@@ -9,7 +9,7 @@ import {
   finalizeIndexing,
   type SummaryBatchResult,
 } from "./metrics-updater.js";
-import { computeAndStoreClustersAndProcesses } from "./cluster-orchestrator.js";
+import { finalizeDerivedState } from "./finalize-derived-state.js";
 import { watchRepositoryWithIndexer } from "./watcher.js";
 import type { RepoConfig } from "../config/types.js";
 import { loadConfig } from "../config/loadConfig.js";
@@ -51,7 +51,7 @@ import {
 import { withIndexingGate } from "../mcp/indexing-gate.js";
 import { preIndexCheckpoint } from "../db/ladybug.js";
 
-export type { IndexProgress } from "./indexer-init.js";
+export type { IndexProgress, IndexProgressSubstage } from "./indexer-init.js";
 
 export interface IndexTimingDiagnostics {
   totalMs: number;
@@ -623,6 +623,12 @@ async function indexRepoImpl(
 
     // --- Phase: re-resolve unresolved import edges ---
 
+    onProgress?.({
+      stage: "finalizing",
+      current: 0,
+      total: files.length,
+      substage: "importReresolution",
+    });
     const importReResolution = await measurePhase(
       "resolveUnresolvedImports",
       () =>
@@ -667,6 +673,12 @@ async function indexRepoImpl(
 
     // --- Phase: finalize edges (pending calls + config edges) ---
 
+    onProgress?.({
+      stage: "finalizing",
+      current: 0,
+      total: files.length,
+      substage: "edgeFinalize",
+    });
     const configEdgeWeight =
       appConfig.slice?.edgeWeights?.config !== undefined
         ? appConfig.slice.edgeWeights.config
@@ -700,11 +712,19 @@ async function indexRepoImpl(
 
     // --- Phase: version management ---
 
+    onProgress?.({
+      stage: "finalizing",
+      current: 0,
+      total: files.length,
+      substage: "versionSnapshot",
+    });
     const versionReason = mode === "full" ? "Full index" : "Incremental index";
     const hasActualChanges = changedFiles > 0 || totalEdgesCreated > 0;
-    const versionId = await createOrReuseVersion(
-      versionReason,
-      mode === "incremental" && hasActualChanges,
+    const versionId = await measurePhase("versionSnapshot", () =>
+      createOrReuseVersion(
+        versionReason,
+        mode === "incremental" && hasActualChanges,
+      ),
     );
 
     const durationMs = Date.now() - startTime;
@@ -713,6 +733,8 @@ async function indexRepoImpl(
 
     const changedFileIdsParam =
       mode === "incremental" ? changedFileIds : undefined;
+    const changedTestFilePathsParam =
+      mode === "incremental" ? changedPass2FilePaths : undefined;
     const hasIndexMutations = changedFiles > 0 || totalEdgesCreated > 0;
     const finalizeResult = await measurePhase("finalizeIndexing", () =>
       finalizeIndexing({
@@ -720,6 +742,7 @@ async function indexRepoImpl(
         versionId,
         appConfig,
         changedFileIds: changedFileIdsParam,
+        changedTestFilePaths: changedTestFilePathsParam,
         hasIndexMutations,
         includeTimings: Boolean(phaseTimings),
         callResolutionTelemetry,
@@ -735,36 +758,19 @@ async function indexRepoImpl(
       }
     }
 
-    let clustersComputed = 0;
-    let processesTraced = 0;
     // Refresh read connection again after version/metrics writes.
     freshConn = await getLadybugConn();
-    if (!(mode === "incremental" && changedFiles === 0)) {
-      try {
-        const result = await measurePhase("clustersAndProcesses", () =>
-          computeAndStoreClustersAndProcesses({
-            conn: freshConn,
-            repoId,
-            versionId,
-            includeTimings: Boolean(phaseTimings),
-          }),
-        );
-        clustersComputed = result.clustersComputed;
-        processesTraced = result.processesTraced;
-        if (phaseTimings && result.timings) {
-          for (const [phaseName, durationMs] of Object.entries(
-            result.timings,
-          )) {
-            phaseTimings[`clustersAndProcesses.${phaseName}`] = durationMs;
-          }
-        }
-      } catch (error) {
-        logger.warn(
-          "Cluster/process computation failed; continuing without it",
-          { repoId, error },
-        );
-      }
-    }
+    const { clustersComputed, processesTraced } = await finalizeDerivedState({
+      mode,
+      conn: freshConn,
+      repoId,
+      versionId,
+      filesTotal: files.length,
+      phaseTimings,
+      onProgress,
+      sharedGraph: finalizeResult.sharedGraph,
+      measurePhase,
+    });
 
     // --- Phase: build deferred indexes (fresh DB only) ---
 

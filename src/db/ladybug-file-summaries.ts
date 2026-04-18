@@ -9,7 +9,12 @@
  *   (FileSummary)-[:SUMMARY_OF_FILE]->(File)
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle, withTransaction } from "./ladybug-core.js";
+import {
+  exec,
+  queryAll,
+  querySingle,
+  withTransaction,
+} from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
 import { getEmbeddingPropertyName } from "../retrieval/model-mapping.js";
 
@@ -63,6 +68,61 @@ export async function upsertFileSummary(
       updatedAt: params.updatedAt,
     },
   );
+}
+
+/**
+ * Batched upsert of FileSummary rows. Wraps each chunk of `chunkSize` rows in
+ * a single transaction to cut per-row overhead. Safe for any connection.
+ */
+export async function upsertFileSummaryBatch(
+  conn: Connection,
+  rows: Array<{
+    fileId: string;
+    repoId: string;
+    summary: string | null;
+    searchText: string | null;
+    updatedAt: string;
+  }>,
+  chunkSize = 256,
+): Promise<void> {
+  if (rows.length === 0) return;
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+    try {
+      await withTransaction(conn, async (txConn) => {
+        for (const params of chunk) {
+          await exec(
+            txConn,
+            `MATCH (r:Repo {repoId: $repoId})
+             MATCH (f:File {fileId: $fileId})
+             MERGE (fs:FileSummary {fileId: $fileId})
+             SET fs.repoId = $repoId,
+                 fs.summary = $summary,
+                 fs.searchText = $searchText,
+                 fs.updatedAt = $updatedAt
+             MERGE (fs)-[:FILE_SUMMARY_IN_REPO]->(r)
+             MERGE (fs)-[:SUMMARY_OF_FILE]->(f)`,
+            {
+              fileId: params.fileId,
+              repoId: params.repoId,
+              summary: params.summary ?? null,
+              searchText: params.searchText ?? null,
+              updatedAt: params.updatedAt,
+            },
+          );
+        }
+      });
+    } catch (err) {
+      // Do not abort the whole materialisation on a single failing batch —
+      // log the failing file IDs and continue.
+      logger.warn("upsertFileSummaryBatch: chunk failed, continuing", {
+        chunkStart: i,
+        chunkSize: chunk.length,
+        fileIds: chunk.map((r) => r.fileId),
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 }
 
 /**
@@ -133,7 +193,9 @@ export async function updateFileSummaryEmbedding(
 ): Promise<boolean> {
   const prefix = getEmbeddingPropertyName(model);
   if (!prefix) {
-    logger.warn(`updateFileSummaryEmbedding: unrecognised model "${model}", skipping`);
+    logger.warn(
+      `updateFileSummaryEmbedding: unrecognised model "${model}", skipping`,
+    );
     return false;
   }
 

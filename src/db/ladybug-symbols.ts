@@ -294,6 +294,33 @@ export async function updateSymbolSummary(
   );
 }
 
+/**
+ * Grouped read of exported symbol names by file id. Used by file-summary
+ * materialisation to avoid the N+1 round trip of calling getSymbolsByFile per
+ * file. Returns a map keyed by fileId; missing entries mean no exported
+ * symbols for that file.
+ */
+export async function getExportedSymbolsByFileIds(
+  conn: Connection,
+  fileIds: string[],
+): Promise<Map<string, string[]>> {
+  const result = new Map<string, string[]>();
+  if (fileIds.length === 0) return result;
+  const rows = await queryAll<{ fileId: string; name: string }>(
+    conn,
+    `MATCH (f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
+     WHERE f.fileId IN $fileIds AND s.exported = true
+     RETURN f.fileId AS fileId, s.name AS name`,
+    { fileIds },
+  );
+  for (const row of rows) {
+    const list = result.get(row.fileId) ?? [];
+    list.push(row.name);
+    result.set(row.fileId, list);
+  }
+  return result;
+}
+
 export async function getSymbolsByFile(
   conn: Connection,
   fileId: string,

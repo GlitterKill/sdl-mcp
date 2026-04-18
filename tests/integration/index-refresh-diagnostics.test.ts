@@ -1,6 +1,12 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -39,7 +45,15 @@ describe("index.refresh diagnostics", () => {
     );
     writeFileSync(
       join(repoDir, "package.json"),
-      JSON.stringify({ name: "index-refresh-diagnostics-test", version: "1.0.0", type: "module" }, null, 2),
+      JSON.stringify(
+        {
+          name: "index-refresh-diagnostics-test",
+          version: "1.0.0",
+          type: "module",
+        },
+        null,
+        2,
+      ),
       "utf8",
     );
     writeFileSync(
@@ -129,7 +143,10 @@ describe("index.refresh diagnostics", () => {
 
     assert.equal(result.ok, true);
     assert.ok(result.versionId, "expected versionId to be present");
-    assert.ok(result.diagnostics, "expected diagnostics when includeDiagnostics=true");
+    assert.ok(
+      result.diagnostics,
+      "expected diagnostics when includeDiagnostics=true",
+    );
     assert.ok(result.diagnostics.timings, "expected timings diagnostics");
     assert.ok(
       result.diagnostics.timings.totalMs >= 0,
@@ -151,12 +168,16 @@ describe("index.refresh diagnostics", () => {
       "expected initSharedState.tsResolver timing",
     );
     assert.equal(
-      typeof result.diagnostics.timings.phases["initSharedState.tsResolver.sourceFiles"],
+      typeof result.diagnostics.timings.phases[
+        "initSharedState.tsResolver.sourceFiles"
+      ],
       "number",
       "expected initSharedState.tsResolver.sourceFiles timing",
     );
     assert.equal(
-      typeof result.diagnostics.timings.phases["initSharedState.tsResolver.programBuild"],
+      typeof result.diagnostics.timings.phases[
+        "initSharedState.tsResolver.programBuild"
+      ],
       "number",
       "expected initSharedState.tsResolver.programBuild timing",
     );
@@ -176,37 +197,50 @@ describe("index.refresh diagnostics", () => {
       "expected finalizeIndexing.metrics timing",
     );
     assert.equal(
-      typeof result.diagnostics.timings.phases["finalizeIndexing.metrics.testRefs"],
+      typeof result.diagnostics.timings.phases[
+        "finalizeIndexing.metrics.testRefs"
+      ],
       "number",
       "expected finalizeIndexing.metrics.testRefs timing",
     );
     assert.equal(
-      typeof result.diagnostics.timings.phases["finalizeIndexing.fileSummaries"],
+      typeof result.diagnostics.timings.phases[
+        "finalizeIndexing.fileSummaries"
+      ],
       "number",
       "expected finalizeIndexing.fileSummaries timing",
     );
+    // Incremental runs defer cluster/process/algorithm work to the
+    // derived-refresh queue (see Section 5 of the 2026-04-17 plan), so
+    // clustersAndProcesses.* timings are intentionally absent here.
     assert.equal(
-      typeof result.diagnostics.timings.phases["clustersAndProcesses.loadSymbols"],
-      "number",
-      "expected clustersAndProcesses.loadSymbols timing",
+      "clustersAndProcesses.loadSymbols" in result.diagnostics.timings.phases,
+      false,
+      "expected clustersAndProcesses.loadSymbols to be deferred on incremental",
     );
     assert.equal(
-      typeof result.diagnostics.timings.phases["clustersAndProcesses.processWrite"],
-      "number",
-      "expected clustersAndProcesses.processWrite timing",
+      "clustersAndProcesses.processWrite" in result.diagnostics.timings.phases,
+      false,
+      "expected clustersAndProcesses.processWrite to be deferred on incremental",
     );
     assert.equal(
-      typeof result.diagnostics.timings.phases["finalizeEdges.resolvePendingCalls"],
+      typeof result.diagnostics.timings.phases[
+        "finalizeEdges.resolvePendingCalls"
+      ],
       "number",
       "expected finalizeEdges.resolvePendingCalls timing",
     );
     assert.equal(
-      typeof result.diagnostics.timings.phases["finalizeEdges.cleanupUnresolvedBuiltins"],
+      typeof result.diagnostics.timings.phases[
+        "finalizeEdges.cleanupUnresolvedBuiltins"
+      ],
       "number",
       "expected finalizeEdges.cleanupUnresolvedBuiltins timing",
     );
     assert.equal(
-      typeof result.diagnostics.timings.phases["finalizeEdges.insertConfigEdges"],
+      typeof result.diagnostics.timings.phases[
+        "finalizeEdges.insertConfigEdges"
+      ],
       "number",
       "expected finalizeEdges.insertConfigEdges timing",
     );

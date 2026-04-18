@@ -430,6 +430,25 @@ export async function handleRepoStatus(
       });
     }
 
+    // Derived-state freshness (clusters/processes/algorithms/summaries/
+    // embeddings). Surfaces dirty flags so callers can tell that an
+    // incremental run deferred downstream work; cheap single-row lookup.
+    let derivedState: Awaited<
+      ReturnType<
+        typeof import("../../db/ladybug-derived-state.js").getDerivedStateSummary
+      >
+    > | null = null;
+    try {
+      const { getDerivedStateSummary } =
+        await import("../../db/ladybug-derived-state.js");
+      derivedState = await getDerivedStateSummary(repoId);
+    } catch (err) {
+      logger.debug("derivedState lookup failed (non-critical)", {
+        repoId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     // Surface relevant memories if enabled (default: false) and config allows it
     const memCaps = getMemoryCapabilities(loadConfig(), repoId);
     let memories:
@@ -487,6 +506,7 @@ export async function handleRepoStatus(
       prefetchStats: prefetchStats ?? undefined,
       liveIndexStatus,
       memories,
+      derivedState: derivedState ?? undefined,
     };
   };
 
@@ -600,8 +620,12 @@ export async function handleIndexRefresh(
     const onProgress =
       progressToken !== undefined && sendNotification
         ? (progress: IndexProgress) => {
-            const message =
-              `[${progress.stage}] ${progress.currentFile ?? ""}`.trim();
+            const subLabel = progress.substage ? `:${progress.substage}` : "";
+            const base =
+              `[${progress.stage}${subLabel}] ${progress.currentFile ?? ""}`.trim();
+            const message = progress.message
+              ? `${base} ${progress.message}`.trim()
+              : base;
             sendNotification({
               method: "notifications/progress",
               params: {
@@ -609,6 +633,13 @@ export async function handleIndexRefresh(
                 progress: progress.current,
                 total: progress.total,
                 message,
+                _meta: {
+                  stage: progress.stage,
+                  substage: progress.substage,
+                  stageCurrent: progress.stageCurrent,
+                  stageTotal: progress.stageTotal,
+                  currentFile: progress.currentFile,
+                },
               },
             }).catch((err) => {
               logger.warn("Failed to send progress notification", {

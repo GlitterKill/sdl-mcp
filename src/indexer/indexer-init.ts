@@ -26,11 +26,28 @@ import {
   type SymbolMapCache,
 } from "./symbol-map-cache.js";
 
+export type IndexProgressSubstage =
+  | "importReresolution"
+  | "edgeFinalize"
+  | "versionSnapshot"
+  | "metrics"
+  | "fileSummaries"
+  | "audit"
+  | "semanticSummaries"
+  | "semanticEmbeddings"
+  | "clusterRefresh"
+  | "processRefresh"
+  | "algorithmRefresh";
+
 export interface IndexProgress {
   stage: "scanning" | "parsing" | "pass1" | "pass2" | "finalizing" | "summaries" | "embeddings";
   current: number;
   total: number;
   currentFile?: string;
+  substage?: IndexProgressSubstage;
+  stageCurrent?: number;
+  stageTotal?: number;
+  message?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -182,7 +182,7 @@ async function collectTestRefs(
   repoRoot: string,
   symbols: Array<{ symbolId: string; name: string }>,
   config: RepoConfig,
-  _changedTestFiles?: Set<string>,
+  changedTestFilePaths?: Set<string>,
 ): Promise<Map<string, Set<string>>> {
   const extGroup = config.languages.join(",");
   const patterns = [
@@ -223,13 +223,52 @@ async function collectTestRefs(
   const testRefs = new Map<string, Set<string>>();
   const newTestRefs = new Map<string, Set<string>>();
 
+  // Scoped incremental: if caller supplied the exact set of changed test file
+  // paths AND we have a warm cache, trust cached entries for unchanged files
+  // and only re-read the changed ones. Cold-cache entries must still be read.
+  const normalizedChangedPaths = changedTestFilePaths
+    ? new Set(Array.from(changedTestFilePaths, (p) => normalizePath(p)))
+    : null;
+  const filesToRead = normalizedChangedPaths
+    ? testFiles.filter(
+        (f) =>
+          normalizedChangedPaths.has(normalizePath(f)) ||
+          !cached?.testRefs.has(f),
+      )
+    : testFiles;
+  const filesFromCache = normalizedChangedPaths
+    ? testFiles.filter(
+        (f) =>
+          !normalizedChangedPaths.has(normalizePath(f)) &&
+          cached?.testRefs.has(f),
+      )
+    : [];
+
+  // Hydrate testRefs + newTestRefs for cached-only files without re-reading.
+  if (cached) {
+    for (const file of filesFromCache) {
+      const cachedFileRefs = cached.testRefs.get(file);
+      if (!cachedFileRefs) continue;
+      for (const ref of cachedFileRefs) {
+        const symbolIds = nameToSymbolIds.get(ref);
+        if (!symbolIds) continue;
+        for (const symbolId of symbolIds) {
+          const existing = testRefs.get(symbolId) ?? new Set<string>();
+          existing.add(normalizePath(file));
+          testRefs.set(symbolId, existing);
+        }
+      }
+      newTestRefs.set(file, cachedFileRefs);
+    }
+  }
+
   // Process test files in chunks to avoid blocking the event loop
   for (
     let chunkStart = 0;
-    chunkStart < testFiles.length;
+    chunkStart < filesToRead.length;
     chunkStart += CONCURRENCY_LIMIT
   ) {
-    const chunk = testFiles.slice(chunkStart, chunkStart + CONCURRENCY_LIMIT);
+    const chunk = filesToRead.slice(chunkStart, chunkStart + CONCURRENCY_LIMIT);
     const results = await Promise.all(
       chunk.map(async (file) => {
         try {
@@ -693,8 +732,15 @@ export async function updateMetricsForRepo(
   changedFileIds?: Set<string>,
   options?: {
     includeTimings?: boolean;
+    changedTestFilePaths?: Set<string>;
   },
-): Promise<{ timings?: Record<string, number> }> {
+): Promise<{
+  timings?: Record<string, number>;
+  sharedGraph?: {
+    callEdges: Array<{ callerId: string; calleeId: string }>;
+    clusterEdges: Array<{ fromSymbolId: string; toSymbolId: string }>;
+  };
+}> {
   const timings: Record<string, number> | undefined = options?.includeTimings
     ? {}
     : undefined;
@@ -778,7 +824,12 @@ export async function updateMetricsForRepo(
     getChurnByFileCached(repo.rootPath),
   );
   const testRefs = await measureSubphase("testRefs", () =>
-    collectTestRefs(repo.rootPath, allSymbols, config),
+    collectTestRefs(
+      repo.rootPath,
+      allSymbols,
+      config,
+      options?.changedTestFilePaths,
+    ),
   );
 
   // Build a lightweight Graph for canonicalTest BFS
@@ -888,7 +939,33 @@ export async function updateMetricsForRepo(
     });
   });
 
-  return { timings };
+  // Produce a shared-graph handle so downstream consumers (cluster orchestrator)
+  // can reuse the edge load instead of rescanning the repo.
+  const sharedClusterEdges: Array<{
+    fromSymbolId: string;
+    toSymbolId: string;
+  }> = [];
+  const sharedCallEdges: Array<{ callerId: string; calleeId: string }> = [];
+  for (const edge of edges) {
+    if (edge.edgeType === "call") {
+      sharedClusterEdges.push({
+        fromSymbolId: edge.fromSymbolId,
+        toSymbolId: edge.toSymbolId,
+      });
+      sharedCallEdges.push({
+        callerId: edge.fromSymbolId,
+        calleeId: edge.toSymbolId,
+      });
+    }
+  }
+
+  return {
+    timings,
+    sharedGraph: {
+      callEdges: sharedCallEdges,
+      clusterEdges: sharedClusterEdges,
+    },
+  };
 }
 
 interface Graph {

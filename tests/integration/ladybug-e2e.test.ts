@@ -23,6 +23,7 @@ import {
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import type { SymbolRow } from "../../dist/db/ladybug-queries.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
+import { computeAndStoreClustersAndProcesses } from "../../dist/indexer/cluster-orchestrator.js";
 import { buildSlice } from "../../dist/graph/slice.js";
 import { buildRepoOverview } from "../../dist/graph/overview.js";
 import { computeDelta } from "../../dist/delta/diff.js";
@@ -365,6 +366,17 @@ describe("Ladybug E2E (clusters + processes + slices + delta)", () => {
     const inc = await indexRepo(REPO_ID, "incremental");
     const afterVersion = inc.versionId;
     assert.notStrictEqual(afterVersion, beforeVersion);
+
+    // Incremental refresh defers cluster/process recompute to the
+    // derived-refresh queue (see Section 5 of the 2026-04-17 plan). The
+    // governor loop below checks "process" signals against persisted process
+    // membership, so force a synchronous refresh here to avoid racing the
+    // background queue.
+    await computeAndStoreClustersAndProcesses({
+      conn,
+      repoId: REPO_ID,
+      versionId: afterVersion,
+    });
 
     const delta = await computeDelta(REPO_ID, beforeVersion, afterVersion);
     const changedSymbolIds = delta.changedSymbols.map((c) => c.symbolId);

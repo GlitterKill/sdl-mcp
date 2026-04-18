@@ -976,6 +976,10 @@ async function handleRestRequest(
               current: progress.current,
               total: progress.total,
               currentFile: progress.currentFile,
+              substage: progress.substage,
+              stageCurrent: progress.stageCurrent,
+              stageTotal: progress.stageTotal,
+              message: progress.message,
             });
           },
         );

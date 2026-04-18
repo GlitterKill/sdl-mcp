@@ -6,7 +6,10 @@ import {
   IndexWatchHandle,
   IndexResult,
 } from "../../indexer/indexer.js";
-import type { IndexProgress } from "../../indexer/indexer.js";
+import type {
+  IndexProgress,
+  IndexProgressSubstage,
+} from "../../indexer/indexer.js";
 import { initGraphDb, resolveGraphDbPath } from "../../db/initGraphDb.js";
 import {
   getLadybugConn,
@@ -76,13 +79,46 @@ function indexStageLabel(stage: IndexProgress["stage"]): string {
     case "pass2":
       return "Pass 2 (edges)";
     case "finalizing":
-      return "Finalizing (edges, metrics, file summaries)";
+      return "Finalizing";
     case "summaries":
       return "Summaries";
     case "embeddings":
       return "Embeddings";
     default:
       return stage;
+  }
+}
+
+/**
+ * Human-facing label for a finalize substage. Used to keep CLI / SSE / MCP
+ * progress consumers reading the same vocabulary as the plan.
+ */
+function indexSubstageLabel(substage: IndexProgressSubstage): string {
+  switch (substage) {
+    case "importReresolution":
+      return "Import re-resolution";
+    case "edgeFinalize":
+      return "Finalize pending/config edges";
+    case "versionSnapshot":
+      return "Create version snapshot";
+    case "metrics":
+      return "Update metrics";
+    case "fileSummaries":
+      return "Materialize file summaries";
+    case "audit":
+      return "Audit events";
+    case "semanticSummaries":
+      return "Semantic summaries";
+    case "semanticEmbeddings":
+      return "Semantic embeddings";
+    case "clusterRefresh":
+      return "Cluster refresh";
+    case "processRefresh":
+      return "Process refresh";
+    case "algorithmRefresh":
+      return "Algorithm refresh";
+    default:
+      return substage;
   }
 }
 
@@ -168,14 +204,18 @@ function finishProgress(state: ProgressState): void {
 }
 
 /**
- * Render a single IndexProgress event. Handles both stages with a known
- * total (parsing, pass1, pass2, summaries, embeddings — drawn as a bar) and
- * stages without progress (scanning, finalizing — drawn as a spinner/label).
+ * Render a single IndexProgress event. Handles stages with a known total
+ * (parsing, pass1, pass2, summaries, embeddings — drawn as a bar), stages
+ * without progress (scanning — spinner/label), and the finalizing stage
+ * which now carries explicit substages for the post-pass2 pipeline.
  */
 function renderIndexProgress(state: ProgressState, p: IndexProgress): void {
   const label = indexStageLabel(p.stage);
   let line: string;
   let pct: number | null = null;
+  // Dedupe key includes substage so transitions inside `finalizing` are not
+  // swallowed by the identical-stage check in writeProgressLine.
+  const stageKey = `${p.stage}:${p.substage ?? ""}`;
 
   if (p.stage === "scanning") {
     line = `  ${label}...`;
@@ -184,9 +224,22 @@ function renderIndexProgress(state: ProgressState, p: IndexProgress): void {
     // count without a progress bar to avoid the misleading 0% that never updates.
     line = `  Parsing ${p.total} files:`;
   } else if (p.stage === "finalizing") {
-    // finalizing fires only once; show it as a static indicator while the
-    // silent internal phases (finalizeEdges, metrics, fileSummaries) run.
-    line = `  ${label}...`;
+    const subLabel = p.substage ? indexSubstageLabel(p.substage) : "Finalizing";
+    const stageCur = p.stageCurrent;
+    const stageTot = p.stageTotal;
+    if (
+      typeof stageCur === "number" &&
+      typeof stageTot === "number" &&
+      stageTot > 0
+    ) {
+      pct = Math.min(100, Math.floor((stageCur / stageTot) * 100));
+      const bar = buildBar(pct);
+      line = `  ${subLabel}: ${bar} ${String(pct).padStart(3)}% (${stageCur}/${stageTot})`;
+    } else if (p.message) {
+      line = `  ${subLabel} — ${p.message}`;
+    } else {
+      line = `  ${subLabel}...`;
+    }
   } else if (p.total > 0) {
     pct = Math.min(100, Math.floor((p.current / p.total) * 100));
     const bar = buildBar(pct);
@@ -195,7 +248,7 @@ function renderIndexProgress(state: ProgressState, p: IndexProgress): void {
     line = `  ${label}...`;
   }
 
-  writeProgressLine(state, p.stage, line, pct, p.currentFile);
+  writeProgressLine(state, stageKey, line, pct, p.currentFile);
 }
 
 /**
@@ -271,6 +324,10 @@ async function delegateIndexToServer(
               current: number;
               total: number;
               currentFile?: string;
+              substage?: IndexProgressSubstage;
+              stageCurrent?: number;
+              stageTotal?: number;
+              message?: string;
             };
             renderIndexProgress(progressState, p);
           } catch {
@@ -444,6 +501,8 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
         (progress) => {
           renderIndexProgress(progressState, progress);
         },
+        undefined,
+        { includeTimings: Boolean(options.diagnostics) },
       );
       // Finalize the last indexer stage line before printing summary lines.
       finishProgress(progressState);
@@ -460,6 +519,41 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
         console.log(
           `  Summaries: ${s.generated} new ($${s.totalCostUsd.toFixed(4)}), ${s.skipped} cached, ${s.failed} failed`,
         );
+      }
+
+      if (options.diagnostics && stats.timings) {
+        console.log(`\n  Timings (total=${stats.timings.totalMs}ms):`);
+        const entries = Object.entries(stats.timings.phases).sort(
+          (a, b) => b[1] - a[1],
+        );
+        for (const [phase, ms] of entries) {
+          console.log(`    ${ms.toString().padStart(6)}ms  ${phase}`);
+        }
+      }
+
+      // Incremental runs defer cluster/process/algorithm/summary/embedding
+      // recompute; surface that explicitly so the operator knows derived
+      // state lags after this run.
+      if (options.diagnostics) {
+        try {
+          const { getDerivedStateSummary } =
+            await import("../../db/ladybug-derived-state.js");
+          const ds = await getDerivedStateSummary(repo.repoId);
+          if (ds?.stale) {
+            const flags = [
+              ds.clustersDirty && "clusters",
+              ds.processesDirty && "processes",
+              ds.algorithmsDirty && "algorithms",
+              ds.summariesDirty && "summaries",
+              ds.embeddingsDirty && "embeddings",
+            ]
+              .filter((x): x is string => Boolean(x))
+              .join(", ");
+            console.log(`  Derived-state deferred: ${flags}`);
+          }
+        } catch {
+          // Non-fatal: diagnostics reporting is best-effort.
+        }
       }
 
       // SCIP auto-ingest — mirrors the MCP `runPostRefresh` behavior so

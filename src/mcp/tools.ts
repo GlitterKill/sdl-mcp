@@ -722,6 +722,27 @@ export const RepoStatusResponseSchema = z.object({
     })
     .optional(),
   memories: z.array(SurfacedMemorySchema).optional(),
+  /**
+   * Derived-state freshness. When `stale` is true, at least one of the
+   * downstream computations (clusters, processes, graph algorithms,
+   * semantic summaries/embeddings) lagged behind the latest incremental
+   * index and is either queued for background refresh or waiting on a
+   * subsequent full index. See the post-pass2 performance plan (§5).
+   */
+  derivedState: z
+    .object({
+      stale: z.boolean(),
+      clustersDirty: z.boolean(),
+      processesDirty: z.boolean(),
+      algorithmsDirty: z.boolean(),
+      summariesDirty: z.boolean(),
+      embeddingsDirty: z.boolean(),
+      targetVersionId: z.string().nullable(),
+      computedVersionId: z.string().nullable(),
+      updatedAt: z.string().nullable(),
+      lastError: z.string().nullable().optional(),
+    })
+    .optional(),
 });
 
 export const IndexRefreshRequestSchema = z.object({

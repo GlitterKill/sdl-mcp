@@ -81,6 +81,7 @@ async function main(): Promise<void> {
       json: { type: "boolean" },
       badge: { type: "boolean" },
       "no-watch": { type: "boolean" },
+      diagnostics: { type: "boolean" },
     },
   });
 
@@ -227,7 +228,8 @@ async function main(): Promise<void> {
 
     case "tool": {
       const toolIndex = process.argv.indexOf("tool");
-      const toolArgs = toolIndex !== -1 ? process.argv.slice(toolIndex + 1) : [];
+      const toolArgs =
+        toolIndex !== -1 ? process.argv.slice(toolIndex + 1) : [];
       const options = parseToolDispatchOptions(
         toolArgs,
         global,

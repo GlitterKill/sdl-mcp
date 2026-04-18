@@ -145,6 +145,8 @@ export function parseIndexOptions(
       options.watch = true;
     } else if (arg === "--force" || arg === "-f") {
       options.force = true;
+    } else if (arg === "--diagnostics") {
+      options.diagnostics = true;
     } else if (arg === "--repo-id") {
       if (i + 1 >= args.length) {
         throw new Error("--repo-id requires a value");
@@ -158,6 +160,9 @@ export function parseIndexOptions(
   }
   if (values.force === true) {
     options.force = true;
+  }
+  if (values.diagnostics === true) {
+    options.diagnostics = true;
   }
   if (typeof values["repo-id"] === "string") {
     options.repoId = values["repo-id"];
@@ -416,7 +421,11 @@ export function parseSummaryOptions(
         throw new Error("--format requires a value");
       }
       const format = args[++i];
-      if (format !== "markdown" && format !== "json" && format !== "clipboard") {
+      if (
+        format !== "markdown" &&
+        format !== "json" &&
+        format !== "clipboard"
+      ) {
         throw new Error("--format must be one of: markdown, json, clipboard");
       }
       options.format = format;
@@ -446,7 +455,10 @@ export function parseSummaryOptions(
     query = values.query.trim();
   }
   if (!query && args.length > 0) {
-    query = args.filter((arg) => !arg.startsWith("-")).join(" ").trim();
+    query = args
+      .filter((arg) => !arg.startsWith("-"))
+      .join(" ")
+      .trim();
   }
   if (typeof values.budget === "string") {
     const budget = parseInt(values.budget, 10);
@@ -625,7 +637,11 @@ export function parseToolDispatchOptions(
   }
 
   // Check for --help after action
-  if (values.help === true || remainingArgs.includes("--help") || remainingArgs.includes("-h")) {
+  if (
+    values.help === true ||
+    remainingArgs.includes("--help") ||
+    remainingArgs.includes("-h")
+  ) {
     options.showHelp = true;
     // Filter out --help from remaining args
     options.rawArgs = remainingArgs.filter((a) => a !== "--help" && a !== "-h");

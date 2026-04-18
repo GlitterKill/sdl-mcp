@@ -319,6 +319,22 @@ const NODE_TABLES: string[] = [
     truncated BOOL DEFAULT false
   )`,
 
+  // Per-repo derived-state freshness record. Cluster/process/algorithm/
+  // summary/embedding recompute may lag after incremental runs; this
+  // table makes the staleness lifecycle explicit, queryable, and
+  // recoverable. See devdocs/plans/2026-04-17-post-pass2-performance-and-feedback-plan.md §5.
+  `CREATE NODE TABLE IF NOT EXISTS DerivedState (
+    repoId STRING PRIMARY KEY,
+    clustersDirty BOOL DEFAULT false,
+    processesDirty BOOL DEFAULT false,
+    algorithmsDirty BOOL DEFAULT false,
+    summariesDirty BOOL DEFAULT false,
+    embeddingsDirty BOOL DEFAULT false,
+    targetVersionId STRING,
+    computedVersionId STRING,
+    updatedAt STRING,
+    lastError STRING
+  )`,
 ];
 
 export const CALL_EDGE_METADATA_FIELDS = [
@@ -499,7 +515,9 @@ export function supportsCallResolutionMetadata(
  * (fixed-size ARRAY) so HNSW vector indexes can be created.
  * Idempotent: only runs if the column type is wrong.
  */
-export async function migrateVecColumnsToFixedSize(conn: Connection): Promise<void> {
+export async function migrateVecColumnsToFixedSize(
+  conn: Connection,
+): Promise<void> {
   // Check if any HNSW indexes exist. If so, the columns were either already
   // correct or a previous migration succeeded — skip to avoid the Kuzu crash
   // that occurs when DROP+ADD is used on columns with existing HNSW indexes.
@@ -516,7 +534,9 @@ export async function migrateVecColumnsToFixedSize(conn: Connection): Promise<vo
   }
 
   if (hasHnswIndexes) {
-    logger.debug("[schema-migration] HNSW indexes already exist, skipping vec column migration");
+    logger.debug(
+      "[schema-migration] HNSW indexes already exist, skipping vec column migration",
+    );
     return;
   }
 
@@ -534,15 +554,20 @@ export async function migrateVecColumnsToFixedSize(conn: Connection): Promise<vo
     try {
       await conn.query(`ALTER TABLE ${table} DROP ${column}`);
       await conn.query(`ALTER TABLE ${table} ADD ${column} DOUBLE[${size}]`);
-      logger.info(`[schema-migration] Migrated ${table}.${column} to DOUBLE[${size}]`);
+      logger.info(
+        `[schema-migration] Migrated ${table}.${column} to DOUBLE[${size}]`,
+      );
       migrated++;
     } catch (err) {
-      logger.debug(`[schema-migration] ${table}.${column} migration skipped: ${err instanceof Error ? err.message : String(err)}`);
+      logger.debug(
+        `[schema-migration] ${table}.${column} migration skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
   if (migrated > 0) {
-    logger.info(`[schema-migration] Vec column migration complete: ${migrated} column(s) converted to fixed-size ARRAY`);
+    logger.info(
+      `[schema-migration] Vec column migration complete: ${migrated} column(s) converted to fixed-size ARRAY`,
+    );
   }
 }
-

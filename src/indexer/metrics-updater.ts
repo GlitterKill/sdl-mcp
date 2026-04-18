@@ -1,7 +1,6 @@
 import * as crypto from "crypto";
 
 import type { AppConfig } from "../config/types.js";
-import { withTransaction } from "../db/ladybug-core.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { updateMetricsForRepo } from "../graph/metrics.js";
@@ -21,6 +20,7 @@ export interface FinalizeIndexingParams {
   versionId: string;
   appConfig: AppConfig;
   changedFileIds?: Set<string>;
+  changedTestFilePaths?: Set<string>;
   hasIndexMutations?: boolean;
   includeTimings?: boolean;
   callResolutionTelemetry: CallResolutionTelemetry;
@@ -30,6 +30,10 @@ export interface FinalizeIndexingParams {
 export interface FinalizeIndexingResult {
   summaryStats?: SummaryBatchResult;
   timings?: Record<string, number>;
+  sharedGraph?: {
+    callEdges: Array<{ callerId: string; calleeId: string }>;
+    clusterEdges: Array<{ fromSymbolId: string; toSymbolId: string }>;
+  };
 }
 
 export async function finalizeIndexing({
@@ -37,12 +41,15 @@ export async function finalizeIndexing({
   versionId,
   appConfig,
   changedFileIds,
+  changedTestFilePaths,
   hasIndexMutations,
   includeTimings,
   callResolutionTelemetry,
   onProgress,
 }: FinalizeIndexingParams): Promise<FinalizeIndexingResult> {
-  const timings: Record<string, number> | undefined = includeTimings ? {} : undefined;
+  const timings: Record<string, number> | undefined = includeTimings
+    ? {}
+    : undefined;
   const measureSubphase = async <T>(
     phaseName: string,
     fn: () => Promise<T>,
@@ -59,22 +66,76 @@ export async function finalizeIndexing({
 
   // Incremental no-op refreshes can reuse the current version, so rerunning the
   // repo-wide post-index phases is pure overhead.
-  if (changedFileIds && changedFileIds.size === 0 && hasIndexMutations === false) {
+  if (
+    changedFileIds &&
+    changedFileIds.size === 0 &&
+    hasIndexMutations === false
+  ) {
     logger.debug("Skipping finalizeIndexing for no-op incremental refresh", {
       repoId,
     });
     return { timings };
   }
 
-  const metricsResult = await measureSubphase("metrics", () =>
+  // Parallelise metrics, fileSummaries, and audit. Each phase acquires its
+  // own writer via `withWriteConn`; on LadybugDB 0.15.2 the write pool is
+  // pinned to size 1 so these serialize transparently (correct, no wall-time
+  // win). Scaffolding is in place for when `writePoolSize` >= 2 lands with
+  // LadybugDB >= 0.15.4.
+  const metricsTask = measureSubphase("metrics", () =>
     updateMetricsForRepo(repoId, changedFileIds, {
       includeTimings,
+      changedTestFilePaths,
     }),
   );
+  const fileSummariesTask = measureSubphase("fileSummaries", async () => {
+    const fsConn = await getLadybugConn();
+    return materializeFileSummaries(fsConn, repoId, { changedFileIds });
+  }).catch((error) => {
+    logger.warn(`FileSummary materialisation skipped: ${String(error)}`);
+    return null;
+  });
+  const auditTask =
+    callResolutionTelemetry.pass2EligibleFileCount > 0
+      ? measureSubphase("audit", async () => {
+          await withWriteConn(async (wConn) => {
+            await ladybugDb.insertAuditEvent(wConn, {
+              eventId: `audit_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`,
+              timestamp: new Date().toISOString(),
+              tool: "index.callResolution",
+              decision: "stats",
+              repoId,
+              symbolId: null,
+              detailsJson: JSON.stringify({
+                versionId,
+                ...callResolutionTelemetry,
+              }),
+            });
+          });
+        }).catch((error) => {
+          logger.warn(
+            `Failed to log call-resolution telemetry: ${String(error)}`,
+          );
+          return null;
+        })
+      : Promise.resolve(null);
+
+  const [metricsResult, fsResult] = await Promise.all([
+    metricsTask,
+    fileSummariesTask,
+    auditTask,
+  ]);
   if (timings && metricsResult.timings) {
-    for (const [phaseName, durationMs] of Object.entries(metricsResult.timings)) {
+    for (const [phaseName, durationMs] of Object.entries(
+      metricsResult.timings,
+    )) {
       timings[`metrics.${phaseName}`] = durationMs;
     }
+  }
+  if (fsResult) {
+    logger.info(
+      `FileSummary materialisation: ${fsResult.updated}/${fsResult.total} files updated`,
+    );
   }
 
   let summaryStats: SummaryBatchResult | undefined;
@@ -118,44 +179,7 @@ export async function finalizeIndexing({
     }
   }
 
-  if (callResolutionTelemetry.pass2EligibleFileCount > 0) {
-    try {
-      await measureSubphase("audit", async () => {
-        await withWriteConn(async (wConn) => {
-          await ladybugDb.insertAuditEvent(wConn, {
-            eventId: `audit_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`,
-            timestamp: new Date().toISOString(),
-            tool: "index.callResolution",
-            decision: "stats",
-            repoId,
-            symbolId: null,
-            detailsJson: JSON.stringify({
-              versionId,
-              ...callResolutionTelemetry,
-            }),
-          });
-        });
-      });
-    } catch (error) {
-      logger.warn(`Failed to log call-resolution telemetry: ${String(error)}`);
-    }
-  }
-
-  try {
-    const fsResult = await measureSubphase("fileSummaries", async () => {
-      const conn = await getLadybugConn();
-      return materializeFileSummaries(conn, repoId, {
-        changedFileIds,
-      });
-    });
-    logger.info(
-      `FileSummary materialisation: ${fsResult.updated}/${fsResult.total} files updated`,
-    );
-  } catch (error) {
-    logger.warn(`FileSummary materialisation skipped: ${String(error)}`);
-  }
-
-  return { summaryStats, timings };
+  return { summaryStats, timings, sharedGraph: metricsResult.sharedGraph };
 }
 
 /**
@@ -190,11 +214,16 @@ export async function materializeFileSummaries(
   } else {
     files = await ladybugDb.getFilesByRepo(conn, repoId);
   }
-  let updated = 0;
   const updatedAt = new Date().toISOString();
 
-  // Collect all upserts, then batch-write via the serialized write connection
-  // to avoid writing on a read-pool connection (which can crash Kuzu).
+  // Grouped read: fetch exported symbol names for all target files in one
+  // round trip instead of one query per file.
+  const fileIds = files.map((f) => f.fileId);
+  const exportedByFile = await ladybugDb.getExportedSymbolsByFileIds(
+    conn,
+    fileIds,
+  );
+
   const upserts: Array<{
     fileId: string;
     repoId: string;
@@ -204,41 +233,25 @@ export async function materializeFileSummaries(
   }> = [];
 
   for (const file of files) {
-    try {
-      const symbols = await ladybugDb.getSymbolsByFile(conn, file.fileId);
-      const exportedNames = symbols
-        .filter((s) => s.exported)
-        .map((s) => s.name);
-
-      const searchText = ladybugDb.buildFileSummarySearchText(
-        file.relPath,
-        exportedNames,
-      );
-
-      upserts.push({
-        fileId: file.fileId,
-        repoId,
-        summary: null,
-        searchText,
-        updatedAt,
-      });
-    } catch (err) {
-      logger.warn(
-        `materializeFileSummaries: failed for ${file.relPath}: ${String(err)}`,
-      );
-    }
+    const exportedNames = exportedByFile.get(file.fileId) ?? [];
+    const searchText = ladybugDb.buildFileSummarySearchText(
+      file.relPath,
+      exportedNames,
+    );
+    upserts.push({
+      fileId: file.fileId,
+      repoId,
+      summary: null,
+      searchText,
+      updatedAt,
+    });
   }
 
   if (upserts.length > 0) {
     await withWriteConn(async (wConn) => {
-      await withTransaction(wConn, async (txConn) => {
-        for (const params of upserts) {
-          await ladybugDb.upsertFileSummary(txConn, params);
-          updated++;
-        }
-      });
+      await ladybugDb.upsertFileSummaryBatch(wConn, upserts);
     });
   }
 
-  return { total: files.length, updated };
+  return { total: files.length, updated: upserts.length };
 }

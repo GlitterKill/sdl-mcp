@@ -90,6 +90,11 @@ export async function computeAndStoreClustersAndProcesses(params: {
   minClusterSize?: number;
   maxProcessDepth?: number;
   includeTimings?: boolean;
+  onProgress?: (progress: import("./indexer-init.js").IndexProgress) => void;
+  sharedGraph?: {
+    callEdges: Array<{ callerId: string; calleeId: string }>;
+    clusterEdges: Array<{ fromSymbolId: string; toSymbolId: string }>;
+  };
 }): Promise<ClusterOrchestratorResult> {
   const {
     conn,
@@ -99,7 +104,22 @@ export async function computeAndStoreClustersAndProcesses(params: {
     minClusterSize = DEFAULT_MIN_CLUSTER_SIZE,
     maxProcessDepth = DEFAULT_MAX_PROCESS_DEPTH,
     includeTimings = false,
+    onProgress,
+    sharedGraph,
   } = params;
+  const emitSubstage = (
+    substage: import("./indexer-init.js").IndexProgressSubstage,
+    message?: string,
+  ): void => {
+    if (!onProgress) return;
+    onProgress({
+      stage: "finalizing",
+      current: 0,
+      total: 0,
+      substage,
+      ...(message ? { message } : {}),
+    });
+  };
 
   const startMs = Date.now();
   const now = new Date().toISOString();
@@ -137,47 +157,69 @@ export async function computeAndStoreClustersAndProcesses(params: {
 
   const symbolIds = symbols.map((s) => s.symbolId).sort();
 
-  const { clusterEdges, callEdges } = await measureSubphase(
-    "loadEdges",
-    async () => {
-      let edgesByFrom = await ladybugDb.getEdgesFromSymbolsLite(
-        conn,
-        symbolIds,
-      );
-      const nextClusterEdges: Array<{
-        fromSymbolId: string;
-        toSymbolId: string;
-      }> = [];
-      const nextCallEdges: Array<{ callerId: string; calleeId: string }> = [];
+  const { clusterEdges, callEdges } = sharedGraph
+    ? await measureSubphase("loadEdges", async () => ({
+        clusterEdges: sharedGraph.clusterEdges,
+        callEdges: sharedGraph.callEdges,
+      }))
+    : await measureSubphase("loadEdges", async () => {
+        const edgesByFrom = await ladybugDb.getEdgesFromSymbolsLite(
+          conn,
+          symbolIds,
+        );
+        const nextClusterEdges: Array<{
+          fromSymbolId: string;
+          toSymbolId: string;
+        }> = [];
+        const nextCallEdges: Array<{ callerId: string; calleeId: string }> = [];
 
-      for (const [fromSymbolId, edges] of edgesByFrom) {
-        for (const edge of edges) {
-          // Restrict clustering to call edges only. Import edges create
-          // artificial hubs (utility modules referenced by hundreds of
-          // files) that collapse LPA into a single giant catch-all
-          // community. Calls represent runtime dependencies, which is
-          // what cluster cohesion should actually measure.
-          if (edge.edgeType === "call") {
-            nextClusterEdges.push({
-              fromSymbolId,
-              toSymbolId: edge.toSymbolId,
-            });
-            nextCallEdges.push({
-              callerId: fromSymbolId,
-              calleeId: edge.toSymbolId,
-            });
+        for (const [fromSymbolId, edges] of edgesByFrom) {
+          for (const edge of edges) {
+            // Restrict clustering to call edges only. Import edges create
+            // artificial hubs (utility modules referenced by hundreds of
+            // files) that collapse LPA into a single giant catch-all
+            // community. Calls represent runtime dependencies, which is
+            // what cluster cohesion should actually measure.
+            if (edge.edgeType === "call") {
+              nextClusterEdges.push({
+                fromSymbolId,
+                toSymbolId: edge.toSymbolId,
+              });
+              nextCallEdges.push({
+                callerId: fromSymbolId,
+                calleeId: edge.toSymbolId,
+              });
+            }
           }
         }
-      }
 
-      edgesByFrom.clear();
-      return {
-        clusterEdges: nextClusterEdges,
-        callEdges: nextCallEdges,
-      };
-    },
-  );
+        edgesByFrom.clear();
+        return {
+          clusterEdges: nextClusterEdges,
+          callEdges: nextCallEdges,
+        };
+      });
 
+  // Short-circuit when the graph has no call edges. With 0 call edges, clusters
+  // and processes are both empty by construction, and the algorithm stage
+  // would attempt to PROJECT_GRAPH on an empty projection — a known hang in
+  // LadybugDB 0.15.2. Also, the TS cluster fallback issues additional DB
+  // reads that can deadlock against the connection used by the caller.
+  if (callEdges.length === 0) {
+    logger.debug("cluster-orchestrator: skipping (no call edges)", {
+      repoId,
+      symbolCount: symbols.length,
+    });
+    return {
+      clustersComputed: 0,
+      processesTraced: 0,
+      centralityComputed: 0,
+      shadowClustersComputed: 0,
+      ...(timings ? { timings } : {}),
+    };
+  }
+
+  emitSubstage("clusterRefresh");
   const clustersStartMs = Date.now();
   const clusterAssignments = await measureSubphase(
     "clusterCompute",
@@ -296,6 +338,7 @@ export async function computeAndStoreClustersAndProcesses(params: {
     });
   });
 
+  emitSubstage("processRefresh");
   const processesStartMs = Date.now();
   const processes = await measureSubphase(
     "processCompute",
@@ -421,7 +464,23 @@ export async function computeAndStoreClustersAndProcesses(params: {
   let centralityComputed = 0;
   let shadowClustersComputed = 0;
   try {
+    emitSubstage("algorithmRefresh");
     await measureSubphase("algorithmStage", async () => {
+      // Skip for trivial graphs. LadybugDB's PROJECT_GRAPH + page_rank/k_core/
+      // louvain procedures can hang indefinitely on empty projections (0-edge
+      // graphs) at the native layer, holding the write mutex and blocking
+      // subsequent indexRepo runs via preIndexCheckpoint.
+      if (callEdges.length === 0) {
+        logger.debug(
+          "ladybug-algorithms: skipping algorithm stage (no call edges)",
+          {
+            repoId,
+            symbolCount: symbols.length,
+          },
+        );
+        return;
+      }
+
       const capability = await detectAlgoCapability(conn);
       if (!capability.supported) {
         logger.info("ladybug-algorithms: skipping algorithm stage", {

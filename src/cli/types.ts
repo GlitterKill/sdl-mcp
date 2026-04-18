@@ -37,6 +37,7 @@ export interface IndexOptions extends CLIOptions {
   watch?: boolean;
   repoId?: string;
   force?: boolean;
+  diagnostics?: boolean;
 }
 
 export interface VersionOptions extends CLIOptions {}
