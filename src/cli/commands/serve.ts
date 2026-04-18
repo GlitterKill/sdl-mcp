@@ -137,10 +137,12 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   if (concurrency) {
     if (
       concurrency.readPoolSize != null ||
+      concurrency.writePoolSize != null ||
       concurrency.writeQueueTimeoutMs != null
     ) {
       configurePool({
         readPoolSize: concurrency.readPoolSize,
+        writePoolSize: concurrency.writePoolSize,
         writeQueueTimeoutMs: concurrency.writeQueueTimeoutMs,
       });
     }

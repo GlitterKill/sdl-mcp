@@ -916,6 +916,13 @@
           "maximum": 16,
           "default": 4
         },
+        "writePoolSize": {
+          "type": "integer",
+          "description": "Number of write database connections in the pool. Default 1 serializes writes to avoid LadybugDB 0.15.2 native concurrency UAF (fixed upstream in PR #10, pending 0.15.4 release).",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 1
+        },
         "writeQueueTimeoutMs": {
           "type": "integer",
           "description": "Timeout for queued write operations in milliseconds",
@@ -935,6 +942,7 @@
         "maxSessions": 8,
         "maxToolConcurrency": 8,
         "readPoolSize": 4,
+        "writePoolSize": 1,
         "writeQueueTimeoutMs": 30000,
         "toolQueueTimeoutMs": 30000
       }

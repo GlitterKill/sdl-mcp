@@ -146,19 +146,28 @@ export function loadConfig(configPath?: string): AppConfig {
           ...baseConcurrency,
           maxToolConcurrency: presets.maxToolConcurrency,
           readPoolSize: presets.readPoolSize,
+          writePoolSize: presets.writePoolSize,
           maxSessions: presets.maxSessions,
         },
         runtime: (() => {
           const baseRuntime = RuntimeConfigSchema.parse(config.runtime ?? {});
-          return { ...baseRuntime, maxConcurrentJobs: presets.runtimeMaxConcurrentJobs };
+          return {
+            ...baseRuntime,
+            maxConcurrentJobs: presets.runtimeMaxConcurrentJobs,
+          };
         })(),
         liveIndex: {
           ...baseLiveIndex,
           reconcileConcurrency: presets.reconcileConcurrency,
         },
         semantic: (() => {
-          const baseSemantic = SemanticConfigSchema.parse(config.semantic ?? {});
-          return { ...baseSemantic, summaryMaxConcurrency: presets.summaryMaxConcurrency };
+          const baseSemantic = SemanticConfigSchema.parse(
+            config.semantic ?? {},
+          );
+          return {
+            ...baseSemantic,
+            summaryMaxConcurrency: presets.summaryMaxConcurrency,
+          };
         })(),
         parallelScorer: {
           ...baseParallelScorer,
