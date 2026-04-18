@@ -5,8 +5,8 @@
  * slice builds can use the fast in-memory beam search path instead of
  * the DB-backed beamSearchLadybug when a recent snapshot is available.
  *
- * Snapshots are populated after indexing and during the first slice build.
- * Subsequent builds within the TTL window reuse the cached graph.
+ * Snapshots are populated by explicit warm-up callers. Subsequent builds within
+ * the TTL window reuse the cached graph.
  *
  * @module graph/graphSnapshotCache
  */

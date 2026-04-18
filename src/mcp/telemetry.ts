@@ -182,6 +182,20 @@ function generateAuditEventId(): string {
   return `audit_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
 }
 
+function buildIndexEventDetails(event: IndexEvent): string {
+  return JSON.stringify({
+    versionId: event.versionId,
+    ...event.stats,
+  });
+}
+
+function logIndexEventInfo(event: IndexEvent): void {
+  logger.info(`Index event logged: ${event.repoId}`, {
+    versionId: event.versionId,
+    stats: event.stats,
+  });
+}
+
 async function recordAuditEvent(event: {
   tool: string;
   decision: string;
@@ -256,18 +270,23 @@ export function logIndexEvent(event: IndexEvent): void {
     tool: "index.refresh",
     decision: "success",
     repoId: event.repoId,
-    detailsJson: JSON.stringify({
-      versionId: event.versionId,
-      ...event.stats,
-    }),
+    detailsJson: buildIndexEventDetails(event),
   }).catch((err) =>
     logger.warn(`Audit write failed for index.refresh: ${String(err)}`),
   );
 
-  logger.info(`Index event logged: ${event.repoId}`, {
-    versionId: event.versionId,
-    stats: event.stats,
+  logIndexEventInfo(event);
+}
+
+export async function flushIndexEvent(event: IndexEvent): Promise<void> {
+  await recordAuditEvent({
+    tool: "index.refresh",
+    decision: "success",
+    repoId: event.repoId,
+    detailsJson: buildIndexEventDetails(event),
   });
+
+  logIndexEventInfo(event);
 }
 
 export async function getAuditTrail(

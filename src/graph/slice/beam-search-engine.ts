@@ -1108,17 +1108,26 @@ export async function beamSearchLadybug(
       if (edgeByTarget.size === 0) return;
 
       const neighborIds = Array.from(edgeByTarget.keys());
-      const neighborSymbolsMap = await ladybugDb.getSymbolsByIds(
-        conn,
-        neighborIds,
+      const missingNeighborIds = neighborIds.filter(
+        (neighborId) => !symbolCache.has(neighborId),
       );
+      if (missingNeighborIds.length > 0) {
+        const neighborSymbolsMap = await ladybugDb.getSymbolsByIds(
+          conn,
+          missingNeighborIds,
+        );
+        for (const [neighborId, symbol] of neighborSymbolsMap) {
+          if (symbol.repoId === repoId) {
+            symbolCache.set(neighborId, symbol);
+          }
+        }
+      }
 
       const validNeighborIds: SymbolId[] = [];
       const fileIds = new Set<string>();
       for (const neighborId of neighborIds) {
-        const symbol = neighborSymbolsMap.get(neighborId);
+        const symbol = symbolCache.get(neighborId);
         if (!symbol || symbol.repoId !== repoId) continue;
-        symbolCache.set(neighborId, symbol);
         validNeighborIds.push(neighborId);
         fileIds.add(symbol.fileId);
       }

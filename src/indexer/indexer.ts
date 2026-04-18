@@ -16,7 +16,7 @@ import { loadConfig } from "../config/loadConfig.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
-import { logIndexEvent } from "../mcp/telemetry.js";
+import { flushIndexEvent } from "../mcp/telemetry.js";
 import { isRustEngineAvailable } from "./rustIndexer.js";
 import {
   clearTsCallResolverCache,
@@ -399,7 +399,9 @@ async function indexRepoImpl(
       // Phase 1 Task 1.12 — emit `index.refresh.complete` audit event with
       // zero-valued Pass-1 engine telemetry (Pass 1 never ran in this
       // short-circuit no-op incremental path).
-      logIndexEvent({
+      // Ensure indexRepo() does not resolve while its own audit write is still
+      // holding LadybugDB's single-writer slot.
+      await flushIndexEvent({
         repoId,
         versionId,
         stats: {
@@ -819,7 +821,9 @@ async function indexRepoImpl(
     // Phase 1 Task 1.12 — emit `index.refresh.complete` audit event
     // carrying per-language Pass-1 engine telemetry so users can
     // audit Rust engine coverage and fallback rates over time.
-    logIndexEvent({
+    // Keep the completion contract consistent across full and no-op
+    // incremental refreshes: when indexRepo() resolves, index writes are done.
+    await flushIndexEvent({
       repoId,
       versionId,
       stats: {

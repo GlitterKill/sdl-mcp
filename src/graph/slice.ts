@@ -77,10 +77,7 @@ import {
   type FrontierItem,
 } from "./slice/beam-search-engine.js";
 
-import {
-  getGraphSnapshot,
-  loadAndCacheGraphSnapshot,
-} from "./graphSnapshotCache.js";
+import { getGraphSnapshot } from "./graphSnapshotCache.js";
 
 import {
   buildPayloadCardsAndRefs,
@@ -338,15 +335,6 @@ export async function buildSlice(
     frontier = result.frontier;
     wasTruncated = result.wasTruncated;
     droppedCandidates = result.droppedCandidates;
-
-    // Opportunistically load and cache the graph snapshot for future calls.
-    // Run in background — don't block the current response.
-    void loadAndCacheGraphSnapshot(conn, request.repoId).catch((err) => {
-      logger.debug("Background graph snapshot load failed", {
-        repoId: request.repoId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
   }
 
   const cardCount = sliceCards.size;
