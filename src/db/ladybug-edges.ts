@@ -141,9 +141,22 @@ export async function insertEdge(
  * parameterized batch MERGE. Wrapped in a transaction to amortize
  * commit overhead.
  */
+export interface InsertEdgesOptions {
+  /**
+   * Skip the MERGE that ensures each source symbol has a SYMBOL_IN_REPO
+   * relationship. Callers that already ran `upsertSymbolBatch` for the same
+   * symbols in the same transaction should pass `true` — a second MERGE of
+   * SYMBOL_IN_REPO after a DELETE-in-same-tx produces a duplicate
+   * relationship in LadybugDB (MERGE's MATCH does not see prior MERGE
+   * creations when the relationship was deleted earlier in the tx).
+   */
+  skipSourceRepoLink?: boolean;
+}
+
 export async function insertEdges(
   conn: Connection,
   edges: EdgeRow[],
+  options?: InsertEdgesOptions,
 ): Promise<void> {
   if (edges.length === 0) return;
 
@@ -158,15 +171,17 @@ export async function insertEdges(
     for (const [repoId, repoEdges] of edgesByRepo) {
       const fromSymbolIds = [...new Set(repoEdges.map((e) => e.fromSymbolId))];
 
-      for (const symbolId of fromSymbolIds) {
-        await exec(
-          txConn,
-          `MATCH (r:Repo {repoId: $repoId})
-           MERGE (s:Symbol {symbolId: $symbolId})
-           SET s.repoId = $repoId
-           MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
-          { repoId, symbolId },
-        );
+      if (!options?.skipSourceRepoLink) {
+        for (const symbolId of fromSymbolIds) {
+          await exec(
+            txConn,
+            `MATCH (r:Repo {repoId: $repoId})
+             MERGE (s:Symbol {symbolId: $symbolId})
+             SET s.repoId = $repoId
+             MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
+            { repoId, symbolId },
+          );
+        }
       }
 
       for (const edge of repoEdges) {

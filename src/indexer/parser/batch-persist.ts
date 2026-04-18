@@ -170,7 +170,9 @@ export class BatchPersistAccumulator {
         }
 
         if (batch.edges.length > 0) {
-          await ladybugDb.insertEdges(txConn, batch.edges);
+          await ladybugDb.insertEdges(txConn, batch.edges, {
+            skipSourceRepoLink: true,
+          });
         }
       });
     });
@@ -204,7 +206,7 @@ export class BatchPersistAccumulator {
     }
   }
 
-    /**
+  /**
    * @deprecated Use drain() instead.
    */
   async flush(): Promise<void> {
