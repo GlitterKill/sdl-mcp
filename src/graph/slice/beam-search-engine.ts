@@ -15,7 +15,12 @@ import { Worker } from "worker_threads";
 import type { Connection } from "kuzu";
 
 import type { EdgeType, RepoId, SymbolId } from "../../domain/types.js";
-import type { EdgeRow, FileRow, MetricsRow, SymbolRow } from "../../db/schema.js";
+import type {
+  EdgeRow,
+  FileRow,
+  MetricsRow,
+  SymbolRow,
+} from "../../db/schema.js";
 import type { SliceBudget } from "../../domain/types.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import {
@@ -848,13 +853,14 @@ export async function beamSearchLadybug(
 
     if (idsToFetch.length === 0) return;
 
-    // Step 1: Batch-fetch symbols + edges for all frontier candidates in parallel
-    const [symbolsMap, edgesMap] = await Promise.all([
-      ladybugDb.getSymbolsByIds(conn, idsToFetch),
-      ladybugDb.getEdgesFromSymbolsForSlice(conn, idsToFetch, {
-        minCallConfidence: request.minCallConfidence,
-      }),
-    ]);
+    // Step 1: Batch-fetch symbols + edges for all frontier candidates sequentially
+    // (LadybugDB connections are not safe for concurrent execute() calls)
+    const symbolsMap = await ladybugDb.getSymbolsByIds(conn, idsToFetch);
+    const edgesMap = await ladybugDb.getEdgesFromSymbolsForSlice(
+      conn,
+      idsToFetch,
+      { minCallConfidence: request.minCallConfidence },
+    );
 
     // Populate symbol + edge caches
     for (const [symbolId, symbol] of symbolsMap) {
@@ -889,11 +895,15 @@ export async function beamSearchLadybug(
 
     const neighborIdList = Array.from(neighborIds);
 
-    // Step 3: Batch-fetch neighbour symbols, metrics, clusters, and files in parallel
-    const [neighborSymbols, neighborMetrics] = await Promise.all([
-      ladybugDb.getSymbolsByIds(conn, neighborIdList),
-      ladybugDb.getMetricsBySymbolIds(conn, neighborIdList),
-    ]);
+    // Step 3: Batch-fetch neighbour symbols + metrics sequentially
+    const neighborSymbols = await ladybugDb.getSymbolsByIds(
+      conn,
+      neighborIdList,
+    );
+    const neighborMetrics = await ladybugDb.getMetricsBySymbolIds(
+      conn,
+      neighborIdList,
+    );
 
     // Populate neighbour caches
     const fileIds = new Set<string>();
@@ -909,7 +919,7 @@ export async function beamSearchLadybug(
       }
     }
 
-    // Fetch missing files + clusters in parallel
+    // Fetch missing files + clusters sequentially (same conn)
     const missingFileIds = Array.from(fileIds).filter(
       (id) => !fileCache.has(id),
     );
@@ -917,30 +927,20 @@ export async function beamSearchLadybug(
       ? neighborIdList.filter((id) => !clusterCache.has(id))
       : [];
 
-    const prefetchPromises: Promise<void>[] = [];
     if (missingFileIds.length > 0) {
-      prefetchPromises.push(
-        ladybugDb.getFilesByIds(conn, missingFileIds).then((filesMap) => {
-          for (const [fileId, file] of filesMap) {
-            fileCache.set(fileId, file);
-          }
-        }),
-      );
+      const filesMap = await ladybugDb.getFilesByIds(conn, missingFileIds);
+      for (const [fileId, file] of filesMap) {
+        fileCache.set(fileId, file);
+      }
     }
     if (clusterIds.length > 0) {
-      prefetchPromises.push(
-        ladybugDb.getClustersForSymbols(conn, clusterIds).then((clusterMap) => {
-          for (const symbolId of clusterIds) {
-            clusterCache.set(
-              symbolId,
-              clusterMap.get(symbolId)?.clusterId ?? null,
-            );
-          }
-        }),
+      const clusterMap = await ladybugDb.getClustersForSymbols(
+        conn,
+        clusterIds,
       );
-    }
-    if (prefetchPromises.length > 0) {
-      await Promise.all(prefetchPromises);
+      for (const symbolId of clusterIds) {
+        clusterCache.set(symbolId, clusterMap.get(symbolId)?.clusterId ?? null);
+      }
     }
   };
 
@@ -1352,7 +1352,9 @@ class ParallelScorerPool {
         const worker = new Worker(workerPath);
 
         worker.on("error", (err) => {
-          logger.warn("Parallel scorer worker error", { error: err instanceof Error ? err.message : String(err) });
+          logger.warn("Parallel scorer worker error", {
+            error: err instanceof Error ? err.message : String(err),
+          });
           this.failed = true;
         });
 

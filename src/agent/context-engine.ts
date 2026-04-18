@@ -15,7 +15,11 @@ import { logger } from "../util/logger.js";
 import { classifySymptomType } from "../retrieval/evidence.js";
 import { estimateTokens } from "../util/tokenize.js";
 import { BROAD_VISIBLE_FIELDS } from "../mcp/context-response-projection.js";
-import { buildSeedContext, seedResultToContext, inferFocusPathsFromTaskText } from "./context-seeding.js";
+import {
+  buildSeedContext,
+  seedResultToContext,
+  inferFocusPathsFromTaskText,
+} from "./context-seeding.js";
 import { randomUUID } from "node:crypto";
 
 const HANDLED_EVIDENCE_TYPES = new Set([
@@ -64,8 +68,7 @@ export class ContextEngine {
       // This dramatically improves symbol discovery for natural language queries
       // like "how does beam search work" or "debug skeleton IR parameters".
       const hasExplicitScope = !!(
-        task.options?.focusPaths?.length ||
-        task.options?.focusSymbols?.length
+        task.options?.focusPaths?.length || task.options?.focusSymbols?.length
       );
       if (!hasExplicitScope && task.taskText) {
         const inferred = inferFocusPathsFromTaskText(task.taskText);
@@ -95,7 +98,14 @@ export class ContextEngine {
       // is worse than occasionally missing hotPath for inferred scopes.
       const planTask = hasExplicitScope
         ? task
-        : { ...task, options: { ...task.options, focusPaths: undefined, focusSymbols: undefined } };
+        : {
+            ...task,
+            options: {
+              ...task.options,
+              focusPaths: undefined,
+              focusSymbols: undefined,
+            },
+          };
       const path = this.planner.plan(planTask);
       let context = await this.planner.selectContext(task);
 
@@ -154,9 +164,14 @@ export class ContextEngine {
         return {
           taskId,
           taskType: task.taskType,
-          actionsTaken: actions.map((a) => ({ ...a, evidence: [], evidenceCount: a.evidence?.length ?? 0 })),
+          actionsTaken: actions.map((a) => ({
+            ...a,
+            evidence: [],
+            evidenceCount: a.evidence?.length ?? 0,
+          })),
           path,
-          contextModeHint: "precise: Returns focused evidence with minimal metadata. Use for targeted lookups when you know what you're looking for.",
+          contextModeHint:
+            "precise: Returns focused evidence with minimal metadata. Use for targeted lookups when you know what you're looking for.",
           finalEvidence: evidence,
           summary: this.generateSummary(task, actions, evidence, success, {
             clusterExpandedCount,
@@ -169,9 +184,14 @@ export class ContextEngine {
       const result: ContextResult = {
         taskId,
         taskType: task.taskType,
-        actionsTaken: actions.map((a) => ({ ...a, evidence: [], evidenceCount: a.evidence?.length ?? 0 })),
+        actionsTaken: actions.map((a) => ({
+          ...a,
+          evidence: [],
+          evidenceCount: a.evidence?.length ?? 0,
+        })),
         path,
-        contextModeHint: "broad: Expands context via cluster relationships and graph edges. Returns answer, nextBestAction, and retrievalEvidence. Use for exploratory tasks.",
+        contextModeHint:
+          "broad: Expands context via cluster relationships and graph edges. Returns answer, nextBestAction, and retrievalEvidence. Use for exploratory tasks.",
         finalEvidence: evidence,
         summary: this.generateSummary(task, actions, evidence, success, {
           clusterExpandedCount,
@@ -323,23 +343,35 @@ export class ContextEngine {
     const cards = byType.get("symbolCard");
     if (cards && cards.length > 0) {
       const topCards = cards.slice(0, 5);
-      const overflow = cards.length > 5 ? "\n- ... and " + (cards.length - 5) + " more (see finalEvidence)" : "";
+      const overflow =
+        cards.length > 5
+          ? "\n- ... and " + (cards.length - 5) + " more (see finalEvidence)"
+          : "";
       sections.push(
         `## Symbols (${cards.length})\n` +
-          topCards.map((c) => `- ${c.summary}`).join("\n") + overflow,
+          topCards.map((c) => `- ${c.summary}`).join("\n") +
+          overflow,
       );
     }
 
     // Skeleton section — reference only, full content is in finalEvidence
     const skeletons = byType.get("skeleton");
     if (skeletons && skeletons.length > 0) {
-      sections.push("Includes " + skeletons.length + " skeleton(s) — see finalEvidence for details.");
+      sections.push(
+        "Includes " +
+          skeletons.length +
+          " skeleton(s) — see finalEvidence for details.",
+      );
     }
 
     // Hot path section — reference only, full content is in finalEvidence
     const hotPaths = byType.get("hotPath");
     if (hotPaths && hotPaths.length > 0) {
-      sections.push("Includes " + hotPaths.length + " hot path(s) — see finalEvidence for details.");
+      sections.push(
+        "Includes " +
+          hotPaths.length +
+          " hot path(s) — see finalEvidence for details.",
+      );
     }
 
     // Code window section
@@ -594,11 +626,10 @@ export class ContextEngine {
       }
 
       const cappedClusterIds = Array.from(clusterIds).slice(0, 10);
-      const memberLists = await Promise.all(
-        cappedClusterIds.map((clusterId) =>
-          ladybugDb.getClusterMembers(conn, clusterId),
-        ),
-      );
+      const memberLists = [];
+      for (const clusterId of cappedClusterIds) {
+        memberLists.push(await ladybugDb.getClusterMembers(conn, clusterId));
+      }
 
       // Collect candidate IDs (not already in context)
       const already = new Set(context);

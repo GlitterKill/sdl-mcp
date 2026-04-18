@@ -229,11 +229,45 @@ export function buildContextAwareStopWords(queryText: string): Set<string> {
  */
 /** Stop words for compound identifier generation. */
 const COMPOUND_STOP_WORDS = new Set([
-    "the", "and", "for", "with", "from", "that", "this", "have", "are",
-    "was", "not", "but", "has", "how", "does", "what", "when", "where",
-    "which", "about", "into", "through", "during", "before", "after",
-    "should", "would", "could", "being", "been", "will", "than", "also",
-    "need", "understand", "investigate", "check", "look", "find",
+  "the",
+  "and",
+  "for",
+  "with",
+  "from",
+  "that",
+  "this",
+  "have",
+  "are",
+  "was",
+  "not",
+  "but",
+  "has",
+  "how",
+  "does",
+  "what",
+  "when",
+  "where",
+  "which",
+  "about",
+  "into",
+  "through",
+  "during",
+  "before",
+  "after",
+  "should",
+  "would",
+  "could",
+  "being",
+  "been",
+  "will",
+  "than",
+  "also",
+  "need",
+  "understand",
+  "investigate",
+  "check",
+  "look",
+  "find",
 ]);
 
 export function generateCompoundIdentifiers(text: string): string[] {
@@ -255,7 +289,11 @@ export function generateCompoundIdentifiers(text: string): string[] {
   };
 
   const toCamel = (parts: string[]): string =>
-    parts[0] + parts.slice(1).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
+    parts[0] +
+    parts
+      .slice(1)
+      .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+      .join("");
   const toPascal = (parts: string[]): string =>
     parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
   const toSnake = (parts: string[]): string => parts.join("_");
@@ -314,7 +352,10 @@ export function extractIdentifiersFromText(
   const allSet = new Set([...primary, ...secondary]);
   const compoundsFiltered = compounds.filter((c) => !allSet.has(c));
 
-  return [...primary, ...secondary, ...compoundsFiltered].slice(0, MAX_IDENTIFIERS);
+  return [...primary, ...secondary, ...compoundsFiltered].slice(
+    0,
+    MAX_IDENTIFIERS,
+  );
 }
 
 export class Executor {
@@ -517,56 +558,53 @@ export class Executor {
   ): Promise<string[]> {
     const conn = await this.getConn();
 
-    const results = await Promise.all(
-      filePaths.map(async (relPath) => {
-        try {
-          // Try exact file match first
-          const file = await ladybugDb.getFileByRepoPath(conn, repoId, relPath);
-          if (file) {
-            const symbols = await ladybugDb.getSymbolsByFile(conn, file.fileId);
-            // Prefer behavioral symbols (functions/methods/classes) over variables for explain tasks
-            const behavioral = symbols.filter((s) =>
-              BEHAVIORAL_KINDS.has(s.kind),
-            );
-            const preferred = behavioral.length > 0 ? behavioral : symbols;
-            return preferred.slice(0, 50).map((sym) => sym.symbolId);
-          }
-
-          // If exact match fails, treat as directory prefix and find files under it.
-          // Cap total symbols per directory to avoid flooding broad-mode queries.
-          const MAX_DIR_SYMBOLS = 30;
-          const normalizedPrefix = relPath.endsWith("/")
-            ? relPath
-            : relPath + "/";
-          const filesUnderDir = await ladybugDb.getFilesByPrefix(
-            conn,
-            repoId,
-            normalizedPrefix,
+    const results: string[][] = [];
+    for (const relPath of filePaths) {
+      try {
+        // Try exact file match first
+        const file = await ladybugDb.getFileByRepoPath(conn, repoId, relPath);
+        if (file) {
+          const symbols = await ladybugDb.getSymbolsByFile(conn, file.fileId);
+          const behavioral = symbols.filter((s) =>
+            BEHAVIORAL_KINDS.has(s.kind),
           );
-          if (filesUnderDir.length > 0) {
-            const symbolResults = await Promise.all(
-              filesUnderDir.slice(0, 10).map(async (f) => {
-                const symbols = await ladybugDb.getSymbolsByFile(
-                  conn,
-                  f.fileId,
-                );
-                const beh = symbols.filter((s) => BEHAVIORAL_KINDS.has(s.kind));
-                return (beh.length > 0 ? beh : symbols)
-                  .slice(0, 5)
-                  .map((sym) => sym.symbolId);
-              }),
-            );
-            return symbolResults.flat().slice(0, MAX_DIR_SYMBOLS);
-          }
-        } catch (err) {
-          logger.debug("Failed to resolve symbols for file", {
-            relPath,
-            error: err instanceof Error ? err.message : String(err),
-          });
+          const preferred = behavioral.length > 0 ? behavioral : symbols;
+          results.push(preferred.slice(0, 50).map((sym) => sym.symbolId));
+          continue;
         }
-        return [];
-      }),
-    );
+
+        // If exact match fails, treat as directory prefix and find files under it.
+        const MAX_DIR_SYMBOLS = 30;
+        const normalizedPrefix = relPath.endsWith("/")
+          ? relPath
+          : relPath + "/";
+        const filesUnderDir = await ladybugDb.getFilesByPrefix(
+          conn,
+          repoId,
+          normalizedPrefix,
+        );
+        if (filesUnderDir.length > 0) {
+          const symbolResults: string[][] = [];
+          for (const f of filesUnderDir.slice(0, 10)) {
+            const symbols = await ladybugDb.getSymbolsByFile(conn, f.fileId);
+            const beh = symbols.filter((s) => BEHAVIORAL_KINDS.has(s.kind));
+            symbolResults.push(
+              (beh.length > 0 ? beh : symbols)
+                .slice(0, 5)
+                .map((sym) => sym.symbolId),
+            );
+          }
+          results.push(symbolResults.flat().slice(0, MAX_DIR_SYMBOLS));
+          continue;
+        }
+      } catch (err) {
+        logger.debug("Failed to resolve symbols for file", {
+          relPath,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      results.push([]);
+    }
 
     return results.flat();
   }

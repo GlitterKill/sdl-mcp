@@ -1376,16 +1376,26 @@ export async function searchSymbols(
 
   // Single-term: use existing behavior
   if (terms.length <= 1) {
-    const rows = await searchSymbolsSingleTerm(conn, repoId, trimmed, kinds, excludeExternal);
+    const rows = await searchSymbolsSingleTerm(
+      conn,
+      repoId,
+      trimmed,
+      kinds,
+      excludeExternal,
+    );
     return rows
       .slice(0, safeLimit)
       .map((row) => mapSearchSymbolRow(row, repoId));
   }
 
-  // Multi-term (including camelCase-split): run per-term queries, merge with match-count ranking
-  const perTermResults = await Promise.all(
-    terms.map((term) => searchSymbolsSingleTerm(conn, repoId, term, kinds, excludeExternal)),
-  );
+  // Multi-term (including camelCase-split): run per-term queries, merge with match-count ranking.
+  // Serialize queries — LadybugDB connections are not safe for concurrent execute() calls.
+  const perTermResults: SearchSymbolsRawRow[][] = [];
+  for (const term of terms) {
+    perTermResults.push(
+      await searchSymbolsSingleTerm(conn, repoId, term, kinds, excludeExternal),
+    );
+  }
 
   const matchCounts = new Map<
     string,
@@ -1552,10 +1562,20 @@ export async function searchSymbolsLite(
     return rows.slice(0, safeLimit);
   }
 
-  // Multi-term: run per-term queries, merge with match-count ranking
-  const perTermResults = await Promise.all(
-    terms.map((term) => searchSymbolsLiteSingleTerm(conn, repoId, term, kinds, excludeExternal)),
-  );
+  // Multi-term: run per-term queries, merge with match-count ranking.
+  // Serialize queries — LadybugDB connections are not safe for concurrent execute() calls.
+  const perTermResults: SearchSymbolLiteRow[][] = [];
+  for (const term of terms) {
+    perTermResults.push(
+      await searchSymbolsLiteSingleTerm(
+        conn,
+        repoId,
+        term,
+        kinds,
+        excludeExternal,
+      ),
+    );
+  }
 
   // Count how many terms each symbol matched
   const matchCounts = new Map<

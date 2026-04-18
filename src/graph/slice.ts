@@ -63,7 +63,10 @@ import {
   START_NODE_SOURCE_SCORE,
   TASK_TEXT_STOP_WORDS,
 } from "./slice/start-node-resolver.js";
-import type { RetrievalEvidence, HybridSearchResultItem } from "../retrieval/types.js";
+import type {
+  RetrievalEvidence,
+  HybridSearchResultItem,
+} from "../retrieval/types.js";
 
 import {
   beamSearch,
@@ -106,7 +109,12 @@ import {
   type OverlaySnapshot,
 } from "../live-index/overlay-reader.js";
 import { logger } from "../util/logger.js";
-import { safeJsonParse, safeJsonParseOptional, StringArraySchema, SignatureSchema } from "../util/safeJson.js";
+import {
+  safeJsonParse,
+  safeJsonParseOptional,
+  StringArraySchema,
+  SignatureSchema,
+} from "../util/safeJson.js";
 
 export {
   type StartNodeSource,
@@ -240,13 +248,14 @@ export async function buildSlice(
         suggestions.push(`"${entryId.slice(0, 16)}..." not found`);
       }
     }
-    const hint = suggestions.length > 0
-      ? ` (${suggestions.join(", ")})`
-      : "";
-    logger.warn("slice.build: none of the provided entrySymbols resolved to valid symbols", {
-      repoId: request.repoId,
-      entrySymbols: request.entrySymbols,
-    });
+    const hint = suggestions.length > 0 ? ` (${suggestions.join(", ")})` : "";
+    logger.warn(
+      "slice.build: none of the provided entrySymbols resolved to valid symbols",
+      {
+        repoId: request.repoId,
+        entrySymbols: request.entrySymbols,
+      },
+    );
     // Throw an error instead of silently returning an empty slice
     throw new Error(
       `None of the provided entrySymbols were found in the index${hint}. Verify symbol IDs with sdl.symbol.search first.`,
@@ -268,12 +277,8 @@ export async function buildSlice(
 
     if (entryClusterIds.size > 0) {
       const relatedClusterIds = new Set<string>();
-      const relatedLists = await Promise.all(
-        Array.from(entryClusterIds).map((clusterId) =>
-          ladybugDb.getRelatedClusters(conn, clusterId, 20),
-        ),
-      );
-      for (const related of relatedLists) {
+      for (const clusterId of entryClusterIds) {
+        const related = await ladybugDb.getRelatedClusters(conn, clusterId, 20);
         for (const row of related) {
           relatedClusterIds.add(row.clusterId);
         }
@@ -409,7 +414,8 @@ export async function buildSlice(
     const hitTokenLimit = estimatedTokens >= budget.maxEstimatedTokens;
     const reasons: string[] = [];
     if (hitCardLimit) reasons.push(`card limit (${budget.maxCards})`);
-    if (hitTokenLimit) reasons.push(`token limit (~${budget.maxEstimatedTokens})`);
+    if (hitTokenLimit)
+      reasons.push(`token limit (~${budget.maxEstimatedTokens})`);
     if (reasons.length === 0) reasons.push("score threshold");
 
     slice.truncation = {
@@ -423,9 +429,10 @@ export async function buildSlice(
         estimatedTokens,
         maxTokens: budget.maxEstimatedTokens,
       },
-      suggestion: droppedCandidates > 0
-        ? `Use slice.spillover.get with the spilloverHandle to retrieve ${Math.min(droppedCandidates, 20)} more symbols, or increase budget.maxCards/budget.maxEstimatedTokens.`
-        : "Use slice.refresh to get incremental updates.",
+      suggestion:
+        droppedCandidates > 0
+          ? `Use slice.spillover.get with the spilloverHandle to retrieve ${Math.min(droppedCandidates, 20)} more symbols, or increase budget.maxCards/budget.maxEstimatedTokens.`
+          : "Use slice.refresh to get incremental updates.",
       howToResume: {
         type: "token",
         value: estimatedTokens,
@@ -436,7 +443,8 @@ export async function buildSlice(
   // Cache the full slice (before ETag dedup) so that cache hits serve
   // complete data regardless of the requesting client's known ETags.
   if (canUseCache) {
-    const hasKnownEtags = request.knownCardEtags && Object.keys(request.knownCardEtags).length > 0;
+    const hasKnownEtags =
+      request.knownCardEtags && Object.keys(request.knownCardEtags).length > 0;
     if (hasKnownEtags) {
       // Rebuild full cards (without ETag dedup) for caching
       const { cardsForPayload: fullCards } = buildPayloadCardsAndRefs(
@@ -445,7 +453,11 @@ export async function buildSlice(
         sliceDepsBySymbol,
         sliceCards,
       );
-      const fullSlice: GraphSlice = { ...slice, cards: fullCards, cardRefs: undefined };
+      const fullSlice: GraphSlice = {
+        ...slice,
+        cards: fullCards,
+        cardRefs: undefined,
+      };
       setCachedSlice(cacheKey, fullSlice);
     } else {
       setCachedSlice(cacheKey, slice);
@@ -718,14 +730,19 @@ async function loadSymbolCards(
 
     let signature;
     if (includeSignature && symbolRow.signatureJson) {
-      signature = safeJsonParse(symbolRow.signatureJson, SignatureSchema, { name: symbolRow.name }) as unknown as SymbolCard["signature"];
+      signature = safeJsonParse(symbolRow.signatureJson, SignatureSchema, {
+        name: symbolRow.name,
+      }) as unknown as SymbolCard["signature"];
     } else if (includeSignature) {
       signature = { name: symbolRow.name };
     }
 
     let invariants: string[] | undefined;
     if (includeFullDetails && symbolRow.invariantsJson) {
-      const parsed = safeJsonParseOptional(symbolRow.invariantsJson, StringArraySchema);
+      const parsed = safeJsonParseOptional(
+        symbolRow.invariantsJson,
+        StringArraySchema,
+      );
       if (parsed) {
         invariants = parsed.slice(0, SYMBOL_CARD_MAX_INVARIANTS);
       }
@@ -733,7 +750,10 @@ async function loadSymbolCards(
 
     let sideEffects: string[] | undefined;
     if (includeFullDetails && symbolRow.sideEffectsJson) {
-      const parsed = safeJsonParseOptional(symbolRow.sideEffectsJson, StringArraySchema);
+      const parsed = safeJsonParseOptional(
+        symbolRow.sideEffectsJson,
+        StringArraySchema,
+      );
       if (parsed) {
         sideEffects = parsed.slice(0, SYMBOL_CARD_MAX_SIDE_EFFECTS);
       }
@@ -741,8 +761,13 @@ async function loadSymbolCards(
 
     let metricsData;
     if (includeFullDetails && metrics) {
-      const rawTestRefs = safeJsonParseOptional(metrics.testRefsJson, StringArraySchema);
-      const testRefs = rawTestRefs ? uniqueLimit(rawTestRefs, SYMBOL_CARD_MAX_TEST_REFS) : undefined;
+      const rawTestRefs = safeJsonParseOptional(
+        metrics.testRefsJson,
+        StringArraySchema,
+      );
+      const testRefs = rawTestRefs
+        ? uniqueLimit(rawTestRefs, SYMBOL_CARD_MAX_TEST_REFS)
+        : undefined;
 
       metricsData = {
         fanIn: metrics.fanIn,

@@ -43,7 +43,6 @@ const PHP_RECEIVER_THIS_CONFIDENCE = 0.85;
  */
 const PHP_SAME_NAMESPACE_CONFIDENCE = 0.82;
 
-
 type ExtractedSymbol = {
   nodeId: string;
   kind: SymbolKind;
@@ -577,13 +576,11 @@ async function resolvePhpUseImportMaps(params: {
       extensions,
     });
 
-    const existingResolvedPaths = (
-      await Promise.all(
-        resolvedPaths.map((relPath) =>
-          ladybugDb.getFileByRepoPath(conn, repoId, relPath),
-        ),
-      )
-    ).flatMap((file) => (file ? [file.relPath] : []));
+    const existingResolvedPaths: string[] = [];
+    for (const relPath of resolvedPaths) {
+      const file = await ladybugDb.getFileByRepoPath(conn, repoId, relPath);
+      if (file) existingResolvedPaths.push(file.relPath);
+    }
 
     const candidateClassFqns = new Set<string>();
     candidateClassFqns.add(normalizedSpecifier);
@@ -1253,7 +1250,10 @@ async function resolvePhpCallEdgesPass2(params: {
   let createdEdges = 0;
 
   for (const detail of filteredSymbolDetails) {
-    const callerSourceText = slicePhpSourceText(content, detail.extractedSymbol.range);
+    const callerSourceText = slicePhpSourceText(
+      content,
+      detail.extractedSymbol.range,
+    );
     for (const call of calls) {
       const callerNodeId =
         call.callerNodeId ??

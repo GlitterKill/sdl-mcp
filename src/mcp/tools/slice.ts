@@ -120,7 +120,12 @@ function generateSliceHandle(): SliceHandle {
 function generateSliceHash(slice: GraphSlice): string {
   const cardFingerprint = crypto
     .createHash("sha256")
-    .update(slice.cards.map((c) => c.symbolId).sort().join(","))
+    .update(
+      slice.cards
+        .map((c) => c.symbolId)
+        .sort()
+        .join(","),
+    )
     .digest("hex");
   const canonical = JSON.stringify({
     repoId: slice.repoId,
@@ -220,7 +225,11 @@ export async function handleSliceBuild(
     }
 
     // PolicyDenialError (from createPolicyDenial) has code === POLICY_ERROR
-    if (error instanceof Error && "code" in error && (error as { code?: string }).code === "POLICY_ERROR") {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error as { code?: string }).code === "POLICY_ERROR"
+    ) {
       return sliceErrorToResponse({
         type: "policy_denied",
         reason: error.message.replace("Policy denied slice request: ", ""),
@@ -267,18 +276,19 @@ async function handleSliceBuildInternal(
   } = request;
 
   const memCaps = getMemoryCapabilities(loadConfig(), repoId);
-  const shouldIncludeMemories = includeMemories === true && memCaps.surfacingEnabled;
+  const shouldIncludeMemories =
+    includeMemories === true && memCaps.surfacingEnabled;
 
   // Resolve any file::name shorthands in entrySymbols
   let resolvedEntrySymbols = entrySymbols;
   if (entrySymbols && entrySymbols.length > 0) {
     const sliceConn = await getLadybugConn();
-    resolvedEntrySymbols = await Promise.all(
-      entrySymbols.map(async (id) => {
-        const { symbolId: resolved } = await resolveSymbolId(sliceConn, repoId, id);
-        return resolved;
-      }),
-    );
+    const resolved: string[] = [];
+    for (const id of entrySymbols) {
+      const { symbolId: r } = await resolveSymbolId(sliceConn, repoId, id);
+      resolved.push(r);
+    }
+    resolvedEntrySymbols = resolved;
   }
 
   recordToolTrace({
@@ -514,11 +524,14 @@ async function handleSliceBuildInternal(
               .map((r) => r.entityId)
               .filter((id) => !existingIds.has(id));
             if (newMemoryIds.length > 0) {
-              const additionalMemories = await Promise.all(
-                newMemoryIds.map((id) => ladybugDb.getMemory(conn, id)),
-              );
+              const additionalMemories = [];
+              for (const id of newMemoryIds) {
+                additionalMemories.push(await ladybugDb.getMemory(conn, id));
+              }
               const validMemories: SurfacedMemory[] = additionalMemories
-                .filter((m): m is NonNullable<typeof m> => m !== null && !m.deleted)
+                .filter(
+                  (m): m is NonNullable<typeof m> => m !== null && !m.deleted,
+                )
                 .map((m) => ({
                   memoryId: m.memoryId,
                   type: m.type as SurfacedMemory["type"],
@@ -551,7 +564,11 @@ async function handleSliceBuildInternal(
 
     // Build per-symbol retrieval evidence when requested (before response construction)
     let evidenceItems: RetrievalEvidenceItem[] | undefined;
-    if (includeRetrievalEvidence && hybridSearchItems && hybridSearchItems.length > 0) {
+    if (
+      includeRetrievalEvidence &&
+      hybridSearchItems &&
+      hybridSearchItems.length > 0
+    ) {
       evidenceItems = hybridSearchItems.map((item, index) => {
         const mapped: RetrievalEvidenceItem = {
           symbolId: item.symbolId,
@@ -590,12 +607,16 @@ async function handleSliceBuildInternal(
         { includeLegend: request.includeLegend },
       ),
       ...(evidenceItems ? { retrievalEvidence: evidenceItems } : {}),
-      ...(includeRetrievalEvidence ? { symptomType: classifySymptomType({
-        stackTrace,
-        failingTestPath,
-        editedFiles,
-        taskText,
-      }) } : {}),
+      ...(includeRetrievalEvidence
+        ? {
+            symptomType: classifySymptomType({
+              stackTrace,
+              failingTestPath,
+              editedFiles,
+              taskText,
+            }),
+          }
+        : {}),
     };
     return attachRawContext(response, { fileIds });
   };
@@ -614,8 +635,10 @@ async function handleSliceBuildInternal(
         const result = await buildSliceWithTracing();
         if ("slice" in result && result.slice) {
           const sliceData = result.slice as Record<string, unknown>;
-          const cards = "c" in sliceData && Array.isArray(sliceData.c) ? sliceData.c : [];
-          const edges = "e" in sliceData && Array.isArray(sliceData.e) ? sliceData.e : [];
+          const cards =
+            "c" in sliceData && Array.isArray(sliceData.c) ? sliceData.c : [];
+          const edges =
+            "e" in sliceData && Array.isArray(sliceData.e) ? sliceData.e : [];
           span.setAttributes({
             "counts.cards": cards.length,
             "counts.edges": edges.length,
@@ -660,7 +683,8 @@ export async function handleSliceRefresh(
   }
 
   // Default knownVersion to the slice handle's maxVersion when not provided
-  const knownVersion = request.knownVersion ?? handleRow.maxVersion ?? handleRow.minVersion ?? "";
+  const knownVersion =
+    request.knownVersion ?? handleRow.maxVersion ?? handleRow.minVersion ?? "";
 
   const now = new Date();
   if (new Date(handleRow.expiresAt) < now) {
@@ -971,7 +995,9 @@ export async function handleSliceSpilloverGet(
     hasMore,
     symbols,
   };
-  return attachRawContext(response, { fileIds: [...new Set(spilloverFileIds)] });
+  return attachRawContext(response, {
+    fileIds: [...new Set(spilloverFileIds)],
+  });
 }
 
 /**

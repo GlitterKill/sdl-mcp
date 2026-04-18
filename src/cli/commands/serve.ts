@@ -55,6 +55,10 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     enableFileLogging();
   }
 
+  // Forward reference so the uncaughtException handler can trigger graceful
+  // shutdown (including PID file removal) once the manager is initialized.
+  let activeShutdownMgr: ShutdownManager | null = null;
+
   // Catch uncaught errors — sanitize stderr output, log full details to file, then exit.
   process.on("uncaughtException", (error) => {
     process.stderr.write(
@@ -64,7 +68,15 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });
-    process.exit(1);
+    if (activeShutdownMgr) {
+      const deadline = setTimeout(() => process.exit(1), 5_000).unref();
+      void activeShutdownMgr.shutdown("uncaught exception").finally(() => {
+        clearTimeout(deadline);
+        process.exit(1);
+      });
+    } else {
+      process.exit(1);
+    }
   });
 
   process.on("unhandledRejection", (reason) => {
@@ -242,6 +254,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   const shutdownMgr = new ShutdownManager({
     log: (msg) => console.error(`[sdl-mcp] ${msg}`),
   });
+  activeShutdownMgr = shutdownMgr;
   if (pidfilePath) {
     shutdownMgr.setPidfilePath(pidfilePath);
   }

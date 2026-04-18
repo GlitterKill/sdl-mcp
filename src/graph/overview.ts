@@ -324,12 +324,10 @@ async function buildRepoOverviewImpl(
   // "full" entries that would already contain the computed data.
   const skipClusterProcess = level === "stats";
 
-  const [files, symbols, edgeCount, edgeCountsByType] = await Promise.all([
-    ladybugDb.getFilesByRepo(conn, repoId),
-    ladybugDb.getSymbolsByRepo(conn, repoId),
-    ladybugDb.getEdgeCount(conn, repoId),
-    ladybugDb.getEdgeCountsByType(conn, repoId),
-  ]);
+  const files = await ladybugDb.getFilesByRepo(conn, repoId);
+  const symbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
+  const edgeCount = await ladybugDb.getEdgeCount(conn, repoId);
+  const edgeCountsByType = await ladybugDb.getEdgeCountsByType(conn, repoId);
 
   // For stats level, try to reuse cluster/process data from a cached
   // higher-detail overview.  If nothing is cached, return placeholder values
@@ -364,10 +362,8 @@ async function buildRepoOverviewImpl(
       clusterProcessDeferred = true;
     }
   } else {
-    [clusterStats, processStats] = await Promise.all([
-      ladybugDb.getClusterOverviewStats(conn, repoId),
-      ladybugDb.getProcessOverviewStats(conn, repoId),
-    ]);
+    clusterStats = await ladybugDb.getClusterOverviewStats(conn, repoId);
+    processStats = await ladybugDb.getProcessOverviewStats(conn, repoId);
   }
 
   // Always build stats
@@ -704,10 +700,16 @@ async function buildCodebaseHotspots(
   const symbolById = new Map(symbols.map((s) => [s.symbolId, s]));
   const fileById = new Map(files.map((f) => [f.fileId, f]));
 
-  const [topByFanIn, topByChurn] = await Promise.all([
-    ladybugDb.getTopSymbolsByFanIn(conn, repoId, DEFAULT_MAX_HOTSPOT_SYMBOLS),
-    ladybugDb.getTopSymbolsByChurn(conn, repoId, DEFAULT_MAX_HOTSPOT_SYMBOLS),
-  ]);
+  const topByFanIn = await ladybugDb.getTopSymbolsByFanIn(
+    conn,
+    repoId,
+    DEFAULT_MAX_HOTSPOT_SYMBOLS,
+  );
+  const topByChurn = await ladybugDb.getTopSymbolsByChurn(
+    conn,
+    repoId,
+    DEFAULT_MAX_HOTSPOT_SYMBOLS,
+  );
 
   const mostDepended: CompactSymbolRef[] = [];
   for (const row of topByFanIn) {

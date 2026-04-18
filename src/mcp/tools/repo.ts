@@ -373,35 +373,26 @@ export async function handleRepoStatus(
       },
       isStale: false,
     };
-    const [
-      latestVersion,
-      filesIndexed,
-      symbolsIndexed,
-      lastIndexedAt,
-      healthResult,
-      recentVersions,
-    ] = await Promise.all([
-      ladybugDb.getLatestVersion(conn, repoId),
-      ladybugDb.getFileCount(conn, repoId),
-      ladybugDb.getSymbolCount(conn, repoId),
-      ladybugDb.getLastIndexedAt(conn, repoId),
-      includeHealth
-        ? Promise.race([
-            getCachedHealthSnapshot(repoId),
-            new Promise<typeof unavailableHealth>((resolve) =>
-              setTimeout(() => {
-                logger.debug(
-                  "Health computation timed out for repoStatus, returning unavailable",
-                );
-                resolve(unavailableHealth);
-              }, 5000).unref(),
-            ),
-          ])
-        : Promise.resolve(unavailableHealth),
-      includeLiveIndex
-        ? ladybugDb.getVersionsByRepo(conn, repoId, 10)
-        : Promise.resolve([] as Awaited<ReturnType<typeof ladybugDb.getVersionsByRepo>>),
-    ]);
+    const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
+    const filesIndexed = await ladybugDb.getFileCount(conn, repoId);
+    const symbolsIndexed = await ladybugDb.getSymbolCount(conn, repoId);
+    const lastIndexedAt = await ladybugDb.getLastIndexedAt(conn, repoId);
+    const healthResult = includeHealth
+      ? await Promise.race([
+          getCachedHealthSnapshot(repoId),
+          new Promise<typeof unavailableHealth>((resolve) =>
+            setTimeout(() => {
+              logger.debug(
+                "Health computation timed out for repoStatus, returning unavailable",
+              );
+              resolve(unavailableHealth);
+            }, 5000).unref(),
+          ),
+        ])
+      : unavailableHealth;
+    const recentVersions = includeLiveIndex
+      ? await ladybugDb.getVersionsByRepo(conn, repoId, 10)
+      : ([] as Awaited<ReturnType<typeof ladybugDb.getVersionsByRepo>>);
     const health = healthResult.snapshot;
     const healthIsStale = healthResult.isStale;
     const watcherHealth = includeHealth ? getWatcherHealth(repoId) : null;
@@ -463,13 +454,14 @@ export async function handleRepoStatus(
       repoId,
       rootPath: repo.rootPath,
       latestVersionId: latestVersion?.versionId ?? null,
-      recentVersions: detail === "full"
-        ? recentVersions.map((v) => ({
-            versionId: v.versionId,
-            createdAt: v.createdAt,
-            reason: v.reason,
-          }))
-        : undefined,
+      recentVersions:
+        detail === "full"
+          ? recentVersions.map((v) => ({
+              versionId: v.versionId,
+              createdAt: v.createdAt,
+              reason: v.reason,
+            }))
+          : undefined,
       filesIndexed,
       symbolsIndexed,
       lastIndexedAt,

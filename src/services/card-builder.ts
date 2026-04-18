@@ -45,7 +45,10 @@ import { safeJsonParse, StringArraySchema } from "../util/safeJson.js";
  * (some HTTP intermediaries do this), and compare against the current value
  * directly.
  */
-function etagMatches(ifNoneMatch: string | undefined, current: string): boolean {
+function etagMatches(
+  ifNoneMatch: string | undefined,
+  current: string,
+): boolean {
   if (ifNoneMatch === undefined) return false;
   return ifNoneMatch.toLowerCase() === current;
 }
@@ -98,22 +101,24 @@ async function buildOverlayCardForSymbol(
   }
 
   const metrics = await ladybugDb.getMetrics(conn, symbolId);
-  const [clusterRow, processesRows] = await Promise.all([
-    ladybugDb.getClusterForSymbol(conn, symbolId).catch((err) => {
+  const clusterRow = await ladybugDb
+    .getClusterForSymbol(conn, symbolId)
+    .catch((err) => {
       logger.warn("Failed to get cluster for symbol", {
         symbolId,
         error: err instanceof Error ? err.message : String(err),
       });
       return null;
-    }),
-    ladybugDb.getProcessesForSymbol(conn, symbolId).catch((err) => {
+    });
+  const processesRows = await ladybugDb
+    .getProcessesForSymbol(conn, symbolId)
+    .catch((err) => {
       logger.warn("Failed to get processes for symbol", {
         symbolId,
         error: err instanceof Error ? err.message : String(err),
       });
       return [];
-    }),
-  ]);
+    });
 
   const signature = parseJson<SymbolSignature>(overlay.symbol.signatureJson);
   const invariants = parseJson<string[]>(overlay.symbol.invariantsJson);
@@ -148,12 +153,17 @@ async function buildOverlayCardForSymbol(
           pickDepLabel(targetId, targetNamesById.get(targetId)?.name),
         )
         .filter((label): label is string => Boolean(label))
-        .filter((label) => !includeResolutionMetadata && label.startsWith("unresolved:") ? false : true),
+        .filter((label) =>
+          !includeResolutionMetadata && label.startsWith("unresolved:")
+            ? false
+            : true,
+        ),
       SYMBOL_CARD_MAX_DEPS_PER_KIND,
     ),
     calls: overlayResolvedCalls,
     callsNote:
-      CLASS_LIKE_KINDS.has(overlay.symbol.kind) && overlayResolvedCalls.length === 0
+      CLASS_LIKE_KINDS.has(overlay.symbol.kind) &&
+      overlayResolvedCalls.length === 0
         ? "See method cards for call dependencies"
         : undefined,
   };
@@ -241,7 +251,17 @@ async function buildOverlayCardForSymbol(
               )
             : undefined,
           canonicalTest: metrics.canonicalTestJson
-            ? (() => { const ct = parseJson(metrics.canonicalTestJson); return ct && typeof ct === "object" && ct !== null && "proximity" in ct && "file" in ct && (ct as { proximity: number }).proximity >= 0.5 ? (ct as SymbolMetrics["canonicalTest"]) : undefined; })()
+            ? (() => {
+                const ct = parseJson(metrics.canonicalTestJson);
+                return ct &&
+                  typeof ct === "object" &&
+                  ct !== null &&
+                  "proximity" in ct &&
+                  "file" in ct &&
+                  (ct as { proximity: number }).proximity >= 0.5
+                  ? (ct as SymbolMetrics["canonicalTest"])
+                  : undefined;
+              })()
             : undefined,
         }
       : undefined,
@@ -345,7 +365,8 @@ export async function buildCardForSymbol(
 
   // External symbols (from SCIP) get a minimal card without code details
   if (symbol.external) {
-    const latestVer = latestVersion ?? await ladybugDb.getLatestVersion(conn, repoId);
+    const latestVer =
+      latestVersion ?? (await ladybugDb.getLatestVersion(conn, repoId));
     const minimalCard: SymbolCard = {
       symbolId,
       repoId,
@@ -418,26 +439,28 @@ export async function buildCardForSymbol(
     throw new DatabaseError(`File not found: ${symbol.fileId}`);
   }
 
-  const [edgesFrom, metrics, clusterRow, processesRows] = await Promise.all([
-    ladybugDb.getEdgesFrom(conn, symbolId, {
-      minCallConfidence: effectiveMinCallConfidence,
-    }),
-    ladybugDb.getMetrics(conn, symbolId),
-    ladybugDb.getClusterForSymbol(conn, symbolId).catch((err) => {
+  const edgesFrom = await ladybugDb.getEdgesFrom(conn, symbolId, {
+    minCallConfidence: effectiveMinCallConfidence,
+  });
+  const metrics = await ladybugDb.getMetrics(conn, symbolId);
+  const clusterRow = await ladybugDb
+    .getClusterForSymbol(conn, symbolId)
+    .catch((err) => {
       logger.warn("Failed to get cluster for symbol", {
         symbolId,
         error: err instanceof Error ? err.message : String(err),
       });
       return null;
-    }),
-    ladybugDb.getProcessesForSymbol(conn, symbolId).catch((err) => {
+    });
+  const processesRows = await ladybugDb
+    .getProcessesForSymbol(conn, symbolId)
+    .catch((err) => {
       logger.warn("Failed to get processes for symbol", {
         symbolId,
         error: err instanceof Error ? err.message : String(err),
       });
       return [];
-    }),
-  ]);
+    });
 
   const signature = parseJson<SymbolSignature>(symbol.signatureJson);
   const invariants = parseJson<string[]>(symbol.invariantsJson);
@@ -478,7 +501,11 @@ export async function buildCardForSymbol(
           pickDepLabel(targetId, targetNamesById.get(targetId)?.name),
         )
         .filter((label): label is string => Boolean(label))
-        .filter((label) => !options.includeResolutionMetadata && label.startsWith("unresolved:") ? false : true),
+        .filter((label) =>
+          !options.includeResolutionMetadata && label.startsWith("unresolved:")
+            ? false
+            : true,
+        ),
       SYMBOL_CARD_MAX_DEPS_PER_KIND,
     ),
     calls: resolvedCalls,
@@ -521,7 +548,17 @@ export async function buildCardForSymbol(
             )
           : undefined,
         canonicalTest: metrics.canonicalTestJson
-          ? (() => { const ct = parseJson(metrics.canonicalTestJson); return ct && typeof ct === "object" && ct !== null && "proximity" in ct && "file" in ct && (ct as { proximity: number }).proximity >= 0.5 ? (ct as SymbolMetrics["canonicalTest"]) : undefined; })()
+          ? (() => {
+              const ct = parseJson(metrics.canonicalTestJson);
+              return ct &&
+                typeof ct === "object" &&
+                ct !== null &&
+                "proximity" in ct &&
+                "file" in ct &&
+                (ct as { proximity: number }).proximity >= 0.5
+                ? (ct as SymbolMetrics["canonicalTest"])
+                : undefined;
+            })()
           : undefined,
       }
     : undefined;

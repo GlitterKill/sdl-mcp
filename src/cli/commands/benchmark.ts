@@ -191,11 +191,9 @@ async function collectBenchmarkMetrics(
     filesIndexed = indexResult.filesProcessed;
   }
 
-  const [allSymbols, edges, files] = await Promise.all([
-    ladybugDb.getSymbolsByRepo(conn, repoId),
-    ladybugDb.getEdgesByRepo(conn, repoId),
-    ladybugDb.getFilesByRepo(conn, repoId),
-  ]);
+  const allSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
+  const edges = await ladybugDb.getEdgesByRepo(conn, repoId);
+  const files = await ladybugDb.getFilesByRepo(conn, repoId);
 
   const filesById = new Map(files.map((file) => [file.fileId, file.relPath]));
 

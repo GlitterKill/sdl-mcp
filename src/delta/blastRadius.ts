@@ -44,7 +44,11 @@ function computeBlastRadiusCacheKey(
 ): string {
   const sortedSymbols = [...changedSymbols].sort().join(",");
   const optionsKey = `${options.maxHops ?? 3}-${options.maxResults ?? 20}-${options.fromVersionId ?? ""}-${options.toVersionId ?? ""}`;
-  return crypto.createHash("sha256").update(`${repoId}:${sortedSymbols}:${optionsKey}`).digest("hex").slice(0, 16);
+  return crypto
+    .createHash("sha256")
+    .update(`${repoId}:${sortedSymbols}:${optionsKey}`)
+    .digest("hex")
+    .slice(0, 16);
 }
 
 function getCachedBlastRadius(key: string): BlastRadiusItem[] | null {
@@ -102,7 +106,9 @@ interface ProcessDependentMetrics {
 
 function assertSafeInt(value: number, name: string): void {
   if (!Number.isSafeInteger(value)) {
-    throw new DatabaseError(`${name} must be a safe integer, got: ${String(value)}`);
+    throw new DatabaseError(
+      `${name} must be a safe integer, got: ${String(value)}`,
+    );
   }
 }
 
@@ -227,7 +233,11 @@ export async function computeBlastRadius(
   }
 
   // Check cache first
-  const cacheKey = computeBlastRadiusCacheKey(repoId, changedSymbols, options ?? {});
+  const cacheKey = computeBlastRadiusCacheKey(
+    repoId,
+    changedSymbols,
+    options ?? {},
+  );
   const cached = getCachedBlastRadius(cacheKey);
   if (cached) {
     logger.debug("Blast radius cache hit", {
@@ -305,12 +315,12 @@ export async function computeBlastRadius(
       const normalizedDistance = Math.max(0, 1 - distance / safeMaxHops);
       const normalizedFanIn = Math.min(1, Math.log(fanIn + 1) / Math.log(100));
       const rank =
-        0.6 * normalizedDistance +
-        0.3 * normalizedFanIn +
-        0.1 * testProximity;
+        0.6 * normalizedDistance + 0.3 * normalizedFanIn + 0.1 * testProximity;
 
       const reason =
-        distance === 1 ? "calls changed symbol" : "dependency of changed symbol";
+        distance === 1
+          ? "calls changed symbol"
+          : "dependency of changed symbol";
 
       const signal: BlastRadiusItem["signal"] =
         distance === 1 ? "directDependent" : "graph";
@@ -325,7 +335,10 @@ export async function computeBlastRadius(
     }
   }
 
-  const processDependentsBySymbol = new Map<SymbolId, ProcessDependentMetrics>();
+  const processDependentsBySymbol = new Map<
+    SymbolId,
+    ProcessDependentMetrics
+  >();
 
   // TODO: Batch process lookups for all changed symbols in a single query
   // to reduce O(N) sequential DB round trips per changed symbol.
@@ -407,10 +420,18 @@ export async function computeBlastRadius(
   const { fromVersionId, toVersionId } = options ?? {};
   if (fromVersionId && toVersionId && repoId) {
     const rankedSymbolIds = ranked.map((item) => item.symbolId);
-    const [previousMap, currentMap] = await Promise.all([
-      batchGetFanInAtVersion(conn, repoId, rankedSymbolIds, fromVersionId),
-      batchGetFanInAtVersion(conn, repoId, rankedSymbolIds, toVersionId),
-    ]);
+    const previousMap = await batchGetFanInAtVersion(
+      conn,
+      repoId,
+      rankedSymbolIds,
+      fromVersionId,
+    );
+    const currentMap = await batchGetFanInAtVersion(
+      conn,
+      repoId,
+      rankedSymbolIds,
+      toVersionId,
+    );
 
     for (const item of ranked) {
       const previous = previousMap.get(item.symbolId) ?? 0;
@@ -480,7 +501,9 @@ export async function computeBlastRadius(
 export function rankDependents(
   dependents: BlastRadiusItem[],
 ): BlastRadiusItem[] {
-  return dependents.sort((a, b) => b.rank - a.rank || a.symbolId.localeCompare(b.symbolId));
+  return dependents.sort(
+    (a, b) => b.rank - a.rank || a.symbolId.localeCompare(b.symbolId),
+  );
 }
 
 export function mergeBlastRadiusWithDiagnostics(
@@ -552,7 +575,10 @@ export async function runGovernorLoop(
     try {
       const timeoutMs = options.diagnosticsTimeoutMs ?? 5000;
 
-      const { suspects } = await runDiagnosticsWithTimeout(options.repoId, timeoutMs);
+      const { suspects } = await runDiagnosticsWithTimeout(
+        options.repoId,
+        timeoutMs,
+      );
       diagnosticSuspects = suspects;
     } catch (error) {
       logger.warn("Failed to run diagnostics with timeout", {
@@ -614,7 +640,10 @@ async function runDiagnosticsWithTimeout(
 function applyBudgetedSelection(
   blastRadius: BlastRadiusItem[],
   budget: SliceBudget,
-  symbolsById: Map<string, { name: string; signatureJson: string | null; summary: string | null }>,
+  symbolsById: Map<
+    string,
+    { name: string; signatureJson: string | null; summary: string | null }
+  >,
   _depth = 0,
 ): { trimmedSet: TrimmedSet; spilloverHandle: SpilloverHandle | null } {
   const maxCards = budget.maxCards ?? DEFAULT_MAX_CARDS;
@@ -622,7 +651,8 @@ function applyBudgetedSelection(
 
   if (maxCards <= 0 || maxTokens <= 0) {
     const effectiveMaxCards = maxCards <= 0 ? DEFAULT_MAX_CARDS : maxCards;
-    const effectiveMaxTokens = maxTokens <= 0 ? DEFAULT_MAX_TOKENS_SLICE : maxTokens;
+    const effectiveMaxTokens =
+      maxTokens <= 0 ? DEFAULT_MAX_TOKENS_SLICE : maxTokens;
     logger.warn("Invalid budget values detected, using defaults", {
       providedMaxCards: budget.maxCards,
       providedMaxTokens: budget.maxEstimatedTokens,
@@ -738,7 +768,8 @@ function prioritizeBlastRadius(
   const priorityWeight = { must: 3, should: 2, optional: 1 };
 
   return prioritized.sort((a, b) => {
-    const priorityDiff = priorityWeight[b.priority] - priorityWeight[a.priority];
+    const priorityDiff =
+      priorityWeight[b.priority] - priorityWeight[a.priority];
     if (priorityDiff !== 0) return priorityDiff;
 
     const rankDiff = b.rank - a.rank;

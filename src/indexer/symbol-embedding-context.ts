@@ -282,15 +282,13 @@ export async function prepareSymbolEmbeddingInputs(
     ...new Set(symbols.map((s) => s.fileId).filter((v): v is string => !!v)),
   ];
 
-  const [filesMap, edgesMap, summaryCacheMap] = await Promise.all([
-    ladybugDb.getFilesByIds(conn, fileIds),
-    ladybugDb.getEdgesFromSymbols(conn, symbolIds, {
-      minCallConfidence: MIN_CALL_CONFIDENCE,
-    }),
-    options.summaryCacheMap
-      ? Promise.resolve(options.summaryCacheMap)
-      : ladybugDb.getSummaryCaches(conn, symbolIds),
-  ]);
+  const filesMap = await ladybugDb.getFilesByIds(conn, fileIds);
+  const edgesMap = await ladybugDb.getEdgesFromSymbols(conn, symbolIds, {
+    minCallConfidence: MIN_CALL_CONFIDENCE,
+  });
+  const summaryCacheMap = options.summaryCacheMap
+    ? options.summaryCacheMap
+    : await ladybugDb.getSummaryCaches(conn, symbolIds);
 
   const resolvedTargetIds = new Set<string>();
   for (const edgeList of edgesMap.values()) {

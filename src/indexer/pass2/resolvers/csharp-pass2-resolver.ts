@@ -47,7 +47,6 @@ const CSHARP_RECEIVER_THIS_CONFIDENCE = 0.85;
  */
 const CSHARP_STATIC_USING_CONFIDENCE = 0.8;
 
-
 type ExtractedSymbol = {
   nodeId: string;
   kind: SymbolKind;
@@ -344,11 +343,7 @@ function buildCSharpCallScope(
         if (match?.[1]) {
           const firstBase =
             normalizeTypeName(
-              match[1]
-                .split(",")[0]
-                ?.trim()
-                .split(".")
-                .pop() ?? "",
+              match[1].split(",")[0]?.trim().split(".").pop() ?? "",
             ) ?? "";
           if (firstBase) {
             localBaseByClassName.set(className, firstBase);
@@ -689,21 +684,24 @@ async function resolveCSharpImportMaps(params: {
         specifier,
         extensions,
       });
-      const targetFiles = (
-        await Promise.all(
-          resolvedPaths.map((relPath) =>
-            ladybugDb.getFileByRepoPath(conn, repoId, relPath),
-          ),
-        )
-      ).flatMap((targetFile) => (targetFile ? [targetFile] : []));
+      const targetFiles: Exclude<
+        Awaited<ReturnType<typeof ladybugDb.getFileByRepoPath>>,
+        null
+      >[] = [];
+      for (const relPath of resolvedPaths) {
+        const f = await ladybugDb.getFileByRepoPath(conn, repoId, relPath);
+        if (f) targetFiles.push(f);
+      }
       if (targetFiles.length > 0) {
-        const targetSymbols = (
-          await Promise.all(
-            targetFiles.map((targetFile) =>
-              ladybugDb.getSymbolsByFile(conn, targetFile.fileId),
-            ),
-          )
-        ).flat();
+        const targetSymbolsNested: Awaited<
+          ReturnType<typeof ladybugDb.getSymbolsByFile>
+        >[] = [];
+        for (const targetFile of targetFiles) {
+          targetSymbolsNested.push(
+            await ladybugDb.getSymbolsByFile(conn, targetFile.fileId),
+          );
+        }
+        const targetSymbols = targetSymbolsNested.flat();
         const typeSymbol = targetSymbols.find(
           (symbol) =>
             symbol.kind === "class" ||
@@ -998,19 +996,12 @@ async function resolveCSharpCallEdgesPass2(params: {
   let nodeIdToSymbolId: ReturnType<typeof createNodeIdToSymbolId>;
   let callScope: ReturnType<typeof buildCSharpCallScope>;
   try {
-    fileRecord = await ladybugDb.getFileByRepoPath(
-      conn,
-      repoId,
-      fileMeta.path,
-    );
+    fileRecord = await ladybugDb.getFileByRepoPath(conn, repoId, fileMeta.path);
     if (!fileRecord) {
       return 0;
     }
 
-    existingSymbols = await ladybugDb.getSymbolsByFile(
-      conn,
-      fileRecord.fileId,
-    );
+    existingSymbols = await ladybugDb.getSymbolsByFile(conn, fileRecord.fileId);
     if (existingSymbols.length === 0) {
       return 0;
     }

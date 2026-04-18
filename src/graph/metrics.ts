@@ -721,12 +721,11 @@ export async function updateMetricsForRepo(
 
   const conn = await getLadybugConn();
 
-  const [edges, repo] = await measureSubphase("loadRepoState", () =>
-    Promise.all([
-      ladybugDb.getEdgesByRepoLite(conn, repoId),
-      ladybugDb.getRepo(conn, repoId),
-    ]),
-  );
+  const [edges, repo] = await measureSubphase("loadRepoState", async () => {
+    const e = await ladybugDb.getEdgesByRepoLite(conn, repoId);
+    const r = await ladybugDb.getRepo(conn, repoId);
+    return [e, r] as const;
+  });
   if (!repo) {
     return { timings };
   }
@@ -735,11 +734,13 @@ export async function updateMetricsForRepo(
     ConfigObjectSchema,
     {},
   ) as RepoConfig;
-  const [files, allSymbols] = await measureSubphase("loadFilesAndSymbols", () =>
-    Promise.all([
-      ladybugDb.getFilesByRepoLite(conn, repoId),
-      ladybugDb.getSymbolsByRepoLite(conn, repoId),
-    ]),
+  const [files, allSymbols] = await measureSubphase(
+    "loadFilesAndSymbols",
+    async () => {
+      const f = await ladybugDb.getFilesByRepoLite(conn, repoId);
+      const s = await ladybugDb.getSymbolsByRepoLite(conn, repoId);
+      return [f, s] as const;
+    },
   );
   const fileById = new Map(files.map((file) => [file.fileId, file.relPath]));
   const symbolIds = new Set(allSymbols.map((symbol) => symbol.symbolId));

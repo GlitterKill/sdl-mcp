@@ -158,7 +158,10 @@ export async function computeAndStoreClustersAndProcesses(params: {
           // community. Calls represent runtime dependencies, which is
           // what cluster cohesion should actually measure.
           if (edge.edgeType === "call") {
-            nextClusterEdges.push({ fromSymbolId, toSymbolId: edge.toSymbolId });
+            nextClusterEdges.push({
+              fromSymbolId,
+              toSymbolId: edge.toSymbolId,
+            });
             nextCallEdges.push({
               callerId: fromSymbolId,
               calleeId: edge.toSymbolId,
@@ -428,11 +431,9 @@ export async function computeAndStoreClustersAndProcesses(params: {
         return;
       }
 
-      const [pageRankResults, kCoreResults, louvainResults] = await Promise.all([
-        runPageRank(conn, repoId),
-        runKCore(conn, repoId),
-        runLouvain(conn, repoId),
-      ]);
+      const pageRankResults = await runPageRank(conn, repoId);
+      const kCoreResults = await runKCore(conn, repoId);
+      const louvainResults = await runLouvain(conn, repoId);
 
       // Merge pageRank + kCore on symbolId for combined write.
       const pageRankMap = new Map<string, number>();
@@ -474,13 +475,17 @@ export async function computeAndStoreClustersAndProcesses(params: {
       // Apply the same min-cluster-size threshold as canonical clusters
       // so tiny Louvain fragments do not dominate downstream telemetry.
       const sortedCommunityIds = [...communityMembers.keys()]
-        .filter((cid) => (communityMembers.get(cid)?.length ?? 0) >= minClusterSize)
+        .filter(
+          (cid) => (communityMembers.get(cid)?.length ?? 0) >= minClusterSize,
+        )
         .sort((a, b) => a - b);
 
       await withWriteConn(async (wConn) => {
         await deleteShadowClustersByRepo(wConn, repoId);
         for (const communityId of sortedCommunityIds) {
-          const memberIds = (communityMembers.get(communityId) ?? []).slice().sort();
+          const memberIds = (communityMembers.get(communityId) ?? [])
+            .slice()
+            .sort();
           const shadowClusterId = `${repoId}:louvain:${communityId}`;
           const label = `Louvain community ${communityId}`;
           await upsertShadowCluster(wConn, {
@@ -515,7 +520,8 @@ export async function computeAndStoreClustersAndProcesses(params: {
           canonicalBySymbol.set(assignment.symbolId, assignment.clusterId);
         }
         const louvainBySymbol = new Map<string, number>();
-        for (const r of louvainResults) louvainBySymbol.set(r.symbolId, r.communityId);
+        for (const r of louvainResults)
+          louvainBySymbol.set(r.symbolId, r.communityId);
 
         // For each canonical cluster, find the Louvain community with
         // the largest intersection, then compute Jaccard overlap.
@@ -566,10 +572,13 @@ export async function computeAndStoreClustersAndProcesses(params: {
       }
     });
   } catch (err) {
-    logger.warn("ladybug-algorithms: algorithm stage failed; canonical indexing preserved", {
-      repoId,
-      error: err instanceof Error ? err.message : String(err),
-    });
+    logger.warn(
+      "ladybug-algorithms: algorithm stage failed; canonical indexing preserved",
+      {
+        repoId,
+        error: err instanceof Error ? err.message : String(err),
+      },
+    );
   }
 
   logger.info("Cluster/process computation completed", {

@@ -58,13 +58,14 @@ export async function resolveImportTargets(
       continue;
     }
 
-    const targetFiles = (
-      await Promise.all(
-        resolvedPaths.map((relPath) =>
-          ladybugDb.getFileByRepoPath(conn, repoId, relPath),
-        ),
-      )
-    ).flatMap((targetFile) => (targetFile ? [targetFile] : []));
+    const targetFiles: Exclude<
+      Awaited<ReturnType<typeof ladybugDb.getFileByRepoPath>>,
+      null
+    >[] = [];
+    for (const relPath of resolvedPaths) {
+      const f = await ladybugDb.getFileByRepoPath(conn, repoId, relPath);
+      if (f) targetFiles.push(f);
+    }
 
     if (targetFiles.length === 0) {
       for (const name of importedNames) {
@@ -105,13 +106,15 @@ export async function resolveImportTargets(
       continue;
     }
 
-    const targetSymbols = (
-      await Promise.all(
-        sameLanguageFiles.map((targetFile) =>
-          ladybugDb.getSymbolsByFile(conn, targetFile.fileId),
-        ),
-      )
-    )
+    const targetSymbolsNested: Awaited<
+      ReturnType<typeof ladybugDb.getSymbolsByFile>
+    >[] = [];
+    for (const targetFile of sameLanguageFiles) {
+      targetSymbolsNested.push(
+        await ladybugDb.getSymbolsByFile(conn, targetFile.fileId),
+      );
+    }
+    const targetSymbols = targetSymbolsNested
       .flat()
       .filter((symbol) => symbol.exported);
 

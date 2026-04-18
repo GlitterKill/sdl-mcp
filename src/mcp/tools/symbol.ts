@@ -180,11 +180,11 @@ export async function handleSymbolSearch(
       if (!shouldFallbackToLegacy(caps, retrievalConfig)) {
         useHybrid = true;
       } else {
-        fallbackReason = caps.degradationReasons
-          ?.map((r) => r.message)
-          .join("; ") ?? (!caps.fts
-          ? "FTS extension unavailable"
-          : "Retrieval health check failed");
+        fallbackReason =
+          caps.degradationReasons?.map((r) => r.message).join("; ") ??
+          (!caps.fts
+            ? "FTS extension unavailable"
+            : "Retrieval health check failed");
       }
     } catch (err) {
       fallbackReason = `Health check error: ${err instanceof Error ? err.message : String(err)}`;
@@ -269,7 +269,10 @@ export async function handleSymbolSearch(
       query,
       request.kinds,
     );
-    if (exactMatch && !results.some((r) => r.symbolId === exactMatch.symbolId)) {
+    if (
+      exactMatch &&
+      !results.some((r) => r.symbolId === exactMatch.symbolId)
+    ) {
       results.unshift({
         symbolId: exactMatch.symbolId,
         name: exactMatch.name,
@@ -283,11 +286,7 @@ export async function handleSymbolSearch(
   // decompose into subwords and re-search with joined terms (multi-term query)
   let camelFallbackUsed = false;
   let camelFallbackTerms: string[] = [];
-  if (
-    results.length === 0 &&
-    !query.includes("*") &&
-    !query.includes("?")
-  ) {
+  if (results.length === 0 && !query.includes("*") && !query.includes("?")) {
     const subwords = splitCamelSubwords(query);
     if (subwords.length >= 2) {
       camelFallbackTerms = subwords;
@@ -358,9 +357,7 @@ export async function handleSymbolSearch(
   // FP-5: For wildcard queries or when no exact match, sort by importance metrics
   // This ensures "*" queries return the most important symbols rather than arbitrary order
   const isWildcard =
-    query === "*" ||
-    query.includes("*") ||
-    query.includes("?");
+    query === "*" || query.includes("*") || query.includes("?");
   if (isWildcard && results.length > 1) {
     // Fetch metrics for top results to sort by importance
     const topIds = results
@@ -461,9 +458,10 @@ export async function handleSymbolSearch(
   }));
   // Apply a higher relevance floor for explicit semantic search to
   // prevent very low-scoring results from polluting the output.
-  const effectiveThreshold = semanticEnabled && semanticRequested
-    ? Math.max(MIN_RELEVANCE_THRESHOLD, 0.4)
-    : MIN_RELEVANCE_THRESHOLD;
+  const effectiveThreshold =
+    semanticEnabled && semanticRequested
+      ? Math.max(MIN_RELEVANCE_THRESHOLD, 0.4)
+      : MIN_RELEVANCE_THRESHOLD;
   const relevant = scoredResults.filter(
     (r) => r.relevance >= effectiveThreshold,
   );
@@ -654,21 +652,15 @@ async function buildCardsForSymbolIds(
     }
   }
 
-  const BATCH_SIZE = 10;
   const cards: Awaited<ReturnType<typeof buildCardForSymbol>>[] = [];
-  for (let i = 0; i < input.symbolIds.length; i += BATCH_SIZE) {
-    const batch = input.symbolIds.slice(i, i + BATCH_SIZE);
-    const batchResults = await Promise.all(
-      batch.map((id) =>
-        buildCardForSymbol(input.repoId, id, input.knownEtags?.[id], {
-          minCallConfidence: input.minCallConfidence,
-          includeResolutionMetadata: input.includeResolutionMetadata,
-          // MCP callers must opt in explicitly; undefined collapses to false
-          includeProcesses: input.includeProcesses === true,
-        }),
-      ),
+  for (const id of input.symbolIds) {
+    cards.push(
+      await buildCardForSymbol(input.repoId, id, input.knownEtags?.[id], {
+        minCallConfidence: input.minCallConfidence,
+        includeResolutionMetadata: input.includeResolutionMetadata,
+        includeProcesses: input.includeProcesses === true,
+      }),
     );
-    cards.push(...batchResults);
   }
 
   return { cards, symbolMap };
@@ -682,13 +674,14 @@ export async function handleSymbolGetCard(
   args: unknown,
 ): Promise<SymbolGetCardResponse | NotModifiedResponse> {
   const request = SymbolGetCardRequestSchema.parse(args);
-  
+
   // Dispatch to batch handler if symbolIds or symbolRefs is provided
-  const isBatch = request.symbolIds !== undefined || request.symbolRefs !== undefined;
+  const isBatch =
+    request.symbolIds !== undefined || request.symbolRefs !== undefined;
   if (isBatch) {
     return handleBatchCards(request);
   }
-  
+
   // Single symbol lookup
   const conn = await getLadybugConn();
 

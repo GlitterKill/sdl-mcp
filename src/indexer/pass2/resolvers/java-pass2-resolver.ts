@@ -551,24 +551,27 @@ async function resolveJavaImportMaps(params: {
       continue;
     }
 
-    const targetFiles = (
-      await Promise.all(
-        resolvedPaths.map((relPath) =>
-          ladybugDb.getFileByRepoPath(conn, repoId, relPath),
-        ),
-      )
-    ).flatMap((targetFile) => (targetFile ? [targetFile] : []));
+    const targetFiles: Exclude<
+      Awaited<ReturnType<typeof ladybugDb.getFileByRepoPath>>,
+      null
+    >[] = [];
+    for (const relPath of resolvedPaths) {
+      const f = await ladybugDb.getFileByRepoPath(conn, repoId, relPath);
+      if (f) targetFiles.push(f);
+    }
     if (targetFiles.length === 0) {
       continue;
     }
 
-    const targetSymbols = (
-      await Promise.all(
-        targetFiles.map((targetFile) =>
-          ladybugDb.getSymbolsByFile(conn, targetFile.fileId),
-        ),
-      )
-    )
+    const targetSymbolsNested: Awaited<
+      ReturnType<typeof ladybugDb.getSymbolsByFile>
+    >[] = [];
+    for (const targetFile of targetFiles) {
+      targetSymbolsNested.push(
+        await ladybugDb.getSymbolsByFile(conn, targetFile.fileId),
+      );
+    }
+    const targetSymbols = targetSymbolsNested
       .flat()
       .filter((symbol) => symbol.exported);
 
@@ -720,13 +723,27 @@ export function computeJavaCallArity(
   while (i < content.length) {
     const ch = content[i];
     if (inString) {
-      if (ch === "\\") { i += 2; continue; }
-      if (ch === inString) { inString = null; }
+      if (ch === "\\") {
+        i += 2;
+        continue;
+      }
+      if (ch === inString) {
+        inString = null;
+      }
       i++;
       continue;
     }
-    if (ch === '"' || ch === "'") { inString = ch; i++; continue; }
-    if (ch === "(") { depth++; sawNonWs = true; i++; continue; }
+    if (ch === '"' || ch === "'") {
+      inString = ch;
+      i++;
+      continue;
+    }
+    if (ch === "(") {
+      depth++;
+      sawNonWs = true;
+      i++;
+      continue;
+    }
     if (ch === ")") {
       depth--;
       if (depth === 0) {
@@ -736,8 +753,17 @@ export function computeJavaCallArity(
       i++;
       continue;
     }
-    if (ch === "<" && depth === 1) { angleDepth++; sawNonWs = true; i++; continue; }
-    if (ch === ">" && depth === 1 && angleDepth > 0) { angleDepth--; i++; continue; }
+    if (ch === "<" && depth === 1) {
+      angleDepth++;
+      sawNonWs = true;
+      i++;
+      continue;
+    }
+    if (ch === ">" && depth === 1 && angleDepth > 0) {
+      angleDepth--;
+      i++;
+      continue;
+    }
     if (ch === "," && depth === 1 && angleDepth === 0) {
       commasAtTop++;
       sawNonWs = true;
@@ -795,16 +821,35 @@ export function computeJavaParamCountFromSource(
   let angleDepth = 0;
   while (i < content.length) {
     const ch = content[i];
-    if (ch === "(") { depth++; sawNonWs = true; i++; continue; }
+    if (ch === "(") {
+      depth++;
+      sawNonWs = true;
+      i++;
+      continue;
+    }
     if (ch === ")") {
       depth--;
       if (depth === 0) return sawNonWs ? commas + 1 : 0;
       i++;
       continue;
     }
-    if (ch === "<") { angleDepth++; sawNonWs = true; i++; continue; }
-    if (ch === ">" && angleDepth > 0) { angleDepth--; i++; continue; }
-    if (ch === "," && depth === 1 && angleDepth === 0) { commas++; sawNonWs = true; i++; continue; }
+    if (ch === "<") {
+      angleDepth++;
+      sawNonWs = true;
+      i++;
+      continue;
+    }
+    if (ch === ">" && angleDepth > 0) {
+      angleDepth--;
+      i++;
+      continue;
+    }
+    if (ch === "," && depth === 1 && angleDepth === 0) {
+      commas++;
+      sawNonWs = true;
+      i++;
+      continue;
+    }
     if (!/\s/.test(ch)) sawNonWs = true;
     i++;
   }
@@ -877,7 +922,11 @@ export function resolveJavaPass2CallTarget(params: {
     const staticMethods = classMethodsByName.get(staticClassName);
     const staticCandidates = staticMethods?.get(identifier);
     if (staticCandidates && staticCandidates.length >= 1) {
-      const arityFiltered = filterByArity(staticCandidates, callArity, paramCountBySymbolId);
+      const arityFiltered = filterByArity(
+        staticCandidates,
+        callArity,
+        paramCountBySymbolId,
+      );
       if (arityFiltered.length === 1) {
         return {
           symbolId: arityFiltered[0],
@@ -934,14 +983,20 @@ export function resolveJavaPass2CallTarget(params: {
           const methods = classMethodsByName.get(className);
           const candidates = methods?.get(member);
           if (candidates && candidates.length >= 1) {
-            const arityFiltered = filterByArity(candidates, callArity, paramCountBySymbolId);
+            const arityFiltered = filterByArity(
+              candidates,
+              callArity,
+              paramCountBySymbolId,
+            );
             if (arityFiltered.length === 1) {
-              const strategy = depth === 0 ? "receiver-this" : "inheritance-method";
+              const strategy =
+                depth === 0 ? "receiver-this" : "inheritance-method";
               return {
                 symbolId: arityFiltered[0],
                 isResolved: true,
                 confidence: confidenceFor(strategy),
-                resolution: depth === 0 ? "receiver-this" : "inheritance-method",
+                resolution:
+                  depth === 0 ? "receiver-this" : "inheritance-method",
               };
             }
             if (arityFiltered.length > 1 && telemetry && resolverId) {
@@ -956,8 +1011,15 @@ export function resolveJavaPass2CallTarget(params: {
 
     const samePackageClassMethods = classMethodsByName.get(prefix);
     const samePackageMethodCandidates = samePackageClassMethods?.get(member);
-    if (samePackageMethodCandidates && samePackageMethodCandidates.length >= 1) {
-      const arityFiltered = filterByArity(samePackageMethodCandidates, callArity, paramCountBySymbolId);
+    if (
+      samePackageMethodCandidates &&
+      samePackageMethodCandidates.length >= 1
+    ) {
+      const arityFiltered = filterByArity(
+        samePackageMethodCandidates,
+        callArity,
+        paramCountBySymbolId,
+      );
       if (arityFiltered.length === 1) {
         return {
           symbolId: arityFiltered[0],
@@ -974,7 +1036,11 @@ export function resolveJavaPass2CallTarget(params: {
 
   const samePackageCandidates = samePackageNameToSymbolIds.get(identifier);
   if (samePackageCandidates && samePackageCandidates.length >= 1) {
-    const arityFiltered = filterByArity(samePackageCandidates, callArity, paramCountBySymbolId);
+    const arityFiltered = filterByArity(
+      samePackageCandidates,
+      callArity,
+      paramCountBySymbolId,
+    );
     if (arityFiltered.length === 1) {
       return {
         symbolId: arityFiltered[0],
@@ -1100,19 +1166,12 @@ async function resolveJavaCallEdgesPass2(params: {
   let nodeIdToSymbolId: ReturnType<typeof createNodeIdToSymbolId>;
   let callScope: ReturnType<typeof buildJavaCallScope>;
   try {
-    fileRecord = await ladybugDb.getFileByRepoPath(
-      conn,
-      repoId,
-      fileMeta.path,
-    );
+    fileRecord = await ladybugDb.getFileByRepoPath(conn, repoId, fileMeta.path);
     if (!fileRecord) {
       return 0;
     }
 
-    existingSymbols = await ladybugDb.getSymbolsByFile(
-      conn,
-      fileRecord.fileId,
-    );
+    existingSymbols = await ladybugDb.getSymbolsByFile(conn, fileRecord.fileId);
     if (existingSymbols.length === 0) {
       return 0;
     }
