@@ -46,13 +46,22 @@ SDL-MCP's plugin system allows external code to run within the indexer process. 
 ### Trust Boundaries
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    User["User / System<br/>configures which plugins to load"] -->|"trusted plugin path"| Host["SDL-MCP Host<br/>validates manifests, checks API versions, loads modules"]
-    Host -->|"plugin execution"| Plugin["Plugin Code<br/>runs with host permissions, file/network/process access"]
+    User["User / System<br/>configures which plugins to load"] e1@-->|"trusted plugin path"| Host["SDL-MCP Host<br/>validates manifests, checks API versions, loads modules"]
+    Host e2@-->|"plugin execution"| Plugin["Plugin Code<br/>runs with host permissions, file/network/process access"]
 
-    style Host fill:#e7f5ff,stroke:#1971c2
-    style Plugin fill:#fff3cd,stroke:#d39e00
+    style Host fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43
+    style Plugin fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2 animate;
 ```
 
 ### Execution Permissions
@@ -74,12 +83,21 @@ Plugins execute with the same permissions as the SDL-MCP process:
 Use a dedicated, protected directory for trusted plugins:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
-    Unix["/usr/local/lib/sdl-mcp/plugins/"] --> UnixA["my-lang-plugin/dist/index.js"]
-    Unix --> UnixB["another-plugin/dist/index.js"]
-    Win["C:\\Program Files\\sdl-mcp\\plugins\\"] --> WinA["my-lang-plugin\\dist\\index.js"]
-    Win --> WinB["another-plugin\\dist\\index.js"]
+    Unix["/usr/local/lib/sdl-mcp/plugins/"] e1@--> UnixA["my-lang-plugin/dist/index.js"]
+    Unix e2@--> UnixB["another-plugin/dist/index.js"]
+    Win["C:\\Program Files\\sdl-mcp\\plugins\\"] e3@--> WinA["my-lang-plugin\\dist\\index.js"]
+    Win e4@--> WinB["another-plugin\\dist\\index.js"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4 animate;
 ```
 
 ### Configuration Best Practices

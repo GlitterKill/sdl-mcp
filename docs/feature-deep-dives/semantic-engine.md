@@ -24,21 +24,23 @@ This document covers all three in depth, with architecture diagrams, configurati
 ## Overview: The Three Pillars
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     subgraph P1["Pillar 1: Pass-2 Call Resolution"]
         Call["Who calls whom, and how sure are we?"]
         Resolvers["11 language resolvers"]
         Confidence["Confidence-scored edges
 0.0 - 1.0"]
-        Call --> Resolvers --> Confidence
+        Call e1@--> Resolvers
+        Resolvers e2@--> Confidence
     end
 
     subgraph P2["Pillar 2: Embedding Search"]
         Search["Find what you mean, not just what you typed"]
         Embeddings["Local ONNX or API embeddings"]
         Fusion["Hybrid or legacy reranking"]
-        Search --> Embeddings --> Fusion
+        Search e3@--> Embeddings
+        Embeddings e4@--> Fusion
     end
 
     subgraph P3["Pillar 3: Summary Pipeline"]
@@ -46,14 +48,24 @@ flowchart TD
         Stages["Heuristic -> NN transfer -> LLM"]
         Quality["Quality tracked
 0.0 - 1.0"]
-        Summary --> Stages --> Quality
+        Summary e5@--> Stages
+        Stages e6@--> Quality
     end
 
-    Confidence --> Cards["Symbol Cards & Slices"]
-    Fusion --> Cards
-    Quality --> Cards
+    Confidence e7@--> Cards["Symbol Cards & Slices"]
+    Fusion e8@--> Cards
+    Quality e9@--> Cards
 
-    style Cards fill:#d4edda,stroke:#28a745
+    style Cards fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9 animate;
 ```
 
 | Pillar                | Runs When                                                 | Output                             | Default State                                                                 |
@@ -75,20 +87,29 @@ Pass-2 answers this question by tracing import chains, analyzing scope, and reso
 ### Two-Pass Architecture
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
     subgraph Pass1["Pass 1 (per-file, parallelizable)"]
-        Parse["Parse AST"] --> Extract["Extract symbols, imports, raw calls, and types"]
+        Parse["Parse AST"] e1@--> Extract["Extract symbols, imports, raw calls, and types"]
     end
 
     subgraph Pass2["Pass 2 (cross-file, sequential)"]
-        Reextract["Re-extract symbols"] --> Map["Map to indexed symbolIds"]
-        Map --> ImportMap["Build import map"]
-        ImportMap --> Resolve["Resolve raw calls via aliases, re-exports, scopes, namespaces, packages, and fallback rules"]
-        Resolve --> Score["Score confidence and create metadata-rich call edges"]
+        Reextract["Re-extract symbols"] e2@--> Map["Map to indexed symbolIds"]
+        Map e3@--> ImportMap["Build import map"]
+        ImportMap e4@--> Resolve["Resolve raw calls via aliases, re-exports, scopes, namespaces, packages, and fallback rules"]
+        Resolve e5@--> Score["Score confidence and create metadata-rich call edges"]
     end
 
-    Extract -->|"stored raw call names"| Reextract
+    Extract e6@-->|"stored raw call names"| Reextract
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6 animate;
 ```
 
 ### 11 Language Resolvers
@@ -261,17 +282,26 @@ When `semantic.retrieval.mode` is `"hybrid"` and the required database extension
 #### Hybrid Retrieval Pipeline
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Query["User Query: check auth credentials"] --> FTS["1. Full-Text Search
+    Query["User Query: check auth credentials"] e1@--> FTS["1. Full-Text Search
 Ladybug FTS on Symbol.searchText"]
-    Query --> Vector["2. Vector Search
+    Query e2@--> Vector["2. Vector Search
 query embedding per real model"]
-    FTS --> RRF["3. Reciprocal Rank Fusion
+    FTS e3@--> RRF["3. Reciprocal Rank Fusion
 rrfK = 60 by default"]
-    Vector --> RRF
-    RRF --> Result["validateToken rises to the top
+    Vector e4@--> RRF
+    RRF e5@--> Result["validateToken rises to the top
 when multiple sources agree"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5 animate;
 ```
 
 RRF is more robust than alpha-blending because it fuses _rank positions_ rather than raw scores, making it insensitive to score distribution differences between FTS and vector backends.
@@ -281,13 +311,22 @@ RRF is more robust than alpha-blending because it fuses _rank positions_ rather 
 The legacy path is retained as a fallback and can be explicitly selected via `semantic.retrieval.mode: "legacy"`:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Query["User Query: check auth credentials"] --> Lexical["1. Lexical Search<br/>always runs first"]
-    Lexical --> Embed["2. Embed Query + Cosine Similarity<br/>sim(authenticate)=0.87<br/>sim(validateToken)=0.91"]
-    Embed --> Blend["3. Alpha blending (deprecated)<br/>alpha * lexicalScore + (1 - alpha) * semanticScore<br/>60% lexical, 40% semantic by default"]
+    Query["User Query: check auth credentials"] e1@--> Lexical["1. Lexical Search<br/>always runs first"]
+    Lexical e2@--> Embed["2. Embed Query + Cosine Similarity<br/>sim(authenticate)=0.87<br/>sim(validateToken)=0.91"]
+    Embed e3@--> Blend["3. Alpha blending (deprecated)<br/>alpha * lexicalScore + (1 - alpha) * semanticScore<br/>60% lexical, 40% semantic by default"]
 
-    style Blend fill:#fff3cd,stroke:#d39e00
+    style Blend fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3 animate;
 ```
 
 > **Legacy mode note**: `semantic.retrieval.mode: "legacy"` still preserves the compatibility rerank path, but current tuning guidance belongs under `semantic.retrieval.*` rather than deprecated alpha controls.
@@ -324,11 +363,19 @@ If a fallback occurred, `mode` is `"legacy"` and `fallbackReason` explains why (
 SDL-MCP currently ships with two supported embedding models, each suited to different workflows:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
-    Jina["jina-embeddings-v2-base-code<br/>768 dims, 8192 max tokens<br/>~110 MB, bundled<br/>Optimized for code"] --> Shared["Natural-language symbol text<br/>benefits from summaries"]
-    Nomic["nomic-embed-text-v1.5<br/>768 dims, 8192 max tokens<br/>~138 MB download<br/>Best for NL queries + summaries"] --> Shared
+    Jina["jina-embeddings-v2-base-code<br/>768 dims, 8192 max tokens<br/>~110 MB, bundled<br/>Optimized for code"] e1@--> Shared["Natural-language symbol text<br/>benefits from summaries"]
+    Nomic["nomic-embed-text-v1.5<br/>768 dims, 8192 max tokens<br/>~138 MB download<br/>Best for NL queries + summaries"] e2@--> Shared
 
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2 animate;
 ```
 
 **Which should you choose?**
@@ -407,23 +454,32 @@ Embedding payloads now include **outgoing dependency edges** — the imports and
 - A function's meaning is better captured by what it _uses_ than what _uses it_
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
     subgraph "Included (Outgoing)"
-        A[parseConfig] --> B[yaml.parse]
-        A --> C[zod.validate]
-        A --> D[ConfigSchema]
+        A[parseConfig] e1@--> B[yaml.parse]
+        A e2@--> C[zod.validate]
+        A e3@--> D[ConfigSchema]
     end
 
     subgraph "Excluded (Incoming)"
-        E[loadSettings] -.-> A
-        F[initApp] -.-> A
-        G[testHelper] -.-> A
+        E[loadSettings] e4@-.-> A
+        F[initApp] e5@-.-> A
+        G[testHelper] e6@-.-> A
     end
 
     style E stroke-dasharray: 5 5
     style F stroke-dasharray: 5 5
     style G stroke-dasharray: 5 5
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6 animate;
 ```
 
 #### Summary Freshness
@@ -454,11 +510,20 @@ This batching reduces ONNX inference overhead and speeds up re-indexing of large
 Embeddings are stored as **inline properties on Symbol nodes** in LadybugDB. Each model gets its own set of properties:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Symbol["Symbol node"] --> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
-    Symbol --> Nomic["embeddingNomic<br/>embeddingNomicCardHash<br/>embeddingNomicUpdatedAt"]
-    Symbol --> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
+    Symbol["Symbol node"] e1@--> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
+    Symbol e2@--> Nomic["embeddingNomic<br/>embeddingNomicCardHash<br/>embeddingNomicUpdatedAt"]
+    Symbol e3@--> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3 animate;
 ```
 
 Vectors are compressed for storage: `Float32 -> multiply by 10,000 -> round to Int16 -> base64 encode` (~50% savings vs raw float32, negligible precision loss for cosine similarity).
@@ -472,14 +537,23 @@ Each embedding is tagged with a `cardHash` (SHA-256 of the symbol data + text fo
 Hybrid retrieval uses native Ladybug vector indexes for fast approximate nearest-neighbor search at query time:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     subgraph Indexes["Native Ladybug Vector Indexes"]
         JinaIndex["symbol_vec_jina_code_v2<br/>Property: Symbol.embeddingJinaCode<br/>Dimensions: 768"]
         NomicIndex["symbol_vec_nomic_embed_v15<br/>Property: Symbol.embeddingNomic<br/>Dimensions: 768"]
     end
 
-    Config["semantic.retrieval.vector<br/>vector.enabled = true<br/>vector.topK = 75<br/>vector.efs = 200"] --> Indexes
+    Config["semantic.retrieval.vector<br/>vector.enabled = true<br/>vector.topK = 75<br/>vector.efs = 200"] e1@--> Indexes
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1 animate;
 ```
 
 The current recommended configuration surface is `semantic.retrieval.vector`. Retired sidecar ANN configuration is intentionally omitted from current examples.
@@ -503,9 +577,18 @@ This ensures unsaved code always appears in results, just without hybrid retriev
 A symbol summary is a 1-3 sentence plain-English description of what a symbol does:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Symbol["buildGraphSlice<br/>function"] --> Summary["Performs a BFS traversal from entry symbols across the dependency graph, scores nodes by relevance, and returns the top cards within a token budget."]
+    Symbol["buildGraphSlice<br/>function"] e1@--> Summary["Performs a BFS traversal from entry symbols across the dependency graph, scores nodes by relevance, and returns the top cards within a token budget."]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1 animate;
 ```
 
 These summaries serve two purposes:
@@ -553,18 +636,27 @@ Both the TypeScript and Rust indexing engines implement these generators with id
 When `semantic.enabled: true`, the NN (nearest-neighbor) summary transfer module runs after metrics computation and before LLM generation. It uses the existing ONNX embedding model and vector similarity search to propagate documentation from well-documented symbols to undocumented neighbors.
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Candidates["1. Gather candidates<br/>summary missing or quality < 0.5"] --> Embed["2a. Embed symbol text"]
-    Embed --> Search["2b. Search vector index<br/>max 5 neighbors"]
-    Search --> Filter["2c. Filter<br/>same kind, has good summary, similarity >= 0.7"]
-    Filter --> Pick["2d. Pick best neighbor"]
-    Pick --> Decision{"3. Similarity threshold"}
-    Decision -->|">= 0.85"| Direct["Direct transfer<br/>quality 0.6"]
-    Decision -->|"0.70 - 0.85"| Adapted["Adapted transfer<br/>quality 0.5"]
-    Direct --> Validate["4. Validate transferred summary<br/>reject if cosine similarity < 0.5"]
-    Adapted --> Validate
-    Validate --> Store["5. Write summary, quality, and source tracking to DB"]
+    Candidates["1. Gather candidates<br/>summary missing or quality < 0.5"] e1@--> Embed["2a. Embed symbol text"]
+    Embed e2@--> Search["2b. Search vector index<br/>max 5 neighbors"]
+    Search e3@--> Filter["2c. Filter<br/>same kind, has good summary, similarity >= 0.7"]
+    Filter e4@--> Pick["2d. Pick best neighbor"]
+    Pick e5@--> Decision{"3. Similarity threshold"}
+    Decision e6@-->|">= 0.85"| Direct["Direct transfer<br/>quality 0.6"]
+    Decision e7@-->|"0.70 - 0.85"| Adapted["Adapted transfer<br/>quality 0.5"]
+    Direct e8@--> Validate["4. Validate transferred summary<br/>reject if cosine similarity < 0.5"]
+    Adapted e9@--> Validate
+    Validate e10@--> Store["5. Write summary, quality, and source tracking to DB"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10 animate;
 ```
 
 **Adapted transfer example:**
@@ -582,12 +674,21 @@ A well-documented function `validateToken` with summary "Validates JWT signature
 ### LLM Generation Pipeline
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Indexing["Indexing completes<br/>(pass 1 + pass 2)"] --> Gate["Quality gate<br/>skip symbols with summaryQuality >= 0.8"]
-    Gate --> Prompt["Build LLM prompt<br/>system instruction + kind + name + signature + heuristic hint"]
-    Prompt --> Summary["Generate 1-3 sentence summary<br/>max 256 tokens"]
-    Summary --> Cache["Cache in LadybugDB<br/>keyed by name, kind, signature, fingerprint, provider, model"]
+    Indexing["Indexing completes<br/>(pass 1 + pass 2)"] e1@--> Gate["Quality gate<br/>skip symbols with summaryQuality >= 0.8"]
+    Gate e2@--> Prompt["Build LLM prompt<br/>system instruction + kind + name + signature + heuristic hint"]
+    Prompt e3@--> Summary["Generate 1-3 sentence summary<br/>max 256 tokens"]
+    Summary e4@--> Cache["Cache in LadybugDB<br/>keyed by name, kind, signature, fingerprint, provider, model"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4 animate;
 ```
 
 ### Three Summary Providers
@@ -603,12 +704,21 @@ flowchart TD
 Summaries are generated in configurable batches with concurrency control:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Total["500 symbols needing summaries<br/>batchSize = 20<br/>25 total batches"] --> Wave1["Wave 1<br/>B1-B5 in parallel"]
-    Wave1 --> Wave2["Wave 2<br/>B6-B10 after first completions"]
-    Wave2 --> Remaining["Continue until all 25 batches complete"]
-    Remaining --> Time["Approximate time: 3-5 minutes for 500 symbols<br/>Approximate cost: ~$0.50 USD with Claude Haiku"]
+    Total["500 symbols needing summaries<br/>batchSize = 20<br/>25 total batches"] e1@--> Wave1["Wave 1<br/>B1-B5 in parallel"]
+    Wave1 e2@--> Wave2["Wave 2<br/>B6-B10 after first completions"]
+    Wave2 e3@--> Remaining["Continue until all 25 batches complete"]
+    Remaining e4@--> Time["Approximate time: 3-5 minutes for 500 symbols<br/>Approximate cost: ~$0.50 USD with Claude Haiku"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4 animate;
 ```
 
 ### Cache Invalidation
@@ -959,14 +1069,22 @@ sdl.symbol.search({
 The real power emerges when all three pillars reinforce each other:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Pass2["1. Pass-2 resolves
-authenticate() -> validateToken()"] --> Summary["2. LLM summary
+    Pass2["1. Pass-2 resolves<br/>authenticate() -&gt; validateToken()"] e1@--> Summary["2. LLM summary
 Validates JWT signature and checks expiration"]
-    Summary --> Search["3. Agent searches for token validation
+    Summary e2@--> Search["3. Agent searches for token validation
 and semantic ranking surfaces validateToken first"]
-    Search --> Outcome["Agent finds the symbol, understands it from metadata, and traces the auth flow without opening raw source"]
+    Search e3@--> Outcome["Agent finds the symbol, understands it from metadata, and traces the auth flow without opening raw source"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3 animate;
 ```
 
 This is how SDL-MCP achieves 10-50x token savings: the semantic engine provides _understanding_ at the metadata level, so raw code is rarely needed.

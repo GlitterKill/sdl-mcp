@@ -23,7 +23,7 @@ AI coding agents are stateless. Every session starts from scratch — the agent 
 ## Architecture Overview
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
     Store["memory.store"]
     Query["memory.query"]
@@ -33,33 +33,42 @@ flowchart LR
     Files[".sdl-memory/<type>/<id>.md<br/>version-controlled markdown"]
     Refresh["sdl.index.refresh<br/>scanMemoryFiles -> readMemoryFile -> upsertMemory"]
 
-    Store --> Graph
-    Store --> Files
-    Query --> Graph
-    Remove --> Graph
-    Remove --> Files
-    Surface --> Graph
-    Refresh --> Files
-    Refresh --> Graph
+    Store e1@--> Graph
+    Store e2@--> Files
+    Query e3@--> Graph
+    Remove e4@--> Graph
+    Remove e5@--> Files
+    Surface e6@--> Graph
+    Refresh e7@--> Files
+    Refresh e8@--> Graph
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8 animate;
 ```
 ### Dual Storage and Auto-Surfacing Flow
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     subgraph "Write Path"
         Store["sdl.memory.store"]
         Graph["LadybugDB<br/>(Memory node + edges)"]
         File[".sdl-memory/<type>/<id>.md<br/>(YAML frontmatter + markdown)"]
-        Store --> Graph
-        Store --> File
+        Store e1@--> Graph
+        Store e2@--> File
     end
 
     subgraph "Read Path: Explicit Query"
         MQ["sdl.memory.query"]
         MS["sdl.memory.surface"]
-        MQ --> Graph
-        MS --> Graph
+        MQ e3@--> Graph
+        MS e4@--> Graph
     end
 
     subgraph "Read Path: Auto-Surfacing"
@@ -67,10 +76,10 @@ flowchart TD
         Syms["Collect symbolIds<br/>from slice cards"]
         Rank["Rank memories by<br/>confidence x recency x overlap"]
         Embed["Embed top N memories<br/>in slice response"]
-        Slice --> Syms
-        Syms --> Graph
-        Graph --> Rank
-        Rank --> Embed
+        Slice e5@--> Syms
+        Syms e6@--> Graph
+        Graph e7@--> Rank
+        Rank e8@--> Embed
     end
 
     subgraph "Sync Path"
@@ -78,15 +87,24 @@ flowchart TD
         Index["sdl.index.refresh"]
         Scan["scanMemoryFiles()"]
         Upsert["upsertMemory()"]
-        Git --> Index
-        Index --> Scan
-        Scan --> File
-        File --> Upsert
-        Upsert --> Graph
+        Git e9@--> Index
+        Index e10@--> Scan
+        Scan e11@--> File
+        File e12@--> Upsert
+        Upsert e13@--> Graph
     end
 
-    style Graph fill:#d4edda,stroke:#28a745
-    style File fill:#fff3cd,stroke:#ffc107
+    style Graph fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43
+    style File fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13 animate;
 ```
 
 ### Dual Storage
@@ -259,7 +277,7 @@ introduced in v0.7.
 ### Directory Structure
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Root["<repo-root>/.sdl-memory"]
     Decisions["decisions/a1b2c3d4e5f6g7h8.md"]
@@ -271,14 +289,23 @@ flowchart TD
     Performance["performance/<memory>.md"]
     Security["security/<memory>.md"]
 
-    Root --> Decisions
-    Root --> Bugfixes
-    Root --> TaskContext
-    Root --> Patterns
-    Root --> Conventions
-    Root --> Architecture
-    Root --> Performance
-    Root --> Security
+    Root e1@--> Decisions
+    Root e2@--> Bugfixes
+    Root e3@--> TaskContext
+    Root e4@--> Patterns
+    Root e5@--> Conventions
+    Root e6@--> Architecture
+    Root e7@--> Performance
+    Root e8@--> Security
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8 animate;
 ```
 
 ### File Write Semantics

@@ -29,19 +29,28 @@ The CI workflow validates cross-platform behavior through three mechanisms:
 3. **Performance Validation**: Validate performance budgets on both platforms
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 graph TB
-    A[Push to main] --> B[CI Job - Linux]
-    A --> C[CI Job - Windows]
-    B --> D[Sync Memory - Linux]
-    C --> E[Sync Memory - Windows]
-    D --> F[Upload Artifact - Linux]
-    E --> G[Upload Artifact - Windows]
-    F --> H[Sync Validation]
-    G --> H
-    H --> I[Compare Artifacts]
-    I --> J[Validate Consistency]
-    J --> K[Report Results]
+    A[Push to main] e1@--> B[CI Job - Linux]
+    A e2@--> C[CI Job - Windows]
+    B e3@--> D[Sync Memory - Linux]
+    C e4@--> E[Sync Memory - Windows]
+    D e5@--> F[Upload Artifact - Linux]
+    E e6@--> G[Upload Artifact - Windows]
+    F e7@--> H[Sync Validation]
+    G e8@--> H
+    H e9@--> I[Compare Artifacts]
+    I e10@--> J[Validate Consistency]
+    J e11@--> K[Report Results]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11 animate;
 ```
 
 ## Platform-Specific Behaviors

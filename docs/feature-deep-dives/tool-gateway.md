@@ -5,17 +5,23 @@
 The gateway compresses most of the flat SDL-MCP surface into four namespace tools: `sdl.query`, `sdl.code`, `sdl.repo`, and `sdl.agent`. It exists to reduce `tools/list` overhead without changing the underlying handler behavior.
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#dff6e8","primaryBorderColor":"#12715b","primaryTextColor":"#0f172a","secondaryColor":"#e0f2fe","secondaryBorderColor":"#1d4ed8","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#0f766e","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
     Flat["Flat mode<br/>33 tools<br/>2 universal + 31 flat"]
     Shrink["Gateway projection<br/>30 gateway-routable actions"]
     Gateway["Gateway mode<br/>6 tools<br/>2 universal + 4 gateway"]
 
     Flat e1@--> Shrink
-    Shrink --> Gateway
+    Shrink e2@--> Gateway
 
-    classDef animate stroke-dasharray: 8\,4,stroke-dashoffset: 240,animation: dash 18s linear infinite;
-    class e1 animate;
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2 animate;
 ```
 
 ## Current Surface Matrix
@@ -43,23 +49,29 @@ The gateway currently exposes `30` of the `31` flat actions. The missing flat ac
 ## Routing Path
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#eef6ff","primaryBorderColor":"#2563eb","primaryTextColor":"#0f172a","secondaryColor":"#e9fff4","secondaryBorderColor":"#12715b","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#2563eb","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
-    Agent["Agent call"] --> Gateway{"Namespace tool"}
-    Gateway --> Q["sdl.query"]
-    Gateway --> C["sdl.code"]
-    Gateway --> R["sdl.repo"]
-    Gateway --> A["sdl.agent"]
+    Agent["Agent call"] e1@--> Gateway{"Namespace tool"}
+    Gateway e2@--> Q["sdl.query"]
+    Gateway e3@--> C["sdl.code"]
+    Gateway e4@--> R["sdl.repo"]
+    Gateway e5@--> A["sdl.agent"]
 
-    Q e1@--> Normalize["Normalize aliases<br/>camelCase + snake_case"]
-    C --> Normalize
-    R --> Normalize
-    A --> Normalize
-    Normalize --> Strict["Strict per-action schema"]
-    Strict --> Handler["Same handler layer<br/>used by flat tools"]
+    Q e6@--> Normalize["Normalize aliases<br/>camelCase + snake_case"]
+    C e7@--> Normalize
+    R e8@--> Normalize
+    A e9@--> Normalize
+    Normalize e10@--> Strict["Strict per-action schema"]
+    Strict e11@--> Handler["Same handler layer<br/>used by flat tools"]
 
-    classDef animate stroke-dasharray: 8\,4,stroke-dashoffset: 240,animation: dash 18s linear infinite;
-    class e1 animate;
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11 animate;
 ```
 
 The important implementation detail is not the namespace wrapper. It is the preservation of the original validation and handler path after routing. Gateway mode is a registration optimization, not a separate execution engine.

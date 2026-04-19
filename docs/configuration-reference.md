@@ -16,18 +16,24 @@
 </details>
 </div>
 
-SDL-MCP is configured through one JSON file. This page documents the current parsed configuration surface from `src/config/types.ts` and the current example config. Compatibility-only keys are intentionally omitted from the reference and examples.
+SDL-MCP is configured through one JSON file. This page documents the current parsed configuration surface from `src/config/types.ts` and the current example config. Deprecated compatibility-only keys are intentionally omitted from the reference and examples.
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#dff6e8","primaryBorderColor":"#12715b","primaryTextColor":"#0f172a","secondaryColor":"#e0f2fe","secondaryBorderColor":"#1d4ed8","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#0f766e","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
-    File["Config file"] --> Parse["Parse JSON<br/>expand ${VAR}"]
-    Parse e1@--> Validate["Zod validation<br/>fill defaults"]
-    Validate --> Tier["Apply performance tier presets<br/>only to unset fields"]
-    Tier --> Runtime["Resolved runtime state"]
+    File["Config file"] e1@--> Parse["Parse JSON<br/>expand ${VAR}"]
+    Parse e2@--> Validate["Zod validation<br/>fill defaults"]
+    Validate e3@--> Tier["Apply performance tier presets<br/>only to unset fields"]
+    Tier e4@--> Runtime["Resolved runtime state"]
 
-    classDef animate stroke-dasharray: 8\,4,stroke-dashoffset: 240,animation: dash 18s linear infinite;
-    class e1 animate;
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4 animate;
 ```
 
 ## Resolution Order
@@ -42,7 +48,7 @@ Environment-variable expansion supports `${VAR_NAME}` and `${VAR_NAME:-default}`
 
 ## Minimal Config
 
-Only `repos` is required. Everything else falls back to defaults.
+Only `repos` and the `policy` object are required. The `policy` object can be empty because its fields have defaults.
 
 ```json
 {
@@ -51,7 +57,8 @@ Only `repos` is required. Everything else falls back to defaults.
       "repoId": "my-repo",
       "rootPath": "."
     }
-  ]
+  ],
+  "policy": {}
 }
 ```
 
@@ -76,7 +83,7 @@ The smallest high-leverage change is usually `codeMode.exclusive`. Setting it to
 | `repos` | Yes | Repository registration defaults and per-repo overrides |
 | `performanceTier` | No | Hardware-aware concurrency preset selection |
 | `graphDatabase` | No | Ladybug database file location |
-| `policy` | No | Iris Gate and budget enforcement |
+| `policy` | Yes | Iris Gate and budget enforcement |
 | `redaction` | No | Secret masking in code responses |
 | `indexing` | No | Indexer concurrency, watcher, and engine settings |
 | `liveIndex` | No | Draft-buffer overlay behavior |

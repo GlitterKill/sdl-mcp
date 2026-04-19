@@ -4,21 +4,22 @@
 
 ---
 
-SDL-MCP's semantic system has three layers — **embedding models**, **LLM summary generation**, and **pass-2 call resolution** — each with its own dependencies and setup. This guide covers installation, configuration, and verification for every tier and provider.
+SDL-MCP's semantic system has three layers ï¿½ **embedding models**, **LLM summary generation**, and **pass-2 call resolution** ï¿½ each with its own dependencies and setup. This guide covers installation, configuration, and verification for every tier and provider.
 
 ---
 
 ## Architecture Overview
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Text["Symbol Text Construction"] --> Tokenizer["Tokenizer<br/>(tokenizers)"] --> Onnx["ONNX Model<br/>(onnxruntime)"] --> Vector["Embedding Vector"]
+    Text["Symbol Text Construction"] e1@--> Tokenizer["Tokenizer<br/>(tokenizers)"]
+    Tokenizer e2@--> Onnx["ONNX Model<br/>(onnxruntime)"]
+    Onnx e3@--> Vector["Embedding Vector"]
 
     subgraph Models["Embedding Models"]
         Jina["jina-embeddings-v2-base-code<br/>768-dim, ~110 MB, bundled"]
         Nomic["nomic-embed-text-v1.5<br/>768-dim, ~138 MB, downloaded"]
-        Jina["jina-embeddings-v2-base-code<br/>768-dim, ~110 MB, downloaded<br/>code-specialized"]
         Mock["Mock fallback<br/>64-dim, deterministic"]
     end
 
@@ -35,15 +36,24 @@ flowchart TD
     end
 
     subgraph Retrieval["Hybrid Retrieval"]
-        FTS["FTS index"] --> RRF["RRF fusion"]
-        VecIndex["Vector index"] --> RRF
-        RRF --> Results["Ranked results"]
-        Fallback["Legacy alpha blending fallback"] --> Results
+        FTS["FTS index"] e4@--> RRF["RRF fusion"]
+        VecIndex["Vector index"] e5@--> RRF
+        RRF e6@--> Results["Ranked results"]
+        Fallback["Legacy alpha blending fallback"] e7@--> Results
     end
 
-    Models --> Onnx
-    Summary --> Text
-    Providers --> Tier2
+    Models e8@--> Onnx
+    Summary e9@--> Text
+    Providers e10@--> Tier2
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10 animate;
 ```
 
 ## Required vs Optional Dependencies
@@ -52,32 +62,32 @@ flowchart TD
 | :-------------------- | :----------------- | :-------- | :-------- | :----------------------------------- |
 | ONNX Runtime          | `onnxruntime-node` | `^1.24.3` | Optional  | Run embedding model inference (CPU)  |
 | HuggingFace Tokenizer | `tokenizers`       | `^0.13.3` | Optional  | Tokenize text for ONNX models        |
-| Jina Code Model       | bundled            | —         | Included  | 768-dim code-optimized embeddings    |
-| Nomic Model           | downloaded         | —         | Optional  | 768-dim high-quality text embeddings |
-| Jina Code Model       | downloaded         | —         | Optional  | 768-dim code-specialized embeddings  |
-| Anthropic API Key     | —                  | —         | Optional  | LLM summary generation (High tier)   |
-| Ollama Server         | —                  | —         | Optional  | Local LLM summary generation         |
+| Jina Code Model       | bundled            | ï¿½         | Included  | 768-dim code-optimized embeddings    |
+| Nomic Model           | downloaded         | ï¿½         | Optional  | 768-dim high-quality text embeddings |
+| Jina Code Model       | downloaded         | ï¿½         | Optional  | 768-dim code-specialized embeddings  |
+| Anthropic API Key     | ï¿½                  | ï¿½         | Optional  | LLM summary generation (High tier)   |
+| Ollama Server         | ï¿½                  | ï¿½         | Optional  | Local LLM summary generation         |
 
-**Without the optional dependencies**, SDL-MCP still works — embeddings fall back to a deterministic 64-dim mock. Semantic search will function but with lower quality results.
+**Without the optional dependencies**, SDL-MCP still works ï¿½ embeddings fall back to a deterministic 64-dim mock. Semantic search will function but with lower quality results.
 
 ---
 
 ## Quick Setup by Tier
 
-### Tier 1: Low (Free, Bundled — Default)
+### Tier 1: Low (Free, Bundled ï¿½ Default)
 
 The default configuration. Uses the bundled Jina Code model with symbol text enriched by enhanced per-kind heuristic summaries. No LLM summaries.
 
 Enhanced heuristics are always active, generating pattern-matched summaries for all symbol kinds (class, interface, type, enum, variable, constructor) in addition to the existing typed function/method summaries. When `semantic.enabled: true`, NN summary transfer also runs automatically, propagating documentation from well-documented neighbors to undocumented symbols via embedding similarity.
 
-**Step 1 — Install ONNX dependencies:**
+**Step 1 ï¿½ Install ONNX dependencies:**
 
 ```bash
 cd sdl-mcp
 npm install onnxruntime-node tokenizers
 ```
 
-**Step 2 — Verify the bundled model exists:**
+**Step 2 ï¿½ Verify the bundled model exists:**
 
 ```bash
 npx sdl-mcp doctor
@@ -92,7 +102,7 @@ Semantic embedding models .................. PASS
   model: jina-embeddings-v2-base-code (768d, files present)
 ```
 
-**Step 3 — Config (optional — this is the default):**
+**Step 3 ï¿½ Config (optional ï¿½ this is the default):**
 
 ```jsonc
 // sdl-mcp.config.json
@@ -105,7 +115,7 @@ Semantic embedding models .................. PASS
 }
 ```
 
-**Step 4 — Index your repository:**
+**Step 4 ï¿½ Index your repository:**
 
 ```bash
 npx sdl-mcp index --repo-id my-repo
@@ -134,23 +144,23 @@ Includes graph context (imports/calls made by the symbol) and search terms. See 
 
 ### Tier 2: Medium (Free, Downloaded)
 
-Uses the higher-quality Nomic text embedding model. Better semantic matching thanks to 768 dimensions and an 8,192-token context window (both have 768-dim but Nomic has different training focus). Still fully offline — no LLM API calls needed.
+Uses the higher-quality Nomic text embedding model. Better semantic matching thanks to 768 dimensions and an 8,192-token context window (both have 768-dim but Nomic has different training focus). Still fully offline ï¿½ no LLM API calls needed.
 
-**Step 1 — Install ONNX dependencies (if not already):**
+**Step 1 ï¿½ Install ONNX dependencies (if not already):**
 
 ```bash
 npm install onnxruntime-node tokenizers
 ```
 
-**Step 2 — Download the Nomic model (~138 MB):**
+**Step 2 ï¿½ Download the Nomic model (~138 MB):**
 
-Option A — Pre-download via script:
+Option A ï¿½ Pre-download via script:
 
 ```bash
 node scripts/download-models.mjs nomic-embed-text-v1.5
 ```
 
-Option B — Let SDL-MCP download on first use (automatic):
+Option B ï¿½ Let SDL-MCP download on first use (automatic):
 The model is fetched from HuggingFace on the first embedding call during indexing. No manual step needed, but the first index run will take longer.
 
 **Where files are stored:**
@@ -170,7 +180,7 @@ The model is fetched from HuggingFace on the first embedding call during indexin
 | `tokenizer.json`       | [HuggingFace](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/tokenizer.json)            | ~700 KB |
 | `config.json`          | [HuggingFace](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/config.json)               | ~1 KB   |
 
-**Step 3 — Configure:**
+**Step 3 ï¿½ Configure:**
 
 ```jsonc
 // sdl-mcp.config.json
@@ -183,7 +193,7 @@ The model is fetched from HuggingFace on the first embedding call during indexin
 }
 ```
 
-**Step 4 — Re-index to generate new embeddings:**
+**Step 4 ï¿½ Re-index to generate new embeddings:**
 
 ```bash
 npx sdl-mcp index --repo-id my-repo --mode full
@@ -191,7 +201,7 @@ npx sdl-mcp index --repo-id my-repo --mode full
 
 A full re-index is needed when switching models because the embedding dimensions change (384 ? 768).
 
-**Step 5 — Verify:**
+**Step 5 ï¿½ Verify:**
 
 ```bash
 npx sdl-mcp doctor
@@ -221,25 +231,25 @@ Includes the same graph context as Jina but formatted as English sentences. The 
 
 ---
 
-### Tier 2b: Medium — Code-Specialized (Free, Downloaded)
+### Tier 2b: Medium ï¿½ Code-Specialized (Free, Downloaded)
 
 Uses the **jina-embeddings-v2-base-code** model, which is trained specifically on source code across 30+ programming languages. Same 768 dimensions and 8,192-token context window as Nomic, but optimized for code retrieval rather than general text. Best choice when your primary use case is searching code rather than documentation.
 
-**Step 1 — Install ONNX dependencies (if not already):**
+**Step 1 ï¿½ Install ONNX dependencies (if not already):**
 
 ```bash
 npm install onnxruntime-node tokenizers
 ```
 
-**Step 2 — Download the Jina Code model (~110 MB):**
+**Step 2 ï¿½ Download the Jina Code model (~110 MB):**
 
-Option A — Pre-download via script:
+Option A ï¿½ Pre-download via script:
 
 ```bash
 node scripts/download-models.mjs jina-embeddings-v2-base-code
 ```
 
-Option B — Let SDL-MCP download on first use (automatic):
+Option B ï¿½ Let SDL-MCP download on first use (automatic):
 The model is fetched from HuggingFace on the first embedding call during indexing.
 
 **Where files are stored:**
@@ -259,7 +269,7 @@ The model is fetched from HuggingFace on the first embedding call during indexin
 | `tokenizer.json`       | [HuggingFace](https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/tokenizer.json)            | ~700 KB |
 | `config.json`          | [HuggingFace](https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/config.json)               | ~1 KB   |
 
-**Step 3 — Configure:**
+**Step 3 ï¿½ Configure:**
 
 ```jsonc
 // sdl-mcp.config.json
@@ -272,7 +282,7 @@ The model is fetched from HuggingFace on the first embedding call during indexin
 }
 ```
 
-**Step 4 — Re-index to generate new embeddings:**
+**Step 4 ï¿½ Re-index to generate new embeddings:**
 
 ```bash
 npx sdl-mcp index --repo-id my-repo --mode full
@@ -280,7 +290,7 @@ npx sdl-mcp index --repo-id my-repo --mode full
 
 A full re-index is needed when switching models because the embedding dimensions and model semantics change.
 
-**Step 5 — Verify:**
+**Step 5 ï¿½ Verify:**
 
 ```bash
 npx sdl-mcp doctor
@@ -305,7 +315,7 @@ Semantic embedding models .................. PASS
 
 - Your queries are natural-language descriptions (e.g., "find the authentication handler")
 - Your codebase has rich documentation, comments, and summaries
-- You're using LLM-generated summaries (Tier 3) — Nomic handles natural-language summaries better
+- You're using LLM-generated summaries (Tier 3) ï¿½ Nomic handles natural-language summaries better
 
 > **Note**: Unlike Nomic, the Jina Code model does not use document/query prefixes. Text is embedded as-is.
 
@@ -321,19 +331,19 @@ Choose one of three LLM providers:
 
 #### Option A: Anthropic API (Claude Haiku)
 
-**Step 1 — Get an API key:**
+**Step 1 ï¿½ Get an API key:**
 
 Sign up at [console.anthropic.com](https://console.anthropic.com) and create an API key.
 
-**Step 2 — Set the API key:**
+**Step 2 ï¿½ Set the API key:**
 
-Option A — Environment variable:
+Option A ï¿½ Environment variable:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
-Option B — Config file:
+Option B ï¿½ Config file:
 
 ```jsonc
 {
@@ -343,10 +353,10 @@ Option B — Config file:
 }
 ```
 
-**Step 3 — Configure:**
+**Step 3 ï¿½ Configure:**
 
 ```jsonc
-// sdl-mcp.config.json — use either embedding model; both benefit from summaries
+// sdl-mcp.config.json ï¿½ use either embedding model; both benefit from summaries
 {
   "semantic": {
     "enabled": true,
@@ -363,30 +373,30 @@ Option B — Config file:
 
 > **Tip:** For maximum quality with natural-language queries, pair summaries with `nomic-embed-text-v1.5`. For code-centric queries, the default `jina-embeddings-v2-base-code` is very effective.
 
-**Step 4 — Index (summaries generated during finalization):**
+**Step 4 ï¿½ Index (summaries generated during finalization):**
 
 ```bash
 npx sdl-mcp index --repo-id my-repo
 ```
 
-**Cost estimate:** ~$2 per 1M tokens. A typical symbol summary uses ~50-100 input tokens and ~30-50 output tokens. For a 1,000-symbol repository: roughly $0.15–$0.30.
+**Cost estimate:** ~$2 per 1M tokens. A typical symbol summary uses ~50-100 input tokens and ~30-50 output tokens. For a 1,000-symbol repository: roughly $0.15ï¿½$0.30.
 
 **Default model:** `claude-haiku-4-5-20251001`
 
 Other supported models (any Anthropic model works):
 
 - `claude-sonnet-4-20250514` (higher quality, higher cost)
-- `claude-haiku-4-5-20251001` (recommended — best quality/cost ratio)
+- `claude-haiku-4-5-20251001` (recommended ï¿½ best quality/cost ratio)
 
 #### Option B: Ollama (Local, Free)
 
 Run an OpenAI-compatible LLM server locally. No API costs, but requires a machine with enough RAM.
 
-**Step 1 — Install Ollama:**
+**Step 1 ï¿½ Install Ollama:**
 
 Download from [ollama.com](https://ollama.com/download) and install for your platform.
 
-**Step 2 — Pull a model:**
+**Step 2 ï¿½ Pull a model:**
 
 ```bash
 ollama pull llama3.2:3b       # Lightweight (~2GB RAM)
@@ -396,7 +406,7 @@ ollama pull qwen2.5-coder:7b  # Better for code (~5GB RAM)
 ollama pull gpt-4o-mini       # If available via compatible API
 ```
 
-**Step 3 — Start the server (if not auto-started):**
+**Step 3 ï¿½ Start the server (if not auto-started):**
 
 ```bash
 ollama serve
@@ -404,7 +414,7 @@ ollama serve
 
 Ollama runs an OpenAI-compatible API at `http://localhost:11434/v1` by default.
 
-**Step 4 — Configure:**
+**Step 4 ï¿½ Configure:**
 
 ```jsonc
 // sdl-mcp.config.json
@@ -425,7 +435,7 @@ Ollama runs an OpenAI-compatible API at `http://localhost:11434/v1` by default.
 
 > Lower `summaryMaxConcurrency` (2-3) and `summaryBatchSize` (10) for local models to avoid overwhelming a single GPU/CPU.
 
-**Step 5 — Index:**
+**Step 5 ï¿½ Index:**
 
 ```bash
 npx sdl-mcp index --repo-id my-repo
@@ -433,7 +443,7 @@ npx sdl-mcp index --repo-id my-repo
 
 #### Option C: Any OpenAI-Compatible API
 
-Any server implementing the `/v1/chat/completions` endpoint works — LM Studio, vLLM, text-generation-inference, etc.
+Any server implementing the `/v1/chat/completions` endpoint works ï¿½ LM Studio, vLLM, text-generation-inference, etc.
 
 **Configure:**
 
@@ -470,9 +480,9 @@ The `summaryProvider: "local"` value sends OpenAI-format requests (`POST /chat/c
 
 **Choosing a model:**
 
-- **Jina Code** — Zero setup, bundled, optimized for code. Has 8192-token context so handles long functions well.
-- **Nomic** — Best for natural-language queries ("find the auth handler") and when using LLM summaries. Its 8,192-token window captures longer signatures and documentation.
-- **Jina Code** — Best for code-to-code similarity and multi-language codebases. Trained directly on source code from 30+ languages, so it understands code structure natively without needing natural-language summaries.
+- **Jina Code** ï¿½ Zero setup, bundled, optimized for code. Has 8192-token context so handles long functions well.
+- **Nomic** ï¿½ Best for natural-language queries ("find the auth handler") and when using LLM summaries. Its 8,192-token window captures longer signatures and documentation.
+- **Jina Code** ï¿½ Best for code-to-code similarity and multi-language codebases. Trained directly on source code from 30+ languages, so it understands code structure natively without needing natural-language summaries.
 
 ## Summary Provider Comparison
 
@@ -480,7 +490,7 @@ The `summaryProvider: "local"` value sends OpenAI-format requests (`POST /chat/c
 | :----------------- | :----------- | :-------------------------- | :------------------------------------------- | :------------------------------------- | :------------------- |
 | **Anthropic**      | `"api"`      | `claude-haiku-4-5-20251001` | `https://api.anthropic.com/v1/messages`      | `ANTHROPIC_API_KEY` or `summaryApiKey` | ~$2/1M tokens        |
 | **Ollama / Local** | `"local"`    | `gpt-4o-mini`               | `http://localhost:11434/v1/chat/completions` | Optional (default: `"ollama"`)         | Free (local compute) |
-| **Mock**           | `"mock"`     | —                           | None                                         | None                                   | Free                 |
+| **Mock**           | `"mock"`     | ï¿½                           | None                                         | None                                   | Free                 |
 
 **API format differences:**
 
@@ -498,15 +508,24 @@ The `summaryProvider: "local"` value sends OpenAI-format requests (`POST /chat/c
 When you call `sdl.symbol.search` with `semantic: true` in legacy mode, SDL-MCP uses a compatibility alpha-blended rerank after lexical and embedding search:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Query["Query: validate authentication token"] --> Lexical["Lexical search<br/>BM25-style"]
-    Query --> Semantic["Embedding search<br/>cosine similarity"]
-    Lexical --> LexScore["lexicalScore<br/>0.0 - 1.0"]
-    Semantic --> SemScore["semanticScore<br/>0.0 - 1.0"]
-    LexScore --> Blend["legacy compatibility blend<br/>lexical + embedding rerank"]
-    SemScore --> Blend
-    Blend --> Result["Reranked results"]
+    Query["Query: validate authentication token"] e1@--> Lexical["Lexical search<br/>BM25-style"]
+    Query e2@--> Semantic["Embedding search<br/>cosine similarity"]
+    Lexical e3@--> LexScore["lexicalScore<br/>0.0 - 1.0"]
+    Semantic e4@--> SemScore["semanticScore<br/>0.0 - 1.0"]
+    LexScore e5@--> Blend["legacy compatibility blend<br/>lexical + embedding rerank"]
+    SemScore e6@--> Blend
+    Blend e7@--> Result["Reranked results"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7 animate;
 ```
 
 Hybrid retrieval is the recommended default. The legacy path remains available through `semantic.retrieval.mode: "legacy"`, but the current recommended configuration surface is the hybrid pipeline under `semantic.retrieval.*`.
@@ -549,12 +568,12 @@ Hybrid retrieval replaces the legacy alpha-blending search with native Ladybug F
 
 1. **FTS and vector indexes are created automatically** on DB init when `semantic.enabled: true`. The FTS extension indexes `Symbol.searchText`; vector indexes cover `Symbol.embeddingJinaCode` and `Symbol.embeddingNomic`.
 2. **At query time**, FTS and vector searches run in parallel. Each source produces a ranked candidate list.
-3. **RRF fuses** the rank lists: `score(d) = S 1/(k + rank_i(d))` — symbols ranked highly by multiple sources rise to the top.
+3. **RRF fuses** the rank lists: `score(d) = S 1/(k + rank_i(d))` ï¿½ symbols ranked highly by multiple sources rise to the top.
 4. **If extensions are unavailable** (e.g., `fts` or `vector` not loaded), the system automatically falls back to the legacy alpha-blending path and records the fallback reason in telemetry.
 
 ### Extension Requirements
 
-Hybrid retrieval requires the Ladybug `fts` and `vector` extensions. These are loaded best-effort on DB connection — if they're unavailable, hybrid search falls back to legacy automatically. Run `sdl-mcp doctor` to check extension status:
+Hybrid retrieval requires the Ladybug `fts` and `vector` extensions. These are loaded best-effort on DB connection ï¿½ if they're unavailable, hybrid search falls back to legacy automatically. Run `sdl-mcp doctor` to check extension status:
 
 ```
 Retrieval extensions ...................... PASS
@@ -578,11 +597,20 @@ The current recommended configuration surface is `semantic.retrieval.*`. Retired
 Embeddings are stored as **inline properties on Symbol nodes** in LadybugDB:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Symbol["Symbol node"] --> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
-    Symbol --> Nomic["embeddingNomic<br/>embeddingNomicCardHash<br/>embeddingNomicUpdatedAt"]
-    Symbol --> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
+    Symbol["Symbol node"] e1@--> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
+    Symbol e2@--> Nomic["embeddingNomic<br/>embeddingNomicCardHash<br/>embeddingNomicUpdatedAt"]
+    Symbol e3@--> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3 animate;
 ```
 
 Vectors are compressed using Float16 quantization:
@@ -646,7 +674,7 @@ node scripts/download-models.mjs jina-embeddings-v2-base-code
 
 **Cause:** Network error during HuggingFace download. Possibly behind a proxy or firewall.
 
-**Fix — manual download:**
+**Fix ï¿½ manual download:**
 
 ```bash
 # Download files manually and place in cache directory:
@@ -685,7 +713,7 @@ Or point to a custom cache directory:
 
 **Cause:** `summaryProvider: "api"` configured but no key found.
 
-**Fix — set the key:**
+**Fix ï¿½ set the key:**
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-api03-...
@@ -805,9 +833,9 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
 
 ## Related Documentation
 
-- [Semantic Engine Deep Dive](./semantic-engine.md) — pass-2 resolution, embedding search, and LLM summaries working together
-- [Indexing & Languages](./indexing-languages.md) — two-pass architecture, 12-language support, LLM summary tiers
-- [Configuration Reference](../configuration-reference.md) — complete config schema
-- [CLI Reference](../cli-reference.md) — `sdl-mcp doctor`, `sdl-mcp index` commands
+- [Semantic Engine Deep Dive](./semantic-engine.md) ï¿½ pass-2 resolution, embedding search, and LLM summaries working together
+- [Indexing & Languages](./indexing-languages.md) ï¿½ two-pass architecture, 12-language support, LLM summary tiers
+- [Configuration Reference](../configuration-reference.md) ï¿½ complete config schema
+- [CLI Reference](../cli-reference.md) ï¿½ `sdl-mcp doctor`, `sdl-mcp index` commands
 
 [Back to README](../../README.md)

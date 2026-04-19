@@ -14,15 +14,28 @@ The Iris Gate Ladder eliminates this waste. Named after the adjustable aperture 
 
 ## The Four Rungs
 
+![Iris Gate Ladder infographic](../assets/iris-gate-ladder-infographic.svg)
+
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     R1["Rung 1: Symbol cards<br/>~100 tokens<br/>name, signature, summary, deps, metrics"]
     R2["Rung 2: Skeleton IR<br/>~300 tokens<br/>signatures + control flow, bodies elided"]
     R3["Rung 3: Hot-path excerpt<br/>~600 tokens<br/>lines matching specific identifiers"]
     R4["Rung 4: Raw code window<br/>~2,000 tokens<br/>full source, gated by policy"]
 
-    R1 --> R2 --> R3 --> R4
+    R1 e1@--> R2
+    R2 e2@--> R3
+    R3 e3@--> R4
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3 animate;
 ```
 
 ### Rung 1: Symbol Cards (`sdl.symbol.getCard`)
@@ -83,7 +96,7 @@ The last resort. Full source code access, but with guardrails:
 ## Escalation Flow
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Q["Agent Question"]
     R1["Rung 1: Symbol Card<br/>~100 tokens"]
@@ -92,19 +105,28 @@ flowchart TD
     R4["Rung 4: Raw Code Window<br/>~2,000 tokens"]
     Done["Answer Found"]
 
-    Q --> R1
-    R1 -->|"Answered?"| Done
-    R1 -->|"Need structure"| R2
-    R2 -->|"Answered?"| Done
-    R2 -->|"Need specific lines"| R3
-    R3 -->|"Answered?"| Done
-    R3 -->|"Need full code"| R4
-    R4 -->|"Policy gate:<br/>reason + identifiers<br/>+ line/token limits"| Done
+    Q e1@--> R1
+    R1 e2@-->|"Answered?"| Done
+    R1 e3@-->|"Need structure"| R2
+    R2 e4@-->|"Answered?"| Done
+    R2 e5@-->|"Need specific lines"| R3
+    R3 e6@-->|"Answered?"| Done
+    R3 e7@-->|"Need full code"| R4
+    R4 e8@-->|"Policy gate:<br/>reason + identifiers<br/>+ line/token limits"| Done
 
-    style R1 fill:#d4edda,stroke:#28a745
-    style R2 fill:#fff3cd,stroke:#ffc107
-    style R3 fill:#ffeaa7,stroke:#fdcb6e
-    style R4 fill:#f8d7da,stroke:#dc3545
+    style R1 fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43
+    style R2 fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43
+    style R3 fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43
+    style R4 fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8 animate;
 ```
 
 ---
@@ -113,6 +135,6 @@ flowchart TD
 
 - [`sdl.symbol.search`](../mcp-tools-detailed.md#sdlsymbolsearch) - Find symbols to get cards for
 - [`sdl.slice.build`](../mcp-tools-detailed.md#sdlslicebuild) - Get cards for an entire task context at once
-- [](../mcp-tools-detailed.md#sdlcontextsummary) - Generate a portable context briefing
+- [`sdl.context`](../mcp-tools-detailed.md#sdlcontext) - Let Code Mode choose the cheapest useful rung path
 
 [Back to README](../../README.md)

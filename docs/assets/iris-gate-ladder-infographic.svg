@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Iris Gate Ladder infographic</title>
+  <desc id="desc">A four-step context ladder showing symbol cards, skeleton IR, hot-path excerpts, and raw code windows with increasing token cost and policy friction.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B1220"/>
+      <stop offset="52%" stop-color="#102A43"/>
+      <stop offset="100%" stop-color="#0F1B2D"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0F766E"/>
+      <stop offset="52%" stop-color="#2563EB"/>
+      <stop offset="100%" stop-color="#7C3AED"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-25%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#14B8A6"/>
+    </marker>
+    <style>
+      .title { font: 800 56px Inter, Segoe UI, Arial, sans-serif; fill: #F8FAFC; letter-spacing: 0; }
+      .subtitle { font: 500 24px Inter, Segoe UI, Arial, sans-serif; fill: #BFD7EA; letter-spacing: 0; }
+      .label { font: 800 22px Inter, Segoe UI, Arial, sans-serif; fill: #102A43; letter-spacing: 0; }
+      .body { font: 500 18px Inter, Segoe UI, Arial, sans-serif; fill: #102A43; letter-spacing: 0; }
+      .small { font: 700 16px Inter, Segoe UI, Arial, sans-serif; fill: #102A43; letter-spacing: 0; }
+      .cost { font: 900 30px Inter, Segoe UI, Arial, sans-serif; fill: #102A43; letter-spacing: 0; }
+      .dark-label { font: 800 18px Inter, Segoe UI, Arial, sans-serif; fill: #F8FAFC; letter-spacing: 0; }
+      .dark-body { font: 500 15px Inter, Segoe UI, Arial, sans-serif; fill: #D9EAF7; letter-spacing: 0; }
+      .arrow { fill: none; stroke: #14B8A6; stroke-width: 8; stroke-linecap: round; marker-end: url(#arrow); stroke-dasharray: 22 16; animation: dash 2.8s linear infinite; }
+      .pulse { animation: pulse 3s ease-in-out infinite; transform-origin: center; }
+      @keyframes dash { to { stroke-dashoffset: -152; } }
+      @keyframes pulse { 0%, 100% { opacity: 0.82; transform: scale(1); } 50% { opacity: 1; transform: scale(1.025); } }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" rx="0" fill="url(#bg)"/>
+  <circle cx="1360" cy="120" r="180" fill="#2563EB" opacity="0.16"/>
+  <circle cx="180" cy="760" r="220" fill="#0F766E" opacity="0.14"/>
+  <circle cx="780" cy="460" r="210" fill="none" stroke="url(#ring)" stroke-width="26" opacity="0.85"/>
+  <circle cx="780" cy="460" r="138" fill="#0B1220" stroke="#BFD7EA" stroke-width="2" opacity="0.94"/>
+  <path class="pulse" d="M780 300 L835 405 L950 385 L866 467 L914 575 L780 520 L646 575 L694 467 L610 385 L725 405 Z" fill="url(#ring)" opacity="0.32"/>
+  <text x="780" y="446" text-anchor="middle" class="dark-label">IRIS GATE</text>
+  <text x="780" y="476" text-anchor="middle" class="dark-body">open only as far</text>
+  <text x="780" y="498" text-anchor="middle" class="dark-body">as the task proves</text>
+
+  <text x="92" y="102" class="title">Iris Gate Ladder</text>
+  <text x="96" y="145" class="subtitle">Progressive code context: cheaper evidence first, gated source only when justified.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="90" y="245" width="300" height="220" rx="22" fill="#E7F8F2" stroke="#0F766E" stroke-width="4"/>
+    <text x="124" y="292" class="label">1. Symbol cards</text>
+    <text x="124" y="342" class="cost">~100 tokens</text>
+    <text x="124" y="386" class="body">Signature, summary, deps,</text>
+    <text x="124" y="414" class="body">metrics, ETag.</text>
+    <rect x="124" y="438" width="172" height="30" rx="15" fill="#0F766E"/>
+    <text x="210" y="459" text-anchor="middle" class="dark-label">default first look</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="470" y="245" width="300" height="220" rx="22" fill="#E8F1FF" stroke="#2563EB" stroke-width="4"/>
+    <text x="504" y="292" class="label">2. Skeleton IR</text>
+    <text x="504" y="342" class="cost">~300 tokens</text>
+    <text x="504" y="386" class="body">Signatures plus control</text>
+    <text x="504" y="414" class="body">flow with bodies elided.</text>
+    <rect x="504" y="438" width="156" height="30" rx="15" fill="#2563EB"/>
+    <text x="582" y="459" text-anchor="middle" class="dark-label">shape of code</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="850" y="245" width="300" height="220" rx="22" fill="#FFF4D6" stroke="#B45309" stroke-width="4"/>
+    <text x="884" y="292" class="label">3. Hot path</text>
+    <text x="884" y="342" class="cost">~600 tokens</text>
+    <text x="884" y="386" class="body">Identifier-matched lines</text>
+    <text x="884" y="414" class="body">with nearby context.</text>
+    <rect x="884" y="438" width="178" height="30" rx="15" fill="#B45309"/>
+    <text x="973" y="459" text-anchor="middle" class="dark-label">surgical excerpt</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1230" y="245" width="300" height="220" rx="22" fill="#FFE8EF" stroke="#BE123C" stroke-width="4"/>
+    <text x="1264" y="292" class="label">4. Raw window</text>
+    <text x="1264" y="342" class="cost">~2,000 tokens</text>
+    <text x="1264" y="386" class="body">Full source, policy-gated</text>
+    <text x="1264" y="414" class="body">and audit logged.</text>
+    <rect x="1264" y="438" width="170" height="30" rx="15" fill="#BE123C"/>
+    <text x="1349" y="459" text-anchor="middle" class="dark-label">last resort</text>
+  </g>
+
+  <path class="arrow" d="M392 355 C420 340 442 340 468 355"/>
+  <path class="arrow" d="M772 355 C800 340 822 340 848 355"/>
+  <path class="arrow" d="M1152 355 C1180 340 1202 340 1228 355"/>
+
+  <g filter="url(#shadow)">
+    <rect x="215" y="585" width="1170" height="150" rx="28" fill="#F8FAFC" opacity="0.96" stroke="#BFD7EA" stroke-width="2"/>
+    <text x="250" y="635" class="label">Decision rule</text>
+    <text x="250" y="676" class="body">Escalate only when the current rung cannot answer the task. Each step trades more tokens for more code fidelity.</text>
+    <text x="250" y="708" class="body">`sdl.context` and `slice.build` automate this path; `needWindow` remains proof-of-need gated.</text>
+    <rect x="1068" y="621" width="270" height="72" rx="20" fill="#102A43"/>
+    <text x="1203" y="651" text-anchor="middle" class="dark-label">Typical savings</text>
+    <text x="1203" y="681" text-anchor="middle" class="dark-label">10x to 50x</text>
+  </g>
+</svg>

@@ -49,108 +49,39 @@ Compiled runtimes use a compile-then-execute workflow: SDL-MCP compiles the sour
 ## Sandboxed Execution Flow
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
-flowchart TD
-    Req["sdl.runtime.execute request"]
-    G1{"runtime.enabled?"}
-    G2{"Runtime in<br/>allowedRuntimes?"}
-    G3{"Executable<br/>valid?"}
-    G4{"CWD within<br/>repo root?"}
-    Scrub["Scrub environment<br/>(PATH + allowlist only)"]
-    Spawn["Spawn subprocess<br/>with timeout + output caps"]
-    Run["Process executes"]
-    Timeout{"Timeout<br/>exceeded?"}
-    Kill["Hard kill"]
-    Collect["Collect stdout/stderr"]
-    Trunc["Truncate + summarize<br/>output"]
-    Resp["Return structured response"]
-    Deny["DENY:<br/>policy violation"]
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
+flowchart LR
+    Agent["Agent"]
+    Execute["sdl.runtime.execute<br/>outputMode: minimal"]
+    Store[("Artifact store<br/>gzip stdout/stderr")]
+    Status["status + exitCode<br/>artifactHandle"]
+    Decision{"exitCode = 0?"}
+    Query["sdl.runtime.queryOutput<br/>artifactHandle + terms"]
+    Excerpts["targeted excerpts"]
 
-    Req --> G1
-    G1 -->|No| Deny
-    G1 -->|Yes| G2
-    G2 -->|No| Deny
-    G2 -->|Yes| G3
-    G3 -->|Invalid| Deny
-    G3 -->|Valid| G4
-    G4 -->|Outside repo| Deny
-    G4 -->|Inside repo| Scrub
-    Scrub --> Spawn
-    Spawn --> Run
-    Run --> Timeout
-    Timeout -->|Yes| Kill
-    Timeout -->|No| Collect
-    Kill --> Collect
-    Collect --> Trunc
-    Trunc --> Resp
+    Agent e1@--> Execute
+    Execute e2@--> Store
+    Execute e3@--> Status
+    Status e4@--> Decision
+    Decision e5@-->|yes| Agent
+    Decision e6@-->|inspect output| Query
+    Query e7@--> Store
+    Query e8@--> Excerpts
+    Excerpts e9@--> Agent
 
-    style Deny fill:#f8d7da,stroke:#dc3545
-    style Resp fill:#d4edda,stroke:#28a745
-```
-
-## Security Model
-
-Every runtime request passes through SDL-MCP governance:
-
-1. feature gate: `runtime.enabled`
-2. allowed runtime check
-3. executable compatibility validation
-4. repo-scoped cwd enforcement
-5. env scrubbing
-6. timeout and output caps
-7. concurrency limits
-
-This keeps command execution consistent with SDL policy rather than depending on client-native shell permissions.
-
----
-
-## Output Modes
-
-`sdl.runtime.execute` supports three output modes via the `outputMode` parameter, controlling how much output is returned in the response:
-
-| Mode | Default | Tokens | What you get |
-|:-----|:--------|:-------|:-------------|
-| `"minimal"` | **Yes** | ~50 | `{status, exitCode, signal, durationMs, outputLines, outputBytes, artifactHandle}` — no stdout/stderr content |
-| `"summary"` | No | ~200-500 | Head + tail output excerpts (legacy default behavior) |
-| `"intent"` | No | Variable | Only `queryTerms`-matched excerpts — no head/tail summary |
-
-### Choosing a mode
-
-- **`minimal`** is the new default. Use it when you only need to know whether a command succeeded. Follow up with `sdl.runtime.queryOutput` to search the persisted artifact on demand.
-- **`summary`** restores the legacy behavior where head + tail excerpts are returned inline. Useful for short commands where you always want to see the output.
-- **`intent`** is ideal when you provide `queryTerms` and only care about matching lines. No head/tail summary is included — only matched excerpts.
-
-### Per-line truncation
-
-All modes now enforce a 500-character per-line cap. Lines exceeding this limit are truncated with a `[truncated]` suffix. This prevents a single long line (e.g., minified JSON) from consuming the entire response budget.
-
----
-
-## Two-Phase Pattern: Minimal Execute + Query
-
-The recommended workflow for most runtime tasks is a two-phase approach:
-
-1. **Execute with `outputMode: "minimal"`** — run the command and get back a lightweight status response with an `artifactHandle`.
-2. **Query with `sdl.runtime.queryOutput`** — search the persisted output artifact for specific terms, retrieving only relevant excerpts.
-
-This pattern minimizes tokens in the common case (command succeeded, move on) while still providing full output access when needed.
-
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
-sequenceDiagram
-    participant Agent
-    participant SDL as sdl.runtime.execute
-    participant Store as Artifact Store
-    participant Query as sdl.runtime.queryOutput
-
-    Agent->>SDL: execute(outputMode: "minimal")
-    SDL->>Store: persist stdout/stderr (gzip)
-    SDL-->>Agent: {status, exitCode, artifactHandle}
-    Note over Agent: Check exitCode — done if 0
-
-    Agent->>Query: queryOutput(artifactHandle, queryTerms)
-    Query->>Store: search persisted artifact
-    Query-->>Agent: {excerpts: [...]}
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class Agent source;
+    class Execute,Query process;
+    class Store storage;
+    class Decision decision;
+    class Status,Excerpts output;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9 animate;
 ```
 
 ### Example: Two-phase test run

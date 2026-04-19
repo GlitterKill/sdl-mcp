@@ -37,54 +37,72 @@ Select explicitly via config:
 Indexing happens in two passes:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
     subgraph Pass1["Pass 1: Local Extraction"]
-        Parse["Parse AST"] --> Symbols["Extract symbols"]
-        Parse --> Imports["Extract imports"]
-        Parse --> Calls["Extract calls"]
-        Parse --> Types["Extract types"]
+        Parse["Parse AST"] e1@--> Symbols["Extract symbols"]
+        Parse e2@--> Imports["Extract imports"]
+        Parse e3@--> Calls["Extract calls"]
+        Parse e4@--> Types["Extract types"]
     end
 
     subgraph Pass2["Pass 2: Global Resolution"]
-        Resolve["Resolve call targets"] --> Example["getUserById -> symbolId abc123<br/>confidence: 0.95<br/>resolver: import-alias-resolver"]
+        Resolve["Resolve call targets"] e5@--> Example["getUserById -> symbolId abc123<br/>confidence: 0.95<br/>resolver: import-alias-resolver"]
     end
 
-    Calls --> Resolve
-    Imports --> Resolve
+    Calls e6@--> Resolve
+    Imports e7@--> Resolve
 
-    style Example fill:#e7f5ff,stroke:#1971c2
+    style Example fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7 animate;
 ```
 
 ### Two-Pass Pipeline Diagram
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
     subgraph "Pass 1: Local Extraction (per-file, parallel)"
-        F1["Source File"] --> Parse["Parse AST<br/>(tree-sitter)"]
-        Parse --> Sym["Symbols"]
-        Parse --> Imp["Imports"]
-        Parse --> Calls["Raw Calls<br/>(names only)"]
-        Parse --> FP["AST Fingerprints"]
-        Parse --> Sig["Signatures"]
+        F1["Source File"] e1@--> Parse["Parse AST<br/>(tree-sitter)"]
+        Parse e2@--> Sym["Symbols"]
+        Parse e3@--> Imp["Imports"]
+        Parse e4@--> Calls["Raw Calls<br/>(names only)"]
+        Parse e5@--> FP["AST Fingerprints"]
+        Parse e6@--> Sig["Signatures"]
     end
 
     subgraph "Pass 2: Global Resolution (cross-file, sequential)"
-        Calls --> Resolve["Resolve call targets<br/>to symbolIds"]
-        Imp --> Resolve
-        Resolve --> Score["Score confidence<br/>(0.0 - 1.0)"]
-        Score --> Edge["Create edges<br/>with metadata"]
+        Calls e7@--> Resolve["Resolve call targets<br/>to symbolIds"]
+        Imp e8@--> Resolve
+        Resolve e9@--> Score["Score confidence<br/>(0.0 - 1.0)"]
+        Score e10@--> Edge["Create edges<br/>with metadata"]
     end
 
     subgraph "Enrichment"
-        Edge --> Cluster["Community Detection<br/>(clusters)"]
-        Edge --> Process["Call-Chain Tracing<br/>(processes)"]
-        Edge --> Summary["LLM Summaries<br/>(optional)"]
+        Edge e11@--> Cluster["Community Detection<br/>(clusters)"]
+        Edge e12@--> Process["Call-Chain Tracing<br/>(processes)"]
+        Edge e13@--> Summary["LLM Summaries<br/>(optional)"]
     end
 
-    style F1 fill:#cce5ff,stroke:#004085
-    style Edge fill:#d4edda,stroke:#28a745
+    style F1 fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43
+    style Edge fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13 animate;
 ```
 
 ### Pass 1: What Gets Extracted

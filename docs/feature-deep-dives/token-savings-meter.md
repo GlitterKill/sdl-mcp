@@ -19,7 +19,7 @@ SDL-MCP's core value proposition is token efficiency — agents get the code int
 ## Architecture
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Handler["Tool handler"]
     Raw["attachRawContext<br/>fileIds or rawTokens<br/>raw-read cost estimate"]
@@ -31,10 +31,23 @@ flowchart TD
     Block["Content block<br/>_tokenUsage appended to tool response"]
     Strip["Strip _rawContext + keep _tokenUsage"]
 
-    Handler --> Raw --> Post --> Usage --> Acc
-    Usage --> Meter
-    Usage --> Summary
-    Usage --> Block --> Strip
+    Handler e1@--> Raw
+    Raw e2@--> Post
+    Post e3@--> Usage
+    Usage e4@--> Acc
+    Usage e5@--> Meter
+    Usage e6@--> Summary
+    Usage e7@--> Block
+    Block e8@--> Strip
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8 animate;
 ```
 
 ## Session Savings Summary
@@ -215,13 +228,23 @@ These summaries are non-critical — formatting failures are silently caught and
 The server declares `logging: {}` in its MCP capabilities, enabling the `notifications/message` method. Up to three notifications are sent per tool call:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     N1["Notification 1<br/>savings meter"]
     N2["Notification 2<br/>tool summary"]
     N3["Notification 3<br/>usage.stats formatted summary"]
 
-    N1 --> N2 --> N3
+    N1 e1@--> N2
+    N2 e2@--> N3
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2 animate;
 ```
 
 All notifications use:
@@ -241,30 +264,39 @@ All notifications use:
 ## Data Flow Diagram
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    H["Tool Handler"] -->|"attachRawContext<br/>(fileIds or rawTokens)"| R["Result with _rawContext"]
+    H["Tool Handler"] e1@-->|"attachRawContext<br/>(fileIds or rawTokens)"| R["Result with _rawContext"]
 
-    R --> C["computeTokenUsage"]
-    C -->|"sdlTokens, rawEquivalent,<br/>savingsPercent, meter"| U["_tokenUsage metadata"]
+    R e2@--> C["computeTokenUsage"]
+    C e3@-->|"sdlTokens, rawEquivalent,<br/>savingsPercent, meter"| U["_tokenUsage metadata"]
 
-    U --> A["tokenAccumulator.recordUsage"]
-    A -->|"per-tool breakdown<br/>running totals"| S["Session Snapshot"]
+    U e4@--> A["tokenAccumulator.recordUsage"]
+    A e5@-->|"per-tool breakdown<br/>running totals"| S["Session Snapshot"]
 
-    U --> N1["MCP Notification<br/>████████░░ 84%"]
-    U --> B["Content Block<br/>📊 1.2k / 65.0k ████████░░ 98%"]
+    U e6@--> N1["MCP Notification<br/>████████░░ 84%"]
+    U e7@--> B["Content Block<br/>📊 1.2k / 65.0k ████████░░ 98%"]
 
-    S -->|"server shutdown<br/>or persist: true"| DB["LadybugDB<br/>UsageSnapshot node"]
+    S e8@-->|"server shutdown<br/>or persist: true"| DB["LadybugDB<br/>UsageSnapshot node"]
 
-    DB --> Q["sdl.usage.stats query"]
-    S --> Q
-    Q --> RS["renderSessionSummary"]
-    RS --> N3["MCP Notification<br/>formatted summary"]
+    DB e9@--> Q["sdl.usage.stats query"]
+    S e10@--> Q
+    Q e11@--> RS["renderSessionSummary"]
+    RS e12@--> N3["MCP Notification<br/>formatted summary"]
 
-    style N1 fill:#d4edda,stroke:#28a745
-    style N3 fill:#d4edda,stroke:#28a745
-    style B fill:#cce5ff,stroke:#004085
-    style DB fill:#fff3cd,stroke:#ffc107
+    style N1 fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43
+    style N3 fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43
+    style B fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43
+    style DB fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12 animate;
 ```
 
 ---

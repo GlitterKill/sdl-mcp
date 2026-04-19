@@ -42,7 +42,7 @@ SDL-MCP is a high-performance codebase indexing and context retrieval server. Th
 SDL-MCP follows a **hexagonal / ports-and-adapters** design. Each module has a clear role and no cross-layer mutations:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Tools["MCP tool layer<br/>tools.ts, server.ts, coord.ts"]
     Indexer["Indexer<br/>write path<br/>pass-1 + pass-2<br/>clusters, processes, summaries"]
@@ -50,12 +50,21 @@ flowchart TD
     Code["Code<br/>read path<br/>skeleton, hot-path, windows, gate/policy"]
     DB["LadybugDB<br/>Symbols, edges, files, repos, versions, embeddings, summaries, memories<br/>FTS + vector indexes"]
 
-    Tools --> Indexer
-    Tools --> Graph
-    Tools --> Code
-    Indexer --> DB
-    Graph --> DB
-    Code --> DB
+    Tools e1@--> Indexer
+    Tools e2@--> Graph
+    Tools e3@--> Code
+    Indexer e4@--> DB
+    Graph e5@--> DB
+    Code e6@--> DB
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6 animate;
 ```
 
 - **Indexer** produces pure domain objects (symbols, edges) — owns all writes
@@ -98,7 +107,7 @@ All MCP tools flow through a single dispatch path in `src/server.ts`. The exact 
 Before strict Zod validation, requests also pass through a shared normalization layer. Flat and gateway calls therefore accept the same canonical camelCase fields plus common aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, and `spillover_handle`.
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Request["Client request"]
     Validate["Zod schema validation"]
@@ -108,9 +117,21 @@ flowchart TD
     Post["Post-process pipeline<br/>compute _tokenUsage<br/>strip _rawContext<br/>logToolCall telemetry"]
     Response["JSON response wrapped in MCP content format"]
 
-    Request --> Validate
-    Validate -->|ok| Limit --> Handler --> Post --> Response
-    Validate -->|error| Error
+    Request e1@--> Validate
+    Validate e2@-->|ok| Limit
+    Limit e4@--> Handler
+    Handler e5@--> Post
+    Post e6@--> Response
+    Validate e3@-->|error| Error
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6 animate;
 ```
 
 **Sideband system:** Handlers can attach `_rawContext` hints (file IDs or raw token counts). The post-processor computes `_tokenUsage` metadata (SDL tokens vs. raw-file equivalent, savings percentage) and strips internal fields before serialization.
@@ -128,13 +149,22 @@ Indexing happens in two passes plus a finalization stage. Triggered by `sdl-mcp 
 Per-file, parallelizable. Each file produces:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Source["Source file<br/>.ts, .py, .go, ..."] --> Engine["Indexer engine<br/>Rust native or Tree-sitter fallback"]
-    Engine --> Symbols["Symbols<br/>name, kind, range, signature"]
-    Engine --> Imports["Imports<br/>module, alias, source"]
-    Engine --> Calls["Calls<br/>raw identifiers"]
-    Engine --> Fingerprints["Fingerprints<br/>SHA-256 of symbol parts"]
+    Source["Source file<br/>.ts, .py, .go, ..."] e1@--> Engine["Indexer engine<br/>Rust native or Tree-sitter fallback"]
+    Engine e2@--> Symbols["Symbols<br/>name, kind, range, signature"]
+    Engine e3@--> Imports["Imports<br/>module, alias, source"]
+    Engine e4@--> Calls["Calls<br/>raw identifiers"]
+    Engine e5@--> Fingerprints["Fingerprints<br/>SHA-256 of symbol parts"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5 animate;
 ```
 
 **Language adapters** (`src/indexer/adapter/`) — 11 adapters covering 12 languages, each extends `BaseAdapter`:
@@ -148,9 +178,20 @@ flowchart TD
 Sequential, cross-file. Resolves raw call identifiers to specific symbol IDs using the pass-2 resolver registry (`src/indexer/pass2/registry.ts`):
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Raw["Raw call edge<br/>getUserById"] --> Registry["Resolver registry<br/>11 language-specific resolvers<br/>selected by file extension"] --> Resolver["Language resolver<br/>import maps, alias chains, barrel re-exports,<br/>package resolution, inheritance"] --> Resolved["Resolved edge<br/>targetSymbolId: abc123<br/>confidence: 0.92<br/>strategy: import-alias"]
+    Raw["Raw call edge<br/>getUserById"] e1@--> Registry["Resolver registry<br/>11 language-specific resolvers<br/>selected by file extension"]
+    Registry e2@--> Resolver["Language resolver<br/>import maps, alias chains, barrel re-exports,<br/>package resolution, inheritance"]
+    Resolver e3@--> Resolved["Resolved edge<br/>targetSymbolId: abc123<br/>confidence: 0.92<br/>strategy: import-alias"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3 animate;
 ```
 
 11 language-specific resolvers are registered, all performing semantic cross-file analysis. Every resolver builds a repo-wide index (namespace, module, package, or directory-scoped), follows import/use/include/source chains to resolve call targets, handles language-specific patterns (generics, traits, templates, extensions, header pairs), and assigns stratified confidence scores (same-file 0.93 → imports 0.9 → same-scope 0.88–0.92 → fallback 0.45–0.78). TS and JS share one resolver implementation; the remaining 10 languages each have a dedicated resolver (700–1,350 lines).
@@ -184,12 +225,21 @@ SDL-MCP uses LadybugDB (Kuzu engine, npm alias `kuzu`) as the sole persistence l
 **Connection pool:**
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Reads["Read pool<br/>round-robin connections<br/>default 4, configurable 1-8"]
-    Limit["ConcurrencyLimiter(1)"] --> Write["Serialized write connection<br/>withWriteConn(async fn)"]
-    Reads --> DB["LadybugDB"]
-    Write --> DB
+    Limit["ConcurrencyLimiter(1)"] e1@--> Write["Serialized write connection<br/>withWriteConn(async fn)"]
+    Reads e2@--> DB["LadybugDB"]
+    Write e3@--> DB
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3 animate;
 ```
 
 Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write serialization prevents graph corruption.
@@ -290,11 +340,20 @@ Each module owns a specific domain of queries:
 The slice builder (`src/graph/slice.ts`) constructs task-scoped context subgraphs bounded by a token budget.
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Entry["Entry symbols<br/>explicit IDs or auto-discovered from taskText"] --> Start["Start-node resolver<br/>explicit IDs, hybrid retrieval, stack traces,<br/>edited files, legacy search"]
-    Start --> Beam["Beam-search engine<br/>weighted BFS<br/>call 1.0, config 0.8, import 0.6<br/>adaptive minConfidence + budget tracking"]
-    Beam --> Serialize["Slice serializer<br/>adaptive detail<br/>in-slice edge filtering<br/>ETag dedup + spillover"]
+    Entry["Entry symbols<br/>explicit IDs or auto-discovered from taskText"] e1@--> Start["Start-node resolver<br/>explicit IDs, hybrid retrieval, stack traces,<br/>edited files, legacy search"]
+    Start e2@--> Beam["Beam-search engine<br/>weighted BFS<br/>call 1.0, config 0.8, import 0.6<br/>adaptive minConfidence + budget tracking"]
+    Beam e3@--> Serialize["Slice serializer<br/>adaptive detail<br/>in-slice edge filtering<br/>ETag dedup + spillover"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3 animate;
 ```
 
 **Card detail levels** — the serializer adapts detail based on remaining budget:
@@ -315,14 +374,25 @@ flowchart TD
 The four-rung escalation ladder controls how much raw code an agent receives:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     R1["Rung 1: Symbol cards<br/>~50-135 tokens per symbol<br/>always available"]
     R2["Rung 2: Skeleton IR<br/>~200 tokens per function<br/>signatures + control flow"]
     R3["Rung 3: Hot-path excerpt<br/>~500 tokens<br/>identifier-matched lines only"]
     R4["Rung 4: Full code window<br/>variable cost<br/>gated by proof-of-need"]
 
-    R1 -->|need more| R2 -->|need more| R3 -->|need more| R4
+    R1 e1@-->|need more| R2
+    R2 e2@-->|need more| R3
+    R3 e3@-->|need more| R4
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3 animate;
 ```
 
 ### Skeleton (`src/code/skeleton.ts`)
@@ -336,16 +406,25 @@ Finds lines matching requested identifiers with configurable context lines befor
 ### Proof-of-Need Gating (`src/code/gate.ts`)
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Req["needWindow request<br/>symbolId + reason + expectedLines + identifiersToFind"]
     Engine["Policy engine<br/>priority 100 hard caps<br/>priority 90 identifiers required<br/>priority 80 budget enforcement<br/>priority 10 break-glass override"]
     Approve["Approve when one or more identifiers match,<br/>or the symbol is already in slice / frontier,<br/>or utility exceeds threshold,<br/>or break-glass is audited"]
     Deny["Denial returns reason, suggested alternative tool,<br/>and nextBestAction guidance"]
 
-    Req --> Engine
-    Engine --> Approve
-    Engine --> Deny
+    Req e1@--> Engine
+    Engine e2@--> Approve
+    Engine e3@--> Deny
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3 animate;
 ```
 
 ---
@@ -359,9 +438,19 @@ flowchart TD
 **Blast radius** (`blastRadius.ts`) ? BFS traversal of reverse dependency edges from changed symbols:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Changed["Changed symbols"] --> Reverse["Reverse-edge BFS<br/>imports + calls + config"] --> Score["Scoring and ranking<br/>0.6 distance + 0.3 fanIn + 0.1 test proximity<br/>fan-in amplifiers flagged across versions"]
+    Changed["Changed symbols"] e1@--> Reverse["Reverse-edge BFS<br/>imports + calls + config"]
+    Reverse e2@--> Score["Scoring and ranking<br/>0.6 distance + 0.3 fanIn + 0.1 test proximity<br/>fan-in amplifiers flagged across versions"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2 animate;
 ```
 
 **PR risk analysis** (`src/mcp/tools/prRisk.ts`) — builds on blast radius to recommend test targets and flag high-risk changes.
@@ -373,9 +462,21 @@ flowchart TD
 The live index system (`src/live-index/`) provides draft-aware code intelligence for unsaved editor buffers.
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Editor["Editor<br/>VSCode, etc."] --> Push["buffer.push<br/>on each keystroke or save"] --> Overlay["Overlay store<br/>content, version, parseResult, dirty flag"] --> Coordinator["Live index coordinator<br/>parse queue, reconcile queue,<br/>checkpoint service, idle monitor"] --> Reads["Merged into reads<br/>search, getCard, slice.build, getSkeleton"]
+    Editor["Editor<br/>VSCode, etc."] e1@--> Push["buffer.push<br/>on each keystroke or save"]
+    Push e2@--> Overlay["Overlay store<br/>content, version, parseResult, dirty flag"]
+    Overlay e3@--> Coordinator["Live index coordinator<br/>parse queue, reconcile queue,<br/>checkpoint service, idle monitor"]
+    Coordinator e4@--> Reads["Merged into reads<br/>search, getCard, slice.build, getSkeleton"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4 animate;
 ```
 
 **Version conflict:** `upsertDraft()` rejects updates where `update.version < existing.version` — prevents out-of-order edits from overwriting newer content.
@@ -393,11 +494,21 @@ Single-session, used by CLI agents (Claude Code, etc.). One MCPServer instance h
 Multi-session, per-session server isolation:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Http["HTTP server<br/>POST /mcp"] --> Sessions["SessionManager<br/>max 8 sessions<br/>reserve, register, idle reaper"] --> Resources["Per-session resources<br/>transport map + MCPServer map"]
-    Http --> Rest["REST endpoints<br/>health, buffer, graph, symbol, UI"]
-    Http --> Events["EventStore<br/>message replay on reconnect<br/>FIFO eviction"]
+    Http["HTTP server<br/>POST /mcp"] e1@--> Sessions["SessionManager<br/>max 8 sessions<br/>reserve, register, idle reaper"]
+    Sessions e4@--> Resources["Per-session resources<br/>transport map + MCPServer map"]
+    Http e2@--> Rest["REST endpoints<br/>health, buffer, graph, symbol, UI"]
+    Http e3@--> Events["EventStore<br/>message replay on reconnect<br/>FIFO eviction"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4 animate;
 ```
 
 Each connected client gets its own `MCPServer` instance, ensuring complete session isolation. The `SessionManager` enforces the 8-session limit and reaps idle connections.
@@ -462,14 +573,25 @@ See [Development Memories deep dive](./feature-deep-dives/development-memories.m
 `sdl.runtime.execute` runs repo-scoped commands under SDL-MCP governance instead of uncontrolled shell access. 16 runtimes are supported (Node, Python, Go, Java, Rust, C, C++, C#, Kotlin, PHP, Ruby, Perl, R, Elixir, Shell, TypeScript).
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Request["runtime.execute request"]
     Validate["runtime enabled?<br/>allowed runtime?<br/>valid executable?"]
     Sandbox["repo-jail cwd<br/>environment scrubbing<br/>timeout enforcement<br/>concurrency limits"]
     Capture["capture stdout/stderr<br/>persist gzip artifact<br/>return artifactHandle"]
 
-    Request --> Validate --> Sandbox --> Capture
+    Request e1@--> Validate
+    Validate e2@--> Sandbox
+    Sandbox e3@--> Capture
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3 animate;
 ```
 
 The `outputMode` parameter controls response verbosity:
@@ -530,91 +652,109 @@ Current command/tool registration notes:
 - Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, or can run exclusive with `sdl.action.search`, `sdl.manual`, `sdl.context`, and `sdl.workflow`
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Src["src/"] --> Entry["main.ts, server.ts"]
-    Src --> CLI["cli/<br/>commands, transport"]
-    Src --> Config["config/<br/>types.ts"]
-    Src --> DB["db/<br/>schema, init, query modules"]
-    Src --> Domain["domain/<br/>types, errors"]
-    Src --> Indexer["indexer/<br/>adapters, pass2, embeddings, watcher"]
-    Src --> Graph["graph/<br/>slice builder"]
-    Src --> Delta["delta/<br/>diff, blastRadius"]
-    Src --> Code["code/<br/>skeleton, hotpath, gate, windows"]
-    Src --> CodeMode["code-mode/<br/>workflow, manual, action catalog, ladder validator"]
-    Src --> Gateway["gateway/<br/>router, thin-schemas, compact-schema"]
-    Src --> Agent["agent/<br/>context engine, planner, evidence"]
-    Src --> Policy["policy/<br/>engine"]
-    Src --> Live["live-index/<br/>overlay store, coordinator, checkpoint, idle monitor"]
-    Src --> Memory["memory/<br/>surface, file-sync"]
-    Src --> Runtime["runtime/<br/>executor, runtimes"]
-    Src --> Services["services/<br/>summary, health, card-builder"]
-    Src --> Sync["sync/<br/>sync, pull"]
-    Src --> Startup["startup/<br/>bootstrap"]
-    Src --> Benchmark["benchmark/<br/>threshold, regression"]
-    Src --> MCP["mcp/<br/>tools, errors, telemetry, token-usage, session-manager, dispatch-limiter"]
-    Src --> Util["util/<br/>paths, concurrency, hashing, tokenizer"]
+    Src["src/"] e1@--> Entry["main.ts, server.ts"]
+    Src e2@--> CLI["cli/<br/>commands, transport"]
+    Src e3@--> Config["config/<br/>types.ts"]
+    Src e4@--> DB["db/<br/>schema, init, query modules"]
+    Src e5@--> Domain["domain/<br/>types, errors"]
+    Src e6@--> Indexer["indexer/<br/>adapters, pass2, embeddings, watcher"]
+    Src e7@--> Graph["graph/<br/>slice builder"]
+    Src e8@--> Delta["delta/<br/>diff, blastRadius"]
+    Src e9@--> Code["code/<br/>skeleton, hotpath, gate, windows"]
+    Src e10@--> CodeMode["code-mode/<br/>workflow, manual, action catalog, ladder validator"]
+    Src e11@--> Gateway["gateway/<br/>router, thin-schemas, compact-schema"]
+    Src e12@--> Agent["agent/<br/>context engine, planner, evidence"]
+    Src e13@--> Policy["policy/<br/>engine"]
+    Src e14@--> Live["live-index/<br/>overlay store, coordinator, checkpoint, idle monitor"]
+    Src e15@--> Memory["memory/<br/>surface, file-sync"]
+    Src e16@--> Runtime["runtime/<br/>executor, runtimes"]
+    Src e17@--> Services["services/<br/>summary, health, card-builder"]
+    Src e18@--> Sync["sync/<br/>sync, pull"]
+    Src e19@--> Startup["startup/<br/>bootstrap"]
+    Src e20@--> Benchmark["benchmark/<br/>threshold, regression"]
+    Src e21@--> MCP["mcp/<br/>tools, errors, telemetry, token-usage, session-manager, dispatch-limiter"]
+    Src e22@--> Util["util/<br/>paths, concurrency, hashing, tokenizer"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13,e14,e15,e16,e17,e18,e19,e20,e21,e22 animate;
 ```
 
 ## Component Diagram
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 graph TD
-    A[Repository Files] --> B[Indexer Engine]
-    B --> |Pass-1: Symbols, Imports, Calls| C[LadybugDB Graph]
+    A[Repository Files] e1@--> B[Indexer Engine]
+    B e2@--> |Pass-1: Symbols, Imports, Calls| C[LadybugDB Graph]
 
-    E[Editor Buffers] --> F[Live Overlay Store]
-    F -.-> |Merged at read time| C
+    E[Editor Buffers] e3@--> F[Live Overlay Store]
+    F e4@-.-> |Merged at read time| C
 
-    C --> G[Pass-2: Call Resolver Registry]
-    G --> |Resolved edges + confidence| C
+    C e5@--> G[Pass-2: Call Resolver Registry]
+    G e6@--> |Resolved edges + confidence| C
 
-    C --> H[Cluster Detection + Process Tracing]
-    H --> C
+    C e7@--> H[Cluster Detection + Process Tracing]
+    H e8@--> C
 
-    C --> I[Embedding Pipeline + LLM Summaries]
-    I --> C
+    C e9@--> I[Embedding Pipeline + LLM Summaries]
+    I e10@--> C
 
-    C --> J[MCP Tool Layer]
+    C e11@--> J[MCP Tool Layer]
 
     subgraph Tool Registration Modes
         J1[Flat Mode: 33 tools]
         J2[Gateway Mode: 6 tools]
         J3[Code Mode adds manual, context, and workflow]
     end
-    J --- J1
-    J --- J2
-    J --- J3
+    J e12@--- J1
+    J e13@--- J2
+    J e14@--- J3
 
-    J --> K[Iris Gate Ladder]
-    K --> |Cards → Skeleton → HotPath → Window| L[AI Agent]
+    J e15@--> K[Iris Gate Ladder]
+    K e16@--> |Cards → Skeleton → HotPath → Window| L[AI Agent]
 
-    J --> M[Graph Slicing]
-    M --> |Beam search + budget| L
+    J e17@--> M[Graph Slicing]
+    M e18@--> |Beam search + budget| L
 
-    J --> N[Delta + Blast Radius]
-    N --> |Changed symbols + impact| L
+    J e19@--> N[Delta + Blast Radius]
+    N e20@--> |Changed symbols + impact| L
 
-    J --> O[Agent Context]
-    O --> |Task-shaped rung planning| L
+    J e21@--> O[Agent Context]
+    O e22@--> |Task-shaped rung planning| L
 
-    J --> U[Runtime Execution]
-    U --> |Sandboxed code execution| L
+    J e23@--> U[Runtime Execution]
+    U e24@--> |Sandboxed code execution| L
 
-    L --> P[Agent Feedback]
-    P --> C
+    L e25@--> P[Agent Feedback]
+    P e26@--> C
 
-    J --> T[Development Memories]
-    T --> |Store/surface memories| C
-    T --> |Auto-surface in slices| L
+    J e27@--> T[Development Memories]
+    T e28@--> |Store/surface memories| C
+    T e29@--> |Auto-surface in slices| L
 
-    J --> V[Usage Stats]
-    V --> |Token savings tracking| L
+    J e30@--> V[Usage Stats]
+    V e31@--> |Token savings tracking| L
 
-    Q[Policy Engine] -.-> |Gates code windows| K
-    R[Session Manager] -.-> |Max 8 sessions| J
-    S[Dispatch Limiter] -.-> |Max 8 concurrent| J
+    Q[Policy Engine] e32@-.-> |Gates code windows| K
+    R[Session Manager] e33@-.-> |Max 8 sessions| J
+    S[Dispatch Limiter] e34@-.-> |Max 8 concurrent| J
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13,e14,e15,e16,e17,e18,e19,e20,e21,e22,e23,e24,e25,e26,e27,e28,e29,e30,e31,e32,e33,e34 animate;
 ```
 
 Registration-mode counts in the current implementation:

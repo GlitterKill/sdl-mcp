@@ -445,26 +445,35 @@ if (
 ## Decision Tree: Pass or Fail?
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Failed["CI failed"] --> OneCategory{"All failures in one category?"}
-    OneCategory -->|Yes| SmallKnown{"Small (<5%) and understood?"}
-    SmallKnown -->|Yes| UpdateThreshold["Consider updating threshold after approval"]
-    SmallKnown -->|No| FixRegression1["Fix the regression"]
-    OneCategory -->|No| MultiFail{"Multiple categories failing?"}
-    MultiFail -->|Yes| FixRegression2["Fix the regressions instead of updating thresholds"]
-    MultiFail -->|No| Intentional{"Intentional improvement elsewhere?"}
-    Intentional -->|Yes| Tradeoff["Document the trade-off and update thresholds after approval"]
-    Intentional -->|No| FixRegression3["Fix the regression"]
-    Tradeoff --> Flaky{"Failure is flaky?"}
-    FixRegression1 --> Flaky
-    FixRegression2 --> Flaky
-    FixRegression3 --> Flaky
-    UpdateThreshold --> Flaky
-    Flaky -->|Yes| Investigate["Investigate flakiness, increase smoothing, fix root cause"]
-    Flaky -->|No| Done["Proceed with the chosen action"]
+    Failed["CI failed"] e1@--> OneCategory{"All failures in one category?"}
+    OneCategory e2@-->|Yes| SmallKnown{"Small (<5%) and understood?"}
+    SmallKnown e3@-->|Yes| UpdateThreshold["Consider updating threshold after approval"]
+    SmallKnown e4@-->|No| FixRegression1["Fix the regression"]
+    OneCategory e5@-->|No| MultiFail{"Multiple categories failing?"}
+    MultiFail e6@-->|Yes| FixRegression2["Fix the regressions instead of updating thresholds"]
+    MultiFail e7@-->|No| Intentional{"Intentional improvement elsewhere?"}
+    Intentional e8@-->|Yes| Tradeoff["Document the trade-off and update thresholds after approval"]
+    Intentional e9@-->|No| FixRegression3["Fix the regression"]
+    Tradeoff e10@--> Flaky{"Failure is flaky?"}
+    FixRegression1 e11@--> Flaky
+    FixRegression2 e12@--> Flaky
+    FixRegression3 e13@--> Flaky
+    UpdateThreshold e14@--> Flaky
+    Flaky e15@-->|Yes| Investigate["Investigate flakiness, increase smoothing, fix root cause"]
+    Flaky e16@-->|No| Done["Proceed with the chosen action"]
 
-    style Investigate fill:#fff3cd,stroke:#d39e00
+    style Investigate fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13,e14,e15,e16 animate;
 ```
 
 ## Getting Help

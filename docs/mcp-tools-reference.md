@@ -20,7 +20,7 @@ Complete reference for the SDL-MCP runtime surfaces exposed by `registerTools`.
 
 - `31` flat SDL action tools (`30` gateway-routable + `1` flat-only)
 - `2` universal tools: `sdl.action.search` and `sdl.info`
-- optional Code Mode-only tools: `sdl.manual`, `sdl.context`, and `sdl.workflow`
+- Code Mode tools: `sdl.action.search`, `sdl.manual`, `sdl.context`, and `sdl.workflow` (`sdl.info` is omitted in Code Mode exclusive)
 
 Flat mode and gateway mode share the same handler layer. The CLI `tool` command exposes a narrower direct-action subset rather than the full MCP surface.
 
@@ -780,11 +780,13 @@ Update policy configuration for a repository. Accepts a partial patch — only s
 
 ---
 
-## Agent Context and Feedback (3 tools)
+## Code Context and Agent Feedback
 
 ### `sdl.context`
 
 Retrieve task-shaped code context with rung path selection and evidence capture. The engine uses semantic-first candidate seeding (with lexical and feedback fallbacks), evidence-aware ranking, and confidence-driven rung planning to select an optimal path through the context ladder (card -> skeleton -> hotPath -> raw).
+
+`sdl.context` is part of the Code Mode surface. In regular flat or gateway mode, use the manual ladder directly or enable Code Mode for task-shaped retrieval.
 
 **Context modes:**
 

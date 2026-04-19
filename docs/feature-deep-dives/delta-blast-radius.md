@@ -20,7 +20,7 @@ A delta pack contains:
 ## Anatomy of a Delta Pack
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Change["Code change<br/>modified validateToken() signature"]
     Sig["signatureDiff<br/>token -> token, options?"]
@@ -33,17 +33,26 @@ flowchart TD
     C4["loginHandler()<br/>distance 2"]
     T1["auth.test.ts<br/>flag for re-run"]
 
-    Change --> Sig
-    Change --> Inv
-    Change --> Fx
-    Sig --> Blast
-    Inv --> Blast
-    Fx --> Blast
-    Blast --> C1
-    Blast --> C2
-    Blast --> C3
-    Blast --> C4
-    Blast --> T1
+    Change e1@--> Sig
+    Change e2@--> Inv
+    Change e3@--> Fx
+    Sig e4@--> Blast
+    Inv e5@--> Blast
+    Fx e6@--> Blast
+    Blast e7@--> C1
+    Blast e8@--> C2
+    Blast e9@--> C3
+    Blast e10@--> C4
+    Blast e11@--> T1
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11 animate;
 ```
 
 ### Blast Radius Ranking
@@ -79,7 +88,7 @@ SDL-MCP tracks how a symbol's fan-in changes across versions. A symbol whose fan
 ## Delta Computation Flow
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Change["Code Change Detected"]
     Diff["Compute Symbol Diffs"]
@@ -91,31 +100,43 @@ flowchart TD
     Rank["Rank Affected Symbols"]
     DP["Delta Pack"]
 
-    Change --> Diff
-    Diff --> Sig
-    Diff --> Inv
-    Diff --> SE
-    Sig --> BR
-    Inv --> BR
-    SE --> BR
-    BR --> Rank
-    FI --> Rank
-    Rank --> DP
+    Change e1@--> Diff
+    Diff e2@--> Sig
+    Diff e3@--> Inv
+    Diff e4@--> SE
+    Sig e5@--> BR
+    Inv e6@--> BR
+    SE e7@--> BR
+    BR e8@--> Rank
+    FI e9@--> Rank
+    Rank e10@--> DP
 
     subgraph "Blast Radius Ranking"
         D1["Distance from change"]
         D2["Fan-in of affected symbol"]
         D3["Test proximity"]
         D4["Process participation"]
-        D1 & D2 & D3 & D4 --> Rank
+        D1 e11@--> Rank
+        D2 e12@--> Rank
+        D3 e13@--> Rank
+        D4 e14@--> Rank
     end
 
     subgraph "Amplifiers"
         FI
     end
 
-    style Change fill:#f8d7da,stroke:#dc3545
-    style DP fill:#d4edda,stroke:#28a745
+    style Change fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43
+    style DP fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13,e14 animate;
 ```
 
 ---

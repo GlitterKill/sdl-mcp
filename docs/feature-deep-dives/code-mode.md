@@ -99,7 +99,7 @@ Bad fits:
 ## Architecture
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Agent["Agent"]
 
@@ -110,29 +110,38 @@ flowchart TD
         WF["sdl.workflow<br/>Multi-step operations"]
     end
 
-    Agent -->|"1. What should I use?"| AS
-    AS -->|"ranked actions + hints"| Agent
-    Agent -->|"2. Show me the narrow API"| MN
-    MN -->|"compact manual"| Agent
-    Agent -->|"3a. Understand code"| CTX
-    Agent -->|"3b. Execute a pipeline"| WF
+    Agent e1@-->|"1. What should I use?"| AS
+    AS e2@-->|"ranked actions + hints"| Agent
+    Agent e3@-->|"2. Show me the narrow API"| MN
+    MN e4@-->|"compact manual"| Agent
+    Agent e5@-->|"3a. Understand code"| CTX
+    Agent e6@-->|"3b. Execute a pipeline"| WF
 
     subgraph "sdl.workflow Example"
         S1["Step 0: symbolSearch"]
         S2["Step 1: runtimeExecute"]
         S3["Step 2: dataTemplate"]
-        S1 -->|"$0"| S2
-        S2 -->|"$1"| S3
+        S1 e7@-->|"$0"| S2
+        S2 e8@-->|"$1"| S3
     end
 
-    WF --> S1
-    CTX -->|"finalEvidence + metrics"| Agent
-    S3 -->|"step results + budget + traces"| Agent
+    WF e9@--> S1
+    CTX e10@-->|"finalEvidence + metrics"| Agent
+    S3 e11@-->|"step results + budget + traces"| Agent
 
-    style AS fill:#cce5ff,stroke:#004085
-    style MN fill:#fff3cd,stroke:#ffc107
-    style CTX fill:#d4edda,stroke:#28a745
-    style WF fill:#f8d7da,stroke:#721c24
+    style AS fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43
+    style MN fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43
+    style CTX fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43
+    style WF fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11 animate;
 ```
 
 ---

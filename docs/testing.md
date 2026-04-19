@@ -45,15 +45,24 @@ SDL-MCP uses a **dist-first** testing strategy to ensure tests validate the ship
 ### Test Layers
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Stress["Stress Tests<br/>Concurrent clients, session limits, large repos"] --> Integration["Integration Tests<br/>Adapter harness, MCP server E2E, CLI dispatch"]
-    Integration --> Golden["Golden File Tests<br/>Fixture validation and deterministic snapshots"]
-    Golden --> Unit["Unit Tests<br/>Extractors, adapters, import resolution"]
-    Unit --> Property["Property Tests<br/>Randomized invariants and schema contracts"]
-    Property --> Runner["Runner: node:test + --experimental-strip-types<br/>CI: ubuntu + windows x Node 24.x"]
+    Stress["Stress Tests<br/>Concurrent clients, session limits, large repos"] e1@--> Integration["Integration Tests<br/>Adapter harness, MCP server E2E, CLI dispatch"]
+    Integration e2@--> Golden["Golden File Tests<br/>Fixture validation and deterministic snapshots"]
+    Golden e3@--> Unit["Unit Tests<br/>Extractors, adapters, import resolution"]
+    Unit e4@--> Property["Property Tests<br/>Randomized invariants and schema contracts"]
+    Property e5@--> Runner["Runner: node:test + --experimental-strip-types<br/>CI: ubuntu + windows x Node 24.x"]
 
-    style Runner fill:#e7f5ff,stroke:#1971c2
+    style Runner fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5 animate;
 ```
 
 ## Running Tests

@@ -66,14 +66,23 @@ sdl-mcp index
 A minimal plugin has the following structure:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Root["my-plugin/"] --> Package["package.json<br/>NPM package metadata"]
-    Root --> TSConfig["tsconfig.json<br/>TypeScript configuration"]
-    Root --> Entry["index.ts<br/>Plugin entry point"]
-    Root --> Readme["README.md<br/>Plugin documentation"]
-    Root --> Dist["dist/"]
-    Dist --> JS["index.js<br/>Compiled output"]
+    Root["my-plugin/"] e1@--> Package["package.json<br/>NPM package metadata"]
+    Root e2@--> TSConfig["tsconfig.json<br/>TypeScript configuration"]
+    Root e3@--> Entry["index.ts<br/>Plugin entry point"]
+    Root e4@--> Readme["README.md<br/>Plugin documentation"]
+    Root e5@--> Dist["dist/"]
+    Dist e6@--> JS["index.js<br/>Compiled output"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6 animate;
 ```
 
 ### Required Exports
@@ -338,14 +347,23 @@ ls dist/
 Your published plugin should include:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Archive["sdl-mcp-my-lang-plugin-1.0.0.tgz"] --> Dist["dist/"]
-    Dist --> JS["index.js"]
-    Dist --> DTS["index.d.ts"]
-    Archive --> Package["package.json"]
-    Archive --> Readme["README.md"]
-    Archive --> License["LICENSE"]
+    Archive["sdl-mcp-my-lang-plugin-1.0.0.tgz"] e1@--> Dist["dist/"]
+    Dist e2@--> JS["index.js"]
+    Dist e3@--> DTS["index.d.ts"]
+    Archive e4@--> Package["package.json"]
+    Archive e5@--> Readme["README.md"]
+    Archive e6@--> License["LICENSE"]
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6 animate;
 ```
 
 ### Files to Include

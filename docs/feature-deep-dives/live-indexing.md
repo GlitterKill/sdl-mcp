@@ -15,22 +15,31 @@ SDL-MCP's live indexing system eliminates this gap. As you type in your editor, 
 ## Architecture
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Editor["Editor (VSCode, etc.)"] -->|"open / change / save / close"| Push["sdl.buffer.push<br/>full buffer content + metadata"]
-    Push --> Overlay["Overlay Store<br/>dirty buffers, parse queue, symbol cache"]
-    Overlay --> Tools["MCP Tool Layer<br/>search, card, slice, skeleton"]
-    Overlay -->|"save / checkpoint"| DB["LadybugDB<br/>(durable)"]
-    DB --> Tools
+    Editor["Editor (VSCode, etc.)"] e1@-->|"open / change / save / close"| Push["sdl.buffer.push<br/>full buffer content + metadata"]
+    Push e2@--> Overlay["Overlay Store<br/>dirty buffers, parse queue, symbol cache"]
+    Overlay e3@--> Tools["MCP Tool Layer<br/>search, card, slice, skeleton"]
+    Overlay e4@-->|"save / checkpoint"| DB["LadybugDB<br/>(durable)"]
+    DB e5@--> Tools
 
-    style Overlay fill:#fff3cd,stroke:#d39e00
+    style Overlay fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43
     style DB fill:#d4edda,stroke:#2b8a3e
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5 animate;
 ```
 
 ### Overlay Merge and Checkpoint Flow
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Editor["Editor (VSCode, etc.)"]
     Push["sdl.buffer.push<br/>(full buffer content)"]
@@ -48,20 +57,29 @@ flowchart TD
     DB["LadybugDB (durable)"]
     Reconcile["Background Reconciler<br/>(cleanup stale drafts)"]
 
-    Editor -->|"buffer events"| Push
-    Push --> Overlay
-    Overlay --> Parse
-    Parse --> Cache
-    Cache --> Merge
-    Query --> Merge
-    Merge --> Result
-    Save --> DB
-    DB --> Reconcile
-    Reconcile --> Overlay
+    Editor e1@-->|"buffer events"| Push
+    Push e2@--> Overlay
+    Overlay e3@--> Parse
+    Parse e4@--> Cache
+    Cache e5@--> Merge
+    Query e6@--> Merge
+    Merge e7@--> Result
+    Save e8@--> DB
+    DB e9@--> Reconcile
+    Reconcile e10@--> Overlay
 
-    style Editor fill:#cce5ff,stroke:#004085
-    style DB fill:#d4edda,stroke:#28a745
-    style Overlay fill:#fff3cd,stroke:#ffc107
+    style Editor fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43
+    style DB fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43
+    style Overlay fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10 animate;
 ```
 
 ### How It Works

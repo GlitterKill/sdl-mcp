@@ -15,7 +15,7 @@ Without governance, AI agents default to reading entire files. This wastes token
 Every request to `sdl.code.needWindow` (raw code, Rung 4) passes through the policy engine before code is returned:
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Req["Agent request<br/>I need to read validateToken()"]
     Policy["Policy engine<br/>identifiers required<br/>line and token caps<br/>identifier match check<br/>slice / frontier boost<br/>utility scoring"]
@@ -26,8 +26,14 @@ flowchart TD
     Policy e2@--> Approve
     Policy e3@--> Deny
 
-    classDef animate stroke-dasharray: 9\,5,stroke-dashoffset: 900,animation: dash 25s linear infinite;
-    class e1,e2,e3 animate
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3 animate;
 ```
 
 ### Configurable Policy Settings
@@ -86,7 +92,7 @@ When a request is denied, the response doesn't just say "no." It provides:
 ## Policy Decision Tree
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#e8fff1","primaryBorderColor":"#157f5b","primaryTextColor":"#102a43","secondaryColor":"#eef6ff","secondaryBorderColor":"#2563eb","tertiaryColor":"#fff4d6","tertiaryBorderColor":"#b45309","lineColor":"#157f5b","fontFamily":"Trebuchet MS, Arial"},"flowchart":{"curve":"basis"}}}%%
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Req["sdl.code.needWindow request"]
     C1{"Identifiers<br/>provided?"}
@@ -99,24 +105,33 @@ flowchart TD
     Approve["APPROVE<br/>Return code + audit log"]
     Deny["DENY<br/>Return guidance +<br/>nextBestAction"]
 
-    Req --> C1
-    C1 -->|No| Deny
-    C1 -->|Yes| C2
-    C2 -->|Exceeds maxWindowLines| Deny
-    C2 -->|OK| C3
-    C3 -->|Exceeds maxWindowTokens| Deny
-    C3 -->|OK| C4
-    C4 -->|Found| Approve
-    C4 -->|Not found| C5
-    C5 -->|In slice/frontier| Approve
-    C5 -->|Not in slice| C6
-    C6 -->|Above threshold| Approve
-    C6 -->|Below threshold| C7
-    C7 -->|Enabled + audit| Approve
-    C7 -->|Disabled| Deny
+    Req e1@--> C1
+    C1 e2@-->|No| Deny
+    C1 e3@-->|Yes| C2
+    C2 e4@-->|Exceeds maxWindowLines| Deny
+    C2 e5@-->|OK| C3
+    C3 e6@-->|Exceeds maxWindowTokens| Deny
+    C3 e7@-->|OK| C4
+    C4 e8@-->|Found| Approve
+    C4 e9@-->|Not found| C5
+    C5 e10@-->|In slice/frontier| Approve
+    C5 e11@-->|Not in slice| C6
+    C6 e12@-->|Above threshold| Approve
+    C6 e13@-->|Below threshold| C7
+    C7 e14@-->|Enabled + audit| Approve
+    C7 e15@-->|Disabled| Deny
 
-    style Approve fill:#d4edda,stroke:#28a745
-    style Deny fill:#f8d7da,stroke:#dc3545
+    style Approve fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43
+    style Deny fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43
+
+    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
+    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
+    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
+    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
+    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
+    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
+    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13,e14,e15 animate;
 ```
 
 ---
@@ -125,7 +140,7 @@ flowchart TD
 
 `sdl.runtime.execute` has its own governance layer:
 
-- **Disabled by default** — must be explicitly enabled in config
+- **Enabled by default** - set `runtime.enabled: false` in hardened deployments that cannot permit subprocess execution
 - **Executable validation** — only allowed executables can run
 - **CWD jailing** — subprocess can't escape the repo root
 - **Environment scrubbing** — only `PATH` and allowlisted vars are passed
