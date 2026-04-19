@@ -217,10 +217,13 @@ export async function indexRepo(
   }
 
   const resultPromise = withIndexingGate(async () => {
-    // Flush WAL before the indexer opens its own transactions. Prevents
-    // LadybugDB 0.15.2 `wal_record.cpp:76` UNREACHABLE_CODE crashes when a
-    // large WAL backlog collides with heavy concurrent writes.
-    await preIndexCheckpoint();
+    // Flush WAL before large indexing runs open their own transactions.
+    // Incremental refreshes are often tiny/no-op and can run frequently;
+    // forcing CHECKPOINT on every incremental call can become a contention
+    // hotspot under mixed read/write stress.
+    if (mode === "full") {
+      await preIndexCheckpoint();
+    }
     return indexRepoImpl(repoId, mode, onProgress, signal, options);
   });
   indexLocks.set(repoId, resultPromise);

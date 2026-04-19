@@ -20,13 +20,25 @@ interface HttpServerHandle {
 
 interface SessionManagerInstance {
   getStats(): { activeSessions: number; maxSessions: number };
+  setMaxSessions(maxSessions: number): void;
 }
 
 type SetupHttpTransport = (
   host: string,
   port: number,
   graphDbPath: string,
-  options: { sessionManager: SessionManagerInstance | null },
+  options: {
+    sessionManager: SessionManagerInstance | null;
+    codeModeConfig?: {
+      enabled: boolean;
+      exclusive: boolean;
+      maxWorkflowSteps: number;
+      maxWorkflowTokens: number;
+      maxWorkflowDurationMs: number;
+      ladderValidation: "off" | "warn" | "enforce";
+      etagCaching: boolean;
+    };
+  },
 ) => Promise<HttpServerHandle>;
 
 type PoolStats = {
@@ -113,6 +125,12 @@ export class ServerHarness {
               ignore: ["**/node_modules/**", "**/dist/**"],
             },
           ],
+          // Stress scenarios exercise both flat tools and Code Mode context tools.
+          // Keep Code Mode non-exclusive so core tools remain available.
+          codeMode: {
+            enabled: true,
+            exclusive: false,
+          },
           policy: {},
         },
         null,
@@ -145,7 +163,18 @@ export class ServerHarness {
       this.config.host,
       this.config.port,
       graphDbPath,
-      { sessionManager: this.sessionManager },
+      {
+        sessionManager: this.sessionManager,
+        codeModeConfig: {
+          enabled: true,
+          exclusive: false,
+          maxWorkflowSteps: 20,
+          maxWorkflowTokens: 50_000,
+          maxWorkflowDurationMs: 60_000,
+          ladderValidation: "warn",
+          etagCaching: true,
+        },
+      },
     );
 
     // setupHttpTransport now waits for listen and exposes the actual bound port
@@ -229,5 +258,13 @@ export class ServerHarness {
     queueTimeoutMs?: number;
   }): void {
     configureToolDispatchLimiter(opts);
+  }
+
+  /** Reconfigure max session cap between scenarios without restarting server. */
+  reconfigureSessions(maxSessions: number): void {
+    if (!this.sessionManager) {
+      return;
+    }
+    this.sessionManager.setMaxSessions(maxSessions);
   }
 }

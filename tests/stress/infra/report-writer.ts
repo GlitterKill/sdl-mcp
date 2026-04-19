@@ -1,5 +1,5 @@
 /**
- * Report Writer — outputs stress test results to console and JSON file.
+ * Report Writer - outputs stress test results to console and JSON file.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -19,13 +19,37 @@ const CYAN = "\x1b[36m";
 const DIM = "\x1b[2m";
 
 function pass(text: string): string {
-  return `${GREEN}✓ ${text}${RESET}`;
+  return `${GREEN}OK ${text}${RESET}`;
 }
+
 function fail(text: string): string {
-  return `${RED}✗ ${text}${RESET}`;
+  return `${RED}X ${text}${RESET}`;
 }
+
 function warn(text: string): string {
-  return `${YELLOW}⚠ ${text}${RESET}`;
+  return `${YELLOW}! ${text}${RESET}`;
+}
+
+type ReportStream = "stdout" | "stderr" | "both";
+
+function resolveReportStream(): ReportStream {
+  const raw = (process.env.SDL_STRESS_REPORT_STREAM ?? "stderr")
+    .trim()
+    .toLowerCase();
+  if (raw === "stdout" || raw === "stderr" || raw === "both") {
+    return raw;
+  }
+  return "stderr";
+}
+
+function writeLine(msg: string, stream: ReportStream): void {
+  const line = `${msg}\n`;
+  if (stream === "stdout" || stream === "both") {
+    process.stdout.write(line);
+  }
+  if (stream === "stderr" || stream === "both") {
+    process.stderr.write(line);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -33,16 +57,15 @@ function warn(text: string): string {
 // ---------------------------------------------------------------------------
 
 export function writeConsoleReport(report: StressReport): void {
-  const w = (msg: string = "") => console.error(msg);
+  // Default to stderr so the final report lands in the same stream as stress logs.
+  // Override with SDL_STRESS_REPORT_STREAM=stdout|stderr|both.
+  const stream = resolveReportStream();
+  const w = (msg: string = "") => writeLine(msg, stream);
 
   w();
-  w(
-    `${BOLD}${CYAN}═══════════════════════════════════════════════════════════${RESET}`,
-  );
+  w(`${BOLD}${CYAN}${"=".repeat(59)}${RESET}`);
   w(`${BOLD}${CYAN}  SDL-MCP Stress Test Report${RESET}`);
-  w(
-    `${BOLD}${CYAN}═══════════════════════════════════════════════════════════${RESET}`,
-  );
+  w(`${BOLD}${CYAN}${"=".repeat(59)}${RESET}`);
   w();
   w(`  Timestamp:  ${report.timestamp}`);
   w(`  Version:    ${report.version}`);
@@ -51,21 +74,22 @@ export function writeConsoleReport(report: StressReport): void {
   w();
 
   for (const scenario of report.scenarios) {
-    writeScenarioSection(scenario);
+    writeScenarioSection(scenario, stream);
   }
 
-  w(
-    `${BOLD}${CYAN}═══════════════════════════════════════════════════════════${RESET}`,
-  );
+  w(`${BOLD}${CYAN}${"=".repeat(59)}${RESET}`);
   w();
 }
 
-function writeScenarioSection(scenario: ScenarioResult): void {
-  const w = (msg: string = "") => console.error(msg);
+function writeScenarioSection(
+  scenario: ScenarioResult,
+  stream: ReportStream,
+): void {
+  const w = (msg: string = "") => writeLine(msg, stream);
 
   const status = scenario.passed ? pass("PASS") : fail("FAIL");
   w(
-    `${BOLD}  ─── ${scenario.name} (${scenario.clients} clients) ─── ${status}${RESET}`,
+    `${BOLD}  --- ${scenario.name} (${scenario.clients} clients) --- ${status}${RESET}`,
   );
   w(
     `  ${DIM}Duration: ${formatDuration(scenario.durationMs)} | Peak Memory: ${scenario.memoryPeakMB}MB${RESET}`,
@@ -79,7 +103,7 @@ function writeScenarioSection(scenario: ScenarioResult): void {
       `  ${"Tool".padEnd(30)} ${"Count".padStart(6)} ${"Min".padStart(8)} ${"P50".padStart(8)} ${"P95".padStart(8)} ${"P99".padStart(8)} ${"Max".padStart(8)} ${"Err%".padStart(7)} ${"AvgSize".padStart(9)} ${"Ops/s".padStart(7)}`,
     );
     w(
-      `  ${"─".repeat(30)} ${"─".repeat(6)} ${"─".repeat(8)} ${"─".repeat(8)} ${"─".repeat(8)} ${"─".repeat(8)} ${"─".repeat(8)} ${"─".repeat(7)} ${"─".repeat(9)} ${"─".repeat(7)}`,
+      `  ${"-".repeat(30)} ${"-".repeat(6)} ${"-".repeat(8)} ${"-".repeat(8)} ${"-".repeat(8)} ${"-".repeat(8)} ${"-".repeat(8)} ${"-".repeat(7)} ${"-".repeat(9)} ${"-".repeat(7)}`,
     );
 
     for (const name of toolNames) {
@@ -106,20 +130,18 @@ function writeScenarioSection(scenario: ScenarioResult): void {
       : `${RED}${stats.checksFailed}/${stats.checksRun} FAILED${RESET}`;
     w(`  ${BOLD}Result Validation:${RESET} ${statusStr}`);
 
-    // Show failures (critical — these indicate broken tools)
+    // Show failures (critical - these indicate broken tools)
     if (stats.failures.length > 0) {
       w(`  ${RED}Failed checks:${RESET}`);
       for (const f of stats.failures.slice(0, 10)) {
-        w(
-          `    ${RED}✗${RESET} ${f.tool} → ${f.check}: ${DIM}${f.actual ?? "?"}${RESET}`,
-        );
+        w(`    ${RED}X${RESET} ${f.tool} -> ${f.check}: ${DIM}${f.actual ?? "?"}${RESET}`);
       }
       if (stats.failures.length > 10) {
         w(`    ${DIM}... and ${stats.failures.length - 10} more${RESET}`);
       }
     }
 
-    // Show sample values — quick human-readable "is this real data?"
+    // Show sample values - quick human-readable signal that data looks real.
     const entries = Object.entries(stats.sampleValues);
     if (entries.length > 0) {
       w(`  ${BOLD}Sample Values:${RESET}`);

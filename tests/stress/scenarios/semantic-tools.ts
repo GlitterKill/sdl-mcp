@@ -3,7 +3,7 @@
  *
  * Tests semantic-layer MCP tools under concurrent load:
  *   - sdl.symbol.search with `semantic: true` (embedding rerank / graceful fallback)
- *   - sdl.symbol.getCard / sdl.symbol.getCards (single/batch card fetch)
+ *   - sdl.symbol.getCard (single + batch card fetch)
  *   - sdl.context (context retrieval with tight budget)
  *   - sdl.agent.feedback + feedback.query (feedback loop)
  *
@@ -42,7 +42,7 @@ const ITERATIONS_PER_CLIENT = 2;
 /**
  * Each client runs a full semantic workflow per iteration:
  *   1. Semantic search (semantic: true)
- *   2. Batch getCards for top results
+ *   2. Batch getCard for top results
  *   3. Agent context (explain, tight budget)
  *   4. Agent feedback (record useful symbols)
  *   5. Agent feedback query
@@ -70,9 +70,9 @@ async function runSemanticWorkflow(
 
     if (results.length === 0) continue;
 
-    // 2. Batch getCards for top results
+    // 2. Batch getCard for top results
     const topSymbolIds = results.slice(0, 5).map((r) => r.symbolId);
-    const cardsResult = await client.callToolParsed("sdl.symbol.getCards", {
+    const cardsResult = await client.callToolParsed("sdl.symbol.getCard", {
       repoId: "stress-fixtures",
       symbolIds: topSymbolIds,
     });
@@ -127,7 +127,7 @@ async function runSemanticWorkflow(
       limit: 15,
     });
 
-    // 7. Second batch getCards with ETag support (simulating cache hit path)
+    // 7. Second batch getCard with ETag support (simulating cache hit path)
     if (cards.length > 0) {
       const knownEtags: Record<string, string> = {};
       for (const card of cards) {
@@ -136,7 +136,7 @@ async function runSemanticWorkflow(
         }
       }
       if (Object.keys(knownEtags).length > 0) {
-        await client.callToolParsed("sdl.symbol.getCards", {
+        await client.callToolParsed("sdl.symbol.getCard", {
           repoId: "stress-fixtures",
           symbolIds: topSymbolIds,
           knownEtags,

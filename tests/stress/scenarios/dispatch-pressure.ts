@@ -46,7 +46,7 @@ async function fireMixedBatch(
   client: import("../infra/client-factory.js").StressClient,
   clientIdx: number,
   firstSymbolId: string | undefined,
-): Promise<Record<string, unknown>[]> {
+): Promise<Array<PromiseSettledResult<Record<string, unknown>>>> {
   const baseIdx = clientIdx * CALLS_PER_CLIENT;
   const promises: Promise<Record<string, unknown>>[] = [];
 
@@ -117,7 +117,9 @@ async function fireMixedBatch(
     );
   }
 
-  return Promise.all(promises);
+  // Use allSettled so teardown never begins while trailing calls are still in-flight.
+  // Promise.all would reject on first failure and leave other calls running.
+  return Promise.allSettled(promises);
 }
 
 export async function runDispatchPressure(
@@ -225,7 +227,20 @@ export async function runDispatchPressure(
     let failed = 0;
     for (const batch of batchResults) {
       if (batch.status === "fulfilled") {
-        succeeded += batch.value.length;
+        for (const callResult of batch.value) {
+          if (callResult.status === "fulfilled") {
+            succeeded++;
+            continue;
+          }
+          failed++;
+          const msg =
+            callResult.reason instanceof Error
+              ? callResult.reason.message
+              : String(callResult.reason);
+          if (msg.includes("timeout")) {
+            warnings.push(`Queue timeout detected: ${msg}`);
+          }
+        }
       } else {
         failed += CALLS_PER_CLIENT; // entire batch failed
         const msg =

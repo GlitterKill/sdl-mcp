@@ -92,13 +92,24 @@ export class StressClient {
       responseSize = JSON.stringify(response).length;
       success = true;
 
-      // Check if the tool itself reported an error
+      // Check if the tool itself reported an error.
       const content = (
-        response as { content?: Array<{ type: string; text: string }> }
+        response as {
+          content?: Array<{ type: string; text: string }>;
+          isError?: boolean;
+        }
       )?.content;
-      if (content?.[0]?.text) {
+      const firstText = content?.[0]?.text;
+      const responseIsError = (
+        response as { isError?: boolean } | undefined
+      )?.isError;
+      if (responseIsError) {
+        success = false;
+        error = firstText?.trim() || "Tool call returned isError=true";
+      } else if (firstText) {
+        // Back-compat: some handlers encode errors in JSON payloads.
         try {
-          const parsed = JSON.parse(content[0].text);
+          const parsed = JSON.parse(firstText);
           if (parsed?.error) {
             success = false;
             error =
@@ -107,7 +118,7 @@ export class StressClient {
                 : (parsed.error.message ?? JSON.stringify(parsed.error));
           }
         } catch {
-          // Not JSON, that's fine
+          // Non-JSON success payload is allowed.
         }
       }
     } catch (err) {
@@ -159,9 +170,20 @@ export class StressClient {
     const content = (
       response as { content?: Array<{ type: string; text: string }> }
     )?.content;
-    const parsed: Record<string, unknown> = content?.[0]?.text
-      ? (JSON.parse(content[0].text) as Record<string, unknown>)
-      : ((response ?? {}) as Record<string, unknown>);
+    const firstText = content?.[0]?.text;
+    let parsed: Record<string, unknown>;
+    if (firstText) {
+      try {
+        parsed = JSON.parse(firstText) as Record<string, unknown>;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `Tool call ${name} returned non-JSON text payload: ${msg}; text="${firstText.slice(0, 200)}"`,
+        );
+      }
+    } else {
+      parsed = (response ?? {}) as Record<string, unknown>;
+    }
 
     // Run result validators — fires for every known tool, no-op for unknown
     const checks = validateToolResult(name, effectiveArgs, parsed);

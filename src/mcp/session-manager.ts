@@ -236,4 +236,34 @@ export class SessionManager {
   getMaxSessions(): number {
     return this.maxSessions;
   }
+
+  /**
+   * Reconfigure the maximum session cap at runtime.
+   *
+   * Lowering below current active+reserved sessions is allowed: it blocks
+   * new sessions until usage drops under the new cap.
+   */
+  setMaxSessions(maxSessions: number): void {
+    if (maxSessions < 1 || maxSessions > 32) {
+      throw new ValidationError(
+        `maxSessions must be between 1 and 32, got ${maxSessions}`,
+      );
+    }
+
+    const inUse = this.sessions.size + this.pendingReservations;
+    if (maxSessions < inUse) {
+      logger.warn("Session cap lowered below current usage", {
+        requestedMaxSessions: maxSessions,
+        activeSessions: this.sessions.size,
+        pendingReservations: this.pendingReservations,
+      });
+    }
+
+    this.maxSessions = maxSessions;
+    logger.info("Session cap updated", {
+      maxSessions: this.maxSessions,
+      activeSessions: this.sessions.size,
+      pendingReservations: this.pendingReservations,
+    });
+  }
 }

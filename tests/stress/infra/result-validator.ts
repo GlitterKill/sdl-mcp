@@ -233,6 +233,27 @@ const VALIDATORS: Record<string, ValidatorFn> = {
 
   "sdl.symbol.getCard": (_args, result) => {
     const tool = "sdl.symbol.getCard";
+    const cards = result.cards as unknown[] | undefined;
+    if (Array.isArray(cards)) {
+      const checks: ToolResultCheck[] = [
+        checkExists(tool, "cards array present", cards),
+        checkArrayMinLen(tool, "cards.length >= 1", cards, 1),
+      ];
+      // Spot-check first card in batch mode.
+      if (cards.length > 0) {
+        const first = cards[0] as Record<string, unknown> | undefined;
+        if (first && first.notModified !== true) {
+          checks.push(
+            checkNonEmptyString(tool, "cards[0].symbolId", first.symbolId),
+            checkNonEmptyString(tool, "cards[0].name", first.name),
+          );
+        } else if (first?.notModified === true) {
+          checks.push(ok(tool, "cards[0] notModified", "true"));
+        }
+      }
+      return checks;
+    }
+
     // Could be a notModified response or a full card
     if (result.notModified === true) {
       return [
@@ -503,6 +524,13 @@ const SAMPLE_EXTRACTORS: Record<string, SampleExtractorFn> = {
   },
 
   "sdl.symbol.getCard": (result) => {
+    const cards = result.cards as unknown[] | undefined;
+    if (Array.isArray(cards)) {
+      return {
+        cardsReturned: String(cards.length),
+      };
+    }
+
     if (result.notModified) {
       const vals: Record<string, string> = { notModified: "true" };
       return vals;

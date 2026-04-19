@@ -6,14 +6,14 @@
  * 1. Build dist/
  * 2. Start server harness
  * 3. Run baseline (must pass before continuing)
- * 4. Run concurrent readers (3→4→5→6)
- * 5. Run mixed read/write no-op refreshes (3→4→5→6)
- * 6. Run mixed read/write editful refreshes (3→4→5→6)
- * 7. Restart server with maxSessions: 4 → run session saturation
- * 8. Restart server with maxToolConcurrency: 4 → run dispatch pressure
- * 9. Restart server (default config) → run semantic tools
- * 10. Restart server (max config) → run limit stress (1 writer + 7 readers)
- * 11. Generate report
+ * 4. Run concurrent readers (3->4->5->6)
+ * 5. Run mixed read/write no-op refreshes (3->4->5->6)
+ * 6. Run mixed read/write editful refreshes (3->4->5->6)
+ * 7. Reconfigure maxSessions: 4 and run session saturation
+ * 8. Reconfigure maxToolConcurrency: 4 and run dispatch pressure
+ * 9. Reconfigure default limits and run semantic tools
+ * 10. Reconfigure max limits and run limit stress (1 writer + 7 readers)
+ * 11. Generate report (stdout summary + JSON artifact)
  *
  * Usage:
  *   node --import tsx tests/stress/run-stress.ts
@@ -61,6 +61,26 @@ interface CliArgs {
   verbose: boolean;
   skipBuild: boolean;
   port: number;
+}
+
+function flushWritable(
+  stream: NodeJS.WriteStream | NodeJS.Socket,
+): Promise<void> {
+  return new Promise((resolve) => {
+    if ((stream as { destroyed?: boolean }).destroyed) {
+      resolve();
+      return;
+    }
+    stream.write("", () => resolve());
+  });
+}
+
+async function flushStdStreams(): Promise<void> {
+  // Best-effort flush so final report lines are not lost before process.exit.
+  await Promise.allSettled([
+    flushWritable(process.stdout),
+    flushWritable(process.stderr),
+  ]);
 }
 
 function parseArgs(): CliArgs {
@@ -113,7 +133,7 @@ function runBuild(): void {
     });
     stressLog("info", "Build complete");
   } catch (err) {
-    stressLog("error", "Build failed — cannot run stress tests without dist/");
+    stressLog("error", "Build failed - cannot run stress tests without dist/");
     process.exit(1);
   }
 }
@@ -173,191 +193,181 @@ async function main(): Promise<void> {
     },
   });
 
-  // -----------------------------------------------------------------------
-  // Scenarios 1-4: Baseline, Concurrent Readers, Mixed Read-Write, Editful Mixed Read-Write
-  // -----------------------------------------------------------------------
-  if (
-    shouldRun("single-client-baseline") ||
-    shouldRun("concurrent-readers") ||
-    shouldRun("mixed-read-write") ||
-    shouldRun("mixed-read-write-editful")
-  ) {
-    const harness = new ServerHarness(config);
-    let port: number;
+  const harness = new ServerHarness(config);
+  let port: number;
+  let token: string;
 
-    try {
-      port = await harness.start({ maxSessions: 8, maxToolConcurrency: 8 });
-    } catch (err) {
-      stressLog(
-        "error",
-        `Failed to start server: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      process.exit(1);
-      return;
-    }
-
-    const token = harness.getAuthToken();
-
-    try {
-      // Scenario 1: Baseline
-      if (shouldRun("single-client-baseline") || !cliArgs.scenario) {
-        stressLog("info", "=== Scenario 1: Single Client Baseline ===");
-        const result = await withTimeout(
-          runSingleClientBaseline(makeCtx(port, token)),
-          cliArgs.timeout,
-          "single-client-baseline",
-        );
-        scenarios.push(result);
-        baselineMetrics = result.toolMetrics;
-
-        if (!result.passed) {
-          stressLog(
-            "error",
-            "Baseline FAILED — remaining scenarios may be unreliable",
-          );
-        }
-      }
-
-      // Scenario 2: Concurrent Readers
-      if (shouldRun("concurrent-readers")) {
-        stressLog("info", "=== Scenario 2: Concurrent Readers ===");
-        const result = await withTimeout(
-          runConcurrentReaders(makeCtx(port, token)),
-          cliArgs.timeout * config.concurrencyLevels.length,
-          "concurrent-readers",
-        );
-        scenarios.push(result);
-      }
-
-      // Scenario 3: Mixed Read-Write
-      if (shouldRun("mixed-read-write")) {
-        stressLog("info", "=== Scenario 3: Mixed Read-Write ===");
-        const result = await withTimeout(
-          runMixedReadWrite(makeCtx(port, token)),
-          cliArgs.timeout * config.concurrencyLevels.length,
-          "mixed-read-write",
-        );
-        scenarios.push(result);
-      }
-
-      // Scenario 4: Mixed Read-Write Editful
-      if (shouldRun("mixed-read-write-editful")) {
-        stressLog("info", "=== Scenario 4: Mixed Read-Write Editful ===");
-        const result = await withTimeout(
-          runMixedReadWriteEditful(makeCtx(port, token)),
-          cliArgs.timeout * config.concurrencyLevels.length,
-          "mixed-read-write-editful",
-        );
-        scenarios.push(result);
-      }
-    } finally {
-      await harness.stop();
-    }
+  try {
+    port = await harness.start({ maxSessions: 8, maxToolConcurrency: 8 });
+    token = harness.getAuthToken();
+  } catch (err) {
+    stressLog(
+      "error",
+      `Failed to start server: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    process.exit(1);
+    return;
   }
 
-  // -----------------------------------------------------------------------
-  // Scenario 5: Session Saturation (maxSessions: 4)
-  // -----------------------------------------------------------------------
-  if (shouldRun("session-saturation")) {
-    stressLog(
-      "info",
-      "=== Scenario 5: Session Saturation (maxSessions: 4) ===",
-    );
-    const harness = new ServerHarness(config);
-    try {
-      const port = await harness.start({
-        maxSessions: 4,
-        maxToolConcurrency: 8,
-      });
+  try {
+    // ---------------------------------------------------------------------
+    // Scenario 1: Baseline (default caps)
+    // ---------------------------------------------------------------------
+    if (shouldRun("single-client-baseline") || !cliArgs.scenario) {
+      stressLog("info", "=== Scenario 1: Single Client Baseline ===");
       const result = await withTimeout(
-        runSessionSaturation(makeCtx(port, harness.getAuthToken())),
+        runSingleClientBaseline(makeCtx(port, token)),
         cliArgs.timeout,
-        "session-saturation",
+        "single-client-baseline",
       );
       scenarios.push(result);
-    } catch (err) {
-      scenarios.push(errorResult("session-saturation", err));
-    } finally {
-      await harness.stop();
-    }
-  }
+      baselineMetrics = result.toolMetrics;
 
-  // -----------------------------------------------------------------------
-  // Scenario 6: Dispatch Pressure (maxToolConcurrency: 4)
-  // -----------------------------------------------------------------------
-  if (shouldRun("dispatch-pressure")) {
-    stressLog(
-      "info",
-      "=== Scenario 6: Dispatch Pressure (maxToolConcurrency: 4) ===",
-    );
-    const harness = new ServerHarness(config);
-    try {
-      const port = await harness.start({
-        maxSessions: 8,
-        maxToolConcurrency: 4,
-      });
-      const result = await withTimeout(
-        runDispatchPressure(makeCtx(port, harness.getAuthToken())),
-        cliArgs.timeout,
-        "dispatch-pressure",
-      );
-      scenarios.push(result);
-    } catch (err) {
-      scenarios.push(errorResult("dispatch-pressure", err));
-    } finally {
-      await harness.stop();
+      if (!result.passed) {
+        stressLog(
+          "error",
+          "Baseline FAILED - remaining scenarios may be unreliable",
+        );
+      }
     }
-  }
 
-  // -----------------------------------------------------------------------
-  // Scenario 7: Semantic Tools (default server config)
-  // -----------------------------------------------------------------------
-  if (shouldRun("semantic-tools")) {
-    stressLog("info", "=== Scenario 7: Semantic Tools ===");
-    const harness = new ServerHarness(config);
-    try {
-      const port = await harness.start({
-        maxSessions: 8,
-        maxToolConcurrency: 8,
-      });
+    // ---------------------------------------------------------------------
+    // Scenario 2: Concurrent Readers (default caps)
+    // ---------------------------------------------------------------------
+    if (shouldRun("concurrent-readers")) {
+      stressLog("info", "=== Scenario 2: Concurrent Readers ===");
       const result = await withTimeout(
-        runSemanticTools(makeCtx(port, harness.getAuthToken())),
+        runConcurrentReaders(makeCtx(port, token)),
         cliArgs.timeout * config.concurrencyLevels.length,
-        "semantic-tools",
+        "concurrent-readers",
       );
       scenarios.push(result);
-    } catch (err) {
-      scenarios.push(errorResult("semantic-tools", err));
-    } finally {
-      await harness.stop();
     }
-  }
 
-  // -----------------------------------------------------------------------
-  // Scenario 8: Limit Stress (maxSessions: 9, 1 setup + 1 writer + 7 readers)
-  // -----------------------------------------------------------------------
-  if (shouldRun("limit-stress")) {
-    stressLog(
-      "info",
-      "=== Scenario 8: Limit Stress (1 setup + 1 writer + 7 readers, max sessions) ===",
-    );
-    const harness = new ServerHarness(config);
-    try {
-      const port = await harness.start({
-        maxSessions: 9,
-        maxToolConcurrency: 8,
-      });
+    // ---------------------------------------------------------------------
+    // Scenario 3: Mixed Read-Write (default caps)
+    // ---------------------------------------------------------------------
+    if (shouldRun("mixed-read-write")) {
+      stressLog("info", "=== Scenario 3: Mixed Read-Write ===");
       const result = await withTimeout(
-        runLimitStress(makeCtx(port, harness.getAuthToken())),
-        cliArgs.timeout * 2, // extended timeout for longer scenario
-        "limit-stress",
+        runMixedReadWrite(makeCtx(port, token)),
+        cliArgs.timeout * config.concurrencyLevels.length,
+        "mixed-read-write",
       );
       scenarios.push(result);
-    } catch (err) {
-      scenarios.push(errorResult("limit-stress", err));
-    } finally {
-      await harness.stop();
     }
+
+    // ---------------------------------------------------------------------
+    // Scenario 4: Mixed Read-Write Editful (default caps)
+    // ---------------------------------------------------------------------
+    if (shouldRun("mixed-read-write-editful")) {
+      stressLog("info", "=== Scenario 4: Mixed Read-Write Editful ===");
+      const result = await withTimeout(
+        runMixedReadWriteEditful(makeCtx(port, token)),
+        cliArgs.timeout * config.concurrencyLevels.length,
+        "mixed-read-write-editful",
+      );
+      scenarios.push(result);
+    }
+
+    // ---------------------------------------------------------------------
+    // Scenario 5: Session Saturation (maxSessions: 4)
+    // ---------------------------------------------------------------------
+    if (shouldRun("session-saturation")) {
+      stressLog(
+        "info",
+        "=== Scenario 5: Session Saturation (maxSessions: 4) ===",
+      );
+      try {
+        harness.reconfigureSessions(4);
+        harness.reconfigureDispatch({
+          maxConcurrency: 8,
+          queueTimeoutMs: config.toolCallTimeoutMs,
+        });
+        const result = await withTimeout(
+          runSessionSaturation(makeCtx(port, token)),
+          cliArgs.timeout,
+          "session-saturation",
+        );
+        scenarios.push(result);
+      } catch (err) {
+        scenarios.push(errorResult("session-saturation", err));
+      }
+    }
+
+    // ---------------------------------------------------------------------
+    // Scenario 6: Dispatch Pressure (maxToolConcurrency: 4)
+    // ---------------------------------------------------------------------
+    if (shouldRun("dispatch-pressure")) {
+      stressLog(
+        "info",
+        "=== Scenario 6: Dispatch Pressure (maxToolConcurrency: 4) ===",
+      );
+      try {
+        harness.reconfigureSessions(8);
+        harness.reconfigureDispatch({
+          maxConcurrency: 4,
+          queueTimeoutMs: config.toolCallTimeoutMs,
+        });
+        const result = await withTimeout(
+          runDispatchPressure(makeCtx(port, token)),
+          cliArgs.timeout,
+          "dispatch-pressure",
+        );
+        scenarios.push(result);
+      } catch (err) {
+        scenarios.push(errorResult("dispatch-pressure", err));
+      }
+    }
+
+    // ---------------------------------------------------------------------
+    // Scenario 7: Semantic Tools (default caps)
+    // ---------------------------------------------------------------------
+    if (shouldRun("semantic-tools")) {
+      stressLog("info", "=== Scenario 7: Semantic Tools ===");
+      try {
+        harness.reconfigureSessions(8);
+        harness.reconfigureDispatch({
+          maxConcurrency: 8,
+          queueTimeoutMs: config.toolCallTimeoutMs,
+        });
+        const result = await withTimeout(
+          runSemanticTools(makeCtx(port, token)),
+          cliArgs.timeout * config.concurrencyLevels.length,
+          "semantic-tools",
+        );
+        scenarios.push(result);
+      } catch (err) {
+        scenarios.push(errorResult("semantic-tools", err));
+      }
+    }
+
+    // ---------------------------------------------------------------------
+    // Scenario 8: Limit Stress (maxSessions: 9, 1 setup + 1 writer + 7 readers)
+    // ---------------------------------------------------------------------
+    if (shouldRun("limit-stress")) {
+      stressLog(
+        "info",
+        "=== Scenario 8: Limit Stress (1 setup + 1 writer + 7 readers, max sessions) ===",
+      );
+      try {
+        harness.reconfigureSessions(9);
+        harness.reconfigureDispatch({
+          maxConcurrency: 8,
+          queueTimeoutMs: config.toolCallTimeoutMs,
+        });
+        const result = await withTimeout(
+          runLimitStress(makeCtx(port, token)),
+          cliArgs.timeout * 2, // extended timeout for longer scenario
+          "limit-stress",
+        );
+        scenarios.push(result);
+      } catch (err) {
+        scenarios.push(errorResult("limit-stress", err));
+      }
+    }
+  } finally {
+    await harness.stop();
   }
 
   // -----------------------------------------------------------------------
@@ -407,6 +417,8 @@ async function main(): Promise<void> {
   const jsonPath = writeJsonReport(report, resultsDir);
   stressLog("info", `JSON report saved to: ${jsonPath}`);
 
+  await flushStdStreams();
+
   // Force GC while kuzu objects are still reachable via closed handles,
   // then exit immediately to skip V8's at-exit GC sweep (which can
   // segfault on kuzu 0.15.2 N-API destructors).
@@ -414,6 +426,7 @@ async function main(): Promise<void> {
     globalThis.gc();
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
+  await flushStdStreams();
   const code = report.overallPassed ? 0 : 1;
   setImmediate(() => process.exit(code));
 }
