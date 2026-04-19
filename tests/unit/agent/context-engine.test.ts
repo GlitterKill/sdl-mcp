@@ -120,7 +120,11 @@ describe("ContextEngine", () => {
     // Broad-mode compacts: actionsTaken, path, metrics are stripped
     assert.deepEqual(result.finalEvidence, evidence);
     assert.equal(result.nextBestAction, "none");
-    assert.match(result.answer ?? "", /## Symbols \(1\)/);
+    // Broad-mode answer is now compact and references finalEvidence instead of listing symbols inline.
+    assert.match(
+      result.answer ?? "",
+      /Found 1 symbol card\(s\).+finalEvidence for details\./s,
+    );
   });
 
   it("enforces planner budget constraints for token and duration", async () => {
