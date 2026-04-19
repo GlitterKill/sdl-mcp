@@ -47,17 +47,29 @@ export async function ensureModelAvailable(name: string): Promise<string> {
 
   const sizeHint =
     name === "nomic-embed-text-v1.5"
-        ? "138MB"
-        : name === "jina-embeddings-v2-base-code"
-          ? "110MB"
-          : "unknown size";
+      ? "138MB"
+      : name === "jina-embeddings-v2-base-code"
+        ? "110MB"
+        : "unknown size";
   logger.info(`Downloading model "${name}" (~${sizeHint})...`);
   mkdirSync(modelDir, { recursive: true });
 
   const filesToDownload = [
-    { name: info.modelFile, url: info.downloadUrls.model },
-    { name: info.tokenizerFile, url: info.downloadUrls.tokenizer },
-    { name: info.configFile, url: info.downloadUrls.config },
+    {
+      name: info.modelFile,
+      url: info.downloadUrls.model,
+      fallbackUrl: info.fallbackDownloadUrls?.model,
+    },
+    {
+      name: info.tokenizerFile,
+      url: info.downloadUrls.tokenizer,
+      fallbackUrl: info.fallbackDownloadUrls?.tokenizer,
+    },
+    {
+      name: info.configFile,
+      url: info.downloadUrls.config,
+      fallbackUrl: info.fallbackDownloadUrls?.config,
+    },
   ];
 
   for (const file of filesToDownload) {
@@ -68,6 +80,7 @@ export async function ensureModelAvailable(name: string): Promise<string> {
     }
 
     logger.info(`  Downloading ${file.name}...`);
+    let primaryErr: unknown = null;
     try {
       await downloadFile(file.url, destPath, {
         maxBytes: info.maxDownloadBytes,
@@ -75,12 +88,37 @@ export async function ensureModelAvailable(name: string): Promise<string> {
       const stats = statSync(destPath);
       const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
       logger.info(`  Downloaded ${file.name} (${sizeMB} MB)`);
+      continue;
     } catch (error) {
-      throw new Error(
-        `Failed to download ${file.name} for model "${name}": ${error instanceof Error ? error.message : String(error)}. ` +
-          `You can try downloading manually with: node scripts/download-models.mjs ${name}`,
-      );
+      primaryErr = error;
     }
+
+    if (file.fallbackUrl) {
+      logger.warn(
+        `  Primary download failed for ${file.name} (${primaryErr instanceof Error ? primaryErr.message : String(primaryErr)}); trying fallback ${file.fallbackUrl}`,
+      );
+      try {
+        await downloadFile(file.fallbackUrl, destPath, {
+          maxBytes: info.maxDownloadBytes,
+        });
+        const stats = statSync(destPath);
+        const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
+        logger.info(`  Downloaded ${file.name} from fallback (${sizeMB} MB)`);
+        continue;
+      } catch (fallbackErr) {
+        throw new Error(
+          `Failed to download ${file.name} for model "${name}" from both primary and fallback URLs. ` +
+            `Primary: ${primaryErr instanceof Error ? primaryErr.message : String(primaryErr)}. ` +
+            `Fallback: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}. ` +
+            `You can try downloading manually with: node scripts/download-models.mjs ${name}`,
+        );
+      }
+    }
+
+    throw new Error(
+      `Failed to download ${file.name} for model "${name}": ${primaryErr instanceof Error ? primaryErr.message : String(primaryErr)}. ` +
+        `You can try downloading manually with: node scripts/download-models.mjs ${name}`,
+    );
   }
 
   logger.info(`Model "${name}" ready at ${modelDir}`);

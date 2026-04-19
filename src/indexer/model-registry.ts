@@ -26,6 +26,16 @@ export interface ModelInfo {
     tokenizer: string;
     config: string;
   };
+  /**
+   * Fallback URLs tried when the primary `downloadUrls` host fails (e.g.
+   * HuggingFace outage, geoblock, rate limit). Typically points at a mirror
+   * under the project's own GitHub Releases or CDN.
+   */
+  fallbackDownloadUrls?: {
+    model: string;
+    tokenizer: string;
+    config: string;
+  };
   /** Prefix prepended to text at index time (e.g. nomic "search_document: "). */
   documentPrefix?: string;
   /** Prefix prepended to text at search/query time (e.g. nomic "search_query: "). */
@@ -39,12 +49,29 @@ const MODEL_REGISTRY: Record<string, ModelInfo> = {
     name: "jina-embeddings-v2-base-code",
     dimension: 768,
     maxSequenceLength: 8192,
-    bundled: true,
+    bundled: false,
     modelFile: "model_quantized.onnx",
     tokenizerFile: "tokenizer.json",
     configFile: "config.json",
     description:
-      "Code-specialized embedding model for 30+ programming languages (768-dim, ~110MB quantized, bundled)",
+      "Code-specialized embedding model for 30+ programming languages (768-dim, ~162MB quantized, fetched on postinstall)",
+    downloadUrls: {
+      model:
+        "https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/onnx/model_quantized.onnx",
+      tokenizer:
+        "https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/tokenizer.json",
+      config:
+        "https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/config.json",
+    },
+    fallbackDownloadUrls: {
+      model:
+        "https://github.com/GlitterKill/sdl-mcp/releases/download/models-v1/jina-embeddings-v2-base-code-model_quantized.onnx",
+      tokenizer:
+        "https://github.com/GlitterKill/sdl-mcp/releases/download/models-v1/jina-embeddings-v2-base-code-tokenizer.json",
+      config:
+        "https://github.com/GlitterKill/sdl-mcp/releases/download/models-v1/jina-embeddings-v2-base-code-config.json",
+    },
+    maxDownloadBytes: 200_000_000, // ~162MB model + tokenizer + config
   },
   "nomic-embed-text-v1.5": {
     name: "nomic-embed-text-v1.5",
@@ -55,7 +82,7 @@ const MODEL_REGISTRY: Record<string, ModelInfo> = {
     tokenizerFile: "tokenizer.json",
     configFile: "config.json",
     description:
-      "High-quality text embedding model with Matryoshka support (768-dim, ~138MB quantized, ungated)",
+      "High-quality text embedding model with Matryoshka support (768-dim, ~138MB quantized, ungated, fetched on postinstall)",
     downloadUrls: {
       model:
         "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/onnx/model_quantized.onnx",
@@ -63,6 +90,14 @@ const MODEL_REGISTRY: Record<string, ModelInfo> = {
         "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/tokenizer.json",
       config:
         "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/config.json",
+    },
+    fallbackDownloadUrls: {
+      model:
+        "https://github.com/GlitterKill/sdl-mcp/releases/download/models-v1/nomic-embed-text-v1.5-model_quantized.onnx",
+      tokenizer:
+        "https://github.com/GlitterKill/sdl-mcp/releases/download/models-v1/nomic-embed-text-v1.5-tokenizer.json",
+      config:
+        "https://github.com/GlitterKill/sdl-mcp/releases/download/models-v1/nomic-embed-text-v1.5-config.json",
     },
     documentPrefix: "search_document: ",
     queryPrefix: "search_query: ",

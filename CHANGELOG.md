@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.11.0] - Unreleased
 
+### Changed
+
+- **ONNX embedding models unbundled**: `jina-embeddings-v2-base-code` (~162MB) and
+  `nomic-embed-text-v1.5` (~137MB) are no longer shipped inside the npm tarball.
+  Published package size dropped from ~215 MB to ~1.6 MB. Both models are now
+  fetched on `npm install` by `scripts/postinstall-models.mjs` into the platform
+  cache directory (`%LOCALAPPDATA%/sdl-mcp/models/` on Windows,
+  `~/.cache/sdl-mcp/models/` elsewhere). Set `SDL_MCP_SKIP_MODEL_DOWNLOAD=1` to
+  skip the postinstall download.
+- **Model registry fallback URLs**: `ModelInfo.fallbackDownloadUrls` points at
+  the project's GitHub Releases mirror (tag `models-v1`) and is used
+  automatically when the primary HuggingFace URL fails at postinstall time or
+  on lazy runtime download. Both bundled models now have primary HuggingFace
+  URLs populated (jina previously had none).
+
+### Fixed
+
+- **Hybrid retrieval FTS and vector lanes silently returned zero**: The
+  `QUERY_FTS_INDEX` and `QUERY_VECTOR_INDEX` calls in `src/retrieval/orchestrator.ts`
+  were malformed — missing `RETURN` clause (rejected by the LadybugDB binder),
+  passing the index name as a parameter (must be a literal), and passing `topK`
+  positionally (must be `K := <int>`). Every invocation threw and the error was
+  swallowed at `logger.debug` level, making both lanes invisible contributors
+  with zero candidates. Fixed in four call sites (two in `hybridSearch`, two in
+  `entitySearch`). The `fts.conjunctive` config flag is now threaded through to
+  the FTS call. Index and table names are validated against a strict identifier
+  whitelist before interpolation. Swallow-catch logging bumped from `debug` →
+  `warn` so future binder errors surface at the default log level.
+
 ### Breaking Changes
 
 - **API Consolidation**: Reduced tool surface from 37 to 34 actions

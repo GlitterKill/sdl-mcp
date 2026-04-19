@@ -28,7 +28,7 @@ function getModelCacheDir() {
 
 const MODELS = {
   "jina-embeddings-v2-base-code": {
-    dir: join(ROOT, "models", "jina-embeddings-v2-base-code"),
+    dir: join(getModelCacheDir(), "jina-embeddings-v2-base-code"),
     files: [
       {
         name: "model_quantized.onnx",

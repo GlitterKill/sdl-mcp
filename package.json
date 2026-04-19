@@ -18,15 +18,16 @@
   "files": [
     "dist",
     "config",
-    "models",
     "templates/*.json",
     "templates/*.template",
+    "scripts/postinstall.mjs",
     "scripts/postinstall-prune.mjs",
+    "scripts/postinstall-models.mjs",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "postinstall": "node scripts/postinstall-prune.mjs",
+    "postinstall": "node scripts/postinstall.mjs",
     "clean:dist": "node scripts/clean-dist.mjs",
     "build": "tsc -p tsconfig.build.json",
     "build:scripts": "tsc -p tsconfig.scripts.json && node scripts/fix-imports.ts",
