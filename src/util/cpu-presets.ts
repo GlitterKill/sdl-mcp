@@ -23,9 +23,8 @@ import { type AppConfig } from "../config/types.js";
  * | parallelScorer.poolSize          | null      | 4           | 8             |
  *
  * Tuning notes:
- *   - dispatch:readPool ratio kept at 2:1 — per-connection mutex serializes
- *     native DB execution, so ratios above 2:1 queue callers without added
- *     throughput and increase LadybugDB 0.15.2 WAL pressure.
+ *   - dispatch:readPool ratio kept at 2:1 so read connections are not
+ *     over-contended under concurrent tool dispatch.
  *   - indexingConcurrency capped at 16 (extreme) / 12 (high): empirically
  *     saturates the Rust parse stage; higher values yielded <5% gain while
  *     doubling DB contention windows.
@@ -37,7 +36,6 @@ export interface PerformancePresets {
   indexingConcurrency: number;
   maxToolConcurrency: number;
   readPoolSize: number;
-  writePoolSize: number;
   maxSessions: number;
   runtimeMaxConcurrentJobs: number;
   reconcileConcurrency: number;
@@ -57,7 +55,7 @@ export function getTierPresets(tier: CpuTier): PerformancePresets {
         indexingConcurrency: 16,
         maxToolConcurrency: 16,
         readPoolSize: 8,
-        writePoolSize: 1,
+
         maxSessions: 16,
         runtimeMaxConcurrentJobs: 8,
         reconcileConcurrency: 6,
@@ -70,7 +68,7 @@ export function getTierPresets(tier: CpuTier): PerformancePresets {
         indexingConcurrency: 12,
         maxToolConcurrency: 12,
         readPoolSize: 8,
-        writePoolSize: 1,
+
         maxSessions: 8,
         runtimeMaxConcurrentJobs: 4,
         reconcileConcurrency: 3,
@@ -84,7 +82,7 @@ export function getTierPresets(tier: CpuTier): PerformancePresets {
         indexingConcurrency: 4,
         maxToolConcurrency: 8,
         readPoolSize: 4,
-        writePoolSize: 1,
+
         maxSessions: 4,
         runtimeMaxConcurrentJobs: 2,
         reconcileConcurrency: 1,
@@ -132,9 +130,6 @@ export function resolvePerformancePresets(
       userConfig.concurrency?.maxToolConcurrency ?? presets.maxToolConcurrency,
 
     readPoolSize: userConfig.concurrency?.readPoolSize ?? presets.readPoolSize,
-
-    writePoolSize:
-      userConfig.concurrency?.writePoolSize ?? presets.writePoolSize,
 
     maxSessions: userConfig.concurrency?.maxSessions ?? presets.maxSessions,
 

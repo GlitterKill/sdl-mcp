@@ -73,7 +73,7 @@
     "docs:tools:check": "node --experimental-strip-types scripts/check-tool-inventory.ts",
     "prepublishOnly": "npm run build:all && npm run lint && npm run typecheck",
     "spike:ladybug": "node scripts/ladybug-spike.ts",
-    "test:stress": "npm run build && npx tsc --rootDir tests/stress --outDir dist/tests/stress --module nodenext tests/stress/run-stress.ts && node --max-old-space-size=4096 dist/tests/stress/run-stress.js --skip-build",
+    "test:stress": "npm run build && npx tsc --rootDir tests/stress --outDir dist/tests/stress --module nodenext tests/stress/run-stress.ts && node --expose-gc --max-old-space-size=4096 dist/tests/stress/run-stress.js --skip-build",
     "test:mutation": "stryker run stryker.conf.cjs",
     "test:coverage": "node --experimental-test-coverage scripts/run-tests.mjs",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit"

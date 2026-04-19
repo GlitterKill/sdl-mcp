@@ -78,10 +78,8 @@ export async function finalizeIndexing({
   }
 
   // Parallelise metrics, fileSummaries, and audit. Each phase acquires its
-  // own writer via `withWriteConn`; on LadybugDB 0.15.2 the write pool is
-  // pinned to size 1 so these serialize transparently (correct, no wall-time
-  // win). Scaffolding is in place for when `writePoolSize` >= 2 lands with
-  // LadybugDB >= 0.15.4.
+  // own writer via `withWriteConn` which serializes through a single write
+  // connection (correct, no wall-time win — but keeps call sites independent).
   const metricsTask = measureSubphase("metrics", () =>
     updateMetricsForRepo(repoId, changedFileIds, {
       includeTimings,

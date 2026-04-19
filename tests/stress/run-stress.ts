@@ -407,9 +407,13 @@ async function main(): Promise<void> {
   const jsonPath = writeJsonReport(report, resultsDir);
   stressLog("info", `JSON report saved to: ${jsonPath}`);
 
-  // Force-exit immediately after flushing output. kuzu 0.15.2's N-API
-  // destructor segfaults during V8's at-exit GC sweep on Windows when
-  // Connection/Database objects are finalized after close().
+  // Force GC while kuzu objects are still reachable via closed handles,
+  // then exit immediately to skip V8's at-exit GC sweep (which can
+  // segfault on kuzu 0.15.2 N-API destructors).
+  if (typeof globalThis.gc === "function") {
+    globalThis.gc();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
   const code = report.overallPassed ? 0 : 1;
   setImmediate(() => process.exit(code));
 }

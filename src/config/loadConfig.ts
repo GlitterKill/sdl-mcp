@@ -146,7 +146,6 @@ export function loadConfig(configPath?: string): AppConfig {
           ...baseConcurrency,
           maxToolConcurrency: presets.maxToolConcurrency,
           readPoolSize: presets.readPoolSize,
-          writePoolSize: presets.writePoolSize,
           maxSessions: presets.maxSessions,
         },
         runtime: (() => {

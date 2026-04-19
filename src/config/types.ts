@@ -438,11 +438,6 @@ export const ConcurrencyConfigSchema = z.object({
   maxSessions: z.number().int().min(1).max(32).default(8),
   maxToolConcurrency: z.number().int().min(1).max(64).default(8),
   readPoolSize: z.number().int().min(1).max(16).default(4),
-  // Default 1 serializes writes through a single native connection. This
-  // avoids LadybugDB 0.15.2 use-after-free (NodeQueryResult GC finalizer vs
-  // Database destruction across pooled write conns — fixed upstream in PR
-  // #10, pending 0.15.4 release). Bump once the fix ships.
-  writePoolSize: z.number().int().min(1).max(8).default(1),
   writeQueueTimeoutMs: z.number().int().min(1000).max(120000).default(30000),
   toolQueueTimeoutMs: z.number().int().min(5000).max(120000).default(30000),
 });

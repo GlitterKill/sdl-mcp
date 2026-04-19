@@ -13,7 +13,7 @@ describe("stress test package script", () => {
 
     assert.strictEqual(
       pkg.scripts?.["test:stress"],
-      "npm run build && npx tsc --rootDir tests/stress --outDir dist/tests/stress --module nodenext tests/stress/run-stress.ts && node --max-old-space-size=4096 dist/tests/stress/run-stress.js --skip-build",
+      "npm run build && npx tsc --rootDir tests/stress --outDir dist/tests/stress --module nodenext tests/stress/run-stress.ts && node --expose-gc --max-old-space-size=4096 dist/tests/stress/run-stress.js --skip-build",
     );
   });
 });

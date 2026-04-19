@@ -22,96 +22,56 @@ const poisonedConnections = new WeakMap<Connection, true>();
 const transactionOwnerByConn = new WeakMap<Connection, symbol>();
 const transactionContext = new AsyncLocalStorage<Map<Connection, symbol>>();
 
-// Per-connection execution mutex.
-//
-// LadybugDB's native connection state is NOT safe for concurrent execute() or
-// query() calls. The read pool round-robins connections, but with more
-// concurrent tool handlers than pool slots (dispatch limit 8 vs. read pool 4),
-// two callers can land on the same conn and issue simultaneous queries — the
-// native layer then aborts the process (no JS exception, just silent exit).
-//
-// This mutex serializes prepare → execute → getAll → close on a per-conn basis
-// so that CPU-bound parallelism is preserved at the tool-dispatch level while
-// native DB execution is always one-at-a-time per connection.
-//
-// Reentrancy: do NOT call runExclusive from inside another runExclusive on the
-// same conn — maxConcurrency is 1, so nested acquire deadlocks. The public
-// helpers (queryAll / exec) wrap once at the outermost layer; querySingle
-// delegates to queryAll without adding another wrap.
-const connExecMutex = new WeakMap<Connection, ConcurrencyLimiter>();
+// Per-connection mutex. LadybugDB native connections are not safe for
+// concurrent execute()/query() calls — the native layer aborts the process.
+// The read pool round-robins connections, but with more concurrent tool
+// handlers than pool slots two callers can land on the same conn. This mutex
+// serializes prepare → execute → getAll per connection.
+const connMutex = new WeakMap<Connection, ConcurrencyLimiter>();
 
-// Parallel iterable registry of per-conn mutexes. WeakMap is not iterable, so
-// shutdown cannot walk it to drain in-flight query pipelines. This Set holds
-// strong refs to every live mutex so closeLadybugDb() can await them before
-// tearing down the connection pools. Pool size is small (read + write
-// connections, fixed at init), so the set stays bounded.
-const activeConnMutexes = new Set<ConcurrencyLimiter>();
-
-// Hard fence for shutdown. When set, no new runExclusive() call may start —
-// late arrivals that cross an `await` after drain returned would otherwise
-// schedule against a conn we are about to close (LadybugDB 0.15.2 UAF). The
-// flag is raised before drainConnectionMutexes() runs and lowered by
-// resetConnectionGate() on re-init.
-let connectionGateClosed = false;
-let connectionGateError: Error = new DatabaseError("LadybugDB is closing");
-
-function getConnExecMutex(conn: Connection): ConcurrencyLimiter {
-  let mutex = connExecMutex.get(conn);
+function getConnMutex(conn: Connection): ConcurrencyLimiter {
+  let mutex = connMutex.get(conn);
   if (!mutex) {
     mutex = new ConcurrencyLimiter({
       maxConcurrency: 1,
       queueTimeoutMs: 120_000,
     });
-    connExecMutex.set(conn, mutex);
+    connMutex.set(conn, mutex);
   }
-  // Re-add on every access (Set.add is idempotent). If a previous
-  // drainConnectionMutexes() cleared the Set but the WeakMap still hands back
-  // this cached mutex, we must re-register so a subsequent close can drain it.
-  activeConnMutexes.add(mutex);
   return mutex;
 }
 
 /**
- * Close the connection gate. All future runExclusive() calls will reject with
- * the configured error until resetConnectionGate() is called. Idempotent.
+ * Run a function with exclusive access to a LadybugDB connection.
+ * For callers that use `conn.query()` directly (stored procedures, DDL)
+ * and need to participate in the per-connection serialization.
+ *
+ * WARNING: non-reentrant. Do not nest on the same connection.
  */
-export function closeConnectionGate(error: Error): void {
-  connectionGateError = error;
-  connectionGateClosed = true;
+export function runExclusive<T>(
+  conn: Connection,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return getConnMutex(conn).run(fn);
 }
 
 /**
- * Reopen the connection gate. Called on DB (re-)initialization so the next
- * session can accept queries.
+ * Wait for any in-flight query on `conn` to finish, then reject all queued
+ * work with `onTimeoutError`. Used during shutdown to ensure no native
+ * prepare/execute pipeline is mid-flight when the connection closes.
  */
-export function resetConnectionGate(): void {
-  connectionGateClosed = false;
-}
-
-/**
- * Drain all per-connection execution mutexes. Used on shutdown to ensure no
- * prepare/execute/getAll pipeline is mid-flight when the DB closes — a race
- * that has triggered native use-after-free crashes in LadybugDB 0.15.2.
- *
- * Waits up to `timeoutMs` for active work to finish, then rejects any still-
- * queued tasks with `onTimeoutError` so callers receive a clean DatabaseError
- * rather than a silent hang.
- *
- * CALLER CONTRACT: closeConnectionGate() must be raised before calling this
- * so new runExclusive() invocations cannot repopulate activeConnMutexes while
- * the drain is in flight.
- */
-export async function drainConnectionMutexes(
+export async function drainConnMutex(
+  conn: Connection,
   timeoutMs: number,
   onTimeoutError: Error,
 ): Promise<void> {
-  const mutexes = [...activeConnMutexes];
-  if (mutexes.length === 0) return;
+  const mutex = connMutex.get(conn);
+  if (!mutex) return;
 
   let timeoutHandle: NodeJS.Timeout | undefined;
   try {
     await Promise.race([
-      Promise.all(mutexes.map((m) => m.drain())),
+      mutex.drain(),
       new Promise<void>((resolve) => {
         timeoutHandle = setTimeout(resolve, timeoutMs);
         timeoutHandle.unref();
@@ -120,33 +80,7 @@ export async function drainConnectionMutexes(
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
   }
-
-  // Clear queued tasks on every mutex so nothing schedules against a conn we
-  // are about to close. Safe to call even after drain completed.
-  for (const m of mutexes) {
-    m.clearQueue(onTimeoutError);
-  }
-  activeConnMutexes.clear();
-}
-
-/**
- * Run a function with exclusive access to a LadybugDB connection.
- *
- * Serializes concurrent callers on the same connection so native prepare /
- * execute / query calls are never interleaved. Exported so low-level callers
- * that use `conn.query()` directly (schema init, extension load, migrations)
- * can participate in the same lock regime.
- *
- * WARNING: non-reentrant. Nested calls on the same connection deadlock.
- *
- * Rejects immediately if the connection gate is closed (shutdown in progress).
- */
-export function runExclusive<T>(
-  conn: Connection,
-  fn: () => Promise<T>,
-): Promise<T> {
-  if (connectionGateClosed) return Promise.reject(connectionGateError);
-  return getConnExecMutex(conn).run(fn);
+  mutex.clearQueue(onTimeoutError);
 }
 
 /**
@@ -243,9 +177,7 @@ export async function getPreparedStatement(
   return prepared;
 }
 
-// Inner execute: caller must hold the per-conn mutex. Used by queryAll/exec
-// to do the prepare → native execute without re-acquiring the lock.
-async function executeLocked(
+async function execute(
   conn: Connection,
   statement: string,
   params: Record<string, unknown> = {},
@@ -271,8 +203,8 @@ export async function queryAll<T>(
   statement: string,
   params: Record<string, unknown> = {},
 ): Promise<T[]> {
-  return runExclusive(conn, async () => {
-    const result = await executeLocked(conn, statement, params);
+  return getConnMutex(conn).run(async () => {
+    const result = await execute(conn, statement, params);
     try {
       return (await result.getAll()) as T[];
     } finally {
@@ -295,8 +227,8 @@ export async function exec(
   statement: string,
   params: Record<string, unknown> = {},
 ): Promise<void> {
-  return runExclusive(conn, async () => {
-    const result = await executeLocked(conn, statement, params);
+  return getConnMutex(conn).run(async () => {
+    const result = await execute(conn, statement, params);
     result.close();
   });
 }

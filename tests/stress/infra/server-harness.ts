@@ -32,6 +32,7 @@ type SetupHttpTransport = (
 type PoolStats = {
   readPoolSize: number;
   readPoolInitialized: number;
+  writeInitialized: boolean;
   writeQueued: number;
   writeActive: number;
 };
@@ -40,7 +41,9 @@ type ToolDispatchStats = { active: number; queued: number };
 
 type DispatchLimiter = { getStats(): ToolDispatchStats };
 
-type SessionManagerConstructor = new (maxSessions: number) => SessionManagerInstance;
+type SessionManagerConstructor = new (
+  maxSessions: number,
+) => SessionManagerInstance;
 
 const transportModule = await importStressDistModule<{
   setupHttpTransport: SetupHttpTransport;
@@ -198,12 +201,7 @@ export class ServerHarness {
     return this._authToken;
   }
 
-  getPoolStats(): {
-    readPoolSize: number;
-    readPoolInitialized: number;
-    writeQueued: number;
-    writeActive: number;
-  } {
+  getPoolStats(): PoolStats {
     return getPoolStats();
   }
 

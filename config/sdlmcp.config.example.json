@@ -176,7 +176,6 @@
     "maxSessions": 8,
     "maxToolConcurrency": 8,
     "readPoolSize": 4,
-    "writePoolSize": 1,
     "writeQueueTimeoutMs": 30000,
     "toolQueueTimeoutMs": 30000
   },

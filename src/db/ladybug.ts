@@ -24,10 +24,8 @@ import { runPendingMigrations } from "./migration-runner.js";
 import {
   clearConnectionPoisoned,
   clearPreparedStatementCache,
-  closeConnectionGate,
-  drainConnectionMutexes,
+  drainConnMutex,
   isConnectionPoisoned,
-  resetConnectionGate,
 } from "./ladybug-core.js";
 import { resetJoinHintCache } from "./ladybug-edges.js";
 
@@ -117,23 +115,15 @@ function formatReindexGuidanceError(dbPath: string, msg: string): string {
 // instance for concurrent queries within one process.
 //
 // Read pool: N connections (default 4, configurable) for concurrent reads.
-// Write pool: N connections (default 4) kept warm for failover/pipelining.
-// LadybugDB allows only ONE write transaction at a time, so actual DB
-// execution is serialized via writeExecMutex (concurrency 1).
-//
-// This enables multi-agent scenarios where 4-6 MCP sessions issue read
-// queries concurrently while writes are serialized through warm connections.
+// Write conn: 1 dedicated connection, serialized via ConcurrencyLimiter.
 // ---------------------------------------------------------------------------
 
 let readPoolSize = 4;
 const readPool: LadybugConnection[] = [];
 let readPoolIndex = 0;
 
-const writePool: LadybugConnection[] = [];
-let writePoolIndex = 0;
-let writePoolSize = 4;
+let writeConn: LadybugConnection | null = null;
 let writeLimiter: ConcurrencyLimiter | null = null;
-let writeExecMutex: ConcurrencyLimiter | null = null;
 let writeQueueTimeoutMs = 30_000;
 
 let deferredIndexesPending = false;
@@ -152,24 +142,21 @@ let poolInitPromise: Promise<void> | null = null;
  */
 export function configurePool(opts: {
   readPoolSize?: number;
-  writePoolSize?: number;
   writeQueueTimeoutMs?: number;
 }): void {
   if (readPool.length > 0 || poolInitPromise !== null) {
     // No-op if the requested settings match the current values (M6).
-    // Note: readPoolSize / writeQueueTimeoutMs hold their defaults (4 / 10000)
+    // Note: readPoolSize / writeQueueTimeoutMs hold their defaults (4 / 30000)
     // until configurePool() is called. If the pool was initialized via
     // initLadybugDb() without a prior configurePool() call, and a subsequent
     // configurePool({ readPoolSize: 4 }) arrives, this will silently no-op
     // because the defaults happen to match — which is the intended behavior.
     const sameReadSize =
       opts.readPoolSize === undefined || opts.readPoolSize === readPoolSize;
-    const sameWriteSize =
-      opts.writePoolSize === undefined || opts.writePoolSize === writePoolSize;
     const sameTimeout =
       opts.writeQueueTimeoutMs === undefined ||
       opts.writeQueueTimeoutMs === writeQueueTimeoutMs;
-    if (sameReadSize && sameWriteSize && sameTimeout) {
+    if (sameReadSize && sameTimeout) {
       return; // Already initialized with same settings
     }
     throw new DatabaseError(
@@ -183,14 +170,6 @@ export function configurePool(opts: {
       );
     }
     readPoolSize = opts.readPoolSize;
-  }
-  if (opts.writePoolSize !== undefined) {
-    if (opts.writePoolSize < 1 || opts.writePoolSize > 8) {
-      throw new DatabaseError(
-        `writePoolSize must be between 1 and 8, got ${opts.writePoolSize}`,
-      );
-    }
-    writePoolSize = opts.writePoolSize;
   }
   if (opts.writeQueueTimeoutMs !== undefined) {
     writeQueueTimeoutMs = opts.writeQueueTimeoutMs;
@@ -371,7 +350,12 @@ async function installExtensionsOnce(conn: LadybugConnection): Promise<void> {
 
   for (const ext of MANAGED_EXTENSIONS) {
     try {
-      await conn.query(`INSTALL ${ext}`);
+      const result = await conn.query(`INSTALL ${ext}`);
+      if (Array.isArray(result)) {
+        for (const r of result) r.close();
+      } else {
+        result.close();
+      }
       logger.debug(`Kuzu extension installed`, { extension: ext });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -392,7 +376,12 @@ async function loadExtensionsOnConnection(
 ): Promise<void> {
   for (const ext of MANAGED_EXTENSIONS) {
     try {
-      await conn.query(`LOAD EXTENSION ${ext}`);
+      const result = await conn.query(`LOAD EXTENSION ${ext}`);
+      if (Array.isArray(result)) {
+        for (const r of result) r.close();
+      } else {
+        result.close();
+      }
       markExtensionLoaded(ext);
       logger.debug(`Kuzu extension loaded`, { extension: ext });
     } catch (err) {
@@ -451,7 +440,7 @@ async function checkpointWal(
  */
 export async function preIndexCheckpoint(): Promise<void> {
   // Skip if the pool isn't ready — indexer may be driving an init path.
-  if (writePool.length === 0) return;
+  if (!writeConn) return;
 
   // Race with a short timeout. If another writer holds the mutex (e.g. a
   // deferred derived-refresh still in flight), we do NOT want to block
@@ -508,11 +497,10 @@ export async function getLadybugReadConn(): Promise<LadybugConnection> {
     // concurrent callers never observe a partially-initialized pool.
     const initPool = async (): Promise<void> => {
       logger.debug(
-        `Initializing LadybugDB connection pool: ${readPoolSize} read + ${writePoolSize} write`,
+        `Initializing LadybugDB connection pool: ${readPoolSize} read + 1 write`,
       );
 
       const localReadPool: LadybugConnection[] = [];
-      const localWritePool: LadybugConnection[] = [];
 
       try {
         // Create read connections into local array
@@ -521,35 +509,25 @@ export async function getLadybugReadConn(): Promise<LadybugConnection> {
           localReadPool.push(conn);
         }
 
-        // Create write connection pool
-        for (let i = 0; i < writePoolSize; i++) {
-          localWritePool.push(await createConnection(db));
-        }
+        // Create single write connection
+        const localWriteConn = await createConnection(db);
 
-        // Connection pool limiter — allows writePoolSize callers to acquire
-        // a connection concurrently for preparation/queueing.
+        // Write limiter — serializes all write operations through the single
+        // write connection (LadybugDB allows only ONE write transaction at a time).
         const localWriteLimiter = new ConcurrencyLimiter({
-          maxConcurrency: writePoolSize,
-          queueTimeoutMs: writeQueueTimeoutMs,
-        });
-
-        // Execution mutex — LadybugDB allows only ONE write transaction at a
-        // time (explicit or auto-commit). This serializes actual DB execution
-        // while letting multiple callers hold warm connections in the pipeline.
-        const localWriteExecMutex = new ConcurrencyLimiter({
           maxConcurrency: 1,
           queueTimeoutMs: writeQueueTimeoutMs,
         });
 
         // Step: attempt INSTALL once, then LOAD on write + all read conns.
         // Best-effort — failures must not prevent pool initialization.
-        await installExtensionsOnce(localWritePool[0]);
+        await installExtensionsOnce(localWriteConn);
         // Force a CHECKPOINT before LOAD EXTENSION to drain any uncheckpointed
         // WAL records. Kuzu 0.15.2 `fts` extension hits UNREACHABLE_CODE in
         // wal_record.cpp:76 when parsing a dirty WAL on LOAD — aborting the
         // process mid-session. Ensuring an empty WAL sidesteps that path.
-        await checkpointWal(localWritePool[0], "pre-extension-load");
-        for (const c of [...localWritePool, ...localReadPool]) {
+        await checkpointWal(localWriteConn, "pre-extension-load");
+        for (const c of [localWriteConn, ...localReadPool]) {
           await loadExtensionsOnConnection(c);
         }
 
@@ -561,12 +539,11 @@ export async function getLadybugReadConn(): Promise<LadybugConnection> {
         // Publish all refs atomically — no concurrent caller can see
         // partial state because no `await` between these assignments.
         readPool.push(...localReadPool);
-        writePool.push(...localWritePool);
+        writeConn = localWriteConn;
         writeLimiter = localWriteLimiter;
-        writeExecMutex = localWriteExecMutex;
       } catch (err) {
         // Clean up any partially-created connections before re-throwing
-        for (const conn of [...localReadPool, ...localWritePool]) {
+        for (const conn of localReadPool) {
           try {
             await conn.close();
           } catch {
@@ -649,77 +626,37 @@ export async function getLadybugConn(): Promise<LadybugConnection> {
   return getLadybugReadConn();
 }
 
-/**
- * Execute a write operation via the write connection pool.
- *
- * Two-layer concurrency control:
- *   Layer 1 — writeLimiter (concurrency = writePoolSize, default 4):
- *     Acquires a warm connection from the round-robin pool.
- *   Layer 2 — writeExecMutex (concurrency = 1):
- *     Serializes actual DB execution because LadybugDB allows only ONE
- *     write transaction at a time (explicit or auto-commit).
- *
- * Multiple callers can hold connections in the pipeline while one executes.
- * Connections stay warm for instant failover if one gets poisoned.
- */
 export async function withWriteConn<T>(
   fn: (conn: LadybugConnection) => Promise<T>,
 ): Promise<T> {
-  // Ensure pool is initialized
   await getLadybugReadConn();
-
-  if (!writeLimiter || !writeExecMutex || writePool.length === 0) {
+  if (!writeLimiter || !writeConn) {
     throw new DatabaseError(
-      "Write connection pool not initialized. Call initLadybugDb() first.",
+      "Write connection not initialized. Call initLadybugDb() first.",
     );
   }
-
-  // Capture refs before entering the async gate so a concurrent
-  // closeLadybugDb() cannot null them between the check and use.
-  const limiter = writeLimiter;
-  const execMutex = writeExecMutex;
-
-  return limiter.run(async () => {
-    // Connection selection happens inside the exec mutex so only
-    // the active writer holds a reference to the chosen connection.
-    return execMutex.run(async () => {
-      if (writePool.length === 0) {
-        throw new DatabaseError(
-          "Write pool was drained during queue wait. Server may be shutting down.",
-        );
-      }
-      const idx = writePoolIndex % writePool.length;
-      writePoolIndex = (writePoolIndex + 1) % writePool.length;
-      const conn = writePool[idx];
-
+  return writeLimiter.run(async () => {
+    const conn = writeConn;
+    if (!conn) {
+      throw new DatabaseError(
+        "Write connection was closed during queue wait. Server may be shutting down.",
+      );
+    }
+    try {
+      return await fn(conn);
+    } catch (err) {
       try {
-        return await fn(conn);
-      } catch (err) {
-        // On connection-level failure, attempt to recycle the write connection
-        // and re-throw so the caller can decide whether to retry.
-        try {
-          const db = await getLadybugDb();
-          const healthy = await getHealthyConnection(conn, db, "write");
-          if (healthy !== conn) {
-            const poolIdx = writePool.indexOf(conn);
-            if (poolIdx !== -1) writePool[poolIdx] = healthy;
-          }
-        } catch {
-          // If reconnect also fails, leave write pool entry as-is and propagate
-          // the original error.
-        }
-        throw err;
-      }
-    });
+        const db = await getLadybugDb();
+        const healthy = await getHealthyConnection(conn, db, "write");
+        if (healthy !== conn) writeConn = healthy;
+      } catch {}
+      throw err;
+    }
   });
 }
 
 export async function initLadybugDb(dbPath: string): Promise<void> {
   const normalizedPath = normalizePath(normalizeGraphDbPath(dbPath));
-
-  // Reopen the connection gate in case a prior close() raised it — otherwise
-  // every query on the new DB would reject with "LadybugDB is closing".
-  resetConnectionGate();
 
   logger.info("Initializing LadybugDB", { path: normalizedPath });
 
@@ -895,22 +832,13 @@ export async function buildDeferredIndexes(): Promise<void> {
 }
 
 export async function closeLadybugDb(): Promise<void> {
-  // Raise the shutdown fence BEFORE any drain so a caller that crosses an
-  // await during the drain cannot acquire a new per-conn mutex and race the
-  // pool teardown.
-  closeConnectionGate(
-    new DatabaseError("LadybugDB is closing, connection gate closed"),
-  );
-
   // Drain in-flight writes before closing connections. Timeout after 5s
   // to avoid hanging indefinitely if a write is stuck.
   if (writeLimiter) {
     try {
       let timeoutHandle: NodeJS.Timeout | undefined;
-      const drainPromises = [writeLimiter.drain()];
-      if (writeExecMutex) drainPromises.push(writeExecMutex.drain());
       await Promise.race([
-        Promise.all(drainPromises),
+        writeLimiter.drain(),
         new Promise<void>((resolve) => {
           timeoutHandle = setTimeout(resolve, 5_000);
           timeoutHandle.unref();
@@ -928,25 +856,26 @@ export async function closeLadybugDb(): Promise<void> {
       new DatabaseError("LadybugDB is closing, write queue cleared"),
     );
     writeLimiter = null;
-    if (writeExecMutex) {
-      writeExecMutex.clearQueue(
-        new DatabaseError("LadybugDB is closing, write exec queue cleared"),
-      );
-      writeExecMutex = null;
-    }
   }
 
   // Drain per-connection execution mutexes before tearing down the pools.
-  // LadybugDB 0.15.2 segfaults if a native prepare/execute/getAll pipeline is
-  // still running on a conn when Database closes; this drains the one-at-a-
-  // time per-conn serializer so no query is mid-flight at teardown.
-  try {
-    await drainConnectionMutexes(
-      5_000,
-      new DatabaseError("LadybugDB is closing, per-conn queue cleared"),
-    );
-  } catch {
-    // Best-effort drain — proceed with teardown regardless
+  const shutdownError = new DatabaseError(
+    "LadybugDB is closing, per-conn queue cleared",
+  );
+  for (const conn of readPool) {
+    try {
+      await drainConnMutex(conn, 5_000, shutdownError);
+    } catch {
+      // Best-effort drain — proceed with teardown regardless
+    }
+  }
+
+  // Force GC before closing connections so that any lingering QueryResult
+  // N-API pointers are finalized while their parent Connection is still alive.
+  // Without this, kuzu 0.15.2's C++ destructor hits freed memory (0xC0000005).
+  if (typeof globalThis.gc === "function") {
+    globalThis.gc();
+    await new Promise<void>((resolve) => setImmediate(resolve));
   }
 
   // Synchronously capture and clear the read pool so concurrent readers
@@ -967,23 +896,20 @@ export async function closeLadybugDb(): Promise<void> {
     }
   }
 
-  // Close write pool connections
-  if (writePool.length > 0) {
+  // Close write connection
+  if (writeConn) {
     // Force CHECKPOINT on the way out so the next startup opens a clean WAL.
     // Prevents the Kuzu 0.15.2 UNREACHABLE_CODE crash in wal_record.cpp:76
     // when `LOAD EXTENSION fts` replays an uncheckpointed WAL.
-    await checkpointWal(writePool[0], "pre-close");
-    for (const wConn of writePool) {
-      try {
-        await wConn.close();
-      } catch (err) {
-        logger.warn("Error closing LadybugDB write connection", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+    await checkpointWal(writeConn, "pre-close");
+    try {
+      await writeConn.close();
+    } catch (err) {
+      logger.warn("Error closing LadybugDB write connection", {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
-    writePool.length = 0;
-    writePoolIndex = 0;
+    writeConn = null;
   }
 
   if (dbInstance) {
@@ -1023,24 +949,17 @@ export async function closeLadybugDb(): Promise<void> {
 export function getPoolStats(): {
   readPoolSize: number;
   readPoolInitialized: number;
-  writePoolSize: number;
-  writePoolInitialized: number;
+  writeInitialized: boolean;
   writeQueued: number;
   writeActive: number;
-  writeExecQueued: number;
-  writeExecActive: number;
 } {
   const writeStats = writeLimiter?.getStats() ?? { active: 0, queued: 0 };
-  const execStats = writeExecMutex?.getStats() ?? { active: 0, queued: 0 };
   return {
     readPoolSize,
     readPoolInitialized: readPool.length,
-    writePoolSize,
-    writePoolInitialized: writePool.length,
+    writeInitialized: writeConn !== null,
     writeQueued: writeStats.queued,
     writeActive: writeStats.active,
-    writeExecQueued: execStats.queued,
-    writeExecActive: execStats.active,
   };
 }
 
