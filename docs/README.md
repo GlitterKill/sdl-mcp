@@ -81,7 +81,7 @@ Use this page as the entry point for SDL-MCP documentation.
 
 ## Current Scope Snapshot
 
-- **Version**: 0.10.5
+- **Version**: 0.10.6
 - **Supported languages**: TS, JS, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, Shell (11 adapters, 12 languages)
 - **CLI commands** (13): init, doctor, info, index, serve, export, import, pull, benchmark, summary, health, version, tool
 - **Generated tool inventory**: [docs/generated/tool-inventory.md](./generated/tool-inventory.md)

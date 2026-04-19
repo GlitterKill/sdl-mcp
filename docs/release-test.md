@@ -621,7 +621,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 
 - [ ] Returns feedback entries
 
-#### 
+####
 
 **Input:**
 
@@ -984,5 +984,5 @@ Test with each supported client:
 
 **Tested By:** **\*\***\_\_\_**\*\***
 **Date:** **\*\***\_\_\_**\*\***
-**Version:** 0.10.5
+**Version:** 0.10.6
 **Result:** PASS / FAIL

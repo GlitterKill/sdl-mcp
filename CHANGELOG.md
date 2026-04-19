@@ -39,6 +39,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Java/Kotlin, and C# import-resolution fallback scans to avoid leaving identical
   traversal leak candidates in place.
 
+## [0.10.6] - 2026-04-19
+
+### Performance
+
+- **Deferred derived-state refresh**: Incremental index runs now skip cluster/process/file-summary
+  recomputation, deferring it to the next full index. Reduces incremental index latency.
+- **Deferred fresh-DB index bootstrap**: Fresh databases create only base schema during
+  initialization, deferring 19 secondary indexes until after the first full index completes.
+- **Batch TS pass1 persistence**: TypeScript pass1 indexing uses `BatchPersistAccumulator`
+  with background drain loop, eliminating per-file transaction overhead.
+- **Rust indexer pipelining**: Rust engine overlaps parsing with DB writes for higher throughput.
+
+### Fixed
+
+- **Write pool reverted to single connection**: Reverted the v0.10.5-era write connection pool
+  (4 warm connections) back to a single serialized write connection. LadybugDB has a known bug
+  where concurrent writes on separate connections can cause N-API GC crashes and use-after-free
+  in native code. The bug has been patched upstream but not yet released. This rollback trades
+  write throughput for stability until the fix ships.
+- **Connection mutex shutdown safety**: Gated connection mutexes during shutdown to prevent
+  use-after-free when pending writes race against connection disposal.
+- **Pre-index checkpoint timeout**: `preIndexCheckpoint` now races against a 2-second timeout
+  to prevent stalls on slow databases.
+- **Live-index reconcile gating**: Reconcile-worker writes now route through the indexing gate,
+  preventing concurrent writes during active indexing.
+- **Tool dispatch throttling**: MCP tool dispatch is throttled during active indexing to prevent
+  write contention on the single connection.
+- **Batch drain re-entry guard**: Prevents drain loop re-entry after write errors, avoiding
+  cascading failures during DB pressure.
+- **Repository scanning descriptor cleanup**: Replaced `glob()` with explicit directory walker
+  that closes every opened directory handle deterministically.
+- **Symbol search noise floor**: Results below 0.3 relevance are suppressed when no exact match
+  exists, preventing misleading low-confidence results. Suggestion message updated to reflect
+  suppression.
+- **Context answer verbosity**: `sdl.context` broad mode no longer duplicates symbol card
+  summaries already present in `finalEvidence`.
+- **Spillover respects cardDetail**: `slice.spillover.get` now honors the `cardDetail` setting
+  from the original `slice.build` call, omitting `invariants`, `sideEffects`, and `metrics`
+  for compact slices.
+
+### Added
+
+- **`excludeDisabled` for action.search**: New boolean parameter to filter disabled actions
+  from results, with correct pre-pagination filtering.
+- **Manual step reference patterns**: `sdl.manual` markdown output now includes a table
+  documenting `$N.field` cross-step reference syntax for workflow users.
+- **`cardDetail` in SliceHandle**: Schema addition — `cardDetail STRING` column on
+  `SliceHandle` graph node for spillover detail-level propagation.
+
 ## [0.10.5] - 2026-04-14
 
 ### Breaking Changes
