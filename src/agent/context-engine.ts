@@ -109,19 +109,37 @@ export class ContextEngine {
       const path = this.planner.plan(planTask);
       let context = await this.planner.selectContext(task);
 
-      // If selectContext returned context (from user-provided or inferred
-      // paths), seeding is unnecessary — the context is already populated.
+      /* sdl.context: always-on hybrid seed merge */
+      // Run hybrid seeding whenever no explicit scope was provided, even
+      // if path inference already filled `context`. Inferred paths are a
+      // heuristic; hybrid retrieval surfaces semantically-related symbols
+      // the heuristic misses. Path-inferred refs are preserved first; hybrid
+      // adds only refs not already present.
       const hasExplicitContext = context.length > 0;
-      if (!hasExplicitContext && task.taskText) {
+      let seedEvidence: import("../retrieval/types.js").RetrievalEvidence | undefined;
+      if (!hasExplicitScope && task.taskText) {
         try {
           const seedResult = await this.seedContext(task);
-          context = seedResultToContext(seedResult);
-          logger.debug("Semantic-first seeding completed", {
+          seedEvidence = seedResult.evidence;
+          const seedRefs = seedResultToContext(seedResult);
+          if (hasExplicitContext) {
+            const existing = new Set(context);
+            for (const ref of seedRefs) {
+              if (!existing.has(ref)) {
+                context.push(ref);
+                existing.add(ref);
+              }
+            }
+          } else {
+            context = seedRefs;
+          }
+          logger.debug("Hybrid seeding completed", {
             repoId: task.repoId,
             semantic: seedResult.sources.semantic,
             lexical: seedResult.sources.lexical,
             feedback: seedResult.sources.feedback,
             total: context.length,
+            mode: hasExplicitContext ? "merge" : "seed-only",
           });
         } catch (err) {
           logger.debug("Context seeding failed (non-fatal)", {
@@ -203,11 +221,20 @@ export class ContextEngine {
         retrievalEvidence: {
           // The context tool only has taskText available (no stackTrace,
           // failingTestPath, or editedFiles), so symptomType will always be
-          // "taskText" here. This is by design — richer classification is
-          // available in slice.build where all input fields exist.
+          // "taskText" here.
           symptomType: classifySymptomType({
             taskText: task.taskText,
           }),
+          ...(seedEvidence ? {
+            sources: seedEvidence.sources,
+            candidateCountPerSource: seedEvidence.candidateCountPerSource,
+            topRanksPerSource: seedEvidence.topRanksPerSource,
+            ftsAvailable: (seedEvidence.sources ?? []).includes("fts"),
+            vectorAvailable: (seedEvidence.sources ?? []).some((s) => typeof s === "string" && s.startsWith("vector:")),
+            ...(seedEvidence.fusionLatencyMs !== undefined ? { fusionLatencyMs: seedEvidence.fusionLatencyMs } : {}),
+            ...(seedEvidence.fallbackReason !== undefined ? { fallbackReason: seedEvidence.fallbackReason } : {}),
+            ...(seedEvidence.feedbackBoosts ? { feedbackBoosts: seedEvidence.feedbackBoosts } : {}),
+          } : {}),
         },
       };
 

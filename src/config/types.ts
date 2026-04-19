@@ -363,6 +363,12 @@ export const SemanticConfigSchema = z.object({
   alpha: z.number().min(0).max(1).default(0.6),
   provider: z.enum(["api", "local", "mock"]).default("local"),
   model: z.string().default("jina-embeddings-v2-base-code"),
+  /* sdl.context: additional embedding models */
+  /** Additional embedding models to populate at index time so multiple vector
+   *  lanes can contribute to hybrid fusion. Primary `model` is always populated;
+   *  each name listed here gets a separate pass. Unknown model names are skipped.
+   *  Typical: `["nomic-embed-text-v1.5"]` alongside a jina primary. */
+  additionalModels: z.array(z.string()).optional().default([]),
   modelCacheDir: z.string().nullish(),
   generateSummaries: z.boolean().default(false),
   /** Summary LLM backend — independent from embedding provider.

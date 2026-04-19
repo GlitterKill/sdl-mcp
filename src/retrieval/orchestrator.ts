@@ -755,6 +755,8 @@ function buildEntityEvidence(
 export async function entitySearch(
   options: EntitySearchOptions,
 ): Promise<EntitySearchResult> {
+  /* sdl.context: entity-search telemetry */
+  const entitySearchStart = Date.now();
   const config = resolveConfig();
   const caps = await checkRetrievalHealth(options.repoId);
 
@@ -776,6 +778,14 @@ export async function entitySearch(
   const entityTypes = options.entityTypes ?? ALL_ENTITY_TYPES;
 
   if (shouldFallbackToLegacy(caps, config)) {
+    const fallbackReason = "fallback-to-legacy: " + (caps.degradationReasons?.map((r) => r.message).join("; ") ?? "retrieval unavailable");
+    logger.info("Entity search", {
+      eventType: "entity_search", timestamp: new Date().toISOString(),
+      repoId: options.repoId, latencyMs: Date.now() - entitySearchStart,
+      candidateCount: 0, candidateCountPerSource: {}, finalResultCount: 0,
+      retrievalMode: "legacy", retrievalType: "lexical-only", fallbackReason,
+      ftsAvailable: false, vectorAvailable: false,
+    });
     return {
       results: [],
       ...(options.includeEvidence
@@ -797,6 +807,13 @@ export async function entitySearch(
   try {
     conn = await getLadybugConn();
   } catch (err) {
+    logger.info("Entity search", {
+      eventType: "entity_search", timestamp: new Date().toISOString(),
+      repoId: options.repoId, latencyMs: Date.now() - entitySearchStart,
+      candidateCount: 0, candidateCountPerSource: {}, finalResultCount: 0,
+      retrievalMode: "legacy", retrievalType: "lexical-only", fallbackReason: "db-connection-unavailable",
+      ftsAvailable: false, vectorAvailable: false,
+    });
     logger.warn(
       `[entity-search] Failed to obtain DB connection: ${
         err instanceof Error ? err.message : String(err)
@@ -1030,6 +1047,26 @@ export async function entitySearch(
   logger.debug(
     `[entity-search] Fused ${rankings.length} source(s) into ${fusedResults.length} results (${fusionLatencyMs}ms)`,
   );
+
+  {
+    const candidateCountPerSource: Record<string, number> = {};
+    let totalCandidates = 0;
+    for (const r of rankings) {
+      const key = r.entityType === "symbol" ? r.source : `${r.source}:${r.entityType}`;
+      candidateCountPerSource[key] = (candidateCountPerSource[key] ?? 0) + r.candidateCount;
+      totalCandidates += r.candidateCount;
+    }
+    const sources = Array.from(new Set(rankings.map((r) => r.source)));
+    logger.info("Entity search", {
+      eventType: "entity_search", timestamp: new Date().toISOString(),
+      repoId: options.repoId, latencyMs: Date.now() - entitySearchStart,
+      candidateCount: totalCandidates, candidateCountPerSource,
+      finalResultCount: fusedResults.length, fusionLatencyMs,
+      retrievalMode: "hybrid", retrievalType: "hybrid",
+      ftsAvailable: sources.includes("fts"),
+      vectorAvailable: sources.some((s) => s.startsWith("vector:")),
+    });
+  }
 
   return {
     results: fusedResults,

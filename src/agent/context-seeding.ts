@@ -20,6 +20,7 @@ import type {
 import { entitySearch } from "../retrieval/index.js";
 import { extractIdentifiersFromText } from "./executor.js";
 import { searchSymbols } from "../db/ladybug-queries.js";
+import { searchSymbolsHybridWithOverlay } from "../live-index/overlay-reader.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import { logger } from "../util/logger.js";
@@ -149,6 +150,12 @@ export function inferFocusPathsFromTaskText(taskText: string): string[] {
 export async function buildSeedContext(
   task: AgentTask,
 ): Promise<ContextSeedResult> {
+  /* sdl.context: semantic hybrid defaults */
+  const useHybrid = task.options?.semantic !== false;
+  const includeEvidence = task.options?.includeRetrievalEvidence !== false;
+  /* sdl.context: capture hybrid evidence */
+  let seedEvidence: import("../retrieval/types.js").RetrievalEvidence | undefined;
+
   const isBroad = task.options?.contextMode !== "precise";
   const maxSeeds = isBroad ? MAX_SEEDS_BROAD : MAX_SEEDS_PRECISE;
   const halfMax = Math.ceil(maxSeeds / 2);
@@ -158,17 +165,19 @@ export async function buildSeedContext(
   const sourceCounts = { semantic: 0, lexical: 0, feedback: 0 };
 
   // ------------------------------------------------------------------
-  // Stage 1: Semantic retrieval
+  // Stage 1: Semantic retrieval (hybrid FTS + vector via orchestrator)
+  //   Skipped when the caller explicitly sets options.semantic = false.
   // ------------------------------------------------------------------
-  try {
+  if (useHybrid) try {
     const entityResult = await entitySearch({
       repoId: task.repoId,
       query: task.taskText,
       limit: 20,
       entityTypes: ["symbol", "cluster", "process", "fileSummary"],
-      includeEvidence: false,
+      includeEvidence: includeEvidence,
     });
 
+    if (entityResult.evidence) seedEvidence = entityResult.evidence;
     const filtered = entityResult.results.filter(
       (r) => r.score >= MIN_ENTITY_SCORE,
     );
@@ -224,12 +233,9 @@ export async function buildSeedContext(
       // Strategy 1: Compound multi-term search
       const compoundQuery = terms.slice(0, 6).join(" ");
       if (compoundQuery) {
-        const compoundResults = await searchSymbols(
-          conn,
-          task.repoId,
-          compoundQuery,
-          compoundLimit,
-        );
+        const compoundResults = useHybrid
+          ? (await searchSymbolsHybridWithOverlay(conn, task.repoId, compoundQuery, compoundLimit, {})).rows
+          : await searchSymbols(conn, task.repoId, compoundQuery, compoundLimit);
         for (const r of compoundResults) {
           if (sourceCounts.lexical >= halfMax) break;
           const ref = `symbol:${r.symbolId}`;
@@ -257,12 +263,9 @@ export async function buildSeedContext(
       // Strategy 2: Individual term searches
       for (const term of terms.slice(0, maxIndividualTerms)) {
         if (sourceCounts.lexical >= halfMax) break;
-        const results = await searchSymbols(
-          conn,
-          task.repoId,
-          term,
-          perTermLimit,
-        );
+        const results = useHybrid
+          ? (await searchSymbolsHybridWithOverlay(conn, task.repoId, term, perTermLimit, {})).rows
+          : await searchSymbols(conn, task.repoId, term, perTermLimit);
         for (const r of results) {
           if (sourceCounts.lexical >= halfMax) break;
           const ref = `symbol:${r.symbolId}`;
@@ -335,7 +338,11 @@ export async function buildSeedContext(
     finalSources[c.source]++;
   }
 
-  return { candidates: finalCandidates, sources: finalSources };
+  return {
+    candidates: finalCandidates,
+    sources: finalSources,
+    ...(seedEvidence ? { evidence: seedEvidence } : {}),
+  };
 }
 
 /**

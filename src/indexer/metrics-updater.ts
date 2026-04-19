@@ -159,21 +159,26 @@ export async function finalizeIndexing({
       }
     }
 
-    try {
-      const embResult = await measureSubphase("semanticEmbeddings", () =>
-        refreshSymbolEmbeddings({
-          repoId,
-          provider: semanticConfig.provider ?? "local",
-          model,
-          onProgress,
-          concurrency: semanticConfig.embeddingConcurrency ?? 1,
-        }),
-      );
-      logger.info(
-        `Embeddings: ${embResult.embedded} embedded, ${embResult.skipped} cached (model: ${model})`,
-      );
-    } catch (error) {
-      logger.warn(`Semantic embedding refresh skipped: ${String(error)}`);
+    /* sdl.context: multi-model embedding pass */
+    const extraModels = semanticConfig.additionalModels ?? [];
+    const modelsToEmbed: string[] = [model, ...extraModels.filter((m) => m !== model)];
+    for (const embModel of modelsToEmbed) {
+      try {
+        const embResult = await measureSubphase(`semanticEmbeddings:${embModel}`, () =>
+          refreshSymbolEmbeddings({
+            repoId,
+            provider: semanticConfig.provider ?? "local",
+            model: embModel,
+            onProgress,
+            concurrency: semanticConfig.embeddingConcurrency ?? 1,
+          }),
+        );
+        logger.info(
+          `Embeddings: ${embResult.embedded} embedded, ${embResult.skipped} cached (model: ${embModel})`,
+        );
+      } catch (error) {
+        logger.warn(`Semantic embedding refresh skipped for ${embModel}: ${String(error)}`);
+      }
     }
   }
 

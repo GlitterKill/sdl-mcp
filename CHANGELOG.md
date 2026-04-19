@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.11.0] - Unreleased
 
+### Added
+
+- **`sdl.context` defaults to hybrid retrieval end-to-end**: hybrid seeding (entitySearch
+  via FTS + vector + RRF) now runs **alongside** path-inference, not instead of it.
+  Path-inferred refs are preserved first; hybrid adds semantically related refs
+  the heuristic misses. `TaskOptions.semantic` (default `true`) and
+  `TaskOptions.includeRetrievalEvidence` (default `true`) toggle the behavior.
+- **Retrieval evidence surfaced on `sdl.context` responses**: `ContextSeedResult`
+  gained an `evidence?: RetrievalEvidence` field, captured from Stage 1
+  entitySearch and propagated into `AgentContextPayloadSchema.retrievalEvidence`.
+  The Zod schema now accepts `sources`, `candidateCountPerSource`,
+  `topRanksPerSource`, `fusionLatencyMs`, `fallbackReason`, `ftsAvailable`, and
+  `vectorAvailable` — so callers can see which lanes contributed to their
+  results.
+- **Entity-search telemetry**: `entitySearch` emits
+  `logger.info("Entity search", { eventType: "entity_search", ... })` at every
+  return path (fallback-to-legacy, db-connection-fail, main success) with
+  latency, per-source candidate counts, and `ftsAvailable`/`vectorAvailable`.
+  This makes hybrid contribution visible for `sdl.context` calls (previously
+  only `sdl.symbol.search` emitted hybrid telemetry).
+- **Multi-model embedding pass**: new `semantic.additionalModels: string[]`
+  config option. The indexer now loops over `[model, ...additionalModels]`
+  calling `refreshSymbolEmbeddings` per model, so both `jina-embeddings-v2-base-code`
+  and `nomic-embed-text-v1.5` vectors can be populated from a single index run.
+  Hybrid fusion can then RRF-merge both vector lanes alongside FTS.
+
 ### Changed
 
 - **ONNX embedding models unbundled**: `jina-embeddings-v2-base-code` (~162MB) and

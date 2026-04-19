@@ -1,3 +1,6 @@
+// RetrievalEvidence imported for ContextSeedResult evidence field
+import type { RetrievalEvidence } from "../retrieval/types.js";
+
 export type TaskType = "debug" | "review" | "implement" | "explain";
 
 export type RungType = "card" | "skeleton" | "hotPath" | "raw";
@@ -29,6 +32,12 @@ export interface TaskOptions {
   /** Explicit search terms for symbol resolution fallback.
    *  When provided, these are used instead of extracting identifiers from taskText. */
   searchTerms?: string[];
+  /** Use hybrid (FTS + vector) retrieval for context seeding. Default: true.
+   *  Set to false to force plain lexical search (debugging/deterministic tests). */
+  semantic?: boolean;
+  /** Include retrieval evidence (which lanes contributed, per-source counts) in
+   *  the response and downstream logging. Default: true. */
+  includeRetrievalEvidence?: boolean;
 }
 
 export interface RungPath {
@@ -156,6 +165,8 @@ export interface ContextSeedCandidate {
 export interface ContextSeedResult {
   candidates: ContextSeedCandidate[];
   sources: { semantic: number; lexical: number; feedback: number };
+  /** Hybrid retrieval evidence captured from Stage 1 entitySearch (optional). */
+  evidence?: RetrievalEvidence;
 }
 
 // ---------------------------------------------------------------------------

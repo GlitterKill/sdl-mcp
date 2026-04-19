@@ -1901,6 +1901,19 @@ export const AgentContextRequestSchema = z.object({
         .describe(
           "Context breadth: precise returns minimal workflow-efficient context, broad returns richer surrounding context. Default: broad",
         ),
+      semantic: z
+        .boolean()
+        .optional()
+        .describe(
+          // AgentContextRequest retrieval defaults: semantic=true, evidence=true
+          "Use hybrid (FTS + vector) retrieval for context seeding. Default: true.",
+        ),
+      includeRetrievalEvidence: z
+        .boolean()
+        .optional()
+        .describe(
+          "Include retrieval evidence (which lanes contributed, per-source counts) in the response. Default: true.",
+        ),
     })
     .optional()
     .describe("Task-specific options"),
@@ -1974,12 +1987,19 @@ const AgentContextPayloadSchema = z.object({
     .describe(
       "Suggested next action based on execution results and policy decisions",
     ),
+  /* sdl.context: enriched retrieval evidence */
   retrievalEvidence: z
     .object({
       symptomType: z
         .enum(["stackTrace", "failingTest", "taskText", "editedFiles"])
         .optional(),
       sources: z.array(z.string()).optional(),
+      candidateCountPerSource: z.record(z.string(), z.number()).optional(),
+      topRanksPerSource: z.record(z.string(), z.array(z.number())).optional(),
+      fusionLatencyMs: z.number().optional(),
+      fallbackReason: z.string().optional(),
+      ftsAvailable: z.boolean().optional(),
+      vectorAvailable: z.boolean().optional(),
       feedbackBoosts: z
         .object({
           feedbackMatchCount: z.number(),
