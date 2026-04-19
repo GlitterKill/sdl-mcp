@@ -28,6 +28,7 @@ jobs:
       npm_dist_tag: ${{ steps.resolve.outputs.npm_dist_tag }}
       dry_run: ${{ steps.resolve.outputs.dry_run }}
       raw_tag: ${{ steps.resolve.outputs.raw_tag }}
+      should_publish: ${{ steps.resolve.outputs.should_publish }}
     steps:
       - name: Resolve version and npm dist-tag
         id: resolve
@@ -50,8 +51,19 @@ jobs:
 
           VERSION="${RAW_TAG#v}"
           if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Release tag '${RAW_TAG}' is not a valid semver tag (expected vX.Y.Z)"
-            exit 1
+            if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+              echo "Release tag '${RAW_TAG}' is not a valid semver tag (expected vX.Y.Z)"
+              exit 1
+            fi
+
+            # Allow asset-only releases (for example models-v1) without failing publish CI.
+            echo "Non-semver release tag '${RAW_TAG}' detected; skipping npm publish workflow."
+            echo "raw_tag=${RAW_TAG}" >> "${GITHUB_OUTPUT}"
+            echo "version=" >> "${GITHUB_OUTPUT}"
+            echo "npm_dist_tag=" >> "${GITHUB_OUTPUT}"
+            echo "dry_run=false" >> "${GITHUB_OUTPUT}"
+            echo "should_publish=false" >> "${GITHUB_OUTPUT}"
+            exit 0
           fi
 
           NPM_DIST_TAG="latest"
@@ -68,16 +80,19 @@ jobs:
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "npm_dist_tag=${NPM_DIST_TAG}" >> "${GITHUB_OUTPUT}"
           echo "dry_run=${DRY_RUN}" >> "${GITHUB_OUTPUT}"
+          echo "should_publish=true" >> "${GITHUB_OUTPUT}"
 
           echo "Resolved release tag: ${RAW_TAG}"
           echo "Resolved version: ${VERSION}"
           echo "Resolved npm dist-tag: ${NPM_DIST_TAG}"
           echo "Dry run: ${DRY_RUN}"
+          echo "Should publish: true"
 
   build-native:
     name: Build Native (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     needs: resolve-version
+    if: needs.resolve-version.outputs.should_publish == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -157,6 +172,7 @@ jobs:
     needs:
       - resolve-version
       - build-native
+    if: needs.resolve-version.outputs.should_publish == 'true'
     env:
       VERSION: ${{ needs.resolve-version.outputs.version }}
       NPM_DIST_TAG: ${{ needs.resolve-version.outputs.npm_dist_tag }}

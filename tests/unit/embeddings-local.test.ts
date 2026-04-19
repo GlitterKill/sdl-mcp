@@ -4,7 +4,11 @@ import {
   ensureLocalEmbeddingRuntime,
   resetLocalEmbeddingRuntime,
 } from "../../dist/indexer/embeddings-local.js";
-import { getEmbeddingProvider } from "../../dist/indexer/embeddings.js";
+import {
+  EMBEDDING_DIMENSION,
+  getEmbeddingProvider,
+} from "../../dist/indexer/embeddings.js";
+import { getModelInfo } from "../../dist/indexer/model-registry.js";
 
 test("ensureLocalEmbeddingRuntime returns availability status", async () => {
   resetLocalEmbeddingRuntime();
@@ -112,13 +116,22 @@ test("getEmbeddingProvider api provider works", async () => {
 });
 
 test("local provider embeds or falls back gracefully", async () => {
+  const expectedRealDimension = getModelInfo(
+    "jina-embeddings-v2-base-code",
+  ).dimension;
   const provider = getEmbeddingProvider("local", "jina-embeddings-v2-base-code");
-  // If ONNX runtime is available, returns 384-dim vectors
-  // If not, falls back to 64-dim mock vectors — either way, should not throw
+  // If ONNX runtime is available, returns model-registry dimension vectors.
+  // If not, falls back to EMBEDDING_DIMENSION mock vectors.
   const result = await provider.embed(["test embedding"]);
   assert.strictEqual(result.length, 1);
+  assert.strictEqual(
+    provider.getDimension(),
+    result[0].length,
+    "provider dimension should match embedding vector length",
+  );
   assert.ok(
-    result[0].length === 384 || result[0].length === 64,
-    `Expected 384 (real) or 64 (mock fallback), got ${result[0].length}`,
+    result[0].length === expectedRealDimension ||
+      result[0].length === EMBEDDING_DIMENSION,
+    `Expected ${expectedRealDimension} (real) or ${EMBEDDING_DIMENSION} (mock fallback), got ${result[0].length}`,
   );
 });

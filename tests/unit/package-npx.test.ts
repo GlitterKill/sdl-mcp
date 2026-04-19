@@ -16,9 +16,11 @@ describe("npx packaging metadata", () => {
     const files = new Set(pkg.files ?? []);
     assert.ok(files.has("dist"));
     assert.ok(files.has("config"));
-    assert.ok(files.has("models"));
     assert.ok(files.has("templates/*.json"));
     assert.ok(files.has("templates/*.template"));
+    assert.ok(files.has("scripts/postinstall.mjs"));
+    assert.ok(files.has("scripts/postinstall-prune.mjs"));
+    assert.ok(files.has("scripts/postinstall-models.mjs"));
     assert.ok(!files.has("migrations"));
     assert.ok(!files.has("templates"));
   });

@@ -15,7 +15,7 @@ test("getModelInfo returns Jina metadata", () => {
   assert.strictEqual(info.name, "jina-embeddings-v2-base-code");
   assert.strictEqual(info.dimension, 768);
   assert.strictEqual(info.maxSequenceLength, 8192);
-  assert.strictEqual(info.bundled, true);
+  assert.strictEqual(info.bundled, false);
   assert.strictEqual(info.modelFile, "model_quantized.onnx");
   assert.strictEqual(info.tokenizerFile, "tokenizer.json");
 });
@@ -86,12 +86,15 @@ test("resolveTokenizerPath returns path ending with tokenizer file", () => {
   );
 });
 
-test("resolveModelDir for bundled model points to models/ directory", () => {
+test("resolveModelDir for jina model uses runtime cache directory", () => {
   const dir = resolveModelDir("jina-embeddings-v2-base-code");
-  assert.ok(dir.includes("models"), `Dir should contain 'models': ${dir}`);
   assert.ok(
     dir.endsWith("jina-embeddings-v2-base-code"),
     `Dir should end with model name: ${dir}`,
+  );
+  assert.ok(
+    dir.includes("sdl-mcp") || dir.includes(".cache"),
+    `Jina dir should resolve to runtime cache: ${dir}`,
   );
 });
 
