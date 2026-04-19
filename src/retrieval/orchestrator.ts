@@ -79,6 +79,32 @@ const DEFAULT_FTS_INDEX_NAME = "symbol_search_text_v1";
 // FTS retrieval
 // ---------------------------------------------------------------------------
 
+// LadybugDB requires table + index names to be literal expressions inside
+// QUERY_FTS_INDEX / QUERY_VECTOR_INDEX, so we inline them after strict
+// validation. The pattern permits the same identifier shape Ladybug itself
+// accepts for index DDL — never user input.
+const INDEX_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const TABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function assertIndexName(name: string): void {
+  if (!INDEX_NAME_PATTERN.test(name)) {
+    throw new Error(`Invalid index name: ${JSON.stringify(name)}`);
+  }
+}
+
+function assertTableName(name: string): void {
+  if (!TABLE_NAME_PATTERN.test(name)) {
+    throw new Error(`Invalid table name: ${JSON.stringify(name)}`);
+  }
+}
+
+function assertPositiveInt(n: number, label: string): number {
+  if (!Number.isInteger(n) || n <= 0 || n > 10_000) {
+    throw new Error(`${label} must be a positive integer ≤ 10000, got ${n}`);
+  }
+  return n;
+}
+
 /**
  * Query the Kuzu FTS index for symbols matching the query text.
  *
@@ -90,16 +116,19 @@ async function queryFts(
   indexName: string,
   query: string,
   topK: number,
+  conjunctive: boolean,
 ): Promise<FtsRawRow[]> {
   try {
+    assertIndexName(indexName);
+    const k = assertPositiveInt(topK, "topK");
     const rows = await queryAll<FtsRawRow>(
       conn,
-      `CALL QUERY_FTS_INDEX('Symbol', $indexName, $query, $topK)`,
-      { indexName, query, topK },
+      `CALL QUERY_FTS_INDEX('Symbol', '${indexName}', $query, K := ${k}, conjunctive := ${conjunctive ? "true" : "false"}) RETURN node, score`,
+      { query },
     );
     return rows;
   } catch (err) {
-    logger.debug(
+    logger.warn(
       `[hybrid-search] FTS query failed (extension/index may be unavailable): ${
         err instanceof Error ? err.message : String(err)
       }`,
@@ -139,10 +168,12 @@ async function queryVectorIndex(
   topK: number,
 ): Promise<{ symbolId: string; score: number }[]> {
   try {
+    assertIndexName(indexName);
+    const k = assertPositiveInt(topK, "topK");
     const rows = await queryAll<VectorRawRow>(
       conn,
-      `CALL QUERY_VECTOR_INDEX('Symbol', $indexName, $queryVector, $topK)`,
-      { indexName, queryVector: embedding, topK },
+      `CALL QUERY_VECTOR_INDEX('Symbol', '${indexName}', $queryVector, ${k}) RETURN node, distance`,
+      { queryVector: embedding },
     );
     return rows.map((r) => ({
       symbolId: r.symbolId ?? r.node?.symbolId ?? r._node?.symbolId ?? "",
@@ -156,7 +187,7 @@ async function queryVectorIndex(
             : 0,
     }));
   } catch (err) {
-    logger.debug(
+    logger.warn(
       `[hybrid-search] Vector query failed (extension/index may be unavailable): ${
         err instanceof Error ? err.message : String(err)
       }`,
@@ -347,7 +378,14 @@ export async function hybridSearch(
       results: [],
       ...(options.includeEvidence
         ? {
-            evidence: buildEvidence([], [], 0, "fallback-to-legacy: " + (caps.degradationReasons?.map((r) => r.message).join("; ") ?? "retrieval unavailable")),
+            evidence: buildEvidence(
+              [],
+              [],
+              0,
+              "fallback-to-legacy: " +
+                (caps.degradationReasons?.map((r) => r.message).join("; ") ??
+                  "retrieval unavailable"),
+            ),
           }
         : {}),
     };
@@ -383,8 +421,15 @@ export async function hybridSearch(
   if (ftsEnabled && caps.fts) {
     const ftsTopK = config.fts.topK ?? DEFAULT_FTS_TOP_K;
     const ftsIndexName = config.fts.indexName ?? DEFAULT_FTS_INDEX_NAME;
+    const ftsConjunctive = config.fts.conjunctive ?? false;
 
-    const ftsRows = await queryFts(conn, ftsIndexName, options.query, ftsTopK);
+    const ftsRows = await queryFts(
+      conn,
+      ftsIndexName,
+      options.query,
+      ftsTopK,
+      ftsConjunctive,
+    );
 
     if (ftsRows.length > 0) {
       const ranks = new Map<string, number>();
@@ -415,7 +460,8 @@ export async function hybridSearch(
     // Prioritize Jina for Symbol retrieval, then Nomic
     const sortedModels = Object.entries(EMBEDDING_MODELS).sort(([a], [b]) => {
       // Jina-code first for symbol search, then nomic
-      const priority = (m: string) => m.includes("jina") ? 0 : m.includes("nomic") ? 1 : 2;
+      const priority = (m: string) =>
+        m.includes("jina") ? 0 : m.includes("nomic") ? 1 : 2;
       return priority(a) - priority(b);
     });
     for (const [modelName, modelInfo] of sortedModels) {
@@ -733,7 +779,16 @@ export async function entitySearch(
     return {
       results: [],
       ...(options.includeEvidence
-        ? { evidence: buildEntityEvidence([], [], 0, "fallback-to-legacy: " + (caps.degradationReasons?.map((r) => r.message).join("; ") ?? "retrieval unavailable")) }
+        ? {
+            evidence: buildEntityEvidence(
+              [],
+              [],
+              0,
+              "fallback-to-legacy: " +
+                (caps.degradationReasons?.map((r) => r.message).join("; ") ??
+                  "retrieval unavailable"),
+            ),
+          }
         : {}),
     };
   }
@@ -768,6 +823,7 @@ export async function entitySearch(
   // ----- FTS retrieval (per entity type) -----
   if (ftsEnabled && caps.fts) {
     const ftsTopK = config.fts.topK ?? DEFAULT_FTS_TOP_K;
+    const ftsConjunctive = config.fts.conjunctive ?? false;
 
     for (const entityType of entityTypes) {
       const entityCfg = ENTITY_FTS_CONFIG[entityType];
@@ -781,13 +837,16 @@ export async function entitySearch(
 
       let ftsRows: FtsRawRow[] = [];
       try {
+        assertTableName(entityCfg.tableName);
+        assertIndexName(indexName);
+        const k = assertPositiveInt(ftsTopK, "topK");
         ftsRows = await queryAll<FtsRawRow>(
           conn,
-          `CALL QUERY_FTS_INDEX('${entityCfg.tableName}', $indexName, $query, $topK)`,
-          { indexName, query: options.query, topK: ftsTopK },
+          `CALL QUERY_FTS_INDEX('${entityCfg.tableName}', '${indexName}', $query, K := ${k}, conjunctive := ${ftsConjunctive ? "true" : "false"}) RETURN node, score`,
+          { query: options.query },
         );
       } catch (err) {
-        logger.debug(
+        logger.warn(
           `[entity-search] FTS query failed for '${entityType}' (index may be unavailable): ${
             err instanceof Error ? err.message : String(err)
           }`,
@@ -896,10 +955,13 @@ export async function entitySearch(
         const entityFtsCfg = ENTITY_FTS_CONFIG[entityType];
         if (!entityFtsCfg) continue; // skip unknown entity types in vector path
         try {
+          assertTableName(entityFtsCfg.tableName);
+          assertIndexName(indexName);
+          const k = assertPositiveInt(vectorTopK, "topK");
           const rawRows = await queryAll<VectorRawRow>(
             conn,
-            `CALL QUERY_VECTOR_INDEX('${entityFtsCfg.tableName}', $indexName, $queryVector, $topK)`,
-            { indexName, queryVector: queryEmbedding, topK: vectorTopK },
+            `CALL QUERY_VECTOR_INDEX('${entityFtsCfg.tableName}', '${indexName}', $queryVector, ${k}) RETURN node, distance`,
+            { queryVector: queryEmbedding },
           );
           vecRows = rawRows.map((r) => {
             // The id field varies by entity type.
@@ -921,7 +983,7 @@ export async function entitySearch(
             return { symbolId: entityId, score };
           });
         } catch (err) {
-          logger.debug(
+          logger.warn(
             `[entity-search] Vector query failed for '${entityType}' model '${modelName}': ${
               err instanceof Error ? err.message : String(err)
             }`,
