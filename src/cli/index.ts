@@ -32,6 +32,16 @@ import {
   parseHealthOptions,
   parseToolDispatchOptions,
 } from "./argParsing.js";
+import { NODE_MIN_MAJOR_VERSION } from "../config/constants.js";
+
+const _nodeMajor = parseInt(process.version.slice(1).split(".")[0], 10);
+if (_nodeMajor < NODE_MIN_MAJOR_VERSION) {
+  process.stderr.write(
+    "[sdl-mcp] Error: sdl-mcp requires Node.js " + NODE_MIN_MAJOR_VERSION + "+, found " + process.version + ".\n" +
+    "[sdl-mcp] Please upgrade: https://nodejs.org/\n",
+  );
+  process.exit(1);
+}
 
 async function main(): Promise<void> {
   const { values, positionals } = parseArgs({

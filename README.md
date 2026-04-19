@@ -64,10 +64,22 @@ flowchart TD
 
 <br/>
 
+## Prerequisites
+
+- **Node.js 24+** is required ([download](https://nodejs.org/)). SDL-MCP uses Node.js features not available in earlier versions. Run `node -v` to check.
+
+> **Peer dependency warnings during install?** The tree-sitter grammar packages may produce `ERESOLVE` warnings about peer dependencies. These are harmless — the install succeeds and everything works correctly. Add `--legacy-peer-deps` to suppress them: `npm install -g sdl-mcp --legacy-peer-deps`
+
+<br/>
+
+---
+
+<br/>
+
 ## Quick Start
 
 ```bash
-# Install
+# Install (requires Node.js 24+)
 npm install -g sdl-mcp
 
 # Initialize, auto-detect languages, index your repo, and run health checks
@@ -285,7 +297,7 @@ The sandboxed runtime execution tool (`sdl.runtime.execute`) has its own governa
 
 The feedback loop (`sdl.agent.feedback`) records which symbols were useful and which were missing, improving future slice quality.
 
- generates portable, token-bounded context briefings in markdown, JSON, or clipboard format for use outside MCP environments.
+generates portable, token-bounded context briefings in markdown, JSON, or clipboard format for use outside MCP environments.
 
 **Why it matters:**
 

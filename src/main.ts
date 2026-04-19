@@ -6,7 +6,7 @@ import { initGraphDb } from "./db/initGraphDb.js";
 import { closeLadybugDb } from "./db/ladybug.js";
 import { persistUsageSnapshot } from "./db/ladybug-usage.js";
 import { tokenAccumulator } from "./mcp/token-accumulator.js";
-import { CLEANUP_INTERVAL_MS } from "./config/constants.js";
+import { CLEANUP_INTERVAL_MS, NODE_MIN_MAJOR_VERSION } from "./config/constants.js";
 import {
   configureDefaultLiveIndexCoordinator,
   getDefaultLiveIndexCoordinator,
@@ -32,6 +32,17 @@ import {
 import { ensureConfiguredReposRegistered } from "./startup/bootstrap.js";
 
 import { resetScorerPool } from "./graph/slice/beam-search-engine.js";
+
+// Fail fast with a clear message on unsupported Node.js versions.
+const _nodeMajor = parseInt(process.version.slice(1).split(".")[0], 10);
+if (_nodeMajor < NODE_MIN_MAJOR_VERSION) {
+  process.stderr.write(
+    "[sdl-mcp] Error: sdl-mcp requires Node.js " + NODE_MIN_MAJOR_VERSION + "+, found " + process.version + ".\n" +
+    "[sdl-mcp] Please upgrade: https://nodejs.org/\n",
+  );
+  process.exit(1);
+}
+
 // Enable file logging by default for the direct MCP entry point so crash
 // evidence is always persisted. The SDL_LOG_FILE env var auto-enables in
 // logger.ts as well, but this ensures a log file exists even without it.
