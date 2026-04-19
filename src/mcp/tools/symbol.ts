@@ -491,10 +491,18 @@ export async function handleSymbolSearch(
         : bestRelevance < 0.5
           ? "Results may not be relevant. Try more specific terms, use kinds filter, or try sdl.symbol.search with a wildcard pattern."
           : undefined;
+  // Suppress results below noise floor when no exact match exists
+  const NOISE_FLOOR = 0.3;
+  const effectiveResults = !hasExactMatch && bestRelevance < NOISE_FLOOR
+    ? []
+    : relevant;
+  const effectiveSuggestion = effectiveResults.length === 0 && relevant.length > 0
+    ? "No confident matches found. Try more specific terms or exact symbol names."
+    : suggestion;
   const response: SymbolSearchResponse = {
-    results: relevant,
+    results: effectiveResults,
     exactMatchFound: hasExactMatch,
-    ...(suggestion !== undefined && { suggestion }),
+    ...(effectiveSuggestion !== undefined && { suggestion: effectiveSuggestion }),
   };
   if (request.includeRetrievalEvidence) {
     if (useHybrid && retrievalEvidence) {

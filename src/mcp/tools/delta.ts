@@ -227,6 +227,7 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
             maxVersion: validated.toVersion ?? null,
             sliceHash: spilloverHandle,
             spilloverRef: null,
+            cardDetail: null,
           });
         }
         await updateSliceHandleSpillover(

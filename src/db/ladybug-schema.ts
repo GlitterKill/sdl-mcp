@@ -172,7 +172,8 @@ const NODE_TABLES: string[] = [
     minVersion STRING,
     maxVersion STRING,
     sliceHash STRING,
-    spilloverRef STRING
+    spilloverRef STRING,
+    cardDetail STRING
   )`,
 
   `CREATE NODE TABLE IF NOT EXISTS CardHash (

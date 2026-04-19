@@ -14,6 +14,7 @@ export interface SliceHandleRow {
   maxVersion: string | null;
   sliceHash: string;
   spilloverRef: string | null;
+  cardDetail: string | null;
 }
 
 export async function upsertSliceHandle(
@@ -29,7 +30,8 @@ export async function upsertSliceHandle(
          h.minVersion = $minVersion,
          h.maxVersion = $maxVersion,
          h.sliceHash = $sliceHash,
-         h.spilloverRef = $spilloverRef`,
+         h.spilloverRef = $spilloverRef,
+         h.cardDetail = $cardDetail`,
     {
       handle: handle.handle,
       repoId: handle.repoId,
@@ -39,6 +41,7 @@ export async function upsertSliceHandle(
       maxVersion: handle.maxVersion,
       sliceHash: handle.sliceHash,
       spilloverRef: handle.spilloverRef,
+      cardDetail: handle.cardDetail,
     },
   );
 }
@@ -57,7 +60,8 @@ export async function getSliceHandle(
             h.minVersion AS minVersion,
             h.maxVersion AS maxVersion,
             h.sliceHash AS sliceHash,
-            h.spilloverRef AS spilloverRef`,
+            h.spilloverRef AS spilloverRef,
+            h.cardDetail AS cardDetail`,
     { handle },
   );
   return row ?? null;

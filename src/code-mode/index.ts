@@ -39,6 +39,7 @@ export const ActionSearchRequestSchema = z.object({
   includeExamples: z.boolean().default(false),
   /** When true, return only counts and categories instead of full action details */
   summaryOnly: z.boolean().default(false),
+  excludeDisabled: z.boolean().default(false),
 })
 
 export function registerActionSearchTool(
@@ -69,8 +70,11 @@ export function registerActionSearchTool(
       });
 
       const allRanked = rankCatalog(catalog, args.query);
+      const filteredRanked = args.excludeDisabled
+        ? allRanked.filter(a => !a.disabled)
+        : allRanked;
       const offset = args.offset ?? 0;
-      const ranked = allRanked.slice(offset, offset + args.limit);
+      const ranked = filteredRanked.slice(offset, offset + args.limit);
       const autoEnabled =
         narrowLookup && (!args.includeSchemas || !args.includeExamples)
           ? {
@@ -83,21 +87,22 @@ export function registerActionSearchTool(
       if (args.summaryOnly) {
         const byKind: Record<string, number> = {};
         const byNamespace: Record<string, number> = {};
-        for (const action of allRanked) {
+        for (const action of filteredRanked) {
           byKind[action.kind] = (byKind[action.kind] ?? 0) + 1;
           const ns = action.action.split('.')[0];
           byNamespace[ns] = (byNamespace[ns] ?? 0) + 1;
         }
         return {
           summary: {
-            total: allRanked.length,
+            total: filteredRanked.length,
             byKind,
             byNamespace,
             matchedActions: ranked.map(a => a.action),
           },
-          tokenEstimate: estimateTokens(JSON.stringify({ total: allRanked.length, byKind, byNamespace })),
+          tokenEstimate: estimateTokens(JSON.stringify({ total: filteredRanked.length, byKind, byNamespace })),
         };
       }
+
 
       // Compute disabled action hints
       const disabledActions = ranked.filter(a => a.disabled);
@@ -114,11 +119,11 @@ export function registerActionSearchTool(
 
       return {
         actions: ranked,
-        total: allRanked.length,
+        total: filteredRanked.length,
         disabledHint,
         // Hint when schemas not included
         ...(!effectiveIncludeSchemas ? { schemaHint: "Tip: Add includeSchemas: true to see parameter types and enum values." } : {}),
-        hasMore: allRanked.length > offset + args.limit,
+        hasMore: filteredRanked.length > offset + args.limit,
         tokenEstimate: estimateTokens(JSON.stringify(ranked)),
         ...(autoEnabled ? { autoEnabled } : {}),
       };
@@ -132,6 +137,7 @@ export function registerActionSearchTool(
         includeSchemas: { type: "boolean" },
         includeExamples: { type: "boolean" },
         summaryOnly: { type: "boolean", description: "Return only counts and categories" },
+        excludeDisabled: { type: "boolean", description: "Hide disabled actions from results" },
       },
       required: ["query"],
       additionalProperties: false,
@@ -428,5 +434,22 @@ function renderMarkdown(catalog: ActionDescriptor[]): string {
     lines.push("");
   }
 
+  
+  // Step reference patterns for workflow users
+  lines.push("## Step Reference Patterns");
+  lines.push("");
+  lines.push("Use `$N.field` to reference results from prior workflow steps:");
+  lines.push("");
+  lines.push("| Pattern | Description |");
+  lines.push("|---------|-------------|");
+  lines.push("| `$0.results[0].symbolId` | First symbol ID from search |");
+  lines.push("| `$0.card.symbolId` | Symbol ID from getCard |");
+  lines.push("| `$0.slice.si[0]` | First symbol in slice (compact) |");
+  lines.push("| `$0.sliceHandle` | Handle from slice.build |");
+  lines.push("| `$0.artifactHandle` | Handle from runtime.execute |");
+  lines.push("| `$0.skeleton` | Skeleton IR string |");
+  lines.push("| `$0.excerpt` | Hot-path excerpt string |");
+  lines.push("| `$N.result.fieldName` | Any field from step N result |");
+  lines.push("");
   return lines.join("\n");
 }

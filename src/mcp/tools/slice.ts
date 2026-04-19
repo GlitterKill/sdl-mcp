@@ -471,6 +471,7 @@ async function handleSliceBuildInternal(
       maxVersion: lease.maxVersion,
       sliceHash: sliceHash,
       spilloverRef: spilloverPayload,
+      cardDetail: cardDetail ?? null,
     };
 
     await withWriteConn(async (wConn) => {
@@ -974,10 +975,10 @@ export async function handleSliceSpilloverGet(
         visibility: normalizeVisibility(symbolRow.visibility),
         signature,
         summary: symbolRow.summary ?? undefined,
-        invariants,
-        sideEffects,
+        invariants: handleRow.cardDetail === "compact" ? undefined : invariants,
+        sideEffects: handleRow.cardDetail === "compact" ? undefined : sideEffects,
         deps,
-        metrics: metricsData,
+        metrics: handleRow.cardDetail === "compact" ? undefined : metricsData,
         version: {
           ledgerVersion: handleRow.maxVersion ?? "",
           astFingerprint: symbolRow.astFingerprint,

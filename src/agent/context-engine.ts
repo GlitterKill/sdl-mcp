@@ -339,18 +339,11 @@ export class ContextEngine {
       );
     }
 
-    // Symbol cards section — concise: count + top 5 only
+    // Symbol cards section — count only, details are in finalEvidence
     const cards = byType.get("symbolCard");
     if (cards && cards.length > 0) {
-      const topCards = cards.slice(0, 5);
-      const overflow =
-        cards.length > 5
-          ? "\n- ... and " + (cards.length - 5) + " more (see finalEvidence)"
-          : "";
       sections.push(
-        `## Symbols (${cards.length})\n` +
-          topCards.map((c) => `- ${c.summary}`).join("\n") +
-          overflow,
+        `Found ${cards.length} symbol card(s) — see finalEvidence for details.`,
       );
     }
 
