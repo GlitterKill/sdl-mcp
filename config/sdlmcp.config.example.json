@@ -116,6 +116,7 @@
     "enabled": true,
     "provider": "local",
     "model": "jina-embeddings-v2-base-code",
+    "additionalModels": ["nomic-embed-text-v1.5"],
     "modelCacheDir": null,
     "generateSummaries": false,
     "summaryProvider": null,

@@ -368,7 +368,7 @@ export const SemanticConfigSchema = z.object({
    *  lanes can contribute to hybrid fusion. Primary `model` is always populated;
    *  each name listed here gets a separate pass. Unknown model names are skipped.
    *  Typical: `["nomic-embed-text-v1.5"]` alongside a jina primary. */
-  additionalModels: z.array(z.string()).optional().default([]),
+  additionalModels: z.array(z.string()).optional().default(["nomic-embed-text-v1.5"]),
   modelCacheDir: z.string().nullish(),
   generateSummaries: z.boolean().default(false),
   /** Summary LLM backend — independent from embedding provider.

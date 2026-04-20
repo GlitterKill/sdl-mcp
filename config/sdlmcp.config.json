@@ -144,6 +144,7 @@
     "alpha": 0.6,
     "provider": "mock",
     "model": "jina-embeddings-v2-base-code",
+    "additionalModels": ["nomic-embed-text-v1.5"],
     "generateSummaries": false
   },
   "prefetch": {

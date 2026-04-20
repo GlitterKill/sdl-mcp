@@ -530,7 +530,6 @@ flowchart TD
 
 Hybrid retrieval is the recommended default. The legacy path remains available through `semantic.retrieval.mode: "legacy"`, but the current recommended configuration surface is the hybrid pipeline under `semantic.retrieval.*`.
 
-
 ## Hybrid Retrieval Setup
 
 Hybrid retrieval replaces the legacy alpha-blending search with native Ladybug FTS + vector indexes fused via Reciprocal Rank Fusion (RRF). It is controlled by `semantic.retrieval.mode`.
@@ -747,7 +746,8 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
     // -- Embedding Model -----------------------------------------
     "enabled": true, // Enable semantic search
     "provider": "local", // "local" | "api" | "mock"
-    "model": "jina-embeddings-v2-base-code", // or "nomic-embed-text-v1.5"
+    "model": "jina-embeddings-v2-base-code", // Primary embedding model (or "nomic-embed-text-v1.5")
+    "additionalModels": ["nomic-embed-text-v1.5"], // Extra embedding lanes for hybrid fusion. Each entry runs a separate embedding pass at index time. Set to [] to disable.
     "modelCacheDir": null, // Override model storage path
     // -- LLM Summaries -------------------------------------------
     "generateSummaries": false, // Enable LLM summary generation
@@ -762,11 +762,16 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
     "retrieval": {
       "mode": "hybrid",
       "extensionsOptional": true,
-      "fts": { "enabled": true, "indexName": "symbol_search_text_v1", "topK": 75, "conjunctive": false },
+      "fts": {
+        "enabled": true,
+        "indexName": "symbol_search_text_v1",
+        "topK": 75,
+        "conjunctive": false,
+      },
       "vector": { "enabled": true, "topK": 75, "efs": 200 },
       "fusion": { "strategy": "rrf", "rrfK": 60 },
-      "candidateLimit": 100
-    }
+      "candidateLimit": 100,
+    },
   },
 }
 ```
