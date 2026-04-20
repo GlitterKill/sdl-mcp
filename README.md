@@ -13,7 +13,8 @@ _Stop feeding entire files into the context window.<br/>Start giving agents exac
 
 ![npm version](https://img.shields.io/npm/v/sdl-mcp.svg?style=for-the-badge)
 ![npm downloads](https://img.shields.io/npm/dm/sdl-mcp.svg?style=for-the-badge)
-![GitHub commit activity](https://img.shields.io/github/commit-activity/w/GlitterKill/sdl-mcp?style=for-the-badge)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/w/GlitterKill/sdl-mcp?style=for-the-badge)<br/>
+[![RoastMyCode: A](https://roastmycode.ai/badge/GlitterKill/sdl-mcp)](https://roastmycode.ai/roast/latest/GlitterKill/sdl-mcp)
 
 </div>
 
