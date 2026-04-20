@@ -71,7 +71,8 @@ describe("context-response-projection", () => {
       assert.equal(projected.actionsTaken, undefined);
       assert.equal(projected.path, undefined);
       assert.equal(projected.metrics, undefined);
-      assert.equal(projected.retrievalEvidence, undefined);
+      // retrievalEvidence is model-visible in compact broad responses.
+      assert.deepEqual(projected.retrievalEvidence, broadResult.retrievalEvidence);
     });
 
     it("preserves error field when present", () => {

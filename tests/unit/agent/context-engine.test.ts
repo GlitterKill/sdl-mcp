@@ -740,7 +740,7 @@ describe("ContextEngine", () => {
     }
   });
 
-  it("compact broad response omits internal fields (path, metrics, retrievalEvidence)", async () => {
+  it("compact broad response omits internal fields (path, metrics) while preserving retrievalEvidence", async () => {
     mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
     mock.method(Planner.prototype, "plan", () => defaultPath);
     mock.method(Planner.prototype, "selectContext", () => ["symbol:alpha"]);
@@ -790,10 +790,10 @@ describe("ContextEngine", () => {
       undefined,
       "metrics should be stripped by compaction",
     );
-    assert.equal(
-      resultObj.retrievalEvidence,
-      undefined,
-      "retrievalEvidence should be stripped by compaction",
+    assert.ok(
+      resultObj.retrievalEvidence &&
+        typeof resultObj.retrievalEvidence === "object",
+      "retrievalEvidence should be preserved in compact broad responses",
     );
   });
 
