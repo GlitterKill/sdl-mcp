@@ -285,6 +285,7 @@ If you set `budgetCaps`, provide both `maxCards` and `maxEstimatedTokens`.
 | `enabled` | `boolean` | `true` | |
 | `provider` | `"api" \| "local" \| "mock"` | `"local"` | Embedding provider |
 | `model` | `string` | `"jina-embeddings-v2-base-code"` | Embedding model |
+| `additionalModels` | `string[]` | `[]` | Extra embedding models to populate at index time so multiple vector lanes can contribute to hybrid fusion. Example: `["nomic-embed-text-v1.5"]` |
 | `modelCacheDir` | `string \| null` | `null` | Optional local cache override |
 | `generateSummaries` | `boolean` | `false` | Generates symbol summaries during indexing |
 | `summaryProvider` | `"api" \| "local" \| "mock" \| null` | `null` | Falls back to `provider` when omitted |
@@ -519,6 +520,7 @@ When both `scip.enabled` and `scip.generator.enabled` are true, SDL-MCP auto-add
     "enabled": true,
     "provider": "local",
     "model": "jina-embeddings-v2-base-code",
+    "additionalModels": ["nomic-embed-text-v1.5"],
     "generateSummaries": true,
     "summaryProvider": "local",
     "summaryApiBaseUrl": "http://localhost:11434/v1",

@@ -13,6 +13,7 @@ export const BROAD_VISIBLE_FIELDS = new Set([
   "answer",
   "finalEvidence",
   "nextBestAction",
+  "retrievalEvidence",
   "error",
   "truncation",
   "etag",

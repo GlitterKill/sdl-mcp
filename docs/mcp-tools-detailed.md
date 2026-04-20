@@ -1222,6 +1222,8 @@ Retrieves task-shaped code context inside Code Mode.
 
 **Parameters:** Same as `sdl.context`.
 
+**Note (v0.11.0):** Hybrid seeding (FTS + vector via RRF) now runs alongside path inference rather than only as a fallback. When available, `retrievalEvidence` carries hybrid seed evidence in the response — sources, candidateCountPerSource, topRanksPerSource, fusionLatencyMs, ftsAvailable, vectorAvailable. Disable per-call with `options.semantic: false`.
+
 **Response:** Same as `sdl.context`.
 
 ---

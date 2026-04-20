@@ -784,7 +784,7 @@ Update policy configuration for a repository. Accepts a partial patch — only s
 
 ### `sdl.context`
 
-Retrieve task-shaped code context with rung path selection and evidence capture. The engine uses semantic-first candidate seeding (with lexical and feedback fallbacks), evidence-aware ranking, and confidence-driven rung planning to select an optimal path through the context ladder (card -> skeleton -> hotPath -> raw).
+Retrieve task-shaped code context with rung path selection and evidence capture. The engine uses hybrid candidate seeding (FTS + vector via RRF, with feedback priors) that runs **alongside** path-inference rather than as a fallback, evidence-aware ranking, and confidence-driven rung planning to select an optimal path through the context ladder (card -> skeleton -> hotPath -> raw). Hybrid seeding can be disabled per-call with `options.semantic: false`.
 
 `sdl.context` is part of the Code Mode surface. In regular flat or gateway mode, use the manual ladder directly or enable Code Mode for task-shaped retrieval.
 
@@ -820,10 +820,12 @@ Retrieve task-shaped code context with rung path selection and evidence capture.
 | `focusPaths`         | `string[]`             | File paths to focus on                                                                                       |
 | `includeTests`       | `boolean`              | Include test files in analysis                                                                               |
 | `requireDiagnostics` | `boolean`              | Include diagnostic info (may add a raw rung)                                                                 |
+| `semantic`                 | `boolean`              | Use hybrid (FTS + vector + RRF) retrieval for context seeding. Default `true`. Set `false` to force plain lexical — useful for deterministic tests |
+| `includeRetrievalEvidence` | `boolean`              | Attach hybrid `retrievalEvidence` to the response (sources, candidate counts, top ranks per source, fusion latency, lane availability). Default `true` |
 
 **Response:**
 
-In **broad** mode (default, compact): `taskId`, `taskType`, `success`, `summary`, `answer`, `finalEvidence`, `nextBestAction?`, `error?` — the fields `actionsTaken`, `path`, `metrics`, and `retrievalEvidence` are omitted from the model-visible response. `finalEvidence` is the primary evidence surface. The `answer` field is always preserved on successful responses.
+In **broad** mode (default, compact): `taskId`, `taskType`, `success`, `summary`, `answer`, `finalEvidence`, `nextBestAction?`, `retrievalEvidence?`, `error?` — the fields `actionsTaken`, `path`, and `metrics` are omitted from the model-visible response. `finalEvidence` is the primary evidence surface. `retrievalEvidence` carries `sources`, `candidateCountPerSource`, `topRanksPerSource`, `fusionLatencyMs`, `ftsAvailable`, and `vectorAvailable` from Stage 1 hybrid seeding when available. The `answer` field is always preserved on successful responses.
 
 In **precise** mode: `taskId`, `taskType`, `success`, `path`, `finalEvidence`, `metrics` — envelope fields stripped for token efficiency.
 

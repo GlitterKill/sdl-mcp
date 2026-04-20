@@ -45,7 +45,7 @@ flowchart TD
 The context engine:
 
 1. Classifies the task as `debug`, `review`, `implement`, or `explain`.
-2. Seeds candidates using semantic retrieval first, lexical fallback second, and feedback priors third.
+2. Seeds candidates via hybrid retrieval (FTS + vector with RRF) that runs **alongside** path inference — merged into context, not replacing it — with feedback priors and a lexical fallback. This is the hybrid seed merge behaviour. Disable per-call with `options.semantic: false`.
 3. Ranks symbols and paths with an evidence-aware scorer.
 4. Plans only the rungs needed for the task and budget.
 5. Returns compact evidence plus an answer envelope when broad mode is used.
