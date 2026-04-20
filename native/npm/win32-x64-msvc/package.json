@@ -1,6 +1,6 @@
 {
   "name": "sdl-mcp-native-win32-x64-msvc",
-  "version": "0.10.6",
+  "version": "0.10.7",
   "description": "Native Rust indexer for SDL-MCP - Windows x64",
   "license": "SEE LICENSE IN LICENSE",
   "os": [
