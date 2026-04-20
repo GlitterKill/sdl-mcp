@@ -89,6 +89,56 @@ if (
   console.log(`  package.json sdl-mcp-native already at ${version}`);
 }
 
+// 4. Update package-lock.json native entries when present
+const lockPath = join(root, "package-lock.json");
+let lockChanged = false;
+try {
+  const lock = readJson(lockPath);
+  const lockRoot = lock.packages?.[""];
+  if (
+    lockRoot?.optionalDependencies &&
+    lockRoot.optionalDependencies["sdl-mcp-native"] !== version
+  ) {
+    lockRoot.optionalDependencies["sdl-mcp-native"] = version;
+    lockChanged = true;
+  }
+
+  const nativeLockEntry = lock.packages?.["node_modules/sdl-mcp-native"];
+  if (nativeLockEntry) {
+    if (nativeLockEntry.version !== version) {
+      nativeLockEntry.version = version;
+      lockChanged = true;
+    }
+    if (nativeLockEntry.optionalDependencies) {
+      for (const depName of Object.keys(nativeLockEntry.optionalDependencies)) {
+        if (nativeLockEntry.optionalDependencies[depName] !== version) {
+          nativeLockEntry.optionalDependencies[depName] = version;
+          lockChanged = true;
+        }
+      }
+    }
+  }
+
+  if (nativePkg.optionalDependencies) {
+    for (const depName of Object.keys(nativePkg.optionalDependencies)) {
+      const depEntry = lock.packages?.[`node_modules/${depName}`];
+      if (depEntry?.version && depEntry.version !== version) {
+        depEntry.version = version;
+        lockChanged = true;
+      }
+    }
+  }
+
+  if (lockChanged) {
+    writeJson(lockPath, lock);
+    console.log(`  Updated package-lock.json native entries -> ${version}`);
+  } else {
+    console.log("  package-lock.json native entries already in sync");
+  }
+} catch {
+  console.log("  package-lock.json not found or unreadable, skipping lock sync");
+}
+
 console.log(
   `\nDone. Synced version ${version} across ${platformCount} platform packages.`
 );
