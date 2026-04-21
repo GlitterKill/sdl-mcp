@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { RetrievalEvidence } from "../retrieval/types.js";
 import { RUNTIME_NAMES } from "../runtime/runtimes.js";
 import {
   SYMBOL_SEARCH_MAX_RESULTS,
@@ -2605,7 +2606,7 @@ export const FileWriteInsertAtSchema = z.object({
 
 export const FileWriteRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  filePath: z.string().min(1).describe("File path relative to repo root"),
+  filePath: z.string().min(1).max(1024).refine((p) => !p.includes("\0"), { message: "filePath must not contain null bytes" }).describe("File path relative to repo root"),
 
   // Write modes (mutually exclusive - use exactly one)
   content: z
@@ -2676,3 +2677,137 @@ export interface FileWriteResponse {
     error?: string;
   };
 }
+
+// ============================================================================
+// Search/Edit (sdl.search.edit) Schemas
+// ============================================================================
+
+const SearchEditQuerySchema = z.object({
+  literal: z.string().min(1).max(500).optional(),
+  regex: z.string().max(500).optional(),
+  replacement: z.string().max(5000).optional(),
+  global: z.boolean().optional(),
+  symbolRef: z
+    .object({
+      name: z.string().min(1).max(200),
+      file: z.string().max(500).optional(),
+      kind: z.string().max(50).optional(),
+    })
+    .optional(),
+  symbolIds: z.array(z.string().min(1)).max(200).optional(),
+  replaceLines: z
+    .object({
+      start: z.number().int().min(0),
+      end: z.number().int().min(0),
+      content: z.string().max(512 * 1024),
+    })
+    .refine((v) => v.end >= v.start, {
+      message: "replaceLines.end must be >= replaceLines.start",
+    })
+    .optional(),
+  insertAt: z
+    .object({
+      line: z.number().int().min(0),
+      content: z.string().max(512 * 1024),
+    })
+    .optional(),
+  content: z
+    .string()
+    .max(512 * 1024)
+    .optional(),
+  append: z
+    .string()
+    .max(512 * 1024)
+    .optional(),
+});
+
+const SearchEditFiltersSchema = z.object({
+  include: z.array(z.string().max(500)).max(50).optional(),
+  exclude: z.array(z.string().max(500)).max(50).optional(),
+  extensions: z.array(z.string().max(20)).max(50).optional(),
+});
+
+const SearchEditEditMode = z.enum([
+  "replacePattern",
+  "replaceLines",
+  "insertAt",
+  "append",
+  "overwrite",
+]);
+
+const SearchEditPreviewRequestSchema = z.object({
+  mode: z.literal("preview"),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  targeting: z.enum(["text", "symbol"]),
+  query: SearchEditQuerySchema,
+  filters: SearchEditFiltersSchema.optional(),
+  editMode: SearchEditEditMode,
+  previewContextLines: z.number().int().min(0).max(20).optional(),
+  maxFiles: z.number().int().min(1).max(500).optional(),
+  maxMatchesPerFile: z.number().int().min(1).max(5000).optional(),
+  maxTotalMatches: z.number().int().min(1).max(50000).optional(),
+  createBackup: z.boolean().optional(),
+});
+
+const SearchEditApplyRequestSchema = z.object({
+  mode: z.literal("apply"),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  planHandle: z.string().min(1).max(200),
+  createBackup: z.boolean().optional(),
+});
+
+export const SearchEditRequestSchema = z.discriminatedUnion("mode", [
+  SearchEditPreviewRequestSchema,
+  SearchEditApplyRequestSchema,
+]);
+
+export type SearchEditRequest = z.infer<typeof SearchEditRequestSchema>;
+
+export interface SearchEditPreviewResponse {
+  mode: "preview";
+  planHandle: string;
+  filesMatched: number;
+  matchesFound: number;
+  filesEligible: number;
+  filesSkipped: Array<{ path: string; reason: string }>;
+  fileEntries: Array<{
+    file: string;
+    matchCount: number;
+    editMode: FileWriteResponse["mode"];
+    snippets: { before: string; after: string };
+    indexedSource: boolean;
+  }>;
+  requiresApply: boolean;
+  expiresAt: string;
+  preconditionSnapshot: Array<{
+    file: string;
+    sha256: string | null;
+    mtimeMs: number | null;
+  }>;
+  partial?: boolean;
+  retrievalEvidence?: RetrievalEvidence;
+}
+
+export interface SearchEditApplyResponse {
+  mode: "apply";
+  planHandle: string;
+  filesAttempted: number;
+  filesWritten: number;
+  filesSkipped: number;
+  filesFailed: number;
+  results: Array<{
+    file: string;
+    status: "written" | "skipped" | "failed" | "rolled-back";
+    bytes?: number;
+    reason?: string;
+    indexUpdate?: FileWriteResponse["indexUpdate"];
+  }>;
+  rollback: {
+    triggered: boolean;
+    restoredFiles: string[];
+  };
+}
+
+export type SearchEditResponse =
+  | SearchEditPreviewResponse
+  | SearchEditApplyResponse;

@@ -9,6 +9,7 @@
 import type { Connection } from "kuzu";
 import { queryAll } from "../db/ladybug-core.js";
 import { getLadybugConn } from "../db/ladybug.js";
+import * as ladybugDb from "../db/ladybug-queries.js";
 import { loadConfig } from "../config/loadConfig.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
 import { logger } from "../util/logger.js";
@@ -1080,4 +1081,116 @@ export async function entitySearch(
         }
       : {}),
   };
+}
+/**
+ * Narrow the candidate file set for `search.edit` text-mode planning.
+ *
+ * Runs an entity-level hybrid search (FTS + vector + RRF) restricted to the
+ * `symbol` entity type, then maps each returned symbol to its owning
+ * file. The caller uses this to shortlist files before bounded raw reads,
+ * instead of enumerating the entire repository.
+ *
+ * Degrades gracefully: when retrieval backends are unavailable the
+ * function returns an empty `paths` list and the planner falls back to
+ * full enumeration. Evidence (when requested) is always returned so the
+ * caller can surface `retrievalEvidence` in its response.
+ */
+export interface NarrowFilesForQueryOptions {
+  repoId: string;
+  query: string;
+  limit?: number;
+  includeEvidence?: boolean;
+}
+
+export interface NarrowFilesForQueryResult {
+  paths: string[];
+  evidence?: RetrievalEvidence;
+}
+
+export async function narrowFilesForQuery(
+  options: NarrowFilesForQueryOptions,
+): Promise<NarrowFilesForQueryResult> {
+  const limit = Math.max(1, Math.min(options.limit ?? 32, 200));
+  let entityResult;
+  try {
+    entityResult = await entitySearch({
+      repoId: options.repoId,
+      query: options.query,
+      limit,
+      entityTypes: ["symbol"],
+      includeEvidence: options.includeEvidence ?? true,
+    });
+  } catch (err) {
+    logger.debug(
+      `[narrow-files] entitySearch failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return { paths: [] };
+  }
+
+  const symbolIds = entityResult.results
+    .filter((r) => r.entityType === "symbol")
+    .map((r) => r.entityId);
+  if (symbolIds.length === 0) {
+    return {
+      paths: [],
+      ...(entityResult.evidence ? { evidence: entityResult.evidence } : {}),
+    };
+  }
+
+  let conn;
+  try {
+    conn = await getLadybugConn();
+  } catch (err) {
+    logger.debug(
+      `[narrow-files] getLadybugConn failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return {
+      paths: [],
+      ...(entityResult.evidence ? { evidence: entityResult.evidence } : {}),
+    };
+  }
+
+  try {
+    const symbols = await ladybugDb.getSymbolsByIds(conn, symbolIds);
+    const fileIds: string[] = [];
+    const seenFileIds = new Set<string>();
+    for (const sid of symbolIds) {
+      const sym = symbols.get(sid);
+      if (!sym || sym.repoId !== options.repoId) continue;
+      if (seenFileIds.has(sym.fileId)) continue;
+      seenFileIds.add(sym.fileId);
+      fileIds.push(sym.fileId);
+    }
+    if (fileIds.length === 0) {
+      return {
+        paths: [],
+        ...(entityResult.evidence ? { evidence: entityResult.evidence } : {}),
+      };
+    }
+
+    const fileRows = await ladybugDb.getFilesByIds(conn, fileIds);
+    const paths: string[] = [];
+    for (const fid of fileIds) {
+      const row = fileRows.get(fid);
+      if (row && row.repoId === options.repoId) paths.push(row.relPath);
+    }
+    return {
+      paths,
+      ...(entityResult.evidence ? { evidence: entityResult.evidence } : {}),
+    };
+  } catch (err) {
+    logger.debug(
+      `[narrow-files] DB lookup failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return {
+      paths: [],
+      ...(entityResult.evidence ? { evidence: entityResult.evidence } : {}),
+    };
+  }
 }

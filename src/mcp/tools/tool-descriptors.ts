@@ -45,6 +45,7 @@ import {
   FileReadRequestSchema,
   FileWriteRequestSchema,
   ScipIngestRequestSchema,
+  SearchEditRequestSchema,
 } from "../tools.js";
 
 import {
@@ -91,6 +92,7 @@ import { handleUsageStats } from "./usage.js";
 import { handleFileRead } from "./file-read.js";
 import { handleFileWrite } from "./file-write.js";
 import { handleScipIngest } from "./scip.js";
+import { handleSearchEdit } from "./search-edit/index.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { anyRepoHasMemoryTools } from "../../config/memory-config.js";
 
@@ -341,7 +343,7 @@ export function buildFlatToolDescriptors(
     {
       name: "sdl.file.write",
       description:
-        "Write to non-indexed files with targeted modes: full content, line replacement, pattern replacement, JSON path update, insert, or append",
+        "Write to a single file (indexed or non-indexed) with targeted modes; use sdl.search.edit for cross-file batching: full content, line replacement, pattern replacement, JSON path update, insert, or append",
       schema: FileWriteRequestSchema,
       handler: handleFileWrite,
     },
@@ -351,6 +353,13 @@ export function buildFlatToolDescriptors(
         "Ingest a pre-built SCIP index file to overlay compiler-grade cross-references onto the symbol graph. Supports dry-run mode.",
       schema: ScipIngestRequestSchema,
       handler: handleScipIngest,
+    },
+    {
+      name: "sdl.search.edit",
+      description:
+        "Cross-file search-and-edit in two phases: mode:\"preview\" returns a planHandle summarizing proposed edits; mode:\"apply\" executes the plan with sha256/mtime preconditions and rollback on mid-batch failure. Prefer this over composing repeated file.write calls.",
+      schema: SearchEditRequestSchema,
+      handler: handleSearchEdit,
     },
   ];
 

@@ -34,10 +34,10 @@ describe("Gateway router", () => {
   });
 
   describe("createActionMap", () => {
-    it("contains all 31 actions", () => {
+    it("contains all 32 actions", () => {
       const map = createActionMap();
       const actions = Object.keys(map);
-      assert.strictEqual(actions.length, 31);
+      assert.strictEqual(actions.length, 32);
     });
 
     it("each entry has schema and handler", () => {

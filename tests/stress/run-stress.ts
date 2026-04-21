@@ -37,6 +37,7 @@ import { runSessionSaturation } from "./scenarios/session-saturation.js";
 import { runDispatchPressure } from "./scenarios/dispatch-pressure.js";
 import { runSemanticTools } from "./scenarios/semantic-tools.js";
 import { runLimitStress } from "./scenarios/limit-stress.js";
+import { runSearchEditBatch } from "./scenarios/search-edit-batch.js";
 import type {
   StressTestConfig,
   ScenarioResult,
@@ -364,6 +365,26 @@ async function main(): Promise<void> {
         scenarios.push(result);
       } catch (err) {
         scenarios.push(errorResult("limit-stress", err));
+      }
+    }
+
+    // ---------------------------------------------------------------------
+    // Scenario 9: Search-Edit Batch (50-file preview+apply under concurrent reads)
+    // ---------------------------------------------------------------------
+    if (shouldRun("search-edit-batch")) {
+      stressLog(
+        "info",
+        "=== Scenario 9: Search-Edit Batch (50-file apply + concurrent readers) ===",
+      );
+      try {
+        const result = await withTimeout(
+          runSearchEditBatch(makeCtx(port, token)),
+          cliArgs.timeout * config.concurrencyLevels.length,
+          "search-edit-batch",
+        );
+        scenarios.push(result);
+      } catch (err) {
+        scenarios.push(errorResult("search-edit-batch", err));
       }
     }
   } finally {

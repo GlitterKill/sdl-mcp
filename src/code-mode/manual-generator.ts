@@ -48,6 +48,7 @@ export const FN_NAME_MAP: Record<string, string> = {
   usageStats: "usage.stats",
   fileRead: "file.read",
   fileWrite: "file.write",
+  searchEdit: "search.edit",
   scipIngest: "scip.ingest",
 };
 
@@ -168,6 +169,8 @@ function usageStats(p: { scope?: "session" | "history" | "both"; since?: string;
 /** Read non-indexed file content (templates, configs, docs) */
 function fileRead(p: { filePath: string; maxBytes?: number; offset?: number; limit?: number; search?: string; searchContext?: number; jsonPath?: string }): { content: string; bytes: number; totalLines: number; returnedLines: number; truncated: boolean; matchCount?: number; extractedPath?: string }
 function fileWrite(p: { filePath: string; content?: string; replaceLines?: { start: number; end: number; content: string }; replacePattern?: { pattern: string; replacement: string; global?: boolean }; jsonPath?: string; jsonValue?: unknown; insertAt?: { line: number; content: string }; append?: string; createBackup?: boolean; createIfMissing?: boolean }): { filePath: string; bytesWritten: number; linesWritten: number; mode: string; backupPath?: string; replacementCount?: number }
+/** Cross-file search-and-edit: mode "preview" computes a plan; mode "apply" executes with sha256 preconditions and rollback */
+function searchEdit(p: { mode: "preview"; repoId: string; targeting: "text"|"symbol"; query: { literal?: string; regex?: string; replacement?: string; global?: boolean; symbolRef?: { name: string; file?: string }; symbolIds?: string[] }; editMode: "replacePattern"|"replaceLines"|"insertAt"|"append"|"overwrite"; filters?: { include?: string[]; exclude?: string[]; extensions?: string[] }; maxFiles?: number; createBackup?: boolean } | { mode: "apply"; repoId: string; planHandle: string; createBackup?: boolean }): { mode: "preview"; planHandle: string; filesMatched: number; matchesFound: number; fileEntries: object[]; requiresApply: boolean } | { mode: "apply"; planHandle: string; filesWritten: number; filesFailed: number; results: object[]; rollback: { triggered: boolean } }
 
 // === Data Transforms (use inside sdl.workflow steps) ===
 // These are internal transforms, NOT gateway actions. Use as workflow step fn names.

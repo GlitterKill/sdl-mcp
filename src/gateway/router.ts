@@ -40,6 +40,7 @@ import {
   UsageStatsRequestSchema,
   FileReadRequestSchema,
   FileWriteRequestSchema,
+  SearchEditRequestSchema,
   ScipIngestRequestSchema,
 } from "../mcp/tools.js";
 import {
@@ -86,6 +87,7 @@ import { handleUsageStats } from "../mcp/tools/usage.js";
 import { handleFileRead } from "../mcp/tools/file-read.js";
 import { handleFileWrite } from "../mcp/tools/file-write.js";
 import { handleScipIngest } from "../mcp/tools/scip.js";
+import { handleSearchEdit } from "../mcp/tools/search-edit/index.js";
 import type { z } from "zod";
 import { normalizeToolArguments } from "../mcp/request-normalization.js";
 import { loadConfig } from "../config/loadConfig.js";
@@ -103,7 +105,7 @@ export interface ActionEntry {
 export type ActionMap = Record<string, ActionEntry>;
 
 /**
- * Maps action name -> { schema, handler } for all 25 tool actions.
+ * Maps action name -> { schema, handler } for all gateway tool actions.
  * Some handlers need the liveIndex service — those are patched in via
  * `createActionMap()` at registration time.
  */
@@ -189,6 +191,10 @@ export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
     "file.write": {
       schema: FileWriteRequestSchema,
       handler: handleFileWrite,
+    },
+    "search.edit": {
+      schema: SearchEditRequestSchema,
+      handler: handleSearchEdit,
     },
     "scip.ingest": {
       schema: ScipIngestRequestSchema,
