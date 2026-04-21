@@ -3,8 +3,13 @@ import { resolveCliConfigPath } from "../src/config/configPath.js";
 import { loadConfig } from "../src/config/loadConfig.js";
 import type { RepoConfig, AppConfig } from "../src/config/types.js";
 import { initGraphDb } from "../src/db/initGraphDb.js";
-import { getLadybugConn } from "../src/db/ladybug.js";
+import { closeLadybugDb, getLadybugConn } from "../src/db/ladybug.js";
 import * as ladybugDb from "../src/db/ladybug-queries.js";
+import {
+  disableDerivedRefreshQueue,
+  enableDerivedRefreshQueue,
+  shutdownDerivedRefreshQueue,
+} from "../src/indexer/derived-refresh-queue.js";
 import { getCurrentTimestamp } from "../src/util/time.js";
 
 interface CliArgs {
@@ -89,28 +94,42 @@ function reportResult(result: IndexResult): void {
   console.log(`Duration: ${(result.durationMs / 1000).toFixed(2)}s`);
 }
 
+async function cleanupCliResources(): Promise<void> {
+  try {
+    await shutdownDerivedRefreshQueue();
+    await closeLadybugDb();
+  } finally {
+    enableDerivedRefreshQueue();
+  }
+}
+
 async function main(): Promise<void> {
   const { repoId, mode, config: configArg } = parseArgs(process.argv);
+  disableDerivedRefreshQueue();
 
-  console.log("Loading configuration...");
-  const resolvedConfigPath = resolveCliConfigPath(configArg, "read");
-  const config: AppConfig = loadConfig(resolvedConfigPath);
+  try {
+    console.log("Loading configuration...");
+    const resolvedConfigPath = resolveCliConfigPath(configArg, "read");
+    const config: AppConfig = loadConfig(resolvedConfigPath);
 
-  await initGraphDb(config, resolvedConfigPath);
+    await initGraphDb(config, resolvedConfigPath);
 
-  const repoConfig = config.repos.find((r) => r.repoId === repoId);
-  if (!repoConfig) {
-    console.error(`Repository "${repoId}" not found in configuration`);
-    process.exit(1);
+    const repoConfig = config.repos.find((r) => r.repoId === repoId);
+    if (!repoConfig) {
+      throw new Error(`Repository "${repoId}" not found in configuration`);
+    }
+
+    console.log("Checking repository registration...");
+    await registerRepoIfNotExists(repoId, repoConfig);
+
+    console.log(`Starting ${mode} index for repository: ${repoId}`);
+    const result: IndexResult = await indexRepo(repoId, mode, logProgress);
+
+    reportResult(result);
+  } finally {
+    await cleanupCliResources();
   }
-
-  console.log("Checking repository registration...");
-  await registerRepoIfNotExists(repoId, repoConfig);
-
-  console.log(`Starting ${mode} index for repository: ${repoId}`);
-  const result: IndexResult = await indexRepo(repoId, mode, logProgress);
-
-  reportResult(result);
+  process.exit(0);
 }
 
 main().catch((error) => {
@@ -118,4 +137,3 @@ main().catch((error) => {
   console.error(`Error during indexing: ${msg}`);
   process.exit(1);
 });
-

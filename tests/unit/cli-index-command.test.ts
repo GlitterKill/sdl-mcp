@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert";
-import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -78,6 +78,37 @@ describe("CLI index command", () => {
       const g: CLIOptions = { config: "/path/to/config.json" };
       const options = parseIndexOptions([], g, {});
       assert.strictEqual(options.config, "/path/to/config.json");
+    });
+  });
+
+  describe("one-shot lifecycle", () => {
+    it("cleans up direct indexing resources before reporting completion", () => {
+      const source = readFileSync("src/cli/commands/index.ts", "utf-8");
+
+      assert.match(
+        source,
+        /if \(!options\.watch\) \{[\s\S]*?await cleanupOneShotIndexing\(/,
+      );
+      assert.match(
+        source,
+        /async function cleanupOneShotIndexing[\s\S]*?shutdownDerivedRefreshQueue\(\)[\s\S]*?closeLadybugDb\(\)/,
+      );
+    });
+
+    it("forces process exit after successful one-shot index command", () => {
+      const source = readFileSync("src/cli/index.ts", "utf-8");
+
+      assert.match(
+        source,
+        /await indexCommand\(options\);\s*process\.exit\(0\);\s*return;/,
+      );
+    });
+
+    it("legacy index-repo script closes resources and exits on success", () => {
+      const source = readFileSync("scripts/index-repo.ts", "utf-8");
+
+      assert.match(source, /await closeLadybugDb\(\);/);
+      assert.match(source, /process\.exit\(0\);/);
     });
   });
 

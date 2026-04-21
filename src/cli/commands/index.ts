@@ -6,6 +6,11 @@ import {
   IndexWatchHandle,
   IndexResult,
 } from "../../indexer/indexer.js";
+import {
+  disableDerivedRefreshQueue,
+  enableDerivedRefreshQueue,
+  shutdownDerivedRefreshQueue,
+} from "../../indexer/derived-refresh-queue.js";
 import type {
   IndexProgress,
   IndexProgressSubstage,
@@ -395,6 +400,22 @@ async function delegateIndexToServer(
   }
 }
 
+async function cleanupOneShotIndexing(
+  dbInitialized: boolean,
+  derivedRefreshDisabled: boolean,
+): Promise<void> {
+  try {
+    await shutdownDerivedRefreshQueue();
+    if (dbInitialized) {
+      await closeLadybugDb();
+    }
+  } finally {
+    if (derivedRefreshDisabled) {
+      enableDerivedRefreshQueue();
+    }
+  }
+}
+
 export async function indexCommand(options: IndexOptions): Promise<void> {
   printBanner();
 
@@ -450,6 +471,14 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
   console.log(`Indexing ${reposToIndex.length} repo(s)...`);
 
   const errors: Array<{ repoId: string; error: string }> = [];
+  const isOneShot = !options.watch;
+  let derivedRefreshDisabled = false;
+  if (isOneShot) {
+    // One-shot CLI invocations should mark derived state dirty but must not
+    // start background work that keeps the command prompt alive after indexing.
+    disableDerivedRefreshQueue();
+    derivedRefreshDisabled = true;
+  }
 
   for (const repo of reposToIndex) {
     const mode = options.force ? "full" : "incremental";
@@ -629,7 +658,7 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
     for (const e of errors) {
       console.error(`  - ${e.repoId}: ${e.error}`);
     }
-    await closeLadybugDb();
+    await cleanupOneShotIndexing(dbInitialized, derivedRefreshDisabled);
     process.exit(1);
   }
 
@@ -671,6 +700,7 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       for (const watcher of watchers) {
         await watcher.close();
       }
+      await shutdownDerivedRefreshQueue();
       await closeLadybugDb();
       process.exit(0);
     };
@@ -690,6 +720,10 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
     process.once("SIGTERM", () => handleShutdown("SIGTERM"));
 
     await new Promise(() => {});
+  }
+
+  if (!options.watch) {
+    await cleanupOneShotIndexing(dbInitialized, derivedRefreshDisabled);
   }
 
   console.log("\n✓ Indexing complete");

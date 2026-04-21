@@ -162,7 +162,8 @@ async function main(): Promise<void> {
         values as Record<string, unknown>,
       );
       await indexCommand(options);
-      break;
+      process.exit(0);
+      return;
     }
 
     case "serve": {
