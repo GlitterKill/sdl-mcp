@@ -83,18 +83,22 @@ export async function preflightPreconditions(
       });
       continue;
     }
-    // TOCTOU: re-verify path hasn't been swapped for a symlink escape
-    try {
-      const resolved = realpathSync(pc.absPath);
-      if (resolved !== pc.absPath) {
-        validatePathWithinRoot(rootPath, resolved);
+    // TOCTOU: re-verify path hasn't been swapped for a symlink escape.
+    // Skip when sha256 is null (file did not exist at preview time):
+    // realpathSync would throw ENOENT legitimately.
+    if (pc.sha256 !== null) {
+      try {
+        const resolved = realpathSync(pc.absPath);
+        if (resolved !== pc.absPath) {
+          validatePathWithinRoot(rootPath, resolved);
+        }
+      } catch (err) {
+        failures.push({
+          file: pc.relPath,
+          reason: `symlink-escape:${err instanceof Error ? err.message : "unknown"}`,
+        });
+        continue;
       }
-    } catch (err) {
-      failures.push({
-        file: pc.relPath,
-        reason: `symlink-escape:${err instanceof Error ? err.message : "unknown"}`,
-      });
-      continue;
     }
     if (currentSha !== pc.sha256) {
       failures.push({
@@ -173,15 +177,20 @@ export async function applyBatch(
         }
       }
       // TOCTOU: re-verify path hasn't been swapped for a symlink escape
-      try {
-        const resolved = realpathSync(edit.absPath);
-        if (resolved !== edit.absPath) {
-          validatePathWithinRoot(rootPath, resolved);
+      // TOCTOU: re-verify path hasn't been swapped for a symlink escape.
+      // Skip for new files (fileExists=false): realpathSync throws
+      // ENOENT legitimately until the file is created.
+      if (edit.fileExists) {
+        try {
+          const resolved = realpathSync(edit.absPath);
+          if (resolved !== edit.absPath) {
+            validatePathWithinRoot(rootPath, resolved);
+          }
+        } catch (symErr) {
+          throw new Error(
+            `symlink-escape-at-write: ${edit.relPath}: ${symErr instanceof Error ? symErr.message : String(symErr)}`,
+          );
         }
-      } catch (symErr) {
-        throw new Error(
-          `symlink-escape-at-write: ${edit.relPath}: ${symErr instanceof Error ? symErr.message : String(symErr)}`,
-        );
       }
       const backupPath = await writeWithBackup(
         edit.absPath,
@@ -290,8 +299,15 @@ export async function applyBatch(
   const restoredSet = new Set(restoredFiles);
   if (rollbackTriggered) {
     for (const r of results) {
-      if (r.status === "written" && restoredSet.has(r.file)) {
+      if (r.status !== "written") continue;
+      if (restoredSet.has(r.file)) {
         r.status = "rolled-back";
+      } else {
+        // File was written but could not be rolled back (restore
+        // failed or no backup existed). Surface as failed so callers
+        // see the file is in a broken state instead of "written".
+        r.status = "failed";
+        r.reason = r.reason ?? "rollback-failed: file modified but not restored";
       }
     }
   }

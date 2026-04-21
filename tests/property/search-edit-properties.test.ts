@@ -33,11 +33,8 @@ function randomContent(seed: number): string {
     }
     lines.push(line);
   }
-  return lines.join("
-") + "
-";
+  return lines.join("\n") + "\n";
 }
-
 function makePlan(
   repoId: string,
   edits: PlannedFileEdit[],

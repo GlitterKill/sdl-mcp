@@ -285,6 +285,13 @@ export async function enumerateRepoFiles(
   const skipped: PreviewFileSkip[] = [];
 
   const visitedRealpaths = new Set<string>();
+  // Seed with the root's realpath so a symlink loop back to root is
+  // caught on the very first recursive descent.
+  try {
+    visitedRealpaths.add(realpathSync(rootPath));
+  } catch {
+    // Root unreadable — walk() will handle by returning early.
+  }
   const MAX_WALK_DEPTH = 30;
   async function walk(dirAbs: string, depth = 0): Promise<void> {
     if (depth > MAX_WALK_DEPTH) return;
@@ -716,7 +723,13 @@ export async function planSearchEditPreview(
         }
         if (m[0].length === 0) countRegex.lastIndex++;
       }
-      if (matchCount >= maxMatchesPerFile && countRegex.exec(content) !== null) {
+      // Cap only applies to text targeting; symbol-targeted edits already
+      // filtered the candidate list and the regex is just informational.
+      if (
+        request.targeting === "text" &&
+        matchCount >= maxMatchesPerFile &&
+        countRegex.exec(content) !== null
+      ) {
         skipped.push({ path: rel, reason: `matches-exceed-per-file-cap:${maxMatchesPerFile}` });
         continue;
       }
@@ -810,7 +823,14 @@ export async function planSearchEditPreview(
       filesEligible: candidates.length,
       filesSkipped: skipped,
       fileEntries,
-      ...(candidatesCapped ? { partial: true } : {}),
+      ...(candidatesCapped ||
+        skipped.some(
+          (s) =>
+            s.reason === "maxFiles-reached" ||
+            s.reason === "maxTotalMatches-reached",
+        )
+        ? { partial: true }
+        : {}),
     },
   };
 }

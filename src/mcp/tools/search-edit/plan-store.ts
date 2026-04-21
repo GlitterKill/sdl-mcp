@@ -115,7 +115,12 @@ export class PlanStore {
       (sum, e) => sum + Buffer.byteLength(e.newContent, "utf-8"),
       0,
     );
-    this.evictIfNeeded();
+    if (planBytes > MAX_AGGREGATE_PLAN_BYTES) {
+      throw new Error(
+        `Plan exceeds aggregate byte limit (${planBytes} > ${MAX_AGGREGATE_PLAN_BYTES})`,
+      );
+    }
+    this.evictIfNeeded(planBytes);
     if (this.aggregateBytes + planBytes > MAX_AGGREGATE_PLAN_BYTES) {
       throw new Error(
         `Plan store aggregate byte limit exceeded (${this.aggregateBytes + planBytes} > ${MAX_AGGREGATE_PLAN_BYTES})`,
@@ -158,10 +163,15 @@ export class PlanStore {
     return this.plans.delete(planHandle);
   }
 
-  /** Mark a plan as consumed (apply in progress). */
+  /**
+   * Atomically mark a plan as consumed (apply in progress).
+   * Returns false if the plan is missing or already consumed —
+   * callers rely on this to reject concurrent double-apply.
+   */
   markConsumed(planHandle: string): boolean {
     const plan = this.plans.get(planHandle);
     if (!plan) return false;
+    if (plan.consumed) return false;
     plan.consumed = true;
     return true;
   }
@@ -201,9 +211,12 @@ export class PlanStore {
     }
   }
 
-  private evictIfNeeded(): void {
+  private evictIfNeeded(incomingBytes = 0): void {
     this.purgeExpired();
-    while (this.plans.size >= this.capacity) {
+    while (
+      this.plans.size >= this.capacity ||
+      this.aggregateBytes + incomingBytes > MAX_AGGREGATE_PLAN_BYTES
+    ) {
       let oldestKey: string | undefined;
       for (const [key, plan] of this.plans) {
         if (!plan.consumed) { oldestKey = key; break; }

@@ -102,10 +102,14 @@ async function handleApply(
     );
   }
 
-  // Mark consumed to prevent concurrent double-apply.
-  // Removed only after successful apply; unmarks on transient failure
-  // before any writes, allowing retry without re-preview.
-  store.markConsumed(plan.planHandle);
+  // Atomically claim the plan to prevent concurrent double-apply.
+  // The plan is removed on both success and error (see below) so
+  // callers must re-preview after any failure.
+  if (!store.markConsumed(plan.planHandle)) {
+    throw new ValidationError(
+      `search.edit planHandle is already being applied: ${plan.planHandle}`,
+    );
+  }
 
   let batch;
   try {
