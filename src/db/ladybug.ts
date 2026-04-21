@@ -127,6 +127,7 @@ let writeLimiter: ConcurrencyLimiter | null = null;
 let writeQueueTimeoutMs = 30_000;
 
 let deferredIndexesPending = false;
+let vecMigrationDone = false;
 
 // Per-slot recycling guard: prevents concurrent recycling of the same pool slot (TOCTOU).
 const recyclingSlots = new Set<number>();
@@ -738,8 +739,9 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
           // Migrate DOUBLE[] → DOUBLE[N] for vector indexing (existing DBs)
           // Only migrate vec columns on existing DBs — fresh DBs already have DOUBLE[N].
           // ALTER TABLE DROP+ADD corrupts Kuzu's column cache for the current process.
-          if (!freshlyCreated) {
+          if (!freshlyCreated && !vecMigrationDone) {
             await migrateVecColumnsToFixedSize(indexConn);
+            vecMigrationDone = true;
           }
           // Get a fresh connection after DDL changes to avoid stale column cache
 

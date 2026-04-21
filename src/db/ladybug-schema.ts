@@ -550,9 +550,31 @@ export async function migrateVecColumnsToFixedSize(
     { table: "AgentFeedback", column: "embeddingJinaCodeVec", size: 768 },
   ];
 
+  const tableInfoCache = new Map<string, Array<Record<string, unknown>>>();
+
   let migrated = 0;
   for (const { table, column, size } of migrations) {
     try {
+      if (!tableInfoCache.has(table)) {
+        const infoResult = await conn.query(
+          `CALL TABLE_INFO('${table}') RETURN *`,
+        );
+        const infoRows = (await infoResult.getAll()) as Array<
+          Record<string, unknown>
+        >;
+        infoResult.close();
+        tableInfoCache.set(table, infoRows);
+      }
+      const colInfo = tableInfoCache.get(table)!.find(
+        (r) => r.name === column,
+      );
+      if (colInfo && /DOUBLE\[\d+\]/.test(String(colInfo.type))) {
+        logger.debug(
+          `[schema-migration] ${table}.${column} already DOUBLE[${size}], skipping`,
+        );
+        continue;
+      }
+
       await conn.query(`ALTER TABLE ${table} DROP ${column}`);
       await conn.query(`ALTER TABLE ${table} ADD ${column} DOUBLE[${size}]`);
       logger.info(

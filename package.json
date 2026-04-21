@@ -125,16 +125,7 @@
     "kuzu": "npm:@ladybugdb/core@0.15.2",
     "onnxruntime-node": "^1.24.3",
     "sdl-mcp-native": "0.10.7",
-    "tokenizers": "0.13.4-rc2",
-    "tokenizers-darwin-arm64": "0.13.4-rc2",
-    "tokenizers-darwin-x64": "0.13.4-rc2",
-    "tokenizers-linux-arm64-gnu": "0.13.4-rc2",
-    "tokenizers-linux-arm64-musl": "0.13.4-rc2",
-    "tokenizers-linux-x64-gnu": "0.13.4-rc2",
-    "tokenizers-linux-x64-musl": "0.13.4-rc2",
-    "tokenizers-win32-arm64-msvc": "0.13.4-rc2",
-    "tokenizers-win32-ia32-msvc": "0.13.4-rc2",
-    "tokenizers-win32-x64-msvc": "0.13.4-rc2"
+    "tokenizers": "npm:@anush008/tokenizers@^0.6.0"
   },
   "devDependencies": {
     "@bufbuild/protobuf": "^2.0.0",

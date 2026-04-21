@@ -889,7 +889,7 @@ async function checkSemanticModels(
       message:
         `Semantic embedding runtime incomplete:\n  ${details.join("\n  ")}\n\n` +
         `  Remediation:\n` +
-        `    npm install onnxruntime-node tokenizers\n` +
+        `    npm install onnxruntime-node @anush008/tokenizers\n` +
         `  Embeddings will fall back to deterministic mock vectors.`,
     };
   }
