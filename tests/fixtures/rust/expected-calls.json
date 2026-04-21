@@ -6,9 +6,9 @@
     "callType": "function",
     "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
     "range": {
-      "startLine": 8,
+      "startLine": 9,
       "startCol": 4,
-      "endLine": 8,
+      "endLine": 9,
       "endCol": 22
     }
   },
@@ -19,9 +19,9 @@
     "callType": "function",
     "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
     "range": {
-      "startLine": 9,
+      "startLine": 10,
       "startCol": 4,
-      "endLine": 9,
+      "endLine": 10,
       "endCol": 23
     }
   },
@@ -31,9 +31,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 24,
+      "startLine": 25,
       "startCol": 8,
-      "endLine": 24,
+      "endLine": 25,
       "endCol": 49
     }
   },
@@ -43,9 +43,9 @@
     "isResolved": false,
     "callType": "function",
     "range": {
-      "startLine": 34,
+      "startLine": 35,
       "startCol": 16,
-      "endLine": 34,
+      "endLine": 35,
       "endCol": 32
     }
   },
@@ -55,9 +55,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 35,
+      "startLine": 36,
       "startCol": 4,
-      "endLine": 35,
+      "endLine": 36,
       "endCol": 16
     }
   },
@@ -67,9 +67,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 36,
+      "startLine": 37,
       "startCol": 4,
-      "endLine": 36,
+      "endLine": 37,
       "endCol": 22
     }
   },
@@ -79,9 +79,9 @@
     "isResolved": false,
     "callType": "function",
     "range": {
-      "startLine": 46,
+      "startLine": 47,
       "startCol": 27,
-      "endLine": 46,
+      "endLine": 47,
       "endCol": 37
     }
   },
@@ -91,9 +91,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 50,
+      "startLine": 51,
       "startCol": 8,
-      "endLine": 50,
+      "endLine": 51,
       "endCol": 29
     }
   },
@@ -103,9 +103,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 55,
+      "startLine": 56,
       "startCol": 8,
-      "endLine": 55,
+      "endLine": 56,
       "endCol": 23
     }
   },
@@ -115,9 +115,9 @@
     "isResolved": false,
     "callType": "function",
     "range": {
-      "startLine": 60,
+      "startLine": 61,
       "startCol": 18,
-      "endLine": 60,
+      "endLine": 61,
       "endCol": 35
     }
   },
@@ -127,9 +127,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 60,
+      "startLine": 61,
       "startCol": 18,
-      "endLine": 60,
+      "endLine": 61,
       "endCol": 43
     }
   },
@@ -139,9 +139,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 60,
+      "startLine": 61,
       "startCol": 18,
-      "endLine": 60,
+      "endLine": 61,
       "endCol": 51
     }
   },
@@ -151,9 +151,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 60,
+      "startLine": 61,
       "startCol": 18,
-      "endLine": 60,
+      "endLine": 61,
       "endCol": 59
     }
   },
@@ -163,22 +163,10 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 61,
+      "startLine": 62,
       "startCol": 4,
-      "endLine": 61,
+      "endLine": 62,
       "endCol": 17
-    }
-  },
-  {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
-    "calleeIdentifier": "println!",
-    "isResolved": false,
-    "callType": "dynamic",
-    "range": {
-      "startLine": 66,
-      "startCol": 4,
-      "endLine": 66,
-      "endCol": 29
     }
   },
   {
@@ -190,19 +178,19 @@
       "startLine": 67,
       "startCol": 4,
       "endLine": 67,
-      "endCol": 30
+      "endCol": 29
     }
   },
   {
     "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
-    "calleeIdentifier": "vec!",
+    "calleeIdentifier": "println!",
     "isResolved": false,
     "callType": "dynamic",
     "range": {
       "startLine": 68,
       "startCol": 4,
       "endLine": 68,
-      "endCol": 23
+      "endCol": 30
     }
   },
   {
@@ -219,13 +207,25 @@
   },
   {
     "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
-    "calleeIdentifier": "assert!",
+    "calleeIdentifier": "vec!",
     "isResolved": false,
     "callType": "dynamic",
     "range": {
       "startLine": 70,
       "startCol": 4,
       "endLine": 70,
+      "endCol": 23
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_macros:12",
+    "calleeIdentifier": "assert!",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 71,
+      "startCol": 4,
+      "endLine": 71,
       "endCol": 17
     }
   },
@@ -235,9 +235,9 @@
     "isResolved": false,
     "callType": "dynamic",
     "range": {
-      "startLine": 71,
+      "startLine": 72,
       "startCol": 4,
-      "endLine": 71,
+      "endLine": 72,
       "endCol": 20
     }
   },
@@ -247,9 +247,9 @@
     "isResolved": false,
     "callType": "dynamic",
     "range": {
-      "startLine": 72,
+      "startLine": 73,
       "startCol": 4,
-      "endLine": 72,
+      "endLine": 73,
       "endCol": 32
     }
   },
@@ -259,9 +259,9 @@
     "isResolved": false,
     "callType": "dynamic",
     "range": {
-      "startLine": 73,
+      "startLine": 74,
       "startCol": 4,
-      "endLine": 73,
+      "endLine": 74,
       "endCol": 27
     }
   },
@@ -271,9 +271,9 @@
     "isResolved": false,
     "callType": "function",
     "range": {
-      "startLine": 107,
+      "startLine": 108,
       "startCol": 17,
-      "endLine": 107,
+      "endLine": 108,
       "endCol": 41
     }
   },
@@ -283,9 +283,9 @@
     "isResolved": false,
     "callType": "function",
     "range": {
-      "startLine": 108,
+      "startLine": 109,
       "startCol": 15,
-      "endLine": 108,
+      "endLine": 109,
       "endCol": 41
     }
   },
@@ -295,9 +295,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 109,
+      "startLine": 110,
       "startCol": 4,
-      "endLine": 109,
+      "endLine": 110,
       "endCol": 17
     }
   },
@@ -307,23 +307,10 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 110,
+      "startLine": 111,
       "startCol": 4,
-      "endLine": 110,
+      "endLine": 111,
       "endCol": 15
-    }
-  },
-  {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:outer_function:21",
-    "calleeIdentifier": "helper_function",
-    "isResolved": true,
-    "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:helper_function:20",
-    "range": {
-      "startLine": 119,
-      "startCol": 20,
-      "endLine": 119,
-      "endCol": 38
     }
   },
   {
@@ -340,28 +327,15 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_nested_calls:22",
-    "calleeIdentifier": "simple_function",
-    "isResolved": true,
-    "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
-    "range": {
-      "startLine": 126,
-      "startCol": 4,
-      "endLine": 126,
-      "endCol": 39
-    }
-  },
-  {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_nested_calls:22",
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:outer_function:21",
     "calleeIdentifier": "helper_function",
     "isResolved": true,
     "callType": "function",
     "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:helper_function:20",
     "range": {
-      "startLine": 126,
+      "startLine": 121,
       "startCol": 20,
-      "endLine": 126,
+      "endLine": 121,
       "endCol": 38
     }
   },
@@ -373,8 +347,34 @@
     "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
     "range": {
       "startLine": 127,
-      "startCol": 17,
+      "startCol": 4,
       "endLine": 127,
+      "endCol": 39
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_nested_calls:22",
+    "calleeIdentifier": "helper_function",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:helper_function:20",
+    "range": {
+      "startLine": 127,
+      "startCol": 20,
+      "endLine": 127,
+      "endCol": 38
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_nested_calls:22",
+    "calleeIdentifier": "simple_function",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
+    "range": {
+      "startLine": 128,
+      "startCol": 17,
+      "endLine": 128,
       "endCol": 53
     }
   },
@@ -385,9 +385,9 @@
     "callType": "function",
     "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
     "range": {
-      "startLine": 127,
+      "startLine": 128,
       "startCol": 33,
-      "endLine": 127,
+      "endLine": 128,
       "endCol": 52
     }
   },
@@ -397,27 +397,15 @@
     "isResolved": false,
     "callType": "dynamic",
     "range": {
-      "startLine": 142,
+      "startLine": 143,
       "startCol": 8,
-      "endLine": 142,
+      "endLine": 143,
       "endCol": 58
     }
   },
   {
     "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_trait_methods:27",
     "calleeIdentifier": "square.draw",
-    "isResolved": false,
-    "callType": "method",
-    "range": {
-      "startLine": 152,
-      "startCol": 4,
-      "endLine": 152,
-      "endCol": 17
-    }
-  },
-  {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_trait_methods:27",
-    "calleeIdentifier": "square.area",
     "isResolved": false,
     "callType": "method",
     "range": {
@@ -428,15 +416,15 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_generic_associated:31",
-    "calleeIdentifier": "Box::new",
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_trait_methods:27",
+    "calleeIdentifier": "square.area",
     "isResolved": false,
-    "callType": "function",
+    "callType": "method",
     "range": {
-      "startLine": 172,
-      "startCol": 20,
-      "endLine": 172,
-      "endCol": 32
+      "startLine": 154,
+      "startCol": 4,
+      "endLine": 154,
+      "endCol": 17
     }
   },
   {
@@ -448,24 +436,24 @@
       "startLine": 173,
       "startCol": 20,
       "endLine": 173,
+      "endCol": 32
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_generic_associated:31",
+    "calleeIdentifier": "Box::new",
+    "isResolved": false,
+    "callType": "function",
+    "range": {
+      "startLine": 174,
+      "startCol": 20,
+      "endLine": 174,
       "endCol": 37
     }
   },
   {
     "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_generic_associated:31",
     "calleeIdentifier": "boxed_int.get",
-    "isResolved": false,
-    "callType": "method",
-    "range": {
-      "startLine": 174,
-      "startCol": 4,
-      "endLine": 174,
-      "endCol": 19
-    }
-  },
-  {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_generic_associated:31",
-    "calleeIdentifier": "boxed_str.get",
     "isResolved": false,
     "callType": "method",
     "range": {
@@ -476,14 +464,26 @@
     }
   },
   {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_generic_associated:31",
+    "calleeIdentifier": "boxed_str.get",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 176,
+      "startCol": 4,
+      "endLine": 176,
+      "endCol": 19
+    }
+  },
+  {
     "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:calculate_distance:33",
     "calleeIdentifier": "(x2 - x1).powi",
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 181,
+      "startLine": 182,
       "startCol": 9,
-      "endLine": 181,
+      "endLine": 182,
       "endCol": 26
     }
   },
@@ -493,9 +493,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 181,
+      "startLine": 182,
       "startCol": 29,
-      "endLine": 181,
+      "endLine": 182,
       "endCol": 46
     }
   },
@@ -505,9 +505,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 181,
+      "startLine": 182,
       "startCol": 8,
-      "endLine": 181,
+      "endLine": 182,
       "endCol": 54
     }
   },
@@ -517,9 +517,9 @@
     "isResolved": false,
     "callType": "function",
     "range": {
-      "startLine": 186,
+      "startLine": 187,
       "startCol": 4,
-      "endLine": 186,
+      "endLine": 187,
       "endCol": 52
     }
   },
@@ -530,9 +530,9 @@
     "callType": "function",
     "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:add:37",
     "range": {
-      "startLine": 192,
+      "startLine": 193,
       "startCol": 4,
-      "endLine": 192,
+      "endLine": 193,
       "endCol": 13
     }
   },
@@ -542,9 +542,9 @@
     "isResolved": false,
     "callType": "function",
     "range": {
-      "startLine": 194,
+      "startLine": 195,
       "startCol": 4,
-      "endLine": 194,
+      "endLine": 195,
       "endCol": 18
     }
   },
@@ -554,23 +554,10 @@
     "isResolved": false,
     "callType": "function",
     "range": {
-      "startLine": 209,
+      "startLine": 210,
       "startCol": 4,
-      "endLine": 209,
+      "endLine": 210,
       "endCol": 12
-    }
-  },
-  {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_function_pointers:40",
-    "calleeIdentifier": "apply_operation",
-    "isResolved": true,
-    "callType": "function",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:apply_operation:39",
-    "range": {
-      "startLine": 213,
-      "startCol": 4,
-      "endLine": 213,
-      "endCol": 30
     }
   },
   {
@@ -583,6 +570,19 @@
       "startLine": 214,
       "startCol": 4,
       "endLine": 214,
+      "endCol": 30
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:test_function_pointers:40",
+    "calleeIdentifier": "apply_operation",
+    "isResolved": true,
+    "callType": "function",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:apply_operation:39",
+    "range": {
+      "startLine": 215,
+      "startCol": 4,
+      "endLine": 215,
       "endCol": 36
     }
   },
@@ -593,9 +593,9 @@
     "callType": "function",
     "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:async_helper:41",
     "range": {
-      "startLine": 223,
+      "startLine": 224,
       "startCol": 4,
-      "endLine": 223,
+      "endLine": 224,
       "endCol": 18
     }
   },
@@ -605,9 +605,9 @@
     "isResolved": false,
     "callType": "function",
     "range": {
-      "startLine": 247,
+      "startLine": 248,
       "startCol": 4,
-      "endLine": 247,
+      "endLine": 248,
       "endCol": 18
     }
   },
@@ -617,9 +617,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 247,
+      "startLine": 248,
       "startCol": 4,
-      "endLine": 247,
+      "endLine": 248,
       "endCol": 33
     }
   },
@@ -629,9 +629,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 247,
+      "startLine": 248,
       "startCol": 4,
-      "endLine": 247,
+      "endLine": 248,
       "endCol": 41
     }
   },
@@ -642,9 +642,9 @@
     "callType": "method",
     "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:increment:50",
     "range": {
-      "startLine": 269,
+      "startLine": 270,
       "startCol": 8,
-      "endLine": 269,
+      "endLine": 270,
       "endCol": 24
     }
   },
@@ -655,9 +655,9 @@
     "callType": "method",
     "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:double:51",
     "range": {
-      "startLine": 270,
+      "startLine": 271,
       "startCol": 8,
-      "endLine": 270,
+      "endLine": 271,
       "endCol": 21
     }
   },
@@ -667,9 +667,9 @@
     "isResolved": false,
     "callType": "function",
     "range": {
-      "startLine": 275,
+      "startLine": 276,
       "startCol": 22,
-      "endLine": 275,
+      "endLine": 276,
       "endCol": 36
     }
   },
@@ -679,9 +679,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 276,
+      "startLine": 277,
       "startCol": 4,
-      "endLine": 276,
+      "endLine": 277,
       "endCol": 21
     }
   },
@@ -692,9 +692,9 @@
     "callType": "function",
     "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:simple_function:0",
     "range": {
-      "startLine": 281,
+      "startLine": 282,
       "startCol": 17,
-      "endLine": 281,
+      "endLine": 282,
       "endCol": 52
     }
   },
@@ -705,9 +705,9 @@
     "callType": "function",
     "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:helper_function:20",
     "range": {
-      "startLine": 281,
+      "startLine": 282,
       "startCol": 33,
-      "endLine": 281,
+      "endLine": 282,
       "endCol": 51
     }
   },
@@ -718,9 +718,9 @@
     "callType": "function",
     "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\rust\\calls.rs:helper_function:20",
     "range": {
-      "startLine": 281,
+      "startLine": 282,
       "startCol": 55,
-      "endLine": 281,
+      "endLine": 282,
       "endCol": 74
     }
   },
@@ -730,9 +730,9 @@
     "isResolved": false,
     "callType": "dynamic",
     "range": {
-      "startLine": 282,
+      "startLine": 283,
       "startCol": 4,
-      "endLine": 282,
+      "endLine": 283,
       "endCol": 34
     }
   },
@@ -742,9 +742,9 @@
     "isResolved": false,
     "callType": "function",
     "range": {
-      "startLine": 287,
+      "startLine": 288,
       "startCol": 27,
-      "endLine": 287,
+      "endLine": 288,
       "endCol": 34
     }
   },
@@ -754,9 +754,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 288,
+      "startLine": 289,
       "startCol": 4,
-      "endLine": 288,
+      "endLine": 289,
       "endCol": 16
     }
   },
@@ -766,9 +766,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 289,
+      "startLine": 290,
       "startCol": 4,
-      "endLine": 289,
+      "endLine": 290,
       "endCol": 20
     }
   },
@@ -778,9 +778,9 @@
     "isResolved": false,
     "callType": "function",
     "range": {
-      "startLine": 291,
+      "startLine": 292,
       "startCol": 33,
-      "endLine": 291,
+      "endLine": 292,
       "endCol": 39
     }
   },
@@ -790,9 +790,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 292,
+      "startLine": 293,
       "startCol": 4,
-      "endLine": 292,
+      "endLine": 293,
       "endCol": 16
     }
   },
@@ -802,9 +802,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 293,
+      "startLine": 294,
       "startCol": 4,
-      "endLine": 293,
+      "endLine": 294,
       "endCol": 20
     }
   },
@@ -814,9 +814,9 @@
     "isResolved": false,
     "callType": "dynamic",
     "range": {
-      "startLine": 298,
+      "startLine": 299,
       "startCol": 18,
-      "endLine": 298,
+      "endLine": 299,
       "endCol": 37
     }
   },
@@ -826,9 +826,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 299,
+      "startLine": 300,
       "startCol": 19,
-      "endLine": 299,
+      "endLine": 300,
       "endCol": 33
     }
   },
@@ -838,9 +838,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 299,
+      "startLine": 300,
       "startCol": 19,
-      "endLine": 299,
+      "endLine": 300,
       "endCol": 48
     }
   },
@@ -850,9 +850,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 299,
+      "startLine": 300,
       "startCol": 19,
-      "endLine": 299,
+      "endLine": 300,
       "endCol": 54
     }
   },
@@ -862,9 +862,9 @@
     "isResolved": false,
     "callType": "dynamic",
     "range": {
-      "startLine": 300,
+      "startLine": 301,
       "startCol": 4,
-      "endLine": 300,
+      "endLine": 301,
       "endCol": 28
     }
   },
@@ -874,9 +874,9 @@
     "isResolved": false,
     "callType": "function",
     "range": {
-      "startLine": 305,
+      "startLine": 306,
       "startCol": 12,
-      "endLine": 305,
+      "endLine": 306,
       "endCol": 33
     }
   },
@@ -886,9 +886,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 306,
+      "startLine": 307,
       "startCol": 4,
-      "endLine": 306,
+      "endLine": 307,
       "endCol": 11
     }
   },
@@ -898,9 +898,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 307,
+      "startLine": 308,
       "startCol": 4,
-      "endLine": 307,
+      "endLine": 308,
       "endCol": 20
     }
   },
@@ -910,9 +910,9 @@
     "isResolved": false,
     "callType": "method",
     "range": {
-      "startLine": 308,
+      "startLine": 309,
       "startCol": 4,
-      "endLine": 308,
+      "endLine": 309,
       "endCol": 21
     }
   }

@@ -24,6 +24,18 @@
     }
   },
   {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:callDynamicMethod:8",
+    "calleeIdentifier": "$obj.$method",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 35,
+      "startCol": 8,
+      "endLine": 35,
+      "endCol": 31
+    }
+  },
+  {
     "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:getConfig:11",
     "calleeIdentifier": "\\App\\Config::get",
     "isResolved": false,
@@ -33,6 +45,43 @@
       "startCol": 15,
       "endLine": 52,
       "endCol": 43
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:processUser:12",
+    "calleeIdentifier": "$this.getUserById",
+    "isResolved": true,
+    "callType": "method",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:getUserById:9",
+    "range": {
+      "startLine": 57,
+      "startCol": 16,
+      "endLine": 57,
+      "endCol": 39
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:processUser:12",
+    "calleeIdentifier": "$this.transformUser",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 58,
+      "startCol": 15,
+      "endLine": 58,
+      "endCol": 42
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:batchProcess:13",
+    "calleeIdentifier": "$user.$method",
+    "isResolved": false,
+    "callType": "dynamic",
+    "range": {
+      "startLine": 64,
+      "startCol": 12,
+      "endLine": 64,
+      "endCol": 28
     }
   },
   {
@@ -105,6 +154,19 @@
       "startCol": 12,
       "endLine": 109,
       "endCol": 38
+    }
+  },
+  {
+    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:dispatch:26",
+    "calleeIdentifier": "$this.getHandler",
+    "isResolved": true,
+    "callType": "method",
+    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:getHandler:27",
+    "range": {
+      "startLine": 118,
+      "startCol": 19,
+      "endLine": 118,
+      "endCol": 45
     }
   },
   {

@@ -9,9 +9,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`sdl.search.edit` cross-file search/edit tool** (two-phase `preview` +
+  `apply`). Preview returns a server-side `planHandle` plus per-file
+  snippets, match counts, and a sha256/mtime precondition snapshot.
+  Apply re-verifies preconditions, writes sequentially in deterministic
+  path order, rolls back already-written files on mid-batch failure,
+  and surfaces per-file `indexUpdate` for indexed source. Plan handles
+  are in-memory with a 15-minute TTL and LRU cap of 16 per process.
+  Closes the cross-file mutation gap where agents previously composed
+  `symbol.search` → `file.read` → `file.write` by hand.
+  - New module tree: `src/mcp/tools/search-edit/{planner,plan-store,batch-executor,index}.ts`
+  - New doc: `docs/search-edit-tool.md`
+- **`search.edit` text-mode uses hybrid retrieval to narrow candidates**:
+  text-mode previews with a `literal` query (≥3 chars) now seed the
+  candidate file list via `narrowFilesForQuery` (entity-level FTS +
+  vector + RRF), falling back to full directory enumeration when hybrid
+  retrieval returns nothing or is unavailable. The planner surfaces a
+  `retrievalEvidence` field on `SearchEditPreviewResponse` carrying the
+  same shape (`sources`, `topRanksPerSource`, `candidateCountPerSource`,
+  `fusionLatencyMs`, `fallbackReason`) that `sdl.context` emits.
+- **`narrowFilesForQuery` in `src/retrieval/orchestrator.ts`**: exported
+  entry point used by the `search.edit` planner. Resolves hybrid-search
+  symbol hits back to their owning files and returns both the candidate
+  paths and the retrieval evidence. Degrades gracefully to `paths: []`
+  when the DB or retrieval backends are unavailable.
+- **Unit + property tests for `search.edit`**:
+  - `tests/unit/search-edit-plan-store.test.ts` — TTL, LRU eviction,
+    remove/clear, unique handles
+  - `tests/unit/search-edit-batch-executor.test.ts` — precondition
+    drift detection, deterministic apply order, mid-batch rollback
+  - `tests/unit/search-edit-narrow.test.ts` — graceful fallback paths
+    for `narrowFilesForQuery`
+  - `tests/property/search-edit-properties.test.ts` — apply+revert
+    identity over N files, backup invariants
+
 ### Changed
 
+- **`file.write` refactored into thin handler + shared internals**
+  (`src/mcp/tools/file-write-internals.ts`). No behavior change to
+  `file.write`; the new internals are reused by `search.edit`'s batch
+  executor to share path validation, backup, mode dispatch, and
+  live-index sync.
+- **`file.write` action description clarified** — previously "Write to
+  non-indexed files". Now documents that both indexed and non-indexed
+  single-file writes are supported, and cross-references `search.edit`
+  as the multi-file path.
+
 ### Fixed
+
+- **CLI incremental indexing now returns to the prompt**: one-shot
+  `sdl-mcp index` runs suppress deferred derived-state background refresh,
+  shut down any queued refresh work, close LadybugDB resources, and explicitly
+  exit after successful indexing. The legacy `scripts/index-repo.ts` helper now
+  performs the same cleanup.
 
 ## [0.10.7] - 2026-04-19
 

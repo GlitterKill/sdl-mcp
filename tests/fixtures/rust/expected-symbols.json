@@ -285,6 +285,9 @@
           "name": "reference",
           "type": "&'a T"
         }
+      ],
+      "generics": [
+        "T: 'a"
       ]
     },
     "visibility": "public"
@@ -603,7 +606,10 @@
           "type": "impl Fn(&T) -> bool"
         }
       ],
-      "returns": "Vec<T>"
+      "returns": "Vec<T>",
+      "generics": [
+        "T: Clone"
+      ]
     },
     "visibility": "public"
   },

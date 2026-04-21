@@ -408,7 +408,7 @@
     "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:cached:23",
     "kind": "variable",
     "name": "cached",
-    "exported": false,
+    "exported": true,
     "range": {
       "startLine": 60,
       "startCol": 8,
@@ -418,13 +418,13 @@
     "signature": {
       "params": []
     },
-    "visibility": "local"
+    "visibility": "public"
   },
   {
     "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:user:24",
     "kind": "variable",
     "name": "user",
-    "exported": false,
+    "exported": true,
     "range": {
       "startLine": 64,
       "startCol": 8,
@@ -434,7 +434,7 @@
     "signature": {
       "params": []
     },
-    "visibility": "local"
+    "visibility": "public"
   },
   {
     "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:getAllUsers:25",
@@ -483,7 +483,7 @@
     "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:id:27",
     "kind": "variable",
     "name": "id",
-    "exported": false,
+    "exported": true,
     "range": {
       "startLine": 76,
       "startCol": 8,
@@ -493,13 +493,13 @@
     "signature": {
       "params": []
     },
-    "visibility": "local"
+    "visibility": "public"
   },
   {
     "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:user:28",
     "kind": "variable",
     "name": "user",
-    "exported": false,
+    "exported": true,
     "range": {
       "startLine": 77,
       "startCol": 8,
@@ -509,7 +509,7 @@
     "signature": {
       "params": []
     },
-    "visibility": "local"
+    "visibility": "public"
   },
   {
     "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:transformUser:29",
@@ -544,7 +544,7 @@
     "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:user:30",
     "kind": "variable",
     "name": "user",
-    "exported": false,
+    "exported": true,
     "range": {
       "startLine": 82,
       "startCol": 8,
@@ -554,7 +554,7 @@
     "signature": {
       "params": []
     },
-    "visibility": "local"
+    "visibility": "public"
   },
   {
     "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\kotlin\\symbols.kt:Status:31",
