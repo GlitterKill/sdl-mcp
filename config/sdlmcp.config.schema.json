@@ -1082,7 +1082,7 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "Enable Code Mode tools (sdl.manual + sdl.workflow + sdl.context)",
+          "description": "Enable Code Mode tools (sdl.manual + sdl.workflow + sdl.context + sdl.file)",
           "default": true
         },
         "exclusive": {

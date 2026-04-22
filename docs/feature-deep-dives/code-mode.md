@@ -195,9 +195,9 @@ The workflow engine also provides:
 | Mode | Registered tools |
 |:-----|:-----------------|
 | Disabled | Base flat or gateway tools, plus universal `sdl.action.search` and `sdl.info` |
-| Enabled + gateway | Gateway tools plus `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow` |
-| Enabled + flat | Flat tools plus `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow` |
-| Exclusive | `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow` only |
+| Enabled + gateway | Gateway tools plus `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, `sdl.file` |
+| Enabled + flat | Flat tools plus `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, `sdl.file` |
+| Exclusive | `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, `sdl.file` only |
 
 ---
 

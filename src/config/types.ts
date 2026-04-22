@@ -502,7 +502,7 @@ export const GatewayConfigSchema = z.object({
 export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;
 
 export const CodeModeConfigSchema = z.object({
-  /** Enable Code Mode tools (sdl.manual + sdl.workflow + sdl.context) */
+  /** Enable Code Mode tools (sdl.manual + sdl.workflow + sdl.context + sdl.file) */
   enabled: z.boolean().default(true),
   /** When true, suppress gateway and legacy tools - only register code-mode tools */
   exclusive: z.boolean().default(true),

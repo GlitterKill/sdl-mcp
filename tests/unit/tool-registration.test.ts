@@ -171,13 +171,17 @@ describe("MCP tool registration", () => {
       "expected sdl.action.search in exclusive mode",
     );
     assert.ok(
+      names.includes("sdl.file"),
+      "expected sdl.file in exclusive mode",
+    );
+    assert.ok(
       !names.includes("sdl.info"),
       "sdl.info should NOT be registered in exclusive mode",
     );
     assert.strictEqual(
       names.length,
-      4,
-      `exclusive mode should register exactly 4 tools, got ${names.length}: ${names.join(", ")}`,
+      5,
+      `exclusive mode should register exactly 5 tools, got ${names.length}: ${names.join(", ")}`,
     );
 
     // No flat tools

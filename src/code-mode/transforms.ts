@@ -301,7 +301,6 @@ function matchesClause(
         return fieldVal.includes(clause.value);
       }
       return false;
-    case "in":
     case "icontains":
       if (typeof fieldVal === "string" && typeof clause.value === "string") {
         return fieldVal.toLowerCase().includes(clause.value.toLowerCase());

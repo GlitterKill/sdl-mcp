@@ -20,7 +20,7 @@ Complete reference for the SDL-MCP runtime surfaces exposed by `registerTools`.
 
 - `31` flat SDL action tools (`30` gateway-routable + `1` flat-only)
 - `2` universal tools: `sdl.action.search` and `sdl.info`
-- Code Mode tools: `sdl.action.search`, `sdl.manual`, `sdl.context`, and `sdl.workflow` (`sdl.info` is omitted in Code Mode exclusive)
+- Code Mode tools: `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file` (`sdl.info` is omitted in Code Mode exclusive)
 
 Flat mode and gateway mode share the same handler layer. The CLI `tool` command exposes a narrower direct-action subset rather than the full MCP surface.
 
@@ -1229,7 +1229,7 @@ Get cumulative token usage statistics and savings metrics for the current sessio
 
 ---
 
-## Code Mode (4 tools)
+## Code Mode (5 tools)
 
 ### `sdl.context`
 
@@ -1248,6 +1248,10 @@ Use this for runtime execution, data shaping, batch mutations, and reusable mult
 Return a compact API reference for the SDL action surface.
 
 Use this before `sdl.context` or `sdl.workflow` when the model needs a narrow, typed subset of the API instead of the full tool surface.
+
+### `sdl.file`
+
+Provide a unified Code Mode file gateway for read, write, search/edit preview, and search/edit apply operations.
 
 ---
 

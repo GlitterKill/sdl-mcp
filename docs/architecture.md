@@ -102,7 +102,7 @@ All MCP tools flow through a single dispatch path in `src/server.ts`. The exact 
 - Flat mode: 33 tools (`31` flat tools + `sdl.action.search` + `sdl.info`)
 - Gateway-only mode: 6 tools (`4` gateway tools + `sdl.action.search` + `sdl.info`)
 - Gateway + legacy mode: 37 tools (`4` gateway tools + `31` legacy flat tools + `sdl.action.search` + `sdl.info`)
-- Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, or can run in exclusive mode with just `sdl.action.search`, `sdl.manual`, `sdl.context`, and `sdl.workflow`
+- Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`, or can run in exclusive mode with just `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`
 
 Before strict Zod validation, requests also pass through a shared normalization layer. Flat and gateway calls therefore accept the same canonical camelCase fields plus common aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, and `spillover_handle`.
 
@@ -649,7 +649,7 @@ Current command/tool registration notes:
 
 - CLI commands: 13 (`init`, `doctor`, `info`, `index`, `serve`, `version`, `export`, `import`, `pull`, `benchmark:ci`, `summary`, `health`, `tool`)
 - Gateway mode keeps `sdl.action.search` and `sdl.info` outside the 4 namespace tools
-- Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, or can run exclusive with `sdl.action.search`, `sdl.manual`, `sdl.context`, and `sdl.workflow`
+- Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`, or can run exclusive with `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
@@ -762,6 +762,6 @@ Registration-mode counts in the current implementation:
 - Flat mode: 33 tools
 - Gateway-only mode: 6 tools
 - Gateway + legacy mode: 37 tools
-- Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`
+- Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`
 
 [Back to README](../README.md)

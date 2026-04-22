@@ -62,6 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shut down any queued refresh work, close LadybugDB resources, and explicitly
   exit after successful indexing. The legacy `scripts/index-repo.ts` helper now
   performs the same cleanup.
+- **Code Mode CI regressions**: `dataFilter` now handles the `in` operator as
+  array membership instead of falling into `icontains`, and exclusive Code Mode
+  tests/docs now include the unified `sdl.file` surface.
 
 ## [0.10.7] - 2026-04-19
 

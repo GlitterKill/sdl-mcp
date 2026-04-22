@@ -50,7 +50,7 @@ flowchart LR
 
 ## Complete Tool Reference
 
-SDL-MCP exposes 33 tools in flat default mode (31 flat tools plus `sdl.action.search` and `sdl.info`). Gateway mode replaces 30 of those flat tools with 4 namespace surfaces, while `sdl.file.write` remains flat-only. Code Mode adds `sdl.manual`, `sdl.context`, and `sdl.workflow`, and can also run in exclusive mode with only those 4 tools.
+SDL-MCP exposes 33 tools in flat default mode (31 flat tools plus `sdl.action.search` and `sdl.info`). Gateway mode replaces 30 of those flat tools with 4 namespace surfaces, while `sdl.file.write` remains flat-only. Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`, and can also run in exclusive mode with only those 5 tools.
 
 | Category                   | Tool                       | Purpose                                                                                                                                                              |
 | :------------------------- | :------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -90,6 +90,7 @@ SDL-MCP exposes 33 tools in flat default mode (31 flat tools plus `sdl.action.se
 |                            | `sdl.manual`               | Return a compact filtered API reference for a queried or explicit action subset                                                                                      |
 |                            | `sdl.context`              | Retrieve task-shaped context inside Code Mode for explain/debug/review/implement work                                                                                |
 |                            | `sdl.workflow`             | Execute up to 50 actions in a single round trip with `$N` result piping, transforms, and optional traces                                                             |
+|                            | `sdl.file`                 | Unified Code Mode file gateway for read, write, search/edit preview, and search/edit apply operations                                                               |
 
 ---
 
@@ -272,12 +273,13 @@ Then, if needed:
 
 ### 7) Code Mode (`sdl.context` + `sdl.workflow`)
 
-When `codeMode.enabled: true` is set in config, three Code Mode tools sit alongside the universal `sdl.action.search` surface:
+When `codeMode.enabled: true` is set in config, four Code Mode tools sit alongside the universal `sdl.action.search` surface:
 
 - `sdl.action.search` — returns the most relevant SDL actions for a query, optionally with schema and example metadata.
 - `sdl.manual` — returns a compact filtered API reference for all or part of the action surface.
 - `sdl.context` — retrieves task-shaped context inside Code Mode. Start here for `explain`, `debug`, `review`, and most `implement` requests.
 - `sdl.workflow` — executes up to 50 actions in a single round trip with `$N` result piping, internal data transforms, and optional traces.
+- `sdl.file` — performs Code Mode file read/write and two-phase search/edit operations through one `op` discriminator.
 
 Routing guidance:
 

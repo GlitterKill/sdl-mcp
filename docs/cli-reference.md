@@ -277,7 +277,7 @@ Key options:
 
 The CLI parser accepts the canonical action fields plus the same common aliases accepted by MCP requests, such as `--repo-id`, `--symbol-id`, `--symbol-ids`, `--from-version`, `--to-version`, and `--slice-handle`.
 
-Not every MCP surface is available through `sdl-mcp tool`. Code Mode-only tools (`sdl.manual`, `sdl.context`, `sdl.workflow`) are separate, and `sdl.file.write` is currently MCP-only. Use [`CLI Tool Access`](./feature-deep-dives/cli-tool-access.md) for the current direct-action matrix.
+Not every MCP surface is available through `sdl-mcp tool`. Code Mode-only tools (`sdl.manual`, `sdl.context`, `sdl.workflow`, `sdl.file`) are separate, and `sdl.file.write` is currently MCP-only. Use [`CLI Tool Access`](./feature-deep-dives/cli-tool-access.md) for the current direct-action matrix.
 
 ### `sdl-mcp version`
 

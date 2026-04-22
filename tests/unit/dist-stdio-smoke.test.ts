@@ -61,6 +61,7 @@ describe("dist stdio smoke", () => {
       assert.deepStrictEqual(names, [
         "sdl.action.search",
         "sdl.context",
+        "sdl.file",
         "sdl.manual",
         "sdl.workflow",
       ]);

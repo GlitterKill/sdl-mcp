@@ -111,7 +111,7 @@ Run `sdl-mcp tool --list` to inspect the current aliases grouped by namespace.
 | `memory.remove` | Remove a development memory |
 | `memory.surface` | Surface relevant memories |
 
-`sdl-mcp tool` does not expose Code Mode-only tools (`sdl.context`, `sdl.manual`, `sdl.workflow`), and it currently does not expose `file.write`.
+`sdl-mcp tool` does not expose Code Mode-only tools (`sdl.context`, `sdl.manual`, `sdl.workflow`, `sdl.file`), and it currently does not expose `file.write`.
 
 ---
 
