@@ -363,7 +363,7 @@ describe("bufferPush close event handling", () => {
     // The fix: close events are processed BEFORE the stale version check.
     // This tests the logic in coordinator.ts lines 118-129:
     //
-    //   if (input.eventType === "close" && !input.dirty) {
+    //   if (input.eventType === "close") {
     //     this.overlayStore.removeDraft(input.repoId, input.filePath);
     //     return { accepted: true, ... };
     //   }
@@ -402,7 +402,7 @@ describe("bufferPush close event handling", () => {
     };
 
     // Apply the fix logic: close + !dirty -> removeDraft -> accepted
-    if (closeInput.eventType === "close" && !closeInput.dirty) {
+    if (closeInput.eventType === "close") {
       store.removeDraft(closeInput.repoId, closeInput.filePath);
       const afterClose = store.getDraft("repo1", "src/test.ts");
       assert.equal(afterClose, null, "draft should be removed after close");
@@ -434,17 +434,35 @@ describe("bufferPush close event handling", () => {
     );
   });
 
-  it("close event with dirty=true does NOT get the bypass", () => {
-    // The fix explicitly checks input.dirty === false (via !input.dirty)
+  it("close event with dirty=true also gets the close handler", () => {
+    // All close events now enter the close handler regardless of dirty flag.
+    // Dirty close means the editor closed without saving — we restore from disk.
+    const store = new OverlayStore();
+
+    store.upsertDraft({
+      repoId: "repo1",
+      eventType: "change",
+      filePath: "src/test.ts",
+      version: 5,
+      dirty: true,
+      content: "stale content",
+      language: "typescript",
+      timestamp: new Date().toISOString(),
+    });
+
     const closeInput = {
       eventType: "close" as const,
       dirty: true,
       version: 5,
     };
 
-    const shouldBypass =
-      closeInput.eventType === "close" && !closeInput.dirty;
-    assert.equal(shouldBypass, false, "dirty close events should not bypass");
+    const shouldHandle = closeInput.eventType === "close";
+    assert.equal(shouldHandle, true, "dirty close events enter close handler");
+
+    // Simulate the close handler: removeDraft
+    store.removeDraft("repo1", "src/test.ts");
+    const afterClose = store.getDraft("repo1", "src/test.ts");
+    assert.equal(afterClose, null, "dirty draft removed on close");
   });
 });
 

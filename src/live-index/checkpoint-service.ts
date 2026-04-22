@@ -5,6 +5,7 @@ import type { CheckpointRequest, CheckpointResult } from "./types.js";
 import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import { withIndexingGate } from "../mcp/indexing-gate.js";
 import { logger } from "../util/logger.js";
 
 export interface CheckpointStatus {
@@ -174,14 +175,16 @@ export class CheckpointService {
     repoId: string,
     draft: DraftOverlayEntry,
   ): Promise<void> {
-    await this.patchSavedFileImpl({
-      repoId,
-      filePath: draft.filePath,
-      content: draft.content,
-      language: draft.language,
-      version: draft.version,
-      parseResult: draft.parseError ? null : draft.parseResult,
-    });
+    await withIndexingGate(() =>
+      this.patchSavedFileImpl({
+        repoId,
+        filePath: draft.filePath,
+        content: draft.content,
+        language: draft.language,
+        version: draft.version,
+        parseResult: draft.parseError ? null : draft.parseResult,
+      }),
+    );
   }
 
   /**

@@ -18,6 +18,7 @@ import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { normalizePath } from "../util/paths.js";
 import { patchSavedFile } from "../live-index/file-patcher.js";
+import { withIndexingGate } from "../mcp/indexing-gate.js";
 
 import type { IndexWatchHandle, WatcherHealth } from "./indexer.js";
 import { logger } from "../util/logger.js";
@@ -48,7 +49,7 @@ export async function processWatchedFileChange(params: {
   const { repoId, filePath, indexRepo, patchSavedFileFn } = params;
   if (patchSavedFileFn) {
     try {
-      await patchSavedFileFn({ repoId, filePath });
+      await withIndexingGate(() => patchSavedFileFn({ repoId, filePath }));
       return;
     } catch (patchError: unknown) {
       // Fall back to repo-wide incremental indexing below.

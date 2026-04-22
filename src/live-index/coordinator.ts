@@ -16,6 +16,7 @@ import {
   type LiveStatus,
 } from "./types.js";
 import { IndexError } from "../domain/errors.js";
+import { withIndexingGate } from "../mcp/indexing-gate.js";
 import { getOverlayEmbeddingCache } from "./overlay-embedding-cache.js";
 
 import { logger } from "../util/logger.js";
@@ -24,6 +25,7 @@ export interface InMemoryLiveIndexCoordinatorOptions {
   enabled?: boolean;
   debounceMs?: number;
   maxDraftFiles?: number;
+  sweepIntervalMs?: number;
 }
 
 export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
@@ -35,6 +37,10 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   private readonly reconcileWorker = new ReconcileWorker(this.reconcileQueue);
   private readonly parseScheduler;
   private readonly repoRootCache = new Map<string, string>();
+  private sweepTimer: ReturnType<typeof setInterval> | null = null;
+
+  private static readonly DEFAULT_SWEEP_INTERVAL_MS = 30_000;
+  private static readonly STALE_DIRTY_DRAFT_MS = 120_000;
 
   constructor(options: InMemoryLiveIndexCoordinatorOptions = {}) {
     this.enabled = options.enabled ?? true;
@@ -98,6 +104,14 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
         }
       },
     });
+
+    const sweepMs = options.sweepIntervalMs ?? InMemoryLiveIndexCoordinator.DEFAULT_SWEEP_INTERVAL_MS;
+    if (this.enabled && sweepMs > 0) {
+      this.sweepTimer = setInterval(() => {
+        void this.sweepOverlay();
+      }, sweepMs);
+      this.sweepTimer.unref();
+    }
   }
 
   async pushBufferUpdate(
@@ -118,7 +132,7 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
     const warnings: string[] = [];
 
     // Close events are lifecycle signals — always accept them regardless of version
-    if (input.eventType === "close" && !input.dirty) {
+    if (input.eventType === "close") {
       if (existing && input.version !== existing.version) {
         warnings.push(
           `Close event version ${input.version} does not match draft version ${existing.version}.`,
@@ -133,13 +147,14 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
       let diskRecoveryScheduled = false;
       try {
         // Pass the raw filePath — patchSavedFile normalizes internally
-        await patchSavedFile({
-          repoId: input.repoId,
-          filePath: input.filePath,
-          language: input.language,
-          version: input.version,
-          // content omitted — patchSavedFile reads from disk when absent
-        });
+        await withIndexingGate(() =>
+          patchSavedFile({
+            repoId: input.repoId,
+            filePath: input.filePath,
+            language: input.language,
+            version: input.version,
+          }),
+        );
         diskRecoveryScheduled = true;
         logger.debug("Restored canonical index from disk on close event", {
           repoId: input.repoId,
@@ -205,15 +220,17 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
     }
     this.overlayStore.upsertDraft(input);
     if (input.eventType === "save" && !input.dirty) {
-      const patched = await patchSavedFile({
-        repoId: input.repoId,
-        filePath: input.filePath,
-        content: input.content,
-        language: input.language,
-        version: input.version,
-        parseResult:
-          existing?.version === input.version ? existing.parseResult : null,
-      }).catch((error) => {
+      const patched = await withIndexingGate(() =>
+        patchSavedFile({
+          repoId: input.repoId,
+          filePath: input.filePath,
+          content: input.content,
+          language: input.language,
+          version: input.version,
+          parseResult:
+            existing?.version === input.version ? existing.parseResult : null,
+        }),
+      ).catch((error) => {
         warnings.push(
           `Durable patch failed: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -252,18 +269,16 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
         );
       }
     }
-    if (input.eventType !== "close") {
-      void this.parseScheduler.schedule(
-        `${input.repoId}:${input.filePath}`,
-        input,
-      );
-    }
+    void this.parseScheduler.schedule(
+      `${input.repoId}:${input.filePath}`,
+      input,
+    );
 
     return {
       accepted: true,
       repoId: input.repoId,
       overlayVersion: input.version,
-      parseScheduled: input.eventType !== "close",
+      parseScheduled: true,
       checkpointScheduled: input.eventType === "save" && !input.dirty,
       warnings,
     };
@@ -324,7 +339,62 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
     await this.reconcileWorker.waitForIdle();
   }
 
+  private async sweepOverlay(): Promise<void> {
+    const now = Date.now();
+    for (const repoId of this.overlayStore.listRepoIds()) {
+      const drafts = this.overlayStore.listDrafts(repoId);
+      if (drafts.length === 0) continue;
+
+      // Retry non-dirty drafts left behind by failed save-event patches
+      const hasNonDirty = drafts.some((d) => !d.dirty);
+      if (hasNonDirty) {
+        await this.checkpointService
+          .checkpointRepo({ repoId, reason: "sweep" })
+          .catch((error) => {
+            logger.warn("Sweep checkpoint failed", {
+              repoId,
+              error:
+                error instanceof Error ? error.message : String(error),
+            });
+          });
+      }
+
+      // Evict stale dirty drafts orphaned by editor crash or disconnect
+      for (const draft of drafts) {
+        if (!draft.dirty) continue;
+        const age = now - Date.parse(draft.timestamp);
+        if (age < InMemoryLiveIndexCoordinator.STALE_DIRTY_DRAFT_MS) continue;
+
+        logger.debug("Sweep evicting stale dirty draft", {
+          repoId,
+          filePath: draft.filePath,
+          ageMs: age,
+        });
+        try {
+          await withIndexingGate(() =>
+            patchSavedFile({ repoId, filePath: draft.filePath }),
+          );
+          const current = this.overlayStore.getDraft(repoId, draft.filePath);
+          if (current && current.version === draft.version) {
+            this.overlayStore.removeDraft(repoId, draft.filePath);
+          }
+        } catch (error) {
+          logger.warn("Sweep disk recovery failed", {
+            repoId,
+            filePath: draft.filePath,
+            error:
+              error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+  }
+
   reset(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
     this.parseScheduler.cancelAll();
     this.overlayStore.clearAll();
     this.checkpointService.clear();
