@@ -148,3 +148,6 @@ runner-tap.out
 draft-parser.out
 draft-tap.out
 .fallow/churn.bin
+src/code-mode/descriptions.ts.bak
+.gitignore
+tests/unit/file-gateway.test.ts.bak
