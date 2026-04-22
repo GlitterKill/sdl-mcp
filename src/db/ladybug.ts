@@ -409,7 +409,7 @@ async function loadExtensionsOnConnection(
 async function checkpointWal(
   conn: LadybugConnection,
   phase: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const result = await conn.query("CHECKPOINT");
     if (Array.isArray(result)) {
@@ -418,12 +418,14 @@ async function checkpointWal(
       result.close();
     }
     logger.debug(`LadybugDB CHECKPOINT completed`, { phase });
+    return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn(`LadybugDB CHECKPOINT failed (best-effort)`, {
       phase,
       reason: msg,
     });
+    return false;
   }
 }
 
@@ -527,9 +529,26 @@ export async function getLadybugReadConn(): Promise<LadybugConnection> {
         // WAL records. Kuzu 0.15.2 `fts` extension hits UNREACHABLE_CODE in
         // wal_record.cpp:76 when parsing a dirty WAL on LOAD — aborting the
         // process mid-session. Ensuring an empty WAL sidesteps that path.
-        await checkpointWal(localWriteConn, "pre-extension-load");
-        for (const c of [localWriteConn, ...localReadPool]) {
-          await loadExtensionsOnConnection(c);
+        //
+        // If the CHECKPOINT itself fails (e.g. the WAL already contains
+        // unrecognizable records from a previous crash), skip LOAD EXTENSION
+        // entirely — loading extensions on a dirty WAL triggers a native
+        // abort() that kills the process. The pool operates without FTS
+        // until the next clean startup.
+        const walClean = await checkpointWal(
+          localWriteConn,
+          "pre-extension-load",
+        );
+        if (walClean) {
+          for (const c of [localWriteConn, ...localReadPool]) {
+            await loadExtensionsOnConnection(c);
+          }
+        } else {
+          logger.warn(
+            "Skipping LOAD EXTENSION — WAL is dirty and cannot be checkpointed. " +
+              "FTS will be unavailable until the WAL is resolved. " +
+              "Try stopping all processes using this DB and restarting.",
+          );
         }
 
         // Log extension capabilities after INSTALL+LOAD phase

@@ -33,7 +33,21 @@ export async function handleBufferPush(
       ? { ...args as Record<string, unknown>, timestamp: new Date((args as Record<string, unknown>).timestamp as number).toISOString() }
       : args;
     const request = BufferPushRequestSchema.parse(normalized);
-    return await resolveLiveIndex(liveIndex).pushBufferUpdate(request);
+    const result = await resolveLiveIndex(liveIndex).pushBufferUpdate(request);
+    // Warn if file does not exist on disk
+    if (request.filePath) {
+      const { existsSync } = await import("node:fs");
+      const { resolve } = await import("node:path");
+      const config = (await import("../../config/loadConfig.js")).loadConfig();
+      const repo = config.repos?.find((r: { repoId?: string }) => r.repoId === request.repoId) ?? config.repos?.[0];
+      if (repo?.rootPath) {
+        const absPath = resolve(repo.rootPath, request.filePath);
+        if (!existsSync(absPath)) {
+          result.warnings = [...(result.warnings ?? []), `File does not exist on disk: ${request.filePath}`];
+        }
+      }
+    }
+    return result;
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(

@@ -85,9 +85,10 @@ export async function handlePRRiskAnalysis(args: unknown) {
     throw new IndexError(`Repository ${validated.repoId} not found`);
   }
 
+  const maxBlastResults = validated.budget?.maxBlastRadius ?? 50;
   const blastRadiusItems = await computeBlastRadius(conn, changedSymbolIds, {
-    maxHops: 3,
-    maxResults: 50,
+    maxHops: maxBlastResults <= 10 ? 2 : 3,
+    maxResults: maxBlastResults,
     repoId: validated.repoId,
   });
 
@@ -337,18 +338,29 @@ export async function handlePRRiskAnalysis(args: unknown) {
         response.analysis.evidence.truncated = true;
         response.analysis.recommendedTests.truncated = true;
       },
-      // Pass 3: empty all arrays — envelope only.
+      // Pass 3: keep 1 item per array for minimum viable detail.
       () => {
-        response.analysis.changedSymbols.items = [];
-        response.analysis.blastRadius.items = [];
-        response.analysis.findings.items = [];
-        response.analysis.evidence.items = [];
-        response.analysis.recommendedTests.items = [];
+        response.analysis.changedSymbols.items =
+          response.analysis.changedSymbols.items.slice(0, 1);
+        response.analysis.blastRadius.items =
+          response.analysis.blastRadius.items.slice(0, 1);
+        response.analysis.findings.items =
+          response.analysis.findings.items.slice(0, 1);
+        response.analysis.evidence.items =
+          response.analysis.evidence.items.slice(0, 1);
+        response.analysis.recommendedTests.items =
+          response.analysis.recommendedTests.items.slice(0, 1);
         response.analysis.changedSymbols.truncated = true;
         response.analysis.blastRadius.truncated = true;
         response.analysis.findings.truncated = true;
         response.analysis.evidence.truncated = true;
         response.analysis.recommendedTests.truncated = true;
+      },
+      // Pass 4: empty all arrays — envelope only.
+      () => {
+        response.analysis.changedSymbols.items = [];
+        response.analysis.blastRadius.items = [];
+        response.analysis.findings.items = [];
       },
     ];
 

@@ -37,9 +37,16 @@ export async function handleAgentFeedback(
     throw new DatabaseError(`Repository ${repoId} not found`);
   }
 
-  const version = await ladybugDb.getVersion(conn, versionId);
+  // Auto-resolve versionId/sliceHandle when omitted
+  const resolvedVersionId = versionId ?? (await ladybugDb.getLatestVersion(conn, repoId))?.versionId;
+  if (!resolvedVersionId) {
+    throw new DatabaseError(`No indexed version found for repository ${repoId}. Run sdl.index.refresh first.`);
+  }
+  const resolvedSliceHandle = sliceHandle ?? "none";
+
+  const version = await ladybugDb.getVersion(conn, resolvedVersionId);
   if (!version) {
-    throw new DatabaseError(`Version ${versionId} not found`);
+    throw new DatabaseError(`Version ${resolvedVersionId} not found`);
   }
 
   const now = new Date().toISOString();
@@ -49,8 +56,8 @@ export async function handleAgentFeedback(
     await ladybugDb.upsertAgentFeedback(wConn, {
       feedbackId,
       repoId,
-      versionId,
-      sliceHandle,
+      versionId: resolvedVersionId,
+      sliceHandle: resolvedSliceHandle,
       usefulSymbolsJson: JSON.stringify(usefulSymbols),
       missingSymbolsJson: JSON.stringify(missingSymbols),
       taskTagsJson: taskTags ? JSON.stringify(taskTags) : null,
@@ -64,7 +71,7 @@ export async function handleAgentFeedback(
     ok: true,
     feedbackId,
     repoId,
-    versionId,
+    versionId: resolvedVersionId,
     symbolsRecorded: usefulSymbols.length + missingSymbols.length,
   };
 }

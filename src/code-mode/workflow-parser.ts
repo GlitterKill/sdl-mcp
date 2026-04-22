@@ -106,8 +106,13 @@ export function parseWorkflowRequest(
     }
 
     if (!isTransform && !(resolvedFn in fnNameMap)) {
+      const memoryFns = ['memory.store', 'memory.query', 'memory.remove', 'memory.surface'];
+      const isMemoryFn = memoryFns.includes(step.fn);
+      const hint = isMemoryFn
+        ? `. Memory tools require memory.enabled: true in your sdlmcp.config.json`
+        : '';
       errors.push(
-        `Step ${i}: unknown function '${step.fn}'. Available: ${Object.keys(fnNameMap).join(", ")}, dataPick, dataMap, dataFilter, dataSort, dataTemplate, workflowContinuationGet`,
+        `Step ${i}: unknown function '${step.fn}'${hint}. Available: ${Object.keys(fnNameMap).join(", ")}, dataPick, dataMap, dataFilter, dataSort, dataTemplate, workflowContinuationGet`,
       );
       continue;
     }

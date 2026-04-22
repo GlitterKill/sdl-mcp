@@ -159,6 +159,7 @@ const FilterClauseSchema = z.object({
     "lte",
     "contains",
     "in",
+    "icontains",
     "exists",
   ]),
   value: z.unknown().optional(),
@@ -298,6 +299,16 @@ function matchesClause(
       }
       if (Array.isArray(fieldVal)) {
         return fieldVal.includes(clause.value);
+      }
+      return false;
+    case "in":
+    case "icontains":
+      if (typeof fieldVal === "string" && typeof clause.value === "string") {
+        return fieldVal.toLowerCase().includes(clause.value.toLowerCase());
+      }
+      if (Array.isArray(fieldVal) && typeof clause.value === "string") {
+        const lv = clause.value.toLowerCase();
+        return fieldVal.some((v) => typeof v === "string" && v.toLowerCase().includes(lv));
       }
       return false;
     case "in":

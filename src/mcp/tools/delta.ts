@@ -101,7 +101,8 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       skipBlastRadius?: boolean;
     };
     const autoSkipBlastRadius =
-      !validated.fromVersion && totalChangesEarly > 500;
+      (!validated.fromVersion && totalChangesEarly > 500) ||
+      (validated.budget?.maxCards != null && totalChangesEarly > validated.budget.maxCards * 5);
     const shouldSkipBlastRadius =
       preValidated.preview === true ||
       preValidated.skipBlastRadius === true ||

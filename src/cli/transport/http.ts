@@ -22,7 +22,7 @@ import { logger } from "../../util/logger.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { computeDelta } from "../../delta/diff.js";
 import { runGovernorLoop } from "../../delta/blastRadius.js";
-import { getLadybugConn, initLadybugDb } from "../../db/ladybug.js";
+import { getLadybugConn } from "../../db/ladybug.js";
 import { indexRepo, type IndexProgress } from "../../indexer/indexer.js";
 import {
   BufferCheckpointRequestSchema,
@@ -1342,7 +1342,7 @@ export interface HttpServerHandle {
 export async function setupHttpTransport(
   host: string,
   port: number,
-  graphDbPath: string,
+  _graphDbPath: string,
   services: HttpTransportServices & MCPServerServices = {},
   httpAuthConfig?: { enabled?: boolean; token?: string | null },
 ): Promise<HttpServerHandle> {
@@ -1433,7 +1433,11 @@ export async function setupHttpTransport(
     cleanupSession,
   };
 
-  await initLadybugDb(graphDbPath);
+  // DB is already initialized by serve.ts → initGraphDb() before this
+  // function is called. A redundant initLadybugDb() here risked a
+  // close+reopen cycle when normalizeGraphDbPath() returned a different
+  // path (the DB directory now exists, flipping the hint from "file" to
+  // "directory"). Removed to prevent dirty-WAL crashes on re-init.
 
   const checkHealth = async (): Promise<boolean> => {
     try {

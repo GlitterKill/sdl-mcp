@@ -26,7 +26,11 @@ import {
   replaceEdgeTarget,
 } from "../db/ladybug-scip.js";
 import { getLatestVersion } from "../db/ladybug-versions.js";
-import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
+import {
+  getLadybugConn,
+  preIndexCheckpoint,
+  withWriteConn,
+} from "../db/ladybug.js";
 import { ScipFileNotFoundError, ScipIngestionError } from "../domain/errors.js";
 import type { SymbolId } from "../domain/types.js";
 import { logger } from "../util/logger.js";
@@ -520,6 +524,15 @@ export async function ingestScipIndex(
           matched: symbolsMatched,
           edges: edgesCreated,
         });
+      }
+
+      // Flush WAL every 100 documents to prevent unbounded WAL growth.
+      // LadybugDB 0.15.2 can crash on LOAD EXTENSION / CHECKPOINT when
+      // the WAL contains certain record types accumulated during heavy
+      // writes. Periodic flushing keeps the WAL small and limits data
+      // loss on unexpected process termination.
+      if (!dryRun && documentsProcessed % 100 === 0) {
+        await preIndexCheckpoint();
       }
     }
 

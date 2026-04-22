@@ -213,7 +213,7 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
   const ext = dotIndex >= 0 ? filePath.slice(dotIndex).toLowerCase() : "";
   if (SDL_SOURCE_EXTENSIONS.has(ext)) {
     throw new ValidationError(
-      `file.read is for non-indexed files only. Use sdl.symbol.getCard, sdl.code.getSkeleton, or sdl.code.getHotPath for ${ext} files.`,
+      `file.read is for non-indexed files only. Use sdl.context for task-scoped retrieval, or sdl.code.getSkeleton / sdl.code.getHotPath for targeted lookups on ${ext} files.`,
     );
   }
 

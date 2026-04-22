@@ -798,7 +798,8 @@ export async function handleSliceSpilloverGet(
   args: unknown,
 ): Promise<SliceSpilloverGetResponse> {
   const request = args as SliceSpilloverGetRequest;
-  const { spilloverHandle, cursor, pageSize } = request;
+  const spilloverHandle = request.spilloverHandle ?? request.sliceHandle!;
+  const { cursor, pageSize } = request;
 
   const conn = await getLadybugConn();
   const handleRow = await ladybugDb.getSliceHandle(conn, spilloverHandle);

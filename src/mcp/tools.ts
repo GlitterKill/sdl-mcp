@@ -1315,10 +1315,14 @@ export const DeltaGetResponseSchema = z.object({
 });
 
 export const SliceSpilloverGetRequestSchema = z.object({
-  spilloverHandle: z.string().min(1).max(256),
+  spilloverHandle: z.string().min(1).max(256).optional(),
+  sliceHandle: z.string().min(1).max(256).optional(),
   cursor: z.string().optional(),
   pageSize: z.number().int().min(1).max(PAGE_SIZE_MAX).optional(),
-});
+}).refine(
+  (d) => d.spilloverHandle != null || d.sliceHandle != null,
+  { message: "Either spilloverHandle or sliceHandle is required" },
+);
 
 export const SliceSpilloverGetResponseSchema = z.object({
   spilloverHandle: z.string(),
@@ -2035,11 +2039,13 @@ export const AgentFeedbackRequestSchema = z.object({
   versionId: z
     .string()
     .min(1)
-    .describe("Version identifier for the feedback context"),
+    .optional()
+    .describe("Version identifier — auto-resolves to latest if omitted"),
   sliceHandle: z
     .string()
     .min(1)
-    .describe("Slice handle that was used for the task"),
+    .optional()
+    .describe("Slice handle — defaults to 'none' if not from a slice workflow"),
   usefulSymbols: z
     .array(z.string())
     .min(1)
@@ -2682,7 +2688,7 @@ export interface FileWriteResponse {
 // Search/Edit (sdl.search.edit) Schemas
 // ============================================================================
 
-const SearchEditQuerySchema = z.object({
+export const SearchEditQuerySchema = z.object({
   literal: z.string().min(1).max(500).optional(),
   regex: z.string().min(1).max(500).optional(),
   replacement: z.string().max(5000).optional(),
@@ -2721,13 +2727,13 @@ const SearchEditQuerySchema = z.object({
     .optional(),
 });
 
-const SearchEditFiltersSchema = z.object({
+export const SearchEditFiltersSchema = z.object({
   include: z.array(z.string().max(500)).max(50).optional(),
   exclude: z.array(z.string().max(500)).max(50).optional(),
   extensions: z.array(z.string().max(20)).max(50).optional(),
 });
 
-const SearchEditEditMode = z.enum([
+export const SearchEditEditMode = z.enum([
   "replacePattern",
   "replaceLines",
   "insertAt",

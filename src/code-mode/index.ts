@@ -5,6 +5,7 @@ import type { ToolServices } from "../gateway/index.js";
 import { createActionMap, type ActionMap } from "../gateway/router.js";
 import { AgentContextRequestSchema } from "../mcp/tools.js";
 import { handleAgentContext } from "../mcp/tools/context.js";
+import { FileGatewayRequestSchema, handleFileGateway } from "../mcp/tools/file-gateway.js";
 import type { MCPServer, ToolContext } from "../server.js";
 import { estimateTokens } from "../util/tokenize.js";
 import {
@@ -16,6 +17,7 @@ import {
   ACTION_SEARCH_DESCRIPTION,
   CONTEXT_DESCRIPTION,
   MANUAL_DESCRIPTION,
+  FILE_GATEWAY_DESCRIPTION,
   WORKFLOW_DESCRIPTION,
 } from "./descriptions.js";
 import { INTERNAL_TRANSFORM_NAMES } from "./transforms.js";
@@ -26,10 +28,13 @@ import {
   getActiveFnNameMap,
 } from "./manual-generator.js";
 import { parseWorkflowRequest } from "./workflow-parser.js";
+
 import {
   WorkflowRequestSchema,
   WorkflowTraceOptionsSchema,
 } from "./types.js";
+
+const TRANSFORM_HINT = "\n\n> **Tip:** Data transforms (dataPick, dataMap, dataFilter, dataSort, dataTemplate) are available as sdl.workflow steps. Use sdl.manual({ actions: [\"dataPick\", \"dataMap\", \"dataFilter\", \"dataSort\", \"dataTemplate\"] }) for schemas.";
 
 export const ActionSearchRequestSchema = z.object({
   query: z.string().min(1),
@@ -97,7 +102,7 @@ export function registerActionSearchTool(
             total: filteredRanked.length,
             byKind,
             byNamespace,
-            matchedActions: ranked.map(a => a.action),
+            matchedActions: filteredRanked.map(a => a.action),
           },
           tokenEstimate: estimateTokens(JSON.stringify({ total: filteredRanked.length, byKind, byNamespace })),
         };
@@ -146,7 +151,7 @@ export function registerActionSearchTool(
 }
 
 /**
- * Register Code Mode tools (sdl.manual + sdl.workflow + sdl.context) on the MCP server.
+ * Register Code Mode tools (sdl.manual + sdl.workflow + sdl.context + sdl.file) on the MCP server.
  *
  * @param prebuiltActionMap Optional pre-built action map to avoid duplicate creation
  *   when code-mode is registered alongside gateway.
@@ -239,7 +244,8 @@ export function registerCodeModeTools(
       const rendered = format === "markdown"
         ? renderMarkdown(catalog)
         : renderTypescript(catalog);
-      return { manual: rendered, tokenEstimate: estimateTokens(rendered) };
+      const withTransforms = rendered + TRANSFORM_HINT;
+      return { manual: withTransforms, tokenEstimate: estimateTokens(withTransforms) };
     },
     {
       type: "object",
@@ -316,6 +322,46 @@ export function registerCodeModeTools(
         options: { type: "object" },
       },
       required: ["repoId", "taskType", "taskText"],
+      additionalProperties: false,
+    },
+  );
+
+  server.registerTool(
+    "sdl.file",
+    FILE_GATEWAY_DESCRIPTION,
+    FileGatewayRequestSchema,
+    async (rawArgs: unknown) => handleFileGateway(rawArgs),
+    {
+      type: "object",
+      properties: {
+        op: { type: "string", enum: ["read", "write", "searchEditPreview", "searchEditApply"] },
+        repoId: { type: "string", minLength: 1 },
+        filePath: { type: "string" },
+        maxBytes: { type: "number" },
+        offset: { type: "number" },
+        limit: { type: "number" },
+        search: { type: "string" },
+        searchContext: { type: "number" },
+        jsonPath: { type: "string" },
+        content: { type: "string" },
+        replaceLines: { type: "object" },
+        replacePattern: { type: "object" },
+        jsonValue: {},
+        insertAt: { type: "object" },
+        append: { type: "string" },
+        createBackup: { type: "boolean" },
+        createIfMissing: { type: "boolean" },
+        targeting: { type: "string", enum: ["text", "symbol"] },
+        query: { type: "object" },
+        filters: { type: "object" },
+        editMode: { type: "string" },
+        previewContextLines: { type: "number" },
+        maxFiles: { type: "number" },
+        maxMatchesPerFile: { type: "number" },
+        maxTotalMatches: { type: "number" },
+        planHandle: { type: "string" },
+      },
+      required: ["op", "repoId"],
       additionalProperties: false,
     },
   );

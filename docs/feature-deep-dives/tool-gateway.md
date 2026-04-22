@@ -7,7 +7,7 @@ The gateway compresses most of the flat SDL-MCP surface into four namespace tool
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
-    Flat["Flat mode<br/>33 tools<br/>2 universal + 31 flat"]
+    Flat["Flat mode<br/>34 tools<br/>2 universal + 32 flat"]
     Shrink["Gateway projection<br/>30 gateway-routable actions"]
     Gateway["Gateway mode<br/>6 tools<br/>2 universal + 4 gateway"]
 
@@ -26,25 +26,27 @@ flowchart LR
 
 ## Current Surface Matrix
 
-| Mode | Tool count | Composition |
-| --- | --- | --- |
-| Flat | `33` | `2` universal + `31` flat tools |
-| Gateway | `6` | `2` universal + `4` gateway tools |
-| Gateway + legacy | `37` | `2` universal + `4` gateway + `31` flat tools |
-| Code Mode exclusive | `4` | `sdl.action.search`, `sdl.context`, `sdl.manual`, `sdl.workflow` |
+| Mode                | Tool count | Composition                                                                  |
+| ------------------- | ---------- | ---------------------------------------------------------------------------- |
+| Flat                | `34`       | `2` universal + `32` flat tools                                              |
+| Gateway             | `6`        | `2` universal + `4` gateway tools                                            |
+| Gateway + legacy    | `38`       | `2` universal + `4` gateway + `32` flat tools                                |
+| Code Mode exclusive | `5`        | `sdl.action.search`, `sdl.context`, `sdl.file`, `sdl.manual`, `sdl.workflow` |
 
 The generated source of truth is [tool-inventory.md](../generated/tool-inventory.md).
 
 ## What the Gateway Actually Covers
 
-The gateway currently exposes `30` of the `31` flat actions. The missing flat action is `sdl.file.write`, which remains flat-only today.
+The gateway currently exposes `30` of the `32` flat actions through the four namespace schemas. The two flat actions outside those schemas are `file.write` and `search.edit`. Both are available in flat mode and through the Code Mode action catalog; they are not routable through the regular `sdl.repo` gateway envelope today. In Code Mode, the top-level `sdl.file` tool provides a unified gateway for `file.read`, `file.write`, and `search.edit` via a single `op` discriminator (`"read"`, `"write"`, `"searchEditPreview"`, `"searchEditApply"`).
 
-| Gateway tool | Actions | Current action set |
-| --- | --- | --- |
-| `sdl.query` | `7` | `symbol.search`, `symbol.getCard`, `slice.build`, `slice.refresh`, `slice.spillover.get`, `delta.get`, `pr.risk.analyze` |
-| `sdl.code` | `3` | `code.needWindow`, `code.getSkeleton`, `code.getHotPath` |
-| `sdl.repo` | `9` | `repo.register`, `repo.status`, `repo.overview`, `index.refresh`, `policy.get`, `policy.set`, `usage.stats`, `file.read`, `scip.ingest` |
-| `sdl.agent` | `11` | `agent.feedback`, `agent.feedback.query`, `buffer.push`, `buffer.checkpoint`, `buffer.status`, `runtime.execute`, `runtime.queryOutput`, `memory.store`, `memory.query`, `memory.remove`, `memory.surface` |
+| Gateway tool | Actions | Current action set                                                                                                                                                                                         |
+| ------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdl.query`  | `7`     | `symbol.search`, `symbol.getCard`, `slice.build`, `slice.refresh`, `slice.spillover.get`, `delta.get`, `pr.risk.analyze`                                                                                   |
+| `sdl.code`   | `3`     | `code.needWindow`, `code.getSkeleton`, `code.getHotPath`                                                                                                                                                   |
+| `sdl.repo`   | `9`     | `repo.register`, `repo.status`, `repo.overview`, `index.refresh`, `policy.get`, `policy.set`, `usage.stats`, `file.read`, `scip.ingest`                                                                    |
+| `sdl.agent`  | `11`    | `agent.feedback`, `agent.feedback.query`, `buffer.push`, `buffer.checkpoint`, `buffer.status`, `runtime.execute`, `runtime.queryOutput`, `memory.store`, `memory.query`, `memory.remove`, `memory.surface` |
+
+In Code Mode, use `sdl.file({ op: "searchEditPreview" })` and `sdl.file({ op: "searchEditApply" })` for two-phase cross-file edits: preview first, then apply the stored plan with sha256/mtime preconditions and rollback on mid-batch failure. The internal `search.edit` action remains callable via `sdl.workflow`. See [sdl.search.edit - Cross-File Search and Edit](../search-edit-tool.md) for request shapes and examples.
 
 ## Routing Path
 
@@ -84,7 +86,7 @@ The important implementation detail is not the namespace wrapper. It is the pres
 
 ## Limits and Gotchas
 
-- `sdl.file.write` is still flat-only.
+- `file.write` and `search.edit` are outside the four namespace gateway schemas. In Code Mode, use `sdl.file` which unifies `file.read`, `file.write`, and `search.edit` under one tool.
 - `sdl.info` is universal outside Code Mode exclusive. It is not part of the four gateway tools.
 - Code Mode exclusive bypasses the regular gateway and flat surfaces entirely.
 - The CLI `sdl-mcp tool` command is related but not identical. It exposes a narrower direct-action subset. See [CLI Tool Access](./cli-tool-access.md).
@@ -107,12 +109,12 @@ If you are migrating older agent instructions that still depend on flat tool nam
 
 ## When To Use Which Surface
 
-| Situation | Recommended surface |
-| --- | --- |
-| Smallest registration footprint | Gateway mode |
-| Task-shaped retrieval first | Code Mode |
-| Need `file.write` | Flat mode or flat + Code Mode |
-| Existing legacy instructions still call flat tools | Flat mode, or a temporary migration setup |
+| Situation                                          | Recommended surface                                      |
+| -------------------------------------------------- | -------------------------------------------------------- |
+| Smallest registration footprint                    | Gateway mode                                             |
+| Task-shaped retrieval first                        | Code Mode                                                |
+| Need `file.write` or `search.edit`                 | Code Mode `sdl.file`, flat mode, or `sdl.workflow` steps |
+| Existing legacy instructions still call flat tools | Flat mode, or a temporary migration setup                |
 
 ## Practical Recommendation
 

@@ -326,6 +326,7 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "usage.stats": { scope: "both", since: "2026-03-01T00:00:00Z" },
   "file.read": { filePath: "config/sdlmcp.config.example.json" },
   "file.write": { filePath: "config/app.yaml", jsonPath: "server.port", jsonValue: 8080 },
+
   "search.edit": { mode: "preview", targeting: "text", query: { literal: "oldName", replacement: "newName", global: true }, editMode: "replacePattern" },
 };
 
@@ -634,13 +635,19 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
   "file.read": {
     prerequisites: ["repo.status"],
     recommendedNextActions: ["repo.overview"],
-    fallbacks: ["runtime.execute"],
+    fallbacks: ["symbol.getCard", "code.getSkeleton"],
   },
   "file.write": {
     prerequisites: ["repo.status", "file.read"],
     recommendedNextActions: ["search.edit"],
     fallbacks: ["runtime.execute"],
   },
+  "file": {
+    prerequisites: ["repo.status"],
+    recommendedNextActions: ["file"],
+    fallbacks: ["file.write", "search.edit"],
+  },
+
   "search.edit": {
     prerequisites: ["repo.status"],
     recommendedNextActions: ["search.edit"],
