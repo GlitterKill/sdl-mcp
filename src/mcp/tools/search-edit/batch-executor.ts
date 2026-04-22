@@ -176,7 +176,6 @@ export async function applyBatch(
           );
         }
       }
-      // TOCTOU: re-verify path hasn't been swapped for a symlink escape
       // TOCTOU: re-verify path hasn't been swapped for a symlink escape.
       // Skip for new files (fileExists=false): realpathSync throws
       // ENOENT legitimately until the file is created.

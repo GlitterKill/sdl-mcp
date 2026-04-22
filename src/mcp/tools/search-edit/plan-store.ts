@@ -176,7 +176,7 @@ export class PlanStore {
     return true;
   }
 
-  /** Unmark consumed (allow retry after transient failure with no writes). */
+  /** @internal Unmark consumed (allow retry after transient failure with no writes). Test-only. */
   unmarkConsumed(planHandle: string): boolean {
     const plan = this.plans.get(planHandle);
     if (!plan) return false;
