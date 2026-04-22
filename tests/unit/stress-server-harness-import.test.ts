@@ -1,7 +1,7 @@
 import assert from "node:assert";
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
-import { describe, it } from "node:test";
+import { before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -24,7 +24,7 @@ function runCommand(command: string, args: string[]) {
 }
 
 describe("compiled stress server harness", () => {
-  it("imports without resolving dist/dist paths", () => {
+  before(() => {
     const build = runCommand("npm", ["run", "build"]);
 
     assert.strictEqual(
@@ -52,7 +52,9 @@ describe("compiled stress server harness", () => {
       0,
       `Expected stress harness compilation to succeed.\nSTDOUT:\n${compile.stdout}\nSTDERR:\n${compile.stderr}`,
     );
+  });
 
+  it("imports without resolving dist/dist paths", () => {
     const importResult = spawnSync(
       process.execPath,
       [
@@ -71,6 +73,52 @@ describe("compiled stress server harness", () => {
       importResult.status,
       0,
       `Expected compiled stress server harness to import successfully.\nSTDOUT:\n${importResult.stdout}\nSTDERR:\n${importResult.stderr}`,
+    );
+  });
+
+  it("initializes LadybugDB before accepting stress traffic", () => {
+    const lifecycleResult = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+          import assert from "node:assert/strict";
+          import { resolve } from "node:path";
+          import { pathToFileURL } from "node:url";
+
+          const repoRoot = process.argv[1];
+          const harnessUrl = pathToFileURL(resolve(repoRoot, "dist/tests/stress/infra/server-harness.js")).href;
+          const typesUrl = pathToFileURL(resolve(repoRoot, "dist/tests/stress/infra/types.js")).href;
+          const { ServerHarness } = await import(harnessUrl);
+          const { DEFAULT_CONFIG } = await import(typesUrl);
+
+          const harness = new ServerHarness({
+            ...DEFAULT_CONFIG,
+            fixturePath: resolve(repoRoot, "tests/stress/fixtures"),
+          });
+
+          try {
+            await harness.start({ maxSessions: 1, maxToolConcurrency: 1 });
+            const poolStats = harness.getPoolStats();
+            assert.equal(poolStats.writeInitialized, true);
+            assert.equal(poolStats.readPoolInitialized > 0, true);
+          } finally {
+            await harness.stop();
+          }
+        `,
+        repoRoot,
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+      },
+    );
+
+    assert.strictEqual(
+      lifecycleResult.status,
+      0,
+      `Expected stress harness startup to initialize LadybugDB.\nSTDOUT:\n${lifecycleResult.stdout}\nSTDERR:\n${lifecycleResult.stderr}`,
     );
   });
 });

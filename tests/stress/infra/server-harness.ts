@@ -61,6 +61,7 @@ const transportModule = await importStressDistModule<{
   setupHttpTransport: SetupHttpTransport;
 }>(import.meta.url, "cli/transport/http.js");
 const ladybugModule = await importStressDistModule<{
+  initLadybugDb: (dbPath: string) => Promise<void>;
   closeLadybugDb: () => Promise<void>;
   getPoolStats: () => PoolStats;
 }>(import.meta.url, "db/ladybug.js");
@@ -77,7 +78,7 @@ const sessionManagerModule = await importStressDistModule<{
 }>(import.meta.url, "mcp/session-manager.js");
 
 const { setupHttpTransport } = transportModule;
-const { closeLadybugDb, getPoolStats } = ladybugModule;
+const { initLadybugDb, closeLadybugDb, getPoolStats } = ladybugModule;
 const {
   configureToolDispatchLimiter,
   getToolDispatchLimiter,
@@ -157,6 +158,10 @@ export class ServerHarness {
       graphDbPath,
       fixturePath: this.config.fixturePath,
     });
+
+    // The harness bypasses serveCommand(), so it must perform the DB bootstrap
+    // that production HTTP startup normally completes before transport setup.
+    await initLadybugDb(graphDbPath);
 
     // Start the HTTP transport in-process
     this.handle = await setupHttpTransport(
