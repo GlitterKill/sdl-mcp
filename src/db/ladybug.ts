@@ -2,6 +2,8 @@ import { existsSync, mkdirSync } from "fs";
 import { createRequire } from "node:module";
 import { totalmem } from "node:os";
 import { dirname } from "path";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { normalizePath } from "../util/paths.js";
 import { logger } from "../util/logger.js";
 import { loadConfig } from "../config/loadConfig.js";
@@ -75,8 +77,10 @@ let dbInstance: LadybugDatabase | null = null;
 let currentDbPath: string | null = null;
 
 const ONE_GB = 1024 * 1024 * 1024;
-const EIGHT_GB = 8 * ONE_GB;
-const DEFAULT_BUFFER_MANAGER_RATIO = 0.5;
+const FOUR_GB = 4 * ONE_GB;
+// 25% of system RAM (was 50%/8GB cap; reduced to avoid OOM when SCIP
+// auto-ingest runs immediately after index refresh on ≤16GB systems).
+const DEFAULT_BUFFER_MANAGER_RATIO = 0.25;
 const DEFAULT_CHECKPOINT_THRESHOLD_BYTES = 128 * 1024 * 1024;
 
 function formatReindexGuidanceError(dbPath: string, msg: string): string {
@@ -206,7 +210,7 @@ export function resolveLadybugBufferManagerSizeBytes(
   }
 
   const autoSized = Math.floor(totalMemoryBytes * DEFAULT_BUFFER_MANAGER_RATIO);
-  return Math.min(Math.max(autoSized, ONE_GB), EIGHT_GB);
+  return Math.min(Math.max(autoSized, ONE_GB), FOUR_GB);
 }
 
 export async function getLadybugDb(dbPath?: string): Promise<LadybugDatabase> {
@@ -891,13 +895,7 @@ export async function closeLadybugDb(): Promise<void> {
     }
   }
 
-  // Force GC before closing connections so that any lingering QueryResult
-  // N-API pointers are finalized while their parent Connection is still alive.
-  // Without this, kuzu 0.15.2's C++ destructor hits freed memory (0xC0000005).
-  if (typeof globalThis.gc === "function") {
-    globalThis.gc();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
+  await flushStaleFinalizers();
 
   // Synchronously capture and clear the read pool so concurrent readers
   // immediately see "not initialized" instead of accessing closing connections.
@@ -1003,6 +1001,39 @@ export function isLadybugAvailable(): boolean {
 
 export function getLadybugDbPath(): string | null {
   return currentDbPath;
+}
+
+/**
+ * Ensure `globalThis.gc` is available by enabling `--expose-gc` at runtime.
+ * Idempotent — only runs the V8 flag + vm bootstrap once.
+ */
+let gcExposed = typeof globalThis.gc === "function";
+function ensureGcExposed(): void {
+  if (gcExposed) return;
+  try {
+    setFlagsFromString("--expose-gc");
+    globalThis.gc = runInNewContext("gc") as typeof globalThis.gc;
+    gcExposed = true;
+  } catch {
+    // Non-fatal — flushStaleFinalizers degrades to a no-op
+  }
+}
+
+/**
+ * Flush stale LadybugDB QueryResult N-API pointers by forcing a GC cycle.
+ *
+ * LadybugDB (kuzu 0.15.2) C++ destructors can hit freed memory (0xC0000005)
+ * when V8 finalizes QueryResult pointers at unpredictable times. Call this
+ * before heavy napi allocations (e.g. SCIP decoder document iteration) to
+ * finalize stale pointers while connections are still alive.
+ */
+export async function flushStaleFinalizers(): Promise<void> {
+  ensureGcExposed();
+  if (typeof globalThis.gc === "function") {
+    logger.debug("Flushing stale N-API finalizers via forced GC");
+    globalThis.gc();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 
 // Re-export for backward compatibility — canonical home is extension-caps.ts.

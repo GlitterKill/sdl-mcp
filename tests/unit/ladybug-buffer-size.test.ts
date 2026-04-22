@@ -6,19 +6,26 @@ import { resolveLadybugBufferManagerSizeBytes } from "../../dist/db/ladybug.js";
 const ONE_GB = 1024 * 1024 * 1024;
 
 describe("resolveLadybugBufferManagerSizeBytes", () => {
-  it("auto-sizes to 50% of system memory within bounds", () => {
-    assert.strictEqual(resolveLadybugBufferManagerSizeBytes(2 * ONE_GB, undefined), ONE_GB);
+  it("auto-sizes to 25% of system memory within bounds", () => {
+    // 2GB system → 0.5GB → clamped to 1GB floor
+    assert.strictEqual(
+      resolveLadybugBufferManagerSizeBytes(2 * ONE_GB, undefined),
+      ONE_GB,
+    );
+    // 8GB system → 2GB
     assert.strictEqual(
       resolveLadybugBufferManagerSizeBytes(8 * ONE_GB, undefined),
-      4 * ONE_GB,
+      2 * ONE_GB,
     );
+    // 12GB system → 3GB
     assert.strictEqual(
       resolveLadybugBufferManagerSizeBytes(12 * ONE_GB, undefined),
-      6 * ONE_GB,
+      3 * ONE_GB,
     );
+    // 32GB system → 8GB → clamped to 4GB cap
     assert.strictEqual(
       resolveLadybugBufferManagerSizeBytes(32 * ONE_GB, undefined),
-      8 * ONE_GB,
+      4 * ONE_GB,
     );
   });
 
@@ -32,11 +39,14 @@ describe("resolveLadybugBufferManagerSizeBytes", () => {
   it("falls back to auto-sizing for invalid or undersized overrides", () => {
     assert.strictEqual(
       resolveLadybugBufferManagerSizeBytes(8 * ONE_GB, "not-a-number"),
-      4 * ONE_GB,
+      2 * ONE_GB,
     );
     assert.strictEqual(
-      resolveLadybugBufferManagerSizeBytes(8 * ONE_GB, String(512 * 1024 * 1024)),
-      4 * ONE_GB,
+      resolveLadybugBufferManagerSizeBytes(
+        8 * ONE_GB,
+        String(512 * 1024 * 1024),
+      ),
+      2 * ONE_GB,
     );
   });
 });

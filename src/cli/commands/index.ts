@@ -20,6 +20,7 @@ import {
   getLadybugConn,
   withWriteConn,
   closeLadybugDb,
+  flushStaleFinalizers,
 } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { getCurrentTimestamp } from "../../util/time.js";
@@ -591,6 +592,7 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       // even when scip.autoIngestOnRefresh was true.
       if (config.scip?.enabled && config.scip?.autoIngestOnRefresh) {
         try {
+          await flushStaleFinalizers();
           const { autoIngestScipIndexes } =
             await import("../../scip/ingestion.js");
           const total = config.scip.indexes?.length ?? 0;

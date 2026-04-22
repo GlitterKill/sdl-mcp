@@ -11,18 +11,25 @@ mod scip_proto;
 use scip_proto::*;
 use super::types::*;
 
-/// Holds the decoded SCIP index and a cursor for streaming document iteration.
+struct DocumentIterState {
+    docs: Vec<Document>,
+    cursor: usize,
+}
+
+/// Holds the decoded SCIP index with progressive memory release.
+///
+/// Documents are taken (std::mem::take) from the vec as they're consumed,
+/// freeing each document's occurrences/symbols immediately after napi
+/// conversion instead of holding the entire decoded index in memory.
 pub struct ScipDecodeState {
-    index: Index,
-    cursor: Mutex<usize>,
+    metadata: Option<Metadata>,
+    external_symbols: Vec<SymbolInformation>,
+    doc_state: Mutex<DocumentIterState>,
 }
 
 impl ScipDecodeState {
     /// Parse a SCIP index file from disk into an in-memory protobuf structure.
     pub fn new(file_path: &str) -> NapiResult<Self> {
-        // Size guard — reject SCIP files larger than MAX_SCIP_INDEX_BYTES
-        // to prevent OOM of the Node process when reading very large
-        // monorepo indexes. Matches the 256 MB limit in the TS decoder.
         const MAX_SCIP_INDEX_BYTES: u64 = 256 * 1024 * 1024;
         let metadata = std::fs::metadata(file_path).map_err(|e| {
             napi::Error::from_reason(format!("Failed to stat SCIP file: {}", e))
@@ -39,14 +46,18 @@ impl ScipDecodeState {
         let index = Index::decode(&bytes[..])
             .map_err(|e| napi::Error::from_reason(format!("Failed to decode SCIP index: {}", e)))?;
         Ok(Self {
-            index,
-            cursor: Mutex::new(0),
+            metadata: index.metadata,
+            external_symbols: index.external_symbols,
+            doc_state: Mutex::new(DocumentIterState {
+                docs: index.documents,
+                cursor: 0,
+            }),
         })
     }
 
     /// Extract metadata from the parsed SCIP index.
     pub fn metadata(&self) -> NapiResult<NapiScipMetadata> {
-        let meta = self.index.metadata.as_ref();
+        let meta = self.metadata.as_ref();
         let tool_info = meta.and_then(|m| m.tool_info.as_ref());
         Ok(NapiScipMetadata {
             version: meta.map(|m| m.version).unwrap_or(0),
@@ -67,20 +78,25 @@ impl ScipDecodeState {
 
     /// Return the next document from the index, advancing the internal cursor.
     /// Returns None when all documents have been consumed.
+    ///
+    /// Each consumed document is replaced with `Default::default()` via
+    /// `std::mem::take`, releasing its occurrences and symbol data immediately
+    /// rather than keeping the full decoded index resident until drop.
     pub fn next_document(&self) -> NapiResult<Option<NapiScipDocument>> {
-        let mut cursor = self.cursor.lock()
+        let mut state = self.doc_state.lock()
             .map_err(|e| napi::Error::from_reason(format!("Lock poisoned: {}", e)))?;
-        if *cursor >= self.index.documents.len() {
+        let idx = state.cursor;
+        if idx >= state.docs.len() {
             return Ok(None);
         }
-        let doc = &self.index.documents[*cursor];
-        *cursor += 1;
-        Ok(Some(convert_document(doc)))
+        let doc = std::mem::take(&mut state.docs[idx]);
+        state.cursor += 1;
+        Ok(Some(convert_document(&doc)))
     }
 
     /// Return all external symbols from the SCIP index.
     pub fn external_symbols(&self) -> NapiResult<Vec<NapiScipExternalSymbol>> {
-        Ok(self.index.external_symbols.iter().map(convert_external_symbol).collect())
+        Ok(self.external_symbols.iter().map(convert_external_symbol).collect())
     }
 }
 

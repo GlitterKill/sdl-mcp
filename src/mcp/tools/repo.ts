@@ -11,7 +11,11 @@ import {
   type RepoOverviewRequest,
   RepoOverviewResponse,
 } from "../tools.js";
-import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
+import {
+  getLadybugConn,
+  withWriteConn,
+  flushStaleFinalizers,
+} from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import {
   getWatcherHealth,
@@ -584,6 +588,7 @@ export async function handleIndexRefresh(
       if (scipConfig?.enabled && scipConfig?.autoIngestOnRefresh) {
         const repo = await ladybugDb.getRepo(conn, repoId);
         if (repo?.rootPath) {
+          await flushStaleFinalizers();
           const { autoIngestScipIndexes } =
             await import("../../scip/ingestion.js");
           const scipResults = await autoIngestScipIndexes(
