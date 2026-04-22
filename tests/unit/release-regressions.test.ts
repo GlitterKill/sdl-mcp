@@ -259,19 +259,21 @@ describe("release regression guards", () => {
     );
   });
 
-  it("uses a published optional tokenizers version compatible with clean installs", () => {
+  it("uses a published optional tokenizers build compatible with clean installs", () => {
     const source = readSource("package.json");
 
+    // The unscoped tokenizers 0.13.x package references missing platform
+    // packages on npm. Keep the alias that resolves cleanly on CI runners.
     assert.match(
       source,
-      /"tokenizers":\s*"[\^~]?0\.13\.\d+[\w.-]*"/,
-      "package.json should pin optional tokenizers to a published npm range",
+      /"tokenizers":\s*"npm:@anush008\/tokenizers@\^0\.6\.0"/,
+      "package.json should pin optional tokenizers to the published multi-arch alias",
     );
 
     assert.doesNotMatch(
       source,
-      /"tokenizers":\s*"[\^~]?0\.22\.0"/,
-      "package.json should not reference an unpublished tokenizers range",
+      /"tokenizers":\s*"[\^~]?0\.(?:13|22)\.\d+[\w.-]*"/,
+      "package.json should not reference unaliased tokenizers ranges with missing platform packages",
     );
   });
 

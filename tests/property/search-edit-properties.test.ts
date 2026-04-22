@@ -11,7 +11,11 @@ import type {
   PlanPrecondition,
   StoredPlan,
 } from "../../dist/mcp/tools/search-edit/plan-store.js";
-import { getLadybugConn } from "../../dist/db/ladybug.js";
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+} from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { normalizePath } from "../../dist/util/paths.js";
 
@@ -63,6 +67,8 @@ describe("search-edit property: apply+revert identity", () => {
   let root: string;
   before(async () => {
     root = await mkdtemp(join(tmpdir(), "sdl-se-prop-"));
+    await closeLadybugDb();
+    await initLadybugDb(join(root, "test.lbug"));
     const conn = await getLadybugConn();
     await ladybugDb.upsertRepo(conn, {
       repoId: "repo-prop",
@@ -72,6 +78,7 @@ describe("search-edit property: apply+revert identity", () => {
     });
   });
   after(async () => {
+    await closeLadybugDb();
     await rm(root, { recursive: true, force: true });
   });
 

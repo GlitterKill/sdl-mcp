@@ -2684,7 +2684,7 @@ export interface FileWriteResponse {
 
 const SearchEditQuerySchema = z.object({
   literal: z.string().min(1).max(500).optional(),
-  regex: z.string().max(500).optional(),
+  regex: z.string().min(1).max(500).optional(),
   replacement: z.string().max(5000).optional(),
   global: z.boolean().optional(),
   symbolRef: z
