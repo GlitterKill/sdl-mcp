@@ -851,6 +851,10 @@ function buildEnforcementAssets(
 ): GeneratedAsset[] {
   const assets: GeneratedAsset[] = [
     {
+      path: join(repoRoot, "SDL.md"),
+      content: loadTextTemplate("SDL.md"),
+    },
+    {
       path: join(repoRoot, "AGENTS.md"),
       content: renderTextTemplate("AGENTS.md.template", { REPO_ID: repoId }),
     },
@@ -1213,14 +1217,17 @@ export async function initCommand(options: InitOptions): Promise<void> {
       : {}),
   };
 
-  const generatedAssets = options.enforceAgentTools
-    ? buildEnforcementAssets(
-        repoRoot,
-        repoId,
-        configPath,
-        options.client as ClientType | undefined,
-      )
-    : [];
+  // SDL.md + baseline AGENTS.md are dropped regardless of enforcement so the
+  // optimized-tool-use playbook is always present before any agent touches
+  // the repo. Client-specific hooks/settings only ship when enforcement is on.
+  const generatedAssets = buildEnforcementAssets(
+    repoRoot,
+    repoId,
+    configPath,
+    options.enforceAgentTools
+      ? (options.client as ClientType | undefined)
+      : undefined,
+  );
 
   if (options.dryRun) {
     printDryRunPreview(configPath, config, generatedAssets);

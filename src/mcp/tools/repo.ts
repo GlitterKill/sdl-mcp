@@ -53,6 +53,7 @@ import {
 import type { ToolContext } from "../../server.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 import type { Connection } from "kuzu";
+import { ensureBaselineEnforcementAssets } from "../../cli/commands/enforcement-bootstrap.js";
 
 // Health snapshot cache with 30s TTL to avoid expensive recomputation.
 // lastKnownHealth persists indefinitely as a stale fallback when fresh computation times out.
@@ -254,6 +255,15 @@ export async function handleRepoRegister(
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  try {
+    ensureBaselineEnforcementAssets(resolvedRoot, repoId);
+  } catch (err) {
+    logger.warn("Failed to ensure baseline SDL enforcement assets", {
+      repoId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   return {
