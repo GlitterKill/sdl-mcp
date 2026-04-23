@@ -8,7 +8,12 @@
  * ladybug-embeddings.ts for the hybrid retrieval pipeline.
  */
 import type { Connection } from "kuzu";
-import { exec, queryAll, querySingle } from "./ladybug-core.js";
+import {
+  exec,
+  queryAll,
+  querySingle,
+  withTransaction,
+} from "./ladybug-core.js";
 import {
   getEmbeddingPropertyName,
   getVecPropertyName,
@@ -56,11 +61,17 @@ function resolvePropertyNames(model: string): {
 
   // Validate property names before they are interpolated into Cypher queries
   const SAFE_PROP = /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/;
-  for (const [label, value] of Object.entries({ vectorProp, cardHashProp, updatedAtProp })) {
+  const propsToValidate: Record<string, string> = {
+    vectorProp,
+    cardHashProp,
+    updatedAtProp,
+  };
+  if (vecProp) {
+    propsToValidate.vecProp = vecProp;
+  }
+  for (const [label, value] of Object.entries(propsToValidate)) {
     if (!SAFE_PROP.test(value)) {
-      throw new Error(
-        `Unsafe Cypher property name for ${label}: "${value}"`,
-      );
+      throw new Error(`Unsafe Cypher property name for ${label}: "${value}"`);
     }
   }
 
@@ -83,8 +94,12 @@ export async function getSymbolEmbeddingFromNode(
   symbolId: string,
   model: string,
 ): Promise<SymbolNodeEmbeddingRow | null> {
-  const { vectorProp, vecProp: _vecProp, cardHashProp, updatedAtProp } =
-    resolvePropertyNames(model);
+  const {
+    vectorProp,
+    vecProp: _vecProp,
+    cardHashProp,
+    updatedAtProp,
+  } = resolvePropertyNames(model);
 
   // Property names come from the trusted EMBEDDING_MODELS registry, so
   // interpolation is safe here. Kuzu does not support parameterised property
@@ -143,14 +158,24 @@ export async function setSymbolEmbeddingOnNode(
     { symbolId, vector, cardHash, updatedAt },
   );
 
-  // Also write to the numeric DOUBLE[] column for vector indexing
+  // Also write to the numeric DOUBLE[] column for vector indexing.
+  // LadybugDB does not allow SET on HNSW-indexed columns — the old value
+  // must be nulled first so the index entry is removed, then re-set.
   if (vectorArray && vecProp) {
-    await exec(
-      conn,
-      `MATCH (s:Symbol {symbolId: $symbolId})
-       SET s.${vecProp} = $vectorArray`,
-      { symbolId, vectorArray },
-    );
+    await withTransaction(conn, async (txConn) => {
+      await exec(
+        txConn,
+        `MATCH (s:Symbol {symbolId: $symbolId})
+         SET s.${vecProp} = null`,
+        { symbolId },
+      );
+      await exec(
+        txConn,
+        `MATCH (s:Symbol {symbolId: $symbolId})
+         SET s.${vecProp} = $vectorArray`,
+        { symbolId, vectorArray },
+      );
+    });
   }
 }
 
@@ -175,8 +200,12 @@ export async function getSymbolEmbeddingsFromNodes(
     return result;
   }
 
-  const { vectorProp, vecProp: _vecProp2, cardHashProp, updatedAtProp } =
-    resolvePropertyNames(model);
+  const {
+    vectorProp,
+    vecProp: _vecProp2,
+    cardHashProp,
+    updatedAtProp,
+  } = resolvePropertyNames(model);
 
   // Batch query: filter symbols that have a non-null vector property.
   const rows = await queryAll<{
@@ -205,11 +234,14 @@ export async function getSymbolEmbeddingsFromNodes(
     });
   }
 
-  logger.debug("getSymbolEmbeddingsFromNodes: loaded embeddings from Symbol nodes", {
-    model,
-    requested: symbolIds.length,
-    found: result.size,
-  });
+  logger.debug(
+    "getSymbolEmbeddingsFromNodes: loaded embeddings from Symbol nodes",
+    {
+      model,
+      requested: symbolIds.length,
+      found: result.size,
+    },
+  );
 
   return result;
 }
