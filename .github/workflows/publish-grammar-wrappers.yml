@@ -1,0 +1,254 @@
+name: Publish Grammar Wrappers
+
+# Publishes the 11 sdl-mcp-tree-sitter-* wrapper packages to npm.
+# These wrappers silence ERESOLVE peer-dependency warnings during
+# `npm install sdl-mcp` by bundling each upstream grammar with a
+# permissive tree-sitter peer range. See grammar-wrappers/README.md.
+#
+# Trigger manually from the Actions tab. Each wrapper publishes
+# independently; re-running after a partial failure skips already-published
+# versions (npm view idempotency check).
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (npm publish --dry-run, no registry writes)"
+        required: false
+        default: false
+        type: boolean
+      only_wrapper:
+        description: "Publish just one wrapper (e.g. sdl-mcp-tree-sitter-c). Leave blank to publish all 11."
+        required: false
+        default: ""
+        type: string
+      dist_tag:
+        description: "npm dist-tag to publish under"
+        required: false
+        default: "latest"
+        type: string
+
+permissions:
+  contents: read
+  id-token: write # required for npm --provenance + OIDC trusted publishing
+
+jobs:
+  publish:
+    name: Publish ${{ github.event.inputs.only_wrapper || 'all grammar wrappers' }}
+    runs-on: ubuntu-latest
+    env:
+      DRY_RUN: ${{ github.event.inputs.dry_run }}
+      ONLY_WRAPPER: ${{ github.event.inputs.only_wrapper }}
+      DIST_TAG: ${{ github.event.inputs.dist_tag }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Install root dependencies (for drift test)
+        run: npm ci --ignore-scripts --legacy-peer-deps
+
+      - name: Manifest drift gate
+        # Ensures wrapper package.json files still match scripts/scaffold-grammar-wrappers.mjs
+        # expectations (bundleDeps present, peer range permissive, pins unchanged).
+        # If this fails, run `node scripts/scaffold-grammar-wrappers.mjs` and commit the diff.
+        run: node --experimental-strip-types --test tests/unit/grammar-wrapper-manifest.test.ts
+
+      - name: Resolve wrappers to publish
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${ONLY_WRAPPER}" ]]; then
+            if [[ ! -d "grammar-wrappers/${ONLY_WRAPPER}" ]]; then
+              echo "ERROR: grammar-wrappers/${ONLY_WRAPPER} does not exist"
+              exit 1
+            fi
+            WRAPPERS=("${ONLY_WRAPPER}")
+          else
+            mapfile -t WRAPPERS < <(find grammar-wrappers -maxdepth 1 -mindepth 1 -type d -name 'sdl-mcp-tree-sitter-*' -printf '%f\n' | sort)
+          fi
+
+          echo "Wrappers to publish: ${WRAPPERS[*]}"
+          printf '%s\n' "${WRAPPERS[@]}" > /tmp/wrappers-to-publish.txt
+          echo "count=${#WRAPPERS[@]}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install upstream grammars into each wrapper (for bundleDependencies)
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r wrapper; do
+            [[ -z "${wrapper}" ]] && continue
+            echo "=== Installing upstream for ${wrapper} ==="
+            (
+              cd "grammar-wrappers/${wrapper}"
+              # --ignore-scripts: upstream grammars may run node-gyp rebuild; we only need
+              # node_modules/upstream-grammar/ populated so bundleDependencies has something
+              # to bundle. The upstream's own prebuilds ship inside its tarball and are
+              # reused transitively at consumer install time.
+              npm install --ignore-scripts --no-audit --no-fund
+            )
+          done < /tmp/wrappers-to-publish.txt
+
+      - name: Verify bundled upstream dep populated
+        shell: bash
+        run: |
+          set -euo pipefail
+          MISSING=()
+          while IFS= read -r wrapper; do
+            [[ -z "${wrapper}" ]] && continue
+            path="grammar-wrappers/${wrapper}/node_modules/upstream-grammar/package.json"
+            if [[ ! -f "${path}" ]]; then
+              MISSING+=("${wrapper}")
+              continue
+            fi
+            v=$(node -p "require('./${path}').version")
+            echo "OK ${wrapper} bundles upstream-grammar@${v}"
+          done < /tmp/wrappers-to-publish.txt
+
+          if [[ ${#MISSING[@]} -gt 0 ]]; then
+            echo "ERROR: upstream-grammar missing for: ${MISSING[*]}"
+            echo "bundleDependencies would ship empty node_modules; aborting."
+            exit 1
+          fi
+
+      - name: Smoke parse check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          declare -A SAMPLE_SRC=(
+            ["sdl-mcp-tree-sitter-bash"]="echo hi"
+            ["sdl-mcp-tree-sitter-c"]="int x;"
+            ["sdl-mcp-tree-sitter-c-sharp"]="class A{}"
+            ["sdl-mcp-tree-sitter-cpp"]="int x;"
+            ["sdl-mcp-tree-sitter-go"]="package m"
+            ["sdl-mcp-tree-sitter-java"]="class A{}"
+            ["sdl-mcp-tree-sitter-kotlin"]="fun x(){}"
+            ["sdl-mcp-tree-sitter-php"]="<?php \$x=1;"
+            ["sdl-mcp-tree-sitter-python"]="x=1"
+            ["sdl-mcp-tree-sitter-rust"]="fn m(){}"
+            ["sdl-mcp-tree-sitter-typescript"]="let x=1;"
+          )
+
+          # Multi-export grammars need a sub-key.
+          declare -A SUB_KEY=(
+            ["sdl-mcp-tree-sitter-typescript"]="typescript"
+            ["sdl-mcp-tree-sitter-php"]="php"
+          )
+
+          # Install tree-sitter peer once for the smoke host.
+          mkdir -p /tmp/smoke-host
+          (
+            cd /tmp/smoke-host
+            npm init -y > /dev/null
+            npm install --no-audit --no-fund "tree-sitter@npm:@keqingmoe/tree-sitter@0.26.2"
+          )
+
+          while IFS= read -r wrapper; do
+            [[ -z "${wrapper}" ]] && continue
+            src="${SAMPLE_SRC[${wrapper}]:-}"
+            if [[ -z "${src}" ]]; then
+              echo "SKIP no sample src for ${wrapper}"
+              continue
+            fi
+            sub="${SUB_KEY[${wrapper}]:-}"
+            (
+              cd "grammar-wrappers/${wrapper}"
+              # Link the wrapper into the smoke host without rebuilding node_modules.
+              # We use `npm link` style by copying, simpler than packing here.
+              npm pack --pack-destination /tmp/smoke-host > /dev/null
+            )
+            # Extract tgz name deterministically from package.json.
+            tgz_name=$(node -p "const p=require('./grammar-wrappers/${wrapper}/package.json'); p.name+'-'+p.version+'.tgz'")
+            (
+              cd /tmp/smoke-host
+              npm install --no-audit --no-fund "./${tgz_name}"
+              if [[ -n "${sub}" ]]; then
+                node -e "const P=require('tree-sitter');const m=require('${wrapper}');const p=new P();p.setLanguage(m['${sub}']);console.log('${wrapper}',p.parse(${src@Q}).rootNode.type);"
+              else
+                node -e "const P=require('tree-sitter');const m=require('${wrapper}');const p=new P();p.setLanguage(m);console.log('${wrapper}',p.parse(${src@Q}).rootNode.type);"
+              fi
+            )
+          done < /tmp/wrappers-to-publish.txt
+
+      - name: Publish wrappers
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          FAILED=0
+          PUBLISHED=0
+          SKIPPED=0
+
+          while IFS= read -r wrapper; do
+            [[ -z "${wrapper}" ]] && continue
+            dir="grammar-wrappers/${wrapper}"
+            name=$(node -p "require('./${dir}/package.json').name")
+            version=$(node -p "require('./${dir}/package.json').version")
+
+            echo ""
+            echo "=== ${name}@${version} (dist-tag: ${DIST_TAG}) ==="
+
+            if [[ "${DRY_RUN}" == "true" ]]; then
+              npm publish "${dir}" --access public --tag "${DIST_TAG}" --provenance --dry-run
+              PUBLISHED=$((PUBLISHED + 1))
+              continue
+            fi
+
+            existing=$(npm view "${name}@${version}" version 2>/dev/null || true)
+            if [[ "${existing}" == "${version}" ]]; then
+              echo "SKIP ${name}@${version} already exists on registry"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            if npm publish "${dir}" --access public --tag "${DIST_TAG}" --provenance 2>&1; then
+              echo "OK ${name}@${version} published"
+              PUBLISHED=$((PUBLISHED + 1))
+            else
+              # Tolerate late-binding "already published" races.
+              recheck=$(npm view "${name}@${version}" version 2>/dev/null || true)
+              if [[ "${recheck}" == "${version}" ]]; then
+                echo "SKIP ${name}@${version} already published (confirmed after retry)"
+                SKIPPED=$((SKIPPED + 1))
+              else
+                echo "FAIL ${name}@${version} publish failed"
+                FAILED=$((FAILED + 1))
+              fi
+            fi
+          done < /tmp/wrappers-to-publish.txt
+
+          echo ""
+          echo "Summary: published=${PUBLISHED} skipped=${SKIPPED} failed=${FAILED}"
+
+          if [[ "${FAILED}" -gt 0 ]]; then
+            exit 1
+          fi
+
+      - name: Post-publish verification
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r wrapper; do
+            [[ -z "${wrapper}" ]] && continue
+            dir="grammar-wrappers/${wrapper}"
+            name=$(node -p "require('./${dir}/package.json').name")
+            version=$(node -p "require('./${dir}/package.json').version")
+            registry_version=$(npm view "${name}@${version}" version 2>/dev/null || true)
+            if [[ "${registry_version}" != "${version}" ]]; then
+              echo "MISSING ${name}@${version} not visible on registry"
+              exit 1
+            fi
+            echo "OK ${name}@${version} visible on registry"
+          done < /tmp/wrappers-to-publish.txt

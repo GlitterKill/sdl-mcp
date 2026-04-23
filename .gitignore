@@ -89,6 +89,14 @@ benchmarks/**/budget-sensitivity/
 # Package archives
 *.tgz
 
+# Grammar wrapper install/pack artifacts (only the per-wrapper package.json +
+# index.js + index.d.ts + LICENSE + README.md are tracked; node_modules and
+# package-lock.json are regenerated on demand).
+grammar-wrappers/*/node_modules/
+grammar-wrappers/*/package-lock.json
+grammar-wrappers/*/*.tgz
+grammar-wrappers/*/package.json.bak
+
 # Local-only project artifacts
 /data/
 devdocs/

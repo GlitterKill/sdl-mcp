@@ -1,0 +1,43 @@
+{
+  "name": "sdl-mcp-tree-sitter-cpp",
+  "version": "1.0.0",
+  "description": "sdl-mcp peer-range wrapper around tree-sitter-cpp. Re-exports upstream unchanged with a permissive tree-sitter peer range (>=0.21.0) so installs of sdl-mcp avoid ERESOLVE peer-dependency warnings.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GlitterKill/sdl-mcp.git",
+    "directory": "grammar-wrappers/sdl-mcp-tree-sitter-cpp"
+  },
+  "homepage": "https://github.com/GlitterKill/sdl-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/GlitterKill/sdl-mcp/issues"
+  },
+  "keywords": [
+    "tree-sitter",
+    "sdl-mcp",
+    "wrapper",
+    "tree-sitter-cpp"
+  ],
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "LICENSE",
+    "README.md"
+  ],
+  "dependencies": {
+    "upstream-grammar": "npm:tree-sitter-cpp@~0.23.4"
+  },
+  "bundleDependencies": [
+    "upstream-grammar"
+  ],
+  "peerDependencies": {
+    "tree-sitter": ">=0.21.0"
+  },
+  "peerDependenciesMeta": {
+    "tree-sitter": {
+      "optional": true
+    }
+  }
+}
