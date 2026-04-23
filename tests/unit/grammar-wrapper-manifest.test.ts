@@ -13,18 +13,30 @@ const WRAPPERS_DIR = join(REPO_ROOT, "grammar-wrappers");
 const EXPECTED_PINS: Record<string, { upstream: string; pin: string }> = {
   "sdl-mcp-tree-sitter-bash": { upstream: "tree-sitter-bash", pin: "~0.25.1" },
   "sdl-mcp-tree-sitter-c": { upstream: "tree-sitter-c", pin: "~0.24.1" },
-  "sdl-mcp-tree-sitter-c-sharp": { upstream: "tree-sitter-c-sharp", pin: "0.23.1" },
+  "sdl-mcp-tree-sitter-c-sharp": {
+    upstream: "tree-sitter-c-sharp",
+    pin: "0.23.1",
+  },
   "sdl-mcp-tree-sitter-cpp": { upstream: "tree-sitter-cpp", pin: "~0.23.4" },
   "sdl-mcp-tree-sitter-go": { upstream: "tree-sitter-go", pin: "~0.25.0" },
   "sdl-mcp-tree-sitter-java": { upstream: "tree-sitter-java", pin: "~0.23.5" },
-  "sdl-mcp-tree-sitter-kotlin": { upstream: "tree-sitter-kotlin", pin: "~0.3.8" },
+  "sdl-mcp-tree-sitter-kotlin": {
+    upstream: "tree-sitter-kotlin",
+    pin: "~0.3.8",
+  },
   "sdl-mcp-tree-sitter-php": { upstream: "tree-sitter-php", pin: "~0.24.2" },
-  "sdl-mcp-tree-sitter-python": { upstream: "tree-sitter-python", pin: "~0.25.0" },
+  "sdl-mcp-tree-sitter-python": {
+    upstream: "tree-sitter-python",
+    pin: "~0.25.0",
+  },
   "sdl-mcp-tree-sitter-rust": { upstream: "tree-sitter-rust", pin: "~0.24.0" },
-  "sdl-mcp-tree-sitter-typescript": { upstream: "tree-sitter-typescript", pin: "~0.23.2" },
+  "sdl-mcp-tree-sitter-typescript": {
+    upstream: "tree-sitter-typescript",
+    pin: "~0.23.2",
+  },
 };
 
-const EXPECTED_PEER_RANGE = ">=0.21.0";
+const EXPECTED_PEER_RANGE = ">=0.21.0 <1.0.0";
 const REQUIRED_PEER_NAME = "tree-sitter";
 
 type WrapperManifest = {
@@ -39,24 +51,37 @@ type WrapperManifest = {
 };
 
 function readManifest(wrapperDir: string): WrapperManifest {
-  const raw = readFileSync(join(WRAPPERS_DIR, wrapperDir, "package.json"), "utf8");
+  const raw = readFileSync(
+    join(WRAPPERS_DIR, wrapperDir, "package.json"),
+    "utf8",
+  );
   return JSON.parse(raw) as WrapperManifest;
 }
 
 describe("grammar-wrappers manifest drift guard", () => {
   it("wrappers directory contains exactly the 11 expected wrappers", () => {
     if (!existsSync(WRAPPERS_DIR)) {
-      throw new Error(`grammar-wrappers/ missing — run scripts/scaffold-grammar-wrappers.mjs`);
+      throw new Error(
+        `grammar-wrappers/ missing — run scripts/scaffold-grammar-wrappers.mjs`,
+      );
     }
     const found = readdirSync(WRAPPERS_DIR, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && d.name.startsWith("sdl-mcp-tree-sitter-"))
+      .filter(
+        (d) => d.isDirectory() && d.name.startsWith("sdl-mcp-tree-sitter-"),
+      )
       .map((d) => d.name)
       .sort();
     const expected = Object.keys(EXPECTED_PINS).sort();
-    assert.deepEqual(found, expected, "wrapper directory set drifted from EXPECTED_PINS");
+    assert.deepEqual(
+      found,
+      expected,
+      "wrapper directory set drifted from EXPECTED_PINS",
+    );
   });
 
-  for (const [wrapperName, { upstream, pin }] of Object.entries(EXPECTED_PINS)) {
+  for (const [wrapperName, { upstream, pin }] of Object.entries(
+    EXPECTED_PINS,
+  )) {
     describe(wrapperName, () => {
       const manifest = readManifest(wrapperName);
 
@@ -87,8 +112,13 @@ describe("grammar-wrappers manifest drift guard", () => {
           EXPECTED_PEER_RANGE,
           `peer range must accept keqingmoe@0.26.x; got ${peer}`,
         );
-        const optional = manifest.peerDependenciesMeta?.[REQUIRED_PEER_NAME]?.optional;
-        assert.equal(optional, true, `peer ${REQUIRED_PEER_NAME} must be marked optional`);
+        const optional =
+          manifest.peerDependenciesMeta?.[REQUIRED_PEER_NAME]?.optional;
+        assert.equal(
+          optional,
+          true,
+          `peer ${REQUIRED_PEER_NAME} must be marked optional`,
+        );
       });
     });
   }

@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Grammar-wrapper packages to silence `ERESOLVE` peer warnings on install.**
+  sdl-mcp consumes 11 upstream tree-sitter grammars whose `peerOptional
+tree-sitter` ranges cap at `^0.25.0` — narrower than the `@keqingmoe/tree-sitter@0.26.2`
+  alias sdl-mcp needs for Node 24 / C++20 compatibility. Published 11 thin
+  `sdl-mcp-tree-sitter-*` wrapper packages that bundle each upstream grammar
+  and declare a permissive `tree-sitter: >=0.21.0` peer range. [sdl-mcp/package.json](package.json)
+  now aliases each grammar dep (e.g. `"tree-sitter-c": "npm:sdl-mcp-tree-sitter-c@^1.0.0"`)
+  so `grammarLoader.ts` requires resolve to the wrappers with no code change.
+  Consumer install output drops from ~10 `ERESOLVE overriding peer dependency`
+  warnings to 0. Upstream grammar native bindings ship transitively via
+  `bundleDependencies`, so no extra compilation happens at consumer install.
+  - New tree: `grammar-wrappers/sdl-mcp-tree-sitter-{bash,c,c-sharp,cpp,go,java,kotlin,php,python,rust,typescript}/`
+  - New script: [scripts/scaffold-grammar-wrappers.mjs](scripts/scaffold-grammar-wrappers.mjs)
+    (idempotent wrapper regenerator; bump upstream pins here)
+  - New drift guard: [tests/unit/grammar-wrapper-manifest.test.ts](tests/unit/grammar-wrapper-manifest.test.ts)
+    and `findGrammarWrapperAliasDrift()` in [scripts/prepare-release.mjs](scripts/prepare-release.mjs)
+  - New CI workflow: [.github/workflows/publish-grammar-wrappers.yml](.github/workflows/publish-grammar-wrappers.yml)
+    (manual dispatch, supports `dry_run` / `only_wrapper` / `dist_tag` inputs)
+  - New doc: [grammar-wrappers/README.md](grammar-wrappers/README.md) — rationale,
+    version matrix, upgrade procedure, and CJS/ESM pin caveat for `tree-sitter-c-sharp`
 - **`sdl.search.edit` cross-file search/edit tool** (two-phase `preview` +
   `apply`). Preview returns a server-side `planHandle` plus per-file
   snippets, match counts, and a sha256/mtime precondition snapshot.

@@ -19,8 +19,8 @@ No native compilation happens here — the upstream grammar ships prebuilt `.nod
 ## Pins
 
 - Upstream pin: `~0.24.1`
-- Wrapper version: `1.0.0`
-- Peer `tree-sitter`: `>=0.21.0` (optional)
+- Wrapper version: `1.0.1`
+- Peer `tree-sitter`: `>=0.21.0 <1.0.0` (optional)
 
 Bump by editing [`scripts/scaffold-grammar-wrappers.mjs`](../../scripts/scaffold-grammar-wrappers.mjs) and re-running.
 

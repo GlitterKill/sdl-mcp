@@ -1,7 +1,7 @@
 {
   "name": "sdl-mcp-tree-sitter-bash",
-  "version": "1.0.0",
-  "description": "sdl-mcp peer-range wrapper around tree-sitter-bash. Re-exports upstream unchanged with a permissive tree-sitter peer range (>=0.21.0) so installs of sdl-mcp avoid ERESOLVE peer-dependency warnings.",
+  "version": "1.0.1",
+  "description": "sdl-mcp peer-range wrapper around tree-sitter-bash. Re-exports upstream unchanged with a permissive tree-sitter peer range (>=0.21.0 <1.0.0) so installs of sdl-mcp avoid ERESOLVE peer-dependency warnings.",
   "main": "index.js",
   "types": "index.d.ts",
   "license": "MIT",
@@ -33,7 +33,7 @@
     "upstream-grammar"
   ],
   "peerDependencies": {
-    "tree-sitter": ">=0.21.0"
+    "tree-sitter": ">=0.21.0 <1.0.0"
   },
   "peerDependenciesMeta": {
     "tree-sitter": {

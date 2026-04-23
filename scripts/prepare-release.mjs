@@ -112,6 +112,47 @@ export function findSelfTarballDependencies(packageJson) {
     : [];
 }
 
+// The 11 upstream grammar package names that sdl-mcp consumes. Each must be
+// aliased to its published sdl-mcp-tree-sitter-* wrapper so consumer installs
+// don't leak `ERESOLVE overriding peer dependency` warnings. See
+// grammar-wrappers/README.md.
+const GRAMMAR_DEP_NAMES = [
+  "tree-sitter-bash",
+  "tree-sitter-c",
+  "tree-sitter-c-sharp",
+  "tree-sitter-cpp",
+  "tree-sitter-go",
+  "tree-sitter-java",
+  "tree-sitter-kotlin",
+  "tree-sitter-php",
+  "tree-sitter-python",
+  "tree-sitter-rust",
+  "tree-sitter-typescript",
+];
+
+export function findGrammarWrapperAliasDrift(packageJson) {
+  const drift = [];
+  const deps = packageJson.dependencies ?? {};
+  for (const name of GRAMMAR_DEP_NAMES) {
+    const spec = deps[name];
+    if (typeof spec !== "string") {
+      drift.push(`dependencies.${name} missing`);
+      continue;
+    }
+
+    // Require wrappers resolve within the 1.x line — catches tarball URLs,
+    // pre-release tags, and accidental major bumps (e.g. @^999.0.0) that the
+    // bare-prefix check would otherwise accept.
+    const expectedPrefix = `npm:sdl-mcp-${name}@^1.`;
+    if (!spec.startsWith(expectedPrefix)) {
+      drift.push(
+        `dependencies.${name} not aliased to ^1.x wrapper (found: ${spec})`,
+      );
+    }
+  }
+  return drift;
+}
+
 export function getRequiredPackEntries() {
   return [
     "package.json",
@@ -250,6 +291,12 @@ async function main() {
       `invalid self tarball dependency detected: ${selfTarballDeps.join(", ")}`,
     );
   }
+
+  const grammarDrift = findGrammarWrapperAliasDrift(pkg);
+  if (grammarDrift.length > 0) {
+    fail(`grammar wrapper alias drift: ${grammarDrift.join(", ")}`);
+  }
+
 
   if (!hasChangelogEntry(changelog, pkg.version)) {
     fail(`CHANGELOG.md is missing an entry for version ${pkg.version}`);

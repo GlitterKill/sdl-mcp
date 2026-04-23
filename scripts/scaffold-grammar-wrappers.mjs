@@ -22,8 +22,11 @@ const __dirname = dirname(__filename);
 const REPO_ROOT = dirname(__dirname);
 const WRAPPERS_DIR = join(REPO_ROOT, "grammar-wrappers");
 
-const WRAPPER_VERSION = "1.0.0";
-const PEER_RANGE = ">=0.21.0";
+const WRAPPER_VERSION = "1.0.1";
+// Upper bound prevents a future breaking upstream `tree-sitter@1.0.0` from
+// silently satisfying our peer range. Adjust if tree-sitter's versioning
+// conventions change.
+const PEER_RANGE = ">=0.21.0 <1.0.0";
 
 // Upstream grammar versions pinned at ~minor per plan.
 // Bump entries here, then re-run scaffold + republish affected wrappers.

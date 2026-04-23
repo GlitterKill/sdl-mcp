@@ -24,16 +24,16 @@ SDL-MCP is a high-performance codebase indexing and context retrieval server. Th
 
 ## Technical Stack
 
-| Layer        | Technology                                                                                         |
-| :----------- | :------------------------------------------------------------------------------------------------- |
-| Runtime      | Node.js v24+ / TypeScript 5.9+ (strict, ESM)                                                       |
-| Database     | LadybugDB (embedded graph database, single-file storage, Kuzu engine)                              |
-| MCP SDK      | `@modelcontextprotocol/sdk` ^1.27.1                                                                |
-| Transports   | stdio (CLI agents), HTTP/SSE (network clients)                                                     |
-| AST parsing  | tree-sitter 0.26.2 (via @keqingmoe/tree-sitter) + language grammars (0.23.x–0.25.x)                |
-| Native addon | Rust via napi-rs (optional, multi-threaded pass-1)                                                 |
-| Embeddings   | ONNX Runtime (jina-embeddings-v2-base-code 768-dim bundled, nomic-embed-text-v1.5 768-dim optional) |
-| Validation   | Zod schemas for all tool payloads and responses                                                    |
+| Layer        | Technology                                                                                                                                                                                                                 |
+| :----------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime      | Node.js v24+ / TypeScript 5.9+ (strict, ESM)                                                                                                                                                                               |
+| Database     | LadybugDB (embedded graph database, single-file storage, Kuzu engine)                                                                                                                                                      |
+| MCP SDK      | `@modelcontextprotocol/sdk` ^1.27.1                                                                                                                                                                                        |
+| Transports   | stdio (CLI agents), HTTP/SSE (network clients)                                                                                                                                                                             |
+| AST parsing  | tree-sitter 0.26.2 (via @keqingmoe/tree-sitter) + language grammars via `sdl-mcp-tree-sitter-*` wrapper packages (peer-range normalized to accept 0.26.x; see [grammar-wrappers/README.md](../grammar-wrappers/README.md)) |
+| Native addon | Rust via napi-rs (optional, multi-threaded pass-1)                                                                                                                                                                         |
+| Embeddings   | ONNX Runtime (jina-embeddings-v2-base-code 768-dim bundled, nomic-embed-text-v1.5 768-dim optional)                                                                                                                        |
+| Validation   | Zod schemas for all tool payloads and responses                                                                                                                                                                            |
 
 ---
 
@@ -248,32 +248,32 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 
 **Core nodes:**
 
-| Node Table        | Key Fields                                                                                                                                                      |
-| :---------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Repo**          | repoId, rootPath, configJson, createdAt                                                                                                                         |
-| **File**          | fileId, repoId, relPath, byteSize, contentHash                                                                                                                  |
+| Node Table        | Key Fields                                                                                                                                                        |
+| :---------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Repo**          | repoId, rootPath, configJson, createdAt                                                                                                                           |
+| **File**          | fileId, repoId, relPath, byteSize, contentHash                                                                                                                    |
 | **Symbol**        | symbolId, repoId, fileId, kind, name, exported, signatureJson, summary, summaryQuality, summarySource, etag, embeddingJinaCode, embeddingNomic, embeddingJinaCode |
-| **Version**       | versionId, repoId, timestamp, indexedAt                                                                                                                         |
-| **SymbolVersion** | symbolId, versionId, signatureJson, summary                                                                                                                     |
-| **Metrics**       | symbolId, repoId, fanIn, fanOut, churn, testRefs                                                                                                                |
+| **Version**       | versionId, repoId, timestamp, indexedAt                                                                                                                           |
+| **SymbolVersion** | symbolId, versionId, signatureJson, summary                                                                                                                       |
+| **Metrics**       | symbolId, repoId, fanIn, fanOut, churn, testRefs                                                                                                                  |
 
 **Graph enrichment nodes:**
 
-| Node Table      | Key Fields                                                                              |
-| :-------------- | :-------------------------------------------------------------------------------------- |
-| **Cluster**     | clusterId, label, memberCount, searchText                                               |
-| **Process**     | processId, label, repoId, searchText                                                    |
+| Node Table      | Key Fields                                                                                |
+| :-------------- | :---------------------------------------------------------------------------------------- |
+| **Cluster**     | clusterId, label, memberCount, searchText                                                 |
+| **Process**     | processId, label, repoId, searchText                                                      |
 | **FileSummary** | fileId, repoId, summary, searchText, embeddingJinaCode, embeddingNomic, embeddingJinaCode |
 
 **Infrastructure nodes:**
 
-| Node Table        | Key Fields                                                                                             |
-| :---------------- | :----------------------------------------------------------------------------------------------------- |
-| **SliceHandle**   | handle, createdAt, expiresAt, minVersion, maxVersion                                                   |
-| **CardHash**      | symbolId, hash                                                                                         |
-| **Audit**         | auditId, repoId, action, timestamp                                                                     |
+| Node Table        | Key Fields                                                                                               |
+| :---------------- | :------------------------------------------------------------------------------------------------------- |
+| **SliceHandle**   | handle, createdAt, expiresAt, minVersion, maxVersion                                                     |
+| **CardHash**      | symbolId, hash                                                                                           |
+| **Audit**         | auditId, repoId, action, timestamp                                                                       |
 | **AgentFeedback** | feedbackId, repoId, taskText, taskType, searchText, embeddingJinaCode, embeddingNomic, embeddingJinaCode |
-| **SchemaVersion** | version, appliedAt                                                                                     |
+| **SchemaVersion** | version, appliedAt                                                                                       |
 
 **Semantic nodes:**
 
