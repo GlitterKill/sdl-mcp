@@ -190,6 +190,13 @@ jobs:
           PUBLISHED=0
           SKIPPED=0
 
+          # Note: --provenance intentionally OFF. When npm provenance is enabled
+          # for a subpackage whose package.json includes `repository.directory`,
+          # npm constructs a bogus git ls-remote URL (ssh://git@github.com/<dir>.git)
+          # that fails under Actions SSH-less checkout. Re-enable once the
+          # npm/provenance monorepo-directory handling is sorted, or after we
+          # drop the `directory` field from wrapper manifests.
+
           while IFS= read -r wrapper; do
             [[ -z "${wrapper}" ]] && continue
             dir="grammar-wrappers/${wrapper}"
@@ -200,7 +207,7 @@ jobs:
             echo "=== ${name}@${version} (dist-tag: ${DIST_TAG}) ==="
 
             if [[ "${DRY_RUN}" == "true" ]]; then
-              npm publish "${dir}" --access public --tag "${DIST_TAG}" --provenance --dry-run
+              (cd "${dir}" && npm publish --access public --tag "${DIST_TAG}" --dry-run)
               PUBLISHED=$((PUBLISHED + 1))
               continue
             fi
@@ -212,7 +219,7 @@ jobs:
               continue
             fi
 
-            if npm publish "${dir}" --access public --tag "${DIST_TAG}" --provenance 2>&1; then
+            if (cd "${dir}" && npm publish --access public --tag "${DIST_TAG}") 2>&1; then
               echo "OK ${name}@${version} published"
               PUBLISHED=$((PUBLISHED + 1))
             else
