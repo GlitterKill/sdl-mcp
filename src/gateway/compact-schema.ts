@@ -14,6 +14,7 @@ import { toJSONSchema } from "zod/v4";
  * Convert a Zod schema to JSON Schema using Zod 4 built-in conversion.
  */
 export function zodSchemaToJsonSchema(
+
   schema: z.ZodType,
 ): Record<string, unknown> {
   // v3 compat schemas are structurally compatible with v4 toJSONSchema
@@ -22,7 +23,23 @@ export function zodSchemaToJsonSchema(
   ) as Record<string, unknown>;
   // Remove $schema key for compact MCP tool responses
   delete jsonSchema["$schema"];
+  ensureObjectType(jsonSchema);
   return jsonSchema;
+}
+
+function ensureObjectType(schema: Record<string, unknown>): void {
+  if (schema["type"] !== undefined) {
+    return;
+  }
+  const variants = (schema["anyOf"] ?? schema["oneOf"]) as
+    | Array<Record<string, unknown>>
+    | undefined;
+  if (!Array.isArray(variants) || variants.length === 0) {
+    return;
+  }
+  if (variants.every((v) => v && v["type"] === "object")) {
+    schema["type"] = "object";
+  }
 }
 
 export function buildCompactJsonSchema(
