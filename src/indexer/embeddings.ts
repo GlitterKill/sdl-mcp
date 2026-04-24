@@ -380,8 +380,22 @@ export async function refreshSymbolEmbeddings(params: {
       return { embedded: 0, skipped: batch.length, terminal: false };
     }
 
+    // Recheck the durable cache after embed so a concurrent refresher that
+    // finished while this batch was in flight wins without redundant writes.
+    const batchSymbolIds = batch.map((item) => item.symbol.symbolId);
+    const postEmbedExisting = await getSymbolEmbeddingsFromNodes(
+      conn,
+      batchSymbolIds,
+      storageModel,
+    );
+
     const batchItems: SymbolEmbeddingBatchItem[] = [];
     for (let i = 0; i < batch.length; i++) {
+      const postExisting = postEmbedExisting.get(batch[i].symbol.symbolId);
+      if (postExisting && postExisting.cardHash === batch[i].cardHash) {
+        continue;
+      }
+
       batchItems.push({
         symbolId: batch[i].symbol.symbolId,
         vector: toFloat16Blob(batchVectors[i]),
@@ -390,11 +404,17 @@ export async function refreshSymbolEmbeddings(params: {
       });
     }
 
-    await withWriteConn(async (wConn) => {
-      await setSymbolEmbeddingBatchOnNode(wConn, storageModel, batchItems);
-    });
+    if (batchItems.length > 0) {
+      await withWriteConn(async (wConn) => {
+        await setSymbolEmbeddingBatchOnNode(wConn, storageModel, batchItems);
+      });
+    }
 
-    return { embedded: batchItems.length, skipped: 0, terminal: false };
+    return {
+      embedded: batchItems.length,
+      skipped: batch.length - batchItems.length,
+      terminal: false,
+    };
   };
 
   // Process batches with bounded concurrency using a sliding window.
