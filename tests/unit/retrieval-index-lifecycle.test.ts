@@ -488,13 +488,13 @@ describe("embedding persistence uses numeric arrays", () => {
     );
   });
 
-  it("embedding caller passes raw vector array", () => {
-    const callSite = callerSrc.indexOf("setSymbolEmbeddingOnNode(");
-    assert.ok(callSite > 0, "Should have a call to setSymbolEmbeddingOnNode");
-    const callBlock = callerSrc.slice(callSite, callSite + 300);
+  it("embedding caller passes raw vector array via batch", () => {
+    const callSite = callerSrc.indexOf("setSymbolEmbeddingBatchOnNode(");
+    assert.ok(callSite > 0, "Should have a call to setSymbolEmbeddingBatchOnNode");
+    const batchItemSite = callerSrc.indexOf("vectorArray: batchVectors[");
     assert.ok(
-      callBlock.includes("vector,"),
-      "Caller should pass raw vector array as last argument",
+      batchItemSite > 0,
+      "Caller should pass raw vector array in batch items",
     );
   });
 });

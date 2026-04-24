@@ -245,3 +245,66 @@ export async function getSymbolEmbeddingsFromNodes(
 
   return result;
 }
+
+
+// ---------------------------------------------------------------------------
+// Write: batch
+// ---------------------------------------------------------------------------
+
+export interface SymbolEmbeddingBatchItem {
+  symbolId: string;
+  vector: string;
+  cardHash: string;
+  vectorArray?: number[];
+}
+
+/**
+ * Batch-write embedding vectors for multiple symbols in a single connection.
+ * Avoids per-symbol write-lock acquisition overhead that dominates embedding
+ * time on large repos.
+ */
+export async function setSymbolEmbeddingBatchOnNode(
+  conn: Connection,
+  model: string,
+  items: SymbolEmbeddingBatchItem[],
+): Promise<void> {
+  if (items.length === 0) return;
+
+  const { vectorProp, vecProp, cardHashProp, updatedAtProp } =
+    resolvePropertyNames(model);
+
+  const updatedAt = new Date().toISOString();
+
+  for (const item of items) {
+    await exec(
+      conn,
+      `MATCH (s:Symbol {symbolId: $symbolId})
+       SET s.${vectorProp} = $vector,
+           s.${cardHashProp} = $cardHash,
+           s.${updatedAtProp} = $updatedAt`,
+      {
+        symbolId: item.symbolId,
+        vector: item.vector,
+        cardHash: item.cardHash,
+        updatedAt,
+      },
+    );
+
+    if (item.vectorArray && vecProp) {
+      await withTransaction(conn, async (txConn) => {
+        await exec(
+          txConn,
+          `MATCH (s:Symbol {symbolId: $symbolId})
+           SET s.${vecProp} = null`,
+          { symbolId: item.symbolId },
+        );
+        await exec(
+          txConn,
+          `MATCH (s:Symbol {symbolId: $symbolId})
+           SET s.${vecProp} = $vectorArray`,
+          { symbolId: item.symbolId, vectorArray: item.vectorArray },
+        );
+      });
+    }
+  }
+}

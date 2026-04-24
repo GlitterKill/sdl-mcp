@@ -10,7 +10,8 @@ import { getModelInfo, applyDocumentPrefix, isModelAvailable } from "./model-reg
 import type { IndexProgress } from "./indexer.js";
 import {
   getSymbolEmbeddingsFromNodes,
-  setSymbolEmbeddingOnNode,
+  setSymbolEmbeddingBatchOnNode,
+  type SymbolEmbeddingBatchItem,
 } from "../db/ladybug-symbol-embeddings.js";
 import { prepareSymbolEmbeddingInputs } from "./symbol-embedding-context.js";
 import { buildSymbolEmbeddingText } from "./symbol-embedding-text.js";
@@ -379,41 +380,21 @@ export async function refreshSymbolEmbeddings(params: {
       return { embedded: 0, skipped: batch.length, terminal: false };
     }
 
-    // Post-embed cache recheck for race avoidance
-    const batchSymbolIds = batch.map((item) => item.symbol.symbolId);
-    const postEmbedExisting = await getSymbolEmbeddingsFromNodes(
-      conn,
-      batchSymbolIds,
-      storageModel,
-    );
-
-    let batchEmbedded = 0;
-    let batchSkipped = 0;
-
+    const batchItems: SymbolEmbeddingBatchItem[] = [];
     for (let i = 0; i < batch.length; i++) {
-      const item = batch[i];
-      const vector = batchVectors[i];
-      const postExisting = postEmbedExisting.get(item.symbol.symbolId);
-
-      if (postExisting && postExisting.cardHash === item.cardHash) {
-        batchSkipped += 1;
-        continue;
-      }
-
-      await withWriteConn(async (wConn) => {
-        await setSymbolEmbeddingOnNode(
-          wConn,
-          item.symbol.symbolId,
-          storageModel,
-          toFloat16Blob(vector),
-          item.cardHash,
-          vector,
-        );
+      batchItems.push({
+        symbolId: batch[i].symbol.symbolId,
+        vector: toFloat16Blob(batchVectors[i]),
+        cardHash: batch[i].cardHash,
+        vectorArray: batchVectors[i],
       });
-      batchEmbedded += 1;
     }
 
-    return { embedded: batchEmbedded, skipped: batchSkipped, terminal: false };
+    await withWriteConn(async (wConn) => {
+      await setSymbolEmbeddingBatchOnNode(wConn, storageModel, batchItems);
+    });
+
+    return { embedded: batchItems.length, skipped: 0, terminal: false };
   };
 
   // Process batches with bounded concurrency using a sliding window.
