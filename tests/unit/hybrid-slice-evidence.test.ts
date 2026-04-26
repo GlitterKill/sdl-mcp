@@ -87,7 +87,7 @@ describe("mapRetrievalSource — logic", () => {
 
 describe("SliceBuildInternalResult — shape verification", () => {
   const src = readFileSync(
-    join(process.cwd(), "src/graph/slice.ts"),
+    join(process.cwd(), "src/graph/slice/types.ts"),
     "utf8",
   );
 

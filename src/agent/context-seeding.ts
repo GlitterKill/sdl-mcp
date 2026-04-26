@@ -18,7 +18,7 @@ import type {
   ContextSeedResult,
 } from "./types.js";
 import { entitySearch } from "../retrieval/index.js";
-import { extractIdentifiersFromText } from "./executor.js";
+import { extractIdentifiersFromText } from "./identifier-extraction.js";
 import { searchSymbols } from "../db/ladybug-queries.js";
 import { searchSymbolsHybridWithOverlay } from "../live-index/overlay-reader.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";

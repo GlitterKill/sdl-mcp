@@ -1,4 +1,44 @@
 /**
+// =============================================================================
+// graph/slice/beam-search-engine.ts — Beam-search algorithm for slice traversal.
+//
+// Public exports (LLM-cost cheat sheet):
+//
+//   Types:
+//     - FrontierItem, BeamSearchResult, BeamSearchRequest
+//     - DynamicCapState, RollbackSliceState
+//
+//   Pure scoring / weighting helpers (no I/O):
+//     - normalizeEdgeConfidence(c)
+//     - applyEdgeConfidenceWeight(baseWeight, c)
+//     - getAdaptiveMinConfidence(min, used, max)
+//     - shouldTightenDynamicCardCap(state)
+//     - computeMinCardsForDynamicCap(...)
+//     - estimateCardTokens / estimateCardTokensLadybug
+//     - normalizeEdgeType, getEdgeWhy, compareFrontierItems
+//
+//   Frontier / state mutation:
+//     - acceptNodeIntoSlice(state, symbolId, score)
+//     - rollbackAcceptedNodeFromSlice(state, symbolId, actualScore)
+//     - insertCandidateIntoFrontier(...)
+//     - seedFrontierFromGraph(...)
+//     - buildUnvisitedNeighborMaps(...)
+//
+//   Main loops:
+//     - beamSearch(graph, startNodes, budget, request, edgeWeights, minConfidence, signal?)
+//     - beamSearchLadybug(...)
+//
+//   Constants:
+//     - DYNAMIC_CAP_MIN_CARDS, DYNAMIC_CAP_HIGH_CONFIDENCE_MARGIN,
+//       DYNAMIC_CAP_RECENT_SCORE_WINDOW, DYNAMIC_CAP_MIN_ENTRY_COVERAGE,
+//       DYNAMIC_CAP_FRONTIER_SCORE_MARGIN, DYNAMIC_CAP_FRONTIER_DROP_FACTOR
+//
+//   Parallel scoring infra:
+//     - ParallelScorerPool (class)
+//     - getScorerPool() / resetScorerPool()
+// =============================================================================
+
+
  * Beam Search Engine Module
  *
  * Implements beam search traversal for graph slice construction.

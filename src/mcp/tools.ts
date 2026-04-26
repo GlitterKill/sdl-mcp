@@ -1,4 +1,36 @@
 import { z } from "zod";
+// =============================================================================
+// mcp/tools.ts — Zod schemas + types for MCP tool I/O contracts.
+//
+// This file is the source-of-truth for tool request/response shapes consumed by
+// the gateway router, dispatch tables, and 29 internal callers. ~71 schema exports
+// + ~76 type/interface exports across 14 banner-marked sections.
+//
+// Public sections (search by `// === SECTION ===` banners below):
+//   - Repo                  (RepoRegister*, RepoStatus*)
+//   - Index                 (IndexRefresh*, plus telemetry payloads)
+//   - Buffer                (BufferPush*, BufferCheckpoint*, BufferStatus*)
+//   - Symbol                (SymbolSearch*, SymbolGetCard*, SymbolRef)
+//   - Slice                 (SliceBuild*, SliceRefresh*, SliceSpilloverGet*)
+//   - Delta                 (DeltaGet*, blast-radius payloads)
+//   - Code                  (CodeGetSkeleton*, CodeGetHotPath*, CodeNeedWindow*)
+//   - Policy                (PolicyGet*, PolicySet*, policy-patch shapes)
+//   - RepoOverview          (RepoOverview* directories/full)
+//   - PR Risk               (PrRiskAnalyze*)
+//   - AgentContext          (sdl.context request/response, ladder rungs)
+//   - AgentFeedback         (AgentFeedback*, AgentFeedbackQuery*)
+//   - Runtime               (RuntimeExecute*, RuntimeQueryOutput*)
+//   - Memory                (Memory*, opt-in)
+//   - UsageStats            (UsageStats*)
+//   - FileRead / FileWrite  (file gateway ops)
+//   - ScipIngest            (SCIP overlay)
+//   - SearchEdit            (cross-file batched edits)
+//
+// Shared primitives lifted to ./tools/schemas/_shared.ts candidates: Range,
+// Signature, Card, Slice, Compact V1/V2/V3, Delta, CodeWindow.
+// =============================================================================
+
+
 import type { RetrievalEvidence } from "../retrieval/types.js";
 import { RUNTIME_NAMES } from "../runtime/runtimes.js";
 import {

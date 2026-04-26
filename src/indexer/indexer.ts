@@ -1,4 +1,27 @@
 import type { PendingCallEdge, SymbolIndex } from "./edge-builder.js";
+// =============================================================================
+// indexer.ts — Repository indexing entry point and watcher orchestrator.
+//
+// Public exports (LLM-cost cheat sheet):
+//   Functions:
+//     - indexRepo(repoId, mode, onProgress?, signal?, options?) — full/incremental indexing run
+//     - watchRepository(repoId) — start file watcher (delegates to watchRepositoryWithIndexer)
+//     - derivePass1EngineTelemetry(acc) — surface per-language Pass-1 engine breakdown
+//   Types:
+//     - IndexResult, IndexRepoOptions, IndexTimingDiagnostics, IndexWatchHandle, WatcherHealth
+//     - IndexProgress, IndexProgressSubstage (re-exported from ./indexer-init.js)
+//     - ResolveParserWorkerPoolSizeParams, ProcessFileParams (re-exported from ./parser.js)
+//   Re-exports from ./watcher.js:
+//     - getWatcherHealth, getAllWatcherHealth, _setWatcherHealthForTesting, _clearWatcherHealthForTesting
+//   Re-exports from ./parser.js:
+//     - resolveParserWorkerPoolSize
+//
+// Heavy lifting is delegated to siblings: indexer-pass1.ts, indexer-pass2.ts,
+// indexer-init.ts, indexer-version.ts, indexer-memory.ts, metrics-updater.ts,
+// finalize-derived-state.ts, watcher.ts. This file is the sequencer.
+// =============================================================================
+
+
 import {
   isTsCallResolutionFile,
   resolveUnresolvedImportEdges,
