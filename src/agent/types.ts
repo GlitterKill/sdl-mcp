@@ -38,6 +38,14 @@ export interface TaskOptions {
   /** Include retrieval evidence (which lanes contributed, per-source counts) in
    *  the response and downstream logging. Default: true. */
   includeRetrievalEvidence?: boolean;
+  /** Identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank. */
+  chatMentions?: string[];
+  /** Optional per-mention weight overrides for PPR seeding. */
+  chatMentionWeights?: Record<string, number>;
+  /** Walk direction across the dependency graph for chat-aware re-ranking. Default: "both". */
+  pprDirection?: "out" | "in" | "both";
+  /** Multiplicative boost ceiling for Personalized PageRank re-ranking. Default: 0.5. */
+  pprWeight?: number;
 }
 
 export interface RungPath {

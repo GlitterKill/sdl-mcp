@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use regex::Regex;
 
 pub mod cluster;
+pub mod pagerank;
 pub mod error;
 pub mod extract;
 pub mod lang;
@@ -173,6 +174,23 @@ pub fn compute_clusters(
 
     assignments.sort_by(|a, b| a.symbol_id.cmp(&b.symbol_id));
     assignments
+}
+
+#[napi]
+pub fn compute_personalized_pagerank(
+    adjacency: Vec<Vec<pagerank::NativePprAdjEntry>>,
+    seeds: Vec<pagerank::NativePprSeed>,
+    alpha: f64,
+    epsilon: f64,
+    max_nodes_touched: u32,
+) -> Vec<pagerank::NativePprScore> {
+    pagerank::push::run(
+        adjacency,
+        seeds,
+        alpha,
+        epsilon,
+        max_nodes_touched as usize,
+    )
 }
 
 #[napi]

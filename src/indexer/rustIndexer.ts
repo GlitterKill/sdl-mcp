@@ -156,6 +156,13 @@ interface NativeAddon {
     maxDepth: number,
     entryPatterns: string[],
   ): NativeProcess[];
+  computePersonalizedPagerank?(
+    adjacency: Array<Array<{ neighbor: number; weight: number }>>,
+    seeds: Array<{ node: number; weight: number }>,
+    alpha: number,
+    epsilon: number,
+    maxNodesTouched: number,
+  ): Array<{ node: number; score: number }>;
 }
 
 // --- Addon loading ---
@@ -628,6 +635,48 @@ export function computeClustersRust(
     return null;
   }
 }
+
+/**
+ * Native wrapper for personalized PageRank.
+ *
+ * Returns null when the addon is missing the `computePersonalizedPagerank`
+ * export (older builds, JS fallback enforced via SDL_MCP_DISABLE_NATIVE_ADDON,
+ * etc.) or when the call throws. The TypeScript fallback in
+ * `src/retrieval/ppr.ts` mirrors the algorithm to within 1e-3.
+ */
+export function computePersonalizedPageRankRust(
+  adjacency: Array<Array<[number, number]>>,
+  seeds: Array<[number, number]>,
+  alpha: number,
+  epsilon: number,
+  maxNodesTouched: number,
+): Array<[number, number]> | null {
+  const addon = loadNativeAddon();
+  if (!addon?.computePersonalizedPagerank) return null;
+
+  const adj = adjacency.map((row) =>
+    row.map(([neighbor, weight]) => ({ neighbor, weight })),
+  );
+  const seedStructs = seeds.map(([node, weight]) => ({ node, weight }));
+
+  try {
+    const result = addon.computePersonalizedPagerank(
+      adj,
+      seedStructs,
+      alpha,
+      epsilon,
+      maxNodesTouched,
+    );
+    return result.map((s) => [s.node, s.score]);
+  } catch (error) {
+    logger.error(
+      "Native Rust personalized PageRank failed; falling back to TypeScript",
+      { error: error instanceof Error ? error.message : String(error) },
+    );
+    return null;
+  }
+}
+
 
 export function traceProcessesRust(
   symbols: NativeProcessSymbol[],

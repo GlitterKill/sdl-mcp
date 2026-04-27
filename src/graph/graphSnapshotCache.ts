@@ -87,6 +87,19 @@ export function getGraphSnapshot(repoId: RepoId): Graph | null {
 }
 
 /**
+ * Returns the cached snapshot's `createdAt` timestamp (ms since epoch), or
+ * null if no live entry exists. Caches keyed on snapshot age (e.g. PPR) read
+ * this to invalidate when a fresh snapshot replaces a stale one.
+ */
+export function getGraphSnapshotCreatedAt(repoId: RepoId): number | null {
+  const entry = snapshotsByRepo.get(repoId);
+  if (!entry) return null;
+  if (Date.now() - entry.createdAt > snapshotTtlMs) return null;
+  return entry.createdAt;
+}
+
+
+/**
  * Check if a valid snapshot exists without returning it.
  */
 export function hasGraphSnapshot(repoId: RepoId): boolean {

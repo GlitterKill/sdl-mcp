@@ -15,12 +15,12 @@
 //                  ENTITY_FTS_CONFIG, ENTITY_VECTOR_CONFIG
 // =============================================================================
 
-
+/**
  * Hybrid retrieval orchestrator.
  *
  * Combines FTS (full-text search) and vector retrieval backends, then
  * fuses results via Reciprocal Rank Fusion (RRF).  Degrades gracefully
- * when individual backends are unavailable.
+ * when backends are unavailable.
  */
 
 import type { Connection } from "kuzu";
@@ -28,6 +28,22 @@ import { queryAll } from "../db/ladybug-core.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { loadConfig } from "../config/loadConfig.js";
+import {
+  type SourceRanking,
+  type EntitySourceRanking,
+  DEFAULT_RRF_K,
+  rrfFuse,
+  buildEvidence,
+  rrfFuseEntities,
+  buildEntityEvidence,
+} from "./fusion.js";
+import { resolveSeedSymbols } from "./seed-resolver.js";
+import { applyPprBoost, computePpr } from "./ppr.js";
+import {
+  getGraphSnapshot,
+  getGraphSnapshotCreatedAt,
+  loadAndCacheGraphSnapshot,
+} from "../graph/graphSnapshotCache.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
 import { logger } from "../util/logger.js";
 import { getEmbeddingProvider } from "../indexer/embeddings.js";
@@ -44,15 +60,6 @@ import type {
   EntitySearchOptions,
   EntitySearchResult,
 } from "./types.js";
-import {
-  type SourceRanking,
-  type EntitySourceRanking,
-  DEFAULT_RRF_K,
-  rrfFuse,
-  buildEvidence,
-  rrfFuseEntities,
-  buildEntityEvidence,
-} from "./fusion.js";
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -503,20 +510,78 @@ export async function hybridSearch(
   }
 
   // ----- RRF fusion -----
+  // ----- RRF fusion -----
   const fusedResults = rrfFuse(rankings, rrfK, limit);
 
   logger.debug(
     `[hybrid-search] Fused ${rankings.length} source(s) into ${fusedResults.length} results (${fusionLatencyMs}ms)`,
   );
 
-  return {
-    results: fusedResults,
-    ...(options.includeEvidence
-      ? {
-          evidence: buildEvidence(rankings, fusedResults, fusionLatencyMs),
-        }
-      : {}),
-  };
+  // ----- Chat-aware Personalized PageRank boost (optional) -----
+  let pprAdjusted = fusedResults;
+  let pprBoosts: NonNullable<RetrievalEvidence["pprBoosts"]> | undefined;
+  if (options.chatMentions && options.chatMentions.length > 0) {
+    const pprStart = performance.now();
+    try {
+      const seedResolution = await resolveSeedSymbols(
+        conn,
+        options.repoId,
+        options.chatMentions,
+        options.chatMentionWeights,
+      );
+      let snapshot = getGraphSnapshot(options.repoId);
+      if (!snapshot) {
+        snapshot = await loadAndCacheGraphSnapshot(conn, options.repoId);
+      }
+      let backend: NonNullable<RetrievalEvidence["pprBoosts"]>["backend"] =
+        "js";
+      let symbolsBoosted = 0;
+      if (snapshot && seedResolution.seeds.size > 0) {
+        const pprResult = await computePpr({
+          graph: snapshot,
+          snapshotCreatedAt:
+            getGraphSnapshotCreatedAt(options.repoId) ?? Date.now(),
+          repoId: options.repoId,
+          options: {
+            seeds: seedResolution.seeds,
+            direction: options.pprDirection,
+          },
+        });
+        backend = pprResult.backend;
+        const originalScores = new Map(
+          fusedResults.map((r) => [r.symbolId, r.score] as const),
+        );
+        const boost = applyPprBoost(fusedResults, pprResult.scores, {
+          pprWeight: options.pprWeight,
+          combinedCap: 4,
+          originalScores,
+        });
+        pprAdjusted = boost.items;
+        symbolsBoosted = boost.symbolsBoosted;
+      }
+      pprBoosts = {
+        resolvedSeeds: seedResolution.evidence.resolved,
+        unresolvedMentions: seedResolution.evidence.unresolved,
+        ambiguousMentions: seedResolution.evidence.ambiguous,
+        symbolsBoosted,
+        latencyMs: Math.round(performance.now() - pprStart),
+        backend,
+      };
+    } catch (err) {
+      logger.debug(
+        `[hybrid-search] PPR boost failed (non-fatal): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  if (!options.includeEvidence) {
+    return { results: pprAdjusted };
+  }
+  const evidence = buildEvidence(rankings, pprAdjusted, fusionLatencyMs);
+  if (pprBoosts) evidence.pprBoosts = pprBoosts;
+  return { results: pprAdjusted, evidence };
 }
 
 // ---------------------------------------------------------------------------
@@ -899,19 +964,90 @@ export async function entitySearch(
     });
   }
 
-  return {
-    results: fusedResults,
-    ...(options.includeEvidence
-      ? {
-          evidence: buildEntityEvidence(
-            rankings,
-            fusedResults,
-            fusionLatencyMs,
-          ),
-        }
-      : {}),
-  };
+  // ----- Chat-aware Personalized PageRank boost (symbol entities only) -----
+  let pprAdjusted = fusedResults;
+  let pprBoosts: NonNullable<RetrievalEvidence["pprBoosts"]> | undefined;
+  if (options.chatMentions && options.chatMentions.length > 0) {
+    const pprStart = performance.now();
+    try {
+      const seedResolution = await resolveSeedSymbols(
+        conn,
+        options.repoId,
+        options.chatMentions,
+        options.chatMentionWeights,
+      );
+      let snapshot = getGraphSnapshot(options.repoId);
+      if (!snapshot) {
+        snapshot = await loadAndCacheGraphSnapshot(conn, options.repoId);
+      }
+      let backend: NonNullable<RetrievalEvidence["pprBoosts"]>["backend"] =
+        "js";
+      let symbolsBoosted = 0;
+      if (snapshot && seedResolution.seeds.size > 0) {
+        const pprResult = await computePpr({
+          graph: snapshot,
+          snapshotCreatedAt:
+            getGraphSnapshotCreatedAt(options.repoId) ?? Date.now(),
+          repoId: options.repoId,
+          options: {
+            seeds: seedResolution.seeds,
+            direction: options.pprDirection,
+          },
+        });
+        backend = pprResult.backend;
+        // Boost only symbol entities; other entity types pass through.
+        const symbolItems = fusedResults
+          .filter((r) => r.entityType === "symbol")
+          .map((r) => ({ symbolId: r.entityId, score: r.score, source: r.source }));
+        const otherItems = fusedResults.filter((r) => r.entityType !== "symbol");
+        const originalScores = new Map(
+          symbolItems.map((r) => [r.symbolId, r.score] as const),
+        );
+        const boost = applyPprBoost(symbolItems, pprResult.scores, {
+          pprWeight: options.pprWeight,
+          combinedCap: 4,
+          originalScores,
+        });
+        symbolsBoosted = boost.symbolsBoosted;
+        const reweightedSymbols = boost.items.map((item) => ({
+          entityType: "symbol" as const,
+          entityId: item.symbolId,
+          score: item.score,
+          source: item.source,
+        }));
+        pprAdjusted = [...reweightedSymbols, ...otherItems].sort(
+          (a, b) => b.score - a.score,
+        );
+      }
+      pprBoosts = {
+        resolvedSeeds: seedResolution.evidence.resolved,
+        unresolvedMentions: seedResolution.evidence.unresolved,
+        ambiguousMentions: seedResolution.evidence.ambiguous,
+        symbolsBoosted,
+        latencyMs: Math.round(performance.now() - pprStart),
+        backend,
+      };
+    } catch (err) {
+      logger.debug(
+        `[entity-search] PPR boost failed (non-fatal): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  if (!options.includeEvidence) {
+    return { results: pprAdjusted };
+  }
+  const evidence = buildEntityEvidence(
+    rankings,
+    pprAdjusted,
+    fusionLatencyMs,
+  );
+  if (pprBoosts) evidence.pprBoosts = pprBoosts;
+  return { results: pprAdjusted, evidence };
 }
+
 /**
  * Narrow the candidate file set for `search.edit` text-mode planning.
  *

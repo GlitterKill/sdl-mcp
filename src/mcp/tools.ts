@@ -929,6 +929,14 @@ export const SymbolSearchRequestSchema = z
     includeRetrievalEvidence: z.boolean().optional(),
     /** When true, exclude external symbols (from SCIP) from search results. */
     excludeExternal: z.boolean().optional(),
+    /** Identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank for chat-aware re-ranking. */
+    chatMentions: z.array(z.string().min(1).max(200)).max(20).optional(),
+    /** Optional per-mention weight overrides; missing entries default to uniform 1.0. */
+    chatMentionWeights: z.record(z.string(), z.number().min(0).max(10)).optional(),
+    /** Walk direction across the dependency graph. Default: "both". */
+    pprDirection: z.enum(["out", "in", "both"]).optional(),
+    /** PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default: 2.0 (tuned 2026-04-27). */
+    pprWeight: z.number().min(0).max(2).optional(),
   })
   .refine((data) => data.query || data.pattern, {
     message: "Either 'query' or 'pattern' must be provided",
@@ -963,6 +971,17 @@ export const SymbolSearchResponseSchema = z.object({
     .optional(),
   /** Per-result retrieval evidence. Only populated when includeRetrievalEvidence is true. */
   retrievalEvidence: z.array(RetrievalEvidenceItemSchema).optional(),
+  /** Personalized PageRank diagnostics, populated when chatMentions triggered the boost. Useful for tuning + debugging. */
+  pprBoosts: z
+    .object({
+      resolvedSeeds: z.array(z.string()),
+      unresolvedMentions: z.array(z.string()),
+      ambiguousMentions: z.array(z.string()),
+      symbolsBoosted: z.number().int().nonnegative(),
+      latencyMs: z.number().int().nonnegative(),
+      backend: z.enum(["native", "js", "fallback-bfs"]),
+    })
+    .optional(),
   /** Whether any result had a high-confidence exact match (relevance >= 0.85). */
   exactMatchFound: z.boolean().optional(),
   /** Suggestion text when results are weak or empty. */
@@ -1950,6 +1969,33 @@ export const AgentContextRequestSchema = z.object({
         .optional()
         .describe(
           "Include retrieval evidence (which lanes contributed, per-source counts) in the response. Default: true.",
+        ),
+      chatMentions: z
+        .array(z.string().min(1).max(200))
+        .max(20)
+        .optional()
+        .describe(
+          "Identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank for chat-aware re-ranking.",
+        ),
+      chatMentionWeights: z
+        .record(z.string(), z.number().min(0).max(10))
+        .optional()
+        .describe(
+          "Optional per-mention weight overrides; missing entries default to uniform 1.0.",
+        ),
+      pprDirection: z
+        .enum(["out", "in", "both"])
+        .optional()
+        .describe(
+          "Walk direction across the dependency graph for chat-aware re-ranking. Default: both.",
+        ),
+      pprWeight: z
+        .number()
+        .min(0)
+        .max(2)
+        .optional()
+        .describe(
+          "PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default: 2.0 (tuned 2026-04-27).",
         ),
     })
     .optional()

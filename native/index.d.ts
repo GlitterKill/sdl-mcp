@@ -15,6 +15,34 @@ export interface NativeClusterAssignment {
   clusterId: string
   membershipScore: number
 }
+/**
+ * A single (neighbor index, weight) entry in the directional adjacency the
+ * TypeScript layer hands to the native walker.
+ */
+export interface NativePprAdjEntry {
+  neighbor: number
+  weight: number
+}
+/**
+ * A single seed contribution to the personalization vector.
+ *
+ * `node` is an index into the adjacency `Vec<Vec<...>>`. `weight` should
+ * already be normalized so the seed vector sums to 1.
+ */
+export interface NativePprSeed {
+  node: number
+  weight: number
+}
+/**
+ * A node that received a non-zero PPR score.
+ *
+ * Returned as a sparse list to keep payload size proportional to touched
+ * nodes rather than the full graph.
+ */
+export interface NativePprScore {
+  node: number
+  score: number
+}
 export interface NativeProcessSymbol {
   symbolId: string
   name: string
@@ -253,6 +281,7 @@ export declare function parseFilesAsync(files: Array<NativeFileInput>, threadCou
 export declare function hashContentNative(content: string): string
 export declare function generateSymbolIdNative(repoId: string, relPath: string, kind: string, name: string, fingerprint: string): string
 export declare function computeClusters(symbols: Array<NativeClusterSymbol>, edges: Array<NativeClusterEdge>, minClusterSize: number): Array<NativeClusterAssignment>
+export declare function computePersonalizedPagerank(adjacency: Array<Array<NativePprAdjEntry>>, seeds: Array<NativePprSeed>, alpha: number, epsilon: number, maxNodesTouched: number): Array<NativePprScore>
 export declare function traceProcesses(symbols: Array<NativeProcessSymbol>, callEdges: Array<NativeProcessCallEdge>, maxDepth: number, entryPatterns: Array<string>): Array<NativeProcess>
 export declare function scipDecodeStart(filePath: string): ScipDecodeHandle
 export declare class ScipDecodeHandle {

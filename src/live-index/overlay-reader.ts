@@ -234,6 +234,10 @@ export async function searchSymbolsHybridWithOverlay(
     rrfK?: number;
     candidateLimit?: number;
     includeEvidence?: boolean;
+    chatMentions?: string[];
+    chatMentionWeights?: Record<string, number>;
+    pprDirection?: "out" | "in" | "both";
+    pprWeight?: number;
   },
 ): Promise<{ rows: OverlaySearchResult[]; evidence?: RetrievalEvidence }> {
   const snapshot = getOverlaySnapshot(repoId);
@@ -250,6 +254,10 @@ export async function searchSymbolsHybridWithOverlay(
     rrfK: hybridOptions.rrfK,
     candidateLimit: hybridOptions.candidateLimit,
     includeEvidence: hybridOptions.includeEvidence,
+    chatMentions: hybridOptions.chatMentions,
+    chatMentionWeights: hybridOptions.chatMentionWeights,
+    pprDirection: hybridOptions.pprDirection,
+    pprWeight: hybridOptions.pprWeight,
   });
 
   // 2. Hydrate hybrid results — get symbol/file data, filter out touched files

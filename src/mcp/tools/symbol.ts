@@ -29,6 +29,7 @@ import {
   shouldFallbackToLegacy,
 } from "../../retrieval/index.js";
 import type { RetrievalEvidence } from "../../retrieval/types.js";
+import { autoExtractMentions } from "../../retrieval/seed-resolver.js";
 import { logger } from "../../util/logger.js";
 import { buildCardForSymbol } from "../../services/card-builder.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
@@ -212,6 +213,13 @@ export async function handleSymbolSearch(
             rrfK: retrievalConfig?.fusion?.rrfK,
             candidateLimit: retrievalConfig?.candidateLimit,
             includeEvidence: request.includeRetrievalEvidence === true,
+            chatMentions:
+              request.chatMentions !== undefined
+                ? request.chatMentions
+                : autoExtractMentions(query),
+            chatMentionWeights: request.chatMentionWeights,
+            pprDirection: request.pprDirection,
+            pprWeight: request.pprWeight,
           },
         );
       rows = hybridRows;
@@ -519,6 +527,10 @@ export async function handleSymbolSearch(
           retrievalSource: "legacy" as const,
         }),
       );
+    }
+    if (retrievalEvidence?.pprBoosts) {
+      (response as Record<string, unknown>).pprBoosts =
+        retrievalEvidence.pprBoosts;
     }
   }
   return attachRawContext(response, {

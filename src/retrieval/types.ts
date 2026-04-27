@@ -57,6 +57,22 @@ export interface RetrievalEvidence {
     /** IDs of feedback rows that contributed boosts. */
     feedbackIds: string[];
   };
+
+  /** Personalized PageRank boost diagnostics (chat-aware re-ranking). */
+  pprBoosts?: {
+    /** Resolved seed symbol IDs that anchored the walk. */
+    resolvedSeeds: string[];
+    /** Mention strings that could not be resolved to a symbol. */
+    unresolvedMentions: string[];
+    /** Bare-name mentions where the top hit was ambiguous (top1/top2 < 1.5). */
+    ambiguousMentions: string[];
+    /** Number of fused symbols that received a non-trivial boost. */
+    symbolsBoosted: number;
+    /** Wall-clock time (ms) spent computing PPR + applying boost. */
+    latencyMs: number;
+    /** Backend that ran the walk. */
+    backend: "native" | "js" | "fallback-bfs";
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +120,14 @@ export interface HybridSearchOptions {
   rrfK?: number;
   candidateLimit?: number;
   includeEvidence?: boolean;
+  /** Identifiers / names / IDs the user just mentioned in chat. Used to seed Personalized PageRank. */
+  chatMentions?: string[];
+  /** Optional per-mention weight overrides; defaults to uniform 1.0. */
+  chatMentionWeights?: Record<string, number>;
+  /** Walk direction across the dependency graph. Default: "both". */
+  pprDirection?: "out" | "in" | "both";
+  /** Multiplicative boost ceiling for PPR re-ranking. Default: 0.5. */
+  pprWeight?: number;
 }
 
 /** A single scored result from hybrid search. */
@@ -163,4 +187,12 @@ export interface EntitySearchOptions {
   rrfK?: number;
   candidateLimit?: number;
   includeEvidence?: boolean;
+  /** Identifiers / names / IDs the user just mentioned in chat. Used to seed Personalized PageRank. */
+  chatMentions?: string[];
+  /** Optional per-mention weight overrides; defaults to uniform 1.0. */
+  chatMentionWeights?: Record<string, number>;
+  /** Walk direction across the dependency graph. Default: "both". */
+  pprDirection?: "out" | "in" | "both";
+  /** Multiplicative boost ceiling for PPR re-ranking. Default: 0.5. */
+  pprWeight?: number;
 }

@@ -153,6 +153,12 @@ export async function buildSeedContext(
   /* sdl.context: semantic hybrid defaults */
   const useHybrid = task.options?.semantic !== false;
   const includeEvidence = task.options?.includeRetrievalEvidence !== false;
+  /* sdl.context: auto-extract chatMentions from taskText when caller did not pass any */
+  const { autoExtractMentions } = await import("../retrieval/seed-resolver.js");
+  const resolvedChatMentions: string[] | undefined =
+    task.options?.chatMentions !== undefined
+      ? task.options.chatMentions
+      : autoExtractMentions(task.taskText);
   /* sdl.context: capture hybrid evidence */
   let seedEvidence: import("../retrieval/types.js").RetrievalEvidence | undefined;
 
@@ -175,6 +181,10 @@ export async function buildSeedContext(
       limit: 20,
       entityTypes: ["symbol", "cluster", "process", "fileSummary"],
       includeEvidence: includeEvidence,
+      chatMentions: resolvedChatMentions,
+      chatMentionWeights: task.options?.chatMentionWeights,
+      pprDirection: task.options?.pprDirection,
+      pprWeight: task.options?.pprWeight,
     });
 
     if (entityResult.evidence) seedEvidence = entityResult.evidence;
@@ -234,7 +244,7 @@ export async function buildSeedContext(
       const compoundQuery = terms.slice(0, 6).join(" ");
       if (compoundQuery) {
         const compoundResults = useHybrid
-          ? (await searchSymbolsHybridWithOverlay(conn, task.repoId, compoundQuery, compoundLimit, {})).rows
+          ? (await searchSymbolsHybridWithOverlay(conn, task.repoId, compoundQuery, compoundLimit, { chatMentions: resolvedChatMentions, chatMentionWeights: task.options?.chatMentionWeights, pprDirection: task.options?.pprDirection, pprWeight: task.options?.pprWeight })).rows
           : await searchSymbols(conn, task.repoId, compoundQuery, compoundLimit);
         for (const r of compoundResults) {
           if (sourceCounts.lexical >= halfMax) break;
@@ -264,7 +274,7 @@ export async function buildSeedContext(
       for (const term of terms.slice(0, maxIndividualTerms)) {
         if (sourceCounts.lexical >= halfMax) break;
         const results = useHybrid
-          ? (await searchSymbolsHybridWithOverlay(conn, task.repoId, term, perTermLimit, {})).rows
+          ? (await searchSymbolsHybridWithOverlay(conn, task.repoId, term, perTermLimit, { chatMentions: resolvedChatMentions, chatMentionWeights: task.options?.chatMentionWeights, pprDirection: task.options?.pprDirection, pprWeight: task.options?.pprWeight })).rows
           : await searchSymbols(conn, task.repoId, term, perTermLimit);
         for (const r of results) {
           if (sourceCounts.lexical >= halfMax) break;
