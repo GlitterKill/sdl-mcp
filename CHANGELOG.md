@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Chat-aware Personalized PageRank re-ranking on `sdl.symbol.search` and `sdl.context`.**
+  Callers can pass `chatMentions: string[]` (plus optional `chatMentionWeights`,
+  `pprDirection`, `pprWeight`) to bias result ranking toward symbols structurally
+  close to what the user just talked about. Resolves mentions to symbols (full
+  hex ID / shortId prefix / bare name), runs Andersen-Chung-Lang forward-push PPR
+  over `DEPENDS_ON` from those seeds, and applies a multiplicative boost to the
+  fused RRF list. Native Rust impl via `compute_personalized_pagerank` napi
+  export with a JS push fallback (parity within 1e-3). Composition cap 4× over
+  the original RRF score keeps stacked boosts (feedback + PPR) bounded.
+  - New: [src/retrieval/ppr.ts](src/retrieval/ppr.ts), [src/retrieval/seed-resolver.ts](src/retrieval/seed-resolver.ts), [native/src/pagerank/](native/src/pagerank/)
+  - Default `pprWeight = 2.0` tuned via 20-query sweep — see
+    [devdocs/ppr-weight-tune-results.md](devdocs/ppr-weight-tune-results.md):
+    85% NDCG@10 lift over RRF baseline on near-target mentions, zero effect on
+    irrelevant or empty mention sets, no recall regression, ~5ms PPR overhead.
+  - Bench harness: `npm run bench:ppr` ([scripts/bench-ppr-weight.ts](scripts/bench-ppr-weight.ts))
+    against [tests/fixtures/ppr-tune/queries.json](tests/fixtures/ppr-tune/queries.json).
+  - Deep dive: [docs/feature-deep-dives/semantic-engine.md → Chat-Aware PageRank Boost](docs/feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0108).
+  - **Auto-extract chatMentions**: when caller passes `chatMentions: undefined`,
+    the server extracts identifier-like tokens from `query` (`sdl.symbol.search`)
+    or `taskText` (`sdl.context`) via `autoExtractMentions` and uses those as
+    PPR seeds. Pass an explicit empty array `[]` to disable PPR for the call.
+  - **`pprBoosts` evidence surface**: `SymbolSearchResponse.pprBoosts` exposes
+    `{ resolvedSeeds, unresolvedMentions, ambiguousMentions, symbolsBoosted,
+    latencyMs, backend }` when `includeRetrievalEvidence: true` and PPR ran.
+  - **Bench CI flags**: `npm run bench:ppr -- --baseline tune-baseline.json`
+    fails with exit code 1 if the current winner regresses by >2% NDCG vs. a
+    checked-in baseline; `--holdout N` splits the fixture into train + holdout
+    and reports cross-validation drift.
+
 - **Grammar-wrapper packages to silence `ERESOLVE` peer warnings on install.**
   sdl-mcp consumes 11 upstream tree-sitter grammars whose `peerOptional
 tree-sitter` ranges cap at `^0.25.0` — narrower than the `@keqingmoe/tree-sitter@0.26.2`

@@ -326,6 +326,12 @@ Search symbols by name or summary text.
 | `limit`                    | `integer`  | No       | Max results (1-1000, default: 50)                                                |
 | `semantic`                 | `boolean`  | No       | Enable semantic reranking / hybrid retrieval                                     |
 | `includeRetrievalEvidence` | `boolean`  | No       | Include retrieval evidence (sources, candidate counts, latency, fallback reason) |
+| `chatMentions`             | `string[]` | No       | Up to 20 identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank for chat-aware re-ranking. |
+| `chatMentionWeights`       | `Record<string, number>` | No | Per-mention weight overrides; missing entries default to uniform 1.0. |
+| `pprDirection`             | `"out" \| "in" \| "both"` | No | Walk direction across the dependency graph. Default: `"both"`. |
+| `pprWeight`                | `number`   | No       | PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default: `2.0`. Range: `[0, 2]`. |
+
+When `chatMentions` is non-empty, results are re-ranked via Personalized PageRank seeded at those mentions — see [semantic-engine.md → Chat-Aware PageRank Boost](feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0108). When `chatMentions` is **omitted** (`undefined`), the server auto-extracts identifier-like tokens from the query as seeds. Pass an explicit empty array `[]` to disable PPR entirely. PPR diagnostics surface in `response.pprBoosts` when `includeRetrievalEvidence: true`.
 
 When semantic mode is enabled, the retrieval path depends on `semantic.retrieval.mode`: `"hybrid"` uses FTS + vector search with RRF fusion; `"legacy"` uses alpha-blended lexical + embedding reranking. Falls back to legacy automatically if hybrid indexes are unavailable.
 
@@ -822,6 +828,10 @@ Retrieve task-shaped code context with rung path selection and evidence capture.
 | `requireDiagnostics` | `boolean`              | Include diagnostic info (may add a raw rung)                                                                 |
 | `semantic`                 | `boolean`              | Use hybrid (FTS + vector + RRF) retrieval for context seeding. Default `true`. Set `false` to force plain lexical — useful for deterministic tests |
 | `includeRetrievalEvidence` | `boolean`              | Attach hybrid `retrievalEvidence` to the response (sources, candidate counts, top ranks per source, fusion latency, lane availability). Default `true` |
+| `chatMentions`             | `string[]`             | Up to 20 identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank for chat-aware re-ranking. See [semantic-engine.md → Chat-Aware PageRank](feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0108) |
+| `chatMentionWeights`       | `Record<string, number>` | Per-mention weight overrides; missing entries default to uniform 1.0 |
+| `pprDirection`             | `"out" \| "in" \| "both"` | Walk direction across the dependency graph for chat-aware re-ranking. Default `"both"` |
+| `pprWeight`                | `number`               | PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default `2.0`, range `[0, 2]` |
 
 **Response:**
 

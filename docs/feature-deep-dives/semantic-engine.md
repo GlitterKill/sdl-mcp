@@ -306,6 +306,41 @@ when multiple sources agree"]
 
 RRF is more robust than alpha-blending because it fuses _rank positions_ rather than raw scores, making it insensitive to score distribution differences between FTS and vector backends.
 
+
+#### Chat-Aware Personalized PageRank Boost (v0.10.8)
+
+When the caller passes `chatMentions`, the orchestrator runs a **Personalized PageRank** (PPR) walk seeded at those mentions over the `DEPENDS_ON` graph and applies a multiplicative boost to the fused result list. Symbols structurally close to what the user just talked about surface higher; everything else ranks as before.
+
+- **Algorithm:** Andersen-Chung-Lang forward-push. Walks both directions by default (callers + callees, reverse edges scaled 0.5).
+- **Boost shape:** `final = score × min(1 + pprWeight × pprScore, 2.0)`. Stack cap at 4× the original RRF score (composes with feedback boost).
+- **Defaults:** `pprWeight = 2.0`, `pprDirection = "both"`, `alpha = 0.15`, `epsilon = 1e-4`, max 2000 nodes touched.
+- **Tuning data:** [devdocs/ppr-weight-tune-results.md](../../devdocs/ppr-weight-tune-results.md) — 85% NDCG@10 lift over RRF baseline on near-target mentions, zero effect on `none` / `far` configs (correct safety property), no recall regression, ~5ms PPR overhead.
+- **Backends:** Native Rust (`compute_personalized_pagerank` napi export) when the addon is loaded; pure-JS push fallback otherwise. Both kept within 1e-3 of each other.
+- **Cache:** in-memory LRU keyed on `repoId | snapshotCreatedAt | seedHash | alpha | direction`; 64 entries / 5 min TTL.
+
+Mentions are resolved via `src/retrieval/seed-resolver.ts`:
+
+1. **Full hex symbolId** (64 chars) — looked up directly.
+2. **Short ID prefix** (16-63 hex) — expanded via `STARTS WITH`; ambiguous prefixes dropped.
+3. **Bare name** — exact-match on `Symbol.name` first, then `STARTS WITH` fallback. Top-1 / top-2 score ratio < 1.5 surfaces in evidence as `ambiguousMentions`.
+
+Unresolved mentions are reported in `evidence.pprBoosts.unresolvedMentions` rather than failing the request. When the seed has no out-edges in the chosen direction, PPR degrades to a depth-3 BFS fallback (`evidence.pprBoosts.backend = "fallback-bfs"`).
+
+##### Tool surface
+
+Both `sdl.symbol.search` and `sdl.context` accept the same four optional fields:
+
+```json
+{
+  "chatMentions": ["hybridSearch", "f84156fe"],
+  "chatMentionWeights": { "hybridSearch": 2.0 },
+  "pprDirection": "both",
+  "pprWeight": 2.0
+}
+```
+
+Leaving `chatMentions` empty / unset disables PPR entirely — the orchestrator emits exactly the RRF-only ordering it would have without the feature.
+
 #### Legacy Pipeline (Alpha Blending)
 
 The legacy path is retained as a fallback and can be explicitly selected via `semantic.retrieval.mode: "legacy"`:
