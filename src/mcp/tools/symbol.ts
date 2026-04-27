@@ -149,6 +149,7 @@ export async function handleSymbolSearch(
   const config = loadConfig();
   const semanticConfig = config.semantic;
   const semanticRequested = request.semantic === true;
+  const semanticOptOut = request.semantic === false;
 
   recordToolTrace({
     repoId: request.repoId,
@@ -170,7 +171,7 @@ export async function handleSymbolSearch(
   let fallbackReason: string | undefined;
 
   if (
-    semanticRequested &&
+    !semanticOptOut &&
     semanticConfig?.enabled === true &&
     retrievalConfig?.mode === "hybrid"
   ) {
