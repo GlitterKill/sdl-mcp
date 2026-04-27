@@ -1,6 +1,6 @@
 {
   "name": "sdl-mcp-native",
-  "version": "0.10.8",
+  "version": "0.10.9",
   "description": "Native Rust indexer for SDL-MCP with tree-sitter parsing and Rayon parallelism",
   "license": "SEE LICENSE IN LICENSE",
   "main": "index.js",
@@ -29,12 +29,12 @@
     "version": "napi version"
   },
   "optionalDependencies": {
-    "sdl-mcp-native-win32-x64-msvc": "0.10.8",
-    "sdl-mcp-native-darwin-x64": "0.10.8",
-    "sdl-mcp-native-darwin-arm64": "0.10.8",
-    "sdl-mcp-native-linux-x64-gnu": "0.10.8",
-    "sdl-mcp-native-linux-x64-musl": "0.10.8",
-    "sdl-mcp-native-linux-arm64-gnu": "0.10.8"
+    "sdl-mcp-native-win32-x64-msvc": "0.10.9",
+    "sdl-mcp-native-darwin-x64": "0.10.9",
+    "sdl-mcp-native-darwin-arm64": "0.10.9",
+    "sdl-mcp-native-linux-x64-gnu": "0.10.9",
+    "sdl-mcp-native-linux-x64-musl": "0.10.9",
+    "sdl-mcp-native-linux-arm64-gnu": "0.10.9"
   },
   "repository": {
     "type": "git",

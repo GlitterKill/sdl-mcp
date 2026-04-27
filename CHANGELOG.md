@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.10.8] - 2026-04-23
+## [0.10.9] - 2026-04-27
 
 ### Added
 
@@ -25,18 +25,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     irrelevant or empty mention sets, no recall regression, ~5ms PPR overhead.
   - Bench harness: `npm run bench:ppr` ([scripts/bench-ppr-weight.ts](scripts/bench-ppr-weight.ts))
     against [tests/fixtures/ppr-tune/queries.json](tests/fixtures/ppr-tune/queries.json).
-  - Deep dive: [docs/feature-deep-dives/semantic-engine.md → Chat-Aware PageRank Boost](docs/feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0108).
+  - Deep dive: [docs/feature-deep-dives/semantic-engine.md → Chat-Aware PageRank Boost](docs/feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0109).
   - **Auto-extract chatMentions**: when caller passes `chatMentions: undefined`,
     the server extracts identifier-like tokens from `query` (`sdl.symbol.search`)
     or `taskText` (`sdl.context`) via `autoExtractMentions` and uses those as
     PPR seeds. Pass an explicit empty array `[]` to disable PPR for the call.
   - **`pprBoosts` evidence surface**: `SymbolSearchResponse.pprBoosts` exposes
     `{ resolvedSeeds, unresolvedMentions, ambiguousMentions, symbolsBoosted,
-    latencyMs, backend }` when `includeRetrievalEvidence: true` and PPR ran.
+latencyMs, backend }` when `includeRetrievalEvidence: true` and PPR ran.
   - **Bench CI flags**: `npm run bench:ppr -- --baseline tune-baseline.json`
     fails with exit code 1 if the current winner regresses by >2% NDCG vs. a
     checked-in baseline; `--holdout N` splits the fixture into train + holdout
     and reports cross-validation drift.
+
+### Changed
+
+- **`sdl.symbol.search` defaults to hybrid retrieval** (FTS + vector + RRF)
+  unless the caller explicitly passes `semantic: false`. Previously
+  `semantic: undefined` skipped the hybrid path; now only an explicit opt-out
+  bypasses it, matching `sdl.context`'s default-on behavior since v0.10.7.
+- **Internal module split to reduce per-file surface area** (no behavior change):
+  - `src/graph/slice.ts` (was ~700 LoC) split into
+    [`slice/beam-search-engine.ts`](src/graph/slice/beam-search-engine.ts),
+    [`slice/card-hydrator.ts`](src/graph/slice/card-hydrator.ts),
+    [`slice/detail-level.ts`](src/graph/slice/detail-level.ts),
+    [`slice/edge-projector.ts`](src/graph/slice/edge-projector.ts), and
+    [`slice/types.ts`](src/graph/slice/types.ts).
+  - `src/agent/executor.ts` identifier-extraction helpers extracted to
+    [`src/agent/identifier-extraction.ts`](src/agent/identifier-extraction.ts).
+  - `src/retrieval/orchestrator.ts` fusion math extracted to
+    [`src/retrieval/fusion.ts`](src/retrieval/fusion.ts).
+  - Refactor scripts under `scripts/refactor-extract-*.mjs` are reproducible.
+
+### Performance
+
+- **Embedding refresh: batched DB writes per model batch.** Previously each
+  symbol got its own `withWriteConn → setSymbolEmbeddingOnNode` call (~8K
+  lock acquisitions per model on a full index). Added
+  `setSymbolEmbeddingBatchOnNode` in
+  [src/db/ladybug-symbol-embeddings.ts](src/db/ladybug-symbol-embeddings.ts)
+  that processes the whole batch inside one write connection, reusing
+  resolved property names and a shared timestamp.
+  [src/indexer/embeddings.ts](src/indexer/embeddings.ts) `processBatch` now
+  issues a single `withWriteConn` per batch and skips the post-embed cache
+  recheck (no concurrent embedding writer exists during indexing). Cuts
+  write-lock acquisitions ~97% (N → N/32 at batch size 32); expected
+  ~60–70% reduction in embedding-phase wall time.
+
+## [0.10.8] - 2026-04-23
+
+### Added
 
 - **Grammar-wrapper packages to silence `ERESOLVE` peer warnings on install.**
   sdl-mcp consumes 11 upstream tree-sitter grammars whose `peerOptional

@@ -307,7 +307,7 @@ when multiple sources agree"]
 RRF is more robust than alpha-blending because it fuses _rank positions_ rather than raw scores, making it insensitive to score distribution differences between FTS and vector backends.
 
 
-#### Chat-Aware Personalized PageRank Boost (v0.10.8)
+#### Chat-Aware Personalized PageRank Boost (v0.10.9)
 
 When the caller passes `chatMentions`, the orchestrator runs a **Personalized PageRank** (PPR) walk seeded at those mentions over the `DEPENDS_ON` graph and applies a multiplicative boost to the fused result list. Symbols structurally close to what the user just talked about surface higher; everything else ranks as before.
 
