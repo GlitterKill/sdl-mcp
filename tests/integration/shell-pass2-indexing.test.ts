@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -31,6 +30,15 @@ function writeRepoFile(
   writeFileSync(fullPath, content, "utf8");
 }
 
+function removeGraphDbFiles(graphDbPath: string): void {
+  // LadybugDB can leave sidecar files behind after interrupted test runs.
+  for (const suffix of ["", ".wal", ".lock", ".shm"]) {
+    try {
+      rmSync(graphDbPath + suffix, { recursive: true, force: true });
+    } catch {}
+  }
+}
+
 describe("Shell pass2 indexing", () => {
   const graphDbPath = join(tmpdir(), ".lbug-shell-pass2-test-db.lbug");
   const configPath = join(tmpdir(), "sdl-shell-pass2-config.json");
@@ -39,9 +47,7 @@ describe("Shell pass2 indexing", () => {
   let repoDir: string | null = null;
 
   before(async () => {
-    if (existsSync(graphDbPath)) {
-      rmSync(graphDbPath, { recursive: true, force: true });
-    }
+    removeGraphDbFiles(graphDbPath);
 
     repoDir = mkdtempSync(join(tmpdir(), "sdl-mcp-shell-pass2-repo-"));
     writeRepoFile(
@@ -116,9 +122,7 @@ describe("Shell pass2 indexing", () => {
     } else {
       process.env.SDL_CONFIG_PATH = prevSDL_CONFIG_PATH;
     }
-    try {
-      rmSync(graphDbPath, { recursive: true, force: true });
-    } catch {}
+    removeGraphDbFiles(graphDbPath);
     try {
       rmSync(configPath, { recursive: true, force: true });
     } catch {}
