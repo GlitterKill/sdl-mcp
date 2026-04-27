@@ -159,3 +159,4 @@ draft-tap.out
 src/code-mode/descriptions.ts.bak
 .gitignore
 tests/unit/file-gateway.test.ts.bak
+tune-results.json

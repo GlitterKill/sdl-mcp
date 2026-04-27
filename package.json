@@ -53,6 +53,7 @@
     "benchmark:matrix": "node scripts/real-world-benchmark-matrix.ts",
     "benchmark:claims": "node scripts/check-benchmark-claims.ts",
     "benchmark:sweep": "node scripts/budget-sensitivity-sweep.ts",
+    "bench:ppr": "node scripts/bench-ppr-weight.ts",
     "benchmark:record-trace": "node scripts/record-trace.ts",
     "benchmark:setup-external": "node scripts/setup-external-benchmark-repos.ts",
     "benchmark:v067": "node scripts/benchmark/v067-baseline.ts",

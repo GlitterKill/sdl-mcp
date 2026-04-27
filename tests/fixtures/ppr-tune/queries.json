@@ -1,0 +1,264 @@
+{
+  "$schema": "./queries.schema.json",
+  "repoId": "sdl-mcp",
+  "description": "20 fixture queries for A/B-tuning DEFAULT_PPR_WEIGHT in Personalized PageRank. Each query carries three mention configs: 'none' (RRF baseline), 'near' (mentions structurally adjacent to the relevant symbols), and 'far' (mentions in unrelated subgraphs). Ground truth lists the symbol *names* the bench resolves to symbolIds at run time.",
+  "queries": [
+    {
+      "id": "q01-hybrid-search",
+      "category": "explain",
+      "query": "hybrid search fusion",
+      "groundTruth": [
+        "hybridSearch",
+        "rrfFuse",
+        "buildEvidence",
+        "entitySearch",
+        "DEFAULT_RRF_K"
+      ],
+      "mentions": {
+        "near": ["rrfFuse", "entitySearch"],
+        "far": ["loadNativeAddon", "computeClustersRust"]
+      }
+    },
+    {
+      "id": "q02-ppr-boost",
+      "category": "implement",
+      "query": "personalized pagerank boost ranking",
+      "groundTruth": [
+        "computePpr",
+        "applyPprBoost",
+        "pushPpr",
+        "resolveSeedSymbols"
+      ],
+      "mentions": {
+        "near": ["pushPpr", "applyPprBoost"],
+        "far": ["parseFiles", "extractSymbols"]
+      }
+    },
+    {
+      "id": "q03-symbol-search-handler",
+      "category": "debug",
+      "query": "symbol search request handler",
+      "groundTruth": [
+        "handleSymbolSearch",
+        "searchSymbolsHybridWithOverlay",
+        "searchSymbolsWithOverlay"
+      ],
+      "mentions": {
+        "near": ["searchSymbolsHybridWithOverlay", "SymbolSearchRequestSchema"],
+        "far": ["mergeFeedbackBoosts", "tracProcesses"]
+      }
+    },
+    {
+      "id": "q04-context-engine",
+      "category": "explain",
+      "query": "agent context engine build",
+      "groundTruth": [
+        "ContextEngine",
+        "buildSeedContext",
+        "seedContext",
+        "Planner"
+      ],
+      "mentions": {
+        "near": ["buildSeedContext", "Planner"],
+        "far": ["computePpr", "rrfFuse"]
+      }
+    },
+    {
+      "id": "q05-resolve-symbol-ref",
+      "category": "debug",
+      "query": "resolve symbol reference by name",
+      "groundTruth": ["resolveSymbolRef", "computeRelevance", "scoreCandidate"],
+      "mentions": {
+        "near": ["computeRelevance", "scoreCandidate"],
+        "far": ["loadAndCacheGraphSnapshot", "ContextEngine"]
+      }
+    },
+    {
+      "id": "q06-graph-snapshot",
+      "category": "implement",
+      "query": "graph snapshot cache ttl",
+      "groundTruth": [
+        "getGraphSnapshot",
+        "loadAndCacheGraphSnapshot",
+        "invalidateGraphSnapshot",
+        "configureGraphSnapshotCache"
+      ],
+      "mentions": {
+        "near": ["loadAndCacheGraphSnapshot", "invalidateGraphSnapshot"],
+        "far": ["queryFeedbackBoosts", "rrfFuseEntities"]
+      }
+    },
+    {
+      "id": "q07-native-addon-loader",
+      "category": "debug",
+      "query": "load native rust addon",
+      "groundTruth": [
+        "loadNativeAddon",
+        "isCompatibleNativeAddon",
+        "computeClustersRust",
+        "computePersonalizedPageRankRust"
+      ],
+      "mentions": {
+        "near": ["isCompatibleNativeAddon", "computeClustersRust"],
+        "far": ["resolveSymbolRef", "buildEvidence"]
+      }
+    },
+    {
+      "id": "q08-feedback-boost",
+      "category": "explain",
+      "query": "feedback boost prior queries",
+      "groundTruth": ["queryFeedbackBoosts", "mergeFeedbackBoosts"],
+      "mentions": {
+        "near": ["mergeFeedbackBoosts"],
+        "far": ["parseFiles", "extractCalls"]
+      }
+    },
+    {
+      "id": "q09-handle-agent-context",
+      "category": "implement",
+      "query": "agent context tool entry point",
+      "groundTruth": [
+        "handleAgentContext",
+        "ContextEngine",
+        "AgentContextRequestSchema"
+      ],
+      "mentions": {
+        "near": ["ContextEngine", "AgentContextRequestSchema"],
+        "far": ["computeClusters", "parseFilesAsync"]
+      }
+    },
+    {
+      "id": "q10-extract-symbols-treesitter",
+      "category": "explain",
+      "query": "tree sitter extract symbols ast",
+      "groundTruth": [
+        "extractSymbols",
+        "extractImports",
+        "extractCalls",
+        "parseFiles"
+      ],
+      "mentions": {
+        "near": ["extractImports", "parseFiles"],
+        "far": ["rrfFuse", "applyPprBoost"]
+      }
+    },
+    {
+      "id": "q11-blast-radius",
+      "category": "implement",
+      "query": "blast radius downstream impact",
+      "groundTruth": ["computeBlastRadius", "BlastRadiusItem"],
+      "mentions": {
+        "near": ["BlastRadiusItem"],
+        "far": ["loadNativeAddon", "queryFeedbackBoosts"]
+      }
+    },
+    {
+      "id": "q12-policy-engine",
+      "category": "explain",
+      "query": "policy engine code window gating",
+      "groundTruth": ["PolicyEngine", "evaluateCodeAccess"],
+      "mentions": {
+        "near": ["evaluateCodeAccess"],
+        "far": ["rrfFuseEntities", "ContextEngine"]
+      }
+    },
+    {
+      "id": "q13-overlay-reader",
+      "category": "debug",
+      "query": "live index overlay symbol search",
+      "groundTruth": [
+        "searchSymbolsWithOverlay",
+        "searchSymbolsHybridWithOverlay",
+        "getOverlaySnapshot",
+        "mergeSearchResults"
+      ],
+      "mentions": {
+        "near": ["mergeSearchResults", "getOverlaySnapshot"],
+        "far": ["computePpr", "loadNativeAddon"]
+      }
+    },
+    {
+      "id": "q14-rrf-fusion-math",
+      "category": "explain",
+      "query": "reciprocal rank fusion algorithm",
+      "groundTruth": [
+        "rrfFuse",
+        "rrfFuseEntities",
+        "buildEvidence",
+        "buildEntityEvidence"
+      ],
+      "mentions": {
+        "near": ["rrfFuseEntities", "buildEvidence"],
+        "far": ["loadNativeAddon", "extractCalls"]
+      }
+    },
+    {
+      "id": "q15-seed-resolver",
+      "category": "implement",
+      "query": "resolve chat mentions to symbol ids",
+      "groundTruth": ["resolveSeedSymbols"],
+      "mentions": {
+        "near": ["computePpr"],
+        "far": ["queryFeedbackBoosts", "extractSymbols"]
+      }
+    },
+    {
+      "id": "q16-cluster-detection",
+      "category": "explain",
+      "query": "label propagation cluster detection",
+      "groundTruth": [
+        "computeClustersRust",
+        "computeClusters",
+        "label_propagation"
+      ],
+      "mentions": {
+        "near": ["computeClusters"],
+        "far": ["resolveSymbolRef", "buildEvidence"]
+      }
+    },
+    {
+      "id": "q17-process-tracer",
+      "category": "explain",
+      "query": "process trace call chain",
+      "groundTruth": ["traceProcesses", "tracProcesses"],
+      "mentions": {
+        "near": [],
+        "far": ["rrfFuse", "PolicyEngine"]
+      }
+    },
+    {
+      "id": "q18-symbol-card-builder",
+      "category": "debug",
+      "query": "build symbol card with metrics",
+      "groundTruth": ["buildCardForSymbol", "getMetricsBySymbolIds"],
+      "mentions": {
+        "near": ["getMetricsBySymbolIds"],
+        "far": ["loadNativeAddon", "rrfFuse"]
+      }
+    },
+    {
+      "id": "q19-tool-schemas",
+      "category": "implement",
+      "query": "zod schema tool request validation",
+      "groundTruth": [
+        "SymbolSearchRequestSchema",
+        "AgentContextRequestSchema",
+        "SliceBuildRequestSchema"
+      ],
+      "mentions": {
+        "near": ["AgentContextRequestSchema"],
+        "far": ["computePpr", "loadNativeAddon"]
+      }
+    },
+    {
+      "id": "q20-runtime-execute",
+      "category": "implement",
+      "query": "runtime execute shell node python",
+      "groundTruth": ["handleRuntimeExecute", "RuntimeExecuteRequestSchema"],
+      "mentions": {
+        "near": ["RuntimeExecuteRequestSchema"],
+        "far": ["resolveSymbolRef", "buildSeedContext"]
+      }
+    }
+  ]
+}
