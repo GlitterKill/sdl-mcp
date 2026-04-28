@@ -287,6 +287,14 @@ export const WATCHER_REINDEX_RETRY_MAX_MS = 4000;
 export const WATCHER_REINDEX_MAX_ATTEMPTS = 4;
 
 /**
+ * Hard ceiling on a single watcher reindex attempt. Without this, a wedged
+ * write conn (e.g. ConcurrencyLimiter queue stuck behind a long cluster
+ * transaction) leaves `processWatchedFileChange` hanging forever, freezing
+ * `health.pendingChanges` and turning watcher restarts into no-ops.
+ */
+export const WATCHER_REINDEX_OPERATION_TIMEOUT_MS = 60_000;
+
+/**
  * Default upper bound on candidate source files in watcher mode.
  */
 export const WATCHER_DEFAULT_MAX_WATCHED_FILES = 25_000;

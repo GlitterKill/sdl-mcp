@@ -36,6 +36,39 @@ const running = new Map<string, RunningEntry>();
 let enabled = true;
 let shuttingDown = false;
 
+/**
+ * Per-repo serialization for write-heavy refresh phases (cluster/process
+ * computation, SCIP auto-ingest). LadybugDB allows one write transaction at
+ * a time and `writeLimiter` has a 30s queue timeout — running two long
+ * write-heavy phases concurrently against the same repo starves both.
+ *
+ * Each map entry holds the *tail* of the per-repo queue. Acquirers append a
+ * new promise, await the prior tail, run their critical section, then
+ * resolve their promise so the next acquirer proceeds.
+ */
+const repoWriteHeavyTails = new Map<string, Promise<void>>();
+
+export async function withRepoWriteHeavyLock<T>(
+  repoId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const prior = repoWriteHeavyTails.get(repoId) ?? Promise.resolve();
+  let releaseOurs!: () => void;
+  const ours = new Promise<void>((resolve) => {
+    releaseOurs = resolve;
+  });
+  repoWriteHeavyTails.set(repoId, ours);
+  try {
+    await prior;
+    return await fn();
+  } finally {
+    releaseOurs();
+    if (repoWriteHeavyTails.get(repoId) === ours) {
+      repoWriteHeavyTails.delete(repoId);
+    }
+  }
+}
+
 export interface DerivedRefreshHooks {
   refresh: (params: {
     repoId: string;
@@ -127,7 +160,13 @@ async function runOne(
   try {
     await withIndexingGate(async () => {
       if (signal.aborted) return;
-      await hooks.refresh({ repoId, versionId: targetVersionId, signal });
+      // Acquire the per-repo write-heavy lock so concurrent SCIP
+      // auto-ingest (or another runOne started before we landed in the
+      // queue) does not race for the single LadybugDB write conn.
+      await withRepoWriteHeavyLock(repoId, async () => {
+        if (signal.aborted) return;
+        await hooks.refresh({ repoId, versionId: targetVersionId, signal });
+      });
       if (signal.aborted) return;
       await markDerivedStateComputed(repoId, targetVersionId);
     });
@@ -181,9 +220,86 @@ export async function shutdownDerivedRefreshQueue(): Promise<void> {
   await Promise.allSettled(outstanding.map((e) => e.promise));
 }
 
+/**
+ * Block until the derived-refresh queue has no pending or running entries
+ * for `repoId`. Used by post-refresh hooks (SCIP auto-ingest) to avoid
+ * racing the cluster/process write transaction for the single LadybugDB
+ * write connection — concurrent writers exceeded the 30s queue timeout.
+ *
+ * Times out (logs warn + returns) after `timeoutMs` so a wedged background
+ * task cannot stall the foreground refresh response indefinitely.
+ */
+export async function waitForDerivedRefreshIdle(
+  repoId: string,
+  timeoutMs = 120_000,
+  pollIntervalMs = 100,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let announced = false;
+  while (running.has(repoId) || pending.has(repoId)) {
+    if (Date.now() >= deadline) {
+      logger.warn("waitForDerivedRefreshIdle timed out", {
+        repoId,
+        timeoutMs,
+        pending: pending.has(repoId),
+        running: running.has(repoId),
+      });
+      return;
+    }
+    if (!announced) {
+      logger.info("Waiting for derived-refresh idle before proceeding", {
+        repoId,
+        timeoutMs,
+      });
+      announced = true;
+    }
+    if (pending.has(repoId) && !running.has(repoId)) {
+      // Kick the drain so the pending entry transitions to running and we
+      // can observe completion. drain() is idempotent per repo.
+      void drain(repoId);
+    }
+    // Poll on a short cadence rather than awaiting `inFlight.promise`
+    // directly: a rejection in `runOne` (from a future refactor) would
+    // abort the caller, and a Promise.race leg leaks if the loser never
+    // settles. Polling tolerates both and respects the deadline.
+    const remaining = deadline - Date.now();
+    const sleepMs = Math.min(pollIntervalMs, Math.max(remaining, 0));
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, sleepMs);
+    });
+  }
+}
+
 export function _getDerivedRefreshQueueStateForTesting(): {
   pending: number;
   running: number;
 } {
   return { pending: pending.size, running: running.size };
+}
+
+/**
+ * Test-only: synthesize a `running` entry whose promise resolves when the
+ * returned `release` callback is invoked. Lets unit tests exercise
+ * `waitForDerivedRefreshIdle` without bringing up LadybugDB or threading
+ * through `runOne`'s real DB-bound finalization.
+ */
+export function _seedRunningForTesting(
+  repoId: string,
+  targetVersionId = "test",
+): () => void {
+  let resolveRun!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    resolveRun = resolve;
+  });
+  const abort = new AbortController();
+  const entry: RunningEntry = {
+    repoId,
+    targetVersionId,
+    abort,
+    promise: promise.finally(() => {
+      running.delete(repoId);
+    }),
+  };
+  running.set(repoId, entry);
+  return resolveRun;
 }

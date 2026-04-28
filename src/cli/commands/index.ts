@@ -592,15 +592,24 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       // even when scip.autoIngestOnRefresh was true.
       if (config.scip?.enabled && config.scip?.autoIngestOnRefresh) {
         try {
-          await flushStaleFinalizers();
-          const { autoIngestScipIndexes } =
-            await import("../../scip/ingestion.js");
-          const total = config.scip.indexes?.length ?? 0;
-          if (total === 0) {
-            console.log(
-              "  SCIP: enabled but no indexes configured (set scip.indexes in config)",
-            );
-          } else {
+          // Drain background derived-refresh (cluster/process) and serialize
+          // against any watcher-driven re-enqueue. Concurrent writes against
+          // the single LadybugDB write conn caused per-document SCIP merges
+          // to time out at 30s.
+          const { waitForDerivedRefreshIdle, withRepoWriteHeavyLock } =
+            await import("../../indexer/derived-refresh-queue.js");
+          await waitForDerivedRefreshIdle(repo.repoId);
+          await withRepoWriteHeavyLock(repo.repoId, async () => {
+            await flushStaleFinalizers();
+            const { autoIngestScipIndexes } =
+              await import("../../scip/ingestion.js");
+            const total = config.scip?.indexes?.length ?? 0;
+            if (total === 0) {
+              console.log(
+                "  SCIP: enabled but no indexes configured (set scip.indexes in config)",
+              );
+              return;
+            }
             console.log(`  SCIP: ingesting ${total} configured index(es)...`);
             // Use a dedicated progress state for SCIP so its stage keys
             // ("scip:<label>:externals" / ":documents") don't collide with
@@ -609,7 +618,7 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
             const scipProgressState = createProgressState();
             const scipResults = await autoIngestScipIndexes(
               repo.repoId,
-              config.scip,
+              config.scip!,
               repo.rootPath,
               (event) => renderScipProgress(scipProgressState, event),
             );
@@ -634,7 +643,7 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
                 );
               }
             }
-          }
+          });
         } catch (scipErr) {
           const msg =
             scipErr instanceof Error ? scipErr.message : String(scipErr);

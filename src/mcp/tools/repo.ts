@@ -598,21 +598,32 @@ export async function handleIndexRefresh(
       if (scipConfig?.enabled && scipConfig?.autoIngestOnRefresh) {
         const repo = await ladybugDb.getRepo(conn, repoId);
         if (repo?.rootPath) {
-          await flushStaleFinalizers();
-          const { autoIngestScipIndexes } =
-            await import("../../scip/ingestion.js");
-          const scipResults = await autoIngestScipIndexes(
-            repoId,
-            scipConfig,
-            repo.rootPath,
-          );
-          if (scipResults.length > 0) {
-            logger.info("Auto-ingested SCIP indexes after refresh", {
+          // Drain the background derived-refresh queue (cluster/process
+          // computation) and serialize against any watcher-driven refresh
+          // that may enqueue a new run mid-flight. Both paths write through
+          // the single LadybugDB write conn; running them concurrently
+          // starved SCIP's per-document writes and tripped the 30s
+          // ConcurrencyLimiter queue timeout.
+          const { waitForDerivedRefreshIdle, withRepoWriteHeavyLock } =
+            await import("../../indexer/derived-refresh-queue.js");
+          await waitForDerivedRefreshIdle(repoId);
+          await withRepoWriteHeavyLock(repoId, async () => {
+            await flushStaleFinalizers();
+            const { autoIngestScipIndexes } =
+              await import("../../scip/ingestion.js");
+            const scipResults = await autoIngestScipIndexes(
               repoId,
-              count: scipResults.length,
-              statuses: scipResults.map((r) => r.status),
-            });
-          }
+              scipConfig,
+              repo.rootPath,
+            );
+            if (scipResults.length > 0) {
+              logger.info("Auto-ingested SCIP indexes after refresh", {
+                repoId,
+                count: scipResults.length,
+                statuses: scipResults.map((r) => r.status),
+              });
+            }
+          });
         }
       }
     } catch (err) {

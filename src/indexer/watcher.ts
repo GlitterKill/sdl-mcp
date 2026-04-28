@@ -11,6 +11,7 @@ import {
   WATCHER_REINDEX_RETRY_BASE_MS,
   WATCHER_REINDEX_RETRY_MAX_MS,
   WATCHER_REINDEX_MAX_ATTEMPTS,
+  WATCHER_REINDEX_OPERATION_TIMEOUT_MS,
   WATCHER_DEFAULT_MAX_WATCHED_FILES,
 } from "../config/constants.js";
 import { loadConfig } from "../config/loadConfig.js";
@@ -24,7 +25,7 @@ import type { IndexWatchHandle, WatcherHealth } from "./indexer.js";
 import { logger } from "../util/logger.js";
 
 // Local interface for chokidar FSWatcher to avoid 'as any' casts
- 
+
 interface ChokidarWatcher {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   on(event: string, fn: (...args: any[]) => void): this;
@@ -65,14 +66,21 @@ export async function processWatchedFileChange(params: {
   await indexRepo(repoId, "incremental");
 }
 
-type ChokidarModule = { watch: (paths: string | string[], options?: Record<string, unknown>) => unknown };
-
+type ChokidarModule = {
+  watch: (
+    paths: string | string[],
+    options?: Record<string, unknown>,
+  ) => unknown;
+};
 
 async function loadChokidar(): Promise<ChokidarModule | null> {
   try {
     return await import("chokidar");
   } catch (err) {
-    logger.debug("[sdl-mcp] chokidar not available: " + (err instanceof Error ? err.message : String(err)));
+    logger.debug(
+      "[sdl-mcp] chokidar not available: " +
+        (err instanceof Error ? err.message : String(err)),
+    );
     return null;
   }
 }
@@ -165,8 +173,7 @@ export function isWatcherStale(
     : 0;
 
   return (
-    lastSuccessMs === 0 ||
-    nowMs - lastSuccessMs > WATCHER_STALE_THRESHOLD_MS
+    lastSuccessMs === 0 || nowMs - lastSuccessMs > WATCHER_STALE_THRESHOLD_MS
   );
 }
 
@@ -257,19 +264,43 @@ export async function watchRepositoryWithIndexer(
   ): Promise<void> => {
     try {
       logger.debug("File change detected", { filePath });
-      await processWatchedFileChange({
-        repoId,
-        filePath,
-        indexRepo,
-        patchSavedFileFn: ({
-          repoId: changedRepoId,
-          filePath: changedFilePath,
-        }) =>
-          patchSavedFile({
-            repoId: changedRepoId,
-            filePath: changedFilePath,
-          }),
+      // Bound the operation: the underlying patchSavedFile / indexRepo path
+      // routes through `withWriteConn`, whose limiter has a 30s queue
+      // timeout — but if the in-flight write itself stalls inside Ladybug,
+      // the call hangs indefinitely, freezing pendingChanges and turning
+      // watcher stale-restart into a no-op. The timeout treats the attempt
+      // as a failure so the retry/backoff path can run.
+      let timeoutTimer: NodeJS.Timeout | undefined;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutTimer = setTimeout(() => {
+          reject(
+            new Error(
+              `reindex attempt timed out after ${WATCHER_REINDEX_OPERATION_TIMEOUT_MS}ms`,
+            ),
+          );
+        }, WATCHER_REINDEX_OPERATION_TIMEOUT_MS);
+        timeoutTimer.unref();
       });
+      try {
+        await Promise.race([
+          processWatchedFileChange({
+            repoId,
+            filePath,
+            indexRepo,
+            patchSavedFileFn: ({
+              repoId: changedRepoId,
+              filePath: changedFilePath,
+            }) =>
+              patchSavedFile({
+                repoId: changedRepoId,
+                filePath: changedFilePath,
+              }),
+          }),
+          timeoutPromise,
+        ]);
+      } finally {
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+      }
       health.eventsProcessed += 1;
       health.pendingChanges = Math.max(0, health.pendingChanges - 1);
       health.lastSuccessfulReindexAt = new Date().toISOString();
@@ -409,12 +440,32 @@ export async function watchRepositoryWithIndexer(
     }
     const now = Date.now();
     if (now - lastRestartMs < WATCHER_STALE_THRESHOLD_MS / 2) {
+      logger.debug("Restart watcher suppressed by debounce", {
+        repoId,
+        reason,
+        sinceLastRestartMs: now - lastRestartMs,
+      });
       return;
     }
     restarting = true;
     lastRestartMs = now;
     health.restartCount += 1;
-    logger.info("Restarting watcher", { repoId, reason });
+    logger.info("Restarting watcher", {
+      repoId,
+      reason,
+      abandonedPending: pending.size,
+    });
+    // Drain stale debounce timers and reset pending counters. Without this,
+    // a wedged write conn leaves `pending`/`pendingChanges` frozen for the
+    // life of the process — every subsequent stale check restarts the
+    // watcher again with the same numbers, so the recovery loop never
+    // converges. New file events will re-populate pending naturally.
+    for (const timer of pending.values()) {
+      clearTimeout(timer);
+    }
+    pending.clear();
+    health.pendingChanges = 0;
+    health.queueDepth = 0;
     try {
       if (activeWatcher) {
         await activeWatcher.close();
