@@ -28,6 +28,7 @@ import { ShutdownManager } from "../../util/shutdown.js";
 import {
   findExistingProcess,
   formatExistingProcessMessage,
+  removePidfile,
   writePidfile,
 } from "../../util/pidfile.js";
 import {
@@ -371,6 +372,9 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       await httpHandle.serverClosed;
     }
   } catch (error) {
+    if (pidfilePath) {
+      try { removePidfile(pidfilePath); } catch { /* best-effort */ }
+    }
     console.error(
       `Fatal error: ${error instanceof Error ? error.message : String(error)}`,
     );

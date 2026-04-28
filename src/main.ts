@@ -21,6 +21,7 @@ import { ShutdownManager } from "./util/shutdown.js";
 import {
   findExistingProcess,
   formatExistingProcessMessage,
+  removePidfile,
   writePidfile,
 } from "./util/pidfile.js";
 import {
@@ -85,6 +86,9 @@ async function main(): Promise<void> {
   const shutdownMgr = new ShutdownManager({ log });
   activeShutdownMgr = shutdownMgr;
 
+  // Hoisted so the catch handler can clean up if startup fails after the pidfile is claimed.
+  let pidfilePath: string | undefined;
+
   try {
     log("Loading configuration...");
     const resolvedConfigPath = activateCliConfigPath(process.env.SDL_CONFIG);
@@ -99,7 +103,7 @@ async function main(): Promise<void> {
       log(formatExistingProcessMessage(graphDbPath, existing));
       process.exit(1);
     }
-    const pidfilePath = writePidfile(graphDbPath, "stdio");
+    pidfilePath = writePidfile(graphDbPath, "stdio");
     shutdownMgr.setPidfilePath(pidfilePath);
     log(`PID file written: ${pidfilePath}`);
 
@@ -218,6 +222,9 @@ async function main(): Promise<void> {
     log("SDL-MCP server running...");
     await new Promise(() => {});
   } catch (error) {
+    if (pidfilePath) {
+      try { removePidfile(pidfilePath); } catch { /* best-effort */ }
+    }
     if (error instanceof ConfigError) {
       process.stderr.write(`[sdl-mcp] Configuration error: ${error.message}\n`);
       process.exit(1);

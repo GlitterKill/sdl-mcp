@@ -214,14 +214,27 @@ describe("pidfile", () => {
         ? distPidfile.slice(1)
         : distPidfile;
 
-      const driver = `
+      const goFile = join(tempDir, "go");
+      const readyA = join(tempDir, "ready-a");
+      const readyB = join(tempDir, "ready-b");
+
+      // Children write their ready-file, then poll for the parent's go-file.
+      // The parent fires the go signal only after both children are ready, so
+      // both processes hit writePidfile within the same scheduler tick — the
+      // actual race we want to exercise.
+      const driverFor = (readyFile: string) => `
+        import { existsSync, writeFileSync } from "node:fs";
         import { writePidfile } from ${JSON.stringify("file:///" + pidfileModule.replace(/\\\\/g, "/"))};
-        // Tiny startup jitter so both children reach writeFileSync within the same tick.
-        await new Promise((r) => setTimeout(r, 5));
+        writeFileSync(${JSON.stringify(readyFile)}, String(process.pid), "utf8");
+        const deadline = Date.now() + 10000;
+        while (!existsSync(${JSON.stringify(goFile)})) {
+          if (Date.now() > deadline) { console.error("go-file timeout"); process.exit(3); }
+          await new Promise((r) => setTimeout(r, 1));
+        }
         try {
           writePidfile(${JSON.stringify(fakeDbPath)}, "stdio");
-          // Hold the pidfile briefly so the loser does not see us exit (and become \"stale\").
-          await new Promise((r) => setTimeout(r, 200));
+          // Hold long enough that the loser cannot mistake us for stale.
+          await new Promise((r) => setTimeout(r, 1500));
           process.exit(0);
         } catch (err) {
           console.error(err instanceof Error ? err.message : String(err));
@@ -229,20 +242,43 @@ describe("pidfile", () => {
         }
       `;
 
-      const runOne = () => new Promise<number>((resolve) => {
+      const runOne = (readyFile: string) => new Promise<number>((resolve) => {
         const child = spawn(
           process.execPath,
-          ["--input-type=module", "-e", driver],
+          ["--input-type=module", "-e", driverFor(readyFile)],
           { stdio: ["ignore", "ignore", "pipe"] },
         );
         child.on("exit", (code) => resolve(code ?? -1));
       });
 
-      const [a, b] = await Promise.all([runOne(), runOne()]);
-      const winners = [a, b].filter((c) => c === 0).length;
-      const losers = [a, b].filter((c) => c === 2).length;
-      assert.strictEqual(winners, 1, `expected exactly one winner, got codes ${a} and ${b}`);
-      assert.strictEqual(losers, 1, `expected exactly one loser, got codes ${a} and ${b}`);
+      const childA = runOne(readyA);
+      const childB = runOne(readyB);
+
+      // Wait for both children to be ready, then release the barrier.
+      const waitFor = async (path: string) => {
+        const deadline = Date.now() + 10000;
+        while (!existsSync(path)) {
+          if (Date.now() > deadline) throw new Error(`child not ready: ${path}`);
+          await new Promise((r) => setTimeout(r, 5));
+        }
+      };
+      await Promise.all([waitFor(readyA), waitFor(readyB)]);
+      writeFileSync(goFile, "go", "utf8");
+
+      const [a, b] = await Promise.all([childA, childB]);
+      const codes = [a, b];
+      const winners = codes.filter((c) => c === 0).length;
+      const losers = codes.filter((c) => c === 2).length;
+      assert.strictEqual(
+        winners + losers,
+        2,
+        `unexpected exit codes (winners=${winners}, losers=${losers}): ${codes.join(",")}`,
+      );
+      assert.strictEqual(
+        winners,
+        1,
+        `expected exactly one winner; got winners=${winners}, losers=${losers}, codes=${codes.join(",")}`,
+      );
     });
   });
 });
