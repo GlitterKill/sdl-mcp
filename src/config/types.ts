@@ -605,6 +605,24 @@ export const ScipConfigSchema = z.object({
 export type ScipConfig = z.infer<typeof ScipConfigSchema>;
 
 export const PerformanceTierSchema = z.enum(["mid", "high", "extreme", "auto"]);
+
+export const PackedEncoderToggleSchema = z.object({
+  enabled: z.boolean().default(true),
+});
+
+export const PackedConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  threshold: z.number().min(0).max(1).default(0.15),
+  tokenThreshold: z.number().min(0).max(1).default(0.3),
+  defaultFormat: z.enum(["packed", "auto", "compact"]).default("compact"),
+  encoders: z.record(z.string(), PackedEncoderToggleSchema).optional(),
+});
+export type PackedConfig = z.infer<typeof PackedConfigSchema>;
+
+export const WireConfigSchema = z.object({
+  packed: PackedConfigSchema.optional(),
+});
+export type WireConfig = z.infer<typeof WireConfigSchema>;
 export type PerformanceTier = z.infer<typeof PerformanceTierSchema>;
 
 export const AppConfigSchema = z.object({
@@ -647,6 +665,7 @@ export const AppConfigSchema = z.object({
   httpAuth: HttpAuthConfigSchema.optional(),
   memory: MemoryConfigSchema.optional(),
   scip: ScipConfigSchema.optional(),
+  wire: WireConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

@@ -73,6 +73,7 @@ import {
   type SpanAttributes,
 } from "../../util/tracing.js";
 import { attachRawContext } from "../token-usage.js";
+import { tokenAccumulator } from "../token-accumulator.js";
 import {
   serializeSliceForWireFormat,
   normalizeVisibility,
@@ -84,13 +85,7 @@ import {
 import type { SurfacedMemory } from "../../domain/types.js";
 
 export {
-  toCompactGraphSliceV1,
-  toCompactGraphSlice,
-  toCompactGraphSliceV2,
   toCompactGraphSliceV3,
-  decodeCompactGraphSliceV3ToV2,
-  decodeCompactEdgesV2ToV1,
-  decodeCompactEdgesV3ToV1,
   serializeSliceForWireFormat,
 } from "./slice-wire-format.js";
 
@@ -301,7 +296,7 @@ async function handleSliceBuildInternal(
   const buildSliceWithTracing = async (): Promise<SliceBuildResponse> => {
     const requestedWireFormat: SliceBuildWireFormat = wireFormat ?? "compact";
     const effectiveWireFormatVersion =
-      requestedWireFormat === "compact" ? (wireFormatVersion ?? 2) : undefined;
+      requestedWireFormat === "compact" ? (wireFormatVersion ?? 3) : undefined;
 
     const config = loadConfig();
 
@@ -589,24 +584,64 @@ async function handleSliceBuildInternal(
       });
     }
 
+    const wireResult = serializeSliceForWireFormat(
+      slice,
+      requestedWireFormat,
+      effectiveWireFormatVersion,
+      { includeLegend: request.includeLegend },
+    );
+    let packedStats:
+      | {
+          encoderId: string;
+          jsonBytes: number;
+          packedBytes: number;
+          jsonTokens?: number;
+          packedTokens?: number;
+          savedRatio: number;
+          tokenSavedRatio?: number;
+          axisHit?: "bytes" | "tokens";
+          gateDecision: "packed";
+        }
+      | undefined;
+    if (wireResult.format === "packed") {
+      tokenAccumulator.recordPackedUsage(
+        wireResult.encoderId,
+        wireResult.jsonBytes,
+        wireResult.packedBytes,
+        "packed",
+      );
+      const savedRatio =
+        wireResult.jsonBytes > 0
+          ? (wireResult.jsonBytes - wireResult.packedBytes) / wireResult.jsonBytes
+          : 0;
+      const jt = wireResult.jsonTokens;
+      const pt = wireResult.packedTokens;
+      const tokenSavedRatio =
+        typeof jt === "number" && typeof pt === "number" && jt > 0
+          ? (jt - pt) / jt
+          : undefined;
+      packedStats = {
+        encoderId: wireResult.encoderId,
+        jsonBytes: wireResult.jsonBytes,
+        packedBytes: wireResult.packedBytes,
+        jsonTokens: wireResult.jsonTokens,
+        packedTokens: wireResult.packedTokens,
+        savedRatio,
+        tokenSavedRatio,
+        axisHit: wireResult.axisHit,
+        gateDecision: "packed",
+      };
+    }
     const response = {
       sliceHandle: handle,
       ledgerVersion: latestVersion.versionId,
       lease,
       sliceEtag,
-      // Expose the spilloverHandle at the top level when the slice was
-      // truncated, so callers can reach slice.spillover.get without having
-      // to parse the compact wire format. The value aliases sliceHandle
-      // because slice.spillover.get looks up by slice handle.
+      slice: wireResult.payload as never,
       ...(sliceWasTruncated && spilloverPayload
         ? { spilloverHandle: handle }
         : {}),
-      slice: serializeSliceForWireFormat(
-        slice,
-        requestedWireFormat,
-        effectiveWireFormatVersion,
-        { includeLegend: request.includeLegend },
-      ),
+      ...(packedStats ? { _packedStats: packedStats } : {}),
       ...(evidenceItems ? { retrievalEvidence: evidenceItems } : {}),
       ...(includeRetrievalEvidence
         ? {

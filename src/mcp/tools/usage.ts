@@ -96,6 +96,22 @@ export async function handleUsageStats(
     response.session = tokenAccumulator.getSnapshot();
   }
 
+  // wire.packed summary — prefer session figures, fall back to history aggregate.
+  const sessionSnap = response.session ?? tokenAccumulator.getSnapshot();
+  if (
+    (sessionSnap.packedEncodings ?? 0) > 0 ||
+    (sessionSnap.packedFallbacks ?? 0) > 0
+  ) {
+    response.wire = {
+      packed: {
+        encodings: sessionSnap.packedEncodings ?? 0,
+        fallbacks: sessionSnap.packedFallbacks ?? 0,
+        bytesSaved: sessionSnap.packedBytesSaved ?? 0,
+        byEncoder: sessionSnap.packedByEncoder ?? {},
+      },
+    };
+  }
+
   // History scope — from LadybugDB
   if (request.scope === "history" || request.scope === "both") {
     const conn = await getLadybugConn();

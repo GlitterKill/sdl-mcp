@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - unreleased
+
+### Token-aware gate
+
+- **Two-axis auto-gate** for `packed` emission. The dispatcher now emits
+  packed when EITHER byte savings clear `wire.packed.threshold` (default
+  0.15) OR estimated-token savings clear `wire.packed.tokenThreshold`
+  (default 0.30). Tokens are the dominant axis on slice-shaped LLM
+  payloads — empirically 40–54% saved across 8 representative live slices
+  (6–60 cards), versus 5–23% byte savings. Pre-tune, only 1/8 fixtures
+  cleared the byte gate; post-tune, 8/8 emit packed. New env var
+  `SDL_PACKED_TOKEN_THRESHOLD` overrides the token axis.
+- New `decideFormatDetailed(wireFormat, metrics, byteThreshold,
+tokenThreshold)` returns `{ decision, axisHit, bytesSavedRatio,
+tokensSavedRatio }`. Legacy single-axis `decideFormat` and
+  `shouldEmitPacked` retained for back-compat.
+- `_packedStats` response field gains `jsonTokens`, `packedTokens`,
+  `tokenSavedRatio`, `axisHit` (`"bytes"` | `"tokens"`).
+- New optional dispatcher option `packedTokenThreshold` parallels
+  `packedThreshold`.
+
+### Added — `packed` wire format
+
+- **New `wireFormat: "packed"` and `"auto"` for `sdl.slice.build`, plus optional
+  `wireFormat` on `sdl.symbol.search` and `sdl.context`.** Line-oriented
+  text format with `#PACKED/1` header, legend-interned path prefixes, single-char
+  tagged CSV tables, and `__tables` / `__stypes` self-describing schema. Median
+  ~45% byte savings vs JSON across slice-shaped responses; gate-protected to
+  fall back to compact-JSON below the 0.15 savings threshold (configurable).
+  Encoders ship as `sl1` (slice), `ss1` (symbol-search), `ctx1` (context),
+  `gen1` (generic fallback). Schema-free decoder (`decodePacked`) reads
+  `__tables` / `__stypes` so new encoders ship without bumping the decoder
+  version. Header is intentionally `#PACKED/1` (not `#MUNCH/1`) to namespace
+  cleanly from the upstream jcodemunch-mcp dialect.
+- **Telemetry**: new `wire.packed` section in `sdl.usage.stats` reports
+  `encodings`, `fallbacks`, `bytesSaved`, and per-encoder breakdown.
+  Migration `m014` adds `packedEncodings`, `packedFallbacks`,
+  `packedBytesSaved`, `packedByEncoderJson` columns to `UsageSnapshot`.
+- **Config**: new `wire.packed.{enabled,threshold,defaultFormat,encoders}`
+  block under `AppConfigSchema`. Env vars `SDL_PACKED_ENABLED`,
+  `SDL_PACKED_THRESHOLD`, `SDL_PACKED_DEFAULT_FORMAT` override config.
+- New `estimatePackedTokens(text)` in `src/util/tokenize.ts` (length / 3.2).
+- New agent helper `unpackWireResult(result)` /
+  `tryUnpackPayload(payload)` in `src/agent/wire-utils.ts`.
+
+### Breaking Changes
+
+- **Compact wire format versions 1 and 2 retired.** Calling
+  `sdl.slice.build` with `wireFormatVersion: 1` or `2` now throws
+  `WireFormatRetiredError` (code `WIRE_FORMAT_RETIRED`) at runtime.
+  **Migration**: replace `wireFormatVersion: 1` or `2` with
+  `wireFormatVersion: 3` (the default since v0.7.x), or opt in to
+  `wireFormat: "packed"` for the new line-oriented format.
+- Deleted: `toCompactGraphSliceV1`, `toCompactGraphSliceV2`,
+  `decodeCompactGraphSliceV3ToV2`, `decodeCompactEdgesV2ToV1`,
+  `decodeCompactEdgesV3ToV1`, `CompactGraphSlice` (v1 alias),
+  `CompactGraphSliceV2` type aliases. The downgrade decoders are gone
+  because the encoders that fed them are gone.
+- `serializeSliceForWireFormat()` now returns a discriminated
+  `WireFormatResult` union (`{format, payload, ...}`) instead of a raw
+  payload object. Direct callers in user-side code must read `.payload`.
+- `SliceBuildResponse.slice` schema gained `z.string()` to admit packed
+  payloads.
+
 ## [0.10.9] - 2026-04-27
 
 ### Added

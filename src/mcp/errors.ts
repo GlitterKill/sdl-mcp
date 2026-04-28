@@ -13,6 +13,21 @@ export {
 
 import { ErrorCode } from "../domain/errors.js";
 
+export class WireFormatRetiredError extends Error {
+  readonly retiredVersion: number;
+  readonly migrationHint: string;
+  constructor(retiredVersion: number) {
+    const hint =
+      "Compact wire format versions 1 and 2 were retired in 0.11.0. " +
+      'Use wireFormatVersion: 3 (default) or wireFormat: "packed".';
+    super(`wireFormatVersion ${retiredVersion} is retired. ${hint}`);
+    this.name = "WireFormatRetiredError";
+    this.retiredVersion = retiredVersion;
+    this.migrationHint = hint;
+    (this as { code?: string }).code = "WIRE_FORMAT_RETIRED";
+  }
+}
+
 export class PolicyDenialError extends Error {
   readonly code = ErrorCode.POLICY_ERROR;
   readonly nextBestAction?: NextBestAction;

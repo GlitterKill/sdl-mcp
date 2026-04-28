@@ -1,0 +1,126 @@
+{
+  "name": "Packed Wire Format — Slice Encoder Stability",
+  "description": "Snapshot of the deterministic sl1 encoder output for a fixed input slice. Detects accidental wire-format drift between releases. The input is a 6-card slice with 5 edges across 2 directories so the legend interner kicks in.",
+  "encoderId": "sl1",
+  "input": {
+    "repoId": "fixture",
+    "versionId": "v1",
+    "budget": { "maxCards": 60, "maxEstimatedTokens": 8000 },
+    "startSymbols": ["s00000001"],
+    "symbolIndex": [
+      "s00000001",
+      "s00000002",
+      "s00000003",
+      "s00000004",
+      "s00000005",
+      "s00000006"
+    ],
+    "cards": [
+      {
+        "symbolId": "s00000001",
+        "repoId": "fixture",
+        "file": "src/auth/login.ts",
+        "range": { "startLine": 12, "startCol": 0, "endLine": 28, "endCol": 1 },
+        "kind": "function",
+        "name": "login",
+        "exported": true,
+        "deps": { "imports": [], "calls": [] },
+        "detailLevel": "full",
+        "version": { "ledgerVersion": "v1", "astFingerprint": "abc123" },
+        "etag": "et-login",
+        "summary": "Validate credentials and issue session token"
+      },
+      {
+        "symbolId": "s00000002",
+        "repoId": "fixture",
+        "file": "src/auth/session.ts",
+        "range": { "startLine": 5, "startCol": 0, "endLine": 14, "endCol": 1 },
+        "kind": "function",
+        "name": "createSession",
+        "exported": true,
+        "deps": { "imports": [], "calls": [] },
+        "detailLevel": "full",
+        "version": { "ledgerVersion": "v1", "astFingerprint": "abc124" },
+        "etag": "et-session",
+        "summary": "Create signed session token"
+      },
+      {
+        "symbolId": "s00000003",
+        "repoId": "fixture",
+        "file": "src/auth/hash.ts",
+        "range": { "startLine": 1, "startCol": 0, "endLine": 8, "endCol": 1 },
+        "kind": "function",
+        "name": "hashPassword",
+        "exported": true,
+        "deps": { "imports": [], "calls": [] },
+        "detailLevel": "full",
+        "version": { "ledgerVersion": "v1", "astFingerprint": "abc125" },
+        "etag": "et-hash",
+        "summary": "Argon2 password hashing"
+      },
+      {
+        "symbolId": "s00000004",
+        "repoId": "fixture",
+        "file": "src/db/users.ts",
+        "range": { "startLine": 22, "startCol": 0, "endLine": 38, "endCol": 1 },
+        "kind": "function",
+        "name": "getUser",
+        "exported": true,
+        "deps": { "imports": [], "calls": [] },
+        "detailLevel": "full",
+        "version": { "ledgerVersion": "v1", "astFingerprint": "abc126" },
+        "etag": "et-getuser",
+        "summary": "Fetch user by id from DB"
+      },
+      {
+        "symbolId": "s00000005",
+        "repoId": "fixture",
+        "file": "src/db/users.ts",
+        "range": { "startLine": 40, "startCol": 0, "endLine": 55, "endCol": 1 },
+        "kind": "function",
+        "name": "updateUser",
+        "exported": true,
+        "deps": { "imports": [], "calls": [] },
+        "detailLevel": "full",
+        "version": { "ledgerVersion": "v1", "astFingerprint": "abc127" },
+        "etag": "et-updateuser",
+        "summary": "Update user record"
+      },
+      {
+        "symbolId": "s00000006",
+        "repoId": "fixture",
+        "file": "src/db/connection.ts",
+        "range": { "startLine": 3, "startCol": 0, "endLine": 12, "endCol": 1 },
+        "kind": "function",
+        "name": "getConnection",
+        "exported": true,
+        "deps": { "imports": [], "calls": [] },
+        "detailLevel": "full",
+        "version": { "ledgerVersion": "v1", "astFingerprint": "abc128" },
+        "etag": "et-getconn",
+        "summary": "Get pooled DB connection"
+      }
+    ],
+    "edges": [
+      [0, 1, "call", 1],
+      [0, 2, "call", 1],
+      [0, 3, "call", 1],
+      [3, 5, "call", 1],
+      [4, 5, "call", 1]
+    ]
+  },
+  "expected": {
+    "header": "#PACKED/1 tool=slice.build enc=sl1",
+    "encoderId": "sl1",
+    "toolName": "slice.build",
+    "minLegendEntries": 1,
+    "minTableRows": { "c": 6, "e": 5 },
+    "decodedKeys": [
+      "versionId",
+      "sliceVersion",
+      "frontierCount",
+      "cards",
+      "edges"
+    ]
+  }
+}

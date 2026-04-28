@@ -1231,6 +1231,55 @@
         }
       },
       "additionalProperties": false
+    },
+    "wire": {
+      "type": "object",
+      "description": "Wire-format configuration (packed, auto-gate)",
+      "properties": {
+        "packed": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Master switch for packed wire format. Env var SDL_PACKED_ENABLED overrides.",
+              "default": true
+            },
+            "threshold": {
+              "type": "number",
+              "description": "Minimum byte-savings ratio before packed payload is emitted (0.0-1.0). Env var SDL_PACKED_THRESHOLD overrides.",
+              "default": 0.15,
+              "minimum": 0,
+              "maximum": 1
+            },
+            "tokenThreshold": {
+              "type": "number",
+              "description": "Minimum estimated-token-savings ratio before packed payload is emitted (0.0-1.0). Either threshold (bytes OR tokens) is sufficient. Env var SDL_PACKED_TOKEN_THRESHOLD overrides.",
+              "default": 0.3,
+              "minimum": 0,
+              "maximum": 1
+            },
+            "defaultFormat": {
+              "type": "string",
+              "enum": ["packed", "auto", "compact"],
+              "description": "Default wire format when client omits the field. Env var SDL_PACKED_DEFAULT_FORMAT overrides.",
+              "default": "compact"
+            },
+            "encoders": {
+              "type": "object",
+              "description": "Per-encoder enable map keyed by encoderId (sl1, ss1, ctx1, gen1)",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "enabled": { "type": "boolean", "default": true }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

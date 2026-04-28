@@ -14,6 +14,17 @@ export function estimateTokens(text: string): number {
   return Math.ceil(structuralChars + proseChars / PROSE_CHARS_PER_TOKEN);
 }
 
+/**
+ * Token estimate for SDL-MCP packed wire format. Empirical chars/token ratio
+ * is ~3.2 (vs JSON's 3.5) because the packed format strips structural sigils
+ * and interns redundant prefixes. Plain length / 3.2 over-estimates more
+ * conservatively than estimateTokens, so policy caps remain safe.
+ */
+export function estimatePackedTokens(text: string): number {
+  if (!text) return 0;
+  return Math.ceil(text.length / 3.2);
+}
+
 export function calculateRemainingBudget(used: number, total: number): number {
   return Math.max(0, total - used);
 }

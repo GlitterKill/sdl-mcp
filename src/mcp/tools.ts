@@ -260,7 +260,15 @@ const SliceBuildWireFormatSchema = z.enum([
   "readable",
   "compact",
   "agent",
+  "packed",
+  "auto",
 ]);
+/**
+ * Compact wire-format version selector. Versions 1 and 2 were retired in
+ * 0.11.0 — passing them throws WireFormatRetiredError at runtime. Kept as a
+ * Zod literal so the runtime guard fires before payload encoding. Ignored
+ * when wireFormat is "packed" (header carries its own version).
+ */
 const SliceBuildWireFormatVersionSchema = z.union([
   z.literal(1),
   z.literal(2),
@@ -309,47 +317,11 @@ const CompactSymbolMetricsSchema = z.object({
   t: z.array(z.string()).optional(),
 });
 
-const CompactSliceSymbolCardSchema = z.object({
-  sid: z.string(),
-  f: z.string(),
-  r: CompactRangeSchema,
-  k: z.enum([
-    "function",
-    "class",
-    "interface",
-    "type",
-    "module",
-    "method",
-    "constructor",
-    "variable",
-  ]),
-  n: z.string(),
-  x: z.boolean(),
-  v: z
-    .enum(["public", "protected", "private", "exported", "internal"])
-    .optional(),
-  sig: SymbolSignatureSchema.optional(),
-  sum: z.string().optional(),
-  inv: z.array(z.string()).optional(),
-  se: z.array(z.string()).optional(),
-  d: CompactSymbolDepsSchema,
-  cr: z.array(CallResolutionRefSchema).optional(),
-  m: CompactSymbolMetricsSchema.optional(),
-  dl: CardDetailLevelSchema.optional(),
-  af: z.string(),
-});
 
-const CompactSliceCardRefSchema = z.object({
-  sid: z.string(),
-  e: z.string(),
-  dl: CardDetailLevelSchema.optional(),
-});
 
-const CompactFrontierItemSchema = z.object({
-  sid: z.string(),
-  s: z.number(),
-  w: z.string(),
-});
+
+
+
 
 const CompactSliceResumeSchema = z.object({
   t: z.enum(["cursor", "token"]),
@@ -368,22 +340,7 @@ const CompactSliceBudgetSchema = z.object({
   mt: z.number().int().min(1).max(200000),
 });
 
-const CompactGraphSliceSchema = z.object({
-  wf: z.literal("compact"),
-  wv: z.literal(1),
-  rid: z.string(),
-  vid: z.string(),
-  b: CompactSliceBudgetSchema,
-  ss: z.array(z.string()),
-  si: z.array(z.string()),
-  c: z.array(CompactSliceSymbolCardSchema),
-  cr: z.array(CompactSliceCardRefSchema).optional(),
-  e: z.array(CompressedEdgeSchema),
-  f: z.array(CompactFrontierItemSchema).optional(),
-  t: CompactSliceTruncationSchema.optional(),
-  staleSymbols: z.array(z.string()).optional(),
-  memories: z.array(SurfacedMemorySchema).optional(),
-});
+
 
 // ============================================================================
 // Compact Wire Format V2 Schemas
@@ -433,32 +390,9 @@ const CompactSliceCardRefV2Schema = z.object({
   dl: CardDetailLevelSchema.optional(),
 });
 
-const CompactEdgeV2Schema = z.tuple([
-  z.number().int().min(0),
-  z.number().int().min(0),
-  z.number().int().min(0),
-  z.number(),
-]);
 
-const CompactGraphSliceV2Schema = z.object({
-  wf: z.literal("compact"),
-  wv: z.literal(2),
-  rid: z.string().optional(),
-  vid: z.string(),
-  b: CompactSliceBudgetSchema,
-  ss: z.array(z.string()),
-  si: z.array(z.string()),
-  fp: z.array(z.string()),
-  et: z.array(z.string()).optional(),
-  c: z.array(CompactSliceSymbolCardV2Schema),
-  cr: z.array(CompactSliceCardRefV2Schema).optional(),
-  e: z.array(CompactEdgeV2Schema),
-  f: z.array(CompactFrontierItemV2Schema).optional(),
-  t: CompactSliceTruncationSchema.optional(),
-  staleSymbols: z.array(z.string()).optional(),
-  memories: z.array(SurfacedMemorySchema).optional(),
-  _legend: z.record(z.string(), z.string()).optional(),
-});
+
+
 
 // ============================================================================
 // Compact Wire Format V3 Schemas (Grouped Edge Encoding)
@@ -492,7 +426,6 @@ const CompactGraphSliceV3Schema = z.object({
 export {
   CompactGroupedEdgeV3Schema,
   CompactGraphSliceV3Schema,
-  CompactGraphSliceV2Schema,
 };
 
 const DeltaSymbolChangeSchema = z.discriminatedUnion("changeType", [
@@ -937,6 +870,8 @@ export const SymbolSearchRequestSchema = z
     pprDirection: z.enum(["out", "in", "both"]).optional(),
     /** PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default: 2.0 (tuned 2026-04-27). */
     pprWeight: z.number().min(0).max(2).optional(),
+    /** Wire format for the response payload. "packed" emits the SDL-MCP packed wire format (gate-protected); "auto" picks the smaller of packed vs JSON. Falls back to JSON below the savings threshold. */
+    wireFormat: z.enum(["json", "packed", "auto"]).optional(),
   })
   .refine((data) => data.query || data.pattern, {
     message: "Either 'query' or 'pattern' must be provided",
@@ -1288,8 +1223,6 @@ export const SliceBuildResponseSchema = z.union([
     sliceEtag: SliceEtagSchema.optional(),
     slice: z.union([
       GraphSliceSchema,
-      CompactGraphSliceSchema,
-      CompactGraphSliceV2Schema,
       CompactGraphSliceV3Schema,
       z.object({
         wireFormat: z.literal("agent"),
@@ -1299,12 +1232,27 @@ export const SliceBuildResponseSchema = z.union([
         cards: z.array(z.unknown()),
         edges: z.array(z.unknown()),
       }),
+      z.string(),
     ]),
     /** Per-symbol retrieval evidence. Only populated when includeRetrievalEvidence is true. */
     retrievalEvidence: z.array(RetrievalEvidenceItemSchema).optional(),
     /** Symptom type classification. Only populated when includeRetrievalEvidence is true. */
     symptomType: z
       .enum(["stackTrace", "failingTest", "taskText", "editedFiles"])
+      .optional(),
+    /** Packed wire-format telemetry. Only populated when slice was emitted in packed format. */
+    _packedStats: z
+      .object({
+        encoderId: z.string(),
+        jsonBytes: z.number().int().nonnegative(),
+        packedBytes: z.number().int().nonnegative(),
+        jsonTokens: z.number().int().nonnegative().optional(),
+        packedTokens: z.number().int().nonnegative().optional(),
+        savedRatio: z.number(),
+        tokenSavedRatio: z.number().optional(),
+        axisHit: z.enum(["bytes", "tokens"]).optional(),
+        gateDecision: z.enum(["packed", "fallback"]),
+      })
       .optional(),
   }),
   NotModifiedResponseSchema,
@@ -1758,8 +1706,7 @@ export type CardDetailLevelSchemaType = z.infer<typeof CardDetailLevelSchema>;
 export type LegacyCardDetailLevelSchemaType = z.infer<
   typeof _LegacyCardDetailLevelSchema
 >;
-export type CompactGraphSlice = z.infer<typeof CompactGraphSliceSchema>;
-export type CompactGraphSliceV2 = z.infer<typeof CompactGraphSliceV2Schema>;
+
 export type CompactGroupedEdgeV3 = z.infer<typeof CompactGroupedEdgeV3Schema>;
 export type CompactGraphSliceV3 = z.infer<typeof CompactGraphSliceV3Schema>;
 // SliceLease, SliceEtag, NotModifiedResponse — canonical types in domain/types.ts
@@ -1910,6 +1857,8 @@ export type PRRiskAnalysisResponse = z.infer<
 // ============================================================================
 
 export const AgentContextRequestSchema = z.object({
+  /** Wire format for the response payload. "packed" emits packed wire format (gate-protected); "auto" picks the smaller of packed vs JSON. */
+  wireFormat: z.enum(["json", "packed", "auto"]).optional(),
   repoId: z
     .string()
     .min(1)
@@ -2495,6 +2444,12 @@ const ToolUsageEntrySchema = z.object({
   callCount: z.number().int(),
 });
 
+const PackedEncoderUsageEntrySchema = z.object({
+  count: z.number().int().nonnegative(),
+  bytesSaved: z.number().nonnegative(),
+  avgRatio: z.number(),
+});
+
 const SessionUsageSnapshotSchema = z.object({
   sessionId: z.string(),
   startedAt: z.string(),
@@ -2504,6 +2459,12 @@ const SessionUsageSnapshotSchema = z.object({
   overallSavingsPercent: z.number(),
   toolBreakdown: z.array(ToolUsageEntrySchema),
   callCount: z.number().int(),
+  packedEncodings: z.number().int().nonnegative().optional(),
+  packedFallbacks: z.number().int().nonnegative().optional(),
+  packedBytesSaved: z.number().nonnegative().optional(),
+  packedByEncoder: z
+    .record(z.string(), PackedEncoderUsageEntrySchema)
+    .optional(),
 });
 
 const UsageHistorySnapshotSchema = z.object({
@@ -2532,6 +2493,19 @@ export const UsageStatsRequestSchema = z.object({
   persist: z.boolean().optional(),
 });
 
+const PackedEncoderUsageSchema = z.object({
+  count: z.number().int().nonnegative(),
+  bytesSaved: z.number().nonnegative(),
+  avgRatio: z.number(),
+});
+
+const WirePackedSummarySchema = z.object({
+  encodings: z.number().int().nonnegative(),
+  fallbacks: z.number().int().nonnegative(),
+  bytesSaved: z.number().nonnegative(),
+  byEncoder: z.record(z.string(), PackedEncoderUsageSchema),
+});
+
 export const UsageStatsResponseSchema = z.object({
   session: SessionUsageSnapshotSchema.optional(),
   history: z
@@ -2546,6 +2520,11 @@ export const UsageStatsResponseSchema = z.object({
         sessionCount: z.number().int(),
         topToolsBySavings: z.array(TopToolSavingsSchema),
       }),
+    })
+    .optional(),
+  wire: z
+    .object({
+      packed: WirePackedSummarySchema,
     })
     .optional(),
   formattedSummary: z.string().optional(),

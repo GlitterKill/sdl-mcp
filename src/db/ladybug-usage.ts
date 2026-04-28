@@ -29,6 +29,10 @@ export interface UsageSnapshotRow {
   savingsPercent: number;
   callCount: number;
   toolBreakdownJson: string;
+  packedEncodings?: number;
+  packedFallbacks?: number;
+  packedBytesSaved?: number;
+  packedByEncoderJson?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -50,7 +54,11 @@ export async function insertUsageSnapshot(
          u.totalSavedTokens = $totalSavedTokens,
          u.savingsPercent = $savingsPercent,
          u.callCount = $callCount,
-         u.toolBreakdownJson = $toolBreakdownJson`,
+         u.toolBreakdownJson = $toolBreakdownJson,
+         u.packedEncodings = $packedEncodings,
+         u.packedFallbacks = $packedFallbacks,
+         u.packedBytesSaved = $packedBytesSaved,
+         u.packedByEncoderJson = $packedByEncoderJson`,
     {
       snapshotId: row.snapshotId,
       sessionId: row.sessionId,
@@ -62,6 +70,10 @@ export async function insertUsageSnapshot(
       savingsPercent: row.savingsPercent,
       callCount: row.callCount,
       toolBreakdownJson: row.toolBreakdownJson,
+      packedEncodings: row.packedEncodings ?? 0,
+      packedFallbacks: row.packedFallbacks ?? 0,
+      packedBytesSaved: row.packedBytesSaved ?? 0,
+      packedByEncoderJson: row.packedByEncoderJson ?? "{}",
     },
   );
 }
@@ -110,7 +122,11 @@ export async function getUsageSnapshots(
             u.totalSavedTokens AS totalSavedTokens,
             u.savingsPercent AS savingsPercent,
             u.callCount AS callCount,
-            u.toolBreakdownJson AS toolBreakdownJson
+            u.toolBreakdownJson AS toolBreakdownJson,
+            u.packedEncodings AS packedEncodings,
+            u.packedFallbacks AS packedFallbacks,
+            u.packedBytesSaved AS packedBytesSaved,
+            u.packedByEncoderJson AS packedByEncoderJson
      ORDER BY u.timestamp DESC
      LIMIT $limit`,
     { ...params, limit: maxFetch },
@@ -126,6 +142,12 @@ export async function getUsageSnapshots(
       savingsPercent: toNumber(r.savingsPercent),
       callCount: toNumber(r.callCount),
       toolBreakdownJson: String(r.toolBreakdownJson),
+      packedEncodings: r.packedEncodings != null ? toNumber(r.packedEncodings) : 0,
+      packedFallbacks: r.packedFallbacks != null ? toNumber(r.packedFallbacks) : 0,
+      packedBytesSaved:
+        r.packedBytesSaved != null ? toNumber(r.packedBytesSaved) : 0,
+      packedByEncoderJson:
+        r.packedByEncoderJson != null ? String(r.packedByEncoderJson) : "{}",
     })),
   );
 }
@@ -278,6 +300,10 @@ export async function persistUsageSnapshot(
       savingsPercent: snapshot.overallSavingsPercent,
       callCount: snapshot.callCount,
       toolBreakdownJson: JSON.stringify(snapshot.toolBreakdown),
+      packedEncodings: snapshot.packedEncodings ?? 0,
+      packedFallbacks: snapshot.packedFallbacks ?? 0,
+      packedBytesSaved: snapshot.packedBytesSaved ?? 0,
+      packedByEncoderJson: JSON.stringify(snapshot.packedByEncoder ?? {}),
     });
   });
 }
