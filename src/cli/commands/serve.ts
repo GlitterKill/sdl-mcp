@@ -6,7 +6,7 @@ import { setupStdioTransport } from "../transport/stdio.js";
 import { setupHttpTransport } from "../transport/http.js";
 import { configureLogger } from "../logging.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
-import { initGraphDb } from "../../db/initGraphDb.js";
+import { initGraphDb, resolveGraphDbPath } from "../../db/initGraphDb.js";
 import { closeLadybugDb, configurePool } from "../../db/ladybug.js";
 import { persistUsageSnapshot } from "../../db/ladybug-usage.js";
 import { printBanner } from "../../util/banner.js";
@@ -155,7 +155,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     }
   }
 
-  const graphDbPath = await initGraphDb(config, configPath);
+  const graphDbPath = resolveGraphDbPath(config, configPath);
   const graphDbSource = process.env.SDL_GRAPH_DB_DIR
     ? "SDL_GRAPH_DB_DIR"
     : process.env.SDL_GRAPH_DB_PATH
@@ -173,6 +173,16 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     console.error(formatExistingProcessMessage(graphDbPath, existing));
     process.exit(1);
   }
+
+  // Claim the singleton + pidfile BEFORE opening the WAL so two concurrent
+  // stdio servers cannot both open the DB and corrupt it (issue #19).
+  // HTTP transport re-writes the pidfile after listen() with the bound port.
+  const transport: "stdio" | "http" =
+    options.transport === "stdio" ? "stdio" : "http";
+  let pidfilePath: string | undefined = writePidfile(graphDbPath, transport);
+  console.error(`PID file written: ${pidfilePath}`);
+
+  await initGraphDb(config, configPath);
 
   await ensureConfiguredReposRegistered(config, (message) => {
     console.error(message);
@@ -252,17 +262,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   // Create session manager for HTTP transport
   const sessionManager = new SessionManager(concurrency?.maxSessions ?? 8);
 
-  // Determine transport type and write PID file for process discovery.
-  // For HTTP transport, the pidfile is written after the server starts so we
-  // can record the actual bound port (e.g. when port 0 is requested).
-  const transport: "stdio" | "http" =
-    options.transport === "stdio" ? "stdio" : "http";
   const httpPort = options.port ?? 3000;
-  let pidfilePath: string | undefined;
-  if (transport === "stdio") {
-    pidfilePath = writePidfile(graphDbPath, transport);
-    console.error(`PID file written: ${pidfilePath}`);
-  }
 
   // Set up centralized shutdown manager.
   const shutdownMgr = new ShutdownManager({

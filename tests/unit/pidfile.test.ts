@@ -204,4 +204,45 @@ describe("pidfile", () => {
       assert.strictEqual(data.pid, process.pid);
     });
   });
+
+  describe("writePidfile EEXIST race (issue #19)", () => {
+    it("two concurrent processes claiming the same pidfile: exactly one wins", async () => {
+      const { spawn } = await import("node:child_process");
+      const distPidfile = new URL("../../dist/util/pidfile.js", import.meta.url).pathname;
+      // On Windows the URL.pathname has a leading slash before the drive letter.
+      const pidfileModule = process.platform === "win32" && distPidfile.startsWith("/")
+        ? distPidfile.slice(1)
+        : distPidfile;
+
+      const driver = `
+        import { writePidfile } from ${JSON.stringify("file:///" + pidfileModule.replace(/\\\\/g, "/"))};
+        // Tiny startup jitter so both children reach writeFileSync within the same tick.
+        await new Promise((r) => setTimeout(r, 5));
+        try {
+          writePidfile(${JSON.stringify(fakeDbPath)}, "stdio");
+          // Hold the pidfile briefly so the loser does not see us exit (and become \"stale\").
+          await new Promise((r) => setTimeout(r, 200));
+          process.exit(0);
+        } catch (err) {
+          console.error(err instanceof Error ? err.message : String(err));
+          process.exit(2);
+        }
+      `;
+
+      const runOne = () => new Promise<number>((resolve) => {
+        const child = spawn(
+          process.execPath,
+          ["--input-type=module", "-e", driver],
+          { stdio: ["ignore", "ignore", "pipe"] },
+        );
+        child.on("exit", (code) => resolve(code ?? -1));
+      });
+
+      const [a, b] = await Promise.all([runOne(), runOne()]);
+      const winners = [a, b].filter((c) => c === 0).length;
+      const losers = [a, b].filter((c) => c === 2).length;
+      assert.strictEqual(winners, 1, `expected exactly one winner, got codes ${a} and ${b}`);
+      assert.strictEqual(losers, 1, `expected exactly one loser, got codes ${a} and ${b}`);
+    });
+  });
 });

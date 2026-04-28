@@ -169,7 +169,25 @@ export function writePidfile(
     startedAt: new Date().toISOString(),
   };
 
-  writeFileSync(pidfilePath, JSON.stringify(data, null, 2) + "\n", "utf8");
+  const serialized = JSON.stringify(data, null, 2) + "\n";
+  try {
+    writeFileSync(pidfilePath, serialized, { flag: "wx", encoding: "utf8" });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    const racer = readPidfile(pidfilePath);
+    if (
+      racer &&
+      isProcessAlive(racer.pid) &&
+      racer.pid !== process.pid
+    ) {
+      throw new Error(
+        `Another SDL-MCP server (PID ${racer.pid}) is already running ` +
+          `for this database directory. ` +
+          formatPidfileDirectoryGuidance(graphDbPath),
+      );
+    }
+    writeFileSync(pidfilePath, serialized, "utf8");
+  }
   // Restrict permissions since the file may contain an auth token
   try { chmodSync(pidfilePath, 0o600); } catch { /* Best-effort on Windows */ }
   return pidfilePath;

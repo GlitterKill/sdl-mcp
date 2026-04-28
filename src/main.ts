@@ -2,7 +2,7 @@ import { MCPServer } from "./server.js";
 import { ConfigError, DatabaseError } from "./domain/errors.js";
 import { loadConfig } from "./config/loadConfig.js";
 import { activateCliConfigPath } from "./config/configPath.js";
-import { initGraphDb } from "./db/initGraphDb.js";
+import { initGraphDb, resolveGraphDbPath } from "./db/initGraphDb.js";
 import { closeLadybugDb } from "./db/ladybug.js";
 import { persistUsageSnapshot } from "./db/ladybug-usage.js";
 import { tokenAccumulator } from "./mcp/token-accumulator.js";
@@ -90,22 +90,23 @@ async function main(): Promise<void> {
     const resolvedConfigPath = activateCliConfigPath(process.env.SDL_CONFIG);
     const config = loadConfig(resolvedConfigPath);
 
-    const graphDbPath = await initGraphDb(config, resolvedConfigPath);
-    log(`Graph database initialized at ${graphDbPath}`);
+    const graphDbPath = resolveGraphDbPath(config, resolvedConfigPath);
 
-    // Check for an existing live server process (stale PIDs are auto-cleaned).
+    // Claim the singleton + pidfile BEFORE opening the WAL so two concurrent
+    // stdio servers cannot both open the DB and corrupt it (issue #19).
     const existing = findExistingProcess(graphDbPath);
     if (existing) {
       log(formatExistingProcessMessage(graphDbPath, existing));
       process.exit(1);
     }
-
-    await ensureConfiguredReposRegistered(config, log);
-
-    // Write PID file for process discovery / reuse.
     const pidfilePath = writePidfile(graphDbPath, "stdio");
     shutdownMgr.setPidfilePath(pidfilePath);
     log(`PID file written: ${pidfilePath}`);
+
+    await initGraphDb(config, resolvedConfigPath);
+    log(`Graph database initialized at ${graphDbPath}`);
+
+    await ensureConfiguredReposRegistered(config, log);
 
     // Dynamic imports AFTER migrations - these modules prepare SQL statements
     log("Registering MCP tools...");
