@@ -5,7 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.11.0] - unreleased
+## [0.10.10] - 2026-04-28
+
+### Fixed
+
+- **`sdl-mcp init` now respects `CLAUDE_CONFIG_DIR` and resolves the home
+  directory cross-platform.** `detectInstalledClients` previously used the
+  Windows-only `process.env.USERPROFILE`, so detection on macOS/Linux
+  silently produced CWD-relative garbage paths and never matched anything;
+  it also ignored `CLAUDE_CONFIG_DIR`, so install instructions always
+  pointed at `~/.claude` even when the user had redirected it. Falls back
+  to `os.homedir()` when `USERPROFILE` is unset and honors
+  `CLAUDE_CONFIG_DIR`. (#17)
+- **Concurrent `serve --stdio` no longer corrupts the LadybugDB WAL.** Two
+  processes starting simultaneously (e.g. two Claude Code windows) could
+  both open the WAL before the pidfile singleton guard fired, corrupting
+  it on the next checkpoint. Both call sites (`src/main.ts` and
+  `src/cli/commands/serve.ts`) now resolve the graph DB path, run
+  `findExistingProcess`, and `writePidfile` to atomically claim the
+  singleton _before_ `initGraphDb`. `writePidfile` additionally writes
+  with `flag: "wx"` and recovers from `EEXIST` by re-reading the file,
+  closing the check-then-write TOCTOU window if call-site ordering ever
+  regresses. (#19)
+- **Pidfile is removed when startup fails.** Code-review follow-up to the
+  WAL race fix: after reordering `writePidfile` ahead of `initGraphDb`,
+  startup throwing later (initGraphDb, watcher start, etc.) left the
+  pidfile on disk because the `catch` handlers in `main.ts` and `serve.ts`
+  exit without invoking `shutdownMgr.shutdown()`. `pidfilePath` is now
+  hoisted so the catch handler can `removePidfile()` on failure,
+  eliminating the operator-confusion + PID-reuse window. (#19)
 
 ### Token-aware gate
 
