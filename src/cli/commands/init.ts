@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from "fs";
 import { basename, dirname, join, resolve } from "path";
+import { homedir } from "node:os";
 import { createInterface } from "readline";
 import { fileURLToPath } from "url";
 import {
@@ -978,15 +979,35 @@ function buildGenericClientConfig(configPath: string): string {
   );
 }
 
-type ClientDetection = {
+export type ClientDetection = {
   name: string;
   configPath: string;
   templateClient?: ClientType;
 };
 
-function detectInstalledClients(): ClientDetection[] {
-  const userProfile = process.env.USERPROFILE ?? "";
+export function detectInstalledClients(): ClientDetection[] {
+  // USERPROFILE is Windows-only — fall back to homedir() so detection works on macOS/Linux.
+  const userProfile = process.env.USERPROFILE ?? homedir();
   const appData = process.env.APPDATA ?? "";
+  // CLAUDE_CONFIG_DIR overrides ~/.claude when set (issue #17). When set, it is
+  // authoritative — we do NOT fall through to legacy paths, since users set this
+  // env var precisely to redirect Claude Code config away from ~/.claude. The
+  // value may be a comma-separated list per upstream Claude Code semantics.
+  const claudeConfigDirs = (process.env.CLAUDE_CONFIG_DIR ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const claudeCandidates: string[] =
+    claudeConfigDirs.length > 0
+      ? claudeConfigDirs.flatMap((dir) => [
+          join(dir, ".claude.json"),
+          join(dir, "settings.json"),
+        ])
+      : [
+          join(userProfile, ".claude.json"),
+          join(userProfile, ".claude", "settings.json"),
+          join(appData, "Claude", "claude_desktop_config.json"),
+        ];
   const detections: Array<{
     name: string;
     templateClient?: ClientType;
@@ -995,11 +1016,7 @@ function detectInstalledClients(): ClientDetection[] {
     {
       name: "claude-code",
       templateClient: "claude-code",
-      candidates: [
-        join(userProfile, ".claude.json"),
-        join(userProfile, ".claude", "settings.json"),
-        join(appData, "Claude", "claude_desktop_config.json"),
-      ],
+      candidates: claudeCandidates,
     },
     {
       name: "cursor",
@@ -1038,6 +1055,19 @@ function detectInstalledClients(): ClientDetection[] {
         configPath: normalizePath(hit),
       });
     }
+  }
+  // CLAUDE_CONFIG_DIR is set but no Claude Code config exists there yet — surface
+  // the env-var location as the intended install target so instructions point at
+  // the right place instead of falling back to manual-config (issue #17).
+  if (
+    claudeConfigDirs.length > 0 &&
+    !installed.some((d) => d.name === "claude-code")
+  ) {
+    installed.push({
+      name: "claude-code",
+      templateClient: "claude-code",
+      configPath: normalizePath(join(claudeConfigDirs[0], "settings.json")),
+    });
   }
   if (installed.length === 0) {
     installed.push({
