@@ -1,5 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert";
+import { createServer } from "http";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -78,6 +79,74 @@ describe("CLI index command", () => {
       const g: CLIOptions = { config: "/path/to/config.json" };
       const options = parseIndexOptions([], g, {});
       assert.strictEqual(options.config, "/path/to/config.json");
+    });
+  });
+
+  describe("delegation decision", () => {
+    it("allows HTTP delegation without an auth token when HTTP auth is disabled", async () => {
+      const { canDelegateIndexToServer } = await import(
+        "../../dist/cli/commands/index.js"
+      );
+
+      assert.strictEqual(
+        canDelegateIndexToServer(
+          {
+            pid: process.pid,
+            transport: "http",
+            port: 3000,
+            startedAt: new Date().toISOString(),
+          },
+          false,
+        ),
+        true,
+      );
+    });
+
+    it("requires an auth token when HTTP auth is enabled", async () => {
+      const { canDelegateIndexToServer } = await import(
+        "../../dist/cli/commands/index.js"
+      );
+      const server = {
+        pid: process.pid,
+        transport: "http" as const,
+        port: 3000,
+        startedAt: new Date().toISOString(),
+      };
+
+      assert.strictEqual(canDelegateIndexToServer(server, true), false);
+      assert.strictEqual(
+        canDelegateIndexToServer({ ...server, authToken: "secret" }, true),
+        true,
+      );
+    });
+
+    it("rejects non-HTTP pidfiles and HTTP pidfiles without a port", async () => {
+      const { canDelegateIndexToServer } = await import(
+        "../../dist/cli/commands/index.js"
+      );
+
+      assert.strictEqual(
+        canDelegateIndexToServer(
+          {
+            pid: process.pid,
+            transport: "stdio",
+            startedAt: new Date().toISOString(),
+          },
+          false,
+        ),
+        false,
+      );
+      assert.strictEqual(
+        canDelegateIndexToServer(
+          {
+            pid: process.pid,
+            transport: "http",
+            startedAt: new Date().toISOString(),
+          },
+          false,
+        ),
+        false,
+      );
     });
   });
 
@@ -316,6 +385,112 @@ describe("CLI index command", () => {
           "Command should have either logged or thrown",
         );
       }
+    });
+
+    it("delegates indexing to an auth-disabled HTTP server", async () => {
+      const dir = join(tempDir, "delegate-no-auth");
+      const repoRoot = join(dir, "repo");
+      mkdirSync(repoRoot, { recursive: true });
+      const configPath = join(dir, "sdlmcp.config.json");
+      const ladybugPath = join(dir, "sdl-mcp-graph.lbug");
+
+      writeFileSync(
+        configPath,
+        JSON.stringify({
+          repos: [{ repoId: "test-repo", rootPath: repoRoot }],
+          dbPath: join(dir, "sdlmcp.sqlite"),
+          graphDatabase: { path: ladybugPath },
+          policy: {
+            maxWindowLines: 180,
+            maxWindowTokens: 1400,
+            requireIdentifiers: true,
+            allowBreakGlass: false,
+            defaultDenyRaw: true,
+          },
+          httpAuth: { enabled: false, token: null },
+        }),
+      );
+
+      let receivedPath = "";
+      let receivedBody = "";
+      let receivedAuthorization: string | undefined;
+      const server = createServer((req, res) => {
+        receivedPath = req.url ?? "";
+        receivedAuthorization = req.headers.authorization;
+        req.setEncoding("utf8");
+        req.on("data", (chunk: string) => {
+          receivedBody += chunk;
+        });
+        req.on("end", () => {
+          res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "close",
+          });
+          res.write("event: complete\n");
+          res.write(
+            `data: ${JSON.stringify({
+              filesProcessed: 0,
+              symbolsIndexed: 0,
+              totalSymbols: 0,
+              edgesCreated: 0,
+              totalEdges: 0,
+              durationMs: 1,
+            })}\n\n`,
+          );
+          res.end();
+        });
+      });
+
+      await new Promise<void>((resolve) => server.listen(0, resolve));
+      const address = server.address();
+      assert.ok(address && typeof address === "object");
+
+      const { closeLadybugDb } = await import("../../dist/db/ladybug.js");
+      const { indexCommand } = await import(
+        "../../dist/cli/commands/index.js"
+      );
+      const { writePidfile } = await import("../../dist/util/pidfile.js");
+      writePidfile(ladybugPath, "http", address.port);
+
+      const originalGraphDbPath = process.env.SDL_GRAPH_DB_PATH;
+      const originalGraphDbDir = process.env.SDL_GRAPH_DB_DIR;
+      const origLog = console.log;
+      const origError = console.error;
+      delete process.env.SDL_GRAPH_DB_PATH;
+      delete process.env.SDL_GRAPH_DB_DIR;
+      console.log = () => {};
+      console.error = () => {};
+
+      try {
+        await indexCommand({ config: configPath, repoId: "test-repo" });
+      } finally {
+        if (originalGraphDbPath === undefined) {
+          delete process.env.SDL_GRAPH_DB_PATH;
+        } else {
+          process.env.SDL_GRAPH_DB_PATH = originalGraphDbPath;
+        }
+        if (originalGraphDbDir === undefined) {
+          delete process.env.SDL_GRAPH_DB_DIR;
+        } else {
+          process.env.SDL_GRAPH_DB_DIR = originalGraphDbDir;
+        }
+        console.log = origLog;
+        console.error = origError;
+        await closeLadybugDb();
+        await new Promise<void>((resolve, reject) => {
+          server.close((err) => (err ? reject(err) : resolve()));
+        });
+      }
+
+      assert.strictEqual(
+        receivedPath,
+        "/api/repo/test-repo/reindex-stream",
+      );
+      assert.strictEqual(receivedAuthorization, undefined);
+      assert.deepStrictEqual(JSON.parse(receivedBody), {
+        mode: "incremental",
+      });
     });
   });
 });

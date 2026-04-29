@@ -306,6 +306,12 @@ async function delegateIndexToServer(
 
   const progressState = createProgressState();
   let completed = false;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (server.authToken) {
+    headers.Authorization = `Bearer ${server.authToken}`;
+  }
 
   try {
     await connectSSE({
@@ -313,10 +319,7 @@ async function delegateIndexToServer(
       port: server.port!,
       path: `/api/repo/${encodeURIComponent(repoId)}/reindex-stream`,
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${server.authToken}`,
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify({ mode }),
       onEvent: (evt: SSEEvent) => {
         if (evt.event === "progress") {
@@ -417,6 +420,23 @@ async function cleanupOneShotIndexing(
   }
 }
 
+export function canDelegateIndexToServer(
+  existing: PidfileData | null,
+  httpAuthEnabled: boolean,
+): existing is PidfileData & { transport: "http"; port: number } {
+  if (!existing || existing.transport !== "http" || existing.port == null) {
+    return false;
+  }
+
+  // Auth-disabled HTTP servers intentionally omit authToken from the pidfile.
+  // Delegating avoids opening LadybugDB directly while the server owns the lock.
+  if (!httpAuthEnabled) {
+    return true;
+  }
+
+  return typeof existing.authToken === "string" && existing.authToken.length > 0;
+}
+
 export async function indexCommand(options: IndexOptions): Promise<void> {
   printBanner();
 
@@ -427,11 +447,10 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
   const graphDbPath = resolveGraphDbPath(config, configPath);
   const existing = findExistingProcess(graphDbPath);
 
-  const canDelegate =
-    existing &&
-    existing.transport === "http" &&
-    existing.port != null &&
-    existing.authToken != null;
+  const canDelegate = canDelegateIndexToServer(
+    existing,
+    config.httpAuth?.enabled === true,
+  );
 
   if (canDelegate) {
     console.log(
