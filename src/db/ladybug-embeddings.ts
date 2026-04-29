@@ -3,6 +3,7 @@
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
 import type { Connection } from "kuzu";
+import { getObservabilityTap } from "../observability/event-tap.js";
 import {
   exec,
   queryAll,
@@ -142,6 +143,7 @@ export async function getSummaryCache(
   conn: Connection,
   symbolId: string,
 ): Promise<SummaryCacheRow | null> {
+  const t0 = performance.now();
   const row = await querySingle<{
     symbolId: string;
     summary: string;
@@ -165,6 +167,7 @@ export async function getSummaryCache(
     { symbolId },
   );
 
+  emitSummaryCacheLookup(row !== null, t0);
   if (!row) return null;
 
   return {
@@ -466,4 +469,16 @@ export async function deleteSymbolReferencesByFileId(
      DELETE sr`,
     { fileId },
   );
+}
+
+function emitSummaryCacheLookup(hit: boolean, t0: number): void {
+  try {
+    getObservabilityTap()?.cacheLookup({
+      source: "summary",
+      hit,
+      latencyMs: performance.now() - t0,
+    });
+  } catch {
+    // observability is best-effort
+  }
 }

@@ -23,6 +23,7 @@ import { withIndexingGate } from "../mcp/indexing-gate.js";
 
 import type { IndexWatchHandle, WatcherHealth } from "./indexer.js";
 import { logger } from "../util/logger.js";
+import { logWatcherHealthTelemetry } from "../mcp/telemetry.js";
 
 // Local interface for chokidar FSWatcher to avoid 'as any' casts
 
@@ -489,6 +490,20 @@ export async function watchRepositoryWithIndexer(
     }
     const stale = isWatcherStale(health);
     health.stale = stale;
+    try {
+      logWatcherHealthTelemetry({
+        repoId,
+        enabled: health.enabled,
+        running: health.running,
+        stale: health.stale,
+        errors: health.errors,
+        queueDepth: health.queueDepth,
+        eventsReceived: health.eventsReceived,
+        eventsProcessed: health.eventsProcessed,
+      });
+    } catch {
+      // observability is best-effort
+    }
     if (stale) {
       const staleMsg = `[sdl-mcp] Watcher stale detected for ${repoId}: pending=${health.pendingChanges}, queueDepth=${health.queueDepth}`;
       recordWatcherError(staleMsg);

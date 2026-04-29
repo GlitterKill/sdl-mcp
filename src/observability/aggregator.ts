@@ -173,6 +173,8 @@ export class Aggregator {
   >();
   private indexEngineRust = 0;
   private indexEngineTs = 0;
+  private lastIndexEdges = 0;
+  private lastIndexErrors = 0;
   private indexFilesPerMinuteRing: RingBuffer<IndexEventRec>;
   private indexDerivedStateLagMs: number | null = null;
 
@@ -399,6 +401,14 @@ export class Aggregator {
       language: anyEvt.language,
       engine: anyEvt.engine,
     });
+    if (event.stats) {
+      if (Number.isFinite(event.stats.edgesExtracted)) {
+        this.lastIndexEdges = event.stats.edgesExtracted;
+      }
+      if (Number.isFinite(event.stats.errors)) {
+        this.lastIndexErrors = event.stats.errors;
+      }
+    }
     this.filesPerMinShort.push(files);
     this.filesPerMinLong.push(files);
   }
@@ -600,9 +610,15 @@ export class Aggregator {
    * via recordHealth(). Called periodically by ObservabilityService.tick().
    *
    * Components are 0..1 each. Score is a weighted-average × 100, rounded.
-   * Placeholder values (1.0) are used for components that don't yet have
-   * raw signals plumbed; refine when coverage/edgeQuality/callResolution
-   * event taps are added.
+   *
+   * Signals:
+   * - freshness: derived from indexDerivedStateLagMs (60s saturation).
+   * - errorRate: 1 - (tool-call errors / total) over short ring.
+   * - coverage: 1 - (indexFailures / indexEventTotal).
+   * - edgeQuality: 1 - (lastIndexErrors / lastIndexEdges) from most recent
+   *   IndexEvent stats; defaults to 1.0 before any indexing has run.
+   * - callResolution: 1 - (retrievalEmpty / retrievalTotal); defaults to 1.0
+   *   before any retrieval has run.
    */
   computeAndRecordHealth(): void {
     const lagMs = this.indexDerivedStateLagMs ?? 0;
@@ -620,8 +636,15 @@ export class Aggregator {
       this.indexEventTotal === 0 ? 0 : this.indexFailures / this.indexEventTotal;
     const coverage = Math.max(0, 1 - failureRatio);
 
-    const edgeQuality = 1.0;
-    const callResolution = 1.0;
+    const edgeQuality =
+      this.lastIndexEdges > 0
+        ? Math.max(0, 1 - this.lastIndexErrors / this.lastIndexEdges)
+        : 1.0;
+
+    const callResolution =
+      this.retrievalTotal === 0
+        ? 1.0
+        : Math.max(0, 1 - this.retrievalEmpty / this.retrievalTotal);
 
     const components = { freshness, coverage, errorRate, edgeQuality, callResolution };
     const score = Math.round(

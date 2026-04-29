@@ -1,6 +1,8 @@
 const MAX_ETAG_CACHE_SIZE = 2000;
 const MAX_KNOWN_CARD_ETAGS = 1000;
 
+import { getObservabilityTap } from "../observability/event-tap.js";
+
 export class WorkflowEtagCache {
   private cache: Map<string, string> = new Map();
 
@@ -13,7 +15,10 @@ export class WorkflowEtagCache {
         const knownEtags: Record<string, string> = {};
         let found = false;
         for (const id of symbolIds) {
-          if (typeof id === "string" && this.cache.has(id)) {
+          const t0 = performance.now();
+          const has = typeof id === "string" && this.cache.has(id);
+          emitEtagCacheLookup(has, t0);
+          if (has) {
             knownEtags[id] = this.cache.get(id)!;
             found = true;
           }
@@ -24,12 +29,13 @@ export class WorkflowEtagCache {
       } else {
         // Handle single symbolId format
         const symbolId = args.symbolId;
-        if (
-          typeof symbolId === "string"
-          && this.cache.has(symbolId)
-          && !args.ifNoneMatch
-        ) {
-          args.ifNoneMatch = this.cache.get(symbolId);
+        if (typeof symbolId === "string") {
+          const t0 = performance.now();
+          const has = this.cache.has(symbolId);
+          emitEtagCacheLookup(has, t0);
+          if (has && !args.ifNoneMatch) {
+            args.ifNoneMatch = this.cache.get(symbolId);
+          }
         }
       }
     } else if (action === "slice.build" && !args.knownCardEtags) {
@@ -148,5 +154,17 @@ export class WorkflowEtagCache {
       this.cache.set(key, value);
       this.evictIfNeeded();
     }
+  }
+}
+
+function emitEtagCacheLookup(hit: boolean, t0: number): void {
+  try {
+    getObservabilityTap()?.cacheLookup({
+      source: "etag",
+      hit,
+      latencyMs: performance.now() - t0,
+    });
+  } catch {
+    // observability is best-effort
   }
 }
