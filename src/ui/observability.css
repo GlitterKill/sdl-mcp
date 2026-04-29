@@ -383,6 +383,13 @@ input:focus {
 /* Stack bar (multi-segment) */
 .stack-bar {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+}
+
+.stack-track {
+  display: flex;
   height: 10px;
   background: rgba(0, 240, 255, 0.08);
   border-radius: var(--r-sm);

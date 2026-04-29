@@ -140,7 +140,7 @@ function renderStackBar(container, segments) {
         `<span><i style="background:${legendColor(s.key)}"></i>${escapeHtml(s.key.toUpperCase())} ${fmtPct((s.value / total) * 100, 0)}</span>`,
     )
     .join("")}</div>`;
-  container.innerHTML = segHtml + legendHtml;
+  container.innerHTML = `<div class="stack-track">${segHtml}</div>` + legendHtml;
 }
 
 function legendColor(key) {

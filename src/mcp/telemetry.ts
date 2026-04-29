@@ -25,6 +25,8 @@ export interface ToolCallEvent {
   durationMs: number;
   repoId?: RepoId;
   symbolId?: SymbolId;
+  tokensUsed?: number;
+  tokensSaved?: number;
 }
 
 export interface CodeWindowDecisionEvent {

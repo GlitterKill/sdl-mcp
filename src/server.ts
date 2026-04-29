@@ -240,6 +240,8 @@ export class MCPServer {
             // Inject _tokenUsage and strip _rawContext before serialization
             let finalResult = result;
             let capturedUsage: TokenUsageMetadata | undefined;
+            let tokensUsedForObs: number | undefined;
+            let tokensSavedForObs: number | undefined;
             if (result && typeof result === "object") {
               const r = result as Record<string, unknown>;
               if (shouldAttachUsage(request.params.name) && r._rawContext) {
@@ -253,6 +255,8 @@ export class MCPServer {
                   usage.sdlTokens,
                   usage.rawEquivalent,
                 );
+                tokensUsedForObs = usage.sdlTokens;
+                tokensSavedForObs = Math.max(0, usage.rawEquivalent - usage.sdlTokens);
                 // Send per-call savings notification to user (MCP logging)
                 void toolContext
                   .sendNotification({
@@ -280,6 +284,8 @@ export class MCPServer {
                   r.totalTokens,
                   r.totalTokens,
                 );
+                tokensUsedForObs = r.totalTokens;
+                tokensSavedForObs = 0;
               }
 
               // Send human-readable tool call summary to user (MCP logging)
@@ -385,6 +391,8 @@ export class MCPServer {
               durationMs: Date.now() - start,
               repoId,
               symbolId,
+              tokensUsed: tokensUsedForObs,
+              tokensSaved: tokensSavedForObs,
             });
             const footerLines: string[] = [];
             if (capturedUsage && capturedUsage.sdlTokens < capturedUsage.rawEquivalent) {
