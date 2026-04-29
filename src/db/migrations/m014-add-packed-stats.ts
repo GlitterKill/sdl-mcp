@@ -32,7 +32,9 @@ export async function up(conn: Connection): Promise<void> {
       await execDdl(conn, ddl);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (/already exists|duplicate column/i.test(msg)) continue;
+      if (/already exists|already has property|duplicate column/i.test(msg)) {
+        continue;
+      }
       throw err;
     }
   }

@@ -13,6 +13,7 @@ import type { Connection } from "kuzu";
  *   - Fresh DBs created after the base-schema fix (columns already present
  *     from createBaseSchema → ALTER raises duplicate column → ignored).
  *   - DBs that legitimately upgraded through m014 (same path).
+ *   - Historical minimal fixtures/DBs without UsageSnapshot (no table to heal).
  *
  * It is only load-bearing for the narrow window of DBs that hit the drift.
  */
@@ -22,6 +23,10 @@ export const description =
   "Backfill packed-wire-format columns on UsageSnapshot for drifted v14 DBs";
 
 export async function up(conn: Connection): Promise<void> {
+  if (!(await tableExists(conn, "UsageSnapshot"))) {
+    return;
+  }
+
   const ddls = [
     "ALTER TABLE UsageSnapshot ADD packedEncodings INT64 DEFAULT 0",
     "ALTER TABLE UsageSnapshot ADD packedFallbacks INT64 DEFAULT 0",
@@ -34,9 +39,29 @@ export async function up(conn: Connection): Promise<void> {
       await execDdl(conn, ddl);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (/already exists|duplicate column/i.test(msg)) continue;
+      if (/already exists|already has property|duplicate column/i.test(msg)) {
+        continue;
+      }
       throw err;
     }
+  }
+}
+
+async function tableExists(conn: Connection, name: string): Promise<boolean> {
+  try {
+    const result = await conn.query(`CALL show_tables() RETURN name`);
+    let exists = false;
+    while (await result.hasNext()) {
+      const row = (await result.getNext()) as { name?: unknown };
+      if (row && String(row.name) === name) {
+        exists = true;
+        break;
+      }
+    }
+    result.close();
+    return exists;
+  } catch {
+    return false;
   }
 }
 

@@ -100,7 +100,9 @@ describe("LadybugDB Schema", () => {
     it("should export schema version", async () => {
       const { LADYBUG_SCHEMA_VERSION } =
         await import("../../dist/db/ladybug-schema.js");
-      assert.strictEqual(LADYBUG_SCHEMA_VERSION, 14);
+      const { LADYBUG_SCHEMA_VERSION: MIGRATION_SCHEMA_VERSION } =
+        await import("../../dist/db/migrations/index.js");
+      assert.strictEqual(LADYBUG_SCHEMA_VERSION, MIGRATION_SCHEMA_VERSION);
     });
   });
 
