@@ -18,6 +18,7 @@ import * as m011 from "./m011-add-centrality-and-shadow-clusters.js";
 import * as m012 from "./m012-add-symbol-repo-id-for-algo-projections.js";
 import * as m013 from "./m013-semantic-vector-array-storage.js";
 import * as m014 from "./m014-add-packed-stats.js";
+import * as m015 from "./m015-backfill-packed-stats.js";
 
 /** Ordered list of all migrations. Must be sorted by version ascending. */
 export const migrations: Migration[] = [
@@ -31,6 +32,7 @@ export const migrations: Migration[] = [
   m012,
   m013,
   m014,
+  m015,
 ];
 
 // --- Registry validation (runs at import time) ---

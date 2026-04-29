@@ -298,7 +298,11 @@ const NODE_TABLES: string[] = [
     totalSavedTokens INT64,
     savingsPercent DOUBLE,
     callCount INT64,
-    toolBreakdownJson STRING
+    toolBreakdownJson STRING,
+    packedEncodings INT64 DEFAULT 0,
+    packedFallbacks INT64 DEFAULT 0,
+    packedBytesSaved INT64 DEFAULT 0,
+    packedByEncoderJson STRING DEFAULT '{}'
   )`,
 
   `CREATE NODE TABLE IF NOT EXISTS SchemaVersion (
