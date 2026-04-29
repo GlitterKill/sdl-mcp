@@ -471,6 +471,8 @@ export class ObservabilityService implements ObservabilityTap {
         source: event.source,
         hit: event.hit,
         latencyMs: event.latencyMs,
+        count: event.count,
+        hits: event.hits,
       });
     } catch (err) {
       this.logWarn("cacheLookup failed", err);

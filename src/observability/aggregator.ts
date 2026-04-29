@@ -53,6 +53,10 @@ interface CacheOutcomeRec {
   source: string;
   hit: boolean;
   latencyMs: number;
+  /** Optional batch fields. When `count` is set (>1), `hits` provides the
+   *  number of hits within the batch; the remainder are misses. */
+  count?: number;
+  hits?: number;
 }
 
 interface IndexEventRec {
@@ -296,26 +300,33 @@ export class Aggregator {
   /* ---------------------- recording ---------------------- */
 
   recordCacheOutcome(rec: CacheOutcomeRec): void {
-    if (rec.hit) this.cacheTotalHits += 1;
-    else this.cacheTotalMisses += 1;
+    const count = rec.count !== undefined && rec.count > 0 ? rec.count : 1;
+    const hits =
+      rec.hits !== undefined
+        ? Math.max(0, Math.min(count, rec.hits))
+        : rec.hit
+          ? count
+          : 0;
+    const misses = count - hits;
+    this.cacheTotalHits += hits;
+    this.cacheTotalMisses += misses;
     if (Number.isFinite(rec.latencyMs) && rec.latencyMs >= 0) {
       this.cacheLatencySum += rec.latencyMs;
-      this.cacheLatencyCount += 1;
+      this.cacheLatencyCount += count;
     }
     let bucket = this.cachePerSource.get(rec.source);
     if (!bucket) {
       bucket = { hits: 0, misses: 0, latencySum: 0, latencyCount: 0 };
       this.cachePerSource.set(rec.source, bucket);
     }
-    if (rec.hit) bucket.hits += 1;
-    else bucket.misses += 1;
+    bucket.hits += hits;
+    bucket.misses += misses;
     if (Number.isFinite(rec.latencyMs) && rec.latencyMs >= 0) {
       bucket.latencySum += rec.latencyMs;
-      bucket.latencyCount += 1;
+      bucket.latencyCount += count;
     }
-    const total = (rec.hit ? 1 : 0) + (rec.hit ? 0 : 1);
-    this.cacheHitRateShort.push({ hit: rec.hit ? 1 : 0, total });
-    this.cacheHitRateLong.push({ hit: rec.hit ? 1 : 0, total });
+    this.cacheHitRateShort.push({ hit: hits, total: count });
+    this.cacheHitRateLong.push({ hit: hits, total: count });
   }
 
   recordToolCall(

@@ -69,8 +69,15 @@ export interface ResourceSampleTapEvent {
 export interface CacheLookupTapEvent {
   repoId?: string;
   source: "card" | "slice" | "summary" | "symbol-map" | "etag";
+  /**
+   * For single-lookup events, set `hit` and leave `count`/`hits` undefined.
+   * For batch events, set `count` (total lookups) and `hits` (subset that hit);
+   * `hit` is then ignored. `latencyMs` is the wall-clock for the full batch.
+   */
   hit: boolean;
   latencyMs: number;
+  count?: number;
+  hits?: number;
 }
 
 export interface SliceBuildTapEvent {

@@ -14,15 +14,20 @@ export class WorkflowEtagCache {
       if (Array.isArray(symbolIds) && !args.knownEtags) {
         const knownEtags: Record<string, string> = {};
         let found = false;
+        let hits = 0;
+        let count = 0;
+        const t0 = performance.now();
         for (const id of symbolIds) {
-          const t0 = performance.now();
-          const has = typeof id === "string" && this.cache.has(id);
-          emitEtagCacheLookup(has, t0);
-          if (has) {
-            knownEtags[id] = this.cache.get(id)!;
-            found = true;
+          if (typeof id === "string") {
+            count++;
+            if (this.cache.has(id)) {
+              hits++;
+              knownEtags[id] = this.cache.get(id)!;
+              found = true;
+            }
           }
         }
+        if (count > 0) emitEtagCacheBatch(hits, count, t0);
         if (found) {
           args.knownEtags = knownEtags;
         }
@@ -163,6 +168,20 @@ function emitEtagCacheLookup(hit: boolean, t0: number): void {
       source: "etag",
       hit,
       latencyMs: performance.now() - t0,
+    });
+  } catch {
+    // observability is best-effort
+  }
+}
+
+function emitEtagCacheBatch(hits: number, count: number, t0: number): void {
+  try {
+    getObservabilityTap()?.cacheLookup({
+      source: "etag",
+      hit: hits > 0,
+      latencyMs: performance.now() - t0,
+      count,
+      hits,
     });
   } catch {
     // observability is best-effort

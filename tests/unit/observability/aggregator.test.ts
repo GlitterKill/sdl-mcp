@@ -117,4 +117,67 @@ describe("Aggregator", () => {
     assert.ok(ts.resolutionMs > 0);
     assert.equal(typeof ts.series, "object");
   });
+
+  it("computeAndRecordHealth returns 1.0 placeholders on a fresh aggregator (no NaN)", () => {
+    const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
+    agg.computeAndRecordHealth();
+    const { health } = agg.getSnapshot(REPO);
+    assert.equal(health.components.freshness, 1);
+    assert.equal(health.components.errorRate, 1);
+    assert.equal(health.components.coverage, 1);
+    assert.equal(health.components.edgeQuality, 1);
+    assert.equal(health.components.callResolution, 1);
+    assert.equal(Number.isFinite(health.score), true);
+    assert.equal(health.score, 100);
+  });
+
+  it("computeAndRecordHealth derives edgeQuality from latest IndexEvent stats", () => {
+    const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
+    agg.recordIndexEvent({
+      repoId: REPO,
+      versionId: "v1",
+      stats: {
+        filesScanned: 100,
+        symbolsExtracted: 500,
+        edgesExtracted: 1000,
+        durationMs: 200,
+        errors: 100,
+      },
+    });
+    agg.computeAndRecordHealth();
+    const { health } = agg.getSnapshot(REPO);
+    assert.equal(health.components.edgeQuality, 0.9);
+  });
+
+  it("computeAndRecordHealth clamps edgeQuality at 0 when errors exceed edges", () => {
+    const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
+    agg.recordIndexEvent({
+      repoId: REPO,
+      versionId: "v1",
+      stats: {
+        filesScanned: 1,
+        symbolsExtracted: 1,
+        edgesExtracted: 10,
+        durationMs: 1,
+        errors: 50,
+      },
+    });
+    agg.computeAndRecordHealth();
+    const { health } = agg.getSnapshot(REPO);
+    assert.equal(health.components.edgeQuality, 0);
+  });
+
+  it("recordCacheOutcome batch (count + hits) increments totals correctly", () => {
+    const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
+    agg.recordCacheOutcome({
+      source: "etag",
+      hit: true,
+      latencyMs: 2,
+      count: 10,
+      hits: 7,
+    });
+    const { cache } = agg.getSnapshot(REPO);
+    assert.equal(cache.totalHits, 7);
+    assert.equal(cache.totalMisses, 3);
+  });
 });
