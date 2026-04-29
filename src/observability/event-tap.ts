@@ -66,6 +66,21 @@ export interface ResourceSampleTapEvent {
   eventLoopLagMs: number;
 }
 
+export interface CacheLookupTapEvent {
+  repoId?: string;
+  source: "card" | "slice" | "summary" | "symbol-map" | "etag";
+  hit: boolean;
+  latencyMs: number;
+}
+
+export interface SliceBuildTapEvent {
+  repoId?: string;
+  durationMs: number;
+  accepted: number;
+  evicted: number;
+  rejected: number;
+}
+
 export interface IndexPhaseTapEvent {
   phase: string;
   language?: string;
@@ -90,6 +105,8 @@ export interface ObservabilityTap {
   poolSample(event: PoolSampleTapEvent): void;
   resourceSample(event: ResourceSampleTapEvent): void;
   indexPhase(event: IndexPhaseTapEvent): void;
+  cacheLookup(event: CacheLookupTapEvent): void;
+  sliceBuild(event: SliceBuildTapEvent): void;
 }
 
 let installedTap: ObservabilityTap | null = null;

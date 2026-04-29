@@ -1,5 +1,6 @@
 import type { GraphSlice, CardDetailLevel } from "../domain/types.js";
 import type { RepoId, VersionId, SymbolId } from "../domain/types.js";
+import { getObservabilityTap } from "../observability/event-tap.js";
 
 interface SliceBuildRequest {
   repoId: RepoId;
@@ -110,10 +111,13 @@ function promoteAccessOrder(key: string): void {
 }
 
 export function getCachedSlice(key: string): GraphSlice | null {
+  const t0 = performance.now();
+  const repoId = key.split(":")[0] || undefined;
   const entry = sliceCache.get(key);
   if (!entry) {
     cacheStats.misses++;
     updateHitRate();
+    emitCacheLookup(repoId, false, t0);
     return null;
   }
   if (Date.now() >= entry.expiresAt) {
@@ -122,11 +126,13 @@ export function getCachedSlice(key: string): GraphSlice | null {
     cacheStats.currentSize--;
     cacheStats.misses++;
     updateHitRate();
+    emitCacheLookup(repoId, false, t0);
     return null;
   }
   promoteAccessOrder(key);
   cacheStats.hits++;
   updateHitRate();
+  emitCacheLookup(repoId, true, t0);
   return entry.slice;
 }
 
@@ -197,4 +203,17 @@ export function resetSliceCacheStats(): void {
     currentSize: sliceCache.size,
     hitRate: 0,
   };
+}
+
+function emitCacheLookup(repoId: string | undefined, hit: boolean, t0: number): void {
+  try {
+    getObservabilityTap()?.cacheLookup({
+      repoId,
+      source: "slice",
+      hit,
+      latencyMs: performance.now() - t0,
+    });
+  } catch {
+    // observability is best-effort
+  }
 }

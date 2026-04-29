@@ -19,12 +19,14 @@ import { logger } from "../util/logger.js";
 import { Aggregator, DEFAULT_AGGREGATOR_OPTIONS } from "./aggregator.js";
 import type {
   IndexPhaseTapEvent,
+  CacheLookupTapEvent,
   ObservabilityTap,
   PackedWireTapEvent,
   PoolSampleTapEvent,
   PprTapEvent,
   ResourceSampleTapEvent,
   ScipIngestTapEvent,
+  SliceBuildTapEvent,
 } from "./event-tap.js";
 import type {
   BeamExplainResponse,
@@ -144,6 +146,11 @@ export class ObservabilityService implements ObservabilityTap {
           aggregator.recordResourceSample(sample);
         } catch (err) {
           this.logWarn("aggregator.recordResourceSample failed", err);
+        }
+        try {
+          aggregator.computeAndRecordHealth();
+        } catch (err) {
+          this.logWarn("aggregator.computeAndRecordHealth failed", err);
         }
       }
       this.emitSnapshot();
@@ -455,6 +462,31 @@ export class ObservabilityService implements ObservabilityTap {
       }
     } catch (err) {
       this.logWarn("indexPhase failed", err);
+    }
+  }
+
+  cacheLookup(event: CacheLookupTapEvent): void {
+    try {
+      this.getAggregator(event.repoId ?? "_global").recordCacheOutcome({
+        source: event.source,
+        hit: event.hit,
+        latencyMs: event.latencyMs,
+      });
+    } catch (err) {
+      this.logWarn("cacheLookup failed", err);
+    }
+  }
+
+  sliceBuild(event: SliceBuildTapEvent): void {
+    try {
+      this.getAggregator(event.repoId ?? "_global").recordBeamBuild({
+        durationMs: event.durationMs,
+        accepted: event.accepted,
+        evicted: event.evicted,
+        rejected: event.rejected,
+      });
+    } catch (err) {
+      this.logWarn("sliceBuild failed", err);
     }
   }
 

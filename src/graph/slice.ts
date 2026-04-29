@@ -26,6 +26,7 @@ import { beamSearch, beamSearchLadybug, applyEdgeConfidenceWeight, getAdaptiveMi
 import { SLICE_SCORE_THRESHOLD as TRACE_SLICE_SCORE_THRESHOLD, MAX_FRONTIER as TRACE_MAX_FRONTIER } from "../config/constants.js";
 import type { BeamExplainEntry } from "../observability/types.js";
 import { getBeamExplainStore } from "../observability/index.js";
+import { getObservabilityTap } from "../observability/event-tap.js";
 
 import { getGraphSnapshot } from "./graphSnapshotCache.js";
 
@@ -217,18 +218,31 @@ export async function buildSlice(
   let traceTruncated = false;
   const traceEntries: BeamExplainEntry[] = [];
   const beamStore = getBeamExplainStore();
-  const traceCollector: BeamTraceCollector | null = beamStore === null ? null : {
+  let beamAcceptedCount = 0;
+  let beamEvictedCount = 0;
+  let beamRejectedCount = 0;
+  const beamStartedAt = performance.now();
+  const traceCollector: BeamTraceCollector = {
     recordAccept(entry) {
-      if (traceEntries.length < traceCap) traceEntries.push(entry);
-      else traceTruncated = true;
+      beamAcceptedCount++;
+      if (beamStore !== null) {
+        if (traceEntries.length < traceCap) traceEntries.push(entry);
+        else traceTruncated = true;
+      }
     },
     recordEvict(entry) {
-      if (traceEntries.length < traceCap) traceEntries.push(entry);
-      else traceTruncated = true;
+      beamEvictedCount++;
+      if (beamStore !== null) {
+        if (traceEntries.length < traceCap) traceEntries.push(entry);
+        else traceTruncated = true;
+      }
     },
     recordReject(entry) {
-      if (traceEntries.length < traceCap) traceEntries.push(entry);
-      else traceTruncated = true;
+      beamRejectedCount++;
+      if (beamStore !== null) {
+        if (traceEntries.length < traceCap) traceEntries.push(entry);
+        else traceTruncated = true;
+      }
     },
   };
 
@@ -270,6 +284,18 @@ export async function buildSlice(
     frontier = result.frontier;
     wasTruncated = result.wasTruncated;
     droppedCandidates = result.droppedCandidates;
+  }
+
+  try {
+    getObservabilityTap()?.sliceBuild({
+      repoId: request.repoId,
+      durationMs: performance.now() - beamStartedAt,
+      accepted: beamAcceptedCount,
+      evicted: beamEvictedCount,
+      rejected: beamRejectedCount,
+    });
+  } catch {
+    // observability is best-effort
   }
 
   const cardCount = sliceCards.size;
@@ -387,7 +413,7 @@ export async function buildSlice(
     }
   }
 
-  const beamTrace = traceCollector === null ? null : {
+  const beamTrace = beamStore === null ? null : {
     entries: traceEntries,
     truncated: traceTruncated,
     edgeWeights: {

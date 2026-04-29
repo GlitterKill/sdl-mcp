@@ -36,6 +36,7 @@ export type {
 export { BEAM_EXPLAIN_MAX_ENTRIES } from "./types.js";
 
 export type {
+  CacheLookupTapEvent,
   IndexPhaseTapEvent,
   ObservabilityTap,
   PackedWireTapEvent,
@@ -43,6 +44,7 @@ export type {
   PprTapEvent,
   ResourceSampleTapEvent,
   ScipIngestTapEvent,
+  SliceBuildTapEvent,
 } from "./event-tap.js";
 export {
   getObservabilityTap,

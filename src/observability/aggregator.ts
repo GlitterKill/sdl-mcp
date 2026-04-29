@@ -595,6 +595,46 @@ export class Aggregator {
     this.healthComponents = components;
   }
 
+  /**
+   * Compute health score + components from aggregator's own state and record
+   * via recordHealth(). Called periodically by ObservabilityService.tick().
+   *
+   * Components are 0..1 each. Score is a weighted-average × 100, rounded.
+   * Placeholder values (1.0) are used for components that don't yet have
+   * raw signals plumbed; refine when coverage/edgeQuality/callResolution
+   * event taps are added.
+   */
+  computeAndRecordHealth(): void {
+    const lagMs = this.indexDerivedStateLagMs ?? 0;
+    const freshness = Math.max(0, 1 - Math.min(lagMs / 60_000, 1));
+
+    let errors = 0;
+    let total = 0;
+    for (const e of this.errorRateShort.snapshot()) {
+      errors += e.v.errors;
+      total += e.v.total;
+    }
+    const errorRate = total === 0 ? 1 : Math.max(0, 1 - errors / total);
+
+    const failureRatio =
+      this.indexEventTotal === 0 ? 0 : this.indexFailures / this.indexEventTotal;
+    const coverage = Math.max(0, 1 - failureRatio);
+
+    const edgeQuality = 1.0;
+    const callResolution = 1.0;
+
+    const components = { freshness, coverage, errorRate, edgeQuality, callResolution };
+    const score = Math.round(
+      (freshness * 0.25 +
+        coverage * 0.20 +
+        errorRate * 0.30 +
+        edgeQuality * 0.10 +
+        callResolution * 0.15) *
+        100,
+    );
+    this.recordHealth(score, components);
+  }
+
   recordBeamBuild(rec: {
     durationMs: number;
     accepted: number;

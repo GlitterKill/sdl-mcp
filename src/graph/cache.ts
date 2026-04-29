@@ -10,6 +10,7 @@
 
 import type { SymbolCard } from "../domain/types.js";
 import type { VersionId, SymbolId, RepoId } from "../domain/types.js";
+import { getObservabilityTap } from "../observability/event-tap.js";
 
 interface CacheEntry<T> {
   value: T;
@@ -175,6 +176,7 @@ class LRUCache<T> {
   }
 
   get(repoId: RepoId, id: string, versionId: VersionId): T | undefined {
+    const t0 = performance.now();
     const key = this.makeKey(repoId, id, versionId);
     const entry = this.cache.get(key);
 
@@ -182,10 +184,12 @@ class LRUCache<T> {
       this.promoteKey(key);
       entry.lastAccessed = Date.now();
       this.stats.hits++;
+      emitCardCacheLookup(repoId, true, t0);
       return entry.value;
     }
 
     this.stats.misses++;
+    emitCardCacheLookup(repoId, false, t0);
     return undefined;
   }
 
@@ -301,3 +305,16 @@ export function resetAllCacheStats(): void {
 
 export { LRUCache };
 export type { CacheEntry, CacheStats, CacheConfig };
+
+function emitCardCacheLookup(repoId: string, hit: boolean, t0: number): void {
+  try {
+    getObservabilityTap()?.cacheLookup({
+      repoId,
+      source: "card",
+      hit,
+      latencyMs: performance.now() - t0,
+    });
+  } catch {
+    // observability is best-effort
+  }
+}
