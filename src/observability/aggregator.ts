@@ -21,8 +21,16 @@ import type {
   ToolCallEvent,
   WatcherHealthTelemetryEvent,
 } from "../mcp/telemetry.js";
+import { getHeapStatistics } from "node:v8";
+
 import { classifyBottleneck } from "./bottleneck-classifier.js";
 import { RingBuffer } from "./ring-buffer.js";
+
+// V8 heap_size_limit (—max-old-space-size). Fixed for process lifetime, so
+// capture once at module load. Used as the denominator for heap-pressure
+// classification — the *actual* ceiling, unlike heapTotal which is V8's
+// currently committed heap and inflates idle ratios toward 1.0 between GCs.
+const HEAP_LIMIT_MB = getHeapStatistics().heap_size_limit / (1024 * 1024);
 import type {
   BeamSummary,
   CacheMetrics,
@@ -84,6 +92,10 @@ interface ResourceSampleRec {
   cpuPct: number;
   rssMb: number;
   heapUsedMb: number;
+  /** V8 currently-committed heap (process.memoryUsage().heapTotal), NOT the
+   *  --max-old-space-size limit. Between GCs V8 fills it close to capacity
+   *  even on idle, so heapUsed/heapTotal is a poor pressure indicator on its
+   *  own — see HEAP_LIMIT_MB above and bottleneck-classifier.ts. */
   heapTotalMb: number;
   eventLoopLagMs: number;
 }
@@ -718,6 +730,7 @@ export class Aggregator {
       rssMb: resources.rssMb,
       heapUsedMb: resources.heapUsedMb,
       heapTotalMb: resources.heapTotalMb,
+      heapLimitMb: HEAP_LIMIT_MB,
       eventLoopLagP95Ms: resources.eventLoopLagP95Ms,
       dbLatencyP95Ms: percentile(this.dbLatencies, 0.95),
       indexerParseP95Ms: percentile(this.beamBuildLatencies, 0.95),

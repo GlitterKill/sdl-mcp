@@ -62,6 +62,9 @@ export interface ResourceSampleTapEvent {
   cpuPct: number;
   rssMb: number;
   heapUsedMb: number;
+  /** V8 currently-committed heap (process.memoryUsage().heapTotal), NOT the
+   *  --max-old-space-size limit. See bottleneck-classifier.ts for why this
+   *  alone is a poor pressure signal. */
   heapTotalMb: number;
   eventLoopLagMs: number;
 }
