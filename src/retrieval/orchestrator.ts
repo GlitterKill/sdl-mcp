@@ -46,6 +46,7 @@ import {
 } from "../graph/graphSnapshotCache.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
 import { logger } from "../util/logger.js";
+import { getObservabilityTap } from "../observability/event-tap.js";
 import { getEmbeddingProvider } from "../indexer/embeddings.js";
 import { applyQueryPrefix } from "../indexer/model-registry.js";
 import { EMBEDDING_MODELS } from "./model-mapping.js";
@@ -548,6 +549,15 @@ export async function hybridSearch(
           },
         });
         backend = pprResult.backend;
+        try {
+          getObservabilityTap()?.pprResult({
+            repoId: options.repoId,
+            backend: pprResult.backend,
+            computeMs: pprResult.computeMs,
+            touched: pprResult.touched,
+            seedCount: seedResolution.seeds.size,
+          });
+        } catch { /* swallow */ }
         const originalScores = new Map(
           fusedResults.map((r) => [r.symbolId, r.score] as const),
         );
@@ -995,6 +1005,15 @@ export async function entitySearch(
           },
         });
         backend = pprResult.backend;
+        try {
+          getObservabilityTap()?.pprResult({
+            repoId: options.repoId,
+            backend: pprResult.backend,
+            computeMs: pprResult.computeMs,
+            touched: pprResult.touched,
+            seedCount: seedResolution.seeds.size,
+          });
+        } catch { /* swallow */ }
         // Boost only symbol entities; other entity types pass through.
         const symbolItems = fusedResults
           .filter((r) => r.entityType === "symbol")

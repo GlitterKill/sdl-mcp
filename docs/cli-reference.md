@@ -155,6 +155,7 @@ When running with `--http`, additional surfaces are available:
 - Graph UI: `http://<host>:<port>/ui/graph`
 - Graph REST: `/api/graph/:repoId/symbol/:symbolId/neighborhood`, `/api/graph/:repoId/blast-radius/:fromVersion/:toVersion`, `/api/graph/:repoId/slice/:handle`
 - Symbol and repo helpers: `/api/symbol/:repoId/search`, `/api/symbol/:repoId/card/:symbolId`, `/api/repo/:repoId/status`, `/api/repo/:repoId/reindex`
+- Observability dashboard: UI at `http://<host>:<port>/ui/observability` plus REST + SSE under `/api/observability/{snapshot,timeseries,beam-explain,stream}`. Enabled by default; toggle via `observability.enabled` in config. See [Observability Dashboard](./feature-deep-dives/observability-dashboard.md).
 
 ### `sdl-mcp export`
 

@@ -28,6 +28,7 @@ import { LanguageSchema } from "../../config/types.js";
 import { normalizePath } from "../../util/paths.js";
 import { DatabaseError, ConfigError, ValidationError } from "../errors.js";
 import { logger } from "../../util/logger.js";
+import { getObservabilityTap } from "../../observability/event-tap.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { MAX_FILE_BYTES } from "../../config/constants.js";
 import { buildRepoOverview, clearOverviewCache } from "../../graph/overview.js";
@@ -592,6 +593,7 @@ export async function handleIndexRefresh(
     symbolCardCache.clear();
     invalidateGraphSnapshot(repoId);
 
+    const scipAutoIngestStart = Date.now();
     try {
       const appConfig = loadConfig();
       const scipConfig = appConfig.scip;
@@ -622,11 +624,31 @@ export async function handleIndexRefresh(
                 count: scipResults.length,
                 statuses: scipResults.map((r) => r.status),
               });
+              for (const status of scipResults) {
+                try {
+                  getObservabilityTap()?.scipIngest({
+                    repoId,
+                    edgesCreated: status.edgesCreated ?? 0,
+                    edgesUpgraded: status.edgesUpgraded ?? 0,
+                    durationMs: status.durationMs ?? 0,
+                    failed: false,
+                  });
+                } catch { /* swallow */ }
+              }
             }
           });
         }
       }
     } catch (err) {
+      try {
+        getObservabilityTap()?.scipIngest({
+          repoId,
+          edgesCreated: 0,
+          edgesUpgraded: 0,
+          durationMs: Date.now() - scipAutoIngestStart,
+          failed: true,
+        });
+      } catch { /* swallow */ }
       logger.warn("SCIP auto-ingest failed (non-fatal)", {
         repoId,
         error: err instanceof Error ? err.message : String(err),

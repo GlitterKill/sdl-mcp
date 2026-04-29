@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Observability dashboard (V1, read-only)** — built-in HTTP UI at
+  `/ui/observability` plus
+  `/api/observability/{snapshot,timeseries,beam-explain,stream}` REST + SSE APIs.
+  Surfaces cache hit rates, hybrid retrieval breakdowns (FTS / vector / PPR /
+  RRF), beam-search decision traces, indexing pipeline metrics, write-pool /
+  drain saturation, packed-wire savings, SCIP ingest health, deterministic
+  bottleneck classification, and OS-level resource samples. Configurable via
+  the new `observability.*` config block (`enabled`, `sampleIntervalMs`,
+  `retentionShortMinutes`, `retentionLongHours`, `pprMetricsEnabled`,
+  `packedStatsEnabled`, `scipIngestMetrics`, `beamExplainCapacity`,
+  `beamExplainEntriesPerSlice`, `sseHeartbeatMs`). Default sampling interval
+  2 s; 15-minute short window + 24-hour long window. Bearer-auth gated
+  identically to other `/api/*` routes. New deep dive at
+  [`docs/feature-deep-dives/observability-dashboard.md`](docs/feature-deep-dives/observability-dashboard.md).
+
 ## [0.10.10] - 2026-04-28
 
 ### Fixed

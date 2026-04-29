@@ -531,6 +531,12 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 
 [Tool Gateway Deep Dive →](./docs/feature-deep-dives/tool-gateway.md)
 
+---
+
+### Observability Dashboard
+
+Built-in read-only dashboard surfaces every metric needed to diagnose SDL-MCP behaviour without parsing stderr logs. Cyberpunk-corporate dark UI at `/ui/observability` on the HTTP transport, plus REST + SSE APIs (`/api/observability/snapshot`, `/timeseries`, `/beam-explain`, `/stream`) for programmatic access. Surfaces cache hit rates, hybrid-retrieval breakdowns (FTS / vector / PPR / RRF), beam-search decision traces, indexing pipeline metrics, write-pool and drain saturation, packed-wire savings, SCIP ingest health, deterministic bottleneck classification, and OS-level resource samples. See [Observability Dashboard Deep Dive](./docs/feature-deep-dives/observability-dashboard.md).
+
 <br/>
 
 ---
@@ -539,12 +545,12 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 
 ## Current Tool Surface at a Glance
 
-| Mode | Tool count | Composition |
-| :--- | :--------- | :---------- |
-| Flat | `33` | `2` universal + `31` flat tools |
-| Gateway | `6` | `2` universal + `4` gateway tools |
-| Gateway + legacy | `37` | `2` universal + `4` gateway + `31` flat tools |
-| Code Mode exclusive | `4` | `sdl.action.search`, `sdl.context`, `sdl.manual`, `sdl.workflow` |
+| Mode                | Tool count | Composition                                                      |
+| :------------------ | :--------- | :--------------------------------------------------------------- |
+| Flat                | `33`       | `2` universal + `31` flat tools                                  |
+| Gateway             | `6`        | `2` universal + `4` gateway tools                                |
+| Gateway + legacy    | `37`       | `2` universal + `4` gateway + `31` flat tools                    |
+| Code Mode exclusive | `4`        | `sdl.action.search`, `sdl.context`, `sdl.manual`, `sdl.workflow` |
 
 The generated source of truth is [`docs/generated/tool-inventory.md`](./docs/generated/tool-inventory.md).
 
@@ -627,21 +633,21 @@ The generated source of truth is [`docs/generated/tool-inventory.md`](./docs/gen
 
 ## CLI Commands
 
-| Command             | Description                                                                                    |
-| :------------------ | :--------------------------------------------------------------------------------------------- |
-| `sdl-mcp init`      | Bootstrap config, detect repo/languages, optionally auto-index                                 |
-| `sdl-mcp doctor`    | Validate runtime, config, DB, grammars, repo access                                            |
-| `sdl-mcp index`     | Index repositories (with optional `--watch` mode)                                              |
-| `sdl-mcp serve`     | Start MCP server (`--stdio` or `--http`)                                                       |
-| `sdl-mcp tool`      | Access 30 direct action aliases ([docs](./docs/feature-deep-dives/cli-tool-access.md))          |
-| `sdl-mcp info`      | Runtime diagnostics — version, Node.js, platform, database, config                             |
-| `sdl-mcp summary`   | Generate copy/paste context summaries from the CLI                                             |
-| `sdl-mcp health`    | Compute composite health score with badge/JSON output                                          |
-| `sdl-mcp benchmark` | Run CI regression benchmarks                                                                   |
-| `sdl-mcp export`    | Export sync artifact                                                                           |
-| `sdl-mcp import`    | Import sync artifact                                                                           |
-| `sdl-mcp pull`      | Pull by version/commit with fallback                                                           |
-| `sdl-mcp version`   | Show version and environment info                                                              |
+| Command             | Description                                                                            |
+| :------------------ | :------------------------------------------------------------------------------------- |
+| `sdl-mcp init`      | Bootstrap config, detect repo/languages, optionally auto-index                         |
+| `sdl-mcp doctor`    | Validate runtime, config, DB, grammars, repo access                                    |
+| `sdl-mcp index`     | Index repositories (with optional `--watch` mode)                                      |
+| `sdl-mcp serve`     | Start MCP server (`--stdio` or `--http`)                                               |
+| `sdl-mcp tool`      | Access 30 direct action aliases ([docs](./docs/feature-deep-dives/cli-tool-access.md)) |
+| `sdl-mcp info`      | Runtime diagnostics — version, Node.js, platform, database, config                     |
+| `sdl-mcp summary`   | Generate copy/paste context summaries from the CLI                                     |
+| `sdl-mcp health`    | Compute composite health score with badge/JSON output                                  |
+| `sdl-mcp benchmark` | Run CI regression benchmarks                                                           |
+| `sdl-mcp export`    | Export sync artifact                                                                   |
+| `sdl-mcp import`    | Import sync artifact                                                                   |
+| `sdl-mcp pull`      | Pull by version/commit with fallback                                                   |
+| `sdl-mcp version`   | Show version and environment info                                                      |
 
 [CLI Reference →](./docs/cli-reference.md) · [Configuration Reference →](./docs/configuration-reference.md)
 
@@ -731,16 +737,16 @@ flowchart TD
 
 ## Documentation
 
-| Document                                                          | Description                                                                     |
-| :---------------------------------------------------------------- | :------------------------------------------------------------------------------ |
-| [Getting Started](./docs/getting-started.md)                      | Installation, 5-minute setup, MCP client config                                 |
-| [MCP Tools Reference](./docs/mcp-tools-detailed.md)               | Detailed docs for the current flat, gateway, and Code Mode surfaces             |
-| [CLI Reference](./docs/cli-reference.md)                          | All CLI commands and options                                                    |
-| [Configuration Reference](./docs/configuration-reference.md)      | Every config option with defaults and guidance                                  |
-| [Agent Workflows](./docs/agent-workflows.md)                      | Workflow instructions for CLAUDE.md / AGENTS.md                                 |
-| [Architecture](./docs/architecture.md)                            | Tech stack, data flow, component diagram                                        |
-| [Iris Gate Ladder](./docs/feature-deep-dives/iris-gate-ladder.md) | Context escalation methodology                                                  |
-| [Troubleshooting](./docs/troubleshooting.md)                      | Common issues and fixes                                                         |
+| Document                                                          | Description                                                         |
+| :---------------------------------------------------------------- | :------------------------------------------------------------------ |
+| [Getting Started](./docs/getting-started.md)                      | Installation, 5-minute setup, MCP client config                     |
+| [MCP Tools Reference](./docs/mcp-tools-detailed.md)               | Detailed docs for the current flat, gateway, and Code Mode surfaces |
+| [CLI Reference](./docs/cli-reference.md)                          | All CLI commands and options                                        |
+| [Configuration Reference](./docs/configuration-reference.md)      | Every config option with defaults and guidance                      |
+| [Agent Workflows](./docs/agent-workflows.md)                      | Workflow instructions for CLAUDE.md / AGENTS.md                     |
+| [Architecture](./docs/architecture.md)                            | Tech stack, data flow, component diagram                            |
+| [Iris Gate Ladder](./docs/feature-deep-dives/iris-gate-ladder.md) | Context escalation methodology                                      |
+| [Troubleshooting](./docs/troubleshooting.md)                      | Common issues and fixes                                             |
 
 ### Feature Deep Dives
 

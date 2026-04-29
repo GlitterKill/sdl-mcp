@@ -44,6 +44,7 @@ export class BatchPersistAccumulator {
 
   constructor(flushThreshold = 200) {
     this.flushThreshold = flushThreshold;
+    activeAccumulators.add(this);
   }
 
   get pending(): number {
@@ -190,19 +191,23 @@ export class BatchPersistAccumulator {
    * PRECONDITION: All add*() producers must have finished before calling.
    */
   async drain(): Promise<void> {
-    this.enqueueSnapshot();
+    try {
+      this.enqueueSnapshot();
 
-    if (this.draining && this.drainPromise) {
-      await this.drainPromise;
-    }
+      if (this.draining && this.drainPromise) {
+        await this.drainPromise;
+      }
 
-    if (this.writeQueue.length > 0 && !this._error) {
-      this.ensureDraining();
-      if (this.drainPromise) await this.drainPromise;
-    }
+      if (this.writeQueue.length > 0 && !this._error) {
+        this.ensureDraining();
+        if (this.drainPromise) await this.drainPromise;
+      }
 
-    if (this._error) {
-      throw this._error;
+      if (this._error) {
+        throw this._error;
+      }
+    } finally {
+      activeAccumulators.delete(this);
     }
   }
 
@@ -210,6 +215,24 @@ export class BatchPersistAccumulator {
    * @deprecated Use drain() instead.
    */
   async flush(): Promise<void> {
-    await this.drain();
+    try {
+      await this.drain();
+    } finally {
+      activeAccumulators.delete(this);
+    }
   }
+}
+
+// Active-instance registry for observability probes.
+// Kept module-internal except for the small `getActiveDrainStats` accessor.
+const activeAccumulators: Set<BatchPersistAccumulator> = new Set();
+
+export function getActiveDrainStats(): { queueDepth: number; drainFailures: number } {
+  let queueDepth = 0;
+  let drainFailures = 0;
+  for (const acc of activeAccumulators) {
+    queueDepth += acc.queueDepth;
+    if (acc.error !== null) drainFailures += 1;
+  }
+  return { queueDepth, drainFailures };
 }

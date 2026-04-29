@@ -614,6 +614,12 @@ MCP logging notifications emit per-call savings meters and end-of-task session s
 
 ---
 
+## Observability Service
+
+`src/observability/` is a side-channel observer that aggregates the existing telemetry stream and adds runtime probes (CPU, RSS, heap, event-loop lag, write-pool depth, indexer drain depth) for per-repo dashboards. The `ObservabilityTap` interface receives forwarded `log*` events from `src/mcp/telemetry.ts`; the singleton `ObservabilityService` owns one `Aggregator` per repo with dual retention windows (short, default 15 min; long, default 24 h) and a sampling tick at `observability.sampleIntervalMs` (default 2000 ms). A separate `BeamExplainStore` LRU keeps the most-recent beam-search decision traces. The whole subsystem is exposed via bearer-auth-gated `/api/observability/{snapshot,timeseries,beam-explain,stream}` routes plus the `/ui/observability` HTML/JS/CSS surface in the HTTP transport. As an outbound observer it sits **outside the request path** of MCP tool dispatch — no observability code runs synchronously inside a handler, and observability failures cannot block tool calls. See [Observability Dashboard deep dive](./feature-deep-dives/observability-dashboard.md).
+
+---
+
 ## Error Handling
 
 **Typed errors** (`src/domain/errors.ts`):

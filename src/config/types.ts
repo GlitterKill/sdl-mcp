@@ -416,6 +416,21 @@ export const PrefetchConfigSchema = z.object({
 
 export type PrefetchConfig = z.infer<typeof PrefetchConfigSchema>;
 
+export const ObservabilityConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  sampleIntervalMs: z.number().int().min(250).max(60000).default(2000),
+  retentionShortMinutes: z.number().int().min(1).max(60).default(15),
+  retentionLongHours: z.number().int().min(1).max(168).default(24),
+  pprMetricsEnabled: z.boolean().default(true),
+  packedStatsEnabled: z.boolean().default(true),
+  scipIngestMetrics: z.boolean().default(true),
+  beamExplainCapacity: z.number().int().min(8).max(2048).default(128),
+  beamExplainEntriesPerSlice: z.number().int().min(16).max(8192).default(512),
+  sseHeartbeatMs: z.number().int().min(1000).max(60000).default(15000),
+});
+
+export type ObservabilityConfig = z.infer<typeof ObservabilityConfigSchema>;
+
 export const TracingConfigSchema = z.object({
   enabled: z.boolean().default(true),
   serviceName: z.string().default("sdl-mcp"),
@@ -666,6 +681,7 @@ export const AppConfigSchema = z.object({
   memory: MemoryConfigSchema.optional(),
   scip: ScipConfigSchema.optional(),
   wire: WireConfigSchema.optional(),
+  observability: ObservabilityConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

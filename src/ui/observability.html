@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>SDL-MCP — Observability</title>
+    <link rel="stylesheet" href="/ui/observability.css" />
+  </head>
+  <body>
+    <header class="topbar" role="banner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">SDL</span>
+        <span class="brand-name">MCP // OBSERVABILITY</span>
+      </div>
+      <nav class="topbar-controls" aria-label="Dashboard controls">
+        <label class="ctl">
+          <span class="ctl-label">REPO</span>
+          <input id="repoInput" value="sdl-mcp" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="ctl">
+          <span class="ctl-label">TOKEN</span>
+          <input id="tokenInput" type="password" placeholder="Bearer token" autocomplete="off" spellcheck="false" />
+        </label>
+        <button id="connectBtn" type="button" class="btn">CONNECT</button>
+        <button id="systemToggleBtn" type="button" class="btn btn-ghost" aria-pressed="false">
+          SYSTEM STATS
+        </button>
+        <div id="connStatus" class="conn-status" data-state="idle" aria-live="polite">
+          <span class="conn-dot" aria-hidden="true"></span>
+          <span class="conn-label">IDLE</span>
+        </div>
+      </nav>
+    </header>
+
+    <main id="dashboard" class="grid" data-system-visible="false">
+      <section class="panel panel-bottleneck panel-wide" data-panel="bottleneck" aria-label="Bottleneck">
+        <header class="panel-head">
+          <h2>BOTTLENECK</h2>
+          <span class="panel-sub" data-field="confidence">—</span>
+        </header>
+        <div class="bottleneck-body">
+          <span class="bottleneck-badge" data-field="dominant">—</span>
+          <div class="bottleneck-bar" aria-hidden="true">
+            <span class="bottleneck-bar-fill" data-field="confidenceBar"></span>
+          </div>
+          <ul class="chip-list" data-field="topSignals" role="list"></ul>
+        </div>
+      </section>
+
+      <section class="panel" data-panel="cache" aria-label="Cache">
+        <header class="panel-head">
+          <h2>CACHE</h2>
+          <span class="panel-sub" data-field="hitRate">—</span>
+        </header>
+        <div class="kv-row">
+          <span class="kv-key">HITS</span>
+          <span class="kv-val" data-field="totalHits">—</span>
+          <span class="kv-key">MISSES</span>
+          <span class="kv-val" data-field="totalMisses">—</span>
+          <span class="kv-key">AVG µ</span>
+          <span class="kv-val" data-field="avgLookupLatencyMs">—</span>
+        </div>
+        <div class="bar-list" data-field="perSource" aria-label="Per-source hit rate"></div>
+        <svg class="spark" data-field="hitRateSpark" viewBox="0 0 200 40" preserveAspectRatio="none" aria-hidden="true"></svg>
+      </section>
+
+      <section class="panel" data-panel="retrieval" aria-label="Retrieval">
+        <header class="panel-head">
+          <h2>RETRIEVAL</h2>
+          <span class="panel-sub" data-field="totalRetrievals">—</span>
+        </header>
+        <div class="kv-row">
+          <span class="kv-key">AVG</span>
+          <span class="kv-val" data-field="avgLatencyMs">—</span>
+          <span class="kv-key">P95</span>
+          <span class="kv-val" data-field="p95LatencyMs">—</span>
+          <span class="kv-key">EMPTY</span>
+          <span class="kv-val" data-field="emptyResultCount">—</span>
+        </div>
+        <div class="stack-bar" data-field="hybridMix" aria-label="Hybrid mix"></div>
+        <div class="bar-list" data-field="candidateCounts" aria-label="Candidate counts per source"></div>
+      </section>
+
+      <section class="panel" data-panel="beam" aria-label="Beam">
+        <header class="panel-head">
+          <h2>BEAM</h2>
+          <span class="panel-sub" data-field="totalSliceBuilds">—</span>
+        </header>
+        <div class="kv-row">
+          <span class="kv-key">AVG MS</span>
+          <span class="kv-val" data-field="avgBuildMs">—</span>
+          <span class="kv-key">P95 MS</span>
+          <span class="kv-val" data-field="p95BuildMs">—</span>
+          <span class="kv-key">HANDLES</span>
+          <span class="kv-val" data-field="retainedExplainHandles">—</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">A</span>
+          <span class="kv-val" data-field="avgAccepted">—</span>
+          <span class="kv-key">E</span>
+          <span class="kv-val" data-field="avgEvicted">—</span>
+          <span class="kv-key">R</span>
+          <span class="kv-val" data-field="avgRejected">—</span>
+        </div>
+        <form id="beamExplainForm" class="beam-form">
+          <input id="beamSliceHandle" placeholder="sliceHandle" autocomplete="off" spellcheck="false" />
+          <input id="beamSymbolId" placeholder="symbolId (optional)" autocomplete="off" spellcheck="false" />
+          <button type="submit" class="btn">EXPLAIN</button>
+        </form>
+      </section>
+
+      <section class="panel" data-panel="indexing" aria-label="Indexing">
+        <header class="panel-head">
+          <h2>INDEXING</h2>
+          <span class="panel-sub" data-field="filesPerMinute">—</span>
+        </header>
+        <div class="kv-row">
+          <span class="kv-key">PASS1</span>
+          <span class="kv-val" data-field="avgPass1Ms">—</span>
+          <span class="kv-key">PASS2</span>
+          <span class="kv-val" data-field="avgPass2Ms">—</span>
+          <span class="kv-key">FAIL</span>
+          <span class="kv-val" data-field="failures">—</span>
+        </div>
+        <div class="donut-row">
+          <svg class="donut" data-field="engineDonut" viewBox="0 0 36 36" aria-hidden="true">
+            <circle class="donut-base" cx="18" cy="18" r="15.9155"></circle>
+            <circle class="donut-fill" cx="18" cy="18" r="15.9155" stroke-dasharray="0 100"></circle>
+          </svg>
+          <div class="donut-legend">
+            <span><i class="lg-rust"></i>RUST <em data-field="rustPct">—</em></span>
+            <span><i class="lg-ts"></i>TS <em data-field="tsPct">—</em></span>
+          </div>
+        </div>
+        <div class="bar-list" data-field="slowestLanguages" aria-label="Slowest languages"></div>
+      </section>
+
+      <section class="panel" data-panel="tokenEfficiency" aria-label="Token efficiency">
+        <header class="panel-head">
+          <h2>TOKEN EFFICIENCY</h2>
+          <span class="panel-sub" data-field="savingsRatio">—</span>
+        </header>
+        <div class="kv-row">
+          <span class="kv-key">USED</span>
+          <span class="kv-val" data-field="totalUsed">—</span>
+          <span class="kv-key">SAVED</span>
+          <span class="kv-val" data-field="totalSaved">—</span>
+          <span class="kv-key">AVG/CALL</span>
+          <span class="kv-val" data-field="avgPerCall">—</span>
+        </div>
+        <div class="stack-bar" data-field="usedVsSaved" aria-label="Used vs saved"></div>
+        <div class="kv-row">
+          <span class="kv-key">PACKED</span>
+          <span class="kv-val" data-field="packedAdoptionPct">—</span>
+          <span class="kv-key">BYTES SAVED</span>
+          <span class="kv-val" data-field="packedBytesSaved">—</span>
+        </div>
+      </section>
+
+      <section class="panel" data-panel="health" aria-label="Health">
+        <header class="panel-head">
+          <h2>HEALTH</h2>
+          <span class="panel-sub" data-field="score">—</span>
+        </header>
+        <div class="bar-list" data-field="components" aria-label="Health components"></div>
+        <div class="kv-row">
+          <span class="kv-key">WATCHER</span>
+          <span class="kv-val" data-field="watcherRunning">—</span>
+          <span class="kv-key">QUEUE</span>
+          <span class="kv-val" data-field="watcherQueueDepth">—</span>
+          <span class="kv-key">STALE</span>
+          <span class="kv-val" data-field="watcherStale">—</span>
+        </div>
+      </section>
+
+      <section class="panel" data-panel="latency" aria-label="Latency">
+        <header class="panel-head">
+          <h2>LATENCY</h2>
+          <span class="panel-sub" data-field="p95Ms">—</span>
+        </header>
+        <div class="kv-row">
+          <span class="kv-key">AVG</span>
+          <span class="kv-val" data-field="avgMs">—</span>
+          <span class="kv-key">P50</span>
+          <span class="kv-val" data-field="p50Ms">—</span>
+          <span class="kv-key">P99</span>
+          <span class="kv-val" data-field="p99Ms">—</span>
+          <span class="kv-key">MAX</span>
+          <span class="kv-val" data-field="maxMs">—</span>
+        </div>
+        <div class="tool-table" data-field="perTool" aria-label="Slowest tools"></div>
+      </section>
+
+      <section class="panel" data-panel="ppr" aria-label="PPR">
+        <header class="panel-head">
+          <h2>PPR</h2>
+          <span class="panel-sub" data-field="totalRuns">—</span>
+        </header>
+        <div class="kv-row">
+          <span class="kv-key">AVG MS</span>
+          <span class="kv-val" data-field="avgComputeMs">—</span>
+          <span class="kv-key">P95 MS</span>
+          <span class="kv-val" data-field="p95ComputeMs">—</span>
+          <span class="kv-key">SEEDS</span>
+          <span class="kv-val" data-field="avgSeedCount">—</span>
+        </div>
+        <div class="stack-bar" data-field="dispatchMix" aria-label="Backend dispatch"></div>
+      </section>
+
+      <section class="panel" data-panel="scip" aria-label="SCIP">
+        <header class="panel-head">
+          <h2>SCIP</h2>
+          <span class="panel-sub" data-field="lastIngestAt">—</span>
+        </header>
+        <div class="kv-row">
+          <span class="kv-key">OK</span>
+          <span class="kv-val" data-field="successCount">—</span>
+          <span class="kv-key">FAIL</span>
+          <span class="kv-val" data-field="failureCount">—</span>
+          <span class="kv-key">AVG MS</span>
+          <span class="kv-val" data-field="avgIngestMs">—</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">EDGES NEW</span>
+          <span class="kv-val" data-field="totalEdgesCreated">—</span>
+          <span class="kv-key">UPGRADED</span>
+          <span class="kv-val" data-field="totalEdgesUpgraded">—</span>
+        </div>
+      </section>
+
+      <section class="panel" data-panel="toolVolume" aria-label="Tool volume">
+        <header class="panel-head">
+          <h2>TOOL VOLUME</h2>
+          <span class="panel-sub" data-field="callsPerMinute">—</span>
+        </header>
+        <div class="kv-row">
+          <span class="kv-key">TOTAL</span>
+          <span class="kv-val" data-field="totalCalls">—</span>
+        </div>
+        <div class="bar-list" data-field="perTool" aria-label="Per-tool calls"></div>
+      </section>
+
+      <section class="panel panel-system" data-panel="resources" aria-label="System stats">
+        <header class="panel-head">
+          <h2>SYSTEM STATS</h2>
+          <span class="panel-sub" data-field="cpuPctAvg">—</span>
+        </header>
+        <div class="kv-row">
+          <span class="kv-key">CPU AVG</span>
+          <span class="kv-val" data-field="cpuPctAvg2">—</span>
+          <span class="kv-key">CPU MAX</span>
+          <span class="kv-val" data-field="cpuPctMax">—</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">RSS</span>
+          <span class="kv-val" data-field="rssMb">—</span>
+          <span class="kv-key">RSS MAX</span>
+          <span class="kv-val" data-field="rssMbMax">—</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">HEAP</span>
+          <span class="kv-val" data-field="heapUsedMb">—</span>
+          <span class="kv-key">HEAP TOTAL</span>
+          <span class="kv-val" data-field="heapTotalMb">—</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">EVENT-LOOP P95</span>
+          <span class="kv-val" data-field="eventLoopLagP95Ms">—</span>
+          <span class="kv-key">MAX</span>
+          <span class="kv-val" data-field="eventLoopLagMaxMs">—</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">UPTIME</span>
+          <span class="kv-val" data-field="uptimeMs">—</span>
+          <span class="kv-key">POOL Q</span>
+          <span class="kv-val" data-field="avgWriteQueued">—</span>
+          <span class="kv-key">DRAIN Q</span>
+          <span class="kv-val" data-field="avgDrainQueueDepth">—</span>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="beamExplainModal" class="modal" aria-label="Beam decision detail">
+      <div class="modal-head">
+        <h3 id="beamExplainTitle">BEAM EXPLAIN</h3>
+        <button type="button" class="btn btn-ghost" data-close="modal">CLOSE</button>
+      </div>
+      <div id="beamExplainBody" class="modal-body" role="region" aria-live="polite">
+        <p class="muted">No data.</p>
+      </div>
+    </dialog>
+
+    <script type="module" src="/ui/observability.js"></script>
+  </body>
+</html>

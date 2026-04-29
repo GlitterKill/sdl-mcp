@@ -4,6 +4,7 @@ import type { RepoId, SymbolId } from "../domain/types.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
+import { getObservabilityTap } from "../observability/event-tap.js";
 import { getCurrentTimestamp } from "../util/time.js";
 import type { PolicyRequestContext } from "../policy/types.js";
 import type { NextBestAction, RequiredFieldsForNext } from "./types.js";
@@ -242,6 +243,8 @@ export function logToolCall(event: ToolCallEvent): void {
     decision,
     durationMs: event.durationMs,
   });
+
+  try { getObservabilityTap()?.toolCall(event); } catch (err) { logger.warn("observability tap error", { error: err instanceof Error ? err.message : String(err) }); }
 }
 
 export function logCodeWindowDecision(event: CodeWindowDecisionEvent): void {
@@ -276,6 +279,8 @@ export function logIndexEvent(event: IndexEvent): void {
   );
 
   logIndexEventInfo(event);
+
+  try { getObservabilityTap()?.indexEvent(event); } catch (err) { logger.warn("observability tap error", { error: err instanceof Error ? err.message : String(err) }); }
 }
 
 export async function flushIndexEvent(event: IndexEvent): Promise<void> {
@@ -349,6 +354,8 @@ export function logPolicyDecision(event: PolicyDecisionEvent): void {
     auditHash,
     nextBestAction,
   });
+
+  try { getObservabilityTap()?.policyDecision(event); } catch (err) { logger.warn("observability tap error", { error: err instanceof Error ? err.message : String(err) }); }
 }
 
 export function logSetupPipelineEvent(event: SetupPipelineEvent): void {
@@ -360,6 +367,8 @@ export function logSetupPipelineEvent(event: SetupPipelineEvent): void {
   }).catch((err) =>
     logger.warn(`Audit write failed for phaseA.setup: ${String(err)}`),
   );
+
+  try { getObservabilityTap()?.setupPipeline(event); } catch (err) { logger.warn("observability tap error", { error: err instanceof Error ? err.message : String(err) }); }
 }
 
 export function logSummaryGenerationEvent(event: SummaryGenerationEvent): void {
@@ -371,6 +380,8 @@ export function logSummaryGenerationEvent(event: SummaryGenerationEvent): void {
   }).catch((err) =>
     logger.warn(`Audit write failed for phaseA.summary: ${String(err)}`),
   );
+
+  try { getObservabilityTap()?.summaryGeneration(event); } catch (err) { logger.warn("observability tap error", { error: err instanceof Error ? err.message : String(err) }); }
 }
 
 export function logWatcherHealthTelemetry(
@@ -384,6 +395,8 @@ export function logWatcherHealthTelemetry(
   }).catch((err) =>
     logger.warn(`Audit write failed for phaseA.watcher: ${String(err)}`),
   );
+
+  try { getObservabilityTap()?.watcherHealth(event); } catch (err) { logger.warn("observability tap error", { error: err instanceof Error ? err.message : String(err) }); }
 }
 
 export function logEdgeResolutionTelemetry(
@@ -399,6 +412,8 @@ export function logEdgeResolutionTelemetry(
     f1: event.f1,
     strategyAccuracy: event.strategyAccuracy,
   });
+
+  try { getObservabilityTap()?.edgeResolution(event); } catch (err) { logger.warn("observability tap error", { error: err instanceof Error ? err.message : String(err) }); }
 }
 
 export function logSemanticSearchTelemetry(
@@ -443,6 +458,8 @@ export function logSemanticSearchTelemetry(
   }
 
   logger.info("Semantic search", fields);
+
+  try { getObservabilityTap()?.semanticSearch(event); } catch (err) { logger.warn("observability tap error", { error: err instanceof Error ? err.message : String(err) }); }
 }
 
 export function logSummaryQualityTelemetry(
@@ -456,6 +473,8 @@ export function logSummaryQualityTelemetry(
     divergenceScore: event.divergenceScore,
     costUsd: event.costUsd,
   });
+
+  try { getObservabilityTap()?.summaryQuality(event); } catch (err) { logger.warn("observability tap error", { error: err instanceof Error ? err.message : String(err) }); }
 }
 
 export function logPrefetchTelemetry(event: PrefetchTelemetryEvent): void {
@@ -468,6 +487,8 @@ export function logPrefetchTelemetry(event: PrefetchTelemetryEvent): void {
     avgLatencyReductionMs: event.avgLatencyReductionMs,
     queueDepth: event.queueDepth,
   });
+
+  try { getObservabilityTap()?.prefetch(event); } catch (err) { logger.warn("observability tap error", { error: err instanceof Error ? err.message : String(err) }); }
 }
 
 // ============================================================================
@@ -525,4 +546,6 @@ export function logRuntimeExecution(event: RuntimeExecutionEvent): void {
     timedOut: event.timedOut,
     policyDecision: event.policyDecision,
   });
+
+  try { getObservabilityTap()?.runtimeExecution(event); } catch (err) { logger.warn("observability tap error", { error: err instanceof Error ? err.message : String(err) }); }
 }

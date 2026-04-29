@@ -63,6 +63,7 @@ Use this page as the entry point for SDL-MCP documentation.
 - [Code Mode](./feature-deep-dives/code-mode.md)
 - [Runtime Execution](./feature-deep-dives/runtime-execution.md)
 - [Token Savings Meter](./feature-deep-dives/token-savings-meter.md)
+- [Observability Dashboard](./feature-deep-dives/observability-dashboard.md)
 
 ## Advanced and Supporting Docs
 

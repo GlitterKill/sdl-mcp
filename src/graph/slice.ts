@@ -22,7 +22,10 @@ import { getSliceCacheKey, getCachedSlice, setCachedSlice, configureSliceCache }
 
 import { resolveStartNodes, resolveStartNodesLadybug, type StartNodeSource, type ResolvedStartNode, type StartNodeResolutionResult, type StartNodeLimits, START_NODE_SOURCE_PRIORITY, START_NODE_SOURCE_SCORE, TASK_TEXT_STOP_WORDS } from "./slice/start-node-resolver.js";
 
-import { beamSearch, beamSearchLadybug, applyEdgeConfidenceWeight, getAdaptiveMinConfidence, type FrontierItem } from "./slice/beam-search-engine.js";
+import { beamSearch, beamSearchLadybug, applyEdgeConfidenceWeight, getAdaptiveMinConfidence, type FrontierItem, type BeamTraceCollector } from "./slice/beam-search-engine.js";
+import { SLICE_SCORE_THRESHOLD as TRACE_SLICE_SCORE_THRESHOLD, MAX_FRONTIER as TRACE_MAX_FRONTIER } from "../config/constants.js";
+import type { BeamExplainEntry } from "../observability/types.js";
+import { getBeamExplainStore } from "../observability/index.js";
 
 import { getGraphSnapshot } from "./graphSnapshotCache.js";
 
@@ -201,6 +204,34 @@ export async function buildSlice(
   let wasTruncated: boolean;
   let droppedCandidates: number;
 
+  // Beam-search decision trace setup. Only active when an observability store
+  // is registered AND the slice request has a versionId we can publish under.
+  // The collector is bounded by config.observability.beamExplainEntriesPerSlice
+  // (default 512) — once full, additional entries are dropped and 	runcated
+  // is set true. Errors in the collector NEVER propagate back into beam search.
+  const observabilityCfg = config.observability;
+  const traceCap =
+    observabilityCfg?.beamExplainEntriesPerSlice && observabilityCfg.beamExplainEntriesPerSlice > 0
+      ? observabilityCfg.beamExplainEntriesPerSlice
+      : 512;
+  let traceTruncated = false;
+  const traceEntries: BeamExplainEntry[] = [];
+  const beamStore = getBeamExplainStore();
+  const traceCollector: BeamTraceCollector | null = beamStore === null ? null : {
+    recordAccept(entry) {
+      if (traceEntries.length < traceCap) traceEntries.push(entry);
+      else traceTruncated = true;
+    },
+    recordEvict(entry) {
+      if (traceEntries.length < traceCap) traceEntries.push(entry);
+      else traceTruncated = true;
+    },
+    recordReject(entry) {
+      if (traceEntries.length < traceCap) traceEntries.push(entry);
+      else traceTruncated = true;
+    },
+  };
+
   if (cachedGraph) {
     // Fast path: in-memory beam search — no DB calls during traversal
     logger.debug("Using in-memory graph snapshot for slice build", {
@@ -216,6 +247,7 @@ export async function buildSlice(
       edgeWeights,
       minConfidence,
       request.signal,
+      traceCollector,
     );
     sliceCards = result.sliceCards;
     frontier = result.frontier;
@@ -232,6 +264,7 @@ export async function buildSlice(
       edgeWeights,
       minConfidence,
       request.signal,
+      traceCollector,
     );
     sliceCards = result.sliceCards;
     frontier = result.frontier;
@@ -354,7 +387,22 @@ export async function buildSlice(
     }
   }
 
-  return { slice, retrievalEvidence, hybridSearchItems };
+  const beamTrace = traceCollector === null ? null : {
+    entries: traceEntries,
+    truncated: traceTruncated,
+    edgeWeights: {
+      call: edgeWeights.call,
+      import: edgeWeights.import,
+      config: edgeWeights.config,
+      implements: edgeWeights.implements,
+    },
+    thresholds: {
+      sliceScoreThreshold: TRACE_SLICE_SCORE_THRESHOLD,
+      maxFrontier: TRACE_MAX_FRONTIER,
+    },
+  };
+
+  return { slice, retrievalEvidence, hybridSearchItems, beamTrace: beamTrace ?? undefined };
 }
 
 export async function buildSliceWithResult(

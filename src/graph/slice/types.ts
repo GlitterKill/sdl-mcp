@@ -16,6 +16,16 @@ export interface SliceBuildInternalResult {
   retrievalEvidence?: RetrievalEvidence;
   /** Per-symbol hybrid search items (score + source). Present when hybrid retrieval was used. */
   hybridSearchItems?: HybridSearchResultItem[];
+  /** Optional captured beam-search decision trace for the observability dashboard. */
+  beamTrace?: BeamTraceCapture;
+}
+
+/** In-memory snapshot of beam-search decisions captured during a single slice build. */
+export interface BeamTraceCapture {
+  entries: import("../../observability/types.js").BeamExplainEntry[];
+  truncated: boolean;
+  edgeWeights: { call: number; import: number; config: number; implements: number };
+  thresholds: { sliceScoreThreshold: number; maxFrontier: number };
 }
 
 export interface SliceBuildRequest {

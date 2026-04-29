@@ -1,4 +1,3 @@
-/**
 // =============================================================================
 // graph/slice/beam-search-engine.ts — Beam-search algorithm for slice traversal.
 //
@@ -39,6 +38,7 @@
 // =============================================================================
 
 
+/**
  * Beam Search Engine Module
  *
  * Implements beam search traversal for graph slice construction.
@@ -46,6 +46,7 @@
  *
  * @module graph/slice/beam-search-engine
  */
+
 
 import * as os from "os";
 import { dirname, join } from "path";
@@ -202,6 +203,12 @@ export interface FrontierItem {
   why: string;
   priority: number;
   sequence: number;
+  /** Source symbol that produced this candidate via an edge, if any. */
+  edgeFromSymbolId?: SymbolId;
+  /** Edge type that produced this candidate. */
+  edgeType?: EdgeType;
+  /** Effective edge weight (base * normalized confidence) at time of insert. */
+  edgeWeight?: number;
 }
 
 export const DYNAMIC_CAP_MIN_CARDS = 6;
@@ -284,6 +291,23 @@ export function getAdaptiveMinConfidence(
  * Mutable bookkeeping state shared across all beam search iterations.
  * Passed by reference so helper functions can update it in-place.
  */
+
+import type { BeamExplainEntry } from "../../observability/types.js";
+
+/**
+ * Optional trace collector wired by the slice-build call site to capture
+ * beam-search decision rationale for the observability dashboard.
+ *
+ * All methods MUST be synchronous, side-effect-free against beam state,
+ * and exception-safe — implementations should swallow + log their own
+ * errors so the metrics path never throws into beam search.
+ */
+export interface BeamTraceCollector {
+  recordAccept(entry: BeamExplainEntry): void;
+  recordEvict(entry: BeamExplainEntry): void;
+  recordReject(entry: BeamExplainEntry): void;
+}
+
 interface BeamCoreState {
   sliceCards: Set<SymbolId>;
   visited: Set<SymbolId>;
@@ -303,7 +327,12 @@ interface BeamCoreState {
   wasTruncated: boolean;
   totalTokens: number;
   effectiveMinConfidence: number;
+  /** Optional collector for beam-explain traces. Default null — path is unchanged when unset. */
+  traceCollector: BeamTraceCollector | null;
+  /** Outer beam-loop iteration counter, incremented once per loop body. */
+  iterationCounter: number;
 }
+
 
 export interface RollbackSliceState {
   sliceCards: Set<SymbolId>;
@@ -348,7 +377,10 @@ function createBeamCoreState(
     wasTruncated: false,
     totalTokens: 0,
     effectiveMinConfidence: minConfidence,
+    traceCollector: null,
+    iterationCounter: 0,
   };
+
 }
 
 /** Builds the SliceContext used for symbol scoring. */
@@ -368,6 +400,11 @@ function acceptNodeIntoSlice(
   state: BeamCoreState,
   symbolId: SymbolId,
   actualScore: number,
+  edgeContext?: {
+    edgeFromSymbolId?: SymbolId;
+    edgeType?: EdgeType;
+    edgeWeight?: number;
+  },
 ): void {
   state.sliceCards.add(symbolId);
   if (state.entrySymbols.has(symbolId)) {
@@ -383,6 +420,29 @@ function acceptNodeIntoSlice(
   if (state.recentAcceptedScores.length > DYNAMIC_CAP_RECENT_SCORE_WINDOW) {
     state.recentAcceptedScores.shift();
   }
+  if (state.traceCollector !== null) {
+    try {
+      state.traceCollector.recordAccept({
+        symbolId,
+        decision: "accepted",
+        totalScore: actualScore,
+        components: makeEmptyScoreComponents(),
+        why: edgeContext?.edgeType ? `accept via ${edgeContext.edgeType}` : "accept",
+        edgeFromSymbolId: edgeContext?.edgeFromSymbolId,
+        edgeType: edgeContext?.edgeType,
+        edgeWeight: edgeContext?.edgeWeight,
+        iteration: state.iterationCounter,
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      logger.warn("beam trace recordAccept failed", { error: String(err) });
+    }
+  }
+}
+
+/** Empty BeamScoreComponents — individual score components are not exposed at the hook point yet. */
+function makeEmptyScoreComponents(): import("../../observability/types.js").BeamScoreComponents {
+  return { query: 0, stacktrace: 0, hotness: 0, structure: 0, kind: 0 };
 }
 
 export function rollbackAcceptedNodeFromSlice(
@@ -414,6 +474,11 @@ function insertCandidateIntoFrontier(
   symbolId: SymbolId,
   score: number,
   why: string,
+  edgeContext?: {
+    edgeFromSymbolId?: SymbolId;
+    edgeType?: EdgeType;
+    edgeWeight?: number;
+  },
 ): void {
   const item: FrontierItem = {
     symbolId,
@@ -421,6 +486,9 @@ function insertCandidateIntoFrontier(
     why,
     priority: 10,
     sequence: state.sequence++,
+    edgeFromSymbolId: edgeContext?.edgeFromSymbolId,
+    edgeType: edgeContext?.edgeType,
+    edgeWeight: edgeContext?.edgeWeight,
   };
   if (state.frontier.size() < MAX_FRONTIER) {
     state.frontier.insert(item);
@@ -434,9 +502,46 @@ function insertCandidateIntoFrontier(
   if (worstIdx === -1) return;
   const worstItem = state.frontier.toHeapArray()[worstIdx];
   if (compareFrontierItems(item, worstItem) < 0) {
+    const evicted = worstItem;
     state.frontier.replaceAt(worstIdx, item);
+    if (state.traceCollector !== null) {
+      try {
+        state.traceCollector.recordEvict({
+          symbolId: evicted.symbolId,
+          decision: "evicted",
+          totalScore: -evicted.score,
+          components: makeEmptyScoreComponents(),
+          why: `evicted by better frontier candidate (${why})`,
+          edgeFromSymbolId: evicted.edgeFromSymbolId,
+          edgeType: evicted.edgeType,
+          edgeWeight: evicted.edgeWeight,
+          iteration: state.iterationCounter,
+          timestamp: Date.now(),
+        });
+      } catch (err) {
+        logger.warn("beam trace recordEvict failed", { error: String(err) });
+      }
+    }
   } else {
     state.droppedCandidates++;
+    if (state.traceCollector !== null) {
+      try {
+        state.traceCollector.recordReject({
+          symbolId,
+          decision: "rejected",
+          totalScore: -score,
+          components: makeEmptyScoreComponents(),
+          why: `rejected: frontier full and worse than worst (${why})`,
+          edgeFromSymbolId: edgeContext?.edgeFromSymbolId,
+          edgeType: edgeContext?.edgeType,
+          edgeWeight: edgeContext?.edgeWeight,
+          iteration: state.iterationCounter,
+          timestamp: Date.now(),
+        });
+      } catch (err) {
+        logger.warn("beam trace recordReject failed", { error: String(err) });
+      }
+    }
   }
 }
 
@@ -582,6 +687,8 @@ async function beamSearchCoreAsync(
     state.sliceCards.size < state.effectiveCardCap
   ) {
     if (signal?.aborted) break;
+    if (signal?.aborted) break;
+    state.iterationCounter++;
     await strategy.onIterationStart?.(state);
 
     state.effectiveMinConfidence = getAdaptiveMinConfidence(
@@ -617,7 +724,11 @@ async function beamSearchCoreAsync(
       continue;
     }
 
-    acceptNodeIntoSlice(state, current.symbolId, actualScore);
+    acceptNodeIntoSlice(state, current.symbolId, actualScore, {
+      edgeFromSymbolId: current.edgeFromSymbolId,
+      edgeType: current.edgeType,
+      edgeWeight: current.edgeWeight,
+    });
 
     const cardTokens = await strategy.estimateCardTokens(
       current.symbolId,
@@ -675,8 +786,10 @@ export function beamSearch(
   edgeWeights: Record<EdgeType, number>,
   minConfidence: number,
   signal?: AbortSignal,
+  traceCollector?: BeamTraceCollector | null,
 ): BeamSearchResult {
   const state = createBeamCoreState(budget, request, startNodes, minConfidence);
+  if (traceCollector) state.traceCollector = traceCollector;
 
   seedFrontierFromGraph(state, startNodes, graph);
 
@@ -705,6 +818,8 @@ export function beamSearch(
     state.sliceCards.size < state.effectiveCardCap
   ) {
     if (signal?.aborted) break;
+    if (signal?.aborted) break;
+    state.iterationCounter++;
     state.effectiveMinConfidence = getAdaptiveMinConfidence(
       minConfidence,
       state.totalTokens,
@@ -731,7 +846,11 @@ export function beamSearch(
 
     state.belowThresholdCount = 0;
 
-    acceptNodeIntoSlice(state, current.symbolId, actualScore);
+    acceptNodeIntoSlice(state, current.symbolId, actualScore, {
+      edgeFromSymbolId: current.edgeFromSymbolId,
+      edgeType: current.edgeType,
+      edgeWeight: current.edgeWeight,
+    });
 
     const cardTokens = estimateCardTokens(current.symbolId, graph);
     state.totalTokens += cardTokens;
@@ -814,6 +933,11 @@ export function beamSearch(
         neighborId,
         neighborScore,
         getEdgeWhy(edge.type),
+        {
+          edgeFromSymbolId: current.symbolId,
+          edgeType: edge.type,
+          edgeWeight,
+        },
       );
     }
 
@@ -861,8 +985,10 @@ export async function beamSearchLadybug(
   edgeWeights: Record<EdgeType, number>,
   minConfidence: number,
   signal?: AbortSignal,
+  traceCollector?: BeamTraceCollector | null,
 ): Promise<BeamSearchResult> {
   const state = createBeamCoreState(budget, request, startNodes, minConfidence);
+  if (traceCollector) state.traceCollector = traceCollector;
 
   const symbolCache = new Map<SymbolId, ladybugDb.SymbolRow>();
   const fileCache = new Map<string, ladybugDb.FileRow>();
@@ -1246,6 +1372,11 @@ export async function beamSearchLadybug(
           neighborId,
           neighborScore,
           getEdgeWhy(edge.edgeType),
+          {
+            edgeFromSymbolId: currentSymbolId,
+            edgeType: edge.edgeType,
+            edgeWeight,
+          },
         );
       }
     },
@@ -1620,6 +1751,7 @@ export async function beamSearchAsync(
   minConfidence: number,
   options?: BeamSearchOptions,
   signal?: AbortSignal,
+  traceCollector?: BeamTraceCollector | null,
 ): Promise<BeamSearchResult & { scorerMode: ScorerMode }> {
   const scorerConfig: ParallelScorerConfig = {
     ...DEFAULT_PARALLEL_SCORER_CONFIG,
@@ -1630,6 +1762,7 @@ export async function beamSearchAsync(
   const scorerMode = await pool.initialize();
 
   const state = createBeamCoreState(budget, request, startNodes, minConfidence);
+  if (traceCollector) state.traceCollector = traceCollector;
 
   seedFrontierFromGraph(state, startNodes, graph);
 
@@ -1726,6 +1859,11 @@ export async function beamSearchAsync(
           neighborId,
           neighborScore,
           getEdgeWhy(edge.type),
+          {
+            edgeFromSymbolId: currentSymbolId,
+            edgeType: edge.type,
+            edgeWeight: candidate.edgeWeight,
+          },
         );
       }
     },

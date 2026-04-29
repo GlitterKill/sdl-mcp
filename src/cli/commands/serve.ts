@@ -42,6 +42,15 @@ import { SessionManager } from "../../mcp/session-manager.js";
 import { tokenAccumulator } from "../../mcp/token-accumulator.js";
 import { ensureConfiguredReposRegistered } from "../../startup/bootstrap.js";
 import { detectCpuProfile } from "../../util/cpu-detect.js";
+import {
+  BeamExplainStore,
+  createObservabilityService,
+  installObservabilityTap,
+  setBeamExplainStore,
+  startRuntimeProbes,
+  stopRuntimeProbes,
+} from "../../observability/index.js";
+import type { ObservabilityService } from "../../observability/index.js";
 
 export async function serveCommand(options: ServeOptions): Promise<void> {
   // Show banner for HTTP transport only (stdio needs clean output for MCP protocol)
@@ -263,6 +272,35 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   // Create session manager for HTTP transport
   const sessionManager = new SessionManager(concurrency?.maxSessions ?? 8);
 
+  // Wire observability service + beam-explain store before HTTP transport
+  // so the dashboard routes (and the global tap) see live data.
+  const observabilityConfig = config.observability ?? {
+    enabled: true,
+    sampleIntervalMs: 2000,
+    retentionShortMinutes: 15,
+    retentionLongHours: 24,
+    pprMetricsEnabled: true,
+    packedStatsEnabled: true,
+    scipIngestMetrics: true,
+    beamExplainCapacity: 128,
+    beamExplainEntriesPerSlice: 512,
+    sseHeartbeatMs: 15000,
+  };
+  let observabilityService: ObservabilityService | null = null;
+  let beamExplainStore: BeamExplainStore | null = null;
+  if (observabilityConfig.enabled) {
+    observabilityService = createObservabilityService(observabilityConfig);
+    observabilityService.start();
+    installObservabilityTap(observabilityService);
+    startRuntimeProbes(observabilityConfig);
+    beamExplainStore = new BeamExplainStore({
+      capacity: observabilityConfig.beamExplainCapacity,
+      maxEntriesPerSlice: observabilityConfig.beamExplainEntriesPerSlice,
+    });
+    setBeamExplainStore(beamExplainStore);
+    observabilityService.setBeamExplainStore(beamExplainStore);
+  }
+
   const httpPort = options.port ?? 3000;
 
   // Set up centralized shutdown manager.
@@ -277,6 +315,12 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   shutdownMgr.addCleanup("idleMonitor", () => {
     idleMonitor.stop();
   });
+  if (observabilityService) {
+    shutdownMgr.addCleanup("observability", () => {
+      stopRuntimeProbes();
+      observabilityService?.stop();
+    });
+  }
   if (stdioServer) {
     shutdownMgr.addCleanup("server", () => stdioServer.stop());
   }
@@ -351,6 +395,9 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
           sessionManager,
           gatewayConfig: config.gateway,
           codeModeConfig: config.codeMode,
+          observabilityService,
+          beamExplainStore,
+          observabilitySseHeartbeatMs: observabilityConfig.sseHeartbeatMs,
         },
         config.httpAuth,
       );

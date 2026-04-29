@@ -821,6 +821,77 @@
         "warmTopN": 50
       }
     },
+    "observability": {
+      "type": "object",
+      "description": "Observability dashboard configuration (in-process metrics + SSE stream)",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "sampleIntervalMs": {
+          "type": "integer",
+          "minimum": 250,
+          "maximum": 60000,
+          "default": 2000
+        },
+        "retentionShortMinutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60,
+          "default": 15
+        },
+        "retentionLongHours": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 168,
+          "default": 24
+        },
+        "pprMetricsEnabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "packedStatsEnabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "scipIngestMetrics": {
+          "type": "boolean",
+          "default": true
+        },
+        "beamExplainCapacity": {
+          "type": "integer",
+          "minimum": 8,
+          "maximum": 2048,
+          "default": 128
+        },
+        "beamExplainEntriesPerSlice": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 8192,
+          "default": 512
+        },
+        "sseHeartbeatMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 60000,
+          "default": 15000
+        }
+      },
+      "default": {
+        "enabled": true,
+        "sampleIntervalMs": 2000,
+        "retentionShortMinutes": 15,
+        "retentionLongHours": 24,
+        "pprMetricsEnabled": true,
+        "packedStatsEnabled": true,
+        "scipIngestMetrics": true,
+        "beamExplainCapacity": 128,
+        "beamExplainEntriesPerSlice": 512,
+        "sseHeartbeatMs": 15000
+      }
+    },
     "tracing": {
       "type": "object",
       "description": "OpenTelemetry tracing configuration",

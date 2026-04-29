@@ -18,6 +18,9 @@ import type {
 } from "../types.js";
 import { buildSlice } from "../../graph/slice.js";
 import type { RetrievalSource } from "../../retrieval/types.js";
+import { getBeamExplainStore } from "../../observability/index.js";
+import { getObservabilityTap } from "../../observability/event-tap.js";
+
 import { classifySymptomType } from "../../retrieval/evidence.js";
 import { entitySearch } from "../../retrieval/index.js";
 import {
@@ -423,7 +426,7 @@ async function handleSliceBuildInternal(
       throw error;
     }
 
-    const { slice, hybridSearchItems } = await buildSlice(sliceRequest);
+    const { slice, hybridSearchItems, beamTrace } = await buildSlice(sliceRequest);
     const frontierSeeds =
       resolvedEntrySymbols && resolvedEntrySymbols.length > 0
         ? resolvedEntrySymbols
@@ -472,6 +475,27 @@ async function handleSliceBuildInternal(
     await withWriteConn(async (wConn) => {
       await ladybugDb.upsertSliceHandle(wConn, handleRow);
     });
+
+    // Publish beam-search trace to the observability store (if active).
+    // Wrapped in try/catch so observability errors NEVER affect slice build.
+    if (beamTrace) {
+      try {
+        const store = getBeamExplainStore();
+        if (store) {
+          store.publishTrace({
+            repoId,
+            sliceHandle: handle,
+            builtAt: new Date().toISOString(),
+            entries: beamTrace.entries,
+            edgeWeights: beamTrace.edgeWeights,
+            thresholds: beamTrace.thresholds,
+            truncated: beamTrace.truncated,
+          });
+        }
+      } catch (err) {
+        logger.warn("beam-explain trace publish failed", { error: String(err) });
+      }
+    }
 
     // For a fresh build, staleSymbols is always empty since we just built
     // from the current version. Assign explicitly to signal feature is active.
@@ -610,6 +634,15 @@ async function handleSliceBuildInternal(
         wireResult.packedBytes,
         "packed",
       );
+      try {
+        getObservabilityTap()?.packedWire({
+          encoderId: wireResult.encoderId,
+          jsonBytes: wireResult.jsonBytes,
+          packedBytes: wireResult.packedBytes,
+          decision: "packed",
+          axisHit: wireResult.axisHit ?? null,
+        });
+      } catch { /* swallow */ }
       const savedRatio =
         wireResult.jsonBytes > 0
           ? (wireResult.jsonBytes - wireResult.packedBytes) / wireResult.jsonBytes

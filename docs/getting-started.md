@@ -262,6 +262,30 @@ The HTTP server includes a built-in graph visualization UI:
 - `http://localhost:3000/api/graph/<repoId>/symbol/<symbolId>/neighborhood` — symbol neighborhood API
 - `http://localhost:3000/api/repo/<repoId>/status` — repository status API
 
+### Observability Dashboard
+
+The HTTP server also exposes a built-in operational dashboard at
+`http://localhost:3000/ui/observability` plus REST + SSE APIs under
+`/api/observability/*`. The dashboard is enabled by default
+(`observability.enabled = true`) and surfaces cache hit rates, hybrid-retrieval
+breakdowns, beam-search decision traces, indexing throughput, write-pool / drain
+saturation, packed-wire savings, SCIP ingest health, a deterministic bottleneck
+classifier, and OS-level resource samples.
+
+The bearer token is the same one printed at server startup (or the static value of
+`httpAuth.token`). Pass it as `Authorization: Bearer <token>` on `/api/observability/*`
+requests, or — if your client cannot set headers — append `?token=<token>` for the UI:
+
+```
+http://localhost:3000/ui/observability?token=<token-from-server-startup>
+```
+
+To disable the dashboard, set `observability.enabled = false` in your config and
+restart. To stop the dashboard from registering at all, run with `--stdio` instead of
+`--http` — there is no observability surface on stdio. See the
+[Observability Dashboard Deep Dive](./feature-deep-dives/observability-dashboard.md)
+for the full route reference, configuration keys, and metric definitions.
+
 ## Optional: Switch to TypeScript Indexer
 
 SDL-MCP defaults to the native Rust indexer for pass-1 symbol extraction with multi-threaded performance. If the Rust addon is missing at startup (e.g., unsupported platform), SDL-MCP falls back to the TypeScript engine automatically.

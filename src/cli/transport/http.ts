@@ -35,6 +35,12 @@ import {
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 import type { LiveIndexCoordinator } from "../../live-index/types.js";
 import { SessionManager } from "../../mcp/session-manager.js";
+import type {
+  BeamExplainStore,
+  ObservabilityService,
+  ObservabilitySnapshot,
+  TimeseriesWindow,
+} from "../../observability/index.js";
 import type { Connection } from "kuzu";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -83,6 +89,9 @@ type HttpTransportServices = {
   liveIndex?: LiveIndexCoordinator;
   sessionManager?: SessionManager;
   symbolGetCard?: typeof handleSymbolGetCard;
+  observabilityService?: ObservabilityService | null;
+  beamExplainStore?: BeamExplainStore | null;
+  observabilitySseHeartbeatMs?: number;
 };
 
 const LOCALHOST_ORIGIN_RE =
@@ -637,6 +646,18 @@ function serveUiAsset(pathname: string, res: ServerResponse): boolean {
       type: "application/javascript; charset=utf-8",
     },
     "/ui/graph.css": { file: "graph.css", type: "text/css; charset=utf-8" },
+    "/ui/observability": {
+      file: "observability.html",
+      type: "text/html; charset=utf-8",
+    },
+    "/ui/observability.js": {
+      file: "observability.js",
+      type: "application/javascript; charset=utf-8",
+    },
+    "/ui/observability.css": {
+      file: "observability.css",
+      type: "text/css; charset=utf-8",
+    },
   };
 
   const asset = map[pathname];
@@ -1006,6 +1027,202 @@ async function handleRestRequest(
       }
 
       res.end();
+      return true;
+    }
+
+    // ---------------------------------------------------------------
+    // Observability dashboard routes
+    // ---------------------------------------------------------------
+    const observabilityService = services.observabilityService ?? null;
+    const sseHeartbeatMs = services.observabilitySseHeartbeatMs ?? 15000;
+
+    if (
+      req.method === "GET" &&
+      pathname === "/api/observability/snapshot"
+    ) {
+      if (!observabilityService) {
+        json(res, 503, { error: "observability_disabled" });
+        return true;
+      }
+      const repoId = (url.searchParams.get("repoId") ?? "").trim();
+      if (!repoId) {
+        json(res, 400, { error: "missing_repoId" });
+        return true;
+      }
+      const snapshot = observabilityService.getSnapshot(repoId);
+      json(res, 200, snapshot);
+      return true;
+    }
+
+    if (
+      req.method === "GET" &&
+      pathname === "/api/observability/timeseries"
+    ) {
+      if (!observabilityService) {
+        json(res, 503, { error: "observability_disabled" });
+        return true;
+      }
+      const repoId = (url.searchParams.get("repoId") ?? "").trim();
+      if (!repoId) {
+        json(res, 400, { error: "missing_repoId" });
+        return true;
+      }
+      const rawWindow = url.searchParams.get("window") ?? "15m";
+      if (rawWindow !== "15m" && rawWindow !== "1h" && rawWindow !== "24h") {
+        json(res, 400, {
+          error: "invalid_window",
+          allowed: ["15m", "1h", "24h"],
+        });
+        return true;
+      }
+      const ts = observabilityService.getTimeseries(
+        repoId,
+        rawWindow as TimeseriesWindow,
+      );
+      json(res, 200, ts);
+      return true;
+    }
+
+    if (
+      req.method === "GET" &&
+      pathname === "/api/observability/beam-explain"
+    ) {
+      if (!observabilityService) {
+        json(res, 503, { error: "observability_disabled" });
+        return true;
+      }
+      const repoId = (url.searchParams.get("repoId") ?? "").trim();
+      const sliceHandle = (url.searchParams.get("sliceHandle") ?? "").trim();
+      if (!repoId) {
+        json(res, 400, { error: "missing_repoId" });
+        return true;
+      }
+      if (!sliceHandle) {
+        json(res, 400, { error: "missing_sliceHandle" });
+        return true;
+      }
+      const rawSymbolId = url.searchParams.get("symbolId");
+      const symbolId = rawSymbolId ? rawSymbolId.trim() : undefined;
+      const explain = observabilityService.getBeamExplain(
+        repoId,
+        sliceHandle,
+        symbolId,
+      );
+      if (!explain) {
+        json(res, 404, { error: "trace_not_found" });
+        return true;
+      }
+      json(res, 200, explain);
+      return true;
+    }
+
+    if (
+      req.method === "GET" &&
+      pathname === "/api/observability/stream"
+    ) {
+      if (!observabilityService) {
+        json(res, 503, { error: "observability_disabled" });
+        return true;
+      }
+      const repoId = (url.searchParams.get("repoId") ?? "").trim();
+      if (!repoId) {
+        json(res, 400, { error: "missing_repoId" });
+        return true;
+      }
+      setCorsHeaders(req, res);
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+
+      let closed = false;
+      let unsubscribe: (() => void) | null = null;
+      let heartbeatTimer: NodeJS.Timeout | null = null;
+
+      const sendEvent = (event: string, data: unknown): boolean => {
+        if (closed || res.destroyed) return false;
+        try {
+          const ok = res.write(
+            `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
+          );
+          // Backpressure: bail when kernel/Node buffer is saturated or the
+          // socket reports the write was queued.
+          if (!ok || res.writableLength > 1_048_576) return false;
+          return true;
+        } catch (err) {
+          logger.warn("Observability SSE write failed", { error: err });
+          return false;
+        }
+      };
+
+      const cleanup = (): void => {
+        if (closed) return;
+        closed = true;
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+        if (unsubscribe) {
+          try {
+            unsubscribe();
+          } catch (err) {
+            logger.debug("Observability SSE unsubscribe failed", {
+              error: err,
+            });
+          }
+          unsubscribe = null;
+        }
+      };
+
+      // Initial snapshot.
+      try {
+        const initial = observabilityService.getSnapshot(repoId);
+        if (!sendEvent("snapshot", initial)) {
+          cleanup();
+          res.end();
+          return true;
+        }
+      } catch (err) {
+        logger.warn("Observability SSE initial snapshot failed", {
+          error: err,
+        });
+      }
+
+      // Subscribe to subsequent ticks. The service emits a snapshot per repo
+      // each sample interval; filter to the requested repo before sending.
+      unsubscribe = observabilityService.onSnapshot(
+        (snap: ObservabilitySnapshot) => {
+          if (snap.repoId !== repoId) return;
+          if (!sendEvent("snapshot", snap)) {
+            cleanup();
+            try {
+              res.end();
+            } catch {
+              /* best-effort */
+            }
+          }
+        },
+      );
+
+      // Heartbeat keeps proxies/load-balancers from idle-closing the stream.
+      heartbeatTimer = setInterval(() => {
+        if (!sendEvent("heartbeat", { t: Date.now() })) {
+          cleanup();
+          try {
+            res.end();
+          } catch {
+            /* best-effort */
+          }
+        }
+      }, sseHeartbeatMs);
+      heartbeatTimer.unref();
+
+      req.on("close", () => {
+        cleanup();
+      });
+
       return true;
     }
   } catch (error) {

@@ -40,6 +40,7 @@ import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
 import { flushIndexEvent } from "../mcp/telemetry.js";
+import { getObservabilityTap } from "../observability/event-tap.js";
 import { isRustEngineAvailable } from "./rustIndexer.js";
 import {
   clearTsCallResolverCache,
@@ -276,14 +277,13 @@ async function indexRepoImpl(
     phaseName: string,
     fn: () => Promise<T> | T,
   ): Promise<T> => {
-    if (!phaseTimings) {
-      return await fn();
-    }
     const phaseStart = Date.now();
     try {
       return await fn();
     } finally {
-      phaseTimings[phaseName] = Date.now() - phaseStart;
+      const durationMs = Date.now() - phaseStart;
+      if (phaseTimings) phaseTimings[phaseName] = durationMs;
+      try { getObservabilityTap()?.indexPhase({ phase: phaseName, durationMs }); } catch { /* swallow */ }
     }
   };
   const measureNestedPhase = async <T>(
