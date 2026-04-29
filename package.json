@@ -123,7 +123,7 @@
   },
   "optionalDependencies": {
     "chokidar": "^5.0.0",
-    "kuzu": "npm:@ladybugdb/core@0.15.2",
+    "kuzu": "npm:@ladybugdb/core@0.16.0",
     "onnxruntime-node": "^1.24.3",
     "sdl-mcp-native": "0.10.10",
     "tokenizers": "npm:@anush008/tokenizers@^0.6.0"
