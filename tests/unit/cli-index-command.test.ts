@@ -455,10 +455,14 @@ describe("CLI index command", () => {
 
       const originalGraphDbPath = process.env.SDL_GRAPH_DB_PATH;
       const originalGraphDbDir = process.env.SDL_GRAPH_DB_DIR;
+      const originalDbPath = process.env.SDL_DB_PATH;
       const origLog = console.log;
       const origError = console.error;
       delete process.env.SDL_GRAPH_DB_PATH;
       delete process.env.SDL_GRAPH_DB_DIR;
+      // The test runner sets legacy SDL_DB_PATH for compatibility. Clear it so
+      // this test exercises the graphDatabase.path from its temporary config.
+      delete process.env.SDL_DB_PATH;
       console.log = () => {};
       console.error = () => {};
 
@@ -474,6 +478,11 @@ describe("CLI index command", () => {
           delete process.env.SDL_GRAPH_DB_DIR;
         } else {
           process.env.SDL_GRAPH_DB_DIR = originalGraphDbDir;
+        }
+        if (originalDbPath === undefined) {
+          delete process.env.SDL_DB_PATH;
+        } else {
+          process.env.SDL_DB_PATH = originalDbPath;
         }
         console.log = origLog;
         console.error = origError;
