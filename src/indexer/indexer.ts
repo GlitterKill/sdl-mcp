@@ -662,13 +662,19 @@ async function indexRepoImpl(
       () =>
         resolveUnresolvedImportEdges(repoId, {
           includeTimings: Boolean(phaseTimings),
-          affectedPaths: new Set<string>([
-            ...changedPass2FilePaths,
-            ...Array.from(
-              symbolMapFileUpdates.values(),
-              (update) => update.relPath,
-            ),
-          ]),
+          // Skip path filter on full reindex — listing every file becomes
+          // O(N) STARTS WITH OR-clauses inside fetchEdges, often slower than
+          // an unfiltered scan once the change set covers most of the repo.
+          affectedPaths:
+            mode === "incremental"
+              ? new Set<string>([
+                  ...changedPass2FilePaths,
+                  ...Array.from(
+                    symbolMapFileUpdates.values(),
+                    (update) => update.relPath,
+                  ),
+                ])
+              : undefined,
         }),
     );
     if (phaseTimings && importReResolution.timings) {
