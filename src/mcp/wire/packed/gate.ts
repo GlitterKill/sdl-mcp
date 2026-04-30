@@ -13,11 +13,11 @@
  *   1. Per-call options.{packedThreshold, packedTokenThreshold}
  *   2. Env SDL_PACKED_THRESHOLD / SDL_PACKED_TOKEN_THRESHOLD (parsed float)
  *   3. Config wire.packed.{threshold, tokenThreshold}
- *   4. Defaults — bytes 0.15, tokens 0.30
+ *   4. Defaults — bytes 0.10, tokens 0.20
  */
 
-const DEFAULT_BYTE_THRESHOLD = 0.15;
-const DEFAULT_TOKEN_THRESHOLD = 0.3;
+const DEFAULT_BYTE_THRESHOLD = 0.10;
+const DEFAULT_TOKEN_THRESHOLD = 0.20;
 
 export interface GateContext {
   /** Per-call byte-savings override; takes top precedence. */

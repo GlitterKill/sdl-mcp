@@ -406,7 +406,7 @@ Two-axis packed wire format adoption.
 | `packedBytesTotal`, `jsonBaselineBytesTotal`, `bytesSaved` | number                    | Raw byte accounting.                                                                             |
 | `bytesSavedRatio`                                          | number 0–1                | `bytesSaved / jsonBaselineBytesTotal`.                                                           |
 | `axisHits`                                                 | `{ bytes, tokens, none }` | Which gate axis tripped per decision. `tokens` dominating is expected for slice-shaped payloads. |
-| `perEncoder`                                               | `Record<string, number>`  | Per-encoder counts (`sl1`, `ss1`, `ctx1`, `gen1`).                                               |
+| `perEncoder`                                               | `Record<string, number>`  | Per-encoder counts (`sl1`, `ss1`, `ctx1`).                                               |
 
 ### `ppr: PprMetrics`
 

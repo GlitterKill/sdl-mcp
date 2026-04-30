@@ -40,8 +40,6 @@ export {
   parseTablesScalar,
 } from "./schema.js";
 
-export { encodeGeneric, decodeGeneric } from "./generic.js";
-
 export { decodePacked, tryDecodePacked } from "./decoder.js";
 
 export { encodePackedSlice, SLICE_ENCODER_ID } from "./encoders/slice.js";

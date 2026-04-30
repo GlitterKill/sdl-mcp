@@ -20,6 +20,7 @@ import { recordToolTrace } from "../../graph/prefetch-model.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { logSemanticSearchTelemetry } from "../telemetry.js";
 import { attachRawContext } from "../token-usage.js";
+import { serializeSymbolSearchForWireFormat } from "./symbol-wire-format.js";
 import {
   searchSymbolsWithOverlay,
   searchSymbolsHybridWithOverlay,
@@ -532,6 +533,48 @@ export async function handleSymbolSearch(
     if (retrievalEvidence?.pprBoosts) {
       (response as Record<string, unknown>).pprBoosts =
         retrievalEvidence.pprBoosts;
+    }
+  }
+  if (request.wireFormat === "packed" || request.wireFormat === "auto") {
+    const wireResult = serializeSymbolSearchForWireFormat(
+      {
+        query,
+        results: effectiveResults.map((r) => ({
+          symbolId: r.symbolId,
+          name: r.name,
+          file: r.file,
+          kind: r.kind as string,
+        })),
+        total: effectiveResults.length,
+      },
+      request.wireFormat,
+    );
+    if (wireResult.gateDecision) {
+      const savedRatio =
+        wireResult.jsonBytes && wireResult.jsonBytes > 0
+          ? (wireResult.jsonBytes - (wireResult.packedBytes ?? 0)) /
+            wireResult.jsonBytes
+          : 0;
+      const jt = wireResult.jsonTokens;
+      const pt = wireResult.packedTokens;
+      const tokenSavedRatio =
+        typeof jt === "number" && typeof pt === "number" && jt > 0
+          ? (jt - pt) / jt
+          : undefined;
+      (response as Record<string, unknown>)._packedStats = {
+        encoderId: wireResult.encoderId,
+        jsonBytes: wireResult.jsonBytes,
+        packedBytes: wireResult.packedBytes,
+        jsonTokens: wireResult.jsonTokens,
+        packedTokens: wireResult.packedTokens,
+        savedRatio,
+        tokenSavedRatio,
+        axisHit: wireResult.axisHit,
+        gateDecision: wireResult.gateDecision,
+      };
+    }
+    if (wireResult.format === "packed") {
+      response.results = wireResult.payload as string;
     }
   }
   return attachRawContext(response, {

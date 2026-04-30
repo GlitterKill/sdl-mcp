@@ -1318,14 +1318,14 @@
             "threshold": {
               "type": "number",
               "description": "Minimum byte-savings ratio before packed payload is emitted (0.0-1.0). Env var SDL_PACKED_THRESHOLD overrides.",
-              "default": 0.15,
+              "default": 0.10,
               "minimum": 0,
               "maximum": 1
             },
             "tokenThreshold": {
               "type": "number",
               "description": "Minimum estimated-token-savings ratio before packed payload is emitted (0.0-1.0). Either threshold (bytes OR tokens) is sufficient. Env var SDL_PACKED_TOKEN_THRESHOLD overrides.",
-              "default": 0.3,
+              "default": 0.20,
               "minimum": 0,
               "maximum": 1
             },
@@ -1333,11 +1333,11 @@
               "type": "string",
               "enum": ["packed", "auto", "compact"],
               "description": "Default wire format when client omits the field. Env var SDL_PACKED_DEFAULT_FORMAT overrides.",
-              "default": "compact"
+              "default": "auto"
             },
             "encoders": {
               "type": "object",
-              "description": "Per-encoder enable map keyed by encoderId (sl1, ss1, ctx1, gen1)",
+              "description": "Per-encoder enable map keyed by encoderId (sl1, ss1, ctx1)",
               "additionalProperties": {
                 "type": "object",
                 "properties": {

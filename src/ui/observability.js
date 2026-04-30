@@ -357,7 +357,27 @@ function updateTokenEfficiency(t, packed) {
   if (packed) {
     setVal(panel, "packedAdoptionPct", fmtPct(packed.packedAdoptionPct, 1));
     setVal(panel, "packedBytesSaved", fmtBytes(packed.bytesSaved));
+    renderPerEncoderBreakdown(panel, packed.byEncoder ?? {});
   }
+}
+
+function renderPerEncoderBreakdown(panel, byEncoder) {
+  const host = panelField(panel, "packedByEncoder");
+  if (!host) return;
+  const entries = Object.entries(byEncoder);
+  if (entries.length === 0) {
+    host.textContent = "—";
+    return;
+  }
+  const rows = entries
+    .sort((a, b) => b[1].bytesSaved - a[1].bytesSaved)
+    .map(([id, m]) => {
+      const adoption = fmtPct(m.packedAdoptionPct, 1);
+      const bytes = fmtBytes(m.bytesSaved);
+      return `<tr><td class="enc">${escapeHtml(id)}</td><td class="adopt">${escapeHtml(adoption)}</td><td class="saved">${escapeHtml(bytes)}</td><td class="count">${escapeHtml(String(m.totalDecisions))}</td></tr>`;
+    });
+  host.innerHTML =
+    `<table class="per-encoder"><thead><tr><th>encoder</th><th>adoption</th><th>saved</th><th>n</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 
 function updateHealth(h) {

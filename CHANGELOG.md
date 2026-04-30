@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Packed wire format default flipped to `"auto"`** for `slice.build`,
+  `sdl.symbol.search`, and `sdl.context`. Server now runs the packed gate by
+  default; clients without a packed decoder must opt back to legacy with
+  `wireFormat: "compact"` (slice) or `wireFormat: "json"` (symbol/context),
+  or set `wire.packed.defaultFormat: "compact"` in config. Decoder available
+  via `decodePacked` from `@sdl-mcp/wire/packed`.
+- **Packed gate thresholds lowered**: byte threshold `0.15 → 0.10`, token
+  threshold `0.30 → 0.20`. More responses now clear the gate; admins can
+  override via `wire.packed.threshold` / `wire.packed.tokenThreshold` or env
+  `SDL_PACKED_THRESHOLD` / `SDL_PACKED_TOKEN_THRESHOLD`.
+
+### Added
+
+- **Packed wire-format coverage extended to `sdl.symbol.search` and
+  `sdl.context`** — both tools now run the packed gate end-to-end with tap
+  events for both `packed` and `fallback` decisions. Observability dashboard
+  PACKED / BYTES SAVED counters increment for `ss1` (symbol-search) and
+  `ctx1` (context) encoders, not just `sl1`. Per-encoder breakdown table
+  added to the token-efficiency panel.
+- **Per-encoder dashboard breakdown** in `PackedWireMetrics.byEncoder`:
+  totalDecisions, packedCount, fallbackCount, packedAdoptionPct,
+  jsonBaselineBytesTotal, packedBytesTotal, bytesSaved, bytesSavedRatio.
+  Surfaces in `/ui/observability` token-efficiency panel.
+- **Slice fallback tap publishing** — `slice.build` previously only published
+  packed-decision tap events; fallbacks were silent. Both branches now record
+  to `tokenAccumulator` and publish `packedWire` tap events.
+
+### Removed
+
+- **`gen1` generic packed encoder** — never wired into any production tool
+  path. Removed `encodeGeneric` / `decodeGeneric` exports, registry entry,
+  and `tests/unit/packed-generic.test.ts`. `EncoderId` type narrowed to
+  `"sl1" | "ss1" | "ctx1"`.
+
 ### Added
 
 - **Observability dashboard (V1, read-only)** — built-in HTTP UI at

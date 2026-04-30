@@ -19,8 +19,6 @@ import type {
 import { buildSlice } from "../../graph/slice.js";
 import type { RetrievalSource } from "../../retrieval/types.js";
 import { getBeamExplainStore } from "../../observability/index.js";
-import { getObservabilityTap } from "../../observability/event-tap.js";
-
 import { classifySymptomType } from "../../retrieval/evidence.js";
 import { entitySearch } from "../../retrieval/index.js";
 import {
@@ -76,7 +74,6 @@ import {
   type SpanAttributes,
 } from "../../util/tracing.js";
 import { attachRawContext } from "../token-usage.js";
-import { tokenAccumulator } from "../token-accumulator.js";
 import {
   serializeSliceForWireFormat,
   normalizeVisibility,
@@ -628,21 +625,6 @@ async function handleSliceBuildInternal(
         }
       | undefined;
     if (wireResult.format === "packed") {
-      tokenAccumulator.recordPackedUsage(
-        wireResult.encoderId,
-        wireResult.jsonBytes,
-        wireResult.packedBytes,
-        "packed",
-      );
-      try {
-        getObservabilityTap()?.packedWire({
-          encoderId: wireResult.encoderId,
-          jsonBytes: wireResult.jsonBytes,
-          packedBytes: wireResult.packedBytes,
-          decision: "packed",
-          axisHit: wireResult.axisHit ?? null,
-        });
-      } catch { /* swallow */ }
       const savedRatio =
         wireResult.jsonBytes > 0
           ? (wireResult.jsonBytes - wireResult.packedBytes) / wireResult.jsonBytes

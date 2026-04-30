@@ -3,7 +3,7 @@
  * See devdocs/plans/packed-wireformat-plan.md.
  */
 
-export type EncoderId = "sl1" | "ss1" | "ctx1" | "gen1";
+export type EncoderId = "sl1" | "ss1" | "ctx1";
 
 export interface PackedPayload {
   text: string;

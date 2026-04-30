@@ -20,11 +20,31 @@ interface ContextRung {
   rationale?: string;
 }
 
+interface ContextAction {
+  id?: string;
+  type?: string;
+  status?: string;
+  durationMs?: number;
+  error?: string;
+}
+
+interface ContextEvidenceItem {
+  type?: string;
+  reference?: string;
+  summary?: string;
+}
+
 interface ContextInput {
   taskType?: string;
   windowBytes?: number;
   cards?: ContextCard[];
   rungs?: ContextRung[];
+  actions?: ContextAction[];
+  evidence?: ContextEvidenceItem[];
+  summary?: string;
+  success?: boolean;
+  nextBestActionTool?: string;
+  nextBestActionRationale?: string;
 }
 
 const CARDS_SPEC: TableSpec = {
@@ -48,6 +68,28 @@ const RUNGS_SPEC: TableSpec = {
   ],
 };
 
+const ACTIONS_SPEC: TableSpec = {
+  tag: "a",
+  key: "actions",
+  columns: [
+    { name: "id", type: "str" },
+    { name: "type", type: "str", intern: true },
+    { name: "status", type: "str", intern: true },
+    { name: "durationMs", type: "int" },
+    { name: "error", type: "str" },
+  ],
+};
+
+const EVIDENCE_SPEC: TableSpec = {
+  tag: "e",
+  key: "evidence",
+  columns: [
+    { name: "type", type: "str", intern: true },
+    { name: "reference", type: "str" },
+    { name: "summary", type: "str" },
+  ],
+};
+
 export function encodePackedContext(input: ContextInput): string {
   const cardRows = (input.cards ?? []).map((card) => ({
     id: card.symbolId ?? card.id ?? "",
@@ -60,17 +102,42 @@ export function encodePackedContext(input: ContextInput): string {
     rungName: r.rungName ?? r.rung ?? "",
     rationale: r.rationale ?? "",
   }));
+  const actionRows = (input.actions ?? []).map((a) => ({
+    id: a.id ?? "",
+    type: a.type ?? "",
+    status: a.status ?? "",
+    durationMs: a.durationMs ?? 0,
+    error: a.error ?? "",
+  }));
+  const evidenceRows = (input.evidence ?? []).map((e) => ({
+    type: e.type ?? "",
+    reference: e.reference ?? "",
+    summary: e.summary ?? "",
+  }));
   return encodeSchemaDriven({
     toolName: "context",
     encoderId: "ctx1",
     scalars: {
       taskType: input.taskType ?? "",
       windowBytes: input.windowBytes ?? 0,
+      summary: input.summary ?? "",
+      success: input.success === true ? 1 : 0,
+      nbaTool: input.nextBestActionTool ?? "",
+      nbaRationale: input.nextBestActionRationale ?? "",
     },
-    scalarTypes: { taskType: "str", windowBytes: "int" },
+    scalarTypes: {
+      taskType: "str",
+      windowBytes: "int",
+      summary: "str",
+      success: "int",
+      nbaTool: "str",
+      nbaRationale: "str",
+    },
     tables: [
       { spec: CARDS_SPEC, rows: cardRows },
       { spec: RUNGS_SPEC, rows: rungRows },
+      { spec: ACTIONS_SPEC, rows: actionRows },
+      { spec: EVIDENCE_SPEC, rows: evidenceRows },
     ],
     legendCandidates: (input.cards ?? [])
       .map((c) => c.file ?? "")

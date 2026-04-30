@@ -198,6 +198,20 @@ export interface PackedWireMetrics {
   axisHits: { bytes: number; tokens: number; none: number };
   /** Per-encoder counts. */
   perEncoder: Record<string, number>;
+  /** Per-encoder breakdown including bytes saved and adoption. */
+  byEncoder: Record<
+    string,
+    {
+      totalDecisions: number;
+      packedCount: number;
+      fallbackCount: number;
+      packedAdoptionPct: number;
+      jsonBaselineBytesTotal: number;
+      packedBytesTotal: number;
+      bytesSaved: number;
+      bytesSavedRatio: number;
+    }
+  >;
 }
 
 export interface PprMetrics {

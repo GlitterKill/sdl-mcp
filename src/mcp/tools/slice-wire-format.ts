@@ -20,6 +20,10 @@ import {
   SYMBOL_ID_COMPACT_WIRE_LENGTH,
 } from "../../config/constants.js";
 
+import { getObservabilityTap } from "../../observability/event-tap.js";
+import { tokenAccumulator } from "../token-accumulator.js";
+import { SLICE_ENCODER_ID } from "../wire/packed/encoders/slice.js";
+
 
 
 const VISIBILITY_VALUES: readonly Visibility[] = [
@@ -221,11 +225,28 @@ export function serializeSliceForWireFormat(
         callTokenThreshold: options?.packedTokenThreshold,
       }),
     );
+
+    const gateDecision = detail.decision === "packed" ? "packed" : "fallback";
+    tokenAccumulator.recordPackedUsage(
+      SLICE_ENCODER_ID,
+      jsonStr.length,
+      packedStr.length,
+      gateDecision,
+    );
+    try {
+      getObservabilityTap()?.packedWire({
+        encoderId: SLICE_ENCODER_ID,
+        jsonBytes: jsonStr.length,
+        packedBytes: packedStr.length,
+        decision: gateDecision,
+        axisHit: detail.axisHit ?? null,
+      });
+    } catch { /* swallow */ }
     if (detail.decision === "packed") {
       return {
         format: "packed",
         payload: packedStr,
-        encoderId: "sl1",
+        encoderId: SLICE_ENCODER_ID,
         jsonBytes: jsonStr.length,
         packedBytes: packedStr.length,
         jsonTokens,

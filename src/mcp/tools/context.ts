@@ -2,6 +2,7 @@ import { contextEngine } from "../../agent/context-engine.js";
 import type { AgentTask } from "../../agent/types.js";
 import { IndexError, ValidationError } from "../errors.js";
 import { attachRawContext } from "../token-usage.js";
+import { serializeContextForWireFormat } from "./context-wire-format.js";
 import {
   AgentContextRequestSchema,
   type AgentContextResponse,
@@ -111,12 +112,56 @@ export async function handleAgentContext(
     // and would cause the savings meter to always show 0%.
     const rawTokens = (response.metrics?.totalTokens ?? 0) * 3;
     const enrichedResponse = attachRawContext(response, { rawTokens });
+    // Snapshot pre-gate bulk fields so the ETag stable view reflects the
+    // original payload identity even when the packed gate clears them.
+    const stableView: Record<string, unknown> = {
+      ...(enrichedResponse as Record<string, unknown>),
+    };
+    if (request.wireFormat === "packed" || request.wireFormat === "auto") {
+      const wireResult = serializeContextForWireFormat(
+        enrichedResponse as Record<string, unknown>,
+        request.wireFormat,
+      );
+      if (wireResult.gateDecision) {
+        const savedRatio =
+          wireResult.jsonBytes && wireResult.jsonBytes > 0
+            ? (wireResult.jsonBytes - (wireResult.packedBytes ?? 0)) /
+              wireResult.jsonBytes
+            : 0;
+        const jt = wireResult.jsonTokens;
+        const pt = wireResult.packedTokens;
+        const tokenSavedRatio =
+          typeof jt === "number" && typeof pt === "number" && jt > 0
+            ? (jt - pt) / jt
+            : undefined;
+        (enrichedResponse as Record<string, unknown>)._packedStats = {
+          encoderId: wireResult.encoderId,
+          jsonBytes: wireResult.jsonBytes,
+          packedBytes: wireResult.packedBytes,
+          jsonTokens: wireResult.jsonTokens,
+          packedTokens: wireResult.packedTokens,
+          savedRatio,
+          tokenSavedRatio,
+          axisHit: wireResult.axisHit,
+          gateDecision: wireResult.gateDecision,
+        };
+      }
+      if (wireResult.format === "packed") {
+        (enrichedResponse as Record<string, unknown>)._packedPayload =
+          wireResult.payload as string;
+        (enrichedResponse as Record<string, unknown>).actionsTaken = [];
+        (enrichedResponse as Record<string, unknown>).finalEvidence = [];
+        // stableView keeps pre-clear actionsTaken/finalEvidence so two
+        // packed responses with different underlying data produce different
+        // ETags. _packedPayload is also tracked here to defend against
+        // future decoder drift surfacing identity-changing fields.
+        stableView._packedPayload = wireResult.payload;
+      }
+    }
     return buildConditionalResponse(enrichedResponse, {
       ifNoneMatch: request.ifNoneMatch,
       // Strip request-unique IDs and timing data from the ETag source.
-      stableValue: buildStableAgentContextValue(
-        enrichedResponse as Record<string, unknown>,
-      ),
+      stableValue: buildStableAgentContextValue(stableView),
     });
   } catch (error) {
     if (error instanceof ZodError) {

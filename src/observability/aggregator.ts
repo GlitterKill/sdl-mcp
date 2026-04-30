@@ -237,6 +237,16 @@ export class Aggregator {
   private packedAxisTokens = 0;
   private packedAxisNone = 0;
   private readonly packedPerEncoder = new Map<string, number>();
+  private readonly packedPerEncoderStats = new Map<
+    string,
+    {
+      count: number;
+      packedHits: number;
+      fallback: number;
+      jsonBytes: number;
+      packedBytes: number;
+    }
+  >();
 
   // ----- PPR -----
   private pprTotal = 0;
@@ -560,6 +570,19 @@ export class Aggregator {
       rec.encoderId,
       (this.packedPerEncoder.get(rec.encoderId) ?? 0) + 1,
     );
+    const stats = this.packedPerEncoderStats.get(rec.encoderId) ?? {
+      count: 0,
+      packedHits: 0,
+      fallback: 0,
+      jsonBytes: 0,
+      packedBytes: 0,
+    };
+    stats.count += 1;
+    if (rec.decision === "packed") stats.packedHits += 1;
+    else stats.fallback += 1;
+    if (Number.isFinite(rec.jsonBytes)) stats.jsonBytes += rec.jsonBytes;
+    if (Number.isFinite(rec.packedBytes)) stats.packedBytes += rec.packedBytes;
+    this.packedPerEncoderStats.set(rec.encoderId, stats);
   }
 
   recordScipIngest(rec: {
@@ -1015,6 +1038,26 @@ export class Aggregator {
         none: this.packedAxisNone,
       },
       perEncoder: Object.fromEntries(this.packedPerEncoder),
+      byEncoder: Object.fromEntries(
+        Array.from(this.packedPerEncoderStats.entries()).map(([id, s]) => {
+          const adoption = s.count === 0 ? 0 : (s.packedHits / s.count) * 100;
+          const bytesSaved = Math.max(0, s.jsonBytes - s.packedBytes);
+          const ratio = s.jsonBytes === 0 ? 0 : bytesSaved / s.jsonBytes;
+          return [
+            id,
+            {
+              totalDecisions: s.count,
+              packedCount: s.packedHits,
+              fallbackCount: s.fallback,
+              packedAdoptionPct: adoption,
+              jsonBaselineBytesTotal: s.jsonBytes,
+              packedBytesTotal: s.packedBytes,
+              bytesSaved,
+              bytesSavedRatio: ratio,
+            },
+          ];
+        }),
+      ),
     };
   }
 

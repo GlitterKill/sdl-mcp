@@ -11,9 +11,9 @@ import {
   PACKED_DEFAULT_TOKEN_THRESHOLD,
 } from "../../dist/mcp/wire/packed/index.js";
 
-test("default thresholds: bytes 0.15, tokens 0.30", () => {
-  assert.equal(PACKED_DEFAULT_THRESHOLD, 0.15);
-  assert.equal(PACKED_DEFAULT_TOKEN_THRESHOLD, 0.3);
+test("default thresholds: bytes 0.10, tokens 0.20", () => {
+  assert.equal(PACKED_DEFAULT_THRESHOLD, 0.10);
+  assert.equal(PACKED_DEFAULT_TOKEN_THRESHOLD, 0.20);
 });
 
 test("shouldEmitPacked clears 0.15 byte threshold", () => {

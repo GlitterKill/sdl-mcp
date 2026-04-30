@@ -10,7 +10,6 @@ import {
   SYMBOL_SEARCH_ENCODER_ID,
 } from "./symbol-search.js";
 import { encodePackedContext, CONTEXT_ENCODER_ID } from "./context.js";
-import { encodeGeneric } from "../generic.js";
 
 export interface RegisteredEncoder {
   id: string;
@@ -39,11 +38,6 @@ REGISTRY.set(CONTEXT_ENCODER_ID, {
   toolName: "context",
   encode: (v) =>
     encodePackedContext(v as Parameters<typeof encodePackedContext>[0]),
-});
-REGISTRY.set("gen1", {
-  id: "gen1",
-  toolName: "generic",
-  encode: (v) => encodeGeneric("generic", v),
 });
 
 export function getEncoder(id: string): RegisteredEncoder | undefined {

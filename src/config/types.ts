@@ -627,9 +627,9 @@ export const PackedEncoderToggleSchema = z.object({
 
 export const PackedConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  threshold: z.number().min(0).max(1).default(0.15),
-  tokenThreshold: z.number().min(0).max(1).default(0.3),
-  defaultFormat: z.enum(["packed", "auto", "compact"]).default("compact"),
+  threshold: z.number().min(0).max(1).default(0.10),
+  tokenThreshold: z.number().min(0).max(1).default(0.20),
+  defaultFormat: z.enum(["packed", "auto", "compact"]).default("auto"),
   encoders: z.record(z.string(), PackedEncoderToggleSchema).optional(),
 });
 export type PackedConfig = z.infer<typeof PackedConfigSchema>;

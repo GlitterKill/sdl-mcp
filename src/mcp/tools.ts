@@ -870,8 +870,8 @@ export const SymbolSearchRequestSchema = z
     pprDirection: z.enum(["out", "in", "both"]).optional(),
     /** PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default: 2.0 (tuned 2026-04-27). */
     pprWeight: z.number().min(0).max(2).optional(),
-    /** Wire format for the response payload. "packed" emits the SDL-MCP packed wire format (gate-protected); "auto" picks the smaller of packed vs JSON. Falls back to JSON below the savings threshold. */
-    wireFormat: z.enum(["json", "packed", "auto"]).optional(),
+    /** Wire format for the response payload. "packed" emits the SDL-MCP packed wire format (gate-protected); "auto" picks the smaller of packed vs JSON; "json" forces legacy JSON. Falls back to JSON below the savings threshold. Default: "auto". */
+    wireFormat: z.enum(["json", "packed", "auto"]).optional().default("auto"),
   })
   .refine((data) => data.query || data.pattern, {
     message: "Either 'query' or 'pattern' must be provided",
@@ -889,7 +889,7 @@ export type RetrievalEvidenceItem = z.infer<typeof RetrievalEvidenceItemSchema>;
 
 export const SymbolSearchResponseSchema = z.object({
   repoId: z.string().optional(),
-  results: z.array(SymbolSearchResultSchema),
+  results: z.union([z.array(SymbolSearchResultSchema), z.string()]),
   /** @deprecated Use results instead. Removed to reduce response size. */
   symbols: z.array(SymbolSearchResultSchema).optional(),
   truncation: z
@@ -921,6 +921,20 @@ export const SymbolSearchResponseSchema = z.object({
   exactMatchFound: z.boolean().optional(),
   /** Suggestion text when results are weak or empty. */
   suggestion: z.string().optional(),
+  /** Packed wire-format telemetry. Only populated when symbol-search ran the packed gate. */
+  _packedStats: z
+    .object({
+      encoderId: z.string(),
+      jsonBytes: z.number().int().nonnegative(),
+      packedBytes: z.number().int().nonnegative(),
+      jsonTokens: z.number().int().nonnegative().optional(),
+      packedTokens: z.number().int().nonnegative().optional(),
+      savedRatio: z.number(),
+      tokenSavedRatio: z.number().optional(),
+      axisHit: z.enum(["bytes", "tokens"]).optional(),
+      gateDecision: z.enum(["packed", "fallback"]),
+    })
+    .optional(),
 });
 
 const NotModifiedResponseSchema = z.object({
@@ -1076,7 +1090,7 @@ export const SliceBuildRequestSchema = z.object({
     .optional(),
   cardDetail: CardDetailLevelSchema.optional(),
   adaptiveDetail: z.boolean().optional(),
-  wireFormat: SliceBuildWireFormatSchema.optional(),
+  wireFormat: SliceBuildWireFormatSchema.optional().default("auto"),
   wireFormatVersion: SliceBuildWireFormatVersionSchema.optional(),
   budget: SliceBudgetSchema.optional(),
   minConfidence: z.number().min(0).max(1).default(0.5),
@@ -1857,8 +1871,8 @@ export type PRRiskAnalysisResponse = z.infer<
 // ============================================================================
 
 export const AgentContextRequestSchema = z.object({
-  /** Wire format for the response payload. "packed" emits packed wire format (gate-protected); "auto" picks the smaller of packed vs JSON. */
-  wireFormat: z.enum(["json", "packed", "auto"]).optional(),
+  /** Wire format for the response payload. "packed" emits packed wire format (gate-protected); "auto" picks the smaller of packed vs JSON; "json" forces legacy JSON. Default: "auto". */
+  wireFormat: z.enum(["json", "packed", "auto"]).optional().default("auto"),
   repoId: z
     .string()
     .min(1)
@@ -2039,6 +2053,22 @@ const AgentContextPayloadSchema = z.object({
           feedbackIds: z.array(z.string()),
         })
         .optional(),
+    })
+    .optional(),
+  /** Packed wire-format payload. Populated when wireFormat=packed and gate decision was "packed". */
+  _packedPayload: z.string().optional(),
+  /** Packed wire-format telemetry. Populated when sdl.context ran the packed gate. */
+  _packedStats: z
+    .object({
+      encoderId: z.string(),
+      jsonBytes: z.number().int().nonnegative(),
+      packedBytes: z.number().int().nonnegative(),
+      jsonTokens: z.number().int().nonnegative().optional(),
+      packedTokens: z.number().int().nonnegative().optional(),
+      savedRatio: z.number(),
+      tokenSavedRatio: z.number().optional(),
+      axisHit: z.enum(["bytes", "tokens"]).optional(),
+      gateDecision: z.enum(["packed", "fallback"]),
     })
     .optional(),
 });
