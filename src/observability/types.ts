@@ -290,6 +290,40 @@ export interface ToolVolume {
 /* Top-level snapshot                                                          */
 /* -------------------------------------------------------------------------- */
 
+export interface AuditBufferMetrics {
+  /** Current in-memory audit buffer depth. */
+  depth: number;
+  /** Maximum depth observed since service start. */
+  maxDepth: number;
+  /** Cumulative dropped audit events since process start. */
+  droppedTotal: number;
+  /** True when a post-index write session is currently active. */
+  sessionActive: boolean;
+}
+
+export interface PostIndexSessionMetrics {
+  /** Total post-index sessions observed since service start. */
+  totalSessions: number;
+  /** Average session duration in milliseconds. */
+  avgDurationMs: number;
+  /** P50 session duration in milliseconds. */
+  p50DurationMs: number;
+  /** P95 session duration in milliseconds. */
+  p95DurationMs: number;
+  /** P99 session duration in milliseconds. */
+  p99DurationMs: number;
+  /** Maximum session duration in milliseconds. */
+  maxDurationMs: number;
+  /** Sessions that aborted with timeout since service start. */
+  timeoutCount: number;
+  /** Most recent session duration in milliseconds. */
+  lastDurationMs: number;
+  /** Whether the most recent session timed out. */
+  lastTimedOut: boolean;
+  /** ISO 8601 timestamp when the most recent session ended, or null. */
+  lastEndedAt: string | null;
+}
+
 export interface ObservabilitySnapshot {
   schemaVersion: 1;
   /** ISO 8601 timestamp at which the snapshot was generated. */
@@ -313,6 +347,8 @@ export interface ObservabilitySnapshot {
   resources: ResourceMetrics;
   bottleneck: BottleneckSummary;
   toolVolume: ToolVolume;
+  auditBuffer: AuditBufferMetrics;
+  postIndexSession: PostIndexSessionMetrics;
 }
 
 /* -------------------------------------------------------------------------- */

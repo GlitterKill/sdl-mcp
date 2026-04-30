@@ -37,6 +37,7 @@ import { watchRepositoryWithIndexer } from "./watcher.js";
 import type { RepoConfig } from "../config/types.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { getLadybugConn } from "../db/ladybug.js";
+import { withPostIndexWriteSession } from "../db/write-session.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
 import { flushIndexEvent } from "../mcp/telemetry.js";
@@ -763,68 +764,100 @@ async function indexRepoImpl(
 
     const durationMs = Date.now() - startTime;
 
-    // --- Phase: post-index metrics (summaries, clusters, processes) ---
-
-    const changedFileIdsParam =
-      mode === "incremental" ? changedFileIds : undefined;
-    const changedTestFilePathsParam =
-      mode === "incremental" ? changedPass2FilePaths : undefined;
-    const hasIndexMutations = changedFiles > 0 || totalEdgesCreated > 0;
-    const finalizeResult = await measurePhase("finalizeIndexing", () =>
-      finalizeIndexing({
-        repoId,
-        versionId,
-        appConfig,
-        changedFileIds: changedFileIdsParam,
-        changedTestFilePaths: changedTestFilePathsParam,
-        hasIndexMutations,
-        includeTimings: Boolean(phaseTimings),
-        callResolutionTelemetry,
-        onProgress,
-      }),
-    );
-    const { summaryStats } = finalizeResult;
-    if (phaseTimings && finalizeResult.timings) {
-      for (const [phaseName, durationMs] of Object.entries(
-        finalizeResult.timings,
-      )) {
-        phaseTimings[`finalizeIndexing.${phaseName}`] = durationMs;
-      }
-    }
-
-    // Refresh read connection again after version/metrics writes.
-    freshConn = await getLadybugConn();
-    const { clustersComputed, processesTraced } = await finalizeDerivedState({
-      mode,
-      conn: freshConn,
-      repoId,
-      versionId,
-      filesTotal: files.length,
-      phaseTimings,
-      onProgress,
-      sharedGraph: finalizeResult.sharedGraph,
-      measurePhase,
-    });
-
-    // --- Phase: build deferred indexes (fresh DB only) ---
-
-    await measurePhase("buildDeferredIndexes", async () => {
-      const { buildDeferredIndexes } = await import("../db/ladybug.js");
-      await buildDeferredIndexes();
-    });
-
-    // --- Phase: memory management (staleness flagging + file import) ---
-
-    await measurePhase("memorySync", async () => {
-      await flagStaleMemoriesForChangedFiles(
-        freshConn,
-        repoId,
-        changedFileIds,
-        versionId,
+    // --- Phase: post-index metrics (summaries, clusters, processes,
+    // deferred indexes, memory sync, audit flush) ---
+    //
+    // All DB writes from finalizeIndexing through the index-event audit log
+    // are routed through a single post-index session that holds the
+    // writeLimiter end-to-end. Other writers (audit logs from interactive
+    // tools, live-index reconcile) detect the session via
+    // getActivePostIndexSession() and buffer rather than racing for a write
+    // txn. Inside the session body, withWriteConn() reuses the session conn
+    // directly via AsyncLocalStorage so nested write paths don't deadlock
+    // waiting for the limiter slot they already own.
+    const sessionEdgeTotal = totalEdgesCreated + configEdgesCreated;
+    const phaseOutcome = await withPostIndexWriteSession(async () => {
+      const changedFileIdsParam =
+        mode === "incremental" ? changedFileIds : undefined;
+      const changedTestFilePathsParam =
+        mode === "incremental" ? changedPass2FilePaths : undefined;
+      const hasIndexMutations = changedFiles > 0 || totalEdgesCreated > 0;
+      const finalizeResult = await measurePhase("finalizeIndexing", () =>
+        finalizeIndexing({
+          repoId,
+          versionId,
+          appConfig,
+          changedFileIds: changedFileIdsParam,
+          changedTestFilePaths: changedTestFilePathsParam,
+          hasIndexMutations,
+          includeTimings: Boolean(phaseTimings),
+          callResolutionTelemetry,
+          onProgress,
+        }),
       );
-      await importMemoryFilesFromDisk(repoRow.rootPath, repoId, versionId);
+      if (phaseTimings && finalizeResult.timings) {
+        for (const [phaseName, phaseDurationMs] of Object.entries(
+          finalizeResult.timings,
+        )) {
+          phaseTimings[`finalizeIndexing.${phaseName}`] = phaseDurationMs;
+        }
+      }
+
+      // Refresh read connection again after version/metrics writes.
+      freshConn = await getLadybugConn();
+      const derivedResult = await finalizeDerivedState({
+        mode,
+        conn: freshConn,
+        repoId,
+        versionId,
+        filesTotal: files.length,
+        phaseTimings,
+        onProgress,
+        sharedGraph: finalizeResult.sharedGraph,
+        measurePhase,
+      });
+
+      // --- Phase: build deferred indexes (fresh DB only) ---
+      await measurePhase("buildDeferredIndexes", async () => {
+        const { buildDeferredIndexes } = await import("../db/ladybug.js");
+        await buildDeferredIndexes();
+      });
+
+      // --- Phase: memory management (staleness flagging + file import) ---
+      await measurePhase("memorySync", async () => {
+        await flagStaleMemoriesForChangedFiles(
+          freshConn,
+          repoId,
+          changedFileIds,
+          versionId,
+        );
+        await importMemoryFilesFromDisk(repoRow.rootPath, repoId, versionId);
+      });
+
+      // --- Phase: index-event audit flush ---
+      // Kept inside the session so it doesn't race writers that may run
+      // immediately after we release the limiter.
+      await flushIndexEvent({
+        repoId,
+        versionId,
+        stats: {
+          filesScanned: filesProcessed,
+          symbolsExtracted: totalSymbolsIndexed,
+          edgesExtracted: sessionEdgeTotal,
+          durationMs,
+          errors: 0,
+          pass1Engine: derivePass1EngineTelemetry(pass1Acc),
+        },
+      });
+
+      return {
+        summaryStats: finalizeResult.summaryStats,
+        clustersComputed: derivedResult.clustersComputed,
+        processesTraced: derivedResult.processesTraced,
+      };
     });
 
+    const { summaryStats, clustersComputed, processesTraced } = phaseOutcome;
     const totalMs = Date.now() - startTime;
 
     const result: IndexResult = {
@@ -833,7 +866,7 @@ async function indexRepoImpl(
       changedFiles,
       removedFiles,
       symbolsIndexed: totalSymbolsIndexed,
-      edgesCreated: totalEdgesCreated + configEdgesCreated,
+      edgesCreated: sessionEdgeTotal,
       clustersComputed,
       processesTraced,
       durationMs,
@@ -850,23 +883,6 @@ async function indexRepoImpl(
     clearSliceCache();
     clearFingerprintCollisionLog();
 
-    // Phase 1 Task 1.12 — emit `index.refresh.complete` audit event
-    // carrying per-language Pass-1 engine telemetry so users can
-    // audit Rust engine coverage and fallback rates over time.
-    // Keep the completion contract consistent across full and no-op
-    // incremental refreshes: when indexRepo() resolves, index writes are done.
-    await flushIndexEvent({
-      repoId,
-      versionId,
-      stats: {
-        filesScanned: result.filesProcessed,
-        symbolsExtracted: result.symbolsIndexed,
-        edgesExtracted: result.edgesCreated,
-        durationMs: result.durationMs,
-        errors: 0,
-        pass1Engine: derivePass1EngineTelemetry(pass1Acc),
-      },
-    });
     return result;
   } finally {
     if (workerPool) {

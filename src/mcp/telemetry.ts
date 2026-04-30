@@ -3,6 +3,8 @@ import * as crypto from "crypto";
 import type { RepoId, SymbolId } from "../domain/types.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import { getActivePostIndexSession } from "../db/write-session.js";
+import { bufferAuditEvent } from "./audit-buffer.js";
 import { logger } from "../util/logger.js";
 import { getObservabilityTap } from "../observability/event-tap.js";
 import { getCurrentTimestamp } from "../util/time.js";
@@ -206,17 +208,35 @@ async function recordAuditEvent(event: {
   symbolId?: string;
   detailsJson: string;
 }): Promise<void> {
+  const row = {
+    eventId: generateAuditEventId(),
+    timestamp: getCurrentTimestamp(),
+    tool: event.tool,
+    decision: event.decision,
+    repoId: event.repoId ?? null,
+    symbolId: event.symbolId ?? null,
+    detailsJson: event.detailsJson,
+  };
+  // Route through the audit buffer when a post-index session is in flight.
+  // The session holds the writeLimiter slot end-to-end; calling withWriteConn
+  // here would queue for the entire session duration and likely hit
+  // queueTimeoutMs. The session-end hook drains the buffer using the
+  // session's conn so audits land before the next writer can interleave.
+  if (getActivePostIndexSession()) {
+    if (!bufferAuditEvent(row)) {
+      // Buffer full; surface the drop synchronously so the first event is
+      // never silent. audit-buffer's own per-N log won't fire until N drops
+      // have accumulated, but operators need immediate visibility for
+      // compliance.
+      logger.error(
+        `[telemetry] Audit event dropped (buffer full) tool=${row.tool} decision=${row.decision} eventId=${row.eventId}`,
+      );
+    }
+    return;
+  }
   try {
     await withWriteConn(async (wConn) => {
-      await ladybugDb.insertAuditEvent(wConn, {
-        eventId: generateAuditEventId(),
-        timestamp: getCurrentTimestamp(),
-        tool: event.tool,
-        decision: event.decision,
-        repoId: event.repoId ?? null,
-        symbolId: event.symbolId ?? null,
-        detailsJson: event.detailsJson,
-      });
+      await ladybugDb.insertAuditEvent(wConn, row);
     });
   } catch (err) {
     logger.error(`Failed to log audit event: ${String(err)}`);

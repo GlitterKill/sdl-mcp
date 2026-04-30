@@ -519,6 +519,24 @@ function updateToolVolume(t) {
   });
 }
 
+function updatePostIndex(p, audit) {
+  const panel = $('[data-panel="postIndex"]');
+  if (!panel) return;
+  if (p) {
+    setVal(panel, "lastDurationMs", fmtMs(p.lastDurationMs));
+    setVal(panel, "totalSessions", fmtNum(p.totalSessions));
+    setVal(panel, "p95DurationMs", fmtMs(p.p95DurationMs));
+    setVal(panel, "p99DurationMs", fmtMs(p.p99DurationMs));
+    setVal(panel, "maxDurationMs", fmtMs(p.maxDurationMs));
+    setVal(panel, "timeoutCount", fmtNum(p.timeoutCount));
+  }
+  if (audit) {
+    setVal(panel, "auditBufferDepth", fmtNum(audit.depth));
+    setVal(panel, "auditBufferMaxDepth", fmtNum(audit.maxDepth));
+    setVal(panel, "auditBufferDropped", fmtNum(audit.droppedTotal));
+  }
+}
+
 // -------- Main snapshot apply --------
 function applySnapshot(snap) {
   if (!snap || typeof snap !== "object") return;
@@ -538,6 +556,7 @@ function applySnapshot(snap) {
     updatePpr(snap.ppr);
     updateResources(snap.resources, snap.uptimeMs);
     updateToolVolume(snap.toolVolume);
+    updatePostIndex(snap.postIndexSession, snap.auditBuffer);
   } catch (err) {
     console.error("[observability] applySnapshot error:", err);
   }

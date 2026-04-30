@@ -28,8 +28,13 @@ import {
   clearPreparedStatementCache,
   drainConnMutex,
   isConnectionPoisoned,
+  isConnStuck,
 } from "./ladybug-core.js";
 import { resetJoinHintCache } from "./ladybug-edges.js";
+import {
+  configureWriteConnAcquirer,
+  getCurrentSession,
+} from "./write-session.js";
 
 // ---------------------------------------------------------------------------
 // Close Hooks — allows external modules (e.g. indexer caches) to register
@@ -56,7 +61,7 @@ export function registerDbCloseHook(fn: () => void): void {
 // ---------------------------------------------------------------------------
 
 /** Names of Kuzu extensions managed by this module. */
-const MANAGED_EXTENSIONS = ["fts", "vector"] as const;
+const MANAGED_EXTENSIONS = ["fts", "vector", "algo"] as const;
 
 // Set to true once INSTALL has been attempted for the pool lifetime.
 let extensionsInstallAttempted = false;
@@ -594,6 +599,19 @@ export async function getLadybugReadConn(): Promise<LadybugConnection> {
   // `RETURN 1` query on every read checkout, doubling read latency.
   // Callers that hit a connection error should retry; the pool will
   // recreate unhealthy connections lazily on demand.
+  //
+  // Skip conns flagged stuck by ladybug-core's watchdog (a native task
+  // running inside the per-conn mutex >30s). Falls back to round-robin if
+  // every conn is stuck so liveness wins over correctness.
+  for (let attempt = 0; attempt < readPool.length; attempt++) {
+    const idx = readPoolIndex;
+    readPoolIndex = (readPoolIndex + 1) % readPool.length;
+    const candidate = readPool[idx];
+    if (!isConnStuck(candidate)) return candidate;
+  }
+  logger.error(
+    "[ladybug] all read conns flagged stuck; using round-robin anyway",
+  );
   const idx = readPoolIndex;
   readPoolIndex = (readPoolIndex + 1) % readPool.length;
   return readPool[idx];
@@ -654,6 +672,15 @@ export async function withWriteConn<T>(
   fn: (conn: LadybugConnection) => Promise<T>,
 ): Promise<T> {
   await getLadybugReadConn();
+  // Reuse the active post-index session conn when called from inside the
+  // session body. Avoids deadlock: the session already owns the writeLimiter
+  // slot, so another writeLimiter.run() would queue forever waiting for
+  // itself. The session conn is the same write conn the limiter would hand
+  // out; this is the only safe shortcut.
+  const session = getCurrentSession();
+  if (session) {
+    return fn(session.conn);
+  }
   if (!writeLimiter || !writeConn) {
     throw new DatabaseError(
       "Write connection not initialized. Call initLadybugDb() first.",
@@ -678,6 +705,11 @@ export async function withWriteConn<T>(
     }
   });
 }
+
+// Wire write-session.ts so withPostIndexWriteSession can acquire the same
+// writeLimiter slot. Function reference is hoisted; the actual pool init
+// runs lazily on first invocation.
+configureWriteConnAcquirer(withWriteConn);
 
 export async function initLadybugDb(dbPath: string): Promise<void> {
   const normalizedPath = normalizePath(normalizeGraphDbPath(dbPath));
@@ -830,33 +862,61 @@ export async function buildDeferredIndexes(): Promise<void> {
   const startMs = Date.now();
   logger.info("Building deferred secondary indexes after fresh load");
 
+  // Hold the writeLimiter slot across BOTH halves of the deferred-index
+  // build. Splitting them into two withWriteConn calls leaves a window
+  // where another writer (audit log, live-index reconcile) can interleave
+  // — the same race shape that produced "Cannot start a new write
+  // transaction" warnings before the post-index session refactor. Inside a
+  // post-index session, the ALS shortcut in withWriteConn reuses the
+  // session conn so this single call doesn't deadlock on the slot the
+  // session already holds.
   await withWriteConn(async (wConn) => {
     await createSecondaryIndexes(wConn);
-  });
 
-  try {
-    const sdlConfig = loadConfig();
-    const semanticConfig = sdlConfig.semantic;
-    if (semanticConfig?.enabled && semanticConfig.retrieval) {
-      const indexConn = await getLadybugConn();
-      const { ensureIndexes, ensureEntityIndexes } =
-        await import("../retrieval/index-lifecycle.js");
-      await ensureIndexes(indexConn, semanticConfig.retrieval);
-      await ensureEntityIndexes(indexConn);
+    try {
+      const sdlConfig = loadConfig();
+      const semanticConfig = sdlConfig.semantic;
+      const retrievalConfig = semanticConfig?.retrieval;
+      if (semanticConfig?.enabled && retrievalConfig) {
+        const { ensureIndexes, ensureEntityIndexes } =
+          await import("../retrieval/index-lifecycle.js");
+        await ensureIndexes(wConn, retrievalConfig);
+        await ensureEntityIndexes(wConn);
+      }
+    } catch (err) {
+      logger.warn(
+        `Deferred retrieval index build failed (non-fatal): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
-  } catch (err) {
-    logger.warn(
-      `Deferred retrieval index build failed (non-fatal): ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-  }
+  });
 
   deferredIndexesPending = false;
   logger.info("Deferred indexes built", { durationMs: Date.now() - startMs });
 }
 
 export async function closeLadybugDb(): Promise<void> {
+  // Best-effort flush of any audit events queued by the post-index buffer
+  // (src/mcp/audit-buffer.ts). Done before the writeLimiter drain so the
+  // events have a chance to commit while the limiter still accepts work.
+  // Failures are logged inside flushAuditBufferOnShutdown and don't block
+  // close.
+  if (writeLimiter) {
+    try {
+      const { flushAuditBufferOnShutdown } = await import(
+        "../mcp/audit-buffer.js"
+      );
+      await flushAuditBufferOnShutdown(async (body) => {
+        await withWriteConn(async (conn) => {
+          await body(conn);
+        });
+      });
+    } catch {
+      // Best-effort; never block shutdown on audit drain.
+    }
+  }
+
   // Drain in-flight writes before closing connections. Timeout after 5s
   // to avoid hanging indefinitely if a write is stuck.
   if (writeLimiter) {
@@ -873,6 +933,26 @@ export async function closeLadybugDb(): Promise<void> {
       });
     } catch {
       // Best-effort drain — proceed with teardown regardless
+    }
+
+    // Second pass: audit events that arrived from in-flight tool calls
+    // DURING the limiter drain landed in the buffer (their recordAuditEvent
+    // saw no active session, but the writeLimiter task they queued was
+    // cancelled by clearQueue below — actually the path is different;
+    // cross-context audit calls during shutdown go straight via
+    // withWriteConn and queue here. Either way, sweep the buffer once more
+    // before clearQueue so durability is best-effort but contiguous.
+    try {
+      const { flushAuditBufferOnShutdown } = await import(
+        "../mcp/audit-buffer.js"
+      );
+      await flushAuditBufferOnShutdown(async (body) => {
+        await withWriteConn(async (conn) => {
+          await body(conn);
+        });
+      });
+    } catch {
+      // Best-effort; never block shutdown.
     }
 
     // Clear queued tasks BEFORE closing connections so that processQueue
@@ -988,6 +1068,30 @@ export function getPoolStats(): {
  */
 export function getReadPool(): readonly import("kuzu").Connection[] {
   return readPool;
+}
+
+/**
+ * Snapshot of read-pool health used by callers that should back off when
+ * the DB is unresponsive (e.g. the file watcher). `stuck` counts read conns
+ * whose in-flight task has exceeded the watchdog threshold in ladybug-core.
+ * `healthy=true` iff fewer than half of the pool is currently stuck.
+ */
+export function getReadPoolHealth(): {
+  total: number;
+  stuck: number;
+  healthy: boolean;
+} {
+  const total = readPool.length;
+  let stuck = 0;
+  for (const conn of readPool) {
+    if (isConnStuck(conn)) stuck += 1;
+  }
+  // Unhealthy when at least half the conns are flagged stuck. (For a
+  // 1-conn pool, any stuck conn = unhealthy.) total === 0 means the pool
+  // is not initialized yet; treat as healthy so callers don't pre-emptively
+  // back off during startup.
+  const healthy = total === 0 ? true : stuck * 2 < total;
+  return { total, stuck, healthy };
 }
 
 export function isLadybugAvailable(): boolean {

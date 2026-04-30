@@ -15,7 +15,7 @@ import {
   WATCHER_DEFAULT_MAX_WATCHED_FILES,
 } from "../config/constants.js";
 import { loadConfig } from "../config/loadConfig.js";
-import { getLadybugConn } from "../db/ladybug.js";
+import { getLadybugConn, getReadPoolHealth } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { normalizePath } from "../util/paths.js";
 import { patchSavedFile } from "../live-index/file-patcher.js";
@@ -264,6 +264,17 @@ export async function watchRepositoryWithIndexer(
     attempt = 0,
   ): Promise<void> => {
     try {
+      // Health gate: bail before touching the DB if the read pool is
+      // already wedged. Avoids piling on more 60s reindex timeouts when
+      // a native call is hung. The catch block below schedules a
+      // backoff retry; pool typically recovers within seconds once the
+      // hung writer settles or the watchdog flips the conn.
+      const poolHealth = getReadPoolHealth();
+      if (!poolHealth.healthy) {
+        throw new Error(
+          `read pool unhealthy (stuck=${poolHealth.stuck}/${poolHealth.total}); deferring reindex`,
+        );
+      }
       logger.debug("File change detected", { filePath });
       // Bound the operation: the underlying patchSavedFile / indexRepo path
       // routes through `withWriteConn`, whose limiter has a 30s queue

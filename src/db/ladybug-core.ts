@@ -41,6 +41,52 @@ function getConnMutex(conn: Connection): ConcurrencyLimiter {
   return mutex;
 }
 
+// Stuck-connection tracker. When a native task running inside the per-conn
+// mutex exceeds STUCK_TASK_WARN_MS without settling, the conn is flagged
+// stuck so the read-pool round-robin can route around it. This is a liveness
+// fallback for the case where a LadybugDB native call hangs (e.g. after an
+// INSTALL race or write-txn conflict left the conn in an internally locked
+// state). The flag clears when the task finally settles.
+const DEFAULT_STUCK_TASK_WARN_MS = 30_000;
+
+// Test-only: override the watchdog threshold via env var so unit tests can
+// exercise the stuck-conn flag without 30-second sleeps. Read fresh on each
+// call so a test can change it mid-process.
+function getStuckTaskWarnMs(): number {
+  const raw = process.env.SDL_STUCK_TASK_WARN_MS;
+  if (raw) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return DEFAULT_STUCK_TASK_WARN_MS;
+}
+const stuckConns = new WeakSet<Connection>();
+
+export function isConnStuck(conn: Connection): boolean {
+  return stuckConns.has(conn);
+}
+
+function withConnWatchdog<T>(
+  conn: Connection,
+  label: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  let stuckMarked = false;
+  const warnMs = getStuckTaskWarnMs();
+  const timer = setTimeout(() => {
+    stuckMarked = true;
+    stuckConns.add(conn);
+    logger.warn(
+      `[ladybug-core] DB task running >${warnMs}ms; conn flagged stuck (label=${label})`,
+    );
+  }, warnMs);
+  timer.unref();
+  return fn().finally(() => {
+    clearTimeout(timer);
+    if (stuckMarked) stuckConns.delete(conn);
+  });
+}
+
 /**
  * Run a function with exclusive access to a LadybugDB connection.
  * For callers that use `conn.query()` directly (stored procedures, DDL)
@@ -52,7 +98,7 @@ export function runExclusive<T>(
   conn: Connection,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return getConnMutex(conn).run(fn);
+  return getConnMutex(conn).run(() => withConnWatchdog(conn, "runExclusive", fn));
 }
 
 /**
@@ -203,14 +249,16 @@ export async function queryAll<T>(
   statement: string,
   params: Record<string, unknown> = {},
 ): Promise<T[]> {
-  return getConnMutex(conn).run(async () => {
-    const result = await execute(conn, statement, params);
-    try {
-      return (await result.getAll()) as T[];
-    } finally {
-      result.close();
-    }
-  });
+  return getConnMutex(conn).run(() =>
+    withConnWatchdog(conn, "queryAll", async () => {
+      const result = await execute(conn, statement, params);
+      try {
+        return (await result.getAll()) as T[];
+      } finally {
+        result.close();
+      }
+    }),
+  );
 }
 
 export async function querySingle<T>(
@@ -227,10 +275,12 @@ export async function exec(
   statement: string,
   params: Record<string, unknown> = {},
 ): Promise<void> {
-  return getConnMutex(conn).run(async () => {
-    const result = await execute(conn, statement, params);
-    result.close();
-  });
+  return getConnMutex(conn).run(() =>
+    withConnWatchdog(conn, "exec", async () => {
+      const result = await execute(conn, statement, params);
+      result.close();
+    }),
+  );
 }
 
 export function isConnectionPoisoned(conn: Connection): boolean {
@@ -257,6 +307,39 @@ export function clearConnectionPoisoned(conn: Connection): void {
 // in the same microtask before either reaches the first await — but that
 // scenario is impossible given the synchronous check-set path.
 const transactionLockByConn = new WeakMap<Connection, boolean>();
+
+// LadybugDB allows only one write transaction at a time system-wide. When
+// concurrent writers race — e.g. indexer post-phase writes overlap with audit-
+// log writes or detectAlgoCapability lazy DDL — BEGIN TRANSACTION fails with
+// "Cannot start a new write transaction in the system". This is transient:
+// the active writer commits within milliseconds in the common case. Retry
+// with capped exponential backoff before propagating, so transient races
+// don't surface as user-visible failures.
+const BEGIN_TXN_RETRY_DELAYS_MS = [50, 100, 200, 400, 800] as const;
+
+async function beginTransactionWithRetry(conn: Connection): Promise<void> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= BEGIN_TXN_RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      await exec(conn, "BEGIN TRANSACTION");
+      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes("Cannot start a new write transaction")) throw err;
+      lastErr = err;
+      if (attempt >= BEGIN_TXN_RETRY_DELAYS_MS.length) break;
+      const delay = BEGIN_TXN_RETRY_DELAYS_MS[attempt];
+      logger.debug(
+        `[ladybug-core] BEGIN TRANSACTION conflict (attempt ${attempt + 1}); retrying in ${delay}ms`,
+      );
+      await new Promise((r) => {
+        const t = setTimeout(r, delay);
+        t.unref();
+      });
+    }
+  }
+  throw lastErr ?? new DatabaseError("BEGIN TRANSACTION failed without error");
+}
 
 export async function withTransaction<T>(
   conn: Connection,
@@ -299,7 +382,7 @@ export async function withTransaction<T>(
     transactionDepthByConn.set(conn, depth + 1);
 
     if (depth === 0) {
-      await exec(conn, "BEGIN TRANSACTION");
+      await beginTransactionWithRetry(conn);
     }
 
     try {

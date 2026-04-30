@@ -180,4 +180,48 @@ describe("Aggregator", () => {
     assert.equal(cache.totalHits, 7);
     assert.equal(cache.totalMisses, 3);
   });
+
+  it("records audit buffer samples and exposes gauge in snapshot", () => {
+    const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
+    agg.recordAuditBufferSample({
+      depth: 12,
+      droppedTotal: 0,
+      sessionActive: true,
+    });
+    agg.recordAuditBufferSample({
+      depth: 5,
+      droppedTotal: 2,
+      sessionActive: false,
+    });
+    const { auditBuffer } = agg.getSnapshot(REPO);
+    assert.equal(auditBuffer.depth, 5);
+    assert.equal(auditBuffer.maxDepth, 12);
+    assert.equal(auditBuffer.droppedTotal, 2);
+    assert.equal(auditBuffer.sessionActive, false);
+  });
+
+  it("computes post-index session histogram + timeout count", () => {
+    const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
+    agg.recordPostIndexSession({ durationMs: 100, timedOut: false });
+    agg.recordPostIndexSession({ durationMs: 250, timedOut: false });
+    agg.recordPostIndexSession({ durationMs: 9000, timedOut: true });
+    const { postIndexSession } = agg.getSnapshot(REPO);
+    assert.equal(postIndexSession.totalSessions, 3);
+    assert.equal(postIndexSession.timeoutCount, 1);
+    assert.equal(postIndexSession.maxDurationMs, 9000);
+    assert.equal(postIndexSession.lastDurationMs, 9000);
+    assert.equal(postIndexSession.lastTimedOut, true);
+    assert.ok(postIndexSession.lastEndedAt);
+    assert.ok(postIndexSession.p95DurationMs >= 250);
+    assert.ok(postIndexSession.avgDurationMs > 100);
+  });
+
+  it("ignores invalid post-index durations", () => {
+    const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
+    agg.recordPostIndexSession({ durationMs: Number.NaN, timedOut: false });
+    agg.recordPostIndexSession({ durationMs: -5, timedOut: false });
+    const { postIndexSession } = agg.getSnapshot(REPO);
+    assert.equal(postIndexSession.totalSessions, 0);
+    assert.equal(postIndexSession.maxDurationMs, 0);
+  });
 });

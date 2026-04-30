@@ -27,6 +27,8 @@ import type {
   ResourceSampleTapEvent,
   ScipIngestTapEvent,
   SliceBuildTapEvent,
+  AuditBufferTapEvent,
+  PostIndexSessionTapEvent,
 } from "./event-tap.js";
 import type {
   BeamExplainResponse,
@@ -489,6 +491,46 @@ export class ObservabilityService implements ObservabilityTap {
       });
     } catch (err) {
       this.logWarn("sliceBuild failed", err);
+    }
+  }
+
+  auditBufferSample(event: AuditBufferTapEvent): void {
+    try {
+      // Audit buffer is process-global; fan out to all aggregators so any
+      // active repo's snapshot reflects the same gauge value.
+      for (const aggregator of this.aggregators.values()) {
+        aggregator.recordAuditBufferSample({
+          depth: event.depth,
+          droppedTotal: event.droppedTotal,
+          sessionActive: event.sessionActive,
+        });
+      }
+      // Always populate the _global aggregator so dashboards have a target
+      // even before any repo has been registered.
+      this.getAggregator("_global").recordAuditBufferSample({
+        depth: event.depth,
+        droppedTotal: event.droppedTotal,
+        sessionActive: event.sessionActive,
+      });
+    } catch (err) {
+      this.logWarn("auditBufferSample failed", err);
+    }
+  }
+
+  postIndexSession(event: PostIndexSessionTapEvent): void {
+    try {
+      // Post-index session ends are process-global (no repoId on the event).
+      const rec = {
+        durationMs: event.durationMs,
+        timedOut: event.timedOut,
+        endedAt: new Date().toISOString(),
+      };
+      for (const aggregator of this.aggregators.values()) {
+        aggregator.recordPostIndexSession(rec);
+      }
+      this.getAggregator("_global").recordPostIndexSession(rec);
+    } catch (err) {
+      this.logWarn("postIndexSession failed", err);
     }
   }
 

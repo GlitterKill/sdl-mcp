@@ -6,6 +6,8 @@
  * ring-buffer internals, and helper utilities deliberately stay private.
  */
 export type {
+  AuditBufferMetrics,
+  PostIndexSessionMetrics,
   BeamDecision,
   BeamEdgeType,
   BeamExplainEntry,
@@ -45,6 +47,8 @@ export type {
   ResourceSampleTapEvent,
   ScipIngestTapEvent,
   SliceBuildTapEvent,
+  AuditBufferTapEvent,
+  PostIndexSessionTapEvent,
 } from "./event-tap.js";
 export {
   getObservabilityTap,

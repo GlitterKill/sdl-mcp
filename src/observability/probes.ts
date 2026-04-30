@@ -2,6 +2,11 @@ import { logger } from "../util/logger.js";
 import { getObservabilityTap } from "./event-tap.js";
 import { getPoolStats } from "../db/ladybug.js";
 import { getActiveDrainStats } from "../indexer/parser/batch-persist.js";
+import {
+  getBufferedAuditCount,
+  getDroppedAuditCount,
+} from "../mcp/audit-buffer.js";
+import { isPostIndexSessionActive } from "../db/write-session.js";
 import { clampInterval } from "./service.js";
 import type { ObservabilityConfig } from "../config/types.js";
 
@@ -53,6 +58,15 @@ export function startRuntimeProbes(config: ObservabilityConfig): void {
         drainQueueDepth,
         drainFailures,
       });
+      try {
+        tap.auditBufferSample({
+          depth: getBufferedAuditCount(),
+          droppedTotal: getDroppedAuditCount(),
+          sessionActive: isPostIndexSessionActive(),
+        });
+      } catch {
+        // audit buffer module may not be initialized — skip silently
+      }
     } catch (err) {
       logger.warn("observability runtime probe tick failed", {
         error: err instanceof Error ? err.message : String(err),

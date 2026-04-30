@@ -8,11 +8,13 @@
 export interface ExtensionCapabilities {
   fts: boolean;
   vector: boolean;
+  algo: boolean;
 }
 
 const extensionCapabilities: ExtensionCapabilities = {
   fts: false,
   vector: false,
+  algo: false,
 };
 
 /**
@@ -39,4 +41,5 @@ export function markExtensionLoaded(ext: keyof ExtensionCapabilities): void {
 export function resetExtensionCapabilities(): void {
   extensionCapabilities.fts = false;
   extensionCapabilities.vector = false;
+  extensionCapabilities.algo = false;
 }

@@ -97,6 +97,21 @@ export interface IndexPhaseTapEvent {
   durationMs: number;
 }
 
+export interface AuditBufferTapEvent {
+  /** Current depth of the in-memory audit buffer. */
+  depth: number;
+  /** Cumulative drops since process start. */
+  droppedTotal: number;
+  /** True when a post-index write session is currently active. */
+  sessionActive: boolean;
+}
+
+export interface PostIndexSessionTapEvent {
+  sessionId: string;
+  durationMs: number;
+  timedOut: boolean;
+}
+
 export interface ObservabilityTap {
   toolCall(event: ToolCallEvent): void;
   indexEvent(event: IndexEvent): void;
@@ -117,6 +132,8 @@ export interface ObservabilityTap {
   indexPhase(event: IndexPhaseTapEvent): void;
   cacheLookup(event: CacheLookupTapEvent): void;
   sliceBuild(event: SliceBuildTapEvent): void;
+  auditBufferSample(event: AuditBufferTapEvent): void;
+  postIndexSession(event: PostIndexSessionTapEvent): void;
 }
 
 let installedTap: ObservabilityTap | null = null;

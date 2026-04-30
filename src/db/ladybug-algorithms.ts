@@ -1,5 +1,6 @@
 import type { Connection } from "kuzu";
 import { exec, queryAll, querySingle, toNumber } from "./ladybug-core.js";
+import { getExtensionCapabilities } from "./extension-caps.js";
 import { logger } from "../util/logger.js";
 
 /**
@@ -88,10 +89,16 @@ export function graphProjectionName(repoId: string): string {
 
 /**
  * Detect whether the `algo` extension is available on this connection.
- * Tries `INSTALL algo; LOAD algo;` and caches the result per connection.
  *
- * When detection fails, logs a single warning with the reason and caches
- * `{ supported: false }` so subsequent calls are fast.
+ * Fast path: pool init runs INSTALL+LOAD for `algo` once on the write conn
+ * and per-conn LOAD on every read conn (see ladybug.ts MANAGED_EXTENSIONS).
+ * If that succeeded, this returns supported without further DDL.
+ *
+ * Fallback: when pool init didn't run (legacy tests, partial init), lazily
+ * INSTALL+LOAD on the caller's connection. Lazy DDL on a read conn races
+ * with the indexer's active write txn, so prefer the pool-init path.
+ *
+ * Caches per connection.
  */
 export async function detectAlgoCapability(
   conn: Connection,
@@ -99,25 +106,40 @@ export async function detectAlgoCapability(
   const cached = capabilityCacheByConn.get(conn);
   if (cached) return cached;
 
-  // Try install then load. Kuzu (LadybugDB) exposes extensions through
-  // INSTALL/LOAD. If the extension is bundled, INSTALL may be a no-op.
+  // Fast path: pool init (ladybug.ts MANAGED_EXTENSIONS) runs INSTALL+LOAD
+  // for `algo` once on the write conn and per-conn LOAD on every read conn.
+  // If that succeeded, the extension is already loaded on this conn — skip
+  // the lazy INSTALL/LOAD that would otherwise race the indexer's write txn
+  // and emit "Cannot start a new write transaction" warnings.
+  if (getExtensionCapabilities().algo) {
+    const capability: AlgoCapability = { supported: true };
+    capabilityCacheByConn.set(conn, capability);
+    return capability;
+  }
+
+  // Fallback: pool init didn't run (legacy tests, partial init). Lazy
+  // INSTALL/LOAD on the caller's connection. Best-effort.
   try {
     try {
       await exec(conn, "INSTALL algo");
     } catch (installErr) {
-      // INSTALL failures can be benign (e.g. already installed). Only
-      // propagate if LOAD also fails below. Log at warn so non-idempotency
-      // errors surface in production diagnostics rather than being hidden.
-      logger.warn("ladybug-algorithms: INSTALL algo failed (may be benign)", {
-        error:
-          installErr instanceof Error ? installErr.message : String(installErr),
-      });
+      logger.debug(
+        "ladybug-algorithms: lazy INSTALL algo failed (may be benign)",
+        {
+          error:
+            installErr instanceof Error
+              ? installErr.message
+              : String(installErr),
+        },
+      );
     }
 
     await exec(conn, "LOAD algo");
     const capability: AlgoCapability = { supported: true };
     capabilityCacheByConn.set(conn, capability);
-    logger.debug("ladybug-algorithms: algo extension loaded successfully");
+    logger.debug(
+      "ladybug-algorithms: algo extension loaded successfully (lazy)",
+    );
     return capability;
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
@@ -130,6 +152,7 @@ export async function detectAlgoCapability(
     return capability;
   }
 }
+
 
 function escapeCypherStringLiteral(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');

@@ -40,14 +40,21 @@ async function main(): Promise<void> {
       repoId,
       query,
       limit: 1,
+      wireFormat: "json",
     });
 
-    if (searchResponse.results.length === 0) {
+    const results = searchResponse.results;
+    if (!Array.isArray(results)) {
+      console.error("Symbol search returned packed results, cannot dump");
+      process.exit(1);
+    }
+
+    if (results.length === 0) {
       console.error(`No symbols found matching "${query}" in repo ${repoId}`);
       process.exit(1);
     }
 
-    if (searchResponse.results.length > 1) {
+    if (results.length > 1) {
       console.error(
         `Multiple symbols found matching "${query}". Please specify symbolId.`,
       );
@@ -55,7 +62,7 @@ async function main(): Promise<void> {
     }
 
     const cardResponse = await handleSymbolGetCard({
-      symbolId: searchResponse.results[0].symbolId,
+      symbolId: results[0].symbolId,
     });
     if ("card" in cardResponse) {
       card = cardResponse.card;
@@ -100,4 +107,3 @@ main().catch((err) => {
   console.error("Unexpected error:", err instanceof Error ? err.message : String(err));
   process.exit(1);
 });
-

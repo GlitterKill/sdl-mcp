@@ -32,6 +32,8 @@ import { RingBuffer } from "./ring-buffer.js";
 // currently committed heap and inflates idle ratios toward 1.0 between GCs.
 const HEAP_LIMIT_MB = getHeapStatistics().heap_size_limit / (1024 * 1024);
 import type {
+  AuditBufferMetrics,
+  PostIndexSessionMetrics,
   BeamSummary,
   CacheMetrics,
   CacheSourceMetrics,
@@ -292,6 +294,22 @@ export class Aggregator {
 
   // ----- DB latency tracking (for bottleneck input) -----
   private readonly dbLatencies: number[] = [];
+
+  // ----- audit buffer (gauge) -----
+  private auditBufferDepthLatest = 0;
+  private auditBufferDepthMax = 0;
+  private auditBufferDroppedTotal = 0;
+  private auditBufferSessionActive = false;
+
+  // ----- post-index session histogram -----
+  private postIndexSessionCount = 0;
+  private postIndexSessionDurationSum = 0;
+  private postIndexSessionDurationMax = 0;
+  private readonly postIndexSessionDurations: number[] = [];
+  private postIndexSessionTimeoutCount = 0;
+  private postIndexSessionLastDurationMs = 0;
+  private postIndexSessionLastTimedOut = false;
+  private postIndexSessionLastEndedAt: string | null = null;
 
   constructor(opts: AggregatorOptions = DEFAULT_AGGREGATOR_OPTIONS) {
     this.opts = opts;
@@ -727,6 +745,45 @@ export class Aggregator {
     if (Number.isFinite(n) && n >= 0) this.beamRetainedHandles = n;
   }
 
+  recordAuditBufferSample(rec: {
+    depth: number;
+    droppedTotal: number;
+    sessionActive: boolean;
+  }): void {
+    if (Number.isFinite(rec.depth) && rec.depth >= 0) {
+      this.auditBufferDepthLatest = rec.depth;
+      if (rec.depth > this.auditBufferDepthMax)
+        this.auditBufferDepthMax = rec.depth;
+    }
+    if (Number.isFinite(rec.droppedTotal) && rec.droppedTotal >= 0) {
+      this.auditBufferDroppedTotal = rec.droppedTotal;
+    }
+    this.auditBufferSessionActive = Boolean(rec.sessionActive);
+  }
+
+  recordPostIndexSession(rec: {
+    durationMs: number;
+    timedOut: boolean;
+    endedAt?: string;
+  }): void {
+    if (Number.isFinite(rec.durationMs) && rec.durationMs >= 0) {
+      this.postIndexSessionCount += 1;
+      this.postIndexSessionDurationSum += rec.durationMs;
+      if (rec.durationMs > this.postIndexSessionDurationMax)
+        this.postIndexSessionDurationMax = rec.durationMs;
+      pushBoundedSorted(
+        this.postIndexSessionDurations,
+        rec.durationMs,
+        LATENCY_WINDOW_SIZE,
+      );
+      this.postIndexSessionLastDurationMs = rec.durationMs;
+    }
+    this.postIndexSessionLastTimedOut = Boolean(rec.timedOut);
+    if (rec.timedOut) this.postIndexSessionTimeoutCount += 1;
+    this.postIndexSessionLastEndedAt =
+      rec.endedAt ?? new Date().toISOString();
+  }
+
   /* ---------------------- snapshot ---------------------- */
 
   getSnapshot(repoId: string): ObservabilitySnapshot {
@@ -746,6 +803,8 @@ export class Aggregator {
     const ppr = this.computePpr();
     const resources = this.computeResources();
     const toolVolume = this.computeToolVolume();
+    const auditBuffer = this.computeAuditBuffer();
+    const postIndexSession = this.computePostIndexSession();
 
     const bottleneck = classifyBottleneck({
       cpuPctAvg: resources.cpuPctAvg,
@@ -782,6 +841,8 @@ export class Aggregator {
       resources,
       bottleneck,
       toolVolume,
+      auditBuffer,
+      postIndexSession,
     };
   }
 
@@ -1111,6 +1172,33 @@ export class Aggregator {
       perTool,
       perToolErrors,
       callsPerMinute: this.toolCallTotal / uptimeMin,
+    };
+  }
+
+  private computeAuditBuffer(): AuditBufferMetrics {
+    return {
+      depth: this.auditBufferDepthLatest,
+      maxDepth: this.auditBufferDepthMax,
+      droppedTotal: this.auditBufferDroppedTotal,
+      sessionActive: this.auditBufferSessionActive,
+    };
+  }
+
+  private computePostIndexSession(): PostIndexSessionMetrics {
+    const total = this.postIndexSessionCount;
+    const avgDurationMs =
+      total === 0 ? 0 : this.postIndexSessionDurationSum / total;
+    return {
+      totalSessions: total,
+      avgDurationMs,
+      p50DurationMs: percentile(this.postIndexSessionDurations, 0.5),
+      p95DurationMs: percentile(this.postIndexSessionDurations, 0.95),
+      p99DurationMs: percentile(this.postIndexSessionDurations, 0.99),
+      maxDurationMs: this.postIndexSessionDurationMax,
+      timeoutCount: this.postIndexSessionTimeoutCount,
+      lastDurationMs: this.postIndexSessionLastDurationMs,
+      lastTimedOut: this.postIndexSessionLastTimedOut,
+      lastEndedAt: this.postIndexSessionLastEndedAt,
     };
   }
 }

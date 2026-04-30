@@ -242,6 +242,37 @@
         <div class="bar-list" data-field="perTool" aria-label="Per-tool calls"></div>
       </section>
 
+      <section class="panel" data-panel="postIndex" aria-label="Post-index sessions">
+        <header class="panel-head">
+          <h2>POST-INDEX</h2>
+          <span class="panel-sub" data-field="lastDurationMs">—</span>
+        </header>
+        <div class="kv-row">
+          <span class="kv-key">SESSIONS</span>
+          <span class="kv-val" data-field="totalSessions">—</span>
+          <span class="kv-key">P95</span>
+          <span class="kv-val" data-field="p95DurationMs">—</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">P99</span>
+          <span class="kv-val" data-field="p99DurationMs">—</span>
+          <span class="kv-key">MAX</span>
+          <span class="kv-val" data-field="maxDurationMs">—</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">TIMEOUTS</span>
+          <span class="kv-val" data-field="timeoutCount">—</span>
+          <span class="kv-key">AUDIT BUF</span>
+          <span class="kv-val" data-field="auditBufferDepth">—</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">AUDIT MAX</span>
+          <span class="kv-val" data-field="auditBufferMaxDepth">—</span>
+          <span class="kv-key">AUDIT DROP</span>
+          <span class="kv-val" data-field="auditBufferDropped">—</span>
+        </div>
+      </section>
+
       <section class="panel panel-system" data-panel="resources" aria-label="System stats">
         <header class="panel-head">
           <h2>SYSTEM STATS</h2>

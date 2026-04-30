@@ -261,6 +261,12 @@ export async function handleSymbolSearch(
     kind: row.kind as SymbolKind,
   }));
 
+  // Track every fileId that contributes to results so _rawContext.fileIds
+  // covers symbols added via fallback paths (exact-name lookup, camelCase
+  // subword fallback). Without this, workflow envelope can't compute
+  // savings for queries that resolve only via fallback.
+  const contributingFileIds = new Set<string>(rows.map((r) => r.fileId));
+
   // Prioritize exact name matches over fuzzy/partial matches
 
   // FP-7: Guarantee exact name matches are never missed due to DB limit truncation.
@@ -289,6 +295,7 @@ export async function handleSymbolSearch(
         file: exactMatch.file,
         kind: exactMatch.kind as SymbolKind,
       });
+      contributingFileIds.add(exactMatch.fileId);
     }
   }
 
@@ -319,6 +326,7 @@ export async function handleSymbolSearch(
             kind: row.kind as SymbolKind,
           });
           existingIds.add(row.symbolId);
+          contributingFileIds.add(row.fileId);
         }
       }
       // If joined multi-term query still found nothing, try individual subwords
@@ -349,6 +357,7 @@ export async function handleSymbolSearch(
                   kind: row.kind as SymbolKind,
                 });
                 existingIds.add(row.symbolId);
+                contributingFileIds.add(row.fileId);
               }
             }
           }
@@ -578,7 +587,7 @@ export async function handleSymbolSearch(
     }
   }
   return attachRawContext(response, {
-    fileIds: [...new Set(rows.map((row) => row.fileId))],
+    fileIds: [...contributingFileIds],
   });
 }
 
