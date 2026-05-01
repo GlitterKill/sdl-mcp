@@ -1,26 +1,7 @@
 import type { PendingCallEdge, SymbolIndex } from "./edge-builder.js";
-// =============================================================================
-// indexer.ts — Repository indexing entry point and watcher orchestrator.
-//
-// Public exports (LLM-cost cheat sheet):
-//   Functions:
-//     - indexRepo(repoId, mode, onProgress?, signal?, options?) — full/incremental indexing run
-//     - watchRepository(repoId) — start file watcher (delegates to watchRepositoryWithIndexer)
-//     - derivePass1EngineTelemetry(acc) — surface per-language Pass-1 engine breakdown
-//   Types:
-//     - IndexResult, IndexRepoOptions, IndexTimingDiagnostics, IndexWatchHandle, WatcherHealth
-//     - IndexProgress, IndexProgressSubstage (re-exported from ./indexer-init.js)
-//     - ResolveParserWorkerPoolSizeParams, ProcessFileParams (re-exported from ./parser.js)
-//   Re-exports from ./watcher.js:
-//     - getWatcherHealth, getAllWatcherHealth, _setWatcherHealthForTesting, _clearWatcherHealthForTesting
-//   Re-exports from ./parser.js:
-//     - resolveParserWorkerPoolSize
-//
-// Heavy lifting is delegated to siblings: indexer-pass1.ts, indexer-pass2.ts,
-// indexer-init.ts, indexer-version.ts, indexer-memory.ts, metrics-updater.ts,
-// finalize-derived-state.ts, watcher.ts. This file is the sequencer.
-// =============================================================================
-
+// Repository indexing entry point and watcher orchestrator. Heavy work stays in
+// sibling modules; this file sequences scans, pass1/pass2, finalization, and
+// watcher delegation.
 
 import {
   isTsCallResolutionFile,
@@ -75,9 +56,7 @@ import {
 } from "./indexer-memory.js";
 import { withIndexingGate } from "../mcp/indexing-gate.js";
 import { preIndexCheckpoint } from "../db/ladybug.js";
-
 export type { IndexProgress, IndexProgressSubstage } from "./indexer-init.js";
-
 export interface IndexTimingDiagnostics {
   totalMs: number;
   phases: Record<string, number>;
@@ -86,7 +65,6 @@ export interface IndexTimingDiagnostics {
 export interface IndexRepoOptions {
   includeTimings?: boolean;
 }
-
 export interface IndexResult {
   versionId: string;
   filesProcessed: number;
@@ -121,7 +99,6 @@ export interface IndexWatchHandle {
   ready: Promise<void>;
   close: () => Promise<void>;
 }
-
 export interface WatcherHealth {
   enabled: boolean;
   running: boolean;
@@ -606,7 +583,7 @@ async function indexRepoImpl(
       }
       return await runPass1WithTsEngine(pass1Params);
     }, { engine: useRustEngine ? "rust" : "ts" });
-    // Phase 1.13 — record actual engine used so engineDispatch reflects fallbacks.
+    // Record actual engine used so engineDispatch reflects fallbacks.
     try {
       getObservabilityTap()?.indexPhase({
         phase: "_meta.pass1Engine",
@@ -636,9 +613,7 @@ async function indexRepoImpl(
     });
 
     // --- Phase: Pass 2 — cross-file call resolution ---
-
-    // Fix 4: TS resolver created eagerly in initSharedState — no deferred creation needed.
-
+    // Fix 4: TS resolver created eagerly in initSharedState.
     totalEdgesCreated += await measurePhase("pass2", async () =>
       runPass2Resolvers({
         repoId,
@@ -713,7 +688,6 @@ async function indexRepoImpl(
       });
       totalEdgesCreated += importReResolution.resolved;
     }
-
     const changedFiles = changedFilesFromPass1 + removedFiles;
 
     // --- Phase: release pass2 memory before edge finalization ---

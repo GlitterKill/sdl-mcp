@@ -133,6 +133,10 @@ let readPoolIndex = 0;
 
 let writeConn: LadybugConnection | null = null;
 let writeLimiter: ConcurrencyLimiter | null = null;
+const sessionWriteBodyLimiters = new WeakMap<
+  LadybugConnection,
+  ConcurrencyLimiter
+>();
 let writeQueueTimeoutMs = 30_000;
 
 let deferredIndexesPending = false;
@@ -144,6 +148,18 @@ const recyclingSlots = new Set<number>();
 // Initialization mutex: prevents concurrent callers from double-initializing
 // the DB instance or connection pool across async boundaries.
 let dbInitPromise: Promise<LadybugDatabase> | null = null;
+
+function getSessionWriteBodyLimiter(conn: LadybugConnection): ConcurrencyLimiter {
+  let limiter = sessionWriteBodyLimiters.get(conn);
+  if (!limiter) {
+    limiter = new ConcurrencyLimiter({
+      maxConcurrency: 1,
+      queueTimeoutMs: writeQueueTimeoutMs,
+    });
+    sessionWriteBodyLimiters.set(conn, limiter);
+  }
+  return limiter;
+}
 let poolInitPromise: Promise<void> | null = null;
 
 /**
@@ -676,10 +692,12 @@ export async function withWriteConn<T>(
   // session body. Avoids deadlock: the session already owns the writeLimiter
   // slot, so another writeLimiter.run() would queue forever waiting for
   // itself. The session conn is the same write conn the limiter would hand
-  // out; this is the only safe shortcut.
+  // out, but parallel session subphases can still overlap, so serialize
+  // these write bodies with a separate mutex. Do not use the low-level
+  // query mutex here; write bodies call exec/query internally.
   const session = getCurrentSession();
   if (session) {
-    return fn(session.conn);
+    return getSessionWriteBodyLimiter(session.conn).run(() => fn(session.conn));
   }
   if (!writeLimiter || !writeConn) {
     throw new DatabaseError(
@@ -700,7 +718,9 @@ export async function withWriteConn<T>(
         const db = await getLadybugDb();
         const healthy = await getHealthyConnection(conn, db, "write");
         if (healthy !== conn) writeConn = healthy;
-      } catch {}
+      } catch {
+        // Best-effort health check; preserve the original write error.
+      }
       throw err;
     }
   });
