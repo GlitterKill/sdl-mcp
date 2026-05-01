@@ -3,6 +3,7 @@ import {
   processFile,
   processFileFromRustResult,
 } from "./parser.js";
+import { ParserWorkerPool } from "./workerPool.js";
 import {
   parseFilesRust,
   parseFilesRustAsync,
@@ -228,7 +229,20 @@ export async function runPass1WithRustEngine(
   // Wait for background write queue to finish
   await batchAccumulator.drain();
 
-  // Process files that the Rust engine couldn't handle via the TS engine
+  // Process files that the Rust engine couldn't handle via the TS engine.
+  // Lazy-create a small worker pool when Rust path didn't supply one,
+  // so fallback parsing isn't serialized on the main thread.
+  let fallbackPool: ParserWorkerPool | null = params.workerPool ?? null;
+  let ownsFallbackPool = false;
+  if (fallbackPool === null && tsFallbackFiles.length > 0) {
+    try {
+      fallbackPool = new ParserWorkerPool();
+      ownsFallbackPool = true;
+    } catch (err) {
+      logger.warn("Failed to create fallback ParserWorkerPool; falling back to inline parse", { err });
+      fallbackPool = null;
+    }
+  }
   for (const file of tsFallbackFiles) {
     if (params.signal?.aborted) break;
     updateProgress(file.path);
@@ -249,7 +263,7 @@ export async function runPass1WithRustEngine(
         tsResolver,
         config,
         allSymbolsByName,
-        workerPool: null,
+        workerPool: fallbackPool,
         skipCallResolution,
         globalNameToSymbolIds,
         globalPreferredSymbolId,
@@ -283,6 +297,9 @@ export async function runPass1WithRustEngine(
     }
   }
 
+  if (ownsFallbackPool && fallbackPool !== null) {
+    try { await fallbackPool.shutdown(); } catch (err) { logger.warn("fallbackPool.shutdown failed", { err }); }
+  }
   logger.info("Pass 1 engine breakdown", {
     rustFiles: acc.rustFilesProcessed,
     tsFiles: acc.tsFilesProcessed,

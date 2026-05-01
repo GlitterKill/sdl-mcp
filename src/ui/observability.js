@@ -395,6 +395,8 @@ function updateHealth(h) {
     sort: false,
   });
   setVal(panel, "watcherRunning", h.watcherRunning ? "ON" : "OFF");
+  setVal(panel, "watcherErrors", fmtNum(h.watcherErrors ?? 0));
+  setVal(panel, "watcherRestartCount", fmtNum(h.watcherRestartCount ?? 0));
   setVal(panel, "watcherQueueDepth", fmtNum(h.watcherQueueDepth));
   setVal(panel, "watcherStale", h.watcherStale ? "STALE" : "FRESH");
 }

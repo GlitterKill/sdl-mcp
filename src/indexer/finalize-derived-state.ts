@@ -4,6 +4,11 @@ import { computeAndStoreClustersAndProcesses } from "./cluster-orchestrator.js";
 import type { IndexProgress } from "./indexer-init.js";
 import { logger } from "../util/logger.js";
 
+import {
+  markDerivedStateComputed,
+  markDerivedStateDirty,
+} from "../db/ladybug-derived-state.js";
+import { enqueueDerivedRefresh } from "./derived-refresh-queue.js";
 export interface FinalizeDerivedStateParams {
   mode: "full" | "incremental";
   conn: Connection;
@@ -62,8 +67,6 @@ export async function finalizeDerivedState(
         }
       }
       try {
-        const { markDerivedStateComputed } =
-          await import("../db/ladybug-derived-state.js");
         await markDerivedStateComputed(repoId, versionId);
       } catch (error) {
         logger.debug("markDerivedStateComputed skipped", {
@@ -81,8 +84,6 @@ export async function finalizeDerivedState(
   }
 
   try {
-    const { markDerivedStateDirty } =
-      await import("../db/ladybug-derived-state.js");
     await markDerivedStateDirty(repoId, versionId, {
       clusters: true,
       processes: true,
@@ -120,8 +121,6 @@ export async function finalizeDerivedState(
   });
 
   try {
-    const { enqueueDerivedRefresh } =
-      await import("./derived-refresh-queue.js");
     enqueueDerivedRefresh(repoId, versionId);
   } catch (error) {
     logger.debug("enqueueDerivedRefresh skipped", {

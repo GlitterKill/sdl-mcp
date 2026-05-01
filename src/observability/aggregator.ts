@@ -80,6 +80,7 @@ interface IndexEventRec {
 interface IndexPhaseRec {
   phase: string;
   language?: string;
+  engine?: "rust" | "ts";
   durationMs: number;
 }
 
@@ -191,6 +192,10 @@ export class Aggregator {
   >();
   private indexEngineRust = 0;
   private indexEngineTs = 0;
+  /** Per-language Rust→TS fallback file counts; surfaced separately from
+   *  per-language parse durations so the count divisor for
+   *  perLanguageAvgMs stays clean. */
+  private readonly indexLangFallbackCount = new Map<string, number>();
   private lastIndexEdges = 0;
   private lastIndexErrors = 0;
   private indexFilesPerMinuteRing: RingBuffer<IndexEventRec>;
@@ -198,6 +203,8 @@ export class Aggregator {
 
   // ----- watcher / health -----
   private watcherRunning = false;
+  private watcherErrors = 0;
+  private watcherRestartCount = 0;
   private watcherQueueDepth = 0;
   private watcherStale = false;
   private healthScore = 0;
@@ -433,8 +440,26 @@ export class Aggregator {
       : 0;
     const failed = anyEvt.failed === true;
     if (failed) this.indexFailures += 1;
-    if (anyEvt.engine === "rust") this.indexEngineRust += 1;
-    else if (anyEvt.engine === "ts") this.indexEngineTs += 1;
+    // Phase 1.13 — derive per-engine file dispatch from pass1Engine telemetry
+    // when present so engineDispatch reflects file counts, not run counts.
+    const p1e = event.stats?.pass1Engine;
+    if (p1e) {
+      if (Number.isFinite(p1e.rustFiles)) this.indexEngineRust += p1e.rustFiles;
+      if (Number.isFinite(p1e.tsFiles)) this.indexEngineTs += p1e.tsFiles;
+      if (p1e.perLanguageFallback) {
+        for (const [lang, count] of Object.entries(p1e.perLanguageFallback)) {
+          if (!Number.isFinite(count)) continue;
+          let bucket = this.indexLangFallbackCount.get(lang);
+          if (bucket === undefined) bucket = 0;
+          this.indexLangFallbackCount.set(lang, bucket + count);
+        }
+      }
+    } else {
+      // Back-compat: when pass1Engine telemetry is absent, fall back to
+      // event-level engine field counted per run (legacy behavior).
+      if (anyEvt.engine === "rust") this.indexEngineRust += 1;
+      else if (anyEvt.engine === "ts") this.indexEngineTs += 1;
+    }
     if (anyEvt.language) {
       const lang = anyEvt.language;
       let bucket = this.indexLangSum.get(lang);
@@ -465,8 +490,13 @@ export class Aggregator {
   }
 
   recordIndexPhase(rec: IndexPhaseRec): void {
-    const phaseCount = (this.indexPhaseCounts.get(rec.phase) ?? 0) + 1;
-    this.indexPhaseCounts.set(rec.phase, phaseCount);
+    // Skip phaseCounts for synthetic _meta.* phases — they carry side-band
+    // metadata (engine, language) and would pollute charts that expect
+    // real timed phases.
+    if (!rec.phase.startsWith("_meta.")) {
+      const phaseCount = (this.indexPhaseCounts.get(rec.phase) ?? 0) + 1;
+      this.indexPhaseCounts.set(rec.phase, phaseCount);
+    }
     if (rec.phase === "pass1") {
       this.indexPass1Sum += rec.durationMs;
       this.indexPass1Count += 1;
@@ -534,6 +564,8 @@ export class Aggregator {
       stale?: boolean;
     };
     if (typeof evt.running === "boolean") this.watcherRunning = evt.running;
+    if (typeof evt.errors === "number" && Number.isFinite(evt.errors)) this.watcherErrors = evt.errors;
+    if (typeof evt.restartCount === "number" && Number.isFinite(evt.restartCount)) this.watcherRestartCount = evt.restartCount;
     if (typeof evt.queueDepth === "number")
       this.watcherQueueDepth = evt.queueDepth;
     if (typeof evt.stale === "boolean") this.watcherStale = evt.stale;
@@ -1021,6 +1053,8 @@ export class Aggregator {
       score: this.healthScore,
       components: this.healthComponents,
       watcherRunning: this.watcherRunning,
+      watcherErrors: this.watcherErrors,
+      watcherRestartCount: this.watcherRestartCount,
       watcherQueueDepth: this.watcherQueueDepth,
       watcherStale: this.watcherStale,
     };

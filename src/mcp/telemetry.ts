@@ -115,6 +115,8 @@ export interface WatcherHealthTelemetryEvent {
   queueDepth: number;
   eventsReceived: number;
   eventsProcessed: number;
+  /** Cumulative restarts since service start. */
+  restartCount?: number;
 }
 
 export interface EdgeResolutionTelemetryEvent {

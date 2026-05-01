@@ -170,7 +170,7 @@ export async function finalizeIndexing({
             provider: semanticConfig.provider ?? "local",
             model: embModel,
             onProgress,
-            concurrency: semanticConfig.embeddingConcurrency ?? 1,
+            concurrency: semanticConfig.embeddingConcurrency ?? 4,
           }),
         );
         logger.info(

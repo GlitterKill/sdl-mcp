@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`HealthMetrics.engineDispatch` semantics: events → files (BREAKING).**
+  Previously incremented per `index.refresh` event (one tick per run);
+  now reflects per-file dispatch sourced from `IndexStats.pass1Engine.{rustFiles,tsFiles}`.
+  Legacy `+= 1` per-event behavior preserved as a back-compat fallback when
+  `pass1Engine` telemetry is absent. Dashboard ratios + REST snapshot consumers
+  should expect order-of-magnitude larger counts. Surfaces in
+  `/api/observability/snapshot` and SSE stream.
+
 - **Packed wire format default flipped to `"auto"`** for `slice.build`,
   `sdl.symbol.search`, and `sdl.context`. Server now runs the packed gate by
   default; clients without a packed decoder must opt back to legacy with

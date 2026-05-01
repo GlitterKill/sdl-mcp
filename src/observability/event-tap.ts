@@ -94,6 +94,9 @@ export interface SliceBuildTapEvent {
 export interface IndexPhaseTapEvent {
   phase: string;
   language?: string;
+  engine?: "rust" | "ts";
+  /** Optional repo scope. When omitted (legacy), event applies to all aggregators. */
+  repoId?: string;
   durationMs: number;
 }
 

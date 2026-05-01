@@ -36,7 +36,7 @@ import { finalizeDerivedState } from "./finalize-derived-state.js";
 import { watchRepositoryWithIndexer } from "./watcher.js";
 import type { RepoConfig } from "../config/types.js";
 import { loadConfig } from "../config/loadConfig.js";
-import { getLadybugConn } from "../db/ladybug.js";
+import { buildDeferredIndexes, getLadybugConn } from "../db/ladybug.js";
 import { withPostIndexWriteSession } from "../db/write-session.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
@@ -277,6 +277,7 @@ async function indexRepoImpl(
   const measurePhase = async <T>(
     phaseName: string,
     fn: () => Promise<T> | T,
+    meta?: { language?: string; engine?: "rust" | "ts" },
   ): Promise<T> => {
     const phaseStart = Date.now();
     try {
@@ -284,7 +285,15 @@ async function indexRepoImpl(
     } finally {
       const durationMs = Date.now() - phaseStart;
       if (phaseTimings) phaseTimings[phaseName] = durationMs;
-      try { getObservabilityTap()?.indexPhase({ phase: phaseName, durationMs }); } catch { /* swallow */ }
+      try {
+        getObservabilityTap()?.indexPhase({
+          phase: phaseName,
+          durationMs,
+          repoId,
+          ...(meta?.language ? { language: meta.language } : {}),
+          ...(meta?.engine ? { engine: meta.engine } : {}),
+        });
+      } catch { /* swallow */ }
     }
   };
   const measureNestedPhase = async <T>(
@@ -586,15 +595,26 @@ async function indexRepoImpl(
       signal,
     };
 
+    let pass1EngineUsed: "rust" | "ts" = useRustEngine ? "rust" : "ts";
     const pass1Acc: Pass1Accumulator = await measurePhase("pass1", async () => {
       if (useRustEngine) {
         const outcome = await runPass1WithRustEngine(pass1Params);
-        return outcome.usedRust
-          ? outcome.acc
-          : await runPass1WithTsEngine(pass1Params);
+        if (outcome.usedRust) return outcome.acc;
+        // Native addon returned null — fall back to TS engine.
+        pass1EngineUsed = "ts";
+        return await runPass1WithTsEngine(pass1Params);
       }
       return await runPass1WithTsEngine(pass1Params);
-    });
+    }, { engine: useRustEngine ? "rust" : "ts" });
+    // Phase 1.13 — record actual engine used so engineDispatch reflects fallbacks.
+    try {
+      getObservabilityTap()?.indexPhase({
+        phase: "_meta.pass1Engine",
+        durationMs: 0,
+        repoId,
+        engine: pass1EngineUsed,
+      });
+    } catch { /* swallow */ }
 
     const {
       filesProcessed,
@@ -631,7 +651,7 @@ async function indexRepoImpl(
         symbolIndex,
         tsResolver,
         config,
-        pass2Concurrency: appConfig.indexing?.pass2Concurrency ?? 1,
+        pass2Concurrency: appConfig.indexing?.pass2Concurrency ?? 4,
         createdCallEdges,
         globalNameToSymbolIds,
         globalPreferredSymbolId,
@@ -819,7 +839,6 @@ async function indexRepoImpl(
 
       // --- Phase: build deferred indexes (fresh DB only) ---
       await measurePhase("buildDeferredIndexes", async () => {
-        const { buildDeferredIndexes } = await import("../db/ladybug.js");
         await buildDeferredIndexes();
       });
 

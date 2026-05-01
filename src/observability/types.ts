@@ -121,6 +121,10 @@ export interface HealthMetrics {
   watcherQueueDepth: number;
   /** True when watcher is reporting stale state. */
   watcherStale: boolean;
+  /** Cumulative watcher errors observed since service start. */
+  watcherErrors: number;
+  /** Cumulative watcher restart count observed since service start. */
+  watcherRestartCount: number;
 }
 
 export interface LatencyMetrics {

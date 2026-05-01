@@ -51,6 +51,7 @@ export type BeamExplainStoreLike = {
     sliceHandle: string,
     symbolId?: string,
   ): BeamExplainResponse | null;
+  size?(): number;
 };
 
 type SnapshotSubscriber = (snapshot: ObservabilitySnapshot) => void;
@@ -154,6 +155,18 @@ export class ObservabilityService implements ObservabilityTap {
         } catch (err) {
           this.logWarn("aggregator.computeAndRecordHealth failed", err);
         }
+      }
+      // Beam: surface retained explain-handle count.
+      try {
+        const beamStore = this.beamExplainStore;
+        if (beamStore !== null) {
+          const size = beamStore.size === undefined ? 0 : beamStore.size();
+          for (const aggregator of this.aggregators.values()) {
+            aggregator.setBeamRetainedHandles(size);
+          }
+        }
+      } catch (err) {
+        this.logWarn("beamExplainStore.size failed", err);
       }
       this.emitSnapshot();
     } catch (err) {
@@ -454,11 +467,23 @@ export class ObservabilityService implements ObservabilityTap {
 
   indexPhase(event: IndexPhaseTapEvent): void {
     try {
-      // indexPhase events do not carry repoId; apply to every aggregator.
+      const targetRepoId = event.repoId;
+      if (targetRepoId !== undefined && targetRepoId.length > 0) {
+        // Scoped event — apply only to the named aggregator.
+        this.getAggregator(targetRepoId).recordIndexPhase({
+          phase: event.phase,
+          language: event.language,
+          engine: event.engine,
+          durationMs: event.durationMs,
+        });
+        return;
+      }
+      // Legacy unscoped event — fan out to every known aggregator.
       for (const aggregator of this.aggregators.values()) {
         aggregator.recordIndexPhase({
           phase: event.phase,
           language: event.language,
+          engine: event.engine,
           durationMs: event.durationMs,
         });
       }
