@@ -213,6 +213,12 @@ export class StressClient {
         includeDiagnostics: true,
       };
     }
+    if (name === "sdl.symbol.search" && args.wireFormat === undefined) {
+      return { ...args, wireFormat: "json" };
+    }
+    if (name === "sdl.slice.build" && args.wireFormat === undefined) {
+      return { ...args, wireFormat: "compact" };
+    }
     return args;
   }
 }
