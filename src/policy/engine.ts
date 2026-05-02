@@ -15,7 +15,6 @@ import {
   isExecutableCompatibleWithRuntime,
   normalizeExecutableName,
 } from "../runtime/runtimes.js";
-import { logger } from "../util/logger.js";
 import type { NextBestAction, RequiredFieldsForNext } from "../domain/types.js";
 import {
   POLICY_PRIORITY_WINDOW_SIZE_LIMIT,
@@ -287,17 +286,19 @@ export class PolicyEngine {
         if (ctx.reason) {
           const reasonTrimmed = ctx.reason.trim();
           if (reasonTrimmed.startsWith("BREAK-GLASS:")) {
-            logger.warn("Break-glass override triggered", {
-              repoId: ctx.repoId,
-              symbolId: ctx.symbolId,
-              reason: ctx.reason,
-              requestType: ctx.requestType,
-            });
+            // Decision layer is pure: evidence type "break-glass-triggered"
+            // is the audit signal. Callers (enforcement / tool handlers) are
+            // responsible for any operator-visible logging.
             return {
               passed: true,
               evidence: {
                 type: "break-glass-triggered",
-                value: { reason: ctx.reason },
+                value: {
+                  reason: ctx.reason,
+                  repoId: ctx.repoId,
+                  symbolId: ctx.symbolId,
+                  requestType: ctx.requestType,
+                },
                 reason: "Break glass override triggered",
               },
             };
@@ -448,10 +449,8 @@ export class PolicyEngine {
           }
         }
       } catch (error) {
-        logger.error(`Policy rule "${rule.name}" evaluation failed`, {
-          error,
-          context,
-        });
+        // Decision layer is pure: failures surface as `rule-error` evidence.
+        // Callers may inspect evidenceUsed and log if observability is desired.
         evidence.push({
           type: "rule-error",
           value: { ruleName: rule.name, error: String(error) },
@@ -657,7 +656,9 @@ export class PolicyEngine {
         });
       }
 
-      if (!isExecutableCompatibleWithRuntime(context.runtime, context.executable)) {
+      if (
+        !isExecutableCompatibleWithRuntime(context.runtime, context.executable)
+      ) {
         evidence.push({
           type: "runtime-executable-mismatch",
           value: {

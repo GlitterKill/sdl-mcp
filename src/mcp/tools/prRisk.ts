@@ -9,7 +9,7 @@ import {
 } from "../../graph/score.js";
 import { getMetricsBySymbolIds } from "../../db/ladybug-metrics.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { PolicyEngine } from "../../policy/engine.js";
+import { decideCodeAccessLegacy } from "../../policy/code-access.js";
 import { logger } from "../../util/logger.js";
 import { PRRiskAnalysisRequestSchema } from "../tools.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
@@ -92,7 +92,8 @@ export async function handlePRRiskAnalysis(args: unknown) {
     repoId: validated.repoId,
   });
 
-  const policyEngine = new PolicyEngine(config.policy ?? {});
+
+
 
   const findings = generateFindings(delta, blastRadiusItems);
 
@@ -139,12 +140,16 @@ export async function handlePRRiskAnalysis(args: unknown) {
     | undefined;
   if (escalationRequired) {
     // Use delta requestType since this is PR/diff analysis, not code window access
-    const rawDecision = policyEngine.evaluate({
-      requestType: "delta",
-      repoId: validated.repoId,
-      identifiersToFind: ["pr-risk-escalation"],
-      reason: `PR risk score ${riskScore} exceeds threshold`,
-    });
+    const { decision: rawDecision } = decideCodeAccessLegacy(
+      {
+        requestType: "delta",
+        repoId: validated.repoId,
+        identifiersToFind: ["pr-risk-escalation"],
+        reason: `PR risk score ${riskScore} exceeds threshold`,
+      },
+      config.policy ?? {},
+    );
+
     policyDecision = {
       decision: rawDecision.decision,
       deniedReasons: rawDecision.deniedReasons ?? [],

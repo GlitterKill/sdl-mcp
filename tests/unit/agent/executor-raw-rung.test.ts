@@ -4,7 +4,6 @@ import { describe, it } from "node:test";
 import { Executor } from "../../../dist/agent/executor.js";
 import type { GateEvaluator } from "../../../dist/agent/executor.js";
 import type { AgentTask } from "../../../dist/agent/types.js";
-import { PolicyEngine } from "../../../dist/policy/engine.js";
 
 describe("executor raw rung", () => {
   it("captures bounded code-window evidence via evaluateRequest", async () => {
@@ -20,10 +19,7 @@ describe("executor raw rung", () => {
       estimatedTokens: 50,
     });
 
-    const executor = new Executor(
-      new PolicyEngine({ defaultDenyRaw: false }),
-      mockGate,
-    );
+    const executor = new Executor(mockGate);
     const task: AgentTask = {
       taskType: "debug",
       taskText: "Inspect raw context",
@@ -37,9 +33,7 @@ describe("executor raw rung", () => {
     assert.equal(rawAction.status, "completed");
     assert.deepEqual(rawAction.output, { symbolsProcessed: 1 });
 
-    const codeEvidence = result.evidence.filter(
-      (e) => e.type === "codeWindow",
-    );
+    const codeEvidence = result.evidence.filter((e) => e.type === "codeWindow");
     assert.ok(codeEvidence.length > 0, "Should capture code window evidence");
     assert.ok(
       codeEvidence[0].summary.includes("Code window"),
@@ -60,10 +54,7 @@ describe("executor raw rung", () => {
       estimatedTokens: 0,
     });
 
-    const executor = new Executor(
-      new PolicyEngine({ defaultDenyRaw: false }),
-      mockGate,
-    );
+    const executor = new Executor(mockGate);
     const task: AgentTask = {
       taskType: "review",
       taskText: "Inspect raw context",
@@ -93,14 +84,14 @@ describe("executor escalation", () => {
       estimatedTokens: 20,
     });
 
-    const executor = new Executor(
-      new PolicyEngine({ defaultDenyRaw: false }),
-      mockGate,
-    );
+    const executor = new Executor(mockGate);
     const noEvidenceError = new Error("forced empty rung");
     const testExecutor = executor as unknown as {
       executeCardRung: (task: AgentTask, context: string[]) => Promise<void>;
-      executeSkeletonRung: (task: AgentTask, context: string[]) => Promise<void>;
+      executeSkeletonRung: (
+        task: AgentTask,
+        context: string[],
+      ) => Promise<void>;
       executeHotPathRung: (task: AgentTask, context: string[]) => Promise<void>;
     };
     testExecutor.executeCardRung = async () => {
@@ -143,10 +134,7 @@ describe("executor escalation", () => {
       estimatedTokens: 20,
     });
 
-    const executor = new Executor(
-      new PolicyEngine({ defaultDenyRaw: false }),
-      mockGate,
-    );
+    const executor = new Executor(mockGate);
     const task: AgentTask = {
       taskType: "debug",
       taskText: "Investigate handleRequest",
@@ -195,13 +183,11 @@ describe("executor identifier extraction (via raw rung)", () => {
 
   it("extracts camelCase and PascalCase identifiers from task text", async () => {
     const { gate, captured } = createCapturingGate();
-    const executor = new Executor(
-      new PolicyEngine({ defaultDenyRaw: false }),
-      gate,
-    );
+    const executor = new Executor(gate);
     const task: AgentTask = {
       taskType: "debug",
-      taskText: "Fix the handleRequest and processData methods, check IndexError",
+      taskText:
+        "Fix the handleRequest and processData methods, check IndexError",
       repoId: "test-repo",
     };
 
@@ -209,17 +195,23 @@ describe("executor identifier extraction (via raw rung)", () => {
 
     assert.ok(captured.length > 0, "Gate should have been called");
     const ids = captured[0];
-    assert.ok(ids.includes("handleRequest"), "Should extract camelCase: handleRequest");
-    assert.ok(ids.includes("processData"), "Should extract camelCase: processData");
-    assert.ok(ids.includes("IndexError"), "Should extract PascalCase: IndexError");
+    assert.ok(
+      ids.includes("handleRequest"),
+      "Should extract camelCase: handleRequest",
+    );
+    assert.ok(
+      ids.includes("processData"),
+      "Should extract camelCase: processData",
+    );
+    assert.ok(
+      ids.includes("IndexError"),
+      "Should extract PascalCase: IndexError",
+    );
   });
 
   it("extracts snake_case identifiers from task text", async () => {
     const { gate, captured } = createCapturingGate();
-    const executor = new Executor(
-      new PolicyEngine({ defaultDenyRaw: false }),
-      gate,
-    );
+    const executor = new Executor(gate);
     const task: AgentTask = {
       taskType: "debug",
       taskText: "Check the max_window_lines and parse_config values",
@@ -230,16 +222,19 @@ describe("executor identifier extraction (via raw rung)", () => {
 
     assert.ok(captured.length > 0, "Gate should have been called");
     const ids = captured[0];
-    assert.ok(ids.includes("max_window_lines"), "Should extract snake_case: max_window_lines");
-    assert.ok(ids.includes("parse_config"), "Should extract snake_case: parse_config");
+    assert.ok(
+      ids.includes("max_window_lines"),
+      "Should extract snake_case: max_window_lines",
+    );
+    assert.ok(
+      ids.includes("parse_config"),
+      "Should extract snake_case: parse_config",
+    );
   });
 
   it("filters out STOP_WORDS in fallback extraction", async () => {
     const { gate, captured } = createCapturingGate();
-    const executor = new Executor(
-      new PolicyEngine({ defaultDenyRaw: false }),
-      gate,
-    );
+    const executor = new Executor(gate);
     const task: AgentTask = {
       taskType: "explain",
       // All words are either too short or in STOP_WORDS — except "validation"
@@ -251,7 +246,10 @@ describe("executor identifier extraction (via raw rung)", () => {
 
     assert.ok(captured.length > 0, "Gate should have been called");
     const ids = captured[0];
-    assert.ok(ids.includes("validation"), "Should include non-stop-word: validation");
+    assert.ok(
+      ids.includes("validation"),
+      "Should include non-stop-word: validation",
+    );
     // STOP_WORDS: "find", "the", "code", "that", "does" should be filtered
     assert.ok(!ids.includes("find"), "Should filter STOP_WORD: find");
     assert.ok(!ids.includes("the"), "Should filter STOP_WORD: the");
@@ -260,10 +258,7 @@ describe("executor identifier extraction (via raw rung)", () => {
 
   it("handles task text with no extractable identifiers", async () => {
     const { gate, captured } = createCapturingGate();
-    const executor = new Executor(
-      new PolicyEngine({ defaultDenyRaw: false }),
-      gate,
-    );
+    const executor = new Executor(gate);
     const task: AgentTask = {
       taskType: "explain",
       // Only stop words and short words
@@ -275,19 +270,21 @@ describe("executor identifier extraction (via raw rung)", () => {
 
     assert.ok(captured.length > 0, "Gate should have been called");
     const ids = captured[0];
-    assert.equal(ids.length, 0, "Should produce empty identifiers for all-stop-word text");
+    assert.equal(
+      ids.length,
+      0,
+      "Should produce empty identifiers for all-stop-word text",
+    );
   });
 
   it("caps identifiers at MAX_IDENTIFIERS (10)", async () => {
     const { gate, captured } = createCapturingGate();
-    const executor = new Executor(
-      new PolicyEngine({ defaultDenyRaw: false }),
-      gate,
-    );
+    const executor = new Executor(gate);
     const task: AgentTask = {
       taskType: "debug",
       // 12 distinct camelCase identifiers — should be capped at 10
-      taskText: "fix handleAlpha handleBeta handleGamma handleDelta handleEpsilon handleZeta handleEta handleTheta handleIota handleKappa handleLambda handleMu",
+      taskText:
+        "fix handleAlpha handleBeta handleGamma handleDelta handleEpsilon handleZeta handleEta handleTheta handleIota handleKappa handleLambda handleMu",
       repoId: "test-repo",
     };
 
@@ -295,15 +292,15 @@ describe("executor identifier extraction (via raw rung)", () => {
 
     assert.ok(captured.length > 0, "Gate should have been called");
     const ids = captured[0];
-    assert.ok(ids.length <= 10, `Should cap at 10 identifiers, got ${ids.length}`);
+    assert.ok(
+      ids.length <= 10,
+      `Should cap at 10 identifiers, got ${ids.length}`,
+    );
   });
 
   it("bounds identifier extraction on very long task text", async () => {
     const { gate, captured } = createCapturingGate();
-    const executor = new Executor(
-      new PolicyEngine({ defaultDenyRaw: false }),
-      gate,
-    );
+    const executor = new Executor(gate);
     const task: AgentTask = {
       taskType: "debug",
       // 7000+ chars — should be sliced to 2000 before regex
@@ -316,7 +313,10 @@ describe("executor identifier extraction (via raw rung)", () => {
     assert.ok(captured.length > 0, "Gate should have been called");
     const ids = captured[0];
     // handleRequest should still be extracted from the first 2000 chars
-    assert.ok(ids.includes("handleRequest"), "Should extract handleRequest from bounded text");
+    assert.ok(
+      ids.includes("handleRequest"),
+      "Should extract handleRequest from bounded text",
+    );
     assert.ok(ids.length <= 10, "Should respect MAX_IDENTIFIERS cap");
   });
 });

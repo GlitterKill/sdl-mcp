@@ -7,7 +7,7 @@ import type {
 } from "./types.js";
 import { Planner } from "./planner.js";
 import { Executor } from "./executor.js";
-import { PolicyEngine } from "../policy/engine.js";
+
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { ValidationError } from "../domain/errors.js";
@@ -44,11 +44,11 @@ const BEHAVIORAL_KINDS = new Set([
 
 export class ContextEngine {
   private planner: Planner;
-  private policyEngine: PolicyEngine;
+
 
   constructor() {
     this.planner = new Planner();
-    this.policyEngine = new PolicyEngine();
+
   }
 
   async buildContext(task: AgentTask): Promise<ContextResult> {
@@ -162,7 +162,7 @@ export class ContextEngine {
         task.options?.contextMode,
       );
 
-      const executor = new Executor(this.policyEngine);
+      const executor = new Executor();
       const { actions, evidence, success } = await executor.execute(
         task,
         path.rungs,

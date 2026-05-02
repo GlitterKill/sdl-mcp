@@ -403,19 +403,27 @@ Deterministic code outline using tree-sitter. Keeps imports, type declarations, 
 
 Finds lines matching requested identifiers with configurable context lines before/after each match. Returns excerpt, matched line numbers, and which identifiers were found.
 
-### Proof-of-Need Gating (`src/code/gate.ts`)
+### Proof-of-Need Gating (`src/policy/code-access.ts` + `src/code/enforce.ts`)
+
+Code Window requests flow through two pure modules:
+
+1. **Code Access Decision** (`policy/code-access.ts::decideCodeAccess`) — applies the rule chain (caps, identifier requirements, budget, break-glass) and returns `approve`, `downgrade-to-skeleton`, `downgrade-to-hotpath`, or `deny`. Pure: no I/O.
+2. **Code Window Enforcement** (`code/enforce.ts::enforceCodeWindow`) — given an approved decision and a `WindowLoader` adapter (`LadybugWindowLoader` in production, `FakeWindowLoader` in tests), loads the window text, verifies that requested identifiers actually appear, and falls back to slice membership / utility approval when no identifiers were requested.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Req["needWindow request<br/>symbolId + reason + expectedLines + identifiersToFind"]
-    Engine["Policy engine<br/>priority 100 hard caps<br/>priority 90 identifiers required<br/>priority 80 budget enforcement<br/>priority 10 break-glass override"]
-    Approve["Approve when one or more identifiers match,<br/>or the symbol is already in slice / frontier,<br/>or utility exceeds threshold,<br/>or break-glass is audited"]
+    Decide["decideCodeAccess<br/>priority 100 hard caps<br/>priority 90 identifiers required<br/>priority 80 budget enforcement<br/>priority 10 break-glass override"]
+    Enforce["enforceCodeWindow<br/>load window via WindowLoader<br/>verify identifiers in real text<br/>slice / utility / break-glass fallback"]
+    Approve["Approve when identifiers match,<br/>or symbol is in slice / frontier,<br/>or utility exceeds threshold,<br/>or break-glass is audited"]
     Deny["Denial returns reason, suggested alternative tool,<br/>and nextBestAction guidance"]
 
-    Req e1@--> Engine
-    Engine e2@--> Approve
-    Engine e3@--> Deny
+    Req e1@--> Decide
+    Decide e2@--> Enforce
+    Enforce e3@--> Approve
+    Decide e4@--> Deny
+    Enforce e5@--> Deny
 
     classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
     classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
@@ -424,7 +432,7 @@ flowchart TD
     classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
     classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
     classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1,e2,e3 animate;
+    class e1,e2,e3,e4,e5 animate;
 ```
 
 ---

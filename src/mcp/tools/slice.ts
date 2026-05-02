@@ -30,10 +30,9 @@ import { computeDelta } from "../../delta/diff.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { SymbolKind } from "../../domain/types.js";
-import {
-  PolicyEngine,
-  type PolicyRequestContext,
-} from "../../policy/engine.js";
+
+import { decideCodeAccessLegacy } from "../../policy/code-access.js";
+import type { PolicyRequestContext } from "../../policy/types.js";
 import { logPolicyDecision } from "../telemetry.js";
 import { logger } from "../../util/logger.js";
 import {
@@ -325,17 +324,17 @@ async function handleSliceBuildInternal(
       maxEstimatedTokens:
         config.slice?.defaultMaxTokens ?? DEFAULT_MAX_TOKENS_SLICE,
     };
-    const policyEngine = new PolicyEngine();
-    policyEngine.updateConfig({
+
+    const mergedPolicyConfig = {
       maxWindowLines: mergedPolicy.maxWindowLines,
       maxWindowTokens: mergedPolicy.maxWindowTokens,
       requireIdentifiers: mergedPolicy.requireIdentifiers,
       allowBreakGlass: mergedPolicy.allowBreakGlass,
       defaultDenyRaw: mergedPolicy.defaultDenyRaw,
       budgetCaps: sliceBudgetDefaults,
-    });
+    };
 
-    const policyCaps = policyEngine.getConfig().budgetCaps;
+    const policyCaps = mergedPolicyConfig.budgetCaps;
     const requestedBudget = budget ?? {};
     const effectiveBudget = {
       maxCards: clampInt(
@@ -398,9 +397,12 @@ async function handleSliceBuildInternal(
       budget: effectiveBudget,
     };
 
-    const policyDecision = policyEngine.evaluate(policyContext);
-    const { nextBestAction, requiredFieldsForNext } =
-      policyEngine.generateNextBestAction(policyDecision, policyContext);
+
+    const {
+      decision: policyDecision,
+      nextBestAction,
+      requiredFieldsForNext,
+    } = decideCodeAccessLegacy(policyContext, mergedPolicyConfig);
 
     logPolicyDecision({
       requestType: policyContext.requestType,

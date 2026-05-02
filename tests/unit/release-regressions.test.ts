@@ -18,20 +18,22 @@ describe("release regression guards", () => {
     );
   });
 
-  it("updates code policy engine from merged repo+app policy before evaluation", () => {
+  it("decides code access from merged repo+app policy before evaluation", () => {
     const source = readSource("src/mcp/tools/code.ts");
 
     assert.match(
       source,
-      /const policyEngine = new PolicyEngine\(\{\s*maxWindowLines:\s*validatedPolicy\.maxWindowLines,\s*maxWindowTokens:\s*validatedPolicy\.maxWindowTokens,\s*requireIdentifiers:\s*validatedPolicy\.requireIdentifiers,\s*allowBreakGlass:\s*validatedPolicy\.allowBreakGlass,/s,
-      "code handler should construct PolicyEngine with merged policy values",
+      /const policyConfig = \{\s*maxWindowLines:\s*validatedPolicy\.maxWindowLines,\s*maxWindowTokens:\s*validatedPolicy\.maxWindowTokens,\s*requireIdentifiers:\s*validatedPolicy\.requireIdentifiers,\s*allowBreakGlass:\s*validatedPolicy\.allowBreakGlass,/s,
+      "code handler should build policyConfig with merged policy values",
     );
 
-    const updateIdx = source.indexOf("const policyEngine = new PolicyEngine({");
-    const evaluateIdx = source.indexOf("policyEngine.evaluate(policyContext)");
+    const configIdx = source.indexOf("const policyConfig = {");
+    const decideIdx = source.indexOf(
+      "decideCodeAccess(policyContext, policyConfig)",
+    );
     assert.ok(
-      updateIdx !== -1 && evaluateIdx !== -1 && updateIdx < evaluateIdx,
-      "policy engine should be configured before evaluation",
+      configIdx !== -1 && decideIdx !== -1 && configIdx < decideIdx,
+      "policyConfig should be assembled before decideCodeAccess is called",
     );
   });
 
@@ -254,8 +256,14 @@ describe("release regression guards", () => {
 
     assert.match(
       source,
-      /policyEngine\.updateConfig\(\{\s*maxWindowLines:\s*mergedPolicy\.maxWindowLines,\s*maxWindowTokens:\s*mergedPolicy\.maxWindowTokens,\s*requireIdentifiers:\s*mergedPolicy\.requireIdentifiers,\s*allowBreakGlass:\s*mergedPolicy\.allowBreakGlass,/s,
-      "slice handler should evaluate using merged policy values",
+      /const mergedPolicyConfig = \{\s*maxWindowLines:\s*mergedPolicy\.maxWindowLines,\s*maxWindowTokens:\s*mergedPolicy\.maxWindowTokens,\s*requireIdentifiers:\s*mergedPolicy\.requireIdentifiers,\s*allowBreakGlass:\s*mergedPolicy\.allowBreakGlass,/s,
+      "slice handler should pass merged policy values to decideCodeAccessLegacy",
+    );
+
+    assert.match(
+      source,
+      /decideCodeAccessLegacy\(policyContext,\s*mergedPolicyConfig\)/s,
+      "slice handler should call decideCodeAccessLegacy with mergedPolicyConfig",
     );
   });
 

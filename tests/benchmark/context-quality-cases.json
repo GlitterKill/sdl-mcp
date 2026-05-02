@@ -206,15 +206,20 @@
     "id": "explain-precise-gate-policy",
     "taskType": "explain",
     "contextMode": "precise",
-    "taskText": "Explain the proof-of-need gating mechanism: how does the PolicyEngine decide whether to approve or deny a code window request?",
-    "focusPaths": ["src/code/gate.ts", "src/policy/engine.ts"],
+    "taskText": "Explain the proof-of-need gating mechanism: how do decideCodeAccess and enforceCodeWindow decide whether to approve or deny a code window request?",
+    "focusPaths": [
+      "src/policy/code-access.ts",
+      "src/code/enforce.ts",
+      "src/policy/engine.ts"
+    ],
     "includeTests": false,
     "requireAnswer": false,
     "expectedUsefulSymbols": [
-      "GateContext",
+      "decideCodeAccess",
+      "enforceCodeWindow",
       "PolicyEngine",
-      "generateDenialGuidance",
-      "DenialGuidance"
+      "CodeAccessDecision",
+      "WindowLoader"
     ],
     "unexpectedSymbols": [
       "buildFlatToolDescriptors",

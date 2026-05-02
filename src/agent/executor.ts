@@ -1,23 +1,22 @@
 import type {
-// =============================================================================
-// agent/executor.ts — Autopilot Executor: drives the 4-rung context ladder.
-//
-// Public exports (LLM-cost cheat sheet):
-//   Class:
-//     - Executor — state machine: card → skeleton → hotPath → raw rungs;
-//                  emits Action[] + Evidence[] + ExecutionMetrics
-//   Identifier-extraction helpers (pure; stateless):
-//     - extractIdentifiersFromText(text, queryContext?)
-//     - generateCompoundIdentifiers(text)
-//     - buildContextAwareStopWords(queryText)
-//     - MAX_IDENTIFIERS, IDENTIFIER_STOP_WORDS
-//   Types:
-//     - GateEvaluator (= typeof evaluateRequest)
-//
-// Internal-only constants: BEHAVIORAL_KINDS, ALWAYS_STOP_WORDS, DOMAIN_STOP_WORDS,
-// COMPOUND_STOP_WORDS, RUNG_ESCALATION_ORDER, RUNG_TO_ACTION_TYPE, MAX_ESCALATIONS.
-// =============================================================================
-
+  // =============================================================================
+  // agent/executor.ts — Autopilot Executor: drives the 4-rung context ladder.
+  //
+  // Public exports (LLM-cost cheat sheet):
+  //   Class:
+  //     - Executor — state machine: card → skeleton → hotPath → raw rungs;
+  //                  emits Action[] + Evidence[] + ExecutionMetrics
+  //   Identifier-extraction helpers (pure; stateless):
+  //     - extractIdentifiersFromText(text, queryContext?)
+  //     - generateCompoundIdentifiers(text)
+  //     - buildContextAwareStopWords(queryText)
+  //     - MAX_IDENTIFIERS, IDENTIFIER_STOP_WORDS
+  //   Types:
+  //     - GateEvaluator (= signature of defaultGateEvaluator: decide → enforce)
+  //
+  // Internal-only constants: BEHAVIORAL_KINDS, ALWAYS_STOP_WORDS, DOMAIN_STOP_WORDS,
+  // COMPOUND_STOP_WORDS, RUNG_ESCALATION_ORDER, RUNG_TO_ACTION_TYPE, MAX_ESCALATIONS.
+  // =============================================================================
 
   Action,
   AgentTask,
@@ -26,18 +25,23 @@ import type {
   RungType,
 } from "./types.js";
 import { EvidenceCapture } from "./evidence.js";
-import type {
-  PolicyEngine,
-  PolicyRequestContext,
-  PolicyDecision,
-} from "../policy/engine.js";
+import type { PolicyRequestContext, PolicyDecision } from "../policy/types.js";
+import {
+  decideCodeAccess,
+  decideCodeAccessLegacy,
+} from "../policy/code-access.js";
 import { IndexError } from "../domain/errors.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { generateSkeletonIR, generateFileSkeleton } from "../code/skeleton.js";
 import { extractHotPath } from "../code/hotpath.js";
-import { evaluateRequest } from "../code/gate.js";
-import type { CodeWindowRequest } from "../domain/types.js";
+import { enforceCodeWindow } from "../code/enforce.js";
+import { LadybugWindowLoader } from "../code/window-loader.js";
+import type {
+  CodeWindowRequest,
+  CodeWindowResponse,
+  GraphSlice,
+} from "../domain/types.js";
 import { logger } from "../util/logger.js";
 import { isHybridRetrievalAvailable } from "../retrieval/fallback.js";
 import { hybridSearch } from "../retrieval/orchestrator.js";
@@ -52,7 +56,41 @@ import {
   extractIdentifiersFromText,
 } from "./identifier-extraction.js";
 
-export type GateEvaluator = typeof evaluateRequest;
+export type GateEvaluator = (
+  request: CodeWindowRequest,
+  options?: { breakGlass?: boolean; slice?: GraphSlice },
+) => Promise<CodeWindowResponse>;
+
+/**
+ * Default gate evaluator backing the autopilot Executor when no override is
+ * supplied. Calls `decideCodeAccess` for the policy decision and chains
+ * `enforceCodeWindow` (with the production `LadybugWindowLoader`) when the
+ * decision permits raw access.
+ */
+export const defaultGateEvaluator: GateEvaluator = async (request, options) => {
+  const policyContext: PolicyRequestContext = {
+    requestType: "codeWindow",
+    repoId: request.repoId,
+    symbolId: request.symbolId,
+    expectedLines: request.expectedLines,
+    identifiersToFind: request.identifiersToFind,
+    reason: request.reason,
+  };
+  const accessDecision = decideCodeAccess(policyContext);
+  if (accessDecision.kind !== "approve") {
+    return {
+      approved: false,
+      whyDenied:
+        accessDecision.kind === "deny"
+          ? accessDecision.deniedReasons
+          : ["Policy downgrade"],
+      suggestedNextRequest:
+        accessDecision.kind === "deny" ? accessDecision.suggestions : undefined,
+    };
+  }
+  const loader = new LadybugWindowLoader();
+  return enforceCodeWindow(request, accessDecision, loader, options ?? {});
+};
 
 const BEHAVIORAL_KINDS = new Set([
   "function",
@@ -111,16 +149,16 @@ export class Executor {
   private actions: Action[] = [];
   private metrics: ExecutionMetrics;
   private startTime = 0;
-  private policyEngine: PolicyEngine | undefined;
+
   private policyDecisions: Map<string, PolicyDecision> = new Map();
   private gateEvaluator: GateEvaluator;
   private connPromise: ReturnType<typeof getLadybugConn> | null = null;
   private cardCache = new Set<string>();
 
-  constructor(policyEngine?: PolicyEngine, gateEvaluator?: GateEvaluator) {
+  constructor(gateEvaluator?: GateEvaluator) {
     this.evidenceCapture = new EvidenceCapture();
-    this.policyEngine = policyEngine;
-    this.gateEvaluator = gateEvaluator ?? evaluateRequest;
+
+    this.gateEvaluator = gateEvaluator ?? defaultGateEvaluator;
     this.metrics = {
       totalDurationMs: 0,
       totalTokens: 0,
@@ -809,28 +847,27 @@ export class Executor {
       for (const symbolId of symbols.slice(0, MAX_RAW_SYMBOLS)) {
         // Check top-level policy deny. Finer-grained downgrades
         // (downgrade-to-skeleton, downgrade-to-hotpath) are enforced by
-        // the gate evaluator (evaluateRequest) rather than the executor,
+        // the gate evaluator (decide → enforce) rather than the executor,
         // so only an explicit "deny" is blocked here.
         let rawAccessAllowed = true;
 
-        if (this.policyEngine) {
-          const policyContext: PolicyRequestContext = {
-            requestType: "codeWindow",
-            repoId: task.repoId,
+        const policyContext: PolicyRequestContext = {
+          requestType: "codeWindow",
+          repoId: task.repoId,
+          symbolId,
+        };
+
+        const { decision: policyDecision } =
+          decideCodeAccessLegacy(policyContext);
+        this.policyDecisions.set(`${actionId}:${symbolId}`, policyDecision);
+
+        if (policyDecision.decision === "deny") {
+          rawAccessAllowed = false;
+          this.evidenceCapture.captureDiagnostic(
             symbolId,
-          };
-
-          const policyDecision = this.policyEngine.evaluate(policyContext);
-          this.policyDecisions.set(`${actionId}:${symbolId}`, policyDecision);
-
-          if (policyDecision.decision === "deny") {
-            rawAccessAllowed = false;
-            this.evidenceCapture.captureDiagnostic(
-              symbolId,
-              0,
-              `Raw code access denied by policy: ${policyDecision.deniedReasons?.join(", ") ?? "no reason"}`,
-            );
-          }
+            0,
+            `Raw code access denied by policy: ${policyDecision.deniedReasons?.join(", ") ?? "no reason"}`,
+          );
         }
 
         if (rawAccessAllowed) {

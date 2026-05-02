@@ -21,7 +21,7 @@ import {
 } from "../../domain/errors.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { RuntimeConfigSchema } from "../../config/types.js";
-import { PolicyEngine } from "../../policy/engine.js";
+import { decideRuntimeLegacy } from "../../policy/runtime.js";
 import type { RuntimePolicyRequestContext } from "../../policy/types.js";
 import {
   getRuntime,
@@ -308,8 +308,9 @@ export async function handleRuntimeExecute(
     envKeys: [], // No custom env in v1
   };
 
-  const engine = new PolicyEngine();
-  const policyDecision = engine.evaluateRuntimePolicy(
+
+
+  const policyDecision = decideRuntimeLegacy(
     policyContext,
     runtimeConfig,
     tracker,

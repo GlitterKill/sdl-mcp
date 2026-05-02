@@ -10,7 +10,7 @@ import {
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
-import { evaluateRequest } from "../../dist/code/gate.js";
+import { enforceCodeWindow } from "../../dist/code/enforce.js";
 import { handleCodeNeedWindow } from "../../dist/mcp/tools/code.js";
 import { PolicyEngine } from "../../dist/policy/engine.js";
 
@@ -520,7 +520,46 @@ describe("code.needWindow policy remediation", () => {
   });
 
   it("denies requests whose identifiers are missing even when the symbol is already in the slice", async () => {
-    const response = await evaluateRequest(
+    const fakeSymbol = {
+      symbol_id: "sym-demo",
+      repo_id: "repo-test",
+      file_id: 0,
+      kind: "function" as const,
+      name: "demoWindow",
+      exported: 1,
+      visibility: "public" as const,
+      language: "ts",
+      range_start_line: 1,
+      range_start_col: 0,
+      range_end_line: 4,
+      range_end_col: 1,
+      ast_fingerprint: "fp-demo-window",
+      signature_json: JSON.stringify({ name: "demoWindow", params: [] }),
+      summary: "Demo code window target",
+      invariants_json: null,
+      side_effects_json: null,
+      updated_at: "2026-03-07T12:00:00.000Z",
+    };
+    const fakeLoader = {
+      loadWindow: async () => ({
+        approved: true as const,
+        repoId: "repo-test",
+        symbolId: "sym-demo",
+        file: "src/example.ts",
+        range: { startLine: 1, startCol: 0, endLine: 4, endCol: 1 },
+        code: "export function demoWindow() {\n  const importantFlag = true;\n  return importantFlag;\n}",
+        whyApproved: [],
+        estimatedTokens: 30,
+      }),
+      getSymbol: async () => fakeSymbol,
+    };
+    const approveDecision = {
+      kind: "approve" as const,
+      effectiveCaps: { maxWindowLines: 180, maxWindowTokens: 1400 },
+      evidenceUsed: [],
+      auditHash: "test-hash",
+    };
+    const response = await enforceCodeWindow(
       {
         repoId: "repo-test",
         symbolId: "sym-demo",
@@ -529,33 +568,9 @@ describe("code.needWindow policy remediation", () => {
         maxTokens: 120,
         identifiersToFind: ["missingIdentifier"],
       },
+      approveDecision,
+      fakeLoader,
       {
-        policy: {
-          maxWindowLines: 180,
-          maxWindowTokens: 1400,
-          requireIdentifiers: true,
-          allowBreakGlass: false,
-        },
-        symbol: {
-          symbol_id: "sym-demo",
-          repo_id: "repo-test",
-          file_id: 0,
-          kind: "function",
-          name: "demoWindow",
-          exported: 1,
-          visibility: "public",
-          language: "ts",
-          range_start_line: 1,
-          range_start_col: 0,
-          range_end_line: 4,
-          range_end_col: 1,
-          ast_fingerprint: "fp-demo-window",
-          signature_json: JSON.stringify({ name: "demoWindow", params: [] }),
-          summary: "Demo code window target",
-          invariants_json: null,
-          side_effects_json: null,
-          updated_at: "2026-03-07T12:00:00.000Z",
-        },
         slice: {
           cards: [{ symbolId: "sym-demo" }],
           frontier: [],

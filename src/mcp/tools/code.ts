@@ -17,7 +17,8 @@ import {
   DEFAULT_MAX_TOKENS_SLICE,
   MAX_FILE_BYTES,
 } from "../../config/constants.js";
-import { evaluateRequest, GateContext } from "../../code/gate.js";
+import { enforceCodeWindow } from "../../code/enforce.js";
+import { LadybugWindowLoader } from "../../code/window-loader.js";
 import { extractWindow, identifiersExistInWindow } from "../../code/windows.js";
 import {
   buildRedactionPatterns,
@@ -42,23 +43,27 @@ import { NotFoundError, ValidationError, IndexError } from "../errors.js";
 import { PolicyConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { buildSlice } from "../../graph/slice.js";
-import { getAbsolutePathFromRepoRoot, normalizePath } from "../../util/paths.js";
+import {
+  getAbsolutePathFromRepoRoot,
+  normalizePath,
+} from "../../util/paths.js";
 import {
   generateSymbolSkeleton,
   generateFileSkeleton,
 } from "../../code/skeleton.js";
 import { extractHotPath } from "../../code/hotpath.js";
 import {
-  PolicyEngine,
-  type PolicyRequestContext,
-} from "../../policy/engine.js";
+  decideCodeAccess,
+  toLegacyPolicyDecision,
+} from "../../policy/code-access.js";
+import type { CodeWindowResponse, GraphSlice } from "../../domain/types.js";
+import type { PolicyRequestContext } from "../../policy/types.js";
 import { consumePrefetchedKey } from "../../graph/prefetch.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
 import { toLegacySymbolRow } from "./symbol-utils.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
 import { getOverlaySnapshot } from "../../live-index/overlay-reader.js";
 import { buildConditionalResponse } from "../../util/conditional-response.js";
-
 
 function buildPolicyNextBestAction(params: {
   request: CodeNeedWindowRequest;
@@ -209,7 +214,11 @@ export async function handleCodeNeedWindow(
   const rawRequest = args as CodeNeedWindowRequest;
 
   const conn = await getLadybugConn();
-  const { symbolId: resolvedSymbolId } = await resolveSymbolId(conn, rawRequest.repoId, rawRequest.symbolId);
+  const { symbolId: resolvedSymbolId } = await resolveSymbolId(
+    conn,
+    rawRequest.repoId,
+    rawRequest.symbolId,
+  );
   const request = { ...rawRequest, symbolId: resolvedSymbolId };
 
   recordToolTrace({
@@ -275,19 +284,16 @@ export async function handleCodeNeedWindow(
     maxEstimatedTokens:
       appConfig.slice?.defaultMaxTokens ?? DEFAULT_MAX_TOKENS_SLICE,
   };
-  const policyEngine = new PolicyEngine({
+  const policyConfig = {
     maxWindowLines: validatedPolicy.maxWindowLines,
     maxWindowTokens: validatedPolicy.maxWindowTokens,
     requireIdentifiers: validatedPolicy.requireIdentifiers,
     allowBreakGlass: validatedPolicy.allowBreakGlass,
     defaultDenyRaw: validatedPolicy.defaultDenyRaw,
     budgetCaps: sliceBudgetDefaults,
-  });
-
-  const context: GateContext = {
-    symbol: legacySymbol,
-    policy: validatedPolicy,
   };
+
+  let sliceContext: GraphSlice | undefined;
 
   if (request.sliceContext) {
     const latestVersion = await ladybugDb.getLatestVersion(
@@ -300,7 +306,7 @@ export async function handleCodeNeedWindow(
         versionId: latestVersion.versionId,
         ...request.sliceContext,
       });
-      context.slice = slice;
+      sliceContext = slice;
     }
   }
 
@@ -312,25 +318,52 @@ export async function handleCodeNeedWindow(
     maxWindowTokens: request.maxTokens,
     identifiersToFind: request.identifiersToFind,
     reason: request.reason,
-    sliceContext: context.slice,
+    sliceContext,
     expectedLines: request.expectedLines,
     symbolData: legacySymbol,
   };
 
-  // Evaluate policy first so break-glass can flow into the gate
-  const policyDecision = policyEngine.evaluate(policyContext);
-  const isBreakGlass = policyDecision.decision === "approve" &&
-    (policyDecision.evidenceUsed ?? []).some((e) => e.type === "break-glass-triggered");
+  // Evaluate policy first; break-glass evidence can flow into enforcement
+  const accessDecision = decideCodeAccess(policyContext, policyConfig);
+  const policyDecision = toLegacyPolicyDecision(accessDecision);
+  const policyNextBestAction =
+    accessDecision.kind !== "approve"
+      ? accessDecision.nextBestAction
+      : undefined;
+  const requiredFieldsForNext =
+    accessDecision.kind !== "approve"
+      ? accessDecision.requiredFieldsForNext
+      : undefined;
 
-  const gateResult = await evaluateRequest(request, { ...context, breakGlass: isBreakGlass });
+  const isBreakGlass =
+    accessDecision.kind === "approve" &&
+    accessDecision.evidenceUsed.some((e) => e.type === "break-glass-triggered");
+
+  let gateResult: CodeWindowResponse;
+  if (accessDecision.kind === "approve") {
+    const loader = new LadybugWindowLoader();
+    gateResult = await enforceCodeWindow(request, accessDecision, loader, {
+      breakGlass: isBreakGlass,
+      slice: sliceContext,
+    });
+  } else {
+    gateResult = {
+      approved: false,
+      whyDenied:
+        accessDecision.kind === "deny"
+          ? accessDecision.deniedReasons
+          : ["Policy downgrade — see downgrade branch for response"],
+      suggestedNextRequest: undefined,
+      nextBestAction: undefined,
+    };
+  }
   const suggestedNextRequest = !gateResult.approved
     ? gateResult.suggestedNextRequest
     : undefined;
   const gateNextBestAction = !gateResult.approved
     ? gateResult.nextBestAction
     : undefined;
-  const { nextBestAction: policyNextBestAction, requiredFieldsForNext } =
-    policyEngine.generateNextBestAction(policyDecision, policyContext);
+
   const policyAction = buildPolicyNextBestAction({
     request,
     policyNextBestAction,
@@ -417,7 +450,9 @@ export async function handleCodeNeedWindow(
             skeletonResult.skeleton.split("\n").length,
           howToResume: {
             type: "cursor" as const,
-            value: skeletonResult.skeletonLinesConsumed ?? skeletonResult.actualRange.endLine,
+            value:
+              skeletonResult.skeletonLinesConsumed ??
+              skeletonResult.actualRange.endLine,
             parameter: "skeletonOffset",
           },
         }
@@ -432,11 +467,11 @@ export async function handleCodeNeedWindow(
       whyApproved: ["Policy approved (downgraded to skeleton)"],
       estimatedTokens: skeletonResult.estimatedTokens,
       downgradedFrom: "raw-code",
-      downgradeGuidance: "Raw code access was downgraded to skeleton by policy. To get full code: (1) set policy.allowBreakGlass=true via sdl.policy.set, then retry with breakGlass in sliceContext, or (2) use sdl.code.getHotPath with specific identifiersToFind for targeted access.",
+      downgradeGuidance:
+        "Raw code access was downgraded to skeleton by policy. To get full code: (1) set policy.allowBreakGlass=true via sdl.policy.set, then retry with breakGlass in sliceContext, or (2) use sdl.code.getHotPath with specific identifiersToFind for targeted access.",
       truncation: skeletonTruncation,
     };
 
-    
     // FP-2: Check for missed identifiers in downgraded responses (matching getHotPath behavior)
     if (request.identifiersToFind && request.identifiersToFind.length > 0) {
       const skeletonCode = skeletonResult.skeleton;
@@ -500,7 +535,8 @@ export async function handleCodeNeedWindow(
       whyApproved: ["Policy approved (downgraded to hotpath)"],
       estimatedTokens: hotpathResult.estimatedTokens,
       downgradedFrom: "raw-code",
-      downgradeGuidance: "Raw code access was downgraded to hot-path by policy. To get full code: (1) set policy.allowBreakGlass=true via sdl.policy.set, or (2) request a skeleton via sdl.code.getSkeleton for broader code structure.",
+      downgradeGuidance:
+        "Raw code access was downgraded to hot-path by policy. To get full code: (1) set policy.allowBreakGlass=true via sdl.policy.set, or (2) request a skeleton via sdl.code.getSkeleton for broader code structure.",
       matchedIdentifiers: hotpathResult.matchedIdentifiers,
       matchedLineNumbers: hotpathResult.matchedLineNumbers,
       truncation: hotpathTruncation,
@@ -532,7 +568,10 @@ export async function handleCodeNeedWindow(
     let effectiveGranularity = granularity;
 
     // Handle cursor-based continuation (from truncation recovery)
-    if (request.cursor !== undefined && request.cursor > symbolRange.startLine) {
+    if (
+      request.cursor !== undefined &&
+      request.cursor > symbolRange.startLine
+    ) {
       effectiveRange = {
         ...symbolRange,
         startLine: request.cursor,
@@ -542,7 +581,7 @@ export async function handleCodeNeedWindow(
     if (
       request.identifiersToFind.length > 0 &&
       granularity === "symbol" &&
-      (symbolRange.endLine - symbolRange.startLine + 1) > maxLines
+      symbolRange.endLine - symbolRange.startLine + 1 > maxLines
     ) {
       try {
         const resolvedPath = normalizePath(filePath);
@@ -645,18 +684,30 @@ export async function handleCodeNeedWindow(
     if (redactedCode === "" && windowResult.emptyReason) {
       switch (windowResult.emptyReason) {
         case "file-too-large":
-          warnings.push("File exceeds maximum size limit and could not be read. Try sdl.code.getSkeleton instead.");
+          warnings.push(
+            "File exceeds maximum size limit and could not be read. Try sdl.code.getSkeleton instead.",
+          );
           break;
         case "io-error":
-          warnings.push("File could not be read from disk (may have been moved, deleted, or is inaccessible).");
+          warnings.push(
+            "File could not be read from disk (may have been moved, deleted, or is inaccessible).",
+          );
           break;
         case "token-budget-exceeded":
-          warnings.push("Code window empty: the first line exceeds the token budget. Try increasing maxTokens or use sdl.code.getSkeleton.");
+          warnings.push(
+            "Code window empty: the first line exceeds the token budget. Try increasing maxTokens or use sdl.code.getSkeleton.",
+          );
           break;
       }
     }
-    if (redactedCode === "" && !windowResult.emptyReason && windowResult.code !== "") {
-      warnings.push("Code was fully redacted by security policy. No content available.");
+    if (
+      redactedCode === "" &&
+      !windowResult.emptyReason &&
+      windowResult.code !== ""
+    ) {
+      warnings.push(
+        "Code was fully redacted by security policy. No content available.",
+      );
     }
 
     logCodeWindowDecision({
@@ -667,20 +718,22 @@ export async function handleCodeNeedWindow(
 
     const symbolTotalLines = symbolRange.endLine - symbolRange.startLine + 1;
     const windowLines = windowResult.code.split("\n").length;
-    const isRangeNarrowed = effectiveRange.startLine > symbolRange.startLine || effectiveRange.endLine < symbolRange.endLine;
+    const isRangeNarrowed =
+      effectiveRange.startLine > symbolRange.startLine ||
+      effectiveRange.endLine < symbolRange.endLine;
     const isTruncated = windowResult.truncated || isRangeNarrowed;
     const codeTruncation = isTruncated
       ? {
           truncated: true,
-          droppedCount:
-            Math.max(0, symbolTotalLines - windowLines),
+          droppedCount: Math.max(0, symbolTotalLines - windowLines),
           howToResume: {
             type: "cursor" as const,
             value: windowResult.actualRange.endLine,
           },
           suggestedNextCall: {
             tool: "sdl.code.needWindow",
-            description: "Continue reading from the truncation point. All original params preserved; just copy this args block.",
+            description:
+              "Continue reading from the truncation point. All original params preserved; just copy this args block.",
             args: {
               repoId: request.repoId,
               symbolId: request.symbolId,
@@ -740,7 +793,11 @@ export async function handleGetSkeleton(
   let resolvedSkeletonSymbolId = rawSkeletonRequest.symbolId;
   if (rawSkeletonRequest.symbolId) {
     const skeletonConn = await getLadybugConn();
-    const resolved = await resolveSymbolId(skeletonConn, rawSkeletonRequest.repoId, rawSkeletonRequest.symbolId);
+    const resolved = await resolveSymbolId(
+      skeletonConn,
+      rawSkeletonRequest.repoId,
+      rawSkeletonRequest.symbolId,
+    );
     resolvedSkeletonSymbolId = resolved.symbolId;
   }
   const request = { ...rawSkeletonRequest, symbolId: resolvedSkeletonSymbolId };
@@ -764,10 +821,20 @@ export async function handleGetSkeleton(
   const policyMaxTokens = policyConfig.success
     ? policyConfig.data.maxWindowTokens
     : undefined;
-  const rawMaxLines = Math.min(request.maxLines ?? Infinity, policyMaxLines ?? Infinity);
-  const effectiveMaxLines = Number.isFinite(rawMaxLines) ? rawMaxLines : undefined;
-  const rawMaxTokens = Math.min(request.maxTokens ?? Infinity, policyMaxTokens ?? Infinity);
-  const effectiveMaxTokens = Number.isFinite(rawMaxTokens) ? rawMaxTokens : undefined;
+  const rawMaxLines = Math.min(
+    request.maxLines ?? Infinity,
+    policyMaxLines ?? Infinity,
+  );
+  const effectiveMaxLines = Number.isFinite(rawMaxLines)
+    ? rawMaxLines
+    : undefined;
+  const rawMaxTokens = Math.min(
+    request.maxTokens ?? Infinity,
+    policyMaxTokens ?? Infinity,
+  );
+  const effectiveMaxTokens = Number.isFinite(rawMaxTokens)
+    ? rawMaxTokens
+    : undefined;
 
   if (request.symbolId) {
     const result = await generateSymbolSkeleton(
@@ -853,9 +920,7 @@ export async function handleGetSkeleton(
     );
 
     if (!result) {
-      throw new NotFoundError(
-        `File not found or unparseable: ${request.file}`,
-      );
+      throw new NotFoundError(`File not found or unparseable: ${request.file}`);
     }
 
     const skeletonTruncation = result.truncated
@@ -913,7 +978,11 @@ export async function handleGetHotPath(
   const rawHotPathRequest = args as GetHotPathRequest;
 
   const conn = await getLadybugConn();
-  const { symbolId: resolvedHotPathSymbolId } = await resolveSymbolId(conn, rawHotPathRequest.repoId, rawHotPathRequest.symbolId);
+  const { symbolId: resolvedHotPathSymbolId } = await resolveSymbolId(
+    conn,
+    rawHotPathRequest.repoId,
+    rawHotPathRequest.symbolId,
+  );
   const request = { ...rawHotPathRequest, symbolId: resolvedHotPathSymbolId };
 
   recordToolTrace({
@@ -978,10 +1047,12 @@ export async function handleGetHotPath(
     estimatedTokens: result.estimatedTokens,
     matchedIdentifiers: result.matchedIdentifiers,
     matchedLineNumbers: result.matchedLineNumbers,
-    ...(missedIdentifiers.length > 0 ? {
-      missedIdentifiers,
-      missedIdentifierHint: `Identifiers not found in this symbol's excerpt. Use sdl.symbol.search to find the symbol containing these identifiers, then call sdl.code.getHotPath on that symbol.`,
-    } : {}),
+    ...(missedIdentifiers.length > 0
+      ? {
+          missedIdentifiers,
+          missedIdentifierHint: `Identifiers not found in this symbol's excerpt. Use sdl.symbol.search to find the symbol containing these identifiers, then call sdl.code.getHotPath on that symbol.`,
+        }
+      : {}),
     truncated: result.truncated,
   };
   const enrichedResponse = symbol

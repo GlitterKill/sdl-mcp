@@ -24,7 +24,8 @@ import { pickDepLabel } from "../util/depLabels.js";
 import { hashCard } from "../util/hashing.js";
 import { DatabaseError } from "../domain/errors.js";
 import { createPolicyDenial } from "../mcp/errors.js";
-import { PolicyEngine, type PolicyRequestContext } from "../policy/engine.js";
+import { decideCodeAccessLegacy } from "../policy/code-access.js";
+import type { PolicyRequestContext } from "../policy/types.js";
 import { logPolicyDecision } from "../mcp/telemetry.js";
 import { uniqueLimit } from "../graph/slice/slice-serializer.js";
 import { toLegacySymbolRow } from "../mcp/tools/symbol-utils.js";
@@ -399,7 +400,7 @@ export async function buildCardForSymbol(
 
   const legacySymbol = toLegacySymbolRow(symbol);
 
-  const policyEngine = new PolicyEngine();
+
   const policyContext: PolicyRequestContext = {
     requestType: "symbolCard",
     repoId,
@@ -407,9 +408,11 @@ export async function buildCardForSymbol(
     symbolData: legacySymbol,
   };
 
-  const policyDecision = policyEngine.evaluate(policyContext);
-  const { nextBestAction, requiredFieldsForNext } =
-    policyEngine.generateNextBestAction(policyDecision, policyContext);
+  const {
+    decision: policyDecision,
+    nextBestAction,
+    requiredFieldsForNext,
+  } = decideCodeAccessLegacy(policyContext);
 
   logPolicyDecision({
     requestType: policyContext.requestType,

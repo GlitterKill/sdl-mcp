@@ -32,5 +32,8 @@ export {
 } from "./windows.js";
 export type { ExtractWindowResult } from "./windows.js";
 
-export { evaluateRequest, generateDenialGuidance } from "./gate.js";
-export type { GateContext, DenialGuidance } from "./gate.js";
+export { enforceCodeWindow } from "./enforce.js";
+export type { EnforceContext, IdentifierDenialGuidance } from "./enforce.js";
+
+export { LadybugWindowLoader } from "./window-loader.js";
+export type { WindowLoader } from "./window-loader.js";
