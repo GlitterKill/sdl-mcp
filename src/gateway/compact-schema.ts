@@ -18,8 +18,11 @@ export function zodSchemaToJsonSchema(
   schema: z.ZodType,
 ): Record<string, unknown> {
   // v3 compat schemas are structurally compatible with v4 toJSONSchema
+  // io: "input" makes pipeProcessor pick the pre-transform input shape.
+  // unrepresentable: "any" is a defensive fallback for non-representable nodes.
   const jsonSchema = toJSONSchema(
     schema as unknown as Parameters<typeof toJSONSchema>[0],
+    { io: "input", unrepresentable: "any" },
   ) as Record<string, unknown>;
   // Remove $schema key for compact MCP tool responses
   delete jsonSchema["$schema"];

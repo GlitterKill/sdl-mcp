@@ -1,7 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { z } from "zod";
-import { buildCompactJsonSchema } from "../../dist/gateway/compact-schema.js";
+import {
+  buildCompactJsonSchema,
+  zodSchemaToJsonSchema,
+} from "../../dist/gateway/compact-schema.js";
+import {
+  PolicySetRequestSchema,
+  RuntimeExecuteRequestSchema,
+} from "../../dist/mcp/tools.js";
 
 describe("Compact JSON Schema builder", () => {
   it("preserves description fields", () => {
@@ -111,10 +118,7 @@ describe("Compact JSON Schema builder", () => {
         .max(100)
         .optional()
         .describe("Maximum results"),
-      semantic: z
-        .boolean()
-        .optional()
-        .describe("Enable semantic search mode"),
+      semantic: z.boolean().optional().describe("Enable semantic search mode"),
     });
 
     const compact = buildCompactJsonSchema(schema);
@@ -127,6 +131,67 @@ describe("Compact JSON Schema builder", () => {
     assert.ok(
       compactStr.includes("Search query string"),
       "should preserve query description text",
+    );
+  });
+});
+
+describe("Pre-transform input shape (io: 'input')", () => {
+  it("emits the pre-transform object schema for piped transforms", () => {
+    // Regression: with default io: 'output', transforms throw
+    // 'Transforms cannot be represented in JSON Schema' and break tools/list.
+    const schema = z
+      .object({ a: z.string(), b: z.number() })
+      .transform((v) => ({ combined: `${v.a}:${v.b}` }));
+
+    const result = zodSchemaToJsonSchema(schema) as {
+      type?: string;
+      properties?: Record<string, unknown>;
+    };
+
+    assert.strictEqual(result.type, "object", "input view is object");
+    assert.ok(result.properties?.a, "exposes pre-transform field 'a'");
+    assert.ok(result.properties?.b, "exposes pre-transform field 'b'");
+  });
+
+  it("emits both flat aliases and policyPatch for PolicySetRequestSchema", () => {
+    const result = zodSchemaToJsonSchema(PolicySetRequestSchema) as {
+      properties?: Record<string, unknown>;
+    };
+
+    assert.ok(result.properties?.repoId, "has repoId");
+    assert.ok(result.properties?.policyPatch, "has nested policyPatch");
+    assert.ok(
+      result.properties?.maxWindowLines,
+      "has flat alias maxWindowLines (clients can send flat or nested)",
+    );
+    assert.ok(
+      result.properties?.maxWindowTokens,
+      "has flat alias maxWindowTokens",
+    );
+  });
+
+  it("emits both command and executable for RuntimeExecuteRequestSchema", () => {
+    const result = zodSchemaToJsonSchema(RuntimeExecuteRequestSchema) as {
+      properties?: Record<string, unknown>;
+    };
+
+    assert.ok(result.properties?.repoId, "has repoId");
+    assert.ok(result.properties?.runtime, "has runtime");
+    assert.ok(
+      result.properties?.executable,
+      "has executable (canonical field)",
+    );
+    assert.ok(result.properties?.command, "has command (alias preserved)");
+  });
+
+  it("does not throw on transform-bearing tool schemas (the regression)", () => {
+    assert.doesNotThrow(
+      () => zodSchemaToJsonSchema(PolicySetRequestSchema),
+      "PolicySetRequestSchema must not throw",
+    );
+    assert.doesNotThrow(
+      () => zodSchemaToJsonSchema(RuntimeExecuteRequestSchema),
+      "RuntimeExecuteRequestSchema must not throw",
     );
   });
 });
