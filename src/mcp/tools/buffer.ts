@@ -70,7 +70,10 @@ export async function handleBufferCheckpoint(
 ): Promise<BufferCheckpointResponse> {
   try {
     const request = BufferCheckpointRequestSchema.parse(args);
-    return await resolveLiveIndex(liveIndex).checkpointRepo(request);
+    const result = await resolveLiveIndex(liveIndex).checkpointRepo(request);
+    // Surface a clear pending flag so callers know whether to poll buffer.status.
+    const pending = result.requested === true && result.pendingBuffers > 0;
+    return { ...result, pending };
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(

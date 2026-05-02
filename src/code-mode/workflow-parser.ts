@@ -106,13 +106,28 @@ export function parseWorkflowRequest(
     }
 
     if (!isTransform && !(resolvedFn in fnNameMap)) {
-      const memoryFns = ['memory.store', 'memory.query', 'memory.remove', 'memory.surface'];
-      const isMemoryFn = memoryFns.includes(step.fn);
+      const memoryNames = new Set([
+        "memory.store",
+        "memory.query",
+        "memory.remove",
+        "memory.surface",
+        "memoryStore",
+        "memoryQuery",
+        "memoryRemove",
+        "memorySurface",
+      ]);
+      const isMemoryFn =
+        memoryNames.has(step.fn) || memoryNames.has(resolvedFn);
       const hint = isMemoryFn
-        ? `. Memory tools require memory.enabled: true in your sdlmcp.config.json`
-        : '';
+        ? ` — this tool is disabled. Enable with memory.enabled: true in your sdlmcp.config.json.`
+        : "";
+      const available = Object.keys(fnNameMap);
+      const availSummary =
+        available.length > 25
+          ? `${available.slice(0, 25).join(", ")} (and ${available.length - 25} more — call sdl.action.search to discover)`
+          : available.join(", ");
       errors.push(
-        `Step ${i}: unknown function '${step.fn}'${hint}. Available: ${Object.keys(fnNameMap).join(", ")}, dataPick, dataMap, dataFilter, dataSort, dataTemplate, workflowContinuationGet`,
+        `Step ${i}: unknown function '${step.fn}'${hint}. Available: ${availSummary}, dataPick, dataMap, dataFilter, dataSort, dataTemplate, workflowContinuationGet`,
       );
       continue;
     }

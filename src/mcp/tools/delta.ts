@@ -100,8 +100,13 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       previewSampleSize?: number;
       skipBlastRadius?: boolean;
     };
+    // Hard cap: above this many changed symbols, blast radius computation is
+    // unbounded (267s observed on 635-change deltas). Skip regardless of
+    // whether fromVersion was provided; callers can opt back in via
+    // skipBlastRadius:false on a budget-narrowed range.
+    const HARD_AUTO_SKIP_THRESHOLD = 500;
     const autoSkipBlastRadius =
-      (!validated.fromVersion && totalChangesEarly > 500) ||
+      totalChangesEarly > HARD_AUTO_SKIP_THRESHOLD ||
       (validated.budget?.maxCards != null && totalChangesEarly > validated.budget.maxCards * 5);
     const shouldSkipBlastRadius =
       preValidated.preview === true ||
@@ -209,6 +214,17 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
       // Keep the shape deterministic even when skipped so downstream
       // truncation + enrichment blocks don't branch on null.
       delta.blastRadius = [];
+      // preview === true returned earlier; only explicit skipBlastRadius or
+      // the auto-skip threshold can land us here.
+      const reason =
+        preValidated.skipBlastRadius === true ? "explicit" : "auto-skip";
+      (delta as unknown as Record<string, unknown>).blastRadiusSkipped = {
+        reason,
+        totalChanges: totalChangesEarly,
+        threshold: HARD_AUTO_SKIP_THRESHOLD,
+        howToResume:
+          "Pass { preview: false, skipBlastRadius: false, budget: { maxCards: <N> } } with a narrower fromVersion/toVersion window to compute blast radius.",
+      };
     }
 
     if (governorResult && governorResult.spilloverHandle) {

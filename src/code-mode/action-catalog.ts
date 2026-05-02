@@ -89,8 +89,59 @@ export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
 
   // Unwrap to get the inner ZodObject if wrapped in ZodEffects/ZodPipeline
   const inner = unwrapZod(schema);
+  if (!inner) return { fields };
+
+  const innerDef = (inner as unknown as Record<string, unknown>)._def as
+    | Record<string, unknown>
+    | undefined;
+
+  // Discriminated unions (e.g. search.edit's preview/apply variants):
+  // merge fields from every option, marking non-discriminator fields
+  // as optional in the union view.
   if (
-    !inner ||
+    innerDef &&
+    (innerDef.type === "discriminatedUnion" ||
+      innerDef.typeName === "ZodDiscriminatedUnion")
+  ) {
+    const rawOptions = innerDef.options ?? innerDef.optionsMap ?? [];
+    const optionList: z.ZodType[] = Array.isArray(rawOptions)
+      ? (rawOptions as z.ZodType[])
+      : Array.from(
+          (rawOptions as unknown as Map<unknown, z.ZodType>).values(),
+        );
+    const discriminator =
+      typeof innerDef.discriminator === "string"
+        ? (innerDef.discriminator as string)
+        : null;
+    const seen = new Map<string, SchemaSummaryField>();
+    for (const opt of optionList) {
+      const optInner = unwrapZod(opt);
+      const optShape =
+        optInner &&
+        typeof (optInner as unknown as Record<string, unknown>).shape ===
+          "object"
+          ? ((optInner as unknown as Record<string, unknown>)
+              .shape as Record<string, z.ZodType>)
+          : null;
+      if (!optShape) continue;
+      for (const [name, fieldSchema] of Object.entries(optShape)) {
+        if (seen.has(name)) {
+          if (name !== discriminator) {
+            const existing = seen.get(name);
+            if (existing) existing.required = false;
+          }
+          continue;
+        }
+        const f = describeField(name, fieldSchema);
+        if (name !== discriminator) f.required = false;
+        seen.set(name, f);
+        fields.push(f);
+      }
+    }
+    return { fields };
+  }
+
+  if (
     typeof (inner as unknown as Record<string, unknown>).shape !== "object"
   ) {
     return { fields };

@@ -796,6 +796,11 @@ export const BufferCheckpointResponseSchema = z.object({
   repoId: z.string().min(1),
   requested: z.boolean(),
   checkpointId: z.string(),
+  pending: z
+    .boolean()
+    .describe(
+      "True when checkpoint work is still in flight (pendingBuffers > 0). Poll buffer.status until pending=false to confirm completion.",
+    ),
   pendingBuffers: z.number().int().min(0),
   checkpointedFiles: z.number().int().min(0),
   failedFiles: z.number().int().min(0),
@@ -1538,10 +1543,20 @@ export const PolicyGetResponseSchema = z.object({
   policy: PolicyConfigSchema,
 });
 
-export const PolicySetRequestSchema = z.object({
-  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  policyPatch: PolicyConfigSchema.partial(),
-});
+// Accepts both shapes:
+//   { repoId, policyPatch: { maxWindowLines: 200, ... } }   (canonical)
+//   { repoId, maxWindowLines: 200, ... }                    (flat aliases)
+// Flat keys are merged into policyPatch; explicit policyPatch wins on overlap.
+export const PolicySetRequestSchema = z
+  .object({
+    repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+    policyPatch: PolicyConfigSchema.partial().optional(),
+  })
+  .merge(PolicyConfigSchema.partial())
+  .transform(({ repoId, policyPatch, ...flat }) => {
+    const mergedPatch = { ...flat, ...(policyPatch ?? {}) };
+    return { repoId, policyPatch: mergedPatch };
+  });
 
 export const PolicySetResponseSchema = z.object({
   ok: z.boolean(),
@@ -2211,7 +2226,7 @@ export type AgentFeedbackQueryResponse = z.infer<
 // Runtime Execution Schemas
 // ============================================================================
 
-export const RuntimeExecuteRequestSchema = z
+const RuntimeExecuteRequestObjectSchema = z
   .object({
     repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
     runtime: z.enum(RUNTIME_NAMES),
@@ -2221,6 +2236,13 @@ export const RuntimeExecuteRequestSchema = z
       .optional()
       .describe(
         "Override executable; defaults to runtime's default (node, python3, bash/cmd)",
+      ),
+    command: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Friendly alias for `executable`. Use either field; `executable` wins on conflict.",
       ),
     args: z
       .array(z.string())
@@ -2294,6 +2316,18 @@ export const RuntimeExecuteRequestSchema = z
       });
     }
   });
+
+// Public schema accepts `command` as a friendly alias for `executable`.
+// Either field may be set; if both are present, `executable` wins.
+export const RuntimeExecuteRequestSchema = RuntimeExecuteRequestObjectSchema.transform(
+  (val) => {
+    const aliased = val as typeof val & { command?: string };
+    if (aliased.command && !aliased.executable) {
+      return { ...val, executable: aliased.command };
+    }
+    return val;
+  },
+);
 
 export const RuntimeExecuteExcerptSchema = z.object({
   lineStart: z.number().int(),
