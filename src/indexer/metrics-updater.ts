@@ -159,27 +159,62 @@ export async function finalizeIndexing({
       }
     }
 
-    /* sdl.context: multi-model embedding pass */
+    /* sdl.context: multi-model embedding pass.
+     *
+     * P3: Run models in parallel. Each model owns an independent ONNX
+     * session and writes to a distinct vec column on the Symbol node, so
+     * the only shared resource is the LadybugDB write lock — and that
+     * lock is already serialized by withWriteConn() inside each pass.
+     * Running them concurrently overlaps ONNX inference (CPU-bound) with
+     * each other's idle write-lock waits, roughly halving wall time when
+     * two models are configured AND at least one stays on the per-row
+     * write path.
+     *
+     * Trade-off when both models exceed VECTOR_REBUILD_THRESHOLD: both
+     * passes drop their HNSW index, share the writeLimiter slot for
+     * batched writes, and each rebuilds at the end. Wall time is no
+     * worse than sequential (writes serialize through the lock either
+     * way) but the index-down window for each model spans the union of
+     * both passes' write phases. During that window, hybrid retrieval
+     * for either model degrades to FTS+other-model only — orchestrator
+     * silently catches QUERY_VECTOR_INDEX failures and returns []. The
+     * window is bounded by total bulk-write time (typically tens of
+     * seconds), and only first-time / full-reindex runs hit it.
+     *
+     * Per-model embeddingConcurrency now defaults to 1: with the batched
+     * UNWIND writes (P1) and the HNSW rebuild path (P2), the dominant
+     * cost is ONNX inference itself rather than write contention, and a
+     * single batch fully utilises the ONNX thread pool. Concurrency >1
+     * just oversubscribes CPUs across the parallel model passes. */
     const extraModels = semanticConfig.additionalModels ?? [];
-    const modelsToEmbed: string[] = [model, ...extraModels.filter((m) => m !== model)];
-    for (const embModel of modelsToEmbed) {
-      try {
-        const embResult = await measureSubphase(`semanticEmbeddings:${embModel}`, () =>
-          refreshSymbolEmbeddings({
-            repoId,
-            provider: semanticConfig.provider ?? "local",
-            model: embModel,
-            onProgress,
-            concurrency: semanticConfig.embeddingConcurrency ?? 4,
-          }),
-        );
-        logger.info(
-          `Embeddings: ${embResult.embedded} embedded, ${embResult.skipped} cached (model: ${embModel})`,
-        );
-      } catch (error) {
-        logger.warn(`Semantic embedding refresh skipped for ${embModel}: ${String(error)}`);
-      }
-    }
+    const modelsToEmbed: string[] = [
+      model,
+      ...extraModels.filter((m) => m !== model),
+    ];
+    await Promise.all(
+      modelsToEmbed.map(async (embModel) => {
+        try {
+          const embResult = await measureSubphase(
+            `semanticEmbeddings:${embModel}`,
+            () =>
+              refreshSymbolEmbeddings({
+                repoId,
+                provider: semanticConfig.provider ?? "local",
+                model: embModel,
+                onProgress,
+                concurrency: semanticConfig.embeddingConcurrency,
+              }),
+          );
+          logger.info(
+            `Embeddings: ${embResult.embedded} embedded, ${embResult.skipped} cached (model: ${embModel})`,
+          );
+        } catch (error) {
+          logger.warn(
+            `Semantic embedding refresh skipped for ${embModel}: ${String(error)}`,
+          );
+        }
+      }),
+    );
   }
 
   return { summaryStats, timings, sharedGraph: metricsResult.sharedGraph };

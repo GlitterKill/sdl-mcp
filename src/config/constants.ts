@@ -516,6 +516,22 @@ export const DEFAULT_EMBEDDING_CONCURRENCY = 1;
 export const MAX_EMBEDDING_CONCURRENCY = 4;
 
 /**
+ * When the count of uncached symbols to embed exceeds this threshold,
+ * `refreshSymbolEmbeddings` drops the HNSW vector index, performs the bulk
+ * write without per-row index maintenance, then recreates the index in a
+ * single rebuild pass.
+ *
+ * Below the threshold the per-row null-then-set dance is cheaper than a
+ * full rebuild. The break-even point depends on HNSW `efc` (default 200)
+ * and `M` (default 16): per-row insert is roughly `M·log(N)·efc` ops
+ * (~41k for N=8k), and full rebuild amortises the same per-row cost over
+ * all live symbols. So once the changed-symbol count approaches a small
+ * fraction of total symbols (~2–5%), the rebuild path wins. 200 is a
+ * conservative default for repos with 5–20k symbols.
+ */
+export const VECTOR_REBUILD_THRESHOLD = 200;
+
+/**
  * Default timeout for operations in milliseconds.
  */
 export const DEFAULT_OPERATION_TIMEOUT_MS = 2000;

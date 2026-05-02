@@ -3,19 +3,35 @@ import * as ladybugDb from "../db/ladybug-queries.js";
 import { hashContent } from "../util/hashing.js";
 import { logger } from "../util/logger.js";
 import {
+  MAX_EMBEDDING_CONCURRENCY,
+  VECTOR_REBUILD_THRESHOLD,
+} from "../config/constants.js";
+import {
   createOnnxSession,
   type OnnxEmbeddingSession,
 } from "./embeddings-local.js";
-import { getModelInfo, applyDocumentPrefix, isModelAvailable } from "./model-registry.js";
+import {
+  getModelInfo,
+  applyDocumentPrefix,
+  isModelAvailable,
+} from "./model-registry.js";
 import type { IndexProgress } from "./indexer.js";
 import {
   getSymbolEmbeddingsFromNodes,
   setSymbolEmbeddingBatchOnNode,
   type SymbolEmbeddingBatchItem,
 } from "../db/ladybug-symbol-embeddings.js";
+import {
+  createVectorIndex,
+  dropVectorIndex,
+} from "../retrieval/index-lifecycle.js";
+import {
+  EMBEDDING_MODELS,
+  getVecPropertyName,
+  getVectorIndexName,
+} from "../retrieval/model-mapping.js";
 import { prepareSymbolEmbeddingInputs } from "./symbol-embedding-context.js";
 import { buildSymbolEmbeddingText } from "./symbol-embedding-text.js";
-
 
 /** Legacy dimension constant — only used by MockEmbeddingProvider */
 export const EMBEDDING_DIMENSION = 64;
@@ -227,7 +243,9 @@ export function getEmbeddingProvider(
 ): EmbeddingProvider {
   switch (provider) {
     case "local":
-      return new LocalEmbeddingProvider(model ?? "jina-embeddings-v2-base-code");
+      return new LocalEmbeddingProvider(
+        model ?? "jina-embeddings-v2-base-code",
+      );
     case "api":
       return new ApiEmbeddingProvider();
     case "mock":
@@ -302,7 +320,6 @@ export async function refreshSymbolEmbeddings(params: {
     symbol: ladybugDb.SymbolRow;
     prefixedText: string;
     cardHash: string;
-
   }> = [];
 
   for (let i = 0; i < symbols.length; i++) {
@@ -321,17 +338,78 @@ export async function refreshSymbolEmbeddings(params: {
     uncachedItems.push({ symbol, prefixedText, cardHash });
   }
 
+  // P4: sort uncached items by prefixed-text length so each batch contains
+  // similarly sized inputs. Tokenizer padding pads every row in a batch to
+  // the longest sequence, so mixing one outlier with 31 short symbols
+  // multiplies the ONNX work for the whole batch. Bucketing by length
+  // typically cuts inference wall time 30–50% on heterogeneous corpora.
+  // Note: callers must not depend on write order — sort is purely a
+  // throughput optimisation.
+  uncachedItems.sort((a, b) => a.prefixedText.length - b.prefixedText.length);
+
   // Resolve concurrency: clamp to [1, MAX_EMBEDDING_CONCURRENCY].
   const maxConcurrency = Math.max(
     1,
-    Math.min(params.concurrency ?? 1, 4),
+    Math.min(params.concurrency ?? 1, MAX_EMBEDDING_CONCURRENCY),
   );
 
-  // Progress: fire at start
-  params.onProgress?.({ stage: "embeddings", current: 0, total: symbols.length });
+  // P6: helper to fire smooth per-batch progress. We keep firing at the
+  // batch boundary instead of waiting for the whole chunk to finish so
+  // observers see a steady tick stream rather than a 0→56% jump. Under
+  // concurrency >1 the counters are mutated from concurrent closures —
+  // JS guarantees no torn writes, but two batches finishing near the
+  // same tick can both observe the same `current`. The monotonic clamp
+  // keeps the reported value non-decreasing so consumers don't see
+  // duplicate or backwards ticks.
+  let lastReported = -1;
+  const fireProgress = (): void => {
+    const current = Math.min(skipped + embedded, symbols.length);
+    if (current <= lastReported) return;
+    lastReported = current;
+    params.onProgress?.({
+      stage: "embeddings",
+      current,
+      total: symbols.length,
+    });
+  };
+
+  // Progress: fire at start (already includes the cache-hit skip count
+  // accumulated above, so the very first tick is non-zero whenever the
+  // pre-pass found cached embeddings — no surprise jump on first chunk).
+  fireProgress();
+
+  // P2: HNSW drop+rebuild for bulk runs. When the uncached count exceeds
+  // VECTOR_REBUILD_THRESHOLD, dropping the vector index for the duration
+  // of the writes is much cheaper than per-row HNSW maintenance:
+  // O(N · log N · M · efc) becomes O(rebuild) ≈ a single pass at the end.
+  const vecProp = getVecPropertyName(modelName);
+  const indexName = getVectorIndexName(modelName);
+  const useRebuildPath =
+    vecProp !== null &&
+    indexName !== null &&
+    uncachedItems.length >= VECTOR_REBUILD_THRESHOLD;
+  let indexDropped = false;
+  if (useRebuildPath) {
+    indexDropped = await withWriteConn((wConn) =>
+      dropVectorIndex(wConn, "Symbol", indexName),
+    );
+    if (indexDropped) {
+      logger.info(
+        `[embeddings] Bulk path: dropped vector index '${indexName}' for ${uncachedItems.length} writes (rebuild after)`,
+      );
+    } else {
+      logger.warn(
+        `[embeddings] Vector index '${indexName}' drop failed; falling back to per-row HNSW maintenance`,
+      );
+    }
+  }
 
   // Split uncached items into batches of REFRESH_BATCH_SIZE.
-  type UncachedBatch = Array<{ symbol: ladybugDb.SymbolRow; prefixedText: string; cardHash: string }>;
+  type UncachedBatch = Array<{
+    symbol: ladybugDb.SymbolRow;
+    prefixedText: string;
+    cardHash: string;
+  }>;
   const batches: UncachedBatch[] = [];
   for (let i = 0; i < uncachedItems.length; i += REFRESH_BATCH_SIZE) {
     batches.push(uncachedItems.slice(i, i + REFRESH_BATCH_SIZE));
@@ -341,9 +419,7 @@ export async function refreshSymbolEmbeddings(params: {
   // concurrent closures directly) so there are no data races.
   type BatchResult = { embedded: number; skipped: number; terminal: boolean };
 
-  const processBatch = async (
-    batch: UncachedBatch,
-  ): Promise<BatchResult> => {
+  const processBatch = async (batch: UncachedBatch): Promise<BatchResult> => {
     const batchTexts = batch.map((item) => item.prefixedText);
     let batchVectors: number[][];
     try {
@@ -355,8 +431,13 @@ export async function refreshSymbolEmbeddings(params: {
         error: error instanceof Error ? error.message : String(error),
       });
       const errorMsg = error instanceof Error ? error.message : String(error);
-      if (errorMsg.includes("SessionClosed") || errorMsg.includes("ECONNRESET")) {
-        logger.error("Terminal provider error, aborting refresh", { error: errorMsg });
+      if (
+        errorMsg.includes("SessionClosed") ||
+        errorMsg.includes("ECONNRESET")
+      ) {
+        logger.error("Terminal provider error, aborting refresh", {
+          error: errorMsg,
+        });
         return { embedded: 0, skipped: 0, terminal: true };
       }
       return { embedded: 0, skipped: 0, terminal: false };
@@ -380,15 +461,18 @@ export async function refreshSymbolEmbeddings(params: {
       return { embedded: 0, skipped: batch.length, terminal: false };
     }
 
-    // Recheck the durable cache after embed so a concurrent refresher that
-    // finished while this batch was in flight wins without redundant writes.
-    const batchSymbolIds = batch.map((item) => item.symbol.symbolId);
-    const postEmbedExisting = await getSymbolEmbeddingsFromNodes(
-      conn,
-      batchSymbolIds,
-      storageModel,
-    );
-
+    // P5: post-embed recheck for race avoidance is now an in-memory lookup
+    // against the pre-pass snapshot rather than a fresh DB round-trip per
+    // batch. Authoritative reasoning: parallel calls in metrics-updater.ts
+    // each pass a distinct `model`, and each model writes to disjoint
+    // Symbol properties (embeddingJinaCode* vs embeddingNomic*), so the
+    // per-model snapshots cannot race each other. If a future change adds
+    // a same-model parallel writer, this in-memory shortcut must be
+    // re-evaluated — writeLimiter serializes connections, not the in-
+    // memory snapshot, and two refreshes of the same model could write
+    // duplicate work. Cross-process races degrade to rare duplicate
+    // identical writes (harmless).
+    const postEmbedExisting = existingEmbeddings;
     const batchItems: SymbolEmbeddingBatchItem[] = [];
     for (let i = 0; i < batch.length; i++) {
       const postExisting = postEmbedExisting.get(batch[i].symbol.symbolId);
@@ -406,7 +490,9 @@ export async function refreshSymbolEmbeddings(params: {
 
     if (batchItems.length > 0) {
       await withWriteConn(async (wConn) => {
-        await setSymbolEmbeddingBatchOnNode(wConn, storageModel, batchItems);
+        await setSymbolEmbeddingBatchOnNode(wConn, storageModel, batchItems, {
+          hnswIndexDropped: indexDropped,
+        });
       });
     }
 
@@ -420,32 +506,74 @@ export async function refreshSymbolEmbeddings(params: {
   // Process batches with bounded concurrency using a sliding window.
   // Each "chunk" is at most maxConcurrency batches run in parallel.
   let aborted = false;
-  for (let chunkStart = 0; chunkStart < batches.length && !aborted; chunkStart += maxConcurrency) {
-    const chunk = batches.slice(chunkStart, chunkStart + maxConcurrency);
-    const results = await Promise.allSettled(chunk.map((b) => processBatch(b)));
+  try {
+    for (
+      let chunkStart = 0;
+      chunkStart < batches.length && !aborted;
+      chunkStart += maxConcurrency
+    ) {
+      const chunk = batches.slice(chunkStart, chunkStart + maxConcurrency);
+      // P6: fire progress as each batch settles, not after the chunk wraps.
+      const settled = await Promise.allSettled(
+        chunk.map(async (b) => {
+          const res = await processBatch(b);
+          embedded += res.embedded;
+          skipped += res.skipped;
+          fireProgress();
+          return res;
+        }),
+      );
 
-    for (const result of results) {
-      if (result.status === "fulfilled") {
-        embedded += result.value.embedded;
-        skipped += result.value.skipped;
-        if (result.value.terminal) {
-          aborted = true;
+      for (const result of settled) {
+        if (result.status === "fulfilled") {
+          if (result.value.terminal) {
+            aborted = true;
+          }
+        } else {
+          // processBatch should not throw (all errors handled internally),
+          // but guard defensively.
+          logger.warn("Unexpected processBatch rejection", {
+            reason: String(result.reason),
+          });
         }
-      } else {
-        // processBatch should not throw (all errors handled internally),
-        // but guard defensively.
-        logger.warn("Unexpected processBatch rejection", {
-          reason: String(result.reason),
-        });
       }
     }
-
-    // Progress: fire after each chunk
-    const progressCurrent = Math.min(skipped + embedded, symbols.length);
-    params.onProgress?.({ stage: "embeddings", current: progressCurrent, total: symbols.length });
+  } finally {
+    // P2: rebuild the dropped index regardless of write outcome so search
+    // remains operational even if the bulk write aborted partway. Failure
+    // to recreate is non-fatal but logged loudly — vector retrieval will
+    // degrade until the next index.refresh.
+    if (indexDropped && vecProp !== null && indexName !== null) {
+      const modelInfo = EMBEDDING_MODELS[modelName];
+      if (modelInfo) {
+        const ok = await withWriteConn((wConn) =>
+          createVectorIndex(
+            wConn,
+            "Symbol",
+            vecProp,
+            indexName,
+            modelInfo.dimension,
+          ),
+        );
+        if (ok) {
+          logger.info(
+            `[embeddings] Vector index '${indexName}' rebuilt after bulk write`,
+          );
+        } else {
+          logger.error(
+            `[embeddings] Vector index '${indexName}' rebuild FAILED — vector retrieval for ${modelName} will degrade until next refresh`,
+          );
+        }
+      }
+    }
   }
 
-  // Progress: fire at end
-  params.onProgress?.({ stage: "embeddings", current: symbols.length, total: symbols.length });
+  // Progress: fire at end through fireProgress() so the monotonic clamp
+  // covers this final tick too — without it, a 0-symbol refresh would
+  // emit a duplicate {current:0, total:0} after the start tick. The
+  // clamp guarantees the final emit only fires when real progress was
+  // made beyond the last tick; for partial/aborted runs that means
+  // honest "current < total" rather than a dishonest forced-to-total.
+  fireProgress();
   return { embedded, skipped };
 }

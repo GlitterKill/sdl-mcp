@@ -163,6 +163,72 @@ export async function createVectorIndex(
   }
 }
 
+/**
+ * Drop a vector (HNSW) index by name.
+ *
+ * Uses the Kuzu `DROP_VECTOR_INDEX` stored procedure. Returns true on success
+ * (including the case where the index was already absent), false only on
+ * unexpected failure modes.
+ *
+ * Bulk embedding refreshes use this to remove the live index for the
+ * duration of the write phase, avoiding O(N · log N · M · efc) HNSW
+ * insert/delete cost per row, then recreate the index in one rebuild
+ * pass at the end.
+ */
+export async function dropVectorIndex(
+  conn: Connection,
+  tableName: string,
+  indexName: string,
+): Promise<boolean> {
+  try {
+    validateIdentifier(tableName, "table name");
+    validateIdentifier(indexName, "index name");
+    await runExclusive(conn, () =>
+      conn.query(`CALL DROP_VECTOR_INDEX('${tableName}', '${indexName}')`),
+    );
+    logger.info(
+      `[index-lifecycle] Vector index '${indexName}' dropped on ${tableName}`,
+    );
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Conservative swallow: only treat the specific "does not exist" phrase
+    // as success, AND verify via showIndexes that the index is genuinely
+    // absent. A broader regex (e.g. "not found") risks misreading an
+    // unrelated error — callers would then take the index-dropped fast
+    // path while the live HNSW index still rejects vec writes, aborting
+    // the whole bulk pass.
+    if (/does not exist/i.test(msg)) {
+      try {
+        const indexes = await showIndexes(conn);
+        // Only trust the verification when SHOW_INDEXES actually answered.
+        // showIndexes() swallows its own errors and returns [] on failure,
+        // which is indistinguishable from a fresh DB with zero indexes —
+        // so an empty result must be treated as "could not verify" rather
+        // than "confirmed absent". Requiring at least one row guarantees
+        // SHOW_INDEXES was truly executed.
+        if (indexes.length > 0) {
+          const stillPresent = indexes.some(
+            (i) => i.name === indexName && i.type === "vector",
+          );
+          if (!stillPresent) {
+            logger.debug(
+              `[index-lifecycle] Vector index '${indexName}' on ${tableName} already absent`,
+            );
+            return true;
+          }
+        }
+      } catch {
+        // showIndexes throw — fall through to warn+return false.
+      }
+    }
+    logger.warn(
+      `[index-lifecycle] Vector index '${indexName}' on ${tableName} drop failed: ${msg}`,
+    );
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Index introspection
 // ---------------------------------------------------------------------------

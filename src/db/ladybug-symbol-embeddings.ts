@@ -246,7 +246,6 @@ export async function getSymbolEmbeddingsFromNodes(
   return result;
 }
 
-
 // ---------------------------------------------------------------------------
 // Write: batch
 // ---------------------------------------------------------------------------
@@ -259,14 +258,44 @@ export interface SymbolEmbeddingBatchItem {
 }
 
 /**
- * Batch-write embedding vectors for multiple symbols in a single connection.
- * Avoids per-symbol write-lock acquisition overhead that dominates embedding
- * time on large repos.
+ * Options for batch embedding writes.
+ */
+export interface SetSymbolEmbeddingBatchOpts {
+  /**
+   * When true, skip the null-then-set dance for the HNSW-indexed `vec`
+   * column and write the array directly. Use this when the caller has
+   * already dropped the vector index for the duration of the bulk
+   * write, so SET on the column does not violate HNSW constraints.
+   *
+   * When false (default), the writer issues a separate UNWIND that
+   * NULLs every `vec` value first to remove the prior HNSW entries,
+   * then a follow-up UNWIND that writes the new arrays. This is the
+   * required pattern for incremental writes against a live index.
+   */
+  hnswIndexDropped?: boolean;
+}
+
+/**
+ * Batch-write embedding vectors for multiple symbols in a single transaction.
+ *
+ * Replaces the prior per-symbol loop (which issued ~5 round-trips per symbol
+ * — 1 SET, then BEGIN/SET=null/SET=array/COMMIT for the vec column) with
+ * three UNWIND queries inside a single transaction:
+ *
+ *   1. UNWIND text properties (vector, cardHash, updatedAt) for every row.
+ *   2. UNWIND vec=null for rows with arrays — clears HNSW entries.
+ *   3. UNWIND vec=$array for rows with arrays — re-inserts into HNSW.
+ *
+ * When `hnswIndexDropped` is true the null pass is skipped and the vec
+ * write is folded into the first UNWIND. This is dramatically faster
+ * than per-row writes — one round-trip per phase regardless of batch
+ * size — and the entire batch commits atomically.
  */
 export async function setSymbolEmbeddingBatchOnNode(
   conn: Connection,
   model: string,
   items: SymbolEmbeddingBatchItem[],
+  opts: SetSymbolEmbeddingBatchOpts = {},
 ): Promise<void> {
   if (items.length === 0) return;
 
@@ -275,36 +304,59 @@ export async function setSymbolEmbeddingBatchOnNode(
 
   const updatedAt = new Date().toISOString();
 
-  for (const item of items) {
+  const rows = items.map((item) => ({
+    symbolId: item.symbolId,
+    vector: item.vector,
+    cardHash: item.cardHash,
+    vectorArray: item.vectorArray ?? null,
+  }));
+  const vecRows = vecProp
+    ? rows.filter((r) => Array.isArray(r.vectorArray))
+    : [];
+
+  await withTransaction(conn, async (txConn) => {
+    if (vecProp && opts.hnswIndexDropped && vecRows.length > 0) {
+      // Fast path: HNSW index dropped, write everything in one statement.
+      await exec(
+        txConn,
+        `UNWIND $rows AS r
+         MATCH (s:Symbol {symbolId: r.symbolId})
+         SET s.${vectorProp} = r.vector,
+             s.${cardHashProp} = r.cardHash,
+             s.${updatedAtProp} = $updatedAt,
+             s.${vecProp} = r.vectorArray`,
+        { rows, updatedAt },
+      );
+      return;
+    }
+
+    // Phase 1: text-encoded vector + cardHash + updatedAt for every row.
     await exec(
-      conn,
-      `MATCH (s:Symbol {symbolId: $symbolId})
-       SET s.${vectorProp} = $vector,
-           s.${cardHashProp} = $cardHash,
+      txConn,
+      `UNWIND $rows AS r
+       MATCH (s:Symbol {symbolId: r.symbolId})
+       SET s.${vectorProp} = r.vector,
+           s.${cardHashProp} = r.cardHash,
            s.${updatedAtProp} = $updatedAt`,
-      {
-        symbolId: item.symbolId,
-        vector: item.vector,
-        cardHash: item.cardHash,
-        updatedAt,
-      },
+      { rows, updatedAt },
     );
 
-    if (item.vectorArray && vecProp) {
-      await withTransaction(conn, async (txConn) => {
-        await exec(
-          txConn,
-          `MATCH (s:Symbol {symbolId: $symbolId})
-           SET s.${vecProp} = null`,
-          { symbolId: item.symbolId },
-        );
-        await exec(
-          txConn,
-          `MATCH (s:Symbol {symbolId: $symbolId})
-           SET s.${vecProp} = $vectorArray`,
-          { symbolId: item.symbolId, vectorArray: item.vectorArray },
-        );
-      });
+    // Phase 2: HNSW null-then-set, only for rows that supplied vectorArray.
+    if (vecProp && vecRows.length > 0) {
+      await exec(
+        txConn,
+        `UNWIND $rows AS r
+         MATCH (s:Symbol {symbolId: r.symbolId})
+         SET s.${vecProp} = null`,
+        { rows: vecRows },
+      );
+      await exec(
+        txConn,
+        `UNWIND $rows AS r
+         MATCH (s:Symbol {symbolId: r.symbolId})
+         SET s.${vecProp} = r.vectorArray`,
+        { rows: vecRows },
+      );
     }
-  }
+  });
 }
