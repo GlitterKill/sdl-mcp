@@ -86,6 +86,14 @@ export async function upsertFileSummaryBatch(
   chunkSize = 256,
 ): Promise<void> {
   if (rows.length === 0) return;
+  // Dedup by fileId — W3 OPTIONAL-MATCH+CREATE has no within-batch
+  // idempotency for FILE_SUMMARY_IN_REPO and SUMMARY_OF_FILE rels.
+  const seen = new Set<string>();
+  rows = rows.filter((r) => {
+    if (seen.has(r.fileId)) return false;
+    seen.add(r.fileId);
+    return true;
+  });
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize);
     try {
@@ -98,6 +106,9 @@ export async function upsertFileSummaryBatch(
         updatedAt: p.updatedAt,
       }));
       await withTransaction(conn, async (txConn) => {
+        // W3 workaround for LadybugDB UNWIND+MERGE-rel runtime bug:
+        // (1) MERGE node + SET, (2) idempotent FILE_SUMMARY_IN_REPO,
+        // (3) idempotent SUMMARY_OF_FILE.
         await exec(
           txConn,
           `UNWIND $rows AS row
@@ -107,9 +118,29 @@ export async function upsertFileSummaryBatch(
            SET fs.repoId = row.repoId,
                fs.summary = row.summary,
                fs.searchText = row.searchText,
-               fs.updatedAt = row.updatedAt
-           MERGE (fs)-[:FILE_SUMMARY_IN_REPO]->(r)
-           MERGE (fs)-[:SUMMARY_OF_FILE]->(f)`,
+               fs.updatedAt = row.updatedAt`,
+          { rows: unwindRows },
+        );
+        await exec(
+          txConn,
+          `UNWIND $rows AS row
+           MATCH (r:Repo {repoId: row.repoId})
+           MATCH (fs:FileSummary {fileId: row.fileId})
+           OPTIONAL MATCH (fs)-[existing:FILE_SUMMARY_IN_REPO]->(r)
+           WITH fs, r, existing
+           WHERE existing IS NULL
+           CREATE (fs)-[:FILE_SUMMARY_IN_REPO]->(r)`,
+          { rows: unwindRows },
+        );
+        await exec(
+          txConn,
+          `UNWIND $rows AS row
+           MATCH (f:File {fileId: row.fileId})
+           MATCH (fs:FileSummary {fileId: row.fileId})
+           OPTIONAL MATCH (fs)-[existing:SUMMARY_OF_FILE]->(f)
+           WITH fs, f, existing
+           WHERE existing IS NULL
+           CREATE (fs)-[:SUMMARY_OF_FILE]->(f)`,
           { rows: unwindRows },
         );
       });

@@ -120,7 +120,16 @@ export async function upsertProcessStepsBatch(
   }>,
 ): Promise<void> {
   if (steps.length === 0) return;
-  // UNWIND-batched MERGE; side-effect mode (no RETURN) avoids LadybugDB#285.
+  // Dedup by (symbolId, processId) — W4 OPTIONAL-MATCH+CREATE has no
+  // within-batch idempotency.
+  const seen = new Set<string>();
+  steps = steps.filter((s) => {
+    const key = `${s.symbolId}\0${s.processId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  // W4 workaround for LadybugDB UNWIND+MERGE-rel runtime bug.
   const CHUNK = 256;
   await withTransaction(conn, async (txConn) => {
     for (let i = 0; i < steps.length; i += CHUNK) {
@@ -130,7 +139,18 @@ export async function upsertProcessStepsBatch(
         `UNWIND $rows AS row
          MATCH (s:Symbol {symbolId: row.symbolId})
          MATCH (p:Process {processId: row.processId})
-         MERGE (s)-[r:PARTICIPATES_IN]->(p)
+         OPTIONAL MATCH (s)-[existing:PARTICIPATES_IN]->(p)
+         WITH s, p, row, existing
+         WHERE existing IS NULL
+         CREATE (s)-[:PARTICIPATES_IN {stepOrder: row.stepOrder, role: row.role}]->(p)`,
+        { rows },
+      );
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (s:Symbol {symbolId: row.symbolId})
+         MATCH (p:Process {processId: row.processId})
+         MATCH (s)-[r:PARTICIPATES_IN]->(p)
          SET r.stepOrder = row.stepOrder,
              r.role = row.role`,
         { rows },
@@ -436,7 +456,11 @@ export async function backfillProcessSearchText(
         .map((s) => nameMap.get(s.symbolId))
         .filter((n): n is string => Boolean(n));
 
-      const searchText = buildProcessSearchText(proc.label, entryName, stepNames);
+      const searchText = buildProcessSearchText(
+        proc.label,
+        entryName,
+        stepNames,
+      );
       await exec(
         txConn,
         `MATCH (p:Process {processId: $processId})

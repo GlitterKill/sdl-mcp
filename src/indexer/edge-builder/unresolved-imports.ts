@@ -143,7 +143,10 @@ async function resolveUnresolvedImportEdges(
       pendingUpdates.push({
         edge: entry.edge,
         targetSymbolId,
-        provenance: entry.edge.provenance ?? `import:${entry.symbolName}`,
+        // Truthy fallback (not nullish): UNWIND-batched writes coerce nullable
+        // STRING to '' to dodge the kuzu binder ANY-type bug, so '' must also
+        // trigger the import-prefix synthesis.
+        provenance: entry.edge.provenance || `import:${entry.symbolName}`,
       });
     }
   });

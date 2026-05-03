@@ -78,7 +78,7 @@ export function buildSymbolReferences(
     repoId,
     symbolName: token,
     fileId,
-    lineNumber: null,
+    lineNumber: 0,
     createdAt,
   }));
 }

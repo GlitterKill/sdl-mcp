@@ -313,7 +313,12 @@ export async function batchGetExistingEdges(
 ): Promise<
   Map<
     string,
-    { edgeType: string; confidence: number; resolution: string; resolverId: string }
+    {
+      edgeType: string;
+      confidence: number;
+      resolution: string;
+      resolverId: string;
+    }
   >
 > {
   if (pairs.length === 0) return new Map();
@@ -325,9 +330,7 @@ export async function batchGetExistingEdges(
   // (source, target) combinations that were not in the original input pairs
   // but happen to exist in the graph. We post-filter against this Set so only
   // actually-requested pairs are reported as "already exists".
-  const allowedPairs = new Set(
-    pairs.map((p) => `${p.sourceId}:${p.targetId}`),
-  );
+  const allowedPairs = new Set(pairs.map((p) => `${p.sourceId}:${p.targetId}`));
 
   const rows = await queryAll<{
     sourceId: string;
@@ -351,7 +354,12 @@ export async function batchGetExistingEdges(
 
   const result = new Map<
     string,
-    { edgeType: string; confidence: number; resolution: string; resolverId: string }
+    {
+      edgeType: string;
+      confidence: number;
+      resolution: string;
+      resolverId: string;
+    }
   >();
   for (const row of rows) {
     // Drop Cartesian-product rows that were not in the original input pairs.
@@ -376,7 +384,6 @@ export async function batchGetExistingEdges(
 
   return result;
 }
-
 
 // ---------------------------------------------------------------------------
 // 6. getSymbolsForFile — load all symbols for a file (symbol matcher)
@@ -522,7 +529,7 @@ export async function getScipIngestionRecord(
 // 9. batchMergeScipEdges — batched edge writes for performance
 // ---------------------------------------------------------------------------
 
-const EDGE_BATCH_SIZE = 100;
+const EDGE_BATCH_SIZE = 256;
 
 /**
  * Insert or upgrade a batch of DEPENDS_ON edges via UNWIND-batched MERGE
@@ -543,6 +550,16 @@ export async function batchMergeScipEdges(
 ): Promise<void> {
   if (edges.length === 0) return;
 
+  // Dedup by (sourceSymbolId, targetSymbolId, edgeType) — W4 has no
+  // within-batch idempotency, so duplicate triples would CREATE twice.
+  const seen = new Set<string>();
+  edges = edges.filter((e) => {
+    const key = `${e.sourceSymbolId}\0${e.targetSymbolId}\0${e.edgeType}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
   const now = new Date().toISOString();
 
   await withTransaction(conn, async (txConn) => {
@@ -558,25 +575,48 @@ export async function batchMergeScipEdges(
         resolutionPhase: String(edge.resolutionPhase),
         createdAt: now,
       }));
-      // UNWIND-batched MERGE: one statement per chunk; preserves
-      // ON CREATE / ON MATCH semantics. No RETURN — LadybugDB issue #285.
+      // W4-style workaround for LadybugDB UNWIND+MERGE-rel runtime bug.
+      // Three passes preserve original ON CREATE / ON MATCH semantics:
+      //   1. MERGE both Symbol nodes.
+      //   2. Create rel if missing (sets all props incl. createdAt).
+      //   3. For pre-existing rels, upgrade only when incoming confidence
+      //      strictly beats stored confidence (matches CASE WHEN ... ELSE d.x).
       await exec(
         txConn,
         `UNWIND $rows AS row
          MERGE (a:Symbol {symbolId: row.sourceSymbolId})
-         MERGE (b:Symbol {symbolId: row.targetSymbolId})
-         MERGE (a)-[d:DEPENDS_ON {edgeType: row.edgeType}]->(b)
-         ON CREATE SET
-             d.confidence = row.confidence,
+         MERGE (b:Symbol {symbolId: row.targetSymbolId})`,
+        { rows },
+      );
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (a:Symbol {symbolId: row.sourceSymbolId})
+         MATCH (b:Symbol {symbolId: row.targetSymbolId})
+         OPTIONAL MATCH (a)-[existing:DEPENDS_ON {edgeType: row.edgeType}]->(b)
+         WITH a, b, row, existing
+         WHERE existing IS NULL
+         CREATE (a)-[:DEPENDS_ON {
+           edgeType: row.edgeType,
+           confidence: row.confidence,
+           resolution: row.resolution,
+           resolverId: row.resolverId,
+           resolutionPhase: row.resolutionPhase,
+           createdAt: row.createdAt
+         }]->(b)`,
+        { rows },
+      );
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (a:Symbol {symbolId: row.sourceSymbolId})
+         MATCH (b:Symbol {symbolId: row.targetSymbolId})
+         MATCH (a)-[d:DEPENDS_ON {edgeType: row.edgeType}]->(b)
+         WHERE d.confidence < row.confidence
+         SET d.confidence = row.confidence,
              d.resolution = row.resolution,
              d.resolverId = row.resolverId,
-             d.resolutionPhase = row.resolutionPhase,
-             d.createdAt = row.createdAt
-         ON MATCH SET
-             d.confidence = CASE WHEN d.confidence < row.confidence THEN row.confidence ELSE d.confidence END,
-             d.resolution = CASE WHEN d.confidence < row.confidence THEN row.resolution ELSE d.resolution END,
-             d.resolverId = CASE WHEN d.confidence < row.confidence THEN row.resolverId ELSE d.resolverId END,
-             d.resolutionPhase = CASE WHEN d.confidence < row.confidence THEN row.resolutionPhase ELSE d.resolutionPhase END`,
+             d.resolutionPhase = row.resolutionPhase`,
         { rows },
       );
     }

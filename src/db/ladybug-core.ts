@@ -98,7 +98,9 @@ export function runExclusive<T>(
   conn: Connection,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return getConnMutex(conn).run(() => withConnWatchdog(conn, "runExclusive", fn));
+  return getConnMutex(conn).run(() =>
+    withConnWatchdog(conn, "runExclusive", fn),
+  );
 }
 
 /**
@@ -319,7 +321,11 @@ const BEGIN_TXN_RETRY_DELAYS_MS = [50, 100, 200, 400, 800] as const;
 
 async function beginTransactionWithRetry(conn: Connection): Promise<void> {
   let lastErr: unknown;
-  for (let attempt = 0; attempt <= BEGIN_TXN_RETRY_DELAYS_MS.length; attempt++) {
+  for (
+    let attempt = 0;
+    attempt <= BEGIN_TXN_RETRY_DELAYS_MS.length;
+    attempt++
+  ) {
     try {
       await exec(conn, "BEGIN TRANSACTION");
       return;
@@ -396,15 +402,24 @@ export async function withTransaction<T>(
         try {
           await exec(conn, "ROLLBACK");
         } catch (rollbackErr) {
-          poisonedConnections.set(conn, true);
-          const originalMessage =
-            err instanceof Error ? err.message : String(err);
           const rollbackMessage =
             rollbackErr instanceof Error
               ? rollbackErr.message
               : String(rollbackErr);
-          throw new DatabaseError(
-            `Transaction rollback failed after ${originalMessage}: ${rollbackMessage}`,
+          if (!/no active transaction/i.test(rollbackMessage)) {
+            poisonedConnections.set(conn, true);
+            const originalMessage =
+              err instanceof Error ? err.message : String(err);
+            throw new DatabaseError(
+              `Transaction rollback failed after ${originalMessage}: ${rollbackMessage}`,
+            );
+          }
+          logger.debug(
+            "withTransaction: ROLLBACK swallowed (txn already auto-rolled by engine)",
+            {
+              rollbackMessage,
+              originalError: err instanceof Error ? err.message : String(err),
+            },
           );
         }
       }

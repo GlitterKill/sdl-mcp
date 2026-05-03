@@ -132,6 +132,15 @@ export async function upsertSymbolBatch(
 ): Promise<void> {
   if (symbols.length === 0) return;
 
+  // Dedup by symbolId — W3 OPTIONAL-MATCH+CREATE has no within-batch
+  // idempotency, so duplicate (s, f) or (s, r) pairs would CREATE twice.
+  const seenSymbolIds = new Set<string>();
+  symbols = symbols.filter((s) => {
+    if (seenSymbolIds.has(s.symbolId)) return false;
+    seenSymbolIds.add(s.symbolId);
+    return true;
+  });
+
   if (symbols.length > MAX_BATCH_WARNING_THRESHOLD) {
     logger.warn("upsertSymbolBatch: unusually large file-scoped batch", {
       count: symbols.length,
@@ -146,6 +155,11 @@ export async function upsertSymbolBatch(
   await withTransaction(conn, async (txConn) => {
     for (let i = 0; i < symbols.length; i += CHUNK) {
       const chunk = symbols.slice(i, i + CHUNK);
+      // Coerce nullable STRING fields to '' — kuzu binder picks ANY type
+      // when a struct field is uniformly null AND a sibling Number field
+      // mixes integral (0.0 summaryQuality) with fractional (0.55/0.6/0.8)
+      // values. Upstream kuzudb/kuzu#5685, fixed in PR #5705 but not
+      // backported to LadybugDB 0.16.0. Empty string is the workaround.
       const rows = chunk.map((symbol) => ({
         symbolId: symbol.symbolId,
         repoId: symbol.repoId,
@@ -153,23 +167,27 @@ export async function upsertSymbolBatch(
         kind: symbol.kind,
         name: symbol.name,
         exported: symbol.exported,
-        visibility: symbol.visibility,
+        visibility: symbol.visibility ?? "",
         language: symbol.language,
         rangeStartLine: symbol.rangeStartLine,
         rangeStartCol: symbol.rangeStartCol,
         rangeEndLine: symbol.rangeEndLine,
         rangeEndCol: symbol.rangeEndCol,
         astFingerprint: symbol.astFingerprint,
-        signatureJson: symbol.signatureJson,
-        summary: symbol.summary,
-        invariantsJson: symbol.invariantsJson,
-        sideEffectsJson: symbol.sideEffectsJson,
-        roleTagsJson: symbol.roleTagsJson ?? null,
-        searchText: symbol.searchText ?? null,
+        signatureJson: symbol.signatureJson ?? "",
+        summary: symbol.summary ?? "",
+        invariantsJson: symbol.invariantsJson ?? "",
+        sideEffectsJson: symbol.sideEffectsJson ?? "",
+        roleTagsJson: symbol.roleTagsJson ?? "",
+        searchText: symbol.searchText ?? "",
         summaryQuality: symbol.summaryQuality ?? 0.0,
         summarySource: symbol.summarySource ?? "unknown",
         updatedAt: symbol.updatedAt,
       }));
+      // Three-pass W3 workaround for LadybugDB UNWIND+MERGE-rel runtime bug:
+      // (1) MERGE node + SET props, (2) idempotent SYMBOL_IN_FILE,
+      // (3) idempotent SYMBOL_IN_REPO. Plain MERGE-rel inside UNWIND throws
+      // "invalid unordered_map<K, T> key" in 0.15.x–0.16.0.
       await exec(
         txConn,
         `UNWIND $rows AS row
@@ -195,9 +213,29 @@ export async function upsertSymbolBatch(
              s.searchText = row.searchText,
              s.summaryQuality = row.summaryQuality,
              s.summarySource = row.summarySource,
-             s.updatedAt = row.updatedAt
-         MERGE (s)-[:SYMBOL_IN_FILE]->(f)
-         MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
+             s.updatedAt = row.updatedAt`,
+        { rows },
+      );
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (s:Symbol {symbolId: row.symbolId})
+         MATCH (f:File {fileId: row.fileId})
+         OPTIONAL MATCH (s)-[existing:SYMBOL_IN_FILE]->(f)
+         WITH s, f, existing
+         WHERE existing IS NULL
+         CREATE (s)-[:SYMBOL_IN_FILE]->(f)`,
+        { rows },
+      );
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (s:Symbol {symbolId: row.symbolId})
+         MATCH (r:Repo {repoId: row.repoId})
+         OPTIONAL MATCH (s)-[existing:SYMBOL_IN_REPO]->(r)
+         WITH s, r, existing
+         WHERE existing IS NULL
+         CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
         { rows },
       );
     }

@@ -112,7 +112,17 @@ export async function upsertClusterMembersBatch(
   }>,
 ): Promise<void> {
   if (members.length === 0) return;
-  // UNWIND-batched MERGE; side-effect mode (no RETURN) avoids LadybugDB#285.
+  // Dedup by (symbolId, clusterId) — W4 OPTIONAL-MATCH+CREATE has no
+  // within-batch idempotency.
+  const seen = new Set<string>();
+  members = members.filter((m) => {
+    const key = `${m.symbolId}\0${m.clusterId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  // W4 workaround for LadybugDB UNWIND+MERGE-rel runtime bug: split into
+  // OPTIONAL-MATCH+CREATE (if missing) + MATCH+SET (refresh props).
   const CHUNK = 256;
   await withTransaction(conn, async (txConn) => {
     for (let i = 0; i < members.length; i += CHUNK) {
@@ -122,7 +132,18 @@ export async function upsertClusterMembersBatch(
         `UNWIND $rows AS row
          MATCH (s:Symbol {symbolId: row.symbolId})
          MATCH (c:Cluster {clusterId: row.clusterId})
-         MERGE (s)-[m:BELONGS_TO_CLUSTER]->(c)
+         OPTIONAL MATCH (s)-[existing:BELONGS_TO_CLUSTER]->(c)
+         WITH s, c, row, existing
+         WHERE existing IS NULL
+         CREATE (s)-[:BELONGS_TO_CLUSTER {membershipScore: row.membershipScore}]->(c)`,
+        { rows },
+      );
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (s:Symbol {symbolId: row.symbolId})
+         MATCH (c:Cluster {clusterId: row.clusterId})
+         MATCH (s)-[m:BELONGS_TO_CLUSTER]->(c)
          SET m.membershipScore = row.membershipScore`,
         { rows },
       );

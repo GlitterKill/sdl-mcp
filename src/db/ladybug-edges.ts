@@ -159,6 +159,16 @@ export async function insertEdges(
 ): Promise<void> {
   if (edges.length === 0) return;
 
+  // Dedup by (repoId, fromSymbolId, toSymbolId, edgeType) — W4 has no
+  // within-batch idempotency, so duplicate triples would CREATE twice.
+  const seenEdges = new Set<string>();
+  edges = edges.filter((e) => {
+    const key = `${e.repoId}\0${e.fromSymbolId}\0${e.toSymbolId}\0${e.edgeType}`;
+    if (seenEdges.has(key)) return false;
+    seenEdges.add(key);
+    return true;
+  });
+
   // UNWIND-batched MERGE: chunked to keep param payload bounded. Side-effect
   // mode only (no RETURN) to avoid LadybugDB issue #285.
   const CHUNK = 256;
@@ -171,18 +181,31 @@ export async function insertEdges(
     }
 
     for (const [repoId, repoEdges] of edgesByRepo) {
+      // W3/W4 workaround for LadybugDB UNWIND+MERGE-rel runtime bug:
+      // split MERGE-rel into MERGE-node and OPTIONAL-MATCH+CREATE for the rel.
       if (!options?.skipSourceRepoLink) {
-        const fromSymbolIds = [...new Set(repoEdges.map((e) => e.fromSymbolId))];
+        const fromSymbolIds = [
+          ...new Set(repoEdges.map((e) => e.fromSymbolId)),
+        ];
         for (let i = 0; i < fromSymbolIds.length; i += CHUNK) {
           const idChunk = fromSymbolIds.slice(i, i + CHUNK);
           const rows = idChunk.map((symbolId) => ({ symbolId }));
           await exec(
             txConn,
             `UNWIND $rows AS row
-             MATCH (r:Repo {repoId: $repoId})
              MERGE (s:Symbol {symbolId: row.symbolId})
-             SET s.repoId = $repoId
-             MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
+             SET s.repoId = $repoId`,
+            { repoId, rows },
+          );
+          await exec(
+            txConn,
+            `UNWIND $rows AS row
+             MATCH (r:Repo {repoId: $repoId})
+             MATCH (s:Symbol {symbolId: row.symbolId})
+             OPTIONAL MATCH (s)-[existing:SYMBOL_IN_REPO]->(r)
+             WITH s, r, existing
+             WHERE existing IS NULL
+             CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
             { repoId, rows },
           );
         }
@@ -199,22 +222,56 @@ export async function insertEdges(
           resolution: edge.resolution,
           resolverId: edge.resolverId ?? "pass1-generic",
           resolutionPhase: edge.resolutionPhase ?? "pass1",
-          provenance: edge.provenance,
+          // Coerce nullable STRING to '' — kuzu binder picks ANY type when
+          // a struct field is uniformly null AND a sibling Number field
+          // mixes integral (1.0 weight) with fractional (0.6/0.8 weight)
+          // values. Upstream kuzudb/kuzu#5685, fixed in PR #5705 but not
+          // backported to LadybugDB 0.16.0. Empty string is the workaround.
+          provenance: edge.provenance ?? "",
           createdAt: edge.createdAt,
         }));
+        // 1: ensure both Symbol nodes exist.
         await exec(
           txConn,
           `UNWIND $rows AS row
            MERGE (a:Symbol {symbolId: row.fromSymbolId})
-           MERGE (b:Symbol {symbolId: row.toSymbolId})
-           MERGE (a)-[d:DEPENDS_ON {edgeType: row.edgeType}]->(b)
+           MERGE (b:Symbol {symbolId: row.toSymbolId})`,
+          { rows },
+        );
+        // 2: create rel if missing — sets createdAt + all props.
+        await exec(
+          txConn,
+          `UNWIND $rows AS row
+           MATCH (a:Symbol {symbolId: row.fromSymbolId})
+           MATCH (b:Symbol {symbolId: row.toSymbolId})
+           OPTIONAL MATCH (a)-[existing:DEPENDS_ON {edgeType: row.edgeType}]->(b)
+           WITH a, b, row, existing
+           WHERE existing IS NULL
+           CREATE (a)-[:DEPENDS_ON {
+             edgeType: row.edgeType,
+             weight: row.weight,
+             confidence: row.confidence,
+             resolution: row.resolution,
+             resolverId: row.resolverId,
+             resolutionPhase: row.resolutionPhase,
+             provenance: row.provenance,
+             createdAt: row.createdAt
+           }]->(b)`,
+          { rows },
+        );
+        // 3: refresh mutable props on existing rels (preserves createdAt).
+        await exec(
+          txConn,
+          `UNWIND $rows AS row
+           MATCH (a:Symbol {symbolId: row.fromSymbolId})
+           MATCH (b:Symbol {symbolId: row.toSymbolId})
+           MATCH (a)-[d:DEPENDS_ON {edgeType: row.edgeType}]->(b)
            SET d.weight = row.weight,
                d.confidence = row.confidence,
                d.resolution = row.resolution,
                d.resolverId = row.resolverId,
                d.resolutionPhase = row.resolutionPhase,
-               d.provenance = row.provenance,
-               d.createdAt = CASE WHEN d.createdAt IS NOT NULL THEN d.createdAt ELSE row.createdAt END`,
+               d.provenance = row.provenance`,
           { rows },
         );
       }
