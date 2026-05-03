@@ -20,13 +20,13 @@ export function resolveParserWorkerPoolSize(
     cpuCount = os.cpus().length,
   } = params;
 
-  const boundedConcurrency = Math.max(1, concurrency);
+  void concurrency;
   const boundedFileCount = Math.max(1, fileCount);
   const defaultPoolSize = Math.max(1, cpuCount - 1);
   const requestedPoolSize = configuredWorkerPoolSize ?? defaultPoolSize;
 
   return Math.max(
     1,
-    Math.min(requestedPoolSize, boundedConcurrency, boundedFileCount),
+    Math.min(requestedPoolSize, boundedFileCount),
   );
 }

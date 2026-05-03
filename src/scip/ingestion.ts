@@ -33,6 +33,7 @@ import {
 } from "../db/ladybug.js";
 import { ScipFileNotFoundError, ScipIngestionError } from "../domain/errors.js";
 import type { SymbolId } from "../domain/types.js";
+import { ConcurrencyLimiter } from "../util/concurrency.js";
 import { logger } from "../util/logger.js";
 import {
   getRelativePath,
@@ -658,11 +659,14 @@ export async function autoIngestScipIndexes(
     return [];
   }
 
-  const results: ScipIngestResponse[] = [];
   const conn = await getLadybugConn();
   const normalizedRoot = normalizePath(repoRootPath);
+  const ingestConcurrency = Math.max(1, config.ingestConcurrency ?? 1);
+  const limiter = new ConcurrencyLimiter({ maxConcurrency: ingestConcurrency });
 
-  for (const entry of config.indexes) {
+  const processEntry = async (
+    entry: (typeof config.indexes)[number],
+  ): Promise<ScipIngestResponse | null> => {
     const indexPath = normalizePath(entry.path);
     const absolutePath = isAbsolute(indexPath)
       ? indexPath
@@ -676,7 +680,7 @@ export async function autoIngestScipIndexes(
         path: absolutePath,
         label: entry.label,
       });
-      continue;
+      return null;
     }
 
     // Compute relative path for record lookup. getRelativePath() handles
@@ -704,7 +708,7 @@ export async function autoIngestScipIndexes(
             ingestedAt: existingRecord.ingestedAt,
             mtime: fileStat.mtime.toISOString(),
           });
-          continue;
+          return null;
         }
       } catch {
         // If stat fails, fall through to re-ingest
@@ -733,7 +737,7 @@ export async function autoIngestScipIndexes(
               })
           : undefined,
       );
-      results.push(result);
+      return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.warn("Auto-ingest of SCIP index failed", {
@@ -742,8 +746,12 @@ export async function autoIngestScipIndexes(
         error: message,
       });
       // Continue with next index — don't fail the entire refresh
+      return null;
     }
-  }
+  };
 
-  return results;
+  const settled = await Promise.all(
+    config.indexes.map((entry) => limiter.run(() => processEntry(entry))),
+  );
+  return settled.filter((r): r is ScipIngestResponse => r !== null);
 }

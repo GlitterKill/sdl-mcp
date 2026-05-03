@@ -2,7 +2,10 @@ import { opendir } from "node:fs/promises";
 import { resolve } from "path";
 
 import { globToSafeRegex } from "../util/safeRegex.js";
+import { ConcurrencyLimiter } from "../util/concurrency.js";
 import { logger } from "../util/logger.js";
+
+const WALK_DIR_CONCURRENCY = 8;
 import { normalizePath } from "../util/paths.js";
 
 export interface DirectoryEntryLike {
@@ -69,14 +72,11 @@ export async function walkRepositoryFiles(
   const ignorePatterns = compilePatterns(options.ignorePatterns ?? []);
   const openDirectory = options.openDirectory ?? opendir;
   const files: string[] = [];
-  const directoriesToVisit = [""];
+  const limiter = new ConcurrencyLimiter({ maxConcurrency: WALK_DIR_CONCURRENCY });
+  const inFlight: Promise<void>[] = [];
+  const errors: Error[] = [];
 
-  while (directoriesToVisit.length > 0) {
-    const relativeDirectory = directoriesToVisit.pop();
-    if (relativeDirectory === undefined) {
-      continue;
-    }
-
+  const visitDir = async (relativeDirectory: string): Promise<void> => {
     const absoluteDirectory = relativeDirectory
       ? resolve(repoPath, relativeDirectory)
       : repoPath;
@@ -99,7 +99,11 @@ export async function walkRepositoryFiles(
           if (shouldIgnorePath(relativePath, ignorePatterns, true)) {
             continue;
           }
-          directoriesToVisit.push(relativePath);
+          inFlight.push(
+            limiter.run(() => visitDir(relativePath)).catch((e) => {
+              errors.push(e instanceof Error ? e : new Error(String(e)));
+            }),
+          );
           continue;
         }
 
@@ -128,6 +132,20 @@ export async function walkRepositoryFiles(
         }
       }
     }
+  };
+
+  inFlight.push(
+    limiter.run(() => visitDir("")).catch((e) => {
+      errors.push(e instanceof Error ? e : new Error(String(e)));
+    }),
+  );
+  while (inFlight.length > 0) {
+    const current = [...inFlight];
+    inFlight.length = 0;
+    await Promise.all(current);
+  }
+  if (errors.length > 0) {
+    throw errors[0];
   }
 
   return files;
