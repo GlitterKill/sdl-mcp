@@ -107,9 +107,8 @@ export async function upsertProcessStep(
 }
 
 /**
- * Upserts process steps in a loop because Kuzu does not support UNWIND
- * for parameterized batch MERGE. Wrapped in a transaction to amortize
- * commit overhead.
+ * Batch-upsert process steps via UNWIND-batched MERGE within a single
+ * transaction. Side-effect mode (no RETURN) avoids LadybugDB issue #285.
  */
 export async function upsertProcessStepsBatch(
   conn: Connection,
@@ -121,21 +120,20 @@ export async function upsertProcessStepsBatch(
   }>,
 ): Promise<void> {
   if (steps.length === 0) return;
+  // UNWIND-batched MERGE; side-effect mode (no RETURN) avoids LadybugDB#285.
+  const CHUNK = 256;
   await withTransaction(conn, async (txConn) => {
-    for (const step of steps) {
+    for (let i = 0; i < steps.length; i += CHUNK) {
+      const rows = steps.slice(i, i + CHUNK);
       await exec(
         txConn,
-        `MATCH (s:Symbol {symbolId: $symbolId})
-         MATCH (p:Process {processId: $processId})
+        `UNWIND $rows AS row
+         MATCH (s:Symbol {symbolId: row.symbolId})
+         MATCH (p:Process {processId: row.processId})
          MERGE (s)-[r:PARTICIPATES_IN]->(p)
-         SET r.stepOrder = $stepOrder,
-             r.role = $role`,
-        {
-          processId: step.processId,
-          symbolId: step.symbolId,
-          stepOrder: step.stepOrder,
-          role: step.role,
-        },
+         SET r.stepOrder = row.stepOrder,
+             r.role = row.role`,
+        { rows },
       );
     }
   });

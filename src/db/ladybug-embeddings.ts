@@ -437,9 +437,22 @@ export async function insertSymbolReferences(
 ): Promise<void> {
   if (rows.length === 0) return;
 
+  // UNWIND-batched MERGE; side-effect mode (no RETURN) avoids LadybugDB#285.
+  const CHUNK = 256;
   await withTransaction(conn, async (txConn) => {
-    for (const row of rows) {
-      await insertSymbolReference(txConn, row);
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MERGE (sr:SymbolReference {refId: row.refId})
+         SET sr.repoId = row.repoId,
+             sr.symbolName = row.symbolName,
+             sr.fileId = row.fileId,
+             sr.lineNumber = row.lineNumber,
+             sr.createdAt = row.createdAt`,
+        { rows: chunk },
+      );
     }
   });
 }

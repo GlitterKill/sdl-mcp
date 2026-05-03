@@ -137,9 +137,8 @@ export async function insertEdge(
 }
 
 /**
- * Upserts edges in a loop because Kuzu does not support UNWIND for
- * parameterized batch MERGE. Wrapped in a transaction to amortize
- * commit overhead.
+ * Batch-upsert edges via UNWIND-batched MERGE within a single transaction.
+ * Side-effect mode (no RETURN) avoids LadybugDB issue #285.
  */
 export interface InsertEdgesOptions {
   /**
@@ -160,6 +159,9 @@ export async function insertEdges(
 ): Promise<void> {
   if (edges.length === 0) return;
 
+  // UNWIND-batched MERGE: chunked to keep param payload bounded. Side-effect
+  // mode only (no RETURN) to avoid LadybugDB issue #285.
+  const CHUNK = 256;
   await withTransaction(conn, async (txConn) => {
     const edgesByRepo = new Map<string, EdgeRow[]>();
     for (const edge of edges) {
@@ -169,46 +171,51 @@ export async function insertEdges(
     }
 
     for (const [repoId, repoEdges] of edgesByRepo) {
-      const fromSymbolIds = [...new Set(repoEdges.map((e) => e.fromSymbolId))];
-
       if (!options?.skipSourceRepoLink) {
-        for (const symbolId of fromSymbolIds) {
+        const fromSymbolIds = [...new Set(repoEdges.map((e) => e.fromSymbolId))];
+        for (let i = 0; i < fromSymbolIds.length; i += CHUNK) {
+          const idChunk = fromSymbolIds.slice(i, i + CHUNK);
+          const rows = idChunk.map((symbolId) => ({ symbolId }));
           await exec(
             txConn,
-            `MATCH (r:Repo {repoId: $repoId})
-             MERGE (s:Symbol {symbolId: $symbolId})
+            `UNWIND $rows AS row
+             MATCH (r:Repo {repoId: $repoId})
+             MERGE (s:Symbol {symbolId: row.symbolId})
              SET s.repoId = $repoId
              MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
-            { repoId, symbolId },
+            { repoId, rows },
           );
         }
       }
 
-      for (const edge of repoEdges) {
+      for (let i = 0; i < repoEdges.length; i += CHUNK) {
+        const edgeChunk = repoEdges.slice(i, i + CHUNK);
+        const rows = edgeChunk.map((edge) => ({
+          fromSymbolId: edge.fromSymbolId,
+          toSymbolId: edge.toSymbolId,
+          edgeType: edge.edgeType,
+          weight: edge.weight,
+          confidence: edge.confidence,
+          resolution: edge.resolution,
+          resolverId: edge.resolverId ?? "pass1-generic",
+          resolutionPhase: edge.resolutionPhase ?? "pass1",
+          provenance: edge.provenance,
+          createdAt: edge.createdAt,
+        }));
         await exec(
           txConn,
-          `MERGE (a:Symbol {symbolId: $fromSymbolId})
-           MERGE (b:Symbol {symbolId: $toSymbolId})
-           MERGE (a)-[d:DEPENDS_ON {edgeType: $edgeType}]->(b)
-           SET d.weight = $weight,
-               d.confidence = $confidence,
-               d.resolution = $resolution,
-               d.resolverId = $resolverId,
-               d.resolutionPhase = $resolutionPhase,
-               d.provenance = $provenance,
-               d.createdAt = CASE WHEN d.createdAt IS NOT NULL THEN d.createdAt ELSE $createdAt END`,
-          {
-            fromSymbolId: edge.fromSymbolId,
-            toSymbolId: edge.toSymbolId,
-            edgeType: edge.edgeType,
-            weight: edge.weight,
-            confidence: edge.confidence,
-            resolution: edge.resolution,
-            resolverId: edge.resolverId ?? "pass1-generic",
-            resolutionPhase: edge.resolutionPhase ?? "pass1",
-            provenance: edge.provenance,
-            createdAt: edge.createdAt,
-          },
+          `UNWIND $rows AS row
+           MERGE (a:Symbol {symbolId: row.fromSymbolId})
+           MERGE (b:Symbol {symbolId: row.toSymbolId})
+           MERGE (a)-[d:DEPENDS_ON {edgeType: row.edgeType}]->(b)
+           SET d.weight = row.weight,
+               d.confidence = row.confidence,
+               d.resolution = row.resolution,
+               d.resolverId = row.resolverId,
+               d.resolutionPhase = row.resolutionPhase,
+               d.provenance = row.provenance,
+               d.createdAt = CASE WHEN d.createdAt IS NOT NULL THEN d.createdAt ELSE row.createdAt END`,
+          { rows },
         );
       }
     }

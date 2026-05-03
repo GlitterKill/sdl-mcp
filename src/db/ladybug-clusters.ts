@@ -100,9 +100,8 @@ export async function upsertClusterMember(
 }
 
 /**
- * Upserts cluster members in a loop because Kuzu does not support UNWIND
- * for parameterized batch MERGE. Wrapped in a transaction to amortize
- * commit overhead.
+ * Batch-upsert cluster members via UNWIND-batched MERGE within a single
+ * transaction. Side-effect mode (no RETURN) avoids LadybugDB issue #285.
  */
 export async function upsertClusterMembersBatch(
   conn: Connection,
@@ -113,19 +112,19 @@ export async function upsertClusterMembersBatch(
   }>,
 ): Promise<void> {
   if (members.length === 0) return;
+  // UNWIND-batched MERGE; side-effect mode (no RETURN) avoids LadybugDB#285.
+  const CHUNK = 256;
   await withTransaction(conn, async (txConn) => {
-    for (const member of members) {
+    for (let i = 0; i < members.length; i += CHUNK) {
+      const rows = members.slice(i, i + CHUNK);
       await exec(
         txConn,
-        `MATCH (s:Symbol {symbolId: $symbolId})
-         MATCH (c:Cluster {clusterId: $clusterId})
+        `UNWIND $rows AS row
+         MATCH (s:Symbol {symbolId: row.symbolId})
+         MATCH (c:Cluster {clusterId: row.clusterId})
          MERGE (s)-[m:BELONGS_TO_CLUSTER]->(c)
-         SET m.membershipScore = $membershipScore`,
-        {
-          symbolId: member.symbolId,
-          clusterId: member.clusterId,
-          membershipScore: member.membershipScore,
-        },
+         SET m.membershipScore = row.membershipScore`,
+        { rows },
       );
     }
   });

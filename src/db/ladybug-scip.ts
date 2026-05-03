@@ -525,9 +525,9 @@ export async function getScipIngestionRecord(
 const EDGE_BATCH_SIZE = 100;
 
 /**
- * Insert or upgrade a batch of DEPENDS_ON edges.  Wrapped in a single
- * transaction for performance.  Each edge is individually MERGEd because
- * LadybugDB does not support UNWIND for relationship MERGE.
+ * Insert or upgrade a batch of DEPENDS_ON edges via UNWIND-batched MERGE
+ * within a single transaction. Side-effect mode (no RETURN) avoids
+ * LadybugDB issue #285.
  */
 export async function batchMergeScipEdges(
   conn: Connection,
@@ -548,38 +548,37 @@ export async function batchMergeScipEdges(
   await withTransaction(conn, async (txConn) => {
     for (let i = 0; i < edges.length; i += EDGE_BATCH_SIZE) {
       const batch = edges.slice(i, i + EDGE_BATCH_SIZE);
-
-      for (const edge of batch) {
-        const phase = String(edge.resolutionPhase);
-
-        await exec(
-          txConn,
-          `MERGE (a:Symbol {symbolId: $sourceSymbolId})
-           MERGE (b:Symbol {symbolId: $targetSymbolId})
-           MERGE (a)-[d:DEPENDS_ON {edgeType: $edgeType}]->(b)
-           ON CREATE SET
-               d.confidence = $confidence,
-               d.resolution = $resolution,
-               d.resolverId = $resolverId,
-               d.resolutionPhase = $resolutionPhase,
-               d.createdAt = $createdAt
-           ON MATCH SET
-               d.confidence = CASE WHEN d.confidence < $confidence THEN $confidence ELSE d.confidence END,
-               d.resolution = CASE WHEN d.confidence < $confidence THEN $resolution ELSE d.resolution END,
-               d.resolverId = CASE WHEN d.confidence < $confidence THEN $resolverId ELSE d.resolverId END,
-               d.resolutionPhase = CASE WHEN d.confidence < $confidence THEN $resolutionPhase ELSE d.resolutionPhase END`,
-          {
-            sourceSymbolId: edge.sourceSymbolId,
-            targetSymbolId: edge.targetSymbolId,
-            edgeType: edge.edgeType,
-            confidence: edge.confidence,
-            resolution: edge.resolution,
-            resolverId: edge.resolverId,
-            resolutionPhase: phase,
-            createdAt: now,
-          },
-        );
-      }
+      const rows = batch.map((edge) => ({
+        sourceSymbolId: edge.sourceSymbolId,
+        targetSymbolId: edge.targetSymbolId,
+        edgeType: edge.edgeType,
+        confidence: edge.confidence,
+        resolution: edge.resolution,
+        resolverId: edge.resolverId,
+        resolutionPhase: String(edge.resolutionPhase),
+        createdAt: now,
+      }));
+      // UNWIND-batched MERGE: one statement per chunk; preserves
+      // ON CREATE / ON MATCH semantics. No RETURN — LadybugDB issue #285.
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MERGE (a:Symbol {symbolId: row.sourceSymbolId})
+         MERGE (b:Symbol {symbolId: row.targetSymbolId})
+         MERGE (a)-[d:DEPENDS_ON {edgeType: row.edgeType}]->(b)
+         ON CREATE SET
+             d.confidence = row.confidence,
+             d.resolution = row.resolution,
+             d.resolverId = row.resolverId,
+             d.resolutionPhase = row.resolutionPhase,
+             d.createdAt = row.createdAt
+         ON MATCH SET
+             d.confidence = CASE WHEN d.confidence < row.confidence THEN row.confidence ELSE d.confidence END,
+             d.resolution = CASE WHEN d.confidence < row.confidence THEN row.resolution ELSE d.resolution END,
+             d.resolverId = CASE WHEN d.confidence < row.confidence THEN row.resolverId ELSE d.resolverId END,
+             d.resolutionPhase = CASE WHEN d.confidence < row.confidence THEN row.resolutionPhase ELSE d.resolutionPhase END`,
+        { rows },
+      );
     }
   });
 

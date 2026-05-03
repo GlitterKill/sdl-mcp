@@ -139,59 +139,66 @@ export async function upsertSymbolBatch(
     });
   }
 
+  // UNWIND-batched MERGE: collapses N round-trips to one statement per chunk
+  // while preserving idempotency (MERGE) and side-effect-only semantics (no
+  // RETURN — avoids LadybugDB issue #285 cardinality bug).
+  const CHUNK = 256;
   await withTransaction(conn, async (txConn) => {
-    for (const symbol of symbols) {
+    for (let i = 0; i < symbols.length; i += CHUNK) {
+      const chunk = symbols.slice(i, i + CHUNK);
+      const rows = chunk.map((symbol) => ({
+        symbolId: symbol.symbolId,
+        repoId: symbol.repoId,
+        fileId: symbol.fileId,
+        kind: symbol.kind,
+        name: symbol.name,
+        exported: symbol.exported,
+        visibility: symbol.visibility,
+        language: symbol.language,
+        rangeStartLine: symbol.rangeStartLine,
+        rangeStartCol: symbol.rangeStartCol,
+        rangeEndLine: symbol.rangeEndLine,
+        rangeEndCol: symbol.rangeEndCol,
+        astFingerprint: symbol.astFingerprint,
+        signatureJson: symbol.signatureJson,
+        summary: symbol.summary,
+        invariantsJson: symbol.invariantsJson,
+        sideEffectsJson: symbol.sideEffectsJson,
+        roleTagsJson: symbol.roleTagsJson ?? null,
+        searchText: symbol.searchText ?? null,
+        summaryQuality: symbol.summaryQuality ?? 0.0,
+        summarySource: symbol.summarySource ?? "unknown",
+        updatedAt: symbol.updatedAt,
+      }));
       await exec(
         txConn,
-        `MATCH (r:Repo {repoId: $repoId})
-         MATCH (f:File {fileId: $fileId})
-         MERGE (s:Symbol {symbolId: $symbolId})
-         SET s.repoId = $repoId,
-             s.kind = $kind,
-             s.name = $name,
-             s.exported = $exported,
-             s.visibility = $visibility,
-             s.language = $language,
-             s.rangeStartLine = $rangeStartLine,
-             s.rangeStartCol = $rangeStartCol,
-             s.rangeEndLine = $rangeEndLine,
-             s.rangeEndCol = $rangeEndCol,
-             s.astFingerprint = $astFingerprint,
-             s.signatureJson = $signatureJson,
-             s.summary = $summary,
-             s.invariantsJson = $invariantsJson,
-             s.sideEffectsJson = $sideEffectsJson,
-             s.roleTagsJson = $roleTagsJson,
-             s.searchText = $searchText,
-             s.summaryQuality = $summaryQuality,
-             s.summarySource = $summarySource,
-             s.updatedAt = $updatedAt
+        `UNWIND $rows AS row
+         MATCH (r:Repo {repoId: row.repoId})
+         MATCH (f:File {fileId: row.fileId})
+         MERGE (s:Symbol {symbolId: row.symbolId})
+         SET s.repoId = row.repoId,
+             s.kind = row.kind,
+             s.name = row.name,
+             s.exported = row.exported,
+             s.visibility = row.visibility,
+             s.language = row.language,
+             s.rangeStartLine = row.rangeStartLine,
+             s.rangeStartCol = row.rangeStartCol,
+             s.rangeEndLine = row.rangeEndLine,
+             s.rangeEndCol = row.rangeEndCol,
+             s.astFingerprint = row.astFingerprint,
+             s.signatureJson = row.signatureJson,
+             s.summary = row.summary,
+             s.invariantsJson = row.invariantsJson,
+             s.sideEffectsJson = row.sideEffectsJson,
+             s.roleTagsJson = row.roleTagsJson,
+             s.searchText = row.searchText,
+             s.summaryQuality = row.summaryQuality,
+             s.summarySource = row.summarySource,
+             s.updatedAt = row.updatedAt
          MERGE (s)-[:SYMBOL_IN_FILE]->(f)
          MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
-        {
-          symbolId: symbol.symbolId,
-          repoId: symbol.repoId,
-          fileId: symbol.fileId,
-          kind: symbol.kind,
-          name: symbol.name,
-          exported: symbol.exported,
-          visibility: symbol.visibility,
-          language: symbol.language,
-          rangeStartLine: symbol.rangeStartLine,
-          rangeStartCol: symbol.rangeStartCol,
-          rangeEndLine: symbol.rangeEndLine,
-          rangeEndCol: symbol.rangeEndCol,
-          astFingerprint: symbol.astFingerprint,
-          signatureJson: symbol.signatureJson,
-          summary: symbol.summary,
-          invariantsJson: symbol.invariantsJson,
-          sideEffectsJson: symbol.sideEffectsJson,
-          roleTagsJson: symbol.roleTagsJson ?? null,
-          searchText: symbol.searchText ?? null,
-          summaryQuality: symbol.summaryQuality ?? 0.0,
-          summarySource: symbol.summarySource ?? "unknown",
-          updatedAt: symbol.updatedAt,
-        },
+        { rows },
       );
     }
   });

@@ -47,39 +47,41 @@ export async function upsertMetrics(
 }
 
 /**
- * Batch-upsert metrics rows within a single transaction to reduce per-row
- * round-trip overhead during full metric refreshes. Upserts in a loop
- * because Kuzu does not support UNWIND for parameterized batch MERGE.
+ * Batch-upsert metrics rows via UNWIND-batched MERGE within a single
+ * transaction. Side-effect mode (no RETURN) avoids LadybugDB issue #285.
  */
 export async function upsertMetricsBatch(
   conn: Connection,
   rows: MetricsRow[],
 ): Promise<void> {
   if (rows.length === 0) return;
+  const CHUNK = 256;
   await withTransaction(conn, async (txConn) => {
-    for (const metrics of rows) {
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK).map((m) => ({
+        symbolId: m.symbolId,
+        fanIn: m.fanIn,
+        fanOut: m.fanOut,
+        churn30d: m.churn30d,
+        testRefsJson: m.testRefsJson,
+        canonicalTestJson: m.canonicalTestJson,
+        pageRank: m.pageRank ?? 0,
+        kCore: m.kCore ?? 0,
+        updatedAt: m.updatedAt,
+      }));
       await exec(
         txConn,
-        `MERGE (m:Metrics {symbolId: $symbolId})
-         SET m.fanIn = $fanIn,
-             m.fanOut = $fanOut,
-             m.churn30d = $churn30d,
-             m.testRefsJson = $testRefsJson,
-             m.canonicalTestJson = $canonicalTestJson,
-             m.pageRank = $pageRank,
-             m.kCore = $kCore,
-             m.updatedAt = $updatedAt`,
-        {
-          symbolId: metrics.symbolId,
-          fanIn: metrics.fanIn,
-          fanOut: metrics.fanOut,
-          churn30d: metrics.churn30d,
-          testRefsJson: metrics.testRefsJson,
-          canonicalTestJson: metrics.canonicalTestJson,
-          pageRank: metrics.pageRank ?? 0,
-          kCore: metrics.kCore ?? 0,
-          updatedAt: metrics.updatedAt,
-        },
+        `UNWIND $rows AS row
+         MERGE (m:Metrics {symbolId: row.symbolId})
+         SET m.fanIn = row.fanIn,
+             m.fanOut = row.fanOut,
+             m.churn30d = row.churn30d,
+             m.testRefsJson = row.testRefsJson,
+             m.canonicalTestJson = row.canonicalTestJson,
+             m.pageRank = row.pageRank,
+             m.kCore = row.kCore,
+             m.updatedAt = row.updatedAt`,
+        { rows: chunk },
       );
     }
   });
@@ -101,48 +103,44 @@ export async function upsertCentralityBatch(
   }>,
 ): Promise<void> {
   if (rows.length === 0) return;
+  const CHUNK = 256;
   await withTransaction(conn, async (txConn) => {
-    for (const row of rows) {
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
       await exec(
         txConn,
-        `MERGE (m:Metrics {symbolId: $symbolId})
-         SET m.pageRank = $pageRank,
-             m.kCore = $kCore,
-             m.updatedAt = $updatedAt`,
-        {
-          symbolId: row.symbolId,
-          pageRank: row.pageRank,
-          kCore: row.kCore,
-          updatedAt: row.updatedAt,
-        },
+        `UNWIND $rows AS row
+         MERGE (m:Metrics {symbolId: row.symbolId})
+         SET m.pageRank = row.pageRank,
+             m.kCore = row.kCore,
+             m.updatedAt = row.updatedAt`,
+        { rows: chunk },
       );
     }
   });
 }
 
 /**
- * Batch-upsert canonical test mappings. Upserts in a loop because Kuzu does
- * not support UNWIND for parameterized batch MERGE. Wrapped in a transaction
- * to amortize commit overhead. Used during incremental indexing to propagate
- * canonical test changes to symbols not in the changed-file set.
+ * Batch-upsert canonical test mappings via UNWIND-batched MERGE. Wrapped in a
+ * transaction to amortize commit overhead. Used during incremental indexing to
+ * propagate canonical test changes to symbols not in the changed-file set.
  */
 export async function upsertCanonicalTestBatch(
   conn: Connection,
   rows: Array<{ symbolId: string; canonicalTestJson: string | null; updatedAt: string }>,
 ): Promise<void> {
   if (rows.length === 0) return;
+  const CHUNK = 256;
   await withTransaction(conn, async (txConn) => {
-    for (const row of rows) {
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
       await exec(
         txConn,
-        `MERGE (m:Metrics {symbolId: $symbolId})
-         SET m.canonicalTestJson = $canonicalTestJson,
-             m.updatedAt = $updatedAt`,
-        {
-          symbolId: row.symbolId,
-          canonicalTestJson: row.canonicalTestJson,
-          updatedAt: row.updatedAt,
-        },
+        `UNWIND $rows AS row
+         MERGE (m:Metrics {symbolId: row.symbolId})
+         SET m.canonicalTestJson = row.canonicalTestJson,
+             m.updatedAt = row.updatedAt`,
+        { rows: chunk },
       );
     }
   });

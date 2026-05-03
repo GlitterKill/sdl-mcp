@@ -89,28 +89,29 @@ export async function upsertFileSummaryBatch(
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize);
     try {
+      // UNWIND-batched MERGE; side-effect mode (no RETURN) avoids LadybugDB#285.
+      const unwindRows = chunk.map((p) => ({
+        fileId: p.fileId,
+        repoId: p.repoId,
+        summary: p.summary ?? null,
+        searchText: p.searchText ?? null,
+        updatedAt: p.updatedAt,
+      }));
       await withTransaction(conn, async (txConn) => {
-        for (const params of chunk) {
-          await exec(
-            txConn,
-            `MATCH (r:Repo {repoId: $repoId})
-             MATCH (f:File {fileId: $fileId})
-             MERGE (fs:FileSummary {fileId: $fileId})
-             SET fs.repoId = $repoId,
-                 fs.summary = $summary,
-                 fs.searchText = $searchText,
-                 fs.updatedAt = $updatedAt
-             MERGE (fs)-[:FILE_SUMMARY_IN_REPO]->(r)
-             MERGE (fs)-[:SUMMARY_OF_FILE]->(f)`,
-            {
-              fileId: params.fileId,
-              repoId: params.repoId,
-              summary: params.summary ?? null,
-              searchText: params.searchText ?? null,
-              updatedAt: params.updatedAt,
-            },
-          );
-        }
+        await exec(
+          txConn,
+          `UNWIND $rows AS row
+           MATCH (r:Repo {repoId: row.repoId})
+           MATCH (f:File {fileId: row.fileId})
+           MERGE (fs:FileSummary {fileId: row.fileId})
+           SET fs.repoId = row.repoId,
+               fs.summary = row.summary,
+               fs.searchText = row.searchText,
+               fs.updatedAt = row.updatedAt
+           MERGE (fs)-[:FILE_SUMMARY_IN_REPO]->(r)
+           MERGE (fs)-[:SUMMARY_OF_FILE]->(f)`,
+          { rows: unwindRows },
+        );
       });
     } catch (err) {
       // Do not abort the whole materialisation on a single failing batch —
