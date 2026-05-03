@@ -7,6 +7,7 @@ import {
   ConcurrencyConfigSchema,
   ParallelScorerConfigSchema,
   RuntimeConfigSchema,
+  ScipConfigSchema,
   SemanticConfigSchema,
 } from "./types.js";
 import { ConfigError } from "../domain/errors.js";
@@ -141,7 +142,11 @@ export function loadConfig(configPath?: string): AppConfig {
 
       tierAdjustedConfig = {
         ...config,
-        indexing: { ...baseIndexing, concurrency: presets.indexingConcurrency },
+        indexing: {
+          ...baseIndexing,
+          concurrency: presets.indexingConcurrency,
+          pass2Concurrency: presets.pass2Concurrency,
+        },
         concurrency: {
           ...baseConcurrency,
           maxToolConcurrency: presets.maxToolConcurrency,
@@ -173,6 +178,13 @@ export function loadConfig(configPath?: string): AppConfig {
           enabled: presets.parallelScorerEnabled,
           poolSize: presets.parallelScorerPoolSize,
         },
+        scip: (() => {
+          const baseScip = ScipConfigSchema.parse(config.scip ?? {});
+          return {
+            ...baseScip,
+            ingestConcurrency: presets.scipIngestConcurrency,
+          };
+        })(),
       };
     }
 

@@ -28,6 +28,7 @@ export async function handleScipIngest(
     externalSymbols: { enabled: true, maxPerIndex: 10_000 },
     confidence: 0.95,
     autoIngestOnRefresh: true,
+    ingestConcurrency: 1,
     generator: {
       enabled: false,
       binary: "scip-io",

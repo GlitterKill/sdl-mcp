@@ -608,6 +608,7 @@ export const ScipConfigSchema = z.object({
   }),
   confidence: z.number().min(0.5).max(1.0).default(0.95),
   autoIngestOnRefresh: z.boolean().default(true),
+  ingestConcurrency: z.number().int().min(1).max(8).default(1),
   generator: ScipGeneratorConfigSchema.default({
     enabled: false,
     binary: "scip-io",

@@ -1235,6 +1235,13 @@
           "default": 0.95
         },
         "autoIngestOnRefresh": { "type": "boolean", "default": true },
+        "ingestConcurrency": {
+          "type": "integer",
+          "description": "Number of SCIP indexes to ingest concurrently. Decode/parse overlaps; writes still serialise via writeLimiter. Default 1 (sequential).",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 1
+        },
         "generator": {
           "type": "object",
           "description": "Auto-generate index.scip via the scip-io CLI before each refresh. Has no effect unless scip.enabled is also true. When enabled and the binary is missing, sdl-mcp downloads it from GitHub releases into ~/.sdl-mcp/bin/ with mandatory SHA-256 verification against the release's SHA256SUMS.txt; installs are refused if the checksum file is absent.",

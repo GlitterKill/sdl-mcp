@@ -12,7 +12,7 @@ import { type AppConfig } from "../config/types.js";
  *
  * | Setting                          | mid (1-8) | high (9-20) | extreme (21+) |
  * |----------------------------------|-----------|-------------|---------------|
- * | indexing.concurrency             | 4         | 12          | 16            |
+ * | indexing.concurrency             | 4         | 8           | 12            |
  * | concurrency.maxToolConcurrency   | 8         | 12          | 16            |
  * | concurrency.readPoolSize         | 4         | 8           | 8             |
  * | concurrency.maxSessions          | 4         | 8           | 16            |
@@ -21,13 +21,22 @@ import { type AppConfig } from "../config/types.js";
  * | semantic.summaryMaxConcurrency   | 3         | 8           | 16            |
  * | parallelScorer.enabled           | false     | true        | true          |
  * | parallelScorer.poolSize          | null      | 4           | 8             |
+ * | indexing.pass2Concurrency        | 1         | 3           | 6             |
+ * | scip.ingestConcurrency           | 1         | 2           | 3             |
  *
  * Tuning notes:
  *   - dispatch:readPool ratio kept at 2:1 so read connections are not
  *     over-contended under concurrent tool dispatch.
- *   - indexingConcurrency capped at 16 (extreme) / 12 (high): empirically
- *     saturates the Rust parse stage; higher values yielded <5% gain while
- *     doubling DB contention windows.
+ *   - indexingConcurrency tuned to 12 (extreme) / 8 (high): the LadybugDB
+ *     write path now uses UNWIND-batched MERGE so per-symbol round-trips
+ *     collapse, but the writer is still single. These values keep the
+ *     parser CPU saturated without queuing too many writers behind the
+ *     single-writer lock.
+ *   - pass2Concurrency parallelises the cross-file call resolver. Mid stays
+ *     sequential (1) because writes still serialise; high (3) and extreme
+ *     (6) overlap resolver CPU + read I/O with the writer.
+ *   - scipIngestConcurrency overlaps decode/parse of multi-language SCIP
+ *     indexes (TS + Go + Rust). Writes still serialise via writeLimiter.
  *   - During an active `indexRepo`, the dispatch limiter throttles to
  *     INDEXING_DISPATCH_CAP (see src/mcp/indexing-gate.ts) so tool callers
  *     don't compete with the indexer for the same connections.
@@ -42,6 +51,8 @@ export interface PerformancePresets {
   summaryMaxConcurrency: number;
   parallelScorerEnabled: boolean;
   parallelScorerPoolSize: number | null;
+  pass2Concurrency: number;
+  scipIngestConcurrency: number;
 }
 
 /**
@@ -52,7 +63,7 @@ export function getTierPresets(tier: CpuTier): PerformancePresets {
   switch (tier) {
     case "extreme":
       return {
-        indexingConcurrency: 16,
+        indexingConcurrency: 12,
         maxToolConcurrency: 16,
         readPoolSize: 8,
 
@@ -62,10 +73,12 @@ export function getTierPresets(tier: CpuTier): PerformancePresets {
         summaryMaxConcurrency: 16,
         parallelScorerEnabled: true,
         parallelScorerPoolSize: 8,
+        pass2Concurrency: 6,
+        scipIngestConcurrency: 3,
       };
     case "high":
       return {
-        indexingConcurrency: 12,
+        indexingConcurrency: 8,
         maxToolConcurrency: 12,
         readPoolSize: 8,
 
@@ -75,6 +88,8 @@ export function getTierPresets(tier: CpuTier): PerformancePresets {
         summaryMaxConcurrency: 8,
         parallelScorerEnabled: true,
         parallelScorerPoolSize: 4,
+        pass2Concurrency: 3,
+        scipIngestConcurrency: 2,
       };
     case "mid":
     default:
@@ -89,6 +104,8 @@ export function getTierPresets(tier: CpuTier): PerformancePresets {
         summaryMaxConcurrency: 3,
         parallelScorerEnabled: false,
         parallelScorerPoolSize: null,
+        pass2Concurrency: 1,
+        scipIngestConcurrency: 1,
       };
   }
 }
@@ -151,5 +168,12 @@ export function resolvePerformancePresets(
       userConfig.parallelScorer?.poolSize !== undefined
         ? (userConfig.parallelScorer.poolSize ?? null)
         : presets.parallelScorerPoolSize,
+
+    pass2Concurrency:
+      userConfig.indexing?.pass2Concurrency ?? presets.pass2Concurrency,
+
+    scipIngestConcurrency:
+      (userConfig.scip as { ingestConcurrency?: number } | undefined)
+        ?.ingestConcurrency ?? presets.scipIngestConcurrency,
   };
 }
