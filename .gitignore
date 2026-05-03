@@ -160,3 +160,4 @@ src/code-mode/descriptions.ts.bak
 .gitignore
 tests/unit/file-gateway.test.ts.bak
 tune-results.json
+scripts/fix-agent-frontmatter.py
