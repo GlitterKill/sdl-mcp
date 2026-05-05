@@ -7,6 +7,7 @@ import * as ladybugDb from "../../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../../db/ladybug-queries.js";
 import type { SymbolKind } from "../../../domain/types.js";
 import { readFileAsync } from "../../../util/asyncFs.js";
+import { singleFlight } from "../../../util/concurrency.js";
 import { logger } from "../../../util/logger.js";
 import { normalizePath } from "../../../util/paths.js";
 import { normalizeTypeName } from "../../../util/type-name.js";
@@ -236,16 +237,17 @@ function mapExtractedSymbolsToExisting(
   return filteredSymbolDetails;
 }
 
-async function clearOutgoingCallEdges(
-  conn: import("kuzu").Connection,
+/**
+ * In-memory cleanup of stale dedup keys for the symbols this file is about to
+ * re-resolve. The matching SQL DELETE is deferred to `submitEdgeWrite` so the
+ * dispatcher can combine deletes + inserts across an entire concurrency batch
+ * into a single `withWriteConn`.
+ */
+function clearLocalCallDedupKeys(
   symbolIds: string[],
   createdCallEdges: Set<string>,
-): Promise<void> {
-  if (symbolIds.length === 0) {
-    return;
-  }
-
-  await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(conn, symbolIds, "call");
+): void {
+  if (symbolIds.length === 0) return;
   for (const symbolId of symbolIds) {
     for (const edgeKey of Array.from(createdCallEdges)) {
       if (edgeKey.startsWith(`${symbolId}->`)) {
@@ -444,63 +446,66 @@ async function buildCSharpNamespaceIndex(
   repoId: string,
   cache?: Map<string, unknown>,
 ): Promise<CSharpNamespaceIndex> {
-  const cacheKey = `pass2-csharp:namespace-index:${repoId}`;
-  const cached = cache?.get(cacheKey);
-  if (cached) {
-    return cached as CSharpNamespaceIndex;
-  }
+  return singleFlight(
+    cache,
+    `pass2-csharp:namespace-index:${repoId}`,
+    async () => {
+      const conn = await getLadybugConn();
+      const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
+      const csharpFiles = repoFiles.filter(
+        (file) => file.language === "csharp",
+      );
+      const csharpFileIds = new Set(csharpFiles.map((file) => file.fileId));
+      const fileById = new Map(csharpFiles.map((file) => [file.fileId, file]));
 
-  const conn = await getLadybugConn();
-  const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
-  const csharpFiles = repoFiles.filter((file) => file.language === "csharp");
-  const csharpFileIds = new Set(csharpFiles.map((file) => file.fileId));
-  const fileById = new Map(csharpFiles.map((file) => [file.fileId, file]));
+      const namespaceByFilePath = new Map<string, string>();
+      const symbolsByNamespace = new Map<
+        string,
+        Array<SymbolRow & { relPath: string }>
+      >();
 
-  const namespaceByFilePath = new Map<string, string>();
-  const symbolsByNamespace = new Map<
-    string,
-    Array<SymbolRow & { relPath: string }>
-  >();
+      for (const file of csharpFiles) {
+        namespaceByFilePath.set(
+          file.relPath,
+          normalizePath(dirname(file.relPath)),
+        );
+      }
 
-  for (const file of csharpFiles) {
-    namespaceByFilePath.set(file.relPath, normalizePath(dirname(file.relPath)));
-  }
+      const repoSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
+      for (const symbol of repoSymbols) {
+        if (!csharpFileIds.has(symbol.fileId) || symbol.kind !== "module") {
+          continue;
+        }
+        const file = fileById.get(symbol.fileId);
+        if (!file) {
+          continue;
+        }
+        namespaceByFilePath.set(file.relPath, symbol.name);
+      }
 
-  const repoSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
-  for (const symbol of repoSymbols) {
-    if (!csharpFileIds.has(symbol.fileId) || symbol.kind !== "module") {
-      continue;
-    }
-    const file = fileById.get(symbol.fileId);
-    if (!file) {
-      continue;
-    }
-    namespaceByFilePath.set(file.relPath, symbol.name);
-  }
+      for (const symbol of repoSymbols) {
+        if (!csharpFileIds.has(symbol.fileId)) {
+          continue;
+        }
+        const file = fileById.get(symbol.fileId);
+        if (!file) {
+          continue;
+        }
+        const namespaceName = namespaceByFilePath.get(file.relPath);
+        if (!namespaceName) {
+          continue;
+        }
+        const bucket = symbolsByNamespace.get(namespaceName) ?? [];
+        bucket.push({
+          ...symbol,
+          relPath: file.relPath,
+        });
+        symbolsByNamespace.set(namespaceName, bucket);
+      }
 
-  for (const symbol of repoSymbols) {
-    if (!csharpFileIds.has(symbol.fileId)) {
-      continue;
-    }
-    const file = fileById.get(symbol.fileId);
-    if (!file) {
-      continue;
-    }
-    const namespaceName = namespaceByFilePath.get(file.relPath);
-    if (!namespaceName) {
-      continue;
-    }
-    const bucket = symbolsByNamespace.get(namespaceName) ?? [];
-    bucket.push({
-      ...symbol,
-      relPath: file.relPath,
-    });
-    symbolsByNamespace.set(namespaceName, bucket);
-  }
-
-  const index = { namespaceByFilePath, symbolsByNamespace };
-  cache?.set(cacheKey, index);
-  return index;
+      return { namespaceByFilePath, symbolsByNamespace };
+    },
+  );
 }
 
 function buildSameNamespaceNameIndex(
@@ -926,6 +931,9 @@ async function resolveCSharpCallEdgesPass2(params: {
   globalNameToSymbolIds?: Map<string, string[]>;
   telemetry?: Pass2ResolverContext["telemetry"];
   cache?: Map<string, unknown>;
+  mode?: "full" | "incremental";
+  submitEdgeWrite?: Pass2ResolverContext["submitEdgeWrite"];
+  importCache?: Pass2ResolverContext["importCache"];
 }): Promise<number> {
   const {
     repoId,
@@ -935,6 +943,9 @@ async function resolveCSharpCallEdgesPass2(params: {
     globalNameToSymbolIds,
     telemetry,
     cache,
+    mode,
+    submitEdgeWrite,
+    importCache,
   } = params;
 
   const conn = await getLadybugConn();
@@ -995,6 +1006,7 @@ async function resolveCSharpCallEdgesPass2(params: {
   let filteredSymbolDetails: ReturnType<typeof mapExtractedSymbolsToExisting>;
   let nodeIdToSymbolId: ReturnType<typeof createNodeIdToSymbolId>;
   let callScope: ReturnType<typeof buildCSharpCallScope>;
+  let symbolIdsToRefresh: string[] = [];
   try {
     fileRecord = await ladybugDb.getFileByRepoPath(conn, repoId, fileMeta.path);
     if (!fileRecord) {
@@ -1016,12 +1028,8 @@ async function resolveCSharpCallEdgesPass2(params: {
       return 0;
     }
 
-    const symbolIdsToRefresh = filteredSymbolDetails.map(
-      (detail) => detail.symbolId,
-    );
-    await withWriteConn(async (wConn) => {
-      await clearOutgoingCallEdges(wConn, symbolIdsToRefresh, createdCallEdges);
-    });
+    symbolIdsToRefresh = filteredSymbolDetails.map((detail) => detail.symbolId);
+    clearLocalCallDedupKeys(symbolIdsToRefresh, createdCallEdges);
 
     nodeIdToSymbolId = createNodeIdToSymbolId(filteredSymbolDetails);
     callScope = buildCSharpCallScope(treeRef, filteredSymbolDetails);
@@ -1036,6 +1044,7 @@ async function resolveCSharpCallEdgesPass2(params: {
     [...adapter.fileExtensions],
     "csharp",
     content,
+    importCache,
   );
 
   const namespaceIndex = await buildCSharpNamespaceIndex(repoId, cache);
@@ -1162,9 +1171,23 @@ async function resolveCSharpCallEdgesPass2(params: {
     }
   }
 
-  await withWriteConn(async (wConn) => {
-    await ladybugDb.insertEdges(wConn, edgesToInsert);
-  });
+  if (submitEdgeWrite) {
+    await submitEdgeWrite({
+      symbolIdsToRefresh,
+      edges: edgesToInsert,
+    });
+  } else {
+    await withWriteConn(async (wConn) => {
+      if (mode !== "full" && symbolIdsToRefresh.length > 0) {
+        await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
+          wConn,
+          symbolIdsToRefresh,
+          "call",
+        );
+      }
+      await ladybugDb.insertEdges(wConn, edgesToInsert);
+    });
+  }
   return createdEdges;
 }
 
@@ -1199,6 +1222,9 @@ export class CSharpPass2Resolver implements Pass2Resolver {
         globalNameToSymbolIds: context.globalNameToSymbolIds,
         telemetry: context.telemetry,
         cache: context.cache,
+        mode: context.mode,
+        submitEdgeWrite: context.submitEdgeWrite,
+        importCache: context.importCache,
       });
       return { edgesCreated };
     } catch (error) {

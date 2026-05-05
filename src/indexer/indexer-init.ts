@@ -4,9 +4,7 @@ import type {
   SymbolIndex,
   TsCallResolver,
 } from "./edge-builder.js";
-import {
-  createCallResolutionTelemetry,
-} from "./edge-builder.js";
+import { createCallResolutionTelemetry } from "./edge-builder.js";
 import {
   createDefaultPass2ResolverRegistry,
   toPass2Target,
@@ -27,6 +25,7 @@ import {
 } from "./symbol-map-cache.js";
 
 export type IndexProgressSubstage =
+  | "pass1Drain"
   | "importReresolution"
   | "edgeFinalize"
   | "versionSnapshot"
@@ -40,7 +39,15 @@ export type IndexProgressSubstage =
   | "algorithmRefresh";
 
 export interface IndexProgress {
-  stage: "scanning" | "parsing" | "pass1" | "pass2" | "finalizing" | "summaries" | "embeddings";
+  stage:
+    | "scanning"
+    | "parsing"
+    | "pass1"
+    | "scipIngest"
+    | "pass2"
+    | "finalizing"
+    | "summaries"
+    | "embeddings";
   current: number;
   total: number;
   currentFile?: string;
@@ -48,6 +55,14 @@ export interface IndexProgress {
   stageCurrent?: number;
   stageTotal?: number;
   message?: string;
+  /**
+   * Embedding model identifier when `stage === "embeddings"`. Two models run
+   * concurrently via Promise.all in metrics-updater.ts and emit interleaved
+   * events; the CLI keys per-model state on this field so each model gets its
+   * own progress line instead of fighting for the same one. Undefined for
+   * non-embedding stages.
+   */
+  model?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +94,33 @@ export interface Pass1Accumulator {
   tsFilesProcessed: number;
   rustFallbackFiles: number;
   rustFallbackByLanguage: Map<string, number>;
+  /**
+   * Promise resolved when the BatchPersistAccumulator has finished draining
+   * all queued FlushBatches to disk. The drain is kicked off as the last
+   * step of pass-1 but NOT awaited there — callers in `indexer.ts` can run
+   * the in-memory pass-2 bridge (applySymbolMapFileUpdates,
+   * syncSymbolIndexFromCache) and, in `mode === "full"`, even kick off
+   * `runPass2Resolvers` while the writes settle in the background. Pass-2
+   * writes serialize through the same writeLimiter so they interleave
+   * safely with the still-draining pass-1 batches.
+   *
+   * In `mode === "incremental"` the caller MUST await this promise before
+   * `resolvePass2Targets` — that helper does DB reads off the changed-file
+   * symbols and would miss un-flushed writes otherwise.
+   */
+  drainPromise: Promise<void>;
+  /**
+   * Pass-1 extraction outputs captured for files that the pass-2 TS
+   * resolver will re-process. Lets pass-2 skip a redundant tree-sitter
+   * parse + three `extract*` calls per file. Populated only for
+   * `isTsCallResolutionFile(path)` matches — other-language pass-2
+   * resolvers consume the live tree handle for scope walkers and stay on
+   * the inline re-parse path. Dropped after pass-2 completes.
+   *
+   * Imported as a value type to avoid a circular import; `Pass1Accumulator`
+   * is referenced by both pass-1 and pass-2 modules.
+   */
+  pass1Extractions: import("./pass2/types.js").Pass1ExtractionCache;
 }
 
 export interface Pass1Params {

@@ -189,8 +189,8 @@ export function extractSkeletonFromNode(
 
     if (exportedOnly) {
       // Collapse imports into a summary line instead of showing them verbatim
-      const importCount = node.children.filter(
-        (c) => IMPORT_TYPES.has(c.type),
+      const importCount = node.children.filter((c) =>
+        IMPORT_TYPES.has(c.type),
       ).length;
       if (importCount > 0) {
         parts.push(`// ${importCount} import${importCount > 1 ? "s" : ""}\n`);
@@ -200,13 +200,15 @@ export function extractSkeletonFromNode(
       const exportParts: string[] = [];
       for (const child of node.children) {
         if (child.type === "export_statement") {
-          exportParts.push(extractSkeletonFromNode(
-            child,
-            content,
-            includeIdentifiers,
-            depth,
-            exportedOnly,
-          ));
+          exportParts.push(
+            extractSkeletonFromNode(
+              child,
+              content,
+              includeIdentifiers,
+              depth,
+              exportedOnly,
+            ),
+          );
         }
       }
 
@@ -220,27 +222,34 @@ export function extractSkeletonFromNode(
           if (IMPORT_TYPES.has(child.type)) {
             continue; // Already summarized above
           }
-          parts.push(extractSkeletonFromNode(
-            child,
-            content,
-            includeIdentifiers,
-            depth,
-            false, // Process children fully in fallback mode
-          ));
+          parts.push(
+            extractSkeletonFromNode(
+              child,
+              content,
+              includeIdentifiers,
+              depth,
+              false, // Process children fully in fallback mode
+            ),
+          );
         }
       }
     } else {
       // Non-exported mode: show everything (original behavior)
       // First pass: imports + verbatim types + export statements
       for (const child of node.children) {
-        if (VERBATIM_TYPES.has(child.type) || child.type === "export_statement") {
-          parts.push(extractSkeletonFromNode(
-            child,
-            content,
-            includeIdentifiers,
-            depth,
-            exportedOnly,
-          ));
+        if (
+          VERBATIM_TYPES.has(child.type) ||
+          child.type === "export_statement"
+        ) {
+          parts.push(
+            extractSkeletonFromNode(
+              child,
+              content,
+              includeIdentifiers,
+              depth,
+              exportedOnly,
+            ),
+          );
         }
       }
       // Second pass: everything else
@@ -249,13 +258,15 @@ export function extractSkeletonFromNode(
           !VERBATIM_TYPES.has(child.type) &&
           child.type !== "export_statement"
         ) {
-          parts.push(extractSkeletonFromNode(
-            child,
-            content,
-            includeIdentifiers,
-            depth,
-            exportedOnly,
-          ));
+          parts.push(
+            extractSkeletonFromNode(
+              child,
+              content,
+              includeIdentifiers,
+              depth,
+              exportedOnly,
+            ),
+          );
         }
       }
     }
@@ -278,12 +289,9 @@ export function extractSkeletonFromNode(
     const parts: string[] = ["export "];
     for (const child of node.children) {
       if (child.type !== "export") {
-        parts.push(extractSkeletonFromNode(
-          child,
-          content,
-          includeIdentifiers,
-          depth,
-        ));
+        parts.push(
+          extractSkeletonFromNode(child, content, includeIdentifiers, depth),
+        );
       }
     }
     return parts.join("");
@@ -312,13 +320,15 @@ export function extractSkeletonFromNode(
       if (child.type === "decorator") {
         parts.push(child.text + "\n");
       } else {
-        parts.push(extractSkeletonFromNode(
-          child,
-          content,
-          includeIdentifiers,
-          depth,
-          exportedOnly,
-        ));
+        parts.push(
+          extractSkeletonFromNode(
+            child,
+            content,
+            includeIdentifiers,
+            depth,
+            exportedOnly,
+          ),
+        );
       }
     }
     return parts.join("");
@@ -463,8 +473,9 @@ function extractSkeletonFromBody(
       );
       const isThrow = child.children.some((c) => c.type === "throw_statement");
 
-      const hasImportantIdentifier =
-        includeIdentifiers.some((id) => childText.includes(id));
+      const hasImportantIdentifier = includeIdentifiers.some((id) =>
+        childText.includes(id),
+      );
 
       if (isReturn || isThrow || hasImportantIdentifier) {
         parts.push(child.text.trim() + "\n");
@@ -518,21 +529,47 @@ function extractSkeletonFromBody(
     else if (
       childType === "for_statement" ||
       childType === "for_in_statement" ||
+      childType === "for_of_statement" ||
+      childType === "for_each_statement" ||
       childType === "while_statement" ||
       childType === "for_expression" ||
       childType === "while_expression"
     ) {
-      const condition = child.children.find(
+      const body = child.children.find((c) => BODY_TYPES.has(c.type));
+      // Plain for/while wrap the header in `parenthesized_expression`.
+      // for-of / for-in / for-each emit the iteration variable + iterable
+      // as siblings between the `for` keyword and the body block.
+      const paren = child.children.find(
         (c) => c.type === "parenthesized_expression",
       );
-      const conditionText = condition ? condition.text : "";
-      const body = child.children.find((c) => BODY_TYPES.has(c.type));
+      let conditionText: string;
+      if (paren) {
+        conditionText = paren.text;
+      } else {
+        const startIdx = child.children.findIndex((c) => c.text === "for");
+        const endIdx = body ? child.children.indexOf(body) : -1;
+        if (startIdx >= 0 && endIdx > startIdx + 1) {
+          const headerNodes = child.children.slice(startIdx + 1, endIdx);
+          const text = headerNodes
+            .map((n) => n.text.trim())
+            .filter(Boolean)
+            .join(" ");
+          conditionText = text.startsWith("(") ? text : "(" + text + ")";
+        } else {
+          conditionText = "";
+        }
+      }
 
-      const loopKeyword = childType
-        .replace("_statement", "")
-        .replace("_expression", "")
-        .replace("_in", "");
-      let loopLine = loopKeyword + " " + conditionText;
+      // for_in_statement / for_of_statement / for_each_statement still
+      // render as the keyword `for`. Plain for/while keep their keyword.
+      const isFor = childType.startsWith("for_");
+      const loopKeyword = isFor
+        ? "for"
+        : childType.replace("_statement", "").replace("_expression", "");
+      let loopLine =
+        conditionText.length > 0
+          ? loopKeyword + " " + conditionText
+          : loopKeyword;
       if (body) {
         const bodySkeleton = extractSkeletonFromBody(
           body,
@@ -561,7 +598,8 @@ function extractSkeletonFromBody(
       childType === "decorated_definition"
     ) {
       parts.push(
-        extractSkeletonFromNode(child, content, includeIdentifiers, 1) + "\n");
+        extractSkeletonFromNode(child, content, includeIdentifiers, 1) + "\n",
+      );
       processedStatements++;
     }
     // Assignment (Python)
@@ -612,7 +650,11 @@ export function trimSkeletonToBounds(
   if (skipLines === 0) {
     const tokenCount = estimateTokenCount(skeleton);
     if (lines.length <= maxLines && tokenCount <= maxTokens) {
-      return { code: skeleton, truncated: false, skeletonLinesConsumed: allLines.length };
+      return {
+        code: skeleton,
+        truncated: false,
+        skeletonLinesConsumed: allLines.length,
+      };
     }
   }
 

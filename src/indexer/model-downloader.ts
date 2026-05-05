@@ -15,20 +15,27 @@ import { logger } from "../util/logger.js";
 import {
   getModelInfo,
   resolveModelDir,
+  resolveVariant,
   isModelAvailable,
 } from "./model-registry.js";
 
 /**
  * Ensure a model's files are available locally.
  * - For bundled models: verifies files exist, throws if missing.
- * - For downloadable models: downloads from HuggingFace if not cached.
+ * - For downloadable models: downloads the requested variant from
+ *   HuggingFace if not cached. Tokenizer + config are shared across
+ *   variants and only downloaded once per model.
  * Returns the directory path where the model files live.
  */
-export async function ensureModelAvailable(name: string): Promise<string> {
+export async function ensureModelAvailable(
+  name: string,
+  variant?: string,
+): Promise<string> {
   const info = getModelInfo(name);
   const modelDir = resolveModelDir(name);
+  const { variantName, variant: variantInfo } = resolveVariant(name, variant);
 
-  if (isModelAvailable(name)) {
+  if (isModelAvailable(name, variantName)) {
     return modelDir;
   }
 
@@ -45,30 +52,29 @@ export async function ensureModelAvailable(name: string): Promise<string> {
     );
   }
 
-  const sizeHint =
-    name === "nomic-embed-text-v1.5"
-      ? "138MB"
-      : name === "jina-embeddings-v2-base-code"
-        ? "110MB"
-        : "unknown size";
-  logger.info(`Downloading model "${name}" (~${sizeHint})...`);
+  logger.info(
+    `Downloading model "${name}" variant "${variantName}" (${variantInfo.modelFile})...`,
+  );
   mkdirSync(modelDir, { recursive: true });
 
   const filesToDownload = [
     {
-      name: info.modelFile,
-      url: info.downloadUrls.model,
-      fallbackUrl: info.fallbackDownloadUrls?.model,
+      name: variantInfo.modelFile,
+      url: variantInfo.downloadUrl,
+      fallbackUrl: variantInfo.fallbackDownloadUrl,
+      maxBytes: variantInfo.maxDownloadBytes,
     },
     {
       name: info.tokenizerFile,
       url: info.downloadUrls.tokenizer,
       fallbackUrl: info.fallbackDownloadUrls?.tokenizer,
+      maxBytes: undefined,
     },
     {
       name: info.configFile,
       url: info.downloadUrls.config,
       fallbackUrl: info.fallbackDownloadUrls?.config,
+      maxBytes: undefined,
     },
   ];
 
@@ -83,7 +89,7 @@ export async function ensureModelAvailable(name: string): Promise<string> {
     let primaryErr: unknown = null;
     try {
       await downloadFile(file.url, destPath, {
-        maxBytes: info.maxDownloadBytes,
+        maxBytes: file.maxBytes,
       });
       const stats = statSync(destPath);
       const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
@@ -99,7 +105,7 @@ export async function ensureModelAvailable(name: string): Promise<string> {
       );
       try {
         await downloadFile(file.fallbackUrl, destPath, {
-          maxBytes: info.maxDownloadBytes,
+          maxBytes: file.maxBytes,
         });
         const stats = statSync(destPath);
         const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);

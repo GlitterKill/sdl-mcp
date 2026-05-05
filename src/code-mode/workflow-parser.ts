@@ -9,6 +9,15 @@ export interface ParsedWorkflowStep {
   /** Whether this step is an internal transform (not routed through gateway) */
   internal: boolean;
   maxResponseTokens?: number;
+  /**
+   * When true, the executor must skip this step and emit an `error`-status
+   * result for it. Set by the parser when `onError: "continue"` lets us
+   * tolerate per-step validation failures (unknown fn, disabled tool) so
+   * sibling steps can still execute.
+   */
+  skip?: boolean;
+  /** Human-readable reason populated when `skip` is true. */
+  skipReason?: string;
 }
 
 export interface ParsedWorkflowRequest {
@@ -126,9 +135,24 @@ export function parseWorkflowRequest(
         available.length > 25
           ? `${available.slice(0, 25).join(", ")} (and ${available.length - 25} more — call sdl.action.search to discover)`
           : available.join(", ");
-      errors.push(
-        `Step ${i}: unknown function '${step.fn}'${hint}. Available: ${availSummary}, dataPick, dataMap, dataFilter, dataSort, dataTemplate, workflowContinuationGet`,
-      );
+      const message = `Step ${i}: unknown function '${step.fn}'${hint}. Available: ${availSummary}, dataPick, dataMap, dataFilter, dataSort, dataTemplate, workflowContinuationGet`;
+      // With `onError: "continue"` we record the bad step as a soft skip
+      // and let the executor emit a per-step `error` result, so sibling
+      // steps in the same envelope still run. Without `continue`, this
+      // remains a hard validation failure that aborts the workflow.
+      if (onError === "continue") {
+        parsedSteps.push({
+          fn: step.fn,
+          action: step.fn,
+          args: step.args,
+          internal: false,
+          maxResponseTokens: step.maxResponseTokens,
+          skip: true,
+          skipReason: message,
+        });
+      } else {
+        errors.push(message);
+      }
       continue;
     }
 

@@ -5,7 +5,10 @@ import type { ToolServices } from "../gateway/index.js";
 import { createActionMap, type ActionMap } from "../gateway/router.js";
 import { AgentContextRequestSchema } from "../mcp/tools.js";
 import { handleAgentContext } from "../mcp/tools/context.js";
-import { FileGatewayRequestSchema, handleFileGateway } from "../mcp/tools/file-gateway.js";
+import {
+  FileGatewayRequestSchema,
+  handleFileGateway,
+} from "../mcp/tools/file-gateway.js";
 import type { MCPServer, ToolContext } from "../server.js";
 import { estimateTokens } from "../util/tokenize.js";
 import {
@@ -29,12 +32,10 @@ import {
 } from "./manual-generator.js";
 import { parseWorkflowRequest } from "./workflow-parser.js";
 
-import {
-  WorkflowRequestSchema,
-  WorkflowTraceOptionsSchema,
-} from "./types.js";
+import { WorkflowRequestSchema, WorkflowTraceOptionsSchema } from "./types.js";
 
-const TRANSFORM_HINT = "\n\n> **Tip:** Data transforms (dataPick, dataMap, dataFilter, dataSort, dataTemplate) are available as sdl.workflow steps. Use sdl.manual({ actions: [\"dataPick\", \"dataMap\", \"dataFilter\", \"dataSort\", \"dataTemplate\"] }) for schemas.";
+const TRANSFORM_HINT =
+  '\n\n> **Tip:** Data transforms (dataPick, dataMap, dataFilter, dataSort, dataTemplate) are available as sdl.workflow steps. Use sdl.manual({ actions: ["dataPick", "dataMap", "dataFilter", "dataSort", "dataTemplate"] }) for schemas.';
 
 export const ActionSearchRequestSchema = z.object({
   query: z.string().min(1),
@@ -45,7 +46,7 @@ export const ActionSearchRequestSchema = z.object({
   /** When true, return only counts and categories instead of full action details */
   summaryOnly: z.boolean().default(false),
   excludeDisabled: z.boolean().default(false),
-})
+});
 
 export function registerActionSearchTool(
   server: MCPServer,
@@ -64,7 +65,7 @@ export function registerActionSearchTool(
       // guess param shapes wrong.
       const trimmed = args.query.trim();
       const looksLikeExactName =
-        /^[a-zA-Z][\w.]*$/.test(trimmed) && trimmed.includes('.');
+        /^[a-zA-Z][\w.]*$/.test(trimmed) && trimmed.includes(".");
       const narrowLookup = args.limit === 1 || looksLikeExactName;
       const effectiveIncludeSchemas = args.includeSchemas || narrowLookup;
       const effectiveIncludeExamples = args.includeExamples || narrowLookup;
@@ -76,7 +77,7 @@ export function registerActionSearchTool(
 
       const allRanked = rankCatalog(catalog, args.query);
       const filteredRanked = args.excludeDisabled
-        ? allRanked.filter(a => !a.disabled)
+        ? allRanked.filter((a) => !a.disabled)
         : allRanked;
       const offset = args.offset ?? 0;
       const ranked = filteredRanked.slice(offset, offset + args.limit);
@@ -85,7 +86,7 @@ export function registerActionSearchTool(
           ? {
               includeSchemas: !args.includeSchemas,
               includeExamples: !args.includeExamples,
-              reason: args.limit === 1 ? 'limit=1' : 'exact-name-query',
+              reason: args.limit === 1 ? "limit=1" : "exact-name-query",
             }
           : undefined;
       // Handle summaryOnly mode - return counts/categories instead of full details
@@ -94,7 +95,7 @@ export function registerActionSearchTool(
         const byNamespace: Record<string, number> = {};
         for (const action of filteredRanked) {
           byKind[action.kind] = (byKind[action.kind] ?? 0) + 1;
-          const ns = action.action.split('.')[0];
+          const ns = action.action.split(".")[0];
           byNamespace[ns] = (byNamespace[ns] ?? 0) + 1;
         }
         return {
@@ -102,32 +103,43 @@ export function registerActionSearchTool(
             total: filteredRanked.length,
             byKind,
             byNamespace,
-            matchedActions: filteredRanked.map(a => a.action),
+            matchedActions: filteredRanked.map((a) => a.action),
           },
-          tokenEstimate: estimateTokens(JSON.stringify({ total: filteredRanked.length, byKind, byNamespace })),
+          tokenEstimate: estimateTokens(
+            JSON.stringify({
+              total: filteredRanked.length,
+              byKind,
+              byNamespace,
+            }),
+          ),
         };
       }
 
-
       // Compute disabled action hints
-      const disabledActions = ranked.filter(a => a.disabled);
-      const disabledHint = disabledActions.length > 0
-        ? {
-            count: disabledActions.length,
-            message: `${disabledActions.length} action(s) are disabled. Enable them by updating your sdlmcp.config.json.`,
-            actions: disabledActions.map(a => ({
-              action: a.action,
-              reason: a.disabledReason ?? "Unknown",
-            })),
-          }
-        : undefined;
+      const disabledActions = ranked.filter((a) => a.disabled);
+      const disabledHint =
+        disabledActions.length > 0
+          ? {
+              count: disabledActions.length,
+              message: `${disabledActions.length} action(s) are disabled. Enable them by updating your sdlmcp.config.json.`,
+              actions: disabledActions.map((a) => ({
+                action: a.action,
+                reason: a.disabledReason ?? "Unknown",
+              })),
+            }
+          : undefined;
 
       return {
         actions: ranked,
         total: filteredRanked.length,
         disabledHint,
         // Hint when schemas not included
-        ...(!effectiveIncludeSchemas ? { schemaHint: "Tip: Add includeSchemas: true to see parameter types and enum values." } : {}),
+        ...(!effectiveIncludeSchemas
+          ? {
+              schemaHint:
+                "Tip: Add includeSchemas: true to see parameter types and enum values.",
+            }
+          : {}),
         hasMore: filteredRanked.length > offset + args.limit,
         tokenEstimate: estimateTokens(JSON.stringify(ranked)),
         ...(autoEnabled ? { autoEnabled } : {}),
@@ -141,8 +153,14 @@ export function registerActionSearchTool(
         offset: { type: "integer", minimum: 0 },
         includeSchemas: { type: "boolean" },
         includeExamples: { type: "boolean" },
-        summaryOnly: { type: "boolean", description: "Return only counts and categories" },
-        excludeDisabled: { type: "boolean", description: "Hide disabled actions from results" },
+        summaryOnly: {
+          type: "boolean",
+          description: "Return only counts and categories",
+        },
+        excludeDisabled: {
+          type: "boolean",
+          description: "Hide disabled actions from results",
+        },
       },
       required: ["query"],
       additionalProperties: false,
@@ -183,11 +201,11 @@ export function registerCodeModeTools(
       const includeExamples = args.includeExamples;
 
       if (
-        !args.query
-        && !args.actions
-        && format === "typescript"
-        && !includeSchemas
-        && !includeExamples
+        !args.query &&
+        !args.actions &&
+        format === "typescript" &&
+        !includeSchemas &&
+        !includeExamples
       ) {
         const manual = getManualCached(services.liveIndex);
         return { manual, tokenEstimate: estimateTokens(manual) };
@@ -211,7 +229,9 @@ export function registerCodeModeTools(
           "action.search",
         ]);
 
-        const unknowns = args.actions.filter((action) => !validNames.has(action));
+        const unknowns = args.actions.filter(
+          (action) => !validNames.has(action),
+        );
         if (unknowns.length > 0) {
           return {
             error: "UNKNOWN_ACTIONS",
@@ -222,7 +242,9 @@ export function registerCodeModeTools(
 
         const filtered: ActionDescriptor[] = [];
         for (const name of args.actions) {
-          const match = catalog.find((entry) => entry.action === name || entry.fn === name);
+          const match = catalog.find(
+            (entry) => entry.action === name || entry.fn === name,
+          );
           if (match && !filtered.includes(match)) {
             filtered.push(match);
           }
@@ -241,11 +263,15 @@ export function registerCodeModeTools(
         };
       }
 
-      const rendered = format === "markdown"
-        ? renderMarkdown(catalog)
-        : renderTypescript(catalog);
+      const rendered =
+        format === "markdown"
+          ? renderMarkdown(catalog)
+          : renderTypescript(catalog);
       const withTransforms = rendered + TRANSFORM_HINT;
-      return { manual: withTransforms, tokenEstimate: estimateTokens(withTransforms) };
+      return {
+        manual: withTransforms,
+        tokenEstimate: estimateTokens(withTransforms),
+      };
     },
     {
       type: "object",
@@ -277,7 +303,13 @@ export function registerCodeModeTools(
         ? WorkflowTraceOptionsSchema.parse(rawObject.trace)
         : undefined;
 
-      return executeWorkflow(parsed.request, actionMap, config, context, traceOpts);
+      return executeWorkflow(
+        parsed.request,
+        actionMap,
+        config,
+        context,
+        traceOpts,
+      );
     },
     {
       type: "object",
@@ -334,7 +366,10 @@ export function registerCodeModeTools(
     {
       type: "object",
       properties: {
-        op: { type: "string", enum: ["read", "write", "searchEditPreview", "searchEditApply"] },
+        op: {
+          type: "string",
+          enum: ["read", "write", "searchEditPreview", "searchEditApply"],
+        },
         repoId: { type: "string", minLength: 1 },
         filePath: { type: "string" },
         maxBytes: { type: "number" },
@@ -371,8 +406,12 @@ function renderTypescript(catalog: ActionDescriptor[]): string {
   const lines: string[] = [
     "// SDL-MCP API - use with sdl.workflow for multi-step operations",
     "// Prefer sdl.context for explain/debug/review/implement context retrieval.",
-    "// repoId is set in the workflow envelope, not per-step.",
+    "// repoId is set in the workflow envelope and auto-injected into every",
+    "// gateway step, so it is omitted from per-step signatures below.",
     "// Reference prior step results with $N (e.g., $0.results[0].symbolId).",
+    '// wireFormat="auto" (default for slice.build / symbol.search /',
+    "// sdl.context) returns either a JSON object OR a packed `#PACKED/...`",
+    "// string when packed encoding saves tokens; check the response shape.",
     "",
   ];
 
@@ -389,7 +428,9 @@ function renderTypescript(catalog: ActionDescriptor[]): string {
     }
     if (descriptor.schemaSummary) {
       const params = descriptor.schemaSummary.fields
-        .map((field) => `${field.name}${field.required ? "" : "?"}: ${field.type}`)
+        .map(
+          (field) => `${field.name}${field.required ? "" : "?"}: ${field.type}`,
+        )
         .join("; ");
       lines.push(`function ${descriptor.fn}(p: { ${params} }): object`);
     } else {
@@ -399,15 +440,19 @@ function renderTypescript(catalog: ActionDescriptor[]): string {
       for (const field of descriptor.schemaSummary.fields) {
         if (field.subFields && field.subFields.length > 0) {
           const subParams = field.subFields
-            .map((subField) =>
-              `${subField.name}${subField.required ? "" : "?"}: ${subField.type}`)
+            .map(
+              (subField) =>
+                `${subField.name}${subField.required ? "" : "?"}: ${subField.type}`,
+            )
             .join("; ");
           lines.push(`//   ${field.name} shape: { ${subParams} }`);
         }
       }
     }
     if (descriptor.example) {
-      lines.push(`// Example: ${descriptor.fn}(${JSON.stringify(descriptor.example)})`);
+      lines.push(
+        `// Example: ${descriptor.fn}(${JSON.stringify(descriptor.example)})`,
+      );
     }
   }
 
@@ -433,7 +478,9 @@ function renderMarkdown(catalog: ActionDescriptor[]): string {
       lines.push(`- **Prerequisites**: ${descriptor.prerequisites.join(", ")}`);
     }
     if (descriptor.recommendedNextActions.length > 0) {
-      lines.push(`- **Recommended next**: ${descriptor.recommendedNextActions.join(", ")}`);
+      lines.push(
+        `- **Recommended next**: ${descriptor.recommendedNextActions.join(", ")}`,
+      );
     }
     if (descriptor.fallbacks.length > 0) {
       lines.push(`- **Fallbacks**: ${descriptor.fallbacks.join(", ")}`);
@@ -444,9 +491,8 @@ function renderMarkdown(catalog: ActionDescriptor[]): string {
       lines.push("| Parameter | Type | Required | Default |");
       lines.push("|-----------|------|----------|---------|");
       for (const field of descriptor.schemaSummary.fields) {
-        const defaultValue = field.default !== undefined
-          ? JSON.stringify(field.default)
-          : "";
+        const defaultValue =
+          field.default !== undefined ? JSON.stringify(field.default) : "";
         lines.push(
           `| ${field.name} | ${field.type} | ${field.required ? "yes" : "no"} | ${defaultValue} |`,
         );
@@ -459,9 +505,10 @@ function renderMarkdown(catalog: ActionDescriptor[]): string {
           lines.push("| Field | Type | Required | Default |");
           lines.push("|-------|------|----------|---------|");
           for (const subField of field.subFields) {
-            const defaultValue = subField.default !== undefined
-              ? JSON.stringify(subField.default)
-              : "";
+            const defaultValue =
+              subField.default !== undefined
+                ? JSON.stringify(subField.default)
+                : "";
             lines.push(
               `| ${subField.name} | ${subField.type} | ${subField.required ? "yes" : "no"} | ${defaultValue} |`,
             );
@@ -480,7 +527,6 @@ function renderMarkdown(catalog: ActionDescriptor[]): string {
     lines.push("");
   }
 
-  
   // Step reference patterns for workflow users
   lines.push("## Step Reference Patterns");
   lines.push("");

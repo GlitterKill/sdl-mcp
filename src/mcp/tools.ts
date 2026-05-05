@@ -30,7 +30,6 @@ import { z } from "zod";
 // Signature, Card, Slice, Compact V1/V2/V3, Delta, CodeWindow.
 // =============================================================================
 
-
 import type { RetrievalEvidence } from "../retrieval/types.js";
 import { RUNTIME_NAMES } from "../runtime/runtimes.js";
 import {
@@ -265,15 +264,11 @@ const SliceBuildWireFormatSchema = z.enum([
 ]);
 /**
  * Compact wire-format version selector. Versions 1 and 2 were retired in
- * 0.11.0 — passing them throws WireFormatRetiredError at runtime. Kept as a
- * Zod literal so the runtime guard fires before payload encoding. Ignored
- * when wireFormat is "packed" (header carries its own version).
+ * 0.11.0; only version 3 is accepted. Ignored when wireFormat is "packed"
+ * (header carries its own version). Schema-level rejection of v1/v2 produces
+ * a clear validation message instead of a runtime error after parse.
  */
-const SliceBuildWireFormatVersionSchema = z.union([
-  z.literal(1),
-  z.literal(2),
-  z.literal(3),
-]);
+const SliceBuildWireFormatVersionSchema = z.literal(3);
 
 const GraphSliceSchema = z.object({
   repoId: z.string().min(1),
@@ -317,12 +312,6 @@ const CompactSymbolMetricsSchema = z.object({
   t: z.array(z.string()).optional(),
 });
 
-
-
-
-
-
-
 const CompactSliceResumeSchema = z.object({
   t: z.enum(["cursor", "token"]),
   v: z.union([z.string(), z.number()]),
@@ -339,8 +328,6 @@ const CompactSliceBudgetSchema = z.object({
   mc: z.number().int().min(1).max(500),
   mt: z.number().int().min(1).max(200000),
 });
-
-
 
 // ============================================================================
 // Compact Wire Format V2 Schemas
@@ -390,10 +377,6 @@ const CompactSliceCardRefV2Schema = z.object({
   dl: CardDetailLevelSchema.optional(),
 });
 
-
-
-
-
 // ============================================================================
 // Compact Wire Format V3 Schemas (Grouped Edge Encoding)
 // ============================================================================
@@ -423,10 +406,7 @@ const CompactGraphSliceV3Schema = z.object({
   memories: z.array(SurfacedMemorySchema).optional(),
 });
 
-export {
-  CompactGroupedEdgeV3Schema,
-  CompactGraphSliceV3Schema,
-};
+export { CompactGroupedEdgeV3Schema, CompactGraphSliceV3Schema };
 
 const DeltaSymbolChangeSchema = z.discriminatedUnion("changeType", [
   z.object({
@@ -870,7 +850,9 @@ export const SymbolSearchRequestSchema = z
     /** Identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank for chat-aware re-ranking. */
     chatMentions: z.array(z.string().min(1).max(200)).max(20).optional(),
     /** Optional per-mention weight overrides; missing entries default to uniform 1.0. */
-    chatMentionWeights: z.record(z.string(), z.number().min(0).max(10)).optional(),
+    chatMentionWeights: z
+      .record(z.string(), z.number().min(0).max(10))
+      .optional(),
     /** Walk direction across the dependency graph. Default: "both". */
     pprDirection: z.enum(["out", "in", "both"]).optional(),
     /** PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default: 2.0 (tuned 2026-04-27). */
@@ -1332,15 +1314,16 @@ export const DeltaGetResponseSchema = z.object({
   blastRadiusTruncated: z.boolean().optional(),
 });
 
-export const SliceSpilloverGetRequestSchema = z.object({
-  spilloverHandle: z.string().min(1).max(256).optional(),
-  sliceHandle: z.string().min(1).max(256).optional(),
-  cursor: z.string().optional(),
-  pageSize: z.number().int().min(1).max(PAGE_SIZE_MAX).optional(),
-}).refine(
-  (d) => d.spilloverHandle != null || d.sliceHandle != null,
-  { message: "Either spilloverHandle or sliceHandle is required" },
-);
+export const SliceSpilloverGetRequestSchema = z
+  .object({
+    spilloverHandle: z.string().min(1).max(256).optional(),
+    sliceHandle: z.string().min(1).max(256).optional(),
+    cursor: z.string().optional(),
+    pageSize: z.number().int().min(1).max(PAGE_SIZE_MAX).optional(),
+  })
+  .refine((d) => d.spilloverHandle != null || d.sliceHandle != null, {
+    message: "Either spilloverHandle or sliceHandle is required",
+  });
 
 export const SliceSpilloverGetResponseSchema = z.object({
   spilloverHandle: z.string(),
@@ -1935,13 +1918,10 @@ export const AgentContextRequestSchema = z.object({
         .describe(
           "Context breadth: precise returns minimal workflow-efficient context, broad returns richer surrounding context. Default: broad",
         ),
-      semantic: z
-        .boolean()
-        .optional()
-        .describe(
-          // AgentContextRequest retrieval defaults: semantic=true, evidence=true
-          "Use hybrid (FTS + vector) retrieval for context seeding. Default: true.",
-        ),
+      semantic: z.boolean().optional().describe(
+        // AgentContextRequest retrieval defaults: semantic=true, evidence=true
+        "Use hybrid (FTS + vector) retrieval for context seeding. Default: true.",
+      ),
       includeRetrievalEvidence: z
         .boolean()
         .optional()
@@ -2319,15 +2299,14 @@ const RuntimeExecuteRequestObjectSchema = z
 
 // Public schema accepts `command` as a friendly alias for `executable`.
 // Either field may be set; if both are present, `executable` wins.
-export const RuntimeExecuteRequestSchema = RuntimeExecuteRequestObjectSchema.transform(
-  (val) => {
+export const RuntimeExecuteRequestSchema =
+  RuntimeExecuteRequestObjectSchema.transform((val) => {
     const aliased = val as typeof val & { command?: string };
     if (aliased.command && !aliased.executable) {
       return { ...val, executable: aliased.command };
     }
     return val;
-  },
-);
+  });
 
 export const RuntimeExecuteExcerptSchema = z.object({
   lineStart: z.number().int(),
@@ -2733,7 +2712,14 @@ export const FileWriteInsertAtSchema = z.object({
 
 export const FileWriteRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  filePath: z.string().min(1).max(1024).refine((p) => !p.includes("\0"), { message: "filePath must not contain null bytes" }).describe("File path relative to repo root"),
+  filePath: z
+    .string()
+    .min(1)
+    .max(1024)
+    .refine((p) => !p.includes("\0"), {
+      message: "filePath must not contain null bytes",
+    })
+    .describe("File path relative to repo root"),
 
   // Write modes (mutually exclusive - use exactly one)
   content: z

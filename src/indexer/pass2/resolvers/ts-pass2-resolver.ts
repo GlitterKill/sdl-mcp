@@ -21,6 +21,10 @@ type ResolveTsPass2Delegate = (params: {
   globalNameToSymbolIds?: Pass2ResolverContext["globalNameToSymbolIds"];
   globalPreferredSymbolId?: Pass2ResolverContext["globalPreferredSymbolId"];
   telemetry?: Pass2ResolverContext["telemetry"];
+  mode?: Pass2ResolverContext["mode"];
+  submitEdgeWrite?: Pass2ResolverContext["submitEdgeWrite"];
+  importCache?: Pass2ResolverContext["importCache"];
+  pass1Extractions?: Pass2ResolverContext["pass1Extractions"];
 }) => Promise<number>;
 
 export class TsPass2Resolver implements Pass2Resolver {
@@ -31,7 +35,10 @@ export class TsPass2Resolver implements Pass2Resolver {
   ) {}
 
   supports(target: Pass2Target): boolean {
-    return target.language === "typescript" && TS_PASS2_EXTENSIONS.has(target.extension);
+    return (
+      target.language === "typescript" &&
+      TS_PASS2_EXTENSIONS.has(target.extension)
+    );
   }
 
   async resolve(
@@ -57,6 +64,10 @@ export class TsPass2Resolver implements Pass2Resolver {
       globalNameToSymbolIds: context.globalNameToSymbolIds,
       globalPreferredSymbolId: context.globalPreferredSymbolId,
       telemetry: context.telemetry,
+      mode: context.mode,
+      submitEdgeWrite: context.submitEdgeWrite,
+      importCache: context.importCache,
+      pass1Extractions: context.pass1Extractions,
     });
 
     return { edgesCreated };

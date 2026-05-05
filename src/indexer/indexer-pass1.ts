@@ -1,8 +1,4 @@
-
-import {
-  processFile,
-  processFileFromRustResult,
-} from "./parser.js";
+import { processFile, processFileFromRustResult } from "./parser.js";
 import { ParserWorkerPool } from "./workerPool.js";
 import {
   parseFilesRust,
@@ -10,13 +6,12 @@ import {
   type RustParseResult,
 } from "./rustIndexer.js";
 import { BatchPersistAccumulator } from "./parser/batch-persist.js";
-import {
-  toPass2Target,
-} from "./pass2/registry.js";
+import { toPass2Target } from "./pass2/registry.js";
 import { logger } from "../util/logger.js";
 import type { FileMetadata } from "./fileScanner.js";
 import {
   fileIdForPath,
+  type IndexProgress,
   type Pass1Accumulator,
   type Pass1Params,
 } from "./indexer-init.js";
@@ -29,19 +24,40 @@ export async function runPass1WithRustEngine(
   params: Pass1Params,
 ): Promise<{ acc: Pass1Accumulator; usedRust: boolean }> {
   const {
-    repoId, repoRoot, config, mode, files, existingByPath, symbolIndex,
-    pendingCallEdges, createdCallEdges, tsResolver, allSymbolsByName,
-    globalNameToSymbolIds, globalPreferredSymbolId, pass2ResolverRegistry,
-    supportsPass2FilePath, concurrency, onProgress,
+    repoId,
+    repoRoot,
+    config,
+    mode,
+    files,
+    existingByPath,
+    symbolIndex,
+    pendingCallEdges,
+    createdCallEdges,
+    tsResolver,
+    allSymbolsByName,
+    globalNameToSymbolIds,
+    globalPreferredSymbolId,
+    pass2ResolverRegistry,
+    supportsPass2FilePath,
+    concurrency,
+    onProgress,
   } = params;
 
   const acc: Pass1Accumulator = {
-    filesProcessed: 0, changedFiles: 0, totalSymbolsIndexed: 0,
-    totalEdgesCreated: 0, allConfigEdges: [], changedFileIds: new Set(),
+    filesProcessed: 0,
+    changedFiles: 0,
+    totalSymbolsIndexed: 0,
+    totalEdgesCreated: 0,
+    allConfigEdges: [],
+    changedFileIds: new Set(),
     changedPass2FilePaths: new Set(),
     symbolMapFileUpdates: new Map(),
-    rustFilesProcessed: 0, tsFilesProcessed: 0, rustFallbackFiles: 0,
+    rustFilesProcessed: 0,
+    tsFilesProcessed: 0,
+    rustFallbackFiles: 0,
     rustFallbackByLanguage: new Map(),
+    drainPromise: Promise.resolve(),
+    pass1Extractions: new Map(),
   };
   const updateProgress = (currentFile?: string): void => {
     onProgress?.({
@@ -89,7 +105,12 @@ export async function runPass1WithRustEngine(
 
   // Kick off first chunk parse (async)
   if (chunks.length > 0) {
-    pendingParse = parseFilesRustAsync(repoId, repoRoot, chunks[0], concurrency);
+    pendingParse = parseFilesRustAsync(
+      repoId,
+      repoRoot,
+      chunks[0],
+      concurrency,
+    );
     pendingChunkIdx = 0;
   }
 
@@ -107,7 +128,9 @@ export async function runPass1WithRustEngine(
     }
 
     if (!chunkResults) {
-      logger.warn("Rust engine returned null mid-run, falling back to TS for remaining files");
+      logger.warn(
+        "Rust engine returned null mid-run, falling back to TS for remaining files",
+      );
       for (let j = ci; j < chunks.length; j++) {
         for (const f of chunks[j]) tsFallbackFiles.push(f);
       }
@@ -117,7 +140,12 @@ export async function runPass1WithRustEngine(
 
     // Kick off NEXT chunk parse after confirming current chunk succeeded
     if (ci + 1 < chunks.length) {
-      pendingParse = parseFilesRustAsync(repoId, repoRoot, chunks[ci + 1], concurrency);
+      pendingParse = parseFilesRustAsync(
+        repoId,
+        repoRoot,
+        chunks[ci + 1],
+        concurrency,
+      );
       pendingChunkIdx = ci + 1;
     }
 
@@ -132,7 +160,10 @@ export async function runPass1WithRustEngine(
 
     const resultByPath = new Map<string, RustParseResult>();
     for (const r of chunkResults) resultByPath.set(r.relPath, r);
-    const processable: Array<{ file: FileMetadata; rustResult: RustParseResult }> = [];
+    const processable: Array<{
+      file: FileMetadata;
+      rustResult: RustParseResult;
+    }> = [];
     for (let i = 0; i < chunks[ci].length; i++) {
       const file = chunks[ci][i];
       const rustResult = resultByPath.get(file.path);
@@ -162,7 +193,10 @@ export async function runPass1WithRustEngine(
       processable.push({ file, rustResult });
     }
 
-    const processOne = async (file: FileMetadata, rustResult: RustParseResult): Promise<void> => {
+    const processOne = async (
+      file: FileMetadata,
+      rustResult: RustParseResult,
+    ): Promise<void> => {
       updateProgress(file.path);
       const skipCallResolution = pass2ResolverRegistry.supports(
         toPass2Target(file),
@@ -187,6 +221,7 @@ export async function runPass1WithRustEngine(
           globalPreferredSymbolId,
           supportsPass2FilePath,
           batchAccumulator,
+          pass1Extractions: acc.pass1Extractions,
         });
         acc.filesProcessed++;
         acc.rustFilesProcessed++;
@@ -212,7 +247,9 @@ export async function runPass1WithRustEngine(
         acc.allConfigEdges.push(...result.configEdges);
       } catch (error) {
         acc.filesProcessed++;
-        logger.error(`Error processing Rust result for ${file.path}`, { error });
+        logger.error(`Error processing Rust result for ${file.path}`, {
+          error,
+        });
       }
     };
 
@@ -226,8 +263,11 @@ export async function runPass1WithRustEngine(
     }
   }
 
-  // Wait for background write queue to finish
-  await batchAccumulator.drain();
+  // Background drain continues from this point — no await here. Rust-batch
+  // writes already issued via maybeEnqueue() keep flowing through the
+  // writeLimiter while we process TS fallback files below; final drain
+  // promise is captured at function end and surrendered to the caller for
+  // mode-aware overlap with the pass-2 bridge.
 
   // Process files that the Rust engine couldn't handle via the TS engine.
   // Lazy-create a small worker pool when Rust path didn't supply one,
@@ -239,7 +279,10 @@ export async function runPass1WithRustEngine(
       fallbackPool = new ParserWorkerPool();
       ownsFallbackPool = true;
     } catch (err) {
-      logger.warn("Failed to create fallback ParserWorkerPool; falling back to inline parse", { err });
+      logger.warn(
+        "Failed to create fallback ParserWorkerPool; falling back to inline parse",
+        { err },
+      );
       fallbackPool = null;
     }
   }
@@ -298,7 +341,11 @@ export async function runPass1WithRustEngine(
   }
 
   if (ownsFallbackPool && fallbackPool !== null) {
-    try { await fallbackPool.shutdown(); } catch (err) { logger.warn("fallbackPool.shutdown failed", { err }); }
+    try {
+      await fallbackPool.shutdown();
+    } catch (err) {
+      logger.warn("fallbackPool.shutdown failed", { err });
+    }
   }
   logger.info("Pass 1 engine breakdown", {
     rustFiles: acc.rustFilesProcessed,
@@ -306,6 +353,12 @@ export async function runPass1WithRustEngine(
     rustFallbackFiles: acc.rustFallbackFiles,
     perLanguageFallback: Object.fromEntries(acc.rustFallbackByLanguage),
   });
+
+  // Surface the deferred drain promise so the caller can overlap it with
+  // pass-2 bridge work. The progress emit gives the CLI a non-stuck-looking
+  // substage label while the drain runs in the background.
+  attachPass1DrainProgress(batchAccumulator, onProgress);
+  acc.drainPromise = batchAccumulator.drain();
 
   return { acc, usedRust: true };
 }
@@ -315,19 +368,41 @@ export async function runPass1WithTsEngine(
   params: Pass1Params,
 ): Promise<Pass1Accumulator> {
   const {
-    repoId, repoRoot, config, mode, files, existingByPath, symbolIndex,
-    pendingCallEdges, createdCallEdges, tsResolver, allSymbolsByName,
-    globalNameToSymbolIds, globalPreferredSymbolId, pass2ResolverRegistry,
-    supportsPass2FilePath, concurrency, workerPool, onProgress,
+    repoId,
+    repoRoot,
+    config,
+    mode,
+    files,
+    existingByPath,
+    symbolIndex,
+    pendingCallEdges,
+    createdCallEdges,
+    tsResolver,
+    allSymbolsByName,
+    globalNameToSymbolIds,
+    globalPreferredSymbolId,
+    pass2ResolverRegistry,
+    supportsPass2FilePath,
+    concurrency,
+    workerPool,
+    onProgress,
   } = params;
 
   const acc: Pass1Accumulator = {
-    filesProcessed: 0, changedFiles: 0, totalSymbolsIndexed: 0,
-    totalEdgesCreated: 0, allConfigEdges: [], changedFileIds: new Set(),
+    filesProcessed: 0,
+    changedFiles: 0,
+    totalSymbolsIndexed: 0,
+    totalEdgesCreated: 0,
+    allConfigEdges: [],
+    changedFileIds: new Set(),
     changedPass2FilePaths: new Set(),
     symbolMapFileUpdates: new Map(),
-    rustFilesProcessed: 0, tsFilesProcessed: 0, rustFallbackFiles: 0,
+    rustFilesProcessed: 0,
+    tsFilesProcessed: 0,
+    rustFallbackFiles: 0,
     rustFallbackByLanguage: new Map(),
+    drainPromise: Promise.resolve(),
+    pass1Extractions: new Map(),
   };
   // SAFETY: nextIndex++ must remain synchronous — no `await` between reading
   // and incrementing. JavaScript's single-threaded event loop guarantees
@@ -336,7 +411,6 @@ export async function runPass1WithTsEngine(
   let nextIndex = 0;
 
   const runWorker = async (): Promise<void> => {
-     
     while (true) {
       if (params.signal?.aborted) return;
       if (batchAccumulator.error) return;
@@ -373,6 +447,7 @@ export async function runPass1WithTsEngine(
           globalPreferredSymbolId,
           supportsPass2FilePath,
           batchAccumulator,
+          pass1Extractions: acc.pass1Extractions,
         });
         acc.filesProcessed++;
         acc.tsFilesProcessed++;
@@ -408,6 +483,59 @@ export async function runPass1WithTsEngine(
     () => runWorker(),
   );
   await Promise.all(workers);
-  await batchAccumulator.drain();
+  // Match the Rust path: surface the drain phase so a 30-60s queue flush
+  // doesn't masquerade as a stuck "99%" progress bar, and surrender the
+  // promise to the caller for overlap with pass-2 bridge work.
+  attachPass1DrainProgress(batchAccumulator, onProgress);
+  acc.drainPromise = batchAccumulator.drain();
   return acc;
+}
+
+/**
+ * Attach a progress callback to a `BatchPersistAccumulator` that drives a
+ * CLI bar showing how many queued FlushBatches still need to commit. Emits
+ * one initial event so the user sees the bar appear immediately even when
+ * the first batch takes seconds to flush, then ticks per batch as the drain
+ * loop completes them.
+ */
+/** @internal exported for tests; do not import from product code. */
+export function attachPass1DrainProgress(
+  batchAccumulator: BatchPersistAccumulator,
+  onProgress: ((progress: IndexProgress) => void) | undefined,
+): void {
+  if (!onProgress) return;
+  // Seed the work-to-flush from the queue at handoff. Producers that overlap
+  // with drain (e.g. the Rust pipeline parsing the next chunk while pass-1
+  // is finalising) can enqueue more snapshots after this point, so we track
+  // the high-water mark of `remaining` as the running total. The bar moves
+  // forward monotonically: `flushed = highWater - remaining`.
+  const initialQueue = batchAccumulator.queueDepth;
+  const hasResidual = batchAccumulator.pending > 0;
+  let highWater = initialQueue + (hasResidual ? 1 : 0);
+  if (highWater === 0) {
+    return;
+  }
+  // Initial tick: 0 / total — gives the CLI a bar to render while the first
+  // batch commits.
+  onProgress({
+    stage: "finalizing",
+    current: 0,
+    total: 0,
+    substage: "pass1Drain",
+    stageCurrent: 0,
+    stageTotal: highWater,
+  });
+  batchAccumulator.setProgressCallback((state) => {
+    const remaining = state.queueDepth + (state.pending > 0 ? 1 : 0);
+    if (remaining > highWater) highWater = remaining;
+    const flushed = Math.max(0, highWater - remaining);
+    onProgress({
+      stage: "finalizing",
+      current: 0,
+      total: 0,
+      substage: "pass1Drain",
+      stageCurrent: Math.min(flushed, highWater),
+      stageTotal: highWater,
+    });
+  });
 }

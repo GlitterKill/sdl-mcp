@@ -50,9 +50,10 @@ import type { ExistingEdge, ScipEdgeDescriptor } from "./edge-builder.js";
 import { createExternalSymbol } from "./external-symbols.js";
 import type { ExternalSymbolRow } from "./external-symbols.js";
 import { isExternalSymbol } from "./kind-mapping.js";
-import { buildSymbolMatchMap } from "./symbol-matcher.js";
+import { buildSymbolMatchMap, SCIP_ROLE_DEFINITION } from "./symbol-matcher.js";
 import type {
   ScipDecoder,
+  ScipFileCoverage,
   ScipIngestRequest,
   ScipIngestResponse,
 } from "./types.js";
@@ -118,6 +119,7 @@ function zeroCounts(): Omit<
     unresolvedOccurrences: 0,
     skippedSymbols: 0,
     truncated: false,
+    perFileCoverage: [],
   };
 }
 
@@ -328,6 +330,11 @@ export async function ingestScipIndex(
     let edgesUpgraded = 0;
     let edgesReplaced = 0;
     let unresolvedOccurrences = 0;
+    // Per-document coverage for the pass-2 file-skip optimisation. Each entry
+    // captures total / matched / unresolved CALLABLE REFERENCE occurrences
+    // (definitions excluded — pass-2 only resolves calls and imports). The
+    // pass-2 dispatcher reads this set later to skip files SCIP fully covered.
+    const perFileCoverage: ScipFileCoverage[] = [];
 
     // Fire an initial zero-progress tick so the CLI can render the documents
     // phase indicator immediately, even before the first document arrives
@@ -492,22 +499,41 @@ export async function ingestScipIndex(
       }
 
       // Track unresolved from this document. We count distinct symbols per
-      // document, not raw occurrences, so a single unresolved function with N
-      // call sites contributes 1 rather than N. Previously the counter could
-      // be inflated by an order of magnitude and mislead operators using it
-      // to gauge match quality.
+      // document for `unresolvedOccurrences` (so a single unresolved function
+      // with N call sites contributes 1 rather than N — preserves prior
+      // operator-facing semantics) BUT also produce a per-document coverage
+      // row that counts CALLABLE REFERENCE OCCURRENCES (per-occurrence, not
+      // per-unique-symbol). The latter feeds the pass-2 file-skip optimisation
+      // — pass-2 resolves per call site, so its skip predicate must reason
+      // per occurrence. Definitions are excluded since they are not "calls
+      // to resolve"; empty / local-prefixed symbols are excluded since they
+      // never produce cross-file edges.
       const matchedScipSymbols = new Set(scipSymbolToId.keys());
       const unresolvedInDoc = new Set<string>();
+      let docTotalRefs = 0;
+      let docMatchedRefs = 0;
+      let docUnresolvedRefs = 0;
       for (const occ of doc.occurrences) {
+        if (occ.symbolRoles & SCIP_ROLE_DEFINITION) continue;
         if (occ.symbol === "" || occ.symbol.startsWith("local ")) continue;
+        docTotalRefs++;
         if (
-          !matchedScipSymbols.has(occ.symbol) &&
-          !isExternalSymbol(occ.symbol, metadata.projectRoot)
+          matchedScipSymbols.has(occ.symbol) ||
+          isExternalSymbol(occ.symbol, metadata.projectRoot)
         ) {
+          docMatchedRefs++;
+        } else {
+          docUnresolvedRefs++;
           unresolvedInDoc.add(occ.symbol);
         }
       }
       unresolvedOccurrences += unresolvedInDoc.size;
+      perFileCoverage.push({
+        relPath,
+        total: docTotalRefs,
+        matched: docMatchedRefs,
+        unresolved: docUnresolvedRefs,
+      });
 
       // Log + emit progress every 50 documents. We don't know the total
       // upfront with the streaming decoder, so progress is reported as a
@@ -606,6 +632,7 @@ export async function ingestScipIndex(
       skippedSymbols,
       truncated: truncatedExternals,
       durationMs,
+      perFileCoverage,
     };
   } catch (err) {
     // Re-throw known error types
@@ -754,4 +781,153 @@ export async function autoIngestScipIndexes(
     config.indexes.map((entry) => limiter.run(() => processEntry(entry))),
   );
   return settled.filter((r): r is ScipIngestResponse => r !== null);
+}
+
+/**
+ * Synchronous predicate used by `indexRepoImpl` to decide whether SCIP will
+ * actually do work this run. Mirrors the short-circuit conditions in
+ * `runScipIngestInsideIndex` so the indexer can preserve its full-mode
+ * pass1-drain ↔ pass2 overlap when SCIP is not configured.
+ *
+ * Cheap (config inspection only) — no DB / fs touch. Safe to call repeatedly.
+ */
+export function scipIngestWillRun(config: { scip?: ScipConfig }): boolean {
+  const scip = config.scip;
+  if (!scip || !scip.enabled || !scip.autoIngestOnRefresh) return false;
+  if ((scip.indexes?.length ?? 0) === 0) return false;
+  return true;
+}
+
+/**
+ * Run SCIP auto-ingest from inside `indexRepoImpl`. Centralises the skip
+ * decision so the indexer doesn't have to re-implement it. Wraps
+ * `autoIngestScipIndexes`, translates its progress events into the indexer's
+ * `IndexProgress` shape, and never throws — SCIP failure must never block a
+ * refresh, matching the historical "non-fatal" CLI/MCP contract.
+ *
+ * Coordination notes (vs the old CLI/MCP post-refresh wrappers):
+ *   - No `withRepoWriteHeavyLock` / `waitForDerivedRefreshIdle` /
+ *     `flushStaleFinalizers`. The caller already holds the per-repo
+ *     `indexLocks` mutex, the post-index session has not opened yet, and
+ *     no derived-refresh has been enqueued — so none of those guards are
+ *     load-bearing at this earlier point.
+ *
+ * @returns Per-index results plus `fullyCoveredPaths` — the union of
+ *          (relPath) entries across all ingested indexes where SCIP resolved
+ *          every callable reference occurrence (`total > 0 && unresolved === 0`).
+ *          The pass-2 dispatcher uses this set to skip resolver work on
+ *          fully-covered files. Empty set on any short-circuit / failure so
+ *          pass-2 falls back to running on every file.
+ */
+export interface ScipIngestInsideIndexResult {
+  results: ScipIngestResponse[];
+  fullyCoveredPaths: ReadonlySet<string>;
+}
+
+/**
+ * Build the conservative "fully covered" set from per-document coverage rows.
+ *
+ * Predicate: `total > 0 && matched === total && unresolved === 0`. The
+ * `total > 0` clause is non-negotiable — zero callable reference occurrences
+ * means SCIP has no positive signal that it analysed the file's call sites,
+ * and pass-2 may find calls SCIP missed entirely (dynamic dispatch, files
+ * the language scraper failed silently on, etc.).
+ *
+ * Multi-index aggregation: union across `.scip` indexes. Each language's
+ * scraper covers files in its own language; cross-language overlap on the
+ * same `relPath` is rare. If a file appears in any index with full coverage,
+ * it qualifies for the skip set.
+ */
+function buildFullyCoveredPathSet(
+  results: readonly ScipIngestResponse[],
+): Set<string> {
+  const covered = new Set<string>();
+  for (const result of results) {
+    for (const row of result.perFileCoverage) {
+      if (row.total > 0 && row.unresolved === 0 && row.matched === row.total) {
+        covered.add(row.relPath);
+      }
+    }
+  }
+  return covered;
+}
+
+export async function runScipIngestInsideIndex(params: {
+  repoId: string;
+  repoRoot: string;
+  config: { scip?: ScipConfig };
+  onProgress?: (progress: {
+    stage: "scipIngest";
+    current: number;
+    total: number;
+    currentFile?: string;
+    message?: string;
+  }) => void;
+}): Promise<ScipIngestInsideIndexResult> {
+  const { repoId, repoRoot, config, onProgress } = params;
+  const scip = config.scip;
+  const empty: ScipIngestInsideIndexResult = {
+    results: [],
+    fullyCoveredPaths: new Set(),
+  };
+
+  if (!scipIngestWillRun({ scip })) {
+    logger.debug(
+      "SCIP ingest skipped (not configured / disabled / no indexes)",
+      {
+        repoId,
+        enabled: scip?.enabled,
+        autoIngestOnRefresh: scip?.autoIngestOnRefresh,
+        indexCount: scip?.indexes?.length ?? 0,
+      },
+    );
+    return empty;
+  }
+
+  // Adapt SCIP's per-index progress into the indexer's progress shape.
+  // The externals phase has a known total (% bar). The documents phase has
+  // no upfront total, so we surface the running counter through `message`.
+  const adapter = onProgress
+    ? (e: AutoIngestProgressEvent): void => {
+        if (e.event.phase === "externals") {
+          onProgress({
+            stage: "scipIngest",
+            current: e.event.current,
+            total: e.event.total,
+            message: `[${e.indexLabel}] externals`,
+          });
+        } else {
+          onProgress({
+            stage: "scipIngest",
+            current: e.event.current,
+            total: 0,
+            message: `[${e.indexLabel}] documents — matched=${e.event.matched} edges=${e.event.edges}`,
+          });
+        }
+      }
+    : undefined;
+
+  try {
+    const results = await autoIngestScipIndexes(
+      repoId,
+      scip!,
+      repoRoot,
+      adapter,
+    );
+    const fullyCoveredPaths = buildFullyCoveredPathSet(results);
+    if (fullyCoveredPaths.size > 0) {
+      logger.info("SCIP fully covered", {
+        repoId,
+        fullyCoveredFiles: fullyCoveredPaths.size,
+        indexCount: results.length,
+      });
+    }
+    return { results, fullyCoveredPaths };
+  } catch (err) {
+    logger.warn("SCIP auto-ingest failed (non-fatal)", {
+      repoId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return empty;
+  }
 }

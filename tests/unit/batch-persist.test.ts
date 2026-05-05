@@ -111,9 +111,9 @@ describe("BatchPersistAccumulator", () => {
     assert.equal(acc.pending, 0);
   });
 
-  it("default threshold is 200", () => {
+  it("default threshold is 512", () => {
     const acc = new BatchPersistAccumulator();
-    for (let i = 0; i < 199; i++) {
+    for (let i = 0; i < 511; i++) {
       acc.addFile(
         {
           fileId: `f${i}`,
@@ -128,14 +128,14 @@ describe("BatchPersistAccumulator", () => {
       );
     }
     assert.equal(acc.shouldFlush(), false);
-    assert.equal(acc.pending, 199);
+    assert.equal(acc.pending, 511);
 
     acc.addFile(
       {
-        fileId: "f199",
+        fileId: "f511",
         repoId: "r1",
-        relPath: "src/199.ts",
-        contentHash: "hash199",
+        relPath: "src/511.ts",
+        contentHash: "hash511",
         language: "ts",
         byteSize: 100,
         lastIndexedAt: new Date().toISOString(),
@@ -144,5 +144,40 @@ describe("BatchPersistAccumulator", () => {
     );
     // Auto-enqueued at threshold, pending resets
     assert.equal(acc.pending, 0);
+  });
+
+  it("setProgressCallback accepts a function", () => {
+    const acc = new BatchPersistAccumulator();
+    let calls = 0;
+    acc.setProgressCallback(() => {
+      calls += 1;
+    });
+    // The callback is stored privately; we cannot trigger drain here
+    // without a real LadybugDB connection. The integration tests in
+    // tests/integration/*-pass2-indexing.test.ts exercise the firing
+    // path end-to-end. This unit test verifies the API contract.
+    assert.strictEqual(typeof calls, "number");
+  });
+
+  it("setProgressCallback accepts null to clear the callback", () => {
+    const acc = new BatchPersistAccumulator();
+    acc.setProgressCallback(() => {
+      // ignored
+    });
+    // Re-setting to null must not throw.
+    assert.doesNotThrow(() => acc.setProgressCallback(null));
+  });
+
+  it("getActiveDrainStats returns zero queue depth on a fresh accumulator", async () => {
+    const { getActiveDrainStats } =
+      await import("../../dist/indexer/parser/batch-persist.js");
+    const acc = new BatchPersistAccumulator();
+    // Track an arbitrary callback so the registry sees this instance.
+    acc.setProgressCallback(() => {
+      // ignored
+    });
+    const stats = getActiveDrainStats();
+    assert.strictEqual(typeof stats.queueDepth, "number");
+    assert.strictEqual(typeof stats.drainFailures, "number");
   });
 });

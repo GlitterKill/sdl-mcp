@@ -8,6 +8,7 @@ import {
   resolveTokenizerPath,
   resolveModelDir,
   isModelAvailable,
+  resolveVariant,
 } from "../../dist/indexer/model-registry.js";
 
 test("getModelInfo returns Jina metadata", () => {
@@ -16,7 +17,13 @@ test("getModelInfo returns Jina metadata", () => {
   assert.strictEqual(info.dimension, 768);
   assert.strictEqual(info.maxSequenceLength, 8192);
   assert.strictEqual(info.bundled, false);
-  assert.strictEqual(info.modelFile, "model_quantized.onnx");
+  assert.strictEqual(info.defaultVariant, "default");
+  assert.ok(info.variants.default, "default variant must be present");
+  assert.strictEqual(
+    info.variants.default.modelFile,
+    "model_quantized.onnx",
+    "default variant should map to the int8-quantized file",
+  );
   assert.strictEqual(info.tokenizerFile, "tokenizer.json");
 });
 
@@ -26,10 +33,80 @@ test("getModelInfo returns nomic metadata", () => {
   assert.strictEqual(info.dimension, 768);
   assert.strictEqual(info.maxSequenceLength, 8192);
   assert.strictEqual(info.bundled, false);
-  assert.ok(info.downloadUrls, "nomic should have downloadUrls");
+  assert.ok(info.downloadUrls, "nomic should have shared downloadUrls");
   assert.ok(
-    info.downloadUrls.model.includes("huggingface.co"),
-    "download URL should point to HuggingFace",
+    info.downloadUrls.tokenizer.includes("huggingface.co"),
+    "tokenizer URL should point to HuggingFace",
+  );
+  assert.ok(
+    info.variants.default.downloadUrl.includes("huggingface.co"),
+    "default variant URL should point to HuggingFace",
+  );
+});
+
+test("Jina exposes default, int8, fp16, fp32 variants", () => {
+  const info = getModelInfo("jina-embeddings-v2-base-code");
+  for (const name of ["default", "int8", "fp16", "fp32"]) {
+    assert.ok(info.variants[name], `Jina should expose ${name} variant`);
+    assert.ok(
+      info.variants[name].modelFile.endsWith(".onnx"),
+      `${name} variant must have an .onnx modelFile`,
+    );
+  }
+});
+
+test("nomic exposes the full variant set", () => {
+  const info = getModelInfo("nomic-embed-text-v1.5");
+  for (const name of [
+    "default",
+    "int8",
+    "uint8",
+    "q4",
+    "q4f16",
+    "bnb4",
+    "fp16",
+    "fp32",
+  ]) {
+    assert.ok(info.variants[name], `nomic should expose ${name} variant`);
+  }
+});
+
+test("resolveVariant returns requested variant when supported", () => {
+  const { variantName, variant } = resolveVariant(
+    "nomic-embed-text-v1.5",
+    "fp16",
+  );
+  assert.strictEqual(variantName, "fp16");
+  assert.strictEqual(variant.modelFile, "model_fp16.onnx");
+});
+
+test("resolveVariant falls back to default for unsupported variant", () => {
+  const { variantName } = resolveVariant(
+    "jina-embeddings-v2-base-code",
+    "q4f16",
+  );
+  // jina does not publish q4f16 — fallback to default.
+  assert.strictEqual(
+    variantName,
+    "jina-embeddings-v2-base-code".length === 0 ? "default" : "default",
+  );
+});
+
+test("resolveVariant returns default when requested is undefined", () => {
+  const { variantName } = resolveVariant("jina-embeddings-v2-base-code");
+  assert.strictEqual(variantName, "default");
+});
+
+test("resolveModelPath returns variant-specific file", () => {
+  const fp16Path = resolveModelPath("nomic-embed-text-v1.5", "fp16");
+  assert.ok(
+    fp16Path.endsWith("model_fp16.onnx"),
+    `fp16 path should end with model_fp16.onnx: ${fp16Path}`,
+  );
+  const defaultPath = resolveModelPath("nomic-embed-text-v1.5");
+  assert.ok(
+    defaultPath.endsWith("model_quantized.onnx"),
+    `default path should end with model_quantized.onnx: ${defaultPath}`,
   );
 });
 

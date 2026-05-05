@@ -175,6 +175,32 @@ export async function createVectorIndex(
  * insert/delete cost per row, then recreate the index in one rebuild
  * pass at the end.
  */
+/**
+ * Recognise LadybugDB's catalog-miss phrasings emitted by `DROP_VECTOR_INDEX`
+ * (and equivalents) when the named index isn't registered on the table.
+ * The binder verifies the catalog BEFORE issuing the DROP, so any of these
+ * forms is authoritative for "this index does not exist on this table at
+ * this moment":
+ *
+ *   - "Binder exception: Table <T> doesn't have an index with name <N>."
+ *     (fresh DB, deferred indexes)
+ *   - "... does not exist."  (older / generic phrasing)
+ *   - "no such (vector|fts) index ..."  (variant phrasings)
+ *
+ * The regex stays specific to these binder catalog errors — a broader
+ * pattern like "not found" would risk misreading an unrelated failure
+ * and stranding callers on the index-dropped fast path while a live
+ * HNSW index still rejects vec writes.
+ *
+ * Exported primarily for unit testing; product callers go through
+ * `dropVectorIndex` instead.
+ */
+export function isAbsentIndexError(msg: string): boolean {
+  return /does not exist|doesn't have an index with name|no such (vector |fts )?index/i.test(
+    msg,
+  );
+}
+
 export async function dropVectorIndex(
   conn: Connection,
   tableName: string,
@@ -192,34 +218,26 @@ export async function dropVectorIndex(
     return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    // Conservative swallow: only treat the specific "does not exist" phrase
-    // as success, AND verify via showIndexes that the index is genuinely
-    // absent. A broader regex (e.g. "not found") risks misreading an
-    // unrelated error — callers would then take the index-dropped fast
-    // path while the live HNSW index still rejects vec writes, aborting
-    // the whole bulk pass.
-    if (/does not exist/i.test(msg)) {
+    if (isAbsentIndexError(msg)) {
+      // Belt-and-suspenders: cross-check via SHOW_INDEXES. The binder error
+      // is authoritative on its own, but if SHOW_INDEXES happens to be
+      // available it lets us catch a hypothetical race where the index was
+      // re-created between the failed DROP and this check. SHOW_INDEXES
+      // returning [] (fresh DB or silent driver failure) is consistent with
+      // the binder's catalog verdict and is treated as confirmation.
       try {
         const indexes = await showIndexes(conn);
-        // Only trust the verification when SHOW_INDEXES actually answered.
-        // showIndexes() swallows its own errors and returns [] on failure,
-        // which is indistinguishable from a fresh DB with zero indexes —
-        // so an empty result must be treated as "could not verify" rather
-        // than "confirmed absent". Requiring at least one row guarantees
-        // SHOW_INDEXES was truly executed.
-        if (indexes.length > 0) {
-          const stillPresent = indexes.some(
-            (i) => i.name === indexName && i.type === "vector",
+        const stillPresent = indexes.some(
+          (i) => i.name === indexName && i.type === "vector",
+        );
+        if (!stillPresent) {
+          logger.debug(
+            `[index-lifecycle] Vector index '${indexName}' on ${tableName} already absent`,
           );
-          if (!stillPresent) {
-            logger.debug(
-              `[index-lifecycle] Vector index '${indexName}' on ${tableName} already absent`,
-            );
-            return true;
-          }
+          return true;
         }
       } catch {
-        // showIndexes throw — fall through to warn+return false.
+        // showIndexes threw — fall through to warn+return false.
       }
     }
     logger.warn(

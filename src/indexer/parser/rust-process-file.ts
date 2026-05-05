@@ -27,6 +27,7 @@ import {
 } from "./symbol-mapping.js";
 import type { ProcessFileResult, SymbolDetail } from "./types.js";
 import type { BatchPersistAccumulator } from "./batch-persist.js";
+import type { Pass1ExtractionCache } from "../pass2/types.js";
 
 /**
  * Process a file using pre-parsed results from the Rust native engine.
@@ -58,6 +59,7 @@ export async function processFileFromRustResult(params: {
   globalPreferredSymbolId?: Map<string, string>;
   supportsPass2FilePath?: (relPath: string) => boolean;
   batchAccumulator?: BatchPersistAccumulator;
+  pass1Extractions?: Pass1ExtractionCache;
 }): Promise<ProcessFileResult> {
   const {
     repoId,
@@ -189,9 +191,36 @@ export async function processFileFromRustResult(params: {
       }
     }
 
+    // C1: cache pass-1's extraction outputs so the TS pass-2 resolver can
+    // skip a redundant tree-sitter parse + three `extract*` calls. Mirrors
+    // the JS-engine path in process-file.ts; only TS-resolvable files are
+    // captured because non-TS resolvers consume the live tree handle.
+    if (
+      params.pass1Extractions &&
+      isTsCallResolutionFile(fileMeta.path) &&
+      skipCallResolution
+    ) {
+      params.pass1Extractions.set(relPath, {
+        symbolsWithNodeIds: rustResult.symbols.map((extracted) => ({
+          nodeId: extracted.nodeId,
+          kind: extracted.kind as import("./types.js").SymbolKindLiteral,
+          name: extracted.name,
+          exported: extracted.exported,
+          range: extracted.range,
+          signature: extracted.signature,
+          visibility: extracted.visibility,
+        })),
+        imports: rustResult.imports,
+        calls: rustResult.calls,
+        content,
+      });
+    }
+
     // ── Phase 4: Load existing symbols ───────────────────────────
-    const { existingSymbols, existingSymbolsById } =
-      await loadExistingSymbols(conn, existingFile);
+    const { existingSymbols, existingSymbolsById } = await loadExistingSymbols(
+      conn,
+      existingFile,
+    );
 
     // ── Phase 5: Pass2 hint paths ────────────────────────────────
     const pass2HintPaths = await computePass2HintPaths({

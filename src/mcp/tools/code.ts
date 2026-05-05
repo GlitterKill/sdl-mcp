@@ -402,6 +402,62 @@ export async function handleCodeNeedWindow(
   }
 
   if (policyDecision.decision === "downgrade-to-skeleton") {
+    // Issue #11: when the caller provided specific identifiers, the
+    // skeleton downgrade is byte-identical to a plain `code.getSkeleton`
+    // call and adds no value over the cheaper code.getSkeleton tool. Promote
+    // to a hot-path excerpt anchored on the requested identifiers — same
+    // policy outcome (still a downgrade), but the response surfaces
+    // identifier-anchored context the caller actually needs.
+    const wantsIdentifierAnchor =
+      Array.isArray(request.identifiersToFind) &&
+      request.identifiersToFind.length > 0;
+    if (wantsIdentifierAnchor) {
+      const hotpathResult = await extractHotPath(
+        request.repoId,
+        request.symbolId,
+        request.identifiersToFind,
+        { maxLines: request.expectedLines, maxTokens: request.maxTokens },
+      );
+      if (hotpathResult) {
+        logCodeWindowDecision({
+          symbolId: request.symbolId,
+          approved: true,
+          reason: [
+            "Policy approved (downgraded to hotpath; identifiers supplied)",
+            ...(policyDecision.deniedReasons ?? []),
+          ],
+        });
+        const hotpathTruncation = hotpathResult.truncated
+          ? {
+              truncated: true,
+              droppedCount: 0,
+              howToResume: {
+                type: "cursor" as const,
+                value: hotpathResult.actualRange.endLine,
+              },
+            }
+          : undefined;
+        const response: CodeNeedWindowResponse = {
+          approved: true,
+          symbolId: request.symbolId,
+          file: file.relPath,
+          range: hotpathResult.actualRange,
+          code: hotpathResult.excerpt,
+          whyApproved: [
+            "Policy approved (downgraded to hotpath; identifiers supplied)",
+          ],
+          estimatedTokens: hotpathResult.estimatedTokens,
+          downgradedFrom: "raw-code",
+          downgradeGuidance:
+            "Raw code was downgraded; identifiers in identifiersToFind anchored a hot-path excerpt. To get full code: (1) set policy.allowBreakGlass=true via sdl.policy.set, or (2) call sdl.code.getSkeleton for broader code structure.",
+          matchedIdentifiers: hotpathResult.matchedIdentifiers,
+          matchedLineNumbers: hotpathResult.matchedLineNumbers,
+          truncation: hotpathTruncation,
+        };
+        return attachRawContext(response, { fileIds: [symbol.fileId] });
+      }
+      // Hotpath failed — fall through to skeleton below.
+    }
     const skeletonResult = await generateSymbolSkeleton(
       request.repoId,
       request.symbolId,

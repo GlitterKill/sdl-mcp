@@ -86,6 +86,28 @@ export interface ScipIngestRequest {
   dryRun?: boolean;
 }
 
+/**
+ * Per-document coverage row emitted by the ingest pipeline so downstream
+ * consumers (e.g. pass-2 file-skip optimisation) can decide whether SCIP
+ * resolved every callable occurrence in a file. Counts are scoped to
+ * occurrences whose role is REFERENCE — definitions and metadata-only
+ * occurrences are excluded since they are not "calls to resolve".
+ *
+ * "Fully covered" is `total > 0 && matched === total && unresolved === 0`.
+ * Zero-of-zero is NEVER coverage (would silently skip files SCIP did not
+ * actually analyse).
+ */
+export interface ScipFileCoverage {
+  /** Repo-relative path that SDL stores in `File.relPath`. */
+  relPath: string;
+  /** Total callable reference occurrences extracted from the document. */
+  total: number;
+  /** Subset of `total` that bound to an existing SDL symbol or a SCIP-created external symbol. */
+  matched: number;
+  /** Subset of `total` that could not be resolved to any symbol. */
+  unresolved: number;
+}
+
 export interface ScipIngestResponse {
   status: "ingested" | "alreadyIngested" | "dryRun";
   decoderBackend: "rust" | "typescript";
@@ -100,6 +122,11 @@ export interface ScipIngestResponse {
   skippedSymbols: number;
   truncated: boolean;
   durationMs: number;
+  /**
+   * Per-document coverage rows. Empty for `status: "alreadyIngested"` or
+   * `dryRun` since neither produces fresh occurrence data.
+   */
+  perFileCoverage: ScipFileCoverage[];
 }
 
 export interface ScipIngestionRecord {

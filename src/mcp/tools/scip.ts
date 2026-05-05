@@ -35,6 +35,7 @@ export async function handleScipIngest(
       args: [],
       autoInstall: true,
       timeoutMs: 10 * 60 * 1000,
+      cleanupAfterIngest: true,
     },
   };
 

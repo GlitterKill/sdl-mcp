@@ -7,6 +7,7 @@ import * as ladybugDb from "../../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../../db/ladybug-queries.js";
 import type { SymbolKind } from "../../../domain/types.js";
 import { readFileAsync } from "../../../util/asyncFs.js";
+import { singleFlight } from "../../../util/concurrency.js";
 import { logger } from "../../../util/logger.js";
 import { normalizePath } from "../../../util/paths.js";
 import { getAdapterForExtension } from "../../adapter/registry.js";
@@ -224,16 +225,17 @@ function mapExtractedSymbolsToExisting(
   return filteredSymbolDetails;
 }
 
-async function clearOutgoingCallEdges(
-  conn: import("kuzu").Connection,
+/**
+ * In-memory cleanup of stale dedup keys for the symbols this file is about to
+ * re-resolve. The matching SQL DELETE is deferred to `submitEdgeWrite` so the
+ * dispatcher can combine deletes + inserts across an entire concurrency batch
+ * into a single `withWriteConn`.
+ */
+function clearLocalCallDedupKeys(
   symbolIds: string[],
   createdCallEdges: Set<string>,
-): Promise<void> {
-  if (symbolIds.length === 0) {
-    return;
-  }
-
-  await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(conn, symbolIds, "call");
+): void {
+  if (symbolIds.length === 0) return;
   for (const symbolId of symbolIds) {
     for (const edgeKey of Array.from(createdCallEdges)) {
       if (edgeKey.startsWith(`${symbolId}->`)) {
@@ -438,62 +440,56 @@ async function buildJavaPackageIndex(
   repoId: string,
   cache?: Map<string, unknown>,
 ): Promise<JavaPackageIndex> {
-  const cacheKey = `pass2-java:package-index:${repoId}`;
-  const cached = cache?.get(cacheKey);
-  if (cached) {
-    return cached as JavaPackageIndex;
-  }
+  return singleFlight(cache, `pass2-java:package-index:${repoId}`, async () => {
+    const conn = await getLadybugConn();
+    const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
+    const javaFiles = repoFiles.filter((file) => file.language === "java");
+    const javaFileIds = new Set(javaFiles.map((file) => file.fileId));
+    const fileById = new Map(javaFiles.map((file) => [file.fileId, file]));
+    const packageByFilePath = new Map<string, string>();
+    const symbolsByPackage = new Map<
+      string,
+      Array<SymbolRow & { relPath: string }>
+    >();
 
-  const conn = await getLadybugConn();
-  const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
-  const javaFiles = repoFiles.filter((file) => file.language === "java");
-  const javaFileIds = new Set(javaFiles.map((file) => file.fileId));
-  const fileById = new Map(javaFiles.map((file) => [file.fileId, file]));
-  const packageByFilePath = new Map<string, string>();
-  const symbolsByPackage = new Map<
-    string,
-    Array<SymbolRow & { relPath: string }>
-  >();
+    for (const file of javaFiles) {
+      packageByFilePath.set(file.relPath, normalizePath(dirname(file.relPath)));
+    }
 
-  for (const file of javaFiles) {
-    packageByFilePath.set(file.relPath, normalizePath(dirname(file.relPath)));
-  }
+    const repoSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
+    for (const symbol of repoSymbols) {
+      if (!javaFileIds.has(symbol.fileId) || symbol.kind !== "module") {
+        continue;
+      }
+      const file = fileById.get(symbol.fileId);
+      if (!file) {
+        continue;
+      }
+      packageByFilePath.set(file.relPath, symbol.name);
+    }
 
-  const repoSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
-  for (const symbol of repoSymbols) {
-    if (!javaFileIds.has(symbol.fileId) || symbol.kind !== "module") {
-      continue;
+    for (const symbol of repoSymbols) {
+      if (!javaFileIds.has(symbol.fileId)) {
+        continue;
+      }
+      const file = fileById.get(symbol.fileId);
+      if (!file) {
+        continue;
+      }
+      const packageName = packageByFilePath.get(file.relPath);
+      if (!packageName) {
+        continue;
+      }
+      const bucket = symbolsByPackage.get(packageName) ?? [];
+      bucket.push({
+        ...symbol,
+        relPath: file.relPath,
+      });
+      symbolsByPackage.set(packageName, bucket);
     }
-    const file = fileById.get(symbol.fileId);
-    if (!file) {
-      continue;
-    }
-    packageByFilePath.set(file.relPath, symbol.name);
-  }
 
-  for (const symbol of repoSymbols) {
-    if (!javaFileIds.has(symbol.fileId)) {
-      continue;
-    }
-    const file = fileById.get(symbol.fileId);
-    if (!file) {
-      continue;
-    }
-    const packageName = packageByFilePath.get(file.relPath);
-    if (!packageName) {
-      continue;
-    }
-    const bucket = symbolsByPackage.get(packageName) ?? [];
-    bucket.push({
-      ...symbol,
-      relPath: file.relPath,
-    });
-    symbolsByPackage.set(packageName, bucket);
-  }
-
-  const index = { packageByFilePath, symbolsByPackage };
-  cache?.set(cacheKey, index);
-  return index;
+    return { packageByFilePath, symbolsByPackage };
+  });
 }
 
 function buildSamePackageNameIndex(
@@ -1096,6 +1092,9 @@ async function resolveJavaCallEdgesPass2(params: {
   globalNameToSymbolIds?: Map<string, string[]>;
   telemetry?: Pass2ResolverContext["telemetry"];
   cache?: Map<string, unknown>;
+  mode?: "full" | "incremental";
+  submitEdgeWrite?: Pass2ResolverContext["submitEdgeWrite"];
+  importCache?: Pass2ResolverContext["importCache"];
 }): Promise<number> {
   const {
     repoId,
@@ -1105,6 +1104,9 @@ async function resolveJavaCallEdgesPass2(params: {
     globalNameToSymbolIds,
     telemetry,
     cache,
+    mode,
+    submitEdgeWrite,
+    importCache,
   } = params;
 
   const conn = await getLadybugConn();
@@ -1165,6 +1167,7 @@ async function resolveJavaCallEdgesPass2(params: {
   let filteredSymbolDetails: ReturnType<typeof mapExtractedSymbolsToExisting>;
   let nodeIdToSymbolId: ReturnType<typeof createNodeIdToSymbolId>;
   let callScope: ReturnType<typeof buildJavaCallScope>;
+  let symbolIdsToRefresh: string[] = [];
   try {
     fileRecord = await ladybugDb.getFileByRepoPath(conn, repoId, fileMeta.path);
     if (!fileRecord) {
@@ -1186,12 +1189,8 @@ async function resolveJavaCallEdgesPass2(params: {
       return 0;
     }
 
-    const symbolIdsToRefresh = filteredSymbolDetails.map(
-      (detail) => detail.symbolId,
-    );
-    await withWriteConn(async (wConn) => {
-      await clearOutgoingCallEdges(wConn, symbolIdsToRefresh, createdCallEdges);
-    });
+    symbolIdsToRefresh = filteredSymbolDetails.map((detail) => detail.symbolId);
+    clearLocalCallDedupKeys(symbolIdsToRefresh, createdCallEdges);
 
     nodeIdToSymbolId = createNodeIdToSymbolId(filteredSymbolDetails);
     callScope = buildJavaCallScope(treeRef, filteredSymbolDetails);
@@ -1206,6 +1205,7 @@ async function resolveJavaCallEdgesPass2(params: {
     [...adapter.fileExtensions],
     "java",
     content,
+    importCache,
   );
   const javaImportMaps = await resolveJavaImportMaps({
     conn,
@@ -1350,9 +1350,23 @@ async function resolveJavaCallEdgesPass2(params: {
     }
   }
 
-  await withWriteConn(async (wConn) => {
-    await ladybugDb.insertEdges(wConn, edgesToInsert);
-  });
+  if (submitEdgeWrite) {
+    await submitEdgeWrite({
+      symbolIdsToRefresh,
+      edges: edgesToInsert,
+    });
+  } else {
+    await withWriteConn(async (wConn) => {
+      if (mode !== "full" && symbolIdsToRefresh.length > 0) {
+        await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
+          wConn,
+          symbolIdsToRefresh,
+          "call",
+        );
+      }
+      await ladybugDb.insertEdges(wConn, edgesToInsert);
+    });
+  }
   return createdEdges;
 }
 
@@ -1386,6 +1400,9 @@ export class JavaPass2Resolver implements Pass2Resolver {
         globalNameToSymbolIds: context.globalNameToSymbolIds,
         telemetry: context.telemetry,
         cache: context.cache,
+        mode: context.mode,
+        submitEdgeWrite: context.submitEdgeWrite,
+        importCache: context.importCache,
       });
       return { edgesCreated };
     } catch (error) {

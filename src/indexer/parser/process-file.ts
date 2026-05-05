@@ -74,11 +74,33 @@ export async function processFile(
     if (parseResult.status === "skip") return parseResult.result;
     const { data: parsed } = parseResult;
 
+    // C1: cache pass-1's extraction outputs so the TS pass-2 resolver can
+    // skip a redundant tree-sitter parse + three `extract*` calls. Gated on
+    // `isTsCallResolutionFile` because non-TS resolvers consume the live
+    // tree handle for scope walkers and don't benefit from cached
+    // pure-JS extraction. The data deep-copies off the tree-sitter tree
+    // (extract* return plain JS objects keyed by string nodeId), so
+    // downstream `tree.delete()` calls don't invalidate the cached entries.
+    if (
+      params.pass1Extractions &&
+      isTsCallResolutionFile(fileMeta.path) &&
+      skipCallResolution
+    ) {
+      params.pass1Extractions.set(fileData.relPath, {
+        symbolsWithNodeIds: parsed.symbolsWithNodeIds,
+        imports: parsed.imports,
+        calls: parsed.calls,
+        content: fileData.content,
+      });
+    }
+
     const conn = await getLadybugConn();
 
     // ── Phase 4: Load existing symbols ───────────────────────────
-    const { existingSymbols, existingSymbolsById } =
-      await loadExistingSymbols(conn, existingFile);
+    const { existingSymbols, existingSymbolsById } = await loadExistingSymbols(
+      conn,
+      existingFile,
+    );
 
     // ── Phase 5: Pass2 hint paths ────────────────────────────────
     const pass2HintPaths = await computePass2HintPaths({
@@ -171,15 +193,18 @@ export async function processFile(
     const { batchAccumulator } = params;
 
     if (batchAccumulator) {
-      batchAccumulator.addFile({
-        fileId: fileData.fileId,
-        repoId,
-        relPath: fileData.relPath,
-        contentHash: fileData.contentHash,
-        language: adapter?.languageId ?? fileData.ext,
-        byteSize: fileMeta.size,
-        lastIndexedAt: new Date().toISOString(),
-      }, existingFile?.fileId ?? null);
+      batchAccumulator.addFile(
+        {
+          fileId: fileData.fileId,
+          repoId,
+          relPath: fileData.relPath,
+          contentHash: fileData.contentHash,
+          language: adapter?.languageId ?? fileData.ext,
+          byteSize: fileMeta.size,
+          lastIndexedAt: new Date().toISOString(),
+        },
+        existingFile?.fileId ?? null,
+      );
       if (symbolReferences.length > 0) {
         batchAccumulator.addSymbolReferences(symbolReferences);
       }

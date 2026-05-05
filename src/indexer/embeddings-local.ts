@@ -7,6 +7,8 @@
  *
  * Falls back gracefully when onnxruntime-node or tokenizers packages are unavailable.
  */
+import { availableParallelism } from "node:os";
+import { loadConfig } from "../config/loadConfig.js";
 import { logger } from "../util/logger.js";
 import {
   getModelInfo,
@@ -48,7 +50,14 @@ interface OrtModule {
   InferenceSession: {
     create(
       path: string,
-      options?: { executionProviders?: string[] },
+      options?: {
+        executionProviders?: string[];
+        intraOpNumThreads?: number;
+        interOpNumThreads?: number;
+        executionMode?: "sequential" | "parallel";
+        graphOptimizationLevel?: "disabled" | "basic" | "extended" | "all";
+        logSeverityLevel?: 0 | 1 | 2 | 3 | 4;
+      },
     ): Promise<OrtSession>;
   };
   Tensor: new (
@@ -112,6 +121,9 @@ export async function ensureLocalEmbeddingRuntime(): Promise<LocalEmbeddingRunti
 /** Reset cached runtime state (for testing) */
 export function resetLocalEmbeddingRuntime(): void {
   cachedRuntime = null;
+  for (const sessionPromise of sessionCache.values()) {
+    sessionPromise.then((s) => s.dispose()).catch(() => {});
+  }
   sessionCache.clear();
 }
 
@@ -150,6 +162,83 @@ export async function createOnnxSession(
   }
 }
 
+/**
+ * Per-platform allow-list of execution providers shipped with the default
+ * `onnxruntime-node` npm package (no separate build required):
+ *
+ *   - Windows x64: `cpu`, `dml` (DirectML — any DX12 GPU: NVIDIA, AMD
+ *     Radeon, Intel Arc, integrated GPUs), `webgpu`.
+ *   - macOS x64 / arm64: `cpu`, `coreml` (Apple Silicon ANE/GPU + Intel
+ *     Mac GPU).
+ *   - Linux x64: `cpu`, `cuda`, `tensorrt`. CUDA EP requires NVIDIA GPU
+ *     plus CUDA 12 driver + cuDNN installed on the host system; the
+ *     binaries ship in the package but won't initialise without the
+ *     runtime libraries.
+ *   - Linux arm64: `cpu` only.
+ *
+ * Out of scope (require building ORT from source or vendor-specific
+ * forks): ROCm (AMD on Linux), OpenVINO (Intel CPU/GPU/NPU), QNN
+ * (Qualcomm), MIGraphX. Users wanting these can swap `onnxruntime-node`
+ * for a custom build at the package level — sdl-mcp will pick up the
+ * additional providers automatically since this filter only drops
+ * KNOWN-bad entries on each platform.
+ */
+/** @internal exported for tests; do not consume from product code. */
+export function platformAllowedProviders(): readonly string[] {
+  if (process.platform === "win32") {
+    return ["cpu", "dml", "webgpu"];
+  }
+  if (process.platform === "darwin") {
+    return ["cpu", "coreml"];
+  }
+  if (process.platform === "linux" && process.arch === "x64") {
+    return ["cpu", "cuda", "tensorrt"];
+  }
+  // Linux arm64, freebsd, etc. — CPU only in the default package.
+  return ["cpu"];
+}
+
+/**
+ * Resolve the user's requested execution-provider list against the
+ * platform's bundled providers. Drops unsupported entries with a one-time
+ * warning, and appends `"cpu"` as the final fallback so session creation
+ * always has at least one viable provider.
+ */
+/**
+ * @internal exported for tests. Resolves the user's requested execution-
+ * provider list against the platform's bundled providers. Drops
+ * unsupported entries with a one-time warning, and appends `"cpu"` as
+ * the final fallback so session creation always has at least one viable
+ * provider.
+ *
+ * The optional `platformOverride` parameter lets tests simulate
+ * different platforms without spawning a child process. Production
+ * callers always omit it.
+ */
+export function resolveExecutionProviders(
+  requested: readonly string[] | undefined,
+  platformOverride?: readonly string[],
+): string[] {
+  const allowed = new Set(platformOverride ?? platformAllowedProviders());
+  const result: string[] = [];
+  const dropped: string[] = [];
+  for (const provider of requested ?? ["cpu"]) {
+    const normalised = provider.toLowerCase();
+    if (allowed.has(normalised)) {
+      if (!result.includes(normalised)) result.push(normalised);
+    } else if (!dropped.includes(normalised)) {
+      dropped.push(normalised);
+    }
+  }
+  if (dropped.length > 0) {
+    logger.warn(
+      `[embeddings-local] Dropping unsupported execution providers on ${process.platform}: [${dropped.join(", ")}]. Bundled providers: [${[...allowed].join(", ")}]. Install a separate onnxruntime-node build for CUDA / ROCm / TensorRT.`,
+    );
+  }
+  if (!result.includes("cpu")) result.push("cpu");
+  return result;
+}
+
 async function createOnnxSessionInternal(
   modelName: string,
 ): Promise<OnnxEmbeddingSession> {
@@ -159,15 +248,18 @@ async function createOnnxSessionInternal(
   }
 
   const modelInfo = getModelInfo(modelName);
+  const appConfig = loadConfig();
+  const onnxConfig = appConfig.semantic?.onnx;
+  const requestedVariant = appConfig.semantic?.modelVariant;
 
   // Ensure model files are available (downloads if needed for non-bundled models)
-  await ensureModelAvailable(modelName);
+  await ensureModelAvailable(modelName, requestedVariant);
 
-  const modelPath = resolveModelPath(modelName);
+  const modelPath = resolveModelPath(modelName, requestedVariant);
   const tokenizerPath = resolveTokenizerPath(modelName);
 
   logger.info(
-    `Loading ONNX model "${modelName}" (${modelInfo.dimension}-dim)...`,
+    `Loading ONNX model "${modelName}" (${modelInfo.dimension}-dim, variant="${requestedVariant ?? modelInfo.defaultVariant}")...`,
   );
 
   // Dynamic imports — these are optional dependencies
@@ -180,8 +272,39 @@ async function createOnnxSessionInternal(
     Tokenizer: { fromFile(path: string): HfTokenizer };
   };
 
+  // Resolve ORT thread-pool sizing from semantic.onnx config. Default 0
+  // (== "auto") resolves to the visible logical-thread count via
+  // `os.availableParallelism()`. ORT's own default is physical cores, which
+  // leaves SMT lanes idle; on the AMD 9000 X3D series this halves further
+  // because the Provider Driver pins single-process workloads to one CCD.
+  const autoThreads = availableParallelism();
+  const intraOpNumThreads =
+    onnxConfig?.intraOpNumThreads && onnxConfig.intraOpNumThreads > 0
+      ? onnxConfig.intraOpNumThreads
+      : autoThreads;
+  const interOpNumThreads =
+    onnxConfig?.interOpNumThreads && onnxConfig.interOpNumThreads > 0
+      ? onnxConfig.interOpNumThreads
+      : 1;
+  const executionMode = onnxConfig?.executionMode ?? "sequential";
+
+  // Resolve execution providers: filter user list against the platform's
+  // bundled `onnxruntime-node` build, append `"cpu"` as final fallback so
+  // a missing GPU provider can never strand session creation.
+  const executionProviders = resolveExecutionProviders(
+    appConfig.semantic?.executionProviders,
+  );
+
+  logger.info(
+    `ONNX session "${modelName}" thread config: intra=${intraOpNumThreads}, inter=${interOpNumThreads}, mode=${executionMode}, providers=[${executionProviders.join(", ")}]`,
+  );
+
   const session = await ort.InferenceSession.create(modelPath, {
-    executionProviders: ["cpu"],
+    executionProviders,
+    intraOpNumThreads,
+    interOpNumThreads,
+    executionMode,
+    logSeverityLevel: 3,
   });
 
   // Tokenizer.fromFile() is synchronous (napi-rs binding)

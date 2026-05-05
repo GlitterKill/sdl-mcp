@@ -143,38 +143,86 @@ export async function deleteRepo(
       { repoId },
     );
     // Clean up Version nodes and their edges
-    await exec(txConn, `MATCH (v:Version)-[e:VERSION_OF_REPO]->(r:Repo {repoId: $repoId}) DELETE e, v`, { repoId });
+    await exec(
+      txConn,
+      `MATCH (v:Version)-[e:VERSION_OF_REPO]->(r:Repo {repoId: $repoId}) DELETE e, v`,
+      { repoId },
+    );
 
     // Clean up orphaned SymbolVersion nodes for the deleted versions
     const versionIds = versionRows.map((r) => r.versionId);
     if (versionIds.length > 0) {
-      await exec(txConn, `MATCH (sv:SymbolVersion) WHERE sv.versionId IN $versionIds DELETE sv`, { versionIds });
+      await exec(
+        txConn,
+        `MATCH (sv:SymbolVersion) WHERE sv.versionId IN $versionIds DELETE sv`,
+        { versionIds },
+      );
     }
 
     // Clean up Cluster nodes (delete all edge types before nodes)
-    await exec(txConn, `MATCH (c:Cluster {repoId: $repoId})<-[e:BELONGS_TO_CLUSTER]-() DELETE e`, { repoId });
-    await exec(txConn, `MATCH (c:Cluster {repoId: $repoId})-[e:CLUSTER_IN_REPO]->() DELETE e`, { repoId });
-    await exec(txConn, `MATCH (c:Cluster {repoId: $repoId}) DELETE c`, { repoId });
+    await exec(
+      txConn,
+      `MATCH (c:Cluster {repoId: $repoId})<-[e:BELONGS_TO_CLUSTER]-() DELETE e`,
+      { repoId },
+    );
+    await exec(
+      txConn,
+      `MATCH (c:Cluster {repoId: $repoId})-[e:CLUSTER_IN_REPO]->() DELETE e`,
+      { repoId },
+    );
+    await exec(txConn, `MATCH (c:Cluster {repoId: $repoId}) DELETE c`, {
+      repoId,
+    });
 
     // Clean up Process nodes (delete all edge types before nodes)
-    await exec(txConn, `MATCH (p:Process {repoId: $repoId})<-[e:PARTICIPATES_IN]-() DELETE e`, { repoId });
-    await exec(txConn, `MATCH (p:Process {repoId: $repoId})-[e:PROCESS_IN_REPO]->() DELETE e`, { repoId });
-    await exec(txConn, `MATCH (p:Process {repoId: $repoId}) DELETE p`, { repoId });
+    await exec(
+      txConn,
+      `MATCH (p:Process {repoId: $repoId})<-[e:PARTICIPATES_IN]-() DELETE e`,
+      { repoId },
+    );
+    await exec(
+      txConn,
+      `MATCH (p:Process {repoId: $repoId})-[e:PROCESS_IN_REPO]->() DELETE e`,
+      { repoId },
+    );
+    await exec(txConn, `MATCH (p:Process {repoId: $repoId}) DELETE p`, {
+      repoId,
+    });
 
     // Clean up SliceHandle nodes
-    await exec(txConn, `MATCH (h:SliceHandle {repoId: $repoId}) DELETE h`, { repoId });
+    await exec(txConn, `MATCH (h:SliceHandle {repoId: $repoId}) DELETE h`, {
+      repoId,
+    });
 
     // Clean up Memory nodes and their edges
-    await exec(txConn, `MATCH (r:Repo {repoId: $repoId})-[e:HAS_MEMORY]->(m:Memory) DELETE e`, { repoId });
-    await exec(txConn, `MATCH (m:Memory)-[e:MEMORY_OF]->() WHERE m.repoId = $repoId DELETE e`, { repoId });
-    await exec(txConn, `MATCH (m:Memory)-[e:MEMORY_OF_FILE]->() WHERE m.repoId = $repoId DELETE e`, { repoId });
-    await exec(txConn, `MATCH (m:Memory {repoId: $repoId}) DELETE m`, { repoId });
+    await exec(
+      txConn,
+      `MATCH (r:Repo {repoId: $repoId})-[e:HAS_MEMORY]->(m:Memory) DELETE e`,
+      { repoId },
+    );
+    await exec(
+      txConn,
+      `MATCH (m:Memory)-[e:MEMORY_OF]->() WHERE m.repoId = $repoId DELETE e`,
+      { repoId },
+    );
+    await exec(
+      txConn,
+      `MATCH (m:Memory)-[e:MEMORY_OF_FILE]->() WHERE m.repoId = $repoId DELETE e`,
+      { repoId },
+    );
+    await exec(txConn, `MATCH (m:Memory {repoId: $repoId}) DELETE m`, {
+      repoId,
+    });
 
     // Clean up AgentFeedback nodes
-    await exec(txConn, `MATCH (a:AgentFeedback {repoId: $repoId}) DELETE a`, { repoId });
+    await exec(txConn, `MATCH (a:AgentFeedback {repoId: $repoId}) DELETE a`, {
+      repoId,
+    });
 
     // Clean up SyncArtifact nodes
-    await exec(txConn, `MATCH (s:SyncArtifact {repoId: $repoId}) DELETE s`, { repoId });
+    await exec(txConn, `MATCH (s:SyncArtifact {repoId: $repoId}) DELETE s`, {
+      repoId,
+    });
 
     // Clean up FileSummary nodes and edges
     await exec(
@@ -187,10 +235,18 @@ export async function deleteRepo(
       `MATCH (fs:FileSummary)-[e]->(dst) WHERE fs.repoId = $repoId DELETE e`,
       { repoId },
     );
-    await exec(txConn, `MATCH (fs:FileSummary) WHERE fs.repoId = $repoId DELETE fs`, { repoId });
+    await exec(
+      txConn,
+      `MATCH (fs:FileSummary) WHERE fs.repoId = $repoId DELETE fs`,
+      { repoId },
+    );
 
     // Clean up UsageSnapshot nodes
-    await exec(txConn, `MATCH (u:UsageSnapshot) WHERE u.repoId = $repoId DELETE u`, { repoId });
+    await exec(
+      txConn,
+      `MATCH (u:UsageSnapshot) WHERE u.repoId = $repoId DELETE u`,
+      { repoId },
+    );
 
     await exec(
       txConn,
@@ -230,6 +286,86 @@ export async function upsertFile(
       directory,
     },
   );
+}
+
+/**
+ * UNWIND-batched upsert for File nodes + FILE_IN_REPO edge.
+ *
+ * Pass-1 batched-write site (`src/indexer/parser/batch-persist.ts`) was the
+ * sole missed callsite from the 2026-05-02 UNWIND sweep — its name didn't
+ * match the `*Batch` audit pattern. Per-row `upsertFile` inside the flush
+ * transaction made the pass-1 tail drain dominate when ~200 files queued
+ * at once, surfacing as a 60s+ silent pause at "Pass 1: 99% (N/M)" that
+ * looked indistinguishable from a hang.
+ *
+ * Three-pass W3 workaround (matches upsertSymbolBatch):
+ *   (1) UNWIND + MERGE node + SET props
+ *   (2) UNWIND + OPTIONAL MATCH + CREATE FILE_IN_REPO
+ *
+ * `lastIndexedAt` is asserted non-null by all production callers (see
+ * src/indexer/parser/{rust-process-file,process-file,helpers}.ts — every
+ * `addFile` / direct upsert site sets `new Date().toISOString()`). The
+ * coercion below is a defence-in-depth against future callers that
+ * introduce uniformly-null fields and trip the LadybugDB UNWIND binder
+ * type-inference bug (kuzu#5685).
+ */
+export async function upsertFileBatch(
+  conn: Connection,
+  files: Array<Omit<FileRow, "directory">>,
+): Promise<void> {
+  if (files.length === 0) return;
+
+  const seen = new Set<string>();
+  const dedup = files.filter((f) => {
+    if (seen.has(f.fileId)) return false;
+    seen.add(f.fileId);
+    return true;
+  });
+
+  const CHUNK = 256;
+  await withTransaction(conn, async (txConn) => {
+    for (let i = 0; i < dedup.length; i += CHUNK) {
+      const chunk = dedup.slice(i, i + CHUNK);
+      const rows = chunk.map((file) => {
+        const relPath = normalizePath(file.relPath);
+        return {
+          fileId: file.fileId,
+          repoId: file.repoId,
+          relPath,
+          contentHash: file.contentHash,
+          language: file.language,
+          byteSize: file.byteSize,
+          lastIndexedAt: file.lastIndexedAt ?? "",
+          directory: computeDirectory(relPath),
+        };
+      });
+
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (r:Repo {repoId: row.repoId})
+         MERGE (f:File {fileId: row.fileId})
+         SET f.relPath = row.relPath,
+             f.contentHash = row.contentHash,
+             f.language = row.language,
+             f.byteSize = row.byteSize,
+             f.lastIndexedAt = row.lastIndexedAt,
+             f.directory = row.directory`,
+        { rows },
+      );
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (f:File {fileId: row.fileId})
+         MATCH (r:Repo {repoId: row.repoId})
+         OPTIONAL MATCH (f)-[existing:FILE_IN_REPO]->(r)
+         WITH f, r, existing
+         WHERE existing IS NULL
+         CREATE (f)-[:FILE_IN_REPO]->(r)`,
+        { rows },
+      );
+    }
+  });
 }
 
 export async function getFilesByRepo(
@@ -562,7 +698,7 @@ export async function getLastIndexedAt(
      ORDER BY f.lastIndexedAt DESC LIMIT 1`,
     { repoId },
   );
-  return row ? (row.lastIndexedAt as string) ?? null : null;
+  return row ? ((row.lastIndexedAt as string) ?? null) : null;
 }
 
 export async function getFilesByIds(

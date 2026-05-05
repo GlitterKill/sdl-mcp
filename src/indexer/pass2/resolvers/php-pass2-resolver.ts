@@ -5,6 +5,7 @@ import * as ladybugDb from "../../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../../db/ladybug-queries.js";
 import type { SymbolKind } from "../../../domain/types.js";
 import { readFileAsync } from "../../../util/asyncFs.js";
+import { singleFlight } from "../../../util/concurrency.js";
 import { logger } from "../../../util/logger.js";
 import { normalizePath } from "../../../util/paths.js";
 import { getAdapterForExtension } from "../../adapter/registry.js";
@@ -275,16 +276,17 @@ function mapExtractedSymbolsToExisting(
   return filteredSymbolDetails;
 }
 
-async function clearOutgoingCallEdges(
-  conn: import("kuzu").Connection,
+/**
+ * In-memory cleanup of stale dedup keys for the symbols this file is about to
+ * re-resolve. The matching SQL DELETE is deferred to `submitEdgeWrite` so the
+ * dispatcher can combine deletes + inserts across an entire concurrency batch
+ * into a single `withWriteConn`.
+ */
+function clearLocalCallDedupKeys(
   symbolIds: string[],
   createdCallEdges: Set<string>,
-): Promise<void> {
-  if (symbolIds.length === 0) {
-    return;
-  }
-
-  await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(conn, symbolIds, "call");
+): void {
+  if (symbolIds.length === 0) return;
   for (const symbolId of symbolIds) {
     for (const edgeKey of Array.from(createdCallEdges)) {
       if (edgeKey.startsWith(`${symbolId}->`)) {
@@ -422,82 +424,80 @@ async function buildPhpRepoIndex(
   repoId: string,
   cache?: Map<string, unknown>,
 ): Promise<PhpRepoIndex> {
-  const cacheKey = `pass2-php:repo-index:${repoId}`;
-  const cached = cache?.get(cacheKey);
-  if (cached) {
-    return cached as PhpRepoIndex;
-  }
+  return singleFlight(cache, `pass2-php:repo-index:${repoId}`, async () => {
+    const conn = await getLadybugConn();
+    const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
+    const phpFiles = repoFiles.filter((file) => file.language === "php");
+    const phpFileIds = new Set(phpFiles.map((file) => file.fileId));
+    const fileById = new Map(phpFiles.map((file) => [file.fileId, file]));
 
-  const conn = await getLadybugConn();
-  const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
-  const phpFiles = repoFiles.filter((file) => file.language === "php");
-  const phpFileIds = new Set(phpFiles.map((file) => file.fileId));
-  const fileById = new Map(phpFiles.map((file) => [file.fileId, file]));
+    const namespaceByFilePath = new Map<string, string>();
+    const symbolsByNamespace = new Map<
+      string,
+      Array<SymbolRow & { relPath: string }>
+    >();
+    const symbolsByRelPath = new Map<
+      string,
+      Array<SymbolRow & { relPath: string }>
+    >();
+    const classSymbolIdByFqn = new Map<string, string>();
+    const methodsByClassFqn = new Map<string, Map<string, string>>();
+    const classFqnByShortName = new Map<string, string[]>();
 
-  const namespaceByFilePath = new Map<string, string>();
-  const symbolsByNamespace = new Map<
-    string,
-    Array<SymbolRow & { relPath: string }>
-  >();
-  const symbolsByRelPath = new Map<
-    string,
-    Array<SymbolRow & { relPath: string }>
-  >();
-  const classSymbolIdByFqn = new Map<string, string>();
-  const methodsByClassFqn = new Map<string, Map<string, string>>();
-  const classFqnByShortName = new Map<string, string[]>();
-
-  const repoSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
-  const fileSymbols = new Map<string, SymbolRow[]>();
-  for (const symbol of repoSymbols) {
-    if (!phpFileIds.has(symbol.fileId)) {
-      continue;
-    }
-    const existing = fileSymbols.get(symbol.fileId) ?? [];
-    existing.push(symbol);
-    fileSymbols.set(symbol.fileId, existing);
-  }
-
-  for (const [fileId, symbols] of fileSymbols) {
-    const file = fileById.get(fileId);
-    if (!file) {
-      continue;
+    const repoSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
+    const fileSymbols = new Map<string, SymbolRow[]>();
+    for (const symbol of repoSymbols) {
+      if (!phpFileIds.has(symbol.fileId)) {
+        continue;
+      }
+      const existing = fileSymbols.get(symbol.fileId) ?? [];
+      existing.push(symbol);
+      fileSymbols.set(symbol.fileId, existing);
     }
 
-    const namespace = inferPhpNamespaceFromSymbols(symbols);
-    namespaceByFilePath.set(file.relPath, namespace);
-    const bucket = symbolsByNamespace.get(namespace) ?? [];
-    const relPathBucket = symbolsByRelPath.get(file.relPath) ?? [];
-    for (const symbol of symbols) {
-      const withPath = { ...symbol, relPath: file.relPath };
-      bucket.push(withPath);
-      relPathBucket.push(withPath);
+    for (const [fileId, symbols] of fileSymbols) {
+      const file = fileById.get(fileId);
+      if (!file) {
+        continue;
+      }
+
+      const namespace = inferPhpNamespaceFromSymbols(symbols);
+      namespaceByFilePath.set(file.relPath, namespace);
+      const bucket = symbolsByNamespace.get(namespace) ?? [];
+      const relPathBucket = symbolsByRelPath.get(file.relPath) ?? [];
+      for (const symbol of symbols) {
+        const withPath = { ...symbol, relPath: file.relPath };
+        bucket.push(withPath);
+        relPathBucket.push(withPath);
+      }
+      symbolsByNamespace.set(namespace, bucket);
+      symbolsByRelPath.set(file.relPath, relPathBucket);
+
+      buildClassMethodMapForFile(
+        symbols,
+        classSymbolIdByFqn,
+        methodsByClassFqn,
+      );
     }
-    symbolsByNamespace.set(namespace, bucket);
-    symbolsByRelPath.set(file.relPath, relPathBucket);
 
-    buildClassMethodMapForFile(symbols, classSymbolIdByFqn, methodsByClassFqn);
-  }
-
-  for (const classFqn of classSymbolIdByFqn.keys()) {
-    const shortName = extractShortName(classFqn);
-    const existing = classFqnByShortName.get(shortName) ?? [];
-    if (!existing.includes(classFqn)) {
-      existing.push(classFqn);
+    for (const classFqn of classSymbolIdByFqn.keys()) {
+      const shortName = extractShortName(classFqn);
+      const existing = classFqnByShortName.get(shortName) ?? [];
+      if (!existing.includes(classFqn)) {
+        existing.push(classFqn);
+      }
+      classFqnByShortName.set(shortName, existing);
     }
-    classFqnByShortName.set(shortName, existing);
-  }
 
-  const index: PhpRepoIndex = {
-    namespaceByFilePath,
-    symbolsByNamespace,
-    symbolsByRelPath,
-    classSymbolIdByFqn,
-    methodsByClassFqn,
-    classFqnByShortName,
-  };
-  cache?.set(cacheKey, index);
-  return index;
+    return {
+      namespaceByFilePath,
+      symbolsByNamespace,
+      symbolsByRelPath,
+      classSymbolIdByFqn,
+      methodsByClassFqn,
+      classFqnByShortName,
+    };
+  });
 }
 
 function mergeImportedNameMaps(
@@ -784,18 +784,18 @@ async function tryResolvePsr4AutoloadCall(params: {
       return directSymbol;
     }
 
-    const cacheKey = `pass2-php:psr4-candidate:${importerRelPath}:${classCandidate}`;
-    let resolvedPaths = cache?.get(cacheKey) as string[] | undefined;
-    if (!resolvedPaths) {
-      resolvedPaths = await resolveImportCandidatePaths({
-        language: "php",
-        repoRoot,
-        importerRelPath,
-        specifier: classCandidate,
-        extensions,
-      });
-      cache?.set(cacheKey, resolvedPaths);
-    }
+    const resolvedPaths = await singleFlight(
+      cache,
+      `pass2-php:psr4-candidate:${importerRelPath}:${classCandidate}`,
+      () =>
+        resolveImportCandidatePaths({
+          language: "php",
+          repoRoot,
+          importerRelPath,
+          specifier: classCandidate,
+          extensions,
+        }),
+    );
 
     for (const relPath of resolvedPaths) {
       const normalizedPath = normalizePath(relPath);
@@ -1111,6 +1111,9 @@ async function resolvePhpCallEdgesPass2(params: {
   globalNameToSymbolIds?: Map<string, string[]>;
   telemetry?: Pass2ResolverContext["telemetry"];
   cache?: Map<string, unknown>;
+  mode?: "full" | "incremental";
+  submitEdgeWrite?: Pass2ResolverContext["submitEdgeWrite"];
+  importCache?: Pass2ResolverContext["importCache"];
 }): Promise<number> {
   const {
     repoId,
@@ -1120,6 +1123,9 @@ async function resolvePhpCallEdgesPass2(params: {
     globalNameToSymbolIds,
     telemetry,
     cache,
+    mode,
+    submitEdgeWrite,
+    importCache,
   } = params;
 
   const conn = await getLadybugConn();
@@ -1199,9 +1205,7 @@ async function resolvePhpCallEdgesPass2(params: {
   const symbolIdsToRefresh = filteredSymbolDetails.map(
     (detail) => detail.symbolId,
   );
-  await withWriteConn(async (wConn) => {
-    await clearOutgoingCallEdges(wConn, symbolIdsToRefresh, createdCallEdges);
-  });
+  clearLocalCallDedupKeys(symbolIdsToRefresh, createdCallEdges);
 
   const index = await buildPhpRepoIndex(repoId, cache);
   const { classByMemberSymbolId, localMethodsByClassFqn } =
@@ -1227,6 +1231,7 @@ async function resolvePhpCallEdgesPass2(params: {
     [...adapter.fileExtensions],
     "php",
     content,
+    importCache,
   );
   const phpImportMaps = await resolvePhpUseImportMaps({
     repoId,
@@ -1331,9 +1336,23 @@ async function resolvePhpCallEdgesPass2(params: {
     }
   }
 
-  await withWriteConn(async (wConn) => {
-    await ladybugDb.insertEdges(wConn, edgesToInsert);
-  });
+  if (submitEdgeWrite) {
+    await submitEdgeWrite({
+      symbolIdsToRefresh,
+      edges: edgesToInsert,
+    });
+  } else {
+    await withWriteConn(async (wConn) => {
+      if (mode !== "full" && symbolIdsToRefresh.length > 0) {
+        await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
+          wConn,
+          symbolIdsToRefresh,
+          "call",
+        );
+      }
+      await ladybugDb.insertEdges(wConn, edgesToInsert);
+    });
+  }
   return createdEdges;
 }
 
@@ -1367,6 +1386,9 @@ export class PhpPass2Resolver implements Pass2Resolver {
         globalNameToSymbolIds: context.globalNameToSymbolIds,
         telemetry: context.telemetry,
         cache: context.cache,
+        mode: context.mode,
+        submitEdgeWrite: context.submitEdgeWrite,
+        importCache: context.importCache,
       });
       return { edgesCreated };
     } catch (error) {

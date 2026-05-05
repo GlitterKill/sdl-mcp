@@ -512,16 +512,18 @@ export async function handleSymbolSearch(
           : undefined;
   // Suppress results below noise floor when no exact match exists
   const NOISE_FLOOR = 0.3;
-  const effectiveResults = !hasExactMatch && bestRelevance < NOISE_FLOOR
-    ? []
-    : relevant;
-  const effectiveSuggestion = effectiveResults.length === 0 && relevant.length > 0
-    ? "No confident matches found. Try more specific terms or exact symbol names."
-    : suggestion;
+  const effectiveResults =
+    !hasExactMatch && bestRelevance < NOISE_FLOOR ? [] : relevant;
+  const effectiveSuggestion =
+    effectiveResults.length === 0 && relevant.length > 0
+      ? "No confident matches found. Try more specific terms or exact symbol names."
+      : suggestion;
   const response: SymbolSearchResponse = {
     results: effectiveResults,
     exactMatchFound: hasExactMatch,
-    ...(effectiveSuggestion !== undefined && { suggestion: effectiveSuggestion }),
+    ...(effectiveSuggestion !== undefined && {
+      suggestion: effectiveSuggestion,
+    }),
   };
   if (request.includeRetrievalEvidence) {
     if (useHybrid && retrievalEvidence) {
@@ -553,6 +555,10 @@ export async function handleSymbolSearch(
           name: r.name,
           file: r.file,
           kind: r.kind as string,
+          line:
+            (r as { line?: number; rangeStartLine?: number }).line ??
+            (r as { rangeStartLine?: number }).rangeStartLine,
+          score: (r as { score?: number }).score,
         })),
         total: effectiveResults.length,
       },

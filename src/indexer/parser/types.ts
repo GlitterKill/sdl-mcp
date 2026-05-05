@@ -1,5 +1,9 @@
 import type { RepoConfig } from "../../config/types.js";
-import type { EdgeRow, SymbolRow, SymbolReferenceRow } from "../../db/ladybug-queries.js";
+import type {
+  EdgeRow,
+  SymbolRow,
+  SymbolReferenceRow,
+} from "../../db/ladybug-queries.js";
 import type {
   PendingCallEdge,
   SymbolIndex,
@@ -15,6 +19,7 @@ import type { ExtractedImport } from "../treesitter/extractImports.js";
 import type * as ladybugDb from "../../db/ladybug-queries.js";
 import type { SymbolMapFileUpdate } from "../symbol-map-cache.js";
 import type { BatchPersistAccumulator } from "./batch-persist.js";
+import type { Pass1ExtractionCache } from "../pass2/types.js";
 
 // ── ProcessFile params & result ─────────────────────────────────────
 
@@ -42,6 +47,14 @@ export interface ProcessFileParams {
   globalPreferredSymbolId?: Map<string, string>;
   supportsPass2FilePath?: (relPath: string) => boolean;
   batchAccumulator?: BatchPersistAccumulator;
+  /**
+   * Pass-1 extraction cache. When provided, `processFile`
+   * (or `processFileFromRustResult`) records `(symbolsWithNodeIds, imports,
+   * calls, content)` for files the TS pass-2 resolver will re-process so
+   * pass-2 can skip a redundant tree-sitter parse + extraction. Other
+   * languages keep their inline re-parse for tree-handle access.
+   */
+  pass1Extractions?: Pass1ExtractionCache;
 }
 
 export interface ProcessFileResult {
@@ -70,7 +83,11 @@ export type EarlyExitOutcome =
   | {
       status: "ready";
       data: FileReadResult;
-      adapter: NonNullable<ReturnType<typeof import("../adapter/registry.js").getAdapterForExtension>>;
+      adapter: NonNullable<
+        ReturnType<
+          typeof import("../adapter/registry.js").getAdapterForExtension
+        >
+      >;
     };
 
 // ── Parse phase output ──────────────────────────────────────────────

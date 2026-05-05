@@ -149,7 +149,9 @@ const recyclingSlots = new Set<number>();
 // the DB instance or connection pool across async boundaries.
 let dbInitPromise: Promise<LadybugDatabase> | null = null;
 
-function getSessionWriteBodyLimiter(conn: LadybugConnection): ConcurrencyLimiter {
+function getSessionWriteBodyLimiter(
+  conn: LadybugConnection,
+): ConcurrencyLimiter {
   let limiter = sessionWriteBodyLimiters.get(conn);
   if (!limiter) {
     limiter = new ConcurrencyLimiter({
@@ -924,9 +926,8 @@ export async function closeLadybugDb(): Promise<void> {
   // close.
   if (writeLimiter) {
     try {
-      const { flushAuditBufferOnShutdown } = await import(
-        "../mcp/audit-buffer.js"
-      );
+      const { flushAuditBufferOnShutdown } =
+        await import("../mcp/audit-buffer.js");
       await flushAuditBufferOnShutdown(async (body) => {
         await withWriteConn(async (conn) => {
           await body(conn);
@@ -963,9 +964,8 @@ export async function closeLadybugDb(): Promise<void> {
     // withWriteConn and queue here. Either way, sweep the buffer once more
     // before clearQueue so durability is best-effort but contiguous.
     try {
-      const { flushAuditBufferOnShutdown } = await import(
-        "../mcp/audit-buffer.js"
-      );
+      const { flushAuditBufferOnShutdown } =
+        await import("../mcp/audit-buffer.js");
       await flushAuditBufferOnShutdown(async (body) => {
         await withWriteConn(async (conn) => {
           await body(conn);
@@ -1071,14 +1071,32 @@ export function getPoolStats(): {
   writeInitialized: boolean;
   writeQueued: number;
   writeActive: number;
+  writeTotalActiveMs: number;
+  writeTotalQueueMs: number;
+  writeTotalRuns: number;
+  writePeakQueued: number;
+  writePeakActive: number;
 } {
-  const writeStats = writeLimiter?.getStats() ?? { active: 0, queued: 0 };
+  const writeStats = writeLimiter?.getStats() ?? {
+    active: 0,
+    queued: 0,
+    totalActiveMs: 0,
+    totalQueueMs: 0,
+    totalRuns: 0,
+    peakQueued: 0,
+    peakActive: 0,
+  };
   return {
     readPoolSize,
     readPoolInitialized: readPool.length,
     writeInitialized: writeConn !== null,
     writeQueued: writeStats.queued,
     writeActive: writeStats.active,
+    writeTotalActiveMs: writeStats.totalActiveMs,
+    writeTotalQueueMs: writeStats.totalQueueMs,
+    writeTotalRuns: writeStats.totalRuns,
+    writePeakQueued: writeStats.peakQueued,
+    writePeakActive: writeStats.peakActive,
   };
 }
 

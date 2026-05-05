@@ -7,6 +7,7 @@ import * as ladybugDb from "../../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../../db/ladybug-queries.js";
 import type { SymbolKind } from "../../../domain/types.js";
 import { readFileAsync } from "../../../util/asyncFs.js";
+import { singleFlight } from "../../../util/concurrency.js";
 import { logger } from "../../../util/logger.js";
 import { normalizePath } from "../../../util/paths.js";
 import { getAdapterForExtension } from "../../adapter/registry.js";
@@ -214,16 +215,17 @@ function mapExtractedSymbolsToExisting(
   return filteredSymbolDetails;
 }
 
-async function clearOutgoingCallEdges(
-  conn: import("kuzu").Connection,
+/**
+ * In-memory cleanup of stale dedup keys for the symbols this file is about to
+ * re-resolve. The matching SQL DELETE is deferred to `submitEdgeWrite` so the
+ * dispatcher can combine deletes + inserts across an entire concurrency batch
+ * into a single `withWriteConn`.
+ */
+function clearLocalCallDedupKeys(
   symbolIds: string[],
   createdCallEdges: Set<string>,
-): Promise<void> {
-  if (symbolIds.length === 0) {
-    return;
-  }
-
-  await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(conn, symbolIds, "call");
+): void {
+  if (symbolIds.length === 0) return;
   for (const symbolId of symbolIds) {
     for (const edgeKey of Array.from(createdCallEdges)) {
       if (edgeKey.startsWith(`${symbolId}->`)) {
@@ -247,52 +249,49 @@ async function buildShellRepoIndex(
   repoId: string,
   cache?: Map<string, unknown>,
 ): Promise<ShellRepoIndex> {
-  const cacheKey = `pass2-shell:repo-index:${repoId}`;
-  const cached = cache?.get(cacheKey);
-  if (cached) {
-    return cached as ShellRepoIndex;
-  }
+  return singleFlight(cache, `pass2-shell:repo-index:${repoId}`, async () => {
+    const conn = await getLadybugConn();
+    const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
+    const shellFiles = repoFiles.filter((file) => file.language === "shell");
+    const shellFileIds = new Set(shellFiles.map((file) => file.fileId));
+    const fileById = new Map(shellFiles.map((file) => [file.fileId, file]));
 
-  const conn = await getLadybugConn();
-  const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
-  const shellFiles = repoFiles.filter((file) => file.language === "shell");
-  const shellFileIds = new Set(shellFiles.map((file) => file.fileId));
-  const fileById = new Map(shellFiles.map((file) => [file.fileId, file]));
+    const directoryByFilePath = new Map<string, string>();
+    const symbolsByDirectory = new Map<
+      string,
+      Array<SymbolRow & { relPath: string }>
+    >();
 
-  const directoryByFilePath = new Map<string, string>();
-  const symbolsByDirectory = new Map<
-    string,
-    Array<SymbolRow & { relPath: string }>
-  >();
-
-  for (const file of shellFiles) {
-    directoryByFilePath.set(file.relPath, normalizePath(dirname(file.relPath)));
-  }
-
-  const repoSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
-  for (const symbol of repoSymbols) {
-    if (!shellFileIds.has(symbol.fileId)) {
-      continue;
+    for (const file of shellFiles) {
+      directoryByFilePath.set(
+        file.relPath,
+        normalizePath(dirname(file.relPath)),
+      );
     }
-    const file = fileById.get(symbol.fileId);
-    if (!file) {
-      continue;
-    }
-    const directory = directoryByFilePath.get(file.relPath);
-    if (!directory) {
-      continue;
-    }
-    const bucket = symbolsByDirectory.get(directory) ?? [];
-    bucket.push({
-      ...symbol,
-      relPath: file.relPath,
-    });
-    symbolsByDirectory.set(directory, bucket);
-  }
 
-  const index = { directoryByFilePath, symbolsByDirectory };
-  cache?.set(cacheKey, index);
-  return index;
+    const repoSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
+    for (const symbol of repoSymbols) {
+      if (!shellFileIds.has(symbol.fileId)) {
+        continue;
+      }
+      const file = fileById.get(symbol.fileId);
+      if (!file) {
+        continue;
+      }
+      const directory = directoryByFilePath.get(file.relPath);
+      if (!directory) {
+        continue;
+      }
+      const bucket = symbolsByDirectory.get(directory) ?? [];
+      bucket.push({
+        ...symbol,
+        relPath: file.relPath,
+      });
+      symbolsByDirectory.set(directory, bucket);
+    }
+
+    return { directoryByFilePath, symbolsByDirectory };
+  });
 }
 
 function buildSameDirectoryFunctionIndex(
@@ -338,6 +337,7 @@ async function buildSourceFunctionIndex(params: {
   extensions: string[];
   content: string;
   cache?: Map<string, unknown>;
+  importCache?: Pass2ResolverContext["importCache"];
 }): Promise<Map<string, string[]>> {
   const {
     conn,
@@ -348,6 +348,7 @@ async function buildSourceFunctionIndex(params: {
     extensions,
     content,
     cache,
+    importCache,
   } = params;
   const importResolution = await resolveImportTargets(
     repoId,
@@ -357,6 +358,7 @@ async function buildSourceFunctionIndex(params: {
     extensions,
     "shell",
     content,
+    importCache,
   );
 
   const sourceFilePaths = new Set<string>();
@@ -369,25 +371,23 @@ async function buildSourceFunctionIndex(params: {
 
   const sourceNameToSymbolIds = new Map<string, string[]>();
   for (const relPath of sourceFilePaths) {
-    const cacheKey = `pass2-shell:source-fns:${repoId}:${relPath}`;
-    const cached = cache?.get(cacheKey);
-    let sourceFunctions: SymbolRow[];
-    if (cached) {
-      sourceFunctions = cached as SymbolRow[];
-    } else {
-      const sourceFile = await ladybugDb.getFileByRepoPath(
-        conn,
-        repoId,
-        relPath,
-      );
-      if (!sourceFile || sourceFile.language !== "shell") {
-        continue;
-      }
-      sourceFunctions = (
-        await ladybugDb.getSymbolsByFile(conn, sourceFile.fileId)
-      ).filter((symbol) => symbol.kind === "function");
-      cache?.set(cacheKey, sourceFunctions);
-    }
+    const sourceFunctions = await singleFlight(
+      cache,
+      `pass2-shell:source-fns:${repoId}:${relPath}`,
+      async (): Promise<SymbolRow[]> => {
+        const sourceFile = await ladybugDb.getFileByRepoPath(
+          conn,
+          repoId,
+          relPath,
+        );
+        if (!sourceFile || sourceFile.language !== "shell") {
+          return [];
+        }
+        return (
+          await ladybugDb.getSymbolsByFile(conn, sourceFile.fileId)
+        ).filter((symbol) => symbol.kind === "function");
+      },
+    );
 
     for (const symbol of sourceFunctions) {
       const existing = sourceNameToSymbolIds.get(symbol.name) ?? [];
@@ -479,6 +479,9 @@ async function resolveShellCallEdgesPass2(params: {
   globalNameToSymbolIds?: Map<string, string[]>;
   telemetry?: Pass2ResolverContext["telemetry"];
   cache?: Map<string, unknown>;
+  mode?: "full" | "incremental";
+  submitEdgeWrite?: Pass2ResolverContext["submitEdgeWrite"];
+  importCache?: Pass2ResolverContext["importCache"];
 }): Promise<number> {
   const {
     repoId,
@@ -488,6 +491,9 @@ async function resolveShellCallEdgesPass2(params: {
     globalNameToSymbolIds,
     telemetry,
     cache,
+    mode,
+    submitEdgeWrite,
+    importCache,
   } = params;
 
   const conn = await getLadybugConn();
@@ -577,9 +583,7 @@ async function resolveShellCallEdgesPass2(params: {
   const symbolIdsToRefresh = filteredSymbolDetails.map(
     (detail) => detail.symbolId,
   );
-  await withWriteConn(async (wConn) => {
-    await clearOutgoingCallEdges(wConn, symbolIdsToRefresh, createdCallEdges);
-  });
+  clearLocalCallDedupKeys(symbolIdsToRefresh, createdCallEdges);
 
   const nodeIdToSymbolId = createNodeIdToSymbolId(filteredSymbolDetails);
   const sourceNameToSymbolIds = await buildSourceFunctionIndex({
@@ -591,6 +595,7 @@ async function resolveShellCallEdgesPass2(params: {
     extensions: [...adapter.fileExtensions],
     content,
     cache,
+    importCache,
   });
 
   const repoIndex = await buildShellRepoIndex(repoId, cache);
@@ -672,9 +677,23 @@ async function resolveShellCallEdgesPass2(params: {
     }
   }
 
-  await withWriteConn(async (wConn) => {
-    await ladybugDb.insertEdges(wConn, edgesToInsert);
-  });
+  if (submitEdgeWrite) {
+    await submitEdgeWrite({
+      symbolIdsToRefresh,
+      edges: edgesToInsert,
+    });
+  } else {
+    await withWriteConn(async (wConn) => {
+      if (mode !== "full" && symbolIdsToRefresh.length > 0) {
+        await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
+          wConn,
+          symbolIdsToRefresh,
+          "call",
+        );
+      }
+      await ladybugDb.insertEdges(wConn, edgesToInsert);
+    });
+  }
   return createdEdges;
 }
 
@@ -709,6 +728,9 @@ export class ShellPass2Resolver implements Pass2Resolver {
         globalNameToSymbolIds: context.globalNameToSymbolIds,
         telemetry: context.telemetry,
         cache: context.cache,
+        mode: context.mode,
+        submitEdgeWrite: context.submitEdgeWrite,
+        importCache: context.importCache,
       });
       return { edgesCreated };
     } catch (error) {

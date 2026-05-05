@@ -313,7 +313,7 @@ Semantic search is enabled by default with the `local` ONNX embedding provider. 
   "prefetch": {
     "enabled": true,
     "maxBudgetPercent": 20,
-    "warmTopN": 50
+    "warmTopN": 0
   }
 }
 ```

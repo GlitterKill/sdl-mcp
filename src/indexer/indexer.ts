@@ -56,6 +56,10 @@ import {
 } from "./indexer-memory.js";
 import { withIndexingGate } from "../mcp/indexing-gate.js";
 import { preIndexCheckpoint } from "../db/ladybug.js";
+import {
+  runScipIngestInsideIndex,
+  scipIngestWillRun,
+} from "../scip/ingestion.js";
 export type { IndexProgress, IndexProgressSubstage } from "./indexer-init.js";
 export interface IndexTimingDiagnostics {
   totalMs: number;
@@ -246,6 +250,28 @@ async function indexRepoImpl(
   signal?: AbortSignal,
   options?: IndexRepoOptions,
 ): Promise<IndexResult> {
+  // Auto-upgrade incremental → full on a fresh repo (no files indexed yet).
+  // Callers (CLI delegated path, MCP `sdl.index.refresh`, watcher first-run)
+  // can request "incremental" without checking DB state. Running as
+  // incremental on empty data is a correctness no-op but defeats every
+  // full-mode optimisation: pass-2 still does the per-file
+  // `deleteOutgoingEdgesByTypeForSymbols` round-trip against an empty
+  // edge table, the pass-1→pass-2 drain awaits instead of overlapping,
+  // and `preIndexCheckpoint()` is skipped. Detecting fileCount===0 once
+  // here lets every code path benefit without each caller duplicating
+  // the check.
+  if (mode === "incremental") {
+    const probeConn = await getLadybugConn();
+    const fileCount = await ladybugDb.getFileCount(probeConn, repoId);
+    if (fileCount === 0) {
+      logger.info(
+        "indexRepo: upgrading mode 'incremental' → 'full' (repo has no indexed files)",
+        { repoId },
+      );
+      mode = "full";
+    }
+  }
+
   const startTime = Date.now();
   const phaseTimings: Record<string, number> | null = options?.includeTimings
     ? {}
@@ -270,7 +296,9 @@ async function indexRepoImpl(
           ...(meta?.language ? { language: meta.language } : {}),
           ...(meta?.engine ? { engine: meta.engine } : {}),
         });
-      } catch { /* swallow */ }
+      } catch {
+        /* swallow */
+      }
     }
   };
   const measureNestedPhase = async <T>(
@@ -489,6 +517,8 @@ async function indexRepoImpl(
         // Fix 4: Create TS resolver eagerly when repo has TS/JS files,
         // so it is warm for Pass 1 call resolution and avoids cold-start
         // penalty before Pass 2. Skip for pure non-TS repos.
+        // Fix 4: TS resolver created eagerly in initSharedState — no deferred
+        // creation needed downstream.
         () => {
           const hasTsFiles = files.some((f) => /.[cm]?[jt]sx?$/.test(f.path));
           if (!hasTsFiles) return null;
@@ -573,16 +603,20 @@ async function indexRepoImpl(
     };
 
     let pass1EngineUsed: "rust" | "ts" = useRustEngine ? "rust" : "ts";
-    const pass1Acc: Pass1Accumulator = await measurePhase("pass1", async () => {
-      if (useRustEngine) {
-        const outcome = await runPass1WithRustEngine(pass1Params);
-        if (outcome.usedRust) return outcome.acc;
-        // Native addon returned null — fall back to TS engine.
-        pass1EngineUsed = "ts";
+    const pass1Acc: Pass1Accumulator = await measurePhase(
+      "pass1",
+      async () => {
+        if (useRustEngine) {
+          const outcome = await runPass1WithRustEngine(pass1Params);
+          if (outcome.usedRust) return outcome.acc;
+          // Native addon returned null — fall back to TS engine.
+          pass1EngineUsed = "ts";
+          return await runPass1WithTsEngine(pass1Params);
+        }
         return await runPass1WithTsEngine(pass1Params);
-      }
-      return await runPass1WithTsEngine(pass1Params);
-    }, { engine: useRustEngine ? "rust" : "ts" });
+      },
+      { engine: useRustEngine ? "rust" : "ts" },
+    );
     // Record actual engine used so engineDispatch reflects fallbacks.
     try {
       getObservabilityTap()?.indexPhase({
@@ -591,7 +625,9 @@ async function indexRepoImpl(
         repoId,
         engine: pass1EngineUsed,
       });
-    } catch { /* swallow */ }
+    } catch {
+      /* swallow */
+    }
 
     const {
       filesProcessed,
@@ -601,40 +637,134 @@ async function indexRepoImpl(
       changedFileIds,
       changedPass2FilePaths,
       symbolMapFileUpdates,
+      drainPromise: pass1DrainPromise,
     } = pass1Acc;
     let { totalEdgesCreated } = pass1Acc;
     let freshConn = conn;
 
     // --- Phase: refresh symbol index from DB (Pass 1 → Pass 2 bridge) ---
-
+    //
+    // Pass 1 returns with its BatchPersistAccumulator drain still in flight
+    // (see indexer-pass1.ts). The two helpers below mutate ONLY in-memory
+    // structures (symbolMapCache, symbolIndex) so they can run in parallel
+    // with the still-flushing pass-1 writes — saves ~5-15s on repos where
+    // the drain queue is non-trivial.
     await measurePhase("refreshSymbolIndex", () => {
       applySymbolMapFileUpdates(symbolMapCache, symbolMapFileUpdates.values());
       syncSymbolIndexFromCache(symbolMapCache, symbolIndex);
     });
 
-    // --- Phase: Pass 2 — cross-file call resolution ---
-    // Fix 4: TS resolver created eagerly in initSharedState.
-    totalEdgesCreated += await measurePhase("pass2", async () =>
-      runPass2Resolvers({
-        repoId,
-        repoRoot: repoRow.rootPath,
-        mode,
-        pass2EligibleFiles,
-        changedPass2FilePaths,
-        supportsPass2FilePath,
-        pass2ResolverRegistry,
-        symbolIndex,
-        tsResolver,
-        config,
-        pass2Concurrency: appConfig.indexing?.pass2Concurrency ?? 4,
-        createdCallEdges,
-        globalNameToSymbolIds,
-        globalPreferredSymbolId,
-        callResolutionTelemetry,
-        onProgress,
-        signal,
-      }),
-    );
+    // --- Phase: SCIP ingest (between pass 1 and pass 2) ---
+    //
+    // SCIP overlays compiler-grade exact cross-references onto the heuristic
+    // graph pass 1 just wrote. Running it BEFORE pass 2 means:
+    //   1. Pass 2's heuristic resolvers see SCIP exact edges already in DB.
+    //      `insertEdges` carries a confidence-aware guard so pass 2 cannot
+    //      downgrade `resolution: "exact"` rows to its lower-confidence
+    //      heuristic resolutions (see ladybug-edges.ts).
+    //   2. Embeddings (later in finalize) build their import/call labels off
+    //      exact resolutions instead of `unresolved:call:*` strings, so
+    //      first-run cardhashes match what the next refresh would produce.
+    //   3. SCIP-created external Symbol nodes (npm packages etc.) become
+    //      visible to the embedding pre-pass and get embedded immediately
+    //      rather than waiting for the next index run.
+    //
+    // SCIP must observe pass-1 writes — it MERGEs against symbolIds pass 1
+    // just wrote. So we need pass1DrainPromise settled before SCIP starts.
+    //
+    // When SCIP is not configured (`scipIngestWillRun === false`), preserve
+    // the previous full-mode optimisation: pass-1 drain ↔ pass-2 overlap via
+    // Promise.all. SCIP-not-configured repos see no behaviour change beyond
+    // an unconditional drain await in incremental mode (matches prior code).
+    const willRunScip = scipIngestWillRun({ scip: appConfig.scip });
+    let pass2Edges: number;
+    if (willRunScip) {
+      // SCIP path: drain → SCIP → pass 2 (sequential, all writeLimiter-bound).
+      await measurePhase("pass1Drain", () => pass1DrainPromise);
+      const scipResult = await measurePhase("scipIngest", () =>
+        runScipIngestInsideIndex({
+          repoId,
+          repoRoot: repoRow.rootPath,
+          config: appConfig,
+          onProgress,
+        }),
+      );
+      // After ingest, delete the generator-produced `<repoRoot>/index.scip`
+      // when the user has enabled both the generator and cleanup. Skipped
+      // when `--output` is in args (we can't safely guess the location);
+      // those users opt out by setting `cleanupAfterIngest: false`.
+      const { maybeCleanupGeneratedScipIndex } =
+        await import("../scip/cleanup.js");
+      await maybeCleanupGeneratedScipIndex({
+        generatorEnabled: Boolean(appConfig.scip?.generator?.enabled),
+        cleanupAfterIngest: Boolean(
+          appConfig.scip?.generator?.cleanupAfterIngest,
+        ),
+        args: appConfig.scip?.generator?.args ?? [],
+        repoRootPath: repoRow.rootPath,
+      });
+      // Per-file coverage feeds the pass-2 file-skip optimisation:
+      // resolver work avoided on files SCIP fully resolved. The
+      // `insertEdges` confidence guard already protected SCIP exact edges
+      // from being downgraded; this skip avoids the wasted CPU of running
+      // resolvers whose writes the guard would have ignored anyway.
+      pass2Edges = await measurePhase("pass2", async () =>
+        runPass2Resolvers({
+          repoId,
+          repoRoot: repoRow.rootPath,
+          mode,
+          pass2EligibleFiles,
+          changedPass2FilePaths,
+          supportsPass2FilePath,
+          pass2ResolverRegistry,
+          symbolIndex,
+          tsResolver,
+          config,
+          pass2Concurrency: appConfig.indexing?.pass2Concurrency ?? 4,
+          createdCallEdges,
+          globalNameToSymbolIds,
+          globalPreferredSymbolId,
+          callResolutionTelemetry,
+          onProgress,
+          signal,
+          scipFullyCoveredPaths: scipResult.fullyCoveredPaths,
+          pass1Extractions: pass1Acc.pass1Extractions,
+        }),
+      );
+    } else {
+      // No-SCIP path. Pass 2 calls getFileByRepoPath/getSymbolsByFile per file. Those
+      // reads must see pass-1's File/Symbol writes settled or pass 2 returns
+      // 0 edges. The previous full-mode `resolvePass2Targets is a no-op so
+      // skip the drain` shortcut was incorrect — the per-file DB reads still
+      // need pass-1 settled regardless of mode.
+      await pass1DrainPromise;
+      const pass2Task = measurePhase("pass2", async () =>
+        runPass2Resolvers({
+          repoId,
+          repoRoot: repoRow.rootPath,
+          mode,
+          pass2EligibleFiles,
+          changedPass2FilePaths,
+          supportsPass2FilePath,
+          pass2ResolverRegistry,
+          symbolIndex,
+          tsResolver,
+          config,
+          pass2Concurrency: appConfig.indexing?.pass2Concurrency ?? 4,
+          createdCallEdges,
+          globalNameToSymbolIds,
+          globalPreferredSymbolId,
+          callResolutionTelemetry,
+          onProgress,
+          signal,
+          pass1Extractions: pass1Acc.pass1Extractions,
+        }),
+      );
+      // Always settle the drain before moving past pass 2 — finalizeEdges
+      // and every downstream phase reads the persisted graph state.
+      [pass2Edges] = await Promise.all([pass2Task, pass1DrainPromise]);
+    }
+    totalEdgesCreated += pass2Edges;
 
     // Emit finalizing immediately after Pass 2 so the user sees feedback
     // before the silent internal phases (import re-resolution, edge
@@ -646,11 +776,15 @@ async function indexRepoImpl(
     });
 
     // --- Phase: re-resolve unresolved import edges ---
-
+    //
+    // Initial emit uses 0/0 so the CLI shows `Import re-resolution...` until
+    // we know the actual edge count. The resolver fires per-chunk progress
+    // updates via `onChunkComplete` as it processes batches; that's the bar
+    // the user actually watches advance.
     onProgress?.({
       stage: "finalizing",
       current: 0,
-      total: files.length,
+      total: 0,
       substage: "importReresolution",
     });
     const importReResolution = await measurePhase(
@@ -671,6 +805,16 @@ async function indexRepoImpl(
                   ),
                 ])
               : undefined,
+          onChunkComplete: (current, total) => {
+            onProgress?.({
+              stage: "finalizing",
+              current,
+              total,
+              substage: "importReresolution",
+              stageCurrent: current,
+              stageTotal: total,
+            });
+          },
         }),
     );
     if (phaseTimings && importReResolution.timings) {
@@ -756,8 +900,6 @@ async function indexRepoImpl(
       ),
     );
 
-    const durationMs = Date.now() - startTime;
-
     // --- Phase: post-index metrics (summaries, clusters, processes,
     // deferred indexes, memory sync, audit flush) ---
     //
@@ -837,7 +979,10 @@ async function indexRepoImpl(
           filesScanned: filesProcessed,
           symbolsExtracted: totalSymbolsIndexed,
           edgesExtracted: sessionEdgeTotal,
-          durationMs,
+          // Wall-clock from indexRepo start through the audit-flush call —
+          // captured here (not before the session) so the recorded duration
+          // includes finalizeIndexing, embeddings, deferred indexes, etc.
+          durationMs: Date.now() - startTime,
           errors: 0,
           pass1Engine: derivePass1EngineTelemetry(pass1Acc),
         },
@@ -862,7 +1007,13 @@ async function indexRepoImpl(
       edgesCreated: sessionEdgeTotal,
       clustersComputed,
       processesTraced,
-      durationMs,
+      // Full wall-clock from indexRepo start through the post-index session
+      // (finalizeIndexing, embeddings, summaries, deferred indexes, memory
+      // sync, audit flush). Earlier this captured Date.now() right after the
+      // versionSnapshot phase, which silently excluded the entire post-index
+      // session — visible to users as a "Duration" several minutes shorter
+      // than the actual wall time on full reindexes with embeddings.
+      durationMs: totalMs,
       summaryStats,
       timings: phaseTimings ? { totalMs, phases: phaseTimings } : undefined,
       // Phase 1 Task 1.12 — surface Pass-1 engine breakdown so tests and

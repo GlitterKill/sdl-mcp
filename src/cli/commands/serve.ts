@@ -203,9 +203,36 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     maxBudgetPercent: config.prefetch?.maxBudgetPercent ?? 20,
   });
   if (config.prefetch?.enabled ?? true) {
-    for (const repo of config.repos) {
-      warmPrefetchOnServeStart(repo.repoId, config.prefetch?.warmTopN ?? 50);
+    // warmTopN defaults to 0 to avoid the "100% wasted prefetch" pattern
+    // observed when no caller actually requests the warmed top-fan-in
+    // symbols within the 5-minute stale window. Operators can set
+    // prefetch.warmTopN > 0 in config when they have evidence the warm set
+    // is consumed (e.g. a CI agent that always opens the same hot files).
+    const warmTopN = config.prefetch?.warmTopN ?? 0;
+    if (warmTopN > 0) {
+      for (const repo of config.repos) {
+        warmPrefetchOnServeStart(repo.repoId, warmTopN);
+      }
     }
+  }
+
+  // Pre-warm the local embeddings ONNX session if semantic search is on.
+  // First semantic call paid ~2.7s for session creation; subsequent calls
+  // were sub-300ms. Fire-and-forget so serve startup is unaffected.
+  if (config.semantic?.provider === "local") {
+    queueMicrotask(async () => {
+      try {
+        const { getEmbeddingProvider } =
+          await import("../../indexer/embeddings.js");
+        const provider = getEmbeddingProvider("local", config.semantic?.model);
+        await provider.embed(["sdl-mcp warmup"]);
+        logger.debug("[serve] embeddings session pre-warmed");
+      } catch (err) {
+        logger.debug("[serve] embeddings warmup skipped", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
   }
 
   const watchers: IndexWatchHandle[] = [];
@@ -420,7 +447,11 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     }
   } catch (error) {
     if (pidfilePath) {
-      try { removePidfile(pidfilePath); } catch { /* best-effort */ }
+      try {
+        removePidfile(pidfilePath);
+      } catch {
+        /* best-effort */
+      }
     }
     console.error(
       `Fatal error: ${error instanceof Error ? error.message : String(error)}`,

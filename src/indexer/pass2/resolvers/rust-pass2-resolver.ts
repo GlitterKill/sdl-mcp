@@ -7,6 +7,7 @@ import * as ladybugDb from "../../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../../db/ladybug-queries.js";
 import type { SymbolKind } from "../../../domain/types.js";
 import { readFileAsync } from "../../../util/asyncFs.js";
+import { singleFlight } from "../../../util/concurrency.js";
 import { logger } from "../../../util/logger.js";
 import { normalizePath } from "../../../util/paths.js";
 import { getAdapterForExtension } from "../../adapter/registry.js";
@@ -240,16 +241,17 @@ function mapExtractedSymbolsToExisting(
   return filteredSymbolDetails;
 }
 
-async function clearOutgoingCallEdges(
-  conn: import("kuzu").Connection,
+/**
+ * In-memory cleanup of stale dedup keys for the symbols this file is about to
+ * re-resolve. The matching SQL DELETE is deferred to `submitEdgeWrite` so the
+ * dispatcher can combine deletes + inserts across an entire concurrency batch
+ * into a single `withWriteConn`.
+ */
+function clearLocalCallDedupKeys(
   symbolIds: string[],
   createdCallEdges: Set<string>,
-): Promise<void> {
-  if (symbolIds.length === 0) {
-    return;
-  }
-
-  await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(conn, symbolIds, "call");
+): void {
+  if (symbolIds.length === 0) return;
   for (const symbolId of symbolIds) {
     for (const edgeKey of Array.from(createdCallEdges)) {
       if (edgeKey.startsWith(`${symbolId}->`)) {
@@ -322,54 +324,48 @@ async function buildRustModuleIndex(
   repoId: string,
   cache?: Map<string, unknown>,
 ): Promise<RustModuleIndex> {
-  const cacheKey = `pass2-rust:module-index:${repoId}`;
-  const cached = cache?.get(cacheKey);
-  if (cached) {
-    return cached as RustModuleIndex;
-  }
+  return singleFlight(cache, `pass2-rust:module-index:${repoId}`, async () => {
+    const conn = await getLadybugConn();
+    const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
+    const rustFiles = repoFiles.filter((file) => file.language === "rust");
+    const rustFileIds = new Set(rustFiles.map((file) => file.fileId));
+    const fileById = new Map(rustFiles.map((file) => [file.fileId, file]));
+    const modulePathByFilePath = new Map<string, string>();
+    const symbolsByModulePath = new Map<
+      string,
+      Array<SymbolRow & { relPath: string }>
+    >();
 
-  const conn = await getLadybugConn();
-  const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
-  const rustFiles = repoFiles.filter((file) => file.language === "rust");
-  const rustFileIds = new Set(rustFiles.map((file) => file.fileId));
-  const fileById = new Map(rustFiles.map((file) => [file.fileId, file]));
-  const modulePathByFilePath = new Map<string, string>();
-  const symbolsByModulePath = new Map<
-    string,
-    Array<SymbolRow & { relPath: string }>
-  >();
-
-  for (const file of rustFiles) {
-    modulePathByFilePath.set(file.relPath, inferRustModulePath(file.relPath));
-  }
-
-  const repoSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
-  for (const symbol of repoSymbols) {
-    if (!rustFileIds.has(symbol.fileId)) {
-      continue;
+    for (const file of rustFiles) {
+      modulePathByFilePath.set(file.relPath, inferRustModulePath(file.relPath));
     }
-    const file = fileById.get(symbol.fileId);
-    if (!file) {
-      continue;
-    }
-    const modulePath = modulePathByFilePath.get(file.relPath);
-    if (!modulePath) {
-      continue;
-    }
-    const bucket = symbolsByModulePath.get(modulePath) ?? [];
-    bucket.push({
-      ...symbol,
-      relPath: file.relPath,
-    });
-    symbolsByModulePath.set(modulePath, bucket);
-  }
 
-  const moduleIndex = {
-    modulePathByFilePath,
-    symbolsByModulePath,
-  };
-  cache?.set(cacheKey, moduleIndex);
-  return moduleIndex;
+    const repoSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
+    for (const symbol of repoSymbols) {
+      if (!rustFileIds.has(symbol.fileId)) {
+        continue;
+      }
+      const file = fileById.get(symbol.fileId);
+      if (!file) {
+        continue;
+      }
+      const modulePath = modulePathByFilePath.get(file.relPath);
+      if (!modulePath) {
+        continue;
+      }
+      const bucket = symbolsByModulePath.get(modulePath) ?? [];
+      bucket.push({
+        ...symbol,
+        relPath: file.relPath,
+      });
+      symbolsByModulePath.set(modulePath, bucket);
+    }
+
+    return {
+      modulePathByFilePath,
+      symbolsByModulePath,
+    };
+  });
 }
 
 function buildSameModuleFunctionIndex(
@@ -573,11 +569,7 @@ function collectExplicitImportedNames(
 // from each file's `use` imports. Only truly universal crates belong here;
 // the dynamic set (externalCratePrefixes) built from each file's `use`
 // imports is the primary mechanism and handles ecosystem-specific crates.
-const KNOWN_EXTERNAL_CRATE_PREFIXES = new Set([
-  "std",
-  "core",
-  "alloc",
-]);
+const KNOWN_EXTERNAL_CRATE_PREFIXES = new Set(["std", "core", "alloc"]);
 
 function isExternalCrateCall(
   calleeId: string,
@@ -630,7 +622,6 @@ function disambiguateRustCandidates(
 
   return null; // Still ambiguous
 }
-
 
 // ============================================================================
 // Phase 2 Task 2.4.x — trait default dispatch + Self::method + aliased `use`
@@ -789,8 +780,7 @@ function resolveTraitDefaultMethod(
     // Local override wins over the trait default.
     return null;
   }
-  const traits =
-    traitDefaults.implementedTraitsByType.get(normalized) ?? [];
+  const traits = traitDefaults.implementedTraitsByType.get(normalized) ?? [];
   for (const traitName of traits) {
     const methodMap = traitDefaults.traitDefaultMethods.get(traitName);
     const hit = methodMap?.get(methodName);
@@ -1072,9 +1062,10 @@ function resolveRustPass2CallTarget(params: {
     // Phase 2 Task 2.4.1 — trait-default dispatch for receiver.method()
     // when the receiver's type has no local override of the method.
     if (traitDefaults) {
-      const receiverType = receiver === "self"
-        ? (selfImplType ?? parseOwnerTypeFromNodeId(callerSymbol.nodeId))
-        : receiverTypes?.get(receiver);
+      const receiverType =
+        receiver === "self"
+          ? (selfImplType ?? parseOwnerTypeFromNodeId(callerSymbol.nodeId))
+          : receiverTypes?.get(receiver);
       if (receiverType) {
         const traitHit = resolveTraitDefaultMethod(
           receiverType,
@@ -1172,6 +1163,9 @@ async function resolveRustCallEdgesPass2(params: {
   globalNameToSymbolIds?: Map<string, string[]>;
   telemetry?: Pass2ResolverContext["telemetry"];
   cache?: Map<string, unknown>;
+  mode?: "full" | "incremental";
+  submitEdgeWrite?: Pass2ResolverContext["submitEdgeWrite"];
+  importCache?: Pass2ResolverContext["importCache"];
 }): Promise<number> {
   const {
     repoId,
@@ -1181,6 +1175,9 @@ async function resolveRustCallEdgesPass2(params: {
     globalNameToSymbolIds,
     telemetry,
     cache,
+    mode,
+    submitEdgeWrite,
+    importCache,
   } = params;
 
   const conn = await getLadybugConn();
@@ -1296,9 +1293,7 @@ async function resolveRustCallEdgesPass2(params: {
   const symbolIdsToRefresh = filteredSymbolDetails.map(
     (detail) => detail.symbolId,
   );
-  await withWriteConn(async (wConn) => {
-    await clearOutgoingCallEdges(wConn, symbolIdsToRefresh, createdCallEdges);
-  });
+  clearLocalCallDedupKeys(symbolIdsToRefresh, createdCallEdges);
 
   const nodeIdToSymbolId = createNodeIdToSymbolId(filteredSymbolDetails);
   const localImplMethodsByType = buildLocalImplMethodNamespaces(
@@ -1317,6 +1312,7 @@ async function resolveRustCallEdgesPass2(params: {
     [...adapter.fileExtensions],
     "rust",
     content,
+    importCache,
   );
   const importedNameToSymbolIds = mergeImportedNameMaps(
     importResolution.importedNameToSymbolIds,
@@ -1497,9 +1493,23 @@ async function resolveRustCallEdgesPass2(params: {
     }
   }
 
-  await withWriteConn(async (wConn) => {
-    await ladybugDb.insertEdges(wConn, edgesToInsert);
-  });
+  if (submitEdgeWrite) {
+    await submitEdgeWrite({
+      symbolIdsToRefresh,
+      edges: edgesToInsert,
+    });
+  } else {
+    await withWriteConn(async (wConn) => {
+      if (mode !== "full" && symbolIdsToRefresh.length > 0) {
+        await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
+          wConn,
+          symbolIdsToRefresh,
+          "call",
+        );
+      }
+      await ladybugDb.insertEdges(wConn, edgesToInsert);
+    });
+  }
   return createdEdges;
 }
 
@@ -1533,6 +1543,9 @@ export class RustPass2Resolver implements Pass2Resolver {
         globalNameToSymbolIds: context.globalNameToSymbolIds,
         telemetry: context.telemetry,
         cache: context.cache,
+        mode: context.mode,
+        submitEdgeWrite: context.submitEdgeWrite,
+        importCache: context.importCache,
       });
       return { edgesCreated };
     } catch (error) {
@@ -1618,7 +1631,10 @@ function parseRustUseBody(
     parseRustUseLeaf(body, isReExport, out);
     return;
   }
-  const prefix = body.slice(0, braceIdx).replace(/::\s*$/, "").trim();
+  const prefix = body
+    .slice(0, braceIdx)
+    .replace(/::\s*$/, "")
+    .trim();
   const closeIdx = body.lastIndexOf("}");
   if (closeIdx === -1 || closeIdx <= braceIdx) {
     return;

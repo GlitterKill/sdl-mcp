@@ -9,6 +9,8 @@ import {
   DEFAULT_PASS2_CONCURRENCY,
   MAX_PASS2_CONCURRENCY,
   DEFAULT_EMBEDDING_CONCURRENCY,
+  DEFAULT_EMBEDDING_BATCH_SIZE,
+  MAX_EMBEDDING_BATCH_SIZE,
   MAX_EMBEDDING_CONCURRENCY,
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
@@ -368,7 +370,10 @@ export const SemanticConfigSchema = z.object({
    *  lanes can contribute to hybrid fusion. Primary `model` is always populated;
    *  each name listed here gets a separate pass. Unknown model names are skipped.
    *  Typical: `["nomic-embed-text-v1.5"]` alongside a jina primary. */
-  additionalModels: z.array(z.string()).optional().default(["nomic-embed-text-v1.5"]),
+  additionalModels: z
+    .array(z.string())
+    .optional()
+    .default(["nomic-embed-text-v1.5"]),
   modelCacheDir: z.string().nullish(),
   generateSummaries: z.boolean().default(false),
   /** Summary LLM backend — independent from embedding provider.
@@ -388,7 +393,7 @@ export const SemanticConfigSchema = z.object({
    * this can improve throughput on multi-core machines but ONNX Runtime's
    * internal thread pool is shared across all concurrent calls; consider
    * reducing `intraOpNumThreads` proportionally when raising above 1.
-   * Capped at MAX_EMBEDDING_CONCURRENCY (4).
+   * Capped at MAX_EMBEDDING_CONCURRENCY (8).
    */
   embeddingConcurrency: z
     .number()
@@ -396,6 +401,109 @@ export const SemanticConfigSchema = z.object({
     .min(1)
     .max(MAX_EMBEDDING_CONCURRENCY)
     .default(DEFAULT_EMBEDDING_CONCURRENCY),
+  /**
+   * ONNX inference batch width for symbol embedding refresh. Default 32
+   * matches `LocalEmbeddingProvider`'s tokenizer + session expectations.
+   * Larger batches (64-128) amortise tokenizer + session bind/unbind costs
+   * across more rows per round-trip but raise peak memory roughly with the
+   * longest sequence in the batch. Length-bucketing before splitting keeps
+   * tokenizer pad waste bounded. Capped at MAX_EMBEDDING_BATCH_SIZE (128).
+   */
+  embeddingBatchSize: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_EMBEDDING_BATCH_SIZE)
+    .default(DEFAULT_EMBEDDING_BATCH_SIZE),
+  /**
+   * When two or more embedding models are configured (e.g. jina + nomic),
+   * run them in series instead of via `Promise.all`. The default
+   * (`false`) launches all models concurrently — best when ORT can truly
+   * run two sessions on independent thread pools. On systems where the
+   * sessions serialize at the ORT thread-pool layer (observed alternation
+   * pattern), `true` typically wins by ~5-15%: each model holds the full
+   * thread budget end-to-end, weights stay hot in L3 cache, and
+   * model-handoff scheduling overhead disappears. Wall time becomes
+   * `model_a_time + model_b_time` rather than the contended-parallel
+   * worst-case.
+   */
+  embeddingsSequential: z.boolean().default(false),
+  /**
+   * Which ONNX file variant to load for each embedding model. Lets users
+   * trade speed for accuracy without recompiling. Valid values depend on
+   * what each model publishes — when a chosen variant is unavailable for
+   * a given model, the registry falls back to that model's
+   * `defaultVariant` with a warning.
+   *
+   * Common variants:
+   *   - `"default"` / `"int8"`: HF's general-quantized file (~140-160MB).
+   *     The current shipped default, balanced speed/accuracy.
+   *   - `"fp16"`: half-precision (~270-320MB). ~30% faster than fp32 with
+   *     <0.5% accuracy loss.
+   *   - `"fp32"`: full precision (~550-650MB). Reference quality, slowest.
+   *   - `"q4"`, `"q4f16"`, `"bnb4"`, `"uint8"`: aggressive quantization
+   *     (~110-165MB), 2-4× faster than fp32 with 1-7% accuracy loss
+   *     depending on workload. Availability per model varies — see
+   *     `ModelInfo.variants` in `model-registry.ts`.
+   *
+   * Pass-through string so future variants land without a schema bump.
+   */
+  modelVariant: z.string().optional(),
+  /**
+   * ONNX Runtime execution providers, in priority order. ORT tries them
+   * left-to-right and uses the first one that initialises successfully.
+   *
+   * Defaults to `["cpu"]`. The default `onnxruntime-node` npm package
+   * ships these providers (no extra installation required):
+   *
+   *   - Windows x64: `"dml"` (DirectML — NVIDIA + AMD + Intel DX12 GPUs),
+   *     `"webgpu"`.
+   *   - macOS (x64 / arm64): `"coreml"` (Apple Silicon ANE/GPU + Intel
+   *     Mac GPU).
+   *   - Linux x64: `"cuda"`, `"tensorrt"`. CUDA EP requires an NVIDIA
+   *     GPU plus CUDA 12 + cuDNN installed on the host system — the EP
+   *     binaries ship with the package but won't initialise without the
+   *     runtime libraries.
+   *
+   * Out of scope (need a custom ORT build): `"rocm"` (AMD on Linux),
+   * `"openvino"` (Intel), `"qnn"` (Qualcomm). Users on AMD Linux can
+   * substitute their own `onnxruntime-node` build at the package level
+   * and sdl-mcp will pick up the extra providers — the filter only
+   * drops entries known to be unavailable in the default package.
+   *
+   * Always include `"cpu"` somewhere so initialisation can fall back
+   * when a GPU provider can't load — the helper auto-appends it if you
+   * forget.
+   */
+  executionProviders: z.array(z.string()).default(["cpu"]),
+  /**
+   * ONNX Runtime thread-pool configuration for local embedding inference.
+   *
+   * ORT defaults `intra_op_num_threads` to **physical** core count, which on
+   * SMT/HT CPUs (and on AMD CPUs whose Provider Driver pins the Node process
+   * to a single CCD) leaves half the logical threads idle. Setting this
+   * explicitly to `os.availableParallelism()` saturates available threads.
+   *
+   * Both fields default to 0 — the helper interprets 0 as "auto" and resolves
+   * to `os.availableParallelism()` for `intraOpNumThreads`, 1 for
+   * `interOpNumThreads`. Set explicit positive values to override.
+   *
+   * Notes:
+   *   - Two embedding models run concurrently via Promise.all and share ORT's
+   *     global thread pool, so the pool size is total, not per-model.
+   *   - When raising `embeddingConcurrency` above 1, consider lowering
+   *     `intraOpNumThreads` proportionally to avoid oversubscription.
+   *   - `executionMode: "parallel"` allows ORT to run independent graph nodes
+   *     concurrently within a single inference; usually a small win for
+   *     transformer-style models.
+   */
+  onnx: z
+    .object({
+      intraOpNumThreads: z.number().int().min(0).max(256).default(0),
+      interOpNumThreads: z.number().int().min(0).max(64).default(0),
+      executionMode: z.enum(["sequential", "parallel"]).default("sequential"),
+    })
+    .optional(),
   /**
    * @deprecated Use `retrieval.vector` for HNSW index configuration instead.
    * Legacy HNSW ANN index settings. Still honoured when `retrieval.mode` is
@@ -411,7 +519,12 @@ export type SemanticConfig = z.infer<typeof SemanticConfigSchema>;
 export const PrefetchConfigSchema = z.object({
   enabled: z.boolean().default(true),
   maxBudgetPercent: z.number().int().min(1).max(100).default(20),
-  warmTopN: z.number().int().min(1).default(50),
+  // Default 0 = no startup warming. Earlier default (50) marked all 50
+  // entries as wasted prefetch when no caller consumed them within the
+  // 5-minute stale window, producing repo.status `wasteRate: 1.0` on
+  // workloads that don't follow the top-fan-in path. Set > 0 only when
+  // the warm set is provably consumed.
+  warmTopN: z.number().int().min(0).default(0),
 });
 
 export type PrefetchConfig = z.infer<typeof PrefetchConfigSchema>;
@@ -595,6 +708,18 @@ export const ScipGeneratorConfigSchema = z.object({
     .min(1000)
     .max(30 * 60 * 1000)
     .default(10 * 60 * 1000),
+  /**
+   * Delete the generator-produced `<repoRoot>/index.scip` after the post-
+   * refresh ingest has consumed it. The file is regenerated on every
+   * refresh so keeping it around just clutters the working tree (and
+   * shows up in `git status`). Set to `false` if you want to inspect
+   * the file out-of-band or have other tooling that consumes it.
+   *
+   * Only the default output location is cleaned up — if you pass
+   * `--output <custom-path>` via `args` you are on the hook for managing
+   * that file's lifecycle yourself.
+   */
+  cleanupAfterIngest: z.boolean().default(true),
 });
 
 export type ScipGeneratorConfig = z.infer<typeof ScipGeneratorConfigSchema>;
@@ -615,6 +740,7 @@ export const ScipConfigSchema = z.object({
     args: [],
     autoInstall: true,
     timeoutMs: 10 * 60 * 1000,
+    cleanupAfterIngest: true,
   }),
 });
 
@@ -628,8 +754,8 @@ export const PackedEncoderToggleSchema = z.object({
 
 export const PackedConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  threshold: z.number().min(0).max(1).default(0.10),
-  tokenThreshold: z.number().min(0).max(1).default(0.20),
+  threshold: z.number().min(0).max(1).default(0.1),
+  tokenThreshold: z.number().min(0).max(1).default(0.2),
   defaultFormat: z.enum(["packed", "auto", "compact"]).default("auto"),
   encoders: z.record(z.string(), PackedEncoderToggleSchema).optional(),
 });

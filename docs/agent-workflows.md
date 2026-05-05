@@ -63,7 +63,7 @@ SDL-MCP exposes 33 tools in flat default mode (31 flat tools plus `sdl.action.se
 |                            | `sdl.buffer.status`        | Check live buffer state (pending, dirty, queue depth)                                                                                                                |
 | **Symbols**                | `sdl.symbol.search`        | Search symbols by name or summary; supports semantic reranking via `semantic: true`                                                                                  |
 |                            | `sdl.symbol.getCard`       | Get a single symbol card by `symbolId` or `symbolRef`, with ETag caching and optional `minCallConfidence` filtering                                                  |
-|                            | `sdl.symbol.getCard`      | Batch fetch up to 100 cards by `symbolIds` or `symbolRefs`; supports `knownEtags` and partial-success metadata                                                       |
+|                            | `sdl.symbol.getCard`       | Batch fetch up to 100 cards by `symbolIds` or `symbolRefs`; supports `knownEtags` and partial-success metadata                                                       |
 | **Slices**                 | `sdl.slice.build`          | Build graph slice from entry symbols, task text, stack traces, or edited files                                                                                       |
 |                            | `sdl.slice.refresh`        | Refresh an existing slice handle; returns incremental delta only                                                                                                     |
 |                            | `sdl.slice.spillover.get`  | Paginated fetch for overflow symbols beyond budget                                                                                                                   |
@@ -90,7 +90,7 @@ SDL-MCP exposes 33 tools in flat default mode (31 flat tools plus `sdl.action.se
 |                            | `sdl.manual`               | Return a compact filtered API reference for a queried or explicit action subset                                                                                      |
 |                            | `sdl.context`              | Retrieve task-shaped context inside Code Mode for explain/debug/review/implement work                                                                                |
 |                            | `sdl.workflow`             | Execute up to 50 actions in a single round trip with `$N` result piping, transforms, and optional traces                                                             |
-|                            | `sdl.file`                 | Unified Code Mode file gateway for read, write, search/edit preview, and search/edit apply operations                                                               |
+|                            | `sdl.file`                 | Unified Code Mode file gateway for read, write, search/edit preview, and search/edit apply operations                                                                |
 
 ---
 
@@ -127,8 +127,7 @@ Use this order unless task constraints force escalation:
    - Pass `knownEtags` to `getCards` for delta fetching (unchanged cards return as refs, not full payloads).
    - Use `minCallConfidence` to filter low-confidence call edges from card responses.
 4. `sdl.slice.build` with explicit budget and compact output:
-   - Keep `wireFormat: "compact"` (default) and `wireFormatVersion: 2` (default).
-   - Use `wireFormatVersion: 3` for grouped edge encoding when slices exceed 50 cards.
+   - Use `wireFormat: "compact"` and `wireFormatVersion: 3` (the only accepted version since 0.11.0; v1/v2 retired). Or use `wireFormat: "auto"` (the schema default) to let SDL-MCP pick between compact JSON and a packed string based on token savings.
    - Use `wireFormat: "readable"` when debugging slice payloads or developing integrations and the compact legend is getting in the way.
    - Set budget early, for example: `{ "maxCards": 30, "maxEstimatedTokens": 4000 }`.
    - Use `minConfidence` to drop low-trust edges (default `0.5`; adaptive thresholds can tighten to `0.8` and `0.95` as token usage approaches budget).
@@ -176,7 +175,7 @@ Use this order unless task constraints force escalation:
   - Keep `minConfidence` near `0.5` for recall-oriented work and raise it for precision-focused runs.
   - Use `minCallConfidence` to additionally filter low-confidence call edges in returned cards.
   - Slice cards filter `deps.calls`/`deps.imports` to only in-slice symbols and include per-dependency confidence scores.
-  - Use `wireFormatVersion: 3` for grouped edge encoding when slices exceed 50 cards.
+  - `wireFormatVersion: 3` is the only accepted compact version (v1/v2 retired in 0.11.0); v3 uses grouped edge encoding which scales well past 50 cards.
   - Use `adaptiveDetail: true` to let SDL-MCP vary card detail levels by relevance score.
   - `cardDetail` options: `"minimal"` (cheapest) → `"signature"` → `"deps"` → `"compact"` → `"full"` (most expensive).
 - `sdl.code.needWindow`:

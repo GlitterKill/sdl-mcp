@@ -56,7 +56,9 @@ const SymbolGetCardAction = z
     includeResolutionMetadata: z.boolean().optional(),
   })
   .superRefine((value, ctx) => {
-    const provided = Number(value.symbolId !== undefined) + Number(value.symbolRef !== undefined);
+    const provided =
+      Number(value.symbolId !== undefined) +
+      Number(value.symbolRef !== undefined);
     if (provided !== 1) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -73,17 +75,20 @@ const SliceBuildAction = z.object({
   failingTestPath: z.string().optional(),
   editedFiles: z.array(z.string()).max(100).optional(),
   entrySymbols: z.array(z.string()).max(100).optional(),
-  knownCardEtags: z.record(z.string(), z.string())
-      .refine(obj => Object.keys(obj).length <= 1000, { message: "knownCardEtags exceeds maximum of 1000 entries" })
-      .optional(),
+  knownCardEtags: z
+    .record(z.string(), z.string())
+    .refine((obj) => Object.keys(obj).length <= 1000, {
+      message: "knownCardEtags exceeds maximum of 1000 entries",
+    })
+    .optional(),
   cardDetail: z
     .enum(["minimal", "signature", "deps", "compact", "full"])
     .optional(),
   adaptiveDetail: z.boolean().optional(),
-  wireFormat: z.enum(["standard", "compact", "agent"]).optional(),
-  wireFormatVersion: z
-    .union([z.literal(1), z.literal(2), z.literal(3)])
+  wireFormat: z
+    .enum(["standard", "compact", "agent", "packed", "auto"])
     .optional(),
+  wireFormatVersion: z.literal(3).optional(),
   budget: SliceBudgetFields.optional(),
   minConfidence: z.number().min(0).max(1).optional(),
   minCallConfidence: z.number().min(0).max(1).optional(),
@@ -273,7 +278,12 @@ const UsageStatsAction = z.object({
 const FileReadAction = z.object({
   action: z.literal("file.read"),
   filePath: z.string().min(1),
-  maxBytes: z.number().int().min(1).max(512 * 1024).optional(),
+  maxBytes: z
+    .number()
+    .int()
+    .min(1)
+    .max(512 * 1024)
+    .optional(),
   offset: z.number().int().min(0).optional(),
   limit: z.number().int().min(1).max(5000).optional(),
   search: z.string().max(500).optional(),
@@ -347,12 +357,13 @@ const BufferPushAction = z.object({
     .min(1)
     .refine(
       (p) => !p.includes("..") && !/^[\/]/.test(p) && !/^[A-Za-z]:/.test(p),
-      { message: "filePath must be a relative path without traversal sequences" },
+      {
+        message: "filePath must be a relative path without traversal sequences",
+      },
     )
-    .refine(
-      (p) => !p.includes("\0"),
-      { message: "filePath must not contain null bytes" },
-    ),
+    .refine((p) => !p.includes("\0"), {
+      message: "filePath must not contain null bytes",
+    }),
   content: z.string().max(5_242_880),
   language: z.string().optional(),
   version: z.number().int().min(0),
@@ -406,7 +417,10 @@ const RuntimeExecuteAction = z.object({
     .max(1000)
     .default(RUNTIME_DEFAULT_MAX_RESPONSE_LINES),
   persistOutput: z.boolean().default(true),
-  outputMode: z.enum(["minimal", "summary", "intent"]).default("minimal").optional(),
+  outputMode: z
+    .enum(["minimal", "summary", "intent"])
+    .default("minimal")
+    .optional(),
 });
 
 const RuntimeQueryOutputAction = z.object({

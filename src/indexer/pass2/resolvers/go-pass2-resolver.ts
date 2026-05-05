@@ -7,6 +7,7 @@ import * as ladybugDb from "../../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../../db/ladybug-queries.js";
 import type { SymbolKind } from "../../../domain/types.js";
 import { readFileAsync } from "../../../util/asyncFs.js";
+import { singleFlight } from "../../../util/concurrency.js";
 import { logger } from "../../../util/logger.js";
 import { getAdapterForExtension } from "../../adapter/registry.js";
 import type { FileMetadata } from "../../fileScanner.js";
@@ -36,7 +37,6 @@ const GO_IMPORT_ALIAS_CONFIDENCE = 0.82;
  * Go same-package literal (0.92). Off-rubric value preserved byte-for-byte.
  */
 const GO_SAME_PACKAGE_CONFIDENCE = 0.92;
-
 
 type ExtractedSymbol = {
   nodeId: string;
@@ -246,16 +246,17 @@ function mapExtractedSymbolsToExisting(
   return filteredSymbolDetails;
 }
 
-async function clearOutgoingCallEdges(
-  conn: import("kuzu").Connection,
+/**
+ * In-memory cleanup of stale dedup keys for the symbols this file is about to
+ * re-resolve. The matching SQL DELETE is deferred to `submitEdgeWrite` so the
+ * dispatcher can combine deletes + inserts across an entire concurrency batch
+ * into a single `withWriteConn`.
+ */
+function clearLocalCallDedupKeys(
   symbolIds: string[],
   createdCallEdges: Set<string>,
-): Promise<void> {
-  if (symbolIds.length === 0) {
-    return;
-  }
-
-  await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(conn, symbolIds, "call");
+): void {
+  if (symbolIds.length === 0) return;
   for (const symbolId of symbolIds) {
     for (const edgeKey of Array.from(createdCallEdges)) {
       if (edgeKey.startsWith(`${symbolId}->`)) {
@@ -291,60 +292,54 @@ async function buildGoPackageIndex(
   repoId: string,
   cache?: Map<string, unknown>,
 ): Promise<GoPackageIndex> {
-  const cacheKey = `pass2-go:package-index:${repoId}`;
-  const cached = cache?.get(cacheKey);
-  if (cached) {
-    return cached as GoPackageIndex;
-  }
+  return singleFlight(cache, `pass2-go:package-index:${repoId}`, async () => {
+    const conn = await getLadybugConn();
+    const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
+    const goFiles = repoFiles.filter((file) => file.language === "go");
+    const goFileIds = new Set(goFiles.map((file) => file.fileId));
+    const fileById = new Map(goFiles.map((file) => [file.fileId, file]));
+    const packageByFilePath = new Map<string, string>();
+    const symbolsByPackage = new Map<
+      string,
+      Array<SymbolRow & { relPath: string }>
+    >();
 
-  const conn = await getLadybugConn();
-  const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
-  const goFiles = repoFiles.filter((file) => file.language === "go");
-  const goFileIds = new Set(goFiles.map((file) => file.fileId));
-  const fileById = new Map(goFiles.map((file) => [file.fileId, file]));
-  const packageByFilePath = new Map<string, string>();
-  const symbolsByPackage = new Map<
-    string,
-    Array<SymbolRow & { relPath: string }>
-  >();
+    const repoSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
+    for (const symbol of repoSymbols) {
+      if (!goFileIds.has(symbol.fileId)) {
+        continue;
+      }
+      const file = fileById.get(symbol.fileId);
+      if (!file) {
+        continue;
+      }
+      if (symbol.kind === "module") {
+        packageByFilePath.set(file.relPath, symbol.name);
+      }
+    }
 
-  const repoSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
-  for (const symbol of repoSymbols) {
-    if (!goFileIds.has(symbol.fileId)) {
-      continue;
+    for (const symbol of repoSymbols) {
+      if (!goFileIds.has(symbol.fileId)) {
+        continue;
+      }
+      const file = fileById.get(symbol.fileId);
+      if (!file) {
+        continue;
+      }
+      const packageName = packageByFilePath.get(file.relPath);
+      if (!packageName) {
+        continue;
+      }
+      const bucket = symbolsByPackage.get(packageName) ?? [];
+      bucket.push({
+        ...symbol,
+        relPath: file.relPath,
+      });
+      symbolsByPackage.set(packageName, bucket);
     }
-    const file = fileById.get(symbol.fileId);
-    if (!file) {
-      continue;
-    }
-    if (symbol.kind === "module") {
-      packageByFilePath.set(file.relPath, symbol.name);
-    }
-  }
 
-  for (const symbol of repoSymbols) {
-    if (!goFileIds.has(symbol.fileId)) {
-      continue;
-    }
-    const file = fileById.get(symbol.fileId);
-    if (!file) {
-      continue;
-    }
-    const packageName = packageByFilePath.get(file.relPath);
-    if (!packageName) {
-      continue;
-    }
-    const bucket = symbolsByPackage.get(packageName) ?? [];
-    bucket.push({
-      ...symbol,
-      relPath: file.relPath,
-    });
-    symbolsByPackage.set(packageName, bucket);
-  }
-
-  const packageIndex = { packageByFilePath, symbolsByPackage };
-  cache?.set(cacheKey, packageIndex);
-  return packageIndex;
+    return { packageByFilePath, symbolsByPackage };
+  });
 }
 
 function inferGoReceiverTypes(tree: Tree): Map<string, string> {
@@ -574,6 +569,9 @@ async function resolveGoCallEdgesPass2(params: {
   globalNameToSymbolIds?: Map<string, string[]>;
   telemetry?: Pass2ResolverContext["telemetry"];
   cache?: Map<string, unknown>;
+  mode?: "full" | "incremental";
+  submitEdgeWrite?: Pass2ResolverContext["submitEdgeWrite"];
+  importCache?: Pass2ResolverContext["importCache"];
 }): Promise<number> {
   const {
     repoId,
@@ -584,6 +582,9 @@ async function resolveGoCallEdgesPass2(params: {
     globalNameToSymbolIds,
     telemetry,
     cache,
+    mode,
+    submitEdgeWrite,
+    importCache,
   } = params;
 
   const conn = await getLadybugConn();
@@ -664,9 +665,7 @@ async function resolveGoCallEdgesPass2(params: {
   const symbolIdsToRefresh = filteredSymbolDetails.map(
     (detail) => detail.symbolId,
   );
-  await withWriteConn(async (wConn) => {
-    await clearOutgoingCallEdges(wConn, symbolIdsToRefresh, createdCallEdges);
-  });
+  clearLocalCallDedupKeys(symbolIdsToRefresh, createdCallEdges);
 
   const nodeIdToSymbolId = createNodeIdToSymbolId(filteredSymbolDetails);
   const localNameToSymbolIds = createLocalNameIndex(filteredSymbolDetails);
@@ -678,6 +677,7 @@ async function resolveGoCallEdgesPass2(params: {
     languages.map((language) => `.${language}`),
     "go",
     content,
+    importCache,
   );
 
   const packageIndex = await buildGoPackageIndex(repoId, cache);
@@ -768,9 +768,23 @@ async function resolveGoCallEdgesPass2(params: {
     }
   }
 
-  await withWriteConn(async (wConn) => {
-    await ladybugDb.insertEdges(wConn, edgesToInsert);
-  });
+  if (submitEdgeWrite) {
+    await submitEdgeWrite({
+      symbolIdsToRefresh,
+      edges: edgesToInsert,
+    });
+  } else {
+    await withWriteConn(async (wConn) => {
+      if (mode !== "full" && symbolIdsToRefresh.length > 0) {
+        await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
+          wConn,
+          symbolIdsToRefresh,
+          "call",
+        );
+      }
+      await ladybugDb.insertEdges(wConn, edgesToInsert);
+    });
+  }
   return createdEdges;
 }
 
@@ -805,6 +819,9 @@ export class GoPass2Resolver implements Pass2Resolver {
         globalNameToSymbolIds: context.globalNameToSymbolIds,
         telemetry: context.telemetry,
         cache: context.cache,
+        mode: context.mode,
+        submitEdgeWrite: context.submitEdgeWrite,
+        importCache: context.importCache,
       });
       return { edgesCreated };
     } catch (error) {

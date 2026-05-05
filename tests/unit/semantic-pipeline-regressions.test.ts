@@ -10,7 +10,9 @@ function readSource(path: string): string {
 describe("semantic pipeline regressions", () => {
   it("checks embedding cache before invoking provider embed (batched)", () => {
     const source = readSource("src/indexer/embeddings.ts");
-    const fnStart = source.indexOf("export async function refreshSymbolEmbeddings(");
+    const fnStart = source.indexOf(
+      "export async function refreshSymbolEmbeddings(",
+    );
     const nextFnStart = source.indexOf("\nexport ", fnStart + 1);
     const fnEnd = nextFnStart !== -1 ? nextFnStart : source.length;
     assert.ok(fnStart !== -1);
@@ -19,7 +21,9 @@ describe("semantic pipeline regressions", () => {
 
     // Phase 4: Batched refresh patterns
     // 1. storageModel pinned once at start (const, not let)
-    const storageModelIdx = fnBody.indexOf("const storageModel = provider.isMockFallback");
+    const storageModelIdx = fnBody.indexOf(
+      "const storageModel = provider.isMockFallback",
+    );
     assert.ok(
       storageModelIdx !== -1,
       "refreshSymbolEmbeddings should pin storageModel once at start",
@@ -33,7 +37,9 @@ describe("semantic pipeline regressions", () => {
     );
 
     // 3. cardHash computed per symbol in uncached filter loop
-    const cardHashIdx = fnBody.indexOf("const cardHash = buildCardHash(symbol, prefixedText)");
+    const cardHashIdx = fnBody.indexOf(
+      "const cardHash = buildCardHash(symbol, prefixedText)",
+    );
     assert.ok(
       cardHashIdx !== -1,
       "refreshSymbolEmbeddings should compute cardHash for each symbol",
@@ -70,11 +76,14 @@ describe("semantic pipeline regressions", () => {
       "refreshSymbolEmbeddings should skip cached symbols before batching",
     );
 
-    // Batch size constant usage
+    // Batch size source: either the legacy `REFRESH_BATCH_SIZE` constant
+    // (kept as an exported alias) or the resolved `batchSize` local that
+    // clamps the new `params.batchSize` field against
+    // `DEFAULT_EMBEDDING_BATCH_SIZE` / `MAX_EMBEDDING_BATCH_SIZE`.
     assert.match(
       fnBody,
-      /REFRESH_BATCH_SIZE/,
-      "refreshSymbolEmbeddings should use REFRESH_BATCH_SIZE constant",
+      /REFRESH_BATCH_SIZE|DEFAULT_EMBEDDING_BATCH_SIZE/,
+      "refreshSymbolEmbeddings should reference the batch-size constants",
     );
   });
 
@@ -133,7 +142,10 @@ describe("semantic pipeline regressions", () => {
 
     const fnBody = source.slice(fnStart, fnEnd);
     const localStart = fnBody.indexOf('if (provider === "local") {');
-    assert.ok(localStart !== -1, "createSummaryProvider should include a local provider branch");
+    assert.ok(
+      localStart !== -1,
+      "createSummaryProvider should include a local provider branch",
+    );
 
     const localBranch = fnBody.slice(localStart);
     assert.match(

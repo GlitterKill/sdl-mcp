@@ -5,6 +5,7 @@ import { getLadybugConn, withWriteConn } from "../../../db/ladybug.js";
 import * as ladybugDb from "../../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../../db/ladybug-queries.js";
 import { readFileAsync } from "../../../util/asyncFs.js";
+import { singleFlight } from "../../../util/concurrency.js";
 import { logger } from "../../../util/logger.js";
 import { normalizePath } from "../../../util/paths.js";
 import { getAdapterForExtension } from "../../adapter/registry.js";
@@ -40,7 +41,6 @@ const KOTLIN_COMPANION_OBJECT_CONFIDENCE = 0.88;
  * preserved byte-for-byte.
  */
 const KOTLIN_RECEIVER_THIS_CONFIDENCE = 0.85;
-
 
 type ExtractedSymbol = {
   nodeId: string;
@@ -230,16 +230,17 @@ function mapExtractedSymbolsToExisting(
   return filteredSymbolDetails;
 }
 
-async function clearOutgoingCallEdges(
-  conn: import("kuzu").Connection,
+/**
+ * In-memory cleanup of stale dedup keys for the symbols this file is about to
+ * re-resolve. The matching SQL DELETE is deferred to `submitEdgeWrite` so the
+ * dispatcher can combine deletes + inserts across an entire concurrency batch
+ * into a single `withWriteConn`.
+ */
+function clearLocalCallDedupKeys(
   symbolIds: string[],
   createdCallEdges: Set<string>,
-): Promise<void> {
-  if (symbolIds.length === 0) {
-    return;
-  }
-
-  await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(conn, symbolIds, "call");
+): void {
+  if (symbolIds.length === 0) return;
   for (const symbolId of symbolIds) {
     for (const edgeKey of Array.from(createdCallEdges)) {
       if (edgeKey.startsWith(`${symbolId}->`)) {
@@ -321,12 +322,14 @@ async function buildKotlinPackageIndex(
   repoId: string,
   cache?: Map<string, unknown>,
 ): Promise<KotlinPackageIndex> {
-  const cacheKey = `pass2-kotlin:package-index:${repoId}`;
-  const cached = cache?.get(cacheKey);
-  if (cached) {
-    return cached as KotlinPackageIndex;
-  }
+  return singleFlight(cache, `pass2-kotlin:package-index:${repoId}`, () =>
+    buildKotlinPackageIndexInner(repoId),
+  );
+}
 
+async function buildKotlinPackageIndexInner(
+  repoId: string,
+): Promise<KotlinPackageIndex> {
   const conn = await getLadybugConn();
   const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
   const kotlinFiles = repoFiles.filter((file) =>
@@ -413,7 +416,9 @@ async function buildKotlinPackageIndex(
 
   const methodsByClassSymbolId = new Map<string, Map<string, string[]>>();
   for (const symbolsInFile of symbolsByRelPath.values()) {
-    const classSymbols = symbolsInFile.filter((symbol) => symbol.kind === "class");
+    const classSymbols = symbolsInFile.filter(
+      (symbol) => symbol.kind === "class",
+    );
     if (classSymbols.length === 0) {
       continue;
     }
@@ -448,7 +453,7 @@ async function buildKotlinPackageIndex(
     }
   }
 
-  const packageIndex = {
+  return {
     packageByFilePath,
     symbolsByPackage,
     directoryByFilePath,
@@ -456,8 +461,6 @@ async function buildKotlinPackageIndex(
     classNameToSymbolIds,
     methodsByClassSymbolId,
   };
-  cache?.set(cacheKey, packageIndex);
-  return packageIndex;
 }
 
 function buildSamePackageCallableIndex(
@@ -805,6 +808,9 @@ async function resolveKotlinCallEdgesPass2(params: {
   globalNameToSymbolIds?: Map<string, string[]>;
   telemetry?: Pass2ResolverContext["telemetry"];
   cache?: Map<string, unknown>;
+  mode?: "full" | "incremental";
+  submitEdgeWrite?: Pass2ResolverContext["submitEdgeWrite"];
+  importCache?: Pass2ResolverContext["importCache"];
 }): Promise<number> {
   const {
     repoId,
@@ -814,6 +820,9 @@ async function resolveKotlinCallEdgesPass2(params: {
     globalNameToSymbolIds,
     telemetry,
     cache,
+    mode,
+    submitEdgeWrite,
+    importCache,
   } = params;
 
   const conn = await getLadybugConn();
@@ -895,9 +904,7 @@ async function resolveKotlinCallEdgesPass2(params: {
   const symbolIdsToRefresh = filteredSymbolDetails.map(
     (detail) => detail.symbolId,
   );
-  await withWriteConn(async (wConn) => {
-    await clearOutgoingCallEdges(wConn, symbolIdsToRefresh, createdCallEdges);
-  });
+  clearLocalCallDedupKeys(symbolIdsToRefresh, createdCallEdges);
 
   const nodeIdToSymbolId = createNodeIdToSymbolId(filteredSymbolDetails);
   const localClassMethodNameToSymbolIds = buildLocalClassMethodIndex(
@@ -911,6 +918,7 @@ async function resolveKotlinCallEdgesPass2(params: {
     [...adapter.fileExtensions],
     "kotlin",
     content,
+    importCache,
   );
 
   const packageIndex = await buildKotlinPackageIndex(repoId, cache);
@@ -942,7 +950,10 @@ async function resolveKotlinCallEdgesPass2(params: {
   let createdEdges = 0;
 
   for (const detail of filteredSymbolDetails) {
-    const callerSourceText = sliceSourceText(content, detail.extractedSymbol.range);
+    const callerSourceText = sliceSourceText(
+      content,
+      detail.extractedSymbol.range,
+    );
     for (const call of calls) {
       const callerNodeId =
         call.callerNodeId ??
@@ -1013,9 +1024,23 @@ async function resolveKotlinCallEdgesPass2(params: {
     }
   }
 
-  await withWriteConn(async (wConn) => {
-    await ladybugDb.insertEdges(wConn, edgesToInsert);
-  });
+  if (submitEdgeWrite) {
+    await submitEdgeWrite({
+      symbolIdsToRefresh,
+      edges: edgesToInsert,
+    });
+  } else {
+    await withWriteConn(async (wConn) => {
+      if (mode !== "full" && symbolIdsToRefresh.length > 0) {
+        await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
+          wConn,
+          symbolIdsToRefresh,
+          "call",
+        );
+      }
+      await ladybugDb.insertEdges(wConn, edgesToInsert);
+    });
+  }
   return createdEdges;
 }
 
@@ -1050,6 +1075,9 @@ export class KotlinPass2Resolver implements Pass2Resolver {
         globalNameToSymbolIds: context.globalNameToSymbolIds,
         telemetry: context.telemetry,
         cache: context.cache,
+        mode: context.mode,
+        submitEdgeWrite: context.submitEdgeWrite,
+        importCache: context.importCache,
       });
       return { edgesCreated };
     } catch (error) {

@@ -73,7 +73,13 @@ export function getTierPresets(tier: CpuTier): PerformancePresets {
         summaryMaxConcurrency: 16,
         parallelScorerEnabled: true,
         parallelScorerPoolSize: 8,
-        pass2Concurrency: 6,
+        // F1: raised from 6 → 12 after C1 eliminated the per-file
+        // tree-sitter re-parse on the JS main thread. With pass-2 reads now
+        // served by the import cache (A1) and writes coalesced per batch,
+        // the new bottleneck is CPU on the resolver hot loop — higher
+        // concurrency overlaps that work across files instead of queueing
+        // it behind a single-threaded main-thread parse.
+        pass2Concurrency: 12,
         scipIngestConcurrency: 3,
       };
     case "high":
@@ -88,7 +94,8 @@ export function getTierPresets(tier: CpuTier): PerformancePresets {
         summaryMaxConcurrency: 8,
         parallelScorerEnabled: true,
         parallelScorerPoolSize: 4,
-        pass2Concurrency: 3,
+        // F1: raised from 3 → 8 (see extreme-tier note above).
+        pass2Concurrency: 8,
         scipIngestConcurrency: 2,
       };
     case "mid":

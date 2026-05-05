@@ -143,6 +143,8 @@
     "enabled": true,
     "alpha": 0.6,
     "provider": "mock",
+    "executionProviders": ["cpu"],
+    "modelVariant": "default",
     "model": "jina-embeddings-v2-base-code",
     "additionalModels": ["nomic-embed-text-v1.5"],
     "generateSummaries": false

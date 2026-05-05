@@ -498,7 +498,7 @@ Supports three wire format versions for encoding efficiency:
 | `cardDetail`                | `"minimal"` \| `"signature"` \| `"deps"` \| `"compact"` \| `"full"` | No       | Detail level for cards in the slice                                                                                                                                                     |
 | `adaptiveDetail`            | boolean                                                             | No       | Let the system choose detail level per card based on relevance                                                                                                                          |
 | `wireFormat`                | `"standard"` \| `"readable"` \| `"compact"` \| `"agent"`            | No       | Response encoding (default: `"compact"`)                                                                                                                                                |
-| `wireFormatVersion`         | 1 \| 2 \| 3                                                         | No       | Compact format version (default: 2)                                                                                                                                                     |
+| `wireFormatVersion`         | 3                                                                   | No       | Compact format version. Only `3` is accepted; v1 and v2 were retired in 0.11.0.                                                                                                         |
 | `budget`                    | object                                                              | No       | `{maxCards: 1-500, maxEstimatedTokens: 1-200000}`                                                                                                                                       |
 | `minConfidence`             | number (0-1)                                                        | No       | Drop edges below this confidence (default: 0.5)                                                                                                                                         |
 | `minCallConfidence`         | number (0-1)                                                        | No       | Filter call edges specifically                                                                                                                                                          |
@@ -756,33 +756,33 @@ Write non-indexed files with targeted update modes instead of rewriting entire f
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-| :-------- | :--- | :------- | :------ | :---------- |
-| `repoId` | string | Yes | — | Repository identifier |
-| `filePath` | string | Yes | — | Path relative to repo root |
-| `content` | string | No | — | Full content for create or overwrite mode |
-| `replaceLines` | object | No | — | `{start, end, content}` line-range replacement |
-| `replacePattern` | object | No | — | `{pattern, replacement, global?}` regex replacement |
-| `jsonPath` | string | No | — | Dot-separated JSON key path |
-| `jsonValue` | unknown | No | — | New value for `jsonPath`; required when `jsonPath` is set |
-| `insertAt` | object | No | — | `{line, content}` insertion mode |
-| `append` | string | No | — | Content appended to the end of the file |
-| `createBackup` | boolean | No | `true` | Create a `.bak` file before modifying an existing file |
-| `createIfMissing` | boolean | No | `false` | Create the file if it does not already exist |
+| Parameter         | Type    | Required | Default | Description                                               |
+| :---------------- | :------ | :------- | :------ | :-------------------------------------------------------- |
+| `repoId`          | string  | Yes      | —       | Repository identifier                                     |
+| `filePath`        | string  | Yes      | —       | Path relative to repo root                                |
+| `content`         | string  | No       | —       | Full content for create or overwrite mode                 |
+| `replaceLines`    | object  | No       | —       | `{start, end, content}` line-range replacement            |
+| `replacePattern`  | object  | No       | —       | `{pattern, replacement, global?}` regex replacement       |
+| `jsonPath`        | string  | No       | —       | Dot-separated JSON key path                               |
+| `jsonValue`       | unknown | No       | —       | New value for `jsonPath`; required when `jsonPath` is set |
+| `insertAt`        | object  | No       | —       | `{line, content}` insertion mode                          |
+| `append`          | string  | No       | —       | Content appended to the end of the file                   |
+| `createBackup`    | boolean | No       | `true`  | Create a `.bak` file before modifying an existing file    |
+| `createIfMissing` | boolean | No       | `false` | Create the file if it does not already exist              |
 
 Provide exactly one of `content`, `replaceLines`, `replacePattern`, `jsonPath`, `insertAt`, or `append`.
 
 **Response:**
 
-| Field | Type | Description |
-| :---- | :--- | :---------- |
-| `filePath` | string | Normalized relative path |
-| `bytesWritten` | number | Total bytes written |
-| `linesWritten` | number | Line count written |
-| `mode` | string | One of `create`, `overwrite`, `replaceLines`, `replacePattern`, `jsonPath`, `insertAt`, or `append` |
-| `backupPath` | string | Backup path when backup creation is enabled |
-| `replacementCount` | number | Number of replacements in regex mode |
-| `indexUpdate` | object | Live-index patch result for indexed source files |
+| Field              | Type   | Description                                                                                         |
+| :----------------- | :----- | :-------------------------------------------------------------------------------------------------- |
+| `filePath`         | string | Normalized relative path                                                                            |
+| `bytesWritten`     | number | Total bytes written                                                                                 |
+| `linesWritten`     | number | Line count written                                                                                  |
+| `mode`             | string | One of `create`, `overwrite`, `replaceLines`, `replacePattern`, `jsonPath`, `insertAt`, or `append` |
+| `backupPath`       | string | Backup path when backup creation is enabled                                                         |
+| `replacementCount` | number | Number of replacements in regex mode                                                                |
+| `indexUpdate`      | object | Live-index patch result for indexed source files                                                    |
 
 **Security and limits:**
 
@@ -925,6 +925,7 @@ See the full write-tool section above under [File Access](#6-file-access). `sdl.
 There is no separate flat `sdl.context` tool in the regular MCP surface. Task-shaped context retrieval lives in Code Mode and is documented in [15. Code Mode Tools](#15-code-mode-tools). Outside Code Mode, use the manual ladder: `repo.overview` -> `symbol.search` -> `symbol.getCard` -> `slice.build` -> `code.getSkeleton` -> `code.getHotPath` -> `code.needWindow`.
 
 ### sdl.agent.feedback
+
 Records which symbols were useful or missing during a task, enabling offline tuning of slice relevance.
 
 **What it does:** After completing a task with a slice, the agent reports which symbols in the slice were actually useful and which expected symbols were missing. This feedback is stored in the graph database and used to improve future slice quality through reinforcement-style tuning.

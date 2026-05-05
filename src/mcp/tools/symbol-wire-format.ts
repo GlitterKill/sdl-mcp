@@ -38,6 +38,8 @@ export interface SymbolSearchWireInput {
     name: string;
     file: string;
     kind: string;
+    line?: number;
+    score?: number;
   }>;
   total?: number;
 }
@@ -51,10 +53,7 @@ export function serializeSymbolSearchForWireFormat(
     packedEnabled?: boolean;
   },
 ): SymbolSearchWireResult {
-  if (
-    wireFormat !== "packed" &&
-    wireFormat !== "auto"
-  ) {
+  if (wireFormat !== "packed" && wireFormat !== "auto") {
     return { format: "json", payload: input };
   }
   if (!isPackedEnabled(options?.packedEnabled)) {

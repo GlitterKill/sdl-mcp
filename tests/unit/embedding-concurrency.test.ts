@@ -15,9 +15,7 @@ import assert from "node:assert/strict";
 
 describe("embedding concurrency config", () => {
   it("SemanticConfigSchema accepts embeddingConcurrency with default 1", async () => {
-    const { SemanticConfigSchema } = await import(
-      "../../dist/config/types.js"
-    );
+    const { SemanticConfigSchema } = await import("../../dist/config/types.js");
     const parsed = SemanticConfigSchema.parse({});
     assert.strictEqual(
       parsed.embeddingConcurrency,
@@ -27,53 +25,44 @@ describe("embedding concurrency config", () => {
   });
 
   it("SemanticConfigSchema clamps embeddingConcurrency min to 1", async () => {
-    const { SemanticConfigSchema } = await import(
-      "../../dist/config/types.js"
-    );
+    const { SemanticConfigSchema } = await import("../../dist/config/types.js");
     assert.throws(
       () => SemanticConfigSchema.parse({ embeddingConcurrency: 0 }),
       "embeddingConcurrency < 1 should throw",
     );
   });
 
-  it("SemanticConfigSchema clamps embeddingConcurrency max to 4", async () => {
-    const { SemanticConfigSchema } = await import(
-      "../../dist/config/types.js"
-    );
+  it("SemanticConfigSchema clamps embeddingConcurrency max to 8", async () => {
+    const { SemanticConfigSchema } = await import("../../dist/config/types.js");
     assert.throws(
-      () => SemanticConfigSchema.parse({ embeddingConcurrency: 5 }),
-      "embeddingConcurrency > 4 should throw",
+      () => SemanticConfigSchema.parse({ embeddingConcurrency: 9 }),
+      "embeddingConcurrency > 8 should throw",
     );
   });
 
   it("SemanticConfigSchema accepts embeddingConcurrency = 2", async () => {
-    const { SemanticConfigSchema } = await import(
-      "../../dist/config/types.js"
-    );
+    const { SemanticConfigSchema } = await import("../../dist/config/types.js");
     const parsed = SemanticConfigSchema.parse({ embeddingConcurrency: 2 });
     assert.strictEqual(parsed.embeddingConcurrency, 2);
   });
 
   it("exports DEFAULT_EMBEDDING_CONCURRENCY = 1", async () => {
-    const { DEFAULT_EMBEDDING_CONCURRENCY } = await import(
-      "../../dist/config/constants.js"
-    );
+    const { DEFAULT_EMBEDDING_CONCURRENCY } =
+      await import("../../dist/config/constants.js");
     assert.strictEqual(DEFAULT_EMBEDDING_CONCURRENCY, 1);
   });
 
-  it("exports MAX_EMBEDDING_CONCURRENCY = 4", async () => {
-    const { MAX_EMBEDDING_CONCURRENCY } = await import(
-      "../../dist/config/constants.js"
-    );
-    assert.strictEqual(MAX_EMBEDDING_CONCURRENCY, 4);
+  it("exports MAX_EMBEDDING_CONCURRENCY = 8", async () => {
+    const { MAX_EMBEDDING_CONCURRENCY } =
+      await import("../../dist/config/constants.js");
+    assert.strictEqual(MAX_EMBEDDING_CONCURRENCY, 8);
   });
 });
 
 describe("refreshSymbolEmbeddings concurrency parameter", () => {
   it("accepts concurrency param without error (module loads)", async () => {
-    const { refreshSymbolEmbeddings } = await import(
-      "../../dist/indexer/embeddings.js"
-    );
+    const { refreshSymbolEmbeddings } =
+      await import("../../dist/indexer/embeddings.js");
     assert.ok(
       typeof refreshSymbolEmbeddings === "function",
       "refreshSymbolEmbeddings must be a function",
@@ -96,9 +85,8 @@ describe("refreshSymbolEmbeddings concurrency parameter", () => {
     // integration harness (which requires a live LadybugDB), we verify the
     // exported REFRESH_BATCH_SIZE and the batch-slicing arithmetic that drives
     // the concurrency window calculation.
-    const { REFRESH_BATCH_SIZE } = await import(
-      "../../dist/indexer/embeddings.js"
-    );
+    const { REFRESH_BATCH_SIZE } =
+      await import("../../dist/indexer/embeddings.js");
 
     // With concurrency = 2 and 0 uncached items, 0 batches are created.
     const uncachedCount = 0;
@@ -118,7 +106,11 @@ describe("refreshSymbolEmbeddings concurrency parameter", () => {
 
     assert.strictEqual(chunks.length, 2, "should produce 2 chunks");
     assert.deepStrictEqual(chunks[0], ["a", "b"], "first chunk has 2 batches");
-    assert.deepStrictEqual(chunks[1], ["c"], "second chunk has 1 batch (boundary)");
+    assert.deepStrictEqual(
+      chunks[1],
+      ["c"],
+      "second chunk has 1 batch (boundary)",
+    );
   });
 
   it("caching: concurrency=1 produces same chunk structure as sequential", () => {
@@ -130,9 +122,17 @@ describe("refreshSymbolEmbeddings concurrency parameter", () => {
       chunks.push(batches.slice(i, i + concurrency));
     }
 
-    assert.strictEqual(chunks.length, 3, "concurrency=1 produces one chunk per batch");
+    assert.strictEqual(
+      chunks.length,
+      3,
+      "concurrency=1 produces one chunk per batch",
+    );
     for (const chunk of chunks) {
-      assert.strictEqual(chunk.length, 1, "each chunk contains exactly one batch");
+      assert.strictEqual(
+        chunk.length,
+        1,
+        "each chunk contains exactly one batch",
+      );
     }
   });
 
@@ -176,6 +176,10 @@ describe("refreshSymbolEmbeddings concurrency parameter", () => {
       [1, 2],
       "only first chunk processed before abort",
     );
-    assert.strictEqual(embedded, 1, "only embedded count from non-terminal batch");
+    assert.strictEqual(
+      embedded,
+      1,
+      "only embedded count from non-terminal batch",
+    );
   });
 });

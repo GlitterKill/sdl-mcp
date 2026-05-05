@@ -20,14 +20,12 @@ import {
   getLadybugConn,
   withWriteConn,
   closeLadybugDb,
-  flushStaleFinalizers,
 } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { getCurrentTimestamp } from "../../util/time.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { findExistingProcess, type PidfileData } from "../../util/pidfile.js";
 import { connectSSE, type SSEEvent } from "../../util/sse-client.js";
-import type { AutoIngestProgressEvent } from "../../scip/ingestion.js";
 import { printBanner } from "../../util/banner.js";
 
 // ---------------------------------------------------------------------------
@@ -40,7 +38,8 @@ import { printBanner } from "../../util/banner.js";
 // can emit a newline when the active stage changes — without this, in-place
 // updates from stage N would collide with stage N+1 on the same line.
 
-interface ProgressState {
+/** @internal exported for tests; do not import from product code. */
+export interface ProgressState {
   /** Key identifying the currently-rendered stage (e.g. "pass1", "scip:label:documents"). */
   currentStage: string | null;
   /** Last line written, used to dedupe identical updates from high-frequency callbacks. */
@@ -49,15 +48,38 @@ interface ProgressState {
   lastFileLine: string;
   /** Last percentage printed in non-TTY mode (throttles to ~10% increments). */
   lastPrintedPct: number;
+  /**
+   * Per-model embedding progress. Two models (jina + nomic) emit interleaved
+   * events through the same onProgress callback; without per-model state the
+   * displayed count would flicker between each model's last reported value.
+   * Map preserves insertion order so the rendered line keeps a stable column
+   * ordering across updates. Cleared on stage transitions away from
+   * embeddings.
+   */
+  embeddingsByModel: Map<string, { current: number; total: number }>;
 }
 
-function createProgressState(): ProgressState {
+/** @internal exported for tests; do not import from product code. */
+export function createProgressState(): ProgressState {
   return {
     currentStage: null,
     lastLine: "",
     lastFileLine: "",
     lastPrintedPct: -1,
+    embeddingsByModel: new Map(),
   };
+}
+
+/**
+ * Shorten a model identifier for display in the per-model progress line.
+ * Model names like "jina-embeddings-v2-base-code" or "nomic-embed-text-v1.5"
+ * are too long for a multi-model status line; the first dash-separated token
+ * gives a stable, recognisable abbreviation.
+ */
+/** @internal exported for tests; do not import from product code. */
+export function shortModelLabel(model: string): string {
+  const head = model.split("-")[0] ?? model;
+  return head.toLowerCase();
 }
 
 function isTty(): boolean {
@@ -82,6 +104,8 @@ function indexStageLabel(stage: IndexProgress["stage"]): string {
       return "Parsing";
     case "pass1":
       return "Pass 1 (symbols)";
+    case "scipIngest":
+      return "SCIP ingest";
     case "pass2":
       return "Pass 2 (edges)";
     case "finalizing":
@@ -101,6 +125,8 @@ function indexStageLabel(stage: IndexProgress["stage"]): string {
  */
 function indexSubstageLabel(substage: IndexProgressSubstage): string {
   switch (substage) {
+    case "pass1Drain":
+      return "Flushing pass 1 writes";
     case "importReresolution":
       return "Import re-resolution";
     case "edgeFinalize":
@@ -215,7 +241,11 @@ function finishProgress(state: ProgressState): void {
  * without progress (scanning — spinner/label), and the finalizing stage
  * which now carries explicit substages for the post-pass2 pipeline.
  */
-function renderIndexProgress(state: ProgressState, p: IndexProgress): void {
+/** @internal exported for tests; do not import from product code. */
+export function renderIndexProgress(
+  state: ProgressState,
+  p: IndexProgress,
+): void {
   const label = indexStageLabel(p.stage);
   let line: string;
   let pct: number | null = null;
@@ -223,12 +253,35 @@ function renderIndexProgress(state: ProgressState, p: IndexProgress): void {
   // swallowed by the identical-stage check in writeProgressLine.
   const stageKey = `${p.stage}:${p.substage ?? ""}`;
 
+  // Drop accumulated per-model embedding state when the active stage moves
+  // away from embeddings — keeps a re-entered embeddings phase (a second
+  // index.refresh) from showing a stale combined line.
+  if (p.stage !== "embeddings" && state.embeddingsByModel.size > 0) {
+    state.embeddingsByModel.clear();
+  }
+
   if (p.stage === "scanning") {
     line = `  ${label}...`;
   } else if (p.stage === "parsing") {
     // parsing fires only once with current=0 before pass1 begins; show file
     // count without a progress bar to avoid the misleading 0% that never updates.
     line = `  Parsing ${p.total} files:`;
+  } else if (p.stage === "scipIngest") {
+    // SCIP emits two phase shapes: an `externals` phase with a known total
+    // (rendered as a percentage bar) and a streaming `documents` phase with
+    // no upfront total (rendered as a counter via `message`). Without this
+    // branch the documents phase falls through to the generic "no total"
+    // case and shows just `SCIP ingest...` for the entire ingest, which
+    // looks indistinguishable from a hang on multi-MB index files.
+    if (p.total > 0) {
+      pct = Math.min(100, Math.floor((p.current / p.total) * 100));
+      const bar = buildBar(pct);
+      line = `  ${label}: ${bar} ${String(pct).padStart(3)}% (${p.current}/${p.total})`;
+    } else if (p.message) {
+      line = `  ${label} — ${p.message}`;
+    } else {
+      line = `  ${label}...`;
+    }
   } else if (p.stage === "finalizing") {
     const subLabel = p.substage ? indexSubstageLabel(p.substage) : "Finalizing";
     const stageCur = p.stageCurrent;
@@ -246,6 +299,41 @@ function renderIndexProgress(state: ProgressState, p: IndexProgress): void {
     } else {
       line = `  ${subLabel}...`;
     }
+  } else if (p.stage === "embeddings") {
+    // Per-model rendering: each model's progress lives in its own column of
+    // a single status line. Two models emitting interleaved events used to
+    // overwrite each other's counts, producing a flickering current-value
+    // (e.g. 21 → 25 → 22 → 26). The Map preserves insertion order so the
+    // displayed columns stay stable across updates.
+    const modelKey = p.model ?? "default";
+    state.embeddingsByModel.set(modelKey, {
+      current: p.current,
+      total: p.total,
+    });
+    const segments: string[] = [];
+    let combinedCurrent = 0;
+    let combinedTotal = 0;
+    for (const [model, st] of state.embeddingsByModel) {
+      const modelLabel = shortModelLabel(model);
+      if (st.total > 0) {
+        const modelPct = Math.min(
+          100,
+          Math.floor((st.current / st.total) * 100),
+        );
+        const bar = buildBar(modelPct, 12);
+        segments.push(
+          `${modelLabel} ${bar} ${String(modelPct).padStart(3)}% (${st.current}/${st.total})`,
+        );
+      } else {
+        segments.push(`${modelLabel}...`);
+      }
+      combinedCurrent += st.current;
+      combinedTotal += st.total;
+    }
+    if (combinedTotal > 0) {
+      pct = Math.min(100, Math.floor((combinedCurrent / combinedTotal) * 100));
+    }
+    line = `  ${label}: ${segments.join(" | ")}`;
   } else if (p.total > 0) {
     pct = Math.min(100, Math.floor((p.current / p.total) * 100));
     const bar = buildBar(pct);
@@ -255,39 +343,6 @@ function renderIndexProgress(state: ProgressState, p: IndexProgress): void {
   }
 
   writeProgressLine(state, stageKey, line, pct, p.currentFile);
-}
-
-/**
- * Render a SCIP auto-ingest progress event. The externals phase has a known
- * total (pre-fetched list) so it draws a real bar; the documents phase is
- * streamed from an async iterator with no upfront count, so it renders a
- * moving counter with running match/edge totals.
- */
-function renderScipProgress(
-  state: ProgressState,
-  ev: AutoIngestProgressEvent,
-): void {
-  const { indexLabel, event } = ev;
-  let line: string;
-  let pct: number | null = null;
-  let stageKey: string;
-
-  if (event.phase === "externals") {
-    stageKey = `scip:${indexLabel}:externals`;
-    pct =
-      event.total > 0
-        ? Math.min(100, Math.floor((event.current / event.total) * 100))
-        : 100;
-    const bar = buildBar(pct);
-    line = `  SCIP [${indexLabel}] externals: ${bar} ${String(pct).padStart(3)}% (${event.current}/${event.total})`;
-  } else {
-    stageKey = `scip:${indexLabel}:documents`;
-    // No upfront total for streaming documents — show a counter with running
-    // match/edge totals so the user sees forward progress.
-    line = `  SCIP [${indexLabel}] documents: ${event.current} processed, ${event.matched} matched, +${event.edges} edges`;
-  }
-
-  writeProgressLine(state, stageKey, line, pct);
 }
 
 /**
@@ -434,7 +489,9 @@ export function canDelegateIndexToServer(
     return true;
   }
 
-  return typeof existing.authToken === "string" && existing.authToken.length > 0;
+  return (
+    typeof existing.authToken === "string" && existing.authToken.length > 0
+  );
 }
 
 export async function indexCommand(options: IndexOptions): Promise<void> {
@@ -501,14 +558,21 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
   }
 
   for (const repo of reposToIndex) {
-    const mode = options.force ? "full" : "incremental";
-    console.log(
-      `\nIndexing ${repo.repoId} (${repo.rootPath}) [mode=${mode}]...`,
-    );
+    const requestedMode = options.force ? "full" : "incremental";
 
-    // Try delegating to the running server first.
+    // Try delegating to the running server first. The server auto-upgrades
+    // 'incremental' → 'full' when the repo has no indexed files (see
+    // indexRepoImpl), so we display the requested mode and trust the server
+    // to do the right thing — its log surfaces the upgrade if it fires.
     if (canDelegate) {
-      const ok = await delegateIndexToServer(existing, repo.repoId, mode);
+      console.log(
+        `\nIndexing ${repo.repoId} (${repo.rootPath}) [mode=${requestedMode}]...`,
+      );
+      const ok = await delegateIndexToServer(
+        existing,
+        repo.repoId,
+        requestedMode,
+      );
       if (ok) {
         continue;
       }
@@ -524,9 +588,6 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
     const conn = await getLadybugConn();
 
     const existingRepo = await ladybugDb.getRepo(conn, repo.repoId);
-    if (!existingRepo) {
-      console.log(`  Registering repository: ${repo.repoId}`);
-    }
 
     await withWriteConn(async (wConn) => {
       await ladybugDb.upsertRepo(wConn, {
@@ -538,6 +599,19 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
     });
 
     const directMode = options.force || !existingRepo ? "full" : "incremental";
+
+    // Direct-path display reflects the actual mode that will run — fresh
+    // repos correctly show `[mode=full]` even without --force. If we got
+    // here via delegation fallback the requested-mode line was already
+    // printed; otherwise this is the first per-repo banner.
+    if (!canDelegate) {
+      console.log(
+        `\nIndexing ${repo.repoId} (${repo.rootPath}) [mode=${directMode}]...`,
+      );
+    }
+    if (!existingRepo) {
+      console.log(`  Registering repository: ${repo.repoId}`);
+    }
 
     try {
       // Shared progress state across indexer + SCIP so stage transitions
@@ -605,70 +679,12 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
         }
       }
 
-      // SCIP auto-ingest — mirrors the MCP `runPostRefresh` behavior so
-      // `sdl-mcp index` and `sdl.index.refresh` produce the same final
-      // state. Without this the CLI path silently skipped SCIP ingestion
-      // even when scip.autoIngestOnRefresh was true.
-      if (config.scip?.enabled && config.scip?.autoIngestOnRefresh) {
-        try {
-          // Drain background derived-refresh (cluster/process) and serialize
-          // against any watcher-driven re-enqueue. Concurrent writes against
-          // the single LadybugDB write conn caused per-document SCIP merges
-          // to time out at 30s.
-          const { waitForDerivedRefreshIdle, withRepoWriteHeavyLock } =
-            await import("../../indexer/derived-refresh-queue.js");
-          await waitForDerivedRefreshIdle(repo.repoId);
-          await withRepoWriteHeavyLock(repo.repoId, async () => {
-            await flushStaleFinalizers();
-            const { autoIngestScipIndexes } =
-              await import("../../scip/ingestion.js");
-            const total = config.scip?.indexes?.length ?? 0;
-            if (total === 0) {
-              console.log(
-                "  SCIP: enabled but no indexes configured (set scip.indexes in config)",
-              );
-              return;
-            }
-            console.log(`  SCIP: ingesting ${total} configured index(es)...`);
-            // Use a dedicated progress state for SCIP so its stage keys
-            // ("scip:<label>:externals" / ":documents") don't collide with
-            // indexer stage keys and so the first SCIP line starts on a
-            // fresh line below the indexer summary.
-            const scipProgressState = createProgressState();
-            const scipResults = await autoIngestScipIndexes(
-              repo.repoId,
-              config.scip!,
-              repo.rootPath,
-              (event) => renderScipProgress(scipProgressState, event),
-            );
-            finishProgress(scipProgressState);
-            if (scipResults.length === 0) {
-              console.log(
-                `  SCIP: 0/${total} indexes ingested (files missing or unchanged since last ingest)`,
-              );
-            } else {
-              console.log(
-                `  SCIP: ${scipResults.length}/${total} index(es) processed`,
-              );
-              for (const r of scipResults) {
-                console.log(
-                  `    ${r.status}: docs ${r.documentsProcessed}/${
-                    r.documentsProcessed + r.documentsSkipped
-                  }, matched ${r.symbolsMatched}, edges +${r.edgesCreated}/^${
-                    r.edgesUpgraded
-                  }/~${r.edgesReplaced}, external ${
-                    r.externalSymbolsCreated
-                  }, unresolved ${r.unresolvedOccurrences} (${r.durationMs}ms)`,
-                );
-              }
-            }
-          });
-        } catch (scipErr) {
-          const msg =
-            scipErr instanceof Error ? scipErr.message : String(scipErr);
-          console.warn(`  SCIP auto-ingest failed (non-fatal): ${msg}`);
-        }
-      }
+      // SCIP auto-ingest now runs INSIDE `indexRepoImpl` between pass 1 and
+      // pass 2 (see indexer.ts). Progress is rendered through the same
+      // `renderIndexProgress` pipeline as the rest of the index phases via
+      // a new `stage: "scipIngest"` event. The CLI no longer needs its own
+      // post-refresh SCIP block — it would duplicate work and miss the
+      // edge-quality + embedding-quality wins of running pre-pass-2.
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.error(`  Error indexing: ${msg}`);

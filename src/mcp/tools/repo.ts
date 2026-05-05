@@ -11,11 +11,7 @@ import {
   type RepoOverviewRequest,
   RepoOverviewResponse,
 } from "../tools.js";
-import {
-  getLadybugConn,
-  withWriteConn,
-  flushStaleFinalizers,
-} from "../../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import {
   getWatcherHealth,
@@ -28,7 +24,6 @@ import { LanguageSchema } from "../../config/types.js";
 import { normalizePath } from "../../util/paths.js";
 import { DatabaseError, ConfigError, ValidationError } from "../errors.js";
 import { logger } from "../../util/logger.js";
-import { getObservabilityTap } from "../../observability/event-tap.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { MAX_FILE_BYTES } from "../../config/constants.js";
 import { buildRepoOverview, clearOverviewCache } from "../../graph/overview.js";
@@ -583,77 +578,17 @@ export async function handleIndexRefresh(
     return response;
   };
 
-  // Post-refresh work shared by sync (executeRefresh) and async (bgRefresh) paths:
-  // cache invalidation + optional SCIP auto-ingest. Kept as a closure so both
-  // paths stay in sync — prior versions duplicated this block and the async
-  // path silently skipped SCIP ingestion when autoIngestOnRefresh was set.
-  const runPostRefresh = async (conn: Connection): Promise<void> => {
+  // Post-refresh cache invalidation. SCIP auto-ingest used to live here
+  // wrapped in `withRepoWriteHeavyLock` + `waitForDerivedRefreshIdle` +
+  // `flushStaleFinalizers`. It now runs INSIDE `indexRepoImpl` between
+  // pass 1 and pass 2, so every consumer (CLI, MCP, watcher) gets the
+  // same exact-edge-aware embeddings on the first index pass — see
+  // `runScipIngestInsideIndex` in src/scip/ingestion.ts.
+  const runPostRefresh = async (_conn: Connection): Promise<void> => {
     clearSliceCache();
     clearOverviewCache();
     symbolCardCache.clear();
     invalidateGraphSnapshot(repoId);
-
-    const scipAutoIngestStart = Date.now();
-    try {
-      const appConfig = loadConfig();
-      const scipConfig = appConfig.scip;
-      if (scipConfig?.enabled && scipConfig?.autoIngestOnRefresh) {
-        const repo = await ladybugDb.getRepo(conn, repoId);
-        if (repo?.rootPath) {
-          // Drain the background derived-refresh queue (cluster/process
-          // computation) and serialize against any watcher-driven refresh
-          // that may enqueue a new run mid-flight. Both paths write through
-          // the single LadybugDB write conn; running them concurrently
-          // starved SCIP's per-document writes and tripped the 30s
-          // ConcurrencyLimiter queue timeout.
-          const { waitForDerivedRefreshIdle, withRepoWriteHeavyLock } =
-            await import("../../indexer/derived-refresh-queue.js");
-          await waitForDerivedRefreshIdle(repoId);
-          await withRepoWriteHeavyLock(repoId, async () => {
-            await flushStaleFinalizers();
-            const { autoIngestScipIndexes } =
-              await import("../../scip/ingestion.js");
-            const scipResults = await autoIngestScipIndexes(
-              repoId,
-              scipConfig,
-              repo.rootPath,
-            );
-            if (scipResults.length > 0) {
-              logger.info("Auto-ingested SCIP indexes after refresh", {
-                repoId,
-                count: scipResults.length,
-                statuses: scipResults.map((r) => r.status),
-              });
-              for (const status of scipResults) {
-                try {
-                  getObservabilityTap()?.scipIngest({
-                    repoId,
-                    edgesCreated: status.edgesCreated ?? 0,
-                    edgesUpgraded: status.edgesUpgraded ?? 0,
-                    durationMs: status.durationMs ?? 0,
-                    failed: false,
-                  });
-                } catch { /* swallow */ }
-              }
-            }
-          });
-        }
-      }
-    } catch (err) {
-      try {
-        getObservabilityTap()?.scipIngest({
-          repoId,
-          edgesCreated: 0,
-          edgesUpgraded: 0,
-          durationMs: Date.now() - scipAutoIngestStart,
-          failed: true,
-        });
-      } catch { /* swallow */ }
-      logger.warn("SCIP auto-ingest failed (non-fatal)", {
-        repoId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
   };
 
   const executeRefresh = async () => {

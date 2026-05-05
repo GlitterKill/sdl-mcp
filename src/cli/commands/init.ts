@@ -1216,7 +1216,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
     prefetch: {
       enabled: true,
       maxBudgetPercent: 20,
-      warmTopN: 50,
+      warmTopN: 0,
     },
     tracing: {
       enabled: true,

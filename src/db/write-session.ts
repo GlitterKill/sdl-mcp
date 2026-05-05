@@ -106,7 +106,18 @@ export function registerSessionEndHook(fn: SessionEndHook): () => void {
 // LadybugDB native call wedges), the session timeout fires so callers see
 // a clear error rather than waiting for the writeLimiter's per-call queue
 // timeouts to surface. Override via env or the options arg.
-const DEFAULT_SESSION_TIMEOUT_MS = 5 * 60 * 1000;
+//
+// Sized for fresh-DB initial index of mid-size repos (~8-12k symbols):
+// `buildDeferredIndexes` runs `CREATE_VECTOR_INDEX` once per configured
+// embedding model on the populated `Symbol.embedding*Vec` columns, and
+// each call walks all live vectors with HNSW ef_construction=200 and M=16.
+// Empirically a 8500-symbol × 768-dim × 2-model rebuild lands near the old
+// 5min default; allowing 15min keeps a safety margin while still
+// surfacing a real wedge before the writeLimiter's per-call queue
+// timeouts pile on. Incremental refreshes finish in seconds and don't
+// approach this budget. Override via SDL_POST_INDEX_SESSION_TIMEOUT_MS
+// when running on slower disks or larger repos.
+const DEFAULT_SESSION_TIMEOUT_MS = 15 * 60 * 1000;
 
 function resolveSessionTimeoutMs(override?: number): number {
   if (override !== undefined && override > 0) return override;

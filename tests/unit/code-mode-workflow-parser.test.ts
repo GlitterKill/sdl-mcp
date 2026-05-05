@@ -29,15 +29,39 @@ describe("code-mode workflow parser", () => {
     }
   });
 
-  it("unknown function name rejected with clear error", () => {
+  it("unknown function name rejected with clear error when onError=stop", () => {
     const result = parseWorkflowRequest({
       repoId: "test",
       steps: [{ fn: "unknownFn", args: {} }],
+      onError: "stop",
     });
     assert.strictEqual(result.ok, false);
     if (!result.ok) {
       assert.ok(result.errors[0].includes("unknown function 'unknownFn'"));
       assert.ok(result.errors[0].includes("Available:"));
+    }
+  });
+
+  it("unknown function name marked as soft-skip when onError=continue", () => {
+    // onError defaults to "continue"; under that mode, unknown fns become
+    // skip-flagged steps so sibling steps in the envelope still execute.
+    const result = parseWorkflowRequest({
+      repoId: "test",
+      steps: [
+        { fn: "unknownFn", args: {} },
+        { fn: "symbolSearch", args: { query: "x" } },
+      ],
+    });
+    assert.strictEqual(result.ok, true);
+    if (result.ok) {
+      assert.strictEqual(result.request.steps.length, 2);
+      assert.strictEqual(result.request.steps[0].skip, true);
+      assert.ok(
+        (result.request.steps[0].skipReason ?? "").includes(
+          "unknown function 'unknownFn'",
+        ),
+      );
+      assert.strictEqual(result.request.steps[1].skip, undefined);
     }
   });
 

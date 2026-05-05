@@ -511,9 +511,33 @@ export const DEFAULT_EMBEDDING_CONCURRENCY = 1;
 
 /**
  * Maximum number of concurrent embedding batches during symbol embedding refresh.
- * Capped at 4; profiling suggests diminishing returns beyond 2 for local ONNX models.
+ * Raised from 4 → 8 after measurements with `executionMode: "parallel"` +
+ * `intraOpNumThreads: 8` showed CPU underutilisation (50-60%) at concurrency=4.
+ * Higher concurrency overlaps tokenisation (single-threaded JS) with the next
+ * batch's ONNX inference, masking the orchestration latency between batches.
+ *
+ * Tune downward if running multiple models at once on a low-core machine —
+ * each model owns its own concurrency window, so total in-flight batches is
+ * `embeddingConcurrency × num_models`.
  */
-export const MAX_EMBEDDING_CONCURRENCY = 4;
+export const MAX_EMBEDDING_CONCURRENCY = 8;
+
+/**
+ * Default ONNX inference batch width used by the symbol-embedding refresh
+ * loop. Matches `LocalEmbeddingProvider`'s tokenizer/session expectations;
+ * length-bucketing at the call site (sort by `prefixedText.length`) keeps
+ * pad waste bounded so larger batches mostly help with tokenizer + session
+ * bind/unbind amortisation.
+ */
+export const DEFAULT_EMBEDDING_BATCH_SIZE = 32;
+
+/**
+ * Maximum embedding batch size accepted from config. Larger batches have
+ * diminishing returns once tokenizer pad waste dominates inference cost,
+ * and balloon GPU/CPU memory roughly linearly with the longest sequence
+ * in the batch.
+ */
+export const MAX_EMBEDDING_BATCH_SIZE = 128;
 
 /**
  * When the count of uncached symbols to embed exceeds this threshold,
@@ -521,15 +545,17 @@ export const MAX_EMBEDDING_CONCURRENCY = 4;
  * write without per-row index maintenance, then recreates the index in a
  * single rebuild pass.
  *
- * Below the threshold the per-row null-then-set dance is cheaper than a
- * full rebuild. The break-even point depends on HNSW `efc` (default 200)
- * and `M` (default 16): per-row insert is roughly `M·log(N)·efc` ops
- * (~41k for N=8k), and full rebuild amortises the same per-row cost over
- * all live symbols. So once the changed-symbol count approaches a small
- * fraction of total symbols (~2–5%), the rebuild path wins. 200 is a
- * conservative default for repos with 5–20k symbols.
+ * Pinned to 0 (always rebuild) to work around upstream LadybugDB issue #377
+ * — the engine refuses ALL in-place writes to HNSW-indexed columns, so the
+ * "below threshold, do per-row null-then-set" path throws
+ * `Cannot set property vec ... it is used in one or more indexes`. That
+ * error poisons the connection (rollback failure cascade) and strands
+ * subsequent writes with `Connection is unusable after a rollback failure`.
+ * Drop+rebuild is the only working pattern on 0.16.x. Restore to 200 (or
+ * the workload-appropriate break-even point) once the upstream issue is
+ * resolved.
  */
-export const VECTOR_REBUILD_THRESHOLD = 200;
+export const VECTOR_REBUILD_THRESHOLD = 0;
 
 /**
  * Default timeout for operations in milliseconds.

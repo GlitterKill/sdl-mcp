@@ -59,7 +59,10 @@ function narrowVisibility(
   visibility: string | null | undefined,
   symbolId: string,
 ): Visibility | null {
-  if (visibility == null) return null;
+  // LadybugDB binder bug forces empty-string sentinel on insert (see
+  // ladybug-symbols.ts comment near visibility column). Treat "" as
+  // "unknown/no visibility" instead of an invalid value.
+  if (visibility == null || visibility === "") return null;
   if ((VISIBILITIES as ReadonlySet<string>).has(visibility)) {
     return visibility as Visibility;
   }

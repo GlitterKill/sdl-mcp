@@ -318,18 +318,18 @@ Search symbols by name or summary text.
 
 **Parameters:**
 
-| Parameter                  | Type       | Required | Description                                                                      |
-| -------------------------- | ---------- | -------- | -------------------------------------------------------------------------------- |
-| `repoId`                   | `string`   | Yes      | Repository identifier                                                            |
-| `query`                    | `string`   | Yes      | Search query (min length: 1)                                                     |
-| `kinds`                    | `string[]` | No       | Filter by symbol kind (e.g., `["function", "class"]`)                            |
-| `limit`                    | `integer`  | No       | Max results (1-1000, default: 50)                                                |
-| `semantic`                 | `boolean`  | No       | Enable semantic reranking / hybrid retrieval                                     |
-| `includeRetrievalEvidence` | `boolean`  | No       | Include retrieval evidence (sources, candidate counts, latency, fallback reason) |
-| `chatMentions`             | `string[]` | No       | Up to 20 identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank for chat-aware re-ranking. |
-| `chatMentionWeights`       | `Record<string, number>` | No | Per-mention weight overrides; missing entries default to uniform 1.0. |
-| `pprDirection`             | `"out" \| "in" \| "both"` | No | Walk direction across the dependency graph. Default: `"both"`. |
-| `pprWeight`                | `number`   | No       | PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default: `2.0`. Range: `[0, 2]`. |
+| Parameter                  | Type                      | Required | Description                                                                                                                                                                     |
+| -------------------------- | ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repoId`                   | `string`                  | Yes      | Repository identifier                                                                                                                                                           |
+| `query`                    | `string`                  | Yes      | Search query (min length: 1)                                                                                                                                                    |
+| `kinds`                    | `string[]`                | No       | Filter by symbol kind (e.g., `["function", "class"]`)                                                                                                                           |
+| `limit`                    | `integer`                 | No       | Max results (1-1000, default: 50)                                                                                                                                               |
+| `semantic`                 | `boolean`                 | No       | Enable semantic reranking / hybrid retrieval                                                                                                                                    |
+| `includeRetrievalEvidence` | `boolean`                 | No       | Include retrieval evidence (sources, candidate counts, latency, fallback reason)                                                                                                |
+| `chatMentions`             | `string[]`                | No       | Up to 20 identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank for chat-aware re-ranking.                                               |
+| `chatMentionWeights`       | `Record<string, number>`  | No       | Per-mention weight overrides; missing entries default to uniform 1.0.                                                                                                           |
+| `pprDirection`             | `"out" \| "in" \| "both"` | No       | Walk direction across the dependency graph. Default: `"both"`.                                                                                                                  |
+| `pprWeight`                | `number`                  | No       | PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default: `2.0`. Range: `[0, 2]`. |
 
 When `chatMentions` is non-empty, results are re-ranked via Personalized PageRank seeded at those mentions — see [semantic-engine.md → Chat-Aware PageRank Boost](feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0108). When `chatMentions` is **omitted** (`undefined`), the server auto-extracts identifier-like tokens from the query as seeds. Pass an explicit empty array `[]` to disable PPR entirely. PPR diagnostics surface in `response.pprBoosts` when `includeRetrievalEvidence: true`.
 
@@ -466,7 +466,7 @@ Build a task-scoped graph slice. `taskText` alone is sufficient — it triggers 
 | `cardDetail`                | `"minimal" \| "signature" \| "deps" \| "compact" \| "full"` | No       | Card detail level (leave unset for mixed)                                                                  |
 | `adaptiveDetail`            | `boolean`                                                   | No       | Enable adaptive detail level selection                                                                     |
 | `wireFormat`                | `"standard" \| "readable" \| "compact" \| "agent"`          | No       | Wire format (default: compact)                                                                             |
-| `wireFormatVersion`         | `1 \| 2 \| 3`                                               | No       | Wire format version (default: 2)                                                                           |
+| `wireFormatVersion`         | `3`                                                         | No       | Wire format version. Only `3` is accepted; v1 and v2 were retired in 0.11.0.                               |
 | `minCallConfidence`         | `number`                                                    | No       | Filter call edges below this confidence threshold (0-1)                                                    |
 | `includeResolutionMetadata` | `boolean`                                                   | No       | Include call resolution metadata in edge data                                                              |
 | `includeMemories`           | `boolean`                                                   | No       | Include related development memories in the response (only effective when memory is enabled in config)     |
@@ -819,19 +819,19 @@ Retrieve task-shaped code context with rung path selection and evidence capture.
 
 `options` fields (all optional):
 
-| Field                | Type                   | Description                                                                                                  |
-| -------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `contextMode`        | `"precise" \| "broad"` | Context breadth. `"precise"` returns minimal context; `"broad"` (default) returns richer surrounding context |
-| `focusSymbols`       | `string[]`             | Symbol IDs to focus on                                                                                       |
-| `focusPaths`         | `string[]`             | File paths to focus on                                                                                       |
-| `includeTests`       | `boolean`              | Include test files in analysis                                                                               |
-| `requireDiagnostics` | `boolean`              | Include diagnostic info (may add a raw rung)                                                                 |
-| `semantic`                 | `boolean`              | Use hybrid (FTS + vector + RRF) retrieval for context seeding. Default `true`. Set `false` to force plain lexical — useful for deterministic tests |
-| `includeRetrievalEvidence` | `boolean`              | Attach hybrid `retrievalEvidence` to the response (sources, candidate counts, top ranks per source, fusion latency, lane availability). Default `true` |
-| `chatMentions`             | `string[]`             | Up to 20 identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank for chat-aware re-ranking. See [semantic-engine.md → Chat-Aware PageRank](feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0108) |
-| `chatMentionWeights`       | `Record<string, number>` | Per-mention weight overrides; missing entries default to uniform 1.0 |
-| `pprDirection`             | `"out" \| "in" \| "both"` | Walk direction across the dependency graph for chat-aware re-ranking. Default `"both"` |
-| `pprWeight`                | `number`               | PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default `2.0`, range `[0, 2]` |
+| Field                      | Type                      | Description                                                                                                                                                                                                                                                          |
+| -------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `contextMode`              | `"precise" \| "broad"`    | Context breadth. `"precise"` returns minimal context; `"broad"` (default) returns richer surrounding context                                                                                                                                                         |
+| `focusSymbols`             | `string[]`                | Symbol IDs to focus on                                                                                                                                                                                                                                               |
+| `focusPaths`               | `string[]`                | File paths to focus on                                                                                                                                                                                                                                               |
+| `includeTests`             | `boolean`                 | Include test files in analysis                                                                                                                                                                                                                                       |
+| `requireDiagnostics`       | `boolean`                 | Include diagnostic info (may add a raw rung)                                                                                                                                                                                                                         |
+| `semantic`                 | `boolean`                 | Use hybrid (FTS + vector + RRF) retrieval for context seeding. Default `true`. Set `false` to force plain lexical — useful for deterministic tests                                                                                                                   |
+| `includeRetrievalEvidence` | `boolean`                 | Attach hybrid `retrievalEvidence` to the response (sources, candidate counts, top ranks per source, fusion latency, lane availability). Default `true`                                                                                                               |
+| `chatMentions`             | `string[]`                | Up to 20 identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank for chat-aware re-ranking. See [semantic-engine.md → Chat-Aware PageRank](feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0108) |
+| `chatMentionWeights`       | `Record<string, number>`  | Per-mention weight overrides; missing entries default to uniform 1.0                                                                                                                                                                                                 |
+| `pprDirection`             | `"out" \| "in" \| "both"` | Walk direction across the dependency graph for chat-aware re-ranking. Default `"both"`                                                                                                                                                                               |
+| `pprWeight`                | `number`                  | PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default `2.0`, range `[0, 2]`                                                                                         |
 
 **Response:**
 
@@ -975,19 +975,19 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 
 Write non-indexed files using targeted update modes. This tool is MCP-only today; `sdl-mcp tool` does not expose it directly.
 
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `repoId` | `string` | Yes | Repository identifier |
-| `filePath` | `string` | Yes | Path relative to repo root |
-| `content` | `string` | No | Full create or overwrite content |
-| `replaceLines` | `{ start, end, content }` | No | Replace a line range |
-| `replacePattern` | `{ pattern, replacement, global? }` | No | Regex-based replacement |
-| `jsonPath` | `string` | No | Dot-separated JSON key path |
-| `jsonValue` | `unknown` | No | New value for `jsonPath` |
-| `insertAt` | `{ line, content }` | No | Insert content at a specific line |
-| `append` | `string` | No | Append content to the end of the file |
-| `createBackup` | `boolean` | No | Create a `.bak` file before modifying an existing file (default: `true`) |
-| `createIfMissing` | `boolean` | No | Create the file when it does not exist |
+| Parameter         | Type                                | Required | Description                                                              |
+| ----------------- | ----------------------------------- | -------- | ------------------------------------------------------------------------ |
+| `repoId`          | `string`                            | Yes      | Repository identifier                                                    |
+| `filePath`        | `string`                            | Yes      | Path relative to repo root                                               |
+| `content`         | `string`                            | No       | Full create or overwrite content                                         |
+| `replaceLines`    | `{ start, end, content }`           | No       | Replace a line range                                                     |
+| `replacePattern`  | `{ pattern, replacement, global? }` | No       | Regex-based replacement                                                  |
+| `jsonPath`        | `string`                            | No       | Dot-separated JSON key path                                              |
+| `jsonValue`       | `unknown`                           | No       | New value for `jsonPath`                                                 |
+| `insertAt`        | `{ line, content }`                 | No       | Insert content at a specific line                                        |
+| `append`          | `string`                            | No       | Append content to the end of the file                                    |
+| `createBackup`    | `boolean`                           | No       | Create a `.bak` file before modifying an existing file (default: `true`) |
+| `createIfMissing` | `boolean`                           | No       | Create the file when it does not exist                                   |
 
 Provide exactly one write mode: `content`, `replaceLines`, `replacePattern`, `jsonPath`, `insertAt`, or `append`.
 
@@ -1283,14 +1283,14 @@ Use tools in this order for most tasks:
 
 ### Task-Specific Workflows
 
-| Task                         | Workflow                                                                                      |
-| ---------------------------- | --------------------------------------------------------------------------------------------- |
-| **Explain / Debug / Review** | `sdl.context` first in Code Mode -> direct ladder follow-up only if still ambiguous |
-| **Debug (manual)**           | search -> card -> slice.build -> hotPath -> needWindow (if still ambiguous)                   |
-| **Debug (auto)**             | slice.build with `taskText` + `stackTrace` -> hotPath -> needWindow with `sliceContext`       |
-| **Feature**                  | repo.overview -> search -> card -> slice.build (use `editedFiles` for impact)                 |
-| **PR Review**                | delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols                            |
-| **Cross-session**            | memory.surface -> slice.build -> work -> memory.store when done                               |
+| Task                         | Workflow                                                                                |
+| ---------------------------- | --------------------------------------------------------------------------------------- |
+| **Explain / Debug / Review** | `sdl.context` first in Code Mode -> direct ladder follow-up only if still ambiguous     |
+| **Debug (manual)**           | search -> card -> slice.build -> hotPath -> needWindow (if still ambiguous)             |
+| **Debug (auto)**             | slice.build with `taskText` + `stackTrace` -> hotPath -> needWindow with `sliceContext` |
+| **Feature**                  | repo.overview -> search -> card -> slice.build (use `editedFiles` for impact)           |
+| **PR Review**                | delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols                      |
+| **Cross-session**            | memory.surface -> slice.build -> work -> memory.store when done                         |
 
 ---
 

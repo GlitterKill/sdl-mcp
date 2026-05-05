@@ -289,7 +289,16 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
       }
     }
 
-    const extracted = extractByPath(parsed, request.jsonPath);
+    // Accept both bare dotted paths ("foo.bar") and JSONPath-style ("$.foo.bar"
+    // or "$foo.bar"). Strip the JSONPath root sigil before splitting so users
+    // can use the syntax they already know.
+    let normalizedPath = request.jsonPath;
+    if (normalizedPath.startsWith("$.")) {
+      normalizedPath = normalizedPath.slice(2);
+    } else if (normalizedPath.startsWith("$")) {
+      normalizedPath = normalizedPath.slice(1);
+    }
+    const extracted = extractByPath(parsed, normalizedPath);
     if (extracted === undefined) {
       return withRawTokenBaseline(
         {

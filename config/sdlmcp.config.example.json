@@ -126,6 +126,10 @@
     "summaryMaxConcurrency": 5,
     "summaryBatchSize": 20,
     "embeddingConcurrency": 1,
+    "embeddingBatchSize": 32,
+    "embeddingsSequential": false,
+    "modelVariant": "default",
+    "executionProviders": ["cpu"],
     "retrieval": {
       "mode": "hybrid",
       "extensionsOptional": true,
@@ -159,7 +163,7 @@
   "prefetch": {
     "enabled": true,
     "maxBudgetPercent": 20,
-    "warmTopN": 50
+    "warmTopN": 0
   },
   "tracing": {
     "enabled": true,
@@ -232,7 +236,8 @@
       "binary": "scip-io",
       "args": [],
       "autoInstall": true,
-      "timeoutMs": 600000
+      "timeoutMs": 600000,
+      "cleanupAfterIngest": true
     }
   },
   "memory": {

@@ -2,9 +2,52 @@ import { createActionMap } from "../gateway/router.js";
 import { ACTION_TO_FN } from "./manual-generator.js";
 import { INTERNAL_TRANSFORMS } from "./transforms.js";
 import type { LiveIndexCoordinator } from "../live-index/types.js";
-import type { z } from "zod";
+import { z } from "zod";
 import { loadConfig } from "../config/loadConfig.js";
 import { anyRepoHasMemoryTools } from "../config/memory-config.js";
+import {
+  AgentContextRequestSchema,
+  MemoryStoreRequestSchema,
+  MemoryQueryRequestSchema,
+  MemoryRemoveRequestSchema,
+  MemorySurfaceRequestSchema,
+} from "../mcp/tools.js";
+import { WorkflowRequestSchema } from "./types.js";
+
+// Meta-tool schemas. ActionSearchRequestSchema is also exported from
+// `./index.ts`, but importing from there creates a load-time circularity
+// (index.ts imports this module). Keep the meta schemas local so the manual
+// renderer can introspect them without pulling the whole gateway.
+const META_ACTION_SEARCH_SCHEMA = z.object({
+  query: z.string().min(1),
+  limit: z.number().int().min(1).max(50).optional(),
+  offset: z.number().int().min(0).optional(),
+  includeSchemas: z.boolean().optional(),
+  includeExamples: z.boolean().optional(),
+  excludeDisabled: z.boolean().optional(),
+  summaryOnly: z.boolean().optional(),
+});
+const META_MANUAL_SCHEMA = z.object({
+  format: z.enum(["typescript", "markdown", "json"]).optional(),
+  query: z.string().optional(),
+  actions: z.array(z.string()).optional(),
+  includeSchemas: z.boolean().optional(),
+  includeExamples: z.boolean().optional(),
+});
+
+const META_TOOL_SCHEMAS: Record<string, z.ZodType> = {
+  "action.search": META_ACTION_SEARCH_SCHEMA,
+  manual: META_MANUAL_SCHEMA,
+  context: AgentContextRequestSchema,
+  workflow: WorkflowRequestSchema,
+};
+
+const DISABLED_GATEWAY_FALLBACK_SCHEMAS: Record<string, z.ZodType> = {
+  "memory.store": MemoryStoreRequestSchema,
+  "memory.query": MemoryQueryRequestSchema,
+  "memory.remove": MemoryRemoveRequestSchema,
+  "memory.surface": MemorySurfaceRequestSchema,
+};
 
 // --- Action Tags / Categories ---
 
@@ -106,9 +149,7 @@ export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
     const rawOptions = innerDef.options ?? innerDef.optionsMap ?? [];
     const optionList: z.ZodType[] = Array.isArray(rawOptions)
       ? (rawOptions as z.ZodType[])
-      : Array.from(
-          (rawOptions as unknown as Map<unknown, z.ZodType>).values(),
-        );
+      : Array.from((rawOptions as unknown as Map<unknown, z.ZodType>).values());
     const discriminator =
       typeof innerDef.discriminator === "string"
         ? (innerDef.discriminator as string)
@@ -120,8 +161,10 @@ export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
         optInner &&
         typeof (optInner as unknown as Record<string, unknown>).shape ===
           "object"
-          ? ((optInner as unknown as Record<string, unknown>)
-              .shape as Record<string, z.ZodType>)
+          ? ((optInner as unknown as Record<string, unknown>).shape as Record<
+              string,
+              z.ZodType
+            >)
           : null;
       if (!optShape) continue;
       for (const [name, fieldSchema] of Object.entries(optShape)) {
@@ -141,9 +184,7 @@ export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
     return { fields };
   }
 
-  if (
-    typeof (inner as unknown as Record<string, unknown>).shape !== "object"
-  ) {
+  if (typeof (inner as unknown as Record<string, unknown>).shape !== "object") {
     return { fields };
   }
 
@@ -159,21 +200,46 @@ export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
 }
 
 function unwrapZod(s: z.ZodType): z.ZodType {
-  const def = (s as unknown as Record<string, unknown>)._def as Record<
-    string,
-    unknown
-  >;
-  if (!def) return s;
-
-  // ZodEffects (transform, refine, preprocess)
-  if (def.type === "effects" && def.schema) {
-    return unwrapZod(def.schema as z.ZodType);
+  // Handles wrapper types from Zod v3 + v4 plus a few cousin shapes:
+  //   ZodEffects   (transform/refine/preprocess) — v3: type="effects"
+  //   ZodTransform                                 — v4: type="transform"
+  //   ZodPipeline / ZodPipe                        — v3/v4: type in {pipeline,pipe}
+  //   ZodIntersection                              — type="intersection"
+  // Without these, schemas built via .merge(...).transform(...) (PolicySet,
+  // RuntimeExecute, SearchEdit) flow through to the empty-fields path and
+  // render as `{ }` in the manual.
+  let current = s;
+  for (let depth = 0; depth < 16; depth++) {
+    const def = (current as unknown as Record<string, unknown>)._def as
+      | Record<string, unknown>
+      | undefined;
+    if (!def) return current;
+    const typeName =
+      typeof def.typeName === "string" ? (def.typeName as string) : "";
+    const t = typeof def.type === "string" ? (def.type as string) : "";
+    if (
+      (t === "effects" || t === "transform" || typeName === "ZodEffects") &&
+      def.schema
+    ) {
+      current = def.schema as z.ZodType;
+      continue;
+    }
+    if (
+      (t === "pipeline" || t === "pipe" || typeName === "ZodPipeline") &&
+      def.in
+    ) {
+      current = def.in as z.ZodType;
+      continue;
+    }
+    if ((t === "intersection" || typeName === "ZodIntersection") && def.left) {
+      // Prefer the left side; for `A.merge(B).transform(...)` shapes Zod
+      // typically materialises the merged shape on the left.
+      current = def.left as z.ZodType;
+      continue;
+    }
+    return current;
   }
-  // ZodPipeline
-  if (def.type === "pipeline" && def.in) {
-    return unwrapZod(def.in as z.ZodType);
-  }
-  return s;
+  return current;
 }
 
 function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
@@ -376,9 +442,18 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "memory.surface": { taskText: "fix auth bug", limit: 5 },
   "usage.stats": { scope: "both", since: "2026-03-01T00:00:00Z" },
   "file.read": { filePath: "config/sdlmcp.config.example.json" },
-  "file.write": { filePath: "config/app.yaml", jsonPath: "server.port", jsonValue: 8080 },
+  "file.write": {
+    filePath: "config/app.yaml",
+    jsonPath: "server.port",
+    jsonValue: 8080,
+  },
 
-  "search.edit": { mode: "preview", targeting: "text", query: { literal: "oldName", replacement: "newName", global: true }, editMode: "replacePattern" },
+  "search.edit": {
+    mode: "preview",
+    targeting: "text",
+    query: { literal: "oldName", replacement: "newName", global: true },
+    editMode: "replacePattern",
+  },
 };
 
 // --- ActionDescriptor ---
@@ -452,9 +527,12 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "memory.surface": "Auto-surface relevant memories",
   "usage.stats": "Get cumulative token savings statistics",
   "file.read": "Read non-indexed file content (templates, configs, docs)",
-  "file.write": "Write to a single file (indexed or non-indexed) with targeted modes (line replace, pattern replace, JSON path, insert, append); use search.edit for cross-file batching",
-  "search.edit": "Cross-file search-and-edit in two phases (preview + apply) with server-side plan handles, sha256 preconditions, and rollback",
-  "scip.ingest": "Ingest a pre-built SCIP index to overlay compiler-grade cross-references onto the symbol graph",
+  "file.write":
+    "Write to a single file (indexed or non-indexed) with targeted modes (line replace, pattern replace, JSON path, insert, append); use search.edit for cross-file batching",
+  "search.edit":
+    "Cross-file search-and-edit in two phases (preview + apply) with server-side plan handles, sha256 preconditions, and rollback",
+  "scip.ingest":
+    "Ingest a pre-built SCIP index to overlay compiler-grade cross-references onto the symbol graph",
 };
 
 const META_TOOL_DESCRIPTIONS: Record<string, string> = {
@@ -515,7 +593,8 @@ const META_TOOL_EXAMPLES: Record<string, Record<string, unknown>> = {
     repoId: "<repoId>",
     steps: [
       { fn: "repoStatus" },
-      { fn: "runtimeExecute", args: { runtime: "node", args: ["--version"] } }],
+      { fn: "runtimeExecute", args: { runtime: "node", args: ["--version"] } },
+    ],
   },
 };
 
@@ -526,7 +605,8 @@ const CONTEXT_DISCOVERY_TERMS = new Set([
   "explain",
   "understand",
   "investigate",
-  "implement"]);
+  "implement",
+]);
 
 const WORKFLOW_DISCOVERY_TERMS = new Set([
   "workflow",
@@ -534,7 +614,8 @@ const WORKFLOW_DISCOVERY_TERMS = new Set([
   "runtime",
   "transform",
   "batch",
-  "pipeline"]);
+  "pipeline",
+]);
 
 const EMPTY_METADATA: ActionMetadata = {
   prerequisites: [],
@@ -693,7 +774,7 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
     recommendedNextActions: ["search.edit"],
     fallbacks: ["runtime.execute"],
   },
-  "file": {
+  file: {
     prerequisites: ["repo.status"],
     recommendedNextActions: ["file"],
     fallbacks: ["file.write", "search.edit"],
@@ -780,9 +861,16 @@ export function buildCatalog(opts?: {
 
   // When memory is disabled, inject disabled placeholders so callers
   // know the tools exist and how to enable them.
-  const MEMORY_ACTIONS_LIST = ["memory.store", "memory.query", "memory.remove", "memory.surface"];
+  const MEMORY_ACTIONS_LIST = [
+    "memory.store",
+    "memory.query",
+    "memory.remove",
+    "memory.surface",
+  ];
   if (!memoryVisible) {
-    const hasMemory = cachedCatalog.some((d) => MEMORY_ACTIONS_LIST.includes(d.action));
+    const hasMemory = cachedCatalog.some((d) =>
+      MEMORY_ACTIONS_LIST.includes(d.action),
+    );
     if (!hasMemory) {
       for (const action of MEMORY_ACTIONS_LIST) {
         const fn = ACTION_TO_FN[action];
@@ -795,7 +883,8 @@ export function buildCatalog(opts?: {
           kind: "gateway",
           requiredParams: [],
           disabled: true,
-          disabledReason: "Enable with memory.enabled: true in sdlmcp.config.json",
+          disabledReason:
+            "Enable with memory.enabled: true in sdlmcp.config.json",
           ...getActionMetadata(action),
         });
       }
@@ -815,11 +904,24 @@ export function buildCatalog(opts?: {
         const entry = cachedActionMap![desc.action];
         if (entry) {
           result.schemaSummary = zodToSchemaSummary(entry.schema);
+        } else {
+          // Disabled gateway placeholder (e.g. memory.* with memory off).
+          // Fall back to the static schema so the manual still describes
+          // the parameters callers will need once the tool is enabled.
+          const fallback = DISABLED_GATEWAY_FALLBACK_SCHEMAS[desc.action];
+          if (fallback) {
+            result.schemaSummary = zodToSchemaSummary(fallback);
+          }
         }
       } else if (desc.kind === "internal") {
         const transform = INTERNAL_TRANSFORMS[desc.fn];
         if (transform) {
           result.schemaSummary = zodToSchemaSummary(transform.schema);
+        }
+      } else if (desc.kind === "meta") {
+        const schema = META_TOOL_SCHEMAS[desc.action];
+        if (schema) {
+          result.schemaSummary = zodToSchemaSummary(schema);
         }
       }
     }
@@ -927,37 +1029,37 @@ const ACTION_SEARCH_SYNONYMS: Record<string, string[]> = {
   tests: ["metrics", "symbol"],
   testing: ["metrics", "symbol"],
   coverage: ["metrics", "symbol", "card"],
-  
+
   // Code quality
   quality: ["metrics", "churn", "fanin", "fanout"],
   complexity: ["metrics", "fanin", "fanout"],
-  
+
   // Navigation
   find: ["search", "symbol"],
   lookup: ["search", "getcard", "symbol"],
   locate: ["search", "symbol"],
-  
+
   // Dependencies - match catalog terms like "dependency graph slice"
   deps: ["slice", "dependency", "graph"],
   dependencies: ["slice", "dependency", "graph"],
   imports: ["slice", "dependency"],
   callers: ["fanin", "slice"],
   callees: ["fanout", "slice", "calls"],
-  
+
   // Changes
   changes: ["delta", "churn", "pr"],
   diff: ["delta", "pr"],
   history: ["delta", "churn"],
-  
+
   // Risk
   risk: ["pr", "blast", "delta"],
   impact: ["blast", "pr", "fanin"],
-  
+
   // Reading code
   read: ["skeleton", "hotpath", "window", "code"],
   view: ["skeleton", "hotpath", "window", "code"],
   show: ["skeleton", "hotpath", "window", "code"],
-  
+
   // Running
   run: ["runtime", "execute"],
   exec: ["runtime", "execute"],
@@ -970,7 +1072,7 @@ export function rankCatalog(
 ): ActionDescriptor[] {
   const q = query.toLowerCase();
   const rawTerms = q.split(/\s+/).filter(Boolean);
-  
+
   // Expand synonyms: add related terms for better matching
   const terms = rawTerms.flatMap((term) => {
     const synonyms = ACTION_SEARCH_SYNONYMS[term];
@@ -1000,7 +1102,8 @@ export function rankCatalog(
     const metadataStr = [
       ...desc.prerequisites,
       ...desc.recommendedNextActions,
-      ...desc.fallbacks]
+      ...desc.fallbacks,
+    ]
       .join(" ")
       .toLowerCase();
 

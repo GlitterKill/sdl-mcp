@@ -147,20 +147,40 @@ export async function handleAgentContext(
         };
       }
       if (wireResult.format === "packed") {
-        (enrichedResponse as Record<string, unknown>)._packedPayload =
-          wireResult.payload as string;
-        // Only suppress JSON fields when the caller explicitly asked for
-        // packed. Under wireFormat="auto" we keep both forms so callers
-        // that cannot decode packed still get human-readable evidence.
-        if (request.wireFormat === "packed") {
-          (enrichedResponse as Record<string, unknown>).actionsTaken = [];
-          (enrichedResponse as Record<string, unknown>).finalEvidence = [];
+        // Only attach _packedPayload when it actually saves both bytes AND
+        // tokens vs the JSON form. The gate occasionally picks "packed" on
+        // a single-axis win (e.g. tokens up, bytes down) where shipping the
+        // string alongside finalEvidence + summary inflates the response.
+        const bytesSaved =
+          (wireResult.jsonBytes ?? 0) > (wireResult.packedBytes ?? 0);
+        const tokensSaved =
+          typeof wireResult.jsonTokens === "number" &&
+          typeof wireResult.packedTokens === "number" &&
+          wireResult.jsonTokens > wireResult.packedTokens;
+        const netWin = bytesSaved && tokensSaved;
+        if (netWin) {
+          (enrichedResponse as Record<string, unknown>)._packedPayload =
+            wireResult.payload as string;
+          // Only suppress JSON fields when the caller explicitly asked for
+          // packed. Under wireFormat="auto" we keep both forms so callers
+          // that cannot decode packed still get human-readable evidence.
+          if (request.wireFormat === "packed") {
+            (enrichedResponse as Record<string, unknown>).actionsTaken = [];
+            (enrichedResponse as Record<string, unknown>).finalEvidence = [];
+          }
+          // stableView keeps pre-clear actionsTaken/finalEvidence so two
+          // packed responses with different underlying data produce
+          // different ETags. _packedPayload is also tracked here to defend
+          // against future decoder drift surfacing identity-changing
+          // fields.
+          stableView._packedPayload = wireResult.payload;
+        } else {
+          // Net loss — downgrade gateDecision so the stats block tells
+          // observers honestly that we fell back rather than packed.
+          const stats = (enrichedResponse as Record<string, unknown>)
+            ._packedStats as Record<string, unknown> | undefined;
+          if (stats) stats.gateDecision = "fallback";
         }
-        // stableView keeps pre-clear actionsTaken/finalEvidence so two
-        // packed responses with different underlying data produce different
-        // ETags. _packedPayload is also tracked here to defend against
-        // future decoder drift surfacing identity-changing fields.
-        stableView._packedPayload = wireResult.payload;
       }
     }
     return buildConditionalResponse(enrichedResponse, {

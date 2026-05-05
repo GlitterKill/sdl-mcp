@@ -7,6 +7,7 @@ import * as ladybugDb from "../../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../../db/ladybug-queries.js";
 import type { SymbolKind } from "../../../domain/types.js";
 import { readFileAsync } from "../../../util/asyncFs.js";
+import { singleFlight } from "../../../util/concurrency.js";
 import { logger } from "../../../util/logger.js";
 import { normalizePath } from "../../../util/paths.js";
 import { normalizeTypeName } from "../../../util/type-name.js";
@@ -34,7 +35,6 @@ const CPP_HEADER_PAIR_CONFIDENCE = 0.88;
  * rubric value (0.88). Preserved byte-for-byte; revisit in follow-up.
  */
 const CPP_NAMESPACE_QUALIFIED_CONFIDENCE = 0.9;
-
 
 type ExtractedSymbol = {
   nodeId: string;
@@ -240,16 +240,17 @@ function mapExtractedSymbolsToExisting(
   return filteredSymbolDetails;
 }
 
-async function clearOutgoingCallEdges(
-  conn: import("kuzu").Connection,
+/**
+ * In-memory cleanup of stale dedup keys for the symbols this file is about to
+ * re-resolve. The matching SQL DELETE is deferred to `submitEdgeWrite` so the
+ * dispatcher can combine deletes + inserts across an entire concurrency batch
+ * into a single `withWriteConn`.
+ */
+function clearLocalCallDedupKeys(
   symbolIds: string[],
   createdCallEdges: Set<string>,
-): Promise<void> {
-  if (symbolIds.length === 0) {
-    return;
-  }
-
-  await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(conn, symbolIds, "call");
+): void {
+  if (symbolIds.length === 0) return;
   for (const symbolId of symbolIds) {
     for (const edgeKey of Array.from(createdCallEdges)) {
       if (edgeKey.startsWith(`${symbolId}->`)) {
@@ -438,206 +439,206 @@ async function buildCppIncludeIndex(params: {
   repoId: string;
   repoRoot: string;
   cache?: Map<string, unknown>;
+  importCache?: Pass2ResolverContext["importCache"];
 }): Promise<CppIncludeIndex> {
-  const cacheKey = `pass2-cpp:include-index:${params.repoId}`;
-  const cached = params.cache?.get(cacheKey);
-  if (cached) {
-    return cached as CppIncludeIndex;
-  }
+  return singleFlight(
+    params.cache,
+    `pass2-cpp:include-index:${params.repoId}`,
+    async () => {
+      const conn = await getLadybugConn();
+      const files = await ladybugDb.getFilesByRepo(conn, params.repoId);
+      const symbols = await ladybugDb.getSymbolsByRepo(conn, params.repoId);
+      const {
+        filesByRelPath,
+        filePathByFileId,
+        symbolsByFilePath,
+        symbolById,
+      } = buildRepoSymbolIndexes({ files, symbols });
 
-  const conn = await getLadybugConn();
-  const files = await ladybugDb.getFilesByRepo(conn, params.repoId);
-  const symbols = await ladybugDb.getSymbolsByRepo(conn, params.repoId);
-  const { filesByRelPath, filePathByFileId, symbolsByFilePath, symbolById } =
-    buildRepoSymbolIndexes({ files, symbols });
+      const adapter = getAdapterForExtension(".cpp");
+      const includedSymbolsByFilePath = new Map<
+        string,
+        Array<SymbolRow & { relPath: string }>
+      >();
+      if (!adapter) {
+        return {
+          includedSymbolsByFilePath,
+          symbolsByFilePath,
+          filesByRelPath,
+          symbolById,
+        };
+      }
 
-  const adapter = getAdapterForExtension(".cpp");
-  const includedSymbolsByFilePath = new Map<
-    string,
-    Array<SymbolRow & { relPath: string }>
-  >();
-  if (!adapter) {
-    const index = {
-      includedSymbolsByFilePath,
-      symbolsByFilePath,
-      filesByRelPath,
-      symbolById,
-    };
-    params.cache?.set(cacheKey, index);
-    return index;
-  }
+      const extensionCandidates = new Set<string>(CPP_IMPORT_EXTENSIONS);
+      for (const file of files) {
+        const extension = extname(file.relPath).toLowerCase();
+        if (extension) {
+          extensionCandidates.add(extension);
+        }
+      }
 
-  const extensionCandidates = new Set<string>(CPP_IMPORT_EXTENSIONS);
-  for (const file of files) {
-    const extension = extname(file.relPath).toLowerCase();
-    if (extension) {
-      extensionCandidates.add(extension);
-    }
-  }
+      const cppFiles = files.filter((file) => file.language === "cpp");
+      for (const file of cppFiles) {
+        const absolutePath = join(params.repoRoot, file.relPath);
+        let content = "";
+        try {
+          content = await readFileAsync(absolutePath, "utf-8");
+        } catch {
+          includedSymbolsByFilePath.set(file.relPath, []);
+          continue;
+        }
 
-  const cppFiles = files.filter((file) => file.language === "cpp");
-  for (const file of cppFiles) {
-    const absolutePath = join(params.repoRoot, file.relPath);
-    let content = "";
-    try {
-      content = await readFileAsync(absolutePath, "utf-8");
-    } catch {
-      includedSymbolsByFilePath.set(file.relPath, []);
-      continue;
-    }
+        const tree = adapter.parse(content, absolutePath);
+        if (!tree) {
+          includedSymbolsByFilePath.set(file.relPath, []);
+          continue;
+        }
 
-    const tree = adapter.parse(content, absolutePath);
-    if (!tree) {
-      includedSymbolsByFilePath.set(file.relPath, []);
-      continue;
-    }
-
-    let imports;
-    try {
-      imports = adapter.extractImports(tree, content, absolutePath);
-    } finally {
-      (tree as unknown as { delete?: () => void }).delete?.();
-    }
-    const importResolution = await resolveImportTargets(
-      params.repoId,
-      params.repoRoot,
-      file.relPath,
-      imports,
-      Array.from(extensionCandidates),
-      "cpp",
-      content,
-    );
-
-    const includedPaths = new Set<string>();
-    for (const target of importResolution.targets) {
-      if (target.symbolId.startsWith("unresolved:")) {
-        const unresolvedPath = extractPathFromUnresolvedSymbolId(
-          target.symbolId,
+        let imports;
+        try {
+          imports = adapter.extractImports(tree, content, absolutePath);
+        } finally {
+          (tree as unknown as { delete?: () => void }).delete?.();
+        }
+        const importResolution = await resolveImportTargets(
+          params.repoId,
+          params.repoRoot,
+          file.relPath,
+          imports,
+          Array.from(extensionCandidates),
+          "cpp",
+          content,
+          params.importCache,
         );
-        if (unresolvedPath) {
-          includedPaths.add(unresolvedPath);
+
+        const includedPaths = new Set<string>();
+        for (const target of importResolution.targets) {
+          if (target.symbolId.startsWith("unresolved:")) {
+            const unresolvedPath = extractPathFromUnresolvedSymbolId(
+              target.symbolId,
+            );
+            if (unresolvedPath) {
+              includedPaths.add(unresolvedPath);
+            }
+            continue;
+          }
+
+          const symbol = symbolById.get(target.symbolId);
+          const relPath = symbol ? filePathByFileId.get(symbol.fileId) : null;
+          if (relPath) {
+            includedPaths.add(relPath);
+          }
         }
-        continue;
-      }
 
-      const symbol = symbolById.get(target.symbolId);
-      const relPath = symbol ? filePathByFileId.get(symbol.fileId) : null;
-      if (relPath) {
-        includedPaths.add(relPath);
-      }
-    }
-
-    for (const symbolIds of importResolution.importedNameToSymbolIds.values()) {
-      for (const symbolId of symbolIds) {
-        const symbol = symbolById.get(symbolId);
-        const relPath = symbol ? filePathByFileId.get(symbol.fileId) : null;
-        if (relPath) {
-          includedPaths.add(relPath);
+        for (const symbolIds of importResolution.importedNameToSymbolIds.values()) {
+          for (const symbolId of symbolIds) {
+            const symbol = symbolById.get(symbolId);
+            const relPath = symbol ? filePathByFileId.get(symbol.fileId) : null;
+            if (relPath) {
+              includedPaths.add(relPath);
+            }
+          }
         }
-      }
-    }
 
-    for (const namespaceMap of importResolution.namespaceImports.values()) {
-      for (const symbolId of namespaceMap.values()) {
-        const symbol = symbolById.get(symbolId);
-        const relPath = symbol ? filePathByFileId.get(symbol.fileId) : null;
-        if (relPath) {
-          includedPaths.add(relPath);
+        for (const namespaceMap of importResolution.namespaceImports.values()) {
+          for (const symbolId of namespaceMap.values()) {
+            const symbol = symbolById.get(symbolId);
+            const relPath = symbol ? filePathByFileId.get(symbol.fileId) : null;
+            if (relPath) {
+              includedPaths.add(relPath);
+            }
+          }
         }
+
+        const includedSymbols: Array<SymbolRow & { relPath: string }> = [];
+        for (const relPath of includedPaths) {
+          const symbolsFromFile = symbolsByFilePath.get(relPath) ?? [];
+          for (const symbol of symbolsFromFile) {
+            includedSymbols.push(symbol);
+          }
+        }
+
+        includedSymbolsByFilePath.set(file.relPath, includedSymbols);
       }
-    }
 
-    const includedSymbols: Array<SymbolRow & { relPath: string }> = [];
-    for (const relPath of includedPaths) {
-      const symbolsFromFile = symbolsByFilePath.get(relPath) ?? [];
-      for (const symbol of symbolsFromFile) {
-        includedSymbols.push(symbol);
-      }
-    }
-
-    includedSymbolsByFilePath.set(file.relPath, includedSymbols);
-  }
-
-  const includeIndex = {
-    includedSymbolsByFilePath,
-    symbolsByFilePath,
-    filesByRelPath,
-    symbolById,
-  };
-  params.cache?.set(cacheKey, includeIndex);
-  return includeIndex;
+      return {
+        includedSymbolsByFilePath,
+        symbolsByFilePath,
+        filesByRelPath,
+        symbolById,
+      };
+    },
+  );
 }
 
 async function buildCppNamespaceIndex(
   repoId: string,
   cache?: Map<string, unknown>,
 ): Promise<CppNamespaceIndex> {
-  const cacheKey = `pass2-cpp:namespace-index:${repoId}`;
-  const cached = cache?.get(cacheKey);
-  if (cached) {
-    return cached as CppNamespaceIndex;
-  }
+  return singleFlight(
+    cache,
+    `pass2-cpp:namespace-index:${repoId}`,
+    async () => {
+      const conn = await getLadybugConn();
+      const files = await ladybugDb.getFilesByRepo(conn, repoId);
+      const cppFiles = files.filter((file) => file.language === "cpp");
+      const cppFileIds = new Set(cppFiles.map((file) => file.fileId));
+      const fileById = new Map(cppFiles.map((file) => [file.fileId, file]));
+      const symbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
 
-  const conn = await getLadybugConn();
-  const files = await ladybugDb.getFilesByRepo(conn, repoId);
-  const cppFiles = files.filter((file) => file.language === "cpp");
-  const cppFileIds = new Set(cppFiles.map((file) => file.fileId));
-  const fileById = new Map(cppFiles.map((file) => [file.fileId, file]));
-  const symbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
+      const namespaceByFilePath = new Map<string, string[]>();
+      const symbolsByNamespace = new Map<
+        string,
+        Array<SymbolRow & { relPath: string }>
+      >();
+      const namespaceNames = new Set<string>();
 
-  const namespaceByFilePath = new Map<string, string[]>();
-  const symbolsByNamespace = new Map<
-    string,
-    Array<SymbolRow & { relPath: string }>
-  >();
-  const namespaceNames = new Set<string>();
-
-  for (const symbol of symbols) {
-    if (!cppFileIds.has(symbol.fileId) || symbol.kind !== "module") {
-      continue;
-    }
-    const file = fileById.get(symbol.fileId);
-    if (!file) {
-      continue;
-    }
-    namespaceNames.add(symbol.name);
-    const existing = namespaceByFilePath.get(file.relPath) ?? [];
-    if (!existing.includes(symbol.name)) {
-      existing.push(symbol.name);
-    }
-    namespaceByFilePath.set(file.relPath, existing);
-  }
-
-  for (const namespaceName of namespaceNames) {
-    const bucket: Array<SymbolRow & { relPath: string }> = [];
-    for (const symbol of symbols) {
-      if (!cppFileIds.has(symbol.fileId)) {
-        continue;
+      for (const symbol of symbols) {
+        if (!cppFileIds.has(symbol.fileId) || symbol.kind !== "module") {
+          continue;
+        }
+        const file = fileById.get(symbol.fileId);
+        if (!file) {
+          continue;
+        }
+        namespaceNames.add(symbol.name);
+        const existing = namespaceByFilePath.get(file.relPath) ?? [];
+        if (!existing.includes(symbol.name)) {
+          existing.push(symbol.name);
+        }
+        namespaceByFilePath.set(file.relPath, existing);
       }
-      if (
-        symbol.name !== namespaceName &&
-        !symbol.name.startsWith(`${namespaceName}::`)
-      ) {
-        continue;
-      }
-      const file = fileById.get(symbol.fileId);
-      if (!file) {
-        continue;
-      }
-      bucket.push({
-        ...symbol,
-        relPath: file.relPath,
-      });
-    }
-    symbolsByNamespace.set(namespaceName, bucket);
-  }
 
-  const namespaceIndex = {
-    namespaceByFilePath,
-    symbolsByNamespace,
-  };
-  cache?.set(cacheKey, namespaceIndex);
-  return namespaceIndex;
+      for (const namespaceName of namespaceNames) {
+        const bucket: Array<SymbolRow & { relPath: string }> = [];
+        for (const symbol of symbols) {
+          if (!cppFileIds.has(symbol.fileId)) {
+            continue;
+          }
+          if (
+            symbol.name !== namespaceName &&
+            !symbol.name.startsWith(`${namespaceName}::`)
+          ) {
+            continue;
+          }
+          const file = fileById.get(symbol.fileId);
+          if (!file) {
+            continue;
+          }
+          bucket.push({
+            ...symbol,
+            relPath: file.relPath,
+          });
+        }
+        symbolsByNamespace.set(namespaceName, bucket);
+      }
+
+      return {
+        namespaceByFilePath,
+        symbolsByNamespace,
+      };
+    },
+  );
 }
 
 function buildNamespaceMemberIndex(
@@ -925,6 +926,9 @@ async function resolveCppCallEdgesPass2(params: {
   globalNameToSymbolIds?: Map<string, string[]>;
   telemetry?: Pass2ResolverContext["telemetry"];
   cache?: Map<string, unknown>;
+  mode?: "full" | "incremental";
+  submitEdgeWrite?: Pass2ResolverContext["submitEdgeWrite"];
+  importCache?: Pass2ResolverContext["importCache"];
 }): Promise<number> {
   const {
     repoId,
@@ -934,6 +938,9 @@ async function resolveCppCallEdgesPass2(params: {
     globalNameToSymbolIds,
     telemetry,
     cache,
+    mode,
+    submitEdgeWrite,
+    importCache,
   } = params;
 
   const conn = await getLadybugConn();
@@ -1017,9 +1024,7 @@ async function resolveCppCallEdgesPass2(params: {
   const symbolIdsToRefresh = filteredSymbolDetails.map(
     (detail) => detail.symbolId,
   );
-  await withWriteConn(async (wConn) => {
-    await clearOutgoingCallEdges(wConn, symbolIdsToRefresh, createdCallEdges);
-  });
+  clearLocalCallDedupKeys(symbolIdsToRefresh, createdCallEdges);
 
   const nodeIdToSymbolId = createNodeIdToSymbolId(filteredSymbolDetails);
 
@@ -1027,6 +1032,7 @@ async function resolveCppCallEdgesPass2(params: {
     repoId,
     repoRoot,
     cache,
+    importCache,
   });
   const namespaceIndex = await buildCppNamespaceIndex(repoId, cache);
   const namespaceMembersByNamespace = buildNamespaceMemberIndex(namespaceIndex);
@@ -1124,9 +1130,23 @@ async function resolveCppCallEdgesPass2(params: {
     }
   }
 
-  await withWriteConn(async (wConn) => {
-    await ladybugDb.insertEdges(wConn, edgesToInsert);
-  });
+  if (submitEdgeWrite) {
+    await submitEdgeWrite({
+      symbolIdsToRefresh,
+      edges: edgesToInsert,
+    });
+  } else {
+    await withWriteConn(async (wConn) => {
+      if (mode !== "full" && symbolIdsToRefresh.length > 0) {
+        await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
+          wConn,
+          symbolIdsToRefresh,
+          "call",
+        );
+      }
+      await ladybugDb.insertEdges(wConn, edgesToInsert);
+    });
+  }
   return createdEdges;
 }
 
@@ -1160,6 +1180,9 @@ export class CppPass2Resolver implements Pass2Resolver {
         globalNameToSymbolIds: context.globalNameToSymbolIds,
         telemetry: context.telemetry,
         cache: context.cache,
+        mode: context.mode,
+        submitEdgeWrite: context.submitEdgeWrite,
+        importCache: context.importCache,
       });
       return { edgesCreated };
     } catch (error) {

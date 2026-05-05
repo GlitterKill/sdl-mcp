@@ -146,6 +146,23 @@ export async function executeWorkflow(
   for (let i = 0; i < request.steps.length; i++) {
     const step = request.steps[i];
 
+    // Soft-skip: parser flagged this step as unknown/disabled while
+    // `onError: "continue"` was set. Emit an error result and let sibling
+    // steps proceed.
+    if (step.skip) {
+      stepResults.push({
+        stepIndex: i,
+        fn: step.fn,
+        result: null,
+        tokens: 0,
+        durationMs: 0,
+        status: "error",
+        error: step.skipReason ?? `Step ${i}: skipped (validation failure).`,
+      });
+      priorResults.push(null);
+      continue;
+    }
+
     if (context?.signal?.aborted) {
       for (let j = i; j < request.steps.length; j++) {
         stepResults.push({
@@ -236,10 +253,14 @@ export async function executeWorkflow(
             _type: "array",
             length: result.length,
             sample: result.slice(0, 3),
-            hint: "Full data available via $" + i + " reference in subsequent steps",
+            hint:
+              "Full data available via $" +
+              i +
+              " reference in subsequent steps",
           };
         }
-        const tokens = WorkflowBudgetTracker.estimateResultTokens(resultForResponse);
+        const tokens =
+          WorkflowBudgetTracker.estimateResultTokens(resultForResponse);
         budget.record(tokens, stepDuration);
 
         const stepResult: WorkflowStepResult = {

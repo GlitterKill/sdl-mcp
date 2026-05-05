@@ -28,6 +28,19 @@ interface FlushBatch {
  * through the DB write pool but never blocks
  * the parsing/processing loop.
  */
+/**
+ * Snapshot delivered to a `BatchPersistAccumulator` progress callback after
+ * each completed flush. `totalFlushed` counts all rows committed so far for
+ * the lifetime of the accumulator; `queueDepth` is the number of pending
+ * `FlushBatch` snapshots awaiting commit; `pending` is the row count not yet
+ * snapshotted into a batch.
+ */
+export interface BatchPersistDrainProgress {
+  totalFlushed: number;
+  queueDepth: number;
+  pending: number;
+}
+
 export class BatchPersistAccumulator {
   private files: FileUpsertEntry[] = [];
   private symbols: SymbolRow[] = [];
@@ -41,10 +54,26 @@ export class BatchPersistAccumulator {
   private draining = false;
   private _error: Error | null = null;
   private _totalFlushed = 0;
+  private progressCallback:
+    | ((state: BatchPersistDrainProgress) => void)
+    | null = null;
 
-  constructor(flushThreshold = 200) {
+  constructor(flushThreshold = 512) {
     this.flushThreshold = flushThreshold;
     activeAccumulators.add(this);
+  }
+
+  /**
+   * Register a callback invoked after each `FlushBatch` commits. Used by the
+   * pass-1 drain phase to drive a CLI progress bar — without periodic ticks
+   * the user sees only the static "Flushing pass 1 writes" message for the
+   * full drain duration. Callback errors are caught and logged so a faulty
+   * progress consumer cannot abort the drain.
+   */
+  setProgressCallback(
+    cb: ((state: BatchPersistDrainProgress) => void) | null,
+  ): void {
+    this.progressCallback = cb;
   }
 
   get pending(): number {
@@ -130,6 +159,19 @@ export class BatchPersistAccumulator {
       try {
         await this.writeBatch(batch);
         this._totalFlushed += batch.count;
+        if (this.progressCallback) {
+          try {
+            this.progressCallback({
+              totalFlushed: this._totalFlushed,
+              queueDepth: this.writeQueue.length,
+              pending: this.pendingCount,
+            });
+          } catch (cbErr) {
+            logger.warn("BatchPersistAccumulator progress callback threw", {
+              error: cbErr,
+            });
+          }
+        }
       } catch (err) {
         this._error = err instanceof Error ? err : new Error(String(err));
         logger.error("BatchPersistAccumulator drain error", { error: err });
@@ -158,8 +200,11 @@ export class BatchPersistAccumulator {
           await ladybugDb.deleteSymbolsByFileIds(txConn, existingFileIds);
         }
 
-        for (const entry of batch.files) {
-          await ladybugDb.upsertFile(txConn, entry.file);
+        if (batch.files.length > 0) {
+          await ladybugDb.upsertFileBatch(
+            txConn,
+            batch.files.map((entry) => entry.file),
+          );
         }
 
         if (batch.refs.length > 0) {
@@ -227,7 +272,10 @@ export class BatchPersistAccumulator {
 // Kept module-internal except for the small `getActiveDrainStats` accessor.
 const activeAccumulators: Set<BatchPersistAccumulator> = new Set();
 
-export function getActiveDrainStats(): { queueDepth: number; drainFailures: number } {
+export function getActiveDrainStats(): {
+  queueDepth: number;
+  drainFailures: number;
+} {
   let queueDepth = 0;
   let drainFailures = 0;
   for (const acc of activeAccumulators) {

@@ -740,6 +740,14 @@ export async function updateMetricsForRepo(
     callEdges: Array<{ callerId: string; calleeId: string }>;
     clusterEdges: Array<{ fromSymbolId: string; toSymbolId: string }>;
   };
+  /**
+   * Set of symbol IDs affected by `changedFileIds` (direct + 1-hop edge
+   * neighbours). Undefined for full-repo runs (when `changedFileIds` is
+   * undefined or empty). Downstream consumers (semantic embedding refresh)
+   * use this to scope per-symbol work to <100 IDs on incremental runs
+   * instead of paying the full ~8k pre-pass cost.
+   */
+  affectedSymbolIds?: Set<string>;
 }> {
   const timings: Record<string, number> | undefined = options?.includeTimings
     ? {}
@@ -792,9 +800,10 @@ export async function updateMetricsForRepo(
   const symbolIds = new Set(allSymbols.map((symbol) => symbol.symbolId));
 
   let symbols = allSymbols;
+  let affectedSymbolIds: Set<string> | undefined;
 
   if (changedFileIds && changedFileIds.size > 0) {
-    const affectedSymbolIds = new Set<string>();
+    affectedSymbolIds = new Set<string>();
 
     for (const symbol of allSymbols) {
       if (changedFileIds.has(symbol.fileId)) {
@@ -811,7 +820,8 @@ export async function updateMetricsForRepo(
       }
     }
 
-    symbols = allSymbols.filter((s) => affectedSymbolIds.has(s.symbolId));
+    const affected = affectedSymbolIds;
+    symbols = allSymbols.filter((s) => affected.has(s.symbolId));
     logger.debug(
       `Incremental metrics: updating ${symbols.length} of ${allSymbols.length} symbols for ${changedFileIds.size} changed files`,
     );
@@ -965,6 +975,7 @@ export async function updateMetricsForRepo(
       callEdges: sharedCallEdges,
       clusterEdges: sharedClusterEdges,
     },
+    affectedSymbolIds,
   };
 }
 

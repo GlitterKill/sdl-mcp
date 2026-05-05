@@ -13,6 +13,16 @@ import {
 import { logger } from "../util/logger.js";
 import { normalizePath } from "../util/paths.js";
 
+// Workaround for LadybugDB 0.16.0 binder bug: when an UNWIND struct mixes
+// integer and fractional Number values for the same field, the binder
+// picks ANY type and integer values round-trip as Number.MIN_VALUE
+// (5e-324). Adding 1e-12 to integer values forces the binder to encode
+// them as DOUBLE while losing precision only at the 13th decimal place
+// — negligible for weight/confidence which round to 2-3 places.
+function forceDoubleEncoding(value: number): number {
+  return Number.isInteger(value) ? value + 1e-12 : value;
+}
+
 // Promise-based singleton for join hint support detection.
 // Used by getEdgesToSymbols and getCallersOfSymbols to avoid
 // re-probing on every call after the first success/failure.
@@ -217,8 +227,8 @@ export async function insertEdges(
           fromSymbolId: edge.fromSymbolId,
           toSymbolId: edge.toSymbolId,
           edgeType: edge.edgeType,
-          weight: edge.weight,
-          confidence: edge.confidence,
+          weight: forceDoubleEncoding(edge.weight),
+          confidence: forceDoubleEncoding(edge.confidence),
           resolution: edge.resolution,
           resolverId: edge.resolverId ?? "pass1-generic",
           resolutionPhase: edge.resolutionPhase ?? "pass1",
@@ -260,12 +270,20 @@ export async function insertEdges(
           { rows },
         );
         // 3: refresh mutable props on existing rels (preserves createdAt).
+        // The WHERE guard prevents pass-2 (heuristic, confidence ~0.7-0.85)
+        // from overwriting SCIP-written exact edges (resolution: "exact",
+        // confidence: 0.95). Pass-2 now runs AFTER SCIP ingest, so without
+        // the guard every pass-2 file would clobber SCIP exact edges on
+        // shared (from, to, edgeType) triples. The OR clause keeps an
+        // upgrade path open if a future row carries higher confidence
+        // than the existing exact edge.
         await exec(
           txConn,
           `UNWIND $rows AS row
            MATCH (a:Symbol {symbolId: row.fromSymbolId})
            MATCH (b:Symbol {symbolId: row.toSymbolId})
            MATCH (a)-[d:DEPENDS_ON {edgeType: row.edgeType}]->(b)
+           WHERE d.resolution <> 'exact' OR d.confidence < row.confidence
            SET d.weight = row.weight,
                d.confidence = row.confidence,
                d.resolution = row.resolution,

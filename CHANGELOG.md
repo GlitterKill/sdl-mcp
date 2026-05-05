@@ -7,6 +7,139 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- **Pass-2 read amplification eliminated (A1).** Each language resolver
+  previously did `getFileByRepoPath` per imported module + `getSymbolsByFile`
+  per resolved target file — ~30k point reads per refresh on a 1000-file TS
+  repo. New pass-level `Pass2ImportCache` (in `src/indexer/pass2/types.ts`)
+  populated once at dispatcher start with two batched reads
+  (`getFilesByRepo` + new `getExportedSymbolsLiteByFileIds`); resolvers do
+  O(1) map lookups instead. Threaded through `resolveImportTargets` (now
+  takes optional `cache` arg) and the cpp/c/shell helper indexes that wrap
+  it. Eliminates ~30k point-read round trips per pass-2.
+- **Pass-2 re-parse eliminated for TS files (C1).** Pass-1 already
+  parses every file with tree-sitter; pass-2 was redundantly re-parsing on
+  the JS main thread. New `Pass1ExtractionCache` (`Map<relPath,
+Pass1ExtractionEntry>`) populated during pass-1 from both engines
+  (`process-file.ts` for the TS engine, `rust-process-file.ts` for the Rust
+  engine), gated on `isTsCallResolutionFile + skipCallResolution`. The TS
+  resolver in `edge-builder/pass2.ts` checks the cache first; on hit,
+  skips a full tree-sitter parse + three `extract*` calls. Other-language
+  resolvers retain inline re-parse because their resolvers consume the live
+  tree handle for scope walkers / call-scope indexes. ~30-50% of pass-2
+  wall on TS-heavy repos.
+- **Pass-2 write coalescing per concurrency batch.** New `submitEdgeWrite`
+  callback in `Pass2ResolverContext` lets the dispatcher decide between
+  immediate flush (sequential path, one `withWriteConn` per file) and
+  batched flush (parallel path, one `withWriteConn` per concurrency batch
+  with combined delete + insert). All 11 language resolvers refactored:
+  removed `clearOutgoingCallEdges` SQL helper, replaced with in-memory
+  `clearLocalCallDedupKeys`; replaced 2× `withWriteConn` per file with 1×
+  `submitEdgeWrite` callback. Cuts writeLimiter handshakes from
+  O(filesPerBatch) to 1.
+- **Pass-2 concurrency raised on high-end tiers (F1).** `cpu-presets.ts`:
+  extreme tier `pass2Concurrency 6 → 12`, high tier `3 → 8`. Unblocked by
+  C1 — earlier raises were capped by the JS main-thread re-parse
+  bottleneck.
+- **Embedding write coalescing on rebuild path.** When `dropVectorIndex`
+  succeeds (no live HNSW to maintain), `refreshSymbolEmbeddings` accumulates
+  ONNX batch results into a 256-item buffer and flushes via a single
+  `withWriteConn` instead of one per ONNX batch. Cuts writeLimiter
+  handshakes ~8× on bulk rebuild. Buffer is force-flushed in `finally`
+  before the HNSW rebuild so unflushed vectors can't strand outside the
+  index.
+- **`BatchPersistAccumulator` flush threshold raised 200 → 512.** Better
+  fills the underlying UNWIND CHUNK=256 window in batched writes; halves
+  txn boundaries on pass-1 drain. Memory cost per accumulator ~+200KB.
+
+### Added
+
+- **`semantic.modelVariant` config.** Selects the ONNX file variant
+  (`default`/`int8`, `fp16`, `fp32`, plus nomic-only `uint8`/`q4`/
+  `q4f16`/`bnb4`) per embedding model. Each model declares supported
+  variants in `src/indexer/model-registry.ts`; unsupported requests fall
+  back to that model's `defaultVariant` with a warning. Lets users trade
+  speed for accuracy without a code change.
+- **`semantic.executionProviders` config.** Configurable ONNX Runtime
+  execution provider list. Platform allow-list filtered against the default
+  `onnxruntime-node` package: Windows x64 `["cpu", "dml", "webgpu"]`,
+  macOS `["cpu", "coreml"]`, Linux x64 `["cpu", "cuda", "tensorrt"]`,
+  Linux arm64 `["cpu"]`. Unsupported entries dropped with a warning;
+  `"cpu"` auto-appended as final fallback. Enables AMD GPU acceleration
+  on Windows via DirectML, Apple Silicon ANE/GPU via CoreML, NVIDIA on
+  Linux via CUDA (system CUDA 12 + cuDNN required).
+- **`semantic.embeddingsSequential` config.** Run multiple embedding
+  models in series instead of via `Promise.all`. Default `false`. Set
+  `true` on systems where ORT serializes parallel sessions at the
+  thread-pool layer (alternation pattern in CLI progress). Each model
+  then holds the full thread budget end-to-end.
+- **`semantic.embeddingBatchSize` config.** ONNX inference batch width
+  for symbol embedding refresh. Default 32, max 128. Larger batches
+  amortise tokenizer + session bind/unbind costs.
+- **`MAX_EMBEDDING_CONCURRENCY` raised 4 → 8.** Schema cap and clamp logic
+  bumped; users can now request `embeddingConcurrency` up to 8.
+- **`scip.generator.cleanupAfterIngest` config.** Default `true`. Deletes
+  `<repoRoot>/index.scip` after the post-refresh ingest consumes it so the
+  generated file doesn't clutter the working tree. Skipped automatically
+  when `args` contains `--output`/`-o` (custom paths are user-managed).
+- **Per-model embedding progress in CLI.** `IndexProgress.model?: string`
+  tags embedding events with their source model. CLI renderer keeps a
+  per-model `Map` and renders both jina + nomic on a single status line
+  (e.g. `Embeddings: jina [###---] 25% (2100/8522) | nomic [####--] 30% (2500/8522)`)
+  instead of letting interleaved events overwrite each other's counts.
+- **Pass-1 drain progress feedback.** `BatchPersistAccumulator` accepts an
+  optional `setProgressCallback` invoked after each batch flush.
+  `indexer-pass1.ts` wires this to emit `finalizing/pass1Drain` substage
+  events with `stageCurrent`/`stageTotal`, replacing the static
+  "Flushing pass 1 writes" label with a live progress bar.
+- **Pass-2 import + extraction cache types.** `Pass2ImportCache`,
+  `Pass1ExtractionCache`, `Pass1ExtractionEntry`, and `SubmitEdgeWrite`
+  exported from `src/indexer/pass2/types.ts`.
+- **`getExportedSymbolsLiteByFileIds` query.** New batched read in
+  `src/db/ladybug-symbols.ts` returning `Map<fileId, ExportedSymbolLite[]>`
+  (just `symbolId`, `name`). Drop-in replacement for per-file
+  `getSymbolsByFile().filter(s => s.exported)` in import resolution.
+
+### Changed
+
+- **`durationMs` in `IndexResult` now reflects full wall-clock.**
+  Previously captured immediately after the `versionSnapshot` phase, which
+  silently excluded the entire post-index session (finalizeIndexing,
+  embeddings, deferred indexes, audit flush). On full-mode runs with
+  embeddings this could under-report by 200-400+ seconds. Now matches
+  `timings.totalMs`.
+- **`MAX_EMBEDDING_CONCURRENCY` is 8** (was 4). Schema clamps + tests
+  updated. `embeddingConcurrency` accepts 1-8.
+- **`MAX_EMBEDDING_BATCH_SIZE` and `DEFAULT_EMBEDDING_BATCH_SIZE`.** New
+  constants (128 and 32 respectively). `REFRESH_BATCH_SIZE` kept as an
+  exported alias for `DEFAULT_EMBEDDING_BATCH_SIZE` so tests / scripts
+  retain a stable reference.
+- **Model registry restructured around variants.** `ModelInfo` now exposes
+  `defaultVariant` + `variants: Record<string, ModelVariantInfo>` instead
+  of a flat `modelFile` + `downloadUrls.model`. Tokenizer/config URLs
+  remain shared across variants. New `resolveVariant(name, requested?)`
+  helper centralises fallback logic. `resolveModelPath`,
+  `isModelAvailable`, and `ensureModelAvailable` now accept an optional
+  `variant` argument.
+- **Pass-2 dispatcher writes per batch, not per file.** Parallel-path
+  `runPass2Resolvers` now collects edges from every file in a
+  concurrency-batch into a `BatchWriteAccumulator` and issues one combined
+  `withWriteConn(delete-then-insert)` after `Promise.all` settles.
+
+### Fixed
+
+- **`dropVectorIndex` regex now matches LadybugDB binder errors.** The
+  `/does not exist/i` check missed LadybugDB's actual phrasing
+  (`"Binder exception: Table X doesn't have an index with name Y."`),
+  causing fresh-DB embedding refreshes to take the slow per-row HNSW
+  maintenance path AND skip the post-write index rebuild — leaving the DB
+  without a vector index after every fresh-DB run. Regex broadened to
+  `/does not exist|doesn't have an index with name|no such (vector |fts )?index/i`.
+  The `indexes.length > 0` guard on `showIndexes` verification was also
+  dropped; the binder error itself is authoritative for "this index
+  doesn't exist on this table".
+
 ### Changed
 
 - **`HealthMetrics.engineDispatch` semantics: events → files (BREAKING).**

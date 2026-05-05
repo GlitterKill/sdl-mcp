@@ -34,8 +34,18 @@ export class ConcurrencyLimiter {
     reject: (reason?: unknown) => void;
     task: () => Promise<unknown>;
     taskTimeoutMs?: number;
+    enqueuedAt: number;
   }>;
   private drainResolvers: Array<() => void> = [];
+
+  // Cumulative timing counters for telemetry. Sampled by callers via
+  // getStats(); pass-2 in particular uses the deltas to confirm the
+  // writeLimiter-bound diagnosis without per-resolver instrumentation.
+  private totalActiveMs = 0;
+  private totalQueueMs = 0;
+  private totalRuns = 0;
+  private peakQueued = 0;
+  private peakActive = 0;
 
   constructor(options: ConcurrencyLimiterOptions) {
     if (options.maxConcurrency < 1) {
@@ -75,6 +85,7 @@ export class ConcurrencyLimiter {
         },
         // Preserve the execution timeout for when the task is dequeued (H8)
         taskTimeoutMs: timeoutMs,
+        enqueuedAt: Date.now(),
       };
 
       if (timeout) {
@@ -91,6 +102,9 @@ export class ConcurrencyLimiter {
       }
 
       this.queue.push(item);
+      if (this.queue.length > this.peakQueued) {
+        this.peakQueued = this.queue.length;
+      }
     });
   }
 
@@ -99,12 +113,18 @@ export class ConcurrencyLimiter {
     timeoutMs?: number,
   ): Promise<T> {
     this.activeCount++;
+    if (this.activeCount > this.peakActive) {
+      this.peakActive = this.activeCount;
+    }
+    const startedAt = Date.now();
 
     // releaseSlot is called exactly once, after the underlying task
     // settles OR if no task was started. This keeps the slot occupied
     // until the real work finishes, even if a timeout fires first.
     const releaseSlot = (): void => {
       this.activeCount--;
+      this.totalActiveMs += Date.now() - startedAt;
+      this.totalRuns++;
       this.processQueue();
       this.notifyDrainIfIdle();
     };
@@ -156,6 +176,7 @@ export class ConcurrencyLimiter {
     while (this.queue.length > 0 && this.activeCount < this.maxConcurrency) {
       const item = this.queue.shift();
       if (item) {
+        this.totalQueueMs += Date.now() - item.enqueuedAt;
         // Pass the preserved execution timeout through to executeTask (H8)
         this.executeTask(item.task, item.taskTimeoutMs)
           .then((result) => item.resolve(result))
@@ -167,12 +188,29 @@ export class ConcurrencyLimiter {
   /**
    * Gets current statistics about the limiter.
    *
-   * @returns Object with active count and queue length
+   * The cumulative timing fields (`totalActiveMs`, `totalQueueMs`,
+   * `totalRuns`, `peakQueued`, `peakActive`) accumulate for the lifetime of
+   * the limiter. Callers wanting a windowed measurement (e.g. pass-2 only)
+   * should snapshot before/after and diff. Existing two-field consumers
+   * (`active`, `queued`) keep working — additional fields are additive.
    */
-  getStats(): { active: number; queued: number } {
+  getStats(): {
+    active: number;
+    queued: number;
+    totalActiveMs: number;
+    totalQueueMs: number;
+    totalRuns: number;
+    peakQueued: number;
+    peakActive: number;
+  } {
     return {
       active: this.activeCount,
       queued: this.queue.length,
+      totalActiveMs: this.totalActiveMs,
+      totalQueueMs: this.totalQueueMs,
+      totalRuns: this.totalRuns,
+      peakQueued: this.peakQueued,
+      peakActive: this.peakActive,
     };
   }
 
@@ -268,4 +306,32 @@ export function createDbIOLimiter(concurrency: number): ConcurrencyLimiter {
   return new ConcurrencyLimiter({
     maxConcurrency: concurrency,
   });
+}
+
+/**
+ * Single-flight wrapper over a shared cache. Concurrent callers for the same
+ * key await one in-flight Promise instead of each running `compute()`. The
+ * cache stores the Promise itself so the cache lookup is race-free under
+ * single-threaded JS (set happens before the first await of `compute()`).
+ *
+ * On `compute()` rejection the cache entry is cleared so a retry is possible.
+ */
+export async function singleFlight<T>(
+  cache: Map<string, unknown> | undefined,
+  cacheKey: string,
+  compute: () => Promise<T>,
+): Promise<T> {
+  if (!cache) return compute();
+  const existing = cache.get(cacheKey);
+  if (existing !== undefined) {
+    return (await existing) as T;
+  }
+  const inflight = compute();
+  cache.set(cacheKey, inflight);
+  try {
+    return await inflight;
+  } catch (err) {
+    if (cache.get(cacheKey) === inflight) cache.delete(cacheKey);
+    throw err;
+  }
 }

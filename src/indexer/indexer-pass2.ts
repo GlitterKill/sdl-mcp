@@ -17,16 +17,126 @@ import * as ladybugDb from "../db/ladybug-queries.js";
 import type { SymbolKind } from "../domain/types.js";
 import type { RepoConfig } from "../config/types.js";
 import type { FileMetadata } from "./fileScanner.js";
-import {
-  toPass2Target,
-  type Pass2ResolverRegistry,
-} from "./pass2/registry.js";
-import { withWriteConn } from "../db/ladybug.js";
+import { toPass2Target, type Pass2ResolverRegistry } from "./pass2/registry.js";
+import type {
+  Pass1ExtractionCache,
+  Pass2ImportCache,
+  SubmitEdgeWrite,
+} from "./pass2/types.js";
+import { getLadybugConn, withWriteConn, getPoolStats } from "../db/ladybug.js";
+import { logger } from "../util/logger.js";
 import {
   buildGlobalPreferredSymbolIds,
   type IndexProgress,
   type LadybugConn,
 } from "./indexer-init.js";
+
+/**
+ * Build a `submitEdgeWrite` that flushes immediately on each call. Used by the
+ * sequential pass-2 dispatch path — preserves the legacy "one write per file"
+ * shape so single-threaded indexing still benefits from the dispatcher-owned
+ * delete-then-insert tx without any coalescing semantics.
+ */
+/** @internal exported for tests; do not import from product code. */
+export function makeImmediateSubmit(
+  mode: "full" | "incremental",
+): SubmitEdgeWrite {
+  return async ({ symbolIdsToRefresh, edges }) => {
+    if (symbolIdsToRefresh.length === 0 && edges.length === 0) return;
+    await withWriteConn(async (wConn) => {
+      if (mode !== "full" && symbolIdsToRefresh.length > 0) {
+        await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
+          wConn,
+          symbolIdsToRefresh,
+          "call",
+        );
+      }
+      if (edges.length > 0) {
+        await ladybugDb.insertEdges(wConn, edges);
+      }
+    });
+  };
+}
+
+interface BatchWriteAccumulator {
+  symbolIdsToRefresh: string[];
+  edges: ladybugDb.EdgeRow[];
+}
+
+/**
+ * Build a `submitEdgeWrite` that defers the write into a shared accumulator.
+ * Used by the parallel pass-2 dispatch path so all files in one concurrency
+ * batch issue a single combined `withWriteConn`. The accumulator is mutated
+ * synchronously from each resolver's submit call — JS event-loop semantics
+ * guarantee no torn writes between the `.push(...)` calls in concurrent
+ * closures.
+ */
+/** @internal exported for tests; do not import from product code. */
+export function makeBatchAccumulator(): {
+  acc: BatchWriteAccumulator;
+  submit: SubmitEdgeWrite;
+} {
+  const acc: BatchWriteAccumulator = { symbolIdsToRefresh: [], edges: [] };
+  const submit: SubmitEdgeWrite = async ({ symbolIdsToRefresh, edges }) => {
+    if (symbolIdsToRefresh.length > 0) {
+      acc.symbolIdsToRefresh.push(...symbolIdsToRefresh);
+    }
+    if (edges.length > 0) {
+      acc.edges.push(...edges);
+    }
+  };
+  return { acc, submit };
+}
+
+/** @internal exported for tests; do not import from product code. */
+export async function flushBatchAccumulator(
+  acc: BatchWriteAccumulator,
+  mode: "full" | "incremental",
+): Promise<void> {
+  if (acc.symbolIdsToRefresh.length === 0 && acc.edges.length === 0) return;
+  await withWriteConn(async (wConn) => {
+    if (mode !== "full" && acc.symbolIdsToRefresh.length > 0) {
+      await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
+        wConn,
+        acc.symbolIdsToRefresh,
+        "call",
+      );
+    }
+    if (acc.edges.length > 0) {
+      await ladybugDb.insertEdges(wConn, acc.edges);
+    }
+  });
+}
+
+/**
+ * Build the pass-2 import resolution cache with two batched reads:
+ *
+ *   1. `getFilesByRepo` — every File row keyed by `relPath`.
+ *   2. `getExportedSymbolsLiteByFileIds` — exported `(symbolId, name)` tuples
+ *      grouped by `fileId`.
+ *
+ * Both batches run on a single read connection. Replaces the per-file
+ * `getFileByRepoPath` and `getSymbolsByFile` round-trips that
+ * `import-resolution.ts` previously made on every imported module — for a
+ * 1000-file TS repo with 20 imports/file × 1.5 candidate paths each, that
+ * collapsed ~30k point reads into 2 batched queries.
+ */
+async function buildPass2ImportCache(
+  repoId: string,
+): Promise<Pass2ImportCache> {
+  const conn = await getLadybugConn();
+  const files = await ladybugDb.getFilesByRepo(conn, repoId);
+  const fileByRelPath = new Map<string, ladybugDb.FileRow>();
+  for (const file of files) {
+    fileByRelPath.set(file.relPath, file);
+  }
+  const exportedSymbolsByFileId =
+    await ladybugDb.getExportedSymbolsLiteByFileIds(
+      conn,
+      files.map((f) => f.fileId),
+    );
+  return { fileByRelPath, exportedSymbolsByFileId };
+}
 
 type FinalizeEdgesPhaseMeasurer = <T>(
   phaseName: string,
@@ -51,7 +161,13 @@ export async function refreshSymbolIndexFromDb(
   for (const symbol of symbols) {
     const filePath = filePathById.get(symbol.fileId);
     if (filePath)
-      addToSymbolIndex(refreshed, filePath, symbol.symbolId, symbol.name, symbol.kind as SymbolKind);
+      addToSymbolIndex(
+        refreshed,
+        filePath,
+        symbol.symbolId,
+        symbol.name,
+        symbol.kind as SymbolKind,
+      );
   }
   symbolIndex.clear();
   for (const [fp, names] of refreshed) symbolIndex.set(fp, names);
@@ -104,6 +220,7 @@ export async function refreshSymbolIndexFromDb(
 async function runOnePass2Resolver(params: {
   repoId: string;
   repoRoot: string;
+  mode: "full" | "incremental";
   fileMeta: FileMetadata;
   pass2ResolverRegistry: Pass2ResolverRegistry;
   symbolIndex: SymbolIndex;
@@ -120,17 +237,43 @@ async function runOnePass2Resolver(params: {
   globalPreferredSymbolId: Map<string, string>;
   callResolutionTelemetry: CallResolutionTelemetry;
   pass2ResolverCache: Map<string, unknown>;
-}): Promise<{ edgesCreated: number; localEdgeKeys: Set<string>; resolverId: string | null; elapsedMs: number }> {
+  submitEdgeWrite: SubmitEdgeWrite;
+  importCache: Pass2ImportCache;
+  pass1Extractions?: Pass1ExtractionCache;
+}): Promise<{
+  edgesCreated: number;
+  localEdgeKeys: Set<string>;
+  resolverId: string | null;
+  elapsedMs: number;
+}> {
   const {
-    repoId, repoRoot, fileMeta, pass2ResolverRegistry, symbolIndex, tsResolver,
-    config, localCreatedCallEdges, globalNameToSymbolIds, globalPreferredSymbolId,
-    callResolutionTelemetry, pass2ResolverCache,
+    repoId,
+    repoRoot,
+    mode,
+    fileMeta,
+    pass2ResolverRegistry,
+    symbolIndex,
+    tsResolver,
+    config,
+    localCreatedCallEdges,
+    globalNameToSymbolIds,
+    globalPreferredSymbolId,
+    callResolutionTelemetry,
+    pass2ResolverCache,
+    submitEdgeWrite,
+    importCache,
+    pass1Extractions,
   } = params;
 
   const target = toPass2Target({ ...fileMeta, repoId });
   const resolver = pass2ResolverRegistry.getResolver(target);
   if (!resolver) {
-    return { edgesCreated: 0, localEdgeKeys: localCreatedCallEdges, resolverId: null, elapsedMs: 0 };
+    return {
+      edgesCreated: 0,
+      localEdgeKeys: localCreatedCallEdges,
+      resolverId: null,
+      elapsedMs: 0,
+    };
   }
 
   const resolverStartedAt = Date.now();
@@ -144,6 +287,10 @@ async function runOnePass2Resolver(params: {
     globalPreferredSymbolId,
     telemetry: callResolutionTelemetry,
     cache: pass2ResolverCache,
+    mode,
+    submitEdgeWrite,
+    importCache,
+    pass1Extractions,
   });
 
   return {
@@ -175,12 +322,44 @@ export async function runPass2Resolvers(params: {
   callResolutionTelemetry: CallResolutionTelemetry;
   onProgress: ((progress: IndexProgress) => void) | undefined;
   signal?: AbortSignal;
+  /**
+   * Files that SCIP fully covered (every callable reference occurrence
+   * resolved). The dispatcher skips resolver invocation for these to avoid
+   * redundant CPU + I/O — pass-2's heuristic writes for those call sites
+   * would have been blocked by the `insertEdges` confidence guard anyway.
+   * Empty / undefined when SCIP is not configured or returned no coverage.
+   * Files in `changedPass2FilePaths` are NEVER skipped regardless of
+   * coverage — their content may differ from the SCIP-generated state.
+   */
+  scipFullyCoveredPaths?: ReadonlySet<string>;
+  /**
+   * Pass-1 extraction cache. The TS pass-2 resolver checks this map keyed
+   * by `relPath`; on hit, it skips the redundant tree-sitter parse + the
+   * three `extract*` calls and reuses the data pass-1 already computed.
+   * Optional so SCIP-only refresh paths (which never run pass-1) and tests
+   * can omit it.
+   */
+  pass1Extractions?: Pass1ExtractionCache;
 }): Promise<number> {
   const {
-    repoId, repoRoot, mode, pass2EligibleFiles, changedPass2FilePaths,
-    supportsPass2FilePath, pass2ResolverRegistry, symbolIndex, tsResolver,
-    config, createdCallEdges, globalNameToSymbolIds, globalPreferredSymbolId,
-    callResolutionTelemetry, onProgress, signal,
+    repoId,
+    repoRoot,
+    mode,
+    pass2EligibleFiles,
+    changedPass2FilePaths,
+    supportsPass2FilePath,
+    pass2ResolverRegistry,
+    symbolIndex,
+    tsResolver,
+    config,
+    createdCallEdges,
+    globalNameToSymbolIds,
+    globalPreferredSymbolId,
+    callResolutionTelemetry,
+    onProgress,
+    signal,
+    scipFullyCoveredPaths,
+    pass1Extractions,
   } = params;
 
   const pass2Targets = await resolvePass2Targets({
@@ -192,18 +371,69 @@ export async function runPass2Resolvers(params: {
   });
   callResolutionTelemetry.pass2Targets = pass2Targets.length;
 
-  // Resolver cache - shared in sequential mode, per-batch in parallel mode to avoid compute-once races.
+  // Pre-compute the safe-skip set: files SCIP fully covered MINUS files in
+  // the incremental change set (whose content has shifted since SCIP was
+  // generated). One Set difference build, then O(1) `.has()` per file in
+  // the dispatch loop. No allocation when SCIP isn't configured.
+  const safeSkipSet: ReadonlySet<string> = (() => {
+    if (!scipFullyCoveredPaths || scipFullyCoveredPaths.size === 0) {
+      return new Set();
+    }
+    if (changedPass2FilePaths.size === 0) {
+      return scipFullyCoveredPaths;
+    }
+    const out = new Set<string>();
+    for (const path of scipFullyCoveredPaths) {
+      if (!changedPass2FilePaths.has(path)) out.add(path);
+    }
+    return out;
+  })();
+
+  // Pass-level resolver cache. Promoted from per-batch (was `batchCache`) so
+  // parallel batches share the cached symbol/file lookups built by language
+  // resolvers (e.g. `getSymbolsByRepo` in cpp/csharp/go/java/rust). Since
+  // values are deterministic and `Map.set` is atomic, two parallel resolvers
+  // computing the same key just race to set — last write wins, no corruption.
   const pass2ResolverCache = new Map<string, unknown>();
+
+  // Pass-level import cache. Built once with two batched reads against the
+  // readPool, eliminating ~30k point-read round-trips that
+  // `import-resolution.ts` previously made per refresh (one
+  // `getFileByRepoPath` per imported module + one `getSymbolsByFile` per
+  // resolved target file). Stays read-only for the duration of pass-2 — no
+  // writes mutate File or Symbol rows during pass-2 (writes are confined to
+  // call edges via `submitEdgeWrite`).
+  const importCache = await buildPass2ImportCache(repoId);
+
+  // Snapshot writeLimiter stats so we can report a pass-2-only delta. Reveals
+  // whether the phase is genuinely writeLimiter-bound (high totalQueueMs +
+  // peakQueued near concurrency) or CPU-bound (totalActiveMs ~ wall time).
+  const wlBefore = getPoolStats();
+  const pass2StartedAt = Date.now();
 
   const concurrency = Math.max(1, params.pass2Concurrency ?? 1);
   let totalEdgesCreated = 0;
   let pass2Processed = 0;
+
+  // Sequential path uses an immediate-flush submit (one withWriteConn per file,
+  // identical to the legacy behaviour). The parallel path replaces it per
+  // batch with a coalescing accumulator.
+  const sequentialSubmit = makeImmediateSubmit(mode);
 
   if (concurrency <= 1) {
     // --- Sequential path (default, identical to original behaviour) ---
     for (const fileMeta of pass2Targets) {
       if (signal?.aborted) break;
       callResolutionTelemetry.pass2FilesProcessed++;
+      // SCIP-coverage skip: file fully resolved by SCIP (and not in the
+      // changed set), so there is no heuristic edge for pass-2 to add. The
+      // `insertEdges` confidence guard would already block downgrade
+      // attempts; this skip avoids the wasted resolver execution.
+      if (safeSkipSet.has(fileMeta.path)) {
+        callResolutionTelemetry.pass2FilesSkippedSCIP++;
+        pass2Processed++;
+        continue;
+      }
       onProgress?.({
         stage: "pass2",
         current: pass2Processed,
@@ -231,6 +461,10 @@ export async function runPass2Resolvers(params: {
           globalPreferredSymbolId,
           telemetry: callResolutionTelemetry,
           cache: pass2ResolverCache,
+          mode,
+          submitEdgeWrite: sequentialSubmit,
+          importCache,
+          pass1Extractions,
         },
       );
       recordPass2ResolverResult(callResolutionTelemetry, resolver.id, {
@@ -255,16 +489,38 @@ export async function runPass2Resolvers(params: {
     //
     // DB writes inside resolvers are already serialised by withWriteConn and
     // use MERGE semantics, so concurrent writes of the same edge are idempotent.
-    for (let batchStart = 0; batchStart < pass2Targets.length; batchStart += concurrency) {
+    for (
+      let batchStart = 0;
+      batchStart < pass2Targets.length;
+      batchStart += concurrency
+    ) {
       if (signal?.aborted) break;
 
       const batchEnd = Math.min(batchStart + concurrency, pass2Targets.length);
-      const batch = pass2Targets.slice(batchStart, batchEnd);
+      const rawBatch = pass2Targets.slice(batchStart, batchEnd);
+
+      // SCIP-coverage skip: drop files SCIP fully resolved (and not in the
+      // changed set) before launching resolvers. Counted toward
+      // `pass2FilesSkippedSCIP` and `pass2Processed` so progress + telemetry
+      // stay accurate, but no resolver runs and no DB writes are issued.
+      let skippedInBatch = 0;
+      const batch: typeof rawBatch = [];
+      for (const fileMeta of rawBatch) {
+        if (safeSkipSet.has(fileMeta.path)) {
+          callResolutionTelemetry.pass2FilesSkippedSCIP++;
+          skippedInBatch++;
+        } else {
+          batch.push(fileMeta);
+        }
+      }
+      pass2Processed += skippedInBatch;
+      if (batch.length === 0) {
+        // Whole batch was SCIP-covered; nothing to dispatch.
+        continue;
+      }
 
       // Snapshot the canonical dedup set for this batch.
       const batchSnapshot = new Set(createdCallEdges);
-      // Per-batch cache avoids compute-once races on package index builds.
-      const batchCache = new Map<string, unknown>();
 
       // Emit progress for the first file in this batch.
       if (batch[0]) {
@@ -276,13 +532,13 @@ export async function runPass2Resolvers(params: {
         });
       }
 
-      // Record targets before launching — recordPass2ResolverTarget is synchronous and cheap.
-      for (const fileMeta of batch) {
-        const resolver = pass2ResolverRegistry.getResolver(toPass2Target({ ...fileMeta, repoId }));
-        if (resolver) recordPass2ResolverTarget(callResolutionTelemetry, resolver.id);
-      }
-
-      callResolutionTelemetry.pass2FilesProcessed += batch.length;
+      // Per-batch write accumulator: every resolver in this batch submits
+      // its (symbolIdsToRefresh, edges) into the same buffer; one combined
+      // `withWriteConn` flushes the whole batch after `Promise.all` settles.
+      // Cuts writeLimiter handshakes from O(batch.length) to 1 per batch and
+      // amortises the delete-then-insert tx setup across N files.
+      const { acc: batchWriteAcc, submit: batchSubmit } =
+        makeBatchAccumulator();
 
       // Launch all files in this batch concurrently, each with its own
       // local copy of the dedup set.
@@ -292,6 +548,7 @@ export async function runPass2Resolvers(params: {
         return runOnePass2Resolver({
           repoId,
           repoRoot,
+          mode,
           fileMeta,
           pass2ResolverRegistry,
           symbolIndex,
@@ -301,11 +558,33 @@ export async function runPass2Resolvers(params: {
           globalNameToSymbolIds,
           globalPreferredSymbolId,
           callResolutionTelemetry,
-          pass2ResolverCache: batchCache,
+          pass2ResolverCache,
+          submitEdgeWrite: batchSubmit,
+          importCache,
+          pass1Extractions,
         });
       });
 
       const batchResults = await Promise.all(batchPromises);
+
+      // Single combined write for the whole batch. Runs BEFORE the canonical
+      // dedup-set merge so a write failure doesn't leave the in-memory state
+      // claiming edges that never made it to disk. A failure here is logged
+      // via withWriteConn's pool error path and propagates out — pass-2's
+      // existing higher-level catch (in indexer.ts) will record it.
+      await flushBatchAccumulator(batchWriteAcc, mode);
+
+      // Telemetry only credits files whose edges actually persisted. Bumping
+      // these before the flush would mark files "processed" even on a write
+      // failure that propagates out of this loop without committing edges.
+      for (const fileMeta of batch) {
+        const resolver = pass2ResolverRegistry.getResolver(
+          toPass2Target({ ...fileMeta, repoId }),
+        );
+        if (resolver)
+          recordPass2ResolverTarget(callResolutionTelemetry, resolver.id);
+      }
+      callResolutionTelemetry.pass2FilesProcessed += batch.length;
 
       // Sequentially merge results back into the canonical state.
       for (const result of batchResults) {
@@ -316,10 +595,14 @@ export async function runPass2Resolvers(params: {
           createdCallEdges.add(key);
         }
         if (result.resolverId !== null) {
-          recordPass2ResolverResult(callResolutionTelemetry, result.resolverId, {
-            edgesCreated: result.edgesCreated,
-            elapsedMs: result.elapsedMs,
-          });
+          recordPass2ResolverResult(
+            callResolutionTelemetry,
+            result.resolverId,
+            {
+              edgesCreated: result.edgesCreated,
+              elapsedMs: result.elapsedMs,
+            },
+          );
         }
       }
 
@@ -334,6 +617,33 @@ export async function runPass2Resolvers(params: {
       total: pass2Targets.length,
     });
   }
+
+  // writeLimiter delta — confirms / refutes the writeLimiter-bound diagnosis.
+  // High `writeQueueMs` relative to wall time => writes serialised behind the
+  // single mutex (pass-2 is writeLimiter-bound). Low queue time + low active
+  // time => phase is CPU- or read-bound. peakQueued near `concurrency`
+  // indicates resolvers were piling on faster than the writer could clear.
+  const wlAfter = getPoolStats();
+  const wallMs = Date.now() - pass2StartedAt;
+  const writeRuns = wlAfter.writeTotalRuns - wlBefore.writeTotalRuns;
+  const writeActiveMs =
+    wlAfter.writeTotalActiveMs - wlBefore.writeTotalActiveMs;
+  const writeQueueMs = wlAfter.writeTotalQueueMs - wlBefore.writeTotalQueueMs;
+  logger.info("Pass-2 writeLimiter telemetry", {
+    mode,
+    pass2Files: pass2Targets.length,
+    pass2FilesSkippedSCIP: callResolutionTelemetry.pass2FilesSkippedSCIP,
+    edgesCreated: totalEdgesCreated,
+    wallMs,
+    writeRuns,
+    writeActiveMs,
+    writeQueueMs,
+    writeQueueShare: wallMs > 0 ? Math.round((writeQueueMs / wallMs) * 100) : 0,
+    peakQueuedDuringPass: wlAfter.writePeakQueued,
+    peakActiveDuringPass: wlAfter.writePeakActive,
+    concurrency,
+  });
+
   return totalEdgesCreated;
 }
 
@@ -356,7 +666,8 @@ export async function finalizeEdges(params: {
     configEdgeWeight,
     measurePhase,
   } = params;
-  const measure = measurePhase ??
+  const measure =
+    measurePhase ??
     (async <T>(_phaseName: string, fn: () => Promise<T> | T): Promise<T> =>
       await fn());
 

@@ -3,6 +3,8 @@ import * as ladybugDb from "../db/ladybug-queries.js";
 import { hashContent } from "../util/hashing.js";
 import { logger } from "../util/logger.js";
 import {
+  DEFAULT_EMBEDDING_BATCH_SIZE,
+  MAX_EMBEDDING_BATCH_SIZE,
   MAX_EMBEDDING_CONCURRENCY,
   VECTOR_REBUILD_THRESHOLD,
 } from "../config/constants.js";
@@ -38,10 +40,13 @@ export const EMBEDDING_DIMENSION = 64;
 
 /**
  * Batch size for refresh operations. Matches the ONNX inference batch width
- * used by LocalEmbeddingProvider. Changing provider batch width should update
- * this value in lockstep.
+ * used by LocalEmbeddingProvider. Acts as the **default** when the caller
+ * does not pass an explicit `batchSize` — the indexer wires
+ * `semantic.embeddingBatchSize` from config, so production callers normally
+ * override this. Kept exported so tests and ad-hoc scripts have a stable
+ * reference value.
  */
-export const REFRESH_BATCH_SIZE = 32;
+export const REFRESH_BATCH_SIZE = DEFAULT_EMBEDDING_BATCH_SIZE;
 
 export interface EmbeddingScoredSymbol {
   symbol: ladybugDb.SymbolRow;
@@ -276,6 +281,12 @@ export async function refreshSymbolEmbeddings(params: {
   onProgress?: (progress: IndexProgress) => void;
   /** Number of batches to process concurrently. Defaults to 1 (sequential). */
   concurrency?: number;
+  /**
+   * ONNX inference batch width. Defaults to `DEFAULT_EMBEDDING_BATCH_SIZE`
+   * (32). Clamped to `[1, MAX_EMBEDDING_BATCH_SIZE]` so a misconfigured
+   * value can't OOM the tokenizer or break ONNX session shape contracts.
+   */
+  batchSize?: number;
 }): Promise<{ embedded: number; skipped: number }> {
   const modelName = params.model ?? "jina-embeddings-v2-base-code";
   const provider = getEmbeddingProvider(params.provider, modelName);
@@ -370,6 +381,11 @@ export async function refreshSymbolEmbeddings(params: {
       stage: "embeddings",
       current,
       total: symbols.length,
+      // Model tag lets the CLI keep per-model state. Two models run in
+      // parallel from metrics-updater.ts and previously interleaved into a
+      // single shared progress line, causing the displayed count to flicker
+      // between each model's value.
+      model: storageModel,
     });
   };
 
@@ -404,20 +420,54 @@ export async function refreshSymbolEmbeddings(params: {
     }
   }
 
-  // Split uncached items into batches of REFRESH_BATCH_SIZE.
+  // Resolve effective batch size: clamp caller-supplied value to a sane
+  // window so a misconfigured `embeddingBatchSize` cannot OOM tokenizer
+  // padding or violate the ONNX session's expected input shape.
+  const batchSize = Math.max(
+    1,
+    Math.min(
+      params.batchSize ?? DEFAULT_EMBEDDING_BATCH_SIZE,
+      MAX_EMBEDDING_BATCH_SIZE,
+    ),
+  );
+
+  // Split uncached items into batches of `batchSize`.
   type UncachedBatch = Array<{
     symbol: ladybugDb.SymbolRow;
     prefixedText: string;
     cardHash: string;
   }>;
   const batches: UncachedBatch[] = [];
-  for (let i = 0; i < uncachedItems.length; i += REFRESH_BATCH_SIZE) {
-    batches.push(uncachedItems.slice(i, i + REFRESH_BATCH_SIZE));
+  for (let i = 0; i < uncachedItems.length; i += batchSize) {
+    batches.push(uncachedItems.slice(i, i + batchSize));
   }
 
   // Shared mutable counters — updated inside processBatch results (not inside
   // concurrent closures directly) so there are no data races.
   type BatchResult = { embedded: number; skipped: number; terminal: boolean };
+
+  // P2.b: write-coalescing buffer for the rebuild path. When the HNSW index is
+  // dropped, every per-ONNX-batch DB write is just an INSERT into a plain
+  // FLOAT[] column (no HNSW maintenance), so the per-write overhead is mostly
+  // writeLimiter handshake + tx round-trip. Batching ~8 ONNX batches into one
+  // DB write cuts those handshakes ~8x without any correctness risk: the items
+  // are independent SET ops on disjoint Symbol nodes. Buffer is mutated only
+  // from non-concurrent code paths (inside processBatch's single tick of
+  // pendingWriteItems.push, and the chunk-boundary flush after allSettled),
+  // so no lock is required.
+  const COALESCE_WRITE_BUFFER_SIZE = 256;
+  const pendingWriteItems: SymbolEmbeddingBatchItem[] = [];
+
+  const flushPendingWrites = async (force: boolean): Promise<void> => {
+    if (pendingWriteItems.length === 0) return;
+    if (!force && pendingWriteItems.length < COALESCE_WRITE_BUFFER_SIZE) return;
+    const toWrite = pendingWriteItems.splice(0);
+    await withWriteConn(async (wConn) => {
+      await setSymbolEmbeddingBatchOnNode(wConn, storageModel, toWrite, {
+        hnswIndexDropped: indexDropped,
+      });
+    });
+  };
 
   const processBatch = async (batch: UncachedBatch): Promise<BatchResult> => {
     const batchTexts = batch.map((item) => item.prefixedText);
@@ -489,11 +539,22 @@ export async function refreshSymbolEmbeddings(params: {
     }
 
     if (batchItems.length > 0) {
-      await withWriteConn(async (wConn) => {
-        await setSymbolEmbeddingBatchOnNode(wConn, storageModel, batchItems, {
-          hnswIndexDropped: indexDropped,
+      if (indexDropped) {
+        // Coalesced path: append to shared buffer; flush is driven by the
+        // chunk-boundary in the dispatch loop (and the force-flush in
+        // `finally` before HNSW rebuild).
+        pendingWriteItems.push(...batchItems);
+      } else {
+        // Per-batch immediate write: the index drop failed, so we are on
+        // the legacy per-row HNSW maintenance path that LADYBUG#377 likely
+        // rejects anyway. Preserved for parity with the pre-coalescing
+        // behaviour so a future upstream fix re-enables it cleanly.
+        await withWriteConn(async (wConn) => {
+          await setSymbolEmbeddingBatchOnNode(wConn, storageModel, batchItems, {
+            hnswIndexDropped: indexDropped,
+          });
         });
-      });
+      }
     }
 
     return {
@@ -537,8 +598,43 @@ export async function refreshSymbolEmbeddings(params: {
           });
         }
       }
+
+      // P2.b: chunk-boundary opportunistic flush. Only flushes when the
+      // pending buffer has reached COALESCE_WRITE_BUFFER_SIZE so concurrency
+      // > 1 still amortises the writeLimiter handshake across the whole
+      // chunk. A flush failure is logged but does not abort the loop —
+      // the items remain in the buffer and the force-flush in `finally`
+      // will retry once.
+      if (indexDropped) {
+        try {
+          await flushPendingWrites(false);
+        } catch (err) {
+          logger.warn(
+            "[embeddings] Coalesced write flush failed (will retry at end)",
+            {
+              error: err instanceof Error ? err.message : String(err),
+              pending: pendingWriteItems.length,
+            },
+          );
+        }
+      }
     }
   } finally {
+    // P2.b: drain any remaining coalesced writes BEFORE rebuilding the
+    // index. The rebuild scans Symbol.<vecProp>, so unflushed items would
+    // not appear in HNSW until the next refresh. Failures here are logged
+    // and counted toward `embedded` only after successful flush.
+    if (indexDropped && pendingWriteItems.length > 0) {
+      try {
+        await flushPendingWrites(true);
+      } catch (err) {
+        logger.error(
+          `[embeddings] Final coalesced write flush failed — ${pendingWriteItems.length} vectors will not be persisted; vector retrieval may be stale`,
+          { error: err instanceof Error ? err.message : String(err) },
+        );
+      }
+    }
+
     // P2: rebuild the dropped index regardless of write outcome so search
     // remains operational even if the bulk write aborted partway. Failure
     // to recreate is non-fatal but logged loudly — vector retrieval will

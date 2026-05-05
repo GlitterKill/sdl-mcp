@@ -6,6 +6,7 @@ import { readFileAsync } from "../../util/asyncFs.js";
 import { logger } from "../../util/logger.js";
 import { getAdapterForExtension } from "../adapter/registry.js";
 import type { FileMetadata } from "../fileScanner.js";
+import type { Pass2ImportCache, SubmitEdgeWrite } from "../pass2/types.js";
 
 import { isBuiltinCall } from "./builtins.js";
 import { resolveCallTarget } from "./call-resolution.js";
@@ -31,6 +32,10 @@ async function resolveTsCallEdgesPass2(params: {
   globalNameToSymbolIds?: Map<string, string[]>;
   globalPreferredSymbolId?: Map<string, string>;
   telemetry?: CallResolutionTelemetry;
+  mode?: "full" | "incremental";
+  submitEdgeWrite?: SubmitEdgeWrite;
+  importCache?: Pass2ImportCache;
+  pass1Extractions?: import("../pass2/types.js").Pass1ExtractionCache;
 }): Promise<number> {
   const {
     repoId,
@@ -43,6 +48,10 @@ async function resolveTsCallEdgesPass2(params: {
     globalNameToSymbolIds,
     globalPreferredSymbolId,
     telemetry,
+    mode,
+    submitEdgeWrite,
+    importCache,
+    pass1Extractions,
   } = params;
   if (!isTsCallResolutionFile(fileMeta.path)) {
     return 0;
@@ -51,20 +60,6 @@ async function resolveTsCallEdgesPass2(params: {
   try {
     const conn = await getLadybugConn();
     const filePath = join(repoRoot, fileMeta.path);
-    let content: string;
-    try {
-      content = await readFileAsync(filePath, "utf-8");
-    } catch (readError: unknown) {
-      const code = (readError as NodeJS.ErrnoException).code;
-      if (code === "ENOENT" || code === "EPERM") {
-        logger.warn(
-          `File disappeared before pass2 resolution: ${fileMeta.path}`,
-          { code },
-        );
-        return 0;
-      }
-      throw readError;
-    }
     const ext = fileMeta.path.split(".").pop() || "";
     const extWithDot = `.${ext}`;
     const adapter = getAdapterForExtension(extWithDot);
@@ -72,38 +67,83 @@ async function resolveTsCallEdgesPass2(params: {
       return 0;
     }
 
-    const tree = adapter.parse(content, filePath);
-    if (!tree) {
-      return 0;
-    }
+    // C1: prefer pass-1's extraction outputs when available — skips a full
+    // tree-sitter parse + three `extract*` calls per file. Falls back to
+    // re-parse when the cache is unset (test fakes, live-index draft path)
+    // or when this file slipped past pass-1 (mtime/contentHash short-circuit
+    // in incremental mode).
+    let content: string;
+    let symbolsWithNodeIds: Array<{
+      nodeId: string;
+      kind: import("../treesitter/extractSymbols.js").ExtractedSymbol["kind"];
+      name: string;
+      exported: boolean;
+      range: import("../treesitter/extractSymbols.js").ExtractedSymbol["range"];
+      signature?: import("../treesitter/extractSymbols.js").ExtractedSymbol["signature"];
+      visibility?: import("../treesitter/extractSymbols.js").ExtractedSymbol["visibility"];
+    }>;
+    let imports: ReturnType<typeof adapter.extractImports>;
+    let calls: ReturnType<typeof adapter.extractCalls>;
 
-    let extractedSymbols;
-    let symbolsWithNodeIds;
-    let imports;
-    let calls;
-    try {
-      extractedSymbols = adapter.extractSymbols(tree, content, filePath);
+    const cachedExtraction = pass1Extractions?.get(fileMeta.path);
+    if (cachedExtraction) {
+      content = cachedExtraction.content;
+      symbolsWithNodeIds = cachedExtraction.symbolsWithNodeIds;
+      imports = cachedExtraction.imports;
+      calls = cachedExtraction.calls;
       if (telemetry) {
-        telemetry.pass2SymbolMapping.extractedSymbols += extractedSymbols.length;
+        telemetry.pass2SymbolMapping.extractedSymbols +=
+          symbolsWithNodeIds.length;
       }
-      symbolsWithNodeIds = extractedSymbols.map((symbol) => ({
-        nodeId: symbol.nodeId,
-        kind: symbol.kind,
-        name: symbol.name,
-        exported: symbol.exported,
-        range: symbol.range,
-        signature: symbol.signature,
-        visibility: symbol.visibility,
-      }));
-      imports = adapter.extractImports(tree, content, filePath);
-      calls = adapter.extractCalls(
-        tree,
-        content,
-        filePath,
-        symbolsWithNodeIds,
-      );
-    } finally {
-      (tree as unknown as { delete?: () => void }).delete?.();
+    } else {
+      try {
+        content = await readFileAsync(filePath, "utf-8");
+      } catch (readError: unknown) {
+        const code = (readError as NodeJS.ErrnoException).code;
+        if (code === "ENOENT" || code === "EPERM") {
+          logger.warn(
+            `File disappeared before pass2 resolution: ${fileMeta.path}`,
+            { code },
+          );
+          return 0;
+        }
+        throw readError;
+      }
+
+      const tree = adapter.parse(content, filePath);
+      if (!tree) {
+        return 0;
+      }
+
+      try {
+        const extractedSymbols = adapter.extractSymbols(
+          tree,
+          content,
+          filePath,
+        );
+        if (telemetry) {
+          telemetry.pass2SymbolMapping.extractedSymbols +=
+            extractedSymbols.length;
+        }
+        symbolsWithNodeIds = extractedSymbols.map((symbol) => ({
+          nodeId: symbol.nodeId,
+          kind: symbol.kind,
+          name: symbol.name,
+          exported: symbol.exported,
+          range: symbol.range,
+          signature: symbol.signature,
+          visibility: symbol.visibility,
+        }));
+        imports = adapter.extractImports(tree, content, filePath);
+        calls = adapter.extractCalls(
+          tree,
+          content,
+          filePath,
+          symbolsWithNodeIds,
+        );
+      } finally {
+        (tree as unknown as { delete?: () => void }).delete?.();
+      }
     }
 
     const fileRecord = await ladybugDb.getFileByRepoPath(
@@ -208,6 +248,7 @@ async function resolveTsCallEdgesPass2(params: {
       extensions,
       adapter.languageId,
       content,
+      importCache,
     );
 
     const edgesToInsert: ladybugDb.EdgeRow[] = [];
@@ -223,7 +264,8 @@ async function resolveTsCallEdgesPass2(params: {
 
     let createdEdges = 0;
     for (const detail of filteredSymbolDetails) {
-      const matchingCalls = callsByCallerNodeId.get(detail.extractedSymbol.nodeId) ?? [];
+      const matchingCalls =
+        callsByCallerNodeId.get(detail.extractedSymbol.nodeId) ?? [];
       for (const call of matchingCalls) {
         if (telemetry) telemetry.adapterCalls.total++;
         const resolved = resolveCallTarget(
@@ -362,14 +404,30 @@ async function resolveTsCallEdgesPass2(params: {
       }
     }
 
-    await withWriteConn(async (wConn) => {
-      await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
-        wConn,
+    if (submitEdgeWrite) {
+      // Dispatcher-driven write path: defers the delete-then-insert to the
+      // pass-2 dispatcher, which combines all files in a concurrency batch
+      // into a single `withWriteConn`. The dispatcher honours the same
+      // full-mode-DELETE-skip rule as the legacy inline path.
+      await submitEdgeWrite({
         symbolIdsToRefresh,
-        "call",
-      );
-      await ladybugDb.insertEdges(wConn, edgesToInsert);
-    });
+        edges: edgesToInsert,
+      });
+    } else {
+      // Legacy inline path: kept for callers that build a Pass2ResolverContext
+      // manually (tests, ad-hoc CLI invocations) and never wire the
+      // dispatcher's submit callback.
+      await withWriteConn(async (wConn) => {
+        if (mode !== "full") {
+          await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
+            wConn,
+            symbolIdsToRefresh,
+            "call",
+          );
+        }
+        await ladybugDb.insertEdges(wConn, edgesToInsert);
+      });
+    }
     return createdEdges;
   } catch (error) {
     logger.warn(
@@ -380,6 +438,5 @@ async function resolveTsCallEdgesPass2(params: {
     return 0;
   }
 }
-
 
 export { resolveTsCallEdgesPass2 };

@@ -1,5 +1,7 @@
 import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
+import { normalizePath } from "../../util/paths.js";
+import type { Pass2ImportCache } from "../pass2/types.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
 import { resolveImportCandidatePaths } from "../import-resolution/registry.js";
 
@@ -11,6 +13,14 @@ export async function resolveImportTargets(
   extensions: string[],
   importerLanguage: string,
   sourceContent?: string,
+  /**
+   * Optional pass-2 read cache. When provided, replaces the per-import
+   * `getFileByRepoPath` and per-target `getSymbolsByFile` round-trips with
+   * O(1) map lookups. Pass-1 callers (process-file.ts, rust-process-file.ts)
+   * and the live-index draft path leave this undefined and fall back to
+   * direct DB reads.
+   */
+  cache?: Pass2ImportCache,
 ): Promise<{
   targets: Array<{ symbolId: string; provenance: string }>;
   importedNameToSymbolIds: Map<string, string[]>;
@@ -23,7 +33,14 @@ export async function resolveImportTargets(
     ? [...imports, ...extractCommonJsRequireImports(sourceContent)]
     : imports;
 
-  const conn = await getLadybugConn();
+  // Lazily acquired — only the no-cache path needs a read connection. Skipping
+  // this when a cache is provided shaves the readPool acquire cost off pass-2
+  // resolution, which now does zero DB reads per file when the cache is hot.
+  let conn: Awaited<ReturnType<typeof getLadybugConn>> | null = null;
+  const getConn = async () => {
+    if (!conn) conn = await getLadybugConn();
+    return conn;
+  };
 
   for (const imp of allImports) {
     const resolvedPaths = await resolveImportCandidatePaths({
@@ -63,7 +80,21 @@ export async function resolveImportTargets(
       null
     >[] = [];
     for (const relPath of resolvedPaths) {
-      const f = await ladybugDb.getFileByRepoPath(conn, repoId, relPath);
+      const normalizedRelPath = normalizePath(relPath);
+      const cached = cache?.fileByRelPath.get(normalizedRelPath);
+      if (cached) {
+        targetFiles.push(cached);
+        continue;
+      }
+      // Cache miss (or no cache): fall back to a direct point read. For
+      // pass-2 with a populated cache this branch only fires for paths
+      // outside the repo's tracked file set (e.g. a stale relPath returned
+      // by `resolveImportCandidatePaths` after a file was deleted).
+      const f = await ladybugDb.getFileByRepoPath(
+        await getConn(),
+        repoId,
+        relPath,
+      );
       if (f) targetFiles.push(f);
     }
 
@@ -106,17 +137,27 @@ export async function resolveImportTargets(
       continue;
     }
 
-    const targetSymbolsNested: Awaited<
-      ReturnType<typeof ladybugDb.getSymbolsByFile>
-    >[] = [];
+    // When a cache is provided, replace the per-file `getSymbolsByFile`
+    // call (which deserializes ~25 properties including JSON blobs) with a
+    // map lookup of pre-filtered exported `(symbolId, name)` tuples.
+    type ResolvedSymbol = { symbolId: string; name: string };
+    const targetSymbols: ResolvedSymbol[] = [];
     for (const targetFile of sameLanguageFiles) {
-      targetSymbolsNested.push(
-        await ladybugDb.getSymbolsByFile(conn, targetFile.fileId),
+      if (cache) {
+        const cached = cache.exportedSymbolsByFileId.get(targetFile.fileId);
+        if (cached) targetSymbols.push(...cached);
+        continue;
+      }
+      const fileSymbols = await ladybugDb.getSymbolsByFile(
+        await getConn(),
+        targetFile.fileId,
       );
+      for (const symbol of fileSymbols) {
+        if (symbol.exported) {
+          targetSymbols.push({ symbolId: symbol.symbolId, name: symbol.name });
+        }
+      }
     }
-    const targetSymbols = targetSymbolsNested
-      .flat()
-      .filter((symbol) => symbol.exported);
 
     for (const name of importedNames) {
       if (name.startsWith("*")) {

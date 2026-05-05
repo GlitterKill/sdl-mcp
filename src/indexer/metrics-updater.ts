@@ -191,30 +191,70 @@ export async function finalizeIndexing({
       model,
       ...extraModels.filter((m) => m !== model),
     ];
-    await Promise.all(
-      modelsToEmbed.map(async (embModel) => {
-        try {
-          const embResult = await measureSubphase(
-            `semanticEmbeddings:${embModel}`,
-            () =>
-              refreshSymbolEmbeddings({
-                repoId,
-                provider: semanticConfig.provider ?? "local",
-                model: embModel,
-                onProgress,
-                concurrency: semanticConfig.embeddingConcurrency,
-              }),
-          );
-          logger.info(
-            `Embeddings: ${embResult.embedded} embedded, ${embResult.skipped} cached (model: ${embModel})`,
-          );
-        } catch (error) {
-          logger.warn(
-            `Semantic embedding refresh skipped for ${embModel}: ${String(error)}`,
-          );
-        }
-      }),
-    );
+
+    // Incremental embedding scope: hydrate the affected-symbol subset that
+    // metrics already computed (changed files + 1-hop edge neighbours).
+    // Without this, refreshSymbolEmbeddings reads ALL repo symbols every
+    // run, builds card hashes for ~8k symbols, and pays the pre-pass cost
+    // even when 99% are cache hits — the dominant wall-time on incremental
+    // refreshes. Full-repo runs (affectedSymbolIds undefined) keep the
+    // previous behaviour and let refreshSymbolEmbeddings load by repo.
+    let scopedSymbols: ladybugDb.SymbolRow[] | undefined;
+    if (
+      metricsResult.affectedSymbolIds &&
+      metricsResult.affectedSymbolIds.size > 0
+    ) {
+      const conn = await getLadybugConn();
+      const hydrated = await ladybugDb.getSymbolsByIds(conn, [
+        ...metricsResult.affectedSymbolIds,
+      ]);
+      scopedSymbols = [...hydrated.values()];
+      logger.debug(
+        `Embedding scope: ${scopedSymbols.length} affected symbols ` +
+          `(from ${metricsResult.affectedSymbolIds.size} affected IDs)`,
+      );
+    }
+
+    const runOneModel = async (embModel: string): Promise<void> => {
+      try {
+        const embResult = await measureSubphase(
+          `semanticEmbeddings:${embModel}`,
+          () =>
+            refreshSymbolEmbeddings({
+              repoId,
+              provider: semanticConfig.provider ?? "local",
+              model: embModel,
+              symbols: scopedSymbols,
+              onProgress,
+              concurrency: semanticConfig.embeddingConcurrency,
+              batchSize: semanticConfig.embeddingBatchSize,
+            }),
+        );
+        logger.info(
+          `Embeddings: ${embResult.embedded} embedded, ${embResult.skipped} cached (model: ${embModel})`,
+        );
+      } catch (error) {
+        logger.warn(
+          `Semantic embedding refresh skipped for ${embModel}: ${String(error)}`,
+        );
+      }
+    };
+
+    if (semanticConfig.embeddingsSequential) {
+      // Sequential: each model holds the full ORT thread budget end-to-end,
+      // weights stay hot in L3 cache, and model-handoff scheduling overhead
+      // disappears. Wins on systems where ORT serializes parallel sessions
+      // at the thread-pool layer (observed alternation pattern).
+      for (const embModel of modelsToEmbed) {
+        await runOneModel(embModel);
+      }
+    } else {
+      // Parallel: launch all models via Promise.all so independent thread
+      // pools can overlap. Best when ORT does NOT serialize sessions —
+      // model jobs interleave at the batch boundary and total wall time is
+      // close to max(model_a, model_b).
+      await Promise.all(modelsToEmbed.map((embModel) => runOneModel(embModel)));
+    }
   }
 
   return { summaryStats, timings, sharedGraph: metricsResult.sharedGraph };

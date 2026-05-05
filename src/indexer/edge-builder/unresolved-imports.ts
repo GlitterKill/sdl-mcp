@@ -4,6 +4,14 @@ import * as ladybugDb from "../../db/ladybug-queries.js";
 interface ResolveUnresolvedImportEdgesOptions {
   includeTimings?: boolean;
   affectedPaths?: Iterable<string>;
+  /**
+   * Per-chunk progress callback. Fires after each batch flush so the CLI can
+   * draw a real bar instead of a stuck "Import re-resolution..." line. The
+   * counter walks `pendingUpdates.length` (resolvable edges), not
+   * `unresolvedImports.length` (initial scan), since the post-DELETE write
+   * pass is the dominant cost.
+   */
+  onChunkComplete?: (current: number, total: number) => void;
 }
 
 interface ResolveUnresolvedImportEdgesResult {
@@ -173,34 +181,89 @@ async function resolveUnresolvedImportEdges(
           { oldTargetIds },
         );
 
-        // Re-insert in a loop: LadybugDB does not support UNWIND for
-        // parameterized batch MERGE on relationships. The transaction
-        // amortizes commit overhead across all writes.
+        // UNWIND-batched W3/W4 rewrite (replaces per-row MERGE-rel loop —
+        // missed by the 2026-05-02 sweep because the function name doesn't
+        // match the *Batch audit pattern). Three passes per chunk:
+        //   Pass A: ensure target Symbol node exists (defensive — the lookup
+        //           pulled the symbolId from existing exports so it should
+        //           already exist, but MERGE is cheap idempotent and matches
+        //           the original behaviour).
+        //   Pass B: ensure SYMBOL_IN_REPO via OPTIONAL-MATCH+CREATE — plain
+        //           MERGE-rel inside UNWIND throws the "invalid
+        //           unordered_map<K,T> key" runtime error in LadybugDB
+        //           0.15.x–0.16.0 (kuzu#5685 family).
+        //   Pass C: create DEPENDS_ON if missing.
+        //   Pass D: update existing rel props, with a guard preserving any
+        //           SCIP-written `resolution: "exact"` edges (SCIP and this
+        //           phase write disjoint sets today, but the guard also
+        //           dovetails with the same protection in `insertEdges`).
         const createdAt = new Date().toISOString();
-        for (const update of pendingUpdates) {
+        const allRows = pendingUpdates.map((u) => ({
+          repoId,
+          fromSymbolId: u.edge.fromSymbolId,
+          toSymbolId: u.targetSymbolId,
+          provenance: u.provenance,
+          createdAt,
+        }));
+        const CHUNK = 256;
+        for (let i = 0; i < allRows.length; i += CHUNK) {
+          const chunk = allRows.slice(i, i + CHUNK);
+
           await ladybugDb.exec(
             txConn,
-            `MATCH (r:Repo {repoId: $repoId})
-             MATCH (a:Symbol {symbolId: $fromSymbolId})
-             MERGE (b:Symbol {symbolId: $toSymbolId})
-             MERGE (b)-[:SYMBOL_IN_REPO]->(r)
-             MERGE (a)-[d:DEPENDS_ON {edgeType: 'import'}]->(b)
+            `UNWIND $rows AS row
+             MERGE (b:Symbol {symbolId: row.toSymbolId})`,
+            { rows: chunk },
+          );
+          await ladybugDb.exec(
+            txConn,
+            `UNWIND $rows AS row
+             MATCH (r:Repo {repoId: row.repoId})
+             MATCH (b:Symbol {symbolId: row.toSymbolId})
+             OPTIONAL MATCH (b)-[existing:SYMBOL_IN_REPO]->(r)
+             WITH b, r, existing
+             WHERE existing IS NULL
+             CREATE (b)-[:SYMBOL_IN_REPO]->(r)`,
+            { rows: chunk },
+          );
+          await ladybugDb.exec(
+            txConn,
+            `UNWIND $rows AS row
+             MATCH (a:Symbol {symbolId: row.fromSymbolId})
+             MATCH (b:Symbol {symbolId: row.toSymbolId})
+             OPTIONAL MATCH (a)-[existing:DEPENDS_ON {edgeType: 'import'}]->(b)
+             WITH a, b, row, existing
+             WHERE existing IS NULL
+             CREATE (a)-[:DEPENDS_ON {
+               edgeType: 'import',
+               weight: 0.6,
+               confidence: 1.0,
+               resolution: 're-resolved',
+               resolverId: 'import-reresolution',
+               resolutionPhase: 'pass2',
+               provenance: row.provenance,
+               createdAt: row.createdAt
+             }]->(b)`,
+            { rows: chunk },
+          );
+          await ladybugDb.exec(
+            txConn,
+            `UNWIND $rows AS row
+             MATCH (a:Symbol {symbolId: row.fromSymbolId})
+             MATCH (b:Symbol {symbolId: row.toSymbolId})
+             MATCH (a)-[d:DEPENDS_ON {edgeType: 'import'}]->(b)
+             WHERE d.resolution <> 'exact' OR d.confidence < 1.0
              SET d.weight = 0.6,
                  d.confidence = 1.0,
                  d.resolution = 're-resolved',
                  d.resolverId = 'import-reresolution',
                  d.resolutionPhase = 'pass2',
-                 d.provenance = $provenance,
-                 d.createdAt = CASE WHEN d.createdAt IS NOT NULL THEN d.createdAt ELSE $createdAt END`,
-            {
-              repoId,
-              fromSymbolId: update.edge.fromSymbolId,
-              toSymbolId: update.targetSymbolId,
-              provenance: update.provenance,
-              createdAt,
-            },
+                 d.provenance = row.provenance`,
+            { rows: chunk },
           );
-          resolved++;
+
+          resolved += chunk.length;
+          options?.onChunkComplete?.(resolved, allRows.length);
         }
       });
     });

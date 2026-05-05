@@ -6,6 +6,7 @@ import type { SymbolRow } from "../../../db/ladybug-queries.js";
 import type { SymbolKind } from "../../../domain/types.js";
 import { readFileAsync } from "../../../util/asyncFs.js";
 import { logger } from "../../../util/logger.js";
+import { normalizePath } from "../../../util/paths.js";
 import { getAdapterForExtension } from "../../adapter/registry.js";
 import type { FileMetadata } from "../../fileScanner.js";
 import { resolveImportTargets } from "../../edge-builder/import-resolution.js";
@@ -14,6 +15,7 @@ import { resolveImportCandidatePaths } from "../../import-resolution/registry.js
 import type { ExtractedImport } from "../../treesitter/extractImports.js";
 
 import type {
+  Pass2ImportCache,
   Pass2Resolver,
   Pass2ResolverContext,
   Pass2ResolverResult,
@@ -220,16 +222,17 @@ function mapExtractedSymbolsToExisting(
   return filteredSymbolDetails;
 }
 
-async function clearOutgoingCallEdges(
-  conn: import("kuzu").Connection,
+/**
+ * In-memory cleanup of stale dedup keys for the symbols this file is about to
+ * re-resolve. The matching SQL DELETE is deferred to `submitEdgeWrite` so the
+ * dispatcher can combine deletes + inserts across an entire concurrency batch
+ * into a single `withWriteConn`.
+ */
+function clearLocalCallDedupKeys(
   symbolIds: string[],
   createdCallEdges: Set<string>,
-): Promise<void> {
-  if (symbolIds.length === 0) {
-    return;
-  }
-
-  await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(conn, symbolIds, "call");
+): void {
+  if (symbolIds.length === 0) return;
   for (const symbolId of symbolIds) {
     for (const edgeKey of Array.from(createdCallEdges)) {
       if (edgeKey.startsWith(`${symbolId}->`)) {
@@ -568,8 +571,22 @@ async function resolvePythonBarrelChain(params: {
   startFile: string;
   symbolName: string;
   extensions: string[];
+  importCache?: Pass2ImportCache;
 }): Promise<{ resolvedFile: string; resolvedName: string } | null> {
-  const { conn, repoId, repoRoot, startFile, symbolName, extensions } = params;
+  const {
+    conn,
+    repoId,
+    repoRoot,
+    startFile,
+    symbolName,
+    extensions,
+    importCache,
+  } = params;
+  const lookupFile = (relPath: string): Promise<ladybugDb.FileRow | null> => {
+    const cached = importCache?.fileByRelPath.get(normalizePath(relPath));
+    if (cached) return Promise.resolve(cached);
+    return ladybugDb.getFileByRepoPath(conn, repoId, relPath);
+  };
   // Only attempt if the start file is an __init__.py.
   if (!/__init__.(py|pyw)$/.test(startFile)) return null;
   const reExportsByFile: Record<string, ReExport[]> = {};
@@ -601,7 +618,7 @@ async function resolvePythonBarrelChain(params: {
   // Try to resolve the raw targetFile prefix to a concrete indexed file.
   for (const ext of extensions) {
     const candidate = `${firstHop.targetFile}${ext}`;
-    const file = await ladybugDb.getFileByRepoPath(conn, repoId, candidate);
+    const file = await lookupFile(candidate);
     if (file) {
       // Direct .py hit -- done.
       return {
@@ -610,11 +627,7 @@ async function resolvePythonBarrelChain(params: {
       };
     }
     const initCandidate = `${firstHop.targetFile}/__init__${ext}`;
-    const initFile = await ladybugDb.getFileByRepoPath(
-      conn,
-      repoId,
-      initCandidate,
-    );
+    const initFile = await lookupFile(initCandidate);
     if (initFile) {
       // Another __init__.py -- load its re-exports and continue with
       // the shared walker.
@@ -664,19 +677,56 @@ async function resolvePythonImportMaps(params: {
   importerRelPath: string;
   imports: ExtractedImport[];
   extensions: string[];
+  importCache?: Pass2ImportCache;
 }): Promise<{
   importedNameToSymbolIds: Map<string, string[]>;
   methodsByImportedClassSymbolId: Map<string, Map<string, string[]>>;
   namespaceImports: Map<string, Map<string, string>>;
 }> {
-  const { conn, repoId, repoRoot, importerRelPath, imports, extensions } =
-    params;
+  const {
+    conn,
+    repoId,
+    repoRoot,
+    importerRelPath,
+    imports,
+    extensions,
+    importCache,
+  } = params;
   const importedNameToSymbolIds = new Map<string, string[]>();
+  // Populated below from full SymbolRows fetched per imported file. The
+  // import cache cannot drive this index because it stores only LiteSymbol
+  // (id+name); buildPythonClassMethodIndex needs kind + range to map
+  // methods to their owning classes.
   const methodsByImportedClassSymbolId = new Map<
     string,
     Map<string, string[]>
   >();
   const namespaceImports = new Map<string, Map<string, string>>();
+
+  type LiteSymbol = { symbolId: string; name: string };
+
+  const lookupFile = async (
+    relPath: string,
+  ): Promise<ladybugDb.FileRow | null> => {
+    const cached = importCache?.fileByRelPath.get(normalizePath(relPath));
+    if (cached) return cached;
+    return ladybugDb.getFileByRepoPath(conn, repoId, relPath);
+  };
+
+  const lookupExportedSymbols = async (
+    targetFile: ladybugDb.FileRow,
+  ): Promise<LiteSymbol[]> => {
+    const cached = importCache?.exportedSymbolsByFileId.get(targetFile.fileId);
+    if (cached) return cached;
+    if (importCache) {
+      // Cache present but file has no exports — cache is authoritative.
+      return [];
+    }
+    const symbols = await ladybugDb.getSymbolsByFile(conn, targetFile.fileId);
+    return symbols
+      .filter((symbol) => symbol.exported)
+      .map((symbol) => ({ symbolId: symbol.symbolId, name: symbol.name }));
+  };
 
   for (const imp of imports) {
     const resolvedPaths = await resolveImportCandidatePaths({
@@ -690,44 +740,51 @@ async function resolvePythonImportMaps(params: {
       continue;
     }
 
-    const targetFiles: Exclude<
-      Awaited<ReturnType<typeof ladybugDb.getFileByRepoPath>>,
-      null
-    >[] = [];
+    const targetFiles: ladybugDb.FileRow[] = [];
     for (const relPath of resolvedPaths) {
-      const f = await ladybugDb.getFileByRepoPath(conn, repoId, relPath);
+      const f = await lookupFile(relPath);
       if (f) targetFiles.push(f);
     }
     if (targetFiles.length === 0) {
       continue;
     }
 
-    const targetSymbolsNested: Awaited<
-      ReturnType<typeof ladybugDb.getSymbolsByFile>
-    >[] = [];
+    const targetSymbols: LiteSymbol[] = [];
     for (const targetFile of targetFiles) {
-      targetSymbolsNested.push(
-        await ladybugDb.getSymbolsByFile(conn, targetFile.fileId),
-      );
+      const lite = await lookupExportedSymbols(targetFile);
+      targetSymbols.push(...lite);
     }
-    const targetSymbols = targetSymbolsNested
-      .flat()
-      .filter((symbol) => symbol.exported);
-    const importedClassMethods = buildPythonClassMethodIndex(targetSymbols);
-    for (const [classSymbolId, methods] of importedClassMethods) {
-      const existing =
-        methodsByImportedClassSymbolId.get(classSymbolId) ??
-        new Map<string, string[]>();
-      for (const [methodName, symbolIds] of methods) {
-        const merged = existing.get(methodName) ?? [];
-        for (const symbolId of symbolIds) {
-          if (!merged.includes(symbolId)) {
-            merged.push(symbolId);
-          }
-        }
-        existing.set(methodName, merged);
+
+    // Build the dotted-method index from full SymbolRows regardless of
+    // cache presence. The import cache only stores LiteSymbol (id+name); it
+    // lacks the kind+range data buildPythonClassMethodIndex needs to map
+    // methods to their owning classes. Without this DB query,
+    // `svc.run()`-style receiver-imported-instance calls never resolve.
+    {
+      const fullSymbols: SymbolRow[] = [];
+      for (const targetFile of targetFiles) {
+        const symbols = await ladybugDb.getSymbolsByFile(
+          conn,
+          targetFile.fileId,
+        );
+        fullSymbols.push(...symbols.filter((s) => s.exported));
       }
-      methodsByImportedClassSymbolId.set(classSymbolId, existing);
+      const importedClassMethods = buildPythonClassMethodIndex(fullSymbols);
+      for (const [classSymbolId, methods] of importedClassMethods) {
+        const existing =
+          methodsByImportedClassSymbolId.get(classSymbolId) ??
+          new Map<string, string[]>();
+        for (const [methodName, symbolIds] of methods) {
+          const merged = existing.get(methodName) ?? [];
+          for (const symbolId of symbolIds) {
+            if (!merged.includes(symbolId)) {
+              merged.push(symbolId);
+            }
+          }
+          existing.set(methodName, merged);
+        }
+        methodsByImportedClassSymbolId.set(classSymbolId, existing);
+      }
     }
 
     const importedNames = new Set<string>();
@@ -742,7 +799,9 @@ async function resolvePythonImportMaps(params: {
       if (name.startsWith("*")) {
         continue;
       }
-      let match = targetSymbols.find((symbol) => symbol.name === name);
+      let match: LiteSymbol | undefined = targetSymbols.find(
+        (symbol) => symbol.name === name,
+      );
       if (!match && imp.defaultImport === name && targetSymbols.length === 1) {
         match = targetSymbols[0];
       }
@@ -759,21 +818,13 @@ async function resolvePythonImportMaps(params: {
             startFile: tf.relPath,
             symbolName: name,
             extensions,
+            importCache,
           });
           if (!walked) continue;
-          const resolvedFileRow = await ladybugDb.getFileByRepoPath(
-            conn,
-            repoId,
-            walked.resolvedFile,
-          );
+          const resolvedFileRow = await lookupFile(walked.resolvedFile);
           if (!resolvedFileRow) continue;
-          const syms = await ladybugDb.getSymbolsByFile(
-            conn,
-            resolvedFileRow.fileId,
-          );
-          const found = syms.find(
-            (sym) => sym.exported && sym.name === walked.resolvedName,
-          );
+          const syms = await lookupExportedSymbols(resolvedFileRow);
+          const found = syms.find((sym) => sym.name === walked.resolvedName);
           if (found) {
             match = found;
             break;
@@ -976,8 +1027,20 @@ async function resolvePythonCallEdgesPass2(params: {
   fileMeta: FileMetadata;
   createdCallEdges: Set<string>;
   telemetry?: Pass2ResolverContext["telemetry"];
+  mode?: "full" | "incremental";
+  submitEdgeWrite?: Pass2ResolverContext["submitEdgeWrite"];
+  importCache?: Pass2ResolverContext["importCache"];
 }): Promise<number> {
-  const { repoId, repoRoot, fileMeta, createdCallEdges, telemetry } = params;
+  const {
+    repoId,
+    repoRoot,
+    fileMeta,
+    createdCallEdges,
+    telemetry,
+    mode,
+    submitEdgeWrite,
+    importCache,
+  } = params;
 
   const conn = await getLadybugConn();
   const filePath = join(repoRoot, fileMeta.path);
@@ -1062,9 +1125,7 @@ async function resolvePythonCallEdgesPass2(params: {
   const symbolIdsToRefresh = filteredSymbolDetails.map(
     (detail) => detail.symbolId,
   );
-  await withWriteConn(async (wConn) => {
-    await clearOutgoingCallEdges(wConn, symbolIdsToRefresh, createdCallEdges);
-  });
+  clearLocalCallDedupKeys(symbolIdsToRefresh, createdCallEdges);
 
   const nodeIdToSymbolId = createNodeIdToSymbolId(filteredSymbolDetails);
   const localClassMethodNameToSymbolIds = buildLocalClassMethodIndex(
@@ -1078,6 +1139,7 @@ async function resolvePythonCallEdgesPass2(params: {
     [...adapter.fileExtensions],
     "python",
     content,
+    importCache,
   );
   const pythonImportMaps = await resolvePythonImportMaps({
     conn,
@@ -1086,6 +1148,7 @@ async function resolvePythonCallEdgesPass2(params: {
     importerRelPath: fileMeta.path,
     imports,
     extensions: [...adapter.fileExtensions],
+    importCache,
   });
   const importedNameToSymbolIds = mergeImportedNameMaps(
     importResolution.importedNameToSymbolIds,
@@ -1228,9 +1291,23 @@ async function resolvePythonCallEdgesPass2(params: {
     }
   }
 
-  await withWriteConn(async (wConn) => {
-    await ladybugDb.insertEdges(wConn, edgesToInsert);
-  });
+  if (submitEdgeWrite) {
+    await submitEdgeWrite({
+      symbolIdsToRefresh,
+      edges: edgesToInsert,
+    });
+  } else {
+    await withWriteConn(async (wConn) => {
+      if (mode !== "full" && symbolIdsToRefresh.length > 0) {
+        await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
+          wConn,
+          symbolIdsToRefresh,
+          "call",
+        );
+      }
+      await ladybugDb.insertEdges(wConn, edgesToInsert);
+    });
+  }
   (tree as unknown as { delete?: () => void }).delete?.();
   return createdEdges;
 }
@@ -1264,6 +1341,9 @@ export class PythonPass2Resolver implements Pass2Resolver {
         },
         createdCallEdges: context.createdCallEdges,
         telemetry: context.telemetry,
+        mode: context.mode,
+        submitEdgeWrite: context.submitEdgeWrite,
+        importCache: context.importCache,
       });
       return { edgesCreated };
     } catch (error) {

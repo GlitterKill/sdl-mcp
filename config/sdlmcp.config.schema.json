@@ -597,10 +597,32 @@
         },
         "embeddingConcurrency": {
           "type": "integer",
-          "description": "Number of embedding batches to process concurrently during refreshSymbolEmbeddings(). Defaults to 1 (sequential). Increasing this can improve throughput on multi-core machines but ONNX Runtime's internal thread pool is shared across concurrent calls; consider reducing intraOpNumThreads proportionally when raising above 1. Maximum 4.",
+          "description": "Number of embedding batches to process concurrently during refreshSymbolEmbeddings(). Defaults to 1 (sequential). Increasing this can improve throughput on multi-core machines but ONNX Runtime's internal thread pool is shared across concurrent calls; consider reducing intraOpNumThreads proportionally when raising above 1. Maximum 8.",
           "minimum": 1,
-          "maximum": 4,
+          "maximum": 8,
           "default": 1
+        },
+        "embeddingBatchSize": {
+          "type": "integer",
+          "description": "ONNX inference batch width for symbol embedding refresh. Default 32 matches LocalEmbeddingProvider's tokenizer + session expectations. Larger batches (64-128) amortise tokenizer + session bind/unbind costs across more rows but raise peak memory roughly with the longest sequence in the batch. Length-bucketing before splitting keeps tokenizer pad waste bounded.",
+          "minimum": 1,
+          "maximum": 128,
+          "default": 32
+        },
+        "embeddingsSequential": {
+          "type": "boolean",
+          "description": "When two or more embedding models are configured, run them in series instead of via Promise.all. Default false launches concurrently — best when ORT runs sessions on independent thread pools. Set true on systems where ORT serializes sessions at the thread-pool layer (observed alternation pattern in CLI progress); each model holds the full thread budget end-to-end, weights stay hot in L3 cache, and model-handoff scheduling overhead disappears.",
+          "default": false
+        },
+        "modelVariant": {
+          "type": "string",
+          "description": "ONNX model file variant to load. Common values: 'default' / 'int8' (~140-160MB, balanced), 'fp16' (~270-320MB, ~30% faster than fp32 with <0.5% accuracy loss), 'fp32' (~550-650MB, reference quality). nomic-embed-text-v1.5 also publishes 'uint8', 'q4', 'q4f16', 'bnb4'. When the chosen variant is not published for a given model, the registry falls back to that model's default variant with a warning."
+        },
+        "executionProviders": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "ONNX Runtime execution providers in priority order. ORT tries them left-to-right; first one that initialises wins. Bundled with default onnxruntime-node npm package: Windows x64 ['cpu', 'dml', 'webgpu'], macOS ['cpu', 'coreml'], Linux x64 ['cpu', 'cuda', 'tensorrt'] (CUDA EP requires NVIDIA GPU + CUDA 12 + cuDNN on the host), Linux arm64 ['cpu']. DirectML covers any DX12 GPU including AMD Radeon, NVIDIA GeForce, Intel Arc. ROCm (AMD on Linux), OpenVINO, QNN need a custom ORT build. Unsupported entries on a given platform are dropped with a warning; 'cpu' is auto-appended as final fallback so session creation never strands.",
+          "default": ["cpu"]
         },
         "ann": {
           "type": "object",
@@ -811,14 +833,15 @@
         },
         "warmTopN": {
           "type": "integer",
-          "minimum": 1,
-          "default": 50
+          "minimum": 0,
+          "default": 0,
+          "description": "Number of top-fan-in symbols to prefetch on serve start. Default 0 disables startup warming; raise only when you have evidence the warm set is consumed within the 5-minute stale window."
         }
       },
       "default": {
         "enabled": true,
         "maxBudgetPercent": 20,
-        "warmTopN": 50
+        "warmTopN": 0
       }
     },
     "observability": {
@@ -1259,6 +1282,11 @@
               "minimum": 1000,
               "maximum": 1800000,
               "default": 600000
+            },
+            "cleanupAfterIngest": {
+              "type": "boolean",
+              "description": "Delete <repoRoot>/index.scip after the post-refresh ingest consumes it. The file is regenerated every refresh, so keeping it just clutters the working tree. Only the default output location is cleaned up — passing --output via args opts you out of cleanup automatically.",
+              "default": true
             }
           },
           "default": {
@@ -1266,7 +1294,8 @@
             "binary": "scip-io",
             "args": [],
             "autoInstall": true,
-            "timeoutMs": 600000
+            "timeoutMs": 600000,
+            "cleanupAfterIngest": true
           }
         }
       }
@@ -1325,14 +1354,14 @@
             "threshold": {
               "type": "number",
               "description": "Minimum byte-savings ratio before packed payload is emitted (0.0-1.0). Env var SDL_PACKED_THRESHOLD overrides.",
-              "default": 0.10,
+              "default": 0.1,
               "minimum": 0,
               "maximum": 1
             },
             "tokenThreshold": {
               "type": "number",
               "description": "Minimum estimated-token-savings ratio before packed payload is emitted (0.0-1.0). Either threshold (bytes OR tokens) is sufficient. Env var SDL_PACKED_TOKEN_THRESHOLD overrides.",
-              "default": 0.20,
+              "default": 0.2,
               "minimum": 0,
               "maximum": 1
             },

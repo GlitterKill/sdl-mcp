@@ -45,7 +45,9 @@ import {
   DEFAULT_MAX_TOKENS_SLICE,
   SLICE_LEASE_TTL_MS,
   SPILLOVER_DEFAULT_PAGE_SIZE,
+  SYMBOL_CARD_MAX_TEST_REFS,
 } from "../../config/constants.js";
+import { uniqueLimit } from "../../graph/slice/slice-serializer.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { PolicyConfigSchema } from "../../config/types.js";
 import { getMemoryCapabilities } from "../../config/memory-config.js";
@@ -397,7 +399,6 @@ async function handleSliceBuildInternal(
       budget: effectiveBudget,
     };
 
-
     const {
       decision: policyDecision,
       nextBestAction,
@@ -425,7 +426,8 @@ async function handleSliceBuildInternal(
       throw error;
     }
 
-    const { slice, hybridSearchItems, beamTrace } = await buildSlice(sliceRequest);
+    const { slice, hybridSearchItems, beamTrace } =
+      await buildSlice(sliceRequest);
     const frontierSeeds =
       resolvedEntrySymbols && resolvedEntrySymbols.length > 0
         ? resolvedEntrySymbols
@@ -492,7 +494,9 @@ async function handleSliceBuildInternal(
           });
         }
       } catch (err) {
-        logger.warn("beam-explain trace publish failed", { error: String(err) });
+        logger.warn("beam-explain trace publish failed", {
+          error: String(err),
+        });
       }
     }
 
@@ -629,7 +633,8 @@ async function handleSliceBuildInternal(
     if (wireResult.format === "packed") {
       const savedRatio =
         wireResult.jsonBytes > 0
-          ? (wireResult.jsonBytes - wireResult.packedBytes) / wireResult.jsonBytes
+          ? (wireResult.jsonBytes - wireResult.packedBytes) /
+            wireResult.jsonBytes
           : 0;
       const jt = wireResult.jsonTokens;
       const pt = wireResult.packedTokens;
@@ -999,10 +1004,16 @@ export async function handleSliceSpilloverGet(
 
       let metricsData;
       if (metrics) {
-        const testRefs = safeJsonParseOptional(
+        const rawTestRefs = safeJsonParseOptional(
           metrics.testRefsJson,
           StringArraySchema,
         );
+        // Cap test references — hot symbols can carry 50+ entries which
+        // dominate the spillover token budget. Match the per-card hydrator
+        // limit so spillover and primary cards agree on shape.
+        const testRefs = rawTestRefs
+          ? uniqueLimit(rawTestRefs, SYMBOL_CARD_MAX_TEST_REFS)
+          : undefined;
 
         metricsData = {
           fanIn: metrics.fanIn,
@@ -1029,7 +1040,8 @@ export async function handleSliceSpilloverGet(
         signature,
         summary: symbolRow.summary ?? undefined,
         invariants: handleRow.cardDetail === "compact" ? undefined : invariants,
-        sideEffects: handleRow.cardDetail === "compact" ? undefined : sideEffects,
+        sideEffects:
+          handleRow.cardDetail === "compact" ? undefined : sideEffects,
         deps,
         metrics: handleRow.cardDetail === "compact" ? undefined : metricsData,
         version: {

@@ -591,6 +591,102 @@ The current recommended configuration surface is `semantic.retrieval.*`. Retired
 
 ---
 
+## Performance Tuning & Hardware Acceleration
+
+Local embedding generation is the dominant cost of a full reindex on most repos (often 60-70% of wall time). The settings below let you trade memory, accuracy, and compatibility for speed without changing the embedding model.
+
+### Model Variants (`semantic.modelVariant`)
+
+Each ONNX model on HuggingFace ships several pre-quantised variants. SDL-MCP picks the variant by name; unsupported requests fall back to the model's `defaultVariant` with a warning.
+
+| Variant   | jina-code | nomic-text | File size (approx)         | Speed vs fp32   | Quality vs fp32         |
+| :-------- | :-------: | :--------: | :------------------------- | :-------------- | :---------------------- |
+| `default` |     ✓     |     ✓      | jina ~162MB / nomic ~137MB | baseline (int8) | baseline (int8)         |
+| `int8`    |     ✓     |     ✓      | ~140-160MB                 | ~2-3× fp32      | -1 to -3% retrieval     |
+| `uint8`   |     —     |     ✓      | ~137MB                     | ~2-3× fp32      | -1 to -3% retrieval     |
+| `q4`      |     —     |     ✓      | ~165MB                     | ~3-4× fp32      | -3 to -7% retrieval     |
+| `q4f16`   |     —     |     ✓      | ~111MB                     | ~3-4× fp32      | -3 to -7% retrieval     |
+| `bnb4`    |     —     |     ✓      | ~158MB                     | ~3-4× fp32      | -3 to -7% retrieval     |
+| `fp16`    |     ✓     |     ✓      | ~270-321MB                 | ~1.3-1.5× fp32  | <0.5% loss (negligible) |
+| `fp32`    |     ✓     |     ✓      | ~547-642MB                 | baseline        | reference               |
+
+The default ships the int8 quantised variant. Move to `fp16` if you want a small speed boost with no measurable quality loss, or to `q4`/`q4f16`/`bnb4` if you can tolerate ~3-7% retrieval quality drop for ~3× speed. Each variant downloads on first use to the model cache directory; tokenizer + config are shared across variants.
+
+```jsonc
+{
+  "semantic": {
+    "modelVariant": "fp16", // or "default" / "int8" / "uint8" / "q4" / "q4f16" / "bnb4" / "fp32"
+  },
+}
+```
+
+### GPU / Accelerator Execution Providers (`semantic.executionProviders`)
+
+ONNX Runtime ships several execution providers in the default `onnxruntime-node` npm package — no separate package or build needed. SDL-MCP filters the user list against the platform's bundled providers and auto-appends `"cpu"` as final fallback so session creation never strands.
+
+| Platform    | Bundled providers         | Covers                                                                  |
+| :---------- | :------------------------ | :---------------------------------------------------------------------- |
+| Windows x64 | `cpu`, `dml`, `webgpu`    | DirectML covers any DX12 GPU: AMD Radeon, NVIDIA, Intel Arc, integrated |
+| macOS       | `cpu`, `coreml`           | Apple Silicon ANE/GPU + Intel Mac GPU                                   |
+| Linux x64   | `cpu`, `cuda`, `tensorrt` | NVIDIA GPU + CUDA 12 + cuDNN must be installed on the host              |
+| Linux arm64 | `cpu`                     | CPU only in default package                                             |
+
+Out of scope (require a custom ONNX Runtime build): `rocm` (AMD on Linux), `openvino`, `qnn`. If you swap in a custom `onnxruntime-node` build, those providers will work — sdl-mcp's filter only drops entries known to be unavailable in the default package.
+
+```jsonc
+{
+  "semantic": {
+    // Windows + AMD/NVIDIA/Intel discrete or integrated GPU:
+    "executionProviders": ["dml", "cpu"],
+    // Apple Silicon Mac:
+    // "executionProviders": ["coreml", "cpu"],
+    // NVIDIA Linux (CUDA 12 + cuDNN installed):
+    // "executionProviders": ["cuda", "cpu"],
+  },
+}
+```
+
+Expected speedup vs CPU-only on a workstation-class machine: **3-8× for transformer inference**. Combine with `modelVariant: "fp16"` for additive gains.
+
+### Throughput Tuning (`embeddingConcurrency`, `embeddingBatchSize`)
+
+| Knob                   | Default | Range   | Effect                                                                                  |
+| :--------------------- | :------ | :------ | :-------------------------------------------------------------------------------------- |
+| `embeddingConcurrency` | `1`     | `1-8`   | ONNX batches in flight per model. Higher = more overlap of tokenization with inference. |
+| `embeddingBatchSize`   | `32`    | `1-128` | Rows per ONNX inference call. Larger = fewer round trips but higher peak memory.        |
+
+Tuning advice for a 16-physical-core CPU (e.g. 9950X3D):
+
+- Start with `embeddingConcurrency: 4`, `embeddingBatchSize: 32`, `intraOpNumThreads: 16` (= physical cores).
+- If CPU stays below 70% during the embedding phase, the tokenizer (single-thread JS) is the bottleneck — raise `embeddingConcurrency` to 6 or 8 to keep more batches in tokenization while ORT computes.
+- If wall time stops improving past concurrency 4, the bottleneck has shifted to ORT compute; tweak `intraOpNumThreads` instead (set to physical core count, not logical — hyperthreading hurts inference).
+
+### Multi-Model Sequencing (`embeddingsSequential`)
+
+When two or more embedding models are configured (e.g. jina + nomic), SDL-MCP runs them concurrently via `Promise.all` by default. On systems where ORT serializes parallel sessions at the thread-pool layer, this can produce an alternation pattern: one model's progress jumps, then the other's, back and forth, with neither model holding the full thread budget end-to-end.
+
+Set `embeddingsSequential: true` to run models in series instead. Each model then keeps its weights hot in L3 cache for the full duration. Wall time becomes `model_a_time + model_b_time` rather than the contended-parallel worst case. Whether this wins depends on hardware — measure both to decide.
+
+```jsonc
+{
+  "semantic": {
+    "embeddingsSequential": true,
+  },
+}
+```
+
+### ONNX Runtime Thread Pool (`semantic.onnx`)
+
+| Field                    | Default                    | Notes                                                                                                               |
+| :----------------------- | :------------------------- | :------------------------------------------------------------------------------------------------------------------ |
+| `onnx.intraOpNumThreads` | `0` (auto = logical cores) | Set to **physical** core count for best inference (transformer matmul/attention). Hyperthreading slows ORT compute. |
+| `onnx.interOpNumThreads` | `0` (auto = 1)             | Only used in `executionMode: "parallel"`. Keep at 1 for sentence-transformer ONNX graphs.                           |
+| `onnx.executionMode`     | `"sequential"`             | Sequential is usually optimal — these models have linear graphs.                                                    |
+
+The `intraOpNumThreads` setting is the single most impactful knob after model variant + execution provider selection.
+
+---
+
 ## Embedding Vector Storage
 
 Embeddings are stored as **inline properties on Symbol nodes** in LadybugDB:
@@ -757,6 +853,18 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
     "summaryApiBaseUrl": null, // Custom endpoint (default: Anthropic for api, localhost:11434 for local)
     "summaryMaxConcurrency": 5, // Parallel summary requests (1-20)
     "summaryBatchSize": 20, // Symbols per batch (1-50)
+
+    // -- ONNX Inference Performance ------------------------------
+    "embeddingConcurrency": 1, // 1-8: ONNX batches in flight per model
+    "embeddingBatchSize": 32, // 1-128: rows per ONNX inference call
+    "embeddingsSequential": false, // run multi-model embedding in series (vs Promise.all)
+    "modelVariant": "default", // "default" | "fp16" | "fp32" | "int8" | nomic-only "uint8"/"q4"/"q4f16"/"bnb4"
+    "executionProviders": ["cpu"], // ORT EPs: ["dml","cpu"] (Win), ["coreml","cpu"] (macOS), ["cuda","cpu"] (Linux NVIDIA)
+    "onnx": {
+      "intraOpNumThreads": 0, // 0 = auto (logical cores). Set to physical core count for best inference perf.
+      "interOpNumThreads": 0, // 0 = 1. Only used in executionMode "parallel".
+      "executionMode": "sequential", // "sequential" | "parallel"
+    },
 
     // -- Retrieval -----------------------------------------------
     "retrieval": {

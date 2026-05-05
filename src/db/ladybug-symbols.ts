@@ -366,6 +366,47 @@ export async function getExportedSymbolsByFileIds(
   return result;
 }
 
+/**
+ * Lightweight exported-symbol shape used by pass-2 import resolution. Only
+ * the fields the resolver actually consumes — keeps the cache footprint
+ * tight when populated for an entire repo.
+ */
+export interface ExportedSymbolLite {
+  symbolId: string;
+  name: string;
+}
+
+/**
+ * Batched read of exported `(symbolId, name)` tuples grouped by fileId.
+ * Used by `runPass2Resolvers` to populate a pass-level cache so that the
+ * `import-resolution.ts` hot loop can resolve target symbols via map
+ * lookups instead of one `getSymbolsByFile` call per imported module.
+ */
+export async function getExportedSymbolsLiteByFileIds(
+  conn: Connection,
+  fileIds: string[],
+): Promise<Map<string, ExportedSymbolLite[]>> {
+  const result = new Map<string, ExportedSymbolLite[]>();
+  if (fileIds.length === 0) return result;
+  const rows = await queryAll<{
+    fileId: string;
+    symbolId: string;
+    name: string;
+  }>(
+    conn,
+    `MATCH (f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
+     WHERE f.fileId IN $fileIds AND s.exported = true
+     RETURN f.fileId AS fileId, s.symbolId AS symbolId, s.name AS name`,
+    { fileIds },
+  );
+  for (const row of rows) {
+    const list = result.get(row.fileId) ?? [];
+    list.push({ symbolId: row.symbolId, name: row.name });
+    result.set(row.fileId, list);
+  }
+  return result;
+}
+
 export async function getSymbolsByFile(
   conn: Connection,
   fileId: string,

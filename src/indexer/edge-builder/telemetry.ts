@@ -49,6 +49,13 @@ export type CallResolutionTelemetry = {
   pass2FilesProcessed: number;
   pass2FilesNoExistingSymbols: number;
   pass2FilesNoMappedSymbols: number;
+  /**
+   * Files skipped by the pass-2 dispatcher because SCIP fully covered every
+   * callable reference occurrence in the file (`scipFullyCoveredPaths`
+   * membership). Always 0 when SCIP is not configured or did not produce
+   * coverage rows.
+   */
+  pass2FilesSkippedSCIP: number;
   resolverBreakdown: Record<string, Pass2ResolverTelemetry>;
 
   pass2SymbolMapping: {
@@ -132,6 +139,7 @@ export function createCallResolutionTelemetry(params: {
     pass2FilesProcessed: 0,
     pass2FilesNoExistingSymbols: 0,
     pass2FilesNoMappedSymbols: 0,
+    pass2FilesSkippedSCIP: 0,
     resolverBreakdown,
     pass2SymbolMapping: {
       extractedSymbols: 0,
@@ -299,7 +307,13 @@ export function bucketForResolution(
 export function recordPass2ResolverEdge(
   telemetry: CallResolutionTelemetry,
   resolverId: string,
-  bucket: "compiler" | "import" | "lexical" | "global" | "ambiguous" | "heuristic",
+  bucket:
+    | "compiler"
+    | "import"
+    | "lexical"
+    | "global"
+    | "ambiguous"
+    | "heuristic",
 ): void {
   const t = getResolverTelemetryBucket(telemetry, resolverId);
   switch (bucket) {
