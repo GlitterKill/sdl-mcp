@@ -844,6 +844,154 @@ export const EnforceSDL: Plugin = async () => {
 `;
 }
 
+function buildCodexProjectConfig(): string {
+  return `[features]
+codex_hooks = true
+`;
+}
+
+function buildCodexHooksJson(repoRoot: string): string {
+  const hookPath = normalizePath(
+    join(repoRoot, ".codex", "hooks", "force-sdl-mcp.mjs"),
+  );
+  const config = {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: "Bash|mcp__(?!sdl_mcp__).*",
+          hooks: [
+            {
+              type: "command",
+              command: `node "${hookPath.replace(/"/g, '\\"')}"`,
+              timeout: 10,
+              statusMessage: "Checking SDL-MCP tool policy",
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  return `${JSON.stringify(config, null, 2)}\n`;
+}
+
+function buildCodexPreToolUseHook(): string {
+  return `#!/usr/bin/env node
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+function deny(reason) {
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: reason,
+      },
+    }),
+  );
+}
+
+async function sdlMcpIsReachableWhenConfigured() {
+  if (process.env.SDL_MCP_HOOK_DISABLE === "1") {
+    return false;
+  }
+  if (process.env.SDL_MCP_HOOK_ASSUME_ACTIVE === "1") {
+    return true;
+  }
+  if (!process.env.SDL_MCP_URL) {
+    return true;
+  }
+
+  try {
+    await fetch(process.env.SDL_MCP_URL, { method: "GET" });
+    return true;
+  } catch (error) {
+    // A plain GET can produce an HTTP error while still proving the server exists.
+    return Boolean(error?.response);
+  }
+}
+
+function normalize(value) {
+  return String(value ?? "").replace(/\\\\/g, "/").toLowerCase();
+}
+
+function targetsRepo(input, serializedToolInput) {
+  const normalizedRepoRoot = normalize(repoRoot);
+  return (
+    normalize(input.cwd).startsWith(normalizedRepoRoot) ||
+    normalize(serializedToolInput).includes(normalizedRepoRoot)
+  );
+}
+
+function bashShouldUseSdl(command) {
+  const readOrSearch =
+    /\\b(Get-Content|gc|type|cat|Select-String|findstr|rg|grep|git\\s+grep|sed|Get-ChildItem|gci|dir|ls)\\b/i;
+  const indexedCodeTarget =
+    /(\\bsrc\\b|[\\\\/]src[\\\\/]|\\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|cs|c|cc|cpp|h|hpp|php|rs|kt|kts|sh|bash)\\b)/i;
+  const repoRuntime =
+    /\\b(npm\\s+(test|run\\s+(build|build:all|typecheck|lint|test|test:[\\w:-]+|golden:update))|node\\s+scripts[\\\\/]run-tests\\.mjs|cargo\\s+(test|build|check)|go\\s+test|pytest|ruff|eslint|tsc)\\b/i;
+
+  return (readOrSearch.test(command) && indexedCodeTarget.test(command)) ||
+    repoRuntime.test(command);
+}
+
+const rawInput = await new Promise((resolveInput) => {
+  let data = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => {
+    data += chunk;
+  });
+  process.stdin.on("end", () => resolveInput(data));
+});
+
+if (!rawInput.trim()) {
+  process.exit(0);
+}
+
+let hookInput;
+try {
+  hookInput = JSON.parse(rawInput);
+} catch {
+  process.exit(0);
+}
+
+if (hookInput.hook_event_name !== "PreToolUse") {
+  process.exit(0);
+}
+
+const toolInputJson = JSON.stringify(hookInput.tool_input ?? {});
+if (!targetsRepo(hookInput, toolInputJson)) {
+  process.exit(0);
+}
+
+if (!(await sdlMcpIsReachableWhenConfigured())) {
+  process.exit(0);
+}
+
+if (hookInput.tool_name === "Bash") {
+  const command = String(hookInput.tool_input?.command ?? "");
+  if (bashShouldUseSdl(command)) {
+    deny(
+      "Use SDL-MCP code/context tools for indexed source reads/searches and SDL runtime for repo-local build/test/lint commands.",
+    );
+  }
+  process.exit(0);
+}
+
+if (
+  /^mcp__/.test(hookInput.tool_name ?? "") &&
+  !/^mcp__sdl_mcp__/.test(hookInput.tool_name ?? "")
+) {
+  deny(
+    "Use the SDL-MCP MCP server instead of non-SDL MCP file/search tooling in this repository.",
+  );
+}
+`;
+}
+
 function buildEnforcementAssets(
   repoRoot: string,
   repoId: string,
@@ -918,6 +1066,24 @@ function buildEnforcementAssets(
       {
         path: join(repoRoot, ".claude", "sdl-prompt.md"),
         content: buildClaudePrompt(repoId),
+      },
+    );
+  }
+
+  if (client === "codex") {
+    assets.push(
+      {
+        path: join(repoRoot, ".codex", "config.toml"),
+        content: buildCodexProjectConfig(),
+      },
+      {
+        path: join(repoRoot, ".codex", "hooks.json"),
+        content: buildCodexHooksJson(repoRoot),
+      },
+      {
+        path: join(repoRoot, ".codex", "hooks", "force-sdl-mcp.mjs"),
+        content: buildCodexPreToolUseHook(),
+        executable: true,
       },
     );
   }

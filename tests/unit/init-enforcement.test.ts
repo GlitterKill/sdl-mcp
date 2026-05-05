@@ -1,10 +1,6 @@
 import assert from "node:assert";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-} from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -88,9 +84,66 @@ describe("init agent enforcement", () => {
     assert.ok(existsSync(join(tempDir, "AGENTS.md")));
     assert.ok(existsSync(join(tempDir, "CLAUDE.md")));
     assert.ok(existsSync(join(tempDir, ".claude", "settings.json")));
-    assert.ok(existsSync(join(tempDir, ".claude", "hooks", "force-sdl-mcp.sh")));
-    assert.ok(existsSync(join(tempDir, ".claude", "hooks", "force-sdl-runtime.sh")));
+    assert.ok(
+      existsSync(join(tempDir, ".claude", "hooks", "force-sdl-mcp.sh")),
+    );
+    assert.ok(
+      existsSync(join(tempDir, ".claude", "hooks", "force-sdl-runtime.sh")),
+    );
     assert.ok(existsSync(join(tempDir, ".claude", "agents", "explore-sdl.md")));
+  });
+
+  it("creates Codex enforcement assets", async () => {
+    const configPath = join(tempDir, "sdlmcp.config.json");
+    const { initCommand } = await import("../../dist/cli/commands/init.js");
+
+    await initCommand({
+      config: configPath,
+      repoPath: tempDir,
+      yes: true,
+      autoIndex: false,
+      force: true,
+      client: "codex",
+      enforceAgentTools: true,
+    });
+
+    assert.ok(existsSync(join(tempDir, "AGENTS.md")));
+    assert.ok(existsSync(join(tempDir, "CODEX.md")));
+    assert.ok(existsSync(join(tempDir, ".codex", "config.toml")));
+    assert.ok(existsSync(join(tempDir, ".codex", "hooks.json")));
+    assert.ok(
+      existsSync(join(tempDir, ".codex", "hooks", "force-sdl-mcp.mjs")),
+    );
+
+    const hookPath = join(tempDir, ".codex", "hooks", "force-sdl-mcp.mjs");
+    const hooks = JSON.parse(
+      readFileSync(join(tempDir, ".codex", "hooks.json"), "utf8"),
+    );
+    assert.strictEqual(
+      hooks.hooks.PreToolUse[0].matcher,
+      "Bash|mcp__(?!sdl_mcp__).*",
+    );
+
+    const hookRun = spawnSync(process.execPath, [hookPath], {
+      input: JSON.stringify({
+        hook_event_name: "PreToolUse",
+        cwd: tempDir,
+        tool_name: "Bash",
+        tool_input: { command: "Get-Content src/cli/commands/init.ts" },
+      }),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        SDL_MCP_HOOK_ASSUME_ACTIVE: "1",
+      },
+    });
+
+    assert.strictEqual(hookRun.status, 0);
+    const hookOutput = JSON.parse(hookRun.stdout);
+    assert.strictEqual(
+      hookOutput.hookSpecificOutput.permissionDecision,
+      "deny",
+    );
   });
 
   it("creates OpenCode enforcement assets", async () => {

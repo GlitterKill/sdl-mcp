@@ -56,12 +56,12 @@ If an agent falls back to native file reads or native shell commands for indexed
 
 ## Client Matrix
 
-| Client | Generated docs | Generated hard enforcement | Notes |
-|:-------|:---------------|:---------------------------|:------|
-| Claude Code / Claude | `AGENTS.md`, `CLAUDE.md` | `.claude/settings.json`, read hook, runtime hook, `explore-sdl` subagent, prompt file | Strongest current hook-based enforcement |
-| Codex App / Codex CLI | `AGENTS.md`, `CODEX.md` | No native hook assets generated | Instruction-driven enforcement via repo-local docs |
-| Gemini CLI | `AGENTS.md`, `GEMINI.md` | No native hook assets generated | Instruction-driven enforcement via repo-local docs |
-| OpenCode CLI | `AGENTS.md`, `OPENCODE.md` | `opencode.json`, `.opencode/plugins/enforce-sdl.ts` | Uses project config plus plugin enforcement |
+| Client                | Generated docs             | Generated hard enforcement                                                            | Notes                                              |
+| :-------------------- | :------------------------- | :------------------------------------------------------------------------------------ | :------------------------------------------------- |
+| Claude Code / Claude  | `AGENTS.md`, `CLAUDE.md`   | `.claude/settings.json`, read hook, runtime hook, `explore-sdl` subagent, prompt file | Strongest current hook-based enforcement           |
+| Codex App / Codex CLI | `AGENTS.md`, `CODEX.md`    | `.codex/config.toml`, `.codex/hooks.json`, `.codex/hooks/force-sdl-mcp.mjs`           | Uses Codex lifecycle hooks plus repo-local docs    |
+| Gemini CLI            | `AGENTS.md`, `GEMINI.md`   | No native hook assets generated                                                       | Instruction-driven enforcement via repo-local docs |
+| OpenCode CLI          | `AGENTS.md`, `OPENCODE.md` | `opencode.json`, `.opencode/plugins/enforce-sdl.ts`                                   | Uses project config plus plugin enforcement        |
 
 ---
 
@@ -79,9 +79,9 @@ See the client-specific guide in [tool-enforcement-for-claude.md](./tool-enforce
 
 ### Codex App / Codex CLI
 
-Codex currently relies on repo-local instruction files rather than generated hook assets. The generated `CODEX.md` and `AGENTS.md` direct the agent toward SDL-first workflows and away from token-heavy native reads and shell commands.
+Codex gets repo-local instruction files and Codex lifecycle hook assets. The generated `.codex/config.toml` enables `codex_hooks`, `.codex/hooks.json` registers a `PreToolUse` policy hook, and `.codex/hooks/force-sdl-mcp.mjs` redirects common native Bash reads/searches and repo-local build/test/lint commands toward SDL-MCP.
 
-Those generated files also describe natural-identifier lookup and fallback-guided recovery so Codex can stay inside SDL-MCP even when the exact `symbolId` is unknown.
+The generated `CODEX.md` and `AGENTS.md` still matter: they describe natural-identifier lookup and fallback-guided recovery so Codex can stay inside SDL-MCP even when the exact `symbolId` is unknown.
 
 ### Gemini CLI
 
@@ -109,6 +109,6 @@ After generating the enforcement setup:
 3. confirm the agent uses `sdl.context` or `sdl.context` for code context retrieval
 4. confirm explain/debug/review requests route to context first
 5. confirm `sdl.workflow` is used for runtime execution and multi-step operations, not context retrieval
-5. confirm symbol lookups can use `symbolRef` / `symbolRefs` when IDs are not yet known
-6. confirm repo-local execution is happening through SDL runtime rather than the client's native shell tool
-7. confirm denied or ambiguous responses are followed via `nextBestAction`, `fallbackTools`, or `fallbackRationale` instead of retrying native tools
+6. confirm symbol lookups can use `symbolRef` / `symbolRefs` when IDs are not yet known
+7. confirm repo-local execution is happening through SDL runtime rather than the client's native shell tool
+8. confirm denied or ambiguous responses are followed via `nextBestAction`, `fallbackTools`, or `fallbackRationale` instead of retrying native tools

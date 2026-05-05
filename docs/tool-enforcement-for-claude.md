@@ -64,18 +64,18 @@ That instruction layer now includes natural-identifier lookup and guidance field
 
 ## Indexed Source Extensions
 
-| Language | Extensions |
-|----------|-----------|
-| TypeScript/JavaScript | `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` |
-| Python | `.py` `.pyw` |
-| Go | `.go` |
-| Java | `.java` |
-| C# | `.cs` |
-| C/C++ | `.c` `.h` `.cpp` `.hpp` `.cc` `.cxx` `.hxx` |
-| PHP | `.php` `.phtml` |
-| Rust | `.rs` |
-| Kotlin | `.kt` `.kts` |
-| Shell | `.sh` `.bash` `.zsh` |
+| Language              | Extensions                                  |
+| --------------------- | ------------------------------------------- |
+| TypeScript/JavaScript | `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs`     |
+| Python                | `.py` `.pyw`                                |
+| Go                    | `.go`                                       |
+| Java                  | `.java`                                     |
+| C#                    | `.cs`                                       |
+| C/C++                 | `.c` `.h` `.cpp` `.hpp` `.cc` `.cxx` `.hxx` |
+| PHP                   | `.php` `.phtml`                             |
+| Rust                  | `.rs`                                       |
+| Kotlin                | `.kt` `.kts`                                |
+| Shell                 | `.sh` `.bash` `.zsh`                        |
 
 Non-indexed files such as Markdown, JSON, YAML, TOML, and similar config or documentation files can still be read natively.
 
@@ -90,7 +90,7 @@ For code understanding:
 3. `sdl.manual(query|actions|format)` for focused reference
 4. `sdl.context` with `contextMode: "precise"` for targeted lookups or `"broad"` for exploration
 5. `sdl.context` when Claude is already operating inside Code Mode and needs task-shaped context
-5. Provide `focusSymbols` and/or `focusPaths` to scope retrieval; always set a budget
+6. Provide `focusSymbols` and/or `focusPaths` to scope retrieval; always set a budget
 
 For symbol lookup:
 
@@ -110,4 +110,4 @@ Do not retry denied native `Read` or `Bash` calls. Switch to SDL-MCP immediately
 ## Notes
 
 - The generated enforcement assets are conservative. They are created automatically for new setups and do not blindly merge into existing user-managed files.
-- Claude is the client with the strongest current hook support. Other client integrations rely more heavily on SDL config plus repo-local instruction files.
+- Claude remains the strongest current hook path because it also disables the built-in `Explore` agent. Codex and OpenCode now get generated hook/plugin enforcement assets plus repo-local instruction files; Gemini remains instruction-driven.
