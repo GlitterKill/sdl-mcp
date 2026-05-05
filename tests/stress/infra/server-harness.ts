@@ -109,6 +109,14 @@ export class ServerHarness {
     process.env.SDL_MCP_DISABLE_NATIVE_ADDON = "1";
     process.env.SDL_LOG_LEVEL = this.config.verbose ? "debug" : "warn";
 
+    // Cap LadybugDB buffer pool to 1 GB. Default auto-sizes from total RAM up
+    // to 4 GB; on beefy hosts that combines with V8's 4 GB heap + ONNX models
+    // to exhaust native memory under stress (segfault in scenario 4 at 6
+    // concurrent clients). Fixture repo is small, big pool is unnecessary.
+    if (!process.env.SDL_LADYBUG_BUFFER_POOL_BYTES) {
+      process.env.SDL_LADYBUG_BUFFER_POOL_BYTES = String(1024 * 1024 * 1024);
+    }
+
     // Create temp directory for isolated graph DB
     this.tempDir = mkdtempSync(join(tmpdir(), "sdl-mcp-stress-"));
     const graphDbPath = join(this.tempDir, "sdl-mcp-graph");
