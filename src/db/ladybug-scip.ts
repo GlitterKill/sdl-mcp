@@ -104,6 +104,9 @@ export async function insertScipSymbol(
          s.source = $source,
          s.packageName = $packageName,
          s.packageVersion = $packageVersion,
+         s.symbolStatus = $symbolStatus,
+         s.placeholderKind = $placeholderKind,
+         s.placeholderTarget = $placeholderTarget,
          s.updatedAt = $updatedAt
      ON MATCH SET
          s.repoId = coalesce($repoId, s.repoId),
@@ -120,6 +123,9 @@ export async function insertScipSymbol(
          s.source = $source,
          s.packageName = $packageName,
          s.packageVersion = $packageVersion,
+         s.symbolStatus = $symbolStatus,
+         s.placeholderKind = $placeholderKind,
+         s.placeholderTarget = $placeholderTarget,
          s.updatedAt = $updatedAt`,
     {
       symbolId: symbol.symbolId,
@@ -137,6 +143,9 @@ export async function insertScipSymbol(
       source: symbol.source,
       packageName: symbol.packageName ?? null,
       packageVersion: symbol.packageVersion ?? null,
+      symbolStatus: symbol.external ? "external" : "real",
+      placeholderKind: symbol.external ? "scip" : null,
+      placeholderTarget: symbol.external ? symbol.scipSymbol : null,
       updatedAt: symbol.updatedAt,
     },
   );
@@ -151,8 +160,7 @@ export async function insertScipSymbol(
  * confidence if the new value is higher.  Both source and target must
  * already exist (or be created as stubs via MERGE).
  *
- * `resolutionPhase` is stored as STRING in the schema, so we convert from
- * the numeric input.
+ * `resolutionPhase` is stored as STRING in the schema.
  */
 export async function mergeScipEdge(
   conn: Connection,
@@ -163,11 +171,10 @@ export async function mergeScipEdge(
     confidence: number;
     resolution: string;
     resolverId: string;
-    resolutionPhase: number;
+    resolutionPhase: string;
   },
 ): Promise<void> {
   const now = new Date().toISOString();
-  const phase = String(edge.resolutionPhase);
 
   await exec(
     conn,
@@ -192,7 +199,7 @@ export async function mergeScipEdge(
       confidence: edge.confidence,
       resolution: edge.resolution,
       resolverId: edge.resolverId,
-      resolutionPhase: phase,
+      resolutionPhase: edge.resolutionPhase,
       createdAt: now,
     },
   );
@@ -215,10 +222,9 @@ export async function replaceEdgeTarget(
   confidence: number,
   resolution: string,
   resolverId: string,
-  resolutionPhase: number,
+  resolutionPhase: string,
 ): Promise<void> {
   const now = new Date().toISOString();
-  const phase = String(resolutionPhase);
 
   await withTransaction(conn, async (txConn) => {
     // Delete the old edge
@@ -253,13 +259,12 @@ export async function replaceEdgeTarget(
         confidence,
         resolution,
         resolverId,
-        resolutionPhase: phase,
+        resolutionPhase,
         createdAt: now,
       },
     );
   });
 }
-
 
 /**
  * Batch variant of replaceEdgeTarget: deletes old edges and creates new
@@ -275,7 +280,7 @@ export async function batchReplaceEdgeTargets(
     confidence: number;
     resolution: string;
     resolverId: string;
-    resolutionPhase: number;
+    resolutionPhase: string;
   }>,
 ): Promise<void> {
   if (ops.length === 0) return;
@@ -289,7 +294,7 @@ export async function batchReplaceEdgeTargets(
     confidence: op.confidence,
     resolution: op.resolution,
     resolverId: op.resolverId,
-    resolutionPhase: String(op.resolutionPhase),
+    resolutionPhase: op.resolutionPhase,
     createdAt: now,
   }));
 
@@ -631,7 +636,7 @@ export async function batchMergeScipEdges(
     confidence: number;
     resolution: string;
     resolverId: string;
-    resolutionPhase: number;
+    resolutionPhase: string;
   }>,
 ): Promise<void> {
   if (edges.length === 0) return;
@@ -658,7 +663,7 @@ export async function batchMergeScipEdges(
         confidence: edge.confidence,
         resolution: edge.resolution,
         resolverId: edge.resolverId,
-        resolutionPhase: String(edge.resolutionPhase),
+        resolutionPhase: edge.resolutionPhase,
         createdAt: now,
       }));
       // W4-style workaround for LadybugDB UNWIND+MERGE-rel runtime bug.
@@ -775,6 +780,9 @@ export async function batchMergeExternalSymbols(
                s.source = $source,
                s.packageName = $packageName,
                s.packageVersion = $packageVersion,
+               s.symbolStatus = $symbolStatus,
+               s.placeholderKind = $placeholderKind,
+               s.placeholderTarget = $placeholderTarget,
                s.updatedAt = $updatedAt
            ON MATCH SET
                s.repoId = $repoId,
@@ -791,6 +799,9 @@ export async function batchMergeExternalSymbols(
                s.source = $source,
                s.packageName = $packageName,
                s.packageVersion = $packageVersion,
+               s.symbolStatus = $symbolStatus,
+               s.placeholderKind = $placeholderKind,
+               s.placeholderTarget = $placeholderTarget,
                s.updatedAt = $updatedAt
            MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
           {
@@ -809,6 +820,9 @@ export async function batchMergeExternalSymbols(
             source: symbol.source,
             packageName: symbol.packageName ?? null,
             packageVersion: symbol.packageVersion ?? null,
+            symbolStatus: symbol.external ? "external" : "real",
+            placeholderKind: symbol.external ? "scip" : null,
+            placeholderTarget: symbol.external ? symbol.scipSymbol : null,
             updatedAt: symbol.updatedAt,
           },
         );

@@ -256,7 +256,7 @@ describe("buildEdgesFromOccurrences", () => {
     assert.equal(edges[0].confidence, 0.95);
     assert.equal(edges[0].resolution, "exact");
     assert.equal(edges[0].resolverId, "scip");
-    assert.equal(edges[0].resolutionPhase, 3);
+    assert.equal(edges[0].resolutionPhase, "scip");
   });
 
   it("creates an import edge when symbolRoles has IMPORT flag", () => {
@@ -399,7 +399,7 @@ describe("classifyEdgeAction", () => {
     confidence: 0.95,
     resolution: "exact",
     resolverId: "scip",
-    resolutionPhase: 3,
+    resolutionPhase: "scip",
   };
 
   it("returns 'create' when there is no existing edge", () => {

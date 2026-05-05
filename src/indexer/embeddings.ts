@@ -213,7 +213,7 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return dot / denom;
 }
 
-function toFloat16Blob(vector: number[]): string {
+export function toFloat16Blob(vector: number[]): string {
   const ints = new Int16Array(vector.length);
   for (let i = 0; i < vector.length; i++) {
     ints[i] = Math.max(-32767, Math.min(32767, Math.round(vector[i] * 10000)));

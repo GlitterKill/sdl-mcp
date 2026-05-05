@@ -985,6 +985,8 @@ async function indexRepoImpl(
           durationMs: Date.now() - startTime,
           errors: 0,
           pass1Engine: derivePass1EngineTelemetry(pass1Acc),
+          fileSummaryEmbeddings: finalizeResult.fileSummaryEmbeddingStats,
+          quality: finalizeResult.qualityStats,
         },
       });
 

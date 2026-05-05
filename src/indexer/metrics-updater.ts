@@ -6,6 +6,10 @@ import * as ladybugDb from "../db/ladybug-queries.js";
 import { updateMetricsForRepo } from "../graph/metrics.js";
 import { logger } from "../util/logger.js";
 import { refreshSymbolEmbeddings } from "./embeddings.js";
+import {
+  refreshFileSummaryEmbeddings,
+  type FileSummaryEmbeddingRefreshResult,
+} from "./file-summary-embeddings.js";
 import type { CallResolutionTelemetry } from "./edge-builder.js";
 import type { IndexProgress } from "./indexer.js";
 import {
@@ -29,11 +33,21 @@ export interface FinalizeIndexingParams {
 
 export interface FinalizeIndexingResult {
   summaryStats?: SummaryBatchResult;
+  fileSummaryEmbeddingStats?: Record<string, FileSummaryEmbeddingRefreshResult>;
+  qualityStats?: IndexQualityStats;
   timings?: Record<string, number>;
   sharedGraph?: {
     callEdges: Array<{ callerId: string; calleeId: string }>;
     clusterEdges: Array<{ fromSymbolId: string; toSymbolId: string }>;
   };
+}
+
+export interface IndexQualityStats {
+  unresolvedTargets: number;
+  externalTargets: number;
+  untypedPlaceholderTargets: number;
+  missingSignatureByKind: Record<string, number>;
+  scipPhaseCounts: Record<string, number>;
 }
 
 export async function finalizeIndexing({
@@ -137,6 +151,9 @@ export async function finalizeIndexing({
   }
 
   let summaryStats: SummaryBatchResult | undefined;
+  let fileSummaryEmbeddingStats:
+    | Record<string, FileSummaryEmbeddingRefreshResult>
+    | undefined;
   const semanticConfig = appConfig.semantic;
   const shouldRunSemanticRefresh =
     semanticConfig?.enabled &&
@@ -191,6 +208,41 @@ export async function finalizeIndexing({
       model,
       ...extraModels.filter((m) => m !== model),
     ];
+    const retrievalConfig = semanticConfig.retrieval;
+    const shouldRunFileSummaryEmbeddings =
+      (retrievalConfig?.mode ?? "hybrid") === "hybrid" &&
+      retrievalConfig?.vector?.enabled !== false;
+
+    if (shouldRunFileSummaryEmbeddings) {
+      fileSummaryEmbeddingStats = {};
+      for (const embModel of modelsToEmbed) {
+        try {
+          fileSummaryEmbeddingStats[embModel] = await measureSubphase(
+            `fileSummaryEmbeddings:${embModel}`,
+            () =>
+              refreshFileSummaryEmbeddings({
+                repoId,
+                provider: semanticConfig.provider ?? "local",
+                model: embModel,
+                fileIds: changedFileIds ? [...changedFileIds] : undefined,
+                onProgress,
+                concurrency: semanticConfig.embeddingConcurrency,
+                batchSize: semanticConfig.embeddingBatchSize,
+              }),
+          );
+        } catch (error) {
+          logger.warn(
+            `FileSummary embedding refresh degraded for ${embModel}: ${String(error)}`,
+          );
+          fileSummaryEmbeddingStats[embModel] = {
+            embedded: 0,
+            skipped: 0,
+            missing: 0,
+            degraded: true,
+          };
+        }
+      }
+    }
 
     // Incremental embedding scope: hydrate the affected-symbol subset that
     // metrics already computed (changed files + 1-hop edge neighbours).
@@ -257,7 +309,99 @@ export async function finalizeIndexing({
     }
   }
 
-  return { summaryStats, timings, sharedGraph: metricsResult.sharedGraph };
+  const qualityStats = await measureSubphase("qualityAudit", () =>
+    collectIndexQualityStats(repoId),
+  ).catch((error) => {
+    logger.warn(`Index quality audit skipped: ${String(error)}`);
+    return undefined;
+  });
+
+  return {
+    summaryStats,
+    fileSummaryEmbeddingStats,
+    qualityStats,
+    timings,
+    sharedGraph: metricsResult.sharedGraph,
+  };
+}
+
+async function collectIndexQualityStats(
+  repoId: string,
+): Promise<IndexQualityStats> {
+  const conn = await getLadybugConn();
+  const unresolvedRow = await ladybugDb.querySingle<{
+    unresolvedTargets: unknown;
+  }>(
+    conn,
+    `MATCH (a:Symbol {repoId: $repoId})-[d:DEPENDS_ON]->(b:Symbol)
+     WHERE b.symbolId STARTS WITH 'unresolved:'
+     RETURN count(d) AS unresolvedTargets`,
+    { repoId },
+  );
+  const untypedRow = await ladybugDb.querySingle<{
+    untypedPlaceholderTargets: unknown;
+  }>(
+    conn,
+    `MATCH (a:Symbol {repoId: $repoId})-[d:DEPENDS_ON]->(b:Symbol)
+     OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]->(bf:File)
+     WHERE bf IS NULL
+       AND (b.symbolStatus IS NULL OR b.symbolStatus = '')
+     RETURN count(d) AS untypedPlaceholderTargets`,
+    { repoId },
+  );
+  const externalRow = await ladybugDb.querySingle<{
+    externalTargets: unknown;
+  }>(
+    conn,
+    `MATCH (a:Symbol {repoId: $repoId})-[d:DEPENDS_ON]->(b:Symbol)
+     WHERE coalesce(b.symbolStatus, '') = 'external'
+        OR coalesce(b.external, false) = true
+     RETURN count(d) AS externalTargets`,
+    { repoId },
+  );
+  const missingSignatureRows = await ladybugDb.queryAll<{
+    kind: string;
+    count: unknown;
+  }>(
+    conn,
+    `MATCH (s:Symbol {repoId: $repoId})
+     WHERE coalesce(s.symbolStatus, 'real') = 'real'
+       AND (s.signatureJson IS NULL OR s.signatureJson = '')
+     RETURN s.kind AS kind, count(s) AS count`,
+    { repoId },
+  );
+  const scipPhaseRows = await ladybugDb.queryAll<{
+    phase: string;
+    count: unknown;
+  }>(
+    conn,
+    `MATCH (a:Symbol {repoId: $repoId})-[d:DEPENDS_ON]->(:Symbol)
+     WHERE d.resolverId = 'scip'
+     RETURN d.resolutionPhase AS phase, count(d) AS count`,
+    { repoId },
+  );
+
+  return {
+    unresolvedTargets: ladybugDb.toNumber(
+      unresolvedRow?.unresolvedTargets ?? 0,
+    ),
+    externalTargets: ladybugDb.toNumber(externalRow?.externalTargets ?? 0),
+    untypedPlaceholderTargets: ladybugDb.toNumber(
+      untypedRow?.untypedPlaceholderTargets ?? 0,
+    ),
+    missingSignatureByKind: Object.fromEntries(
+      missingSignatureRows.map((row) => [
+        row.kind ?? "unknown",
+        ladybugDb.toNumber(row.count),
+      ]),
+    ),
+    scipPhaseCounts: Object.fromEntries(
+      scipPhaseRows.map((row) => [
+        row.phase ?? "unknown",
+        ladybugDb.toNumber(row.count),
+      ]),
+    ),
+  };
 }
 
 /**
@@ -301,6 +445,10 @@ export async function materializeFileSummaries(
     conn,
     fileIds,
   );
+  const symbolFactsByFile = await ladybugDb.getFileSummarySymbolFactsByFileIds(
+    conn,
+    fileIds,
+  );
 
   const upserts: Array<{
     fileId: string;
@@ -312,14 +460,20 @@ export async function materializeFileSummaries(
 
   for (const file of files) {
     const exportedNames = exportedByFile.get(file.fileId) ?? [];
+    const summary = ladybugDb.buildFileSummaryHybridPayload({
+      relPath: file.relPath,
+      language: file.language,
+      symbols: symbolFactsByFile.get(file.fileId) ?? [],
+    });
     const searchText = ladybugDb.buildFileSummarySearchText(
       file.relPath,
       exportedNames,
+      summary,
     );
     upserts.push({
       fileId: file.fileId,
       repoId,
-      summary: null,
+      summary,
       searchText,
       updatedAt,
     });

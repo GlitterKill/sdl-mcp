@@ -2,7 +2,8 @@
  * migration-runner.ts — Forward-only schema migration runner for LadybugDB.
  *
  * Applies pending migrations sequentially. DDL runs in autocommit mode
- * (Kuzu requirement). Idempotent IF NOT EXISTS clauses handle crash recovery.
+ * (Kuzu requirement). Migrations use IF NOT EXISTS where supported, or catch
+ * known idempotent DDL errors where LadybugDB/Kuzu does not support that form.
  */
 import type { Connection } from "kuzu";
 import type { Migration } from "./migrations/types.js";
@@ -116,7 +117,7 @@ export async function runPendingMigrations(
       throw new DatabaseError(
         `Migration "${migration.description}" (v${prevVersion} -> v${migration.version}) failed: ${msg}. ` +
           `The database is at schema version ${appliedVersion}. ` +
-          `The migration uses IF NOT EXISTS clauses and will retry on next startup.`,
+          `The migration is forward-only and will retry on next startup.`,
       );
     }
   }

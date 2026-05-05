@@ -19,6 +19,7 @@ import * as m012 from "./m012-add-symbol-repo-id-for-algo-projections.js";
 import * as m013 from "./m013-semantic-vector-array-storage.js";
 import * as m014 from "./m014-add-packed-stats.js";
 import * as m015 from "./m015-backfill-packed-stats.js";
+import * as m016 from "./m016-add-symbol-placeholder-status.js";
 
 /** Ordered list of all migrations. Must be sorted by version ascending. */
 export const migrations: Migration[] = [
@@ -33,6 +34,7 @@ export const migrations: Migration[] = [
   m013,
   m014,
   m015,
+  m016,
 ];
 
 // --- Registry validation (runs at import time) ---

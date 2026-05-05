@@ -32,8 +32,10 @@ export type IndexProgressSubstage =
   | "metrics"
   | "fileSummaries"
   | "audit"
+  | "qualityAudit"
   | "semanticSummaries"
   | "semanticEmbeddings"
+  | "fileSummaryEmbeddings"
   | "clusterRefresh"
   | "processRefresh"
   | "algorithmRefresh";

@@ -16,7 +16,12 @@ import {
   withTransaction,
 } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
-import { getEmbeddingPropertyName } from "../retrieval/model-mapping.js";
+import {
+  getCardHashPropertyName,
+  getEmbeddingPropertyName,
+  getUpdatedAtPropertyName,
+  getVecPropertyName,
+} from "../retrieval/model-mapping.js";
 
 export interface FileSummaryRow {
   fileId: string;
@@ -30,6 +35,25 @@ export interface FileSummaryRow {
   embeddingNomic: string | null;
   embeddingNomicCardHash: string | null;
   embeddingNomicUpdatedAt: string | null;
+}
+
+export interface FileSummarySymbolFact {
+  name: string;
+  kind: string;
+  exported: boolean;
+  signatureJson: string | null;
+  summary: string | null;
+}
+
+export interface FileSummaryEmbeddingBatchItem {
+  fileId: string;
+  vector: string;
+  cardHash: string;
+  vectorArray?: number[];
+}
+
+export interface SetFileSummaryEmbeddingBatchOpts {
+  hnswIndexDropped?: boolean;
 }
 
 /**
@@ -208,6 +232,37 @@ export async function getFileSummariesForRepo(
   );
 }
 
+export async function getFileSummariesByFileIds(
+  conn: Connection,
+  fileIds: string[],
+): Promise<Map<string, FileSummaryRow>> {
+  const result = new Map<string, FileSummaryRow>();
+  if (fileIds.length === 0) return result;
+
+  const rows = await queryAll<FileSummaryRow>(
+    conn,
+    `MATCH (fs:FileSummary)
+     WHERE fs.fileId IN $fileIds
+     RETURN fs.fileId AS fileId,
+            fs.repoId AS repoId,
+            fs.summary AS summary,
+            fs.searchText AS searchText,
+            fs.updatedAt AS updatedAt,
+            fs.embeddingJinaCode AS embeddingJinaCode,
+            fs.embeddingJinaCodeCardHash AS embeddingJinaCodeCardHash,
+            fs.embeddingJinaCodeUpdatedAt AS embeddingJinaCodeUpdatedAt,
+            fs.embeddingNomic AS embeddingNomic,
+            fs.embeddingNomicCardHash AS embeddingNomicCardHash,
+            fs.embeddingNomicUpdatedAt AS embeddingNomicUpdatedAt`,
+    { fileIds },
+  );
+
+  for (const row of rows) {
+    result.set(row.fileId, row);
+  }
+  return result;
+}
+
 /**
  * Update the embedding vector and card hash for a specific model on a FileSummary node.
  *
@@ -244,6 +299,71 @@ export async function updateFileSummaryEmbedding(
     { fileId, embedding, cardHash, updatedAt: now },
   );
   return true;
+}
+
+export async function setFileSummaryEmbeddingBatch(
+  conn: Connection,
+  model: string,
+  items: FileSummaryEmbeddingBatchItem[],
+  opts: SetFileSummaryEmbeddingBatchOpts = {},
+): Promise<void> {
+  if (items.length === 0) return;
+
+  const { vectorProp, vecProp, cardHashProp, updatedAtProp } =
+    resolveFileSummaryEmbeddingProperties(model);
+  const updatedAt = new Date().toISOString();
+  const rows = items.map((item) => ({
+    fileId: item.fileId,
+    vector: item.vector,
+    cardHash: item.cardHash,
+    vectorArray: item.vectorArray ?? null,
+  }));
+  const vecRows = vecProp
+    ? rows.filter((row) => Array.isArray(row.vectorArray))
+    : [];
+
+  await withTransaction(conn, async (txConn) => {
+    if (vecProp && opts.hnswIndexDropped && vecRows.length > 0) {
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (fs:FileSummary {fileId: row.fileId})
+         SET fs.${vectorProp} = row.vector,
+             fs.${cardHashProp} = row.cardHash,
+             fs.${updatedAtProp} = $updatedAt,
+             fs.${vecProp} = row.vectorArray`,
+        { rows, updatedAt },
+      );
+      return;
+    }
+
+    await exec(
+      txConn,
+      `UNWIND $rows AS row
+       MATCH (fs:FileSummary {fileId: row.fileId})
+       SET fs.${vectorProp} = row.vector,
+           fs.${cardHashProp} = row.cardHash,
+           fs.${updatedAtProp} = $updatedAt`,
+      { rows, updatedAt },
+    );
+
+    if (vecProp && vecRows.length > 0) {
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (fs:FileSummary {fileId: row.fileId})
+         SET fs.${vecProp} = null`,
+        { rows: vecRows },
+      );
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (fs:FileSummary {fileId: row.fileId})
+         SET fs.${vecProp} = row.vectorArray`,
+        { rows: vecRows },
+      );
+    }
+  });
 }
 
 /**
@@ -296,4 +416,69 @@ export function buildFileSummarySearchText(
   let text = `file: ${relPath} exports: ${names}`;
   if (summary) text += ` summary: ${summary}`;
   return text.trim();
+}
+
+export function buildFileSummaryHybridPayload(params: {
+  relPath: string;
+  language: string | null;
+  symbols: FileSummarySymbolFact[];
+}): string {
+  const exportedNames = params.symbols
+    .filter((symbol) => symbol.exported)
+    .map((symbol) => symbol.name)
+    .slice(0, 30);
+  const lines = [
+    `File: ${params.relPath}`,
+    `Language: ${params.language ?? "unknown"}`,
+    `Exports: ${exportedNames.join(", ")}`,
+  ];
+
+  for (const symbol of params.symbols.slice(0, 20)) {
+    const signature = parseSignatureText(symbol.signatureJson);
+    const parts = [`- ${symbol.kind} ${symbol.name}`];
+    if (symbol.exported) parts.push("(exported)");
+    if (signature) parts.push(signature);
+    if (symbol.summary) parts.push(symbol.summary);
+    lines.push(parts.join(" | "));
+  }
+
+  return lines.join("\n").trim();
+}
+
+function parseSignatureText(signatureJson: string | null): string | null {
+  if (!signatureJson) return null;
+  try {
+    const parsed = JSON.parse(signatureJson) as { text?: string } | string;
+    return typeof parsed === "string" ? parsed : (parsed.text ?? signatureJson);
+  } catch {
+    return signatureJson;
+  }
+}
+
+function resolveFileSummaryEmbeddingProperties(model: string): {
+  vectorProp: string;
+  vecProp: string | null;
+  cardHashProp: string;
+  updatedAtProp: string;
+} {
+  const vectorProp = getEmbeddingPropertyName(model);
+  const vecProp = getVecPropertyName(model);
+  const cardHashProp = getCardHashPropertyName(model);
+  const updatedAtProp = getUpdatedAtPropertyName(model);
+  if (!vectorProp || !cardHashProp || !updatedAtProp) {
+    throw new Error(
+      `Unknown embedding model "${model}": cannot resolve FileSummary embedding properties`,
+    );
+  }
+
+  const safeProp = /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/;
+  for (const prop of [vectorProp, cardHashProp, updatedAtProp, vecProp].filter(
+    (p): p is string => typeof p === "string",
+  )) {
+    if (!safeProp.test(prop)) {
+      throw new Error(`Unsafe FileSummary embedding property: ${prop}`);
+    }
+  }
+
+  return { vectorProp, vecProp, cardHashProp, updatedAtProp };
 }

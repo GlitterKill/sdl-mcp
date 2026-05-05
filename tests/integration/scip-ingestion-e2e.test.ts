@@ -323,6 +323,9 @@ describe("SCIP Ingestion E2E", () => {
       name: string;
       external: boolean;
       scipSymbol: string;
+      symbolStatus: string;
+      placeholderKind: string;
+      placeholderTarget: string;
     }>(
       conn,
       `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
@@ -330,7 +333,10 @@ describe("SCIP Ingestion E2E", () => {
        RETURN s.symbolId AS symbolId,
               s.name AS name,
               s.external AS external,
-              s.scipSymbol AS scipSymbol`,
+              s.scipSymbol AS scipSymbol,
+              s.symbolStatus AS symbolStatus,
+              s.placeholderKind AS placeholderKind,
+              s.placeholderTarget AS placeholderTarget`,
       { repoId: REPO_ID, name: "chunk" },
     );
     assert.equal(
@@ -340,9 +346,22 @@ describe("SCIP Ingestion E2E", () => {
     );
     const [row] = rows;
     assert.ok(row.external, "symbol row should be marked external=true");
+    assert.equal(row.symbolStatus, "external");
+    assert.equal(row.placeholderKind, "scip");
     assert.ok(
       row.scipSymbol.includes("lodash"),
       `scipSymbol should preserve the lodash descriptor, got: ${row.scipSymbol}`,
+    );
+    assert.equal(row.placeholderTarget, row.scipSymbol);
+
+    const snapshotRows = await ladybugDb.getSymbolsByRepoForSnapshot(
+      conn,
+      REPO_ID,
+    );
+    assert.equal(
+      snapshotRows.some((s) => s.symbolId === row.symbolId),
+      false,
+      "repo snapshots should exclude external placeholder symbols",
     );
   });
 

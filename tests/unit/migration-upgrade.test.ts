@@ -126,6 +126,16 @@ async function createV8DatabaseWithoutSummaryMetadata(
   );
   closeResult(
     await conn.query(
+      `CREATE (s:Symbol {symbolId: 'unresolved:call:legacyHelper', kind: null, name: null, exported: false, visibility: null, language: null, rangeStartLine: null, rangeStartCol: null, rangeEndLine: null, rangeEndCol: null, astFingerprint: null, signatureJson: null, summary: null, invariantsJson: null, sideEffectsJson: null, roleTagsJson: null, searchText: null, updatedAt: '${now}', embeddingJinaCode: null, embeddingJinaCodeCardHash: null, embeddingJinaCodeUpdatedAt: null, embeddingNomic: null, embeddingNomicCardHash: null, embeddingNomicUpdatedAt: null})`,
+    ),
+  );
+  closeResult(
+    await conn.query(
+      `MATCH (r:Repo {repoId: 'repo-1'}), (s:Symbol {symbolId: 'unresolved:call:legacyHelper'}) CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
+    ),
+  );
+  closeResult(
+    await conn.query(
       `CREATE (sv:SchemaVersion {id: 'current', schemaVersion: 8, createdAt: '${now}', updatedAt: '${now}'})`,
     ),
   );
@@ -224,6 +234,38 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     assert.strictEqual(rows[0].summaryQuality, 0);
     assert.strictEqual(rows[0].summarySource, "unknown");
     assert.strictEqual(rows[0].repoId, "repo-1");
+  });
+
+  it("v8 -> latest: m016 backfills Symbol placeholder status columns", async () => {
+    mkdirSync(testRoot, { recursive: true });
+    const dbPath = join(testRoot, "v8-placeholder-status.lbug");
+
+    await createV8DatabaseWithoutSummaryMetadata(dbPath);
+    await initLadybugDb(dbPath);
+
+    const conn = await getLadybugConn();
+    const result = await conn.query(
+      `MATCH (real:Symbol {symbolId: 'sym-1'})
+       MATCH (placeholder:Symbol {symbolId: 'unresolved:call:legacyHelper'})
+       RETURN real.symbolStatus AS realStatus,
+              placeholder.symbolStatus AS placeholderStatus,
+              placeholder.placeholderKind AS placeholderKind,
+              placeholder.placeholderTarget AS placeholderTarget`,
+    );
+    const qr = Array.isArray(result) ? result[0] : result;
+    const rows = (await qr.getAll()) as Array<{
+      realStatus: unknown;
+      placeholderStatus: unknown;
+      placeholderKind: unknown;
+      placeholderTarget: unknown;
+    }>;
+    qr.close();
+
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].realStatus, "real");
+    assert.strictEqual(rows[0].placeholderStatus, "unresolved");
+    assert.strictEqual(rows[0].placeholderKind, "call");
+    assert.strictEqual(rows[0].placeholderTarget, "legacyHelper");
   });
 
   it("v8 -> latest: m011 adds pageRank/kCore columns to Metrics", async () => {

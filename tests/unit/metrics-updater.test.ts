@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import type { FinalizeIndexingParams } from "../../dist/indexer/metrics-updater.js";
 
@@ -103,6 +105,17 @@ describe("metrics-updater semantic config branching", () => {
       },
     };
     assert.ok(config.semantic.ann.enabled !== false);
+  });
+
+  it("treats omitted retrieval config as default hybrid for FileSummary embeddings", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/indexer/metrics-updater.ts"),
+      "utf8",
+    );
+    assert.ok(
+      source.includes('(retrievalConfig?.mode ?? "hybrid") === "hybrid"'),
+      "FileSummary embedding gate should follow the default hybrid retrieval mode",
+    );
   });
 });
 

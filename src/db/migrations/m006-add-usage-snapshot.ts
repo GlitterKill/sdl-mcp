@@ -8,7 +8,8 @@ import type { Connection } from "kuzu";
 import { execDdl } from "../ladybug-core.js";
 
 export const version = 6;
-export const description = "Add UsageSnapshot node table for token savings tracking";
+export const description =
+  "Add UsageSnapshot node table for token savings tracking";
 
 export async function up(conn: Connection): Promise<void> {
   // Node table
@@ -30,8 +31,8 @@ export async function up(conn: Connection): Promise<void> {
 
   // Indexes (may not be supported on all Kuzu versions)
   const indexes = [
-    `CREATE INDEX IF NOT EXISTS idx_usagesnapshot_repoId ON UsageSnapshot(repoId)`,
-    `CREATE INDEX IF NOT EXISTS idx_usagesnapshot_timestamp ON UsageSnapshot(timestamp)`,
+    `CREATE INDEX idx_usagesnapshot_repoId ON UsageSnapshot(repoId)`,
+    `CREATE INDEX idx_usagesnapshot_timestamp ON UsageSnapshot(timestamp)`,
   ];
   for (const idx of indexes) {
     try {

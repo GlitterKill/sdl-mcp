@@ -3,12 +3,22 @@ import { describe, it } from "node:test";
 
 import { buildClusterSearchText } from "../../dist/db/ladybug-clusters.js";
 import { buildProcessSearchText } from "../../dist/db/ladybug-processes.js";
-import { buildFileSummarySearchText } from "../../dist/db/ladybug-file-summaries.js";
+import {
+  buildFileSummaryHybridPayload,
+  buildFileSummarySearchText,
+} from "../../dist/db/ladybug-file-summaries.js";
 
 describe("buildClusterSearchText", () => {
   it("should produce cluster-prefixed text with label and member names", () => {
-    const text = buildClusterSearchText("Auth Module", ["login", "logout", "validateToken"]);
-    assert.ok(text.startsWith("cluster:"), `expected cluster: prefix, got: ${text}`);
+    const text = buildClusterSearchText("Auth Module", [
+      "login",
+      "logout",
+      "validateToken",
+    ]);
+    assert.ok(
+      text.startsWith("cluster:"),
+      `expected cluster: prefix, got: ${text}`,
+    );
     assert.ok(text.includes("Auth Module"), "label missing");
     assert.ok(text.includes("members:"), "members: section missing");
     assert.ok(text.includes("login"), "login missing");
@@ -32,7 +42,11 @@ describe("buildClusterSearchText", () => {
 
   it("should trim the result", () => {
     const text = buildClusterSearchText("Trim Test", []);
-    assert.equal(text, text.trim(), "result should not have leading/trailing whitespace");
+    assert.equal(
+      text,
+      text.trim(),
+      "result should not have leading/trailing whitespace",
+    );
   });
 
   it("should include exactly 20 member names when list has 20", () => {
@@ -45,8 +59,15 @@ describe("buildClusterSearchText", () => {
 
 describe("buildProcessSearchText", () => {
   it("should produce process-prefixed text with label, entry, and steps", () => {
-    const text = buildProcessSearchText("Request Flow", "handleRequest", ["validate", "process", "respond"]);
-    assert.ok(text.startsWith("process:"), `expected process: prefix, got: ${text}`);
+    const text = buildProcessSearchText("Request Flow", "handleRequest", [
+      "validate",
+      "process",
+      "respond",
+    ]);
+    assert.ok(
+      text.startsWith("process:"),
+      `expected process: prefix, got: ${text}`,
+    );
     assert.ok(text.includes("Request Flow"), "label missing");
     assert.ok(text.includes("entry:"), "entry: section missing");
     assert.ok(text.includes("handleRequest"), "entrySymbolName missing");
@@ -88,7 +109,10 @@ describe("buildProcessSearchText", () => {
 
 describe("buildFileSummarySearchText", () => {
   it("should produce file-prefixed text with path and export names", () => {
-    const text = buildFileSummarySearchText("src/auth/login.ts", ["login", "LoginOptions"]);
+    const text = buildFileSummarySearchText("src/auth/login.ts", [
+      "login",
+      "LoginOptions",
+    ]);
     assert.ok(text.startsWith("file:"), `expected file: prefix, got: ${text}`);
     assert.ok(text.includes("src/auth/login.ts"), "file path missing");
     assert.ok(text.includes("exports:"), "exports: section missing");
@@ -97,9 +121,16 @@ describe("buildFileSummarySearchText", () => {
   });
 
   it("should include summary section when summary is provided", () => {
-    const text = buildFileSummarySearchText("src/main.ts", ["main"], "Application entry point");
+    const text = buildFileSummarySearchText(
+      "src/main.ts",
+      ["main"],
+      "Application entry point",
+    );
     assert.ok(text.includes("summary:"), "summary: section missing");
-    assert.ok(text.includes("Application entry point"), "summary content missing");
+    assert.ok(
+      text.includes("Application entry point"),
+      "summary content missing",
+    );
   });
 
   it("should omit summary section when summary is undefined", () => {
@@ -109,7 +140,10 @@ describe("buildFileSummarySearchText", () => {
 
   it("should omit summary section when summary is null", () => {
     const text = buildFileSummarySearchText("src/main.ts", ["main"], null);
-    assert.ok(!text.includes("summary:"), "summary: section should be absent for null");
+    assert.ok(
+      !text.includes("summary:"),
+      "summary: section should be absent for null",
+    );
   });
 
   it("should limit exported symbol names to 30", () => {
@@ -137,5 +171,38 @@ describe("buildFileSummarySearchText", () => {
     const text = buildFileSummarySearchText("src/exact.ts", names);
     assert.ok(text.includes("e0"), "e0 missing");
     assert.ok(text.includes("e29"), "e29 missing");
+  });
+});
+
+describe("buildFileSummaryHybridPayload", () => {
+  it("builds deterministic file context for hybrid vector payloads", () => {
+    const payload = buildFileSummaryHybridPayload({
+      relPath: "src/auth/login.ts",
+      language: "typescript",
+      symbols: [
+        {
+          name: "login",
+          kind: "function",
+          exported: true,
+          signatureJson: JSON.stringify({
+            text: "function login(user: User): Session",
+          }),
+          summary: "Creates a login session.",
+        },
+        {
+          name: "LoginOptions",
+          kind: "interface",
+          exported: true,
+          signatureJson: JSON.stringify({ text: "interface LoginOptions" }),
+          summary: null,
+        },
+      ],
+    });
+
+    assert.ok(payload.includes("File: src/auth/login.ts"));
+    assert.ok(payload.includes("Language: typescript"));
+    assert.ok(payload.includes("Exports: login, LoginOptions"));
+    assert.ok(payload.includes("function login(user: User): Session"));
+    assert.ok(payload.includes("Creates a login session."));
   });
 });

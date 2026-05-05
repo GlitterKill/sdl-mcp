@@ -200,7 +200,7 @@ Returns a token-efficient summary of the entire codebase structure, tunable from
 
 Triggers re-indexing of a repository in either full or incremental mode.
 
-**What it does:** Scans the repository for changed files, parses them with the configured indexer (Rust native or tree-sitter TypeScript), extracts symbols and edges, runs pass-2 call resolution, and writes the results to the graph database. Creates a new ledger version. Clears slice and card caches. Supports MCP progress notifications.
+**What it does:** Scans the repository for changed files, parses them with the configured indexer (Rust native or tree-sitter TypeScript), extracts symbols and edges, runs pass-2 call resolution, and writes the results to the graph database. Creates a new ledger version. Clears slice and card caches. Supports MCP progress notifications. Dependency targets that cannot be resolved are still kept as `Symbol` nodes so graph traversal stays stable, but they are typed with `symbolStatus: "unresolved"` or `symbolStatus: "external"` instead of being counted as ordinary in-repo symbols.
 
 **Parameters:**
 
@@ -225,12 +225,20 @@ Triggers re-indexing of a repository in either full or incremental mode.
 | `message`      | string  | Human-readable status for async refresh requests                                                    |
 | `diagnostics`  | object  | Optional diagnostics envelope returned only when `includeDiagnostics: true` on synchronous requests |
 
+**Audit metadata:** `sdl.index.refresh` also writes an `index.refresh.complete` audit event. Its `stats` object can include:
+
+| Field                   | Type   | Description                                                                                                                                                       |
+| :---------------------- | :----- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fileSummaryEmbeddings` | object | Per embedding model `{embedded, skipped, missing, degraded}` counts for hybrid `FileSummary` vectors. `degraded: true` means lexical summaries are fallback only. |
+| `quality`               | object | `{unresolvedTargets, externalTargets, untypedPlaceholderTargets, missingSignatureByKind, scipPhaseCounts}` post-index quality counters.                            |
+
 **Notes:**
 
 - Incremental mode compares file content hashes to detect changes. Only changed files are re-parsed.
 - If no tracked files changed, incremental refresh can short-circuit after `scanRepo`, `versioning`, and `memorySync` while reusing the existing version.
 - After indexing, all slice caches and card caches are invalidated.
 - `diagnostics.timings.totalMs` covers the full synchronous indexing run, while `diagnostics.timings.phases` breaks out coarse stages such as `scanRepo`, `pass1`, `pass2`, and `finalizeIndexing`. Nested keys may also appear for hotspots inside a phase, for example `initSharedState.tsResolver`, `initSharedState.tsResolver.sourceFiles`, `initSharedState.tsResolver.programBuild`, `initSharedState.symbolMaps`, `resolveUnresolvedImports.fetchEdges`, `finalizeEdges.cleanupUnresolvedBuiltins`, `finalizeEdges.insertConfigEdges`, `finalizeIndexing.metrics`, `finalizeIndexing.metrics.testRefs`, `finalizeIndexing.fileSummaries`, `clustersAndProcesses.loadSymbols`, or `clustersAndProcesses.processWrite`. No-op incremental refreshes may omit later phases and report `shortCircuitNoOp` instead.
+- The `quality.unresolvedTargets` and `quality.externalTargets` counters report dependency placeholders separately from real symbols. `quality.untypedPlaceholderTargets` should be zero on healthy new indexes; non-zero values usually mean an old DB needs migration or a writer created no-file dependency targets without status metadata.
 
 ---
 
@@ -336,7 +344,7 @@ Returns the current state of the live editor buffer system for a repository.
 
 Searches the symbol graph by name, with optional semantic reranking or hybrid retrieval.
 
-**What it does:** Performs a text search across all symbol names in the repository. Returns matching symbols with their IDs, names, file paths, and kinds. When `semantic: true` is specified, the retrieval path depends on the configured mode: with `semantic.retrieval.mode: "hybrid"`, results are found via FTS + vector search fused with Reciprocal Rank Fusion (RRF); with legacy mode, results are reranked using embedding similarity (alpha-blended lexical + semantic scores). Falls back to legacy automatically if hybrid indexes are unavailable. The tool also triggers predictive prefetch of cards for the top 5 results, anticipating follow-up `getCard` calls.
+**What it does:** Performs a text search across all symbol names in the repository. Returns matching symbols with their IDs, names, file paths, and kinds. When `semantic: true` is specified, the retrieval path depends on the configured mode: with `semantic.retrieval.mode: "hybrid"`, results are found via FTS + vector search fused with Reciprocal Rank Fusion (RRF); with legacy mode, results are reranked using embedding similarity (alpha-blended lexical + semantic scores). Falls back to legacy automatically if hybrid indexes are unavailable. Unresolved dependency placeholders are excluded from search results; SCIP external symbols remain searchable unless `excludeExternal: true` is set. The tool also triggers predictive prefetch of cards for the top 5 results, anticipating follow-up `getCard` calls.
 
 **Parameters:**
 
@@ -385,28 +393,28 @@ Provide exactly one of `symbolId` or `symbolRef`.
 
 **Response (full card):**
 
-| Field            | Type     | Description                                                                                                                            |
-| :--------------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------- | -------------- | ------------------------------------------ |
-| `symbolId`       | string   | Unique symbol identifier                                                                                                               |
-| `repoId`         | string   | Repository identifier                                                                                                                  |
-| `file`           | string   | Relative file path                                                                                                                     |
-| `range`          | object   | `{startLine, startCol, endLine, endCol}`                                                                                               |
-| `kind`           | string   | `function`, `class`, `interface`, `type`, `module`, `method`, `constructor`, or `variable`                                             |
-| `name`           | string   | Symbol name                                                                                                                            |
-| `exported`       | boolean  | Whether the symbol is exported                                                                                                         |
-| `visibility`     | string   | `public`, `protected`, `private`, `exported`, or `internal`                                                                            |
-| `signature`      | object   | `{name, params: [{name, type}], returns, generics, overloads}`                                                                         |
-| `summary`        | string   | 1-2 line semantic summary                                                                                                              |
-| `invariants`     | string[] | Known invariants (e.g., "returns non-null")                                                                                            |
-| `sideEffects`    | string[] | Known side effects (e.g., "writes to disk")                                                                                            |
-| `cluster`        | object   | `{clusterId, label, memberCount}` — community detection result                                                                         |
-| `processes`      | array    | `{processId, label, role: "entry"                                                                                                      | "intermediate" | "exit", depth}` — call-chain participation |
-| `callResolution` | object   | Full resolution metadata: `{minCallConfidence, calls: [{symbolId, label, confidence, resolutionReason, resolverId, resolutionPhase}]}` |
-| `deps`           | object   | `{imports: string[], calls: string[]}` — human-readable dependency labels                                                              |
-| `metrics`        | object   | `{fanIn, fanOut, churn30d, testRefs: string[], canonicalTest: {file, symbolId, distance, proximity}}`                                  |
-| `detailLevel`    | string   | Card detail level                                                                                                                      |
-| `etag`           | string   | Content hash for conditional requests                                                                                                  |
-| `version`        | object   | `{ledgerVersion, astFingerprint}`                                                                                                      |
+| Field            | Type     | Description                                                                                                                                                                                                      |
+| :--------------- | :------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `symbolId`       | string   | Unique symbol identifier                                                                                                                                                                                         |
+| `repoId`         | string   | Repository identifier                                                                                                                                                                                            |
+| `file`           | string   | Relative file path                                                                                                                                                                                               |
+| `range`          | object   | `{startLine, startCol, endLine, endCol}`                                                                                                                                                                         |
+| `kind`           | string   | `function`, `class`, `interface`, `type`, `module`, `method`, `constructor`, or `variable`                                                                                                                       |
+| `name`           | string   | Symbol name                                                                                                                                                                                                      |
+| `exported`       | boolean  | Whether the symbol is exported                                                                                                                                                                                   |
+| `visibility`     | string   | `public`, `protected`, `private`, `exported`, or `internal`                                                                                                                                                      |
+| `signature`      | object   | `{name, params: [{name, type}], returns, generics, overloads}`                                                                                                                                                   |
+| `summary`        | string   | 1-2 line semantic summary                                                                                                                                                                                        |
+| `invariants`     | string[] | Known invariants (e.g., "returns non-null")                                                                                                                                                                      |
+| `sideEffects`    | string[] | Known side effects (e.g., "writes to disk")                                                                                                                                                                      |
+| `cluster`        | object   | `{clusterId, label, memberCount}` — community detection result                                                                                                                                                   |
+| `processes`      | array    | `{processId, label, role, depth}` where `role` is `entry`, `intermediate`, or `exit` - call-chain participation                                                                                                  |
+| `callResolution` | object   | Full resolution metadata: `{minCallConfidence, calls: [{symbolId, label, confidence, resolutionReason, resolverId, resolutionPhase}]}`. `resolutionPhase` is a string such as `"pass1"`, `"pass2"`, or `"scip"`. |
+| `deps`           | object   | `{imports: string[], calls: string[]}` — human-readable dependency labels                                                                                                                                        |
+| `metrics`        | object   | `{fanIn, fanOut, churn30d, testRefs: string[], canonicalTest: {file, symbolId, distance, proximity}}`                                                                                                            |
+| `detailLevel`    | string   | Card detail level                                                                                                                                                                                                |
+| `etag`           | string   | Content hash for conditional requests                                                                                                                                                                            |
+| `version`        | object   | `{ledgerVersion, astFingerprint}`                                                                                                                                                                                |
 
 **Response (not modified):**
 

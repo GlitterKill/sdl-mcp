@@ -6,6 +6,7 @@
  */
 import type { Connection } from "kuzu";
 import { execDdl } from "../ladybug-core.js";
+import { logger } from "../../util/logger.js";
 
 export const version = 5;
 export const description =
@@ -49,14 +50,22 @@ export async function up(conn: Connection): Promise<void> {
     `CREATE REL TABLE IF NOT EXISTS MEMORY_OF_FILE (FROM Memory TO File)`,
   );
 
-  // Performance-only secondary indexes. LadybugDB 0.16+ supports CREATE INDEX,
-  // so unexpected failures should surface instead of being swallowed.
+  // Performance-only secondary indexes. Older LadybugDB/Kuzu builds either do
+  // not support scalar indexes or do not support IF NOT EXISTS for indexes, so
+  // failures here must not block a historical schema upgrade.
   const indexes = [
-    `CREATE INDEX IF NOT EXISTS idx_memory_repoId ON Memory(repoId)`,
-    `CREATE INDEX IF NOT EXISTS idx_memory_type ON Memory(type)`,
-    `CREATE INDEX IF NOT EXISTS idx_memory_contentHash ON Memory(contentHash)`,
+    `CREATE INDEX idx_memory_repoId ON Memory(repoId)`,
+    `CREATE INDEX idx_memory_type ON Memory(type)`,
+    `CREATE INDEX idx_memory_contentHash ON Memory(contentHash)`,
   ];
   for (const idx of indexes) {
-    await execDdl(conn, idx);
+    try {
+      await execDdl(conn, idx);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.debug("m005: Memory secondary index creation skipped", {
+        reason: msg,
+      });
+    }
   }
 }

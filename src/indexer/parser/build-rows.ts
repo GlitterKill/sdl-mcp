@@ -15,8 +15,56 @@ import {
   hasJSDoc,
   isNameOnlySummary,
 } from "../summaries.js";
-import { buildSymbolReferences, isTestFile, resolveTsCallEdges } from "./helpers.js";
-import type { BuildRowsParams, BuildRowsResult } from "./types.js";
+import {
+  buildSymbolReferences,
+  isTestFile,
+  resolveTsCallEdges,
+} from "./helpers.js";
+import type {
+  BuildRowsParams,
+  BuildRowsResult,
+  SignatureLike,
+  SymbolKindLiteral,
+} from "./types.js";
+
+export type { SignatureLike, SymbolKindLiteral } from "./types.js";
+
+export function buildSignatureJson(
+  kind: SymbolKindLiteral,
+  name: string,
+  signature?: SignatureLike,
+): string {
+  if (signature) {
+    return JSON.stringify(signature);
+  }
+
+  return JSON.stringify({ text: buildFallbackSignatureText(kind, name) });
+}
+
+function buildFallbackSignatureText(
+  kind: SymbolKindLiteral,
+  name: string,
+): string {
+  switch (kind) {
+    case "function":
+      return `function ${name}`;
+    case "class":
+      return `class ${name}`;
+    case "interface":
+      return `interface ${name}`;
+    case "type":
+      return `type ${name}`;
+    case "method":
+      return `method ${name}`;
+    case "constructor":
+      return `constructor ${name}`;
+    case "module":
+      return `module ${name}`;
+    case "variable":
+    default:
+      return `const ${name}`;
+  }
+}
 
 /**
  * Phase 7: Build symbol rows and edge rows from symbol details.
@@ -112,10 +160,7 @@ export async function buildSymbolAndEdgeRows(
         ? nativeSummary
         : null;
     let summary = existingSymbol?.summary ?? null;
-    if (
-      summary !== null &&
-      isNameOnlySummary(summary, extractedSymbol.name)
-    ) {
+    if (summary !== null && isNameOnlySummary(summary, extractedSymbol.name)) {
       summary = null;
     }
     summary = summary ?? nativeSummaryValue;
@@ -182,9 +227,11 @@ export async function buildSymbolAndEdgeRows(
       rangeEndLine: extractedSymbol.range.endLine,
       rangeEndCol: extractedSymbol.range.endCol,
       astFingerprint: detail.astFingerprint,
-      signatureJson: extractedSymbol.signature
-        ? JSON.stringify(extractedSymbol.signature)
-        : null,
+      signatureJson: buildSignatureJson(
+        extractedSymbol.kind,
+        extractedSymbol.name,
+        extractedSymbol.signature,
+      ),
       summary,
       invariantsJson,
       sideEffectsJson,

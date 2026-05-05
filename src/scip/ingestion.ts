@@ -431,7 +431,7 @@ export async function ingestScipIndex(
         confidence: number;
         resolution: string;
         resolverId: string;
-        resolutionPhase: number;
+        resolutionPhase: string;
       }> = [];
 
       for (const edge of rawEdges) {
@@ -502,7 +502,10 @@ export async function ingestScipIndex(
       // Batch write created/upgraded/replaced edges in one transaction per
       // document so a partially failed update cannot leave the edge set in
       // a mixed state.
-      if (!dryRun && (edgeBatchCreate.length > 0 || edgeBatchReplace.length > 0)) {
+      if (
+        !dryRun &&
+        (edgeBatchCreate.length > 0 || edgeBatchReplace.length > 0)
+      ) {
         await withWriteConn(async (wConn) => {
           await withTransaction(wConn, async (txConn) => {
             if (edgeBatchCreate.length > 0) {

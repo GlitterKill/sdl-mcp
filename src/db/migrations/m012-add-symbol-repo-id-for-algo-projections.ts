@@ -40,11 +40,7 @@ export async function up(conn: Connection): Promise<void> {
   // Index creation is best-effort, mirroring createSchema(): performance-only
   // and known to be unsupported on some Ladybug/Kuzu builds.
   try {
-    await exec(
-      conn,
-      "CREATE INDEX IF NOT EXISTS idx_symbol_repoId ON Symbol(repoId)",
-      {},
-    );
+    await exec(conn, "CREATE INDEX idx_symbol_repoId ON Symbol(repoId)", {});
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.debug("m012: Symbol.repoId index creation skipped", {

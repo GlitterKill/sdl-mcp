@@ -12,6 +12,7 @@ import {
 } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
 import { normalizePath } from "../util/paths.js";
+import { classifyDependencyTarget } from "./symbol-placeholders.js";
 
 // Workaround for LadybugDB 0.16.0 binder bug: when an UNWIND struct mixes
 // integer and fractional Number values for the same field, the binder
@@ -111,6 +112,7 @@ export async function insertEdge(
   conn: Connection,
   edge: EdgeRow,
 ): Promise<void> {
+  const targetMeta = classifyDependencyTarget(edge.toSymbolId);
   // Note: MERGE on target symbol (b) may create "stub" nodes with only symbolId
   // and SYMBOL_IN_REPO edge when the target hasn't been indexed yet. This is
   // intentional — stubs are populated when the target file is indexed, and
@@ -120,6 +122,12 @@ export async function insertEdge(
     `MATCH (r:Repo {repoId: $repoId})
      MERGE (a:Symbol {symbolId: $fromSymbolId})
      MERGE (b:Symbol {symbolId: $toSymbolId})
+     SET a.repoId = $repoId,
+         a.symbolStatus = CASE WHEN a.symbolStatus IS NULL OR a.symbolStatus = '' THEN 'real' ELSE a.symbolStatus END,
+         b.repoId = $repoId,
+         b.symbolStatus = CASE WHEN b.symbolStatus IS NULL OR b.symbolStatus = '' OR $targetStatus <> 'real' THEN $targetStatus ELSE b.symbolStatus END,
+         b.placeholderKind = CASE WHEN $targetStatus <> 'real' THEN $targetPlaceholderKind ELSE b.placeholderKind END,
+         b.placeholderTarget = CASE WHEN $targetStatus <> 'real' THEN $targetPlaceholderTarget ELSE b.placeholderTarget END
      MERGE (a)-[:SYMBOL_IN_REPO]->(r)
      MERGE (b)-[:SYMBOL_IN_REPO]->(r)
      MERGE (a)-[d:DEPENDS_ON {edgeType: $edgeType}]->(b)
@@ -142,6 +150,9 @@ export async function insertEdge(
       resolutionPhase: edge.resolutionPhase ?? "pass1",
       provenance: edge.provenance,
       createdAt: edge.createdAt,
+      targetStatus: targetMeta.symbolStatus,
+      targetPlaceholderKind: targetMeta.placeholderKind ?? "",
+      targetPlaceholderTarget: targetMeta.placeholderTarget ?? "",
     },
   );
 }
@@ -223,31 +234,60 @@ export async function insertEdges(
 
       for (let i = 0; i < repoEdges.length; i += CHUNK) {
         const edgeChunk = repoEdges.slice(i, i + CHUNK);
-        const rows = edgeChunk.map((edge) => ({
-          fromSymbolId: edge.fromSymbolId,
-          toSymbolId: edge.toSymbolId,
-          edgeType: edge.edgeType,
-          weight: forceDoubleEncoding(edge.weight),
-          confidence: forceDoubleEncoding(edge.confidence),
-          resolution: edge.resolution,
-          resolverId: edge.resolverId ?? "pass1-generic",
-          resolutionPhase: edge.resolutionPhase ?? "pass1",
-          // Coerce nullable STRING to '' — kuzu binder picks ANY type when
-          // a struct field is uniformly null AND a sibling Number field
-          // mixes integral (1.0 weight) with fractional (0.6/0.8 weight)
-          // values. Upstream kuzudb/kuzu#5685, fixed in PR #5705 but not
-          // backported to LadybugDB 0.16.0. Empty string is the workaround.
-          provenance: edge.provenance ?? "",
-          createdAt: edge.createdAt,
-        }));
+        const rows = edgeChunk.map((edge) => {
+          const targetMeta = classifyDependencyTarget(edge.toSymbolId);
+          return {
+            repoId,
+            fromSymbolId: edge.fromSymbolId,
+            toSymbolId: edge.toSymbolId,
+            edgeType: edge.edgeType,
+            weight: forceDoubleEncoding(edge.weight),
+            confidence: forceDoubleEncoding(edge.confidence),
+            resolution: edge.resolution,
+            resolverId: edge.resolverId ?? "pass1-generic",
+            resolutionPhase: edge.resolutionPhase ?? "pass1",
+            // Coerce nullable STRING to '' — kuzu binder picks ANY type when
+            // a struct field is uniformly null AND a sibling Number field
+            // mixes integral (1.0 weight) with fractional (0.6/0.8 weight)
+            // values. Upstream kuzudb/kuzu#5685, fixed in PR #5705 but not
+            // backported to LadybugDB 0.16.0. Empty string is the workaround.
+            provenance: edge.provenance ?? "",
+            createdAt: edge.createdAt,
+            targetStatus: targetMeta.symbolStatus,
+            targetPlaceholderKind: targetMeta.placeholderKind ?? "",
+            targetPlaceholderTarget: targetMeta.placeholderTarget ?? "",
+          };
+        });
         // 1: ensure both Symbol nodes exist.
         await exec(
           txConn,
           `UNWIND $rows AS row
            MERGE (a:Symbol {symbolId: row.fromSymbolId})
-           MERGE (b:Symbol {symbolId: row.toSymbolId})`,
+           MERGE (b:Symbol {symbolId: row.toSymbolId})
+           SET a.repoId = row.repoId,
+               a.symbolStatus = CASE WHEN a.symbolStatus IS NULL OR a.symbolStatus = '' THEN 'real' ELSE a.symbolStatus END,
+               b.repoId = row.repoId,
+               b.symbolStatus = CASE WHEN b.symbolStatus IS NULL OR b.symbolStatus = '' OR row.targetStatus <> 'real' THEN row.targetStatus ELSE b.symbolStatus END,
+               b.placeholderKind = CASE WHEN row.targetStatus <> 'real' THEN row.targetPlaceholderKind ELSE b.placeholderKind END,
+               b.placeholderTarget = CASE WHEN row.targetStatus <> 'real' THEN row.targetPlaceholderTarget ELSE b.placeholderTarget END`,
           { rows },
         );
+        const placeholderRows = rows.filter(
+          (row) => row.targetStatus !== "real",
+        );
+        if (placeholderRows.length > 0) {
+          await exec(
+            txConn,
+            `UNWIND $rows AS row
+             MATCH (r:Repo {repoId: row.repoId})
+             MATCH (b:Symbol {symbolId: row.toSymbolId})
+             OPTIONAL MATCH (b)-[existing:SYMBOL_IN_REPO]->(r)
+             WITH b, r, existing
+             WHERE existing IS NULL
+             CREATE (b)-[:SYMBOL_IN_REPO]->(r)`,
+            { rows: placeholderRows },
+          );
+        }
         // 2: create rel if missing — sets createdAt + all props.
         await exec(
           txConn,

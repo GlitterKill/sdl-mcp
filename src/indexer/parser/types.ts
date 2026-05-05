@@ -119,6 +119,7 @@ export type SignatureLike = {
   params: Array<{ name: string; type?: string }>;
   returns?: string;
   generics?: string[];
+  text?: string;
 };
 
 export interface SymbolDetail {

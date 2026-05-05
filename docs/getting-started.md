@@ -325,6 +325,12 @@ Notes:
 - Prefetch is disabled by default; enable it for long-running `serve` sessions to pre-warm results.
 - Prefetch stats are visible in `sdl.repo.status` under `prefetchStats`.
 
+### Hybrid File Summary Embeddings
+
+When hybrid retrieval is configured (`semantic.retrieval.mode: "hybrid"` with vector retrieval enabled), indexing also builds one `FileSummary` per indexed file and embeds that file-level payload. The payload is deterministic: relative path, language, exported symbols, and top indexed symbol signatures/summaries. `FileSummary.searchText` remains populated for FTS and lexical fallback, but it is not the healthy hybrid path by itself.
+
+If the embedding provider is unavailable or only the mock fallback is active, SDL-MCP still keeps lexical `FileSummary` rows for FTS/RRF fallback and marks the embedding pass as degraded in the `index.refresh.complete` audit stats (`fileSummaryEmbeddings[model].degraded: true`, with `missing` counts). Treat that as a retrieval-quality warning rather than a successful vector pass.
+
 ## Optional: Enable LLM-Generated Summaries
 
 LLM summaries produce 1–3 sentence natural-language descriptions for every symbol in your repository. These summaries appear in symbol cards and significantly improve semantic search quality.

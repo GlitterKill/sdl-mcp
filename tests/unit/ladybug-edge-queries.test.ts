@@ -152,6 +152,48 @@ describe("LadybugDB Edge Queries", () => {
   );
 
   it(
+    "insertEdge types unresolved targets as dependency placeholders",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "unresolved:call:makeSession",
+        edgeType: "call",
+        weight: 0.5,
+        confidence: 0.5,
+        resolution: "unresolved",
+        provenance: "unresolved-call:makeSession",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+
+      const result = await conn.query(
+        `MATCH (s:Symbol {symbolId: 'unresolved:call:makeSession'})
+         RETURN s.repoId AS repoId,
+                s.symbolStatus AS symbolStatus,
+                s.placeholderKind AS placeholderKind,
+                s.placeholderTarget AS placeholderTarget`,
+      );
+      const rows = [await result.getNext()];
+      result.close();
+
+      assert.strictEqual(rows[0]!.repoId, repoId);
+      assert.strictEqual(rows[0]!.symbolStatus, "unresolved");
+      assert.strictEqual(rows[0]!.placeholderKind, "call");
+      assert.strictEqual(rows[0]!.placeholderTarget, "makeSession");
+
+      const realSymbolIds = await queries.getSymbolIdsByRepo(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+      );
+      assert.ok(
+        !realSymbolIds.includes("unresolved:call:makeSession"),
+        "repo symbol projections should exclude unresolved dependency placeholders",
+      );
+    },
+  );
+
+  it(
     "insertEdges handles 1000+ edges",
     { skip: !ladybugAvailable },
     async () => {
@@ -180,6 +222,44 @@ describe("LadybugDB Edge Queries", () => {
         repoId,
       );
       assert.ok(count >= 1000);
+    },
+  );
+
+  it(
+    "insertEdges batch-types unresolved import targets",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.insertEdges(conn as unknown as import("kuzu").Connection, [
+        {
+          repoId,
+          fromSymbolId: "edge-from",
+          toSymbolId: "unresolved:node:test:describe",
+          edgeType: "import",
+          weight: 0.6,
+          confidence: 1,
+          resolution: "exact",
+          provenance: "import:node:test",
+          createdAt: "2026-03-04T00:00:00Z",
+        },
+      ]);
+
+      const result = await conn.query(
+        `MATCH (s:Symbol {symbolId: 'unresolved:node:test:describe'})
+         RETURN s.repoId AS repoId,
+                s.symbolStatus AS symbolStatus,
+                s.placeholderKind AS placeholderKind,
+                s.placeholderTarget AS placeholderTarget`,
+      );
+      const rows = [await result.getNext()];
+      result.close();
+
+      assert.strictEqual(rows[0]!.repoId, repoId);
+      assert.strictEqual(rows[0]!.symbolStatus, "unresolved");
+      assert.strictEqual(rows[0]!.placeholderKind, "import");
+      assert.strictEqual(
+        rows[0]!.placeholderTarget,
+        "describe (from node:test)",
+      );
     },
   );
 
@@ -313,8 +393,8 @@ describe("LadybugDB Edge Queries", () => {
         "function",
       );
 
-      const unresolvedImports = await queriesWithUnresolvedImports
-        .getUnresolvedImportEdgesByRepo!(
+      const unresolvedImports =
+        await queriesWithUnresolvedImports.getUnresolvedImportEdgesByRepo!(
           conn as unknown as import("kuzu").Connection,
           repoId,
         );
@@ -323,27 +403,24 @@ describe("LadybugDB Edge Queries", () => {
         unresolvedImports.map((edge) => Object.keys(edge).sort()),
         [["fromSymbolId", "provenance", "toSymbolId"]],
       );
-      assert.deepStrictEqual(
-        unresolvedImports,
-        [
-          {
-            fromSymbolId: "edge-from",
-            toSymbolId: "unresolved:src/target.ts:Target",
-            provenance: "import:Target",
-          },
-        ],
-      );
+      assert.deepStrictEqual(unresolvedImports, [
+        {
+          fromSymbolId: "edge-from",
+          toSymbolId: "unresolved:src/target.ts:Target",
+          provenance: "import:Target",
+        },
+      ]);
 
-      const unrelatedImports = await queriesWithUnresolvedImports
-        .getUnresolvedImportEdgesByRepo!(
+      const unrelatedImports =
+        await queriesWithUnresolvedImports.getUnresolvedImportEdgesByRepo!(
           conn as unknown as import("kuzu").Connection,
           repoId,
           { affectedPaths: ["src/other.ts"] },
         );
       assert.deepStrictEqual(unrelatedImports, []);
 
-      const targetScopedImports = await queriesWithUnresolvedImports
-        .getUnresolvedImportEdgesByRepo!(
+      const targetScopedImports =
+        await queriesWithUnresolvedImports.getUnresolvedImportEdgesByRepo!(
           conn as unknown as import("kuzu").Connection,
           repoId,
           { affectedPaths: ["src/target.ts"] },
@@ -402,8 +479,8 @@ describe("LadybugDB Edge Queries", () => {
         "function",
       );
 
-      const unresolvedCalls = await queriesWithUnresolvedCalls
-        .getUnresolvedCallEdgesByRepo!(
+      const unresolvedCalls =
+        await queriesWithUnresolvedCalls.getUnresolvedCallEdgesByRepo!(
           conn as unknown as import("kuzu").Connection,
           repoId,
         );
@@ -412,15 +489,12 @@ describe("LadybugDB Edge Queries", () => {
         unresolvedCalls.map((edge) => Object.keys(edge).sort()),
         [["fromSymbolId", "toSymbolId"]],
       );
-      assert.deepStrictEqual(
-        unresolvedCalls,
-        [
-          {
-            fromSymbolId: "edge-from",
-            toSymbolId: "unresolved:call:console.log",
-          },
-        ],
-      );
+      assert.deepStrictEqual(unresolvedCalls, [
+        {
+          fromSymbolId: "edge-from",
+          toSymbolId: "unresolved:call:console.log",
+        },
+      ]);
     },
   );
 

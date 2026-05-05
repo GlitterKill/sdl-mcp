@@ -13,6 +13,7 @@ import {
   withTransaction,
 } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
+import type { SymbolStatus } from "./symbol-placeholders.js";
 
 const MAX_BATCH_WARNING_THRESHOLD = 5000;
 
@@ -43,6 +44,9 @@ export interface SymbolRow {
   packageName?: string | null;
   packageVersion?: string | null;
   scipSymbol?: string | null;
+  symbolStatus?: SymbolStatus;
+  placeholderKind?: string | null;
+  placeholderTarget?: string | null;
   updatedAt: string;
 }
 
@@ -83,6 +87,9 @@ export async function upsertSymbol(
          s.searchText = $searchText,
          s.summaryQuality = $summaryQuality,
          s.summarySource = $summarySource,
+         s.symbolStatus = 'real',
+         s.placeholderKind = null,
+         s.placeholderTarget = null,
          s.updatedAt = $updatedAt
      MERGE (s)-[:SYMBOL_IN_FILE]->(f)
      MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
@@ -182,6 +189,9 @@ export async function upsertSymbolBatch(
         searchText: symbol.searchText ?? "",
         summaryQuality: symbol.summaryQuality ?? 0.0,
         summarySource: symbol.summarySource ?? "unknown",
+        symbolStatus: "real",
+        placeholderKind: "",
+        placeholderTarget: "",
         updatedAt: symbol.updatedAt,
       }));
       // Three-pass W3 workaround for LadybugDB UNWIND+MERGE-rel runtime bug:
@@ -213,6 +223,9 @@ export async function upsertSymbolBatch(
              s.searchText = row.searchText,
              s.summaryQuality = row.summaryQuality,
              s.summarySource = row.summarySource,
+             s.symbolStatus = row.symbolStatus,
+             s.placeholderKind = row.placeholderKind,
+             s.placeholderTarget = row.placeholderTarget,
              s.updatedAt = row.updatedAt`,
         { rows },
       );
@@ -407,6 +420,68 @@ export async function getExportedSymbolsLiteByFileIds(
   return result;
 }
 
+export interface FileSummarySymbolFactRow {
+  fileId: string;
+  name: string;
+  kind: string;
+  exported: boolean;
+  signatureJson: string | null;
+  summary: string | null;
+  rangeStartLine: number;
+}
+
+export async function getFileSummarySymbolFactsByFileIds(
+  conn: Connection,
+  fileIds: string[],
+): Promise<Map<string, FileSummarySymbolFactRow[]>> {
+  const result = new Map<string, FileSummarySymbolFactRow[]>();
+  if (fileIds.length === 0) return result;
+
+  const rows = await queryAll<{
+    fileId: string;
+    name: string;
+    kind: string;
+    exported: unknown;
+    signatureJson: string | null;
+    summary: string | null;
+    rangeStartLine: unknown;
+  }>(
+    conn,
+    `MATCH (f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
+     WHERE f.fileId IN $fileIds AND coalesce(s.symbolStatus, 'real') = 'real'
+     RETURN f.fileId AS fileId,
+            s.name AS name,
+            s.kind AS kind,
+            s.exported AS exported,
+            s.signatureJson AS signatureJson,
+            s.summary AS summary,
+            s.rangeStartLine AS rangeStartLine`,
+    { fileIds },
+  );
+
+  for (const row of rows) {
+    const list = result.get(row.fileId) ?? [];
+    list.push({
+      fileId: row.fileId,
+      name: row.name,
+      kind: row.kind,
+      exported: toBoolean(row.exported),
+      signatureJson: row.signatureJson,
+      summary: row.summary,
+      rangeStartLine: toNumber(row.rangeStartLine),
+    });
+    result.set(row.fileId, list);
+  }
+
+  for (const list of result.values()) {
+    list.sort((a, b) => {
+      if (a.exported !== b.exported) return a.exported ? -1 : 1;
+      return a.rangeStartLine - b.rangeStartLine;
+    });
+  }
+  return result;
+}
+
 export async function getSymbolsByFile(
   conn: Connection,
   fileId: string,
@@ -535,6 +610,7 @@ export async function getSymbolsByRepoLite(
   }>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     WHERE coalesce(s.symbolStatus, 'real') = 'real'
      MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
      RETURN s.symbolId AS symbolId,
             r.repoId AS repoId,
@@ -561,6 +637,7 @@ export async function getSymbolIdsByRepo(
   const rows = await queryAll<{ symbolId: string }>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     WHERE coalesce(s.symbolStatus, 'real') = 'real'
      RETURN s.symbolId AS symbolId`,
     { repoId },
   );
@@ -600,6 +677,7 @@ export async function getSymbolsByRepo(
   }>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     WHERE coalesce(s.symbolStatus, 'real') = 'real'
      MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
      RETURN s.symbolId AS symbolId,
             f.fileId AS fileId,
@@ -666,6 +744,7 @@ export async function getSymbolsByRepoForSnapshot(
   const rows = await queryAll<SymbolSnapshotRow>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     WHERE coalesce(s.symbolStatus, 'real') = 'real'
      RETURN s.symbolId AS symbolId,
             s.astFingerprint AS astFingerprint,
             s.signatureJson AS signatureJson,
@@ -684,6 +763,7 @@ export async function getSymbolCount(
   const row = await querySingle<{ count: unknown }>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     WHERE coalesce(s.symbolStatus, 'real') = 'real'
      RETURN count(s) AS count`,
     { repoId },
   );
@@ -1398,7 +1478,8 @@ async function searchSymbolsSingleTerm(
   return queryAll<SearchSymbolsRawRow>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
-     WHERE (lower(s.name) CONTAINS lower($query)
+     WHERE coalesce(s.symbolStatus, 'real') <> 'unresolved'
+       AND (lower(s.name) CONTAINS lower($query)
         OR lower(coalesce(s.summary, '')) CONTAINS lower($query)
         OR lower(coalesce(s.searchText, '')) CONTAINS lower($query))
      ${kinds && kinds.length > 0 ? "AND s.kind IN $kinds" : ""}
@@ -1592,7 +1673,8 @@ async function searchSymbolsLiteSingleTerm(
   return queryAll<SearchSymbolLiteRow>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
-     WHERE (lower(s.name) CONTAINS lower($query)
+     WHERE coalesce(s.symbolStatus, 'real') <> 'unresolved'
+       AND (lower(s.name) CONTAINS lower($query)
         OR lower(coalesce(s.summary, '')) CONTAINS lower($query)
         OR lower(coalesce(s.searchText, '')) CONTAINS lower($query))
      ${kinds && kinds.length > 0 ? "AND s.kind IN $kinds" : ""}
@@ -1799,7 +1881,8 @@ export async function findSymbolByExactName(
     conn,
     `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(r:Repo {repoId: $repoId})
      MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
-     WHERE lower(s.name) = $name
+      WHERE coalesce(s.symbolStatus, 'real') = 'real'
+        AND lower(s.name) = $name
      ${hasKinds ? "AND s.kind IN $kinds" : ""}
      RETURN s.symbolId AS symbolId, s.name AS name, f.fileId AS fileId,
             f.relPath AS file, s.kind AS kind, s.exported AS exported,

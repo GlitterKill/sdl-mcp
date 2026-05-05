@@ -26,7 +26,7 @@ export interface ScipEdgeDescriptor {
   confidence: number;
   resolution: "exact";
   resolverId: "scip";
-  resolutionPhase: 3;
+  resolutionPhase: "scip";
 }
 
 export type EdgeAction = "create" | "upgrade" | "replace" | "skip";
@@ -212,7 +212,7 @@ export function buildEdgesFromOccurrences(
       confidence,
       resolution: "exact",
       resolverId: "scip",
-      resolutionPhase: 3,
+      resolutionPhase: "scip",
     });
   }
 

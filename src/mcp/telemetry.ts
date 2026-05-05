@@ -59,6 +59,17 @@ export interface IndexStats {
     rustFallbackFiles: number;
     perLanguageFallback: Record<string, number>;
   };
+  fileSummaryEmbeddings?: Record<
+    string,
+    { embedded: number; skipped: number; missing: number; degraded: boolean }
+  >;
+  quality?: {
+    unresolvedTargets: number;
+    externalTargets: number;
+    untypedPlaceholderTargets: number;
+    missingSignatureByKind: Record<string, number>;
+    scipPhaseCounts: Record<string, number>;
+  };
 }
 
 export interface IndexEvent {

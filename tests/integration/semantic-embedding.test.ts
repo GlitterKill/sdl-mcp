@@ -14,6 +14,7 @@ import {
   getEmbeddingProvider,
   refreshSymbolEmbeddings,
 } from "../../dist/indexer/embeddings.js";
+import { refreshFileSummaryEmbeddings } from "../../dist/indexer/file-summary-embeddings.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -204,4 +205,81 @@ describe("Semantic Embedding Pipeline", () => {
     assert.strictEqual(second.skipped, 3);
   });
 
+  it("refreshFileSummaryEmbeddings marks mock fallback as degraded without persistence", async () => {
+    const conn = await getLadybugConn();
+    const now = new Date().toISOString();
+    await ladybugDb.upsertFileSummaryBatch(conn, [
+      {
+        fileId: "file1",
+        repoId,
+        summary: "File: src/auth.ts\nLanguage: ts\nExports: authenticateUser",
+        searchText: "file: src/auth.ts exports: authenticateUser",
+        updatedAt: now,
+      },
+      {
+        fileId: "file2",
+        repoId,
+        summary:
+          "File: src/dashboard.ts\nLanguage: ts\nExports: renderDashboard",
+        searchText: "file: src/dashboard.ts exports: renderDashboard",
+        updatedAt: now,
+      },
+    ]);
+
+    const result = await refreshFileSummaryEmbeddings({
+      repoId,
+      provider: "mock",
+      model: "jina-embeddings-v2-base-code",
+      fileIds: ["file1", "file2"],
+    });
+
+    assert.deepStrictEqual(result, {
+      embedded: 0,
+      skipped: 0,
+      missing: 2,
+      degraded: true,
+    });
+
+    const summaries = await ladybugDb.getFileSummariesByFileIds(conn, [
+      "file1",
+      "file2",
+    ]);
+    for (const summary of summaries.values()) {
+      assert.strictEqual(summary.embeddingJinaCode, null);
+      assert.strictEqual(summary.embeddingJinaCodeCardHash, null);
+    }
+  });
+
+  it("refreshFileSummaryEmbeddings degrades unknown models without persistence", async () => {
+    const conn = await getLadybugConn();
+    await ladybugDb.upsertFileSummaryBatch(conn, [
+      {
+        fileId: "file1",
+        repoId,
+        summary: "File: src/auth.ts\nLanguage: ts\nExports: authenticateUser",
+        searchText: "file: src/auth.ts exports: authenticateUser",
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+
+    const result = await refreshFileSummaryEmbeddings({
+      repoId,
+      provider: "mock",
+      model: "unknown-embedding-model",
+      fileIds: ["file1"],
+    });
+
+    assert.deepStrictEqual(result, {
+      embedded: 0,
+      skipped: 0,
+      missing: 1,
+      degraded: true,
+    });
+
+    const summaries = await ladybugDb.getFileSummariesByFileIds(conn, [
+      "file1",
+    ]);
+    assert.strictEqual(summaries.get("file1")?.embeddingJinaCode, null);
+    assert.strictEqual(summaries.get("file1")?.embeddingNomic, null);
+  });
 });

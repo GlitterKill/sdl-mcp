@@ -21,7 +21,12 @@
  */
 
 import type { Connection } from "kuzu";
-import { exec, execDdl, execStoredProcRaw, querySingle } from "./ladybug-core.js";
+import {
+  exec,
+  execDdl,
+  execStoredProcRaw,
+  querySingle,
+} from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
 import { LADYBUG_SCHEMA_VERSION } from "./migrations/index.js";
 
@@ -87,7 +92,10 @@ export const NODE_TABLES: string[] = [
     scipSymbol STRING,
     source STRING DEFAULT 'treesitter',
     packageName STRING,
-    packageVersion STRING
+    packageVersion STRING,
+    symbolStatus STRING DEFAULT 'real',
+    placeholderKind STRING,
+    placeholderTarget STRING
   )`,
 
   `CREATE NODE TABLE IF NOT EXISTS Version (
@@ -443,25 +451,25 @@ const REL_TABLES: string[] = [
 
 const INDEXES: string[] = [
   // Secondary indexes for common query patterns
-  `CREATE INDEX IF NOT EXISTS idx_symbol_name ON Symbol(name)`,
-  `CREATE INDEX IF NOT EXISTS idx_symbol_repoId ON Symbol(repoId)`,
-  `CREATE INDEX IF NOT EXISTS idx_file_relPath ON File(relPath)`,
-  `CREATE INDEX IF NOT EXISTS idx_file_directory ON File(directory)`,
-  `CREATE INDEX IF NOT EXISTS idx_cluster_repoId ON Cluster(repoId)`,
-  `CREATE INDEX IF NOT EXISTS idx_shadowcluster_repoId ON ShadowCluster(repoId)`,
-  `CREATE INDEX IF NOT EXISTS idx_process_repoId ON Process(repoId)`,
-  `CREATE INDEX IF NOT EXISTS idx_symbol_reference_fileId ON SymbolReference(fileId)`,
-  `CREATE INDEX IF NOT EXISTS idx_symbol_reference_symbolName ON SymbolReference(symbolName)`,
-  `CREATE INDEX IF NOT EXISTS idx_memory_repoId ON Memory(repoId)`,
-  `CREATE INDEX IF NOT EXISTS idx_memory_type ON Memory(type)`,
-  `CREATE INDEX IF NOT EXISTS idx_memory_contentHash ON Memory(contentHash)`,
-  `CREATE INDEX IF NOT EXISTS idx_symbolversion_versionId ON SymbolVersion(versionId)`,
-  `CREATE INDEX IF NOT EXISTS idx_usagesnapshot_repoId ON UsageSnapshot(repoId)`,
-  `CREATE INDEX IF NOT EXISTS idx_usagesnapshot_timestamp ON UsageSnapshot(timestamp)`,
-  `CREATE INDEX IF NOT EXISTS idx_audit_repoId ON Audit(repoId)`,
-  `CREATE INDEX IF NOT EXISTS idx_agentfeedback_repoId ON AgentFeedback(repoId)`,
-  `CREATE INDEX IF NOT EXISTS idx_symbolversion_symbolId ON SymbolVersion(symbolId)`,
-  `CREATE INDEX IF NOT EXISTS idx_filesummary_repoId ON FileSummary(repoId)`,
+  `CREATE INDEX idx_symbol_name ON Symbol(name)`,
+  `CREATE INDEX idx_symbol_repoId ON Symbol(repoId)`,
+  `CREATE INDEX idx_file_relPath ON File(relPath)`,
+  `CREATE INDEX idx_file_directory ON File(directory)`,
+  `CREATE INDEX idx_cluster_repoId ON Cluster(repoId)`,
+  `CREATE INDEX idx_shadowcluster_repoId ON ShadowCluster(repoId)`,
+  `CREATE INDEX idx_process_repoId ON Process(repoId)`,
+  `CREATE INDEX idx_symbol_reference_fileId ON SymbolReference(fileId)`,
+  `CREATE INDEX idx_symbol_reference_symbolName ON SymbolReference(symbolName)`,
+  `CREATE INDEX idx_memory_repoId ON Memory(repoId)`,
+  `CREATE INDEX idx_memory_type ON Memory(type)`,
+  `CREATE INDEX idx_memory_contentHash ON Memory(contentHash)`,
+  `CREATE INDEX idx_symbolversion_versionId ON SymbolVersion(versionId)`,
+  `CREATE INDEX idx_usagesnapshot_repoId ON UsageSnapshot(repoId)`,
+  `CREATE INDEX idx_usagesnapshot_timestamp ON UsageSnapshot(timestamp)`,
+  `CREATE INDEX idx_audit_repoId ON Audit(repoId)`,
+  `CREATE INDEX idx_agentfeedback_repoId ON AgentFeedback(repoId)`,
+  `CREATE INDEX idx_symbolversion_symbolId ON SymbolVersion(symbolId)`,
+  `CREATE INDEX idx_filesummary_repoId ON FileSummary(repoId)`,
 ];
 
 export async function createBaseSchema(conn: Connection): Promise<void> {
@@ -588,9 +596,7 @@ export async function migrateVecColumnsToFixedSize(
           infoResult.close();
         }
       }
-      const colInfo = tableInfoCache.get(table)!.find(
-        (r) => r.name === column,
-      );
+      const colInfo = tableInfoCache.get(table)!.find((r) => r.name === column);
       if (colInfo && /DOUBLE\[\d+\]/.test(String(colInfo.type))) {
         logger.debug(
           `[schema-migration] ${table}.${column} already DOUBLE[${size}], skipping`,
@@ -622,10 +628,7 @@ export async function migrateVecColumnsToFixedSize(
       }
 
       await execDdl(conn, `ALTER TABLE ${table} DROP ${column}`);
-      await execDdl(
-        conn,
-        `ALTER TABLE ${table} ADD ${column} DOUBLE[${size}]`,
-      );
+      await execDdl(conn, `ALTER TABLE ${table} ADD ${column} DOUBLE[${size}]`);
       logger.info(
         `[schema-migration] Migrated ${table}.${column} to DOUBLE[${size}]`,
       );
