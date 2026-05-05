@@ -135,6 +135,42 @@ describe("index.refresh diagnostics", () => {
   });
 
   it("includes opt-in timing diagnostics in the tool response", async () => {
+    // Seed the repo with a full index first so the subsequent incremental
+    // run is genuinely incremental — indexRepo auto-upgrades incremental
+    // → full when fileCount===0, which would defeat the deferred-cluster
+    // assertion below.
+    await handleIndexRefresh({
+      repoId: REPO_ID,
+      mode: "full",
+      includeDiagnostics: false,
+    });
+    // Modify the source file so the incremental run does real work;
+    // otherwise it short-circuits and most phases are skipped.
+    writeFileSync(
+      join(repoDir, "src", "index.ts"),
+      [
+        "export function greet(name: string): string {",
+        "  return `hello ${name}!`;",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    // Bump mtime so incremental scan sees the change. We avoid setting mtime
+    // far into the future, which would make the file *permanently* look newer
+    // than lastIndexedAt and break the no-op short-circuit assertions in
+    // sibling tests.
+    const { utimes } = await import("node:fs/promises");
+    const slightlyAfter = new Date(Date.now() + 1);
+    await utimes(
+      join(repoDir, "src", "index.ts"),
+      slightlyAfter,
+      slightlyAfter,
+    );
+    // Wait so that subsequent indexes record a `lastIndexedAt` strictly after
+    // the bumped mtime; otherwise mtime===lastIndexedAt could go either way
+    // depending on filesystem timestamp resolution.
+    await new Promise((resolve) => setTimeout(resolve, 50));
     const result = await handleIndexRefresh({
       repoId: REPO_ID,
       mode: "incremental",

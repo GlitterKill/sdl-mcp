@@ -38,6 +38,7 @@ describe("code-mode tool validation", () => {
       () =>
         workflowHandler?.({
           repoId: "demo-repo",
+          onError: "stop",
           steps: [{ fn: "notARealFunction", args: {} }],
         }),
       (error: unknown) => {
