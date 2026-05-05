@@ -6,6 +6,7 @@ import {
   BufferCheckpointRequestSchema,
   type BufferCheckpointResponse,
   BufferPushRequestSchema,
+  type BufferPushRequest,
   type BufferPushResponse,
   BufferStatusRequestSchema,
   type BufferStatusResponse,
@@ -45,6 +46,44 @@ async function runSerializedBufferPush<T>(
   return queue;
 }
 
+async function appendMissingFileWarning(
+  request: BufferPushRequest,
+  pushed: BufferPushResponse,
+): Promise<BufferPushResponse> {
+  try {
+    const conn = await getLadybugConn();
+    const repo = await ladybugDb.getRepo(conn, request.repoId);
+    if (!repo) {
+      logger.warn("Buffer push repo not found", {
+        repoId: request.repoId,
+        filePath: request.filePath,
+      });
+      return pushed;
+    }
+
+    const absPath = resolve(repo.rootPath, request.filePath);
+    if (!existsSync(absPath)) {
+      return {
+        ...pushed,
+        warnings: [
+          ...(pushed.warnings ?? []),
+          `File does not exist on disk: ${request.filePath}`,
+        ],
+      };
+    }
+  } catch (error) {
+    // The disk check is advisory. A live buffer update should not fail just
+    // because repository metadata is unavailable in tests or during startup.
+    logger.debug("Skipping buffer push file existence warning", {
+      repoId: request.repoId,
+      filePath: request.filePath,
+      error,
+    });
+  }
+
+  return pushed;
+}
+
 export async function handleBufferPush(
   args: unknown,
   _context?: ToolContext,
@@ -61,24 +100,7 @@ export async function handleBufferPush(
           `${request.repoId}\0${request.filePath}`,
           async () => {
             const pushed = await resolveLiveIndex(liveIndex).pushBufferUpdate(request);
-            const conn = await getLadybugConn();
-            const repo = await ladybugDb.getRepo(conn, request.repoId);
-            if (!repo) {
-              logger.warn("Buffer push repo not found", {
-                repoId: request.repoId,
-                filePath: request.filePath,
-              });
-              return pushed;
-            }
-
-            const absPath = resolve(repo.rootPath, request.filePath);
-            if (!existsSync(absPath)) {
-              pushed.warnings = [
-                ...(pushed.warnings ?? []),
-                `File does not exist on disk: ${request.filePath}`,
-              ];
-            }
-            return pushed;
+            return appendMissingFileWarning(request, pushed);
           },
         )
       : await resolveLiveIndex(liveIndex).pushBufferUpdate(request);

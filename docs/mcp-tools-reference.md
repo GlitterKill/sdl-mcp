@@ -536,6 +536,7 @@ Paginate additional symbols that exceeded the slice budget. Only use when the sl
 
 | Parameter         | Type      | Required | Description                             |
 | ----------------- | --------- | -------- | --------------------------------------- |
+| `repoId`          | `string`  | Yes      | Repository identifier                   |
 | `spilloverHandle` | `string`  | Yes      | Spillover handle from a truncated slice |
 | `cursor`          | `string`  | No       | Pagination cursor from previous page    |
 | `pageSize`        | `integer` | No       | Items per page (1-100, default: 20)     |
@@ -545,7 +546,7 @@ Paginate additional symbols that exceeded the slice budget. Only use when the sl
 **Example:**
 
 ```json
-{ "spilloverHandle": "sp_abc123", "pageSize": 20 }
+{ "repoId": "my-repo", "spilloverHandle": "sp_abc123", "pageSize": 20 }
 ```
 
 ---

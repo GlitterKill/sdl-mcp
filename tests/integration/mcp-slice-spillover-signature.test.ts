@@ -106,7 +106,7 @@ describe("MCP slice spillover signatures", () => {
   });
 
   it("preserves stored signature details even when signatureJson omits name", async () => {
-    const response = await handleSliceSpilloverGet({ spilloverHandle });
+    const response = await handleSliceSpilloverGet({ repoId, spilloverHandle });
 
     assert.equal(response.hasMore, false);
     assert.equal(response.symbols.length, 1);

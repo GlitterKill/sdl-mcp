@@ -570,6 +570,7 @@ Fetches overflow symbols that didn't fit within the slice's token budget, via pa
 
 | Parameter         | Type           | Required | Description                                   |
 | :---------------- | :------------- | :------- | :-------------------------------------------- |
+| `repoId`          | string         | Yes      | Repository identifier                         |
 | `spilloverHandle` | string         | Yes      | Handle from `slice.build` truncation metadata |
 | `cursor`          | string         | No       | Pagination cursor from the previous page      |
 | `pageSize`        | number (1-100) | No       | Number of symbols per page (default: 20)      |

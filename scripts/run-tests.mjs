@@ -79,6 +79,13 @@ function parseTapResult(output, testFile = '') {
   // A file with real failures will have:
   // - "not ok" lines with assertion errors (AssertionError, ERR_ASSERTION)
   
+  // Indented "not ok" lines are subtest failures. They are real test failures,
+  // even when the file-level summary reports only one failed suite.
+  if (/^[ \t]+not ok \d+ - /m.test(output)) {
+    log(`[TAP DEBUG] ${testFile}: Subtest failure found`);
+    return { passed: false, reason: 'subtest_failure' };
+  }
+
   // Check for assertion errors anywhere in the output
   const hasAssertionError = /AssertionError|ERR_ASSERTION|expected.*actual|Error:.*\n.*at /m.test(output);
   
@@ -103,11 +110,12 @@ function parseTapResult(output, testFile = '') {
   const summaryMatch = output.match(/# fail (\d+)/m);
   if (summaryMatch) {
     const failCount = parseInt(summaryMatch[1], 10);
-    // If fail count is 1 and we didn't find assertion errors, it's likely segfault-on-exit
-    // (the file itself is counted as the 1 failure)
-    if (failCount === 1 && !hasAssertionError) {
-      log(`[TAP DEBUG] ${testFile}: Single file-level failure, likely segfault on exit`);
-      return { passed: true, reason: 'single_file_failure' };
+    if (failCount === 0) {
+      return { passed: true, reason: 'summary_pass' };
+    }
+    if (failCount > 0) {
+      log(`[TAP DEBUG] ${testFile}: TAP summary reported ${failCount} failure(s)`);
+      return { passed: false, reason: 'summary_failure' };
     }
   }
   

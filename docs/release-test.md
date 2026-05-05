@@ -354,6 +354,7 @@ Connect SDL-MCP to an MCP client (Codex, Claude Code, etc.) and test each tool.
 
 ```json
 {
+  "repoId": "sdl-mcp",
   "spilloverHandle": "<spilloverHandle-from-build>",
   "pageSize": 20
 }
