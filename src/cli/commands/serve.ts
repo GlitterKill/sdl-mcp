@@ -25,6 +25,7 @@ import {
   IdleMonitor,
 } from "../../live-index/idle-monitor.js";
 import { ShutdownManager } from "../../util/shutdown.js";
+import { installProcessHandlers } from "../../startup/process-handlers.js";
 import {
   findExistingProcess,
   formatExistingProcessMessage,
@@ -65,41 +66,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     enableFileLogging();
   }
 
-  // Forward reference so the uncaughtException handler can trigger graceful
-  // shutdown (including PID file removal) once the manager is initialized.
-  let activeShutdownMgr: ShutdownManager | null = null;
 
-  // Catch uncaught errors — sanitize stderr output, log full details to file, then exit.
-  process.on("uncaughtException", (error) => {
-    process.stderr.write(
-      `[sdl-mcp] Fatal uncaught exception: ${error instanceof Error ? error.message : String(error)}\n`,
-    );
-    logger.error("Uncaught exception", {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    if (activeShutdownMgr) {
-      const deadline = setTimeout(() => process.exit(1), 5_000).unref();
-      void activeShutdownMgr.shutdown("uncaught exception").finally(() => {
-        clearTimeout(deadline);
-        process.exit(1);
-      });
-    } else {
-      process.exit(1);
-    }
-  });
-
-  process.on("unhandledRejection", (reason) => {
-    const message = reason instanceof Error ? reason.message : String(reason);
-    process.stderr.write(`[sdl-mcp] Unhandled rejection: ${message}\n`);
-    logger.error("Unhandled rejection", {
-      error: message,
-      stack: reason instanceof Error ? reason.stack : undefined,
-    });
-    // Do NOT process.exit here — a stray unhandled rejection (e.g. from a
-    // fire-and-forget notification or audit write) should not kill the server.
-    // This matches main.ts behavior.
-  });
 
   const configPath = activateCliConfigPath(options.config);
   const configSource = options.config
@@ -312,6 +279,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     beamExplainCapacity: 128,
     beamExplainEntriesPerSlice: 512,
     sseHeartbeatMs: 15000,
+    sseMaxStreamMs: 3_600_000,
   };
   let observabilityService: ObservabilityService | null = null;
   let beamExplainStore: BeamExplainStore | null = null;
@@ -334,7 +302,8 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   const shutdownMgr = new ShutdownManager({
     log: (msg) => console.error(`[sdl-mcp] ${msg}`),
   });
-  activeShutdownMgr = shutdownMgr;
+  const uninstallProcessHandlers = installProcessHandlers(shutdownMgr);
+  shutdownMgr.addCleanup("processHandlers", uninstallProcessHandlers);
   if (pidfilePath) {
     shutdownMgr.setPidfilePath(pidfilePath);
   }
@@ -386,7 +355,6 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP
 
   if (options.transport === "stdio") {
-    // Monitor stdin so we detect terminal close / MCP client disconnect.
     shutdownMgr.monitorStdin();
   }
 
@@ -425,8 +393,10 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
           observabilityService,
           beamExplainStore,
           observabilitySseHeartbeatMs: observabilityConfig.sseHeartbeatMs,
+          observabilitySseMaxStreamMs: observabilityConfig.sseMaxStreamMs,
         },
         config.httpAuth,
+        config.http,
       );
 
       // Now that we know the actual bound port, write the pidfile.

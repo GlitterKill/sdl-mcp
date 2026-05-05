@@ -17,13 +17,14 @@ export async function cleanupUnresolvedEdges(repoId: string): Promise<void> {
     }
 
     await ladybugDb.withTransaction(wConn, async (txConn) => {
-      for (const edge of edgesToDelete) {
-        await ladybugDb.deleteEdge(txConn, {
+      await ladybugDb.deleteEdges(
+        txConn,
+        edgesToDelete.map((edge) => ({
           fromSymbolId: edge.fromSymbolId,
           toSymbolId: edge.toSymbolId,
           edgeType: "call",
-        });
-      }
+        })),
+      );
     });
   });
 }

@@ -10,6 +10,8 @@ export async function initGraphDb(
   resolvedConfigPath: string,
 ): Promise<string> {
   const graphDbPath = resolveGraphDbPath(config, resolvedConfigPath);
-  await initLadybugDb(graphDbPath);
+  await initLadybugDb(graphDbPath, {
+    bufferPoolBytes: config.graphDatabase?.bufferPoolBytes ?? undefined,
+  });
   return normalizePath(graphDbPath);
 }

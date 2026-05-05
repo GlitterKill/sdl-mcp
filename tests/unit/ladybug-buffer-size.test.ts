@@ -36,6 +36,24 @@ describe("resolveLadybugBufferManagerSizeBytes", () => {
     );
   });
 
+  it("honors a configured override when no env override is present", () => {
+    assert.strictEqual(
+      resolveLadybugBufferManagerSizeBytes(8 * ONE_GB, "", 3 * ONE_GB),
+      3 * ONE_GB,
+    );
+  });
+
+  it("prefers env override over configured override", () => {
+    assert.strictEqual(
+      resolveLadybugBufferManagerSizeBytes(
+        8 * ONE_GB,
+        String(4 * ONE_GB),
+        3 * ONE_GB,
+      ),
+      4 * ONE_GB,
+    );
+  });
+
   it("falls back to auto-sizing for invalid or undersized overrides", () => {
     assert.strictEqual(
       resolveLadybugBufferManagerSizeBytes(8 * ONE_GB, "not-a-number"),

@@ -9,6 +9,7 @@ import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import {
   handleAgentFeedback,
   handleAgentFeedbackQuery,
+  resetAgentFeedbackRateLimitForTests,
 } from "../../dist/mcp/tools/agent-feedback.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -23,6 +24,7 @@ describe("Agent Feedback Tool", () => {
   const sliceHandle = "slice-abc123";
 
   beforeEach(async () => {
+    resetAgentFeedbackRateLimitForTests();
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true });
     }
@@ -190,6 +192,30 @@ describe("Agent Feedback Tool", () => {
         assert.ok(error instanceof Error);
         assert.ok(error.message.includes("not found"));
       }
+    });
+
+    it("rate limits repeated feedback writes for the same repo", async () => {
+      for (let i = 0; i < 30; i++) {
+        const response = await handleAgentFeedback({
+          repoId,
+          versionId,
+          sliceHandle: `slice-rate-${i}`,
+          usefulSymbols: ["sym1"],
+        });
+        assert.strictEqual(response.ok, true);
+      }
+
+      await assert.rejects(
+        handleAgentFeedback({
+          repoId,
+          versionId,
+          sliceHandle: "slice-rate-overflow",
+          usefulSymbols: ["sym1"],
+        }),
+        (error) =>
+          error instanceof Error &&
+          error.message.toLowerCase().includes("rate limit"),
+      );
     });
   });
 

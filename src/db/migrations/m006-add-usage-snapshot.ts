@@ -5,14 +5,10 @@
  * UsageSnapshot table starts empty since there is no prior usage data.
  */
 import type { Connection } from "kuzu";
+import { execDdl } from "../ladybug-core.js";
 
 export const version = 6;
 export const description = "Add UsageSnapshot node table for token savings tracking";
-
-async function execDdl(conn: Connection, ddl: string): Promise<void> {
-  const result = await conn.query(ddl);
-  result.close();
-}
 
 export async function up(conn: Connection): Promise<void> {
   // Node table
@@ -41,8 +37,7 @@ export async function up(conn: Connection): Promise<void> {
     try {
       await execDdl(conn, idx);
     } catch {
-      // Kùzu versions before 0.4 do not support CREATE INDEX. Since indexes
-      // are performance-only (not correctness), silently skipping is safe.
+      // Index support varies across LadybugDB/Kuzu versions; these are performance-only.
     }
   }
 }

@@ -314,6 +314,23 @@ export async function deleteEdge(
   );
 }
 
+export async function deleteEdges(
+  conn: Connection,
+  edges: Array<{ fromSymbolId: string; toSymbolId: string; edgeType: string }>,
+): Promise<void> {
+  if (edges.length === 0) {
+    return;
+  }
+
+  await exec(
+    conn,
+    `UNWIND $edges AS edge
+     MATCH (a:Symbol {symbolId: edge.fromSymbolId})-[d:DEPENDS_ON {edgeType: edge.edgeType}]->(b:Symbol {symbolId: edge.toSymbolId})
+     DELETE d`,
+    { edges },
+  );
+}
+
 export async function getEdgesFrom(
   conn: Connection,
   symbolId: string,

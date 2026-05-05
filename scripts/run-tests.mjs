@@ -176,6 +176,20 @@ if ((buildResult.status ?? 1) !== 0) {
   process.exit(buildResult.status ?? 1);
 }
 
+const schemaSyncResult = spawnSync(
+  process.execPath,
+  [resolve(repoRoot, "scripts", "check-schema-sync.mjs")],
+  {
+    cwd: repoRoot,
+    stdio: "inherit",
+    env: testEnv,
+  },
+);
+
+if ((schemaSyncResult.status ?? 1) !== 0) {
+  process.exit(schemaSyncResult.status ?? 1);
+}
+
 const treeSitterProbe = spawnSync(
   process.execPath,
   ["--input-type=module", "-e", "await import('tree-sitter');"],

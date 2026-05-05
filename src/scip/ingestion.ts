@@ -23,7 +23,7 @@ import {
   getScipIngestionRecord,
   getSymbolsForFile,
   batchGetExistingEdges,
-  replaceEdgeTarget,
+  batchReplaceEdgeTargets,
 } from "../db/ladybug-scip.js";
 import { getLatestVersion } from "../db/ladybug-versions.js";
 import {
@@ -31,6 +31,7 @@ import {
   preIndexCheckpoint,
   withWriteConn,
 } from "../db/ladybug.js";
+import { withTransaction } from "../db/ladybug-core.js";
 import { ScipFileNotFoundError, ScipIngestionError } from "../domain/errors.js";
 import type { SymbolId } from "../domain/types.js";
 import { ConcurrencyLimiter } from "../util/concurrency.js";
@@ -422,6 +423,16 @@ export async function ingestScipIndex(
 
       // Classify and apply each edge action
       const edgeBatchCreate: typeof rawEdges = [];
+      const edgeBatchReplace: Array<{
+        sourceId: string;
+        oldTargetId: string;
+        newTargetId: string;
+        edgeType: string;
+        confidence: number;
+        resolution: string;
+        resolverId: string;
+        resolutionPhase: number;
+      }> = [];
 
       for (const edge of rawEdges) {
         const key = `${edge.sourceSymbolId}:${edge.targetSymbolId}:${edge.edgeType}`;
@@ -453,18 +464,15 @@ export async function ingestScipIndex(
               break;
             case "replace":
               if (existingEdge) {
-                await withWriteConn(async (wConn) => {
-                  await replaceEdgeTarget(
-                    wConn,
-                    edge.sourceSymbolId,
-                    existingEdge.targetSymbolId,
-                    edge.targetSymbolId,
-                    edge.edgeType,
-                    edge.confidence,
-                    edge.resolution,
-                    edge.resolverId,
-                    edge.resolutionPhase,
-                  );
+                edgeBatchReplace.push({
+                  sourceId: edge.sourceSymbolId,
+                  oldTargetId: existingEdge.targetSymbolId,
+                  newTargetId: edge.targetSymbolId,
+                  edgeType: edge.edgeType,
+                  confidence: edge.confidence,
+                  resolution: edge.resolution,
+                  resolverId: edge.resolverId,
+                  resolutionPhase: edge.resolutionPhase,
                 });
               }
               edgesReplaced++;
@@ -491,10 +499,20 @@ export async function ingestScipIndex(
         }
       }
 
-      // Batch write created/upgraded edges
-      if (edgeBatchCreate.length > 0 && !dryRun) {
+      // Batch write created/upgraded/replaced edges in one transaction per
+      // document so a partially failed update cannot leave the edge set in
+      // a mixed state.
+      if (!dryRun && (edgeBatchCreate.length > 0 || edgeBatchReplace.length > 0)) {
         await withWriteConn(async (wConn) => {
-          await batchMergeScipEdges(wConn, edgeBatchCreate);
+          await withTransaction(wConn, async (txConn) => {
+            if (edgeBatchCreate.length > 0) {
+              await batchMergeScipEdges(txConn, edgeBatchCreate);
+            }
+
+            if (edgeBatchReplace.length > 0) {
+              await batchReplaceEdgeTargets(txConn, edgeBatchReplace);
+            }
+          });
         });
       }
 

@@ -11,6 +11,7 @@ import {
 } from "fs";
 import { join } from "path";
 import { pipeline } from "stream/promises";
+import { Transform } from "stream";
 import { logger } from "../util/logger.js";
 import {
   getModelInfo,
@@ -156,9 +157,26 @@ async function downloadFile(
 
   const fileStream = createWriteStream(destPath);
   try {
-    // Node 20+ fetch returns a web ReadableStream
+    // Node 20+ fetch returns a web ReadableStream.
+    // Insert a counting limiter so the pipeline rejects mid-stream once we
+    // exceed maxBytes. Without this, a server returning chunked encoding
+    // with no/lying Content-Length could write unbounded bytes to disk
+    // before the post-stream stat check ever runs.
+    let writtenBytes = 0;
+    const limiter = new Transform({
+      transform(chunk: Buffer | string, _enc, cb) {
+        const len = typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length;
+        writtenBytes += len;
+        if (writtenBytes > maxBytes) {
+          cb(new Error(`Download exceeded limit: wrote ${writtenBytes} bytes, max ${maxBytes}`));
+          return;
+        }
+        cb(null, chunk);
+      },
+    });
     await pipeline(
       response.body as unknown as NodeJS.ReadableStream,
+      limiter,
       fileStream,
     );
   } catch (err) {

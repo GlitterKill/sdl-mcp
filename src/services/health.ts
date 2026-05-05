@@ -3,6 +3,7 @@ import { RepoConfigSchema } from "../config/types.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { scanRepository } from "../indexer/fileScanner.js";
+import { getEmbeddingFailureCount } from "../indexer/embeddings.js";
 import { NotFoundError } from "../domain/errors.js";
 import { safeJsonParseOrThrow, ConfigObjectSchema } from "../util/safeJson.js";
 
@@ -65,6 +66,7 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
         errorRate: 0,
         edgeQuality: 0,
         callResolution: 0,
+        embeddingFailures: getEmbeddingFailureCount(),
       },
     };
   }
@@ -114,6 +116,7 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
       errorRate,
       edgeQuality,
       callResolution,
+      embeddingFailures: getEmbeddingFailureCount(),
     },
   };
 }

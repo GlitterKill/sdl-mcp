@@ -11,7 +11,7 @@ import {
 import { getModelInfo } from "../../dist/indexer/model-registry.js";
 
 test("ensureLocalEmbeddingRuntime returns availability status", async () => {
-  resetLocalEmbeddingRuntime();
+  await resetLocalEmbeddingRuntime();
   const runtime = await ensureLocalEmbeddingRuntime();
   assert.strictEqual(typeof runtime.available, "boolean");
   if (!runtime.available) {
@@ -21,7 +21,7 @@ test("ensureLocalEmbeddingRuntime returns availability status", async () => {
 });
 
 test("ensureLocalEmbeddingRuntime caches result on second call", async () => {
-  resetLocalEmbeddingRuntime();
+  await resetLocalEmbeddingRuntime();
   const first = await ensureLocalEmbeddingRuntime();
   const second = await ensureLocalEmbeddingRuntime();
   // Should be the exact same object (cached)
@@ -30,7 +30,7 @@ test("ensureLocalEmbeddingRuntime caches result on second call", async () => {
 
 test("resetLocalEmbeddingRuntime clears cached state", async () => {
   const first = await ensureLocalEmbeddingRuntime();
-  resetLocalEmbeddingRuntime();
+  await resetLocalEmbeddingRuntime();
   const second = await ensureLocalEmbeddingRuntime();
   // After reset, should re-detect (may be a different object)
   assert.strictEqual(first.available, second.available);

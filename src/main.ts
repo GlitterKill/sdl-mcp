@@ -27,10 +27,10 @@ import {
 import {
   enableFileLogging,
   getLogFilePath,
-  logger,
   shutdownLogger,
 } from "./util/logger.js";
 import { ensureConfiguredReposRegistered } from "./startup/bootstrap.js";
+import { installProcessHandlers } from "./startup/process-handlers.js";
 
 import { resetScorerPool } from "./graph/slice/beam-search-engine.js";
 
@@ -51,40 +51,14 @@ if (!getLogFilePath()) {
   enableFileLogging();
 }
 
-// MCP servers must use stderr for logging - stdout is reserved for JSON-RPC
-// Module-level reference so uncaughtException can trigger graceful shutdown.
-let activeShutdownMgr: ShutdownManager | null = null;
-
 const log = (msg: string) => process.stderr.write(`[sdl-mcp] ${msg}\n`);
-
-// Catch uncaught errors — sanitize stderr output, log full details to file, then exit.
-process.on("uncaughtException", (error) => {
-  process.stderr.write(`[sdl-mcp] Fatal uncaught exception: ${error instanceof Error ? error.message : String(error)}\n`);
-  logger.error("Uncaught exception", { error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
-  if (activeShutdownMgr) {
-    const deadline = setTimeout(() => process.exit(1), 5_000).unref();
-    void activeShutdownMgr.shutdown("uncaught exception").finally(() => {
-      clearTimeout(deadline);
-      process.exit(1);
-    });
-  } else {
-    process.exit(1);
-  }
-});
-
-process.on("unhandledRejection", (reason) => {
-  const message = reason instanceof Error ? reason.message : String(reason);
-  process.stderr.write(`[sdl-mcp] Unhandled rejection: ${message}\n`);
-  logger.error("Unhandled rejection", { error: message, stack: reason instanceof Error ? reason.stack : undefined });
-  // Do NOT process.exit here — a stray unhandled rejection (e.g. from a
-  // fire-and-forget notification or audit write) should not kill the server.
-});
 
 async function main(): Promise<void> {
   const server = new MCPServer();
   const watchers: Array<{ close: () => Promise<void> }> = [];
   const shutdownMgr = new ShutdownManager({ log });
-  activeShutdownMgr = shutdownMgr;
+  const uninstallProcessHandlers = installProcessHandlers(shutdownMgr);
+  shutdownMgr.addCleanup("processHandlers", uninstallProcessHandlers);
 
   // Hoisted so the catch handler can clean up if startup fails after the pidfile is claimed.
   let pidfilePath: string | undefined;
@@ -203,7 +177,7 @@ async function main(): Promise<void> {
 
     // Register all shutdown triggers.
     shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP
-    shutdownMgr.monitorStdin(); // stdin end/close (terminal close detection)
+    shutdownMgr.monitorStdin();
 
     const activeLogFile = getLogFilePath();
     if (activeLogFile) {
@@ -220,7 +194,7 @@ async function main(): Promise<void> {
     await server.start();
 
     log("SDL-MCP server running...");
-    await new Promise(() => {});
+    await shutdownMgr.shutdownInitiated;
   } catch (error) {
     if (pidfilePath) {
       try { removePidfile(pidfilePath); } catch { /* best-effort */ }

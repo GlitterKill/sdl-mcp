@@ -19,6 +19,16 @@ interface FlushBatch {
   count: number;
 }
 
+function describeBatch(batch: FlushBatch): Record<string, number> {
+  return {
+    rows: batch.count,
+    files: batch.files.length,
+    symbols: batch.symbols.length,
+    edges: batch.edges.length,
+    refs: batch.refs.length,
+  };
+}
+
 /**
  * Accumulates DB writes and drains them via a background write queue.
  *
@@ -174,7 +184,19 @@ export class BatchPersistAccumulator {
         }
       } catch (err) {
         this._error = err instanceof Error ? err : new Error(String(err));
-        logger.error("BatchPersistAccumulator drain error", { error: err });
+        logger.error("BatchPersistAccumulator drain error", {
+          error: err,
+          batch: describeBatch(batch),
+        });
+        while (this.writeQueue.length > 0) {
+          const dropped = this.writeQueue.shift()!;
+          logger.warn(
+            "BatchPersistAccumulator dropping queued batch after drain failure",
+            {
+              batch: describeBatch(dropped),
+            },
+          );
+        }
         break;
       }
     }

@@ -119,11 +119,19 @@ export async function ensureLocalEmbeddingRuntime(): Promise<LocalEmbeddingRunti
 }
 
 /** Reset cached runtime state (for testing) */
-export function resetLocalEmbeddingRuntime(): void {
+export async function resetLocalEmbeddingRuntime(): Promise<void> {
   cachedRuntime = null;
-  for (const sessionPromise of sessionCache.values()) {
-    sessionPromise.then((s) => s.dispose()).catch(() => {});
-  }
+  const disposePromises = Array.from(sessionCache.values(), async (sessionPromise) => {
+    try {
+      const session = await sessionPromise;
+      session.dispose();
+    } catch (error) {
+      logger.debug("Failed to dispose cached embedding session during reset", {
+        error,
+      });
+    }
+  });
+  await Promise.allSettled(disposePromises);
   sessionCache.clear();
 }
 

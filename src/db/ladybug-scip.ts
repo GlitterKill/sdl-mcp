@@ -260,6 +260,92 @@ export async function replaceEdgeTarget(
   });
 }
 
+
+/**
+ * Batch variant of replaceEdgeTarget: deletes old edges and creates new
+ * edges in a single transaction. Replaces N round-trips with 3 UNWINDs.
+ */
+export async function batchReplaceEdgeTargets(
+  conn: Connection,
+  ops: ReadonlyArray<{
+    sourceId: string;
+    oldTargetId: string;
+    newTargetId: string;
+    edgeType: string;
+    confidence: number;
+    resolution: string;
+    resolverId: string;
+    resolutionPhase: number;
+  }>,
+): Promise<void> {
+  if (ops.length === 0) return;
+
+  const now = new Date().toISOString();
+  const rows = ops.map((op) => ({
+    sourceId: op.sourceId,
+    oldTargetId: op.oldTargetId,
+    newTargetId: op.newTargetId,
+    edgeType: op.edgeType,
+    confidence: op.confidence,
+    resolution: op.resolution,
+    resolverId: op.resolverId,
+    resolutionPhase: String(op.resolutionPhase),
+    createdAt: now,
+  }));
+
+  await withTransaction(conn, async (txConn) => {
+    // Delete old edges
+    await exec(
+      txConn,
+      `UNWIND $rows AS row
+       MATCH (a:Symbol {symbolId: row.sourceId})-[d:DEPENDS_ON {edgeType: row.edgeType}]->(b:Symbol {symbolId: row.oldTargetId})
+       DELETE d`,
+      { rows },
+    );
+    // Ensure target nodes exist
+    await exec(
+      txConn,
+      `UNWIND $rows AS row
+       MERGE (a:Symbol {symbolId: row.sourceId})
+       MERGE (b:Symbol {symbolId: row.newTargetId})`,
+      { rows },
+    );
+    // Create new edges where missing
+    await exec(
+      txConn,
+      `UNWIND $rows AS row
+       MATCH (a:Symbol {symbolId: row.sourceId})
+       MATCH (b:Symbol {symbolId: row.newTargetId})
+       OPTIONAL MATCH (a)-[existing:DEPENDS_ON {edgeType: row.edgeType}]->(b)
+       WITH a, b, row, existing
+       WHERE existing IS NULL
+       CREATE (a)-[:DEPENDS_ON {
+         edgeType: row.edgeType,
+         confidence: row.confidence,
+         resolution: row.resolution,
+         resolverId: row.resolverId,
+         resolutionPhase: row.resolutionPhase,
+         createdAt: row.createdAt
+       }]->(b)`,
+      { rows },
+    );
+    // Upgrade confidence on pre-existing edges
+    await exec(
+      txConn,
+      `UNWIND $rows AS row
+       MATCH (a:Symbol {symbolId: row.sourceId})
+       MATCH (b:Symbol {symbolId: row.newTargetId})
+       MATCH (a)-[d:DEPENDS_ON {edgeType: row.edgeType}]->(b)
+       WHERE d.confidence < row.confidence
+       SET d.confidence = row.confidence,
+           d.resolution = row.resolution,
+           d.resolverId = row.resolverId,
+           d.resolutionPhase = row.resolutionPhase`,
+      { rows },
+    );
+  });
+}
+
 // ---------------------------------------------------------------------------
 // 5. getExistingEdge — check for an existing edge between two symbols
 // ---------------------------------------------------------------------------

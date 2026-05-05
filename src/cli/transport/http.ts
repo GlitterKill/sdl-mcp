@@ -1,5 +1,5 @@
 import { createReadStream, existsSync, statSync } from "fs";
-import { randomBytes, randomUUID, timingSafeEqual } from "crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { join } from "path";
 import { fileURLToPath } from "url";
@@ -92,10 +92,26 @@ type HttpTransportServices = {
   observabilityService?: ObservabilityService | null;
   beamExplainStore?: BeamExplainStore | null;
   observabilitySseHeartbeatMs?: number;
+  observabilitySseMaxStreamMs?: number;
 };
 
 const LOCALHOST_ORIGIN_RE =
-  /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+  /^https?:\/\/(localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[::1\]|\[::ffff:127\.\d{1,3}\.\d{1,3}\.\d{1,3}\])(:\d+)?$/;
+
+function isLoopbackBindHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized.startsWith("127.") ||
+    normalized === "::1" ||
+    normalized === "[::1]" ||
+    normalized === "0:0:0:0:0:0:0:1" ||
+    normalized === "::ffff:127.0.0.1" ||
+    normalized.startsWith("::ffff:127.") ||
+    normalized === "[::ffff:127.0.0.1]"
+  );
+}
 
 /**
  * Generate a cryptographically random bearer token for HTTP transport auth.
@@ -123,6 +139,88 @@ function isAuthorized(
     return timingSafeEqual(Buffer.from(provided), Buffer.from(expectedToken));
   }
   return false;
+}
+
+export interface HttpAuthRateLimitConfig {
+  bucketSize: number;
+  refillPerSec: number;
+}
+
+type HttpAuthRateLimitDecision =
+  | { allowed: true }
+  | { allowed: false; retryAfterSeconds: number };
+
+interface HttpAuthRateLimitEntry {
+  tokens: number;
+  lastRefill: number;
+  lastSeen: number;
+}
+
+const DEFAULT_HTTP_AUTH_RATE_LIMIT: HttpAuthRateLimitConfig = {
+  bucketSize: 30,
+  refillPerSec: 0.5,
+};
+const HTTP_AUTH_RATE_LIMIT_IDLE_MS = 5 * 60 * 1000;
+
+export function createHttpAuthRateLimiter(
+  config: Partial<HttpAuthRateLimitConfig> = DEFAULT_HTTP_AUTH_RATE_LIMIT,
+  nowMs: () => number = () => Date.now(),
+): {
+  consume: (key: string) => HttpAuthRateLimitDecision;
+  evictIdle: () => void;
+} {
+  const bucketSize = Math.max(
+    1,
+    Math.floor(config.bucketSize ?? DEFAULT_HTTP_AUTH_RATE_LIMIT.bucketSize),
+  );
+  const refillPerSec = Math.max(
+    Number.EPSILON,
+    config.refillPerSec ?? DEFAULT_HTTP_AUTH_RATE_LIMIT.refillPerSec,
+  );
+  const buckets = new Map<string, HttpAuthRateLimitEntry>();
+
+  const consume = (key: string): HttpAuthRateLimitDecision => {
+    const now = nowMs();
+    const entry =
+      buckets.get(key) ??
+      ({
+        tokens: bucketSize,
+        lastRefill: now,
+        lastSeen: now,
+      } satisfies HttpAuthRateLimitEntry);
+
+    const elapsedSeconds = Math.max(0, (now - entry.lastRefill) / 1000);
+    entry.tokens = Math.min(
+      bucketSize,
+      entry.tokens + elapsedSeconds * refillPerSec,
+    );
+    entry.lastRefill = now;
+    entry.lastSeen = now;
+    buckets.set(key, entry);
+
+    if (entry.tokens >= 1) {
+      entry.tokens -= 1;
+      return { allowed: true };
+    }
+
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.max(1, Math.ceil((1 - entry.tokens) / refillPerSec)),
+    };
+  };
+
+  const evictIdle = (): void => {
+    const cutoff = nowMs() - HTTP_AUTH_RATE_LIMIT_IDLE_MS;
+    for (const [key, entry] of buckets) {
+      if (entry.lastSeen < cutoff) buckets.delete(key);
+    }
+  };
+
+  return { consume, evictIdle };
+}
+
+function getAuthRateLimitKey(req: IncomingMessage): string {
+  return req.socket.remoteAddress ?? "unknown";
 }
 
 function setCorsHeaders(req: IncomingMessage, res: ServerResponse): void {
@@ -668,7 +766,7 @@ function serveUiAsset(pathname: string, res: ServerResponse): boolean {
   const fullPath = join(UI_DIR, asset.file);
   try {
     if (!statSync(fullPath).isFile()) {
-      json(res, 500, { error: `Failed to read UI asset: ${asset.file}` });
+      json(res, 500, { error: "Failed to read UI asset" });
       return true;
     }
   } catch (error) {
@@ -678,9 +776,7 @@ function serveUiAsset(pathname: string, res: ServerResponse): boolean {
         : undefined;
     const status = code === "ENOENT" ? 404 : 500;
     const message =
-      status === 404
-        ? `UI asset not found: ${asset.file}`
-        : `Failed to read UI asset: ${asset.file}`;
+      status === 404 ? "UI asset not found" : "Failed to read UI asset";
     json(res, status, { error: message });
     return true;
   }
@@ -699,9 +795,7 @@ function serveUiAsset(pathname: string, res: ServerResponse): boolean {
           : undefined;
       const status = code === "ENOENT" ? 404 : 500;
       const message =
-        status === 404
-          ? `UI asset not found: ${asset.file}`
-          : `Failed to read UI asset: ${asset.file}`;
+        status === 404 ? "UI asset not found" : "Failed to read UI asset";
       json(res, status, { error: message });
       return;
     }
@@ -1035,6 +1129,7 @@ async function handleRestRequest(
     // ---------------------------------------------------------------
     const observabilityService = services.observabilityService ?? null;
     const sseHeartbeatMs = services.observabilitySseHeartbeatMs ?? 15000;
+    const sseMaxStreamMs = services.observabilitySseMaxStreamMs ?? 3_600_000;
 
     if (
       req.method === "GET" &&
@@ -1140,6 +1235,7 @@ async function handleRestRequest(
       let closed = false;
       let unsubscribe: (() => void) | null = null;
       let heartbeatTimer: NodeJS.Timeout | null = null;
+      let maxStreamTimer: NodeJS.Timeout | null = null;
 
       const sendEvent = (event: string, data: unknown): boolean => {
         if (closed || res.destroyed) return false;
@@ -1160,6 +1256,10 @@ async function handleRestRequest(
       const cleanup = (): void => {
         if (closed) return;
         closed = true;
+        if (maxStreamTimer) {
+          clearTimeout(maxStreamTimer);
+          maxStreamTimer = null;
+        }
         if (heartbeatTimer) {
           clearInterval(heartbeatTimer);
           heartbeatTimer = null;
@@ -1175,6 +1275,18 @@ async function handleRestRequest(
           unsubscribe = null;
         }
       };
+
+      req.on("close", cleanup);
+
+      maxStreamTimer = setTimeout(() => {
+        cleanup();
+        try {
+          res.end();
+        } catch {
+          /* best-effort */
+        }
+      }, sseMaxStreamMs);
+      maxStreamTimer.unref();
 
       // Initial snapshot.
       try {
@@ -1218,10 +1330,6 @@ async function handleRestRequest(
         }
       }, sseHeartbeatMs);
       heartbeatTimer.unref();
-
-      req.on("close", () => {
-        cleanup();
-      });
 
       return true;
     }
@@ -1561,8 +1669,21 @@ export async function setupHttpTransport(
   port: number,
   _graphDbPath: string,
   services: HttpTransportServices & MCPServerServices = {},
-  httpAuthConfig?: { enabled?: boolean; token?: string | null },
+  httpAuthConfig?: {
+    enabled?: boolean;
+    token?: string | null;
+    rateLimit?: Partial<HttpAuthRateLimitConfig>;
+  },
+  httpConfig?: {
+    allowRemote?: boolean;
+  },
 ): Promise<HttpServerHandle> {
+  if (!httpConfig?.allowRemote && !isLoopbackBindHost(host)) {
+    throw new Error(
+      `Refusing to bind HTTP transport to non-loopback host ${host}; set http.allowRemote = true to opt in`,
+    );
+  }
+
   // Resolve auth token from config (H3).
   const authEnabled = httpAuthConfig?.enabled !== false;
   let authToken: string | null;
@@ -1577,11 +1698,26 @@ export async function setupHttpTransport(
     );
   } else {
     authToken = generateAuthToken();
-    console.error(`[sdl-mcp] HTTP auth token: ${authToken.slice(0, 8)}...`);
+    const tokenFingerprint = createHash("sha256")
+      .update(authToken)
+      .digest("hex")
+      .slice(0, 12);
+    console.error(
+      `[sdl-mcp] HTTP auth token generated (fingerprint: ${tokenFingerprint})`,
+    );
     console.error(
       "[sdl-mcp] Include header: Authorization: Bearer <token> for /mcp and /api/* endpoints",
     );
   }
+
+  const authRateLimiter = createHttpAuthRateLimiter(
+    httpAuthConfig?.rateLimit ?? DEFAULT_HTTP_AUTH_RATE_LIMIT,
+  );
+  const authRateLimitCleanup = setInterval(
+    () => authRateLimiter.evictIdle(),
+    60_000,
+  );
+  authRateLimitCleanup.unref();
 
   // Unified transport map: sessionId -> Transport (SSE or StreamableHTTP)
   const transports = new Map<string, Transport>();
@@ -1702,16 +1838,28 @@ export async function setupHttpTransport(
           (pathname === "/mcp" ||
             pathname === "/sse" ||
             pathname === "/message" ||
-            pathname.startsWith("/api/")) &&
-          !isAuthorized(req, authToken)
+            pathname.startsWith("/api/"))
         ) {
-          res.writeHead(401, { "Content-Type": "application/json" });
-          res.end(
-            JSON.stringify({
-              error: "Unauthorized: Bearer token required",
-            }),
-          );
-          return;
+          if (authToken) {
+            const rateLimit = authRateLimiter.consume(getAuthRateLimitKey(req));
+            if (!rateLimit.allowed) {
+              res.writeHead(429, {
+                "Content-Type": "application/json",
+                "Retry-After": String(rateLimit.retryAfterSeconds),
+              });
+              res.end(JSON.stringify({ code: "rate_limited" }));
+              return;
+            }
+          }
+          if (!isAuthorized(req, authToken)) {
+            res.writeHead(401, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({
+                error: "Unauthorized: Bearer token required",
+              }),
+            );
+            return;
+          }
         }
 
         // ---------------------------------------------------------------
@@ -1841,6 +1989,7 @@ export async function setupHttpTransport(
     serverClosed,
     close: async () => {
       sessionManager.stopIdleReaper();
+      clearInterval(authRateLimitCleanup);
       // Clean up all active sessions via idempotent cleanup
       for (const sid of [...transports.keys()]) {
         cleanupSession(sid);

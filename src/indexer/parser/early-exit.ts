@@ -29,19 +29,6 @@ export async function resolveFileForIndexing(params: {
 }): Promise<EarlyExitOutcome> {
   const { repoId, repoRoot, fileMeta, languages, mode, existingFile } = params;
 
-  // ── Incremental mtime check ──────────────────────────────────────
-  if (mode === "incremental" && existingFile?.lastIndexedAt) {
-    const lastIndexedMs = new Date(existingFile.lastIndexedAt).getTime();
-    if (fileMeta.mtime <= lastIndexedMs) {
-      logger.debug("Skipping file (mtime not newer than lastIndexedAt)", {
-        file: fileMeta.path,
-        fileMtime: fileMeta.mtime,
-        lastIndexedMs,
-      });
-      return { status: "skip", result: createEmptyProcessFileResult(false) };
-    }
-  }
-
   // ── Read file content ────────────────────────────────────────────
   const filePath = join(repoRoot, fileMeta.path);
   let content: string;
@@ -63,6 +50,30 @@ export async function resolveFileForIndexing(params: {
   const extWithDot = `.${ext}`;
   const relPath = normalizePath(fileMeta.path);
   const fileId = existingFile?.fileId ?? `${repoId}:${relPath}`;
+
+  // ── Incremental mtime check ──────────────────────────────────────
+  if (mode === "incremental" && existingFile?.lastIndexedAt) {
+    const lastIndexedMs = new Date(existingFile.lastIndexedAt).getTime();
+    if (fileMeta.mtime <= lastIndexedMs) {
+      if (existingFile.contentHash === contentHash) {
+        logger.debug("Skipping file (mtime not newer and content hash unchanged)", {
+          file: fileMeta.path,
+          fileMtime: fileMeta.mtime,
+          lastIndexedMs,
+          contentHash,
+        });
+        return { status: "skip", result: createEmptyProcessFileResult(false) };
+      }
+
+      logger.debug("File mtime is stale but content changed; re-indexing", {
+        file: fileMeta.path,
+        fileMtime: fileMeta.mtime,
+        lastIndexedMs,
+        contentHash,
+        previousContentHash: existingFile.contentHash,
+      });
+    }
+  }
 
   // ── Binary file check ────────────────────────────────────────────
   if (content.includes("\0")) {

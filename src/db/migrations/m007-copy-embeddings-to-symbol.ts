@@ -1,23 +1,24 @@
 /**
- * m007 — Copy real embeddings from SymbolEmbedding nodes into Symbol node properties.
+ * m007 — Copy embeddings from SymbolEmbedding nodes into Symbol node properties.
  *
- * Upgrades v6 databases to v7. Reads all SymbolEmbedding rows and copies the
- * serialised vector string into the corresponding Symbol's embeddingMiniLM or
- * embeddingNomic column depending on the model field.  After a successful copy
- * the migrated SymbolEmbedding nodes are deleted so data lives in one place.
+ * Upgrades v6 databases to v7. Reads SymbolEmbedding rows, batches by model,
+ * and uses UNWIND to write to Symbol nodes in chunks of 256 inside a single
+ * transaction. This collapses N round-trips to ceil(N / 256) round-trips per
+ * model, dramatically reducing time on the single-writer txn lock.
  *
- * Skipped rows:
- *   - model = "mock-fallback"  → increment skippedMock counter, leave node
- *   - model = unknown value    → increment skippedUnknown counter, leave node
+ * Mock-fallback and unknown models are left in place. Migrated SymbolEmbedding
+ * nodes for the recognised models are deleted at the end.
  */
-
 import type { Connection } from "kuzu";
-import { exec, queryAll, withTransaction } from "../ladybug-core.js";
+import { exec, execDdl, queryAll, withTransaction } from "../ladybug-core.js";
+import { IDEMPOTENT_DDL_ERROR_RE } from "../migration-runner.js";
 import { logger } from "../../util/logger.js";
 
 export const version = 7;
 export const description =
   "Copy embeddings from SymbolEmbedding nodes into Symbol node properties";
+
+const CHUNK = 256;
 
 /** Shape returned by MATCH (se:SymbolEmbedding) RETURN se.* */
 interface EmbeddingRow {
@@ -26,6 +27,13 @@ interface EmbeddingRow {
   "se.embeddingVector": string | null;
   "se.cardHash": string | null;
   "se.updatedAt": string | null;
+}
+
+interface CopyRow {
+  symbolId: string;
+  vector: string | null;
+  cardHash: string | null;
+  updatedAt: string | null;
 }
 
 export async function up(conn: Connection): Promise<void> {
@@ -46,9 +54,13 @@ export async function up(conn: Connection): Promise<void> {
 
   for (const stmt of alterStatements) {
     try {
-      await exec(conn, stmt, {});
-    } catch {
-      // Column already exists — safe to ignore.
+      await execDdl(conn, stmt);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Tolerate idempotent re-runs only; surface real failures.
+      if (!IDEMPOTENT_DDL_ERROR_RE.test(msg)) {
+        throw err;
+      }
     }
   }
 
@@ -82,95 +94,93 @@ export async function up(conn: Connection): Promise<void> {
   logger.info(`m007: found ${rows.length} SymbolEmbedding rows to process`, {});
 
   // ------------------------------------------------------------------
-  // 3. Copy vectors into Symbol nodes inside a transaction.
+  // 3. Bucket rows by model.
   // ------------------------------------------------------------------
-  let migratedMiniLM = 0;
-  let migratedNomic = 0;
+  const miniLM: CopyRow[] = [];
+  const nomic: CopyRow[] = [];
   let skippedMock = 0;
   let skippedUnknown = 0;
 
-  // Collect symbolIds that were successfully migrated so we can delete them.
+  for (const row of rows) {
+    const symbolId = row["se.symbolId"];
+    const model = row["se.model"];
+    const copy: CopyRow = {
+      symbolId,
+      vector: row["se.embeddingVector"] ?? null,
+      cardHash: row["se.cardHash"] ?? null,
+      updatedAt: row["se.updatedAt"] ?? null,
+    };
+    if (model === "mock-fallback") {
+      skippedMock++;
+    } else if (model === "all-MiniLM-L6-v2") {
+      miniLM.push(copy);
+    } else if (model === "nomic-embed-text-v1.5") {
+      nomic.push(copy);
+    } else {
+      logger.warn(
+        `m007: unknown embedding model "${model}" for symbol ${symbolId} — skipping`,
+        { symbolId, model },
+      );
+      skippedUnknown++;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // 4. UNWIND-batched copy into Symbol nodes inside one transaction.
+  //    Side-effect-only (no RETURN) per UNWIND-batched-writes pattern.
+  // ------------------------------------------------------------------
   const migratedSymbolIds: string[] = [];
 
   await withTransaction(conn, async (txConn) => {
-    for (const row of rows) {
-      const symbolId = row["se.symbolId"];
-      const model = row["se.model"];
-      const vector = row["se.embeddingVector"];
-      const cardHash = row["se.cardHash"];
-      const updatedAt = row["se.updatedAt"];
-
-      if (model === "mock-fallback") {
-        skippedMock++;
-        continue;
-      }
-
-      if (model === "all-MiniLM-L6-v2") {
-        await exec(
-          txConn,
-          `MATCH (s:Symbol {symbolId: $symbolId})
-           SET s.embeddingMiniLM = $vector,
-               s.embeddingMiniLMCardHash = $cardHash,
-               s.embeddingMiniLMUpdatedAt = $updatedAt`,
-          {
-            symbolId,
-            vector: vector ?? null,
-            cardHash: cardHash ?? null,
-            updatedAt: updatedAt ?? null,
-          },
-        );
-        migratedMiniLM++;
-        migratedSymbolIds.push(symbolId);
-        continue;
-      }
-
-      if (model === "nomic-embed-text-v1.5") {
-        await exec(
-          txConn,
-          `MATCH (s:Symbol {symbolId: $symbolId})
-           SET s.embeddingNomic = $vector,
-               s.embeddingNomicCardHash = $cardHash,
-               s.embeddingNomicUpdatedAt = $updatedAt`,
-          {
-            symbolId,
-            vector: vector ?? null,
-            cardHash: cardHash ?? null,
-            updatedAt: updatedAt ?? null,
-          },
-        );
-        migratedNomic++;
-        migratedSymbolIds.push(symbolId);
-        continue;
-      }
-
-      // Unknown model — log and skip.
-      logger.warn(`m007: unknown embedding model "${model}" for symbol ${symbolId} — skipping`, {
-        symbolId,
-        model,
-      });
-      skippedUnknown++;
+    for (let i = 0; i < miniLM.length; i += CHUNK) {
+      const batch = miniLM.slice(i, i + CHUNK);
+      await exec(
+        txConn,
+        `UNWIND $rows AS r
+         MATCH (s:Symbol {symbolId: r.symbolId})
+         SET s.embeddingMiniLM = r.vector,
+             s.embeddingMiniLMCardHash = r.cardHash,
+             s.embeddingMiniLMUpdatedAt = r.updatedAt`,
+        { rows: batch },
+      );
+      for (const r of batch) migratedSymbolIds.push(r.symbolId);
+    }
+    for (let i = 0; i < nomic.length; i += CHUNK) {
+      const batch = nomic.slice(i, i + CHUNK);
+      await exec(
+        txConn,
+        `UNWIND $rows AS r
+         MATCH (s:Symbol {symbolId: r.symbolId})
+         SET s.embeddingNomic = r.vector,
+             s.embeddingNomicCardHash = r.cardHash,
+             s.embeddingNomicUpdatedAt = r.updatedAt`,
+        { rows: batch },
+      );
+      for (const r of batch) migratedSymbolIds.push(r.symbolId);
     }
   });
 
   logger.info(
     `m007: migration complete — ` +
-      `migratedMiniLM=${migratedMiniLM}, ` +
-      `migratedNomic=${migratedNomic}, ` +
+      `migratedMiniLM=${miniLM.length}, ` +
+      `migratedNomic=${nomic.length}, ` +
       `skippedMock=${skippedMock}, ` +
       `skippedUnknown=${skippedUnknown}`,
-    { migratedMiniLM, migratedNomic, skippedMock, skippedUnknown },
+    {
+      migratedMiniLM: miniLM.length,
+      migratedNomic: nomic.length,
+      skippedMock,
+      skippedUnknown,
+    },
   );
 
   // ------------------------------------------------------------------
-  // 4. Delete migrated SymbolEmbedding nodes (mock/unknown are kept).
+  // 5. Delete migrated SymbolEmbedding nodes (mock/unknown are kept).
   // ------------------------------------------------------------------
   if (migratedSymbolIds.length === 0) {
     return;
   }
 
-  // Kuzu does not support IN with a list parameter in all versions, so we
-  // delete in a single pass using the known-good list approach: unwind the
-  // array as a parameter.
   await exec(
     conn,
     `UNWIND $symbolIds AS sid

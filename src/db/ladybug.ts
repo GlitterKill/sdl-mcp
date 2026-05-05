@@ -26,6 +26,8 @@ import { runPendingMigrations } from "./migration-runner.js";
 import {
   clearConnectionPoisoned,
   clearPreparedStatementCache,
+  exec,
+  execDdl,
   drainConnMutex,
   isConnectionPoisoned,
   isConnStuck,
@@ -87,6 +89,10 @@ const FOUR_GB = 4 * ONE_GB;
 // auto-ingest runs immediately after index refresh on ≤16GB systems).
 const DEFAULT_BUFFER_MANAGER_RATIO = 0.25;
 const DEFAULT_CHECKPOINT_THRESHOLD_BYTES = 128 * 1024 * 1024;
+
+export interface LadybugDbInitOptions {
+  bufferPoolBytes?: number | null;
+}
 
 function formatReindexGuidanceError(dbPath: string, msg: string): string {
   logger.error("Database initialization failed", { dbPath, error: msg });
@@ -226,17 +232,29 @@ export function resolveLadybugBufferManagerSizeBytes(
   totalMemoryBytes = totalmem(),
   envValue = process.env.SDL_LADYBUG_BUFFER_POOL_BYTES ??
     process.env.SDL_KUZU_BUFFER_POOL_BYTES,
+  configuredBytes?: number | null,
 ): number {
   const parsedEnvValue = envValue ? Number(envValue) : Number.NaN;
   if (Number.isFinite(parsedEnvValue) && parsedEnvValue >= ONE_GB) {
     return Math.floor(parsedEnvValue);
   }
 
+  const parsedConfiguredBytes = configuredBytes ?? Number.NaN;
+  if (
+    Number.isFinite(parsedConfiguredBytes) &&
+    parsedConfiguredBytes >= ONE_GB
+  ) {
+    return Math.floor(parsedConfiguredBytes);
+  }
+
   const autoSized = Math.floor(totalMemoryBytes * DEFAULT_BUFFER_MANAGER_RATIO);
   return Math.min(Math.max(autoSized, ONE_GB), FOUR_GB);
 }
 
-export async function getLadybugDb(dbPath?: string): Promise<LadybugDatabase> {
+export async function getLadybugDb(
+  dbPath?: string,
+  options?: LadybugDbInitOptions,
+): Promise<LadybugDatabase> {
   const resolvedPath = dbPath
     ? normalizePath(normalizeGraphDbPath(dbPath))
     : currentDbPath;
@@ -285,7 +303,11 @@ export async function getLadybugDb(dbPath?: string): Promise<LadybugDatabase> {
     }
 
     try {
-      const bufferManagerSize = resolveLadybugBufferManagerSizeBytes();
+      const bufferManagerSize = resolveLadybugBufferManagerSizeBytes(
+        undefined,
+        undefined,
+        options?.bufferPoolBytes ?? undefined,
+      );
       dbInstance = new modules.Database(
         normalizedPath,
         bufferManagerSize,
@@ -318,8 +340,7 @@ export async function getLadybugDb(dbPath?: string): Promise<LadybugDatabase> {
 
 async function isConnectionHealthy(conn: LadybugConnection): Promise<boolean> {
   try {
-    const result = await conn.query("RETURN 1");
-    result.close();
+    await exec(conn, "RETURN 1");
     return true;
   } catch {
     return false;
@@ -378,12 +399,7 @@ async function installExtensionsOnce(conn: LadybugConnection): Promise<void> {
 
   for (const ext of MANAGED_EXTENSIONS) {
     try {
-      const result = await conn.query(`INSTALL ${ext}`);
-      if (Array.isArray(result)) {
-        for (const r of result) r.close();
-      } else {
-        result.close();
-      }
+      await execDdl(conn, `INSTALL ${ext}`);
       logger.debug(`Kuzu extension installed`, { extension: ext });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -404,12 +420,7 @@ async function loadExtensionsOnConnection(
 ): Promise<void> {
   for (const ext of MANAGED_EXTENSIONS) {
     try {
-      const result = await conn.query(`LOAD EXTENSION ${ext}`);
-      if (Array.isArray(result)) {
-        for (const r of result) r.close();
-      } else {
-        result.close();
-      }
+      await execDdl(conn, `LOAD EXTENSION ${ext}`);
       markExtensionLoaded(ext);
       logger.debug(`Kuzu extension loaded`, { extension: ext });
     } catch (err) {
@@ -438,12 +449,7 @@ async function checkpointWal(
   phase: string,
 ): Promise<boolean> {
   try {
-    const result = await conn.query("CHECKPOINT");
-    if (Array.isArray(result)) {
-      for (const r of result) r.close();
-    } else {
-      result.close();
-    }
+    await execDdl(conn, "CHECKPOINT");
     logger.debug(`LadybugDB CHECKPOINT completed`, { phase });
     return true;
   } catch (err) {
@@ -733,7 +739,10 @@ export async function withWriteConn<T>(
 // runs lazily on first invocation.
 configureWriteConnAcquirer(withWriteConn);
 
-export async function initLadybugDb(dbPath: string): Promise<void> {
+export async function initLadybugDb(
+  dbPath: string,
+  options?: LadybugDbInitOptions,
+): Promise<void> {
   const normalizedPath = normalizePath(normalizeGraphDbPath(dbPath));
 
   logger.info("Initializing LadybugDB", { path: normalizedPath });
@@ -755,7 +764,7 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
 
   try {
     // Step 1: Open database and initialize connection pool
-    await getLadybugDb(normalizedPath);
+    await getLadybugDb(normalizedPath, options);
     await getLadybugConn(); // triggers pool init
 
     // Step 2: Read current schema version (may throw if table doesn't exist)
@@ -812,13 +821,21 @@ export async function initLadybugDb(dbPath: string): Promise<void> {
         const sdlConfig = loadConfig();
         const semanticConfig = sdlConfig.semantic;
         if (semanticConfig?.enabled && semanticConfig.retrieval) {
-          const indexConn = await getLadybugConn();
+          let indexConn = await getLadybugConn();
           // Migrate DOUBLE[] → DOUBLE[N] for vector indexing (existing DBs)
           // Only migrate vec columns on existing DBs — fresh DBs already have DOUBLE[N].
           // ALTER TABLE DROP+ADD corrupts Kuzu's column cache for the current process.
           if (!freshlyCreated && !vecMigrationDone) {
             await migrateVecColumnsToFixedSize(indexConn);
             vecMigrationDone = true;
+            // Clear prepared-statement caches on every read-pool conn —
+            // the post-DDL column metadata invalidates any cached plan
+            // that referenced the dropped vec columns.
+            for (const c of readPool) clearPreparedStatementCache(c);
+            // The conn we just used to run DDL has stale native column
+            // metadata cached. Take a fresh checkout for the index-bootstrap
+            // calls below.
+            indexConn = await getLadybugConn();
           }
           // Get a fresh connection after DDL changes to avoid stale column cache
 
@@ -1017,6 +1034,14 @@ export async function closeLadybugDb(): Promise<void> {
 
   // Close write connection
   if (writeConn) {
+    // Drain the write conn's per-connection mutex before issuing CHECKPOINT.
+    // Otherwise CHECKPOINT can race a still-in-flight write executing on
+    // the same native handle and crash inside the libkuzu C++ destructor.
+    try {
+      await drainConnMutex(writeConn, 5_000, shutdownError);
+    } catch {
+      // Best-effort drain — proceed with checkpoint regardless.
+    }
     // Force CHECKPOINT on the way out so the next startup opens a clean WAL.
     // Prevents the Kuzu 0.15.2 UNREACHABLE_CODE crash in wal_record.cpp:76
     // when `LOAD EXTENSION fts` replays an uncheckpointed WAL.

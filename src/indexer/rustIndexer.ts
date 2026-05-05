@@ -394,7 +394,7 @@ export function parseFilesRust(
   repoRoot: string,
   files: FileMetadata[],
   threadCount: number = 0,
-): RustParseResult[] | null {
+): Array<RustParseResult | null> | null {
   const addon = loadNativeAddon();
   if (!addon) return null;
 
@@ -427,9 +427,7 @@ export function parseFilesRust(
   });
 
   if (nativeEntries.length === 0) {
-    return results.filter(
-      (result): result is RustParseResult => result !== null,
-    );
+    return results;
   }
 
   for (
@@ -498,7 +496,7 @@ export function parseFilesRust(
     }
   }
 
-  return results.filter((result): result is RustParseResult => result !== null);
+  return results;
 }
 
 /**
@@ -510,7 +508,7 @@ export async function parseFilesRustAsync(
   repoRoot: string,
   files: FileMetadata[],
   threadCount: number = 0,
-): Promise<RustParseResult[] | null> {
+): Promise<Array<RustParseResult | null> | null> {
   const addon = loadNativeAddon();
   if (!addon) return null;
 
@@ -546,9 +544,7 @@ export async function parseFilesRustAsync(
   });
 
   if (nativeEntries.length === 0) {
-    return results.filter(
-      (result): result is RustParseResult => result !== null,
-    );
+    return results;
   }
 
   const batch = nativeEntries.map((entry) => entry.input);
@@ -588,7 +584,7 @@ export async function parseFilesRustAsync(
     return null;
   }
 
-  return results.filter((result): result is RustParseResult => result !== null);
+  return results;
 }
 
 /**

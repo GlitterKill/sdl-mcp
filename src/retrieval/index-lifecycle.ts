@@ -7,7 +7,7 @@
  */
 
 import type { Connection } from "kuzu";
-import { queryAll, runExclusive } from "../db/ladybug-core.js";
+import { execStoredProc, queryAll } from "../db/ladybug-core.js";
 import { getExtensionCapabilities } from "../db/extension-caps.js";
 import { logger } from "../util/logger.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
@@ -58,6 +58,11 @@ export interface IndexEnsureResult {
   failed: string[];
 }
 
+export type DropVectorIndexResult =
+  | { status: "dropped" }
+  | { status: "absent" }
+  | { status: "failed"; error: string };
+
 // ---------------------------------------------------------------------------
 // FTS index
 // ---------------------------------------------------------------------------
@@ -91,13 +96,9 @@ export async function createFtsIndex(
     // Validate names to prevent injection before string interpolation.
     validateIdentifier(tableName, "table name");
     validateIdentifier(indexName, "index name");
-    // CALL stored procedures cannot be prepared; use conn.query() directly.
-    // Wrap in runExclusive so deferred-index builds don't race concurrent
-    // tool handlers sharing the same read-pool connection.
-    await runExclusive(conn, () =>
-      conn.query(
-        `CALL CREATE_FTS_INDEX('${tableName}', '${indexName}', ['searchText'])`,
-      ),
+    await execStoredProc(
+      conn,
+      `CALL CREATE_FTS_INDEX('${tableName}', '${indexName}', ['searchText'])`,
     );
     logger.info(
       `[index-lifecycle] FTS index '${indexName}' created on ${tableName}.searchText`,
@@ -143,11 +144,9 @@ export async function createVectorIndex(
     validateIdentifier(tableName, "table name");
     validateIdentifier(propertyName, "property name");
     validateIdentifier(indexName, "index name");
-    // CALL stored procedures cannot be prepared; use conn.query() directly.
-    await runExclusive(conn, () =>
-      conn.query(
-        `CALL CREATE_VECTOR_INDEX('${tableName}', '${indexName}', '${propertyName}', metric := 'cosine', efc := ${Number(efc)})`,
-      ),
+    await execStoredProc(
+      conn,
+      `CALL CREATE_VECTOR_INDEX('${tableName}', '${indexName}', '${propertyName}', metric := 'cosine', efc := ${Number(efc)})`,
     );
     logger.info(
       `[index-lifecycle] Vector index '${indexName}' created on ${tableName}.${propertyName} (dim=${dimension}, efc=${efc})`,
@@ -205,17 +204,18 @@ export async function dropVectorIndex(
   conn: Connection,
   tableName: string,
   indexName: string,
-): Promise<boolean> {
+): Promise<DropVectorIndexResult> {
   try {
     validateIdentifier(tableName, "table name");
     validateIdentifier(indexName, "index name");
-    await runExclusive(conn, () =>
-      conn.query(`CALL DROP_VECTOR_INDEX('${tableName}', '${indexName}')`),
+    await execStoredProc(
+      conn,
+      `CALL DROP_VECTOR_INDEX('${tableName}', '${indexName}')`,
     );
     logger.info(
       `[index-lifecycle] Vector index '${indexName}' dropped on ${tableName}`,
     );
-    return true;
+    return { status: "dropped" };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (isAbsentIndexError(msg)) {
@@ -234,16 +234,16 @@ export async function dropVectorIndex(
           logger.debug(
             `[index-lifecycle] Vector index '${indexName}' on ${tableName} already absent`,
           );
-          return true;
+          return { status: "absent" };
         }
       } catch {
-        // showIndexes threw — fall through to warn+return false.
+        // showIndexes threw — fall through to warn and return a failed result.
       }
     }
     logger.warn(
       `[index-lifecycle] Vector index '${indexName}' on ${tableName} drop failed: ${msg}`,
     );
-    return false;
+    return { status: "failed", error: msg };
   }
 }
 

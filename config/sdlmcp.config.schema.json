@@ -900,6 +900,13 @@
           "minimum": 1000,
           "maximum": 60000,
           "default": 15000
+        },
+        "sseMaxStreamMs": {
+          "type": "integer",
+          "minimum": 60000,
+          "maximum": 86400000,
+          "default": 3600000,
+          "description": "Maximum lifetime for a single observability SSE stream before the server closes it."
         }
       },
       "default": {
@@ -912,7 +919,8 @@
         "scipIngestMetrics": true,
         "beamExplainCapacity": 128,
         "beamExplainEntriesPerSlice": 512,
-        "sseHeartbeatMs": 15000
+        "sseHeartbeatMs": 15000,
+        "sseMaxStreamMs": 3600000
       }
     },
     "tracing": {
@@ -1163,11 +1171,52 @@
           "description": "Static bearer token. When null a random token is generated at startup.",
           "minLength": 1,
           "default": null
+        },
+        "rateLimit": {
+          "type": "object",
+          "description": "Per-client token bucket for protected HTTP routes before bearer-token comparison",
+          "properties": {
+            "bucketSize": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "default": 30
+            },
+            "refillPerSec": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1000,
+              "default": 0.5
+            }
+          },
+          "default": {
+            "bucketSize": 30,
+            "refillPerSec": 0.5
+          }
         }
       },
       "default": {
         "enabled": false,
-        "token": null
+        "token": null,
+        "rateLimit": {
+          "bucketSize": 30,
+          "refillPerSec": 0.5
+        }
+      }
+    },
+    "http": {
+      "type": "object",
+      "description": "HTTP transport bind configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "allowRemote": {
+          "type": "boolean",
+          "description": "Allow binding the HTTP transport to a non-loopback host such as 0.0.0.0 or ::.",
+          "default": false
+        }
+      },
+      "default": {
+        "allowRemote": false
       }
     },
     "codeMode": {

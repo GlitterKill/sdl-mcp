@@ -21,7 +21,7 @@
  */
 
 import type { Connection } from "kuzu";
-import { exec, querySingle } from "./ladybug-core.js";
+import { exec, execDdl, execStoredProcRaw, querySingle } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
 import { LADYBUG_SCHEMA_VERSION } from "./migrations/index.js";
 
@@ -31,7 +31,7 @@ import { LADYBUG_SCHEMA_VERSION } from "./migrations/index.js";
  * for the hybrid-retrieval feature (Stage 0+). SymbolEmbedding is kept during
  * migration until Stage 1 is verified complete.
  */
-const NODE_TABLES: string[] = [
+export const NODE_TABLES: string[] = [
   `CREATE NODE TABLE IF NOT EXISTS Repo (
     repoId STRING PRIMARY KEY,
     rootPath STRING,
@@ -70,7 +70,12 @@ const NODE_TABLES: string[] = [
     sideEffectsJson STRING,
     roleTagsJson STRING,
     searchText STRING,
-    updatedAt STRING,    embeddingNomic STRING,
+    updatedAt STRING,
+    embeddingMiniLM STRING,
+    embeddingMiniLMCardHash STRING,
+    embeddingMiniLMUpdatedAt STRING,
+    embeddingMiniLMVec DOUBLE[768],
+    embeddingNomic STRING,
     embeddingNomicCardHash STRING,
     embeddingNomicUpdatedAt STRING,
     embeddingJinaCode STRING,
@@ -143,7 +148,12 @@ const NODE_TABLES: string[] = [
     repoId STRING,
     summary STRING,
     searchText STRING,
-    updatedAt STRING,    embeddingNomic STRING,
+    updatedAt STRING,
+    embeddingMiniLM STRING,
+    embeddingMiniLMCardHash STRING,
+    embeddingMiniLMUpdatedAt STRING,
+    embeddingMiniLMVec DOUBLE[768],
+    embeddingNomic STRING,
     embeddingNomicCardHash STRING,
     embeddingNomicUpdatedAt STRING,
     embeddingNomicVec DOUBLE[768],
@@ -204,6 +214,10 @@ const NODE_TABLES: string[] = [
     taskText STRING,
     createdAt STRING,
     searchText STRING,
+    embeddingMiniLM STRING,
+    embeddingMiniLMCardHash STRING,
+    embeddingMiniLMUpdatedAt STRING,
+    embeddingMiniLMVec DOUBLE[768],
     embeddingNomic STRING,
     embeddingNomicCardHash STRING,
     embeddingNomicUpdatedAt STRING,
@@ -427,11 +441,6 @@ const REL_TABLES: string[] = [
   )`,
 ];
 
-async function execDdl(conn: Connection, ddl: string): Promise<void> {
-  const result = await conn.query(ddl);
-  result.close();
-}
-
 const INDEXES: string[] = [
   // Secondary indexes for common query patterns
   `CREATE INDEX IF NOT EXISTS idx_symbol_name ON Symbol(name)`,
@@ -528,12 +537,18 @@ export async function migrateVecColumnsToFixedSize(
   // that occurs when DROP+ADD is used on columns with existing HNSW indexes.
   let hasHnswIndexes = false;
   try {
-    const result = await conn.query("CALL SHOW_INDEXES() RETURN *");
-    const rows = await result.getAll();
-    result.close();
-    hasHnswIndexes = (rows as Array<Record<string, unknown>>).some(
-      (r) => r.index_type === "HNSW",
+    const result = await execStoredProcRaw(
+      conn,
+      "CALL SHOW_INDEXES() RETURN *",
     );
+    try {
+      const rows = await result.getAll();
+      hasHnswIndexes = (rows as Array<Record<string, unknown>>).some(
+        (r) => r.index_type === "HNSW",
+      );
+    } finally {
+      result.close();
+    }
   } catch {
     // SHOW_INDEXES unavailable — assume no indexes, allow migration
   }
@@ -560,14 +575,18 @@ export async function migrateVecColumnsToFixedSize(
   for (const { table, column, size } of migrations) {
     try {
       if (!tableInfoCache.has(table)) {
-        const infoResult = await conn.query(
+        const infoResult = await execStoredProcRaw(
+          conn,
           `CALL TABLE_INFO('${table}') RETURN *`,
         );
-        const infoRows = (await infoResult.getAll()) as Array<
-          Record<string, unknown>
-        >;
-        infoResult.close();
-        tableInfoCache.set(table, infoRows);
+        try {
+          const infoRows = (await infoResult.getAll()) as Array<
+            Record<string, unknown>
+          >;
+          tableInfoCache.set(table, infoRows);
+        } finally {
+          infoResult.close();
+        }
       }
       const colInfo = tableInfoCache.get(table)!.find(
         (r) => r.name === column,
@@ -579,8 +598,34 @@ export async function migrateVecColumnsToFixedSize(
         continue;
       }
 
-      await conn.query(`ALTER TABLE ${table} DROP ${column}`);
-      await conn.query(`ALTER TABLE ${table} ADD ${column} DOUBLE[${size}]`);
+      // Count non-null rows before DROP so a silent data loss surfaces
+      // in logs. Parameterised so the column name is safe (we already
+      // gated on the column name being a known fixed-size vec target).
+      try {
+        const countRow = await querySingle<{ n: number | bigint }>(
+          conn,
+          `MATCH (n:${table}) WHERE n.${column} IS NOT NULL RETURN count(n) AS n`,
+        );
+        const nonNull =
+          typeof countRow?.n === "bigint"
+            ? Number(countRow.n)
+            : (countRow?.n ?? 0);
+        if (nonNull > 0) {
+          logger.warn(
+            `[schema-migration] DROP+ADD will discard ${nonNull} non-null vector row(s) on ${table}.${column}; rebuild required after migration`,
+          );
+        }
+      } catch (countErr) {
+        logger.debug(
+          `[schema-migration] Pre-drop count failed for ${table}.${column}: ${countErr instanceof Error ? countErr.message : String(countErr)}`,
+        );
+      }
+
+      await execDdl(conn, `ALTER TABLE ${table} DROP ${column}`);
+      await execDdl(
+        conn,
+        `ALTER TABLE ${table} ADD ${column} DOUBLE[${size}]`,
+      );
       logger.info(
         `[schema-migration] Migrated ${table}.${column} to DOUBLE[${size}]`,
       );

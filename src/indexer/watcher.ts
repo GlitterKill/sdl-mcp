@@ -229,6 +229,10 @@ export async function watchRepositoryWithIndexer(
   let closed = false;
   let restarting = false;
   let lastRestartMs = 0;
+  // AbortController for in-flight reindex operations. close() and
+  // restartWatcher() abort it so a late-completing reindex doesn't decrement
+  // pendingChanges twice or schedule retries against a stale watcher state.
+  let abortController = new AbortController();
   const staleCheckIntervalMs = Math.max(
     5_000,
     Math.floor(WATCHER_STALE_THRESHOLD_MS / 4),
@@ -263,6 +267,11 @@ export async function watchRepositoryWithIndexer(
     filePath: string,
     attempt = 0,
   ): Promise<void> => {
+    // Snapshot the abort signal at entry. If restartWatcher() or close()
+    // swaps abortController out from under us during the await, the snapshot
+    // still tracks the cancellation we care about for THIS reindex.
+    const abortSignal = abortController.signal;
+    let scheduledRetry = false;
     try {
       // Health gate: bail before touching the DB if the read pool is
       // already wedged. Avoids piling on more 60s reindex timeouts when
@@ -314,7 +323,6 @@ export async function watchRepositoryWithIndexer(
         if (timeoutTimer) clearTimeout(timeoutTimer);
       }
       health.eventsProcessed += 1;
-      health.pendingChanges = Math.max(0, health.pendingChanges - 1);
       health.lastSuccessfulReindexAt = new Date().toISOString();
       health.stale = false;
     } catch (error) {
@@ -322,19 +330,28 @@ export async function watchRepositoryWithIndexer(
       recordWatcherError(
         `[sdl-mcp] Failed incremental index for ${filePath}: ${msg}`,
       );
-      if (attempt + 1 < WATCHER_REINDEX_MAX_ATTEMPTS && !closed) {
+      if (attempt + 1 < WATCHER_REINDEX_MAX_ATTEMPTS && !closed && !abortSignal.aborted) {
         const delay = Math.min(
           WATCHER_REINDEX_RETRY_MAX_MS,
           WATCHER_REINDEX_RETRY_BASE_MS * 2 ** attempt,
         );
+        scheduledRetry = true;
         setTimeout(() => {
+          // Re-check abort/closed at retry firing time so a watcher restart
+          // between schedule and fire doesn't reindex against stale state.
+          if (closed || abortSignal.aborted) {
+            health.pendingChanges = Math.max(0, health.pendingChanges - 1);
+            return;
+          }
           void reindexWithRetry(filePath, attempt + 1).catch((err: unknown) => {
             const errMsg = err instanceof Error ? err.message : String(err);
             recordWatcherError(`[sdl-mcp] reindexWithRetry failed: ${errMsg}`);
           });
         }, delay).unref();
-      } else {
-        // All retry attempts exhausted; decrement pending so stale detection stays accurate
+      }
+      // exhausted retries fall through to finally for decrement
+    } finally {
+      if (!scheduledRetry) {
         health.pendingChanges = Math.max(0, health.pendingChanges - 1);
       }
     }

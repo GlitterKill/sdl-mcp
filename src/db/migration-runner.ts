@@ -11,6 +11,14 @@ import { logger } from "../util/logger.js";
 import { DatabaseError } from "../domain/errors.js";
 
 /**
+ * LadybugDB/Kuzu phrasings that mean an idempotent DDL statement has already
+ * been applied. Migrations should use this shared guard so retry behavior does
+ * not drift between files.
+ */
+export const IDEMPOTENT_DDL_ERROR_RE =
+  /already exists|duplicate column|already has property/i;
+
+/**
  * Validate that a migration list is sequential with no gaps or duplicates.
  * Exported for testing.
  */

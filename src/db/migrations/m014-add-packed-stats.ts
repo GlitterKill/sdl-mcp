@@ -1,4 +1,6 @@
 import type { Connection } from "kuzu";
+import { execDdl, execStoredProcRaw } from "../ladybug-core.js";
+import { IDEMPOTENT_DDL_ERROR_RE } from "../migration-runner.js";
 
 /**
  * m014 — Extend UsageSnapshot node table with packed-wire-format telemetry.
@@ -32,7 +34,7 @@ export async function up(conn: Connection): Promise<void> {
       await execDdl(conn, ddl);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (/already exists|already has property|duplicate column/i.test(msg)) {
+      if (IDEMPOTENT_DDL_ERROR_RE.test(msg)) {
         continue;
       }
       throw err;
@@ -41,10 +43,9 @@ export async function up(conn: Connection): Promise<void> {
 }
 
 async function tableExists(conn: Connection, name: string): Promise<boolean> {
+  let result: Awaited<ReturnType<typeof execStoredProcRaw>> | undefined;
   try {
-    const result = await conn.query(
-      `CALL show_tables() RETURN name`,
-    );
+    result = await execStoredProcRaw(conn, `CALL show_tables() RETURN name`);
     let exists = false;
     while (await result.hasNext()) {
       const row = (await result.getNext()) as { name?: unknown };
@@ -53,14 +54,10 @@ async function tableExists(conn: Connection, name: string): Promise<boolean> {
         break;
       }
     }
-    result.close();
     return exists;
   } catch {
     return false;
+  } finally {
+    result?.close();
   }
-}
-
-async function execDdl(conn: Connection, ddl: string): Promise<void> {
-  const result = await conn.query(ddl);
-  result.close();
 }

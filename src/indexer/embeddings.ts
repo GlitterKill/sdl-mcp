@@ -34,6 +34,7 @@ import {
 } from "../retrieval/model-mapping.js";
 import { prepareSymbolEmbeddingInputs } from "./symbol-embedding-context.js";
 import { buildSymbolEmbeddingText } from "./symbol-embedding-text.js";
+import { IndexError } from "../domain/errors.js";
 
 /** Legacy dimension constant — only used by MockEmbeddingProvider */
 export const EMBEDDING_DIMENSION = 64;
@@ -47,6 +48,16 @@ export const EMBEDDING_DIMENSION = 64;
  * reference value.
  */
 export const REFRESH_BATCH_SIZE = DEFAULT_EMBEDDING_BATCH_SIZE;
+
+let embeddingFailureCount = 0;
+
+export function getEmbeddingFailureCount(): number {
+  return embeddingFailureCount;
+}
+
+function recordEmbeddingFailure(): void {
+  embeddingFailureCount++;
+}
 
 export interface EmbeddingScoredSymbol {
   symbol: ladybugDb.SymbolRow;
@@ -406,16 +417,21 @@ export async function refreshSymbolEmbeddings(params: {
     uncachedItems.length >= VECTOR_REBUILD_THRESHOLD;
   let indexDropped = false;
   if (useRebuildPath) {
-    indexDropped = await withWriteConn((wConn) =>
+    const dropResult = await withWriteConn((wConn) =>
       dropVectorIndex(wConn, "Symbol", indexName),
     );
-    if (indexDropped) {
+    indexDropped = dropResult.status !== "failed";
+    if (dropResult.status === "dropped") {
       logger.info(
         `[embeddings] Bulk path: dropped vector index '${indexName}' for ${uncachedItems.length} writes (rebuild after)`,
       );
+    } else if (dropResult.status === "absent") {
+      logger.debug(
+        `[embeddings] Vector index '${indexName}' already absent before bulk rebuild`,
+      );
     } else {
       logger.warn(
-        `[embeddings] Vector index '${indexName}' drop failed; falling back to per-row HNSW maintenance`,
+        `[embeddings] Vector index '${indexName}' drop failed (${dropResult.error}); falling back to per-row HNSW maintenance`,
       );
     }
   }
@@ -444,7 +460,12 @@ export async function refreshSymbolEmbeddings(params: {
 
   // Shared mutable counters — updated inside processBatch results (not inside
   // concurrent closures directly) so there are no data races.
-  type BatchResult = { embedded: number; skipped: number; terminal: boolean };
+  type BatchResult = {
+    embedded: number;
+    skipped: number;
+    terminal: boolean;
+    failed: boolean;
+  };
 
   // P2.b: write-coalescing buffer for the rebuild path. When the HNSW index is
   // dropped, every per-ONNX-batch DB write is just an INSERT into a plain
@@ -475,6 +496,7 @@ export async function refreshSymbolEmbeddings(params: {
     try {
       batchVectors = await provider.embed(batchTexts);
     } catch (error) {
+      recordEmbeddingFailure();
       logger.warn("Batch embedding failed, continuing to next batch", {
         batchSize: batch.length,
         firstSymbolId: batch[0]?.symbol.symbolId,
@@ -488,9 +510,9 @@ export async function refreshSymbolEmbeddings(params: {
         logger.error("Terminal provider error, aborting refresh", {
           error: errorMsg,
         });
-        return { embedded: 0, skipped: 0, terminal: true };
+        return { embedded: 0, skipped: 0, terminal: true, failed: true };
       }
-      return { embedded: 0, skipped: 0, terminal: false };
+      return { embedded: 0, skipped: 0, terminal: false, failed: true };
     }
 
     // Guard: validate provider returned correct vector count
@@ -500,7 +522,8 @@ export async function refreshSymbolEmbeddings(params: {
         received: batchVectors.length,
         firstSymbolId: batch[0]?.symbol.symbolId,
       });
-      return { embedded: 0, skipped: 0, terminal: false };
+      recordEmbeddingFailure();
+      return { embedded: 0, skipped: 0, terminal: false, failed: true };
     }
 
     // Check if provider degraded to mock mid-refresh
@@ -508,7 +531,7 @@ export async function refreshSymbolEmbeddings(params: {
       logger.debug("Provider degraded to mock, skipping batch persistence", {
         batchSize: batch.length,
       });
-      return { embedded: 0, skipped: batch.length, terminal: false };
+      return { embedded: 0, skipped: batch.length, terminal: false, failed: false };
     }
 
     // P5: post-embed recheck for race avoidance is now an in-memory lookup
@@ -561,12 +584,15 @@ export async function refreshSymbolEmbeddings(params: {
       embedded: batchItems.length,
       skipped: batch.length - batchItems.length,
       terminal: false,
+      failed: false,
     };
   };
 
   // Process batches with bounded concurrency using a sliding window.
   // Each "chunk" is at most maxConcurrency batches run in parallel.
   let aborted = false;
+  let failedBatches = 0;
+  let processedBatches = 0;
   try {
     for (
       let chunkStart = 0;
@@ -580,6 +606,8 @@ export async function refreshSymbolEmbeddings(params: {
           const res = await processBatch(b);
           embedded += res.embedded;
           skipped += res.skipped;
+          processedBatches++;
+          if (res.failed) failedBatches++;
           fireProgress();
           return res;
         }),
@@ -596,7 +624,14 @@ export async function refreshSymbolEmbeddings(params: {
           logger.warn("Unexpected processBatch rejection", {
             reason: String(result.reason),
           });
+          recordEmbeddingFailure();
+          failedBatches++;
+          processedBatches++;
         }
+      }
+
+      if (processedBatches > 0 && failedBatches / processedBatches > 0.5) {
+        throw new IndexError("Embedding failure rate exceeds 50%");
       }
 
       // P2.b: chunk-boundary opportunistic flush. Only flushes when the

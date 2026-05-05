@@ -261,13 +261,13 @@ describe("showIndexes — SHOW_INDEXES() RETURN * compatibility", () => {
 // createFtsIndex — safe literal query path
 // ---------------------------------------------------------------------------
 describe("createFtsIndex — safe literal query", () => {
-  it("uses queryAll instead of exec for FTS index creation", () => {
+  it("uses the stored-procedure helper for FTS index creation", () => {
     const fnStart = src.indexOf("export async function createFtsIndex");
     assert.ok(fnStart !== -1, "createFtsIndex function must exist");
     const fnBody = src.slice(fnStart, fnStart + 800);
     assert.ok(
-      fnBody.includes("queryAll(") || fnBody.includes("queryAll<") || fnBody.includes("conn.query("),
-      "createFtsIndex should use queryAll (not exec) for Kuzu procedure calls",
+      fnBody.includes("execStoredProc("),
+      "createFtsIndex should use execStoredProc for Kuzu procedure calls",
     );
   });
 
@@ -355,7 +355,7 @@ describe("initLadybugDb bootstrap wiring", () => {
   it("calls ensureIndexes during initLadybugDb", () => {
     const fnStart = ladybugSrc.indexOf("export async function initLadybugDb");
     assert.ok(fnStart !== -1, "initLadybugDb must exist");
-    const fnBody = ladybugSrc.slice(fnStart, fnStart + 5000);
+    const fnBody = ladybugSrc.slice(fnStart, fnStart + 8000);
     assert.ok(
       fnBody.includes("ensureIndexes("),
       "initLadybugDb should call ensureIndexes during startup",
@@ -364,7 +364,7 @@ describe("initLadybugDb bootstrap wiring", () => {
 
   it("calls ensureEntityIndexes during initLadybugDb", () => {
     const fnStart = ladybugSrc.indexOf("export async function initLadybugDb");
-    const fnBody = ladybugSrc.slice(fnStart, fnStart + 5000);
+    const fnBody = ladybugSrc.slice(fnStart, fnStart + 8000);
     assert.ok(
       fnBody.includes("ensureEntityIndexes("),
       "initLadybugDb should call ensureEntityIndexes during startup",
@@ -373,7 +373,7 @@ describe("initLadybugDb bootstrap wiring", () => {
 
   it("index bootstrap failure does not block DB init", () => {
     const fnStart = ladybugSrc.indexOf("export async function initLadybugDb");
-    const fnBody = ladybugSrc.slice(fnStart, fnStart + 5000);
+    const fnBody = ladybugSrc.slice(fnStart, fnStart + 8000);
     assert.ok(
       fnBody.includes("non-fatal"),
       "index bootstrap failure should be logged as non-fatal",

@@ -906,6 +906,7 @@ export interface HealthComponents {
   errorRate: number;
   edgeQuality: number;
   callResolution?: number;
+  embeddingFailures?: number;
 }
 
 export interface WatcherHealth {

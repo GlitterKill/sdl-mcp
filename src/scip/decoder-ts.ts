@@ -162,6 +162,7 @@ function mapEncoding(enc: number): string {
  */
 export class TypeScriptScipDecoder implements ScipDecoder {
   private index: ProtoScipIndex | null = null;
+  private closed = false;
 
   constructor(private readonly filePath: string) {}
 
@@ -180,7 +181,12 @@ export class TypeScriptScipDecoder implements ScipDecoder {
 
   async *documents(): AsyncIterable<ScipDocument> {
     await this.ensureLoaded();
-    for (const doc of this.index!.documents) {
+    // Snapshot the index reference so that a concurrent close() that nulls
+    // out this.index does not produce a null deref on the next yield.
+    const snapshot = this.index;
+    if (!snapshot) return;
+    for (const doc of snapshot.documents) {
+      if (this.closed) return;
       yield mapDocument(doc);
     }
   }
@@ -191,11 +197,16 @@ export class TypeScriptScipDecoder implements ScipDecoder {
   }
 
   close(): void {
+    this.closed = true;
     this.index = null;
   }
 
   /** Maximum SCIP index file size (256 MB) for the TS fallback decoder. */
   private static readonly MAX_INDEX_SIZE = 256 * 1024 * 1024;
+  /** Maximum number of documents in a SCIP index for the TS fallback decoder. */
+  private static readonly MAX_DOCUMENTS = 50_000;
+  /** Maximum total occurrences across all documents for the TS fallback decoder. */
+  private static readonly MAX_TOTAL_OCCURRENCES = 5_000_000;
 
   private async ensureLoaded(): Promise<void> {
     if (this.index) return;
@@ -210,6 +221,29 @@ export class TypeScriptScipDecoder implements ScipDecoder {
       }
       const buf = await readFile(this.filePath);
       this.index = decodeScipIndex(new Uint8Array(buf));
+      // Refuse oversized indexes that would push memory usage near the heap
+      // limit. The Rust streaming decoder should be used in that case.
+      const docCount = this.index.documents?.length ?? 0;
+      if (docCount > TypeScriptScipDecoder.MAX_DOCUMENTS) {
+        this.index = null;
+        throw new ScipDecodeError(
+          `SCIP index at ${this.filePath} has ${docCount} documents, exceeding the ` +
+          `${TypeScriptScipDecoder.MAX_DOCUMENTS} document limit for the TypeScript decoder. ` +
+          `Use the Rust native addon for large indexes.`,
+        );
+      }
+      let totalOcc = 0;
+      for (const d of this.index.documents ?? []) {
+        totalOcc += d.occurrences?.length ?? 0;
+        if (totalOcc > TypeScriptScipDecoder.MAX_TOTAL_OCCURRENCES) {
+          this.index = null;
+          throw new ScipDecodeError(
+            `SCIP index at ${this.filePath} has more than ` +
+            `${TypeScriptScipDecoder.MAX_TOTAL_OCCURRENCES} total occurrences, exceeding ` +
+            `the limit for the TypeScript decoder. Use the Rust native addon for large indexes.`,
+          );
+        }
+      }
     } catch (err) {
       if (err instanceof ScipDecodeError) throw err;
       const msg = err instanceof Error ? err.message : String(err);

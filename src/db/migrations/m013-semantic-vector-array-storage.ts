@@ -1,10 +1,11 @@
 import type { Connection } from "kuzu";
 import type { Migration } from "./types.js";
-import { exec, queryAll } from "../ladybug-core.js";
+import { execDdl, queryAll } from "../ladybug-core.js";
+import { IDEMPOTENT_DDL_ERROR_RE } from "../migration-runner.js";
 import { logger } from "../../util/logger.js";
 
 export const version = 13;
-export const description = "Add DOUBLE[] vector columns for semantic embeddings";
+export const description = "Add fixed-size vector columns for semantic embeddings";
 
 /**
  * Check whether a node table exists in the current graph database.
@@ -26,7 +27,8 @@ async function tableExists(conn: Connection, tableName: string): Promise<boolean
  *
  * The existing STRING columns (embeddingMiniLM, embeddingNomic, embeddingJinaCode) are
  * kept for backward compatibility but will no longer be used for retrieval.
- * New DOUBLE[] columns store embeddings in Kuzu-native format for vector indexing.
+ * New fixed-size DOUBLE[768] columns store embeddings in Kuzu-native format
+ * for vector indexing.
  *
  * Tables that do not exist (e.g. FileSummary on very old DBs) are skipped gracefully.
  */
@@ -58,12 +60,12 @@ export const up = async (conn: Connection): Promise<void> => {
     }
 
     try {
-      await exec(conn, `ALTER TABLE ${table} ADD ${column} DOUBLE[]`);
-      logger.info(`[m013] Added ${column} DOUBLE[] to ${table}`);
+      await execDdl(conn, `ALTER TABLE ${table} ADD ${column} DOUBLE[768]`);
+      logger.info(`[m013] Added ${column} DOUBLE[768] to ${table}`);
     } catch (err) {
       // Column may already exist from a partial run
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("already exists") || msg.includes("duplicate")) {
+      if (IDEMPOTENT_DDL_ERROR_RE.test(msg)) {
         logger.debug(`[m013] Column ${column} already exists on ${table}, skipping`);
       } else {
         logger.warn(`[m013] Failed to add ${column} to ${table}: ${msg}`);

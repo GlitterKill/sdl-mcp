@@ -114,7 +114,15 @@ function collectNormalizedParts(
     node.type === "null" ||
     node.type === "undefined";
 
-  if (!isLiteral) {
+  if (isLiteral) {
+    parts.push(node.type);
+    const text = node.text;
+    parts.push(`lit:${text.length > 64 ? text.slice(0, 64) : text}`);
+    return;
+  }
+
+  // Recurse into children (non-literal node)
+  {
     parts.push(node.type);
 
     for (const child of node.children) {

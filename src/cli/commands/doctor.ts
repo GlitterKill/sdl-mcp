@@ -337,7 +337,9 @@ async function checkStaleIndex(
     const config = loadConfig(configPath);
     const ladybugDbPath = resolveDoctorGraphDbPath(config, configPath);
 
-    await initLadybugDb(ladybugDbPath);
+    await initLadybugDb(ladybugDbPath, {
+      bufferPoolBytes: config.graphDatabase?.bufferPoolBytes ?? undefined,
+    });
     const conn = await getLadybugConn();
 
     const staleRepos: string[] = [];

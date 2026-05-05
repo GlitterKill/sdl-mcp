@@ -83,7 +83,13 @@ export async function handlePolicySet(
       configJson.policy && typeof configJson.policy === "object"
         ? configJson.policy
         : {};
-    const mergedOverrides = { ...existingPolicyOverrides, ...policyPatch };
+    const validatedPatch = PolicyConfigSchema.partial().strict().parse(
+      policyPatch,
+    );
+    const mergedOverrides = {
+      ...existingPolicyOverrides,
+      ...validatedPatch,
+    };
     PolicyConfigSchema.parse({
       ...appConfig.policy,
       ...mergedOverrides,

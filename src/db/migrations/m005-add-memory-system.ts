@@ -5,15 +5,11 @@
  * Memory tables start empty since there is no prior memory data.
  */
 import type { Connection } from "kuzu";
+import { execDdl } from "../ladybug-core.js";
 
 export const version = 5;
 export const description =
   "Add Memory node table and memory relationship edges";
-
-async function execDdl(conn: Connection, ddl: string): Promise<void> {
-  const result = await conn.query(ddl);
-  result.close();
-}
 
 export async function up(conn: Connection): Promise<void> {
   // Node table
@@ -53,18 +49,14 @@ export async function up(conn: Connection): Promise<void> {
     `CREATE REL TABLE IF NOT EXISTS MEMORY_OF_FILE (FROM Memory TO File)`,
   );
 
-  // Indexes (may not be supported on all Kuzu versions)
+  // Performance-only secondary indexes. LadybugDB 0.16+ supports CREATE INDEX,
+  // so unexpected failures should surface instead of being swallowed.
   const indexes = [
     `CREATE INDEX IF NOT EXISTS idx_memory_repoId ON Memory(repoId)`,
     `CREATE INDEX IF NOT EXISTS idx_memory_type ON Memory(type)`,
     `CREATE INDEX IF NOT EXISTS idx_memory_contentHash ON Memory(contentHash)`,
   ];
   for (const idx of indexes) {
-    try {
-      await execDdl(conn, idx);
-    } catch {
-      // Kùzu versions before 0.4 do not support CREATE INDEX. Since indexes
-      // are performance-only (not correctness), silently skipping is safe.
-    }
+    await execDdl(conn, idx);
   }
 }

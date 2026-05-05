@@ -57,6 +57,7 @@ describe("CodeNeedWindowRequestSchema hardening", () => {
 describe("SliceSpilloverGetRequestSchema hardening", () => {
   it("accepts a well-formed request", () => {
     const parsed = SliceSpilloverGetRequestSchema.safeParse({
+      repoId: "repo",
       spilloverHandle: "abc123",
       cursor: "0",
       pageSize: 20,
@@ -66,6 +67,7 @@ describe("SliceSpilloverGetRequestSchema hardening", () => {
 
   it("rejects empty-string spilloverHandle", () => {
     const parsed = SliceSpilloverGetRequestSchema.safeParse({
+      repoId: "repo",
       spilloverHandle: "",
     });
     assert.strictEqual(parsed.success, false);
@@ -73,6 +75,7 @@ describe("SliceSpilloverGetRequestSchema hardening", () => {
 
   it("rejects oversized spilloverHandle", () => {
     const parsed = SliceSpilloverGetRequestSchema.safeParse({
+      repoId: "repo",
       spilloverHandle: "x".repeat(1024),
     });
     assert.strictEqual(parsed.success, false);

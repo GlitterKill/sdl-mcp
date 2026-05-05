@@ -1224,12 +1224,32 @@ export async function initCommand(options: InitOptions): Promise<void> {
       exporterType: "console" as const,
       sampleRate: 1.0,
     },
+    observability: {
+      enabled: true,
+      sampleIntervalMs: 2000,
+      retentionShortMinutes: 15,
+      retentionLongHours: 24,
+      pprMetricsEnabled: true,
+      packedStatsEnabled: true,
+      scipIngestMetrics: true,
+      beamExplainCapacity: 128,
+      beamExplainEntriesPerSlice: 512,
+      sseHeartbeatMs: 15_000,
+      sseMaxStreamMs: 3_600_000,
+    },
     parallelScorer: {
       enabled: true,
     },
     httpAuth: {
       enabled: false,
       token: null,
+      rateLimit: {
+        bucketSize: 30,
+        refillPerSec: 0.5,
+      },
+    },
+    http: {
+      allowRemote: false,
     },
     codeMode: {
       enabled: true,

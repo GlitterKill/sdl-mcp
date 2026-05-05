@@ -1,3 +1,7 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { ZodError } from "zod";
+
 import {
   BufferCheckpointRequestSchema,
   type BufferCheckpointResponse,
@@ -6,11 +10,13 @@ import {
   BufferStatusRequestSchema,
   type BufferStatusResponse,
 } from "../tools.js";
+import { ValidationError, IndexError } from "../errors.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 import type { LiveIndexCoordinator } from "../../live-index/types.js";
 import type { ToolContext } from "../../server.js";
-import { ValidationError, IndexError } from "../errors.js";
-import { ZodError } from "zod";
+import { logger } from "../../util/logger.js";
 
 function resolveLiveIndex(
   liveIndex?: LiveIndexCoordinator,
@@ -20,6 +26,23 @@ function resolveLiveIndex(
     throw new IndexError("Live index coordinator is not available");
   }
   return coordinator;
+}
+
+const bufferPushQueues = new Map<string, Promise<unknown>>();
+
+async function runSerializedBufferPush<T>(
+  key: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = bufferPushQueues.get(key) ?? Promise.resolve();
+  const tracked = previous.catch(() => undefined).then(operation);
+  const queue = tracked.finally(() => {
+    if (bufferPushQueues.get(key) === queue) {
+      bufferPushQueues.delete(key);
+    }
+  });
+  bufferPushQueues.set(key, queue);
+  return queue;
 }
 
 export async function handleBufferPush(
@@ -33,20 +56,32 @@ export async function handleBufferPush(
       ? { ...args as Record<string, unknown>, timestamp: new Date((args as Record<string, unknown>).timestamp as number).toISOString() }
       : args;
     const request = BufferPushRequestSchema.parse(normalized);
-    const result = await resolveLiveIndex(liveIndex).pushBufferUpdate(request);
-    // Warn if file does not exist on disk
-    if (request.filePath) {
-      const { existsSync } = await import("node:fs");
-      const { resolve } = await import("node:path");
-      const config = (await import("../../config/loadConfig.js")).loadConfig();
-      const repo = config.repos?.find((r: { repoId?: string }) => r.repoId === request.repoId) ?? config.repos?.[0];
-      if (repo?.rootPath) {
-        const absPath = resolve(repo.rootPath, request.filePath);
-        if (!existsSync(absPath)) {
-          result.warnings = [...(result.warnings ?? []), `File does not exist on disk: ${request.filePath}`];
-        }
-      }
-    }
+    const result = request.filePath
+      ? await runSerializedBufferPush(
+          `${request.repoId}\0${request.filePath}`,
+          async () => {
+            const pushed = await resolveLiveIndex(liveIndex).pushBufferUpdate(request);
+            const conn = await getLadybugConn();
+            const repo = await ladybugDb.getRepo(conn, request.repoId);
+            if (!repo) {
+              logger.warn("Buffer push repo not found", {
+                repoId: request.repoId,
+                filePath: request.filePath,
+              });
+              return pushed;
+            }
+
+            const absPath = resolve(repo.rootPath, request.filePath);
+            if (!existsSync(absPath)) {
+              pushed.warnings = [
+                ...(pushed.warnings ?? []),
+                `File does not exist on disk: ${request.filePath}`,
+              ];
+            }
+            return pushed;
+          },
+        )
+      : await resolveLiveIndex(liveIndex).pushBufferUpdate(request);
     return result;
   } catch (error) {
     if (error instanceof ZodError) {
@@ -57,9 +92,7 @@ export async function handleBufferPush(
     if (error instanceof ValidationError || error instanceof IndexError) {
       throw error;
     }
-    throw new IndexError(
-      `Buffer push failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    throw new IndexError("Buffer push failed");
   }
 }
 
@@ -83,9 +116,7 @@ export async function handleBufferCheckpoint(
     if (error instanceof ValidationError || error instanceof IndexError) {
       throw error;
     }
-    throw new IndexError(
-      `Buffer checkpoint failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    throw new IndexError("Buffer checkpoint failed");
   }
 }
 
@@ -106,8 +137,6 @@ export async function handleBufferStatus(
     if (error instanceof ValidationError || error instanceof IndexError) {
       throw error;
     }
-    throw new IndexError(
-      `Buffer status failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    throw new IndexError("Buffer status failed");
   }
 }

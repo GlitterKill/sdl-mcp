@@ -122,13 +122,24 @@ const CONFIDENCE_LEGACY: Record<CallResolutionStrategy, number> = {
   "disambiguated": 0.55,
 };
 
+let cachedNewConfidenceRubricEnabled: boolean | null = null;
+
 /**
  * Returns true when the new Phase-2 rubric is enabled via env flag.
- * Reads the env var on every call so tests can flip the flag mid-run.
+ * The result is cached after the first lookup; tests can reset the cache
+ * with `resetConfidenceRubricCacheForTests()` when they need to flip the
+ * flag mid-run.
  */
+export function resetConfidenceRubricCacheForTests(): void {
+  cachedNewConfidenceRubricEnabled = null;
+}
+
 export function isNewConfidenceRubricEnabled(): boolean {
-  const value = process.env.SDL_MCP_USE_NEW_CONFIDENCE_RUBRIC;
-  return value === "1" || value === "true";
+  if (cachedNewConfidenceRubricEnabled === null) {
+    const value = process.env.SDL_MCP_USE_NEW_CONFIDENCE_RUBRIC;
+    cachedNewConfidenceRubricEnabled = value === "1" || value === "true";
+  }
+  return cachedNewConfidenceRubricEnabled;
 }
 
 /**

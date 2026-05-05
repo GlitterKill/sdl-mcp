@@ -4,7 +4,7 @@ import {
   SliceBuildWireFormat,
   type SliceRefreshRequest,
   SliceRefreshResponse,
-  type SliceSpilloverGetRequest,
+  SliceSpilloverGetRequestSchema,
   SliceSpilloverGetResponse,
   type RetrievalEvidenceItem,
 } from "../tools.js";
@@ -854,7 +854,7 @@ export async function cleanupExpiredSliceHandles(): Promise<number> {
 export async function handleSliceSpilloverGet(
   args: unknown,
 ): Promise<SliceSpilloverGetResponse> {
-  const request = args as SliceSpilloverGetRequest;
+  const request = SliceSpilloverGetRequestSchema.parse(args);
   const spilloverHandle = request.spilloverHandle ?? request.sliceHandle!;
   const { cursor, pageSize } = request;
 
@@ -862,6 +862,9 @@ export async function handleSliceSpilloverGet(
   const handleRow = await ladybugDb.getSliceHandle(conn, spilloverHandle);
   if (!handleRow) {
     throw new NotFoundError(`Spillover handle not found: ${spilloverHandle}`);
+  }
+  if (handleRow.repoId !== request.repoId) {
+    throw new ValidationError("repoId does not own this handle");
   }
 
   recordToolTrace({
@@ -913,6 +916,14 @@ export async function handleSliceSpilloverGet(
     }
   }
   const size = pageSize ?? SPILLOVER_DEFAULT_PAGE_SIZE;
+  if (startIndex >= droppedSymbols.length) {
+    return {
+      spilloverHandle,
+      cursor: undefined,
+      hasMore: false,
+      symbols: [],
+    };
+  }
   const endIndex = startIndex + size;
 
   const pageSymbols = droppedSymbols.slice(startIndex, endIndex);

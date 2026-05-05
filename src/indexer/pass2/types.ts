@@ -107,6 +107,32 @@ export interface Pass1ExtractionEntry {
 /** `relPath -> Pass1ExtractionEntry` cache, owned by the pass-2 dispatcher. */
 export type Pass1ExtractionCache = Map<string, Pass1ExtractionEntry>;
 
+export const PASS1_EXTRACTION_CACHE_MAX_ENTRIES = 2000;
+
+/**
+ * Insert a pass-1 extraction entry while keeping the cache bounded.
+ * The cache is keyed by relative file path, so refreshing an existing
+ * entry moves it to the back of the insertion order.
+ */
+export function storePass1Extraction(
+  cache: Pass1ExtractionCache,
+  relPath: string,
+  entry: Pass1ExtractionEntry,
+): void {
+  if (cache.has(relPath)) {
+    cache.delete(relPath);
+  }
+  cache.set(relPath, entry);
+
+  while (cache.size > PASS1_EXTRACTION_CACHE_MAX_ENTRIES) {
+    const oldestKey = cache.keys().next().value as string | undefined;
+    if (oldestKey === undefined) {
+      break;
+    }
+    cache.delete(oldestKey);
+  }
+}
+
 export interface Pass2ResolverContext {
   repoRoot: string;
   symbolIndex: SymbolIndex;

@@ -589,6 +589,7 @@ export const RepoStatusResponseSchema = z.object({
     errorRate: z.number().min(0).max(1),
     edgeQuality: z.number().min(0).max(1),
     callResolution: z.number().min(0).max(1).optional(),
+    embeddingFailures: z.number().int().min(0).optional(),
   }),
   healthAvailable: z.boolean().optional(),
   /**
@@ -740,8 +741,8 @@ export const BufferPushRequestSchema = z.object({
   filePath: z
     .string()
     .min(1)
-    .refine((p) => !p.includes(".."), {
-      message: "filePath must not contain path traversal sequences",
+    .refine((p) => !p.split(/[\/\\]/).some((seg) => seg === ".."), {
+      message: "filePath must not contain path traversal segments",
     })
     .refine((p) => !/^[/\\]/.test(p) && !/^[a-zA-Z]:/.test(p), {
       message: "filePath must be relative (absolute paths are not allowed)",
@@ -1316,6 +1317,7 @@ export const DeltaGetResponseSchema = z.object({
 
 export const SliceSpilloverGetRequestSchema = z
   .object({
+    repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
     spilloverHandle: z.string().min(1).max(256).optional(),
     sliceHandle: z.string().min(1).max(256).optional(),
     cursor: z.string().optional(),
@@ -2354,9 +2356,14 @@ export type RuntimeExecuteResponse = z.infer<
 // ============================================================================
 
 export const RuntimeQueryOutputRequestSchema = z.object({
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   artifactHandle: z
     .string()
     .min(1)
+    .max(256)
+    .regex(/^[A-Za-z0-9_-]+$/, {
+      message: "artifactHandle must contain only alphanumerics, dashes, and underscores",
+    })
     .describe("Artifact handle from a previous runtime.execute call"),
   queryTerms: z
     .array(z.string())
@@ -2407,11 +2414,11 @@ export const MemoryStoreRequestSchema = z.object({
   type: MemoryTypeSchema,
   title: z.string().min(1).max(120),
   content: z.string().min(1).max(50000),
-  tags: z.array(z.string()).max(20).optional(),
+  tags: z.array(z.string().min(1).max(100)).max(20).optional(),
   confidence: z.number().min(0).max(1).optional(),
-  symbolIds: z.array(z.string()).max(100).optional(),
-  fileRelPaths: z.array(z.string()).max(100).optional(),
-  memoryId: z.string().optional(),
+  symbolIds: z.array(z.string().min(1).max(MAX_SYMBOL_ID_LENGTH)).max(100).optional(),
+  fileRelPaths: z.array(z.string().min(1).max(1024)).max(100).optional(),
+  memoryId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH).optional(),
 });
 
 export const MemoryStoreResponseSchema = z.object({
@@ -2425,8 +2432,11 @@ export const MemoryQueryRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   query: z.string().max(1000).optional(),
   types: z.array(MemoryTypeSchema).optional(),
-  tags: z.array(z.string()).max(20).optional(),
-  symbolIds: z.array(z.string()).max(100).optional(),
+  tags: z.array(z.string().min(1).max(100)).max(20).optional(),
+  symbolIds: z
+    .array(z.string().min(1).max(MAX_SYMBOL_ID_LENGTH))
+    .max(100)
+    .optional(),
   staleOnly: z.boolean().optional(),
   limit: z.number().int().min(1).max(100).optional(),
   offset: z.number().int().min(0).max(10000).optional(),
@@ -2456,7 +2466,10 @@ export const MemoryRemoveResponseSchema = z.object({
 
 export const MemorySurfaceRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  symbolIds: z.array(z.string()).max(500).optional(),
+  symbolIds: z
+    .array(z.string().min(1).max(MAX_SYMBOL_ID_LENGTH))
+    .max(500)
+    .optional(),
   taskType: MemoryTypeSchema.optional(),
   limit: z.number().int().min(1).max(50).optional(),
 });
@@ -2585,6 +2598,10 @@ export const FileReadRequestSchema = z.object({
   filePath: z
     .string()
     .min(1)
+    .max(1024)
+    .refine((value) => !value.includes("\0"), {
+      message: "filePath must not contain null bytes",
+    })
     .describe(
       "File path relative to repo root. Only non-indexed file types allowed.",
     ),

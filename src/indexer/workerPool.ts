@@ -35,17 +35,86 @@ interface WorkerWithQueue {
   worker: Worker;
   busy: boolean;
   currentTask?: QueuedTask;
+  /**
+   * Set once a crash handler (error/exit/messageerror) has begun replacing
+   * this worker. Subsequent crash events for the same Worker instance are
+   * no-ops, preventing the double-splice bug where both `error` and `exit`
+   * fire and remove a healthy replacement worker.
+   */
+  replaced?: boolean;
+}
+
+/**
+ * Default cap on the parse() backlog. When the queue is full, parse() rejects
+ * immediately rather than letting unbounded backpressure accumulate.
+ */
+export const DEFAULT_MAX_QUEUE_SIZE = 10_000;
+
+export interface ParserWorkerPoolOptions {
+  poolSize?: number;
+  maxQueueSize?: number;
 }
 
 export class ParserWorkerPool {
   private workers: WorkerWithQueue[] = [];
   private queue: QueuedTask[] = [];
   private shuttingDown = false;
+  private readonly poolSize: number;
+  private readonly maxQueueSize: number;
 
-  constructor(private poolSize: number = Math.max(1, os.cpus().length - 1)) {
-    for (let i = 0; i < poolSize; i++) {
-      this.workers.push(this.createWorker(i));
+  constructor(
+    poolSizeOrOptions: number | ParserWorkerPoolOptions = Math.max(
+      1,
+      os.cpus().length - 1,
+    ),
+  ) {
+    const opts: ParserWorkerPoolOptions =
+      typeof poolSizeOrOptions === "number"
+        ? { poolSize: poolSizeOrOptions }
+        : poolSizeOrOptions;
+    this.poolSize = Math.max(1, opts.poolSize ?? Math.max(1, os.cpus().length - 1));
+    this.maxQueueSize = Math.max(1, opts.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE);
+  }
+
+  /**
+   * Centralised crash handler. Invoked from `error`, `exit`, and
+   * `messageerror` handlers. The first call replaces the worker; subsequent
+   * calls for the same worker instance are no-ops.
+   */
+  private handleWorkerCrash(
+    workerWithQueue: WorkerWithQueue,
+    error: Error,
+    originalIndex: number,
+  ): void {
+    if (workerWithQueue.replaced) {
+      return;
     }
+    workerWithQueue.replaced = true;
+
+    const workerIdx = this.workers.findIndex((w) => w === workerWithQueue);
+    if (workerIdx === -1) {
+      return;
+    }
+
+    if (workerWithQueue.currentTask) {
+      try {
+        workerWithQueue.currentTask.reject(error);
+      } catch {
+        // Best-effort reject; downstream consumer may have detached.
+      }
+      workerWithQueue.currentTask = undefined;
+      workerWithQueue.busy = false;
+    }
+
+    this.workers.splice(workerIdx, 1);
+    if (!this.shuttingDown) {
+      this.workers.push(this.createWorker(this.workers.length));
+    }
+    logger.warn("Worker crashed and was replaced", {
+      originalIndex,
+      error: error.message,
+    });
+    this.processQueue();
   }
 
   private createWorker(index: number): WorkerWithQueue {
@@ -54,16 +123,16 @@ export class ParserWorkerPool {
     const packageRoot = findPackageRoot(__dirname);
     const workerPath = join(packageRoot, "dist", "indexer", "worker.js");
     const worker = new Worker(workerPath);
+    const wq: WorkerWithQueue = { worker, busy: false };
 
     worker.on("message", (msg) => {
-      const workerWithQueue = this.workers.find((w) => w.worker === worker);
-      if (!workerWithQueue || !workerWithQueue.currentTask) {
+      if (wq.replaced || !wq.currentTask) {
         return;
       }
 
-      const item = workerWithQueue.currentTask;
-      workerWithQueue.busy = false;
-      workerWithQueue.currentTask = undefined;
+      const item = wq.currentTask;
+      wq.busy = false;
+      wq.currentTask = undefined;
 
       if (msg.error) {
         item.reject(new Error(msg.error));
@@ -79,44 +148,38 @@ export class ParserWorkerPool {
     });
 
     worker.on("error", (error) => {
-      const workerIdx = this.workers.findIndex((w) => w.worker === worker);
-      if (workerIdx !== -1) {
-        const wq = this.workers[workerIdx];
-        if (wq.currentTask) {
-          wq.currentTask.reject(error instanceof Error ? error : new Error(String(error)));
-          wq.currentTask = undefined;
-          wq.busy = false;
-        }
-        // Remove the dead worker and replace it
-        this.workers.splice(workerIdx, 1);
-        if (!this.shuttingDown) {
-          this.workers.push(this.createWorker(this.workers.length));
-        }
-      }
-      logger.warn("Worker crashed and was replaced", { originalIndex: index, error: error instanceof Error ? error.message : String(error) });
-      this.processQueue();
+      this.handleWorkerCrash(
+        wq,
+        error instanceof Error ? error : new Error(String(error)),
+        index,
+      );
     });
 
     worker.on("exit", (code) => {
-      const workerIdx = this.workers.findIndex((w) => w.worker === worker);
-      if (workerIdx !== -1) {
-        const wq = this.workers[workerIdx];
-        if (wq.currentTask) {
-          wq.currentTask.reject(
-            new Error(`Worker ${index} exited with code ${code}`),
-          );
-          wq.currentTask = undefined;
-          wq.busy = false;
-        }
-        this.workers.splice(workerIdx, 1);
-        if (!this.shuttingDown) {
-          this.workers.push(this.createWorker(this.workers.length));
-          this.processQueue();
-        }
+      // Clean exits during shutdown are expected.
+      if (this.shuttingDown && code === 0) {
+        return;
       }
+      this.handleWorkerCrash(
+        wq,
+        new Error(`Worker ${index} exited with code ${code}`),
+        index,
+      );
     });
 
-    return { worker, busy: false };
+    // `messageerror` fires when a posted message fails to deserialise.
+    // Without this handler the in-flight task hangs forever.
+    worker.on("messageerror", (error) => {
+      this.handleWorkerCrash(
+        wq,
+        error instanceof Error
+          ? error
+          : new Error(`Worker ${index} messageerror: ${String(error)}`),
+        index,
+      );
+    });
+
+    return wq;
   }
 
   async parse(
@@ -124,6 +187,14 @@ export class ParserWorkerPool {
     content: string,
     ext: string,
   ): Promise<ParseResult> {
+    if (this.shuttingDown) {
+      throw new Error("Worker pool shut down");
+    }
+    if (this.queue.length >= this.maxQueueSize) {
+      throw new Error(
+        `Worker pool queue full (max=${this.maxQueueSize}, depth=${this.queue.length})`,
+      );
+    }
     return new Promise((resolve, reject) => {
       this.queue.push({
         task: { filePath, content, ext },
@@ -134,26 +205,32 @@ export class ParserWorkerPool {
     });
   }
 
+  /**
+   * Drain the queue, dispatching tasks to free workers. Uses a `while` loop
+   * (not recursion) so the depth does not scale with queue length.
+   */
   private processQueue(): void {
     if (this.shuttingDown) {
       return;
     }
 
-    const availableWorker = this.workers.find((w) => !w.busy);
-    if (!availableWorker || this.queue.length === 0) {
-      return;
+    while (this.queue.length > 0) {
+      let availableWorker = this.workers.find((w) => !w.busy && !w.replaced);
+      if (!availableWorker && this.workers.length < this.poolSize) {
+        availableWorker = this.createWorker(this.workers.length);
+        this.workers.push(availableWorker);
+      }
+      if (!availableWorker) {
+        return;
+      }
+      const item = this.queue.shift();
+      if (!item) {
+        return;
+      }
+      availableWorker.busy = true;
+      availableWorker.currentTask = item;
+      availableWorker.worker.postMessage(item.task);
     }
-
-    const item = this.queue.shift();
-    if (!item) {
-      return;
-    }
-
-    availableWorker.busy = true;
-    availableWorker.currentTask = item;
-    availableWorker.worker.postMessage(item.task);
-
-    this.processQueue();
   }
 
   async shutdown(): Promise<void> {
@@ -171,10 +248,30 @@ export class ParserWorkerPool {
         w.busy = false;
       }
     }
-    await Promise.all(this.workers.map((w) => w.worker.terminate()));
+    // Use allSettled so a single terminate() rejection doesn't leak the rest.
+    const results = await Promise.allSettled(
+      this.workers.map((w) => w.worker.terminate()),
+    );
+    for (const r of results) {
+      if (r.status === "rejected") {
+        logger.warn("Worker terminate failed during shutdown", {
+          error: r.reason instanceof Error ? r.reason.message : String(r.reason),
+        });
+      }
+    }
   }
 
   getPoolSize(): number {
     return this.poolSize;
+  }
+
+  /** Test/diagnostic accessor — current queue depth. */
+  getQueueDepth(): number {
+    return this.queue.length;
+  }
+
+  /** Test/diagnostic accessor — configured queue cap. */
+  getMaxQueueSize(): number {
+    return this.maxQueueSize;
   }
 }

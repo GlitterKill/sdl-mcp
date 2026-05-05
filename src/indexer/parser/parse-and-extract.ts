@@ -61,9 +61,11 @@ export async function parseAndExtract(params: {
           workerError instanceof Error
             ? workerError
             : new Error(String(workerError));
-        logger.warn(
-          `Worker pool parse failed for ${fileMeta.path}, falling back to sync: ${parseError.message}`,
-        );
+        logger.warn("Worker pool parse failed, falling back to sync", {
+          filePath: fileMeta.path,
+          error: parseError,
+          cause: workerError,
+        });
       }
     }
 

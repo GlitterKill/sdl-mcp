@@ -49,6 +49,11 @@ const BLOCKED_PATH_SEGMENTS = new Set([
  * list.
  */
 export const FILE_WRITE_DENY_EXTENSIONS = new Set([
+  // Script formats that some shells/file-managers auto-execute
+  ".lnk", ".url", ".scf", ".desktop", ".command", ".app",
+  ".bat", ".cmd", ".ps1", ".psm1", ".psd1",
+  ".vbs", ".vbe", ".wsh", ".wsf", ".jse",
+  ".htaccess",
   ".ipynb",
   ".zip",
   ".tar",
@@ -468,11 +473,13 @@ export async function writeWithBackup(
   }
 
   let backupPath: string | undefined;
-  if (fileExists && createBackup) {
+  if (fileExists) {
     const lstats = await lstat(absPath);
     if (lstats.isSymbolicLink()) {
-      throw new ValidationError("Symlink detected at write target; refusing backup");
+      throw new ValidationError("Symlink detected at write target; refusing write");
     }
+  }
+  if (fileExists && createBackup) {
     backupPath = `${absPath}${backupSuffix ?? ".bak"}`;
     await copyFile(absPath, backupPath);
     logger.debug(`file.write created backup: ${backupPath}`);

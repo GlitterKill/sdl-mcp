@@ -18,6 +18,7 @@ import {
   loadExistingSymbols,
 } from "./symbol-mapping.js";
 import type { ProcessFileParams, ProcessFileResult } from "./types.js";
+import { storePass1Extraction } from "../pass2/types.js";
 
 export type { ProcessFileParams, ProcessFileResult };
 
@@ -86,7 +87,7 @@ export async function processFile(
       isTsCallResolutionFile(fileMeta.path) &&
       skipCallResolution
     ) {
-      params.pass1Extractions.set(fileData.relPath, {
+      storePass1Extraction(params.pass1Extractions, fileData.relPath, {
         symbolsWithNodeIds: parsed.symbolsWithNodeIds,
         imports: parsed.imports,
         calls: parsed.calls,

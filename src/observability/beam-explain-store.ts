@@ -35,21 +35,21 @@ interface PublishInput {
   truncated: boolean;
 }
 
-function cacheKey(repoId: string, sliceHandle: string): string {
-  return `${repoId}::${sliceHandle}`;
-}
-
 /**
  * In-memory LRU cache of beam-search decision traces.
  *
- * Insertion order is tracked via Map iteration order — every publish (or
- * mutation) deletes-and-re-inserts the entry to keep the most-recently-used
- * key at the tail. Eviction pops the oldest (first) key.
+ * Traces are grouped per repo so one noisy repo cannot evict every other
+ * repo's observability history. Each repo gets a dynamic sub-quota based on
+ * the configured global capacity and current repo count, with a minimum of 8
+ * traces per repo.
  */
 export class BeamExplainStore {
   private readonly capacity: number;
   private readonly maxEntriesPerSlice: number;
-  private readonly traces = new Map<string, BeamExplainResponse>();
+  private readonly tracesByRepo = new Map<
+    string,
+    Map<string, BeamExplainResponse>
+  >();
 
   constructor(config: BeamExplainStoreConfig) {
     this.capacity = Math.max(1, Math.floor(config.capacity));
@@ -65,6 +65,38 @@ export class BeamExplainStore {
    * cap of `maxEntriesPerSlice` and OR's the truncated flag if it
    * trims further.
    */
+  private getOrCreateRepoTraces(
+    repoId: string,
+  ): Map<string, BeamExplainResponse> {
+    let repoTraces = this.tracesByRepo.get(repoId);
+    if (!repoTraces) {
+      repoTraces = new Map();
+      this.tracesByRepo.set(repoId, repoTraces);
+    }
+    return repoTraces;
+  }
+
+  private trimRepoTraces(
+    repoTraces: Map<string, BeamExplainResponse>,
+    repoCapacity: number,
+  ): void {
+    while (repoTraces.size > repoCapacity) {
+      const oldestKey = repoTraces.keys().next().value;
+      if (oldestKey === undefined) break;
+      repoTraces.delete(oldestKey);
+    }
+  }
+
+  private rebalanceAllRepos(): void {
+    const repoCapacity = Math.max(
+      8,
+      Math.floor(this.capacity / Math.max(this.tracesByRepo.size, 1)),
+    );
+    for (const repoTraces of this.tracesByRepo.values()) {
+      this.trimRepoTraces(repoTraces, repoCapacity);
+    }
+  }
+
   publishTrace(input: PublishInput): void {
     let entries = input.entries;
     let truncated = input.truncated;
@@ -90,16 +122,12 @@ export class BeamExplainStore {
         maxFrontier: input.thresholds.maxFrontier,
       },
     };
-    const key = cacheKey(input.repoId, input.sliceHandle);
-    if (this.traces.has(key)) {
-      this.traces.delete(key);
+    const repoTraces = this.getOrCreateRepoTraces(input.repoId);
+    if (repoTraces.has(input.sliceHandle)) {
+      repoTraces.delete(input.sliceHandle);
     }
-    this.traces.set(key, response);
-    while (this.traces.size > this.capacity) {
-      const oldestKey = this.traces.keys().next().value;
-      if (oldestKey === undefined) break;
-      this.traces.delete(oldestKey);
-    }
+    repoTraces.set(input.sliceHandle, response);
+    this.rebalanceAllRepos();
   }
 
   /**
@@ -114,12 +142,13 @@ export class BeamExplainStore {
     sliceHandle: string,
     symbolId?: string,
   ): BeamExplainResponse | null {
-    const key = cacheKey(repoId, sliceHandle);
-    const stored = this.traces.get(key);
+    const repoTraces = this.tracesByRepo.get(repoId);
+    if (!repoTraces) return null;
+    const stored = repoTraces.get(sliceHandle);
     if (stored === undefined) return null;
     // Refresh LRU position on access.
-    this.traces.delete(key);
-    this.traces.set(key, stored);
+    repoTraces.delete(sliceHandle);
+    repoTraces.set(sliceHandle, stored);
     if (symbolId === undefined) {
       return stored;
     }
@@ -134,11 +163,15 @@ export class BeamExplainStore {
 
   /** Number of distinct slice traces currently retained. */
   size(): number {
-    return this.traces.size;
+    let total = 0;
+    for (const repoTraces of this.tracesByRepo.values()) {
+      total += repoTraces.size;
+    }
+    return total;
   }
 
   /** Drop every retained trace. */
   clear(): void {
-    this.traces.clear();
+    this.tracesByRepo.clear();
   }
 }

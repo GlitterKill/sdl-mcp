@@ -540,6 +540,12 @@ export const ObservabilityConfigSchema = z.object({
   beamExplainCapacity: z.number().int().min(8).max(2048).default(128),
   beamExplainEntriesPerSlice: z.number().int().min(16).max(8192).default(512),
   sseHeartbeatMs: z.number().int().min(1000).max(60000).default(15000),
+  sseMaxStreamMs: z
+    .number()
+    .int()
+    .min(60_000)
+    .max(24 * 60 * 60 * 1000)
+    .default(60 * 60 * 1000),
 });
 
 export type ObservabilityConfig = z.infer<typeof ObservabilityConfigSchema>;
@@ -564,6 +570,11 @@ export type ParallelScorerConfig = z.infer<typeof ParallelScorerConfigSchema>;
 
 export const GraphDatabaseConfigSchema = z.object({
   path: z.string().nullish(),
+  // Optional override for the LadybugDB buffer-manager size in bytes.
+  // Useful for stress tests / low-memory deployments where the auto-sized
+  // 25%-of-RAM default is too aggressive.
+  // Floor enforced at 1 GB by resolveLadybugBufferManagerSizeBytes().
+  bufferPoolBytes: z.number().int().positive().nullish(),
 });
 
 export type GraphDatabaseConfig = z.infer<typeof GraphDatabaseConfigSchema>;
@@ -658,9 +669,22 @@ export const HttpAuthConfigSchema = z.object({
   enabled: z.boolean().default(false),
   /** Static bearer token. When null/omitted a random token is generated at startup. */
   token: z.string().min(1).nullish().default(null),
+  /** Per-client token bucket for protected HTTP routes before bearer-token compare. */
+  rateLimit: z
+    .object({
+      bucketSize: z.number().int().min(1).max(10_000).default(30),
+      refillPerSec: z.number().positive().max(1_000).default(0.5),
+    })
+    .default({ bucketSize: 30, refillPerSec: 0.5 }),
 });
 
 export type HttpAuthConfig = z.infer<typeof HttpAuthConfigSchema>;
+
+export const HttpConfigSchema = z.object({
+  allowRemote: z.boolean().default(false),
+});
+
+export type HttpConfig = z.infer<typeof HttpConfigSchema>;
 
 export const SecurityConfigSchema = z.object({
   allowedRepoRoots: z.array(z.string()).default([]),
@@ -803,6 +827,7 @@ export const AppConfigSchema = z.object({
   runtime: RuntimeConfigSchema.optional(),
   gateway: GatewayConfigSchema.optional(),
   codeMode: CodeModeConfigSchema.optional(),
+  http: HttpConfigSchema.optional(),
   security: SecurityConfigSchema.optional(),
   httpAuth: HttpAuthConfigSchema.optional(),
   memory: MemoryConfigSchema.optional(),

@@ -7,6 +7,7 @@ import {
   confidenceForBoth,
   getConfidenceTablesForTesting,
   isNewConfidenceRubricEnabled,
+  resetConfidenceRubricCacheForTests,
   telemetryBucketFor,
   type CallResolutionStrategy,
 } from "../../src/indexer/pass2/confidence.ts";
@@ -43,6 +44,7 @@ describe("Phase 2: confidence rubric (Task 2.0.1)", () => {
 
   before(() => {
     savedFlag = process.env.SDL_MCP_USE_NEW_CONFIDENCE_RUBRIC;
+    resetConfidenceRubricCacheForTests();
   });
 
   after(() => {
@@ -51,6 +53,7 @@ describe("Phase 2: confidence rubric (Task 2.0.1)", () => {
     } else {
       process.env.SDL_MCP_USE_NEW_CONFIDENCE_RUBRIC = savedFlag;
     }
+    resetConfidenceRubricCacheForTests();
   });
 
   it("every strategy has a value in [0, 1] in both tables", () => {
@@ -67,6 +70,7 @@ describe("Phase 2: confidence rubric (Task 2.0.1)", () => {
 
   it("with env flag UNSET, confidenceFor() returns legacy values", () => {
     delete process.env.SDL_MCP_USE_NEW_CONFIDENCE_RUBRIC;
+    resetConfidenceRubricCacheForTests();
     assert.equal(isNewConfidenceRubricEnabled(), false);
     const { legacy } = getConfidenceTablesForTesting();
     for (const strategy of ALL_STRATEGIES) {
@@ -80,6 +84,7 @@ describe("Phase 2: confidence rubric (Task 2.0.1)", () => {
 
   it("with env flag SET to '1', confidenceFor() returns new rubric values", () => {
     process.env.SDL_MCP_USE_NEW_CONFIDENCE_RUBRIC = "1";
+    resetConfidenceRubricCacheForTests();
     assert.equal(isNewConfidenceRubricEnabled(), true);
     const { next } = getConfidenceTablesForTesting();
     for (const strategy of ALL_STRATEGIES) {
@@ -93,6 +98,7 @@ describe("Phase 2: confidence rubric (Task 2.0.1)", () => {
 
   it("with env flag SET to 'true', confidenceFor() returns new rubric values", () => {
     process.env.SDL_MCP_USE_NEW_CONFIDENCE_RUBRIC = "true";
+    resetConfidenceRubricCacheForTests();
     assert.equal(isNewConfidenceRubricEnabled(), true);
     assert.equal(
       confidenceFor("compiler-resolved"),
@@ -102,12 +108,14 @@ describe("Phase 2: confidence rubric (Task 2.0.1)", () => {
 
   it("confidenceForBoth() emits both legacy and next values regardless of flag", () => {
     delete process.env.SDL_MCP_USE_NEW_CONFIDENCE_RUBRIC;
+    resetConfidenceRubricCacheForTests();
     const both = confidenceForBoth("import-direct");
     assert.equal(typeof both.legacy, "number");
     assert.equal(typeof both.next, "number");
     assert.equal(both.active, both.legacy);
 
     process.env.SDL_MCP_USE_NEW_CONFIDENCE_RUBRIC = "1";
+    resetConfidenceRubricCacheForTests();
     const bothNew = confidenceForBoth("import-direct");
     assert.equal(bothNew.active, bothNew.next);
   });
@@ -136,6 +144,7 @@ describe("Phase 2: confidence rubric (Task 2.0.1)", () => {
     // unset, edge weights must remain byte-for-byte identical to the
     // pre-Phase-2 codebase.
     delete process.env.SDL_MCP_USE_NEW_CONFIDENCE_RUBRIC;
+    resetConfidenceRubricCacheForTests();
     const expected: Record<CallResolutionStrategy, number> = {
       "compiler-resolved": 0.95,
       "import-direct": 0.9,

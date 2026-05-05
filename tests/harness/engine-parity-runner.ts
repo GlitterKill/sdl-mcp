@@ -205,7 +205,7 @@ export async function runEngineParityCheck(fixturePath: string, repoRoot: string
   const relPath = relative(absRepoRoot, absFixture).split(sep).join("/");
   const fileMeta: FileMetadata = { path: relPath, size: Buffer.byteLength(content, "utf8"), mtime: Date.now() };
   const rustResults = parseFilesRust("parity-harness", absRepoRoot, [fileMeta]);
-  if (!rustResults || rustResults.length === 0) {
+  if (!rustResults || rustResults.length === 0 || rustResults[0] === null) {
     return { symbolDiffs: [], importDiffs: [], callDiffs: [], skipped: "rust-returned-null" };
   }
   const rustResult: RustParseResult = rustResults[0]!;

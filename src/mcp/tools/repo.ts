@@ -378,7 +378,13 @@ export async function handleRepoStatus(
     const unavailableHealth = {
       snapshot: {
         score: null as number | null,
-        components: { freshness: 0, coverage: 0, errorRate: 0, edgeQuality: 0 },
+        components: {
+          freshness: 0,
+          coverage: 0,
+          errorRate: 0,
+          edgeQuality: 0,
+          embeddingFailures: 0,
+        },
         available: false,
       },
       isStale: false,

@@ -36,6 +36,7 @@ import {
 } from "./mcp/tool-presentation.js";
 import { getPackageVersion } from "./util/package-info.js";
 import { projectBroadContextResult } from "./mcp/context-response-projection.js";
+import { logger } from "./util/logger.js";
 
 export interface ToolContext {
   progressToken?: string | number;
@@ -175,7 +176,7 @@ export class MCPServer {
               content: [
                 {
                   type: "text",
-                  text: `Tool '${request.params.name}' not found`,
+                  text: "Tool not found",
                 },
               ],
               isError: true,
@@ -361,19 +362,35 @@ export class MCPServer {
 
             // Run post-dispatch hooks (non-critical)
             for (const hook of this.postDispatchHooks) {
+              const hookAbortController = new AbortController();
+              const abortHook = (): void => {
+                hookAbortController.abort();
+              };
+              if (toolContext.signal.aborted) {
+                hookAbortController.abort();
+              } else {
+                toolContext.signal.addEventListener("abort", abortHook, {
+                  once: true,
+                });
+              }
+              const hookContext: ToolContext = {
+                ...toolContext,
+                signal: hookAbortController.signal,
+              };
+              let timeoutHandle: NodeJS.Timeout | null = null;
               try {
                 await Promise.race([
                   hook(
                     request.params.name,
                     parseResult.data,
                     finalResult,
-                    toolContext,
+                    hookContext,
                   ),
                   new Promise((_, reject) =>
-                    setTimeout(
-                      () => reject(new Error("Post-dispatch hook timed out")),
-                      5_000,
-                    ).unref(),
+                    (timeoutHandle = setTimeout(() => {
+                      hookAbortController.abort();
+                      reject(new Error("Post-dispatch hook timed out"));
+                    }, 5_000)).unref(),
                   ),
                 ]);
               } catch (err) {
@@ -381,6 +398,11 @@ export class MCPServer {
                   `[sdl-mcp] Post-dispatch hook failed for tool ${request.params.name}: ${err instanceof Error ? err.message : String(err)}
 `,
                 );
+              } finally {
+                if (timeoutHandle) {
+                  clearTimeout(timeoutHandle);
+                }
+                toolContext.signal.removeEventListener("abort", abortHook);
               }
             }
 
@@ -487,6 +509,9 @@ export class MCPServer {
     wireSchema?: Record<string, unknown>,
     presentation?: Partial<ToolPresentation>,
   ): void {
+    if (this.tools.has(name)) {
+      logger.warn("Duplicate tool registration", { name });
+    }
     this.tools.set(name, {
       name,
       description,
@@ -529,9 +554,9 @@ export class MCPServer {
       await this.server.sendToolListChanged();
     } catch (err) {
       // Swallow errors if no client is connected or notification fails
-      process.stderr.write(
-        `[sdl-mcp] Failed to send tool list changed notification: ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+      logger.warn("Failed to send tool list changed notification", {
+        error: err,
+      });
     }
   }
 }

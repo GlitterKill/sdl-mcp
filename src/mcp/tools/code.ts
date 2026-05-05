@@ -3,6 +3,7 @@ import { readFile, stat } from "fs/promises";
 
 import {
   type CodeNeedWindowRequest,
+  CodeNeedWindowRequestSchema,
   CodeNeedWindowResponse,
   type GetSkeletonRequest,
   GetSkeletonResponse,
@@ -211,7 +212,7 @@ function buildPolicyNextBestAction(params: {
 export async function handleCodeNeedWindow(
   args: unknown,
 ): Promise<CodeNeedWindowResponse> {
-  const rawRequest = args as CodeNeedWindowRequest;
+  const rawRequest = CodeNeedWindowRequestSchema.parse(args);
 
   const conn = await getLadybugConn();
   const { symbolId: resolvedSymbolId } = await resolveSymbolId(

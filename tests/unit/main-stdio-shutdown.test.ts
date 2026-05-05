@@ -14,15 +14,21 @@ describe("main stdio shutdown wiring", () => {
     );
   });
 
-  it("uses ShutdownManager to handle stdin end/close for graceful shutdown", () => {
+  it("uses ShutdownManager to handle stdio transport close for graceful shutdown", () => {
     const source = readFileSync(join(process.cwd(), "src", "main.ts"), "utf8");
 
-    // main.ts now delegates to ShutdownManager.monitorStdin() which registers
-    // stdin end/close handlers internally.
+    // Direct stdio owns stdin through StdioServerTransport, so main.ts should
+    // shut down from the MCP transport close callback rather than also
+    // registering raw stdin listeners.
     assert.match(
       source,
-      /shutdownMgr\.monitorStdin\(\)/,
-      "main.ts should call shutdownMgr.monitorStdin() to detect terminal close",
+      /server\.getServer\(\)\.onclose\s*=/,
+      "main.ts should register a transport-close shutdown callback",
+    );
+    assert.match(
+      source,
+      /shutdownMgr\.shutdown\("transport closed"\)/,
+      "main.ts should use ShutdownManager when the transport closes",
     );
   });
 

@@ -201,11 +201,13 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
 
   // Security: ensure path is within repo root
   validatePathWithinRoot(rootPath, absPath);
+  let openPath = absPath;
 
   // Security: resolve symlinks and re-validate to prevent symlink escape
   if (existsSync(absPath)) {
     const realAbsPath = realpathSync(absPath);
     validatePathWithinRoot(rootPath, realAbsPath);
+    openPath = realAbsPath;
   }
 
   // Check extension — block indexed source files
@@ -222,7 +224,7 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
   }
 
   const maxBytes = request.maxBytes ?? MAX_FILE_SIZE_BYTES;
-  const fileStat = await stat(absPath);
+  const fileStat = await stat(openPath);
 
   // Read only what we need: cap at maxBytes to prevent memory exhaustion.
   // For files larger than maxBytes, read exactly maxBytes and truncate.
@@ -241,7 +243,7 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
   let rawContent: string;
   if (readLimit < fileStat.size) {
     // Read limited bytes to avoid full allocation
-    const fh = await open(absPath, "r");
+    const fh = await open(openPath, "r");
     try {
       const buf = Buffer.alloc(readLimit);
       await fh.read(buf, 0, readLimit, 0);
@@ -250,7 +252,7 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
       await fh.close();
     }
   } else {
-    rawContent = await readFile(absPath, "utf-8");
+    rawContent = await readFile(openPath, "utf-8");
   }
   const totalBytes = fileStat.size;
   const lines = rawContent.split(/\r?\n/);

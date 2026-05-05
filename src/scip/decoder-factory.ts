@@ -7,6 +7,7 @@
 
 import type { ScipDecoder } from "./types.js";
 import { TypeScriptScipDecoder } from "./decoder-ts.js";
+import { logger } from "../util/logger.js";
 
 /**
  * Creates a SCIP decoder, preferring the Rust native addon if available.
@@ -21,8 +22,10 @@ export async function createScipDecoder(
     if (isRustScipDecoderAvailable()) {
       return new RustScipDecoder(filePath);
     }
-  } catch {
-    // Native addon not available, fall through to TS decoder
+  } catch (error) {
+    logger.debug("scip decoder factory: rust unavailable, using TS", {
+      error,
+    });
   }
   return new TypeScriptScipDecoder(filePath);
 }
@@ -34,8 +37,10 @@ export async function getDecoderBackend(): Promise<"rust" | "typescript"> {
   try {
     const { isRustScipDecoderAvailable } = await import("./decoder-rust.js");
     if (isRustScipDecoderAvailable()) return "rust";
-  } catch {
-    // ignore
+  } catch (error) {
+    logger.debug("scip decoder factory: rust backend probe failed, using TS", {
+      error,
+    });
   }
   return "typescript";
 }

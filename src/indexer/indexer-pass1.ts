@@ -100,7 +100,7 @@ export async function runPass1WithRustEngine(
     chunks.push(rustFiles.slice(i, i + CHUNK_SIZE));
   }
 
-  let pendingParse: Promise<RustParseResult[] | null> | null = null;
+  let pendingParse: Promise<Array<RustParseResult | null> | null> | null = null;
   let pendingChunkIdx = -1;
 
   // Kick off first chunk parse (async)
@@ -119,7 +119,7 @@ export async function runPass1WithRustEngine(
     if (batchAccumulator.error) break;
 
     // Await the parse that was kicked off previously
-    let chunkResults: RustParseResult[] | null;
+    let chunkResults: Array<RustParseResult | null> | null;
     if (pendingParse && pendingChunkIdx === ci) {
       chunkResults = await pendingParse;
       pendingParse = null;
@@ -159,7 +159,9 @@ export async function runPass1WithRustEngine(
     });
 
     const resultByPath = new Map<string, RustParseResult>();
-    for (const r of chunkResults) resultByPath.set(r.relPath, r);
+    for (const r of chunkResults) {
+      if (r !== null) resultByPath.set(r.relPath, r);
+    }
     const processable: Array<{
       file: FileMetadata;
       rustResult: RustParseResult;

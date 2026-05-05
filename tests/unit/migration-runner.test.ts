@@ -2,7 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert";
 
 // Import from dist/ (tests run against compiled output)
-const { validateMigrationList, computePendingMigrations } =
+const {
+  validateMigrationList,
+  computePendingMigrations,
+  IDEMPOTENT_DDL_ERROR_RE,
+} =
   await import("../../dist/db/migration-runner.js");
 
 describe("migration-runner", () => {
@@ -63,6 +67,15 @@ describe("migration-runner", () => {
     it("returns empty when DB is newer than code", () => {
       const pending = computePendingMigrations(allMigrations, 10);
       assert.strictEqual(pending.length, 0);
+    });
+  });
+
+  describe("IDEMPOTENT_DDL_ERROR_RE", () => {
+    it("matches duplicate-column/idempotent DDL replay errors only", () => {
+      assert.match("Column already exists", IDEMPOTENT_DDL_ERROR_RE);
+      assert.match("duplicate column: packedEncodings", IDEMPOTENT_DDL_ERROR_RE);
+      assert.match("table already has property embeddingNomicVec", IDEMPOTENT_DDL_ERROR_RE);
+      assert.doesNotMatch("syntax error near ALTER", IDEMPOTENT_DDL_ERROR_RE);
     });
   });
 });

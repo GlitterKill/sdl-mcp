@@ -27,7 +27,10 @@ import {
 } from "./symbol-mapping.js";
 import type { ProcessFileResult, SymbolDetail } from "./types.js";
 import type { BatchPersistAccumulator } from "./batch-persist.js";
-import type { Pass1ExtractionCache } from "../pass2/types.js";
+import {
+  type Pass1ExtractionCache,
+  storePass1Extraction,
+} from "../pass2/types.js";
 
 /**
  * Process a file using pre-parsed results from the Rust native engine.
@@ -200,7 +203,7 @@ export async function processFileFromRustResult(params: {
       isTsCallResolutionFile(fileMeta.path) &&
       skipCallResolution
     ) {
-      params.pass1Extractions.set(relPath, {
+      storePass1Extraction(params.pass1Extractions, relPath, {
         symbolsWithNodeIds: rustResult.symbols.map((extracted) => ({
           nodeId: extracted.nodeId,
           kind: extracted.kind as import("./types.js").SymbolKindLiteral,

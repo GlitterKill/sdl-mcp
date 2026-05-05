@@ -104,6 +104,74 @@ export function runExclusive<T>(
 }
 
 /**
+ * Execute a DDL statement (CREATE/ALTER/DROP TABLE, CREATE INDEX, etc.).
+ *
+ * DDL cannot be prepared on LadybugDB, so this bypasses the prepared-statement
+ * cache and routes through `conn.query()` directly. The call participates in
+ * the per-connection mutex (preventing concurrent native execute() races) and
+ * the watchdog (so a hung DDL flags the conn stuck for the read pool).
+ *
+ * The result handle is always closed in a try/finally to avoid handle leaks.
+ */
+export async function execDdl(
+  conn: Connection,
+  ddl: string,
+): Promise<void> {
+  await getConnMutex(conn).run(() =>
+    withConnWatchdog(conn, "execDdl", async () => {
+      const result = await conn.query(ddl);
+      try {
+        if (Array.isArray(result)) {
+          for (const r of result) r.close();
+        } else {
+          result.close();
+        }
+      } catch {
+        // Best-effort close — DDL completed successfully.
+      }
+    }),
+  );
+}
+
+/**
+ * Execute a `CALL <stored_proc>(...)` that cannot be parameterised
+ * (e.g. CREATE_VECTOR_INDEX, DROP_VECTOR_INDEX, CREATE_FTS_INDEX, SHOW_INDEXES).
+ *
+ * Like `execDdl` it bypasses the prepared-statement cache, holds the per-conn
+ * mutex, and runs through the watchdog. Returns the QueryResult so callers
+ * that need to read rows (e.g. SHOW_INDEXES) can iterate; the handle MUST be
+ * closed by the caller via `.close()` once consumed. Callers that only need
+ * side-effects should use `execStoredProc` instead.
+ */
+export async function execStoredProcRaw(
+  conn: Connection,
+  callQuery: string,
+): Promise<QueryResult> {
+  return getConnMutex(conn).run(() =>
+    withConnWatchdog(conn, "execStoredProc", () => conn.query(callQuery)),
+  );
+}
+
+/**
+ * Side-effect-only variant of `execStoredProcRaw` — closes the handle for you.
+ */
+export async function execStoredProc(
+  conn: Connection,
+  callQuery: string,
+): Promise<void> {
+  const result = await execStoredProcRaw(conn, callQuery);
+  try {
+    if (Array.isArray(result)) {
+      for (const r of result) r.close();
+    } else {
+      result.close();
+    }
+  } catch {
+    // Best-effort close.
+  }
+}
+
+/**
  * Wait for any in-flight query on `conn` to finish, then reject all queued
  * work with `onTimeoutError`. Used during shutdown to ensure no native
  * prepare/execute pipeline is mid-flight when the connection closes.
@@ -319,6 +387,45 @@ const transactionLockByConn = new WeakMap<Connection, boolean>();
 // don't surface as user-visible failures.
 const BEGIN_TXN_RETRY_DELAYS_MS = [50, 100, 200, 400, 800] as const;
 
+// ROLLBACK can also race the single-writer txn slot if a competing writer
+// is mid-BEGIN. Two short retries suffice for the millisecond-scale window;
+// after that we treat the rollback as fatal and poison the conn (existing
+// semantics).
+const ROLLBACK_RETRY_DELAYS_MS = [50, 100] as const;
+
+async function rollbackWithRetry(conn: Connection): Promise<void> {
+  let lastErr: unknown;
+  for (
+    let attempt = 0;
+    attempt <= ROLLBACK_RETRY_DELAYS_MS.length;
+    attempt++
+  ) {
+    try {
+      await exec(conn, "ROLLBACK");
+      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Engine already auto-rolled. Treat as success — caller's catch path
+      // surfaces this as the "no active transaction" debug log.
+      if (/no active transaction/i.test(msg)) throw err;
+      // Only retry the single-writer contention pattern; everything else
+      // (genuine rollback failure) bubbles immediately.
+      if (!msg.includes("Cannot start a new write transaction")) throw err;
+      lastErr = err;
+      if (attempt >= ROLLBACK_RETRY_DELAYS_MS.length) break;
+      const delay = ROLLBACK_RETRY_DELAYS_MS[attempt];
+      logger.debug(
+        `[ladybug-core] ROLLBACK conflict (attempt ${attempt + 1}); retrying in ${delay}ms`,
+      );
+      await new Promise((r) => {
+        const t = setTimeout(r, delay);
+        t.unref();
+      });
+    }
+  }
+  throw lastErr ?? new DatabaseError("ROLLBACK failed without error");
+}
+
 async function beginTransactionWithRetry(conn: Connection): Promise<void> {
   let lastErr: unknown;
   for (
@@ -400,7 +507,7 @@ export async function withTransaction<T>(
     } catch (err) {
       if (depth === 0) {
         try {
-          await exec(conn, "ROLLBACK");
+          await rollbackWithRetry(conn);
         } catch (rollbackErr) {
           const rollbackMessage =
             rollbackErr instanceof Error

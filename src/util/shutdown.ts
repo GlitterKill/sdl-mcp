@@ -74,9 +74,10 @@ export class ShutdownManager {
   /**
    * Register SIGINT, SIGTERM, and SIGHUP handlers.
    *
-   * SIGHUP is sent on many platforms when the controlling terminal is
-   * closed (e.g. closing a terminal window). On Windows Node.js
-   * approximates SIGHUP when the console window is closed.
+   * SIGHUP is still worth handling, but stdio transports also need
+   * stdin close/end listeners because the transport can disappear before
+   * the signal path runs. On Windows, Node's SIGHUP behavior is also
+   * platform-specific, so transport-close remains the primary stdio path.
    */
   registerSignals(): void {
     const handle = (signal: string): void => {
@@ -86,8 +87,7 @@ export class ShutdownManager {
     process.once("SIGINT", () => handle("SIGINT"));
     process.once("SIGTERM", () => handle("SIGTERM"));
 
-    // SIGHUP fires when the controlling terminal closes. On Windows,
-    // Node.js emits this when the console window is closed.
+    // SIGHUP remains a useful fallback for terminal shutdown paths.
     process.once("SIGHUP", () => handle("SIGHUP"));
   }
 
@@ -113,7 +113,7 @@ export class ShutdownManager {
    *
    * Idempotent — second and subsequent calls are no-ops.
    */
-  async shutdown(reason: string): Promise<void> {
+  async shutdown(reason: string, exitCode = 0): Promise<void> {
     if (this.shutdownCalled) {
       return;
     }
@@ -157,7 +157,7 @@ export class ShutdownManager {
     }
 
     clearTimeout(forceTimer);
-    process.exit(0);
+    process.exit(exitCode);
   }
 
   /**

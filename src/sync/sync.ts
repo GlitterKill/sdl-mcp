@@ -26,6 +26,8 @@ const gunzipAsync = promisify(gunzip);
 
 /** Maximum allowed size of decompressed artifact data (100MB). */
 const MAX_DECOMPRESSED_SIZE = 100 * 1024 * 1024;
+/** Maximum allowed size of compressed artifact input (50MB) — guards against decompression bombs before we even try to gunzip. */
+const MAX_COMPRESSED_INPUT_SIZE = 50 * 1024 * 1024;
 
 export async function exportArtifact(
   options: SyncExportOptions,
@@ -244,10 +246,10 @@ export async function importArtifact(
   }
 
   const compressed = Buffer.from(artifact.compressed_data, "base64");
-  const decompressed = await gunzipAsync(compressed);
-  if (decompressed.length > MAX_DECOMPRESSED_SIZE) {
-    throw new IndexError(`Decompressed artifact exceeds maximum size of ${MAX_DECOMPRESSED_SIZE} bytes (${decompressed.length} bytes)`);
+  if (compressed.length > MAX_COMPRESSED_INPUT_SIZE) {
+    throw new IndexError(`Compressed artifact input exceeds ${MAX_COMPRESSED_INPUT_SIZE} bytes`);
   }
+  const decompressed = await gunzipAsync(compressed, { maxOutputLength: MAX_DECOMPRESSED_SIZE });
   let state: SyncIndexState;
   try {
     state = JSON.parse(decompressed.toString("utf-8"));
@@ -405,10 +407,10 @@ export function getArtifactMetadata(
     const artifact: SyncArtifact = JSON.parse(artifactContent);
 
     const compressed = Buffer.from(artifact.compressed_data, "base64");
-    const decompressed = gunzipSync(compressed);
-    if (decompressed.length > MAX_DECOMPRESSED_SIZE) {
-      throw new IndexError(`Decompressed artifact exceeds maximum size of ${MAX_DECOMPRESSED_SIZE} bytes (${decompressed.length} bytes)`);
+    if (compressed.length > MAX_COMPRESSED_INPUT_SIZE) {
+      throw new IndexError(`Compressed artifact input exceeds ${MAX_COMPRESSED_INPUT_SIZE} bytes`);
     }
+    const decompressed = gunzipSync(compressed, { maxOutputLength: MAX_DECOMPRESSED_SIZE });
     let state: SyncIndexState;
     try {
       state = JSON.parse(decompressed.toString("utf-8"));
@@ -505,6 +507,9 @@ async function getGitCommitSha(repoPath: string): Promise<string | null> {
     const sha = execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: repoPath,
       encoding: "utf-8",
+      timeout: 5_000,
+      maxBuffer: 64 * 1024,
+      windowsHide: true,
     }).trim();
     return sha;
   } catch {
@@ -518,6 +523,9 @@ async function getGitBranch(repoPath: string): Promise<string | null> {
     const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
       cwd: repoPath,
       encoding: "utf-8",
+      timeout: 5_000,
+      maxBuffer: 64 * 1024,
+      windowsHide: true,
     }).trim();
     return branch;
   } catch {
