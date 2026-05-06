@@ -117,6 +117,28 @@ describe("metrics-updater semantic config branching", () => {
       "FileSummary embedding gate should follow the default hybrid retrieval mode",
     );
   });
+
+  it("quality audit counts untyped no-file placeholders with a direct NOT pattern", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/indexer/metrics-updater.ts"),
+      "utf8",
+    );
+    assert.ok(
+      source.includes("WHERE NOT (b)-[:SYMBOL_IN_FILE]->(:File)"),
+      "quality audit should not use OPTIONAL MATCH + WHERE for no-file placeholder counts",
+    );
+  });
+
+  it("quality audit reports SCIP phase counts from normalized phase metadata", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/indexer/metrics-updater.ts"),
+      "utf8",
+    );
+    assert.ok(
+      source.includes("WHERE d.resolutionPhase = 'scip' OR d.resolverId = 'scip'"),
+      "SCIP quality counts should include edges normalized to resolutionPhase='scip'",
+    );
+  });
 });
 
 describe("metrics-updater call resolution telemetry guard", () => {

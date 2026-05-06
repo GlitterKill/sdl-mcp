@@ -1,9 +1,21 @@
 import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
+import {
+  externalImportDependencyTarget,
+  isRepoLocalImportSpecifier,
+  unresolvedImportDependencyTarget,
+  type SymbolPlaceholderMeta,
+} from "../../db/symbol-placeholders.js";
 import { normalizePath } from "../../util/paths.js";
 import type { Pass2ImportCache } from "../pass2/types.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
 import { resolveImportCandidatePaths } from "../import-resolution/registry.js";
+
+interface ImportTarget {
+  symbolId: string;
+  provenance: string;
+  targetMeta?: SymbolPlaceholderMeta;
+}
 
 export async function resolveImportTargets(
   repoId: string,
@@ -22,11 +34,11 @@ export async function resolveImportTargets(
    */
   cache?: Pass2ImportCache,
 ): Promise<{
-  targets: Array<{ symbolId: string; provenance: string }>;
+  targets: ImportTarget[];
   importedNameToSymbolIds: Map<string, string[]>;
   namespaceImports: Map<string, Map<string, string>>;
 }> {
-  const targets: Array<{ symbolId: string; provenance: string }> = [];
+  const targets: ImportTarget[] = [];
   const importedNameToSymbolIds = new Map<string, string[]>();
   const namespaceImports = new Map<string, Map<string, string>>();
   const allImports = sourceContent
@@ -61,16 +73,16 @@ export async function resolveImportTargets(
 
     if (resolvedPaths.length === 0) {
       for (const name of importedNames) {
-        targets.push({
-          symbolId: `unresolved:${imp.specifier}:${name}`,
-          provenance: `${imp.specifier}:${name}`,
-        });
+        targets.push(makeUnresolvedImportTarget(imp.specifier, name, imp));
       }
       if (imp.namespaceImport) {
-        targets.push({
-          symbolId: `unresolved:${imp.specifier}:* as ${imp.namespaceImport}`,
-          provenance: `${imp.specifier}:* as ${imp.namespaceImport}`,
-        });
+        targets.push(
+          makeUnresolvedImportTarget(
+            imp.specifier,
+            `* as ${imp.namespaceImport}`,
+            imp,
+          ),
+        );
       }
       continue;
     }
@@ -100,16 +112,15 @@ export async function resolveImportTargets(
 
     if (targetFiles.length === 0) {
       for (const name of importedNames) {
-        targets.push({
-          symbolId: `unresolved:${resolvedPaths[0]}:${name}`,
-          provenance: `${resolvedPaths[0]}:${name}`,
-        });
+        targets.push(makeRepoLocalUnresolvedImportTarget(resolvedPaths[0], name));
       }
       if (imp.namespaceImport) {
-        targets.push({
-          symbolId: `unresolved:${resolvedPaths[0]}:* as ${imp.namespaceImport}`,
-          provenance: `${resolvedPaths[0]}:* as ${imp.namespaceImport}`,
-        });
+        targets.push(
+          makeRepoLocalUnresolvedImportTarget(
+            resolvedPaths[0],
+            `* as ${imp.namespaceImport}`,
+          ),
+        );
       }
       continue;
     }
@@ -122,16 +133,22 @@ export async function resolveImportTargets(
     if (sameLanguageFiles.length === 0) {
       for (const targetFile of targetFiles) {
         for (const name of importedNames) {
-          targets.push({
-            symbolId: `unresolved:${targetFile.relPath}:${name}`,
-            provenance: `cross-language:${targetFile.language}->${importerLanguage}:${name}`,
-          });
+          targets.push(
+            makeRepoLocalUnresolvedImportTarget(targetFile.relPath, name, {
+              provenance: `cross-language:${targetFile.language}->${importerLanguage}:${name}`,
+            }),
+          );
         }
         if (imp.namespaceImport) {
-          targets.push({
-            symbolId: `unresolved:${targetFile.relPath}:* as ${imp.namespaceImport}`,
-            provenance: `cross-language:${targetFile.language}->${importerLanguage}:* as ${imp.namespaceImport}`,
-          });
+          targets.push(
+            makeRepoLocalUnresolvedImportTarget(
+              targetFile.relPath,
+              `* as ${imp.namespaceImport}`,
+              {
+                provenance: `cross-language:${targetFile.language}->${importerLanguage}:* as ${imp.namespaceImport}`,
+              },
+            ),
+          );
         }
       }
       continue;
@@ -161,10 +178,7 @@ export async function resolveImportTargets(
 
     for (const name of importedNames) {
       if (name.startsWith("*")) {
-        targets.push({
-          symbolId: `unresolved:${resolvedPaths[0]}:${name}`,
-          provenance: `${resolvedPaths[0]}:${name}`,
-        });
+        targets.push(makeRepoLocalUnresolvedImportTarget(resolvedPaths[0], name));
         continue;
       }
 
@@ -182,10 +196,7 @@ export async function resolveImportTargets(
         existing.push(match.symbolId);
         importedNameToSymbolIds.set(name, existing);
       } else {
-        targets.push({
-          symbolId: `unresolved:${resolvedPaths[0]}:${name}`,
-          provenance: `${resolvedPaths[0]}:${name}`,
-        });
+        targets.push(makeRepoLocalUnresolvedImportTarget(resolvedPaths[0], name));
       }
     }
 
@@ -201,10 +212,12 @@ export async function resolveImportTargets(
       if (namespaceMap.size > 0) {
         namespaceImports.set(imp.namespaceImport, namespaceMap);
       } else {
-        targets.push({
-          symbolId: `unresolved:${resolvedPaths[0]}:* as ${imp.namespaceImport}`,
-          provenance: `${resolvedPaths[0]}:* as ${imp.namespaceImport}`,
-        });
+        targets.push(
+          makeRepoLocalUnresolvedImportTarget(
+            resolvedPaths[0],
+            `* as ${imp.namespaceImport}`,
+          ),
+        );
       }
     }
 
@@ -237,6 +250,50 @@ export async function resolveImportTargets(
   }
 
   return { targets, importedNameToSymbolIds, namespaceImports };
+}
+
+function makeUnresolvedImportTarget(
+  specifier: string,
+  name: string,
+  imp: Pick<ExtractedImport, "isRelative" | "isExternal">,
+): ImportTarget {
+  const symbolId = `unresolved:${specifier}:${name}`;
+  const provenance = `${specifier}:${name}`;
+  const targetLabel = renderImportTarget(specifier, name);
+  const isOutsideRepo =
+    !isRepoLocalImportSpecifier(specifier) &&
+    (imp.isExternal || !imp.isRelative);
+  return {
+    symbolId,
+    provenance,
+    targetMeta: isOutsideRepo
+      ? externalImportDependencyTarget(targetLabel)
+      : unresolvedImportDependencyTarget(targetLabel),
+  };
+}
+
+function makeRepoLocalUnresolvedImportTarget(
+  specifier: string,
+  name: string,
+  options?: { provenance?: string },
+): ImportTarget {
+  return {
+    symbolId: `unresolved:${specifier}:${name}`,
+    provenance: options?.provenance ?? `${specifier}:${name}`,
+    targetMeta: unresolvedImportDependencyTarget(
+      renderImportTarget(specifier, name),
+    ),
+  };
+}
+
+function renderImportTarget(specifier: string, name: string): string {
+  if (name.startsWith("* as ")) {
+    const namespaceName = name.slice(5).trim();
+    return namespaceName
+      ? `${namespaceName} (* from ${specifier})`
+      : `${name} (from ${specifier})`;
+  }
+  return `${name} (from ${specifier})`;
 }
 
 function extractCommonJsRequireImports(content: string): ExtractedImport[] {

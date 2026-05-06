@@ -4,6 +4,7 @@ import type {
   SymbolRow,
   SymbolReferenceRow,
 } from "../../db/ladybug-queries.js";
+import type { SymbolPlaceholderMeta } from "../../db/symbol-placeholders.js";
 import type {
   PendingCallEdge,
   SymbolIndex,
@@ -162,7 +163,11 @@ export interface BuildRowsParams {
   nameToSymbolIds: Map<string, string[]>;
   existingSymbolsById: Map<string, SymbolRow>;
   importResolution: {
-    targets: Array<{ symbolId: string; provenance: string }>;
+    targets: Array<{
+      symbolId: string;
+      provenance: string;
+      targetMeta?: SymbolPlaceholderMeta;
+    }>;
     importedNameToSymbolIds: Map<string, string[]>;
     namespaceImports: Map<string, Map<string, string>>;
   };

@@ -143,6 +143,7 @@ fix-kuzu.cjs
 fix_prRisk.js
 tests.tap
 claude-code-mcp-config.json
+codex-mcp-config.json
 opencode-mcp-config.json
 docs/plans/observability-dashboard-v1-plan.md
 .gitignore
@@ -161,3 +162,4 @@ src/code-mode/descriptions.ts.bak
 tests/unit/file-gateway.test.ts.bak
 tune-results.json
 scripts/fix-agent-frontmatter.py
+AGENTS.old

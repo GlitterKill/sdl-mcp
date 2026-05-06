@@ -230,7 +230,7 @@ Triggers re-indexing of a repository in either full or incremental mode.
 | Field                   | Type   | Description                                                                                                                                                       |
 | :---------------------- | :----- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `fileSummaryEmbeddings` | object | Per embedding model `{embedded, skipped, missing, degraded}` counts for hybrid `FileSummary` vectors. `degraded: true` means lexical summaries are fallback only. |
-| `quality`               | object | `{unresolvedTargets, externalTargets, untypedPlaceholderTargets, missingSignatureByKind, scipPhaseCounts}` post-index quality counters.                            |
+| `quality`               | object | Post-index quality counters, including unresolved/external dependency targets, placeholder hygiene, signature coverage, and SCIP phase counts.                     |
 
 **Notes:**
 
@@ -238,7 +238,8 @@ Triggers re-indexing of a repository in either full or incremental mode.
 - If no tracked files changed, incremental refresh can short-circuit after `scanRepo`, `versioning`, and `memorySync` while reusing the existing version.
 - After indexing, all slice caches and card caches are invalidated.
 - `diagnostics.timings.totalMs` covers the full synchronous indexing run, while `diagnostics.timings.phases` breaks out coarse stages such as `scanRepo`, `pass1`, `pass2`, and `finalizeIndexing`. Nested keys may also appear for hotspots inside a phase, for example `initSharedState.tsResolver`, `initSharedState.tsResolver.sourceFiles`, `initSharedState.tsResolver.programBuild`, `initSharedState.symbolMaps`, `resolveUnresolvedImports.fetchEdges`, `finalizeEdges.cleanupUnresolvedBuiltins`, `finalizeEdges.insertConfigEdges`, `finalizeIndexing.metrics`, `finalizeIndexing.metrics.testRefs`, `finalizeIndexing.fileSummaries`, `clustersAndProcesses.loadSymbols`, or `clustersAndProcesses.processWrite`. No-op incremental refreshes may omit later phases and report `shortCircuitNoOp` instead.
-- The `quality.unresolvedTargets` and `quality.externalTargets` counters report dependency placeholders separately from real symbols. `quality.untypedPlaceholderTargets` should be zero on healthy new indexes; non-zero values usually mean an old DB needs migration or a writer created no-file dependency targets without status metadata.
+- `quality.unresolvedTargets` counts repo-local missing or ambiguous dependency targets. `quality.externalTargets` counts outside-repo dependency targets such as runtime modules and packages. Both remain `Symbol` nodes for graph traversal, but graph consumers can distinguish them with `symbolStatus`.
+- `quality.untypedPlaceholderTargets`, `quality.placeholderTargetMismatches`, and `quality.isolatedPlaceholders` should be zero on healthy new indexes. Non-zero values usually mean an old DB needs migration or a writer created no-file dependency targets without deterministic placeholder metadata.
 
 ---
 

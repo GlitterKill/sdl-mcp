@@ -403,4 +403,50 @@ describe("LadybugDB Symbol Queries", () => {
       assert.strictEqual(count, 1);
     },
   );
+
+  it(
+    "normalizeDependencyPlaceholderSymbols counts external-only file-backed repairs",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
+        symbolId: "sym-external-stale",
+        repoId,
+        fileId,
+        kind: "function",
+        name: "externalStale",
+        exported: true,
+        visibility: null,
+        language: "typescript",
+        rangeStartLine: 1,
+        rangeStartCol: 0,
+        rangeEndLine: 1,
+        rangeEndCol: 0,
+        astFingerprint: "external-stale",
+        signatureJson: null,
+        summary: null,
+        invariantsJson: null,
+        sideEffectsJson: null,
+        updatedAt: "2026-03-04T00:00:00Z",
+      });
+      await exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: 'sym-external-stale'})
+         SET s.external = true`,
+      );
+
+      const result = await queries.normalizeDependencyPlaceholderSymbols(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+      );
+
+      assert.strictEqual(result.fileBackedRepaired, 1);
+      const dbResult = await conn.query(
+        `MATCH (s:Symbol {symbolId: 'sym-external-stale'})
+         RETURN coalesce(s.external, false) AS external`,
+      );
+      const row = await dbResult.getNext();
+      dbResult.close();
+      assert.strictEqual(row.external, false);
+    },
+  );
 });

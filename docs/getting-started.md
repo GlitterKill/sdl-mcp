@@ -331,6 +331,12 @@ When hybrid retrieval is configured (`semantic.retrieval.mode: "hybrid"` with ve
 
 If the embedding provider is unavailable or only the mock fallback is active, SDL-MCP still keeps lexical `FileSummary` rows for FTS/RRF fallback and marks the embedding pass as degraded in the `index.refresh.complete` audit stats (`fileSummaryEmbeddings[model].degraded: true`, with `missing` counts). Treat that as a retrieval-quality warning rather than a successful vector pass.
 
+### Dependency Placeholder Quality
+
+Dependency targets that are not indexed as real repo symbols still stay in the graph as `Symbol` nodes so `DEPENDS_ON` traversal keeps its shape. SDL-MCP now types those placeholders explicitly: `symbolStatus: "external"` for outside-repo imports such as Node builtins, npm packages, Rust crates, and Java/JDK imports; `symbolStatus: "unresolved"` for repo-local missing/ambiguous imports and unresolved calls.
+
+Healthy indexes should report zero `quality.untypedPlaceholderTargets`, zero `quality.placeholderTargetMismatches`, and zero `quality.isolatedPlaceholders` in the `index.refresh.complete` audit stats. `quality.unresolvedTargets` and `quality.externalTargets` are expected to be non-zero on many repos and should be read as dependency-shape counters, not broken real-symbol counts.
+
 ## Optional: Enable LLM-Generated Summaries
 
 LLM summaries produce 1–3 sentence natural-language descriptions for every symbol in your repository. These summaries appear in symbol cards and significantly improve semantic search quality.

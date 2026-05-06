@@ -13,7 +13,11 @@ import {
   withTransaction,
 } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
-import type { SymbolStatus } from "./symbol-placeholders.js";
+import {
+  classifyDependencyTarget,
+  type SymbolPlaceholderMeta,
+  type SymbolStatus,
+} from "./symbol-placeholders.js";
 
 const MAX_BATCH_WARNING_THRESHOLD = 5000;
 
@@ -87,9 +91,10 @@ export async function upsertSymbol(
          s.searchText = $searchText,
          s.summaryQuality = $summaryQuality,
          s.summarySource = $summarySource,
+         s.external = false,
          s.symbolStatus = 'real',
-         s.placeholderKind = null,
-         s.placeholderTarget = null,
+         s.placeholderKind = '',
+         s.placeholderTarget = '',
          s.updatedAt = $updatedAt
      MERGE (s)-[:SYMBOL_IN_FILE]->(f)
      MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
@@ -223,6 +228,7 @@ export async function upsertSymbolBatch(
              s.searchText = row.searchText,
              s.summaryQuality = row.summaryQuality,
              s.summarySource = row.summarySource,
+             s.external = false,
              s.symbolStatus = row.symbolStatus,
              s.placeholderKind = row.placeholderKind,
              s.placeholderTarget = row.placeholderTarget,
@@ -253,6 +259,359 @@ export async function upsertSymbolBatch(
       );
     }
   });
+}
+
+export async function normalizeFileBackedSymbolStatuses(
+  conn: Connection,
+  repoId: string,
+): Promise<number> {
+  const row = await querySingle<{ count: unknown }>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(:File)
+     WHERE s.repoId = $repoId
+       AND (
+         coalesce(s.symbolStatus, 'real') <> 'real'
+         OR coalesce(s.placeholderKind, '') <> ''
+         OR coalesce(s.placeholderTarget, '') <> ''
+       )
+     RETURN count(DISTINCT s) AS count`,
+    { repoId },
+  );
+  const repaired = toNumber(row?.count ?? 0);
+  if (repaired === 0) return 0;
+
+  await exec(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(:File)
+     WHERE s.repoId = $repoId
+       AND (
+         coalesce(s.symbolStatus, 'real') <> 'real'
+         OR coalesce(s.placeholderKind, '') <> ''
+         OR coalesce(s.placeholderTarget, '') <> ''
+       )
+     SET s.symbolStatus = 'real',
+         s.placeholderKind = '',
+         s.placeholderTarget = ''`,
+    { repoId },
+  );
+  return repaired;
+}
+
+export interface DependencyPlaceholderNormalizeResult {
+  fileBackedRepaired: number;
+  dependencyPlaceholdersRepaired: number;
+}
+
+export async function normalizeDependencyPlaceholderSymbols(
+  conn: Connection,
+  repoId: string,
+): Promise<DependencyPlaceholderNormalizeResult> {
+  const hasExternalColumn = await symbolExternalColumnExists(conn);
+  const fileBackedRepaired = await countFileBackedDependencyMetadataRepairs(
+    conn,
+    repoId,
+    hasExternalColumn,
+  );
+  await normalizeFileBackedSymbolStatuses(conn, repoId);
+  if (hasExternalColumn) {
+    await exec(
+      conn,
+      `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(:File)
+       WHERE s.repoId = $repoId AND coalesce(s.external, false) = true
+       SET s.external = false`,
+      { repoId },
+    );
+  }
+  const rows = await queryAll<{
+    symbolId: string;
+    symbolStatus: string | null;
+    placeholderKind: string | null;
+    placeholderTarget: string | null;
+    external?: unknown;
+  }>(
+    conn,
+    `MATCH (s:Symbol {repoId: $repoId})
+     WHERE NOT (s)-[:SYMBOL_IN_FILE]->(:File)
+       AND s.symbolId STARTS WITH 'unresolved:'
+     RETURN s.symbolId AS symbolId,
+            s.symbolStatus AS symbolStatus,
+            s.placeholderKind AS placeholderKind,
+            s.placeholderTarget AS placeholderTarget${
+              hasExternalColumn
+                ? `,
+            coalesce(s.external, false) AS external`
+                : ""
+            }`,
+    { repoId },
+  );
+  const repairs: Array<{
+    symbolId: string;
+    symbolStatus: SymbolPlaceholderMeta["symbolStatus"];
+    placeholderKind: string;
+    placeholderTarget: string;
+    external: boolean;
+  }> = [];
+
+  for (const row of rows) {
+    const meta = classifyDependencyTarget(row.symbolId);
+    const external = meta.symbolStatus === "external";
+    if (
+      row.symbolStatus !== meta.symbolStatus ||
+      (row.placeholderKind ?? "") !== (meta.placeholderKind ?? "") ||
+      (row.placeholderTarget ?? "") !== (meta.placeholderTarget ?? "") ||
+      (hasExternalColumn && toBoolean(row.external) !== external)
+    ) {
+      repairs.push({
+        symbolId: row.symbolId,
+        symbolStatus: meta.symbolStatus,
+        placeholderKind: meta.placeholderKind ?? "",
+        placeholderTarget: meta.placeholderTarget ?? "",
+        external,
+      });
+    }
+  }
+
+  const CHUNK = 256;
+  for (let i = 0; i < repairs.length; i += CHUNK) {
+    const chunk = repairs.slice(i, i + CHUNK);
+    await exec(
+      conn,
+      `UNWIND $rows AS row
+       MATCH (s:Symbol {symbolId: row.symbolId})
+       SET s.symbolStatus = row.symbolStatus,
+           s.placeholderKind = row.placeholderKind,
+           s.placeholderTarget = row.placeholderTarget${
+             hasExternalColumn
+               ? `,
+           s.external = row.external`
+               : ""
+           }`,
+      { rows: chunk },
+    );
+  }
+
+  return {
+    fileBackedRepaired,
+    dependencyPlaceholdersRepaired: repairs.length,
+  };
+}
+
+async function countFileBackedDependencyMetadataRepairs(
+  conn: Connection,
+  repoId: string,
+  hasExternalColumn: boolean,
+): Promise<number> {
+  const row = await querySingle<{ count: unknown }>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(:File)
+     WHERE s.repoId = $repoId
+       AND (
+         coalesce(s.symbolStatus, 'real') <> 'real'
+         OR coalesce(s.placeholderKind, '') <> ''
+         OR coalesce(s.placeholderTarget, '') <> ''${
+           hasExternalColumn
+             ? `
+         OR coalesce(s.external, false) = true`
+             : ""
+         }
+       )
+     RETURN count(DISTINCT s) AS count`,
+    { repoId },
+  );
+  return toNumber(row?.count ?? 0);
+}
+
+export async function pruneIsolatedPlaceholderSymbols(
+  conn: Connection,
+  repoId: string,
+): Promise<number> {
+  const rows = await queryAll<{ symbolId: string }>(
+    conn,
+    `MATCH (s:Symbol {repoId: $repoId})
+     WHERE NOT (s)-[:SYMBOL_IN_FILE]->(:File)
+       AND (
+         s.symbolId STARTS WITH 'unresolved:'
+         OR coalesce(s.symbolStatus, '') = 'unresolved'
+         OR coalesce(s.symbolStatus, '') = 'external'
+       )
+       AND NOT (:Symbol)-[:DEPENDS_ON]->(s)
+       AND NOT (s)-[:DEPENDS_ON]->(:Symbol)
+     RETURN s.symbolId AS symbolId`,
+    { repoId },
+  );
+  const symbolIds = rows.map((row) => row.symbolId);
+  if (symbolIds.length === 0) return 0;
+
+  const cleanup = {
+    symbolInFile: await cleanupPatternExists(
+      conn,
+      `MATCH (:Symbol)-[:SYMBOL_IN_FILE]->(:File) RETURN 1 AS ok LIMIT 0`,
+    ),
+    belongsToCluster: await cleanupPatternExists(
+      conn,
+      `MATCH (:Symbol)-[:BELONGS_TO_CLUSTER]->(:Cluster) RETURN 1 AS ok LIMIT 0`,
+    ),
+    belongsToShadowCluster: await cleanupPatternExists(
+      conn,
+      `MATCH (:Symbol)-[:BELONGS_TO_SHADOW_CLUSTER]->(:ShadowCluster) RETURN 1 AS ok LIMIT 0`,
+    ),
+    participatesIn: await cleanupPatternExists(
+      conn,
+      `MATCH (:Symbol)-[:PARTICIPATES_IN]->(:Process) RETURN 1 AS ok LIMIT 0`,
+    ),
+    memoryOf: await cleanupPatternExists(
+      conn,
+      `MATCH (:Memory)-[:MEMORY_OF]->(:Symbol) RETURN 1 AS ok LIMIT 0`,
+    ),
+    metrics: await cleanupPatternExists(
+      conn,
+      `MATCH (:Metrics) RETURN 1 AS ok LIMIT 0`,
+    ),
+    symbolEmbedding: await cleanupPatternExists(
+      conn,
+      `MATCH (:SymbolEmbedding) RETURN 1 AS ok LIMIT 0`,
+    ),
+    summaryCache: await cleanupPatternExists(
+      conn,
+      `MATCH (:SummaryCache) RETURN 1 AS ok LIMIT 0`,
+    ),
+  };
+
+  await withTransaction(conn, async (txConn) => {
+    await exec(
+      txConn,
+      `MATCH (s:Symbol)-[rel:SYMBOL_IN_REPO]->(:Repo)
+       WHERE s.symbolId IN $symbolIds
+       DELETE rel`,
+      { symbolIds },
+    );
+    if (cleanup.symbolInFile) {
+      await exec(
+        txConn,
+        `MATCH (s:Symbol)-[rel:SYMBOL_IN_FILE]->(:File)
+         WHERE s.symbolId IN $symbolIds
+         DELETE rel`,
+        { symbolIds },
+      );
+    }
+    if (cleanup.belongsToCluster) {
+      await exec(
+        txConn,
+        `MATCH (s:Symbol)-[rel:BELONGS_TO_CLUSTER]->(:Cluster)
+         WHERE s.symbolId IN $symbolIds
+         DELETE rel`,
+        { symbolIds },
+      );
+    }
+    if (cleanup.belongsToShadowCluster) {
+      await exec(
+        txConn,
+        `MATCH (s:Symbol)-[rel:BELONGS_TO_SHADOW_CLUSTER]->(:ShadowCluster)
+         WHERE s.symbolId IN $symbolIds
+         DELETE rel`,
+        { symbolIds },
+      );
+    }
+    if (cleanup.participatesIn) {
+      await exec(
+        txConn,
+        `MATCH (s:Symbol)-[rel:PARTICIPATES_IN]->(:Process)
+         WHERE s.symbolId IN $symbolIds
+         DELETE rel`,
+        { symbolIds },
+      );
+    }
+    if (cleanup.memoryOf) {
+      await exec(
+        txConn,
+        `MATCH (mem:Memory)-[rel:MEMORY_OF]->(s:Symbol)
+         WHERE s.symbolId IN $symbolIds
+         DELETE rel`,
+        { symbolIds },
+      );
+    }
+    if (cleanup.metrics) {
+      await exec(
+        txConn,
+        `MATCH (m:Metrics)
+         WHERE m.symbolId IN $symbolIds
+         DELETE m`,
+        { symbolIds },
+      );
+    }
+    if (cleanup.symbolEmbedding) {
+      await exec(
+        txConn,
+        `MATCH (e:SymbolEmbedding)
+         WHERE e.symbolId IN $symbolIds
+         DELETE e`,
+        { symbolIds },
+      );
+    }
+    if (cleanup.summaryCache) {
+      await exec(
+        txConn,
+        `MATCH (sc:SummaryCache)
+         WHERE sc.symbolId IN $symbolIds
+         DELETE sc`,
+        { symbolIds },
+      );
+    }
+    await exec(
+      txConn,
+      `MATCH (s:Symbol {repoId: $repoId})
+       WHERE s.symbolId IN $symbolIds
+       DELETE s`,
+      { repoId, symbolIds },
+    );
+  });
+
+  return symbolIds.length;
+}
+
+async function cleanupPatternExists(
+  conn: Connection,
+  statement: string,
+): Promise<boolean> {
+  try {
+    await queryAll(conn, statement, {});
+    return true;
+  } catch (error) {
+    if (String(error).toLowerCase().includes("does not exist")) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function symbolExternalColumnExists(conn: Connection): Promise<boolean> {
+  try {
+    await queryAll(
+      conn,
+      `MATCH (s:Symbol)
+       RETURN coalesce(s.external, false) AS external
+       LIMIT 0`,
+      {},
+    );
+    return true;
+  } catch (error) {
+    if (isMissingSymbolExternalColumnError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+export function isMissingSymbolExternalColumnError(error: unknown): boolean {
+  const message = String(error).toLowerCase();
+  return (
+    message.includes("external") &&
+    (message.includes("cannot find property") ||
+      (message.includes("property") && message.includes("does not exist")) ||
+      (message.includes("column") && message.includes("does not exist")) ||
+      message.includes("no such property") ||
+      message.includes("not found"))
+  );
 }
 
 export async function getSymbol(

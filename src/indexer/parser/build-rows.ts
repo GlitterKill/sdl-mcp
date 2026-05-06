@@ -267,6 +267,7 @@ export async function buildSymbolAndEdgeRows(
           resolution: "exact",
           provenance: `import:${target.provenance}`,
           createdAt: now,
+          targetMeta: target.targetMeta,
         };
         edgesToInsert.push(edge);
         edgesCreated++;

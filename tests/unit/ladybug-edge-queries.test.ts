@@ -226,7 +226,7 @@ describe("LadybugDB Edge Queries", () => {
   );
 
   it(
-    "insertEdges batch-types unresolved import targets",
+    "insertEdges batch-types outside-repo import targets as external",
     { skip: !ladybugAvailable },
     async () => {
       await queries.insertEdges(conn as unknown as import("kuzu").Connection, [
@@ -248,18 +248,520 @@ describe("LadybugDB Edge Queries", () => {
          RETURN s.repoId AS repoId,
                 s.symbolStatus AS symbolStatus,
                 s.placeholderKind AS placeholderKind,
-                s.placeholderTarget AS placeholderTarget`,
+                s.placeholderTarget AS placeholderTarget,
+                coalesce(s.external, false) AS external`,
       );
       const rows = [await result.getNext()];
       result.close();
 
       assert.strictEqual(rows[0]!.repoId, repoId);
-      assert.strictEqual(rows[0]!.symbolStatus, "unresolved");
+      assert.strictEqual(rows[0]!.symbolStatus, "external");
       assert.strictEqual(rows[0]!.placeholderKind, "import");
       assert.strictEqual(
         rows[0]!.placeholderTarget,
         "describe (from node:test)",
       );
+      assert.strictEqual(rows[0]!.external, true);
+    },
+  );
+
+  it(
+    "insertEdges uses explicit target metadata without cross-contaminating batch rows",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.insertEdges(conn as unknown as import("kuzu").Connection, [
+        {
+          repoId,
+          fromSymbolId: "edge-from",
+          toSymbolId: "unresolved:kuzu:Connection",
+          edgeType: "import",
+          weight: 0.6,
+          confidence: 1,
+          resolution: "exact",
+          provenance: "import:kuzu:Connection",
+          createdAt: "2026-03-04T00:00:00Z",
+          targetMeta: {
+            symbolStatus: "external",
+            placeholderKind: "import",
+            placeholderTarget: "Connection (from kuzu)",
+          },
+        },
+        {
+          repoId,
+          fromSymbolId: "edge-from",
+          toSymbolId: "unresolved:src/db/ladybug-queries.ts:SymbolRow",
+          edgeType: "import",
+          weight: 0.6,
+          confidence: 1,
+          resolution: "unresolved",
+          provenance: "import:src/db/ladybug-queries.ts:SymbolRow",
+          createdAt: "2026-03-04T00:00:00Z",
+          targetMeta: {
+            symbolStatus: "unresolved",
+            placeholderKind: "import",
+            placeholderTarget: "SymbolRow (from src/db/ladybug-queries.ts)",
+          },
+        },
+      ]);
+
+      const result = await conn.query(
+        `MATCH (s:Symbol)
+         WHERE s.symbolId IN ['unresolved:kuzu:Connection', 'unresolved:src/db/ladybug-queries.ts:SymbolRow']
+         RETURN s.symbolId AS symbolId,
+                s.symbolStatus AS symbolStatus,
+                s.placeholderKind AS placeholderKind,
+                s.placeholderTarget AS placeholderTarget,
+                coalesce(s.external, false) AS external
+         ORDER BY symbolId`,
+      );
+      const rows = await result.getAll();
+      result.close();
+
+      assert.deepStrictEqual(rows, [
+        {
+          symbolId: "unresolved:kuzu:Connection",
+          symbolStatus: "external",
+          placeholderKind: "import",
+          placeholderTarget: "Connection (from kuzu)",
+          external: true,
+        },
+        {
+          symbolId: "unresolved:src/db/ladybug-queries.ts:SymbolRow",
+          symbolStatus: "unresolved",
+          placeholderKind: "import",
+          placeholderTarget: "SymbolRow (from src/db/ladybug-queries.ts)",
+          external: false,
+        },
+      ]);
+    },
+  );
+
+  it(
+    "insertEdges repairs stale placeholder metadata on real file-backed targets",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
+        symbolId: "edge-real-target",
+        repoId,
+        fileId,
+        kind: "function",
+        name: "realTarget",
+        exported: true,
+        visibility: "public",
+        language: "ts",
+        rangeStartLine: 1,
+        rangeStartCol: 0,
+        rangeEndLine: 3,
+        rangeEndCol: 1,
+        astFingerprint: "real-target-fp",
+        signatureJson: JSON.stringify({ text: "function realTarget" }),
+        summary: null,
+        invariantsJson: null,
+        sideEffectsJson: null,
+        roleTagsJson: null,
+        searchText: "realTarget function",
+        updatedAt: "2026-03-04T00:00:00Z",
+      });
+      await exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: 'edge-real-target'})
+         SET s.symbolStatus = 'unresolved',
+             s.placeholderKind = 'call',
+             s.placeholderTarget = 'stale.call'`,
+      );
+
+      await queries.insertEdges(conn as unknown as import("kuzu").Connection, [
+        {
+          repoId,
+          fromSymbolId: "edge-from",
+          toSymbolId: "edge-real-target",
+          edgeType: "call",
+          weight: 1,
+          confidence: 1,
+          resolution: "exact",
+          provenance: "call:realTarget",
+          createdAt: "2026-03-04T00:00:00Z",
+        },
+      ]);
+
+      const result = await conn.query(
+        `MATCH (s:Symbol {symbolId: 'edge-real-target'})
+         RETURN s.symbolStatus AS symbolStatus,
+                s.placeholderKind AS placeholderKind,
+                s.placeholderTarget AS placeholderTarget`,
+      );
+      const row = await result.getNext();
+      result.close();
+
+      assert.strictEqual(row.symbolStatus, "real");
+      assert.strictEqual(row.placeholderKind, "");
+      assert.strictEqual(row.placeholderTarget, "");
+    },
+  );
+
+  it(
+    "insertEdges clears stale external metadata on real file-backed targets",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
+        symbolId: "edge-real-target",
+        repoId,
+        fileId,
+        kind: "function",
+        name: "realTarget",
+        exported: true,
+        visibility: "public",
+        language: "ts",
+        rangeStartLine: 1,
+        rangeStartCol: 0,
+        rangeEndLine: 3,
+        rangeEndCol: 1,
+        astFingerprint: "real-target-fp",
+        signatureJson: JSON.stringify({ text: "function realTarget" }),
+        summary: null,
+        invariantsJson: null,
+        sideEffectsJson: null,
+        roleTagsJson: null,
+        searchText: "realTarget function",
+        updatedAt: "2026-03-04T00:00:00Z",
+      });
+      await exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: 'edge-real-target'})
+         SET s.external = true,
+             s.symbolStatus = 'external',
+             s.placeholderKind = 'scip',
+             s.placeholderTarget = 'pkg::realTarget'`,
+      );
+
+      await queries.insertEdges(conn as unknown as import("kuzu").Connection, [
+        {
+          repoId,
+          fromSymbolId: "edge-from",
+          toSymbolId: "edge-real-target",
+          edgeType: "call",
+          weight: 1,
+          confidence: 1,
+          resolution: "exact",
+          provenance: "call:realTarget",
+          createdAt: "2026-03-04T00:00:00Z",
+        },
+      ]);
+
+      const result = await conn.query(
+        `MATCH (s:Symbol {symbolId: 'edge-real-target'})
+         RETURN coalesce(s.external, false) AS external,
+                s.symbolStatus AS symbolStatus,
+                s.placeholderKind AS placeholderKind,
+                s.placeholderTarget AS placeholderTarget`,
+      );
+      const row = await result.getNext();
+      result.close();
+
+      assert.strictEqual(row.external, false);
+      assert.strictEqual(row.symbolStatus, "real");
+      assert.strictEqual(row.placeholderKind, "");
+      assert.strictEqual(row.placeholderTarget, "");
+    },
+  );
+
+  it(
+    "upsertSymbolBatch clears stale external metadata on real file-backed symbols",
+    { skip: !ladybugAvailable },
+    async () => {
+      await exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: 'edge-from'})
+         SET s.external = true,
+             s.symbolStatus = 'external',
+             s.placeholderKind = 'scip',
+             s.placeholderTarget = 'pkg::edge_from'`,
+      );
+
+      await queries.upsertSymbolBatch(
+        conn as unknown as import("kuzu").Connection,
+        [
+          {
+            symbolId: "edge-from",
+            repoId,
+            fileId,
+            kind: "function",
+            name: "edgeFrom",
+            exported: true,
+            visibility: "public",
+            language: "ts",
+            rangeStartLine: 1,
+            rangeStartCol: 0,
+            rangeEndLine: 3,
+            rangeEndCol: 1,
+            astFingerprint: "edge-from-fp",
+            signatureJson: JSON.stringify({ text: "function edgeFrom" }),
+            summary: null,
+            invariantsJson: null,
+            sideEffectsJson: null,
+            roleTagsJson: null,
+            searchText: "edgeFrom function",
+            updatedAt: "2026-03-04T00:00:00Z",
+          },
+        ],
+      );
+
+      const result = await conn.query(
+        `MATCH (s:Symbol {symbolId: 'edge-from'})
+         RETURN coalesce(s.external, false) AS external,
+                s.symbolStatus AS symbolStatus,
+                s.placeholderKind AS placeholderKind,
+                s.placeholderTarget AS placeholderTarget`,
+      );
+      const row = await result.getNext();
+      result.close();
+
+      assert.strictEqual(row.external, false);
+      assert.strictEqual(row.symbolStatus, "real");
+      assert.strictEqual(row.placeholderKind, "");
+      assert.strictEqual(row.placeholderTarget, "");
+    },
+  );
+
+  it(
+    "insertEdges keeps stale-external real sources queryable as real symbols",
+    { skip: !ladybugAvailable },
+    async () => {
+      await exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: 'edge-from'})
+         SET s.external = true,
+             s.symbolStatus = 'real',
+             s.placeholderKind = 'scip',
+             s.placeholderTarget = 'pkg::edge_from'`,
+      );
+
+      await queries.insertEdges(conn as unknown as import("kuzu").Connection, [
+        {
+          repoId,
+          fromSymbolId: "edge-from",
+          toSymbolId: "edge-to",
+          edgeType: "call",
+          weight: 1,
+          confidence: 1,
+          resolution: "exact",
+          provenance: "call:edgeTo",
+          createdAt: "2026-03-04T00:00:00Z",
+        },
+      ]);
+
+      const result = await conn.query(
+        `MATCH (s:Symbol {symbolId: 'edge-from'})
+         RETURN coalesce(s.external, false) AS external,
+                s.symbolStatus AS symbolStatus,
+                s.placeholderKind AS placeholderKind,
+                s.placeholderTarget AS placeholderTarget`,
+      );
+      const row = await result.getNext();
+      result.close();
+
+      assert.strictEqual(row.external, false);
+      assert.strictEqual(row.symbolStatus, "real");
+      assert.strictEqual(row.placeholderKind, "");
+      assert.strictEqual(row.placeholderTarget, "");
+    },
+  );
+
+  it(
+    "insertEdge keeps stale-external real sources queryable as real symbols",
+    { skip: !ladybugAvailable },
+    async () => {
+      await exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: 'edge-from'})
+         SET s.external = true,
+             s.symbolStatus = 'real',
+             s.placeholderKind = 'scip',
+             s.placeholderTarget = 'pkg::edge_from'`,
+      );
+
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "edge-to",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        provenance: "call:edgeTo",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+
+      const result = await conn.query(
+        `MATCH (s:Symbol {symbolId: 'edge-from'})
+         RETURN coalesce(s.external, false) AS external,
+                s.symbolStatus AS symbolStatus,
+                s.placeholderKind AS placeholderKind,
+                s.placeholderTarget AS placeholderTarget`,
+      );
+      const row = await result.getNext();
+      result.close();
+
+      assert.strictEqual(row.external, false);
+      assert.strictEqual(row.symbolStatus, "real");
+      assert.strictEqual(row.placeholderKind, "");
+      assert.strictEqual(row.placeholderTarget, "");
+    },
+  );
+
+  it(
+    "insertEdge clears stale external metadata on real file-backed targets",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
+        symbolId: "edge-real-target",
+        repoId,
+        fileId,
+        kind: "function",
+        name: "realTarget",
+        exported: true,
+        visibility: "public",
+        language: "ts",
+        rangeStartLine: 1,
+        rangeStartCol: 0,
+        rangeEndLine: 3,
+        rangeEndCol: 1,
+        astFingerprint: "real-target-fp",
+        signatureJson: JSON.stringify({ text: "function realTarget" }),
+        summary: null,
+        invariantsJson: null,
+        sideEffectsJson: null,
+        roleTagsJson: null,
+        searchText: "realTarget function",
+        updatedAt: "2026-03-04T00:00:00Z",
+      });
+      await exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: 'edge-real-target'})
+         SET s.external = true,
+             s.symbolStatus = 'external',
+             s.placeholderKind = 'scip',
+             s.placeholderTarget = 'pkg::realTarget'`,
+      );
+
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "edge-real-target",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        provenance: "call:realTarget",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+
+      const result = await conn.query(
+        `MATCH (s:Symbol {symbolId: 'edge-real-target'})
+         RETURN coalesce(s.external, false) AS external,
+                s.symbolStatus AS symbolStatus,
+                s.placeholderKind AS placeholderKind,
+                s.placeholderTarget AS placeholderTarget`,
+      );
+      const row = await result.getNext();
+      result.close();
+
+      assert.strictEqual(row.external, false);
+      assert.strictEqual(row.symbolStatus, "real");
+      assert.strictEqual(row.placeholderKind, "");
+      assert.strictEqual(row.placeholderTarget, "");
+    },
+  );
+
+  it(
+    "insertEdges preserves existing external metadata on real target IDs",
+    { skip: !ladybugAvailable },
+    async () => {
+      await exec(
+        conn,
+        `MATCH (r:Repo {repoId: '${repoId}'})
+         MERGE (s:Symbol {symbolId: 'scip:external:Widget'})
+         SET s.repoId = '${repoId}',
+             s.external = true,
+             s.symbolStatus = 'external',
+             s.placeholderKind = 'scip',
+             s.placeholderTarget = 'pkg::Widget'
+         MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
+      );
+
+      await queries.insertEdges(conn as unknown as import("kuzu").Connection, [
+        {
+          repoId,
+          fromSymbolId: "edge-from",
+          toSymbolId: "scip:external:Widget",
+          edgeType: "call",
+          weight: 1,
+          confidence: 1,
+          resolution: "exact",
+          provenance: "scip:pkg::Widget",
+          createdAt: "2026-03-04T00:00:00Z",
+        },
+      ]);
+
+      const result = await conn.query(
+        `MATCH (s:Symbol {symbolId: 'scip:external:Widget'})
+         RETURN coalesce(s.external, false) AS external,
+                s.symbolStatus AS symbolStatus,
+                s.placeholderKind AS placeholderKind,
+                s.placeholderTarget AS placeholderTarget`,
+      );
+      const row = await result.getNext();
+      result.close();
+
+      assert.strictEqual(row.external, true);
+      assert.strictEqual(row.symbolStatus, "external");
+      assert.strictEqual(row.placeholderKind, "scip");
+      assert.strictEqual(row.placeholderTarget, "pkg::Widget");
+    },
+  );
+
+  it(
+    "pruneIsolatedPlaceholderSymbols removes derived relationships before deleting nodes",
+    { skip: !ladybugAvailable },
+    async () => {
+      await exec(
+        conn,
+        `MATCH (r:Repo {repoId: '${repoId}'})
+         CREATE (s:Symbol {
+           symbolId: 'unresolved:call:staleClustered',
+           repoId: '${repoId}',
+           symbolStatus: 'unresolved',
+           placeholderKind: 'call',
+           placeholderTarget: 'staleClustered',
+           external: false
+         })
+         CREATE (c:ShadowCluster {
+           shadowClusterId: 'shadow-stale-placeholder',
+           repoId: '${repoId}',
+           algorithm: 'test',
+           label: 'stale',
+           symbolCount: 1,
+           modularity: 0.0,
+           versionId: 'v-test',
+           createdAt: '2026-03-04T00:00:00Z'
+         })
+         CREATE (s)-[:SYMBOL_IN_REPO]->(r)
+         CREATE (s)-[:BELONGS_TO_SHADOW_CLUSTER]->(c)`,
+      );
+
+      const pruned = await queries.pruneIsolatedPlaceholderSymbols(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+      );
+
+      assert.strictEqual(pruned, 1);
+      const result = await conn.query(
+        `MATCH (s:Symbol {symbolId: 'unresolved:call:staleClustered'})
+         RETURN count(s) AS count`,
+      );
+      const row = await result.getNext();
+      result.close();
+      assert.strictEqual(Number(row.count), 0);
     },
   );
 
@@ -366,6 +868,17 @@ describe("LadybugDB Edge Queries", () => {
         confidence: 1,
         resolution: "exact",
         provenance: "import:ResolvedTarget",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "unresolved:zod:z",
+        edgeType: "import",
+        weight: 0.6,
+        confidence: 1,
+        resolution: "unresolved",
+        provenance: "import:zod:z",
         createdAt: "2026-03-04T00:00:00Z",
       });
       await queries.insertEdge(conn as unknown as import("kuzu").Connection, {

@@ -12,7 +12,10 @@ import {
 } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
 import { normalizePath } from "../util/paths.js";
-import { classifyDependencyTarget } from "./symbol-placeholders.js";
+import {
+  classifyDependencyTarget,
+  type SymbolPlaceholderMeta,
+} from "./symbol-placeholders.js";
 
 // Workaround for LadybugDB 0.16.0 binder bug: when an UNWIND struct mixes
 // integer and fractional Number values for the same field, the binder
@@ -66,6 +69,7 @@ export interface EdgeRow {
   repoId: string;
   fromSymbolId: string;
   toSymbolId: string;
+  targetMeta?: SymbolPlaceholderMeta;
   edgeType: string;
   weight: number;
   confidence: number;
@@ -112,7 +116,7 @@ export async function insertEdge(
   conn: Connection,
   edge: EdgeRow,
 ): Promise<void> {
-  const targetMeta = classifyDependencyTarget(edge.toSymbolId);
+  const targetMeta = edge.targetMeta ?? classifyDependencyTarget(edge.toSymbolId);
   // Note: MERGE on target symbol (b) may create "stub" nodes with only symbolId
   // and SYMBOL_IN_REPO edge when the target hasn't been indexed yet. This is
   // intentional — stubs are populated when the target file is indexed, and
@@ -122,12 +126,51 @@ export async function insertEdge(
     `MATCH (r:Repo {repoId: $repoId})
      MERGE (a:Symbol {symbolId: $fromSymbolId})
      MERGE (b:Symbol {symbolId: $toSymbolId})
+     WITH r, a, b
+     OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]->(bf:File)
+     WITH r, a, b, count(bf) AS targetFileCount
      SET a.repoId = $repoId,
-         a.symbolStatus = CASE WHEN a.symbolStatus IS NULL OR a.symbolStatus = '' THEN 'real' ELSE a.symbolStatus END,
+         a.external = CASE
+           WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.external, false)
+           ELSE false
+         END,
+         a.symbolStatus = CASE
+           WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.symbolStatus, 'unresolved')
+           ELSE 'real'
+         END,
+         a.placeholderKind = CASE
+           WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.placeholderKind, '')
+           ELSE ''
+         END,
+         a.placeholderTarget = CASE
+           WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.placeholderTarget, '')
+           ELSE ''
+         END,
          b.repoId = $repoId,
-         b.symbolStatus = CASE WHEN b.symbolStatus IS NULL OR b.symbolStatus = '' OR $targetStatus <> 'real' THEN $targetStatus ELSE b.symbolStatus END,
-         b.placeholderKind = CASE WHEN $targetStatus <> 'real' THEN $targetPlaceholderKind ELSE b.placeholderKind END,
-         b.placeholderTarget = CASE WHEN $targetStatus <> 'real' THEN $targetPlaceholderTarget ELSE b.placeholderTarget END
+         b.external = CASE
+           WHEN $targetStatus = 'external' THEN true
+           WHEN $targetStatus <> 'real' THEN false
+           WHEN targetFileCount > 0 THEN false
+           ELSE coalesce(b.external, false)
+         END,
+         b.symbolStatus = CASE
+           WHEN $targetStatus <> 'real' THEN $targetStatus
+           WHEN targetFileCount > 0 THEN 'real'
+           WHEN coalesce(b.external, false) = true THEN 'external'
+           ELSE 'real'
+         END,
+         b.placeholderKind = CASE
+           WHEN $targetStatus <> 'real' THEN $targetPlaceholderKind
+           WHEN targetFileCount > 0 THEN ''
+           WHEN coalesce(b.external, false) = true THEN b.placeholderKind
+           ELSE ''
+         END,
+         b.placeholderTarget = CASE
+           WHEN $targetStatus <> 'real' THEN $targetPlaceholderTarget
+           WHEN targetFileCount > 0 THEN ''
+           WHEN coalesce(b.external, false) = true THEN b.placeholderTarget
+           ELSE ''
+         END
      MERGE (a)-[:SYMBOL_IN_REPO]->(r)
      MERGE (b)-[:SYMBOL_IN_REPO]->(r)
      MERGE (a)-[d:DEPENDS_ON {edgeType: $edgeType}]->(b)
@@ -235,7 +278,6 @@ export async function insertEdges(
       for (let i = 0; i < repoEdges.length; i += CHUNK) {
         const edgeChunk = repoEdges.slice(i, i + CHUNK);
         const rows = edgeChunk.map((edge) => {
-          const targetMeta = classifyDependencyTarget(edge.toSymbolId);
           return {
             repoId,
             fromSymbolId: edge.fromSymbolId,
@@ -253,26 +295,77 @@ export async function insertEdges(
             // backported to LadybugDB 0.16.0. Empty string is the workaround.
             provenance: edge.provenance ?? "",
             createdAt: edge.createdAt,
-            targetStatus: targetMeta.symbolStatus,
-            targetPlaceholderKind: targetMeta.placeholderKind ?? "",
-            targetPlaceholderTarget: targetMeta.placeholderTarget ?? "",
           };
         });
-        // 1: ensure both Symbol nodes exist.
+        // Keep placeholder metadata in a unique node-update batch. Updating it
+        // from every edge row has previously allowed unrelated UNWIND rows to
+        // smear placeholderTarget text across target nodes in LadybugDB.
+        const targetRows = buildTargetMetadataRows(edgeChunk);
+        // 1: ensure both Symbol nodes exist. Real edge endpoints must repair
+        // stale placeholder metadata; otherwise a previously unresolved stub
+        // can stay excluded after the real file-backed symbol is indexed.
         await exec(
           txConn,
           `UNWIND $rows AS row
            MERGE (a:Symbol {symbolId: row.fromSymbolId})
            MERGE (b:Symbol {symbolId: row.toSymbolId})
            SET a.repoId = row.repoId,
-               a.symbolStatus = CASE WHEN a.symbolStatus IS NULL OR a.symbolStatus = '' THEN 'real' ELSE a.symbolStatus END,
-               b.repoId = row.repoId,
-               b.symbolStatus = CASE WHEN b.symbolStatus IS NULL OR b.symbolStatus = '' OR row.targetStatus <> 'real' THEN row.targetStatus ELSE b.symbolStatus END,
-               b.placeholderKind = CASE WHEN row.targetStatus <> 'real' THEN row.targetPlaceholderKind ELSE b.placeholderKind END,
-               b.placeholderTarget = CASE WHEN row.targetStatus <> 'real' THEN row.targetPlaceholderTarget ELSE b.placeholderTarget END`,
+               a.external = CASE
+                 WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.external, false)
+                 ELSE false
+               END,
+               a.symbolStatus = CASE
+                 WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.symbolStatus, 'unresolved')
+                 ELSE 'real'
+               END,
+               a.placeholderKind = CASE
+                 WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.placeholderKind, '')
+                 ELSE ''
+               END,
+               a.placeholderTarget = CASE
+                 WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.placeholderTarget, '')
+                 ELSE ''
+               END,
+               b.repoId = row.repoId`,
           { rows },
         );
-        const placeholderRows = rows.filter(
+        // Target metadata is node-only and one row per target. That avoids
+        // carrying placeholderTarget on every edge row in the relationship
+        // writes below, which is fragile when a target appears multiple times.
+        await exec(
+          txConn,
+          `UNWIND $rows AS row
+           MATCH (b:Symbol {symbolId: row.toSymbolId})
+           OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]->(bf:File)
+           WITH row, b, count(bf) AS targetFileCount
+           SET b.repoId = row.repoId,
+               b.external = CASE
+                 WHEN row.targetStatus = 'external' THEN true
+                 WHEN row.targetStatus <> 'real' THEN false
+                 WHEN targetFileCount > 0 THEN false
+                 ELSE coalesce(b.external, false)
+               END,
+               b.symbolStatus = CASE
+                 WHEN row.targetStatus <> 'real' THEN row.targetStatus
+                 WHEN targetFileCount > 0 THEN 'real'
+                 WHEN coalesce(b.external, false) = true THEN 'external'
+                 ELSE 'real'
+               END,
+               b.placeholderKind = CASE
+                 WHEN row.targetStatus <> 'real' THEN row.targetPlaceholderKind
+                 WHEN targetFileCount > 0 THEN ''
+                 WHEN coalesce(b.external, false) = true THEN b.placeholderKind
+                 ELSE ''
+               END,
+               b.placeholderTarget = CASE
+                 WHEN row.targetStatus <> 'real' THEN row.targetPlaceholderTarget
+                 WHEN targetFileCount > 0 THEN ''
+                 WHEN coalesce(b.external, false) = true THEN b.placeholderTarget
+                 ELSE ''
+               END`,
+          { rows: targetRows },
+        );
+        const placeholderRows = targetRows.filter(
           (row) => row.targetStatus !== "real",
         );
         if (placeholderRows.length > 0) {
@@ -335,6 +428,42 @@ export async function insertEdges(
       }
     }
   });
+}
+
+function buildTargetMetadataRows(edges: EdgeRow[]): Array<{
+  repoId: string;
+  toSymbolId: string;
+  targetStatus: SymbolPlaceholderMeta["symbolStatus"];
+  targetPlaceholderKind: string;
+  targetPlaceholderTarget: string;
+}> {
+  const rowsBySymbolId = new Map<
+    string,
+    {
+      repoId: string;
+      toSymbolId: string;
+      targetStatus: SymbolPlaceholderMeta["symbolStatus"];
+      targetPlaceholderKind: string;
+      targetPlaceholderTarget: string;
+    }
+  >();
+
+  for (const edge of edges) {
+    if (rowsBySymbolId.has(edge.toSymbolId)) {
+      continue;
+    }
+    const targetMeta =
+      edge.targetMeta ?? classifyDependencyTarget(edge.toSymbolId);
+    rowsBySymbolId.set(edge.toSymbolId, {
+      repoId: edge.repoId,
+      toSymbolId: edge.toSymbolId,
+      targetStatus: targetMeta.symbolStatus,
+      targetPlaceholderKind: targetMeta.placeholderKind ?? "",
+      targetPlaceholderTarget: targetMeta.placeholderTarget ?? "",
+    });
+  }
+
+  return [...rowsBySymbolId.values()];
 }
 
 export async function deleteEdge(
@@ -810,7 +939,9 @@ export async function getUnresolvedImportEdgesByRepo(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)
      ${affectedPathsMatchClause}
-     WHERE d.edgeType = 'import' AND b.symbolId STARTS WITH 'unresolved:'${
+     WHERE d.edgeType = 'import'
+       AND b.symbolId STARTS WITH 'unresolved:'
+       AND coalesce(b.symbolStatus, '') = 'unresolved'${
        affectedPaths.length > 0
          ? `
        ${affectedPathsFilterClause}`

@@ -28,7 +28,6 @@ import {
 import { getLatestVersion } from "../db/ladybug-versions.js";
 import {
   getLadybugConn,
-  preIndexCheckpoint,
   withWriteConn,
 } from "../db/ladybug.js";
 import { withTransaction } from "../db/ladybug-core.js";
@@ -574,14 +573,11 @@ export async function ingestScipIndex(
         });
       }
 
-      // Flush WAL every 100 documents to prevent unbounded WAL growth.
-      // LadybugDB 0.15.2 can crash on LOAD EXTENSION / CHECKPOINT when
-      // the WAL contains certain record types accumulated during heavy
-      // writes. Periodic flushing keeps the WAL small and limits data
-      // loss on unexpected process termination.
-      if (!dryRun && documentsProcessed % 100 === 0) {
-        await preIndexCheckpoint();
-      }
+      // Do not run manual CHECKPOINT here. On LadybugDB 0.16.0 / Windows,
+      // a checkpoint can leave a native checkpoint task active while SCIP
+      // continues issuing read/write work, which can terminate the process
+      // with 0xC0000005. Startup and shutdown still perform best-effort WAL
+      // cleanup; SCIP's document loop must stay free of manual checkpoints.
     }
 
     // Final tick after the last document so CLI renderers land on a clean

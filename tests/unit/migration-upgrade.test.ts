@@ -97,6 +97,7 @@ async function createV8DatabaseWithoutSummaryMetadata(
     // Metrics table at v8: no pageRank/kCore columns — m011 must ALTER it.
     `CREATE NODE TABLE IF NOT EXISTS Metrics (symbolId STRING PRIMARY KEY, fanIn INT64 DEFAULT 0, fanOut INT64 DEFAULT 0, churn30d INT64 DEFAULT 0, testRefsJson STRING, canonicalTestJson STRING, updatedAt STRING)`,
     `CREATE REL TABLE IF NOT EXISTS SYMBOL_IN_REPO (FROM Symbol TO Repo)`,
+    `CREATE REL TABLE IF NOT EXISTS DEPENDS_ON (FROM Symbol TO Symbol, edgeType STRING DEFAULT 'call', weight DOUBLE DEFAULT 1.0, confidence DOUBLE DEFAULT 1.0, resolution STRING DEFAULT 'exact', resolverId STRING DEFAULT 'pass1-generic', resolutionPhase STRING DEFAULT 'pass1', provenance STRING, createdAt STRING)`,
   ];
 
   for (const stmt of ddl) {
@@ -132,6 +133,11 @@ async function createV8DatabaseWithoutSummaryMetadata(
   closeResult(
     await conn.query(
       `MATCH (r:Repo {repoId: 'repo-1'}), (s:Symbol {symbolId: 'unresolved:call:legacyHelper'}) CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
+    ),
+  );
+  closeResult(
+    await conn.query(
+      `MATCH (source:Symbol {symbolId: 'sym-1'}), (target:Symbol {symbolId: 'unresolved:call:legacyHelper'}) CREATE (source)-[:DEPENDS_ON {edgeType: 'call', weight: 0.5, confidence: 0.5, resolution: 'unresolved', resolverId: 'legacy', resolutionPhase: 'pass1', provenance: 'unresolved-call:legacyHelper', createdAt: '${now}'}]->(target)`,
     ),
   );
   closeResult(
@@ -266,6 +272,82 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     assert.strictEqual(rows[0].placeholderStatus, "unresolved");
     assert.strictEqual(rows[0].placeholderKind, "call");
     assert.strictEqual(rows[0].placeholderTarget, "legacyHelper");
+  });
+
+  it("v16 -> latest: m017 repairs placeholder metadata and prunes isolated placeholders", async () => {
+    mkdirSync(testRoot, { recursive: true });
+    const dbPath = join(testRoot, "v16-placeholder-quality.lbug");
+    const kuzu = await import("kuzu");
+    const db = new kuzu.Database(dbPath);
+    const seedConn = new kuzu.Connection(db);
+    const now = new Date().toISOString();
+
+    for (const stmt of [
+      `CREATE NODE TABLE IF NOT EXISTS Repo (repoId STRING PRIMARY KEY, rootPath STRING, configJson STRING, createdAt STRING)`,
+      `CREATE NODE TABLE IF NOT EXISTS Symbol (symbolId STRING PRIMARY KEY, repoId STRING, kind STRING, name STRING, exported BOOLEAN, visibility STRING, language STRING, rangeStartLine INT64, rangeStartCol INT64, rangeEndLine INT64, rangeEndCol INT64, astFingerprint STRING, signatureJson STRING, summary STRING, invariantsJson STRING, sideEffectsJson STRING, roleTagsJson STRING, searchText STRING, updatedAt STRING, external BOOL DEFAULT false, symbolStatus STRING DEFAULT 'real', placeholderKind STRING, placeholderTarget STRING)`,
+      `CREATE NODE TABLE IF NOT EXISTS File (fileId STRING PRIMARY KEY, relPath STRING, contentHash STRING, language STRING, byteSize INT64, lastIndexedAt STRING, directory STRING)`,
+      `CREATE NODE TABLE IF NOT EXISTS SchemaVersion (id STRING PRIMARY KEY, schemaVersion INT64, createdAt STRING, updatedAt STRING)`,
+      `CREATE REL TABLE IF NOT EXISTS SYMBOL_IN_REPO (FROM Symbol TO Repo)`,
+      `CREATE REL TABLE IF NOT EXISTS SYMBOL_IN_FILE (FROM Symbol TO File)`,
+      `CREATE REL TABLE IF NOT EXISTS FILE_IN_REPO (FROM File TO Repo)`,
+      `CREATE REL TABLE IF NOT EXISTS DEPENDS_ON (FROM Symbol TO Symbol, edgeType STRING DEFAULT 'call', weight DOUBLE DEFAULT 1.0, confidence DOUBLE DEFAULT 1.0, resolution STRING DEFAULT 'exact', resolverId STRING DEFAULT 'pass1-generic', resolutionPhase STRING DEFAULT 'pass1', provenance STRING, createdAt STRING)`,
+    ]) {
+      closeResult(await seedConn.query(stmt));
+    }
+
+    for (const stmt of [
+      `CREATE (r:Repo {repoId: 'repo-1', rootPath: '/repo', configJson: '{}', createdAt: '${now}'})`,
+      `CREATE (source:Symbol {symbolId: 'source', repoId: 'repo-1', kind: 'function', name: 'source', exported: true, visibility: 'public', language: 'ts', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 1, rangeEndCol: 1, astFingerprint: 'source', signatureJson: '{}', summary: null, invariantsJson: null, sideEffectsJson: null, roleTagsJson: '[]', searchText: 'source', updatedAt: '${now}', external: false, symbolStatus: 'real', placeholderKind: '', placeholderTarget: ''})`,
+      `CREATE (external:Symbol {symbolId: 'unresolved:zod:z', repoId: 'repo-1', kind: null, name: null, exported: false, visibility: null, language: null, rangeStartLine: null, rangeStartCol: null, rangeEndLine: null, rangeEndCol: null, astFingerprint: null, signatureJson: null, summary: null, invariantsJson: null, sideEffectsJson: null, roleTagsJson: null, searchText: null, updatedAt: '${now}', external: false, symbolStatus: 'unresolved', placeholderKind: 'import', placeholderTarget: 'wrong'})`,
+      `CREATE (call:Symbol {symbolId: 'unresolved:call:makeThing', repoId: 'repo-1', kind: null, name: null, exported: false, visibility: null, language: null, rangeStartLine: null, rangeStartCol: null, rangeEndLine: null, rangeEndCol: null, astFingerprint: null, signatureJson: null, summary: null, invariantsJson: null, sideEffectsJson: null, roleTagsJson: null, searchText: null, updatedAt: '${now}', external: true, symbolStatus: 'external', placeholderKind: 'import', placeholderTarget: 'wrong'})`,
+      `CREATE (isolated:Symbol {symbolId: 'unresolved:call:staleThing', repoId: 'repo-1', kind: null, name: null, exported: false, visibility: null, language: null, rangeStartLine: null, rangeStartCol: null, rangeEndLine: null, rangeEndCol: null, astFingerprint: null, signatureJson: null, summary: null, invariantsJson: null, sideEffectsJson: null, roleTagsJson: null, searchText: null, updatedAt: '${now}', external: false, symbolStatus: 'unresolved', placeholderKind: 'call', placeholderTarget: 'staleThing'})`,
+      `MATCH (r:Repo {repoId: 'repo-1'}), (source:Symbol {symbolId: 'source'}), (external:Symbol {symbolId: 'unresolved:zod:z'}), (call:Symbol {symbolId: 'unresolved:call:makeThing'}), (isolated:Symbol {symbolId: 'unresolved:call:staleThing'}) CREATE (source)-[:SYMBOL_IN_REPO]->(r), (external)-[:SYMBOL_IN_REPO]->(r), (call)-[:SYMBOL_IN_REPO]->(r), (isolated)-[:SYMBOL_IN_REPO]->(r)`,
+      `MATCH (source:Symbol {symbolId: 'source'}), (external:Symbol {symbolId: 'unresolved:zod:z'}), (call:Symbol {symbolId: 'unresolved:call:makeThing'}) CREATE (source)-[:DEPENDS_ON {edgeType: 'import', weight: 0.6, confidence: 1.0, resolution: 'exact', resolverId: 'legacy', resolutionPhase: 'pass1', provenance: 'import:zod:z', createdAt: '${now}'}]->(external), (source)-[:DEPENDS_ON {edgeType: 'call', weight: 0.5, confidence: 0.7, resolution: 'unresolved', resolverId: 'legacy', resolutionPhase: 'pass1', provenance: 'unresolved-call:makeThing', createdAt: '${now}'}]->(call)`,
+      `CREATE (sv:SchemaVersion {id: 'current', schemaVersion: 16, createdAt: '${now}', updatedAt: '${now}'})`,
+    ]) {
+      closeResult(await seedConn.query(stmt));
+    }
+    await seedConn.close();
+    await db.close();
+
+    await initLadybugDb(dbPath);
+    const conn = await getLadybugConn();
+    const result = await conn.query(
+      `MATCH (s:Symbol {repoId: 'repo-1'})
+       WHERE s.symbolId STARTS WITH 'unresolved:'
+       RETURN s.symbolId AS symbolId,
+              s.symbolStatus AS symbolStatus,
+              s.placeholderKind AS placeholderKind,
+              s.placeholderTarget AS placeholderTarget,
+              coalesce(s.external, false) AS external
+       ORDER BY symbolId`,
+    );
+    const qr = Array.isArray(result) ? result[0] : result;
+    const rows = (await qr.getAll()) as Array<{
+      symbolId: unknown;
+      symbolStatus: unknown;
+      placeholderKind: unknown;
+      placeholderTarget: unknown;
+      external: unknown;
+    }>;
+    qr.close();
+
+    assert.deepStrictEqual(rows, [
+      {
+        symbolId: "unresolved:call:makeThing",
+        symbolStatus: "unresolved",
+        placeholderKind: "call",
+        placeholderTarget: "makeThing",
+        external: false,
+      },
+      {
+        symbolId: "unresolved:zod:z",
+        symbolStatus: "external",
+        placeholderKind: "import",
+        placeholderTarget: "z (from zod)",
+        external: true,
+      },
+    ]);
   });
 
   it("v8 -> latest: m011 adds pageRank/kCore columns to Metrics", async () => {

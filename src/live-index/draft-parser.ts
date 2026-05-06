@@ -6,6 +6,7 @@ import type {
 } from "../db/ladybug-queries.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import type { SymbolPlaceholderMeta } from "../db/symbol-placeholders.js";
 import { getAdapterForExtension } from "../indexer/adapter/registry.js";
 import { logger } from "../util/logger.js";
 import {
@@ -204,7 +205,11 @@ export async function parseDraftFile(
             input.content,
           )
         : {
-            targets: [] as Array<{ symbolId: string; provenance: string }>,
+            targets: [] as Array<{
+              symbolId: string;
+              provenance: string;
+              targetMeta?: SymbolPlaceholderMeta;
+            }>,
             importedNameToSymbolIds: new Map<string, string[]>(),
             namespaceImports: new Map<string, Map<string, string>>(),
           };
@@ -320,6 +325,7 @@ export async function parseDraftFile(
             resolution: "exact",
             provenance: `import:${target.provenance}`,
             createdAt: timestamp,
+            targetMeta: target.targetMeta,
           });
         }
       }

@@ -217,4 +217,261 @@ describe("materializeFileSummaries incremental targeting", () => {
     const summary = await queries.getFileSummary(conn, fileId);
     assert.equal(summary, null);
   });
+
+  it("normalizes file-backed symbols before derived metrics run", async () => {
+    const { finalizeIndexing } = await import(
+      "../../dist/indexer/metrics-updater.js"
+    );
+    const { getLadybugConn } = await import("../../dist/db/ladybug.js");
+    const queries = await import("../../dist/db/ladybug-queries.js");
+
+    await resetTestDb();
+    const conn = await getLadybugConn();
+    const repoId = "metrics-normalize";
+    const fileId = "file-normalize";
+    const symbolId = "symbol-normalize";
+
+    await queries.upsertRepo(conn, {
+      repoId,
+      rootPath: "C:/tmp/metrics-normalize",
+      configJson: JSON.stringify({ languages: ["ts"] }),
+      createdAt: "2026-04-02T00:00:00Z",
+    });
+    await queries.upsertFile(conn, {
+      fileId,
+      repoId,
+      relPath: "src/normalize.ts",
+      contentHash: "normalize-hash",
+      language: "ts",
+      byteSize: 10,
+      lastIndexedAt: null,
+    });
+    await queries.upsertSymbol(conn, {
+      symbolId,
+      repoId,
+      fileId,
+      kind: "function",
+      name: "normalizeMe",
+      exported: true,
+      visibility: "public",
+      language: "typescript",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 1,
+      rangeEndCol: 10,
+      astFingerprint: "normalize-symbol",
+      signatureJson: null,
+      summary: null,
+      invariantsJson: null,
+      sideEffectsJson: null,
+      updatedAt: "2026-04-02T00:00:00Z",
+    });
+    await queries.exec(
+      conn,
+      `MATCH (s:Symbol {symbolId: $symbolId})
+       SET s.symbolStatus = 'unresolved',
+           s.placeholderKind = 'call',
+           s.placeholderTarget = 'stale.call'`,
+      { symbolId },
+    );
+
+    await finalizeIndexing({
+      repoId,
+      versionId: "v-normalize",
+      appConfig: { repos: [], semantic: { enabled: false } } as any,
+      hasIndexMutations: true,
+      callResolutionTelemetry: {
+        pass2EligibleFileCount: 0,
+        pass2ProcessedFileCount: 0,
+        pass2EdgesCreated: 0,
+        pass2EdgesFailed: 0,
+        pass2Duration: 0,
+      } as any,
+    });
+
+    const statusRow = await queries.querySingle<{
+      status: string;
+      placeholderKind: string;
+      placeholderTarget: string;
+    }>(
+      conn,
+      `MATCH (s:Symbol {symbolId: $symbolId})
+       RETURN s.symbolStatus AS status,
+              s.placeholderKind AS placeholderKind,
+              s.placeholderTarget AS placeholderTarget`,
+      { symbolId },
+    );
+    const metricsRow = await queries.querySingle<{ count: unknown }>(
+      conn,
+      `MATCH (m:Metrics {symbolId: $symbolId}) RETURN count(m) AS count`,
+      { symbolId },
+    );
+
+    assert.equal(statusRow?.status, "real");
+    assert.equal(statusRow?.placeholderKind, "");
+    assert.equal(statusRow?.placeholderTarget, "");
+    assert.equal(queries.toNumber(metricsRow?.count ?? 0), 1);
+  });
+
+  it("repairs and audits dependency placeholder quality before reporting success", async () => {
+    const { finalizeIndexing } = await import(
+      "../../dist/indexer/metrics-updater.js"
+    );
+    const { getLadybugConn } = await import("../../dist/db/ladybug.js");
+    const queries = await import("../../dist/db/ladybug-queries.js");
+
+    await resetTestDb();
+    const conn = await getLadybugConn();
+    const repoId = "metrics-placeholder-quality";
+    const fileId = "file-placeholder-quality";
+    const sourceSymbolId = "symbol-placeholder-source";
+
+    await queries.upsertRepo(conn, {
+      repoId,
+      rootPath: "C:/tmp/metrics-placeholder-quality",
+      configJson: JSON.stringify({ languages: ["ts"] }),
+      createdAt: "2026-04-02T00:00:00Z",
+    });
+    await queries.upsertFile(conn, {
+      fileId,
+      repoId,
+      relPath: "src/source.ts",
+      contentHash: "source-hash",
+      language: "ts",
+      byteSize: 10,
+      lastIndexedAt: null,
+    });
+    await queries.upsertSymbol(conn, {
+      symbolId: sourceSymbolId,
+      repoId,
+      fileId,
+      kind: "function",
+      name: "source",
+      exported: true,
+      visibility: "public",
+      language: "typescript",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 1,
+      rangeEndCol: 10,
+      astFingerprint: "source-symbol",
+      signatureJson: null,
+      summary: null,
+      invariantsJson: null,
+      sideEffectsJson: null,
+      updatedAt: "2026-04-02T00:00:00Z",
+    });
+    await queries.exec(
+      conn,
+      `MATCH (r:Repo {repoId: $repoId})
+       MATCH (source:Symbol {symbolId: $sourceSymbolId})
+       CREATE (external:Symbol {
+         symbolId: 'unresolved:zod:z',
+         repoId: $repoId,
+         symbolStatus: 'unresolved',
+         placeholderKind: 'import',
+         placeholderTarget: 'wrong target',
+         external: false
+       })
+       CREATE (unresolved:Symbol {
+         symbolId: 'unresolved:call:makeThing',
+         repoId: $repoId,
+         symbolStatus: 'external',
+         placeholderKind: 'import',
+         placeholderTarget: 'wrong call',
+         external: true
+       })
+       CREATE (isolated:Symbol {
+         symbolId: 'unresolved:call:staleThing',
+         repoId: $repoId,
+         symbolStatus: 'unresolved',
+         placeholderKind: 'call',
+         placeholderTarget: 'staleThing',
+         external: false
+       })
+       CREATE (external)-[:SYMBOL_IN_REPO]->(r)
+       CREATE (unresolved)-[:SYMBOL_IN_REPO]->(r)
+       CREATE (isolated)-[:SYMBOL_IN_REPO]->(r)
+       CREATE (source)-[:DEPENDS_ON {
+         edgeType: 'import',
+         weight: 0.6,
+         confidence: 1.0,
+         resolution: 'exact',
+         resolverId: 'pass1-generic',
+         resolutionPhase: 'pass1',
+         provenance: 'import:zod:z',
+         createdAt: '2026-04-02T00:00:00Z'
+       }]->(external)
+       CREATE (source)-[:DEPENDS_ON {
+         edgeType: 'call',
+         weight: 0.5,
+         confidence: 0.7,
+         resolution: 'unresolved',
+         resolverId: 'pass2-ts',
+         resolutionPhase: 'pass2',
+         provenance: 'unresolved-call:makeThing',
+         createdAt: '2026-04-02T00:00:00Z'
+       }]->(unresolved)`,
+      { repoId, sourceSymbolId },
+    );
+
+    const result = await finalizeIndexing({
+      repoId,
+      versionId: "v-placeholder-quality",
+      appConfig: { repos: [], semantic: { enabled: false } } as any,
+      hasIndexMutations: true,
+      callResolutionTelemetry: {
+        pass2EligibleFileCount: 0,
+        pass2ProcessedFileCount: 0,
+        pass2EdgesCreated: 0,
+        pass2EdgesFailed: 0,
+        pass2Duration: 0,
+      } as any,
+    });
+
+    const rows = await queries.queryAll<{
+      symbolId: string;
+      status: string;
+      placeholderKind: string;
+      placeholderTarget: string;
+      external: unknown;
+    }>(
+      conn,
+      `MATCH (s:Symbol {repoId: $repoId})
+       WHERE s.symbolId STARTS WITH 'unresolved:'
+       RETURN s.symbolId AS symbolId,
+              s.symbolStatus AS status,
+              s.placeholderKind AS placeholderKind,
+              s.placeholderTarget AS placeholderTarget,
+              coalesce(s.external, false) AS external
+       ORDER BY symbolId`,
+      { repoId },
+    );
+
+    assert.deepEqual(rows, [
+      {
+        symbolId: "unresolved:call:makeThing",
+        status: "unresolved",
+        placeholderKind: "call",
+        placeholderTarget: "makeThing",
+        external: false,
+      },
+      {
+        symbolId: "unresolved:zod:z",
+        status: "external",
+        placeholderKind: "import",
+        placeholderTarget: "z (from zod)",
+        external: true,
+      },
+    ]);
+    assert.equal(result.qualityStats?.unresolvedTargets, 1);
+    assert.equal(result.qualityStats?.externalTargets, 1);
+    assert.equal(result.qualityStats?.untypedPlaceholderTargets, 0);
+    assert.equal((result.qualityStats as any)?.placeholderTargetMismatches, 0);
+    assert.equal((result.qualityStats as any)?.isolatedPlaceholders, 0);
+    assert.deepEqual((result.qualityStats as any)?.placeholderCounts, {
+      "external:import": 1,
+      "unresolved:call": 1,
+    });
+  });
 });

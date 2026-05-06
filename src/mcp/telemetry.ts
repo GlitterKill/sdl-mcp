@@ -67,6 +67,9 @@ export interface IndexStats {
     unresolvedTargets: number;
     externalTargets: number;
     untypedPlaceholderTargets: number;
+    placeholderTargetMismatches?: number;
+    isolatedPlaceholders?: number;
+    placeholderCounts?: Record<string, number>;
     missingSignatureByKind: Record<string, number>;
     scipPhaseCounts: Record<string, number>;
   };

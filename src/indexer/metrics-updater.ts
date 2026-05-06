@@ -3,6 +3,7 @@ import * as crypto from "crypto";
 import type { AppConfig } from "../config/types.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import { classifyDependencyTarget } from "../db/symbol-placeholders.js";
 import { updateMetricsForRepo } from "../graph/metrics.js";
 import { logger } from "../util/logger.js";
 import { refreshSymbolEmbeddings } from "./embeddings.js";
@@ -46,6 +47,9 @@ export interface IndexQualityStats {
   unresolvedTargets: number;
   externalTargets: number;
   untypedPlaceholderTargets: number;
+  placeholderTargetMismatches: number;
+  isolatedPlaceholders: number;
+  placeholderCounts: Record<string, number>;
   missingSignatureByKind: Record<string, number>;
   scipPhaseCounts: Record<string, number>;
 }
@@ -90,6 +94,35 @@ export async function finalizeIndexing({
     });
     return { timings };
   }
+
+  await measureSubphase("symbolStatusNormalize", async () => {
+    await withWriteConn(async (wConn) => {
+      const repaired = await ladybugDb.normalizeDependencyPlaceholderSymbols(
+        wConn,
+        repoId,
+      );
+      const pruned = await ladybugDb.pruneIsolatedPlaceholderSymbols(
+        wConn,
+        repoId,
+      );
+      if (
+        repaired.fileBackedRepaired > 0 ||
+        repaired.dependencyPlaceholdersRepaired > 0 ||
+        pruned > 0
+      ) {
+        logger.info(
+          "Normalized dependency placeholder quality",
+          {
+            repoId,
+            fileBackedRepaired: repaired.fileBackedRepaired,
+            dependencyPlaceholdersRepaired:
+              repaired.dependencyPlaceholdersRepaired,
+            isolatedPlaceholdersPruned: pruned,
+          },
+        );
+      }
+    });
+  });
 
   // Parallelise metrics, fileSummaries, and audit. Each phase acquires its
   // own writer via `withWriteConn` which serializes through a single write
@@ -338,7 +371,7 @@ async function collectIndexQualityStats(
   }>(
     conn,
     `MATCH (a:Symbol {repoId: $repoId})-[d:DEPENDS_ON]->(b:Symbol)
-     WHERE b.symbolId STARTS WITH 'unresolved:'
+     WHERE coalesce(b.symbolStatus, '') = 'unresolved'
      RETURN count(d) AS unresolvedTargets`,
     { repoId },
   );
@@ -347,8 +380,7 @@ async function collectIndexQualityStats(
   }>(
     conn,
     `MATCH (a:Symbol {repoId: $repoId})-[d:DEPENDS_ON]->(b:Symbol)
-     OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]->(bf:File)
-     WHERE bf IS NULL
+     WHERE NOT (b)-[:SYMBOL_IN_FILE]->(:File)
        AND (b.symbolStatus IS NULL OR b.symbolStatus = '')
      RETURN count(d) AS untypedPlaceholderTargets`,
     { repoId },
@@ -374,16 +406,68 @@ async function collectIndexQualityStats(
      RETURN s.kind AS kind, count(s) AS count`,
     { repoId },
   );
+  const placeholderRows = await ladybugDb.queryAll<{
+    symbolId: string;
+    status: string | null;
+    kind: string | null;
+    target: string | null;
+  }>(
+    conn,
+    `MATCH (s:Symbol {repoId: $repoId})
+     WHERE NOT (s)-[:SYMBOL_IN_FILE]->(:File)
+       AND (
+         s.symbolId STARTS WITH 'unresolved:'
+         OR coalesce(s.symbolStatus, '') = 'unresolved'
+         OR coalesce(s.symbolStatus, '') = 'external'
+       )
+     RETURN s.symbolId AS symbolId,
+            s.symbolStatus AS status,
+            s.placeholderKind AS kind,
+            s.placeholderTarget AS target`,
+    { repoId },
+  );
+  const isolatedRow = await ladybugDb.querySingle<{
+    count: unknown;
+  }>(
+    conn,
+    `MATCH (s:Symbol {repoId: $repoId})
+     WHERE NOT (s)-[:SYMBOL_IN_FILE]->(:File)
+       AND (
+         s.symbolId STARTS WITH 'unresolved:'
+         OR coalesce(s.symbolStatus, '') = 'unresolved'
+         OR coalesce(s.symbolStatus, '') = 'external'
+       )
+       AND NOT (:Symbol)-[:DEPENDS_ON]->(s)
+       AND NOT (s)-[:DEPENDS_ON]->(:Symbol)
+     RETURN count(s) AS count`,
+    { repoId },
+  );
   const scipPhaseRows = await ladybugDb.queryAll<{
     phase: string;
     count: unknown;
   }>(
     conn,
     `MATCH (a:Symbol {repoId: $repoId})-[d:DEPENDS_ON]->(:Symbol)
-     WHERE d.resolverId = 'scip'
+     WHERE d.resolutionPhase = 'scip' OR d.resolverId = 'scip'
      RETURN d.resolutionPhase AS phase, count(d) AS count`,
     { repoId },
   );
+  let placeholderTargetMismatches = 0;
+  const placeholderCounts: Record<string, number> = {};
+  for (const row of placeholderRows) {
+    if (row.symbolId.startsWith("unresolved:")) {
+      const meta = classifyDependencyTarget(row.symbolId);
+      if (
+        row.status !== meta.symbolStatus ||
+        (row.kind ?? "") !== (meta.placeholderKind ?? "") ||
+        (row.target ?? "") !== (meta.placeholderTarget ?? "")
+      ) {
+        placeholderTargetMismatches++;
+      }
+    }
+    const key = `${row.status ?? "unknown"}:${row.kind ?? "unknown"}`;
+    placeholderCounts[key] = (placeholderCounts[key] ?? 0) + 1;
+  }
 
   return {
     unresolvedTargets: ladybugDb.toNumber(
@@ -393,6 +477,9 @@ async function collectIndexQualityStats(
     untypedPlaceholderTargets: ladybugDb.toNumber(
       untypedRow?.untypedPlaceholderTargets ?? 0,
     ),
+    placeholderTargetMismatches,
+    isolatedPlaceholders: ladybugDb.toNumber(isolatedRow?.count ?? 0),
+    placeholderCounts,
     missingSignatureByKind: Object.fromEntries(
       missingSignatureRows.map((row) => [
         row.kind ?? "unknown",
