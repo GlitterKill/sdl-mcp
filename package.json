@@ -19,6 +19,7 @@
     "dist",
     "config",
     "templates/*.json",
+    "templates/*.md",
     "templates/*.template",
     "scripts/postinstall.mjs",
     "scripts/postinstall-prune.mjs",

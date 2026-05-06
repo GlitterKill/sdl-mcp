@@ -161,8 +161,16 @@ export function getRequiredPackEntries() {
     "dist/main.js",
     "dist/cli/index.js",
     "config/sdlmcp.config.schema.json",
+    "templates/SDL.md",
+    "templates/AGENTS.md.template",
+    "templates/claude-code.json",
+    "templates/CLAUDE.md.template",
     "templates/codex.json",
     "templates/CODEX.md.template",
+    "templates/gemini.json",
+    "templates/GEMINI.md.template",
+    "templates/opencode.json",
+    "templates/OPENCODE.md.template",
   ];
 }
 

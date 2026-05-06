@@ -134,6 +134,10 @@ Pass1ExtractionEntry>`) populated during pass-1 from both engines
 
 ### Fixed
 
+- **Published package now includes `templates/SDL.md`.** Fixed
+  `sdl-mcp init --client <client>` failing from npm/global installs with
+  `ENOENT: templates\SDL.md`; release preflight now requires all client init
+  templates in the packed tarball.
 - **`dropVectorIndex` regex now matches LadybugDB binder errors.** The
   `/does not exist/i` check missed LadybugDB's actual phrasing
   (`"Binder exception: Table X doesn't have an index with name Y."`),

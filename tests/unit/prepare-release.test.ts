@@ -106,6 +106,16 @@ describe("prepare-release helpers", () => {
       ),
       [],
     );
+    assert.ok(helpers.getRequiredPackEntries().includes("templates/SDL.md"));
+    assert.deepStrictEqual(
+      helpers.findMissingPackEntries(
+        helpers
+          .getRequiredPackEntries()
+          .filter((path) => path !== "templates/SDL.md")
+          .map((path) => ({ path })),
+      ),
+      ["templates/SDL.md"],
+    );
     assert.ok(
       helpers.findMissingPackEntries([{ path: "package.json" }]).length > 0,
     );
