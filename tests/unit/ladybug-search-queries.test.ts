@@ -312,6 +312,82 @@ describe("LadybugDB Search Queries", () => {
         sideEffectsJson: null,
         updatedAt: "2026-03-04T00:00:00Z",
       });
+      await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
+        symbolId: "sym-shared-real",
+        repoId,
+        fileId: "file-core",
+        kind: "function",
+        name: "SharedThing",
+        exported: true,
+        visibility: "public",
+        language: "typescript",
+        rangeStartLine: 60,
+        rangeStartCol: 0,
+        rangeEndLine: 65,
+        rangeEndCol: 0,
+        astFingerprint: "j",
+        signatureJson: null,
+        summary: "real shared thing",
+        invariantsJson: null,
+        sideEffectsJson: null,
+        updatedAt: "2026-03-04T00:00:00Z",
+      });
+
+      await queries.exec(
+        conn as unknown as import("kuzu").Connection,
+        `MATCH (r:Repo {repoId: $repoId})
+         CREATE (p:Symbol {
+           symbolId: 'unresolved:call:SharedThing',
+           repoId: $repoId,
+           kind: 'function',
+           name: 'SharedThing',
+           exported: false,
+           visibility: '',
+           language: 'typescript',
+           rangeStartLine: null,
+           rangeStartCol: null,
+           rangeEndLine: null,
+           rangeEndCol: null,
+           astFingerprint: '',
+           signatureJson: null,
+           summary: 'stale unresolved dependency placeholder',
+           invariantsJson: null,
+           sideEffectsJson: null,
+           roleTagsJson: '[]',
+           searchText: 'SharedThing placeholder',
+           updatedAt: '2026-03-04T00:00:00Z',
+           external: false,
+           symbolStatus: 'real',
+           placeholderKind: 'call',
+           placeholderTarget: 'SharedThing'
+         })
+         CREATE (p)-[:SYMBOL_IN_REPO]->(r)`,
+        { repoId },
+      );
+
+      await queries.batchMergeExternalSymbols(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        [
+          {
+            symbolId: "scip-external-chunk",
+            kind: "function",
+            name: "chunk",
+            exported: true,
+            language: "typescript",
+            rangeStartLine: 0,
+            rangeStartCol: 0,
+            rangeEndLine: 0,
+            rangeEndCol: 0,
+            external: true,
+            scipSymbol: "scip-typescript npm lodash 4.17.21 `chunk`().",
+            source: "scip",
+            packageName: "lodash",
+            packageVersion: "4.17.21",
+            updatedAt: "2026-03-04T00:00:00Z",
+          },
+        ],
+      );
     } catch {
       ladybugAvailable = false;
     }
@@ -414,6 +490,138 @@ describe("LadybugDB Search Queries", () => {
 
       assert.equal(results[0]?.symbolId, "sym-resolve-exported");
       assert.equal(results[1]?.symbolId, "sym-resolve-private");
+    },
+  );
+
+  it(
+    "excludes unresolved dependency placeholders from full and lite search results",
+    { skip: !ladybugAvailable },
+    async () => {
+      const full = await queries.searchSymbols(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "SharedThing",
+        10,
+      );
+      const lite = await queries.searchSymbolsLite(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "SharedThing",
+        10,
+      );
+
+      for (const [label, rows] of [
+        ["full", full],
+        ["lite", lite],
+      ] as const) {
+        assert.ok(
+          rows.some((row) => row.symbolId === "sym-shared-real"),
+          `${label} search should still return the real file-backed symbol`,
+        );
+        assert.equal(
+          rows.some((row) => row.symbolId === "unresolved:call:SharedThing"),
+          false,
+          `${label} search must not return unresolved dependency placeholders`,
+        );
+      }
+    },
+  );
+
+  it(
+    "keeps SCIP external symbols searchable unless excludeExternal is set",
+    { skip: !ladybugAvailable },
+    async () => {
+      const full = await queries.searchSymbols(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "chunk",
+        10,
+      );
+      const lite = await queries.searchSymbolsLite(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "chunk",
+        10,
+      );
+      const exact = await queries.findSymbolByExactName(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "chunk",
+      );
+
+      assert.equal(
+        full.some((row) => row.symbolId === "scip-external-chunk"),
+        true,
+      );
+      assert.equal(
+        lite.some((row) => row.symbolId === "scip-external-chunk"),
+        true,
+      );
+      assert.equal(exact?.symbolId, "scip-external-chunk");
+
+      const filteredFull = await queries.searchSymbols(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "chunk",
+        10,
+        undefined,
+        true,
+      );
+      const filteredLite = await queries.searchSymbolsLite(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "chunk",
+        10,
+        undefined,
+        true,
+      );
+      const filteredExact = await queries.findSymbolByExactName(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "chunk",
+        undefined,
+        true,
+      );
+
+      assert.equal(
+        filteredFull.some((row) => row.symbolId === "scip-external-chunk"),
+        false,
+      );
+      assert.equal(
+        filteredLite.some((row) => row.symbolId === "scip-external-chunk"),
+        false,
+      );
+      assert.equal(filteredExact, null);
+    },
+  );
+
+  it(
+    "hydrates only searchable symbols for semantic/hybrid search candidates",
+    { skip: !ladybugAvailable },
+    async () => {
+      const hydrated = await queries.getSearchableSymbolsByIds(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        [
+          "sym-shared-real",
+          "unresolved:call:SharedThing",
+          "scip-external-chunk",
+        ],
+      );
+
+      assert.equal(hydrated.has("sym-shared-real"), true);
+      assert.equal(hydrated.has("scip-external-chunk"), true);
+      assert.equal(hydrated.has("unresolved:call:SharedThing"), false);
+
+      const filtered = await queries.getSearchableSymbolsByIds(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        ["sym-shared-real", "scip-external-chunk"],
+        true,
+      );
+
+      assert.equal(filtered.has("sym-shared-real"), true);
+      assert.equal(filtered.has("scip-external-chunk"), false);
     },
   );
 });

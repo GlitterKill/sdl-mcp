@@ -1795,6 +1795,18 @@ interface SearchSymbolsRawRow {
   packageVersion: string | null;
 }
 
+// Public symbol search returns file-backed real symbols plus first-class SCIP
+// externals. Dependency placeholder stubs stay in the graph for traversal, but
+// they are not ordinary search results even if stale metadata gives them names.
+const SEARCHABLE_SYMBOL_BOUNDARY = `(
+       (coalesce(s.symbolStatus, 'real') = 'real' AND coalesce(f.fileId, '') <> '')
+       OR (
+         coalesce(s.symbolStatus, 'real') = 'external'
+         AND coalesce(s.external, false) = true
+         AND coalesce(s.placeholderKind, '') = 'scip'
+       )
+     )`;
+
 function mapSearchSymbolRow(
   row: SearchSymbolsRawRow,
   repoId: string,
@@ -1837,13 +1849,14 @@ async function searchSymbolsSingleTerm(
   return queryAll<SearchSymbolsRawRow>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
-     WHERE coalesce(s.symbolStatus, 'real') <> 'unresolved'
-       AND (lower(s.name) CONTAINS lower($query)
+     OPTIONAL MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
+     WITH s, f
+     WHERE ${SEARCHABLE_SYMBOL_BOUNDARY}
+       AND (lower(coalesce(s.name, '')) CONTAINS lower($query)
         OR lower(coalesce(s.summary, '')) CONTAINS lower($query)
         OR lower(coalesce(s.searchText, '')) CONTAINS lower($query))
      ${kinds && kinds.length > 0 ? "AND s.kind IN $kinds" : ""}
      ${excludeExternal ? "AND coalesce(s.external, false) = false" : ""}
-     OPTIONAL MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
      WITH s, f,
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,
@@ -1909,6 +1922,56 @@ async function searchSymbolsSingleTerm(
       ...(kinds && kinds.length > 0 && { kinds }),
     },
   );
+}
+
+export async function getSearchableSymbolsByIds(
+  conn: Connection,
+  repoId: string,
+  symbolIds: string[],
+  excludeExternal?: boolean,
+): Promise<Map<string, SymbolRow>> {
+  if (symbolIds.length === 0) return new Map();
+
+  const rows = await queryAll<SearchSymbolsRawRow>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     WHERE s.symbolId IN $symbolIds
+     OPTIONAL MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
+     WITH s, f
+     WHERE ${SEARCHABLE_SYMBOL_BOUNDARY}
+     ${excludeExternal ? "AND coalesce(s.external, false) = false" : ""}
+     RETURN s.symbolId AS symbolId,
+            coalesce(f.fileId, '') AS fileId,
+            coalesce(f.relPath, '') AS file,
+            s.kind AS kind,
+            s.name AS name,
+            s.exported AS exported,
+            s.visibility AS visibility,
+            s.language AS language,
+            s.rangeStartLine AS rangeStartLine,
+            s.rangeStartCol AS rangeStartCol,
+            s.rangeEndLine AS rangeEndLine,
+            s.rangeEndCol AS rangeEndCol,
+            s.astFingerprint AS astFingerprint,
+            s.signatureJson AS signatureJson,
+            s.summary AS summary,
+            s.invariantsJson AS invariantsJson,
+            s.sideEffectsJson AS sideEffectsJson,
+            s.summaryQuality AS summaryQuality,
+            s.summarySource AS summarySource,
+            s.updatedAt AS updatedAt,
+            coalesce(s.external, false) AS external,
+            s.scipSymbol AS scipSymbol,
+            s.packageName AS packageName,
+            s.packageVersion AS packageVersion`,
+    { repoId, symbolIds },
+  );
+
+  const result = new Map<string, SymbolRow>();
+  for (const row of rows) {
+    result.set(row.symbolId, mapSearchSymbolRow(row, repoId));
+  }
+  return result;
 }
 
 export async function searchSymbols(
@@ -2032,13 +2095,14 @@ async function searchSymbolsLiteSingleTerm(
   return queryAll<SearchSymbolLiteRow>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
-     WHERE coalesce(s.symbolStatus, 'real') <> 'unresolved'
-       AND (lower(s.name) CONTAINS lower($query)
+     OPTIONAL MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
+     WITH s, f
+     WHERE ${SEARCHABLE_SYMBOL_BOUNDARY}
+       AND (lower(coalesce(s.name, '')) CONTAINS lower($query)
         OR lower(coalesce(s.summary, '')) CONTAINS lower($query)
         OR lower(coalesce(s.searchText, '')) CONTAINS lower($query))
      ${kinds && kinds.length > 0 ? "AND s.kind IN $kinds" : ""}
      ${excludeExternal ? "AND coalesce(s.external, false) = false" : ""}
-     OPTIONAL MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
      WITH s, f,
           CASE WHEN s.name = $query THEN 0 ELSE 1 END AS exactNameRank,
           CASE WHEN lower(s.name) = lower($query) THEN 0 ELSE 1 END AS ciExactNameRank,
@@ -2229,6 +2293,7 @@ export async function findSymbolByExactName(
   repoId: string,
   name: string,
   kinds?: string[],
+  excludeExternal?: boolean,
 ): Promise<SearchSymbolLiteRow | null> {
   const hasKinds = Boolean(kinds && kinds.length > 0);
   const params: Record<string, unknown> = {
@@ -2239,13 +2304,17 @@ export async function findSymbolByExactName(
   const rows = await queryAll<SearchSymbolLiteRow>(
     conn,
     `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(r:Repo {repoId: $repoId})
-     MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
-      WHERE coalesce(s.symbolStatus, 'real') = 'real'
-        AND lower(s.name) = $name
+     OPTIONAL MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
+     WITH s, f
+     WHERE ${SEARCHABLE_SYMBOL_BOUNDARY}
+       AND lower(coalesce(s.name, '')) = $name
      ${hasKinds ? "AND s.kind IN $kinds" : ""}
-     RETURN s.symbolId AS symbolId, s.name AS name, f.fileId AS fileId,
-            f.relPath AS file, s.kind AS kind, s.exported AS exported,
-            f.relPath AS filePath, s.summary AS summary,
+     ${excludeExternal ? "AND coalesce(s.external, false) = false" : ""}
+     RETURN s.symbolId AS symbolId, s.name AS name,
+            coalesce(f.fileId, '') AS fileId,
+            coalesce(f.relPath, '') AS file,
+            s.kind AS kind, s.exported AS exported,
+            coalesce(f.relPath, '') AS filePath, s.summary AS summary,
             '' AS searchText
      LIMIT 1`,
     params,

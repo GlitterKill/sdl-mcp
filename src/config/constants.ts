@@ -560,10 +560,10 @@ export const MAX_FILE_SUMMARY_EMBEDDING_BATCH_SIZE = 16;
 export const DEFAULT_FILE_SUMMARY_EMBEDDING_MAX_CHARS = 4096;
 
 /**
- * When the count of uncached symbols to embed exceeds this threshold,
- * `refreshSymbolEmbeddings` drops the HNSW vector index, performs the bulk
- * write without per-row index maintenance, then recreates the index in a
- * single rebuild pass.
+ * When the count of uncached vector rows to embed exceeds this threshold,
+ * the symbol and FileSummary refreshers drop the HNSW vector index, perform
+ * the bulk write without per-row index maintenance, then recreate the index
+ * in a single rebuild pass.
  *
  * Pinned to 0 (always rebuild) to work around upstream LadybugDB issue #377
  * — the engine refuses ALL in-place writes to HNSW-indexed columns, so the

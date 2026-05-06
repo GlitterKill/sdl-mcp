@@ -9,6 +9,16 @@ export const description =
 
 export async function up(conn: Connection): Promise<void> {
   const ddls = [
+    // These SCIP metadata columns predate symbolStatus in the fresh schema, but
+    // some upgraded databases only saw them through createSchema() drift rather
+    // than a forward migration. Add them here so the placeholder-status
+    // backfill and post-upgrade search projections can rely on one Symbol
+    // shape.
+    "ALTER TABLE Symbol ADD external BOOL DEFAULT false",
+    "ALTER TABLE Symbol ADD scipSymbol STRING DEFAULT NULL",
+    "ALTER TABLE Symbol ADD source STRING DEFAULT 'treesitter'",
+    "ALTER TABLE Symbol ADD packageName STRING DEFAULT NULL",
+    "ALTER TABLE Symbol ADD packageVersion STRING DEFAULT NULL",
     "ALTER TABLE Symbol ADD symbolStatus STRING DEFAULT 'real'",
     "ALTER TABLE Symbol ADD placeholderKind STRING DEFAULT NULL",
     "ALTER TABLE Symbol ADD placeholderTarget STRING DEFAULT NULL",
@@ -60,21 +70,19 @@ export async function up(conn: Connection): Promise<void> {
     );
   }
 
-  // External SCIP symbols are best-effort for upgraded DBs because older
-  // schemas may not have the external/scipSymbol columns. Fresh DBs always do.
-  try {
-    await exec(
-      conn,
-      `MATCH (s:Symbol)
-       WHERE s.external = true AND NOT s.symbolId STARTS WITH 'unresolved:'
-       SET s.symbolStatus = 'external',
-           s.placeholderKind = 'scip',
-           s.placeholderTarget = CASE WHEN s.scipSymbol IS NULL THEN s.symbolId ELSE s.scipSymbol END`,
-      {},
-    );
-  } catch {
-    // Historical DBs without SCIP columns cannot have typed SCIP externals.
-  }
+  // Historical SCIP external symbols can be typed deterministically when the
+  // legacy row preserved external=true. Databases that never had that marker
+  // cannot be inferred safely, so those rows remain real until a future SCIP
+  // ingest rewrites them with explicit metadata.
+  await exec(
+    conn,
+    `MATCH (s:Symbol)
+     WHERE s.external = true AND NOT s.symbolId STARTS WITH 'unresolved:'
+     SET s.symbolStatus = 'external',
+         s.placeholderKind = 'scip',
+         s.placeholderTarget = CASE WHEN s.scipSymbol IS NULL THEN s.symbolId ELSE s.scipSymbol END`,
+    {},
+  );
 
   await exec(
     conn,

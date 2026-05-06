@@ -229,7 +229,7 @@ Triggers re-indexing of a repository in either full or incremental mode.
 
 | Field                   | Type   | Description                                                                                                                                                       |
 | :---------------------- | :----- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fileSummaryEmbeddings` | object | Per embedding model `{embedded, skipped, missing, degraded}` counts for hybrid `FileSummary` vectors. `degraded: true` means lexical summaries are fallback only. |
+| `fileSummaryEmbeddings` | object | Per embedding model `{embedded, skipped, missing, degraded}` counts for hybrid `FileSummary` vectors. `skipped` means cache hits, `missing` means no embeddable payload or no persisted vector because the pass degraded/failed, and `degraded: true` means lexical summaries are fallback only. |
 | `quality`               | object | Post-index quality counters, including unresolved/external dependency targets, placeholder hygiene, signature coverage, and SCIP phase counts.                     |
 
 **Notes:**

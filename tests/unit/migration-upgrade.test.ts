@@ -11,12 +11,14 @@ let getSchemaVersion: (
   conn: import("kuzu").Connection,
 ) => Promise<number | null>;
 let LADYBUG_SCHEMA_VERSION: number;
+let ladybugQueries: typeof import("../../dist/db/ladybug-queries.js");
 let ladybugAvailable = false;
 
 try {
   const ladybugMod = await import("../../dist/db/ladybug.js");
   const schemaMod = await import("../../dist/db/ladybug-schema.js");
   const migMod = await import("../../dist/db/migrations/index.js");
+  ladybugQueries = await import("../../dist/db/ladybug-queries.js");
   initLadybugDb = ladybugMod.initLadybugDb;
   closeLadybugDb = ladybugMod.closeLadybugDb;
   getLadybugConn = ladybugMod.getLadybugConn;
@@ -150,6 +152,48 @@ async function createV8DatabaseWithoutSummaryMetadata(
   await db.close();
 }
 
+async function createV15DatabaseWithLegacyScipExternal(
+  dbPath: string,
+): Promise<void> {
+  const kuzu = await import("kuzu");
+
+  const db = new kuzu.Database(dbPath);
+  const conn = new kuzu.Connection(db);
+
+  const ddl = [
+    `CREATE NODE TABLE IF NOT EXISTS Repo (repoId STRING PRIMARY KEY, rootPath STRING, configJson STRING, createdAt STRING)`,
+    `CREATE NODE TABLE IF NOT EXISTS File (fileId STRING PRIMARY KEY, relPath STRING, contentHash STRING, language STRING, byteSize INT64, lastIndexedAt STRING, directory STRING)`,
+    `CREATE NODE TABLE IF NOT EXISTS Symbol (symbolId STRING PRIMARY KEY, repoId STRING, kind STRING, name STRING, exported BOOLEAN, visibility STRING, language STRING, rangeStartLine INT64, rangeStartCol INT64, rangeEndLine INT64, rangeEndCol INT64, astFingerprint STRING, signatureJson STRING, summary STRING, summaryQuality DOUBLE DEFAULT 0.0, summarySource STRING DEFAULT 'unknown', invariantsJson STRING, sideEffectsJson STRING, roleTagsJson STRING, searchText STRING, updatedAt STRING, embeddingMiniLM STRING, embeddingMiniLMCardHash STRING, embeddingMiniLMUpdatedAt STRING, embeddingMiniLMVec DOUBLE[768], embeddingNomic STRING, embeddingNomicCardHash STRING, embeddingNomicUpdatedAt STRING, embeddingJinaCode STRING, embeddingJinaCodeCardHash STRING, embeddingJinaCodeUpdatedAt STRING, embeddingNomicVec DOUBLE[768], embeddingJinaCodeVec DOUBLE[768], external BOOL DEFAULT false, scipSymbol STRING, source STRING DEFAULT 'treesitter', packageName STRING, packageVersion STRING)`,
+    `CREATE NODE TABLE IF NOT EXISTS SchemaVersion (id STRING PRIMARY KEY, schemaVersion INT64, createdAt STRING, updatedAt STRING)`,
+    `CREATE REL TABLE IF NOT EXISTS FILE_IN_REPO (FROM File TO Repo)`,
+    `CREATE REL TABLE IF NOT EXISTS SYMBOL_IN_FILE (FROM Symbol TO File)`,
+    `CREATE REL TABLE IF NOT EXISTS SYMBOL_IN_REPO (FROM Symbol TO Repo)`,
+    `CREATE REL TABLE IF NOT EXISTS DEPENDS_ON (FROM Symbol TO Symbol, edgeType STRING DEFAULT 'call', weight DOUBLE DEFAULT 1.0, confidence DOUBLE DEFAULT 1.0, resolution STRING DEFAULT 'exact', resolverId STRING DEFAULT 'pass1-generic', resolutionPhase STRING DEFAULT 'pass1', provenance STRING, createdAt STRING)`,
+  ];
+  for (const stmt of ddl) {
+    closeResult(await conn.query(stmt));
+  }
+
+  const now = new Date().toISOString();
+  const scipSymbol =
+    "scip-typescript npm lodash 4.17.21 lodash/chunk().";
+  for (const stmt of [
+    `CREATE (r:Repo {repoId: 'repo-1', rootPath: '/repo', configJson: '{}', createdAt: '${now}'})`,
+    `CREATE (f:File {fileId: 'file-1', relPath: 'src/example.ts', contentHash: 'hash-1', language: 'typescript', byteSize: 42, lastIndexedAt: '${now}', directory: 'src'})`,
+    `CREATE (source:Symbol {symbolId: 'sym-1', repoId: 'repo-1', kind: 'function', name: 'exampleFn', exported: true, visibility: 'public', language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 3, rangeEndCol: 1, astFingerprint: 'fp-1', signatureJson: '{}', summary: 'Example summary', summaryQuality: 0, summarySource: 'unknown', invariantsJson: null, sideEffectsJson: null, roleTagsJson: '[]', searchText: 'exampleFn Example summary', updatedAt: '${now}', embeddingMiniLM: null, embeddingMiniLMCardHash: null, embeddingMiniLMUpdatedAt: null, embeddingMiniLMVec: null, embeddingNomic: null, embeddingNomicCardHash: null, embeddingNomicUpdatedAt: null, embeddingJinaCode: null, embeddingJinaCodeCardHash: null, embeddingJinaCodeUpdatedAt: null, embeddingNomicVec: null, embeddingJinaCodeVec: null, external: false, scipSymbol: null, source: 'treesitter', packageName: null, packageVersion: null})`,
+    `CREATE (placeholder:Symbol {symbolId: 'unresolved:call:legacyHelper', repoId: 'repo-1', kind: 'function', name: 'legacyHelper', exported: false, visibility: null, language: 'typescript', rangeStartLine: null, rangeStartCol: null, rangeEndLine: null, rangeEndCol: null, astFingerprint: null, signatureJson: null, summary: 'stale unresolved dependency placeholder', summaryQuality: 0, summarySource: 'unknown', invariantsJson: null, sideEffectsJson: null, roleTagsJson: null, searchText: 'legacyHelper placeholder', updatedAt: '${now}', embeddingMiniLM: null, embeddingMiniLMCardHash: null, embeddingMiniLMUpdatedAt: null, embeddingMiniLMVec: null, embeddingNomic: null, embeddingNomicCardHash: null, embeddingNomicUpdatedAt: null, embeddingJinaCode: null, embeddingJinaCodeCardHash: null, embeddingJinaCodeUpdatedAt: null, embeddingNomicVec: null, embeddingJinaCodeVec: null, external: false, scipSymbol: null, source: 'treesitter', packageName: null, packageVersion: null})`,
+    `CREATE (external:Symbol {symbolId: 'scip-external-legacy-chunk', repoId: 'repo-1', kind: 'function', name: 'chunk', exported: true, visibility: 'public', language: 'typescript', rangeStartLine: 0, rangeStartCol: 0, rangeEndLine: 0, rangeEndCol: 0, astFingerprint: 'scip-external-legacy-chunk', signatureJson: null, summary: 'legacy SCIP external chunk', summaryQuality: 0, summarySource: 'unknown', invariantsJson: null, sideEffectsJson: null, roleTagsJson: null, searchText: 'chunk legacy SCIP external', updatedAt: '${now}', embeddingMiniLM: null, embeddingMiniLMCardHash: null, embeddingMiniLMUpdatedAt: null, embeddingMiniLMVec: null, embeddingNomic: null, embeddingNomicCardHash: null, embeddingNomicUpdatedAt: null, embeddingJinaCode: null, embeddingJinaCodeCardHash: null, embeddingJinaCodeUpdatedAt: null, embeddingNomicVec: null, embeddingJinaCodeVec: null, external: true, scipSymbol: '${scipSymbol}', source: 'scip', packageName: 'lodash', packageVersion: '4.17.21'})`,
+    `MATCH (f:File {fileId: 'file-1'}), (r:Repo {repoId: 'repo-1'}), (source:Symbol {symbolId: 'sym-1'}), (placeholder:Symbol {symbolId: 'unresolved:call:legacyHelper'}), (external:Symbol {symbolId: 'scip-external-legacy-chunk'}) CREATE (f)-[:FILE_IN_REPO]->(r), (source)-[:SYMBOL_IN_FILE]->(f), (source)-[:SYMBOL_IN_REPO]->(r), (placeholder)-[:SYMBOL_IN_REPO]->(r), (external)-[:SYMBOL_IN_REPO]->(r)`,
+    `MATCH (source:Symbol {symbolId: 'sym-1'}), (placeholder:Symbol {symbolId: 'unresolved:call:legacyHelper'}), (external:Symbol {symbolId: 'scip-external-legacy-chunk'}) CREATE (source)-[:DEPENDS_ON {edgeType: 'call', weight: 0.5, confidence: 0.5, resolution: 'unresolved', resolverId: 'legacy', resolutionPhase: 'pass1', provenance: 'unresolved-call:legacyHelper', createdAt: '${now}'}]->(placeholder), (source)-[:DEPENDS_ON {edgeType: 'import', weight: 0.6, confidence: 0.95, resolution: 'exact', resolverId: 'scip', resolutionPhase: 'scip', provenance: 'scip-external:${scipSymbol}', createdAt: '${now}'}]->(external)`,
+    `CREATE (sv:SchemaVersion {id: 'current', schemaVersion: 15, createdAt: '${now}', updatedAt: '${now}'})`,
+  ]) {
+    closeResult(await conn.query(stmt));
+  }
+
+  await conn.close();
+  await db.close();
+}
+
 describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
   const testRoot = join(
     tmpdir(),
@@ -272,6 +316,184 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     assert.strictEqual(rows[0].placeholderStatus, "unresolved");
     assert.strictEqual(rows[0].placeholderKind, "call");
     assert.strictEqual(rows[0].placeholderTarget, "legacyHelper");
+
+    const repoSymbols = await ladybugQueries.getSymbolsByRepo(conn, "repo-1");
+    assert.deepStrictEqual(
+      repoSymbols.map((row) => row.symbolId),
+      ["sym-1"],
+      "repo symbol projections should stay limited to real file-backed symbols",
+    );
+
+    const snapshotRows = await ladybugQueries.getSymbolsByRepoForSnapshot(
+      conn,
+      "repo-1",
+    );
+    assert.deepStrictEqual(
+      snapshotRows.map((row) => row.symbolId),
+      ["sym-1"],
+      "version snapshots should exclude dependency placeholders after migration",
+    );
+
+    const count = await ladybugQueries.getSymbolCount(conn, "repo-1");
+    assert.strictEqual(
+      count,
+      1,
+      "repo symbol count should exclude dependency placeholders after migration",
+    );
+
+    const hydrated = await ladybugQueries.getSearchableSymbolsByIds(
+      conn,
+      "repo-1",
+      ["sym-1", "unresolved:call:legacyHelper"],
+    );
+    assert.deepStrictEqual(
+      [...hydrated.keys()],
+      ["sym-1"],
+      "search hydration should exclude unresolved placeholder candidates after migration",
+    );
+  });
+
+  it("v15 -> latest: m016 types legacy placeholders and SCIP externals", async () => {
+    mkdirSync(testRoot, { recursive: true });
+    const dbPath = join(testRoot, "v15-placeholder-and-scip-status.lbug");
+
+    await createV15DatabaseWithLegacyScipExternal(dbPath);
+    await initLadybugDb(dbPath);
+
+    const conn = await getLadybugConn();
+    const result = await conn.query(
+      `MATCH (s:Symbol {repoId: 'repo-1'})
+       RETURN s.symbolId AS symbolId,
+              s.symbolStatus AS symbolStatus,
+              s.placeholderKind AS placeholderKind,
+              s.placeholderTarget AS placeholderTarget,
+              coalesce(s.external, false) AS external
+       ORDER BY symbolId`,
+    );
+    const qr = Array.isArray(result) ? result[0] : result;
+    const rows = (await qr.getAll()) as Array<{
+      symbolId: unknown;
+      symbolStatus: unknown;
+      placeholderKind: unknown;
+      placeholderTarget: unknown;
+      external: unknown;
+    }>;
+    qr.close();
+
+    assert.deepStrictEqual(rows, [
+      {
+        symbolId: "scip-external-legacy-chunk",
+        symbolStatus: "external",
+        placeholderKind: "scip",
+        placeholderTarget:
+          "scip-typescript npm lodash 4.17.21 lodash/chunk().",
+        external: true,
+      },
+      {
+        symbolId: "sym-1",
+        symbolStatus: "real",
+        placeholderKind: null,
+        placeholderTarget: null,
+        external: false,
+      },
+      {
+        symbolId: "unresolved:call:legacyHelper",
+        symbolStatus: "unresolved",
+        placeholderKind: "call",
+        placeholderTarget: "legacyHelper",
+        external: false,
+      },
+    ]);
+
+    const repoSymbols = await ladybugQueries.getSymbolsByRepo(conn, "repo-1");
+    assert.deepStrictEqual(
+      repoSymbols.map((row) => row.symbolId),
+      ["sym-1"],
+      "repo graph snapshots should exclude unresolved and external placeholders",
+    );
+
+    const snapshotRows = await ladybugQueries.getSymbolsByRepoForSnapshot(
+      conn,
+      "repo-1",
+    );
+    assert.deepStrictEqual(
+      snapshotRows.map((row) => row.symbolId),
+      ["sym-1"],
+      "version snapshots should exclude non-real symbols",
+    );
+
+    const count = await ladybugQueries.getSymbolCount(conn, "repo-1");
+    assert.strictEqual(count, 1);
+
+    const placeholderSearch = await ladybugQueries.searchSymbols(
+      conn,
+      "repo-1",
+      "legacyHelper",
+      10,
+    );
+    assert.equal(
+      placeholderSearch.some(
+        (row) => row.symbolId === "unresolved:call:legacyHelper",
+      ),
+      false,
+      "search should not expose unresolved placeholders with stale names",
+    );
+
+    const externalSearch = await ladybugQueries.searchSymbols(
+      conn,
+      "repo-1",
+      "chunk",
+      10,
+    );
+    assert.equal(
+      externalSearch.some(
+        (row) => row.symbolId === "scip-external-legacy-chunk",
+      ),
+      true,
+      "SCIP externals should remain searchable by default",
+    );
+
+    const filteredExternalSearch = await ladybugQueries.searchSymbols(
+      conn,
+      "repo-1",
+      "chunk",
+      10,
+      undefined,
+      true,
+    );
+    assert.equal(
+      filteredExternalSearch.some(
+        (row) => row.symbolId === "scip-external-legacy-chunk",
+      ),
+      false,
+      "excludeExternal should suppress migrated SCIP externals",
+    );
+
+    const hydrated = await ladybugQueries.getSearchableSymbolsByIds(
+      conn,
+      "repo-1",
+      [
+        "sym-1",
+        "unresolved:call:legacyHelper",
+        "scip-external-legacy-chunk",
+      ],
+    );
+    assert.deepStrictEqual([...hydrated.keys()].sort(), [
+      "scip-external-legacy-chunk",
+      "sym-1",
+    ]);
+
+    const filteredHydrated = await ladybugQueries.getSearchableSymbolsByIds(
+      conn,
+      "repo-1",
+      ["sym-1", "scip-external-legacy-chunk"],
+      true,
+    );
+    assert.deepStrictEqual(
+      [...filteredHydrated.keys()],
+      ["sym-1"],
+      "excludeExternal hydration should keep only real symbols",
+    );
   });
 
   it("v16 -> latest: m017 repairs placeholder metadata and prunes isolated placeholders", async () => {

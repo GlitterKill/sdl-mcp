@@ -131,6 +131,44 @@ describe("semantic pipeline regressions", () => {
     );
   });
 
+  it("hybrid symbol search uses the same external-filter boundary as lexical search", () => {
+    const symbolSource = readSource("src/mcp/tools/symbol.ts");
+    const handleStart = symbolSource.indexOf(
+      "export async function handleSymbolSearch(",
+    );
+    const handleEnd = symbolSource.indexOf(
+      "export async function handleSymbolGetCard(",
+      handleStart,
+    );
+    assert.ok(
+      handleStart !== -1 && handleEnd !== -1 && handleEnd > handleStart,
+    );
+    const handleBody = symbolSource.slice(handleStart, handleEnd);
+
+    assert.match(
+      handleBody,
+      /excludeExternal:\s*request\.excludeExternal/,
+      "handleSymbolSearch should pass excludeExternal into the hybrid path",
+    );
+    assert.match(
+      handleBody,
+      /findSymbolByExactName\([\s\S]*request\.excludeExternal/,
+      "exact-name fallback should use the same excludeExternal request boundary",
+    );
+
+    const overlaySource = readSource("src/live-index/overlay-reader.ts");
+    const hybridStart = overlaySource.indexOf(
+      "export async function searchSymbolsHybridWithOverlay",
+    );
+    assert.ok(hybridStart !== -1);
+    const hybridBody = overlaySource.slice(hybridStart);
+    assert.match(
+      hybridBody,
+      /getSearchableSymbolsByIds\([\s\S]*hybridOptions\.excludeExternal/,
+      "hybrid hydration should filter to searchable symbols before returning MCP rows",
+    );
+  });
+
   it("keeps local summary provider model optional so default fallback model is used", () => {
     const source = readSource("src/indexer/summary-generator.ts");
     const fnStart = source.indexOf("export function createSummaryProvider(");

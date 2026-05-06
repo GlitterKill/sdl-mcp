@@ -103,6 +103,11 @@ Pass1ExtractionEntry>`) populated during pass-1 from both engines
 
 ### Changed
 
+- **MCP TypeScript SDK updated to 1.29.0.** Keeps the monolithic
+  `@modelcontextprotocol/sdk` dependency on the latest v1 release line.
+- **FileSummary embedding refresh stats are stricter.** Incremental
+  refreshes only evaluate the requested file IDs; cache hits count as
+  `skipped`, while empty file-level payloads now count as `missing`.
 - **`durationMs` in `IndexResult` now reflects full wall-clock.**
   Previously captured immediately after the `versionSnapshot` phase, which
   silently excluded the entire post-index session (finalizeIndexing,

@@ -45,8 +45,12 @@ export async function refreshFileSummaryEmbeddings(params: {
   concurrency?: number;
   batchSize?: number;
   maxChars?: number;
+  /** @internal Allows tests to exercise refresh semantics without ONNX files. */
+  embeddingProvider?: EmbeddingProvider;
 }): Promise<FileSummaryEmbeddingRefreshResult> {
-  const provider = getEmbeddingProvider(params.provider, params.model);
+  const provider =
+    params.embeddingProvider ??
+    getEmbeddingProvider(params.provider, params.model);
   const conn = await getLadybugConn();
 
   const summaries =
@@ -77,32 +81,39 @@ export async function refreshFileSummaryEmbeddings(params: {
     };
   }
 
-  const uncached = summaries
-    .map((summary) => {
-      const text = buildFileSummaryEmbeddingText(summary, params.maxChars);
-      const prefixedText = applyDocumentPrefix(storageModel, text);
-      const cardHash = hashContent([summary.fileId, prefixedText].join("|"));
-      const existingHash =
-        storageModel === "jina-embeddings-v2-base-code"
-          ? summary.embeddingJinaCodeCardHash
-          : summary.embeddingNomicCardHash;
-      return {
-        summary,
-        prefixedText,
-        cardHash,
-        cached: existingHash === cardHash,
-      };
-    })
-    .filter((item) => !item.cached && item.prefixedText.trim().length > 0)
+  const candidates = summaries.map((summary) => {
+    const text = buildFileSummaryEmbeddingText(summary, params.maxChars);
+    const hasPayload = text.trim().length > 0;
+    const prefixedText = applyDocumentPrefix(storageModel, text);
+    const cardHash = hashContent([summary.fileId, prefixedText].join("|"));
+    const existingHash =
+      storageModel === "jina-embeddings-v2-base-code"
+        ? summary.embeddingJinaCodeCardHash
+        : summary.embeddingNomicCardHash;
+    return {
+      summary,
+      prefixedText,
+      cardHash,
+      cached: existingHash === cardHash,
+      hasPayload,
+    };
+  });
+  const missingPayloads = candidates.filter((item) => !item.hasPayload).length;
+  const skipped = candidates.filter(
+    (item) => item.hasPayload && item.cached,
+  ).length;
+  const uncached = candidates
+    .filter((item) => item.hasPayload && !item.cached)
     .sort((a, b) => a.prefixedText.length - b.prefixedText.length);
 
-  const skipped = summaries.length - uncached.length;
   if (uncached.length === 0) {
-    return { embedded: 0, skipped, missing: 0, degraded: false };
+    return { embedded: 0, skipped, missing: missingPayloads, degraded: false };
   }
 
   const vecProp = getVecPropertyName(storageModel);
   const indexName = getFileSummaryVectorIndexName(storageModel);
+  // Mirrors the Symbol embedding workaround: with the current LadybugDB HNSW
+  // behavior, enough is currently any non-cached vector row.
   const useRebuildPath =
     vecProp !== null &&
     indexName !== null &&
@@ -194,7 +205,7 @@ export async function refreshFileSummaryEmbeddings(params: {
   return {
     embedded,
     skipped,
-    missing: uncached.length - embedded,
+    missing: missingPayloads + uncached.length - embedded,
     degraded: failed > 0,
   };
 }

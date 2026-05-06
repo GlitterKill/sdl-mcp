@@ -222,6 +222,7 @@ export async function handleSymbolSearch(
             chatMentionWeights: request.chatMentionWeights,
             pprDirection: request.pprDirection,
             pprWeight: request.pprWeight,
+            excludeExternal: request.excludeExternal,
           },
         );
       rows = hybridRows;
@@ -284,6 +285,7 @@ export async function handleSymbolSearch(
       request.repoId,
       query,
       request.kinds,
+      request.excludeExternal,
     );
     if (
       exactMatch &&

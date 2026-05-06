@@ -13,6 +13,7 @@ import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import {
   getEmbeddingProvider,
   refreshSymbolEmbeddings,
+  type EmbeddingProvider,
 } from "../../dist/indexer/embeddings.js";
 import { refreshFileSummaryEmbeddings } from "../../dist/indexer/file-summary-embeddings.js";
 
@@ -23,6 +24,7 @@ describe("Semantic Embedding Pipeline", () => {
   const testDir = join(__dirname, "test-semantic-embedding");
   const graphDbPath = join(testDir, "graph");
   const repoId = "embed-test-repo";
+  const jinaModel = "jina-embeddings-v2-base-code";
 
   const symbols: ladybugDb.SymbolRow[] = [
     {
@@ -147,6 +149,106 @@ describe("Semantic Embedding Pipeline", () => {
       rmSync(testDir, { recursive: true, force: true });
     }
   });
+
+  function createRecordingProvider(): {
+    provider: EmbeddingProvider;
+    calls: string[][];
+  } {
+    const calls: string[][] = [];
+    return {
+      calls,
+      provider: {
+        async embed(texts: string[]): Promise<number[][]> {
+          calls.push([...texts]);
+          return texts.map((text, index) =>
+            makeDeterministicVector(text, calls.length, index),
+          );
+        },
+        getDimension(): number {
+          return 768;
+        },
+        isMockFallback(): boolean {
+          return false;
+        },
+      },
+    };
+  }
+
+  function makeDeterministicVector(
+    text: string,
+    callNumber: number,
+    index: number,
+  ): number[] {
+    const vector = new Array<number>(768).fill(0);
+    vector[0] = ((text.length % 97) + 1) / 100;
+    vector[1] = callNumber / 100;
+    vector[2] = (index + 1) / 100;
+    return vector;
+  }
+
+  async function upsertStandardFileSummaries(
+    conn: Awaited<ReturnType<typeof getLadybugConn>>,
+    updatedAt = "2026-05-05T00:00:00Z",
+  ): Promise<void> {
+    await ladybugDb.upsertFileSummaryBatch(conn, [
+      {
+        fileId: "file1",
+        repoId,
+        summary: "File: src/auth.ts\nLanguage: ts\nExports: authenticateUser",
+        searchText: "file: src/auth.ts exports: authenticateUser",
+        updatedAt,
+      },
+      {
+        fileId: "file2",
+        repoId,
+        summary:
+          "File: src/dashboard.ts\nLanguage: ts\nExports: renderDashboard",
+        searchText: "file: src/dashboard.ts exports: renderDashboard",
+        updatedAt,
+      },
+    ]);
+  }
+
+  interface FileSummaryEmbeddingState {
+    fileId: string;
+    summary: string | null;
+    searchText: string | null;
+    summaryUpdatedAt: string | null;
+    vector: string | null;
+    cardHash: string | null;
+    embeddingUpdatedAt: string | null;
+    vectorArray: unknown;
+  }
+
+  async function readFileSummaryEmbeddingRows(
+    conn: Awaited<ReturnType<typeof getLadybugConn>>,
+    fileIds: string[],
+  ): Promise<Map<string, FileSummaryEmbeddingState>> {
+    const rows = await ladybugDb.queryAll<FileSummaryEmbeddingState>(
+      conn,
+      `MATCH (fs:FileSummary)
+       WHERE fs.fileId IN $fileIds
+       RETURN fs.fileId AS fileId,
+              fs.summary AS summary,
+              fs.searchText AS searchText,
+              fs.updatedAt AS summaryUpdatedAt,
+              fs.embeddingJinaCode AS vector,
+              fs.embeddingJinaCodeCardHash AS cardHash,
+              fs.embeddingJinaCodeUpdatedAt AS embeddingUpdatedAt,
+              fs.embeddingJinaCodeVec AS vectorArray`,
+      { fileIds },
+    );
+    return new Map(rows.map((row) => [row.fileId, row]));
+  }
+
+  function assertStoredVectorArray(value: unknown, fileId: string): void {
+    assert.ok(Array.isArray(value), `${fileId} should store a vector array`);
+    assert.strictEqual(value.length, 768);
+    assert.ok(
+      value.some((entry) => typeof entry === "number" && entry !== 0),
+      `${fileId} vector array should contain provider values`,
+    );
+  }
 
   it("mock provider generates embeddings with expected dimension", async () => {
     const provider = getEmbeddingProvider("mock");
@@ -281,5 +383,170 @@ describe("Semantic Embedding Pipeline", () => {
     ]);
     assert.strictEqual(summaries.get("file1")?.embeddingJinaCode, null);
     assert.strictEqual(summaries.get("file1")?.embeddingNomic, null);
+  });
+
+  it("refreshFileSummaryEmbeddings scopes incremental runs and only re-embeds changed payloads", async () => {
+    const conn = await getLadybugConn();
+    await upsertStandardFileSummaries(conn);
+    const { provider, calls } = createRecordingProvider();
+
+    const first = await refreshFileSummaryEmbeddings({
+      repoId,
+      provider: "local",
+      model: jinaModel,
+      fileIds: ["file1"],
+      embeddingProvider: provider,
+    });
+
+    assert.deepStrictEqual(first, {
+      embedded: 1,
+      skipped: 0,
+      missing: 0,
+      degraded: false,
+    });
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].length, 1);
+    assert.match(calls[0][0], /authenticateUser/);
+
+    let rows = await readFileSummaryEmbeddingRows(conn, ["file1", "file2"]);
+    const originalFile1 = rows.get("file1");
+    assert.ok(originalFile1?.vector);
+    assert.strictEqual(
+      rows.get("file2")?.vector,
+      null,
+      "unrequested FileSummary should not be embedded",
+    );
+
+    const second = await refreshFileSummaryEmbeddings({
+      repoId,
+      provider: "local",
+      model: jinaModel,
+      fileIds: ["file1"],
+      embeddingProvider: provider,
+    });
+
+    assert.deepStrictEqual(second, {
+      embedded: 0,
+      skipped: 1,
+      missing: 0,
+      degraded: false,
+    });
+    assert.strictEqual(
+      calls.length,
+      1,
+      "cached FileSummary payload should not call the provider again",
+    );
+
+    await ladybugDb.upsertFileSummaryBatch(conn, [
+      {
+        fileId: "file1",
+        repoId,
+        summary:
+          "File: src/auth.ts\nLanguage: ts\nExports: authenticateUser\nChanged payload",
+        searchText:
+          "file: src/auth.ts exports: authenticateUser summary: Changed payload",
+        updatedAt: "2026-05-05T00:01:00Z",
+      },
+    ]);
+
+    const third = await refreshFileSummaryEmbeddings({
+      repoId,
+      provider: "local",
+      model: jinaModel,
+      fileIds: ["file1"],
+      embeddingProvider: provider,
+    });
+
+    assert.deepStrictEqual(third, {
+      embedded: 1,
+      skipped: 0,
+      missing: 0,
+      degraded: false,
+    });
+    assert.strictEqual(calls.length, 2);
+    assert.match(calls[1][0], /Changed payload/);
+
+    rows = await readFileSummaryEmbeddingRows(conn, ["file1", "file2"]);
+    assert.notStrictEqual(rows.get("file1")?.cardHash, originalFile1.cardHash);
+    assert.strictEqual(
+      rows.get("file2")?.vector,
+      null,
+      "payload changes outside the requested set should remain untouched",
+    );
+  });
+
+  it("refreshFileSummaryEmbeddings reports empty payloads as missing instead of cached", async () => {
+    const conn = await getLadybugConn();
+    await ladybugDb.upsertFileSummaryBatch(conn, [
+      {
+        fileId: "file1",
+        repoId,
+        summary: null,
+        searchText: "   ",
+        updatedAt: "2026-05-05T00:00:00Z",
+      },
+    ]);
+    const { provider, calls } = createRecordingProvider();
+
+    for (const model of [jinaModel, "nomic-embed-text-v1.5"]) {
+      const result = await refreshFileSummaryEmbeddings({
+        repoId,
+        provider: "local",
+        model,
+        fileIds: ["file1"],
+        embeddingProvider: provider,
+      });
+
+      assert.deepStrictEqual(
+        result,
+        {
+          embedded: 0,
+          skipped: 0,
+          missing: 1,
+          degraded: false,
+        },
+        `${model} should treat empty raw payloads as missing`,
+      );
+    }
+    assert.strictEqual(calls.length, 0);
+  });
+
+  it("refreshFileSummaryEmbeddings preserves metadata and vector arrays on rebuild writes", async () => {
+    const conn = await getLadybugConn();
+    const summaryUpdatedAt = "2026-05-05T00:00:00Z";
+    await upsertStandardFileSummaries(conn, summaryUpdatedAt);
+    const { provider } = createRecordingProvider();
+
+    const result = await refreshFileSummaryEmbeddings({
+      repoId,
+      provider: "local",
+      model: jinaModel,
+      fileIds: ["file1", "file2"],
+      embeddingProvider: provider,
+      batchSize: 1,
+    });
+
+    assert.deepStrictEqual(result, {
+      embedded: 2,
+      skipped: 0,
+      missing: 0,
+      degraded: false,
+    });
+
+    const rows = await readFileSummaryEmbeddingRows(conn, ["file1", "file2"]);
+    for (const fileId of ["file1", "file2"]) {
+      const row = rows.get(fileId);
+      assert.ok(row, `${fileId} summary should exist`);
+      assert.ok(row.vector, `${fileId} should store text vector metadata`);
+      assert.ok(row.cardHash, `${fileId} should store a card hash`);
+      assert.ok(
+        row.embeddingUpdatedAt,
+        `${fileId} should store embedding update metadata`,
+      );
+      assert.strictEqual(row.summaryUpdatedAt, summaryUpdatedAt);
+      assert.match(row.summary ?? "", /File: src\//);
+      assert.match(row.searchText ?? "", /file: src\//);
+      assertStoredVectorArray(row.vectorArray, fileId);
+    }
   });
 });

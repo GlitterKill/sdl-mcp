@@ -238,6 +238,7 @@ export async function searchSymbolsHybridWithOverlay(
     chatMentionWeights?: Record<string, number>;
     pprDirection?: "out" | "in" | "both";
     pprWeight?: number;
+    excludeExternal?: boolean;
   },
 ): Promise<{ rows: OverlaySearchResult[]; evidence?: RetrievalEvidence }> {
   const snapshot = getOverlaySnapshot(repoId);
@@ -263,10 +264,17 @@ export async function searchSymbolsHybridWithOverlay(
   // 2. Hydrate hybrid results — get symbol/file data, filter out touched files
   const hybridSymbolIds = hybridResult.results.map((r) => r.symbolId);
   const symbolMap = hybridSymbolIds.length > 0
-    ? await ladybugDb.getSymbolsByIds(conn, hybridSymbolIds)
+    ? await ladybugDb.getSearchableSymbolsByIds(
+        conn,
+        repoId,
+        hybridSymbolIds,
+        hybridOptions.excludeExternal,
+      )
     : new Map<string, SymbolRow>();
   const fileIds = new Set<string>();
-  for (const sym of symbolMap.values()) fileIds.add(sym.fileId);
+  for (const sym of symbolMap.values()) {
+    if (sym.fileId) fileIds.add(sym.fileId);
+  }
   const fileMap = fileIds.size > 0
     ? await ladybugDb.getFilesByIds(conn, Array.from(fileIds))
     : new Map<string, FileRow>();

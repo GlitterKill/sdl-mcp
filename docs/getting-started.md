@@ -329,6 +329,8 @@ Notes:
 
 When hybrid retrieval is configured (`semantic.retrieval.mode: "hybrid"` with vector retrieval enabled), indexing also builds one `FileSummary` per indexed file and embeds that file-level payload. The payload is deterministic: relative path, language, exported symbols, and top indexed symbol signatures/summaries. `FileSummary.searchText` remains populated for FTS and lexical fallback, but it is not the healthy hybrid path by itself.
 
+Incremental refreshes only re-check the requested changed-file set. Summaries whose payload hash still matches the stored embedding are counted as `skipped`; empty payloads or vectors not persisted because the provider degraded are counted as `missing`.
+
 If the embedding provider is unavailable or only the mock fallback is active, SDL-MCP still keeps lexical `FileSummary` rows for FTS/RRF fallback and marks the embedding pass as degraded in the `index.refresh.complete` audit stats (`fileSummaryEmbeddings[model].degraded: true`, with `missing` counts). Treat that as a retrieval-quality warning rather than a successful vector pass.
 
 ### Dependency Placeholder Quality
