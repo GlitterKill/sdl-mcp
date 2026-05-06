@@ -609,6 +609,20 @@
           "maximum": 128,
           "default": 32
         },
+        "fileSummaryEmbeddingBatchSize": {
+          "type": "integer",
+          "description": "ONNX inference batch width for hybrid FileSummary embedding refresh. File-level payloads are larger than symbol payloads, so this defaults lower than embeddingBatchSize to bound DirectML/ONNX memory use.",
+          "minimum": 1,
+          "maximum": 16,
+          "default": 4
+        },
+        "fileSummaryEmbeddingMaxChars": {
+          "type": "integer",
+          "description": "Maximum characters sent to the embedding provider for each FileSummary. Stored summaries and FTS searchText remain complete; this only bounds vector-generation resources.",
+          "minimum": 512,
+          "maximum": 32768,
+          "default": 4096
+        },
         "embeddingsSequential": {
           "type": "boolean",
           "description": "When two or more embedding models are configured, run them in series instead of via Promise.all. Default false launches concurrently — best when ORT runs sessions on independent thread pools. Set true on systems where ORT serializes sessions at the thread-pool layer (observed alternation pattern in CLI progress); each model holds the full thread budget end-to-end, weights stay hot in L3 cache, and model-handoff scheduling overhead disappears.",

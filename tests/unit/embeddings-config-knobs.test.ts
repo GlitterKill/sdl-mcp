@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
  * Tests for the new embedding-related config knobs:
  *
  *   - `semantic.embeddingBatchSize` (1-128, default 32)
+ *   - `semantic.fileSummaryEmbeddingBatchSize` (1-16, default 4)
+ *   - `semantic.fileSummaryEmbeddingMaxChars` (512-32768, default 4096)
  *   - `semantic.embeddingsSequential` (boolean, default false)
  *   - `semantic.modelVariant` (free-form string, optional)
  *   - `semantic.executionProviders` (string[], default ["cpu"])
@@ -52,6 +54,42 @@ describe("embeddingBatchSize schema", () => {
     const { SemanticConfigSchema } = await import("../../dist/config/types.js");
     assert.throws(() =>
       SemanticConfigSchema.parse({ embeddingBatchSize: 32.5 }),
+    );
+  });
+});
+
+describe("FileSummary embedding resource knobs", () => {
+  it("default to conservative values", async () => {
+    const { SemanticConfigSchema } = await import("../../dist/config/types.js");
+    const parsed = SemanticConfigSchema.parse({});
+    assert.strictEqual(parsed.fileSummaryEmbeddingBatchSize, 4);
+    assert.strictEqual(parsed.fileSummaryEmbeddingMaxChars, 4096);
+  });
+
+  it("accept explicit bounds", async () => {
+    const { SemanticConfigSchema } = await import("../../dist/config/types.js");
+    const low = SemanticConfigSchema.parse({
+      fileSummaryEmbeddingBatchSize: 1,
+      fileSummaryEmbeddingMaxChars: 512,
+    });
+    assert.strictEqual(low.fileSummaryEmbeddingBatchSize, 1);
+    assert.strictEqual(low.fileSummaryEmbeddingMaxChars, 512);
+
+    const high = SemanticConfigSchema.parse({
+      fileSummaryEmbeddingBatchSize: 16,
+      fileSummaryEmbeddingMaxChars: 32768,
+    });
+    assert.strictEqual(high.fileSummaryEmbeddingBatchSize, 16);
+    assert.strictEqual(high.fileSummaryEmbeddingMaxChars, 32768);
+  });
+
+  it("rejects unsafe FileSummary embedding resource values", async () => {
+    const { SemanticConfigSchema } = await import("../../dist/config/types.js");
+    assert.throws(() =>
+      SemanticConfigSchema.parse({ fileSummaryEmbeddingBatchSize: 17 }),
+    );
+    assert.throws(() =>
+      SemanticConfigSchema.parse({ fileSummaryEmbeddingMaxChars: 511 }),
     );
   });
 });
@@ -127,5 +165,16 @@ describe("constants module exports", () => {
     const { MAX_EMBEDDING_BATCH_SIZE } =
       await import("../../dist/config/constants.js");
     assert.strictEqual(MAX_EMBEDDING_BATCH_SIZE, 128);
+  });
+
+  it("exports FileSummary embedding resource defaults", async () => {
+    const {
+      DEFAULT_FILE_SUMMARY_EMBEDDING_BATCH_SIZE,
+      DEFAULT_FILE_SUMMARY_EMBEDDING_MAX_CHARS,
+      MAX_FILE_SUMMARY_EMBEDDING_BATCH_SIZE,
+    } = await import("../../dist/config/constants.js");
+    assert.strictEqual(DEFAULT_FILE_SUMMARY_EMBEDDING_BATCH_SIZE, 4);
+    assert.strictEqual(DEFAULT_FILE_SUMMARY_EMBEDDING_MAX_CHARS, 4096);
+    assert.strictEqual(MAX_FILE_SUMMARY_EMBEDDING_BATCH_SIZE, 16);
   });
 });

@@ -540,6 +540,26 @@ export const DEFAULT_EMBEDDING_BATCH_SIZE = 32;
 export const MAX_EMBEDDING_BATCH_SIZE = 128;
 
 /**
+ * FileSummary payloads are much larger than symbol-card payloads because they
+ * include file path, language, exports, and representative symbol facts. Keep
+ * the default batch width low so a hybrid FileSummary pass cannot saturate
+ * DirectML/ONNX memory just because symbol embeddings can safely batch 32.
+ */
+export const DEFAULT_FILE_SUMMARY_EMBEDDING_BATCH_SIZE = 4;
+
+/**
+ * Hard cap for FileSummary embedding batches. This is intentionally below the
+ * symbol cap: file-level payloads can approach the model context window.
+ */
+export const MAX_FILE_SUMMARY_EMBEDDING_BATCH_SIZE = 16;
+
+/**
+ * Cap FileSummary embedding text before tokenization. The stored summary and
+ * FTS searchText stay complete; this only bounds vector-generation resources.
+ */
+export const DEFAULT_FILE_SUMMARY_EMBEDDING_MAX_CHARS = 4096;
+
+/**
  * When the count of uncached symbols to embed exceeds this threshold,
  * `refreshSymbolEmbeddings` drops the HNSW vector index, performs the bulk
  * write without per-row index maintenance, then recreates the index in a

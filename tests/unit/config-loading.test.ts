@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { loadConfig } from "../../dist/config/loadConfig.js";
+import { SemanticConfigSchema } from "../../dist/config/types.js";
 import { createAsyncFsOperations } from "../../dist/util/asyncFs.js";
 import { fileURLToPath } from "url";
 import { resolve, dirname } from "path";
@@ -42,6 +43,15 @@ describe("Config Loading (RR-H.8)", () => {
     );
     assert.strictEqual(typeof config.graphDatabase!.path, "string");
     assert.ok(config.graphDatabase!.path!.length > 0);
+  });
+
+  it("defaults FileSummary embeddings to conservative resource controls", () => {
+    const result = SemanticConfigSchema.safeParse({ enabled: true });
+
+    assert.equal(result.success, true);
+    if (!result.success) return;
+    assert.strictEqual(result.data.fileSummaryEmbeddingBatchSize, 4);
+    assert.strictEqual(result.data.fileSummaryEmbeddingMaxChars, 4096);
   });
 
   it("should throw error for non-existent config", () => {

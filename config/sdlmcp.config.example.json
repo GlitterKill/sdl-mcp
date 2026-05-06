@@ -127,6 +127,8 @@
     "summaryBatchSize": 20,
     "embeddingConcurrency": 1,
     "embeddingBatchSize": 32,
+    "fileSummaryEmbeddingBatchSize": 4,
+    "fileSummaryEmbeddingMaxChars": 4096,
     "embeddingsSequential": false,
     "modelVariant": "default",
     "executionProviders": ["cpu"],

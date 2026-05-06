@@ -215,6 +215,9 @@ export async function finalizeIndexing({
 
     if (shouldRunFileSummaryEmbeddings) {
       fileSummaryEmbeddingStats = {};
+      // FileSummary payloads are much larger than symbol cards. Keep model
+      // lanes serialized here so hybrid file vectors cannot multiply ONNX/DML
+      // memory pressure across every configured embedding model.
       for (const embModel of modelsToEmbed) {
         try {
           fileSummaryEmbeddingStats[embModel] = await measureSubphase(
@@ -227,7 +230,8 @@ export async function finalizeIndexing({
                 fileIds: changedFileIds ? [...changedFileIds] : undefined,
                 onProgress,
                 concurrency: semanticConfig.embeddingConcurrency,
-                batchSize: semanticConfig.embeddingBatchSize,
+                batchSize: semanticConfig.fileSummaryEmbeddingBatchSize,
+                maxChars: semanticConfig.fileSummaryEmbeddingMaxChars,
               }),
           );
         } catch (error) {

@@ -653,7 +653,12 @@ Expected speedup vs CPU-only on a workstation-class machine: **3-8× for transfo
 | Knob                   | Default | Range   | Effect                                                                                  |
 | :--------------------- | :------ | :------ | :-------------------------------------------------------------------------------------- |
 | `embeddingConcurrency` | `1`     | `1-8`   | ONNX batches in flight per model. Higher = more overlap of tokenization with inference. |
-| `embeddingBatchSize`   | `32`    | `1-128` | Rows per ONNX inference call. Larger = fewer round trips but higher peak memory.        |
+| `embeddingBatchSize`   | `32`    | `1-128` | Rows per ONNX inference call for symbols. Larger = fewer round trips but higher peak memory. |
+| `fileSummaryEmbeddingBatchSize` | `4` | `1-16` | Rows per ONNX inference call for FileSummary vectors. Keep lower because file payloads are larger. |
+| `fileSummaryEmbeddingMaxChars` | `4096` | `512-32768` | Character cap for FileSummary embedding text; stored summaries and FTS text remain complete. |
+
+FileSummary embedding model lanes run serially for resource safety; `embeddingsSequential`
+controls the symbol embedding model lanes.
 
 Tuning advice for a 16-physical-core CPU (e.g. 9950X3D):
 
@@ -856,7 +861,9 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
 
     // -- ONNX Inference Performance ------------------------------
     "embeddingConcurrency": 1, // 1-8: ONNX batches in flight per model
-    "embeddingBatchSize": 32, // 1-128: rows per ONNX inference call
+    "embeddingBatchSize": 32, // 1-128: rows per symbol ONNX inference call
+    "fileSummaryEmbeddingBatchSize": 4, // 1-16: rows per FileSummary ONNX call
+    "fileSummaryEmbeddingMaxChars": 4096, // bounds FileSummary vector payloads
     "embeddingsSequential": false, // run multi-model embedding in series (vs Promise.all)
     "modelVariant": "default", // "default" | "fp16" | "fp32" | "int8" | nomic-only "uint8"/"q4"/"q4f16"/"bnb4"
     "executionProviders": ["cpu"], // ORT EPs: ["dml","cpu"] (Win), ["coreml","cpu"] (macOS), ["cuda","cpu"] (Linux NVIDIA)

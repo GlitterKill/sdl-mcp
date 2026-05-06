@@ -154,6 +154,12 @@ function indexSubstageLabel(substage: IndexProgressSubstage): string {
   }
 }
 
+function embeddingStageLabel(substage?: IndexProgressSubstage): string {
+  return substage === "fileSummaryEmbeddings"
+    ? "Summary Embeddings"
+    : "Symbol Embeddings";
+}
+
 /**
  * Write a progress line to stdout, either in-place (TTY) or throttled
  * (non-TTY). When switching between stages, the previous line is finalized
@@ -300,6 +306,13 @@ export function renderIndexProgress(
       line = `  ${subLabel}...`;
     }
   } else if (p.stage === "embeddings") {
+    if (
+      state.currentStage !== null &&
+      state.currentStage !== stageKey &&
+      state.currentStage.startsWith("embeddings:")
+    ) {
+      state.embeddingsByModel.clear();
+    }
     // Per-model rendering: each model's progress lives in its own column of
     // a single status line. Two models emitting interleaved events used to
     // overwrite each other's counts, producing a flickering current-value
@@ -333,7 +346,7 @@ export function renderIndexProgress(
     if (combinedTotal > 0) {
       pct = Math.min(100, Math.floor((combinedCurrent / combinedTotal) * 100));
     }
-    line = `  ${label}: ${segments.join(" | ")}`;
+    line = `  ${embeddingStageLabel(p.substage)}: ${segments.join(" | ")}`;
   } else if (p.total > 0) {
     pct = Math.min(100, Math.floor((p.current / p.total) * 100));
     const bar = buildBar(pct);

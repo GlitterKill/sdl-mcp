@@ -1,7 +1,10 @@
 import {
   DEFAULT_EMBEDDING_BATCH_SIZE,
+  DEFAULT_FILE_SUMMARY_EMBEDDING_BATCH_SIZE,
+  DEFAULT_FILE_SUMMARY_EMBEDDING_MAX_CHARS,
   MAX_EMBEDDING_BATCH_SIZE,
   MAX_EMBEDDING_CONCURRENCY,
+  MAX_FILE_SUMMARY_EMBEDDING_BATCH_SIZE,
   VECTOR_REBUILD_THRESHOLD,
 } from "../config/constants.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
@@ -41,6 +44,7 @@ export async function refreshFileSummaryEmbeddings(params: {
   onProgress?: (progress: IndexProgress) => void;
   concurrency?: number;
   batchSize?: number;
+  maxChars?: number;
 }): Promise<FileSummaryEmbeddingRefreshResult> {
   const provider = getEmbeddingProvider(params.provider, params.model);
   const conn = await getLadybugConn();
@@ -75,7 +79,7 @@ export async function refreshFileSummaryEmbeddings(params: {
 
   const uncached = summaries
     .map((summary) => {
-      const text = buildFileSummaryEmbeddingText(summary);
+      const text = buildFileSummaryEmbeddingText(summary, params.maxChars);
       const prefixedText = applyDocumentPrefix(storageModel, text);
       const cardHash = hashContent([summary.fileId, prefixedText].join("|"));
       const existingHash =
@@ -111,12 +115,9 @@ export async function refreshFileSummaryEmbeddings(params: {
     indexDropped = dropResult.status !== "failed";
   }
 
-  const batchSize = Math.max(
-    1,
-    Math.min(
-      params.batchSize ?? DEFAULT_EMBEDDING_BATCH_SIZE,
-      MAX_EMBEDDING_BATCH_SIZE,
-    ),
+  const batchSize = resolveFileSummaryEmbeddingBatchSize(
+    params.batchSize,
+    DEFAULT_EMBEDDING_BATCH_SIZE,
   );
   const maxConcurrency = Math.max(
     1,
@@ -198,10 +199,33 @@ export async function refreshFileSummaryEmbeddings(params: {
   };
 }
 
-function buildFileSummaryEmbeddingText(
-  summary: ladybugDb.FileSummaryRow,
+export function buildFileSummaryEmbeddingText(
+  summary: Pick<ladybugDb.FileSummaryRow, "summary" | "searchText">,
+  maxChars = DEFAULT_FILE_SUMMARY_EMBEDDING_MAX_CHARS,
 ): string {
-  return [summary.summary, summary.searchText].filter(Boolean).join("\n");
+  const text = (summary.summary ?? summary.searchText ?? "").trim();
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars).trimEnd();
+}
+
+export function resolveFileSummaryEmbeddingBatchSize(
+  fileSummaryBatchSize: number | undefined,
+  symbolBatchSize: number | undefined,
+): number {
+  const requested =
+    fileSummaryBatchSize ??
+    Math.min(
+      symbolBatchSize ?? DEFAULT_EMBEDDING_BATCH_SIZE,
+      DEFAULT_FILE_SUMMARY_EMBEDDING_BATCH_SIZE,
+    );
+  return Math.max(
+    1,
+    Math.min(
+      requested,
+      MAX_FILE_SUMMARY_EMBEDDING_BATCH_SIZE,
+      MAX_EMBEDDING_BATCH_SIZE,
+    ),
+  );
 }
 
 async function embedBatch(

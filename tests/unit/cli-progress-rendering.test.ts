@@ -135,6 +135,46 @@ describe("renderIndexProgress — embeddings stage", () => {
     }
   });
 
+  it("labels summary and symbol embedding phases separately", async () => {
+    const { createProgressState, renderIndexProgress } =
+      await import("../../dist/cli/commands/index.js");
+    try {
+      const state = createProgressState();
+      renderIndexProgress(state, {
+        stage: "embeddings",
+        substage: "fileSummaryEmbeddings",
+        current: 100,
+        total: 100,
+        model: "jina-embeddings-v2-base-code",
+      });
+      const summaryOutput = captured.join("");
+      assert.ok(
+        summaryOutput.includes("Summary Embeddings:"),
+        `FileSummary phase should use summary label: ${summaryOutput}`,
+      );
+
+      captured = [];
+      renderIndexProgress(state, {
+        stage: "embeddings",
+        current: 200,
+        total: 200,
+        model: "nomic-embed-text-v1.5",
+      });
+      const symbolOutput = captured.join("");
+      assert.ok(
+        symbolOutput.includes("Symbol Embeddings:"),
+        `symbol phase should use symbol label: ${symbolOutput}`,
+      );
+      assert.equal(
+        state.embeddingsByModel.has("jina-embeddings-v2-base-code"),
+        false,
+        "transition from summary to symbol embeddings should not keep stale model columns",
+      );
+    } finally {
+      restoreStdout();
+    }
+  });
+
   it("clears per-model state on transition away from embeddings", async () => {
     const { createProgressState, renderIndexProgress } =
       await import("../../dist/cli/commands/index.js");

@@ -10,8 +10,11 @@ import {
   MAX_PASS2_CONCURRENCY,
   DEFAULT_EMBEDDING_CONCURRENCY,
   DEFAULT_EMBEDDING_BATCH_SIZE,
+  DEFAULT_FILE_SUMMARY_EMBEDDING_BATCH_SIZE,
+  DEFAULT_FILE_SUMMARY_EMBEDDING_MAX_CHARS,
   MAX_EMBEDDING_BATCH_SIZE,
   MAX_EMBEDDING_CONCURRENCY,
+  MAX_FILE_SUMMARY_EMBEDDING_BATCH_SIZE,
   DEFAULT_MAX_CARDS,
   DEFAULT_MAX_TOKENS_SLICE,
   TS_DIAGNOSTICS_MAX_ERRORS,
@@ -415,6 +418,28 @@ export const SemanticConfigSchema = z.object({
     .min(1)
     .max(MAX_EMBEDDING_BATCH_SIZE)
     .default(DEFAULT_EMBEDDING_BATCH_SIZE),
+  /**
+   * FileSummary embedding batch width. File-level payloads are larger than
+   * symbol payloads, so this defaults lower than `embeddingBatchSize` and is
+   * used only by the hybrid FileSummary vector pass.
+   */
+  fileSummaryEmbeddingBatchSize: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_FILE_SUMMARY_EMBEDDING_BATCH_SIZE)
+    .default(DEFAULT_FILE_SUMMARY_EMBEDDING_BATCH_SIZE),
+  /**
+   * Maximum characters sent to the embedding provider for each FileSummary.
+   * Stored summaries/search text are not truncated; this only bounds ONNX/DML
+   * inference memory and tokenizer padding cost.
+   */
+  fileSummaryEmbeddingMaxChars: z
+    .number()
+    .int()
+    .min(512)
+    .max(32_768)
+    .default(DEFAULT_FILE_SUMMARY_EMBEDDING_MAX_CHARS),
   /**
    * When two or more embedding models are configured (e.g. jina + nomic),
    * run them in series instead of via `Promise.all`. The default
