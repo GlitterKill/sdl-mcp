@@ -7,9 +7,14 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
-    "test": "node --test",
+    "test": "npm run build && node --test dist/test/*.test.js",
     "prepublishOnly": "npm run build"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "keywords": [
     "sdl-mcp",
     "plugin",
@@ -20,6 +25,7 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "sdl-mcp": "*",
     "typescript": "^5.9.3"
   },
   "peerDependencies": {

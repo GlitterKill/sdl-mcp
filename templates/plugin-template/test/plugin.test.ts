@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { MyLangAdapter } from "../dist/index.js";
+import { MyLangAdapter } from "../index.js";
 
 describe("MyLang Plugin Tests", () => {
   const adapter = new MyLangAdapter();
@@ -12,6 +12,16 @@ describe("MyLang Plugin Tests", () => {
 
     it("should have correct file extensions", () => {
       assert.ok(adapter.fileExtensions.includes(".mylang"));
+    });
+
+    it("should provide a regex parse placeholder", () => {
+      const tree = adapter.parse("function test() {}", "test.mylang");
+
+      assert.ok(tree, "Regex adapters should return a truthy parse result");
+      assert.deepStrictEqual(
+        tree.rootNode.descendantsOfType("function_declaration"),
+        [],
+      );
     });
   });
 
@@ -25,7 +35,8 @@ describe("MyLang Plugin Tests", () => {
       const greet = symbols.find((s) => s.name === "greet");
       assert.ok(greet, "Should extract greet function");
       assert.strictEqual(greet.kind, "function");
-      assert.strictEqual(greet.filePath, "test.mylang");
+      assert.ok(greet.nodeId.includes("test.mylang"));
+      assert.strictEqual(greet.exported, false);
       assert.ok(greet.range, "Should have range information");
     });
 
@@ -69,8 +80,8 @@ import "mylib/utils"`;
       const imports = adapter.extractImports(null, content, "test.mylang");
 
       assert.strictEqual(imports.length, 2);
-      assert.ok(imports.some((i) => i.moduleName === "stdlib"));
-      assert.ok(imports.some((i) => i.moduleName === "mylib/utils"));
+      assert.ok(imports.some((i) => i.specifier === "stdlib"));
+      assert.ok(imports.some((i) => i.specifier === "mylib/utils"));
     });
 
     it("should handle empty imports", () => {
@@ -85,9 +96,9 @@ import "mylib/utils"`;
       const imports = adapter.extractImports(null, content, "test.mylang");
 
       assert.strictEqual(imports.length, 1);
-      assert.strictEqual(imports[0].moduleName, "stdlib");
-      assert.strictEqual(imports[0].range.startLine, 1);
-      assert.ok(imports[0].range.endCol > imports[0].range.startCol);
+      assert.strictEqual(imports[0].specifier, "stdlib");
+      assert.strictEqual(imports[0].isRelative, false);
+      assert.strictEqual(imports[0].isExternal, true);
     });
   });
 
@@ -98,9 +109,10 @@ test()`;
       const symbols = adapter.extractSymbols(null, content, "test.mylang");
       const calls = adapter.extractCalls(null, content, "test.mylang", symbols);
 
-      const testCall = calls.find((c) => c.targetSymbolId.includes("test"));
+      const testCall = calls.find((c) => c.calleeSymbolId?.includes("test"));
       assert.ok(testCall, "Should extract call to test function");
-      assert.strictEqual(testCall.filePath, "test.mylang");
+      assert.strictEqual(testCall.calleeIdentifier, "test");
+      assert.strictEqual(testCall.isResolved, true);
       assert.ok(testCall.range, "Should have range information");
     });
 
@@ -113,8 +125,8 @@ func2()`;
       const calls = adapter.extractCalls(null, content, "test.mylang", symbols);
 
       assert.ok(calls.length >= 2, "Should extract multiple calls");
-      assert.ok(calls.some((c) => c.targetSymbolId.includes("func1")));
-      assert.ok(calls.some((c) => c.targetSymbolId.includes("func2")));
+      assert.ok(calls.some((c) => c.calleeSymbolId?.includes("func1")));
+      assert.ok(calls.some((c) => c.calleeSymbolId?.includes("func2")));
     });
 
     it("should not extract calls to undefined symbols", () => {
@@ -136,12 +148,15 @@ func2()`;
       const symbols = adapter.extractSymbols(null, content, "test.mylang");
 
       for (const symbol of symbols) {
-        assert.ok(symbol.id, "Symbol should have ID");
+        assert.ok(symbol.nodeId, "Symbol should have nodeId");
         assert.ok(
-          symbol.id.includes("test.mylang"),
+          symbol.nodeId.includes("test.mylang"),
           "ID should include file path",
         );
-        assert.ok(symbol.id.includes("test"), "ID should include symbol name");
+        assert.ok(
+          symbol.nodeId.includes("test"),
+          "ID should include symbol name",
+        );
       }
     });
 
@@ -152,8 +167,10 @@ test()`;
       const calls = adapter.extractCalls(null, content, "test.mylang", symbols);
 
       for (const call of calls) {
-        assert.ok(call.targetSymbolId, "Call should have targetSymbolId");
-        const targetSymbol = symbols.find((s) => s.id === call.targetSymbolId);
+        assert.ok(call.calleeSymbolId, "Call should have calleeSymbolId");
+        const targetSymbol = symbols.find(
+          (s) => s.nodeId === call.calleeSymbolId,
+        );
         assert.ok(targetSymbol, "Call should reference existing symbol");
       }
     });
@@ -179,8 +196,8 @@ function main() {
 
       assert.ok(symbols.some((s) => s.name === "helper"));
       assert.ok(symbols.some((s) => s.name === "main"));
-      assert.ok(imports.some((i) => i.moduleName === "stdlib"));
-      assert.ok(calls.some((c) => c.targetSymbolId.includes("helper")));
+      assert.ok(imports.some((i) => i.specifier === "stdlib"));
+      assert.ok(calls.some((c) => c.calleeSymbolId?.includes("helper")));
     });
   });
 });
