@@ -858,7 +858,7 @@ function buildCodexHooksJson(repoRoot: string): string {
     hooks: {
       PreToolUse: [
         {
-          matcher: "Bash|mcp__(?!sdl_mcp__).*",
+          matcher: ".*",
           hooks: [
             {
               type: "command",
@@ -875,12 +875,29 @@ function buildCodexHooksJson(repoRoot: string): string {
   return `${JSON.stringify(config, null, 2)}\n`;
 }
 
-function buildCodexPreToolUseHook(): string {
+function buildCodexPreToolUseHook(pidfilePath: string): string {
+  const indexedExtensions = JSON.stringify(SDL_SOURCE_EXTENSIONS);
+  const runtimeRedirectPrefixes = JSON.stringify(SDL_RUNTIME_REDIRECT_PREFIXES);
   return `#!/usr/bin/env node
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const pidfilePath = ${JSON.stringify(pidfilePath)};
+const indexedExtensions = new Set(${indexedExtensions});
+const runtimeRedirectPrefixes = ${runtimeRedirectPrefixes};
+
+const CODE_ACCESS_REASON =
+  "Use SDL-MCP tools for indexed source code. Start with sdl.context for task-shaped retrieval; use sdl.file/searchEdit for targeted file I/O; escalate through code.getSkeleton -> code.getHotPath -> code.needWindow only when needed.";
+const RUNTIME_REASON =
+  "Run repo-local build, test, lint, and diagnostic commands through SDL runtime via sdl.workflow runtimeExecute.";
+const MCP_REASON =
+  "Use the SDL-MCP MCP server instead of non-SDL MCP file/search tooling in this repository.";
+
+if (!existsSync(pidfilePath)) {
+  process.exit(0);
+}
 
 function deny(reason) {
   process.stdout.write(
@@ -894,48 +911,136 @@ function deny(reason) {
   );
 }
 
-async function sdlMcpIsReachableWhenConfigured() {
-  if (process.env.SDL_MCP_HOOK_DISABLE === "1") {
-    return false;
-  }
-  if (process.env.SDL_MCP_HOOK_ASSUME_ACTIVE === "1") {
-    return true;
-  }
-  if (!process.env.SDL_MCP_URL) {
-    return true;
-  }
-
-  try {
-    await fetch(process.env.SDL_MCP_URL, { method: "GET" });
-    return true;
-  } catch (error) {
-    // A plain GET can produce an HTTP error while still proving the server exists.
-    return Boolean(error?.response);
-  }
-}
-
 function normalize(value) {
   return String(value ?? "").replace(/\\\\/g, "/").toLowerCase();
 }
 
-function targetsRepo(input, serializedToolInput) {
+function getToolInput(input) {
+  return input.tool_input ?? input.toolInput ?? input.input ?? {};
+}
+
+function getToolName(input) {
+  return String(input.tool_name ?? input.toolName ?? "");
+}
+
+function getHookEventName(input) {
+  return String(input.hook_event_name ?? input.hookEventName ?? "");
+}
+
+function getCommand(toolInput) {
+  return String(
+    toolInput.command ??
+      toolInput.cmd ??
+      toolInput.script ??
+      toolInput.args?.command ??
+      "",
+  );
+}
+
+function getCandidatePath(toolInput) {
+  return String(
+    toolInput.file_path ??
+      toolInput.filePath ??
+      toolInput.path ??
+      toolInput.filename ??
+      toolInput.target_file ??
+      toolInput.targetFile ??
+      "",
+  );
+}
+
+function targetsRepo(input, serializedToolInput, toolInput) {
   const normalizedRepoRoot = normalize(repoRoot);
+  const cwd = input.cwd ?? toolInput.cwd ?? toolInput.workdir ?? toolInput.working_directory;
   return (
-    normalize(input.cwd).startsWith(normalizedRepoRoot) ||
+    normalize(cwd).startsWith(normalizedRepoRoot) ||
     normalize(serializedToolInput).includes(normalizedRepoRoot)
   );
 }
 
-function bashShouldUseSdl(command) {
-  const readOrSearch =
-    /\\b(Get-Content|gc|type|cat|Select-String|findstr|rg|grep|git\\s+grep|sed|Get-ChildItem|gci|dir|ls)\\b/i;
-  const indexedCodeTarget =
-    /(\\bsrc\\b|[\\\\/]src[\\\\/]|\\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|cs|c|cc|cpp|h|hpp|php|rs|kt|kts|sh|bash)\\b)/i;
+function containsIndexedSourcePath(value) {
+  const normalized = normalize(value);
+  if (normalized.includes("/src/") || normalized.includes("src/")) {
+    return true;
+  }
+  for (const extension of indexedExtensions) {
+    if (normalized.includes(extension)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function nativeFileToolShouldUseSdl(toolInput, serializedToolInput) {
+  return (
+    containsIndexedSourcePath(getCandidatePath(toolInput)) ||
+    containsIndexedSourcePath(serializedToolInput)
+  );
+}
+
+function shellCommandShouldUseSdl(command) {
+  const normalized = command.trim().toLowerCase();
+  if (
+    runtimeRedirectPrefixes.some(
+      (prefix) => normalized === prefix || normalized.startsWith(prefix + " "),
+    )
+  ) {
+    return RUNTIME_REASON;
+  }
+
+  const repoWideSearch = /\\b(rg|grep|git\\s+grep|Select-String|findstr)\\b/i;
+  const readOrList =
+    /\\b(Get-Content|gc|type|cat|sed|Get-ChildItem|gci|dir|ls|tree)\\b/i;
   const repoRuntime =
     /\\b(npm\\s+(test|run\\s+(build|build:all|typecheck|lint|test|test:[\\w:-]+|golden:update))|node\\s+scripts[\\\\/]run-tests\\.mjs|cargo\\s+(test|build|check)|go\\s+test|pytest|ruff|eslint|tsc)\\b/i;
+  const scriptedFileAccess =
+    /\\b(readFileSync|readFile|createReadStream|openSync|read_text|writeFileSync|writeFile|appendFileSync)\\b/i;
+  const indexedTarget = containsIndexedSourcePath(command);
 
-  return (readOrSearch.test(command) && indexedCodeTarget.test(command)) ||
-    repoRuntime.test(command);
+  if (repoRuntime.test(command)) {
+    return RUNTIME_REASON;
+  }
+  if (repoWideSearch.test(command)) {
+    return CODE_ACCESS_REASON;
+  }
+  if ((readOrList.test(command) || scriptedFileAccess.test(command)) && indexedTarget) {
+    return CODE_ACCESS_REASON;
+  }
+  return null;
+}
+
+function isNativeFileTool(toolName) {
+  const normalized = toolName.toLowerCase();
+  return [
+    "read",
+    "write",
+    "edit",
+    "multiedit",
+    "notebookedit",
+    "apply_patch",
+  ].some((name) => normalized === name || normalized.endsWith("." + name));
+}
+
+function isShellTool(toolName) {
+  const normalized = toolName.toLowerCase();
+  return (
+    normalized === "bash" ||
+    normalized === "shell" ||
+    normalized === "shell_command" ||
+    normalized.endsWith(".shell_command")
+  );
+}
+
+function isSdlMcpTool(toolName) {
+  return /^mcp__sdl[_-]mcp__/.test(toolName);
+}
+
+function isNonSdlMcpFileTool(toolName) {
+  return (
+    /^mcp__/.test(toolName) &&
+    !isSdlMcpTool(toolName) &&
+    /(file|filesystem|fs|read|write|edit|search|grep|ripgrep|glob)/i.test(toolName)
+  );
 }
 
 const rawInput = await new Promise((resolveInput) => {
@@ -958,36 +1063,34 @@ try {
   process.exit(0);
 }
 
-if (hookInput.hook_event_name !== "PreToolUse") {
+if (getHookEventName(hookInput) !== "PreToolUse") {
   process.exit(0);
 }
 
-const toolInputJson = JSON.stringify(hookInput.tool_input ?? {});
-if (!targetsRepo(hookInput, toolInputJson)) {
+const toolInput = getToolInput(hookInput);
+const toolName = getToolName(hookInput);
+const toolInputJson = JSON.stringify(toolInput);
+if (!targetsRepo(hookInput, toolInputJson, toolInput)) {
   process.exit(0);
 }
 
-if (!(await sdlMcpIsReachableWhenConfigured())) {
-  process.exit(0);
-}
-
-if (hookInput.tool_name === "Bash") {
-  const command = String(hookInput.tool_input?.command ?? "");
-  if (bashShouldUseSdl(command)) {
-    deny(
-      "Use SDL-MCP code/context tools for indexed source reads/searches and SDL runtime for repo-local build/test/lint commands.",
-    );
+if (isShellTool(toolName)) {
+  const reason = shellCommandShouldUseSdl(getCommand(toolInput));
+  if (reason) {
+    deny(reason);
   }
   process.exit(0);
 }
 
-if (
-  /^mcp__/.test(hookInput.tool_name ?? "") &&
-  !/^mcp__sdl_mcp__/.test(hookInput.tool_name ?? "")
-) {
-  deny(
-    "Use the SDL-MCP MCP server instead of non-SDL MCP file/search tooling in this repository.",
-  );
+if (isNativeFileTool(toolName)) {
+  if (nativeFileToolShouldUseSdl(toolInput, toolInputJson)) {
+    deny(CODE_ACCESS_REASON);
+  }
+  process.exit(0);
+}
+
+if (isNonSdlMcpFileTool(toolName)) {
+  deny(MCP_REASON);
 }
 `;
 }
@@ -1071,6 +1174,8 @@ function buildEnforcementAssets(
   }
 
   if (client === "codex") {
+    const graphDbPath = defaultGraphDbPath(configPath);
+    const pidfilePath = resolvePidfilePath(graphDbPath).replace(/\\/g, "/");
     assets.push(
       {
         path: join(repoRoot, ".codex", "config.toml"),
@@ -1082,7 +1187,7 @@ function buildEnforcementAssets(
       },
       {
         path: join(repoRoot, ".codex", "hooks", "force-sdl-mcp.mjs"),
-        content: buildCodexPreToolUseHook(),
+        content: buildCodexPreToolUseHook(pidfilePath),
         executable: true,
       },
     );

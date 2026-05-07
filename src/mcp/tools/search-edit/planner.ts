@@ -220,6 +220,44 @@ function matchesAnyGlob(relPath: string, globs: string[] | undefined): boolean {
   return globs.some((g) => globToRegex(g).test(relPath));
 }
 
+const GLOB_META_RE = /[*?[\]{}]/;
+
+function isLiteralIncludePattern(pattern: string): boolean {
+  return pattern.length > 0 && !GLOB_META_RE.test(pattern);
+}
+
+function relPathExtension(relPath: string): string {
+  const basename = relPath.includes("/")
+    ? relPath.slice(relPath.lastIndexOf("/") + 1)
+    : relPath;
+  const dotIdx = basename.lastIndexOf(".");
+  return dotIdx >= 0 ? basename.slice(dotIdx).toLowerCase() : "";
+}
+
+function filterSelectionReason(
+  relPath: string,
+  filters: SearchEditFilters | undefined,
+): string | undefined {
+  if (!filters) return undefined;
+  const ext = relPathExtension(relPath);
+  if (filters.extensions && filters.extensions.length > 0) {
+    if (!filters.extensions.map((e) => e.toLowerCase()).includes(ext)) {
+      return "extension-not-in-filter";
+    }
+  }
+  if (filters.include && filters.include.length > 0) {
+    if (!matchesAnyGlob(relPath, filters.include)) {
+      return "include-miss";
+    }
+  }
+  if (filters.exclude && filters.exclude.length > 0) {
+    if (matchesAnyGlob(relPath, filters.exclude)) {
+      return "excluded";
+    }
+  }
+  return undefined;
+}
+
 const DOTFILE_DENYLIST = new Set([
   ".npmrc", ".netrc", ".pgpass", ".my.cnf", ".boto",
 ]);
@@ -230,8 +268,6 @@ export function isPathAllowed(
   filters: SearchEditFilters | undefined,
 ): { allowed: boolean; reason?: string } {
   const basename = relPath.includes("/") ? relPath.slice(relPath.lastIndexOf("/") + 1) : relPath;
-  const dotIdx = basename.lastIndexOf(".");
-  const ext = dotIdx >= 0 ? basename.slice(dotIdx).toLowerCase() : "";
   // Check each extension segment in basename to prevent double-extension bypass (e.g. foo.dll.txt)
   const extParts = basename.split(".");
   for (let i = 1; i < extParts.length; i++) {
@@ -257,23 +293,79 @@ export function isPathAllowed(
   if (SECRET_FILENAME_RE.test(basename)) {
     return { allowed: false, reason: `denied-secret:${basename}` };
   }
-  if (!filters) return { allowed: true };
-  if (filters.extensions && filters.extensions.length > 0) {
-    if (!filters.extensions.map((e) => e.toLowerCase()).includes(ext)) {
-      return { allowed: false, reason: "extension-not-in-filter" };
-    }
-  }
-  if (filters.include && filters.include.length > 0) {
-    if (!matchesAnyGlob(relPath, filters.include)) {
-      return { allowed: false, reason: "include-miss" };
-    }
-  }
-  if (filters.exclude && filters.exclude.length > 0) {
-    if (matchesAnyGlob(relPath, filters.exclude)) {
-      return { allowed: false, reason: "excluded" };
-    }
+  const filterReason = filterSelectionReason(relPath, filters);
+  if (filterReason) {
+    return { allowed: false, reason: filterReason };
   }
   return { allowed: true };
+}
+
+const SILENT_FILTER_SKIP_REASONS = new Set([
+  "extension-not-in-filter",
+  "include-miss",
+  "excluded",
+]);
+
+export function shouldReportSkippedFile(reason?: string): boolean {
+  return reason === undefined || !SILENT_FILTER_SKIP_REASONS.has(reason);
+}
+
+export async function enumerateExplicitIncludeFiles(
+  rootPath: string,
+  filters: SearchEditFilters | undefined,
+  maxFiles: number,
+): Promise<
+  | { candidates: string[]; skipped: PreviewFileSkip[]; capped: boolean }
+  | undefined
+> {
+  const includes = filters?.include;
+  if (
+    !includes ||
+    includes.length === 0 ||
+    !includes.every(isLiteralIncludePattern)
+  ) {
+    return undefined;
+  }
+
+  const candidates: string[] = [];
+  const skipped: PreviewFileSkip[] = [];
+  const seen = new Set<string>();
+  let capped = false;
+
+  for (const include of includes) {
+    if (candidates.length >= maxFiles) {
+      capped = true;
+      break;
+    }
+    const rel = normalizePath(include).replace(/^\.\//, "");
+    if (!rel || seen.has(rel)) continue;
+    seen.add(rel);
+
+    let abs: string;
+    try {
+      abs = resolve(rootPath, rel);
+      validatePathWithinRoot(rootPath, abs);
+      const info = await stat(abs);
+      if (!info.isFile()) {
+        skipped.push({ path: rel, reason: "not-file" });
+        continue;
+      }
+    } catch {
+      skipped.push({ path: rel, reason: "not-found" });
+      continue;
+    }
+
+    const { allowed, reason } = isPathAllowed(rel, filters);
+    if (!allowed) {
+      if (shouldReportSkippedFile(reason)) {
+        skipped.push({ path: rel, reason: reason ?? "skipped" });
+      }
+      continue;
+    }
+    candidates.push(rel);
+  }
+
+  return { candidates, skipped, capped };
 }
 
 export async function enumerateRepoFiles(
@@ -318,9 +410,15 @@ export async function enumerateRepoFiles(
         await walk(abs, depth + 1);
       } else if (entry.isFile()) {
         const rel = normalizePath(relative(rootPath, abs));
+        const filterReason = filterSelectionReason(rel, filters);
+        if (filterReason) {
+          continue;
+        }
         const { allowed, reason } = isPathAllowed(rel, filters);
         if (!allowed) {
-          skipped.push({ path: rel, reason: reason ?? "skipped" });
+          if (shouldReportSkippedFile(reason)) {
+            skipped.push({ path: rel, reason: reason ?? "skipped" });
+          }
           continue;
         }
         candidates.push(rel);
@@ -491,6 +589,17 @@ export async function planSearchEditPreview(
     skipped = [];
     candidates = [];
 
+    const explicitIncludes = await enumerateExplicitIncludeFiles(
+      rootPath,
+      request.filters,
+      maxFiles,
+    );
+    if (explicitIncludes) {
+      candidates = explicitIncludes.candidates;
+      skipped.push(...explicitIncludes.skipped);
+      candidatesCapped = explicitIncludes.capped;
+    }
+
     let narrowQuery: string | null = null;
     if (request.query.literal !== undefined && request.query.literal.length > 0) {
       narrowQuery = request.query.literal;
@@ -510,7 +619,7 @@ export async function planSearchEditPreview(
       narrowQuery = tokens.length > 0 ? tokens.join(" ") : null;
     }
 
-    if (narrowQuery) {
+    if (!explicitIncludes && narrowQuery) {
       const narrowed = await narrowFilesForQuery({
         repoId: request.repoId,
         query: narrowQuery,
@@ -526,7 +635,9 @@ export async function planSearchEditPreview(
           seen.add(rel);
           const { allowed, reason } = isPathAllowed(rel, request.filters);
           if (!allowed) {
-            skipped.push({ path: rel, reason: reason ?? "skipped" });
+            if (shouldReportSkippedFile(reason)) {
+              skipped.push({ path: rel, reason: reason ?? "skipped" });
+            }
             continue;
           }
           candidates.push(rel);
@@ -552,7 +663,7 @@ export async function planSearchEditPreview(
         }
       }
     }
-    if (candidates.length === 0) {
+    if (!explicitIncludes && candidates.length === 0) {
       const enumerated = await enumerateRepoFiles(
         rootPath,
         request.filters,
@@ -651,7 +762,9 @@ export async function planSearchEditPreview(
     }
     const { allowed: pathAllowed, reason: pathReason } = isPathAllowed(rel, request.filters);
     if (!pathAllowed) {
-      skipped.push({ path: rel, reason: pathReason ?? "skipped" });
+      if (shouldReportSkippedFile(pathReason)) {
+        skipped.push({ path: rel, reason: pathReason ?? "skipped" });
+      }
       continue;
     }
     const abs = resolve(rootPath, rel);

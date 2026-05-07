@@ -80,11 +80,11 @@ sdl.context({
     "semantic": true,
     "includeRetrievalEvidence": false
   },
-  "budget": { "maxTokens": 4000, "maxCards": 20 }
+  "budget": { "maxTokens": 4000 }
 })
 ```
 
-Rung cost: card ≈50 · skeleton ≈200 · hotPath ≈500 · raw ≈2000 tokens. Planner trims rungs from the end if `budget.maxTokens` is tight.
+Rung cost: card ≈50 · skeleton ≈200 · hotPath ≈500 · raw ≈2000 tokens. Planner trims rungs from the end if `budget.maxTokens` is tight. `budget.maxEstimatedTokens` is accepted as a `maxTokens` alias for slice-build compatibility; `budget.maxCards` is slice-only and is rejected by `sdl.context`.
 
 **When `sdl.context` returns too little**, escalate manually:
 

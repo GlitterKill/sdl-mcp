@@ -511,6 +511,11 @@ export async function executeWorkflow(
   const hasEtags =
     etagCacheState !== undefined && Object.keys(etagCacheState).length > 0;
   const totalDurationMs = Date.now() - startTime;
+  const responseWasTruncated = stepResults.some(
+    (result) =>
+      result.status === "budget_exceeded" ||
+      result.truncatedResponse !== undefined,
+  );
 
   const aggregatedFileIds = new Set<string>();
   let aggregatedRawTokens = 0;
@@ -535,7 +540,7 @@ export async function executeWorkflow(
     results: stepResults,
     totalTokens: budgetState.tokensUsed,
     durationMs: totalDurationMs,
-    truncated: budgetState.truncated,
+    truncated: responseWasTruncated,
     // Filter out ladder warnings for steps that failed (e.g., "symbol not found")
     ladderWarnings: (() => {
       const filtered = ladderWarnings.filter((w) => {

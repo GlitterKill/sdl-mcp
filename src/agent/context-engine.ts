@@ -20,6 +20,7 @@ import {
   seedResultToContext,
   inferFocusPathsFromTaskText,
 } from "./context-seeding.js";
+import { extractIdentifiersFromText } from "./identifier-extraction.js";
 import { randomUUID } from "node:crypto";
 
 const HANDLED_EVIDENCE_TYPES = new Set([
@@ -41,6 +42,21 @@ const BEHAVIORAL_KINDS = new Set([
   "class",
   "constructor",
 ]);
+
+const MAX_EXACT_SYMBOL_MENTION_SEEDS = 5;
+
+function prependContextRefs(context: string[], refs: string[]): string[] {
+  if (refs.length === 0) return context;
+  const prioritized = new Set(refs);
+  return [...refs, ...context.filter((ref) => !prioritized.has(ref))];
+}
+
+function isLikelyExactSymbolMention(identifier: string): boolean {
+  return (
+    /[`"'(){}\[\],.;:]/.test(identifier) === false &&
+    (/[a-z0-9][A-Z]/.test(identifier) || identifier.includes("_"))
+  );
+}
 
 export class ContextEngine {
   private planner: Planner;
@@ -108,6 +124,26 @@ export class ContextEngine {
           };
       const path = this.planner.plan(planTask);
       let context = await this.planner.selectContext(task);
+      let exactMentionSeededPreciseContext = false;
+
+      // Exact code identifiers mentioned in task text should anchor the
+      // response before broader lexical/semantic seeding. This preserves the
+      // intended symbol for prompts like "explain handleSymbolSearch" even
+      // when hybrid retrieval finds many related SymbolSearch types first.
+      if (!hasExplicitScope && task.taskText) {
+        try {
+          const exactRefs = await this.seedExactMentionedSymbols(task);
+          exactMentionSeededPreciseContext =
+            exactRefs.length > 0 && task.options?.contextMode === "precise";
+          context = exactMentionSeededPreciseContext
+            ? exactRefs
+            : prependContextRefs(context, exactRefs);
+        } catch (err) {
+          logger.debug("Exact symbol seeding failed (non-fatal)", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
 
       /* sdl.context: always-on hybrid seed merge */
       // Run hybrid seeding whenever no explicit scope was provided, even
@@ -115,14 +151,17 @@ export class ContextEngine {
       // heuristic; hybrid retrieval surfaces semantically-related symbols
       // the heuristic misses. Path-inferred refs are preserved first; hybrid
       // adds only refs not already present.
-      const hasExplicitContext = context.length > 0;
       let seedEvidence: import("../retrieval/types.js").RetrievalEvidence | undefined;
-      if (!hasExplicitScope && task.taskText) {
+      if (
+        !hasExplicitScope &&
+        task.taskText &&
+        !exactMentionSeededPreciseContext
+      ) {
         try {
           const seedResult = await this.seedContext(task);
           seedEvidence = seedResult.evidence;
           const seedRefs = seedResultToContext(seedResult);
-          if (hasExplicitContext) {
+          if (context.length > 0) {
             const existing = new Set(context);
             for (const ref of seedRefs) {
               if (!existing.has(ref)) {
@@ -139,7 +178,7 @@ export class ContextEngine {
             lexical: seedResult.sources.lexical,
             feedback: seedResult.sources.feedback,
             total: context.length,
-            mode: hasExplicitContext ? "merge" : "seed-only",
+            mode: context.length > seedRefs.length ? "merge" : "seed-only",
           });
         } catch (err) {
           logger.debug("Context seeding failed (non-fatal)", {
@@ -601,6 +640,50 @@ export class ContextEngine {
   }
 
   /**
+   * Resolve exact code-like identifiers from the prompt before fuzzy context
+   * expansion. Natural-language terms are intentionally excluded here; hybrid
+   * seeding still owns broad conceptual discovery.
+   */
+  private async seedExactMentionedSymbols(task: AgentTask): Promise<string[]> {
+    const codeQuoted =
+      task.taskText.match(/`([A-Za-z_$][A-Za-z0-9_$]*)`/g)?.map((match) =>
+        match.slice(1, -1),
+      ) ?? [];
+    const extracted = extractIdentifiersFromText(
+      task.taskText,
+      task.taskText,
+    ).filter(isLikelyExactSymbolMention);
+    const candidates = [
+      ...new Set([
+        ...(task.options?.chatMentions ?? []).filter((mention) =>
+          /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(mention),
+        ),
+        ...codeQuoted,
+        ...extracted,
+      ]),
+    ].slice(0, MAX_EXACT_SYMBOL_MENTION_SEEDS);
+
+    if (candidates.length === 0) return [];
+
+    const conn = await getLadybugConn();
+    const refs: string[] = [];
+    const seen = new Set<string>();
+    for (const name of candidates) {
+      const row = await ladybugDb.findSymbolByExactName(
+        conn,
+        task.repoId,
+        name,
+        undefined,
+        true,
+      );
+      if (!row || seen.has(row.symbolId)) continue;
+      seen.add(row.symbolId);
+      refs.push(`symbol:${row.symbolId}`);
+    }
+    return refs;
+  }
+
+  /**
    * Expand context with graph-guided cluster member selection.
    *
    * Instead of keyword-filtering cluster members by name overlap, this
@@ -656,8 +739,10 @@ export class ContextEngine {
       const candidateIds: string[] = [];
       const candidateCluster = new Map<string, string>(); // symbolId -> clusterId
       for (let ci = 0; ci < memberLists.length; ci++) {
-        const clusterId = cappedClusterIds[ci]!;
-        for (const m of memberLists[ci]!) {
+        const clusterId = cappedClusterIds[ci];
+        const members = memberLists[ci];
+        if (!clusterId || !members) continue;
+        for (const m of members) {
           const ref = `symbol:${m.symbolId}`;
           if (already.has(ref)) continue;
           if (!candidateCluster.has(m.symbolId)) {

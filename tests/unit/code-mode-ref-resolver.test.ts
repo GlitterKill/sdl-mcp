@@ -24,6 +24,22 @@ describe("code-mode ref resolver", () => {
     );
   });
 
+  it("$0.results.0.symbolId resolves numeric dot segments", () => {
+    assert.strictEqual(
+      resolveRef("$0.results.0.symbolId", [
+        { results: [{ symbolId: "abc" }] },
+      ]),
+      "abc",
+    );
+  });
+
+  it("$0.results?.0.symbolId supports optional numeric dot segments", () => {
+    assert.strictEqual(
+      resolveRef("$0.results?.0.symbolId", [{ results: [] }]),
+      undefined,
+    );
+  });
+
   it("$1.deep.nested resolves multi-level path", () => {
     assert.strictEqual(resolveRef("$1.a.b", [null, { a: { b: 42 } }]), 42);
   });

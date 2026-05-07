@@ -41,6 +41,22 @@ export const SDL_SOURCE_EXTENSIONS = new Set([
 const MAX_FILE_SIZE_BYTES = 512 * 1024; // 512KB
 const BYTES_PER_TOKEN = 4;
 
+export function computeFileReadLimit(
+  fileSize: number,
+  maxBytes: number,
+  needsFullFile: boolean,
+): number {
+  return needsFullFile ? fileSize : Math.min(fileSize, maxBytes);
+}
+
+export function assertJsonPathSourceFitsExtractionLimit(fileSize: number): void {
+  if (fileSize > MAX_FILE_SIZE_BYTES) {
+    throw new ValidationError(
+      `File size ${fileSize} bytes exceeds the JSON/YAML extraction limit ${MAX_FILE_SIZE_BYTES}. Use a smaller file or search by text instead.`,
+    );
+  }
+}
+
 /**
  * Extract a value from a parsed object using a dot-separated key path.
  * Supports array indexing via numeric segments (e.g. "items.0.name").
@@ -226,19 +242,14 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
   const maxBytes = request.maxBytes ?? MAX_FILE_SIZE_BYTES;
   const fileStat = await stat(openPath);
 
-  // Read only what we need: cap at maxBytes to prevent memory exhaustion.
-  // For files larger than maxBytes, read exactly maxBytes and truncate.
-  // This avoids the previous 64KB headroom that could overread into memory.
   const needsFullFile = request.jsonPath !== undefined; // JSON/YAML parsing needs full content
-  const readLimit = needsFullFile
-    ? fileStat.size
-    : Math.min(fileStat.size, maxBytes);
+  const readLimit = computeFileReadLimit(
+    fileStat.size,
+    maxBytes,
+    needsFullFile,
+  );
 
-  if (needsFullFile && fileStat.size > maxBytes) {
-    throw new ValidationError(
-      `File size ${fileStat.size} bytes exceeds maxBytes ${maxBytes} for JSON/YAML extraction. Use a smaller file or increase maxBytes.`,
-    );
-  }
+  if (needsFullFile) assertJsonPathSourceFitsExtractionLimit(fileStat.size);
 
   let rawContent: string;
   if (readLimit < fileStat.size) {
@@ -320,16 +331,23 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
       typeof extracted === "string"
         ? extracted
         : JSON.stringify(extracted, null, 2);
-    const extractedBytes = Buffer.byteLength(serialized, "utf-8");
+    const serializedBytes = Buffer.from(serialized, "utf-8");
+    const returnedBytes =
+      serializedBytes.length > maxBytes
+        ? serializedBytes.subarray(0, maxBytes)
+        : serializedBytes;
+    const content = returnedBytes.toString("utf-8");
+    const truncated = serializedBytes.length > maxBytes;
 
     return withRawTokenBaseline(
       {
         filePath,
-        content: serialized,
-        bytes: extractedBytes,
+        content,
+        bytes: serializedBytes.length,
         totalLines,
-        returnedLines: serialized.split("\n").length,
-        truncated: false,
+        returnedLines: content.split("\n").length,
+        truncated,
+        ...(truncated ? { truncatedAt: maxBytes } : {}),
         extractedPath: request.jsonPath,
       },
       totalBytes,

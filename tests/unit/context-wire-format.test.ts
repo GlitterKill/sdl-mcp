@@ -7,6 +7,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { serializeContextForWireFormat } from "../../dist/mcp/tools/context-wire-format.js";
+import {
+  buildContextPackedStats,
+  shouldAttachPackedPayloadForContext,
+} from "../../dist/mcp/tools/context.js";
 import { decodePacked } from "../../dist/mcp/wire/packed/decoder.js";
 import { tokenAccumulator } from "../../dist/mcp/token-accumulator.js";
 import {
@@ -125,6 +129,50 @@ test("wireFormat=auto: small input falls back to json", () => {
   });
   assert.equal(result.format, "json");
   assert.equal(result.gateDecision, "fallback");
+});
+
+test("sdl.context auto mode does not attach a duplicate packed payload", () => {
+  const netWinningPacked = {
+    jsonBytes: 10_000,
+    packedBytes: 1_000,
+    jsonTokens: 2_500,
+    packedTokens: 250,
+  };
+
+  assert.equal(
+    shouldAttachPackedPayloadForContext("auto", netWinningPacked),
+    false,
+  );
+  assert.equal(
+    shouldAttachPackedPayloadForContext("packed", netWinningPacked),
+    true,
+  );
+});
+
+test("sdl.context packed stats separate candidate decision from returned payload", () => {
+  const wireResult = {
+    format: "packed" as const,
+    payload: "ctx1|...",
+    encoderId: "ctx1",
+    jsonBytes: 10_000,
+    packedBytes: 1_000,
+    jsonTokens: 2_500,
+    packedTokens: 250,
+    axisHit: "tokens" as const,
+    gateDecision: "packed" as const,
+  };
+
+  const autoStats = buildContextPackedStats(wireResult, false);
+  assert.equal(autoStats?.candidateDecision, "packed");
+  assert.equal(autoStats?.gateDecision, "fallback");
+  assert.equal(autoStats?.payloadAttached, false);
+  assert.equal(autoStats?.returnFormat, "json");
+
+  const packedStats = buildContextPackedStats(wireResult, true);
+  assert.equal(packedStats?.candidateDecision, "packed");
+  assert.equal(packedStats?.gateDecision, "packed");
+  assert.equal(packedStats?.payloadAttached, true);
+  assert.equal(packedStats?.returnFormat, "packed");
 });
 
 test("packed payload round-trips via decodePacked", () => {

@@ -1,6 +1,12 @@
 import assert from "node:assert";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -119,31 +125,97 @@ describe("init agent enforcement", () => {
     const hooks = JSON.parse(
       readFileSync(join(tempDir, ".codex", "hooks.json"), "utf8"),
     );
-    assert.strictEqual(
-      hooks.hooks.PreToolUse[0].matcher,
-      "Bash|mcp__(?!sdl_mcp__).*",
-    );
+    assert.strictEqual(hooks.hooks.PreToolUse[0].matcher, ".*");
 
-    const hookRun = spawnSync(process.execPath, [hookPath], {
-      input: JSON.stringify({
+    const runHook = (payload: Record<string, unknown>): string => {
+      const hookRun = spawnSync(process.execPath, [hookPath], {
+        input: JSON.stringify(payload),
+        encoding: "utf8",
+      });
+      assert.strictEqual(hookRun.status, 0, hookRun.stderr);
+      return hookRun.stdout;
+    };
+
+    const shellReadPayload = {
+      hook_event_name: "PreToolUse",
+      cwd: tempDir,
+      tool_name: "functions.shell_command",
+      tool_input: { command: "Get-Content src/cli/commands/init.ts" },
+    };
+
+    assert.strictEqual(runHook(shellReadPayload), "");
+
+    writeFileSync(join(tempDir, "sdl-mcp.pid"), `${process.pid}\n`);
+
+    const deniedPayloads = [
+      shellReadPayload,
+      {
+        hook_event_name: "PreToolUse",
+        cwd: tempDir,
+        tool_name: "Read",
+        tool_input: {
+          file_path: join(tempDir, "src", "cli", "commands", "init.ts"),
+        },
+      },
+      {
+        hook_event_name: "PreToolUse",
+        cwd: tempDir,
+        tool_name: "apply_patch",
+        tool_input: {
+          patch:
+            "*** Begin Patch\n*** Update File: src/cli/commands/init.ts\n@@\n-old\n+new\n*** End Patch",
+        },
+      },
+      {
         hook_event_name: "PreToolUse",
         cwd: tempDir,
         tool_name: "Bash",
-        tool_input: { command: "Get-Content src/cli/commands/init.ts" },
-      }),
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        SDL_MCP_HOOK_ASSUME_ACTIVE: "1",
+        tool_input: { command: "npm test" },
       },
-    });
+      {
+        hook_event_name: "PreToolUse",
+        cwd: tempDir,
+        tool_name: "mcp__filesystem__read_file",
+        tool_input: { path: join(tempDir, "src", "server.ts") },
+      },
+      {
+        hook_event_name: "PreToolUse",
+        cwd: tempDir,
+        tool_name: "mcp__filesystem__search_files",
+        tool_input: { query: "handleSymbolSearch" },
+      },
+    ];
 
-    assert.strictEqual(hookRun.status, 0);
-    const hookOutput = JSON.parse(hookRun.stdout);
-    assert.strictEqual(
-      hookOutput.hookSpecificOutput.permissionDecision,
-      "deny",
-    );
+    for (const payload of deniedPayloads) {
+      const hookOutput = JSON.parse(runHook(payload));
+      assert.strictEqual(
+        hookOutput.hookSpecificOutput.permissionDecision,
+        "deny",
+      );
+    }
+
+    for (const payload of [
+      {
+        hook_event_name: "PreToolUse",
+        cwd: tempDir,
+        tool_name: "Bash",
+        tool_input: { command: "git status --short" },
+      },
+      {
+        hook_event_name: "PreToolUse",
+        cwd: tempDir,
+        tool_name: "Read",
+        tool_input: { file_path: join(tempDir, "README.md") },
+      },
+      {
+        hook_event_name: "PreToolUse",
+        cwd: tempDir,
+        tool_name: "mcp__sdl_mcp__sdl_context",
+        tool_input: { repoId: "sdl-mcp", taskText: "explain init hooks" },
+      },
+    ]) {
+      assert.strictEqual(runHook(payload), "");
+    }
   });
 
   it("creates OpenCode enforcement assets", async () => {

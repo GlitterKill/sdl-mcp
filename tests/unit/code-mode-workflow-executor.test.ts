@@ -165,6 +165,26 @@ describe("code-mode workflow executor", () => {
     assert.strictEqual(result.truncated, true);
   });
 
+  it("does not report truncated when maxSteps exactly matches executed steps", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        { fn: "testEcho", action: "test.echo", args: { message: "a" } },
+        { fn: "testEcho", action: "test.echo", args: { message: "b" } },
+      ],
+      budget: { maxSteps: 2 },
+      onError: "continue",
+    };
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+    );
+    assert.strictEqual(result.results.length, 2);
+    assert.ok(result.results.every((step) => step.status === "ok"));
+    assert.strictEqual(result.truncated, false);
+  });
+
   it("error with onError=continue marks step as error and continues", async () => {
     const request: ParsedWorkflowRequest = {
       repoId: "test",

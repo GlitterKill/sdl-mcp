@@ -2,7 +2,10 @@ import { contextEngine } from "../../agent/context-engine.js";
 import type { AgentTask } from "../../agent/types.js";
 import { IndexError, ValidationError } from "../errors.js";
 import { attachRawContext } from "../token-usage.js";
-import { serializeContextForWireFormat } from "./context-wire-format.js";
+import {
+  serializeContextForWireFormat,
+  type ContextWireResult,
+} from "./context-wire-format.js";
 import {
   AgentContextRequestSchema,
   type AgentContextResponse,
@@ -89,6 +92,53 @@ function buildStableAgentContextValue(
   };
 }
 
+export function shouldAttachPackedPayloadForContext(
+  wireFormat: "packed" | "auto",
+  wireResult: Pick<
+    ContextWireResult,
+    "jsonBytes" | "packedBytes" | "jsonTokens" | "packedTokens"
+  >,
+): boolean {
+  const bytesSaved = (wireResult.jsonBytes ?? 0) > (wireResult.packedBytes ?? 0);
+  const tokensSaved =
+    typeof wireResult.jsonTokens === "number" &&
+    typeof wireResult.packedTokens === "number" &&
+    wireResult.jsonTokens > wireResult.packedTokens;
+  return wireFormat === "packed" && bytesSaved && tokensSaved;
+}
+
+export function buildContextPackedStats(
+  wireResult: ContextWireResult,
+  payloadAttached: boolean,
+): Record<string, unknown> | undefined {
+  if (!wireResult.gateDecision) return undefined;
+  const savedRatio =
+    wireResult.jsonBytes && wireResult.jsonBytes > 0
+      ? (wireResult.jsonBytes - (wireResult.packedBytes ?? 0)) /
+        wireResult.jsonBytes
+      : 0;
+  const jt = wireResult.jsonTokens;
+  const pt = wireResult.packedTokens;
+  const tokenSavedRatio =
+    typeof jt === "number" && typeof pt === "number" && jt > 0
+      ? (jt - pt) / jt
+      : undefined;
+  return {
+    encoderId: wireResult.encoderId,
+    jsonBytes: wireResult.jsonBytes,
+    packedBytes: wireResult.packedBytes,
+    jsonTokens: wireResult.jsonTokens,
+    packedTokens: wireResult.packedTokens,
+    savedRatio,
+    tokenSavedRatio,
+    axisHit: wireResult.axisHit,
+    candidateDecision: wireResult.gateDecision,
+    gateDecision: payloadAttached ? "packed" : "fallback",
+    payloadAttached,
+    returnFormat: payloadAttached ? "packed" : "json",
+  };
+}
+
 export async function handleAgentContext(
   args: unknown,
 ): Promise<AgentContextResponse> {
@@ -122,64 +172,38 @@ export async function handleAgentContext(
         enrichedResponse as Record<string, unknown>,
         request.wireFormat,
       );
-      if (wireResult.gateDecision) {
-        const savedRatio =
-          wireResult.jsonBytes && wireResult.jsonBytes > 0
-            ? (wireResult.jsonBytes - (wireResult.packedBytes ?? 0)) /
-              wireResult.jsonBytes
-            : 0;
-        const jt = wireResult.jsonTokens;
-        const pt = wireResult.packedTokens;
-        const tokenSavedRatio =
-          typeof jt === "number" && typeof pt === "number" && jt > 0
-            ? (jt - pt) / jt
-            : undefined;
-        (enrichedResponse as Record<string, unknown>)._packedStats = {
-          encoderId: wireResult.encoderId,
-          jsonBytes: wireResult.jsonBytes,
-          packedBytes: wireResult.packedBytes,
-          jsonTokens: wireResult.jsonTokens,
-          packedTokens: wireResult.packedTokens,
-          savedRatio,
-          tokenSavedRatio,
-          axisHit: wireResult.axisHit,
-          gateDecision: wireResult.gateDecision,
-        };
-      }
       if (wireResult.format === "packed") {
-        // Only attach _packedPayload when it actually saves both bytes AND
-        // tokens vs the JSON form. The gate occasionally picks "packed" on
-        // a single-axis win (e.g. tokens up, bytes down) where shipping the
-        // string alongside finalEvidence + summary inflates the response.
-        const bytesSaved =
-          (wireResult.jsonBytes ?? 0) > (wireResult.packedBytes ?? 0);
-        const tokensSaved =
-          typeof wireResult.jsonTokens === "number" &&
-          typeof wireResult.packedTokens === "number" &&
-          wireResult.jsonTokens > wireResult.packedTokens;
-        const netWin = bytesSaved && tokensSaved;
-        if (netWin) {
+        // Only attach _packedPayload for explicit packed requests when it
+        // saves both bytes and tokens. Auto remains JSON-first because adding
+        // the packed string beside readable evidence costs tokens.
+        const payloadAttached = shouldAttachPackedPayloadForContext(
+          request.wireFormat,
+          wireResult,
+        );
+        const stats = buildContextPackedStats(wireResult, payloadAttached);
+        if (stats) {
+          (enrichedResponse as Record<string, unknown>)._packedStats = stats;
+        }
+        if (payloadAttached) {
           (enrichedResponse as Record<string, unknown>)._packedPayload =
             wireResult.payload as string;
-          // Only suppress JSON fields when the caller explicitly asked for
-          // packed. Under wireFormat="auto" we keep both forms so callers
-          // that cannot decode packed still get human-readable evidence.
-          if (request.wireFormat === "packed") {
-            (enrichedResponse as Record<string, unknown>).actionsTaken = [];
-            (enrichedResponse as Record<string, unknown>).finalEvidence = [];
-          }
+          (enrichedResponse as Record<string, unknown>).actionsTaken = [];
+          (enrichedResponse as Record<string, unknown>).finalEvidence = [];
+          stableView._packedPayload = wireResult.payload;
           // stableView keeps pre-clear actionsTaken/finalEvidence so two
           // packed responses with different underlying data produce
-          // different ETags. _packedPayload is also tracked here to defend
-          // against future decoder drift surfacing identity-changing
-          // fields.
-          stableView._packedPayload = wireResult.payload;
+          // different ETags.
         } else {
           // Net loss — downgrade gateDecision so the stats block tells
           // observers honestly that we fell back rather than packed.
           const stats = (enrichedResponse as Record<string, unknown>)
             ._packedStats as Record<string, unknown> | undefined;
           if (stats) stats.gateDecision = "fallback";
+        }
+      } else {
+        const stats = buildContextPackedStats(wireResult, false);
+        if (stats) {
+          (enrichedResponse as Record<string, unknown>)._packedStats = stats;
         }
       }
     }

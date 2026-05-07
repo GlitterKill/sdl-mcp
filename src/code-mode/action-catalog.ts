@@ -139,12 +139,15 @@ export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
     | undefined;
 
   // Discriminated unions (e.g. search.edit's preview/apply variants):
-  // merge fields from every option, marking non-discriminator fields
-  // as optional in the union view.
+  // merge fields from every option. Fields required by every variant stay
+  // required; variant-specific fields are optional in the union view.
   if (
     innerDef &&
     (innerDef.type === "discriminatedUnion" ||
-      innerDef.typeName === "ZodDiscriminatedUnion")
+      innerDef.typeName === "ZodDiscriminatedUnion" ||
+      // Zod v4 stores discriminated unions under the generic "union" type
+      // while retaining the discriminator metadata.
+      (innerDef.type === "union" && typeof innerDef.discriminator === "string"))
   ) {
     const rawOptions = innerDef.options ?? innerDef.optionsMap ?? [];
     const optionList: z.ZodType[] = Array.isArray(rawOptions)
@@ -154,7 +157,15 @@ export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
       typeof innerDef.discriminator === "string"
         ? (innerDef.discriminator as string)
         : null;
-    const seen = new Map<string, SchemaSummaryField>();
+    const seen = new Map<
+      string,
+      {
+        field: SchemaSummaryField;
+        occurrences: number;
+        requiredOccurrences: number;
+      }
+    >();
+    let validOptionCount = 0;
     for (const opt of optionList) {
       const optInner = unwrapZod(opt);
       const optShape =
@@ -167,19 +178,29 @@ export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
             >)
           : null;
       if (!optShape) continue;
+      validOptionCount++;
       for (const [name, fieldSchema] of Object.entries(optShape)) {
-        if (seen.has(name)) {
-          if (name !== discriminator) {
-            const existing = seen.get(name);
-            if (existing) existing.required = false;
-          }
+        const described = describeField(name, fieldSchema);
+        const existing = seen.get(name);
+        if (existing) {
+          mergeSchemaSummaryField(existing.field, described);
+          existing.occurrences++;
+          if (described.required) existing.requiredOccurrences++;
           continue;
         }
-        const f = describeField(name, fieldSchema);
-        if (name !== discriminator) f.required = false;
-        seen.set(name, f);
-        fields.push(f);
+        seen.set(name, {
+          field: described,
+          occurrences: 1,
+          requiredOccurrences: described.required ? 1 : 0,
+        });
+        fields.push(described);
       }
+    }
+    for (const [name, entry] of seen) {
+      entry.field.required =
+        name === discriminator ||
+        (entry.occurrences === validOptionCount &&
+          entry.requiredOccurrences === validOptionCount);
     }
     return { fields };
   }
@@ -242,6 +263,43 @@ function unwrapZod(s: z.ZodType): z.ZodType {
   return current;
 }
 
+function literalValueFromType(type: string): string | undefined {
+  const match = /^literal\((.*)\)$/.exec(type);
+  if (!match) return undefined;
+  try {
+    const parsed = JSON.parse(match[1] ?? "");
+    return typeof parsed === "string" ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function fieldEnumValues(field: SchemaSummaryField): string[] {
+  const values = field.enumValues ?? [];
+  const literal = literalValueFromType(field.type);
+  return literal ? [...values, literal] : values;
+}
+
+function mergeSchemaSummaryField(
+  target: SchemaSummaryField,
+  incoming: SchemaSummaryField,
+): void {
+  const enumValues = new Set([
+    ...fieldEnumValues(target),
+    ...fieldEnumValues(incoming),
+  ]);
+  if (enumValues.size > 0) {
+    target.enumValues = [...enumValues];
+    target.type = `enum(${target.enumValues.join("|")})`;
+  }
+  if (!target.description && incoming.description) {
+    target.description = incoming.description;
+  }
+  if (!target.subFields && incoming.subFields) {
+    target.subFields = incoming.subFields;
+  }
+}
+
 function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
   let required = true;
   let defaultValue: unknown = undefined;
@@ -278,6 +336,7 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
     break;
   }
 
+  current = unwrapZod(current);
   const typeName = resolveTypeName(current);
   const field: SchemaSummaryField = { name, type: typeName, required };
 

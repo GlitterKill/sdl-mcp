@@ -379,6 +379,107 @@ describe("ContextEngine", () => {
     assert.ok(!result.error, "No error should surface from seeding failure");
   });
 
+  it("prepends exact symbol mention seeds before broad retrieval seeds", async () => {
+    const seedResult: ContextSeedResult = {
+      candidates: [
+        {
+          contextRef: "symbol:semantic-related",
+          source: "semantic",
+          score: 1,
+          sourceRank: 0,
+        },
+      ],
+      sources: { semantic: 1, lexical: 0, feedback: 0 },
+    };
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => []);
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedExactMentionedSymbols",
+      async () => ["symbol:exact-handleSymbolSearch"],
+    );
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async () => seedResult,
+    );
+
+    let capturedContext: string[] = [];
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task: unknown, _rungs: unknown, context: string[]) => {
+        capturedContext = context;
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(
+      createTask({
+        taskType: "explain",
+        taskText: "explain handleSymbolSearch exact search path",
+      }),
+    );
+
+    assert.equal(result.success, true);
+    assert.deepEqual(capturedContext.slice(0, 2), [
+      "symbol:exact-handleSymbolSearch",
+      "symbol:semantic-related",
+    ]);
+  });
+
+  it("lets exact symbol mention seeds override inferred paths in precise mode", async () => {
+    const seedContextMock = mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async () => {
+        throw new Error("hybrid seeding should be skipped");
+      },
+    );
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => [
+      "file:src/util/paths.ts",
+      "file:src/util/safeJson.ts",
+    ]);
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedExactMentionedSymbols",
+      async () => ["symbol:exact-handleSymbolSearch"],
+    );
+
+    let capturedContext: string[] = [];
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task: unknown, _rungs: unknown, context: string[]) => {
+        capturedContext = context;
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(
+      createTask({
+        taskType: "explain",
+        taskText: "explain handleSymbolSearch exact search path",
+        options: { contextMode: "precise" },
+      }),
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(seedContextMock.mock.callCount(), 0);
+    assert.deepEqual(capturedContext, ["symbol:exact-handleSymbolSearch"]);
+  });
+
   it("respects per-source quotas in seed results", async () => {
     // Create a seed result where semantic dominates but is capped
     const seedResult: ContextSeedResult = {

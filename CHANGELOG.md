@@ -55,6 +55,12 @@ Pass1ExtractionEntry>`) populated during pass-1 from both engines
 
 ### Added
 
+- **Codex SDL-first tool enforcement.** `sdl-mcp init --client codex
+  --enforce-agent-tools` now emits a broad `PreToolUse` hook that is gated
+  by the SDL-MCP PID file. When the server is running, the hook denies
+  repo-targeting native source reads/searches/edits, non-SDL MCP file/search
+  tools, and repo-local build/test/lint shell commands that should run through
+  SDL-MCP. When the PID file is absent, native tools remain available.
 - **`semantic.modelVariant` config.** Selects the ONNX file variant
   (`default`/`int8`, `fp16`, `fp32`, plus nomic-only `uint8`/`q4`/
   `q4f16`/`bnb4`) per embedding model. Each model declares supported
@@ -134,6 +140,26 @@ Pass1ExtractionEntry>`) populated during pass-1 from both engines
 
 ### Fixed
 
+- **SDL-MCP tool friction fixes.** `sdl.manual` now omits disabled memory
+  actions when memory is off; Zod v4 discriminated-union schemas such as
+  `search.edit` now produce useful schema summaries; `search.edit` preview
+  suppresses normal include/exclude filter misses and caps skipped-file /
+  retrieval diagnostics; `slice.build` accepts `wireFormat: "json"` as a
+  standard JSON alias; `sdl.context` auto mode no longer ships duplicate
+  `_packedPayload`; exact identifier `symbol.search` calls stay on the
+  lexical fast path unless semantic/PPR context is explicitly requested;
+  `sdl.workflow.truncated` only marks actually skipped/truncated responses;
+  and `sdl.file` JSON/YAML path reads parse the full supported file while
+  applying `maxBytes` to the returned extraction.
+- **Second-pass tool friction fixes.** Literal `search.edit` include filters
+  now resolve directly without semantic narrowing or unrelated repo walks;
+  `sdl.context` treats exact code identifiers as deterministic seed symbols
+  before broad retrieval, accepts `budget.maxEstimatedTokens` as a
+  `maxTokens` alias, and rejects unsupported `budget.maxCards` clearly;
+  `$0.results.0.symbolId` workflow refs are now supported; `search.edit`
+  action summaries merge `mode` variants as `preview|apply`; context packed
+  stats now distinguish candidate savings from returned payload format; and
+  MCP responses no longer return a duplicate footer text block.
 - **Published package now includes `templates/SDL.md`.** Fixed
   `sdl-mcp init --client <client>` failing from npm/global installs with
   `ENOENT: templates\SDL.md`; release preflight now requires all client init

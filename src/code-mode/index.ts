@@ -216,6 +216,7 @@ export function registerCodeModeTools(
         includeSchemas,
         includeExamples,
       });
+      catalog = catalog.filter((entry) => !entry.disabled);
 
       if (args.actions && args.actions.length > 0) {
         const activeFnMap = getActiveFnNameMap();

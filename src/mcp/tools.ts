@@ -255,6 +255,7 @@ const SurfacedMemorySchema = z.object({
 });
 
 const SliceBuildWireFormatSchema = z.enum([
+  "json",
   "standard",
   "readable",
   "compact",
@@ -920,7 +921,10 @@ export const SymbolSearchResponseSchema = z.object({
       savedRatio: z.number(),
       tokenSavedRatio: z.number().optional(),
       axisHit: z.enum(["bytes", "tokens"]).optional(),
+      candidateDecision: z.enum(["packed", "fallback"]).optional(),
       gateDecision: z.enum(["packed", "fallback"]),
+      payloadAttached: z.boolean().optional(),
+      returnFormat: z.enum(["json", "packed"]).optional(),
     })
     .optional(),
 });
@@ -1870,6 +1874,51 @@ export type PRRiskAnalysisResponse = z.infer<
 // Agent Context Schemas
 // ============================================================================
 
+const AgentContextBudgetSchema = z
+  .object({
+    maxTokens: z.number().optional().describe("Maximum tokens to consume"),
+    maxEstimatedTokens: z
+      .number()
+      .optional()
+      .describe("Alias for maxTokens, accepted for slice.build compatibility"),
+    maxActions: z
+      .number()
+      .optional()
+      .describe("Maximum number of actions to execute"),
+    maxDurationMs: z
+      .number()
+      .optional()
+      .describe("Maximum duration in milliseconds"),
+    maxCards: z
+      .number()
+      .optional()
+      .describe(
+        "Unsupported in sdl.context; use slice.build when card-count budgets are required",
+      ),
+  })
+  .superRefine((budget, ctx) => {
+    if (budget.maxCards !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["maxCards"],
+        message:
+          "sdl.context budget does not support maxCards; use maxTokens/maxEstimatedTokens or call slice.build for card-count budgets",
+      });
+    }
+  })
+  .transform((budget) => ({
+    ...(budget.maxTokens !== undefined ||
+    budget.maxEstimatedTokens !== undefined
+      ? { maxTokens: budget.maxTokens ?? budget.maxEstimatedTokens }
+      : {}),
+    ...(budget.maxActions !== undefined
+      ? { maxActions: budget.maxActions }
+      : {}),
+    ...(budget.maxDurationMs !== undefined
+      ? { maxDurationMs: budget.maxDurationMs }
+      : {}),
+  }));
+
 export const AgentContextRequestSchema = z.object({
   /** Wire format for the response payload. "packed" emits packed wire format (gate-protected); "auto" picks the smaller of packed vs JSON; "json" forces legacy JSON. Default: "auto". */
   wireFormat: z.enum(["json", "packed", "auto"]).optional().default("auto"),
@@ -1882,18 +1931,7 @@ export const AgentContextRequestSchema = z.object({
     .enum(["debug", "review", "implement", "explain"])
     .describe("Type of task to perform"),
   taskText: z.string().min(1).max(2000).describe("Task description or prompt"),
-  budget: z
-    .object({
-      maxTokens: z.number().optional().describe("Maximum tokens to consume"),
-      maxActions: z
-        .number()
-        .optional()
-        .describe("Maximum number of actions to execute"),
-      maxDurationMs: z
-        .number()
-        .optional()
-        .describe("Maximum duration in milliseconds"),
-    })
+  budget: AgentContextBudgetSchema
     .optional()
     .describe("Budget constraints for the task"),
   options: z
@@ -2065,7 +2103,10 @@ const AgentContextPayloadSchema = z.object({
       savedRatio: z.number(),
       tokenSavedRatio: z.number().optional(),
       axisHit: z.enum(["bytes", "tokens"]).optional(),
+      candidateDecision: z.enum(["packed", "fallback"]).optional(),
       gateDecision: z.enum(["packed", "fallback"]),
+      payloadAttached: z.boolean().optional(),
+      returnFormat: z.enum(["json", "packed"]).optional(),
     })
     .optional(),
 });
@@ -2900,6 +2941,9 @@ export interface SearchEditPreviewResponse {
   matchesFound: number;
   filesEligible: number;
   filesSkipped: Array<{ path: string; reason: string }>;
+  filesSkippedTotal?: number;
+  filesSkippedTruncated?: boolean;
+  filesSkippedByReason?: Array<{ reason: string; count: number }>;
   fileEntries: Array<{
     file: string;
     matchCount: number;

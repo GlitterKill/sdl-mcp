@@ -295,7 +295,8 @@ async function handleSliceBuildInternal(
   });
 
   const buildSliceWithTracing = async (): Promise<SliceBuildResponse> => {
-    const requestedWireFormat: SliceBuildWireFormat = wireFormat ?? "compact";
+    const requestedWireFormat: SliceBuildWireFormat =
+      wireFormat === "json" ? "standard" : (wireFormat ?? "compact");
     const effectiveWireFormatVersion =
       requestedWireFormat === "compact" ? (wireFormatVersion ?? 3) : undefined;
 

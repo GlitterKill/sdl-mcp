@@ -437,9 +437,9 @@ export class MCPServer {
               },
             ];
 
-            // Append per-call token savings meter (visible in tool response)
-            // Always append as content block - not all MCP clients (e.g. Claude Code CLI)
-            // render the _displayFooter property, so this ensures visibility everywhere.
+            // Build the footer text for clients that look at response-level
+            // _displayFooter. The content array is collapsed back to the
+            // primary JSON block below to avoid duplicate text items.
             if (capturedUsage && capturedUsage.sdlTokens < capturedUsage.rawEquivalent) {
               contentBlocks.push({
                 type: "text",
@@ -447,7 +447,7 @@ export class MCPServer {
               });
             }
 
-            // Append session/lifetime summary for usage.stats (visible in tool response)
+            // Preserve the usage.stats summary in the same footer surface.
             if (capturedSummary) {
               contentBlocks.push({
                 type: "text",
@@ -457,6 +457,10 @@ export class MCPServer {
 
             // Add _displayFooter at response level for Claude Code CLI visibility
             const responseLevelDisplayFooter = footerLines.length > 0 ? footerLines.join('\n\n') : undefined;
+            // Keep the MCP content payload to one JSON block. The same footer
+            // text is exposed through _displayFooter, avoiding duplicate text
+            // items in clients that render both surfaces.
+            contentBlocks.length = 1;
             return responseLevelDisplayFooter 
               ? { content: contentBlocks, _displayFooter: responseLevelDisplayFooter }
               : { content: contentBlocks };

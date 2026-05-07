@@ -1,12 +1,12 @@
 /** Global regex for finding $N references (with optional dot/bracket path) embedded in strings. */
 export const REF_PATTERN = new RegExp(
-  String.raw`\$\d+(?:(?:\.[a-zA-Z_]\w*)|(?:\[\d+\])|(?:\?\.(?:[a-zA-Z_]\w*|\[\d+\])))*`,
+  String.raw`\$\d+(?:(?:\.(?:[a-zA-Z_]\w*|\d+))|(?:\[\d+\])|(?:\?\.(?:[a-zA-Z_]\w*|\d+|\[\d+\])))*`,
   "g",
 );
 
 /** Non-global single-match version used inside resolveRef. */
 const REF_PATTERN_SINGLE = new RegExp(
-  String.raw`^\$(\d+)((?:(?:\.[a-zA-Z_]\w*)|(?:\[\d+\])|(?:\?\.(?:[a-zA-Z_]\w*|\[\d+\])))*)$`,
+  String.raw`^\$(\d+)((?:(?:\.(?:[a-zA-Z_]\w*|\d+))|(?:\[\d+\])|(?:\?\.(?:[a-zA-Z_]\w*|\d+|\[\d+\])))*)$`,
 );
 
 /** Property names that must never be navigated to prevent prototype pollution. */
@@ -50,6 +50,17 @@ function parseSegments(pathStr: string, ref: string): RefSegment[] {
       segments.push({ optional, value: parseInt(rawIndex, 10) });
       index = closing + 1;
     } else {
+      const numeric = /^\d+/.exec(pathStr.slice(index));
+      if (numeric) {
+        segments.push({ optional, value: parseInt(numeric[0], 10) });
+        index += numeric[0].length;
+        if (segments.length > 4) {
+          throw new RefResolutionError(
+            `Reference '${ref}' exceeds the maximum path depth of 4 segments`,
+          );
+        }
+        continue;
+      }
       const match = /^[a-zA-Z_]\w*/.exec(pathStr.slice(index));
       if (!match) {
         throw new RefResolutionError(`Invalid reference syntax: '${ref}'`);

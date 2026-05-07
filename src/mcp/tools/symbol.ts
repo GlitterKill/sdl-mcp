@@ -134,6 +134,30 @@ import {
 export { splitCamelSubwords, computeRelevance };
 
 const MIN_RELEVANCE_THRESHOLD = 0.3;
+const SIMPLE_IDENTIFIER_QUERY_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+export function shouldUseLexicalFastPathForSymbolSearch(
+  request: Pick<
+    SymbolSearchRequest,
+    | "semantic"
+    | "chatMentions"
+    | "chatMentionWeights"
+    | "pprDirection"
+    | "pprWeight"
+  >,
+  query: string,
+): boolean {
+  return (
+    request.semantic !== true &&
+    SIMPLE_IDENTIFIER_QUERY_RE.test(query) &&
+    !query.includes("*") &&
+    !query.includes("?") &&
+    (request.chatMentions?.length ?? 0) === 0 &&
+    request.chatMentionWeights === undefined &&
+    request.pprDirection === undefined &&
+    request.pprWeight === undefined
+  );
+}
 
 export async function handleSymbolSearch(
   args: unknown,
@@ -151,6 +175,10 @@ export async function handleSymbolSearch(
   const semanticConfig = config.semantic;
   const semanticRequested = request.semantic === true;
   const semanticOptOut = request.semantic === false;
+  const lexicalFastPath = shouldUseLexicalFastPathForSymbolSearch(
+    request,
+    query,
+  );
 
   recordToolTrace({
     repoId: request.repoId,
@@ -172,6 +200,7 @@ export async function handleSymbolSearch(
   let fallbackReason: string | undefined;
 
   if (
+    !lexicalFastPath &&
     !semanticOptOut &&
     semanticConfig?.enabled === true &&
     retrievalConfig?.mode === "hybrid"
@@ -535,7 +564,7 @@ export async function handleSymbolSearch(
           retrievalSource: "hybrid" as const,
         }),
       );
-    } else if (fallbackReason) {
+    } else {
       (response as Record<string, unknown>).retrievalEvidence = relevant.map(
         (r) => ({
           symbolId: r.symbolId,

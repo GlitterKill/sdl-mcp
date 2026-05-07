@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { serializeSliceForWireFormat } from "../../dist/mcp/tools/slice-wire-format.js";
+import { SliceBuildRequestSchema } from "../../dist/mcp/tools.js";
 import { WireFormatRetiredError } from "../../dist/mcp/errors.js";
 
 const stubSlice = {
@@ -60,4 +61,13 @@ test("wireFormatVersion default (undefined) does not throw", () => {
     undefined,
   );
   assert.equal(result.format, "compact");
+});
+
+test("slice.build accepts json as a standard-format alias", () => {
+  const parsed = SliceBuildRequestSchema.parse({
+    repoId: "test",
+    taskText: "inspect parser",
+    wireFormat: "json",
+  });
+  assert.equal(parsed.wireFormat, "json");
 });

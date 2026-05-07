@@ -10,6 +10,7 @@ import {
   invalidateCatalog,
 } from "../../dist/code-mode/action-catalog.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
+import { SearchEditRequestSchema } from "../../dist/mcp/tools.js";
 import { z } from "zod";
 
 const originalSdlConfig = process.env.SDL_CONFIG;
@@ -213,6 +214,28 @@ describe("code-mode action catalog", () => {
       const modeField = summary.fields.find((f) => f.name === "mode");
       assert.ok(modeField);
       assert.deepStrictEqual(modeField.enumValues, ["full", "incremental"]);
+    });
+
+    it("summarizes Zod v4 discriminated unions", () => {
+      const summary = zodToSchemaSummary(SearchEditRequestSchema);
+      const names = summary.fields.map((f) => f.name);
+
+      assert.ok(names.includes("mode"));
+      assert.ok(names.includes("targeting"));
+      assert.ok(names.includes("query"));
+      assert.ok(names.includes("editMode"));
+      assert.ok(names.includes("planHandle"));
+
+      const modeField = summary.fields.find((f) => f.name === "mode");
+      assert.equal(modeField?.required, true);
+      assert.equal(modeField?.type, "enum(preview|apply)");
+      assert.deepStrictEqual(modeField?.enumValues, ["preview", "apply"]);
+      const repoField = summary.fields.find((f) => f.name === "repoId");
+      assert.equal(repoField?.required, true);
+      const planHandleField = summary.fields.find(
+        (f) => f.name === "planHandle",
+      );
+      assert.equal(planHandleField?.required, false);
     });
 
     it("handles non-object schema gracefully", () => {

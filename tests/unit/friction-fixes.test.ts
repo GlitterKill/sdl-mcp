@@ -18,7 +18,14 @@ import assert from "node:assert/strict";
 import { OverlayStore } from "../../dist/live-index/overlay-store.js";
 import { tokenize } from "../../dist/util/tokenize.js";
 import { TASK_TEXT_STOP_WORDS } from "../../dist/graph/slice/start-node-resolver.js";
-import { sortByExactMatch } from "../../dist/mcp/tools/symbol.js";
+import {
+  sortByExactMatch,
+  shouldUseLexicalFastPathForSymbolSearch,
+} from "../../dist/mcp/tools/symbol.js";
+import {
+  assertJsonPathSourceFitsExtractionLimit,
+  computeFileReadLimit,
+} from "../../dist/mcp/tools/file-read.js";
 import {
   extractIdentifiersFromText,
   IDENTIFIER_STOP_WORDS,
@@ -81,6 +88,46 @@ describe("symbolSearch exact match priority", () => {
     const sorted = sortByExactMatch([...results], "delta");
     // No exact or prefix match, sort is stable (all tied)
     assert.equal(sorted.length, 3);
+  });
+
+  it("uses lexical fast path for exact identifier lookups", () => {
+    assert.equal(
+      shouldUseLexicalFastPathForSymbolSearch({}, "handleRequest"),
+      true,
+    );
+    assert.equal(
+      shouldUseLexicalFastPathForSymbolSearch({ semantic: true }, "handleRequest"),
+      false,
+      "explicit semantic search should still use hybrid retrieval",
+    );
+    assert.equal(
+      shouldUseLexicalFastPathForSymbolSearch(
+        { chatMentions: ["handleRequest"] },
+        "handleRequest",
+      ),
+      false,
+      "explicit chat/PPR context should still use hybrid retrieval",
+    );
+    assert.equal(
+      shouldUseLexicalFastPathForSymbolSearch({}, "handle request"),
+      false,
+      "natural-language queries should keep hybrid retrieval",
+    );
+  });
+});
+
+describe("file.read JSON path maxBytes handling", () => {
+  it("reads the full JSON source for extraction even when returned maxBytes is lower", () => {
+    assert.equal(computeFileReadLimit(6835, 4000, true), 6835);
+    assert.equal(computeFileReadLimit(6835, 4000, false), 4000);
+  });
+
+  it("keeps the hard extraction source-size guard separate from response size", () => {
+    assert.doesNotThrow(() => assertJsonPathSourceFitsExtractionLimit(512 * 1024));
+    assert.throws(
+      () => assertJsonPathSourceFitsExtractionLimit(512 * 1024 + 1),
+      /extraction limit/,
+    );
   });
 });
 

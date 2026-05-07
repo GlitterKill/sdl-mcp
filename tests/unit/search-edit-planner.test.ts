@@ -23,6 +23,8 @@ import {
   compileSearchRegex,
   isPathAllowed,
   enumerateRepoFiles,
+  enumerateExplicitIncludeFiles,
+  shouldReportSkippedFile,
 } from "../../dist/mcp/tools/search-edit/planner.js";
 
 describe("search-edit planner — isPathAllowed (deny-list + globs)", () => {
@@ -68,12 +70,22 @@ describe("search-edit planner — isPathAllowed (deny-list + globs)", () => {
     const filters = { include: ["src/**/*.ts"] };
     assert.equal(isPathAllowed("src/foo.ts", filters).allowed, true);
     assert.equal(isPathAllowed("docs/readme.md", filters).allowed, false);
+    assert.equal(
+      shouldReportSkippedFile(isPathAllowed("docs/readme.md", filters).reason),
+      false,
+      "include misses are expected filter decisions, not diagnostics",
+    );
   });
 
   it("honours exclude globs", () => {
     const filters = { exclude: ["**/*.test.ts"] };
     assert.equal(isPathAllowed("src/foo.ts", filters).allowed, true);
     assert.equal(isPathAllowed("src/foo.test.ts", filters).allowed, false);
+    assert.equal(
+      shouldReportSkippedFile(isPathAllowed("src/foo.test.ts", filters).reason),
+      false,
+      "exclude matches are expected filter decisions, not diagnostics",
+    );
   });
 
   it("rejects dotfiles that contain secrets (.env, .npmrc, .netrc)", () => {
@@ -184,6 +196,52 @@ describe("search-edit planner — enumerateRepoFiles", () => {
       false,
       "node_modules contents must not leak",
     );
+  });
+
+  it("keeps include-filter misses out of filesSkipped", async () => {
+    const { candidates, skipped } = await enumerateRepoFiles(
+      root,
+      { include: ["readme.md"] },
+      200,
+    );
+
+    assert.deepEqual(candidates, ["readme.md"]);
+    assert.deepEqual(
+      skipped,
+      [],
+      "explicit include filters should not surface denied files outside the include set",
+    );
+    assert.equal(
+      skipped.some((entry) => entry.reason === "include-miss"),
+      false,
+    );
+  });
+
+  it("resolves literal include filters directly without walking unrelated files", async () => {
+    const result = await enumerateExplicitIncludeFiles(
+      root,
+      { include: ["readme.md"] },
+      200,
+    );
+
+    assert.ok(result, "literal include filters should use the direct path");
+    assert.deepEqual(result.candidates, ["readme.md"]);
+    assert.deepEqual(result.skipped, []);
+    assert.equal(result.capped, false);
+  });
+
+  it("still reports denied files when the literal include names the denied file", async () => {
+    const result = await enumerateExplicitIncludeFiles(
+      root,
+      { include: ["logo.png"] },
+      200,
+    );
+
+    assert.ok(result);
+    assert.deepEqual(result.candidates, []);
+    assert.deepEqual(result.skipped, [
+      { path: "logo.png", reason: "denied-extension:.png" },
+    ]);
   });
 
 
