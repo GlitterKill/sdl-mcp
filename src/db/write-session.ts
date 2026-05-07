@@ -24,8 +24,9 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Connection } from "kuzu";
-import { logger } from "../util/logger.js";
+import { DEFAULT_POST_INDEX_SESSION_TIMEOUT_MS } from "../config/constants.js";
 import { getObservabilityTap } from "../observability/event-tap.js";
+import { logger } from "../util/logger.js";
 
 const SESSION_BRAND: unique symbol = Symbol("WriteSession");
 
@@ -115,9 +116,10 @@ export function registerSessionEndHook(fn: SessionEndHook): () => void {
 // 5min default; allowing 15min keeps a safety margin while still
 // surfacing a real wedge before the writeLimiter's per-call queue
 // timeouts pile on. Incremental refreshes finish in seconds and don't
-// approach this budget. Override via SDL_POST_INDEX_SESSION_TIMEOUT_MS
-// when running on slower disks or larger repos.
-const DEFAULT_SESSION_TIMEOUT_MS = 15 * 60 * 1000;
+// approach this budget. Override per repo with
+// `repos[].postIndexSessionTimeoutMs`, or process-wide with
+// SDL_POST_INDEX_SESSION_TIMEOUT_MS when no per-call override is supplied.
+const DEFAULT_SESSION_TIMEOUT_MS = DEFAULT_POST_INDEX_SESSION_TIMEOUT_MS;
 
 function resolveSessionTimeoutMs(override?: number): number {
   if (override !== undefined && override > 0) return override;

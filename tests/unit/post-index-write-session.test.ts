@@ -98,6 +98,20 @@ describe("withPostIndexWriteSession", () => {
     assert.equal(isPostIndexSessionActive(), false);
   });
 
+  it("uses explicit timeout options before the process-wide env override", async () => {
+    process.env.SDL_POST_INDEX_SESSION_TIMEOUT_MS = "1000";
+    await assert.rejects(
+      withPostIndexWriteSession(
+        async () => {
+          await new Promise((r) => setTimeout(r, 200));
+        },
+        { timeoutMs: 60 },
+      ),
+      /timed out after 60ms/,
+    );
+    assert.equal(isPostIndexSessionActive(), false);
+  });
+
   it("body's own throw propagates and clears active session", async () => {
     let caught: unknown;
     try {

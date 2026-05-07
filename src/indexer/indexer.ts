@@ -182,6 +182,19 @@ export function derivePass1EngineTelemetry(acc: {
   };
 }
 
+export function resolvePostIndexSessionTimeoutMs(
+  repoId: string,
+  liveRepos: RepoConfig[],
+  storedRepoConfig: RepoConfig,
+): number | undefined {
+  // Prefer the live config file so timeout tuning does not require
+  // re-registering an existing repository.
+  return (
+    liveRepos.find((repo) => repo.repoId === repoId)
+      ?.postIndexSessionTimeoutMs ?? storedRepoConfig.postIndexSessionTimeoutMs
+  );
+}
+
 export async function indexRepo(
   repoId: string,
   mode: "full" | "incremental",
@@ -465,6 +478,11 @@ async function indexRepoImpl(
 
   onProgress?.({ stage: "parsing", current: 0, total: files.length });
   const appConfig = loadConfig();
+  const postIndexSessionTimeoutMs = resolvePostIndexSessionTimeoutMs(
+    repoId,
+    appConfig.repos,
+    config,
+  );
   const concurrency = Math.max(
     1,
     Math.min(appConfig.indexing?.concurrency ?? 4, files.length || 1),
@@ -995,7 +1013,7 @@ async function indexRepoImpl(
         clustersComputed: derivedResult.clustersComputed,
         processesTraced: derivedResult.processesTraced,
       };
-    });
+    }, { timeoutMs: postIndexSessionTimeoutMs });
 
     const { summaryStats, clustersComputed, processesTraced } = phaseOutcome;
     const totalMs = Date.now() - startTime;

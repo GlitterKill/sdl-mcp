@@ -299,6 +299,25 @@ export const WATCHER_REINDEX_OPERATION_TIMEOUT_MS = 60_000;
  */
 export const WATCHER_DEFAULT_MAX_WATCHED_FILES = 25_000;
 
+/**
+ * Default hard timeout for the post-index write session. This covers the
+ * finalization phases after pass-1/pass-2 have finished: embeddings,
+ * summaries, deferred index builds, memory sync, and audit flushing.
+ */
+export const DEFAULT_POST_INDEX_SESSION_TIMEOUT_MS = 15 * 60 * 1000;
+
+/**
+ * Lower bound for post-index write session timeout overrides.
+ */
+export const MIN_POST_INDEX_SESSION_TIMEOUT_MS = 1_000;
+
+/**
+ * Upper bound for post-index write session timeout overrides. Values above
+ * this usually hide a wedged native/database call rather than helping a large
+ * repository finish.
+ */
+export const MAX_POST_INDEX_SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+
 // ============================================================================
 // API & Tool Constants
 // ============================================================================

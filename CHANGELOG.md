@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-repo post-index timeout config.** `repos[].postIndexSessionTimeoutMs`
+  now controls the post-index write-session timeout for each repository,
+  preserving the 900000ms default while letting larger repos raise the budget
+  without changing code or process-wide environment variables.
+
 ### Changed
 
 ### Fixed

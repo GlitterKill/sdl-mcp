@@ -115,11 +115,17 @@ Each entry configures one repository.
 | `ignore`                  | `string[]`         | See below               | Glob patterns excluded from indexing                                                    |
 | `languages`               | `string[]`         | All supported languages | `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `java`, `cs`, `c`, `cpp`, `php`, `rs`, `kt`, `sh` |
 | `maxFileBytes`            | `number`           | `2000000`               | Files larger than this are skipped                                                      |
+| `postIndexSessionTimeoutMs` | `number`         | `900000`                | `1000-86400000`. Hard timeout for post-index finalization writes after pass-1/pass-2    |
 | `includeNodeModulesTypes` | `boolean`          | `true`                  | TypeScript-only helper for `@types/*` resolution                                        |
 | `packageJsonPath`         | `string \| null`   | `null`                  | Manual package root override                                                            |
 | `tsconfigPath`            | `string \| null`   | `null`                  | Manual `tsconfig.json` override                                                         |
 | `workspaceGlobs`          | `string[] \| null` | `null`                  | Monorepo workspace package discovery                                                    |
 | `memory`                  | object             | Omitted                 | Per-repo override for the top-level memory settings                                     |
+
+Use `postIndexSessionTimeoutMs` when large repositories spend longer than
+15 minutes in finalization work such as embedding writes or deferred vector
+index builds. It is deliberately scoped to the post-index write session, not
+the whole scan/parse/pass-2 runtime.
 
 Default `ignore` patterns:
 

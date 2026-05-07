@@ -36,6 +36,8 @@ import {
   RUNTIME_MAX_CONCURRENT_JOBS,
   RUNTIME_MIN_BYTES,
   DEFAULT_MEMORY_SURFACE_LIMIT,
+  MIN_POST_INDEX_SESSION_TIMEOUT_MS,
+  MAX_POST_INDEX_SESSION_TIMEOUT_MS,
 } from "./constants.js";
 
 export const LanguageSchema = z.enum([
@@ -133,6 +135,12 @@ export const RepoConfigSchema = z.object({
       "sh",
     ]),
   maxFileBytes: z.number().int().min(1).default(MAX_FILE_BYTES),
+  postIndexSessionTimeoutMs: z
+    .number()
+    .int()
+    .min(MIN_POST_INDEX_SESSION_TIMEOUT_MS)
+    .max(MAX_POST_INDEX_SESSION_TIMEOUT_MS)
+    .optional(),
   includeNodeModulesTypes: z.boolean().default(true),
   packageJsonPath: z.string().nullish(),
   tsconfigPath: z.string().nullish(),

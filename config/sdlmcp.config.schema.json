@@ -91,6 +91,13 @@
             "minimum": 1,
             "default": 2000000
           },
+          "postIndexSessionTimeoutMs": {
+            "type": "integer",
+            "description": "Hard timeout for post-index finalization writes in milliseconds. Covers embeddings, summaries, deferred index builds, memory sync, and audit flushing after pass-1/pass-2 complete.",
+            "minimum": 1000,
+            "maximum": 86400000,
+            "default": 900000
+          },
           "includeNodeModulesTypes": {
             "type": "boolean",
             "description": "Include node_modules/@types declarations in TypeScript call resolution (excluding @types/node)",

@@ -9,7 +9,13 @@ import { fileURLToPath } from "node:url";
 import {
   PolicyConfigSchema,
   PrefetchConfigSchema,
+  RepoConfigSchema,
 } from "../../dist/config/types.js";
+import {
+  DEFAULT_POST_INDEX_SESSION_TIMEOUT_MS,
+  MAX_POST_INDEX_SESSION_TIMEOUT_MS,
+  MIN_POST_INDEX_SESSION_TIMEOUT_MS,
+} from "../../dist/config/constants.js";
 import { PolicyGetResponseSchema } from "../../dist/mcp/tools.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -87,5 +93,65 @@ describe("config surface sync", () => {
       "utf8",
     );
     assert.match(serveSource, /config\.prefetch\?\.enabled \?\? true/);
+  });
+
+  it("keeps repo post-index session timeout surfaced in config docs and schema", () => {
+    const parsed = RepoConfigSchema.parse({
+      repoId: "timeout-repo",
+      rootPath: "/tmp/timeout-repo",
+      postIndexSessionTimeoutMs: DEFAULT_POST_INDEX_SESSION_TIMEOUT_MS,
+    });
+    assert.strictEqual(
+      parsed.postIndexSessionTimeoutMs,
+      DEFAULT_POST_INDEX_SESSION_TIMEOUT_MS,
+    );
+    assert.strictEqual(
+      RepoConfigSchema.safeParse({
+        repoId: "timeout-repo",
+        rootPath: "/tmp/timeout-repo",
+        postIndexSessionTimeoutMs: MIN_POST_INDEX_SESSION_TIMEOUT_MS - 1,
+      }).success,
+      false,
+    );
+    assert.strictEqual(
+      RepoConfigSchema.safeParse({
+        repoId: "timeout-repo",
+        rootPath: "/tmp/timeout-repo",
+        postIndexSessionTimeoutMs: MAX_POST_INDEX_SESSION_TIMEOUT_MS + 1,
+      }).success,
+      false,
+    );
+
+    const schema = JSON.parse(
+      readFileSync(resolve(repoRoot, "config/sdlmcp.config.schema.json"), "utf8"),
+    );
+    const repoTimeoutSchema =
+      schema.properties.repos.items.properties.postIndexSessionTimeoutMs;
+    assert.strictEqual(
+      repoTimeoutSchema.default,
+      DEFAULT_POST_INDEX_SESSION_TIMEOUT_MS,
+    );
+    assert.strictEqual(
+      repoTimeoutSchema.minimum,
+      MIN_POST_INDEX_SESSION_TIMEOUT_MS,
+    );
+    assert.strictEqual(
+      repoTimeoutSchema.maximum,
+      MAX_POST_INDEX_SESSION_TIMEOUT_MS,
+    );
+
+    const sample = JSON.parse(
+      readFileSync(resolve(repoRoot, "config/sdlmcp.config.example.json"), "utf8"),
+    );
+    assert.strictEqual(
+      sample.repos[0].postIndexSessionTimeoutMs,
+      DEFAULT_POST_INDEX_SESSION_TIMEOUT_MS,
+    );
+
+    const docs = readFileSync(
+      resolve(repoRoot, "docs/configuration-reference.md"),
+      "utf8",
+    );
+    assert.match(docs, /postIndexSessionTimeoutMs/);
   });
 });
