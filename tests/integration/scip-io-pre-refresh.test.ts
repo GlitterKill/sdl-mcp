@@ -1,7 +1,7 @@
 /**
  * Integration test for the scip-io pre-refresh hook.
  *
- * Exercises the full path: a stub `scip-io` binary on PATH, the
+ * Exercises the full path: a stub `scip-io` binary, the
  * `scip.generator.enabled` config flag, `loadConfig()` auto-registration of
  * the `index.scip` entry, and `indexRepo()`'s pre-refresh hook in
  * `src/indexer/indexer.ts`. No real network, no real scip-io binary.
@@ -9,7 +9,7 @@
  * Cases covered:
  *
  *   1. Disabled (default): the stub is NOT invoked.
- *   2. Enabled with stub on PATH: the stub IS invoked with cwd=repoRoot
+ *   2. Enabled with explicit stub path: the stub IS invoked with cwd=repoRoot
  *      and "index" as the first arg, and `indexRepo()` completes.
  *   3. Enabled but stub exits non-zero: indexing still completes successfully
  *      (non-fatal failure mode).
@@ -255,17 +255,16 @@ describe("scip-io pre-refresh hook", () => {
   });
 
   it("invokes scip-io with cwd=repoRoot and 'index' arg when generator is enabled", async () => {
-    writeConfig(configPath, { generatorEnabled: true });
-    process.env.SDL_CONFIG = configPath;
-    delete process.env.SDL_CONFIG_PATH;
-    invalidateConfigCache();
-
     if (existsSync(invocationLog)) rmSync(invocationLog);
-    makeStubBinary(stubBinDir, {
+    const stub = makeStubBinary(stubBinDir, {
       exitCode: 0,
       logFile: invocationLog,
       writeScip: true,
     });
+    writeConfig(configPath, { generatorEnabled: true, binary: stub });
+    process.env.SDL_CONFIG = configPath;
+    delete process.env.SDL_CONFIG_PATH;
+    invalidateConfigCache();
 
     const result = await indexRepo(REPO_ID, "incremental");
     assert.ok(result.versionId.length > 0);
@@ -289,18 +288,17 @@ describe("scip-io pre-refresh hook", () => {
   });
 
   it("continues indexing successfully when scip-io exits non-zero", async () => {
-    writeConfig(configPath, { generatorEnabled: true });
-    process.env.SDL_CONFIG = configPath;
-    delete process.env.SDL_CONFIG_PATH;
-    invalidateConfigCache();
-
     if (existsSync(invocationLog)) rmSync(invocationLog);
     // Stub fails with exit 7 and does NOT write index.scip.
-    makeStubBinary(stubBinDir, {
+    const stub = makeStubBinary(stubBinDir, {
       exitCode: 7,
       logFile: invocationLog,
       writeScip: false,
     });
+    writeConfig(configPath, { generatorEnabled: true, binary: stub });
+    process.env.SDL_CONFIG = configPath;
+    delete process.env.SDL_CONFIG_PATH;
+    invalidateConfigCache();
 
     // Should not throw — the failure must be non-fatal.
     const result = await indexRepo(REPO_ID, "incremental");

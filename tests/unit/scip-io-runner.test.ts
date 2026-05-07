@@ -115,6 +115,21 @@ describe("scip-io-runner: detectScipIo", () => {
     assert.match(result.binaryPath, /scip-io/);
   });
 
+  it("resolves an explicit absolute binary path without PATH lookup", async () => {
+    const stubDir = join(tmp, "bin-absolute");
+    const emptyDir = join(tmp, "empty-for-absolute");
+    mkdirSync(stubDir, { recursive: true });
+    mkdirSync(emptyDir, { recursive: true });
+    const stub = makeStubBinary(stubDir);
+
+    process.env.PATH = emptyDir;
+    const result = await detectScipIo(stub);
+
+    assert.ok(result, "expected to resolve explicit stub path");
+    assert.equal(result.source, "path");
+    assert.equal(result.binaryPath, stub);
+  });
+
   it("returns null when binary is missing from PATH and managed dir", async () => {
     // Clean PATH so the only entry is a known-empty dir.
     const emptyDir = join(tmp, "empty-bin");

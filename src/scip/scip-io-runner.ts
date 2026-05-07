@@ -226,6 +226,19 @@ function getAssetSuffix(): { suffix: string; archiveExt: ".zip" | ".tar.gz" } {
 export async function detectScipIo(
   binaryName: string = DEFAULT_BINARY_NAME,
 ): Promise<ScipIoResolution | null> {
+  // Explicit absolute paths are common in CI/tests and are also the documented
+  // escape hatch for users who maintain their own scip-io binary. Do not pass
+  // them through `where`/`which`: Windows `where C:\path\tool.cmd` treats the
+  // colon as pattern syntax and fails even when the file exists.
+  if (isAbsolute(binaryName)) {
+    try {
+      await access(binaryName);
+      return { binaryPath: binaryName, source: "path" };
+    } catch {
+      return null;
+    }
+  }
+
   // Strip .exe for the PATH lookup on Windows: `where scip-io` matches
   // scip-io.exe automatically. Keep .exe when we check the managed dir
   // because that's the actual filename on disk.
