@@ -238,6 +238,8 @@ export function serializeSliceForWireFormat(
         encoderId: SLICE_ENCODER_ID,
         jsonBytes: jsonStr.length,
         packedBytes: packedStr.length,
+        jsonTokens,
+        packedTokens,
         decision: gateDecision,
         axisHit: detail.axisHit ?? null,
       });
@@ -448,4 +450,3 @@ export function toCompactGraphSliceV3(slice: GraphSlice): CompactGraphSliceV3 {
 
   return compact;
 }
-

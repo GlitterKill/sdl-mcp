@@ -6,7 +6,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { serializeContextForWireFormat } from "../../dist/mcp/tools/context-wire-format.js";
+import {
+  publishContextWireDecision,
+  serializeContextForWireFormat,
+} from "../../dist/mcp/tools/context-wire-format.js";
 import {
   buildContextPackedStats,
   shouldAttachPackedPayloadForContext,
@@ -25,7 +28,12 @@ const SMALL_RESPONSE: Record<string, unknown> = {
   taskId: "t1",
   actionsTaken: [],
   finalEvidence: [],
-  path: { rungs: ["card"], estimatedTokens: 50, estimatedDurationMs: 10, reasoning: "" },
+  path: {
+    rungs: ["card"],
+    estimatedTokens: 50,
+    estimatedDurationMs: 10,
+    reasoning: "",
+  },
   metrics: { totalTokens: 50 },
 };
 
@@ -47,7 +55,12 @@ const LARGE_RESPONSE: Record<string, unknown> = {
     reference: `symbol:${"a".repeat(48)}-${i}`,
     summary: `function someFunctionName${i} | src/some/long/path/module-${i}.ts | does some work`,
   })),
-  path: { rungs: ["card", "skeleton"], estimatedTokens: 1500, estimatedDurationMs: 200, reasoning: "precise debug" },
+  path: {
+    rungs: ["card", "skeleton"],
+    estimatedTokens: 1500,
+    estimatedDurationMs: 200,
+    reasoning: "precise debug",
+  },
   metrics: { totalTokens: 1500 },
   summary: "Long task summary with multiple findings across the codebase.",
   success: true,
@@ -101,6 +114,7 @@ test("wireFormat=packed publishes tap with ctx1 encoder", () => {
   });
 
   assert.ok(result.gateDecision !== undefined);
+  publishContextWireDecision(result, result.gateDecision);
   assert.equal(events.length, 1);
   assert.equal(events[0].encoderId, "ctx1");
   assert.equal(events[0].decision, result.gateDecision);
@@ -199,6 +213,7 @@ test("fallback path also publishes tap", () => {
   });
 
   assert.equal(result.gateDecision, "fallback");
+  publishContextWireDecision(result, "fallback");
   assert.equal(events.length, 1);
   assert.equal(events[0].decision, "fallback");
   assert.equal(events[0].encoderId, "ctx1");

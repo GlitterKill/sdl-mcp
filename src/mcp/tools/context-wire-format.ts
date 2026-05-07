@@ -162,24 +162,6 @@ export function serializeContextForWireFormat(
   );
   const gateDecision = detail.decision === "packed" ? "packed" : "fallback";
 
-  tokenAccumulator.recordPackedUsage(
-    CONTEXT_ENCODER_ID,
-    jsonStr.length,
-    packedStr.length,
-    gateDecision,
-  );
-  try {
-    getObservabilityTap()?.packedWire({
-      encoderId: CONTEXT_ENCODER_ID,
-      jsonBytes: jsonStr.length,
-      packedBytes: packedStr.length,
-      decision: gateDecision,
-      axisHit: detail.axisHit ?? null,
-    });
-  } catch {
-    /* swallow */
-  }
-
   if (gateDecision === "packed") {
     return {
       format: "packed",
@@ -205,4 +187,36 @@ export function serializeContextForWireFormat(
     axisHit: detail.axisHit ?? undefined,
     gateDecision,
   };
+}
+
+export function publishContextWireDecision(
+  wireResult: ContextWireResult,
+  decision: "packed" | "fallback",
+): void {
+  if (
+    !wireResult.encoderId ||
+    typeof wireResult.jsonBytes !== "number" ||
+    typeof wireResult.packedBytes !== "number"
+  ) {
+    return;
+  }
+  tokenAccumulator.recordPackedUsage(
+    wireResult.encoderId,
+    wireResult.jsonBytes,
+    wireResult.packedBytes,
+    decision,
+  );
+  try {
+    getObservabilityTap()?.packedWire({
+      encoderId: wireResult.encoderId,
+      jsonBytes: wireResult.jsonBytes,
+      packedBytes: wireResult.packedBytes,
+      jsonTokens: wireResult.jsonTokens,
+      packedTokens: wireResult.packedTokens,
+      decision,
+      axisHit: wireResult.axisHit ?? null,
+    });
+  } catch {
+    /* swallow */
+  }
 }

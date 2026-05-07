@@ -115,6 +115,8 @@ interface PackedWireRec {
   encoderId: string;
   jsonBytes: number;
   packedBytes: number;
+  jsonTokens?: number;
+  packedTokens?: number;
   decision: "packed" | "fallback";
   axisHit: "bytes" | "tokens" | null;
 }
@@ -242,6 +244,8 @@ export class Aggregator {
   private packedFallback = 0;
   private packedJsonBytes = 0;
   private packedBytes = 0;
+  private packedJsonTokens = 0;
+  private packedTokens = 0;
   private packedAxisBytes = 0;
   private packedAxisTokens = 0;
   private packedAxisNone = 0;
@@ -254,6 +258,8 @@ export class Aggregator {
       fallback: number;
       jsonBytes: number;
       packedBytes: number;
+      jsonTokens: number;
+      packedTokens: number;
     }
   >();
 
@@ -611,8 +617,14 @@ export class Aggregator {
     this.packedTotal += 1;
     if (rec.decision === "packed") this.packedHits += 1;
     else this.packedFallback += 1;
-    if (Number.isFinite(rec.jsonBytes)) this.packedJsonBytes += rec.jsonBytes;
-    if (Number.isFinite(rec.packedBytes)) this.packedBytes += rec.packedBytes;
+    if (rec.decision === "packed") {
+      if (Number.isFinite(rec.jsonBytes)) this.packedJsonBytes += rec.jsonBytes;
+      if (Number.isFinite(rec.packedBytes)) this.packedBytes += rec.packedBytes;
+      if (Number.isFinite(rec.jsonTokens))
+        this.packedJsonTokens += rec.jsonTokens ?? 0;
+      if (Number.isFinite(rec.packedTokens))
+        this.packedTokens += rec.packedTokens ?? 0;
+    }
     if (rec.axisHit === "bytes") this.packedAxisBytes += 1;
     else if (rec.axisHit === "tokens") this.packedAxisTokens += 1;
     else this.packedAxisNone += 1;
@@ -626,12 +638,21 @@ export class Aggregator {
       fallback: 0,
       jsonBytes: 0,
       packedBytes: 0,
+      jsonTokens: 0,
+      packedTokens: 0,
     };
     stats.count += 1;
     if (rec.decision === "packed") stats.packedHits += 1;
     else stats.fallback += 1;
-    if (Number.isFinite(rec.jsonBytes)) stats.jsonBytes += rec.jsonBytes;
-    if (Number.isFinite(rec.packedBytes)) stats.packedBytes += rec.packedBytes;
+    if (rec.decision === "packed") {
+      if (Number.isFinite(rec.jsonBytes)) stats.jsonBytes += rec.jsonBytes;
+      if (Number.isFinite(rec.packedBytes))
+        stats.packedBytes += rec.packedBytes;
+      if (Number.isFinite(rec.jsonTokens))
+        stats.jsonTokens += rec.jsonTokens ?? 0;
+      if (Number.isFinite(rec.packedTokens))
+        stats.packedTokens += rec.packedTokens ?? 0;
+    }
     this.packedPerEncoderStats.set(rec.encoderId, stats);
   }
 
@@ -1118,6 +1139,10 @@ export class Aggregator {
     const baseline = this.packedJsonBytes;
     const saved = baseline - this.packedBytes;
     const ratio = baseline === 0 ? 0 : Math.max(0, saved) / baseline;
+    const tokenBaseline = this.packedJsonTokens;
+    const tokenSaved = tokenBaseline - this.packedTokens;
+    const tokenRatio =
+      tokenBaseline === 0 ? 0 : Math.max(0, tokenSaved) / tokenBaseline;
     return {
       totalDecisions: total,
       packedCount: this.packedHits,
@@ -1127,6 +1152,10 @@ export class Aggregator {
       jsonBaselineBytesTotal: baseline,
       bytesSaved: saved,
       bytesSavedRatio: ratio,
+      packedTokensTotal: this.packedTokens,
+      jsonBaselineTokensTotal: tokenBaseline,
+      tokensSaved: tokenSaved,
+      tokensSavedRatio: tokenRatio,
       axisHits: {
         bytes: this.packedAxisBytes,
         tokens: this.packedAxisTokens,
@@ -1138,6 +1167,9 @@ export class Aggregator {
           const adoption = s.count === 0 ? 0 : (s.packedHits / s.count) * 100;
           const bytesSaved = Math.max(0, s.jsonBytes - s.packedBytes);
           const ratio = s.jsonBytes === 0 ? 0 : bytesSaved / s.jsonBytes;
+          const tokensSaved = Math.max(0, s.jsonTokens - s.packedTokens);
+          const tokenRatio =
+            s.jsonTokens === 0 ? 0 : tokensSaved / s.jsonTokens;
           return [
             id,
             {
@@ -1149,6 +1181,10 @@ export class Aggregator {
               packedBytesTotal: s.packedBytes,
               bytesSaved,
               bytesSavedRatio: ratio,
+              jsonBaselineTokensTotal: s.jsonTokens,
+              packedTokensTotal: s.packedTokens,
+              tokensSaved,
+              tokensSavedRatio: tokenRatio,
             },
           ];
         }),

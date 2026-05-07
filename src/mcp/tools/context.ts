@@ -4,6 +4,7 @@ import { IndexError, ValidationError } from "../errors.js";
 import { attachRawContext } from "../token-usage.js";
 import {
   serializeContextForWireFormat,
+  publishContextWireDecision,
   type ContextWireResult,
 } from "./context-wire-format.js";
 import {
@@ -184,6 +185,10 @@ export async function handleAgentContext(
         if (stats) {
           (enrichedResponse as Record<string, unknown>)._packedStats = stats;
         }
+        publishContextWireDecision(
+          wireResult,
+          payloadAttached ? "packed" : "fallback",
+        );
         if (payloadAttached) {
           (enrichedResponse as Record<string, unknown>)._packedPayload =
             wireResult.payload as string;
@@ -205,6 +210,7 @@ export async function handleAgentContext(
         if (stats) {
           (enrichedResponse as Record<string, unknown>)._packedStats = stats;
         }
+        publishContextWireDecision(wireResult, "fallback");
       }
     }
     return buildConditionalResponse(enrichedResponse, {

@@ -190,14 +190,22 @@ export interface PackedWireMetrics {
   fallbackCount: number;
   /** Adoption rate as a percentage 0-100. */
   packedAdoptionPct: number;
-  /** Cumulative bytes of packed-encoded responses. */
+  /** Cumulative bytes of responses that actually emitted packed payloads. */
   packedBytesTotal: number;
-  /** Cumulative bytes had we used JSON instead. */
+  /** Cumulative bytes had packed-emitted responses used JSON instead. */
   jsonBaselineBytesTotal: number;
   /** Bytes saved vs JSON baseline. */
   bytesSaved: number;
-  /** Savings ratio (0-1). */
+  /** Byte savings ratio (0-1). */
   bytesSavedRatio: number;
+  /** Cumulative estimated tokens of responses that actually emitted packed payloads. */
+  packedTokensTotal: number;
+  /** Cumulative estimated tokens had packed-emitted responses used JSON instead. */
+  jsonBaselineTokensTotal: number;
+  /** Estimated tokens saved vs JSON baseline. */
+  tokensSaved: number;
+  /** Token savings ratio (0-1). */
+  tokensSavedRatio: number;
   /** Hits broken down by axis the gate tripped on. */
   axisHits: { bytes: number; tokens: number; none: number };
   /** Per-encoder counts. */
@@ -214,6 +222,10 @@ export interface PackedWireMetrics {
       packedBytesTotal: number;
       bytesSaved: number;
       bytesSavedRatio: number;
+      jsonBaselineTokensTotal: number;
+      packedTokensTotal: number;
+      tokensSaved: number;
+      tokensSavedRatio: number;
     }
   >;
 }

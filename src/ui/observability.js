@@ -356,6 +356,7 @@ function updateTokenEfficiency(t, packed) {
 
   if (packed) {
     setVal(panel, "packedAdoptionPct", fmtPct(packed.packedAdoptionPct, 1));
+    setVal(panel, "packedTokensSaved", fmtNum(packed.tokensSaved || 0));
     setVal(panel, "packedBytesSaved", fmtBytes(packed.bytesSaved));
     renderPerEncoderBreakdown(panel, packed.byEncoder ?? {});
   }
@@ -370,14 +371,18 @@ function renderPerEncoderBreakdown(panel, byEncoder) {
     return;
   }
   const rows = entries
-    .sort((a, b) => b[1].bytesSaved - a[1].bytesSaved)
+    .sort(
+      (a, b) =>
+        (b[1].tokensSaved || 0) - (a[1].tokensSaved || 0) ||
+        b[1].bytesSaved - a[1].bytesSaved,
+    )
     .map(([id, m]) => {
       const adoption = fmtPct(m.packedAdoptionPct, 1);
+      const tokens = fmtNum(m.tokensSaved || 0);
       const bytes = fmtBytes(m.bytesSaved);
-      return `<tr><td class="enc">${escapeHtml(id)}</td><td class="adopt">${escapeHtml(adoption)}</td><td class="saved">${escapeHtml(bytes)}</td><td class="count">${escapeHtml(String(m.totalDecisions))}</td></tr>`;
+      return `<tr><td class="enc">${escapeHtml(id)}</td><td class="adopt">${escapeHtml(adoption)}</td><td class="tokens">${escapeHtml(tokens)}</td><td class="saved">${escapeHtml(bytes)}</td><td class="count">${escapeHtml(String(m.totalDecisions))}</td></tr>`;
     });
-  host.innerHTML =
-    `<table class="per-encoder"><thead><tr><th>encoder</th><th>adoption</th><th>saved</th><th>n</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  host.innerHTML = `<table class="per-encoder"><thead><tr><th>encoder</th><th>adoption</th><th>tok saved</th><th>byte saved</th><th>n</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 
 function updateHealth(h) {

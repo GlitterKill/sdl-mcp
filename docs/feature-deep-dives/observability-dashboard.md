@@ -398,15 +398,18 @@ DB write-pool and indexer drain saturation.
 
 Two-axis packed wire format adoption.
 
-| Field                                                      | Type                      | Meaning                                                                                          |
-| :--------------------------------------------------------- | :------------------------ | :----------------------------------------------------------------------------------------------- |
-| `totalDecisions`                                           | number                    | Encode decisions observed.                                                                       |
-| `packedCount` / `fallbackCount`                            | number                    | Times the packed encoder won / fell back to JSON.                                                |
-| `packedAdoptionPct`                                        | number 0–100              | `packedCount / totalDecisions * 100`.                                                            |
-| `packedBytesTotal`, `jsonBaselineBytesTotal`, `bytesSaved` | number                    | Raw byte accounting.                                                                             |
-| `bytesSavedRatio`                                          | number 0–1                | `bytesSaved / jsonBaselineBytesTotal`.                                                           |
-| `axisHits`                                                 | `{ bytes, tokens, none }` | Which gate axis tripped per decision. `tokens` dominating is expected for slice-shaped payloads. |
-| `perEncoder`                                               | `Record<string, number>`  | Per-encoder counts (`sl1`, `ss1`, `ctx1`).                                               |
+| Field                                                         | Type                      | Meaning                                                                                                                                                  |
+| :------------------------------------------------------------ | :------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `totalDecisions`                                              | number                    | Encode decisions observed.                                                                                                                               |
+| `packedCount` / `fallbackCount`                               | number                    | Times the packed encoder won / fell back to JSON.                                                                                                        |
+| `packedAdoptionPct`                                           | number 0–100              | `packedCount / totalDecisions * 100`.                                                                                                                    |
+| `packedBytesTotal`, `jsonBaselineBytesTotal`, `bytesSaved`    | number                    | Realized raw byte accounting for responses that actually emitted packed payloads. Fallback decisions count toward adoption, but not savings.             |
+| `bytesSavedRatio`                                             | number 0–1                | `bytesSaved / jsonBaselineBytesTotal`.                                                                                                                   |
+| `packedTokensTotal`, `jsonBaselineTokensTotal`, `tokensSaved` | number                    | Realized estimated-token accounting for responses that actually emitted packed payloads. This is the metric to inspect when `axisHits.tokens` dominates. |
+| `tokensSavedRatio`                                            | number 0–1                | `tokensSaved / jsonBaselineTokensTotal`.                                                                                                                 |
+| `axisHits`                                                    | `{ bytes, tokens, none }` | Which gate axis tripped per decision. `tokens` dominating is expected for slice-shaped payloads.                                                         |
+| `perEncoder`                                                  | `Record<string, number>`  | Per-encoder counts (`sl1`, `ss1`, `ctx1`).                                                                                                               |
+| `byEncoder`                                                   | `Record<string, object>`  | Per-encoder adoption plus byte and token savings totals.                                                                                                 |
 
 ### `ppr: PprMetrics`
 

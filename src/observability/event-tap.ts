@@ -47,6 +47,8 @@ export interface PackedWireTapEvent {
   encoderId: string;
   jsonBytes: number;
   packedBytes: number;
+  jsonTokens?: number;
+  packedTokens?: number;
   decision: "packed" | "fallback";
   axisHit: "bytes" | "tokens" | null;
 }
@@ -172,4 +174,3 @@ export function resetObservabilityTap(): void {
  *
  * to keep telemetry.ts free of inline try/catch boilerplate.
  */
-

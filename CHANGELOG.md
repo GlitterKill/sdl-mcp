@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Observability token-savings reporting now records packed-wire token totals
+  alongside byte totals, counts only realized packed emissions as savings, and
+  measures `sdl.context` usage against the projected response payload that
+  clients receive instead of stripped internal broad-context fields.
+
 ## [0.11.1] - 2026-05-07
 
 ### Added
@@ -77,7 +82,7 @@ Pass1ExtractionEntry>`) populated during pass-1 from both engines
 ### Added
 
 - **Codex SDL-first tool enforcement.** `sdl-mcp init --client codex
-  --enforce-agent-tools` now emits a broad `PreToolUse` hook that is gated
+--enforce-agent-tools` now emits a broad `PreToolUse` hook that is gated
   by the SDL-MCP PID file. When the server is running, the hook denies
   repo-targeting native source reads/searches/edits, non-SDL MCP file/search
   tools, and repo-local build/test/lint shell commands that should run through

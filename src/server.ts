@@ -35,7 +35,10 @@ import {
   type ToolPresentation,
 } from "./mcp/tool-presentation.js";
 import { getPackageVersion } from "./util/package-info.js";
-import { projectBroadContextResult } from "./mcp/context-response-projection.js";
+import {
+  projectBroadContextResult,
+  projectContextResultForUsageAccounting,
+} from "./mcp/context-response-projection.js";
 import { logger } from "./util/logger.js";
 
 export interface ToolContext {
@@ -245,8 +248,13 @@ export class MCPServer {
             let tokensSavedForObs: number | undefined;
             if (result && typeof result === "object") {
               const r = result as Record<string, unknown>;
-              if (shouldAttachUsage(request.params.name) && r._rawContext) {
-                r._tokenUsage = await computeTokenUsage(r);
+              const usageAccountingResult =
+                projectContextResultForUsageAccounting(request.params.name, r);
+              if (
+                shouldAttachUsage(request.params.name) &&
+                usageAccountingResult._rawContext
+              ) {
+                r._tokenUsage = await computeTokenUsage(usageAccountingResult);
               }
               // Accumulate session-level token usage
               if (r._tokenUsage) {
@@ -257,7 +265,10 @@ export class MCPServer {
                   usage.rawEquivalent,
                 );
                 tokensUsedForObs = usage.sdlTokens;
-                tokensSavedForObs = Math.max(0, usage.rawEquivalent - usage.sdlTokens);
+                tokensSavedForObs = Math.max(
+                  0,
+                  usage.rawEquivalent - usage.sdlTokens,
+                );
                 // Send per-call savings notification to user (MCP logging)
                 void toolContext
                   .sendNotification({
@@ -417,7 +428,10 @@ export class MCPServer {
               tokensSaved: tokensSavedForObs,
             });
             const footerLines: string[] = [];
-            if (capturedUsage && capturedUsage.sdlTokens < capturedUsage.rawEquivalent) {
+            if (
+              capturedUsage &&
+              capturedUsage.sdlTokens < capturedUsage.rawEquivalent
+            ) {
               const meterLine = `📊 ${formatTokenCount(capturedUsage.sdlTokens)} / ${formatTokenCount(capturedUsage.rawEquivalent)} tokens (SDL/raw-equiv) ${capturedUsage.meter}`;
               footerLines.push(meterLine);
             }
@@ -440,7 +454,10 @@ export class MCPServer {
             // Build the footer text for clients that look at response-level
             // _displayFooter. The content array is collapsed back to the
             // primary JSON block below to avoid duplicate text items.
-            if (capturedUsage && capturedUsage.sdlTokens < capturedUsage.rawEquivalent) {
+            if (
+              capturedUsage &&
+              capturedUsage.sdlTokens < capturedUsage.rawEquivalent
+            ) {
               contentBlocks.push({
                 type: "text",
                 text: `📊 ${formatTokenCount(capturedUsage.sdlTokens)} / ${formatTokenCount(capturedUsage.rawEquivalent)} tokens (SDL/raw-equiv) ${capturedUsage.meter}`,
@@ -456,13 +473,17 @@ export class MCPServer {
             }
 
             // Add _displayFooter at response level for Claude Code CLI visibility
-            const responseLevelDisplayFooter = footerLines.length > 0 ? footerLines.join('\n\n') : undefined;
+            const responseLevelDisplayFooter =
+              footerLines.length > 0 ? footerLines.join("\n\n") : undefined;
             // Keep the MCP content payload to one JSON block. The same footer
             // text is exposed through _displayFooter, avoiding duplicate text
             // items in clients that render both surfaces.
             contentBlocks.length = 1;
-            return responseLevelDisplayFooter 
-              ? { content: contentBlocks, _displayFooter: responseLevelDisplayFooter }
+            return responseLevelDisplayFooter
+              ? {
+                  content: contentBlocks,
+                  _displayFooter: responseLevelDisplayFooter,
+                }
               : { content: contentBlocks };
           } catch (error) {
             process.stderr.write(

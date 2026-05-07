@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   isBroadContextResult,
   projectBroadContextResult,
+  projectContextResultForUsageAccounting,
 } from "../../dist/mcp/context-response-projection.js";
 
 describe("context-response-projection", () => {
@@ -164,6 +165,22 @@ describe("context-response-projection", () => {
         projected,
         "Re-projecting should return the same reference (no-op)",
       );
+    });
+
+    it("projects usage accounting payloads while preserving raw baseline hints", () => {
+      const withRawContext = {
+        ...broadResult,
+        _rawContext: { rawTokens: 1000 },
+      };
+      const projected = projectContextResultForUsageAccounting(
+        "sdl.context",
+        withRawContext,
+      );
+
+      assert.equal(projected.actionsTaken, undefined);
+      assert.equal(projected.path, undefined);
+      assert.equal(projected.metrics, undefined);
+      assert.deepEqual(projected._rawContext, { rawTokens: 1000 });
     });
   });
 });

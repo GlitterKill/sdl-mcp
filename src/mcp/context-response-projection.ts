@@ -64,3 +64,25 @@ export function projectBroadContextResult(
   }
   return projected;
 }
+
+/**
+ * Project broad context responses before token accounting while keeping the
+ * internal raw baseline hint that `computeTokenUsage()` needs.
+ */
+export function projectContextResultForUsageAccounting(
+  toolName: string,
+  result: Record<string, unknown>,
+): Record<string, unknown> {
+  const projected = projectBroadContextResult(toolName, result);
+  if (!projected || typeof projected !== "object" || projected === result) {
+    return result;
+  }
+  const accountingResult = projected as Record<string, unknown>;
+  if ("_rawContext" in result) {
+    return {
+      ...accountingResult,
+      _rawContext: result._rawContext,
+    };
+  }
+  return accountingResult;
+}

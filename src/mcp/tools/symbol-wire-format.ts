@@ -90,6 +90,8 @@ export function serializeSymbolSearchForWireFormat(
       encoderId: SYMBOL_SEARCH_ENCODER_ID,
       jsonBytes: jsonStr.length,
       packedBytes: packedStr.length,
+      jsonTokens,
+      packedTokens,
       decision: gateDecision,
       axisHit: detail.axisHit ?? null,
     });

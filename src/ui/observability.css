@@ -866,6 +866,7 @@ table.per-encoder th {
   opacity: 0.65;
 }
 table.per-encoder td.adopt,
+table.per-encoder td.tokens,
 table.per-encoder td.saved,
 table.per-encoder td.count {
   text-align: right;

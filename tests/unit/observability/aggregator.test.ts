@@ -35,6 +35,8 @@ describe("Aggregator", () => {
       encoderId: "v2",
       jsonBytes: 1000,
       packedBytes: 400,
+      jsonTokens: 300,
+      packedTokens: 120,
       decision: "packed",
       axisHit: "bytes",
     });
@@ -42,13 +44,23 @@ describe("Aggregator", () => {
       encoderId: "v2",
       jsonBytes: 500,
       packedBytes: 200,
-      decision: "packed",
+      jsonTokens: 150,
+      packedTokens: 60,
+      decision: "fallback",
       axisHit: "tokens",
     });
     const { packed } = agg.getSnapshot(REPO);
-    assert.equal(packed.bytesSaved, 900);
-    assert.equal(packed.packedCount, 2);
-    assert.equal(packed.fallbackCount, 0);
+    assert.equal(packed.jsonBaselineBytesTotal, 1000);
+    assert.equal(packed.packedBytesTotal, 400);
+    assert.equal(packed.jsonBaselineTokensTotal, 300);
+    assert.equal(packed.packedTokensTotal, 120);
+    assert.equal(packed.bytesSaved, 600);
+    assert.equal(packed.tokensSaved, 180);
+    assert.equal(packed.byEncoder.v2.tokensSaved, 180);
+    assert.equal(packed.packedCount, 1);
+    assert.equal(packed.fallbackCount, 1);
+    assert.equal(packed.byEncoder.v2.totalDecisions, 2);
+    assert.equal(packed.byEncoder.v2.fallbackCount, 1);
   });
 
   it("counts SCIP failures separately from successes", () => {
