@@ -9,6 +9,7 @@ import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb, resolveGraphDbPath } from "../../db/initGraphDb.js";
 import { closeLadybugDb, configurePool } from "../../db/ladybug.js";
 import { persistUsageSnapshot } from "../../db/ladybug-usage.js";
+import { createWalCheckpointMaintenance } from "../../db/wal-maintenance.js";
 import { printBanner } from "../../util/banner.js";
 import {
   configurePrefetch,
@@ -39,6 +40,7 @@ import {
   shutdownLogger,
 } from "../../util/logger.js";
 import { configureToolDispatchLimiter } from "../../mcp/dispatch-limiter.js";
+import { isIndexingActive } from "../../mcp/indexing-gate.js";
 import { SessionManager } from "../../mcp/session-manager.js";
 import { tokenAccumulator } from "../../mcp/token-accumulator.js";
 import { ensureConfiguredReposRegistered } from "../../startup/bootstrap.js";
@@ -251,6 +253,11 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   if (config.liveIndex?.enabled ?? true) {
     idleMonitor.start();
   }
+  const walMaintenance = createWalCheckpointMaintenance({
+    graphDbPath,
+    isIndexingActive,
+  });
+  walMaintenance.start();
 
   // For stdio: create a single MCPServer (only one client possible).
   // For HTTP: the transport creates per-session servers via createMCPServer().
@@ -310,6 +317,9 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
 
   shutdownMgr.addCleanup("idleMonitor", () => {
     idleMonitor.stop();
+  });
+  shutdownMgr.addCleanup("walMaintenance", () => {
+    walMaintenance.stop();
   });
   if (observabilityService) {
     shutdownMgr.addCleanup("observability", () => {

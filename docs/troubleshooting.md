@@ -160,6 +160,19 @@ Then run manual refreshes with `sdl-mcp index` until the underlying issue is fix
   - avoid running `sdl-mcp index` while agents are actively querying; index during quiet periods or use incremental mode
   - if errors persist, restart the server to clear stale transaction state
 
+#### WAL file stays large or current
+
+- Symptom: `<graphDatabase.path>.wal` is large, or its modified time is newer than the main `.lbug` database file
+- Cause:
+  - LadybugDB commits can remain in the WAL until a checkpoint; the main `.lbug` timestamp is not a reliable "last write" signal
+  - Indexing, SCIP ingest, embeddings, and derived-state refreshes can create large WAL bursts
+  - MCP tool calls also write compact Audit rows, so read-heavy work can keep the WAL timestamp current even when graph content is unchanged
+- Resolution:
+  - `sdl-mcp serve` runs best-effort WAL maintenance after startup
+  - maintenance checkpoints only when the WAL is quiet, the write pool is idle, and no indexing/post-index session is active
+  - current defaults: check every 60s, checkpoint when WAL is at least 32 MiB after 30s quiet time, or when a non-empty WAL has been quiet for 15 minutes; checkpoint attempts are rate-limited to once every 5 minutes
+  - graceful shutdown still performs a final best-effort checkpoint
+
 #### Database incompatible after upgrade
 
 - Symptom: error "not compatible with the current graph engine" on startup

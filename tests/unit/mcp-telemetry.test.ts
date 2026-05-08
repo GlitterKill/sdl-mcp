@@ -13,6 +13,7 @@ import {
   logSummaryQualityTelemetry,
   logPrefetchTelemetry,
   logRuntimeExecution,
+  buildToolCallAuditDetailsJson,
   type ToolCallEvent,
   type CodeWindowDecisionEvent,
   type IndexEvent,
@@ -69,6 +70,49 @@ describe("MCP telemetry", () => {
       };
 
       assert.doesNotThrow(() => logToolCall(event));
+    });
+
+    it("compacts large request and response payloads before writing audit details", () => {
+      const largeText = "full-payload-marker-".repeat(2_000);
+      const event: ToolCallEvent = {
+        tool: "sdl.context",
+        request: {
+          query: largeText,
+          nested: { code: largeText },
+        },
+        response: {
+          context: largeText,
+          symbols: Array.from({ length: 100 }, (_, index) => ({
+            id: `sym-${index}`,
+            body: largeText,
+          })),
+        },
+        durationMs: 123,
+        repoId: "test-repo",
+      };
+
+      const json = buildToolCallAuditDetailsJson(event);
+      const parsed = JSON.parse(json) as {
+        auditDetailVersion: number;
+        request: { query: { type: string; length: number } };
+        response: {
+          context: { type: string; length: number };
+          symbols: { type: string; length: number; sample: unknown[] };
+        };
+      };
+
+      assert.ok(json.length < 8_192);
+      assert.equal(json.includes(largeText), false);
+      assert.equal(parsed.auditDetailVersion, 2);
+      assert.deepEqual(parsed.request.query, {
+        type: "string",
+        length: largeText.length,
+        preview: largeText.slice(0, 240),
+      });
+      assert.equal(parsed.response.context.length, largeText.length);
+      assert.equal(parsed.response.symbols.type, "array");
+      assert.equal(parsed.response.symbols.length, 100);
+      assert.equal(parsed.response.symbols.sample.length, 5);
     });
   });
 

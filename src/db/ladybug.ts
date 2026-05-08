@@ -463,6 +463,33 @@ async function checkpointWal(
 }
 
 /**
+ * Run a best-effort WAL checkpoint through the serialized write connection.
+ *
+ * This is intentionally timeout-bound. CHECKPOINT is a housekeeping operation:
+ * it should keep WAL sidecars from growing indefinitely, but it must not wedge
+ * user-facing reads/writes if another write owns the limiter.
+ */
+export async function runWalCheckpoint(
+  phase = "manual",
+  timeoutMs = 2_000,
+): Promise<boolean> {
+  if (!writeConn) return false;
+
+  try {
+    return await withWriteConn(
+      (conn) => checkpointWal(conn, phase),
+      timeoutMs,
+    );
+  } catch (err) {
+    logger.debug("LadybugDB CHECKPOINT skipped", {
+      phase,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}
+
+/**
  * Force a WAL checkpoint before starting a large indexing run.
  *
  * Runs through `withWriteConn` so the checkpoint is serialized against any
@@ -471,46 +498,11 @@ async function checkpointWal(
  * — the checkpoint is a best-effort safety measure; indexing will proceed
  * even if the WAL flush fails.
  *
- * This is the public entry point the indexer uses; `checkpointWal` remains
- * private and is used only during pool init and shutdown.
+ * This is the indexer-specific entry point; general WAL maintenance uses
+ * `runWalCheckpoint` above.
  */
 export async function preIndexCheckpoint(): Promise<void> {
-  // Skip if the pool isn't ready — indexer may be driving an init path.
-  if (!writeConn) return;
-
-  // Race with a short timeout. If another writer holds the mutex (e.g. a
-  // deferred derived-refresh still in flight), we do NOT want to block
-  // indexing for ~minutes waiting for CHECKPOINT. Checkpoint is purely a
-  // best-effort WAL flush; skipping it is always safe.
-  const PRE_INDEX_CHECKPOINT_TIMEOUT_MS = 2_000;
-  try {
-    const work = withWriteConn(async (conn) => {
-      await checkpointWal(conn, "pre-index");
-    });
-    const timeout = new Promise<"timeout">((resolve) => {
-      const t = setTimeout(
-        () => resolve("timeout"),
-        PRE_INDEX_CHECKPOINT_TIMEOUT_MS,
-      );
-      t.unref?.();
-    });
-    const winner = await Promise.race([
-      work.then(() => "ok" as const),
-      timeout,
-    ]);
-    if (winner === "timeout") {
-      logger.debug("preIndexCheckpoint skipped (write mutex busy)", {
-        timeoutMs: PRE_INDEX_CHECKPOINT_TIMEOUT_MS,
-      });
-      // Let the checkpoint finish in the background; swallow any error.
-      work.catch(() => {});
-    }
-  } catch (err) {
-    // withWriteConn can throw on poisoned pool — non-fatal for indexing.
-    logger.debug("preIndexCheckpoint skipped", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  await runWalCheckpoint("pre-index", 2_000);
 }
 
 /**
@@ -694,6 +686,7 @@ export async function getLadybugConn(): Promise<LadybugConnection> {
 
 export async function withWriteConn<T>(
   fn: (conn: LadybugConnection) => Promise<T>,
+  timeoutMs?: number,
 ): Promise<T> {
   await getLadybugReadConn();
   // Reuse the active post-index session conn when called from inside the
@@ -731,7 +724,7 @@ export async function withWriteConn<T>(
       }
       throw err;
     }
-  });
+  }, timeoutMs);
 }
 
 // Wire write-session.ts so withPostIndexWriteSession can acquire the same

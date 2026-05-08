@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   alongside byte totals, counts only realized packed emissions as savings, and
   measures `sdl.context` usage against the projected response payload that
   clients receive instead of stripped internal broad-context fields.
+- Serve-mode LadybugDB WAL maintenance now performs best-effort idle
+  checkpoints when the WAL is quiet/large or old, while skipping active
+  indexing and post-index sessions.
+- Tool-call audit logging now stores compact request/response summaries
+  instead of full payload bodies by default, reducing WAL churn from read-heavy
+  MCP usage.
 
 ## [0.11.1] - 2026-05-07
 

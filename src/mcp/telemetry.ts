@@ -203,6 +203,130 @@ function generateAuditEventId(): string {
   return `audit_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
 }
 
+const TOOL_CALL_AUDIT_DETAIL_VERSION = 2;
+const TOOL_CALL_AUDIT_STRING_PREVIEW_CHARS = 240;
+const TOOL_CALL_AUDIT_ARRAY_SAMPLE_SIZE = 5;
+const TOOL_CALL_AUDIT_MAX_OBJECT_KEYS = 24;
+const TOOL_CALL_AUDIT_MAX_DEPTH = 3;
+const TOOL_CALL_AUDIT_DETAILS_MAX_BYTES = 8 * 1024;
+
+type AuditJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | AuditJsonValue[]
+  | { [key: string]: AuditJsonValue };
+
+function summarizeStringForAudit(value: string): AuditJsonValue {
+  if (value.length <= TOOL_CALL_AUDIT_STRING_PREVIEW_CHARS) {
+    return value;
+  }
+  return {
+    type: "string",
+    length: value.length,
+    preview: value.slice(0, TOOL_CALL_AUDIT_STRING_PREVIEW_CHARS),
+  };
+}
+
+function summarizeAuditValue(value: unknown, depth = 0): AuditJsonValue {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "string") {
+    return summarizeStringForAudit(value);
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : String(value);
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "bigint") {
+    return `${value.toString()}n`;
+  }
+  if (typeof value === "symbol" || typeof value === "function") {
+    return `[${typeof value}]`;
+  }
+  if (Array.isArray(value)) {
+    return {
+      type: "array",
+      length: value.length,
+      sample: value
+        .slice(0, TOOL_CALL_AUDIT_ARRAY_SAMPLE_SIZE)
+        .map((entry) => summarizeAuditValue(entry, depth + 1)),
+    };
+  }
+
+  const entries = Object.entries(value);
+  if (depth >= TOOL_CALL_AUDIT_MAX_DEPTH) {
+    return {
+      type: "object",
+      keyCount: entries.length,
+      keys: entries
+        .slice(0, TOOL_CALL_AUDIT_MAX_OBJECT_KEYS)
+        .map(([key]) => key),
+    };
+  }
+
+  const summarized: Record<string, AuditJsonValue> = {};
+  for (const [key, entryValue] of entries.slice(
+    0,
+    TOOL_CALL_AUDIT_MAX_OBJECT_KEYS,
+  )) {
+    summarized[key] = summarizeAuditValue(entryValue, depth + 1);
+  }
+  if (entries.length > TOOL_CALL_AUDIT_MAX_OBJECT_KEYS) {
+    summarized.__truncatedKeys = entries.length - TOOL_CALL_AUDIT_MAX_OBJECT_KEYS;
+  }
+  return summarized;
+}
+
+function jsonByteLength(value: string): number {
+  return Buffer.byteLength(value, "utf8");
+}
+
+export function buildToolCallAuditDetailsJson(event: ToolCallEvent): string {
+  const details = {
+    auditDetailVersion: TOOL_CALL_AUDIT_DETAIL_VERSION,
+    request: summarizeAuditValue(event.request),
+    response: summarizeAuditValue(event.response),
+    durationMs: event.durationMs,
+    tokensUsed: event.tokensUsed,
+    tokensSaved: event.tokensSaved,
+  };
+  const json = JSON.stringify(details);
+  const bytes = jsonByteLength(json);
+  if (bytes <= TOOL_CALL_AUDIT_DETAILS_MAX_BYTES) {
+    return json;
+  }
+
+  const compactJson = JSON.stringify({
+    auditDetailVersion: TOOL_CALL_AUDIT_DETAIL_VERSION,
+    truncated: true,
+    originalBytes: bytes,
+    durationMs: event.durationMs,
+    request: summarizeAuditValue(event.request, TOOL_CALL_AUDIT_MAX_DEPTH),
+    response: summarizeAuditValue(event.response, TOOL_CALL_AUDIT_MAX_DEPTH),
+    tokensUsed: event.tokensUsed,
+    tokensSaved: event.tokensSaved,
+  });
+  if (jsonByteLength(compactJson) <= TOOL_CALL_AUDIT_DETAILS_MAX_BYTES) {
+    return compactJson;
+  }
+
+  return JSON.stringify({
+    auditDetailVersion: TOOL_CALL_AUDIT_DETAIL_VERSION,
+    truncated: true,
+    originalBytes: bytes,
+    durationMs: event.durationMs,
+    request: "[omitted]",
+    response: "[omitted]",
+    tokensUsed: event.tokensUsed,
+    tokensSaved: event.tokensSaved,
+  });
+}
+
 function buildIndexEventDetails(event: IndexEvent): string {
   return JSON.stringify({
     versionId: event.versionId,
@@ -268,11 +392,7 @@ export function logToolCall(event: ToolCallEvent): void {
     decision,
     repoId: event.repoId,
     symbolId: event.symbolId,
-    detailsJson: JSON.stringify({
-      request: event.request,
-      response: event.response,
-      durationMs: event.durationMs,
-    }),
+    detailsJson: buildToolCallAuditDetailsJson(event),
   }).catch((err) =>
     logger.warn(`Audit write failed for ${event.tool}: ${String(err)}`),
   );
