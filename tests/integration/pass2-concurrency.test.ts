@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 
 import {
   closeLadybugDb,
+  configurePool,
   getLadybugConn,
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
@@ -132,6 +133,10 @@ describe("pass2Concurrency — parity and progress", () => {
     delete process.env.SDL_CONFIG_PATH;
 
     await closeLadybugDb();
+    // Windows CI occasionally runs post-index DB work slowly enough that the
+    // default 30s queue guard trips before this pass-2 parity test reaches its
+    // assertions. Keep the test focused on pass-2 correctness, not runner I/O.
+    configurePool({ writeQueueTimeoutMs: 120_000 });
     await initLadybugDb(graphDbPath);
     const conn = await getLadybugConn();
     const now = new Date().toISOString();
@@ -155,6 +160,7 @@ describe("pass2Concurrency — parity and progress", () => {
 
   after(async () => {
     await closeLadybugDb();
+    configurePool({ writeQueueTimeoutMs: 30_000 });
     if (prevSDL_CONFIG === undefined) {
       delete process.env.SDL_CONFIG;
     } else {
