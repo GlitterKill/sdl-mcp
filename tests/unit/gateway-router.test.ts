@@ -12,7 +12,7 @@ describe("Gateway router", () => {
   let tmpDir: string;
 
   before(() => {
-    // Create a config with memory enabled so all 31 actions are present
+    // Create a config with memory enabled so all actions are present
     tmpDir = mkdtempSync(join(tmpdir(), "sdl-gw-router-"));
     const configPath = join(tmpDir, "config.json");
     writeFileSync(configPath, JSON.stringify({
@@ -34,10 +34,10 @@ describe("Gateway router", () => {
   });
 
   describe("createActionMap", () => {
-    it("contains all 32 actions", () => {
+    it("contains all 35 actions", () => {
       const map = createActionMap();
       const actions = Object.keys(map);
-      assert.strictEqual(actions.length, 32);
+      assert.strictEqual(actions.length, 35);
     });
 
     it("each entry has schema and handler", () => {
@@ -79,6 +79,7 @@ describe("Gateway router", () => {
         "buffer.status",
         "runtime.execute",
         "runtime.queryOutput",
+        "response.get",
         "memory.store",
         "memory.query",
         "memory.remove",

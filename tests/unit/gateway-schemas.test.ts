@@ -172,6 +172,22 @@ describe("Gateway schemas", () => {
       });
       assert.strictEqual(result.success, false);
     });
+
+    it("validates search.edit preview with responseMode", () => {
+      const result = RepoGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "search.edit",
+        mode: "preview",
+        targeting: "text",
+        query: {
+          literal: "oldName",
+          replacement: "newName",
+        },
+        editMode: "replacePattern",
+        responseMode: "handle",
+      });
+      assert.strictEqual(result.success, true);
+    });
   });
 
   describe("AgentGatewaySchema", () => {
@@ -212,24 +228,24 @@ describe("Gateway schemas", () => {
   });
 
   describe("action constants", () => {
-    it("QUERY_ACTIONS has 7 actions", () => {
-      assert.strictEqual(QUERY_ACTIONS.length, 7);
+    it("QUERY_ACTIONS has 8 actions", () => {
+      assert.strictEqual(QUERY_ACTIONS.length, 8);
     });
 
     it("CODE_ACTIONS has 3 actions", () => {
       assert.strictEqual(CODE_ACTIONS.length, 3);
     });
 
-    it("REPO_ACTIONS has 9 actions", () => {
-      assert.strictEqual(REPO_ACTIONS.length, 9);
+    it("REPO_ACTIONS has 12 actions", () => {
+      assert.strictEqual(REPO_ACTIONS.length, 12);
     });
 
     it("AGENT_ACTIONS has 11 actions", () => {
       assert.strictEqual(AGENT_ACTIONS.length, 11);
     });
 
-    it("ALL_ACTIONS has 30 total actions", () => {
-      assert.strictEqual(ALL_ACTIONS.length, 30);
+    it("ALL_ACTIONS has 34 total actions", () => {
+      assert.strictEqual(ALL_ACTIONS.length, 34);
     });
   });
 });

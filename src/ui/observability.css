@@ -845,32 +845,51 @@ input:focus {
   }
 }
 
-/* Packed-wire per-encoder breakdown */
+/* Token efficiency breakdowns */
+.layer-breakdown-row {
+  margin-top: 0.45rem;
+  font-size: 0.78rem;
+}
+
 .per-encoder-row {
   margin-top: 0.4rem;
   font-size: 0.78rem;
 }
+
+table.layer-breakdown,
 table.per-encoder {
   width: 100%;
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
 }
+
+table.layer-breakdown th,
+table.layer-breakdown td,
 table.per-encoder th,
 table.per-encoder td {
   text-align: left;
   padding: 1px 4px;
   border-bottom: 1px solid var(--bd, #2a2a2a);
 }
+
+table.layer-breakdown th,
 table.per-encoder th {
   font-weight: 500;
   opacity: 0.65;
 }
+
+table.layer-breakdown td.tokens,
+table.layer-breakdown td.hit,
+table.layer-breakdown td.bytes,
+table.layer-breakdown td.count,
 table.per-encoder td.adopt,
 table.per-encoder td.tokens,
 table.per-encoder td.saved,
 table.per-encoder td.count {
   text-align: right;
 }
+
+table.layer-breakdown td.layer,
 table.per-encoder td.enc {
   font-family: var(--mono, monospace);
 }

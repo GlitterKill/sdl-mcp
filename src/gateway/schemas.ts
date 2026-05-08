@@ -18,6 +18,7 @@ import {
   RUNTIME_MAX_QUERY_TERMS,
   RUNTIME_DEFAULT_MAX_RESPONSE_LINES,
 } from "../config/constants.js";
+import { MAX_RESPONSE_EXCERPT_BYTES } from "../runtime/response-artifacts.js";
 
 // ============================================================================
 // Shared sub-schemas (reused across actions to reduce duplication)
@@ -122,6 +123,29 @@ const PRRiskAnalyzeAction = z.object({
   riskThreshold: z.number().int().min(0).max(100).optional(),
 });
 
+const ResponseGetAction = z.object({
+  action: z.literal("response.get"),
+  handle: z.string().min(1).max(256).regex(/^[A-Za-z0-9_-]+$/),
+  full: z.boolean().default(false).optional(),
+  maxBytes: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_RESPONSE_EXCERPT_BYTES)
+    .optional(),
+  maxTokens: z.number().int().min(1).max(250_000).optional(),
+  offsetBytes: z.number().int().min(0).default(0).optional(),
+});
+
+const ResponseModeField = {
+  responseMode: z.enum(["inline", "auto", "handle"]).optional().default("inline"),
+};
+
+const SessionDeltaFields = {
+  deltaMode: z.enum(["off", "auto"]).optional().default("off"),
+  maxDeltaLines: z.number().int().min(1).max(1000).optional(),
+};
+
 export const QueryGatewaySchema = z
   .object({
     repoId: z.string().min(1),
@@ -135,6 +159,7 @@ export const QueryGatewaySchema = z
       SliceSpilloverGetAction,
       DeltaGetAction,
       PRRiskAnalyzeAction,
+      ResponseGetAction,
     ]),
   );
 
@@ -160,6 +185,8 @@ const CodeNeedWindowAction = z.object({
       budget: SliceBudgetFields.optional(),
     })
     .optional(),
+  ...ResponseModeField,
+  ...SessionDeltaFields,
 });
 
 const GetSkeletonAction = z.object({
@@ -289,7 +316,80 @@ const FileReadAction = z.object({
   search: z.string().max(500).optional(),
   searchContext: z.number().int().min(0).max(20).optional(),
   jsonPath: z.string().max(200).optional(),
+  ...ResponseModeField,
+  ...SessionDeltaFields,
 });
+
+const SearchEditAction = z
+  .object({
+    action: z.literal("search.edit"),
+    mode: z.enum(["preview", "apply"]),
+    targeting: z.enum(["text", "symbol"]).optional(),
+    query: z
+      .object({
+        literal: z.string().optional(),
+        regex: z.string().optional(),
+        replacement: z.string().optional(),
+        global: z.boolean().optional(),
+        symbolRef: SymbolRefFields.optional(),
+        symbolIds: z.array(z.string()).optional(),
+      })
+      .optional(),
+    editMode: z
+      .enum([
+        "replacePattern",
+        "replaceLines",
+        "insertAt",
+        "append",
+        "overwrite",
+      ])
+      .optional(),
+    filters: z
+      .object({
+        include: z.array(z.string()).optional(),
+        exclude: z.array(z.string()).optional(),
+        extensions: z.array(z.string()).optional(),
+      })
+      .optional(),
+    previewContextLines: z.number().int().min(0).max(20).optional(),
+    maxFiles: z.number().int().min(1).max(1000).optional(),
+    maxMatchesPerFile: z.number().int().min(1).max(5000).optional(),
+    maxTotalMatches: z.number().int().min(1).max(50000).optional(),
+    planHandle: z.string().min(1).max(200).optional(),
+    createBackup: z.boolean().optional(),
+    ...ResponseModeField,
+  })
+  .superRefine((value, ctx) => {
+    if (value.mode === "preview") {
+      if (value.targeting === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "search.edit preview requires targeting",
+          path: ["targeting"],
+        });
+      }
+      if (value.query === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "search.edit preview requires query",
+          path: ["query"],
+        });
+      }
+      if (value.editMode === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "search.edit preview requires editMode",
+          path: ["editMode"],
+        });
+      }
+    } else if (value.planHandle === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "search.edit apply requires planHandle",
+        path: ["planHandle"],
+      });
+    }
+  });
 
 const ScipIngestAction = z.object({
   action: z.literal("scip.ingest"),
@@ -336,6 +436,7 @@ export const RepoGatewaySchema = z
       PolicySetAction,
       UsageStatsAction,
       FileReadAction,
+      SearchEditAction,
       ScipIngestAction,
       SemanticEnrichmentRefreshAction,
       SemanticEnrichmentStatusAction,
@@ -517,6 +618,7 @@ export const QUERY_ACTIONS = [
   "slice.spillover.get",
   "delta.get",
   "pr.risk.analyze",
+  "response.get",
 ] as const;
 
 export const CODE_ACTIONS = [
@@ -535,6 +637,7 @@ export const REPO_ACTIONS = [
   "policy.set",
   "usage.stats",
   "file.read",
+  "search.edit",
   "semantic.enrichment.refresh",
   "semantic.enrichment.status",
 ] as const;

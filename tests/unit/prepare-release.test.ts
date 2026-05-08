@@ -107,6 +107,11 @@ describe("prepare-release helpers", () => {
       [],
     );
     assert.ok(helpers.getRequiredPackEntries().includes("templates/SDL.md"));
+    assert.ok(
+      helpers
+        .getRequiredPackEntries()
+        .includes("scripts/postinstall-tree-sitter.mjs"),
+    );
     assert.deepStrictEqual(
       helpers.findMissingPackEntries(
         helpers

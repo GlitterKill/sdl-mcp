@@ -51,9 +51,14 @@ import type {
   TimeseriesPoint,
   TimeseriesResponse,
   TimeseriesWindow,
+  TokenSavingsBreakdownMetrics,
+  TokenSavingsLayerMetrics,
+  TokenSavingsSource,
+  TokenSavingsToolMetrics,
   TokenEfficiencyMetrics,
   ToolVolume,
 } from "./types.js";
+import { TOKEN_SAVINGS_SOURCES } from "./types.js";
 
 /* -------------------------------------------------------------------------- */
 /* Internal record shapes                                                      */
@@ -121,6 +126,25 @@ interface PackedWireRec {
   axisHit: "bytes" | "tokens" | null;
 }
 
+interface TokenSavingsRec {
+  source: TokenSavingsSource;
+  tool?: string;
+  estimatedTokensAvoided?: number;
+  storedBytes?: number;
+  opportunity?: boolean;
+  hit?: boolean;
+  realized?: boolean;
+}
+
+interface TokenSavingsBucket {
+  events: number;
+  realizedEvents: number;
+  estimatedTokensAvoided: number;
+  opportunities: number;
+  hits: number;
+  storedBytes: number;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Aggregator                                                                  */
 /* -------------------------------------------------------------------------- */
@@ -170,6 +194,11 @@ export class Aggregator {
   private tokenUsedTotal = 0;
   private tokenSavedTotal = 0;
   private tokenSampledCalls = 0;
+  private readonly tokenSavingsBySource = new Map<
+    TokenSavingsSource,
+    TokenSavingsBucket
+  >();
+  private readonly tokenSavingsByTool = new Map<string, TokenSavingsBucket>();
 
   // ----- retrieval -----
   private retrievalTotal = 0;
@@ -429,6 +458,62 @@ export class Aggregator {
     }
   }
 
+  recordTokenSavingsEvent(rec: TokenSavingsRec): void {
+    this.applyTokenSavingsBucket(this.bucketForSource(rec.source), rec);
+    if (rec.tool !== undefined && rec.tool.length > 0) {
+      this.applyTokenSavingsBucket(this.bucketForTool(rec.tool), rec);
+    }
+  }
+
+  private bucketForSource(source: TokenSavingsSource): TokenSavingsBucket {
+    let bucket = this.tokenSavingsBySource.get(source);
+    if (bucket === undefined) {
+      bucket = newTokenSavingsBucket();
+      this.tokenSavingsBySource.set(source, bucket);
+    }
+    return bucket;
+  }
+
+  private bucketForTool(tool: string): TokenSavingsBucket {
+    let bucket = this.tokenSavingsByTool.get(tool);
+    if (bucket === undefined) {
+      bucket = newTokenSavingsBucket();
+      this.tokenSavingsByTool.set(tool, bucket);
+    }
+    return bucket;
+  }
+
+  private applyTokenSavingsBucket(
+    bucket: TokenSavingsBucket,
+    rec: TokenSavingsRec,
+  ): void {
+    bucket.events += 1;
+    const opportunity = rec.opportunity === true;
+    if (opportunity) {
+      bucket.opportunities += 1;
+      if (rec.hit === true) bucket.hits += 1;
+    }
+    const realized = rec.realized !== false;
+    if (realized) {
+      bucket.realizedEvents += 1;
+      if (
+        typeof rec.estimatedTokensAvoided === "number" &&
+        Number.isFinite(rec.estimatedTokensAvoided)
+      ) {
+        bucket.estimatedTokensAvoided += Math.max(
+          0,
+          rec.estimatedTokensAvoided,
+        );
+      }
+      if (
+        typeof rec.storedBytes === "number" &&
+        Number.isFinite(rec.storedBytes)
+      ) {
+        bucket.storedBytes += Math.max(0, rec.storedBytes);
+      }
+    }
+  }
+
   recordIndexEvent(event: IndexEvent): void {
     this.indexEventTotal += 1;
     const anyEvt = event as IndexEvent & {
@@ -654,6 +739,22 @@ export class Aggregator {
         stats.packedTokens += rec.packedTokens ?? 0;
     }
     this.packedPerEncoderStats.set(rec.encoderId, stats);
+    const tokensAvoided =
+      rec.decision === "packed"
+        ? Math.max(0, (rec.jsonTokens ?? 0) - (rec.packedTokens ?? 0))
+        : 0;
+    const bytesAvoided =
+      rec.decision === "packed"
+        ? Math.max(0, rec.jsonBytes - rec.packedBytes)
+        : 0;
+    this.recordTokenSavingsEvent({
+      source: "packedWire",
+      estimatedTokensAvoided: tokensAvoided,
+      storedBytes: bytesAvoided,
+      opportunity: true,
+      hit: rec.decision === "packed",
+      realized: rec.decision === "packed",
+    });
   }
 
   recordScipIngest(rec: {
@@ -1066,7 +1167,53 @@ export class Aggregator {
     const savingsRatio = totalRef === 0 ? 0 : saved / totalRef;
     const avgPerCall =
       this.tokenSampledCalls === 0 ? 0 : used / this.tokenSampledCalls;
-    return { totalUsed: used, totalSaved: saved, savingsRatio, avgPerCall };
+    return {
+      totalUsed: used,
+      totalSaved: saved,
+      savingsRatio,
+      avgPerCall,
+      compressionLayers: this.computeTokenSavingsBreakdown(),
+    };
+  }
+
+  private computeTokenSavingsBreakdown(): TokenSavingsBreakdownMetrics {
+    const bySource: Record<string, TokenSavingsLayerMetrics> = {};
+    for (const source of TOKEN_SAVINGS_SOURCES) {
+      bySource[source] = tokenSavingsLayerMetrics(
+        source,
+        this.tokenSavingsBySource.get(source),
+      );
+    }
+    const byTool: Record<string, TokenSavingsToolMetrics> = {};
+    for (const [tool, bucket] of this.tokenSavingsByTool.entries()) {
+      byTool[tool] = {
+        ...tokenSavingsLayerMetrics(tool, bucket),
+        tool,
+      };
+    }
+    const totals = Array.from(this.tokenSavingsBySource.values()).reduce(
+      (acc, bucket) => {
+        acc.events += bucket.events;
+        acc.realizedEvents += bucket.realizedEvents;
+        acc.estimatedTokensAvoided += bucket.estimatedTokensAvoided;
+        acc.storedBytes += bucket.storedBytes;
+        return acc;
+      },
+      {
+        events: 0,
+        realizedEvents: 0,
+        estimatedTokensAvoided: 0,
+        storedBytes: 0,
+      },
+    );
+    return {
+      totalEvents: totals.events,
+      totalRealizedEvents: totals.realizedEvents,
+      totalEstimatedTokensAvoided: totals.estimatedTokensAvoided,
+      totalStoredBytes: totals.storedBytes,
+      bySource,
+      byTool,
+    };
   }
 
   private computeHealth(): HealthMetrics {
@@ -1288,6 +1435,35 @@ function avg(xs: number[]): number {
   let sum = 0;
   for (const x of xs) sum += x;
   return sum / xs.length;
+}
+
+function newTokenSavingsBucket(): TokenSavingsBucket {
+  return {
+    events: 0,
+    realizedEvents: 0,
+    estimatedTokensAvoided: 0,
+    opportunities: 0,
+    hits: 0,
+    storedBytes: 0,
+  };
+}
+
+function tokenSavingsLayerMetrics(
+  source: string,
+  bucket: TokenSavingsBucket | undefined,
+): TokenSavingsLayerMetrics {
+  const b = bucket ?? newTokenSavingsBucket();
+  return {
+    source,
+    events: b.events,
+    realizedEvents: b.realizedEvents,
+    estimatedTokensAvoided: b.estimatedTokensAvoided,
+    opportunities: b.opportunities,
+    hits: b.hits,
+    hitRatePct:
+      b.opportunities === 0 ? 0 : (b.hits / b.opportunities) * 100,
+    storedBytes: b.storedBytes,
+  };
 }
 
 /**

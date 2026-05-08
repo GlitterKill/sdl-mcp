@@ -80,7 +80,7 @@ flowchart TD
 
 - **Node.js 24+** is required ([download](https://nodejs.org/)). SDL-MCP uses Node.js features not available in earlier versions. Run `node -v` to check.
 
-> **Peer dependency warnings during install?** The tree-sitter grammar packages may produce `ERESOLVE` warnings about peer dependencies. These are harmless — the install succeeds and everything works correctly. Add `--legacy-peer-deps` to suppress them: `npm install -g sdl-mcp --legacy-peer-deps`
+> **Peer dependency warnings during install?** The tree-sitter grammar packages may produce `ERESOLVE` warnings about peer dependencies. These are harmless — the install succeeds and everything works correctly. Add `--legacy-peer-deps` to suppress them: `npm install -g sdl-mcp --legacy-peer-deps`. SDL-MCP's postinstall also verifies tree-sitter grammar bindings and rebuilds missing ones before pruning sources; installs that use `--ignore-scripts` should run `npm rebuild tree-sitter tree-sitter-kotlin` if a grammar is unavailable.
 
 <br/>
 

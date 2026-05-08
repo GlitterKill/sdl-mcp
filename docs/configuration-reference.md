@@ -413,6 +413,10 @@ Combined SCIP and LSIF indexes are supported. When `languages` or `--languages` 
 | `maxStdoutBytes`     | `number`         | `1048576`                                   |                                                    |
 | `maxStderrBytes`     | `number`         | `262144`                                    |                                                    |
 | `maxArtifactBytes`   | `number`         | `10485760`                                  |                                                    |
+| `maxResponseArtifactsPerRepo` | `number` | `128`                                      | Response-artifact handles retained per repo        |
+| `maxResponseArtifactBytesPerRepo` | `number` | `1342177280`                         | Response-artifact bytes retained per repo          |
+| `maxResponseArtifactBytesTotal` | `number` | `2684354560`                           | Response-artifact bytes retained across storage    |
+| `maxResponseArtifactsTotal` | `number` | `512`                                      | Response-artifact handles retained across storage  |
 | `artifactTtlHours`   | `number`         | `24`                                        |                                                    |
 | `maxConcurrentJobs`  | `number`         | `2`                                         | `1-12`                                             |
 | `envAllowlist`       | `string[]`       | `[]`                                        |                                                    |

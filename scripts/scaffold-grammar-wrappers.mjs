@@ -184,7 +184,7 @@ const grammar = require("${name}");
 const grammar = require("${upstream}");
 \`\`\`
 
-No native compilation happens here — the upstream grammar ships prebuilt \`.node\` binaries that are reused transitively.
+The wrapper itself does not compile native code. Upstream grammars use prebuilt \`.node\` binaries when available; otherwise sdl-mcp's postinstall verifier rebuilds grammar bindings before source pruning.
 
 ## Pins
 

@@ -762,6 +762,29 @@ export const RUNTIME_DEFAULT_MAX_STDERR_BYTES = 262_144;
 export const RUNTIME_DEFAULT_MAX_ARTIFACT_BYTES = 10_485_760;
 
 /**
+ * Default number of response artifacts retained per repo.
+ */
+export const RUNTIME_DEFAULT_MAX_RESPONSE_ARTIFACTS_PER_REPO = 128;
+
+/**
+ * Default response-artifact bytes retained per repo.
+ */
+export const RUNTIME_DEFAULT_MAX_RESPONSE_ARTIFACT_BYTES_PER_REPO =
+  RUNTIME_DEFAULT_MAX_ARTIFACT_BYTES *
+  RUNTIME_DEFAULT_MAX_RESPONSE_ARTIFACTS_PER_REPO;
+
+/**
+ * Default response-artifact bytes retained across the artifact directory.
+ */
+export const RUNTIME_DEFAULT_MAX_RESPONSE_ARTIFACT_BYTES_TOTAL =
+  RUNTIME_DEFAULT_MAX_ARTIFACT_BYTES * 256;
+
+/**
+ * Default response-artifact count retained across the artifact directory.
+ */
+export const RUNTIME_DEFAULT_MAX_RESPONSE_ARTIFACTS_TOTAL = 512;
+
+/**
  * Default artifact time-to-live in hours.
  */
 export const RUNTIME_DEFAULT_ARTIFACT_TTL_HOURS = 24;

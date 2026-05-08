@@ -14,7 +14,7 @@ const grammar = require("sdl-mcp-tree-sitter-go");
 const grammar = require("tree-sitter-go");
 ```
 
-No native compilation happens here — the upstream grammar ships prebuilt `.node` binaries that are reused transitively.
+The wrapper itself does not compile native code. Upstream grammars use prebuilt `.node` binaries when available; otherwise sdl-mcp's postinstall verifier rebuilds the grammar binding before source pruning.
 
 ## Pins
 

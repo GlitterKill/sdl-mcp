@@ -12,6 +12,7 @@ import {
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { enforceCodeWindow } from "../../dist/code/enforce.js";
 import { handleCodeNeedWindow } from "../../dist/mcp/tools/code.js";
+import { handleResponseGet } from "../../dist/mcp/tools/response.js";
 import { PolicyEngine } from "../../dist/policy/engine.js";
 
 describe("code.needWindow policy remediation", () => {
@@ -57,6 +58,7 @@ describe("code.needWindow policy remediation", () => {
           requireIdentifiers: true,
           allowBreakGlass: false,
         },
+        runtime: { artifactBaseDir: join(tempDir, "artifacts") },
       }),
     );
 
@@ -195,6 +197,64 @@ describe("code.needWindow policy remediation", () => {
       },
       rationale: "Raw code access denied by custom policy",
     });
+  });
+
+  it("stores approved windows behind response.get when responseMode is handle", async () => {
+    const response = await handleCodeNeedWindow({
+      repoId: "repo-test",
+      symbolId: "sym-demo",
+      reason: "inspect important flag handling",
+      expectedLines: 20,
+      maxTokens: 120,
+      identifiersToFind: ["importantFlag"],
+      responseMode: "handle",
+    }) as Record<string, unknown>;
+
+    assert.equal(response.responseMode, "handle");
+    assert.equal(response.kind, "responseArtifact");
+    assert.equal(response.action, "response.get");
+
+    const full = await handleResponseGet({
+      repoId: "repo-test",
+      handle: response.handle,
+      full: true,
+    }) as Record<string, unknown>;
+    const content = full.content as Record<string, unknown>;
+    assert.equal(content.approved, true);
+    assert.match(String(content.code), /importantFlag/);
+  });
+
+  it("returns same-session code deltas only when a session id is present", async () => {
+    const request = {
+      repoId: "repo-test",
+      symbolId: "sym-demo",
+      reason: "inspect important flag handling",
+      expectedLines: 20,
+      maxTokens: 120,
+      identifiersToFind: ["importantFlag"],
+      deltaMode: "auto" as const,
+    };
+    const context = {
+      sessionId: "code-window-delta-session",
+      sendNotification: async () => {},
+      signal: new AbortController().signal,
+    };
+
+    const first = await handleCodeNeedWindow(request, context) as Record<string, unknown>;
+    const second = await handleCodeNeedWindow(request, context) as Record<string, unknown>;
+    const noSessionFirst = await handleCodeNeedWindow(request) as Record<string, unknown>;
+    const noSessionSecond = await handleCodeNeedWindow(request) as Record<string, unknown>;
+
+    assert.equal(first.approved, true);
+    assert.match(String(first.code), /importantFlag/);
+    assert.equal(second.approved, true);
+    assert.equal(second.code, "");
+    assert.equal((second.delta as Record<string, unknown>).status, "unchanged");
+    assert.equal(noSessionFirst.approved, true);
+    assert.match(String(noSessionFirst.code), /importantFlag/);
+    assert.equal(noSessionSecond.approved, true);
+    assert.match(String(noSessionSecond.code), /importantFlag/);
+    assert.equal(noSessionSecond.delta, undefined);
   });
 
   it("requestSkeleton NBA forwards identifiersToFind from the original request", async () => {

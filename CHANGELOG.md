@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Semantic enrichment bridge V1 with provider-neutral config/types, SCIP > LSIF > LSP source selection, explicit refresh/status actions, LSIF normalization, lightweight stdio LSP client support, and LadybugDB provider-run/provenance/precision tables.
 - Semantic enrichment V2 TypeScript/JavaScript LSP call-definition enrichment that plans tree-sitter call candidates, queries configured stdio LSP servers, and writes exact call edges through the generic semantic writer.
+- Handle-backed large response storage with `response.get` retrieval and opt-in `responseMode` support for `sdl.context`, `file.read`, `code.needWindow`, and `search.edit` preview responses.
+- Session-aware `deltaMode` support for repeated `file.read` and `code.needWindow` windows, plus observability token-savings breakdowns by compression layer and tool.
 
 ### Changed
 
@@ -22,12 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   alongside byte totals, counts only realized packed emissions as savings, and
   measures `sdl.context` usage against the projected response payload that
   clients receive instead of stripped internal broad-context fields.
+- Response artifacts now honor runtime artifact byte caps, sweep expired
+  handles before writes, and avoid cross-client session-delta reuse when a
+  transport session id is unavailable.
 - Serve-mode LadybugDB WAL maintenance now performs best-effort idle
   checkpoints when the WAL is quiet/large or old, while skipping active
   indexing and post-index sessions.
 - Tool-call audit logging now stores compact request/response summaries
   instead of full payload bodies by default, reducing WAL churn from read-heavy
   MCP usage.
+- npm postinstall now verifies and rebuilds tree-sitter grammar bindings before
+  pruning source files, and release publish CI blocks npm publish until a
+  packed-tarball install verifies those grammars on Ubuntu and Windows.
 
 ## [0.11.1] - 2026-05-07
 

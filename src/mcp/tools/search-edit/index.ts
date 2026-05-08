@@ -13,6 +13,8 @@ import {
 } from "../../tools.js";
 import { ValidationError } from "../../../domain/errors.js";
 import type { RetrievalEvidence } from "../../../retrieval/types.js";
+import type { ToolContext } from "../../../server.js";
+import { maybeCompressToolResponse } from "../../response-compression.js";
 import { applyBatch } from "./batch-executor.js";
 import { getSearchEditPlanStore, type StoredPlan } from "./plan-store.js";
 import { planSearchEditPreview } from "./planner.js";
@@ -103,7 +105,8 @@ function compactRetrievalEvidence(evidence: RetrievalEvidence): RetrievalEvidenc
 
 async function handlePreview(
   request: Extract<SearchEditRequest, { mode: "preview" }>,
-): Promise<SearchEditPreviewResponse> {
+  context: ToolContext | undefined,
+): Promise<SearchEditResponse> {
   const preview = await planSearchEditPreview({
     repoId: request.repoId,
     targeting: request.targeting,
@@ -152,7 +155,16 @@ async function handlePreview(
       ? { retrievalEvidence: compactRetrievalEvidence(preview.retrievalEvidence) }
       : {}),
   };
-  return attachRaw(response, computeAggregateRawBytes(stored));
+  const rawBytes = computeAggregateRawBytes(stored);
+  const enriched = attachRaw(response, rawBytes);
+  return maybeCompressToolResponse({
+    repoId: request.repoId,
+    toolName: "sdl.search.edit",
+    payload: enriched,
+    responseMode: request.responseMode,
+    rawContext: { rawTokens: Math.ceil(rawBytes / 4) },
+    sessionId: context?.sessionId,
+  });
 }
 
 async function handleApply(
@@ -215,10 +227,11 @@ async function handleApply(
 
 export async function handleSearchEdit(
   args: unknown,
+  context?: ToolContext,
 ): Promise<SearchEditResponse> {
   const request = SearchEditRequestSchema.parse(args);
   if (request.mode === "preview") {
-    return handlePreview(request);
+    return handlePreview(request, context);
   }
   return handleApply(request);
 }

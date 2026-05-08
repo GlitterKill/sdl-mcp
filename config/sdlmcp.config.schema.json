@@ -1263,6 +1263,30 @@
           "minimum": 1024,
           "default": 10485760
         },
+        "maxResponseArtifactsPerRepo": {
+          "type": "integer",
+          "description": "Maximum response artifacts retained per repository",
+          "minimum": 1,
+          "default": 128
+        },
+        "maxResponseArtifactBytesPerRepo": {
+          "type": "integer",
+          "description": "Maximum response-artifact bytes retained per repository",
+          "minimum": 1024,
+          "default": 1342177280
+        },
+        "maxResponseArtifactBytesTotal": {
+          "type": "integer",
+          "description": "Maximum response-artifact bytes retained across the artifact directory",
+          "minimum": 1024,
+          "default": 2684354560
+        },
+        "maxResponseArtifactsTotal": {
+          "type": "integer",
+          "description": "Maximum response artifacts retained across the artifact directory",
+          "minimum": 1,
+          "default": 512
+        },
         "artifactTtlHours": {
           "type": "integer",
           "description": "Time-to-live for stored artifacts in hours",

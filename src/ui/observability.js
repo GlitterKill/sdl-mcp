@@ -360,6 +360,31 @@ function updateTokenEfficiency(t, packed) {
     setVal(panel, "packedBytesSaved", fmtBytes(packed.bytesSaved));
     renderPerEncoderBreakdown(panel, packed.byEncoder ?? {});
   }
+  renderCompressionLayerBreakdown(panel, t.compressionLayers);
+}
+
+function renderCompressionLayerBreakdown(panel, layers) {
+  const host = panelField(panel, "compressionLayers");
+  if (!host) return;
+  const bySource = layers?.bySource || {};
+  const entries = Object.entries(bySource)
+    .filter(([, m]) => (m.events || 0) > 0 || (m.estimatedTokensAvoided || 0) > 0)
+    .sort(
+      (a, b) =>
+        (b[1].estimatedTokensAvoided || 0) - (a[1].estimatedTokensAvoided || 0) ||
+        (b[1].events || 0) - (a[1].events || 0),
+    )
+    .slice(0, 6);
+  if (entries.length === 0) {
+    host.textContent = "—";
+    return;
+  }
+  const rows = entries.map(([source, m]) => {
+    const hitRate = (m.opportunities || 0) > 0 ? fmtPct(m.hitRatePct || 0, 1) : "—";
+    const bytes = (m.storedBytes || 0) > 0 ? fmtBytes(m.storedBytes) : "—";
+    return `<tr><td class="layer">${escapeHtml(source)}</td><td class="tokens">${escapeHtml(fmtNum(m.estimatedTokensAvoided || 0))}</td><td class="hit">${escapeHtml(hitRate)}</td><td class="bytes">${escapeHtml(bytes)}</td><td class="count">${escapeHtml(String(m.events || 0))}</td></tr>`;
+  });
+  host.innerHTML = `<table class="layer-breakdown"><thead><tr><th>layer</th><th>tok saved</th><th>hit</th><th>bytes</th><th>n</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 
 function renderPerEncoderBreakdown(panel, byEncoder) {

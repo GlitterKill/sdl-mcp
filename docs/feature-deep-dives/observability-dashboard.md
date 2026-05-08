@@ -352,6 +352,13 @@ Beam-search slice builds. Detailed per-slice traces live behind `/api/observabil
 | `totalSaved`   | number     | Estimated tokens saved versus a raw-file equivalent baseline.                          |
 | `savingsRatio` | number 0–1 | `totalSaved / (totalSaved + totalUsed)` — 0 = no savings, 1 = effectively infinite.    |
 | `avgPerCall`   | number     | Mean tokens per call. Spikes suggest agents are taking the raw-window path more often. |
+| `compressionLayers` | object | Per-layer savings and hit-rate breakdown for response artifacts, session deltas, ETags, spillover, raw-window avoidance, and packed wire. |
+
+`compressionLayers.bySource` answers which token-saving layer is actually paying rent.
+Each source records `events`, `realizedEvents`, `estimatedTokensAvoided`,
+`opportunities`, `hits`, `hitRatePct`, and `storedBytes`. Candidate-only decisions
+increment events/opportunities without inflating realized savings. `byTool` provides the
+same counters grouped by tool name.
 
 ### `health: HealthMetrics`
 

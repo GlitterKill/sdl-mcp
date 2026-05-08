@@ -50,7 +50,7 @@ flowchart LR
 
 ## Complete Tool Reference
 
-SDL-MCP exposes 33 tools in flat default mode (31 flat tools plus `sdl.action.search` and `sdl.info`). Gateway mode replaces 30 of those flat tools with 4 namespace surfaces, while `sdl.file.write` remains flat-only. Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`, and can also run in exclusive mode with only those 5 tools.
+SDL-MCP exposes 37 tools in flat default mode (35 flat tools plus `sdl.action.search` and `sdl.info`). Gateway mode replaces 34 of those flat actions with 4 namespace surfaces, while `sdl.file.write` remains flat-only. Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`, and can also run in exclusive mode with only those 5 tools.
 
 | Category                   | Tool                       | Purpose                                                                                                                                                              |
 | :------------------------- | :------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

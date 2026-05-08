@@ -170,6 +170,7 @@ export class MCPServer {
           progressToken: extra._meta?.progressToken,
           sendNotification: extra.sendNotification,
           signal: extra.signal,
+          sessionId: extra.sessionId,
         };
 
         try {

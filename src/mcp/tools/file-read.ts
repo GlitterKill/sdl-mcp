@@ -1,13 +1,24 @@
 import { resolve } from "path";
 import { open, readFile, stat } from "fs/promises";
 import { existsSync, realpathSync } from "fs";
-import { FileReadRequestSchema, type FileReadResponse } from "../tools.js";
+import {
+  FileReadRequestSchema,
+  type FileReadInlineResponse,
+  type FileReadRequest,
+  type FileReadResponse,
+} from "../tools.js";
 import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { normalizePath, validatePathWithinRoot } from "../../util/paths.js";
 import { logger } from "../../util/logger.js";
 import { NotFoundError, ValidationError } from "../../domain/errors.js";
 import { attachRawContext } from "../token-usage.js";
+import type { ToolContext } from "../../server.js";
+import { maybeBuildSessionDelta } from "../session-delta.js";
+import {
+  maybeCompressToolResponse,
+  recordTokenSavings,
+} from "../response-compression.js";
 
 export const SDL_SOURCE_EXTENSIONS = new Set([
   ".ts",
@@ -194,16 +205,85 @@ function searchLines(
 }
 
 function withRawTokenBaseline(
-  response: FileReadResponse,
+  response: FileReadInlineResponse,
   totalBytes: number,
-): FileReadResponse {
+): FileReadInlineResponse {
   // Measure every file.read variant against the full underlying file read.
   return attachRawContext(response, {
     rawTokens: Math.ceil(totalBytes / BYTES_PER_TOKEN),
   });
 }
 
-export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
+async function finalizeFileReadResponse(
+  request: FileReadRequest,
+  context: ToolContext | undefined,
+  response: FileReadInlineResponse,
+  rawBytes: number,
+): Promise<FileReadResponse> {
+  const rawTokens = Math.ceil(rawBytes / BYTES_PER_TOKEN);
+  let enriched = withRawTokenBaseline(response, rawBytes);
+
+  if (request.deltaMode === "auto") {
+    const deltaResult = maybeBuildSessionDelta({
+      sessionId: context?.sessionId,
+      key: {
+        toolName: "sdl.file.read",
+        repoId: request.repoId,
+        filePath: request.filePath,
+        range: {
+          startLine: request.offset ?? 0,
+          endLine:
+            (request.offset ?? 0) + Math.max(0, response.returnedLines - 1),
+        },
+        extra: {
+          search: request.search,
+          jsonPath: request.jsonPath,
+          limit: request.limit,
+          maxBytes: request.maxBytes,
+        },
+      },
+      content: response.content,
+      deltaMode: request.deltaMode,
+      maxDeltaLines: request.maxDeltaLines,
+    });
+
+    recordTokenSavings({
+      repoId: request.repoId,
+      source: "sessionDelta",
+      tool: "sdl.file.read",
+      estimatedTokensAvoided: deltaResult.metadata.estimatedTokensAvoided,
+      opportunity: true,
+      hit: deltaResult.metadata.cacheHit,
+      realized: deltaResult.metadata.deltaApplied,
+    });
+
+    if (deltaResult.metadata.deltaApplied && deltaResult.delta) {
+      enriched = withRawTokenBaseline(
+        {
+          ...response,
+          content: "",
+          sessionDelta: deltaResult.metadata,
+          delta: deltaResult.delta,
+        },
+        rawBytes,
+      );
+    }
+  }
+
+  return maybeCompressToolResponse({
+    repoId: request.repoId,
+    toolName: "sdl.file.read",
+    payload: enriched,
+    responseMode: request.responseMode,
+    rawContext: { rawTokens },
+    sessionId: context?.sessionId,
+  });
+}
+
+export async function handleFileRead(
+  args: unknown,
+  context?: ToolContext,
+): Promise<FileReadResponse> {
   const request = FileReadRequestSchema.parse(args);
   const conn = await getLadybugConn();
   const repo = await ladybugDb.getRepo(conn, request.repoId);
@@ -313,7 +393,9 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
     }
     const extracted = extractByPath(parsed, normalizedPath);
     if (extracted === undefined) {
-      return withRawTokenBaseline(
+      return finalizeFileReadResponse(
+        request,
+        context,
         {
           filePath,
           content: "",
@@ -339,7 +421,9 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
     const content = returnedBytes.toString("utf-8");
     const truncated = serializedBytes.length > maxBytes;
 
-    return withRawTokenBaseline(
+    return finalizeFileReadResponse(
+      request,
+      context,
       {
         filePath,
         content,
@@ -369,7 +453,9 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
     const finalContent = result.matchesTruncated
       ? `// WARNING: ${result.matchCount} total matches, showing first ${MAX_SEARCH_MATCHES}. Narrow the pattern.\n${result.content}`
       : result.content;
-    return withRawTokenBaseline(
+    return finalizeFileReadResponse(
+      request,
+      context,
       {
         filePath,
         content: finalContent,
@@ -398,7 +484,9 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
     // Apply maxBytes truncation
     if (slicedBytes > maxBytes) {
       const truncated = numberedContent.slice(0, maxBytes);
-      return withRawTokenBaseline(
+      return finalizeFileReadResponse(
+        request,
+        context,
         {
           filePath,
           content: truncated,
@@ -412,7 +500,9 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
       ); // Compare against sliced range, not full file
     }
 
-    return withRawTokenBaseline(
+    return finalizeFileReadResponse(
+      request,
+      context,
       {
         filePath,
         content: numberedContent,
@@ -431,7 +521,9 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
     logger.debug(
       `file.read truncated ${filePath}: ${totalBytes} -> ${maxBytes} bytes`,
     );
-    return withRawTokenBaseline(
+    return finalizeFileReadResponse(
+      request,
+      context,
       {
         filePath,
         content: truncated,
@@ -445,7 +537,9 @@ export async function handleFileRead(args: unknown): Promise<FileReadResponse> {
     );
   }
 
-  return withRawTokenBaseline(
+  return finalizeFileReadResponse(
+    request,
+    context,
     {
       filePath,
       content: rawContent,

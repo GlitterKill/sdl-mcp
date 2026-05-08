@@ -55,7 +55,7 @@ describe("code-mode manual generator", () => {
     }
   });
 
-  it("manual token count is under 1500", () => {
+  it("manual token count stays under the Code Mode budget", () => {
     const manual = generateManual();
     const tokens = estimateTokens(manual);
     assert.ok(tokens < 4000, `Expected tokens < 4000, got ${tokens}`);
@@ -91,7 +91,7 @@ describe("code-mode manual generator", () => {
     );
   });
 
-  it("FN_NAME_MAP covers all 32 actions", () => {
-    assert.strictEqual(Object.keys(FN_NAME_MAP).length, 32);
+  it("FN_NAME_MAP covers all 35 actions", () => {
+    assert.strictEqual(Object.keys(FN_NAME_MAP).length, 35);
   });
 });

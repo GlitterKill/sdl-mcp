@@ -22,6 +22,7 @@
     "templates/*.md",
     "templates/*.template",
     "scripts/postinstall.mjs",
+    "scripts/postinstall-tree-sitter.mjs",
     "scripts/postinstall-prune.mjs",
     "scripts/postinstall-models.mjs",
     "README.md",

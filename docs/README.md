@@ -99,12 +99,12 @@ Use this page as the entry point for SDL-MCP documentation.
   - SCIP: ingest
   - Usage: stats
   - Universal: `sdl.action.search` and `sdl.info`
-  - Default flat mode: 33 tools (`31` flat tools + `sdl.action.search` + `sdl.info`)
+  - Default flat mode: 37 tools (`35` flat tools + `sdl.action.search` + `sdl.info`)
   - Gateway-only mode: 6 tools (`4` gateway tools + `sdl.action.search` + `sdl.info`)
-  - Gateway + legacy mode: 37 tools (`4` gateway + `31` legacy flat + `sdl.action.search` + `sdl.info`)
+  - Gateway + legacy mode: 41 tools (`4` gateway + `35` legacy flat + `sdl.action.search` + `sdl.info`)
   - Code Mode exclusive: 5 tools (`sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, `sdl.file`)
-  - Gateway routing covers 30 of the 31 flat tools; `sdl.file.write` remains flat-only
-  - `sdl-mcp tool` exposes 30 direct CLI action aliases, not the full flat surface
+  - Gateway routing covers 34 of the 35 flat tools; `sdl.file.write` remains flat-only
+  - `sdl-mcp tool` exposes 33 direct CLI action aliases, not the full flat surface
 - **Semantic features**: optional semantic reranking with 2 embedding models (Jina Code bundled, Nomic optional), LLM-generated symbol summaries (Anthropic/Ollama/mock)
 - **HTTP surface**: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP
 - **Native addon**: Rust via napi-rs for multi-threaded indexing (default engine, TS fallback)

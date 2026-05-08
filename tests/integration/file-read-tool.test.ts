@@ -11,6 +11,7 @@ import {
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { handleFileRead } from "../../dist/mcp/tools/file-read.js";
+import { handleResponseGet } from "../../dist/mcp/tools/response.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -81,5 +82,60 @@ describe("sdl.file.read token usage metadata", () => {
     assert.deepEqual(response._rawContext, {
       rawTokens: Math.ceil(Buffer.byteLength("3: alpha line", "utf-8") / 4),
     });
+  });
+
+  it("returns a response artifact handle when responseMode is handle", async () => {
+    const response = await handleFileRead({
+      repoId,
+      filePath: "docs/guide.md",
+      responseMode: "handle",
+    }) as Record<string, unknown>;
+
+    assert.equal(response.responseMode, "handle");
+    assert.equal(response.kind, "responseArtifact");
+    assert.equal(response.action, "response.get");
+    assert.equal(
+      (response.metadata as Record<string, unknown>).toolName,
+      "sdl.file.read",
+    );
+
+    const full = await handleResponseGet({
+      repoId,
+      handle: response.handle,
+      full: true,
+    }) as Record<string, unknown>;
+    const content = full.content as Record<string, unknown>;
+    assert.equal(content.filePath, "docs/guide.md");
+    assert.equal(content.content, fileContent);
+  });
+
+  it("returns same-session deltas for repeated opted-in reads", async () => {
+    const context = {
+      sessionId: "file-read-delta-session",
+      sendNotification: async () => {},
+      signal: new AbortController().signal,
+    };
+
+    const first = await handleFileRead(
+      {
+        repoId,
+        filePath: "docs/guide.md",
+        deltaMode: "auto",
+      },
+      context,
+    ) as Record<string, unknown>;
+    const second = await handleFileRead(
+      {
+        repoId,
+        filePath: "docs/guide.md",
+        deltaMode: "auto",
+      },
+      context,
+    ) as Record<string, unknown>;
+
+    assert.equal(first.content, fileContent);
+    assert.equal(second.content, "");
+    assert.equal((second.sessionDelta as Record<string, unknown>).cacheHit, true);
+    assert.equal((second.delta as Record<string, unknown>).status, "unchanged");
   });
 });

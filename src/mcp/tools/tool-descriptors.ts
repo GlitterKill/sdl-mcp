@@ -37,6 +37,7 @@ import {
   AgentFeedbackQueryRequestSchema,
   RuntimeExecuteRequestSchema,
   RuntimeQueryOutputRequestSchema,
+  ResponseGetRequestSchema,
   MemoryStoreRequestSchema,
   MemoryQueryRequestSchema,
   MemoryRemoveRequestSchema,
@@ -81,6 +82,7 @@ import {
 } from "./agent-feedback.js";
 import { handleRuntimeExecute } from "./runtime.js";
 import { handleRuntimeQueryOutput } from "./runtime-query.js";
+import { handleResponseGet } from "./response.js";
 import {
   handleMemoryStore,
   handleMemoryQuery,
@@ -295,6 +297,13 @@ export function buildFlatToolDescriptors(
         "Query stored command output by keywords and retrieve specific sections of previous runtime execution results",
       schema: RuntimeQueryOutputRequestSchema,
       handler: handleRuntimeQueryOutput,
+    },
+    {
+      name: "sdl.response.get",
+      description:
+        "Retrieve a stored large tool response by handle, with bounded excerpt or full payload modes",
+      schema: ResponseGetRequestSchema,
+      handler: handleResponseGet,
     },
     {
       name: "sdl.memory.store",

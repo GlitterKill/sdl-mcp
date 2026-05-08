@@ -68,7 +68,7 @@ const INCLUDE_RESOLUTION_METADATA_ARG: ActionArgDef = {
 };
 
 // ---------------------------------------------------------------------------
-// Query actions (9)
+// Query actions (8)
 // ---------------------------------------------------------------------------
 
 const symbolSearch: ActionDefinition = {
@@ -391,6 +391,24 @@ const codeNeedWindow: ActionDefinition = {
       type: "json",
       description: "JSON slice context for auto-slice",
     },
+    {
+      flag: "--response-mode",
+      field: "responseMode",
+      type: "string",
+      description: "Large-response mode: inline|auto|handle",
+    },
+    {
+      flag: "--delta-mode",
+      field: "deltaMode",
+      type: "string",
+      description: "Same-session delta mode: off|auto",
+    },
+    {
+      flag: "--max-delta-lines",
+      field: "maxDeltaLines",
+      type: "number",
+      description: "Maximum diff lines when delta-mode is auto",
+    },
   ],
   examples: [
     'sdl-mcp tool code.needWindow --repo-id my-repo --symbol-id "sym1" --reason "debugging" --expected-lines 50 --identifiers "foo,bar"',
@@ -497,7 +515,7 @@ const codeGetHotPath: ActionDefinition = {
 };
 
 // ---------------------------------------------------------------------------
-// Repo actions (6)
+// Repo actions (11)
 // ---------------------------------------------------------------------------
 
 const repoRegister: ActionDefinition = {
@@ -737,7 +755,7 @@ const policySet: ActionDefinition = {
 };
 
 // ---------------------------------------------------------------------------
-// Agent actions (7)
+// Agent actions (11)
 // ---------------------------------------------------------------------------
 
 const agentFeedback: ActionDefinition = {
@@ -1036,6 +1054,49 @@ const runtimeQueryOutput: ActionDefinition = {
   ],
 };
 
+const responseGet: ActionDefinition = {
+  action: "response.get",
+  namespace: "query",
+  description: "Retrieve a stored large tool response by handle",
+  args: [
+    { ...REPO_ID_ARG },
+    {
+      flag: "--handle",
+      field: "handle",
+      type: "string",
+      required: true,
+      description: "Response artifact handle returned by a large-response tool",
+    },
+    {
+      flag: "--full",
+      field: "full",
+      type: "boolean",
+      description: "Return the full stored response instead of a bounded excerpt",
+    },
+    {
+      flag: "--max-bytes",
+      field: "maxBytes",
+      type: "number",
+      description: "Maximum bytes to return when --full is not set",
+    },
+    {
+      flag: "--max-tokens",
+      field: "maxTokens",
+      type: "number",
+      description: "Estimated token bound when --full is not set",
+    },
+    {
+      flag: "--offset-bytes",
+      field: "offsetBytes",
+      type: "number",
+      description: "Byte offset for excerpt retrieval",
+    },
+  ],
+  examples: [
+    'sdl-mcp tool response.get --repo-id my-repo --handle "response-myrepo-1770000000000-0123456789abcdef" --max-bytes 8192',
+  ],
+};
+
 const usageStats: ActionDefinition = {
   action: "usage.stats",
   namespace: "repo",
@@ -1120,6 +1181,24 @@ const fileRead: ActionDefinition = {
       field: "jsonPath",
       type: "string",
       description: "For JSON/YAML files: dot-separated key path to extract",
+    },
+    {
+      flag: "--response-mode",
+      field: "responseMode",
+      type: "string",
+      description: "Large-response mode: inline|auto|handle",
+    },
+    {
+      flag: "--delta-mode",
+      field: "deltaMode",
+      type: "string",
+      description: "Same-session delta mode: off|auto",
+    },
+    {
+      flag: "--max-delta-lines",
+      field: "maxDeltaLines",
+      type: "number",
+      description: "Maximum diff lines when delta-mode is auto",
     },
   ],
   examples: [
@@ -1312,6 +1391,7 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   sliceSpilloverGet,
   deltaGet,
   prRiskAnalyze,
+  responseGet,
   // Code
   codeNeedWindow,
   codeGetSkeleton,

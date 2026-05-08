@@ -341,7 +341,8 @@ export function registerCodeModeTools(
     "sdl.context",
     CONTEXT_DESCRIPTION,
     AgentContextRequestSchema,
-    async (rawArgs: unknown) => handleAgentContext(rawArgs),
+    async (rawArgs: unknown, context?: ToolContext) =>
+      handleAgentContext(rawArgs, context),
     {
       type: "object",
       properties: {
@@ -353,6 +354,10 @@ export function registerCodeModeTools(
         taskText: { type: "string", minLength: 1 },
         budget: { type: "object" },
         options: { type: "object" },
+        responseMode: {
+          type: "string",
+          enum: ["inline", "auto", "handle"],
+        },
       },
       required: ["repoId", "taskType", "taskText"],
       additionalProperties: false,
@@ -363,7 +368,8 @@ export function registerCodeModeTools(
     "sdl.file",
     FILE_GATEWAY_DESCRIPTION,
     FileGatewayRequestSchema,
-    async (rawArgs: unknown) => handleFileGateway(rawArgs),
+    async (rawArgs: unknown, context?: ToolContext) =>
+      handleFileGateway(rawArgs, context),
     {
       type: "object",
       properties: {
@@ -379,6 +385,12 @@ export function registerCodeModeTools(
         search: { type: "string" },
         searchContext: { type: "number" },
         jsonPath: { type: "string" },
+        responseMode: {
+          type: "string",
+          enum: ["inline", "auto", "handle"],
+        },
+        deltaMode: { type: "string", enum: ["off", "auto"] },
+        maxDeltaLines: { type: "number" },
         content: { type: "string" },
         replaceLines: { type: "object" },
         replacePattern: { type: "object" },

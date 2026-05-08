@@ -29,6 +29,7 @@ import type {
   SliceBuildTapEvent,
   AuditBufferTapEvent,
   PostIndexSessionTapEvent,
+  TokenSavingsTapEvent,
 } from "./event-tap.js";
 import type {
   BeamExplainResponse,
@@ -441,6 +442,22 @@ export class ObservabilityService implements ObservabilityTap {
       }
     } catch (err) {
       this.logWarn("packedWire failed", err);
+    }
+  }
+
+  tokenSavings(event: TokenSavingsTapEvent): void {
+    try {
+      this.getAggregator(event.repoId ?? "_global").recordTokenSavingsEvent({
+        source: event.source,
+        tool: event.tool,
+        estimatedTokensAvoided: event.estimatedTokensAvoided,
+        storedBytes: event.storedBytes,
+        opportunity: event.opportunity,
+        hit: event.hit,
+        realized: event.realized,
+      });
+    } catch (err) {
+      this.logWarn("tokenSavings failed", err);
     }
   }
 

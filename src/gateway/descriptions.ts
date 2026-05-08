@@ -11,7 +11,8 @@ export const QUERY_DESCRIPTION =
   `\nActions: symbol.search(query,limit?,semantic?) | symbol.getCard(symbolId|symbolIds[],ifNoneMatch?,knownEtags?) | slice.build(taskText?,entrySymbols?,editedFiles?,budget?,wireFormat?) | ` +
   `slice.refresh(sliceHandle,knownVersion) | slice.spillover.get(spilloverHandle,cursor?,pageSize?) | ` +
   `delta.get(fromVersion,toVersion,budget?) | ` +
-  `pr.risk.analyze(fromVersion,toVersion,riskThreshold?)` +
+  `pr.risk.analyze(fromVersion,toVersion,riskThreshold?) | ` +
+  `response.get(handle,full?,maxBytes?,maxTokens?,offsetBytes?)` +
   `\nPrefer: repo.status -> symbol.search -> symbol.getCard -> slice.build.`;
 
 export const CODE_DESCRIPTION =
@@ -26,6 +27,7 @@ export const REPO_DESCRIPTION =
   `\nActions: repo.register(rootPath,ignore?,languages?,maxFileBytes?) | repo.status() | ` +
   `repo.overview(level,includeHotspots?,directories?,maxDirectories?) | ` +
   `index.refresh(mode,reason?) | policy.get() | policy.set(policyPatch; budgetCaps requires maxCards+maxEstimatedTokens) | ` +
+  `search.edit(mode,targeting?,query?,editMode?,planHandle?,responseMode?) | ` +
   `scip.ingest(indexPath,dryRun?) | semantic.enrichment.refresh(dryRun?,force?,install?,languages?) | ` +
   `semantic.enrichment.status(languages?) | usage.stats(scope?,since?,limit?,persist?)`;
 

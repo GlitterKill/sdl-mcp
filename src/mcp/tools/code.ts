@@ -4,7 +4,7 @@ import { readFile, stat } from "fs/promises";
 import {
   type CodeNeedWindowRequest,
   CodeNeedWindowRequestSchema,
-  CodeNeedWindowResponse,
+  type CodeNeedWindowResponse,
   type GetSkeletonRequest,
   GetSkeletonResponse,
   type GetHotPathRequest,
@@ -65,6 +65,31 @@ import { toLegacySymbolRow } from "./symbol-utils.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
 import { getOverlaySnapshot } from "../../live-index/overlay-reader.js";
 import { buildConditionalResponse } from "../../util/conditional-response.js";
+import type { ToolContext } from "../../server.js";
+import { maybeBuildSessionDelta } from "../session-delta.js";
+import {
+  maybeCompressToolResponse,
+  recordTokenSavings,
+} from "../response-compression.js";
+
+function estimateRawWindowTokens(request: CodeNeedWindowRequest): number {
+  return Math.max(0, Math.ceil(request.expectedLines * 12));
+}
+
+function recordRawWindowAvoidance(
+  request: CodeNeedWindowRequest,
+  avoided: boolean,
+): void {
+  recordTokenSavings({
+    repoId: request.repoId,
+    source: "rawWindowAvoidance",
+    tool: "sdl.code.needWindow",
+    estimatedTokensAvoided: avoided ? estimateRawWindowTokens(request) : 0,
+    opportunity: true,
+    hit: avoided,
+    realized: avoided,
+  });
+}
 
 function buildPolicyNextBestAction(params: {
   request: CodeNeedWindowRequest;
@@ -200,6 +225,72 @@ function buildPolicyNextBestAction(params: {
   }
 }
 
+async function finalizeCodeNeedWindowResponse(
+  request: CodeNeedWindowRequest,
+  context: ToolContext | undefined,
+  response: Extract<CodeNeedWindowResponse, { approved: true }>,
+  fileId: string,
+): Promise<CodeNeedWindowResponse> {
+  const rawContext = { fileIds: [fileId] };
+  let enriched = attachRawContext(response, rawContext);
+  recordRawWindowAvoidance(request, response.downgradedFrom === "raw-code");
+
+  if (request.deltaMode === "auto") {
+    const deltaResult = maybeBuildSessionDelta({
+      sessionId: context?.sessionId,
+      key: {
+        toolName: "sdl.code.needWindow",
+        repoId: request.repoId,
+        filePath: response.file,
+        symbolId: request.symbolId,
+        range: {
+          startLine: response.range.startLine,
+          endLine: response.range.endLine,
+        },
+        extra: {
+          granularity: request.granularity,
+          maxTokens: request.maxTokens,
+          expectedLines: request.expectedLines,
+        },
+      },
+      content: response.code,
+      deltaMode: request.deltaMode,
+      maxDeltaLines: request.maxDeltaLines,
+    });
+
+    recordTokenSavings({
+      repoId: request.repoId,
+      source: "sessionDelta",
+      tool: "sdl.code.needWindow",
+      estimatedTokensAvoided: deltaResult.metadata.estimatedTokensAvoided,
+      opportunity: true,
+      hit: deltaResult.metadata.cacheHit,
+      realized: deltaResult.metadata.deltaApplied,
+    });
+
+    if (deltaResult.metadata.deltaApplied && deltaResult.delta) {
+      enriched = attachRawContext(
+        {
+          ...response,
+          code: "",
+          sessionDelta: deltaResult.metadata,
+          delta: deltaResult.delta,
+        },
+        rawContext,
+      );
+    }
+  }
+
+  return maybeCompressToolResponse({
+    repoId: request.repoId,
+    toolName: "sdl.code.needWindow",
+    payload: enriched,
+    responseMode: request.responseMode,
+    rawContext,
+    sessionId: context?.sessionId,
+  });
+}
+
 /**
  * Handles code window requests with policy evaluation.
  * Returns full code, skeleton, or hot-path based on policy decisions.
@@ -211,6 +302,7 @@ function buildPolicyNextBestAction(params: {
  */
 export async function handleCodeNeedWindow(
   args: unknown,
+  context?: ToolContext,
 ): Promise<CodeNeedWindowResponse> {
   const rawRequest = CodeNeedWindowRequestSchema.parse(args);
 
@@ -393,6 +485,7 @@ export async function handleCodeNeedWindow(
       approved: false,
       reason: policyDecision.deniedReasons ?? ["Policy denied request"],
     });
+    recordRawWindowAvoidance(request, true);
 
     return {
       approved: false,
@@ -455,7 +548,12 @@ export async function handleCodeNeedWindow(
           matchedLineNumbers: hotpathResult.matchedLineNumbers,
           truncation: hotpathTruncation,
         };
-        return attachRawContext(response, { fileIds: [symbol.fileId] });
+        return finalizeCodeNeedWindowResponse(
+          request,
+          context,
+          response,
+          symbol.fileId,
+        );
       }
       // Hotpath failed — fall through to skeleton below.
     }
@@ -543,7 +641,12 @@ export async function handleCodeNeedWindow(
         });
       }
     }
-    return attachRawContext(response, { fileIds: [symbol.fileId] });
+    return finalizeCodeNeedWindowResponse(
+      request,
+      context,
+      response,
+      symbol.fileId,
+    );
   }
 
   if (policyDecision.decision === "downgrade-to-hotpath") {
@@ -599,7 +702,12 @@ export async function handleCodeNeedWindow(
       truncation: hotpathTruncation,
     };
 
-    return attachRawContext(response, { fileIds: [symbol.fileId] });
+    return finalizeCodeNeedWindowResponse(
+      request,
+      context,
+      response,
+      symbol.fileId,
+    );
   }
 
   if (gateResult.approved) {
@@ -815,13 +923,19 @@ export async function handleCodeNeedWindow(
       truncation: codeTruncation,
     };
 
-    return attachRawContext(response, { fileIds: [symbol.fileId] });
+    return finalizeCodeNeedWindowResponse(
+      request,
+      context,
+      response,
+      symbol.fileId,
+    );
   } else {
     logCodeWindowDecision({
       symbolId: request.symbolId,
       approved: false,
       reason: gateResult.whyDenied,
     });
+    recordRawWindowAvoidance(request, true);
 
     return {
       approved: false,

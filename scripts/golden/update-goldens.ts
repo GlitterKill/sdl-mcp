@@ -35,6 +35,7 @@ interface AdapterMethods {
     symbols: unknown[],
   ) => unknown[];
   parse: (code: string, filePath: string) => unknown;
+  getParser?: () => unknown;
 }
 
 interface GoldenFileSpec {
@@ -45,6 +46,11 @@ interface GoldenFileSpec {
   requiresSymbols?: boolean;
 }
 
+type ProcessResult = "success" | "failed" | "skipped";
+
+const FIXTURE_PATH_PATTERN =
+  /(?:[A-Za-z]:)?(?:[\\/][^:\r\n]*)?[\\/]?tests[\\/]fixtures[\\/](rust|c|cpp|php|kotlin|shell)[\\/]([^:\r\n]+)/gi;
+
 function getAdapter(language: string): AdapterMethods | null {
   const AdapterClass = ADAPTERS[language];
   if (!AdapterClass) {
@@ -53,60 +59,58 @@ function getAdapter(language: string): AdapterMethods | null {
   return new AdapterClass();
 }
 
-function generateGoldenFile(spec: GoldenFileSpec): void {
+function getStableFixturePath(spec: GoldenFileSpec): string {
+  return `tests/fixtures/${spec.language}/${spec.sourceFile}`;
+}
+
+function getUnavailableReason(
+  spec: GoldenFileSpec,
+  adapter: AdapterMethods,
+): string | null {
+  if (spec.language === "kotlin" && adapter.getParser && !adapter.getParser()) {
+    return "tree-sitter-kotlin grammar not available on this platform";
+  }
+  return null;
+}
+
+function normalizeFixturePaths(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.replace(
+      FIXTURE_PATH_PATTERN,
+      (_match, language: string, filePath: string) =>
+        `tests/fixtures/${language.toLowerCase()}/${filePath.replace(/\\/g, "/")}`,
+    );
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeFixturePaths(item));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        normalizeFixturePaths(entry),
+      ]),
+    );
+  }
+
+  return value;
+}
+
+function generateGoldenFile(spec: GoldenFileSpec): ProcessResult {
   const adapter = getAdapter(spec.language);
   if (!adapter) {
     console.log(`⏭️  Skipping ${spec.language} - adapter not available`);
-    return;
+    return "skipped";
   }
 
-  const fixturesDir = resolve(PROJECT_ROOT, "tests/fixtures", spec.language);
-  const sourcePath = join(fixturesDir, spec.sourceFile);
-  const goldenPath = join(fixturesDir, spec.goldenFile);
-
-  if (!existsSync(sourcePath)) {
-    console.log(`⏭️  Skipping ${spec.sourceFile} - source file not found`);
-    return;
-  }
-
-  const code = readFileSync(sourcePath, "utf-8");
-  const tree = adapter.parse(code, sourcePath);
-
-  if (!tree) {
-    console.error(`❌ Failed to parse ${sourcePath}`);
-    return;
-  }
-
-  let data: unknown[];
-
-  if (spec.extractMethod === "symbols") {
-    data = adapter.extractSymbols(tree, code, sourcePath);
-  } else if (spec.extractMethod === "imports") {
-    data = adapter.extractImports(tree, code, sourcePath);
-  } else if (spec.extractMethod === "calls") {
-    if (!spec.requiresSymbols) {
-      console.error(`❌ ${spec.sourceFile} requires symbols but not specified`);
-      return;
-    }
-    const symbols = adapter.extractSymbols(tree, code, sourcePath);
-    data = adapter.extractCalls(tree, code, sourcePath, symbols);
-  } else {
-    console.error(`❌ Unknown extract method: ${spec.extractMethod}`);
-    return;
-  }
-
-  mkdirSync(resolve(goldenPath, ".."), { recursive: true });
-  writeFileSync(goldenPath, JSON.stringify(data, null, 2), "utf-8");
-  console.log(
-    `✅ Generated ${spec.language}/${spec.goldenFile} (${data.length} items)`,
-  );
-}
-
-function validateGoldenFile(spec: GoldenFileSpec): boolean {
-  const adapter = getAdapter(spec.language);
-  if (!adapter) {
-    console.error(`❌ ${spec.language} adapter not available`);
-    return false;
+  const unavailableReason = getUnavailableReason(spec, adapter);
+  if (unavailableReason) {
+    console.log(
+      `[skip] ${spec.language}/${spec.goldenFile} - ${unavailableReason}`,
+    );
+    return "skipped";
   }
 
   const fixturesDir = resolve(PROJECT_ROOT, "tests/fixtures", spec.language);
@@ -115,53 +119,113 @@ function validateGoldenFile(spec: GoldenFileSpec): boolean {
 
   if (!existsSync(sourcePath)) {
     console.error(`❌ Source file not found: ${spec.language}/${spec.sourceFile}`);
-    return false;
+    return "failed";
+  }
+
+  const code = readFileSync(sourcePath, "utf-8");
+  const fixturePath = getStableFixturePath(spec);
+  const tree = adapter.parse(code, fixturePath);
+
+  if (!tree) {
+    console.error(`❌ Failed to parse ${sourcePath}`);
+    return "failed";
+  }
+
+  let data: unknown[];
+
+  if (spec.extractMethod === "symbols") {
+    data = adapter.extractSymbols(tree, code, fixturePath);
+  } else if (spec.extractMethod === "imports") {
+    data = adapter.extractImports(tree, code, fixturePath);
+  } else if (spec.extractMethod === "calls") {
+    if (!spec.requiresSymbols) {
+      console.error(`❌ ${spec.sourceFile} requires symbols but not specified`);
+      return "failed";
+    }
+    const symbols = adapter.extractSymbols(tree, code, fixturePath);
+    data = adapter.extractCalls(tree, code, fixturePath, symbols);
+  } else {
+    console.error(`❌ Unknown extract method: ${spec.extractMethod}`);
+    return "failed";
+  }
+
+  mkdirSync(resolve(goldenPath, ".."), { recursive: true });
+  writeFileSync(goldenPath, JSON.stringify(data, null, 2), "utf-8");
+  console.log(
+    `✅ Generated ${spec.language}/${spec.goldenFile} (${data.length} items)`,
+  );
+  return "success";
+}
+
+function validateGoldenFile(spec: GoldenFileSpec): ProcessResult {
+  const adapter = getAdapter(spec.language);
+  if (!adapter) {
+    console.error(`❌ ${spec.language} adapter not available`);
+    return "failed";
+  }
+
+  const unavailableReason = getUnavailableReason(spec, adapter);
+  if (unavailableReason) {
+    console.log(
+      `[skip] ${spec.language}/${spec.goldenFile} - ${unavailableReason}`,
+    );
+    return "skipped";
+  }
+
+  const fixturesDir = resolve(PROJECT_ROOT, "tests/fixtures", spec.language);
+  const sourcePath = join(fixturesDir, spec.sourceFile);
+  const goldenPath = join(fixturesDir, spec.goldenFile);
+
+  if (!existsSync(sourcePath)) {
+    console.error(`❌ Source file not found: ${spec.language}/${spec.sourceFile}`);
+    return "failed";
   }
 
   if (!existsSync(goldenPath)) {
     console.error(
       `❌ Missing golden file: ${spec.language}/${spec.goldenFile}`,
     );
-    return false;
+    return "failed";
   }
 
   const code = readFileSync(sourcePath, "utf-8");
-  const tree = adapter.parse(code, sourcePath);
+  const fixturePath = getStableFixturePath(spec);
+  const tree = adapter.parse(code, fixturePath);
 
   if (!tree) {
     console.error(`❌ Failed to parse ${sourcePath}`);
-    return false;
+    return "failed";
   }
 
   let data: unknown[];
 
   if (spec.extractMethod === "symbols") {
-    data = adapter.extractSymbols(tree, code, sourcePath);
+    data = adapter.extractSymbols(tree, code, fixturePath);
   } else if (spec.extractMethod === "imports") {
-    data = adapter.extractImports(tree, code, sourcePath);
+    data = adapter.extractImports(tree, code, fixturePath);
   } else if (spec.extractMethod === "calls") {
-    const symbols = adapter.extractSymbols(tree, code, sourcePath);
-    data = adapter.extractCalls(tree, code, sourcePath, symbols);
+    const symbols = adapter.extractSymbols(tree, code, fixturePath);
+    data = adapter.extractCalls(tree, code, fixturePath, symbols);
   } else {
     console.error(`❌ Unknown extract method: ${spec.extractMethod}`);
-    return false;
+    return "failed";
   }
 
   const golden = JSON.parse(readFileSync(goldenPath, "utf-8"));
 
-  const actualStr = JSON.stringify(data, null, 2);
-  const goldenStr = JSON.stringify(golden, null, 2);
+  const actualStr = JSON.stringify(normalizeFixturePaths(data), null, 2);
+  const goldenStr = JSON.stringify(normalizeFixturePaths(golden), null, 2);
 
   if (actualStr !== goldenStr) {
     console.error(`❌ ${spec.language}/${spec.goldenFile} - MISMATCH`);
     console.log(`   Expected ${golden.length} items, got ${data.length} items`);
-    return false;
+    return "failed";
   }
 
   console.log(
     `✅ Validated ${spec.language}/${spec.goldenFile} (${data.length} items)`,
   );
-  return true;
+  return "success";
 }
 
 function getGoldenSpecs(): GoldenFileSpec[] {
@@ -283,22 +347,30 @@ function main(): void {
     ? specs.filter((s) => s.language === filterLanguage)
     : specs;
 
+  if (filterLanguage && filteredSpecs.length === 0) {
+    console.error(`❌ No golden file specs found for language: ${filterLanguage}`);
+    process.exit(1);
+  }
+
   console.log(`\nProcessing ${filteredSpecs.length} golden file specs...\n`);
 
   let successCount = 0;
   let failCount = 0;
+  let skipCount = 0;
 
   for (const spec of filteredSpecs) {
     try {
-      if (mode === "generate") {
-        generateGoldenFile(spec);
+      const result =
+        mode === "generate"
+          ? generateGoldenFile(spec)
+          : validateGoldenFile(spec);
+
+      if (result === "success") {
         successCount++;
+      } else if (result === "skipped") {
+        skipCount++;
       } else {
-        if (validateGoldenFile(spec)) {
-          successCount++;
-        } else {
-          failCount++;
-        }
+        failCount++;
       }
     } catch (error) {
       console.error(
@@ -312,13 +384,16 @@ function main(): void {
   console.log("Summary");
   console.log("=".repeat(60));
   console.log(`Success: ${successCount}`);
+  console.log(`Skipped: ${skipCount}`);
   console.log(`Failed: ${failCount}`);
   console.log("=".repeat(60));
 
-  if (failCount > 0 && mode === "validate") {
-    console.log(
-      "\n💡 Tip: Run 'npx tsx scripts/golden/update-goldens.ts generate' to regenerate failing files",
-    );
+  if (failCount > 0) {
+    if (mode === "validate") {
+      console.log(
+        "\n💡 Tip: Run 'npx tsx scripts/golden/update-goldens.ts generate' to regenerate failing files",
+      );
+    }
     process.exit(1);
   }
 }

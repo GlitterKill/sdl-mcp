@@ -90,6 +90,38 @@ describe("release publish lockfile guards", () => {
     );
   });
 
+  it("verifies packed npm installs on Ubuntu and Windows before publishing", () => {
+    const workflow = readSource(".github/workflows/release-publish.yml");
+    const verifyJob = workflow.match(/verify-packed-install:\s*[\s\S]*?\n  publish:/)?.[0] ?? "";
+    const publishJob = workflow.match(/publish:\s*[\s\S]*$/)?.[0] ?? "";
+
+    assert.ok(
+      verifyJob,
+      "verify-packed-install job section should be present in release-publish workflow",
+    );
+    assert.match(
+      verifyJob,
+      /runs-on:\s*\$\{\{\s*matrix\.os\s*\}\}/,
+      "packed install smoke should run across an OS matrix",
+    );
+    assert.match(verifyJob, /- ubuntu-latest[\s\S]*- windows-latest/);
+    assert.match(
+      verifyJob,
+      /SDL_MCP_STRICT_TREE_SITTER_POSTINSTALL:\s*"1"/,
+      "packed install smoke should fail fast when grammar bindings cannot be verified",
+    );
+    assert.match(
+      verifyJob,
+      /npm pack --pack-destination release-pack[\s\S]*npm install "\$\{tarball\}" --legacy-peer-deps --omit=optional[\s\S]*node node_modules\/sdl-mcp\/scripts\/postinstall-tree-sitter\.mjs --verify-only/s,
+      "release workflow should install the packed tarball and verify bundled grammar bindings",
+    );
+    assert.match(
+      publishJob,
+      /needs:\s*[\s\S]*- verify-packed-install/,
+      "publish job should wait for packed install verification",
+    );
+  });
+
   it("bootstraps the publish job on Node 24 with registry URL for trusted publishing", () => {
     const workflow = readSource(".github/workflows/release-publish.yml");
     const publishJob = workflow.match(/publish:\s*[\s\S]*$/)?.[0] ?? "";

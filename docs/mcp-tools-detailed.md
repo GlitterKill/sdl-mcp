@@ -49,6 +49,7 @@ Flat mode, gateway mode, and the CLI `tool` command share the same normalization
 12. [Runtime Execution](#12-runtime-execution)
     - [sdl.runtime.execute](#sdlruntimeexecute)
     - [sdl.runtime.queryOutput](#sdlruntimequeryoutput)
+    - [sdl.response.get](#sdlresponseget)
 13. [Development Memories](#13-development-memories)
     - [sdl.memory.store](#sdlmemorystore)
     - [sdl.memory.query](#sdlmemoryquery)
@@ -730,6 +731,9 @@ If denied, the response includes `whyDenied` reasons and a `nextBestAction` sugg
 | `granularity`       | `"symbol"` \| `"block"` \| `"fileWindow"` | No       | Scope of the code window                                                                                               |
 | `maxTokens`         | number                                    | No       | Maximum tokens (policy enforces `<= maxWindowTokens`)                                                                  |
 | `sliceContext`      | object                                    | No       | Task context for policy evaluation: `{taskText?, stackTrace?, failingTestPath?, editedFiles?, entrySymbols?, budget?}` |
+| `responseMode`      | `"inline"` \| `"auto"` \| `"handle"`      | No       | Large-response handling. Default `inline`; `auto`/`handle` can return a `response.get` handle                          |
+| `deltaMode`         | `"off"` \| `"auto"`                       | No       | Same-session delta mode for repeated raw windows. Default `off`                                                        |
+| `maxDeltaLines`     | number                                    | No       | Maximum diff lines when `deltaMode: "auto"` returns a changed-window delta                                             |
 
 **Response (approved):**
 
@@ -745,6 +749,10 @@ If denied, the response includes `whyDenied` reasons and a `nextBestAction` sugg
 | `downgradedFrom`     | string   | If the request was downgraded (e.g., to skeleton) |
 | `matchedIdentifiers` | string[] | Which identifiers were found                      |
 | `matchedLineNumbers` | number[] | Line numbers of matches                           |
+| `sessionDelta`       | object   | Same-session delta metadata when `deltaMode` applies |
+| `delta`              | object   | Bounded unified-line diff or unchanged marker when a repeated window is compressed |
+
+When `responseMode` returns a handle, the response is a `responseArtifact` reference with `handle`, `metadata`, `savings`, and `action: "response.get"`. Call `response.get` to retrieve a bounded excerpt or the full stored response.
 
 **Response (denied):**
 
@@ -779,6 +787,9 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 | `search`        | string | No       | —              | Regex pattern for search mode (case-insensitive)                                            |
 | `searchContext` | number | No       | 2              | Lines of context around each match in search mode                                           |
 | `jsonPath`      | string | No       | —              | Dot-separated key path for JSON/YAML extraction (e.g., `"scripts.build"`, `"items.0.name"`) |
+| `responseMode`  | string | No       | `inline`       | `inline`, `auto`, or `handle`; `auto`/`handle` stores large responses behind `response.get`  |
+| `deltaMode`     | string | No       | `off`          | `off` or `auto`; repeated reads in the same session can return a delta instead of content    |
+| `maxDeltaLines` | number | No       | 80             | Maximum diff lines returned for `deltaMode: "auto"`                                         |
 
 **Modes** (mutually exclusive, checked in priority order):
 
@@ -800,6 +811,10 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 | `truncatedAt`   | number  | Byte offset of truncation (only if truncated)     |
 | `matchCount`    | number  | Number of regex matches (search mode only)        |
 | `extractedPath` | string  | JSON path that was extracted (jsonPath mode only) |
+| `sessionDelta`  | object  | Same-session delta metadata when `deltaMode` applies |
+| `delta`         | object  | Bounded unified-line diff or unchanged marker when a repeated read is compressed |
+
+When `responseMode` returns a handle, call `response.get` with the returned handle to fetch an excerpt or the full stored response. This keeps large config, docs, or generated-file reads out of the immediate MCP response.
 
 **Blocked extensions:** `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.pyw`, `.go`, `.java`, `.cs`, `.c`, `.h`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx`, `.php`, `.phtml`, `.rs`, `.kt`, `.kts`, `.sh`, `.bash`, `.zsh`. Use SDL code tools for these.
 
@@ -1166,6 +1181,27 @@ Retrieves and searches stored runtime output artifacts on demand.
 
 ---
 
+### sdl.response.get
+
+Retrieves large tool responses stored behind an opaque handle.
+
+**What it does:** Loads a response artifact created by `responseMode: "auto"` or `"handle"` on `sdl.context`, `sdl.file.read`, `sdl.code.needWindow`, or `sdl.search.edit` preview. By default it returns a bounded excerpt; set `full: true` only when the whole stored response is needed.
+
+**Parameters:**
+
+| Parameter     | Type    | Required | Description                                                   |
+| :------------ | :------ | :------- | :------------------------------------------------------------ |
+| `repoId`      | string  | Yes      | Repository identifier used when the artifact was created      |
+| `handle`      | string  | Yes      | Opaque handle returned by the original large-response request |
+| `full`        | boolean | No       | Return the full stored payload instead of an excerpt          |
+| `maxBytes`    | number  | No       | Maximum excerpt bytes when `full` is not set                  |
+| `maxTokens`   | number  | No       | Estimated token bound for excerpt retrieval                   |
+| `offsetBytes` | number  | No       | Byte offset for paged excerpt retrieval                       |
+
+**Response:** `content`, `metadata`, `range`, `truncated`, and `savings`. Full JSON payloads are returned as JSON; excerpts are returned as strings so partial JSON is never misrepresented as complete structured data.
+
+---
+
 ## 13. Development Memories
 
 > **Note:** Memory tools are only available when memory is enabled in the configuration (either globally or per-repo via `"memory": { "enabled": true }`). When memory is disabled (the default), these tools return a clear error. See the [Enabling Memory](./feature-deep-dives/development-memories.md#enabling-memory) section.
@@ -1281,6 +1317,8 @@ Retrieves task-shaped code context inside Code Mode.
 **What it does:** Mirrors `sdl.context` but lives alongside `sdl.manual` and `sdl.workflow`. Use it first for `explain`, `debug`, `review`, and most `implement` requests when you are already operating through the Code Mode surfaces.
 
 **Parameters:** Same as `sdl.context`.
+
+`responseMode: "auto"` or `"handle"` can store large context responses behind `response.get`; the default `inline` preserves the legacy response shape.
 
 **Note (v0.11.0):** Hybrid seeding (FTS + vector via RRF) now runs alongside path inference rather than only as a fallback. When available, `retrievalEvidence` carries hybrid seed evidence in the response — sources, candidateCountPerSource, topRanksPerSource, fusionLatencyMs, ftsAvailable, vectorAvailable. Disable per-call with `options.semantic: false`.
 

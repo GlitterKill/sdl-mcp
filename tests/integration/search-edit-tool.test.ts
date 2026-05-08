@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { handleSearchEdit } from "../../dist/mcp/tools/search-edit/index.js";
+import { handleResponseGet } from "../../dist/mcp/tools/response.js";
 import { resetSearchEditPlanStore } from "../../dist/mcp/tools/search-edit/plan-store.js";
 import {
   SearchEditRequestSchema,
@@ -92,6 +93,40 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     assert.equal(response.preconditionSnapshot.length, 2);
     const files = response.fileEntries.map((e) => e.file).sort();
     assert.deepEqual(files, ["a.txt", "b.txt"]);
+  });
+
+  it("preview can spill the large response behind response.get", async () => {
+    const req = SearchEditRequestSchema.parse({
+      mode: "preview",
+      repoId: REPO_ID,
+      targeting: "text",
+      query: {
+        literal: "oldName",
+        replacement: "newName",
+        global: true,
+      },
+      editMode: "replacePattern",
+      filters: { extensions: [".txt"] },
+      responseMode: "handle",
+    });
+    const response = (await handleSearchEdit(req)) as Record<string, unknown>;
+
+    assert.equal(response.responseMode, "handle");
+    assert.equal(response.kind, "responseArtifact");
+    assert.equal(
+      (response.metadata as Record<string, unknown>).toolName,
+      "sdl.search.edit",
+    );
+
+    const full = await handleResponseGet({
+      repoId: REPO_ID,
+      handle: response.handle,
+      full: true,
+    }) as Record<string, unknown>;
+    const preview = full.content as SearchEditPreviewResponse;
+    assert.equal(preview.mode, "preview");
+    assert.ok(preview.planHandle.startsWith("se-"));
+    assert.equal(preview.filesMatched, 2);
   });
 
   it("apply writes all files and removes backups on success", async () => {

@@ -28,6 +28,7 @@ import {
   AgentFeedbackRequestSchema,
   AgentFeedbackQueryRequestSchema,
   RuntimeExecuteRequestSchema,
+  ResponseGetRequestSchema,
   MemoryStoreRequestSchema,
   MemoryQueryRequestSchema,
   MemoryRemoveRequestSchema,
@@ -67,6 +68,7 @@ import {
   handleAgentFeedbackQuery,
 } from "../mcp/tools/agent-feedback.js";
 import { handleRuntimeExecute } from "../mcp/tools/runtime.js";
+import { handleResponseGet } from "../mcp/tools/response.js";
 import {
   handleMemoryStore,
   handleMemoryQuery,
@@ -227,6 +229,12 @@ export function registerLegacyTools(
     dep("sdl.agent", "Execute a command in a repo-scoped subprocess"),
     RuntimeExecuteRequestSchema,
     handleRuntimeExecute,
+  );
+  server.registerTool(
+    "sdl.response.get",
+    dep("sdl.query", "Retrieve a stored large response by handle"),
+    ResponseGetRequestSchema,
+    handleResponseGet,
   );
   server.registerTool(
     "sdl.memory.store",

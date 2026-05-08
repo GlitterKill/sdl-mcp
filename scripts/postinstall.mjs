@@ -2,8 +2,9 @@
 /**
  * postinstall.mjs — top-level npm postinstall entrypoint.
  *
- * Runs each sub-step as a separate Node process. A failure in any sub-step
- * logs a warning but never aborts npm install.
+ * Runs each sub-step as a separate Node process. Sub-step failures are
+ * warnings by default; CI can set SDL_MCP_STRICT_TREE_SITTER_POSTINSTALL=1
+ * to fail fast when grammar bindings cannot be verified.
  */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -13,6 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const STEPS = [
+  { name: "tree-sitter", script: "postinstall-tree-sitter.mjs" },
   { name: "prune", script: "postinstall-prune.mjs" },
   { name: "models", script: "postinstall-models.mjs" },
 ];
@@ -38,6 +40,12 @@ for (const step of STEPS) {
     console.warn(
       `sdl-mcp: postinstall step "${step.name}" exited with code ${code}`,
     );
+    if (
+      step.name === "tree-sitter" &&
+      process.env.SDL_MCP_STRICT_TREE_SITTER_POSTINSTALL === "1"
+    ) {
+      process.exit(code);
+    }
   }
 }
 

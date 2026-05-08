@@ -13,7 +13,7 @@ Each wrapper:
 3. Declares its own permissive `peerDependencies: { "tree-sitter": ">=0.21.0" }` (optional) that matches keqingmoe@0.26.2.
 4. Re-exports upstream unchanged via `module.exports = require("upstream-grammar")`.
 
-The upstream grammar's prebuilt `.node` binaries ship transitively in the bundled `node_modules/upstream-grammar/prebuilds/` dir, so no compilation happens at consumer install.
+Upstream grammars use prebuilt `.node` binaries when available. When a binding is missing for the active Node/OS ABI, sdl-mcp's postinstall verifier rebuilds the grammar set before `postinstall-prune` removes source directories.
 
 ## Package matrix
 

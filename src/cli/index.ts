@@ -95,7 +95,11 @@ async function main(): Promise<void> {
     },
   });
 
-  if (values.help) {
+  const command = positionals[0];
+  const shouldDeferToolHelp =
+    command === "tool" && positionals.length > 1;
+
+  if (values.help && !shouldDeferToolHelp) {
     showHelp();
     process.exit(0);
   }
@@ -115,8 +119,6 @@ async function main(): Promise<void> {
       | undefined,
     logFormat: values["log-format"] as "json" | "pretty" | undefined,
   };
-
-  const command = positionals[0];
 
   if (!command) {
     showHelp();

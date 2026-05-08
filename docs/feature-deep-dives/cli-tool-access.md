@@ -72,6 +72,7 @@ Run `sdl-mcp tool --list` to inspect the current aliases grouped by namespace.
 | `slice.spillover.get` | Fetch paginated spillover cards   |
 | `delta.get`           | Get a delta pack between versions |
 | `pr.risk.analyze`     | Analyze PR risk and blast radius  |
+| `response.get`        | Retrieve stored large responses   |
 
 ### Code
 

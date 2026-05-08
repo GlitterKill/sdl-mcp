@@ -32,10 +32,14 @@ export type {
   TimeseriesPoint,
   TimeseriesResponse,
   TimeseriesWindow,
+  TokenSavingsBreakdownMetrics,
+  TokenSavingsLayerMetrics,
+  TokenSavingsSource,
+  TokenSavingsToolMetrics,
   TokenEfficiencyMetrics,
   ToolVolume,
 } from "./types.js";
-export { BEAM_EXPLAIN_MAX_ENTRIES } from "./types.js";
+export { BEAM_EXPLAIN_MAX_ENTRIES, TOKEN_SAVINGS_SOURCES } from "./types.js";
 
 export type {
   CacheLookupTapEvent,
@@ -47,6 +51,7 @@ export type {
   ResourceSampleTapEvent,
   ScipIngestTapEvent,
   SliceBuildTapEvent,
+  TokenSavingsTapEvent,
   AuditBufferTapEvent,
   PostIndexSessionTapEvent,
 } from "./event-tap.js";

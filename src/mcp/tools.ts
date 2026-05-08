@@ -32,6 +32,7 @@ import { z } from "zod";
 
 import type { RetrievalEvidence } from "../retrieval/types.js";
 import { RUNTIME_NAMES } from "../runtime/runtimes.js";
+import { MAX_RESPONSE_EXCERPT_BYTES } from "../runtime/response-artifacts.js";
 import {
   SYMBOL_SEARCH_MAX_RESULTS,
   PAGE_SIZE_MAX,
@@ -940,6 +941,81 @@ const ConditionalNotModifiedResponseSchema = z.object({
   etag: z.string(),
 });
 
+export const ResponseModeSchema = z
+  .enum(["inline", "auto", "handle"])
+  .optional()
+  .default("inline");
+
+export const SessionDeltaModeSchema = z
+  .enum(["off", "auto"])
+  .optional()
+  .default("off");
+
+const ResponseArtifactMetadataSchema = z.object({
+  id: z.string(),
+  handle: z.string(),
+  repoId: z.string(),
+  toolName: z.string(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+  estimatedOriginalTokens: z.number().int(),
+  originalBytes: z.number().int(),
+  storedBytes: z.number().int(),
+  sha256: z.string(),
+  etag: z.string(),
+  contentKind: z.enum(["json", "text"]),
+  requiresSameSession: z.boolean().optional(),
+  sessionKeyHash: z.string().optional(),
+});
+
+const ResponseArtifactSavingsSchema = z.object({
+  originalTokens: z.number().int(),
+  returnedTokens: z.number().int(),
+  savedTokens: z.number().int(),
+  originalBytes: z.number().int(),
+  returnedBytes: z.number().int(),
+  savedBytes: z.number().int(),
+});
+
+export const ResponseArtifactReferenceSchema = z.object({
+  responseMode: z.literal("handle"),
+  kind: z.literal("responseArtifact"),
+  handle: z.string(),
+  action: z.literal("response.get"),
+  metadata: ResponseArtifactMetadataSchema,
+  savings: ResponseArtifactSavingsSchema,
+});
+
+const SessionDeltaMetadataSchema = z.object({
+  cacheHit: z.boolean(),
+  deltaApplied: z.boolean(),
+  stableKey: z.string(),
+  currentContentHash: z.string(),
+  previousContentHash: z.string().optional(),
+  etag: z.string().optional(),
+  estimatedFullTokens: z.number().int().nonnegative(),
+  estimatedDeltaTokens: z.number().int().nonnegative(),
+  estimatedTokensAvoided: z.number().int().nonnegative(),
+  reason: z
+    .enum([
+      "delta-off",
+      "no-session",
+      "cache-miss",
+      "content-too-large",
+      "delta-too-large",
+    ])
+    .optional(),
+});
+
+const SessionDeltaPayloadSchema = z.object({
+  format: z.literal("unified-line-diff"),
+  status: z.enum(["unchanged", "changed"]),
+  excerpt: z.string().optional(),
+  changedLineCount: z.number().int().nonnegative(),
+  maxDeltaLines: z.number().int().positive(),
+  truncated: z.boolean(),
+});
+
 export const SymbolRefSchema = z.object({
   name: z.string().min(1),
   file: z.string().min(1).optional(),
@@ -1364,6 +1440,19 @@ export const CodeNeedWindowRequestSchema = z.object({
     .describe(
       "Resume from this line number (for continuation after truncation)",
     ),
+  responseMode: ResponseModeSchema.describe(
+    "Large-response handling: inline preserves legacy output; auto/handle returns response.get handles for large payloads.",
+  ),
+  deltaMode: SessionDeltaModeSchema.describe(
+    "Same-session delta mode for repeated raw windows. Default off preserves legacy output.",
+  ),
+  maxDeltaLines: z
+    .number()
+    .int()
+    .min(1)
+    .max(1000)
+    .optional()
+    .describe("Maximum diff lines when deltaMode=auto returns changed content."),
 });
 
 const CodeWindowResponseApprovedSchema = z.object({
@@ -1401,6 +1490,8 @@ const CodeWindowResponseApprovedSchema = z.object({
   matchedIdentifiers: z.array(z.string()).optional(),
   matchedLineNumbers: z.array(z.number().int()).optional(),
   downgradeGuidance: z.string().optional(),
+  sessionDelta: SessionDeltaMetadataSchema.optional(),
+  delta: SessionDeltaPayloadSchema.optional(),
 });
 
 const CodeWindowResponseDeniedSchema = z.object({
@@ -1416,9 +1507,12 @@ const CodeWindowResponseDeniedSchema = z.object({
     .optional(),
 });
 
-export const CodeNeedWindowResponseSchema = z.discriminatedUnion("approved", [
-  CodeWindowResponseApprovedSchema,
-  CodeWindowResponseDeniedSchema,
+export const CodeNeedWindowResponseSchema = z.union([
+  z.discriminatedUnion("approved", [
+    CodeWindowResponseApprovedSchema,
+    CodeWindowResponseDeniedSchema,
+  ]),
+  ResponseArtifactReferenceSchema,
 ]);
 
 export const GetSkeletonRequestSchema = z
@@ -1922,6 +2016,9 @@ const AgentContextBudgetSchema = z
 export const AgentContextRequestSchema = z.object({
   /** Wire format for the response payload. "packed" emits packed wire format (gate-protected); "auto" picks the smaller of packed vs JSON; "json" forces legacy JSON. Default: "auto". */
   wireFormat: z.enum(["json", "packed", "auto"]).optional().default("auto"),
+  responseMode: ResponseModeSchema.describe(
+    "Large-response handling: inline preserves legacy output; auto/handle stores full responses behind response.get handles.",
+  ),
   repoId: z
     .string()
     .min(1)
@@ -2116,6 +2213,7 @@ export const AgentContextResponseSchema = z.union([
     etag: z.string(),
   }),
   ConditionalNotModifiedResponseSchema,
+  ResponseArtifactReferenceSchema,
 ]);
 
 export type AgentContextRequest = z.infer<typeof AgentContextRequestSchema>;
@@ -2447,6 +2545,65 @@ export type RuntimeQueryOutputResponse = z.infer<
   typeof RuntimeQueryOutputResponseSchema
 >;
 
+export const ResponseGetRequestSchema = z.object({
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  handle: z
+    .string()
+    .min(1)
+    .max(256)
+    .regex(/^[A-Za-z0-9_-]+$/, {
+      message:
+        "handle must contain only alphanumerics, dashes, and underscores",
+    })
+    .describe("Response artifact handle returned by a large-response tool"),
+  full: z
+    .boolean()
+    .default(false)
+    .describe("Return the full stored response instead of a bounded excerpt"),
+  maxBytes: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_RESPONSE_EXCERPT_BYTES)
+    .optional()
+    .describe("Maximum bytes to return when full=false"),
+  maxTokens: z
+    .number()
+    .int()
+    .min(1)
+    .max(250_000)
+    .optional()
+    .describe("Estimated token bound to return when full=false"),
+  offsetBytes: z
+    .number()
+    .int()
+    .min(0)
+    .default(0)
+    .describe("Byte offset for excerpt retrieval when full=false"),
+});
+
+export const ResponseGetResponseSchema = z.object({
+  handle: z.string(),
+  full: z.boolean(),
+  truncated: z.boolean(),
+  contentKind: z.enum(["json", "text"]),
+  content: z.unknown(),
+  metadata: ResponseArtifactMetadataSchema,
+  range: z.object({
+    offsetBytes: z.number().int(),
+    returnedBytes: z.number().int(),
+    totalBytes: z.number().int(),
+    estimatedReturnedTokens: z.number().int(),
+  }),
+  savings: ResponseArtifactSavingsSchema,
+});
+
+export type ResponseGetRequest = z.infer<typeof ResponseGetRequestSchema>;
+export type ResponseGetResponse = z.infer<typeof ResponseGetResponseSchema>;
+export type ResponseArtifactReference = z.infer<
+  typeof ResponseArtifactReferenceSchema
+>;
+
 // ============================================================================
 // Memory Schemas
 // ============================================================================
@@ -2695,11 +2852,24 @@ export const FileReadRequestSchema = z.object({
     .describe(
       "For JSON/YAML files: dot-separated key path to extract (e.g. 'server.port' or 'dependencies').",
     ),
+  responseMode: ResponseModeSchema.describe(
+    "Large-response handling: inline preserves legacy output; auto/handle stores full responses behind response.get handles.",
+  ),
+  deltaMode: SessionDeltaModeSchema.describe(
+    "Same-session delta mode for repeated file windows. Default off preserves legacy output.",
+  ),
+  maxDeltaLines: z
+    .number()
+    .int()
+    .min(1)
+    .max(1000)
+    .optional()
+    .describe("Maximum diff lines when deltaMode=auto returns changed content."),
 });
 
 export type FileReadRequest = z.infer<typeof FileReadRequestSchema>;
 
-export interface FileReadResponse {
+export interface FileReadInlineResponse {
   filePath: string;
   content: string;
   bytes: number;
@@ -2709,7 +2879,11 @@ export interface FileReadResponse {
   truncatedAt?: number;
   matchCount?: number;
   extractedPath?: string;
+  sessionDelta?: z.infer<typeof SessionDeltaMetadataSchema>;
+  delta?: z.infer<typeof SessionDeltaPayloadSchema>;
 }
+
+export type FileReadResponse = FileReadInlineResponse | ResponseArtifactReference;
 
 // ============================================================================
 // SCIP Ingest Schemas
@@ -2961,6 +3135,9 @@ const SearchEditPreviewRequestSchema = z.object({
   maxMatchesPerFile: z.number().int().min(1).max(5000).optional(),
   maxTotalMatches: z.number().int().min(1).max(50000).optional(),
   createBackup: z.boolean().optional(),
+  responseMode: ResponseModeSchema.describe(
+    "Large-preview handling: inline preserves legacy output; auto/handle stores full previews behind response.get handles.",
+  ),
 });
 
 const SearchEditApplyRequestSchema = z.object({
@@ -3027,4 +3204,5 @@ export interface SearchEditApplyResponse {
 
 export type SearchEditResponse =
   | SearchEditPreviewResponse
-  | SearchEditApplyResponse;
+  | SearchEditApplyResponse
+  | ResponseArtifactReference;

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MAX_REPO_ID_LENGTH } from "../../config/constants.js";
+import type { ToolContext } from "../../server.js";
 import {
   FileWriteReplaceLinesSchema,
   FileWriteReplacePatternSchema,
@@ -69,6 +70,9 @@ const FileGatewayReadSchema = z.object({
     .describe(
       "For JSON/YAML files: dot-separated key path to extract (e.g. 'server.port' or 'dependencies').",
     ),
+  responseMode: z.enum(["inline", "auto", "handle"]).optional().default("inline"),
+  deltaMode: z.enum(["off", "auto"]).optional().default("off"),
+  maxDeltaLines: z.number().int().min(1).max(1000).optional(),
 });
 
 const FileGatewayWriteSchema = z.object({
@@ -133,6 +137,7 @@ const FileGatewaySearchEditPreviewSchema = z.object({
   maxMatchesPerFile: z.number().int().min(1).max(5000).optional(),
   maxTotalMatches: z.number().int().min(1).max(50000).optional(),
   createBackup: z.boolean().optional(),
+  responseMode: z.enum(["inline", "auto", "handle"]).optional().default("inline"),
 });
 
 const FileGatewaySearchEditApplySchema = z.object({
@@ -157,25 +162,26 @@ export type FileGatewayResponse =
 
 export async function handleFileGateway(
   args: unknown,
+  context?: ToolContext,
 ): Promise<FileGatewayResponse> {
   const request = FileGatewayRequestSchema.parse(args);
 
   switch (request.op) {
     case "read": {
-      const { op, ...rest } = request;
-      return handleFileRead(rest);
+      const { op: _op, ...rest } = request;
+      return handleFileRead(rest, context);
     }
     case "write": {
-      const { op, ...rest } = request;
+      const { op: _op, ...rest } = request;
       return handleFileWrite(rest);
     }
     case "searchEditPreview": {
-      const { op, ...rest } = request;
-      return handleSearchEdit({ mode: "preview", ...rest });
+      const { op: _op, ...rest } = request;
+      return handleSearchEdit({ mode: "preview", ...rest }, context);
     }
     case "searchEditApply": {
-      const { op, ...rest } = request;
-      return handleSearchEdit({ mode: "apply", ...rest });
+      const { op: _op, ...rest } = request;
+      return handleSearchEdit({ mode: "apply", ...rest }, context);
     }
   }
 }

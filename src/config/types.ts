@@ -31,6 +31,10 @@ import {
   RUNTIME_DEFAULT_MAX_STDOUT_BYTES,
   RUNTIME_DEFAULT_MAX_STDERR_BYTES,
   RUNTIME_DEFAULT_MAX_ARTIFACT_BYTES,
+  RUNTIME_DEFAULT_MAX_RESPONSE_ARTIFACTS_PER_REPO,
+  RUNTIME_DEFAULT_MAX_RESPONSE_ARTIFACT_BYTES_PER_REPO,
+  RUNTIME_DEFAULT_MAX_RESPONSE_ARTIFACT_BYTES_TOTAL,
+  RUNTIME_DEFAULT_MAX_RESPONSE_ARTIFACTS_TOTAL,
   RUNTIME_DEFAULT_ARTIFACT_TTL_HOURS,
   RUNTIME_DEFAULT_MAX_CONCURRENT_JOBS,
   RUNTIME_MAX_CONCURRENT_JOBS,
@@ -649,6 +653,26 @@ export const RuntimeConfigSchema = z.object({
     .int()
     .min(RUNTIME_MIN_BYTES)
     .default(RUNTIME_DEFAULT_MAX_ARTIFACT_BYTES),
+  maxResponseArtifactsPerRepo: z
+    .number()
+    .int()
+    .min(1)
+    .default(RUNTIME_DEFAULT_MAX_RESPONSE_ARTIFACTS_PER_REPO),
+  maxResponseArtifactBytesPerRepo: z
+    .number()
+    .int()
+    .min(RUNTIME_MIN_BYTES)
+    .default(RUNTIME_DEFAULT_MAX_RESPONSE_ARTIFACT_BYTES_PER_REPO),
+  maxResponseArtifactBytesTotal: z
+    .number()
+    .int()
+    .min(RUNTIME_MIN_BYTES)
+    .default(RUNTIME_DEFAULT_MAX_RESPONSE_ARTIFACT_BYTES_TOTAL),
+  maxResponseArtifactsTotal: z
+    .number()
+    .int()
+    .min(1)
+    .default(RUNTIME_DEFAULT_MAX_RESPONSE_ARTIFACTS_TOTAL),
   artifactTtlHours: z
     .number()
     .int()

@@ -102,6 +102,50 @@ export interface TokenEfficiencyMetrics {
   savingsRatio: number;
   /** Average tokens per tool call. */
   avgPerCall: number;
+  /** Per-compression-layer savings; realized emitted savings are kept separate from hit-rate opportunities. */
+  compressionLayers: TokenSavingsBreakdownMetrics;
+}
+
+export const TOKEN_SAVINGS_SOURCES = [
+  "responseArtifact",
+  "sessionDelta",
+  "etag",
+  "spillover",
+  "rawWindowAvoidance",
+  "packedWire",
+] as const;
+
+export type TokenSavingsSource = (typeof TOKEN_SAVINGS_SOURCES)[number];
+
+export interface TokenSavingsLayerMetrics {
+  source: string;
+  /** Events observed for this source, including misses/candidates. */
+  events: number;
+  /** Events that produced realized emitted savings. */
+  realizedEvents: number;
+  /** Realized estimated tokens avoided. Candidate-only events do not increment this. */
+  estimatedTokensAvoided: number;
+  /** Hit denominator when the source reports opportunities. */
+  opportunities: number;
+  /** Hit numerator when the source reports opportunities. */
+  hits: number;
+  /** Hit percentage 0-100. Zero when no opportunity denominator exists. */
+  hitRatePct: number;
+  /** Stored or avoided bytes when a layer can report bytes. */
+  storedBytes: number;
+}
+
+export interface TokenSavingsToolMetrics extends TokenSavingsLayerMetrics {
+  tool: string;
+}
+
+export interface TokenSavingsBreakdownMetrics {
+  totalEvents: number;
+  totalRealizedEvents: number;
+  totalEstimatedTokensAvoided: number;
+  totalStoredBytes: number;
+  bySource: Record<string, TokenSavingsLayerMetrics>;
+  byTool: Record<string, TokenSavingsToolMetrics>;
 }
 
 export interface HealthMetrics {

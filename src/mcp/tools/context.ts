@@ -13,6 +13,11 @@ import {
 } from "../tools.js";
 import { ZodError } from "zod";
 import { buildConditionalResponse } from "../../util/conditional-response.js";
+import type { ToolContext } from "../../server.js";
+import {
+  maybeCompressToolResponse,
+  recordTokenSavings,
+} from "../response-compression.js";
 
 function stripVolatileEvidenceFields(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -142,6 +147,7 @@ export function buildContextPackedStats(
 
 export async function handleAgentContext(
   args: unknown,
+  context?: ToolContext,
 ): Promise<AgentContextResponse> {
   try {
     const request = AgentContextRequestSchema.parse(args);
@@ -154,10 +160,7 @@ export async function handleAgentContext(
     };
 
     const result = await contextEngine.buildContext(task);
-    const response = result as Exclude<
-      AgentContextResponse,
-      { notModified: true }
-    >;
+    const response = result as Extract<AgentContextResponse, { taskId: string }>;
 
     // Always use rawTokens for usage tracking - synthetic fileIds don't exist in DB
     // and would cause the savings meter to always show 0%.
@@ -213,10 +216,33 @@ export async function handleAgentContext(
         publishContextWireDecision(wireResult, "fallback");
       }
     }
-    return buildConditionalResponse(enrichedResponse, {
+    const conditionalResponse = buildConditionalResponse(enrichedResponse, {
       ifNoneMatch: request.ifNoneMatch,
       // Strip request-unique IDs and timing data from the ETag source.
       stableValue: buildStableAgentContextValue(stableView),
+    });
+    if (request.ifNoneMatch) {
+      const hit = "notModified" in conditionalResponse;
+      recordTokenSavings({
+        repoId: request.repoId,
+        source: "etag",
+        tool: "sdl.context",
+        estimatedTokensAvoided: hit ? rawTokens : 0,
+        opportunity: true,
+        hit,
+        realized: hit,
+      });
+    }
+    if ("notModified" in conditionalResponse) {
+      return conditionalResponse;
+    }
+    return maybeCompressToolResponse({
+      repoId: request.repoId,
+      toolName: "sdl.context",
+      payload: conditionalResponse,
+      responseMode: request.responseMode,
+      rawContext: { rawTokens },
+      sessionId: context?.sessionId,
     });
   } catch (error) {
     if (error instanceof ZodError) {

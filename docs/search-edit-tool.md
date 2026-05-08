@@ -49,7 +49,8 @@ file whose sha256/mtime has drifted since the preview was taken.
   "maxFiles": 50,
   "maxMatchesPerFile": 100,
   "maxTotalMatches": 500,
-  "createBackup": true
+  "createBackup": true,
+  "responseMode": "inline"
 }
 ```
 
@@ -76,6 +77,13 @@ from v1):
 - `append` — requires `query.append`
 
 ## Preview response
+
+Preview supports `responseMode: "inline" | "auto" | "handle"`. The default is
+`"inline"`. Use `"auto"` for large previews or `"handle"` when you always want the
+full preview stored behind `response.get`; this is useful when many `fileEntries` or
+snippets would otherwise dominate the model context. Apply still uses the returned
+`planHandle`; `response.get({ handle, full: true })` retrieves the original preview
+payload.
 
 ```json
 {

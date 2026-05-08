@@ -66,6 +66,9 @@ flowchart TD
 | `search`        | string | No       | -       | Regex pattern for search mode         |
 | `searchContext` | number | No       | 2       | Context lines around matches (max 20) |
 | `jsonPath`      | string | No       | -       | Dot-separated key path for JSON/YAML  |
+| `responseMode`  | string | No       | inline  | `inline`, `auto`, or `handle`; `handle` stores the full response behind `response.get` |
+| `deltaMode`     | string | No       | off     | `off` or `auto`; `auto` returns same-session deltas for repeated reads |
+| `maxDeltaLines` | number | No       | 80      | Max diff lines when `deltaMode: "auto"` returns changed content |
 
 ---
 
@@ -82,6 +85,39 @@ flowchart TD
 | `truncatedAt`   | number  | Byte position where truncation occurred |
 | `matchCount`    | number  | Total matches found (search mode)       |
 | `extractedPath` | string  | Path that was extracted (jsonPath mode) |
+| `sessionDelta`  | object  | Same-session delta metadata when `deltaMode` applies |
+| `delta`         | object  | Unified-line diff payload when `deltaMode` applies |
+
+When `responseMode` returns a handle, the response is:
+
+```json
+{
+  "responseMode": "handle",
+  "kind": "responseArtifact",
+  "handle": "response-myrepo-1770000000000-0123456789abcdef",
+  "action": "response.get",
+  "metadata": { "toolName": "sdl.file.read" },
+  "savings": { "savedTokens": 1200 }
+}
+```
+
+Call `response.get` with the returned handle to retrieve an excerpt or the full stored response.
+
+---
+
+## Large Responses and Repeated Reads
+
+Use `responseMode: "auto"` or `"handle"` when a read may produce a large response.
+`"auto"` keeps small reads inline and stores responses above the token threshold as
+`response.get` artifacts. `"handle"` always stores the full response and returns only
+the handle plus savings metadata. The default remains `"inline"` for backwards
+compatibility.
+
+Use `deltaMode: "auto"` in edit-heavy sessions when rereading the same file/range.
+The first call returns the full content and seeds a per-session cache. Repeated calls
+return `content: ""` plus `sessionDelta` and `delta` when unchanged or changed, avoiding
+resending the whole window. Deltas are scoped to the MCP transport session (`stdio` for
+stdio clients) and are bounded by TTL and LRU limits.
 
 ---
 

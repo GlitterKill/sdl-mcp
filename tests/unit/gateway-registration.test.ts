@@ -48,7 +48,7 @@ describe("Gateway tool registration", () => {
     );
   });
 
-  it("registers 33 tools when gateway enabled with legacy", () => {
+  it("registers 34 tools when gateway enabled with legacy", () => {
     const names: string[] = [];
     const fakeServer = makeFakeGatewayServer(names);
 
@@ -61,7 +61,7 @@ describe("Gateway tool registration", () => {
       },
     );
 
-    // 2 universal + 4 gateway + 30 legacy = 36
+    // 2 universal + 4 gateway + 28 legacy = 34
     assert.ok(names.includes("sdl.query"), "expected sdl.query gateway tool");
     assert.ok(
       names.includes("sdl.repo.register"),
@@ -74,12 +74,12 @@ describe("Gateway tool registration", () => {
     assert.ok(names.includes("sdl.info"), "expected sdl.info universal tool");
     assert.strictEqual(
       names.length,
-      33,
-      "expected 33 tools (2 universal + 4 gateway + 27 legacy)",
+      34,
+      "expected 34 tools (2 universal + 4 gateway + 28 legacy)",
     );
   });
 
-  it("registers 30 tools when gateway disabled (28 flat + 2 universal)", () => {
+  it("registers 33 tools when gateway disabled (31 flat + 2 universal)", () => {
     const names: string[] = [];
     const fakeServer = {
       registerTool(name: string): void {
@@ -111,12 +111,12 @@ describe("Gateway tool registration", () => {
     assert.ok(names.includes("sdl.info"), "expected sdl.info");
     assert.strictEqual(
       names.length,
-      30,
-      "expected 30 tools (28 flat + 2 universal)",
+      33,
+      "expected 33 tools (31 flat + 2 universal)",
     );
   });
 
-  it("registers 30 tools when no gateway config (28 flat + 2 universal)", () => {
+  it("registers 33 tools when no gateway config (31 flat + 2 universal)", () => {
     const names: string[] = [];
     const fakeServer = {
       registerTool(name: string): void {
@@ -138,8 +138,8 @@ describe("Gateway tool registration", () => {
     assert.ok(names.includes("sdl.info"), "expected sdl.info");
     assert.strictEqual(
       names.length,
-      30,
-      "expected 30 tools (28 flat + 2 universal)",
+      33,
+      "expected 33 tools (31 flat + 2 universal)",
     );
   });
 

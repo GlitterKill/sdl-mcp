@@ -19,6 +19,7 @@ describe("npx packaging metadata", () => {
     assert.ok(files.has("templates/*.json"));
     assert.ok(files.has("templates/*.template"));
     assert.ok(files.has("scripts/postinstall.mjs"));
+    assert.ok(files.has("scripts/postinstall-tree-sitter.mjs"));
     assert.ok(files.has("scripts/postinstall-prune.mjs"));
     assert.ok(files.has("scripts/postinstall-models.mjs"));
     assert.ok(!files.has("migrations"));

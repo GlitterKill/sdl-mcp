@@ -345,6 +345,42 @@ describe("release regression guards", () => {
     );
   });
 
+  it("verifies tree-sitter grammars during package postinstall before pruning sources", () => {
+    const postinstallSource = readSource("scripts/postinstall.mjs");
+    const grammarSource = readSource("scripts/postinstall-tree-sitter.mjs");
+
+    assert.match(
+      postinstallSource,
+      /name: "tree-sitter"[\s\S]*script: "postinstall-tree-sitter\.mjs"[\s\S]*name: "prune"/,
+      "top-level postinstall should verify tree-sitter bindings before pruning sources",
+    );
+    assert.match(
+      postinstallSource,
+      /SDL_MCP_STRICT_TREE_SITTER_POSTINSTALL[\s\S]*process\.exit\(code\)/,
+      "strict mode should let CI fail on missing grammar bindings",
+    );
+    assert.match(
+      grammarSource,
+      /tree-sitter-kotlin/,
+      "grammar verifier should include Kotlin in the required grammar set",
+    );
+    assert.match(
+      grammarSource,
+      /parser\.setLanguage\(grammar\)[\s\S]*parser\.parse\(spec\.sample\)/,
+      "grammar verifier should parse a sample with each loaded grammar",
+    );
+    assert.match(
+      grammarSource,
+      /SDL_MCP_SKIP_TREE_SITTER_POSTINSTALL/,
+      "operators should be able to skip grammar rebuilds in constrained installs",
+    );
+    assert.match(
+      grammarSource,
+      /spawnSync\(npmCmd, \["rebuild", \.\.\.rebuildPackages\]/,
+      "grammar verifier should rebuild the full grammar set when bindings are missing",
+    );
+  });
+
   it("policy get/set merges with app policy without clobbering overrides", () => {
     const source = readSource("src/mcp/tools/policy.ts");
 

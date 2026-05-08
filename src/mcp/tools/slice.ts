@@ -75,6 +75,7 @@ import {
   type SpanAttributes,
 } from "../../util/tracing.js";
 import { attachRawContext } from "../token-usage.js";
+import { recordTokenSavings } from "../response-compression.js";
 import {
   serializeSliceForWireFormat,
   normalizeVisibility,
@@ -654,6 +655,20 @@ async function handleSliceBuildInternal(
         axisHit: wireResult.axisHit,
         gateDecision: "packed",
       };
+    }
+    if (sliceWasTruncated && spilloverPayload) {
+      recordTokenSavings({
+        repoId,
+        source: "spillover",
+        tool: "sdl.slice.build",
+        estimatedTokensAvoided: Math.ceil(
+          Buffer.byteLength(spilloverPayload, "utf-8") / 4,
+        ),
+        storedBytes: Buffer.byteLength(spilloverPayload, "utf-8"),
+        opportunity: true,
+        hit: true,
+        realized: true,
+      });
     }
     const response = {
       sliceHandle: handle,

@@ -88,6 +88,7 @@ const ACTION_TAGS: Record<string, ActionTag[]> = {
   "buffer.status": ["buffer"],
   "runtime.execute": ["runtime"],
   "runtime.queryOutput": ["runtime"],
+  "response.get": ["query"],
   "memory.store": ["memory"],
   "memory.query": ["memory"],
   "memory.remove": ["memory"],
@@ -492,6 +493,10 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
     artifactHandle: "runtime-myrepo-123-abc",
     queryTerms: ["error", "failed"],
   },
+  "response.get": {
+    handle: "response-myrepo-1770000000000-0123456789abcdef",
+    maxBytes: 8192,
+  },
   "memory.store": {
     type: "pattern",
     title: "Auth uses JWT",
@@ -582,6 +587,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "buffer.status": "Get buffer status",
   "runtime.execute": "Execute runtime command",
   "runtime.queryOutput": "Query stored command output by keywords",
+  "response.get": "Retrieve a stored large tool response by handle",
   "memory.store": "Store a development memory",
   "memory.query": "Query memories",
   "memory.remove": "Soft-delete a memory",
@@ -803,6 +809,11 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
     prerequisites: ["runtime.execute"],
     recommendedNextActions: ["repo.overview"],
     fallbacks: ["runtime.execute"],
+  },
+  "response.get": {
+    prerequisites: [],
+    recommendedNextActions: [],
+    fallbacks: ["action.search"],
   },
   "memory.store": {
     prerequisites: ["symbol.getCard", "slice.build"],

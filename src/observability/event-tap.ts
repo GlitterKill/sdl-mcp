@@ -25,6 +25,7 @@ import type {
   ToolCallEvent,
   WatcherHealthTelemetryEvent,
 } from "../mcp/telemetry.js";
+import type { TokenSavingsSource } from "./types.js";
 
 export interface PprTapEvent {
   repoId: string;
@@ -51,6 +52,22 @@ export interface PackedWireTapEvent {
   packedTokens?: number;
   decision: "packed" | "fallback";
   axisHit: "bytes" | "tokens" | null;
+}
+
+export interface TokenSavingsTapEvent {
+  repoId?: string;
+  source: TokenSavingsSource;
+  tool?: string;
+  /** Estimated tokens avoided when the event produced realized emitted savings. */
+  estimatedTokensAvoided?: number;
+  /** Stored or avoided bytes when the compression layer can report them. */
+  storedBytes?: number;
+  /** Whether this event should count in hit-rate denominators. */
+  opportunity?: boolean;
+  /** Whether this event should count in hit-rate numerators. */
+  hit?: boolean;
+  /** Defaults to true; false records candidate/adoption stats without adding realized savings. */
+  realized?: boolean;
 }
 
 export interface PoolSampleTapEvent {
@@ -132,6 +149,7 @@ export interface ObservabilityTap {
   pprResult(event: PprTapEvent): void;
   scipIngest(event: ScipIngestTapEvent): void;
   packedWire(event: PackedWireTapEvent): void;
+  tokenSavings(event: TokenSavingsTapEvent): void;
   poolSample(event: PoolSampleTapEvent): void;
   resourceSample(event: ResourceSampleTapEvent): void;
   indexPhase(event: IndexPhaseTapEvent): void;

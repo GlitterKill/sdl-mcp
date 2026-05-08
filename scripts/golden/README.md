@@ -38,13 +38,13 @@ npm run test:golden
 npm run golden:update
 
 # Generate golden files for specific language
-npm run golden:update rust
+npm run golden:update -- rust
 
 # Validate specific language
-npm run test:golden rust
+npm run test:golden -- rust
 ```
 
-#### Supported Languages
+#### Managed Languages
 
 - c (C)
 - cpp (C++)
@@ -52,10 +52,8 @@ npm run test:golden rust
 - rust
 - kotlin
 - shell (Bash)
-- java
-- python
-- csharp
-- go
+
+If a specific-language validation is requested for a language outside this list, the script exits with an error instead of reporting a zero-spec pass.
 
 #### Golden File Patterns
 
@@ -108,6 +106,10 @@ assert.deepStrictEqual(
   "Extracted symbols should match golden file",
 );
 ```
+
+The adapter golden manager normalizes checkout-specific fixture paths before comparison. Symbol and call IDs that include `tests/fixtures/{language}/...` are compared using repo-relative fixture paths, so validation works from the main checkout, git worktrees, and CI paths. Regenerated adapter goldens use the same stable fixture-relative paths.
+
+If an optional tree-sitter grammar is not available on the current platform, the manager reports those specs as skipped instead of failing the whole suite. This mirrors the adapter unit tests.
 
 ## Directory Structure
 
