@@ -1,5 +1,5 @@
 /**
- * CLI action definitions for all 25 gateway tool actions.
+ * CLI action definitions for gateway tool actions.
  *
  * Each definition maps CLI flags (kebab-case) to handler field names (camelCase),
  * specifying types, required/optional, and descriptions for help rendering.
@@ -515,7 +515,7 @@ const codeGetHotPath: ActionDefinition = {
 };
 
 // ---------------------------------------------------------------------------
-// Repo actions (11)
+// Repo actions (12)
 // ---------------------------------------------------------------------------
 
 const repoRegister: ActionDefinition = {
@@ -1206,6 +1206,95 @@ const fileRead: ActionDefinition = {
   ],
 };
 
+const searchEdit: ActionDefinition = {
+  action: "search.edit",
+  namespace: "repo",
+  description: "Preview and apply cross-file search/edit plans",
+  args: [
+    { ...REPO_ID_ARG },
+    {
+      flag: "--mode",
+      field: "mode",
+      type: "string",
+      required: true,
+      description: "Phase to run: preview|apply",
+    },
+    {
+      flag: "--targeting",
+      field: "targeting",
+      type: "string",
+      description: "Preview targeting mode: text|symbol",
+    },
+    {
+      flag: "--query",
+      field: "query",
+      type: "json",
+      description:
+        "Preview query JSON, e.g. '{\"literal\":\"old\",\"replacement\":\"new\",\"global\":true}'",
+    },
+    {
+      flag: "--edit-mode",
+      field: "editMode",
+      type: "string",
+      description:
+        "Preview edit mode: replacePattern|replaceLines|insertAt|append|overwrite",
+    },
+    {
+      flag: "--filters",
+      field: "filters",
+      type: "json",
+      description:
+        "Preview filters JSON, e.g. '{\"include\":[\"src/**/*.ts\"],\"exclude\":[\"dist/**\"]}'",
+    },
+    {
+      flag: "--preview-context-lines",
+      field: "previewContextLines",
+      type: "number",
+      description: "Context lines to include around preview matches",
+    },
+    {
+      flag: "--max-files",
+      field: "maxFiles",
+      type: "number",
+      description: "Maximum candidate files to edit",
+    },
+    {
+      flag: "--max-matches-per-file",
+      field: "maxMatchesPerFile",
+      type: "number",
+      description: "Maximum matches per file",
+    },
+    {
+      flag: "--max-total-matches",
+      field: "maxTotalMatches",
+      type: "number",
+      description: "Maximum total matches across all files",
+    },
+    {
+      flag: "--plan-handle",
+      field: "planHandle",
+      type: "string",
+      description: "Plan handle returned by preview, required for apply",
+    },
+    {
+      flag: "--create-backup",
+      field: "createBackup",
+      type: "boolean",
+      description: "Create per-file backups during apply",
+    },
+    {
+      flag: "--response-mode",
+      field: "responseMode",
+      type: "string",
+      description: "Large-preview mode: inline|auto|handle",
+    },
+  ],
+  examples: [
+    'sdl-mcp tool search.edit --repo-id my-repo --mode preview --targeting text --query \'{"literal":"oldName","replacement":"newName","global":true}\' --edit-mode replacePattern --filters \'{"include":["src/**/*.ts"]}\'',
+    'sdl-mcp tool search.edit --repo-id my-repo --mode apply --plan-handle "search-edit-my-repo-1770000000000-abc123"',
+  ],
+};
+
 const memoryStore: ActionDefinition = {
   action: "memory.store",
   namespace: "agent",
@@ -1408,6 +1497,7 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   policySet,
   usageStats,
   fileRead,
+  searchEdit,
   // Agent
   agentFeedback,
   agentFeedbackQuery,

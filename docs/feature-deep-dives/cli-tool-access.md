@@ -1,8 +1,8 @@
 # CLI Tool Access
 
-**Access 32 SDL-MCP action aliases directly from the command line without running an MCP transport.**
+**Access 34 SDL-MCP action aliases directly from the command line without running an MCP transport.**
 
-The `sdl-mcp tool` command executes the same handler layer used by the MCP server, but it does not expose the entire runtime surface. It covers the CLI action definitions in [`src/cli/commands/tool-actions.ts`](../../src/cli/commands/tool-actions.ts), which currently includes 32 aliases across query, code, repo, and agent namespaces.
+The `sdl-mcp tool` command executes the same handler layer used by the MCP server, but it does not expose the entire runtime surface. It covers the CLI action definitions in [`src/cli/commands/tool-actions.ts`](../../src/cli/commands/tool-actions.ts), which currently includes 34 aliases across query, code, repo, and agent namespaces.
 
 ---
 
@@ -97,6 +97,7 @@ Run `sdl-mcp tool --list` to inspect the current aliases grouped by namespace.
 | `policy.set`                  | Update the current policy                    |
 | `usage.stats`                 | Read token usage statistics                  |
 | `file.read`                   | Read non-indexed files through SDL           |
+| `search.edit`                 | Preview and apply cross-file search/edit plans  |
 
 ### Agent
 
@@ -198,12 +199,12 @@ The direct CLI surface is implemented by four modules:
 
 | Module             | File                                  | Responsibility                                                      |
 | :----------------- | :------------------------------------ | :------------------------------------------------------------------ |
-| Action definitions | `src/cli/commands/tool-actions.ts`    | Declares the 32 CLI-visible aliases                                 |
+| Action definitions | `src/cli/commands/tool-actions.ts`    | Declares the 34 CLI-visible aliases                                 |
 | Arg parser         | `src/cli/commands/tool-arg-parser.ts` | Maps flags to handler fields and coerces types                      |
 | Dispatcher         | `src/cli/commands/tool-dispatch.ts`   | Loads config, resolves `repoId`, routes actions, and handles errors |
 | Output formatter   | `src/cli/commands/tool-output.ts`     | Formats results as JSON, compact JSON, pretty, or table output      |
 
-The dispatcher reuses the gateway action map for execution, so the CLI and MCP server share the same handlers and core validation logic. The important distinction is surface area: the CLI alias list is defined separately and therefore can lag or intentionally omit parts of the full MCP catalog.
+The dispatcher reuses the gateway action map for execution, so the CLI and MCP server share the same handlers and core validation logic. The CLI alias list is kept in sync with the gateway action catalog while still excluding separate Code Mode-only tools and MCP-only `file.write`.
 
 ---
 

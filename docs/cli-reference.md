@@ -262,7 +262,7 @@ Key options:
 
 ### `sdl-mcp tool <action> [args]`
 
-Direct MCP tool invocation from the CLI. The command currently exposes 33 action definitions from [`src/cli/commands/tool-actions.ts`](../src/cli/commands/tool-actions.ts), reuses the gateway action map for execution, and shares the same normalization and Zod validation path as the MCP server.
+Direct MCP tool invocation from the CLI. The command currently exposes 34 action definitions from [`src/cli/commands/tool-actions.ts`](../src/cli/commands/tool-actions.ts), reuses the gateway action map for execution, and shares the same normalization and Zod validation path as the MCP server.
 
 ```bash
 sdl-mcp tool repo.status --repo-id my-repo
@@ -270,6 +270,7 @@ sdl-mcp tool symbol.search --repo-id my-repo --query "handleRequest"
 sdl-mcp tool slice.build --repo-id my-repo --entry-symbols sym123
 sdl-mcp tool semantic.enrichment.status --repo-id my-repo
 sdl-mcp tool semantic.enrichment.refresh --repo-id my-repo --dry-run
+sdl-mcp tool search.edit --repo-id my-repo --mode preview --targeting text --query '{"literal":"old","replacement":"new"}' --edit-mode replacePattern
 sdl-mcp tool response.get --repo-id my-repo --handle response-myrepo-1770000000000-0123456789abcdef --max-bytes 8192
 ```
 
