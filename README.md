@@ -3,7 +3,7 @@
 
 <br/>
 
-# SDL-MCP
+# SYMBOL DELTA LEDGER
 
 ### **Cards-first code context for AI coding agents**
 
