@@ -45,6 +45,8 @@ import {
   FileReadRequestSchema,
   FileWriteRequestSchema,
   ScipIngestRequestSchema,
+  SemanticEnrichmentRefreshRequestSchema,
+  SemanticEnrichmentStatusRequestSchema,
   SearchEditRequestSchema,
 } from "../tools.js";
 
@@ -59,10 +61,7 @@ import {
   handleBufferCheckpoint,
   handleBufferStatus,
 } from "./buffer.js";
-import {
-  handleSymbolSearch,
-  handleSymbolGetCard,
-} from "./symbol.js";
+import { handleSymbolSearch, handleSymbolGetCard } from "./symbol.js";
 import {
   handleSliceBuild,
   handleSliceRefresh,
@@ -92,6 +91,10 @@ import { handleUsageStats } from "./usage.js";
 import { handleFileRead } from "./file-read.js";
 import { handleFileWrite } from "./file-write.js";
 import { handleScipIngest } from "./scip.js";
+import {
+  handleSemanticEnrichmentRefresh,
+  handleSemanticEnrichmentStatus,
+} from "./semantic-enrichment.js";
 import { handleSearchEdit } from "./search-edit/index.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { anyRepoHasMemoryTools } from "../../config/memory-config.js";
@@ -150,8 +153,7 @@ export function buildFlatToolDescriptors(
     },
     {
       name: "sdl.index.refresh",
-      description:
-        "Refresh index for a repository (full or incremental)",
+      description: "Refresh index for a repository (full or incremental)",
       schema: IndexRefreshRequestSchema,
       handler: handleIndexRefresh,
     },
@@ -171,16 +173,14 @@ export function buildFlatToolDescriptors(
     },
     {
       name: "sdl.buffer.checkpoint",
-      description:
-        "Request a live draft checkpoint for a repository",
+      description: "Request a live draft checkpoint for a repository",
       schema: BufferCheckpointRequestSchema,
       handler: (args, context) =>
         handleBufferCheckpoint(args, context, services.liveIndex),
     },
     {
       name: "sdl.buffer.status",
-      description:
-        "Get live draft buffer status for a repository",
+      description: "Get live draft buffer status for a repository",
       schema: BufferStatusRequestSchema,
       handler: (args, context) =>
         handleBufferStatus(args, context, services.liveIndex),
@@ -223,8 +223,7 @@ export function buildFlatToolDescriptors(
     },
     {
       name: "sdl.delta.get",
-      description:
-        "Get delta pack between two versions with blast radius",
+      description: "Get delta pack between two versions with blast radius",
       schema: DeltaGetRequestSchema,
       handler: handleDeltaGet,
     },
@@ -257,8 +256,7 @@ export function buildFlatToolDescriptors(
     },
     {
       name: "sdl.policy.set",
-      description:
-        "Update policy configuration for a repository",
+      description: "Update policy configuration for a repository",
       schema: PolicySetRequestSchema,
       handler: handlePolicySet,
     },
@@ -355,9 +353,23 @@ export function buildFlatToolDescriptors(
       handler: handleScipIngest,
     },
     {
+      name: "sdl.semantic.enrichment.refresh",
+      description:
+        "Run provider-backed semantic enrichment for a repository using SCIP, LSIF, or LSP source selection.",
+      schema: SemanticEnrichmentRefreshRequestSchema,
+      handler: handleSemanticEnrichmentRefresh,
+    },
+    {
+      name: "sdl.semantic.enrichment.status",
+      description:
+        "Report semantic enrichment provider selection, skipped providers, last runs, and precision scores.",
+      schema: SemanticEnrichmentStatusRequestSchema,
+      handler: handleSemanticEnrichmentStatus,
+    },
+    {
       name: "sdl.search.edit",
       description:
-        "Cross-file search-and-edit in two phases: mode:\"preview\" returns a planHandle summarizing proposed edits; mode:\"apply\" executes the plan with sha256/mtime preconditions and rollback on mid-batch failure. Prefer this over composing repeated file.write calls.",
+        'Cross-file search-and-edit in two phases: mode:"preview" returns a planHandle summarizing proposed edits; mode:"apply" executes the plan with sha256/mtime preconditions and rollback on mid-batch failure. Prefer this over composing repeated file.write calls.',
       schema: SearchEditRequestSchema,
       handler: handleSearchEdit,
     },

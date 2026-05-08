@@ -30,6 +30,8 @@ SCIP supplements tree-sitter with exact compiler knowledge. After ingesting a SC
 
 **Tree-sitter and SCIP are complementary.** Tree-sitter provides the structural backbone (symbol extraction, skeleton IR, hot-path excerpts), while SCIP upgrades the semantic edges and fills in the gaps that syntax-only analysis misses.
 
+SCIP is also the highest-priority provider in the [Semantic Enrichment Bridge](./semantic-enrichment-bridge.md). The bridge can report SCIP beside LSIF and LSP status, but SCIP keeps its optimized indexing path: `scip-io` can run before refresh, ingest runs after pass-1 writes drain, and pass 2 can skip files with full SCIP coverage.
+
 ---
 
 ## Supported SCIP Emitters

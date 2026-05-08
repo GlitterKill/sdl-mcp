@@ -50,6 +50,7 @@ import type { ToolContext } from "../../server.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 import type { Connection } from "kuzu";
 import { ensureBaselineEnforcementAssets } from "../../cli/commands/enforcement-bootstrap.js";
+import { refreshSemanticEnrichment } from "../../semantic/enrichment.js";
 
 // Health snapshot cache with 30s TTL to avoid expensive recomputation.
 // lastKnownHealth persists indefinitely as a stale fallback when fresh computation times out.
@@ -595,6 +596,21 @@ export async function handleIndexRefresh(
     clearOverviewCache();
     symbolCardCache.clear();
     invalidateGraphSnapshot(repoId);
+    const config = loadConfig();
+    if (
+      config.semanticEnrichment?.enabled &&
+      config.semanticEnrichment.autoRunOnIndexRefresh
+    ) {
+      await refreshSemanticEnrichment(
+        { repoId, skipProviders: ["scip"] },
+        config,
+      ).catch((err: unknown) => {
+        logger.warn("Post-index semantic enrichment failed", {
+          repoId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
   };
 
   const executeRefresh = async () => {

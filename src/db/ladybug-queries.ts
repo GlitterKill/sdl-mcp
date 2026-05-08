@@ -19,6 +19,7 @@
  *   ladybug-processes.ts   Process operations
  *   ladybug-file-summaries.ts FileSummary operations
  *   ladybug-scip.ts          SCIP ingestion operations
+ *   ladybug-semantic.ts      Semantic enrichment provider run operations
  */
 
 // Core helpers
@@ -80,6 +81,8 @@ export * from "./ladybug-file-summaries.js";
 
 // SCIP ingestion operations
 export * from "./ladybug-scip.js";
+// Semantic enrichment operations
+export * from "./ladybug-semantic.js";
 
 // Graph algorithm adapter (PageRank, K-core, Louvain, shortest-path)
 export * from "./ladybug-algorithms.js";

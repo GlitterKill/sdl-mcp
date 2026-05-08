@@ -42,6 +42,8 @@ import {
   FileWriteRequestSchema,
   SearchEditRequestSchema,
   ScipIngestRequestSchema,
+  SemanticEnrichmentRefreshRequestSchema,
+  SemanticEnrichmentStatusRequestSchema,
 } from "../mcp/tools.js";
 import {
   handleSymbolSearch,
@@ -87,13 +89,22 @@ import { handleUsageStats } from "../mcp/tools/usage.js";
 import { handleFileRead } from "../mcp/tools/file-read.js";
 import { handleFileWrite } from "../mcp/tools/file-write.js";
 import { handleScipIngest } from "../mcp/tools/scip.js";
+import {
+  handleSemanticEnrichmentRefresh,
+  handleSemanticEnrichmentStatus,
+} from "../mcp/tools/semantic-enrichment.js";
 import { handleSearchEdit } from "../mcp/tools/search-edit/index.js";
 import type { z } from "zod";
 import { normalizeToolArguments } from "../mcp/request-normalization.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { anyRepoHasMemoryTools } from "../config/memory-config.js";
 
-const MEMORY_ACTIONS = new Set(["memory.store", "memory.query", "memory.remove", "memory.surface"]);
+const MEMORY_ACTIONS = new Set([
+  "memory.store",
+  "memory.query",
+  "memory.remove",
+  "memory.surface",
+]);
 
 type ActionHandler = (args: unknown, context?: ToolContext) => Promise<unknown>;
 
@@ -200,6 +211,14 @@ export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
       schema: ScipIngestRequestSchema,
       handler: handleScipIngest,
     },
+    "semantic.enrichment.refresh": {
+      schema: SemanticEnrichmentRefreshRequestSchema,
+      handler: handleSemanticEnrichmentRefresh,
+    },
+    "semantic.enrichment.status": {
+      schema: SemanticEnrichmentStatusRequestSchema,
+      handler: handleSemanticEnrichmentStatus,
+    },
 
     // === Agent actions ===
     "agent.feedback": {
@@ -305,7 +324,10 @@ export async function routeGatewayCall(
 
   // Pre-normalize known fields before schema validation.
   // Coerce numeric timestamps to ISO strings so callers can pass epoch ms.
-  const normalized = preNormalizeArgs(action, merged as Record<string, unknown>);
+  const normalized = preNormalizeArgs(
+    action,
+    merged as Record<string, unknown>,
+  );
 
   // Second-pass validation using the original strict Zod schema
   const parsed = entry.schema.parse(normalized);

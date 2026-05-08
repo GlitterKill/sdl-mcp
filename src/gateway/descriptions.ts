@@ -26,7 +26,8 @@ export const REPO_DESCRIPTION =
   `\nActions: repo.register(rootPath,ignore?,languages?,maxFileBytes?) | repo.status() | ` +
   `repo.overview(level,includeHotspots?,directories?,maxDirectories?) | ` +
   `index.refresh(mode,reason?) | policy.get() | policy.set(policyPatch; budgetCaps requires maxCards+maxEstimatedTokens) | ` +
-  `usage.stats(scope?,since?,limit?,persist?)`;
+  `scip.ingest(indexPath,dryRun?) | semantic.enrichment.refresh(dryRun?,force?,install?,languages?) | ` +
+  `semantic.enrichment.status(languages?) | usage.stats(scope?,since?,limit?,persist?)`;
 
 const AGENT_DESCRIPTION_BASE =
   `sdl.agent - Agentic + live-edit operations. Pass { repoId, action, ...params }.` +
@@ -56,4 +57,5 @@ export function getAgentDescription(): string {
  * @deprecated Use `getAgentDescription()` instead. Kept for backward compatibility
  * with existing imports. Always includes memory actions regardless of config.
  */
-export const AGENT_DESCRIPTION = AGENT_DESCRIPTION_BASE + MEMORY_DESCRIPTION_SUFFIX;
+export const AGENT_DESCRIPTION =
+  AGENT_DESCRIPTION_BASE + MEMORY_DESCRIPTION_SUFFIX;

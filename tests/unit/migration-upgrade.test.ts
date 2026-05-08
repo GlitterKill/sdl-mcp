@@ -175,8 +175,7 @@ async function createV15DatabaseWithLegacyScipExternal(
   }
 
   const now = new Date().toISOString();
-  const scipSymbol =
-    "scip-typescript npm lodash 4.17.21 lodash/chunk().";
+  const scipSymbol = "scip-typescript npm lodash 4.17.21 lodash/chunk().";
   for (const stmt of [
     `CREATE (r:Repo {repoId: 'repo-1', rootPath: '/repo', configJson: '{}', createdAt: '${now}'})`,
     `CREATE (f:File {fileId: 'file-1', relPath: 'src/example.ts', contentHash: 'hash-1', language: 'typescript', byteSize: 42, lastIndexedAt: '${now}', directory: 'src'})`,
@@ -385,8 +384,7 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
         symbolId: "scip-external-legacy-chunk",
         symbolStatus: "external",
         placeholderKind: "scip",
-        placeholderTarget:
-          "scip-typescript npm lodash 4.17.21 lodash/chunk().",
+        placeholderTarget: "scip-typescript npm lodash 4.17.21 lodash/chunk().",
         external: true,
       },
       {
@@ -472,11 +470,7 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     const hydrated = await ladybugQueries.getSearchableSymbolsByIds(
       conn,
       "repo-1",
-      [
-        "sym-1",
-        "unresolved:call:legacyHelper",
-        "scip-external-legacy-chunk",
-      ],
+      ["sym-1", "unresolved:call:legacyHelper", "scip-external-legacy-chunk"],
     );
     assert.deepStrictEqual([...hydrated.keys()].sort(), [
       "scip-external-legacy-chunk",
@@ -568,6 +562,66 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
         placeholderKind: "import",
         placeholderTarget: "z (from zod)",
         external: true,
+      },
+    ]);
+  });
+
+  it("v17 -> latest: m018 creates semantic enrichment provider tables", async () => {
+    mkdirSync(testRoot, { recursive: true });
+    const dbPath = join(testRoot, "v17-semantic-enrichment.lbug");
+    const kuzu = await import("kuzu");
+    const db = new kuzu.Database(dbPath);
+    const seedConn = new kuzu.Connection(db);
+    const now = new Date().toISOString();
+
+    for (const stmt of [
+      `CREATE NODE TABLE IF NOT EXISTS Repo (repoId STRING PRIMARY KEY, rootPath STRING, configJson STRING, createdAt STRING)`,
+      `CREATE NODE TABLE IF NOT EXISTS SchemaVersion (id STRING PRIMARY KEY, schemaVersion INT64, createdAt STRING, updatedAt STRING)`,
+      `CREATE (r:Repo {repoId: 'repo-1', rootPath: '/repo', configJson: '{}', createdAt: '${now}'})`,
+      `CREATE (sv:SchemaVersion {id: 'current', schemaVersion: 17, createdAt: '${now}', updatedAt: '${now}'})`,
+    ]) {
+      closeResult(await seedConn.query(stmt));
+    }
+    await seedConn.close();
+    await db.close();
+
+    await initLadybugDb(dbPath);
+    const conn = await getLadybugConn();
+    const version = await getSchemaVersion(conn);
+    assert.strictEqual(version, LADYBUG_SCHEMA_VERSION);
+
+    for (const stmt of [
+      `CREATE (r:SemanticProviderRun {runId: 'run-1', repoId: 'repo-1', providerType: 'scip', providerId: 'scip-typescript', providerVersion: '1.0.0', languagesJson: '["typescript"]', sourceIndexPath: 'index.scip', sourceHash: 'hash-1', cacheKey: 'cache-1', configHash: 'config-1', ledgerVersion: 'v1', status: 'completed', startedAt: '${now}', finishedAt: '${now}', documentsProcessed: 1, symbolsMatched: 2, edgesCreated: 3, edgesUpgraded: 4, edgesReplaced: 0, edgesSkipped: 1, diagnosticsCount: 1, precisionScore: 0.95, cacheHit: false, canAffectPass2: true, selected: true, metadataJson: '{}', error: null})`,
+      `CREATE (d:SemanticDiagnostic {id: 'diag-1', repoId: 'repo-1', runId: 'run-1', providerType: 'scip', providerId: 'scip-typescript', languageId: 'typescript', sourcePath: 'src/example.ts', severity: 'warning', message: 'demo', code: 'W1', rangeJson: '{}', createdAt: '${now}'})`,
+      `CREATE (m:SemanticPrecisionMetric {id: 'metric-1', repoId: 'repo-1', runId: 'run-1', languageId: 'typescript', providerType: 'scip', providerId: 'scip-typescript', score: 0.95, filesCovered: 1, filesEligible: 1, symbolMatchRate: 1.0, resolvedEdgeRate: 1.0, diagnosticsAvailable: true, pass2SkipRate: 1.0, computedAt: '${now}', metadataJson: '{}'})`,
+    ]) {
+      closeResult(await conn.query(stmt));
+    }
+
+    const result = await conn.query(
+      `MATCH (r:SemanticProviderRun {runId: 'run-1'})
+       MATCH (d:SemanticDiagnostic {id: 'diag-1'})
+       MATCH (m:SemanticPrecisionMetric {id: 'metric-1'})
+       RETURN r.cacheKey AS cacheKey,
+              r.canAffectPass2 AS canAffectPass2,
+              d.sourcePath AS sourcePath,
+              m.metadataJson AS metadataJson`,
+    );
+    const qr = Array.isArray(result) ? result[0] : result;
+    const rows = (await qr.getAll()) as Array<{
+      cacheKey: unknown;
+      canAffectPass2: unknown;
+      sourcePath: unknown;
+      metadataJson: unknown;
+    }>;
+    qr.close();
+
+    assert.deepStrictEqual(rows, [
+      {
+        cacheKey: "cache-1",
+        canAffectPass2: true,
+        sourcePath: "src/example.ts",
+        metadataJson: "{}",
       },
     ]);
   });

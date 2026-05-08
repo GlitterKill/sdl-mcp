@@ -1,8 +1,8 @@
 # CLI Tool Access
 
-**Access 30 SDL-MCP action aliases directly from the command line without running an MCP transport.**
+**Access 32 SDL-MCP action aliases directly from the command line without running an MCP transport.**
 
-The `sdl-mcp tool` command executes the same handler layer used by the MCP server, but it does not expose the entire runtime surface. It covers the CLI action definitions in [`src/cli/commands/tool-actions.ts`](../../src/cli/commands/tool-actions.ts), which currently includes 30 aliases across query, code, repo, and agent namespaces.
+The `sdl-mcp tool` command executes the same handler layer used by the MCP server, but it does not expose the entire runtime surface. It covers the CLI action definitions in [`src/cli/commands/tool-actions.ts`](../../src/cli/commands/tool-actions.ts), which currently includes 32 aliases across query, code, repo, and agent namespaces.
 
 ---
 
@@ -63,53 +63,55 @@ Run `sdl-mcp tool --list` to inspect the current aliases grouped by namespace.
 
 ### Query
 
-| Action | Description |
-| :----- | :---------- |
-| `symbol.search` | Search symbols by name or summary |
-| `symbol.getCard` | Get a symbol card by ID |
-| `slice.build` | Build a graph slice for a task |
-| `slice.refresh` | Refresh an existing slice handle |
-| `slice.spillover.get` | Fetch paginated spillover cards |
-| `delta.get` | Get a delta pack between versions |
-| `pr.risk.analyze` | Analyze PR risk and blast radius |
+| Action                | Description                       |
+| :-------------------- | :-------------------------------- |
+| `symbol.search`       | Search symbols by name or summary |
+| `symbol.getCard`      | Get a symbol card by ID           |
+| `slice.build`         | Build a graph slice for a task    |
+| `slice.refresh`       | Refresh an existing slice handle  |
+| `slice.spillover.get` | Fetch paginated spillover cards   |
+| `delta.get`           | Get a delta pack between versions |
+| `pr.risk.analyze`     | Analyze PR risk and blast radius  |
 
 ### Code
 
-| Action | Description |
-| :----- | :---------- |
-| `code.needWindow` | Request a policy-gated raw code window |
+| Action             | Description                                |
+| :----------------- | :----------------------------------------- |
+| `code.needWindow`  | Request a policy-gated raw code window     |
 | `code.getSkeleton` | Get skeleton structure without full bodies |
-| `code.getHotPath` | Get lines matching specific identifiers |
+| `code.getHotPath`  | Get lines matching specific identifiers    |
 
 ### Repo
 
-| Action | Description |
-| :----- | :---------- |
-| `repo.register` | Register a repository |
-| `repo.status` | Get repository status |
-| `repo.overview` | Get a token-efficient repository overview |
-| `index.refresh` | Trigger indexing |
-| `scip.ingest` | Ingest a SCIP index |
-| `policy.get` | Read the current policy |
-| `policy.set` | Update the current policy |
-| `usage.stats` | Read token usage statistics |
-| `file.read` | Read non-indexed files through SDL |
+| Action                        | Description                                  |
+| :---------------------------- | :------------------------------------------- |
+| `repo.register`               | Register a repository                        |
+| `repo.status`                 | Get repository status                        |
+| `repo.overview`               | Get a token-efficient repository overview    |
+| `index.refresh`               | Trigger indexing                             |
+| `scip.ingest`                 | Ingest a SCIP index                          |
+| `semantic.enrichment.refresh` | Run provider-backed graph enrichment         |
+| `semantic.enrichment.status`  | Inspect enrichment source selection and runs |
+| `policy.get`                  | Read the current policy                      |
+| `policy.set`                  | Update the current policy                    |
+| `usage.stats`                 | Read token usage statistics                  |
+| `file.read`                   | Read non-indexed files through SDL           |
 
 ### Agent
 
-| Action | Description |
-| :----- | :---------- |
-| `agent.feedback` | Record which symbols were useful or missing |
-| `agent.feedback.query` | Query aggregated feedback |
-| `buffer.push` | Push live buffer updates |
-| `buffer.checkpoint` | Force a live-buffer checkpoint |
-| `buffer.status` | Inspect live-buffer state |
-| `runtime.execute` | Run a sandboxed subprocess |
-| `runtime.queryOutput` | Query stored runtime output |
-| `memory.store` | Store a development memory |
-| `memory.query` | Search development memories |
-| `memory.remove` | Remove a development memory |
-| `memory.surface` | Surface relevant memories |
+| Action                 | Description                                 |
+| :--------------------- | :------------------------------------------ |
+| `agent.feedback`       | Record which symbols were useful or missing |
+| `agent.feedback.query` | Query aggregated feedback                   |
+| `buffer.push`          | Push live buffer updates                    |
+| `buffer.checkpoint`    | Force a live-buffer checkpoint              |
+| `buffer.status`        | Inspect live-buffer state                   |
+| `runtime.execute`      | Run a sandboxed subprocess                  |
+| `runtime.queryOutput`  | Query stored runtime output                 |
+| `memory.store`         | Store a development memory                  |
+| `memory.query`         | Search development memories                 |
+| `memory.remove`        | Remove a development memory                 |
+| `memory.surface`       | Surface relevant memories                   |
 
 `sdl-mcp tool` does not expose Code Mode-only tools (`sdl.context`, `sdl.manual`, `sdl.workflow`, `sdl.file`), and it currently does not expose `file.write`.
 
@@ -193,12 +195,12 @@ sdl-mcp tool runtime.execute --runtime shell --code "npm test" --timeout-ms 3000
 
 The direct CLI surface is implemented by four modules:
 
-| Module | File | Responsibility |
-| :----- | :--- | :------------- |
-| Action definitions | `src/cli/commands/tool-actions.ts` | Declares the 30 CLI-visible aliases |
-| Arg parser | `src/cli/commands/tool-arg-parser.ts` | Maps flags to handler fields and coerces types |
-| Dispatcher | `src/cli/commands/tool-dispatch.ts` | Loads config, resolves `repoId`, routes actions, and handles errors |
-| Output formatter | `src/cli/commands/tool-output.ts` | Formats results as JSON, compact JSON, pretty, or table output |
+| Module             | File                                  | Responsibility                                                      |
+| :----------------- | :------------------------------------ | :------------------------------------------------------------------ |
+| Action definitions | `src/cli/commands/tool-actions.ts`    | Declares the 32 CLI-visible aliases                                 |
+| Arg parser         | `src/cli/commands/tool-arg-parser.ts` | Maps flags to handler fields and coerces types                      |
+| Dispatcher         | `src/cli/commands/tool-dispatch.ts`   | Loads config, resolves `repoId`, routes actions, and handles errors |
+| Output formatter   | `src/cli/commands/tool-output.ts`     | Formats results as JSON, compact JSON, pretty, or table output      |
 
 The dispatcher reuses the gateway action map for execution, so the CLI and MCP server share the same handlers and core validation logic. The important distinction is surface area: the CLI alias list is defined separately and therefore can lag or intentionally omit parts of the full MCP catalog.
 

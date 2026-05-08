@@ -227,10 +227,10 @@ Triggers re-indexing of a repository in either full or incremental mode.
 
 **Audit metadata:** `sdl.index.refresh` also writes an `index.refresh.complete` audit event. Its `stats` object can include:
 
-| Field                   | Type   | Description                                                                                                                                                       |
-| :---------------------- | :----- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Field                   | Type   | Description                                                                                                                                                                                                                                                                                      |
+| :---------------------- | :----- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `fileSummaryEmbeddings` | object | Per embedding model `{embedded, skipped, missing, degraded}` counts for hybrid `FileSummary` vectors. `skipped` means cache hits, `missing` means no embeddable payload or no persisted vector because the pass degraded/failed, and `degraded: true` means lexical summaries are fallback only. |
-| `quality`               | object | Post-index quality counters, including unresolved/external dependency targets, placeholder hygiene, signature coverage, and SCIP phase counts.                     |
+| `quality`               | object | Post-index quality counters, including unresolved/external dependency targets, placeholder hygiene, signature coverage, and SCIP phase counts.                                                                                                                                                   |
 
 **Notes:**
 
@@ -240,6 +240,55 @@ Triggers re-indexing of a repository in either full or incremental mode.
 - `diagnostics.timings.totalMs` covers the full synchronous indexing run, while `diagnostics.timings.phases` breaks out coarse stages such as `scanRepo`, `pass1`, `pass2`, and `finalizeIndexing`. Nested keys may also appear for hotspots inside a phase, for example `initSharedState.tsResolver`, `initSharedState.tsResolver.sourceFiles`, `initSharedState.tsResolver.programBuild`, `initSharedState.symbolMaps`, `resolveUnresolvedImports.fetchEdges`, `finalizeEdges.cleanupUnresolvedBuiltins`, `finalizeEdges.insertConfigEdges`, `finalizeIndexing.metrics`, `finalizeIndexing.metrics.testRefs`, `finalizeIndexing.fileSummaries`, `clustersAndProcesses.loadSymbols`, or `clustersAndProcesses.processWrite`. No-op incremental refreshes may omit later phases and report `shortCircuitNoOp` instead.
 - `quality.unresolvedTargets` counts repo-local missing or ambiguous dependency targets. `quality.externalTargets` counts outside-repo dependency targets such as runtime modules and packages. Both remain `Symbol` nodes for graph traversal, but graph consumers can distinguish them with `symbolStatus`.
 - `quality.untypedPlaceholderTargets`, `quality.placeholderTargetMismatches`, and `quality.isolatedPlaceholders` should be zero on healthy new indexes. Non-zero values usually mean an old DB needs migration or a writer created no-file dependency targets without deterministic placeholder metadata.
+
+---
+
+### sdl.scip.ingest
+
+Ingests a pre-built SCIP protobuf index (`.scip`) and overlays compiler-grade cross-references onto the existing tree-sitter symbol graph.
+
+**Parameters:**
+
+| Parameter   | Type    | Required | Description                                 |
+| :---------- | :------ | :------- | :------------------------------------------ |
+| `repoId`    | string  | Yes      | Repository identifier                       |
+| `indexPath` | string  | Yes      | Absolute or repo-relative `.scip` file path |
+| `dryRun`    | boolean | No       | Parse/count without writing to the graph DB |
+
+This compatibility action remains SCIP-only. LSIF and LSP run through the semantic enrichment bridge.
+
+---
+
+### sdl.semantic.enrichment.refresh
+
+Runs provider-backed graph precision enrichment. Selection is one source per language in priority order: SCIP, LSIF, then LSP. SCIP keeps its optimized pass-1-drain -> SCIP-ingest -> pass-2 placement when indexing is configured; LSIF and LSP run as post-index enrichment.
+
+**Parameters:**
+
+| Parameter   | Type     | Required | Description                                                                   |
+| :---------- | :------- | :------- | :---------------------------------------------------------------------------- |
+| `repoId`    | string   | Yes      | Repository identifier                                                         |
+| `dryRun`    | boolean  | No       | Plan and parse without graph writes                                           |
+| `force`     | boolean  | No       | Bypass compatible cache decisions where supported                             |
+| `install`   | boolean  | No       | Allow verified downloads only when `semanticEnrichment.installPolicy` permits |
+| `languages` | string[] | No       | Restrict refresh to specific language IDs                                     |
+
+**Response includes:** provider selections, skipped-provider reasons, provider run records, SCIP compatibility results, and non-fatal skips such as disabled install policy.
+
+---
+
+### sdl.semantic.enrichment.status
+
+Reports semantic enrichment configuration and last-run state for a repository.
+
+**Parameters:**
+
+| Parameter   | Type     | Required | Description                              |
+| :---------- | :------- | :------- | :--------------------------------------- |
+| `repoId`    | string   | Yes      | Repository identifier                    |
+| `languages` | string[] | No       | Restrict status to specific language IDs |
+
+**Response includes:** `enabled`, `autoRunOnIndexRefresh`, `installPolicy`, selected provider per language, skipped providers, and latest provider runs with precision scores.
 
 ---
 

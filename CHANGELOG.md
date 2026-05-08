@@ -9,7 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Semantic enrichment bridge V1 with provider-neutral config/types, SCIP > LSIF > LSP source selection, explicit refresh/status actions, LSIF normalization, lightweight stdio LSP client support, and LadybugDB provider-run/provenance/precision tables.
+- Semantic enrichment V2 TypeScript/JavaScript LSP call-definition enrichment that plans tree-sitter call candidates, queries configured stdio LSP servers, and writes exact call edges through the generic semantic writer.
+
 ### Changed
+
+- `sdl.scip.ingest` help/schema now describes SCIP `.scip` input only; LSIF runs through the semantic enrichment bridge instead of the SCIP compatibility action.
 
 ### Fixed
 

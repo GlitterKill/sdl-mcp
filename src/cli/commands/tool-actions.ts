@@ -650,6 +650,65 @@ const scipIngest: ActionDefinition = {
   ],
 };
 
+const semanticEnrichmentRefresh: ActionDefinition = {
+  action: "semantic.enrichment.refresh",
+  namespace: "repo",
+  description:
+    "Run provider-backed semantic enrichment with SCIP > LSIF > LSP source selection",
+  args: [
+    { ...REPO_ID_ARG },
+    {
+      flag: "--dry-run",
+      field: "dryRun",
+      type: "boolean",
+      description: "Plan and parse providers without writing to the database",
+    },
+    {
+      flag: "--force",
+      field: "force",
+      type: "boolean",
+      description: "Bypass compatible cache decisions where supported",
+    },
+    {
+      flag: "--install",
+      field: "install",
+      type: "boolean",
+      description:
+        "Allow verified provider downloads when semanticEnrichment.installPolicy is verified",
+    },
+    {
+      flag: "--languages",
+      field: "languages",
+      type: "string[]",
+      description: "Comma-separated language IDs to refresh",
+    },
+  ],
+  examples: [
+    "sdl-mcp tool semantic.enrichment.refresh --repo-id my-repo --dry-run",
+    "sdl-mcp tool semantic.enrichment.refresh --repo-id my-repo --languages typescript,python",
+  ],
+};
+
+const semanticEnrichmentStatus: ActionDefinition = {
+  action: "semantic.enrichment.status",
+  namespace: "repo",
+  description:
+    "Report selected semantic enrichment sources, skipped providers, last runs, and precision scores",
+  args: [
+    { ...REPO_ID_ARG },
+    {
+      flag: "--languages",
+      field: "languages",
+      type: "string[]",
+      description: "Comma-separated language IDs to inspect",
+    },
+  ],
+  examples: [
+    "sdl-mcp tool semantic.enrichment.status --repo-id my-repo",
+    "sdl-mcp tool semantic.enrichment.status --repo-id my-repo --languages typescript",
+  ],
+};
+
 const policyGet: ActionDefinition = {
   action: "policy.get",
   namespace: "repo",
@@ -1263,6 +1322,8 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   repoOverview,
   indexRefresh,
   scipIngest,
+  semanticEnrichmentRefresh,
+  semanticEnrichmentStatus,
   policyGet,
   policySet,
   usageStats,

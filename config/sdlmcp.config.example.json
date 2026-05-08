@@ -163,6 +163,32 @@
       "candidateLimit": 100
     }
   },
+  "semanticEnrichment": {
+    "enabled": false,
+    "autoRunOnIndexRefresh": false,
+    "installPolicy": "never",
+    "cacheDir": null,
+    "concurrency": 1,
+    "timeoutMs": 300000,
+    "languages": [],
+    "providers": {
+      "scip": {
+        "enabled": true,
+        "indexes": []
+      },
+      "lsif": {
+        "enabled": true,
+        "indexes": [],
+        "confidence": 0.9
+      },
+      "lsp": {
+        "enabled": true,
+        "confidence": 0.8,
+        "candidateLimit": 200,
+        "servers": {}
+      }
+    }
+  },
   "prefetch": {
     "enabled": true,
     "maxBudgetPercent": 20,

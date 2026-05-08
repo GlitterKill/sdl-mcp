@@ -838,6 +838,155 @@
         "embeddingConcurrency": 1
       }
     },
+    "semanticEnrichment": {
+      "type": "object",
+      "description": "Provider-backed graph precision enrichment. Separate from semantic embeddings/retrieval.",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "autoRunOnIndexRefresh": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, run eligible enrichment providers after index.refresh. SCIP keeps its existing mid-index ingest placement and is not moved to the post-index hook."
+        },
+        "installPolicy": {
+          "type": "string",
+          "enum": ["never", "verified"],
+          "default": "never",
+          "description": "Controls provider download behavior. 'verified' permits only checksum-verified downloads; package-manager install recipes are never executed automatically."
+        },
+        "cacheDir": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Reserved cache root for future durable provider caches. V2 writes provider results to the graph and does not persist LSIF/LSP response caches here."
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 1,
+          "description": "Reserved cap for future cross-provider scheduling. V2 runs selected providers serially, with provider-specific internal limits where needed."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 1800000,
+          "default": 300000
+        },
+        "languages": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Language IDs to enrich. Empty means all current tree-sitter-backed languages."
+        },
+        "providers": {
+          "type": "object",
+          "description": "Provider-specific overrides. Source selection is fixed priority: SCIP > LSIF > LSP.",
+          "properties": {
+            "scip": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "providerId": { "type": "string" },
+                "providerVersion": { "type": "string" },
+                "indexes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {
+                      "path": { "type": "string" },
+                      "label": { "type": "string" }
+                    }
+                  },
+                  "default": []
+                }
+              }
+            },
+            "lsif": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "providerId": { "type": "string" },
+                "providerVersion": { "type": "string" },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0.5,
+                  "maximum": 1,
+                  "default": 0.9
+                },
+                "indexes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {
+                      "path": { "type": "string" },
+                      "label": { "type": "string" }
+                    }
+                  },
+                  "default": []
+                }
+              }
+            },
+            "lsp": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "providerId": { "type": "string" },
+                "providerVersion": { "type": "string" },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0.5,
+                  "maximum": 1,
+                  "default": 0.8
+                },
+                "candidateLimit": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 5000,
+                  "default": 200
+                },
+                "servers": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "required": ["serverId", "command"],
+                    "properties": {
+                      "enabled": { "type": "boolean", "default": true },
+                      "serverId": { "type": "string" },
+                      "command": { "type": "string" },
+                      "args": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": []
+                      },
+                      "languages": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": []
+                      },
+                      "initializationOptions": { "type": "object" }
+                    }
+                  },
+                  "default": {}
+                }
+              }
+            }
+          },
+          "default": {}
+        }
+      },
+      "default": {
+        "enabled": false,
+        "autoRunOnIndexRefresh": false,
+        "installPolicy": "never",
+        "cacheDir": null,
+        "concurrency": 1,
+        "timeoutMs": 300000,
+        "languages": [],
+        "providers": {}
+      }
+    },
     "prefetch": {
       "type": "object",
       "description": "Predictive prefetch configuration",

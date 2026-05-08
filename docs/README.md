@@ -56,6 +56,7 @@ Use this page as the entry point for SDL-MCP documentation.
 - [Context Modes](./feature-deep-dives/context-modes.md)
 - [Indexing & Languages](./feature-deep-dives/indexing-languages.md)
 - [Semantic Engine](./feature-deep-dives/semantic-engine.md)
+- [Semantic Enrichment Bridge](./feature-deep-dives/semantic-enrichment-bridge.md)
 - [Semantic Embeddings Setup](./feature-deep-dives/semantic-embeddings-setup.md)
 - [CLI Tool Access](./feature-deep-dives/cli-tool-access.md)
 - [Development Memories](./feature-deep-dives/development-memories.md)

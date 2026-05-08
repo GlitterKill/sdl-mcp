@@ -1931,9 +1931,9 @@ export const AgentContextRequestSchema = z.object({
     .enum(["debug", "review", "implement", "explain"])
     .describe("Type of task to perform"),
   taskText: z.string().min(1).max(2000).describe("Task description or prompt"),
-  budget: AgentContextBudgetSchema
-    .optional()
-    .describe("Budget constraints for the task"),
+  budget: AgentContextBudgetSchema.optional().describe(
+    "Budget constraints for the task",
+  ),
   options: z
     .object({
       focusSymbols: z
@@ -2403,7 +2403,8 @@ export const RuntimeQueryOutputRequestSchema = z.object({
     .min(1)
     .max(256)
     .regex(/^[A-Za-z0-9_-]+$/, {
-      message: "artifactHandle must contain only alphanumerics, dashes, and underscores",
+      message:
+        "artifactHandle must contain only alphanumerics, dashes, and underscores",
     })
     .describe("Artifact handle from a previous runtime.execute call"),
   queryTerms: z
@@ -2457,7 +2458,10 @@ export const MemoryStoreRequestSchema = z.object({
   content: z.string().min(1).max(50000),
   tags: z.array(z.string().min(1).max(100)).max(20).optional(),
   confidence: z.number().min(0).max(1).optional(),
-  symbolIds: z.array(z.string().min(1).max(MAX_SYMBOL_ID_LENGTH)).max(100).optional(),
+  symbolIds: z
+    .array(z.string().min(1).max(MAX_SYMBOL_ID_LENGTH))
+    .max(100)
+    .optional(),
   fileRelPaths: z.array(z.string().min(1).max(1024)).max(100).optional(),
   memoryId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH).optional(),
 });
@@ -2717,7 +2721,7 @@ export const ScipIngestRequestSchema = z.object({
     .string()
     .min(1)
     .describe(
-      "Path to the SCIP index file (.scip or .lsif). " +
+      "Path to the SCIP protobuf index file (.scip). " +
         "Can be absolute or relative to the repository root.",
     ),
   dryRun: z
@@ -2730,6 +2734,45 @@ export const ScipIngestRequestSchema = z.object({
 });
 
 export type ScipIngestRequest = z.infer<typeof ScipIngestRequestSchema>;
+
+// ============================================================================
+// Semantic Enrichment Schemas
+// ============================================================================
+
+const SemanticEnrichmentLanguageListSchema = z
+  .array(z.string().min(1))
+  .max(32)
+  .optional()
+  .describe(
+    "Optional language IDs to refresh/status-check. Defaults to all tree-sitter-backed languages.",
+  );
+
+export const SemanticEnrichmentRefreshRequestSchema = z.object({
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  dryRun: z.boolean().optional().default(false),
+  force: z.boolean().optional().default(false),
+  install: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "Allow verified provider download only when semanticEnrichment.installPolicy is 'verified'. Package-manager installs are never executed.",
+    ),
+  languages: SemanticEnrichmentLanguageListSchema,
+});
+
+export type SemanticEnrichmentRefreshRequest = z.infer<
+  typeof SemanticEnrichmentRefreshRequestSchema
+>;
+
+export const SemanticEnrichmentStatusRequestSchema = z.object({
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  languages: SemanticEnrichmentLanguageListSchema,
+});
+
+export type SemanticEnrichmentStatusRequest = z.infer<
+  typeof SemanticEnrichmentStatusRequestSchema
+>;
 
 // ============================================================================
 // File Write Schemas

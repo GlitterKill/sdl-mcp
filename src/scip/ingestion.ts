@@ -123,6 +123,23 @@ function zeroCounts(): Omit<
   };
 }
 
+function normalizeLanguageFilter(languages?: string[]): Set<string> | null {
+  if (!languages || languages.length === 0) return null;
+  return new Set(
+    languages.map((language) => language.trim()).filter(Boolean).sort(),
+  );
+}
+
+function scopedIngestionRecordPath(
+  normalizedIndexPath: string,
+  languageFilter: ReadonlySet<string> | null,
+): string {
+  if (!languageFilter || languageFilter.size === 0) {
+    return normalizedIndexPath;
+  }
+  return `${normalizedIndexPath}#languages=${[...languageFilter].join(",")}`;
+}
+
 // ---------------------------------------------------------------------------
 // Main pipeline
 // ---------------------------------------------------------------------------
@@ -149,6 +166,8 @@ export async function ingestScipIndex(
 ): Promise<ScipIngestResponse> {
   const startMs = Date.now();
   const dryRun = request.dryRun === true;
+  const force = request.force === true;
+  const languageFilter = normalizeLanguageFilter(request.languages);
 
   // -----------------------------------------------------------------------
   // Step 1: Validate inputs
@@ -191,16 +210,25 @@ export async function ingestScipIndex(
   // -----------------------------------------------------------------------
   const decoderBackend = await getDecoderBackend();
   const contentHash = await hashFile(absoluteIndexPath);
+  const ingestionRecordPath = scopedIngestionRecordPath(
+    normalizedIndexPath,
+    languageFilter,
+  );
   const existingRecord = await getScipIngestionRecord(
     conn,
     request.repoId,
-    normalizedIndexPath,
+    ingestionRecordPath,
   );
 
-  if (existingRecord && existingRecord.contentHash === contentHash && !dryRun) {
+  if (
+    existingRecord &&
+    existingRecord.contentHash === contentHash &&
+    !dryRun &&
+    !force
+  ) {
     logger.info("SCIP index already ingested (content hash match)", {
       repoId: request.repoId,
-      indexPath: normalizedIndexPath,
+      indexPath: ingestionRecordPath,
       contentHash,
     });
     return {
@@ -348,6 +376,10 @@ export async function ingestScipIndex(
 
     for await (const doc of decoder.documents()) {
       const relPath = normalizePath(doc.relativePath);
+      if (languageFilter && !languageFilter.has(doc.language)) {
+        documentsSkipped++;
+        continue;
+      }
 
       // Check if SDL has indexed this file
       const fileRow = await getFileByRepoPath(conn, request.repoId, relPath);
@@ -597,14 +629,14 @@ export async function ingestScipIndex(
       const ledgerVersion = versionRow ? versionRow.versionId : "unknown";
 
       const ingestionId = createHash("sha256")
-        .update(`${request.repoId}:${normalizedIndexPath}`)
+        .update(`${request.repoId}:${ingestionRecordPath}`)
         .digest("hex");
 
       await withWriteConn(async (wConn) => {
         await mergeScipIngestionRecord(wConn, {
           id: ingestionId,
           repoId: request.repoId,
-          indexPath: normalizedIndexPath,
+          indexPath: ingestionRecordPath,
           contentHash,
           ingestedAt: new Date().toISOString(),
           ledgerVersion,

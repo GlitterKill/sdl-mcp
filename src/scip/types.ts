@@ -84,6 +84,13 @@ export interface ScipIngestRequest {
   repoId: RepoId;
   indexPath: string;
   dryRun?: boolean;
+  /** Bypass compatible ingestion-cache decisions for this request. */
+  force?: boolean;
+  /**
+   * Optional language filter for semantic-enrichment refreshes. Combined SCIP
+   * indexes are allowed; the ingestion loop skips documents outside this set.
+   */
+  languages?: string[];
 }
 
 /**

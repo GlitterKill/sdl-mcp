@@ -735,6 +735,8 @@ export const ScipIndexEntrySchema = z.object({
   label: z.string().optional(),
 });
 
+export type ScipIndexEntry = z.infer<typeof ScipIndexEntrySchema>;
+
 /**
  * Configuration for the scip-io CLI integration that auto-generates the
  * SCIP index before each refresh. When enabled (and `scip.enabled` is also
@@ -803,6 +805,91 @@ export const ScipConfigSchema = z.object({
 
 export type ScipConfig = z.infer<typeof ScipConfigSchema>;
 
+export const SemanticEnrichmentProviderBaseConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  providerId: z.string().optional(),
+  providerVersion: z.string().optional(),
+});
+
+export const SemanticEnrichmentScipProviderConfigSchema =
+  SemanticEnrichmentProviderBaseConfigSchema.extend({
+    indexes: z.array(ScipIndexEntrySchema).default([]),
+  });
+
+export const SemanticEnrichmentLsifProviderConfigSchema =
+  SemanticEnrichmentProviderBaseConfigSchema.extend({
+    indexes: z.array(ScipIndexEntrySchema).default([]),
+    confidence: z.number().min(0.5).max(1.0).default(0.9),
+  });
+
+export const SemanticEnrichmentLspServerConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  serverId: z.string().min(1),
+  command: z.string().min(1),
+  args: z.array(z.string()).default([]),
+  languages: z.array(z.string()).default([]),
+  initializationOptions: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const SemanticEnrichmentLspProviderConfigSchema =
+  SemanticEnrichmentProviderBaseConfigSchema.extend({
+    servers: z
+      .record(z.string(), SemanticEnrichmentLspServerConfigSchema)
+      .default({}),
+    confidence: z.number().min(0.5).max(1.0).default(0.8),
+    candidateLimit: z.number().int().min(0).max(5000).default(200),
+  });
+
+export const SemanticEnrichmentProvidersConfigSchema = z.object({
+  scip: SemanticEnrichmentScipProviderConfigSchema.optional(),
+  lsif: SemanticEnrichmentLsifProviderConfigSchema.optional(),
+  lsp: SemanticEnrichmentLspProviderConfigSchema.optional(),
+});
+
+/**
+ * Provider-backed graph precision enrichment. This is intentionally separate
+ * from `semantic`, which remains reserved for embeddings, summaries, and
+ * retrieval behavior.
+ */
+export const SemanticEnrichmentConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  autoRunOnIndexRefresh: z.boolean().default(false),
+  installPolicy: z.enum(["never", "verified"]).default("never"),
+  // Reserved for durable provider caches; V2 currently keeps provider output
+  // in the graph and does not persist LSIF/LSP response caches here.
+  cacheDir: z.string().nullish(),
+  // Reserved for future cross-provider scheduling. V2 runs the selected
+  // providers serially, with provider-specific internal limits where needed.
+  concurrency: z.number().int().min(1).max(8).default(1),
+  timeoutMs: z
+    .number()
+    .int()
+    .min(1000)
+    .max(30 * 60 * 1000)
+    .default(5 * 60 * 1000),
+  languages: z.array(z.string()).default([]),
+  providers: SemanticEnrichmentProvidersConfigSchema.default({}),
+});
+
+export type SemanticEnrichmentProviderBaseConfig = z.infer<
+  typeof SemanticEnrichmentProviderBaseConfigSchema
+>;
+export type SemanticEnrichmentScipProviderConfig = z.infer<
+  typeof SemanticEnrichmentScipProviderConfigSchema
+>;
+export type SemanticEnrichmentLsifProviderConfig = z.infer<
+  typeof SemanticEnrichmentLsifProviderConfigSchema
+>;
+export type SemanticEnrichmentLspServerConfig = z.infer<
+  typeof SemanticEnrichmentLspServerConfigSchema
+>;
+export type SemanticEnrichmentLspProviderConfig = z.infer<
+  typeof SemanticEnrichmentLspProviderConfigSchema
+>;
+export type SemanticEnrichmentConfig = z.infer<
+  typeof SemanticEnrichmentConfigSchema
+>;
+
 export const PerformanceTierSchema = z.enum(["mid", "high", "extreme", "auto"]);
 
 export const PackedEncoderToggleSchema = z.object({
@@ -853,6 +940,7 @@ export const AppConfigSchema = z.object({
   cache: CacheConfigSchema.optional(),
   plugins: PluginConfigSchema.optional(),
   semantic: SemanticConfigSchema.optional(),
+  semanticEnrichment: SemanticEnrichmentConfigSchema.optional(),
   prefetch: PrefetchConfigSchema.optional(),
   tracing: TracingConfigSchema.optional(),
   parallelScorer: ParallelScorerConfigSchema.optional(),

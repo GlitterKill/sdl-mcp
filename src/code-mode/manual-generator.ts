@@ -50,6 +50,8 @@ export const FN_NAME_MAP: Record<string, string> = {
   fileWrite: "file.write",
   searchEdit: "search.edit",
   scipIngest: "scip.ingest",
+  semanticEnrichmentRefresh: "semantic.enrichment.refresh",
+  semanticEnrichmentStatus: "semantic.enrichment.status",
 };
 
 export const ACTION_TO_FN: Record<string, string> = Object.fromEntries(

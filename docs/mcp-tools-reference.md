@@ -18,7 +18,7 @@
 
 Complete reference for the SDL-MCP runtime surfaces exposed by `registerTools`.
 
-- `31` flat SDL action tools (`30` gateway-routable + `1` flat-only)
+- `34` flat SDL action tools (`32` gateway-routable + `2` flat-only)
 - `2` universal tools: `sdl.action.search` and `sdl.info`
 - Code Mode tools: `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file` (`sdl.info` is omitted in Code Mode exclusive)
 
@@ -75,7 +75,7 @@ Use `offset` with `limit` to page through large result sets such as `query: "*"`
 
 ---
 
-## Repository and Indexing (4 tools)
+## Repository and Indexing (6 tools)
 
 ### `sdl.repo.register`
 
@@ -166,6 +166,53 @@ When called with a progress token, the server emits `notifications/progress` mes
   "includeDiagnostics": true
 }
 ```
+
+---
+
+### `sdl.scip.ingest`
+
+Ingest a pre-built SCIP protobuf index (`.scip`) to overlay compiler-grade cross-references onto the symbol graph.
+
+**Parameters:**
+
+| Parameter   | Type      | Required | Description                                     |
+| ----------- | --------- | -------- | ----------------------------------------------- |
+| `repoId`    | `string`  | Yes      | Repository identifier                           |
+| `indexPath` | `string`  | Yes      | Absolute or repo-relative `.scip` file path     |
+| `dryRun`    | `boolean` | No       | Parse and count without writing to the graph DB |
+
+LSIF is handled by `sdl.semantic.enrichment.refresh`, not by this compatibility SCIP action.
+
+---
+
+### `sdl.semantic.enrichment.refresh`
+
+Run provider-backed semantic enrichment using one source per language with fixed priority: SCIP, then LSIF, then LSP.
+
+**Parameters:**
+
+| Parameter   | Type       | Required | Description                                                                   |
+| ----------- | ---------- | -------- | ----------------------------------------------------------------------------- |
+| `repoId`    | `string`   | Yes      | Repository identifier                                                         |
+| `dryRun`    | `boolean`  | No       | Plan/parse providers without graph writes                                     |
+| `force`     | `boolean`  | No       | Bypass compatible cache decisions where supported                             |
+| `install`   | `boolean`  | No       | Allow verified downloads only when `semanticEnrichment.installPolicy` permits |
+| `languages` | `string[]` | No       | Restrict refresh to specific language IDs                                     |
+
+**Response includes:** selected provider per language, skipped-provider reasons, run records, SCIP compatibility results, and non-fatal skips.
+
+---
+
+### `sdl.semantic.enrichment.status`
+
+Report semantic enrichment source selection, skipped providers, last runs, and precision scores.
+
+**Parameters:**
+
+| Parameter   | Type       | Required | Description                              |
+| ----------- | ---------- | -------- | ---------------------------------------- |
+| `repoId`    | `string`   | Yes      | Repository identifier                    |
+| `languages` | `string[]` | No       | Restrict status to specific language IDs |
 
 ---
 

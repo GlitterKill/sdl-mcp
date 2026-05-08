@@ -12,7 +12,8 @@
  *              AgentFeedback (with searchText + embedding columns),
  *              SymbolEmbedding, SummaryCache, SyncArtifact,
  *              SymbolReference, Memory, UsageSnapshot, SchemaVersion,
- *              ScipIngestion
+ *              ScipIngestion, SemanticProviderRun, SemanticDiagnostic,
+ *              SemanticPrecisionMetric
  *
  * Rel tables: FILE_IN_REPO, SYMBOL_IN_FILE, SYMBOL_IN_REPO, DEPENDS_ON,
  *             VERSION_OF_REPO, BELONGS_TO_CLUSTER, PARTICIPATES_IN,
@@ -346,6 +347,69 @@ export const NODE_TABLES: string[] = [
     truncated BOOL DEFAULT false
   )`,
 
+  `CREATE NODE TABLE IF NOT EXISTS SemanticProviderRun (
+    runId STRING PRIMARY KEY,
+    repoId STRING,
+    providerType STRING,
+    providerId STRING,
+    providerVersion STRING,
+    languagesJson STRING DEFAULT '[]',
+    sourceIndexPath STRING,
+    sourceHash STRING,
+    cacheKey STRING,
+    configHash STRING,
+    ledgerVersion STRING,
+    status STRING,
+    startedAt STRING,
+    finishedAt STRING,
+    documentsProcessed INT64 DEFAULT 0,
+    symbolsMatched INT64 DEFAULT 0,
+    edgesCreated INT64 DEFAULT 0,
+    edgesUpgraded INT64 DEFAULT 0,
+    edgesReplaced INT64 DEFAULT 0,
+    edgesSkipped INT64 DEFAULT 0,
+    diagnosticsCount INT64 DEFAULT 0,
+    precisionScore DOUBLE DEFAULT 0.0,
+    cacheHit BOOL DEFAULT false,
+    canAffectPass2 BOOL DEFAULT false,
+    selected BOOL DEFAULT true,
+    metadataJson STRING DEFAULT '{}',
+    error STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS SemanticDiagnostic (
+    id STRING PRIMARY KEY,
+    repoId STRING,
+    runId STRING,
+    providerType STRING,
+    providerId STRING,
+    languageId STRING,
+    sourcePath STRING,
+    severity STRING,
+    message STRING,
+    code STRING,
+    rangeJson STRING,
+    createdAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS SemanticPrecisionMetric (
+    id STRING PRIMARY KEY,
+    repoId STRING,
+    runId STRING,
+    languageId STRING,
+    providerType STRING,
+    providerId STRING,
+    score DOUBLE DEFAULT 0.0,
+    filesCovered INT64 DEFAULT 0,
+    filesEligible INT64 DEFAULT 0,
+    symbolMatchRate DOUBLE DEFAULT 0.0,
+    resolvedEdgeRate DOUBLE DEFAULT 0.0,
+    diagnosticsAvailable BOOL DEFAULT false,
+    pass2SkipRate DOUBLE DEFAULT 0.0,
+    computedAt STRING,
+    metadataJson STRING DEFAULT '{}'
+  )`,
+
   // Per-repo derived-state freshness record. Cluster/process/algorithm/
   // summary/embedding recompute may lag after incremental runs; this
   // table makes the staleness lifecycle explicit, queryable, and
@@ -470,6 +534,14 @@ const INDEXES: string[] = [
   `CREATE INDEX idx_agentfeedback_repoId ON AgentFeedback(repoId)`,
   `CREATE INDEX idx_symbolversion_symbolId ON SymbolVersion(symbolId)`,
   `CREATE INDEX idx_filesummary_repoId ON FileSummary(repoId)`,
+  `CREATE INDEX idx_semantic_run_repoId ON SemanticProviderRun(repoId)`,
+  `CREATE INDEX idx_semantic_run_startedAt ON SemanticProviderRun(startedAt)`,
+  `CREATE INDEX idx_semantic_diagnostic_repoId ON SemanticDiagnostic(repoId)`,
+  `CREATE INDEX idx_semantic_diagnostic_runId ON SemanticDiagnostic(runId)`,
+  `CREATE INDEX idx_semantic_diagnostic_sourcePath ON SemanticDiagnostic(sourcePath)`,
+  `CREATE INDEX idx_semantic_metric_repoId ON SemanticPrecisionMetric(repoId)`,
+  `CREATE INDEX idx_semantic_metric_runId ON SemanticPrecisionMetric(runId)`,
+  `CREATE INDEX idx_semantic_metric_languageId ON SemanticPrecisionMetric(languageId)`,
 ];
 
 export async function createBaseSchema(conn: Connection): Promise<void> {

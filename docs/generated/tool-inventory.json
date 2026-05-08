@@ -1,15 +1,15 @@
 {
-  "generatedAt": "2026-04-22T17:00:30.268Z",
+  "generatedAt": "2026-05-07T23:22:53.972Z",
   "counts": {
-    "flatTools": 32,
+    "flatTools": 34,
     "universalTools": 2,
     "codeModeTools": 5,
     "gatewayTools": 4,
-    "flatModeTotal": 34,
+    "flatModeTotal": 36,
     "gatewayModeTotal": 6,
-    "gatewayLegacyModeTotal": 38,
+    "gatewayLegacyModeTotal": 40,
     "codeModeExclusiveTotal": 5,
-    "allFlatAndCodeModeActions": 37
+    "allFlatAndCodeModeActions": 39
   },
   "flatToolNames": [
     "sdl.agent.feedback",
@@ -38,6 +38,8 @@
     "sdl.runtime.queryOutput",
     "sdl.scip.ingest",
     "sdl.search.edit",
+    "sdl.semantic.enrichment.refresh",
+    "sdl.semantic.enrichment.status",
     "sdl.slice.build",
     "sdl.slice.refresh",
     "sdl.slice.spillover.get",
@@ -45,10 +47,7 @@
     "sdl.symbol.search",
     "sdl.usage.stats"
   ],
-  "universalToolNames": [
-    "sdl.action.search",
-    "sdl.info"
-  ],
+  "universalToolNames": ["sdl.action.search", "sdl.info"],
   "codeModeToolNames": [
     "sdl.action.search",
     "sdl.context",
@@ -56,10 +55,5 @@
     "sdl.manual",
     "sdl.workflow"
   ],
-  "gatewayToolNames": [
-    "sdl.agent",
-    "sdl.code",
-    "sdl.query",
-    "sdl.repo"
-  ]
+  "gatewayToolNames": ["sdl.agent", "sdl.code", "sdl.query", "sdl.repo"]
 }

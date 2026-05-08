@@ -97,6 +97,8 @@ const ACTION_TAGS: Record<string, ActionTag[]> = {
   "file.write": ["repo", "mutation"],
   "search.edit": ["repo", "mutation"],
   "scip.ingest": ["repo"],
+  "semantic.enrichment.refresh": ["repo", "mutation"],
+  "semantic.enrichment.status": ["repo"],
 };
 
 const META_TOOL_TAGS: Record<string, ActionTag[]> = {
@@ -592,6 +594,10 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
     "Cross-file search-and-edit in two phases (preview + apply) with server-side plan handles, sha256 preconditions, and rollback",
   "scip.ingest":
     "Ingest a pre-built SCIP index to overlay compiler-grade cross-references onto the symbol graph",
+  "semantic.enrichment.refresh":
+    "Run provider-backed semantic enrichment with SCIP > LSIF > LSP source selection",
+  "semantic.enrichment.status":
+    "Report semantic enrichment source selection, skipped providers, last runs, and precision scores",
 };
 
 const META_TOOL_DESCRIPTIONS: Record<string, string> = {

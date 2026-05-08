@@ -424,4 +424,22 @@ describe("SCIP Ingestion E2E", () => {
     assert.equal(response.externalSymbolsCreated, 0);
     assert.equal(response.edgesCreated, 0);
   });
+
+  it("force bypasses the identical content-hash ingestion shortcut", async () => {
+    const response = await ingestScipIndex(
+      { repoId: REPO_ID, indexPath: "index.scip", force: true },
+      scipConfig,
+    );
+
+    assert.equal(response.status, "ingested");
+    assert.equal(
+      response.documentsProcessed,
+      1,
+      "forced ingestion should reopen the index and process documents",
+    );
+    assert.ok(
+      response.symbolsMatched >= 1,
+      "forced ingestion should run the matching pipeline",
+    );
+  });
 });

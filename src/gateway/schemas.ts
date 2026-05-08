@@ -297,7 +297,7 @@ const ScipIngestAction = z.object({
     .string()
     .min(1)
     .describe(
-      "Path to the SCIP index file (.scip or .lsif). " +
+      "Path to the SCIP protobuf index file (.scip). " +
         "Can be absolute or relative to the repository root.",
     ),
   dryRun: z
@@ -307,6 +307,19 @@ const ScipIngestAction = z.object({
     .describe(
       "If true, validate and parse the SCIP index without writing to the graph database.",
     ),
+});
+
+const SemanticEnrichmentRefreshAction = z.object({
+  action: z.literal("semantic.enrichment.refresh"),
+  dryRun: z.boolean().optional().default(false),
+  force: z.boolean().optional().default(false),
+  install: z.boolean().optional().default(false),
+  languages: z.array(z.string().min(1)).max(32).optional(),
+});
+
+const SemanticEnrichmentStatusAction = z.object({
+  action: z.literal("semantic.enrichment.status"),
+  languages: z.array(z.string().min(1)).max(32).optional(),
 });
 
 export const RepoGatewaySchema = z
@@ -324,6 +337,8 @@ export const RepoGatewaySchema = z
       UsageStatsAction,
       FileReadAction,
       ScipIngestAction,
+      SemanticEnrichmentRefreshAction,
+      SemanticEnrichmentStatusAction,
     ]),
   );
 
@@ -520,6 +535,8 @@ export const REPO_ACTIONS = [
   "policy.set",
   "usage.stats",
   "file.read",
+  "semantic.enrichment.refresh",
+  "semantic.enrichment.status",
 ] as const;
 
 export const AGENT_ACTIONS = [
