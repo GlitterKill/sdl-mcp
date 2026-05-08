@@ -1,5 +1,5 @@
 <div align="center">
-<img src="https://github.com/GlitterKill/sdl-mcp/blob/main/docs/Symbol_Delta_Ledger_MCP.jpg" alt="Symbol Delta Ledger MCP">
+<img src="https://github.com/GlitterKill/sdl-mcp/blob/main/docs/SDL-MCP_promo.webp" alt="Symbol Delta Ledger MCP">
 
 <br/>
 
