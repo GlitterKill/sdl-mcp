@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Resolved CI security audit failures by refreshing the transitive `fast-uri`
+  lockfile entry to the patched 3.1.2 release.
 - Observability token-savings reporting now records packed-wire token totals
   alongside byte totals, counts only realized packed emissions as savings, and
   measures `sdl.context` usage against the projected response payload that
