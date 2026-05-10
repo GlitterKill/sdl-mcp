@@ -93,7 +93,10 @@ export function parseToolArgs(
     const rawValue = values[flagKey];
 
     if (rawValue !== undefined) {
-      const coerced = coerceValue(argDef, rawValue);
+      let coerced = coerceValue(argDef, rawValue);
+      if (argDef.invertBoolean) {
+        coerced = !coerced;
+      }
       if (coerced !== undefined) {
         result[argDef.field] = coerced;
       }

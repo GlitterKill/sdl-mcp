@@ -262,7 +262,7 @@ Key options:
 
 ### `sdl-mcp tool <action> [args]`
 
-Direct MCP tool invocation from the CLI. The command currently exposes 34 action definitions from [`src/cli/commands/tool-actions.ts`](../src/cli/commands/tool-actions.ts), reuses the gateway action map for execution, and shares the same normalization and Zod validation path as the MCP server.
+Direct MCP tool invocation from the CLI. The command currently exposes 35 action definitions from [`src/cli/commands/tool-actions.ts`](../src/cli/commands/tool-actions.ts), reuses the gateway action map for execution, and shares the same normalization and Zod validation path as the MCP server.
 
 ```bash
 sdl-mcp tool repo.status --repo-id my-repo
@@ -271,18 +271,19 @@ sdl-mcp tool slice.build --repo-id my-repo --entry-symbols sym123
 sdl-mcp tool semantic.enrichment.status --repo-id my-repo
 sdl-mcp tool semantic.enrichment.refresh --repo-id my-repo --dry-run
 sdl-mcp tool search.edit --repo-id my-repo --mode preview --targeting text --query '{"literal":"old","replacement":"new"}' --edit-mode replacePattern
+sdl-mcp tool file.write --repo-id my-repo --file-path config/app.json --json-path server.port --json-value 8080
 sdl-mcp tool response.get --repo-id my-repo --handle response-myrepo-1770000000000-0123456789abcdef --max-bytes 8192
 ```
 
 Key options:
 
-- `--format <json|pretty|compact>` (default: `pretty`)
+- `--output-format <json|json-compact|pretty|table>` (default: `json`)
 - `--repo-id <ID>` (passed through to the underlying tool)
 - All remaining arguments are forwarded as tool parameters
 
 The CLI parser accepts the canonical action fields plus the same common aliases accepted by MCP requests, such as `--repo-id`, `--symbol-id`, `--symbol-ids`, `--from-version`, `--to-version`, and `--slice-handle`.
 
-Not every MCP surface is available through `sdl-mcp tool`. Code Mode-only tools (`sdl.manual`, `sdl.context`, `sdl.workflow`, `sdl.file`) are separate, and `sdl.file.write` is currently MCP-only. Use [`CLI Tool Access`](./feature-deep-dives/cli-tool-access.md) for the current direct-action matrix.
+Not every MCP surface is available through `sdl-mcp tool`. Code Mode-only tools (`sdl.manual`, `sdl.context`, `sdl.workflow`, `sdl.file`) are separate, but the direct flat write action is available as `file.write`. Use [`CLI Tool Access`](./feature-deep-dives/cli-tool-access.md) for the current direct-action matrix.
 
 ### `sdl-mcp version`
 

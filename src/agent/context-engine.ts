@@ -45,6 +45,314 @@ const BEHAVIORAL_KINDS = new Set([
 
 const MAX_EXACT_SYMBOL_MENTION_SEEDS = 5;
 
+type EvidenceOptimizationMode = "off" | "dedupe" | "budgeted" | "global";
+
+interface EvidenceCandidate {
+  evidence: Evidence;
+  originalIndex: number;
+  normalizedSummary: string;
+  contentValue: string;
+  subjectKey?: string;
+  tokenCost: number;
+  value: number;
+  dominanceRank: number;
+}
+
+interface BroadOptimizationContext {
+  task: AgentTask;
+  actions: Action[];
+  success: boolean;
+  clusterExpandedCount: number;
+  evidenceOptimization?: EvidenceOptimizationMode;
+}
+
+const EVIDENCE_DOMINANCE_RANK: Partial<Record<Evidence["type"], number>> = {
+  symbolCard: 30,
+  skeleton: 40,
+  hotPath: 50,
+  codeWindow: 60,
+};
+
+const EVIDENCE_SELECTION_VALUE: Record<Evidence["type"], number> = {
+  symbolCard: 75,
+  skeleton: 55,
+  hotPath: 95,
+  codeWindow: 85,
+  delta: 65,
+  diagnostic: 90,
+  searchResult: 35,
+};
+
+// Phase 3 evidence optimization keeps the public evidence shape stable while selecting a better set.
+function optimizeEvidenceForResponse(
+  evidence: Evidence[],
+  mode: EvidenceOptimizationMode | undefined,
+  tokenBudget?: number,
+): Evidence[] {
+  if (mode !== "dedupe" && mode !== "budgeted" && mode !== "global") {
+    return evidence;
+  }
+
+  const exactDeduped = dedupeExactEvidence(evidence.map(normalizeEvidenceCandidate));
+  const shouldPreserveHotPathCards = mode === "budgeted" || mode === "global";
+  const dominated = applyEvidenceDominance(exactDeduped, {
+    preserveHotPathCards: shouldPreserveHotPathCards,
+  });
+
+  if (mode === "dedupe") {
+    return dominated.map((candidate) => candidate.evidence);
+  }
+
+  return selectBudgetedEvidence(dominated, tokenBudget, exactDeduped).map(
+    (candidate) => candidate.evidence,
+  );
+}
+
+function normalizeEvidenceCandidate(
+  evidence: Evidence,
+  originalIndex: number,
+): EvidenceCandidate {
+  const normalizedSummary = normalizeEvidenceText(evidence.summary);
+  const contentValue = evidenceContentValue(normalizedSummary);
+  return {
+    evidence,
+    originalIndex,
+    normalizedSummary,
+    contentValue,
+    subjectKey: evidenceSubjectKey(evidence.reference),
+    tokenCost: evidenceTokenCost(evidence),
+    value: EVIDENCE_SELECTION_VALUE[evidence.type],
+    dominanceRank: EVIDENCE_DOMINANCE_RANK[evidence.type] ?? 0,
+  };
+}
+
+function dedupeExactEvidence(
+  candidates: EvidenceCandidate[],
+): EvidenceCandidate[] {
+  const seenExact = new Set<string>();
+  const selected: EvidenceCandidate[] = [];
+
+  for (const candidate of candidates) {
+    const exactKey = `${candidate.evidence.type}\0${candidate.evidence.reference}\0${candidate.normalizedSummary}`;
+    if (seenExact.has(exactKey)) continue;
+    seenExact.add(exactKey);
+    selected.push(candidate);
+  }
+
+  return selected;
+}
+
+function applyEvidenceDominance(
+  candidates: EvidenceCandidate[],
+  options: { preserveHotPathCards: boolean },
+): EvidenceCandidate[] {
+  const selected: EvidenceCandidate[] = [];
+
+  for (const candidate of candidates) {
+    if (
+      candidate.dominanceRank === 0 ||
+      !isMeaningfulEvidenceContent(candidate.contentValue)
+    ) {
+      selected.push(candidate);
+      continue;
+    }
+
+    const dominatedIndex = selected.findIndex((current) =>
+      evidenceItemsOverlap(current, candidate, options),
+    );
+    if (dominatedIndex === -1) {
+      selected.push(candidate);
+      continue;
+    }
+
+    const dominated = selected[dominatedIndex];
+    if (dominated && dominated.dominanceRank < candidate.dominanceRank) {
+      selected[dominatedIndex] = candidate;
+    }
+  }
+
+  return selected;
+}
+
+function evidenceItemsOverlap(
+  current: EvidenceCandidate,
+  candidate: EvidenceCandidate,
+  options: { preserveHotPathCards: boolean },
+): boolean {
+  if (
+    current.dominanceRank === 0 ||
+    !isMeaningfulEvidenceContent(current.contentValue)
+  ) {
+    return false;
+  }
+
+  if (
+    options.preserveHotPathCards &&
+    (supportsHotPath(current, candidate) || supportsHotPath(candidate, current))
+  ) {
+    return false;
+  }
+
+  const sameSubject =
+    current.subjectKey !== undefined && current.subjectKey === candidate.subjectKey;
+  const sameContent =
+    current.contentValue === candidate.contentValue && current.contentValue.length >= 30;
+
+  return (
+    (sameSubject || sameContent) &&
+    (candidate.contentValue.includes(current.contentValue) ||
+      current.contentValue.includes(candidate.contentValue))
+  );
+}
+
+function selectBudgetedEvidence(
+  candidates: EvidenceCandidate[],
+  tokenBudget: number | undefined,
+  supportCandidates: EvidenceCandidate[] = candidates,
+): EvidenceCandidate[] {
+  if (tokenBudget === undefined) return candidates;
+  if (tokenBudget <= 0) return [];
+
+  const selected = new Set<EvidenceCandidate>();
+  let tokensUsed = 0;
+  const ranked = [...candidates].sort(compareEvidenceValueDensity);
+
+  for (const candidate of ranked) {
+    if (selected.has(candidate)) continue;
+
+    const required = requiredEvidenceBundle(
+      candidate,
+      supportCandidates,
+      selected,
+    );
+    if (required.length === 0) continue;
+
+    const additionalCost = required
+      .filter((item) => !selected.has(item))
+      .reduce((total, item) => total + item.tokenCost, 0);
+
+    if (tokensUsed + additionalCost > tokenBudget) continue;
+
+    for (const item of required) {
+      if (!selected.has(item)) {
+        selected.add(item);
+        tokensUsed += item.tokenCost;
+      }
+    }
+  }
+
+  const selectedInOriginalOrder = [...candidates];
+  for (const supportCandidate of supportCandidates) {
+    if (
+      selected.has(supportCandidate) &&
+      !selectedInOriginalOrder.includes(supportCandidate)
+    ) {
+      selectedInOriginalOrder.push(supportCandidate);
+    }
+  }
+
+  return selectedInOriginalOrder
+    .filter((candidate) => selected.has(candidate))
+    .sort((left, right) => left.originalIndex - right.originalIndex);
+}
+
+function requiredEvidenceBundle(
+  candidate: EvidenceCandidate,
+  supportCandidates: EvidenceCandidate[],
+  selected: Set<EvidenceCandidate>,
+): EvidenceCandidate[] {
+  if (candidate.evidence.type !== "hotPath") return [candidate];
+
+  const selectedSupport = [...selected].find((item) =>
+    supportsHotPath(item, candidate),
+  );
+  if (selectedSupport) return [candidate];
+
+  const support = supportCandidates
+    .filter((item) => supportsHotPath(item, candidate))
+    .sort(compareEvidenceValueDensity)[0];
+
+  return support ? [support, candidate] : [];
+}
+
+function supportsHotPath(
+  maybeCard: EvidenceCandidate,
+  maybeHotPath: EvidenceCandidate,
+): boolean {
+  return (
+    maybeCard.evidence.type === "symbolCard" &&
+    maybeHotPath.evidence.type === "hotPath" &&
+    maybeCard.subjectKey !== undefined &&
+    maybeCard.subjectKey === maybeHotPath.subjectKey
+  );
+}
+
+function compareEvidenceValueDensity(
+  left: EvidenceCandidate,
+  right: EvidenceCandidate,
+): number {
+  const leftDensity = left.value / left.tokenCost;
+  const rightDensity = right.value / right.tokenCost;
+  return (
+    rightDensity - leftDensity ||
+    right.value - left.value ||
+    left.tokenCost - right.tokenCost ||
+    left.originalIndex - right.originalIndex
+  );
+}
+
+function evidenceTokenCost(evidence: Evidence): number {
+  return Math.max(
+    1,
+    estimateTokens(`${evidence.type} ${evidence.reference} ${evidence.summary}`),
+  );
+}
+
+function summarizeEvidenceTypeCounts(evidence: Evidence[]): string {
+  const counts = new Map<Evidence["type"], number>();
+  for (const item of evidence) {
+    counts.set(item.type, (counts.get(item.type) ?? 0) + 1);
+  }
+
+  return [...counts]
+    .map(([type, count]) => `${count} ${type}${count === 1 ? "" : "s"}`)
+    .join(", ");
+}
+
+function recordAffectedField(fields: string[], field: string): void {
+  if (!fields.includes(field)) fields.push(field);
+}
+
+function evidenceSubjectKey(reference: string): string | undefined {
+  const [kind, ...rest] = reference.split(":");
+  const value = rest.join(":").trim();
+  if (value.length === 0) return undefined;
+  if (kind === "window") return value.replace(/:\d+$/u, "");
+  if (kind === "symbol" || kind === "hotpath" || kind === "file") return value;
+  return undefined;
+}
+
+function evidenceContentValue(summary: string): string {
+  const withoutWrapper = summary
+    .replace(
+      /^(?:symbol card|skeleton|file skeleton|hot path|code window)(?:\s*\([^)]*\))?\s*:\s*/u,
+      "",
+    )
+    .trim();
+  const parts = withoutWrapper
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts[parts.length - 1] ?? withoutWrapper;
+}
+
+function normalizeEvidenceText(value: string): string {
+  return value.replace(/\s+/gu, " ").trim().toLowerCase();
+}
+
+function isMeaningfulEvidenceContent(value: string): boolean {
+  return value.length >= 20 || value.split(/\s+/u).filter(Boolean).length >= 4;
+}
 function prependContextRefs(context: string[], refs: string[]): string[] {
   if (refs.length === 0) return context;
   const prioritized = new Set(refs);
@@ -210,12 +518,22 @@ export class ContextEngine {
 
       const metrics = executor.getMetrics();
       const nextBestAction = executor.getNextBestAction();
+      const isPrecise = task.options?.contextMode === "precise";
+      const evidenceOptimization = task.options?.evidenceOptimization;
+      const finalEvidenceOptimization =
+        evidenceOptimization === "global" && !isPrecise
+          ? "dedupe"
+          : evidenceOptimization;
+      const optimizedEvidence = optimizeEvidenceForResponse(
+        evidence,
+        finalEvidenceOptimization,
+        task.budget?.maxTokens,
+      );
 
       // Precise mode: return evidence + lightweight metadata.
       // actionsTaken and summary are always populated — they are the most
       // useful fields for agent consumers.  Only answer, nextBestAction,
       // and retrievalEvidence are stripped in precise mode.
-      const isPrecise = task.options?.contextMode === "precise";
 
       if (isPrecise) {
         return {
@@ -229,8 +547,8 @@ export class ContextEngine {
           path,
           contextModeHint:
             "precise: Returns focused evidence with minimal metadata. Use for targeted lookups when you know what you're looking for.",
-          finalEvidence: evidence,
-          summary: this.generateSummary(task, actions, evidence, success, {
+          finalEvidence: optimizedEvidence,
+          summary: this.generateSummary(task, actions, optimizedEvidence, success, {
             clusterExpandedCount,
           }),
           success,
@@ -249,13 +567,16 @@ export class ContextEngine {
         path,
         contextModeHint:
           "broad: Expands context via cluster relationships and graph edges. Returns answer, nextBestAction, and retrievalEvidence. Use for exploratory tasks.",
-        finalEvidence: evidence,
-        summary: this.generateSummary(task, actions, evidence, success, {
+        finalEvidence: optimizedEvidence,
+        summary: this.generateSummary(task, actions, optimizedEvidence, success, {
           clusterExpandedCount,
+          compactEvidence: evidenceOptimization === "global",
         }),
         success,
         metrics,
-        answer: this.generateAnswer(task, evidence, success),
+        answer: this.generateAnswer(task, optimizedEvidence, success, {
+          compactEvidence: evidenceOptimization === "global",
+        }),
         nextBestAction,
         retrievalEvidence: {
           // The context tool only has taskText available (no stackTrace,
@@ -279,7 +600,13 @@ export class ContextEngine {
 
       // Guard against oversized broad-mode responses that can overflow
       // MCP response limits (observed 136K+ chars in production).
-      return this.truncateIfOverBudget(result, task.budget?.maxTokens);
+      return this.truncateIfOverBudget(result, task.budget?.maxTokens, {
+        task,
+        actions,
+        success,
+        clusterExpandedCount,
+        evidenceOptimization,
+      });
     } catch (error) {
       return this.createErrorResult(
         taskId,
@@ -313,7 +640,9 @@ export class ContextEngine {
     actions: Action[],
     evidence: Evidence[],
     success: boolean,
-    extra: { clusterExpandedCount: number } = { clusterExpandedCount: 0 },
+    extra: { clusterExpandedCount: number; compactEvidence?: boolean } = {
+      clusterExpandedCount: 0,
+    },
   ): string {
     const status = success ? "completed successfully" : "completed with errors";
     const clusterNote =
@@ -338,8 +667,16 @@ export class ContextEngine {
       parts.push("Actions: " + actionLines.join("; "));
     }
 
-    // Build a readable paragraph from evidence summaries
-    if (evidence.length > 0) {
+    if (evidence.length > 0 && extra.compactEvidence) {
+      parts.push(
+        `Evidence: ${summarizeEvidenceTypeCounts(evidence)}. See finalEvidence for details.`,
+      );
+    }
+
+    // Build a readable paragraph from evidence summaries when callers want
+    // narrative detail. Global optimization keeps this compact because the
+    // same summaries already live in finalEvidence.
+    if (evidence.length > 0 && !extra.compactEvidence) {
       const seen = new Set<string>();
       const snippets: string[] = [];
       for (const e of evidence) {
@@ -359,6 +696,7 @@ export class ContextEngine {
     task: AgentTask,
     evidence: Evidence[],
     success: boolean,
+    options: { compactEvidence?: boolean } = {},
   ): string {
     if (!success && evidence.length === 0) {
       return `Task execution failed. Review actions and errors for details.`;
@@ -403,6 +741,13 @@ export class ContextEngine {
       sections.push(
         "> **Note:** Task completed with errors. Some rungs failed \u2014 see Diagnostics below.",
       );
+    }
+
+    if (options.compactEvidence) {
+      sections.push(
+        `Selected evidence: ${summarizeEvidenceTypeCounts(evidence)}. See finalEvidence for details.`,
+      );
+      return sections.join("\n\n");
     }
 
     // Symbol cards section — count only, details are in finalEvidence
@@ -532,6 +877,7 @@ export class ContextEngine {
   private truncateIfOverBudget(
     result: ContextResult,
     budgetMaxTokens?: number,
+    optimizationContext?: BroadOptimizationContext,
   ): ContextResult {
     const effectiveCap = Math.min(
       budgetMaxTokens ?? MAX_CONTEXT_RESPONSE_TOKENS,
@@ -556,9 +902,43 @@ export class ContextEngine {
     });
 
     const fieldsAffected: string[] = [];
-
-    // Phase 1: Trim finalEvidence — keep first N items that fit
     let currentTokens = originalTokens;
+
+    if (optimizationContext?.evidenceOptimization === "global") {
+      const globallyOptimized = this.optimizeBroadResultGlobally(
+        result,
+        effectiveCap,
+        optimizationContext,
+      );
+      const optimizedTokens = estimateTokens(JSON.stringify(globallyOptimized));
+      if (optimizedTokens < currentTokens) {
+        if (
+          JSON.stringify(globallyOptimized.finalEvidence) !==
+          JSON.stringify(result.finalEvidence)
+        ) {
+          recordAffectedField(fieldsAffected, "finalEvidence");
+        }
+        if (globallyOptimized.summary !== result.summary) {
+          recordAffectedField(fieldsAffected, "summary");
+        }
+        if (globallyOptimized.answer !== result.answer) {
+          recordAffectedField(fieldsAffected, "answer");
+        }
+        result = globallyOptimized;
+        currentTokens = optimizedTokens;
+      }
+      if (currentTokens <= effectiveCap) {
+        result.truncation = {
+          originalTokens,
+          truncatedTokens: currentTokens,
+          fieldsAffected,
+        };
+        return result;
+      }
+    }
+
+    // Phase 1: Trim finalEvidence. Global optimization must keep evidence
+    // bundles intact, so use the selector instead of positional slicing.
     if (result.finalEvidence.length > 0) {
       const targetEvidenceCount = Math.max(
         1,
@@ -567,11 +947,37 @@ export class ContextEngine {
         ),
       );
       if (targetEvidenceCount < result.finalEvidence.length) {
-        result = {
-          ...result,
-          finalEvidence: result.finalEvidence.slice(0, targetEvidenceCount),
-        };
-        fieldsAffected.push("finalEvidence");
+        if (optimizationContext?.evidenceOptimization === "global") {
+          const evidenceBudget = Math.max(
+            0,
+            Math.floor(
+              result.finalEvidence.reduce(
+                (total, item) => total + evidenceTokenCost(item),
+                0,
+              ) *
+                (effectiveCap / currentTokens),
+            ),
+          );
+          const selectedEvidence = optimizeEvidenceForResponse(
+            result.finalEvidence,
+            "budgeted",
+            evidenceBudget,
+          );
+          result = this.withBroadEvidence(
+            result,
+            optimizationContext,
+            selectedEvidence,
+            true,
+          );
+          recordAffectedField(fieldsAffected, "summary");
+          recordAffectedField(fieldsAffected, "answer");
+        } else {
+          result = {
+            ...result,
+            finalEvidence: result.finalEvidence.slice(0, targetEvidenceCount),
+          };
+        }
+        recordAffectedField(fieldsAffected, "finalEvidence");
       }
     }
 
@@ -597,7 +1003,7 @@ export class ContextEngine {
           ...result,
           actionsTaken: result.actionsTaken.slice(0, targetActionCount),
         };
-        fieldsAffected.push("actionsTaken");
+        recordAffectedField(fieldsAffected, "actionsTaken");
       }
     }
 
@@ -622,13 +1028,55 @@ export class ContextEngine {
           answer:
             result.answer.slice(0, halfBudgetChars) + "\n\n[answer truncated]",
         };
-        if (!fieldsAffected.includes("answer")) fieldsAffected.push("answer");
+        recordAffectedField(fieldsAffected, "answer");
       }
     }
 
     const truncatedTokens = estimateTokens(JSON.stringify(result));
     result.truncation = { originalTokens, truncatedTokens, fieldsAffected };
     return result;
+  }
+
+  private optimizeBroadResultGlobally(
+    result: ContextResult,
+    effectiveCap: number,
+    context: BroadOptimizationContext,
+  ): ContextResult {
+    const baseResult = this.withBroadEvidence(result, context, [], true);
+    const baseTokens = estimateTokens(JSON.stringify(baseResult));
+    const evidenceBudget = Math.max(0, effectiveCap - baseTokens);
+    const selectedEvidence = optimizeEvidenceForResponse(
+      result.finalEvidence,
+      "budgeted",
+      evidenceBudget,
+    );
+
+    return this.withBroadEvidence(result, context, selectedEvidence, true);
+  }
+
+  private withBroadEvidence(
+    result: ContextResult,
+    context: BroadOptimizationContext,
+    evidence: Evidence[],
+    compactEvidence: boolean,
+  ): ContextResult {
+    return {
+      ...result,
+      finalEvidence: evidence,
+      summary: this.generateSummary(
+        context.task,
+        context.actions,
+        evidence,
+        context.success,
+        {
+          clusterExpandedCount: context.clusterExpandedCount,
+          compactEvidence,
+        },
+      ),
+      answer: this.generateAnswer(context.task, evidence, context.success, {
+        compactEvidence,
+      }),
+    };
   }
 
   /**

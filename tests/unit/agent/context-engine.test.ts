@@ -127,6 +127,370 @@ describe("ContextEngine", () => {
     );
   });
 
+  it("leaves duplicate evidence unchanged unless evidenceOptimization is enabled", async () => {
+    const evidence: Evidence[] = [
+      {
+        type: "symbolCard",
+        reference: "symbol:alpha",
+        summary: "Symbol card: shared branch content for alpha",
+        timestamp: Date.now(),
+      },
+      {
+        type: "symbolCard",
+        reference: "symbol:alpha",
+        summary: "Symbol card: shared branch content for alpha",
+        timestamp: Date.now() + 1,
+      },
+    ];
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:alpha"]);
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence,
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => "none");
+
+    const result = await new ContextEngine().buildContext(createTask());
+
+    assert.deepEqual(result.finalEvidence, evidence);
+  });
+
+  it("deduplicates overlapping ladder evidence when evidenceOptimization is dedupe", async () => {
+    const sharedContent = "shared execution branch reused across context surfaces";
+    const evidence: Evidence[] = [
+      {
+        type: "symbolCard",
+        reference: "symbol:alpha",
+        summary: `Symbol card: src/alpha.ts | ${sharedContent}`,
+        timestamp: Date.now(),
+      },
+      {
+        type: "skeleton",
+        reference: "file:src/alpha.ts",
+        summary: `Skeleton (1 line): ${sharedContent}`,
+        timestamp: Date.now() + 1,
+      },
+      {
+        type: "hotPath",
+        reference: "hotpath:alpha",
+        summary: `Hot path (1 match): ${sharedContent}`,
+        timestamp: Date.now() + 2,
+      },
+    ];
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:alpha"]);
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence,
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => "none");
+
+    const result = await new ContextEngine().buildContext(
+      createTask({ options: { evidenceOptimization: "dedupe" } }),
+    );
+
+    assert.equal(result.finalEvidence.length, 1);
+    assert.equal(result.finalEvidence[0]?.type, "hotPath");
+    assert.match(result.answer ?? "", /Found 1 hot path\(s\)/);
+    assert.match(result.summary, /collected 1 evidence item/);
+  });
+
+  it("selects high-value evidence under budget", async () => {
+    const longLowValueSummary = `Search result: ${"low signal filler ".repeat(160)}`;
+    const evidence: Evidence[] = [
+      {
+        type: "searchResult",
+        reference: "search:broad",
+        summary: longLowValueSummary,
+        timestamp: Date.now(),
+      },
+      {
+        type: "diagnostic",
+        reference: "diagnostic:src/alpha.ts:12",
+        summary: "Diagnostic: null branch throws",
+        timestamp: Date.now() + 1,
+      },
+      {
+        type: "symbolCard",
+        reference: "symbol:alpha",
+        summary: "Symbol card: alpha handles request state",
+        timestamp: Date.now() + 2,
+      },
+    ];
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:alpha"]);
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence,
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => "none");
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        budget: { maxTokens: 45 },
+        options: { contextMode: "precise", evidenceOptimization: "budgeted" },
+      }),
+    );
+
+    assert.deepEqual(
+      result.finalEvidence.map((item) => item.type),
+      ["diagnostic", "symbolCard"],
+    );
+  });
+
+  it("keeps a supporting card for every selected hot path", async () => {
+    const evidence: Evidence[] = [
+      {
+        type: "symbolCard",
+        reference: "symbol:alpha",
+        summary: "Symbol card: alpha validates request",
+        timestamp: Date.now(),
+      },
+      {
+        type: "hotPath",
+        reference: "hotpath:alpha",
+        summary: "Hot path (1 match): alpha validates request",
+        timestamp: Date.now() + 1,
+      },
+      {
+        type: "codeWindow",
+        reference: "window:src/noisy.ts:1",
+        summary: `Code window: ${"expensive surrounding code ".repeat(140)}`,
+        timestamp: Date.now() + 2,
+      },
+    ];
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:alpha"]);
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence,
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => "none");
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        budget: { maxTokens: 40 },
+        options: { contextMode: "precise", evidenceOptimization: "budgeted" },
+      }),
+    );
+
+    assert.deepEqual(
+      result.finalEvidence.map((item) => item.type),
+      ["symbolCard", "hotPath"],
+    );
+  });
+
+  it("restores a supporting card when dominance removes it before budget selection", async () => {
+    const sharedContent = "shared execution branch reused across context surfaces";
+    const evidence: Evidence[] = [
+      {
+        type: "symbolCard",
+        reference: "symbol:alpha",
+        summary: `Symbol card: ${sharedContent}`,
+        timestamp: Date.now(),
+      },
+      {
+        type: "skeleton",
+        reference: "file:alpha",
+        summary: `Skeleton (1 line): ${sharedContent}`,
+        timestamp: Date.now() + 1,
+      },
+      {
+        type: "hotPath",
+        reference: "hotpath:alpha",
+        summary: `Hot path (1 match): ${sharedContent}`,
+        timestamp: Date.now() + 2,
+      },
+    ];
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:alpha"]);
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence,
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => "none");
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        budget: { maxTokens: 80 },
+        options: { contextMode: "precise", evidenceOptimization: "budgeted" },
+      }),
+    );
+
+    assert.deepEqual(
+      result.finalEvidence.map((item) => item.type),
+      ["symbolCard", "hotPath"],
+    );
+  });
+
+  it("keeps a supporting card when the hot path appears first", async () => {
+    const sharedContent = "shared execution branch reused across context surfaces";
+    const evidence: Evidence[] = [
+      {
+        type: "hotPath",
+        reference: "hotpath:alpha",
+        summary: `Hot path (1 match): ${sharedContent}`,
+        timestamp: Date.now(),
+      },
+      {
+        type: "symbolCard",
+        reference: "symbol:alpha",
+        summary: `Symbol card: ${sharedContent}`,
+        timestamp: Date.now() + 1,
+      },
+    ];
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:alpha"]);
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence,
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => "none");
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        options: { contextMode: "precise", evidenceOptimization: "budgeted" },
+      }),
+    );
+
+    assert.deepEqual(
+      result.finalEvidence.map((item) => item.type),
+      ["hotPath", "symbolCard"],
+    );
+  });
+
+  it("globally optimizes broad responses under budget", async () => {
+    const noisySummary = `Search result: ${"low signal filler ".repeat(160)}`;
+    const sharedContent = "alpha validates request branch";
+    const evidence: Evidence[] = [
+      {
+        type: "searchResult",
+        reference: "search:broad",
+        summary: noisySummary,
+        timestamp: Date.now(),
+      },
+      {
+        type: "symbolCard",
+        reference: "symbol:alpha",
+        summary: `Symbol card: ${sharedContent}`,
+        timestamp: Date.now() + 1,
+      },
+      {
+        type: "skeleton",
+        reference: "file:alpha",
+        summary: `Skeleton (1 line): ${sharedContent}`,
+        timestamp: Date.now() + 2,
+      },
+      {
+        type: "hotPath",
+        reference: "hotpath:alpha",
+        summary: `Hot path (1 match): ${sharedContent}`,
+        timestamp: Date.now() + 3,
+      },
+      {
+        type: "diagnostic",
+        reference: "diagnostic:src/alpha.ts:12",
+        summary: "Diagnostic: request validation can throw",
+        timestamp: Date.now() + 4,
+      },
+    ];
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:alpha"]);
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence,
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => "none");
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        budget: { maxTokens: 500 },
+        options: { contextMode: "broad", evidenceOptimization: "global" },
+      }),
+    );
+
+    const evidenceTypes = result.finalEvidence.map((item) => item.type);
+    assert.deepEqual(evidenceTypes, ["diagnostic"]);
+    assert.ok(!result.summary.includes("low signal filler"));
+    assert.ok(!result.answer?.includes("low signal filler"));
+    assert.match(result.summary, /See finalEvidence for details/);
+    assert.match(result.answer ?? "", /See finalEvidence for details/);
+    assert.ok(result.truncation?.fieldsAffected.includes("finalEvidence"));
+    assert.ok(result.truncation?.fieldsAffected.includes("summary"));
+  });
+
+  it("uses bundle-aware fallback trimming for global hot-path evidence", async () => {
+    const evidence: Evidence[] = [
+      {
+        type: "hotPath",
+        reference: "hotpath:alpha",
+        summary:
+          "Hot path (1 match): alpha validates token presence in runtime branch",
+        timestamp: Date.now(),
+      },
+      {
+        type: "symbolCard",
+        reference: "symbol:alpha",
+        summary: "Symbol card: alpha owns request validation and auth state",
+        timestamp: Date.now() + 1,
+      },
+    ];
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:alpha"]);
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence,
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => "none");
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        budget: { maxTokens: 400 },
+        options: { contextMode: "broad", evidenceOptimization: "global" },
+      }),
+    );
+
+    assert.deepEqual(
+      result.finalEvidence.map((item) => item.type),
+      ["symbolCard"],
+    );
+    assert.match(result.summary, /Evidence: 1 symbolCard/);
+    assert.match(result.answer ?? "", /Selected evidence: 1 symbolCard/);
+    assert.ok(result.truncation?.fieldsAffected.includes("finalEvidence"));
+  });
+
   it("enforces planner budget constraints for token and duration", async () => {
     mock.method(Executor.prototype, "execute", async () => ({
       actions: [],

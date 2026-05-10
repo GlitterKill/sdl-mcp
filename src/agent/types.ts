@@ -38,6 +38,8 @@ export interface TaskOptions {
   /** Include retrieval evidence (which lanes contributed, per-source counts) in
    *  the response and downstream logging. Default: true. */
   includeRetrievalEvidence?: boolean;
+  /** Experimental final evidence optimizer. Default: "off". */
+  evidenceOptimization?: "off" | "dedupe" | "budgeted" | "global";
   /** Identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank. */
   chatMentions?: string[];
   /** Optional per-mention weight overrides for PPR seeding. */

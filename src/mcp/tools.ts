@@ -2065,6 +2065,12 @@ export const AgentContextRequestSchema = z.object({
         .describe(
           "Include retrieval evidence (which lanes contributed, per-source counts) in the response. Default: true.",
         ),
+      evidenceOptimization: z
+        .enum(["off", "dedupe", "budgeted", "global"] as const)
+        .optional()
+        .describe(
+          "Experimental finalEvidence optimizer. dedupe removes exact duplicates and subsumed ladder evidence; budgeted also greedily selects evidence by value per token under budget.maxTokens while preserving required card support for selected hot paths; global applies broad-mode response optimization so summary/answer/finalEvidence are selected together under the response budget. Default: off.",
+        ),
       chatMentions: z
         .array(z.string().min(1).max(200))
         .max(20)

@@ -64,6 +64,33 @@ flowchart TD
 
 ---
 
+## CLI Access
+
+Use `sdl-mcp tool file.write` when you want to apply the same single-file write primitive from a shell script or local terminal workflow:
+
+```bash
+sdl-mcp tool file.write --repo-id my-repo --file-path config/app.json \
+  --json-path server.port --json-value 8080
+```
+
+Nested write modes accept JSON-valued flags:
+
+```bash
+sdl-mcp tool file.write --repo-id my-repo --file-path docs/guide.md \
+  --replace-pattern '{"pattern":"oldName","replacement":"newName","global":true}'
+```
+
+For multiline content or values that are awkward to quote in a shell, pipe the request as JSON. CLI flags override piped fields when both are present.
+
+```bash
+echo '{"repoId":"my-repo","filePath":"docs/guide.md","append":"\nMore detail"}' \
+  | sdl-mcp tool file.write
+```
+
+By default, `file.write` creates a `.bak` file before modifying an existing file. Pass `--no-backup` only when the caller has another rollback mechanism.
+
+---
+
 ## Parameters
 
 | Parameter         | Type    | Required | Default | Description                                       |

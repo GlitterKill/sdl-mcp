@@ -18,11 +18,11 @@
 
 Complete reference for the SDL-MCP runtime surfaces exposed by `registerTools`.
 
-- `34` flat SDL action tools (`32` gateway-routable + `2` flat-only)
+- `35` flat SDL action tools (`34` gateway-routable + `1` flat-only)
 - `2` universal tools: `sdl.action.search` and `sdl.info`
 - Code Mode tools: `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file` (`sdl.info` is omitted in Code Mode exclusive)
 
-Flat mode and gateway mode share the same handler layer. The CLI `tool` command exposes a narrower direct-action subset rather than the full MCP surface.
+Flat mode and gateway mode share the same handler layer. The CLI `tool` command exposes direct action aliases for the shared handler layer rather than the full MCP surface.
 
 Parameter normalization is shared across flat and gateway calls. SDL-MCP accepts canonical camelCase fields plus common public aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, `spillover_handle`, `if_none_match`, `known_etags`, `known_card_etags`, `edited_files`, `entry_symbols`, and `relative_cwd`.
 
@@ -876,6 +876,7 @@ Retrieve task-shaped code context with rung path selection and evidence capture.
 | `requireDiagnostics`       | `boolean`                 | Include diagnostic info (may add a raw rung)                                                                                                                                                                                                                         |
 | `semantic`                 | `boolean`                 | Use hybrid (FTS + vector + RRF) retrieval for context seeding. Default `true`. Set `false` to force plain lexical — useful for deterministic tests                                                                                                                   |
 | `includeRetrievalEvidence` | `boolean`                 | Attach hybrid `retrievalEvidence` to the response (sources, candidate counts, top ranks per source, fusion latency, lane availability). Default `true`                                                                                                               |
+| `evidenceOptimization`   | `"off" \| "dedupe" \| "budgeted" \| "global"` | Enable opt-in evidence optimization for `sdl.context`. `dedupe` removes duplicate/subsumed evidence; `budgeted` greedily selects finalEvidence by value per token under `budget.maxTokens`; `global` also optimizes broad-mode `summary`, `answer`, and `finalEvidence` together under the response budget while preserving supporting cards for selected hot paths. Default `"off"` |
 | `chatMentions`             | `string[]`                | Up to 20 identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank for chat-aware re-ranking. See [semantic-engine.md → Chat-Aware PageRank](feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0108) |
 | `chatMentionWeights`       | `Record<string, number>`  | Per-mention weight overrides; missing entries default to uniform 1.0                                                                                                                                                                                                 |
 | `pprDirection`             | `"out" \| "in" \| "both"` | Walk direction across the dependency graph for chat-aware re-ranking. Default `"both"`                                                                                                                                                                               |
@@ -1021,7 +1022,7 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 
 ### `sdl.file.write`
 
-Write non-indexed files using targeted update modes. This tool is MCP-only today; `sdl-mcp tool` does not expose it directly.
+Write non-indexed files using targeted update modes. This action is also available from the CLI as `sdl-mcp tool file.write`.
 
 | Parameter         | Type                                | Required | Description                                                              |
 | ----------------- | ----------------------------------- | -------- | ------------------------------------------------------------------------ |

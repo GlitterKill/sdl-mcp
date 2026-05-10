@@ -1,8 +1,8 @@
 # CLI Tool Access
 
-**Access 34 SDL-MCP action aliases directly from the command line without running an MCP transport.**
+**Access 35 SDL-MCP action aliases directly from the command line without running an MCP transport.**
 
-The `sdl-mcp tool` command executes the same handler layer used by the MCP server, but it does not expose the entire runtime surface. It covers the CLI action definitions in [`src/cli/commands/tool-actions.ts`](../../src/cli/commands/tool-actions.ts), which currently includes 34 aliases across query, code, repo, and agent namespaces.
+The `sdl-mcp tool` command executes the same handler layer used by the MCP server, but it does not expose the entire runtime surface. It covers the CLI action definitions in [`src/cli/commands/tool-actions.ts`](../../src/cli/commands/tool-actions.ts), which currently includes 35 aliases across query, code, repo, and agent namespaces.
 
 ---
 
@@ -17,6 +17,10 @@ sdl-mcp tool symbol.search --repo-id my-repo --query "handleAuth"
 
 # Get a symbol card
 sdl-mcp tool symbol.getCard --repo-id my-repo --symbol-id "file:src/server.ts::MCPServer"
+
+# Update one JSON setting
+sdl-mcp tool file.write --repo-id my-repo --file-path config/app.json \
+  --json-path server.port --json-value 8080
 
 # Build a task-scoped graph slice
 sdl-mcp tool slice.build --repo-id my-repo --task-text "debug auth flow" --max-cards 50
@@ -97,7 +101,8 @@ Run `sdl-mcp tool --list` to inspect the current aliases grouped by namespace.
 | `policy.set`                  | Update the current policy                    |
 | `usage.stats`                 | Read token usage statistics                  |
 | `file.read`                   | Read non-indexed files through SDL           |
-| `search.edit`                 | Preview and apply cross-file search/edit plans  |
+| `file.write`                  | Write a single file with targeted modes      |
+| `search.edit`                 | Preview and apply cross-file search/edit plans |
 
 ### Agent
 
@@ -115,7 +120,7 @@ Run `sdl-mcp tool --list` to inspect the current aliases grouped by namespace.
 | `memory.remove`        | Remove a development memory                 |
 | `memory.surface`       | Surface relevant memories                   |
 
-`sdl-mcp tool` does not expose Code Mode-only tools (`sdl.context`, `sdl.manual`, `sdl.workflow`, `sdl.file`), and it currently does not expose `file.write`.
+`sdl-mcp tool` does not expose Code Mode-only tools (`sdl.context`, `sdl.manual`, `sdl.workflow`, `sdl.file`). Use `file.write` for immediate single-file edits and `search.edit` when you want a preview/apply workflow across one or more files.
 
 ---
 
@@ -160,6 +165,20 @@ That becomes:
 
 If stdin provides JSON input, CLI flags override the piped values.
 
+For `file.write`, nested write modes use JSON-valued flags:
+
+```bash
+sdl-mcp tool file.write --repo-id my-repo --file-path docs/guide.md \
+  --replace-lines '{"start":10,"end":12,"content":"Updated text"}'
+```
+
+For multiline content or values that are awkward to quote in a shell, pipe the request as JSON:
+
+```bash
+echo '{"repoId":"my-repo","filePath":"config/app.json","jsonPath":"server.port","jsonValue":8080}' \
+  | sdl-mcp tool file.write
+```
+
 ---
 
 ## Examples
@@ -188,6 +207,8 @@ sdl-mcp summary "changes in v23" --format markdown --repo-id my-repo
 ```bash
 sdl-mcp tool repo.register --repo-id ci-build --root-path .
 sdl-mcp tool index.refresh --repo-id ci-build --mode full
+sdl-mcp tool file.write --repo-id ci-build --file-path config/ci.json \
+  --json-path retries --json-value 2
 sdl-mcp tool runtime.execute --runtime shell --code "npm test" --timeout-ms 30000 --output-mode minimal
 ```
 
@@ -199,19 +220,20 @@ The direct CLI surface is implemented by four modules:
 
 | Module             | File                                  | Responsibility                                                      |
 | :----------------- | :------------------------------------ | :------------------------------------------------------------------ |
-| Action definitions | `src/cli/commands/tool-actions.ts`    | Declares the 34 CLI-visible aliases                                 |
+| Action definitions | `src/cli/commands/tool-actions.ts`    | Declares the 35 CLI-visible aliases                                 |
 | Arg parser         | `src/cli/commands/tool-arg-parser.ts` | Maps flags to handler fields and coerces types                      |
 | Dispatcher         | `src/cli/commands/tool-dispatch.ts`   | Loads config, resolves `repoId`, routes actions, and handles errors |
 | Output formatter   | `src/cli/commands/tool-output.ts`     | Formats results as JSON, compact JSON, pretty, or table output      |
 
-The dispatcher reuses the gateway action map for execution, so the CLI and MCP server share the same handlers and core validation logic. The CLI alias list is kept in sync with the gateway action catalog while still excluding separate Code Mode-only tools and MCP-only `file.write`.
+The dispatcher reuses the gateway action map for execution, so the CLI and MCP server share the same handlers and core validation logic. The CLI alias list is kept in sync with the shared action handler map while still excluding separate Code Mode-only tools.
 
 ---
 
 ## Limitations
 
 - `buffer.*` actions require a running MCP server with live indexing. In CLI mode they typically return limited or empty results.
-- `file.write` is MCP-only today and is not available through `sdl-mcp tool`.
+- `file.write` applies immediately and has no preview phase. Use `search.edit` for preview/apply batch edits with drift checks and rollback.
+- For `file.write` requests with multiline content, nested mode objects, or JSON values that are hard to quote in a shell, prefer stdin JSON.
 - Code Mode tools are separate from the direct CLI alias surface.
 - Each invocation initializes config and the graph database, so high-frequency automation is better served by an MCP server over HTTP or stdio.
 

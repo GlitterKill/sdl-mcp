@@ -18,6 +18,8 @@ export interface ActionArgDef {
   description: string;
   /** Short alias, e.g. "-q" */
   short?: string;
+  /** Invert a boolean flag before assigning it to the handler field. */
+  invertBoolean?: boolean;
 }
 
 export interface ActionDefinition {
@@ -1206,6 +1208,84 @@ const fileRead: ActionDefinition = {
   ],
 };
 
+const fileWrite: ActionDefinition = {
+  action: "file.write",
+  namespace: "repo",
+  description: "Write a single file with targeted update modes",
+  args: [
+    { ...REPO_ID_ARG },
+    {
+      flag: "--file-path",
+      field: "filePath",
+      type: "string",
+      required: true,
+      description: "Path relative to the repository root",
+    },
+    {
+      flag: "--content",
+      field: "content",
+      type: "string",
+      description: "Full file content for create or overwrite mode",
+    },
+    {
+      flag: "--replace-lines",
+      field: "replaceLines",
+      type: "json",
+      description:
+        'JSON line replacement object, e.g. {"start":0,"end":2,"content":"new"}',
+    },
+    {
+      flag: "--replace-pattern",
+      field: "replacePattern",
+      type: "json",
+      description:
+        'JSON regex replacement object, e.g. {"pattern":"old","replacement":"new","global":true}',
+    },
+    {
+      flag: "--json-path",
+      field: "jsonPath",
+      type: "string",
+      description: "Dot-separated JSON path to update",
+    },
+    {
+      flag: "--json-value",
+      field: "jsonValue",
+      type: "json",
+      description: "JSON value to write when --json-path is set",
+    },
+    {
+      flag: "--insert-at",
+      field: "insertAt",
+      type: "json",
+      description: 'JSON insertion object, e.g. {"line":5,"content":"new"}',
+    },
+    {
+      flag: "--append",
+      field: "append",
+      type: "string",
+      description: "Content to append to the end of the file",
+    },
+    {
+      flag: "--no-backup",
+      field: "createBackup",
+      type: "boolean",
+      description: "Disable the default .bak backup for existing files",
+      invertBoolean: true,
+    },
+    {
+      flag: "--create-if-missing",
+      field: "createIfMissing",
+      type: "boolean",
+      description: "Create the file if it does not exist",
+    },
+  ],
+  examples: [
+    'sdl-mcp tool file.write --repo-id my-repo --file-path "config/app.json" --json-path "server.port" --json-value 8080',
+    'sdl-mcp tool file.write --repo-id my-repo --file-path "docs/note.md" --append "\\nMore detail" --create-if-missing',
+    'echo \'{"repoId":"my-repo","filePath":"config/app.json","jsonPath":"server.port","jsonValue":8080}\' | sdl-mcp tool file.write',
+  ],
+};
+
 const searchEdit: ActionDefinition = {
   action: "search.edit",
   namespace: "repo",
@@ -1497,6 +1577,7 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   policySet,
   usageStats,
   fileRead,
+  fileWrite,
   searchEdit,
   // Agent
   agentFeedback,

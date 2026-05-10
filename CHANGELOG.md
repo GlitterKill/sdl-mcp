@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Semantic enrichment V2 TypeScript/JavaScript LSP call-definition enrichment that plans tree-sitter call candidates, queries configured stdio LSP servers, and writes exact call edges through the generic semantic writer.
 - Handle-backed large response storage with `response.get` retrieval and opt-in `responseMode` support for `sdl.context`, `file.read`, `code.needWindow`, and `search.edit` preview responses.
 - Session-aware `deltaMode` support for repeated `file.read` and `code.needWindow` windows, plus observability token-savings breakdowns by compression layer and tool.
+- Experimental opt-in `sdl.context` `evidenceOptimization` modes: `dedupe` removes exact duplicate/subsumed ladder evidence, `budgeted` greedily selects evidence by value per token under `budget.maxTokens` while preserving matching cards for selected hot paths, and `global` optimizes broad-mode `summary`, `answer`, and `finalEvidence` together under the response budget.
+- Direct CLI access to the `file.write` action through `sdl-mcp tool file.write`, including targeted write-mode flags and stdin JSON support for complex payloads.
 
 ### Changed
 

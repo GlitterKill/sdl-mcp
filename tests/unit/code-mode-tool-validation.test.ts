@@ -33,6 +33,46 @@ describe("code-mode tool validation", () => {
     );
   });
 
+  it("accepts sdl.context evidenceOptimization budgeted option", () => {
+    const parsed = AgentContextRequestSchema.parse({
+      repoId: "demo-repo",
+      taskType: "explain",
+      taskText: "explain handleSymbolSearch",
+      options: { evidenceOptimization: "budgeted" },
+    });
+
+    assert.equal(parsed.options?.evidenceOptimization, "budgeted");
+  });
+  it("accepts sdl.context evidenceOptimization global option", () => {
+    const parsed = AgentContextRequestSchema.parse({
+      repoId: "demo-repo",
+      taskType: "explain",
+      taskText: "explain handleSymbolSearch",
+      options: { contextMode: "broad", evidenceOptimization: "global" },
+    });
+
+    assert.equal(parsed.options?.evidenceOptimization, "global");
+  });
+
+  it("rejects invalid sdl.context evidenceOptimization options", () => {
+    assert.throws(
+      () =>
+        AgentContextRequestSchema.parse({
+          repoId: "demo-repo",
+          taskType: "explain",
+          taskText: "explain handleSymbolSearch",
+          options: { evidenceOptimization: "knapsack" },
+        }),
+      (error: unknown) => {
+        const issue = (error as { issues?: Array<{ path?: unknown[]; values?: unknown[] }> })
+          .issues?.[0];
+        assert.deepEqual(issue?.path, ["options", "evidenceOptimization"]);
+        assert.deepEqual(issue?.values, ["off", "dedupe", "budgeted", "global"]);
+        return true;
+      },
+    );
+  });
+
   it("throws a validation error for semantically invalid sdl.workflow requests", async () => {
     let workflowHandler: ((args: unknown) => Promise<unknown>) | null = null;
     const fakeServer = {

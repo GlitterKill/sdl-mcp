@@ -13,6 +13,7 @@ describe("cli-tool-arg-parser", () => {
       { flag: "--repo-id", field: "repoId", type: "string", required: true, description: "Repo ID" },
       { flag: "--limit", field: "limit", type: "number", description: "Limit" },
       { flag: "--active", field: "active", type: "boolean", description: "Active flag" },
+      { flag: "--no-backup", field: "createBackup", type: "boolean", invertBoolean: true, description: "Disable backup" },
       { flag: "--tags", field: "tags", type: "string[]", description: "Tags list" },
       { flag: "--config", field: "config", type: "json", description: "JSON config" },
     ],
@@ -35,6 +36,7 @@ describe("cli-tool-arg-parser", () => {
       "repo-id": { type: "string" },
       limit: { type: "string" }, // numbers use string in parseArgs
       active: { type: "boolean" },
+      "no-backup": { type: "boolean" },
       tags: { type: "string", multiple: true }, // arrays use string in parseArgs
       config: { type: "string" }, // json uses string in parseArgs
     });
@@ -67,6 +69,14 @@ describe("cli-tool-arg-parser", () => {
 
       result = parseToolArgs(mockDef, { "repo-id": "r", active: "false" });
       assert.strictEqual(result.active, false);
+    });
+
+    it("supports inverted booleans for negative flags", () => {
+      const result = parseToolArgs(mockDef, {
+        "repo-id": "r",
+        "no-backup": true,
+      });
+      assert.strictEqual(result.createBackup, false);
     });
 
     it("coerces string arrays", () => {

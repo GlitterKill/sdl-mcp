@@ -127,6 +127,16 @@ When the planner must trim rungs to stay within budget, it now considers the ret
 
 This means budget pressure no longer uniformly removes expensive rungs -- the planner preserves diagnostic depth when the retrieval signal is weak.
 
+## Evidence Optimization
+
+`options.evidenceOptimization: "dedupe"` is experimental and opt-in. It normalizes `finalEvidence`, removes exact duplicates, and applies first-pass dominance across ladder evidence: when a card, skeleton, hot path, or code window repeats the same meaningful content, SDL-MCP keeps the richer evidence item and drops the weaker duplicate before building the summary and answer.
+
+`options.evidenceOptimization: "budgeted"` runs the same normalization/dedupe pass, then uses `budget.maxTokens` as an evidence budget. Selection is deterministic greedy by value per token and preserves required groups: a selected hot path must carry a matching symbol card when one is available.
+
+`options.evidenceOptimization: "global"` is the Phase 3 broad-response optimizer. In broad mode, it treats `summary`, `answer`, and `finalEvidence` as one response budget: evidence summaries stay in `finalEvidence`, narrative fields collapse to counts and pointers, and oversized responses run the budgeted selector against the remaining response headroom before falling back to truncation. In precise mode, `global` behaves like `budgeted`.
+
+The default is `"off"`, so existing `sdl.context` responses remain unchanged unless callers enable the option.
+
 ---
 
 ## Response Differences

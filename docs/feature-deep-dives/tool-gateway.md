@@ -89,7 +89,7 @@ The important implementation detail is not the namespace wrapper. It is the pres
 - `file.write` is outside the four namespace gateway schemas. In Code Mode, use `sdl.file` which unifies `file.read`, `file.write`, and `search.edit` under one tool.
 - `sdl.info` is universal outside Code Mode exclusive. It is not part of the four gateway tools.
 - Code Mode exclusive bypasses the regular gateway and flat surfaces entirely.
-- The CLI `sdl-mcp tool` command is related but not identical. It exposes a narrower direct-action subset. See [CLI Tool Access](./cli-tool-access.md).
+- The CLI `sdl-mcp tool` command is related but not identical. It exposes direct action aliases, including `file.write`, without exposing Code Mode-only wrapper tools. See [CLI Tool Access](./cli-tool-access.md).
 
 ## Configuration
 
@@ -113,7 +113,7 @@ If you are migrating older agent instructions that still depend on flat tool nam
 | -------------------------------------------------- | -------------------------------------------------------- |
 | Smallest registration footprint                    | Gateway mode                                             |
 | Task-shaped retrieval first                        | Code Mode                                                |
-| Need `file.write`                                  | Code Mode `sdl.file`, flat mode, or `sdl.workflow` steps |
+| Need `file.write`                                  | Code Mode `sdl.file`, direct CLI `file.write`, flat mode, or `sdl.workflow` steps |
 | Need `search.edit`                                 | `sdl.repo`, Code Mode `sdl.file`, flat mode, or `sdl.workflow` |
 | Existing legacy instructions still call flat tools | Flat mode, or a temporary migration setup                |
 
