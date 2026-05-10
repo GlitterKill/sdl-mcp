@@ -169,6 +169,74 @@ describe("FileGatewayRequestSchema", () => {
     });
   });
 
+  describe("op: previewWindow/sourceWindow", () => {
+    it("parses a plan-bound previewWindow request", () => {
+      const result = FileGatewayRequestSchema.parse({
+        op: "previewWindow",
+        repoId: "test-repo",
+        planHandle: "plan-abc-123",
+        filePath: "src/index.ts",
+        symbolId: "symbol-123",
+        reason: "Inspect the planned edit before applying it",
+        expectedLines: 12,
+        identifiersToFind: ["target"],
+        granularity: "fileWindow",
+        responseMode: "inline",
+      });
+
+      assert.equal(result.op, "previewWindow");
+      assert.equal(result.planHandle, "plan-abc-123");
+      assert.equal(result.filePath, "src/index.ts");
+      assert.equal(result.symbolId, "symbol-123");
+    });
+
+    it("parses sourceWindow as an alias for the same gated path", () => {
+      const result = FileGatewayRequestSchema.parse({
+        op: "sourceWindow",
+        repoId: "test-repo",
+        planHandle: "plan-abc-123",
+        symbolId: "symbol-123",
+        reason: "Inspect the planned edit before applying it",
+        expectedLines: 12,
+        identifiersToFind: ["target"],
+        responseMode: "inline",
+      });
+
+      assert.equal(result.op, "sourceWindow");
+      assert.equal(result.planHandle, "plan-abc-123");
+    });
+
+    it("rejects previewWindow without a planHandle", () => {
+      assert.throws(() => {
+        FileGatewayRequestSchema.parse({
+          op: "previewWindow",
+          repoId: "test-repo",
+          symbolId: "symbol-123",
+          reason: "Inspect the planned edit before applying it",
+          expectedLines: 12,
+          identifiersToFind: ["target"],
+          responseMode: "inline",
+        });
+      });
+    });
+
+    it("rejects previewWindow filePath with null byte", () => {
+      assert.throws(() => {
+        FileGatewayRequestSchema.parse({
+          op: "previewWindow",
+          repoId: "test-repo",
+          planHandle: "plan-abc-123",
+          filePath: "src/\0index.ts",
+          symbolId: "symbol-123",
+          reason: "Inspect the planned edit before applying it",
+          expectedLines: 12,
+          identifiersToFind: ["target"],
+          responseMode: "inline",
+        });
+      });
+    });
+  });
+
   describe("discriminator validation", () => {
     it("rejects unknown op", () => {
       assert.throws(() => {
@@ -254,6 +322,26 @@ describe("handleFileGateway dispatch", () => {
       }),
       (err: any) => {
         assert.notEqual(err?.constructor?.name, "ZodError");
+        return true;
+      },
+    );
+  });
+
+  it("op:previewWindow dispatches to the plan-bound window handler", async () => {
+    await assert.rejects(
+      () => handleFileGateway({
+        op: "previewWindow",
+        repoId: "test-repo",
+        planHandle: "plan-fake-123",
+        symbolId: "symbol-123",
+        reason: "Inspect the planned edit before applying it",
+        expectedLines: 12,
+        identifiersToFind: ["target"],
+        responseMode: "inline",
+      }),
+      (err: any) => {
+        assert.notEqual(err?.constructor?.name, "ZodError");
+        assert.match(String(err?.message ?? ""), /Edit plan not found or expired/);
         return true;
       },
     );

@@ -15,9 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Session-aware `deltaMode` support for repeated `file.read` and `code.needWindow` windows, plus observability token-savings breakdowns by compression layer and tool.
 - Experimental opt-in `sdl.context` `evidenceOptimization` modes: `dedupe` removes exact duplicate/subsumed ladder evidence, `budgeted` greedily selects evidence by value per token under `budget.maxTokens` while preserving matching cards for selected hot paths, and `global` optimizes broad-mode `summary`, `answer`, and `finalEvidence` together under the response budget.
 - Direct CLI access to the `file.write` action through `sdl-mcp tool file.write`, including targeted write-mode flags and stdin JSON support for complex payloads.
+- `sdl.file` now exposes plan-bound `previewWindow`/`sourceWindow` operations that validate search-edit plan handles and delegate indexed source access through `code.needWindow` policy.
 
 ### Changed
 
+- `search.edit` previews now return diff-anchored, line-numbered hunk snippets with explicit before/after line ranges for each file entry.
 - `sdl.scip.ingest` help/schema now describes SCIP `.scip` input only; LSIF runs through the semantic enrichment bridge instead of the SCIP compatibility action.
 
 ### Fixed

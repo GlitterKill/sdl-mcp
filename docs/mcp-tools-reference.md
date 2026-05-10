@@ -1310,7 +1310,7 @@ Use this before `sdl.context` or `sdl.workflow` when the model needs a narrow, t
 
 ### `sdl.file`
 
-Provide a unified Code Mode file gateway for read, write, search/edit preview, and search/edit apply operations.
+Provide a unified Code Mode file gateway for read, write, search/edit preview/apply, and plan-bound `previewWindow`/`sourceWindow` operations that route indexed source inspection through `code.needWindow` policy.
 
 ---
 

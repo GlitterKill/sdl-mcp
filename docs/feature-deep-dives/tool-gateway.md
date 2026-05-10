@@ -46,7 +46,7 @@ The gateway currently exposes `34` of the `35` flat actions through the four nam
 | `sdl.repo`   | `12`    | `repo.register`, `repo.status`, `repo.overview`, `index.refresh`, `policy.get`, `policy.set`, `usage.stats`, `file.read`, `search.edit`, `scip.ingest`, `semantic.enrichment.refresh`, `semantic.enrichment.status` |
 | `sdl.agent`  | `11`    | `agent.feedback`, `agent.feedback.query`, `buffer.push`, `buffer.checkpoint`, `buffer.status`, `runtime.execute`, `runtime.queryOutput`, `memory.store`, `memory.query`, `memory.remove`, `memory.surface` |
 
-In Code Mode, use `sdl.file({ op: "searchEditPreview" })` and `sdl.file({ op: "searchEditApply" })` for two-phase cross-file edits: preview first, then apply the stored plan with sha256/mtime preconditions and rollback on mid-batch failure. The same `search.edit` action is also callable through `sdl.repo` and via `sdl.workflow`. See [sdl.search.edit - Cross-File Search and Edit](../search-edit-tool.md) for request shapes and examples.
+In Code Mode, use `sdl.file({ op: "searchEditPreview" })` and `sdl.file({ op: "searchEditApply" })` for two-phase cross-file edits: preview first, then apply the stored plan with sha256/mtime preconditions and rollback on mid-batch failure. For indexed source follow-up, `sdl.file({ op: "previewWindow" })` and `sdl.file({ op: "sourceWindow" })` bind a plan handle to the normal `code.needWindow` policy instead of exposing raw file reads. The same `search.edit` action is also callable through `sdl.repo` and via `sdl.workflow`. See [sdl.search.edit - Cross-File Search and Edit](../search-edit-tool.md) for request shapes and examples.
 
 ## Routing Path
 

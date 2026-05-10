@@ -98,7 +98,14 @@ payload.
       "file": "src/auth/token.ts",
       "matchCount": 2,
       "editMode": "replacePattern",
-      "snippets": { "before": "...", "after": "..." },
+      "snippets": {
+        "before": " 41 | const oldName = ...\n>42 | oldName();",
+        "after": " 41 | const newName = ...\n>42 | newName();",
+        "beforeStartLine": 41,
+        "beforeEndLine": 42,
+        "afterStartLine": 41,
+        "afterEndLine": 42
+      },
       "indexedSource": true
     }
   ],
@@ -115,6 +122,25 @@ payload.
   }
 }
 ```
+
+Preview snippets are hunk snippets, not raw file reads. Each snippet is anchored to the first matched or changed line and includes 1-based line numbers; the changed anchor is prefixed with `>`. For indexed source files, callers that need more surrounding code should request a gated window tied to the returned plan handle:
+
+```json
+{
+  "op": "previewWindow",
+  "repoId": "<repoId>",
+  "planHandle": "se-mf0abc-<random>",
+  "filePath": "src/auth/token.ts",
+  "symbolId": "<symbolId-from-symbol.search>",
+  "reason": "Inspect the planned edit before applying it",
+  "expectedLines": 40,
+  "identifiersToFind": ["oldName"],
+  "granularity": "fileWindow",
+  "responseMode": "inline"
+}
+```
+
+`previewWindow` and `sourceWindow` are aliases on `sdl.file`. Both validate that the plan handle contains the requested indexed file, validate that the symbol belongs to that file, then delegate source access to the normal `code.needWindow` policy. This keeps indexed source reads gated while preserving the edit preview provenance.
 
 ### `retrievalEvidence`
 

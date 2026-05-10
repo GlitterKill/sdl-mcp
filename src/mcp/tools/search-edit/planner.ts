@@ -77,11 +77,20 @@ export interface PreviewFileSkip {
   reason: string;
 }
 
+export interface PreviewSnippets {
+  before: string;
+  after: string;
+  beforeStartLine: number;
+  beforeEndLine: number;
+  afterStartLine: number;
+  afterEndLine: number;
+}
+
 export interface PreviewFileEntry {
   file: string;
   matchCount: number;
   editMode: FileWriteResponse["mode"];
-  snippets: { before: string; after: string };
+  snippets: PreviewSnippets;
   indexedSource: boolean;
 }
 
@@ -430,53 +439,157 @@ export async function enumerateRepoFiles(
   return { candidates, skipped };
 }
 
-function buildSnippets(
+interface PreviewLineRange {
+  startIndex: number;
+  endIndex: number;
+}
+
+function splitPreviewLines(text: string): string[] {
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (normalized.length === 0) return [];
+  const lines = normalized.split("\n");
+  if (lines.length > 1 && lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+  return lines;
+}
+
+interface ChangedLineSpan {
+  beforeStartIndex: number;
+  beforeEndIndex: number;
+  afterStartIndex: number;
+  afterEndIndex: number;
+}
+
+function findChangedLineSpan(
+  beforeLines: string[],
+  afterLines: string[],
+): ChangedLineSpan {
+  const sharedLength = Math.min(beforeLines.length, afterLines.length);
+  let prefix = 0;
+  while (prefix < sharedLength && beforeLines[prefix] === afterLines[prefix]) {
+    prefix += 1;
+  }
+
+  let beforeSuffix = beforeLines.length;
+  let afterSuffix = afterLines.length;
+  while (
+    beforeSuffix > prefix &&
+    afterSuffix > prefix &&
+    beforeLines[beforeSuffix - 1] === afterLines[afterSuffix - 1]
+  ) {
+    beforeSuffix -= 1;
+    afterSuffix -= 1;
+  }
+
+  return {
+    beforeStartIndex: prefix,
+    beforeEndIndex: beforeSuffix,
+    afterStartIndex: prefix,
+    afterEndIndex: afterSuffix,
+  };
+}
+
+function findRegexLine(lines: string[], regex: RegExp): number {
+  const flags = regex.flags.replace(/g/g, "");
+  const lineRegex = new RegExp(regex.source, flags);
+  const deadline = Date.now() + 100;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (Date.now() > deadline) return -1;
+    lineRegex.lastIndex = 0;
+    if (lineRegex.test(lines[index])) return index;
+  }
+  return -1;
+}
+
+function nonEmptyDisplaySpan(
+  lines: string[],
+  startIndex: number,
+  endIndex: number,
+  fallbackIndex: number,
+): PreviewLineRange {
+  if (lines.length === 0) {
+    return { startIndex: 0, endIndex: 0 };
+  }
+  if (endIndex > startIndex) {
+    return {
+      startIndex: Math.max(0, Math.min(startIndex, lines.length - 1)),
+      endIndex: Math.max(0, Math.min(endIndex, lines.length)),
+    };
+  }
+  const boundedFallback = Math.max(0, Math.min(fallbackIndex, lines.length - 1));
+  return { startIndex: boundedFallback, endIndex: boundedFallback + 1 };
+}
+
+function buildLineRange(
+  lines: string[],
+  changedSpan: PreviewLineRange,
+  contextLines: number,
+): PreviewLineRange {
+  if (lines.length === 0) {
+    return { startIndex: 0, endIndex: 0 };
+  }
+  return {
+    startIndex: Math.max(0, changedSpan.startIndex - contextLines),
+    endIndex: Math.min(lines.length, changedSpan.endIndex + contextLines),
+  };
+}
+
+function formatNumberedLines(
+  lines: string[],
+  range: PreviewLineRange,
+  changedSpan: PreviewLineRange,
+): string {
+  if (range.endIndex <= range.startIndex) return "";
+  const width = String(range.endIndex).length;
+  return lines
+    .slice(range.startIndex, range.endIndex)
+    .map((line, offset) => {
+      const lineIndex = range.startIndex + offset;
+      const lineNumber = lineIndex + 1;
+      const marker = lineIndex >= changedSpan.startIndex && lineIndex < changedSpan.endIndex ? ">" : " ";
+      return `${marker}${String(lineNumber).padStart(width)} | ${line}`;
+    })
+    .join("\n");
+}
+
+function startLine(range: PreviewLineRange): number {
+  return range.endIndex > range.startIndex ? range.startIndex + 1 : 0;
+}
+
+export function buildSearchEditPreviewSnippets(
   content: string,
   newContent: string,
   contextLines: number,
   regex: RegExp | null,
-): { before: string; after: string } {
-  if (!regex) {
-    return {
-      before: content
-        .split("\n")
-        .slice(0, contextLines * 2)
-        .join("\n"),
-      after: newContent
-        .split("\n")
-        .slice(0, contextLines * 2)
-        .join("\n"),
-    };
-  }
-  const beforeLines = content.split("\n");
-  const afterLines = newContent.split("\n");
-  const snippetRegex = new RegExp(regex.source);
-  const deadline = Date.now() + 100;
-  const matchLine = beforeLines.findIndex((line) => {
-    if (Date.now() > deadline) return false;
-    return snippetRegex.test(line);
-  });
-  if (matchLine < 0) {
-    const top = Math.max(0, contextLines * 2);
-    return {
-      before: beforeLines.slice(0, top).join("\n"),
-      after: afterLines.slice(0, top).join("\n"),
-    };
-  }
-  const s = Math.max(0, matchLine - contextLines);
-  const e = Math.min(beforeLines.length, matchLine + contextLines + 1);
-  const afterDeadline = Date.now() + 100;
-  const afterMatchLine = afterLines.findIndex((line) => {
-    if (Date.now() > afterDeadline) return false;
-    return snippetRegex.test(line);
-  });
-  const sAfter = afterMatchLine >= 0 ? Math.max(0, afterMatchLine - contextLines) : s;
-  const eAfter = afterMatchLine >= 0
-    ? Math.min(afterLines.length, afterMatchLine + contextLines + 1)
-    : Math.min(afterLines.length, s + (e - s));
+): PreviewSnippets {
+  const beforeLines = splitPreviewLines(content);
+  const afterLines = splitPreviewLines(newContent);
+  const changedSpan = findChangedLineSpan(beforeLines, afterLines);
+  const regexLine = regex ? findRegexLine(beforeLines, regex) : -1;
+  const beforeFallback = regexLine >= 0 ? regexLine : changedSpan.beforeStartIndex;
+  const beforeChangedSpan = nonEmptyDisplaySpan(
+    beforeLines,
+    changedSpan.beforeStartIndex,
+    changedSpan.beforeEndIndex,
+    beforeFallback,
+  );
+  const afterChangedSpan = nonEmptyDisplaySpan(
+    afterLines,
+    changedSpan.afterStartIndex,
+    changedSpan.afterEndIndex,
+    changedSpan.afterStartIndex,
+  );
+  const beforeRange = buildLineRange(beforeLines, beforeChangedSpan, contextLines);
+  const afterRange = buildLineRange(afterLines, afterChangedSpan, contextLines);
+
   return {
-    before: beforeLines.slice(s, e).join("\n"),
-    after: afterLines.slice(sAfter, eAfter).join("\n"),
+    before: formatNumberedLines(beforeLines, beforeRange, beforeChangedSpan),
+    after: formatNumberedLines(afterLines, afterRange, afterChangedSpan),
+    beforeStartLine: startLine(beforeRange),
+    beforeEndLine: beforeRange.endIndex,
+    afterStartLine: startLine(afterRange),
+    afterEndLine: afterRange.endIndex,
   };
 }
 
@@ -920,7 +1033,7 @@ export async function planSearchEditPreview(
       file: rel,
       matchCount: (result.replacementCount ?? matchCount) || 1,
       editMode: result.mode,
-      snippets: buildSnippets(content, result.newContent, contextLines, regex),
+      snippets: buildSearchEditPreviewSnippets(content, result.newContent, contextLines, regex),
       indexedSource,
     });
     totalMatches += (result.replacementCount ?? matchCount) || 1;

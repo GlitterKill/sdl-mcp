@@ -1,20 +1,30 @@
 import { z } from "zod";
 import { MAX_REPO_ID_LENGTH } from "../../config/constants.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
+import { normalizePath } from "../../util/paths.js";
+import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
 import type { ToolContext } from "../../server.js";
+import { NotFoundError, ValidationError } from "../errors.js";
 import {
+  CodeNeedWindowRequestSchema,
   FileWriteReplaceLinesSchema,
   FileWriteReplacePatternSchema,
   FileWriteInsertAtSchema,
   SearchEditQuerySchema,
   SearchEditFiltersSchema,
   SearchEditEditMode,
+  type CodeNeedWindowResponse,
   type FileReadResponse,
   type FileWriteResponse,
+  type SearchEditPreviewResponse,
   type SearchEditResponse,
 } from "../tools.js";
+import { handleCodeNeedWindow } from "./code.js";
 import { handleFileRead } from "./file-read.js";
 import { handleFileWrite } from "./file-write.js";
 import { handleSearchEdit } from "./search-edit/index.js";
+import { getSearchEditPlanStore, type StoredPlan } from "./search-edit/plan-store.js";
 
 const FileGatewayReadSchema = z.object({
   op: z.literal("read"),
@@ -147,18 +157,206 @@ const FileGatewaySearchEditApplySchema = z.object({
   createBackup: z.boolean().optional(),
 });
 
+const FileGatewayWindowBaseSchema = CodeNeedWindowRequestSchema.omit({
+  repoId: true,
+}).extend({
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  planHandle: z.string().min(1).max(200),
+  filePath: z
+    .string()
+    .min(1)
+    .max(1024)
+    .refine((p) => !p.includes("\0"), {
+      message: "filePath must not contain null bytes",
+    })
+    .optional()
+    .describe(
+      "Planned file path to inspect. Required when the edit plan has multiple indexed source files.",
+    ),
+});
+
+const FileGatewayPreviewWindowSchema = FileGatewayWindowBaseSchema.extend({
+  op: z.literal("previewWindow"),
+});
+
+const FileGatewaySourceWindowSchema = FileGatewayWindowBaseSchema.extend({
+  op: z.literal("sourceWindow"),
+});
+
 export const FileGatewayRequestSchema = z.discriminatedUnion("op", [
   FileGatewayReadSchema,
   FileGatewayWriteSchema,
   FileGatewaySearchEditPreviewSchema,
   FileGatewaySearchEditApplySchema,
+  FileGatewayPreviewWindowSchema,
+  FileGatewaySourceWindowSchema,
 ]);
 
 export type FileGatewayRequest = z.infer<typeof FileGatewayRequestSchema>;
+
+type FileGatewayWindowRequest =
+  | z.infer<typeof FileGatewayPreviewWindowSchema>
+  | z.infer<typeof FileGatewaySourceWindowSchema>;
+
+type SearchEditPreviewFileEntry = SearchEditPreviewResponse["fileEntries"][number];
+
+export interface FileGatewayPreviewWindowResponse {
+  mode: "previewWindow" | "sourceWindow";
+  planHandle: string;
+  file: string;
+  indexedSource: true;
+  snippets?: SearchEditPreviewFileEntry["snippets"];
+  codeWindow: CodeNeedWindowResponse;
+}
+
 export type FileGatewayResponse =
   | FileReadResponse
   | FileWriteResponse
-  | SearchEditResponse;
+  | SearchEditResponse
+  | FileGatewayPreviewWindowResponse;
+
+function findPlanPreviewEntry(
+  plan: StoredPlan,
+  relPath: string,
+): SearchEditPreviewFileEntry | undefined {
+  const entries = (plan.summary as { fileEntries?: unknown }).fileEntries;
+  if (!Array.isArray(entries)) return undefined;
+  return entries.find(
+    (entry): entry is SearchEditPreviewFileEntry =>
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as { file?: unknown }).file === relPath,
+  );
+}
+
+function selectPlanWindowEdit(plan: StoredPlan, request: FileGatewayWindowRequest) {
+  const requestedPath = request.filePath ? normalizePath(request.filePath) : undefined;
+  const indexedEdits = plan.edits.filter((edit) => edit.indexedSource);
+  if (indexedEdits.length === 0) {
+    throw new ValidationError(
+      "Edit plan " + request.planHandle + " does not contain indexed source edits.",
+    );
+  }
+
+  if (!requestedPath && indexedEdits.length > 1) {
+    throw new ValidationError(
+      "filePath is required because the edit plan contains multiple indexed source files.",
+    );
+  }
+
+  const edit = requestedPath
+    ? indexedEdits.find((candidate) => normalizePath(candidate.relPath) === requestedPath)
+    : indexedEdits[0];
+  if (!edit) {
+    throw new ValidationError(
+      "Edit plan " + request.planHandle + " does not include indexed source file " + (requestedPath ?? "<unspecified>") + ".",
+    );
+  }
+  return edit;
+}
+
+async function resolvePlanWindowSymbolId(
+  request: FileGatewayWindowRequest,
+  relPath: string,
+): Promise<string> {
+  const conn = await getLadybugConn();
+  const { symbolId } = await resolveSymbolId(conn, request.repoId, request.symbolId);
+  const symbols = await ladybugDb.getSymbolsByIds(conn, [symbolId]);
+  const symbol = symbols.get(symbolId);
+  if (!symbol) {
+    throw new NotFoundError(
+      "Symbol not found: " + request.symbolId + ". Use sdl.symbol.search to find valid symbol IDs.",
+    );
+  }
+  if (symbol.repoId !== request.repoId) {
+    throw new ValidationError(
+      "Symbol " + request.symbolId + " belongs to repo \"" + symbol.repoId + "\", not \"" + request.repoId + "\".",
+    );
+  }
+
+  const files = await ladybugDb.getFilesByIds(conn, [symbol.fileId]);
+  const file = files.get(symbol.fileId);
+  if (!file) {
+    throw new NotFoundError(
+      "File record missing for symbol " + symbol.name + " (" + symbolId + "). Try re-indexing with sdl.index.refresh.",
+    );
+  }
+
+  const symbolRelPath = normalizePath(file.relPath);
+  const plannedRelPath = normalizePath(relPath);
+  if (symbolRelPath !== plannedRelPath) {
+    throw new ValidationError(
+      "Symbol " + request.symbolId + " belongs to " + symbolRelPath + ", not planned file " + plannedRelPath + ".",
+    );
+  }
+  return symbolId;
+}
+
+function buildPlanWindowSliceContext(
+  request: FileGatewayWindowRequest,
+  relPath: string,
+): NonNullable<FileGatewayWindowRequest["sliceContext"]> {
+  const editedFiles = Array.from(
+    new Set([
+      normalizePath(relPath),
+      ...(request.sliceContext?.editedFiles?.map((file) => normalizePath(file)) ?? []),
+    ]),
+  );
+  return request.sliceContext
+    ? { ...request.sliceContext, editedFiles }
+    : { taskText: request.reason, editedFiles };
+}
+
+async function handleFileGatewayPreviewWindow(
+  request: FileGatewayWindowRequest,
+  context?: ToolContext,
+): Promise<FileGatewayPreviewWindowResponse> {
+  const plan = getSearchEditPlanStore().get(request.planHandle);
+  if (!plan) {
+    throw new NotFoundError(
+      "Edit plan not found or expired: " + request.planHandle + ". Run searchEditPreview again.",
+    );
+  }
+  if (plan.repoId !== request.repoId) {
+    throw new ValidationError(
+      "Edit plan " + request.planHandle + " belongs to repo \"" + plan.repoId + "\", not \"" + request.repoId + "\".",
+    );
+  }
+
+  // The plan handle selects the file; source access still goes through code.needWindow policy.
+  const edit = selectPlanWindowEdit(plan, request);
+  const relPath = normalizePath(edit.relPath);
+  const symbolId = await resolvePlanWindowSymbolId(request, relPath);
+  const { op: _op, planHandle: _planHandle, filePath: _filePath, ...codeWindowRequest } = request;
+  const codeWindow = await handleCodeNeedWindow(
+    {
+      ...codeWindowRequest,
+      repoId: request.repoId,
+      symbolId,
+      sliceContext: buildPlanWindowSliceContext(request, relPath),
+    },
+    context,
+  );
+
+  if (
+    "approved" in codeWindow &&
+    codeWindow.approved &&
+    normalizePath(codeWindow.file) !== relPath
+  ) {
+    throw new ValidationError(
+      "Code-window policy returned " + codeWindow.file + ", not planned file " + relPath + ".",
+    );
+  }
+
+  return {
+    mode: request.op,
+    planHandle: request.planHandle,
+    file: relPath,
+    indexedSource: true,
+    snippets: findPlanPreviewEntry(plan, relPath)?.snippets,
+    codeWindow,
+  };
+}
 
 export async function handleFileGateway(
   args: unknown,
@@ -182,6 +380,10 @@ export async function handleFileGateway(
     case "searchEditApply": {
       const { op: _op, ...rest } = request;
       return handleSearchEdit({ mode: "apply", ...rest }, context);
+    }
+    case "previewWindow":
+    case "sourceWindow": {
+      return handleFileGatewayPreviewWindow(request, context);
     }
   }
 }

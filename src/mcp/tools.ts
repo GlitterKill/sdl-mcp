@@ -3174,7 +3174,14 @@ export interface SearchEditPreviewResponse {
     file: string;
     matchCount: number;
     editMode: FileWriteResponse["mode"];
-    snippets: { before: string; after: string };
+    snippets: {
+      before: string;
+      after: string;
+      beforeStartLine: number;
+      beforeEndLine: number;
+      afterStartLine: number;
+      afterEndLine: number;
+    };
     indexedSource: boolean;
   }>;
   requiresApply: boolean;
