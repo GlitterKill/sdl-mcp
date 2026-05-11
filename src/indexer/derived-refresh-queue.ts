@@ -13,6 +13,7 @@ import {
   recordDerivedStateError,
 } from "../db/ladybug-derived-state.js";
 import { withIndexingGate } from "../mcp/indexing-gate.js";
+import { runToolDispatch } from "../mcp/dispatch-limiter.js";
 import { logger } from "../util/logger.js";
 
 interface PendingEntry {
@@ -159,16 +160,18 @@ async function runOne(
 ): Promise<void> {
   try {
     await withIndexingGate(async () => {
-      if (signal.aborted) return;
-      // Acquire the per-repo write-heavy lock so concurrent SCIP
-      // auto-ingest (or another runOne started before we landed in the
-      // queue) does not race for the single LadybugDB write conn.
-      await withRepoWriteHeavyLock(repoId, async () => {
+      await runToolDispatch(async () => {
         if (signal.aborted) return;
-        await hooks.refresh({ repoId, versionId: targetVersionId, signal });
+        // The dispatch slot is intentional: while indexing narrows dispatch
+        // concurrency to one, the background refresh must occupy that one slot
+        // so foreground read tools cannot overlap its LadybugDB writes.
+        await withRepoWriteHeavyLock(repoId, async () => {
+          if (signal.aborted) return;
+          await hooks.refresh({ repoId, versionId: targetVersionId, signal });
+        });
+        if (signal.aborted) return;
+        await markDerivedStateComputed(repoId, targetVersionId);
       });
-      if (signal.aborted) return;
-      await markDerivedStateComputed(repoId, targetVersionId);
     });
   } catch (err) {
     if (signal.aborted) {

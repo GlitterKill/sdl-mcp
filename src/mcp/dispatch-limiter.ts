@@ -1,4 +1,7 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import { ConcurrencyLimiter } from "../util/concurrency.js";
+import { logger } from "../util/logger.js";
 import {
   INDEXING_DISPATCH_CAP,
   isIndexingActive,
@@ -6,6 +9,7 @@ import {
 } from "./indexing-gate.js";
 
 let limiter: ConcurrencyLimiter | null = null;
+const dispatchContext = new AsyncLocalStorage<boolean>();
 /**
  * Normal (non-indexing) max concurrency. Reapplied when indexing finishes.
  * Tracked separately so `setMaxConcurrency(INDEXING_DISPATCH_CAP)` during
@@ -44,6 +48,61 @@ export function getToolDispatchLimiter(): ConcurrencyLimiter {
     applyIndexingShape(isIndexingActive());
   }
   return limiter;
+}
+
+/**
+ * Run a tool-like workload through the shared dispatch limiter and mark the
+ * async context as owning a dispatch slot. Indexing uses this marker to avoid
+ * deadlocking when an index refresh is itself invoked as an MCP tool.
+ */
+export function runToolDispatch<T>(
+  fn: () => Promise<T>,
+  timeoutMs?: number,
+): Promise<T> {
+  return getToolDispatchLimiter().run(
+    () => dispatchContext.run(true, fn),
+    timeoutMs,
+  );
+}
+
+export function isInToolDispatch(): boolean {
+  return dispatchContext.getStore() === true;
+}
+
+export async function waitForToolDispatchIdle(params: {
+  activeAllowance: number;
+  timeoutMs: number;
+  pollMs?: number;
+  label: string;
+}): Promise<boolean> {
+  const pollMs = params.pollMs ?? 25;
+  const deadline = Date.now() + params.timeoutMs;
+  let announced = false;
+
+  while (true) {
+    const stats = getToolDispatchLimiter().getStats();
+    if (stats.active <= params.activeAllowance) {
+      return true;
+    }
+
+    if (Date.now() >= deadline) {
+      return false;
+    }
+
+    if (!announced) {
+      announced = true;
+      logger.debug("Waiting for tool dispatch idle", {
+        label: params.label,
+        active: stats.active,
+        queued: stats.queued,
+      });
+    }
+
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, pollMs);
+      timer.unref();
+    });
+  }
 }
 
 /**

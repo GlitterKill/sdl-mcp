@@ -1840,7 +1840,10 @@ export async function setupHttpTransport(
             pathname === "/message" ||
             pathname.startsWith("/api/"))
         ) {
-          if (authToken) {
+          if (authToken && !isAuthorized(req, authToken)) {
+            // This is an auth-abuse limiter, not a valid-client throughput
+            // limiter. Legitimate MCP traffic is governed by session and tool
+            // dispatch caps, while failed auth attempts share this bucket.
             const rateLimit = authRateLimiter.consume(getAuthRateLimitKey(req));
             if (!rateLimit.allowed) {
               res.writeHead(429, {
@@ -1850,8 +1853,6 @@ export async function setupHttpTransport(
               res.end(JSON.stringify({ code: "rate_limited" }));
               return;
             }
-          }
-          if (!isAuthorized(req, authToken)) {
             res.writeHead(401, { "Content-Type": "application/json" });
             res.end(
               JSON.stringify({

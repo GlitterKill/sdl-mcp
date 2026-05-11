@@ -6,7 +6,12 @@
  */
 
 import { MetricsCollector } from "../infra/metrics-collector.js";
-import { createStressClients, disconnectAll } from "../infra/client-factory.js";
+import {
+  createStressClient,
+  createStressClients,
+  disconnectAll,
+} from "../infra/client-factory.js";
+import { ensureStressFixtureReady } from "../infra/scenario-setup.js";
 import type {
   ScenarioContext,
   ScenarioResult,
@@ -118,6 +123,21 @@ export async function runConcurrentReaders(
   let peakMemory = 0;
   let anyFailed = false;
   const allResultStats: ToolResultStats[] = [];
+
+  log("Setup: Ensuring fixture repo is ready for concurrent readers");
+  const setupCollector = new MetricsCollector();
+  const setupClient = await createStressClient(
+    serverPort,
+    "readers-setup",
+    setupCollector,
+    config.verbose,
+    authToken,
+  );
+  try {
+    await ensureStressFixtureReady(setupClient, config.fixturePath, log);
+  } finally {
+    await disconnectAll([setupClient]);
+  }
 
   for (const clientCount of config.concurrencyLevels) {
     log(`--- Round: ${clientCount} concurrent readers ---`);

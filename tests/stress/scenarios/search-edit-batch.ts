@@ -393,7 +393,7 @@ export async function runSearchEditBatch(
 
   return {
     name: "search-edit-batch",
-    passed: !anyFailed,
+    passed: !anyFailed && allErrors.length === 0,
     clients: config.concurrencyLevels[config.concurrencyLevels.length - 1],
     durationMs: totalDuration,
     toolMetrics: allToolMetrics,

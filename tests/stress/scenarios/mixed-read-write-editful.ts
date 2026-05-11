@@ -278,7 +278,7 @@ export async function runMixedReadWriteEditful(
 
   return {
     name: "mixed-read-write-editful",
-    passed: !anyFailed,
+    passed: !anyFailed && allErrors.length === 0,
     clients: config.concurrencyLevels[config.concurrencyLevels.length - 1],
     durationMs: totalDuration,
     toolMetrics: allToolMetrics,

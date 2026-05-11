@@ -726,7 +726,7 @@ export const HttpAuthConfigSchema = z.object({
   enabled: z.boolean().default(false),
   /** Static bearer token. When null/omitted a random token is generated at startup. */
   token: z.string().min(1).nullish().default(null),
-  /** Per-client token bucket for protected HTTP routes before bearer-token compare. */
+  /** Per-client token bucket for failed HTTP auth attempts. */
   rateLimit: z
     .object({
       bucketSize: z.number().int().min(1).max(10_000).default(30),

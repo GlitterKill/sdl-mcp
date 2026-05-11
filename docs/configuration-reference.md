@@ -469,10 +469,11 @@ If you want both `sdl.context` and the regular gateway or flat tools in the same
 
 ## `httpAuth`
 
-| Field     | Type             | Default | Notes                                                                            |
-| --------- | ---------------- | ------- | -------------------------------------------------------------------------------- |
-| `enabled` | `boolean`        | `false` | Only affects HTTP transport                                                      |
-| `token`   | `string \| null` | `null`  | Random token is generated at startup when auth is enabled and `token` is omitted |
+| Field       | Type                                      | Default                           | Notes                                                                            |
+| ----------- | ----------------------------------------- | --------------------------------- | -------------------------------------------------------------------------------- |
+| `enabled`   | `boolean`                                 | `false`                           | Only affects HTTP transport                                                      |
+| `token`     | `string \| null`                          | `null`                            | Random token is generated at startup when auth is enabled and `token` is omitted |
+| `rateLimit` | `{ bucketSize: number, refillPerSec: number }` | `{ bucketSize: 30, refillPerSec: 0.5 }` | Per-client token bucket for failed HTTP auth attempts; valid bearer-token traffic is governed by session and dispatch concurrency limits |
 
 ## `memory`
 

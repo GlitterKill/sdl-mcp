@@ -90,13 +90,15 @@ describe("indexing gate reshapes dispatch limiter", () => {
     assert.strictEqual(isIndexingActive(), false);
   });
 
-  it("honors configured max smaller than INDEXING_DISPATCH_CAP", async () => {
+  it("uses the lower of configured max and INDEXING_DISPATCH_CAP", async () => {
     configureToolDispatchLimiter({ maxConcurrency: 2 });
     const limiter = getToolDispatchLimiter();
 
     await withIndexingGate(async () => {
-      // min(INDEXING_DISPATCH_CAP=4, 2) == 2 — no change.
-      assert.strictEqual(limiter.getMaxConcurrency(), 2);
+      assert.strictEqual(
+        limiter.getMaxConcurrency(),
+        Math.min(INDEXING_DISPATCH_CAP, 2),
+      );
     });
 
     assert.strictEqual(limiter.getMaxConcurrency(), 2);

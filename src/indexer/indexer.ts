@@ -55,6 +55,11 @@ import {
   importMemoryFilesFromDisk,
 } from "./indexer-memory.js";
 import { withIndexingGate } from "../mcp/indexing-gate.js";
+import {
+  isInToolDispatch,
+  runToolDispatch,
+  waitForToolDispatchIdle,
+} from "../mcp/dispatch-limiter.js";
 import { preIndexCheckpoint } from "../db/ladybug.js";
 import {
   runScipIngestInsideIndex,
@@ -182,6 +187,8 @@ export function derivePass1EngineTelemetry(acc: {
   };
 }
 
+const INDEX_DISPATCH_IDLE_TIMEOUT_MS = 30_000;
+
 export function resolvePostIndexSessionTimeoutMs(
   repoId: string,
   liveRepos: RepoConfig[],
@@ -235,7 +242,20 @@ export async function indexRepo(
     }
   }
 
-  const resultPromise = withIndexingGate(async () => {
+  const runIndex = async (): Promise<IndexResult> => {
+    const idle = await waitForToolDispatchIdle({
+      // MCP-triggered refreshes already occupy one dispatch slot. Watcher and
+      // CLI refreshes reserve a synthetic slot through runToolDispatch below.
+      activeAllowance: 1,
+      timeoutMs: INDEX_DISPATCH_IDLE_TIMEOUT_MS,
+      label: `index refresh for ${repoId}`,
+    });
+    if (!idle) {
+      throw new Error(
+        `Timed out waiting for active tool calls to drain before index refresh for ${repoId}`,
+      );
+    }
+
     // Flush WAL before large indexing runs open their own transactions.
     // Incremental refreshes are often tiny/no-op and can run frequently;
     // forcing CHECKPOINT on every incremental call can become a contention
@@ -244,7 +264,11 @@ export async function indexRepo(
       await preIndexCheckpoint();
     }
     return indexRepoImpl(repoId, mode, onProgress, signal, options);
-  });
+  };
+
+  const resultPromise = withIndexingGate(() =>
+    isInToolDispatch() ? runIndex() : runToolDispatch(runIndex),
+  );
   indexLocks.set(repoId, resultPromise);
   try {
     return await resultPromise;

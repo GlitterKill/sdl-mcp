@@ -12,8 +12,9 @@
  * crashed at the native layer (no JS exception, silent process exit).
  *
  * Mitigation: while an indexer is running, narrow the tool-dispatch limiter
- * to `INDEXING_DISPATCH_CAP` so indexing sees a quieter DB. Indexing speed is
- * unaffected — tool callers just queue behind indexing when both are hot.
+ * to `INDEXING_DISPATCH_CAP`. Index refresh then waits for the other active
+ * tool calls to drain before touching LadybugDB, so native read/write work
+ * cannot overlap on separate connections.
  *
  * The gate is a simple reference counter (nested indexRepo calls are fine).
  * A listener callback is notified whenever the count transitions 0↔n so the
@@ -21,7 +22,7 @@
  */
 
 /** Max tool-dispatch concurrency while indexing is active. */
-export const INDEXING_DISPATCH_CAP = 4;
+export const INDEXING_DISPATCH_CAP = 1;
 
 let activeIndexers = 0;
 let listener: ((indexing: boolean) => void) | null = null;

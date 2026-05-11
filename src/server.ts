@@ -8,7 +8,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { errorToMcpResponse } from "./mcp/errors.js";
-import { getToolDispatchLimiter } from "./mcp/dispatch-limiter.js";
+import { runToolDispatch } from "./mcp/dispatch-limiter.js";
 import { logToolCall } from "./mcp/telemetry.js";
 import {
   buildCompactJsonSchema,
@@ -238,7 +238,7 @@ export class MCPServer {
 
           try {
             // Pass the parsed (validated + coerced) data to the handler
-            const result = await getToolDispatchLimiter().run(() =>
+            const result = await runToolDispatch(() =>
               tool.handler(parseResult.data, toolContext),
             );
 

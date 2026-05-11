@@ -262,7 +262,7 @@ export async function runMixedReadWrite(
 
   return {
     name: "mixed-read-write",
-    passed: !anyFailed,
+    passed: !anyFailed && allErrors.length === 0,
     clients: config.concurrencyLevels[config.concurrencyLevels.length - 1],
     durationMs: totalDuration,
     toolMetrics: allToolMetrics,

@@ -35,6 +35,7 @@ import {
 import { resetJoinHintCache } from "./ladybug-edges.js";
 import {
   configureWriteConnAcquirer,
+  getActivePostIndexSession,
   getCurrentSession,
 } from "./write-session.js";
 
@@ -696,8 +697,11 @@ export async function withWriteConn<T>(
   // out, but parallel session subphases can still overlap, so serialize
   // these write bodies with a separate mutex. Do not use the low-level
   // query mutex here; write bodies call exec/query internally.
+  // Fire-and-forget work spawned inside a session can inherit AsyncLocalStorage
+  // after the session ends. Only reuse the session conn while that exact
+  // session is still process-active; stale context must use the global limiter.
   const session = getCurrentSession();
-  if (session) {
+  if (session && getActivePostIndexSession() === session) {
     return getSessionWriteBodyLimiter(session.conn).run(() => fn(session.conn));
   }
   if (!writeLimiter || !writeConn) {

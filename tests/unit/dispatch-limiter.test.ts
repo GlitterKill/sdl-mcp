@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   configureToolDispatchLimiter,
   getToolDispatchLimiter,
+  isInToolDispatch,
   resetToolDispatchLimiter,
+  runToolDispatch,
+  waitForToolDispatchIdle,
 } from "../../dist/mcp/dispatch-limiter.js";
 
 function delay(ms: number): Promise<void> {
@@ -134,5 +137,60 @@ describe("tool dispatch limiter", () => {
     const stats = fresh.getStats();
     assert.strictEqual(stats.active, 0);
     assert.strictEqual(stats.queued, 0);
+  });
+
+  it("marks async context while a tool dispatch slot is active", async () => {
+    assert.strictEqual(isInToolDispatch(), false);
+
+    await runToolDispatch(async () => {
+      assert.strictEqual(isInToolDispatch(), true);
+      await Promise.resolve();
+      assert.strictEqual(isInToolDispatch(), true);
+    });
+
+    assert.strictEqual(isInToolDispatch(), false);
+  });
+
+  it("waits until active dispatch work drains to the allowance", async () => {
+    configureToolDispatchLimiter({
+      maxConcurrency: 2,
+      queueTimeoutMs: 1_000,
+    });
+    const limiter = getToolDispatchLimiter();
+
+    let releaseFirst: (() => void) | undefined;
+    let releaseSecond: (() => void) | undefined;
+    const firstBarrier = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const secondBarrier = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+
+    const first = runToolDispatch(async () => firstBarrier);
+    const second = runToolDispatch(async () => secondBarrier);
+    await delay(20);
+    assert.strictEqual(limiter.getStats().active, 2);
+
+    let idle = false;
+    const wait = waitForToolDispatchIdle({
+      activeAllowance: 1,
+      timeoutMs: 1_000,
+      pollMs: 5,
+      label: "test",
+    }).then((result) => {
+      idle = result;
+    });
+
+    await delay(20);
+    assert.strictEqual(idle, false);
+
+    releaseFirst?.();
+    await wait;
+    assert.strictEqual(idle, true);
+    assert.strictEqual(limiter.getStats().active, 1);
+
+    releaseSecond?.();
+    await Promise.all([first, second]);
   });
 });

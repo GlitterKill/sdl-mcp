@@ -1358,7 +1358,7 @@
         },
         "rateLimit": {
           "type": "object",
-          "description": "Per-client token bucket for protected HTTP routes before bearer-token comparison",
+          "description": "Per-client token bucket for failed HTTP auth attempts",
           "properties": {
             "bucketSize": {
               "type": "integer",
