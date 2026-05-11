@@ -1992,7 +1992,7 @@ export async function setupHttpTransport(
       clearInterval(authRateLimitCleanup);
       // Clean up all active sessions via idempotent cleanup
       for (const sid of [...transports.keys()]) {
-        cleanupSession(sid);
+        cleanupSession(sid, { closeTransport: true });
       }
       // Wait briefly for async stop() calls to settle
       await new Promise((r) => setTimeout(r, 50));

@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- HTTP serve shutdown now closes active Streamable HTTP session transports before final LadybugDB/log cleanup, preventing long-lived stream sessions from keeping Ctrl+C shutdown stuck.
 - LSP semantic enrichment now launches Windows `.cmd`/`.bat` server shims through `cmd.exe` so installer-managed language servers can run from their recorded command paths without Node shell-argument deprecation warnings.
 - Resolved CI security audit failures by refreshing the transitive `fast-uri`
   lockfile entry to the patched 3.1.2 release.

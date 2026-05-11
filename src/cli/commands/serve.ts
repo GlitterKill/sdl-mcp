@@ -330,36 +330,46 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   if (stdioServer) {
     shutdownMgr.addCleanup("server", () => stdioServer.stop());
   }
-  // Persist token usage BEFORE closing the DB — MCPServer.stop() runs during
-  // httpServer cleanup (registered later, executes later), so the DB would
-  // already be closed by that point.  Doing it here guarantees availability.
-  shutdownMgr.addCleanup("persistUsage", async () => {
-    try {
-      if (tokenAccumulator.hasUsage) {
-        await persistUsageSnapshot(tokenAccumulator.getSnapshot());
-      }
-    } catch (err) {
-      // Non-critical — don't block shutdown
-      console.error(
-        "[sdl-mcp] Failed to persist usage snapshot: " +
-          (err instanceof Error ? err.message : String(err)),
-      );
-    }
-  });
-  shutdownMgr.addCleanup("db", () => closeLadybugDb());
-  shutdownMgr.addCleanup("logger", () => shutdownLogger());
-  shutdownMgr.addCleanup("watchers", async () => {
-    for (const watcher of watchers) {
+  // Final cleanups must run after transport-specific server cleanup.
+  let finalCleanupsRegistered = false;
+  const registerFinalCleanups = (): void => {
+    if (finalCleanupsRegistered) return;
+    finalCleanupsRegistered = true;
+
+    // Persist token usage while the DB is still open, but after transport
+    // cleanup has stopped accepting new HTTP work.
+    shutdownMgr.addCleanup("persistUsage", async () => {
       try {
-        await watcher.close();
-      } catch (error) {
-        // Don't let a single watcher failure abort cleanup of others
+        if (tokenAccumulator.hasUsage) {
+          await persistUsageSnapshot(tokenAccumulator.getSnapshot());
+        }
+      } catch (err) {
+        // Non-critical — don't block shutdown
         console.error(
-          `[sdl-mcp] Watcher close error during shutdown: ${error}`,
+          "[sdl-mcp] Failed to persist usage snapshot: " +
+            (err instanceof Error ? err.message : String(err)),
         );
       }
-    }
-  });
+    });
+    shutdownMgr.addCleanup("db", () => closeLadybugDb());
+    shutdownMgr.addCleanup("logger", () => shutdownLogger());
+    shutdownMgr.addCleanup("watchers", async () => {
+      for (const watcher of watchers) {
+        try {
+          await watcher.close();
+        } catch (error) {
+          // Don't let a single watcher failure abort cleanup of others
+          console.error(
+            `[sdl-mcp] Watcher close error during shutdown: ${error}`,
+          );
+        }
+      }
+    });
+  };
+
+  if (options.transport === "stdio") {
+    registerFinalCleanups();
+  }
 
   // Register all shutdown triggers.
   shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP
@@ -421,6 +431,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
 
       // Register HTTP server with shutdown manager for graceful close
       shutdownMgr.addCleanup("httpServer", () => httpHandle.close());
+      registerFinalCleanups();
 
       // Block until the server closes
       await httpHandle.serverClosed;
