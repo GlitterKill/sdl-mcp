@@ -53,7 +53,6 @@ describe("semantic enrichment bridge core", () => {
       [{ languageId: "typescript", extensions: [".ts"], treeSitter: true }],
       {
         scip: { typescript: { available: true, providerId: "scip" } },
-        lsif: { typescript: { available: true, providerId: "lsif" } },
         lsp: { typescript: { available: true, providerId: "tsserver" } },
       },
     );
@@ -61,8 +60,39 @@ describe("semantic enrichment bridge core", () => {
     assert.equal(selection.selected?.providerType, "scip");
     assert.deepEqual(
       selection.skipped.map((skip) => skip.providerType).sort(),
-      ["lsif", "lsp"],
+      ["lsp"],
     );
+  });
+
+  it("selects LSP when SCIP is unavailable", () => {
+    const [selection] = selectSemanticSources(
+      SemanticEnrichmentConfigSchema.parse({ languages: ["typescript"] }),
+      [{ languageId: "typescript", extensions: [".ts"], treeSitter: true }],
+      {
+        lsp: {
+          typescript: {
+            available: true,
+            providerId: "tsserver",
+            canAffectPass2: false,
+          },
+        },
+      },
+    );
+
+    assert.equal(selection.selected?.providerType, "lsp");
+    assert.equal(selection.selected?.canAffectPass2, false);
+  });
+
+  it("ignores stale LSIF provider config during parsing", () => {
+    const config = SemanticEnrichmentConfigSchema.parse({
+      providers: {
+        lsif: { enabled: true, indexes: [{ path: "stale.lsif" }] },
+        lsp: { enabled: true, servers: {} },
+      },
+    });
+
+    assert.equal(Object.hasOwn(config.providers, "lsif"), false);
+    assert.equal(config.providers.lsp?.enabled, true);
   });
 
   it("keeps semantic cache keys stable across object key order", () => {
@@ -87,16 +117,16 @@ describe("semantic enrichment bridge core", () => {
       edgeType: "call",
       confidence: 0.9,
       resolution: "exact",
-      resolverId: "lsif:fixture",
-      resolutionPhase: "lsif",
+      resolverId: "lsp:fixture",
+      resolutionPhase: "semantic-enrichment:lsp",
       capability: "definition",
       provenance: {
-        providerType: "lsif",
+        providerType: "lsp",
         providerId: "fixture",
         capability: "definition",
         confidence: 0.9,
         runId: "run",
-        resolutionPhase: "lsif",
+        resolutionPhase: "semantic-enrichment:lsp",
       },
     };
 
@@ -160,7 +190,6 @@ describe("semantic enrichment bridge core", () => {
         computeSemanticPrecisionScore({ ...base, providerType: "lsp" }),
     );
   });
-});
 
   it("records cached SCIP ingests as skipped cache-hit runs", () => {
     const run = scipResultToProviderRun({
@@ -192,3 +221,4 @@ describe("semantic enrichment bridge core", () => {
     assert.equal(run.selected, true);
     assert.equal(run.precisionScore, 0);
   });
+});

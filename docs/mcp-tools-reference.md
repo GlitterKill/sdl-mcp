@@ -88,7 +88,7 @@ Register a new repository for indexing.
 | `repoId`       | `string`   | Yes      | Unique identifier for the repository                   |
 | `rootPath`     | `string`   | Yes      | Absolute path to repository root                       |
 | `ignore`       | `string[]` | No       | Glob patterns for files/dirs to ignore                 |
-| `languages`    | `string[]` | No       | Language filter (e.g., `["typescript", "javascript"]`) |
+| `languages`    | `string[]` | No       | Language extension filter (e.g., `["ts", "py"]`)      |
 | `maxFileBytes` | `integer`  | No       | Max file size to index (min: 1)                        |
 
 **Response:** `{ ok: boolean, repoId: string }`
@@ -100,7 +100,7 @@ Register a new repository for indexing.
   "repoId": "my-repo",
   "rootPath": "/workspace/my-repo",
   "ignore": ["node_modules", "dist"],
-  "languages": ["typescript", "javascript"]
+  "languages": ["ts", "py"]
 }
 ```
 
@@ -181,13 +181,13 @@ Ingest a pre-built SCIP protobuf index (`.scip`) to overlay compiler-grade cross
 | `indexPath` | `string`  | Yes      | Absolute or repo-relative `.scip` file path     |
 | `dryRun`    | `boolean` | No       | Parse and count without writing to the graph DB |
 
-LSIF is handled by `sdl.semantic.enrichment.refresh`, not by this compatibility SCIP action.
+LSP enrichment is handled by `sdl.semantic.enrichment.refresh`, not by this compatibility SCIP action.
 
 ---
 
 ### `sdl.semantic.enrichment.refresh`
 
-Run provider-backed semantic enrichment using one source per language with fixed priority: SCIP, then LSIF, then LSP.
+Run provider-backed semantic enrichment using one source per language with fixed priority: SCIP, then LSP.
 
 **Parameters:**
 

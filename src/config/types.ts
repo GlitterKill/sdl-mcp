@@ -840,11 +840,6 @@ export const SemanticEnrichmentScipProviderConfigSchema =
     indexes: z.array(ScipIndexEntrySchema).default([]),
   });
 
-export const SemanticEnrichmentLsifProviderConfigSchema =
-  SemanticEnrichmentProviderBaseConfigSchema.extend({
-    indexes: z.array(ScipIndexEntrySchema).default([]),
-    confidence: z.number().min(0.5).max(1.0).default(0.9),
-  });
 
 export const SemanticEnrichmentLspServerConfigSchema = z.object({
   enabled: z.boolean().default(true),
@@ -866,7 +861,6 @@ export const SemanticEnrichmentLspProviderConfigSchema =
 
 export const SemanticEnrichmentProvidersConfigSchema = z.object({
   scip: SemanticEnrichmentScipProviderConfigSchema.optional(),
-  lsif: SemanticEnrichmentLsifProviderConfigSchema.optional(),
   lsp: SemanticEnrichmentLspProviderConfigSchema.optional(),
 });
 
@@ -880,7 +874,7 @@ export const SemanticEnrichmentConfigSchema = z.object({
   autoRunOnIndexRefresh: z.boolean().default(false),
   installPolicy: z.enum(["never", "verified"]).default("never"),
   // Reserved for durable provider caches; V2 currently keeps provider output
-  // in the graph and does not persist LSIF/LSP response caches here.
+  // in the graph and does not persist LSP response caches here.
   cacheDir: z.string().nullish(),
   // Reserved for future cross-provider scheduling. V2 runs the selected
   // providers serially, with provider-specific internal limits where needed.
@@ -900,9 +894,6 @@ export type SemanticEnrichmentProviderBaseConfig = z.infer<
 >;
 export type SemanticEnrichmentScipProviderConfig = z.infer<
   typeof SemanticEnrichmentScipProviderConfigSchema
->;
-export type SemanticEnrichmentLsifProviderConfig = z.infer<
-  typeof SemanticEnrichmentLsifProviderConfigSchema
 >;
 export type SemanticEnrichmentLspServerConfig = z.infer<
   typeof SemanticEnrichmentLspServerConfigSchema

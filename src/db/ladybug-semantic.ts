@@ -1,5 +1,6 @@
 import type { Connection } from "kuzu";
 import type {
+  PersistedSemanticProviderRun,
   SemanticDiagnostic,
   SemanticPrecisionMetric,
   SemanticProviderRun,
@@ -24,7 +25,7 @@ export interface SemanticEdgeWriteRow {
   provenance: string;
 }
 
-export interface SemanticProviderRunRecord extends SemanticProviderRun {
+interface SemanticProviderRunStorageFields {
   cacheKey?: string;
   configHash?: string;
   ledgerVersion?: string;
@@ -33,6 +34,14 @@ export interface SemanticProviderRunRecord extends SemanticProviderRun {
   selected?: boolean;
   metadataJson?: string;
 }
+
+export interface SemanticProviderRunRecord
+  extends SemanticProviderRun,
+    SemanticProviderRunStorageFields {}
+
+export interface PersistedSemanticProviderRunRecord
+  extends PersistedSemanticProviderRun,
+    SemanticProviderRunStorageFields {}
 
 export interface SemanticPrecisionMetricRecord extends SemanticPrecisionMetric {
   metadataJson?: string;
@@ -165,7 +174,7 @@ export async function mergeSemanticProviderRun(
 export async function getLatestSemanticProviderRuns(
   conn: Connection,
   repoId: string,
-): Promise<SemanticProviderRunRecord[]> {
+): Promise<PersistedSemanticProviderRunRecord[]> {
   const rows = await queryAll<{
     runId: string;
     repoId: string;
@@ -178,7 +187,7 @@ export async function getLatestSemanticProviderRuns(
     cacheKey: string | null;
     configHash: string | null;
     ledgerVersion: string | null;
-    status: SemanticProviderRun["status"];
+    status: PersistedSemanticProviderRun["status"];
     startedAt: string;
     finishedAt: string | null;
     documentsProcessed: unknown;
@@ -231,7 +240,7 @@ export async function getLatestSemanticProviderRuns(
   return rows.map((row) => ({
     runId: row.runId,
     repoId: row.repoId,
-    providerType: row.providerType as SemanticProviderRun["providerType"],
+    providerType: row.providerType as PersistedSemanticProviderRun["providerType"],
     providerId: row.providerId,
     providerVersion: row.providerVersion ?? undefined,
     languages: parseLanguages(row.languagesJson),

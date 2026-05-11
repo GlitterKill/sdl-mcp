@@ -364,7 +364,7 @@ export function buildFlatToolDescriptors(
     {
       name: "sdl.semantic.enrichment.refresh",
       description:
-        "Run provider-backed semantic enrichment for a repository using SCIP, LSIF, or LSP source selection.",
+        "Run provider-backed semantic enrichment for a repository using SCIP or LSP source selection.",
       schema: SemanticEnrichmentRefreshRequestSchema,
       handler: handleSemanticEnrichmentRefresh,
     },

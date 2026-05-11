@@ -169,6 +169,75 @@ describe("LadybugDB semantic enrichment queries", () => {
   );
 
   it(
+    "reads historical LSIF provider runs without filtering them out",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.exec(
+        conn,
+        `MERGE (r:SemanticProviderRun {runId: $runId})
+         SET r.repoId = $repoId,
+             r.providerType = $providerType,
+             r.providerId = $providerId,
+             r.providerVersion = $providerVersion,
+             r.languagesJson = $languagesJson,
+             r.sourceIndexPath = $sourceIndexPath,
+             r.sourceHash = $sourceHash,
+             r.status = $status,
+             r.startedAt = $startedAt,
+             r.finishedAt = $finishedAt,
+             r.documentsProcessed = $documentsProcessed,
+             r.symbolsMatched = $symbolsMatched,
+             r.edgesCreated = $edgesCreated,
+             r.edgesUpgraded = $edgesUpgraded,
+             r.edgesReplaced = $edgesReplaced,
+             r.edgesSkipped = $edgesSkipped,
+             r.diagnosticsCount = $diagnosticsCount,
+             r.precisionScore = $precisionScore,
+             r.cacheHit = $cacheHit,
+             r.canAffectPass2 = $canAffectPass2,
+             r.selected = $selected,
+             r.metadataJson = $metadataJson`,
+        {
+          runId: "run-historical-lsif",
+          repoId: "repo-1",
+          providerType: "lsif",
+          providerId: "legacy-lsif",
+          providerVersion: "0.0.1",
+          languagesJson: JSON.stringify(["typescript"]),
+          sourceIndexPath: "index.lsif",
+          sourceHash: "hash-lsif",
+          status: "completed",
+          startedAt: "2026-05-07T00:00:00.000Z",
+          finishedAt: "2026-05-07T00:00:01.000Z",
+          documentsProcessed: 2,
+          symbolsMatched: 3,
+          edgesCreated: 4,
+          edgesUpgraded: 5,
+          edgesReplaced: 6,
+          edgesSkipped: 7,
+          diagnosticsCount: 8,
+          precisionScore: 0.75,
+          cacheHit: true,
+          canAffectPass2: false,
+          selected: false,
+          metadataJson: "{\"legacy\":true}",
+        },
+      );
+
+      const [run] = await queries.getLatestSemanticProviderRuns(conn, "repo-1");
+
+      assert.strictEqual(run.providerType, "lsif");
+      assert.strictEqual(run.providerId, "legacy-lsif");
+      assert.deepStrictEqual(run.languages, ["typescript"]);
+      assert.strictEqual(run.documentsProcessed, 2);
+      assert.strictEqual(run.edgesReplaced, 6);
+      assert.strictEqual(run.cacheHit, true);
+      assert.strictEqual(run.canAffectPass2, false);
+      assert.strictEqual(run.selected, false);
+      assert.strictEqual(run.metadataJson, "{\"legacy\":true}");
+    },
+  );
+  it(
     "writes semantic DEPENDS_ON provenance without returning unrelated edges",
     { skip: !ladybugAvailable },
     async () => {
@@ -413,8 +482,8 @@ describe("LadybugDB semantic enrichment queries", () => {
 
       const result = await writer.writeSemanticIndex(conn, {
         repoId: "repo-1",
-        runId: "run-lsif",
-        providerType: "lsif",
+        runId: "run-lsp",
+        providerType: "lsp",
         providerId: "fixture",
         generatedAt: "2026-05-07T00:00:00.000Z",
         documents: [
@@ -433,16 +502,16 @@ describe("LadybugDB semantic enrichment queries", () => {
             edgeType: "call",
             confidence: 0.95,
             resolution: "exact",
-            resolverId: "lsif:fixture",
-            resolutionPhase: "semantic-enrichment:lsif",
+            resolverId: "lsp:fixture",
+            resolutionPhase: "semantic-enrichment:lsp",
             capability: "definition",
             provenance: {
-              providerType: "lsif",
+              providerType: "lsp",
               providerId: "fixture",
               capability: "definition",
               confidence: 0.95,
-              runId: "run-lsif",
-              resolutionPhase: "semantic-enrichment:lsif",
+              runId: "run-lsp",
+              resolutionPhase: "semantic-enrichment:lsp",
             },
           },
         ],
@@ -505,10 +574,9 @@ describe("LadybugDB semantic enrichment queries", () => {
 
       const result = await writer.writeSemanticIndex(conn, {
         repoId: "repo-1",
-        runId: "run-lsif",
-        providerType: "lsif",
-        providerId: "lsif",
-        sourceIndexPath: "index.lsif",
+        runId: "run-lsp",
+        providerType: "lsp",
+        providerId: "lsp",
         generatedAt: "2026-05-07T00:00:00.000Z",
         documents: [
           {
@@ -520,14 +588,14 @@ describe("LadybugDB semantic enrichment queries", () => {
         ],
         symbols: [
           {
-            providerSymbolId: "lsif:source",
+            providerSymbolId: "lsp:source",
             name: "caller",
             languageId: "typescript",
             sourcePath: "src/example.ts",
             range: { startLine: 1, startCol: 2, endLine: 1, endCol: 8 },
           },
           {
-            providerSymbolId: "lsif:target",
+            providerSymbolId: "lsp:target",
             name: "callee",
             languageId: "typescript",
             sourcePath: "src/example.ts",
@@ -536,21 +604,21 @@ describe("LadybugDB semantic enrichment queries", () => {
         ],
         edges: [
           {
-            sourceProviderSymbolId: "lsif:source",
-            targetProviderSymbolId: "lsif:target",
+            sourceProviderSymbolId: "lsp:source",
+            targetProviderSymbolId: "lsp:target",
             edgeType: "call",
             confidence: 0.9,
             resolution: "exact",
-            resolverId: "lsif:fixture",
-            resolutionPhase: "lsif",
+            resolverId: "lsp:fixture",
+            resolutionPhase: "semantic-enrichment:lsp",
             capability: "definition",
             provenance: {
-              providerType: "lsif",
+              providerType: "lsp",
               providerId: "fixture",
               capability: "definition",
               confidence: 0.9,
-              runId: "run-lsif",
-              resolutionPhase: "lsif",
+              runId: "run-lsp",
+              resolutionPhase: "semantic-enrichment:lsp",
             },
           },
         ],

@@ -256,13 +256,13 @@ Ingests a pre-built SCIP protobuf index (`.scip`) and overlays compiler-grade cr
 | `indexPath` | string  | Yes      | Absolute or repo-relative `.scip` file path |
 | `dryRun`    | boolean | No       | Parse/count without writing to the graph DB |
 
-This compatibility action remains SCIP-only. LSIF and LSP run through the semantic enrichment bridge.
+This compatibility action remains SCIP-only. LSP runs through the semantic enrichment bridge.
 
 ---
 
 ### sdl.semantic.enrichment.refresh
 
-Runs provider-backed graph precision enrichment. Selection is one source per language in priority order: SCIP, LSIF, then LSP. SCIP keeps its optimized pass-1-drain -> SCIP-ingest -> pass-2 placement when indexing is configured; LSIF and LSP run as post-index enrichment.
+Runs provider-backed graph precision enrichment. Selection is one source per language in priority order: SCIP, then LSP. SCIP keeps its optimized pass-1-drain -> SCIP-ingest -> pass-2 placement when indexing is configured; LSP runs as post-index enrichment.
 
 **Parameters:**
 

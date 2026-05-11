@@ -80,6 +80,48 @@ export interface LspTextDocument {
   text: string;
 }
 
+export interface LspSpawnCommand {
+  command: string;
+  args: string[];
+  shell: boolean;
+}
+
+export function resolveLspSpawnCommand(options: {
+  command: string;
+  args?: string[];
+  platform?: NodeJS.Platform;
+  comspec?: string;
+}): LspSpawnCommand {
+  const platform = options.platform ?? process.platform;
+  const args = options.args ?? [];
+  const shimCommand = unwrapWindowsCommandShim(options.command);
+  if (platform === "win32" && hasWindowsCommandShimExtension(shimCommand)) {
+    return {
+      command: options.comspec ?? process.env.ComSpec ?? "cmd.exe",
+      // Windows command shims are batch scripts; direct spawn() fails with EINVAL.
+      args: ["/d", "/s", "/c", shimCommand, ...args],
+      shell: false,
+    };
+  }
+
+  return {
+    command: options.command,
+    args,
+    shell: false,
+  };
+}
+
+function unwrapWindowsCommandShim(command: string): string {
+  const trimmed = command.trim();
+  return trimmed.startsWith('"') && trimmed.endsWith('"')
+    ? trimmed.slice(1, -1)
+    : trimmed;
+}
+
+function hasWindowsCommandShimExtension(command: string): boolean {
+  return /\.(?:cmd|bat)$/iu.test(command);
+}
+
 export class SemanticLspClient {
   private readonly options: LspClientOptions;
   private process: ChildProcessWithoutNullStreams | null = null;
@@ -95,10 +137,15 @@ export class SemanticLspClient {
       throw new Error(`LSP client ${this.options.serverId} is already running`);
     }
 
-    const child = spawn(this.options.command, this.options.args ?? [], {
+    const spawnCommand = resolveLspSpawnCommand({
+      command: this.options.command,
+      args: this.options.args,
+    });
+    const child = spawn(spawnCommand.command, spawnCommand.args, {
       cwd: this.options.workspaceRoot,
       stdio: "pipe",
       windowsHide: true,
+      shell: spawnCommand.shell,
     });
     const connection = createMessageConnection(
       new StreamMessageReader(child.stdout),
