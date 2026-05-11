@@ -965,6 +965,22 @@
                         "items": { "type": "string" },
                         "default": []
                       },
+                      "documentLanguageIds": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": []
+                      },
+                      "filePatterns": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": []
+                      },
+                      "capabilities": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": []
+                      },
+                      "readiness": { "type": "string" },
                       "initializationOptions": { "type": "object" }
                     }
                   },

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
@@ -72,6 +72,10 @@ function makePlan(repoRoot: string): LspCandidatePlan {
 function makeClient(params: {
   definitions?: unknown[];
   definitionProvider?: boolean;
+  documentSymbolProvider?: boolean;
+  documentSymbols?: unknown[];
+  diagnosticProvider?: boolean;
+  diagnostics?: unknown[];
   startError?: Error;
 }): SemanticLspClientLike {
   const definitions = params.definitions ?? [];
@@ -80,9 +84,15 @@ function makeClient(params: {
     async start() {
       if (params.startError) throw params.startError;
       return {
-        capabilities: params.definitionProvider === false
-          ? {}
-          : { definitionProvider: true },
+        capabilities: {
+          ...(params.definitionProvider === false
+            ? {}
+            : { definitionProvider: true }),
+          ...(params.documentSymbolProvider
+            ? { documentSymbolProvider: true }
+            : {}),
+          ...(params.diagnosticProvider ? { diagnosticProvider: {} } : {}),
+        },
         serverInfo: { name: "mock-lsp", version: "1.2.3" },
       };
     },
@@ -91,6 +101,12 @@ function makeClient(params: {
     },
     async definition() {
       return definitions[requestIndex++] as never;
+    },
+    async documentSymbols() {
+      return (params.documentSymbols ?? []) as never;
+    },
+    diagnostics() {
+      return (params.diagnostics ?? []) as never;
     },
     async dispose() {
       return undefined;
@@ -114,6 +130,9 @@ describe("LSP call-definition runner", () => {
           command: "mock",
           args: [],
           languages: ["typescript"],
+          documentLanguageIds: ["typescript"],
+          filePatterns: ["**/*.ts"],
+          capabilities: [],
         },
         confidence: 0.8,
         timeoutMs: 1000,
@@ -164,7 +183,7 @@ describe("LSP call-definition runner", () => {
     }
   });
 
-  it("returns a completed empty index when the server has no definition capability", async () => {
+  it("records a skipped run when the server has no useful capability", async () => {
     const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-runner-no-def-"));
     try {
       const result = await runLspCallDefinitionEnrichment({
@@ -178,6 +197,9 @@ describe("LSP call-definition runner", () => {
           command: "mock",
           args: [],
           languages: ["typescript"],
+          documentLanguageIds: ["typescript"],
+          filePatterns: ["**/*.ts"],
+          capabilities: [],
         },
         confidence: 0.8,
         timeoutMs: 1000,
@@ -188,10 +210,137 @@ describe("LSP call-definition runner", () => {
       });
 
       assert.equal(result.failedRun, undefined);
-      assert.equal(result.index?.edges.length, 0);
+      assert.equal(result.index, undefined);
+      assert.equal(result.skippedRun?.status, "skipped");
       assert.ok(
         result.skipped.every((skip) => skip.reason === "definition-unavailable"),
       );
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("ingests document symbols for a non-TypeScript LSP server", async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-runner-doc-symbol-"));
+    try {
+      mkdirSync(join(repoRoot, "src"), { recursive: true });
+      writeFileSync(
+        join(repoRoot, "src", "main.py"),
+        "def greet():\n    return 'hello'\n",
+        "utf8",
+      );
+      const result = await runLspCallDefinitionEnrichment({
+        conn: {} as never,
+        repoId: "repo",
+        repoRoot,
+        languageId: "python",
+        server: {
+          enabled: true,
+          serverId: "mock-python",
+          command: "mock",
+          args: [],
+          languages: ["python"],
+          documentLanguageIds: ["python"],
+          filePatterns: ["**/*.py"],
+          capabilities: ["documentSymbol"],
+        },
+        confidence: 0.8,
+        timeoutMs: 1000,
+        candidateLimit: 10,
+        runId: "run-doc-symbol",
+        candidatePlanner: async () => ({
+          repoId: "repo",
+          languageId: "python",
+          documents: [],
+          candidates: [],
+          skipped: [],
+        }),
+        clientFactory: () =>
+          makeClient({
+            definitionProvider: false,
+            documentSymbolProvider: true,
+            documentSymbols: [
+              {
+                name: "greet",
+                kind: 12,
+                range: {
+                  start: { line: 0, character: 0 },
+                  end: { line: 1, character: 18 },
+                },
+                selectionRange: {
+                  start: { line: 0, character: 4 },
+                  end: { line: 0, character: 9 },
+                },
+              },
+            ],
+          }),
+      });
+
+      assert.equal(result.failedRun, undefined);
+      assert.equal(result.skippedRun, undefined);
+      assert.equal(result.index?.documents.length, 1);
+      assert.equal(result.index?.symbols.length, 1);
+      assert.equal(result.index?.symbols[0].name, "greet");
+      assert.equal(result.index?.symbols[0].languageId, "python");
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("ingests diagnostics when that is the only useful LSP capability", async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-runner-diagnostic-"));
+    try {
+      mkdirSync(join(repoRoot, "src"), { recursive: true });
+      writeFileSync(join(repoRoot, "src", "main.py"), "x = unknown\n", "utf8");
+      const result = await runLspCallDefinitionEnrichment({
+        conn: {} as never,
+        repoId: "repo",
+        repoRoot,
+        languageId: "python",
+        server: {
+          enabled: true,
+          serverId: "mock-python",
+          command: "mock",
+          args: [],
+          languages: ["python"],
+          documentLanguageIds: ["python"],
+          filePatterns: ["**/*.py"],
+          capabilities: ["diagnostics"],
+        },
+        confidence: 0.8,
+        timeoutMs: 1000,
+        candidateLimit: 10,
+        runId: "run-diagnostic",
+        candidatePlanner: async () => ({
+          repoId: "repo",
+          languageId: "python",
+          documents: [],
+          candidates: [],
+          skipped: [],
+        }),
+        clientFactory: () =>
+          makeClient({
+            definitionProvider: false,
+            diagnosticProvider: true,
+            diagnostics: [
+              {
+                range: {
+                  start: { line: 0, character: 4 },
+                  end: { line: 0, character: 11 },
+                },
+                severity: 1,
+                message: "Unknown name",
+                code: "E001",
+              },
+            ],
+          }),
+      });
+
+      assert.equal(result.failedRun, undefined);
+      assert.equal(result.skippedRun, undefined);
+      assert.equal(result.index?.diagnostics.length, 1);
+      assert.equal(result.index?.diagnostics[0].severity, "error");
+      assert.equal(result.index?.diagnostics[0].message, "Unknown name");
     } finally {
       rmSync(repoRoot, { recursive: true, force: true });
     }
@@ -211,6 +360,9 @@ describe("LSP call-definition runner", () => {
           command: "mock",
           args: [],
           languages: ["typescript"],
+          documentLanguageIds: ["typescript"],
+          filePatterns: ["**/*.ts"],
+          capabilities: [],
         },
         confidence: 0.8,
         timeoutMs: 1000,

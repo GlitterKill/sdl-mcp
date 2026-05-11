@@ -124,21 +124,6 @@ export async function planLspCallDefinitionCandidatesFromRows(
   options: PlanLspCallDefinitionCandidatesFromRowsOptions,
 ): Promise<LspCandidatePlan> {
   const skipped: LspCandidateSkip[] = [];
-  if (options.languageId !== "typescript") {
-    return {
-      repoId: options.repoId,
-      languageId: options.languageId,
-      documents: [],
-      candidates: [],
-      skipped: [
-        {
-          reason: "unsupported-language",
-          languageId: options.languageId,
-        },
-      ],
-    };
-  }
-
   const readFileText = options.readFileText ?? readFileUtf8;
   const resolveAdapter = options.resolveAdapter ?? defaultResolveAdapter;
   const parsedByPath = new Map<string, ParsedFile | null>();

@@ -80,14 +80,6 @@ export function selectSemanticSources(
           skipped.push({ providerType, reason: "disabled by configuration" });
           continue;
         }
-        if (providerType === "lsp" && !pack.treeSitter) {
-          skipped.push({
-            providerType,
-            reason: "LSP fallback requires an existing tree-sitter adapter",
-          });
-          continue;
-        }
-
         const detected = detectedTools[providerType]?.[pack.languageId];
         if (!detected?.available) {
           skipped.push({

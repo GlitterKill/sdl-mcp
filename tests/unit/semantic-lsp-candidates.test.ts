@@ -121,7 +121,7 @@ describe("LSP call-definition candidate planning", () => {
     }
   });
 
-  it("reports unsupported languages and applies the candidate limit deterministically", async () => {
+  it("does not hard-reject non-TypeScript languages and applies the candidate limit deterministically", async () => {
     const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-candidate-limit-"));
     try {
       writeRepoFile(
@@ -135,16 +135,15 @@ describe("LSP call-definition candidate planning", () => {
         ].join("\n"),
       );
 
-      const unsupported = await planLspCallDefinitionCandidatesFromRows({
+      const nonTypescript = await planLspCallDefinitionCandidatesFromRows({
         repoId: "repo",
         repoRoot,
         languageId: "python",
         candidateLimit: 10,
-        rows: [makeRow({ sourceLanguage: "python" })],
+        rows: [],
       });
-      assert.deepEqual(unsupported.skipped.map((skip) => skip.reason), [
-        "unsupported-language",
-      ]);
+      assert.deepEqual(nonTypescript.skipped, []);
+      assert.deepEqual(nonTypescript.candidates, []);
 
       const limited = await planLspCallDefinitionCandidatesFromRows({
         repoId: "repo",

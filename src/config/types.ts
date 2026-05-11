@@ -852,6 +852,10 @@ export const SemanticEnrichmentLspServerConfigSchema = z.object({
   command: z.string().min(1),
   args: z.array(z.string()).default([]),
   languages: z.array(z.string()).default([]),
+  documentLanguageIds: z.array(z.string()).default([]),
+  filePatterns: z.array(z.string()).default([]),
+  capabilities: z.array(z.string()).default([]),
+  readiness: z.string().optional(),
   initializationOptions: z.record(z.string(), z.unknown()).optional(),
 });
 

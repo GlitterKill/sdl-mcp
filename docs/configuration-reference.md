@@ -357,8 +357,10 @@ Default vector indexes:
 | `providers.lsif.indexes`    | `{path,label?}[]`                          | `[]`      | LSIF JSON/JSONL inputs for explicit refresh                                                    |
 | `providers.lsif.confidence` | `number`                                   | `0.9`     | Lower than SCIP, higher than syntax heuristics                                                 |
 | `providers.lsp.servers`     | `Record<string, {serverId, command, ...}>` | `{}`      | Stdio LSP servers. SDL-MCP does not run package-manager install commands                       |
-| `providers.lsp.confidence`  | `number`                                   | `0.8`     | LSP edges are marked `resolverId: "lsp:<serverId>"`                                            |
-| `providers.lsp.candidateLimit` | `number`                                | `200`     | Maximum TypeScript/JavaScript call-definition candidates per refresh                           |
+| `providers.lsp.confidence`  | `number`                                   | `0.8`     | LSP evidence is marked `resolverId: "lsp:<serverId>"` when it creates or upgrades edges        |
+| `providers.lsp.candidateLimit` | `number`                                | `200`     | Maximum tree-sitter-assisted call-definition candidates per refresh                            |
+
+Each LSP server entry supports `serverId`, `command`, `args`, `languages`, optional `initializationOptions`, and optional LSP-IO metadata hints: `documentLanguageIds`, `filePatterns`, `capabilities`, and `readiness`. SDL-MCP uses tree-sitter-assisted call-definition enrichment for languages that already have adapters, and generic LSP document-symbol/diagnostic ingestion for configured servers that advertise those capabilities.
 
 `semantic` means embeddings, summaries, and retrieval. `semanticEnrichment` means provider-backed graph precision and provenance.
 

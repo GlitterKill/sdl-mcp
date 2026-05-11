@@ -1,17 +1,24 @@
 import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
+import type { Dirent } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
+import { extname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { Connection } from "kuzu";
 import type {
   DefinitionParams,
+  Diagnostic,
+  DocumentSymbol,
   InitializeResult,
   Location,
   LocationLink,
+  SymbolInformation,
 } from "vscode-languageserver-protocol";
 
 import type { SemanticEnrichmentLspServerConfig } from "../../../config/types.js";
 import type {
   SemanticEdge,
+  SemanticDiagnostic,
   SemanticIndex,
   SemanticProviderRun,
   SemanticRange,
@@ -38,6 +45,10 @@ export interface SemanticLspClientLike {
     params: DefinitionParams,
     timeoutMs?: number,
   ): Promise<Location | Location[] | LocationLink[] | null>;
+  documentSymbols?(
+    uri: string,
+  ): Promise<DocumentSymbol[] | SymbolInformation[] | null>;
+  diagnostics?(uri: string): Diagnostic[];
   dispose(): Promise<void>;
 }
 
@@ -60,6 +71,7 @@ export interface RunLspCallDefinitionEnrichmentOptions {
 export interface LspCallDefinitionEnrichmentResult {
   index?: SemanticIndex;
   failedRun?: SemanticProviderRun;
+  skippedRun?: SemanticProviderRun;
   skipped: LspCandidateSkip[];
   candidateCount: number;
 }
@@ -86,18 +98,27 @@ export async function runLspCallDefinitionEnrichment(
     });
   const candidatePlan = await plan;
   const skipped = [...candidatePlan.skipped];
+  const documents = mergeDocuments([
+    ...candidatePlan.documents,
+    ...(await collectConfiguredDocuments({
+      repoRoot: options.repoRoot,
+      languageId: options.languageId,
+      server: options.server,
+    })),
+  ]);
 
-  if (candidatePlan.candidates.length === 0) {
+  if (documents.length === 0 && candidatePlan.candidates.length === 0) {
     return {
-      index: buildSemanticIndex({
+      skippedRun: buildSkippedRun({
         repoId: options.repoId,
         runId,
         providerId,
         providerVersion: options.providerVersion,
         languageId: options.languageId,
-        documents: candidatePlan.documents,
-        resolved: [],
-        confidence: options.confidence,
+        documentsProcessed: 0,
+        candidateCount: 0,
+        skippedCount: skipped.length,
+        reason: "no matching documents for configured LSP server",
       }),
       skipped,
       candidateCount: 0,
@@ -118,63 +139,104 @@ export async function runLspCallDefinitionEnrichment(
 
   try {
     const initializeResult = await client.start(remainingTimeoutMs(deadlineMs));
-    if (!supportsDefinition(initializeResult)) {
+    const canRunDefinitions =
+      candidatePlan.candidates.length > 0 && supportsDefinition(initializeResult);
+    const canRunDocumentSymbols =
+      documents.length > 0 &&
+      supportsDocumentSymbols(initializeResult) &&
+      typeof client.documentSymbols === "function";
+    const canCollectDiagnostics =
+      documents.length > 0 &&
+      supportsDiagnostics(initializeResult) &&
+      typeof client.diagnostics === "function";
+
+    if (!canRunDefinitions && !canRunDocumentSymbols && !canCollectDiagnostics) {
       skipped.push(
         ...candidatePlan.candidates.map((candidate) =>
           skipCandidate(candidate, "definition-unavailable"),
         ),
       );
       return {
-        index: buildSemanticIndex({
+        skippedRun: buildSkippedRun({
           repoId: options.repoId,
           runId,
           providerId,
           providerVersion: options.providerVersion,
           languageId: options.languageId,
-          documents: candidatePlan.documents,
-          resolved: [],
-          confidence: options.confidence,
+          documentsProcessed: documents.length,
+          candidateCount: candidatePlan.candidates.length,
+          skippedCount: skipped.length,
+          reason:
+            "server did not advertise documentSymbol, diagnostic, or definition capabilities",
         }),
         skipped,
         candidateCount: candidatePlan.candidates.length,
       };
     }
 
-    for (const document of candidatePlan.documents) {
+    for (const document of documents) {
       await client.openDocument(documentToLspTextDocument(document));
     }
 
-    const resolved: ResolvedDefinition[] = [];
-    for (const candidate of candidatePlan.candidates) {
-      const remainingMs = remainingTimeoutMs(deadlineMs);
-      if (remainingMs <= 0) {
-        skipped.push(skipCandidate(candidate, "definition-failed"));
-        continue;
-      }
-      try {
-        const definitions = await client.definition(
-          {
-            textDocument: { uri: candidate.sourceUri },
-            position: candidate.position,
-          },
-          remainingMs,
-        );
-        const target = firstInRepoDefinition({
-          definitions,
+    const lspSymbols = canRunDocumentSymbols
+      ? await collectDocumentSymbols({
+          client,
+          documents,
           repoRoot: options.repoRoot,
           runId,
           providerId,
-          languageId: options.languageId,
-          candidate,
-        });
-        if (!target) {
-          skipped.push(skipCandidate(candidate, "definition-not-found"));
+          fallbackLanguageId: options.languageId,
+        })
+      : [];
+    const lspDiagnostics = canCollectDiagnostics
+      ? collectDiagnostics({
+          client,
+          documents,
+          repoId: options.repoId,
+          runId,
+          providerId,
+        })
+      : [];
+
+    const resolved: ResolvedDefinition[] = [];
+    if (canRunDefinitions) {
+      for (const candidate of candidatePlan.candidates) {
+        const remainingMs = remainingTimeoutMs(deadlineMs);
+        if (remainingMs <= 0) {
+          skipped.push(skipCandidate(candidate, "definition-failed"));
           continue;
         }
-        resolved.push({ candidate, targetSymbol: target });
-      } catch {
-        skipped.push(skipCandidate(candidate, "definition-failed"));
+        try {
+          const definitions = await client.definition(
+            {
+              textDocument: { uri: candidate.sourceUri },
+              position: candidate.position,
+            },
+            remainingMs,
+          );
+          const target = firstInRepoDefinition({
+            definitions,
+            repoRoot: options.repoRoot,
+            runId,
+            providerId,
+            languageId: options.languageId,
+            candidate,
+          });
+          if (!target) {
+            skipped.push(skipCandidate(candidate, "definition-not-found"));
+            continue;
+          }
+          resolved.push({ candidate, targetSymbol: target });
+        } catch {
+          skipped.push(skipCandidate(candidate, "definition-failed"));
+        }
       }
+    } else {
+      skipped.push(
+        ...candidatePlan.candidates.map((candidate) =>
+          skipCandidate(candidate, "definition-unavailable"),
+        ),
+      );
     }
 
     return {
@@ -185,8 +247,10 @@ export async function runLspCallDefinitionEnrichment(
         providerVersion:
           options.providerVersion ?? initializeResult.serverInfo?.version,
         languageId: options.languageId,
-        documents: candidatePlan.documents,
+        documents,
         resolved,
+        symbols: lspSymbols,
+        diagnostics: lspDiagnostics,
         confidence: options.confidence,
       }),
       skipped,
@@ -220,6 +284,8 @@ export function buildSemanticIndexFromLspDefinitions(params: {
   languageId: string;
   documents: readonly LspCandidateDocument[];
   resolved: readonly ResolvedDefinition[];
+  symbols?: readonly SemanticSymbol[];
+  diagnostics?: readonly SemanticDiagnostic[];
   confidence: number;
 }): SemanticIndex {
   return buildSemanticIndex(params);
@@ -227,6 +293,14 @@ export function buildSemanticIndexFromLspDefinitions(params: {
 
 function supportsDefinition(result: InitializeResult): boolean {
   return Boolean(result.capabilities.definitionProvider);
+}
+
+function supportsDocumentSymbols(result: InitializeResult): boolean {
+  return Boolean(result.capabilities.documentSymbolProvider);
+}
+
+function supportsDiagnostics(result: InitializeResult): boolean {
+  return Boolean(result.capabilities.diagnosticProvider);
 }
 
 function documentToLspTextDocument(
@@ -238,6 +312,253 @@ function documentToLspTextDocument(
     version: document.version,
     text: document.text,
   };
+}
+
+async function collectConfiguredDocuments(params: {
+  repoRoot: string;
+  languageId: string;
+  server: SemanticEnrichmentLspServerConfig;
+}): Promise<LspCandidateDocument[]> {
+  if (params.server.filePatterns.length === 0) return [];
+
+  const documents: LspCandidateDocument[] = [];
+  for await (const sourcePath of walkRepoFiles(params.repoRoot)) {
+    if (
+      !params.server.filePatterns.some((pattern) =>
+        matchesFilePattern(sourcePath, pattern),
+      )
+    ) {
+      continue;
+    }
+    const absolutePath = join(params.repoRoot, sourcePath);
+    let text: string;
+    try {
+      text = await readFile(absolutePath, "utf8");
+    } catch {
+      continue;
+    }
+    documents.push({
+      uri: pathToFileURL(absolutePath).toString(),
+      sourcePath: normalizePath(sourcePath),
+      languageId: documentLanguageIdForPath(
+        sourcePath,
+        params.server.documentLanguageIds,
+        params.languageId,
+      ),
+      text,
+      version: 1,
+    });
+    if (documents.length >= 500) break;
+  }
+  return documents;
+}
+
+async function* walkRepoFiles(
+  root: string,
+  relativeDir = "",
+): AsyncGenerator<string> {
+  const absoluteDir = join(root, relativeDir);
+  let entries: Dirent[];
+  try {
+    entries = await readdir(absoluteDir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    const relativePath = normalizePath(join(relativeDir, entry.name));
+    if (entry.isDirectory()) {
+      if (shouldSkipLspScanDirectory(entry.name)) continue;
+      yield* walkRepoFiles(root, relativePath);
+    } else if (entry.isFile()) {
+      yield relativePath;
+    }
+  }
+}
+
+function shouldSkipLspScanDirectory(name: string): boolean {
+  return new Set([
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "target",
+    "vendor",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".gradle",
+    ".idea",
+    "build",
+    "dist",
+    ".tmp",
+    ".worktrees",
+    ".sisyphus",
+    ".codex",
+    ".claude",
+  ]).has(name.toLowerCase());
+}
+
+function matchesFilePattern(sourcePath: string, pattern: string): boolean {
+  const normalizedPath = normalizePath(sourcePath).toLowerCase();
+  const normalizedPattern = normalizePath(pattern).toLowerCase();
+  if (normalizedPattern.startsWith("**/*.")) {
+    return normalizedPath.endsWith(normalizedPattern.slice("**/*".length));
+  }
+  if (normalizedPattern.startsWith("**/") && normalizedPattern.endsWith("/**/*")) {
+    const directory = normalizedPattern.slice(3, -"**/*".length);
+    return normalizedPath.startsWith(directory) || normalizedPath.includes(`/${directory}`);
+  }
+  if (normalizedPattern.startsWith("**/")) {
+    return normalizedPath.endsWith(normalizedPattern.slice(3));
+  }
+  return normalizedPath === normalizedPattern;
+}
+
+function documentLanguageIdForPath(
+  sourcePath: string,
+  configuredIds: readonly string[],
+  fallback: string,
+): string {
+  const extension = extname(sourcePath).toLowerCase();
+  if (configuredIds.length === 0) return fallback;
+  if (extension === ".tsx" && configuredIds.includes("typescriptreact")) {
+    return "typescriptreact";
+  }
+  if (extension === ".jsx" && configuredIds.includes("javascriptreact")) {
+    return "javascriptreact";
+  }
+  return configuredIds[0] ?? fallback;
+}
+
+function mergeDocuments(
+  documents: readonly LspCandidateDocument[],
+): LspCandidateDocument[] {
+  const byUri = new Map<string, LspCandidateDocument>();
+  for (const document of documents) {
+    byUri.set(document.uri, document);
+  }
+  return [...byUri.values()];
+}
+
+async function collectDocumentSymbols(params: {
+  client: SemanticLspClientLike;
+  documents: readonly LspCandidateDocument[];
+  repoRoot: string;
+  runId: string;
+  providerId: string;
+  fallbackLanguageId: string;
+}): Promise<SemanticSymbol[]> {
+  if (!params.client.documentSymbols) return [];
+  const symbols: SemanticSymbol[] = [];
+  for (const document of params.documents) {
+    const result = await params.client.documentSymbols(document.uri).catch(
+      () => null,
+    );
+    if (!result) continue;
+    symbols.push(
+      ...flattenDocumentSymbols({
+        values: result,
+        document,
+        repoRoot: params.repoRoot,
+        runId: params.runId,
+        providerId: params.providerId,
+        fallbackLanguageId: params.fallbackLanguageId,
+      }),
+    );
+  }
+  return symbols;
+}
+
+function flattenDocumentSymbols(params: {
+  values: DocumentSymbol[] | SymbolInformation[];
+  document: LspCandidateDocument;
+  repoRoot: string;
+  runId: string;
+  providerId: string;
+  fallbackLanguageId: string;
+}): SemanticSymbol[] {
+  const output: SemanticSymbol[] = [];
+  const visit = (
+    symbol: DocumentSymbol | SymbolInformation,
+    indexPath: string,
+  ): void => {
+    const location = "location" in symbol ? symbol.location : null;
+    const sourcePath = location
+      ? repoPathFromUri(location.uri, params.repoRoot)
+      : params.document.sourcePath;
+    if (!sourcePath) return;
+    const range =
+      "selectionRange" in symbol
+        ? symbol.selectionRange
+        : location?.range;
+    output.push({
+      providerSymbolId: `lsp-symbol:${params.runId}:${params.providerId}:${indexPath}`,
+      name: symbol.name,
+      kind: String(symbol.kind),
+      languageId: params.document.languageId || params.fallbackLanguageId,
+      sourcePath,
+      range: range ? lspRangeToSemanticRange(range) : undefined,
+    });
+    if ("children" in symbol && symbol.children) {
+      symbol.children.forEach((child, childIndex) =>
+        visit(child, `${indexPath}.${childIndex}`),
+      );
+    }
+  };
+
+  params.values.forEach((symbol, index) => visit(symbol, String(index)));
+  return output;
+}
+
+function collectDiagnostics(params: {
+  client: SemanticLspClientLike;
+  documents: readonly LspCandidateDocument[];
+  repoId: string;
+  runId: string;
+  providerId: string;
+}): SemanticDiagnostic[] {
+  if (!params.client.diagnostics) return [];
+  const diagnostics: SemanticDiagnostic[] = [];
+  for (const document of params.documents) {
+    const values = params.client.diagnostics(document.uri);
+    values.forEach((diagnostic, index) => {
+      diagnostics.push({
+        id: `lsp-diagnostic:${params.runId}:${params.providerId}:${document.sourcePath}:${index}`,
+        repoId: params.repoId,
+        runId: params.runId,
+        providerType: "lsp",
+        providerId: params.providerId,
+        languageId: document.languageId,
+        sourcePath: document.sourcePath,
+        severity: diagnosticSeverity(diagnostic.severity),
+        message: diagnostic.message,
+        code:
+          diagnostic.code === undefined ? undefined : String(diagnostic.code),
+        range: diagnostic.range
+          ? lspRangeToSemanticRange(diagnostic.range)
+          : undefined,
+      });
+    });
+  }
+  return diagnostics;
+}
+
+function diagnosticSeverity(
+  severity: Diagnostic["severity"],
+): SemanticDiagnostic["severity"] {
+  switch (severity) {
+    case 1:
+      return "error";
+    case 2:
+      return "warning";
+    case 3:
+      return "information";
+    case 4:
+      return "hint";
+    default:
+      return "information";
+  }
 }
 
 function firstInRepoDefinition(params: {
@@ -331,6 +652,8 @@ function buildSemanticIndex(params: {
   languageId: string;
   documents: readonly LspCandidateDocument[];
   resolved: readonly ResolvedDefinition[];
+  symbols?: readonly SemanticSymbol[];
+  diagnostics?: readonly SemanticDiagnostic[];
   confidence: number;
 }): SemanticIndex {
   const documents = new Map<string, LspCandidateDocument>();
@@ -405,9 +728,9 @@ function buildSemanticIndex(params: {
       occurrences: [],
       diagnostics: [],
     })),
-    symbols: [...sourceSymbols, ...targetSymbols],
+    symbols: [...sourceSymbols, ...targetSymbols, ...(params.symbols ?? [])],
     edges,
-    diagnostics: [],
+    diagnostics: [...(params.diagnostics ?? [])],
   };
 }
 
@@ -460,5 +783,39 @@ function buildFailedRun(params: {
     precisionScore: 0,
     error:
       params.error instanceof Error ? params.error.message : String(params.error),
+  };
+}
+
+function buildSkippedRun(params: {
+  repoId: string;
+  runId: string;
+  providerId: string;
+  providerVersion?: string;
+  languageId: string;
+  documentsProcessed: number;
+  candidateCount: number;
+  skippedCount: number;
+  reason: string;
+}): SemanticProviderRun {
+  const now = new Date().toISOString();
+  return {
+    runId: params.runId,
+    repoId: params.repoId,
+    providerType: "lsp",
+    providerId: params.providerId,
+    providerVersion: params.providerVersion,
+    languages: [params.languageId],
+    status: "skipped",
+    startedAt: now,
+    finishedAt: now,
+    documentsProcessed: params.documentsProcessed,
+    symbolsMatched: 0,
+    edgesCreated: 0,
+    edgesUpgraded: 0,
+    edgesReplaced: 0,
+    edgesSkipped: params.candidateCount + params.skippedCount,
+    diagnosticsCount: 0,
+    precisionScore: 0,
+    error: params.reason,
   };
 }

@@ -2,7 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { SemanticEnrichmentConfigSchema } from "../../dist/config/types.js";
-import { deriveSemanticLanguagePacks } from "../../dist/semantic/language-packs.js";
+import {
+  deriveSemanticLanguagePacks,
+  extendLanguagePacksForLsp,
+} from "../../dist/semantic/language-packs.js";
 import { selectSemanticSources } from "../../dist/semantic/source-selection.js";
 import { createSemanticCacheKey } from "../../dist/semantic/cache-key.js";
 import { computeSemanticPrecisionScore } from "../../dist/semantic/precision.js";
@@ -63,6 +66,36 @@ describe("semantic enrichment bridge core", () => {
       selection.skipped.map((skip) => skip.providerType).sort(),
       ["lsif", "lsp"],
     );
+  });
+
+  it("selects configured LSP languages without a tree-sitter adapter", () => {
+    const config = SemanticEnrichmentConfigSchema.parse({
+      languages: ["elixir"],
+      providers: {
+        scip: { enabled: false, indexes: [] },
+        lsif: { enabled: false, indexes: [] },
+        lsp: {
+          enabled: true,
+          servers: {
+            expert: {
+              serverId: "expert",
+              command: "expert",
+              args: [],
+              languages: ["elixir"],
+              documentLanguageIds: ["elixir"],
+              filePatterns: ["**/*.ex", "**/*.exs"],
+            },
+          },
+        },
+      },
+    });
+    const packs = extendLanguagePacksForLsp([], config);
+    const [selection] = selectSemanticSources(config, packs, {
+      lsp: { elixir: { available: true, providerId: "expert" } },
+    });
+
+    assert.equal(packs[0].treeSitter, false);
+    assert.equal(selection.selected?.providerType, "lsp");
   });
 
   it("keeps semantic cache keys stable across object key order", () => {

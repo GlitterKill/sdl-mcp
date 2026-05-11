@@ -28,7 +28,10 @@ import { ingestScipIndex } from "../scip/ingestion.js";
 import type { ScipIngestResponse } from "../scip/types.js";
 import { logger } from "../util/logger.js";
 import { normalizePath, validatePathWithinRootAsync } from "../util/paths.js";
-import { deriveSemanticLanguagePacks } from "./language-packs.js";
+import {
+  deriveSemanticLanguagePacks,
+  extendLanguagePacksForLsp,
+} from "./language-packs.js";
 import {
   selectSemanticSources,
   type DetectedSemanticTools,
@@ -108,7 +111,7 @@ export async function refreshSemanticEnrichment(
     );
   }
 
-  const packs = deriveSemanticLanguagePacks();
+  const packs = extendLanguagePacksForLsp(deriveSemanticLanguagePacks(), config);
   const detectedTools = detectSemanticTools(
     appConfig,
     config,
@@ -240,6 +243,16 @@ export async function refreshSemanticEnrichment(
         continue;
       }
 
+      if (result.skippedRun) {
+        runs.push(result.skippedRun);
+        if (!dryRun) {
+          await withWriteConn((writeConn) =>
+            mergeSemanticProviderRun(writeConn, result.skippedRun!),
+          );
+        }
+        continue;
+      }
+
       if (result.index) {
         const index = result.index;
         const writeResult = dryRun
@@ -279,7 +292,7 @@ export async function getSemanticEnrichmentStatus(
   appConfig: AppConfig,
 ): Promise<SemanticEnrichmentStatusResult> {
   const config = resolveSemanticEnrichmentConfig(appConfig, request.languages);
-  const packs = deriveSemanticLanguagePacks();
+  const packs = extendLanguagePacksForLsp(deriveSemanticLanguagePacks(), config);
   const detectedTools = detectSemanticTools(
     appConfig,
     config,
@@ -407,14 +420,6 @@ function detectSemanticTools(
     for (const [serverId, server] of Object.entries(lspServers)) {
       if (server.enabled === false) continue;
       for (const languageId of server.languages) {
-        if (languageId !== "typescript") {
-          detected.lsp[languageId] = {
-            available: false,
-            reason:
-              "LSP V2 supports TypeScript/JavaScript call-definition enrichment only",
-          };
-          continue;
-        }
         detected.lsp[languageId] = {
           available: true,
           providerId: server.serverId || serverId,

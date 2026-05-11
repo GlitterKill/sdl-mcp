@@ -20,8 +20,9 @@ Only the selected source runs for a language. Lower-priority providers are repor
 - `sdl.semantic.enrichment.status` reports source selection, skipped providers, last runs, and precision scores even when refresh is disabled.
 - SCIP remains compatible with `sdl.scip.ingest` and keeps its existing optimized index-refresh placement: pass-1 drain, SCIP ingest, then pass 2.
 - LSIF JSON/JSONL files are normalized into the provider-neutral model and written after the base tree-sitter index exists.
-- LSP uses a lightweight stdio JSON-RPC client. TypeScript/JavaScript LSP enrichment queries call-definition candidates derived from tree-sitter call ranges and can replace unresolved or heuristic call edges with exact provider-backed edges.
-- LSP remains post-index only. It does not resolve imports/references, execute package-manager install recipes, or affect pass-2 scheduling.
+- LSP uses a lightweight stdio JSON-RPC client. Tree-sitter-backed languages can run call-definition candidates derived from call ranges and replace unresolved or heuristic call edges with exact provider-backed edges.
+- Configured LSP servers can also run generic document-symbol and diagnostic ingestion when they advertise those capabilities, even when SDL-MCP does not have a tree-sitter adapter for that language.
+- LSP remains post-index only. It does not execute package-manager install recipes or affect pass-2 scheduling.
 - Combined SCIP and LSIF indexes are supported. Language-scoped refresh filters provider documents to the requested language set instead of requiring one index file per language.
 - `force` bypasses compatible cache decisions where they exist. In V2, that means the SCIP ingestion content-hash shortcut; LSIF and LSP have no durable response cache yet.
 
@@ -33,7 +34,7 @@ Only the selected source runs for a language. Lower-priority providers are repor
     "enabled": true,
     "autoRunOnIndexRefresh": false,
     "installPolicy": "never",
-    "languages": ["typescript"],
+    "languages": ["typescript", "python"],
     "providers": {
       "scip": {
         "enabled": true,
@@ -48,7 +49,24 @@ Only the selected source runs for a language. Lower-priority providers are repor
         "enabled": true,
         "confidence": 0.8,
         "candidateLimit": 200,
-        "servers": {}
+        "servers": {
+          "typescript-language-server": {
+            "serverId": "typescript-language-server",
+            "command": "typescript-language-server",
+            "args": ["--stdio"],
+            "languages": ["typescript"],
+            "documentLanguageIds": ["typescript", "typescriptreact"],
+            "filePatterns": ["**/*.ts", "**/*.tsx"]
+          },
+          "pyright": {
+            "serverId": "pyright",
+            "command": "pyright-langserver",
+            "args": ["--stdio"],
+            "languages": ["python"],
+            "documentLanguageIds": ["python"],
+            "filePatterns": ["**/*.py", "**/*.pyi"]
+          }
+        }
       }
     }
   }

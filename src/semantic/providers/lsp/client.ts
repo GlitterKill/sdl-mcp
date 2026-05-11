@@ -13,6 +13,7 @@ import {
 } from "vscode-jsonrpc/node.js";
 import type {
   DefinitionParams,
+  Diagnostic,
   DidChangeTextDocumentParams,
   DidOpenTextDocumentParams,
   DocumentSymbol,
@@ -21,6 +22,7 @@ import type {
   InitializeResult,
   Location,
   LocationLink,
+  PublishDiagnosticsParams,
   ReferenceParams,
   SymbolInformation,
   TextDocumentContentChangeEvent,
@@ -40,6 +42,8 @@ const DidOpenTextDocumentNotification =
   new NotificationType<DidOpenTextDocumentParams>("textDocument/didOpen");
 const DidChangeTextDocumentNotification =
   new NotificationType<DidChangeTextDocumentParams>("textDocument/didChange");
+const PublishDiagnosticsNotification =
+  new NotificationType<PublishDiagnosticsParams>("textDocument/publishDiagnostics");
 const DefinitionRequest = new RequestType<
   DefinitionParams,
   Location | Location[] | LocationLink[] | null,
@@ -84,6 +88,7 @@ export class SemanticLspClient {
   private readonly options: LspClientOptions;
   private process: ChildProcessWithoutNullStreams | null = null;
   private connection: MessageConnection | null = null;
+  private readonly diagnosticsByUri = new Map<string, Diagnostic[]>();
   private initialized = false;
 
   constructor(options: LspClientOptions) {
@@ -105,6 +110,9 @@ export class SemanticLspClient {
       new StreamMessageWriter(child.stdin),
       NullLogger,
     );
+    connection.onNotification(PublishDiagnosticsNotification, (params) => {
+      this.diagnosticsByUri.set(params.uri, params.diagnostics);
+    });
     connection.listen();
 
     this.process = child;
@@ -195,6 +203,10 @@ export class SemanticLspClient {
       textDocument: { uri },
       position,
     });
+  }
+
+  diagnostics(uri: string): Diagnostic[] {
+    return this.diagnosticsByUri.get(uri) ?? [];
   }
 
   async dispose(): Promise<void> {
