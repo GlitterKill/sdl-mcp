@@ -1,12 +1,8 @@
 import type { SemanticEnrichmentConfig } from "../config/types.js";
-import type { SemanticProviderType } from "./types.js";
+import type { ActiveSemanticProviderType } from "./types.js";
 import type { SemanticLanguagePack } from "./language-packs.js";
 
-const PROVIDER_PRIORITY: readonly SemanticProviderType[] = [
-  "scip",
-  "lsif",
-  "lsp",
-] as const;
+const PROVIDER_PRIORITY: readonly ActiveSemanticProviderType[] = ["scip", "lsp"];
 
 export interface DetectedSemanticProvider {
   available: boolean;
@@ -18,20 +14,20 @@ export interface DetectedSemanticProvider {
 
 export type DetectedSemanticTools = Partial<
   Record<
-    SemanticProviderType,
+    ActiveSemanticProviderType,
     Partial<Record<string, DetectedSemanticProvider>>
   >
 >;
 
 export interface SkippedSemanticProvider {
-  providerType: SemanticProviderType;
+  providerType: ActiveSemanticProviderType;
   reason: string;
 }
 
 export interface SemanticSourceSelection {
   languageId: string;
   selected?: {
-    providerType: SemanticProviderType;
+    providerType: ActiveSemanticProviderType;
     providerId: string;
     providerVersion?: string;
     canAffectPass2: boolean;
@@ -41,7 +37,7 @@ export interface SemanticSourceSelection {
 
 function providerEnabled(
   config: SemanticEnrichmentConfig | undefined,
-  providerType: SemanticProviderType,
+  providerType: ActiveSemanticProviderType,
 ): boolean {
   const providerConfig = config?.providers?.[providerType];
   if (

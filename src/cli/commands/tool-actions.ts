@@ -674,7 +674,7 @@ const semanticEnrichmentRefresh: ActionDefinition = {
   action: "semantic.enrichment.refresh",
   namespace: "repo",
   description:
-    "Run provider-backed semantic enrichment with SCIP > LSIF > LSP source selection",
+    "Run provider-backed semantic enrichment with SCIP > LSP source selection",
   args: [
     { ...REPO_ID_ARG },
     {

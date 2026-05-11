@@ -5,26 +5,24 @@
 The semantic enrichment bridge keeps tree-sitter as SDL-MCP's base syntax layer and enriches graph precision from one provider per language. Provider priority is fixed:
 
 1. SCIP
-2. LSIF
-3. LSP
+2. LSP
 
 Only the selected source runs for a language. Lower-priority providers are reported as skipped with a reason so status output explains why a provider did not run.
 
 ## Relationship To `semantic`
 
-`semantic` config still means embeddings, generated summaries, and hybrid retrieval. The bridge uses a separate `semanticEnrichment` section because SCIP, LSIF, and LSP change graph precision and provenance rather than vector search behavior.
+`semantic` config still means embeddings, generated summaries, and hybrid retrieval. The bridge uses a separate `semanticEnrichment` section because SCIP and LSP change graph precision and provenance rather than vector search behavior.
 
 ## Current Behavior
 
 - `sdl.semantic.enrichment.refresh` runs selected providers explicitly only when `semanticEnrichment.enabled` is true.
 - `sdl.semantic.enrichment.status` reports source selection, skipped providers, last runs, and precision scores even when refresh is disabled.
 - SCIP remains compatible with `sdl.scip.ingest` and keeps its existing optimized index-refresh placement: pass-1 drain, SCIP ingest, then pass 2.
-- LSIF JSON/JSONL files are normalized into the provider-neutral model and written after the base tree-sitter index exists.
 - LSP uses a lightweight stdio JSON-RPC client. Tree-sitter-backed languages can run call-definition candidates derived from call ranges and replace unresolved or heuristic call edges with exact provider-backed edges.
 - Configured LSP servers can also run generic document-symbol and diagnostic ingestion when they advertise those capabilities, even when SDL-MCP does not have a tree-sitter adapter for that language.
 - LSP remains post-index only. It does not execute package-manager install recipes or affect pass-2 scheduling.
-- Combined SCIP and LSIF indexes are supported. Language-scoped refresh filters provider documents to the requested language set instead of requiring one index file per language.
-- `force` bypasses compatible cache decisions where they exist. In V2, that means the SCIP ingestion content-hash shortcut; LSIF and LSP have no durable response cache yet.
+- Combined SCIP indexes are supported. Language-scoped refresh filters provider documents to the requested language set instead of requiring one index file per language.
+- `force` bypasses compatible cache decisions where they exist. In V2, that means the SCIP ingestion content-hash shortcut; LSP has no durable response cache yet.
 
 ## Configuration
 
@@ -40,11 +38,6 @@ Only the selected source runs for a language. Lower-priority providers are repor
         "enabled": true,
         "indexes": []
       },
-      "lsif": {
-        "enabled": true,
-        "indexes": [{ "path": "index.lsif", "label": "typescript" }],
-        "confidence": 0.9
-      },
       "lsp": {
         "enabled": true,
         "confidence": 0.8,
@@ -55,8 +48,14 @@ Only the selected source runs for a language. Lower-priority providers are repor
             "command": "typescript-language-server",
             "args": ["--stdio"],
             "languages": ["typescript"],
-            "documentLanguageIds": ["typescript", "typescriptreact"],
-            "filePatterns": ["**/*.ts", "**/*.tsx"]
+            "documentLanguageIds": [
+              "typescript",
+              "typescriptreact",
+              "javascript",
+              "javascriptreact"
+            ],
+            "filePatterns": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"],
+            "enabled": true
           },
           "pyright": {
             "serverId": "pyright",
@@ -64,7 +63,8 @@ Only the selected source runs for a language. Lower-priority providers are repor
             "args": ["--stdio"],
             "languages": ["python"],
             "documentLanguageIds": ["python"],
-            "filePatterns": ["**/*.py", "**/*.pyi"]
+            "filePatterns": ["**/*.py", "**/*.pyi"],
+            "enabled": true
           }
         }
       }
@@ -79,7 +79,15 @@ When `providers.scip.indexes` is empty, the bridge reuses `scip.indexes`. `scip.
 
 ## Install Model
 
-`installPolicy: "never"` refuses provider downloads. `installPolicy: "verified"` permits only checksum-verified downloads such as the existing `scip-io` path. SDL-MCP never runs package-manager install commands automatically; status output can point at the command an operator should run.
+`installPolicy: "never"` refuses provider downloads. `installPolicy: "verified"` permits only checksum-verified downloads such as the existing `scip-io` path. SDL-MCP never runs package-manager install commands automatically.
+
+LSP servers are externally owned. SDL-MCP accepts configured server entries with `serverId`, `command`, `args`, `languages`, `initializationOptions`, and `enabled`; separate installer apps can make those servers available and write or update this config.
+
+For V2, configure TypeScript and JavaScript LSP enrichment with the SDL language ID `typescript`. The TypeScript adapter covers `.ts`, `.tsx`, `.js`, and `.jsx` files, so a separate `javascript` language entry is not used.
+
+## LSIF Removed
+
+LSIF support was removed because known LSIF-producing ecosystems also have SCIP indexers. Keeping LSIF would duplicate the lower-priority index path without expanding language coverage.
 
 ## Precision Score
 
@@ -92,4 +100,4 @@ Precision score combines:
 - diagnostics availability
 - pass-2 skip coverage
 
-SCIP has the highest provider tier and is the only source allowed to affect pass-2 scheduling. LSIF and LSP stay as post-index enrichment until they can prove equivalent full-file coverage.
+SCIP has the highest provider tier and is the only source allowed to affect pass-2 scheduling. LSP stays as post-index enrichment until coverage can be measured per file and is comparable to SCIP.

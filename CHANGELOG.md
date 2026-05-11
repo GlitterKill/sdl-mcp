@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Semantic enrichment bridge V1 with provider-neutral config/types, SCIP > LSIF > LSP source selection, explicit refresh/status actions, LSIF normalization, lightweight stdio LSP client support, and LadybugDB provider-run/provenance/precision tables.
+- Semantic enrichment bridge V1 with provider-neutral config/types, SCIP > LSP source selection, explicit refresh/status actions, lightweight stdio LSP client support, and LadybugDB provider-run/provenance/precision tables.
 - Semantic enrichment V2 TypeScript/JavaScript LSP call-definition enrichment that plans tree-sitter call candidates, queries configured stdio LSP servers, and writes exact call edges through the generic semantic writer.
 - Generic LSP-native document-symbol and diagnostic ingestion for configured stdio servers without SDL-MCP tree-sitter adapters, plus optional LSP metadata hints (`documentLanguageIds`, `filePatterns`, `capabilities`, `readiness`) in config.
 - Handle-backed large response storage with `response.get` retrieval and opt-in `responseMode` support for `sdl.context`, `file.read`, `code.needWindow`, and `search.edit` preview responses.
@@ -20,12 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Removed LSIF semantic enrichment support before stabilization; source selection is now SCIP > LSP, with historical LSIF provider-run rows still readable.
 - `search.edit` previews now return diff-anchored, line-numbered hunk snippets with explicit before/after line ranges for each file entry.
-- `sdl.scip.ingest` help/schema now describes SCIP `.scip` input only; LSIF runs through the semantic enrichment bridge instead of the SCIP compatibility action.
+- `sdl.scip.ingest` help/schema now describes SCIP `.scip` input only; LSP enrichment runs through the semantic enrichment bridge instead of the SCIP compatibility action.
 - LSP semantic enrichment no longer hard-rejects non-TypeScript languages; configured servers are selected by advertised provider availability and runtime LSP capabilities.
 
 ### Fixed
 
+- LSP semantic enrichment now launches Windows `.cmd`/`.bat` server shims through `cmd.exe` so installer-managed language servers can run from their recorded command paths without Node shell-argument deprecation warnings.
 - Resolved CI security audit failures by refreshing the transitive `fast-uri`
   lockfile entry to the patched 3.1.2 release.
 - Restored `search.edit` to the direct CLI tool-action surface so the CLI

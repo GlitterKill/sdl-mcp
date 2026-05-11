@@ -286,7 +286,7 @@ If you set `budgetCaps`, provide both `maxCards` and `maxEstimatedTokens`.
 
 ## `semantic`
 
-`semantic` now centers on retrieval and vector index configuration. It does not configure SCIP, LSIF, or LSP graph enrichment; those settings live under `semanticEnrichment`.
+`semantic` now centers on retrieval and vector index configuration. It does not configure SCIP or LSP graph enrichment; those settings live under `semanticEnrichment`.
 
 | Field                           | Type                                    | Default                          | Notes                                                                                                                                                                                                                                                                                               |
 | ------------------------------- | --------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -342,20 +342,20 @@ Default vector indexes:
 
 ## `semanticEnrichment`
 
-`semanticEnrichment` controls provider-backed graph precision. Source selection is fixed per language: SCIP first, then LSIF, then LSP. Only one source runs for a language; skipped providers are reported in status output.
+`semanticEnrichment` controls provider-backed graph precision. Source selection is fixed per language: SCIP first, then LSP. Only one source runs for a language; skipped providers are reported in status output.
+
+For one release, stale `semanticEnrichment.providers.lsif` config entries are ignored during parsing so older local configs keep loading. Remove those entries because LSIF no longer runs.
 
 | Field                       | Type                                       | Default   | Notes                                                                                          |
 | --------------------------- | ------------------------------------------ | --------- | ---------------------------------------------------------------------------------------------- |
 | `enabled`                   | `boolean`                                  | `false`   | Enables explicit refresh writes. Status remains available when disabled                         |
-| `autoRunOnIndexRefresh`     | `boolean`                                  | `false`   | Runs eligible LSIF/LSP enrichment after indexing; SCIP keeps its existing mid-index placement  |
+| `autoRunOnIndexRefresh`     | `boolean`                                  | `false`   | Runs eligible LSP enrichment after indexing; SCIP keeps its existing mid-index placement  |
 | `installPolicy`             | `"never" \| "verified"`                    | `"never"` | `verified` allows only checksum-verified downloads. Package-manager recipes are never executed |
-| `cacheDir`                  | `string \| null`                           | `null`    | Reserved cache root for future durable provider caches; V2 does not persist LSIF/LSP responses |
+| `cacheDir`                  | `string \| null`                           | `null`    | Reserved cache root for future durable provider caches; V2 does not persist LSP responses |
 | `concurrency`               | `number`                                   | `1`       | Reserved `1-8` cap for future cross-provider scheduling; V2 runs selected providers serially   |
 | `timeoutMs`                 | `number`                                   | `300000`  | Provider request/process timeout                                                               |
 | `languages`                 | `string[]`                                 | `[]`      | Empty means all current tree-sitter-backed languages                                           |
 | `providers.scip.indexes`    | `{path,label?}[]`                          | `[]`      | When omitted, the bridge reuses `scip.indexes`                                                 |
-| `providers.lsif.indexes`    | `{path,label?}[]`                          | `[]`      | LSIF JSON/JSONL inputs for explicit refresh                                                    |
-| `providers.lsif.confidence` | `number`                                   | `0.9`     | Lower than SCIP, higher than syntax heuristics                                                 |
 | `providers.lsp.servers`     | `Record<string, {serverId, command, ...}>` | `{}`      | Stdio LSP servers. SDL-MCP does not run package-manager install commands                       |
 | `providers.lsp.confidence`  | `number`                                   | `0.8`     | LSP evidence is marked `resolverId: "lsp:<serverId>"` when it creates or upgrades edges        |
 | `providers.lsp.candidateLimit` | `number`                                | `200`     | Maximum tree-sitter-assisted call-definition candidates per refresh                            |
@@ -364,7 +364,7 @@ Each LSP server entry supports `serverId`, `command`, `args`, `languages`, optio
 
 `semantic` means embeddings, summaries, and retrieval. `semanticEnrichment` means provider-backed graph precision and provenance.
 
-Combined SCIP and LSIF indexes are supported. When `languages` or `--languages` narrows refresh scope, SDL-MCP filters documents inside the combined provider artifact.
+Combined SCIP indexes are supported. When `languages` or `--languages` narrows refresh scope, SDL-MCP filters documents inside the combined SCIP artifact. LSP is selected per configured server language.
 
 ## `prefetch`
 

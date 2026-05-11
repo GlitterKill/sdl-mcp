@@ -91,7 +91,6 @@ describe("semantic enrichment LSP integration", () => {
             languages: ["typescript"],
             providers: {
               scip: { enabled: false },
-              lsif: { enabled: false, indexes: [] },
               lsp: {
                 enabled: true,
                 confidence: 0.95,
@@ -181,7 +180,6 @@ describe("semantic enrichment LSP integration", () => {
         languages: ["typescript"],
         providers: {
           scip: { enabled: false, indexes: [] },
-          lsif: { enabled: false, indexes: [], confidence: 0.9 },
           lsp: {
             enabled: true,
             confidence: 0.95,

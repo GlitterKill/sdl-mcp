@@ -1,6 +1,10 @@
 import type { EdgeType, RepoId, SymbolId } from "../domain/types.js";
 
-export type SemanticProviderType = "scip" | "lsif" | "lsp";
+export type SemanticProviderType = "scip" | "lsp";
+export type ActiveSemanticProviderType = SemanticProviderType;
+// Historical provider-run rows can contain LSIF from development builds. New
+// writable semantic indexes and provider runs must use active providers only.
+export type PersistedSemanticProviderType = SemanticProviderType | "lsif";
 
 export type SemanticCapability =
   | "definition"
@@ -22,7 +26,7 @@ export interface SemanticRange {
 }
 
 export interface SemanticProvenance {
-  providerType: SemanticProviderType;
+  providerType: ActiveSemanticProviderType;
   providerId: string;
   capability: SemanticCapability;
   confidence: number;
@@ -86,7 +90,7 @@ export interface SemanticDiagnostic {
   id: string;
   repoId: RepoId;
   runId: string;
-  providerType: SemanticProviderType;
+  providerType: ActiveSemanticProviderType;
   providerId: string;
   languageId: string;
   sourcePath: string;
@@ -99,7 +103,7 @@ export interface SemanticDiagnostic {
 export interface SemanticIndex {
   repoId: RepoId;
   runId: string;
-  providerType: SemanticProviderType;
+  providerType: ActiveSemanticProviderType;
   providerId: string;
   providerVersion?: string;
   sourceIndexPath?: string;
@@ -110,10 +114,12 @@ export interface SemanticIndex {
   diagnostics: SemanticDiagnostic[];
 }
 
-export interface SemanticProviderRun {
+export interface SemanticProviderRunBase<
+  TProviderType extends PersistedSemanticProviderType,
+> {
   runId: string;
   repoId: RepoId;
-  providerType: SemanticProviderType;
+  providerType: TProviderType;
   providerId: string;
   providerVersion?: string;
   languages: string[];
@@ -137,6 +143,12 @@ export interface SemanticProviderRun {
   error?: string;
 }
 
+export interface SemanticProviderRun
+  extends SemanticProviderRunBase<SemanticProviderType> {}
+
+export interface PersistedSemanticProviderRun
+  extends SemanticProviderRunBase<PersistedSemanticProviderType> {}
+
 export interface SemanticPrecisionInputs {
   filesCovered: number;
   filesEligible: number;
@@ -145,7 +157,7 @@ export interface SemanticPrecisionInputs {
   resolvedEdges: number;
   totalEdges: number;
   diagnosticsAvailable: boolean;
-  providerType: SemanticProviderType;
+  providerType: ActiveSemanticProviderType;
   pass2SkippedFiles: number;
   pass2EligibleFiles: number;
 }

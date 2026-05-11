@@ -857,7 +857,7 @@
         "cacheDir": {
           "type": ["string", "null"],
           "default": null,
-          "description": "Reserved cache root for future durable provider caches. V2 writes provider results to the graph and does not persist LSIF/LSP response caches here."
+          "description": "Reserved cache root for future durable provider caches. V2 writes provider results to the graph and does not persist LSP response caches here."
         },
         "concurrency": {
           "type": "integer",
@@ -880,7 +880,7 @@
         },
         "providers": {
           "type": "object",
-          "description": "Provider-specific overrides. Source selection is fixed priority: SCIP > LSIF > LSP.",
+          "description": "Provider-specific overrides. Source selection is fixed priority: SCIP > LSP.",
           "properties": {
             "scip": {
               "type": "object",
@@ -888,32 +888,6 @@
                 "enabled": { "type": "boolean", "default": true },
                 "providerId": { "type": "string" },
                 "providerVersion": { "type": "string" },
-                "indexes": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "required": ["path"],
-                    "properties": {
-                      "path": { "type": "string" },
-                      "label": { "type": "string" }
-                    }
-                  },
-                  "default": []
-                }
-              }
-            },
-            "lsif": {
-              "type": "object",
-              "properties": {
-                "enabled": { "type": "boolean", "default": true },
-                "providerId": { "type": "string" },
-                "providerVersion": { "type": "string" },
-                "confidence": {
-                  "type": "number",
-                  "minimum": 0.5,
-                  "maximum": 1,
-                  "default": 0.9
-                },
                 "indexes": {
                   "type": "array",
                   "items": {

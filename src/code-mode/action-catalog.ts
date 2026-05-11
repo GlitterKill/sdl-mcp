@@ -601,7 +601,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "scip.ingest":
     "Ingest a pre-built SCIP index to overlay compiler-grade cross-references onto the symbol graph",
   "semantic.enrichment.refresh":
-    "Run provider-backed semantic enrichment with SCIP > LSIF > LSP source selection",
+    "Run provider-backed semantic enrichment with SCIP > LSP source selection",
   "semantic.enrichment.status":
     "Report semantic enrichment source selection, skipped providers, last runs, and precision scores",
 };

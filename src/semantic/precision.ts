@@ -1,12 +1,11 @@
 import type {
   SemanticPrecisionInputs,
   SemanticPrecisionMetric,
-  SemanticProviderType,
+  ActiveSemanticProviderType,
 } from "./types.js";
 
-const PROVIDER_TIER_WEIGHT: Record<SemanticProviderType, number> = {
+const PROVIDER_TIER_WEIGHT: Record<ActiveSemanticProviderType, number> = {
   scip: 1,
-  lsif: 0.9,
   lsp: 0.8,
 };
 
@@ -41,7 +40,7 @@ export function buildSemanticPrecisionMetric(params: {
   repoId: string;
   runId: string;
   languageId: string;
-  providerType: SemanticProviderType;
+  providerType: ActiveSemanticProviderType;
   providerId: string;
   inputs: SemanticPrecisionInputs;
   computedAt?: string;

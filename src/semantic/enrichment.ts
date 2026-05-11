@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { access } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
 
 import {
   ScipConfigSchema,
@@ -27,7 +25,7 @@ import { invalidateGraphSnapshot } from "../graph/graphSnapshotCache.js";
 import { ingestScipIndex } from "../scip/ingestion.js";
 import type { ScipIngestResponse } from "../scip/types.js";
 import { logger } from "../util/logger.js";
-import { normalizePath, validatePathWithinRootAsync } from "../util/paths.js";
+import { normalizePath } from "../util/paths.js";
 import {
   deriveSemanticLanguagePacks,
   extendLanguagePacksForLsp,
@@ -37,8 +35,10 @@ import {
   type DetectedSemanticTools,
   type SemanticSourceSelection,
 } from "./source-selection.js";
-import type { SemanticProviderRun } from "./types.js";
-import { readLsifIndex } from "./providers/lsif/reader.js";
+import type {
+  PersistedSemanticProviderRun,
+  SemanticProviderRun,
+} from "./types.js";
 import { runLspCallDefinitionEnrichment } from "./providers/lsp/runner.js";
 import { writeSemanticIndex } from "./writer.js";
 
@@ -48,7 +48,7 @@ export interface SemanticEnrichmentRefreshRequest {
   force?: boolean;
   install?: boolean;
   languages?: string[];
-  skipProviders?: Array<"scip" | "lsif" | "lsp">;
+  skipProviders?: Array<"scip" | "lsp">;
 }
 
 export interface SemanticEnrichmentStatusRequest {
@@ -75,7 +75,7 @@ export interface SemanticEnrichmentStatusResult {
   autoRunOnIndexRefresh: boolean;
   installPolicy: SemanticEnrichmentConfig["installPolicy"];
   selections: SemanticSourceSelection[];
-  lastRuns: SemanticProviderRun[];
+  lastRuns: PersistedSemanticProviderRun[];
 }
 
 export async function refreshSemanticEnrichment(
@@ -133,7 +133,7 @@ export async function refreshSemanticEnrichment(
   const selectedProviderTypes = new Set(
     selections
       .map((selection) => selection.selected?.providerType)
-      .filter((providerType): providerType is "scip" | "lsif" | "lsp" =>
+      .filter((providerType): providerType is "scip" | "lsp" =>
         Boolean(providerType),
       ),
   );
@@ -171,33 +171,6 @@ export async function refreshSemanticEnrichment(
           mergeSemanticProviderRun(writeConn, run),
         );
       }
-    }
-  }
-
-  if (selectedProviderTypes.has("lsif")) {
-    const indexes = config.providers.lsif?.indexes ?? [];
-    const lsifLanguages = selectedLanguages(selections, "lsif");
-    for (const index of indexes) {
-      const absoluteIndexPath = await resolveProviderIndexPath(
-        normalizePath(repo.rootPath),
-        index.path,
-      );
-      const semanticIndex = await readLsifIndex({
-        repoId: request.repoId,
-        repoRoot: repo.rootPath,
-        indexPath: absoluteIndexPath,
-        runId: randomUUID(),
-        providerId: config.providers.lsif?.providerId ?? "lsif",
-        providerVersion: config.providers.lsif?.providerVersion,
-        confidence: config.providers.lsif?.confidence,
-        languages: shouldFilterProviderLanguages ? lsifLanguages : undefined,
-      });
-      const result = dryRun
-        ? await writeSemanticIndex(conn, semanticIndex, { dryRun: true })
-        : await withWriteConn((writeConn) =>
-            writeSemanticIndex(writeConn, semanticIndex),
-          );
-      runs.push(result.run);
     }
   }
 
@@ -358,9 +331,9 @@ async function invalidateSemanticEnrichmentState(repoId: string): Promise<void> 
 }
 
 function filterProviderRunsByLanguages(
-  runs: readonly SemanticProviderRun[],
+  runs: readonly PersistedSemanticProviderRun[],
   languages: readonly string[],
-): SemanticProviderRun[] {
+): PersistedSemanticProviderRun[] {
   if (languages.length === 0) return [...runs];
   const allowed = new Set(languages);
   return runs.filter((run) =>
@@ -394,21 +367,6 @@ function detectSemanticTools(
           providerId: config.providers.scip?.providerId ?? "scip",
           providerVersion: config.providers.scip?.providerVersion,
           canAffectPass2: true,
-        },
-      ]),
-    );
-  }
-
-  const lsifIndexes = config.providers.lsif?.indexes ?? [];
-  if (lsifIndexes.length > 0) {
-    detected.lsif = Object.fromEntries(
-      languageIds.map((languageId) => [
-        languageId,
-        {
-          available: true,
-          providerId: config.providers.lsif?.providerId ?? "lsif",
-          providerVersion: config.providers.lsif?.providerVersion,
-          canAffectPass2: false,
         },
       ]),
     );
@@ -449,7 +407,7 @@ function resolveScipIndexes(
 
 function selectedLanguages(
   selections: readonly SemanticSourceSelection[],
-  providerType: "scip" | "lsif" | "lsp",
+  providerType: "scip" | "lsp",
 ): string[] {
   return selections
     .filter((selection) => selection.selected?.providerType === providerType)
@@ -515,15 +473,4 @@ export function scipResultToProviderRun(params: {
     canAffectPass2: true,
     selected: true,
   };
-}
-
-async function resolveProviderIndexPath(
-  repoRoot: string,
-  indexPath: string,
-): Promise<string> {
-  const raw = normalizePath(indexPath);
-  const absolute = isAbsolute(raw) ? raw : resolve(repoRoot, raw);
-  await validatePathWithinRootAsync(repoRoot, absolute);
-  await access(absolute);
-  return normalizePath(absolute);
 }

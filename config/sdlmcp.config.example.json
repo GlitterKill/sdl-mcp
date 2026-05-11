@@ -176,11 +176,6 @@
         "enabled": true,
         "indexes": []
       },
-      "lsif": {
-        "enabled": true,
-        "indexes": [],
-        "confidence": 0.9
-      },
       "lsp": {
         "enabled": true,
         "confidence": 0.8,
