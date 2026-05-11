@@ -11,7 +11,7 @@
 | Flat (default) | 37 | 2 universal + 35 flat |
 | Gateway | 6 | 2 universal + 4 gateway |
 | Gateway + legacy | 41 | 2 universal + 4 gateway + 35 flat |
-| Code Mode exclusive | 5 | 5 Code Mode tools only (no `sdl.info`) |
+| Code Mode exclusive | 5 | `sdl.action.search`, `sdl.context`, `sdl.file`, `sdl.manual`, `sdl.workflow` |
 | All unique actions | 40 | flat + code-mode unique |
 
 ## Universal Tools

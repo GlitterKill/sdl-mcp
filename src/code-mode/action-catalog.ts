@@ -12,6 +12,7 @@ import {
   MemoryRemoveRequestSchema,
   MemorySurfaceRequestSchema,
 } from "../mcp/tools.js";
+import { FileGatewayRequestSchema } from "../mcp/tools/file-gateway.js";
 import { WorkflowRequestSchema } from "./types.js";
 
 // Meta-tool schemas. ActionSearchRequestSchema is also exported from
@@ -39,6 +40,7 @@ const META_TOOL_SCHEMAS: Record<string, z.ZodType> = {
   "action.search": META_ACTION_SEARCH_SCHEMA,
   manual: META_MANUAL_SCHEMA,
   context: AgentContextRequestSchema,
+  file: FileGatewayRequestSchema,
   workflow: WorkflowRequestSchema,
 };
 
@@ -106,6 +108,7 @@ const META_TOOL_TAGS: Record<string, ActionTag[]> = {
   "action.search": ["meta"],
   manual: ["meta"],
   context: ["meta", "agent"],
+  file: ["meta", "repo", "mutation"],
   workflow: ["meta", "runtime", "transform"],
 };
 
@@ -613,6 +616,8 @@ const META_TOOL_DESCRIPTIONS: Record<string, string> = {
     "Load the focused SDL-MCP manual after discovery. Use this before composing workflow steps.",
   context:
     "Preferred first tool for explain, debug, review, implement, understand, or investigate prompts. Retrieves task-shaped code context directly and should be chosen before workflow for context retrieval.",
+  file:
+    "Unified sdl.file gateway for non-indexed file reads, targeted writes, two-phase search edits, and plan-bound previewWindow/sourceWindow code windows.",
   workflow:
     "Preferred first tool for execute, runtime, transform, batch, or pipeline prompts. Runs multi-step workflows with $N result piping, runtime execution, data transforms, and batch mutations.",
 };
@@ -659,6 +664,16 @@ const META_TOOL_EXAMPLES: Record<string, Record<string, unknown>> = {
     taskType: "debug",
     taskText: "explain the auth failure path",
     options: { contextMode: "precise", focusPaths: ["src/auth.ts"] },
+  },
+  file: {
+    op: "previewWindow",
+    repoId: "my-repo",
+    planHandle: "<planHandle>",
+    filePath: "src/main.ts",
+    symbolId: "<symbolId>",
+    reason: "Inspect planned source edit",
+    expectedLines: 40,
+    identifiersToFind: ["targetFunction"],
   },
   workflow: {
     repoId: "<repoId>",
@@ -853,7 +868,7 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
   file: {
     prerequisites: ["repo.status"],
     recommendedNextActions: ["file"],
-    fallbacks: ["file.write", "search.edit"],
+    fallbacks: ["file.write", "search.edit", "code.needWindow"],
   },
 
   "search.edit": {
@@ -1070,7 +1085,7 @@ function buildBaseCatalogFromMap(
   }
 
   // Top-level Code Mode meta tools
-  for (const action of ["action.search", "manual", "context", "workflow"]) {
+  for (const action of ["action.search", "manual", "context", "file", "workflow"]) {
     catalog.push({
       action,
       fn: action,

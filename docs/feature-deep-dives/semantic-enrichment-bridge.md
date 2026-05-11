@@ -19,7 +19,7 @@ Only the selected source runs for a language. Lower-priority providers are repor
 - `sdl.semantic.enrichment.status` reports source selection, skipped providers, last runs, and precision scores even when refresh is disabled.
 - SCIP remains compatible with `sdl.scip.ingest` and keeps its existing optimized index-refresh placement: pass-1 drain, SCIP ingest, then pass 2.
 - LSP uses a lightweight stdio JSON-RPC client. Tree-sitter-backed languages can run call-definition candidates derived from call ranges and replace unresolved or heuristic call edges with exact provider-backed edges.
-- Configured LSP servers can also run generic document-symbol and diagnostic ingestion when they advertise those capabilities, even when SDL-MCP does not have a tree-sitter adapter for that language.
+- Configured LSP servers can also run generic diagnostic ingestion when diagnostics are requested in config or advertised by the server, even when SDL-MCP does not have a tree-sitter adapter for that language. Generic document-symbol persistence is intentionally deferred until symbols have durable graph semantics.
 - LSP remains post-index only. It does not execute package-manager install recipes or affect pass-2 scheduling.
 - Combined SCIP indexes are supported. Language-scoped refresh filters provider documents to the requested language set instead of requiring one index file per language.
 - `force` bypasses compatible cache decisions where they exist. In V2, that means the SCIP ingestion content-hash shortcut; LSP has no durable response cache yet.
@@ -64,6 +64,7 @@ Only the selected source runs for a language. Lower-priority providers are repor
             "languages": ["python"],
             "documentLanguageIds": ["python"],
             "filePatterns": ["**/*.py", "**/*.pyi"],
+            "capabilities": ["diagnostics"],
             "enabled": true
           }
         }

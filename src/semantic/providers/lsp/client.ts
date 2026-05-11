@@ -1,4 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { win32 } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -16,7 +18,6 @@ import type {
   Diagnostic,
   DidChangeTextDocumentParams,
   DidOpenTextDocumentParams,
-  DocumentSymbol,
   Hover,
   InitializeParams,
   InitializeResult,
@@ -24,7 +25,6 @@ import type {
   LocationLink,
   PublishDiagnosticsParams,
   ReferenceParams,
-  SymbolInformation,
   TextDocumentContentChangeEvent,
   TextDocumentItem,
   VersionedTextDocumentIdentifier,
@@ -54,11 +54,6 @@ const ReferencesRequest = new RequestType<
   Location[] | null,
   void
 >("textDocument/references");
-const DocumentSymbolRequest = new RequestType<
-  { textDocument: { uri: string } },
-  DocumentSymbol[] | SymbolInformation[] | null,
-  void
->("textDocument/documentSymbol");
 const HoverRequest = new RequestType<
   {
     textDocument: { uri: string };
@@ -94,22 +89,39 @@ export function resolveLspSpawnCommand(options: {
   command: string;
   args?: string[];
   platform?: NodeJS.Platform;
-  comspec?: string;
+  cwd?: string;
+  envPath?: string;
+  pathExt?: string;
+  nodeExecPath?: string;
+  readFileText?: (path: string) => string;
+  fileExists?: (path: string) => boolean;
 }): LspSpawnCommand {
   const platform = options.platform ?? process.platform;
   const args = options.args ?? [];
-  const shimCommand = unwrapWindowsCommandShim(options.command);
-  if (platform === "win32" && hasWindowsCommandShimExtension(shimCommand)) {
+  const command = unwrapWindowsCommandShim(options.command);
+  const resolvedCommand =
+    platform === "win32" ? resolveWindowsCommand(command, options) : command;
+
+  if (platform === "win32" && hasWindowsCommandShimExtension(resolvedCommand)) {
+    const entrypoint = resolveNpmCommandShimEntrypoint(
+      resolvedCommand,
+      options.readFileText ?? ((path) => readFileSync(path, "utf8")),
+    );
+    if (!entrypoint) {
+      throw new Error(
+        `Windows LSP command shim ${resolvedCommand} is not a supported npm-style shim; ` +
+          "configure the server's JS entrypoint or native executable instead.",
+      );
+    }
     return {
-      command: options.comspec ?? process.env.ComSpec ?? "cmd.exe",
-      // Windows command shims are batch scripts; direct spawn() fails with EINVAL.
-      args: ["/d", "/s", "/c", shimCommand, ...args],
+      command: options.nodeExecPath ?? process.execPath,
+      args: [entrypoint, ...args],
       shell: false,
     };
   }
 
   return {
-    command: options.command,
+    command: resolvedCommand,
     args,
     shell: false,
   };
@@ -126,11 +138,80 @@ function hasWindowsCommandShimExtension(command: string): boolean {
   return /\.(?:cmd|bat)$/iu.test(command);
 }
 
+function resolveWindowsCommand(
+  command: string,
+  options: {
+    cwd?: string;
+    envPath?: string;
+    pathExt?: string;
+    fileExists?: (path: string) => boolean;
+  },
+): string {
+  if (/[\\/]/u.test(command) || /^[A-Za-z]:/u.test(command)) {
+    return command;
+  }
+
+  const pathExts = (
+    options.pathExt ?? process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD"
+  )
+    .split(";")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const candidateNames = win32.extname(command)
+    ? [command]
+    : [command, ...pathExts.map((extension) => `${command}${extension}`)];
+  const pathDirs = (options.envPath ?? process.env.PATH ?? "")
+    .split(";")
+    .filter(Boolean);
+  if (options.cwd) pathDirs.unshift(options.cwd);
+
+  const fileExists = options.fileExists ?? existsSync;
+  for (const dir of pathDirs) {
+    for (const candidateName of candidateNames) {
+      const candidate = win32.join(dir, candidateName);
+      if (fileExists(candidate)) return candidate;
+    }
+  }
+
+  return command;
+}
+
+function resolveNpmCommandShimEntrypoint(
+  shimPath: string,
+  readFileText: (path: string) => string,
+): string | null {
+  let shimText: string;
+  try {
+    shimText = readFileText(shimPath);
+  } catch {
+    return null;
+  }
+
+  const shimDir = win32.dirname(shimPath);
+  for (const line of shimText.split(/\r?\n/u)) {
+    if (!line.includes("%*")) continue;
+    const quotedPaths = [...line.matchAll(/"([^"]+\.(?:cjs|mjs|js))"/giu)]
+      .map((match) => match[1])
+      .filter((value) => !/node(?:\.exe)?$/iu.test(value));
+    const script = quotedPaths[0];
+    if (!script) continue;
+    return script.replace(/%~?dp0%?[\\/]?/giu, `${shimDir}\\`);
+  }
+
+  return null;
+}
+
+interface DiagnosticWaiter {
+  uris: Set<string>;
+  resolve: () => void;
+}
+
 export class SemanticLspClient {
   private readonly options: LspClientOptions;
   private process: ChildProcessWithoutNullStreams | null = null;
   private connection: MessageConnection | null = null;
   private readonly diagnosticsByUri = new Map<string, Diagnostic[]>();
+  private readonly diagnosticWaiters: DiagnosticWaiter[] = [];
   private initialized = false;
 
   constructor(options: LspClientOptions) {
@@ -145,6 +226,7 @@ export class SemanticLspClient {
     const spawnCommand = resolveLspSpawnCommand({
       command: this.options.command,
       args: this.options.args,
+      cwd: this.options.workspaceRoot,
     });
     const child = spawn(spawnCommand.command, spawnCommand.args, {
       cwd: this.options.workspaceRoot,
@@ -159,6 +241,7 @@ export class SemanticLspClient {
     );
     connection.onNotification(PublishDiagnosticsNotification, (params) => {
       this.diagnosticsByUri.set(params.uri, params.diagnostics);
+      this.notifyDiagnosticWaiters();
     });
     connection.listen();
 
@@ -234,13 +317,6 @@ export class SemanticLspClient {
     return this.sendRequest(ReferencesRequest, params);
   }
 
-  async documentSymbols(
-    uri: string,
-  ): Promise<DocumentSymbol[] | SymbolInformation[] | null> {
-    this.ensureInitialized();
-    return this.sendRequest(DocumentSymbolRequest, { textDocument: { uri } });
-  }
-
   async hover(
     uri: string,
     position: { line: number; character: number },
@@ -254,6 +330,34 @@ export class SemanticLspClient {
 
   diagnostics(uri: string): Diagnostic[] {
     return this.diagnosticsByUri.get(uri) ?? [];
+  }
+
+  async waitForDiagnostics(
+    uris: readonly string[],
+    timeoutMs: number,
+  ): Promise<void> {
+    this.ensureInitialized();
+    if (timeoutMs <= 0 || uris.every((uri) => this.diagnosticsByUri.has(uri))) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      const waiter: DiagnosticWaiter = {
+        uris: new Set(uris),
+        resolve: () => undefined,
+      };
+      const timeout = setTimeout(() => {
+        this.removeDiagnosticWaiter(waiter);
+        resolve();
+      }, timeoutMs);
+      waiter.resolve = () => {
+        clearTimeout(timeout);
+        this.removeDiagnosticWaiter(waiter);
+        resolve();
+      };
+      this.diagnosticWaiters.push(waiter);
+      this.notifyDiagnosticWaiters();
+    });
   }
 
   async dispose(): Promise<void> {
@@ -271,6 +375,22 @@ export class SemanticLspClient {
     this.connection = null;
     this.process = null;
     this.initialized = false;
+    for (const waiter of [...this.diagnosticWaiters]) {
+      waiter.resolve();
+    }
+  }
+
+  private notifyDiagnosticWaiters(): void {
+    for (const waiter of [...this.diagnosticWaiters]) {
+      if ([...waiter.uris].every((uri) => this.diagnosticsByUri.has(uri))) {
+        waiter.resolve();
+      }
+    }
+  }
+
+  private removeDiagnosticWaiter(waiter: DiagnosticWaiter): void {
+    const index = this.diagnosticWaiters.indexOf(waiter);
+    if (index >= 0) this.diagnosticWaiters.splice(index, 1);
   }
 
   private async sendRequest<P, R>(

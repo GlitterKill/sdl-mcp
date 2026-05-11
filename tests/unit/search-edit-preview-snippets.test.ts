@@ -71,4 +71,23 @@ describe("buildSearchEditPreviewSnippets", () => {
     assert.equal(snippets.before, ">2 | beta");
     assert.equal(snippets.after, ">2 | delta");
   });
+
+  it("bounds distant multi-match replacements to an anchored preview hunk", () => {
+    const beforeLines = [
+      "first foo();",
+      ...Array.from({ length: 120 }, (_, index) => `unchanged ${index}`),
+      "second foo();",
+    ];
+    const before = beforeLines.join("\n");
+    const after = before.replace(/foo\(\)/g, "bar()");
+
+    const snippets = buildSearchEditPreviewSnippets(before, after, 2, /foo\(\)/g);
+
+    assert.ok(snippets.before.split("\n").length <= 5);
+    assert.ok(snippets.after.split("\n").length <= 5);
+    assert.match(snippets.before, />1 \| first foo\(\);/);
+    assert.match(snippets.after, />1 \| first bar\(\);/);
+    assert.doesNotMatch(snippets.before, /second foo/);
+    assert.doesNotMatch(snippets.after, /second bar/);
+  });
 });

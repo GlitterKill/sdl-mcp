@@ -113,6 +113,7 @@ const DEFAULT_MAX_MATCHES_PER_FILE = 100;
 const DEFAULT_MAX_TOTAL_MATCHES = 500;
 const MAX_PLAN_BYTES = 10 * 1024 * 1024; // 10MB aggregate cap per plan
 const DEFAULT_PREVIEW_CONTEXT_LINES = 2;
+const MAX_PREVIEW_SNIPPET_LINES = 80;
 
 /** Directory names that are never descended into. */
 const SKIP_DIRS = new Set([
@@ -535,6 +536,25 @@ function buildLineRange(
   };
 }
 
+function boundPreviewChangedSpan(
+  lines: string[],
+  changedSpan: PreviewLineRange,
+  fallbackIndex: number,
+  contextLines: number,
+): PreviewLineRange {
+  const fullRange = buildLineRange(lines, changedSpan, contextLines);
+  if (fullRange.endIndex - fullRange.startIndex <= MAX_PREVIEW_SNIPPET_LINES) {
+    return changedSpan;
+  }
+
+  return nonEmptyDisplaySpan(
+    lines,
+    fallbackIndex,
+    fallbackIndex,
+    fallbackIndex,
+  );
+}
+
 function formatNumberedLines(
   lines: string[],
   range: PreviewLineRange,
@@ -568,17 +588,27 @@ export function buildSearchEditPreviewSnippets(
   const changedSpan = findChangedLineSpan(beforeLines, afterLines);
   const regexLine = regex ? findRegexLine(beforeLines, regex) : -1;
   const beforeFallback = regexLine >= 0 ? regexLine : changedSpan.beforeStartIndex;
-  const beforeChangedSpan = nonEmptyDisplaySpan(
+  const beforeChangedSpan = boundPreviewChangedSpan(
     beforeLines,
-    changedSpan.beforeStartIndex,
-    changedSpan.beforeEndIndex,
+    nonEmptyDisplaySpan(
+      beforeLines,
+      changedSpan.beforeStartIndex,
+      changedSpan.beforeEndIndex,
+      beforeFallback,
+    ),
     beforeFallback,
+    contextLines,
   );
-  const afterChangedSpan = nonEmptyDisplaySpan(
+  const afterChangedSpan = boundPreviewChangedSpan(
     afterLines,
+    nonEmptyDisplaySpan(
+      afterLines,
+      changedSpan.afterStartIndex,
+      changedSpan.afterEndIndex,
+      changedSpan.afterStartIndex,
+    ),
     changedSpan.afterStartIndex,
-    changedSpan.afterEndIndex,
-    changedSpan.afterStartIndex,
+    contextLines,
   );
   const beforeRange = buildLineRange(beforeLines, beforeChangedSpan, contextLines);
   const afterRange = buildLineRange(afterLines, afterChangedSpan, contextLines);

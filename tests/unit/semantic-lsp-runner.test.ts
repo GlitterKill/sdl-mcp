@@ -72,10 +72,12 @@ function makePlan(repoRoot: string): LspCandidatePlan {
 function makeClient(params: {
   definitions?: unknown[];
   definitionProvider?: boolean;
-  documentSymbolProvider?: boolean;
-  documentSymbols?: unknown[];
   diagnosticProvider?: boolean;
   diagnostics?: unknown[];
+  waitForDiagnostics?: (
+    uris: readonly string[],
+    timeoutMs: number,
+  ) => Promise<void>;
   startError?: Error;
 }): SemanticLspClientLike {
   const definitions = params.definitions ?? [];
@@ -88,9 +90,6 @@ function makeClient(params: {
           ...(params.definitionProvider === false
             ? {}
             : { definitionProvider: true }),
-          ...(params.documentSymbolProvider
-            ? { documentSymbolProvider: true }
-            : {}),
           ...(params.diagnosticProvider ? { diagnosticProvider: {} } : {}),
         },
         serverInfo: { name: "mock-lsp", version: "1.2.3" },
@@ -102,12 +101,12 @@ function makeClient(params: {
     async definition() {
       return definitions[requestIndex++] as never;
     },
-    async documentSymbols() {
-      return (params.documentSymbols ?? []) as never;
-    },
     diagnostics() {
       return (params.diagnostics ?? []) as never;
     },
+    ...(params.waitForDiagnostics
+      ? { waitForDiagnostics: params.waitForDiagnostics }
+      : {}),
     async dispose() {
       return undefined;
     },
@@ -220,7 +219,7 @@ describe("LSP call-definition runner", () => {
     }
   });
 
-  it("ingests document symbols for a non-TypeScript LSP server", async () => {
+  it("skips document-symbol-only LSP servers until symbol persistence exists", async () => {
     const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-runner-doc-symbol-"));
     try {
       mkdirSync(join(repoRoot, "src"), { recursive: true });
@@ -255,56 +254,51 @@ describe("LSP call-definition runner", () => {
           candidates: [],
           skipped: [],
         }),
-        clientFactory: () =>
-          makeClient({
-            definitionProvider: false,
-            documentSymbolProvider: true,
-            documentSymbols: [
-              {
-                name: "greet",
-                kind: 12,
-                range: {
-                  start: { line: 0, character: 0 },
-                  end: { line: 1, character: 18 },
-                },
-                selectionRange: {
-                  start: { line: 0, character: 4 },
-                  end: { line: 0, character: 9 },
-                },
-              },
-            ],
-          }),
+        clientFactory: () => makeClient({ definitionProvider: false }),
       });
 
       assert.equal(result.failedRun, undefined);
-      assert.equal(result.skippedRun, undefined);
-      assert.equal(result.index?.documents.length, 1);
-      assert.equal(result.index?.symbols.length, 1);
-      assert.equal(result.index?.symbols[0].name, "greet");
-      assert.equal(result.index?.symbols[0].languageId, "python");
+      assert.equal(result.index, undefined);
+      assert.equal(result.skippedRun?.status, "skipped");
+      assert.match(
+        result.skippedRun?.error ?? "",
+        /diagnostic or definition capabilities/,
+      );
     } finally {
       rmSync(repoRoot, { recursive: true, force: true });
     }
   });
 
-  it("ingests diagnostics when that is the only useful LSP capability", async () => {
+  it("ingests bounded diagnostics after a bounded wait when config requests them", async () => {
     const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-runner-diagnostic-"));
     try {
       mkdirSync(join(repoRoot, "src"), { recursive: true });
-      writeFileSync(join(repoRoot, "src", "main.py"), "x = unknown\n", "utf8");
+      writeFileSync(join(repoRoot, "src", "main.js"), "x = unknown\n", "utf8");
+      let waitedFor: { uris: readonly string[]; timeoutMs: number } | null = null;
+      const longMessage = "x".repeat(1_200);
+      const diagnostics = Array.from({ length: 250 }, (_, index) => ({
+        range: {
+          start: { line: 0, character: 4 },
+          end: { line: 0, character: 11 },
+        },
+        severity: index === 0 ? 1 : 2,
+        message: longMessage,
+        code: "E001",
+      }));
+
       const result = await runLspCallDefinitionEnrichment({
         conn: {} as never,
         repoId: "repo",
         repoRoot,
-        languageId: "python",
+        languageId: "typescript",
         server: {
           enabled: true,
-          serverId: "mock-python",
+          serverId: "mock-js",
           command: "mock",
           args: [],
-          languages: ["python"],
-          documentLanguageIds: ["python"],
-          filePatterns: ["**/*.py"],
+          languages: ["typescript", "javascript"],
+          documentLanguageIds: ["typescript", "javascript"],
+          filePatterns: ["**/*.js"],
           capabilities: ["diagnostics"],
         },
         confidence: 0.8,
@@ -313,7 +307,7 @@ describe("LSP call-definition runner", () => {
         runId: "run-diagnostic",
         candidatePlanner: async () => ({
           repoId: "repo",
-          languageId: "python",
+          languageId: "typescript",
           documents: [],
           candidates: [],
           skipped: [],
@@ -321,26 +315,21 @@ describe("LSP call-definition runner", () => {
         clientFactory: () =>
           makeClient({
             definitionProvider: false,
-            diagnosticProvider: true,
-            diagnostics: [
-              {
-                range: {
-                  start: { line: 0, character: 4 },
-                  end: { line: 0, character: 11 },
-                },
-                severity: 1,
-                message: "Unknown name",
-                code: "E001",
-              },
-            ],
+            diagnostics,
+            waitForDiagnostics: async (uris, timeoutMs) => {
+              waitedFor = { uris, timeoutMs };
+            },
           }),
       });
 
       assert.equal(result.failedRun, undefined);
       assert.equal(result.skippedRun, undefined);
-      assert.equal(result.index?.diagnostics.length, 1);
+      assert.equal(result.index?.diagnostics.length, 200);
       assert.equal(result.index?.diagnostics[0].severity, "error");
-      assert.equal(result.index?.diagnostics[0].message, "Unknown name");
+      assert.equal(result.index?.diagnostics[0].message.length, 1000);
+      assert.equal(result.index?.diagnostics[0].languageId, "javascript");
+      assert.equal(waitedFor?.uris.length, 1);
+      assert.ok((waitedFor?.timeoutMs ?? 0) <= 1000);
     } finally {
       rmSync(repoRoot, { recursive: true, force: true });
     }

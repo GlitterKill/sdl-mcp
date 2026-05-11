@@ -551,10 +551,10 @@ Built-in read-only dashboard surfaces every metric needed to diagnose SDL-MCP be
 
 | Mode                | Tool count | Composition                                                      |
 | :------------------ | :--------- | :--------------------------------------------------------------- |
-| Flat                | `33`       | `2` universal + `31` flat tools                                  |
+| Flat                | `37`       | `2` universal + `35` flat tools                                  |
 | Gateway             | `6`        | `2` universal + `4` gateway tools                                |
-| Gateway + legacy    | `37`       | `2` universal + `4` gateway + `31` flat tools                    |
-| Code Mode exclusive | `4`        | `sdl.action.search`, `sdl.context`, `sdl.manual`, `sdl.workflow` |
+| Gateway + legacy    | `41`       | `2` universal + `4` gateway + `35` flat tools                    |
+| Code Mode exclusive | `5`        | `sdl.action.search`, `sdl.context`, `sdl.file`, `sdl.manual`, `sdl.workflow` |
 
 The generated source of truth is [`docs/generated/tool-inventory.md`](./docs/generated/tool-inventory.md).
 

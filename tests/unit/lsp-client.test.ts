@@ -1,10 +1,19 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-
 import {
   resolveLspSpawnCommand,
   SemanticLspClient,
 } from "../../dist/semantic/providers/lsp/client.js";
+
+function npmShim(
+  script = "%~dp0\\node_modules\\typescript-language-server\\lib\\cli.js",
+): string {
+  return `@IF EXIST "%~dp0\\node.exe" (
+  "%~dp0\\node.exe" "${script}" %*
+) ELSE (
+  node "${script}" %*
+)`;
+}
 
 describe("SemanticLspClient", () => {
   it("guards LSP requests until initialize completes", async () => {
@@ -16,42 +25,64 @@ describe("SemanticLspClient", () => {
     });
 
     await assert.rejects(
-      () => client.documentSymbols("file:///tmp/example.ts"),
+      () => client.hover("file:///tmp/example.ts", { line: 0, character: 0 }),
       /not initialized/,
     );
   });
-  it("wraps Windows command shims with cmd.exe", () => {
+
+  it("starts explicit Windows npm command shims through node entrypoints", () => {
     assert.deepEqual(
       resolveLspSpawnCommand({
         command: "C:\\tools\\typescript-language-server.cmd",
         args: ["--stdio"],
         platform: "win32",
-        comspec: "C:\\Windows\\System32\\cmd.exe",
+        nodeExecPath: "C:\\node\\node.exe",
+        readFileText: () => npmShim(),
       }),
       {
-        command: "C:\\Windows\\System32\\cmd.exe",
+        command: "C:\\node\\node.exe",
         args: [
-          "/d",
-          "/s",
-          "/c",
-          "C:\\tools\\typescript-language-server.cmd",
+          "C:\\tools\\node_modules\\typescript-language-server\\lib\\cli.js",
           "--stdio",
         ],
         shell: false,
       },
     );
+  });
 
+  it("resolves bare Windows commands through PATH and PATHEXT", () => {
     assert.deepEqual(
       resolveLspSpawnCommand({
-        command: '"C:\\Program Files\\server.bat"',
+        command: "typescript-language-server",
+        args: ["--stdio"],
         platform: "win32",
-        comspec: "cmd.exe",
+        envPath: "C:\\tools;C:\\unused",
+        pathExt: ".CMD;.EXE",
+        nodeExecPath: "C:\\node\\node.exe",
+        fileExists: (path) =>
+          path === "C:\\tools\\typescript-language-server.CMD",
+        readFileText: () => npmShim(),
       }),
       {
-        command: "cmd.exe",
-        args: ["/d", "/s", "/c", "C:\\Program Files\\server.bat"],
+        command: "C:\\node\\node.exe",
+        args: [
+          "C:\\tools\\node_modules\\typescript-language-server\\lib\\cli.js",
+          "--stdio",
+        ],
         shell: false,
       },
+    );
+  });
+
+  it("rejects unsupported Windows batch shims instead of invoking cmd.exe", () => {
+    assert.throws(
+      () =>
+        resolveLspSpawnCommand({
+          command: '"C:\\Program Files\\server.bat"',
+          platform: "win32",
+          readFileText: () => "echo unsafe %*",
+        }),
+      /not a supported npm-style shim/,
     );
   });
 

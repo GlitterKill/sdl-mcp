@@ -73,6 +73,178 @@ describe("code-mode tool validation", () => {
     );
   });
 
+  it("advertises plan-bound file window operations in sdl.file wire schema", () => {
+    let fileWireSchema: { properties?: Record<string, unknown> } | null = null;
+    const fakeServer = {
+      registerTool(
+        name: string,
+        _description: string,
+        _schema: unknown,
+        _handler: (args: unknown) => Promise<unknown>,
+        wireSchema?: unknown,
+      ) {
+        if (name === "sdl.file") {
+          fileWireSchema = wireSchema as { properties?: Record<string, unknown> };
+        }
+      },
+    };
+
+    registerCodeModeTools(
+      fakeServer as any,
+      { liveIndex: undefined } as any,
+      {
+        enabled: true,
+        exclusive: false,
+        maxWorkflowSteps: 20,
+        maxWorkflowTokens: 50_000,
+        maxWorkflowDurationMs: 30_000,
+        ladderValidation: "warn",
+        etagCaching: true,
+      },
+    );
+
+    const properties = fileWireSchema?.properties as
+      | Record<string, { enum?: string[] } | unknown>
+      | undefined;
+    assert.ok(properties);
+    assert.deepEqual((properties.op as { enum: string[] }).enum, [
+      "read",
+      "write",
+      "searchEditPreview",
+      "searchEditApply",
+      "previewWindow",
+      "sourceWindow",
+    ]);
+    for (const field of [
+      "symbolId",
+      "reason",
+      "expectedLines",
+      "identifiersToFind",
+      "granularity",
+      "maxTokens",
+      "sliceContext",
+      "cursor",
+      "ifNoneMatch",
+    ]) {
+      assert.ok(field in properties, `missing ${field}`);
+    }
+  });
+
+  it("includes plan-bound file window operations in sdl.manual schema output", async () => {
+    let manualHandler: ((args: unknown) => Promise<unknown>) | null = null;
+    const fakeServer = {
+      registerTool(
+        name: string,
+        _description: string,
+        _schema: unknown,
+        handler: (args: unknown) => Promise<unknown>,
+      ) {
+        if (name === "sdl.manual") {
+          manualHandler = handler;
+        }
+      },
+    };
+
+    registerCodeModeTools(
+      fakeServer as any,
+      { liveIndex: undefined } as any,
+      {
+        enabled: true,
+        exclusive: false,
+        maxWorkflowSteps: 20,
+        maxWorkflowTokens: 50_000,
+        maxWorkflowDurationMs: 30_000,
+        ladderValidation: "warn",
+        etagCaching: true,
+      },
+    );
+
+    assert.ok(manualHandler);
+    const response = (await manualHandler({
+      format: "json",
+      actions: ["file"],
+      includeSchemas: true,
+      includeExamples: true,
+    })) as {
+      actions: Array<{
+        action: string;
+        example?: Record<string, unknown>;
+        schemaSummary?: { fields: Array<{ name: string; enumValues?: string[] }> };
+      }>;
+    };
+
+    const fileAction = response.actions.find((action) => action.action === "file");
+    assert.ok(fileAction);
+    assert.equal(fileAction.example?.op, "previewWindow");
+    const opField = fileAction.schemaSummary?.fields.find(
+      (field) => field.name === "op",
+    );
+    assert.deepEqual(opField?.enumValues, [
+      "read",
+      "write",
+      "searchEditPreview",
+      "searchEditApply",
+      "previewWindow",
+      "sourceWindow",
+    ]);
+  });
+
+  it("routes plan-bound file window operations through the sdl.file handler", async () => {
+    let fileHandler: ((args: unknown) => Promise<unknown>) | null = null;
+    const fakeServer = {
+      registerTool(
+        name: string,
+        _description: string,
+        _schema: unknown,
+        handler: (args: unknown) => Promise<unknown>,
+      ) {
+        if (name === "sdl.file") {
+          fileHandler = handler;
+        }
+      },
+    };
+
+    registerCodeModeTools(
+      fakeServer as any,
+      { liveIndex: undefined } as any,
+      {
+        enabled: true,
+        exclusive: false,
+        maxWorkflowSteps: 20,
+        maxWorkflowTokens: 50_000,
+        maxWorkflowDurationMs: 30_000,
+        ladderValidation: "warn",
+        etagCaching: true,
+      },
+    );
+
+    assert.ok(fileHandler);
+    const handler = fileHandler;
+    for (const op of ["previewWindow", "sourceWindow"] as const) {
+      await assert.rejects(
+        () =>
+          handler({
+            op,
+            repoId: "demo-repo",
+            planHandle: "missing-plan",
+            symbolId: "deadbeef",
+            reason: "Inspect planned source edit",
+            expectedLines: 12,
+            identifiersToFind: ["targetFunction"],
+          }),
+        (error: unknown) => {
+          const notFound = error as { name?: string; message?: string };
+          assert.equal(notFound.name, "NotFoundError");
+          assert.match(
+            notFound.message ?? "",
+            /Edit plan not found or expired: missing-plan/,
+          );
+          return true;
+        },
+      );
+    }
+  });
+
   it("throws a validation error for semantically invalid sdl.workflow requests", async () => {
     let workflowHandler: ((args: unknown) => Promise<unknown>) | null = null;
     const fakeServer = {

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { Dirent } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import type { Dirent, Stats } from "node:fs";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -8,11 +8,9 @@ import type { Connection } from "kuzu";
 import type {
   DefinitionParams,
   Diagnostic,
-  DocumentSymbol,
   InitializeResult,
   Location,
   LocationLink,
-  SymbolInformation,
 } from "vscode-languageserver-protocol";
 
 import type { SemanticEnrichmentLspServerConfig } from "../../../config/types.js";
@@ -45,10 +43,11 @@ export interface SemanticLspClientLike {
     params: DefinitionParams,
     timeoutMs?: number,
   ): Promise<Location | Location[] | LocationLink[] | null>;
-  documentSymbols?(
-    uri: string,
-  ): Promise<DocumentSymbol[] | SymbolInformation[] | null>;
   diagnostics?(uri: string): Diagnostic[];
+  waitForDiagnostics?(
+    uris: readonly string[],
+    timeoutMs: number,
+  ): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -80,6 +79,15 @@ interface ResolvedDefinition {
   candidate: LspCallDefinitionCandidate;
   targetSymbol: SemanticSymbol;
 }
+
+const MAX_CONFIGURED_LSP_DOCUMENTS = 500;
+const MAX_LSP_WALK_ENTRIES = 20_000;
+const MAX_LSP_FILE_BYTES = 512 * 1024;
+const MAX_LSP_TOTAL_BYTES = 20 * 1024 * 1024;
+const MAX_LSP_DIAGNOSTICS = 5_000;
+const MAX_LSP_DIAGNOSTICS_PER_FILE = 200;
+const MAX_LSP_DIAGNOSTIC_MESSAGE_CHARS = 1_000;
+const LSP_DIAGNOSTIC_WAIT_MS = 2_000;
 
 export async function runLspCallDefinitionEnrichment(
   options: RunLspCallDefinitionEnrichmentOptions,
@@ -141,16 +149,13 @@ export async function runLspCallDefinitionEnrichment(
     const initializeResult = await client.start(remainingTimeoutMs(deadlineMs));
     const canRunDefinitions =
       candidatePlan.candidates.length > 0 && supportsDefinition(initializeResult);
-    const canRunDocumentSymbols =
-      documents.length > 0 &&
-      supportsDocumentSymbols(initializeResult) &&
-      typeof client.documentSymbols === "function";
     const canCollectDiagnostics =
       documents.length > 0 &&
-      supportsDiagnostics(initializeResult) &&
-      typeof client.diagnostics === "function";
+      typeof client.diagnostics === "function" &&
+      (supportsDiagnostics(initializeResult) ||
+        serverRequestsDiagnostics(options.server));
 
-    if (!canRunDefinitions && !canRunDocumentSymbols && !canCollectDiagnostics) {
+    if (!canRunDefinitions && !canCollectDiagnostics) {
       skipped.push(
         ...candidatePlan.candidates.map((candidate) =>
           skipCandidate(candidate, "definition-unavailable"),
@@ -167,7 +172,7 @@ export async function runLspCallDefinitionEnrichment(
           candidateCount: candidatePlan.candidates.length,
           skippedCount: skipped.length,
           reason:
-            "server did not advertise documentSymbol, diagnostic, or definition capabilities",
+            "server did not advertise diagnostic or definition capabilities",
         }),
         skipped,
         candidateCount: candidatePlan.candidates.length,
@@ -178,16 +183,18 @@ export async function runLspCallDefinitionEnrichment(
       await client.openDocument(documentToLspTextDocument(document));
     }
 
-    const lspSymbols = canRunDocumentSymbols
-      ? await collectDocumentSymbols({
-          client,
-          documents,
-          repoRoot: options.repoRoot,
-          runId,
-          providerId,
-          fallbackLanguageId: options.languageId,
-        })
-      : [];
+    if (canCollectDiagnostics && client.waitForDiagnostics) {
+      const waitMs = Math.min(
+        remainingTimeoutMs(deadlineMs),
+        LSP_DIAGNOSTIC_WAIT_MS,
+      );
+      if (waitMs > 0) {
+        await client.waitForDiagnostics(
+          documents.map((document) => document.uri),
+          waitMs,
+        );
+      }
+    }
     const lspDiagnostics = canCollectDiagnostics
       ? collectDiagnostics({
           client,
@@ -249,7 +256,6 @@ export async function runLspCallDefinitionEnrichment(
         languageId: options.languageId,
         documents,
         resolved,
-        symbols: lspSymbols,
         diagnostics: lspDiagnostics,
         confidence: options.confidence,
       }),
@@ -284,7 +290,6 @@ export function buildSemanticIndexFromLspDefinitions(params: {
   languageId: string;
   documents: readonly LspCandidateDocument[];
   resolved: readonly ResolvedDefinition[];
-  symbols?: readonly SemanticSymbol[];
   diagnostics?: readonly SemanticDiagnostic[];
   confidence: number;
 }): SemanticIndex {
@@ -295,12 +300,16 @@ function supportsDefinition(result: InitializeResult): boolean {
   return Boolean(result.capabilities.definitionProvider);
 }
 
-function supportsDocumentSymbols(result: InitializeResult): boolean {
-  return Boolean(result.capabilities.documentSymbolProvider);
-}
-
 function supportsDiagnostics(result: InitializeResult): boolean {
   return Boolean(result.capabilities.diagnosticProvider);
+}
+
+function serverRequestsDiagnostics(
+  server: SemanticEnrichmentLspServerConfig,
+): boolean {
+  return server.capabilities.some((capability) =>
+    /diagnostics?/iu.test(capability),
+  );
 }
 
 function documentToLspTextDocument(
@@ -322,6 +331,7 @@ async function collectConfiguredDocuments(params: {
   if (params.server.filePatterns.length === 0) return [];
 
   const documents: LspCandidateDocument[] = [];
+  let aggregateBytes = 0;
   for await (const sourcePath of walkRepoFiles(params.repoRoot)) {
     if (
       !params.server.filePatterns.some((pattern) =>
@@ -331,9 +341,18 @@ async function collectConfiguredDocuments(params: {
       continue;
     }
     const absolutePath = join(params.repoRoot, sourcePath);
+    let fileStat: Stats;
+    try {
+      fileStat = await stat(absolutePath);
+    } catch {
+      continue;
+    }
+    if (!fileStat.isFile() || fileStat.size > MAX_LSP_FILE_BYTES) continue;
+    if (aggregateBytes + fileStat.size > MAX_LSP_TOTAL_BYTES) break;
     let text: string;
     try {
       text = await readFile(absolutePath, "utf8");
+      aggregateBytes += fileStat.size;
     } catch {
       continue;
     }
@@ -348,15 +367,21 @@ async function collectConfiguredDocuments(params: {
       text,
       version: 1,
     });
-    if (documents.length >= 500) break;
+    if (documents.length >= MAX_CONFIGURED_LSP_DOCUMENTS) break;
   }
   return documents;
+}
+
+interface LspWalkState {
+  visitedEntries: number;
 }
 
 async function* walkRepoFiles(
   root: string,
   relativeDir = "",
+  state: LspWalkState = { visitedEntries: 0 },
 ): AsyncGenerator<string> {
+  if (state.visitedEntries >= MAX_LSP_WALK_ENTRIES) return;
   const absoluteDir = join(root, relativeDir);
   let entries: Dirent[];
   try {
@@ -366,10 +391,12 @@ async function* walkRepoFiles(
   }
 
   for (const entry of entries) {
+    state.visitedEntries += 1;
+    if (state.visitedEntries > MAX_LSP_WALK_ENTRIES) return;
     const relativePath = normalizePath(join(relativeDir, entry.name));
     if (entry.isDirectory()) {
       if (shouldSkipLspScanDirectory(entry.name)) continue;
-      yield* walkRepoFiles(root, relativePath);
+      yield* walkRepoFiles(root, relativePath, state);
     } else if (entry.isFile()) {
       yield relativePath;
     }
@@ -428,6 +455,18 @@ function documentLanguageIdForPath(
   if (extension === ".jsx" && configuredIds.includes("javascriptreact")) {
     return "javascriptreact";
   }
+  if (
+    [".js", ".mjs", ".cjs"].includes(extension) &&
+    configuredIds.includes("javascript")
+  ) {
+    return "javascript";
+  }
+  if (
+    [".ts", ".mts", ".cts"].includes(extension) &&
+    configuredIds.includes("typescript")
+  ) {
+    return "typescript";
+  }
   return configuredIds[0] ?? fallback;
 }
 
@@ -441,76 +480,6 @@ function mergeDocuments(
   return [...byUri.values()];
 }
 
-async function collectDocumentSymbols(params: {
-  client: SemanticLspClientLike;
-  documents: readonly LspCandidateDocument[];
-  repoRoot: string;
-  runId: string;
-  providerId: string;
-  fallbackLanguageId: string;
-}): Promise<SemanticSymbol[]> {
-  if (!params.client.documentSymbols) return [];
-  const symbols: SemanticSymbol[] = [];
-  for (const document of params.documents) {
-    const result = await params.client.documentSymbols(document.uri).catch(
-      () => null,
-    );
-    if (!result) continue;
-    symbols.push(
-      ...flattenDocumentSymbols({
-        values: result,
-        document,
-        repoRoot: params.repoRoot,
-        runId: params.runId,
-        providerId: params.providerId,
-        fallbackLanguageId: params.fallbackLanguageId,
-      }),
-    );
-  }
-  return symbols;
-}
-
-function flattenDocumentSymbols(params: {
-  values: DocumentSymbol[] | SymbolInformation[];
-  document: LspCandidateDocument;
-  repoRoot: string;
-  runId: string;
-  providerId: string;
-  fallbackLanguageId: string;
-}): SemanticSymbol[] {
-  const output: SemanticSymbol[] = [];
-  const visit = (
-    symbol: DocumentSymbol | SymbolInformation,
-    indexPath: string,
-  ): void => {
-    const location = "location" in symbol ? symbol.location : null;
-    const sourcePath = location
-      ? repoPathFromUri(location.uri, params.repoRoot)
-      : params.document.sourcePath;
-    if (!sourcePath) return;
-    const range =
-      "selectionRange" in symbol
-        ? symbol.selectionRange
-        : location?.range;
-    output.push({
-      providerSymbolId: `lsp-symbol:${params.runId}:${params.providerId}:${indexPath}`,
-      name: symbol.name,
-      kind: String(symbol.kind),
-      languageId: params.document.languageId || params.fallbackLanguageId,
-      sourcePath,
-      range: range ? lspRangeToSemanticRange(range) : undefined,
-    });
-    if ("children" in symbol && symbol.children) {
-      symbol.children.forEach((child, childIndex) =>
-        visit(child, `${indexPath}.${childIndex}`),
-      );
-    }
-  };
-
-  params.values.forEach((symbol, index) => visit(symbol, String(index)));
-  return output;
-}
-
 function collectDiagnostics(params: {
   client: SemanticLspClientLike;
   documents: readonly LspCandidateDocument[];
@@ -520,9 +489,15 @@ function collectDiagnostics(params: {
 }): SemanticDiagnostic[] {
   if (!params.client.diagnostics) return [];
   const diagnostics: SemanticDiagnostic[] = [];
+  let totalDiagnostics = 0;
+
   for (const document of params.documents) {
-    const values = params.client.diagnostics(document.uri);
-    values.forEach((diagnostic, index) => {
+    if (totalDiagnostics >= MAX_LSP_DIAGNOSTICS) break;
+    const values = params.client
+      .diagnostics(document.uri)
+      .slice(0, MAX_LSP_DIAGNOSTICS_PER_FILE);
+    for (const [index, diagnostic] of values.entries()) {
+      if (totalDiagnostics >= MAX_LSP_DIAGNOSTICS) break;
       diagnostics.push({
         id: `lsp-diagnostic:${params.runId}:${params.providerId}:${document.sourcePath}:${index}`,
         repoId: params.repoId,
@@ -532,14 +507,15 @@ function collectDiagnostics(params: {
         languageId: document.languageId,
         sourcePath: document.sourcePath,
         severity: diagnosticSeverity(diagnostic.severity),
-        message: diagnostic.message,
+        message: diagnostic.message.slice(0, MAX_LSP_DIAGNOSTIC_MESSAGE_CHARS),
         code:
           diagnostic.code === undefined ? undefined : String(diagnostic.code),
         range: diagnostic.range
           ? lspRangeToSemanticRange(diagnostic.range)
           : undefined,
       });
-    });
+      totalDiagnostics += 1;
+    }
   }
   return diagnostics;
 }
@@ -728,7 +704,7 @@ function buildSemanticIndex(params: {
       occurrences: [],
       diagnostics: [],
     })),
-    symbols: [...sourceSymbols, ...targetSymbols, ...(params.symbols ?? [])],
+    symbols: [...sourceSymbols, ...targetSymbols],
     edges,
     diagnostics: [...(params.diagnostics ?? [])],
   };

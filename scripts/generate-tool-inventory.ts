@@ -224,7 +224,7 @@ function buildMarkdown(inventory: {
   lines.push(`| Flat (default) | ${inventory.counts.flatModeTotal} | ${inventory.counts.universalTools} universal + ${inventory.counts.flatTools} flat |`);
   lines.push(`| Gateway | ${inventory.counts.gatewayModeTotal} | ${inventory.counts.universalTools} universal + ${inventory.counts.gatewayTools} gateway |`);
   lines.push(`| Gateway + legacy | ${inventory.counts.gatewayLegacyModeTotal} | ${inventory.counts.universalTools} universal + ${inventory.counts.gatewayTools} gateway + ${inventory.counts.flatTools} flat |`);
-  lines.push(`| Code Mode exclusive | ${inventory.counts.codeModeExclusiveTotal} | ${inventory.counts.codeModeTools} Code Mode tools only (no \`sdl.info\`) |`);
+  lines.push(`| Code Mode exclusive | ${inventory.counts.codeModeExclusiveTotal} | ${inventory.codeModeToolNames.map((name) => `\`${name}\``).join(", ")} |`);
   lines.push(`| All unique actions | ${inventory.counts.allFlatAndCodeModeActions} | flat + code-mode unique |`);
   lines.push("");
 

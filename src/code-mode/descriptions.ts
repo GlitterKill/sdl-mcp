@@ -28,4 +28,6 @@ export const FILE_GATEWAY_DESCRIPTION =
   + "templates). op:\"write\" writes a single file with targeted modes (line replace, "
   + "pattern replace, JSON path, insert, append). op:\"searchEditPreview\" returns a "
   + "planHandle summarizing proposed cross-file edits; op:\"searchEditApply\" executes "
-  + "the plan with sha256/mtime preconditions and rollback on mid-batch failure.";
+  + "the plan with sha256/mtime preconditions and rollback on mid-batch failure. "
+  + "op:\"previewWindow\" and op:\"sourceWindow\" open policy-gated code windows "
+  + "for indexed source files in an edit plan.";
