@@ -74,6 +74,7 @@ function makeClient(params: {
   definitionProvider?: boolean;
   diagnosticProvider?: boolean;
   diagnostics?: unknown[];
+  pullDiagnostics?: (uri: string, timeoutMs?: number) => Promise<unknown[]>;
   waitForDiagnostics?: (
     uris: readonly string[],
     timeoutMs: number,
@@ -81,8 +82,10 @@ function makeClient(params: {
   startError?: Error;
 }): SemanticLspClientLike {
   const definitions = params.definitions ?? [];
+  let diagnostics = params.diagnostics ?? [];
+  const pullDiagnostics = params.pullDiagnostics;
   let requestIndex = 0;
-  return {
+  const client: SemanticLspClientLike = {
     async start() {
       if (params.startError) throw params.startError;
       return {
@@ -102,7 +105,7 @@ function makeClient(params: {
       return definitions[requestIndex++] as never;
     },
     diagnostics() {
-      return (params.diagnostics ?? []) as never;
+      return diagnostics as never;
     },
     ...(params.waitForDiagnostics
       ? { waitForDiagnostics: params.waitForDiagnostics }
@@ -111,13 +114,31 @@ function makeClient(params: {
       return undefined;
     },
   };
+
+  if (pullDiagnostics) {
+    client.pullDiagnostics = async function (
+      this: SemanticLspClientLike,
+      uri: string,
+      timeoutMs?: number,
+    ) {
+      if (this !== client) {
+        throw new TypeError("pullDiagnostics called without client receiver");
+      }
+      diagnostics = await pullDiagnostics(uri, timeoutMs);
+      return diagnostics as never;
+    };
+  }
+
+  return client;
 }
 
 describe("LSP call-definition runner", () => {
   it("normalizes Location and LocationLink definitions into SemanticIndex edges", async () => {
     const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-runner-"));
     try {
-      const targetUri = pathToFileURL(join(repoRoot, "src/target.ts")).toString();
+      const targetUri = pathToFileURL(
+        join(repoRoot, "src/target.ts"),
+      ).toString();
       const result = await runLspCallDefinitionEnrichment({
         conn: {} as never,
         repoId: "repo",
@@ -212,7 +233,9 @@ describe("LSP call-definition runner", () => {
       assert.equal(result.index, undefined);
       assert.equal(result.skippedRun?.status, "skipped");
       assert.ok(
-        result.skipped.every((skip) => skip.reason === "definition-unavailable"),
+        result.skipped.every(
+          (skip) => skip.reason === "definition-unavailable",
+        ),
       );
     } finally {
       rmSync(repoRoot, { recursive: true, force: true });
@@ -274,7 +297,8 @@ describe("LSP call-definition runner", () => {
     try {
       mkdirSync(join(repoRoot, "src"), { recursive: true });
       writeFileSync(join(repoRoot, "src", "main.js"), "x = unknown\n", "utf8");
-      let waitedFor: { uris: readonly string[]; timeoutMs: number } | null = null;
+      let waitedFor: { uris: readonly string[]; timeoutMs: number } | null =
+        null;
       const longMessage = "x".repeat(1_200);
       const diagnostics = Array.from({ length: 250 }, (_, index) => ({
         range: {
@@ -333,6 +357,114 @@ describe("LSP call-definition runner", () => {
     } finally {
       rmSync(repoRoot, { recursive: true, force: true });
     }
+  });
+
+  it("ingests diagnostics when the server advertises diagnosticProvider", async () => {
+    const repoRoot = mkdtempSync(
+      join(tmpdir(), "sdl-lsp-runner-diagnostic-provider-"),
+    );
+    try {
+      mkdirSync(join(repoRoot, "src"), { recursive: true });
+      writeFileSync(join(repoRoot, "src", "main.py"), "x = unknown\n", "utf8");
+      const sourceUri = pathToFileURL(
+        join(repoRoot, "src", "main.py"),
+      ).toString();
+      let pulledFor: { uri: string; timeoutMs?: number } | null = null;
+
+      const result = await runLspCallDefinitionEnrichment({
+        conn: {} as never,
+        repoId: "repo",
+        repoRoot,
+        languageId: "python",
+        server: {
+          enabled: true,
+          serverId: "mock-python",
+          command: "mock",
+          args: [],
+          languages: ["python"],
+          documentLanguageIds: ["python"],
+          filePatterns: ["**/*.py"],
+          capabilities: [],
+        },
+        confidence: 0.8,
+        timeoutMs: 1000,
+        candidateLimit: 10,
+        runId: "run-diagnostic-provider",
+        candidatePlanner: async () => ({
+          repoId: "repo",
+          languageId: "python",
+          documents: [],
+          candidates: [],
+          skipped: [],
+        }),
+        clientFactory: () =>
+          makeClient({
+            definitionProvider: false,
+            diagnosticProvider: true,
+            pullDiagnostics: async (uri, timeoutMs) => {
+              pulledFor = { uri, timeoutMs };
+              return [
+                {
+                  range: {
+                    start: { line: 0, character: 4 },
+                    end: { line: 0, character: 11 },
+                  },
+                  severity: 2,
+                  message: "Possibly unknown name",
+                },
+              ];
+            },
+          }),
+      });
+
+      assert.equal(result.failedRun, undefined);
+      assert.equal(result.skippedRun, undefined);
+      assert.equal(pulledFor?.uri, sourceUri);
+      assert.ok((pulledFor?.timeoutMs ?? 0) <= 1000);
+      assert.equal(result.index?.diagnostics.length, 1);
+      assert.equal(result.index?.diagnostics[0].severity, "warning");
+      assert.equal(result.index?.diagnostics[0].languageId, "python");
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("pulls diagnostics through the real client when diagnosticProvider is advertised", async () => {
+    const result = await runLspCallDefinitionEnrichment({
+      conn: {} as never,
+      repoId: "repo",
+      repoRoot: process.cwd(),
+      languageId: "python",
+      server: {
+        enabled: true,
+        serverId: "mock-diagnostic",
+        command: process.execPath,
+        args: [
+          join(process.cwd(), "tests/fixtures/lsp/mock-diagnostic-server.mjs"),
+        ],
+        languages: ["python"],
+        documentLanguageIds: ["python"],
+        filePatterns: ["tests/fixtures/lsp/diagnostic-example.py"],
+        capabilities: [],
+      },
+      confidence: 0.8,
+      timeoutMs: 1000,
+      candidateLimit: 10,
+      runId: "run-real-diagnostic-provider",
+      candidatePlanner: async () => ({
+        repoId: "repo",
+        languageId: "python",
+        documents: [],
+        candidates: [],
+        skipped: [],
+      }),
+    });
+
+    assert.equal(result.failedRun, undefined);
+    assert.equal(result.skippedRun, undefined);
+    assert.equal(result.index?.diagnostics.length, 1);
+    assert.equal(result.index?.diagnostics[0].message, "Pulled diagnostic");
+    assert.equal(result.index?.diagnostics[0].languageId, "python");
   });
 
   it("records a failed provider run when server startup fails", async () => {

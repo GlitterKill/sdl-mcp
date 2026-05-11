@@ -17,6 +17,8 @@ import type {
   DefinitionParams,
   Diagnostic,
   DidChangeTextDocumentParams,
+  DocumentDiagnosticParams,
+  DocumentDiagnosticReport,
   DidOpenTextDocumentParams,
   Hover,
   InitializeParams,
@@ -43,7 +45,9 @@ const DidOpenTextDocumentNotification =
 const DidChangeTextDocumentNotification =
   new NotificationType<DidChangeTextDocumentParams>("textDocument/didChange");
 const PublishDiagnosticsNotification =
-  new NotificationType<PublishDiagnosticsParams>("textDocument/publishDiagnostics");
+  new NotificationType<PublishDiagnosticsParams>(
+    "textDocument/publishDiagnostics",
+  );
 const DefinitionRequest = new RequestType<
   DefinitionParams,
   Location | Location[] | LocationLink[] | null,
@@ -62,6 +66,11 @@ const HoverRequest = new RequestType<
   Hover | null,
   void
 >("textDocument/hover");
+const DocumentDiagnosticRequestType = new RequestType<
+  DocumentDiagnosticParams,
+  DocumentDiagnosticReport,
+  void
+>("textDocument/diagnostic");
 
 export interface LspClientOptions {
   serverId: string;
@@ -152,7 +161,9 @@ function resolveWindowsCommand(
   }
 
   const pathExts = (
-    options.pathExt ?? process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD"
+    options.pathExt ??
+    process.env.PATHEXT ??
+    ".COM;.EXE;.BAT;.CMD"
   )
     .split(";")
     .map((value) => value.trim())
@@ -195,7 +206,7 @@ function resolveNpmCommandShimEntrypoint(
       .filter((value) => !/node(?:\.exe)?$/iu.test(value));
     const script = quotedPaths[0];
     if (!script) continue;
-    return script.replace(/%~?dp0%?[\\/]?/giu, `${shimDir}\\`);
+    return win32.normalize(script.replace(/%~?dp0%?[\\/]?/giu, `${shimDir}\\`));
   }
 
   return null;
@@ -254,7 +265,14 @@ export class SemanticLspClient {
       {
         processId: process.pid,
         rootUri,
-        capabilities: {},
+        capabilities: {
+          textDocument: {
+            diagnostic: {
+              dynamicRegistration: false,
+              relatedDocumentSupport: false,
+            },
+          },
+        },
         workspaceFolders: [
           {
             uri: rootUri,
@@ -330,6 +348,25 @@ export class SemanticLspClient {
 
   diagnostics(uri: string): Diagnostic[] {
     return this.diagnosticsByUri.get(uri) ?? [];
+  }
+
+  async pullDiagnostics(
+    uri: string,
+    timeoutMs?: number,
+  ): Promise<Diagnostic[]> {
+    this.ensureInitialized();
+    const report = await this.sendRequest(
+      DocumentDiagnosticRequestType,
+      { textDocument: { uri } },
+      timeoutMs,
+    );
+    const diagnostics =
+      report.kind === "full"
+        ? report.items
+        : (this.diagnosticsByUri.get(uri) ?? []);
+    this.diagnosticsByUri.set(uri, diagnostics);
+    this.notifyDiagnosticWaiters();
+    return diagnostics;
   }
 
   async waitForDiagnostics(

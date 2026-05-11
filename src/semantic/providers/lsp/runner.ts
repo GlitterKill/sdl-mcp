@@ -44,6 +44,7 @@ export interface SemanticLspClientLike {
     timeoutMs?: number,
   ): Promise<Location | Location[] | LocationLink[] | null>;
   diagnostics?(uri: string): Diagnostic[];
+  pullDiagnostics?(uri: string, timeoutMs?: number): Promise<Diagnostic[]>;
   waitForDiagnostics?(
     uris: readonly string[],
     timeoutMs: number,
@@ -148,12 +149,16 @@ export async function runLspCallDefinitionEnrichment(
   try {
     const initializeResult = await client.start(remainingTimeoutMs(deadlineMs));
     const canRunDefinitions =
-      candidatePlan.candidates.length > 0 && supportsDefinition(initializeResult);
+      candidatePlan.candidates.length > 0 &&
+      supportsDefinition(initializeResult);
+    const canPullDiagnostics =
+      documents.length > 0 &&
+      typeof client.pullDiagnostics === "function" &&
+      supportsDiagnostics(initializeResult);
     const canCollectDiagnostics =
       documents.length > 0 &&
       typeof client.diagnostics === "function" &&
-      (supportsDiagnostics(initializeResult) ||
-        serverRequestsDiagnostics(options.server));
+      (canPullDiagnostics || serverRequestsDiagnostics(options.server));
 
     if (!canRunDefinitions && !canCollectDiagnostics) {
       skipped.push(
@@ -183,7 +188,13 @@ export async function runLspCallDefinitionEnrichment(
       await client.openDocument(documentToLspTextDocument(document));
     }
 
-    if (canCollectDiagnostics && client.waitForDiagnostics) {
+    if (canPullDiagnostics && client.pullDiagnostics) {
+      await pullDocumentDiagnostics({
+        client,
+        documents,
+        deadlineMs: Math.min(deadlineMs, Date.now() + LSP_DIAGNOSTIC_WAIT_MS),
+      });
+    } else if (canCollectDiagnostics && client.waitForDiagnostics) {
       const waitMs = Math.min(
         remainingTimeoutMs(deadlineMs),
         LSP_DIAGNOSTIC_WAIT_MS,
@@ -432,9 +443,15 @@ function matchesFilePattern(sourcePath: string, pattern: string): boolean {
   if (normalizedPattern.startsWith("**/*.")) {
     return normalizedPath.endsWith(normalizedPattern.slice("**/*".length));
   }
-  if (normalizedPattern.startsWith("**/") && normalizedPattern.endsWith("/**/*")) {
+  if (
+    normalizedPattern.startsWith("**/") &&
+    normalizedPattern.endsWith("/**/*")
+  ) {
     const directory = normalizedPattern.slice(3, -"**/*".length);
-    return normalizedPath.startsWith(directory) || normalizedPath.includes(`/${directory}`);
+    return (
+      normalizedPath.startsWith(directory) ||
+      normalizedPath.includes(`/${directory}`)
+    );
   }
   if (normalizedPattern.startsWith("**/")) {
     return normalizedPath.endsWith(normalizedPattern.slice(3));
@@ -518,6 +535,21 @@ function collectDiagnostics(params: {
     }
   }
   return diagnostics;
+}
+
+async function pullDocumentDiagnostics(params: {
+  client: SemanticLspClientLike;
+  documents: readonly LspCandidateDocument[];
+  deadlineMs: number;
+}): Promise<void> {
+  if (!params.client.pullDiagnostics) return;
+  for (const document of params.documents) {
+    const timeoutMs = remainingTimeoutMs(params.deadlineMs);
+    if (timeoutMs <= 0) return;
+    await params.client
+      .pullDiagnostics(document.uri, timeoutMs)
+      .catch(() => undefined);
+  }
 }
 
 function diagnosticSeverity(
@@ -758,7 +790,9 @@ function buildFailedRun(params: {
     diagnosticsCount: 0,
     precisionScore: 0,
     error:
-      params.error instanceof Error ? params.error.message : String(params.error),
+      params.error instanceof Error
+        ? params.error.message
+        : String(params.error),
   };
 }
 

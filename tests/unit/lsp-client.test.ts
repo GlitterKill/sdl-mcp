@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   resolveLspSpawnCommand,
   SemanticLspClient,
@@ -30,6 +32,47 @@ describe("SemanticLspClient", () => {
     );
   });
 
+  it("pulls diagnostics from diagnosticProvider servers", async () => {
+    const fixturePath = join(
+      process.cwd(),
+      "tests/fixtures/lsp/mock-diagnostic-server.mjs",
+    );
+    const sourcePath = join(
+      process.cwd(),
+      "tests/fixtures/lsp/diagnostic-example.py",
+    );
+    const sourceText = "x = unknown\n";
+
+    const client = new SemanticLspClient({
+      serverId: "mock-diagnostic",
+      command: process.execPath,
+      args: [fixturePath],
+      workspaceRoot: process.cwd(),
+      timeoutMs: 1000,
+    });
+
+    try {
+      const initializeResult = await client.start();
+      assert.ok(initializeResult.capabilities.diagnosticProvider);
+      const uri = pathToFileURL(sourcePath).toString();
+      await client.openDocument({
+        uri,
+        languageId: "python",
+        version: 1,
+        text: sourceText,
+      });
+
+      const diagnostics = await client.pullDiagnostics(uri, 1000);
+
+      assert.equal(diagnostics.length, 1);
+      assert.equal(diagnostics[0].message, "Pulled diagnostic");
+      assert.equal(diagnostics[0].source, "client-capability-advertised");
+      assert.deepEqual(client.diagnostics(uri), diagnostics);
+    } finally {
+      await client.dispose();
+    }
+  });
+
   it("starts explicit Windows npm command shims through node entrypoints", () => {
     assert.deepEqual(
       resolveLspSpawnCommand({
@@ -43,6 +86,28 @@ describe("SemanticLspClient", () => {
         command: "C:\\node\\node.exe",
         args: [
           "C:\\tools\\node_modules\\typescript-language-server\\lib\\cli.js",
+          "--stdio",
+        ],
+        shell: false,
+      },
+    );
+  });
+
+  it("preserves spaces when resolving Windows npm shim entrypoints", () => {
+    assert.deepEqual(
+      resolveLspSpawnCommand({
+        command:
+          "C:\\Users\\me\\AppData\\Local\\lsp io\\servers\\node_modules\\.bin\\server.cmd",
+        args: ["--stdio"],
+        platform: "win32",
+        nodeExecPath: "C:\\Program Files\\nodejs\\node.exe",
+        readFileText: () =>
+          npmShim("%~dp0\\..\\server package\\bin\\language-server.js"),
+      }),
+      {
+        command: "C:\\Program Files\\nodejs\\node.exe",
+        args: [
+          "C:\\Users\\me\\AppData\\Local\\lsp io\\servers\\node_modules\\server package\\bin\\language-server.js",
           "--stdio",
         ],
         shell: false,
