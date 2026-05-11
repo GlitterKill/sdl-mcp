@@ -54,7 +54,7 @@ describe("code-mode action catalog", () => {
       assert.strictEqual(transforms.length, 6, "should have 6 internal transforms");
       assert.deepStrictEqual(
         metaTools.map((d) => d.action).sort(),
-        ["action.search", "context", "manual", "workflow"],
+        ["action.search", "context", "file", "manual", "workflow"],
       );
     });
 
