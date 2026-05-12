@@ -42,6 +42,8 @@ Use this page as the entry point for SDL-MCP documentation.
   - [Claude-Specific Enforcement](./tool-enforcement-for-claude.md)
 - I need operational debugging guidance:
   - [Troubleshooting](./troubleshooting.md)
+- I want to edit SDL-MCP configuration visually:
+  - [Visual Configuration Admin Console](./feature-deep-dives/config-admin-console.md)
 - I want to understand the memory protocol (opt-in, disabled by default):
   - [Memory Protocol](./memory-protocol.md)
 
@@ -65,6 +67,7 @@ Use this page as the entry point for SDL-MCP documentation.
 - [Runtime Execution](./feature-deep-dives/runtime-execution.md)
 - [Token Savings Meter](./feature-deep-dives/token-savings-meter.md)
 - [Observability Dashboard](./feature-deep-dives/observability-dashboard.md)
+- [Visual Configuration Admin Console](./feature-deep-dives/config-admin-console.md)
 
 ## Advanced and Supporting Docs
 

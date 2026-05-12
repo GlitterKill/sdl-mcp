@@ -1,0 +1,58 @@
+:root {
+  --admin-bg: #0a0e14;
+  --admin-panel: rgba(18, 24, 32, 0.76);
+  --admin-panel-solid: #121820;
+  --admin-border: rgba(0, 240, 255, 0.16);
+  --admin-border-strong: rgba(0, 240, 255, 0.42);
+  --admin-text: #e6f1ff;
+  --admin-muted: #8a9bae;
+  --admin-dim: #56677a;
+  --admin-accent: #00f0ff;
+  --admin-accent-soft: rgba(0, 240, 255, 0.16);
+  --admin-warn: #ff2a6d;
+  --admin-ok: #6dffb0;
+  --admin-radius: 4px;
+  --admin-mono: "JetBrains Mono", "Fira Code", Consolas, monospace;
+  --admin-sans: "Segoe UI", system-ui, sans-serif;
+}
+
+.admin-nav-link {
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius);
+  color: var(--admin-accent);
+  display: inline-flex;
+  font-family: var(--admin-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  padding: 6px 10px;
+  text-decoration: none;
+}
+
+.admin-nav-link:hover,
+.admin-nav-link[aria-current="page"] {
+  background: var(--admin-accent-soft);
+  border-color: var(--admin-border-strong);
+}
+
+.admin-badge {
+  border: 1px solid var(--admin-border);
+  border-radius: 2px;
+  color: var(--admin-muted);
+  display: inline-flex;
+  font-family: var(--admin-mono);
+  font-size: 10px;
+  gap: 4px;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  text-transform: uppercase;
+}
+
+.admin-badge[data-tone="warn"] {
+  border-color: rgba(255, 42, 109, 0.45);
+  color: var(--admin-warn);
+}
+
+.admin-badge[data-tone="ok"] {
+  border-color: rgba(109, 255, 176, 0.45);
+  color: var(--admin-ok);
+}

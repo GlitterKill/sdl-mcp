@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>SDL-MCP — Configuration</title>
+    <link rel="stylesheet" href="/ui/admin-shell.css" />
+    <link rel="stylesheet" href="/ui/config.css" />
+  </head>
+  <body>
+    <header class="topbar" role="banner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">SDL</span>
+        <span class="brand-name">MCP // CONFIG</span>
+      </div>
+      <nav class="topbar-controls" aria-label="Admin navigation">
+        <a class="admin-nav-link" href="/ui/observability">OBSERVABILITY</a>
+        <a class="admin-nav-link" href="/ui/config" aria-current="page">CONFIG</a>
+        <label class="token-control">
+          <span class="eyebrow">TOKEN</span>
+          <input id="tokenInput" type="password" placeholder="Bearer token" autocomplete="off" spellcheck="false" />
+        </label>
+        <button id="reloadBtn" class="btn" type="button">RELOAD</button>
+        <button id="validateBtn" class="btn btn-ghost" type="button">CHECK</button>
+        <button id="saveBtn" class="btn" type="button" disabled>SAVE</button>
+      </nav>
+    </header>
+
+    <main class="config-shell">
+      <aside class="sidebar" aria-label="Configuration sections">
+        <div class="source-card">
+          <span class="eyebrow">ACTIVE CONFIG</span>
+          <strong id="sourcePath">—</strong>
+          <span id="sourceHash" class="muted">—</span>
+        </div>
+        <div id="sectionNav" class="section-nav"></div>
+      </aside>
+
+      <section class="workspace" aria-live="polite">
+        <div class="workspace-head">
+          <div>
+            <span id="sectionEyebrow" class="eyebrow">SECTION</span>
+            <h1 id="sectionTitle">Configuration</h1>
+            <p id="sectionDescription" class="muted"></p>
+          </div>
+          <div id="statusBadges" class="badge-row"></div>
+        </div>
+
+        <div id="alerts" class="alerts"></div>
+        <div id="presetPanel" class="preset-panel"></div>
+        <div id="sectionBody" class="section-body"></div>
+      </section>
+
+      <aside class="right-rail" aria-label="Validation and profiles">
+        <section class="rail-panel">
+          <h2>Validation</h2>
+          <div id="validationSummary" class="muted">No config loaded.</div>
+          <div id="validationList" class="validation-list"></div>
+        </section>
+        <section class="rail-panel">
+          <h2>Backups</h2>
+          <div id="backupList" class="compact-list"></div>
+        </section>
+        <section class="rail-panel">
+          <h2>Profiles</h2>
+          <form id="profileForm" class="profile-form">
+            <input id="profileName" placeholder="Profile name" autocomplete="off" />
+            <button class="btn btn-ghost" type="submit">SAVE PROFILE</button>
+          </form>
+          <div id="profileList" class="compact-list"></div>
+        </section>
+      </aside>
+    </main>
+
+    <dialog id="diffModal" class="modal" aria-label="Configuration diff">
+      <div class="modal-head">
+        <h2>CONFIG DIFF</h2>
+        <button id="closeDiffBtn" class="btn btn-ghost" type="button">CLOSE</button>
+      </div>
+      <div class="modal-body">
+        <div id="diffImpact" class="badge-row"></div>
+        <div id="diffList" class="diff-list"></div>
+        <label class="confirm-row">
+          <input id="highRiskConfirm" type="checkbox" />
+          <span>Apply high-risk command, path, auth, plugin, or runtime changes.</span>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button id="confirmSaveBtn" class="btn" type="button">WRITE CONFIG</button>
+      </div>
+    </dialog>
+
+    <script type="module" src="/ui/config.js"></script>
+  </body>
+</html>

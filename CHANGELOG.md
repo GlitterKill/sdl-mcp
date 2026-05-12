@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a dependency-free `/ui/config` visual configuration admin console with loopback-only write APIs, schema/semantic validation, redacted raw/effective snapshots, atomic save/backup/rollback, high-risk diff confirmation, and reusable JSON Pointer profiles.
+
 ### Changed
 
 ### Fixed

@@ -33,6 +33,7 @@ import {
   handleSymbolSearch,
 } from "../../mcp/tools/symbol.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
+import { routeConfigAdminApiRequest } from "../../config/admin-api.js";
 import type { LiveIndexCoordinator } from "../../live-index/types.js";
 import { SessionManager } from "../../mcp/session-manager.js";
 import type {
@@ -109,8 +110,15 @@ function isLoopbackBindHost(host: string): boolean {
     normalized === "0:0:0:0:0:0:0:1" ||
     normalized === "::ffff:127.0.0.1" ||
     normalized.startsWith("::ffff:127.") ||
-    normalized === "[::ffff:127.0.0.1]"
+    normalized === "[::ffff:127.0.0.1]" ||
+    normalized.startsWith("[::ffff:127.")
   );
+}
+
+
+function isLoopbackRequest(req: IncomingMessage): boolean {
+  const remoteAddress = req.socket.remoteAddress ?? "";
+  return isLoopbackBindHost(remoteAddress);
 }
 
 /**
@@ -756,6 +764,16 @@ function serveUiAsset(pathname: string, res: ServerResponse): boolean {
       file: "observability.css",
       type: "text/css; charset=utf-8",
     },
+    "/ui/admin-shell.css": {
+      file: "admin-shell.css",
+      type: "text/css; charset=utf-8",
+    },
+    "/ui/config": { file: "config.html", type: "text/html; charset=utf-8" },
+    "/ui/config.js": {
+      file: "config.js",
+      type: "application/javascript; charset=utf-8",
+    },
+    "/ui/config.css": { file: "config.css", type: "text/css; charset=utf-8" },
   };
 
   const asset = map[pathname];
@@ -870,6 +888,26 @@ async function handleRestRequest(
       services,
     );
     if (response) {
+      json(res, response.status, response.payload);
+      return true;
+    }
+  }
+
+  if (pathname === "/api/config" || pathname.startsWith("/api/config/")) {
+    const body = req.method === "GET" ? undefined : await readJsonBody(req);
+    const response = await routeConfigAdminApiRequest({
+      method: req.method,
+      pathname,
+      body,
+      isLoopback: isLoopbackRequest(req),
+      remoteAddress: req.socket.remoteAddress,
+    });
+    if (response) {
+      if (response.headers) {
+        for (const [key, value] of Object.entries(response.headers)) {
+          res.setHeader(key, value);
+        }
+      }
       json(res, response.status, response.payload);
       return true;
     }

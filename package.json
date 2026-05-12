@@ -31,7 +31,7 @@
   "scripts": {
     "postinstall": "node scripts/postinstall.mjs",
     "clean:dist": "node scripts/clean-dist.mjs",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-ui-assets.mjs",
     "build:scripts": "tsc -p tsconfig.scripts.json && node scripts/fix-imports.ts",
     "build:runtime": "npm run clean:dist && npm run build",
     "build:all": "npm run clean:dist && npm run build && npm run build:scripts",
