@@ -178,64 +178,96 @@ describe("code-mode action catalog", () => {
   });
 
   describe("zodToSchemaSummary", () => {
-    // TODO: zodToSchemaSummary uses Zod v3 internals (_def.typeName) - update src/code-mode/action-catalog.ts for Zod v4
-    it("converts simple ZodObject", () => {
+    function field(summary: ReturnType<typeof zodToSchemaSummary>, name: string) {
+      const result = summary.fields.find((candidate) => candidate.name === name);
+      assert.ok(result, `expected schema field ${name}`);
+      return result;
+    }
+
+    it("summarizes Zod v4 objects, defaults, and nested object fields", () => {
       const schema = z.object({
         name: z.string(),
         count: z.number().optional(),
         flag: z.boolean().default(false),
+        nested: z.object({ mode: z.enum(["full", "incremental"]) }),
+        clauses: z.array(z.object({ path: z.string(), negate: z.boolean().optional() })),
       });
 
       const summary = zodToSchemaSummary(schema);
-      assert.strictEqual(summary.fields.length, 3);
+      assert.strictEqual(summary.fields.length, 5);
 
-      const nameField = summary.fields.find((f) => f.name === "name");
-      assert.ok(nameField);
+      const nameField = field(summary, "name");
       assert.strictEqual(nameField.type, "string");
       assert.strictEqual(nameField.required, true);
 
-      const countField = summary.fields.find((f) => f.name === "count");
-      assert.ok(countField);
+      const countField = field(summary, "count");
+      assert.strictEqual(countField.type, "number");
       assert.strictEqual(countField.required, false);
 
-      const flagField = summary.fields.find((f) => f.name === "flag");
-      assert.ok(flagField);
+      const flagField = field(summary, "flag");
+      assert.strictEqual(flagField.type, "boolean");
       assert.strictEqual(flagField.required, false);
       assert.strictEqual(flagField.default, false);
+
+      const nestedField = field(summary, "nested");
+      assert.strictEqual(nestedField.type, "object");
+      assert.deepStrictEqual(
+        nestedField.subFields?.map((subField) => subField.name),
+        ["mode"],
+      );
+      assert.deepStrictEqual(nestedField.subFields?.[0]?.enumValues, [
+        "full",
+        "incremental",
+      ]);
+
+      const clausesField = field(summary, "clauses");
+      assert.strictEqual(clausesField.type, "object[]");
+      assert.deepStrictEqual(
+        clausesField.subFields?.map((subField) => [subField.name, subField.required]),
+        [
+          ["path", true],
+          ["negate", false],
+        ],
+      );
     });
 
-    // TODO: zodToSchemaSummary uses Zod v3 internals (_def.typeName/_def.values) - update src/code-mode/action-catalog.ts for Zod v4
-    it("handles enum fields", () => {
+    it("uses Zod v4 enum options for enum summaries", () => {
       const schema = z.object({
         mode: z.enum(["full", "incremental"]),
       });
 
       const summary = zodToSchemaSummary(schema);
-      const modeField = summary.fields.find((f) => f.name === "mode");
-      assert.ok(modeField);
+      const modeField = field(summary, "mode");
+      assert.strictEqual(modeField.type, "enum(full|incremental)");
       assert.deepStrictEqual(modeField.enumValues, ["full", "incremental"]);
+      assert.strictEqual(modeField.required, true);
     });
 
-    it("summarizes Zod v4 discriminated unions", () => {
+    it("summarizes Zod v4 discriminated unions like search.edit", () => {
       const summary = zodToSchemaSummary(SearchEditRequestSchema);
-      const names = summary.fields.map((f) => f.name);
+      const names = summary.fields.map((summaryField) => summaryField.name);
 
-      assert.ok(names.includes("mode"));
-      assert.ok(names.includes("targeting"));
-      assert.ok(names.includes("query"));
-      assert.ok(names.includes("editMode"));
-      assert.ok(names.includes("planHandle"));
+      for (const expected of [
+        "mode",
+        "repoId",
+        "targeting",
+        "query",
+        "editMode",
+        "planHandle",
+      ]) {
+        assert.ok(names.includes(expected), `expected ${expected} in search.edit summary`);
+      }
 
-      const modeField = summary.fields.find((f) => f.name === "mode");
-      assert.equal(modeField?.required, true);
-      assert.equal(modeField?.type, "enum(preview|apply)");
-      assert.deepStrictEqual(modeField?.enumValues, ["preview", "apply"]);
-      const repoField = summary.fields.find((f) => f.name === "repoId");
-      assert.equal(repoField?.required, true);
-      const planHandleField = summary.fields.find(
-        (f) => f.name === "planHandle",
-      );
-      assert.equal(planHandleField?.required, false);
+      const modeField = field(summary, "mode");
+      assert.strictEqual(modeField.required, true);
+      assert.strictEqual(modeField.type, "enum(preview|apply)");
+      assert.deepStrictEqual(modeField.enumValues, ["preview", "apply"]);
+
+      assert.strictEqual(field(summary, "repoId").required, true);
+      assert.strictEqual(field(summary, "targeting").required, false);
+      assert.strictEqual(field(summary, "query").required, false);
+      assert.strictEqual(field(summary, "editMode").required, false);
+      assert.strictEqual(field(summary, "planHandle").required, false);
     });
 
     it("handles non-object schema gracefully", () => {

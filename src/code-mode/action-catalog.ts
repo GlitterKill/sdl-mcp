@@ -130,39 +130,17 @@ export interface SchemaSummary {
 
 /**
  * Converts a Zod schema into a stable SchemaSummary shape.
- * Handles ZodObject, ZodDefault, ZodOptional, ZodNullable, ZodEnum, ZodArray,
- * and ZodPassthrough. Falls back to { type: "unknown" } for unrecognized shapes.
+ * Handles common Zod v4 schema surfaces without relying on legacy typeName
+ * strings. Falls back to { type: "unknown" } for unrecognized shapes.
  */
 export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
   const fields: SchemaSummaryField[] = [];
 
-  // Unwrap to get the inner ZodObject if wrapped in ZodEffects/ZodPipeline
   const inner = unwrapZod(schema);
-  if (!inner) return { fields };
+  const discriminator = getDiscriminator(inner);
 
-  const innerDef = (inner as unknown as Record<string, unknown>)._def as
-    | Record<string, unknown>
-    | undefined;
-
-  // Discriminated unions (e.g. search.edit's preview/apply variants):
-  // merge fields from every option. Fields required by every variant stay
-  // required; variant-specific fields are optional in the union view.
-  if (
-    innerDef &&
-    (innerDef.type === "discriminatedUnion" ||
-      innerDef.typeName === "ZodDiscriminatedUnion" ||
-      // Zod v4 stores discriminated unions under the generic "union" type
-      // while retaining the discriminator metadata.
-      (innerDef.type === "union" && typeof innerDef.discriminator === "string"))
-  ) {
-    const rawOptions = innerDef.options ?? innerDef.optionsMap ?? [];
-    const optionList: z.ZodType[] = Array.isArray(rawOptions)
-      ? (rawOptions as z.ZodType[])
-      : Array.from((rawOptions as unknown as Map<unknown, z.ZodType>).values());
-    const discriminator =
-      typeof innerDef.discriminator === "string"
-        ? (innerDef.discriminator as string)
-        : null;
+  if (discriminator) {
+    const optionList = getUnionOptions(inner);
     const seen = new Map<
       string,
       {
@@ -173,16 +151,7 @@ export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
     >();
     let validOptionCount = 0;
     for (const opt of optionList) {
-      const optInner = unwrapZod(opt);
-      const optShape =
-        optInner &&
-        typeof (optInner as unknown as Record<string, unknown>).shape ===
-          "object"
-          ? ((optInner as unknown as Record<string, unknown>).shape as Record<
-              string,
-              z.ZodType
-            >)
-          : null;
+      const optShape = getObjectShape(opt);
       if (!optShape) continue;
       validOptionCount++;
       for (const [name, fieldSchema] of Object.entries(optShape)) {
@@ -211,14 +180,11 @@ export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
     return { fields };
   }
 
-  if (typeof (inner as unknown as Record<string, unknown>).shape !== "object") {
+  const shape = getObjectShape(inner);
+  if (!shape) {
     return { fields };
   }
 
-  const shape = (inner as unknown as Record<string, unknown>).shape as Record<
-    string,
-    z.ZodType
-  >;
   for (const [name, fieldSchema] of Object.entries(shape)) {
     fields.push(describeField(name, fieldSchema));
   }
@@ -226,42 +192,142 @@ export function zodToSchemaSummary(schema: z.ZodType): SchemaSummary {
   return { fields };
 }
 
+type ZodDef = Record<string, unknown>;
+
+type ZodInspectable = z.ZodType & {
+  def?: ZodDef;
+  _def?: ZodDef;
+  type?: unknown;
+  shape?: unknown;
+  options?: unknown;
+  values?: unknown;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isZodType(value: unknown): value is z.ZodType {
+  return value instanceof z.ZodType;
+}
+
+function inspectable(schema: z.ZodType): ZodInspectable {
+  return schema as ZodInspectable;
+}
+
+function zodDef(schema: z.ZodType): ZodDef {
+  const candidate = inspectable(schema);
+  if (isRecord(candidate.def)) return candidate.def;
+  if (isRecord(candidate._def)) return candidate._def;
+  return {};
+}
+
+function zodKind(schema: z.ZodType): string {
+  const candidate = inspectable(schema);
+  if (typeof candidate.type === "string") return candidate.type;
+
+  const def = zodDef(schema);
+  return typeof def.type === "string" ? def.type : "unknown";
+}
+
+function asZodType(value: unknown): z.ZodType | undefined {
+  return isZodType(value) ? value : undefined;
+}
+
+function asZodShape(value: unknown): Record<string, z.ZodType> | undefined {
+  if (!isRecord(value)) return undefined;
+
+  const shape: Record<string, z.ZodType> = {};
+  for (const [name, fieldSchema] of Object.entries(value)) {
+    if (isZodType(fieldSchema)) {
+      shape[name] = fieldSchema;
+    }
+  }
+
+  return Object.keys(shape).length === Object.keys(value).length
+    ? shape
+    : undefined;
+}
+
+function resolveShapeCandidate(candidate: unknown): unknown {
+  if (typeof candidate === "function") {
+    return (candidate as () => unknown)();
+  }
+  return candidate;
+}
+
+function getObjectShape(
+  schema: z.ZodType,
+  depth = 0,
+): Record<string, z.ZodType> | undefined {
+  if (depth > 8) return undefined;
+
+  const current = unwrapZod(schema);
+  const kind = zodKind(current);
+  const def = zodDef(current);
+
+  if (kind === "object") {
+    return (
+      asZodShape(resolveShapeCandidate(inspectable(current).shape)) ??
+      asZodShape(resolveShapeCandidate(def.shape))
+    );
+  }
+
+  if (kind === "intersection") {
+    const left = asZodType(def.left);
+    const right = asZodType(def.right);
+    const leftShape = left ? getObjectShape(left, depth + 1) : undefined;
+    const rightShape = right ? getObjectShape(right, depth + 1) : undefined;
+    if (!leftShape && !rightShape) return undefined;
+    return { ...(leftShape ?? {}), ...(rightShape ?? {}) };
+  }
+
+  return undefined;
+}
+
+function getDiscriminator(schema: z.ZodType): string | undefined {
+  const def = zodDef(schema);
+  return typeof def.discriminator === "string" ? def.discriminator : undefined;
+}
+
+function getUnionOptions(schema: z.ZodType): z.ZodType[] {
+  const candidate = inspectable(schema).options;
+  if (Array.isArray(candidate)) return candidate.filter(isZodType);
+  if (candidate instanceof Map) {
+    return Array.from(candidate.values()).filter(isZodType);
+  }
+
+  const def = zodDef(schema);
+  if (Array.isArray(def.options)) return def.options.filter(isZodType);
+  if (def.options instanceof Map) {
+    return Array.from(def.options.values()).filter(isZodType);
+  }
+  if (def.optionsMap instanceof Map) {
+    return Array.from(def.optionsMap.values()).filter(isZodType);
+  }
+
+  return [];
+}
+
 function unwrapZod(s: z.ZodType): z.ZodType {
-  // Handles wrapper types from Zod v3 + v4 plus a few cousin shapes:
-  //   ZodEffects   (transform/refine/preprocess) — v3: type="effects"
-  //   ZodTransform                                 — v4: type="transform"
-  //   ZodPipeline / ZodPipe                        — v3/v4: type in {pipeline,pipe}
-  //   ZodIntersection                              — type="intersection"
-  // Without these, schemas built via .merge(...).transform(...) (PolicySet,
-  // RuntimeExecute, SearchEdit) flow through to the empty-fields path and
-  // render as `{ }` in the manual.
+  // Peel wrappers that hide the input schema shape. Intersections are handled
+  // by getObjectShape so both sides can contribute fields.
   let current = s;
   for (let depth = 0; depth < 16; depth++) {
-    const def = (current as unknown as Record<string, unknown>)._def as
-      | Record<string, unknown>
-      | undefined;
-    if (!def) return current;
-    const typeName =
-      typeof def.typeName === "string" ? (def.typeName as string) : "";
-    const t = typeof def.type === "string" ? (def.type as string) : "";
+    const def = zodDef(current);
+    const kind = zodKind(current);
     if (
-      (t === "effects" || t === "transform" || typeName === "ZodEffects") &&
-      def.schema
+      (kind === "effects" || kind === "transform") &&
+      asZodType(def.schema ?? def.innerType)
     ) {
-      current = def.schema as z.ZodType;
+      current = asZodType(def.schema ?? def.innerType) ?? current;
       continue;
     }
     if (
-      (t === "pipeline" || t === "pipe" || typeName === "ZodPipeline") &&
-      def.in
+      (kind === "pipeline" || kind === "pipe") &&
+      asZodType(def.in ?? def.schema)
     ) {
-      current = def.in as z.ZodType;
-      continue;
-    }
-    if ((t === "intersection" || typeName === "ZodIntersection") && def.left) {
-      // Prefer the left side; for `A.merge(B).transform(...)` shapes Zod
-      // typically materialises the merged shape on the left.
-      current = def.left as z.ZodType;
+      current = asZodType(def.in ?? def.schema) ?? current;
       continue;
     }
     return current;
@@ -312,31 +378,28 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
   let hasDefault = false;
   let current = schema;
 
-  // Peel optional/default/nullable wrappers
-  for (;;) {
-    const def = (current as unknown as Record<string, unknown>)._def as Record<
-      string,
-      unknown
-    >;
-    if (!def) break;
+  // Peel optional/default/nullable wrappers.
+  for (let depth = 0; depth < 16; depth++) {
+    const def = zodDef(current);
+    const kind = zodKind(current);
 
-    if (def.type === "default") {
+    if (kind === "default") {
       required = false;
       hasDefault = true;
       defaultValue =
         typeof def.defaultValue === "function"
           ? (def.defaultValue as () => unknown)()
           : def.defaultValue;
-      current = def.innerType as z.ZodType;
+      current = asZodType(def.innerType) ?? current;
       continue;
     }
-    if (def.type === "optional") {
+    if (kind === "optional") {
       required = false;
-      current = def.innerType as z.ZodType;
+      current = asZodType(def.innerType) ?? current;
       continue;
     }
-    if (def.type === "nullable") {
-      current = def.innerType as z.ZodType;
+    if (kind === "nullable") {
+      current = asZodType(def.innerType) ?? current;
       continue;
     }
     break;
@@ -350,48 +413,26 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
     field.default = defaultValue;
   }
 
-  // Extract enum values
-  const def = (current as unknown as Record<string, unknown>)._def as Record<
-    string,
-    unknown
-  >;
-  if (
-    def?.type === "enum" &&
-    (current as unknown as Record<string, unknown>).options
-  ) {
-    field.enumValues = (current as unknown as Record<string, unknown>)
-      .options as string[];
+  const enumValues = enumValuesFor(current);
+  if (enumValues.length > 0) {
+    field.enumValues = enumValues;
   }
 
-  // Extract subFields for nested ZodObject fields (e.g., dataSort.by)
-  if (
-    def?.type === "object" &&
-    typeof (current as unknown as Record<string, unknown>).shape === "object"
-  ) {
-    const nestedShape = (current as unknown as Record<string, unknown>)
-      .shape as Record<string, z.ZodType>;
+  const nestedShape = getObjectShape(current);
+  if (nestedShape) {
     field.subFields = Object.entries(nestedShape).map(([subName, subSchema]) =>
       describeField(subName, subSchema),
     );
   }
-  // Extract subFields for array-of-objects (e.g., dataFilter.clauses)
-  if (def?.type === "array") {
-    const elemType = (def.element ?? def.innerType) as z.ZodType | undefined;
-    if (elemType) {
-      const elemDef = (elemType as unknown as Record<string, unknown>)._def as
-        | Record<string, unknown>
-        | undefined;
-      if (
-        elemDef?.type === "object" &&
-        typeof (elemType as unknown as Record<string, unknown>).shape ===
-          "object"
-      ) {
-        const nestedShape = (elemType as unknown as Record<string, unknown>)
-          .shape as Record<string, z.ZodType>;
-        field.subFields = Object.entries(nestedShape).map(
-          ([subName, subSchema]) => describeField(subName, subSchema),
-        );
-      }
+
+  const def = zodDef(current);
+  if (zodKind(current) === "array") {
+    const elemType = asZodType(def.element ?? def.innerType);
+    const elemShape = elemType ? getObjectShape(elemType) : undefined;
+    if (elemShape) {
+      field.subFields = Object.entries(elemShape).map(([subName, subSchema]) =>
+        describeField(subName, subSchema),
+      );
     }
   }
 
@@ -399,13 +440,9 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
 }
 
 function resolveTypeName(schema: z.ZodType): string {
-  const def = (schema as unknown as Record<string, unknown>)._def as Record<
-    string,
-    unknown
-  >;
-  if (!def?.type) return "unknown";
+  const def = zodDef(schema);
 
-  switch (def.type) {
+  switch (zodKind(schema)) {
     case "string":
       return "string";
     case "number":
@@ -413,30 +450,54 @@ function resolveTypeName(schema: z.ZodType): string {
     case "boolean":
       return "boolean";
     case "array":
-      return `${resolveTypeName((def.element ?? def.innerType) as z.ZodType)}[]`;
+      return `${resolveTypeName(asZodType(def.element ?? def.innerType) ?? z.unknown())}[]`;
     case "object":
       return "object";
     case "record":
       return "Record<string, unknown>";
     case "enum":
-      return `enum(${(((schema as unknown as Record<string, unknown>).options as string[] | undefined) ?? Object.keys((def.entries ?? {}) as Record<string, unknown>)).join("|")})`;
+      return `enum(${enumValuesFor(schema).join("|")})`;
     case "literal": {
-      // Zod v4 stores value in def.values array, v3 in def.value
-      const litVal =
-        def.value !== undefined
-          ? def.value
-          : Array.isArray(def.values)
-            ? (def.values as unknown[])[0]
-            : undefined;
+      const litVal = literalValuesFor(schema)[0];
       return `literal(${JSON.stringify(litVal)})`;
     }
     case "union":
-      return (def.options as z.ZodType[])
-        .map((o) => resolveTypeName(o))
-        .join(" | ");
+      return getUnionOptions(schema).map((o) => resolveTypeName(o)).join(" | ");
     default:
       return "unknown";
   }
+}
+
+function enumValuesFor(schema: z.ZodType): string[] {
+  const candidate = inspectable(schema);
+  if (Array.isArray(candidate.options)) {
+    return candidate.options.filter(
+      (value): value is string => typeof value === "string",
+    );
+  }
+
+  const def = zodDef(schema);
+  if (isRecord(def.entries)) {
+    return Object.values(def.entries).filter(
+      (value): value is string => typeof value === "string",
+    );
+  }
+  if (Array.isArray(def.values)) {
+    return def.values.filter(
+      (value): value is string => typeof value === "string",
+    );
+  }
+
+  return [];
+}
+
+function literalValuesFor(schema: z.ZodType): unknown[] {
+  const candidate = inspectable(schema);
+  if (candidate.values instanceof Set) return Array.from(candidate.values);
+
+  const def = zodDef(schema);
+  if (Array.isArray(def.values)) return def.values;
+  return def.value === undefined ? [] : [def.value];
 }
 
 // --- Hand-Authored Examples ---
