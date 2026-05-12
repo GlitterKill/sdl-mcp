@@ -22,6 +22,10 @@ import * as ladybugDb from "../db/ladybug-queries.js";
 import { z } from "zod";
 import { getActiveFnNameMap, getActiveActionToFn } from "./manual-generator.js";
 import { findRefsInArgs } from "./workflow-parser.js";
+import {
+  attachTimingDiagnostics,
+  ToolPhaseTimer,
+} from "../mcp/timing-diagnostics.js";
 
 /**
  * Apply per-step token truncation if configured.
@@ -62,6 +66,8 @@ export async function executeWorkflow(
   context?: ToolContext,
   traceOpts?: WorkflowTraceOptions,
 ): Promise<WorkflowResponse> {
+  const timer = new ToolPhaseTimer();
+  const setupStartedAt = timer.start();
   const actionCatalog = buildCatalog();
   const budget = new WorkflowBudgetTracker(request.budget, {
     maxSteps: config.maxWorkflowSteps,
@@ -85,6 +91,7 @@ export async function executeWorkflow(
           includeExamples: traceOpts.includeExamples,
         })
       : null;
+  timer.record("workflow.setup", setupStartedAt);
 
   // Handle dryRun mode - validate steps and references without executing
   if (request.dryRun) {
@@ -98,6 +105,7 @@ export async function executeWorkflow(
     const fnNameMap = getActiveFnNameMap();
     const actionToFn = getActiveActionToFn();
 
+    const dryRunStartedAt = timer.start();
     for (let i = 0; i < request.steps.length; i++) {
       const step = request.steps[i];
       const issues: string[] = [];
@@ -129,7 +137,8 @@ export async function executeWorkflow(
     }
 
     const allValid = validation.every((v) => v.valid);
-    return {
+    timer.record("workflow.dryRunValidate", dryRunStartedAt);
+    const response = {
       results: [],
       totalTokens: 0,
       durationMs: Date.now() - startTime,
@@ -141,6 +150,9 @@ export async function executeWorkflow(
         budgetLimits: request.budget ?? {},
       },
     } as WorkflowResponse;
+    return request.includeDiagnostics
+      ? attachTimingDiagnostics(response, timer.snapshot())
+      : response;
   }
 
   for (let i = 0; i < request.steps.length; i++) {
@@ -204,9 +216,12 @@ export async function executeWorkflow(
     }
 
     let resolvedArgs: Record<string, unknown>;
+    const resolveRefsStartedAt = timer.start();
     try {
       resolvedArgs = resolveRefs(step.args, priorResults);
+      timer.record("workflow.resolveRefs", resolveRefsStartedAt);
     } catch (error) {
+      timer.record("workflow.resolveRefs", resolveRefsStartedAt);
       const errorMessage =
         error instanceof RefResolutionError
           ? error.message
@@ -243,7 +258,9 @@ export async function executeWorkflow(
 
     if (step.internal) {
       try {
+        const internalStartedAt = timer.start();
         const result = executeTransform(step.fn, resolvedArgs);
+        timer.record("workflow.internal", internalStartedAt);
 
         const stepDuration = Date.now() - stepStart;
         priorResults.push(result);
@@ -346,7 +363,9 @@ export async function executeWorkflow(
       }
     } else {
       if (etagCache) {
+        const etagInjectStartedAt = timer.start();
         etagCache.injectEtags(step.action, resolvedArgs);
+        timer.record("workflow.etagInject", etagInjectStartedAt);
       }
 
       const gatewayArgs = {
@@ -356,7 +375,9 @@ export async function executeWorkflow(
       };
 
       try {
+        const gatewayStartedAt = timer.start();
         const result = await routeGatewayCall(gatewayArgs, actionMap, context);
+        timer.record("workflow.gateway", gatewayStartedAt);
         const stepDuration = Date.now() - stepStart;
         const tokens = WorkflowBudgetTracker.estimateResultTokens(result);
 
@@ -378,6 +399,7 @@ export async function executeWorkflow(
           rawCtx.fileIds.length > 0
         ) {
           try {
+            const rawUsageStartedAt = timer.start();
             const usageConn = await getLadybugConn();
             const files = await ladybugDb.getFilesByIds(
               usageConn,
@@ -390,6 +412,7 @@ export async function executeWorkflow(
             if (estimatedRaw > tokens) {
               rawEquivalent = estimatedRaw;
             }
+            timer.record("workflow.rawUsageEstimateDb", rawUsageStartedAt);
           } catch {
             /* graceful degradation: keep rawEquivalent = tokens */
           }
@@ -397,7 +420,9 @@ export async function executeWorkflow(
         tokenAccumulator.recordUsage(step.fn, tokens, rawEquivalent);
 
         if (etagCache) {
+          const etagExtractStartedAt = timer.start();
           etagCache.extractEtags(step.action, result);
+          timer.record("workflow.etagExtract", etagExtractStartedAt);
         }
 
         priorResults.push(result);
@@ -500,12 +525,15 @@ export async function executeWorkflow(
     }
   }
 
+  const ladderStartedAt = timer.start();
   const ladderWarnings = validateLadder(
     request.steps,
     priorResults,
     config.ladderValidation,
   );
+  timer.record("workflow.ladderValidation", ladderStartedAt);
 
+  const responseStartedAt = timer.start();
   const budgetState = budget.state();
   const etagCacheState = etagCache?.getCache();
   const hasEtags =
@@ -604,8 +632,11 @@ export async function executeWorkflow(
     // Signal that intermediate results were suppressed
     response.intermediateResultsSuppressed = suppressedCount;
   }
+  timer.record("workflow.responseAssembly", responseStartedAt);
 
-  return response;
+  return request.includeDiagnostics
+    ? attachTimingDiagnostics(response, timer.snapshot())
+    : response;
 }
 
 // --- Trace Helpers ---

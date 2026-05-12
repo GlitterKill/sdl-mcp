@@ -377,7 +377,14 @@ End-to-end MCP tool dispatch latency.
 | Field                                       | Type                             | Meaning                                                                                                      |
 | :------------------------------------------ | :------------------------------- | :----------------------------------------------------------------------------------------------------------- |
 | `avgMs`, `p50Ms`, `p95Ms`, `p99Ms`, `maxMs` | number                           | Aggregate distribution.                                                                                      |
-| `perTool`                                   | `Record<string, LatencyPerTool>` | Each entry carries `count`, `avgMs`, `p95Ms`, `errorCount`. The dashboard's per-tool panel sorts by `p95Ms`. |
+| `perTool`                                   | `Record<string, LatencyPerTool>` | Each entry carries `count`, `avgMs`, `p95Ms`, `errorCount`, and optional `phases`. The dashboard's per-tool panel sorts by `p95Ms`. |
+
+`LatencyPerTool.phases` is populated when callers opt in to tool diagnostics with
+`includeDiagnostics: true`. Each phase entry carries `count`, `avgMs`, `p95Ms`,
+and `maxMs`. Interactive diagnostics currently cover Code Mode/server phases
+such as validation, dispatch, response processing, workflow step execution,
+`sdl.context` context build/packing, `sdl.file` operation variants, and
+`sdl.runtime.execute` policy/runtime/artifact phases.
 
 ### `pool: PoolMetrics`
 
@@ -478,6 +485,11 @@ computes confidence as `(top - runnerUp) / max(top, 1e-6)` clamped to `[0, 1]`.
 | `indexer_parse`   | `indexerParseP95Ms > 500`                            | Per-file parse times are above 500 ms P95.                                              | Identify the slow language adapter via `indexing.perLanguageAvgMs`. Check for very large source files; raise `maxFileBytes` cap if files are being skipped. |
 | `io_throughput`   | `ioThroughputMbPerSec / saturationThreshold >= 0.85` | I/O is approaching the configured saturation threshold.                                 | Verify the saturation threshold is realistic for the host; check for noisy-neighbor disk usage; consider relocating the graph DB file to a faster volume.   |
 | `balanced`        | always 0.1 (floor)                                   | No rule scored higher. The system is healthy.                                           | None — this is the steady state.                                                                                                                            |
+
+`dbLatencyP95Ms` is based on LadybugDB native execution/materialization time from
+the DB wrappers. Queue wait is recorded separately in the observability tap so
+future UI work can distinguish "the database is slow" from "the per-connection
+mutex is saturated."
 
 The `topSignals` array carries the strongest contributors to the dominant class so
 operators can see _why_ the classifier picked it. For example, a `cpu_bound` decision

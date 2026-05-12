@@ -24,7 +24,7 @@
  */
 
 import type { Connection } from "kuzu";
-import { queryAll } from "../db/ladybug-core.js";
+import { queryStoredProcAll } from "../db/ladybug-core.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { loadConfig } from "../config/loadConfig.js";
@@ -126,6 +126,53 @@ function assertPositiveInt(n: number, label: string): number {
   return n;
 }
 
+// Ladybug stored-proc calls are not prepared in this path, so scalar values
+// go through narrow literal serializers before entering CALL syntax.
+function cypherSingleQuotedString(value: string): string {
+  return `'${value
+    .replace(/\\/g, "\\\\")
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n")
+    .replace(/\t/g, "\\t")
+    .replace(/'/g, "\\'")}'`;
+}
+
+function cypherNumberArray(values: readonly number[]): string {
+  return `[${values
+    .map((value) => {
+      if (!Number.isFinite(value)) {
+        throw new Error("Vector query contains a non-finite value");
+      }
+      return Object.is(value, -0) ? "0" : String(value);
+    })
+    .join(", ")}]`;
+}
+
+function timingKeySegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_.-]/g, "_");
+}
+
+function recordRetrievalTiming(
+  timings: Map<string, number>,
+  phase: string,
+  startedAt: number,
+): void {
+  const durationMs = performance.now() - startedAt;
+  if (!Number.isFinite(durationMs) || durationMs < 0) return;
+  timings.set(phase, (timings.get(phase) ?? 0) + durationMs);
+}
+
+function retrievalTimingsToRecord(
+  timings: Map<string, number>,
+): Record<string, number> | undefined {
+  if (timings.size === 0) return undefined;
+  const result: Record<string, number> = {};
+  for (const [phase, durationMs] of timings.entries()) {
+    result[phase] = Math.round(durationMs);
+  }
+  return result;
+}
+
 /**
  * Query the Kuzu FTS index for symbols matching the query text.
  *
@@ -142,10 +189,10 @@ async function queryFts(
   try {
     assertIndexName(indexName);
     const k = assertPositiveInt(topK, "topK");
-    const rows = await queryAll<FtsRawRow>(
+    const queryLiteral = cypherSingleQuotedString(query);
+    const rows = await queryStoredProcAll<FtsRawRow>(
       conn,
-      `CALL QUERY_FTS_INDEX('Symbol', '${indexName}', $query, K := ${k}, conjunctive := ${conjunctive ? "true" : "false"}) RETURN node, score`,
-      { query },
+      `CALL QUERY_FTS_INDEX('Symbol', '${indexName}', ${queryLiteral}, K := ${k}, conjunctive := ${conjunctive ? "true" : "false"}) RETURN node, score`,
     );
     return rows;
   } catch (err) {
@@ -191,10 +238,10 @@ async function queryVectorIndex(
   try {
     assertIndexName(indexName);
     const k = assertPositiveInt(topK, "topK");
-    const rows = await queryAll<VectorRawRow>(
+    const vectorLiteral = cypherNumberArray(embedding);
+    const rows = await queryStoredProcAll<VectorRawRow>(
       conn,
-      `CALL QUERY_VECTOR_INDEX('Symbol', '${indexName}', $queryVector, ${k}) RETURN node, distance`,
-      { queryVector: embedding },
+      `CALL QUERY_VECTOR_INDEX('Symbol', '${indexName}', ${vectorLiteral}, ${k}) RETURN node, distance`,
     );
     return rows.map((r) => ({
       symbolId: r.symbolId ?? r.node?.symbolId ?? r._node?.symbolId ?? "",
@@ -663,6 +710,7 @@ export async function entitySearch(
 ): Promise<EntitySearchResult> {
   /* sdl.context: entity-search telemetry */
   const entitySearchStart = Date.now();
+  const diagnosticTimings = new Map<string, number>();
   const config = resolveConfig();
   const caps = await checkRetrievalHealth(options.repoId);
 
@@ -682,6 +730,7 @@ export async function entitySearch(
     "agentFeedback",
   ];
   const entityTypes = options.entityTypes ?? ALL_ENTITY_TYPES;
+  const ftsQuery = options.ftsQuery?.trim() || options.query;
 
   if (shouldFallbackToLegacy(caps, config)) {
     const fallbackReason = "fallback-to-legacy: " + (caps.degradationReasons?.map((r) => r.message).join("; ") ?? "retrieval unavailable");
@@ -759,14 +808,15 @@ export async function entitySearch(
           : ENTITY_FTS_INDEX_NAMES[entityType];
 
       let ftsRows: FtsRawRow[] = [];
+      const ftsStartedAt = performance.now();
       try {
         assertTableName(entityCfg.tableName);
         assertIndexName(indexName);
         const k = assertPositiveInt(ftsTopK, "topK");
-        ftsRows = await queryAll<FtsRawRow>(
+        const queryLiteral = cypherSingleQuotedString(ftsQuery);
+        ftsRows = await queryStoredProcAll<FtsRawRow>(
           conn,
-          `CALL QUERY_FTS_INDEX('${entityCfg.tableName}', '${indexName}', $query, K := ${k}, conjunctive := ${ftsConjunctive ? "true" : "false"}) RETURN node, score`,
-          { query: options.query },
+          `CALL QUERY_FTS_INDEX('${entityCfg.tableName}', '${indexName}', ${queryLiteral}, K := ${k}, conjunctive := ${ftsConjunctive ? "true" : "false"}) RETURN node, score`,
         );
       } catch (err) {
         logger.warn(
@@ -776,6 +826,12 @@ export async function entitySearch(
         );
         // Skip this entity type's FTS — continue with others.
       }
+
+      recordRetrievalTiming(
+        diagnosticTimings,
+        `entity.fts.${entityType}`,
+        ftsStartedAt,
+      );
 
       if (ftsRows.length > 0) {
         const ranks = new Map<string, number>();
@@ -840,6 +896,7 @@ export async function entitySearch(
       }
 
       let queryEmbedding: number[];
+      const entityEmbedStartedAt = performance.now();
       try {
         const prefixedQuery = applyQueryPrefix(modelName, options.query);
         const embeddings = await provider.embed([prefixedQuery]);
@@ -857,6 +914,12 @@ export async function entitySearch(
           }`,
         );
         continue;
+      } finally {
+        recordRetrievalTiming(
+          diagnosticTimings,
+          `entity.vector.embed.${timingKeySegment(modelName)}`,
+          entityEmbedStartedAt,
+        );
       }
 
       // Query each entity type that supports this model's vector index.
@@ -877,14 +940,15 @@ export async function entitySearch(
         let vecRows: { symbolId: string; score: number }[] = [];
         const entityFtsCfg = ENTITY_FTS_CONFIG[entityType];
         if (!entityFtsCfg) continue; // skip unknown entity types in vector path
+        const vectorQueryStartedAt = performance.now();
         try {
           assertTableName(entityFtsCfg.tableName);
           assertIndexName(indexName);
           const k = assertPositiveInt(vectorTopK, "topK");
-          const rawRows = await queryAll<VectorRawRow>(
+          const vectorLiteral = cypherNumberArray(queryEmbedding);
+          const rawRows = await queryStoredProcAll<VectorRawRow>(
             conn,
-            `CALL QUERY_VECTOR_INDEX('${entityFtsCfg.tableName}', '${indexName}', $queryVector, ${k}) RETURN node, distance`,
-            { queryVector: queryEmbedding },
+            `CALL QUERY_VECTOR_INDEX('${entityFtsCfg.tableName}', '${indexName}', ${vectorLiteral}, ${k}) RETURN node, distance`,
           );
           vecRows = rawRows.map((r) => {
             // The id field varies by entity type.
@@ -912,6 +976,12 @@ export async function entitySearch(
             }`,
           );
           continue;
+        } finally {
+          recordRetrievalTiming(
+            diagnosticTimings,
+            `entity.vector.query.${entityType}.${timingKeySegment(modelName)}`,
+            vectorQueryStartedAt,
+          );
         }
 
         if (vecRows.length > 0) {
@@ -980,20 +1050,33 @@ export async function entitySearch(
   if (options.chatMentions && options.chatMentions.length > 0) {
     const pprStart = performance.now();
     try {
+      const entitySeedResolutionStartedAt = performance.now();
       const seedResolution = await resolveSeedSymbols(
         conn,
         options.repoId,
         options.chatMentions,
         options.chatMentionWeights,
       );
+      recordRetrievalTiming(
+        diagnosticTimings,
+        "entity.ppr.resolveSeeds",
+        entitySeedResolutionStartedAt,
+      );
+      const entitySnapshotStartedAt = performance.now();
       let snapshot = getGraphSnapshot(options.repoId);
       if (!snapshot) {
         snapshot = await loadAndCacheGraphSnapshot(conn, options.repoId);
       }
+      recordRetrievalTiming(
+        diagnosticTimings,
+        "entity.ppr.loadSnapshot",
+        entitySnapshotStartedAt,
+      );
       let backend: NonNullable<RetrievalEvidence["pprBoosts"]>["backend"] =
         "js";
       let symbolsBoosted = 0;
       if (snapshot && seedResolution.seeds.size > 0) {
+        const entityPprComputeStartedAt = performance.now();
         const pprResult = await computePpr({
           graph: snapshot,
           snapshotCreatedAt:
@@ -1004,6 +1087,11 @@ export async function entitySearch(
             direction: options.pprDirection,
           },
         });
+        recordRetrievalTiming(
+          diagnosticTimings,
+          "entity.ppr.compute",
+          entityPprComputeStartedAt,
+        );
         backend = pprResult.backend;
         try {
           getObservabilityTap()?.pprResult({
@@ -1022,11 +1110,17 @@ export async function entitySearch(
         const originalScores = new Map(
           symbolItems.map((r) => [r.symbolId, r.score] as const),
         );
+        const applyBoostStartedAt = performance.now();
         const boost = applyPprBoost(symbolItems, pprResult.scores, {
           pprWeight: options.pprWeight,
           combinedCap: 4,
           originalScores,
         });
+        recordRetrievalTiming(
+          diagnosticTimings,
+          "entity.ppr.applyBoost",
+          applyBoostStartedAt,
+        );
         symbolsBoosted = boost.symbolsBoosted;
         const reweightedSymbols = boost.items.map((item) => ({
           entityType: "symbol" as const,
@@ -1052,6 +1146,12 @@ export async function entitySearch(
           err instanceof Error ? err.message : String(err)
         }`,
       );
+    } finally {
+      recordRetrievalTiming(
+        diagnosticTimings,
+        "entity.pprBoost",
+        pprStart,
+      );
     }
   }
 
@@ -1064,6 +1164,8 @@ export async function entitySearch(
     fusionLatencyMs,
   );
   if (pprBoosts) evidence.pprBoosts = pprBoosts;
+  const timingRecord = retrievalTimingsToRecord(diagnosticTimings);
+  if (timingRecord) evidence.diagnosticTimings = timingRecord;
   return { results: pprAdjusted, evidence };
 }
 

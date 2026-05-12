@@ -43,6 +43,10 @@ import { attachRawContext } from "../token-usage.js";
 import { hashContent } from "../../util/hashing.js";
 import { logger } from "../../util/logger.js";
 import {
+  attachTimingDiagnostics,
+  ToolPhaseTimer,
+} from "../timing-diagnostics.js";
+import {
   RUNTIME_MAX_KEYWORD_EXCERPTS,
   RUNTIME_KEYWORD_CONTEXT_LINES,
   RUNTIME_MAX_LINE_LENGTH,
@@ -268,19 +272,30 @@ export async function handleRuntimeExecute(
   args: unknown,
   context?: ToolContext,
 ): Promise<RuntimeExecuteResponse> {
+  const timer = new ToolPhaseTimer();
+  const parseStartedAt = timer.start();
   const request = RuntimeExecuteRequestSchema.parse(args);
+  timer.record("runtime.validate", parseStartedAt);
+
+  const finish = <T extends RuntimeExecuteResponse>(response: T): T =>
+    request.includeDiagnostics
+      ? attachTimingDiagnostics(response, timer.snapshot())
+      : response;
 
   // 1. Load config + validate repo
+  const repoStartedAt = timer.start();
   const appConfig = loadConfig();
   const runtimeConfig = RuntimeConfigSchema.parse(appConfig.runtime ?? {});
 
   const conn = await getLadybugConn();
   const repo = await ladybugDb.getRepo(conn, request.repoId);
   if (!repo) {
-    throw new DatabaseError(`Repository ${request.repoId} not found`);
+      throw new DatabaseError(`Repository ${request.repoId} not found`);
   }
+  timer.record("runtime.loadRepo", repoStartedAt);
 
   // 2. Resolve runtime descriptor
+  const runtimeResolveStartedAt = timer.start();
   const runtimeDescriptor = getRuntime(request.runtime);
   if (!runtimeDescriptor) {
     const available = getRegisteredRuntimes().join(", ");
@@ -288,8 +303,10 @@ export async function handleRuntimeExecute(
       `Unknown runtime: ${request.runtime}. Available: ${available}`,
     );
   }
+  timer.record("runtime.resolveRuntime", runtimeResolveStartedAt);
 
   // 3. Evaluate policy
+  const policyStartedAt = timer.start();
   const tracker = getOrCreateConcurrencyTracker(
     runtimeConfig.maxConcurrentJobs,
   );
@@ -315,6 +332,7 @@ export async function handleRuntimeExecute(
     runtimeConfig,
     tracker,
   );
+  timer.record("runtime.policy", policyStartedAt);
 
   // Log policy decision
   logPolicyDecision({
@@ -327,7 +345,7 @@ export async function handleRuntimeExecute(
   });
 
   if (policyDecision.decision === "deny") {
-    return {
+    return finish({
       status: "denied",
       exitCode: null,
       signal: null,
@@ -345,12 +363,12 @@ export async function handleRuntimeExecute(
         auditHash: policyDecision.auditHash,
         deniedReasons: policyDecision.deniedReasons,
       },
-    };
+    });
   }
 
   // 4. Acquire concurrency slot
   if (!tracker.acquire()) {
-    return {
+    return finish({
       status: "denied",
       exitCode: null,
       signal: null,
@@ -369,7 +387,7 @@ export async function handleRuntimeExecute(
         auditHash: policyDecision.auditHash,
         deniedReasons: ["Concurrency limit reached"],
       },
-    };
+    });
   }
 
   let tempCodeDir: string | undefined;
@@ -377,6 +395,7 @@ export async function handleRuntimeExecute(
   try {
     // 5. Resolve CWD
     let cwd: string;
+    const cwdStartedAt = timer.start();
     try {
       cwd = await resolveAndValidateCwd(repo.rootPath, request.relativeCwd);
     } catch (err) {
@@ -388,6 +407,7 @@ export async function handleRuntimeExecute(
       }
       throw err;
     }
+    timer.record("runtime.resolveCwd", cwdStartedAt);
 
     // 6. Handle code mode — write to temp file
     let codePath: string | undefined;
@@ -416,6 +436,7 @@ export async function handleRuntimeExecute(
     let effectiveTimeoutMs = timeoutMs;
 
     if (isCompileThenExecute(request.runtime) && codePath) {
+      const compileStartedAt = timer.start();
       const compileStart = Date.now();
       const compileResult = await execute({
         repoId: request.repoId,
@@ -429,6 +450,7 @@ export async function handleRuntimeExecute(
         maxStderrBytes: runtimeConfig.maxStderrBytes,
         signal: context?.signal,
       });
+      timer.record("runtime.compile", compileStartedAt);
 
       if (compileResult.exitCode !== 0 || compileResult.status !== "success") {
         // Compile failed — return compiler output immediately
@@ -450,6 +472,7 @@ export async function handleRuntimeExecute(
           policyDecision: policyDecision.decision,
           auditHash: policyDecision.auditHash,
           artifactHandle: null,
+          diagnostics: request.includeDiagnostics ? timer.snapshot() : undefined,
         });
 
         if (request.outputMode === "minimal") {
@@ -459,7 +482,7 @@ export async function handleRuntimeExecute(
           const stderrLineCount = compileStderr
             ? compileStderr.split("\n").length
             : 0;
-          return attachRawContext(
+          return finish(attachRawContext(
             {
               status: compileResult.status,
               exitCode: compileResult.exitCode,
@@ -483,7 +506,7 @@ export async function handleRuntimeExecute(
               },
             },
             { rawTokens: compileRawTokens },
-          );
+          ));
         }
 
         if (request.outputMode === "intent") {
@@ -497,7 +520,7 @@ export async function handleRuntimeExecute(
               ),
             );
           }
-          return attachRawContext(
+          return finish(attachRawContext(
             {
               status: compileResult.status,
               exitCode: compileResult.exitCode,
@@ -518,7 +541,7 @@ export async function handleRuntimeExecute(
               },
             },
             { rawTokens: compileRawTokens },
-          );
+          ));
         }
 
         // "summary" mode — existing behavior
@@ -528,7 +551,7 @@ export async function handleRuntimeExecute(
           request.maxResponseLines,
           request.queryTerms,
         );
-        return attachRawContext(
+        return finish(attachRawContext(
           {
             status: compileResult.status,
             exitCode: compileResult.exitCode,
@@ -549,14 +572,14 @@ export async function handleRuntimeExecute(
             },
           },
           { rawTokens: compileRawTokens },
-        );
+        ));
       }
 
       const compileDurationMs = Date.now() - compileStart;
       const remainingMs = effectiveTimeoutMs - compileDurationMs;
       if (remainingMs < COMPILE_MIN_EXEC_BUDGET_MS) {
         // Not enough time left to execute
-        return {
+        return finish({
           status: "timeout",
           exitCode: null,
           signal: null,
@@ -573,7 +596,7 @@ export async function handleRuntimeExecute(
           policyDecision: {
             auditHash: policyDecision.auditHash,
           },
-        };
+        });
       }
 
       // Derive output binary path and replace cmd/codePath for execution phase
@@ -593,6 +616,7 @@ export async function handleRuntimeExecute(
     }
 
     // 9. Execute
+    const executeStartedAt = timer.start();
     const result = await execute({
       repoId: request.repoId,
       runtime: request.runtime,
@@ -606,10 +630,13 @@ export async function handleRuntimeExecute(
       signal: context?.signal,
       codePath,
     });
+    timer.record("runtime.execute", executeStartedAt);
 
     // 10. Convert output to strings
+    const decodeStartedAt = timer.start();
     const stdoutStr = result.stdout.toString("utf-8");
     const stderrStr = result.stderr.toString("utf-8");
+    timer.record("runtime.decodeOutput", decodeStartedAt);
 
     // 11. Persist artifact (all modes)
     let artifactHandle: string | null = null;
@@ -618,6 +645,7 @@ export async function handleRuntimeExecute(
       (result.stdout.length > 0 || result.stderr.length > 0)
     ) {
       try {
+        const artifactStartedAt = timer.start();
         const argsHash = hashContent(JSON.stringify(request.args));
         const artifactResult = await writeArtifact({
           repoId: request.repoId,
@@ -635,6 +663,7 @@ export async function handleRuntimeExecute(
           redactionConfig: appConfig.redaction,
         });
         artifactHandle = artifactResult.artifactHandle;
+        timer.record("runtime.persistArtifact", artifactStartedAt);
       } catch (err) {
         logger.error("Failed to persist runtime artifact", {
           error: String(err),
@@ -661,11 +690,12 @@ export async function handleRuntimeExecute(
         durationMs: result.durationMs,
         stdoutBytes: result.totalStdoutBytes,
         stderrBytes: result.totalStderrBytes,
-        timedOut: result.status === "timeout",
-        policyDecision: policyDecision.decision,
-        auditHash: policyDecision.auditHash,
-        artifactHandle,
-      });
+          timedOut: result.status === "timeout",
+          policyDecision: policyDecision.decision,
+          auditHash: policyDecision.auditHash,
+          artifactHandle,
+          diagnostics: request.includeDiagnostics ? timer.snapshot() : undefined,
+        });
       const isSmallOutput =
         !result.stdoutTruncated &&
         !result.stderrTruncated &&
@@ -706,9 +736,11 @@ export async function handleRuntimeExecute(
           truncation: minimalBase.truncation,
           policyDecision: minimalBase.policyDecision,
         };
-        return attachRawContext(compact, { rawTokens: rawOutputTokens });
+        return finish(attachRawContext(compact, { rawTokens: rawOutputTokens }));
       }
-      return attachRawContext(minimalBase, { rawTokens: rawOutputTokens });
+      return finish(
+        attachRawContext(minimalBase, { rawTokens: rawOutputTokens }),
+      );
     }
 
     if (request.outputMode === "intent") {
@@ -730,6 +762,7 @@ export async function handleRuntimeExecute(
         policyDecision: policyDecision.decision,
         auditHash: policyDecision.auditHash,
         artifactHandle,
+        diagnostics: request.includeDiagnostics ? timer.snapshot() : undefined,
       });
       const intentResponse = {
         status: result.status,
@@ -750,7 +783,9 @@ export async function handleRuntimeExecute(
           auditHash: policyDecision.auditHash,
         },
       };
-      return attachRawContext(intentResponse, { rawTokens: rawOutputTokens });
+      return finish(
+        attachRawContext(intentResponse, { rawTokens: rawOutputTokens }),
+      );
     }
 
     // "summary" mode — existing behavior
@@ -774,6 +809,7 @@ export async function handleRuntimeExecute(
       policyDecision: policyDecision.decision,
       auditHash: policyDecision.auditHash,
       artifactHandle,
+      diagnostics: request.includeDiagnostics ? timer.snapshot() : undefined,
     });
 
     // 15. Return response
@@ -796,7 +832,7 @@ export async function handleRuntimeExecute(
         auditHash: policyDecision.auditHash,
       },
     };
-    return attachRawContext(response, { rawTokens: rawOutputTokens });
+    return finish(attachRawContext(response, { rawTokens: rawOutputTokens }));
   } finally {
     tracker.release();
 

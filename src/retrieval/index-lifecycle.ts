@@ -7,7 +7,7 @@
  */
 
 import type { Connection } from "kuzu";
-import { execStoredProc, queryAll } from "../db/ladybug-core.js";
+import { execStoredProc, queryStoredProcAll } from "../db/ladybug-core.js";
 import { getExtensionCapabilities } from "../db/extension-caps.js";
 import { logger } from "../util/logger.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
@@ -271,7 +271,7 @@ interface ShowIndexRow {
  */
 export async function showIndexes(conn: Connection): Promise<IndexInfo[]> {
   try {
-    const rows = await queryAll<ShowIndexRow>(
+    const rows = await queryStoredProcAll<ShowIndexRow>(
       conn,
       "CALL SHOW_INDEXES() RETURN *",
     );

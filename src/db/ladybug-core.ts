@@ -10,6 +10,7 @@ import type { Connection, PreparedStatement, QueryResult } from "kuzu";
 import { logger } from "../util/logger.js";
 import { DatabaseError } from "../domain/errors.js";
 import { ConcurrencyLimiter } from "../util/concurrency.js";
+import { getObservabilityTap } from "../observability/event-tap.js";
 
 const MAX_PREPARED_STATEMENT_CACHE_SIZE = 200;
 
@@ -28,6 +29,34 @@ const transactionContext = new AsyncLocalStorage<Map<Connection, symbol>>();
 // handlers than pool slots two callers can land on the same conn. This mutex
 // serializes prepare → execute → getAll per connection.
 const connMutex = new WeakMap<Connection, ConcurrencyLimiter>();
+
+type DbLatencyOperation =
+  | "queryAll"
+  | "exec"
+  | "storedProcAll"
+  | "storedProcExec";
+
+function recordDbLatency(
+  operation: DbLatencyOperation,
+  event: {
+    queuedAt: number;
+    nativeStartedAt: number;
+    nativeEndedAt: number;
+    success: boolean;
+  },
+): void {
+  try {
+    getObservabilityTap()?.dbLatency({
+      operation,
+      latencyMs: event.nativeEndedAt - event.queuedAt,
+      queueMs: event.nativeStartedAt - event.queuedAt,
+      nativeMs: event.nativeEndedAt - event.nativeStartedAt,
+      success: event.success,
+    });
+  } catch {
+    // Observability must never affect query execution.
+  }
+}
 
 function getConnMutex(conn: Connection): ConcurrencyLimiter {
   let mutex = connMutex.get(conn);
@@ -140,8 +169,9 @@ export async function execDdl(
  * Like `execDdl` it bypasses the prepared-statement cache, holds the per-conn
  * mutex, and runs through the watchdog. Returns the QueryResult so callers
  * that need to read rows (e.g. SHOW_INDEXES) can iterate; the handle MUST be
- * closed by the caller via `.close()` once consumed. Callers that only need
- * side-effects should use `execStoredProc` instead.
+ * closed by the caller via `.close()` once consumed. Prefer
+ * `queryStoredProcAll` for new row-returning call sites so result
+ * materialisation and close both stay inside the connection mutex.
  */
 export async function execStoredProcRaw(
   conn: Connection,
@@ -153,22 +183,87 @@ export async function execStoredProcRaw(
 }
 
 /**
- * Side-effect-only variant of `execStoredProcRaw` — closes the handle for you.
+ * Execute a row-returning stored procedure and close the native handle before
+ * releasing the per-connection mutex. Stored procedures cannot always be
+ * prepared by LadybugDB, so callers pass a fully validated literal query.
+ */
+export async function queryStoredProcAll<T>(
+  conn: Connection,
+  callQuery: string,
+): Promise<T[]> {
+  const queuedAt = performance.now();
+  return getConnMutex(conn).run(() =>
+    withConnWatchdog(conn, "queryStoredProcAll", async () => {
+      const nativeStartedAt = performance.now();
+      let success = false;
+      try {
+        const result = await conn.query(callQuery);
+        const results = Array.isArray(result) ? result : [result];
+        const rows: T[] = [];
+        try {
+          for (const item of results) {
+            rows.push(...((await item.getAll()) as T[]));
+          }
+        } finally {
+          for (const item of results) item.close();
+        }
+        success = true;
+        return rows;
+      } catch (err) {
+        throw new DatabaseError(
+          `Stored procedure query failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      } finally {
+        recordDbLatency("storedProcAll", {
+          queuedAt,
+          nativeStartedAt,
+          nativeEndedAt: performance.now(),
+          success,
+        });
+      }
+    }),
+  );
+}
+
+/**
+ * Side-effect-only stored procedure variant — closes the handle before
+ * releasing the per-connection mutex.
  */
 export async function execStoredProc(
   conn: Connection,
   callQuery: string,
 ): Promise<void> {
-  const result = await execStoredProcRaw(conn, callQuery);
-  try {
-    if (Array.isArray(result)) {
-      for (const r of result) r.close();
-    } else {
-      result.close();
-    }
-  } catch {
-    // Best-effort close.
-  }
+  const queuedAt = performance.now();
+  await getConnMutex(conn).run(() =>
+    withConnWatchdog(conn, "execStoredProc", async () => {
+      const nativeStartedAt = performance.now();
+      let success = false;
+      try {
+        const result = await conn.query(callQuery);
+        try {
+          if (Array.isArray(result)) {
+            for (const item of result) item.close();
+          } else {
+            result.close();
+          }
+        } catch {
+          // Best-effort close; the stored procedure itself has completed.
+        }
+        success = true;
+      } catch (err) {
+        throw new DatabaseError(
+          `Stored procedure execution failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      } finally {
+        recordDbLatency("storedProcExec", {
+          queuedAt,
+          nativeStartedAt,
+          nativeEndedAt: performance.now(),
+          success,
+        });
+      }
+    }),
+  );
 }
 
 /**
@@ -319,13 +414,28 @@ export async function queryAll<T>(
   statement: string,
   params: Record<string, unknown> = {},
 ): Promise<T[]> {
+  const queuedAt = performance.now();
   return getConnMutex(conn).run(() =>
     withConnWatchdog(conn, "queryAll", async () => {
-      const result = await execute(conn, statement, params);
+      const nativeStartedAt = performance.now();
+      let success = false;
       try {
-        return (await result.getAll()) as T[];
+        const result = await execute(conn, statement, params);
+        let rows: T[];
+        try {
+          rows = (await result.getAll()) as T[];
+        } finally {
+          result.close();
+        }
+        success = true;
+        return rows;
       } finally {
-        result.close();
+        recordDbLatency("queryAll", {
+          queuedAt,
+          nativeStartedAt,
+          nativeEndedAt: performance.now(),
+          success,
+        });
       }
     }),
   );
@@ -345,10 +455,23 @@ export async function exec(
   statement: string,
   params: Record<string, unknown> = {},
 ): Promise<void> {
+  const queuedAt = performance.now();
   return getConnMutex(conn).run(() =>
     withConnWatchdog(conn, "exec", async () => {
-      const result = await execute(conn, statement, params);
-      result.close();
+      const nativeStartedAt = performance.now();
+      let success = false;
+      try {
+        const result = await execute(conn, statement, params);
+        result.close();
+        success = true;
+      } finally {
+        recordDbLatency("exec", {
+          queuedAt,
+          nativeStartedAt,
+          nativeEndedAt: performance.now(),
+          success,
+        });
+      }
     }),
   );
 }

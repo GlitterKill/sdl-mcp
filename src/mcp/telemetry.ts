@@ -14,6 +14,7 @@ import type { DecisionEvidence } from "./types.js";
 import { DB_QUERY_LIMIT_MAX } from "../config/constants.js";
 import { safeJsonParse } from "../util/safeJson.js";
 import { z } from "zod";
+import type { ToolTimingDiagnostics } from "./timing-diagnostics.js";
 
 export type ToolRequest = Record<string, unknown>;
 export type ToolResponse = {
@@ -29,6 +30,7 @@ export interface ToolCallEvent {
   symbolId?: SymbolId;
   tokensUsed?: number;
   tokensSaved?: number;
+  diagnostics?: ToolTimingDiagnostics;
 }
 
 export interface CodeWindowDecisionEvent {
@@ -665,6 +667,7 @@ export interface RuntimeExecutionEvent {
   policyDecision: string;
   auditHash: string;
   artifactHandle: string | null;
+  diagnostics?: ToolTimingDiagnostics;
 }
 
 /**

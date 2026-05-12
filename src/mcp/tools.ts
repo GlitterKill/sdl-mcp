@@ -977,6 +977,13 @@ const ResponseArtifactSavingsSchema = z.object({
   savedBytes: z.number().int(),
 });
 
+export const ToolTimingDiagnosticsSchema = z.object({
+  timings: z.object({
+    totalMs: z.number(),
+    phases: z.record(z.string(), z.number()),
+  }),
+});
+
 export const ResponseArtifactReferenceSchema = z.object({
   responseMode: z.literal("handle"),
   kind: z.literal("responseArtifact"),
@@ -2101,6 +2108,10 @@ export const AgentContextRequestSchema = z.object({
     })
     .optional()
     .describe("Task-specific options"),
+  includeDiagnostics: z
+    .boolean()
+    .optional()
+    .describe("Include phase timing diagnostics for performance investigation."),
   ifNoneMatch: z.string().optional(),
 });
 
@@ -2193,6 +2204,7 @@ const AgentContextPayloadSchema = z.object({
         .optional(),
     })
     .optional(),
+  diagnostics: ToolTimingDiagnosticsSchema.optional(),
   /** Packed wire-format payload. Populated when wireFormat=packed and gate decision was "packed". */
   _packedPayload: z.string().optional(),
   /** Packed wire-format telemetry. Populated when sdl.context ran the packed gate. */
@@ -2431,6 +2443,10 @@ const RuntimeExecuteRequestObjectSchema = z
           "'summary' returns head+tail output excerpts (legacy behavior); " +
           "'intent' returns only queryTerms-matched excerpts, no head/tail summary",
       ),
+    includeDiagnostics: z
+      .boolean()
+      .optional()
+      .describe("Include phase timing diagnostics for performance investigation."),
   })
   .strict()
   .superRefine((val, ctx) => {
@@ -2490,6 +2506,7 @@ export const RuntimeExecuteResponseSchema = z.object({
       deniedReasons: z.array(z.string()).optional(),
     })
     .optional(),
+  diagnostics: ToolTimingDiagnosticsSchema.optional(),
 });
 
 export type RuntimeExecuteRequest = z.infer<typeof RuntimeExecuteRequestSchema>;
@@ -2887,6 +2904,7 @@ export interface FileReadInlineResponse {
   extractedPath?: string;
   sessionDelta?: z.infer<typeof SessionDeltaMetadataSchema>;
   delta?: z.infer<typeof SessionDeltaPayloadSchema>;
+  diagnostics?: z.infer<typeof ToolTimingDiagnosticsSchema>;
 }
 
 export type FileReadResponse = FileReadInlineResponse | ResponseArtifactReference;
@@ -3070,6 +3088,7 @@ export interface FileWriteResponse {
     edgesUpserted?: number;
     error?: string;
   };
+  diagnostics?: z.infer<typeof ToolTimingDiagnosticsSchema>;
 }
 
 // ============================================================================
@@ -3193,6 +3212,7 @@ export interface SearchEditPreviewResponse {
   }>;
   partial?: boolean;
   retrievalEvidence?: RetrievalEvidence;
+  diagnostics?: z.infer<typeof ToolTimingDiagnosticsSchema>;
 }
 
 export interface SearchEditApplyResponse {
@@ -3213,6 +3233,7 @@ export interface SearchEditApplyResponse {
     triggered: boolean;
     restoredFiles: string[];
   };
+  diagnostics?: z.infer<typeof ToolTimingDiagnosticsSchema>;
 }
 
 export type SearchEditResponse =

@@ -92,6 +92,9 @@ function captureTap(): {
     indexPhase: noop,
     cacheLookup: noop,
     sliceBuild: noop,
+    auditBufferSample: noop,
+    postIndexSession: noop,
+    dbLatency: noop,
   };
   installObservabilityTap(tap);
   return { events, uninstall: () => resetObservabilityTap() };

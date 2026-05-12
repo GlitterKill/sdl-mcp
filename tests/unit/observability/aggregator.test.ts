@@ -276,6 +276,46 @@ describe("Aggregator", () => {
     assert.equal(auditBuffer.sessionActive, false);
   });
 
+  it("aggregates per-tool timing phase diagnostics", () => {
+    const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
+    agg.recordToolCall({
+      tool: "sdl.context",
+      request: {},
+      response: {},
+      durationMs: 100,
+      diagnostics: {
+        timings: {
+          totalMs: 100,
+          phases: {
+            "context.retrieve": 70,
+            "context.response": 15,
+          },
+        },
+      },
+    });
+    agg.recordToolCall({
+      tool: "sdl.context",
+      request: {},
+      response: {},
+      durationMs: 300,
+      diagnostics: {
+        timings: {
+          totalMs: 300,
+          phases: {
+            "context.retrieve": 210,
+            "context.response": 30,
+          },
+        },
+      },
+    });
+
+    const tool = agg.getSnapshot(REPO).latency.perTool["sdl.context"];
+    assert.ok(tool);
+    assert.equal(tool.phases?.["context.retrieve"]?.count, 2);
+    assert.equal(tool.phases?.["context.retrieve"]?.p95Ms, 210);
+    assert.equal(tool.phases?.["context.response"]?.maxMs, 30);
+  });
+
   it("computes post-index session histogram + timeout count", () => {
     const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
     agg.recordPostIndexSession({ durationMs: 100, timedOut: false });

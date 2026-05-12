@@ -18,7 +18,10 @@ import type {
   ContextSeedResult,
 } from "./types.js";
 import { entitySearch } from "../retrieval/index.js";
-import { extractIdentifiersFromText } from "./identifier-extraction.js";
+import {
+  extractIdentifiersFromText,
+  IDENTIFIER_STOP_WORDS,
+} from "./identifier-extraction.js";
 import { searchSymbols } from "../db/ladybug-queries.js";
 import { searchSymbolsHybridWithOverlay } from "../live-index/overlay-reader.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
@@ -51,6 +54,49 @@ const COMPOUND_LIMIT_BROAD = 15;
 /** Maximum feedback rows to consider. */
 const FEEDBACK_LIMIT = 10;
 
+function recordTiming(
+  timings: Map<string, number>,
+  phase: string,
+  startedAt: number,
+): void {
+  const durationMs = performance.now() - startedAt;
+  if (!Number.isFinite(durationMs) || durationMs < 0) return;
+  timings.set(phase, (timings.get(phase) ?? 0) + durationMs);
+}
+
+function timingsToRecord(timings: Map<string, number>): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const [phase, durationMs] of timings.entries()) {
+    result[phase] = Math.round(durationMs);
+  }
+  return result;
+}
+
+function mergeTimingRecord(
+  timings: Map<string, number>,
+  record: Record<string, number> | undefined,
+): void {
+  if (!record) return;
+  for (const [phase, durationMs] of Object.entries(record)) {
+    if (!Number.isFinite(durationMs) || durationMs < 0) continue;
+    timings.set(phase, (timings.get(phase) ?? 0) + durationMs);
+  }
+}
+
+export function buildContextFtsQuery(taskText: string): string {
+  const words = taskText
+    .slice(0, 2000)
+    .match(/[a-zA-Z_][a-zA-Z0-9_]{2,}/g);
+  const terms = [...new Set(words ?? [])]
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 3)
+    .filter((term) => !IDENTIFIER_STOP_WORDS.has(term.toLowerCase()))
+    .slice(0, 8);
+  if (terms.length > 0) return terms.join(" ");
+  const identifiers = extractIdentifiersFromText(taskText, taskText).slice(0, 4);
+  return identifiers.length > 0 ? identifiers.join(" ") : taskText.slice(0, 200);
+}
+
 // ---------------------------------------------------------------------------
 // Focus Path Inference
 // ---------------------------------------------------------------------------
@@ -75,6 +121,14 @@ const CONCEPT_DIRECTORY_MAP: Array<{ keywords: string[]; paths: string[] }> = [
   { keywords: ["code mode", "workflow", "sdl.context", "sdl.workflow"], paths: ["src/code-mode/"] },
   { keywords: ["memory", "memories"], paths: ["src/memory/"] },
   { keywords: ["runtime", "execute", "runtime execute"], paths: ["src/runtime/"] },
+  {
+    keywords: ["observability", "latency", "metrics", "dashboard", "telemetry"],
+    paths: [
+      "src/observability/aggregator.ts",
+      "src/observability/service.ts",
+      "src/mcp/telemetry.ts",
+    ],
+  },
   { keywords: ["summary", "summaries", "summarize"], paths: ["src/indexer/", "src/services/"] },
   { keywords: ["live index", "draft buffer", "overlay"], paths: ["src/live-index/"] },
   { keywords: ["embedding", "semantic", "vector", "nomic"], paths: ["src/indexer/", "src/retrieval/"] },
@@ -150,8 +204,10 @@ export function inferFocusPathsFromTaskText(taskText: string): string[] {
 export async function buildSeedContext(
   task: AgentTask,
 ): Promise<ContextSeedResult> {
-  /* sdl.context: semantic hybrid defaults */
-  const useHybrid = task.options?.semantic !== false;
+  const timings = new Map<string, number>();
+  /* sdl.context: keep expensive multi-entity semantic seeding opt-in. */
+  const useSemanticEntitySearch = task.options?.semantic === true;
+  const useHybridLexical = task.options?.semantic === true;
   const includeEvidence = task.options?.includeRetrievalEvidence !== false;
   /* sdl.context: auto-extract chatMentions from taskText when caller did not pass any */
   const { autoExtractMentions } = await import("../retrieval/seed-resolver.js");
@@ -172,51 +228,65 @@ export async function buildSeedContext(
 
   // ------------------------------------------------------------------
   // Stage 1: Semantic retrieval (hybrid FTS + vector via orchestrator)
-  //   Skipped when the caller explicitly sets options.semantic = false.
+  //   Kept opt-in because large LadybugDB vector/FTS index calls can dominate
+  //   latency for natural-language context lookups.
   // ------------------------------------------------------------------
-  if (useHybrid) try {
-    const entityResult = await entitySearch({
-      repoId: task.repoId,
-      query: task.taskText,
-      limit: 20,
-      entityTypes: ["symbol", "cluster", "process", "fileSummary"],
-      includeEvidence: includeEvidence,
-      chatMentions: resolvedChatMentions,
-      chatMentionWeights: task.options?.chatMentionWeights,
-      pprDirection: task.options?.pprDirection,
-      pprWeight: task.options?.pprWeight,
-    });
+  if (useSemanticEntitySearch) {
+    const semanticStartedAt = performance.now();
+    try {
+      const entityResult = await entitySearch({
+        repoId: task.repoId,
+        query: task.taskText,
+        ftsQuery: buildContextFtsQuery(task.taskText),
+        limit: 20,
+        entityTypes: ["symbol", "cluster", "process", "fileSummary"],
+        // Entity FTS can dominate natural-language context latency on large
+        // indexes. Vector seeding plus bounded lexical fallback keep symbol
+        // coverage without paying that pathological query cost here.
+        ftsEnabled: false,
+        includeEvidence: includeEvidence,
+        chatMentions: resolvedChatMentions,
+        chatMentionWeights: task.options?.chatMentionWeights,
+        pprDirection: task.options?.pprDirection,
+        pprWeight: task.options?.pprWeight,
+      });
+      recordTiming(timings, "seed.semanticEntitySearch", semanticStartedAt);
 
-    if (entityResult.evidence) seedEvidence = entityResult.evidence;
-    const filtered = entityResult.results.filter(
-      (r) => r.score >= MIN_ENTITY_SCORE,
-    );
-
-    if (filtered.length > 0) {
-      // Normalize scores to 0-1 (divide by max score in batch)
-      const maxScore = Math.max(...filtered.map((r) => r.score));
-      const norm = maxScore > 0 ? maxScore : 1;
-
-      for (let i = 0; i < filtered.length; i++) {
-        if (sourceCounts.semantic >= halfMax) break;
-        const r = filtered[i];
-        const ref = `${r.entityType}:${r.entityId}`;
-        if (seen.has(ref)) continue;
-        seen.add(ref);
-        allCandidates.push({
-          contextRef: ref,
-          source: "semantic",
-          score: r.score / norm,
-          sourceRank: i,
-        });
-        sourceCounts.semantic++;
+      if (entityResult.evidence) {
+        mergeTimingRecord(timings, entityResult.evidence.diagnosticTimings);
+        seedEvidence = entityResult.evidence;
       }
+      const filtered = entityResult.results.filter(
+        (r) => r.score >= MIN_ENTITY_SCORE,
+      );
+
+      if (filtered.length > 0) {
+        // Normalize scores to 0-1 (divide by max score in batch)
+        const maxScore = Math.max(...filtered.map((r) => r.score));
+        const norm = maxScore > 0 ? maxScore : 1;
+
+        for (let i = 0; i < filtered.length; i++) {
+          if (sourceCounts.semantic >= halfMax) break;
+          const r = filtered[i];
+          const ref = `${r.entityType}:${r.entityId}`;
+          if (seen.has(ref)) continue;
+          seen.add(ref);
+          allCandidates.push({
+            contextRef: ref,
+            source: "semantic",
+            score: r.score / norm,
+            sourceRank: i,
+          });
+          sourceCounts.semantic++;
+        }
+      }
+    } catch (err) {
+      recordTiming(timings, "seed.semanticEntitySearch", semanticStartedAt);
+      logger.debug("Semantic retrieval for context seeding failed (non-fatal)", {
+        repoId: task.repoId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
-  } catch (err) {
-    logger.debug("Semantic retrieval for context seeding failed (non-fatal)", {
-      repoId: task.repoId,
-      error: err instanceof Error ? err.message : String(err),
-    });
   }
 
   // ------------------------------------------------------------------
@@ -224,6 +294,7 @@ export async function buildSeedContext(
   //   Only runs if Stage 1 returned fewer than half the max seed count.
   // ------------------------------------------------------------------
   if (sourceCounts.semantic < halfMax) {
+    const lexicalStartedAt = performance.now();
     try {
       const conn = await getLadybugConn();
       const terms = extractIdentifiersFromText(task.taskText, task.taskText);
@@ -243,9 +314,11 @@ export async function buildSeedContext(
       // Strategy 1: Compound multi-term search
       const compoundQuery = terms.slice(0, 6).join(" ");
       if (compoundQuery) {
-        const compoundResults = useHybrid
+        const compoundStartedAt = performance.now();
+        const compoundResults = useHybridLexical
           ? (await searchSymbolsHybridWithOverlay(conn, task.repoId, compoundQuery, compoundLimit, { chatMentions: resolvedChatMentions, chatMentionWeights: task.options?.chatMentionWeights, pprDirection: task.options?.pprDirection, pprWeight: task.options?.pprWeight })).rows
           : await searchSymbols(conn, task.repoId, compoundQuery, compoundLimit);
+        recordTiming(timings, "seed.lexicalCompound", compoundStartedAt);
         for (const r of compoundResults) {
           if (sourceCounts.lexical >= halfMax) break;
           const ref = `symbol:${r.symbolId}`;
@@ -273,9 +346,11 @@ export async function buildSeedContext(
       // Strategy 2: Individual term searches
       for (const term of terms.slice(0, maxIndividualTerms)) {
         if (sourceCounts.lexical >= halfMax) break;
-        const results = useHybrid
+        const termStartedAt = performance.now();
+        const results = useHybridLexical
           ? (await searchSymbolsHybridWithOverlay(conn, task.repoId, term, perTermLimit, { chatMentions: resolvedChatMentions, chatMentionWeights: task.options?.chatMentionWeights, pprDirection: task.options?.pprDirection, pprWeight: task.options?.pprWeight })).rows
           : await searchSymbols(conn, task.repoId, term, perTermLimit);
+        recordTiming(timings, "seed.lexicalTermSearch", termStartedAt);
         for (const r of results) {
           if (sourceCounts.lexical >= halfMax) break;
           const ref = `symbol:${r.symbolId}`;
@@ -299,12 +374,15 @@ export async function buildSeedContext(
       logger.debug("Lexical fallback for context seeding failed (non-fatal)", {
         error: err instanceof Error ? err.message : String(err),
       });
+    } finally {
+      recordTiming(timings, "seed.lexicalFallback", lexicalStartedAt);
     }
   }
 
   // ------------------------------------------------------------------
   // Stage 3: Feedback boosting
   // ------------------------------------------------------------------
+  const feedbackStartedAt = performance.now();
   try {
     const conn = await getLadybugConn();
     const { boosts } = await queryFeedbackBoosts(conn, {
@@ -334,11 +412,14 @@ export async function buildSeedContext(
     logger.debug("Feedback boost for context seeding failed (non-fatal)", {
       error: err instanceof Error ? err.message : String(err),
     });
+  } finally {
+    recordTiming(timings, "seed.feedbackBoost", feedbackStartedAt);
   }
 
   // ------------------------------------------------------------------
   // Final: sort by score descending and cap at maxSeeds
   // ------------------------------------------------------------------
+  const finalizeStartedAt = performance.now();
   allCandidates.sort((a, b) => b.score - a.score);
   const finalCandidates = allCandidates.slice(0, maxSeeds);
 
@@ -347,11 +428,13 @@ export async function buildSeedContext(
   for (const c of finalCandidates) {
     finalSources[c.source]++;
   }
+  recordTiming(timings, "seed.finalize", finalizeStartedAt);
 
   return {
     candidates: finalCandidates,
     sources: finalSources,
     ...(seedEvidence ? { evidence: seedEvidence } : {}),
+    diagnosticTimings: timingsToRecord(timings),
   };
 }
 

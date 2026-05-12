@@ -40,6 +40,12 @@ import {
   projectContextResultForUsageAccounting,
 } from "./mcp/context-response-projection.js";
 import { logger } from "./util/logger.js";
+import {
+  attachTimingDiagnostics,
+  hasTimingDiagnostics,
+  ToolPhaseTimer,
+  type ToolTimingDiagnostics,
+} from "./mcp/timing-diagnostics.js";
 
 export interface ToolContext {
   progressToken?: string | number;
@@ -188,16 +194,22 @@ export class MCPServer {
           }
 
           const start = Date.now();
+          const timer = new ToolPhaseTimer();
+          const normalizeStartedAt = timer.start();
           const normalizedArgs = normalizeToolArguments(
             request.params.arguments,
           );
+          timer.record("server.normalize", normalizeStartedAt);
+          const includeDiagnostics = wantsTimingDiagnostics(normalizedArgs);
           const repoId = extractStringField(normalizedArgs, "repoId");
           const symbolId = extractStringField(normalizedArgs, "symbolId");
 
           // Centralized input validation: parse against the registered Zod schema
           // before dispatching to the handler. This ensures all tools receive
           // validated, coerced arguments regardless of individual handler logic.
+          const validationStartedAt = timer.start();
           const parseResult = tool.inputSchema.safeParse(normalizedArgs);
+          timer.record("server.validate", validationStartedAt);
           if (!parseResult.success) {
             const issueDetails = parseResult.error.issues.map((issue) => ({
               path: issue.path.join("."),
@@ -217,13 +229,17 @@ export class MCPServer {
               `[sdl-mcp] Tool ${request.params.name} validation error: ${JSON.stringify(validationError)}
 `,
             );
+            const responseForLog = includeDiagnostics
+              ? attachTimingDiagnostics(validationError, timer.snapshot())
+              : validationError;
             logToolCall({
               tool: request.params.name,
               request: normalizedArgs as Record<string, unknown>,
-              response: validationError,
+              response: responseForLog,
               durationMs: Date.now() - start,
               repoId,
               symbolId,
+              diagnostics: extractTimingDiagnostics(responseForLog),
             });
             return {
               content: [
@@ -238,11 +254,14 @@ export class MCPServer {
 
           try {
             // Pass the parsed (validated + coerced) data to the handler
+            const dispatchStartedAt = timer.start();
             const result = await runToolDispatch(() =>
               tool.handler(parseResult.data, toolContext),
             );
+            timer.record("server.dispatch", dispatchStartedAt);
 
             // Inject _tokenUsage and strip _rawContext before serialization
+            const responseProcessingStartedAt = timer.start();
             let finalResult = result;
             let capturedUsage: TokenUsageMetadata | undefined;
             let tokensUsedForObs: number | undefined;
@@ -391,6 +410,7 @@ export class MCPServer {
               };
               let timeoutHandle: NodeJS.Timeout | null = null;
               try {
+                const hookStartedAt = timer.start();
                 await Promise.race([
                   hook(
                     request.params.name,
@@ -405,6 +425,7 @@ export class MCPServer {
                     }, 5_000)).unref(),
                   ),
                 ]);
+                timer.record("server.postDispatchHook", hookStartedAt);
               } catch (err) {
                 process.stderr.write(
                   `[sdl-mcp] Post-dispatch hook failed for tool ${request.params.name}: ${err instanceof Error ? err.message : String(err)}
@@ -417,6 +438,10 @@ export class MCPServer {
                 toolContext.signal.removeEventListener("abort", abortHook);
               }
             }
+            timer.record("server.responseProcessing", responseProcessingStartedAt);
+            if (includeDiagnostics) {
+              finalResult = attachTimingDiagnostics(finalResult, timer.snapshot());
+            }
 
             logToolCall({
               tool: request.params.name,
@@ -427,6 +452,7 @@ export class MCPServer {
               symbolId,
               tokensUsed: tokensUsedForObs,
               tokensSaved: tokensSavedForObs,
+              diagnostics: extractTimingDiagnostics(finalResult),
             });
             const footerLines: string[] = [];
             if (
@@ -490,20 +516,25 @@ export class MCPServer {
             process.stderr.write(
               `[sdl-mcp] Tool ${request.params.name} error: ${error}\n`,
             );
+            const errorResponse = errorToMcpResponse(error);
+            const responseForLog = includeDiagnostics
+              ? attachTimingDiagnostics(errorResponse, timer.snapshot())
+              : errorResponse;
             logToolCall({
               tool: request.params.name,
               request: normalizedArgs as Record<string, unknown>,
-              response: errorToMcpResponse(error),
+              response: responseForLog,
               durationMs: Date.now() - start,
               repoId,
               symbolId,
+              diagnostics: extractTimingDiagnostics(responseForLog),
             });
             // Return error in MCP content format instead of throwing
             return {
               content: [
                 {
                   type: "text",
-                  text: JSON.stringify(errorToMcpResponse(error), null, 2),
+                  text: JSON.stringify(responseForLog, null, 2),
                 },
               ],
               isError: true,
@@ -593,6 +624,22 @@ function extractStringField(args: unknown, field: string): string | undefined {
   }
   const value = (args as Record<string, unknown>)[field];
   return typeof value === "string" ? value : undefined;
+}
+
+function wantsTimingDiagnostics(value: unknown): boolean {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    (value as { includeDiagnostics?: unknown }).includeDiagnostics === true
+  );
+}
+
+function extractTimingDiagnostics(
+  value: unknown,
+): ToolTimingDiagnostics | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const diagnostics = (value as { diagnostics?: unknown }).diagnostics;
+  return hasTimingDiagnostics(diagnostics) ? diagnostics : undefined;
 }
 
 function convertSchema(

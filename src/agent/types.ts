@@ -177,6 +177,8 @@ export interface ContextSeedResult {
   sources: { semantic: number; lexical: number; feedback: number };
   /** Hybrid retrieval evidence captured from Stage 1 entitySearch (optional). */
   evidence?: RetrievalEvidence;
+  /** Internal phase timings surfaced only through opt-in tool diagnostics. */
+  diagnosticTimings?: Record<string, number>;
 }
 
 // ---------------------------------------------------------------------------

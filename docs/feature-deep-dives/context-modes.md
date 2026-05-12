@@ -95,13 +95,14 @@ The important part is not the exact rung count. It is the routing choice:
 
 ## Seeding and Ranking
 
-Candidate seeding uses a three-stage pipeline:
+Candidate seeding uses a latency-first pipeline:
 
-1. **Semantic** -- embedding similarity against task text (preferred when embeddings are available)
-2. **Lexical fallback** -- identifier extraction from camelCase, PascalCase, and snake_case tokens in task text, matched against symbol names and summaries
-3. **Feedback priors** -- symbols previously marked useful or missing in past tasks are boosted or surfaced earlier
+1. **Path inference** -- file-like task text is mapped directly to indexed files and nearby symbols.
+2. **Lexical search** -- identifier extraction from camelCase, PascalCase, and snake_case tokens in task text, matched against symbol names and summaries.
+3. **Feedback priors** -- symbols previously marked useful or missing in past tasks are boosted or surfaced earlier.
+4. **Semantic opt-in** -- embedding/FTS/vector retrieval can be requested with `options.semantic: true` when task text alone needs broader semantic expansion.
 
-Because semantic seeding is the first stage, explicit `focusPaths` are less critical in broad mode than they were previously. The engine often finds the right entry points from task text alone.
+Explicit `focusPaths` remain the fastest and most predictable way to constrain broad mode. Semantic expansion is useful for discovery, but it is no longer part of the default low-latency path.
 
 After seeding, an evidence-aware multi-factor scorer ranks every candidate using:
 

@@ -350,12 +350,11 @@ export class Executor {
         // Try exact file match first
         const file = await ladybugDb.getFileByRepoPath(conn, repoId, relPath);
         if (file) {
-          const symbols = await ladybugDb.getSymbolsByFile(conn, file.fileId);
-          const behavioral = symbols.filter((s) =>
-            BEHAVIORAL_KINDS.has(s.kind),
+          const symbolIds = await ladybugDb.getSymbolIdsByFile(
+            conn,
+            file.fileId,
           );
-          const preferred = behavioral.length > 0 ? behavioral : symbols;
-          results.push(preferred.slice(0, 50).map((sym) => sym.symbolId));
+          results.push(symbolIds.slice(0, 5));
           continue;
         }
 

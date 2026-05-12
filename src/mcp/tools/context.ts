@@ -18,6 +18,10 @@ import {
   maybeCompressToolResponse,
   recordTokenSavings,
 } from "../response-compression.js";
+import {
+  attachTimingDiagnostics,
+  ToolPhaseTimer,
+} from "../timing-diagnostics.js";
 
 function stripVolatileEvidenceFields(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -98,6 +102,38 @@ function buildStableAgentContextValue(
   };
 }
 
+function sanitizePhaseSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_.-]/g, "_");
+}
+
+function recordContextSubTimings(
+  timer: ToolPhaseTimer,
+  response: Extract<AgentContextResponse, { taskId: string }>,
+): void {
+  const diagnosticTimings = (response as Record<string, unknown>)
+    .diagnosticTimings;
+  if (diagnosticTimings && typeof diagnosticTimings === "object") {
+    for (const [phase, durationMs] of Object.entries(
+      diagnosticTimings as Record<string, unknown>,
+    )) {
+      if (typeof durationMs === "number") {
+        timer.add(`context.${sanitizePhaseSegment(phase)}`, durationMs);
+      }
+    }
+    delete (response as Record<string, unknown>).diagnosticTimings;
+  }
+  for (const action of response.actionsTaken ?? []) {
+    timer.add(
+      `context.action.${sanitizePhaseSegment(action.type)}`,
+      action.durationMs,
+    );
+  }
+  const fusionLatencyMs = response.retrievalEvidence?.fusionLatencyMs;
+  if (typeof fusionLatencyMs === "number") {
+    timer.add("context.retrievalFusion", fusionLatencyMs);
+  }
+}
+
 export function shouldAttachPackedPayloadForContext(
   wireFormat: "packed" | "auto",
   wireResult: Pick<
@@ -149,8 +185,11 @@ export async function handleAgentContext(
   args: unknown,
   context?: ToolContext,
 ): Promise<AgentContextResponse> {
+  const timer = new ToolPhaseTimer();
   try {
+    const parseStartedAt = timer.start();
     const request = AgentContextRequestSchema.parse(args);
+    timer.record("context.validate", parseStartedAt);
     const task: AgentTask = {
       repoId: request.repoId,
       taskType: request.taskType,
@@ -159,8 +198,11 @@ export async function handleAgentContext(
       options: request.options,
     };
 
-    const result = await contextEngine.buildContext(task);
+    const result = await timer.time("context.buildContext", () =>
+      contextEngine.buildContext(task),
+    );
     const response = result as Extract<AgentContextResponse, { taskId: string }>;
+    recordContextSubTimings(timer, response);
 
     // Always use rawTokens for usage tracking - synthetic fileIds don't exist in DB
     // and would cause the savings meter to always show 0%.
@@ -172,6 +214,7 @@ export async function handleAgentContext(
       ...(enrichedResponse as Record<string, unknown>),
     };
     if (request.wireFormat === "packed" || request.wireFormat === "auto") {
+      const wireStartedAt = timer.start();
       const wireResult = serializeContextForWireFormat(
         enrichedResponse as Record<string, unknown>,
         request.wireFormat,
@@ -215,12 +258,15 @@ export async function handleAgentContext(
         }
         publishContextWireDecision(wireResult, "fallback");
       }
+      timer.record("context.wireFormat", wireStartedAt);
     }
+    const etagStartedAt = timer.start();
     const conditionalResponse = buildConditionalResponse(enrichedResponse, {
       ifNoneMatch: request.ifNoneMatch,
       // Strip request-unique IDs and timing data from the ETag source.
       stableValue: buildStableAgentContextValue(stableView),
     });
+    timer.record("context.etag", etagStartedAt);
     if (request.ifNoneMatch) {
       const hit = "notModified" in conditionalResponse;
       recordTokenSavings({
@@ -234,9 +280,12 @@ export async function handleAgentContext(
       });
     }
     if ("notModified" in conditionalResponse) {
-      return conditionalResponse;
+      return request.includeDiagnostics
+        ? attachTimingDiagnostics(conditionalResponse, timer.snapshot())
+        : conditionalResponse;
     }
-    return maybeCompressToolResponse({
+    const compressionStartedAt = timer.start();
+    const compressedResponse = await maybeCompressToolResponse({
       repoId: request.repoId,
       toolName: "sdl.context",
       payload: conditionalResponse,
@@ -244,6 +293,10 @@ export async function handleAgentContext(
       rawContext: { rawTokens },
       sessionId: context?.sessionId,
     });
+    timer.record("context.responseMode", compressionStartedAt);
+    return request.includeDiagnostics
+      ? attachTimingDiagnostics(compressedResponse, timer.snapshot())
+      : compressedResponse;
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(

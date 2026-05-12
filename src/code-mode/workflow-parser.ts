@@ -31,6 +31,7 @@ export interface ParsedWorkflowRequest {
   /** Prior workflow etagCache to seed */
   etagCache?: Record<string, string>;
   dryRun?: boolean;
+  includeDiagnostics?: boolean;
 }
 
 /**
@@ -94,6 +95,7 @@ export function parseWorkflowRequest(
     defaultMaxResponseTokens,
     onlyFinalResult,
     dryRun,
+    includeDiagnostics,
     etagCache,
   } = parsed.data;
   const errors: string[] = [];
@@ -186,6 +188,7 @@ export function parseWorkflowRequest(
       defaultMaxResponseTokens,
       onlyFinalResult,
       dryRun,
+      includeDiagnostics,
       etagCache,
     },
   };

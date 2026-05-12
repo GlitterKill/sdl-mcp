@@ -134,6 +134,17 @@ export interface PostIndexSessionTapEvent {
   timedOut: boolean;
 }
 
+export interface DbLatencyTapEvent {
+  operation: "queryAll" | "exec" | "storedProcAll" | "storedProcExec";
+  /** End-to-end time from wrapper entry through queue wait and native work. */
+  latencyMs: number;
+  /** Time spent waiting for the per-connection mutex. */
+  queueMs?: number;
+  /** Time spent in LadybugDB native execution/result materialization. */
+  nativeMs?: number;
+  success?: boolean;
+}
+
 export interface ObservabilityTap {
   toolCall(event: ToolCallEvent): void;
   indexEvent(event: IndexEvent): void;
@@ -157,6 +168,7 @@ export interface ObservabilityTap {
   sliceBuild(event: SliceBuildTapEvent): void;
   auditBufferSample(event: AuditBufferTapEvent): void;
   postIndexSession(event: PostIndexSessionTapEvent): void;
+  dbLatency(event: DbLatencyTapEvent): void;
 }
 
 let installedTap: ObservabilityTap | null = null;

@@ -158,6 +158,8 @@ The context quality benchmark (`tests/benchmark/context-quality.test.ts`) valida
 | Noise rate                  | High (broad context includes irrelevant symbols) | -50% vs baseline          |
 | Latency (p95)               | Current                                          | No worse than +20%        |
 
+For tool-call latency regressions, collect at least one cold and one warm sample with `includeDiagnostics: true` before changing retrieval or DB code. Compare the returned phase timings against the observability dashboard's per-tool `phases` and `dbLatencyP95Ms` so regressions can be attributed to server overhead, retrieval, LadybugDB native execution/materialization, response shaping, or runtime artifact handling.
+
 ### Running the Suite
 
 ```bash

@@ -334,6 +334,25 @@ describe("hybrid retrieval regression — non-legacy evidence", () => {
     );
   });
 
+  it("stored-proc retrieval uses literal query helper, not prepared queryAll", () => {
+    assert.ok(
+      orchSrc.includes("queryStoredProcAll"),
+      "FTS/vector stored-proc reads should use queryStoredProcAll",
+    );
+    assert.ok(
+      orchSrc.includes("cypherSingleQuotedString"),
+      "FTS query text should be serialized before literal CALL syntax",
+    );
+    assert.ok(
+      orchSrc.includes("cypherNumberArray"),
+      "Vector query arrays should be serialized before literal CALL syntax",
+    );
+    assert.ok(
+      !orchSrc.includes("$queryVector"),
+      "QUERY_VECTOR_INDEX should not depend on prepared-statement parameters",
+    );
+  });
+
   it("initLadybugDb bootstraps retrieval indexes at startup", () => {
     const ladybugSrc = fs.readFileSync(
       path.join(repoRoot, "src/db/ladybug.ts"),

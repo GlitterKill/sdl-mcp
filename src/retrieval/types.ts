@@ -73,6 +73,9 @@ export interface RetrievalEvidence {
     /** Backend that ran the walk. */
     backend: "native" | "js" | "fallback-bfs";
   };
+
+  /** Internal phase timings surfaced only through opt-in tool diagnostics. */
+  diagnosticTimings?: Record<string, number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +181,8 @@ export interface EntitySearchResult {
 export interface EntitySearchOptions {
   repoId: string;
   query: string;
+  /** Optional compact query used only for FTS; vector/PPR still use `query`. */
+  ftsQuery?: string;
   limit: number;
   /** Which entity types to search.  Defaults to all supported types. */
   entityTypes?: EntityType[];

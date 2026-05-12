@@ -25,7 +25,7 @@ import type { Connection } from "kuzu";
 import {
   exec,
   execDdl,
-  execStoredProcRaw,
+  queryStoredProcAll,
   querySingle,
 } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
@@ -617,18 +617,11 @@ export async function migrateVecColumnsToFixedSize(
   // that occurs when DROP+ADD is used on columns with existing HNSW indexes.
   let hasHnswIndexes = false;
   try {
-    const result = await execStoredProcRaw(
+    const rows = await queryStoredProcAll<Record<string, unknown>>(
       conn,
       "CALL SHOW_INDEXES() RETURN *",
     );
-    try {
-      const rows = await result.getAll();
-      hasHnswIndexes = (rows as Array<Record<string, unknown>>).some(
-        (r) => r.index_type === "HNSW",
-      );
-    } finally {
-      result.close();
-    }
+    hasHnswIndexes = rows.some((r) => r.index_type === "HNSW");
   } catch {
     // SHOW_INDEXES unavailable — assume no indexes, allow migration
   }
@@ -655,18 +648,11 @@ export async function migrateVecColumnsToFixedSize(
   for (const { table, column, size } of migrations) {
     try {
       if (!tableInfoCache.has(table)) {
-        const infoResult = await execStoredProcRaw(
+        const infoRows = await queryStoredProcAll<Record<string, unknown>>(
           conn,
           `CALL TABLE_INFO('${table}') RETURN *`,
         );
-        try {
-          const infoRows = (await infoResult.getAll()) as Array<
-            Record<string, unknown>
-          >;
-          tableInfoCache.set(table, infoRows);
-        } finally {
-          infoResult.close();
-        }
+        tableInfoCache.set(table, infoRows);
       }
       const colInfo = tableInfoCache.get(table)!.find((r) => r.name === column);
       if (colInfo && /DOUBLE\[\d+\]/.test(String(colInfo.type))) {

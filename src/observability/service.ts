@@ -395,6 +395,26 @@ export class ObservabilityService implements ObservabilityTap {
     }
   }
 
+  dbLatency(event: {
+    operation: "queryAll" | "exec";
+    latencyMs: number;
+    queueMs?: number;
+    nativeMs?: number;
+    success?: boolean;
+  }): void {
+    try {
+      const latencyMs =
+        typeof event.nativeMs === "number" && Number.isFinite(event.nativeMs)
+          ? event.nativeMs
+          : event.latencyMs;
+      for (const aggregator of this.aggregators.values()) {
+        aggregator.recordDbLatency(latencyMs);
+      }
+    } catch (err) {
+      this.logWarn("dbLatency failed", err);
+    }
+  }
+
   setupPipeline(_event: SetupPipelineEvent): void {
     // Reserved — setup pipeline is one-shot; no per-repo aggregation needed yet.
   }

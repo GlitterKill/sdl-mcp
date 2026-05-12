@@ -1090,6 +1090,7 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 | `maxResponseLines` | number (10-1000)                         | No       | Max lines in stdout/stderr summaries (default: 100)                                                                                                                                                            |
 | `persistOutput`    | boolean                                  | No       | Whether to persist full output as a gzip artifact (default: true)                                                                                                                                              |
 | `outputMode`       | `"minimal"` \| `"summary"` \| `"intent"` | No       | Controls response verbosity. `"minimal"` (default): ~50 tokens with status and artifact handle only. `"summary"`: head+tail output excerpts (legacy behavior). `"intent"`: only `queryTerms`-matched excerpts. |
+| `includeDiagnostics` | boolean                                | No       | Include coarse policy, execution, output decoding, and artifact phase timings                                                                                                                                  |
 
 **Response (varies by `outputMode`):**
 
@@ -1103,6 +1104,7 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 | `durationMs`     | number                                                                   | Execution duration                                              |
 | `artifactHandle` | string \| null                                                           | Handle for the persisted artifact (if `persistOutput` was true) |
 | `policyDecision` | object                                                                   | `{auditHash, deniedReasons}`                                    |
+| `diagnostics`    | object                                                                   | Optional phase timings returned only when `includeDiagnostics: true` |
 
 **`outputMode: "minimal"` (default) — adds:**
 
@@ -1316,11 +1318,11 @@ Retrieves task-shaped code context inside Code Mode.
 
 **What it does:** Mirrors `sdl.context` but lives alongside `sdl.manual` and `sdl.workflow`. Use it first for `explain`, `debug`, `review`, and most `implement` requests when you are already operating through the Code Mode surfaces.
 
-**Parameters:** Same as `sdl.context`.
+**Parameters:** Same as `sdl.context`, with optional `responseMode` for handle-backed responses and optional `includeDiagnostics` for coarse server/context phase timings.
 
 `responseMode: "auto"` or `"handle"` can store large context responses behind `response.get`; the default `inline` preserves the legacy response shape.
 
-**Note (v0.11.0):** Hybrid seeding (FTS + vector via RRF) now runs alongside path inference rather than only as a fallback. When available, `retrievalEvidence` carries hybrid seed evidence in the response — sources, candidateCountPerSource, topRanksPerSource, fusionLatencyMs, ftsAvailable, vectorAvailable. Disable per-call with `options.semantic: false`.
+**Note (v0.11.3):** The default path now favors path inference, bounded lexical seeding, and feedback priors for lower latency. Expensive multi-entity hybrid seeding (FTS + vector via RRF) is opt-in with `options.semantic: true`. When enabled, `retrievalEvidence` carries hybrid seed evidence in the response — sources, candidateCountPerSource, topRanksPerSource, fusionLatencyMs, ftsAvailable, vectorAvailable.
 
 **Response:** Same as `sdl.context`.
 
@@ -1341,6 +1343,7 @@ Executes a workflow of SDL-MCP operations in a single round-trip with budget tra
 | `budget`  | object                   | No       | Budget constraints for the workflow |
 | `onError` | `"continue"` \| `"stop"` | No       | Error handling mode                 |
 | `trace`   | object                   | No       | Enable execution tracing            |
+| `includeDiagnostics` | boolean             | No       | Include workflow phase timings      |
 
 Each step has:
 

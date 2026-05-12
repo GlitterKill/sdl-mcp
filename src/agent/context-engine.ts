@@ -353,6 +353,45 @@ function normalizeEvidenceText(value: string): string {
 function isMeaningfulEvidenceContent(value: string): boolean {
   return value.length >= 20 || value.split(/\s+/u).filter(Boolean).length >= 4;
 }
+
+type ContextResultWithDiagnosticTimings = ContextResult & {
+  diagnosticTimings?: Record<string, number>;
+};
+
+function recordDiagnosticTiming(
+  timings: Map<string, number>,
+  phase: string,
+  startedAt: number,
+): void {
+  const durationMs = performance.now() - startedAt;
+  if (!Number.isFinite(durationMs) || durationMs < 0) return;
+  timings.set(phase, (timings.get(phase) ?? 0) + durationMs);
+}
+
+function mergeDiagnosticTimings(
+  timings: Map<string, number>,
+  nested: Record<string, number> | undefined,
+): void {
+  if (!nested) return;
+  for (const [phase, durationMs] of Object.entries(nested)) {
+    if (!Number.isFinite(durationMs) || durationMs < 0) continue;
+    timings.set(phase, (timings.get(phase) ?? 0) + durationMs);
+  }
+}
+
+function attachDiagnosticTimings<T extends ContextResult>(
+  result: T,
+  timings: Map<string, number>,
+): T {
+  if (timings.size === 0) return result;
+  const phases: Record<string, number> = {};
+  for (const [phase, durationMs] of timings.entries()) {
+    phases[phase] = Math.round(durationMs);
+  }
+  (result as ContextResultWithDiagnosticTimings).diagnosticTimings = phases;
+  return result;
+}
+
 function prependContextRefs(context: string[], refs: string[]): string[] {
   if (refs.length === 0) return context;
   const prioritized = new Set(refs);
@@ -387,16 +426,21 @@ export class ContextEngine {
       );
     }
 
+    const diagnosticTimings = new Map<string, number>();
+
     try {
       // Infer focus paths from task text when none are explicitly provided.
       // This dramatically improves symbol discovery for natural language queries
       // like "how does beam search work" or "debug skeleton IR parameters".
+      const inferStartedAt = performance.now();
       const hasExplicitScope = !!(
         task.options?.focusPaths?.length || task.options?.focusSymbols?.length
       );
+      let inferredFocusPathsApplied = false;
       if (!hasExplicitScope && task.taskText) {
         const inferred = inferFocusPathsFromTaskText(task.taskText);
         if (inferred.length > 0) {
+          inferredFocusPathsApplied = true;
           task = {
             ...task,
             options: {
@@ -411,6 +455,11 @@ export class ContextEngine {
           });
         }
       }
+      recordDiagnosticTiming(
+        diagnosticTimings,
+        "engine.inferFocusPaths",
+        inferStartedAt,
+      );
 
       // Plan WITHOUT inferred paths — inferred paths should only affect
       // context selection, not rung escalation. Otherwise broad-mode tasks
@@ -430,15 +479,24 @@ export class ContextEngine {
               focusSymbols: undefined,
             },
           };
+      const planStartedAt = performance.now();
       const path = this.planner.plan(planTask);
+      recordDiagnosticTiming(diagnosticTimings, "engine.plan", planStartedAt);
+      const selectStartedAt = performance.now();
       let context = await this.planner.selectContext(task);
+      recordDiagnosticTiming(
+        diagnosticTimings,
+        "engine.selectContext",
+        selectStartedAt,
+      );
       let exactMentionSeededPreciseContext = false;
 
       // Exact code identifiers mentioned in task text should anchor the
       // response before broader lexical/semantic seeding. This preserves the
       // intended symbol for prompts like "explain handleSymbolSearch" even
       // when hybrid retrieval finds many related SymbolSearch types first.
-      if (!hasExplicitScope && task.taskText) {
+      if (!hasExplicitScope && task.taskText && !inferredFocusPathsApplied) {
+        const exactStartedAt = performance.now();
         try {
           const exactRefs = await this.seedExactMentionedSymbols(task);
           exactMentionSeededPreciseContext =
@@ -450,6 +508,12 @@ export class ContextEngine {
           logger.debug("Exact symbol seeding failed (non-fatal)", {
             error: err instanceof Error ? err.message : String(err),
           });
+        } finally {
+          recordDiagnosticTiming(
+            diagnosticTimings,
+            "engine.exactMentionSeed",
+            exactStartedAt,
+          );
         }
       }
 
@@ -463,10 +527,16 @@ export class ContextEngine {
       if (
         !hasExplicitScope &&
         task.taskText &&
-        !exactMentionSeededPreciseContext
+        !exactMentionSeededPreciseContext &&
+        (!inferredFocusPathsApplied || task.options?.semantic === true)
       ) {
+        const seedStartedAt = performance.now();
         try {
           const seedResult = await this.seedContext(task);
+          mergeDiagnosticTimings(
+            diagnosticTimings,
+            seedResult.diagnosticTimings,
+          );
           seedEvidence = seedResult.evidence;
           const seedRefs = seedResultToContext(seedResult);
           if (context.length > 0) {
@@ -492,28 +562,52 @@ export class ContextEngine {
           logger.debug("Context seeding failed (non-fatal)", {
             error: err instanceof Error ? err.message : String(err),
           });
+        } finally {
+          recordDiagnosticTiming(
+            diagnosticTimings,
+            "engine.seedContext",
+            seedStartedAt,
+          );
         }
       }
 
+      const clusterStartedAt = performance.now();
       const { expandedContext, clusterExpandedCount } =
         await this.expandContextForClusters(
           context,
           task.taskText,
           task.options?.contextMode,
         );
+      recordDiagnosticTiming(
+        diagnosticTimings,
+        "engine.clusterExpansion",
+        clusterStartedAt,
+      );
 
       // Graph neighbor expansion: follow call/import edges from top-seeded
       // symbols to discover closely related code that keyword search misses.
+      const edgeStartedAt = performance.now();
       const finalContext = await this.expandContextByEdges(
         expandedContext,
         task.options?.contextMode,
       );
+      recordDiagnosticTiming(
+        diagnosticTimings,
+        "engine.edgeExpansion",
+        edgeStartedAt,
+      );
 
       const executor = new Executor();
+      const executeStartedAt = performance.now();
       const { actions, evidence, success } = await executor.execute(
         task,
         path.rungs,
         finalContext,
+      );
+      recordDiagnosticTiming(
+        diagnosticTimings,
+        "engine.executeRungs",
+        executeStartedAt,
       );
 
       const metrics = executor.getMetrics();
@@ -524,10 +618,16 @@ export class ContextEngine {
         evidenceOptimization === "global" && !isPrecise
           ? "dedupe"
           : evidenceOptimization;
+      const optimizeStartedAt = performance.now();
       const optimizedEvidence = optimizeEvidenceForResponse(
         evidence,
         finalEvidenceOptimization,
         task.budget?.maxTokens,
+      );
+      recordDiagnosticTiming(
+        diagnosticTimings,
+        "engine.optimizeEvidence",
+        optimizeStartedAt,
       );
 
       // Precise mode: return evidence + lightweight metadata.
@@ -536,7 +636,8 @@ export class ContextEngine {
       // and retrievalEvidence are stripped in precise mode.
 
       if (isPrecise) {
-        return {
+        const responseStartedAt = performance.now();
+        const result: ContextResult = {
           taskId,
           taskType: task.taskType,
           actionsTaken: actions.map((a) => ({
@@ -554,8 +655,15 @@ export class ContextEngine {
           success,
           metrics,
         };
+        recordDiagnosticTiming(
+          diagnosticTimings,
+          "engine.responseBuild",
+          responseStartedAt,
+        );
+        return attachDiagnosticTimings(result, diagnosticTimings);
       }
 
+      const responseStartedAt = performance.now();
       const result: ContextResult = {
         taskId,
         taskType: task.taskType,
@@ -597,21 +705,32 @@ export class ContextEngine {
           } : {}),
         },
       };
+      recordDiagnosticTiming(
+        diagnosticTimings,
+        "engine.responseBuild",
+        responseStartedAt,
+      );
 
       // Guard against oversized broad-mode responses that can overflow
       // MCP response limits (observed 136K+ chars in production).
-      return this.truncateIfOverBudget(result, task.budget?.maxTokens, {
-        task,
-        actions,
-        success,
-        clusterExpandedCount,
-        evidenceOptimization,
-      });
+      return attachDiagnosticTimings(
+        this.truncateIfOverBudget(result, task.budget?.maxTokens, {
+          task,
+          actions,
+          success,
+          clusterExpandedCount,
+          evidenceOptimization,
+        }),
+        diagnosticTimings,
+      );
     } catch (error) {
-      return this.createErrorResult(
-        taskId,
-        task,
-        error instanceof Error ? error.message : String(error),
+      return attachDiagnosticTimings(
+        this.createErrorResult(
+          taskId,
+          task,
+          error instanceof Error ? error.message : String(error),
+        ),
+        diagnosticTimings,
       );
     }
   }

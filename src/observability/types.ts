@@ -191,6 +191,14 @@ export interface LatencyPerTool {
   avgMs: number;
   p95Ms: number;
   errorCount: number;
+  phases?: Record<string, LatencyPhaseMetrics>;
+}
+
+export interface LatencyPhaseMetrics {
+  count: number;
+  avgMs: number;
+  p95Ms: number;
+  maxMs: number;
 }
 
 export interface PoolMetrics {

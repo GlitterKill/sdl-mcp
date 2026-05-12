@@ -50,6 +50,8 @@ export const WorkflowRequestSchema = z.object({
   trace: WorkflowTraceOptionsSchema.optional(),
   /** When true, validate steps and $N references without executing. Returns validation result only. */
   dryRun: z.boolean().optional(),
+  /** Include phase timing diagnostics for performance investigation. */
+  includeDiagnostics: z.boolean().optional(),
 
   /** Prior workflow etagCache to seed - enables cross-workflow cache hits */
   etagCache: z.record(z.string(), z.string()).optional(),
@@ -147,4 +149,6 @@ export interface WorkflowResponse {
   trace?: WorkflowTrace;
   /** Count of intermediate step results suppressed due to onlyFinalResult */
   intermediateResultsSuppressed?: number;
+  /** Opt-in phase timing diagnostics for latency investigations. */
+  diagnostics?: import("../mcp/timing-diagnostics.js").ToolTimingDiagnostics;
 }

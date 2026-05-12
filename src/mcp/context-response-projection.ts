@@ -14,6 +14,7 @@ export const BROAD_VISIBLE_FIELDS = new Set([
   "finalEvidence",
   "nextBestAction",
   "retrievalEvidence",
+  "diagnostics",
   "error",
   "truncation",
   "etag",

@@ -56,6 +56,7 @@ const log = (msg: string) => process.stderr.write(`[sdl-mcp] ${msg}\n`);
 async function main(): Promise<void> {
   const server = new MCPServer();
   const watchers: Array<{ close: () => Promise<void> }> = [];
+  let watcherStartTimer: NodeJS.Timeout | undefined;
   const shutdownMgr = new ShutdownManager({ log });
   const uninstallProcessHandlers = installProcessHandlers(shutdownMgr);
   shutdownMgr.addCleanup("processHandlers", uninstallProcessHandlers);
@@ -109,13 +110,25 @@ async function main(): Promise<void> {
     registerTools(server, { liveIndex }, config.gateway, config.codeMode);
 
     if (config.indexing?.enableFileWatching) {
-      log("Starting file watchers...");
-      const { watchRepository } = await import("./indexer/indexer.js");
-      const handles = await Promise.all(
-        config.repos.map((repo) => watchRepository(repo.repoId)),
-      );
-      watchers.push(...handles);
-      log(`File watchers started for ${watchers.length} repo(s).`);
+      log("Scheduling file watchers after stdio startup...");
+      watcherStartTimer = setTimeout(() => {
+        void (async () => {
+          try {
+            log("Starting file watchers...");
+            const { watchRepository } = await import("./indexer/indexer.js");
+            const handles = await Promise.all(
+              config.repos.map((repo) => watchRepository(repo.repoId)),
+            );
+            watchers.push(...handles);
+            log(`File watchers started for ${watchers.length} repo(s).`);
+          } catch (error) {
+            process.stderr.write(
+              `[sdl-mcp] File watcher startup error: ${error}\n`,
+            );
+          }
+        })();
+      }, 5_000);
+      watcherStartTimer.unref();
     }
 
     log("Starting slice handle cleanup scheduler (interval: 1 hour)...");
@@ -145,6 +158,9 @@ async function main(): Promise<void> {
     // Register cleanup callbacks (run in order during shutdown).
     shutdownMgr.addCleanup("cleanupInterval", () => {
       clearInterval(cleanupInterval);
+    });
+    shutdownMgr.addCleanup("watcherStartTimer", () => {
+      if (watcherStartTimer) clearTimeout(watcherStartTimer);
     });
     shutdownMgr.addCleanup("idleMonitor", () => {
       idleMonitor.stop();

@@ -1,5 +1,5 @@
 import type { Connection } from "kuzu";
-import { execDdl, execStoredProcRaw } from "../ladybug-core.js";
+import { execDdl, queryStoredProcAll } from "../ladybug-core.js";
 import { IDEMPOTENT_DDL_ERROR_RE } from "../migration-runner.js";
 
 /**
@@ -50,21 +50,13 @@ export async function up(conn: Connection): Promise<void> {
 }
 
 async function tableExists(conn: Connection, name: string): Promise<boolean> {
-  let result: Awaited<ReturnType<typeof execStoredProcRaw>> | undefined;
   try {
-    result = await execStoredProcRaw(conn, `CALL show_tables() RETURN name`);
-    let exists = false;
-    while (await result.hasNext()) {
-      const row = (await result.getNext()) as { name?: unknown };
-      if (row && String(row.name) === name) {
-        exists = true;
-        break;
-      }
-    }
-    return exists;
+    const rows = await queryStoredProcAll<{ name?: unknown }>(
+      conn,
+      "CALL show_tables() RETURN name",
+    );
+    return rows.some((row) => String(row.name) === name);
   } catch {
     return false;
-  } finally {
-    result?.close();
   }
 }

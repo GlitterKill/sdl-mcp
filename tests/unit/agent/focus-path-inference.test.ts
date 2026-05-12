@@ -1,6 +1,9 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { inferFocusPathsFromTaskText } from "../../../dist/agent/context-seeding.js";
+import {
+  buildContextFtsQuery,
+  inferFocusPathsFromTaskText,
+} from "../../../dist/agent/context-seeding.js";
 
 describe("inferFocusPathsFromTaskText", () => {
   it("infers src/graph/ for beam search queries", () => {
@@ -83,6 +86,16 @@ describe("inferFocusPathsFromTaskText", () => {
     );
   });
 
+  it("infers observability paths for latency diagnostics queries", () => {
+    const paths = inferFocusPathsFromTaskText(
+      "how does tool latency observability work?",
+    );
+    assert.ok(
+      paths.includes("src/observability/aggregator.ts"),
+      `Expected observability aggregator in ${JSON.stringify(paths)}`,
+    );
+  });
+
   it("returns empty array for unrecognized queries", () => {
     const paths = inferFocusPathsFromTaskText("what is the meaning of life?");
     assert.deepStrictEqual(paths, []);
@@ -109,5 +122,19 @@ describe("inferFocusPathsFromTaskText", () => {
     );
     // "beam search" (11 chars) + "graph" (5) + "slice" (5) → src/graph/ should be first
     assert.strictEqual(paths[0], "src/graph/");
+  });
+});
+
+describe("buildContextFtsQuery", () => {
+  it("drops filler words before context FTS retrieval", () => {
+    const query = buildContextFtsQuery(
+      "how does tool latency observability work?",
+    );
+    assert.strictEqual(query, "tool latency observability");
+  });
+
+  it("bounds fallback FTS text when no terms survive extraction", () => {
+    const query = buildContextFtsQuery("a ".repeat(500));
+    assert.ok(query.length <= 200);
   });
 });

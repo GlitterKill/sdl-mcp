@@ -25,6 +25,11 @@ import { handleFileRead } from "./file-read.js";
 import { handleFileWrite } from "./file-write.js";
 import { handleSearchEdit } from "./search-edit/index.js";
 import { getSearchEditPlanStore, type StoredPlan } from "./search-edit/plan-store.js";
+import {
+  attachTimingDiagnostics,
+  ToolPhaseTimer,
+  type ToolTimingDiagnostics,
+} from "../timing-diagnostics.js";
 
 const FileGatewayReadSchema = z.object({
   op: z.literal("read"),
@@ -83,6 +88,7 @@ const FileGatewayReadSchema = z.object({
   responseMode: z.enum(["inline", "auto", "handle"]).optional().default("inline"),
   deltaMode: z.enum(["off", "auto"]).optional().default("off"),
   maxDeltaLines: z.number().int().min(1).max(1000).optional(),
+  includeDiagnostics: z.boolean().optional(),
 });
 
 const FileGatewayWriteSchema = z.object({
@@ -133,6 +139,7 @@ const FileGatewayWriteSchema = z.object({
     .optional()
     .default(false)
     .describe("Create file if it doesn't exist"),
+  includeDiagnostics: z.boolean().optional(),
 });
 
 const FileGatewaySearchEditPreviewSchema = z.object({
@@ -148,6 +155,7 @@ const FileGatewaySearchEditPreviewSchema = z.object({
   maxTotalMatches: z.number().int().min(1).max(50000).optional(),
   createBackup: z.boolean().optional(),
   responseMode: z.enum(["inline", "auto", "handle"]).optional().default("inline"),
+  includeDiagnostics: z.boolean().optional(),
 });
 
 const FileGatewaySearchEditApplySchema = z.object({
@@ -155,6 +163,7 @@ const FileGatewaySearchEditApplySchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   planHandle: z.string().min(1).max(200),
   createBackup: z.boolean().optional(),
+  includeDiagnostics: z.boolean().optional(),
 });
 
 const FileGatewayWindowBaseSchema = CodeNeedWindowRequestSchema.omit({
@@ -173,6 +182,7 @@ const FileGatewayWindowBaseSchema = CodeNeedWindowRequestSchema.omit({
     .describe(
       "Planned file path to inspect. Required when the edit plan has multiple indexed source files.",
     ),
+  includeDiagnostics: z.boolean().optional(),
 });
 
 const FileGatewayPreviewWindowSchema = FileGatewayWindowBaseSchema.extend({
@@ -207,6 +217,7 @@ export interface FileGatewayPreviewWindowResponse {
   indexedSource: true;
   snippets?: SearchEditPreviewFileEntry["snippets"];
   codeWindow: CodeNeedWindowResponse;
+  diagnostics?: ToolTimingDiagnostics;
 }
 
 export type FileGatewayResponse =
@@ -362,28 +373,59 @@ export async function handleFileGateway(
   args: unknown,
   context?: ToolContext,
 ): Promise<FileGatewayResponse> {
+  const timer = new ToolPhaseTimer();
+  const parseStartedAt = timer.start();
   const request = FileGatewayRequestSchema.parse(args);
+  timer.record("file.validate", parseStartedAt);
+
+  const finish = <T extends FileGatewayResponse>(
+    response: T,
+    phaseStartedAt: number,
+    phase: string,
+  ): T => {
+    timer.record(phase, phaseStartedAt);
+    return request.includeDiagnostics
+      ? attachTimingDiagnostics(response, timer.snapshot())
+      : response;
+  };
 
   switch (request.op) {
     case "read": {
       const { op: _op, ...rest } = request;
-      return handleFileRead(rest, context);
+      const phaseStartedAt = timer.start();
+      return finish(await handleFileRead(rest, context), phaseStartedAt, "file.read");
     }
     case "write": {
       const { op: _op, ...rest } = request;
-      return handleFileWrite(rest);
+      const phaseStartedAt = timer.start();
+      return finish(await handleFileWrite(rest), phaseStartedAt, "file.write");
     }
     case "searchEditPreview": {
       const { op: _op, ...rest } = request;
-      return handleSearchEdit({ mode: "preview", ...rest }, context);
+      const phaseStartedAt = timer.start();
+      return finish(
+        await handleSearchEdit({ mode: "preview", ...rest }, context),
+        phaseStartedAt,
+        "file.searchEditPreview",
+      );
     }
     case "searchEditApply": {
       const { op: _op, ...rest } = request;
-      return handleSearchEdit({ mode: "apply", ...rest }, context);
+      const phaseStartedAt = timer.start();
+      return finish(
+        await handleSearchEdit({ mode: "apply", ...rest }, context),
+        phaseStartedAt,
+        "file.searchEditApply",
+      );
     }
     case "previewWindow":
     case "sourceWindow": {
-      return handleFileGatewayPreviewWindow(request, context);
+      const phaseStartedAt = timer.start();
+      return finish(
+        await handleFileGatewayPreviewWindow(request, context),
+        phaseStartedAt,
+        `file.${request.op}`,
+      );
     }
   }
 }

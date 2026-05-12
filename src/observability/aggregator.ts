@@ -59,6 +59,7 @@ import type {
   ToolVolume,
 } from "./types.js";
 import { TOKEN_SAVINGS_SOURCES } from "./types.js";
+import { hasTimingDiagnostics } from "../mcp/timing-diagnostics.js";
 
 /* -------------------------------------------------------------------------- */
 /* Internal record shapes                                                      */
@@ -145,6 +146,21 @@ interface TokenSavingsBucket {
   storedBytes: number;
 }
 
+interface LatencyPhaseBucket {
+  count: number;
+  durationSum: number;
+  latencies: number[];
+  maxMs: number;
+}
+
+interface ToolLatencyBucket {
+  count: number;
+  durationSum: number;
+  latencies: number[];
+  errors: number;
+  phases: Map<string, LatencyPhaseBucket>;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Aggregator                                                                  */
 /* -------------------------------------------------------------------------- */
@@ -185,7 +201,7 @@ export class Aggregator {
   private toolCallTotal = 0;
   private readonly toolPerName = new Map<
     string,
-    { count: number; durationSum: number; latencies: number[]; errors: number }
+    ToolLatencyBucket
   >();
   private readonly toolLatenciesAll: number[] = [];
   private toolLatencyMax = 0;
@@ -424,7 +440,13 @@ export class Aggregator {
     this.toolCallTotal += 1;
     let bucket = this.toolPerName.get(tool);
     if (!bucket) {
-      bucket = { count: 0, durationSum: 0, latencies: [], errors: 0 };
+      bucket = {
+        count: 0,
+        durationSum: 0,
+        latencies: [],
+        errors: 0,
+        phases: new Map(),
+      };
       this.toolPerName.set(tool, bucket);
     }
     bucket.count += 1;
@@ -433,6 +455,33 @@ export class Aggregator {
     if (errored) bucket.errors += 1;
     pushBoundedSorted(this.toolLatenciesAll, dur, LATENCY_WINDOW_SIZE);
     if (dur > this.toolLatencyMax) this.toolLatencyMax = dur;
+    if (hasTimingDiagnostics(event.diagnostics)) {
+      for (const [phase, phaseDuration] of Object.entries(
+        event.diagnostics.timings.phases,
+      )) {
+        if (!Number.isFinite(phaseDuration) || phaseDuration < 0) continue;
+        let phaseBucket = bucket.phases.get(phase);
+        if (!phaseBucket) {
+          phaseBucket = {
+            count: 0,
+            durationSum: 0,
+            latencies: [],
+            maxMs: 0,
+          };
+          bucket.phases.set(phase, phaseBucket);
+        }
+        phaseBucket.count += 1;
+        phaseBucket.durationSum += phaseDuration;
+        pushBoundedSorted(
+          phaseBucket.latencies,
+          phaseDuration,
+          LATENCY_WINDOW_SIZE,
+        );
+        if (phaseDuration > phaseBucket.maxMs) {
+          phaseBucket.maxMs = phaseDuration;
+        }
+      }
+    }
 
     this.latencyShort.push(dur);
     this.latencyLong.push(dur);
@@ -682,6 +731,7 @@ export class Aggregator {
       response: { result: undefined } as ToolCallEvent["response"],
       durationMs: dur,
       errored: evt.failed === true,
+      diagnostics: event.diagnostics,
     });
   }
 
@@ -1232,11 +1282,24 @@ export class Aggregator {
     const avgMs = this.toolCallTotal === 0 ? 0 : avg(this.toolLatenciesAll);
     const perTool: Record<string, LatencyPerTool> = {};
     for (const [name, b] of this.toolPerName.entries()) {
+      const phases: NonNullable<LatencyPerTool["phases"]> = {};
+      for (const [phaseName, phaseBucket] of b.phases.entries()) {
+        phases[phaseName] = {
+          count: phaseBucket.count,
+          avgMs:
+            phaseBucket.count === 0
+              ? 0
+              : phaseBucket.durationSum / phaseBucket.count,
+          p95Ms: percentile(phaseBucket.latencies, 0.95),
+          maxMs: phaseBucket.maxMs,
+        };
+      }
       perTool[name] = {
         count: b.count,
         avgMs: b.count === 0 ? 0 : b.durationSum / b.count,
         p95Ms: percentile(b.latencies, 0.95),
         errorCount: b.errors,
+        ...(Object.keys(phases).length > 0 ? { phases } : {}),
       };
     }
     return {

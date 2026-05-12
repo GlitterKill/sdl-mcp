@@ -233,6 +233,7 @@ describe("withPostIndexWriteSession", () => {
       cacheLookup() {},
       sliceBuild() {},
       auditBufferSample() {},
+      dbLatency() {},
       postIndexSession(e) {
         events.push({
           durationMs: e.durationMs,
@@ -277,6 +278,7 @@ describe("withPostIndexWriteSession", () => {
       cacheLookup() {},
       sliceBuild() {},
       auditBufferSample() {},
+      dbLatency() {},
       postIndexSession(e) {
         events.push({ timedOut: e.timedOut });
       },

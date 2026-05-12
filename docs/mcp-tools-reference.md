@@ -838,14 +838,14 @@ Update policy configuration for a repository. Accepts a partial patch — only s
 
 ### `sdl.context`
 
-Retrieve task-shaped code context with rung path selection and evidence capture. The engine uses hybrid candidate seeding (FTS + vector via RRF, with feedback priors) that runs **alongside** path-inference rather than as a fallback, evidence-aware ranking, and confidence-driven rung planning to select an optimal path through the context ladder (card -> skeleton -> hotPath -> raw). Hybrid seeding can be disabled per-call with `options.semantic: false`.
+Retrieve task-shaped code context with rung path selection and evidence capture. The engine uses path inference, bounded lexical seeding, feedback priors, evidence-aware ranking, and confidence-driven rung planning to select an optimal path through the context ladder (card -> skeleton -> hotPath -> raw). Expensive multi-entity hybrid seeding (FTS + vector via RRF) is opt-in per call with `options.semantic: true`.
 
 `sdl.context` is part of the Code Mode surface. In regular flat or gateway mode, use the manual ladder directly or enable Code Mode for task-shaped retrieval.
 
 **Context modes:**
 
 - **`"precise"`** — Returns minimal, chain-efficient context. Tight cluster expansion (max 4 symbols), stripped response envelope (no `actionsTaken`, `summary`, `answer`, `nextBestAction`). Designed to beat manual `sdl.workflow` on token efficiency.
-- **`"broad"`** (default) — Returns richer surrounding context with graph-guided cluster expansion (max 10 symbols, diversity-scored). Compact response envelope with `answer` always preserved on success. Semantic seeding means explicit `focusPaths` are less critical than before.
+- **`"broad"`** (default) — Returns richer surrounding context with graph-guided cluster expansion (max 10 symbols, diversity-scored). Compact response envelope with `answer` always preserved on success. Explicit `focusPaths` are still the fastest way to constrain broad investigations.
 
 **Parameters:**
 
@@ -856,6 +856,7 @@ Retrieve task-shaped code context with rung path selection and evidence capture.
 | `taskText` | `string`                                          | Yes      | Task description or prompt |
 | `budget`   | `object`                                          | No       | Budget constraints         |
 | `options`  | `object`                                          | No       | Task-specific options      |
+| `includeDiagnostics` | `boolean`                               | No       | Include coarse phase timings in the response |
 
 `budget` fields (all optional):
 
@@ -874,7 +875,7 @@ Retrieve task-shaped code context with rung path selection and evidence capture.
 | `focusPaths`               | `string[]`                | File paths to focus on                                                                                                                                                                                                                                               |
 | `includeTests`             | `boolean`                 | Include test files in analysis                                                                                                                                                                                                                                       |
 | `requireDiagnostics`       | `boolean`                 | Include diagnostic info (may add a raw rung)                                                                                                                                                                                                                         |
-| `semantic`                 | `boolean`                 | Use hybrid (FTS + vector + RRF) retrieval for context seeding. Default `true`. Set `false` to force plain lexical — useful for deterministic tests                                                                                                                   |
+| `semantic`                 | `boolean`                 | Opt in to hybrid (FTS + vector + RRF) retrieval for context seeding. Default `false`; leave unset for fast path/path-inferred lexical retrieval, or set `true` when task text alone needs semantic expansion.                                                        |
 | `includeRetrievalEvidence` | `boolean`                 | Attach hybrid `retrievalEvidence` to the response (sources, candidate counts, top ranks per source, fusion latency, lane availability). Default `true`                                                                                                               |
 | `evidenceOptimization`   | `"off" \| "dedupe" \| "budgeted" \| "global"` | Enable opt-in evidence optimization for `sdl.context`. `dedupe` removes duplicate/subsumed evidence; `budgeted` greedily selects finalEvidence by value per token under `budget.maxTokens`; `global` also optimizes broad-mode `summary`, `answer`, and `finalEvidence` together under the response budget while preserving supporting cards for selected hot paths. Default `"off"` |
 | `chatMentions`             | `string[]`                | Up to 20 identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank for chat-aware re-ranking. See [semantic-engine.md → Chat-Aware PageRank](feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0108) |
@@ -884,7 +885,7 @@ Retrieve task-shaped code context with rung path selection and evidence capture.
 
 **Response:**
 
-In **broad** mode (default, compact): `taskId`, `taskType`, `success`, `summary`, `answer`, `finalEvidence`, `nextBestAction?`, `retrievalEvidence?`, `error?` — the fields `actionsTaken`, `path`, and `metrics` are omitted from the model-visible response. `finalEvidence` is the primary evidence surface. `retrievalEvidence` carries `sources`, `candidateCountPerSource`, `topRanksPerSource`, `fusionLatencyMs`, `ftsAvailable`, and `vectorAvailable` from Stage 1 hybrid seeding when available. The `answer` field is always preserved on successful responses.
+In **broad** mode (default, compact): `taskId`, `taskType`, `success`, `summary`, `answer`, `finalEvidence`, `nextBestAction?`, `retrievalEvidence?`, `diagnostics?`, `error?` — the fields `actionsTaken`, `path`, and `metrics` are omitted from the model-visible response. `finalEvidence` is the primary evidence surface. `retrievalEvidence` carries `sources`, `candidateCountPerSource`, `topRanksPerSource`, `fusionLatencyMs`, `ftsAvailable`, and `vectorAvailable` from hybrid seeding when available. `diagnostics` is returned only when `includeDiagnostics: true`. The `answer` field is always preserved on successful responses.
 
 In **precise** mode: `taskId`, `taskType`, `success`, `path`, `finalEvidence`, `metrics` — envelope fields stripped for token efficiency.
 
@@ -1072,12 +1073,13 @@ Run a command in a repo-scoped subprocess. Runtime execution is enabled by defau
 | `maxResponseLines` | `integer`                                | No       | Max output lines returned (10-1,000, default: 100)                                                                                                                                       |
 | `persistOutput`    | `boolean`                                | No       | Save full output to an artifact handle (default: true)                                                                                                                                   |
 | `outputMode`       | `"minimal"` \| `"summary"` \| `"intent"` | No       | Controls response verbosity. `"minimal"` (default): ~50 tokens, status + artifact handle only. `"summary"`: head+tail excerpts (legacy). `"intent"`: only `queryTerms`-matched excerpts. |
+| `includeDiagnostics` | `boolean`                              | No       | Include coarse policy, execution, output decoding, and artifact phase timings                                                                                                             |
 
 Use `code` for inline snippets or `args` for invoking files/commands. `queryTerms` acts like a built-in grep, extracting only matching lines from long output.
 
 **Response** varies by `outputMode`:
 
-- **All modes:** `status`, `exitCode`, `signal`, `durationMs`, `artifactHandle`, `policyDecision`
+- **All modes:** `status`, `exitCode`, `signal`, `durationMs`, `artifactHandle`, `policyDecision`, `diagnostics?`
 - **`"minimal"` (default):** adds `outputLines`, `outputBytes` — no stdout/stderr content. Use `sdl.runtime.queryOutput` to search the artifact.
 - **`"summary"`:** adds `stdoutSummary`, `stderrSummary`, `excerpts`, `truncation` (legacy behavior)
 - **`"intent"`:** adds `excerpts`, `truncation` — only `queryTerms`-matched windows, no head/tail summary
@@ -1300,7 +1302,7 @@ Use `sdl.context` first for `debug`, `review`, `implement`, and `explain` reques
 
 Execute a multi-step workflow of SDL-MCP actions and internal transforms in one round trip.
 
-Use this for runtime execution, data shaping, batch mutations, and reusable multi-step pipelines. Do not use it for context retrieval; route that work to `sdl.context`.
+Use this for runtime execution, data shaping, batch mutations, and reusable multi-step pipelines. Do not use it for context retrieval; route that work to `sdl.context`. Set `includeDiagnostics: true` to include workflow phase timings.
 
 ### `sdl.manual`
 
@@ -1310,7 +1312,7 @@ Use this before `sdl.context` or `sdl.workflow` when the model needs a narrow, t
 
 ### `sdl.file`
 
-Provide a unified Code Mode file gateway for read, write, search/edit preview/apply, and plan-bound `previewWindow`/`sourceWindow` operations that route indexed source inspection through `code.needWindow` policy.
+Provide a unified Code Mode file gateway for read, write, search/edit preview/apply, and plan-bound `previewWindow`/`sourceWindow` operations that route indexed source inspection through `code.needWindow` policy. Set `includeDiagnostics: true` to include file gateway phase timings.
 
 ---
 
