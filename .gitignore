@@ -163,3 +163,4 @@ tests/unit/file-gateway.test.ts.bak
 tune-results.json
 scripts/fix-agent-frontmatter.py
 AGENTS.old
+brand-spec.md

@@ -67,6 +67,7 @@ async function main(): Promise<void> {
       stdio: { type: "boolean" },
       http: { type: "boolean" },
       port: { type: "string" },
+      "dashboard-port": { type: "string" },
       host: { type: "string" },
       "version-id": { type: "string" },
       "commit-sha": { type: "string" },
@@ -273,7 +274,7 @@ Commands:
   info              Show unified runtime, config, log, Ladybug, and native-addon info
   version           Show version information
   index             Index repositories (optional: --watch, --repo-id, --force)
-  serve             Start MCP server (default: stdio, optional: --http, --port, --host)
+  serve             Start MCP server (default: stdio, optional: --http, --port, --host, --dashboard-port)
   tool              Access all MCP tool actions directly (run 'sdl-mcp tool --list' for more info)
   export            Export indexed state as sync artifact
   import            Import indexed state from sync artifact
@@ -312,6 +313,8 @@ Global Options:
    --http               Use HTTP transport
    --port NUMBER         HTTP port (default: 3000)
    --host HOST          HTTP host (default: localhost)
+   --dashboard-port NUMBER
+                        Start loopback observability dashboard sidecar with stdio
    --no-watch           Disable file watchers even if enabled in config
 
  Export Options:

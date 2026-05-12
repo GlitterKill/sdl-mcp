@@ -542,7 +542,7 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 
 ### Observability Dashboard
 
-Built-in read-only dashboard surfaces every metric needed to diagnose SDL-MCP behaviour without parsing stderr logs. Cyberpunk-corporate dark UI at `/ui/observability` on the HTTP transport, plus REST + SSE APIs (`/api/observability/snapshot`, `/timeseries`, `/beam-explain`, `/stream`) for programmatic access. Surfaces cache hit rates, hybrid-retrieval breakdowns (FTS / vector / PPR / RRF), beam-search decision traces, indexing pipeline metrics, write-pool and drain saturation, packed-wire savings, SCIP ingest health, deterministic bottleneck classification, and OS-level resource samples. See [Observability Dashboard Deep Dive](./docs/feature-deep-dives/observability-dashboard.md).
+Built-in read-only dashboard surfaces every metric needed to diagnose SDL-MCP behaviour without parsing stderr logs. GlitterKill dark UI at `/ui/observability` on the HTTP transport or the loopback-only `sdl-mcp serve --stdio --dashboard-port <port>` sidecar, plus REST + SSE APIs (`/api/observability/snapshot`, `/timeseries`, `/beam-explain`, `/stream`) for programmatic access. Surfaces cache hit rates, hybrid-retrieval breakdowns (FTS / vector / PPR / RRF), beam-search decision traces, indexing pipeline metrics, write-pool and drain saturation, packed-wire token efficiency, and runtime CPU/memory/event-loop probes. See [Observability Dashboard Deep Dive](./docs/feature-deep-dives/observability-dashboard.md).
 
 <br/>
 

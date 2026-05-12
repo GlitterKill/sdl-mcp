@@ -358,6 +358,11 @@ export function parseServeOptions(
         throw new Error("--host requires a value");
       }
       options.host = args[++i];
+    } else if (arg === "--dashboard-port") {
+      if (i + 1 >= args.length) {
+        throw new Error("--dashboard-port requires a value");
+      }
+      options.dashboardPort = parsePort(args[++i]);
     } else if (arg === "--no-watch") {
       options.noWatch = true;
     }
@@ -374,6 +379,9 @@ export function parseServeOptions(
   }
   if (typeof values.host === "string" && values.host.length > 0) {
     options.host = values.host;
+  }
+  if (values["dashboard-port"] !== undefined) {
+    options.dashboardPort = parsePort(values["dashboard-port"]);
   }
   if (values["no-watch"] === true) {
     options.noWatch = true;

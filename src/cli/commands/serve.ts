@@ -3,7 +3,10 @@ import { loadConfig } from "../../config/loadConfig.js";
 import { MCPServer, createMCPServer } from "../../server.js";
 import { watchRepository, IndexWatchHandle } from "../../indexer/indexer.js";
 import { setupStdioTransport } from "../transport/stdio.js";
-import { setupHttpTransport } from "../transport/http.js";
+import {
+  setupHttpTransport,
+  setupObservabilityDashboardSidecar,
+} from "../transport/http.js";
 import { configureLogger } from "../logging.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb, resolveGraphDbPath } from "../../db/initGraphDb.js";
@@ -56,6 +59,10 @@ import {
 import type { ObservabilityService } from "../../observability/index.js";
 
 export async function serveCommand(options: ServeOptions): Promise<void> {
+  if (options.transport === "http" && options.dashboardPort !== undefined) {
+    throw new Error("--dashboard-port can only be used with --stdio");
+  }
+
   // Show banner for HTTP transport only (stdio needs clean output for MCP protocol)
   if (options.transport !== "stdio") {
     printBanner();
@@ -394,6 +401,35 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
 
   try {
     if (options.transport === "stdio") {
+
+      if (options.dashboardPort !== undefined) {
+        const dashboardHandle = await setupObservabilityDashboardSidecar(
+          options.dashboardPort,
+          {
+            observabilityService,
+            beamExplainStore,
+            observabilitySseHeartbeatMs: observabilityConfig.sseHeartbeatMs,
+            observabilitySseMaxStreamMs: observabilityConfig.sseMaxStreamMs,
+          },
+          config.httpAuth,
+        );
+
+        pidfilePath = writePidfile(
+          graphDbPath,
+          transport,
+          dashboardHandle.port,
+          dashboardHandle.authToken ?? undefined,
+        );
+        console.error(`PID file written: ${pidfilePath}`);
+        shutdownMgr.setPidfilePath(pidfilePath);
+        shutdownMgr.addCleanup("observabilityDashboard", () =>
+          dashboardHandle.close(),
+        );
+        console.error(
+          `[sdl-mcp] Observability dashboard: http://127.0.0.1:${dashboardHandle.port}/ui/observability`,
+        );
+      }
+
       console.error("Starting MCP server on stdio transport...");
       await setupStdioTransport(stdioServer!);
       // Wait for shutdown signal (triggered by transport close or signal handlers)

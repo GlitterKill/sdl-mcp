@@ -74,7 +74,7 @@ async function rmWithRetry(
 
 test("GET /ui/graph returns 500 instead of crashing when the asset stream cannot open", async () => {
   const graphHtmlPath = fileURLToPath(
-    new URL("../../src/ui/graph.html", import.meta.url),
+    new URL("../../dist/ui/graph.html", import.meta.url),
   );
   const graphUiDir = dirname(graphHtmlPath);
   const tempDir = await mkdtemp(join(tmpdir(), "sdl-mcp-http-ui-"));

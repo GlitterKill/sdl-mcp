@@ -86,7 +86,7 @@ type LiveIndexApiResponse = {
   headers?: Record<string, string>;
 };
 
-type HttpTransportServices = {
+export type HttpTransportServices = {
   liveIndex?: LiveIndexCoordinator;
   sessionManager?: SessionManager;
   symbolGetCard?: typeof handleSymbolGetCard;
@@ -95,6 +95,19 @@ type HttpTransportServices = {
   observabilitySseHeartbeatMs?: number;
   observabilitySseMaxStreamMs?: number;
 };
+
+type HttpAuthConfig = {
+  enabled?: boolean;
+  token?: string | null;
+  rateLimit?: Partial<HttpAuthRateLimitConfig>;
+};
+
+const OBSERVABILITY_DASHBOARD_HOST = "127.0.0.1";
+const OBSERVABILITY_UI_PATHS = new Set([
+  "/ui/observability",
+  "/ui/observability.js",
+  "/ui/observability.css",
+]);
 
 const LOCALHOST_ORIGIN_RE =
   /^https?:\/\/(localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[::1\]|\[::ffff:127\.\d{1,3}\.\d{1,3}\.\d{1,3}\])(:\d+)?$/;
@@ -828,6 +841,283 @@ function serveUiAsset(pathname: string, res: ServerResponse): boolean {
 }
 
 // ---------------------------------------------------------------------------
+function serveObservabilityUiAsset(
+  pathname: string,
+  res: ServerResponse,
+): boolean {
+  if (!OBSERVABILITY_UI_PATHS.has(pathname)) return false;
+  return serveUiAsset(pathname, res);
+}
+
+async function handleHealthRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  checkHealth: () => Promise<boolean>,
+): Promise<boolean> {
+  if (req.method !== "GET") return false;
+
+  const isHealthy = await checkHealth();
+  json(res, isHealthy ? 200 : 503, {
+    status: isHealthy ? "ok" : "unhealthy",
+    timestamp: Date.now(),
+  });
+  return true;
+}
+
+async function routeObservabilityApiRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  services: HttpTransportServices,
+): Promise<boolean> {
+  const pathname = url.pathname;
+  const observabilityService = services.observabilityService ?? null;
+  const sseHeartbeatMs = services.observabilitySseHeartbeatMs ?? 15000;
+  const sseMaxStreamMs = services.observabilitySseMaxStreamMs ?? 3_600_000;
+
+  if (
+    req.method === "GET" &&
+    pathname === "/api/observability/snapshot"
+  ) {
+    if (!observabilityService) {
+      json(res, 503, { error: "observability_disabled" });
+      return true;
+    }
+    const repoId = (url.searchParams.get("repoId") ?? "").trim();
+    if (!repoId) {
+      json(res, 400, { error: "missing_repoId" });
+      return true;
+    }
+    const snapshot = observabilityService.getSnapshot(repoId);
+    json(res, 200, snapshot);
+    return true;
+  }
+
+  if (
+    req.method === "GET" &&
+    pathname === "/api/observability/timeseries"
+  ) {
+    if (!observabilityService) {
+      json(res, 503, { error: "observability_disabled" });
+      return true;
+    }
+    const repoId = (url.searchParams.get("repoId") ?? "").trim();
+    if (!repoId) {
+      json(res, 400, { error: "missing_repoId" });
+      return true;
+    }
+    const rawWindow = url.searchParams.get("window") ?? "15m";
+    if (!["15m", "1h", "24h"].includes(rawWindow)) {
+      json(res, 400, {
+        error: "invalid_window",
+        allowed: ["15m", "1h", "24h"],
+      });
+      return true;
+    }
+    const ts = observabilityService.getTimeseries(
+      repoId,
+      rawWindow as TimeseriesWindow,
+    );
+    json(res, 200, ts);
+    return true;
+  }
+
+  if (
+    req.method === "GET" &&
+    pathname === "/api/observability/beam-explain"
+  ) {
+    if (!observabilityService) {
+      json(res, 503, { error: "observability_disabled" });
+      return true;
+    }
+    const repoId = (url.searchParams.get("repoId") ?? "").trim();
+    const sliceHandle = (url.searchParams.get("sliceHandle") ?? "").trim();
+    if (!repoId) {
+      json(res, 400, { error: "missing_repoId" });
+      return true;
+    }
+    if (!sliceHandle) {
+      json(res, 400, { error: "missing_sliceHandle" });
+      return true;
+    }
+    const rawSymbolId = url.searchParams.get("symbolId");
+    const symbolId = rawSymbolId ? rawSymbolId.trim() : undefined;
+    const explain = observabilityService.getBeamExplain(
+      repoId,
+      sliceHandle,
+      symbolId,
+    );
+    if (!explain) {
+      json(res, 404, { error: "trace_not_found" });
+      return true;
+    }
+    json(res, 200, explain);
+    return true;
+  }
+
+  if (
+    req.method === "GET" &&
+    pathname === "/api/observability/stream"
+  ) {
+    if (!observabilityService) {
+      json(res, 503, { error: "observability_disabled" });
+      return true;
+    }
+    const repoId = (url.searchParams.get("repoId") ?? "").trim();
+    if (!repoId) {
+      json(res, 400, { error: "missing_repoId" });
+      return true;
+    }
+
+    setCorsHeaders(req, res);
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    let closed = false;
+    let unsubscribe: (() => void) | null = null;
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    let maxStreamTimer: NodeJS.Timeout | null = null;
+
+    const sendEvent = (event: string, data: unknown): boolean => {
+      if (closed || res.destroyed) return false;
+      try {
+        const ok = res.write(
+          `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
+        );
+        // Abort streams that start accumulating too much buffered data.
+        if (!ok || res.writableLength > 1_048_576) return false;
+        return true;
+      } catch (err) {
+        logger.warn("Observability SSE write failed", { error: err });
+        return false;
+      }
+    };
+
+    const cleanup = (): void => {
+      if (closed) return;
+      closed = true;
+      if (maxStreamTimer) {
+        clearTimeout(maxStreamTimer);
+        maxStreamTimer = null;
+      }
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+      if (unsubscribe) {
+        try {
+          unsubscribe();
+        } catch (err) {
+          logger.debug("Observability SSE unsubscribe failed", {
+            error: err,
+          });
+        }
+        unsubscribe = null;
+      }
+    };
+
+    req.on("close", cleanup);
+
+    maxStreamTimer = setTimeout(() => {
+      cleanup();
+      try {
+        res.end();
+      } catch {
+        /* best-effort */
+      }
+    }, sseMaxStreamMs);
+    maxStreamTimer.unref();
+
+    try {
+      const initial = observabilityService.getSnapshot(repoId);
+      if (!sendEvent("snapshot", initial)) {
+        cleanup();
+        res.end();
+        return true;
+      }
+    } catch (err) {
+      logger.warn("Observability SSE initial snapshot failed", {
+        error: err,
+      });
+    }
+
+    unsubscribe = observabilityService.onSnapshot(
+      (snap: ObservabilitySnapshot) => {
+        if (snap.repoId !== repoId) return;
+        if (!sendEvent("snapshot", snap)) {
+          cleanup();
+          try {
+            res.end();
+          } catch {
+            /* best-effort */
+          }
+        }
+      },
+    );
+
+    heartbeatTimer = setInterval(() => {
+      if (!sendEvent("heartbeat", { t: Date.now() })) {
+        cleanup();
+        try {
+          res.end();
+        } catch {
+          /* best-effort */
+        }
+      }
+    }, sseHeartbeatMs);
+    heartbeatTimer.unref();
+
+    return true;
+  }
+
+  return false;
+}
+
+export async function handleObservabilityDashboardRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  host: string,
+  port: number,
+  checkHealth: () => Promise<boolean>,
+  services: HttpTransportServices,
+): Promise<boolean> {
+  const url = new URL(req.url ?? "/", `http://${host}:${port}`);
+  const pathname = url.pathname;
+
+  if (pathname.startsWith("/api/observability/")) {
+    setCorsHeaders(req, res);
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return true;
+    }
+  }
+
+  if (pathname === "/health") {
+    return handleHealthRequest(req, res, checkHealth);
+  }
+
+  if (req.method === "GET" && serveObservabilityUiAsset(pathname, res)) {
+    return true;
+  }
+
+  try {
+    return await routeObservabilityApiRequest(req, res, url, services);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[sdl-mcp] Observability dashboard error: ${message}`);
+    setCorsHeaders(req, res);
+    json(res, 500, {
+      error: "An internal error occurred. Check server logs for details.",
+    });
+    return true;
+  }
+}
+
 // REST API handler
 // ---------------------------------------------------------------------------
 
@@ -1165,212 +1455,17 @@ async function handleRestRequest(
     // ---------------------------------------------------------------
     // Observability dashboard routes
     // ---------------------------------------------------------------
-    const observabilityService = services.observabilityService ?? null;
-    const sseHeartbeatMs = services.observabilitySseHeartbeatMs ?? 15000;
-    const sseMaxStreamMs = services.observabilitySseMaxStreamMs ?? 3_600_000;
-
-    if (
-      req.method === "GET" &&
-      pathname === "/api/observability/snapshot"
-    ) {
-      if (!observabilityService) {
-        json(res, 503, { error: "observability_disabled" });
-        return true;
-      }
-      const repoId = (url.searchParams.get("repoId") ?? "").trim();
-      if (!repoId) {
-        json(res, 400, { error: "missing_repoId" });
-        return true;
-      }
-      const snapshot = observabilityService.getSnapshot(repoId);
-      json(res, 200, snapshot);
+    const observabilityHandled = await routeObservabilityApiRequest(
+      req,
+      res,
+      url,
+      services,
+    );
+    if (observabilityHandled) {
       return true;
     }
 
-    if (
-      req.method === "GET" &&
-      pathname === "/api/observability/timeseries"
-    ) {
-      if (!observabilityService) {
-        json(res, 503, { error: "observability_disabled" });
-        return true;
-      }
-      const repoId = (url.searchParams.get("repoId") ?? "").trim();
-      if (!repoId) {
-        json(res, 400, { error: "missing_repoId" });
-        return true;
-      }
-      const rawWindow = url.searchParams.get("window") ?? "15m";
-      if (rawWindow !== "15m" && rawWindow !== "1h" && rawWindow !== "24h") {
-        json(res, 400, {
-          error: "invalid_window",
-          allowed: ["15m", "1h", "24h"],
-        });
-        return true;
-      }
-      const ts = observabilityService.getTimeseries(
-        repoId,
-        rawWindow as TimeseriesWindow,
-      );
-      json(res, 200, ts);
-      return true;
-    }
 
-    if (
-      req.method === "GET" &&
-      pathname === "/api/observability/beam-explain"
-    ) {
-      if (!observabilityService) {
-        json(res, 503, { error: "observability_disabled" });
-        return true;
-      }
-      const repoId = (url.searchParams.get("repoId") ?? "").trim();
-      const sliceHandle = (url.searchParams.get("sliceHandle") ?? "").trim();
-      if (!repoId) {
-        json(res, 400, { error: "missing_repoId" });
-        return true;
-      }
-      if (!sliceHandle) {
-        json(res, 400, { error: "missing_sliceHandle" });
-        return true;
-      }
-      const rawSymbolId = url.searchParams.get("symbolId");
-      const symbolId = rawSymbolId ? rawSymbolId.trim() : undefined;
-      const explain = observabilityService.getBeamExplain(
-        repoId,
-        sliceHandle,
-        symbolId,
-      );
-      if (!explain) {
-        json(res, 404, { error: "trace_not_found" });
-        return true;
-      }
-      json(res, 200, explain);
-      return true;
-    }
-
-    if (
-      req.method === "GET" &&
-      pathname === "/api/observability/stream"
-    ) {
-      if (!observabilityService) {
-        json(res, 503, { error: "observability_disabled" });
-        return true;
-      }
-      const repoId = (url.searchParams.get("repoId") ?? "").trim();
-      if (!repoId) {
-        json(res, 400, { error: "missing_repoId" });
-        return true;
-      }
-      setCorsHeaders(req, res);
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
-      });
-
-      let closed = false;
-      let unsubscribe: (() => void) | null = null;
-      let heartbeatTimer: NodeJS.Timeout | null = null;
-      let maxStreamTimer: NodeJS.Timeout | null = null;
-
-      const sendEvent = (event: string, data: unknown): boolean => {
-        if (closed || res.destroyed) return false;
-        try {
-          const ok = res.write(
-            `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
-          );
-          // Backpressure: bail when kernel/Node buffer is saturated or the
-          // socket reports the write was queued.
-          if (!ok || res.writableLength > 1_048_576) return false;
-          return true;
-        } catch (err) {
-          logger.warn("Observability SSE write failed", { error: err });
-          return false;
-        }
-      };
-
-      const cleanup = (): void => {
-        if (closed) return;
-        closed = true;
-        if (maxStreamTimer) {
-          clearTimeout(maxStreamTimer);
-          maxStreamTimer = null;
-        }
-        if (heartbeatTimer) {
-          clearInterval(heartbeatTimer);
-          heartbeatTimer = null;
-        }
-        if (unsubscribe) {
-          try {
-            unsubscribe();
-          } catch (err) {
-            logger.debug("Observability SSE unsubscribe failed", {
-              error: err,
-            });
-          }
-          unsubscribe = null;
-        }
-      };
-
-      req.on("close", cleanup);
-
-      maxStreamTimer = setTimeout(() => {
-        cleanup();
-        try {
-          res.end();
-        } catch {
-          /* best-effort */
-        }
-      }, sseMaxStreamMs);
-      maxStreamTimer.unref();
-
-      // Initial snapshot.
-      try {
-        const initial = observabilityService.getSnapshot(repoId);
-        if (!sendEvent("snapshot", initial)) {
-          cleanup();
-          res.end();
-          return true;
-        }
-      } catch (err) {
-        logger.warn("Observability SSE initial snapshot failed", {
-          error: err,
-        });
-      }
-
-      // Subscribe to subsequent ticks. The service emits a snapshot per repo
-      // each sample interval; filter to the requested repo before sending.
-      unsubscribe = observabilityService.onSnapshot(
-        (snap: ObservabilitySnapshot) => {
-          if (snap.repoId !== repoId) return;
-          if (!sendEvent("snapshot", snap)) {
-            cleanup();
-            try {
-              res.end();
-            } catch {
-              /* best-effort */
-            }
-          }
-        },
-      );
-
-      // Heartbeat keeps proxies/load-balancers from idle-closing the stream.
-      heartbeatTimer = setInterval(() => {
-        if (!sendEvent("heartbeat", { t: Date.now() })) {
-          cleanup();
-          try {
-            res.end();
-          } catch {
-            /* best-effort */
-          }
-        }
-      }, sseHeartbeatMs);
-      heartbeatTimer.unref();
-
-      return true;
-    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[sdl-mcp] REST API error: ${message}`);
@@ -1702,16 +1797,159 @@ export interface HttpServerHandle {
   close: () => Promise<void>;
 }
 
+export async function setupObservabilityDashboardSidecar(
+  port: number,
+  services: HttpTransportServices = {},
+  httpAuthConfig?: HttpAuthConfig,
+  checkHealthOverride?: () => Promise<boolean>,
+): Promise<HttpServerHandle> {
+  const host = OBSERVABILITY_DASHBOARD_HOST;
+
+  const authEnabled = httpAuthConfig?.enabled !== false;
+  let authToken: string | null;
+  if (!authEnabled) {
+    authToken = null;
+    console.error("[sdl-mcp] HTTP auth is DISABLED (httpAuth.enabled = false)");
+  } else if (httpAuthConfig?.token) {
+    authToken = httpAuthConfig.token;
+    console.error("[sdl-mcp] HTTP auth using static token from config");
+    console.error(
+      "[sdl-mcp] Include header: Authorization: Bearer <token> for /api/observability/* endpoints",
+    );
+  } else {
+    authToken = generateAuthToken();
+    const tokenFingerprint = createHash("sha256")
+      .update(authToken)
+      .digest("hex")
+      .slice(0, 12);
+    console.error(
+      `[sdl-mcp] HTTP auth token generated (fingerprint: ${tokenFingerprint})`,
+    );
+    console.error(
+      "[sdl-mcp] Include header: Authorization: Bearer <token> for /api/observability/* endpoints",
+    );
+  }
+
+  const authRateLimiter = createHttpAuthRateLimiter(
+    httpAuthConfig?.rateLimit ?? DEFAULT_HTTP_AUTH_RATE_LIMIT,
+  );
+  const authRateLimitCleanup = setInterval(
+    () => authRateLimiter.evictIdle(),
+    60_000,
+  );
+  authRateLimitCleanup.unref();
+
+  const checkHealth =
+    checkHealthOverride ??
+    (async (): Promise<boolean> => {
+      try {
+        const conn = await getLadybugConn();
+        await ladybugDb.queryAll(conn, "RETURN 1 AS ok");
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+  const httpServer = createServer(
+    (req: IncomingMessage, res: ServerResponse) => {
+      void (async () => {
+        const url = new URL(req.url ?? "/", `http://${host}:${port}`);
+        const pathname = url.pathname;
+
+        if (
+          req.method !== "OPTIONS" &&
+          pathname.startsWith("/api/observability/") &&
+          authToken &&
+          !isAuthorized(req, authToken)
+        ) {
+          const rateLimit = authRateLimiter.consume(getAuthRateLimitKey(req));
+          if (!rateLimit.allowed) {
+            res.writeHead(429, {
+              "Content-Type": "application/json",
+              "Retry-After": String(rateLimit.retryAfterSeconds),
+            });
+            res.end(JSON.stringify({ code: "rate_limited" }));
+            return;
+          }
+          res.writeHead(401, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error: "Unauthorized: Bearer token required",
+            }),
+          );
+          return;
+        }
+
+        const handled = await handleObservabilityDashboardRequest(
+          req,
+          res,
+          host,
+          port,
+          checkHealth,
+          services,
+        );
+        if (handled) return;
+
+        json(res, 404, { error: "Not found" });
+      })().catch((error) => {
+        console.error(
+          `[sdl-mcp] Observability dashboard sidecar error: ${String(error)}`,
+        );
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Internal server error" }));
+        } else if (!res.writableEnded) {
+          res.destroy();
+        }
+      });
+    },
+  );
+
+  const boundPort = await new Promise<number>((resolve_, reject_) => {
+    httpServer.once("error", reject_);
+    httpServer.listen(port, host, () => {
+      httpServer.removeListener("error", reject_);
+      httpServer.on("error", (err) => {
+        console.error(
+          `[sdl-mcp] Observability dashboard runtime error: ${err.message}`,
+        );
+      });
+      const addr = httpServer.address();
+      const actualPort = addr && typeof addr === "object" ? addr.port : port;
+      console.error(
+        `Observability dashboard listening on http://${host}:${actualPort}/ui/observability`,
+      );
+      resolve_(actualPort);
+    });
+  });
+
+  const serverClosed = new Promise<void>((resolve_) => {
+    httpServer.on("close", resolve_);
+  });
+
+  return {
+    port: boundPort,
+    authToken,
+    serverClosed,
+    close: async () => {
+      clearInterval(authRateLimitCleanup);
+      if (typeof httpServer.closeAllConnections === "function") {
+        httpServer.closeAllConnections();
+      }
+      await new Promise<void>((resolve, reject) => {
+        httpServer.close((err) => (err ? reject(err) : resolve()));
+      });
+    },
+  };
+}
+
 export async function setupHttpTransport(
   host: string,
   port: number,
   _graphDbPath: string,
   services: HttpTransportServices & MCPServerServices = {},
-  httpAuthConfig?: {
-    enabled?: boolean;
-    token?: string | null;
-    rateLimit?: Partial<HttpAuthRateLimitConfig>;
-  },
+  httpAuthConfig?: HttpAuthConfig,
   httpConfig?: {
     allowRemote?: boolean;
   },

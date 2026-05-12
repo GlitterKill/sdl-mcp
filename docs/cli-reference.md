@@ -139,6 +139,7 @@ Start the MCP server.
 
 ```bash
 sdl-mcp serve --stdio
+sdl-mcp serve --stdio --dashboard-port 3001
 sdl-mcp serve --http --host localhost --port 3000
 ```
 
@@ -148,6 +149,7 @@ Key options:
 - `--http`
 - `--host <HOST>` (default: `localhost`)
 - `--port <NUMBER>` (default: `3000`)
+- `--dashboard-port <NUMBER>` (stdio-only loopback observability dashboard)
 - `--no-watch` (disable file watchers even when enabled in config)
 
 When running with `--http`, additional surfaces are available:
@@ -156,6 +158,8 @@ When running with `--http`, additional surfaces are available:
 - Graph REST: `/api/graph/:repoId/symbol/:symbolId/neighborhood`, `/api/graph/:repoId/blast-radius/:fromVersion/:toVersion`, `/api/graph/:repoId/slice/:handle`
 - Symbol and repo helpers: `/api/symbol/:repoId/search`, `/api/symbol/:repoId/card/:symbolId`, `/api/repo/:repoId/status`, `/api/repo/:repoId/reindex`
 - Observability dashboard: UI at `http://<host>:<port>/ui/observability` plus REST + SSE under `/api/observability/{snapshot,timeseries,beam-explain,stream}`. Enabled by default; toggle via `observability.enabled` in config. See [Observability Dashboard](./feature-deep-dives/observability-dashboard.md).
+
+With `--stdio --dashboard-port <NUMBER>`, MCP traffic stays on stdio while only the observability UI/assets, `/api/observability/*`, and `/health` are exposed on `http://127.0.0.1:<NUMBER>`.
 
 ### `sdl-mcp export`
 

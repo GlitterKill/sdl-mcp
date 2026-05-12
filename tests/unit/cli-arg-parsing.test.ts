@@ -49,6 +49,34 @@ describe("CLI arg parsing", () => {
     assert.strictEqual(options.port, 4567);
   });
 
+  it("parses --dashboard-port for stdio serve command", () => {
+    const options = parseServeOptions(
+      ["--dashboard-port", "3001"],
+      global,
+      {},
+    );
+
+    assert.strictEqual(options.transport, "stdio");
+    assert.strictEqual(options.dashboardPort, 3001);
+  });
+
+  it("prefers parsed --dashboard-port values for serve command", () => {
+    const options = parseServeOptions([], global, {
+      "dashboard-port": "3002",
+    });
+
+    assert.strictEqual(options.transport, "stdio");
+    assert.strictEqual(options.dashboardPort, 3002);
+  });
+
+  it("rejects invalid dashboard ports for serve command", () => {
+    assert.throws(
+      () => parseServeOptions(["--dashboard-port", "70000"], global, {}),
+      /--port must be a number between 1 and 65535/,
+    );
+  });
+
+
   it("parses summary options with short preset and json format", () => {
     const options = parseSummaryOptions(
       ["auth", "--short", "--format", "json"],

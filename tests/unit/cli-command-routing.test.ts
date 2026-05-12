@@ -15,6 +15,8 @@ import {
   parseToolDispatchOptions,
 } from "../../dist/cli/argParsing.js";
 import type { CLIOptions } from "../../dist/cli/types.js";
+import { serveCommand } from "../../dist/cli/commands/serve.js";
+
 
 /**
  * Verifies parser behavior and preserves entrypoint-level coverage for the
@@ -212,6 +214,14 @@ describe("CLI command routing", () => {
       const options = parseServeOptions(["--no-watch"], global, {});
       assert.strictEqual(options.noWatch, true);
     });
+
+    it("rejects --dashboard-port with http transport before startup", async () => {
+      await assert.rejects(
+        () => serveCommand({ transport: "http", dashboardPort: 3001 }),
+        /--dashboard-port can only be used with --stdio/,
+      );
+    });
+
   });
 
   // ----- export -----

@@ -36,10 +36,22 @@
       </nav>
     </header>
 
-    <main id="dashboard" class="grid" data-system-visible="false">
+    <main id="dashboard" class="grid dashboard-grid" data-system-visible="false">
+      <section class="dashboard-hero" aria-labelledby="dashboardTitle">
+        <div>
+          <p class="eyebrow">LIVE MCP RUNTIME</p>
+          <h2 id="dashboardTitle">SDL Dashboard</h2>
+        </div>
+        <div class="hero-meta" aria-label="Dashboard focus">
+          <span>Latency</span>
+          <span>Retrieval</span>
+          <span>Indexing</span>
+          <span>Token flow</span>
+        </div>
+      </section>
       <section class="panel panel-bottleneck panel-wide" data-panel="bottleneck" aria-label="Bottleneck">
         <header class="panel-head">
-          <h2>BOTTLENECK</h2>
+          <h2>DOMINANT BOTTLENECK</h2>
           <span class="panel-sub" data-field="confidence">—</span>
         </header>
         <div class="bottleneck-body">
@@ -61,7 +73,7 @@
           <span class="kv-val" data-field="totalHits">—</span>
           <span class="kv-key">MISSES</span>
           <span class="kv-val" data-field="totalMisses">—</span>
-          <span class="kv-key">AVG µ</span>
+          <span class="kv-key">LOOKUP</span>
           <span class="kv-val" data-field="avgLookupLatencyMs">—</span>
         </div>
         <div class="bar-list" data-field="perSource" aria-label="Per-source hit rate"></div>
@@ -87,7 +99,7 @@
 
       <section class="panel" data-panel="beam" aria-label="Beam">
         <header class="panel-head">
-          <h2>BEAM</h2>
+          <h2>BEAM SEARCH</h2>
           <span class="panel-sub" data-field="totalSliceBuilds">—</span>
         </header>
         <div class="kv-row">
@@ -99,11 +111,11 @@
           <span class="kv-val" data-field="retainedExplainHandles">—</span>
         </div>
         <div class="kv-row">
-          <span class="kv-key">A</span>
+          <span class="kv-key">ACCEPT</span>
           <span class="kv-val" data-field="avgAccepted">—</span>
-          <span class="kv-key">E</span>
+          <span class="kv-key">EVICT</span>
           <span class="kv-val" data-field="avgEvicted">—</span>
-          <span class="kv-key">R</span>
+          <span class="kv-key">REJECT</span>
           <span class="kv-val" data-field="avgRejected">—</span>
         </div>
         <form id="beamExplainForm" class="beam-form">
@@ -205,7 +217,7 @@
 
       <section class="panel" data-panel="ppr" aria-label="PPR">
         <header class="panel-head">
-          <h2>PageRank</h2>
+          <h2>PAGERANK</h2>
           <span class="panel-sub" data-field="totalRuns">—</span>
         </header>
         <div class="kv-row">

@@ -1,27 +1,27 @@
 :root {
-  --bg-0: #0a0e14;
-  --bg-1: #10151c;
+  --bg-0: oklch(16.25% 0.0143 258.36);
+  --bg-1: oklch(19.39% 0.0162 256.83);
   --panel: rgba(18, 24, 32, 0.7);
-  --panel-solid: #121820;
+  --panel-solid: oklch(20.68% 0.0184 255.73);
   --border: rgba(0, 240, 255, 0.15);
   --border-strong: rgba(0, 240, 255, 0.4);
-  --text: #e6f1ff;
-  --muted: #8a9bae;
-  --dim: #56677a;
-  --accent: #00f0ff;
+  --text: oklch(95.40% 0.0222 254.39);
+  --muted: oklch(68.25% 0.0341 251.24);
+  --dim: oklch(50.69% 0.0367 251.40);
+  --accent: oklch(87.00% 0.1481 202.88);
   --accent-soft: rgba(0, 240, 255, 0.18);
-  --warn: #ff2a6d;
+  --warn: oklch(65.28% 0.2415 10.24);
   --warn-soft: rgba(255, 42, 109, 0.18);
-  --ok: #6dffb0;
-  --kind-rust: #ff8a3d;
-  --kind-ts: #5fb3ff;
+  --ok: oklch(90.04% 0.1682 156.76);
+  --kind-rust: oklch(75.00% 0.1668 50.54);
+  --kind-ts: oklch(74.61% 0.1375 248.00);
 
-  --c-cpu: #ff2a6d;
-  --c-mem: #ff8a3d;
-  --c-db: #b46aff;
-  --c-idx: #ffd23f;
-  --c-io: #5fb3ff;
-  --c-bal: #6dffb0;
+  --c-cpu: oklch(65.28% 0.2415 10.24);
+  --c-mem: oklch(75.00% 0.1668 50.54);
+  --c-db: oklch(67.24% 0.2158 304.07);
+  --c-idx: oklch(87.89% 0.1617 90.94);
+  --c-io: oklch(74.61% 0.1375 248.00);
+  --c-bal: oklch(90.04% 0.1682 156.76);
 
   --fs-sm: 11px;
   --fs-md: 13px;
@@ -892,4 +892,441 @@ table.per-encoder td.count {
 table.layer-breakdown td.layer,
 table.per-encoder td.enc {
   font-family: var(--mono, monospace);
+}
+
+/* High-fidelity responsive organization pass: triage first, details second. */
+.dashboard-grid {
+  grid-auto-flow: dense;
+  align-items: stretch;
+  padding-top: 18px;
+}
+
+.dashboard-hero {
+  grid-column: 1 / -1;
+  order: 0;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 118px;
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background:
+    linear-gradient(135deg, rgba(0, 240, 255, 0.12), transparent 36%),
+    linear-gradient(180deg, rgba(18, 24, 32, 0.88), rgba(10, 14, 20, 0.74));
+  box-shadow: 0 0 0 1px rgba(0, 240, 255, 0.04) inset;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.18em;
+}
+
+.dashboard-hero h1 {
+  margin: 0;
+  max-width: 820px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 44px;
+  line-height: 0.96;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.hero-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(110px, 1fr));
+  gap: 8px;
+  min-width: min(360px, 100%);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.hero-meta span {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  padding: 8px 10px;
+  background: rgba(0, 240, 255, 0.05);
+}
+
+.panel {
+  min-height: 236px;
+}
+
+.panel-bottleneck {
+  order: 1;
+  grid-column: span 6;
+  min-height: 260px;
+}
+
+[data-panel="health"] {
+  order: 2;
+  grid-column: span 3;
+}
+
+[data-panel="latency"] {
+  order: 3;
+  grid-column: span 3;
+}
+
+[data-panel="tokenEfficiency"] {
+  order: 4;
+  grid-column: span 6;
+}
+
+[data-panel="retrieval"] {
+  order: 5;
+}
+
+[data-panel="cache"] {
+  order: 6;
+}
+
+[data-panel="beam"] {
+  order: 7;
+}
+
+[data-panel="indexing"] {
+  order: 8;
+}
+
+[data-panel="ppr"] {
+  order: 9;
+}
+
+[data-panel="scip"] {
+  order: 10;
+}
+
+[data-panel="postIndex"] {
+  order: 11;
+}
+
+[data-panel="toolVolume"] {
+  order: 12;
+  grid-column: span 6;
+}
+
+.panel-system {
+  order: 13;
+}
+
+.panel-head h2 {
+  text-wrap: balance;
+}
+
+.panel[data-panel="latency"] .tool-table,
+.panel[data-panel="toolVolume"] .bar-list,
+.panel[data-panel="health"] .bar-list {
+  margin-top: 2px;
+}
+
+@media (min-width: 1281px) {
+  [data-panel="tokenEfficiency"] {
+    grid-column: span 6;
+  }
+
+  [data-panel="indexing"],
+  [data-panel="ppr"],
+  [data-panel="scip"],
+  [data-panel="postIndex"] {
+    grid-column: span 3;
+  }
+}
+
+@media (max-width: 960px) {
+  .dashboard-hero {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .hero-meta {
+    width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  .dashboard-grid {
+    padding-inline: 12px;
+  }
+
+  .dashboard-hero {
+    padding: 16px;
+  }
+
+  .dashboard-hero h1 {
+    font-size: 28px;
+    letter-spacing: 0;
+  }
+
+  .hero-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    min-height: auto;
+  }
+}
+
+/* Overrides that keep priority ordering from compressing cards too far. */
+@media (max-width: 1280px) {
+  [data-panel="health"],
+  [data-panel="latency"],
+  [data-panel="tokenEfficiency"],
+  [data-panel="toolVolume"] {
+    grid-column: span 6;
+  }
+}
+
+@media (max-width: 720px) {
+  [data-panel="health"],
+  [data-panel="latency"],
+  [data-panel="tokenEfficiency"],
+  [data-panel="toolVolume"],
+  [data-panel="indexing"],
+  [data-panel="ppr"],
+  [data-panel="scip"],
+  [data-panel="postIndex"] {
+    grid-column: span 12;
+  }
+}
+
+/* User-arrangeable snap grid -------------------------------------------------
+   The dashboard keeps a deterministic 12-column grid at desktop widths. The
+   runtime layout editor writes per-panel CSS variables, so live data hooks stay
+   attached to their original panel nodes. */
+@media (min-width: 721px) {
+  .dashboard-grid {
+    --grid-row: 112px;
+    grid-auto-flow: row;
+    grid-auto-rows: var(--grid-row);
+    align-items: stretch;
+    max-width: 1920px;
+    width: 100%;
+  }
+
+  .dashboard-grid > .dashboard-hero {
+    grid-column: 1 / span 12;
+    grid-row: 1 / span 1;
+    min-height: 0;
+  }
+
+  .dashboard-grid > .panel {
+    grid-column: var(--panel-col, auto) / span var(--panel-cols, 4);
+    grid-row: var(--panel-row, auto) / span var(--panel-rows, 2);
+    min-height: 0;
+    height: 100%;
+    overflow: auto;
+    position: relative;
+    padding-bottom: 24px;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  .dashboard-grid > [data-panel="bottleneck"] {
+    --panel-col: 1;
+    --panel-row: 2;
+    --panel-cols: 6;
+    --panel-rows: 2;
+  }
+
+  .dashboard-grid > [data-panel="health"] {
+    --panel-col: 7;
+    --panel-row: 2;
+    --panel-cols: 3;
+    --panel-rows: 2;
+  }
+
+  .dashboard-grid > [data-panel="latency"] {
+    --panel-col: 10;
+    --panel-row: 2;
+    --panel-cols: 3;
+    --panel-rows: 2;
+  }
+
+  .dashboard-grid > [data-panel="tokenEfficiency"] {
+    --panel-col: 1;
+    --panel-row: 4;
+    --panel-cols: 6;
+    --panel-rows: 2;
+  }
+
+  .dashboard-grid > [data-panel="retrieval"] {
+    --panel-col: 7;
+    --panel-row: 4;
+    --panel-cols: 3;
+    --panel-rows: 2;
+  }
+
+  .dashboard-grid > [data-panel="cache"] {
+    --panel-col: 10;
+    --panel-row: 4;
+    --panel-cols: 3;
+    --panel-rows: 2;
+  }
+
+  .dashboard-grid > [data-panel="beam"] {
+    --panel-col: 1;
+    --panel-row: 6;
+    --panel-cols: 4;
+    --panel-rows: 2;
+  }
+
+  .dashboard-grid > [data-panel="indexing"] {
+    --panel-col: 5;
+    --panel-row: 6;
+    --panel-cols: 4;
+    --panel-rows: 2;
+  }
+
+  .dashboard-grid > [data-panel="ppr"] {
+    --panel-col: 9;
+    --panel-row: 6;
+    --panel-cols: 4;
+    --panel-rows: 2;
+  }
+
+  .dashboard-grid > [data-panel="scip"] {
+    --panel-col: 1;
+    --panel-row: 8;
+    --panel-cols: 3;
+    --panel-rows: 2;
+  }
+
+  .dashboard-grid > [data-panel="postIndex"] {
+    --panel-col: 4;
+    --panel-row: 8;
+    --panel-cols: 3;
+    --panel-rows: 2;
+  }
+
+  .dashboard-grid > [data-panel="toolVolume"] {
+    --panel-col: 7;
+    --panel-row: 8;
+    --panel-cols: 6;
+    --panel-rows: 2;
+  }
+
+  .dashboard-grid > [data-panel="resources"] {
+    --panel-col: 1;
+    --panel-row: 10;
+    --panel-cols: 12;
+    --panel-rows: 2;
+  }
+}
+
+.layout-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-drag-handle,
+.panel-resize-grip {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.panel-drag-handle {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: rgba(0, 240, 255, 0.06);
+  color: var(--accent);
+  cursor: grab;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  padding: 4px 6px;
+  margin-left: auto;
+}
+
+.panel-resize-grip {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 16px;
+  height: 16px;
+  border-right: 1px solid var(--accent);
+  border-bottom: 1px solid var(--accent);
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, rgba(0, 240, 255, 0.22) 50%);
+}
+
+.dashboard-grid[data-layout-edit="true"] .panel {
+  outline: 1px dashed rgba(0, 240, 255, 0.22);
+  outline-offset: -5px;
+}
+
+.dashboard-grid[data-layout-edit="true"] .panel-drag-handle,
+.dashboard-grid[data-layout-edit="true"] .panel-resize-grip {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dashboard-grid[data-layout-edit="true"] .panel-head {
+  cursor: default;
+}
+
+.panel.is-moving,
+.panel.is-resizing {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft), 0 0 24px rgba(0, 240, 255, 0.12);
+  z-index: 3;
+}
+
+.panel.is-layout-blocked {
+  border-color: var(--warn);
+  box-shadow: 0 0 0 1px var(--warn-soft);
+}
+
+body.layout-interacting {
+  user-select: none;
+  cursor: grabbing;
+}
+
+@media (max-width: 720px) {
+  .layout-controls,
+  .panel-drag-handle,
+  .panel-resize-grip {
+    display: none;
+  }
+
+  .dashboard-grid > .panel,
+  .dashboard-grid > .dashboard-hero {
+    grid-column: span 12 !important;
+    grid-row: auto !important;
+    height: auto;
+    overflow: visible;
+  }
+}
+
+/* Pointer zones for the dashboard layout editor. */
+.dashboard-grid[data-layout-edit="true"] .panel-head {
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+
+.dashboard-grid[data-layout-edit="true"] .panel {
+  touch-action: none;
+}
+
+.dashboard-grid[data-layout-edit="true"] .panel::after {
+  content: "";
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 16px;
+  height: 16px;
+  border-right: 1px solid var(--accent);
+  border-bottom: 1px solid var(--accent);
+  background: linear-gradient(135deg, transparent 50%, rgba(0, 240, 255, 0.22) 50%);
+  pointer-events: none;
 }

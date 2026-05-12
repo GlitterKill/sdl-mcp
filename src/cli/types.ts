@@ -46,6 +46,7 @@ export interface ServeOptions extends CLIOptions {
   transport: "stdio" | "http";
   port?: number;
   host?: string;
+  dashboardPort?: number;
   noWatch?: boolean;
 }
 

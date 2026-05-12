@@ -22,8 +22,8 @@ every metric needed to diagnose SDL-MCP behaviour without parsing stderr logs. I
 in V1 as:
 
 - **HTTP REST + SSE APIs** under `/api/observability/*` (snapshot, timeseries, beam-explain, stream)
-- **Web UI** at `/ui/observability` with a cyberpunk-corporate dark theme, 12 metric panels,
-  and a System Stats toggle for raw process counters
+- **Web UI** at `/ui/observability` with a GlitterKill dark operational theme, a triage-first
+  responsive layout, 12 metric panels, and a System Stats toggle for raw process counters
 - **Per-repo aggregation** of every existing telemetry event plus new probes for the DB write
   pool, indexer drain, CPU, RSS, heap, and event-loop lag
 
@@ -32,10 +32,7 @@ graph, or accept commands. It is a side-channel observer of the same telemetry e
 existing log pipeline consumes. V2 will likely add live tuning controls and a persistent
 warehouse — see [V1 limitations + V2 roadmap](#v1-limitations--v2-roadmap).
 
-The dashboard lives on the **HTTP transport** (`sdl-mcp serve --http`). Stdio transport
-does not expose the routes — there is no static-file server when stdio is the only
-transport active. Bearer-token authentication gates the `/api/observability/*` endpoints
-identically to the rest of the `/api/*` surface.
+The dashboard normally lives on the **HTTP transport** (`sdl-mcp serve --http`). Stdio transport can expose an opt-in loopback-only observability sidecar with `sdl-mcp serve --stdio --dashboard-port <port>`; that sidecar serves only `/ui/observability`, its JS/CSS assets, `/health`, and `/api/observability/*`. Bearer-token authentication gates the `/api/observability/*` endpoints identically to the rest of the `/api/*` surface.
 
 ### Enabling the dashboard
 
@@ -100,7 +97,7 @@ requested.
 | `Aggregator`                 | `src/observability/service.ts`                 | Per-repo state container. Maintains dual retention windows (short, default 15 min; long, default 24 h) over the same metric streams.                                                            |
 | `BeamExplainStore`           | `src/observability/beam-explain-store.ts`      | Independent LRU. Insertion order is tracked via `Map` iteration; every `publish` deletes-then-re-inserts to keep the most-recently-used slice handle at the tail.                               |
 | `classifyBottleneck`         | `src/observability/bottleneck-classifier.ts`   | Pure deterministic classifier that takes a snapshot of resource and queue signals and returns `{dominant, confidence, topSignals}`.                                                             |
-| HTTP routes                  | `src/cli/transport/http.ts` (lines ~1030–1230) | Bearer-auth gated handlers for the four `/api/observability/*` paths plus static asset routes for `/ui/observability{,.js,.css}`.                                                               |
+| HTTP routes / stdio sidecar | `src/cli/transport/http.ts`                    | Bearer-auth gated handlers for `/api/observability/*`, static asset routes for `/ui/observability{,.js,.css}`, `/health`, and the loopback-only stdio dashboard sidecar.                      |
 
 **Sampling tick** — when the service is `start()`ed, it sets a recurring timer at the
 configured `sampleIntervalMs` (default 2000 ms). On each tick the service samples:
@@ -610,7 +607,7 @@ for V2:
 | :------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | No live tuning controls — every knob is config-file only and requires a restart. | Add authenticated mutation endpoints under `/api/observability/admin/*` with audit logging.                                                                                                           |
 | In-memory windows only. Metrics are lost on process restart.                     | Optional persistence to a small SQLite or DuckDB warehouse, retained across restarts and queryable via SQL.                                                                                           |
-| HTTP transport required. Stdio agents see no dashboard.                          | The HTTP transport requirement is structural — V2 will keep this constraint, but add a "satellite" mode that streams snapshots over MCP notifications so stdio agents can visualize them out-of-band. |
+| Stdio sidecar is observability-only and loopback-bound.                        | Add richer out-of-band visualization options without exposing graph, config, or session routes on stdio by default.                                                                                   |
 | Bottleneck classifier is heuristic.                                              | V2 will keep the deterministic heuristic but add a learned model that runs alongside as a comparison signal.                                                                                          |
 | No alerting.                                                                     | Add threshold-based alert rules driven by the classifier and configurable webhooks.                                                                                                                   |
 
@@ -686,3 +683,14 @@ for a closed `text/event-stream` request.
 ---
 
 [Back to documentation hub](../README.md)
+
+### Rearrangeable Panel Grid
+
+The dashboard uses a deterministic 12-column desktop grid so wide displays align on fixed column and row tracks. A lightweight layout helper is embedded in `/ui/observability.css`, loaded by the dashboard script, and keeps the live metric bindings intact while allowing users to:
+
+- drag panels from their header area;
+- resize panels from the bottom-right corner;
+- snap movement and resize operations to grid cells;
+- persist their custom arrangement in `localStorage` under `sdl-observability-panel-layout-v1`.
+
+The layout editor disables itself on narrow mobile viewports so the dashboard falls back to the single-column responsive scan order.
