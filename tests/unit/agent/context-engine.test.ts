@@ -844,6 +844,64 @@ describe("ContextEngine", () => {
     assert.deepEqual(capturedContext, ["symbol:exact-handleSymbolSearch"]);
   });
 
+  it("lets forced semantic precise mode merge exact and semantic seeds", async () => {
+    const seedContextMock = mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async (): Promise<ContextSeedResult> => ({
+        candidates: [
+          {
+            contextRef: "symbol:semantic-related",
+            source: "semantic",
+            score: 0.9,
+            sourceRank: 0,
+          },
+        ],
+        sources: { semantic: 1, lexical: 0, feedback: 0 },
+      }),
+    );
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => [
+      "file:src/util/paths.ts",
+    ]);
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedExactMentionedSymbols",
+      async () => ["symbol:exact-handleSymbolSearch"],
+    );
+
+    let capturedContext: string[] = [];
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task: unknown, _rungs: unknown, context: string[]) => {
+        capturedContext = context;
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(
+      createTask({
+        taskType: "explain",
+        taskText: "explain handleSymbolSearch exact search path",
+        options: { contextMode: "precise", semantic: true },
+      }),
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(seedContextMock.mock.callCount(), 1);
+    assert.deepEqual(capturedContext, [
+      "symbol:exact-handleSymbolSearch",
+      "file:src/util/paths.ts",
+      "symbol:semantic-related",
+    ]);
+  });
+
   it("respects per-source quotas in seed results", async () => {
     // Create a seed result where semantic dominates but is capped
     const seedResult: ContextSeedResult = {
@@ -1309,5 +1367,65 @@ describe("ContextEngine", () => {
     );
     assert.ok(capturedContext.includes("symbol:seed-a"));
     assert.ok(capturedContext.includes("symbol:seed-b"));
+  });
+});
+
+
+describe("ContextEngine confidence-gated retrieval", () => {
+  it("runs seedContext even when focus paths were inferred", async () => {
+    const seedResult: ContextSeedResult = {
+      candidates: [
+        {
+          contextRef: "symbol:semantic-hit",
+          source: "semantic",
+          score: 0.9,
+          sourceRank: 0,
+        },
+      ],
+      sources: { semantic: 1, lexical: 0, feedback: 0 },
+    };
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["file:src/graph/"]);
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedExactMentionedSymbols",
+      async () => [],
+    );
+    const seedMock = mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async () => seedResult,
+    );
+
+    let capturedContext: string[] = [];
+    let capturedSeeds: unknown[] = [];
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task, _rungs, context, seedCandidates) => {
+        capturedContext = context;
+        capturedSeeds = seedCandidates ?? [];
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const engine = new ContextEngine();
+    const result = await engine.buildContext(
+      createTask({
+        taskType: "explain",
+        taskText: "Explain how graph beam search builds a slice",
+        options: { contextMode: "broad" },
+      }),
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(seedMock.mock.callCount(), 1);
+    assert.ok(capturedContext.includes("file:src/graph/"));
+    assert.ok(capturedContext.includes("symbol:semantic-hit"));
+    assert.deepEqual(capturedSeeds, seedResult.candidates);
   });
 });

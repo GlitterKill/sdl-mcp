@@ -20,6 +20,7 @@ import type {
 import { entitySearch } from "../retrieval/index.js";
 import {
   extractIdentifiersFromText,
+  generateCompoundIdentifiers,
   IDENTIFIER_STOP_WORDS,
 } from "./identifier-extraction.js";
 import { searchSymbols } from "../db/ladybug-queries.js";
@@ -32,8 +33,8 @@ import { logger } from "../util/logger.js";
 // Tuning constants
 // ---------------------------------------------------------------------------
 
-/** Minimum entity score to keep from semantic search. */
-const MIN_ENTITY_SCORE = 0.3;
+/** Minimum normalized entity score to keep from semantic search. */
+const MIN_ENTITY_NORMALIZED_SCORE = 0.3;
 
 /** Max seed candidates by context mode. */
 const MAX_SEEDS_PRECISE = 12;
@@ -53,6 +54,10 @@ const COMPOUND_LIMIT_BROAD = 15;
 
 /** Maximum feedback rows to consider. */
 const FEEDBACK_LIMIT = 10;
+
+/** Slots reserved so a secondary source can still appear when one lane dominates. */
+const DIVERSITY_RESERVE_PRECISE = 3;
+const DIVERSITY_RESERVE_BROAD = 4;
 
 function recordTiming(
   timings: Map<string, number>,
@@ -83,18 +88,78 @@ function mergeTimingRecord(
   }
 }
 
+const HIGH_SIGNAL_COMPOUND_TERMS = new Set([
+  "beam",
+  "budget",
+  "candidate",
+  "cluster",
+  "context",
+  "dedup",
+  "diagnostic",
+  "entity",
+  "evidence",
+  "executor",
+  "fusion",
+  "graph",
+  "hybrid",
+  "identifier",
+  "ladder",
+  "planner",
+  "projection",
+  "ranking",
+  "retrieval",
+  "rrf",
+  "rung",
+  "score",
+  "search",
+  "seed",
+  "semantic",
+  "skeleton",
+  "slice",
+  "symbol",
+]);
+
+function isHighSignalCompound(term: string): boolean {
+  const words =
+    term
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/_/g, " ")
+      .toLowerCase()
+      .match(/[a-z0-9]{3,}/g) ?? [];
+  return words.some((word) => HIGH_SIGNAL_COMPOUND_TERMS.has(word));
+}
+
 export function buildContextFtsQuery(taskText: string): string {
   const words = taskText
     .slice(0, 2000)
     .match(/[a-zA-Z_][a-zA-Z0-9_]{2,}/g);
-  const terms = [...new Set(words ?? [])]
+  const lexicalTerms = [...new Set(words ?? [])]
     .map((term) => term.trim())
     .filter((term) => term.length >= 3)
-    .filter((term) => !IDENTIFIER_STOP_WORDS.has(term.toLowerCase()))
-    .slice(0, 8);
+    .filter((term) => !IDENTIFIER_STOP_WORDS.has(term.toLowerCase()));
+  const seenCompoundKeys = new Set<string>();
+  const identifierTerms = generateCompoundIdentifiers(taskText).filter((term) => {
+    if (
+      IDENTIFIER_STOP_WORDS.has(term.toLowerCase()) ||
+      !/[A-Z_]/.test(term) ||
+      !isHighSignalCompound(term)
+    ) {
+      return false;
+    }
+    const key = term.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (seenCompoundKeys.has(key)) return false;
+    seenCompoundKeys.add(key);
+    return true;
+  });
+  const terms = [
+    ...new Set([
+      ...lexicalTerms.slice(0, 8),
+      ...identifierTerms.slice(0, 8),
+      ...lexicalTerms.slice(8, 12),
+    ]),
+  ].slice(0, 12);
   if (terms.length > 0) return terms.join(" ");
-  const identifiers = extractIdentifiersFromText(taskText, taskText).slice(0, 4);
-  return identifiers.length > 0 ? identifiers.join(" ") : taskText.slice(0, 200);
+  return taskText.slice(0, 200);
 }
 
 // ---------------------------------------------------------------------------
@@ -107,8 +172,75 @@ export function buildContextFtsQuery(taskText: string): string {
  * related symbols are most likely to live.
  */
 const CONCEPT_DIRECTORY_MAP: Array<{ keywords: string[]; paths: string[] }> = [
+  {
+    keywords: ["buildcontext", "build context", "context seeding", "seed context", "context seed"],
+    paths: [
+      "src/agent/context-engine.ts",
+      "src/agent/context-seeding.ts",
+      "src/agent/identifier-extraction.ts",
+    ],
+  },
+  {
+    keywords: ["feedback", "feedback boost", "queryfeedbackboosts", "soft-deleted"],
+    paths: ["src/retrieval/feedback-boost.ts"],
+  },
+  {
+    keywords: [
+      "retrieval",
+      "retrieval pipeline",
+      "entity search",
+      "hybrid search",
+      "rrf",
+      "fusion",
+      "semantic seeding",
+    ],
+    paths: [
+      "src/retrieval/orchestrator.ts",
+      "src/retrieval/types.ts",
+      "src/agent/context-seeding.ts",
+    ],
+  },
+  {
+    keywords: ["executor", "rung execution", "evidence-aware", "evidence dedup"],
+    paths: ["src/agent/executor.ts", "src/agent/types.ts"],
+  },
+  {
+    keywords: ["planner", "context ladder", "rung planning", "budget planning"],
+    paths: ["src/agent/planner.ts", "src/agent/types.ts"],
+  },
+  {
+    keywords: [
+      "evidence type",
+      "evidence types",
+      "symbolcard",
+      "codewindow",
+      "searchresult",
+      "diagnostic",
+    ],
+    paths: ["src/agent/types.ts", "src/agent/executor.ts", "src/agent/evidence.ts"],
+  },
+  {
+    keywords: ["identifier extraction", "stop word", "stop words", "stopwords"],
+    paths: ["src/agent/identifier-extraction.ts"],
+  },
+  {
+    keywords: ["projection", "broad response", "visible fields"],
+    paths: ["src/mcp/context-response-projection.ts", "src/mcp/tools/context.ts"],
+  },
+  {
+    keywords: ["score", "scoring", "ranking", "fan-in", "churn", "hotness"],
+    paths: ["src/graph/score.ts", "src/graph/slice.ts"],
+  },
   { keywords: ["graph", "slice", "beam", "beam search", "bfs"], paths: ["src/graph/"] },
-  { keywords: ["skeleton", "hotpath", "hot path", "hot-path", "code window", "gating", "gate"], paths: ["src/code/"] },
+  {
+    keywords: ["skeleton", "getskeleton", "get skeleton", "skeleton budget"],
+    paths: ["src/code/skeleton.ts", "src/agent/executor.ts"],
+  },
+  {
+    keywords: ["hotpath", "hot path", "hot-path"],
+    paths: ["src/code/hotpath.ts", "src/agent/executor.ts"],
+  },
+  { keywords: ["code window", "gating", "gate"], paths: ["src/code/", "src/policy/"] },
   { keywords: ["index", "indexer", "indexing", "symbol extraction", "tree-sitter", "treesitter", "adapter"], paths: ["src/indexer/"] },
   { keywords: ["import", "barrel", "re-export", "reexport", "call resolution"], paths: ["src/indexer/", "src/indexer/treesitter/"] },
   { keywords: ["delta", "blast radius", "version", "diff"], paths: ["src/delta/"] },
@@ -192,22 +324,22 @@ export function inferFocusPathsFromTaskText(taskText: string): string[] {
 
 /**
  * Run the 3-stage seeding pipeline and return scored, deduplicated candidates.
+ * Run the 3-stage seeding pipeline and return scored, deduplicated candidates.
  *
  * Stage 1 — Semantic retrieval (entitySearch)
- * Stage 2 — Hybrid/lexical fallback (searchSymbols) — only when Stage 1
- *           returned fewer than half the max seed count
+ * Stage 2 — Hybrid/lexical fallback (searchSymbols) when retrieval still has
+ *           room before feedback slots are reserved
  * Stage 3 — Feedback boosting (queryFeedbackBoosts)
  *
- * No single source contributes more than half the total cap. Final candidates
- * are sorted by score descending.
+ * The dominant lane can use most of the cap, but diversity reserve slots keep
+ * secondary lexical/semantic and feedback evidence available for final ranking.
  */
 export async function buildSeedContext(
   task: AgentTask,
 ): Promise<ContextSeedResult> {
   const timings = new Map<string, number>();
-  /* sdl.context: keep expensive multi-entity semantic seeding opt-in. */
-  const useSemanticEntitySearch = task.options?.semantic === true;
-  const useHybridLexical = task.options?.semantic === true;
+  const forceSemanticEntitySearch = task.options?.semantic === true;
+  const semanticDisabled = task.options?.semantic === false;
   const includeEvidence = task.options?.includeRetrievalEvidence !== false;
   /* sdl.context: auto-extract chatMentions from taskText when caller did not pass any */
   const { autoExtractMentions } = await import("../retrieval/seed-resolver.js");
@@ -219,17 +351,29 @@ export async function buildSeedContext(
   let seedEvidence: import("../retrieval/types.js").RetrievalEvidence | undefined;
 
   const isBroad = task.options?.contextMode !== "precise";
+  const useSemanticEntitySearch =
+    forceSemanticEntitySearch || (!semanticDisabled && isBroad);
+  // Stage 1 already runs the hybrid FTS/vector lane. Keep Stage 2 lexical-only
+  // so forced semantic calls get diversity without paying for a second hybrid
+  // retrieval pass over the same query.
+  const useHybridLexical = false;
   const maxSeeds = isBroad ? MAX_SEEDS_BROAD : MAX_SEEDS_PRECISE;
   const halfMax = Math.ceil(maxSeeds / 2);
+  const diversityReserve = isBroad
+    ? DIVERSITY_RESERVE_BROAD
+    : DIVERSITY_RESERVE_PRECISE;
+  const primarySourceCap = Math.max(halfMax, maxSeeds - diversityReserve);
+  const feedbackCap = Math.min(FEEDBACK_LIMIT, diversityReserve);
+  const preFeedbackCap = maxSeeds - feedbackCap;
 
   const seen = new Set<string>();
   const allCandidates: ContextSeedCandidate[] = [];
   const sourceCounts = { semantic: 0, lexical: 0, feedback: 0 };
 
   // ------------------------------------------------------------------
-  // Stage 1: Semantic retrieval (hybrid FTS + vector via orchestrator)
-  //   Kept opt-in because large LadybugDB vector/FTS index calls can dominate
-  //   latency for natural-language context lookups.
+  // Stage 1: Semantic retrieval (hybrid FTS + vector via orchestrator).
+  // Forced semantic runs for any mode; the confidence-gated default runs this
+  // lane for broad natural-language discovery and preserves precise fast paths.
   // ------------------------------------------------------------------
   if (useSemanticEntitySearch) {
     const semanticStartedAt = performance.now();
@@ -238,12 +382,13 @@ export async function buildSeedContext(
         repoId: task.repoId,
         query: task.taskText,
         ftsQuery: buildContextFtsQuery(task.taskText),
-        limit: 20,
-        entityTypes: ["symbol", "cluster", "process", "fileSummary"],
-        // Entity FTS can dominate natural-language context latency on large
-        // indexes. Vector seeding plus bounded lexical fallback keep symbol
-        // coverage without paying that pathological query cost here.
-        ftsEnabled: false,
+        limit: isBroad ? 32 : 16,
+        entityTypes: isBroad
+          ? ["symbol", "cluster", "process", "fileSummary"]
+          : ["symbol", "fileSummary"],
+        // Keep FTS bounded through entitySearch limits, then fuse/rerank in
+        // memory. This restores exact lexical hits without changing schema.
+        ftsEnabled: true,
         includeEvidence: includeEvidence,
         chatMentions: resolvedChatMentions,
         chatMentionWeights: task.options?.chatMentionWeights,
@@ -256,25 +401,30 @@ export async function buildSeedContext(
         mergeTimingRecord(timings, entityResult.evidence.diagnosticTimings);
         seedEvidence = entityResult.evidence;
       }
-      const filtered = entityResult.results.filter(
-        (r) => r.score >= MIN_ENTITY_SCORE,
+      const rawSemanticCandidates = entityResult.results.filter(
+        (r) => r.score > 0,
       );
 
-      if (filtered.length > 0) {
-        // Normalize scores to 0-1 (divide by max score in batch)
-        const maxScore = Math.max(...filtered.map((r) => r.score));
+      if (rawSemanticCandidates.length > 0) {
+        // RRF scores are small absolute values, so apply the quality threshold
+        // after normalizing against the best candidate in this retrieval batch.
+        const maxScore = Math.max(...rawSemanticCandidates.map((r) => r.score));
         const norm = maxScore > 0 ? maxScore : 1;
 
-        for (let i = 0; i < filtered.length; i++) {
-          if (sourceCounts.semantic >= halfMax) break;
-          const r = filtered[i];
+        for (let i = 0; i < rawSemanticCandidates.length; i++) {
+          if (sourceCounts.semantic >= primarySourceCap) break;
+          const r = rawSemanticCandidates[i];
+          const normalizedScore = r.score / norm;
+          if (normalizedScore < MIN_ENTITY_NORMALIZED_SCORE) continue;
           const ref = `${r.entityType}:${r.entityId}`;
           if (seen.has(ref)) continue;
           seen.add(ref);
           allCandidates.push({
             contextRef: ref,
             source: "semantic",
-            score: r.score / norm,
+            score: normalizedScore,
+            rawScore: r.score,
+            entityType: r.entityType as ContextSeedCandidate["entityType"],
             sourceRank: i,
           });
           sourceCounts.semantic++;
@@ -290,10 +440,20 @@ export async function buildSeedContext(
   }
 
   // ------------------------------------------------------------------
-  // Stage 2: Hybrid/lexical fallback
-  //   Only runs if Stage 1 returned fewer than half the max seed count.
+  // Stage 2: Hybrid/lexical fallback.
+  // Always keep a bounded lexical lane available before feedback slots so
+  // exact names and domain terms are not crowded out by semantic vectors.
   // ------------------------------------------------------------------
-  if (sourceCounts.semantic < halfMax) {
+  const lexicalTargetCap = semanticDisabled
+    ? preFeedbackCap
+    : Math.min(
+        primarySourceCap,
+        Math.max(diversityReserve, preFeedbackCap - sourceCounts.semantic),
+      );
+
+  const semanticLaneHasCoverage =
+    forceSemanticEntitySearch && sourceCounts.semantic >= diversityReserve;
+  if (sourceCounts.lexical < lexicalTargetCap && !semanticLaneHasCoverage) {
     const lexicalStartedAt = performance.now();
     try {
       const conn = await getLadybugConn();
@@ -320,7 +480,7 @@ export async function buildSeedContext(
           : await searchSymbols(conn, task.repoId, compoundQuery, compoundLimit);
         recordTiming(timings, "seed.lexicalCompound", compoundStartedAt);
         for (const r of compoundResults) {
-          if (sourceCounts.lexical >= halfMax) break;
+          if (sourceCounts.lexical >= lexicalTargetCap) break;
           const ref = `symbol:${r.symbolId}`;
           if (seen.has(ref)) continue;
           seen.add(ref);
@@ -345,14 +505,14 @@ export async function buildSeedContext(
 
       // Strategy 2: Individual term searches
       for (const term of terms.slice(0, maxIndividualTerms)) {
-        if (sourceCounts.lexical >= halfMax) break;
+        if (sourceCounts.lexical >= lexicalTargetCap) break;
         const termStartedAt = performance.now();
         const results = useHybridLexical
           ? (await searchSymbolsHybridWithOverlay(conn, task.repoId, term, perTermLimit, { chatMentions: resolvedChatMentions, chatMentionWeights: task.options?.chatMentionWeights, pprDirection: task.options?.pprDirection, pprWeight: task.options?.pprWeight })).rows
           : await searchSymbols(conn, task.repoId, term, perTermLimit);
         recordTiming(timings, "seed.lexicalTermSearch", termStartedAt);
         for (const r of results) {
-          if (sourceCounts.lexical >= halfMax) break;
+          if (sourceCounts.lexical >= lexicalTargetCap) break;
           const ref = `symbol:${r.symbolId}`;
           if (seen.has(ref)) continue;
           seen.add(ref);
@@ -383,37 +543,46 @@ export async function buildSeedContext(
   // Stage 3: Feedback boosting
   // ------------------------------------------------------------------
   const feedbackStartedAt = performance.now();
-  try {
-    const conn = await getLadybugConn();
-    const { boosts } = await queryFeedbackBoosts(conn, {
-      repoId: task.repoId,
-      query: task.taskText,
-      limit: FEEDBACK_LIMIT,
-    });
+  const taskMentionsFeedback = /\bfeedback\b/i.test(task.taskText);
+  const shouldQueryFeedbackBoosts =
+    !forceSemanticEntitySearch ||
+    taskMentionsFeedback ||
+    sourceCounts.semantic < diversityReserve;
+  if (shouldQueryFeedbackBoosts) {
+    try {
+      const conn = await getLadybugConn();
+      const { boosts } = await queryFeedbackBoosts(conn, {
+        repoId: task.repoId,
+        query: task.taskText,
+        limit: FEEDBACK_LIMIT,
+      });
 
-    if (boosts.size > 0) {
-      let feedbackRank = 0;
-      for (const [symbolId, boostScore] of boosts) {
-        if (sourceCounts.feedback >= halfMax) break;
-        const ref = `symbol:${symbolId}`;
-        if (seen.has(ref)) continue;
-        seen.add(ref);
-        allCandidates.push({
-          contextRef: ref,
-          source: "feedback",
-          score: boostScore,
-          sourceRank: feedbackRank,
-        });
-        sourceCounts.feedback++;
-        feedbackRank++;
+      if (boosts.size > 0) {
+        let feedbackRank = 0;
+        for (const [symbolId, boostScore] of boosts) {
+          if (sourceCounts.feedback >= feedbackCap) break;
+          const ref = `symbol:${symbolId}`;
+          if (seen.has(ref)) continue;
+          seen.add(ref);
+          allCandidates.push({
+            contextRef: ref,
+            source: "feedback",
+            score: boostScore,
+            sourceRank: feedbackRank,
+          });
+          sourceCounts.feedback++;
+          feedbackRank++;
+        }
       }
+    } catch (err) {
+      logger.debug("Feedback boost for context seeding failed (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      recordTiming(timings, "seed.feedbackBoost", feedbackStartedAt);
     }
-  } catch (err) {
-    logger.debug("Feedback boost for context seeding failed (non-fatal)", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  } finally {
-    recordTiming(timings, "seed.feedbackBoost", feedbackStartedAt);
+  } else {
+    recordTiming(timings, "seed.feedbackBoost.skipped", feedbackStartedAt);
   }
 
   // ------------------------------------------------------------------

@@ -305,6 +305,39 @@ export async function getProcessStepsForRepo(
   }));
 }
 
+
+export async function getProcessStepsByIds(
+  conn: Connection,
+  repoId: string,
+  processIds: string[],
+): Promise<ProcessStepForRepoRow[]> {
+  if (processIds.length === 0) return [];
+
+  const rows = await queryAll<{
+    processId: string;
+    symbolId: string;
+    stepOrder: unknown;
+    role: string | null;
+  }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:PROCESS_IN_REPO]-(p:Process)<-[step:PARTICIPATES_IN]-(s:Symbol)
+     WHERE p.processId IN $processIds
+     RETURN p.processId AS processId,
+            s.symbolId AS symbolId,
+            step.stepOrder AS stepOrder,
+            step.role AS role
+     ORDER BY p.processId ASC, step.stepOrder ASC, s.symbolId ASC`,
+    { repoId, processIds },
+  );
+
+  return rows.map((row) => ({
+    processId: row.processId,
+    symbolId: row.symbolId,
+    stepOrder: toNumber(row.stepOrder),
+    role: row.role,
+  }));
+}
+
 export async function getProcessOverviewStats(
   conn: Connection,
   repoId: string,

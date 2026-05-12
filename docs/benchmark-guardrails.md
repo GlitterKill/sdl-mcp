@@ -148,15 +148,21 @@ The context quality benchmark (`tests/benchmark/context-quality.test.ts`) valida
 
 **Noisy evidence** contains symbols that are structurally reachable but semantically irrelevant. For the same debug task, `AgentContextRequestSchema` (a Zod validation schema), `ToolDescriptor` (tool registration plumbing), and `registerLegacyTools` (gateway wiring) would be noise — they are connected in the dependency graph but do not help understand or fix the truncation behavior.
 
-### Target Deltas
+### Quality and Latency Gates
 
-| Metric                      | Baseline (pre-improvement)                       | Target (post-improvement) |
-| --------------------------- | ------------------------------------------------ | ------------------------- |
-| Answer present              | May fail (truncation strips answers)             | 100% of broad cases       |
-| Answer truncation incidents | Non-zero                                         | 0                         |
-| Useful-symbol recall        | Low (lexical seeding misses symbols)             | +50% vs baseline          |
-| Noise rate                  | High (broad context includes irrelevant symbols) | -50% vs baseline          |
-| Latency (p95)               | Current                                          | No worse than +20%        |
+The suite now runs lexical-only, confidence-gated default, and forced semantic/hybrid variants. A live indexed repository is required for the quality gates; set `SDL_CONTEXT_QUALITY_REQUIRE_INDEX=1` to fail when the suite cannot find one.
+
+| Metric                    | Gate |
+| ------------------------- | ---- |
+| Forced semantic recall    | `>= 85%` aggregate |
+| Forced semantic precise   | `>= 75%` recall |
+| Forced semantic broad     | `>= 85%` recall |
+| Noise rate                | `<= 10%` for each variant |
+| Forced semantic latency   | `p50 <= 1s`, `p95 <= 2.5s` |
+| Scoped precise latency    | `p95 <= 250ms` |
+| Broad answer preservation | Answers remain present after budget trimming |
+
+A May 12, 2026 SDL-MCP reference run measured lexical recall at `76.7%`, confidence-gated default recall at `80.2%`, and forced semantic recall at `87.1%` with `0%` noise. Scoped precise lookup measured `p95 161ms`.
 
 For tool-call latency regressions, collect at least one cold and one warm sample with `includeDiagnostics: true` before changing retrieval or DB code. Compare the returned phase timings against the observability dashboard's per-tool `phases` and `dbLatencyP95Ms` so regressions can be attributed to server overhead, retrieval, LadybugDB native execution/materialization, response shaping, or runtime artifact handling.
 
@@ -164,6 +170,13 @@ For tool-call latency regressions, collect at least one cold and one warm sample
 
 ```bash
 # Requires a built dist/ and indexed sdl-mcp repository
+SDL_CONTEXT_QUALITY_REQUIRE_INDEX=1 node --experimental-strip-types --test tests/benchmark/context-quality.test.ts
+```
+
+PowerShell:
+
+```powershell
+$env:SDL_CONTEXT_QUALITY_REQUIRE_INDEX='1'
 node --experimental-strip-types --test tests/benchmark/context-quality.test.ts
 ```
 

@@ -80,7 +80,7 @@ Best for:
 | Task type   | Precise          | Broad                                |
 | :---------- | :--------------- | :----------------------------------- |
 | `debug`     | card -> hotPath  | card -> skeleton -> hotPath -> raw\* |
-| `review`    | card             | card -> skeleton                     |
+| `review`    | card -> skeleton -> hotPath | card -> skeleton                     |
 | `implement` | card -> skeleton | card -> skeleton -> hotPath          |
 | `explain`   | card -> skeleton | card -> skeleton                     |
 
@@ -95,14 +95,21 @@ The important part is not the exact rung count. It is the routing choice:
 
 ## Seeding and Ranking
 
-Candidate seeding uses a latency-first pipeline:
+Candidate seeding uses a confidence-gated hybrid pipeline:
 
-1. **Path inference** -- file-like task text is mapped directly to indexed files and nearby symbols.
-2. **Lexical search** -- identifier extraction from camelCase, PascalCase, and snake_case tokens in task text, matched against symbol names and summaries.
-3. **Feedback priors** -- symbols previously marked useful or missing in past tasks are boosted or surfaced earlier.
-4. **Semantic opt-in** -- embedding/FTS/vector retrieval can be requested with `options.semantic: true` when task text alone needs broader semantic expansion.
+1. **Exact scope** -- explicit `focusSymbols`, exact symbol mentions, and explicit `focusPaths` seed first so known targets stay fast.
+2. **Path inference** -- file-like task text is mapped to indexed files and nearby symbols, but inferred paths are low-priority anchors rather than a reason to stop discovery.
+3. **Lexical search** -- identifier extraction from camelCase, PascalCase, snake_case, path segments, and domain terms is matched against symbol names and summaries.
+4. **Hybrid entity search** -- unscoped or low-confidence calls use bounded FTS + vector retrieval with reciprocal-rank fusion. Symbol candidates support precise lookup, while file-summary, cluster, and process candidates expand into representative symbols for broad discovery.
+5. **Feedback priors** -- symbols previously marked useful or missing in past tasks are boosted when the task asks about related feedback or the retrieval signal is otherwise thin.
 
-Explicit `focusPaths` remain the fastest and most predictable way to constrain broad mode. Semantic expansion is useful for discovery, but it is no longer part of the default low-latency path.
+`options.semantic` controls the retrieval gate:
+
+- omitted: use confidence-gated default behavior
+- `true`: force bounded hybrid retrieval
+- `false`: keep lexical-only behavior
+
+Explicit `focusPaths` and exact symbols remain the fastest and most predictable way to constrain context. Semantic expansion is now part of the default unscoped discovery path when the lexical signal is weak enough to justify it.
 
 After seeding, an evidence-aware multi-factor scorer ranks every candidate using:
 
@@ -186,6 +193,7 @@ The consistent pattern is:
 
 - precise wins when the target is already known
 - broad wins when the agent is still mapping the problem space
+- forced semantic/hybrid retrieval must keep aggregate recall at or above `85%`, broad recall at or above `85%`, precise recall at or above `75%`, noise at or below `10%`, semantic `p95 <= 2.5s`, and scoped precise `p95 <= 250ms`
 
 ---
 

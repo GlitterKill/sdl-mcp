@@ -4,6 +4,7 @@ import type {
   Action,
   ContextResult,
   PlannedExecution,
+  ContextSeedCandidate,
 } from "./types.js";
 import { Planner } from "./planner.js";
 import { Executor } from "./executor.js";
@@ -436,16 +437,15 @@ export class ContextEngine {
       const hasExplicitScope = !!(
         task.options?.focusPaths?.length || task.options?.focusSymbols?.length
       );
-      let inferredFocusPathsApplied = false;
       if (!hasExplicitScope && task.taskText) {
         const inferred = inferFocusPathsFromTaskText(task.taskText);
         if (inferred.length > 0) {
-          inferredFocusPathsApplied = true;
           task = {
             ...task,
             options: {
               ...task.options,
               focusPaths: inferred,
+              inferredFocusPaths: inferred,
             },
           };
           logger.debug("Inferred focus paths from task text", {
@@ -495,13 +495,14 @@ export class ContextEngine {
       // response before broader lexical/semantic seeding. This preserves the
       // intended symbol for prompts like "explain handleSymbolSearch" even
       // when hybrid retrieval finds many related SymbolSearch types first.
-      if (!hasExplicitScope && task.taskText && !inferredFocusPathsApplied) {
+      if (!hasExplicitScope && task.taskText) {
         const exactStartedAt = performance.now();
         try {
           const exactRefs = await this.seedExactMentionedSymbols(task);
           exactMentionSeededPreciseContext =
             exactRefs.length > 0 && task.options?.contextMode === "precise";
-          context = exactMentionSeededPreciseContext
+          context = exactMentionSeededPreciseContext &&
+            task.options?.semantic !== true
             ? exactRefs
             : prependContextRefs(context, exactRefs);
         } catch (err) {
@@ -518,17 +519,16 @@ export class ContextEngine {
       }
 
       /* sdl.context: always-on hybrid seed merge */
-      // Run hybrid seeding whenever no explicit scope was provided, even
-      // if path inference already filled `context`. Inferred paths are a
-      // heuristic; hybrid retrieval surfaces semantically-related symbols
-      // the heuristic misses. Path-inferred refs are preserved first; hybrid
-      // adds only refs not already present.
+      /* sdl.context: confidence-gated seed merge */
+      // Run seeding whenever no explicit scope was provided. Inferred paths are
+      // low-priority anchors; retrieval candidates carry the evidence used by
+      // final executor ranking. semantic:false keeps this lexical-only.
+      let seedCandidates: ContextSeedCandidate[] = [];
       let seedEvidence: import("../retrieval/types.js").RetrievalEvidence | undefined;
       if (
         !hasExplicitScope &&
         task.taskText &&
-        !exactMentionSeededPreciseContext &&
-        (!inferredFocusPathsApplied || task.options?.semantic === true)
+        (!exactMentionSeededPreciseContext || task.options?.semantic === true)
       ) {
         const seedStartedAt = performance.now();
         try {
@@ -537,6 +537,7 @@ export class ContextEngine {
             diagnosticTimings,
             seedResult.diagnosticTimings,
           );
+          seedCandidates = seedResult.candidates;
           seedEvidence = seedResult.evidence;
           const seedRefs = seedResultToContext(seedResult);
           if (context.length > 0) {
@@ -603,6 +604,7 @@ export class ContextEngine {
         task,
         path.rungs,
         finalContext,
+        seedCandidates,
       );
       recordDiagnosticTiming(
         diagnosticTimings,
@@ -1219,7 +1221,11 @@ export class ContextEngine {
     const extracted = extractIdentifiersFromText(
       task.taskText,
       task.taskText,
-    ).filter(isLikelyExactSymbolMention);
+    ).filter(
+      (identifier) =>
+        isLikelyExactSymbolMention(identifier) &&
+        task.taskText.includes(identifier),
+    );
     const candidates = [
       ...new Set([
         ...(task.options?.chatMentions ?? []).filter((mention) =>

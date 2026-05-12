@@ -26,13 +26,13 @@ describe("inferFocusPathsFromTaskText", () => {
     );
   });
 
-  it("infers src/code/ for skeleton IR queries", () => {
+  it("infers focused skeleton files for skeleton IR queries", () => {
     const paths = inferFocusPathsFromTaskText(
       "The skeleton IR output is sometimes missing function parameters",
     );
     assert.ok(
-      paths.includes("src/code/"),
-      `Expected src/code/ in ${JSON.stringify(paths)}`,
+      paths.includes("src/code/skeleton.ts"),
+      `Expected src/code/skeleton.ts in ${JSON.stringify(paths)}`,
     );
   });
 

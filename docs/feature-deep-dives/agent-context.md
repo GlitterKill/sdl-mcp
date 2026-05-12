@@ -45,10 +45,12 @@ flowchart TD
 The context engine:
 
 1. Classifies the task as `debug`, `review`, `implement`, or `explain`.
-2. Seeds candidates via path inference, bounded lexical matching, and feedback priors by default. Expensive multi-entity hybrid retrieval (FTS + vector with RRF) remains available when a call sets `options.semantic: true`.
-3. Ranks symbols and paths with an evidence-aware scorer.
-4. Plans only the rungs needed for the task and budget.
-5. Returns compact evidence plus an answer envelope when broad mode is used.
+2. Seeds exact symbol mentions and explicit focus paths first so known targets stay fast.
+3. For unscoped natural-language tasks, runs confidence-gated retrieval: lexical and path inference stay cheap, while low-confidence or broad discovery paths use bounded hybrid entity search (FTS + vector with RRF).
+4. Treats `options.semantic` as an override: `true` forces hybrid retrieval, `false` keeps lexical-only behavior, and omission lets the confidence gate decide.
+5. Carries seed evidence into executor ranking, including file-summary, cluster, and process candidates that expand into representative symbols.
+6. Plans only the rungs needed for the task and budget.
+7. Returns compact evidence plus an answer envelope when broad mode is used.
 
 ---
 
@@ -60,6 +62,8 @@ Use `sdl.context` first when the job is about understanding code:
 - debug a behavior
 - review a change
 - gather implementation context before editing
+
+When callers already know the target, provide `focusSymbols` or `focusPaths`. Scoped precise lookups stay on the low-latency path and are guarded by a benchmark target of `p95 <= 250ms`.
 
 Use `sdl.workflow` instead when the job is procedural:
 

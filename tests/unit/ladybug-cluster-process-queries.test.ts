@@ -225,6 +225,39 @@ describe("kuzu cluster/process queries", () => {
       [symbolB, symbolC],
     );
 
+    const processId2 = `${REPO_ID}-process-2`;
+    await ladybugDb.upsertProcess(conn, {
+      processId: processId2,
+      repoId: REPO_ID,
+      entrySymbolId: symbolC,
+      label: "process 2",
+      depth: 1,
+      versionId: null,
+      createdAt: now,
+    });
+    await ladybugDb.upsertProcessStep(conn, {
+      processId: processId2,
+      symbolId: symbolC,
+      stepOrder: 0,
+      role: "entry",
+    });
+
+    const filteredSteps = await ladybugDb.getProcessStepsByIds(conn, REPO_ID, [
+      processId,
+    ]);
+    assert.deepStrictEqual(
+      filteredSteps.map((s) => s.processId),
+      [processId, processId, processId],
+    );
+    assert.deepStrictEqual(
+      filteredSteps.map((s) => s.symbolId),
+      [symbolA, symbolB, symbolC],
+    );
+    assert.deepStrictEqual(
+      await ladybugDb.getProcessStepsByIds(conn, REPO_ID, []),
+      [],
+    );
+
     await ladybugDb.deleteProcessesByRepo(conn, REPO_ID);
     assert.strictEqual((await ladybugDb.getProcessesForSymbol(conn, symbolB)).length, 0);
   });

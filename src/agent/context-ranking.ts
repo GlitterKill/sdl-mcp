@@ -329,7 +329,7 @@ function scoreLanguageAffinity(
 }
 
 /**
- * Structural/centrality bonus (0-8): exported, behavioral kind, focus path
+ * Structural/centrality bonus (0-14): exported, behavioral kind, focus path
  * match, and task-type affinity.
  */
 function scoreStructuralBonus(
@@ -341,11 +341,26 @@ function scoreStructuralBonus(
   if (sym.exported) score += 2;
   if (BEHAVIORAL_KINDS.has(sym.kind)) score += 1;
 
-  // Check if symbol name appears in any focus path
+  // Focus paths should prefer symbols that live under the focused file or
+  // directory, not only symbols whose names happen to appear in the path.
   if (focusPaths.length > 0) {
     const nameLower = sym.name.toLowerCase();
+    const fileId = sym.fileId?.toLowerCase();
+    const relPath = fileId?.includes(":")
+      ? fileId.slice(fileId.indexOf(":") + 1)
+      : fileId;
     for (const fp of focusPaths) {
-      if (fp.toLowerCase().includes(nameLower) && nameLower.length >= 3) {
+      const focus = fp.replace(/\\/g, "/").toLowerCase();
+      const normalizedRelPath = relPath?.replace(/\\/g, "/");
+      if (
+        normalizedRelPath &&
+        (normalizedRelPath === focus ||
+          normalizedRelPath.startsWith(focus.endsWith("/") ? focus : `${focus}/`))
+      ) {
+        score += 6;
+        break;
+      }
+      if (focus.includes(nameLower) && nameLower.length >= 3) {
         score += 2;
         break;
       }
@@ -378,7 +393,7 @@ function scoreStructuralBonus(
     else if (sym.signatureJson && BEHAVIORAL_KINDS.has(sym.kind)) score += 1;
   }
 
-  return Math.min(8, score);
+  return Math.min(14, score);
 }
 
 // ---------------------------------------------------------------------------

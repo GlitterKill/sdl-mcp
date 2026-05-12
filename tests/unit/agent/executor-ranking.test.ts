@@ -9,6 +9,7 @@ import type {
   ContextSeedCandidate,
 } from "../../../dist/agent/types.js";
 import type { RankableSymbol } from "../../../dist/agent/context-ranking.js";
+import { Executor, type ExecutorDbQueries } from "../../../dist/agent/executor.js";
 
 function createTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -219,6 +220,43 @@ describe("context-ranking", () => {
       assert.equal(priv.structuralBonus, 0);
     });
 
+    it("symbols under focus paths get file affinity bonus", () => {
+      const symbolMap = new Map<string, RankableSymbol>([
+        [
+          "sym-focused",
+          createSymbol({
+            name: "parseSkeleton",
+            kind: "function",
+            fileId: "repo-1:src/code/skeleton.ts",
+            exported: false,
+          }),
+        ],
+        [
+          "sym-other",
+          createSymbol({
+            name: "parseSkeleton",
+            kind: "function",
+            fileId: "repo-1:scripts/skeleton-report.ts",
+            exported: false,
+          }),
+        ],
+      ]);
+
+      const result = rankSymbols(
+        ["sym-focused", "sym-other"],
+        symbolMap,
+        ["parseSkeleton"],
+        createTask({ options: { focusPaths: ["src/code/"] } }),
+      );
+
+      const focused = result.ranked.find(
+        (s) => s.symbolId === "sym-focused",
+      )!;
+      const other = result.ranked.find((s) => s.symbolId === "sym-other")!;
+
+      assert.ok(focused.structuralBonus > other.structuralBonus);
+    });
+
     it("confidence tier reflects score gap", () => {
       const symbolMap = new Map<string, RankableSymbol>([
         ["sym-top", createSymbol({ name: "buildContext", kind: "method" })],
@@ -366,5 +404,157 @@ describe("context-ranking", () => {
       const selected = applyAdaptiveCutoff(ranking, 10, false, false);
       assert.equal(selected.length, 0);
     });
+  });
+});
+
+
+describe("Executor seed expansion", () => {
+  interface ExecutorPrivate {
+    connPromise: Promise<unknown> | null;
+    resolveContextToSymbols(
+      context: string[],
+      task: AgentTask,
+      seedCandidates: ContextSeedCandidate[],
+    ): Promise<{ symbolIds: string[]; seedCandidates: ContextSeedCandidate[] }>;
+  }
+
+  it("expands fileSummary, cluster, and process candidates into weighted symbol seeds", async () => {
+    const dbQueries: ExecutorDbQueries = {
+      getFileByRepoPath: async () =>
+        null as Awaited<ReturnType<ExecutorDbQueries["getFileByRepoPath"]>>,
+      getSymbolIdsByFile: async () => ["sym-file-a", "sym-file-b"],
+      getFilesByPrefix: async () => [],
+      getSymbolsByFile: async () =>
+        [
+          {
+            symbolId: "sym-file-a",
+            repoId: "repo-1",
+            fileId: "file-1",
+            kind: "function",
+            name: "fileSymbolA",
+            exported: true,
+            visibility: null,
+            language: "ts",
+            rangeStartLine: 1,
+            rangeStartCol: 0,
+            rangeEndLine: 2,
+            rangeEndCol: 0,
+            astFingerprint: "a",
+            signatureJson: null,
+            summary: null,
+            invariantsJson: null,
+            sideEffectsJson: null,
+            roleTagsJson: null,
+            searchText: null,
+            external: undefined,
+            packageName: null,
+            packageVersion: null,
+            scipSymbol: null,
+            updatedAt: "now",
+          },
+          {
+            symbolId: "sym-file-b",
+            repoId: "repo-1",
+            fileId: "file-1",
+            kind: "function",
+            name: "fileSymbolB",
+            exported: true,
+            visibility: null,
+            language: "ts",
+            rangeStartLine: 3,
+            rangeStartCol: 0,
+            rangeEndLine: 4,
+            rangeEndCol: 0,
+            astFingerprint: "b",
+            signatureJson: null,
+            summary: null,
+            invariantsJson: null,
+            sideEffectsJson: null,
+            roleTagsJson: null,
+            searchText: null,
+            external: undefined,
+            packageName: null,
+            packageVersion: null,
+            scipSymbol: null,
+            updatedAt: "now",
+          },
+        ] as Awaited<ReturnType<ExecutorDbQueries["getSymbolsByFile"]>>,
+      getClusterMembers: async () =>
+        [
+          { symbolId: "sym-cluster", membershipScore: 0.95 },
+        ] as Awaited<ReturnType<ExecutorDbQueries["getClusterMembers"]>>,
+      getProcessStepsByIds: async () =>
+        [
+          { processId: "proc-1", symbolId: "sym-process", stepOrder: 1, role: "step" },
+          { processId: "other", symbolId: "sym-other", stepOrder: 1, role: "step" },
+        ] as Awaited<ReturnType<ExecutorDbQueries["getProcessStepsByIds"]>>,
+      getSymbolsByIds: async () =>
+        new Map() as Awaited<ReturnType<ExecutorDbQueries["getSymbolsByIds"]>>,
+      searchSymbols: async () =>
+        [] as Awaited<ReturnType<ExecutorDbQueries["searchSymbols"]>>,
+    };
+
+    const executor = new Executor(undefined, dbQueries);
+    const privateExecutor = executor as unknown as ExecutorPrivate;
+    privateExecutor.connPromise = Promise.resolve({});
+
+    const seeds: ContextSeedCandidate[] = [
+      {
+        contextRef: "fileSummary:file-1",
+        source: "semantic",
+        score: 1,
+        sourceRank: 0,
+        entityType: "fileSummary",
+      },
+      {
+        contextRef: "cluster:cluster-1",
+        source: "semantic",
+        score: 0.9,
+        sourceRank: 1,
+        entityType: "cluster",
+      },
+      {
+        contextRef: "process:proc-1",
+        source: "semantic",
+        score: 0.8,
+        sourceRank: 2,
+        entityType: "process",
+      },
+    ];
+
+    const result = await privateExecutor.resolveContextToSymbols(
+      ["fileSummary:file-1", "cluster:cluster-1", "process:proc-1"],
+      createTask(),
+      seeds,
+    );
+
+    assert.deepEqual(result.symbolIds, [
+      "sym-file-a",
+      "sym-file-b",
+      "sym-cluster",
+      "sym-process",
+    ]);
+    assert.ok(
+      result.seedCandidates.some(
+        (candidate) =>
+          candidate.contextRef === "symbol:sym-file-a" &&
+          candidate.expandedFrom === "fileSummary:file-1" &&
+          candidate.score === 0.92,
+      ),
+    );
+    assert.ok(
+      result.seedCandidates.some(
+        (candidate) =>
+          candidate.contextRef === "symbol:sym-cluster" &&
+          candidate.expandedFrom === "cluster:cluster-1",
+      ),
+    );
+    assert.ok(
+      result.seedCandidates.some(
+        (candidate) =>
+          candidate.contextRef === "symbol:sym-process" &&
+          candidate.expandedFrom === "process:proc-1",
+      ),
+    );
   });
 });

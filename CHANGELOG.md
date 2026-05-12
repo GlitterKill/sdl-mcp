@@ -11,14 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added a dependency-free `/ui/config` visual configuration admin console with loopback-only write APIs, schema/semantic validation, redacted raw/effective snapshots, atomic save/backup/rollback, high-risk diff confirmation, and reusable JSON Pointer profiles.
 - Added opt-in phase timing diagnostics for `sdl.context`, `sdl.workflow`, `sdl.runtime.execute`, and `sdl.file`, plus observability aggregation for per-tool phase p95/max latency and LadybugDB query latency sampling.
+- Added `sdl.context` quality benchmark gates for lexical, confidence-gated default, and forced semantic retrieval recall, noise, and latency targets.
 
 ### Changed
 
-- `sdl.context` now keeps expensive multi-entity hybrid seeding opt-in via `options.semantic: true`; the default path uses path inference, bounded lexical search, and feedback priors for lower interactive latency.
+- `sdl.context` now uses confidence-gated hybrid retrieval for unscoped natural-language requests; `options.semantic: true` forces hybrid, `options.semantic: false` preserves lexical-only behavior, and exact symbol or explicit scope lookups stay on the fast path.
 - Stdio server startup now defers file watcher initialization until after tool serving begins, avoiding watcher/DB contention on the first tool call.
 - LadybugDB stored-procedure row reads now materialize and close result handles under the per-connection mutex via a shared helper, improving latency accounting and avoiding leaked live query results.
 
 ### Fixed
+
+- Bounded LadybugDB FTS retrieval by passing `TOP` separately from BM25 `K` in `QUERY_FTS_INDEX` calls.
 
 ## [0.11.2] - 2026-05-11
 

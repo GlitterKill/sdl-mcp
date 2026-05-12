@@ -368,6 +368,8 @@ The sandboxed runtime execution tool (`sdl.runtime.execute`) has its own governa
 
 `sdl.context` is SDL-MCP's task-shaped context engine. Give it a task type (`debug`, `review`, `implement`, `explain`), a description, and a budget — it selects the right Iris Gate rungs, collects evidence, and returns context tuned to the job. In Code Mode, `sdl.context` provides the same retrieval surface without dropping into `sdl.workflow`.
 
+Unscoped natural-language context calls use confidence-gated hybrid retrieval by default. Exact symbol mentions and explicit `focusPaths` / `focusSymbols` stay on the fast path; low-confidence lexical results can escalate to bounded FTS + vector retrieval. Set `options.semantic: true` to force hybrid retrieval, or `options.semantic: false` to keep lexical-only behavior for deterministic debugging.
+
 The feedback loop (`sdl.agent.feedback`) records which symbols were useful and which were missing, improving future slice quality.
 
 For portable exports such as tickets and PR descriptions, use the CLI `sdl-mcp summary` command. It generates token-bounded context briefings in markdown, JSON, or clipboard format for use outside MCP environments.
@@ -375,6 +377,7 @@ For portable exports such as tickets and PR descriptions, use the CLI `sdl-mcp s
 **Why it matters:**
 
 - Task-shaped context retrieval plans the **right Iris Gate path** within a token budget
+- Confidence-gated hybrid retrieval improves discovery without slowing known-target lookups
 - Feedback loop records what was useful/missing, improving future slice quality
 - Portable context summaries export findings for use outside MCP environments
 

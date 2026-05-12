@@ -24,6 +24,8 @@ export interface BudgetOptions {
 export interface TaskOptions {
   focusSymbols?: string[];
   focusPaths?: string[];
+  /** Internal: focus paths inferred from task text rather than supplied by the caller. */
+  inferredFocusPaths?: string[];
   includeTests?: boolean;
   requireDiagnostics?: boolean;
   /** Controls context breadth. "precise" returns minimal, workflow-efficient context.
@@ -32,8 +34,9 @@ export interface TaskOptions {
   /** Explicit search terms for symbol resolution fallback.
    *  When provided, these are used instead of extracting identifiers from taskText. */
   searchTerms?: string[];
-  /** Use hybrid (FTS + vector) retrieval for context seeding. Default: true.
-   *  Set to false to force plain lexical search (debugging/deterministic tests). */
+  /** Controls hybrid (FTS + vector) retrieval for context seeding.
+   *  undefined = confidence-gated default, true = force hybrid,
+   *  false = lexical-only (debugging/deterministic tests). */
   semantic?: boolean;
   /** Include retrieval evidence (which lanes contributed, per-source counts) in
    *  the response and downstream logging. Default: true. */
@@ -169,6 +172,10 @@ export interface ContextSeedCandidate {
   source: SeedSourceKind;
   score: number; // normalized 0-1
   sourceRank: number; // rank within source (0 = best)
+  rawScore?: number;
+  entityType?: "symbol" | "cluster" | "process" | "fileSummary";
+  expandedFrom?: string;
+  expansionReason?: string;
 }
 
 /** Result of the seeding pipeline. */
@@ -197,7 +204,7 @@ export interface ScoredSymbol {
   lexicalOverlap: number; // 0-15
   summarySupport: number; // 0-10
   feedbackPrior: number; // 0-10
-  structuralBonus: number; // 0-8
+  structuralBonus: number; // 0-14
   languageAffinity: number; // 0-4
 }
 

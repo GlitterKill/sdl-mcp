@@ -1,20 +1,30 @@
-import { describe, it, before } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 
 /**
  * Context quality benchmark suite.
- *
- * Validates that the ContextEngine produces useful, noise-free evidence
- * and preserves answer content under broad-mode truncation.
  *
  * Run:
  *   node --experimental-strip-types --test tests/benchmark/context-quality.test.ts
  *
  * Requires a built dist/ and an indexed "sdl-mcp" repository in the graph DB.
- * When the repo is unavailable, only structural validation runs.
+ * Set SDL_CONTEXT_QUALITY_REQUIRE_INDEX=1 to fail instead of skipping when the
+ * live benchmark index is unavailable.
  */
+
+const REPO_ID = "sdl-mcp";
+const REQUIRE_LIVE_INDEX = process.env.SDL_CONTEXT_QUALITY_REQUIRE_INDEX === "1";
+
+const SEMANTIC_AGGREGATE_RECALL_MIN = 85;
+const SEMANTIC_PRECISE_RECALL_MIN = 75;
+const SEMANTIC_BROAD_RECALL_MIN = 85;
+const NOISE_RATE_MAX = 10;
+const UNSCOPED_P50_MAX_MS = 1_000;
+const UNSCOPED_P95_MAX_MS = 2_500;
+const SCOPED_PRECISE_P95_MAX_MS = 250;
 
 interface BenchmarkCase {
   id: string;
@@ -36,94 +46,277 @@ interface Evidence {
 }
 
 interface ContextResult {
-  taskId: string;
-  taskType: string;
-  actionsTaken: unknown[];
-  path: { rungs: string[]; estimatedTokens: number };
-  finalEvidence: Evidence[];
-  summary: string;
+  finalEvidence?: Evidence[];
   success: boolean;
-  error?: string;
-  metrics: {
-    totalDurationMs: number;
-    totalTokens: number;
-    totalActions: number;
-    successfulActions: number;
-    failedActions: number;
-    cacheHits: number;
-  };
   answer?: string;
-  nextBestAction?: string;
-  truncation?: {
-    originalTokens: number;
-    truncatedTokens: number;
-    fieldsAffected: string[];
-  };
 }
 
-// Aggregate metrics collected during test execution
-const metrics = {
-  totalCases: 0,
-  executedCases: 0,
-  skippedCases: 0,
-  // Answer preservation
-  requireAnswerCases: 0,
-  answerPresentCount: 0,
-  answerTruncatedCount: 0,
-  answerRemovedCount: 0,
-  // Useful-symbol recall
-  totalExpectedSymbols: 0,
-  usefulSymbolHits: 0,
-  // Noise rate
-  totalEvidenceItems: 0,
-  noiseSymbolHits: 0,
-  // Per-case details
-  caseResults: [] as Array<{
+interface ContextEngineLike {
+  buildContext: (task: unknown) => Promise<ContextResult>;
+}
+
+interface Variant {
+  name: "lexical" | "default" | "semantic";
+  semantic?: boolean;
+}
+
+interface VariantMetrics {
+  name: string;
+  cases: number;
+  failures: number;
+  expectedTotal: number;
+  usefulHits: number;
+  preciseExpectedTotal: number;
+  preciseUsefulHits: number;
+  broadExpectedTotal: number;
+  broadUsefulHits: number;
+  totalEvidenceItems: number;
+  noiseHits: number;
+  durationsMs: number[];
+  caseResults: Array<{
     id: string;
-    executed: boolean;
     success: boolean;
-    answerPresent: boolean | null;
-    answerTruncated: boolean;
     usefulHits: number;
     usefulTotal: number;
     noiseHits: number;
     evidenceCount: number;
     durationMs: number;
-  }>,
+  }>;
+}
+
+const variants: Variant[] = [
+  { name: "lexical", semantic: false },
+  { name: "default" },
+  { name: "semantic", semantic: true },
+];
+
+const metrics = {
+  totalCases: 0,
+  repoAvailable: false,
+  availabilityReason: "not checked",
+  variants: new Map<string, VariantMetrics>(),
+  scopedPrecise: createMetrics("scoped-precise"),
 };
 
-describe("context quality benchmarks", () => {
-  let cases: BenchmarkCase[] = [];
-  let repoAvailable = false;
-  let contextEngine: {
-    buildContext: (task: unknown) => Promise<ContextResult>;
-  };
+let cases: BenchmarkCase[] = [];
+let contextEngine: ContextEngineLike | undefined;
+let closeLadybugDb: (() => Promise<void>) | undefined;
 
+function createMetrics(name: string): VariantMetrics {
+  return {
+    name,
+    cases: 0,
+    failures: 0,
+    expectedTotal: 0,
+    usefulHits: 0,
+    preciseExpectedTotal: 0,
+    preciseUsefulHits: 0,
+    broadExpectedTotal: 0,
+    broadUsefulHits: 0,
+    totalEvidenceItems: 0,
+    noiseHits: 0,
+    durationsMs: [],
+    caseResults: [],
+  };
+}
+
+function percentage(numerator: number, denominator: number): number {
+  return denominator > 0 ? (numerator / denominator) * 100 : 0;
+}
+
+function percentile(values: number[], percentileValue: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(
+    sorted.length - 1,
+    Math.ceil((percentileValue / 100) * sorted.length) - 1,
+  );
+  return sorted[index] ?? 0;
+}
+
+function evidenceText(result: ContextResult): string {
+  return (result.finalEvidence ?? [])
+    .map((e) => `${e.summary ?? ""} ${e.reference ?? ""}`)
+    .join(" ");
+}
+
+function buildTask(c: BenchmarkCase, variant: Variant, scoped: boolean): unknown {
+  const options: Record<string, unknown> = {
+    contextMode: c.contextMode,
+    includeTests: c.includeTests,
+    includeRetrievalEvidence: true,
+  };
+  if (variant.semantic !== undefined) {
+    options.semantic = variant.semantic;
+  }
+  if (scoped) {
+    options.focusPaths = c.focusPaths;
+  }
+  return {
+    taskType: c.taskType,
+    taskText: c.taskText,
+    repoId: REPO_ID,
+    options,
+  };
+}
+
+async function runCase(
+  c: BenchmarkCase,
+  variant: Variant,
+  scoped: boolean,
+  target: VariantMetrics,
+): Promise<void> {
+  assert.ok(contextEngine, "ContextEngine must be initialized before benchmarking");
+  const startedAt = performance.now();
+  let result: ContextResult;
+  try {
+    result = await contextEngine.buildContext(buildTask(c, variant, scoped));
+  } catch {
+    target.failures++;
+    return;
+  }
+
+  const durationMs = performance.now() - startedAt;
+  const text = evidenceText(result);
+  let usefulHits = 0;
+  let noiseHits = 0;
+
+  for (const sym of c.expectedUsefulSymbols) {
+    if (text.includes(sym)) usefulHits++;
+  }
+  for (const sym of c.unexpectedSymbols) {
+    if (text.includes(sym)) noiseHits++;
+  }
+
+  const evidenceCount = result.finalEvidence?.length ?? 0;
+  target.cases++;
+  if (!result.success) target.failures++;
+  target.expectedTotal += c.expectedUsefulSymbols.length;
+  target.usefulHits += usefulHits;
+  if (c.contextMode === "precise") {
+    target.preciseExpectedTotal += c.expectedUsefulSymbols.length;
+    target.preciseUsefulHits += usefulHits;
+  } else {
+    target.broadExpectedTotal += c.expectedUsefulSymbols.length;
+    target.broadUsefulHits += usefulHits;
+  }
+  target.totalEvidenceItems += evidenceCount;
+  target.noiseHits += noiseHits;
+  target.durationsMs.push(durationMs);
+  target.caseResults.push({
+    id: c.id,
+    success: result.success,
+    usefulHits,
+    usefulTotal: c.expectedUsefulSymbols.length,
+    noiseHits,
+    evidenceCount,
+    durationMs,
+  });
+}
+
+function recall(m: VariantMetrics): number {
+  return percentage(m.usefulHits, m.expectedTotal);
+}
+
+function preciseRecall(m: VariantMetrics): number {
+  return percentage(m.preciseUsefulHits, m.preciseExpectedTotal);
+}
+
+function broadRecall(m: VariantMetrics): number {
+  return percentage(m.broadUsefulHits, m.broadExpectedTotal);
+}
+
+function noiseRate(m: VariantMetrics): number {
+  return percentage(m.noiseHits, m.totalEvidenceItems);
+}
+
+function skipOrFail(reason: string): boolean {
+  if (REQUIRE_LIVE_INDEX) {
+    assert.fail(reason);
+  }
+  console.warn(`[context-quality] skipped live gate: ${reason}`);
+  return true;
+}
+
+function buildReport(): string {
+  const lines = [
+    "",
+    "=== Context Quality Benchmark Report ===",
+    "",
+    `Total cases:       ${metrics.totalCases}`,
+    `Repo available:    ${metrics.repoAvailable}`,
+    `Availability note: ${metrics.availabilityReason}`,
+    "",
+  ];
+
+  for (const m of metrics.variants.values()) {
+    lines.push(
+      `--- Variant: ${m.name} ---`,
+      `Cases:       ${m.cases}`,
+      `Failures:    ${m.failures}`,
+      `Recall:      ${m.usefulHits}/${m.expectedTotal} (${recall(m).toFixed(1)}%)`,
+      `Precise:     ${m.preciseUsefulHits}/${m.preciseExpectedTotal} (${preciseRecall(m).toFixed(1)}%)`,
+      `Broad:       ${m.broadUsefulHits}/${m.broadExpectedTotal} (${broadRecall(m).toFixed(1)}%)`,
+      `Noise:       ${m.noiseHits}/${m.totalEvidenceItems} (${noiseRate(m).toFixed(1)}%)`,
+      `Latency:     p50=${percentile(m.durationsMs, 50).toFixed(0)}ms p95=${percentile(m.durationsMs, 95).toFixed(0)}ms max=${Math.max(0, ...m.durationsMs).toFixed(0)}ms`,
+      "",
+    );
+  }
+
+  const scoped = metrics.scopedPrecise;
+  lines.push(
+    "--- Scoped Precise Latency ---",
+    `Cases:       ${scoped.cases}`,
+    `Failures:    ${scoped.failures}`,
+    `Latency:     p50=${percentile(scoped.durationsMs, 50).toFixed(0)}ms p95=${percentile(scoped.durationsMs, 95).toFixed(0)}ms max=${Math.max(0, ...scoped.durationsMs).toFixed(0)}ms`,
+    "",
+    "=== End Report ===",
+    "",
+  );
+  return lines.join("\n");
+}
+
+describe("context quality benchmarks", () => {
   before(async () => {
-    // Load benchmark cases
     const casesPath = join(import.meta.dirname, "context-quality-cases.json");
-    const raw = readFileSync(casesPath, "utf-8");
-    cases = JSON.parse(raw) as BenchmarkCase[];
+    cases = JSON.parse(readFileSync(casesPath, "utf-8")) as BenchmarkCase[];
     metrics.totalCases = cases.length;
 
-    // Attempt to load ContextEngine from dist
     try {
-      const mod = await import("../../dist/agent/context-engine.js");
-      contextEngine = mod.contextEngine;
+      const [{ activateCliConfigPath }, { loadConfig }, { initGraphDb }, ladybug, core, engine] =
+        await Promise.all([
+          import("../../dist/config/configPath.js"),
+          import("../../dist/config/loadConfig.js"),
+          import("../../dist/db/initGraphDb.js"),
+          import("../../dist/db/ladybug.js"),
+          import("../../dist/db/ladybug-core.js"),
+          import("../../dist/agent/context-engine.js"),
+        ]);
+      const configPath = activateCliConfigPath(process.env.SDL_CONFIG);
+      const config = loadConfig(configPath);
+      const graphDbPath = await initGraphDb(config, configPath);
+      closeLadybugDb = ladybug.closeLadybugDb;
+      contextEngine = engine.contextEngine;
 
-      // Probe whether the repo is indexed by attempting a minimal buildContext call
-      const probe = await contextEngine.buildContext({
-        taskType: "explain",
-        taskText: "probe",
-        repoId: "sdl-mcp",
-        options: { contextMode: "precise" },
-      });
-      // If we get a result (even an error result), the engine is functional
-      repoAvailable = probe != null && typeof probe === "object";
-    } catch {
-      // ContextEngine not available (no build, no DB, etc.)
-      repoAvailable = false;
+      const conn = await ladybug.getLadybugConn();
+      const rows = await core.queryAll(
+        conn,
+        "MATCH (r:Repo {repoId: $repoId}) RETURN count(r) AS n",
+        { repoId: REPO_ID },
+      );
+      const repoCount = Number(rows[0]?.n ?? 0);
+      metrics.repoAvailable = repoCount > 0;
+      metrics.availabilityReason = metrics.repoAvailable
+        ? `using ${graphDbPath}`
+        : `repo ${REPO_ID} is not indexed in ${graphDbPath}`;
+    } catch (err) {
+      metrics.repoAvailable = false;
+      metrics.availabilityReason = err instanceof Error ? err.message : String(err);
     }
+  });
+
+  after(async () => {
+    await closeLadybugDb?.();
   });
 
   describe("case structure validation", () => {
@@ -143,377 +336,102 @@ describe("context quality benchmarks", () => {
     });
 
     it("has correct context mode distribution", () => {
-      const debugPrecise = cases.filter(
-        (c) => c.taskType === "debug" && c.contextMode === "precise",
-      ).length;
-      const debugBroad = cases.filter(
-        (c) => c.taskType === "debug" && c.contextMode === "broad",
-      ).length;
-      assert.equal(debugPrecise, 4, "Expected 4 precise debug cases");
-      assert.equal(debugBroad, 4, "Expected 4 broad debug cases");
-
-      const explainPrecise = cases.filter(
-        (c) => c.taskType === "explain" && c.contextMode === "precise",
-      ).length;
-      const explainBroad = cases.filter(
-        (c) => c.taskType === "explain" && c.contextMode === "broad",
-      ).length;
-      assert.equal(explainPrecise, 3, "Expected 3 precise explain cases");
-      assert.equal(explainBroad, 3, "Expected 3 broad explain cases");
-    });
-
-    it("all broad cases require an answer", () => {
-      const broadCases = cases.filter((c) => c.contextMode === "broad");
-      for (const c of broadCases) {
-        assert.equal(
-          c.requireAnswer,
-          true,
-          `Broad case ${c.id} should have requireAnswer: true`,
-        );
-      }
-    });
-
-    it("all precise cases do not require an answer", () => {
-      const preciseCases = cases.filter((c) => c.contextMode === "precise");
-      for (const c of preciseCases) {
-        assert.equal(
-          c.requireAnswer,
-          false,
-          `Precise case ${c.id} should have requireAnswer: false`,
-        );
-      }
+      assert.equal(
+        cases.filter((c) => c.contextMode === "precise").length,
+        12,
+        "Expected 12 precise cases",
+      );
+      assert.equal(
+        cases.filter((c) => c.contextMode === "broad").length,
+        12,
+        "Expected 12 broad cases",
+      );
     });
 
     it("all cases have valid structure", () => {
       for (const c of cases) {
-        assert.ok(c.id, `Case missing id`);
+        assert.ok(c.id, "Case missing id");
         assert.ok(c.taskText, `Case ${c.id} missing taskText`);
+        assert.ok(c.focusPaths.length > 0, `Case ${c.id} needs focusPaths`);
         assert.ok(
-          ["debug", "explain", "review", "implement"].includes(c.taskType),
-          `Case ${c.id} has invalid taskType: ${c.taskType}`,
+          c.expectedUsefulSymbols.length > 0,
+          `Case ${c.id} needs expectedUsefulSymbols`,
         );
         assert.ok(
-          ["precise", "broad"].includes(c.contextMode),
-          `Case ${c.id} has invalid contextMode: ${c.contextMode}`,
-        );
-        assert.ok(
-          Array.isArray(c.focusPaths) && c.focusPaths.length > 0,
-          `Case ${c.id} needs at least one focusPath`,
-        );
-        assert.ok(
-          Array.isArray(c.expectedUsefulSymbols) &&
-            c.expectedUsefulSymbols.length > 0,
-          `Case ${c.id} needs at least one expectedUsefulSymbol`,
-        );
-        assert.ok(
-          Array.isArray(c.unexpectedSymbols) && c.unexpectedSymbols.length > 0,
-          `Case ${c.id} needs at least one unexpectedSymbol`,
+          c.unexpectedSymbols.length > 0,
+          `Case ${c.id} needs unexpectedSymbols`,
         );
       }
-    });
-
-    it("has unique case IDs", () => {
-      const ids = new Set(cases.map((c) => c.id));
-      assert.equal(ids.size, cases.length, "Duplicate case IDs found");
-    });
-
-    it("at least 8 cases target context internals", () => {
-      const contextInternalPaths = [
-        "src/agent/",
-        "src/mcp/tools/context.ts",
-        "src/mcp/context-response-projection.ts",
-        "src/retrieval/",
-      ];
-      const internalCases = cases.filter((c) =>
-        c.focusPaths.some((fp) =>
-          contextInternalPaths.some((prefix) => fp.startsWith(prefix)),
-        ),
-      );
-      assert.ok(
-        internalCases.length >= 8,
-        `Expected at least 8 cases targeting context internals, got ${internalCases.length}`,
-      );
     });
   });
 
-  describe("answer preservation", () => {
-    before(() => {
-      if (!repoAvailable) {
-        // This describe block will still have its tests registered,
-        // but each test will skip via the guard below.
-      }
-    });
-
-    for (const c of []) {
-      // Placeholder: cases are iterated dynamically below
+  it("runs lexical, confidence-gated default, and semantic retrieval variants", async () => {
+    if (!metrics.repoAvailable) {
+      skipOrFail(metrics.availabilityReason);
+      return;
     }
 
-    it("runs answer preservation checks for all broad cases", async () => {
-      if (!repoAvailable) {
-        metrics.skippedCases += cases.filter((c) => c.requireAnswer).length;
-        return; // skip when repo not available
+    for (const variant of variants) {
+      const target = createMetrics(variant.name);
+      metrics.variants.set(variant.name, target);
+      for (const c of cases) {
+        await runCase(c, variant, false, target);
       }
+    }
 
-      const broadCases = cases.filter((c) => c.requireAnswer);
-
-      for (const c of broadCases) {
-        const start = Date.now();
-        let result: ContextResult;
-        try {
-          result = await contextEngine.buildContext({
-            taskType: c.taskType,
-            taskText: c.taskText,
-            repoId: "sdl-mcp",
-            options: {
-              contextMode: c.contextMode,
-              focusPaths: c.focusPaths,
-              includeTests: c.includeTests,
-            },
-          });
-        } catch (err) {
-          metrics.caseResults.push({
-            id: c.id,
-            executed: true,
-            success: false,
-            answerPresent: null,
-            answerTruncated: false,
-            usefulHits: 0,
-            usefulTotal: c.expectedUsefulSymbols.length,
-            noiseHits: 0,
-            evidenceCount: 0,
-            durationMs: Date.now() - start,
-          });
-          metrics.executedCases++;
-          continue;
-        }
-
-        const durationMs = Date.now() - start;
-        metrics.executedCases++;
-        metrics.requireAnswerCases++;
-
-        const hasAnswer =
-          result.success &&
-          typeof result.answer === "string" &&
-          result.answer.length > 0;
-
-        const isPlaceholder =
-          typeof result.answer === "string" &&
-          (result.answer.includes("[answer removed") ||
-            result.answer.includes("[answer truncated"));
-
-        const isTruncated =
-          typeof result.answer === "string" &&
-          result.answer.includes("[answer truncated");
-
-        const isRemoved =
-          typeof result.answer === "string" &&
-          result.answer.includes("[answer removed");
-
-        if (hasAnswer && !isPlaceholder) {
-          metrics.answerPresentCount++;
-        }
-        if (isTruncated) {
-          metrics.answerTruncatedCount++;
-        }
-        if (isRemoved) {
-          metrics.answerRemovedCount++;
-        }
-
-        metrics.caseResults.push({
-          id: c.id,
-          executed: true,
-          success: result.success,
-          answerPresent: hasAnswer && !isPlaceholder,
-          answerTruncated: isPlaceholder,
-          usefulHits: 0, // filled in retrieval quality section
-          usefulTotal: c.expectedUsefulSymbols.length,
-          noiseHits: 0,
-          evidenceCount: result.finalEvidence?.length ?? 0,
-          durationMs,
-        });
-      }
-    });
+    const semantic = metrics.variants.get("semantic");
+    assert.ok(semantic, "semantic variant should have metrics");
+    assert.equal(semantic.failures, 0, "semantic variant should not fail cases");
+    assert.ok(
+      recall(semantic) >= SEMANTIC_AGGREGATE_RECALL_MIN,
+      `semantic aggregate recall ${recall(semantic).toFixed(1)}% below ${SEMANTIC_AGGREGATE_RECALL_MIN}%`,
+    );
+    assert.ok(
+      preciseRecall(semantic) >= SEMANTIC_PRECISE_RECALL_MIN,
+      `semantic precise recall ${preciseRecall(semantic).toFixed(1)}% below ${SEMANTIC_PRECISE_RECALL_MIN}%`,
+    );
+    assert.ok(
+      broadRecall(semantic) >= SEMANTIC_BROAD_RECALL_MIN,
+      `semantic broad recall ${broadRecall(semantic).toFixed(1)}% below ${SEMANTIC_BROAD_RECALL_MIN}%`,
+    );
+    assert.ok(
+      noiseRate(semantic) <= NOISE_RATE_MAX,
+      `semantic noise rate ${noiseRate(semantic).toFixed(1)}% above ${NOISE_RATE_MAX}%`,
+    );
+    assert.ok(
+      percentile(semantic.durationsMs, 50) <= UNSCOPED_P50_MAX_MS,
+      `semantic p50 ${percentile(semantic.durationsMs, 50).toFixed(0)}ms above ${UNSCOPED_P50_MAX_MS}ms`,
+    );
+    assert.ok(
+      percentile(semantic.durationsMs, 95) <= UNSCOPED_P95_MAX_MS,
+      `semantic p95 ${percentile(semantic.durationsMs, 95).toFixed(0)}ms above ${UNSCOPED_P95_MAX_MS}ms`,
+    );
   });
 
-  describe("retrieval quality", () => {
-    it("runs retrieval quality checks for all cases", async () => {
-      if (!repoAvailable) {
-        metrics.skippedCases += cases.length;
-        return;
-      }
+  it("keeps scoped precise lookups below the latency target", async () => {
+    if (!metrics.repoAvailable) {
+      skipOrFail(metrics.availabilityReason);
+      return;
+    }
 
-      for (const c of cases) {
-        const start = Date.now();
-        let result: ContextResult;
-        try {
-          result = await contextEngine.buildContext({
-            taskType: c.taskType,
-            taskText: c.taskText,
-            repoId: "sdl-mcp",
-            options: {
-              contextMode: c.contextMode,
-              focusPaths: c.focusPaths,
-              includeTests: c.includeTests,
-            },
-          });
-        } catch {
-          continue;
-        }
+    const scopedCases = cases.filter((c) => c.contextMode === "precise");
+    for (const c of scopedCases) {
+      await runCase(c, { name: "default" }, true, metrics.scopedPrecise);
+    }
 
-        const durationMs = Date.now() - start;
-
-        // Check useful-symbol recall: do expected symbols appear in evidence?
-        const evidenceText = (result.finalEvidence ?? [])
-          .map((e) => `${e.summary ?? ""} ${e.reference ?? ""}`)
-          .join(" ");
-
-        let usefulHits = 0;
-        for (const sym of c.expectedUsefulSymbols) {
-          if (evidenceText.includes(sym)) {
-            usefulHits++;
-          }
-        }
-        metrics.totalExpectedSymbols += c.expectedUsefulSymbols.length;
-        metrics.usefulSymbolHits += usefulHits;
-
-        // Check noise-symbol rate: do unexpected symbols appear in evidence?
-        let noiseHits = 0;
-        const evidenceCount = result.finalEvidence?.length ?? 0;
-        metrics.totalEvidenceItems += evidenceCount;
-
-        for (const noiseSym of c.unexpectedSymbols) {
-          if (evidenceText.includes(noiseSym)) {
-            noiseHits++;
-          }
-        }
-        metrics.noiseSymbolHits += noiseHits;
-
-        // Update or add case result
-        const existing = metrics.caseResults.find((r) => r.id === c.id);
-        if (existing) {
-          existing.usefulHits = usefulHits;
-          existing.noiseHits = noiseHits;
-          existing.evidenceCount = evidenceCount;
-        } else {
-          metrics.executedCases++;
-          metrics.caseResults.push({
-            id: c.id,
-            executed: true,
-            success: result.success,
-            answerPresent: c.requireAnswer
-              ? typeof result.answer === "string" &&
-                result.answer.length > 0 &&
-                !result.answer.includes("[answer removed") &&
-                !result.answer.includes("[answer truncated")
-              : null,
-            answerTruncated:
-              typeof result.answer === "string" &&
-              (result.answer.includes("[answer truncated") ||
-                result.answer.includes("[answer removed")),
-            usefulHits,
-            usefulTotal: c.expectedUsefulSymbols.length,
-            noiseHits,
-            evidenceCount,
-            durationMs,
-          });
-        }
-      }
-    });
+    assert.equal(
+      metrics.scopedPrecise.failures,
+      0,
+      "scoped precise lookups should not fail cases",
+    );
+    assert.ok(
+      percentile(metrics.scopedPrecise.durationsMs, 95) <= SCOPED_PRECISE_P95_MAX_MS,
+      `scoped precise p95 ${percentile(metrics.scopedPrecise.durationsMs, 95).toFixed(0)}ms above ${SCOPED_PRECISE_P95_MAX_MS}ms`,
+    );
   });
 
   it("summary report", () => {
-    const usefulRecall =
-      metrics.totalExpectedSymbols > 0
-        ? (metrics.usefulSymbolHits / metrics.totalExpectedSymbols) * 100
-        : 0;
-
-    const noiseRate =
-      metrics.totalEvidenceItems > 0
-        ? (metrics.noiseSymbolHits / metrics.totalEvidenceItems) * 100
-        : 0;
-
-    const answerRate =
-      metrics.requireAnswerCases > 0
-        ? (metrics.answerPresentCount / metrics.requireAnswerCases) * 100
-        : 0;
-
-    const report = [
-      "",
-      "=== Context Quality Benchmark Report ===",
-      "",
-      `Total cases:       ${metrics.totalCases}`,
-      `Executed:          ${metrics.executedCases}`,
-      `Skipped (no repo): ${metrics.skippedCases}`,
-      "",
-      "--- Answer Preservation ---",
-      `Cases requiring answer: ${metrics.requireAnswerCases}`,
-      `Answers present:        ${metrics.answerPresentCount}`,
-      `Answers truncated:      ${metrics.answerTruncatedCount}`,
-      `Answers removed:        ${metrics.answerRemovedCount}`,
-      `Answer presence rate:   ${answerRate.toFixed(1)}%`,
-      "",
-      "--- Retrieval Quality ---",
-      `Expected useful symbols: ${metrics.totalExpectedSymbols}`,
-      `Useful symbol hits:      ${metrics.usefulSymbolHits}`,
-      `Useful-symbol recall:    ${usefulRecall.toFixed(1)}%`,
-      "",
-      `Total evidence items:    ${metrics.totalEvidenceItems}`,
-      `Noise symbol hits:       ${metrics.noiseSymbolHits}`,
-      `Noise rate:              ${noiseRate.toFixed(1)}%`,
-      "",
-      "--- Per-Case Results ---",
-    ];
-
-    for (const r of metrics.caseResults) {
-      const answerStatus =
-        r.answerPresent === null
-          ? "n/a"
-          : r.answerPresent
-            ? "OK"
-            : r.answerTruncated
-              ? "TRUNCATED"
-              : "MISSING";
-      report.push(
-        `  ${r.id}: success=${r.success} answer=${answerStatus} ` +
-          `useful=${r.usefulHits}/${r.usefulTotal} noise=${r.noiseHits} ` +
-          `evidence=${r.evidenceCount} ${r.durationMs}ms`,
-      );
-    }
-
-    report.push("");
-    report.push("=== End Report ===");
-    report.push("");
-
-    // Print to stdout for CI visibility
-    console.log(report.join("\n"));
-
-    // Structural assertion: the report was generated
-    assert.ok(metrics.totalCases === 24, "Report should cover all 24 cases");
-
-    // When execution happened, assert baseline quality expectations.
-    // These are intentionally set to thresholds that the CURRENT implementation
-    // may fail — improvements in subsequent chunks should bring them to passing.
-    if (metrics.executedCases > 0) {
-      // Target: 100% answer presence for broad cases
-      // Current baseline: may fail due to truncation stripping answers
-      assert.ok(
-        answerRate >= 0,
-        `Answer presence rate ${answerRate.toFixed(1)}% recorded (target: 100%)`,
-      );
-
-      // Target: >= 50% useful-symbol recall
-      // Current baseline: lexical seeding may miss many symbols
-      assert.ok(
-        usefulRecall >= 0,
-        `Useful-symbol recall ${usefulRecall.toFixed(1)}% recorded (target: >= 50%)`,
-      );
-
-      // Target: noise rate <= 10%
-      // Current baseline: may include noisy symbols from broad context
-      assert.ok(
-        noiseRate >= 0,
-        `Noise rate ${noiseRate.toFixed(1)}% recorded (target: <= 10%)`,
-      );
-    }
+    console.log(buildReport());
+    assert.equal(metrics.totalCases, 24, "Report should cover all 24 cases");
   });
 });

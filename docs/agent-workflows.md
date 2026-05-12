@@ -211,11 +211,12 @@ Stale buffer pushes (version ≤ current) are rejected automatically.
 ### 5) Task Context (`sdl.context`) guidance
 
 - Always provide a budget (`maxTokens`, `maxActions`, optionally `maxDurationMs`).
-- Scope with `focusSymbols` and/or `focusPaths` when you have them. In broad mode, explicit paths keep context lookup predictable and avoid unnecessary semantic expansion. Use `options.semantic: true` only when task text alone needs broader discovery.
+- Scope with `focusSymbols` and/or `focusPaths` when you have them. Explicit scope and exact symbol mentions stay on the fast path and are the best option for targeted work.
+- Leave `options.semantic` unset for normal use. SDL-MCP uses confidence-gated retrieval: unscoped natural-language tasks can escalate to bounded hybrid retrieval when lexical confidence is low. Set `options.semantic: true` to force hybrid retrieval, and set `options.semantic: false` for lexical-only debugging or tests.
 - Use `contextMode: "precise"` for targeted lookups (max 4 cluster-expanded symbols, minimal tokens — beats manual workflow assembly). Use `"broad"` (default) for investigation tasks needing surrounding context (max 10 cluster-expanded symbols with diversity scoring).
 - Avoid `requireDiagnostics` unless needed; it can add a raw rung.
 - Task types: `"debug"`, `"review"`, `"implement"`, `"explain"`.
-- Precise mode plans fewer rungs per task type: debug = card + hotPath, explain = card + skeleton, review = card, implement = card + skeleton.
+- Precise mode plans fewer rungs per task type: debug = card + hotPath, explain = card + skeleton, review = card + skeleton + hotPath, implement = card + skeleton.
 - Planner token estimates are approximately:
   - `card`: `50`
   - `skeleton`: `200`

@@ -93,9 +93,9 @@ interface VectorRawRow {
 /** Intermediate per-source ranked list before fusion. */
 const DEFAULT_CANDIDATE_LIMIT = 100;
 const DEFAULT_FTS_TOP_K = 75;
+const DEFAULT_FTS_BM25_K = 1.2;
 const DEFAULT_VECTOR_TOP_K = 75;
 const DEFAULT_FTS_INDEX_NAME = "symbol_search_text_v1";
-
 // ---------------------------------------------------------------------------
 // FTS retrieval
 // ---------------------------------------------------------------------------
@@ -124,6 +124,20 @@ function assertPositiveInt(n: number, label: string): number {
     throw new Error(`${label} must be a positive integer ≤ 10000, got ${n}`);
   }
   return n;
+}
+
+export function buildFtsStoredProcQuery(
+  tableName: string,
+  indexName: string,
+  query: string,
+  topK: number,
+  conjunctive: boolean,
+): string {
+  assertTableName(tableName);
+  assertIndexName(indexName);
+  const top = assertPositiveInt(topK, "topK");
+  const queryLiteral = cypherSingleQuotedString(query);
+  return `CALL QUERY_FTS_INDEX('${tableName}', '${indexName}', ${queryLiteral}, K := ${DEFAULT_FTS_BM25_K}, TOP := ${top}, conjunctive := ${conjunctive ? "true" : "false"}) RETURN node, score`;
 }
 
 // Ladybug stored-proc calls are not prepared in this path, so scalar values
@@ -188,11 +202,15 @@ async function queryFts(
 ): Promise<FtsRawRow[]> {
   try {
     assertIndexName(indexName);
-    const k = assertPositiveInt(topK, "topK");
-    const queryLiteral = cypherSingleQuotedString(query);
     const rows = await queryStoredProcAll<FtsRawRow>(
       conn,
-      `CALL QUERY_FTS_INDEX('Symbol', '${indexName}', ${queryLiteral}, K := ${k}, conjunctive := ${conjunctive ? "true" : "false"}) RETURN node, score`,
+      buildFtsStoredProcQuery(
+        "Symbol",
+        indexName,
+        query,
+        topK,
+        conjunctive,
+      ),
     );
     return rows;
   } catch (err) {
@@ -811,12 +829,15 @@ export async function entitySearch(
       const ftsStartedAt = performance.now();
       try {
         assertTableName(entityCfg.tableName);
-        assertIndexName(indexName);
-        const k = assertPositiveInt(ftsTopK, "topK");
-        const queryLiteral = cypherSingleQuotedString(ftsQuery);
         ftsRows = await queryStoredProcAll<FtsRawRow>(
           conn,
-          `CALL QUERY_FTS_INDEX('${entityCfg.tableName}', '${indexName}', ${queryLiteral}, K := ${k}, conjunctive := ${ftsConjunctive ? "true" : "false"}) RETURN node, score`,
+          buildFtsStoredProcQuery(
+            entityCfg.tableName,
+            indexName,
+            ftsQuery,
+            ftsTopK,
+            ftsConjunctive,
+          ),
         );
       } catch (err) {
         logger.warn(

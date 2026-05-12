@@ -294,7 +294,12 @@ export function extractIdentifiersFromText(
   const allSet = new Set([...primary, ...secondary]);
   const compoundsFiltered = compounds.filter((c) => !allSet.has(c));
 
-  return [...primary, ...secondary, ...compoundsFiltered].slice(
+  // Preserve explicit code identifiers first, then adjacent-word compounds.
+  // Natural-language prompts often say "hybrid search" or "context ladder"
+  // while the indexed symbols are `hybridSearch` or `ContextLadder`; placing
+  // compounds ahead of generic single words lets bounded search terms carry
+  // the most code-shaped signal.
+  return [...primary, ...compoundsFiltered, ...secondary].slice(
     0,
     MAX_IDENTIFIERS,
   );
