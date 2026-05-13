@@ -26,7 +26,7 @@ export interface ActionDefinition {
   /** Action name matching gateway action map, e.g. "symbol.search" */
   action: string;
   /** Namespace grouping for --list display */
-  namespace: "query" | "code" | "repo" | "agent";
+  namespace: "meta" | "query" | "code" | "repo" | "agent";
   /** One-line description */
   description: string;
   /** Argument definitions */
@@ -67,6 +67,117 @@ const INCLUDE_RESOLUTION_METADATA_ARG: ActionArgDef = {
   field: "includeResolutionMetadata",
   type: "boolean",
   description: "Include call resolution metadata",
+};
+
+// ---------------------------------------------------------------------------
+// Meta actions (2)
+// ---------------------------------------------------------------------------
+
+const actionSearch: ActionDefinition = {
+  action: "action.search",
+  namespace: "meta",
+  description: "Search the SDL-MCP action catalog without opening the graph database",
+  args: [
+    {
+      flag: "--query",
+      field: "query",
+      type: "string",
+      required: true,
+      description: "Catalog search query",
+      short: "-q",
+    },
+    {
+      flag: "--limit",
+      field: "limit",
+      type: "number",
+      description: "Maximum actions to return (1-50)",
+    },
+    {
+      flag: "--offset",
+      field: "offset",
+      type: "number",
+      description: "Skip the first N ranked actions",
+    },
+    {
+      flag: "--include-schemas",
+      field: "includeSchemas",
+      type: "boolean",
+      description: "Include schema summaries for matched actions",
+    },
+    {
+      flag: "--include-examples",
+      field: "includeExamples",
+      type: "boolean",
+      description: "Include examples for matched actions",
+    },
+    {
+      flag: "--summary-only",
+      field: "summaryOnly",
+      type: "boolean",
+      description: "Return only counts and matched action names",
+    },
+    {
+      flag: "--exclude-disabled",
+      field: "excludeDisabled",
+      type: "boolean",
+      description: "Hide disabled actions from results",
+    },
+  ],
+  examples: [
+    "sdl-mcp tool action.search --query memory",
+    "sdl-mcp tool sdl.action.search --query repo.status --limit 1 --include-schemas",
+  ],
+};
+
+const manual: ActionDefinition = {
+  action: "manual",
+  namespace: "meta",
+  description: "Render focused SDL-MCP API manual content without opening the graph database",
+  args: [
+    {
+      flag: "--query",
+      field: "query",
+      type: "string",
+      description: "Filter manual actions by query",
+      short: "-q",
+    },
+    {
+      flag: "--actions",
+      field: "actions",
+      type: "string[]",
+      description: "Action names to include (comma-separated or repeated)",
+    },
+    {
+      flag: "--format",
+      field: "format",
+      type: "string",
+      description: "Manual format: typescript|markdown|json",
+    },
+    {
+      flag: "--include-schemas",
+      field: "includeSchemas",
+      type: "boolean",
+      description: "Include schema summaries",
+    },
+    {
+      flag: "--no-include-schemas",
+      field: "includeSchemas",
+      type: "boolean",
+      invertBoolean: true,
+      description: "Omit schema summaries",
+    },
+    {
+      flag: "--include-examples",
+      field: "includeExamples",
+      type: "boolean",
+      description: "Include examples",
+    },
+  ],
+  examples: [
+    "sdl-mcp tool manual --actions repo.status --format typescript",
+    "sdl-mcp tool sdl.manual --query workflow --include-examples",
+    "sdl-mcp tool manual --actions action.search,manual --format json",
+  ],
 };
 
 // ---------------------------------------------------------------------------
@@ -550,6 +661,18 @@ const repoRegister: ActionDefinition = {
       field: "maxFileBytes",
       type: "number",
       description: "Max file size in bytes",
+    },
+    {
+      flag: "--dry-run",
+      field: "dryRun",
+      type: "boolean",
+      description: "Validate and report registration changes without writing",
+    },
+    {
+      flag: "--update-existing",
+      field: "updateExisting",
+      type: "boolean",
+      description: "Apply config changes to an already registered repo",
     },
   ],
   examples: [
@@ -1552,6 +1675,9 @@ const memorySurface: ActionDefinition = {
 // ---------------------------------------------------------------------------
 
 export const ACTION_DEFINITIONS: ActionDefinition[] = [
+  // Meta
+  actionSearch,
+  manual,
   // Query
   symbolSearch,
   symbolGetCard,

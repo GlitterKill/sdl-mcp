@@ -107,7 +107,7 @@ Use this page as the entry point for SDL-MCP documentation.
   - Gateway + legacy mode: 41 tools (`4` gateway + `35` legacy flat + `sdl.action.search` + `sdl.info`)
   - Code Mode exclusive: 5 tools (`sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, `sdl.file`)
   - Gateway routing covers 34 of the 35 flat tools; `sdl.file.write` remains flat-only
-  - `sdl-mcp tool` exposes 33 direct CLI action aliases, not the full flat surface
+  - `sdl-mcp tool` exposes direct CLI action aliases plus only the `action.search` and `manual` metadata proxies; `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only wrappers
 - **Semantic features**: optional semantic reranking with 2 embedding models (Jina Code bundled, Nomic optional), LLM-generated symbol summaries (Anthropic/Ollama/mock)
 - **HTTP surface**: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP
 - **Native addon**: Rust via napi-rs for multi-threaded indexing (default engine, TS fallback)

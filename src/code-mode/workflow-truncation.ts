@@ -174,6 +174,28 @@ export function getContinuation(
     };
   }
 
+  const maxInlineTokens = 4000;
+  if (offset !== undefined || limit !== undefined || totalTokens > maxInlineTokens) {
+    const source = typeof parsed === "string" ? parsed : entry.data;
+    const start = Math.min(offset ?? 0, source.length);
+    const requestedChars = limit ?? 12000;
+    const charLimit = Math.max(1, Math.min(requestedChars, 12000));
+    const end = Math.min(start + charLimit, source.length);
+    const chunk = source.slice(start, end);
+    const data = {
+      content: chunk,
+      encoding: typeof parsed === "string" ? "text" : "json",
+      offset: start,
+      nextOffset: end < source.length ? end : null,
+      totalBytes: source.length,
+    };
+    return {
+      data,
+      totalTokens: estimateJsonTokens(JSON.stringify(data)),
+      hasMore: end < source.length,
+    };
+  }
+
   return { data: parsed, totalTokens, hasMore: false };
 }
 

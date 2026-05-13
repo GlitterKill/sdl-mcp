@@ -63,6 +63,7 @@ import { consumePrefetchedKey } from "../../graph/prefetch.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
 import { toLegacySymbolRow } from "./symbol-utils.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
+import { resolveSymbolRef } from "../../util/resolve-symbol-ref.js";
 import { getOverlaySnapshot } from "../../live-index/overlay-reader.js";
 import { buildConditionalResponse } from "../../util/conditional-response.js";
 import type { ToolContext } from "../../server.js";
@@ -960,7 +961,7 @@ export async function handleGetSkeleton(
 ): Promise<GetSkeletonResponse> {
   const rawSkeletonRequest = args as GetSkeletonRequest;
 
-  // Resolve symbolId shorthand if present
+  // Resolve symbolId shorthand or structured symbolRef if present.
   let resolvedSkeletonSymbolId = rawSkeletonRequest.symbolId;
   if (rawSkeletonRequest.symbolId) {
     const skeletonConn = await getLadybugConn();
@@ -969,6 +970,17 @@ export async function handleGetSkeleton(
       rawSkeletonRequest.repoId,
       rawSkeletonRequest.symbolId,
     );
+    resolvedSkeletonSymbolId = resolved.symbolId;
+  } else if (rawSkeletonRequest.symbolRef) {
+    const skeletonConn = await getLadybugConn();
+    const resolved = await resolveSymbolRef(
+      skeletonConn,
+      rawSkeletonRequest.repoId,
+      rawSkeletonRequest.symbolRef,
+    );
+    if (resolved.status !== "resolved") {
+      throw new NotFoundError(resolved.message);
+    }
     resolvedSkeletonSymbolId = resolved.symbolId;
   }
   const request = { ...rawSkeletonRequest, symbolId: resolvedSkeletonSymbolId };

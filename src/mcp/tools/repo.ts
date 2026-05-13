@@ -164,7 +164,15 @@ export async function handleRepoRegister(
   args: unknown,
 ): Promise<RepoRegisterResponse> {
   const request = args as RepoRegisterRequest;
-  const { repoId, rootPath, ignore, languages, maxFileBytes } = request;
+  const {
+    repoId,
+    rootPath,
+    ignore,
+    languages,
+    maxFileBytes,
+    dryRun,
+    updateExisting,
+  } = request;
 
   recordToolTrace({
     repoId,
@@ -199,37 +207,155 @@ export async function handleRepoRegister(
     appConfig.security?.allowedRepoRoots ?? [],
   );
 
-  const packageJson = detectPackageJson(rootPath);
-  const tsconfigPath = detectTsconfig(rootPath);
+  const packageJson = detectPackageJson(resolvedRoot);
+  const tsconfigPath = detectTsconfig(resolvedRoot);
   const workspaceGlobs = packageJson?.fullPath
     ? detectWorkspaces(packageJson.fullPath)
     : undefined;
 
-  const config: RepoConfig = {
-    repoId,
-    rootPath,
-    ignore: ignore ?? [
-      "**/node_modules/**",
-      "**/dist/**",
-      "**/.next/**",
-      "**/build/**",
-    ],
-    languages: resolveRepoLanguages(languages),
-    maxFileBytes: maxFileBytes ?? MAX_FILE_BYTES,
-    includeNodeModulesTypes: true,
-    packageJsonPath: packageJson?.relPath,
-    tsconfigPath,
-    workspaceGlobs,
-  };
-
   const conn = await getLadybugConn();
   const existingRepo = await ladybugDb.getRepo(conn, repoId);
+
+  const defaultIgnore = [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/.next/**",
+    "**/build/**",
+  ];
+  const stringArrayOrUndefined = (value: unknown): string[] | undefined =>
+    Array.isArray(value) && value.every((entry) => typeof entry === "string")
+      ? value
+      : undefined;
+  const configRecord = (() => {
+    if (!existingRepo?.configJson) return {} as Partial<RepoConfig>;
+    try {
+      const parsed: unknown = JSON.parse(existingRepo.configJson);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Partial<RepoConfig>;
+      }
+    } catch (err) {
+      logger.debug("Failed to parse existing repo config during registration", {
+        repoId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return {} as Partial<RepoConfig>;
+  })();
+
+  const currentConfig: RepoConfig | undefined = existingRepo
+    ? {
+        repoId,
+        rootPath: normalizePath(resolve(normalizePath(existingRepo.rootPath))),
+        ignore: stringArrayOrUndefined(configRecord.ignore) ?? defaultIgnore,
+        languages: resolveRepoLanguages(
+          stringArrayOrUndefined(configRecord.languages),
+        ),
+        maxFileBytes:
+          typeof configRecord.maxFileBytes === "number"
+            ? configRecord.maxFileBytes
+            : MAX_FILE_BYTES,
+        includeNodeModulesTypes:
+          typeof configRecord.includeNodeModulesTypes === "boolean"
+            ? configRecord.includeNodeModulesTypes
+            : true,
+        packageJsonPath:
+          typeof configRecord.packageJsonPath === "string"
+            ? configRecord.packageJsonPath
+            : undefined,
+        tsconfigPath:
+          typeof configRecord.tsconfigPath === "string"
+            ? configRecord.tsconfigPath
+            : undefined,
+        workspaceGlobs: stringArrayOrUndefined(configRecord.workspaceGlobs),
+      }
+    : undefined;
+
+  const rootChanged = currentConfig
+    ? currentConfig.rootPath !== resolvedRoot
+    : true;
+  const proposedConfig: RepoConfig = {
+    repoId,
+    rootPath: resolvedRoot,
+    ignore: ignore ?? currentConfig?.ignore ?? defaultIgnore,
+    languages: languages
+      ? resolveRepoLanguages(languages)
+      : (currentConfig?.languages ?? resolveRepoLanguages(undefined)),
+    maxFileBytes: maxFileBytes ?? currentConfig?.maxFileBytes ?? MAX_FILE_BYTES,
+    includeNodeModulesTypes: currentConfig?.includeNodeModulesTypes ?? true,
+    packageJsonPath: packageJson?.relPath ?? (rootChanged ? undefined : currentConfig?.packageJsonPath),
+    tsconfigPath: tsconfigPath ?? (rootChanged ? undefined : currentConfig?.tsconfigPath),
+    workspaceGlobs: workspaceGlobs ?? (rootChanged ? undefined : currentConfig?.workspaceGlobs),
+  };
+
+  const diffFields: Array<keyof RepoConfig> = [
+    "rootPath",
+    "ignore",
+    "languages",
+    "maxFileBytes",
+    "includeNodeModulesTypes",
+    "packageJsonPath",
+    "tsconfigPath",
+    "workspaceGlobs",
+  ];
+  const configChanges = currentConfig
+    ? diffFields.flatMap((field) => {
+        const before = currentConfig[field] ?? null;
+        const after = proposedConfig[field] ?? null;
+        return JSON.stringify(before) === JSON.stringify(after)
+          ? []
+          : [{ field: String(field), before, after }];
+      })
+    : diffFields.map((field) => ({
+        field: String(field),
+        before: null,
+        after: proposedConfig[field] ?? null,
+      }));
+  const toConfigRecord = (config: RepoConfig): Record<string, unknown> =>
+    JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
+
+  if (dryRun) {
+    return {
+      ok: true,
+      repoId,
+      dryRun: true,
+      changed: configChanges.length > 0,
+      configChanges,
+      currentConfig: currentConfig ? toConfigRecord(currentConfig) : undefined,
+      proposedConfig: toConfigRecord(proposedConfig),
+      message: existingRepo
+        ? "Dry run only; existing repo registration was not changed."
+        : "Dry run only; repo would be registered.",
+    };
+  }
+
+  if (existingRepo && configChanges.length > 0 && !updateExisting) {
+    return {
+      ok: false,
+      repoId,
+      changed: true,
+      requiresUpdateExisting: true,
+      configChanges,
+      currentConfig: currentConfig ? toConfigRecord(currentConfig) : undefined,
+      proposedConfig: toConfigRecord(proposedConfig),
+      message:
+        "Existing repo config differs; no changes applied. Re-run with updateExisting:true to apply this registration update.",
+    };
+  }
+
+  if (existingRepo && configChanges.length === 0) {
+    return {
+      ok: true,
+      repoId,
+      changed: false,
+      message: "Existing repo registration already matches; no changes applied.",
+    };
+  }
 
   await withWriteConn(async (wConn) => {
     await ladybugDb.upsertRepo(wConn, {
       repoId,
       rootPath: resolvedRoot,
-      configJson: JSON.stringify(config),
+      configJson: JSON.stringify(proposedConfig),
       createdAt: existingRepo?.createdAt ?? new Date().toISOString(),
     });
   });
@@ -266,6 +392,11 @@ export async function handleRepoRegister(
   return {
     ok: true,
     repoId,
+    changed: configChanges.length > 0,
+    configChanges,
+    message: existingRepo
+      ? "Existing repo registration updated."
+      : "Repo registered.",
   };
 }
 
@@ -504,7 +635,12 @@ export async function handleRepoStatus(
       healthScore: health.score,
       healthComponents: health.components,
       healthAvailable: health.available,
-      ...(!health.available
+      ...(!includeHealth
+        ? {
+            healthNote:
+              "Health omitted because detail:\"minimal\" skips health computation. Use detail:\"standard\" to inspect health.",
+          }
+        : !health.available
         ? {
             healthNote:
               "Health computation timed out or is pending. Run sdl.index.refresh (incremental) to populate, or retry — a cached result may become available shortly.",
@@ -515,12 +651,13 @@ export async function handleRepoStatus(
                 "Health data may be stale (last known result). Fresh computation failed — retry or run sdl.index.refresh.",
             }
           : {}),
-      watcherHealth,
-      watcherNote:
-        watcherHealth === null
+      watcherHealth: includeHealth ? watcherHealth : null,
+      watcherNote: !includeHealth
+        ? "Watcher health omitted because detail:\"minimal\" skips watcher checks. Use detail:\"standard\" to inspect watcher health."
+        : watcherHealth === null
           ? "Watcher not active. Run 'sdl-mcp serve' or call sdl.index.refresh after edits."
           : undefined,
-      prefetchStats: prefetchStats ?? undefined,
+      prefetchStats: includeHealth ? (prefetchStats ?? undefined) : undefined,
       liveIndexStatus,
       memories,
       derivedState: derivedState ?? undefined,

@@ -89,6 +89,22 @@ describe("workflow-truncation", () => {
     assert.equal(page2.hasMore, false);
   });
 
+  it("continuation pages large non-array payloads", () => {
+    const data = { content: "x".repeat(20_000), meta: { source: "test" } };
+    const result = truncateStepResult(data, 50);
+    const continuation = getContinuation(result.handle, 0, 100);
+
+    assert.ok(continuation);
+    const page = continuation.data as Record<string, unknown>;
+    assert.equal(typeof page.content, "string");
+    assert.equal((page.content as string).length, 100);
+    assert.equal(page.encoding, "json");
+    assert.equal(page.offset, 0);
+    assert.equal(page.nextOffset, 100);
+    assert.equal(continuation.hasMore, true);
+    assert.ok(continuation.totalTokens < result.originalTokens);
+  });
+
   it("nonexistent handle returns null", () => {
     const result = getContinuation("nonexistent-handle");
     assert.equal(result, null);

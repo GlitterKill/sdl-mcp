@@ -841,8 +841,8 @@ function findEntryPoints(files: ladybugDb.FileRow[]): string[] {
  */
 function calculateOverviewTokens(
   _stats: RepoStats,
-  directories: DirectorySummary[],
-  hotspots?: CodebaseHotspots,
+  directories: DirectorySummary[] = [],
+  hotspots?: Partial<CodebaseHotspots>,
 ): number {
   // Base stats section (stats overhead is fixed)
   let tokens = 50;
@@ -852,12 +852,12 @@ function calculateOverviewTokens(
     tokens += dir.summaryTokens;
   }
 
-  // Hotspots
+  // Hotspots may come from cached/older payloads; keep token accounting defensive.
   if (hotspots) {
-    tokens += hotspots.mostDepended.length * COMPACT_SYMBOL_REF_TOKENS;
-    tokens += hotspots.mostChanged.length * COMPACT_SYMBOL_REF_TOKENS;
-    tokens += hotspots.largestFiles.length * 5;
-    tokens += hotspots.mostConnected.length * 5;
+    tokens += (hotspots.mostDepended ?? []).length * COMPACT_SYMBOL_REF_TOKENS;
+    tokens += (hotspots.mostChanged ?? []).length * COMPACT_SYMBOL_REF_TOKENS;
+    tokens += (hotspots.largestFiles ?? []).length * 5;
+    tokens += (hotspots.mostConnected ?? []).length * 5;
   }
 
   return tokens;

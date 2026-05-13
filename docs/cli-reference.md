@@ -266,9 +266,10 @@ Key options:
 
 ### `sdl-mcp tool <action> [args]`
 
-Direct MCP tool invocation from the CLI. The command currently exposes 35 action definitions from [`src/cli/commands/tool-actions.ts`](../src/cli/commands/tool-actions.ts), reuses the gateway action map for execution, and shares the same normalization and Zod validation path as the MCP server.
+Direct MCP tool invocation from the CLI. The command currently exposes the direct action definitions from [`src/cli/commands/tool-actions.ts`](../src/cli/commands/tool-actions.ts), plus in-process metadata proxies for `action.search` and `manual` (aliases: `sdl.action.search`, `sdl.manual`). Direct graph actions reuse the gateway action map; the two metadata proxies call the same handlers registered for MCP clients and do not open the graph database.
 
 ```bash
+sdl-mcp tool repo.register --repo-id my-repo --root-path . --dry-run
 sdl-mcp tool repo.status --repo-id my-repo
 sdl-mcp tool symbol.search --repo-id my-repo --query "handleRequest"
 sdl-mcp tool slice.build --repo-id my-repo --entry-symbols sym123
@@ -277,6 +278,8 @@ sdl-mcp tool semantic.enrichment.refresh --repo-id my-repo --dry-run
 sdl-mcp tool search.edit --repo-id my-repo --mode preview --targeting text --query '{"literal":"old","replacement":"new"}' --edit-mode replacePattern
 sdl-mcp tool file.write --repo-id my-repo --file-path config/app.json --json-path server.port --json-value 8080
 sdl-mcp tool response.get --repo-id my-repo --handle response-myrepo-1770000000000-0123456789abcdef --max-bytes 8192
+sdl-mcp tool action.search --query manual --summary-only
+sdl-mcp tool sdl.manual --actions action.search --format json
 ```
 
 Key options:
@@ -287,7 +290,7 @@ Key options:
 
 The CLI parser accepts the canonical action fields plus the same common aliases accepted by MCP requests, such as `--repo-id`, `--symbol-id`, `--symbol-ids`, `--from-version`, `--to-version`, and `--slice-handle`.
 
-Not every MCP surface is available through `sdl-mcp tool`. Code Mode-only tools (`sdl.manual`, `sdl.context`, `sdl.workflow`, `sdl.file`) are separate, but the direct flat write action is available as `file.write`. Use [`CLI Tool Access`](./feature-deep-dives/cli-tool-access.md) for the current direct-action matrix.
+Not every MCP surface is available through `sdl-mcp tool`. Only `action.search` and `manual` are currently proxied metadata tools; `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only wrapper tools. The direct flat write action is available as `file.write`. Use [`CLI Tool Access`](./feature-deep-dives/cli-tool-access.md) for the current direct-action matrix.
 
 ### `sdl-mcp version`
 

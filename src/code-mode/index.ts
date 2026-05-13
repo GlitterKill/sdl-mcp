@@ -48,6 +48,187 @@ export const ActionSearchRequestSchema = z.object({
   excludeDisabled: z.boolean().default(false),
 });
 
+export const ManualRequestSchema = z.object({
+  query: z.string().min(1).optional(),
+  actions: z.array(z.string().min(1)).optional(),
+  format: z.enum(["typescript", "markdown", "json"]).default("typescript"),
+  includeSchemas: z.boolean().default(true),
+  includeExamples: z.boolean().default(false),
+});
+
+export function handleActionSearch(
+  rawArgs: unknown,
+  services: ToolServices = {},
+): object {
+  const args = ActionSearchRequestSchema.parse(rawArgs);
+  // Auto-enable schemas + examples when the caller is obviously homing in
+  // on a single action (limit=1 or an exact dotted-name query). Without
+  // this, the default payload omits enum values so callers frequently
+  // guess param shapes wrong.
+  const trimmed = args.query.trim();
+  const looksLikeExactName =
+    /^[a-zA-Z][\w.]*$/.test(trimmed) && trimmed.includes(".");
+  const narrowLookup = args.limit === 1 || looksLikeExactName;
+  const effectiveIncludeSchemas = args.includeSchemas || narrowLookup;
+  const effectiveIncludeExamples = args.includeExamples || narrowLookup;
+  const catalog = buildCatalog({
+    liveIndex: services.liveIndex,
+    includeSchemas: effectiveIncludeSchemas,
+    includeExamples: effectiveIncludeExamples,
+  });
+
+  const allRanked = rankCatalog(catalog, args.query);
+  const filteredRanked = args.excludeDisabled
+    ? allRanked.filter((a) => !a.disabled)
+    : allRanked;
+  const offset = args.offset ?? 0;
+  const ranked = filteredRanked.slice(offset, offset + args.limit);
+  const autoEnabled =
+    narrowLookup && (!args.includeSchemas || !args.includeExamples)
+      ? {
+          includeSchemas: !args.includeSchemas,
+          includeExamples: !args.includeExamples,
+          reason: args.limit === 1 ? "limit=1" : "exact-name-query",
+        }
+      : undefined;
+  // Handle summaryOnly mode - return counts/categories instead of full details.
+  if (args.summaryOnly) {
+    const byKind: Record<string, number> = {};
+    const byNamespace: Record<string, number> = {};
+    for (const action of filteredRanked) {
+      byKind[action.kind] = (byKind[action.kind] ?? 0) + 1;
+      const ns = action.action.split(".")[0];
+      byNamespace[ns] = (byNamespace[ns] ?? 0) + 1;
+    }
+    return {
+      summary: {
+        total: filteredRanked.length,
+        byKind,
+        byNamespace,
+        matchedActions: filteredRanked.map((a) => a.action),
+      },
+      tokenEstimate: estimateTokens(
+        JSON.stringify({
+          total: filteredRanked.length,
+          byKind,
+          byNamespace,
+        }),
+      ),
+    };
+  }
+
+  // Compute disabled action hints.
+  const disabledActions = ranked.filter((a) => a.disabled);
+  const disabledHint =
+    disabledActions.length > 0
+      ? {
+          count: disabledActions.length,
+          message: `${disabledActions.length} action(s) are disabled. Enable them by updating your sdlmcp.config.json.`,
+          actions: disabledActions.map((a) => ({
+            action: a.action,
+            reason: a.disabledReason ?? "Unknown",
+          })),
+        }
+      : undefined;
+
+  return {
+    actions: ranked,
+    total: filteredRanked.length,
+    disabledHint,
+    // Hint when schemas not included.
+    ...(!effectiveIncludeSchemas
+      ? {
+          schemaHint:
+            "Tip: Add includeSchemas: true to see parameter types and enum values.",
+        }
+      : {}),
+    hasMore: filteredRanked.length > offset + args.limit,
+    tokenEstimate: estimateTokens(JSON.stringify(ranked)),
+    ...(autoEnabled ? { autoEnabled } : {}),
+  };
+}
+
+export function handleManual(
+  rawArgs: unknown,
+  services: ToolServices = {},
+): object {
+  const args = ManualRequestSchema.parse(rawArgs);
+  const format = args.format;
+  const includeSchemas = args.includeSchemas;
+  const includeExamples = args.includeExamples;
+
+  if (
+    !args.query &&
+    !args.actions &&
+    format === "typescript" &&
+    !includeSchemas &&
+    !includeExamples
+  ) {
+    const manual = getManualCached(services.liveIndex);
+    return { manual, tokenEstimate: estimateTokens(manual) };
+  }
+
+  let catalog = buildCatalog({
+    liveIndex: services.liveIndex,
+    includeSchemas,
+    includeExamples,
+  });
+  catalog = catalog.filter((entry) => !entry.disabled);
+
+  if (args.actions && args.actions.length > 0) {
+    const activeFnMap = getActiveFnNameMap();
+    const validNames = new Set([
+      ...Object.keys(activeFnMap),
+      ...Object.values(activeFnMap),
+      ...INTERNAL_TRANSFORM_NAMES,
+      ...catalog.flatMap((entry) => [entry.action, entry.fn]),
+      "workflow",
+      "context",
+      "manual",
+      "action.search",
+    ]);
+
+    const unknowns = args.actions.filter((action) => !validNames.has(action));
+    if (unknowns.length > 0) {
+      return {
+        error: "UNKNOWN_ACTIONS",
+        unknownActions: unknowns,
+        validActions: Array.from(validNames).sort(),
+      };
+    }
+
+    const filtered: ActionDescriptor[] = [];
+    for (const name of args.actions) {
+      const match = catalog.find(
+        (entry) => entry.action === name || entry.fn === name,
+      );
+      if (match && !filtered.includes(match)) {
+        filtered.push(match);
+      }
+    }
+    catalog = filtered;
+  }
+
+  if (args.query) {
+    catalog = rankCatalog(catalog, args.query);
+  }
+
+  if (format === "json") {
+    return {
+      actions: catalog,
+      tokenEstimate: estimateTokens(JSON.stringify(catalog)),
+    };
+  }
+
+  const rendered =
+    format === "markdown" ? renderMarkdown(catalog) : renderTypescript(catalog);
+  const withTransforms = rendered + TRANSFORM_HINT;
+  return {
+    manual: withTransforms,
+    tokenEstimate: estimateTokens(withTransforms),
+  };
+}
+
 export function registerActionSearchTool(
   server: MCPServer,
   services: ToolServices,
@@ -57,94 +238,7 @@ export function registerActionSearchTool(
     "sdl.action.search",
     ACTION_SEARCH_DESCRIPTION,
     ActionSearchRequestSchema,
-    async (rawArgs: unknown) => {
-      const args = ActionSearchRequestSchema.parse(rawArgs);
-      // Auto-enable schemas + examples when the caller is obviously homing in
-      // on a single action (limit=1 or an exact dotted-name query). Without
-      // this, the default payload omits enum values so callers frequently
-      // guess param shapes wrong.
-      const trimmed = args.query.trim();
-      const looksLikeExactName =
-        /^[a-zA-Z][\w.]*$/.test(trimmed) && trimmed.includes(".");
-      const narrowLookup = args.limit === 1 || looksLikeExactName;
-      const effectiveIncludeSchemas = args.includeSchemas || narrowLookup;
-      const effectiveIncludeExamples = args.includeExamples || narrowLookup;
-      const catalog = buildCatalog({
-        liveIndex: services.liveIndex,
-        includeSchemas: effectiveIncludeSchemas,
-        includeExamples: effectiveIncludeExamples,
-      });
-
-      const allRanked = rankCatalog(catalog, args.query);
-      const filteredRanked = args.excludeDisabled
-        ? allRanked.filter((a) => !a.disabled)
-        : allRanked;
-      const offset = args.offset ?? 0;
-      const ranked = filteredRanked.slice(offset, offset + args.limit);
-      const autoEnabled =
-        narrowLookup && (!args.includeSchemas || !args.includeExamples)
-          ? {
-              includeSchemas: !args.includeSchemas,
-              includeExamples: !args.includeExamples,
-              reason: args.limit === 1 ? "limit=1" : "exact-name-query",
-            }
-          : undefined;
-      // Handle summaryOnly mode - return counts/categories instead of full details
-      if (args.summaryOnly) {
-        const byKind: Record<string, number> = {};
-        const byNamespace: Record<string, number> = {};
-        for (const action of filteredRanked) {
-          byKind[action.kind] = (byKind[action.kind] ?? 0) + 1;
-          const ns = action.action.split(".")[0];
-          byNamespace[ns] = (byNamespace[ns] ?? 0) + 1;
-        }
-        return {
-          summary: {
-            total: filteredRanked.length,
-            byKind,
-            byNamespace,
-            matchedActions: filteredRanked.map((a) => a.action),
-          },
-          tokenEstimate: estimateTokens(
-            JSON.stringify({
-              total: filteredRanked.length,
-              byKind,
-              byNamespace,
-            }),
-          ),
-        };
-      }
-
-      // Compute disabled action hints
-      const disabledActions = ranked.filter((a) => a.disabled);
-      const disabledHint =
-        disabledActions.length > 0
-          ? {
-              count: disabledActions.length,
-              message: `${disabledActions.length} action(s) are disabled. Enable them by updating your sdlmcp.config.json.`,
-              actions: disabledActions.map((a) => ({
-                action: a.action,
-                reason: a.disabledReason ?? "Unknown",
-              })),
-            }
-          : undefined;
-
-      return {
-        actions: ranked,
-        total: filteredRanked.length,
-        disabledHint,
-        // Hint when schemas not included
-        ...(!effectiveIncludeSchemas
-          ? {
-              schemaHint:
-                "Tip: Add includeSchemas: true to see parameter types and enum values.",
-            }
-          : {}),
-        hasMore: filteredRanked.length > offset + args.limit,
-        tokenEstimate: estimateTokens(JSON.stringify(ranked)),
-        ...(autoEnabled ? { autoEnabled } : {}),
-      };
-    },
+    async (rawArgs: unknown) => handleActionSearch(rawArgs, services),
     {
       type: "object",
       properties: {
@@ -182,99 +276,11 @@ export function registerCodeModeTools(
 ): void {
   const actionMap = prebuiltActionMap ?? createActionMap(services.liveIndex);
 
-  const ManualRequestSchema = z.object({
-    query: z.string().min(1).optional(),
-    actions: z.array(z.string().min(1)).optional(),
-    format: z.enum(["typescript", "markdown", "json"]).default("typescript"),
-    includeSchemas: z.boolean().default(true),
-    includeExamples: z.boolean().default(false),
-  });
-
   server.registerTool(
     "sdl.manual",
     MANUAL_DESCRIPTION,
     ManualRequestSchema,
-    async (rawArgs: unknown) => {
-      const args = ManualRequestSchema.parse(rawArgs);
-      const format = args.format;
-      const includeSchemas = args.includeSchemas;
-      const includeExamples = args.includeExamples;
-
-      if (
-        !args.query &&
-        !args.actions &&
-        format === "typescript" &&
-        !includeSchemas &&
-        !includeExamples
-      ) {
-        const manual = getManualCached(services.liveIndex);
-        return { manual, tokenEstimate: estimateTokens(manual) };
-      }
-
-      let catalog = buildCatalog({
-        liveIndex: services.liveIndex,
-        includeSchemas,
-        includeExamples,
-      });
-      catalog = catalog.filter((entry) => !entry.disabled);
-
-      if (args.actions && args.actions.length > 0) {
-        const activeFnMap = getActiveFnNameMap();
-        const validNames = new Set([
-          ...Object.keys(activeFnMap),
-          ...Object.values(activeFnMap),
-          ...INTERNAL_TRANSFORM_NAMES,
-          ...catalog.flatMap((entry) => [entry.action, entry.fn]),
-          "workflow",
-          "context",
-          "manual",
-          "action.search",
-        ]);
-
-        const unknowns = args.actions.filter(
-          (action) => !validNames.has(action),
-        );
-        if (unknowns.length > 0) {
-          return {
-            error: "UNKNOWN_ACTIONS",
-            unknownActions: unknowns,
-            validActions: Array.from(validNames).sort(),
-          };
-        }
-
-        const filtered: ActionDescriptor[] = [];
-        for (const name of args.actions) {
-          const match = catalog.find(
-            (entry) => entry.action === name || entry.fn === name,
-          );
-          if (match && !filtered.includes(match)) {
-            filtered.push(match);
-          }
-        }
-        catalog = filtered;
-      }
-
-      if (args.query) {
-        catalog = rankCatalog(catalog, args.query);
-      }
-
-      if (format === "json") {
-        return {
-          actions: catalog,
-          tokenEstimate: estimateTokens(JSON.stringify(catalog)),
-        };
-      }
-
-      const rendered =
-        format === "markdown"
-          ? renderMarkdown(catalog)
-          : renderTypescript(catalog);
-      const withTransforms = rendered + TRANSFORM_HINT;
-      return {
-        manual: withTransforms,
-        tokenEstimate: estimateTokens(withTransforms),
-      };
-    },
+    async (rawArgs: unknown) => handleManual(rawArgs, services),
     {
       type: "object",
       properties: {

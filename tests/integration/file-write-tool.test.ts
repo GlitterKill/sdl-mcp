@@ -96,6 +96,8 @@ describe("sdl.file.write", () => {
 
       assert.equal(response.mode, "overwrite");
       assert.equal(response.backupPath, "config/existing.json.bak");
+      assert.match(response.snippets?.before ?? "", /old/);
+      assert.match(response.snippets?.after ?? "", /new/);
       assert.equal(readFileSync(filePath, "utf-8"), '{"new": true}');
       assert.equal(readFileSync(filePath + ".bak", "utf-8"), '{"old": true}');
     });

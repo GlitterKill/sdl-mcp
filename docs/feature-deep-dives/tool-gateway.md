@@ -89,7 +89,7 @@ The important implementation detail is not the namespace wrapper. It is the pres
 - `file.write` is outside the four namespace gateway schemas. In Code Mode, use `sdl.file` which unifies `file.read`, `file.write`, and `search.edit` under one tool.
 - `sdl.info` is universal outside Code Mode exclusive. It is not part of the four gateway tools.
 - Code Mode exclusive bypasses the regular gateway and flat surfaces entirely.
-- The CLI `sdl-mcp tool` command is related but not identical. It exposes direct action aliases, including `file.write`, without exposing Code Mode-only wrapper tools. See [CLI Tool Access](./cli-tool-access.md).
+- The CLI `sdl-mcp tool` command is related but not identical. It exposes direct action aliases, including `file.write`, and now proxies only the low-risk metadata tools `action.search` and `manual` (plus `sdl.` aliases). `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only wrapper tools. See [CLI Tool Access](./cli-tool-access.md).
 
 ## Configuration
 

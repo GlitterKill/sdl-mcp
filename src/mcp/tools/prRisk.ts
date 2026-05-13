@@ -35,6 +35,7 @@ export async function handlePRRiskAnalysis(args: unknown) {
   const validated = PRRiskAnalysisRequestSchema.parse(args);
 
   // --- Budget: allow caller to cap response size ---
+  // --- Budget: allow caller to cap response size ---
   const MAX_CHANGED_SYMBOLS_CAP = 200;
   const maxChangedSymbols = Math.min(
     validated.budget?.maxChangedSymbols ?? DEFAULT_MAX_CHANGED_SYMBOLS,
@@ -45,7 +46,22 @@ export async function handlePRRiskAnalysis(args: unknown) {
     validated.budget?.maxBlastRadius ?? DEFAULT_MAX_BLAST_RADIUS,
     MAX_BLAST_RADIUS_CAP,
   );
-
+  const maxFindings = Math.min(
+    validated.budget?.maxFindings ?? MAX_FINDINGS,
+    MAX_FINDINGS,
+  );
+  const maxEvidenceItems = Math.min(
+    validated.budget?.maxEvidenceItems ?? MAX_EVIDENCE_ITEMS,
+    MAX_EVIDENCE_ITEMS,
+  );
+  const maxRecommendedTests = Math.min(
+    validated.budget?.maxRecommendedTests ?? MAX_RECOMMENDED_TESTS,
+    MAX_RECOMMENDED_TESTS,
+  );
+  const maxNestedSymbols = Math.min(
+    validated.budget?.maxNestedSymbols ?? MAX_AFFECTED_SYMBOLS_PER_FINDING,
+    MAX_AFFECTED_SYMBOLS_PER_FINDING,
+  );
   recordToolTrace({
     repoId: validated.repoId,
     taskType: "pr-risk",
@@ -223,18 +239,33 @@ export async function handlePRRiskAnalysis(args: unknown) {
 
   // --- Truncate findings ---
   const totalFindings = findings.length;
-  const truncatedFindings = findings.slice(0, MAX_FINDINGS);
+  const truncatedFindings = findings.slice(0, maxFindings).map((finding) => ({
+    ...finding,
+    affectedSymbols: finding.affectedSymbols.slice(0, maxNestedSymbols),
+    metadata: {
+      ...(finding.metadata ?? {}),
+      affectedSymbolsTotal: finding.affectedSymbols.length,
+      affectedSymbolsTruncated: finding.affectedSymbols.length > maxNestedSymbols,
+    },
+  }));
 
   // --- Truncate recommendedTests ---
+  // --- Truncate recommendedTests ---
   const totalRecommendedTests = recommendedTests.length;
-  const truncatedRecommendedTests = recommendedTests.slice(
-    0,
-    MAX_RECOMMENDED_TESTS,
-  );
+  const truncatedRecommendedTests = recommendedTests
+    .slice(0, maxRecommendedTests)
+    .map((test) => ({
+      ...test,
+      targetSymbols: test.targetSymbols.slice(0, maxNestedSymbols),
+      targetSymbolsTotal: test.targetSymbols.length,
+      targetSymbolsTruncated: test.targetSymbols.length > maxNestedSymbols,
+    }));
 
   // --- Truncate evidence ---
   const totalEvidence = evidence.length;
-  const truncatedEvidence = evidence.slice(0, MAX_EVIDENCE_ITEMS);
+  const truncatedEvidence = evidence
+    .slice(0, maxEvidenceItems)
+    .map((entry) => trimEvidenceEntry(entry, maxNestedSymbols));
 
   // --- Top-level summary for quick triage ---
   const topRiskItemName =
@@ -272,17 +303,17 @@ export async function handlePRRiskAnalysis(args: unknown) {
       findings: {
         items: truncatedFindings,
         totalCount: totalFindings,
-        truncated: totalFindings > MAX_FINDINGS,
+        truncated: totalFindings > maxFindings,
       },
       evidence: {
         items: truncatedEvidence,
         totalCount: totalEvidence,
-        truncated: totalEvidence > MAX_EVIDENCE_ITEMS,
+        truncated: totalEvidence > maxEvidenceItems,
       },
       recommendedTests: {
         items: truncatedRecommendedTests,
         totalCount: totalRecommendedTests,
-        truncated: totalRecommendedTests > MAX_RECOMMENDED_TESTS,
+        truncated: totalRecommendedTests > maxRecommendedTests,
       },
       changedSymbolsCount: totalChangedSymbols,
       blastRadiusCount: totalBlastRadius,
@@ -761,6 +792,26 @@ function collectEvidence(
   });
 
   return evidence;
+}
+
+function trimEvidenceEntry(
+  entry: ReturnType<typeof collectEvidence>[number],
+  maxNestedSymbols: number,
+): ReturnType<typeof collectEvidence>[number] {
+  const data = entry.data;
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return entry;
+  }
+  const copy = { ...data } as Record<string, unknown>;
+  for (const key of ["symbols", "topImpacted"] as const) {
+    const value = copy[key];
+    if (Array.isArray(value)) {
+      copy[`${key}Total`] = value.length;
+      copy[`${key}Truncated`] = value.length > maxNestedSymbols;
+      copy[key] = value.slice(0, maxNestedSymbols);
+    }
+  }
+  return { ...entry, data: copy };
 }
 
 function generateRecommendedTests(

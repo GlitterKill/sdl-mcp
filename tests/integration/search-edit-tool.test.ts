@@ -153,6 +153,9 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     assert.equal(apply.filesWritten, 2);
     assert.equal(apply.filesFailed, 0);
     assert.equal(apply.rollback.triggered, false);
+    assert.equal(apply.fileEntries?.length, preview.fileEntries.length);
+    assert.match(apply.fileEntries?.[0]?.snippets.before ?? "", /oldName/);
+    assert.match(apply.fileEntries?.[0]?.snippets.after ?? "", /newName/);
 
     const a = await readFile(join(repoRoot, "a.txt"), "utf-8");
     const b = await readFile(join(repoRoot, "b.txt"), "utf-8");

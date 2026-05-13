@@ -20,6 +20,7 @@ describe("context-response-projection", () => {
     answer: "# Explain Results\n\nFound 1 symbol(s).",
     nextBestAction: "none",
     retrievalEvidence: { symptomType: "taskText" },
+    etag: "etag-123",
   };
 
   describe("isBroadContextResult", () => {
@@ -67,6 +68,7 @@ describe("context-response-projection", () => {
       assert.ok(projected.answer);
       assert.ok(projected.finalEvidence);
       assert.equal(projected.nextBestAction, "none");
+      assert.equal(projected.etag, "etag-123");
 
       // Hidden fields
       assert.equal(projected.actionsTaken, undefined);
@@ -180,6 +182,11 @@ describe("context-response-projection", () => {
       assert.equal(projected.actionsTaken, undefined);
       assert.equal(projected.path, undefined);
       assert.equal(projected.metrics, undefined);
+      assert.equal(projected.taskId, undefined);
+      assert.equal(projected.summary, undefined);
+      assert.equal(projected.retrievalEvidence, undefined);
+      assert.equal(projected.etag, "etag-123");
+      assert.equal(projected.answer, broadResult.answer);
       assert.deepEqual(projected._rawContext, { rawTokens: 1000 });
     });
   });

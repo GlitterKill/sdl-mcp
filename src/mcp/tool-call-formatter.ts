@@ -57,6 +57,19 @@ function records(value: unknown): Array<Record<string, unknown>> {
   );
 }
 
+function actionSummaryRecords(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): Array<Record<string, unknown>> => {
+    if (typeof item === "string") {
+      return [{ action: item }];
+    }
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      return [item as Record<string, unknown>];
+    }
+    return [];
+  });
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -70,6 +83,29 @@ function appendIndented(lines: string[], text: string, maxChars = 1200): void {
       : text;
   for (const line of clipped.split(/\r?\n/)) {
     lines.push(`    ${line}`);
+  }
+}
+
+
+function appendDiffPreview(
+  lines: string[],
+  snippetsValue: unknown,
+  maxChars = 900,
+): void {
+  const snippets = record(snippetsValue);
+  const before = str(snippets?.before);
+  const after = str(snippets?.after);
+  if (!before && !after) {
+    return;
+  }
+  lines.push("  diff preview:");
+  if (before) {
+    lines.push("  --- before");
+    appendIndented(lines, before, maxChars);
+  }
+  if (after) {
+    lines.push("  +++ after");
+    appendIndented(lines, after, maxChars);
   }
 }
 
@@ -333,7 +369,11 @@ function fmtFileWrite(
   if (replacements > 0) {
     details.push(`${replacements} ${plural(replacements, "replacement")}`);
   }
-  return `file.write (${mode}) -> ${shortPath(file)}${details.length > 0 ? `, ${details.join(", ")}` : ""}`;
+  const output = [
+    `file.write (${mode}) -> ${shortPath(file)}${details.length > 0 ? `, ${details.join(", ")}` : ""}`,
+  ];
+  appendDiffPreview(output, result.snippets);
+  return output.join("\n");
 }
 
 function fmtSearchEditPreview(result: Record<string, unknown>): string | null {
@@ -380,16 +420,22 @@ function fmtSearchEditApply(result: Record<string, unknown>): string | null {
   const attempted = num(result.filesAttempted);
   const failed = num(result.filesFailed);
   const skipped = num(result.filesSkipped);
+  const fileEntriesByPath = new Map(
+    records(result.fileEntries).map((entry) => [str(entry.file), entry] as const),
+  );
   const lines = [
     `search.edit apply -> ${written}/${attempted} ${plural(attempted, "file")} written${failed > 0 ? `, ${failed} failed` : ""}${skipped > 0 ? `, ${skipped} skipped` : ""}`,
   ];
-  for (const item of records(result.results).slice(0, 5)) {
+  for (const [index, item] of records(result.results).slice(0, 5).entries()) {
     const file = str(item.file);
     const status = str(item.status) || "unknown";
     const reason = str(item.reason);
     lines.push(
       `  ${shortPath(file)}: ${status}${reason ? ` (${reason})` : ""}`,
     );
+    if (index < 2) {
+      appendDiffPreview(lines, fileEntriesByPath.get(file)?.snippets);
+    }
   }
   return lines.join("\n");
 }
@@ -418,7 +464,12 @@ function fmtFileGateway(
   if (op === "write") return fmtFileWrite(args, result);
   if (op === "read") return fmtFileRead(args, result);
   if (op === "previewWindow" || op === "sourceWindow") {
-    return fmtCodeNeedWindow(args, result);
+    const codeWindow = result.codeWindow;
+    const windowResult =
+      codeWindow && typeof codeWindow === "object" && !Array.isArray(codeWindow)
+        ? (codeWindow as Record<string, unknown>)
+        : result;
+    return fmtCodeNeedWindow(args, windowResult);
   }
   return op ? `sdl.file ${op} -> complete` : null;
 }
@@ -427,13 +478,30 @@ function fmtActionSearch(
   args: Record<string, unknown>,
   result: Record<string, unknown>,
 ): string | null {
+  const summary =
+    result.summary && typeof result.summary === "object" && !Array.isArray(result.summary)
+      ? (result.summary as Record<string, unknown>)
+      : undefined;
   const actions = records(result.actions);
-  const total = num(result.total) || actions.length;
+  const summaryActions = actionSummaryRecords(summary?.matchedActions);
+  const visibleActions = actions.length > 0 ? actions : summaryActions;
+  const total =
+    typeof result.total === "number"
+      ? result.total
+      : typeof summary?.total === "number"
+        ? summary.total
+        : visibleActions.length;
+  const matchedCount =
+    typeof summary?.matchedCount === "number"
+      ? summary.matchedCount
+      : typeof summary?.matchedActionsCount === "number"
+        ? summary.matchedActionsCount
+        : visibleActions.length;
   const query = str(args.query);
   const lines = [
-    `action.search "${truncName(query, 60)}" -> ${actions.length}/${total} ${plural(total, "action")}`,
+    `action.search "${truncName(query, 60)}" -> ${matchedCount}/${total} ${plural(total, "action")}`,
   ];
-  for (const action of actions.slice(0, 5)) {
+  for (const action of visibleActions.slice(0, 5)) {
     const name = str(action.action) || str(action.fn);
     const description = str(action.description);
     lines.push(

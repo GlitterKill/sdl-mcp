@@ -9,7 +9,10 @@ import {
   UsageStatsRequestSchema,
   type UsageStatsResponse,
 } from "../tools.js";
-import { tokenAccumulator } from "../token-accumulator.js";
+import {
+  tokenAccumulator,
+  type SessionUsageSnapshot,
+} from "../token-accumulator.js";
 import { getLadybugConn } from "../../db/ladybug.js";
 import {
   getUsageSnapshots,
@@ -24,6 +27,21 @@ import {
 } from "../savings-meter.js";
 import { ValidationError, DatabaseError } from "../errors.js";
 import { ZodError } from "zod";
+
+function limitSessionToolBreakdown(
+  snapshot: SessionUsageSnapshot,
+  limit?: number,
+): SessionUsageSnapshot {
+  if (limit === undefined) return snapshot;
+  return {
+    ...snapshot,
+    toolBreakdown: snapshot.toolBreakdown.slice(0, limit),
+  };
+}
+
+function limitEntries<T>(entries: T[], limit?: number): T[] {
+  return limit === undefined ? entries : entries.slice(0, limit);
+}
 
 
 const EMPTY_AGGREGATE: AggregateUsage = {
@@ -93,7 +111,10 @@ export async function handleUsageStats(
 
   // Session scope — in-memory accumulator
   if (request.scope === "session" || request.scope === "both") {
-    response.session = tokenAccumulator.getSnapshot();
+    response.session = limitSessionToolBreakdown(
+      tokenAccumulator.getSnapshot(),
+      request.limit,
+    );
   }
 
   // wire.packed summary — prefer session figures, fall back to history aggregate.
@@ -142,7 +163,9 @@ export async function handleUsageStats(
             : 0,
       }))
       .sort((a, b) => b.savedTokens - a.savedTokens)
-      .slice(0, 10);
+      .slice(0, request.limit ?? 10);
+
+    const displayToolEntries = limitEntries(allToolEntries, request.limit);
 
     response.history = {
       snapshots: snapshots.map((s) => ({
@@ -169,12 +192,12 @@ export async function handleUsageStats(
       response.formattedSummary = renderSessionSummary(
         response.session,
         ltAggregate,
-        allToolEntries,
+        displayToolEntries,
       );
     } else if (request.scope === "history") {
       response.formattedSummary = renderLifetimeSummary(
         ltAggregate,
-        allToolEntries,
+        displayToolEntries,
       );
     }
   }
@@ -182,10 +205,11 @@ export async function handleUsageStats(
   // Session-only: still fetch lifetime for the combined summary
   if (request.scope === "session" && response.session) {
     const { ltAggregate, allToolEntries } = await fetchLifetimeAggregate(request.repoId);
+    const displayToolEntries = limitEntries(allToolEntries, request.limit);
     response.formattedSummary = renderSessionSummary(
       response.session,
       ltAggregate,
-      allToolEntries,
+      displayToolEntries,
     );
   }
 

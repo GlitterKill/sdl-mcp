@@ -65,6 +65,20 @@ describe("code-mode workflow parser", () => {
     }
   });
 
+  it("disabled memory hint does not duplicate punctuation", () => {
+    const result = parseWorkflowRequest({
+      repoId: "test",
+      steps: [{ fn: "memory.query", args: { query: "auth" } }],
+      onError: "stop",
+    });
+
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.match(result.errors[0], /memory\.enabled: true in your sdlmcp\.config\.json\. Available:/);
+      assert.doesNotMatch(result.errors[0], /json\.\. Available/);
+    }
+  });
+
   it("forward $N reference rejected", () => {
     const result = parseWorkflowRequest({
       repoId: "test",

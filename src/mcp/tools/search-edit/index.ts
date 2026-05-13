@@ -167,6 +167,15 @@ async function handlePreview(
   });
 }
 
+function getApplyFileEntries(
+  plan: StoredPlan,
+): SearchEditApplyResponse["fileEntries"] | undefined {
+  const fileEntries = plan.summary.fileEntries;
+  return Array.isArray(fileEntries)
+    ? (fileEntries as SearchEditApplyResponse["fileEntries"])
+    : undefined;
+}
+
 async function handleApply(
   request: Extract<SearchEditRequest, { mode: "apply" }>,
 ): Promise<SearchEditApplyResponse> {
@@ -212,6 +221,7 @@ async function handleApply(
   // Fully applied (or rolled back) — remove the plan.
   store.remove(plan.planHandle);
 
+  const fileEntries = getApplyFileEntries(plan);
   const response: SearchEditApplyResponse = {
     mode: "apply",
     planHandle: request.planHandle,
@@ -220,6 +230,7 @@ async function handleApply(
     filesSkipped: batch.filesSkipped,
     filesFailed: batch.filesFailed,
     results: batch.results,
+    ...(fileEntries !== undefined && { fileEntries }),
     rollback: batch.rollback,
   };
   return attachRaw(response, computeAggregateRawBytes(plan));

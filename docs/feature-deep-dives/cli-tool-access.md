@@ -1,8 +1,8 @@
 # CLI Tool Access
 
-**Access 35 SDL-MCP action aliases directly from the command line without running an MCP transport.**
+**Access direct SDL-MCP action aliases plus `action.search` and `manual` metadata proxies from the command line without running an MCP transport.**
 
-The `sdl-mcp tool` command executes the same handler layer used by the MCP server, but it does not expose the entire runtime surface. It covers the CLI action definitions in [`src/cli/commands/tool-actions.ts`](../../src/cli/commands/tool-actions.ts), which currently includes 35 aliases across query, code, repo, and agent namespaces.
+The `sdl-mcp tool` command executes direct graph actions through the same gateway handler layer used by the MCP server, but it does not expose the entire runtime surface. It covers the CLI action definitions in [`src/cli/commands/tool-actions.ts`](../../src/cli/commands/tool-actions.ts), including 35 direct aliases across query, code, repo, and agent namespaces plus a small meta namespace for `action.search` and `manual`. The metadata proxies run in process and skip graph DB initialization.
 
 ---
 
@@ -25,6 +25,12 @@ sdl-mcp tool file.write --repo-id my-repo --file-path config/app.json \
 # Build a task-scoped graph slice
 sdl-mcp tool slice.build --repo-id my-repo --task-text "debug auth flow" --max-cards 50
 
+# Search the action catalog without opening the graph DB
+sdl-mcp tool action.search --query manual --summary-only
+
+# Render focused manual metadata without opening the graph DB
+sdl-mcp tool sdl.manual --actions action.search --format json
+
 # Show action-specific help
 sdl-mcp tool symbol.search --help
 ```
@@ -33,14 +39,14 @@ sdl-mcp tool symbol.search --help
 
 ## How It Works
 
-The CLI dispatcher bypasses MCP transport setup. It parses flags, loads config, initializes Ladybug, resolves the action, validates arguments with the same Zod schemas used by the MCP server, and then formats the result for terminal output.
+The CLI dispatcher bypasses MCP transport setup. It parses flags, loads config, resolves the action, validates arguments with the same Zod schemas used by the MCP server, and then formats the result for terminal output. Direct graph actions initialize LadybugDB before dispatch; `action.search` and `manual` skip graph initialization and call the shared metadata handlers directly.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
     Cmd["sdl-mcp tool symbol.search --query auth"]
     Parse["CLI arg parser<br/>type coercion + aliases"]
-    Init["Config + DB init<br/>same startup path as MCP server"]
+    Init["Config load<br/>DB init for graph actions"]
     Route["Action router + Zod validation<br/>same handler functions"]
     Output["Output formatter<br/>json | json-compact | pretty | table"]
 
@@ -64,6 +70,15 @@ flowchart TD
 ## Current Action Surface
 
 Run `sdl-mcp tool --list` to inspect the current aliases grouped by namespace.
+
+### Meta
+
+| Action          | Alias               | Description                                  |
+| :-------------- | :------------------ | :------------------------------------------- |
+| `action.search` | `sdl.action.search` | Search the action catalog without graph init |
+| `manual`        | `sdl.manual`        | Render focused manual metadata               |
+
+Only these two metadata tools are proxied through the CLI today.
 
 ### Query
 
@@ -120,7 +135,7 @@ Run `sdl-mcp tool --list` to inspect the current aliases grouped by namespace.
 | `memory.remove`        | Remove a development memory                 |
 | `memory.surface`       | Surface relevant memories                   |
 
-`sdl-mcp tool` does not expose Code Mode-only tools (`sdl.context`, `sdl.manual`, `sdl.workflow`, `sdl.file`). Use `file.write` for immediate single-file edits and `search.edit` when you want a preview/apply workflow across one or more files.
+`sdl-mcp tool` currently exposes only two Code Mode metadata proxies: `action.search` and `manual` (with `sdl.` aliases). `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only wrapper tools. Use `file.write` for immediate single-file edits and `search.edit` when you want a preview/apply workflow across one or more files.
 
 ---
 

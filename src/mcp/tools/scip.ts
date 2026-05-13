@@ -19,7 +19,7 @@ export async function handleScipIngest(
   _context?: ToolContext,
 ): Promise<object> {
   const request = ScipIngestRequestSchema.parse(args);
-  const { repoId, indexPath, dryRun } = request;
+  const { repoId, indexPath, dryRun, includePerFileCoverage } = request;
 
   const config = loadConfig();
   const scipConfig: ScipConfig = config.scip ?? {
@@ -59,6 +59,17 @@ export async function handleScipIngest(
     },
     scipConfig,
   );
+
+  if (!includePerFileCoverage) {
+    const resultRecord = { ...(result as unknown as Record<string, unknown>) };
+    const perFileCoverage = resultRecord.perFileCoverage;
+    if (Array.isArray(perFileCoverage)) {
+      delete resultRecord.perFileCoverage;
+      resultRecord.perFileCoverageCount = perFileCoverage.length;
+      resultRecord.perFileCoverageOmitted = true;
+    }
+    return resultRecord;
+  }
 
   return result;
 }

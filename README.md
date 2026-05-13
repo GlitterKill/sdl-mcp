@@ -477,7 +477,7 @@ flowchart LR
 
 ### CLI Tool Access — No MCP Server Required
 
-Access 35 SDL-MCP action aliases directly from the command line with `sdl-mcp tool`. No MCP server, transport, or SDK is required.
+Access SDL-MCP direct action aliases plus the low-risk `action.search` and `manual` metadata proxies from the command line with `sdl-mcp tool`. No MCP server, transport, or SDK is required.
 
 ```bash
 # Search for symbols
@@ -492,14 +492,18 @@ echo '{"repoId":"my-repo"}' | sdl-mcp tool symbol.search --query "auth"
 # Apply a single-file targeted write
 sdl-mcp tool file.write --repo-id my-repo --file-path config/app.json \
   --json-path server.port --json-value 8080
+
+# Discover and inspect metadata without opening the graph DB
+sdl-mcp tool action.search --query manual --summary-only
+sdl-mcp tool manual --actions action.search --format json
 ```
 
-Features include typed argument coercion (string, number, boolean, string[], json), budget flag merging, stdin JSON piping with CLI flag precedence, auto-resolved `repoId` from cwd, four output formats (json, json-compact, pretty, table), typo suggestions, and per-action `--help`. The CLI dispatches through the same gateway router and Zod schemas as the MCP server — identical code paths, identical validation.
+Features include typed argument coercion (string, number, boolean, string[], json), budget flag merging, stdin JSON piping with CLI flag precedence, auto-resolved `repoId` from cwd for graph actions, four output formats (json, json-compact, pretty, table), typo suggestions, and per-action `--help`. Direct graph actions dispatch through the same gateway router and Zod schemas as the MCP server; `action.search` and `manual` run in process against the same metadata handlers used by MCP registration.
 
 **Why it matters:**
 
-- 35 direct action aliases accessible from **any terminal** — no server, transport, or SDK required
-- Same code paths and Zod validation as the MCP server — identical behavior
+- 35 direct graph/action aliases plus `action.search` and `manual` metadata proxies accessible from **any terminal** - no server, transport, or SDK required
+- Direct graph actions keep gateway-router/Zod parity; metadata proxies share the same MCP registration handlers
 - Four output formats (json, json-compact, pretty, table) for scripting and CI pipelines
 - Auto-resolves repoId from cwd, supports stdin JSON piping and per-action `--help`
 

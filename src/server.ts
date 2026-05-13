@@ -38,6 +38,7 @@ import { getPackageVersion } from "./util/package-info.js";
 import {
   projectBroadContextResult,
   projectContextResultForUsageAccounting,
+  projectToolResultForModelContent,
 } from "./mcp/context-response-projection.js";
 import { logger } from "./util/logger.js";
 import {
@@ -115,15 +116,22 @@ export function buildToolResponseContentBlocks(
   primaryPayload: unknown,
   userDisplay: string | null,
   footerText: string,
+  toolName = "",
+  toolArgs: Record<string, unknown> = {},
 ): ToolResponseContentBlock[] {
+  const modelPayload = projectToolResultForModelContent(
+    toolName,
+    primaryPayload,
+    toolArgs,
+  );
   const contentBlocks: ToolResponseContentBlock[] = [
     {
       type: "text",
-      text: JSON.stringify(primaryPayload, null, 2),
+      text: JSON.stringify(modelPayload, null, 2),
     },
   ];
 
-  // Keep the machine-readable JSON first, then add human-readable surfaces for
+  // Keep model-facing JSON first, then add human-readable surfaces for
   // clients that render MCP content directly instead of logging notifications.
   if (userDisplay) {
     contentBlocks.push({
@@ -144,11 +152,15 @@ export function buildToolResponseEnvelope(
   primaryPayload: unknown,
   userDisplay: string | null,
   footerText: string,
+  toolName = "",
+  toolArgs: Record<string, unknown> = {},
 ): ToolResponseEnvelope {
   const content = buildToolResponseContentBlocks(
     primaryPayload,
     userDisplay,
     footerText,
+    toolName,
+    toolArgs,
   );
   return footerText ? { content, _displayFooter: footerText } : { content };
 }
@@ -322,7 +334,11 @@ export class MCPServer {
             if (result && typeof result === "object") {
               const r = result as Record<string, unknown>;
               const usageAccountingResult =
-                projectContextResultForUsageAccounting(request.params.name, r);
+                projectContextResultForUsageAccounting(
+                  request.params.name,
+                  r,
+                  normalizedArgs as Record<string, unknown>,
+                );
               if (
                 shouldAttachUsage(request.params.name) &&
                 usageAccountingResult._rawContext
@@ -531,6 +547,8 @@ export class MCPServer {
               primaryPayload,
               userDisplay,
               footerText,
+              request.params.name,
+              normalizedArgs as Record<string, unknown>,
             );
           } catch (error) {
             process.stderr.write(

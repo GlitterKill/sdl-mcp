@@ -23,7 +23,82 @@ import {
 } from "./tool-actions.js";
 import type { ActionDefinition } from "./tool-actions.js";
 import { parseToolArgs, buildParseArgsOptions } from "./tool-arg-parser.js";
-import { formatOutput, formatError, detectOutputFormat } from "./tool-output.js";
+import {
+  formatOutput,
+  formatError,
+  detectOutputFormat,
+  type OutputFormat,
+} from "./tool-output.js";
+import { anyRepoHasMemoryTools } from "../../config/memory-config.js";
+import { handleActionSearch, handleManual } from "../../code-mode/index.js";
+import { formatToolCallForUser } from "../../mcp/tool-call-formatter.js";
+
+const CLI_META_ALIASES = new Map<string, string>([
+  ["sdl.action.search", "action.search"],
+  ["sdl.manual", "manual"],
+]);
+
+const CLI_PROXY_META_ACTIONS = new Set(["action.search", "manual"]);
+const MCP_ONLY_META_ACTIONS = new Set(["context", "workflow", "file"]);
+const CANONICAL_META_TOOL_NAMES: Record<string, string> = {
+  "action.search": "sdl.action.search",
+  manual: "sdl.manual",
+};
+
+export function normalizeToolActionName(input: string): string {
+  return CLI_META_ALIASES.get(input) ?? input;
+}
+
+function stripSdlPrefix(input: string): string {
+  return input.replace(/^sdl\./, "");
+}
+
+function isUnsupportedMetaAction(input: string): boolean {
+  return MCP_ONLY_META_ACTIONS.has(stripSdlPrefix(input));
+}
+
+function unsupportedMetaActionMessage(input: string): string {
+  const name = stripSdlPrefix(input);
+  return `"${input}" is not available through sdl-mcp tool yet. Only action.search and manual are proxied metadata tools; use sdl.${name} through an MCP client.`;
+}
+
+function isCliProxyMetaAction(action: string): boolean {
+  return CLI_PROXY_META_ACTIONS.has(action);
+}
+
+function runCliProxyMetaAction(
+  action: string,
+  args: Record<string, unknown>,
+): object {
+  switch (action) {
+    case "action.search":
+      return handleActionSearch(args);
+    case "manual":
+      return handleManual(args);
+    default:
+      throw new Error(`action "${action}" is not a CLI-proxied meta action`);
+  }
+}
+
+function formatCliToolOutput(
+  action: string,
+  args: Record<string, unknown>,
+  result: unknown,
+  outputFormat: OutputFormat,
+): void {
+  if (outputFormat === "pretty") {
+    const toolName = CANONICAL_META_TOOL_NAMES[action];
+    const formatted = toolName
+      ? formatToolCallForUser(toolName, args, result)
+      : null;
+    if (formatted) {
+      console.log(formatted);
+      return;
+    }
+  }
+
+  formatOutput(result, outputFormat);
+}
 
 /**
  * Resolve repoId from options, config, or cwd.
@@ -88,25 +163,40 @@ async function readStdinJson(): Promise<Record<string, unknown> | undefined> {
 /**
  * Print the action listing grouped by namespace.
  */
-function printActionList(): void {
-  const namespaces = ["query", "code", "repo", "agent"] as const;
+function printActionList(showMemoryActions: boolean): void {
+  const namespaces = ["meta", "query", "code", "repo", "agent"] as const;
   const labels: Record<string, string> = {
-    query: "Query — Read-only intelligence queries",
-    code: "Code — Gated raw code access",
-    repo: "Repo — Repository lifecycle",
-    agent: "Agent — Agentic + live-edit operations",
+    meta: "Meta - Catalog and manual helpers",
+    query: "Query - Read-only intelligence queries",
+    code: "Code - Gated raw code access",
+    repo: "Repo - Repository lifecycle",
+    agent: "Agent - Agentic + live-edit operations",
   };
 
   console.log("\nAvailable actions:\n");
 
   for (const ns of namespaces) {
-    const actions = ACTION_DEFINITIONS.filter((a) => a.namespace === ns);
+    const actions = ACTION_DEFINITIONS.filter(
+      (a) => a.namespace === ns && (showMemoryActions || !a.action.startsWith("memory.")),
+    );
     console.log(`  ${labels[ns]}:`);
     for (const action of actions) {
       console.log(`    ${action.action.padEnd(26)} ${action.description}`);
     }
     console.log("");
   }
+
+  if (!showMemoryActions) {
+    console.log("  Memory actions are hidden because memory tools are disabled in the active config.\n");
+  }
+
+  console.log("CLI-proxied meta tools:");
+  console.log("  action.search (alias: sdl.action.search), manual (alias: sdl.manual)");
+  console.log("  These run in process and do not open the graph database.\n");
+
+  console.log("MCP-only meta tools:");
+  console.log("  sdl.context, sdl.workflow, sdl.file");
+  console.log("  These remain available through MCP clients only.\n");
 
   console.log("Usage:");
   console.log("  sdl-mcp tool <action> [flags]");
@@ -167,11 +257,17 @@ export function suggestAction(input: string): string | undefined {
 export async function toolDispatchCommand(
   options: ToolDispatchOptions,
 ): Promise<void> {
-  const { action, rawArgs } = options;
+  const { rawArgs } = options;
+  const requestedAction = options.action;
+  const action = requestedAction
+    ? normalizeToolActionName(requestedAction)
+    : undefined;
 
   // --list: show all actions
   if (options.list) {
-    printActionList();
+    const configPath = activateCliConfigPath(options.config);
+    const config = loadConfig(configPath);
+    printActionList(anyRepoHasMemoryTools(config));
     return;
   }
 
@@ -183,6 +279,10 @@ export async function toolDispatchCommand(
   // Look up action definition
   const definition = ACTION_MAP.get(action);
   if (!definition) {
+    if (requestedAction && isUnsupportedMetaAction(requestedAction)) {
+      throw new Error(unsupportedMetaActionMessage(requestedAction));
+    }
+
     const suggestion = suggestAction(action);
     const parts = [`unknown action "${action}"`];
     if (suggestion) {
@@ -236,9 +336,33 @@ export async function toolDispatchCommand(
 
   // Build handler args (validates required fields — repoId is resolved above)
   const handlerArgs = parseToolArgs(definition, actionValues, stdinArgs);
+  const outputFormat = detectOutputFormat(
+    (actionValues["output-format"] as string) ?? options.outputFormat,
+  );
 
-  // Initialize DB
-  await initGraphDb(config, configPath);
+  if (isCliProxyMetaAction(action)) {
+    const result = runCliProxyMetaAction(action, handlerArgs);
+    formatCliToolOutput(action, handlerArgs, result, outputFormat);
+    return;
+  }
+
+  // Initialize DB. Embedded LadybugDB allows a single writer/owner, so provide
+  // a direct remediation when the active MCP server already owns the graph file.
+  try {
+    await initGraphDb(config, configPath);
+  } catch (err) {
+    const message = formatError(err);
+    if (
+      /lock|locked|Cannot start a new write transaction|Cannot open database/i.test(
+        message,
+      )
+    ) {
+      throw new Error(
+        "sdl-mcp tool cannot open the graph database because another SDL-MCP server process appears to own it. Use the already-running MCP tools, stop that server, or run this command against a separate SDL_GRAPH_DB_PATH.",
+      );
+    }
+    throw err;
+  }
 
   // Build action map (gateway router — no MCP server needed)
   // liveIndex is undefined in CLI mode; buffer.* actions will error gracefully
@@ -255,8 +379,5 @@ export async function toolDispatchCommand(
   const result = await entry.handler(parsed);
 
   // Output
-  const outputFormat = detectOutputFormat(
-    (actionValues["output-format"] as string) ?? options.outputFormat,
-  );
   formatOutput(result, outputFormat);
 }

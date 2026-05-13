@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a dependency-free `/ui/config` visual configuration admin console with loopback-only write APIs, schema/semantic validation, redacted raw/effective snapshots, atomic save/backup/rollback, high-risk diff confirmation, and reusable JSON Pointer profiles.
 - Added opt-in phase timing diagnostics for `sdl.context`, `sdl.workflow`, `sdl.runtime.execute`, and `sdl.file`, plus observability aggregation for per-tool phase p95/max latency and LadybugDB query latency sampling.
 - Added `sdl.context` quality benchmark gates for lexical, confidence-gated default, and forced semantic retrieval recall, noise, and latency targets.
+- Added direct CLI metadata proxies for `action.search` and `manual` (including `sdl.` aliases) without graph DB initialization; `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only.
 
 ### Changed
 
@@ -23,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Bounded LadybugDB FTS retrieval by passing `TOP` separately from BM25 `K` in `QUERY_FTS_INDEX` calls.
 - SDL-MCP tool responses now include visible MCP content blocks for human-readable tool output, edit diff previews, and per-call token-savings meters instead of relying only on optional client logging notifications.
+- MCP content now defaults to model-facing projections that omit internal task IDs, cache/debug diagnostics, precondition snapshots, backup paths, live-index details, packed-wire stats, and duplicate `sdl.context` summaries unless the caller explicitly requests diagnostic surfaces; ETags remain visible for conditional follow-up calls.
+- `file.write` and `search.edit apply` responses now surface bounded before/after diff previews in visible tool output, matching `search.edit preview` behavior.
 
 ## [0.11.2] - 2026-05-11
 

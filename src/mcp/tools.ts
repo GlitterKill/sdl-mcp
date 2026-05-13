@@ -560,11 +560,40 @@ export const RepoRegisterRequestSchema = z.object({
   ignore: z.array(z.string()).optional(),
   languages: z.array(z.string()).optional(),
   maxFileBytes: z.number().int().min(1).optional(),
+  dryRun: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "If true, validate and report the proposed registration diff without writing repo config, versions, or enforcement assets.",
+    ),
+  updateExisting: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "Required to apply config changes to an already registered repo. Exact re-registers remain no-ops.",
+    ),
 });
 
 export const RepoRegisterResponseSchema = z.object({
   ok: z.boolean(),
   repoId: z.string().min(1),
+  dryRun: z.boolean().optional(),
+  changed: z.boolean().optional(),
+  requiresUpdateExisting: z.boolean().optional(),
+  message: z.string().optional(),
+  configChanges: z
+    .array(
+      z.object({
+        field: z.string(),
+        before: z.unknown().optional(),
+        after: z.unknown().optional(),
+      }),
+    )
+    .optional(),
+  currentConfig: z.record(z.string(), z.unknown()).optional(),
+  proposedConfig: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const RepoStatusRequestSchema = z.object({
@@ -1526,12 +1555,13 @@ export const GetSkeletonRequestSchema = z
   .object({
     repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
     symbolId: z.string().max(MAX_SYMBOL_ID_LENGTH).optional(),
+    symbolRef: SymbolRefSchema.optional(),
     file: z
       .string()
       .refine((p) => !p.includes(".."), {
         message: "Path traversal (..) is not allowed",
       })
-      .refine((p) => !/^[/\]/.test(p) && !/^[a-zA-Z]:/.test(p), {
+      .refine((p) => !/^[/\\]/.test(p) && !/^[a-zA-Z]:/.test(p), {
         message: "filePath must be relative",
       })
       .refine((p) => !p.includes("\0"), {
@@ -1545,10 +1575,15 @@ export const GetSkeletonRequestSchema = z
     skeletonOffset: z.number().int().min(0).optional(),
     ifNoneMatch: z.string().optional(),
   })
-  .refine((data) => data.symbolId !== undefined || data.file !== undefined, {
-    message: "Either symbolId or file must be provided",
-  });
-
+  .refine(
+    (data) =>
+      data.symbolId !== undefined ||
+      data.symbolRef !== undefined ||
+      data.file !== undefined,
+    {
+      message: "Either symbolId, symbolRef, or file must be provided",
+    },
+  );
 const GetSkeletonPayloadSchema = z.object({
   skeleton: z.string(),
   file: z.string(),
@@ -1954,6 +1989,10 @@ export const PRRiskAnalysisRequestSchema = z.object({
     .object({
       maxChangedSymbols: z.number().int().min(1).max(200).optional(),
       maxBlastRadius: z.number().int().min(1).max(200).optional(),
+      maxFindings: z.number().int().min(0).max(50).optional(),
+      maxEvidenceItems: z.number().int().min(0).max(50).optional(),
+      maxRecommendedTests: z.number().int().min(0).max(50).optional(),
+      maxNestedSymbols: z.number().int().min(0).max(200).optional(),
     })
     .optional(),
 });
@@ -2929,10 +2968,16 @@ export const ScipIngestRequestSchema = z.object({
     .describe(
       "If true, validate and parse the SCIP index without writing to the graph database.",
     ),
+  includePerFileCoverage: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "If true, include verbose per-file coverage details. Defaults to summary-only output.",
+    ),
 });
 
 export type ScipIngestRequest = z.infer<typeof ScipIngestRequestSchema>;
-
 // ============================================================================
 // Semantic Enrichment Schemas
 // ============================================================================
@@ -3064,6 +3109,15 @@ export const FileWriteRequestSchema = z.object({
 
 export type FileWriteRequest = z.infer<typeof FileWriteRequestSchema>;
 
+export interface DiffPreviewSnippets {
+  before: string;
+  after: string;
+  beforeStartLine: number;
+  beforeEndLine: number;
+  afterStartLine: number;
+  afterEndLine: number;
+}
+
 export interface FileWriteResponse {
   filePath: string;
   bytesWritten: number;
@@ -3078,6 +3132,7 @@ export interface FileWriteResponse {
     | "append";
   backupPath?: string;
   replacementCount?: number;
+  snippets?: DiffPreviewSnippets;
   /** Live-index sync result when writing an indexed source file. */
   indexUpdate?: {
     applied: boolean;
@@ -3193,14 +3248,7 @@ export interface SearchEditPreviewResponse {
     file: string;
     matchCount: number;
     editMode: FileWriteResponse["mode"];
-    snippets: {
-      before: string;
-      after: string;
-      beforeStartLine: number;
-      beforeEndLine: number;
-      afterStartLine: number;
-      afterEndLine: number;
-    };
+    snippets: DiffPreviewSnippets;
     indexedSource: boolean;
   }>;
   requiresApply: boolean;
@@ -3228,6 +3276,13 @@ export interface SearchEditApplyResponse {
     bytes?: number;
     reason?: string;
     indexUpdate?: FileWriteResponse["indexUpdate"];
+  }>;
+  fileEntries?: Array<{
+    file: string;
+    matchCount: number;
+    editMode: FileWriteResponse["mode"];
+    snippets: DiffPreviewSnippets;
+    indexedSource: boolean;
   }>;
   rollback: {
     triggered: boolean;

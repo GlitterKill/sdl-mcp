@@ -130,7 +130,7 @@ export function parseWorkflowRequest(
       const isMemoryFn =
         memoryNames.has(step.fn) || memoryNames.has(resolvedFn);
       const hint = isMemoryFn
-        ? ` — this tool is disabled. Enable with memory.enabled: true in your sdlmcp.config.json.`
+        ? ` — this tool is disabled. Enable with memory.enabled: true in your sdlmcp.config.json`
         : "";
       const available = Object.keys(fnNameMap);
       const availSummary =
