@@ -101,6 +101,58 @@ export function attachDisplayFooter(
   };
 }
 
+interface ToolResponseContentBlock {
+  type: "text";
+  text: string;
+}
+
+interface ToolResponseEnvelope extends Record<string, unknown> {
+  content: ToolResponseContentBlock[];
+  _displayFooter?: string;
+}
+
+export function buildToolResponseContentBlocks(
+  primaryPayload: unknown,
+  userDisplay: string | null,
+  footerText: string,
+): ToolResponseContentBlock[] {
+  const contentBlocks: ToolResponseContentBlock[] = [
+    {
+      type: "text",
+      text: JSON.stringify(primaryPayload, null, 2),
+    },
+  ];
+
+  // Keep the machine-readable JSON first, then add human-readable surfaces for
+  // clients that render MCP content directly instead of logging notifications.
+  if (userDisplay) {
+    contentBlocks.push({
+      type: "text",
+      text: userDisplay,
+    });
+  }
+  if (footerText) {
+    contentBlocks.push({
+      type: "text",
+      text: footerText,
+    });
+  }
+  return contentBlocks;
+}
+
+export function buildToolResponseEnvelope(
+  primaryPayload: unknown,
+  userDisplay: string | null,
+  footerText: string,
+): ToolResponseEnvelope {
+  const content = buildToolResponseContentBlocks(
+    primaryPayload,
+    userDisplay,
+    footerText,
+  );
+  return footerText ? { content, _displayFooter: footerText } : { content };
+}
+
 export class MCPServer {
   private server: Server;
   private tools: Map<string, ToolDefinition> = new Map();
@@ -266,6 +318,7 @@ export class MCPServer {
             let capturedUsage: TokenUsageMetadata | undefined;
             let tokensUsedForObs: number | undefined;
             let tokensSavedForObs: number | undefined;
+            let userDisplay: string | null = null;
             if (result && typeof result === "object") {
               const r = result as Record<string, unknown>;
               const usageAccountingResult =
@@ -321,7 +374,7 @@ export class MCPServer {
               }
 
               // Send human-readable tool call summary to user (MCP logging)
-              const userDisplay = formatToolCallForUser(
+              userDisplay = formatToolCallForUser(
                 request.params.name,
                 normalizedArgs as Record<string, unknown>,
                 r,
@@ -438,9 +491,15 @@ export class MCPServer {
                 toolContext.signal.removeEventListener("abort", abortHook);
               }
             }
-            timer.record("server.responseProcessing", responseProcessingStartedAt);
+            timer.record(
+              "server.responseProcessing",
+              responseProcessingStartedAt,
+            );
             if (includeDiagnostics) {
-              finalResult = attachTimingDiagnostics(finalResult, timer.snapshot());
+              finalResult = attachTimingDiagnostics(
+                finalResult,
+                timer.snapshot(),
+              );
             }
 
             logToolCall({
@@ -465,53 +524,14 @@ export class MCPServer {
             if (capturedSummary) {
               footerLines.push(capturedSummary);
             }
-            const primaryPayload = attachDisplayFooter(
-              finalResult,
-              footerLines.join("\n\n"),
+
+            const footerText = footerLines.join("\n\n");
+            const primaryPayload = attachDisplayFooter(finalResult, footerText);
+            return buildToolResponseEnvelope(
+              primaryPayload,
+              userDisplay,
+              footerText,
             );
-
-            // Wrap result in MCP content format
-            const contentBlocks: Array<{ type: string; text: string }> = [
-              {
-                type: "text",
-                text: JSON.stringify(primaryPayload, null, 2),
-              },
-            ];
-
-            // Build the footer text for clients that look at response-level
-            // _displayFooter. The content array is collapsed back to the
-            // primary JSON block below to avoid duplicate text items.
-            if (
-              capturedUsage &&
-              capturedUsage.sdlTokens < capturedUsage.rawEquivalent
-            ) {
-              contentBlocks.push({
-                type: "text",
-                text: `📊 ${formatTokenCount(capturedUsage.sdlTokens)} / ${formatTokenCount(capturedUsage.rawEquivalent)} tokens (SDL/raw-equiv) ${capturedUsage.meter}`,
-              });
-            }
-
-            // Preserve the usage.stats summary in the same footer surface.
-            if (capturedSummary) {
-              contentBlocks.push({
-                type: "text",
-                text: capturedSummary,
-              });
-            }
-
-            // Add _displayFooter at response level for Claude Code CLI visibility
-            const responseLevelDisplayFooter =
-              footerLines.length > 0 ? footerLines.join("\n\n") : undefined;
-            // Keep the MCP content payload to one JSON block. The same footer
-            // text is exposed through _displayFooter, avoiding duplicate text
-            // items in clients that render both surfaces.
-            contentBlocks.length = 1;
-            return responseLevelDisplayFooter
-              ? {
-                  content: contentBlocks,
-                  _displayFooter: responseLevelDisplayFooter,
-                }
-              : { content: contentBlocks };
           } catch (error) {
             process.stderr.write(
               `[sdl-mcp] Tool ${request.params.name} error: ${error}\n`,

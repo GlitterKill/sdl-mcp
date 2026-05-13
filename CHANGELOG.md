@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Bounded LadybugDB FTS retrieval by passing `TOP` separately from BM25 `K` in `QUERY_FTS_INDEX` calls.
+- SDL-MCP tool responses now include visible MCP content blocks for human-readable tool output, edit diff previews, and per-call token-savings meters instead of relying only on optional client logging notifications.
 
 ## [0.11.2] - 2026-05-11
 
