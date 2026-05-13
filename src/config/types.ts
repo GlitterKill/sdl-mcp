@@ -944,11 +944,6 @@ export const AppConfigSchema = z.object({
    * Set this to "mid" to opt out of auto-scaling on large machines.
    */
   performanceTier: PerformanceTierSchema.default("auto"),
-  /**
-   * Deprecated legacy SQLite path (v0.7.x). Only used by the one-time
-   * SQLite→Ladybug migration script in v0.8.
-   */
-  dbPath: z.string().min(1).optional(),
   graphDatabase: GraphDatabaseConfigSchema.optional(),
   policy: PolicyConfigSchema,
   redaction: RedactionConfigSchema.optional(),

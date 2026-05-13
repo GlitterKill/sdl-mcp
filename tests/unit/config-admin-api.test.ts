@@ -306,5 +306,9 @@ describe("config admin API", () => {
     }
     assert.ok(coverage.secretPaths.includes("/httpAuth/token"));
     assert.ok(coverage.highRiskPaths.includes("/graphDatabase/path"));
+    assert.deepEqual(
+      coverage.topLevelPaths.filter((path) => path.startsWith("/graphDatabase")),
+      ["/graphDatabase/path"],
+    );
   });
 });

@@ -90,6 +90,13 @@ h2 { color: var(--admin-accent); font-family: var(--admin-mono); font-size: 12px
 .full-width { grid-column: 1 / -1; }
 .control { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .control label { color: var(--admin-dim); font-family: var(--admin-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+.field-title-wrap, .control-label-row { align-items: center; display: flex; gap: 6px; min-width: 0; }
+.field-help { align-items: center; background: rgba(0, 240, 255, 0.06); border: 1px solid var(--admin-border); border-radius: 999px; color: var(--admin-accent); cursor: help; display: inline-flex; flex: 0 0 auto; font-family: var(--admin-mono); font-size: 10px; height: 16px; justify-content: center; line-height: 1; position: relative; width: 16px; }
+.field-help:focus-visible { border-color: var(--admin-accent); outline: none; }
+.field-help-tooltip { background: var(--admin-panel-solid); border: 1px solid var(--admin-border-strong); border-radius: 2px; box-shadow: 0 16px 36px rgba(0, 0, 0, 0.42); color: var(--admin-text); font-family: var(--admin-sans); font-size: 11px; font-weight: 400; left: 50%; letter-spacing: 0; line-height: 1.45; opacity: 0; padding: 9px 10px; pointer-events: none; position: absolute; text-transform: none; top: calc(100% + 7px); transform: translate(-50%, -2px); transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease; visibility: hidden; width: min(300px, 72vw); z-index: 30; }
+.field-help-tooltip::before { border: 6px solid transparent; border-bottom-color: var(--admin-border-strong); content: ""; left: 50%; position: absolute; top: -12px; transform: translateX(-50%); }
+.field-help:hover .field-help-tooltip, .field-help:focus-visible .field-help-tooltip { opacity: 1; transform: translate(-50%, 0); visibility: visible; }
+
 input, textarea, select {
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid var(--admin-border);

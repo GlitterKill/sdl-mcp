@@ -138,7 +138,6 @@ const PROFILE_DIR = join(homedir(), ".sdl-mcp", "config-profiles");
 const TOP_LEVEL_KNOWN_KEYS = new Set([
   "repos",
   "performanceTier",
-  "dbPath",
   "graphDatabase",
   "policy",
   "redaction",

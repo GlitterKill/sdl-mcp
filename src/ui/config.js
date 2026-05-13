@@ -10,7 +10,7 @@ const state = {
   dirty: [],
   validation: null,
   pendingAction: null,
-  token: sessionStorage.getItem("sdlConfigToken") ?? "",
+  token: globalThis.sessionStorage?.getItem("sdlConfigToken") ?? "",
 };
 
 const els = {};
@@ -160,6 +160,200 @@ function classifyField(pointer, value) {
   if (typeof value === "string" || value === undefined || value === null) return "string";
   if (Array.isArray(value)) return "array";
   return "object";
+}
+
+function fallbackControlLabel(pointer) {
+  return pointer === "/" ? "root" : decodePointer(pointer).slice(-2).join(" / ");
+}
+
+function controlLabel(pointer, meta = {}) {
+  // Parent metadata still carries risk/control hints for nested leaves, but its
+  // section-level label should not replace the actual value path label.
+  return meta.path === pointer && meta.label ? meta.label : fallbackControlLabel(pointer);
+}
+
+const AREA_EFFECTS = Object.freeze({
+  cache: "cache capacity and memory use",
+  codeMode: "Code Mode tool exposure and workflow execution",
+  concurrency: "server-side request scheduling",
+  diagnostics: "TypeScript diagnostics collection",
+  gateway: "MCP tool registration and gateway routing",
+  graphDatabase: "LadybugDB graph storage",
+  http: "HTTP transport behavior",
+  httpAuth: "HTTP bearer-token authentication",
+  indexing: "repository indexing throughput and freshness",
+  liveIndex: "live draft indexing and reconciliation",
+  memory: "development-memory storage and surfacing",
+  observability: "dashboard metrics and streaming",
+  parallelScorer: "parallel graph scoring",
+  plugins: "plugin discovery and compatibility checks",
+  policy: "raw-code access policy and code-window budgets",
+  prefetch: "proactive context prefetching",
+  redaction: "secret redaction before data leaves the server",
+  runtime: "runtime command execution and artifact handling",
+  scip: "SCIP index generation and ingest",
+  security: "repository access guardrails",
+  semantic: "semantic search, embeddings, summaries, and retrieval",
+  semanticEnrichment: "provider-backed graph precision enrichment",
+  slice: "graph slice retrieval",
+  tracing: "OpenTelemetry tracing",
+  wire: "packed response encoding",
+});
+
+const FIELD_EFFECTS = Object.freeze({
+  "/policy/maxWindowLines": "Limits how many source lines a raw code window can return in one response.",
+  "/policy/maxWindowTokens": "Limits the token budget for raw code windows so oversized files cannot flood context.",
+  "/policy/requireIdentifiers": "Requires raw-code requests to name identifiers they expect to inspect before code is returned.",
+  "/policy/allowBreakGlass": "Allows an explicit break-glass request to bypass normal raw-code gating when policy would otherwise deny it.",
+  "/policy/defaultDenyRaw": "Denies raw-code access by default unless a request satisfies the configured proof-of-need checks.",
+  "/slice/defaultMaxCards": "Limits how many symbol cards a graph slice includes by default.",
+  "/slice/defaultMaxTokens": "Limits the default token budget for graph slice responses.",
+  "/slice/edgeWeights/call": "Controls how strongly call relationships pull neighboring symbols into a graph slice.",
+  "/slice/edgeWeights/import": "Controls how strongly import relationships pull neighboring files and symbols into a graph slice.",
+  "/slice/edgeWeights/config": "Controls how strongly configuration relationships influence graph slice expansion.",
+  "/indexing/concurrency": "Sets how many indexing tasks can run in parallel during repository refresh.",
+  "/indexing/pass2Concurrency": "Sets parallelism for the second indexing pass that resolves cross-file relationships.",
+  "/indexing/enableFileWatching": "Turns automatic file watching on or off after a repository is indexed.",
+  "/indexing/maxWatchedFiles": "Caps how many files the live watcher will track for a repository.",
+  "/indexing/watchDebounceMs": "Sets how long file watching waits for changes to settle before reindexing.",
+  "/liveIndex/enabled": "Turns draft-buffer indexing on or off for unsaved editor changes.",
+  "/liveIndex/debounceMs": "Sets how long live indexing waits after edits before updating draft state.",
+  "/liveIndex/maxDraftFiles": "Caps how many draft files can be tracked at once.",
+  "/diagnostics/maxErrors": "Caps how many diagnostics are returned before truncating the result.",
+  "/diagnostics/timeoutMs": "Sets how long diagnostics collection may run before timing out.",
+  "/cache/symbolCardMaxEntries": "Caps how many symbol-card responses stay in the in-process cache.",
+  "/cache/symbolCardMaxSizeBytes": "Caps memory used by cached symbol-card responses.",
+  "/cache/graphSliceMaxEntries": "Caps how many graph-slice responses stay in the in-process cache.",
+  "/cache/graphSliceMaxSizeBytes": "Caps memory used by cached graph-slice responses.",
+  "/semantic/enabled": "Turns embedding-backed semantic retrieval features on or off.",
+  "/semantic/generateSummaries": "Turns LLM summary generation on or off during semantic indexing.",
+  "/semantic/embeddingConcurrency": "Sets how many embedding batches can run in parallel during semantic refresh.",
+  "/semantic/embeddingBatchSize": "Sets how many symbols are embedded in each embedding inference batch.",
+  "/semantic/retrieval/mode": "Chooses between legacy semantic reranking and the hybrid FTS plus vector retrieval pipeline.",
+  "/semantic/retrieval/candidateLimit": "Caps how many retrieval candidates are fused and reranked before returning context.",
+  "/runtime/maxDurationMs": "Sets the maximum runtime command duration before SDL-MCP stops the process.",
+  "/runtime/maxConcurrentJobs": "Caps how many runtime executions can run at the same time.",
+  "/runtime/maxStdoutBytes": "Caps captured stdout bytes for runtime execution results.",
+  "/runtime/maxStderrBytes": "Caps captured stderr bytes for runtime execution results.",
+  "/runtime/maxArtifactBytes": "Caps the size of any single runtime artifact stored from command execution.",
+  "/observability/sampleIntervalMs": "Sets how often the observability dashboard samples current server metrics.",
+  "/observability/retentionShortMinutes": "Controls how long high-resolution observability samples are retained.",
+  "/observability/retentionLongHours": "Controls how long downsampled observability history is retained.",
+  "/observability/sseHeartbeatMs": "Sets how often dashboard SSE streams send heartbeat events to keep connections alive.",
+  "/concurrency/maxSessions": "Caps how many client sessions can be active at the same time.",
+  "/concurrency/maxToolConcurrency": "Caps how many tool requests can execute concurrently.",
+  "/concurrency/readPoolSize": "Sets the size of the read-side worker pool for concurrent DB reads.",
+  "/concurrency/writeQueueTimeoutMs": "Sets how long DB write work can wait in the queue before timing out.",
+  "/concurrency/toolQueueTimeoutMs": "Sets how long tool work can wait for an execution slot before timing out.",
+  "/scip/autoIngestOnRefresh": "Automatically ingests configured SCIP indexes after an index refresh.",
+  "/scip/generator/autoInstall": "Allows SDL-MCP to install the configured SCIP generator when it is missing.",
+  "/scip/generator/cleanupAfterIngest": "Removes generated SCIP artifacts after ingest completes.",
+  "/httpAuth/rateLimit/bucketSize": "Sets the failed-auth burst size allowed before HTTP auth rate limiting starts.",
+  "/httpAuth/rateLimit/refillPerSec": "Sets how quickly failed-auth rate-limit capacity recovers.",
+  "/codeMode/maxWorkflowSteps": "Caps how many actions a single Code Mode workflow may execute.",
+  "/codeMode/maxWorkflowTokens": "Caps the token budget for a single Code Mode workflow response.",
+  "/codeMode/maxWorkflowDurationMs": "Caps how long a Code Mode workflow may run before timing out.",
+});
+
+function sentence(text) {
+  if (!text) return "";
+  const trimmed = text.trim();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+function humanizeKey(key) {
+  return String(key)
+    .replace(/[-_]/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase();
+}
+
+function areaEffectForPointer(pointer, meta = {}) {
+  const [root] = decodePointer(pointer);
+  if (AREA_EFFECTS[root]) return AREA_EFFECTS[root];
+  if (meta.path === pointer && meta.label) return humanizeKey(meta.label);
+  if (meta.label) return humanizeKey(meta.label);
+  return "this configuration area";
+}
+
+function derivedFieldEffect(pointer, meta = {}) {
+  const parts = decodePointer(pointer);
+  const key = parts.at(-1) ?? pointer;
+  const label = humanizeKey(key);
+  const area = areaEffectForPointer(pointer, meta);
+
+  if (key === "enabled") return `Turns ${area} on or off.`;
+  if (/^enable[A-Z]/.test(key)) return `Turns ${humanizeKey(key.replace(/^enable/, ""))} on or off for ${area}.`;
+  if (/^allow[A-Z]/.test(key)) return `Allows ${humanizeKey(key.replace(/^allow/, ""))} for ${area}.`;
+  if (/^require[A-Z]/.test(key)) return `Requires ${humanizeKey(key.replace(/^require/, ""))} for ${area}.`;
+  if (/timeoutMs$/i.test(key)) return `Sets how long ${area} operations may run before timing out.`;
+  if (/debounceMs$/i.test(key)) return `Sets how long ${area} waits for changes to settle before acting.`;
+  if (/concurrency$/i.test(key) || /poolSize$/i.test(key)) return `Sets parallelism for ${area}.`;
+  if (/batchSize$/i.test(key)) return `Sets how many items ${area} processes per batch.`;
+  if (/max[A-Z]/.test(key)) return `Caps ${label.replace(/^max /, "")} for ${area}.`;
+  if (/retention/i.test(key)) return `Controls how long ${area} history is retained.`;
+  if (/path|dir|root/i.test(key)) return `Sets a filesystem location used by ${area}.`;
+  if (/token|apiKey|secret|password/i.test(key)) return `Supplies secret credentials used by ${area}.`;
+  if (/model/i.test(key)) return `Selects the model used by ${area}.`;
+  if (/provider/i.test(key)) return `Selects the provider used by ${area}.`;
+  if (/mode|strategy|type/i.test(key)) return `Chooses the operating mode for ${area}.`;
+  if (/args|binary|executable|command/i.test(key)) return `Controls the command SDL-MCP runs for ${area}.`;
+  return `Sets ${label} for ${area}.`;
+}
+
+function fieldHelpDescription(pointer, meta = {}) {
+  if (meta.path === pointer && meta.description) return sentence(meta.description);
+  if (FIELD_EFFECTS[pointer]) return FIELD_EFFECTS[pointer];
+  return derivedFieldEffect(pointer, meta);
+}
+
+function validOptionsDescription(kind, meta = {}) {
+  if (meta.options?.length) {
+    return `${meta.options.join(", ")}, or leave unauthored to use the default`;
+  }
+  if (kind === "boolean") return "true or false";
+  if (kind === "number") return "a finite number";
+  if (kind === "secret") return "keep the existing secret, enter a replacement, or leave unset";
+  if (kind === "array") return "a valid JSON array";
+  if (kind === "object") return "a valid JSON object";
+  if (kind === "select") return "one of the configured options";
+  if (meta.pathLike) return "a filesystem path string";
+  return "text, or leave empty when optional";
+}
+
+function fieldTooltipText(pointer, value, meta = {}, kind = classifyField(pointer, value)) {
+  return [
+    fieldHelpDescription(pointer, meta),
+    `Valid entries: ${validOptionsDescription(kind, meta)}.`,
+  ].join(" ");
+}
+
+export function configControlLabelForTest(pointer, meta = {}) {
+  return controlLabel(pointer, meta);
+}
+
+export function configFieldTooltipForTest(pointer, value, meta = {}) {
+  return fieldTooltipText(pointer, value, meta);
+}
+
+let tooltipId = 0;
+
+function createFieldHelp(helpText) {
+  const trigger = document.createElement("span");
+  const tooltip = document.createElement("span");
+  const id = `field-help-${tooltipId += 1}`;
+  trigger.className = "field-help";
+  trigger.tabIndex = 0;
+  trigger.setAttribute("role", "button");
+  trigger.setAttribute("aria-label", "Field help");
+  trigger.setAttribute("aria-describedby", id);
+  trigger.textContent = "?";
+  tooltip.id = id;
+  tooltip.className = "field-help-tooltip";
+  tooltip.setAttribute("role", "tooltip");
+  tooltip.textContent = helpText;
+  trigger.append(tooltip);
+  return trigger;
 }
 
 function diffJson(before, after, pointer = "") {
@@ -354,22 +548,26 @@ function renderFieldCard(field) {
   const card = document.createElement("article");
   card.className = "field-card";
 
+  const control = classifyField(field.path, value);
   const head = document.createElement("div");
   head.className = "field-head";
-  head.innerHTML = `<span class="field-title">${escapeHtml(field.label)}</span>`;
+  const titleWrap = document.createElement("div");
+  titleWrap.className = "field-title-wrap";
+  const title = document.createElement("span");
+  title.className = "field-title";
+  title.textContent = field.label;
+  titleWrap.append(title, createFieldHelp(fieldTooltipText(field.path, value, field, control)));
   const badges = document.createElement("div");
   badges.className = "badge-row";
   for (const item of field.impact ?? []) badges.append(badge(impactLabel(item), item === "appliesImmediately" ? "ok" : undefined));
   if (field.highRisk) badges.append(badge("high risk", "warn"));
-  head.append(badges);
+  head.append(titleWrap, badges);
   card.append(head);
 
   const desc = document.createElement("p");
   desc.className = "field-desc";
   desc.textContent = field.description;
   card.append(desc);
-
-  const control = classifyField(field.path, value);
   if (control === "object" || control === "array") {
     const leaves = collectLeaves(value ?? (control === "array" ? [] : {}), field.path);
     if (leaves.length > 0) {
@@ -396,14 +594,16 @@ function renderPrimitiveControl(pointer, value, explicitMeta) {
   const meta = explicitMeta ?? metadataFor(pointer) ?? {};
   if (isSecretPlaceholder(value) || meta.control === "secret") return renderSecretControl(pointer, value, meta);
 
-  const label = pointer === "/" ? "root" : decodePointer(pointer).slice(-2).join(" / ");
   const kind = classifyField(pointer, value);
   const control = document.createElement("div");
   control.className = `control control-${kind}`;
 
+  const labelRow = document.createElement("div");
+  labelRow.className = "control-label-row";
   const labelEl = document.createElement("label");
-  labelEl.textContent = meta.label ?? label;
-  control.append(labelEl);
+  labelEl.textContent = controlLabel(pointer, meta);
+  labelRow.append(labelEl, createFieldHelp(fieldTooltipText(pointer, value, meta, kind)));
+  control.append(labelRow);
 
   if (meta.options?.length) {
     const select = document.createElement("select");
@@ -462,9 +662,12 @@ function renderPrimitiveControl(pointer, value, explicitMeta) {
 function renderSecretControl(pointer, value, meta = {}) {
   const control = document.createElement("div");
   control.className = "control secret-control";
+  const labelRow = document.createElement("div");
+  labelRow.className = "control-label-row";
   const label = document.createElement("label");
-  label.textContent = meta.label ?? decodePointer(pointer).slice(-1)[0] ?? pointer;
-  control.append(label);
+  label.textContent = controlLabel(pointer, meta);
+  labelRow.append(label, createFieldHelp(fieldTooltipText(pointer, value, meta, "secret")));
+  control.append(labelRow);
 
   const row = document.createElement("div");
   row.className = "secret-row";
@@ -503,8 +706,13 @@ function renderSecretControl(pointer, value, meta = {}) {
 function renderRawEditor(pointer, label, value) {
   const wrapper = document.createElement("div");
   wrapper.className = "control raw-editor";
+  const meta = metadataFor(pointer) ?? {};
+  const kind = classifyField(pointer, value);
+  const labelRow = document.createElement("div");
+  labelRow.className = "control-label-row";
   const labelEl = document.createElement("label");
   labelEl.textContent = label;
+  labelRow.append(labelEl, createFieldHelp(fieldTooltipText(pointer, value, meta, kind)));
   const textarea = document.createElement("textarea");
   textarea.spellcheck = false;
   textarea.value = formatJson(value ?? {});
@@ -519,7 +727,7 @@ function renderRawEditor(pointer, label, value) {
       textarea.setAttribute("aria-invalid", "true");
     }
   });
-  wrapper.append(labelEl, textarea);
+  wrapper.append(labelRow, textarea);
   return wrapper;
 }
 
@@ -834,7 +1042,9 @@ function bindDom() {
   els.profileForm.addEventListener("submit", createProfile);
 }
 
-bindDom();
-loadConfig().catch((error) => {
-  showAlert(error instanceof Error ? error.message : String(error));
-});
+if (typeof document !== "undefined") {
+  bindDom();
+  loadConfig().catch((error) => {
+    showAlert(error instanceof Error ? error.message : String(error));
+  });
+}

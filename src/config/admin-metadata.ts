@@ -81,7 +81,6 @@ export const CONFIG_UI_FIELD_METADATA: ConfigUiFieldMeta[] = [
   { path: "/performanceTier", section: "performance", label: "Performance Tier", control: "select", description: "Auto-tune or pin concurrency defaults for the host.", options: ["auto", "mid", "high", "extreme"], impact: restart },
   { path: "/repos", section: "repos", label: "Repositories", control: "array", description: "Registered repos and per-repo indexing settings.", impact: reindex, pathLike: true },
   { path: "/graphDatabase/path", section: "graphDatabase", label: "Graph Database Path", control: "string", description: "LadybugDB file path for graph persistence.", impact: restart, highRisk: true, pathLike: true },
-  { path: "/dbPath", section: "graphDatabase", label: "Legacy DB Path", control: "string", description: "Legacy graph database path alias preserved for older configs.", impact: restart, highRisk: true, pathLike: true },
   { path: "/policy", section: "policy", label: "Policy", control: "object", description: "Code-window, break-glass, and token-budget policy.", impact: restart },
   { path: "/redaction", section: "redaction", label: "Redaction", control: "object", description: "Secret redaction defaults and custom regex patterns.", impact: restart, highRisk: true },
   { path: "/indexing", section: "indexing", label: "Indexing", control: "object", description: "Indexer engine, watchers, and concurrency.", impact: reindex },
