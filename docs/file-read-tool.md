@@ -18,6 +18,9 @@ The `file.read` tool provides token-efficient file reading for non-indexed files
 
 ---
 
+MCP responses are human-first: visible `content` summarizes the read in a concise form, while the actual task data is available in `structuredContent` with fields such as `filePath`, `content`, `etag`, byte counts, truncation state, and pagination hints. Internal timing, packed stats, and logging-only fields are not shown unless diagnostics are explicitly requested.
+
+
 ## Overview
 
 ```mermaid

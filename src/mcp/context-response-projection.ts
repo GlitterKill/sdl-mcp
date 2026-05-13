@@ -34,10 +34,18 @@ const ALWAYS_INTERNAL_MODEL_FIELDS = new Set([
   "_packedStats",
   "_rawContext",
   "_tokenUsage",
+  "actionsTaken",
   "backupPath",
   "indexUpdate",
+  "metrics",
+  "packedStats",
   "preconditionSnapshot",
+  "rawEquivalent",
+  "serverDiagnostics",
   "taskId",
+  "timings",
+  "totalTokens",
+  "trace",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {

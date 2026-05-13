@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `sdl.context` now uses confidence-gated hybrid retrieval for unscoped natural-language requests; `options.semantic: true` forces hybrid, `options.semantic: false` preserves lexical-only behavior, and exact symbol or explicit scope lookups stay on the fast path.
+- Tool responses are now human-first across the MCP and CLI surfaces: visible `content`/terminal output is concise text, projected task data lives in `structuredContent`, and JSON-first consumers should switch to `structuredContent` or explicit JSON output modes.
 - Stdio server startup now defers file watcher initialization until after tool serving begins, avoiding watcher/DB contention on the first tool call.
 - LadybugDB stored-procedure row reads now materialize and close result handles under the per-connection mutex via a shared helper, improving latency accounting and avoiding leaked live query results.
 

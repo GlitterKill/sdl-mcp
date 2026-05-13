@@ -45,6 +45,10 @@ const CANONICAL_META_TOOL_NAMES: Record<string, string> = {
   manual: "sdl.manual",
 };
 
+function canonicalToolNameForCliAction(action: string): string {
+  return CANONICAL_META_TOOL_NAMES[action] ?? (action.startsWith("sdl.") ? action : `sdl.${action}`);
+}
+
 export function normalizeToolActionName(input: string): string {
   return CLI_META_ALIASES.get(input) ?? input;
 }
@@ -80,17 +84,18 @@ function runCliProxyMetaAction(
   }
 }
 
-function formatCliToolOutput(
+export function formatCliToolOutput(
   action: string,
   args: Record<string, unknown>,
   result: unknown,
   outputFormat: OutputFormat,
 ): void {
   if (outputFormat === "pretty") {
-    const toolName = CANONICAL_META_TOOL_NAMES[action];
-    const formatted = toolName
-      ? formatToolCallForUser(toolName, args, result)
-      : null;
+    const formatted = formatToolCallForUser(
+      canonicalToolNameForCliAction(action),
+      args,
+      result,
+    );
     if (formatted) {
       console.log(formatted);
       return;
@@ -220,7 +225,7 @@ function printActionHelp(definition: ActionDefinition): void {
   }
 
   console.log("\nGlobal Flags:");
-  console.log("  --output-format <format>   json|json-compact|pretty|table (default: json)");
+  console.log("  --output-format <format>   pretty|json|json-compact|table (default: pretty)");
   console.log("  --help                     Show this help");
 
   if (definition.examples.length > 0) {
@@ -379,5 +384,10 @@ export async function toolDispatchCommand(
   const result = await entry.handler(parsed);
 
   // Output
-  formatOutput(result, outputFormat);
+  formatCliToolOutput(
+    action,
+    parsed as Record<string, unknown>,
+    result,
+    outputFormat,
+  );
 }

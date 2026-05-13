@@ -20,6 +20,9 @@ file whose sha256/mtime has drifted since the preview was taken.
 
 ## When to use `search.edit` vs `file.write`
 
+MCP responses are human-first. Preview and apply results show concise visible summaries with bounded diff snippets, while `structuredContent` carries task data such as `planHandle`, file entries, status, `etag`, and error details. Internal precondition snapshots, rollback bookkeeping, timings, and packed/debug stats stay out of normal visible/model-facing output unless diagnostics are explicitly requested.
+
+
 | Tool              | Use when                                                                                                         |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `sdl.file.write`  | Single file, single mode (replaceLines, replacePattern, jsonPath, insertAt, append, overwrite). Immediate apply. |

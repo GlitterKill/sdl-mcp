@@ -51,8 +51,8 @@ export function detectOutputFormat(
     }
   }
 
-  // Default to JSON (machine-readable, pipeable)
-  return "json";
+  // Default to human-readable output; scripts can opt into JSON explicitly.
+  return "pretty";
 }
 
 // ---------------------------------------------------------------------------

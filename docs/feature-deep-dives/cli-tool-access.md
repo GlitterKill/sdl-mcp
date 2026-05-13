@@ -41,6 +41,9 @@ sdl-mcp tool symbol.search --help
 
 The CLI dispatcher bypasses MCP transport setup. It parses flags, loads config, resolves the action, validates arguments with the same Zod schemas used by the MCP server, and then formats the result for terminal output. Direct graph actions initialize LadybugDB before dispatch; `action.search` and `manual` skip graph initialization and call the shared metadata handlers directly.
 
+
+By default, terminal output is human-readable rather than raw JSON. Use `--output-format json` or `--output-format json-compact` when a script needs machine-readable output. The MCP transport follows the same human-first rule in its visible `content` text while exposing projected task data through `structuredContent`; internal timing, packing, logging, and raw-context fields are omitted unless explicitly requested for diagnostics.
+
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD

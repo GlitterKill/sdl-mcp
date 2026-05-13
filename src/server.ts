@@ -109,7 +109,15 @@ interface ToolResponseContentBlock {
 
 interface ToolResponseEnvelope extends Record<string, unknown> {
   content: ToolResponseContentBlock[];
+  structuredContent?: Record<string, unknown>;
   _displayFooter?: string;
+}
+
+function asStructuredContent(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return { value };
 }
 
 export function buildToolResponseContentBlocks(
@@ -119,26 +127,15 @@ export function buildToolResponseContentBlocks(
   toolName = "",
   toolArgs: Record<string, unknown> = {},
 ): ToolResponseContentBlock[] {
-  const modelPayload = projectToolResultForModelContent(
-    toolName,
-    primaryPayload,
-    toolArgs,
-  );
+  const displayText =
+    userDisplay ?? formatToolCallForUser(toolName, toolArgs, primaryPayload);
   const contentBlocks: ToolResponseContentBlock[] = [
     {
       type: "text",
-      text: JSON.stringify(modelPayload, null, 2),
+      text: displayText ?? `${toolName || "tool"} -> complete`,
     },
   ];
 
-  // Keep model-facing JSON first, then add human-readable surfaces for
-  // clients that render MCP content directly instead of logging notifications.
-  if (userDisplay) {
-    contentBlocks.push({
-      type: "text",
-      text: userDisplay,
-    });
-  }
   if (footerText) {
     contentBlocks.push({
       type: "text",
@@ -162,7 +159,15 @@ export function buildToolResponseEnvelope(
     toolName,
     toolArgs,
   );
-  return footerText ? { content, _displayFooter: footerText } : { content };
+  const modelPayload = projectToolResultForModelContent(
+    toolName,
+    primaryPayload,
+    toolArgs,
+  );
+  const structuredContent = asStructuredContent(modelPayload);
+  return footerText
+    ? { content, structuredContent, _displayFooter: footerText }
+    : { content, structuredContent };
 }
 
 export class MCPServer {
@@ -246,13 +251,20 @@ export class MCPServer {
         try {
           const tool = this.tools.get(request.params.name);
           if (!tool) {
+            const notFoundResponse = {
+              error: {
+                message: "Tool not found",
+                code: "TOOL_NOT_FOUND",
+              },
+            };
             return {
-              content: [
-                {
-                  type: "text",
-                  text: "Tool not found",
-                },
-              ],
+              ...buildToolResponseEnvelope(
+                notFoundResponse,
+                null,
+                "",
+                request.params.name,
+                {},
+              ),
               isError: true,
             };
           }
@@ -306,12 +318,13 @@ export class MCPServer {
               diagnostics: extractTimingDiagnostics(responseForLog),
             });
             return {
-              content: [
-                {
-                  type: "text",
-                  text: validationError.error.message,
-                },
-              ],
+              ...buildToolResponseEnvelope(
+                responseForLog,
+                null,
+                "",
+                request.params.name,
+                normalizedArgs as Record<string, unknown>,
+              ),
               isError: true,
             };
           }
@@ -567,14 +580,16 @@ export class MCPServer {
               symbolId,
               diagnostics: extractTimingDiagnostics(responseForLog),
             });
-            // Return error in MCP content format instead of throwing
+            // Return projected error content instead of throwing so clients get
+            // the same human-first envelope shape as successful tool calls.
             return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(responseForLog, null, 2),
-                },
-              ],
+              ...buildToolResponseEnvelope(
+                responseForLog,
+                null,
+                "",
+                request.params.name,
+                normalizedArgs as Record<string, unknown>,
+              ),
               isError: true,
             };
           }
@@ -582,13 +597,15 @@ export class MCPServer {
           process.stderr.write(
             `[sdl-mcp] CallTool outer error: ${outerError}\n`,
           );
+          const outerErrorResponse = errorToMcpResponse(outerError);
           return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(errorToMcpResponse(outerError), null, 2),
-              },
-            ],
+            ...buildToolResponseEnvelope(
+              outerErrorResponse,
+              null,
+              "",
+              request.params.name,
+              {},
+            ),
             isError: true,
           };
         }

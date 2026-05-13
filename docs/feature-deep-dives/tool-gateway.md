@@ -78,6 +78,11 @@ flowchart LR
 
 The important implementation detail is not the namespace wrapper. It is the preservation of the original validation and handler path after routing. Gateway mode is a registration optimization, not a separate execution engine.
 
+
+## Output Contract
+
+Gateway, flat, and Code Mode tools share the same outward response contract. Visible MCP `content` is human-readable first. Machine-readable task data is returned as `structuredContent`, including follow-up identifiers such as `etag`, handles, symbol IDs, file paths, status, errors, summaries, and next-action hints. Internal SDL-MCP bookkeeping such as timings, packed stats, raw-context baselines, action traces, and logging-only details is withheld from the normal model-visible surfaces unless the caller explicitly requests diagnostics.
+
 ## Why It Exists
 
 - Fewer tool descriptors reduce startup token cost in MCP clients.

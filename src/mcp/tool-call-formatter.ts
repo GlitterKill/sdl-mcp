@@ -301,17 +301,30 @@ function fmtAgentContext(
   result: Record<string, unknown>,
 ): string | null {
   if (result.notModified) {
-    return "sdl.context -> not modified (ETag hit)";
+    return "Sdl context\n\nnot modified: ETag hit";
   }
-  const path = result.path as Record<string, unknown> | undefined;
-  const rungs = (path?.rungs as unknown[])?.length ?? 0;
-  const status =
-    typeof result.success === "boolean"
-      ? result.success
-        ? "success"
-        : "error"
-      : "complete";
-  return `sdl.context [${status}] -> ${rungs} rungs`;
+
+  const lines = ["Sdl context"];
+  const taskType = str(result.taskType);
+  if (taskType) {
+    lines.push("", `taskType: ${taskType}`);
+  }
+
+  for (const item of records(result.finalEvidence)) {
+    const reference = str(item.reference);
+    const summary = str(item.summary);
+    if (!reference && !summary) continue;
+    lines.push("");
+    if (reference) lines.push(reference);
+    if (summary) lines.push(`summary: ${summary}`);
+  }
+
+  const etag = str(result.etag);
+  if (etag) {
+    lines.push("", `etag: ${etag}`);
+  }
+
+  return lines.join("\n");
 }
 
 function fmtMemoryStore(
@@ -526,6 +539,107 @@ function fmtManual(
 }
 
 // ---------------------------------------------------------------------------
+const GENERIC_DISPLAY_SKIP_FIELDS = new Set([
+  "_displayFooter",
+  "_packedStats",
+  "_rawContext",
+  "_tokenUsage",
+  "actionsTaken",
+  "backupPath",
+  "diagnostics",
+  "indexUpdate",
+  "metrics",
+  "path",
+  "preconditionSnapshot",
+  "retrievalEvidence",
+  "taskId",
+  "timings",
+  "totalTokens",
+  "trace",
+]);
+
+function compactValue(value: unknown, max = 140): string {
+  if (typeof value === "string") return truncName(value.replace(/\s+/g, " "), max);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? "" : "s"}`;
+  if (value && typeof value === "object") return "object";
+  return "";
+}
+
+function appendGenericField(
+  lines: string[],
+  result: Record<string, unknown>,
+  key: string,
+): boolean {
+  if (!(key in result) || GENERIC_DISPLAY_SKIP_FIELDS.has(key)) return false;
+  const rendered = compactValue(result[key]);
+  if (!rendered) return false;
+  lines.push(`${key}: ${rendered}`);
+  return true;
+}
+
+function fmtGeneric(
+  toolName: string,
+  result: Record<string, unknown>,
+): string | null {
+  if (result.notModified) {
+    return `${toolName || "tool"} -> not modified (ETag hit)`;
+  }
+
+  const status =
+    str(result.status) ||
+    str(result.mode) ||
+    (typeof result.success === "boolean"
+      ? result.success
+        ? "success"
+        : "error"
+      : "complete");
+  const lines = [`${toolName || "tool"} [${status}]`];
+
+  const error = record(result.error);
+  const message = str(error?.message) || str(result.message);
+  if (message) lines.push(`error: ${message}`);
+
+  let appended = false;
+  for (const key of [
+    "filePath",
+    "file",
+    "symbolId",
+    "reference",
+    "planHandle",
+    "sliceHandle",
+    "responseHandle",
+    "etag",
+    "summary",
+    "nextBestAction",
+  ]) {
+    appended = appendGenericField(lines, result, key) || appended;
+  }
+
+  const evidence = records(result.finalEvidence).slice(0, 8);
+  for (const item of evidence) {
+    const reference = str(item.reference);
+    const summary = str(item.summary);
+    if (!reference && !summary) continue;
+    lines.push("");
+    if (reference) lines.push(reference);
+    if (summary) lines.push(`summary: ${summary}`);
+    appended = true;
+  }
+
+  if (!appended) {
+    for (const key of Object.keys(result)) {
+      if (appendGenericField(lines, result, key)) {
+        appended = true;
+      }
+      if (appended && lines.length >= 6) break;
+    }
+  }
+
+  return lines.join("\n");
+}
+
+
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -567,11 +681,14 @@ export function formatToolCallForUser(
   args: Record<string, unknown>,
   result: unknown,
 ): string | null {
+  const recordResult = record(result) ?? { value: result };
+  if ("error" in recordResult) {
+    return fmtGeneric(toolName, recordResult);
+  }
   const formatter = formatters[toolName];
-  if (!formatter) return null;
   try {
-    return formatter(args, (result ?? {}) as Record<string, unknown>);
+    return formatter?.(args, recordResult) ?? fmtGeneric(toolName, recordResult);
   } catch {
-    return null;
+    return fmtGeneric(toolName, recordResult);
   }
 }

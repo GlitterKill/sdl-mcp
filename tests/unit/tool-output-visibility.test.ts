@@ -1,38 +1,165 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 
+import { z } from "zod";
+
 import {
   buildToolResponseContentBlocks,
   buildToolResponseEnvelope,
+  MCPServer,
 } from "../../dist/server.js";
 import { formatToolCallForUser } from "../../dist/mcp/tool-call-formatter.js";
+import { formatCliToolOutput } from "../../dist/cli/commands/tool-dispatch.js";
+
+const REPRESENTATIVE_TOOL_NAMES = [
+  "sdl.action.search",
+  "sdl.agent.feedback",
+  "sdl.buffer.checkpoint",
+  "sdl.code.getHotPath",
+  "sdl.code.getSkeleton",
+  "sdl.code.needWindow",
+  "sdl.context",
+  "sdl.delta.get",
+  "sdl.file",
+  "sdl.file.read",
+  "sdl.file.write",
+  "sdl.index.refresh",
+  "sdl.manual",
+  "sdl.memory.query",
+  "sdl.memory.store",
+  "sdl.policy.get",
+  "sdl.pr.risk.analyze",
+  "sdl.repo.overview",
+  "sdl.repo.status",
+  "sdl.runtime.execute",
+  "sdl.search.edit",
+  "sdl.semantic.enrichment.status",
+  "sdl.slice.build",
+  "sdl.symbol.getCard",
+  "sdl.symbol.search",
+  "sdl.usage.stats",
+  "sdl.workflow",
+];
+
+type CallToolHandler = (
+  request: {
+    method: "tools/call";
+    params: { name: string; arguments?: Record<string, unknown> };
+  },
+  extra: {
+    _meta: Record<string, unknown>;
+    sendNotification: () => Promise<void>;
+    signal: AbortSignal;
+  },
+) => Promise<Record<string, unknown>>;
+
+function getCallToolHandler(server: MCPServer): CallToolHandler {
+  const sdkServer = server.getServer() as unknown as {
+    _requestHandlers: Map<string, CallToolHandler>;
+  };
+  const handler = sdkServer._requestHandlers.get("tools/call");
+  assert.ok(handler, "tools/call handler should be registered");
+  return handler;
+}
+
+function captureConsoleLog(run: () => void): string {
+  const originalLog = console.log;
+  const lines: string[] = [];
+  console.log = (...args: unknown[]): void => {
+    lines.push(args.map(String).join(" "));
+  };
+  try {
+    run();
+  } finally {
+    console.log = originalLog;
+  }
+  return lines.join("\n");
+}
 
 describe("visible tool output", () => {
-  it("returns user display and savings meter as visible MCP content blocks", () => {
-    const footer = "📊 100 / 1.0k tokens (SDL/raw-equiv) █░░░░░░░░░ 90%";
-    const userDisplay = "search.edit preview -> 2 matches in 1 file";
-
-    const blocks = buildToolResponseContentBlocks(
-      { ok: true, _displayFooter: footer },
-      userDisplay,
+  it("returns human-readable MCP content first and projected structured content", () => {
+    const footer = "100 / 1.0k tokens (SDL/raw-equiv)";
+    const envelope = buildToolResponseEnvelope(
+      {
+        filePath: "src/server.ts",
+        mode: "replacePattern",
+        etag: "file-etag",
+        diagnostics: { timings: { totalMs: 10 } },
+        _packedStats: { savedRatio: 0.2 },
+        _displayFooter: footer,
+      },
+      null,
       footer,
+      "sdl.file",
+      { op: "write" },
     );
 
-    assert.equal(blocks.length, 3);
-    assert.match(blocks[0].text, /"ok": true/);
-    assert.equal(blocks[1].text, userDisplay);
-    assert.equal(blocks[2].text, footer);
+    assert.match(envelope.content[0]?.text ?? "", /file\.write \(replacePattern\)/);
+    assert.doesNotMatch(envelope.content[0]?.text ?? "", /^\s*\{/);
+    assert.equal(envelope.content[1]?.text, footer);
+    assert.equal(envelope._displayFooter, footer);
+    assert.equal(envelope.structuredContent?.etag, "file-etag");
+    assert.equal(envelope.structuredContent?.diagnostics, undefined);
+    assert.equal(envelope.structuredContent?._packedStats, undefined);
+    assert.equal(envelope.structuredContent?._displayFooter, undefined);
   });
 
-  it("projects sdl.context JSON content to model-facing fields by default", () => {
-    const footer = "meter text";
+  it("formats sdl.context as an evidence list without internal noise", () => {
     const blocks = buildToolResponseContentBlocks(
       {
         taskId: "task-1",
         taskType: "debug",
         success: true,
         summary: "internal action summary",
-        answer: "# Debug Results\n\nFound relevant context.",
+        finalEvidence: [
+          {
+            type: "symbolCard",
+            reference: "symbol:abc",
+            summary: "function attachDisplayFooter | src/server.ts | fileAlias: Server",
+            timestamp: 12345,
+          },
+          {
+            type: "hotPath",
+            reference: "hotpath:def",
+            summary: "symbol | Hot path (0 matches, ~42 tokens): code",
+          },
+        ],
+        diagnostics: { timings: { totalMs: 12 } },
+        path: { rungs: [{ type: "card" }] },
+        actionsTaken: [{ fn: "getCard" }],
+        etag: "abc123",
+      },
+      null,
+      "",
+      "sdl.context",
+      {},
+    );
+
+    assert.equal(
+      blocks[0]?.text,
+      [
+        "Sdl context",
+        "",
+        "taskType: debug",
+        "",
+        "symbol:abc",
+        "summary: function attachDisplayFooter | src/server.ts | fileAlias: Server",
+        "",
+        "hotpath:def",
+        "summary: symbol | Hot path (0 matches, ~42 tokens): code",
+        "",
+        "etag: abc123",
+      ].join("\n"),
+    );
+    assert.doesNotMatch(blocks[0]?.text ?? "", /diagnostics|actionsTaken|taskId|rungs|internal action summary/);
+  });
+
+  it("keeps task-relevant structured content and omits internal fields by default", () => {
+    const envelope = buildToolResponseEnvelope(
+      {
+        taskType: "debug",
+        success: true,
+        answer: "# Debug Results",
         finalEvidence: [
           {
             type: "symbolCard",
@@ -42,42 +169,38 @@ describe("visible tool output", () => {
           },
         ],
         retrievalEvidence: { fusionLatencyMs: 10 },
-        _packedStats: { savedRatio: 0.5 },
         diagnostics: { timings: { totalMs: 12 } },
+        _packedStats: { savedRatio: 0.5 },
+        actionsTaken: [{ fn: "getCard" }],
+        path: { rungs: [{ type: "card" }] },
         etag: "abc123",
-        _displayFooter: footer,
       },
-      "sdl.context [success] -> 0 rungs",
-      footer,
+      null,
+      "",
       "sdl.context",
       {},
     );
 
-    const payload = JSON.parse(blocks[0].text) as Record<string, unknown>;
-    assert.equal(payload.taskType, "debug");
-    assert.equal(payload.success, true);
-    assert.equal(payload.answer, "# Debug Results\n\nFound relevant context.");
-    assert.equal(payload.taskId, undefined);
-    assert.equal(payload.summary, undefined);
-    assert.equal(payload.retrievalEvidence, undefined);
-    assert.equal(payload._packedStats, undefined);
-    assert.equal(payload.diagnostics, undefined);
-    assert.equal(payload.etag, "abc123");
-    assert.equal(payload._displayFooter, undefined);
+    assert.equal(envelope.structuredContent?.taskType, "debug");
+    assert.equal(envelope.structuredContent?.success, true);
+    assert.equal(envelope.structuredContent?.answer, "# Debug Results");
+    assert.equal(envelope.structuredContent?.etag, "abc123");
+    assert.equal(envelope.structuredContent?.retrievalEvidence, undefined);
+    assert.equal(envelope.structuredContent?.diagnostics, undefined);
+    assert.equal(envelope.structuredContent?._packedStats, undefined);
+    assert.equal(envelope.structuredContent?.actionsTaken, undefined);
+    assert.equal(envelope.structuredContent?.path, undefined);
 
-    const evidence = payload.finalEvidence as Record<string, unknown>[];
-    assert.equal(evidence[0]?.timestamp, undefined);
+    const evidence = envelope.structuredContent?.finalEvidence as Record<string, unknown>[];
     assert.equal(evidence[0]?.reference, "symbol:1");
-    assert.equal(blocks[1]?.text, "sdl.context [success] -> 0 rungs");
-    assert.equal(blocks[2]?.text, footer);
+    assert.equal(evidence[0]?.timestamp, undefined);
   });
 
-  it("keeps explicitly requested sdl.context diagnostics and retrieval evidence", () => {
-    const blocks = buildToolResponseContentBlocks(
+  it("keeps requested diagnostics in structured content without adding them to visible text", () => {
+    const envelope = buildToolResponseEnvelope(
       {
         taskType: "debug",
         success: true,
-        answer: "# Debug Results",
         finalEvidence: [],
         retrievalEvidence: { fusionLatencyMs: 10 },
         diagnostics: { timings: { totalMs: 12 } },
@@ -92,111 +215,107 @@ describe("visible tool output", () => {
       },
     );
 
-    const payload = JSON.parse(blocks[0].text) as Record<string, unknown>;
-    assert.deepEqual(payload.retrievalEvidence, { fusionLatencyMs: 10 });
-    assert.deepEqual(payload.diagnostics, { timings: { totalMs: 12 } });
-    assert.equal(payload._packedStats, undefined);
+    assert.deepEqual(envelope.structuredContent?.retrievalEvidence, { fusionLatencyMs: 10 });
+    assert.deepEqual(envelope.structuredContent?.diagnostics, { timings: { totalMs: 12 } });
+    assert.equal(envelope.structuredContent?._packedStats, undefined);
+    assert.doesNotMatch(envelope.content[0]?.text ?? "", /diagnostics|fusionLatencyMs|_packedStats/);
   });
 
-  it("keeps response-level display footer while preserving JSON-first content", () => {
-    const footer = "usage.stats summary";
-    const envelope = buildToolResponseEnvelope({ ok: true }, null, footer);
+  it("formats every representative tool with non-JSON visible text", () => {
+    for (const toolName of REPRESENTATIVE_TOOL_NAMES) {
+      const display = formatToolCallForUser(toolName, {}, {
+        success: true,
+        status: "ok",
+        etag: `${toolName}-etag`,
+        summary: `${toolName} completed`,
+      });
 
-    assert.equal(envelope._displayFooter, footer);
-    assert.equal(envelope.content.length, 2);
-    assert.match(envelope.content[0].text, /"ok": true/);
-    assert.equal(envelope.content[1].text, footer);
+      assert.ok(display, toolName);
+      assert.doesNotMatch(display ?? "", /^\s*\{/, toolName);
+    }
   });
 
-  it("formats sdl.file edit previews with a visible diff preview", () => {
-    const display = formatToolCallForUser(
-      "sdl.file",
-      { op: "searchEditPreview" },
-      {
-        mode: "preview",
-        planHandle: "se-test",
-        filesMatched: 1,
-        matchesFound: 2,
-        fileEntries: [
-          {
-            file: "src/server.ts",
-            matchCount: 2,
-            editMode: "replacePattern",
-            snippets: {
-              before: "  1 | oldValue",
-              after: "  1 | newValue",
-            },
-          },
-        ],
-      },
-    );
-
-    assert.ok(display);
-    assert.match(display, /search\.edit preview -> 2 matches in 1 file/);
-    assert.match(display, /src\/server\.ts/);
-    assert.match(display, /--- before/);
-    assert.match(display, /\+\+\+ after/);
-    assert.match(display, /oldValue/);
-    assert.match(display, /newValue/);
-  });
-
-  it("projects non-context tool content away from internal fields", () => {
-    const blocks = buildToolResponseContentBlocks(
-      {
-        filePath: "src/server.ts",
-        mode: "replacePattern",
-        bytesWritten: 10,
-        linesWritten: 1,
-        etag: "file-etag",
-        backupPath: "src/server.ts.bak",
-        indexUpdate: { applied: true, symbolsMatched: 2 },
-        diagnostics: { timings: { totalMs: 10 } },
-        _packedStats: { savedRatio: 0.2 },
-        _displayFooter: "meter",
-        policyDecision: { auditHash: "abc", deniedReasons: ["blocked"] },
-        snippets: {
-          before: "  1 | oldValue",
-          after: "  1 | newValue",
+  it("formats CLI direct-action pretty output through the tool formatter", () => {
+    const output = captureConsoleLog(() =>
+      formatCliToolOutput(
+        "repo.status",
+        {},
+        {
+          repoId: "sdl-mcp",
+          status: "ok",
+          etag: "repo-etag",
+          diagnostics: { timings: { totalMs: 2 } },
         },
-      },
-      null,
-      "meter",
-      "sdl.file",
-      { op: "write" },
+        "pretty",
+      ),
     );
 
-    const payload = JSON.parse(blocks[0].text) as Record<string, unknown>;
-    assert.equal(payload.filePath, "src/server.ts");
-    assert.equal(payload.mode, "replacePattern");
-    assert.equal(payload.etag, "file-etag");
-    assert.ok(payload.snippets);
-    assert.equal(payload.backupPath, undefined);
-    assert.equal(payload.indexUpdate, undefined);
-    assert.equal(payload.diagnostics, undefined);
-    assert.equal(payload._packedStats, undefined);
-    assert.equal(payload._displayFooter, undefined);
-    assert.deepEqual(payload.policyDecision, { deniedReasons: ["blocked"] });
-    assert.equal(blocks[1]?.text, "meter");
+    assert.doesNotMatch(output, /^\s*\{/);
+    assert.match(output, /repo\.status ->/);
+    assert.doesNotMatch(output, /diagnostics|timings|totalMs/);
   });
 
-  it("keeps non-context diagnostics only when explicitly requested", () => {
-    const blocks = buildToolResponseContentBlocks(
+  it("projects actual server validation errors into structured content", async () => {
+    const server = new MCPServer();
+    server.registerTool(
+      "sdl.test.validation",
+      "Validation test tool",
+      z.object({ filePath: z.string() }),
+      async () => ({ success: true }),
+    );
+
+    const handler = getCallToolHandler(server);
+    const result = await handler(
       {
-        status: "success",
-        diagnostics: { timings: { totalMs: 10 } },
+        method: "tools/call",
+        params: { name: "sdl.test.validation", arguments: {} },
+      },
+      {
+        _meta: {},
+        sendNotification: async () => {},
+        signal: new AbortController().signal,
+      },
+    );
+
+    const content = result.content as Array<Record<string, unknown>>;
+    const structuredContent = result.structuredContent as Record<string, unknown>;
+    const error = structuredContent.error as Record<string, unknown>;
+    const details = error.details as Array<Record<string, unknown>>;
+
+    assert.equal(result.isError, true);
+    assert.match(String(content[0]?.text), /Invalid tool arguments/);
+    assert.doesNotMatch(String(content[0]?.text), /^\s*\{/);
+    assert.equal(error.code, "VALIDATION_ERROR");
+    assert.equal(details[0]?.path, "filePath");
+  });
+
+  it("formats tool errors for self-correction while preserving structured details", () => {
+    const envelope = buildToolResponseEnvelope(
+      {
+        error: {
+          message: "Invalid tool arguments: missing filePath",
+          code: "VALIDATION_ERROR",
+          details: [{ path: "filePath", message: "Required" }],
+        },
+        diagnostics: { timings: { totalMs: 2 } },
+        etag: "err-etag",
       },
       null,
       "",
-      "sdl.workflow",
-      { includeDiagnostics: true },
+      "sdl.file",
+      { op: "read" },
     );
 
-    const payload = JSON.parse(blocks[0].text) as Record<string, unknown>;
-    assert.deepEqual(payload.diagnostics, { timings: { totalMs: 10 } });
+    assert.match(envelope.content[0]?.text ?? "", /Invalid tool arguments/);
+    assert.equal(envelope.structuredContent?.etag, "err-etag");
+    assert.deepEqual((envelope.structuredContent?.error as Record<string, unknown>)?.details, [
+      { path: "filePath", message: "Required" },
+    ]);
+    assert.equal(envelope.structuredContent?.diagnostics, undefined);
   });
 
-  it("formats file.write results with a visible diff preview", () => {
-    const display = formatToolCallForUser(
+  it("formats file and edit operations with concise visible diffs", () => {
+    const writeDisplay = formatToolCallForUser(
       "sdl.file",
       { op: "write" },
       {
@@ -211,16 +330,12 @@ describe("visible tool output", () => {
       },
     );
 
-    assert.ok(display);
-    assert.match(display, /file\.write \(replacePattern\)/);
-    assert.match(display, /--- before/);
-    assert.match(display, /\+\+\+ after/);
-    assert.match(display, /oldValue/);
-    assert.match(display, /newValue/);
-  });
+    assert.ok(writeDisplay);
+    assert.match(writeDisplay, /file\.write \(replacePattern\)/);
+    assert.match(writeDisplay, /--- before/);
+    assert.match(writeDisplay, /\+\+\+ after/);
 
-  it("formats search.edit apply results with a visible applied diff", () => {
-    const display = formatToolCallForUser(
+    const applyDisplay = formatToolCallForUser(
       "sdl.file",
       { op: "searchEditApply" },
       {
@@ -244,49 +359,9 @@ describe("visible tool output", () => {
       },
     );
 
-    assert.ok(display);
-    assert.match(display, /search\.edit apply -> 1\/1 file written/);
-    assert.match(display, /--- before/);
-    assert.match(display, /\+\+\+ after/);
-    assert.match(display, /oldValue/);
-    assert.match(display, /newValue/);
-  });
-
-  it("formats nested sdl.file code windows", () => {
-    const display = formatToolCallForUser(
-      "sdl.file",
-      { op: "previewWindow" },
-      {
-        codeWindow: {
-          approved: true,
-          range: { startLine: 10, endLine: 20 },
-          estimatedTokens: 123,
-        },
-      },
-    );
-
-    assert.ok(display);
-    assert.match(display, /code\.needWindow -> \[approved\]/);
-    assert.match(display, /L10.*20/);
-    assert.match(display, /~123 tokens/);
-  });
-
-  it("formats action.search summary-only responses", () => {
-    const display = formatToolCallForUser(
-      "sdl.action.search",
-      { query: "memory", summaryOnly: true },
-      {
-        summary: {
-          total: 2,
-          byKind: { gateway: 2 },
-          matchedActions: ["sdl.memory.query", "sdl.memory.store"],
-        },
-      },
-    );
-
-    assert.ok(display);
-    assert.match(display, /action\.search "memory" -> 2\/2 actions/);
-    assert.match(display, /sdl\.memory\.query/);
-    assert.match(display, /sdl\.memory\.store/);
+    assert.ok(applyDisplay);
+    assert.match(applyDisplay, /search\.edit apply -> 1\/1 file written/);
+    assert.match(applyDisplay, /oldValue/);
+    assert.match(applyDisplay, /newValue/);
   });
 });

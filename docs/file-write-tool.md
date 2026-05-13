@@ -19,6 +19,9 @@ The `file.write` tool provides token-efficient file writing with six targeted wr
 
 ---
 
+MCP responses are human-first: visible `content` summarizes the write and includes bounded before/after previews when available. Machine-readable task data remains in `structuredContent`, including `filePath`, `mode`, `etag`, write counts, and error details. Backup paths, precondition snapshots, index-update internals, timings, and other SDL-MCP bookkeeping are hidden from normal visible/model-facing output unless diagnostics are explicitly requested.
+
+
 ## Overview
 
 ```mermaid
