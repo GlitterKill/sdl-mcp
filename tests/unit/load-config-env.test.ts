@@ -25,7 +25,9 @@ describe("loadConfig environment path resolution", () => {
                 maxFileBytes: 1000,
               },
             ],
-            dbPath: "./db-from-env.sqlite",
+            graphDatabase: {
+              path: "./db-from-env.lbug",
+            },
             policy: {
               maxWindowLines: 10,
               maxWindowTokens: 100,
@@ -41,7 +43,7 @@ describe("loadConfig environment path resolution", () => {
       process.env.SDL_CONFIG = configPath;
       const config = loadConfig();
 
-      assert.strictEqual(config.dbPath, "./db-from-env.sqlite");
+      assert.strictEqual(config.graphDatabase?.path, "./db-from-env.lbug");
       assert.strictEqual(config.repos[0].repoId, "env-repo");
     } finally {
       if (oldEnv === undefined) {
