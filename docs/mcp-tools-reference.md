@@ -124,6 +124,7 @@ Get status for one repository including latest version, indexed files/symbols, t
 - `watcherHealth` (nullable) — runtime telemetry: enabled, running, filesWatched, eventsReceived/Processed, errors, queueDepth, restartCount, stale, lastEventAt, lastSuccessfulReindexAt
 - `prefetchStats` — queue depth, hit/waste rates, latency reduction, last run
 - `liveIndexStatus` — live buffer overlay state: enabled, pendingBuffers, dirtyBuffers, parseQueueDepth, checkpointPending, reconcileQueueDepth, etc.
+- `derivedState` — derived refresh freshness: stale flag, dirty cluster/process/algorithm/summary/embedding flags, target/computed version ids, and `lastError` when background refresh failed
 - `memories` (when `surfaceMemories: true` and memory is enabled in config) — array of relevant development memories auto-surfaced for the repository
 
 **Example:**

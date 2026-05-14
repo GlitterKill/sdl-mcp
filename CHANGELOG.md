@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tool responses are now human-first across the MCP and CLI surfaces: visible `content`/terminal output is concise text, projected task data lives in `structuredContent`, and JSON-first consumers should switch to `structuredContent` or explicit JSON output modes.
 - Stdio server startup now defers file watcher initialization until after tool serving begins, avoiding watcher/DB contention on the first tool call.
 - LadybugDB stored-procedure row reads now materialize and close result handles under the per-connection mutex via a shared helper, improving latency accounting and avoiding leaked live query results.
+- Operator docs now distinguish foreground tool dispatch queue timeouts from background derived-refresh timeouts and document `SDL_DERIVED_REFRESH_TIMEOUT_MS`.
 
 ### Fixed
 

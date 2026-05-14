@@ -123,6 +123,14 @@ function projectGenericValueForModel(
 
   const projected: Record<string, unknown> = {};
   for (const [key, itemValue] of Object.entries(value)) {
+    if (key === "diagnostics" && options.includeDiagnostics) {
+      projected[key] = itemValue;
+      continue;
+    }
+    if (key === "retrievalEvidence" && options.includeRetrievalEvidence) {
+      projected[key] = itemValue;
+      continue;
+    }
     if (key === "policyDecision") {
       const decision = isRecord(itemValue) ? itemValue : {};
       if (Array.isArray(decision.deniedReasons)) {

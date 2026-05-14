@@ -155,8 +155,10 @@ export class StressClient {
   }
 
   /**
-   * Call a tool and return the parsed JSON from the first text content block.
+   * Call a tool and return the structured payload emitted by the MCP server.
    *
+   * Human-readable text is intentionally the first content block, so the stress
+   * harness must prefer structuredContent and only parse text for older servers.
    * Automatically runs result validators from `result-validator.ts` and
    * records checks + sample values in the MetricsCollector.  This makes
    * every scenario a release smoke-test for tool correctness.
@@ -167,6 +169,26 @@ export class StressClient {
   ): Promise<Record<string, unknown>> {
     const effectiveArgs = this.prepareToolArgs(name, args);
     const response = await this.callTool(name, effectiveArgs);
+    const structuredContent = (
+      response as { structuredContent?: Record<string, unknown> }
+    )?.structuredContent;
+    if (structuredContent) {
+      const checks = validateToolResult(name, effectiveArgs, structuredContent);
+      if (checks.length > 0) {
+        this.collector.recordResultChecks(checks);
+      }
+      const samples = extractSampleValues(name, structuredContent);
+      if (Object.keys(samples).length > 0) {
+        this.collector.recordSampleValues(name, samples);
+      }
+      this.collector.recordToolTimingDiagnostics(
+        name,
+        structuredContent.diagnostics,
+      );
+
+      return structuredContent;
+    }
+
     const content = (
       response as { content?: Array<{ type: string; text: string }> }
     )?.content;

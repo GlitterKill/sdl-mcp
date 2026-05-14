@@ -62,6 +62,45 @@ This catches most setup issues quickly.
 - Tune `indexing.concurrency`
 - Try the native Rust engine (`indexing.engine: "rust"`) for faster pass-1 extraction
 
+### Indexing or Tool Queue Timeouts
+
+Start by checking the server log named by `sdl-mcp info`. The two timeout
+families have different effects and different controls.
+
+- `derived-refresh timed out after ...` means the background derived-state
+  refresh that follows an incremental index run exceeded
+  `SDL_DERIVED_REFRESH_TIMEOUT_MS` (default `120000`). The current worker aborts
+  the refresh signal, records `derivedState.lastError`, leaves derived state
+  stale until a later successful refresh, and logs when timed-out work settles.
+  Core index data from the incremental run remains available.
+- `Tool dispatch queue timed out after ...` means a foreground MCP tool request
+  waited longer than `concurrency.toolQueueTimeoutMs` (default `30000`) for a
+  dispatch slot before its handler started. The failed tool response is
+  retryable and classified as `unavailable`; running tools or indexing work are
+  not canceled.
+- `waitForDerivedRefreshIdle timed out` means a foreground refresh stopped
+  waiting for the background derived-refresh queue to become idle. It logs a
+  warning and proceeds; it is not controlled by
+  `SDL_DERIVED_REFRESH_TIMEOUT_MS`.
+
+For derived refresh diagnosis, inspect:
+
+```bash
+sdl-mcp tool repo.status --repo-id <repo-id>
+```
+
+Check `derivedState.stale`, the dirty flags, and `derivedState.lastError`.
+Increase `SDL_DERIVED_REFRESH_TIMEOUT_MS` only when the refresh is legitimately
+long-running. If it repeatedly times out at the same phase, treat that as an
+indexing or LadybugDB contention issue first.
+
+For tool dispatch stalls, inspect the warning fields in the log. When
+`indexingActive` is `true`, SDL-MCP intentionally narrows foreground tool
+dispatch to one slot to reduce database contention. Raise
+`concurrency.toolQueueTimeoutMs` when queued tools should wait longer during
+indexing; do not raise `maxToolConcurrency` first unless you have evidence that
+the database can tolerate more concurrent foreground work.
+
 ### Stale Results
 
 - Run `sdl-mcp index`

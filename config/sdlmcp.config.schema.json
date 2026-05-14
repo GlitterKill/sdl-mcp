@@ -1193,7 +1193,7 @@
         },
         "toolQueueTimeoutMs": {
           "type": "integer",
-          "description": "Timeout for queued tool dispatch operations in milliseconds",
+          "description": "How long a foreground MCP tool request can wait for a dispatch slot before its handler starts. Timed-out requests fail with a retryable unavailable error; running handlers are not canceled.",
           "minimum": 5000,
           "maximum": 120000,
           "default": 30000

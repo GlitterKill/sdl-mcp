@@ -221,6 +221,25 @@ describe("visible tool output", () => {
     assert.doesNotMatch(envelope.content[0]?.text ?? "", /diagnostics|fusionLatencyMs|_packedStats/);
   });
 
+  it("preserves requested timing diagnostics for generic tools", () => {
+    const envelope = buildToolResponseEnvelope(
+      {
+        ok: true,
+        repoId: "repo",
+        versionId: "v1",
+        diagnostics: { timings: { totalMs: 12, phases: { dispatch: 10 } } },
+      },
+      null,
+      "",
+      "sdl.index.refresh",
+      { includeDiagnostics: true },
+    );
+
+    assert.deepEqual(envelope.structuredContent?.diagnostics, {
+      timings: { totalMs: 12, phases: { dispatch: 10 } },
+    });
+  });
+
   it("formats every representative tool with non-JSON visible text", () => {
     for (const toolName of REPRESENTATIVE_TOOL_NAMES) {
       const display = formatToolCallForUser(toolName, {}, {

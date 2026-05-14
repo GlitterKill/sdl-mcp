@@ -244,7 +244,7 @@ const FIELD_EFFECTS = Object.freeze({
   "/concurrency/maxToolConcurrency": "Caps how many tool requests can execute concurrently.",
   "/concurrency/readPoolSize": "Sets the size of the read-side worker pool for concurrent DB reads.",
   "/concurrency/writeQueueTimeoutMs": "Sets how long DB write work can wait in the queue before timing out.",
-  "/concurrency/toolQueueTimeoutMs": "Sets how long tool work can wait for an execution slot before timing out.",
+  "/concurrency/toolQueueTimeoutMs": "Sets how long a foreground tool request can wait for a dispatch slot before its handler starts.",
   "/scip/autoIngestOnRefresh": "Automatically ingests configured SCIP indexes after an index refresh.",
   "/scip/generator/autoInstall": "Allows SDL-MCP to install the configured SCIP generator when it is missing.",
   "/scip/generator/cleanupAfterIngest": "Removes generated SCIP artifacts after ingest completes.",

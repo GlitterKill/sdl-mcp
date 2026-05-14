@@ -419,11 +419,11 @@ const VALIDATORS: Record<string, ValidatorFn> = {
   "sdl.context": (_args, result) => {
     const tool = "sdl.context";
     const checks: ToolResultCheck[] = [
-      checkNonEmptyString(tool, "taskId present", result.taskId),
       checkNonEmptyString(tool, "taskType present", result.taskType),
+      checkExists(tool, "success present", result.success),
       checkExists(tool, "finalEvidence present", result.finalEvidence)];
-    // Broad mode: answer must be present on successful responses
-    // (compact format may omit actionsTaken, path, metrics — that is expected)
+    // Broad mode projects model-facing structured content.
+    // taskId/actionsTaken/path/metrics are intentionally omitted.
     if (result.success === true && result.answer !== undefined) {
       checks.push(
         checkNonEmptyString(tool, "answer present on success", result.answer),

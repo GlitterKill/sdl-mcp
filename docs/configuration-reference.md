@@ -402,6 +402,20 @@ Combined SCIP indexes are supported. When `languages` or `--languages` narrows r
 | `writeQueueTimeoutMs` | `number` | `30000` | `1000-120000` |
 | `toolQueueTimeoutMs`  | `number` | `30000` | `5000-120000` |
 
+`toolQueueTimeoutMs` controls how long a foreground MCP tool request can wait
+for a dispatch slot before its handler starts. It does not bound handler
+execution after the slot is acquired. When it expires, the queued request fails
+with a retryable `RUNTIME_ERROR` classified as `unavailable`; running tools keep
+running. The server logs `Tool dispatch queue timed out` with `active`, `queued`,
+`maxConcurrency`, `configuredMax`, and `indexingActive` fields.
+
+During indexing, SDL-MCP narrows foreground tool dispatch to one slot to avoid
+LadybugDB contention. If tool calls fail with dispatch queue timeouts while
+indexing is active, increase `toolQueueTimeoutMs` only when it is acceptable for
+foreground tools to wait longer. Increasing `maxToolConcurrency` can reintroduce
+database pressure and should not be the first response to indexing-related
+queue waits.
+
 ## `runtime`
 
 `runtime` is enabled by default in current source. Disable it explicitly if your deployment cannot permit subprocess execution.
@@ -592,7 +606,13 @@ When both `scip.enabled` and `scip.generator.enabled` are true, SDL-MCP auto-add
 | `SDL_CONSOLE_LOGGING`            | Mirror logs to stderr                                     |
 | `SDL_LOG_FORMAT`                 | `json` or `text`                                          |
 | `SDL_MCP_DISABLE_NATIVE_ADDON`   | Force TypeScript indexing engine                          |
+| `SDL_DERIVED_REFRESH_TIMEOUT_MS` | Timeout for background derived-state refresh work after incremental indexing. Default: `120000` |
 | `ANTHROPIC_API_KEY`              | Hosted semantic-summary provider credential               |
+
+`SDL_DERIVED_REFRESH_TIMEOUT_MS` accepts a positive integer number of
+milliseconds. Invalid or non-positive values are ignored. This is intentionally
+an environment variable rather than a config-file field because it controls
+process-level background work rather than a per-repo index scan setting.
 
 ## Validation and Inspection
 
