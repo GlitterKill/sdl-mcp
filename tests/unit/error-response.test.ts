@@ -7,6 +7,7 @@ import {
   ConfigError,
   ErrorCode,
 } from "../../dist/mcp/errors.js";
+import { ToolDispatchQueueTimeoutError } from "../../dist/mcp/dispatch-limiter.js";
 
 type ErrorResponse = {
   error?: {
@@ -18,6 +19,8 @@ type ErrorResponse = {
     retryable?: boolean;
     fallbackTools?: string[];
     candidates?: Array<{ symbolId: string }>;
+    suggestedRetryDelayMs?: number;
+    details?: string[];
   };
 };
 
@@ -68,6 +71,37 @@ describe("errorToMcpResponse", () => {
     assert.strictEqual(response.error?.retryable, true);
     assert.deepStrictEqual(response.error?.fallbackTools, ["sdl.repo.status"]);
     assert.deepStrictEqual(response.error?.candidates, [{ symbolId: "sym-1" }]);
+  });
+
+  it("surfaces dispatch queue timeouts as clear retryable errors", () => {
+    const error = new ToolDispatchQueueTimeoutError(
+      30_000,
+      {
+        active: 1,
+        queued: 4,
+        maxConcurrency: 1,
+        configuredMax: 8,
+        indexingActive: true,
+        totalActiveMs: 0,
+        totalQueueMs: 0,
+        totalRuns: 0,
+        peakQueued: 4,
+        peakActive: 1,
+      },
+      "sdl.context",
+    );
+
+    const response = errorToMcpResponse(error) as ErrorResponse;
+
+    assert.match(
+      response.error?.message ?? "",
+      /Tool dispatch queue timed out after 30000ms for sdl\.context/,
+    );
+    assert.strictEqual(response.error?.code, ErrorCode.RUNTIME_ERROR);
+    assert.strictEqual(response.error?.classification, "unavailable");
+    assert.strictEqual(response.error?.retryable, true);
+    assert.strictEqual(response.error?.suggestedRetryDelayMs, 1000);
+    assert.ok(response.error?.details?.includes("active=1"));
   });
 
   it("should sanitize non-Error values", () => {

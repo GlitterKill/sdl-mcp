@@ -1,6 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import { ConcurrencyLimiter } from "../util/concurrency.js";
+import {
+  ConcurrencyLimiter,
+  ConcurrencyQueueTimeoutError,
+  type ConcurrencyLimiterStats,
+} from "../util/concurrency.js";
 import { logger } from "../util/logger.js";
 import {
   INDEXING_DISPATCH_CAP,
@@ -16,6 +20,35 @@ const dispatchContext = new AsyncLocalStorage<boolean>();
  * indexing doesn't permanently lower the configured value.
  */
 let configuredMax = 8;
+
+export interface ToolDispatchStats extends ConcurrencyLimiterStats {
+  configuredMax: number;
+  indexingActive: boolean;
+}
+
+export class ToolDispatchQueueTimeoutError extends Error {
+  readonly code = "RUNTIME_ERROR";
+  readonly classification = "unavailable";
+  readonly retryable = true;
+  readonly suggestedRetryDelayMs = 1_000;
+  readonly details: string[];
+
+  constructor(timeoutMs: number, stats: ToolDispatchStats, label: string) {
+    super(
+      `Tool dispatch queue timed out after ${timeoutMs}ms for ${label} ` +
+        `(active=${stats.active}, queued=${stats.queued}, max=${stats.maxConcurrency})`,
+    );
+    this.name = "ToolDispatchQueueTimeoutError";
+    this.details = [
+      `label=${label}`,
+      `active=${stats.active}`,
+      `queued=${stats.queued}`,
+      `max=${stats.maxConcurrency}`,
+      `indexingActive=${stats.indexingActive}`,
+    ];
+    Object.setPrototypeOf(this, ToolDispatchQueueTimeoutError.prototype);
+  }
+}
 
 function applyIndexingShape(indexing: boolean): void {
   if (!limiter) return;
@@ -55,18 +88,53 @@ export function getToolDispatchLimiter(): ConcurrencyLimiter {
  * async context as owning a dispatch slot. Indexing uses this marker to avoid
  * deadlocking when an index refresh is itself invoked as an MCP tool.
  */
-export function runToolDispatch<T>(
+export async function runToolDispatch<T>(
   fn: () => Promise<T>,
   timeoutMs?: number,
+  label = "tool-dispatch",
 ): Promise<T> {
-  return getToolDispatchLimiter().run(
-    () => dispatchContext.run(true, fn),
-    timeoutMs,
-  );
+  try {
+    return await getToolDispatchLimiter().run(
+      () => dispatchContext.run(true, fn),
+      timeoutMs,
+    );
+  } catch (error) {
+    if (error instanceof ConcurrencyQueueTimeoutError) {
+      const stats = getToolDispatchStats();
+      logger.warn("Tool dispatch queue timed out", {
+        label,
+        timeoutMs: error.timeoutMs,
+        active: stats.active,
+        queued: stats.queued,
+        maxConcurrency: stats.maxConcurrency,
+        configuredMax: stats.configuredMax,
+        indexingActive: stats.indexingActive,
+      });
+      throw new ToolDispatchQueueTimeoutError(error.timeoutMs, stats, label);
+    }
+    throw error;
+  }
 }
 
 export function isInToolDispatch(): boolean {
   return dispatchContext.getStore() === true;
+}
+
+export function getToolDispatchStats(): ToolDispatchStats {
+  const stats = limiter?.getStats();
+  const maxConcurrency = limiter?.getMaxConcurrency() ?? configuredMax;
+  return {
+    active: stats?.active ?? 0,
+    queued: stats?.queued ?? 0,
+    maxConcurrency,
+    configuredMax,
+    indexingActive: isIndexingActive(),
+    totalActiveMs: stats?.totalActiveMs ?? 0,
+    totalQueueMs: stats?.totalQueueMs ?? 0,
+    totalRuns: stats?.totalRuns ?? 0,
+    peakQueued: stats?.peakQueued ?? 0,
+    peakActive: stats?.peakActive ?? 0,
+  };
 }
 
 export async function waitForToolDispatchIdle(params: {

@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import assert from "node:assert";
 
 import {
@@ -6,9 +6,22 @@ import {
   waitForDerivedRefreshIdle,
   _seedRunningForTesting,
   _getDerivedRefreshQueueStateForTesting,
+  _getDerivedRefreshTimeoutMsForTesting,
+  _runWithDerivedRefreshTimeoutForTesting,
 } from "../../dist/indexer/derived-refresh-queue.js";
 
 const REPO = "derived-refresh-queue-test";
+const ORIGINAL_DERIVED_REFRESH_TIMEOUT =
+  process.env.SDL_DERIVED_REFRESH_TIMEOUT_MS;
+
+afterEach(() => {
+  if (ORIGINAL_DERIVED_REFRESH_TIMEOUT === undefined) {
+    delete process.env.SDL_DERIVED_REFRESH_TIMEOUT_MS;
+  } else {
+    process.env.SDL_DERIVED_REFRESH_TIMEOUT_MS =
+      ORIGINAL_DERIVED_REFRESH_TIMEOUT;
+  }
+});
 
 function deferred<T = void>(): {
   promise: Promise<T>;
@@ -131,6 +144,89 @@ describe("withRepoWriteHeavyLock", () => {
     await withRepoWriteHeavyLock("repo-cleanup", async () => undefined);
     const elapsed = Date.now() - start;
     assert.ok(elapsed < 50, `second acquire was fast (got ${elapsed}ms)`);
+  });
+});
+
+describe("derived refresh timeout", () => {
+  it("uses the environment override for the bounded refresh timeout", () => {
+    process.env.SDL_DERIVED_REFRESH_TIMEOUT_MS = "25";
+
+    assert.strictEqual(_getDerivedRefreshTimeoutMsForTesting(), 25);
+  });
+
+  it("aborts and rejects work that exceeds the bounded refresh timeout", async () => {
+    process.env.SDL_DERIVED_REFRESH_TIMEOUT_MS = "30";
+    let aborted = false;
+
+    await assert.rejects(
+      _runWithDerivedRefreshTimeoutForTesting(
+        "repo-timeout",
+        "v1",
+        new AbortController().signal,
+        async (signal) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+          });
+          await new Promise<void>(() => undefined);
+        },
+      ),
+      /derived-refresh timed out after 30ms/,
+    );
+    assert.strictEqual(aborted, true);
+  });
+
+  it("rejects new write-heavy lock attempts while timed-out work is still settling", async () => {
+    process.env.SDL_DERIVED_REFRESH_TIMEOUT_MS = "30";
+    const repoId = "repo-lock-timeout";
+    const blocker = deferred();
+    let lockEntered = false;
+
+    try {
+      await assert.rejects(
+        _runWithDerivedRefreshTimeoutForTesting(
+          repoId,
+          "v1",
+          new AbortController().signal,
+          async () => {
+            await withRepoWriteHeavyLock(repoId, async () => {
+              lockEntered = true;
+              await blocker.promise;
+            });
+          },
+          { markActiveWriteLockOnTimeout: true },
+        ),
+        /derived-refresh timed out after 30ms/,
+      );
+      assert.strictEqual(lockEntered, true, "test must exercise active lock");
+
+      await assert.rejects(
+        withRepoWriteHeavyLock(repoId, async () => undefined),
+        /write-heavy lock .* timed out/,
+      );
+    } finally {
+      blocker.resolve();
+    }
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+      try {
+        let ran = false;
+        await withRepoWriteHeavyLock(repoId, async () => {
+          ran = true;
+        });
+        assert.strictEqual(ran, true);
+        return;
+      } catch (err) {
+        if (
+          err instanceof Error &&
+          err.name === "RepoWriteHeavyLockTimedOutError"
+        ) {
+          continue;
+        }
+        throw err;
+      }
+    }
+    assert.fail("timed-out write-heavy lock marker did not clear");
   });
 });
 

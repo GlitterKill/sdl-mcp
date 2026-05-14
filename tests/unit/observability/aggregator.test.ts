@@ -15,6 +15,9 @@ describe("Aggregator", () => {
     assert.equal(snap.schemaVersion, 1);
     assert.equal(snap.repoId, REPO);
     assert.ok(typeof snap.generatedAt === "string");
+    assert.equal(snap.pool.dispatchActive, 0);
+    assert.equal(snap.pool.dispatchQueued, 0);
+    assert.equal(snap.pool.dispatchMax, 0);
   });
 
   it("records cache hits and misses with correct hit rate", () => {
@@ -115,10 +118,7 @@ describe("Aggregator", () => {
     assert.equal(layers.totalStoredBytes, 2048);
     assert.equal(layers.bySource.responseArtifact.events, 2);
     assert.equal(layers.bySource.responseArtifact.realizedEvents, 1);
-    assert.equal(
-      layers.bySource.responseArtifact.estimatedTokensAvoided,
-      120,
-    );
+    assert.equal(layers.bySource.responseArtifact.estimatedTokensAvoided, 120);
     assert.equal(layers.bySource.responseArtifact.hitRatePct, 50);
     assert.equal(layers.bySource.rawWindowAvoidance.estimatedTokensAvoided, 80);
     assert.equal(layers.byTool["sdl.context"].events, 2);
@@ -274,6 +274,20 @@ describe("Aggregator", () => {
     assert.equal(auditBuffer.maxDepth, 12);
     assert.equal(auditBuffer.droppedTotal, 2);
     assert.equal(auditBuffer.sessionActive, false);
+  });
+
+  it("records dispatch limiter state in pool metrics", () => {
+    const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
+
+    agg.recordDispatchSample({ active: 1, queued: 3, maxConcurrency: 1 });
+    agg.recordDispatchSample({ active: 0, queued: 1, maxConcurrency: 8 });
+
+    const { pool } = agg.getSnapshot(REPO);
+    assert.equal(pool.dispatchActive, 0);
+    assert.equal(pool.dispatchQueued, 1);
+    assert.equal(pool.dispatchMax, 8);
+    assert.equal(pool.maxDispatchActive, 1);
+    assert.equal(pool.maxDispatchQueued, 3);
   });
 
   it("aggregates per-tool timing phase diagnostics", () => {

@@ -25,6 +25,33 @@ export interface ConcurrencyLimiterOptions {
   queueTimeoutMs?: number;
 }
 
+export interface ConcurrencyLimiterStats {
+  active: number;
+  queued: number;
+  maxConcurrency: number;
+  totalActiveMs: number;
+  totalQueueMs: number;
+  totalRuns: number;
+  peakQueued: number;
+  peakActive: number;
+}
+
+export class ConcurrencyQueueTimeoutError extends Error {
+  readonly timeoutMs: number;
+  readonly stats: ConcurrencyLimiterStats;
+
+  constructor(timeoutMs: number, stats: ConcurrencyLimiterStats) {
+    super(
+      `Concurrency limiter queue timed out after ${timeoutMs}ms ` +
+        `(active=${stats.active}, queued=${stats.queued}, max=${stats.maxConcurrency})`,
+    );
+    this.name = "ConcurrencyQueueTimeoutError";
+    this.timeoutMs = timeoutMs;
+    this.stats = stats;
+    Object.setPrototypeOf(this, ConcurrencyQueueTimeoutError.prototype);
+  }
+}
+
 export class ConcurrencyLimiter {
   private maxConcurrency: number;
   private queueTimeoutMs: number | undefined;
@@ -94,9 +121,7 @@ export class ConcurrencyLimiter {
           if (index !== -1) {
             this.queue.splice(index, 1);
           }
-          reject(
-            new Error(`ConcurrencyLimiter queue timeout after ${timeout}ms`),
-          );
+          reject(new ConcurrencyQueueTimeoutError(timeout, this.getStats()));
         }, timeout);
         timeoutHandle.unref();
       }
@@ -197,6 +222,7 @@ export class ConcurrencyLimiter {
   getStats(): {
     active: number;
     queued: number;
+    maxConcurrency: number;
     totalActiveMs: number;
     totalQueueMs: number;
     totalRuns: number;
@@ -206,6 +232,7 @@ export class ConcurrencyLimiter {
     return {
       active: this.activeCount,
       queued: this.queue.length,
+      maxConcurrency: this.maxConcurrency,
       totalActiveMs: this.totalActiveMs,
       totalQueueMs: this.totalQueueMs,
       totalRuns: this.totalRuns,

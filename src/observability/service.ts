@@ -15,6 +15,7 @@ import type {
   ToolCallEvent,
   WatcherHealthTelemetryEvent,
 } from "../mcp/telemetry.js";
+import { getToolDispatchStats } from "../mcp/dispatch-limiter.js";
 import { logger } from "../util/logger.js";
 import { Aggregator, DEFAULT_AGGREGATOR_OPTIONS } from "./aggregator.js";
 import type {
@@ -145,11 +146,17 @@ export class ObservabilityService implements ObservabilityTap {
   private tick(): void {
     try {
       const sample = this.collectResourceSample();
+      const dispatchSample = getToolDispatchStats();
       for (const aggregator of this.aggregators.values()) {
         try {
           aggregator.recordResourceSample(sample);
         } catch (err) {
           this.logWarn("aggregator.recordResourceSample failed", err);
+        }
+        try {
+          aggregator.recordDispatchSample(dispatchSample);
+        } catch (err) {
+          this.logWarn("aggregator.recordDispatchSample failed", err);
         }
         try {
           aggregator.computeAndRecordHealth();
@@ -253,7 +260,13 @@ export class ObservabilityService implements ObservabilityTap {
    * Lazily creates the aggregator if needed.
    */
   getSnapshot(repoId: string): ObservabilitySnapshot {
-    return this.getAggregator(repoId).getSnapshot(repoId);
+    const aggregator = this.getAggregator(repoId);
+    try {
+      aggregator.recordDispatchSample(getToolDispatchStats());
+    } catch (err) {
+      this.logWarn("aggregator.recordDispatchSample failed", err);
+    }
+    return aggregator.getSnapshot(repoId);
   }
 
   /**

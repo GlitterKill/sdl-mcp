@@ -199,10 +199,7 @@ export class Aggregator {
 
   // ----- tool calls -----
   private toolCallTotal = 0;
-  private readonly toolPerName = new Map<
-    string,
-    ToolLatencyBucket
-  >();
+  private readonly toolPerName = new Map<string, ToolLatencyBucket>();
   private readonly toolLatenciesAll: number[] = [];
   private toolLatencyMax = 0;
 
@@ -273,6 +270,11 @@ export class Aggregator {
   private poolDrainCount = 0;
   private poolDrainMax = 0;
   private poolDrainFailuresTotal = 0;
+  private dispatchActiveLatest = 0;
+  private dispatchQueuedLatest = 0;
+  private dispatchMaxLatest = 0;
+  private dispatchActiveMax = 0;
+  private dispatchQueuedMax = 0;
 
   // ----- SCIP -----
   private scipTotal = 0;
@@ -704,8 +706,13 @@ export class Aggregator {
       stale?: boolean;
     };
     if (typeof evt.running === "boolean") this.watcherRunning = evt.running;
-    if (typeof evt.errors === "number" && Number.isFinite(evt.errors)) this.watcherErrors = evt.errors;
-    if (typeof evt.restartCount === "number" && Number.isFinite(evt.restartCount)) this.watcherRestartCount = evt.restartCount;
+    if (typeof evt.errors === "number" && Number.isFinite(evt.errors))
+      this.watcherErrors = evt.errors;
+    if (
+      typeof evt.restartCount === "number" &&
+      Number.isFinite(evt.restartCount)
+    )
+      this.watcherRestartCount = evt.restartCount;
     if (typeof evt.queueDepth === "number")
       this.watcherQueueDepth = evt.queueDepth;
     if (typeof evt.stale === "boolean") this.watcherStale = evt.stale;
@@ -862,6 +869,22 @@ export class Aggregator {
     }
   }
 
+  recordDispatchSample(rec: {
+    active: number;
+    queued: number;
+    maxConcurrency: number;
+  }): void {
+    this.dispatchActiveLatest = Math.max(0, rec.active);
+    this.dispatchQueuedLatest = Math.max(0, rec.queued);
+    this.dispatchMaxLatest = Math.max(0, rec.maxConcurrency);
+    if (this.dispatchActiveLatest > this.dispatchActiveMax) {
+      this.dispatchActiveMax = this.dispatchActiveLatest;
+    }
+    if (this.dispatchQueuedLatest > this.dispatchQueuedMax) {
+      this.dispatchQueuedMax = this.dispatchQueuedLatest;
+    }
+  }
+
   recordDbLatency(latencyMs: number): void {
     if (Number.isFinite(latencyMs) && latencyMs >= 0) {
       pushBoundedSorted(this.dbLatencies, latencyMs, LATENCY_WINDOW_SIZE);
@@ -901,7 +924,9 @@ export class Aggregator {
     const errorRate = total === 0 ? 1 : Math.max(0, 1 - errors / total);
 
     const failureRatio =
-      this.indexEventTotal === 0 ? 0 : this.indexFailures / this.indexEventTotal;
+      this.indexEventTotal === 0
+        ? 0
+        : this.indexFailures / this.indexEventTotal;
     const coverage = Math.max(0, 1 - failureRatio);
 
     const edgeQuality =
@@ -914,12 +939,18 @@ export class Aggregator {
         ? 1.0
         : Math.max(0, 1 - this.retrievalEmpty / this.retrievalTotal);
 
-    const components = { freshness, coverage, errorRate, edgeQuality, callResolution };
+    const components = {
+      freshness,
+      coverage,
+      errorRate,
+      edgeQuality,
+      callResolution,
+    };
     const score = Math.round(
       (freshness * 0.25 +
-        coverage * 0.20 +
-        errorRate * 0.30 +
-        edgeQuality * 0.10 +
+        coverage * 0.2 +
+        errorRate * 0.3 +
+        edgeQuality * 0.1 +
         callResolution * 0.15) *
         100,
     );
@@ -984,8 +1015,7 @@ export class Aggregator {
     }
     this.postIndexSessionLastTimedOut = Boolean(rec.timedOut);
     if (rec.timedOut) this.postIndexSessionTimeoutCount += 1;
-    this.postIndexSessionLastEndedAt =
-      rec.endedAt ?? new Date().toISOString();
+    this.postIndexSessionLastEndedAt = rec.endedAt ?? new Date().toISOString();
   }
 
   /* ---------------------- snapshot ---------------------- */
@@ -1314,6 +1344,11 @@ export class Aggregator {
 
   private computePool(): PoolMetrics {
     return {
+      dispatchActive: this.dispatchActiveLatest,
+      dispatchQueued: this.dispatchQueuedLatest,
+      dispatchMax: this.dispatchMaxLatest,
+      maxDispatchActive: this.dispatchActiveMax,
+      maxDispatchQueued: this.dispatchQueuedMax,
       avgWriteQueued:
         this.poolWriteQueuedCount === 0
           ? 0
@@ -1523,8 +1558,7 @@ function tokenSavingsLayerMetrics(
     estimatedTokensAvoided: b.estimatedTokensAvoided,
     opportunities: b.opportunities,
     hits: b.hits,
-    hitRatePct:
-      b.opportunities === 0 ? 0 : (b.hits / b.opportunities) * 100,
+    hitRatePct: b.opportunities === 0 ? 0 : (b.hits / b.opportunities) * 100,
     storedBytes: b.storedBytes,
   };
 }

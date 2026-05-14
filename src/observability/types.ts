@@ -202,6 +202,16 @@ export interface LatencyPhaseMetrics {
 }
 
 export interface PoolMetrics {
+  /** Current active MCP tool dispatch slots. */
+  dispatchActive: number;
+  /** Current queued MCP tool dispatch calls. */
+  dispatchQueued: number;
+  /** Current MCP tool dispatch concurrency ceiling. */
+  dispatchMax: number;
+  /** Maximum observed active MCP tool dispatch slots. */
+  maxDispatchActive: number;
+  /** Maximum observed queued MCP tool dispatch calls. */
+  maxDispatchQueued: number;
   /** Average write-pool queued depth. */
   avgWriteQueued: number;
   /** Maximum observed write-pool queued depth. */

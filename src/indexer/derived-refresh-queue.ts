@@ -37,6 +37,53 @@ const running = new Map<string, RunningEntry>();
 let enabled = true;
 let shuttingDown = false;
 
+const DEFAULT_DERIVED_REFRESH_TIMEOUT_MS = 120_000;
+
+class DerivedRefreshTimeoutError extends Error {
+  constructor(repoId: string, targetVersionId: string, timeoutMs: number) {
+    super(
+      `derived-refresh timed out after ${timeoutMs}ms for repo ${repoId} at version ${targetVersionId}`,
+    );
+    this.name = "DerivedRefreshTimeoutError";
+    Object.setPrototypeOf(this, DerivedRefreshTimeoutError.prototype);
+  }
+}
+
+interface RepoWriteHeavyTimeout {
+  lockId: number;
+  targetVersionId: string;
+  timeoutMs: number;
+  timedOutAt: number;
+}
+
+interface RepoWriteHeavyTail {
+  id: number;
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (err: Error) => void;
+}
+
+class RepoWriteHeavyLockTimedOutError extends Error {
+  constructor(repoId: string, timeout: RepoWriteHeavyTimeout) {
+    super(
+      `derived-refresh write-heavy lock for repo ${repoId} timed out after ${timeout.timeoutMs}ms at version ${timeout.targetVersionId}; waiting for the stuck native work to settle before retrying`,
+    );
+    this.name = "RepoWriteHeavyLockTimedOutError";
+    Object.setPrototypeOf(this, RepoWriteHeavyLockTimedOutError.prototype);
+  }
+}
+
+function getDerivedRefreshTimeoutMs(): number {
+  const raw = process.env.SDL_DERIVED_REFRESH_TIMEOUT_MS;
+  if (raw) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+  }
+  return DEFAULT_DERIVED_REFRESH_TIMEOUT_MS;
+}
+
 /**
  * Per-repo serialization for write-heavy refresh phases (cluster/process
  * computation, SCIP auto-ingest). LadybugDB allows one write transaction at
@@ -47,21 +94,75 @@ let shuttingDown = false;
  * new promise, await the prior tail, run their critical section, then
  * resolve their promise so the next acquirer proceeds.
  */
-const repoWriteHeavyTails = new Map<string, Promise<void>>();
+const repoWriteHeavyTails = new Map<string, RepoWriteHeavyTail>();
+const activeRepoWriteHeavyLocks = new Map<string, RepoWriteHeavyTail>();
+const timedOutRepoWriteHeavyLocks = new Map<string, RepoWriteHeavyTimeout>();
+let nextRepoWriteHeavyLockId = 1;
+
+function getRepoWriteHeavyTimeoutError(repoId: string): Error | undefined {
+  const timeout = timedOutRepoWriteHeavyLocks.get(repoId);
+  return timeout ? new RepoWriteHeavyLockTimedOutError(repoId, timeout) : undefined;
+}
+
+function markActiveRepoWriteHeavyLockTimedOut(
+  repoId: string,
+  targetVersionId: string,
+  timeoutMs: number,
+): boolean {
+  const active = activeRepoWriteHeavyLocks.get(repoId);
+  if (!active) return false;
+  const timeout: RepoWriteHeavyTimeout = {
+    lockId: active.id,
+    targetVersionId,
+    timeoutMs,
+    timedOutAt: Date.now(),
+  };
+  timedOutRepoWriteHeavyLocks.set(repoId, timeout);
+  active.reject(new RepoWriteHeavyLockTimedOutError(repoId, timeout));
+  return true;
+}
 
 export async function withRepoWriteHeavyLock<T>(
   repoId: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const prior = repoWriteHeavyTails.get(repoId) ?? Promise.resolve();
+  const blocked = getRepoWriteHeavyTimeoutError(repoId);
+  if (blocked) throw blocked;
+
+  const prior = repoWriteHeavyTails.get(repoId);
   let releaseOurs!: () => void;
-  const ours = new Promise<void>((resolve) => {
+  let rejectOurs!: (err: Error) => void;
+  const promise = new Promise<void>((resolve, reject) => {
     releaseOurs = resolve;
+    rejectOurs = reject;
   });
+  // A timeout rejects the tail to wake queued waiters; attach a no-op handler
+  // so an otherwise unobserved tail does not become an unhandled rejection.
+  promise.catch(() => undefined);
+  const ours: RepoWriteHeavyTail = {
+    id: nextRepoWriteHeavyLockId++,
+    promise,
+    resolve: releaseOurs,
+    reject: rejectOurs,
+  };
   repoWriteHeavyTails.set(repoId, ours);
   try {
-    await prior;
-    return await fn();
+    await (prior?.promise ?? Promise.resolve());
+    const timedOut = getRepoWriteHeavyTimeoutError(repoId);
+    if (timedOut) throw timedOut;
+
+    activeRepoWriteHeavyLocks.set(repoId, ours);
+    try {
+      return await fn();
+    } finally {
+      if (activeRepoWriteHeavyLocks.get(repoId) === ours) {
+        activeRepoWriteHeavyLocks.delete(repoId);
+      }
+      const timeout = timedOutRepoWriteHeavyLocks.get(repoId);
+      if (timeout?.lockId === ours.id) {
+        timedOutRepoWriteHeavyLocks.delete(repoId);
+      }
+    }
   } finally {
     releaseOurs();
     if (repoWriteHeavyTails.get(repoId) === ours) {
@@ -160,18 +261,54 @@ async function runOne(
 ): Promise<void> {
   try {
     await withIndexingGate(async () => {
-      await runToolDispatch(async () => {
-        if (signal.aborted) return;
-        // The dispatch slot is intentional: while indexing narrows dispatch
-        // concurrency to one, the background refresh must occupy that one slot
-        // so foreground read tools cannot overlap its LadybugDB writes.
-        await withRepoWriteHeavyLock(repoId, async () => {
-          if (signal.aborted) return;
-          await hooks.refresh({ repoId, versionId: targetVersionId, signal });
-        });
-        if (signal.aborted) return;
-        await markDerivedStateComputed(repoId, targetVersionId);
-      });
+      await runToolDispatch(
+        async () => {
+          let writeLockHeld = false;
+          await runWithDerivedRefreshTimeout(
+            repoId,
+            targetVersionId,
+            signal,
+            async (refreshSignal) => {
+              if (refreshSignal.aborted) return;
+              // The dispatch slot is intentional: while indexing narrows dispatch
+              // concurrency to one, the background refresh must occupy that one slot
+              // so foreground read tools cannot overlap its LadybugDB writes.
+              await withRepoWriteHeavyLock(repoId, async () => {
+                writeLockHeld = true;
+                try {
+                  if (refreshSignal.aborted) return;
+                  await hooks.refresh({
+                    repoId,
+                    versionId: targetVersionId,
+                    signal: refreshSignal,
+                  });
+                } finally {
+                  writeLockHeld = false;
+                }
+              });
+              if (refreshSignal.aborted) return;
+              await markDerivedStateComputed(repoId, targetVersionId);
+            },
+            (timeoutMs) => {
+              if (!writeLockHeld) return;
+              const marked = markActiveRepoWriteHeavyLockTimedOut(
+                repoId,
+                targetVersionId,
+                timeoutMs,
+              );
+              if (marked) {
+                logger.warn("derived-refresh write-heavy lock timed out", {
+                  repoId,
+                  targetVersionId,
+                  timeoutMs,
+                });
+              }
+            },
+          );
+        },
+        undefined,
+        `derived-refresh:${repoId}`,
+      );
     });
   } catch (err) {
     if (signal.aborted) {
@@ -186,6 +323,107 @@ async function runOne(
     });
     await recordDerivedStateError(repoId, msg);
   }
+}
+
+async function runWithDerivedRefreshTimeout(
+  repoId: string,
+  targetVersionId: string,
+  parentSignal: AbortSignal,
+  work: (signal: AbortSignal) => Promise<void>,
+  onTimeout?: (timeoutMs: number) => void,
+): Promise<void> {
+  if (parentSignal.aborted) return;
+
+  const timeoutMs = getDerivedRefreshTimeoutMs();
+  const timeoutAbort = new AbortController();
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  let rejectParentAbort: ((err: Error) => void) | undefined;
+  let timedOut = false;
+
+  const parentAbort = (): void => {
+    timeoutAbort.abort();
+    rejectParentAbort?.(new Error("derived-refresh aborted"));
+  };
+  const parentAbortPromise = new Promise<never>((_, reject) => {
+    rejectParentAbort = reject;
+  });
+  parentSignal.addEventListener("abort", parentAbort, { once: true });
+
+  let workPromise: Promise<void> | undefined;
+  try {
+    if (parentSignal.aborted) {
+      parentAbort();
+      await parentAbortPromise;
+    }
+    workPromise = Promise.resolve().then(() => work(timeoutAbort.signal));
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        timeoutAbort.abort();
+        onTimeout?.(timeoutMs);
+        reject(
+          new DerivedRefreshTimeoutError(repoId, targetVersionId, timeoutMs),
+        );
+      }, timeoutMs);
+      timeoutHandle.unref();
+    });
+    await Promise.race([workPromise, timeoutPromise, parentAbortPromise]);
+  } catch (err) {
+    if (timedOut && workPromise) {
+      void workPromise.then(
+        () => {
+          logger.info("derived-refresh timed-out work settled", {
+            repoId,
+            targetVersionId,
+            timeoutMs,
+          });
+        },
+        (settledErr) => {
+          logger.debug("derived-refresh timed-out work rejected later", {
+            repoId,
+            targetVersionId,
+            timeoutMs,
+            error:
+              settledErr instanceof Error
+                ? settledErr.message
+                : String(settledErr),
+          });
+        },
+      );
+    }
+    throw err;
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+    parentSignal.removeEventListener("abort", parentAbort);
+  }
+}
+
+export function _getDerivedRefreshTimeoutMsForTesting(): number {
+  return getDerivedRefreshTimeoutMs();
+}
+
+export async function _runWithDerivedRefreshTimeoutForTesting(
+  repoId: string,
+  targetVersionId: string,
+  signal: AbortSignal,
+  work: (signal: AbortSignal) => Promise<void>,
+  options: { markActiveWriteLockOnTimeout?: boolean } = {},
+): Promise<void> {
+  return runWithDerivedRefreshTimeout(
+    repoId,
+    targetVersionId,
+    signal,
+    work,
+    options.markActiveWriteLockOnTimeout
+      ? (timeoutMs) => {
+          markActiveRepoWriteHeavyLockTimedOut(
+            repoId,
+            targetVersionId,
+            timeoutMs,
+          );
+        }
+      : undefined,
+  );
 }
 
 async function defaultRefreshImpl(params: {

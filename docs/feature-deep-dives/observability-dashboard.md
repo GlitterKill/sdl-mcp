@@ -90,20 +90,21 @@ requested.
 
 **Key components:**
 
-| Component                    | File                                           | Role                                                                                                                                                                                            |
-| :--------------------------- | :--------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ObservabilityTap` interface | `src/observability/event-tap.ts`               | Receives forwarded telemetry events. The tap is registered once at startup and kept on the existing `logger` channel.                                                                           |
-| `ObservabilityService`       | `src/observability/service.ts`                 | Owns one `Aggregator` per repo, samples the runtime probes at `sampleIntervalMs`, and exposes `getSnapshot`, `getTimeseries`, `getBeamExplain`, and `onSnapshot` (subscriber callback for SSE). |
-| `Aggregator`                 | `src/observability/service.ts`                 | Per-repo state container. Maintains dual retention windows (short, default 15 min; long, default 24 h) over the same metric streams.                                                            |
-| `BeamExplainStore`           | `src/observability/beam-explain-store.ts`      | Independent LRU. Insertion order is tracked via `Map` iteration; every `publish` deletes-then-re-inserts to keep the most-recently-used slice handle at the tail.                               |
-| `classifyBottleneck`         | `src/observability/bottleneck-classifier.ts`   | Pure deterministic classifier that takes a snapshot of resource and queue signals and returns `{dominant, confidence, topSignals}`.                                                             |
-| HTTP routes / stdio sidecar | `src/cli/transport/http.ts`                    | Bearer-auth gated handlers for `/api/observability/*`, static asset routes for `/ui/observability{,.js,.css}`, `/health`, and the loopback-only stdio dashboard sidecar.                      |
+| Component                    | File                                         | Role                                                                                                                                                                                            |
+| :--------------------------- | :------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ObservabilityTap` interface | `src/observability/event-tap.ts`             | Receives forwarded telemetry events. The tap is registered once at startup and kept on the existing `logger` channel.                                                                           |
+| `ObservabilityService`       | `src/observability/service.ts`               | Owns one `Aggregator` per repo, samples the runtime probes at `sampleIntervalMs`, and exposes `getSnapshot`, `getTimeseries`, `getBeamExplain`, and `onSnapshot` (subscriber callback for SSE). |
+| `Aggregator`                 | `src/observability/service.ts`               | Per-repo state container. Maintains dual retention windows (short, default 15 min; long, default 24 h) over the same metric streams.                                                            |
+| `BeamExplainStore`           | `src/observability/beam-explain-store.ts`    | Independent LRU. Insertion order is tracked via `Map` iteration; every `publish` deletes-then-re-inserts to keep the most-recently-used slice handle at the tail.                               |
+| `classifyBottleneck`         | `src/observability/bottleneck-classifier.ts` | Pure deterministic classifier that takes a snapshot of resource and queue signals and returns `{dominant, confidence, topSignals}`.                                                             |
+| HTTP routes / stdio sidecar  | `src/cli/transport/http.ts`                  | Bearer-auth gated handlers for `/api/observability/*`, static asset routes for `/ui/observability{,.js,.css}`, `/health`, and the loopback-only stdio dashboard sidecar.                        |
 
 **Sampling tick** — when the service is `start()`ed, it sets a recurring timer at the
 configured `sampleIntervalMs` (default 2000 ms). On each tick the service samples:
 
 - CPU percent (averaged over cores) and the running max
 - RSS in MB, heap used / total in MB, event-loop lag (P95 + max)
+- MCP tool dispatch limiter state via `getToolDispatchStats()` from `src/mcp/dispatch-limiter.ts`
 - DB write-pool stats via `getPoolStats()` from `src/db/ladybug-core.ts`
 - Indexer drain stats via `getActiveDrainStats()` from `src/indexer/`
 
@@ -343,13 +344,13 @@ Beam-search slice builds. Detailed per-slice traces live behind `/api/observabil
 
 ### `tokenEfficiency: TokenEfficiencyMetrics`
 
-| Field          | Type       | Meaning                                                                                |
-| :------------- | :--------- | :------------------------------------------------------------------------------------- |
-| `totalUsed`    | number     | Sum of tokens across all observed tool calls.                                          |
-| `totalSaved`   | number     | Estimated tokens saved versus a raw-file equivalent baseline.                          |
-| `savingsRatio` | number 0–1 | `totalSaved / (totalSaved + totalUsed)` — 0 = no savings, 1 = effectively infinite.    |
-| `avgPerCall`   | number     | Mean tokens per call. Spikes suggest agents are taking the raw-window path more often. |
-| `compressionLayers` | object | Per-layer savings and hit-rate breakdown for response artifacts, session deltas, ETags, spillover, raw-window avoidance, and packed wire. |
+| Field               | Type       | Meaning                                                                                                                                   |
+| :------------------ | :--------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
+| `totalUsed`         | number     | Sum of tokens across all observed tool calls.                                                                                             |
+| `totalSaved`        | number     | Estimated tokens saved versus a raw-file equivalent baseline.                                                                             |
+| `savingsRatio`      | number 0–1 | `totalSaved / (totalSaved + totalUsed)` — 0 = no savings, 1 = effectively infinite.                                                       |
+| `avgPerCall`        | number     | Mean tokens per call. Spikes suggest agents are taking the raw-window path more often.                                                    |
+| `compressionLayers` | object     | Per-layer savings and hit-rate breakdown for response artifacts, session deltas, ETags, spillover, raw-window avoidance, and packed wire. |
 
 `compressionLayers.bySource` answers which token-saving layer is actually paying rent.
 Each source records `events`, `realizedEvents`, `estimatedTokensAvoided`,
@@ -371,9 +372,9 @@ same counters grouped by tool name.
 
 End-to-end MCP tool dispatch latency.
 
-| Field                                       | Type                             | Meaning                                                                                                      |
-| :------------------------------------------ | :------------------------------- | :----------------------------------------------------------------------------------------------------------- |
-| `avgMs`, `p50Ms`, `p95Ms`, `p99Ms`, `maxMs` | number                           | Aggregate distribution.                                                                                      |
+| Field                                       | Type                             | Meaning                                                                                                                             |
+| :------------------------------------------ | :------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------- |
+| `avgMs`, `p50Ms`, `p95Ms`, `p99Ms`, `maxMs` | number                           | Aggregate distribution.                                                                                                             |
 | `perTool`                                   | `Record<string, LatencyPerTool>` | Each entry carries `count`, `avgMs`, `p95Ms`, `errorCount`, and optional `phases`. The dashboard's per-tool panel sorts by `p95Ms`. |
 
 `LatencyPerTool.phases` is populated when callers opt in to tool diagnostics with
@@ -385,14 +386,16 @@ such as validation, dispatch, response processing, workflow step execution,
 
 ### `pool: PoolMetrics`
 
-DB write-pool and indexer drain saturation.
+MCP dispatch, DB write-pool, and indexer drain saturation.
 
-| Field                                       | Type   | Meaning                                                                                     |
-| :------------------------------------------ | :----- | :------------------------------------------------------------------------------------------ |
-| `avgWriteQueued` / `maxWriteQueued`         | number | Write-pool queue depth. >0 mean and a high max indicates writes are backing up.             |
-| `avgWriteActive`                            | number | Mean active workers. With single-writer serialization this is bounded at 1.0.               |
-| `avgDrainQueueDepth` / `maxDrainQueueDepth` | number | Drain queue depth from `getActiveDrainStats()`. Indexer batch-persist saturation indicator. |
-| `totalDrainFailures`                        | number | Lifetime drain failures.                                                                    |
+| Field                                               | Type   | Meaning                                                                                                                                            |
+| :-------------------------------------------------- | :----- | :------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dispatchActive` / `dispatchQueued` / `dispatchMax` | number | Current active, queued, and max MCP tool dispatch slots. Queued >0 with active at max means foreground tools are waiting before handler execution. |
+| `maxDispatchActive` / `maxDispatchQueued`           | number | Peak active/queued MCP tool dispatch slots since service start. Useful for diagnosing transient queue saturation.                                  |
+| `avgWriteQueued` / `maxWriteQueued`                 | number | Write-pool queue depth. >0 mean and a high max indicates writes are backing up.                                                                    |
+| `avgWriteActive`                                    | number | Mean active workers. With single-writer serialization this is bounded at 1.0.                                                                      |
+| `avgDrainQueueDepth` / `maxDrainQueueDepth`         | number | Drain queue depth from `getActiveDrainStats()`. Indexer batch-persist saturation indicator.                                                        |
+| `totalDrainFailures`                                | number | Lifetime drain failures.                                                                                                                           |
 
 ### `scip: ScipMetrics`
 
@@ -603,13 +606,13 @@ signal.
 V1 is **read-only** and **in-memory**. The following are out of scope for V1 and planned
 for V2:
 
-| Limitation (V1)                                                                  | V2 plan                                                                                                                                                                                               |
-| :------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| No live tuning controls — every knob is config-file only and requires a restart. | Add authenticated mutation endpoints under `/api/observability/admin/*` with audit logging.                                                                                                           |
-| In-memory windows only. Metrics are lost on process restart.                     | Optional persistence to a small SQLite or DuckDB warehouse, retained across restarts and queryable via SQL.                                                                                           |
-| Stdio sidecar is observability-only and loopback-bound.                        | Add richer out-of-band visualization options without exposing graph, config, or session routes on stdio by default.                                                                                   |
-| Bottleneck classifier is heuristic.                                              | V2 will keep the deterministic heuristic but add a learned model that runs alongside as a comparison signal.                                                                                          |
-| No alerting.                                                                     | Add threshold-based alert rules driven by the classifier and configurable webhooks.                                                                                                                   |
+| Limitation (V1)                                                                  | V2 plan                                                                                                             |
+| :------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------ |
+| No live tuning controls — every knob is config-file only and requires a restart. | Add authenticated mutation endpoints under `/api/observability/admin/*` with audit logging.                         |
+| In-memory windows only. Metrics are lost on process restart.                     | Optional persistence to a small SQLite or DuckDB warehouse, retained across restarts and queryable via SQL.         |
+| Stdio sidecar is observability-only and loopback-bound.                          | Add richer out-of-band visualization options without exposing graph, config, or session routes on stdio by default. |
+| Bottleneck classifier is heuristic.                                              | V2 will keep the deterministic heuristic but add a learned model that runs alongside as a comparison signal.        |
+| No alerting.                                                                     | Add threshold-based alert rules driven by the classifier and configurable webhooks.                                 |
 
 ---
 

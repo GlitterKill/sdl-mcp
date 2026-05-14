@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert";
 import { z } from "zod";
-import { MCPServer } from "../../dist/server.js";
+import { isMetadataOnlyTool, MCPServer } from "../../dist/server.js";
 
 /**
  * Tests for src/server.ts — MCPServer class.
@@ -15,6 +15,15 @@ describe("MCPServer", () => {
 
   beforeEach(() => {
     server = new MCPServer();
+  });
+
+  describe("metadata-only dispatch bypass", () => {
+    it("identifies catalog/manual tools as metadata-only", () => {
+      assert.strictEqual(isMetadataOnlyTool("sdl.action.search"), true);
+      assert.strictEqual(isMetadataOnlyTool("sdl.manual"), true);
+      assert.strictEqual(isMetadataOnlyTool("sdl.context"), false);
+      assert.strictEqual(isMetadataOnlyTool("sdl.file"), false);
+    });
   });
 
   describe("constructor", () => {

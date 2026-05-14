@@ -3,16 +3,23 @@ import assert from "node:assert/strict";
 
 import type { Connection } from "kuzu";
 import {
+  _captureCallSiteForTesting,
   isConnStuck,
+  queryAll,
   runExclusive,
 } from "../../dist/db/ladybug-core.js";
 import { getReadPoolHealth } from "../../dist/db/ladybug.js";
+import { logger } from "../../dist/util/logger.js";
 
 // These tests verify the per-conn watchdog wiring added in fix #3 and the
 // pool-health snapshot used by the watcher in fix #5. The watchdog threshold
 // is normally 30s; the SDL_STUCK_TASK_WARN_MS env var lets tests shrink it
 // without 30-second sleeps.
 const ORIGINAL_THRESHOLD = process.env.SDL_STUCK_TASK_WARN_MS;
+
+function captureFromWatchdogTestHelper(): string | undefined {
+  return _captureCallSiteForTesting();
+}
 
 describe("ladybug-core: stuck-conn watchdog", () => {
   before(() => {
@@ -62,6 +69,51 @@ describe("ladybug-core: stuck-conn watchdog", () => {
     const result = await runExclusive(fakeConn, async () => 7);
     assert.equal(result, 7);
     assert.equal(isConnStuck(fakeConn), false);
+  });
+
+  it("captures workspace call sites before framework internals", () => {
+    assert.match(
+      String(captureFromWatchdogTestHelper()),
+      /ladybug-core-watchdog\.test\.ts/,
+    );
+  });
+
+  it("logs query fingerprint and caller site when a query task is stuck", async () => {
+    const fakeResult = {
+      getAll: async () => [],
+      close: () => undefined,
+    };
+    const fakeConn = {
+      prepare: async () => ({}),
+      execute: async () =>
+        new Promise((resolve) => {
+          setTimeout(() => resolve(fakeResult), 140);
+        }),
+    } as unknown as Connection;
+
+    const originalWarn = logger.warn.bind(logger);
+    let captured:
+      | { message: string; meta?: Record<string, unknown> }
+      | undefined;
+    logger.warn = (message: string, meta?: Record<string, unknown>): void => {
+      if (message.includes("DB task running")) {
+        captured = { message, meta };
+      }
+      originalWarn(message, meta);
+    };
+    try {
+      await queryAll(fakeConn, "MATCH (n) RETURN n", {});
+    } finally {
+      logger.warn = originalWarn;
+    }
+
+    assert.ok(captured, "watchdog should log a stuck query warning");
+    assert.equal(captured.meta?.label, "queryAll");
+    assert.match(String(captured.meta?.statementFingerprint), /^[a-f0-9]{16}$/);
+    assert.match(
+      String(captured.meta?.callSite),
+      /ladybug-core-watchdog\.test\.ts/,
+    );
   });
 
   it("clears stuck flag even when task throws after threshold", async () => {

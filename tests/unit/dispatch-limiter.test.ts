@@ -4,9 +4,11 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   configureToolDispatchLimiter,
   getToolDispatchLimiter,
+  getToolDispatchStats,
   isInToolDispatch,
   resetToolDispatchLimiter,
   runToolDispatch,
+  ToolDispatchQueueTimeoutError,
   waitForToolDispatchIdle,
 } from "../../dist/mcp/dispatch-limiter.js";
 
@@ -49,6 +51,7 @@ describe("tool dispatch limiter", () => {
     assert.strictEqual(reshaped.getMaxConcurrency(), 2);
     assert.strictEqual(reshaped.getStats().active, 0);
     assert.strictEqual(reshaped.getStats().queued, 0);
+    assert.strictEqual(reshaped.getStats().maxConcurrency, 2);
   });
 
   it("resetToolDispatchLimiter clears the singleton instance", () => {
@@ -123,6 +126,46 @@ describe("tool dispatch limiter", () => {
     const finalStats = limiter.getStats();
     assert.strictEqual(finalStats.active, 0);
     assert.strictEqual(finalStats.queued, 0);
+  });
+
+  it("exposes dispatch stats without creating stale queue state", () => {
+    configureToolDispatchLimiter({ maxConcurrency: 3, queueTimeoutMs: 1_000 });
+
+    const stats = getToolDispatchStats();
+
+    assert.strictEqual(stats.active, 0);
+    assert.strictEqual(stats.queued, 0);
+    assert.strictEqual(stats.maxConcurrency, 3);
+    assert.strictEqual(stats.configuredMax, 3);
+    assert.strictEqual(typeof stats.indexingActive, "boolean");
+  });
+
+  it("returns retryable typed errors when queued dispatch work times out", async () => {
+    configureToolDispatchLimiter({ maxConcurrency: 1, queueTimeoutMs: 30 });
+
+    let release: (() => void) | undefined;
+    const blocker = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = runToolDispatch(async () => blocker, undefined, "first");
+
+    await assert.rejects(
+      runToolDispatch(async () => "second", undefined, "sdl.context"),
+      (err: unknown) => {
+        assert.ok(err instanceof ToolDispatchQueueTimeoutError);
+        assert.strictEqual((err as { code?: string }).code, "RUNTIME_ERROR");
+        assert.strictEqual(
+          (err as { classification?: string }).classification,
+          "unavailable",
+        );
+        assert.strictEqual((err as { retryable?: boolean }).retryable, true);
+        assert.match(err.message, /Tool dispatch queue timed out/);
+        return true;
+      },
+    );
+
+    release?.();
+    await first;
   });
 
   it("creates a fresh limiter after reset", () => {

@@ -6,6 +6,7 @@
  * It is the foundation of the ladybug-queries.ts split.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createHash } from "node:crypto";
 import type { Connection, PreparedStatement, QueryResult } from "kuzu";
 import { logger } from "../util/logger.js";
 import { DatabaseError } from "../domain/errors.js";
@@ -91,6 +92,70 @@ function getStuckTaskWarnMs(): number {
 }
 const stuckConns = new WeakSet<Connection>();
 
+interface ConnWatchdogDetails {
+  statement?: string;
+  callSite?: string;
+}
+
+function statementFingerprint(statement: string): string {
+  const normalized = statement.replace(/\s+/g, " ").trim();
+  return createHash("sha256").update(normalized).digest("hex").slice(0, 16);
+}
+
+const MAX_CALL_SITE_FRAMES = 8;
+
+function isNodeInternalFrame(frame: string): boolean {
+  return (
+    frame.startsWith("node:") ||
+    frame.includes("(node:") ||
+    frame.includes("node:internal")
+  );
+}
+
+function isWorkspaceCallSiteFrame(frame: string): boolean {
+  if (frame.includes("node_modules")) return false;
+  return frame.includes("file:///") || /[A-Za-z]:[\\/]/.test(frame);
+}
+
+function isLadybugCoreFrame(frame: string): boolean {
+  return (
+    frame.includes("/src/db/ladybug-core.") ||
+    frame.includes("\\src\\db\\ladybug-core.") ||
+    frame.includes("/dist/db/ladybug-core.") ||
+    frame.includes("\\dist\\db\\ladybug-core.") ||
+    frame.startsWith("captureCallSite ") ||
+    frame.startsWith("_captureCallSiteForTesting ")
+  );
+}
+
+function captureCallSite(): string | undefined {
+  const stack = new Error().stack;
+  if (!stack) return undefined;
+  const frames = stack
+    .split("\n")
+    .map((line) => line.trim().replace(/^at\s+/, ""))
+    .filter(
+      (line) =>
+        line.length > 0 &&
+        line !== "Error" &&
+        !line.includes("captureCallSite") &&
+        !isLadybugCoreFrame(line),
+    );
+  const externalFrames = frames.filter((line) => !isNodeInternalFrame(line));
+  const workspaceFrames = externalFrames.filter(isWorkspaceCallSiteFrame);
+  const selected =
+    workspaceFrames.length > 0
+      ? workspaceFrames
+      : externalFrames.length > 0
+        ? externalFrames
+        : frames;
+  return selected.slice(0, MAX_CALL_SITE_FRAMES).join(" <- ");
+}
+
+export function _captureCallSiteForTesting(): string | undefined {
+  return captureCallSite();
+}
+
 export function isConnStuck(conn: Connection): boolean {
   return stuckConns.has(conn);
 }
@@ -99,6 +164,7 @@ function withConnWatchdog<T>(
   conn: Connection,
   label: string,
   fn: () => Promise<T>,
+  details: ConnWatchdogDetails = {},
 ): Promise<T> {
   let stuckMarked = false;
   const warnMs = getStuckTaskWarnMs();
@@ -106,7 +172,14 @@ function withConnWatchdog<T>(
     stuckMarked = true;
     stuckConns.add(conn);
     logger.warn(
-      `[ladybug-core] DB task running >${warnMs}ms; conn flagged stuck (label=${label})`,
+      `[ladybug-core] DB task running >${warnMs}ms; conn flagged stuck`,
+      {
+        label,
+        statementFingerprint: details.statement
+          ? statementFingerprint(details.statement)
+          : undefined,
+        callSite: details.callSite,
+      },
     );
   }, warnMs);
   timer.unref();
@@ -142,23 +215,26 @@ export function runExclusive<T>(
  *
  * The result handle is always closed in a try/finally to avoid handle leaks.
  */
-export async function execDdl(
-  conn: Connection,
-  ddl: string,
-): Promise<void> {
+export async function execDdl(conn: Connection, ddl: string): Promise<void> {
+  const callSite = captureCallSite();
   await getConnMutex(conn).run(() =>
-    withConnWatchdog(conn, "execDdl", async () => {
-      const result = await conn.query(ddl);
-      try {
-        if (Array.isArray(result)) {
-          for (const r of result) r.close();
-        } else {
-          result.close();
+    withConnWatchdog(
+      conn,
+      "execDdl",
+      async () => {
+        const result = await conn.query(ddl);
+        try {
+          if (Array.isArray(result)) {
+            for (const r of result) r.close();
+          } else {
+            result.close();
+          }
+        } catch {
+          // Best-effort close — DDL completed successfully.
         }
-      } catch {
-        // Best-effort close — DDL completed successfully.
-      }
-    }),
+      },
+      { statement: ddl, callSite },
+    ),
   );
 }
 
@@ -177,8 +253,12 @@ export async function execStoredProcRaw(
   conn: Connection,
   callQuery: string,
 ): Promise<QueryResult> {
+  const callSite = captureCallSite();
   return getConnMutex(conn).run(() =>
-    withConnWatchdog(conn, "execStoredProc", () => conn.query(callQuery)),
+    withConnWatchdog(conn, "execStoredProc", () => conn.query(callQuery), {
+      statement: callQuery,
+      callSite,
+    }),
   );
 }
 
@@ -191,37 +271,43 @@ export async function queryStoredProcAll<T>(
   conn: Connection,
   callQuery: string,
 ): Promise<T[]> {
+  const callSite = captureCallSite();
   const queuedAt = performance.now();
   return getConnMutex(conn).run(() =>
-    withConnWatchdog(conn, "queryStoredProcAll", async () => {
-      const nativeStartedAt = performance.now();
-      let success = false;
-      try {
-        const result = await conn.query(callQuery);
-        const results = Array.isArray(result) ? result : [result];
-        const rows: T[] = [];
+    withConnWatchdog(
+      conn,
+      "queryStoredProcAll",
+      async () => {
+        const nativeStartedAt = performance.now();
+        let success = false;
         try {
-          for (const item of results) {
-            rows.push(...((await item.getAll()) as T[]));
+          const result = await conn.query(callQuery);
+          const results = Array.isArray(result) ? result : [result];
+          const rows: T[] = [];
+          try {
+            for (const item of results) {
+              rows.push(...((await item.getAll()) as T[]));
+            }
+          } finally {
+            for (const item of results) item.close();
           }
+          success = true;
+          return rows;
+        } catch (err) {
+          throw new DatabaseError(
+            `Stored procedure query failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         } finally {
-          for (const item of results) item.close();
+          recordDbLatency("storedProcAll", {
+            queuedAt,
+            nativeStartedAt,
+            nativeEndedAt: performance.now(),
+            success,
+          });
         }
-        success = true;
-        return rows;
-      } catch (err) {
-        throw new DatabaseError(
-          `Stored procedure query failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      } finally {
-        recordDbLatency("storedProcAll", {
-          queuedAt,
-          nativeStartedAt,
-          nativeEndedAt: performance.now(),
-          success,
-        });
-      }
-    }),
+      },
+      { statement: callQuery, callSite },
+    ),
   );
 }
 
@@ -233,36 +319,42 @@ export async function execStoredProc(
   conn: Connection,
   callQuery: string,
 ): Promise<void> {
+  const callSite = captureCallSite();
   const queuedAt = performance.now();
   await getConnMutex(conn).run(() =>
-    withConnWatchdog(conn, "execStoredProc", async () => {
-      const nativeStartedAt = performance.now();
-      let success = false;
-      try {
-        const result = await conn.query(callQuery);
+    withConnWatchdog(
+      conn,
+      "execStoredProc",
+      async () => {
+        const nativeStartedAt = performance.now();
+        let success = false;
         try {
-          if (Array.isArray(result)) {
-            for (const item of result) item.close();
-          } else {
-            result.close();
+          const result = await conn.query(callQuery);
+          try {
+            if (Array.isArray(result)) {
+              for (const item of result) item.close();
+            } else {
+              result.close();
+            }
+          } catch {
+            // Best-effort close; the stored procedure itself has completed.
           }
-        } catch {
-          // Best-effort close; the stored procedure itself has completed.
+          success = true;
+        } catch (err) {
+          throw new DatabaseError(
+            `Stored procedure execution failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        } finally {
+          recordDbLatency("storedProcExec", {
+            queuedAt,
+            nativeStartedAt,
+            nativeEndedAt: performance.now(),
+            success,
+          });
         }
-        success = true;
-      } catch (err) {
-        throw new DatabaseError(
-          `Stored procedure execution failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      } finally {
-        recordDbLatency("storedProcExec", {
-          queuedAt,
-          nativeStartedAt,
-          nativeEndedAt: performance.now(),
-          success,
-        });
-      }
-    }),
+      },
+      { statement: callQuery, callSite },
+    ),
   );
 }
 
@@ -414,30 +506,36 @@ export async function queryAll<T>(
   statement: string,
   params: Record<string, unknown> = {},
 ): Promise<T[]> {
+  const callSite = captureCallSite();
   const queuedAt = performance.now();
   return getConnMutex(conn).run(() =>
-    withConnWatchdog(conn, "queryAll", async () => {
-      const nativeStartedAt = performance.now();
-      let success = false;
-      try {
-        const result = await execute(conn, statement, params);
-        let rows: T[];
+    withConnWatchdog(
+      conn,
+      "queryAll",
+      async () => {
+        const nativeStartedAt = performance.now();
+        let success = false;
         try {
-          rows = (await result.getAll()) as T[];
+          const result = await execute(conn, statement, params);
+          let rows: T[];
+          try {
+            rows = (await result.getAll()) as T[];
+          } finally {
+            result.close();
+          }
+          success = true;
+          return rows;
         } finally {
-          result.close();
+          recordDbLatency("queryAll", {
+            queuedAt,
+            nativeStartedAt,
+            nativeEndedAt: performance.now(),
+            success,
+          });
         }
-        success = true;
-        return rows;
-      } finally {
-        recordDbLatency("queryAll", {
-          queuedAt,
-          nativeStartedAt,
-          nativeEndedAt: performance.now(),
-          success,
-        });
-      }
-    }),
+      },
+      { statement, callSite },
+    ),
   );
 }
 
@@ -455,24 +553,30 @@ export async function exec(
   statement: string,
   params: Record<string, unknown> = {},
 ): Promise<void> {
+  const callSite = captureCallSite();
   const queuedAt = performance.now();
   return getConnMutex(conn).run(() =>
-    withConnWatchdog(conn, "exec", async () => {
-      const nativeStartedAt = performance.now();
-      let success = false;
-      try {
-        const result = await execute(conn, statement, params);
-        result.close();
-        success = true;
-      } finally {
-        recordDbLatency("exec", {
-          queuedAt,
-          nativeStartedAt,
-          nativeEndedAt: performance.now(),
-          success,
-        });
-      }
-    }),
+    withConnWatchdog(
+      conn,
+      "exec",
+      async () => {
+        const nativeStartedAt = performance.now();
+        let success = false;
+        try {
+          const result = await execute(conn, statement, params);
+          result.close();
+          success = true;
+        } finally {
+          recordDbLatency("exec", {
+            queuedAt,
+            nativeStartedAt,
+            nativeEndedAt: performance.now(),
+            success,
+          });
+        }
+      },
+      { statement, callSite },
+    ),
   );
 }
 
@@ -518,11 +622,7 @@ const ROLLBACK_RETRY_DELAYS_MS = [50, 100] as const;
 
 async function rollbackWithRetry(conn: Connection): Promise<void> {
   let lastErr: unknown;
-  for (
-    let attempt = 0;
-    attempt <= ROLLBACK_RETRY_DELAYS_MS.length;
-    attempt++
-  ) {
+  for (let attempt = 0; attempt <= ROLLBACK_RETRY_DELAYS_MS.length; attempt++) {
     try {
       await exec(conn, "ROLLBACK");
       return;

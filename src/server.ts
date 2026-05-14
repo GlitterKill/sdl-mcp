@@ -332,9 +332,13 @@ export class MCPServer {
           try {
             // Pass the parsed (validated + coerced) data to the handler
             const dispatchStartedAt = timer.start();
-            const result = await runToolDispatch(() =>
-              tool.handler(parseResult.data, toolContext),
-            );
+            const result = isMetadataOnlyTool(request.params.name)
+              ? await tool.handler(parseResult.data, toolContext)
+              : await runToolDispatch(
+                  () => tool.handler(parseResult.data, toolContext),
+                  undefined,
+                  request.params.name,
+                );
             timer.record("server.dispatch", dispatchStartedAt);
 
             // Inject _tokenUsage and strip _rawContext before serialization
@@ -671,6 +675,10 @@ export class MCPServer {
       });
     }
   }
+}
+
+export function isMetadataOnlyTool(name: string): boolean {
+  return name === "sdl.action.search" || name === "sdl.manual";
 }
 
 function extractStringField(args: unknown, field: string): string | undefined {
