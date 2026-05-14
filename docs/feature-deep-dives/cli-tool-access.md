@@ -147,13 +147,13 @@ Only these two metadata tools are proxied through the CLI today.
 Use `--output-format` to choose how results are printed:
 
 ```bash
-# Default: indented JSON
+# Default: human-readable pretty output
 sdl-mcp tool repo.status --repo-id my-repo
 
 # Compact JSON for scripts
 sdl-mcp tool repo.status --repo-id my-repo --output-format json-compact
 
-# Human-readable pretty output
+# Explicit pretty output
 sdl-mcp tool symbol.search --repo-id my-repo --query "auth" --output-format pretty
 
 # Table output for list-shaped data

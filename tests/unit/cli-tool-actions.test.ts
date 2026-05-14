@@ -8,8 +8,13 @@ import {
 import { ALL_ACTIONS } from "../../dist/gateway/schemas.js";
 
 describe("CLI tool actions", () => {
-  it("stays in sync with gateway schema actions plus direct flat-only actions", () => {
-    const expected = new Set([...ALL_ACTIONS, "file.write"]);
+  it("stays in sync with gateway schema actions plus CLI-only action proxies", () => {
+    const expected = new Set([
+      ...ALL_ACTIONS,
+      "action.search",
+      "file.write",
+      "manual",
+    ]);
     assert.deepStrictEqual(
       [...ALL_ACTION_NAMES].sort(),
       [...expected].sort(),

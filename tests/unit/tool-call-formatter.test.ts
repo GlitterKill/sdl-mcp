@@ -4,15 +4,15 @@ import assert from "node:assert";
 import { formatToolCallForUser } from "../../dist/mcp/tool-call-formatter.js";
 
 describe("formatToolCallForUser", () => {
-  it("returns null for unknown tool name", () => {
+  it("uses a generic fallback for unknown tool names", () => {
     const result = formatToolCallForUser("sdl.nonexistent.tool", {}, {});
-    assert.strictEqual(result, null);
+    assert.strictEqual(result, "sdl.nonexistent.tool [complete]");
   });
 
-  it("returns null (not throws) for malformed result objects", () => {
-    // Even with a registered tool, bad data should not throw
+  it("uses a generic fallback for malformed result objects", () => {
+    // Even with a registered tool, bad data should still produce visible text.
     const result = formatToolCallForUser("sdl.symbol.search", {}, null);
-    assert.strictEqual(result, null);
+    assert.strictEqual(result, "sdl.symbol.search [complete]");
   });
 
   // --- symbol.search ---

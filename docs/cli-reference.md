@@ -284,7 +284,7 @@ sdl-mcp tool sdl.manual --actions action.search --format json
 
 Key options:
 
-- `--output-format <json|json-compact|pretty|table>` (default: `json`)
+- `--output-format <json|json-compact|pretty|table>` (default: `pretty`)
 - `--repo-id <ID>` (passed through to the underlying tool)
 - All remaining arguments are forwarded as tool parameters
 

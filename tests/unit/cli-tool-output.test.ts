@@ -12,9 +12,9 @@ describe("cli-tool-output", () => {
       assert.strictEqual(detectOutputFormat("PRETTY"), "pretty");
     });
 
-    it("defaults to json if no explicit format provided", () => {
-      assert.strictEqual(detectOutputFormat(), "json");
-      assert.strictEqual(detectOutputFormat("invalid-format"), "json");
+    it("defaults to pretty if no explicit format provided", () => {
+      assert.strictEqual(detectOutputFormat(), "pretty");
+      assert.strictEqual(detectOutputFormat("invalid-format"), "pretty");
     });
   });
 

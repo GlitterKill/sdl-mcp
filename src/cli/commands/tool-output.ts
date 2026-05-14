@@ -86,7 +86,7 @@ function prettyPrint(result: unknown): string {
     return prettySliceResult(obj);
   }
 
-  // Default: indented JSON
+  // Pretty/table fallback for unrecognized shapes: keep the data inspectable.
   return JSON.stringify(result, null, 2);
 }
 

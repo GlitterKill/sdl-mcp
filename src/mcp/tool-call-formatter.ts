@@ -674,7 +674,7 @@ const formatters: Record<string, Formatter> = {
 
 /**
  * Format a tool call + result as human-readable text for user display.
- * Returns null if no formatter is registered for the tool.
+ * Uses action-specific summaries when available and a generic fallback otherwise.
  */
 export function formatToolCallForUser(
   toolName: string,
