@@ -330,6 +330,16 @@ function assertNoNestedScopeRename(
 function isDeclarationIdentifier(node: Parser.SyntaxNode): boolean {
   const parent = node.parent;
   if (!parent) return false;
+  const hasFieldIdentity = (fieldName: string): boolean => {
+    const fieldNode = parent.childForFieldName(fieldName);
+    // tree-sitter may return a fresh SyntaxNode wrapper for field lookups.
+    return (
+      !!fieldNode &&
+      fieldNode.type === node.type &&
+      fieldNode.startIndex === node.startIndex &&
+      fieldNode.endIndex === node.endIndex
+    );
+  };
   if (
     parent.type === "required_parameter" ||
     parent.type === "optional_parameter" ||
@@ -337,7 +347,7 @@ function isDeclarationIdentifier(node: Parser.SyntaxNode): boolean {
     parent.type === "catch_clause" ||
     parent.type === "variable_declarator"
   ) {
-    return parent.childForFieldName("name") === node;
+    return hasFieldIdentity("name");
   }
   if (parent.type === "shorthand_property_identifier_pattern") {
     return true;
