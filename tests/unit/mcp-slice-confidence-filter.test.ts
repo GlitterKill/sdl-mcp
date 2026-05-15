@@ -150,6 +150,19 @@ describe("slice confidence-aware filtering", () => {
       {
         repoId: "repo",
         fromSymbolId: "sym-entry",
+        toSymbolId: "sym-high",
+        edgeType: "call",
+        weight: 0.5,
+        confidence: 0.92,
+        resolution: "exact",
+        resolverId: "scip",
+        resolutionPhase: "semantic",
+        provenance: "scip",
+        createdAt: now,
+      },
+      {
+        repoId: "repo",
+        fromSymbolId: "sym-entry",
         toSymbolId: "sym-low",
         edgeType: "call",
         weight: 1,
@@ -202,6 +215,14 @@ describe("slice confidence-aware filtering", () => {
         ([from, to, type]) =>
           from === fromIndex && to === highIndex && type === "call",
       ),
+    );
+    assert.strictEqual(
+      slice.edges.filter(
+        ([from, to, type]) =>
+          from === fromIndex && to === highIndex && type === "call",
+      ).length,
+      1,
+      "duplicate call edges should be collapsed in slice output",
     );
     assert.ok(
       slice.edges.some(

@@ -7,7 +7,10 @@ import { tmpdir } from "node:os";
 
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
-import { handlePRRiskAnalysis } from "../../dist/mcp/tools/prRisk.js";
+import {
+  handlePRRiskAnalysis,
+  selectBlastRadiusSeedSymbols,
+} from "../../dist/mcp/tools/prRisk.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -16,6 +19,37 @@ describe("PR Risk Analysis Tool", () => {
   const kuzuDbPath = join(tmpdir(), ".lbug-pr-risk-test-db");
   const repoId = "test-repo";
   const callerSymId = "sym-caller";
+
+  it("limits blast-radius seeds for large deltas by risk and budget", () => {
+    const changedSymbols = Array.from({ length: 600 }, (_, index) => ({
+      symbolId: `sym-${index}`,
+      changeType: "modified",
+      tiers: { riskScore: index % 100 },
+    }));
+
+    const seeds = selectBlastRadiusSeedSymbols(changedSymbols, {
+      riskThreshold: 80,
+      maxChangedSymbols: 5,
+      maxBlastRadius: 5,
+    });
+
+    assert.strictEqual(seeds.length, 50);
+    assert.ok(
+      seeds.every((symbolId) => {
+        const index = Number(symbolId.replace("sym-", ""));
+        return index % 100 >= 80;
+      }),
+    );
+  });
+
+  it("skips blast-radius seed work when the caller requests no blast radius", () => {
+    const seeds = selectBlastRadiusSeedSymbols(
+      [{ symbolId: "sym-1", tiers: { riskScore: 100 } }],
+      { maxChangedSymbols: 5, maxBlastRadius: 0 },
+    );
+
+    assert.deepStrictEqual(seeds, []);
+  });
 
   beforeEach(async () => {
     if (existsSync(kuzuDbPath)) {
@@ -241,6 +275,58 @@ describe("PR Risk Analysis Tool", () => {
       assert.ok(typeof evidence.type === "string");
       assert.ok(typeof evidence.description === "string");
     });
+  });
+
+  it("reports blast-radius truncation when more impacts exist than the display budget", async () => {
+    const conn = await getLadybugConn();
+    const now = new Date().toISOString();
+    for (const [symbolId, name] of [
+      ["sym-caller-2", "callerTwo"],
+      ["sym-caller-3", "callerThree"],
+    ] as const) {
+      await ladybugDb.upsertSymbol(conn, {
+        symbolId,
+        repoId,
+        fileId: "file-1",
+        kind: "function",
+        name,
+        exported: true,
+        visibility: "public",
+        language: "ts",
+        rangeStartLine: 21,
+        rangeStartCol: 0,
+        rangeEndLine: 30,
+        rangeEndCol: 1,
+        astFingerprint: `${symbolId}-fp`,
+        signatureJson: '{"params":[],"returnType":"void"}',
+        summary: "Additional caller",
+        invariantsJson: "[]",
+        sideEffectsJson: "[]",
+        updatedAt: now,
+      });
+      await ladybugDb.insertEdge(conn, {
+        repoId,
+        fromSymbolId: symbolId,
+        toSymbolId: "sym1",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        provenance: "static",
+        createdAt: now,
+      });
+    }
+
+    const response = await handlePRRiskAnalysis({
+      repoId,
+      fromVersion: "v1",
+      toVersion: "v2",
+      budget: { maxBlastRadius: 1 },
+    });
+
+    assert.strictEqual(response.analysis.blastRadius.items.length, 1);
+    assert.ok(response.analysis.blastRadius.totalCount > 1);
+    assert.strictEqual(response.analysis.blastRadius.truncated, true);
   });
 
   it("surfaces dependency chains in blast-radius evidence and recommended tests", async () => {

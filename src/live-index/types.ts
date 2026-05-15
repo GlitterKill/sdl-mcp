@@ -55,6 +55,7 @@ export interface CheckpointResult {
   checkpointedFiles: number;
   failedFiles: number;
   lastCheckpointAt: string | null;
+  message?: string;
 }
 
 export interface LiveStatus {

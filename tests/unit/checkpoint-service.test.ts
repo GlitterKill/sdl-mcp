@@ -91,4 +91,51 @@ describe("CheckpointService", () => {
     assert.match(status.lastCheckpointError ?? "", /disk write failed/i);
     assert.strictEqual(status.lastCheckpointReason, "idle");
   });
+
+  it("explains successful checkpoints that find no clean eligible drafts", async () => {
+    const store = new OverlayStore();
+    store.upsertDraft({
+      repoId: "demo-repo",
+      eventType: "change",
+      filePath: "src/dirty.ts",
+      content: "export const dirty = 2;",
+      language: "typescript",
+      version: 3,
+      dirty: true,
+      timestamp: "2026-03-07T12:01:00.000Z",
+    });
+
+    const checkpointService = new CheckpointService(store, {
+      now: () => "2026-03-07T12:15:00.000Z",
+      patchSavedFile: async () => undefined as never,
+    });
+
+    const result = await checkpointService.checkpointRepo({
+      repoId: "demo-repo",
+      reason: "manual",
+    });
+
+    assert.strictEqual(result.checkpointedFiles, 0);
+    assert.strictEqual(result.failedFiles, 0);
+    assert.strictEqual(result.pendingBuffers, 1);
+    assert.match(result.message ?? "", /No checkpoint-eligible clean buffers/i);
+  });
+
+  it("explains checkpoints when no buffers are pending", async () => {
+    const store = new OverlayStore();
+    const checkpointService = new CheckpointService(store, {
+      now: () => "2026-03-07T12:20:00.000Z",
+      patchSavedFile: async () => undefined as never,
+    });
+
+    const result = await checkpointService.checkpointRepo({
+      repoId: "demo-repo",
+      reason: "manual",
+    });
+
+    assert.strictEqual(result.checkpointedFiles, 0);
+    assert.strictEqual(result.failedFiles, 0);
+    assert.strictEqual(result.pendingBuffers, 0);
+    assert.match(result.message ?? "", /No checkpoint-eligible buffers were pending/i);
+  });
 });

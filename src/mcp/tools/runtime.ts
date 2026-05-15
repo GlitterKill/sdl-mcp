@@ -25,6 +25,7 @@ import { decideRuntimeLegacy } from "../../policy/runtime.js";
 import type { RuntimePolicyRequestContext } from "../../policy/types.js";
 import {
   getRuntime,
+  getRuntimeDefaultExecutable,
   getRegisteredRuntimes,
   getRuntimeExtension,
   getRuntimeRequiredEnvKeys,
@@ -312,7 +313,9 @@ export async function handleRuntimeExecute(
   );
   const timeoutMs = request.timeoutMs ?? runtimeConfig.maxDurationMs;
   const executable =
-    request.executable ?? runtimeDescriptor.buildCommand([], {}).executable;
+    request.executable ??
+    getRuntimeDefaultExecutable(request.runtime) ??
+    runtimeDescriptor.name;
 
   const policyContext: RuntimePolicyRequestContext = {
     requestType: "runtimeExecute",

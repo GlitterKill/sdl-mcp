@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert";
 import {
   getRuntime,
+  getRuntimeDefaultExecutable,
   getRegisteredRuntimes,
   getRuntimeExtension,
   isExecutableCompatibleWithRuntime,
@@ -172,6 +173,13 @@ describe("extension lookup", () => {
     const ext = getRuntimeExtension("shell");
     const expected = process.platform === "win32" ? ".cmd" : ".sh";
     assert.strictEqual(ext, expected);
+  });
+});
+
+describe("default executable lookup", () => {
+  it("returns shell's platform executable without requiring a codePath", () => {
+    const expected = process.platform === "win32" ? "cmd.exe" : "bash";
+    assert.strictEqual(getRuntimeDefaultExecutable("shell"), expected);
   });
 });
 

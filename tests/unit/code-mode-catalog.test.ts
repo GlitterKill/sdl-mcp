@@ -110,6 +110,36 @@ describe("code-mode action catalog", () => {
       assert.ok(withSchema.length > 0, "at least some descriptors should have schemas");
     });
 
+    it("documents the corrected tool friction points in catalog metadata", () => {
+      invalidateCatalog();
+      const catalog = buildCatalog({ includeSchemas: true });
+      const byAction = new Map(catalog.map((descriptor) => [descriptor.action, descriptor]));
+
+      const context = byAction.get("context");
+      assert.ok(context?.schemaSummary, "context schema should be documented");
+      const contextFieldNames = new Set(
+        context.schemaSummary.fields.map((field) => field.name),
+      );
+      for (const expected of ["wireFormat", "responseMode", "ifNoneMatch"]) {
+        assert.ok(contextFieldNames.has(expected), `context schema should include ${expected}`);
+      }
+
+      const contextBudget = context.schemaSummary.fields.find(
+        (field) => field.name === "budget",
+      );
+      assert.ok(contextBudget, "context budget schema should be documented");
+      const maxCards = contextBudget.subFields?.find(
+        (field) => field.name === "maxCards",
+      );
+      assert.match(maxCards?.description ?? "", /unsupported/i);
+
+      assert.match(byAction.get("action.search")?.description ?? "", /limit.*50/i);
+      assert.match(byAction.get("index.refresh")?.description ?? "", /wait/i);
+      assert.match(byAction.get("runtime.execute")?.description ?? "", /shell.*code/i);
+      assert.match(byAction.get("search.edit")?.description ?? "", /dot/i);
+      assert.match(byAction.get("buffer.checkpoint")?.description ?? "", /zero/i);
+    });
+
     it("includeExamples adds example to descriptors", () => {
       invalidateCatalog();
       const catalog = buildCatalog({ includeExamples: true });

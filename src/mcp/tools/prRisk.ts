@@ -25,16 +25,66 @@ const MAX_FINDINGS = 10;
 const MAX_RECOMMENDED_TESTS = 10;
 const MAX_EVIDENCE_ITEMS = 5;
 const MAX_AFFECTED_SYMBOLS_PER_FINDING = 20;
+const LARGE_DELTA_BLAST_SEED_THRESHOLD = 500;
+const LARGE_DELTA_BLAST_SEED_CAP = 200;
 /** Hard cap on serialized response size to prevent unbounded output. */
 const MAX_RESPONSE_BYTES = 32_000;
 
 type ComputedDeltaWithTiers = Awaited<ReturnType<typeof computeDeltaWithTiers>>;
 type ChangedSymbol = ComputedDeltaWithTiers["changedSymbols"][number];
 
+interface BlastRadiusSeedCandidate {
+  symbolId: string;
+  tiers?: { riskScore?: number };
+}
+
+export function selectBlastRadiusSeedSymbols(
+  changedSymbols: BlastRadiusSeedCandidate[],
+  options: {
+    riskThreshold?: number;
+    maxChangedSymbols: number;
+    maxBlastRadius: number;
+    largeDeltaThreshold?: number;
+  },
+): string[] {
+  if (options.maxBlastRadius <= 0 || changedSymbols.length === 0) {
+    return [];
+  }
+
+  const largeDeltaThreshold =
+    options.largeDeltaThreshold ?? LARGE_DELTA_BLAST_SEED_THRESHOLD;
+  if (changedSymbols.length <= largeDeltaThreshold) {
+    return changedSymbols.map((symbol) => symbol.symbolId);
+  }
+
+  const threshold = options.riskThreshold;
+  const riskFiltered =
+    threshold !== undefined
+      ? changedSymbols.filter(
+          (symbol) => (symbol.tiers?.riskScore ?? 0) >= threshold,
+        )
+      : changedSymbols;
+  const candidates = riskFiltered.length > 0 ? riskFiltered : changedSymbols;
+  const seedLimit = Math.min(
+    LARGE_DELTA_BLAST_SEED_CAP,
+    Math.max(options.maxChangedSymbols, options.maxBlastRadius * 10, 25),
+  );
+
+  return [...candidates]
+    .sort((left, right) => {
+      const riskDelta =
+        (right.tiers?.riskScore ?? 0) - (left.tiers?.riskScore ?? 0);
+      return riskDelta !== 0
+        ? riskDelta
+        : left.symbolId.localeCompare(right.symbolId);
+    })
+    .slice(0, seedLimit)
+    .map((symbol) => symbol.symbolId);
+}
+
 export async function handlePRRiskAnalysis(args: unknown) {
   const validated = PRRiskAnalysisRequestSchema.parse(args);
 
-  // --- Budget: allow caller to cap response size ---
   // --- Budget: allow caller to cap response size ---
   const MAX_CHANGED_SYMBOLS_CAP = 200;
   const maxChangedSymbols = Math.min(
@@ -89,10 +139,13 @@ export async function handlePRRiskAnalysis(args: unknown) {
     throw new IndexError(`Delta pack error: ${message}`);
   }
 
-  const changedSymbolIds = delta.changedSymbols.map(
-    (c: ChangedSymbol) => c.symbolId,
-  );
-
+  const riskThreshold = validated.riskThreshold;
+  const filteredChangedSymbols =
+    riskThreshold !== undefined
+      ? delta.changedSymbols.filter(
+          (c: ChangedSymbol) => (c.tiers?.riskScore ?? 0) >= riskThreshold,
+        )
+      : delta.changedSymbols;
   const conn = await getLadybugConn();
 
   // Validate repository exists
@@ -101,15 +154,24 @@ export async function handlePRRiskAnalysis(args: unknown) {
     throw new IndexError(`Repository ${validated.repoId} not found`);
   }
 
-  const maxBlastResults = validated.budget?.maxBlastRadius ?? 50;
-  const blastRadiusItems = await computeBlastRadius(conn, changedSymbolIds, {
-    maxHops: maxBlastResults <= 10 ? 2 : 3,
-    maxResults: maxBlastResults,
-    repoId: validated.repoId,
-  });
-
-
-
+  const blastRadiusSeedSymbolIds = selectBlastRadiusSeedSymbols(
+    delta.changedSymbols,
+    {
+      riskThreshold,
+      maxChangedSymbols,
+      maxBlastRadius,
+    },
+  );
+  const blastRadiusItems =
+    blastRadiusSeedSymbolIds.length > 0
+      ? await computeBlastRadius(conn, blastRadiusSeedSymbolIds, {
+          maxHops: maxBlastRadius <= 10 ? 2 : 3,
+          // Fetch one sentinel item so callers can tell when the visible
+          // blast-radius list was truncated.
+          maxResults: maxBlastRadius + 1,
+          repoId: validated.repoId,
+        })
+      : [];
 
   const findings = generateFindings(delta, blastRadiusItems);
 
@@ -173,9 +235,14 @@ export async function handlePRRiskAnalysis(args: unknown) {
     };
   }
 
+  const visibleChangedSymbols = filteredChangedSymbols.slice(
+    0,
+    maxChangedSymbols,
+  );
+
   // --- Enrich symbols with name/kind/file metadata ---
   const allSymbolIds = [
-    ...changedSymbolIds,
+    ...visibleChangedSymbols.map((c: ChangedSymbol) => c.symbolId),
     ...blastRadiusItems.map((item: BlastRadiusItem) => item.symbolId),
   ];
   const uniqueSymbolIds = [...new Set(allSymbolIds)];
@@ -204,25 +271,17 @@ export async function handlePRRiskAnalysis(args: unknown) {
     };
   };
 
-  // --- Filter by riskThreshold when set ---
-  const riskThreshold = validated.riskThreshold;
-  const filteredChangedSymbols =
-    riskThreshold !== undefined
-      ? delta.changedSymbols.filter(
-          (c: ChangedSymbol) => (c.tiers?.riskScore ?? 0) >= riskThreshold,
-        )
-      : delta.changedSymbols;
 
   // --- Enrich and truncate changedSymbols ---
   const totalChangedSymbols = filteredChangedSymbols.length;
   const unfilteredTotal = delta.changedSymbols.length;
-  const truncatedChangedSymbols = filteredChangedSymbols
-    .slice(0, maxChangedSymbols)
-    .map((c: ChangedSymbol) => ({
+  const truncatedChangedSymbols = visibleChangedSymbols.map(
+    (c: ChangedSymbol) => ({
       ...enrichSymbol(c.symbolId),
       changeType: c.changeType,
       tiers: c.tiers,
-    }));
+    }),
+  );
 
   // --- Enrich and truncate blastRadius ---
   const totalBlastRadius = blastRadiusItems.length;

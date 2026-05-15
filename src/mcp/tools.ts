@@ -818,6 +818,7 @@ export const BufferCheckpointResponseSchema = z.object({
   checkpointedFiles: z.number().int().min(0),
   failedFiles: z.number().int().min(0),
   lastCheckpointAt: z.string().nullable(),
+  message: z.string().optional(),
 });
 
 export const BufferStatusRequestSchema = z.object({

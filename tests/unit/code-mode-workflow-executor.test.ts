@@ -44,6 +44,14 @@ function createMockActionMap() {
         return { delayed: true };
       },
     },
+    "test.large": {
+      schema: z.object({}).passthrough(),
+      handler: async () => ({ body: "x".repeat(5_000) }),
+    },
+    "test.largeString": {
+      schema: z.object({}).passthrough(),
+      handler: async () => "x".repeat(5_000),
+    },
     // Real action names for the router to accept
     "symbol.search": {
       schema: z.object({ query: z.string() }).passthrough(),
@@ -120,6 +128,66 @@ describe("code-mode workflow executor", () => {
     assert.deepStrictEqual(
       (result.results[0].result as Record<string, unknown>).sum,
       5,
+    );
+  });
+
+  it("exposes a truncated step's continuation handle to later steps", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        { fn: "testLarge", action: "test.large", args: {} },
+        {
+          fn: "testEcho",
+          action: "test.echo",
+          args: { message: "$0.truncatedResponse.continuationHandle" },
+        },
+      ],
+      defaultMaxResponseTokens: 50,
+      onError: "continue",
+    };
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+    );
+
+    assert.strictEqual(result.results[0].status, "ok");
+    assert.ok(result.results[0].truncatedResponse?.continuationHandle);
+    assert.strictEqual(result.results[1].status, "ok");
+    assert.strictEqual(
+      (result.results[1].result as { message?: unknown }).message,
+      result.results[0].truncatedResponse?.continuationHandle,
+    );
+  });
+
+  it("exposes a truncated primitive step's continuation handle to later steps", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        { fn: "testLargeString", action: "test.largeString", args: {} },
+        {
+          fn: "testEcho",
+          action: "test.echo",
+          args: { message: "$0.truncatedResponse.continuationHandle" },
+        },
+      ],
+      defaultMaxResponseTokens: 50,
+      onError: "continue",
+    };
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+    );
+
+    assert.strictEqual(result.results[0].status, "ok");
+    assert.ok(result.results[0].truncatedResponse?.continuationHandle);
+    assert.strictEqual(result.results[1].status, "ok");
+    assert.strictEqual(
+      (result.results[1].result as { message?: unknown }).message,
+      result.results[0].truncatedResponse?.continuationHandle,
     );
   });
 

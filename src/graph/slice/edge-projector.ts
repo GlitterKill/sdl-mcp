@@ -109,7 +109,7 @@ export async function loadEdgesBetweenSymbols(
   }
 
   const symbolSet = new Set(symbolIds);
-  const dbEdges: SliceEdgeProjection[] = [];
+  const dbEdgesByKey = new Map<string, SliceEdgeProjection>();
   const confidenceDistribution: ConfidenceDistribution = {
     high: 0,
     medium: 0,
@@ -157,17 +157,35 @@ export async function loadEdgesBetweenSymbols(
         confidenceDistribution.low++;
       }
       if (symbolSet.has(edge.toSymbolId) && edgeConfidence >= minConfidence) {
-        dbEdges.push({
+        const candidate: SliceEdgeProjection = {
           from_symbol_id: edge.fromSymbolId,
           to_symbol_id: edge.toSymbolId,
           type: edgeType,
           weight: edge.weight,
           confidence: edge.confidence,
-        });
+        };
+        const key = `${candidate.from_symbol_id}\0${candidate.to_symbol_id}\0${candidate.type}`;
+        const existing = dbEdgesByKey.get(key);
+        const existingConfidence = existing
+          ? normalizeEdgeConfidence(existing.confidence)
+          : Number.NEGATIVE_INFINITY;
+        if (
+          !existing ||
+          edgeConfidence > existingConfidence ||
+          (edgeConfidence === existingConfidence &&
+            candidate.weight > existing.weight)
+        ) {
+          // Multiple indexers can emit the same logical edge; keep the best
+          // signal so compact slice edges remain one row per dependency.
+          dbEdgesByKey.set(key, candidate);
+        }
       }
     }
   }
-  const encoded = encodeEdgesWithSymbolIndex(symbolIds, dbEdges);
+  const encoded = encodeEdgesWithSymbolIndex(
+    symbolIds,
+    [...dbEdgesByKey.values()],
+  );
   return {
     ...encoded,
     confidenceDistribution,

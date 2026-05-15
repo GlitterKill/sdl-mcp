@@ -21,7 +21,13 @@ import { WorkflowRequestSchema } from "./types.js";
 // renderer can introspect them without pulling the whole gateway.
 const META_ACTION_SEARCH_SCHEMA = z.object({
   query: z.string().min(1),
-  limit: z.number().int().min(1).max(50).optional(),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .describe("Maximum 50 results."),
   offset: z.number().int().min(0).optional(),
   includeSchemas: z.boolean().optional(),
   includeExamples: z.boolean().optional(),
@@ -231,6 +237,15 @@ function zodKind(schema: z.ZodType): string {
   return typeof def.type === "string" ? def.type : "unknown";
 }
 
+function zodDescription(schema: z.ZodType): string | undefined {
+  const candidate = inspectable(schema) as ZodInspectable & {
+    description?: unknown;
+  };
+  if (typeof candidate.description === "string") return candidate.description;
+  const def = zodDef(schema);
+  return typeof def.description === "string" ? def.description : undefined;
+}
+
 function asZodType(value: unknown): z.ZodType | undefined {
   return isZodType(value) ? value : undefined;
 }
@@ -378,6 +393,7 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
   let defaultValue: unknown = undefined;
   let hasDefault = false;
   let current = schema;
+  const initialDescription = zodDescription(schema);
 
   // Peel optional/default/nullable wrappers.
   for (let depth = 0; depth < 16; depth++) {
@@ -409,6 +425,10 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
   current = unwrapZod(current);
   const typeName = resolveTypeName(current);
   const field: SchemaSummaryField = { name, type: typeName, required };
+  const description = initialDescription ?? zodDescription(current);
+  if (description) {
+    field.description = description;
+  }
 
   if (hasDefault) {
     field.default = defaultValue;
@@ -534,7 +554,7 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "repo.register": { rootPath: "/path/to/repo" },
   "repo.status": {},
   "repo.overview": { level: "stats" },
-  "index.refresh": { mode: "incremental" },
+  "index.refresh": { mode: "incremental", async: false },
   "policy.get": {},
   "policy.set": { policyPatch: { maxWindowLines: 200 } },
   "agent.feedback": {
@@ -648,16 +668,19 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "repo.register": "Register a repository",
   "repo.status": "Get repository status",
   "repo.overview": "Get codebase overview",
-  "index.refresh": "Refresh index",
+  "index.refresh":
+    "Refresh index. Prefer synchronous calls; if async:true is used, wait for repo.status to show indexing complete before continuing dependent work.",
   "policy.get": "Get policy config",
   "policy.set":
     "Set policy config (policyPatch wrapper: maxWindowLines, maxWindowTokens, requireIdentifiers, allowBreakGlass, defaultMinCallConfidence, defaultDenyRaw, budgetCaps)",
   "agent.feedback": "Record agent feedback",
   "agent.feedback.query": "Query feedback records",
   "buffer.push": "Push buffer update",
-  "buffer.checkpoint": "Request buffer checkpoint",
+  "buffer.checkpoint":
+    "Request buffer checkpoint. Zero-file success responses include a message explaining why no clean buffers were checkpointed.",
   "buffer.status": "Get buffer status",
-  "runtime.execute": "Execute runtime command",
+  "runtime.execute":
+    "Execute runtime command. Shell runtime requires code; direct args-only shell execution is rejected.",
   "runtime.queryOutput": "Query stored command output by keywords",
   "response.get": "Retrieve a stored large tool response by handle",
   "memory.store": "Store a development memory",
@@ -669,7 +692,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "file.write":
     "Write to a single file (indexed or non-indexed) with targeted modes (line replace, pattern replace, JSON path, insert, append); use search.edit for cross-file batching",
   "search.edit":
-    "Cross-file search-and-edit in two phases (preview + apply) with server-side plan handles, sha256 preconditions, and rollback",
+    "Cross-file search-and-edit in two phases (preview + apply) with server-side plan handles, sha256 preconditions, rollback, and ignored/dot-directory refusal; use file.write for explicit single-file writes where allowed.",
   "scip.ingest":
     "Ingest a pre-built SCIP index to overlay compiler-grade cross-references onto the symbol graph",
   "semantic.enrichment.refresh":
@@ -680,7 +703,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
 
 const META_TOOL_DESCRIPTIONS: Record<string, string> = {
   "action.search":
-    "Search the SDL-MCP catalog before choosing a tool. Best starting point when you are unsure whether to use context or workflow.",
+    "Search the SDL-MCP catalog before choosing a tool. Best starting point when you are unsure whether to use context or workflow; limit accepts at most 50 results.",
   manual:
     "Load the focused SDL-MCP manual after discovery. Use this before composing workflow steps.",
   context:

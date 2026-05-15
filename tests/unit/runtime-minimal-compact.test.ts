@@ -113,6 +113,25 @@ describe("runtime minimal mode compact response", () => {
     );
   });
 
+  it("executes shell runtime code without requiring direct command args", async () => {
+    const { handleRuntimeExecute } =
+      await import("../../dist/mcp/tools/runtime.js");
+
+    const result = await handleRuntimeExecute({
+      repoId,
+      runtime: "shell",
+      code: "echo shell-ok",
+      persistOutput: false,
+      outputMode: "summary",
+    });
+
+    assert.strictEqual(result.status, "success");
+    assert.ok(
+      result.stdoutSummary.includes("shell-ok"),
+      `expected shell output, got: ${result.stdoutSummary}`,
+    );
+  });
+
   it("preserves full shape for summary mode regardless of output size", async () => {
     const { handleRuntimeExecute } =
       await import("../../dist/mcp/tools/runtime.js");

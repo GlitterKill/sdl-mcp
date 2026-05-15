@@ -5,7 +5,11 @@ import { estimateTokens } from "../util/tokenize.js";
 import { buildCatalog, type ActionDescriptor } from "./action-catalog.js";
 import { WorkflowEtagCache } from "./etag-cache.js";
 import { validateLadder } from "./ladder-validator.js";
-import { resolveRefs, RefResolutionError } from "./ref-resolver.js";
+import {
+  attachRefMetadata,
+  resolveRefs,
+  RefResolutionError,
+} from "./ref-resolver.js";
 import { executeTransform, TransformError } from "./transforms.js";
 import { truncateStepResult } from "./workflow-truncation.js";
 import {
@@ -52,6 +56,38 @@ function applyStepTruncation(
         continuationHandle: truncation.handle,
       };
     }
+  }
+}
+
+function attachStepMetadataToPriorResult(
+  priorResults: unknown[],
+  stepIndex: number,
+  rawResult: unknown,
+  stepResult: WorkflowStepResult,
+): void {
+  if (!stepResult.truncatedResponse) {
+    return;
+  }
+
+  attachRefMetadata(priorResults, stepIndex, {
+    truncatedResponse: stepResult.truncatedResponse,
+  });
+
+  if (rawResult === null || typeof rawResult !== "object") {
+    return;
+  }
+
+  // Keep response metadata addressable by later $N refs without exposing it in
+  // normal JSON serialization of the raw step result. Non-extensible objects
+  // still work through the sidecar metadata above.
+  try {
+    Object.defineProperty(rawResult, "truncatedResponse", {
+      value: stepResult.truncatedResponse,
+      enumerable: false,
+      configurable: true,
+    });
+  } catch {
+    // The sidecar metadata on priorResults remains authoritative for refs.
   }
 }
 
@@ -289,6 +325,7 @@ export async function executeWorkflow(
           status: "ok",
         };
         applyStepTruncation(stepResult, step, request.defaultMaxResponseTokens);
+        attachStepMetadataToPriorResult(priorResults, i, result, stepResult);
         stepResults.push(stepResult);
 
         if (traceOpts) {
@@ -435,6 +472,7 @@ export async function executeWorkflow(
           status: "ok",
         };
         applyStepTruncation(stepResult, step, request.defaultMaxResponseTokens);
+        attachStepMetadataToPriorResult(priorResults, i, result, stepResult);
         stepResults.push(stepResult);
 
         if (traceOpts) {

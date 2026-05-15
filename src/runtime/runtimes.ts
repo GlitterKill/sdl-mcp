@@ -431,6 +431,13 @@ export function getRuntimeTableEntry(
   return RUNTIME_TABLE.find((e) => e.name === name);
 }
 
+export function getRuntimeDefaultExecutable(name: string): string | undefined {
+  const entry = getRuntimeTableEntry(name);
+  if (!entry) return undefined;
+  const candidates = IS_WINDOWS ? entry.candidates.win32 : entry.candidates.unix;
+  return candidates[0];
+}
+
 export function getRuntimeExtension(name: string): string | undefined {
   const entry = RUNTIME_TABLE.find((e) => e.name === name);
   if (!entry) return undefined;

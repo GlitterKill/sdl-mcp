@@ -114,6 +114,7 @@ describe("buffer MCP tools", () => {
             checkpointedFiles: 2,
             failedFiles: 0,
             lastCheckpointAt: "2026-03-07T12:02:00.000Z",
+            message: "Checkpointed 2 clean buffers.",
           };
         },
         async getLiveStatus() {
@@ -125,5 +126,36 @@ describe("buffer MCP tools", () => {
     assert.deepStrictEqual(calls, [{ repoId: "demo-repo", reason: "manual" }]);
     assert.strictEqual(result.checkpointId, "ckpt-1");
     assert.strictEqual(result.checkpointedFiles, 2);
+    assert.strictEqual(result.message, "Checkpointed 2 clean buffers.");
+  });
+
+  it("marks an in-progress checkpoint as pending", async () => {
+    const result = await handleBufferCheckpoint(
+      { repoId: "demo-repo", reason: "manual" },
+      undefined,
+      {
+        async pushBufferUpdate() {
+          throw new Error("not used");
+        },
+        async checkpointRepo(payload) {
+          return {
+            repoId: payload.repoId,
+            requested: false,
+            checkpointId: "in-progress",
+            pendingBuffers: 2,
+            checkpointedFiles: 0,
+            failedFiles: 0,
+            lastCheckpointAt: null,
+            message: "Checkpoint already in progress; poll buffer.status for completion.",
+          };
+        },
+        async getLiveStatus() {
+          throw new Error("not used");
+        },
+      },
+    );
+
+    assert.strictEqual(result.pending, true);
+    assert.match(result.message ?? "", /already in progress/i);
   });
 });

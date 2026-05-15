@@ -73,6 +73,7 @@ export class CheckpointService {
         checkpointedFiles: 0,
         failedFiles: 0,
         lastCheckpointAt: status.lastCheckpointAt,
+        message: "Checkpoint already in progress; poll buffer.status for completion.",
       };
     }
 
@@ -90,6 +91,8 @@ export class CheckpointService {
       let checkpointedFiles = 0;
       let failedFiles = 0;
       let lastCheckpointAt: string | null = null;
+      let skippedSuspicious = 0;
+      let skippedDirty = 0;
       const errors: string[] = [];
 
       for (const draft of candidates) {
@@ -103,6 +106,7 @@ export class CheckpointService {
               draft,
             );
             if (skip) {
+              skippedSuspicious += 1;
               // Leave the draft in the overlay — do NOT remove or count it.
               // It will be re-evaluated on the next checkpoint cycle.
               // Removing it without re-indexing from disk would leave the
@@ -120,6 +124,7 @@ export class CheckpointService {
             draft.filePath,
           );
           if (currentDraft?.dirty) {
+            skippedDirty += 1;
             continue; // Skip — a newer version arrived; do not remove
           }
           // M3 optimization: removeDraft directly, lastCheckpointAt tracked in status
@@ -147,14 +152,31 @@ export class CheckpointService {
         status.lastCheckpointAt = lastCheckpointAt;
       }
 
+      const pendingBuffers = this.overlayStore.listDrafts(input.repoId).length;
+      let message: string | undefined;
+      if (candidates.length === 0) {
+        message =
+          pendingBuffers > 0
+            ? "No checkpoint-eligible clean buffers were available; dirty buffers remain pending."
+            : "No checkpoint-eligible buffers were pending.";
+      } else if (
+        checkpointedFiles === 0 &&
+        failedFiles === 0 &&
+        skippedSuspicious + skippedDirty > 0
+      ) {
+        message =
+          "No files were checkpointed; pending buffers were dirty or failed checkpoint safety checks.";
+      }
+
       return {
         repoId: input.repoId,
         requested: true,
         checkpointId,
-        pendingBuffers: this.overlayStore.listDrafts(input.repoId).length,
+        pendingBuffers,
         checkpointedFiles,
         failedFiles,
         lastCheckpointAt: status.lastCheckpointAt,
+        ...(message ? { message } : {}),
       };
     } finally {
       this.checkpointInProgress.delete(input.repoId);

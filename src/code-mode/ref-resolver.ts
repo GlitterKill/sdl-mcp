@@ -11,6 +11,41 @@ const REF_PATTERN_SINGLE = new RegExp(
 
 /** Property names that must never be navigated to prevent prototype pollution. */
 const BLOCKED_PROPS = new Set(["__proto__", "constructor", "prototype"]);
+const REF_METADATA = Symbol("sdl.workflow.refMetadata");
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+type RefMetadataMap = Map<number, Record<string, unknown>>;
+type PriorResultsWithMetadata = unknown[] & {
+  [REF_METADATA]?: RefMetadataMap;
+};
+
+export function attachRefMetadata(
+  priorResults: unknown[],
+  index: number,
+  metadata: Record<string, unknown>,
+): void {
+  const target = priorResults as PriorResultsWithMetadata;
+  let existing = target[REF_METADATA];
+  if (!existing) {
+    existing = new Map<number, Record<string, unknown>>();
+    Object.defineProperty(target, REF_METADATA, {
+      value: existing,
+      enumerable: false,
+      configurable: false,
+    });
+  }
+  existing.set(index, { ...(existing.get(index) ?? {}), ...metadata });
+}
+
+function getRefMetadata(
+  priorResults: unknown[],
+  index: number,
+): Record<string, unknown> | undefined {
+  return (priorResults as PriorResultsWithMetadata)[REF_METADATA]?.get(index);
+}
 
 export class RefResolutionError extends Error {
   constructor(message: string) {
@@ -107,6 +142,7 @@ export function resolveRef(ref: string, priorResults: unknown[]): unknown {
 
   const segments = parseSegments(pathStr, ref);
 
+  const metadata = getRefMetadata(priorResults, n);
   let current: unknown = priorResults[n];
   for (const [index, segment] of segments.entries()) {
     const seg = segment.value;
@@ -143,7 +179,20 @@ export function resolveRef(ref: string, priorResults: unknown[]): unknown {
       }
       current = current[seg];
     } else {
-      if (typeof current !== "object" || Array.isArray(current)) {
+      if (BLOCKED_PROPS.has(seg)) {
+        throw new RefResolutionError(
+          `Access to property '${seg}' is blocked in reference '${ref}'`,
+        );
+      }
+      if (
+        index === 0 &&
+        metadata &&
+        Object.prototype.hasOwnProperty.call(metadata, seg)
+      ) {
+        current = metadata[seg];
+        continue;
+      }
+      if (!isPlainRecord(current)) {
         if (segment.optional) {
           return undefined;
         }
@@ -151,12 +200,7 @@ export function resolveRef(ref: string, priorResults: unknown[]): unknown {
           `Expected object at field '${seg}' in reference '${ref}', got ${Array.isArray(current) ? "array" : typeof current}`,
         );
       }
-      const obj = current as Record<string, unknown>;
-      if (BLOCKED_PROPS.has(seg)) {
-        throw new RefResolutionError(
-          `Access to property '${seg}' is blocked in reference '${ref}'`,
-        );
-      }
+      const obj = current;
       if (!(seg in obj)) {
         if (segment.optional) {
           return undefined;
@@ -198,7 +242,7 @@ export function resolveRefs(
   priorResults: unknown[],
 ): Record<string, unknown> {
   // Deep-clone to avoid mutating the original
-  const cloned = structuredClone(args) as Record<string, unknown>;
+  const cloned = structuredClone(args);
 
   function resolveValue(value: unknown): unknown {
     if (typeof value === "string") {

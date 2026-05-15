@@ -127,7 +127,9 @@ export async function handleBufferCheckpoint(
     const request = BufferCheckpointRequestSchema.parse(args);
     const result = await resolveLiveIndex(liveIndex).checkpointRepo(request);
     // Surface a clear pending flag so callers know whether to poll buffer.status.
-    const pending = result.requested === true && result.pendingBuffers > 0;
+    const pending =
+    result.pendingBuffers > 0 &&
+    (result.requested === true || result.checkpointId === "in-progress");
     return { ...result, pending };
   } catch (error) {
     if (error instanceof ZodError) {

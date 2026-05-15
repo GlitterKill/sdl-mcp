@@ -39,7 +39,13 @@ const TRANSFORM_HINT =
 
 export const ActionSearchRequestSchema = z.object({
   query: z.string().min(1),
-  limit: z.number().int().min(1).max(50).default(20),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .default(20)
+    .describe("Maximum 50 results."),
   offset: z.number().int().min(0).optional().describe("Skip first N results"),
   includeSchemas: z.boolean().default(false),
   includeExamples: z.boolean().default(false),
@@ -487,6 +493,9 @@ function renderTypescript(catalog: ActionDescriptor[]): string {
     }
     if (descriptor.schemaSummary) {
       for (const field of descriptor.schemaSummary.fields) {
+        if (field.description) {
+          lines.push(`//   ${field.name}: ${field.description}`);
+        }
         if (field.subFields && field.subFields.length > 0) {
           const subParams = field.subFields
             .map(
@@ -537,13 +546,13 @@ function renderMarkdown(catalog: ActionDescriptor[]): string {
 
     if (descriptor.schemaSummary) {
       lines.push("");
-      lines.push("| Parameter | Type | Required | Default |");
-      lines.push("|-----------|------|----------|---------|");
+      lines.push("| Parameter | Type | Required | Default | Description |");
+      lines.push("|-----------|------|----------|---------|-------------|");
       for (const field of descriptor.schemaSummary.fields) {
         const defaultValue =
           field.default !== undefined ? JSON.stringify(field.default) : "";
         lines.push(
-          `| ${field.name} | ${field.type} | ${field.required ? "yes" : "no"} | ${defaultValue} |`,
+          `| ${field.name} | ${field.type} | ${field.required ? "yes" : "no"} | ${defaultValue} | ${field.description ?? ""} |`,
         );
       }
       for (const field of descriptor.schemaSummary.fields) {
@@ -551,15 +560,15 @@ function renderMarkdown(catalog: ActionDescriptor[]): string {
           lines.push("");
           lines.push(`**${field.name}** shape:`);
           lines.push("");
-          lines.push("| Field | Type | Required | Default |");
-          lines.push("|-------|------|----------|---------|");
+          lines.push("| Field | Type | Required | Default | Description |");
+          lines.push("|-------|------|----------|---------|-------------|");
           for (const subField of field.subFields) {
             const defaultValue =
               subField.default !== undefined
                 ? JSON.stringify(subField.default)
                 : "";
             lines.push(
-              `| ${subField.name} | ${subField.type} | ${subField.required ? "yes" : "no"} | ${defaultValue} |`,
+              `| ${subField.name} | ${subField.type} | ${subField.required ? "yes" : "no"} | ${defaultValue} | ${subField.description ?? ""} |`,
             );
           }
         }
@@ -588,6 +597,7 @@ function renderMarkdown(catalog: ActionDescriptor[]): string {
   lines.push("| `$0.slice.si[0]` | First symbol in slice (compact) |");
   lines.push("| `$0.sliceHandle` | Handle from slice.build |");
   lines.push("| `$0.artifactHandle` | Handle from runtime.execute |");
+  lines.push("| `$0.truncatedResponse.continuationHandle` | Handle for a truncated workflow step result |");
   lines.push("| `$0.skeleton` | Skeleton IR string |");
   lines.push("| `$0.excerpt` | Hot-path excerpt string |");
   lines.push("| `$N.result.fieldName` | Any field from step N result |");
