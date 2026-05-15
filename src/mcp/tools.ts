@@ -31,6 +31,7 @@ import { z } from "zod";
 // =============================================================================
 
 import type { RetrievalEvidence } from "../retrieval/types.js";
+import type { Range } from "../domain/types.js";
 import { RUNTIME_NAMES } from "../runtime/runtimes.js";
 import { MAX_RESPONSE_EXCERPT_BYTES } from "../runtime/response-artifacts.js";
 import {
@@ -1058,6 +1059,163 @@ export const SymbolRefSchema = z.object({
   kind: z.string().min(1).optional(),
   exportedOnly: z.boolean().optional(),
 });
+
+export const SymbolEditOperationSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("replaceSymbol"),
+    content: z.string().max(512 * 1024),
+  }),
+  z.object({
+    kind: z.literal("replaceBody"),
+    content: z.string().max(512 * 1024),
+  }),
+  z.object({
+    kind: z.literal("replaceSignature"),
+    content: z.string().max(512 * 1024),
+  }),
+  z.object({
+    kind: z.literal("insertBefore"),
+    content: z.string().max(512 * 1024),
+  }),
+  z.object({
+    kind: z.literal("insertAfter"),
+    content: z.string().max(512 * 1024),
+  }),
+  z.object({
+    kind: z.literal("renameLocal"),
+    name: z.string().min(1).max(200),
+    replacement: z.string().min(1).max(200),
+  }),
+]);
+
+const SymbolEditPreviewRequestSchema = z
+  .object({
+    mode: z.literal("preview"),
+    repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+    symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH).optional(),
+    symbolRef: SymbolRefSchema.optional(),
+    operation: SymbolEditOperationSchema,
+    createBackup: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const targetCount =
+      Number(value.symbolId !== undefined) +
+      Number(value.symbolRef !== undefined);
+    if (targetCount !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide exactly one of symbolId or symbolRef.",
+        path: ["symbolId"],
+      });
+    }
+  });
+
+const SymbolEditApplyRequestSchema = z.object({
+  mode: z.literal("apply"),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  planHandle: z.string().min(1).max(200),
+  createBackup: z.boolean().optional(),
+});
+
+const SymbolEditApplyNowRequestSchema = z.object({
+  mode: z.literal("applyNow"),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH),
+  expectedAstFingerprint: z.string().min(1),
+  expectedRange: RangeSchema,
+  operation: SymbolEditOperationSchema,
+  createBackup: z.boolean().optional(),
+});
+
+export const SymbolEditRequestSchema = z.discriminatedUnion("mode", [
+  SymbolEditPreviewRequestSchema,
+  SymbolEditApplyRequestSchema,
+  SymbolEditApplyNowRequestSchema,
+]);
+
+export type SymbolEditOperation = z.infer<typeof SymbolEditOperationSchema>;
+export type SymbolEditRequest = z.infer<typeof SymbolEditRequestSchema>;
+
+export interface SymbolEditPreconditions {
+  symbol: {
+    symbolId: string;
+    astFingerprint: string;
+    range: Range;
+  };
+  file: {
+    path: string;
+    sha256: string | null;
+    mtimeMs: number | null;
+  };
+  draft?: {
+    version: number;
+    sha256: string;
+  };
+}
+
+export interface SymbolEditValidationSummary {
+  parseBefore: boolean;
+  parseAfter: boolean;
+  targetSymbolResolved: boolean;
+  warnings?: string[];
+}
+
+export interface SymbolEditPreviewResponse {
+  mode: "preview";
+  planHandle: string;
+  symbolId: string;
+  symbolName: string;
+  operation: SymbolEditOperation["kind"];
+  file: string;
+  writeTarget: "file" | "draft";
+  requiresApply: boolean;
+  expiresAt: string;
+  preconditions: SymbolEditPreconditions;
+  validation: SymbolEditValidationSummary;
+  fileEntries: Array<{
+    file: string;
+    matchCount: number;
+    editMode: FileWriteResponse["mode"];
+    snippets: DiffPreviewSnippets;
+    indexedSource: boolean;
+  }>;
+}
+
+export interface SymbolEditApplyResponse {
+  mode: "apply";
+  planHandle: string;
+  symbolId: string;
+  symbolName: string;
+  operation: SymbolEditOperation["kind"];
+  file: string;
+  writeTarget: "file" | "draft";
+  validation: SymbolEditValidationSummary;
+  filesAttempted: number;
+  filesWritten: number;
+  filesSkipped: number;
+  filesFailed: number;
+  results: Array<{
+    file: string;
+    status: "written" | "skipped" | "failed" | "rolled-back";
+    bytes?: number;
+    reason?: string;
+    indexUpdate?: FileWriteResponse["indexUpdate"];
+  }>;
+  rollback: {
+    triggered: boolean;
+    restoredFiles: string[];
+  };
+  draftUpdate?: {
+    accepted: boolean;
+    overlayVersion: number;
+    parseScheduled: boolean;
+    warnings: string[];
+  };
+}
+
+export type SymbolEditResponse =
+  | SymbolEditPreviewResponse
+  | SymbolEditApplyResponse;
 
 /**
  * Unified symbol card request schema - supports both single and batch retrieval.

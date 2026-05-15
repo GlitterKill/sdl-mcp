@@ -112,11 +112,18 @@ describe("code-mode tool validation", () => {
       "write",
       "searchEditPreview",
       "searchEditApply",
+      "symbolEditPreview",
+      "symbolEditApply",
+      "symbolEditApplyNow",
       "previewWindow",
       "sourceWindow",
     ]);
     for (const field of [
       "symbolId",
+      "symbolRef",
+      "operation",
+      "expectedAstFingerprint",
+      "expectedRange",
       "reason",
       "expectedLines",
       "identifiersToFind",
@@ -184,6 +191,9 @@ describe("code-mode tool validation", () => {
       "write",
       "searchEditPreview",
       "searchEditApply",
+      "symbolEditPreview",
+      "symbolEditApply",
+      "symbolEditApplyNow",
       "previewWindow",
       "sourceWindow",
     ]);

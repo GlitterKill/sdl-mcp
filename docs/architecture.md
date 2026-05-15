@@ -99,9 +99,9 @@ Startup is sequenced (not parallel) — the DB must be ready before tools regist
 
 All MCP tools flow through a single dispatch path in `src/server.ts`. The exact surface is configuration-dependent:
 
-- Flat mode: 37 tools (`35` flat tools + `sdl.action.search` + `sdl.info`)
+- Flat mode: 38 tools (`36` flat tools + `sdl.action.search` + `sdl.info`)
 - Gateway-only mode: 6 tools (`4` gateway tools + `sdl.action.search` + `sdl.info`)
-- Gateway + legacy mode: 41 tools (`4` gateway tools + `35` legacy flat tools + `sdl.action.search` + `sdl.info`)
+- Gateway + legacy mode: 42 tools (`4` gateway tools + `36` legacy flat tools + `sdl.action.search` + `sdl.info`)
 - Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`, or can run in exclusive mode with just `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`
 
 Before strict Zod validation, requests also pass through a shared normalization layer. Flat and gateway calls therefore accept the same canonical camelCase fields plus common aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, and `spillover_handle`.
@@ -724,7 +724,7 @@ graph TD
     C e11@--> J[MCP Tool Layer]
 
     subgraph Tool Registration Modes
-        J1[Flat Mode: 37 tools]
+        J1[Flat Mode: 38 tools]
         J2[Gateway Mode: 6 tools]
         J3[Code Mode adds manual, context, and workflow]
     end
@@ -773,9 +773,9 @@ graph TD
 
 Registration-mode counts in the current implementation:
 
-- Flat mode: 37 tools
+- Flat mode: 38 tools
 - Gateway-only mode: 6 tools
-- Gateway + legacy mode: 41 tools
+- Gateway + legacy mode: 42 tools
 - Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`
 
 [Back to README](../README.md)

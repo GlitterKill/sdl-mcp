@@ -20,6 +20,7 @@ const MEMORY_ACTIONS = new Set([
 export const FN_NAME_MAP: Record<string, string> = {
   symbolSearch: "symbol.search",
   symbolGetCard: "symbol.getCard",
+  symbolEdit: "symbol.edit",
   sliceBuild: "slice.build",
   sliceRefresh: "slice.refresh",
   sliceSpilloverGet: "slice.spillover.get",
@@ -86,21 +87,15 @@ export function getActiveActionToFn(): Record<string, string> {
 const MANUAL_TEMPLATE = `// SDL-MCP API - use sdl.context for context retrieval, sdl.workflow for multi-step operations
 // repoId is set in the workflow envelope, not per-step.
 // Reference prior step results with ${"$"}N (e.g., ${"$"}0.results[0].symbolId).
-//
-// === ${"$"}N Reference Patterns ===
-// Common patterns for referencing prior step results:
-//   ${"$"}0.results[0].symbolId    - First symbol from search results
-//   ${"$"}0.card.symbolId          - Symbol ID from getCard response  
-//   ${"$"}0.slice.si[0]            - First symbol in slice (compact format)
-//   ${"$"}0.skeleton               - Skeleton IR string
-//   ${"$"}N.result.fieldName       - Any field from step N's result
-type RM = "inline"|"auto"|"handle"; type DM = "off"|"auto"; type ResponseHandle = { kind: "responseArtifact"; handle: string; action: "response.get" }; type SQ = { literal?: string; regex?: string; replacement?: string; global?: boolean; symbolRef?: object; symbolIds?: string[] }; type EM = "replacePattern"|"replaceLines"|"insertAt"|"append"|"overwrite"
+type RM = "inline"|"auto"|"handle"; type DM = "off"|"auto"; type ResponseHandle = { kind: "responseArtifact"; handle: string; action: "response.get" }; type SQ = { literal?: string; regex?: string; replacement?: string; global?: boolean; symbolRef?: object; symbolIds?: string[] }; type EM = "replacePattern"|"replaceLines"|"insertAt"|"append"|"overwrite"; type SEO = { kind: "replaceSymbol"|"replaceBody"|"replaceSignature"|"insertBefore"|"insertAfter"; content: string } | { kind: "renameLocal"; name: string; replacement: string }; type SR = { startLine: number; startCol: number; endLine: number; endCol: number }
 
 // === Query ===
 /** Search symbols by name/pattern */
 function symbolSearch(p: { query: string; kinds?: string[]; limit?: number; semantic?: boolean }): { results: { symbolId: string; name: string; kind: string; file: string; relevance?: number }[] }
 /** Get symbol card (metadata, deps, metrics) */
 function symbolGetCard(p: { symbolId: string; ifNoneMatch?: string }): { card: { symbolId: string; name: string; kind: string; signature: string; summary: string; deps: object }; etag: string } | { notModified: true }
+/** Symbol-scoped edit with snapshot preconditions */
+function symbolEdit(p: { mode: "preview"; symbolId?: string; symbolRef?: object; operation: SEO; createBackup?: boolean } | { mode: "apply"; planHandle: string; createBackup?: boolean } | { mode: "applyNow"; symbolId: string; expectedAstFingerprint: string; expectedRange: SR; operation: SEO; createBackup?: boolean }): { mode: "preview"|"apply"; planHandle: string; symbolId: string; file: string; writeTarget: "file"|"draft"; validation: object }
 /** Build dependency graph slice */
 function sliceBuild(p: { taskText?: string; entrySymbols?: string[]; budget?: { maxCards?: number; maxEstimatedTokens?: number } }): { handle: string; cards: object[]; spilloverCount: number }
 /** Refresh existing slice (delta only) */
@@ -164,7 +159,6 @@ function bufferCheckpoint(): { checkpointed: boolean }
 function bufferStatus(): { status: object }
 /** Execute runtime command */
 function runtimeExecute(p: { runtime: string; executable?: string; args?: string[]; code?: string; relativeCwd?: string; timeoutMs?: number; queryTerms?: string[]; maxResponseLines?: number; persistOutput?: boolean; outputMode?: "minimal"|"summary"|"intent" }): { status: string; exitCode: number; durationMs: number; artifactHandle?: string; stdoutSummary?: string }
-// outputMode defaults to "minimal" (~50 tokens); use "summary" for head+tail, "intent" for queryTerms-only excerpts
 /** Query stored runtime output by keywords */
 function runtimeQueryOutput(p: { artifactHandle: string; queryTerms: string[]; maxExcerpts?: number; contextLines?: number; stream?: "stdout"|"stderr"|"both" }): { excerpts: object[] }
 /** Retrieve a large tool response by handle */
@@ -181,25 +175,17 @@ function fileWrite(p: { filePath: string; content?: string; replaceLines?: { sta
 /** Cross-file search-and-edit: mode "preview" computes a plan; mode "apply" executes with sha256 preconditions and rollback */
 function searchEdit(p: { mode: "preview"; repoId: string; targeting: "text"|"symbol"; query: SQ; editMode: EM; filters?: object; maxFiles?: number; createBackup?: boolean; responseMode?: RM } | { mode: "apply"; repoId: string; planHandle: string; createBackup?: boolean }): { mode: "preview"; planHandle: string; filesMatched: number; matchesFound: number; fileEntries: object[]; requiresApply: boolean } | { mode: "apply"; filesWritten: number; filesFailed: number; results: object[]; rollback: object } | ResponseHandle
 
-// === Data Transforms (use inside sdl.workflow steps) ===
-// These are internal transforms, NOT gateway actions. Use as workflow step fn names.
-// IMPORTANT: 'fields' is Record<string, string> (object mapping outputKey -> inputKey), NOT an array.
-// IMPORTANT: First param is always 'input', NOT 'source'.
+// === Data Transforms (workflow-only) ===
 /** Project fields from an object */
 function dataPick(p: { input: unknown; fields: Record<string, string> }): object
-// Example: dataPick({"input":"$0","fields":{"name":"name","file":"file"}})
 /** Project fields from each element of an array */
 function dataMap(p: { input: unknown[]; fields: Record<string, string> }): object[]
-// Example: dataMap({"input":"$0.results","fields":{"id":"symbolId","name":"name","file":"file"}})
 /** Filter array elements by clauses */
 function dataFilter(p: { input: unknown[]; clauses: Array<{path: string; op: "eq"|"ne"|"gt"|"gte"|"lt"|"lte"|"contains"|"in"|"exists"; value?: unknown}>; mode?: "all"|"any" }): object[]
-// Example: dataFilter({"input":"$0.results","clauses":[{"path":"kind","op":"eq","value":"function"}]})
 /** Sort array elements by a field. Uses 'by' (NOT field/order) */
 function dataSort(p: { input: unknown[]; by: {path: string; direction?: "asc"|"desc"; type?: "string"|"number"|"date"|"boolean"} }): object[]
-// Example: dataSort({"input":"$0.results","by":{"path":"name","direction":"asc"}})
 /** Render {{mustache}} template strings from object(s) */
 function dataTemplate(p: { input: Record<string, unknown> | unknown[]; template: string; joinWith?: string }): { text: string }
-// Example: dataTemplate({"input":"$0.results","template":"{{name}} ({{kind}}) in {{file}}","joinWith":"\\n"})
 
 // === Compact Wire Format Decode Guide (sliceBuild with wireFormat: "compact") ===
 // Top-level: wf=wireFormat, wv=wireVersion, vid=versionId, b={mc=maxCards, mt=maxTokens}

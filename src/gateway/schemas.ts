@@ -69,6 +69,83 @@ const SymbolGetCardAction = z
     }
   });
 
+const SymbolEditOperationFields = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("replaceSymbol"), content: z.string() }),
+  z.object({ kind: z.literal("replaceBody"), content: z.string() }),
+  z.object({ kind: z.literal("replaceSignature"), content: z.string() }),
+  z.object({ kind: z.literal("insertBefore"), content: z.string() }),
+  z.object({ kind: z.literal("insertAfter"), content: z.string() }),
+  z.object({
+    kind: z.literal("renameLocal"),
+    name: z.string().min(1),
+    replacement: z.string().min(1),
+  }),
+]);
+
+const SymbolEditAction = z
+  .object({
+    action: z.literal("symbol.edit"),
+    mode: z.enum(["preview", "apply", "applyNow"]),
+    symbolId: z.string().optional(),
+    symbolRef: SymbolRefFields.optional(),
+    operation: SymbolEditOperationFields.optional(),
+    expectedAstFingerprint: z.string().optional(),
+    expectedRange: z
+      .object({
+        startLine: z.number().int().min(0),
+        startCol: z.number().int().min(0),
+        endLine: z.number().int().min(0),
+        endCol: z.number().int().min(0),
+      })
+      .optional(),
+    planHandle: z.string().min(1).max(200).optional(),
+    createBackup: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.mode === "preview") {
+      const targetCount =
+        Number(value.symbolId !== undefined) +
+        Number(value.symbolRef !== undefined);
+      if (targetCount !== 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "symbol.edit preview requires exactly one of symbolId or symbolRef.",
+          path: ["symbolId"],
+        });
+      }
+      if (value.operation === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "symbol.edit preview requires operation.",
+          path: ["operation"],
+        });
+      }
+    }
+    if (value.mode === "apply" && value.planHandle === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "symbol.edit apply requires planHandle.",
+        path: ["planHandle"],
+      });
+    }
+    if (value.mode === "applyNow") {
+      for (const field of [
+        "symbolId",
+        "operation",
+        "expectedAstFingerprint",
+        "expectedRange",
+      ] as const) {
+        if (value[field] === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `symbol.edit applyNow requires ${field}.`,
+            path: [field],
+          });
+        }
+      }
+    }
+  });
+
 const SliceBuildAction = z.object({
   action: z.literal("slice.build"),
   taskText: z.string().min(1).optional(),
@@ -437,6 +514,7 @@ export const RepoGatewaySchema = z
       UsageStatsAction,
       FileReadAction,
       SearchEditAction,
+      SymbolEditAction,
       ScipIngestAction,
       SemanticEnrichmentRefreshAction,
       SemanticEnrichmentStatusAction,
@@ -638,6 +716,7 @@ export const REPO_ACTIONS = [
   "usage.stats",
   "file.read",
   "search.edit",
+  "symbol.edit",
   "semantic.enrichment.refresh",
   "semantic.enrichment.status",
 ] as const;

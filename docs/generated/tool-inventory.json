@@ -1,15 +1,15 @@
 {
-  "generatedAt": "2026-05-10T18:35:05.062Z",
+  "generatedAt": "2026-05-15T03:58:24.794Z",
   "counts": {
-    "flatTools": 35,
+    "flatTools": 36,
     "universalTools": 2,
     "codeModeTools": 5,
     "gatewayTools": 4,
-    "flatModeTotal": 37,
+    "flatModeTotal": 38,
     "gatewayModeTotal": 6,
-    "gatewayLegacyModeTotal": 41,
+    "gatewayLegacyModeTotal": 42,
     "codeModeExclusiveTotal": 5,
-    "allFlatAndCodeModeActions": 40
+    "allFlatAndCodeModeActions": 41
   },
   "flatToolNames": [
     "sdl.agent.feedback",
@@ -44,6 +44,7 @@
     "sdl.slice.build",
     "sdl.slice.refresh",
     "sdl.slice.spillover.get",
+    "sdl.symbol.edit",
     "sdl.symbol.getCard",
     "sdl.symbol.search",
     "sdl.usage.stats"

@@ -463,11 +463,35 @@ function fmtSearchEdit(
   return null;
 }
 
+function fmtSymbolEdit(
+  _args: Record<string, unknown>,
+  result: Record<string, unknown>,
+): string | null {
+  const mode = str(result.mode);
+  const file = shortPath(str(result.file));
+  const symbol = str(result.symbolName) || str(result.symbolId);
+  const operation = str(result.operation);
+  const writeTarget = str(result.writeTarget) || "file";
+  if (mode === "preview") {
+    const handle = str(result.planHandle);
+    return `symbol.edit preview -> ${operation} ${symbol} in ${file} (${writeTarget}); apply with ${handle}`;
+  }
+  if (mode === "apply") {
+    const written = num(result.filesWritten);
+    const failed = num(result.filesFailed);
+    return `symbol.edit apply -> ${operation} ${symbol} in ${file} (${writeTarget}); ${written} written${failed > 0 ? `, ${failed} failed` : ""}`;
+  }
+  return null;
+}
+
 function fmtFileGateway(
   args: Record<string, unknown>,
   result: Record<string, unknown>,
 ): string | null {
   const op = str(args.op);
+  if (op.startsWith("symbolEdit")) {
+    return fmtSymbolEdit(args, result);
+  }
   if (result.mode === "preview" || op === "searchEditPreview") {
     return fmtSearchEditPreview(result);
   }
@@ -646,6 +670,7 @@ function fmtGeneric(
 const formatters: Record<string, Formatter> = {
   "sdl.symbol.search": fmtSymbolSearch,
   "sdl.symbol.getCard": fmtSymbolGetCard,
+  "sdl.symbol.edit": fmtSymbolEdit,
   "sdl.code.getSkeleton": fmtCodeSkeleton,
   "sdl.code.getHotPath": fmtCodeHotPath,
   "sdl.code.needWindow": fmtCodeNeedWindow,

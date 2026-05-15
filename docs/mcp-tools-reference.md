@@ -18,7 +18,7 @@
 
 Complete reference for the SDL-MCP runtime surfaces exposed by `registerTools`.
 
-- `35` flat SDL action tools (`34` gateway-routable + `1` flat-only)
+- `36` flat SDL action tools (`35` gateway-routable + `1` flat-only)
 - `2` universal tools: `sdl.action.search` and `sdl.info`
 - Code Mode tools: `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file` (`sdl.info` is omitted in Code Mode exclusive)
 
@@ -358,7 +358,7 @@ Inspect the current live draft overlay health for a repository.
 
 ---
 
-## Symbol Discovery (4 tools)
+## Symbol Discovery and Editing (5 tools)
 
 ### `sdl.symbol.search`
 
@@ -441,6 +441,53 @@ If a natural reference is ambiguous or not found, the error response includes st
   "symbolRef": { "name": "handleRequest", "file": "src/server.ts" }
 }
 ```
+
+---
+
+### `sdl.symbol.edit`
+
+Preview or apply a symbol-scoped edit with symbol, file, and draft preconditions. It reuses the search-edit plan store and write path, then adds `symbolId`, `astFingerprint`, range, saved-file sha, optional draft version, and parse-after validation.
+
+Use this for edits where the target is one symbol. Use `sdl.search.edit` for cross-file search replacements, and use `sdl.file.write` for immediate non-symbol-shaped writes.
+
+**Parameters:**
+
+| Parameter                | Type                                    | Required    | Description                                                                 |
+| ------------------------ | --------------------------------------- | ----------- | --------------------------------------------------------------------------- |
+| `repoId`                 | `string`                                | Yes         | Repository identifier                                                       |
+| `mode`                   | `"preview" \| "apply" \| "applyNow"`   | Yes         | Preview creates a plan, apply consumes one, applyNow does both              |
+| `symbolId`               | `string`                                | Conditional | Symbol identifier or shorthand. Required for applyNow                       |
+| `symbolRef`              | `{ name, file?, kind?, exportedOnly? }` | Conditional | Natural symbol reference for preview                                        |
+| `operation`              | `object`                                | Conditional | Edit operation for preview/applyNow                                         |
+| `planHandle`             | `string`                                | Conditional | Plan handle for apply                                                       |
+| `expectedAstFingerprint` | `string`                                | Conditional | Required for applyNow                                                       |
+| `expectedRange`          | `{ startLine, startCol, endLine, endCol }` | Conditional | Required for applyNow                                                    |
+| `createBackup`           | `boolean`                               | No          | Backup saved files before writing. Must match preview when supplied to apply |
+
+**Operations:** `replaceSymbol`, `replaceBody`, `replaceSignature`, `insertBefore`, `insertAfter`, and `renameLocal`. TypeScript, TSX, JavaScript, and JSX support all operations. Other indexed languages support only full-symbol replacement and adjacent inserts when symbol ranges are available and the language adapter can parse before and after the edit.
+
+**Response:** preview returns `{ mode, planHandle, symbolId, file, writeTarget, preconditions, validation, fileEntries }`; apply returns `{ mode, filesWritten, results, validation, draftUpdate? }`.
+
+**Examples:**
+
+```json
+{
+  "repoId": "my-repo",
+  "mode": "preview",
+  "symbolRef": { "name": "handleAuth", "file": "src/auth.ts" },
+  "operation": { "kind": "replaceBody", "content": "return true;\n" }
+}
+```
+
+```json
+{
+  "repoId": "my-repo",
+  "mode": "apply",
+  "planHandle": "se-mf0abc-1234"
+}
+```
+
+See [sdl.symbol.edit](./symbol-edit-tool.md) for the full operation and precondition contract.
 
 ---
 
@@ -1313,7 +1360,7 @@ Use this before `sdl.context` or `sdl.workflow` when the model needs a narrow, t
 
 ### `sdl.file`
 
-Provide a unified Code Mode file gateway for read, write, search/edit preview/apply, and plan-bound `previewWindow`/`sourceWindow` operations that route indexed source inspection through `code.needWindow` policy. Set `includeDiagnostics: true` to include file gateway phase timings.
+Provide a unified Code Mode file gateway for read, write, search/edit preview/apply, symbol edit preview/apply/applyNow, and plan-bound `previewWindow`/`sourceWindow` operations that route indexed source inspection through `code.needWindow` policy. Set `includeDiagnostics: true` to include file gateway phase timings.
 
 ---
 

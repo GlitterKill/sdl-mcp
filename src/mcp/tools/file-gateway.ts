@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { MAX_REPO_ID_LENGTH } from "../../config/constants.js";
+import {
+  MAX_REPO_ID_LENGTH,
+  MAX_SYMBOL_ID_LENGTH,
+} from "../../config/constants.js";
 import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { normalizePath } from "../../util/paths.js";
@@ -14,16 +17,19 @@ import {
   SearchEditQuerySchema,
   SearchEditFiltersSchema,
   SearchEditEditMode,
+  SymbolEditOperationSchema,
   type CodeNeedWindowResponse,
   type FileReadResponse,
   type FileWriteResponse,
   type SearchEditPreviewResponse,
   type SearchEditResponse,
+  type SymbolEditResponse,
 } from "../tools.js";
 import { handleCodeNeedWindow } from "./code.js";
 import { handleFileRead } from "./file-read.js";
 import { handleFileWrite } from "./file-write.js";
 import { handleSearchEdit } from "./search-edit/index.js";
+import { handleSymbolEdit } from "./symbol-edit/index.js";
 import { getSearchEditPlanStore, type StoredPlan } from "./search-edit/plan-store.js";
 import {
   attachTimingDiagnostics,
@@ -166,6 +172,60 @@ const FileGatewaySearchEditApplySchema = z.object({
   includeDiagnostics: z.boolean().optional(),
 });
 
+const FileGatewaySymbolEditPreviewSchema = z
+  .object({
+    op: z.literal("symbolEditPreview"),
+    repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+    symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH).optional(),
+    symbolRef: z
+      .object({
+        name: z.string().min(1),
+        file: z.string().min(1).optional(),
+        kind: z.string().min(1).optional(),
+        exportedOnly: z.boolean().optional(),
+      })
+      .optional(),
+    operation: SymbolEditOperationSchema,
+    createBackup: z.boolean().optional(),
+    includeDiagnostics: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const targetCount =
+      Number(value.symbolId !== undefined) +
+      Number(value.symbolRef !== undefined);
+    if (targetCount !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide exactly one of symbolId or symbolRef.",
+        path: ["symbolId"],
+      });
+    }
+  });
+
+const FileGatewaySymbolEditApplySchema = z.object({
+  op: z.literal("symbolEditApply"),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  planHandle: z.string().min(1).max(200),
+  createBackup: z.boolean().optional(),
+  includeDiagnostics: z.boolean().optional(),
+});
+
+const FileGatewaySymbolEditApplyNowSchema = z.object({
+  op: z.literal("symbolEditApplyNow"),
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH),
+  expectedAstFingerprint: z.string().min(1),
+  expectedRange: z.object({
+    startLine: z.number().int().min(0),
+    startCol: z.number().int().min(0),
+    endLine: z.number().int().min(0),
+    endCol: z.number().int().min(0),
+  }),
+  operation: SymbolEditOperationSchema,
+  createBackup: z.boolean().optional(),
+  includeDiagnostics: z.boolean().optional(),
+});
+
 const FileGatewayWindowBaseSchema = CodeNeedWindowRequestSchema.omit({
   repoId: true,
 }).extend({
@@ -198,6 +258,9 @@ export const FileGatewayRequestSchema = z.discriminatedUnion("op", [
   FileGatewayWriteSchema,
   FileGatewaySearchEditPreviewSchema,
   FileGatewaySearchEditApplySchema,
+  FileGatewaySymbolEditPreviewSchema,
+  FileGatewaySymbolEditApplySchema,
+  FileGatewaySymbolEditApplyNowSchema,
   FileGatewayPreviewWindowSchema,
   FileGatewaySourceWindowSchema,
 ]);
@@ -224,6 +287,7 @@ export type FileGatewayResponse =
   | FileReadResponse
   | FileWriteResponse
   | SearchEditResponse
+  | SymbolEditResponse
   | FileGatewayPreviewWindowResponse;
 
 function findPlanPreviewEntry(
@@ -416,6 +480,33 @@ export async function handleFileGateway(
         await handleSearchEdit({ mode: "apply", ...rest }, context),
         phaseStartedAt,
         "file.searchEditApply",
+      );
+    }
+    case "symbolEditPreview": {
+      const { op: _op, ...rest } = request;
+      const phaseStartedAt = timer.start();
+      return finish(
+        await handleSymbolEdit({ mode: "preview", ...rest }, context),
+        phaseStartedAt,
+        "file.symbolEditPreview",
+      );
+    }
+    case "symbolEditApply": {
+      const { op: _op, ...rest } = request;
+      const phaseStartedAt = timer.start();
+      return finish(
+        await handleSymbolEdit({ mode: "apply", ...rest }, context),
+        phaseStartedAt,
+        "file.symbolEditApply",
+      );
+    }
+    case "symbolEditApplyNow": {
+      const { op: _op, ...rest } = request;
+      const phaseStartedAt = timer.start();
+      return finish(
+        await handleSymbolEdit({ mode: "applyNow", ...rest }, context),
+        phaseStartedAt,
+        "file.symbolEditApplyNow",
       );
     }
     case "previewWindow":
