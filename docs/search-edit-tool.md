@@ -26,9 +26,12 @@ MCP responses are human-first. Preview and apply results show concise visible su
 | Tool              | Use when                                                                                                         |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `sdl.file.write`  | Single file, single mode (replaceLines, replacePattern, jsonPath, insertAt, append, overwrite). Immediate apply. |
+| `sdl.symbol.edit` | One symbol-scoped edit with AST/range/file preconditions and parse-after validation.                             |
 | `sdl.search.edit` | Many files, one consistent edit shape, and you want atomic precondition checks + rollback across the batch.      |
 | `sdl.context`     | Reading-only context retrieval for explain/debug/review/implement.                                               |
 | `sdl.workflow`    | Multi-step pipelines that aren't search+edit (runtime execution, data transforms, orchestration).                |
+
+See [`sdl.symbol.edit`](./symbol-edit-tool.md) when the edit target is a single symbol rather than a search result set.
 
 ## Request shape — `mode: "preview"`
 

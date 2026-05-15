@@ -272,6 +272,7 @@ Direct MCP tool invocation from the CLI. The command currently exposes the direc
 sdl-mcp tool repo.register --repo-id my-repo --root-path . --dry-run
 sdl-mcp tool repo.status --repo-id my-repo
 sdl-mcp tool symbol.search --repo-id my-repo --query "handleRequest"
+sdl-mcp tool symbol.edit --repo-id my-repo --mode applyNow --symbol-id "src/auth.ts::handleAuth" --expected-ast-fingerprint fp123 --expected-range '{"startLine":1,"startCol":0,"endLine":3,"endCol":1}' --operation '{"kind":"replaceBody","content":"return true;\n"}'
 sdl-mcp tool slice.build --repo-id my-repo --entry-symbols sym123
 sdl-mcp tool semantic.enrichment.status --repo-id my-repo
 sdl-mcp tool semantic.enrichment.refresh --repo-id my-repo --dry-run
@@ -290,7 +291,7 @@ Key options:
 
 The CLI parser accepts the canonical action fields plus the same common aliases accepted by MCP requests, such as `--repo-id`, `--symbol-id`, `--symbol-ids`, `--from-version`, `--to-version`, and `--slice-handle`.
 
-Not every MCP surface is available through `sdl-mcp tool`. Only `action.search` and `manual` are currently proxied metadata tools; `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only wrapper tools. The direct flat write action is available as `file.write`. Use [`CLI Tool Access`](./feature-deep-dives/cli-tool-access.md) for the current direct-action matrix.
+Not every MCP surface is available through `sdl-mcp tool`. Only `action.search` and `manual` are currently proxied metadata tools; `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only wrapper tools. The direct flat write actions are available as `file.write`, `search.edit`, and `symbol.edit`. CLI `symbol.edit` operates on saved files; use `applyNow` for CLI writes because preview plan handles are process-local. Overlay-aware draft edits and two-phase symbol apply require an MCP server session. Use [`CLI Tool Access`](./feature-deep-dives/cli-tool-access.md) for the current direct-action matrix.
 
 ### `sdl-mcp version`
 

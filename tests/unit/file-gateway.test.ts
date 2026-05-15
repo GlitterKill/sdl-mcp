@@ -169,6 +169,33 @@ describe("FileGatewayRequestSchema", () => {
     });
   });
 
+  describe("op: symbolEdit", () => {
+    it("accepts long symbolId values matching the flat symbol.edit schema", () => {
+      const longSymbolId = "src/" + "deep/".repeat(70) + "module.ts::targetSymbol";
+      assert.equal(longSymbolId.length > 200, true);
+
+      const preview = FileGatewayRequestSchema.parse({
+        op: "symbolEditPreview",
+        repoId: "test-repo",
+        symbolId: longSymbolId,
+        operation: { kind: "replaceSymbol", content: "export const next = 1;" },
+      });
+      const applyNow = FileGatewayRequestSchema.parse({
+        op: "symbolEditApplyNow",
+        repoId: "test-repo",
+        symbolId: longSymbolId,
+        expectedAstFingerprint: "fp-1",
+        expectedRange: { startLine: 1, startCol: 0, endLine: 1, endCol: 22 },
+        operation: { kind: "replaceSymbol", content: "export const next = 1;" },
+      });
+
+      assert.equal(preview.op, "symbolEditPreview");
+      assert.equal(preview.symbolId, longSymbolId);
+      assert.equal(applyNow.op, "symbolEditApplyNow");
+      assert.equal(applyNow.symbolId, longSymbolId);
+    });
+  });
+
   describe("op: previewWindow/sourceWindow", () => {
     it("parses a plan-bound previewWindow request", () => {
       const result = FileGatewayRequestSchema.parse({

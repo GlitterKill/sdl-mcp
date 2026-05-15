@@ -69,6 +69,7 @@ export type ActionTag =
 const ACTION_TAGS: Record<string, ActionTag[]> = {
   "symbol.search": ["query"],
   "symbol.getCard": ["query"],
+  "symbol.edit": ["repo", "mutation"],
   "slice.build": ["query"],
   "slice.refresh": ["query"],
   "slice.spillover.get": ["query"],
@@ -505,6 +506,11 @@ function literalValuesFor(schema: z.ZodType): unknown[] {
 const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "symbol.search": { query: "handleError", kinds: ["function"], limit: 10 },
   "symbol.getCard": { symbolId: "<symbolId>" },
+  "symbol.edit": {
+    mode: "preview",
+    symbolId: "<symbolId>",
+    operation: { kind: "replaceBody", content: "return true;\n" },
+  },
   "slice.build": {
     taskText: "debug authentication flow",
     entrySymbols: ["<symbolId>"],
@@ -628,6 +634,8 @@ export interface ActionMetadata {
 const ACTION_DESCRIPTIONS: Record<string, string> = {
   "symbol.search": "Search symbols by name/pattern",
   "symbol.getCard": "Get symbol card (metadata, deps, metrics)",
+  "symbol.edit":
+    "Preview/apply symbol-scoped edits with astFingerprint, range, file sha, draft preconditions, and parse-after validation",
   "slice.build": "Build dependency graph slice",
   "slice.refresh": "Refresh existing slice (delta only)",
   "slice.spillover.get":
@@ -678,7 +686,7 @@ const META_TOOL_DESCRIPTIONS: Record<string, string> = {
   context:
     "Preferred first tool for explain, debug, review, implement, understand, or investigate prompts. Retrieves task-shaped code context directly and should be chosen before workflow for context retrieval.",
   file:
-    "Unified sdl.file gateway for non-indexed file reads, targeted writes, two-phase search edits, and plan-bound previewWindow/sourceWindow code windows.",
+    "Unified sdl.file gateway for non-indexed file reads, targeted writes, two-phase search edits, symbol edit wrappers, and plan-bound previewWindow/sourceWindow code windows.",
   workflow:
     "Preferred first tool for execute, runtime, transform, batch, or pipeline prompts. Runs multi-step workflows with $N result piping, runtime execution, data transforms, and batch mutations.",
 };
@@ -780,6 +788,11 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
     prerequisites: ["symbol.search"],
     recommendedNextActions: ["slice.build", "code.getSkeleton"],
     fallbacks: ["symbol.search"],
+  },
+  "symbol.edit": {
+    prerequisites: ["symbol.getCard"],
+    recommendedNextActions: ["symbol.edit"],
+    fallbacks: ["search.edit", "file.write"],
   },
   "slice.build": {
     prerequisites: ["symbol.getCard", "repo.overview"],
@@ -929,7 +942,7 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
   file: {
     prerequisites: ["repo.status"],
     recommendedNextActions: ["file"],
-    fallbacks: ["file.write", "search.edit", "code.needWindow"],
+    fallbacks: ["file.write", "search.edit", "symbol.edit", "code.needWindow"],
   },
 
   "search.edit": {

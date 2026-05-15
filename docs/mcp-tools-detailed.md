@@ -19,9 +19,10 @@ Flat mode, gateway mode, and the CLI `tool` command share the same normalization
    - [sdl.buffer.push](#sdlbufferpush)
    - [sdl.buffer.checkpoint](#sdlbuffercheckpoint)
    - [sdl.buffer.status](#sdlbufferstatus)
-3. [Symbol Search & Retrieval](#3-symbol-search--retrieval)
+3. [Symbol Search, Retrieval & Editing](#3-symbol-search-retrieval--editing)
    - [sdl.symbol.search](#sdlsymbolsearch)
    - [sdl.symbol.getCard](#sdlsymbolgetcard)
+   - [sdl.symbol.edit](#sdlsymboledit)
    - [sdl.symbol.getCard](#sdlsymbolgetcards)
 4. [Graph Slices](#4-graph-slices)
    - [sdl.slice.build](#sdlslicebuild)
@@ -389,7 +390,7 @@ Returns the current state of the live editor buffer system for a repository.
 
 ---
 
-## 3. Symbol Search & Retrieval
+## 3. Symbol Search, Retrieval & Editing
 
 ### sdl.symbol.search
 
@@ -480,6 +481,36 @@ Provide exactly one of `symbolId` or `symbolRef`.
 **Natural-reference resolution:** When `symbolRef` resolves to a single high-confidence match, the tool returns the same card payload as an ID lookup. When it is ambiguous or missing, the MCP error payload includes `classification`, `fallbackTools`, `fallbackRationale`, and ranked `candidates`.
 
 **Token cost:** ~50-150 tokens per card. This is Rung 1 of the Iris Gate Ladder and should always be tried before requesting code.
+
+---
+
+### sdl.symbol.edit
+
+Previews or applies a symbol-scoped edit with symbol, file, and draft preconditions.
+
+**What it does:** Resolves a `symbolId` or `symbolRef`, computes the exact post-edit content, stores a plan in the existing search-edit plan store, and applies the plan only if the symbol snapshot and file or draft preconditions still match. TypeScript, TSX, JavaScript, and JSX support full AST operations in v1; other indexed languages support whole-symbol replacement and adjacent inserts when symbol ranges are available and the language adapter can parse before and after the edit.
+
+**Parameters:**
+
+| Parameter                | Type                                  | Required    | Description                                                |
+| :----------------------- | :------------------------------------ | :---------- | :--------------------------------------------------------- |
+| `repoId`                 | string                                | Yes         | Repository identifier                                      |
+| `mode`                   | `"preview" \| "apply" \| "applyNow"` | Yes         | Preview creates a plan, apply consumes one, applyNow does both |
+| `symbolId`               | string                                | Conditional | Symbol ID or shorthand. Required for applyNow              |
+| `symbolRef`              | object                                | Conditional | Natural symbol reference for preview                       |
+| `operation`              | object                                | Conditional | Edit operation for preview/applyNow                        |
+| `planHandle`             | string                                | Conditional | Plan handle for apply                                      |
+| `expectedAstFingerprint` | string                                | Conditional | Required for applyNow                                      |
+| `expectedRange`          | object                                | Conditional | Required for applyNow                                      |
+| `createBackup`           | boolean                               | No          | Backup saved files before writing                          |
+
+**Operations:** `replaceSymbol`, `replaceBody`, `replaceSignature`, `insertBefore`, `insertAfter`, and `renameLocal`.
+
+**Response:** Preview returns a `planHandle`, target symbol, file, write target (`file` or `draft`), preconditions, validation status, and diff snippets. Apply returns write results, validation status, rollback metadata, and `draftUpdate` when the plan targeted a live overlay.
+
+**Safety:** Apply rejects stale `astFingerprint`, stale range, stale saved-file sha, and stale draft version/content. Parse-after validation rejects invalid edits before writing.
+
+See [sdl.symbol.edit](./symbol-edit-tool.md) for examples and Code Mode wrapper operations.
 
 ---
 

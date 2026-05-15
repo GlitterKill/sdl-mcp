@@ -84,6 +84,17 @@ function runCliProxyMetaAction(
   }
 }
 
+function validateCliActionConstraints(
+  action: string,
+  args: Record<string, unknown>,
+): void {
+  if (action === "symbol.edit" && args.mode === "apply") {
+    throw new Error(
+      "symbol.edit apply uses a process-local preview plan and is only available inside an MCP/server session. For CLI writes, use --mode applyNow with expectedAstFingerprint and expectedRange.",
+    );
+  }
+}
+
 export function formatCliToolOutput(
   action: string,
   args: Record<string, unknown>,
@@ -97,6 +108,21 @@ export function formatCliToolOutput(
       result,
     );
     if (formatted) {
+      if (
+        action === "symbol.edit" &&
+        typeof result === "object" &&
+        result !== null &&
+        "mode" in result &&
+        result.mode === "preview"
+      ) {
+        console.log(
+          formatted.replace(
+            /; apply with .+$/,
+            "; CLI apply is MCP/server-session only; use applyNow for CLI writes",
+          ),
+        );
+        return;
+      }
       console.log(formatted);
       return;
     }
@@ -341,6 +367,7 @@ export async function toolDispatchCommand(
 
   // Build handler args (validates required fields — repoId is resolved above)
   const handlerArgs = parseToolArgs(definition, actionValues, stdinArgs);
+  validateCliActionConstraints(action, handlerArgs);
   const outputFormat = detectOutputFormat(
     (actionValues["output-format"] as string) ?? options.outputFormat,
   );

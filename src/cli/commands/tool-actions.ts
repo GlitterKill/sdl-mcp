@@ -238,6 +238,73 @@ const symbolGetCard: ActionDefinition = {
   ],
 };
 
+const symbolEdit: ActionDefinition = {
+  action: "symbol.edit",
+  namespace: "repo",
+  description:
+    "Preview or apply a symbol-scoped edit with astFingerprint, range, file sha, and parse-after validation",
+  args: [
+    { ...REPO_ID_ARG },
+    {
+      flag: "--mode",
+      field: "mode",
+      type: "string",
+      required: true,
+      description:
+        "Mode: preview|applyNow for CLI. apply requires an MCP/server session because plan handles are process-local.",
+    },
+    {
+      flag: "--symbol-id",
+      field: "symbolId",
+      type: "string",
+      description: "Symbol ID or file::name shorthand",
+    },
+    {
+      flag: "--symbol-ref",
+      field: "symbolRef",
+      type: "json",
+      description: 'JSON symbol ref, e.g. {"name":"handleAuth","file":"src/auth.ts"}',
+    },
+    {
+      flag: "--operation",
+      field: "operation",
+      type: "json",
+      description:
+        'JSON operation, e.g. {"kind":"replaceBody","content":"return true;\\n"}',
+    },
+    {
+      flag: "--plan-handle",
+      field: "planHandle",
+      type: "string",
+      description:
+        "Plan handle from symbol.edit preview. apply is MCP/server-session only, not a separate CLI invocation.",
+    },
+    {
+      flag: "--expected-ast-fingerprint",
+      field: "expectedAstFingerprint",
+      type: "string",
+      description: "Required for applyNow: expected current symbol fingerprint",
+    },
+    {
+      flag: "--expected-range",
+      field: "expectedRange",
+      type: "json",
+      description:
+        'Required for applyNow: JSON range {"startLine":1,"startCol":0,"endLine":3,"endCol":1}',
+    },
+    {
+      flag: "--create-backup",
+      field: "createBackup",
+      type: "boolean",
+      description: "Create .bak backup for saved-file applies",
+    },
+  ],
+  examples: [
+    'sdl-mcp tool symbol.edit --repo-id my-repo --mode preview --symbol-id "src/auth.ts::handleAuth" --operation "{\\"kind\\":\\"replaceBody\\",\\"content\\":\\"return true;\\\\n\\"}"',
+    'sdl-mcp tool symbol.edit --repo-id my-repo --mode applyNow --symbol-id "src/auth.ts::handleAuth" --expected-ast-fingerprint fp123 --expected-range "{\\"startLine\\":1,\\"startCol\\":0,\\"endLine\\":3,\\"endCol\\":1}" --operation "{\\"kind\\":\\"replaceBody\\",\\"content\\":\\"return true;\\\\n\\"}"',
+  ],
+};
+
 const sliceBuild: ActionDefinition = {
   action: "slice.build",
   namespace: "query",
@@ -1681,6 +1748,7 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   // Query
   symbolSearch,
   symbolGetCard,
+  symbolEdit,
   sliceBuild,
   sliceRefresh,
   sliceSpilloverGet,

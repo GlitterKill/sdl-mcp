@@ -44,6 +44,17 @@ describe("Gateway schemas", () => {
       assert.strictEqual(result.success, true);
     });
 
+    it("rejects symbol.edit because sdl.query is read-only", () => {
+      const result = QueryGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "symbol.edit",
+        mode: "preview",
+        symbolId: "src/server.ts::handleRequest",
+        operation: { kind: "replaceBody", content: "return true;\n" },
+      });
+      assert.strictEqual(result.success, false);
+    });
+
     it("rejects symbol.getCard action with batch symbolIds (not supported)", () => {
       const result = QueryGatewaySchema.safeParse({
         repoId: "test-repo",
@@ -188,6 +199,17 @@ describe("Gateway schemas", () => {
       });
       assert.strictEqual(result.success, true);
     });
+
+    it("validates symbol.edit preview action", () => {
+      const result = RepoGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "symbol.edit",
+        mode: "preview",
+        symbolId: "src/server.ts::handleRequest",
+        operation: { kind: "replaceBody", content: "return true;\n" },
+      });
+      assert.strictEqual(result.success, true);
+    });
   });
 
   describe("AgentGatewaySchema", () => {
@@ -236,16 +258,16 @@ describe("Gateway schemas", () => {
       assert.strictEqual(CODE_ACTIONS.length, 3);
     });
 
-    it("REPO_ACTIONS has 12 actions", () => {
-      assert.strictEqual(REPO_ACTIONS.length, 12);
+    it("REPO_ACTIONS has 13 actions", () => {
+      assert.strictEqual(REPO_ACTIONS.length, 13);
     });
 
     it("AGENT_ACTIONS has 11 actions", () => {
       assert.strictEqual(AGENT_ACTIONS.length, 11);
     });
 
-    it("ALL_ACTIONS has 34 total actions", () => {
-      assert.strictEqual(ALL_ACTIONS.length, 34);
+    it("ALL_ACTIONS has 35 total actions", () => {
+      assert.strictEqual(ALL_ACTIONS.length, 35);
     });
   });
 });

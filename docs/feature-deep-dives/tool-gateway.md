@@ -7,8 +7,8 @@ The gateway compresses most of the flat SDL-MCP surface into four namespace tool
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
-    Flat["Flat mode<br/>37 tools<br/>2 universal + 35 flat"]
-    Shrink["Gateway projection<br/>34 gateway-routable actions"]
+    Flat["Flat mode<br/>38 tools<br/>2 universal + 36 flat"]
+    Shrink["Gateway projection<br/>35 gateway-routable actions"]
     Gateway["Gateway mode<br/>6 tools<br/>2 universal + 4 gateway"]
 
     Flat e1@--> Shrink
@@ -28,25 +28,25 @@ flowchart LR
 
 | Mode                | Tool count | Composition                                                                  |
 | ------------------- | ---------- | ---------------------------------------------------------------------------- |
-| Flat                | `37`       | `2` universal + `35` flat tools                                              |
+| Flat                | `38`       | `2` universal + `36` flat tools                                              |
 | Gateway             | `6`        | `2` universal + `4` gateway tools                                            |
-| Gateway + legacy    | `41`       | `2` universal + `4` gateway + `35` flat tools                                |
+| Gateway + legacy    | `42`       | `2` universal + `4` gateway + `36` flat tools                                |
 | Code Mode exclusive | `5`        | `sdl.action.search`, `sdl.context`, `sdl.file`, `sdl.manual`, `sdl.workflow` |
 
 The generated source of truth is [tool-inventory.md](../generated/tool-inventory.md).
 
 ## What the Gateway Actually Covers
 
-The gateway currently exposes `34` of the `35` flat actions through the four namespace schemas. The remaining flat action outside those schemas is `file.write`, which is available in flat mode and through the Code Mode `sdl.file` gateway. `search.edit` is routable through the regular `sdl.repo` gateway envelope and through Code Mode `sdl.file`.
+The gateway currently exposes `35` of the `36` flat actions through the four namespace schemas. The remaining flat action outside those schemas is `file.write`, which is available in flat mode and through the Code Mode `sdl.file` gateway. `search.edit` and `symbol.edit` are routable through the mutation-capable `sdl.repo` gateway envelope and through Code Mode `sdl.file`; `symbol.edit` is also available through `sdl.workflow`.
 
 | Gateway tool | Actions | Current action set                                                                                                                                                                                         |
 | ------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sdl.query`  | `8`     | `symbol.search`, `symbol.getCard`, `slice.build`, `slice.refresh`, `slice.spillover.get`, `delta.get`, `pr.risk.analyze`, `response.get`                                                                   |
+| `sdl.query`  | `8`     | `symbol.search`, `symbol.getCard`, `slice.build`, `slice.refresh`, `slice.spillover.get`, `delta.get`, `pr.risk.analyze`, `response.get`                                                                    |
 | `sdl.code`   | `3`     | `code.needWindow`, `code.getSkeleton`, `code.getHotPath`                                                                                                                                                   |
-| `sdl.repo`   | `12`    | `repo.register`, `repo.status`, `repo.overview`, `index.refresh`, `policy.get`, `policy.set`, `usage.stats`, `file.read`, `search.edit`, `scip.ingest`, `semantic.enrichment.refresh`, `semantic.enrichment.status` |
+| `sdl.repo`   | `13`    | `repo.register`, `repo.status`, `repo.overview`, `index.refresh`, `policy.get`, `policy.set`, `usage.stats`, `file.read`, `search.edit`, `symbol.edit`, `scip.ingest`, `semantic.enrichment.refresh`, `semantic.enrichment.status` |
 | `sdl.agent`  | `11`    | `agent.feedback`, `agent.feedback.query`, `buffer.push`, `buffer.checkpoint`, `buffer.status`, `runtime.execute`, `runtime.queryOutput`, `memory.store`, `memory.query`, `memory.remove`, `memory.surface` |
 
-In Code Mode, use `sdl.file({ op: "searchEditPreview" })` and `sdl.file({ op: "searchEditApply" })` for two-phase cross-file edits: preview first, then apply the stored plan with sha256/mtime preconditions and rollback on mid-batch failure. For indexed source follow-up, `sdl.file({ op: "previewWindow" })` and `sdl.file({ op: "sourceWindow" })` bind a plan handle to the normal `code.needWindow` policy instead of exposing raw file reads. The same `search.edit` action is also callable through `sdl.repo` and via `sdl.workflow`. See [sdl.search.edit - Cross-File Search and Edit](../search-edit-tool.md) for request shapes and examples.
+In Code Mode, use `sdl.file({ op: "searchEditPreview" })` and `sdl.file({ op: "searchEditApply" })` for two-phase cross-file edits: preview first, then apply the stored plan with sha256/mtime preconditions and rollback on mid-batch failure. Use `sdl.file({ op: "symbolEditPreview" })`, `sdl.file({ op: "symbolEditApply" })`, and `sdl.file({ op: "symbolEditApplyNow" })` for one-symbol edits with symbol snapshot preconditions. For indexed source follow-up, `sdl.file({ op: "previewWindow" })` and `sdl.file({ op: "sourceWindow" })` bind a plan handle to the normal `code.needWindow` policy instead of exposing raw file reads. The same `search.edit` action is also callable through `sdl.repo` and via `sdl.workflow`. See [sdl.search.edit - Cross-File Search and Edit](../search-edit-tool.md) and [sdl.symbol.edit](../symbol-edit-tool.md) for request shapes and examples.
 
 ## Routing Path
 
@@ -119,7 +119,7 @@ If you are migrating older agent instructions that still depend on flat tool nam
 | Smallest registration footprint                    | Gateway mode                                             |
 | Task-shaped retrieval first                        | Code Mode                                                |
 | Need `file.write`                                  | Code Mode `sdl.file`, direct CLI `file.write`, flat mode, or `sdl.workflow` steps |
-| Need `search.edit`                                 | `sdl.repo`, Code Mode `sdl.file`, flat mode, or `sdl.workflow` |
+| Need `search.edit` or `symbol.edit`                | `sdl.repo`, Code Mode `sdl.file`, flat mode, or `sdl.workflow` |
 | Existing legacy instructions still call flat tools | Flat mode, or a temporary migration setup                |
 
 ## Practical Recommendation

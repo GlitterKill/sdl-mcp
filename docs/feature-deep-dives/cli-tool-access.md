@@ -2,7 +2,7 @@
 
 **Access direct SDL-MCP action aliases plus `action.search` and `manual` metadata proxies from the command line without running an MCP transport.**
 
-The `sdl-mcp tool` command executes direct graph actions through the same gateway handler layer used by the MCP server, but it does not expose the entire runtime surface. It covers the CLI action definitions in [`src/cli/commands/tool-actions.ts`](../../src/cli/commands/tool-actions.ts), including 35 direct aliases across query, code, repo, and agent namespaces plus a small meta namespace for `action.search` and `manual`. The metadata proxies run in process and skip graph DB initialization.
+The `sdl-mcp tool` command executes direct graph actions through the same gateway handler layer used by the MCP server, but it does not expose the entire runtime surface. It covers the CLI action definitions in [`src/cli/commands/tool-actions.ts`](../../src/cli/commands/tool-actions.ts), including 36 direct aliases across query, code, repo, and agent namespaces plus a small meta namespace for `action.search` and `manual`. The metadata proxies run in process and skip graph DB initialization.
 
 ---
 
@@ -17,6 +17,12 @@ sdl-mcp tool symbol.search --repo-id my-repo --query "handleAuth"
 
 # Get a symbol card
 sdl-mcp tool symbol.getCard --repo-id my-repo --symbol-id "file:src/server.ts::MCPServer"
+
+# Preview a symbol-scoped edit against the saved file.
+# The returned plan handle is process-local; use applyNow for CLI writes.
+sdl-mcp tool symbol.edit --repo-id my-repo --mode preview \
+  --symbol-id "src/auth.ts::handleAuth" \
+  --operation '{"kind":"replaceBody","content":"return true;\n"}'
 
 # Update one JSON setting
 sdl-mcp tool file.write --repo-id my-repo --file-path config/app.json \
@@ -121,6 +127,7 @@ Only these two metadata tools are proxied through the CLI today.
 | `file.read`                   | Read non-indexed files through SDL           |
 | `file.write`                  | Write a single file with targeted modes      |
 | `search.edit`                 | Preview and apply cross-file search/edit plans |
+| `symbol.edit`                 | Preview or applyNow one saved-file symbol edit |
 
 ### Agent
 
@@ -138,7 +145,7 @@ Only these two metadata tools are proxied through the CLI today.
 | `memory.remove`        | Remove a development memory                 |
 | `memory.surface`       | Surface relevant memories                   |
 
-`sdl-mcp tool` currently exposes only two Code Mode metadata proxies: `action.search` and `manual` (with `sdl.` aliases). `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only wrapper tools. Use `file.write` for immediate single-file edits and `search.edit` when you want a preview/apply workflow across one or more files.
+`sdl-mcp tool` currently exposes only two Code Mode metadata proxies: `action.search` and `manual` (with `sdl.` aliases). `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only wrapper tools. Use `file.write` for immediate single-file edits, `symbol.edit --mode applyNow` for one-call saved-file symbol edits, and `search.edit` when you want a preview/apply workflow across one or more files. `symbol.edit --mode preview` can inspect the saved-file plan from CLI, but `symbol.edit --mode apply` requires the MCP/server session that created the process-local plan handle. Overlay-aware `symbol.edit` plans also require the MCP server session that owns the live draft.
 
 ---
 
@@ -238,7 +245,7 @@ The direct CLI surface is implemented by four modules:
 
 | Module             | File                                  | Responsibility                                                      |
 | :----------------- | :------------------------------------ | :------------------------------------------------------------------ |
-| Action definitions | `src/cli/commands/tool-actions.ts`    | Declares the 35 CLI-visible aliases                                 |
+| Action definitions | `src/cli/commands/tool-actions.ts`    | Declares the 36 CLI-visible aliases                                 |
 | Arg parser         | `src/cli/commands/tool-arg-parser.ts` | Maps flags to handler fields and coerces types                      |
 | Dispatcher         | `src/cli/commands/tool-dispatch.ts`   | Loads config, resolves `repoId`, routes actions, and handles errors |
 | Output formatter   | `src/cli/commands/tool-output.ts`     | Formats results as JSON, compact JSON, pretty, or table output      |
@@ -250,7 +257,7 @@ The dispatcher reuses the gateway action map for execution, so the CLI and MCP s
 ## Limitations
 
 - `buffer.*` actions require a running MCP server with live indexing. In CLI mode they typically return limited or empty results.
-- `file.write` applies immediately and has no preview phase. Use `search.edit` for preview/apply batch edits with drift checks and rollback.
+- `file.write` applies immediately and has no preview phase. Use `search.edit` for preview/apply batch edits with drift checks and rollback. Use `symbol.edit --mode applyNow` for CLI symbol-scoped writes; two-phase `symbol.edit` apply requires the MCP/server session that created the preview plan.
 - For `file.write` requests with multiline content, nested mode objects, or JSON values that are hard to quote in a shell, prefer stdin JSON.
 - Code Mode tools are separate from the direct CLI alias surface.
 - Each invocation initializes config and the graph database, so high-frequency automation is better served by an MCP server over HTTP or stdio.

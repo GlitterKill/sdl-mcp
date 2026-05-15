@@ -188,5 +188,25 @@ describe("cli-tool-dispatch", () => {
         );
       }
     });
+
+    it("rejects symbol.edit apply because CLI plan handles are process-local", () => {
+      const result = runTool([
+        "symbol.edit",
+        "--repo-id",
+        "demo-repo",
+        "--mode",
+        "apply",
+        "--plan-handle",
+        "se-demo",
+        "--output-format",
+        "json-compact",
+      ], cliMetaEnv());
+
+      assert.notStrictEqual(result.status, 0);
+      assert.match(
+        `${result.stdout}\n${result.stderr}`,
+        /process-local preview plan/,
+      );
+    });
   });
 });

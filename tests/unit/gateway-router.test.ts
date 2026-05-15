@@ -34,10 +34,10 @@ describe("Gateway router", () => {
   });
 
   describe("createActionMap", () => {
-    it("contains all 35 actions", () => {
+    it("contains all 36 actions", () => {
       const map = createActionMap();
       const actions = Object.keys(map);
-      assert.strictEqual(actions.length, 35);
+      assert.strictEqual(actions.length, 36);
     });
 
     it("each entry has schema and handler", () => {
@@ -56,6 +56,7 @@ describe("Gateway router", () => {
       const expected = [
         "symbol.search",
         "symbol.getCard",
+        "symbol.edit",
         "slice.build",
         "slice.refresh",
         "slice.spillover.get",

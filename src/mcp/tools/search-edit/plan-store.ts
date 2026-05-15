@@ -13,6 +13,7 @@
 
 import { randomBytes } from "crypto";
 
+import type { Range } from "../../../domain/types.js";
 import type { FileWriteResponse } from "../../tools.js";
 
 export const PLAN_TTL_MS = 15 * 60 * 1000;
@@ -47,6 +48,39 @@ export interface PlannedFileEdit {
   editMode: FileWriteResponse["mode"];
 }
 
+export interface SymbolEditStoredMetadata {
+  tool: "symbol.edit";
+  symbolId: string;
+  symbolName: string;
+  symbolKind: string;
+  language: string;
+  operation: string;
+  file: string;
+  writeTarget: "file" | "draft";
+  preconditions: {
+    symbol: {
+      symbolId: string;
+      astFingerprint: string;
+      range: Range;
+    };
+    file: {
+      path: string;
+      sha256: string | null;
+      mtimeMs: number | null;
+    };
+    draft?: {
+      version: number;
+      sha256: string;
+    };
+  };
+  validation: {
+    parseBefore: boolean;
+    parseAfter: boolean;
+    targetSymbolResolved: boolean;
+    warnings?: string[];
+  };
+}
+
 export interface StoredPlan {
   planHandle: string;
   repoId: string;
@@ -65,6 +99,8 @@ export interface StoredPlan {
   preconditions: PlanPrecondition[];
   /** Preview summary snapshot returned to the caller. */
   summary: Record<string, unknown>;
+  /** Optional symbol-scoped metadata for `symbol.edit` plans. */
+  symbolEdit?: SymbolEditStoredMetadata;
 }
 
 export interface PlanStoreOptions {
@@ -97,6 +133,7 @@ export class PlanStore {
     preconditions: PlanPrecondition[],
     summary: Record<string, unknown>,
     defaultCreateBackup: boolean,
+    symbolEdit?: SymbolEditStoredMetadata,
   ): StoredPlan {
     const now = this.clock();
     const planHandle = `se-${now.toString(36)}-${randomBytes(8).toString("hex")}`;
@@ -110,6 +147,7 @@ export class PlanStore {
       edits,
       preconditions,
       summary,
+      ...(symbolEdit ? { symbolEdit } : {}),
     };
     const planBytes = edits.reduce(
       (sum, e) => sum + Buffer.byteLength(e.newContent, "utf-8"),

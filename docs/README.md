@@ -32,6 +32,8 @@ Use this page as the entry point for SDL-MCP documentation.
 - I need MCP tool payloads and responses:
   - [MCP Tools Reference](./mcp-tools-reference.md)
   - [MCP Tools Detailed](./mcp-tools-detailed.md)
+- I want to make symbol-scoped edits safely:
+  - [sdl.symbol.edit](./symbol-edit-tool.md)
 - I need to tune repository, policy, and slice behavior:
   - [Configuration Reference](./configuration-reference.md)
 - I want agent best practices and Iris Gate Ladder workflows:
@@ -83,6 +85,7 @@ Use this page as the entry point for SDL-MCP documentation.
 - [Plugin SDK Author Guide](./plugin-sdk-author-guide.md)
 - [Plugin SDK Quick Reference](./plugin-sdk-quick-reference.md)
 - [Plugin SDK Security](./plugin-sdk-security.md)
+- [sdl.symbol.edit](./symbol-edit-tool.md)
 
 ## Current Scope Snapshot
 
@@ -91,7 +94,7 @@ Use this page as the entry point for SDL-MCP documentation.
 - **CLI commands** (13): init, doctor, info, index, serve, export, import, pull, benchmark, summary, health, version, tool
 - **Generated tool inventory**: [docs/generated/tool-inventory.md](./generated/tool-inventory.md)
 - **MCP surfaces**:
-  - Core: repo register/status/overview, index refresh, symbol search/getCard, slice build/refresh/spillover, delta get, PR risk analyze
+  - Core: repo register/status/overview, index refresh, symbol search/getCard/edit, slice build/refresh/spillover, delta get, PR risk analyze
   - Code access: getSkeleton, getHotPath, needWindow (Iris Gate Ladder)
   - Policy: get/set
   - Feedback: agent.feedback, agent.feedback.query
@@ -102,11 +105,11 @@ Use this page as the entry point for SDL-MCP documentation.
   - SCIP: ingest
   - Usage: stats
   - Universal: `sdl.action.search` and `sdl.info`
-  - Default flat mode: 37 tools (`35` flat tools + `sdl.action.search` + `sdl.info`)
+  - Default flat mode: 38 tools (`36` flat tools + `sdl.action.search` + `sdl.info`)
   - Gateway-only mode: 6 tools (`4` gateway tools + `sdl.action.search` + `sdl.info`)
-  - Gateway + legacy mode: 41 tools (`4` gateway + `35` legacy flat + `sdl.action.search` + `sdl.info`)
+  - Gateway + legacy mode: 42 tools (`4` gateway + `36` legacy flat + `sdl.action.search` + `sdl.info`)
   - Code Mode exclusive: 5 tools (`sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, `sdl.file`)
-  - Gateway routing covers 34 of the 35 flat tools; `sdl.file.write` remains flat-only
+  - Gateway routing covers 35 of the 36 flat tools; `sdl.file.write` remains flat-only
   - `sdl-mcp tool` exposes direct CLI action aliases plus only the `action.search` and `manual` metadata proxies; `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only wrappers
 - **Semantic features**: optional semantic reranking with 2 embedding models (Jina Code bundled, Nomic optional), LLM-generated symbol summaries (Anthropic/Ollama/mock)
 - **HTTP surface**: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP

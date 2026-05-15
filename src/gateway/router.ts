@@ -12,6 +12,7 @@ import type { LiveIndexCoordinator } from "../live-index/types.js";
 import {
   SymbolSearchRequestSchema,
   SymbolGetCardRequestSchema,
+  SymbolEditRequestSchema,
   SliceBuildRequestSchema,
   SliceRefreshRequestSchema,
   SliceSpilloverGetRequestSchema,
@@ -50,6 +51,7 @@ import {
   handleSymbolSearch,
   handleSymbolGetCard,
 } from "../mcp/tools/symbol.js";
+import { handleSymbolEdit } from "../mcp/tools/symbol-edit/index.js";
 import {
   handleSliceBuild,
   handleSliceRefresh,
@@ -132,6 +134,10 @@ export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
     "symbol.getCard": {
       schema: SymbolGetCardRequestSchema,
       handler: handleSymbolGetCard,
+    },
+    "symbol.edit": {
+      schema: SymbolEditRequestSchema,
+      handler: handleSymbolEdit,
     },
     "slice.build": {
       schema: SliceBuildRequestSchema,

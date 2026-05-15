@@ -502,7 +502,7 @@ Features include typed argument coercion (string, number, boolean, string[], jso
 
 **Why it matters:**
 
-- 35 direct graph/action aliases plus `action.search` and `manual` metadata proxies accessible from **any terminal** - no server, transport, or SDK required
+- 36 direct graph/action aliases plus `action.search` and `manual` metadata proxies accessible from **any terminal** - no server, transport, or SDK required
 - Direct graph actions keep gateway-router/Zod parity; metadata proxies share the same MCP registration handlers
 - Four output formats (json, json-compact, pretty, table) for scripting and CI pipelines
 - Auto-resolves repoId from cwd, supports stdin JSON piping and per-action `--help`
@@ -513,12 +513,12 @@ Features include typed argument coercion (string, number, boolean, string[], jso
 
 ### Tool Gateway — Compact Tool Registration
 
-The tool gateway projects the 34 gateway-routable SDL actions into **4 namespace-scoped tools** (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`), reducing `tools/list` overhead from the full flat schema surface to a compact gateway surface.
+The tool gateway projects the 35 gateway-routable SDL actions into **4 namespace-scoped tools** (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`), reducing `tools/list` overhead from the full flat schema surface to a compact gateway surface.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
-    Before["Flat mode<br/>37 tools<br/>2 universal + 35 flat"] e1@--> After["Gateway mode<br/>6 tools<br/>2 universal + 4 gateway"]
+    Before["Flat mode<br/>38 tools<br/>2 universal + 36 flat"] e1@--> After["Gateway mode<br/>6 tools<br/>2 universal + 4 gateway"]
     After e2@--> Savings["Smaller tools/list payload<br/>lower agent startup overhead"]
 
     classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
@@ -536,7 +536,7 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 **Why it matters:**
 
 - Large reduction in `tools/list` overhead for gateway-first agents
-- 34 gateway-routable actions consolidated into 4 namespace-scoped tools for simpler agent selection
+- 35 gateway-routable actions consolidated into 4 namespace-scoped tools for simpler agent selection
 - Fewer tool choices means faster and more accurate tool dispatch by the agent
 - Choose Code Mode for task-shaped retrieval first; opt out of exclusive Code Mode when you also need regular flat or gateway tools
 
@@ -558,9 +558,9 @@ Built-in read-only dashboard surfaces every metric needed to diagnose SDL-MCP be
 
 | Mode                | Tool count | Composition                                                      |
 | :------------------ | :--------- | :--------------------------------------------------------------- |
-| Flat                | `37`       | `2` universal + `35` flat tools                                  |
+| Flat                | `38`       | `2` universal + `36` flat tools                                  |
 | Gateway             | `6`        | `2` universal + `4` gateway tools                                |
-| Gateway + legacy    | `41`       | `2` universal + `4` gateway + `35` flat tools                    |
+| Gateway + legacy    | `42`       | `2` universal + `4` gateway + `36` flat tools                    |
 | Code Mode exclusive | `5`        | `sdl.action.search`, `sdl.context`, `sdl.file`, `sdl.manual`, `sdl.workflow` |
 
 The generated source of truth is [`docs/generated/tool-inventory.md`](./docs/generated/tool-inventory.md).
@@ -578,9 +578,10 @@ The generated source of truth is [`docs/generated/tool-inventory.md`](./docs/gen
 <tr><td><code>sdl.buffer.checkpoint</code></td><td>Force-write pending buffers to the durable database</td></tr>
 <tr><td><code>sdl.buffer.status</code></td><td>Live indexing diagnostics and queue depth</td></tr>
 
-<tr><td rowspan="2"><strong>Symbols</strong></td>
+<tr><td rowspan="3"><strong>Symbols</strong></td>
     <td><code>sdl.symbol.search</code></td><td>Search symbols by name (with optional semantic reranking)</td></tr>
 <tr><td><code>sdl.symbol.getCard</code></td><td>Get one card or batch-fetch up to 100 cards with ETag-based conditional support</td></tr>
+<tr><td><code>sdl.symbol.edit</code></td><td>Preview/apply one symbol-scoped edit with AST, range, file, and draft preconditions</td></tr>
 
 <tr><td rowspan="3"><strong>Slices</strong></td>
     <td><code>sdl.slice.build</code></td><td>Build a task-scoped dependency subgraph</td></tr>
@@ -650,7 +651,7 @@ The generated source of truth is [`docs/generated/tool-inventory.md`](./docs/gen
 | `sdl-mcp doctor`    | Validate runtime, config, DB, grammars, repo access                                    |
 | `sdl-mcp index`     | Index repositories (with optional `--watch` mode)                                      |
 | `sdl-mcp serve`     | Start MCP server (`--stdio` or `--http`)                                               |
-| `sdl-mcp tool`      | Access 35 direct action aliases ([docs](./docs/feature-deep-dives/cli-tool-access.md)) |
+| `sdl-mcp tool`      | Access 36 direct action aliases ([docs](./docs/feature-deep-dives/cli-tool-access.md)) |
 | `sdl-mcp info`      | Runtime diagnostics — version, Node.js, platform, database, config                     |
 | `sdl-mcp summary`   | Generate copy/paste context summaries from the CLI                                     |
 | `sdl-mcp health`    | Compute composite health score with badge/JSON output                                  |
@@ -772,8 +773,8 @@ flowchart TD
 | [Context Modes](./docs/feature-deep-dives/context-modes.md)                         | Precise vs broad retrieval, adaptive symbol ranking, benchmark trade-offs             |
 | [Indexing & Languages](./docs/feature-deep-dives/indexing-languages.md)             | Rust/TS engines, two-pass architecture, 12-language support                           |
 | [Runtime Execution](./docs/feature-deep-dives/runtime-execution.md)                 | Sandboxed subprocess execution with governance                                        |
-| [CLI Tool Access](./docs/feature-deep-dives/cli-tool-access.md)                     | Direct CLI access to 35 action aliases, output formats, stdin piping, scripting       |
-| [Tool Gateway](./docs/feature-deep-dives/tool-gateway.md)                           | 34 gateway-routable actions, 4 namespace tools, thin schemas, migration guide         |
+| [CLI Tool Access](./docs/feature-deep-dives/cli-tool-access.md)                     | Direct CLI access to 36 action aliases, output formats, stdin piping, scripting       |
+| [Tool Gateway](./docs/feature-deep-dives/tool-gateway.md)                           | 35 gateway-routable actions, 4 namespace tools, thin schemas, migration guide         |
 | [Semantic Engine](./docs/feature-deep-dives/semantic-engine.md)                     | Pass-2 call resolution, embedding search, LLM summaries, confidence scoring           |
 | [Semantic Embeddings Setup](./docs/feature-deep-dives/semantic-embeddings-setup.md) | Dependencies, model installation, provider configuration, tier-by-tier setup          |
 | [Code Mode](./docs/feature-deep-dives/code-mode.md)                                 | `sdl.context`, `sdl.workflow`, action discovery, manual reference, one-call workflows |

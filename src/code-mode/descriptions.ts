@@ -29,5 +29,7 @@ export const FILE_GATEWAY_DESCRIPTION =
   + "pattern replace, JSON path, insert, append). op:\"searchEditPreview\" returns a "
   + "planHandle summarizing proposed cross-file edits; op:\"searchEditApply\" executes "
   + "the plan with sha256/mtime preconditions and rollback on mid-batch failure. "
+  + "op:\"symbolEditPreview\", op:\"symbolEditApply\", and op:\"symbolEditApplyNow\" "
+  + "wrap symbol.edit for symbol-scoped edits with astFingerprint/range preconditions. "
   + "op:\"previewWindow\" and op:\"sourceWindow\" open policy-gated code windows "
   + "for indexed source files in an edit plan.";

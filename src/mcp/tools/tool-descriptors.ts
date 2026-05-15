@@ -23,6 +23,7 @@ import {
   BufferStatusRequestSchema,
   SymbolSearchRequestSchema,
   SymbolGetCardRequestSchema,
+  SymbolEditRequestSchema,
   SliceBuildRequestSchema,
   SliceRefreshRequestSchema,
   SliceSpilloverGetRequestSchema,
@@ -63,6 +64,7 @@ import {
   handleBufferStatus,
 } from "./buffer.js";
 import { handleSymbolSearch, handleSymbolGetCard } from "./symbol.js";
+import { handleSymbolEdit } from "./symbol-edit/index.js";
 import {
   handleSliceBuild,
   handleSliceRefresh,
@@ -198,6 +200,13 @@ export function buildFlatToolDescriptors(
       description: "Get a single symbol card by ID",
       schema: SymbolGetCardRequestSchema,
       handler: handleSymbolGetCard,
+    },
+    {
+      name: "sdl.symbol.edit",
+      description:
+        'Symbol-scoped edit preview/apply/applyNow with astFingerprint, range, file sha, draft preconditions, and parse-after validation.',
+      schema: SymbolEditRequestSchema,
+      handler: handleSymbolEdit,
     },
     {
       name: "sdl.slice.build",

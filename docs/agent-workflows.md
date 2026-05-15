@@ -50,7 +50,7 @@ flowchart LR
 
 ## Complete Tool Reference
 
-SDL-MCP exposes 37 tools in flat default mode (35 flat tools plus `sdl.action.search` and `sdl.info`). Gateway mode replaces 34 of those flat actions with 4 namespace surfaces, while `sdl.file.write` remains flat-only. Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`, and can also run in exclusive mode with only those 5 tools.
+SDL-MCP exposes 38 tools in flat default mode (36 flat tools plus `sdl.action.search` and `sdl.info`). Gateway mode replaces 35 of those flat actions with 4 namespace surfaces, while `sdl.file.write` remains flat-only. Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`, and can also run in exclusive mode with only those 5 tools.
 
 | Category                   | Tool                       | Purpose                                                                                                                                                              |
 | :------------------------- | :------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -64,6 +64,7 @@ SDL-MCP exposes 37 tools in flat default mode (35 flat tools plus `sdl.action.se
 | **Symbols**                | `sdl.symbol.search`        | Search symbols by name or summary; supports semantic reranking via `semantic: true`                                                                                  |
 |                            | `sdl.symbol.getCard`       | Get a single symbol card by `symbolId` or `symbolRef`, with ETag caching and optional `minCallConfidence` filtering                                                  |
 |                            | `sdl.symbol.getCard`       | Batch fetch up to 100 cards by `symbolIds` or `symbolRefs`; supports `knownEtags` and partial-success metadata                                                       |
+|                            | `sdl.symbol.edit`          | Preview/apply one symbol-scoped edit with AST/range/file preconditions and parse-after validation                                                                    |
 | **Slices**                 | `sdl.slice.build`          | Build graph slice from entry symbols, task text, stack traces, or edited files                                                                                       |
 |                            | `sdl.slice.refresh`        | Refresh an existing slice handle; returns incremental delta only                                                                                                     |
 |                            | `sdl.slice.spillover.get`  | Paginated fetch for overflow symbols beyond budget                                                                                                                   |
@@ -90,7 +91,7 @@ SDL-MCP exposes 37 tools in flat default mode (35 flat tools plus `sdl.action.se
 |                            | `sdl.manual`               | Return a compact filtered API reference for a queried or explicit action subset                                                                                      |
 |                            | `sdl.context`              | Retrieve task-shaped context inside Code Mode for explain/debug/review/implement work                                                                                |
 |                            | `sdl.workflow`             | Execute up to 50 actions in a single round trip with `$N` result piping, transforms, and optional traces                                                             |
-|                            | `sdl.file`                 | Unified Code Mode file gateway for read, write, search/edit preview, and search/edit apply operations                                                                |
+|                            | `sdl.file`                 | Unified Code Mode file gateway for read, write, search/edit preview/apply, symbol edit preview/apply, and gated source windows                                      |
 
 ---
 
@@ -151,12 +152,13 @@ Use this order unless task constraints force escalation:
 
 - **Debug**: `search -> card -> slice.build -> hotPath -> needWindow (only if still ambiguous)`.
 - **Debug (auto-discovery)**: `slice.build` with `taskText` describing the bug + `stackTrace` and/or `failingTestPath` if available → SDL-MCP finds symbols automatically. Pass the same context via `sliceContext` to `code.needWindow` if raw code is needed.
-- **Feature implementation**: `repo.overview -> search -> card -> slice.build`. Use `editedFiles` in `slice.build` to include symbols from files you're actively modifying.
+- **Feature implementation**: `repo.overview -> search -> card -> slice.build`. Use `editedFiles` in `slice.build` to include symbols from files you're actively modifying. Use `symbol.edit` when the change is one symbol and you want preview/apply safety with AST preconditions.
 - **PR review**: `delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols`.
 - **Live editing**: `buffer.push` as files change (with cursor/selection tracking) → `buffer.checkpoint` to persist → search/card/slice now reflect draft state.
 - **Test execution**: `runtime.execute` with the narrowest useful runtime (`node`, `python`, or `shell`) to run tests and capture structured output.
 - **Context retrieval** _(Code Mode)_: use `sdl.context` when Code Mode is enabled. If Code Mode is disabled, follow the manual ladder (`repo.overview` -> `symbol.search` -> `symbol.getCard` -> `slice.build` -> code tools).
 - **Multi-step operations** _(Code Mode)_: `sdl.workflow` for runtime execution, data transforms, and batch mutations. Do not use it for context retrieval — route explain/debug/review/implement work to context first.
+- **Symbol-scoped edits** _(Code Mode)_: `sdl.file` with `op: "symbolEditPreview"` -> review `planHandle` -> `op: "symbolEditApply"`. Use `symbolEditApplyNow` only when you already hold the current `astFingerprint` and range from a fresh card.
 
 ### 3) Token controls by tool
 
@@ -279,7 +281,7 @@ When `codeMode.enabled: true` is set in config, four Code Mode tools sit alongsi
 - `sdl.manual` — returns a compact filtered API reference for all or part of the action surface.
 - `sdl.context` — retrieves task-shaped context inside Code Mode. Start here for `explain`, `debug`, `review`, and most `implement` requests.
 - `sdl.workflow` — executes up to 50 actions in a single round trip with `$N` result piping, internal data transforms, and optional traces.
-- `sdl.file` — performs Code Mode file read/write and two-phase search/edit operations through one `op` discriminator.
+- `sdl.file` — performs Code Mode file read/write, two-phase search/edit, symbol edit, and gated source-window operations through one `op` discriminator.
 
 Routing guidance:
 
