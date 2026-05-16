@@ -361,29 +361,33 @@ export async function execStoredProc(
 /**
  * Wait for any in-flight query on `conn` to finish, then reject all queued
  * work with `onTimeoutError`. Used during shutdown to ensure no native
- * prepare/execute pipeline is mid-flight when the connection closes.
+ * prepare/execute pipeline is mid-flight when the connection closes. Returns
+ * true when the mutex drained before the timeout, false when shutdown moved on
+ * because the timeout elapsed.
  */
 export async function drainConnMutex(
   conn: Connection,
   timeoutMs: number,
   onTimeoutError: Error,
-): Promise<void> {
+): Promise<boolean> {
   const mutex = connMutex.get(conn);
-  if (!mutex) return;
+  if (!mutex) return true;
 
   let timeoutHandle: NodeJS.Timeout | undefined;
+  let drained = false;
   try {
-    await Promise.race([
-      mutex.drain(),
+    drained = await Promise.race([
+      mutex.drain().then(() => true),
       new Promise<void>((resolve) => {
         timeoutHandle = setTimeout(resolve, timeoutMs);
         timeoutHandle.unref();
-      }),
+      }).then(() => false),
     ]);
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
   }
   mutex.clearQueue(onTimeoutError);
+  return drained;
 }
 
 /**

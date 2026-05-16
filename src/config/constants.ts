@@ -478,11 +478,19 @@ export const DEFAULT_HTTP_PORT = 3000;
 export const PIDFILE_NAME = "sdl-mcp.pid";
 
 /**
- * Maximum time in milliseconds to wait for graceful shutdown before
- * forcing process exit. Prevents the server from hanging indefinitely
- * if a cleanup step (e.g. LadybugDB close) blocks.
+ * Maximum time a single LadybugDB shutdown drain waits for in-flight work.
+ * The process-level shutdown force timeout must stay comfortably above this:
+ * DB close can spend one drain window on active writes and additional windows
+ * on per-connection mutex drains before it reaches the final checkpoint.
  */
-export const SHUTDOWN_FORCE_EXIT_TIMEOUT_MS = 5000;
+export const DB_SHUTDOWN_DRAIN_TIMEOUT_MS = 5000;
+
+/**
+ * Maximum time in milliseconds to wait for graceful shutdown before forcing
+ * process exit. This must be longer than the DB drain budget above; otherwise
+ * routine LadybugDB close/checkpoint work can be killed by the outer watchdog.
+ */
+export const SHUTDOWN_FORCE_EXIT_TIMEOUT_MS = 60000;
 
 /**
  * SDL-MCP package version. Keep in sync with package.json.

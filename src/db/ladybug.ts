@@ -7,6 +7,7 @@ import { runInNewContext } from "node:vm";
 import { normalizePath } from "../util/paths.js";
 import { logger } from "../util/logger.js";
 import { loadConfig } from "../config/loadConfig.js";
+import { DB_SHUTDOWN_DRAIN_TIMEOUT_MS } from "../config/constants.js";
 import { DatabaseError } from "../domain/errors.js";
 import { ConcurrencyLimiter } from "../util/concurrency.js";
 import {
@@ -945,22 +946,23 @@ export async function closeLadybugDb(): Promise<void> {
       await flushAuditBufferOnShutdown(async (body) => {
         await withWriteConn(async (conn) => {
           await body(conn);
-        });
+        }, DB_SHUTDOWN_DRAIN_TIMEOUT_MS);
       });
     } catch {
       // Best-effort; never block shutdown on audit drain.
     }
   }
 
-  // Drain in-flight writes before closing connections. Timeout after 5s
-  // to avoid hanging indefinitely if a write is stuck.
+  // Drain in-flight writes before closing connections. This wait is bounded
+  // so shutdown can proceed if a native write is stuck; keep the outer
+  // ShutdownManager watchdog comfortably higher than this per-drain budget.
   if (writeLimiter) {
     try {
       let timeoutHandle: NodeJS.Timeout | undefined;
       await Promise.race([
         writeLimiter.drain(),
         new Promise<void>((resolve) => {
-          timeoutHandle = setTimeout(resolve, 5_000);
+          timeoutHandle = setTimeout(resolve, DB_SHUTDOWN_DRAIN_TIMEOUT_MS);
           timeoutHandle.unref();
         }),
       ]).finally(() => {
@@ -983,7 +985,7 @@ export async function closeLadybugDb(): Promise<void> {
       await flushAuditBufferOnShutdown(async (body) => {
         await withWriteConn(async (conn) => {
           await body(conn);
-        });
+        }, DB_SHUTDOWN_DRAIN_TIMEOUT_MS);
       });
     } catch {
       // Best-effort; never block shutdown.
@@ -1001,13 +1003,15 @@ export async function closeLadybugDb(): Promise<void> {
   const shutdownError = new DatabaseError(
     "LadybugDB is closing, per-conn queue cleared",
   );
-  for (const conn of readPool) {
-    try {
-      await drainConnMutex(conn, 5_000, shutdownError);
-    } catch {
-      // Best-effort drain — proceed with teardown regardless
-    }
-  }
+  await Promise.allSettled(
+    readPool.map((conn) =>
+      drainConnMutex(
+        conn,
+        DB_SHUTDOWN_DRAIN_TIMEOUT_MS,
+        shutdownError,
+      ),
+    ),
+  );
 
   await flushStaleFinalizers();
 
@@ -1034,15 +1038,28 @@ export async function closeLadybugDb(): Promise<void> {
     // Drain the write conn's per-connection mutex before issuing CHECKPOINT.
     // Otherwise CHECKPOINT can race a still-in-flight write executing on
     // the same native handle and crash inside the libkuzu C++ destructor.
+    let writeConnDrained = false;
     try {
-      await drainConnMutex(writeConn, 5_000, shutdownError);
+      writeConnDrained = await drainConnMutex(
+        writeConn,
+        DB_SHUTDOWN_DRAIN_TIMEOUT_MS,
+        shutdownError,
+      );
     } catch {
-      // Best-effort drain — proceed with checkpoint regardless.
+      // Best-effort drain — proceed with close regardless.
+      writeConnDrained = false;
     }
-    // Force CHECKPOINT on the way out so the next startup opens a clean WAL.
-    // Prevents the Kuzu 0.15.2 UNREACHABLE_CODE crash in wal_record.cpp:76
-    // when `LOAD EXTENSION fts` replays an uncheckpointed WAL.
-    await checkpointWal(writeConn, "pre-close");
+    if (writeConnDrained) {
+      // Force CHECKPOINT on the way out so the next startup opens a clean WAL.
+      // Prevents the Kuzu 0.15.2 UNREACHABLE_CODE crash in wal_record.cpp:76
+      // when `LOAD EXTENSION fts` replays an uncheckpointed WAL.
+      await checkpointWal(writeConn, "pre-close");
+    } else {
+      logger.warn("Skipping LadybugDB shutdown checkpoint", {
+        reason: "write connection did not drain before shutdown timeout",
+        timeoutMs: DB_SHUTDOWN_DRAIN_TIMEOUT_MS,
+      });
+    }
     try {
       await writeConn.close();
     } catch (err) {

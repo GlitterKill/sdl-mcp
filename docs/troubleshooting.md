@@ -212,6 +212,15 @@ Then run manual refreshes with `sdl-mcp index` until the underlying issue is fix
   - current defaults: check every 60s, checkpoint when WAL is at least 32 MiB after 30s quiet time, or when a non-empty WAL has been quiet for 15 minutes; checkpoint attempts are rate-limited to once every 5 minutes
   - graceful shutdown still performs a final best-effort checkpoint
 
+#### Shutdown forces exit before cleanup finishes
+
+- Symptom: shutdown logs `Cleanup did not finish within ... forcing exit`
+- Cause: a cleanup step, usually LadybugDB drain/checkpoint or an active HTTP session teardown, did not finish before the shutdown watchdog fired
+- Resolution:
+  - current builds allow 60 seconds for graceful shutdown; LadybugDB shutdown drains use bounded 5-second windows, read-connection drains run in parallel, and shutdown skips the final checkpoint when the write connection fails to drain
+  - if the message includes a cleanup name, inspect that subsystem first; repeated `db` timeouts usually mean an active index/post-index write or a stuck native DB call
+  - after a forced exit, run `sdl-mcp doctor` or restart the server before indexing; startup and shutdown both perform best-effort WAL checkpoints
+
 #### Database incompatible after upgrade
 
 - Symptom: error "not compatible with the current graph engine" on startup

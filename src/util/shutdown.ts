@@ -9,7 +9,7 @@
  * - PID file removal
  *
  * Usage:
- *   const mgr = new ShutdownManager({ forceTimeoutMs: 5000 });
+ *   const mgr = new ShutdownManager({ forceTimeoutMs: 60000 });
  *   mgr.addCleanup("server", () => server.stop());
  *   mgr.addCleanup("db", () => closeLadybugDb());
  *   mgr.registerSignals();         // SIGINT, SIGTERM, SIGHUP
@@ -25,7 +25,7 @@ export type CleanupFn = () => void | Promise<void>;
 export interface ShutdownManagerOptions {
   /**
    * Milliseconds to wait for cleanup before force-exiting.
-   * Defaults to `SHUTDOWN_FORCE_EXIT_TIMEOUT_MS` (5 000).
+   * Defaults to `SHUTDOWN_FORCE_EXIT_TIMEOUT_MS` (60 000).
    */
   forceTimeoutMs?: number;
 
@@ -127,10 +127,15 @@ export class ShutdownManager {
 
     this.log(`Received ${reason}, shutting down gracefully...`);
 
+    let activeCleanup: string | null = null;
+
     // Safety net: if cleanup hangs, force exit after timeout.
     const forceTimer = setTimeout(() => {
+      const activeCleanupSuffix = activeCleanup
+        ? ` while running cleanup "${activeCleanup}"`
+        : "";
       this.log(
-        `Cleanup did not finish within ${this.forceTimeoutMs}ms — forcing exit.`,
+        `Cleanup did not finish within ${this.forceTimeoutMs}ms${activeCleanupSuffix} — forcing exit.`,
       );
       // Remove PID file even on forced exit.
       if (this.pidfilePath) {
@@ -142,12 +147,20 @@ export class ShutdownManager {
 
     // Run cleanups sequentially.
     for (const { name, fn } of this.cleanups) {
+      activeCleanup = name;
+      const cleanupStartedAt = Date.now();
       try {
         await fn();
       } catch (error) {
         this.log(
           `Cleanup "${name}" error: ${error instanceof Error ? error.message : String(error)}`,
         );
+      } finally {
+        const durationMs = Date.now() - cleanupStartedAt;
+        if (durationMs >= 1000) {
+          this.log(`Cleanup "${name}" completed in ${durationMs}ms`);
+        }
+        activeCleanup = null;
       }
     }
 

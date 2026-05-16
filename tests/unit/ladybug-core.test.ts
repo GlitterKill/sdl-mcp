@@ -16,6 +16,7 @@ import {
   withTransaction,
   getPreparedStatement,
   isConnectionPoisoned,
+  drainConnMutex,
 } from "../../dist/db/ladybug-core.js";
 
 describe("toNumber", () => {
@@ -176,6 +177,29 @@ describe("query helpers", () => {
       String(preparedByStatement.get(statement)),
     );
     assert.deepEqual(calls[0]?.params, { value: 1 });
+  });
+
+  it("reports false when draining a stuck connection mutex times out", async () => {
+    const conn = {
+      prepare: async (_statement: string) => "prepared",
+      execute: async () => new Promise(() => {}),
+    };
+
+    const pending = queryAll(
+      conn as unknown as import("kuzu").Connection,
+      "RETURN 1",
+    ).catch(() => undefined);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const drained = await drainConnMutex(
+      conn as unknown as import("kuzu").Connection,
+      5,
+      new Error("shutdown"),
+    );
+
+    assert.equal(drained, false);
+    void pending;
   });
 
   it("queryAll/querySingle return rows and close the QueryResult", async () => {
