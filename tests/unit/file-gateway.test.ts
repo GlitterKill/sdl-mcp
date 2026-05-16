@@ -171,7 +171,8 @@ describe("FileGatewayRequestSchema", () => {
 
   describe("op: symbolEdit", () => {
     it("accepts long symbolId values matching the flat symbol.edit schema", () => {
-      const longSymbolId = "src/" + "deep/".repeat(70) + "module.ts::targetSymbol";
+      const longSymbolId =
+        "src/" + "deep/".repeat(70) + "module.ts::targetSymbol";
       assert.equal(longSymbolId.length > 200, true);
 
       const preview = FileGatewayRequestSchema.parse({
@@ -247,6 +248,20 @@ describe("FileGatewayRequestSchema", () => {
       });
     });
 
+    it("rejects sourceWindow without a planHandle", () => {
+      assert.throws(() => {
+        FileGatewayRequestSchema.parse({
+          op: "sourceWindow",
+          repoId: "test-repo",
+          symbolId: "symbol-123",
+          reason: "Inspect source after previewing an edit",
+          expectedLines: 12,
+          identifiersToFind: ["target"],
+          responseMode: "inline",
+        });
+      });
+    });
+
     it("rejects previewWindow filePath with null byte", () => {
       assert.throws(() => {
         FileGatewayRequestSchema.parse({
@@ -297,11 +312,12 @@ describe("FileGatewayRequestSchema", () => {
 describe("handleFileGateway dispatch", () => {
   it("op:read dispatches to handleFileRead", async () => {
     await assert.rejects(
-      () => handleFileGateway({
-        op: "read",
-        repoId: "nonexistent-test-repo",
-        filePath: "package.json",
-      }),
+      () =>
+        handleFileGateway({
+          op: "read",
+          repoId: "nonexistent-test-repo",
+          filePath: "package.json",
+        }),
       (err: any) => {
         assert.notEqual(err?.constructor?.name, "ZodError");
         return true;
@@ -311,12 +327,13 @@ describe("handleFileGateway dispatch", () => {
 
   it("op:write dispatches to handleFileWrite", async () => {
     await assert.rejects(
-      () => handleFileGateway({
-        op: "write",
-        repoId: "nonexistent-test-repo",
-        filePath: "test.txt",
-        content: "test",
-      }),
+      () =>
+        handleFileGateway({
+          op: "write",
+          repoId: "nonexistent-test-repo",
+          filePath: "test.txt",
+          content: "test",
+        }),
       (err: any) => {
         assert.notEqual(err?.constructor?.name, "ZodError");
         return true;
@@ -326,13 +343,14 @@ describe("handleFileGateway dispatch", () => {
 
   it("op:searchEditPreview dispatches to handleSearchEdit", async () => {
     await assert.rejects(
-      () => handleFileGateway({
-        op: "searchEditPreview",
-        repoId: "nonexistent-test-repo",
-        targeting: "text",
-        query: { literal: "foo", replacement: "bar" },
-        editMode: "replacePattern",
-      }),
+      () =>
+        handleFileGateway({
+          op: "searchEditPreview",
+          repoId: "nonexistent-test-repo",
+          targeting: "text",
+          query: { literal: "foo", replacement: "bar" },
+          editMode: "replacePattern",
+        }),
       (err: any) => {
         assert.notEqual(err?.constructor?.name, "ZodError");
         return true;
@@ -342,11 +360,12 @@ describe("handleFileGateway dispatch", () => {
 
   it("op:searchEditApply dispatches to handleSearchEdit", async () => {
     await assert.rejects(
-      () => handleFileGateway({
-        op: "searchEditApply",
-        repoId: "nonexistent-test-repo",
-        planHandle: "plan-fake-123",
-      }),
+      () =>
+        handleFileGateway({
+          op: "searchEditApply",
+          repoId: "nonexistent-test-repo",
+          planHandle: "plan-fake-123",
+        }),
       (err: any) => {
         assert.notEqual(err?.constructor?.name, "ZodError");
         return true;
@@ -356,19 +375,23 @@ describe("handleFileGateway dispatch", () => {
 
   it("op:previewWindow dispatches to the plan-bound window handler", async () => {
     await assert.rejects(
-      () => handleFileGateway({
-        op: "previewWindow",
-        repoId: "test-repo",
-        planHandle: "plan-fake-123",
-        symbolId: "symbol-123",
-        reason: "Inspect the planned edit before applying it",
-        expectedLines: 12,
-        identifiersToFind: ["target"],
-        responseMode: "inline",
-      }),
+      () =>
+        handleFileGateway({
+          op: "previewWindow",
+          repoId: "test-repo",
+          planHandle: "plan-fake-123",
+          symbolId: "symbol-123",
+          reason: "Inspect the planned edit before applying it",
+          expectedLines: 12,
+          identifiersToFind: ["target"],
+          responseMode: "inline",
+        }),
       (err: any) => {
         assert.notEqual(err?.constructor?.name, "ZodError");
-        assert.match(String(err?.message ?? ""), /Edit plan not found or expired/);
+        assert.match(
+          String(err?.message ?? ""),
+          /Edit plan not found or expired/,
+        );
         return true;
       },
     );

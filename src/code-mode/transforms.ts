@@ -307,7 +307,9 @@ function matchesClause(
       }
       if (Array.isArray(fieldVal) && typeof clause.value === "string") {
         const lv = clause.value.toLowerCase();
-        return fieldVal.some((v) => typeof v === "string" && v.toLowerCase().includes(lv));
+        return fieldVal.some(
+          (v) => typeof v === "string" && v.toLowerCase().includes(lv),
+        );
       }
       return false;
     case "in":
@@ -392,7 +394,15 @@ export type InternalTransformName = (typeof INTERNAL_TRANSFORM_NAMES)[number];
 const WorkflowContinuationGetSchema = z.object({
   handle: z.string().min(1),
   offset: z.number().int().min(0).optional(),
-  limit: z.number().int().min(1).max(1000).optional(),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(1000)
+    .optional()
+    .describe(
+      "Maximum array items or string characters to return; capped at 1000.",
+    ),
 });
 
 export const INTERNAL_TRANSFORMS: Record<string, InternalTransformEntry> = {

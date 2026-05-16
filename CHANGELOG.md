@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Aligned SDL-MCP action discovery/manual contracts for disabled memory actions, workflow response handles, transform return shapes, file window plan handles, and documented discovery limits.
+- Let read-only status workflows bypass the foreground dispatch limiter so `repo.status` remains visible while a long `index.refresh` owns the normal tool slot.
 - Increased the graceful shutdown watchdog to leave room for LadybugDB drain/checkpoint cleanup, bounded shutdown audit flush waits, parallelized read-connection drains, skipped the final checkpoint after a write-connection drain timeout, and named the active cleanup step in forced-exit logs so normal DB close work is not cut off at the old 5-second boundary.
 
 ## [0.11.3] - 2026-05-14

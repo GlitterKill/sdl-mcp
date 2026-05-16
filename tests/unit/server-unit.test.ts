@@ -1,7 +1,11 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert";
 import { z } from "zod";
-import { isMetadataOnlyTool, MCPServer } from "../../dist/server.js";
+import {
+  isMetadataOnlyTool,
+  MCPServer,
+  shouldBypassToolDispatch,
+} from "../../dist/server.js";
 
 /**
  * Tests for src/server.ts — MCPServer class.
@@ -23,6 +27,74 @@ describe("MCPServer", () => {
       assert.strictEqual(isMetadataOnlyTool("sdl.manual"), true);
       assert.strictEqual(isMetadataOnlyTool("sdl.context"), false);
       assert.strictEqual(isMetadataOnlyTool("sdl.file"), false);
+    });
+
+    it("bypasses dispatch for direct status tools", () => {
+      assert.strictEqual(
+        shouldBypassToolDispatch("sdl.repo.status", { repoId: "sdl-mcp" }),
+        true,
+      );
+      assert.strictEqual(
+        shouldBypassToolDispatch("sdl.repo", {
+          repoId: "sdl-mcp",
+          action: "repo.status",
+        }),
+        true,
+      );
+      assert.strictEqual(
+        shouldBypassToolDispatch("sdl.index.refresh", {
+          repoId: "sdl-mcp",
+          mode: "incremental",
+        }),
+        false,
+      );
+      assert.strictEqual(
+        shouldBypassToolDispatch("sdl.repo", {
+          repoId: "sdl-mcp",
+          action: "index.refresh",
+        }),
+        false,
+      );
+    });
+
+    it("bypasses dispatch for read-only status workflows", () => {
+      assert.strictEqual(
+        shouldBypassToolDispatch("sdl.workflow", {
+          repoId: "sdl-mcp",
+          steps: [{ fn: "repo.status", args: { detail: "minimal" } }],
+        }),
+        true,
+      );
+      assert.strictEqual(
+        shouldBypassToolDispatch("sdl.workflow", {
+          repoId: "sdl-mcp",
+          steps: [
+            { fn: "repo.status", args: {} },
+            {
+              fn: "dataPick",
+              args: { input: "$0", fields: { repoId: "repoId" } },
+            },
+          ],
+        }),
+        true,
+      );
+    });
+
+    it("keeps mutating or runtime workflows behind dispatch", () => {
+      assert.strictEqual(
+        shouldBypassToolDispatch("sdl.workflow", {
+          repoId: "sdl-mcp",
+          steps: [{ fn: "index.refresh", args: { mode: "incremental" } }],
+        }),
+        false,
+      );
+      assert.strictEqual(
+        shouldBypassToolDispatch("sdl.workflow", {
+          repoId: "sdl-mcp",
+          steps: [{ fn: "runtime.execute", args: { runtime: "node" } }],
+        }),
+        false,
+      );
     });
   });
 

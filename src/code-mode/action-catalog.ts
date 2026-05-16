@@ -483,7 +483,9 @@ function resolveTypeName(schema: z.ZodType): string {
       return `literal(${JSON.stringify(litVal)})`;
     }
     case "union":
-      return getUnionOptions(schema).map((o) => resolveTypeName(o)).join(" | ");
+      return getUnionOptions(schema)
+        .map((o) => resolveTypeName(o))
+        .join(" | ");
     default:
       return "unknown";
   }
@@ -554,7 +556,7 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "repo.register": { rootPath: "/path/to/repo" },
   "repo.status": {},
   "repo.overview": { level: "stats" },
-  "index.refresh": { mode: "incremental", async: false },
+  "index.refresh": { mode: "incremental", async: true },
   "policy.get": {},
   "policy.set": { policyPatch: { maxWindowLines: 200 } },
   "agent.feedback": {
@@ -669,7 +671,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "repo.status": "Get repository status",
   "repo.overview": "Get codebase overview",
   "index.refresh":
-    "Refresh index. Prefer synchronous calls; if async:true is used, wait for repo.status to show indexing complete before continuing dependent work.",
+    "Refresh index. Use async:true from agent workflows unless the caller can tolerate a long foreground run; while async indexing is active, use repo.status to monitor completion before dependent work.",
   "policy.get": "Get policy config",
   "policy.set":
     "Set policy config (policyPatch wrapper: maxWindowLines, maxWindowTokens, requireIdentifiers, allowBreakGlass, defaultMinCallConfidence, defaultDenyRaw, budgetCaps)",
@@ -708,8 +710,7 @@ const META_TOOL_DESCRIPTIONS: Record<string, string> = {
     "Load the focused SDL-MCP manual after discovery. Use this before composing workflow steps.",
   context:
     "Preferred first tool for explain, debug, review, implement, understand, or investigate prompts. Retrieves task-shaped code context directly and should be chosen before workflow for context retrieval.",
-  file:
-    "Unified sdl.file gateway for non-indexed file reads, targeted writes, two-phase search edits, symbol edit wrappers, and plan-bound previewWindow/sourceWindow code windows.",
+  file: "Unified sdl.file gateway for non-indexed file reads, targeted writes, two-phase search edits, symbol edit wrappers, and plan-bound previewWindow/sourceWindow code windows.",
   workflow:
     "Preferred first tool for execute, runtime, transform, batch, or pipeline prompts. Runs multi-step workflows with $N result piping, runtime execution, data transforms, and batch mutations.",
 };
@@ -724,7 +725,7 @@ const TRANSFORM_DESCRIPTIONS: Record<string, string> = {
   dataSort:
     'Sort array elements. by: {path: string, direction: "asc"|"desc", type?: "string"|"number"|"date"|"boolean"}. NOT field/order.',
   dataTemplate:
-    "Render {{mustache}} template strings from object or array. joinWith (default '\\n') joins array results.",
+    "Render {{mustache}} template strings from object or array and return the rendered string. joinWith (default '\\n') joins array results.",
 };
 
 const TRANSFORM_EXAMPLES: Record<string, Record<string, unknown>> = {
@@ -1182,7 +1183,13 @@ function buildBaseCatalogFromMap(
   }
 
   // Top-level Code Mode meta tools
-  for (const action of ["action.search", "manual", "context", "file", "workflow"]) {
+  for (const action of [
+    "action.search",
+    "manual",
+    "context",
+    "file",
+    "workflow",
+  ]) {
     catalog.push({
       action,
       fn: action,

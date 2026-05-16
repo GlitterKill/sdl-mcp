@@ -174,12 +174,12 @@ export function handleManual(
     return { manual, tokenEstimate: estimateTokens(manual) };
   }
 
-  let catalog = buildCatalog({
+  const fullCatalog = buildCatalog({
     liveIndex: services.liveIndex,
     includeSchemas,
     includeExamples,
   });
-  catalog = catalog.filter((entry) => !entry.disabled);
+  let catalog = fullCatalog.filter((entry) => !entry.disabled);
 
   if (args.actions && args.actions.length > 0) {
     const activeFnMap = getActiveFnNameMap();
@@ -187,14 +187,29 @@ export function handleManual(
       ...Object.keys(activeFnMap),
       ...Object.values(activeFnMap),
       ...INTERNAL_TRANSFORM_NAMES,
-      ...catalog.flatMap((entry) => [entry.action, entry.fn]),
+      ...fullCatalog.flatMap((entry) => [entry.action, entry.fn]),
       "workflow",
       "context",
       "manual",
       "action.search",
     ]);
 
-    const unknowns = args.actions.filter((action) => !validNames.has(action));
+    const matchesSelector = (
+      entry: ActionDescriptor,
+      selector: string,
+    ): boolean => {
+      if (selector.endsWith(".*")) {
+        const prefix = selector.slice(0, -1);
+        return entry.action.startsWith(prefix) || entry.fn.startsWith(prefix);
+      }
+      return entry.action === selector || entry.fn === selector;
+    };
+    const knownSelector = (selector: string): boolean =>
+      validNames.has(selector) ||
+      (selector.endsWith(".*") &&
+        fullCatalog.some((entry) => matchesSelector(entry, selector)));
+
+    const unknowns = args.actions.filter((action) => !knownSelector(action));
     if (unknowns.length > 0) {
       return {
         error: "UNKNOWN_ACTIONS",
@@ -205,18 +220,18 @@ export function handleManual(
 
     const filtered: ActionDescriptor[] = [];
     for (const name of args.actions) {
-      const match = catalog.find(
-        (entry) => entry.action === name || entry.fn === name,
+      const matches = fullCatalog.filter((entry) =>
+        matchesSelector(entry, name),
       );
-      if (match && !filtered.includes(match)) {
-        filtered.push(match);
+      for (const match of matches) {
+        if (!filtered.includes(match)) {
+          filtered.push(match);
+        }
       }
     }
     catalog = filtered;
-  }
-
-  if (args.query) {
-    catalog = rankCatalog(catalog, args.query);
+  } else if (args.query) {
+    catalog = rankCatalog(fullCatalog, args.query);
   }
 
   if (format === "json") {
@@ -472,9 +487,13 @@ function renderTypescript(catalog: ActionDescriptor[]): string {
 
   for (const descriptor of catalog) {
     lines.push(`/** ${descriptor.description} */`);
+    if (descriptor.disabled) {
+      lines.push(`// Disabled: ${descriptor.disabledReason ?? "not enabled"}`);
+    }
     if (descriptor.prerequisites.length > 0) {
       lines.push(`// Prerequisites: ${descriptor.prerequisites.join(", ")}`);
     }
+
     if (descriptor.recommendedNextActions.length > 0) {
       lines.push(`// Next: ${descriptor.recommendedNextActions.join(", ")}`);
     }
@@ -530,6 +549,12 @@ function renderMarkdown(catalog: ActionDescriptor[]): string {
     lines.push("");
     lines.push(descriptor.description);
     lines.push("");
+    if (descriptor.disabled) {
+      lines.push(
+        `- **Status**: disabled (${descriptor.disabledReason ?? "not enabled"})`,
+      );
+    }
+
     lines.push(`- **Kind**: ${descriptor.kind}`);
     lines.push(`- **Tags**: ${descriptor.tags.join(", ")}`);
     if (descriptor.prerequisites.length > 0) {
@@ -597,7 +622,9 @@ function renderMarkdown(catalog: ActionDescriptor[]): string {
   lines.push("| `$0.slice.si[0]` | First symbol in slice (compact) |");
   lines.push("| `$0.sliceHandle` | Handle from slice.build |");
   lines.push("| `$0.artifactHandle` | Handle from runtime.execute |");
-  lines.push("| `$0.truncatedResponse.continuationHandle` | Handle for a truncated workflow step result |");
+  lines.push(
+    "| `$0.truncatedResponse.continuationHandle` | Handle for a truncated workflow step result |",
+  );
   lines.push("| `$0.skeleton` | Skeleton IR string |");
   lines.push("| `$0.excerpt` | Hot-path excerpt string |");
   lines.push("| `$N.result.fieldName` | Any field from step N result |");

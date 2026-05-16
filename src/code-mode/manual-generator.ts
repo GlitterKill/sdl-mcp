@@ -87,6 +87,10 @@ export function getActiveActionToFn(): Record<string, string> {
 const MANUAL_TEMPLATE = `// SDL-MCP API - use sdl.context for context retrieval, sdl.workflow for multi-step operations
 // repoId is set in the workflow envelope, not per-step.
 // Reference prior step results with ${"$"}N (e.g., ${"$"}0.results[0].symbolId).
+// Discovery limits: sdl.action.search limit <= 50; workflowContinuationGet limit <= 1000.
+// sdl.context budgets accept maxTokens/maxEstimatedTokens, not maxCards; use sliceBuild for card-count budgets.
+// In workflow pipelines, force wireFormat:"json" for symbol.search/sliceBuild when later ${"$"}N refs need object fields.
+
 type RM = "inline"|"auto"|"handle"; type DM = "off"|"auto"; type ResponseHandle = { kind: "responseArtifact"; handle: string; action: "response.get" }; type SQ = { literal?: string; regex?: string; replacement?: string; global?: boolean; symbolRef?: object; symbolIds?: string[] }; type EM = "replacePattern"|"replaceLines"|"insertAt"|"append"|"overwrite"; type SEO = { kind: "replaceSymbol"|"replaceBody"|"replaceSignature"|"insertBefore"|"insertAfter"; content: string } | { kind: "renameLocal"; name: string; replacement: string }; type SR = { startLine: number; startCol: number; endLine: number; endCol: number }
 
 // === Query ===
@@ -97,7 +101,7 @@ function symbolGetCard(p: { symbolId: string; ifNoneMatch?: string }): { card: {
 /** Symbol-scoped edit with snapshot preconditions */
 function symbolEdit(p: { mode: "preview"; symbolId?: string; symbolRef?: object; operation: SEO; createBackup?: boolean } | { mode: "apply"; planHandle: string; createBackup?: boolean } | { mode: "applyNow"; symbolId: string; expectedAstFingerprint: string; expectedRange: SR; operation: SEO; createBackup?: boolean }): { mode: "preview"|"apply"; planHandle: string; symbolId: string; file: string; writeTarget: "file"|"draft"; validation: object }
 /** Build dependency graph slice */
-function sliceBuild(p: { taskText?: string; entrySymbols?: string[]; budget?: { maxCards?: number; maxEstimatedTokens?: number } }): { handle: string; cards: object[]; spilloverCount: number }
+function sliceBuild(p: { taskText?: string; entrySymbols?: string[]; budget?: { maxCards?: number; maxEstimatedTokens?: number }; wireFormat?: "json"|"standard"|"readable"|"compact"|"agent"|"packed"|"auto" }): { sliceHandle: string; slice?: object; spilloverHandle?: string; sliceEtag: object }
 /** Refresh existing slice (delta only) */
 function sliceRefresh(p: { sliceHandle: string; knownVersion?: string }): { added: object[]; removed: string[]; changed: object[] }
 /** Fetch spillover page */
@@ -123,7 +127,7 @@ function repoStatus(): { status: object }
 /** Get codebase overview */
 function repoOverview(p: { level?: "stats" | "directories" | "full"; ifNoneMatch?: string }): { overview: object; etag: string } | { notModified: true; etag: string }
 /** Refresh index */
-function indexRefresh(p: { mode?: "full" | "incremental" }): { indexed: number; duration: number }
+function indexRefresh(p: { mode: "full" | "incremental"; async?: boolean; includeDiagnostics?: boolean }): { ok: true; repoId: string; versionId?: string; changedFiles?: number; async?: true; operationId?: string; message?: string }
 /** Get policy config */
 function policyGet(): { policy: object }
 /** Set policy config */
@@ -152,7 +156,7 @@ function agentFeedback(p: { versionId: string; sliceHandle: string; usefulSymbol
 /** Query feedback records */
 function agentFeedbackQuery(p: { limit?: number }): { records: object[] }
 /** Push buffer update */
-function bufferPush(p: { eventType: "open"|"change"|"save"|"close"|"checkpoint"; filePath: string; version: number; dirty: boolean; timestamp: string; content?: string }): { accepted: boolean }
+function bufferPush(p: { eventType: "open"|"change"|"save"|"close"|"checkpoint"; filePath: string; content: string; version: number; dirty: boolean; timestamp: string }): { accepted: boolean }
 /** Request buffer checkpoint */
 function bufferCheckpoint(): { checkpointed: boolean }
 /** Get buffer status */
@@ -185,7 +189,7 @@ function dataFilter(p: { input: unknown[]; clauses: Array<{path: string; op: "eq
 /** Sort array elements by a field. Uses 'by' (NOT field/order) */
 function dataSort(p: { input: unknown[]; by: {path: string; direction?: "asc"|"desc"; type?: "string"|"number"|"date"|"boolean"} }): object[]
 /** Render {{mustache}} template strings from object(s) */
-function dataTemplate(p: { input: Record<string, unknown> | unknown[]; template: string; joinWith?: string }): { text: string }
+function dataTemplate(p: { input: Record<string, unknown> | unknown[]; template: string; joinWith?: string }): string
 
 // === Compact Wire Format Decode Guide (sliceBuild with wireFormat: "compact") ===
 // Top-level: wf=wireFormat, wv=wireVersion, vid=versionId, b={mc=maxCards, mt=maxTokens}

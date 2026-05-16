@@ -332,7 +332,10 @@ export class MCPServer {
           try {
             // Pass the parsed (validated + coerced) data to the handler
             const dispatchStartedAt = timer.start();
-            const result = isMetadataOnlyTool(request.params.name)
+            const result = shouldBypassToolDispatch(
+              request.params.name,
+              parseResult.data,
+            )
               ? await tool.handler(parseResult.data, toolContext)
               : await runToolDispatch(
                   () => tool.handler(parseResult.data, toolContext),
@@ -679,6 +682,80 @@ export class MCPServer {
 
 export function isMetadataOnlyTool(name: string): boolean {
   return name === "sdl.action.search" || name === "sdl.manual";
+}
+
+const DIRECT_STATUS_TOOL_NAMES = new Set([
+  "sdl.repo.status",
+  "repo.status",
+  "sdl.buffer.status",
+  "buffer.status",
+  "sdl.policy.get",
+  "policy.get",
+  "sdl.response.get",
+  "response.get",
+  "sdl.usage.stats",
+  "usage.stats",
+]);
+
+const STATUS_GATEWAY_TOOL_NAMES = new Set([
+  "sdl.repo",
+  "sdl.agent",
+  "sdl.code",
+  "sdl.query",
+]);
+
+const STATUS_WORKFLOW_FNS = new Set([
+  "repo.status",
+  "repoStatus",
+  "buffer.status",
+  "bufferStatus",
+  "policy.get",
+  "policyGet",
+  "usage.stats",
+  "usageStats",
+  "response.get",
+  "responseGet",
+  "dataPick",
+  "dataMap",
+  "dataFilter",
+  "dataSort",
+  "dataTemplate",
+  "workflowContinuationGet",
+]);
+
+export function shouldBypassToolDispatch(name: string, args: unknown): boolean {
+  if (isMetadataOnlyTool(name) || DIRECT_STATUS_TOOL_NAMES.has(name)) {
+    return true;
+  }
+  if (STATUS_GATEWAY_TOOL_NAMES.has(name)) {
+    const action = extractStringField(args, "action");
+    return action !== undefined && STATUS_WORKFLOW_FNS.has(action);
+  }
+  if (name !== "sdl.workflow") {
+    return false;
+  }
+  return isStatusOnlyWorkflow(args);
+}
+
+function isStatusOnlyWorkflow(args: unknown): boolean {
+  if (!args || typeof args !== "object") {
+    return false;
+  }
+  const steps = (args as { steps?: unknown }).steps;
+  if (!Array.isArray(steps) || steps.length === 0) {
+    return false;
+  }
+
+  // Keep read-only status workflows visible while an index refresh owns the
+  // normal dispatch slot. Mutating, runtime, and context-building workflow
+  // steps still go through the shared limiter.
+  return steps.every((step) => {
+    if (!step || typeof step !== "object") {
+      return false;
+    }
+    const fn = (step as { fn?: unknown }).fn;
+    return typeof fn === "string" && STATUS_WORKFLOW_FNS.has(fn);
+  });
 }
 
 function extractStringField(args: unknown, field: string): string | undefined {

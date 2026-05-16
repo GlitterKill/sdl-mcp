@@ -204,6 +204,33 @@ describe("sdl.action.search behavior", () => {
     });
   });
 
+  describe("schema summaries", () => {
+    it("surfaces important limits and op-specific plan-handle guidance", () => {
+      invalidateCatalog();
+      const catalog = buildCatalog({ includeSchemas: true });
+
+      const actionSearch = catalog.find((d) => d.action === "action.search");
+      const actionLimit = actionSearch?.schemaSummary?.fields.find(
+        (field) => field.name === "limit",
+      );
+      assert.match(actionLimit?.description ?? "", /Maximum 50/);
+
+      const continuation = catalog.find(
+        (d) => d.action === "workflowContinuationGet",
+      );
+      const continuationLimit = continuation?.schemaSummary?.fields.find(
+        (field) => field.name === "limit",
+      );
+      assert.match(continuationLimit?.description ?? "", /capped at 1000/);
+
+      const file = catalog.find((d) => d.action === "file");
+      const planHandle = file?.schemaSummary?.fields.find(
+        (field) => field.name === "planHandle",
+      );
+      assert.match(planHandle?.description ?? "", /preview\/source window/);
+    });
+  });
+
   describe("catalog structure", () => {
     it("each descriptor has required fields", () => {
       invalidateCatalog();
@@ -211,10 +238,18 @@ describe("sdl.action.search behavior", () => {
       for (const desc of catalog) {
         assert.ok(desc.action, `action should be set for ${desc.fn}`);
         assert.ok(desc.fn, `fn should be set for ${desc.action}`);
-        assert.ok(desc.description, `description should be set for ${desc.action}`);
-        assert.ok(Array.isArray(desc.tags), `tags should be an array for ${desc.action}`);
         assert.ok(
-          desc.kind === "gateway" || desc.kind === "internal" || desc.kind === "meta",
+          desc.description,
+          `description should be set for ${desc.action}`,
+        );
+        assert.ok(
+          Array.isArray(desc.tags),
+          `tags should be an array for ${desc.action}`,
+        );
+        assert.ok(
+          desc.kind === "gateway" ||
+            desc.kind === "internal" ||
+            desc.kind === "meta",
           `kind should be gateway, internal, or meta for ${desc.action}`,
         );
       }
