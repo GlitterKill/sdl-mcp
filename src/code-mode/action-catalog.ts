@@ -671,7 +671,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "repo.status": "Get repository status",
   "repo.overview": "Get codebase overview",
   "index.refresh":
-    "Refresh index. Use async:true from agent workflows unless the caller can tolerate a long foreground run; while async indexing is active, use repo.status to monitor completion before dependent work.",
+    "Refresh index. Use async:true from agent workflows unless the caller can tolerate a long foreground run; while async indexing is active, poll repo.status and wait for completion before dependent work.",
   "policy.get": "Get policy config",
   "policy.set":
     "Set policy config (policyPatch wrapper: maxWindowLines, maxWindowTokens, requireIdentifiers, allowBreakGlass, defaultMinCallConfidence, defaultDenyRaw, budgetCaps)",
