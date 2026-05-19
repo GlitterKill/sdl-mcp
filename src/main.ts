@@ -31,6 +31,7 @@ import {
 } from "./util/logger.js";
 import { ensureConfiguredReposRegistered } from "./startup/bootstrap.js";
 import { recoverStaleDerivedStateOnStartup } from "./startup/derived-state-recovery.js";
+import { startPrefetchPolicy } from "./startup/prefetch-startup.js";
 import { installProcessHandlers } from "./startup/process-handlers.js";
 
 import { resetScorerPool } from "./graph/slice/beam-search-engine.js";
@@ -88,6 +89,7 @@ async function main(): Promise<void> {
 
     await ensureConfiguredReposRegistered(config, log);
     await recoverStaleDerivedStateOnStartup(config, log);
+    await startPrefetchPolicy(config);
 
     // Dynamic imports AFTER migrations - these modules prepare SQL statements
     log("Registering MCP tools...");

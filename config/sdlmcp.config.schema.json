@@ -996,12 +996,47 @@
           "minimum": 0,
           "default": 0,
           "description": "Number of top-fan-in symbols to prefetch on serve start. Default 0 disables startup warming; raise only when you have evidence the warm set is consumed within the 5-minute stale window."
+        },
+        "policy": {
+          "type": "object",
+          "description": "Outcome-trained predictive context policy. Safe mode can suppress, trim, or boost existing prefetch strategies but cannot invent new strategy types.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "mode": { "enum": ["observe", "safe"], "default": "safe" },
+            "minSamples": { "type": "integer", "minimum": 1, "default": 20 },
+            "suppressionWasteRate": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.8 },
+            "boostHitRate": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.35 },
+            "retentionDays": { "type": "integer", "minimum": 1, "default": 14 },
+            "maxPriorityBoost": { "type": "integer", "minimum": 0, "maximum": 100, "default": 25 },
+            "maxBudgetTrimPercent": { "type": "integer", "minimum": 0, "maximum": 100, "default": 50 }
+          },
+          "default": {
+            "enabled": true,
+            "mode": "safe",
+            "minSamples": 20,
+            "suppressionWasteRate": 0.8,
+            "boostHitRate": 0.35,
+            "retentionDays": 14,
+            "maxPriorityBoost": 25,
+            "maxBudgetTrimPercent": 50
+          }
         }
       },
       "default": {
         "enabled": true,
         "maxBudgetPercent": 20,
-        "warmTopN": 0
+        "warmTopN": 0,
+        "policy": {
+          "enabled": true,
+          "mode": "safe",
+          "minSamples": 20,
+          "suppressionWasteRate": 0.8,
+          "boostHitRate": 0.35,
+          "retentionDays": 14,
+          "maxPriorityBoost": 25,
+          "maxBudgetTrimPercent": 50
+        }
       }
     },
     "observability": {

@@ -320,8 +320,14 @@ export async function handleCodeNeedWindow(
     taskType: "code",
     tool: "code.needWindow",
     symbolId: request.symbolId,
+    clientKey: context?.clientKey,
   });
-  consumePrefetchedKey(request.repoId, `card:${request.symbolId}`);
+  consumePrefetchedKey(
+    request.repoId,
+    `card:${request.symbolId}`,
+    "search-cards",
+    context,
+  );
 
   let symbol = await ladybugDb.getSymbol(conn, request.symbolId);
   if (!symbol) {
@@ -958,6 +964,7 @@ export async function handleCodeNeedWindow(
  */
 export async function handleGetSkeleton(
   args: unknown,
+  context?: ToolContext,
 ): Promise<GetSkeletonResponse> {
   const rawSkeletonRequest = args as GetSkeletonRequest;
 
@@ -990,9 +997,15 @@ export async function handleGetSkeleton(
     taskType: "code",
     tool: "code.getSkeleton",
     symbolId: request.symbolId,
+    clientKey: context?.clientKey,
   });
   if (request.symbolId) {
-    consumePrefetchedKey(request.repoId, `card:${request.symbolId}`);
+    consumePrefetchedKey(
+      request.repoId,
+      `card:${request.symbolId}`,
+      "search-cards",
+      context,
+    );
   }
 
   // Enforce policy limits as caps on maxLines/maxTokens
@@ -1157,6 +1170,7 @@ export async function handleGetSkeleton(
  */
 export async function handleGetHotPath(
   args: unknown,
+  context?: ToolContext,
 ): Promise<GetHotPathResponse> {
   const rawHotPathRequest = args as GetHotPathRequest;
 
@@ -1173,8 +1187,14 @@ export async function handleGetHotPath(
     taskType: "code",
     tool: "code.getHotPath",
     symbolId: request.symbolId,
+    clientKey: context?.clientKey,
   });
-  consumePrefetchedKey(request.repoId, `card:${request.symbolId}`);
+  consumePrefetchedKey(
+    request.repoId,
+    `card:${request.symbolId}`,
+    "search-cards",
+    context,
+  );
 
   // Enforce policy limits as caps on maxLines/maxTokens
   const hotPathAppConfig = loadConfig();

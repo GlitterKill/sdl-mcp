@@ -79,6 +79,10 @@ export * from "./ladybug-usage.js";
 // FileSummary operations
 export * from "./ladybug-file-summaries.js";
 
+
+// Predictive prefetch outcome operations
+export * from "./ladybug-prefetch-outcomes.js";
+
 // SCIP ingestion operations
 export * from "./ladybug-scip.js";
 // Semantic enrichment operations

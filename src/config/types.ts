@@ -553,6 +553,28 @@ export const SemanticConfigSchema = z.object({
 
 export type SemanticConfig = z.infer<typeof SemanticConfigSchema>;
 
+const DEFAULT_PREFETCH_POLICY_CONFIG = {
+  enabled: true,
+  mode: "safe" as const,
+  minSamples: 20,
+  suppressionWasteRate: 0.8,
+  boostHitRate: 0.35,
+  retentionDays: 14,
+  maxPriorityBoost: 25,
+  maxBudgetTrimPercent: 50,
+};
+
+export const PrefetchPolicyConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  mode: z.enum(["observe", "safe"]).default("safe"),
+  minSamples: z.number().int().min(1).default(20),
+  suppressionWasteRate: z.number().min(0).max(1).default(0.8),
+  boostHitRate: z.number().min(0).max(1).default(0.35),
+  retentionDays: z.number().int().min(1).default(14),
+  maxPriorityBoost: z.number().int().min(0).max(100).default(25),
+  maxBudgetTrimPercent: z.number().int().min(0).max(100).default(50),
+});
+
 export const PrefetchConfigSchema = z.object({
   enabled: z.boolean().default(true),
   maxBudgetPercent: z.number().int().min(1).max(100).default(20),
@@ -562,6 +584,7 @@ export const PrefetchConfigSchema = z.object({
   // workloads that don't follow the top-fan-in path. Set > 0 only when
   // the warm set is provably consumed.
   warmTopN: z.number().int().min(0).default(0),
+  policy: PrefetchPolicyConfigSchema.default(DEFAULT_PREFETCH_POLICY_CONFIG),
 });
 
 export type PrefetchConfig = z.infer<typeof PrefetchConfigSchema>;

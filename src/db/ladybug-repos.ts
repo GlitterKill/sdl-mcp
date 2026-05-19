@@ -248,6 +248,17 @@ export async function deleteRepo(
       { repoId },
     );
 
+
+    // Clean up predictive prefetch learning state
+    await exec(txConn, `MATCH (p:PrefetchOutcome {repoId: $repoId}) DELETE p`, {
+      repoId,
+    });
+    await exec(
+      txConn,
+      `MATCH (p:PrefetchPolicyAggregate {repoId: $repoId}) DELETE p`,
+      { repoId },
+    );
+
     await exec(
       txConn,
       `MATCH (r:Repo {repoId: $repoId})

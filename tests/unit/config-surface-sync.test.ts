@@ -75,24 +75,82 @@ describe("config surface sync", () => {
   });
 
   it("keeps prefetch defaults aligned across config and generated schema", () => {
-    assert.strictEqual(PrefetchConfigSchema.parse({}).enabled, true);
+    const parsed = PrefetchConfigSchema.parse({});
+    assert.strictEqual(parsed.enabled, true);
+    assert.strictEqual(parsed.policy.enabled, true);
+    assert.strictEqual(parsed.policy.mode, "safe");
+    assert.strictEqual(parsed.policy.minSamples, 20);
+    assert.strictEqual(parsed.policy.maxPriorityBoost, 25);
+    assert.strictEqual(parsed.policy.maxBudgetTrimPercent, 50);
 
     const schema = JSON.parse(
       readFileSync(resolve(repoRoot, "config/sdlmcp.config.schema.json"), "utf8"),
     );
     assert.strictEqual(schema.properties.prefetch.properties.enabled.default, true);
     assert.strictEqual(schema.properties.prefetch.default.enabled, true);
+    assert.strictEqual(
+      schema.properties.prefetch.properties.policy.default.mode,
+      "safe",
+    );
+    assert.strictEqual(schema.properties.prefetch.default.policy.minSamples, 20);
+    assert.strictEqual(schema.properties.prefetch.default.policy.maxPriorityBoost, 25);
+    assert.strictEqual(schema.properties.prefetch.default.policy.maxBudgetTrimPercent, 50);
 
     const sample = JSON.parse(
       readFileSync(resolve(repoRoot, "config/sdlmcp.config.example.json"), "utf8"),
     );
     assert.strictEqual(sample.prefetch.enabled, true);
+    assert.strictEqual(sample.prefetch.policy.mode, "safe");
+    assert.strictEqual(sample.prefetch.policy.maxPriorityBoost, 25);
+    assert.strictEqual(sample.prefetch.policy.maxBudgetTrimPercent, 50);
 
-    const serveSource = readFileSync(
-      resolve(repoRoot, "src/cli/commands/serve.ts"),
+    const docs = readFileSync(
+      resolve(repoRoot, "docs/configuration-reference.md"),
       "utf8",
     );
-    assert.match(serveSource, /config\.prefetch\?\.enabled \?\? true/);
+    assert.match(docs, /maxPriorityBoost/);
+    assert.match(docs, /maxBudgetTrimPercent/);
+
+    const adminMetadata = readFileSync(
+      resolve(repoRoot, "src/config/admin-metadata.ts"),
+      "utf8",
+    );
+    for (const field of [
+      "suppressionWasteRate",
+      "boostHitRate",
+      "retentionDays",
+      "maxPriorityBoost",
+      "maxBudgetTrimPercent",
+    ]) {
+      assert.match(adminMetadata, new RegExp(`/prefetch/policy/${field}`));
+    }
+
+    const prefetchStartupSource = readFileSync(
+      resolve(repoRoot, "src/startup/prefetch-startup.ts"),
+      "utf8",
+    );
+    assert.match(prefetchStartupSource, /config\.prefetch\?\.enabled \?\? true/);
+    assert.match(
+      prefetchStartupSource,
+      /configurePrefetchPolicy\(config\.prefetch\?\.policy \?\? \{\}\)/,
+    );
+  });
+
+  it("uses the shared prefetch startup helper from serve and direct stdio entrypoints", () => {
+    const serveSource = readFileSync(
+      join(process.cwd(), "src/cli/commands/serve.ts"),
+      "utf8",
+    );
+    const mainSource = readFileSync(join(process.cwd(), "src/main.ts"), "utf8");
+    const helperSource = readFileSync(
+      join(process.cwd(), "src/startup/prefetch-startup.ts"),
+      "utf8",
+    );
+
+    assert.match(serveSource, /startPrefetchPolicy/);
+    assert.match(mainSource, /startPrefetchPolicy/);
+    assert.match(helperSource, /hydratePrefetchPolicyFromDb/);
+    assert.match(helperSource, /warmPrefetchOnServeStart/);
   });
 
   it("keeps repo post-index session timeout surfaced in config docs and schema", () => {

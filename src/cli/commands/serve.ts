@@ -14,10 +14,7 @@ import { closeLadybugDb, configurePool } from "../../db/ladybug.js";
 import { persistUsageSnapshot } from "../../db/ladybug-usage.js";
 import { createWalCheckpointMaintenance } from "../../db/wal-maintenance.js";
 import { printBanner } from "../../util/banner.js";
-import {
-  configurePrefetch,
-  warmPrefetchOnServeStart,
-} from "../../graph/prefetch.js";
+import { startPrefetchPolicy } from "../../startup/prefetch-startup.js";
 import {
   configureDefaultLiveIndexCoordinator,
   getDefaultLiveIndexCoordinator,
@@ -179,23 +176,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     console.error(message);
   });
 
-  configurePrefetch({
-    enabled: config.prefetch?.enabled ?? true,
-    maxBudgetPercent: config.prefetch?.maxBudgetPercent ?? 20,
-  });
-  if (config.prefetch?.enabled ?? true) {
-    // warmTopN defaults to 0 to avoid the "100% wasted prefetch" pattern
-    // observed when no caller actually requests the warmed top-fan-in
-    // symbols within the 5-minute stale window. Operators can set
-    // prefetch.warmTopN > 0 in config when they have evidence the warm set
-    // is consumed (e.g. a CI agent that always opens the same hot files).
-    const warmTopN = config.prefetch?.warmTopN ?? 0;
-    if (warmTopN > 0) {
-      for (const repo of config.repos) {
-        warmPrefetchOnServeStart(repo.repoId, warmTopN);
-      }
-    }
-  }
+  await startPrefetchPolicy(config);
 
   // Pre-warm the local embeddings ONNX session if semantic search is on.
   // First semantic call paid ~2.7s for session creation; subsequent calls

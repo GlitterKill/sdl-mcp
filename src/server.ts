@@ -55,6 +55,12 @@ export interface ToolContext {
   signal: AbortSignal;
   /** Set from transport session for HTTP; undefined for stdio (defaults to "stdio" in hooks). */
   sessionId?: string;
+  /** Stable, low-cardinality client identity for outcome-trained policies. */
+  clientKey?: string;
+  /** Inferred task class used to scope predictive context learning. */
+  taskType?: string;
+  /** Transport request metadata, kept for telemetry and policy attribution only. */
+  requestInfo?: unknown;
 }
 
 export type PostDispatchHook = (
@@ -63,6 +69,62 @@ export type PostDispatchHook = (
   result: unknown,
   context: ToolContext,
 ) => Promise<void>;
+
+function sanitizeClientKeyPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_.:-]+/g, "_").slice(0, 80);
+}
+
+function classifyUserAgent(userAgent: string): string {
+  const lower = userAgent.toLowerCase();
+  if (lower.includes("codex")) return "codex";
+  if (lower.includes("claude")) return "claude";
+  if (lower.includes("cursor")) return "cursor";
+  if (lower.includes("vscode") || lower.includes("visual studio code")) return "vscode";
+  if (lower.includes("cline")) return "cline";
+  const firstProduct = userAgent.split(/\s+/)[0] ?? "unknown";
+  return sanitizeClientKeyPart(firstProduct.split("/")[0] ?? firstProduct) || "unknown";
+}
+
+export function deriveClientKey(sessionId?: string, requestInfo?: unknown): string {
+  const explicitClient = readRequestHeader(requestInfo, "x-sdl-client");
+  if (explicitClient) {
+    return `client:${sanitizeClientKeyPart(explicitClient)}`;
+  }
+  const userAgent = readRequestHeader(requestInfo, "user-agent");
+  if (userAgent) {
+    return `ua:${classifyUserAgent(userAgent)}`;
+  }
+  if (typeof sessionId === "string" && sessionId.length > 0) {
+    return `session:${sanitizeClientKeyPart(sessionId)}`;
+  }
+  return "stdio";
+}
+
+function readRequestHeader(requestInfo: unknown, name: string): string | undefined {
+  if (!requestInfo || typeof requestInfo !== "object") return undefined;
+  const headers = (requestInfo as { headers?: unknown }).headers;
+  const lowerName = name.toLowerCase();
+  if (headers && typeof (headers as { get?: unknown }).get === "function") {
+    const value = (headers as { get: (key: string) => unknown }).get(name);
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+  }
+  if (headers && typeof headers === "object") {
+    for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+      if (key.toLowerCase() !== lowerName) continue;
+      if (typeof value === "string") return value;
+      if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+    }
+  }
+  return undefined;
+}
+
+function inferTaskType(toolName: string, args: Record<string, unknown>): string {
+  const explicit = extractStringField(args, "taskType");
+  if (explicit) return explicit;
+  const normalized = toolName.replace(/^sdl\./, "");
+  const root = normalized.split(".")[0];
+  return (root || "general").replace(/[^a-zA-Z0-9_.:-]+/g, "_").slice(0, 64);
+}
 
 interface ToolHandler {
   (args: unknown, context?: ToolContext): Promise<unknown>;
@@ -243,11 +305,17 @@ export class MCPServer {
     this.server.setRequestHandler(
       CallToolRequestSchema,
       async (request, extra) => {
+        const extraContext = extra as typeof extra & {
+          requestInfo?: unknown;
+          sessionId?: string;
+        };
         const toolContext: ToolContext = {
           progressToken: extra._meta?.progressToken,
           sendNotification: extra.sendNotification,
           signal: extra.signal,
-          sessionId: extra.sessionId,
+          sessionId: extraContext.sessionId,
+          clientKey: deriveClientKey(extraContext.sessionId, extraContext.requestInfo),
+          requestInfo: extraContext.requestInfo,
         };
 
         try {
@@ -281,6 +349,10 @@ export class MCPServer {
           const includeDiagnostics = wantsTimingDiagnostics(normalizedArgs);
           const repoId = extractStringField(normalizedArgs, "repoId");
           const symbolId = extractStringField(normalizedArgs, "symbolId");
+          toolContext.taskType = inferTaskType(
+            request.params.name,
+            normalizedArgs as Record<string, unknown>,
+          );
 
           // Centralized input validation: parse against the registered Zod schema
           // before dispatching to the handler. This ensures all tools receive
@@ -317,6 +389,8 @@ export class MCPServer {
               durationMs: Date.now() - start,
               repoId,
               symbolId,
+              clientKey: toolContext.clientKey,
+              taskType: toolContext.taskType,
               diagnostics: extractTimingDiagnostics(responseForLog),
             });
             return {
@@ -547,6 +621,8 @@ export class MCPServer {
               durationMs: Date.now() - start,
               repoId,
               symbolId,
+              clientKey: toolContext.clientKey,
+              taskType: toolContext.taskType,
               tokensUsed: tokensUsedForObs,
               tokensSaved: tokensSavedForObs,
               diagnostics: extractTimingDiagnostics(finalResult),
@@ -587,6 +663,8 @@ export class MCPServer {
               durationMs: Date.now() - start,
               repoId,
               symbolId,
+              clientKey: toolContext.clientKey,
+              taskType: toolContext.taskType,
               diagnostics: extractTimingDiagnostics(responseForLog),
             });
             // Return projected error content instead of throwing so clients get

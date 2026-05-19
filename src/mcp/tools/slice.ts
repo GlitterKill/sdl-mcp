@@ -293,6 +293,7 @@ async function handleSliceBuildInternal(
     taskType: "slice",
     tool: "slice.build",
     symbolId: resolvedEntrySymbols?.[0],
+    clientKey: context?.clientKey,
   });
 
   const buildSliceWithTracing = async (): Promise<SliceBuildResponse> => {
@@ -305,7 +306,12 @@ async function handleSliceBuildInternal(
 
     if (resolvedEntrySymbols && resolvedEntrySymbols.length > 0) {
       for (const symbolId of resolvedEntrySymbols) {
-        consumePrefetchedKey(repoId, `slice:${symbolId}`);
+        consumePrefetchedKey(
+          repoId,
+          `slice:${symbolId}`,
+          "slice-frontier",
+          context,
+        );
       }
     }
     const conn = await getLadybugConn();
@@ -434,7 +440,7 @@ async function handleSliceBuildInternal(
       resolvedEntrySymbols && resolvedEntrySymbols.length > 0
         ? resolvedEntrySymbols
         : slice.cards.slice(0, 12).map((card) => card.symbolId);
-    prefetchSliceFrontier(repoId, frontierSeeds);
+    prefetchSliceFrontier(repoId, frontierSeeds, context);
 
     const handle = generateSliceHandle();
     const sliceHash = generateSliceHash(slice);

@@ -40,11 +40,35 @@ export {
   prefetchFileExports,
   warmPrefetchOnServeStart,
   consumePrefetchedKey,
+  consumePrefetchedKeyWithOutcome,
   getPrefetchStats,
 } from "./prefetch.js";
 
 // Prefetch model
 export { recordToolTrace } from "./prefetch-model.js";
+
+
+export {
+  configurePrefetchPolicy,
+  getPrefetchPolicyAggregate,
+  getPrefetchPolicyConfig,
+  getPrefetchPolicyDecision,
+  getPrefetchOutcomeSampleCount,
+  getTopPrefetchStrategySummaries,
+  hydratePrefetchPolicyFromDb,
+  recordPrefetchOutcome,
+} from "./prefetch-outcomes.js";
+export type {
+  PrefetchOutcomeEvent,
+  PrefetchOutcomeKind,
+  PrefetchPolicyAggregate,
+  PrefetchPolicyConfig,
+  PrefetchPolicyDecision,
+  PrefetchPolicyMode,
+  PrefetchResourceKind,
+  PrefetchStrategySummary,
+  PublicPrefetchStrategySummary,
+} from "./prefetch-outcomes.js";
 
 // Score
 export * as score from "./score.js";

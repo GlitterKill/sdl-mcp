@@ -48,6 +48,11 @@ describe("repo status health fields", () => {
         modelEnabled: true,
         strategyMetrics: [],
         deterministicFallback: false,
+        policyMode: "safe",
+        outcomeSamples: 0,
+        suppressedPrefetch: 0,
+        acceptedPrefetch: 0,
+        topStrategies: [],
       },
       liveIndexStatus: {
         enabled: true,
@@ -75,6 +80,8 @@ describe("repo status health fields", () => {
     assert.strictEqual(parsed.prefetchStats.modelEnabled, true);
     assert.deepStrictEqual(parsed.prefetchStats.strategyMetrics, []);
     assert.strictEqual(parsed.prefetchStats.deterministicFallback, false);
+    assert.strictEqual(parsed.prefetchStats.policyMode, "safe");
+    assert.deepStrictEqual(parsed.prefetchStats.topStrategies, []);
     assert.strictEqual(parsed.liveIndexStatus?.enabled, true);
     assert.strictEqual(parsed.liveIndexStatus?.lastCheckpointResult, "success");
   });

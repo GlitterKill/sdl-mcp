@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added outcome-trained predictive context policy storage and observability: prefetch outcomes now persist to LadybugDB, aggregate by repo/task/client/strategy/resource kind, and surface safe-mode suppression/boost metrics in `repo.status` and `/ui/observability`.
+
 ### Changed
 
 ### Fixed

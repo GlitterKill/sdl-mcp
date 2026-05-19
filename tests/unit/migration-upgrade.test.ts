@@ -626,6 +626,91 @@ describe("migration: upgrade existing DB", { skip: !ladybugAvailable }, () => {
     ]);
   });
 
+  it("v18 -> latest: m019 creates predictive prefetch outcome tables", async () => {
+    mkdirSync(testRoot, { recursive: true });
+    const dbPath = join(testRoot, "v18-prefetch-outcomes.lbug");
+    const kuzu = await import("kuzu");
+    const db = new kuzu.Database(dbPath);
+    const seedConn = new kuzu.Connection(db);
+    const now = new Date().toISOString();
+
+    for (const stmt of [
+      `CREATE NODE TABLE IF NOT EXISTS Repo (repoId STRING PRIMARY KEY, rootPath STRING, configJson STRING, createdAt STRING)`,
+      `CREATE NODE TABLE IF NOT EXISTS SchemaVersion (id STRING PRIMARY KEY, schemaVersion INT64, createdAt STRING, updatedAt STRING)`,
+      `CREATE (r:Repo {repoId: 'repo-1', rootPath: '/repo', configJson: '{}', createdAt: '${now}'})`,
+      `CREATE (sv:SchemaVersion {id: 'current', schemaVersion: 18, createdAt: '${now}', updatedAt: '${now}'})`,
+    ]) {
+      closeResult(await seedConn.query(stmt));
+    }
+    await seedConn.close();
+    await db.close();
+
+    await initLadybugDb(dbPath);
+    const conn = await getLadybugConn();
+    const version = await getSchemaVersion(conn);
+    assert.strictEqual(version, LADYBUG_SCHEMA_VERSION);
+    assert.ok(LADYBUG_SCHEMA_VERSION >= 19);
+
+    await ladybugQueries.upsertPrefetchOutcomeAndAggregate(
+      conn,
+      {
+        outcomeId: "outcome-1",
+        prefetchId: "prefetch-1",
+        aggregateKey: "repo-1|implement|client-a|search-cards|card",
+        repoId: "repo-1",
+        taskType: "implement",
+        clientKey: "client-a",
+        strategy: "search-cards",
+        resourceKind: "card",
+        resourceKey: "card:symbol-a",
+        outcome: "offered",
+        latencySavedMs: 0,
+        tokensSavedEstimate: 0,
+        plannedCost: 220,
+        createdAt: now,
+      },
+      {
+        aggregateKey: "repo-1|implement|client-a|search-cards|card",
+        repoId: "repo-1",
+        taskType: "implement",
+        clientKey: "client-a",
+        strategy: "search-cards",
+        resourceKind: "card",
+        offered: 1,
+        used: 0,
+        accepted: 0,
+        wasted: 0,
+        suppressed: 0,
+        latencySavedMs: 0,
+        tokensSavedEstimate: 0,
+        score: 0,
+        scoreEwma: 0,
+        hitRateEwma: 0,
+        acceptedRateEwma: 0,
+        wasteRateEwma: 0,
+        ewmaSamples: 0,
+        lastOutcomeAt: now,
+        updatedAt: now,
+      },
+    );
+
+    const result = await conn.query(
+      `MATCH (o:PrefetchOutcome {outcomeId: 'outcome-1'})
+       MATCH (a:PrefetchPolicyAggregate {aggregateKey: 'repo-1|implement|client-a|search-cards|card'})
+       RETURN o.prefetchId AS prefetchId, a.offered AS offered`,
+    );
+    const qr = Array.isArray(result) ? result[0] : result;
+    const rows = (await qr.getAll()) as Array<{
+      prefetchId: unknown;
+      offered: unknown;
+    }>;
+    qr.close();
+
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].prefetchId, "prefetch-1");
+    assert.strictEqual(Number(rows[0].offered), 1);
+  });
+
   it("v8 -> latest: m011 adds pageRank/kCore columns to Metrics", async () => {
     mkdirSync(testRoot, { recursive: true });
     const dbPath = join(testRoot, "v8-m011-centrality.lbug");

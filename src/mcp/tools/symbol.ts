@@ -39,6 +39,7 @@ import {
   type SymbolRefResolution,
 } from "../../util/resolve-symbol-ref.js";
 import { DatabaseError, NotFoundError, ValidationError } from "../errors.js";
+import type { ToolContext } from "../../server.js";
 
 /**
  * Sort search results by exact match priority: exact name > starts-with > other.
@@ -161,6 +162,7 @@ export function shouldUseLexicalFastPathForSymbolSearch(
 
 export async function handleSymbolSearch(
   args: unknown,
+  context?: ToolContext,
 ): Promise<SymbolSearchResponse> {
   const startedAt = Date.now();
   const request = args as SymbolSearchRequest;
@@ -184,6 +186,7 @@ export async function handleSymbolSearch(
     repoId: request.repoId,
     taskType: "search",
     tool: "symbol.search",
+    clientKey: context?.clientKey,
   });
 
   const conn = await getLadybugConn();
@@ -457,7 +460,7 @@ export async function handleSymbolSearch(
   // Prefetch cards for top search results (anticipating getCard calls)
   const topSymbolIds = results.slice(0, 5).map((r) => r.symbolId);
   if (topSymbolIds.length > 0) {
-    prefetchCardsForSymbols(request.repoId, topSymbolIds);
+    prefetchCardsForSymbols(request.repoId, topSymbolIds, context);
   }
 
   logSemanticSearchTelemetry({
@@ -743,12 +746,18 @@ async function buildCardsForSymbolIds(
     includeResolutionMetadata?: boolean;
     includeProcesses?: boolean;
   },
+  context?: ToolContext,
 ): Promise<{
   cards: Awaited<ReturnType<typeof buildCardForSymbol>>[];
   symbolMap: Map<string, ladybugDb.SymbolRow>;
 }> {
   for (const symbolId of input.symbolIds) {
-    consumePrefetchedKey(input.repoId, `card:${symbolId}`);
+    consumePrefetchedKey(
+      input.repoId,
+      `card:${symbolId}`,
+      "search-cards",
+      context,
+    );
   }
 
   const symbolMap = await ladybugDb.getSymbolsByIds(conn, input.symbolIds);
@@ -782,6 +791,7 @@ async function buildCardsForSymbolIds(
  */
 export async function handleSymbolGetCard(
   args: unknown,
+  context?: ToolContext,
 ): Promise<SymbolGetCardResponse | NotModifiedResponse> {
   const request = SymbolGetCardRequestSchema.parse(args);
 
@@ -789,7 +799,7 @@ export async function handleSymbolGetCard(
   const isBatch =
     request.symbolIds !== undefined || request.symbolRefs !== undefined;
   if (isBatch) {
-    return handleBatchCards(request);
+    return handleBatchCards(request, context);
   }
 
   // Single symbol lookup
@@ -814,8 +824,9 @@ export async function handleSymbolGetCard(
     taskType: "card",
     tool: "symbol.getCard",
     symbolId,
+    clientKey: context?.clientKey,
   });
-  consumePrefetchedKey(repoId, `card:${symbolId}`);
+  consumePrefetchedKey(repoId, `card:${symbolId}`, "search-cards", context);
 
   const result = await buildCardForSymbol(repoId, symbolId, ifNoneMatch, {
     minCallConfidence,
@@ -828,7 +839,7 @@ export async function handleSymbolGetCard(
   }
 
   // Prefetch edge targets for anticipated slice.build
-  prefetchSliceFrontier(repoId, [symbolId]);
+  prefetchSliceFrontier(repoId, [symbolId], context);
 
   const response = { card: result };
   const symbol = await ladybugDb.getSymbol(conn, symbolId);
@@ -842,6 +853,7 @@ export async function handleSymbolGetCard(
  */
 async function handleBatchCards(
   request: SymbolGetCardRequest,
+  context?: ToolContext,
 ): Promise<SymbolGetCardResponse> {
   const {
     repoId,
@@ -859,13 +871,17 @@ async function handleBatchCards(
   }
 
   if (symbolIds) {
-    const { cards, symbolMap } = await buildCardsForSymbolIds(conn, {
-      repoId,
-      symbolIds,
-      knownEtags,
-      minCallConfidence,
-      includeResolutionMetadata,
-    });
+    const { cards, symbolMap } = await buildCardsForSymbolIds(
+      conn,
+      {
+        repoId,
+        symbolIds,
+        knownEtags,
+        minCallConfidence,
+        includeResolutionMetadata,
+      },
+      context,
+    );
     const fileIds = [
       ...new Set(Array.from(symbolMap.values()).map((symbol) => symbol.fileId)),
     ];
@@ -890,13 +906,17 @@ async function handleBatchCards(
   let cards: Awaited<ReturnType<typeof buildCardForSymbol>>[] = [];
   let fileIds: string[] = [];
   if (resolvedSymbolIds.length > 0) {
-    const built = await buildCardsForSymbolIds(conn, {
-      repoId,
-      symbolIds: resolvedSymbolIds,
-      knownEtags,
-      minCallConfidence,
-      includeResolutionMetadata,
-    });
+    const built = await buildCardsForSymbolIds(
+      conn,
+      {
+        repoId,
+        symbolIds: resolvedSymbolIds,
+        knownEtags,
+        minCallConfidence,
+        includeResolutionMetadata,
+      },
+      context,
+    );
 
     cards = built.cards;
     fileIds = [

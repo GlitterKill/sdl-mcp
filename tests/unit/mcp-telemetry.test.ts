@@ -114,6 +114,26 @@ describe("MCP telemetry", () => {
       assert.equal(parsed.response.symbols.length, 100);
       assert.equal(parsed.response.symbols.sample.length, 5);
     });
+
+    it("includes client and task attribution in audit details", () => {
+      const event: ToolCallEvent = {
+        tool: "sdl.symbol.search",
+        request: { query: "prefetch" },
+        response: { symbols: [] },
+        durationMs: 12,
+        repoId: "test-repo",
+        clientKey: "request:codex",
+        taskType: "implement",
+      };
+
+      const parsed = JSON.parse(buildToolCallAuditDetailsJson(event)) as {
+        clientKey?: string;
+        taskType?: string;
+      };
+
+      assert.equal(parsed.clientKey, "request:codex");
+      assert.equal(parsed.taskType, "implement");
+    });
   });
 
   describe("logCodeWindowDecision", () => {

@@ -32,6 +32,23 @@ describe("Aggregator", () => {
     assert.equal(cache.overallHitRatePct, 50);
   });
 
+  it("includes tool-call token usage in token-efficiency totals", () => {
+    const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
+    agg.recordToolCall({
+      tool: "sdl.context",
+      request: {},
+      response: {},
+      durationMs: 25,
+      tokensUsed: 100,
+      tokensSaved: 40,
+    });
+
+    const { tokenEfficiency } = agg.getSnapshot(REPO);
+    assert.equal(tokenEfficiency.totalUsed, 100);
+    assert.equal(tokenEfficiency.totalSaved, 40);
+    assert.equal(tokenEfficiency.savingsRatio, 40 / 140);
+  });
+
   it("aggregates packed-wire byte savings", () => {
     const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
     agg.recordPackedWire({
@@ -353,5 +370,39 @@ describe("Aggregator", () => {
     const { postIndexSession } = agg.getSnapshot(REPO);
     assert.equal(postIndexSession.totalSessions, 0);
     assert.equal(postIndexSession.maxDurationMs, 0);
+  });
+
+  it("surfaces predictive context aggregates from prefetch telemetry", () => {
+    const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
+    agg.recordPrefetch({
+      repoId: REPO,
+      hitRate: 0.4,
+      wasteRate: 0.25,
+      avgLatencyReductionMs: 35,
+      queueDepth: 2,
+      policyMode: "safe",
+      outcomeSamples: 24,
+      suppressedPrefetch: 3,
+      acceptedPrefetch: 7,
+      topStrategies: [
+        {
+          strategy: "search-cards",
+          resourceKind: "card",
+          samples: 24,
+          hitRate: 0.4,
+          acceptedRate: 0.3,
+          wasteRate: 0.25,
+          score: 0.42,
+          suppressed: 3,
+        },
+      ],
+    });
+
+    const { predictiveContext } = agg.getSnapshot(REPO);
+    assert.equal(predictiveContext.policyMode, "safe");
+    assert.equal(predictiveContext.outcomeSamples, 24);
+    assert.equal(predictiveContext.hitRatePct, 40);
+    assert.equal(predictiveContext.wasteRatePct, 25);
+    assert.equal(predictiveContext.topStrategies[0]?.strategy, "search-cards");
   });
 });

@@ -23,7 +23,7 @@ in V1 as:
 
 - **HTTP REST + SSE APIs** under `/api/observability/*` (snapshot, timeseries, beam-explain, stream)
 - **Web UI** at `/ui/observability` with a GlitterKill dark operational theme, a triage-first
-  responsive layout, 12 metric panels, and a System Stats toggle for raw process counters
+  responsive layout, 13 metric panels, and a System Stats toggle for raw process counters
 - **Per-repo aggregation** of every existing telemetry event plus new probes for the DB write
   pool, indexer drain, CPU, RSS, heap, and event-loop lag
 
@@ -317,6 +317,23 @@ Hybrid retrieval pipeline (FTS + vector + PPR + RRF fusion).
 | `candidateCountPerSource` | `Record<string, number>` | Volume of candidates per source — `fts`, `vector`, `ppr`, `hybrid`, etc. Imbalance suggests a mis-tuned source. |
 | `byRetrievalType`         | `Record<string, number>` | Counts by call site (`context`, `search`, ...).                                                                 |
 | `emptyResultCount`        | number                   | Number of retrievals returning zero results. A rising number is an early warning for index drift.               |
+
+### `predictiveContext: PredictiveContextMetrics`
+
+Outcome-trained prefetch policy state. This is aggregate-only: detailed prefetch
+outcome IDs stay in logs or `_meta`, while user/model-visible responses expose
+counts, rates, and strategy summaries.
+
+| Field                   | Type                     | Meaning                                                                 |
+| :---------------------- | :----------------------- | :---------------------------------------------------------------------- |
+| `policyMode`            | `"disabled" \| "observe" \| "safe"` | Current predictive policy mode. `safe` can suppress or boost only existing strategies. |
+| `outcomeSamples`        | number                   | Persisted/offered outcome sample count in the current policy view.      |
+| `suppressedPrefetch`    | number                   | Total prefetch candidates suppressed by the learned safe policy.        |
+| `acceptedPrefetch`      | number                   | Prefetched resources later accepted/consumed by a caller.               |
+| `hitRatePct`            | number 0-100             | Cache hit rate sampled from `repo.status.prefetchStats`.                |
+| `wasteRatePct`          | number 0-100             | Expired or otherwise wasted prefetch ratio.                             |
+| `avgLatencyReductionMs` | number                   | Estimated latency reduction for accepted prefetches.                    |
+| `topStrategies`         | array                    | Top strategy/resource-kind aggregates with score, hit, accept, and waste rates. |
 
 ### `beam: BeamSummary`
 

@@ -270,6 +270,26 @@ function updateCache(c) {
   renderSparkline(panelField(panel, "hitRateSpark"), state.hitRateHistory);
 }
 
+function updatePredictiveContext(p) {
+  const panel = $('[data-panel="predictiveContext"]');
+  if (!panel || !p) return;
+  setVal(panel, "policyMode", (p.policyMode || "disabled").toUpperCase());
+  setVal(panel, "outcomeSamples", fmtNum(p.outcomeSamples));
+  setVal(panel, "hitRatePct", fmtPct(p.hitRatePct, 1));
+  setVal(panel, "wasteRatePct", fmtPct(p.wasteRatePct, 1));
+  setVal(panel, "acceptedPrefetch", fmtNum(p.acceptedPrefetch));
+  setVal(panel, "suppressedPrefetch", fmtNum(p.suppressedPrefetch));
+  setVal(panel, "avgLatencyReductionMs", fmtMs(p.avgLatencyReductionMs));
+  const entries = (p.topStrategies || []).map((strategy) => ({
+    key: `${strategy.strategy}:${strategy.resourceKind}`,
+    value: strategy.score ?? 0,
+  }));
+  renderBarList(panelField(panel, "topStrategies"), entries, {
+    valueFormatter: (v) => fmtNum(v, 2),
+    limit: 5,
+  });
+}
+
 function updateRetrieval(r) {
   const panel = $('[data-panel="retrieval"]');
   if (!panel || !r) return;
@@ -576,6 +596,7 @@ function applySnapshot(snap) {
   try {
     updateBottleneck(snap.bottleneck);
     updateCache(snap.cache);
+    updatePredictiveContext(snap.predictiveContext);
     updateRetrieval(snap.retrieval);
     updateBeam(snap.beam);
     updateIndexing(snap.indexing);
@@ -877,9 +898,9 @@ function initDashboardLayoutEditor() {
   const defaults = {
     bottleneck: [1, 2, 6, 2], health: [7, 2, 3, 2], latency: [10, 2, 3, 2],
     tokenEfficiency: [1, 4, 6, 2], retrieval: [7, 4, 3, 2], cache: [10, 4, 3, 2],
-    beam: [1, 6, 4, 2], indexing: [5, 6, 4, 2], ppr: [9, 6, 4, 2],
-    scip: [1, 8, 3, 2], postIndex: [4, 8, 3, 2], toolVolume: [7, 8, 6, 2],
-    resources: [1, 10, 12, 2],
+    predictiveContext: [1, 6, 4, 2], beam: [5, 6, 4, 2], indexing: [9, 6, 4, 2],
+    ppr: [1, 8, 4, 2], scip: [5, 8, 4, 2], postIndex: [9, 8, 4, 2],
+    toolVolume: [1, 10, 6, 2], resources: [7, 10, 6, 2],
   };
   const storageKey = "sdl-observability-panel-layout-v2";
   const mobile = window.matchMedia("(max-width: 720px)");

@@ -989,33 +989,37 @@ table.per-encoder td.enc {
   order: 6;
 }
 
-[data-panel="beam"] {
+[data-panel="predictiveContext"] {
   order: 7;
 }
 
-[data-panel="indexing"] {
+[data-panel="beam"] {
   order: 8;
 }
 
-[data-panel="ppr"] {
+[data-panel="indexing"] {
   order: 9;
 }
 
-[data-panel="scip"] {
+[data-panel="ppr"] {
   order: 10;
 }
 
-[data-panel="postIndex"] {
+[data-panel="scip"] {
   order: 11;
 }
 
-[data-panel="toolVolume"] {
+[data-panel="postIndex"] {
   order: 12;
+}
+
+[data-panel="toolVolume"] {
+  order: 13;
   grid-column: span 6;
 }
 
 .panel-system {
-  order: 13;
+  order: 14;
 }
 
 .panel-head h2 {

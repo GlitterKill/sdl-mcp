@@ -117,7 +117,9 @@
     "enabled": true,
     "provider": "local",
     "model": "jina-embeddings-v2-base-code",
-    "additionalModels": ["nomic-embed-text-v1.5"],
+    "additionalModels": [
+      "nomic-embed-text-v1.5"
+    ],
     "modelCacheDir": null,
     "generateSummaries": false,
     "summaryProvider": null,
@@ -132,7 +134,9 @@
     "fileSummaryEmbeddingMaxChars": 4096,
     "embeddingsSequential": false,
     "modelVariant": "default",
-    "executionProviders": ["cpu"],
+    "executionProviders": [
+      "cpu"
+    ],
     "retrieval": {
       "mode": "hybrid",
       "extensionsOptional": true,
@@ -187,7 +191,17 @@
   "prefetch": {
     "enabled": true,
     "maxBudgetPercent": 20,
-    "warmTopN": 0
+    "warmTopN": 0,
+    "policy": {
+      "enabled": true,
+      "mode": "safe",
+      "minSamples": 20,
+      "suppressionWasteRate": 0.8,
+      "boostHitRate": 0.35,
+      "retentionDays": 14,
+      "maxPriorityBoost": 25,
+      "maxBudgetTrimPercent": 50
+    }
   },
   "tracing": {
     "enabled": true,
@@ -223,7 +237,12 @@
   },
   "runtime": {
     "enabled": true,
-    "allowedRuntimes": ["node", "typescript", "python", "shell"],
+    "allowedRuntimes": [
+      "node",
+      "typescript",
+      "python",
+      "shell"
+    ],
     "allowedExecutables": [],
     "maxDurationMs": 30000,
     "maxStdoutBytes": 1048576,
@@ -290,5 +309,10 @@
   },
   "memory": {
     "enabled": false
+  },
+  "$": {
+    "prefetch": {
+      "policy": "{\"enabled\":true,\"mode\":\"safe\",\"minSamples\":20,\"suppressionWasteRate\":0.8,\"boostHitRate\":0.35,\"retentionDays\":14,\"maxPriorityBoost\":25,\"maxBudgetTrimPercent\":50}"
+    }
   }
 }

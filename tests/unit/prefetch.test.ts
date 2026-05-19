@@ -3,19 +3,43 @@ import assert from "node:assert";
 import {
   configurePrefetch,
   consumePrefetchedKey,
+  consumePrefetchedKeyWithOutcome,
   getPrefetchStats,
+  _setPrefetchEntryCreatedAtForTesting,
+  prefetchCardsForSymbols,
   prefetchSliceFrontier,
 } from "../../dist/graph/prefetch.js";
+
 import {
   trainPrefetchModel,
   predictNextTool,
   configureGating,
   resetModel,
 } from "../../dist/graph/prefetch-model.js";
+import {
+  configurePrefetchPolicy,
+  getPrefetchPolicyAggregate,
+  resetPrefetchOutcomeStateForTests,
+} from "../../dist/graph/prefetch-outcomes.js";
+
+function waitForPrefetchQueue(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+}
 
 describe("prefetch pipeline", () => {
   beforeEach(() => {
     resetModel();
+    resetPrefetchOutcomeStateForTests();
+    configurePrefetchPolicy({
+      enabled: true,
+      mode: "safe",
+      minSamples: 20,
+      suppressionWasteRate: 0.8,
+      boostHitRate: 0.35,
+      retentionDays: 14,
+    });
     configureGating({
       enabled: true,
       minSamplesForPrediction: 2,
@@ -40,6 +64,153 @@ describe("prefetch pipeline", () => {
     prefetchSliceFrontier(repoId, []);
     const hit = consumePrefetchedKey(repoId, "card:missing");
     assert.strictEqual(typeof hit, "boolean");
+    assert.strictEqual(hit, false);
+  });
+
+  it("keeps boolean-compatible consume API and exposes attributed outcomes separately", () => {
+    const repoId = "prefetch-outcome-api";
+    configurePrefetch({ enabled: true, maxBudgetPercent: 20 });
+
+    const miss = consumePrefetchedKey(repoId, "card:missing");
+    assert.equal(miss, false);
+
+    const missOutcome = consumePrefetchedKeyWithOutcome(repoId, "card:missing");
+    assert.equal(missOutcome.hit, false);
+    assert.equal(missOutcome.outcome, "miss");
+  });
+
+  it("returns attributed consume outcomes and counts stale entries as waste once", () => {
+    const repoId = "prefetch-stale-once";
+    configurePrefetch({ enabled: true, maxBudgetPercent: 20 });
+
+    prefetchSliceFrontier(repoId, []);
+    _setPrefetchEntryCreatedAtForTesting(
+      repoId,
+      "card:missing",
+      Date.now() - 10 * 60_000,
+    );
+
+    const first = getPrefetchStats(repoId);
+    const second = getPrefetchStats(repoId);
+
+    assert.equal(first.wastedPrefetch, 1);
+    assert.equal(second.wastedPrefetch, 1);
+    const miss = consumePrefetchedKeyWithOutcome(repoId, "card:missing");
+    assert.equal(miss.hit, false);
+    assert.equal(miss.outcome, "miss");
+  });
+
+  it("does not expose client or task attribution in public prefetch stats", () => {
+    const repoId = "prefetch-public-redaction";
+    configurePrefetch({ enabled: true, maxBudgetPercent: 20 });
+
+    prefetchSliceFrontier(repoId, [], {
+      clientKey: "session:sensitive",
+      taskType: "implement",
+    });
+    const stats = getPrefetchStats(repoId);
+
+    for (const strategy of stats.topStrategies) {
+      assert.equal("clientKey" in strategy, false);
+      assert.equal("taskType" in strategy, false);
+      assert.equal("repoId" in strategy, false);
+    }
+  });
+
+  it("does not consume another client or task type's attributed prefetch", async () => {
+    const repoId = "prefetch-context-isolation";
+    configurePrefetch({ enabled: true, maxBudgetPercent: 20 });
+
+    prefetchCardsForSymbols(repoId, ["symbol-a"], {
+      clientKey: "client-a",
+      taskType: "implement",
+    });
+    await waitForPrefetchQueue();
+
+    const wrongClient = consumePrefetchedKeyWithOutcome(
+      repoId,
+      "card:symbol-a",
+      "search-cards",
+      { clientKey: "client-b", taskType: "implement" },
+    );
+    assert.equal(wrongClient.hit, false);
+
+    const rightClient = consumePrefetchedKeyWithOutcome(
+      repoId,
+      "card:symbol-a",
+      "search-cards",
+      { clientKey: "client-a", taskType: "implement" },
+    );
+    assert.equal(rightClient.hit, true);
+
+    const aggregate = getPrefetchPolicyAggregate({
+      repoId,
+      clientKey: "client-a",
+      taskType: "implement",
+      strategy: "search-cards",
+      resourceKind: "card",
+    });
+    assert.ok(aggregate);
+    assert.equal(aggregate.used, 1);
+    assert.equal(aggregate.accepted, 1);
+  });
+
+  it("records superseded duplicate prefetch entries as wasted once", async () => {
+    const repoId = "prefetch-duplicate-superseded";
+    configurePrefetch({ enabled: true, maxBudgetPercent: 20 });
+    const context = { clientKey: "client-a", taskType: "implement" };
+
+    prefetchCardsForSymbols(repoId, ["symbol-a"], context);
+    await waitForPrefetchQueue();
+    prefetchCardsForSymbols(repoId, ["symbol-a"], context);
+    await waitForPrefetchQueue();
+
+    const beforeConsume = getPrefetchPolicyAggregate({
+      repoId,
+      ...context,
+      strategy: "search-cards",
+      resourceKind: "card",
+    });
+    assert.ok(beforeConsume);
+    assert.equal(beforeConsume.offered, 2);
+    assert.equal(beforeConsume.wasted, 1);
+
+    assert.equal(
+      consumePrefetchedKey(repoId, "card:symbol-a", "search-cards", context),
+      true,
+    );
+    const afterConsume = getPrefetchPolicyAggregate({
+      repoId,
+      ...context,
+      strategy: "search-cards",
+      resourceKind: "card",
+    });
+    assert.ok(afterConsume);
+    assert.equal(afterConsume.used, 1);
+    assert.equal(afterConsume.accepted, 1);
+  });
+
+  it("records token savings estimates when an attributed prefetch is consumed", async () => {
+    const repoId = "prefetch-token-savings";
+    configurePrefetch({ enabled: true, maxBudgetPercent: 20 });
+    const context = { clientKey: "client-a", taskType: "implement" };
+
+    prefetchCardsForSymbols(repoId, ["symbol-a"], context);
+    await waitForPrefetchQueue();
+
+    assert.equal(
+      consumePrefetchedKey(repoId, "card:symbol-a", "search-cards", context),
+      true,
+    );
+
+    const aggregate = getPrefetchPolicyAggregate({
+      repoId,
+      ...context,
+      strategy: "search-cards",
+      resourceKind: "card",
+    });
+    assert.ok(aggregate);
+    assert.ok(aggregate.tokensSavedEstimate > 0);
   });
 
   it("configurePrefetch defaults to enabled when config key is absent", () => {
@@ -47,13 +218,6 @@ describe("prefetch pipeline", () => {
     configurePrefetch({ enabled: true, maxBudgetPercent: 20 });
     const stats = getPrefetchStats("test-repo");
     assert.strictEqual(stats.enabled, true);
-  });
-
-  it("serve command default resolves to disabled when config key is absent", () => {
-    // Simulate the serve.ts default: config.prefetch?.enabled ?? false
-    const configPrefetchEnabled: boolean | undefined = undefined;
-    const resolvedEnabled = configPrefetchEnabled ?? false;
-    assert.strictEqual(resolvedEnabled, false);
   });
 
   it("trains lightweight model from tool traces", () => {

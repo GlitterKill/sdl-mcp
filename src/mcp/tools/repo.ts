@@ -575,6 +575,11 @@ export async function handleRepoStatus(
         wasteRate: prefetchStats.wasteRate,
         avgLatencyReductionMs: prefetchStats.avgLatencyReductionMs,
         queueDepth: prefetchStats.queueDepth,
+        policyMode: prefetchStats.policyMode,
+        outcomeSamples: prefetchStats.outcomeSamples,
+        suppressedPrefetch: prefetchStats.suppressedPrefetch,
+        acceptedPrefetch: prefetchStats.acceptedPrefetch,
+        topStrategies: prefetchStats.topStrategies,
       });
     }
 

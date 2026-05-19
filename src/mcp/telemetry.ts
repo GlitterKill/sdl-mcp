@@ -28,6 +28,8 @@ export interface ToolCallEvent {
   durationMs: number;
   repoId?: RepoId;
   symbolId?: SymbolId;
+  clientKey?: string;
+  taskType?: string;
   tokensUsed?: number;
   tokensSaved?: number;
   diagnostics?: ToolTimingDiagnostics;
@@ -189,6 +191,20 @@ export interface PrefetchTelemetryEvent {
   wasteRate: number;
   avgLatencyReductionMs: number;
   queueDepth: number;
+  policyMode?: "disabled" | "observe" | "safe";
+  outcomeSamples?: number;
+  suppressedPrefetch?: number;
+  acceptedPrefetch?: number;
+  topStrategies?: Array<{
+    strategy: string;
+    resourceKind: string;
+    samples: number;
+    hitRate: number;
+    acceptedRate: number;
+    wasteRate: number;
+    score: number;
+    suppressed: number;
+  }>;
 }
 
 export interface AuditEvent {
@@ -294,6 +310,8 @@ export function buildToolCallAuditDetailsJson(event: ToolCallEvent): string {
     request: summarizeAuditValue(event.request),
     response: summarizeAuditValue(event.response),
     durationMs: event.durationMs,
+    clientKey: event.clientKey,
+    taskType: event.taskType,
     tokensUsed: event.tokensUsed,
     tokensSaved: event.tokensSaved,
   };
@@ -308,6 +326,8 @@ export function buildToolCallAuditDetailsJson(event: ToolCallEvent): string {
     truncated: true,
     originalBytes: bytes,
     durationMs: event.durationMs,
+    clientKey: event.clientKey,
+    taskType: event.taskType,
     request: summarizeAuditValue(event.request, TOOL_CALL_AUDIT_MAX_DEPTH),
     response: summarizeAuditValue(event.response, TOOL_CALL_AUDIT_MAX_DEPTH),
     tokensUsed: event.tokensUsed,
@@ -324,6 +344,8 @@ export function buildToolCallAuditDetailsJson(event: ToolCallEvent): string {
     durationMs: event.durationMs,
     request: "[omitted]",
     response: "[omitted]",
+    clientKey: event.clientKey,
+    taskType: event.taskType,
     tokensUsed: event.tokensUsed,
     tokensSaved: event.tokensSaved,
   });
@@ -402,6 +424,9 @@ export function logToolCall(event: ToolCallEvent): void {
   logger.info(`Tool call logged: ${event.tool}`, {
     decision,
     durationMs: event.durationMs,
+    repoId: event.repoId,
+    clientKey: event.clientKey,
+    taskType: event.taskType,
   });
 
   try { getObservabilityTap()?.toolCall(event); } catch (err) { logger.warn("observability tap error", { error: err instanceof Error ? err.message : String(err) }); }

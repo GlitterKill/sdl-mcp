@@ -25,6 +25,7 @@ import {
 } from "../../util/tracing.js";
 import { attachRawContext } from "../token-usage.js";
 import { IndexError } from "../errors.js";
+import type { ToolContext } from "../../server.js";
 
 /** Default max changed symbols for delta responses (tighter than slice default). */
 const DEFAULT_DELTA_MAX_CARDS = 10;
@@ -42,13 +43,17 @@ const MAX_BLAST_RADIUS_ITEMS = 25;
  * @returns Delta pack response with changed symbols and blast radius
  * @throws {Error} If delta computation fails
  */
-export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
+export async function handleDeltaGet(
+  args: unknown,
+  context?: ToolContext,
+): Promise<DeltaGetResponse> {
   const validated = DeltaGetRequestSchema.parse(args);
 
   recordToolTrace({
     repoId: validated.repoId,
     taskType: "delta",
     tool: "delta.get",
+    clientKey: context?.clientKey,
   });
 
   const executeDelta = async () => {
@@ -169,11 +174,16 @@ export async function handleDeltaGet(args: unknown): Promise<DeltaGetResponse> {
 
     // Consume prefetched blast-radius keys
     for (const symbolId of changedSymbolIds) {
-      consumePrefetchedKey(validated.repoId, `blast:${symbolId}`);
+      consumePrefetchedKey(
+        validated.repoId,
+        `blast:${symbolId}`,
+        "delta-blast",
+        context,
+      );
     }
 
     if (!shouldSkipBlastRadius) {
-      prefetchDeltaBlastRadius(validated.repoId, changedSymbolIds);
+      prefetchDeltaBlastRadius(validated.repoId, changedSymbolIds, context);
     }
 
     const config = loadConfig();

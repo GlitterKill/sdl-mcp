@@ -34,6 +34,7 @@ const HEAP_LIMIT_MB = getHeapStatistics().heap_size_limit / (1024 * 1024);
 import type {
   AuditBufferMetrics,
   PostIndexSessionMetrics,
+  PredictiveContextMetrics,
   BeamSummary,
   CacheMetrics,
   CacheSourceMetrics,
@@ -196,6 +197,16 @@ export class Aggregator {
     string,
     { hits: number; misses: number; latencySum: number; latencyCount: number }
   >();
+
+  // ----- predictive context -----
+  private predictivePolicyMode: PredictiveContextMetrics["policyMode"] = "disabled";
+  private predictiveOutcomeSamples = 0;
+  private predictiveSuppressedPrefetch = 0;
+  private predictiveAcceptedPrefetch = 0;
+  private predictiveHitRatePct = 0;
+  private predictiveWasteRatePct = 0;
+  private predictiveAvgLatencyReductionMs = 0;
+  private predictiveTopStrategies: PredictiveContextMetrics["topStrategies"] = [];
 
   // ----- tool calls -----
   private toolCallTotal = 0;
@@ -694,9 +705,24 @@ export class Aggregator {
     // Kept on the tap surface so Agent C can wire it without re-coordinating.
   }
 
-  recordPrefetch(_event: PrefetchTelemetryEvent): void {
-    // Reserved — prefetch hit-rate is sampled directly from `repo.status.prefetchStats`
-    // in the snapshot path, so no aggregation is required here yet.
+  recordPrefetch(event: PrefetchTelemetryEvent): void {
+    this.predictivePolicyMode = event.policyMode ?? "disabled";
+    this.predictiveOutcomeSamples = Math.max(0, event.outcomeSamples ?? 0);
+    this.predictiveSuppressedPrefetch = Math.max(0, event.suppressedPrefetch ?? 0);
+    this.predictiveAcceptedPrefetch = Math.max(0, event.acceptedPrefetch ?? 0);
+    this.predictiveHitRatePct = Math.max(0, event.hitRate * 100);
+    this.predictiveWasteRatePct = Math.max(0, event.wasteRate * 100);
+    this.predictiveAvgLatencyReductionMs = Math.max(0, event.avgLatencyReductionMs);
+    this.predictiveTopStrategies = (event.topStrategies ?? []).slice(0, 5).map((strategy) => ({
+      strategy: strategy.strategy,
+      resourceKind: strategy.resourceKind,
+      samples: strategy.samples,
+      hitRatePct: strategy.hitRate * 100,
+      acceptedRatePct: strategy.acceptedRate * 100,
+      wasteRatePct: strategy.wasteRate * 100,
+      score: strategy.score,
+      suppressed: strategy.suppressed,
+    }));
   }
 
   recordWatcherHealth(event: WatcherHealthTelemetryEvent): void {
@@ -1029,6 +1055,7 @@ export class Aggregator {
     const beam = this.computeBeam();
     const indexing = this.computeIndexing();
     const tokenEfficiency = this.computeTokenEfficiency();
+    const predictiveContext = this.computePredictiveContext();
     const health = this.computeHealth();
     const latency = this.computeLatency();
     const pool = this.computePool();
@@ -1066,6 +1093,7 @@ export class Aggregator {
       beam,
       indexing,
       tokenEfficiency,
+      predictiveContext,
       health,
       latency,
       pool,
@@ -1237,6 +1265,19 @@ export class Aggregator {
       engineDispatch: { rust: this.indexEngineRust, ts: this.indexEngineTs },
       failures: this.indexFailures,
       derivedStateLagMs: this.indexDerivedStateLagMs,
+    };
+  }
+
+  private computePredictiveContext(): PredictiveContextMetrics {
+    return {
+      policyMode: this.predictivePolicyMode,
+      outcomeSamples: this.predictiveOutcomeSamples,
+      suppressedPrefetch: this.predictiveSuppressedPrefetch,
+      acceptedPrefetch: this.predictiveAcceptedPrefetch,
+      hitRatePct: this.predictiveHitRatePct,
+      wasteRatePct: this.predictiveWasteRatePct,
+      avgLatencyReductionMs: this.predictiveAvgLatencyReductionMs,
+      topStrategies: this.predictiveTopStrategies,
     };
   }
 

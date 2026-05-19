@@ -328,6 +328,48 @@ export const NODE_TABLES: string[] = [
     packedByEncoderJson STRING DEFAULT '{}'
   )`,
 
+
+  `CREATE NODE TABLE IF NOT EXISTS PrefetchOutcome (
+    outcomeId STRING PRIMARY KEY,
+    prefetchId STRING,
+    aggregateKey STRING,
+    repoId STRING,
+    taskType STRING,
+    clientKey STRING,
+    strategy STRING,
+    resourceKind STRING,
+    resourceKey STRING,
+    outcome STRING,
+    latencySavedMs DOUBLE DEFAULT 0.0,
+    tokensSavedEstimate INT64 DEFAULT 0,
+    plannedCost INT64 DEFAULT 0,
+    createdAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS PrefetchPolicyAggregate (
+    aggregateKey STRING PRIMARY KEY,
+    repoId STRING,
+    taskType STRING,
+    clientKey STRING,
+    strategy STRING,
+    resourceKind STRING,
+    offered INT64 DEFAULT 0,
+    used INT64 DEFAULT 0,
+    accepted INT64 DEFAULT 0,
+    wasted INT64 DEFAULT 0,
+    suppressed INT64 DEFAULT 0,
+    latencySavedMs DOUBLE DEFAULT 0.0,
+    tokensSavedEstimate INT64 DEFAULT 0,
+    score DOUBLE DEFAULT 0.0,
+    scoreEwma DOUBLE DEFAULT 0.0,
+    hitRateEwma DOUBLE DEFAULT 0.0,
+    acceptedRateEwma DOUBLE DEFAULT 0.0,
+    wasteRateEwma DOUBLE DEFAULT 0.0,
+    ewmaSamples INT64 DEFAULT 0,
+    lastOutcomeAt STRING,
+    updatedAt STRING
+  )`,
+
   `CREATE NODE TABLE IF NOT EXISTS SchemaVersion (
     id STRING PRIMARY KEY,
     schemaVersion INT64,
@@ -530,6 +572,10 @@ const INDEXES: string[] = [
   `CREATE INDEX idx_symbolversion_versionId ON SymbolVersion(versionId)`,
   `CREATE INDEX idx_usagesnapshot_repoId ON UsageSnapshot(repoId)`,
   `CREATE INDEX idx_usagesnapshot_timestamp ON UsageSnapshot(timestamp)`,
+  `CREATE INDEX idx_prefetch_outcome_repoId ON PrefetchOutcome(repoId)`,
+  `CREATE INDEX idx_prefetch_outcome_createdAt ON PrefetchOutcome(createdAt)`,
+  `CREATE INDEX idx_prefetch_aggregate_repoId ON PrefetchPolicyAggregate(repoId)`,
+
   `CREATE INDEX idx_audit_repoId ON Audit(repoId)`,
   `CREATE INDEX idx_agentfeedback_repoId ON AgentFeedback(repoId)`,
   `CREATE INDEX idx_symbolversion_symbolId ON SymbolVersion(symbolId)`,

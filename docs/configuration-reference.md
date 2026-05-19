@@ -373,6 +373,20 @@ Combined SCIP indexes are supported. When `languages` or `--languages` narrows r
 | `enabled`          | `boolean` | `true`  |
 | `maxBudgetPercent` | `number`  | `20`    |
 | `warmTopN`         | `number`  | `0`     |
+| `policy.enabled`   | `boolean` | `true`  |
+| `policy.mode`      | `"observe" \| "safe"` | `"safe"` |
+| `policy.minSamples` | `number` | `20` |
+| `policy.suppressionWasteRate` | `number` | `0.8` |
+| `policy.boostHitRate` | `number` | `0.35` |
+| `policy.retentionDays` | `number` | `14` |
+| `policy.maxPriorityBoost` | `number` | `25` |
+| `policy.maxBudgetTrimPercent` | `number` | `50` |
+
+`prefetch.policy` stores outcome learning in LadybugDB and applies it only to
+existing deterministic strategies. In `safe` mode the policy may suppress a
+high-waste strategy, trim its budget within `maxBudgetPercent`, or add a bounded
+priority boost; it does not invent new prefetch resource types. `observe` keeps
+recording outcomes without changing queue behavior.
 
 ## `tracing`
 

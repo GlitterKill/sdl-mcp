@@ -402,6 +402,28 @@ export interface PostIndexSessionMetrics {
   lastEndedAt: string | null;
 }
 
+export interface PredictiveContextStrategyMetrics {
+  strategy: string;
+  resourceKind: string;
+  samples: number;
+  hitRatePct: number;
+  acceptedRatePct: number;
+  wasteRatePct: number;
+  score: number;
+  suppressed: number;
+}
+
+export interface PredictiveContextMetrics {
+  policyMode: "disabled" | "observe" | "safe";
+  outcomeSamples: number;
+  suppressedPrefetch: number;
+  acceptedPrefetch: number;
+  hitRatePct: number;
+  wasteRatePct: number;
+  avgLatencyReductionMs: number;
+  topStrategies: PredictiveContextStrategyMetrics[];
+}
+
 export interface ObservabilitySnapshot {
   schemaVersion: 1;
   /** ISO 8601 timestamp at which the snapshot was generated. */
@@ -416,6 +438,7 @@ export interface ObservabilitySnapshot {
   beam: BeamSummary;
   indexing: IndexingMetrics;
   tokenEfficiency: TokenEfficiencyMetrics;
+  predictiveContext: PredictiveContextMetrics;
   health: HealthMetrics;
   latency: LatencyMetrics;
   pool: PoolMetrics;

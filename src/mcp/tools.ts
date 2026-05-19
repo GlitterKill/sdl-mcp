@@ -675,6 +675,22 @@ export const RepoStatusResponseSchema = z.object({
         }),
       ),
       deterministicFallback: z.boolean(),
+      policyMode: z.enum(["disabled", "observe", "safe"]),
+      outcomeSamples: z.number().int().min(0),
+      suppressedPrefetch: z.number().int().min(0),
+      acceptedPrefetch: z.number().int().min(0),
+      topStrategies: z.array(
+        z.object({
+          strategy: z.string(),
+          resourceKind: z.enum(["card", "slice", "window", "tool"]),
+          samples: z.number().int().min(0),
+          hitRate: z.number().min(0),
+          acceptedRate: z.number().min(0),
+          wasteRate: z.number().min(0),
+          score: z.number(),
+          suppressed: z.number().int().min(0),
+        }),
+      ),
     })
     .optional(),
   liveIndexStatus: z

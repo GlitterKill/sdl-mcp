@@ -1841,6 +1841,16 @@ export async function initCommand(options: InitOptions): Promise<void> {
       enabled: true,
       maxBudgetPercent: 20,
       warmTopN: 0,
+      policy: {
+        enabled: true,
+        mode: "safe" as const,
+        minSamples: 20,
+        suppressionWasteRate: 0.8,
+        boostHitRate: 0.35,
+        retentionDays: 14,
+        maxPriorityBoost: 25,
+        maxBudgetTrimPercent: 50,
+      },
     },
     tracing: {
       enabled: true,

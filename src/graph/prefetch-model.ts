@@ -3,6 +3,7 @@ export interface ToolTraceEvent {
   taskType: string;
   tool: string;
   symbolId?: string;
+  clientKey?: string;
   timestamp?: number;
 }
 
