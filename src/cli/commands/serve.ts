@@ -47,6 +47,7 @@ import { isIndexingActive } from "../../mcp/indexing-gate.js";
 import { SessionManager } from "../../mcp/session-manager.js";
 import { tokenAccumulator } from "../../mcp/token-accumulator.js";
 import { ensureConfiguredReposRegistered } from "../../startup/bootstrap.js";
+import { recoverStaleDerivedStateOnStartup } from "../../startup/derived-state-recovery.js";
 import { detectCpuProfile } from "../../util/cpu-detect.js";
 import {
   BeamExplainStore,
@@ -171,6 +172,10 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   await initGraphDb(config, configPath);
 
   await ensureConfiguredReposRegistered(config, (message) => {
+    console.error(message);
+  });
+
+  await recoverStaleDerivedStateOnStartup(config, (message) => {
     console.error(message);
   });
 

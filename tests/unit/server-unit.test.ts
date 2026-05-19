@@ -6,6 +6,7 @@ import {
   MCPServer,
   shouldBypassToolDispatch,
 } from "../../dist/server.js";
+import { SDL_MCP_SERVER_INSTRUCTIONS } from "../../dist/mcp/server-instructions.js";
 
 /**
  * Tests for src/server.ts — MCPServer class.
@@ -102,6 +103,13 @@ describe("MCPServer", () => {
     it("creates an MCPServer instance", () => {
       assert.ok(server);
       assert.ok(server instanceof MCPServer);
+    });
+
+    it("publishes SDL-MCP Agent Workflow instructions for session start", () => {
+      assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /sdl-mcp-agent-workflow/);
+      assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /repo\.status/);
+      assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /sdl\.context/);
+      assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /usageStats/);
     });
 
     it("has gatewayMode defaulting to false", () => {

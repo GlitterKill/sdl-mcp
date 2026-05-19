@@ -72,7 +72,11 @@ families have different effects and different controls.
   `SDL_DERIVED_REFRESH_TIMEOUT_MS` (default `120000`). The current worker aborts
   the refresh signal, records `derivedState.lastError`, leaves derived state
   stale until a later successful refresh, and logs when timed-out work settles.
-  Core index data from the incremental run remains available.
+  Core index data from the incremental run remains available. On server startup,
+  SDL-MCP scans configured repositories for persisted stale `derivedState` rows
+  and re-enqueues the saved `targetVersionId`; the startup log includes a
+  `Derived-state recovery: ...` summary so operators can tell whether recovery
+  ran.
 - `Tool dispatch queue timed out after ...` means a foreground MCP tool request
   waited longer than `concurrency.toolQueueTimeoutMs` (default `30000`) for a
   dispatch slot before its handler started. The failed tool response is

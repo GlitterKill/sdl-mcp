@@ -41,16 +41,17 @@ SDL-MCP's token savings depend on the model actually using SDL tools:
 3. focused `sdl.manual`
 4. `sdl.context` for direct code context retrieval (`contextMode: "precise"` or `"broad"`)
 5. `sdl.context` first for Code Mode explain/debug/review/implement requests
-6. `sdl.workflow` for multi-step operations (runtime execution, data transforms, batch mutations)
+6. `sdl.workflow` for batched follow-ups, runtime execution, data transforms, and batch mutations
 7. `runtimeExecute` inside `sdl.workflow` for repo-local commands
 
 The generated enforcement files also teach:
 
 - use `symbolRef` / `symbolRefs` when the agent knows a symbol name but not the canonical `symbolId`
 - follow structured recovery guidance such as `nextBestAction`, `fallbackTools`, `fallbackRationale`, and candidate lists instead of retrying blocked native tools
-- use `file.read` inside `sdl.workflow` for non-indexed files with targeted modes (search, jsonPath, offset/limit)
+- use `file.read` and `file.write` inside SDL-MCP for non-indexed files with targeted modes
+- use `symbol.edit` or the symbol edit preview/apply path for indexed source writes
 
-If an agent falls back to native file reads or native shell commands for indexed code and repo-local execution, you lose much of the token-efficiency benefit.
+If an agent falls back to native repo file tools or native shell commands while SDL-MCP is active, you lose much of the token-efficiency benefit and bypass the graph-aware policy.
 
 ---
 
@@ -58,8 +59,8 @@ If an agent falls back to native file reads or native shell commands for indexed
 
 | Client                | Generated docs             | Generated hard enforcement                                                            | Notes                                              |
 | :-------------------- | :------------------------- | :------------------------------------------------------------------------------------ | :------------------------------------------------- |
-| Claude Code / Claude  | `AGENTS.md`, `CLAUDE.md`   | `.claude/settings.json`, read hook, runtime hook, `explore-sdl` subagent, prompt file | Strongest current hook-based enforcement           |
-| Codex App / Codex CLI | `AGENTS.md`, `CODEX.md`    | `.codex/config.toml`, `.codex/hooks.json`, `.codex/hooks/force-sdl-mcp.mjs`           | Uses Codex lifecycle hooks plus repo-local docs    |
+| Claude Code / Claude  | `AGENTS.md`, `CLAUDE.md`   | `.claude/settings.json`, file hook, runtime hook, `explore-sdl` subagent, prompt file | Strongest current hook-based enforcement           |
+| Codex App / Codex CLI | `AGENTS.md`, `CODEX.md`    | `.codex/config.toml`, `.codex/hooks.json`, `.codex/hooks/load-sdl-skill.mjs`, `.codex/hooks/force-sdl-mcp.mjs` | Uses Codex lifecycle hooks plus repo-local docs    |
 | Gemini CLI            | `AGENTS.md`, `GEMINI.md`   | No native hook assets generated                                                       | Instruction-driven enforcement via repo-local docs |
 | OpenCode CLI          | `AGENTS.md`, `OPENCODE.md` | `opencode.json`, `.opencode/plugins/enforce-sdl.ts`                                   | Uses project config plus plugin enforcement        |
 
@@ -71,15 +72,15 @@ If an agent falls back to native file reads or native shell commands for indexed
 
 Claude gets the most complete enforcement path:
 
-- native `Read` is redirected to SDL for indexed source code
-- common native Bash test/build/lint commands are redirected to SDL runtime
+- repo-local native file reads, writes, edits, and patches are redirected to SDL-MCP when the PID file is present
+- repo-local native Bash commands are redirected to SDL runtime
 - the built-in `Explore` agent is replaced with `explore-sdl`
 
 See the client-specific guide in [tool-enforcement-for-claude.md](./tool-enforcement-for-claude.md).
 
 ### Codex App / Codex CLI
 
-Codex gets repo-local instruction files and Codex lifecycle hook assets. The generated `.codex/config.toml` enables `codex_hooks`, `.codex/hooks.json` registers a `PreToolUse` policy hook, and `.codex/hooks/force-sdl-mcp.mjs` redirects common native Bash reads/searches and repo-local build/test/lint commands toward SDL-MCP.
+Codex gets repo-local instruction files and Codex lifecycle hook assets. The generated `.codex/config.toml` enables `codex_hooks`, `.codex/hooks.json` registers a `SessionStart` skill-loader hook plus a broad `PreToolUse` policy hook, `.codex/hooks/load-sdl-skill.mjs` injects the lean `sdl-mcp-agent-workflow` skill body at session start, and `.codex/hooks/force-sdl-mcp.mjs` redirects repo-local native shell, file read/write/edit, apply-patch, and non-SDL MCP file/search tools toward SDL-MCP when the PID file is present. Native access remains allowed for `.codex/**`, `.claude/**`, and non-repo skills, memories, and session internals.
 
 The generated `CODEX.md` and `AGENTS.md` still matter: they describe natural-identifier lookup and fallback-guided recovery so Codex can stay inside SDL-MCP even when the exact `symbolId` is unknown.
 

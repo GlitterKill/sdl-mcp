@@ -30,6 +30,7 @@ import {
   shutdownLogger,
 } from "./util/logger.js";
 import { ensureConfiguredReposRegistered } from "./startup/bootstrap.js";
+import { recoverStaleDerivedStateOnStartup } from "./startup/derived-state-recovery.js";
 import { installProcessHandlers } from "./startup/process-handlers.js";
 
 import { resetScorerPool } from "./graph/slice/beam-search-engine.js";
@@ -86,6 +87,7 @@ async function main(): Promise<void> {
     log(`Graph database initialized at ${graphDbPath}`);
 
     await ensureConfiguredReposRegistered(config, log);
+    await recoverStaleDerivedStateOnStartup(config, log);
 
     // Dynamic imports AFTER migrations - these modules prepare SQL statements
     log("Registering MCP tools...");

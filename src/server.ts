@@ -47,6 +47,7 @@ import {
   ToolPhaseTimer,
   type ToolTimingDiagnostics,
 } from "./mcp/timing-diagnostics.js";
+import { SDL_MCP_SERVER_INSTRUCTIONS } from "./mcp/server-instructions.js";
 
 export interface ToolContext {
   progressToken?: string | number;
@@ -187,6 +188,7 @@ export class MCPServer {
           tools: { listChanged: true },
           logging: {},
         },
+        instructions: SDL_MCP_SERVER_INSTRUCTIONS,
       },
     );
 
