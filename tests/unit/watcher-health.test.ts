@@ -63,6 +63,11 @@ describe("watcher health", () => {
         modelEnabled: true,
         strategyMetrics: [],
         deterministicFallback: false,
+        policyMode: "disabled",
+        outcomeSamples: 0,
+        suppressedPrefetch: 0,
+        acceptedPrefetch: 0,
+        topStrategies: [],
       },
     };
 
