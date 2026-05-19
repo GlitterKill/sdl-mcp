@@ -358,22 +358,32 @@ export function renderIndexProgress(
   writeProgressLine(state, stageKey, line, pct, p.currentFile);
 }
 
+interface DelegatedIndexResult {
+  ok: boolean;
+  message?: string;
+}
+
+function isDispatchQueueTimeoutMessage(message: string | undefined): boolean {
+  return /Tool dispatch queue timed out/.test(message ?? "");
+}
+
 /**
  * Delegate indexing for a single repo to the running HTTP server via SSE.
- * Returns true if delegation succeeded, false if it failed (caller should
- * fall back to direct indexing).
+ * When delegation fails the caller reports a retryable server-side failure
+ * instead of opening the graph DB directly while the live server owns its lock.
  */
 async function delegateIndexToServer(
   server: PidfileData,
   repoId: string,
   mode: "full" | "incremental",
-): Promise<boolean> {
+): Promise<DelegatedIndexResult> {
   console.log(
     `  Delegating to running server (PID ${server.pid}, port ${server.port})...`,
   );
 
   const progressState = createProgressState();
   let completed = false;
+  let serverError: string | undefined;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -452,9 +462,10 @@ async function delegateIndexToServer(
           finishProgress(progressState);
           try {
             const e = JSON.parse(evt.data) as { message: string };
-            console.error(`  Error from server: ${e.message}`);
+            serverError = e.message;
+            console.error(`  Error from server: ${serverError}`);
           } catch {
-            // Skip malformed SSE event
+            serverError = "Server sent a malformed indexing error event.";
           }
         }
       },
@@ -463,12 +474,18 @@ async function delegateIndexToServer(
     // Defensive finalize in case the SSE stream closed without emitting
     // complete/error (network drop, server crash).
     finishProgress(progressState);
-    return completed;
+    if (completed) {
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      message: serverError ?? "Delegated indexing stream closed before completion.",
+    };
   } catch (error) {
     finishProgress(progressState);
     const msg = error instanceof Error ? error.message : String(error);
     console.error(`  Failed to delegate to server: ${msg}`);
-    return false;
+    return { ok: false, message: msg };
   }
 }
 
@@ -550,8 +567,9 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
     process.exit(1);
   }
 
-  // If we cannot delegate, initialize the DB for direct indexing.
-  // Track initialization state for lazy init on delegation fallback.
+  // If we cannot delegate, initialize the DB for direct indexing. When a live
+  // HTTP server owns the graph DB, failed delegation remains a retryable
+  // server-side error instead of falling through to local DB initialization.
   let dbInitialized = false;
   if (!canDelegate) {
     await initGraphDb(config, configPath);
@@ -581,20 +599,33 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       console.log(
         `\nIndexing ${repo.repoId} (${repo.rootPath}) [mode=${requestedMode}]...`,
       );
-      const ok = await delegateIndexToServer(
+      const delegated = await delegateIndexToServer(
         existing,
         repo.repoId,
         requestedMode,
       );
-      if (ok) {
+      if (delegated.ok) {
         continue;
       }
-      // Delegation failed — fall back to direct indexing.
-      console.log("  Falling back to direct indexing...");
-      if (!dbInitialized) {
-        await initGraphDb(config, configPath);
-        dbInitialized = true;
+      // Delegation failed while the live server owns the graph DB lock.
+      const delegationMessage =
+        delegated.message ?? "Delegated indexing did not complete.";
+      console.error(
+        `  Delegated indexing did not complete: ${delegationMessage}`,
+      );
+      console.error(
+        "  Not falling back to direct indexing because the HTTP server owns the graph DB lock.",
+      );
+      if (isDispatchQueueTimeoutMessage(delegationMessage)) {
+        console.error(
+          "  Retry after deferred server work finishes. Increase concurrency.toolQueueTimeoutMs only if longer foreground waits are acceptable.",
+        );
       }
+      errors.push({
+        repoId: repo.repoId,
+        error: `Delegation to running HTTP server failed: ${delegationMessage}`,
+      });
+      continue;
     }
 
     // Direct indexing path (original behavior).

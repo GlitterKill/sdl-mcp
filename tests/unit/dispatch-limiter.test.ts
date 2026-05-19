@@ -11,6 +11,7 @@ import {
   ToolDispatchQueueTimeoutError,
   waitForToolDispatchIdle,
 } from "../../dist/mcp/dispatch-limiter.js";
+import { _seedRunningForTesting } from "../../dist/indexer/derived-refresh-queue.js";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -166,6 +167,60 @@ describe("tool dispatch limiter", () => {
 
     release?.();
     await first;
+  });
+
+  it("lets derived-refresh deferred work finish before timing foreground dispatch out", async () => {
+    configureToolDispatchLimiter({ maxConcurrency: 1, queueTimeoutMs: 30 });
+
+    let releaseSlot: (() => void) | undefined;
+    const blocker = new Promise<void>((resolve) => {
+      releaseSlot = resolve;
+    });
+    const releaseStatus = _seedRunningForTesting("repo-deferred", "v1", {
+      current: 2,
+      total: 4,
+      phase: "processRefresh",
+      message: "processes",
+    });
+
+    const first = runToolDispatch(
+      async () => blocker,
+      undefined,
+      "derived-refresh:repo-deferred",
+    );
+    let outcome = "pending";
+    const second = runToolDispatch(
+      async () => "second",
+      undefined,
+      "sdl.context",
+    ).then(
+      (value) => {
+        outcome = `resolved:${value}`;
+        return value;
+      },
+      (err: unknown) => {
+        outcome = `rejected:${err instanceof Error ? err.message : String(err)}`;
+        return "rejected";
+      },
+    );
+
+    try {
+      await delay(80);
+      assert.strictEqual(outcome, "pending");
+      releaseSlot?.();
+      releaseStatus();
+      const result = await Promise.race([
+        second,
+        delay(500).then(() => "timed out"),
+      ]);
+      assert.strictEqual(result, "second");
+      await first;
+    } finally {
+      releaseSlot?.();
+      releaseStatus();
+      await first.catch(() => undefined);
+      await second.catch(() => undefined);
+    }
   });
 
   it("creates a fresh limiter after reset", () => {

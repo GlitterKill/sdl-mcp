@@ -15,6 +15,15 @@ import {
 import { withIndexingGate } from "../mcp/indexing-gate.js";
 import { runToolDispatch } from "../mcp/dispatch-limiter.js";
 import { logger } from "../util/logger.js";
+import {
+  clearDeferredWorkStatus,
+  getDeferredWorkStatuses,
+  setDeferredWorkStatus,
+  type DeferredWorkProgress,
+} from "../runtime/deferred-work-state.js";
+import type { IndexProgress } from "./indexer-init.js";
+
+const DERIVED_REFRESH_PROGRESS_TOTAL = 4;
 
 interface PendingEntry {
   repoId: string;
@@ -27,6 +36,7 @@ interface RunningEntry {
   targetVersionId: string;
   abort: AbortController;
   promise: Promise<void>;
+  startedAt: number;
 }
 
 // Module-local state. Long-lived processes carry this across incremental runs;
@@ -176,6 +186,7 @@ export interface DerivedRefreshHooks {
     repoId: string;
     versionId: string;
     signal: AbortSignal;
+    onProgress?: (progress: IndexProgress) => void;
   }) => Promise<void>;
 }
 
@@ -201,6 +212,38 @@ export function disableDerivedRefreshQueue(): void {
 export function enableDerivedRefreshQueue(): void {
   enabled = true;
   shuttingDown = false;
+}
+
+function progressForIndexEvent(progress: IndexProgress): DeferredWorkProgress {
+  const phase = progress.substage ?? progress.stage;
+  const phaseCurrent =
+    phase === "clusterRefresh"
+      ? 1
+      : phase === "processRefresh"
+        ? 2
+        : phase === "algorithmRefresh"
+          ? 3
+          : undefined;
+  return {
+    phase,
+    ...(phaseCurrent !== undefined
+      ? { current: phaseCurrent, total: DERIVED_REFRESH_PROGRESS_TOTAL }
+      : {}),
+    ...(progress.message ? { message: progress.message } : {}),
+  };
+}
+
+function setDerivedRefreshProgress(
+  repoId: string,
+  targetVersionId: string,
+  progress: DeferredWorkProgress,
+): void {
+  setDeferredWorkStatus({
+    kind: "derived-refresh",
+    repoId,
+    targetVersionId,
+    progress,
+  });
 }
 
 /**
@@ -243,8 +286,10 @@ async function drain(repoId: string): Promise<void> {
     repoId,
     targetVersionId: next.targetVersionId,
     abort,
+    startedAt: Date.now(),
     promise: runOne(repoId, next.targetVersionId, abort.signal).finally(() => {
       running.delete(repoId);
+      clearDeferredWorkStatus("derived-refresh", repoId);
       // If a newer version was enqueued while we ran, drain again.
       if (pending.has(repoId)) {
         void drain(repoId);
@@ -259,6 +304,12 @@ async function runOne(
   targetVersionId: string,
   signal: AbortSignal,
 ): Promise<void> {
+  setDerivedRefreshProgress(repoId, targetVersionId, {
+    phase: "starting",
+    current: 0,
+    total: DERIVED_REFRESH_PROGRESS_TOTAL,
+    message: "starting",
+  });
   try {
     await withIndexingGate(async () => {
       await runToolDispatch(
@@ -281,12 +332,25 @@ async function runOne(
                     repoId,
                     versionId: targetVersionId,
                     signal: refreshSignal,
+                    onProgress: (progress) => {
+                      setDerivedRefreshProgress(
+                        repoId,
+                        targetVersionId,
+                        progressForIndexEvent(progress),
+                      );
+                    },
                   });
                 } finally {
                   writeLockHeld = false;
                 }
               });
               if (refreshSignal.aborted) return;
+              setDerivedRefreshProgress(repoId, targetVersionId, {
+                phase: "complete",
+                current: DERIVED_REFRESH_PROGRESS_TOTAL,
+                total: DERIVED_REFRESH_PROGRESS_TOTAL,
+                message: "marking derived state complete",
+              });
               await markDerivedStateComputed(repoId, targetVersionId);
             },
             (timeoutMs) => {
@@ -430,17 +494,26 @@ async function defaultRefreshImpl(params: {
   repoId: string;
   versionId: string;
   signal: AbortSignal;
+  onProgress?: (progress: IndexProgress) => void;
 }): Promise<void> {
-  const { repoId, versionId, signal } = params;
+  const { repoId, versionId, signal, onProgress } = params;
   if (signal.aborted) return;
   const { computeAndStoreClustersAndProcesses } =
     await import("./cluster-orchestrator.js");
   const conn = await getLadybugConn();
   if (signal.aborted) return;
+  onProgress?.({
+    stage: "finalizing",
+    current: 0,
+    total: 0,
+    substage: "clusterRefresh",
+    message: "loading graph",
+  });
   await computeAndStoreClustersAndProcesses({
     conn,
     repoId,
     versionId,
+    onProgress,
   });
   // Semantic summaries + embeddings are currently regenerated lazily via
   // index.refresh and the queries that depend on them; leave them to the next
@@ -514,8 +587,15 @@ export async function waitForDerivedRefreshIdle(
 export function _getDerivedRefreshQueueStateForTesting(): {
   pending: number;
   running: number;
+  details: ReturnType<typeof getDeferredWorkStatuses>;
 } {
-  return { pending: pending.size, running: running.size };
+  return {
+    pending: pending.size,
+    running: running.size,
+    details: getDeferredWorkStatuses().filter(
+      (status) => status.kind === "derived-refresh",
+    ),
+  };
 }
 
 /**
@@ -527,18 +607,27 @@ export function _getDerivedRefreshQueueStateForTesting(): {
 export function _seedRunningForTesting(
   repoId: string,
   targetVersionId = "test",
+  progress: DeferredWorkProgress = {
+    phase: "starting",
+    current: 0,
+    total: DERIVED_REFRESH_PROGRESS_TOTAL,
+    message: "starting",
+  },
 ): () => void {
   let resolveRun!: () => void;
   const promise = new Promise<void>((resolve) => {
     resolveRun = resolve;
   });
   const abort = new AbortController();
+  setDerivedRefreshProgress(repoId, targetVersionId, progress);
   const entry: RunningEntry = {
     repoId,
     targetVersionId,
     abort,
+    startedAt: Date.now(),
     promise: promise.finally(() => {
       running.delete(repoId);
+      clearDeferredWorkStatus("derived-refresh", repoId);
     }),
   };
   running.set(repoId, entry);

@@ -280,6 +280,37 @@ describe("renderIndexProgress — pass-1 drain substage", () => {
       restoreStdout();
     }
   });
+
+  it("surfaces deferred-work progress messages with percentages", async () => {
+    const { createProgressState, renderIndexProgress } =
+      await import("../../dist/cli/commands/index.js");
+    try {
+      const state = createProgressState();
+      renderIndexProgress(state, {
+        stage: "finalizing",
+        current: 2,
+        total: 4,
+        substage: "processRefresh",
+        message:
+          "Deferred work is running (derived-refresh for repo test-repo, processRefresh, 50%); foreground tool calls will wait for it to finish.",
+      });
+      const output = captured.join("");
+      assert.ok(
+        output.includes("Process refresh"),
+        `output should label the active deferred phase: ${output}`,
+      );
+      assert.ok(
+        output.includes("Deferred work is running"),
+        `output should explain why the user is waiting: ${output}`,
+      );
+      assert.ok(
+        output.includes("50%"),
+        `output should include known deferred progress: ${output}`,
+      );
+    } finally {
+      restoreStdout();
+    }
+  });
 });
 
 describe("renderIndexProgress — known stages have user-facing labels", () => {

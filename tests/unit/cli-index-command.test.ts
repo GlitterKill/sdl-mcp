@@ -501,5 +501,121 @@ describe("CLI index command", () => {
         mode: "incremental",
       });
     });
+
+    it("does not fall back to direct indexing when HTTP delegation reports a retryable server-busy error", async () => {
+      const dir = join(tempDir, "delegate-server-busy");
+      const repoRoot = join(dir, "repo");
+      mkdirSync(repoRoot, { recursive: true });
+      const configPath = join(dir, "sdlmcp.config.json");
+      const ladybugPath = join(dir, "sdl-mcp-graph.lbug");
+
+      writeFileSync(
+        configPath,
+        JSON.stringify({
+          repos: [{ repoId: "test-repo", rootPath: repoRoot }],
+          dbPath: join(dir, "sdlmcp.sqlite"),
+          graphDatabase: { path: ladybugPath },
+          policy: {
+            maxWindowLines: 180,
+            maxWindowTokens: 1400,
+            requireIdentifiers: true,
+            allowBreakGlass: false,
+            defaultDenyRaw: true,
+          },
+          httpAuth: { enabled: false, token: null },
+        }),
+      );
+
+      const server = createServer((req, res) => {
+        req.resume();
+        req.on("end", () => {
+          res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "close",
+          });
+          res.write("event: error\n");
+          res.write(
+            `data: ${JSON.stringify({
+              message:
+                "Tool dispatch queue timed out after 30000ms for tool-dispatch (active=1, queued=0, max=1)",
+            })}\n\n`,
+          );
+          res.end();
+        });
+      });
+
+      await new Promise<void>((resolve) => server.listen(0, resolve));
+      const address = server.address();
+      assert.ok(address && typeof address === "object");
+
+      const { closeLadybugDb } = await import("../../dist/db/ladybug.js");
+      const { indexCommand } = await import(
+        "../../dist/cli/commands/index.js"
+      );
+      const { writePidfile } = await import("../../dist/util/pidfile.js");
+      writePidfile(ladybugPath, "http", address.port);
+
+      const originalGraphDbPath = process.env.SDL_GRAPH_DB_PATH;
+      const originalGraphDbDir = process.env.SDL_GRAPH_DB_DIR;
+      const originalDbPath = process.env.SDL_DB_PATH;
+      const origLog = console.log;
+      const origError = console.error;
+      const originalExit = process.exit;
+      const stdout: string[] = [];
+      const stderr: string[] = [];
+      delete process.env.SDL_GRAPH_DB_PATH;
+      delete process.env.SDL_GRAPH_DB_DIR;
+      delete process.env.SDL_DB_PATH;
+      console.log = (message?: unknown) => {
+        stdout.push(String(message ?? ""));
+      };
+      console.error = (message?: unknown) => {
+        stderr.push(String(message ?? ""));
+      };
+      process.exit = ((code?: string | number | null) => {
+        throw new Error(`process.exit:${code ?? ""}`);
+      }) as typeof process.exit;
+
+      try {
+        await assert.rejects(
+          indexCommand({ config: configPath, repoId: "test-repo" }),
+          /process\.exit:1/,
+        );
+      } finally {
+        if (originalGraphDbPath === undefined) {
+          delete process.env.SDL_GRAPH_DB_PATH;
+        } else {
+          process.env.SDL_GRAPH_DB_PATH = originalGraphDbPath;
+        }
+        if (originalGraphDbDir === undefined) {
+          delete process.env.SDL_GRAPH_DB_DIR;
+        } else {
+          process.env.SDL_GRAPH_DB_DIR = originalGraphDbDir;
+        }
+        if (originalDbPath === undefined) {
+          delete process.env.SDL_DB_PATH;
+        } else {
+          process.env.SDL_DB_PATH = originalDbPath;
+        }
+        console.log = origLog;
+        console.error = origError;
+        process.exit = originalExit;
+        await closeLadybugDb();
+        await new Promise<void>((resolve, reject) => {
+          server.close((err) => (err ? reject(err) : resolve()));
+        });
+      }
+
+      const joinedStdout = stdout.join("\n");
+      const joinedStderr = stderr.join("\n");
+      assert.doesNotMatch(joinedStdout, /Falling back to direct indexing/);
+      assert.match(
+        joinedStderr,
+        /Not falling back to direct indexing because the HTTP server owns the graph DB lock/,
+      );
+      assert.match(joinedStderr, /concurrency\.toolQueueTimeoutMs/);
+      assert.match(joinedStderr, /retry/i);
+    });
   });
 });

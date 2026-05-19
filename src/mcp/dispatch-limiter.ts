@@ -7,6 +7,11 @@ import {
 } from "../util/concurrency.js";
 import { logger } from "../util/logger.js";
 import {
+  formatDeferredWorkStatus,
+  getActiveDeferredWorkStatus,
+  type DeferredWorkStatus,
+} from "../runtime/deferred-work-state.js";
+import {
   INDEXING_DISPATCH_CAP,
   isIndexingActive,
   setIndexingStateListener,
@@ -24,6 +29,7 @@ let configuredMax = 8;
 export interface ToolDispatchStats extends ConcurrencyLimiterStats {
   configuredMax: number;
   indexingActive: boolean;
+  deferredWork?: DeferredWorkStatus;
 }
 
 export class ToolDispatchQueueTimeoutError extends Error {
@@ -45,6 +51,15 @@ export class ToolDispatchQueueTimeoutError extends Error {
       `queued=${stats.queued}`,
       `max=${stats.maxConcurrency}`,
       `indexingActive=${stats.indexingActive}`,
+      ...(stats.deferredWork
+        ? [
+            `deferredWork=${stats.deferredWork.kind}`,
+            `deferredRepoId=${stats.deferredWork.repoId}`,
+            ...(stats.deferredWork.percent !== undefined
+              ? [`deferredPercent=${stats.deferredWork.percent}`]
+              : []),
+          ]
+        : []),
     ];
     Object.setPrototypeOf(this, ToolDispatchQueueTimeoutError.prototype);
   }
@@ -93,10 +108,21 @@ export async function runToolDispatch<T>(
   timeoutMs?: number,
   label = "tool-dispatch",
 ): Promise<T> {
+  const deferredWork = label.startsWith("derived-refresh:")
+    ? undefined
+    : getActiveDeferredWorkStatus();
+  const queueTimeoutMs = timeoutMs ?? (deferredWork ? 0 : undefined);
+  if (deferredWork && timeoutMs === undefined) {
+    logger.info("Tool dispatch waiting for deferred work", {
+      label,
+      message: formatDeferredWorkStatus(deferredWork),
+      deferredWork,
+    });
+  }
   try {
     return await getToolDispatchLimiter().run(
       () => dispatchContext.run(true, fn),
-      timeoutMs,
+      queueTimeoutMs,
     );
   } catch (error) {
     if (error instanceof ConcurrencyQueueTimeoutError) {
@@ -109,6 +135,7 @@ export async function runToolDispatch<T>(
         maxConcurrency: stats.maxConcurrency,
         configuredMax: stats.configuredMax,
         indexingActive: stats.indexingActive,
+        deferredWork: stats.deferredWork,
       });
       throw new ToolDispatchQueueTimeoutError(error.timeoutMs, stats, label);
     }
@@ -123,6 +150,7 @@ export function isInToolDispatch(): boolean {
 export function getToolDispatchStats(): ToolDispatchStats {
   const stats = limiter?.getStats();
   const maxConcurrency = limiter?.getMaxConcurrency() ?? configuredMax;
+  const deferredWork = getActiveDeferredWorkStatus();
   return {
     active: stats?.active ?? 0,
     queued: stats?.queued ?? 0,
@@ -134,6 +162,7 @@ export function getToolDispatchStats(): ToolDispatchStats {
     totalRuns: stats?.totalRuns ?? 0,
     peakQueued: stats?.peakQueued ?? 0,
     peakActive: stats?.peakActive ?? 0,
+    ...(deferredWork ? { deferredWork } : {}),
   };
 }
 

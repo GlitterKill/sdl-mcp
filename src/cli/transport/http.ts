@@ -25,6 +25,10 @@ import { runGovernorLoop } from "../../delta/blastRadius.js";
 import { getLadybugConn } from "../../db/ladybug.js";
 import { indexRepo, type IndexProgress } from "../../indexer/indexer.js";
 import {
+  formatDeferredWorkStatus,
+  getActiveDeferredWorkStatus,
+} from "../../runtime/deferred-work-state.js";
+import {
   BufferCheckpointRequestSchema,
   BufferPushRequestSchema,
 } from "../../mcp/tools.js";
@@ -1409,6 +1413,29 @@ async function handleRestRequest(
         clientDisconnected = true;
       });
 
+      const emitDeferredWorkProgress = (): void => {
+        const deferredWork = getActiveDeferredWorkStatus();
+        if (!deferredWork) return;
+        const allowedSubstages = new Set([
+          "clusterRefresh",
+          "processRefresh",
+          "algorithmRefresh",
+        ]);
+        sendEvent("progress", {
+          stage: "finalizing",
+          current: deferredWork.current ?? 0,
+          total: deferredWork.total ?? 0,
+          substage:
+            deferredWork.phase && allowedSubstages.has(deferredWork.phase)
+              ? deferredWork.phase
+              : undefined,
+          message: formatDeferredWorkStatus(deferredWork),
+        });
+      };
+      emitDeferredWorkProgress();
+      const deferredProgressTimer = setInterval(emitDeferredWorkProgress, 2_000);
+      deferredProgressTimer.unref();
+
       try {
         const result = await indexRepo(
           repoId,
@@ -1446,6 +1473,8 @@ async function handleRestRequest(
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         sendEvent("error", { message });
+      } finally {
+        clearInterval(deferredProgressTimer);
       }
 
       res.end();

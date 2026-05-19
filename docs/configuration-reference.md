@@ -430,6 +430,14 @@ foreground tools to wait longer. Increasing `maxToolConcurrency` can reintroduce
 database pressure and should not be the first response to indexing-related
 queue waits.
 
+Deferred derived-refresh work is handled differently: foreground tool calls wait
+for that work to finish, and index progress can show the active deferred phase
+with a percentage when the server can derive one. If CLI indexing delegated to a
+live HTTP server fails with a server-busy dispatch timeout, retry after the
+server finishes its deferred work; the CLI does not open the same graph DB
+directly while the server owns the lock. Tune `toolQueueTimeoutMs` only when
+longer foreground waits are acceptable.
+
 ## `runtime`
 
 `runtime` is enabled by default in current source. Disable it explicitly if your deployment cannot permit subprocess execution.

@@ -81,7 +81,10 @@ families have different effects and different controls.
   waited longer than `concurrency.toolQueueTimeoutMs` (default `30000`) for a
   dispatch slot before its handler started. The failed tool response is
   retryable and classified as `unavailable`; running tools or indexing work are
-  not canceled.
+  not canceled. If deferred derived-refresh work is running, foreground tool
+  calls wait for it to finish instead of using this timeout, and server-side
+  index progress reports `Deferred work is running (..., NN%)` when a progress
+  estimate is available.
 - `waitForDerivedRefreshIdle timed out` means a foreground refresh stopped
   waiting for the background derived-refresh queue to become idle. It logs a
   warning and proceeds; it is not controlled by
@@ -101,9 +104,12 @@ indexing or LadybugDB contention issue first.
 For tool dispatch stalls, inspect the warning fields in the log. When
 `indexingActive` is `true`, SDL-MCP intentionally narrows foreground tool
 dispatch to one slot to reduce database contention. Raise
-`concurrency.toolQueueTimeoutMs` when queued tools should wait longer during
-indexing; do not raise `maxToolConcurrency` first unless you have evidence that
-the database can tolerate more concurrent foreground work.
+`concurrency.toolQueueTimeoutMs` only when queued tools should wait longer during
+ordinary indexing dispatch. If the CLI reports a delegated server-busy failure,
+retry after the server finishes its deferred work; the CLI will not fall back to
+direct indexing while the live HTTP server owns the graph DB lock. Do not raise
+`maxToolConcurrency` first unless you have evidence that the database can
+tolerate more concurrent foreground work.
 
 ### Stale Results
 

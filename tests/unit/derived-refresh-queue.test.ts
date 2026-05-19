@@ -264,4 +264,40 @@ describe("waitForDerivedRefreshIdle", () => {
     assert.strictEqual(state.running, 0, "no running entries after wait");
     assert.strictEqual(state.pending, 0, "no pending entries after wait");
   });
+
+  it("exposes running refresh progress when known", async () => {
+    const release = _seedRunningForTesting("repo-progress", "v42", {
+      current: 2,
+      total: 4,
+      phase: "processRefresh",
+      message: "processes",
+    });
+
+    try {
+      const state = _getDerivedRefreshQueueStateForTesting() as {
+        details?: Array<{
+          repoId: string;
+          targetVersionId: string;
+          phase?: string;
+          current?: number;
+          total?: number;
+          percent?: number;
+          message?: string;
+        }>;
+      };
+      const detail = state.details?.find(
+        (entry) => entry.repoId === "repo-progress",
+      );
+      assert.ok(detail, "running detail should be reported");
+      assert.strictEqual(detail.targetVersionId, "v42");
+      assert.strictEqual(detail.phase, "processRefresh");
+      assert.strictEqual(detail.current, 2);
+      assert.strictEqual(detail.total, 4);
+      assert.strictEqual(detail.percent, 50);
+      assert.strictEqual(detail.message, "processes");
+    } finally {
+      release();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  });
 });
