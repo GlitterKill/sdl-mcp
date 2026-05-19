@@ -29,6 +29,7 @@ import * as crypto from "crypto";
 import { computeDelta } from "../../delta/diff.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
+import type { MemoryRow } from "../../db/ladybug-memory.js";
 import type { SymbolKind } from "../../domain/types.js";
 
 import { decideCodeAccessLegacy } from "../../policy/code-access.js";
@@ -555,7 +556,7 @@ async function handleSliceBuildInternal(
               .map((r) => r.entityId)
               .filter((id) => !existingIds.has(id));
             if (newMemoryIds.length > 0) {
-              const additionalMemories = [];
+              const additionalMemories: Array<MemoryRow | null> = [];
               for (const id of newMemoryIds) {
                 additionalMemories.push(await ladybugDb.getMemory(conn, id));
               }

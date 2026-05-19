@@ -11,6 +11,7 @@ import { Executor } from "./executor.js";
 
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import type { ClusterMemberRow } from "../db/ladybug-clusters.js";
 import { ValidationError } from "../domain/errors.js";
 import { logger } from "../util/logger.js";
 import { classifySymptomType } from "../retrieval/evidence.js";
@@ -1302,7 +1303,7 @@ export class ContextEngine {
       }
 
       const cappedClusterIds = Array.from(clusterIds).slice(0, 10);
-      const memberLists = [];
+      const memberLists: ClusterMemberRow[][] = [];
       for (const clusterId of cappedClusterIds) {
         memberLists.push(await ladybugDb.getClusterMembers(conn, clusterId));
       }

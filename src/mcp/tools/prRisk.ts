@@ -33,6 +33,28 @@ const MAX_RESPONSE_BYTES = 32_000;
 type ComputedDeltaWithTiers = Awaited<ReturnType<typeof computeDeltaWithTiers>>;
 type ChangedSymbol = ComputedDeltaWithTiers["changedSymbols"][number];
 
+interface RiskFinding {
+  type: string;
+  severity: "low" | "medium" | "high";
+  message: string;
+  affectedSymbols: string[];
+  metadata?: Record<string, unknown>;
+}
+
+interface RiskEvidence {
+  type: string;
+  description: string;
+  symbolId?: string;
+  data?: Record<string, unknown>;
+}
+
+interface RecommendedTest {
+  type: string;
+  description: string;
+  targetSymbols: string[];
+  priority: "high" | "medium" | "low";
+}
+
 interface BlastRadiusSeedCandidate {
   symbolId: string;
   tiers?: { riskScore?: number };
@@ -479,14 +501,8 @@ export async function handlePRRiskAnalysis(args: unknown) {
 function generateFindings(
   delta: ComputedDeltaWithTiers,
   blastRadiusItems: BlastRadiusItem[],
-): Array<{
-  type: string;
-  severity: "low" | "medium" | "high";
-  message: string;
-  affectedSymbols: string[];
-  metadata?: Record<string, unknown>;
-}> {
-  const findings = [];
+): RiskFinding[] {
+  const findings: RiskFinding[] = [];
 
   const highRiskChanges = delta.changedSymbols.filter(
     (c: ChangedSymbol) => (c.tiers?.riskScore ?? 0) >= 70,
@@ -764,13 +780,8 @@ function compareItemsByExplanationPath(
 function collectEvidence(
   delta: ComputedDeltaWithTiers,
   blastRadiusItems: BlastRadiusItem[],
-): Array<{
-  type: string;
-  description: string;
-  symbolId?: string;
-  data?: Record<string, unknown>;
-}> {
-  const evidence = [];
+): RiskEvidence[] {
+  const evidence: RiskEvidence[] = [];
 
   evidence.push({
     type: "summary",
@@ -854,9 +865,9 @@ function collectEvidence(
 }
 
 function trimEvidenceEntry(
-  entry: ReturnType<typeof collectEvidence>[number],
+  entry: RiskEvidence,
   maxNestedSymbols: number,
-): ReturnType<typeof collectEvidence>[number] {
+): RiskEvidence {
   const data = entry.data;
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     return entry;
@@ -876,13 +887,8 @@ function trimEvidenceEntry(
 function generateRecommendedTests(
   delta: ComputedDeltaWithTiers,
   blastRadiusItems: BlastRadiusItem[],
-): Array<{
-  type: string;
-  description: string;
-  targetSymbols: string[];
-  priority: "high" | "medium" | "low";
-}> {
-  const tests = [];
+): RecommendedTest[] {
+  const tests: RecommendedTest[] = [];
 
   const modifiedSymbols = delta.changedSymbols.filter(
     (c: ChangedSymbol) => c.changeType === "modified",
