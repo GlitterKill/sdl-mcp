@@ -143,7 +143,7 @@ describe("CLI config path resolution", () => {
     }
   });
 
-  it("skips package development config in read mode when global config exists", () => {
+  it("prefers repo-root config in read mode when global config exists", () => {
     const oldConfig = process.env.SDL_CONFIG;
     const oldConfigPath = process.env.SDL_CONFIG_PATH;
     const oldConfigHome = process.env.SDL_CONFIG_HOME;
@@ -157,7 +157,8 @@ describe("CLI config path resolution", () => {
       process.env.SDL_CONFIG_HOME = configHome;
 
       const resolved = resolveCliConfigPath(undefined, "read");
-      assert.strictEqual(resolved, resolve(globalConfigPath));
+      const repoConfigPath = resolve(process.cwd(), "config", "sdlmcp.config.json");
+      assert.strictEqual(resolved, repoConfigPath);
     } finally {
       if (oldConfig === undefined) {
         delete process.env.SDL_CONFIG;
@@ -181,7 +182,7 @@ describe("CLI config path resolution", () => {
     }
   });
 
-  it("skips package development config when package cwd casing differs on Windows", () => {
+  it("preserves cwd config preference when cwd casing differs on Windows", () => {
     if (process.platform !== "win32") {
       return;
     }
@@ -201,7 +202,8 @@ describe("CLI config path resolution", () => {
       process.chdir(oldCwd.toLowerCase());
 
       const resolved = resolveCliConfigPath(undefined, "read");
-      assert.strictEqual(resolved, resolve(globalConfigPath));
+      const repoConfigPath = resolve(process.cwd(), "config", "sdlmcp.config.json");
+      assert.strictEqual(resolved, repoConfigPath);
     } finally {
       process.chdir(oldCwd);
       if (oldConfig === undefined) {
