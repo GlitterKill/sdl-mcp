@@ -1,5 +1,8 @@
 import { contextEngine } from "../../agent/context-engine.js";
 import type { AgentTask } from "../../agent/types.js";
+import { getLadybugConn } from "../../db/ladybug.js";
+import * as ladybugDb from "../../db/ladybug-queries.js";
+import { normalizePath } from "../../util/paths.js";
 import { IndexError, ValidationError } from "../errors.js";
 import { attachRawContext } from "../token-usage.js";
 import {
@@ -23,6 +26,27 @@ import {
   ToolPhaseTimer,
 } from "../timing-diagnostics.js";
 
+const BYTES_PER_TOKEN = 4;
+const SYMBOL_ID_PATTERN = /^[a-f0-9]{64}$/i;
+const MIN_RAW_TOKENS_PER_CONTEXT_RESULT = 300;
+
+interface EvidenceSourceCandidates {
+  symbolIds: Set<string>;
+  relPaths: Set<string>;
+}
+
+export interface ContextRawTokenSources {
+  symbolIds: Set<string>;
+  relPaths: Set<string>;
+  evidenceCount: number;
+  evidenceSources: EvidenceSourceCandidates[];
+}
+
+export interface ContextRawEquivalentInput {
+  fileRawTokens: number;
+  evidenceCount: number;
+  resolvedEvidenceCount: number;
+}
 function stripVolatileEvidenceFields(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((entry) => stripVolatileEvidenceFields(entry));
@@ -149,6 +173,219 @@ export function shouldAttachPackedPayloadForContext(
   return wireFormat === "packed" && bytesSaved && tokensSaved;
 }
 
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSymbolId(value: string): boolean {
+  return SYMBOL_ID_PATTERN.test(value);
+}
+
+function normalizeEvidencePath(
+  value: string,
+  allowRootFile = false,
+): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (isSymbolId(trimmed)) return undefined;
+  const hasDirectory = trimmed.includes("/") || trimmed.includes("\\");
+  if (!hasDirectory && !allowRootFile) return undefined;
+  if (!hasDirectory && !/^[^\\/:*?"<>|]+\.[A-Za-z0-9][A-Za-z0-9._-]*$/.test(trimmed)) {
+    return undefined;
+  }
+  return normalizePath(trimmed);
+}
+
+function extractSummaryPath(summary: string): string | undefined {
+  for (const segment of summary.split("|")) {
+    const relPath = normalizeEvidencePath(segment, true);
+    if (relPath) return relPath;
+  }
+  return undefined;
+}
+
+function addCandidate(
+  candidates: EvidenceSourceCandidates,
+  sources: ContextRawTokenSources,
+  kind: "symbol" | "path",
+  value: string,
+): void {
+  if (kind === "symbol") {
+    candidates.symbolIds.add(value);
+    sources.symbolIds.add(value);
+  } else {
+    candidates.relPaths.add(value);
+    sources.relPaths.add(value);
+  }
+}
+
+function extractPathBeforeNumericSuffix(value: string): string | undefined {
+  const separator = value.lastIndexOf(":");
+  if (separator <= 0) return undefined;
+  const suffix = value.slice(separator + 1);
+  if (!/^\d+(?:-\d+)?$/.test(suffix)) return undefined;
+  return value.slice(0, separator);
+}
+
+function addEvidenceSource(
+  evidence: Record<string, unknown>,
+  sources: ContextRawTokenSources,
+): void {
+  const reference =
+    typeof evidence.reference === "string" ? evidence.reference : "";
+  const summary = typeof evidence.summary === "string" ? evidence.summary : "";
+  const type = typeof evidence.type === "string" ? evidence.type : "";
+  if (reference || summary || type) {
+    sources.evidenceCount += 1;
+  }
+
+  const candidates: EvidenceSourceCandidates = {
+    symbolIds: new Set<string>(),
+    relPaths: new Set<string>(),
+  };
+
+  const [prefix, ...rest] = reference.split(":");
+  const body = rest.join(":").trim();
+  if (body) {
+    if (prefix === "symbol" || prefix === "hotpath") {
+      if (isSymbolId(body)) addCandidate(candidates, sources, "symbol", body);
+    } else if (prefix === "file") {
+      if (isSymbolId(body)) {
+        addCandidate(candidates, sources, "symbol", body);
+      } else {
+        const relPath = normalizeEvidencePath(body, true);
+        if (relPath) addCandidate(candidates, sources, "path", relPath);
+      }
+    } else if (prefix === "window" || prefix === "diagnostic") {
+      const filePath = extractPathBeforeNumericSuffix(body);
+      if (filePath) {
+        const relPath = normalizeEvidencePath(filePath, true);
+        if (relPath) addCandidate(candidates, sources, "path", relPath);
+      }
+    }
+  }
+
+  const summaryPath = extractSummaryPath(summary);
+  if (summaryPath) addCandidate(candidates, sources, "path", summaryPath);
+
+  if (candidates.symbolIds.size > 0 || candidates.relPaths.size > 0) {
+    sources.evidenceSources.push(candidates);
+  }
+}
+
+export function collectContextRawTokenSources(
+  response: Record<string, unknown>,
+): ContextRawTokenSources {
+  const sources: ContextRawTokenSources = {
+    symbolIds: new Set(),
+    relPaths: new Set(),
+    evidenceCount: 0,
+    evidenceSources: [],
+  };
+
+  const addEvidenceArray = (value: unknown): void => {
+    if (!Array.isArray(value)) return;
+    for (const item of value) {
+      if (isRecord(item)) addEvidenceSource(item, sources);
+    }
+  };
+
+  addEvidenceArray(response.finalEvidence);
+
+  return sources;
+}
+
+export function calculateContextRawEquivalentTokens({
+  fileRawTokens,
+  evidenceCount,
+  resolvedEvidenceCount,
+}: ContextRawEquivalentInput): number {
+  const unresolvedEvidenceCount = Math.max(
+    0,
+    evidenceCount - resolvedEvidenceCount,
+  );
+  const unresolvedFloor =
+    unresolvedEvidenceCount * MIN_RAW_TOKENS_PER_CONTEXT_RESULT;
+
+  return fileRawTokens + unresolvedFloor;
+}
+
+function fileBytesToTokens(byteSize: number): number {
+  return Math.ceil(byteSize / BYTES_PER_TOKEN);
+}
+
+export async function estimateContextRawEquivalentTokens(
+  repoId: string,
+  response: Record<string, unknown>,
+): Promise<number> {
+  const sources = collectContextRawTokenSources(response);
+  if (sources.symbolIds.size === 0 && sources.relPaths.size === 0) {
+    return calculateContextRawEquivalentTokens({
+      fileRawTokens: 0,
+      evidenceCount: sources.evidenceCount,
+      resolvedEvidenceCount: 0,
+    });
+  }
+
+  try {
+    const conn = await getLadybugConn();
+    const fileIds = new Set<string>();
+    const resolvedSymbolIds = new Set<string>();
+    const resolvedRelPaths = new Set<string>();
+
+    if (sources.symbolIds.size > 0) {
+      const symbols = await ladybugDb.getSymbolsByIds(
+        conn,
+        [...sources.symbolIds],
+      );
+      for (const symbol of symbols.values()) {
+        if (symbol.repoId === repoId) {
+          fileIds.add(symbol.fileId);
+          resolvedSymbolIds.add(symbol.symbolId);
+        }
+      }
+    }
+
+    for (const relPath of sources.relPaths) {
+      const file = await ladybugDb.getFileByRepoPath(conn, repoId, relPath);
+      if (file) {
+        fileIds.add(file.fileId);
+        resolvedRelPaths.add(relPath);
+      }
+    }
+
+    const files = await ladybugDb.getFilesByIds(conn, [...fileIds]);
+    let fileRawTokens = 0;
+    for (const file of files.values()) {
+      if (file.repoId === repoId) {
+        fileRawTokens += fileBytesToTokens(file.byteSize);
+      }
+    }
+
+    let resolvedEvidenceCount = 0;
+    for (const candidates of sources.evidenceSources.values()) {
+      const resolved =
+        [...candidates.symbolIds].some((id) => resolvedSymbolIds.has(id)) ||
+        [...candidates.relPaths].some((relPath) => resolvedRelPaths.has(relPath));
+      if (resolved) resolvedEvidenceCount += 1;
+    }
+
+    return calculateContextRawEquivalentTokens({
+      fileRawTokens,
+      evidenceCount: sources.evidenceCount,
+      resolvedEvidenceCount,
+    });
+  } catch {
+    // Token accounting must never make sdl.context fail.
+    return calculateContextRawEquivalentTokens({
+      fileRawTokens: 0,
+      evidenceCount: sources.evidenceCount,
+      resolvedEvidenceCount: 0,
+    });
+  }
+}
+
 export function buildContextPackedStats(
   wireResult: ContextWireResult,
   payloadAttached: boolean,
@@ -204,9 +441,9 @@ export async function handleAgentContext(
     const response = result as Extract<AgentContextResponse, { taskId: string }>;
     recordContextSubTimings(timer, response);
 
-    // Always use rawTokens for usage tracking - synthetic fileIds don't exist in DB
-    // and would cause the savings meter to always show 0%.
-    const rawTokens = (response.metrics?.totalTokens ?? 0) * 3;
+    const rawTokens = await timer.time("context.rawEquivalent", () =>
+      estimateContextRawEquivalentTokens(request.repoId, response),
+    );
     const enrichedResponse = attachRawContext(response, { rawTokens });
     // Snapshot pre-gate bulk fields so the ETag stable view reflects the
     // original payload identity even when the packed gate clears them.

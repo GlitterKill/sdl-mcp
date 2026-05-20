@@ -50,6 +50,21 @@ flowchart TD
     class e1,e2,e3,e4,e5,e6,e7,e8 animate;
 ```
 
+## sdl.context Raw-Equivalent Baseline
+
+Most SDL-MCP tools attach a direct raw baseline: either explicit raw output tokens or `fileIds` whose byte sizes estimate the raw-file cost. `sdl.context` is broader: a single response may contain symbol cards, skeletons, hot paths, diagnostics, and ranked evidence from several source files.
+
+For `sdl.context`, the raw-equivalent estimate is derived from the evidence returned to the caller:
+
+- collect model-visible returned evidence from `finalEvidence`
+- resolve `symbol:`, `hotpath:`, and `file:` references back to indexed source files
+- sum each unique source file's indexed `byteSize / 4` once, because a caller without SDL-MCP would normally need to inspect those raw files to recover the same facts
+- add the per-result floor only for returned evidence that cannot be mapped back to a source file
+- do not use aggregate context-engine metrics as a floor, because those can include work that was trimmed before the response was returned
+
+This keeps the meter tied to returned results while accounting for the real work avoided by cards, skeletons, hot paths, and ranked retrieval.
+
+---
 ## Session Savings Summary
 
 A `TokenAccumulator` singleton tracks all savings within the current server session.
