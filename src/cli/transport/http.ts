@@ -90,6 +90,49 @@ type LiveIndexApiResponse = {
   headers?: Record<string, string>;
 };
 
+export type ReindexProgressEvent = Pick<
+  IndexProgress,
+  "stage" | "current" | "total"
+> &
+  Partial<
+    Pick<
+      IndexProgress,
+      | "currentFile"
+      | "substage"
+      | "stageCurrent"
+      | "stageTotal"
+      | "message"
+      | "model"
+    >
+  >;
+
+/**
+ * Shape indexer progress for the reindex SSE stream. Keep this centralized so
+ * display-only fields such as the embedding model are not lost by transport
+ * serialization while direct CLI indexing still receives the raw event.
+ */
+export function serializeReindexProgressEvent(
+  progress: IndexProgress,
+): ReindexProgressEvent {
+  return {
+    stage: progress.stage,
+    current: progress.current,
+    total: progress.total,
+    ...(progress.currentFile !== undefined
+      ? { currentFile: progress.currentFile }
+      : {}),
+    ...(progress.substage !== undefined ? { substage: progress.substage } : {}),
+    ...(progress.stageCurrent !== undefined
+      ? { stageCurrent: progress.stageCurrent }
+      : {}),
+    ...(progress.stageTotal !== undefined
+      ? { stageTotal: progress.stageTotal }
+      : {}),
+    ...(progress.message !== undefined ? { message: progress.message } : {}),
+    ...(progress.model !== undefined ? { model: progress.model } : {}),
+  };
+}
+
 export type HttpTransportServices = {
   liveIndex?: LiveIndexCoordinator;
   sessionManager?: SessionManager;
@@ -1441,16 +1484,7 @@ async function handleRestRequest(
           repoId,
           mode,
           (progress: IndexProgress) => {
-            sendEvent("progress", {
-              stage: progress.stage,
-              current: progress.current,
-              total: progress.total,
-              currentFile: progress.currentFile,
-              substage: progress.substage,
-              stageCurrent: progress.stageCurrent,
-              stageTotal: progress.stageTotal,
-              message: progress.message,
-            });
+            sendEvent("progress", serializeReindexProgressEvent(progress));
           },
         );
 

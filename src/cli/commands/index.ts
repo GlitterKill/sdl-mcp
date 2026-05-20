@@ -415,6 +415,7 @@ async function delegateIndexToServer(
               stageCurrent?: number;
               stageTotal?: number;
               message?: string;
+              model?: string;
             };
             renderIndexProgress(progressState, p);
           } catch {
