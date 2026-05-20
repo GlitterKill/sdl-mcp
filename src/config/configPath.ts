@@ -1,15 +1,10 @@
 import { existsSync } from "fs";
 import { homedir } from "os";
-import { dirname, resolve } from "path";
-import { fileURLToPath } from "url";
-import { findPackageRoot } from "../util/findPackageRoot.js";
+import { resolve } from "path";
 
 const CONFIG_FILE_NAME = "sdlmcp.config.json";
 
 export type ConfigPathMode = "read" | "write";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 function normalizeOptionalPath(path: string | undefined): string | undefined {
   if (!path) {
@@ -46,29 +41,10 @@ function resolveGlobalConfigPath(): string {
   return resolve(homePath, ".config", "sdl-mcp", CONFIG_FILE_NAME);
 }
 
-function normalizeComparablePath(pathValue: string): string {
-  const resolvedPath = resolve(pathValue);
-  const withoutExtendedPrefix = resolvedPath.startsWith("\\\\?\\")
-    ? resolvedPath.slice(4)
-    : resolvedPath;
-
-  return process.platform === "win32"
-    ? withoutExtendedPrefix.toLowerCase()
-    : withoutExtendedPrefix;
-}
-
-function pathsEqual(left: string, right: string): boolean {
-  return normalizeComparablePath(left) === normalizeComparablePath(right);
-}
-
 function resolveReadConfigCandidates(globalConfigPath: string): string[] {
   const cwdConfigPath = resolve(process.cwd(), "config", CONFIG_FILE_NAME);
-  const packageRoot = findPackageRoot(__dirname);
-  const packageConfigPath = resolve(packageRoot, "config", CONFIG_FILE_NAME);
 
-  return pathsEqual(cwdConfigPath, packageConfigPath)
-    ? [globalConfigPath]
-    : [cwdConfigPath, globalConfigPath];
+  return [cwdConfigPath, globalConfigPath];
 }
 
 export function resolveCliConfigPath(

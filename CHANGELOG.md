@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed config discovery from the package/repo root so CI, tests, and benchmark guardrails read `config/sdlmcp.config.json` before falling back to the global config path.
 - Aligned SDL-MCP action discovery/manual contracts for disabled memory actions, workflow response handles, transform return shapes, file window plan handles, and documented discovery limits.
 - Re-enqueue persisted stale derived-state refresh work on server startup so one-shot CLI indexing deferrals recover when SDL-MCP next serves the repo.
 - Let read-only status workflows bypass the foreground dispatch limiter so `repo.status` remains visible while a long `index.refresh` owns the normal tool slot.

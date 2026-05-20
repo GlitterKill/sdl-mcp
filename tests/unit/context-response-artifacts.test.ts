@@ -7,7 +7,10 @@ import { join } from "node:path";
 import { contextEngine } from "../../dist/agent/context-engine.js";
 import type { ContextResult } from "../../dist/agent/types.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
-import { handleAgentContext } from "../../dist/mcp/tools/context.js";
+import {
+  calculateContextRawEquivalentTokens,
+  handleAgentContext,
+} from "../../dist/mcp/tools/context.js";
 import { handleResponseGet } from "../../dist/mcp/tools/response.js";
 
 const originalSdlConfig = process.env.SDL_CONFIG;
@@ -92,8 +95,14 @@ describe("sdl.context response artifacts", () => {
     assert.equal(response.kind, "responseArtifact");
     assert.equal(response.action, "response.get");
     assert.equal((response.metadata as Record<string, unknown>).toolName, "sdl.context");
+    const expectedRawTokens = calculateContextRawEquivalentTokens({
+      fileRawTokens: 0,
+      evidenceCount: 1,
+      resolvedEvidenceCount: 0,
+    });
+
     assert.deepEqual((response as Record<string, unknown>)._rawContext, {
-      rawTokens: 18_000,
+      rawTokens: expectedRawTokens,
     });
 
     const full = await handleResponseGet({
