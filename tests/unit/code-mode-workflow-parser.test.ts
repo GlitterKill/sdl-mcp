@@ -1,6 +1,22 @@
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert";
+import { resolve } from "node:path";
 import { parseWorkflowRequest } from "../../dist/code-mode/workflow-parser.js";
+
+const originalSdlConfig = process.env.SDL_CONFIG;
+const workflowParserConfigPath = resolve("config/sdlmcp.config.json");
+
+before(() => {
+  process.env.SDL_CONFIG = workflowParserConfigPath;
+});
+
+after(() => {
+  if (originalSdlConfig === undefined) {
+    delete process.env.SDL_CONFIG;
+  } else {
+    process.env.SDL_CONFIG = originalSdlConfig;
+  }
+});
 
 describe("code-mode workflow parser", () => {
   it("valid single-step chain parses successfully", () => {
@@ -74,7 +90,9 @@ describe("code-mode workflow parser", () => {
 
     assert.strictEqual(result.ok, false);
     if (!result.ok) {
+      assert.match(result.errors[0], /disabled function 'memory\.query'/);
       assert.match(result.errors[0], /memory\.enabled: true in your sdlmcp\.config\.json\. Available:/);
+      assert.doesNotMatch(result.errors[0], /unknown function 'memory\.query'/);
       assert.doesNotMatch(result.errors[0], /json\.\. Available/);
     }
   });

@@ -4,6 +4,7 @@ import {
   FileGatewayRequestSchema,
   handleFileGateway,
 } from "../../dist/mcp/tools/file-gateway.js";
+import { getSearchEditPlanStore } from "../../dist/mcp/tools/search-edit/plan-store.js";
 
 describe("FileGatewayRequestSchema", () => {
   describe("op: read", () => {
@@ -218,6 +219,21 @@ describe("FileGatewayRequestSchema", () => {
       assert.equal(result.symbolId, "symbol-123");
     });
 
+    it("parses previewWindow without symbolId so the handler can return plan-aware guidance", () => {
+      const result = FileGatewayRequestSchema.parse({
+        op: "previewWindow",
+        repoId: "test-repo",
+        planHandle: "plan-abc-123",
+        filePath: "src/index.ts",
+        reason: "Inspect the planned edit before applying it",
+        expectedLines: 12,
+        identifiersToFind: ["target"],
+      });
+
+      assert.equal(result.op, "previewWindow");
+      assert.equal(result.symbolId, undefined);
+    });
+
     it("parses sourceWindow as an alias for the same gated path", () => {
       const result = FileGatewayRequestSchema.parse({
         op: "sourceWindow",
@@ -381,6 +397,76 @@ describe("handleFileGateway dispatch", () => {
           repoId: "test-repo",
           planHandle: "plan-fake-123",
           symbolId: "symbol-123",
+          reason: "Inspect the planned edit before applying it",
+          expectedLines: 12,
+          identifiersToFind: ["target"],
+          responseMode: "inline",
+        }),
+      (err: any) => {
+        assert.notEqual(err?.constructor?.name, "ZodError");
+        assert.match(
+          String(err?.message ?? ""),
+          /Edit plan not found or expired/,
+        );
+        return true;
+      },
+    );
+  });
+
+  it("op:previewWindow without symbolId reports plan-aware guidance", async () => {
+    const store = getSearchEditPlanStore();
+    const plan = store.create(
+      "test-repo",
+      [
+        {
+          relPath: "src/index.ts",
+          absPath: "F:/repo/src/index.ts",
+          newContent: "const target = true;",
+          createBackup: false,
+          fileExists: true,
+          indexedSource: true,
+          matchCount: 1,
+          editMode: "replacePattern",
+        },
+      ],
+      [],
+      { fileEntries: [{ file: "src/index.ts", snippets: [] }] },
+      false,
+    );
+
+    try {
+      await assert.rejects(
+        () =>
+          handleFileGateway({
+            op: "previewWindow",
+            repoId: "test-repo",
+            planHandle: plan.planHandle,
+            filePath: "src/index.ts",
+            reason: "Inspect the planned edit before applying it",
+            expectedLines: 12,
+            identifiersToFind: ["target"],
+            responseMode: "inline",
+          }),
+        (err: any) => {
+          assert.notEqual(err?.constructor?.name, "ZodError");
+          assert.match(
+            String(err?.message ?? ""),
+            /previewWindow requires symbolId.*Use symbol.search or symbol.getCard.*planHandle only constrains the file/s,
+          );
+          return true;
+        },
+      );
+    } finally {
+      store.remove(plan.planHandle);
+    }
+  });
+  it("op:previewWindow without symbolId reaches plan validation instead of schema validation", async () => {
+    await assert.rejects(
+      () =>
+        handleFileGateway({
+          op: "previewWindow",
+          repoId: "test-repo",
+          planHandle: "plan-fake-123",
           reason: "Inspect the planned edit before applying it",
           expectedLines: 12,
           identifiersToFind: ["target"],

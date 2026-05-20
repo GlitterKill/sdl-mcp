@@ -184,6 +184,17 @@ describe("Pre-transform input shape (io: 'input')", () => {
     assert.ok(result.properties?.command, "has command (alias preserved)");
   });
 
+  it("accepts five runtime response lines for compact command summaries", () => {
+    const parsed = RuntimeExecuteRequestSchema.parse({
+      repoId: "test",
+      runtime: "shell",
+      code: "echo ok",
+      maxResponseLines: 5,
+    });
+
+    assert.equal(parsed.maxResponseLines, 5);
+  });
+
   it("does not throw on transform-bearing tool schemas (the regression)", () => {
     assert.doesNotThrow(
       () => zodSchemaToJsonSchema(PolicySetRequestSchema),

@@ -250,8 +250,17 @@ const FileGatewaySymbolEditApplyNowSchema = z.object({
 
 const FileGatewayWindowBaseSchema = CodeNeedWindowRequestSchema.omit({
   repoId: true,
+  symbolId: true,
 }).extend({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  symbolId: z
+    .string()
+    .min(1)
+    .max(MAX_SYMBOL_ID_LENGTH)
+    .optional()
+    .describe(
+      "Symbol ID to inspect inside the planned file. Required for source-window retrieval; the plan handle constrains the file but does not identify a symbol.",
+    ),
   planHandle: z
     .string()
     .min(1)
@@ -377,6 +386,15 @@ async function resolvePlanWindowSymbolId(
   request: FileGatewayWindowRequest,
   relPath: string,
 ): Promise<string> {
+  if (!request.symbolId) {
+    throw new ValidationError(
+      request.op +
+        " requires symbolId for the planned indexed source file " +
+        relPath +
+        ". Use symbol.search or symbol.getCard to select the symbol; planHandle only constrains the file.",
+    );
+  }
+
   const conn = await getLadybugConn();
   const { symbolId } = await resolveSymbolId(
     conn,

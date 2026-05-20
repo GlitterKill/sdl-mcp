@@ -108,6 +108,8 @@ describe("code-mode manual generator", () => {
 
     assert.match(manual, /sdl\.action\.search limit <= 50/);
     assert.match(manual, /workflowContinuationGet limit <= 1000/);
+    assert.match(manual, /runtimeExecute maxResponseLines 5\.\.1000/);
+    assert.match(manual, /shell runtime requires code/);
     assert.match(manual, /not maxCards/);
     assert.match(manual, /wireFormat:\"json\"/);
     assert.match(manual, /sliceHandle: string/);

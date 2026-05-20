@@ -2641,10 +2641,10 @@ const RuntimeExecuteRequestObjectSchema = z
     maxResponseLines: z
       .number()
       .int()
-      .min(10)
+      .min(5)
       .max(1000)
       .default(RUNTIME_DEFAULT_MAX_RESPONSE_LINES)
-      .describe("Max lines in stdout/stderr summaries"),
+      .describe("Max lines in stdout/stderr summaries (5-1000, default 100)"),
     persistOutput: z
       .boolean()
       .default(true)

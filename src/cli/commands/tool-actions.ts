@@ -1187,7 +1187,7 @@ const runtimeExecute: ActionDefinition = {
       flag: "--max-response-lines",
       field: "maxResponseLines",
       type: "number",
-      description: "Max lines in output summaries",
+      description: "Max lines in output summaries (5-1000, default 100)",
     },
     {
       flag: "--persist-output",

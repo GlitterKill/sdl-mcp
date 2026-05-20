@@ -40,20 +40,35 @@ function resolveGlobalConfigPath(): string {
   );
 
   if (!homePath) {
-    const packageRoot = findPackageRoot(__dirname);
-    return resolve(packageRoot, "config", CONFIG_FILE_NAME);
+    return resolve(process.cwd(), "config", CONFIG_FILE_NAME);
   }
 
   return resolve(homePath, ".config", "sdl-mcp", CONFIG_FILE_NAME);
 }
 
+function normalizeComparablePath(pathValue: string): string {
+  const resolvedPath = resolve(pathValue);
+  const withoutExtendedPrefix = resolvedPath.startsWith("\\\\?\\")
+    ? resolvedPath.slice(4)
+    : resolvedPath;
+
+  return process.platform === "win32"
+    ? withoutExtendedPrefix.toLowerCase()
+    : withoutExtendedPrefix;
+}
+
+function pathsEqual(left: string, right: string): boolean {
+  return normalizeComparablePath(left) === normalizeComparablePath(right);
+}
+
 function resolveReadConfigCandidates(globalConfigPath: string): string[] {
+  const cwdConfigPath = resolve(process.cwd(), "config", CONFIG_FILE_NAME);
   const packageRoot = findPackageRoot(__dirname);
-  return [
-    resolve(process.cwd(), "config", CONFIG_FILE_NAME),
-    globalConfigPath,
-    resolve(packageRoot, "config", CONFIG_FILE_NAME),
-  ];
+  const packageConfigPath = resolve(packageRoot, "config", CONFIG_FILE_NAME);
+
+  return pathsEqual(cwdConfigPath, packageConfigPath)
+    ? [globalConfigPath]
+    : [cwdConfigPath, globalConfigPath];
 }
 
 export function resolveCliConfigPath(

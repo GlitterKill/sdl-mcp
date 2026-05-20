@@ -129,15 +129,26 @@ export function parseWorkflowRequest(
       ]);
       const isMemoryFn =
         memoryNames.has(step.fn) || memoryNames.has(resolvedFn);
-      const hint = isMemoryFn
-        ? ` — this tool is disabled. Enable with memory.enabled: true in your sdlmcp.config.json`
-        : "";
       const available = Object.keys(fnNameMap);
       const availSummary =
         available.length > 25
           ? `${available.slice(0, 25).join(", ")} (and ${available.length - 25} more — call sdl.action.search to discover)`
           : available.join(", ");
-      const message = `Step ${i}: unknown function '${step.fn}'${hint}. Available: ${availSummary}, dataPick, dataMap, dataFilter, dataSort, dataTemplate, workflowContinuationGet`;
+      const message = isMemoryFn
+        ? "Step " +
+          i +
+          ": disabled function '" +
+          step.fn +
+          "'. Enable with memory.enabled: true in your sdlmcp.config.json. Available: " +
+          availSummary +
+          ", dataPick, dataMap, dataFilter, dataSort, dataTemplate, workflowContinuationGet"
+        : "Step " +
+          i +
+          ": unknown function '" +
+          step.fn +
+          "'. Available: " +
+          availSummary +
+          ", dataPick, dataMap, dataFilter, dataSort, dataTemplate, workflowContinuationGet";
       // With `onError: "continue"` we record the bad step as a soft skip
       // and let the executor emit a per-step `error` result, so sibling
       // steps in the same envelope still run. Without `continue`, this

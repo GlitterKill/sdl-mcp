@@ -682,7 +682,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
     "Request buffer checkpoint. Zero-file success responses include a message explaining why no clean buffers were checkpointed.",
   "buffer.status": "Get buffer status",
   "runtime.execute":
-    "Execute runtime command. Shell runtime requires code; direct args-only shell execution is rejected.",
+    "Execute runtime command. Shell runtime requires code; direct args-only shell execution is rejected. maxResponseLines accepts 5-1000 lines (default 100).",
   "runtime.queryOutput": "Query stored command output by keywords",
   "response.get": "Retrieve a stored large tool response by handle",
   "memory.store": "Store a development memory",
@@ -710,7 +710,7 @@ const META_TOOL_DESCRIPTIONS: Record<string, string> = {
     "Load the focused SDL-MCP manual after discovery. Use this before composing workflow steps.",
   context:
     "Preferred first tool for explain, debug, review, implement, understand, or investigate prompts. Retrieves task-shaped code context directly and should be chosen before workflow for context retrieval.",
-  file: "Unified sdl.file gateway for non-indexed file reads, targeted writes, two-phase search edits, symbol edit wrappers, and plan-bound previewWindow/sourceWindow code windows.",
+  file: "Unified sdl.file gateway for non-indexed file reads, targeted writes, two-phase search edits, symbol edit wrappers, and plan-bound previewWindow/sourceWindow code windows. previewWindow/sourceWindow need planHandle, reason, expectedLines, identifiersToFind, and symbolId for the planned indexed source file.",
   workflow:
     "Preferred first tool for execute, runtime, transform, batch, or pipeline prompts. Runs multi-step workflows with $N result piping, runtime execution, data transforms, and batch mutations.",
 };
@@ -772,7 +772,7 @@ const META_TOOL_EXAMPLES: Record<string, Record<string, unknown>> = {
     repoId: "<repoId>",
     steps: [
       { fn: "repoStatus" },
-      { fn: "runtimeExecute", args: { runtime: "node", args: ["--version"] } },
+      { fn: "runtimeExecute", args: { runtime: "node", args: ["--version"], maxResponseLines: 5 } },
     ],
   },
 };

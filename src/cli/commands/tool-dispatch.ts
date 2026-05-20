@@ -9,7 +9,7 @@
  *   echo '{"repoId":"x"}' | sdl-mcp tool symbol.search --query "foo"
  */
 
-import { resolve } from "path";
+import { isAbsolute, relative, resolve } from "path";
 import { parseArgs } from "util";
 import type { ToolDispatchOptions } from "../types.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
@@ -141,12 +141,16 @@ export function resolveRepoId(
 ): string | undefined {
   if (explicit) return explicit;
 
-  // Try to match cwd to a configured repo
+  // Try to match cwd to a configured repo. Use path boundaries and the
+  // longest matching root so sibling repos like app and app-tools do not collide.
   const cwd = resolve(process.cwd()).toLowerCase();
-  const matched = repos.find((repo) => {
-    const root = resolve(repo.rootPath).toLowerCase();
-    return cwd.startsWith(root);
-  });
+  const matched = repos
+    .map((repo) => ({ repo, root: resolve(repo.rootPath).toLowerCase() }))
+    .filter(({ root }) => {
+      const rel = relative(root, cwd);
+      return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+    })
+    .sort((a, b) => b.root.length - a.root.length)[0]?.repo;
   if (matched) return matched.repoId;
 
   // Single configured repo fallback
@@ -191,6 +195,21 @@ async function readStdinJson(): Promise<Record<string, unknown> | undefined> {
   });
 }
 
+function parseJsonObjectArg(raw: string, source: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch (err) {
+    throw new Error(source + " must be a valid JSON object: " + formatError(err));
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(source + " must be a JSON object");
+  }
+
+  return parsed as Record<string, unknown>;
+}
+
 /**
  * Print the action listing grouped by namespace.
  */
@@ -231,6 +250,7 @@ function printActionList(showMemoryActions: boolean): void {
 
   console.log("Usage:");
   console.log("  sdl-mcp tool <action> [flags]");
+  console.log("  sdl-mcp tool <action> '{\"repoId\":\"x\"}' --json   Pass positional JSON args");
   console.log("  sdl-mcp tool <action> --help     Show action-specific help");
   console.log('  echo \'{"repoId":"x"}\' | sdl-mcp tool <action>   Pipe JSON args\n');
 }
@@ -252,6 +272,7 @@ function printActionHelp(definition: ActionDefinition): void {
 
   console.log("\nGlobal Flags:");
   console.log("  --output-format <format>   pretty|json|json-compact|table (default: pretty)");
+  console.log("  --json                     Alias for --output-format json; accepts one positional JSON object");
   console.log("  --help                     Show this help");
 
   if (definition.examples.length > 0) {
@@ -332,33 +353,53 @@ export async function toolDispatchCommand(
   // Parse action-specific args (strict: true catches typos like --repoid)
   const actionParseOpts = buildParseArgsOptions(definition);
   let actionValues: Record<string, unknown>;
+  let actionPositionals: string[] = [];
 
   try {
-    const { values: parsed } = parseArgs({
+    const { values: parsed, positionals } = parseArgs({
       args: rawArgs,
       strict: true,
+      allowPositionals: true,
       options: {
         ...actionParseOpts,
         "output-format": { type: "string" },
+        json: { type: "boolean" },
         help: { type: "boolean", short: "h" },
       },
     });
     actionValues = parsed as Record<string, unknown>;
+    actionPositionals = positionals;
   } catch (err) {
     throw new Error(
       `${formatError(err)}. Run: sdl-mcp tool ${action} --help`,
     );
   }
 
+  if (actionPositionals.length > 1) {
+    throw new Error(
+      "expected at most one positional JSON object. Run: sdl-mcp tool " +
+        action +
+        " --help",
+    );
+  }
+
+  const positionalArgs = actionPositionals[0]
+    ? parseJsonObjectArg(actionPositionals[0], "positional JSON")
+    : undefined;
+
   // Read stdin JSON if piped
   const stdinArgs = await readStdinJson();
+  const inputArgs =
+    stdinArgs || positionalArgs
+      ? { ...(stdinArgs ?? {}), ...(positionalArgs ?? {}) }
+      : undefined;
 
   // Initialize config (needed for repoId auto-resolution before arg validation)
   const configPath = activateCliConfigPath(options.config);
   const config = loadConfig(configPath);
 
   // Auto-resolve repoId if not specified in flags or stdin
-  if (!actionValues["repo-id"] && (!stdinArgs || !stdinArgs.repoId)) {
+  if (!actionValues["repo-id"] && (!inputArgs || !inputArgs.repoId)) {
     const resolved = resolveRepoId(undefined, config.repos);
     if (resolved) {
       actionValues["repo-id"] = resolved;
@@ -366,10 +407,12 @@ export async function toolDispatchCommand(
   }
 
   // Build handler args (validates required fields — repoId is resolved above)
-  const handlerArgs = parseToolArgs(definition, actionValues, stdinArgs);
+  const handlerArgs = parseToolArgs(definition, actionValues, inputArgs);
   validateCliActionConstraints(action, handlerArgs);
   const outputFormat = detectOutputFormat(
-    (actionValues["output-format"] as string) ?? options.outputFormat,
+    actionValues.json === true
+      ? "json"
+      : (actionValues["output-format"] as string) ?? options.outputFormat,
   );
 
   if (isCliProxyMetaAction(action)) {
@@ -403,6 +446,11 @@ export async function toolDispatchCommand(
   // Look up handler
   const entry = actionHandlerMap[action];
   if (!entry) {
+    if (action.startsWith("memory.")) {
+      throw new Error(
+        `disabled action "${action}". Enable with memory.enabled: true in your sdlmcp.config.json.`,
+      );
+    }
     throw new Error(`action "${action}" not found in handler map`);
   }
 

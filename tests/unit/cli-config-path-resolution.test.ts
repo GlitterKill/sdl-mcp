@@ -143,6 +143,85 @@ describe("CLI config path resolution", () => {
     }
   });
 
+  it("skips package development config in read mode when global config exists", () => {
+    const oldConfig = process.env.SDL_CONFIG;
+    const oldConfigPath = process.env.SDL_CONFIG_PATH;
+    const oldConfigHome = process.env.SDL_CONFIG_HOME;
+    const configHome = mkdtempSync(join(tmpdir(), "sdl-config-package-skip-"));
+    const globalConfigPath = join(configHome, "sdlmcp.config.json");
+
+    try {
+      writeFileSync(globalConfigPath, "{}");
+      delete process.env.SDL_CONFIG;
+      delete process.env.SDL_CONFIG_PATH;
+      process.env.SDL_CONFIG_HOME = configHome;
+
+      const resolved = resolveCliConfigPath(undefined, "read");
+      assert.strictEqual(resolved, resolve(globalConfigPath));
+    } finally {
+      if (oldConfig === undefined) {
+        delete process.env.SDL_CONFIG;
+      } else {
+        process.env.SDL_CONFIG = oldConfig;
+      }
+
+      if (oldConfigPath === undefined) {
+        delete process.env.SDL_CONFIG_PATH;
+      } else {
+        process.env.SDL_CONFIG_PATH = oldConfigPath;
+      }
+
+      if (oldConfigHome === undefined) {
+        delete process.env.SDL_CONFIG_HOME;
+      } else {
+        process.env.SDL_CONFIG_HOME = oldConfigHome;
+      }
+
+      rmSync(configHome, { recursive: true, force: true });
+    }
+  });
+
+  it("skips package development config when package cwd casing differs on Windows", () => {
+    if (process.platform !== "win32") {
+      return;
+    }
+
+    const oldCwd = process.cwd();
+    const oldConfig = process.env.SDL_CONFIG;
+    const oldConfigPath = process.env.SDL_CONFIG_PATH;
+    const oldConfigHome = process.env.SDL_CONFIG_HOME;
+    const configHome = mkdtempSync(join(tmpdir(), "sdl-config-package-case-skip-"));
+    const globalConfigPath = join(configHome, "sdlmcp.config.json");
+
+    try {
+      writeFileSync(globalConfigPath, "{}");
+      delete process.env.SDL_CONFIG;
+      delete process.env.SDL_CONFIG_PATH;
+      process.env.SDL_CONFIG_HOME = configHome;
+      process.chdir(oldCwd.toLowerCase());
+
+      const resolved = resolveCliConfigPath(undefined, "read");
+      assert.strictEqual(resolved, resolve(globalConfigPath));
+    } finally {
+      process.chdir(oldCwd);
+      if (oldConfig === undefined) {
+        delete process.env.SDL_CONFIG;
+      } else {
+        process.env.SDL_CONFIG = oldConfig;
+      }
+      if (oldConfigPath === undefined) {
+        delete process.env.SDL_CONFIG_PATH;
+      } else {
+        process.env.SDL_CONFIG_PATH = oldConfigPath;
+      }
+      if (oldConfigHome === undefined) {
+        delete process.env.SDL_CONFIG_HOME;
+      } else {
+        process.env.SDL_CONFIG_HOME = oldConfigHome;
+      }
+      rmSync(configHome, { recursive: true, force: true });
+    }
+  });
   it("falls back to cwd config path in read mode when global config is absent", () => {
     const oldCwd = process.cwd();
     const oldConfig = process.env.SDL_CONFIG;

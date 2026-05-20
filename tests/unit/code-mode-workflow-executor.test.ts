@@ -1,9 +1,26 @@
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert";
+import { resolve } from "node:path";
 import { executeWorkflow } from "../../dist/code-mode/workflow-executor.js";
 import type { ParsedWorkflowRequest } from "../../dist/code-mode/workflow-parser.js";
 import type { CodeModeConfig } from "../../dist/config/types.js";
+import { tokenAccumulator } from "../../dist/mcp/token-accumulator.js";
 import { z } from "zod";
+
+const originalSdlConfig = process.env.SDL_CONFIG;
+const workflowTestConfigPath = resolve("config/sdlmcp.config.json");
+
+before(() => {
+  process.env.SDL_CONFIG = workflowTestConfigPath;
+});
+
+after(() => {
+  if (originalSdlConfig === undefined) {
+    delete process.env.SDL_CONFIG;
+  } else {
+    process.env.SDL_CONFIG = originalSdlConfig;
+  }
+});
 
 // Default test config
 const testConfig: CodeModeConfig = {
@@ -161,6 +178,149 @@ describe("code-mode workflow executor", () => {
     );
   });
 
+  it("charges truncated response tokens against workflow budgets", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        { fn: "testLarge", action: "test.large", args: {} },
+        {
+          fn: "testEcho",
+          action: "test.echo",
+          args: { message: "after truncation" },
+        },
+      ],
+      defaultMaxResponseTokens: 25,
+      budget: { maxTotalTokens: 100 },
+      onError: "continue",
+    };
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+      undefined,
+      { level: "summary" },
+    );
+
+    assert.strictEqual(result.results[0].status, "ok");
+    assert.ok(result.results[0].truncatedResponse);
+    assert.strictEqual(result.results[1].status, "ok");
+    assert.strictEqual(
+      result.totalTokens,
+      result.results.reduce((sum, step) => sum + step.tokens, 0),
+    );
+    assert.ok(result.totalTokens < 100);
+    assert.strictEqual(result.trace?.steps[0]?.tokens, result.results[0].tokens);
+    assert.strictEqual(result.trace?.totals.tokens, result.totalTokens);
+  });
+
+
+  it("records truncated response tokens in session usage", async () => {
+    tokenAccumulator.reset();
+    try {
+      const request: ParsedWorkflowRequest = {
+        repoId: "test",
+        steps: [{ fn: "testLarge", action: "test.large", args: {} }],
+        defaultMaxResponseTokens: 25,
+        onError: "continue",
+      };
+
+      const result = await executeWorkflow(
+        request,
+        createMockActionMap(),
+        testConfig,
+      );
+      const snapshot = tokenAccumulator.getSnapshot();
+
+      assert.strictEqual(result.results[0].status, "ok");
+      assert.ok(result.results[0].truncatedResponse);
+      assert.strictEqual(snapshot.totalSdlTokens, result.totalTokens);
+      assert.strictEqual(
+        snapshot.toolBreakdown.find((entry) => entry.tool === "testLarge")
+          ?.sdlTokens,
+        result.results[0].tokens,
+      );
+    } finally {
+      tokenAccumulator.reset();
+    }
+  });
+  it("keeps trace total tokens aligned with onlyFinalResult suppression", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        { fn: "testLarge", action: "test.large", args: {} },
+        {
+          fn: "testEcho",
+          action: "test.echo",
+          args: { message: "final response" },
+        },
+      ],
+      defaultMaxResponseTokens: 25,
+      onlyFinalResult: true,
+      onError: "continue",
+    };
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+      undefined,
+      { level: "verbose" },
+    );
+
+    assert.strictEqual(result.intermediateResultsSuppressed, 1);
+    assert.strictEqual(result.totalTokens, result.results[1].tokens);
+    assert.strictEqual(result.trace?.steps[0]?.tokens, 0);
+    assert.strictEqual(result.trace?.steps[0]?.resultPreview, undefined);
+    assert.strictEqual(
+      result.trace?.steps.reduce((sum, step) => sum + step.tokens, 0),
+      result.totalTokens,
+    );
+    assert.strictEqual(result.trace?.totals.tokens, result.totalTokens);
+  });
+
+  it("keeps final trace entry when onlyFinalResult follows a soft skip", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        {
+          fn: "memoryQuery",
+          action: "memory.query",
+          args: { query: "auth" },
+          internal: false,
+          skip: true,
+          skipReason: "disabled function 'memory.query'",
+        },
+        {
+          fn: "testEcho",
+          action: "test.echo",
+          args: { message: "final response" },
+        },
+      ],
+      onlyFinalResult: true,
+      onError: "continue",
+    };
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+      undefined,
+      { level: "verbose" },
+    );
+
+    assert.strictEqual(result.intermediateResultsSuppressed, 1);
+    assert.strictEqual(result.results[0].tokens, 0);
+    assert.strictEqual(result.results[1].status, "ok");
+    assert.strictEqual(result.trace?.steps.length, 1);
+    assert.strictEqual(result.trace?.steps[0]?.stepIndex, 1);
+    assert.strictEqual(result.trace?.steps[0]?.tokens, result.results[1].tokens);
+    assert.doesNotMatch(
+      result.trace?.steps[0]?.summary ?? "",
+      /suppressed by onlyFinalResult/,
+    );
+    assert.strictEqual(result.trace?.totals.tokens, result.totalTokens);
+  });
   it("exposes a truncated primitive step's continuation handle to later steps", async () => {
     const request: ParsedWorkflowRequest = {
       repoId: "test",

@@ -660,6 +660,8 @@ export function parseToolDispatchOptions(
   // Output format
   if (typeof values["output-format"] === "string") {
     options.outputFormat = values["output-format"];
+  } else if (values.json === true) {
+    options.outputFormat = "json";
   }
 
   return options;

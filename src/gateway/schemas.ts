@@ -607,7 +607,7 @@ const RuntimeExecuteAction = z.object({
   maxResponseLines: z
     .number()
     .int()
-    .min(10)
+    .min(5)
     .max(1000)
     .default(RUNTIME_DEFAULT_MAX_RESPONSE_LINES),
   persistOutput: z.boolean().default(true),

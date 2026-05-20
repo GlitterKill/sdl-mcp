@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { writeFileSync, mkdtempSync } from "node:fs";
+import { writeFileSync, mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, it } from "node:test";
 import assert from "node:assert";
@@ -13,13 +13,34 @@ import {
 function cliMetaEnv(): NodeJS.ProcessEnv {
   const dir = mkdtempSync(join(tmpdir(), "sdl-cli-meta-"));
   const blocker = join(dir, "not-a-directory");
+  const configPath = join(dir, "sdlmcp.config.json");
   writeFileSync(blocker, "blocks graph init");
+  writeFileSync(configPath, JSON.stringify({ repos: [], policy: {} }));
   return {
     ...process.env,
+    SDL_CONFIG: configPath,
     SDL_GRAPH_DB_PATH: join(blocker, "graph.lbug"),
   };
 }
 
+function cliMemoryDisabledEnv(): NodeJS.ProcessEnv {
+  const dir = mkdtempSync(join(tmpdir(), "sdl-cli-memory-disabled-"));
+  const configPath = join(dir, "sdlmcp.config.json");
+  const graphPath = join(dir, "graph.lbug");
+  writeFileSync(
+    configPath,
+    JSON.stringify({
+      repos: [{ repoId: "demo-repo", rootPath: process.cwd() }],
+      policy: {},
+      graphDatabase: { path: graphPath },
+    }),
+  );
+  return {
+    ...process.env,
+    SDL_CONFIG: configPath,
+    SDL_GRAPH_DB_PATH: graphPath,
+  };
+}
 function runTool(args: string[], env: NodeJS.ProcessEnv = process.env) {
   return spawnSync(process.execPath, [resolve("dist/cli/index.js"), "tool", ...args], {
     cwd: process.cwd(),
@@ -53,6 +74,27 @@ describe("cli-tool-dispatch", () => {
       ];
       // It should match the second repo because it matches cwd
       assert.strictEqual(resolveRepoId(undefined, repos), "cwd-repo");
+    });
+
+    it("prefers the longest path-boundary match for sibling repo roots", () => {
+      const originalCwd = process.cwd();
+      const root = mkdtempSync(join(tmpdir(), "sdl-repo-match-"));
+      const appRoot = join(root, "app");
+      const appToolsRoot = join(root, "app-tools");
+      mkdirSync(appRoot, { recursive: true });
+      mkdirSync(appToolsRoot, { recursive: true });
+
+      try {
+        process.chdir(appToolsRoot);
+        const repos = [
+          { repoId: "app", rootPath: appRoot },
+          { repoId: "app-tools", rootPath: appToolsRoot },
+        ];
+
+        assert.strictEqual(resolveRepoId(undefined, repos), "app-tools");
+      } finally {
+        process.chdir(originalCwd);
+      }
     });
 
     it("matches cwd to a subdirectory of a configured repo", () => {
@@ -129,6 +171,37 @@ describe("cli-tool-dispatch", () => {
       assert.ok(payload.actions?.some((entry) => entry.action === "manual"));
     });
 
+    it("accepts positional JSON and --json for action arguments", () => {
+      const payload = parseSuccessfulJson(
+        runTool([
+          "action.search",
+          "{\"query\":\"manual\",\"limit\":1}",
+          "--json",
+        ], cliMetaEnv()),
+      ) as { actions?: Array<{ action: string }> };
+
+      assert.equal(payload.actions?.length, 1);
+      assert.equal(payload.actions?.[0]?.action, "manual");
+    });
+
+    it("reports disabled memory actions instead of missing handlers", () => {
+      const result = runTool([
+        "memory.query",
+        "--repo-id",
+        "demo-repo",
+        "--query",
+        "auth",
+        "--json",
+      ], cliMemoryDisabledEnv());
+
+      const combined = result.stdout + "\n" + result.stderr;
+      assert.notStrictEqual(result.status, 0);
+      assert.match(
+        combined,
+        /disabled action "memory\.query"|memory\.enabled: true/,
+      );
+      assert.doesNotMatch(combined, /not found in handler map/);
+    });
     it("runs sdl.action.search as an equivalent alias", () => {
       const args = [
         "--query",

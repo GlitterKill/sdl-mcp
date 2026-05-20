@@ -87,7 +87,7 @@ export function getActiveActionToFn(): Record<string, string> {
 const MANUAL_TEMPLATE = `// SDL-MCP API - use sdl.context for context retrieval, sdl.workflow for multi-step operations
 // repoId is set in the workflow envelope, not per-step.
 // Reference prior step results with ${"$"}N (e.g., ${"$"}0.results[0].symbolId).
-// Discovery limits: sdl.action.search limit <= 50; workflowContinuationGet limit <= 1000.
+// Discovery limits: sdl.action.search limit <= 50; workflowContinuationGet limit <= 1000; runtimeExecute maxResponseLines 5..1000; shell runtime requires code.
 // sdl.context budgets accept maxTokens/maxEstimatedTokens, not maxCards; use sliceBuild for card-count budgets.
 // In workflow pipelines, force wireFormat:"json" for symbol.search/sliceBuild when later ${"$"}N refs need object fields.
 

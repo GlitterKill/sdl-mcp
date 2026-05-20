@@ -314,7 +314,6 @@ export async function executeWorkflow(
         }
         const tokens =
           WorkflowBudgetTracker.estimateResultTokens(resultForResponse);
-        budget.record(tokens, stepDuration);
 
         const stepResult: WorkflowStepResult = {
           stepIndex: i,
@@ -325,6 +324,7 @@ export async function executeWorkflow(
           status: "ok",
         };
         applyStepTruncation(stepResult, step, request.defaultMaxResponseTokens);
+        budget.record(stepResult.tokens, stepDuration);
         attachStepMetadataToPriorResult(priorResults, i, result, stepResult);
         stepResults.push(stepResult);
 
@@ -337,11 +337,11 @@ export async function executeWorkflow(
               "internal",
               "ok",
               stepDuration,
-              tokens,
+              stepResult.tokens,
               traceOpts,
               traceCatalog,
               resolvedArgs,
-              result,
+              stepResult.result,
             ),
           );
         }
@@ -418,7 +418,6 @@ export async function executeWorkflow(
         const stepDuration = Date.now() - stepStart;
         const tokens = WorkflowBudgetTracker.estimateResultTokens(result);
 
-        budget.record(tokens, stepDuration);
         // Record usage for session-level token tracking (per-step attribution)
         const rawCtx =
           result && typeof result === "object"
@@ -454,8 +453,6 @@ export async function executeWorkflow(
             /* graceful degradation: keep rawEquivalent = tokens */
           }
         }
-        tokenAccumulator.recordUsage(step.fn, tokens, rawEquivalent);
-
         if (etagCache) {
           const etagExtractStartedAt = timer.start();
           etagCache.extractEtags(step.action, result);
@@ -472,6 +469,8 @@ export async function executeWorkflow(
           status: "ok",
         };
         applyStepTruncation(stepResult, step, request.defaultMaxResponseTokens);
+        budget.record(stepResult.tokens, stepDuration);
+        tokenAccumulator.recordUsage(step.fn, stepResult.tokens, rawEquivalent);
         attachStepMetadataToPriorResult(priorResults, i, result, stepResult);
         stepResults.push(stepResult);
 
@@ -484,11 +483,11 @@ export async function executeWorkflow(
               "gateway",
               "ok",
               stepDuration,
-              tokens,
+              stepResult.tokens,
               traceOpts,
               traceCatalog,
               resolvedArgs,
-              result,
+              stepResult.result,
             ),
           );
         }
@@ -669,6 +668,21 @@ export async function executeWorkflow(
     );
     // Signal that intermediate results were suppressed
     response.intermediateResultsSuppressed = suppressedCount;
+    if (response.trace) {
+      response.trace.steps = response.trace.steps.map((step) => {
+        if (step.stepIndex >= lastIdx) {
+          return step;
+        }
+        const redactedStep = { ...step };
+        delete redactedStep.resultPreview;
+        return {
+          ...redactedStep,
+          tokens: 0,
+          summary: `${step.fn}: intermediate result suppressed by onlyFinalResult`,
+        };
+      });
+      response.trace.totals.tokens = response.totalTokens;
+    }
   }
   timer.record("workflow.responseAssembly", responseStartedAt);
 

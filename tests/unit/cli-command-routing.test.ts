@@ -373,6 +373,15 @@ describe("CLI command routing", () => {
       assert.deepStrictEqual(options.rawArgs, ["--query", "auth"]);
     });
 
+    it("maps global --json to JSON output for tool dispatch", () => {
+      const options = parseToolDispatchOptions(
+        ["symbol.search", "--query", "auth"],
+        global,
+        { json: true },
+      );
+      assert.strictEqual(options.outputFormat, "json");
+    });
+
     it("handles --list flag", () => {
       const options = parseToolDispatchOptions(["--list"], global, { list: true });
       assert.strictEqual(options.list, true);

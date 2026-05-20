@@ -160,6 +160,9 @@ sdl-mcp tool repo.status --repo-id my-repo
 # Compact JSON for scripts
 sdl-mcp tool repo.status --repo-id my-repo --output-format json-compact
 
+# Full JSON alias with one positional JSON object
+sdl-mcp tool action.search '{"query":"manual","limit":1}' --json
+
 # Explicit pretty output
 sdl-mcp tool symbol.search --repo-id my-repo --query "auth" --output-format pretty
 
@@ -167,13 +170,13 @@ sdl-mcp tool symbol.search --repo-id my-repo --query "auth" --output-format pret
 sdl-mcp tool agent.feedback.query --repo-id my-repo --output-format table
 ```
 
-Supported values are `json`, `json-compact`, `pretty`, and `table`.
+Supported values are `json`, `json-compact`, `pretty`, and `table`. `--json` is a shorthand for `--output-format json`.
 
 ---
 
 ## Argument Handling
 
-The CLI parser supports the same common aliases accepted by MCP requests, including `--repo-id`, `--root-path`, `--symbol-id`, `--symbol-ids`, `--from-version`, `--to-version`, and `--slice-handle`.
+The CLI parser supports the same common aliases accepted by MCP requests, including `--repo-id`, `--root-path`, `--symbol-id`, `--symbol-ids`, `--from-version`, `--to-version`, and `--slice-handle`. It also accepts one positional JSON object, which is merged with stdin JSON before named flags override both.
 
 For actions that accept nested `budget` objects, the CLI provides flat convenience flags:
 

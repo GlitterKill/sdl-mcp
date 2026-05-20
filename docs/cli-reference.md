@@ -280,13 +280,16 @@ sdl-mcp tool search.edit --repo-id my-repo --mode preview --targeting text --que
 sdl-mcp tool file.write --repo-id my-repo --file-path config/app.json --json-path server.port --json-value 8080
 sdl-mcp tool response.get --repo-id my-repo --handle response-myrepo-1770000000000-0123456789abcdef --max-bytes 8192
 sdl-mcp tool action.search --query manual --summary-only
+sdl-mcp tool action.search '{"query":"manual","limit":1}' --json
 sdl-mcp tool sdl.manual --actions action.search --format json
 ```
 
 Key options:
 
 - `--output-format <json|json-compact|pretty|table>` (default: `pretty`)
+- `--json` (alias for `--output-format json`)
 - `--repo-id <ID>` (passed through to the underlying tool)
+- One positional JSON object may be supplied before flags and is merged with stdin JSON before flag overrides
 - All remaining arguments are forwarded as tool parameters
 
 The CLI parser accepts the canonical action fields plus the same common aliases accepted by MCP requests, such as `--repo-id`, `--symbol-id`, `--symbol-ids`, `--from-version`, `--to-version`, and `--slice-handle`.
