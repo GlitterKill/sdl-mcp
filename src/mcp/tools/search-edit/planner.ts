@@ -59,12 +59,24 @@ export interface SearchEditFilters {
   extensions?: string[];
 }
 
-export interface SearchEditPreviewRequest {
-  repoId: string;
+export interface SearchEditBatchOperation {
+  id?: string;
   targeting: "text" | "symbol";
   query: SearchEditQueryInput;
   filters?: SearchEditFilters;
   editMode: FileWriteResponse["mode"];
+  maxFiles?: number;
+  maxMatchesPerFile?: number;
+  maxTotalMatches?: number;
+}
+
+export interface SearchEditPreviewRequest {
+  repoId: string;
+  targeting?: "text" | "symbol";
+  query?: SearchEditQueryInput;
+  filters?: SearchEditFilters;
+  editMode?: FileWriteResponse["mode"];
+  operations?: SearchEditBatchOperation[];
   previewContextLines?: number;
   maxFiles?: number;
   maxMatchesPerFile?: number;
@@ -72,9 +84,17 @@ export interface SearchEditPreviewRequest {
   createBackup?: boolean;
 }
 
+interface SearchEditSingleOperationRequest extends SearchEditPreviewRequest {
+  targeting: "text" | "symbol";
+  query: SearchEditQueryInput;
+  editMode: FileWriteResponse["mode"];
+  operations?: undefined;
+}
+
 export interface PreviewFileSkip {
   path: string;
   reason: string;
+  operationId?: string;
 }
 
 export interface PreviewSnippets {
@@ -92,6 +112,12 @@ export interface PreviewFileEntry {
   editMode: FileWriteResponse["mode"];
   snippets: PreviewSnippets;
   indexedSource: boolean;
+  operationIds?: string[];
+  operations?: Array<{
+    id: string;
+    matchCount: number;
+    editMode: FileWriteResponse["mode"];
+  }>;
 }
 
 export interface PreviewResult {
@@ -700,11 +726,428 @@ function buildFileWriteRequestForMode(
   }
 }
 
+interface OperationPreview {
+  operationId: string;
+  request: SearchEditSingleOperationRequest;
+  preview: PreviewResult;
+}
+
+interface OperationFilePlan {
+  operationId: string;
+  request: SearchEditSingleOperationRequest;
+  edit: PlannedFileEdit;
+}
+
+interface SourceRange {
+  operationId: string;
+  start: number;
+  end: number;
+}
+
+interface SourceEdit extends SourceRange {
+  replacement: string;
+}
+
+function coerceSingleSearchEditRequest(
+  request: SearchEditPreviewRequest,
+): SearchEditSingleOperationRequest {
+  if (!request.targeting || !request.query || !request.editMode) {
+    throw new ValidationError(
+      "search.edit preview requires targeting, query, and editMode unless operations[] is provided",
+    );
+  }
+  return {
+    ...request,
+    targeting: request.targeting,
+    query: request.query,
+    editMode: request.editMode,
+    operations: undefined,
+  };
+}
+
+function operationIdFor(
+  operation: SearchEditBatchOperation,
+  index: number,
+): string {
+  const trimmed = operation.id?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : `op-${index + 1}`;
+}
+
+function assertUniqueOperationIds(
+  operations: SearchEditBatchOperation[],
+): void {
+  const seen = new Map<string, number>();
+  for (let index = 0; index < operations.length; index += 1) {
+    const operationId = operationIdFor(operations[index], index);
+    const firstIndex = seen.get(operationId);
+    if (firstIndex !== undefined) {
+      throw new ValidationError(
+        `Duplicate search.edit operation id "${operationId}" at operations[${index}] (first used at operations[${firstIndex}]).`,
+      );
+    }
+    seen.set(operationId, index);
+  }
+}
+
+function buildOperationRequest(
+  base: SearchEditPreviewRequest,
+  operation: SearchEditBatchOperation,
+): SearchEditSingleOperationRequest {
+  return {
+    repoId: base.repoId,
+    targeting: operation.targeting,
+    query: operation.query,
+    filters: operation.filters ?? base.filters,
+    editMode: operation.editMode,
+    previewContextLines: base.previewContextLines,
+    maxFiles: operation.maxFiles ?? base.maxFiles,
+    maxMatchesPerFile: operation.maxMatchesPerFile ?? base.maxMatchesPerFile,
+    maxTotalMatches: operation.maxTotalMatches ?? base.maxTotalMatches,
+    createBackup: base.createBackup,
+    operations: undefined,
+  };
+}
+
+function changedSourceEdits(before: string, after: string): Array<Omit<SourceEdit, "operationId">> {
+  if (before === after) return [];
+  const sharedLength = Math.min(before.length, after.length);
+  let prefix = 0;
+  while (prefix < sharedLength && before[prefix] === after[prefix]) {
+    prefix += 1;
+  }
+  let beforeEnd = before.length;
+  let afterEnd = after.length;
+  while (
+    beforeEnd > prefix &&
+    afterEnd > prefix &&
+    before[beforeEnd - 1] === after[afterEnd - 1]
+  ) {
+    beforeEnd -= 1;
+    afterEnd -= 1;
+  }
+  return [{
+    start: prefix,
+    end: beforeEnd,
+    replacement: after.slice(prefix, afterEnd),
+  }];
+}
+
+function applySourceEdits(content: string, edits: SourceEdit[]): string {
+  const sorted = [...edits].sort((a, b) => a.start - b.start || a.end - b.end);
+  const chunks: string[] = [];
+  let cursor = 0;
+  for (const edit of sorted) {
+    if (edit.start < cursor) {
+      throw new ValidationError(
+        `search.edit operation ${edit.operationId} overlaps an earlier planned range`,
+      );
+    }
+    chunks.push(content.slice(cursor, edit.start), edit.replacement);
+    cursor = edit.end;
+  }
+  chunks.push(content.slice(cursor));
+  return chunks.join("");
+}
+
+function dominantEol(content: string): "\r\n" | "\n" {
+  const crlfCount = (content.match(/\r\n/g) || []).length;
+  const lfCount = (content.match(/(?<!\r)\n/g) || []).length;
+  return crlfCount > lfCount ? "\r\n" : "\n";
+}
+
+function expandReplacementString(
+  replacement: string,
+  match: RegExpExecArray,
+  input: string,
+): string {
+  return replacement.replace(
+    /\$(\$|&|`|'|[1-9][0-9]?|<[^>]+>)/g,
+    (token, marker: string) => {
+      if (marker === "$") return "$";
+      if (marker === "&") return match[0];
+      if (marker === "`") return input.slice(0, match.index);
+      if (marker === "'") return input.slice(match.index + match[0].length);
+      if (marker.startsWith("<") && marker.endsWith(">")) {
+        const groupName = marker.slice(1, -1);
+        return match.groups?.[groupName] ?? "";
+      }
+      const groupIndex = Number(marker);
+      if (Number.isInteger(groupIndex) && groupIndex < match.length) {
+        return match[groupIndex] ?? "";
+      }
+      if (marker.length === 2) {
+        const firstGroupIndex = Number(marker[0]);
+        if (firstGroupIndex < match.length) {
+          return `${match[firstGroupIndex] ?? ""}${marker[1]}`;
+        }
+      }
+      return token;
+    },
+  );
+}
+
+function collectReplacePatternSourceEdits(
+  content: string,
+  request: SearchEditSingleOperationRequest,
+  operationId: string,
+): SourceEdit[] {
+  if (request.query.replacement === undefined) {
+    throw new ValidationError(
+      "replacePattern editMode requires query.replacement",
+    );
+  }
+  const regex = compileSearchRegex(request.query, request.query.global ?? true);
+  const normalizeReplacementEol = dominantEol(content) === "\r\n";
+  const edits: SourceEdit[] = [];
+  const matchDeadline = Date.now() + MATCH_TIME_BUDGET_MS;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(content)) !== null) {
+    if (Date.now() > matchDeadline) {
+      throw new ValidationError("Regex match collection exceeded time budget");
+    }
+    let replacement = expandReplacementString(
+      request.query.replacement,
+      match,
+      content,
+    );
+    if (normalizeReplacementEol) {
+      replacement = replacement.replace(/(?<!\r)\n/g, "\r\n");
+    }
+    edits.push({
+      operationId,
+      start: match.index,
+      end: match.index + match[0].length,
+      replacement,
+    });
+    if (!regex.global) break;
+    if (match[0].length === 0) regex.lastIndex += 1;
+  }
+  return edits;
+}
+
+function sourceEditsForPlan(
+  content: string,
+  plan: OperationFilePlan,
+): SourceEdit[] {
+  const precise =
+    plan.request.editMode === "replacePattern"
+      ? collectReplacePatternSourceEdits(content, plan.request, plan.operationId)
+      : [];
+  if (
+    precise.length > 0 &&
+    applySourceEdits(content, precise) === plan.edit.newContent
+  ) {
+    return precise;
+  }
+  return changedSourceEdits(content, plan.edit.newContent).map((range) => ({
+    ...range,
+    operationId: plan.operationId,
+  }));
+}
+
+function rangesOverlap(left: SourceRange, right: SourceRange): boolean {
+  const leftZeroWidth = left.start === left.end;
+  const rightZeroWidth = right.start === right.end;
+  if (leftZeroWidth && rightZeroWidth) {
+    return left.start === right.start;
+  }
+  if (leftZeroWidth) {
+    return left.start >= right.start && left.start < right.end;
+  }
+  if (rightZeroWidth) {
+    return right.start >= left.start && right.start < left.end;
+  }
+  return left.start < right.end && right.start < left.end;
+}
+
+function describeRange(range: SourceRange): string {
+  return `${range.start}-${range.end}`;
+}
+
+async function planSearchEditBatchPreview(
+  request: SearchEditPreviewRequest,
+  operations: SearchEditBatchOperation[],
+): Promise<PreviewResult> {
+  assertUniqueOperationIds(operations);
+  const operationPreviews: OperationPreview[] = [];
+  for (let index = 0; index < operations.length; index += 1) {
+    const operation = operations[index];
+    const operationRequest = buildOperationRequest(request, operation);
+    operationPreviews.push({
+      operationId: operationIdFor(operation, index),
+      request: operationRequest,
+      preview: await planSingleSearchEditPreview(operationRequest),
+    });
+  }
+
+  const filePlans = new Map<string, OperationFilePlan[]>();
+  const filesSkipped: PreviewFileSkip[] = [];
+  let retrievalEvidence: RetrievalEvidence | undefined;
+  let partial = false;
+  for (const operationPreview of operationPreviews) {
+    retrievalEvidence ??= operationPreview.preview.retrievalEvidence;
+    partial = partial || operationPreview.preview.summary.partial === true;
+    for (const skipped of operationPreview.preview.summary.filesSkipped) {
+      filesSkipped.push({ ...skipped, operationId: operationPreview.operationId });
+    }
+    for (const edit of operationPreview.preview.edits) {
+      const plans = filePlans.get(edit.relPath) ?? [];
+      plans.push({
+        operationId: operationPreview.operationId,
+        request: operationPreview.request,
+        edit,
+      });
+      filePlans.set(edit.relPath, plans);
+    }
+  }
+
+  const edits: PlannedFileEdit[] = [];
+  const preconditions: PlanPrecondition[] = [];
+  const fileEntries: PreviewFileEntry[] = [];
+  const maxFiles = request.maxFiles ?? DEFAULT_MAX_FILES;
+  const maxMatchesPerFile =
+    request.maxMatchesPerFile ?? DEFAULT_MAX_MATCHES_PER_FILE;
+  const maxTotalMatches =
+    request.maxTotalMatches ?? DEFAULT_MAX_TOTAL_MATCHES;
+  const contextLines =
+    request.previewContextLines ?? DEFAULT_PREVIEW_CONTEXT_LINES;
+  const createBackup = request.createBackup ?? true;
+  let aggregateBytes = 0;
+  let totalMatches = 0;
+
+  for (const [rel, plans] of Array.from(filePlans).sort(([a], [b]) => a.localeCompare(b))) {
+    if (edits.length >= maxFiles) {
+      filesSkipped.push({ path: rel, reason: "maxFiles-reached" });
+      partial = true;
+      continue;
+    }
+    if (totalMatches >= maxTotalMatches) {
+      filesSkipped.push({ path: rel, reason: "maxTotalMatches-reached" });
+      partial = true;
+      continue;
+    }
+
+    const firstEdit = plans[0].edit;
+    const abs = firstEdit.absPath;
+    const stats = await stat(abs);
+    const buf = await readFile(abs);
+    const content = buf.toString("utf-8");
+    const contentSha = createHash("sha256").update(buf).digest("hex");
+    const sourceEdits: SourceEdit[] = [];
+
+    for (const plan of plans) {
+      const ranges = sourceEditsForPlan(content, plan);
+      for (const range of ranges) {
+        const overlap = sourceEdits.find((candidate) =>
+          rangesOverlap(candidate, range),
+        );
+        if (overlap) {
+          throw new ValidationError(
+            `search.edit operations ${overlap.operationId} and ${range.operationId} in ${rel} overlap: ranges ${describeRange(overlap)} and ${describeRange(range)}`,
+          );
+        }
+        sourceEdits.push(range);
+      }
+    }
+
+    sourceEdits.sort((a, b) => a.start - b.start || a.end - b.end);
+    const newContent = applySourceEdits(content, sourceEdits);
+    let matchCount = 0;
+    const operationSummaries: NonNullable<PreviewFileEntry["operations"]> = [];
+    const operationIds: string[] = [];
+    for (const plan of plans) {
+      matchCount += plan.edit.matchCount;
+      operationIds.push(plan.operationId);
+      operationSummaries.push({
+        id: plan.operationId,
+        matchCount: plan.edit.matchCount,
+        editMode: plan.edit.editMode,
+      });
+    }
+    if (matchCount > maxMatchesPerFile) {
+      filesSkipped.push({ path: rel, reason: `matches-exceed-per-file-cap:${maxMatchesPerFile}` });
+      partial = true;
+      continue;
+    }
+    if (totalMatches + matchCount > maxTotalMatches) {
+      filesSkipped.push({ path: rel, reason: `matches-exceed-total-cap:${maxTotalMatches}` });
+      partial = true;
+      continue;
+    }
+
+    if (newContent === content) {
+      filesSkipped.push({ path: rel, reason: "no-change" });
+      continue;
+    }
+
+    const editBytes = Buffer.byteLength(newContent, "utf-8");
+    aggregateBytes += editBytes;
+    if (aggregateBytes > MAX_PLAN_BYTES) {
+      aggregateBytes -= editBytes;
+      filesSkipped.push({ path: rel, reason: "aggregate-byte-cap-exceeded" });
+      partial = true;
+      continue;
+    }
+
+    const indexedSource = isIndexedSource(rel);
+    preconditions.push({
+      relPath: rel,
+      absPath: abs,
+      sha256: contentSha,
+      mtimeMs: stats.mtimeMs,
+    });
+    edits.push({
+      relPath: rel,
+      absPath: abs,
+      newContent,
+      createBackup,
+      fileExists: true,
+      indexedSource,
+      matchCount,
+      editMode: plans.length === 1 ? plans[0].edit.editMode : "overwrite",
+      operationIds,
+    });
+    fileEntries.push({
+      file: rel,
+      matchCount,
+      editMode: plans.length === 1 ? plans[0].edit.editMode : "overwrite",
+      snippets: buildSearchEditPreviewSnippets(content, newContent, contextLines, null),
+      indexedSource,
+      operationIds,
+      operations: operationSummaries,
+    });
+    totalMatches += matchCount;
+  }
+
+  return {
+    edits,
+    preconditions,
+    ...(retrievalEvidence ? { retrievalEvidence } : {}),
+    summary: {
+      filesMatched: edits.length,
+      matchesFound: totalMatches,
+      filesEligible: filePlans.size,
+      filesSkipped,
+      fileEntries,
+      ...(partial ? { partial: true } : {}),
+    },
+  };
+}
+
+export async function planSearchEditPreview(
+  request: SearchEditPreviewRequest,
+): Promise<PreviewResult> {
+  if (request.operations && request.operations.length > 0) {
+    return planSearchEditBatchPreview(request, request.operations);
+  }
+  return planSingleSearchEditPreview(coerceSingleSearchEditRequest(request));
+}
+
 /**
  * Build the preview plan for a request. Caller stores the result.
  */
-export async function planSearchEditPreview(
-  request: SearchEditPreviewRequest,
+async function planSingleSearchEditPreview(
+  request: SearchEditSingleOperationRequest,
 ): Promise<PreviewResult> {
   const conn = await getLadybugConn();
   const repo = await ladybugDb.getRepo(conn, request.repoId);

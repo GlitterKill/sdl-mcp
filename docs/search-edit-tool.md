@@ -26,8 +26,8 @@ MCP responses are human-first. Preview and apply results show concise visible su
 | Tool              | Use when                                                                                                         |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `sdl.file.write`  | Single file, single mode (replaceLines, replacePattern, jsonPath, insertAt, append, overwrite). Immediate apply. |
-| `sdl.symbol.edit` | One symbol-scoped edit with AST/range/file preconditions and parse-after validation.                             |
-| `sdl.search.edit` | Many files, one consistent edit shape, and you want atomic precondition checks + rollback across the batch.      |
+| `sdl.symbol.edit` | One symbol-scoped edit with AST/range/file preconditions and parse-after validation. Not a batch primitive.      |
+| `sdl.search.edit` | Many files, one consistent edit shape, or a multi-replacement `operations[]` batch with one shared plan/apply.   |
 | `sdl.context`     | Reading-only context retrieval for explain/debug/review/implement.                                               |
 | `sdl.workflow`    | Multi-step pipelines that aren't search+edit (runtime execution, data transforms, orchestration).                |
 
@@ -59,6 +59,40 @@ See [`sdl.symbol.edit`](./symbol-edit-tool.md) when the edit target is a single 
   "responseMode": "inline"
 }
 ```
+
+For multiple replacement operations, send `operations[]` instead of top-level
+`targeting`, `query`, and `editMode`. SDL-MCP previews each operation, rejects
+overlapping ranges in the same file, and merges all non-overlapping edits for a
+file into one planned write:
+
+```json
+{
+  "repoId": "<repoId>",
+  "mode": "preview",
+  "operations": [
+    {
+      "id": "rename-import",
+      "targeting": "text",
+      "query": { "literal": "oldName", "replacement": "newName", "global": true },
+      "editMode": "replacePattern",
+      "filters": { "include": ["src/**/*.ts"] }
+    },
+    {
+      "id": "update-comment",
+      "targeting": "text",
+      "query": { "literal": "Old label", "replacement": "New label", "global": true },
+      "editMode": "replacePattern",
+      "filters": { "include": ["src/**/*.ts"] }
+    }
+  ],
+  "previewContextLines": 2,
+  "responseMode": "inline"
+}
+```
+
+Each operation may set its own `filters`, `maxFiles`,
+`maxMatchesPerFile`, and `maxTotalMatches`. The top-level limits still cap the
+merged preview and apply plan.
 
 ### `targeting`
 
@@ -104,6 +138,11 @@ payload.
       "file": "src/auth/token.ts",
       "matchCount": 2,
       "editMode": "replacePattern",
+      "operationIds": ["rename-import", "update-comment"],
+      "operations": [
+        { "id": "rename-import", "matchCount": 1, "editMode": "replacePattern" },
+        { "id": "update-comment", "matchCount": 1, "editMode": "replacePattern" }
+      ],
       "snippets": {
         "before": " 41 | const oldName = ...\n>42 | oldName();",
         "after": " 41 | const newName = ...\n>42 | newName();",

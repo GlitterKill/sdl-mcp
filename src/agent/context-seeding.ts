@@ -210,6 +210,21 @@ const CONCEPT_DIRECTORY_MAP: Array<{ keywords: string[]; paths: string[] }> = [
   },
   {
     keywords: [
+      "cli positional json",
+      "positional json",
+      "positional json args",
+      "stdin json",
+      "tool json",
+      "tool args",
+    ],
+    paths: [
+      "src/cli/commands/tool-dispatch.ts",
+      "src/cli/commands/tool-arg-parser.ts",
+      "src/cli/commands/tool-actions.ts",
+    ],
+  },
+  {
+    keywords: [
       "evidence type",
       "evidence types",
       "symbolcard",

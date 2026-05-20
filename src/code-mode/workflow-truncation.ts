@@ -7,6 +7,21 @@ function estimateJsonTokens(json: string): number {
   return Math.ceil(json.length / 4);
 }
 
+function safeJsonStringify(value: unknown): string {
+  try {
+    const json = JSON.stringify(value, (_key, item) => {
+      if (typeof item === "bigint") return item.toString();
+      if (typeof item === "function") return "[Function]";
+      if (typeof item === "symbol") return item.toString();
+      if (item === undefined) return null;
+      return item;
+    });
+    return json ?? "null";
+  } catch {
+    return JSON.stringify(String(value));
+  }
+}
+
 // --- Continuation store ---
 
 interface ContinuationEntry {
@@ -55,7 +70,7 @@ function smartTruncate(result: unknown, maxTokens: number): unknown {
     const kept: unknown[] = [];
     let chars = 2; // []
     for (const item of result) {
-      const itemJson = JSON.stringify(item);
+      const itemJson = safeJsonStringify(item);
       if (chars + itemJson.length + 1 > maxChars) break;
       kept.push(item);
       chars += itemJson.length + 1;
@@ -69,7 +84,7 @@ function smartTruncate(result: unknown, maxTokens: number): unknown {
     let chars = 2; // {}
 
     for (const [key, value] of Object.entries(obj)) {
-      const valueJson = JSON.stringify(value);
+      const valueJson = safeJsonStringify(value);
       const entrySize = key.length + valueJson.length + 4; // "key":value,
 
       if (chars + entrySize > maxChars) {
@@ -113,7 +128,7 @@ export function truncateStepResult(
   result: unknown,
   maxTokens: number,
 ): TruncationResult {
-  const json = JSON.stringify(result);
+  const json = safeJsonStringify(result);
   const originalTokens = estimateJsonTokens(json);
 
   if (originalTokens <= maxTokens) {
@@ -143,7 +158,7 @@ export function truncateStepResult(
   });
 
   const truncated = smartTruncate(result, maxTokens);
-  const keptTokens = estimateJsonTokens(JSON.stringify(truncated));
+  const keptTokens = estimateJsonTokens(safeJsonStringify(truncated));
 
   return { truncated, handle, originalTokens, keptTokens };
 }

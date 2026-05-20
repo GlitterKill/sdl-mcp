@@ -147,6 +147,56 @@ describe("FileGatewayRequestSchema", () => {
       assert.equal(result.op, "searchEditPreview");
       assert.deepEqual(result.filters, { include: ["src/**/*.ts"] });
     });
+
+    it("parses preview with operations batch", () => {
+      const result = FileGatewayRequestSchema.parse({
+        op: "searchEditPreview",
+        repoId: "test-repo",
+        operations: [
+          {
+            id: "one",
+            targeting: "text",
+            query: { literal: "foo", replacement: "bar" },
+            editMode: "replacePattern",
+            filters: { include: ["src/a.ts"] },
+          },
+          {
+            id: "two",
+            targeting: "text",
+            query: { literal: "baz", replacement: "qux" },
+            editMode: "replacePattern",
+            filters: { include: ["src/b.ts"] },
+          },
+        ],
+      });
+
+      assert.equal(result.op, "searchEditPreview");
+      assert.equal(result.operations.length, 2);
+      assert.equal(result.operations[0].id, "one");
+    });
+
+    it("rejects operations batch with duplicate ids", () => {
+      assert.throws(() => {
+        FileGatewayRequestSchema.parse({
+          op: "searchEditPreview",
+          repoId: "test-repo",
+          operations: [
+            {
+              id: "rename",
+              targeting: "text",
+              query: { literal: "foo", replacement: "bar" },
+              editMode: "replacePattern",
+            },
+            {
+              id: "rename",
+              targeting: "text",
+              query: { literal: "baz", replacement: "qux" },
+              editMode: "replacePattern",
+            },
+          ],
+        });
+      }, /duplicate/i);
+    });
   });
 
   describe("op: searchEditApply", () => {

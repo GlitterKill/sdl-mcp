@@ -45,6 +45,20 @@ describe("workflow-truncation", () => {
     assert.ok(Object.keys(truncObj).length < 50);
   });
 
+  it("does not crash when object entries serialize to undefined", () => {
+    const data = {
+      omitted: undefined,
+      callback: () => "not-json",
+      symbol: Symbol("not-json"),
+      content: "x".repeat(5_000),
+    };
+
+    const result = truncateStepResult(data, 25);
+
+    assert.ok(result.handle);
+    assert.ok(result.originalTokens > result.keptTokens);
+  });
+
   it("truncates large string values", () => {
     const data = { content: "x".repeat(5000) };
     const result = truncateStepResult(data, 100);

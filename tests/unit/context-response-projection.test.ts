@@ -4,6 +4,7 @@ import {
   isBroadContextResult,
   projectBroadContextResult,
   projectContextResultForUsageAccounting,
+  projectToolResultForModelContent,
 } from "../../dist/mcp/context-response-projection.js";
 
 describe("context-response-projection", () => {
@@ -188,6 +189,34 @@ describe("context-response-projection", () => {
       assert.equal(projected.etag, "etag-123");
       assert.equal(projected.answer, broadResult.answer);
       assert.deepEqual(projected._rawContext, { rawTokens: 1000 });
+    });
+  });
+
+  describe("projectToolResultForModelContent", () => {
+    it("keeps requested workflow trace data visible in MCP content", () => {
+      const projected = projectToolResultForModelContent(
+        "sdl.workflow",
+        {
+          results: [],
+          trace: {
+            steps: [{ stepIndex: 0, fn: "repoStatus" }],
+            totals: { durationMs: 1, tokens: 2, stepsExecuted: 1 },
+          },
+        },
+        { trace: { level: "verbose" } },
+      ) as Record<string, unknown>;
+
+      assert.ok(projected.trace);
+    });
+
+    it("continues to hide trace-like internal fields from other tools", () => {
+      const projected = projectToolResultForModelContent(
+        "sdl.context",
+        { success: true, trace: { internal: true } },
+        {},
+      ) as Record<string, unknown>;
+
+      assert.equal(projected.trace, undefined);
     });
   });
 });

@@ -46,6 +46,7 @@ export interface PlannedFileEdit {
   indexedSource: boolean;
   matchCount: number;
   editMode: FileWriteResponse["mode"];
+  operationIds?: string[];
 }
 
 export interface SymbolEditStoredMetadata {

@@ -578,7 +578,8 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "buffer.status": {},
   "runtime.execute": {
     runtime: "node",
-    args: ["--version"],
+    args: ["-e", "process.stdin.pipe(process.stdout)"],
+    stdin: "hello\n",
     outputMode: "summary",
   },
   "runtime.queryOutput": {
@@ -608,9 +609,14 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
 
   "search.edit": {
     mode: "preview",
-    targeting: "text",
-    query: { literal: "oldName", replacement: "newName", global: true },
-    editMode: "replacePattern",
+    operations: [
+      {
+        id: "rename",
+        targeting: "text",
+        query: { literal: "oldName", replacement: "newName", global: true },
+        editMode: "replacePattern",
+      },
+    ],
   },
 };
 
@@ -682,7 +688,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
     "Request buffer checkpoint. Zero-file success responses include a message explaining why no clean buffers were checkpointed.",
   "buffer.status": "Get buffer status",
   "runtime.execute":
-    "Execute runtime command. Shell runtime requires code; direct args-only shell execution is rejected. maxResponseLines accepts 5-1000 lines (default 100).",
+    "Execute runtime command. Shell runtime requires code; direct args-only shell execution is rejected. Use stdin for multiline scripts/input; maxResponseLines accepts 5-1000 lines (default 100).",
   "runtime.queryOutput": "Query stored command output by keywords",
   "response.get": "Retrieve a stored large tool response by handle",
   "memory.store": "Store a development memory",
@@ -694,7 +700,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "file.write":
     "Write to a single file (indexed or non-indexed) with targeted modes (line replace, pattern replace, JSON path, insert, append); use search.edit for cross-file batching",
   "search.edit":
-    "Cross-file search-and-edit in two phases (preview + apply) with server-side plan handles, sha256 preconditions, rollback, and ignored/dot-directory refusal; use file.write for explicit single-file writes where allowed.",
+    "Cross-file search-and-edit in two phases (preview + apply) with server-side plan handles, sha256 preconditions, rollback, and ignored/dot-directory refusal; use operations[] for multi-replacement batches and file.write for explicit single-file writes where allowed.",
   "scip.ingest":
     "Ingest a pre-built SCIP index to overlay compiler-grade cross-references onto the symbol graph",
   "semantic.enrichment.refresh":
@@ -710,7 +716,7 @@ const META_TOOL_DESCRIPTIONS: Record<string, string> = {
     "Load the focused SDL-MCP manual after discovery. Use this before composing workflow steps.",
   context:
     "Preferred first tool for explain, debug, review, implement, understand, or investigate prompts. Retrieves task-shaped code context directly and should be chosen before workflow for context retrieval.",
-  file: "Unified sdl.file gateway for non-indexed file reads, targeted writes, two-phase search edits, symbol edit wrappers, and plan-bound previewWindow/sourceWindow code windows. previewWindow/sourceWindow need planHandle, reason, expectedLines, identifiersToFind, and symbolId for the planned indexed source file.",
+  file: "Unified sdl.file gateway for non-indexed file reads, targeted writes, two-phase search edits (including searchEditPreview operations[] batches), symbol edit wrappers, and plan-bound previewWindow/sourceWindow code windows. previewWindow/sourceWindow need planHandle, reason, expectedLines, identifiersToFind, and symbolId for the planned indexed source file.",
   workflow:
     "Preferred first tool for execute, runtime, transform, batch, or pipeline prompts. Runs multi-step workflows with $N result piping, runtime execution, data transforms, and batch mutations.",
 };
@@ -772,7 +778,7 @@ const META_TOOL_EXAMPLES: Record<string, Record<string, unknown>> = {
     repoId: "<repoId>",
     steps: [
       { fn: "repoStatus" },
-      { fn: "runtimeExecute", args: { runtime: "node", args: ["--version"], maxResponseLines: 5 } },
+      { fn: "runtimeExecute", args: { runtime: "node", args: ["-e", "process.stdin.pipe(process.stdout)"], stdin: "hello\n", maxResponseLines: 5 } },
     ],
   },
 };

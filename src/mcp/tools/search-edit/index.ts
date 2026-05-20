@@ -37,7 +37,7 @@ function attachRaw<T extends object>(response: T, rawBytes: number): T {
 }
 
 function summarizeSkippedFiles(
-  skipped: Array<{ path: string; reason: string }>,
+  skipped: Array<{ path: string; reason: string; operationId?: string }>,
 ): Pick<
   SearchEditPreviewResponse,
   "filesSkipped" | "filesSkippedTotal" | "filesSkippedTruncated" | "filesSkippedByReason"
@@ -113,6 +113,7 @@ async function handlePreview(
     query: request.query,
     filters: request.filters,
     editMode: request.editMode,
+    operations: request.operations,
     previewContextLines: request.previewContextLines,
     maxFiles: request.maxFiles,
     maxMatchesPerFile: request.maxMatchesPerFile,

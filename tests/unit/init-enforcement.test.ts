@@ -98,6 +98,13 @@ describe("init agent enforcement", () => {
     );
     assert.ok(existsSync(join(tempDir, ".claude", "agents", "explore-sdl.md")));
 
+    const agentsText = readFileSync(join(tempDir, "AGENTS.md"), "utf8");
+    const claudeText = readFileSync(join(tempDir, "CLAUDE.md"), "utf8");
+    for (const generatedText of [agentsText, claudeText]) {
+      assert.match(generatedText, /searchEditPreview operations\[\]/);
+      assert.match(generatedText, /stdin/);
+    }
+
     const settings = JSON.parse(
       readFileSync(join(tempDir, ".claude", "settings.json"), "utf8"),
     );
@@ -152,6 +159,13 @@ describe("init agent enforcement", () => {
     assert.ok(
       existsSync(join(tempDir, ".codex", "hooks", "force-sdl-mcp.mjs")),
     );
+
+    const agentsText = readFileSync(join(tempDir, "AGENTS.md"), "utf8");
+    const codexText = readFileSync(join(tempDir, "CODEX.md"), "utf8");
+    for (const generatedText of [agentsText, codexText]) {
+      assert.match(generatedText, /searchEditPreview operations\[\]/);
+      assert.match(generatedText, /stdin/);
+    }
 
     const sessionHookPath = join(
       tempDir,

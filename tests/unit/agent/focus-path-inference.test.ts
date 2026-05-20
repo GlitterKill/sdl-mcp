@@ -56,6 +56,16 @@ describe("inferFocusPathsFromTaskText", () => {
     );
   });
 
+  it("infers CLI tool JSON parsing files for positional JSON queries", () => {
+    const paths = inferFocusPathsFromTaskText(
+      "CLI positional JSON handling",
+    );
+    assert.ok(
+      paths.includes("src/cli/commands/tool-dispatch.ts"),
+      `Expected tool-dispatch.ts in ${JSON.stringify(paths)}`,
+    );
+  });
+
   it("infers src/policy/ for gating/policy queries", () => {
     const paths = inferFocusPathsFromTaskText(
       "Review the policy enforcement in code.needWindow gating logic",

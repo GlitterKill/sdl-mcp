@@ -153,6 +153,88 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     assert.ok(result.stdoutSummary.includes("hello"));
   });
 
+  it("should pass stdin through the handler without echoing it as metadata", async () => {
+    const { handleRuntimeExecute } =
+      await import("../../dist/mcp/tools/runtime.js");
+    const stdin = "alpha\nbeta\n";
+
+    const result = await handleRuntimeExecute({
+      repoId,
+      runtime: "node",
+      args: [
+        "-e",
+        "process.stdin.setEncoding('utf8'); let input = ''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => console.log(input.split(/\\n/).filter(Boolean).length));",
+      ],
+      stdin,
+      persistOutput: false,
+      outputMode: "summary",
+    });
+
+    assert.equal(result.status, "success");
+    assert.ok(result.stdoutSummary.includes("2"));
+    assert.equal(result.stdinBytes, Buffer.byteLength(stdin, "utf-8"));
+    assert.match(result.stdinSha256 ?? "", /^[a-f0-9]{64}$/);
+    assert.doesNotMatch(JSON.stringify(result), /alpha\\nbeta/);
+  });
+
+  it("should surface quoting warnings for base64 command workarounds", async () => {
+    const { handleRuntimeExecute } =
+      await import("../../dist/mcp/tools/runtime.js");
+
+    const result = await handleRuntimeExecute({
+      repoId,
+      runtime: "node",
+      args: [
+        "-e",
+        "console.log(Buffer.from('YQ==', 'base64').toString('utf8'))",
+      ],
+      persistOutput: false,
+      outputMode: "minimal",
+    });
+
+    assert.equal(result.status, "success");
+    assert.ok(result.quotingWarnings?.some((warning) => /base64/i.test(warning)));
+    assert.ok(
+      result.quotingWarnings?.some((warning) => /stdin|searchEditPreview/i.test(warning)),
+    );
+  });
+
+  it("should not warn about balanced quotes inside direct argv code", async () => {
+    const { handleRuntimeExecute } =
+      await import("../../dist/mcp/tools/runtime.js");
+
+    const result = await handleRuntimeExecute({
+      repoId,
+      runtime: "node",
+      args: ["-e", "console.log(\"it's fine\")"],
+      persistOutput: false,
+      outputMode: "minimal",
+    });
+
+    assert.equal(result.status, "success");
+    assert.notEqual(
+      result.quotingWarnings?.some((warning) => /unbalanced quotes/i.test(warning)),
+      true,
+    );
+  });
+
+  it("should preserve minimal stderr summaries for short failures", async () => {
+    const { handleRuntimeExecute } =
+      await import("../../dist/mcp/tools/runtime.js");
+
+    const result = await handleRuntimeExecute({
+      repoId,
+      runtime: "node",
+      args: ["-e", "console.error('short-failure'); process.exit(2)"],
+      persistOutput: false,
+      outputMode: "minimal",
+    });
+
+    assert.equal(result.status, "failure");
+    assert.equal(result.exitCode, 2);
+    assert.match(result.stderrSummary, /short-failure/);
+  });
+
   it("should include denied reasons in the response", async () => {
     writeConfig({
       enabled: false,

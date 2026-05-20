@@ -246,18 +246,20 @@ describe("index.refresh diagnostics", () => {
       "number",
       "expected finalizeIndexing.fileSummaries timing",
     );
-    // Incremental runs defer cluster/process/algorithm work to the
-    // derived-refresh queue (see Section 5 of the 2026-04-17 plan), so
-    // clustersAndProcesses.* timings are intentionally absent here.
+    // Incremental runs now compute derived state inline before returning, so
+    // status cannot report stale derived state because a background refresh
+    // failed or timed out after the index call completed.
     assert.equal(
-      "clustersAndProcesses.loadSymbols" in result.diagnostics.timings.phases,
-      false,
-      "expected clustersAndProcesses.loadSymbols to be deferred on incremental",
+      typeof result.diagnostics.timings.phases[
+        "clustersAndProcesses.loadSymbols"
+      ],
+      "number",
+      "expected clustersAndProcesses.loadSymbols to run inline on incremental",
     );
     assert.equal(
-      "clustersAndProcesses.processWrite" in result.diagnostics.timings.phases,
-      false,
-      "expected clustersAndProcesses.processWrite to be deferred on incremental",
+      typeof result.diagnostics.timings.phases.clustersAndProcesses,
+      "number",
+      "expected clustersAndProcesses phase to run inline on incremental",
     );
     assert.equal(
       typeof result.diagnostics.timings.phases[

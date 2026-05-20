@@ -67,21 +67,20 @@ This catches most setup issues quickly.
 Start by checking the server log named by `sdl-mcp info`. The two timeout
 families have different effects and different controls.
 
-- `derived-refresh timed out after ...` means the background derived-state
-  refresh that follows an incremental index run exceeded
-  `SDL_DERIVED_REFRESH_TIMEOUT_MS` (default `120000`). The current worker aborts
-  the refresh signal, records `derivedState.lastError`, leaves derived state
-  stale until a later successful refresh, and logs when timed-out work settles.
-  Core index data from the incremental run remains available. On server startup,
-  SDL-MCP scans configured repositories for persisted stale `derivedState` rows
-  and re-enqueues the saved `targetVersionId`; the startup log includes a
-  `Derived-state recovery: ...` summary so operators can tell whether recovery
-  ran.
+- `derived-refresh timed out after ...` means background startup recovery for a
+  stale persisted `derivedState` row exceeded `SDL_DERIVED_REFRESH_TIMEOUT_MS`
+  (default `120000`). Current index refreshes compute derived state inline
+  before returning, but older interrupted runs can still leave stale rows that
+  startup recovery tries to repair. The worker aborts the refresh signal,
+  records `derivedState.lastError`, leaves derived state stale until a later
+  successful refresh, and logs when timed-out work settles. The startup log
+  includes a `Derived-state recovery: ...` summary so operators can tell whether
+  recovery ran.
 - `Tool dispatch queue timed out after ...` means a foreground MCP tool request
   waited longer than `concurrency.toolQueueTimeoutMs` (default `30000`) for a
   dispatch slot before its handler started. The failed tool response is
   retryable and classified as `unavailable`; running tools or indexing work are
-  not canceled. If deferred derived-refresh work is running, foreground tool
+  not canceled. If startup derived-refresh recovery is running, foreground tool
   calls wait for it to finish instead of using this timeout, and server-side
   index progress reports `Deferred work is running (..., NN%)` when a progress
   estimate is available.
@@ -96,17 +95,20 @@ For derived refresh diagnosis, inspect:
 sdl-mcp tool repo.status --repo-id <repo-id>
 ```
 
-Check `derivedState.stale`, the dirty flags, and `derivedState.lastError`.
-Increase `SDL_DERIVED_REFRESH_TIMEOUT_MS` only when the refresh is legitimately
-long-running. If it repeatedly times out at the same phase, treat that as an
-indexing or LadybugDB contention issue first.
+Check `derivedState.stale`, the dirty flags, `derivedState.lastError`, and
+`derivedState.nextBestAction`. For stale state from an interrupted run, the
+normal recovery is `sdl.index.refresh` with `mode: "incremental"`; use a full
+refresh if stale flags remain. Increase `SDL_DERIVED_REFRESH_TIMEOUT_MS` only
+when startup recovery is legitimately long-running. If it repeatedly times out
+at the same phase, treat that as an indexing or LadybugDB contention issue
+first.
 
 For tool dispatch stalls, inspect the warning fields in the log. When
 `indexingActive` is `true`, SDL-MCP intentionally narrows foreground tool
 dispatch to one slot to reduce database contention. Raise
 `concurrency.toolQueueTimeoutMs` only when queued tools should wait longer during
 ordinary indexing dispatch. If the CLI reports a delegated server-busy failure,
-retry after the server finishes its deferred work; the CLI will not fall back to
+retry after the server finishes its active index or startup recovery work; the CLI will not fall back to
 direct indexing while the live HTTP server owns the graph DB lock. Do not raise
 `maxToolConcurrency` first unless you have evidence that the database can
 tolerate more concurrent foreground work.

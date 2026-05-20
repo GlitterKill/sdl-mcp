@@ -584,8 +584,8 @@ export async function handleRepoStatus(
     }
 
     // Derived-state freshness (clusters/processes/algorithms/summaries/
-    // embeddings). Surfaces dirty flags so callers can tell that an
-    // incremental run deferred downstream work; cheap single-row lookup.
+    // embeddings). Surfaces dirty flags and recovery guidance if a prior
+    // post-index derived computation was interrupted or failed.
     let derivedState: Awaited<
       ReturnType<
         typeof import("../../db/ladybug-derived-state.js").getDerivedStateSummary

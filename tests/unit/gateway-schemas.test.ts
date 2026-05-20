@@ -200,6 +200,29 @@ describe("Gateway schemas", () => {
       assert.strictEqual(result.success, true);
     });
 
+    it("rejects search.edit preview operations with duplicate ids", () => {
+      const result = RepoGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "search.edit",
+        mode: "preview",
+        operations: [
+          {
+            id: "rename",
+            targeting: "text",
+            query: { literal: "oldName", replacement: "newName" },
+            editMode: "replacePattern",
+          },
+          {
+            id: "rename",
+            targeting: "text",
+            query: { literal: "otherName", replacement: "newName" },
+            editMode: "replacePattern",
+          },
+        ],
+      });
+      assert.strictEqual(result.success, false);
+    });
+
     it("validates symbol.edit preview action", () => {
       const result = RepoGatewaySchema.safeParse({
         repoId: "test-repo",
@@ -246,6 +269,17 @@ describe("Gateway schemas", () => {
         usefulSymbols: ["sym1"],
       });
       assert.strictEqual(result.success, true);
+    });
+
+    it("rejects runtime.execute stdin above the 512 KiB UTF-8 byte limit", () => {
+      const result = AgentGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "runtime.execute",
+        runtime: "node",
+        args: ["-e", "process.stdin.resume()"],
+        stdin: "\u00e9".repeat(256 * 1024 + 1),
+      });
+      assert.strictEqual(result.success, false);
     });
   });
 

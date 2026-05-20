@@ -397,37 +397,72 @@ const FileReadAction = z.object({
   ...SessionDeltaFields,
 });
 
+const SearchEditGatewayQuery = z.object({
+  literal: z.string().optional(),
+  regex: z.string().optional(),
+  replacement: z.string().optional(),
+  global: z.boolean().optional(),
+  symbolRef: SymbolRefFields.optional(),
+  symbolIds: z.array(z.string()).optional(),
+  replaceLines: z
+    .object({
+      start: z.number().int().min(0),
+      end: z.number().int().min(0),
+      content: z.string(),
+    })
+    .optional(),
+  insertAt: z
+    .object({
+      line: z.number().int().min(0),
+      content: z.string(),
+    })
+    .optional(),
+  content: z.string().optional(),
+  append: z.string().optional(),
+});
+
+const SearchEditGatewayEditMode = z.enum([
+  "replacePattern",
+  "replaceLines",
+  "insertAt",
+  "append",
+  "overwrite",
+]);
+
+const SearchEditGatewayFilters = z.object({
+  include: z.array(z.string()).optional(),
+  exclude: z.array(z.string()).optional(),
+  extensions: z.array(z.string()).optional(),
+});
+
+const SearchEditGatewayOperation = z.object({
+  id: z.string().min(1).max(80).optional(),
+  targeting: z.enum(["text", "symbol"]),
+  query: SearchEditGatewayQuery,
+  filters: SearchEditGatewayFilters.optional(),
+  editMode: SearchEditGatewayEditMode,
+  maxFiles: z.number().int().min(1).max(500).optional(),
+  maxMatchesPerFile: z.number().int().min(1).max(5000).optional(),
+  maxTotalMatches: z.number().int().min(1).max(50000).optional(),
+});
+
+const RuntimeStdinAction = z
+  .string()
+  .max(512 * 1024)
+  .refine(
+    (value) => Buffer.byteLength(value, "utf-8") <= 512 * 1024,
+    "stdin must be at most 512 KiB when encoded as UTF-8",
+  );
+
 const SearchEditAction = z
   .object({
     action: z.literal("search.edit"),
     mode: z.enum(["preview", "apply"]),
     targeting: z.enum(["text", "symbol"]).optional(),
-    query: z
-      .object({
-        literal: z.string().optional(),
-        regex: z.string().optional(),
-        replacement: z.string().optional(),
-        global: z.boolean().optional(),
-        symbolRef: SymbolRefFields.optional(),
-        symbolIds: z.array(z.string()).optional(),
-      })
-      .optional(),
-    editMode: z
-      .enum([
-        "replacePattern",
-        "replaceLines",
-        "insertAt",
-        "append",
-        "overwrite",
-      ])
-      .optional(),
-    filters: z
-      .object({
-        include: z.array(z.string()).optional(),
-        exclude: z.array(z.string()).optional(),
-        extensions: z.array(z.string()).optional(),
-      })
-      .optional(),
+    query: SearchEditGatewayQuery.optional(),
+    editMode: SearchEditGatewayEditMode.optional(),
+    operations: z.array(SearchEditGatewayOperation).min(1).max(50).optional(),
+    filters: SearchEditGatewayFilters.optional(),
     previewContextLines: z.number().int().min(0).max(20).optional(),
     maxFiles: z.number().int().min(1).max(1000).optional(),
     maxMatchesPerFile: z.number().int().min(1).max(5000).optional(),
@@ -438,26 +473,57 @@ const SearchEditAction = z
   })
   .superRefine((value, ctx) => {
     if (value.mode === "preview") {
-      if (value.targeting === undefined) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "search.edit preview requires targeting",
-          path: ["targeting"],
+      if (value.operations !== undefined) {
+        const seenOperationIds = new Map<string, number>();
+        value.operations.forEach((operation, index) => {
+          const trimmed = operation.id?.trim();
+          const operationId = trimmed && trimmed.length > 0
+            ? trimmed
+            : `op-${index + 1}`;
+          const firstIndex = seenOperationIds.get(operationId);
+          if (firstIndex !== undefined) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message:
+                `Duplicate search.edit operation id "${operationId}" at operations[${index}] (first used at operations[${firstIndex}]).`,
+              path: ["operations", index, "id"],
+            });
+          } else {
+            seenOperationIds.set(operationId, index);
+          }
         });
-      }
-      if (value.query === undefined) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "search.edit preview requires query",
-          path: ["query"],
-        });
-      }
-      if (value.editMode === undefined) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "search.edit preview requires editMode",
-          path: ["editMode"],
-        });
+        for (const field of ["targeting", "query", "editMode"] as const) {
+          if (value[field] !== undefined) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message:
+                "operations[] is mutually exclusive with top-level targeting, query, and editMode",
+              path: [field],
+            });
+          }
+        }
+      } else {
+        if (value.targeting === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "search.edit preview requires targeting",
+            path: ["targeting"],
+          });
+        }
+        if (value.query === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "search.edit preview requires query",
+            path: ["query"],
+          });
+        }
+        if (value.editMode === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "search.edit preview requires editMode",
+            path: ["editMode"],
+          });
+        }
       }
     } else if (value.planHandle === undefined) {
       ctx.addIssue({
@@ -596,6 +662,7 @@ const RuntimeExecuteAction = z.object({
   executable: z.string().min(1).optional(),
   args: z.array(z.string()).max(RUNTIME_MAX_ARG_COUNT).default([]),
   code: z.string().max(RUNTIME_MAX_CODE_LENGTH).optional(),
+  stdin: RuntimeStdinAction.optional(),
   relativeCwd: z.string().default("."),
   timeoutMs: z
     .number()

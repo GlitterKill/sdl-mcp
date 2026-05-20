@@ -1,4 +1,5 @@
 import { spawn, execFileSync } from "child_process";
+import { createHash } from "crypto";
 import { mkdtemp, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -135,14 +136,27 @@ export async function execute(
   let stdoutTruncated = false;
   let stderrTruncated = false;
 
+  const stdinBuffer =
+    request.stdin !== undefined ? Buffer.from(request.stdin, "utf-8") : undefined;
+  const stdinSha256 = stdinBuffer
+    ? createHash("sha256").update(stdinBuffer).digest("hex")
+    : undefined;
+
   const child = spawn(request.executable, request.args, {
     cwd: request.cwd,
     env: request.env,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [stdinBuffer ? "pipe" : "ignore", "pipe", "pipe"],
     shell: false,
     detached: !IS_WINDOWS,
     windowsHide: true,
   });
+
+  if (stdinBuffer && child.stdin) {
+    // Commands may exit or close stdin before the buffered write completes.
+    // Swallow the stream error so the child exit status remains authoritative.
+    child.stdin.on("error", () => {});
+    child.stdin.end(stdinBuffer);
+  }
 
   child.stdout?.on("data", (chunk: Buffer | string) => {
     const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
@@ -246,6 +260,9 @@ export async function execute(
     stderrTruncated,
     totalStdoutBytes,
     totalStderrBytes,
+    ...(stdinBuffer
+      ? { stdinBytes: stdinBuffer.length, stdinSha256 }
+      : {}),
   };
 }
 

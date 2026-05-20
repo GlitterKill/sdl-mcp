@@ -222,6 +222,26 @@ describe("formatToolCallForUser", () => {
     assert.ok(result.includes("1.2k"));
   });
 
+  // --- runtime.execute ---
+
+  it("formats runtime.execute minimal stdout previews and stderr summaries", () => {
+    const result = formatToolCallForUser("sdl.runtime.execute", {}, {
+      status: "failed",
+      exitCode: 1,
+      durationMs: 12,
+      artifactHandle: "runtime-abc",
+      stdoutPreview: "first line",
+      stdoutSummary: "",
+      stderrSummary: "error tail",
+    });
+    assert.ok(result !== null);
+    assert.ok(result.includes("runtime.execute -> failed"));
+    assert.ok(result.includes("stdout:"));
+    assert.ok(result.includes("first line"));
+    assert.ok(result.includes("stderr:"));
+    assert.ok(result.includes("error tail"));
+  });
+
   // --- memory tools ---
 
   it("formats memory.store", () => {

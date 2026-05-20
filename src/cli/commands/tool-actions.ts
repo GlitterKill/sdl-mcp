@@ -1166,6 +1166,12 @@ const runtimeExecute: ActionDefinition = {
       description: "Code to execute (written to temp file)",
     },
     {
+      flag: "--stdin",
+      field: "stdin",
+      type: "string",
+      description: "UTF-8 stdin text for multiline scripts or command input",
+    },
+    {
       flag: "--relative-cwd",
       field: "relativeCwd",
       type: "string",
@@ -1510,6 +1516,13 @@ const searchEdit: ActionDefinition = {
         "Preview edit mode: replacePattern|replaceLines|insertAt|append|overwrite",
     },
     {
+      flag: "--operations",
+      field: "operations",
+      type: "json",
+      description:
+        "Batch preview operations JSON array; mutually exclusive with top-level targeting/query/edit-mode",
+    },
+    {
       flag: "--filters",
       field: "filters",
       type: "json",
@@ -1561,6 +1574,7 @@ const searchEdit: ActionDefinition = {
   ],
   examples: [
     'sdl-mcp tool search.edit --repo-id my-repo --mode preview --targeting text --query \'{"literal":"oldName","replacement":"newName","global":true}\' --edit-mode replacePattern --filters \'{"include":["src/**/*.ts"]}\'',
+    'sdl-mcp tool search.edit --repo-id my-repo --mode preview --operations \'[{"id":"rename","targeting":"text","query":{"literal":"oldName","replacement":"newName","global":true},"editMode":"replacePattern"}]\'',
     'sdl-mcp tool search.edit --repo-id my-repo --mode apply --plan-handle "search-edit-my-repo-1770000000000-abc123"',
   ],
 };

@@ -95,9 +95,13 @@ function modelOptionsFromArgs(
 }
 
 function shouldKeepModelField(
+  toolName: string,
   key: string,
   options: ModelContentProjectionOptions,
 ): boolean {
+  if (toolName === "sdl.workflow" && key === "trace") {
+    return true;
+  }
   if (ALWAYS_INTERNAL_MODEL_FIELDS.has(key)) {
     return false;
   }
@@ -111,11 +115,14 @@ function shouldKeepModelField(
 }
 
 function projectGenericValueForModel(
+  toolName: string,
   value: unknown,
   options: ModelContentProjectionOptions,
 ): unknown {
   if (Array.isArray(value)) {
-    return value.map((item) => projectGenericValueForModel(item, options));
+    return value.map((item) =>
+      projectGenericValueForModel(toolName, item, options),
+    );
   }
   if (!isRecord(value)) {
     return value;
@@ -138,10 +145,10 @@ function projectGenericValueForModel(
       }
       continue;
     }
-    if (!shouldKeepModelField(key, options)) {
+    if (!shouldKeepModelField(toolName, key, options)) {
       continue;
     }
-    projected[key] = projectGenericValueForModel(itemValue, options);
+    projected[key] = projectGenericValueForModel(toolName, itemValue, options);
   }
   return projected;
 }
@@ -259,5 +266,5 @@ export function projectToolResultForModelContent(
     return projectContextResultForModel(result, options);
   }
 
-  return projectGenericValueForModel(result, options);
+  return projectGenericValueForModel(toolName, result, options);
 }

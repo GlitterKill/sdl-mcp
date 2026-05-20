@@ -430,11 +430,14 @@ foreground tools to wait longer. Increasing `maxToolConcurrency` can reintroduce
 database pressure and should not be the first response to indexing-related
 queue waits.
 
-Deferred derived-refresh work is handled differently: foreground tool calls wait
-for that work to finish, and index progress can show the active deferred phase
-with a percentage when the server can derive one. If CLI indexing delegated to a
-live HTTP server fails with a server-busy dispatch timeout, retry after the
-server finishes its deferred work; the CLI does not open the same graph DB
+Startup derived-refresh recovery is handled differently from ordinary
+foreground tool dispatch: foreground tool calls wait for that recovery to
+finish, and index progress can show the active deferred phase with a percentage
+when the server can derive one. Current index refreshes compute derived state
+inline before returning; the background recovery path is for stale persisted rows
+left by older interrupted runs. If CLI indexing delegated to a live HTTP server
+fails with a server-busy dispatch timeout, retry after the server finishes its
+active index or startup recovery work; the CLI does not open the same graph DB
 directly while the server owns the lock. Tune `toolQueueTimeoutMs` only when
 longer foreground waits are acceptable.
 
@@ -628,13 +631,13 @@ When both `scip.enabled` and `scip.generator.enabled` are true, SDL-MCP auto-add
 | `SDL_CONSOLE_LOGGING`            | Mirror logs to stderr                                     |
 | `SDL_LOG_FORMAT`                 | `json` or `text`                                          |
 | `SDL_MCP_DISABLE_NATIVE_ADDON`   | Force TypeScript indexing engine                          |
-| `SDL_DERIVED_REFRESH_TIMEOUT_MS` | Timeout for background derived-state refresh work after incremental indexing. Default: `120000` |
+| `SDL_DERIVED_REFRESH_TIMEOUT_MS` | Timeout for background startup recovery of stale derived-state rows. Default: `120000` |
 | `ANTHROPIC_API_KEY`              | Hosted semantic-summary provider credential               |
 
 `SDL_DERIVED_REFRESH_TIMEOUT_MS` accepts a positive integer number of
 milliseconds. Invalid or non-positive values are ignored. This is intentionally
 an environment variable rather than a config-file field because it controls
-process-level background work rather than a per-repo index scan setting.
+process-level startup recovery work rather than a per-repo index scan setting.
 
 ## Validation and Inspection
 

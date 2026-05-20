@@ -136,6 +136,38 @@ describe("execute", () => {
     assert.strictEqual(result.stdoutTruncated, false);
   });
 
+  it("should write stdin to the child process and report metadata", async () => {
+    const stdin = "first line\nsecond line\n";
+    const result = await execute(
+      makeRequest({
+        args: [
+          "-e",
+          "process.stdin.setEncoding('utf8'); let input = ''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => process.stdout.write(input.toUpperCase()));",
+        ],
+        stdin,
+      }),
+    );
+
+    assert.strictEqual(result.status, "success");
+    assert.strictEqual(result.exitCode, 0);
+    assert.strictEqual(result.stdout.toString("utf-8"), stdin.toUpperCase());
+    assert.strictEqual(result.stdinBytes, Buffer.byteLength(stdin, "utf-8"));
+    assert.match(result.stdinSha256 ?? "", /^[a-f0-9]{64}$/);
+  });
+
+  it("should not crash when the child exits before consuming stdin", async () => {
+    const result = await execute(
+      makeRequest({
+        args: ["-e", "process.exit(0)"],
+        stdin: "x".repeat(512 * 1024),
+      }),
+    );
+
+    assert.strictEqual(result.status, "success");
+    assert.strictEqual(result.exitCode, 0);
+    assert.strictEqual(result.stdinBytes, 512 * 1024);
+  });
+
   it("should capture stderr from node process", async () => {
     const result = await execute(
       makeRequest({

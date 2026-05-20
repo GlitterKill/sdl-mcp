@@ -195,6 +195,44 @@ describe("Pre-transform input shape (io: 'input')", () => {
     assert.equal(parsed.maxResponseLines, 5);
   });
 
+
+  it("accepts runtime stdin and exposes it in the input schema", () => {
+    const parsed = RuntimeExecuteRequestSchema.parse({
+      repoId: "test",
+      runtime: "node",
+      args: ["-e", "process.stdin.pipe(process.stdout)"],
+      stdin: "hello\n",
+    });
+    const result = zodSchemaToJsonSchema(RuntimeExecuteRequestSchema) as {
+      properties?: Record<string, unknown>;
+    };
+
+    assert.equal(parsed.stdin, "hello\n");
+    assert.ok(result.properties?.stdin, "has stdin");
+  });
+
+  it("rejects runtime stdin above the 512 KiB limit", () => {
+    assert.throws(() => {
+      RuntimeExecuteRequestSchema.parse({
+        repoId: "test",
+        runtime: "node",
+        args: ["-e", "process.stdin.resume()"],
+        stdin: "x".repeat(512 * 1024 + 1),
+      });
+    });
+  });
+
+  it("rejects runtime stdin above the 512 KiB UTF-8 byte limit", () => {
+    assert.throws(() => {
+      RuntimeExecuteRequestSchema.parse({
+        repoId: "test",
+        runtime: "node",
+        args: ["-e", "process.stdin.resume()"],
+        stdin: "\u00e9".repeat(256 * 1024 + 1),
+      });
+    });
+  });
+
   it("does not throw on transform-bearing tool schemas (the regression)", () => {
     assert.doesNotThrow(
       () => zodSchemaToJsonSchema(PolicySetRequestSchema),

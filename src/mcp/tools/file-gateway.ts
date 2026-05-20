@@ -154,24 +154,84 @@ const FileGatewayWriteSchema = z.object({
   includeDiagnostics: z.boolean().optional(),
 });
 
-const FileGatewaySearchEditPreviewSchema = z.object({
-  op: z.literal("searchEditPreview"),
-  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+const FileGatewaySearchEditBatchOperationSchema = z.object({
+  id: z.string().min(1).max(80).optional(),
   targeting: z.enum(["text", "symbol"]),
   query: SearchEditQuerySchema,
   filters: SearchEditFiltersSchema.optional(),
   editMode: SearchEditEditMode,
-  previewContextLines: z.number().int().min(0).max(20).optional(),
   maxFiles: z.number().int().min(1).max(500).optional(),
   maxMatchesPerFile: z.number().int().min(1).max(5000).optional(),
   maxTotalMatches: z.number().int().min(1).max(50000).optional(),
-  createBackup: z.boolean().optional(),
-  responseMode: z
-    .enum(["inline", "auto", "handle"])
-    .optional()
-    .default("inline"),
-  includeDiagnostics: z.boolean().optional(),
 });
+
+const FileGatewaySearchEditPreviewSchema = z
+  .object({
+    op: z.literal("searchEditPreview"),
+    repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+    targeting: z.enum(["text", "symbol"]).optional(),
+    query: SearchEditQuerySchema.optional(),
+    filters: SearchEditFiltersSchema.optional(),
+    editMode: SearchEditEditMode.optional(),
+    operations: z
+      .array(FileGatewaySearchEditBatchOperationSchema)
+      .min(1)
+      .max(50)
+      .optional(),
+    previewContextLines: z.number().int().min(0).max(20).optional(),
+    maxFiles: z.number().int().min(1).max(500).optional(),
+    maxMatchesPerFile: z.number().int().min(1).max(5000).optional(),
+    maxTotalMatches: z.number().int().min(1).max(50000).optional(),
+    createBackup: z.boolean().optional(),
+    responseMode: z
+      .enum(["inline", "auto", "handle"])
+      .optional()
+      .default("inline"),
+    includeDiagnostics: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const operations = value.operations;
+    if (operations !== undefined) {
+      const seenOperationIds = new Map<string, number>();
+      operations.forEach((operation, index) => {
+        const trimmed = operation.id?.trim();
+        const operationId = trimmed && trimmed.length > 0
+          ? trimmed
+          : `op-${index + 1}`;
+        const firstIndex = seenOperationIds.get(operationId);
+        if (firstIndex !== undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["operations", index, "id"],
+            message:
+              `Duplicate search.edit operation id "${operationId}" at operations[${index}] (first used at operations[${firstIndex}]).`,
+          });
+        } else {
+          seenOperationIds.set(operationId, index);
+        }
+      });
+      for (const field of ["targeting", "query", "editMode"] as const) {
+        if (value[field] !== undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [field],
+            message:
+              "operations[] is mutually exclusive with top-level targeting, query, and editMode.",
+          });
+        }
+      }
+      return;
+    }
+    for (const field of ["targeting", "query", "editMode"] as const) {
+      if (value[field] === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field],
+          message: "Required when operations[] is not provided.",
+        });
+      }
+    }
+  });
 
 const FileGatewaySearchEditApplySchema = z.object({
   op: z.literal("searchEditApply"),

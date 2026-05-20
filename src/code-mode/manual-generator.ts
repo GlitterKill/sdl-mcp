@@ -88,20 +88,24 @@ const MANUAL_TEMPLATE = `// SDL-MCP API - use sdl.context for context retrieval,
 // repoId is set in the workflow envelope, not per-step.
 // Reference prior step results with ${"$"}N (e.g., ${"$"}0.results[0].symbolId).
 // Discovery limits: sdl.action.search limit <= 50; workflowContinuationGet limit <= 1000; runtimeExecute maxResponseLines 5..1000; shell runtime requires code.
-// sdl.context budgets accept maxTokens/maxEstimatedTokens, not maxCards; use sliceBuild for card-count budgets.
-// In workflow pipelines, force wireFormat:"json" for symbol.search/sliceBuild when later ${"$"}N refs need object fields.
+// Edit: symbolEdit one symbol; searchEdit operations[] batch; runtimeExecute stdin for multiline.
+// sdl.context budgets accept maxTokens/maxEstimatedTokens, not maxCards.
+// Use wireFormat:"json" for symbol.search/sliceBuild when ${"$"}N refs need fields.
 
-type RM = "inline"|"auto"|"handle"; type DM = "off"|"auto"; type ResponseHandle = { kind: "responseArtifact"; handle: string; action: "response.get" }; type SQ = { literal?: string; regex?: string; replacement?: string; global?: boolean; symbolRef?: object; symbolIds?: string[] }; type EM = "replacePattern"|"replaceLines"|"insertAt"|"append"|"overwrite"; type SEO = { kind: "replaceSymbol"|"replaceBody"|"replaceSignature"|"insertBefore"|"insertAfter"; content: string } | { kind: "renameLocal"; name: string; replacement: string }; type SR = { startLine: number; startCol: number; endLine: number; endCol: number }
+type RM = "inline"|"auto"|"handle"; type DM = "off"|"auto"; type ResponseHandle = { kind: "responseArtifact"; handle: string; action: "response.get" };
+type SQ = { literal?: string; regex?: string; replacement?: string; global?: boolean; symbolRef?: object; symbolIds?: string[]; replaceLines?: object; insertAt?: object; content?: string; append?: string };
+type EM = "replacePattern"|"replaceLines"|"insertAt"|"append"|"overwrite"; type SEOps = { id?: string; targeting: "text"|"symbol"; query: SQ; editMode: EM; filters?: object; maxFiles?: number; maxMatchesPerFile?: number; maxTotalMatches?: number };
+type SEO = { kind: "replaceSymbol"|"replaceBody"|"replaceSignature"|"insertBefore"|"insertAfter"; content: string } | { kind: "renameLocal"; name: string; replacement: string }; type SR = { startLine: number; startCol: number; endLine: number; endCol: number }
 
 // === Query ===
 /** Search symbols by name/pattern */
 function symbolSearch(p: { query: string; kinds?: string[]; limit?: number; semantic?: boolean }): { results: { symbolId: string; name: string; kind: string; file: string; relevance?: number }[] }
 /** Get symbol card (metadata, deps, metrics) */
-function symbolGetCard(p: { symbolId: string; ifNoneMatch?: string }): { card: { symbolId: string; name: string; kind: string; signature: string; summary: string; deps: object }; etag: string } | { notModified: true }
+function symbolGetCard(p: { symbolId: string; ifNoneMatch?: string }): { card: object; etag: string } | { notModified: true }
 /** Symbol-scoped edit with snapshot preconditions */
 function symbolEdit(p: { mode: "preview"; symbolId?: string; symbolRef?: object; operation: SEO; createBackup?: boolean } | { mode: "apply"; planHandle: string; createBackup?: boolean } | { mode: "applyNow"; symbolId: string; expectedAstFingerprint: string; expectedRange: SR; operation: SEO; createBackup?: boolean }): { mode: "preview"|"apply"; planHandle: string; symbolId: string; file: string; writeTarget: "file"|"draft"; validation: object }
 /** Build dependency graph slice */
-function sliceBuild(p: { taskText?: string; entrySymbols?: string[]; budget?: { maxCards?: number; maxEstimatedTokens?: number }; wireFormat?: "json"|"standard"|"readable"|"compact"|"agent"|"packed"|"auto" }): { sliceHandle: string; slice?: object; spilloverHandle?: string; sliceEtag: object }
+function sliceBuild(p: { taskText?: string; entrySymbols?: string[]; budget?: { maxCards?: number; maxEstimatedTokens?: number }; wireFormat?: "json"|"standard"|"readable"|"compact"|"agent"|"packed"|"auto" }): { sliceHandle: string; slice?: object }
 /** Refresh existing slice (delta only) */
 function sliceRefresh(p: { sliceHandle: string; knownVersion?: string }): { added: object[]; removed: string[]; changed: object[] }
 /** Fetch spillover page */
@@ -117,7 +121,7 @@ function codeSkeleton(p: { symbolId?: string; file?: string; exportedOnly?: bool
 /** Get hot-path excerpt for specific identifiers */
 function codeHotPath(p: { symbolId: string; identifiersToFind: string[]; contextLines?: number; ifNoneMatch?: string }): { excerpt: string; foundIdentifiers: string[]; etag: string } | { notModified: true; etag: string }
 /** Request raw code window (requires justification) */
-function codeNeedWindow(p: { symbolId: string; reason: string; expectedLines: number; identifiersToFind: string[]; maxTokens?: number; responseMode?: RM; deltaMode?: DM; maxDeltaLines?: number }): { code: string; approved: boolean; sessionDelta?: object; delta?: object } | ResponseHandle
+function codeNeedWindow(p: { symbolId: string; reason: string; expectedLines: number; identifiersToFind: string[]; maxTokens?: number; responseMode?: RM; deltaMode?: DM; maxDeltaLines?: number }): object | ResponseHandle
 
 // === Repo ===
 /** Register a repository */
@@ -125,9 +129,9 @@ function repoRegister(p: { rootPath: string }): { repoId: string }
 /** Get repository status */
 function repoStatus(): { status: object }
 /** Get codebase overview */
-function repoOverview(p: { level?: "stats" | "directories" | "full"; ifNoneMatch?: string }): { overview: object; etag: string } | { notModified: true; etag: string }
+function repoOverview(p: { level?: "stats" | "directories" | "full"; ifNoneMatch?: string }): object
 /** Refresh index */
-function indexRefresh(p: { mode: "full" | "incremental"; async?: boolean; includeDiagnostics?: boolean }): { ok: true; repoId: string; versionId?: string; changedFiles?: number; async?: true; operationId?: string; message?: string }
+function indexRefresh(p: { mode: "full" | "incremental"; async?: boolean; includeDiagnostics?: boolean }): object
 /** Get policy config */
 function policyGet(): { policy: object }
 /** Set policy config */
@@ -135,7 +139,7 @@ function policySet(p: { policyPatch: { maxWindowLines?: number; maxWindowTokens?
 
 // === SCIP ===
 /** Ingest a pre-built SCIP index to overlay compiler-grade cross-references */
-function scipIngest(p: { indexPath: string; dryRun?: boolean }): { status: "ingested" | "alreadyIngested" | "dryRun"; documentsProcessed: number; symbolsMatched: number; edgesCreated: number }
+function scipIngest(p: { indexPath: string; dryRun?: boolean }): object
 /** Refresh semantic enrichment source selection */
 function semanticEnrichmentRefresh(p: { dryRun?: boolean; force?: boolean; install?: boolean; languages?: string[] }): { status: string }
 /** Report semantic enrichment status */
@@ -161,8 +165,8 @@ function bufferPush(p: { eventType: "open"|"change"|"save"|"close"|"checkpoint";
 function bufferCheckpoint(): { checkpointed: boolean }
 /** Get buffer status */
 function bufferStatus(): { status: object }
-/** Execute runtime command */
-function runtimeExecute(p: { runtime: string; executable?: string; args?: string[]; code?: string; relativeCwd?: string; timeoutMs?: number; queryTerms?: string[]; maxResponseLines?: number; persistOutput?: boolean; outputMode?: "minimal"|"summary"|"intent" }): { status: string; exitCode: number; durationMs: number; artifactHandle?: string; stdoutSummary?: string }
+/** Execute runtime command; pass stdin for multiline scripts/input instead of quote-heavy shell payloads */
+function runtimeExecute(p: { runtime: string; executable?: string; args?: string[]; code?: string; stdin?: string; relativeCwd?: string; timeoutMs?: number; queryTerms?: string[]; maxResponseLines?: number; persistOutput?: boolean; outputMode?: "minimal"|"summary"|"intent" }): { status: string; exitCode: number; durationMs: number; artifactHandle?: string; stdoutSummary?: string; stdinBytes?: number; stdinSha256?: string; quotingWarnings?: string[] }
 /** Query stored runtime output by keywords */
 function runtimeQueryOutput(p: { artifactHandle: string; queryTerms: string[]; maxExcerpts?: number; contextLines?: number; stream?: "stdout"|"stderr"|"both" }): { excerpts: object[] }
 /** Retrieve a large tool response by handle */
@@ -176,8 +180,8 @@ function usageStats(p: { scope?: "session" | "history" | "both"; since?: string;
 /** Read non-indexed file content (templates, configs, docs) */
 function fileRead(p: { filePath: string; maxBytes?: number; offset?: number; limit?: number; search?: string; searchContext?: number; jsonPath?: string; responseMode?: RM; deltaMode?: DM; maxDeltaLines?: number }): { content: string; bytes: number; totalLines: number; returnedLines: number; truncated: boolean; sessionDelta?: object; delta?: object } | ResponseHandle
 function fileWrite(p: { filePath: string; content?: string; replaceLines?: { start: number; end: number; content: string }; replacePattern?: { pattern: string; replacement: string; global?: boolean }; jsonPath?: string; jsonValue?: unknown; insertAt?: { line: number; content: string }; append?: string; createBackup?: boolean; createIfMissing?: boolean }): { filePath: string; bytesWritten: number; linesWritten: number; mode: string; backupPath?: string; replacementCount?: number }
-/** Cross-file search-and-edit: mode "preview" computes a plan; mode "apply" executes with sha256 preconditions and rollback */
-function searchEdit(p: { mode: "preview"; repoId: string; targeting: "text"|"symbol"; query: SQ; editMode: EM; filters?: object; maxFiles?: number; createBackup?: boolean; responseMode?: RM } | { mode: "apply"; repoId: string; planHandle: string; createBackup?: boolean }): { mode: "preview"; planHandle: string; filesMatched: number; matchesFound: number; fileEntries: object[]; requiresApply: boolean } | { mode: "apply"; filesWritten: number; filesFailed: number; results: object[]; rollback: object } | ResponseHandle
+/** Cross-file search-and-edit: preview computes a plan; operations[] batches multiple replacements into one shared preview/apply */
+function searchEdit(p: { mode: "preview"; targeting?: "text"|"symbol"; query?: SQ; editMode?: EM; operations?: SEOps[]; filters?: object; maxFiles?: number; createBackup?: boolean; responseMode?: RM } | { mode: "apply"; planHandle: string; createBackup?: boolean }): object | ResponseHandle
 
 // === Data Transforms (workflow-only) ===
 /** Project fields from an object */

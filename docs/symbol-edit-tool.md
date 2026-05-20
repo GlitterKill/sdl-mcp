@@ -2,7 +2,7 @@
 
 `sdl.symbol.edit` provides symbol-scoped editing without replacing the safer file write machinery. Preview computes the exact post-edit content, stores the plan in the existing search-edit plan store, and apply enforces symbol, file, and draft preconditions before writing.
 
-Use `symbol.edit` when the intended edit is anchored to one symbol and the caller already has a symbol card, symbol ID, or precise `symbolRef`. Use `search.edit` for cross-file pattern changes, and use `file.write` for immediate single-file edits that are not symbol-shaped.
+Use `symbol.edit` when the intended edit is anchored to one symbol and the caller already has a symbol card, symbol ID, or precise `symbolRef`. It is intentionally single-symbol and single-operation; agents can sequence calls in `sdl.workflow`, but `search.edit` / `searchEditPreview operations[]` is the shared-preview batch primitive. Use `file.write` for immediate single-file edits that are not symbol-shaped.
 
 ## Modes
 

@@ -131,10 +131,10 @@ Use SDL file and edit tools instead of native read/write paths.
 
 - Read non-indexed files with `file.read` or `sdl.file` `op: "read"`. Prefer `search`, `jsonPath`, or bounded ranges over full reads.
 - Write non-indexed files with `file.write` or `sdl.file` `op: "write"` using exactly one targeted write mode.
-- Edit indexed source with `symbol.edit` or `sdl.file` `symbolEditPreview` followed by `symbolEditApply`.
+- Edit indexed source with `symbol.edit` or `sdl.file` `symbolEditPreview` followed by `symbolEditApply` when the edit is anchored to one symbol.
 - Use `symbolEditApplyNow` only with a fresh `astFingerprint` and range from a current symbol card.
-- Use `search.edit` for multi-file replacements or symbol-targeted search plans.
-- Use `sdl.workflow` plus `runtimeExecute` for a targeted Node edit script only when `symbol.edit` cannot express the indexed-source edit.
+- Use `search.edit` or `sdl.file` `op: "searchEditPreview"` with `operations[]` for multi-file or multi-replacement batches. Apply the returned plan handle after reviewing the shared preview.
+- Use `sdl.workflow` plus `runtimeExecute` for a targeted script only when SDL edit tools cannot express the indexed-source edit; pass multiline payloads through `stdin`.
 - Track backup paths returned by edit/write tools and remove created `.bak` files after verification through SDL-governed runtime cleanup. Do not run broad native cleanup commands.
 
 ### Non-Indexed Reads
@@ -215,7 +215,7 @@ Use SDL file and edit tools instead of native read/write paths.
 
 Run repo-local commands through `runtimeExecute` inside `sdl.workflow`.
 
-Default to `outputMode: "minimal"`, `persistOutput: true`, and an explicit `timeoutMs`. Query stored logs only when needed with `runtimeQueryOutput` and focused `queryTerms`. Use `outputMode: "intent"` when the command intent is already tied to known terms such as `FAIL`, `Error`, or a test name.
+Default to `outputMode: "minimal"`, `persistOutput: true`, and an explicit `timeoutMs`. Use `stdin` for multiline scripts/input instead of PowerShell here-strings, quote-heavy `node -e`, or base64 decode/eval workarounds. Query stored logs only when needed with `runtimeQueryOutput` and focused `queryTerms`. Use `outputMode: "intent"` when the command intent is already tied to known terms such as `FAIL`, `Error`, or a test name.
 
 Do not use runtime execution to print indexed source. Use the retrieval ladder instead.
 
@@ -331,6 +331,6 @@ Before the final response:
 - Using `runtimeExecute` to print indexed source.
 - Running `index.refresh` every session or defaulting to full refresh.
 - Reading whole non-indexed files when `search`, `jsonPath`, or bounded ranges would answer.
-- Writing indexed source through native edits instead of `symbol.edit` or symbol edit preview/apply.
+- Writing indexed source through native edits instead of `symbol.edit`, symbol edit preview/apply, or `searchEditPreview operations[]`.
 - Keeping `.bak` files without reporting them.
 - Omitting `usageStats` after an SDL-MCP-backed task.

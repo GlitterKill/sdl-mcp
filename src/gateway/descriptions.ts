@@ -27,7 +27,7 @@ export const REPO_DESCRIPTION =
   `\nActions: repo.register(rootPath,ignore?,languages?,maxFileBytes?) | repo.status() | ` +
   `repo.overview(level,includeHotspots?,directories?,maxDirectories?) | ` +
   `index.refresh(mode,reason?) | policy.get() | policy.set(policyPatch; budgetCaps requires maxCards+maxEstimatedTokens) | ` +
-  `search.edit(mode,targeting?,query?,editMode?,planHandle?,responseMode?) | ` +
+  `search.edit(mode,targeting?,query?,editMode?,operations?,planHandle?,responseMode?) | ` +
   `scip.ingest(indexPath,dryRun?) | semantic.enrichment.refresh(dryRun?,force?,install?,languages?) | ` +
   `semantic.enrichment.status(languages?) | usage.stats(scope?,since?,limit?,persist?)`;
 
@@ -37,7 +37,7 @@ const AGENT_DESCRIPTION_BASE =
   `agent.feedback.query(versionId?,limit?,since?) | ` +
   `buffer.push(eventType,filePath,content,version,dirty,timestamp,cursor?,selections?) | ` +
   `buffer.checkpoint(reason?) | buffer.status() | ` +
-  `runtime.execute(runtime,executable?,args?,code?,relativeCwd?,timeoutMs?,queryTerms?,maxResponseLines? (5..1000),persistOutput?,outputMode?) [outputMode defaults to "minimal" ~50 tokens; use "summary" for head+tail, "intent" for queryTerms-only excerpts] | runtime.queryOutput(artifactHandle,queryTerms[],maxExcerpts?,contextLines?,stream?)`;
+  `runtime.execute(runtime,executable?,args?,code?,stdin?,relativeCwd?,timeoutMs?,queryTerms?,maxResponseLines? (5..1000),persistOutput?,outputMode?) [use stdin for multiline input; outputMode defaults to "minimal" ~50 tokens; use "summary" for head+tail, "intent" for queryTerms-only excerpts] | runtime.queryOutput(artifactHandle,queryTerms[],maxExcerpts?,contextLines?,stream?)`;
 
 const MEMORY_DESCRIPTION_SUFFIX =
   ` | memory.store(type,title,content,tags?,confidence?,symbolIds?,fileRelPaths?,memoryId?) | ` +

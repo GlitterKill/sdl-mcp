@@ -171,4 +171,16 @@ describe("code-mode manual generator", () => {
       rmSync(disabledDir, { recursive: true, force: true });
     }
   });
+
+  it("accepts MCP wrapper names as focused manual action aliases", () => {
+    const result = handleManual({
+      actions: ["sdl.file", "sdl.workflow"],
+      includeSchemas: false,
+      format: "json",
+    }) as { actions?: Array<{ action: string }>; error?: string };
+
+    assert.equal(result.error, undefined);
+    assert.ok(result.actions?.some((entry) => entry.action === "file"));
+    assert.ok(result.actions?.some((entry) => entry.action === "workflow"));
+  });
 });

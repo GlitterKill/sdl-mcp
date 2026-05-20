@@ -61,6 +61,8 @@ export interface ExecutionRequest {
   maxStderrBytes: number;
   signal?: AbortSignal;
   codePath?: string;
+  /** UTF-8 stdin text written to the child process, then closed. */
+  stdin?: string;
 }
 
 /**
@@ -77,6 +79,8 @@ export interface ExecutionResult {
   stderrTruncated: boolean;
   totalStdoutBytes: number;
   totalStderrBytes: number;
+  stdinBytes?: number;
+  stdinSha256?: string;
 }
 
 // ============================================================================

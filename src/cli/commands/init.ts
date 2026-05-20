@@ -548,7 +548,7 @@ import re
 import sys
 
 INDEXED_READ_REASON = "Use the SDL-MCP Iris retrieval ladder for indexed source reads. Start with sdl.context, then batch follow-ups through sdl.workflow using symbolSearch, symbolGetCard, codeSkeleton, codeHotPath, and codeNeedWindow only as a last resort with identifiersToFind and expectedLines."
-INDEXED_WRITE_REASON = "Use SDL-MCP indexed-source edit tools instead of native writes. Prefer symbol.edit or sdl.file symbolEditPreview followed by symbolEditApply. If the edit cannot be expressed symbolically, run a targeted Node edit script through sdl.workflow runtimeExecute."
+INDEXED_WRITE_REASON = "Use SDL-MCP indexed-source edit tools instead of native writes. Prefer symbol.edit for symbol-scoped edits or searchEditPreview operations[] for multi-replacement batches. If an edit cannot use those tools, run a targeted script through sdl.workflow runtimeExecute with stdin for multiline payloads."
 NON_INDEXED_READ_REASON = "Use SDL-MCP file.read for non-indexed repository reads. Prefer sdl.file { op: \\"read\\" } or file.read with search, jsonPath, or bounded offset/limit instead of native file reads."
 NON_INDEXED_WRITE_REASON = "Use SDL-MCP file.write for non-indexed repository writes. Prefer sdl.file { op: \\"write\\" } or file.write with one targeted write mode instead of native Write/Edit/apply_patch."
 
@@ -649,7 +649,7 @@ import os
 import re
 import sys
 
-RUNTIME_REASON = "Run repo-local shell actions through SDL-MCP instead of native Bash. Use sdl.workflow with runtimeExecute, default outputMode: \\"minimal\\", persistOutput: true, an explicit timeoutMs, and runtimeQueryOutput only for focused follow-up output."
+RUNTIME_REASON = "Run repo-local shell actions through SDL-MCP instead of native Bash. Use sdl.workflow with runtimeExecute, default outputMode: \\"minimal\\", persistOutput: true, an explicit timeoutMs, stdin for multiline input, and runtimeQueryOutput only for focused follow-up output."
 
 def norm(value):
     return str(value or "").replace("\\\\", "/").lower()
@@ -838,8 +838,9 @@ Follow the same workflow as the SDL-MCP Agent Workflow skill when that skill is 
    - \`sdl.code.needWindow\` — Full code (last resort, requires justification and \`identifiersToFind\`).
 
 9. **Use SDL runtime for repo-local commands** via \`runtimeExecute\` in \`sdl.workflow\`:
-   - Default to \`outputMode: "minimal"\`, \`persistOutput: true\`, and an explicit \`timeoutMs\`.
-   - If output details are needed, call \`runtimeQueryOutput\` with the \`artifactHandle\` and targeted \`queryTerms\`.
+    - Default to \`outputMode: "minimal"\`, \`persistOutput: true\`, and an explicit \`timeoutMs\`.
+    - Use \`stdin\` for multiline scripts/input instead of PowerShell here-strings, quote-heavy \`node -e\`, or base64 decode/eval workarounds.
+    - If output details are needed, call \`runtimeQueryOutput\` with the \`artifactHandle\` and targeted \`queryTerms\`.
    - Use \`outputMode: "intent"\` when the command is already tied to known terms such as \`FAIL\`, \`Error\`, or a test name.
    - Always set \`timeoutMs\` to prevent hangs.
    - Never use runtime execution to print indexed source.
@@ -868,7 +869,8 @@ Follow the same workflow as the SDL-MCP Agent Workflow skill when that skill is 
 5. Use \`codeNeedWindow\` only as a last resort with clear justification
 6. Use \`fileRead\` for non-indexed files with \`search\`, \`jsonPath\`, or bounded ranges
 7. Use \`runtimeExecute\` plus \`runtimeQueryOutput\` for repo-local commands and targeted output retrieval
-8. Use \`usageStats\` before the final answer and report token savings
+8. Use \`symbol.edit\` for symbol-scoped edits, \`searchEditPreview operations[]\` for multi-replacement batches, and Node scripts only as a last resort
+9. Use \`usageStats\` before the final answer and report token savings
 `;
 }
 
@@ -893,9 +895,9 @@ At the start of every new session in this repository, load and follow the \`sdl-
 
 - Never use native repo-local Read, Write, Edit, patch, or Bash while the SDL-MCP PID file is present.
 - Use the Iris ladder for indexed source reads: sdl.context, then symbolSearch, symbolGetCard, codeSkeleton, codeHotPath, and codeNeedWindow only as a last resort.
-- Use symbol.edit or symbol edit preview/apply for indexed source writes. Use targeted Node edit scripts through sdl.workflow only when symbolic edits cannot express the change.
+- Use symbol.edit for symbol-scoped indexed writes and searchEditPreview operations[] for multi-replacement batches. Use targeted scripts through sdl.workflow runtimeExecute with stdin only when SDL edit tools cannot express the change.
 - Use file.read / file.write for non-indexed repository files.
-- Use runtimeExecute inside sdl.workflow for repo-local shell actions.
+- Use runtimeExecute inside sdl.workflow for repo-local shell actions; pass multiline scripts/input through stdin.
 - If a native file or Bash call is denied by a hook, switch to SDL-MCP immediately and do not retry the denied tool.
 - Use the explore-sdl subagent for codebase exploration instead of the built-in Explore agent.
 - Native access remains allowed for .codex/**, .claude/**, and non-repo agent skills, memories, and session internals.
@@ -914,7 +916,7 @@ Provide focusSymbols and/or focusPaths to scope the retrieval. Always set a budg
 ## Runtime Execution
 
 - Use runtimeExecute inside sdl.workflow with outputMode: "minimal" (default) for ~50-token responses.
-- Parameters: use args (string array) or code (inline string). There is no command field.
+- Parameters: use args (string array), code (inline string), and stdin for multiline input. command is an executable alias; executable wins if both are present.
 - Use runtimeQueryOutput with artifactHandle and queryTerms to retrieve output details after minimal-mode execution.
 - Set timeoutMs on all runtime executions to prevent hangs.
 
@@ -982,7 +984,7 @@ export const EnforceSDL: Plugin = async () => {
         const command = String(output.args.command ?? "").trim().toLowerCase();
         if (REDIRECT_PREFIXES.some((prefix) => command === prefix || command.startsWith(\`\${prefix} \`))) {
           throw new Error(
-            "Run repo-local build, test, lint, and diagnostic commands through SDL runtime. Use runtimeExecute inside sdl.workflow with outputMode: 'minimal' instead of native bash."
+            "Run repo-local build, test, lint, and diagnostic commands through SDL runtime. Use runtimeExecute inside sdl.workflow with outputMode: 'minimal' and stdin for multiline input instead of native bash."
           );
         }
       }
@@ -1089,9 +1091,10 @@ function fallbackSkillBody() {
     "2. Use \`contextMode: \\"precise\\"\` for named symbols, exact paths, narrow bugs, focused reviews, and implementation follow-up.",
     "3. Use \`contextMode: \\"broad\\"\` for subsystem mapping, behavior tracing, unfamiliar code, or broad investigations.",
     "4. Batch follow-up retrieval through \`sdl.workflow\`: \`symbolSearch\`, \`symbolGetCard\`, \`codeSkeleton\`, \`codeHotPath\`, then \`codeNeedWindow\` as a last resort.",
-    "5. Use SDL file/edit tools for repository I/O and SDL runtime for repo-local commands.",
-    "6. Use memory tools only when \`memory.enabled: true\`; avoid habitual \`index.refresh\`.",
-    "7. Finish with \`usageStats\` and report token savings.",
+    "5. Use \`symbol.edit\` for symbol-scoped indexed edits and \`searchEditPreview operations[]\` for multi-replacement batches.",
+    "6. Use \`runtimeExecute\` with \`stdin\` for multiline scripts/input instead of quote-heavy shell or base64 workarounds.",
+    "7. Use memory tools only when \`memory.enabled: true\`; avoid habitual \`index.refresh\`.",
+    "8. Finish with \`usageStats\` and report token savings.",
   ].join("\\n");
 }
 
@@ -1131,11 +1134,11 @@ const pidfilePath = ${JSON.stringify(pidfilePath)};
 const indexedExtensions = new Set(${indexedExtensions});
 
 const RUNTIME_REASON =
-  "Run repo-local shell actions through SDL-MCP instead of native shell. Use sdl.workflow with runtimeExecute, default outputMode: \\"minimal\\", persistOutput: true, an explicit timeoutMs, and runtimeQueryOutput only for focused follow-up output.";
+  "Run repo-local shell actions through SDL-MCP instead of native shell. Use sdl.workflow with runtimeExecute, default outputMode: \\"minimal\\", persistOutput: true, an explicit timeoutMs, stdin for multiline input, and runtimeQueryOutput only for focused follow-up output.";
 const INDEXED_READ_REASON =
   "Use the SDL-MCP Iris retrieval ladder for indexed source reads. Start with sdl.context, then batch follow-ups through sdl.workflow using symbolSearch, symbolGetCard, codeSkeleton, codeHotPath, and codeNeedWindow only as a last resort with identifiersToFind and expectedLines.";
 const INDEXED_WRITE_REASON =
-  "Use SDL-MCP indexed-source edit tools instead of native writes. Prefer symbol.edit or sdl.file symbolEditPreview followed by symbolEditApply. If the edit cannot be expressed symbolically, run a targeted Node edit script through sdl.workflow runtimeExecute.";
+  "Use SDL-MCP indexed-source edit tools instead of native writes. Prefer symbol.edit for symbol-scoped edits or searchEditPreview operations[] for multi-replacement batches. If an edit cannot use those tools, run a targeted script through sdl.workflow runtimeExecute with stdin for multiline payloads.";
 const NON_INDEXED_READ_REASON =
   "Use SDL-MCP file.read for non-indexed repository reads. Prefer sdl.file { op: \\"read\\" } or file.read with search, jsonPath, or bounded offset/limit instead of native file reads.";
 const NON_INDEXED_WRITE_REASON =

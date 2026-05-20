@@ -401,4 +401,323 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     );
   });
 
+  it("batch preview/apply merges two operations in one file", async () => {
+    await writeFile(join(repoRoot, "a.txt"), "alpha beta\n", "utf-8");
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        operations: [
+          {
+            id: "alpha-op",
+            targeting: "text",
+            query: { literal: "alpha", replacement: "ALPHA", global: true },
+            editMode: "replacePattern",
+            filters: { include: ["a.txt"] },
+          },
+          {
+            id: "beta-op",
+            targeting: "text",
+            query: { literal: "beta", replacement: "BETA", global: true },
+            editMode: "replacePattern",
+            filters: { include: ["a.txt"] },
+          },
+        ],
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.filesMatched, 1);
+    assert.equal(preview.matchesFound, 2);
+    assert.deepEqual((preview.fileEntries[0] as any).operationIds, ["alpha-op", "beta-op"]);
+
+    const apply = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "apply",
+        repoId: REPO_ID,
+        planHandle: preview.planHandle,
+      }),
+    )) as SearchEditApplyResponse;
+
+    assert.equal(apply.filesWritten, 1);
+    assert.equal(await readFile(join(repoRoot, "a.txt"), "utf-8"), "ALPHA BETA\n");
+  });
+
+  it("batch preview/apply supports operations across multiple files", async () => {
+    await writeFile(join(repoRoot, "a.txt"), "left token\n", "utf-8");
+    await writeFile(join(repoRoot, "b.txt"), "right token\n", "utf-8");
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        operations: [
+          {
+            id: "left-op",
+            targeting: "text",
+            query: { literal: "left", replacement: "LEFT", global: true },
+            editMode: "replacePattern",
+            filters: { include: ["a.txt"] },
+          },
+          {
+            id: "right-op",
+            targeting: "text",
+            query: { literal: "right", replacement: "RIGHT", global: true },
+            editMode: "replacePattern",
+            filters: { include: ["b.txt"] },
+          },
+        ],
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.filesMatched, 2);
+    assert.deepEqual(
+      preview.fileEntries.map((entry) => [(entry as any).operationIds[0], entry.file]).sort(),
+      [["left-op", "a.txt"], ["right-op", "b.txt"]],
+    );
+
+    await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "apply",
+        repoId: REPO_ID,
+        planHandle: preview.planHandle,
+      }),
+    );
+
+    assert.equal(await readFile(join(repoRoot, "a.txt"), "utf-8"), "LEFT token\n");
+    assert.equal(await readFile(join(repoRoot, "b.txt"), "utf-8"), "RIGHT token\n");
+  });
+
+  it("batch apply only merges each operation's planned original-source diff", async () => {
+    await writeFile(join(repoRoot, "a.txt"), "foo marker\n", "utf-8");
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        operations: [
+          {
+            id: "foo-to-bar",
+            targeting: "text",
+            query: { literal: "foo", replacement: "bar", global: true },
+            editMode: "replacePattern",
+            filters: { include: ["a.txt"] },
+          },
+          {
+            id: "bar-to-baz",
+            targeting: "text",
+            query: { literal: "bar", replacement: "baz", global: true },
+            editMode: "replacePattern",
+            filters: { include: ["a.txt"] },
+          },
+        ],
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.matchesFound, 1);
+    await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "apply",
+        repoId: REPO_ID,
+        planHandle: preview.planHandle,
+      }),
+    );
+
+    assert.equal(await readFile(join(repoRoot, "a.txt"), "utf-8"), "bar marker\n");
+  });
+
+  it("batch preview applies shared top-level filters to operations", async () => {
+    await writeFile(join(repoRoot, "a.txt"), "shared token\n", "utf-8");
+    await writeFile(join(repoRoot, "b.txt"), "shared token\n", "utf-8");
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        filters: { include: ["a.txt"] },
+        operations: [
+          {
+            id: "shared-op",
+            targeting: "text",
+            query: { literal: "shared", replacement: "SHARED", global: true },
+            editMode: "replacePattern",
+          },
+        ],
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.filesMatched, 1);
+    assert.equal(preview.fileEntries[0].file, "a.txt");
+  });
+
+  it("batch preview permits disjoint edits when one operation has multiple matches", async () => {
+    await writeFile(join(repoRoot, "a.txt"), "a x a\n", "utf-8");
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        operations: [
+          {
+            id: "a-op",
+            targeting: "text",
+            query: { literal: "a", replacement: "A", global: true },
+            editMode: "replacePattern",
+            filters: { include: ["a.txt"] },
+          },
+          {
+            id: "x-op",
+            targeting: "text",
+            query: { literal: "x", replacement: "X", global: true },
+            editMode: "replacePattern",
+            filters: { include: ["a.txt"] },
+          },
+        ],
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.filesMatched, 1);
+    assert.equal(preview.matchesFound, 3);
+
+    await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "apply",
+        repoId: REPO_ID,
+        planHandle: preview.planHandle,
+      }),
+    );
+
+    assert.equal(await readFile(join(repoRoot, "a.txt"), "utf-8"), "A X A\n");
+  });
+
+  it("batch preview rejects zero-width edits inside another operation range", async () => {
+    await writeFile(join(repoRoot, "a.txt"), "abcdef\n", "utf-8");
+
+    await assert.rejects(
+      () =>
+        handleSearchEdit(
+          SearchEditRequestSchema.parse({
+            mode: "preview",
+            repoId: REPO_ID,
+            operations: [
+              {
+                id: "replace-cde",
+                targeting: "text",
+                query: { literal: "cde", replacement: "XY", global: true },
+                editMode: "replacePattern",
+                filters: { include: ["a.txt"] },
+              },
+              {
+                id: "insert-before-d",
+                targeting: "text",
+                query: { regex: "(?=d)", replacement: "_", global: true },
+                editMode: "replacePattern",
+                filters: { include: ["a.txt"] },
+              },
+            ],
+          }),
+        ),
+      /replace-cde.*insert-before-d.*overlap/i,
+    );
+  });
+
+  it("batch preview enforces aggregate top-level match caps", async () => {
+    await writeFile(join(repoRoot, "a.txt"), "alpha beta\n", "utf-8");
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        maxMatchesPerFile: 1,
+        maxTotalMatches: 1,
+        operations: [
+          {
+            id: "alpha-op",
+            targeting: "text",
+            query: { literal: "alpha", replacement: "ALPHA", global: true },
+            editMode: "replacePattern",
+            filters: { include: ["a.txt"] },
+          },
+          {
+            id: "beta-op",
+            targeting: "text",
+            query: { literal: "beta", replacement: "BETA", global: true },
+            editMode: "replacePattern",
+            filters: { include: ["a.txt"] },
+          },
+        ],
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.filesMatched, 0);
+    assert.equal(preview.matchesFound, 0);
+    assert.ok(
+      preview.filesSkipped.some((entry) =>
+        entry.reason.startsWith("matches-exceed-per-file-cap:"),
+      ),
+    );
+  });
+
+  it("batch preview rejects overlapping operation ranges", async () => {
+    await writeFile(join(repoRoot, "a.txt"), "one\ntwo\n", "utf-8");
+
+    await assert.rejects(
+      () =>
+        handleSearchEdit(
+          SearchEditRequestSchema.parse({
+            mode: "preview",
+            repoId: REPO_ID,
+            operations: [
+              {
+                id: "first",
+                targeting: "text",
+                query: { literal: "one", replaceLines: { start: 0, end: 1, content: "ONE" } },
+                editMode: "replaceLines",
+                filters: { include: ["a.txt"] },
+              },
+              {
+                id: "second",
+                targeting: "text",
+                query: { literal: "one", replaceLines: { start: 0, end: 1, content: "TWO" } },
+                editMode: "replaceLines",
+                filters: { include: ["a.txt"] },
+              },
+            ],
+          }),
+        ),
+      /first.*second.*a\.txt.*overlap/i,
+    );
+  });
+
+  it("batch preview rejects duplicate explicit operation ids", async () => {
+    await writeFile(join(repoRoot, "a.txt"), "alpha beta\n", "utf-8");
+
+    await assert.rejects(
+      async () => {
+        const request = SearchEditRequestSchema.parse({
+          mode: "preview",
+          repoId: REPO_ID,
+          operations: [
+            {
+              id: "rename",
+              targeting: "text",
+              query: { literal: "alpha", replacement: "ALPHA", global: true },
+              editMode: "replacePattern",
+              filters: { include: ["a.txt"] },
+            },
+            {
+              id: "rename",
+              targeting: "text",
+              query: { literal: "beta", replacement: "BETA", global: true },
+              editMode: "replacePattern",
+              filters: { include: ["a.txt"] },
+            },
+          ],
+        });
+        await handleSearchEdit(request);
+      },
+      /duplicate.*operation.*rename/i,
+    );
+  });
+
 });

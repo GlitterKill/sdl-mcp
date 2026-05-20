@@ -720,9 +720,9 @@ export const RepoStatusResponseSchema = z.object({
   /**
    * Derived-state freshness. When `stale` is true, at least one of the
    * downstream computations (clusters, processes, graph algorithms,
-   * semantic summaries/embeddings) lagged behind the latest incremental
-   * index and is either queued for background refresh or waiting on a
-   * subsequent full index. See the post-pass2 performance plan (§5).
+   * semantic summaries/embeddings) lagged behind the latest index, usually
+   * because a previous post-index derived computation was interrupted or
+   * failed. See `nextBestAction` for the recovery command.
    */
   derivedState: z
     .object({
@@ -736,6 +736,7 @@ export const RepoStatusResponseSchema = z.object({
       computedVersionId: z.string().nullable(),
       updatedAt: z.string().nullable(),
       lastError: z.string().nullable().optional(),
+      nextBestAction: z.string().optional(),
     })
     .optional(),
 });
@@ -2579,6 +2580,15 @@ export type AgentFeedbackQueryResponse = z.infer<
 // Runtime Execution Schemas
 // ============================================================================
 
+const RUNTIME_MAX_STDIN_LENGTH = 512 * 1024;
+const RuntimeStdinSchema = z
+  .string()
+  .max(RUNTIME_MAX_STDIN_LENGTH)
+  .refine(
+    (value) => Buffer.byteLength(value, "utf-8") <= RUNTIME_MAX_STDIN_LENGTH,
+    "stdin must be at most 512 KiB when encoded as UTF-8",
+  );
+
 const RuntimeExecuteRequestObjectSchema = z
   .object({
     repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
@@ -2608,6 +2618,11 @@ const RuntimeExecuteRequestObjectSchema = z
       .optional()
       .describe(
         "Code mode: write to temp file and execute. Mutually exclusive with args-only mode.",
+      ),
+    stdin: RuntimeStdinSchema
+      .optional()
+      .describe(
+        "UTF-8 text written to the child process stdin and then closed (max 512 KiB).",
       ),
     relativeCwd: z
       .string()
@@ -2704,6 +2719,9 @@ export const RuntimeExecuteResponseSchema = z.object({
     .describe("First 3 lines / 200 chars of stdout (minimal mode only)"),
   stderrSummary: z.string().describe("Tail, truncated"),
   artifactHandle: z.string().nullable(),
+  stdinBytes: z.number().int().nonnegative().optional(),
+  stdinSha256: z.string().length(64).optional(),
+  quotingWarnings: z.array(z.string()).optional(),
   excerpts: z
     .array(RuntimeExecuteExcerptSchema)
     .optional()
@@ -3378,22 +3396,79 @@ export const SearchEditEditMode = z.enum([
   "overwrite",
 ]);
 
-const SearchEditPreviewRequestSchema = z.object({
-  mode: z.literal("preview"),
-  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+const SearchEditBatchOperationSchema = z.object({
+  id: z.string().min(1).max(80).optional(),
   targeting: z.enum(["text", "symbol"]),
   query: SearchEditQuerySchema,
   filters: SearchEditFiltersSchema.optional(),
   editMode: SearchEditEditMode,
-  previewContextLines: z.number().int().min(0).max(20).optional(),
   maxFiles: z.number().int().min(1).max(500).optional(),
   maxMatchesPerFile: z.number().int().min(1).max(5000).optional(),
   maxTotalMatches: z.number().int().min(1).max(50000).optional(),
-  createBackup: z.boolean().optional(),
-  responseMode: ResponseModeSchema.describe(
-    "Large-preview handling: inline preserves legacy output; auto/handle stores full previews behind response.get handles.",
-  ),
 });
+
+const SearchEditPreviewRequestSchema = z
+  .object({
+    mode: z.literal("preview"),
+    repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+    targeting: z.enum(["text", "symbol"]).optional(),
+    query: SearchEditQuerySchema.optional(),
+    filters: SearchEditFiltersSchema.optional(),
+    editMode: SearchEditEditMode.optional(),
+    operations: z.array(SearchEditBatchOperationSchema).min(1).max(50).optional(),
+    previewContextLines: z.number().int().min(0).max(20).optional(),
+    maxFiles: z.number().int().min(1).max(500).optional(),
+    maxMatchesPerFile: z.number().int().min(1).max(5000).optional(),
+    maxTotalMatches: z.number().int().min(1).max(50000).optional(),
+    createBackup: z.boolean().optional(),
+    responseMode: ResponseModeSchema.describe(
+      "Large-preview handling: inline preserves legacy output; auto/handle stores full previews behind response.get handles.",
+    ),
+  })
+  .superRefine((value, ctx) => {
+    const operations = value.operations;
+    if (operations !== undefined) {
+      const seenOperationIds = new Map<string, number>();
+      operations.forEach((operation, index) => {
+        const trimmed = operation.id?.trim();
+        const operationId = trimmed && trimmed.length > 0
+          ? trimmed
+          : `op-${index + 1}`;
+        const firstIndex = seenOperationIds.get(operationId);
+        if (firstIndex !== undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["operations", index, "id"],
+            message:
+              `Duplicate search.edit operation id "${operationId}" at operations[${index}] (first used at operations[${firstIndex}]).`,
+          });
+        } else {
+          seenOperationIds.set(operationId, index);
+        }
+      });
+      for (const field of ["targeting", "query", "editMode"] as const) {
+        if (value[field] !== undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [field],
+            message:
+              "operations[] is mutually exclusive with top-level targeting, query, and editMode.",
+          });
+        }
+      }
+      return;
+    }
+    for (const field of ["targeting", "query", "editMode"] as const) {
+      if (value[field] === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field],
+          message:
+            "Required when operations[] is not provided.",
+        });
+      }
+    }
+  });
 
 const SearchEditApplyRequestSchema = z.object({
   mode: z.literal("apply"),
@@ -3415,7 +3490,7 @@ export interface SearchEditPreviewResponse {
   filesMatched: number;
   matchesFound: number;
   filesEligible: number;
-  filesSkipped: Array<{ path: string; reason: string }>;
+  filesSkipped: Array<{ path: string; reason: string; operationId?: string }>;
   filesSkippedTotal?: number;
   filesSkippedTruncated?: boolean;
   filesSkippedByReason?: Array<{ reason: string; count: number }>;
@@ -3425,6 +3500,12 @@ export interface SearchEditPreviewResponse {
     editMode: FileWriteResponse["mode"];
     snippets: DiffPreviewSnippets;
     indexedSource: boolean;
+    operationIds?: string[];
+    operations?: Array<{
+      id: string;
+      matchCount: number;
+      editMode: FileWriteResponse["mode"];
+    }>;
   }>;
   requiresApply: boolean;
   expiresAt: string;
@@ -3458,6 +3539,12 @@ export interface SearchEditApplyResponse {
     editMode: FileWriteResponse["mode"];
     snippets: DiffPreviewSnippets;
     indexedSource: boolean;
+    operationIds?: string[];
+    operations?: Array<{
+      id: string;
+      matchCount: number;
+      editMode: FileWriteResponse["mode"];
+    }>;
   }>;
   rollback: {
     triggered: boolean;

@@ -2,7 +2,7 @@
  * DerivedState freshness record per repo.
  *
  * Tracks staleness of cluster / process / algorithm / summary / embedding
- * work so incremental indexing can defer it without losing track. See
+ * work so failed post-index derived computation is visible in repo.status. See
  * devdocs/plans/2026-04-17-post-pass2-performance-and-feedback-plan.md §5.
  */
 
@@ -160,6 +160,7 @@ export interface DerivedStateSummary {
   computedVersionId: string | null;
   updatedAt: string | null;
   lastError?: string | null;
+  nextBestAction?: string;
 }
 
 export async function getDerivedStateSummary(
@@ -180,6 +181,11 @@ export async function getDerivedStateSummary(
   };
   if (row.lastError) {
     summary.lastError = row.lastError;
+  }
+  if (summary.stale) {
+    summary.nextBestAction = row.lastError
+      ? "Derived state recomputation failed. Inspect derivedState.lastError, then run sdl.index.refresh with mode:\"incremental\"; use mode:\"full\" if stale flags remain."
+      : "Derived state is stale, likely from an interrupted older refresh. Run sdl.index.refresh with mode:\"incremental\" to recompute derived state inline.";
   }
   return summary;
 }

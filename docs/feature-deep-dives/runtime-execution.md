@@ -10,6 +10,11 @@
 
 This is the preferred execution path for SDL-enforced agent workflows. In Code Mode, agents should normally call it through `runtimeExecute` inside `sdl.workflow`.
 
+Use the optional `stdin` field for multiline scripts, large command input, or
+quote-heavy payloads. SDL-MCP writes it to the child process as UTF-8, closes
+stdin, reports `stdinBytes` and `stdinSha256`, and does not echo the full input
+in visible output or persisted logs. The limit is 512 KiB.
+
 ---
 
 ## Supported Runtimes (16)
@@ -228,6 +233,7 @@ When SDL-MCP is configured for agent enforcement:
 
 - prefer `runtimeExecute` in `sdl.workflow` over native shell tools
 - prefer the two-phase pattern: `outputMode: "minimal"` then `sdl.runtime.queryOutput` on demand
+- use `stdin` instead of PowerShell here-strings, multiline `node -e`, base64 decode/eval, or filesystem write scripts for multiline input
 - prefer structured query terms over dumping large output back to the model
 - use `shell` only when a shell is necessary, not as the default runtime
 

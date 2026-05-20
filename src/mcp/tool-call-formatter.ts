@@ -402,8 +402,11 @@ function fmtSearchEditPreview(result: Record<string, unknown>): string | null {
     const file = str(entry.file);
     const count = num(entry.matchCount);
     const mode = str(entry.editMode);
+    const opIds = Array.isArray(entry.operationIds)
+      ? entry.operationIds.map(String).join(", ")
+      : "";
     lines.push(
-      `  ${shortPath(file)}: ${count} ${plural(count, "match", "matches")}${mode ? ` (${mode})` : ""}`,
+      `  ${shortPath(file)}: ${count} ${plural(count, "match", "matches")}${mode ? ` (${mode})` : ""}${opIds ? ` [${opIds}]` : ""}`,
     );
     const snippets = record(entry.snippets);
     const before = str(snippets?.before);
@@ -461,6 +464,47 @@ function fmtSearchEdit(
   if (mode === "preview") return fmtSearchEditPreview(result);
   if (mode === "apply") return fmtSearchEditApply(result);
   return null;
+}
+
+function fmtRuntimeExecute(
+  _args: Record<string, unknown>,
+  result: Record<string, unknown>,
+): string | null {
+  const status = str(result.status) || "complete";
+  const exitCode = typeof result.exitCode === "number" ? result.exitCode : undefined;
+  const duration = typeof result.durationMs === "number" ? result.durationMs : undefined;
+  const artifact = str(result.artifactHandle);
+  const lines = [
+    `runtime.execute -> ${status}${exitCode !== undefined ? ` (exit ${exitCode})` : ""}${duration !== undefined ? ` in ${duration}ms` : ""}${artifact ? `; artifact ${artifact}` : ""}`,
+  ];
+
+  const stdinBytes = typeof result.stdinBytes === "number" ? result.stdinBytes : undefined;
+  const stdinSha = str(result.stdinSha256);
+  if (stdinBytes !== undefined) {
+    lines.push(
+      `  stdin: ${stdinBytes} bytes${stdinSha ? ` sha256=${stdinSha.slice(0, 12)}...` : ""}`,
+    );
+  }
+
+  const warnings = Array.isArray(result.quotingWarnings)
+    ? result.quotingWarnings.map(String)
+    : [];
+  for (const warning of warnings.slice(0, 3)) {
+    lines.push(`  warning: ${warning}`);
+  }
+
+  const stdout = str(result.stdoutSummary) || str(result.stdoutPreview);
+  if (stdout) {
+    lines.push("  stdout:");
+    appendIndented(lines, stdout, 900);
+  }
+  const stderr = str(result.stderrSummary);
+  if (stderr) {
+    lines.push("  stderr:");
+    appendIndented(lines, stderr, 900);
+  }
+
+  return lines.join("\n");
 }
 
 function fmtSymbolEdit(
@@ -684,6 +728,7 @@ const formatters: Record<string, Formatter> = {
   "sdl.file.read": fmtFileRead,
   "sdl.file.write": fmtFileWrite,
   "sdl.search.edit": fmtSearchEdit,
+  "sdl.runtime.execute": fmtRuntimeExecute,
   "sdl.action.search": fmtActionSearch,
   "sdl.manual": fmtManual,
   "sdl.workflow": fmtWorkflow,

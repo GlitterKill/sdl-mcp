@@ -49,7 +49,9 @@ The generated enforcement files also teach:
 - use `symbolRef` / `symbolRefs` when the agent knows a symbol name but not the canonical `symbolId`
 - follow structured recovery guidance such as `nextBestAction`, `fallbackTools`, `fallbackRationale`, and candidate lists instead of retrying blocked native tools
 - use `file.read` and `file.write` inside SDL-MCP for non-indexed files with targeted modes
-- use `symbol.edit` or the symbol edit preview/apply path for indexed source writes
+- use `symbol.edit` or the symbol edit preview/apply path for symbol-scoped indexed source writes
+- use `searchEditPreview operations[]` for multi-replacement indexed-source batches
+- pass multiline runtime input through `runtimeExecute` `stdin` instead of shell quoting or base64 workarounds
 
 If an agent falls back to native repo file tools or native shell commands while SDL-MCP is active, you lose much of the token-efficiency benefit and bypass the graph-aware policy.
 
@@ -113,3 +115,4 @@ After generating the enforcement setup:
 6. confirm symbol lookups can use `symbolRef` / `symbolRefs` when IDs are not yet known
 7. confirm repo-local execution is happening through SDL runtime rather than the client's native shell tool
 8. confirm denied or ambiguous responses are followed via `nextBestAction`, `fallbackTools`, or `fallbackRationale` instead of retrying native tools
+9. confirm multi-replacement edits use `searchEditPreview operations[]` rather than ad hoc runtime write scripts

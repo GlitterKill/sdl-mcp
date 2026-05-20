@@ -157,6 +157,7 @@ Returns the current indexing state and health metrics for a registered repositor
 | `watcherNote`      | string         | Guidance when watcher is inactive                                                                                                                                                                           |
 | `prefetchStats`    | object         | Predictive prefetch metrics: `enabled`, `queueDepth`, `running`, `completed`, `cancelled`, `cacheHits`, `cacheMisses`, `wastedPrefetch`, `hitRate`, `wasteRate`, `avgLatencyReductionMs`, `lastRunAt`       |
 | `liveIndexStatus`  | object         | Live editor buffer state: `enabled`, `pendingBuffers`, `dirtyBuffers`, `parseQueueDepth`, `checkpointPending`, `lastBufferEventAt`, `lastCheckpointAt`, `lastCheckpointResult`, `reconcileQueueDepth`, etc. |
+| `derivedState`     | object         | Derived-state freshness flags plus `nextBestAction` when cluster/process/summary/embedding state is stale. Current index refreshes recompute this inline; startup recovery may handle stale rows left by older interrupted runs. |
 | `memories`         | array \| null  | Relevant development memories auto-surfaced for this repo (when `surfaceMemories` is true)                                                                                                                  |
 
 **Typical use:** Call this first in any session to understand the state of the index before doing deeper queries.
@@ -237,7 +238,7 @@ Triggers re-indexing of a repository in either full or incremental mode.
 **Notes:**
 
 - Incremental mode compares file content hashes to detect changes. Only changed files are re-parsed.
-- If no tracked files changed, incremental refresh can short-circuit after `scanRepo`, `versioning`, and `memorySync` while reusing the existing version.
+- If changed files are found, incremental refresh recomputes derived cluster/process state inline before returning. If no tracked files changed, it can short-circuit after `scanRepo`, `versioning`, and `memorySync` while reusing the existing version.
 - After indexing, all slice caches and card caches are invalidated.
 - `diagnostics.timings.totalMs` covers the full synchronous indexing run, while `diagnostics.timings.phases` breaks out coarse stages such as `scanRepo`, `pass1`, `pass2`, and `finalizeIndexing`. Nested keys may also appear for hotspots inside a phase, for example `initSharedState.tsResolver`, `initSharedState.tsResolver.sourceFiles`, `initSharedState.tsResolver.programBuild`, `initSharedState.symbolMaps`, `resolveUnresolvedImports.fetchEdges`, `finalizeEdges.cleanupUnresolvedBuiltins`, `finalizeEdges.insertConfigEdges`, `finalizeIndexing.metrics`, `finalizeIndexing.metrics.testRefs`, `finalizeIndexing.fileSummaries`, `clustersAndProcesses.loadSymbols`, or `clustersAndProcesses.processWrite`. No-op incremental refreshes may omit later phases and report `shortCircuitNoOp` instead.
 - `quality.unresolvedTargets` counts repo-local missing or ambiguous dependency targets. `quality.externalTargets` counts outside-repo dependency targets such as runtime modules and packages. Both remain `Symbol` nodes for graph traversal, but graph consumers can distinguish them with `symbolStatus`.
@@ -814,7 +815,7 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 | `filePath`      | string | Yes      | —              | Path relative to repo root                                                                  |
 | `maxBytes`      | number | No       | 524288 (512KB) | Max bytes to return before truncation                                                       |
 | `offset`        | number | No       | 0              | Start line (0-based) for line range mode                                                    |
-| `limit`         | number | No       | all            | Max lines to return in line range mode                                                      |
+| `limit`         | number | No       | all            | Max lines to return in line range mode; in search mode, caps returned match/context lines after scanning |
 | `search`        | string | No       | —              | Regex pattern for search mode (case-insensitive)                                            |
 | `searchContext` | number | No       | 2              | Lines of context around each match in search mode                                           |
 | `jsonPath`      | string | No       | —              | Dot-separated key path for JSON/YAML extraction (e.g., `"scripts.build"`, `"items.0.name"`) |
@@ -825,7 +826,7 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 **Modes** (mutually exclusive, checked in priority order):
 
 1. **JSON path extraction** (`jsonPath` set): Parses the file as JSON and returns the subtree at the given path. Array indexing via numeric segments is supported. YAML files are accepted only if they are JSON-compatible (no comments, anchors, or unquoted strings); use `search` mode for complex YAML.
-2. **Regex search** (`search` set): Returns matching lines with `searchContext` lines of surrounding context. Matches are prefixed with `>`. Ranges are merged to avoid duplicate output.
+2. **Regex search** (`search` set): Scans the file, or scans from `offset` when provided, then returns matching lines with `searchContext` lines of surrounding context. Matches are prefixed with `>`. Ranges are merged to avoid duplicate output. `limit` caps returned lines after search; it does not constrain the scanned window.
 3. **Line range** (`offset` and/or `limit` set): Returns numbered lines in the given range.
 4. **Full read** (no mode params): Returns the entire file, truncated at `maxBytes` if necessary.
 
@@ -1104,7 +1105,9 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 8. **Timeout enforcement** — Hard timeout with process-tree kill.
 9. **Output handling** — Stdout/stderr are captured with configurable byte limits and persisted as gzip artifacts. The `outputMode` parameter (`"minimal"`, `"summary"`, `"intent"`) controls how much output is returned inline. Use `sdl.runtime.queryOutput` to search artifacts on demand.
 10. **Artifact persistence** — Full output can be persisted as gzip artifacts with SHA-256 hashing, TTL, and size limits.
-11. **Audit trail** — Every execution is logged with the policy audit hash, duration, exit code, and byte counts.
+11. **Stdin support** — Optional UTF-8 `stdin` is written to the child process and closed. SDL-MCP reports byte count and SHA-256 metadata but does not echo full stdin in visible output or persisted logs.
+12. **Quoting diagnostics** — Risky command patterns such as multiline `node -e`, PowerShell here-strings, base64 decode/eval workarounds, and write scripts without stdin can return `quotingWarnings`.
+13. **Audit trail** — Every execution is logged with the policy audit hash, duration, exit code, and byte counts.
 
 **Parameters:**
 
@@ -1115,12 +1118,13 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 | `executable`       | string                                   | No       | Override the default executable (e.g., `"bun"` instead of `"node"`)                                                                                                                                            |
 | `args`             | string[]                                 | No       | Arguments to pass to the executable                                                                                                                                                                            |
 | `code`             | string                                   | No       | Inline code to execute (written to temp file). Mutually exclusive with args-only mode.                                                                                                                         |
+| `stdin`            | string                                   | No       | UTF-8 text written to child stdin, then closed. Max 512 KiB by encoded byte size. Does not bypass command validation; shell runtime still requires `code`.                                                     |
 | `relativeCwd`      | string                                   | No       | Working directory relative to repo root (default: `"."`)                                                                                                                                                       |
 | `timeoutMs`        | number                                   | No       | Execution timeout in milliseconds                                                                                                                                                                              |
 | `queryTerms`       | string[] (max 10)                        | No       | Keywords for excerpt matching in the output                                                                                                                                                                    |
 | `maxResponseLines` | number (5-1000)                         | No       | Max lines in stdout/stderr summaries (default: 100)                                                                                                                                                            |
 | `persistOutput`    | boolean                                  | No       | Whether to persist full output as a gzip artifact (default: true)                                                                                                                                              |
-| `outputMode`       | `"minimal"` \| `"summary"` \| `"intent"` | No       | Controls response verbosity. `"minimal"` (default): ~50 tokens with status and artifact handle only. `"summary"`: head+tail output excerpts (legacy behavior). `"intent"`: only `queryTerms`-matched excerpts. |
+| `outputMode`       | `"minimal"` \| `"summary"` \| `"intent"` | No       | Controls response verbosity. `"minimal"` (default): status, artifact handle, and concise stdout/stderr previews. `"summary"`: head+tail output excerpts. `"intent"`: only `queryTerms`-matched excerpts.       |
 | `includeDiagnostics` | boolean                                | No       | Include coarse policy, execution, output decoding, and artifact phase timings                                                                                                                                  |
 
 **Response (varies by `outputMode`):**
@@ -1134,7 +1138,11 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 | `signal`         | string \| null                                                           | Signal that terminated the process (e.g., `"SIGTERM"`)          |
 | `durationMs`     | number                                                                   | Execution duration                                              |
 | `artifactHandle` | string \| null                                                           | Handle for the persisted artifact (if `persistOutput` was true) |
+| `truncation`     | object                                                                   | `{stdoutTruncated, stderrTruncated, totalStdoutBytes, totalStderrBytes}` |
 | `policyDecision` | object                                                                   | `{auditHash, deniedReasons}`                                    |
+| `stdinBytes`     | number                                                                   | Optional byte count when `stdin` was provided                    |
+| `stdinSha256`    | string                                                                   | Optional SHA-256 digest when `stdin` was provided                |
+| `quotingWarnings` | string[]                                                                | Optional diagnostics for quote-heavy/base64/runtime-write patterns |
 | `diagnostics`    | object                                                                   | Optional phase timings returned only when `includeDiagnostics: true` |
 
 **`outputMode: "minimal"` (default) — adds:**
@@ -1143,8 +1151,10 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 | :------------ | :----- | :---------------------------------------- |
 | `outputLines` | number | Total lines captured across stdout+stderr |
 | `outputBytes` | number | Total bytes captured across stdout+stderr |
+| `stdoutPreview` | string | First few stdout lines/chars when compact enough to return inline |
+| `stderrSummary` | string | Short stderr excerpt for quick failure diagnosis |
 
-No `stdoutSummary`, `stderrSummary`, or `excerpts` fields. Use `sdl.runtime.queryOutput` with the `artifactHandle` to retrieve output on demand.
+Minimal mode does not return full stdout/stderr dumps or `excerpts`. Use `sdl.runtime.queryOutput` with the `artifactHandle` to retrieve output on demand.
 
 **`outputMode: "summary"` — adds:**
 

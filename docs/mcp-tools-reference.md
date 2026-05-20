@@ -124,7 +124,7 @@ Get status for one repository including latest version, indexed files/symbols, t
 - `watcherHealth` (nullable) — runtime telemetry: enabled, running, filesWatched, eventsReceived/Processed, errors, queueDepth, restartCount, stale, lastEventAt, lastSuccessfulReindexAt
 - `prefetchStats` — queue depth, hit/waste rates, latency reduction, last run
 - `liveIndexStatus` — live buffer overlay state: enabled, pendingBuffers, dirtyBuffers, parseQueueDepth, checkpointPending, reconcileQueueDepth, etc.
-- `derivedState` — derived refresh freshness: stale flag, dirty cluster/process/algorithm/summary/embedding flags, target/computed version ids, and `lastError` when background refresh failed. Server startup scans configured repos for stale persisted `derivedState` rows and re-enqueues the saved `targetVersionId` for background recovery.
+- `derivedState` — derived-state freshness: stale flag, dirty cluster/process/algorithm/summary/embedding flags, target/computed version ids, `lastError` when recomputation failed, and `nextBestAction` when recovery is needed. Current index refreshes compute derived state inline; server startup still scans stale persisted rows from older interrupted runs and can enqueue background recovery.
 - `memories` (when `surfaceMemories: true` and memory is enabled in config) — array of relevant development memories auto-surfaced for the repository
 
 **Example:**
@@ -151,7 +151,7 @@ Refresh the symbol index in `incremental` or `full` mode.
 
 **Response:** `{ ok: boolean, repoId: string, versionId?: string, changedFiles?: integer, async?: boolean, operationId?: string, message?: string, diagnostics?: { timings: { totalMs: number, phases: Record<string, number> } } }`
 
-In incremental mode, files whose modification time predates their last indexed timestamp are skipped. If no tracked files changed, the existing version is reused instead of creating an empty snapshot and the refresh can short-circuit after `scanRepo`, `versioning`, and `memorySync`.
+In incremental mode, files whose modification time predates their last indexed timestamp are skipped. If changed files are found, derived cluster/process state is recomputed inline before the refresh returns. If no tracked files changed, the existing version is reused instead of creating an empty snapshot and the refresh can short-circuit after `scanRepo`, `versioning`, and `memorySync`.
 
 When called with a progress token, the server emits `notifications/progress` messages with the current stage, file path, and completion percentage.
 
@@ -1055,7 +1055,7 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 | `filePath`      | `string` | Yes      | Path relative to repo root                                                         |
 | `maxBytes`      | `number` | No       | Max bytes to read (default 512KB)                                                  |
 | `offset`        | `number` | No       | Start line (0-based)                                                               |
-| `limit`         | `number` | No       | Max lines to return                                                                |
+| `limit`         | `number` | No       | Max lines to return. In search mode this caps returned match/context lines after scanning. |
 | `search`        | `string` | No       | Regex pattern (case-insensitive)                                                   |
 | `searchContext` | `number` | No       | Context lines around matches (default 2)                                           |
 | `jsonPath`      | `string` | No       | Dot-separated key path for JSON extraction (YAML accepted only if JSON-compatible) |
@@ -1065,7 +1065,7 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 **Modes:**
 
 - **Line range**: `offset` + `limit` — returns numbered lines
-- **Search**: `search` — returns matching lines with context, matches prefixed with `>`
+- **Search**: `search` — scans the file (or from `offset`) and returns matching lines with context, matches prefixed with `>`. `limit` caps returned lines; it does not limit the scanned window.
 - **JSON path**: `jsonPath` — parses JSON and returns extracted subtree
 - **Full read**: no params — returns entire file (subject to `maxBytes`)
 
@@ -1115,20 +1115,21 @@ Run a command in a repo-scoped subprocess. Runtime execution is enabled by defau
 | `executable`       | `string`                                 | No       | Custom executable path                                                                                                                                                                   |
 | `args`             | `string[]`                               | No       | Command arguments (max 100)                                                                                                                                                              |
 | `code`             | `string`                                 | No       | Inline code to execute (max 1 MB)                                                                                                                                                        |
+| `stdin`            | `string`                                 | No       | UTF-8 text written to the child process stdin, then closed. Max 512 KiB by encoded byte size.                                                                                             |
 | `relativeCwd`      | `string`                                 | No       | Working directory relative to repo root (default: `"."`)                                                                                                                                 |
 | `timeoutMs`        | `integer`                                | No       | Timeout in milliseconds (100-300,000)                                                                                                                                                    |
 | `queryTerms`       | `string[]`                               | No       | Filter output to lines matching these terms (max 10)                                                                                                                                     |
 | `maxResponseLines` | `integer`                                | No       | Max output lines returned (5-1,000, default: 100)                                                                                                                                       |
 | `persistOutput`    | `boolean`                                | No       | Save full output to an artifact handle (default: true)                                                                                                                                   |
-| `outputMode`       | `"minimal"` \| `"summary"` \| `"intent"` | No       | Controls response verbosity. `"minimal"` (default): ~50 tokens, status + artifact handle only. `"summary"`: head+tail excerpts (legacy). `"intent"`: only `queryTerms`-matched excerpts. |
+| `outputMode`       | `"minimal"` \| `"summary"` \| `"intent"` | No       | Controls response verbosity. `"minimal"` (default): status, artifact handle, and concise stdout/stderr previews. `"summary"`: head+tail excerpts. `"intent"`: only `queryTerms`-matched excerpts. |
 | `includeDiagnostics` | `boolean`                              | No       | Include coarse policy, execution, output decoding, and artifact phase timings                                                                                                             |
 
-Use `code` for inline snippets or `args` for invoking files/commands. `queryTerms` acts like a built-in grep, extracting only matching lines from long output.
+Use `stdin` for multiline scripts/input instead of shell quoting or base64 workarounds. SDL-MCP reports `stdinBytes` and `stdinSha256` but does not echo full stdin in visible output or persisted logs. `stdin` does not bypass command validation: the shell runtime still requires `code`. Use `code` for inline snippets or `args` for invoking files/commands. `queryTerms` acts like a built-in grep, extracting only matching lines from long output.
 
 **Response** varies by `outputMode`:
 
-- **All modes:** `status`, `exitCode`, `signal`, `durationMs`, `artifactHandle`, `policyDecision`, `diagnostics?`
-- **`"minimal"` (default):** adds `outputLines`, `outputBytes` — no stdout/stderr content. Use `sdl.runtime.queryOutput` to search the artifact.
+- **All modes:** `status`, `exitCode`, `signal`, `durationMs`, `artifactHandle`, `truncation`, `policyDecision`, `diagnostics?`, plus `stdinBytes`/`stdinSha256` when stdin was provided and `quotingWarnings` when risky quoting patterns are detected
+- **`"minimal"` (default):** returns concise `stdoutPreview` and short `stderrSummary` when output is small enough to show inline. Use `sdl.runtime.queryOutput` to search the artifact for full output.
 - **`"summary"`:** adds `stdoutSummary`, `stderrSummary`, `excerpts`, `truncation` (legacy behavior)
 - **`"intent"`:** adds `excerpts`, `truncation` — only `queryTerms`-matched windows, no head/tail summary
 

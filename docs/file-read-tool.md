@@ -65,7 +65,7 @@ flowchart TD
 | `filePath`      | string | Yes      | -       | File path relative to repo root       |
 | `maxBytes`      | number | No       | 524288  | Max bytes to read (max 512KB)         |
 | `offset`        | number | No       | 0       | Start line number (0-based)           |
-| `limit`         | number | No       | -       | Max lines to return (max 5000)        |
+| `limit`         | number | No       | -       | Max lines to return (max 5000); in search mode, caps returned match/context lines after scanning |
 | `search`        | string | No       | -       | Regex pattern for search mode         |
 | `searchContext` | number | No       | 2       | Context lines around matches (max 20) |
 | `jsonPath`      | string | No       | -       | Dot-separated key path for JSON/YAML  |
@@ -181,7 +181,7 @@ flowchart LR
 
 ### Mode 2: Regex Search
 
-Search for patterns and return matching lines with surrounding context. Automatically merges overlapping context windows.
+Search for patterns and return matching lines with surrounding context. Automatically merges overlapping context windows. Search scans the file by default, or starts at `offset` when provided. `limit` caps returned match/context lines after search; it does not limit the scanned window.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
@@ -240,6 +240,7 @@ flowchart TD
 - Time budget: 500ms max search time
 - Line length cap: 10,000 chars per line tested
 - Match limit: 50 matches max (warns if exceeded)
+- Returned line cap: `limit` applies after matching, so late-file matches are still found
 
 **Token Savings:** Compares SDL tokens against full file (since Claude Code's Read cannot do regex search).
 

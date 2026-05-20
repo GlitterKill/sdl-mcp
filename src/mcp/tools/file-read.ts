@@ -110,11 +110,16 @@ function searchLines(
   lines: string[],
   pattern: string,
   contextLines: number,
+  options: {
+    lineNumberOffset?: number;
+    maxReturnedLines?: number;
+  } = {},
 ): {
   content: string;
   matchCount: number;
   returnedLines: number;
   matchesTruncated: boolean;
+  linesTruncated: boolean;
 } {
   if (pattern.length > 500) {
     throw new ValidationError("Search pattern too long (max 500 characters)");
@@ -166,6 +171,7 @@ function searchLines(
       matchCount: 0,
       returnedLines: 0,
       matchesTruncated: false,
+      linesTruncated: false,
     };
   }
 
@@ -182,25 +188,68 @@ function searchLines(
   }
 
   const matchSet = new Set(matchIndices);
-  const outputParts: string[] = [];
-  let returnedLines = 0;
-  for (let r = 0; r < ranges.length; r++) {
-    const [start, end] = ranges[r];
-    for (let i = start; i <= end; i++) {
-      const prefix = matchSet.has(i) ? ">" : " ";
-      outputParts.push(`${prefix}${i + 1}: ${lines[i]}`);
-      returnedLines++;
+  const maxReturnedLines = options.maxReturnedLines;
+  const lineNumberOffset = options.lineNumberOffset ?? 0;
+  const rangeLineCount = ranges.reduce(
+    (total, [start, end]) => total + end - start + 1,
+    0,
+  );
+  const selectedLines = new Set<number>();
+
+  if (maxReturnedLines !== undefined) {
+    // Preserve the actual hit lines first. Context is useful, but returning
+    // context without the match makes a capped search result misleading.
+    for (const idx of matchIndices) {
+      if (selectedLines.size >= maxReturnedLines) break;
+      selectedLines.add(idx);
     }
-    if (r < ranges.length - 1) {
-      outputParts.push("  ...");
+    for (
+      let distance = 1;
+      distance <= contextLines && selectedLines.size < maxReturnedLines;
+      distance += 1
+    ) {
+      for (const idx of matchIndices) {
+        for (const candidate of [idx - distance, idx + distance]) {
+          if (
+            candidate >= 0 &&
+            candidate < lines.length &&
+            !selectedLines.has(candidate)
+          ) {
+            selectedLines.add(candidate);
+            if (selectedLines.size >= maxReturnedLines) break;
+          }
+        }
+        if (selectedLines.size >= maxReturnedLines) break;
+      }
+    }
+  } else {
+    for (const [start, end] of ranges) {
+      for (let i = start; i <= end; i++) {
+        selectedLines.add(i);
+      }
     }
   }
+
+  const orderedLines = Array.from(selectedLines).sort((a, b) => a - b);
+  const outputParts: string[] = [];
+  let previousLine: number | undefined;
+  for (const line of orderedLines) {
+    if (previousLine !== undefined && line > previousLine + 1) {
+      outputParts.push("  ...");
+    }
+    const prefix = matchSet.has(line) ? ">" : " ";
+    outputParts.push(`${prefix}${lineNumberOffset + line + 1}: ${lines[line]}`);
+    previousLine = line;
+  }
+  const returnedLines = orderedLines.length;
+  const linesTruncated = returnedLines < rangeLineCount;
 
   return {
     content: outputParts.join("\n"),
     matchCount: totalMatchCount,
     returnedLines,
     matchesTruncated: totalMatchCount > matchIndices.length,
+    linesTruncated,
   };
 }
 
@@ -440,18 +489,33 @@ export async function handleFileRead(
 
   // === Feature 2: Search with context ===
   if (request.search) {
-    // Apply line range first if specified
+    // Search scans from the requested offset through the file; `limit` caps
+    // returned context lines instead of constraining the scanned window.
     const searchOffset = request.offset ?? 0;
-    const searchLimit = request.limit ?? lines.length;
-    const rangedLines = lines.slice(searchOffset, searchOffset + searchLimit);
+    const rangedLines = lines.slice(searchOffset);
 
     const result = searchLines(
       rangedLines,
       request.search,
       Math.min(request.searchContext ?? 2, 50),
+      {
+        lineNumberOffset: searchOffset,
+        maxReturnedLines: request.limit,
+      },
     );
-    const finalContent = result.matchesTruncated
-      ? `// WARNING: ${result.matchCount} total matches, showing first ${MAX_SEARCH_MATCHES}. Narrow the pattern.\n${result.content}`
+    const warnings: string[] = [];
+    if (result.matchesTruncated) {
+      warnings.push(
+        `${result.matchCount} total matches, showing first ${MAX_SEARCH_MATCHES}. Narrow the pattern.`,
+      );
+    }
+    if (result.linesTruncated) {
+      warnings.push(
+        `Returned lines capped at limit ${request.limit}. Increase limit or narrow the pattern.`,
+      );
+    }
+    const finalContent = warnings.length > 0
+      ? `// WARNING: ${warnings.join(" ")}\n${result.content}`
       : result.content;
     return finalizeFileReadResponse(
       request,
@@ -462,7 +526,7 @@ export async function handleFileRead(
         bytes: Buffer.byteLength(finalContent, "utf-8"),
         totalLines,
         returnedLines: result.returnedLines,
-        truncated: result.matchesTruncated,
+        truncated: result.matchesTruncated || result.linesTruncated,
         matchCount: result.matchCount,
       },
       totalBytes,

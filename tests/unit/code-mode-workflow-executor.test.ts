@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { executeWorkflow } from "../../dist/code-mode/workflow-executor.js";
 import type { ParsedWorkflowRequest } from "../../dist/code-mode/workflow-parser.js";
 import type { CodeModeConfig } from "../../dist/config/types.js";
+import { RuntimeExecuteRequestSchema } from "../../dist/mcp/tools.js";
 import { tokenAccumulator } from "../../dist/mcp/token-accumulator.js";
 import { z } from "zod";
 
@@ -47,6 +48,19 @@ function createMockActionMap() {
         const { a, b } = args as { a: number; b: number };
         return { sum: a + b };
       },
+    },
+    "test.periodicValidation": {
+      schema: z.object({
+        code: z
+          .string()
+          .min(1)
+          .describe("Required code value."),
+      }),
+      handler: async () => ({ ok: true }),
+    },
+    "runtime.execute": {
+      schema: RuntimeExecuteRequestSchema,
+      handler: async () => ({ ok: true }),
     },
     "test.fail": {
       schema: z.object({}).passthrough(),
@@ -429,6 +443,29 @@ describe("code-mode workflow executor", () => {
     );
     assert.strictEqual(result.results[0].status, "error");
     assert.strictEqual(result.results[1].status, "ok");
+  });
+
+  it("does not double punctuate validation guidance", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        {
+          fn: "runtimeExecute",
+          action: "runtime.execute",
+          args: { runtime: "shell", args: ["node", "--version"] },
+        },
+      ],
+      onError: "continue",
+    };
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+    );
+
+    assert.strictEqual(result.results[0].status, "error");
+    assert.doesNotMatch(result.results[0].error ?? "", /\.\. Use sdl\.manual/);
   });
 
   it("error with onError=stop halts chain", async () => {

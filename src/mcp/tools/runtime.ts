@@ -11,6 +11,7 @@ import { tmpdir } from "os";
 import type { ToolContext } from "../../server.js";
 import {
   RuntimeExecuteRequestSchema,
+  type RuntimeExecuteRequest,
   type RuntimeExecuteResponse,
 } from "../tools.js";
 import { getLadybugConn } from "../../db/ladybug.js";
@@ -105,6 +106,80 @@ function buildStdoutPreview(stdout: string): string {
   if (firstLines.length <= PREVIEW_MAX_CHARS) return firstLines;
   return firstLines.slice(0, PREVIEW_MAX_CHARS) + "…";
 }
+function buildStdinMetadata(
+  stdin: string | undefined,
+): Pick<RuntimeExecuteResponse, "stdinBytes" | "stdinSha256"> {
+  if (stdin === undefined) return {};
+  return {
+    stdinBytes: Buffer.byteLength(stdin, "utf-8"),
+    stdinSha256: hashContent(stdin),
+  };
+}
+
+function hasUnbalancedQuotes(text: string): boolean {
+  let quote: "'" | "\"" | undefined;
+  for (let index = 0; index < text.length; index += 1) {
+    const ch = text[index];
+    const escaped =
+      index > 0 && (text[index - 1] === "\\" || text[index - 1] === "`");
+    if (escaped) continue;
+    if (quote) {
+      if (ch === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+    }
+  }
+  return quote !== undefined;
+}
+
+function detectQuotingWarnings(
+  request: RuntimeExecuteRequest,
+): string[] | undefined {
+  const commandText = [
+    request.executable,
+    ...request.args,
+    request.code,
+  ]
+    .filter((part): part is string => typeof part === "string")
+    .join("\n");
+  const warnings = new Set<string>();
+  const hasStdin = request.stdin !== undefined;
+
+  const nodeEvalIndex = request.args.findIndex((arg) => arg === "-e" || arg === "--eval");
+  const nodeEvalCode = nodeEvalIndex >= 0 ? request.args[nodeEvalIndex + 1] : undefined;
+  if (request.runtime === "node" && nodeEvalCode?.includes("\n")) {
+    warnings.add(
+      "Multiline node -e code is quoting-sensitive; prefer runtime.execute stdin for script input or searchEditPreview operations[] for edits.",
+    );
+  }
+  if (/@['"]\r?\n|\r?\n['"]@/.test(commandText)) {
+    warnings.add(
+      "PowerShell here-string command text is quoting-sensitive; prefer runtime.execute stdin for multiline input.",
+    );
+  }
+  if (/base64|atob|fromBase64|FromBase64String|certutil\s+-decode/i.test(commandText)) {
+    warnings.add(
+      "Base64 decode/eval command workarounds add token overhead and hide intent; prefer runtime.execute stdin or searchEditPreview operations[].",
+    );
+  }
+  if (!hasStdin && /fs\.writeFileSync|writeFileSync\s*\(/.test(commandText)) {
+    warnings.add(
+      "Runtime write scripts without stdin are fragile for multiline edits; prefer searchEditPreview operations[] or pass payloads through runtime.execute stdin.",
+    );
+  }
+  if (hasUnbalancedQuotes(commandText)) {
+    warnings.add(
+      "Command text appears to contain unbalanced quotes; prefer runtime.execute stdin for multiline or quote-heavy payloads.",
+    );
+  }
+
+  return warnings.size > 0 ? Array.from(warnings) : undefined;
+}
+
 
 // ============================================================================
 // Intent-Only Excerpts (for outputMode: "intent")
@@ -278,10 +353,19 @@ export async function handleRuntimeExecute(
   const request = RuntimeExecuteRequestSchema.parse(args);
   timer.record("runtime.validate", parseStartedAt);
 
-  const finish = <T extends RuntimeExecuteResponse>(response: T): T =>
-    request.includeDiagnostics
-      ? attachTimingDiagnostics(response, timer.snapshot())
-      : response;
+  const stdinMetadata = buildStdinMetadata(request.stdin);
+  const quotingWarnings = detectQuotingWarnings(request);
+  const augmentResponse = <T extends RuntimeExecuteResponse>(response: T): T => ({
+    ...response,
+    ...stdinMetadata,
+    ...(quotingWarnings ? { quotingWarnings } : {}),
+  });
+  const finish = <T extends RuntimeExecuteResponse>(response: T): T => {
+    const augmented = augmentResponse(response);
+    return request.includeDiagnostics
+      ? attachTimingDiagnostics(augmented, timer.snapshot())
+      : augmented;
+  };
 
   // 1. Load config + validate repo
   const repoStartedAt = timer.start();
@@ -493,7 +577,7 @@ export async function handleRuntimeExecute(
               durationMs: compileResult.durationMs,
               stdoutSummary: "",
               stdoutPreview: buildStdoutPreview(compileStdout),
-              stderrSummary: "",
+              stderrSummary: compileStderr ? compileStderr.slice(0, 200) : "",
               outputLines: stdoutLineCount + stderrLineCount,
               outputBytes:
                 compileResult.totalStdoutBytes + compileResult.totalStderrBytes,
@@ -632,6 +716,7 @@ export async function handleRuntimeExecute(
       maxStderrBytes: runtimeConfig.maxStderrBytes,
       signal: context?.signal,
       codePath,
+      stdin: request.stdin,
     });
     timer.record("runtime.execute", executeStartedAt);
 
@@ -734,7 +819,7 @@ export async function handleRuntimeExecute(
           durationMs: minimalBase.durationMs,
           stdoutSummary: "",
           stdoutPreview: minimalBase.stdoutPreview,
-          stderrSummary: "",
+          stderrSummary: minimalBase.stderrSummary,
           artifactHandle,
           truncation: minimalBase.truncation,
           policyDecision: minimalBase.policyDecision,

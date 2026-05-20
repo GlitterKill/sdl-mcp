@@ -37,6 +37,21 @@ import { WorkflowRequestSchema, WorkflowTraceOptionsSchema } from "./types.js";
 const TRANSFORM_HINT =
   '\n\n> **Tip:** Data transforms (dataPick, dataMap, dataFilter, dataSort, dataTemplate) are available as sdl.workflow steps. Use sdl.manual({ actions: ["dataPick", "dataMap", "dataFilter", "dataSort", "dataTemplate"] }) for schemas.';
 
+const MCP_WRAPPER_ACTION_ALIASES = new Map<string, string>([
+  ["sdl.action.search", "action.search"],
+  ["sdl.context", "context"],
+  ["sdl.file", "file"],
+  ["sdl.manual", "manual"],
+  ["sdl.workflow", "workflow"],
+]);
+
+function normalizeManualActionSelector(selector: string): string {
+  const trimmed = selector.trim();
+  const exact = MCP_WRAPPER_ACTION_ALIASES.get(trimmed);
+  if (exact) return exact;
+  return trimmed.startsWith("sdl.") ? trimmed.slice("sdl.".length) : trimmed;
+}
+
 export const ActionSearchRequestSchema = z.object({
   query: z.string().min(1),
   limit: z
@@ -209,7 +224,13 @@ export function handleManual(
       (selector.endsWith(".*") &&
         fullCatalog.some((entry) => matchesSelector(entry, selector)));
 
-    const unknowns = args.actions.filter((action) => !knownSelector(action));
+    const requestedActions = args.actions.map((action) => ({
+      raw: action,
+      normalized: normalizeManualActionSelector(action),
+    }));
+    const unknowns = requestedActions
+      .filter((action) => !knownSelector(action.normalized))
+      .map((action) => action.raw);
     if (unknowns.length > 0) {
       return {
         error: "UNKNOWN_ACTIONS",
@@ -219,7 +240,7 @@ export function handleManual(
     }
 
     const filtered: ActionDescriptor[] = [];
-    for (const name of args.actions) {
+    for (const { normalized: name } of requestedActions) {
       const matches = fullCatalog.filter((entry) =>
         matchesSelector(entry, name),
       );
@@ -441,6 +462,10 @@ export function registerCodeModeTools(
         createIfMissing: { type: "boolean" },
         targeting: { type: "string", enum: ["text", "symbol"] },
         query: { type: "object" },
+        operations: {
+          type: "array",
+          items: { type: "object" },
+        },
         filters: { type: "object" },
         editMode: { type: "string" },
         previewContextLines: { type: "number" },

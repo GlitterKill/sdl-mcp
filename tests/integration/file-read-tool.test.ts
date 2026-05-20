@@ -84,6 +84,51 @@ describe("sdl.file.read token usage metadata", () => {
     });
   });
 
+  it("searches the whole file before applying the returned line limit", async () => {
+    const longPath = join(docsDir, "long.md");
+    const content = Array.from({ length: 40 }, (_, index) =>
+      index === 29 ? "needle appears here" : `ordinary line ${index + 1}`,
+    ).join("\n");
+    writeFileSync(longPath, content, "utf-8");
+
+    const response = await handleFileRead({
+      repoId,
+      filePath: "docs/long.md",
+      search: "needle",
+      limit: 10,
+      searchContext: 0,
+    }) as Record<string, unknown>;
+
+    assert.match(String(response.content), />30: needle appears here/);
+    assert.equal(response.matchCount, 1);
+    assert.equal(response.returnedLines, 1);
+  });
+
+  it("keeps the matching line when returned line limit is smaller than context", async () => {
+    const longPath = join(docsDir, "context-limit.md");
+    const content = [
+      "before one",
+      "before two",
+      "needle appears here",
+      "after one",
+      "after two",
+    ].join("\n");
+    writeFileSync(longPath, content, "utf-8");
+
+    const response = await handleFileRead({
+      repoId,
+      filePath: "docs/context-limit.md",
+      search: "needle",
+      limit: 1,
+      searchContext: 2,
+    }) as Record<string, unknown>;
+
+    assert.match(String(response.content), />3: needle appears here/);
+    assert.doesNotMatch(String(response.content), /before one/);
+    assert.equal(response.matchCount, 1);
+    assert.equal(response.returnedLines, 1);
+  });
+
   it("returns a response artifact handle when responseMode is handle", async () => {
     const response = await handleFileRead({
       repoId,

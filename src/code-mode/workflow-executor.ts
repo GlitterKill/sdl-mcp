@@ -91,6 +91,10 @@ function attachStepMetadataToPriorResult(
   }
 }
 
+function stripTrailingSentencePunctuation(value: string): string {
+  return value.replace(/[.!?]+$/u, "");
+}
+
 /**
  * Execute a parsed workflow request sequentially, resolving $N references,
  * tracking budget, validating the context ladder, and caching ETags.
@@ -501,7 +505,10 @@ export async function executeWorkflow(
               issue.path.length > 0 ? issue.path.join(".") + ": " : "";
             return path + issue.message;
           });
-          errorMessage = `Invalid arguments: ${lines.join("; ")}. Use sdl.manual({ actions: ["${step.action}"] }) to see expected params.`;
+          const validationSummary = stripTrailingSentencePunctuation(
+            lines.join("; "),
+          );
+          errorMessage = `Invalid arguments: ${validationSummary}. Use sdl.manual({ actions: ["${step.action}"] }) to see expected params.`;
         } else if (error instanceof Error) {
           errorMessage = error.message;
         } else {
