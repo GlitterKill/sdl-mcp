@@ -10,6 +10,7 @@ import { traceProcessesTS } from "../graph/process.js";
 import { computeClustersRust, traceProcessesRust } from "./rustIndexer.js";
 import {
   detectAlgoCapability,
+  resetRepoGraphProjection,
   runPageRank,
   runKCore,
   runLouvain,
@@ -489,6 +490,8 @@ export async function computeAndStoreClustersAndProcesses(params: {
         });
         return;
       }
+
+      await resetRepoGraphProjection(conn, repoId);
 
       const pageRankResults = await runPageRank(conn, repoId);
       const kCoreResults = await runKCore(conn, repoId);

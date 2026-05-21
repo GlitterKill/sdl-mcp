@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **LadybugDB algorithm refresh**: Drop and rebuild repo-scoped projected graphs before post-index algorithm refresh so long-lived HTTP server connections do not reuse stale projections during incremental indexing.
+
 ## [0.11.4] - 2026-05-21
 
 ### Added

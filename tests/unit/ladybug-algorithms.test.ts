@@ -10,6 +10,7 @@ import {
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { queryAll } from "../../dist/db/ladybug-core.js";
 import {
   detectAlgoCapability,
   runPageRank,
@@ -17,6 +18,7 @@ import {
   runLouvain,
   shortestPath,
   clearAlgoCapabilityCache,
+  resetRepoGraphProjection,
   graphProjectionName,
 } from "../../dist/db/ladybug-algorithms.js";
 
@@ -239,6 +241,9 @@ describe("LadybugDB Algorithm Adapter", () => {
           if (prepared.includes("CALL PROJECT_GRAPH")) {
             return createQueryResult([]);
           }
+          if (prepared.includes("CALL DROP_PROJECTED_GRAPH")) {
+            return createQueryResult([]);
+          }
           if (prepared.includes("CALL page_rank")) {
             return createQueryResult([{ symbolId: "sym-a", score: 0.5 }]);
           }
@@ -309,6 +314,103 @@ describe("LadybugDB Algorithm Adapter", () => {
           (statement) => !statement.includes("MATCH (s:Symbol"),
         ),
       );
+    });
+
+    it("drops a real repo projection from the current Ladybug connection", async () => {
+      await resetDb();
+      const repoId = "algo-repo-real-projection";
+      await seedChain(repoId, ["real-a", "real-b", "real-c"]);
+      const conn = await getLadybugConn();
+      clearAlgoCapabilityCache(conn);
+
+      if (!(await detectAlgoCapability(conn)).supported) {
+        return;
+      }
+
+      await runPageRank(conn, repoId);
+      const projectionName = graphProjectionName(repoId);
+      const beforeReset = await queryAll<{ name: string }>(
+        conn,
+        "CALL SHOW_PROJECTED_GRAPHS() RETURN *",
+        {},
+      );
+      assert.ok(beforeReset.some((row) => row.name === projectionName));
+
+      await resetRepoGraphProjection(conn, repoId);
+      const afterReset = await queryAll<{ name: string }>(
+        conn,
+        "CALL SHOW_PROJECTED_GRAPHS() RETURN *",
+        {},
+      );
+      assert.ok(!afterReset.some((row) => row.name === projectionName));
+
+      await runKCore(conn, repoId);
+      const afterRecreate = await queryAll<{ name: string }>(
+        conn,
+        "CALL SHOW_PROJECTED_GRAPHS() RETURN *",
+        {},
+      );
+      assert.ok(afterRecreate.some((row) => row.name === projectionName));
+    });
+
+    it("treats a missing repo projection as reset no-op before first algorithm run", async () => {
+      await resetDb();
+      const repoId = "algo-repo-missing-projection";
+      await seedChain(repoId, ["missing-a", "missing-b", "missing-c"]);
+      const conn = await getLadybugConn();
+      clearAlgoCapabilityCache(conn);
+
+      if (!(await detectAlgoCapability(conn)).supported) {
+        return;
+      }
+
+      const projectionName = graphProjectionName(repoId);
+      const beforeReset = await queryAll<{ name: string }>(
+        conn,
+        "CALL SHOW_PROJECTED_GRAPHS() RETURN *",
+        {},
+      );
+      assert.ok(!beforeReset.some((row) => row.name === projectionName));
+
+      await resetRepoGraphProjection(conn, repoId);
+
+      const afterReset = await queryAll<{ name: string }>(
+        conn,
+        "CALL SHOW_PROJECTED_GRAPHS() RETURN *",
+        {},
+      );
+      assert.ok(!afterReset.some((row) => row.name === projectionName));
+
+      await runPageRank(conn, repoId);
+      const afterRecreate = await queryAll<{ name: string }>(
+        conn,
+        "CALL SHOW_PROJECTED_GRAPHS() RETURN *",
+        {},
+      );
+      assert.ok(afterRecreate.some((row) => row.name === projectionName));
+    });
+
+    it("drops and recreates a repo projection when the caller resets it after index mutations", async () => {
+      const { conn, calls } = createFakeAlgoConn();
+      const repoId = "repo-with-incremental-mutation";
+      const typedConn = conn as unknown as import("kuzu").Connection;
+      clearAlgoCapabilityCache(typedConn);
+
+      await runPageRank(typedConn, repoId);
+      await resetRepoGraphProjection(typedConn, repoId);
+      await runKCore(typedConn, repoId);
+
+      const projectionName = graphProjectionName(repoId);
+      const projectionCalls = calls.filter((call) =>
+        call.statement.includes("CALL PROJECT_GRAPH"),
+      );
+      const dropCalls = calls.filter((call) =>
+        call.statement.includes("CALL DROP_PROJECTED_GRAPH"),
+      );
+
+      assert.strictEqual(projectionCalls.length, 2);
+      assert.strictEqual(dropCalls.length, 1);
+      assert.ok(dropCalls[0]?.statement.includes(projectionName));
     });
   });
 });

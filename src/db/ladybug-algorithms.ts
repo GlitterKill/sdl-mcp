@@ -223,6 +223,52 @@ async function ensureGraphProjection(
   return true;
 }
 
+function isMissingProjectedGraphError(
+  message: string,
+  projectionName: string,
+): boolean {
+  const lower = message.toLowerCase();
+  const lowerName = projectionName.toLowerCase();
+  return (
+    lower.includes("projected graph") &&
+    lower.includes(lowerName) &&
+    (lower.includes("does not exist") || lower.includes("does not exists"))
+  );
+}
+
+/**
+ * Drop the repo projection for a connection before algorithm refresh rebuilds
+ * it from freshly indexed Symbol/DEPENDS_ON rows.
+ */
+export async function resetRepoGraphProjection(
+  conn: Connection,
+  repoId: string,
+): Promise<void> {
+  const name = graphProjectionName(repoId);
+  projectedGraphsByConn.get(conn)?.delete(name);
+
+  try {
+    await exec(
+      conn,
+      `CALL DROP_PROJECTED_GRAPH('${escapeSingleQuotedLiteral(name)}')`,
+      {},
+    );
+    logger.debug("ladybug-algorithms: dropped repo graph projection", {
+      repoId,
+      name,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!isMissingProjectedGraphError(message, name)) {
+      throw err;
+    }
+    logger.debug("ladybug-algorithms: repo graph projection already absent", {
+      repoId,
+      name,
+    });
+  }
+}
+
 /**
  * Clear the cached capability for a given connection. Primarily used by
  * tests that want to re-detect capability after faking availability.
