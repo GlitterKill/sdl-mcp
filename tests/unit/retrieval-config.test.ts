@@ -120,7 +120,8 @@ describe("SemanticConfigSchema with retrieval field", () => {
   it("default config parses correctly — retrieval field is optional and absent by default", () => {
     const result = SemanticConfigSchema.parse({});
     assert.strictEqual(result.enabled, true);
-    assert.strictEqual(result.model, "jina-embeddings-v2-base-code");
+    // The deprecated legacy model field stays absent unless configured; lane defaults are resolved downstream.
+    assert.strictEqual(result.model, undefined);
     // retrieval is optional; may be undefined when not provided
     assert.ok(
       result.retrieval === undefined || typeof result.retrieval === "object",

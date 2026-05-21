@@ -53,7 +53,7 @@ describe("code-mode regressions", () => {
     );
     assert.match(
       manual,
-      /function repoOverview\(p: \{ level\?: "stats" \| "directories" \| "full"; ifNoneMatch\?: string \}\): \{ overview: object; etag: string \} \| \{ notModified: true; etag: string \}/,
+      /function repoOverview\(p: \{ level\?: "stats" \| "directories" \| "full"; ifNoneMatch\?: string \}\): object/,
     );
     // agentContext was removed from the API
     assert.match(
