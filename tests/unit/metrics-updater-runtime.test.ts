@@ -475,3 +475,141 @@ describe("materializeFileSummaries incremental targeting", () => {
     });
   });
 });
+
+describe("finalizeIndexing embedding model plan", () => {
+  after(async () => {
+    const { closeLadybugDb } = await import("../../dist/db/ladybug.js");
+    await closeLadybugDb();
+    if (existsSync(TEST_DB_PATH)) {
+      rmSync(TEST_DB_PATH, { recursive: true, force: true });
+    }
+  });
+
+  async function seedRepo(repoId: string): Promise<void> {
+    await resetTestDb();
+    const { getLadybugConn } = await import("../../dist/db/ladybug.js");
+    const queries = await import("../../dist/db/ladybug-queries.js");
+    const conn = await getLadybugConn();
+    const now = "2026-05-21T00:00:00Z";
+
+    await queries.upsertRepo(conn, {
+      repoId,
+      rootPath: `C:/tmp/${repoId}`,
+      configJson: JSON.stringify({ languages: ["ts"] }),
+      createdAt: now,
+    });
+    await queries.upsertFile(conn, {
+      fileId: `${repoId}-file`,
+      repoId,
+      relPath: "src/entry.ts",
+      contentHash: `${repoId}-hash`,
+      language: "ts",
+      byteSize: 128,
+      lastIndexedAt: now,
+    });
+    await queries.upsertSymbol(conn, {
+      symbolId: `${repoId}-symbol`,
+      repoId,
+      fileId: `${repoId}-file`,
+      kind: "function",
+      name: "entryPoint",
+      exported: true,
+      visibility: "public",
+      language: "typescript",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 5,
+      rangeEndCol: 1,
+      astFingerprint: `${repoId}-fingerprint`,
+      signatureJson: JSON.stringify("() => void"),
+      summary: "Entry point for semantic embedding model plan tests",
+      invariantsJson: null,
+      sideEffectsJson: null,
+      updatedAt: now,
+    });
+  }
+
+  function baseTelemetry(): FinalizeIndexingParams["callResolutionTelemetry"] {
+    return {
+      pass2EligibleFileCount: 0,
+      pass2ProcessedFileCount: 0,
+      pass2EdgesCreated: 0,
+      pass2EdgesFailed: 0,
+      pass2Duration: 0,
+    };
+  }
+
+  it("uses specialized defaults for Symbol and FileSummary embedding lanes", async () => {
+    const { finalizeIndexing } = await import(
+      "../../dist/indexer/metrics-updater.js"
+    );
+    const repoId = "metrics-specialized-lanes";
+    await seedRepo(repoId);
+
+    const result = await finalizeIndexing({
+      repoId,
+      versionId: "v-specialized",
+      appConfig: {
+        repos: [],
+        semantic: {
+          enabled: true,
+          provider: "mock",
+          generateSummaries: false,
+        },
+      } as any,
+      hasIndexMutations: true,
+      includeTimings: true,
+      callResolutionTelemetry: baseTelemetry(),
+    });
+
+    assert.ok(
+      result.timings?.["semanticEmbeddings:jina-embeddings-v2-base-code"] !==
+        undefined,
+    );
+    assert.equal(
+      result.timings?.["semanticEmbeddings:nomic-embed-text-v1.5"],
+      undefined,
+    );
+    assert.deepEqual(Object.keys(result.fileSummaryEmbeddingStats ?? {}), [
+      "nomic-embed-text-v1.5",
+    ]);
+  });
+
+  it("uses both models on both embedding lanes for max-recall", async () => {
+    const { finalizeIndexing } = await import(
+      "../../dist/indexer/metrics-updater.js"
+    );
+    const repoId = "metrics-max-recall-lanes";
+    await seedRepo(repoId);
+
+    const result = await finalizeIndexing({
+      repoId,
+      versionId: "v-max-recall",
+      appConfig: {
+        repos: [],
+        semantic: {
+          enabled: true,
+          provider: "mock",
+          embeddingProfile: "max-recall",
+          generateSummaries: false,
+        },
+      } as any,
+      hasIndexMutations: true,
+      includeTimings: true,
+      callResolutionTelemetry: baseTelemetry(),
+    });
+
+    assert.ok(
+      result.timings?.["semanticEmbeddings:jina-embeddings-v2-base-code"] !==
+        undefined,
+    );
+    assert.ok(
+      result.timings?.["semanticEmbeddings:nomic-embed-text-v1.5"] !==
+        undefined,
+    );
+    assert.deepEqual(
+      Object.keys(result.fileSummaryEmbeddingStats ?? {}).sort(),
+      ["jina-embeddings-v2-base-code", "nomic-embed-text-v1.5"],
+    );
+  });
+});

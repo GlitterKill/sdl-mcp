@@ -400,8 +400,10 @@ SDL-MCP currently ships with two supported embedding models, each suited to diff
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
-    Jina["jina-embeddings-v2-base-code<br/>768 dims, 8192 max tokens<br/>~110 MB, bundled<br/>Optimized for code"] e1@--> Shared["Natural-language symbol text<br/>benefits from summaries"]
-    Nomic["nomic-embed-text-v1.5<br/>768 dims, 8192 max tokens<br/>~138 MB download<br/>Best for NL queries + summaries"] e2@--> Shared
+    Jina["jina-embeddings-v2-base-code<br/>768 dims, 8192 max tokens<br/>~110 MB, bundled<br/>Optimized for code"] e1@--> Symbols["Default Symbol lane"]
+    Nomic["nomic-embed-text-v1.5<br/>768 dims, 8192 max tokens<br/>~138 MB download<br/>Best for NL queries + summaries"] e2@--> FileSummaries["Default FileSummary lane"]
+    Jina e3@-. max-recall .-> FileSummaries
+    Nomic e4@-. max-recall .-> Symbols
 
     classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
     classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
@@ -417,13 +419,11 @@ flowchart LR
 
 | If you...                            | Use                                                       |
 | :----------------------------------- | :-------------------------------------------------------- |
-| Want zero setup, code-focused        | `jina-embeddings-v2-base-code` (bundled)                  |
-| Want better quality, longer context  | `nomic-embed-text-v1.5` (768-dim, 8192 tokens)            |
-| Work with multi-language codebases   | `jina-embeddings-v2-base-code` (trained on 30+ languages) |
-| Have LLM summaries enabled           | Nomic (text model benefits most from NL summaries)        |
-| Have a large codebase (>10k symbols) | `jina-embeddings-v2-base-code` (code-optimized)           |
-| Want the best NL query quality       | `nomic-embed-text-v1.5` + LLM summaries                   |
-| Want the best code similarity        | `jina-embeddings-v2-base-code`                            |
+| Want lower index time with strong defaults | `embeddingProfile: "specialized"`                     |
+| Want maximum recall across both lanes       | `embeddingProfile: "max-recall"`                       |
+| Need code-shaped Symbol search              | Jina on `symbolEmbeddingModels`                          |
+| Need prose-heavy FileSummary/NL matching    | Nomic on `fileSummaryEmbeddingModels`                    |
+| Need custom tuning                          | Set `symbolEmbeddingModels` and `fileSummaryEmbeddingModels` explicitly |
 
 ### Three Embedding Providers
 
@@ -785,7 +785,7 @@ Every generated summary records its estimated API cost:
 
 ### Summary Compatibility
 
-Both supported embedding models (`jina-embeddings-v2-base-code` and `nomic-embed-text-v1.5`) benefit from LLM summaries. When `generateSummaries: true` is set, summaries are generated and embedded for all models, producing higher-quality semantic search results. Note that `jina-embeddings-v2-base-code` is already optimized for code semantics, so the improvement from summaries may be less dramatic than with the general-purpose models.
+LLM summaries improve the text each configured embedding lane receives. With the default `specialized` profile, Jina embeds Symbol payloads and Nomic embeds FileSummary payloads; with `max-recall`, both supported models embed both lanes. Jina is already optimized for code semantics, so summary gains are usually more noticeable on prose-heavy Nomic/FileSummary vectors.
 
 ---
 
@@ -801,7 +801,9 @@ Both supported embedding models (`jina-embeddings-v2-base-code` and `nomic-embed
 
     // ── Embedding Configuration ──
     "provider": "local", // "local" (ONNX), "api", or "mock"
-    "model": "jina-embeddings-v2-base-code", // or "nomic-embed-text-v1.5" or "jina-embeddings-v2-base-code"
+    "embeddingProfile": "specialized", // "specialized" or "max-recall"
+    "symbolEmbeddingModels": ["jina-embeddings-v2-base-code"], // optional lane override
+    "fileSummaryEmbeddingModels": ["nomic-embed-text-v1.5"], // optional lane override
     "modelCacheDir": null, // Custom model cache directory
     "retrieval": { "mode": "hybrid" }, // Current search tuning entry point
 
@@ -830,7 +832,7 @@ Both supported embedding models (`jina-embeddings-v2-base-code` and `nomic-embed
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "nomic-embed-text-v1.5",
+    "embeddingProfile": "specialized",
     "generateSummaries": false
   }
 }
@@ -843,7 +845,7 @@ Both supported embedding models (`jina-embeddings-v2-base-code` and `nomic-embed
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "nomic-embed-text-v1.5",
+    "embeddingProfile": "max-recall",
     "generateSummaries": true,
     "summaryProvider": "api",
     "summaryModel": "claude-haiku-4-5-20251001"
@@ -853,20 +855,21 @@ Both supported embedding models (`jina-embeddings-v2-base-code` and `nomic-embed
 
 Set `ANTHROPIC_API_KEY` in your environment.
 
-**Recipe 3: Code-specialized embeddings (best for code search)**
+**Recipe 3: Custom lane overrides**
 
 ```json
 {
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "jina-embeddings-v2-base-code",
+    "symbolEmbeddingModels": ["jina-embeddings-v2-base-code"],
+    "fileSummaryEmbeddingModels": ["nomic-embed-text-v1.5"],
     "generateSummaries": false
   }
 }
 ```
 
-Downloads ~110 MB on first run. Trained on 30+ programming languages — best choice when searching for similar code patterns.
+Use explicit lane arrays when you want to tune one lane without changing the other. The specialized default already uses Jina for code-shaped Symbols and Nomic for prose-heavy FileSummary nodes.
 
 **Recipe 4: Local LLM via Ollama**
 
@@ -875,7 +878,7 @@ Downloads ~110 MB on first run. Trained on 30+ programming languages — best ch
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "jina-embeddings-v2-base-code",
+    "embeddingProfile": "specialized",
     "generateSummaries": true,
     "summaryProvider": "local",
     "summaryModel": "llama3.2",
@@ -1073,7 +1076,7 @@ sdl.symbol.search({
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "nomic-embed-text-v1.5",
+    "embeddingProfile": "specialized",
 
     // Hybrid retrieval replaces alpha-blending
     "retrieval": {

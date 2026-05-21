@@ -567,7 +567,7 @@ The card's `summary` field should contain a natural-language description instead
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "jina-embeddings-v2-base-code",
+    "embeddingProfile": "specialized",
     "generateSummaries": true,
     "summaryProvider": "api",
     "summaryModel": "claude-haiku-4-5-20251001"
@@ -584,7 +584,7 @@ Requires: `ANTHROPIC_API_KEY` environment variable.
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "jina-embeddings-v2-base-code",
+    "embeddingProfile": "specialized",
     "generateSummaries": true,
     "summaryProvider": "local",
     "summaryModel": "qwen2.5-coder"
@@ -594,14 +594,14 @@ Requires: `ANTHROPIC_API_KEY` environment variable.
 
 Requires: Ollama running with `qwen2.5-coder` pulled.
 
-**Nomic embeddings + Anthropic summaries (highest quality):**
+**Max-recall embeddings + Anthropic summaries (highest recall):**
 
 ```json
 {
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "nomic-embed-text-v1.5",
+    "embeddingProfile": "max-recall",
     "generateSummaries": true,
     "summaryProvider": "api",
     "summaryModel": "claude-haiku-4-5-20251001"
@@ -609,21 +609,22 @@ Requires: Ollama running with `qwen2.5-coder` pulled.
 }
 ```
 
-Requires: `ANTHROPIC_API_KEY` environment variable. Downloads ~138 MB embedding model on first run.
+Requires: `ANTHROPIC_API_KEY` environment variable. Runs both supported embedding models on both lanes, so indexing takes longer than the specialized default.
 
-**Jina Code embeddings (best for code-to-code search):**
+**Custom specialized lanes:**
 
 ```json
 {
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "jina-embeddings-v2-base-code"
+    "symbolEmbeddingModels": ["jina-embeddings-v2-base-code"],
+    "fileSummaryEmbeddingModels": ["nomic-embed-text-v1.5"]
   }
 }
 ```
 
-Downloads ~110 MB code-specialized embedding model on first run. Trained on 30+ programming languages — ideal when your primary use case is finding similar code patterns rather than natural-language queries.
+Use explicit lane arrays when you want to tune one lane without changing the other. The specialized default already uses Jina for code-shaped Symbols and Nomic for prose-heavy FileSummary nodes.
 
 For the full configuration reference, see [Configuration Reference](./configuration-reference.md). For a deeper look at how summaries interact with embeddings and pass-2 resolution, see [Semantic Engine](./feature-deep-dives/semantic-engine.md).
 

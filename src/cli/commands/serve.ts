@@ -1,5 +1,6 @@
 import { ServeOptions } from "../types.js";
 import { loadConfig } from "../../config/loadConfig.js";
+import { resolveSemanticEmbeddingModelPlan } from "../../config/semantic-embedding-model-plan.js";
 import { MCPServer, createMCPServer } from "../../server.js";
 import { watchRepository, IndexWatchHandle } from "../../indexer/indexer.js";
 import { setupStdioTransport } from "../transport/stdio.js";
@@ -186,9 +187,23 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       try {
         const { getEmbeddingProvider } =
           await import("../../indexer/embeddings.js");
-        const provider = getEmbeddingProvider("local", config.semantic?.model);
-        await provider.embed(["sdl-mcp warmup"]);
-        logger.debug("[serve] embeddings session pre-warmed");
+        const modelPlan = resolveSemanticEmbeddingModelPlan(config.semantic);
+        const warmupModels = [
+          ...new Set([
+            ...modelPlan.symbolEmbeddingModels,
+            ...modelPlan.fileSummaryEmbeddingModels,
+          ]),
+        ];
+        if (warmupModels.length === 0) {
+          return;
+        }
+        for (const model of warmupModels) {
+          const provider = getEmbeddingProvider("local", model);
+          await provider.embed(["sdl-mcp warmup"]);
+        }
+        logger.debug("[serve] embeddings sessions pre-warmed", {
+          models: warmupModels,
+        });
       } catch (err) {
         logger.debug("[serve] embeddings warmup skipped", {
           error: err instanceof Error ? err.message : String(err),

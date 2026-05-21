@@ -145,8 +145,9 @@
     "provider": "mock",
     "executionProviders": ["cpu"],
     "modelVariant": "default",
-    "model": "jina-embeddings-v2-base-code",
-    "additionalModels": ["nomic-embed-text-v1.5"],
+    "embeddingProfile": "specialized",
+    "symbolEmbeddingModels": ["jina-embeddings-v2-base-code"],
+    "fileSummaryEmbeddingModels": ["nomic-embed-text-v1.5"],
     "generateSummaries": false
   },
   "prefetch": {

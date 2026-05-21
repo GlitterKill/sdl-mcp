@@ -552,20 +552,36 @@
           "enum": ["api", "local", "mock"],
           "default": "local"
         },
+        "embeddingProfile": {
+          "type": "string",
+          "enum": ["specialized", "max-recall"],
+          "default": "specialized",
+          "description": "Semantic embedding model profile. 'specialized' embeds Symbols with Jina and FileSummary nodes with Nomic. 'max-recall' restores both supported models on both lanes."
+        },
+        "symbolEmbeddingModels": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["jina-embeddings-v2-base-code"],
+          "description": "Embedding models to populate for Symbol nodes. Overrides embeddingProfile for the Symbol lane when set."
+        },
+        "fileSummaryEmbeddingModels": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["nomic-embed-text-v1.5"],
+          "description": "Embedding models to populate for FileSummary nodes. Overrides embeddingProfile for the FileSummary lane when set."
+        },
         "model": {
           "type": "string",
-          "enum": ["jina-embeddings-v2-base-code", "nomic-embed-text-v1.5"],
-          "default": "jina-embeddings-v2-base-code"
+          "description": "Deprecated legacy primary embedding model. When no embeddingProfile or per-lane model arrays are configured, model plus additionalModels are treated as one shared model list for both Symbol and FileSummary embeddings."
         },
         "additionalModels": {
           "type": "array",
           "items": { "type": "string" },
-          "default": ["nomic-embed-text-v1.5"],
-          "description": "Extra embedding models to populate at index time so multiple vector lanes can contribute to hybrid fusion. Primary `model` is always populated; each name listed here gets a separate pass. Unknown model names are skipped."
+          "description": "Deprecated legacy shared extra embedding models. Use embeddingProfile, symbolEmbeddingModels, or fileSummaryEmbeddingModels instead."
         },
         "modelCacheDir": {
           "type": "string",
-          "description": "Override directory for downloaded model files (nomic-embed-text-v1.5). Defaults to platform-specific cache."
+          "description": "Override directory for downloaded local embedding model files. Defaults to the platform-specific SDL-MCP model cache."
         },
         "generateSummaries": {
           "type": "boolean",
@@ -830,7 +846,9 @@
       "default": {
         "enabled": true,
         "provider": "local",
-        "model": "jina-embeddings-v2-base-code",
+        "embeddingProfile": "specialized",
+        "symbolEmbeddingModels": ["jina-embeddings-v2-base-code"],
+        "fileSummaryEmbeddingModels": ["nomic-embed-text-v1.5"],
         "generateSummaries": false,
         "summaryModel": "claude-haiku-4-5-20251001",
         "summaryMaxConcurrency": 5,

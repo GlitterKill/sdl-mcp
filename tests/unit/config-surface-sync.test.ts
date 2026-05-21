@@ -153,6 +153,21 @@ describe("config surface sync", () => {
     assert.match(helperSource, /warmPrefetchOnServeStart/);
   });
 
+  it("warms the resolved semantic embedding model plan on serve startup", () => {
+    const serveSource = readFileSync(
+      join(process.cwd(), "src/cli/commands/serve.ts"),
+      "utf8",
+    );
+
+    assert.match(serveSource, /resolveSemanticEmbeddingModelPlan/);
+    assert.match(serveSource, /modelPlan.symbolEmbeddingModels/);
+    assert.match(serveSource, /modelPlan.fileSummaryEmbeddingModels/);
+    assert.doesNotMatch(
+      serveSource,
+      /getEmbeddingProvider("local", config.semantic?.model)/,
+    );
+  });
+
   it("keeps repo post-index session timeout surfaced in config docs and schema", () => {
     const parsed = RepoConfigSchema.parse({
       repoId: "timeout-repo",

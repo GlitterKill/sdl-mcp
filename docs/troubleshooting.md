@@ -260,8 +260,8 @@ Then run manual refreshes with `sdl-mcp index` until the underlying issue is fix
 - Resolution:
   - ensure outbound HTTPS access to Hugging Face model hub
   - configure proxy via `HTTPS_PROXY` environment variable if needed
-  - use the default model (`jina-embeddings-v2-base-code`) which is bundled and requires no download
-  - if one downloaded model fails, try the other (`nomic-embed-text-v1.5` vs `jina-embeddings-v2-base-code`)
+  - pre-download the default specialized-lane models with `node scripts/download-models.mjs jina-embeddings-v2-base-code nomic-embed-text-v1.5`
+  - use `semantic.modelCacheDir` to point SDL-MCP at a pre-seeded model cache for restricted or offline environments
 
 ## Debug Commands
 

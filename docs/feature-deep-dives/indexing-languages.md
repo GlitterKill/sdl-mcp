@@ -254,16 +254,15 @@ The summary system interacts with the embedding pipeline to create four distinct
 
 | Tier           | Embedding Model                                   | Summary Source                               | Cost                                      |
 | :------------- | :------------------------------------------------ | :------------------------------------------- | :---------------------------------------- |
-| Default   | `jina-embeddings-v2-base-code` (768-dim, ~110 MB) | Heuristic summaries | Free, bundled  |
-| Medium         | `nomic-embed-text-v1.5` (768-dim, ~138 MB)        | Heuristic summaries                          | Free, downloaded model                    |
-| Medium+        | `jina-embeddings-v2-base-code` (768-dim, ~110 MB) | Heuristic summaries                          | Free, downloaded model (code-specialized) |
-| Enhanced (1.5) | Either model with `semantic: true`                | Enhanced heuristics plus NN summary transfer | Free, requires embeddings                 |
-| High           | Either model with summaries enabled               | LLM-generated 1-3 sentence summaries         | API cost (~$2 / 1M tokens)                |
+| Specialized | Jina for Symbols, Nomic for FileSummary nodes | Heuristic summaries plus NN summary transfer | Free, downloaded/cached local models |
+| Max recall     | Jina + Nomic on both embedding lanes          | Heuristic summaries plus NN summary transfer | Free, more index time and local model cache use |
+| Custom lanes   | `symbolEmbeddingModels` / `fileSummaryEmbeddingModels` | Heuristic summaries plus NN summary transfer | Free, depends on configured local models |
+| High           | Any embedding profile with summaries enabled | LLM-generated 1-3 sentence summaries | API cost, about 2 USD / 1M tokens |
 
-- **Low** - default. Embeds raw symbol text (name + kind + signature) with a general-purpose model. Enhanced per-kind heuristic summaries are always generated (class, interface, type, enum, variable, constructor), but no embedding-based enrichment.
-- **Medium** - swaps in a higher-quality text model with longer context (8192 tokens). Same heuristic summaries as Low.
-- **Enhanced (Tier 1.5)** - when `semantic.enabled: true`, embedding-based enrichment runs automatically after indexing. It uses the native Ladybug vector indexes to find well-documented neighbor symbols and propagates their documentation patterns to undocumented symbols. Direct transfers (similarity >= 0.85, quality 0.6) copy the summary verbatim; adapted transfers (similarity 0.7-0.85, quality 0.5) extract the verb/pattern and apply it to the target name. No API calls - fully offline.
-- **High** - adds LLM-generated summaries (quality 0.8) to either embedding model. The quality-gated filter skips symbols that already have `summaryQuality >= 0.8` (for example from JSDoc), avoiding redundant API calls. Produces the best results because the LLM distills code meaning into plain English that embedding models handle well.
+- **Specialized** - default. Embeds code-shaped Symbol payloads with Jina and prose-heavy FileSummary payloads with Nomic. Enhanced per-kind heuristic summaries and NN summary transfer run when semantic indexing is enabled.
+- **Max recall** - runs both supported models on both lanes for users who prefer recall over index time.
+- **Custom lanes** - lets advanced users tune Symbol and FileSummary model lists independently. Unsupported model names are skipped and surfaced by `sdl-mcp doctor`.
+- **High** - adds LLM-generated summaries (quality 0.8) to any embedding profile. The quality-gated filter skips symbols that already have `summaryQuality >= 0.8` (for example from JSDoc), avoiding redundant API calls. Produces the best results because the LLM distills code meaning into plain English that embedding models handle well.
 
 Each symbol now carries `summaryQuality` (0.0-1.0) and `summarySource` fields tracking provenance: `jsdoc` (1.0), `llm` (0.8), `nn-direct` (0.6), `nn-adapted` (0.5), `heuristic-typed` (0.4), `heuristic-fallback` (0.3).
 

@@ -144,6 +144,47 @@ describe("CLI doctor command - LadybugDB", () => {
       "Output should mention graph database",
     );
   });
+
+  it("warns when semantic lane models are unsupported", async () => {
+    const configPath = join(tempDir, "sdlmcp.config.json");
+
+    const config = {
+      repos: [{ repoId: "test", rootPath: tempDir }],
+      graphDatabase: { path: join(tempDir, "semantic-warning.lbug") },
+      policy: {},
+      semantic: {
+        enabled: true,
+        provider: "local",
+        symbolEmbeddingModels: ["unsupported-symbol-model"],
+        fileSummaryEmbeddingModels: ["unsupported-summary-model"],
+      },
+    };
+    writeFileSync(configPath, JSON.stringify(config));
+
+    const { doctorCommand } = await import("../../dist/cli/commands/doctor.js");
+
+    let output = "";
+    const originalLog = console.log;
+    console.log = (msg: string) => {
+      output += `${msg}\n`;
+    };
+
+    try {
+      await doctorCommand({ config: configPath });
+    } catch {
+      // Other doctor warnings are acceptable for this focused output assertion.
+    } finally {
+      console.log = originalLog;
+    }
+
+    assert.match(output, /Semantic embedding models/);
+    assert.match(output, /Semantic embedding model configuration needs attention/);
+    assert.match(
+      output,
+      /unsupported models skipped: unsupported-symbol-model, unsupported-summary-model/,
+    );
+    assert.match(output, /no supported models configured/);
+  });
 });
 
 

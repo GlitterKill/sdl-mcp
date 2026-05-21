@@ -379,16 +379,20 @@ export const SemanticConfigSchema = z.object({
    */
   alpha: z.number().min(0).max(1).default(0.6),
   provider: z.enum(["api", "local", "mock"]).default("local"),
-  model: z.string().default("jina-embeddings-v2-base-code"),
-  /* sdl.context: additional embedding models */
-  /** Additional embedding models to populate at index time so multiple vector
-   *  lanes can contribute to hybrid fusion. Primary `model` is always populated;
-   *  each name listed here gets a separate pass. Unknown model names are skipped.
-   *  Typical: `["nomic-embed-text-v1.5"]` alongside a jina primary. */
-  additionalModels: z
-    .array(z.string())
-    .optional()
-    .default(["nomic-embed-text-v1.5"]),
+  /** Preferred embedding model split. `specialized` is the effective default:
+   *  Jina embeds code-shaped Symbol payloads, while Nomic embeds prose-heavy
+   *  FileSummary payloads. `max-recall` restores the legacy both-models-on-
+   *  both-lanes behavior for users who prefer recall over index time. */
+  embeddingProfile: z.enum(["specialized", "max-recall"]).optional(),
+  symbolEmbeddingModels: z.array(z.string()).optional(),
+  fileSummaryEmbeddingModels: z.array(z.string()).optional(),
+  /** @deprecated Use `symbolEmbeddingModels`, `fileSummaryEmbeddingModels`,
+   *  or `embeddingProfile`. When only legacy fields are configured, `model`
+   *  and `additionalModels` are still treated as one shared model list for
+   *  both Symbol and FileSummary embeddings. */
+  model: z.string().optional(),
+  /** @deprecated Use per-lane model arrays or `embeddingProfile` instead. */
+  additionalModels: z.array(z.string()).optional(),
   modelCacheDir: z.string().nullish(),
   generateSummaries: z.boolean().default(false),
   /** Summary LLM backend — independent from embedding provider.

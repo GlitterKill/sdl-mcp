@@ -856,22 +856,35 @@ async function checkSemanticModels(
   // Check model files
   const { getModelInfo, isModelAvailable } =
     await import("../../indexer/model-registry.js");
+  const { resolveSemanticEmbeddingModelPlan } =
+    await import("../../config/semantic-embedding-model-plan.js");
 
-  let activeModel = "jina-embeddings-v2-base-code";
+  let modelPlan = resolveSemanticEmbeddingModelPlan(undefined);
+  let semanticEnabled = true;
   let annEnabled = true;
   if (existsSync(configPath)) {
     try {
       const { loadConfig } = await import("../../config/loadConfig.js");
       const config = loadConfig(configPath);
-      activeModel = config.semantic?.model ?? "jina-embeddings-v2-base-code";
+      modelPlan = resolveSemanticEmbeddingModelPlan(config.semantic);
+      semanticEnabled = config.semantic?.enabled ?? true;
       annEnabled = config.semantic?.ann?.enabled ?? true;
     } catch {
       // Use defaults
     }
   }
 
-  const modelInfo = getModelInfo(activeModel);
-  const modelPresent = isModelAvailable(activeModel);
+  const configuredModels = [
+    ...new Set([
+      ...modelPlan.symbolEmbeddingModels,
+      ...modelPlan.fileSummaryEmbeddingModels,
+    ]),
+  ];
+  const modelStatuses = configuredModels.map((model) => {
+    const modelInfo = getModelInfo(model);
+    const present = isModelAvailable(model);
+    return { model, modelInfo, present };
+  });
 
   const details: string[] = [];
   details.push(
@@ -880,9 +893,35 @@ async function checkSemanticModels(
   details.push(
     `tokenizers: ${tokenizersAvailable ? "available" : "NOT FOUND"}`,
   );
+  details.push(`embedding profile: ${modelPlan.profile}`);
   details.push(
-    `model: ${activeModel} (${modelInfo.dimension}d, ${modelPresent ? "files present" : "files missing"})`,
+    `symbol models: ${modelPlan.symbolEmbeddingModels.join(", ")}`,
   );
+  details.push(
+    `FileSummary models: ${modelPlan.fileSummaryEmbeddingModels.join(", ")}`,
+  );
+  details.push(
+    `model files: ${modelStatuses
+      .map(
+        ({ model, modelInfo, present }) =>
+          `${model} (${modelInfo.dimension}d, ${present ? "files present" : "files missing"})`,
+      )
+      .join("; ")}`,
+  );
+  if (modelPlan.unsupportedModels.length > 0) {
+    details.push(
+      `unsupported models skipped: ${modelPlan.unsupportedModels.join(", ")}`,
+    );
+  }
+  const symbolLaneEmpty = modelPlan.symbolEmbeddingModels.length === 0;
+  const fileSummaryLaneEmpty =
+    modelPlan.fileSummaryEmbeddingModels.length === 0;
+  if (symbolLaneEmpty) {
+    details.push("symbol lane: no supported models configured");
+  }
+  if (fileSummaryLaneEmpty) {
+    details.push("FileSummary lane: no supported models configured");
+  }
   details.push(`ANN index: ${annEnabled ? "enabled" : "disabled"}`);
 
   if (!onnxAvailable || !tokenizersAvailable) {
@@ -896,7 +935,25 @@ async function checkSemanticModels(
     };
   }
 
-  if (!modelPresent && modelInfo.bundled) {
+  const hasModelPlanWarning =
+    semanticEnabled &&
+    (modelPlan.unsupportedModels.length > 0 ||
+      symbolLaneEmpty ||
+      fileSummaryLaneEmpty);
+  if (hasModelPlanWarning) {
+    return {
+      status: "warn",
+      message:
+        `Semantic embedding model configuration needs attention:\n  ${details.join("\n  ")}\n\n` +
+        `  Remediation:\n` +
+        `    Set semantic.embeddingProfile to "specialized" or "max-recall", or configure supported symbolEmbeddingModels/fileSummaryEmbeddingModels.`,
+    };
+  }
+
+  const missingBundledModels = modelStatuses.filter(
+    ({ modelInfo, present }) => modelInfo.bundled && !present,
+  );
+  if (missingBundledModels.length > 0) {
     return {
       status: "warn",
       message:

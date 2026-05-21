@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Default semantic indexing now uses specialized embedding lanes: Jina for Symbol embeddings and Nomic for FileSummary embeddings. Added `semantic.embeddingProfile`, `symbolEmbeddingModels`, and `fileSummaryEmbeddingModels`, with `max-recall` preserving the previous both-models-on-both-lanes behavior.
+
 ### Fixed
 
 - Fixed config discovery from the package/repo root so CI, tests, and benchmark guardrails read `config/sdlmcp.config.json` before falling back to the global config path.

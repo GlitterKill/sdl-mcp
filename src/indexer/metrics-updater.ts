@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 
 import type { AppConfig } from "../config/types.js";
+import { resolveSemanticEmbeddingModelPlan } from "../config/semantic-embedding-model-plan.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { classifyDependencyTarget } from "../db/symbol-placeholders.js";
@@ -193,7 +194,12 @@ export async function finalizeIndexing({
     (changedFileIds === undefined || changedFileIds.size > 0);
 
   if (shouldRunSemanticRefresh) {
-    const model = semanticConfig.model ?? "jina-embeddings-v2-base-code";
+    const modelPlan = resolveSemanticEmbeddingModelPlan(semanticConfig);
+    if (modelPlan.unsupportedModels.length > 0) {
+      logger.warn(
+        `Unsupported semantic embedding models skipped: ${modelPlan.unsupportedModels.join(", ")}`,
+      );
+    }
 
     // Summaries are generated first so embeddings can incorporate them.
     if (semanticConfig.generateSummaries) {
@@ -209,38 +215,13 @@ export async function finalizeIndexing({
       }
     }
 
-    /* sdl.context: multi-model embedding pass.
+    /* sdl.context: lane-specific embedding pass.
      *
-     * P3: Run models in parallel. Each model owns an independent ONNX
-     * session and writes to a distinct vec column on the Symbol node, so
-     * the only shared resource is the LadybugDB write lock — and that
-     * lock is already serialized by withWriteConn() inside each pass.
-     * Running them concurrently overlaps ONNX inference (CPU-bound) with
-     * each other's idle write-lock waits, roughly halving wall time when
-     * two models are configured AND at least one stays on the per-row
-     * write path.
-     *
-     * Trade-off when both models exceed VECTOR_REBUILD_THRESHOLD: both
-     * passes drop their HNSW index, share the writeLimiter slot for
-     * batched writes, and each rebuilds at the end. Wall time is no
-     * worse than sequential (writes serialize through the lock either
-     * way) but the index-down window for each model spans the union of
-     * both passes' write phases. During that window, hybrid retrieval
-     * for either model degrades to FTS+other-model only — orchestrator
-     * silently catches QUERY_VECTOR_INDEX failures and returns []. The
-     * window is bounded by total bulk-write time (typically tens of
-     * seconds), and only first-time / full-reindex runs hit it.
-     *
-     * Per-model embeddingConcurrency now defaults to 1: with the batched
-     * UNWIND writes (P1) and the HNSW rebuild path (P2), the dominant
-     * cost is ONNX inference itself rather than write contention, and a
-     * single batch fully utilises the ONNX thread pool. Concurrency >1
-     * just oversubscribes CPUs across the parallel model passes. */
-    const extraModels = semanticConfig.additionalModels ?? [];
-    const modelsToEmbed: string[] = [
-      model,
-      ...extraModels.filter((m) => m !== model),
-    ];
+     * The specialized profile keeps the expensive semantic tail focused:
+     * Jina embeds code-shaped Symbol payloads, while Nomic embeds the more
+     * prose-heavy FileSummary payloads. The max-recall profile intentionally
+     * restores both models on both lanes for users who prefer recall over
+     * index time. Per-lane arrays override either profile. */
     const retrievalConfig = semanticConfig.retrieval;
     const shouldRunFileSummaryEmbeddings =
       (retrievalConfig?.mode ?? "hybrid") === "hybrid" &&
@@ -251,7 +232,7 @@ export async function finalizeIndexing({
       // FileSummary payloads are much larger than symbol cards. Keep model
       // lanes serialized here so hybrid file vectors cannot multiply ONNX/DML
       // memory pressure across every configured embedding model.
-      for (const embModel of modelsToEmbed) {
+      for (const embModel of modelPlan.fileSummaryEmbeddingModels) {
         try {
           fileSummaryEmbeddingStats[embModel] = await measureSubphase(
             `fileSummaryEmbeddings:${embModel}`,
@@ -334,7 +315,7 @@ export async function finalizeIndexing({
       // weights stay hot in L3 cache, and model-handoff scheduling overhead
       // disappears. Wins on systems where ORT serializes parallel sessions
       // at the thread-pool layer (observed alternation pattern).
-      for (const embModel of modelsToEmbed) {
+      for (const embModel of modelPlan.symbolEmbeddingModels) {
         await runOneModel(embModel);
       }
     } else {
@@ -342,7 +323,9 @@ export async function finalizeIndexing({
       // pools can overlap. Best when ORT does NOT serialize sessions —
       // model jobs interleave at the batch boundary and total wall time is
       // close to max(model_a, model_b).
-      await Promise.all(modelsToEmbed.map((embModel) => runOneModel(embModel)));
+      await Promise.all(
+        modelPlan.symbolEmbeddingModels.map((embModel) => runOneModel(embModel)),
+      );
     }
   }
 

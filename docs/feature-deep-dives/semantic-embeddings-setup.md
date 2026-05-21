@@ -58,36 +58,43 @@ flowchart TD
 
 ## Required vs Optional Dependencies
 
-| Dependency            | npm Package        | Version   | Required? | Purpose                              |
-| :-------------------- | :----------------- | :-------- | :-------- | :----------------------------------- |
-| ONNX Runtime          | `onnxruntime-node` | `^1.24.3` | Optional  | Run embedding model inference (CPU)  |
-| HuggingFace Tokenizer | `tokenizers`       | `^0.13.3` | Optional  | Tokenize text for ONNX models        |
-| Jina Code Model       | bundled            | �         | Included  | 768-dim code-optimized embeddings    |
-| Nomic Model           | downloaded         | �         | Optional  | 768-dim high-quality text embeddings |
-| Jina Code Model       | downloaded         | �         | Optional  | 768-dim code-specialized embeddings  |
-| Anthropic API Key     | �                  | �         | Optional  | LLM summary generation (High tier)   |
-| Ollama Server         | �                  | �         | Optional  | Local LLM summary generation         |
+| Dependency            | npm Package        | Version   | Required? | Purpose                                      |
+| :-------------------- | :----------------- | :-------- | :-------- | :------------------------------------------- |
+| ONNX Runtime          | `onnxruntime-node` | `^1.24.3` | Optional  | Run local embedding model inference          |
+| HuggingFace Tokenizer | `tokenizers`       | `^0.13.3` | Optional  | Tokenize text for ONNX models                |
+| Jina Code Model       | downloaded         | -         | Optional  | Default Symbol-lane code embeddings          |
+| Nomic Model           | downloaded         | -         | Optional  | Default FileSummary-lane text embeddings     |
+| Anthropic API Key     | -                  | -         | Optional  | LLM summary generation                       |
+| Ollama Server         | -                  | -         | Optional  | Local LLM summary generation                 |
 
-**Without the optional dependencies**, SDL-MCP still works � embeddings fall back to a deterministic 64-dim mock. Semantic search will function but with lower quality results.
+Without the optional ONNX dependencies, SDL-MCP still works: embeddings fall back to deterministic 64-dim mock vectors. Semantic search will function, but with lower quality results.
 
 ---
 
 ## Quick Setup by Tier
 
-### Tier 1: Low (Free, Bundled � Default)
+### Tier 1: Specialized Default (Free, Recommended)
 
-The default configuration. Uses the bundled Jina Code model with symbol text enriched by enhanced per-kind heuristic summaries. No LLM summaries.
+The default semantic profile is `specialized`: Symbol embeddings use `jina-embeddings-v2-base-code`, while FileSummary embeddings use `nomic-embed-text-v1.5`. This keeps index time lower than the old both-models-on-both-lanes behavior while preserving the strongest practical default for code-shaped and prose-shaped payloads. LLM summaries remain off unless you enable them.
 
-Enhanced heuristics are always active, generating pattern-matched summaries for all symbol kinds (class, interface, type, enum, variable, constructor) in addition to the existing typed function/method summaries. When `semantic.enabled: true`, NN summary transfer also runs automatically, propagating documentation from well-documented neighbors to undocumented symbols via embedding similarity.
+Enhanced heuristics are always active, generating pattern-matched summaries for all symbol kinds (class, interface, type, enum, variable, constructor) in addition to typed function/method summaries. When `semantic.enabled: true`, NN summary transfer also runs automatically, propagating documentation from well-documented neighbors to undocumented symbols via embedding similarity.
 
-**Step 1 � Install ONNX dependencies:**
+**Step 1 - Install ONNX dependencies:**
 
 ```bash
 cd sdl-mcp
 npm install onnxruntime-node tokenizers
 ```
 
-**Step 2 � Verify the bundled model exists:**
+**Step 2 - Optionally pre-download the default local models:**
+
+```bash
+node scripts/download-models.mjs jina-embeddings-v2-base-code nomic-embed-text-v1.5
+```
+
+If you skip this step, SDL-MCP downloads any missing local model files on the first embedding pass. Use `semantic.modelCacheDir` when you need a pre-seeded cache in an offline or restricted network.
+
+**Step 3 - Verify the model plan:**
 
 ```bash
 npx sdl-mcp doctor
@@ -99,10 +106,13 @@ Look for:
 Semantic embedding models .................. PASS
   onnxruntime-node: 1.24.x
   tokenizers: available
-  model: jina-embeddings-v2-base-code (768d, files present)
+  embedding profile: specialized
+  symbol models: jina-embeddings-v2-base-code
+  FileSummary models: nomic-embed-text-v1.5
+  model files: jina-embeddings-v2-base-code (768d, files present); nomic-embed-text-v1.5 (768d, files present)
 ```
 
-**Step 3 � Config (optional � this is the default):**
+**Step 4 - Config (optional, this is the effective default):**
 
 ```jsonc
 // sdl-mcp.config.json
@@ -110,20 +120,20 @@ Semantic embedding models .................. PASS
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "jina-embeddings-v2-base-code",
+    "embeddingProfile": "specialized",
   },
 }
 ```
 
-**Step 4 � Index your repository:**
+**Step 5 - Index your repository:**
 
 ```bash
 npx sdl-mcp index --repo-id my-repo
 ```
 
-Embeddings are generated during the finalization step of indexing. Subsequent searches with `semantic: true` will use them.
+Embeddings are generated during the finalization step of indexing. Subsequent searches with `semantic: true` use every healthy vector index that exists, so missing optional model files degrade naturally.
 
-**How text is constructed for Jina Code:**
+**How text is constructed for Jina Symbol embeddings:**
 
 Jina payloads use a structured, labeled-section format optimized for code models:
 
@@ -138,49 +148,32 @@ Calls: verify (function), isExpired (function)
 Terms: validate, token, jwt, auth
 ```
 
-Includes graph context (imports/calls made by the symbol) and search terms. See [Model-Aware Embedding Payloads](./semantic-engine.md#model-aware-embedding-payloads) for details.
+**How text is constructed for Nomic FileSummary embeddings:**
+
+Nomic payloads favor flowing prose and file-level context:
+
+```
+src/auth/jwt.ts contains authentication helpers for validating JWT signatures,
+checking expiration claims, and normalizing decoded token state. It exports
+validateToken and imports jsonwebtoken.
+```
+
+See [Model-Aware Embedding Payloads](./semantic-engine.md#model-aware-embedding-payloads) for details.
 
 ---
 
-### Tier 2: Medium (Free, Downloaded)
+### Tier 2: Max Recall (Free, More Index Time)
 
-Uses the higher-quality Nomic text embedding model. Better semantic matching thanks to 768 dimensions and an 8,192-token context window (both have 768-dim but Nomic has different training focus). Still fully offline � no LLM API calls needed.
+Use `embeddingProfile: "max-recall"` when you want the old recall-first behavior: both Jina and Nomic run for both Symbol and FileSummary embeddings. This can improve recall for ambiguous queries, but it roughly doubles the embedding work compared with the specialized default.
 
-**Step 1 � Install ONNX dependencies (if not already):**
+**Step 1 - Install ONNX dependencies and pre-download optional models:**
 
 ```bash
 npm install onnxruntime-node tokenizers
-```
-
-**Step 2 � Download the Nomic model (~138 MB):**
-
-Option A � Pre-download via script:
-
-```bash
 node scripts/download-models.mjs nomic-embed-text-v1.5
 ```
 
-Option B � Let SDL-MCP download on first use (automatic):
-The model is fetched from HuggingFace on the first embedding call during indexing. No manual step needed, but the first index run will take longer.
-
-**Where files are stored:**
-
-| Platform | Path                                                   |
-| :------- | :----------------------------------------------------- |
-| Windows  | `%LOCALAPPDATA%\sdl-mcp\models\nomic-embed-text-v1.5\` |
-| macOS    | `~/.cache/sdl-mcp/models/nomic-embed-text-v1.5/`       |
-| Linux    | `~/.cache/sdl-mcp/models/nomic-embed-text-v1.5/`       |
-| Custom   | Set `semantic.modelCacheDir` in config                 |
-
-**What gets downloaded:**
-
-| File                   | Source                                                                                                      | Size    |
-| :--------------------- | :---------------------------------------------------------------------------------------------------------- | :------ |
-| `model_quantized.onnx` | [HuggingFace](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/onnx/model_quantized.onnx) | ~138 MB |
-| `tokenizer.json`       | [HuggingFace](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/tokenizer.json)            | ~700 KB |
-| `config.json`          | [HuggingFace](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/config.json)               | ~1 KB   |
-
-**Step 3 � Configure:**
+**Step 2 - Configure max recall:**
 
 ```jsonc
 // sdl-mcp.config.json
@@ -188,88 +181,39 @@ The model is fetched from HuggingFace on the first embedding call during indexin
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "nomic-embed-text-v1.5",
+    "embeddingProfile": "max-recall",
   },
 }
 ```
 
-**Step 4 � Re-index to generate new embeddings:**
+**Step 3 - Re-index to populate the extra lane/model vectors:**
 
 ```bash
 npx sdl-mcp index --repo-id my-repo --mode full
 ```
 
-A full re-index is needed when switching models because the embedding dimensions change (384 ? 768).
+A full re-index is recommended when switching profiles so every requested lane/model vector is populated. Both supported models are 768-dimensional; the re-index is about filling missing vector columns, not changing vector dimensionality.
 
-**Step 5 � Verify:**
+**Step 4 - Verify:**
 
 ```bash
 npx sdl-mcp doctor
 ```
 
-Look for:
+Look for both models in both lanes:
 
 ```
 Semantic embedding models .................. PASS
-  onnxruntime-node: 1.24.x
-  tokenizers: available
-  model: nomic-embed-text-v1.5 (768d, files present)
+  embedding profile: max-recall
+  symbol models: jina-embeddings-v2-base-code, nomic-embed-text-v1.5
+  FileSummary models: jina-embeddings-v2-base-code, nomic-embed-text-v1.5
 ```
-
-**How text is constructed for Nomic:**
-
-Nomic payloads use flowing prose optimized for natural-language models:
-
-```
-validateToken is a function in src/auth/jwt.ts that validates JWT signature
-and checks expiration claim. It takes (token: string, opts?: ValidateOpts)
-=> Promise<DecodedToken>. It imports jsonwebtoken, JwtOptions and calls
-verify, isExpired. Related terms: validate, token, jwt, auth.
-```
-
-Includes the same graph context as Jina but formatted as English sentences. The Nomic model's 8,192-token window captures longer summaries without truncation. See [Model-Aware Embedding Payloads](./semantic-engine.md#model-aware-embedding-payloads) for details.
 
 ---
 
-### Tier 2b: Medium � Code-Specialized (Free, Downloaded)
+### Tier 2b: Custom Lane Overrides
 
-Uses the **jina-embeddings-v2-base-code** model, which is trained specifically on source code across 30+ programming languages. Same 768 dimensions and 8,192-token context window as Nomic, but optimized for code retrieval rather than general text. Best choice when your primary use case is searching code rather than documentation.
-
-**Step 1 � Install ONNX dependencies (if not already):**
-
-```bash
-npm install onnxruntime-node tokenizers
-```
-
-**Step 2 � Download the Jina Code model (~110 MB):**
-
-Option A � Pre-download via script:
-
-```bash
-node scripts/download-models.mjs jina-embeddings-v2-base-code
-```
-
-Option B � Let SDL-MCP download on first use (automatic):
-The model is fetched from HuggingFace on the first embedding call during indexing.
-
-**Where files are stored:**
-
-| Platform | Path                                                          |
-| :------- | :------------------------------------------------------------ |
-| Windows  | `%LOCALAPPDATA%\sdl-mcp\models\jina-embeddings-v2-base-code\` |
-| macOS    | `~/.cache/sdl-mcp/models/jina-embeddings-v2-base-code/`       |
-| Linux    | `~/.cache/sdl-mcp/models/jina-embeddings-v2-base-code/`       |
-| Custom   | Set `semantic.modelCacheDir` in config                        |
-
-**What gets downloaded:**
-
-| File                   | Source                                                                                                           | Size    |
-| :--------------------- | :--------------------------------------------------------------------------------------------------------------- | :------ |
-| `model_quantized.onnx` | [HuggingFace](https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/onnx/model_quantized.onnx) | ~110 MB |
-| `tokenizer.json`       | [HuggingFace](https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/tokenizer.json)            | ~700 KB |
-| `config.json`          | [HuggingFace](https://huggingface.co/jinaai/jina-embeddings-v2-base-code/resolve/main/config.json)               | ~1 KB   |
-
-**Step 3 � Configure:**
+Use explicit lane arrays when you want to tune one lane without changing the other. Explicit arrays override the selected profile only for that lane.
 
 ```jsonc
 // sdl-mcp.config.json
@@ -277,47 +221,25 @@ The model is fetched from HuggingFace on the first embedding call during indexin
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "jina-embeddings-v2-base-code",
+    "symbolEmbeddingModels": ["jina-embeddings-v2-base-code"],
+    "fileSummaryEmbeddingModels": ["nomic-embed-text-v1.5"],
   },
 }
 ```
 
-**Step 4 � Re-index to generate new embeddings:**
+**When to bias a lane toward Jina:**
 
-```bash
-npx sdl-mcp index --repo-id my-repo --mode full
-```
+- You need code-to-code similarity matching.
+- Your codebase spans multiple programming languages.
+- Symbol payloads are more useful than prose-heavy file summaries.
 
-A full re-index is needed when switching models because the embedding dimensions and model semantics change.
+**When to bias a lane toward Nomic:**
 
-**Step 5 � Verify:**
+- Your queries are natural-language descriptions like "find the authentication handler".
+- Your codebase has rich documentation, comments, and generated summaries.
+- FileSummary vectors are central to the retrieval workflow.
 
-```bash
-npx sdl-mcp doctor
-```
-
-Look for:
-
-```
-Semantic embedding models .................. PASS
-  onnxruntime-node: 1.24.x
-  tokenizers: available
-  model: jina-embeddings-v2-base-code (768d, files present)
-```
-
-**When to choose Jina Code over Nomic:**
-
-- Your codebase is primarily source code with minimal prose documentation
-- You work across multiple programming languages (Jina Code was trained on 30+ languages)
-- You want better code-to-code similarity matching (e.g., finding similar implementations)
-
-**When to choose Nomic over Jina Code:**
-
-- Your queries are natural-language descriptions (e.g., "find the authentication handler")
-- Your codebase has rich documentation, comments, and summaries
-- You're using LLM-generated summaries (Tier 3) � Nomic handles natural-language summaries better
-
-> **Note**: Unlike Nomic, the Jina Code model does not use document/query prefixes. Text is embedded as-is.
+> Legacy `semantic.model` and `semantic.additionalModels` still work for compatibility when no profile or per-lane arrays are configured, but new configs should use `embeddingProfile`, `symbolEmbeddingModels`, and `fileSummaryEmbeddingModels`.
 
 ---
 
@@ -356,12 +278,12 @@ Option B � Config file:
 **Step 3 � Configure:**
 
 ```jsonc
-// sdl-mcp.config.json � use either embedding model; both benefit from summaries
+// sdl-mcp.config.json - specialized embeddings with API summaries
 {
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "nomic-embed-text-v1.5",
+    "embeddingProfile": "specialized",
     "generateSummaries": true,
     "summaryProvider": "api",
     "summaryModel": "claude-haiku-4-5-20251001",
@@ -371,7 +293,7 @@ Option B � Config file:
 }
 ```
 
-> **Tip:** For maximum quality with natural-language queries, pair summaries with `nomic-embed-text-v1.5`. For code-centric queries, the default `jina-embeddings-v2-base-code` is very effective.
+> **Tip:** Use `embeddingProfile: "max-recall"` when summaries and ambiguous natural-language queries justify the extra embedding work. Keep `specialized` when index time matters more.
 
 **Step 4 � Index (summaries generated during finalization):**
 
@@ -422,7 +344,7 @@ Ollama runs an OpenAI-compatible API at `http://localhost:11434/v1` by default.
   "semantic": {
     "enabled": true,
     "provider": "local",
-    "model": "jina-embeddings-v2-base-code",
+    "embeddingProfile": "specialized",
     "generateSummaries": true,
     "summaryProvider": "local",
     "summaryModel": "llama3.2:3b",
@@ -465,24 +387,25 @@ The `summaryProvider: "local"` value sends OpenAI-format requests (`POST /chat/c
 
 ## Model Comparison
 
-| Property              | `jina-embeddings-v2-base-code` (default) | `nomic-embed-text-v1.5` (optional)     |
-| :-------------------- | :--------------------------------------- | :------------------------------------- | :--------------------------- |
-| Dimensions            | 384                                      | 768                                    | 768                          |
-| Max input tokens      | 256                                      | 8,192                                  | 8,192                        |
-| ONNX file size        | ~110 MB (INT8)                           | ~138 MB (INT8)                         | ~110 MB (INT8)               |
-| Bundled with npm      | Yes                                      | No, downloaded on demand               | No, downloaded on demand     |
-| Training data         | English sentence embeddings              | Diverse text embeddings                | Source code (30+ languages)  |
-| Input format          | Natural-language symbol text             | Natural-language symbol text           | Natural-language symbol text |
-| Document/query prefix | None                                     | `search_document: ` / `search_query: ` | None                         |
-| Best paired with      | LLM summaries                            | LLM summaries (NL queries)             | Code-centric queries         |
-| Disk location         | `<pkg>/models/`                          | `<cache>/models/`                      | `<cache>/models/`            |
-| Upstream source       | `sentence-transformers`                  | `nomic-ai`                             | `jinaai`                     |
+| Property              | `jina-embeddings-v2-base-code` | `nomic-embed-text-v1.5` |
+| :-------------------- | :--------------------------------------- | :------------------------------------- |
+| Default lane          | Symbol embeddings                         | FileSummary embeddings                  |
+| Profile role          | Code-shaped payloads                      | Prose-heavy payloads                    |
+| Dimensions            | 768                                       | 768                                    |
+| Max input tokens      | 8,192                                     | 8,192                                  |
+| ONNX file size        | ~110 MB (INT8), bundled                   | ~138 MB (INT8), downloaded on demand   |
+| Bundled with npm      | Yes                                       | No                                     |
+| Training data         | Source code across many languages         | General text and natural-language data |
+| Input format          | Structured code sections                  | Flowing prose with document/query prefix |
+| Best paired with      | Symbol search and code-to-code matching   | File summaries and NL-heavy queries    |
+| Disk location         | `<pkg>/models/`                          | `<cache>/models/`                      |
+| Upstream source       | `jinaai`                                  | `nomic-ai`                             |
 
-**Choosing a model:**
+**Choosing a profile:**
 
-- **Jina Code** � Zero setup, bundled, optimized for code. Has 8192-token context so handles long functions well.
-- **Nomic** � Best for natural-language queries ("find the auth handler") and when using LLM summaries. Its 8,192-token window captures longer signatures and documentation.
-- **Jina Code** � Best for code-to-code similarity and multi-language codebases. Trained directly on source code from 30+ languages, so it understands code structure natively without needing natural-language summaries.
+- **Specialized** - Recommended default. Runs Jina for Symbols and Nomic for FileSummary nodes.
+- **Max recall** - Runs both supported models on both lanes. Use when recall matters more than index time.
+- **Custom lanes** - Set `symbolEmbeddingModels` or `fileSummaryEmbeddingModels` when one lane needs explicit tuning.
 
 ## Summary Provider Comparison
 
@@ -760,14 +683,16 @@ npm install onnxruntime-node tokenizers
 
 Then run `npx sdl-mcp doctor` to verify.
 
-### "Bundled model files not found"
+### "Model files not found"
 
-**Cause:** The `models/jina-embeddings-v2-base-code/` directory is missing from the package.
+**Cause:** The configured local embedding model files are missing from the model cache directory.
 
 **Fix:**
 
 ```bash
-node scripts/download-models.mjs jina-embeddings-v2-base-code
+node scripts/download-models.mjs <model-name>
+# or prefetch the default specialized-lane models:
+node scripts/download-models.mjs jina-embeddings-v2-base-code nomic-embed-text-v1.5
 ```
 
 ### "Failed to download model_quantized.onnx for model nomic-embed-text-v1.5"
@@ -847,8 +772,9 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
     // -- Embedding Model -----------------------------------------
     "enabled": true, // Enable semantic search
     "provider": "local", // "local" | "api" | "mock"
-    "model": "jina-embeddings-v2-base-code", // Primary embedding model (or "nomic-embed-text-v1.5")
-    "additionalModels": ["nomic-embed-text-v1.5"], // Extra embedding lanes for hybrid fusion. Each entry runs a separate embedding pass at index time. Set to [] to disable.
+    "embeddingProfile": "specialized", // "specialized" | "max-recall"
+    "symbolEmbeddingModels": ["jina-embeddings-v2-base-code"], // Optional Symbol-lane override
+    "fileSummaryEmbeddingModels": ["nomic-embed-text-v1.5"], // Optional FileSummary-lane override
     "modelCacheDir": null, // Override model storage path
     // -- LLM Summaries -------------------------------------------
     "generateSummaries": false, // Enable LLM summary generation
@@ -895,35 +821,38 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
 
 ## Recommended Configurations
 
-### Small personal project (free, minimal setup)
+### Small personal project (free, recommended default)
 
 ```jsonc
 {
   "semantic": {
     "enabled": true,
-    "model": "jina-embeddings-v2-base-code",
+    "provider": "local",
+    "embeddingProfile": "specialized",
   },
 }
 ```
 
-### Large codebase, better quality (free, ~138 MB download)
+### Large codebase, maximum recall (free, more index time)
 
 ```jsonc
 {
   "semantic": {
     "enabled": true,
-    "model": "nomic-embed-text-v1.5",
+    "provider": "local",
+    "embeddingProfile": "max-recall",
   },
 }
 ```
 
-### Production team with API budget (highest quality)
+### Production team with API budget (summaries plus specialized lanes)
 
 ```jsonc
 {
   "semantic": {
     "enabled": true,
-    "model": "nomic-embed-text-v1.5",
+    "provider": "local",
+    "embeddingProfile": "specialized",
     "generateSummaries": true,
     "summaryProvider": "api",
     "summaryModel": "claude-haiku-4-5-20251001",
@@ -938,7 +867,8 @@ Or add `"summaryApiKey": "sk-ant-..."` to the `semantic` config block.
 {
   "semantic": {
     "enabled": true,
-    "model": "nomic-embed-text-v1.5",
+    "provider": "local",
+    "embeddingProfile": "specialized",
     "modelCacheDir": "/shared/models",
     "generateSummaries": true,
     "summaryProvider": "local",
