@@ -2,28 +2,28 @@
 
 `sdl.symbol.edit` provides symbol-scoped editing without replacing the safer file write machinery. Preview computes the exact post-edit content, stores the plan in the existing search-edit plan store, and apply enforces symbol, file, and draft preconditions before writing.
 
-Use `symbol.edit` when the intended edit is anchored to one symbol and the caller already has a symbol card, symbol ID, or precise `symbolRef`. It is intentionally single-symbol and single-operation; agents can sequence calls in `sdl.workflow`, but `search.edit` / `searchEditPreview operations[]` is the shared-preview batch primitive. Use `file.write` for immediate single-file edits that are not symbol-shaped.
+Use `symbol.edit` when the intended edit is anchored to one symbol and the caller already has a symbol card, symbol ID, or precise `symbolRef`. It is intentionally single-symbol and single-operation; agents can sequence calls in `sdl.workflow`, but `search.edit` / `searchEditPreview` is the shared-preview batch primitive for identifier-aware, structural, or heterogeneous multi-replacement edits. Use `file.write` for immediate single-file edits that are not symbol-shaped.
 
 ## Modes
 
-| Mode | Use when | Required fields |
-| ---- | -------- | --------------- |
-| `preview` | You want a plan handle before changing anything. | `repoId`, `operation`, and exactly one of `symbolId` or `symbolRef` |
-| `apply` | You reviewed a preview and want to apply it. | `repoId`, `planHandle` |
+| Mode       | Use when                                                                   | Required fields                                                              |
+| ---------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `preview`  | You want a plan handle before changing anything.                           | `repoId`, `operation`, and exactly one of `symbolId` or `symbolRef`          |
+| `apply`    | You reviewed a preview and want to apply it.                               | `repoId`, `planHandle`                                                       |
 | `applyNow` | You want one-call edit+apply with strict caller-supplied freshness checks. | `repoId`, `symbolId`, `operation`, `expectedAstFingerprint`, `expectedRange` |
 
 `applyNow` is intentionally stricter than `preview`. It requires the exact symbol snapshot that the caller believes is current, so stale cards fail before any write plan is created.
 
 ## Operations
 
-| Operation | Description | TypeScript/JavaScript family support | Other indexed languages |
-| --------- | ----------- | ---------------------- | ----------------------- |
-| `replaceSymbol` | Replace the full symbol range. | Yes | Yes, when indexed symbol ranges are available |
-| `replaceBody` | Replace only the inner body content and preserve delimiters. | Yes | No |
-| `replaceSignature` | Replace the declaration header and preserve the body. | Yes | No |
-| `insertBefore` | Insert sibling text immediately before the symbol declaration. | Yes | Yes, when indexed symbol ranges are available |
-| `insertAfter` | Insert sibling text immediately after the symbol declaration. | Yes | Yes, when indexed symbol ranges are available |
-| `renameLocal` | Rename a declaration, parameter, or local identifier inside the selected symbol only. | Yes | No |
+| Operation          | Description                                                                           | TypeScript/JavaScript family support | Other indexed languages                       |
+| ------------------ | ------------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------- |
+| `replaceSymbol`    | Replace the full symbol range.                                                        | Yes                                  | Yes, when indexed symbol ranges are available |
+| `replaceBody`      | Replace only the inner body content and preserve delimiters.                          | Yes                                  | No                                            |
+| `replaceSignature` | Replace the declaration header and preserve the body.                                 | Yes                                  | No                                            |
+| `insertBefore`     | Insert sibling text immediately before the symbol declaration.                        | Yes                                  | Yes, when indexed symbol ranges are available |
+| `insertAfter`      | Insert sibling text immediately after the symbol declaration.                         | Yes                                  | Yes, when indexed symbol ranges are available |
+| `renameLocal`      | Rename a declaration, parameter, or local identifier inside the selected symbol only. | Yes                                  | No                                            |
 
 V1 does not run a formatter or auto-indent replacement text. SDL-MCP inserts the supplied text exactly, except for newline-boundary normalization around adjacent inserts and body delimiters.
 
@@ -82,7 +82,12 @@ Apply immediately with an exact snapshot:
   "mode": "applyNow",
   "symbolId": "<symbol-id>",
   "expectedAstFingerprint": "<ast-fingerprint-from-card>",
-  "expectedRange": { "startLine": 12, "startCol": 0, "endLine": 18, "endCol": 1 },
+  "expectedRange": {
+    "startLine": 12,
+    "startCol": 0,
+    "endLine": 18,
+    "endCol": 1
+  },
   "operation": {
     "kind": "replaceSignature",
     "content": "export async function handleAuth(user: User): Promise<boolean>"

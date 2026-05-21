@@ -22,7 +22,6 @@ file whose sha256/mtime has drifted since the preview was taken.
 
 MCP responses are human-first. Preview and apply results show concise visible summaries with bounded diff snippets, while `structuredContent` carries task data such as `planHandle`, file entries, status, `etag`, and error details. Internal precondition snapshots, rollback bookkeeping, timings, and packed/debug stats stay out of normal visible/model-facing output unless diagnostics are explicitly requested.
 
-
 | Tool              | Use when                                                                                                         |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `sdl.file.write`  | Single file, single mode (replaceLines, replacePattern, jsonPath, insertAt, append, overwrite). Immediate apply. |
@@ -73,14 +72,22 @@ file into one planned write:
     {
       "id": "rename-import",
       "targeting": "text",
-      "query": { "literal": "oldName", "replacement": "newName", "global": true },
+      "query": {
+        "literal": "oldName",
+        "replacement": "newName",
+        "global": true
+      },
       "editMode": "replacePattern",
       "filters": { "include": ["src/**/*.ts"] }
     },
     {
       "id": "update-comment",
       "targeting": "text",
-      "query": { "literal": "Old label", "replacement": "New label", "global": true },
+      "query": {
+        "literal": "Old label",
+        "replacement": "New label",
+        "global": true
+      },
       "editMode": "replacePattern",
       "filters": { "include": ["src/**/*.ts"] }
     }
@@ -103,6 +110,66 @@ merged preview and apply plan.
 - `"symbol"` — resolve `query.symbolRef` (via `resolveSymbolRef`) or
   `query.symbolIds` to get the home file of each symbol. Only indexed
   source files are eligible.
+- `"identifier"` — parse TypeScript, TSX, JavaScript, and JSX files with
+  the existing tree-sitter grammar and replace only exact AST identifier
+  nodes whose text equals `query.literal`. This skips strings, comments,
+  and other non-identifier text while still flowing through the normal
+  preview/apply/rollback plan.
+- `"structural"` — run a bounded tree-sitter query over TypeScript, TSX,
+  JavaScript, and JSX files, select one capture (default: `@target`), and
+  replace that captured range. `query.structural.requiredCaptures` can
+  require exact capture text such as `{ "callee": "oldName" }`, and the
+  replacement string may interpolate captures with `$name` or `${name}`.
+
+Both AST-aware target modes currently require `editMode: "replacePattern"`.
+They do not use regular expressions for matching; the edit mode name is kept
+so previews and applies can reuse the existing search-edit write machinery.
+Unsupported file extensions are skipped before parsing.
+
+AST-aware previews include a bounded `astMatches` sample in each affected
+`fileEntries[]` item. Each sample carries the selected target capture plus
+named captures with byte offsets and 1-based line ranges. Capture text is
+truncated, and only the first few matches/captures are included to preserve
+the normal token budget.
+
+Identifier-aware rename example:
+
+```json
+{
+  "repoId": "<repoId>",
+  "mode": "preview",
+  "targeting": "identifier",
+  "query": {
+    "literal": "oldName",
+    "replacement": "newName",
+    "global": true
+  },
+  "editMode": "replacePattern",
+  "filters": { "include": ["src/**/*.{ts,tsx,js,jsx}"] },
+  "responseMode": "auto"
+}
+```
+
+Structural call-target example:
+
+```json
+{
+  "repoId": "<repoId>",
+  "mode": "preview",
+  "targeting": "structural",
+  "query": {
+    "structural": {
+      "treeSitterQuery": "(call_expression function: (identifier) @callee arguments: (arguments) @args) @target",
+      "requiredCaptures": { "callee": "oldName" }
+    },
+    "replacement": "newName$args",
+    "global": true
+  },
+  "editMode": "replacePattern",
+  "filters": { "include": ["src/**/*.{ts,tsx,js,jsx}"] },
+  "responseMode": "auto"
+}
+```
 
 ### `editMode`
 
@@ -140,8 +207,16 @@ payload.
       "editMode": "replacePattern",
       "operationIds": ["rename-import", "update-comment"],
       "operations": [
-        { "id": "rename-import", "matchCount": 1, "editMode": "replacePattern" },
-        { "id": "update-comment", "matchCount": 1, "editMode": "replacePattern" }
+        {
+          "id": "rename-import",
+          "matchCount": 1,
+          "editMode": "replacePattern"
+        },
+        {
+          "id": "update-comment",
+          "matchCount": 1,
+          "editMode": "replacePattern"
+        }
       ],
       "snippets": {
         "before": " 41 | const oldName = ...\n>42 | oldName();",

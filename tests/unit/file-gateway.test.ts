@@ -148,6 +148,19 @@ describe("FileGatewayRequestSchema", () => {
       assert.deepEqual(result.filters, { include: ["src/**/*.ts"] });
     });
 
+    it("parses identifier preview targeting", () => {
+      const result = FileGatewayRequestSchema.parse({
+        op: "searchEditPreview",
+        repoId: "test-repo",
+        targeting: "identifier",
+        query: { literal: "oldName", replacement: "newName", global: true },
+        editMode: "replacePattern",
+        filters: { include: ["src/**/*.ts"] },
+      });
+      assert.equal(result.op, "searchEditPreview");
+      assert.equal(result.targeting, "identifier");
+    });
+
     it("parses preview with operations batch", () => {
       const result = FileGatewayRequestSchema.parse({
         op: "searchEditPreview",
@@ -173,6 +186,32 @@ describe("FileGatewayRequestSchema", () => {
       assert.equal(result.op, "searchEditPreview");
       assert.equal(result.operations.length, 2);
       assert.equal(result.operations[0].id, "one");
+    });
+
+    it("parses structural targeting inside operations batch", () => {
+      const result = FileGatewayRequestSchema.parse({
+        op: "searchEditPreview",
+        repoId: "test-repo",
+        operations: [
+          {
+            id: "call-rename",
+            targeting: "structural",
+            query: {
+              structural: {
+                treeSitterQuery:
+                  "(call_expression function: (identifier) @callee) @target",
+                requiredCaptures: { callee: "oldName" },
+              },
+              replacement: "newName()",
+            },
+            editMode: "replacePattern",
+            filters: { include: ["src/a.ts"] },
+          },
+        ],
+      });
+
+      assert.equal(result.op, "searchEditPreview");
+      assert.equal(result.operations[0].targeting, "structural");
     });
 
     it("rejects operations batch with duplicate ids", () => {
@@ -415,6 +454,23 @@ describe("handleFileGateway dispatch", () => {
           repoId: "nonexistent-test-repo",
           targeting: "text",
           query: { literal: "foo", replacement: "bar" },
+          editMode: "replacePattern",
+        }),
+      (err: any) => {
+        assert.notEqual(err?.constructor?.name, "ZodError");
+        return true;
+      },
+    );
+  });
+
+  it("op:searchEditPreview dispatch accepts identifier targeting", async () => {
+    await assert.rejects(
+      () =>
+        handleFileGateway({
+          op: "searchEditPreview",
+          repoId: "nonexistent-test-repo",
+          targeting: "identifier",
+          query: { literal: "oldName", replacement: "newName", global: true },
           editMode: "replacePattern",
         }),
       (err: any) => {

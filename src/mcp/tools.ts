@@ -1664,7 +1664,9 @@ export const CodeNeedWindowRequestSchema = z.object({
     .min(1)
     .max(1000)
     .optional()
-    .describe("Maximum diff lines when deltaMode=auto returns changed content."),
+    .describe(
+      "Maximum diff lines when deltaMode=auto returns changed content.",
+    ),
 });
 
 const CodeWindowResponseApprovedSchema = z.object({
@@ -2326,7 +2328,9 @@ export const AgentContextRequestSchema = z.object({
   includeDiagnostics: z
     .boolean()
     .optional()
-    .describe("Include phase timing diagnostics for performance investigation."),
+    .describe(
+      "Include phase timing diagnostics for performance investigation.",
+    ),
   ifNoneMatch: z.string().optional(),
 });
 
@@ -2619,11 +2623,9 @@ const RuntimeExecuteRequestObjectSchema = z
       .describe(
         "Code mode: write to temp file and execute. Mutually exclusive with args-only mode.",
       ),
-    stdin: RuntimeStdinSchema
-      .optional()
-      .describe(
-        "UTF-8 text written to the child process stdin and then closed (max 512 KiB).",
-      ),
+    stdin: RuntimeStdinSchema.optional().describe(
+      "UTF-8 text written to the child process stdin and then closed (max 512 KiB).",
+    ),
     relativeCwd: z
       .string()
       .default(".")
@@ -2675,7 +2677,9 @@ const RuntimeExecuteRequestObjectSchema = z
     includeDiagnostics: z
       .boolean()
       .optional()
-      .describe("Include phase timing diagnostics for performance investigation."),
+      .describe(
+        "Include phase timing diagnostics for performance investigation.",
+      ),
   })
   .strict()
   .superRefine((val, ctx) => {
@@ -3119,7 +3123,9 @@ export const FileReadRequestSchema = z.object({
     .min(1)
     .max(1000)
     .optional()
-    .describe("Maximum diff lines when deltaMode=auto returns changed content."),
+    .describe(
+      "Maximum diff lines when deltaMode=auto returns changed content.",
+    ),
 });
 
 export type FileReadRequest = z.infer<typeof FileReadRequestSchema>;
@@ -3139,7 +3145,9 @@ export interface FileReadInlineResponse {
   diagnostics?: z.infer<typeof ToolTimingDiagnosticsSchema>;
 }
 
-export type FileReadResponse = FileReadInlineResponse | ResponseArtifactReference;
+export type FileReadResponse =
+  | FileReadInlineResponse
+  | ResponseArtifactReference;
 
 // ============================================================================
 // SCIP Ingest Schemas
@@ -3348,6 +3356,29 @@ export const SearchEditQuerySchema = z.object({
   regex: z.string().min(1).max(500).optional(),
   replacement: z.string().max(5000).optional(),
   global: z.boolean().optional(),
+  structural: z
+    .object({
+      language: z.enum(["typescript"]).optional(),
+      treeSitterQuery: z.string().min(1).max(5000),
+      capture: z
+        .string()
+        .min(1)
+        .max(80)
+        .regex(/^[A-Za-z_][A-Za-z0-9_-]*$/)
+        .optional(),
+      requiredCaptures: z
+        .record(
+          z
+            .string()
+            .min(1)
+            .max(80)
+            .regex(/^[A-Za-z_][A-Za-z0-9_-]*$/),
+          z.string().max(500),
+        )
+        .optional(),
+      replacement: z.string().max(5000).optional(),
+    })
+    .optional(),
   symbolRef: z
     .object({
       name: z.string().min(1).max(200),
@@ -3398,7 +3429,7 @@ export const SearchEditEditMode = z.enum([
 
 const SearchEditBatchOperationSchema = z.object({
   id: z.string().min(1).max(80).optional(),
-  targeting: z.enum(["text", "symbol"]),
+  targeting: z.enum(["text", "symbol", "identifier", "structural"]),
   query: SearchEditQuerySchema,
   filters: SearchEditFiltersSchema.optional(),
   editMode: SearchEditEditMode,
@@ -3411,11 +3442,17 @@ const SearchEditPreviewRequestSchema = z
   .object({
     mode: z.literal("preview"),
     repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-    targeting: z.enum(["text", "symbol"]).optional(),
+    targeting: z
+      .enum(["text", "symbol", "identifier", "structural"])
+      .optional(),
     query: SearchEditQuerySchema.optional(),
     filters: SearchEditFiltersSchema.optional(),
     editMode: SearchEditEditMode.optional(),
-    operations: z.array(SearchEditBatchOperationSchema).min(1).max(50).optional(),
+    operations: z
+      .array(SearchEditBatchOperationSchema)
+      .min(1)
+      .max(50)
+      .optional(),
     previewContextLines: z.number().int().min(0).max(20).optional(),
     maxFiles: z.number().int().min(1).max(500).optional(),
     maxMatchesPerFile: z.number().int().min(1).max(5000).optional(),
@@ -3431,16 +3468,14 @@ const SearchEditPreviewRequestSchema = z
       const seenOperationIds = new Map<string, number>();
       operations.forEach((operation, index) => {
         const trimmed = operation.id?.trim();
-        const operationId = trimmed && trimmed.length > 0
-          ? trimmed
-          : `op-${index + 1}`;
+        const operationId =
+          trimmed && trimmed.length > 0 ? trimmed : `op-${index + 1}`;
         const firstIndex = seenOperationIds.get(operationId);
         if (firstIndex !== undefined) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["operations", index, "id"],
-            message:
-              `Duplicate search.edit operation id "${operationId}" at operations[${index}] (first used at operations[${firstIndex}]).`,
+            message: `Duplicate search.edit operation id "${operationId}" at operations[${index}] (first used at operations[${firstIndex}]).`,
           });
         } else {
           seenOperationIds.set(operationId, index);
@@ -3463,8 +3498,7 @@ const SearchEditPreviewRequestSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: [field],
-          message:
-            "Required when operations[] is not provided.",
+          message: "Required when operations[] is not provided.",
         });
       }
     }
@@ -3500,6 +3534,24 @@ export interface SearchEditPreviewResponse {
     editMode: FileWriteResponse["mode"];
     snippets: DiffPreviewSnippets;
     indexedSource: boolean;
+    astMatches?: Array<{
+      target: {
+        name: string;
+        nodeType: string;
+        text: string;
+        startByte: number;
+        endByte: number;
+        range: Range;
+      };
+      captures: Array<{
+        name: string;
+        nodeType: string;
+        text: string;
+        startByte: number;
+        endByte: number;
+        range: Range;
+      }>;
+    }>;
     operationIds?: string[];
     operations?: Array<{
       id: string;
@@ -3539,6 +3591,7 @@ export interface SearchEditApplyResponse {
     editMode: FileWriteResponse["mode"];
     snippets: DiffPreviewSnippets;
     indexedSource: boolean;
+    astMatches?: SearchEditPreviewResponse["fileEntries"][number]["astMatches"];
     operationIds?: string[];
     operations?: Array<{
       id: string;

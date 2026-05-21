@@ -119,4 +119,28 @@ describe("tsTreesitter wrapper", () => {
 
     assert.deepStrictEqual(matches, []);
   });
+
+  it("queryTreeForExtension uses the TSX grammar for JSX queries", () => {
+    const {
+      parseFile,
+      queryTreeForExtension,
+    } = require("../../dist/indexer/treesitter/tsTreesitter.js");
+    const parseResult = parseFile(
+      "export const App = () => <Button oldName={value} />;",
+      ".tsx",
+    );
+
+    assert.ok(parseResult, "Expected parse result for TSX query test");
+
+    const matches = queryTreeForExtension(
+      parseResult.tree,
+      ".tsx",
+      "(jsx_attribute (property_identifier) @prop) @attribute",
+    );
+
+    assert.strictEqual(matches.length, 1);
+    const prop = matches[0].captures.find((capture) => capture.name === "prop");
+    assert.ok(prop);
+    assert.strictEqual(prop.node.text, "oldName");
+  });
 });

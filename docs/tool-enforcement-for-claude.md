@@ -44,7 +44,7 @@ They also teach Claude to use `symbolRef` / `symbolRefs` when it knows a symbol 
 
 ### Source-code read enforcement
 
-`.claude/hooks/force-sdl-mcp.sh` denies repo-local native `Read`, `Write`, `Edit`, `MultiEdit`, and `NotebookEdit` while the SDL-MCP PID file is present. Indexed reads are redirected to the Iris retrieval ladder, symbol-scoped indexed writes to `symbol.edit` / symbol edit apply, multi-replacement batches to `searchEditPreview operations[]`, and non-indexed reads/writes to `file.read` / `file.write`. Repo `.codex/**` and `.claude/**` maintenance remains allowed.
+`.claude/hooks/force-sdl-mcp.sh` denies repo-local native `Read`, `Write`, `Edit`, `MultiEdit`, and `NotebookEdit` while the SDL-MCP PID file is present. Indexed reads are redirected to the Iris retrieval ladder, one-symbol indexed writes to `symbol.edit` / symbol edit apply, AST-aware batches to `searchEditPreview` with `targeting:"identifier"` or `targeting:"structural"`, heterogeneous batches to `operations[]`, and non-indexed reads/writes to `file.read` / `file.write`. Repo `.codex/**` and `.claude/**` maintenance remains allowed.
 
 ### Runtime enforcement
 
@@ -105,6 +105,7 @@ For multi-step operations:
 
 - use `sdl.workflow` for batched context follow-ups, runtime execution, data transforms, and batch mutations
 - use `runtimeExecute` inside `sdl.workflow` with `outputMode: "minimal"` for repo-local commands, and use `stdin` for multiline input
+- use `searchEditPreview` `targeting:"identifier"` for exact TS/JS identifier changes and `targeting:"structural"` for tree-sitter capture edits before falling back to runtime scripts
 - supported runtimes: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`
 
 Do not retry denied native file or Bash calls. Switch to SDL-MCP immediately and follow the SDL response guidance fields when present.

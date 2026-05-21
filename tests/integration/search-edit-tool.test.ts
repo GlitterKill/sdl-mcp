@@ -27,7 +27,11 @@ import {
   type SearchEditApplyResponse,
   type SearchEditPreviewResponse,
 } from "../../dist/mcp/tools.js";
-import { getLadybugConn, initLadybugDb, closeLadybugDb } from "../../dist/db/ladybug.js";
+import {
+  getLadybugConn,
+  initLadybugDb,
+  closeLadybugDb,
+} from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { normalizePath } from "../../dist/util/paths.js";
 
@@ -95,6 +99,142 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     assert.deepEqual(files, ["a.txt", "b.txt"]);
   });
 
+  it("identifier targeting edits AST identifiers without touching strings or comments", async () => {
+    await writeFile(
+      join(repoRoot, "ident.ts"),
+      [
+        "const oldName = 1;",
+        'const text = "oldName";',
+        "// oldName stays here",
+        "oldName();",
+        "object.oldName;",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        targeting: "identifier",
+        query: { literal: "oldName", replacement: "newName", global: true },
+        editMode: "replacePattern",
+        filters: { include: ["ident.ts"] },
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.filesMatched, 1);
+    assert.equal(preview.matchesFound, 3);
+    assert.equal(preview.fileEntries[0].astMatches?.[0]?.target.name, "target");
+    assert.equal(
+      preview.fileEntries[0].astMatches?.[0]?.target.nodeType,
+      "identifier",
+    );
+    assert.match(preview.fileEntries[0].snippets.before, /oldName/);
+    assert.match(preview.fileEntries[0].snippets.after, /newName/);
+
+    const apply = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "apply",
+        repoId: REPO_ID,
+        planHandle: preview.planHandle,
+      }),
+    )) as SearchEditApplyResponse;
+
+    assert.equal(apply.filesWritten, 1);
+    const updated = await readFile(join(repoRoot, "ident.ts"), "utf-8");
+    assert.match(updated, /const newName = 1/);
+    assert.match(updated, /newName\(\);/);
+    assert.match(updated, /object\.newName;/);
+    assert.match(updated, /const text = "oldName";/);
+    assert.match(updated, /\/\/ oldName stays here/);
+  });
+
+  it("structural targeting edits a selected tree-sitter capture", async () => {
+    await writeFile(
+      join(repoRoot, "calls.ts"),
+      'oldName("a");\nother("b");\n',
+      "utf-8",
+    );
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        targeting: "structural",
+        query: {
+          structural: {
+            treeSitterQuery:
+              "(call_expression function: (identifier) @callee arguments: (arguments) @args) @target",
+            requiredCaptures: { callee: "oldName" },
+          },
+          replacement: "newName$args",
+          global: true,
+        },
+        editMode: "replacePattern",
+        filters: { include: ["calls.ts"] },
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.filesMatched, 1);
+    assert.equal(preview.matchesFound, 1);
+    assert.equal(preview.fileEntries[0].astMatches?.[0]?.target.name, "target");
+    assert.equal(
+      preview.fileEntries[0].astMatches?.[0]?.captures.some(
+        (capture) => capture.name === "callee",
+      ),
+      true,
+    );
+
+    const apply = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "apply",
+        repoId: REPO_ID,
+        planHandle: preview.planHandle,
+      }),
+    )) as SearchEditApplyResponse;
+
+    assert.equal(apply.filesWritten, 1);
+    assert.equal(
+      await readFile(join(repoRoot, "calls.ts"), "utf-8"),
+      'newName("a");\nother("b");\n',
+    );
+  });
+
+  it("AST-aware targeting filters source candidates before maxFiles cap", async () => {
+    await writeFile(
+      join(repoRoot, "000-noise.txt"),
+      "budgetTarget();\n",
+      "utf-8",
+    );
+    await writeFile(
+      join(repoRoot, "001-budget-target.ts"),
+      "budgetTarget();\n",
+      "utf-8",
+    );
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        targeting: "identifier",
+        query: {
+          literal: "budgetTarget",
+          replacement: "budgetNext",
+          global: true,
+        },
+        editMode: "replacePattern",
+        maxFiles: 1,
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.filesMatched, 1);
+    assert.equal(preview.filesEligible, 1);
+    assert.equal(preview.fileEntries[0].file, "001-budget-target.ts");
+    assert.equal(preview.matchesFound, 1);
+  });
+
   it("preview can spill the large response behind response.get", async () => {
     const req = SearchEditRequestSchema.parse({
       mode: "preview",
@@ -118,11 +258,11 @@ describe("sdl.search.edit", { concurrency: false }, () => {
       "sdl.search.edit",
     );
 
-    const full = await handleResponseGet({
+    const full = (await handleResponseGet({
       repoId: REPO_ID,
       handle: response.handle,
       full: true,
-    }) as Record<string, unknown>;
+    })) as Record<string, unknown>;
     const preview = full.content as SearchEditPreviewResponse;
     assert.equal(preview.mode, "preview");
     assert.ok(preview.planHandle.startsWith("se-"));
@@ -220,11 +360,7 @@ describe("sdl.search.edit", { concurrency: false }, () => {
 
   it("preview populates retrievalEvidence when hybrid narrowing runs", async () => {
     // Reset content so preview has a literal match of >=3 chars.
-    await writeFile(
-      join(repoRoot, "a.txt"),
-      "hello oldName world\n",
-      "utf-8",
-    );
+    await writeFile(join(repoRoot, "a.txt"), "hello oldName world\n", "utf-8");
     await writeFile(join(repoRoot, "b.txt"), "oldName line\n", "utf-8");
 
     const preview = (await handleSearchEdit(
@@ -258,8 +394,7 @@ describe("sdl.search.edit", { concurrency: false }, () => {
       "retrievalEvidence.sources must be an array",
     );
     assert.ok(
-      ev.topRanksPerSource &&
-        typeof ev.topRanksPerSource === "object",
+      ev.topRanksPerSource && typeof ev.topRanksPerSource === "object",
       "retrievalEvidence.topRanksPerSource must be an object",
     );
     assert.ok(
@@ -283,11 +418,7 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     resetSearchEditPlanStore({ ttlMs: 5 });
     try {
       const expiringRel = "expired.txt";
-      await writeFile(
-        join(repoRoot, expiringRel),
-        "original\n",
-        "utf-8",
-      );
+      await writeFile(join(repoRoot, expiringRel), "original\n", "utf-8");
 
       const preview = (await handleSearchEdit(
         SearchEditRequestSchema.parse({
@@ -329,8 +460,6 @@ describe("sdl.search.edit", { concurrency: false }, () => {
       resetSearchEditPlanStore();
     }
   });
-
-
 
   it("double-apply with same planHandle fails closed (M4)", async () => {
     // Reset content so preview has matches.
@@ -429,7 +558,10 @@ describe("sdl.search.edit", { concurrency: false }, () => {
 
     assert.equal(preview.filesMatched, 1);
     assert.equal(preview.matchesFound, 2);
-    assert.deepEqual((preview.fileEntries[0] as any).operationIds, ["alpha-op", "beta-op"]);
+    assert.deepEqual((preview.fileEntries[0] as any).operationIds, [
+      "alpha-op",
+      "beta-op",
+    ]);
 
     const apply = (await handleSearchEdit(
       SearchEditRequestSchema.parse({
@@ -440,7 +572,72 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     )) as SearchEditApplyResponse;
 
     assert.equal(apply.filesWritten, 1);
-    assert.equal(await readFile(join(repoRoot, "a.txt"), "utf-8"), "ALPHA BETA\n");
+    assert.equal(
+      await readFile(join(repoRoot, "a.txt"), "utf-8"),
+      "ALPHA BETA\n",
+    );
+  });
+
+  it("batch preview preserves AST match summaries for AST-aware operations", async () => {
+    await writeFile(
+      join(repoRoot, "batch-ast.ts"),
+      "oldName();\notherName();\n",
+      "utf-8",
+    );
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        operations: [
+          {
+            id: "identifier-op",
+            targeting: "identifier",
+            query: { literal: "oldName", replacement: "newName", global: true },
+            editMode: "replacePattern",
+            filters: { include: ["batch-ast.ts"] },
+          },
+          {
+            id: "structural-op",
+            targeting: "structural",
+            query: {
+              structural: {
+                treeSitterQuery:
+                  "(call_expression function: (identifier) @callee arguments: (arguments) @args) @target",
+                requiredCaptures: { callee: "otherName" },
+              },
+              replacement: "nextName$args",
+              global: true,
+            },
+            editMode: "replacePattern",
+            filters: { include: ["batch-ast.ts"] },
+          },
+        ],
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.filesMatched, 1);
+    assert.equal(preview.matchesFound, 2);
+    assert.equal(preview.fileEntries[0].astMatches?.length, 2);
+    assert.deepEqual((preview.fileEntries[0] as any).operationIds, [
+      "identifier-op",
+      "structural-op",
+    ]);
+
+    const apply = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "apply",
+        repoId: REPO_ID,
+        planHandle: preview.planHandle,
+      }),
+    )) as SearchEditApplyResponse;
+
+    assert.equal(apply.filesWritten, 1);
+    assert.equal(apply.fileEntries?.[0].astMatches?.length, 2);
+    assert.equal(
+      await readFile(join(repoRoot, "batch-ast.ts"), "utf-8"),
+      "newName();\nnextName();\n",
+    );
   });
 
   it("batch preview/apply supports operations across multiple files", async () => {
@@ -472,8 +669,13 @@ describe("sdl.search.edit", { concurrency: false }, () => {
 
     assert.equal(preview.filesMatched, 2);
     assert.deepEqual(
-      preview.fileEntries.map((entry) => [(entry as any).operationIds[0], entry.file]).sort(),
-      [["left-op", "a.txt"], ["right-op", "b.txt"]],
+      preview.fileEntries
+        .map((entry) => [(entry as any).operationIds[0], entry.file])
+        .sort(),
+      [
+        ["left-op", "a.txt"],
+        ["right-op", "b.txt"],
+      ],
     );
 
     await handleSearchEdit(
@@ -484,8 +686,14 @@ describe("sdl.search.edit", { concurrency: false }, () => {
       }),
     );
 
-    assert.equal(await readFile(join(repoRoot, "a.txt"), "utf-8"), "LEFT token\n");
-    assert.equal(await readFile(join(repoRoot, "b.txt"), "utf-8"), "RIGHT token\n");
+    assert.equal(
+      await readFile(join(repoRoot, "a.txt"), "utf-8"),
+      "LEFT token\n",
+    );
+    assert.equal(
+      await readFile(join(repoRoot, "b.txt"), "utf-8"),
+      "RIGHT token\n",
+    );
   });
 
   it("batch apply only merges each operation's planned original-source diff", async () => {
@@ -523,7 +731,10 @@ describe("sdl.search.edit", { concurrency: false }, () => {
       }),
     );
 
-    assert.equal(await readFile(join(repoRoot, "a.txt"), "utf-8"), "bar marker\n");
+    assert.equal(
+      await readFile(join(repoRoot, "a.txt"), "utf-8"),
+      "bar marker\n",
+    );
   });
 
   it("batch preview applies shared top-level filters to operations", async () => {
@@ -671,14 +882,20 @@ describe("sdl.search.edit", { concurrency: false }, () => {
               {
                 id: "first",
                 targeting: "text",
-                query: { literal: "one", replaceLines: { start: 0, end: 1, content: "ONE" } },
+                query: {
+                  literal: "one",
+                  replaceLines: { start: 0, end: 1, content: "ONE" },
+                },
                 editMode: "replaceLines",
                 filters: { include: ["a.txt"] },
               },
               {
                 id: "second",
                 targeting: "text",
-                query: { literal: "one", replaceLines: { start: 0, end: 1, content: "TWO" } },
+                query: {
+                  literal: "one",
+                  replaceLines: { start: 0, end: 1, content: "TWO" },
+                },
                 editMode: "replaceLines",
                 filters: { include: ["a.txt"] },
               },
@@ -692,32 +909,28 @@ describe("sdl.search.edit", { concurrency: false }, () => {
   it("batch preview rejects duplicate explicit operation ids", async () => {
     await writeFile(join(repoRoot, "a.txt"), "alpha beta\n", "utf-8");
 
-    await assert.rejects(
-      async () => {
-        const request = SearchEditRequestSchema.parse({
-          mode: "preview",
-          repoId: REPO_ID,
-          operations: [
-            {
-              id: "rename",
-              targeting: "text",
-              query: { literal: "alpha", replacement: "ALPHA", global: true },
-              editMode: "replacePattern",
-              filters: { include: ["a.txt"] },
-            },
-            {
-              id: "rename",
-              targeting: "text",
-              query: { literal: "beta", replacement: "BETA", global: true },
-              editMode: "replacePattern",
-              filters: { include: ["a.txt"] },
-            },
-          ],
-        });
-        await handleSearchEdit(request);
-      },
-      /duplicate.*operation.*rename/i,
-    );
+    await assert.rejects(async () => {
+      const request = SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        operations: [
+          {
+            id: "rename",
+            targeting: "text",
+            query: { literal: "alpha", replacement: "ALPHA", global: true },
+            editMode: "replacePattern",
+            filters: { include: ["a.txt"] },
+          },
+          {
+            id: "rename",
+            targeting: "text",
+            query: { literal: "beta", replacement: "BETA", global: true },
+            editMode: "replacePattern",
+            filters: { include: ["a.txt"] },
+          },
+        ],
+      });
+      await handleSearchEdit(request);
+    }, /duplicate.*operation.*rename/i);
   });
-
 });

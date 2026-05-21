@@ -49,8 +49,9 @@ The generated enforcement files also teach:
 - use `symbolRef` / `symbolRefs` when the agent knows a symbol name but not the canonical `symbolId`
 - follow structured recovery guidance such as `nextBestAction`, `fallbackTools`, `fallbackRationale`, and candidate lists instead of retrying blocked native tools
 - use `file.read` and `file.write` inside SDL-MCP for non-indexed files with targeted modes
-- use `symbol.edit` or the symbol edit preview/apply path for symbol-scoped indexed source writes
-- use `searchEditPreview operations[]` for multi-replacement indexed-source batches
+- use `symbol.edit` or the symbol edit preview/apply path for one-symbol indexed source writes
+- use `searchEditPreview` with `targeting:"identifier"` for exact TS/JS identifier replacements, `targeting:"structural"` for tree-sitter capture edits, and `operations[]` for heterogeneous batches
+- review snippets, file counts, and `astMatches` before applying the returned plan handle
 - pass multiline runtime input through `runtimeExecute` `stdin` instead of shell quoting or base64 workarounds
 
 If an agent falls back to native repo file tools or native shell commands while SDL-MCP is active, you lose much of the token-efficiency benefit and bypass the graph-aware policy.
@@ -59,12 +60,12 @@ If an agent falls back to native repo file tools or native shell commands while 
 
 ## Client Matrix
 
-| Client                | Generated docs             | Generated hard enforcement                                                            | Notes                                              |
-| :-------------------- | :------------------------- | :------------------------------------------------------------------------------------ | :------------------------------------------------- |
-| Claude Code / Claude  | `AGENTS.md`, `CLAUDE.md`   | `.claude/settings.json`, file hook, runtime hook, `explore-sdl` subagent, prompt file | Strongest current hook-based enforcement           |
+| Client                | Generated docs             | Generated hard enforcement                                                                                     | Notes                                              |
+| :-------------------- | :------------------------- | :------------------------------------------------------------------------------------------------------------- | :------------------------------------------------- |
+| Claude Code / Claude  | `AGENTS.md`, `CLAUDE.md`   | `.claude/settings.json`, file hook, runtime hook, `explore-sdl` subagent, prompt file                          | Strongest current hook-based enforcement           |
 | Codex App / Codex CLI | `AGENTS.md`, `CODEX.md`    | `.codex/config.toml`, `.codex/hooks.json`, `.codex/hooks/load-sdl-skill.mjs`, `.codex/hooks/force-sdl-mcp.mjs` | Uses Codex lifecycle hooks plus repo-local docs    |
-| Gemini CLI            | `AGENTS.md`, `GEMINI.md`   | No native hook assets generated                                                       | Instruction-driven enforcement via repo-local docs |
-| OpenCode CLI          | `AGENTS.md`, `OPENCODE.md` | `opencode.json`, `.opencode/plugins/enforce-sdl.ts`                                   | Uses project config plus plugin enforcement        |
+| Gemini CLI            | `AGENTS.md`, `GEMINI.md`   | No native hook assets generated                                                                                | Instruction-driven enforcement via repo-local docs |
+| OpenCode CLI          | `AGENTS.md`, `OPENCODE.md` | `opencode.json`, `.opencode/plugins/enforce-sdl.ts`                                                            | Uses project config plus plugin enforcement        |
 
 ---
 
@@ -115,4 +116,4 @@ After generating the enforcement setup:
 6. confirm symbol lookups can use `symbolRef` / `symbolRefs` when IDs are not yet known
 7. confirm repo-local execution is happening through SDL runtime rather than the client's native shell tool
 8. confirm denied or ambiguous responses are followed via `nextBestAction`, `fallbackTools`, or `fallbackRationale` instead of retrying native tools
-9. confirm multi-replacement edits use `searchEditPreview operations[]` rather than ad hoc runtime write scripts
+9. confirm indexed-source batches use `searchEditPreview` with `targeting:"identifier"`, `targeting:"structural"`, or `operations[]` rather than ad hoc runtime write scripts

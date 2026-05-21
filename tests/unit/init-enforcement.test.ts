@@ -101,7 +101,9 @@ describe("init agent enforcement", () => {
     const agentsText = readFileSync(join(tempDir, "AGENTS.md"), "utf8");
     const claudeText = readFileSync(join(tempDir, "CLAUDE.md"), "utf8");
     for (const generatedText of [agentsText, claudeText]) {
-      assert.match(generatedText, /searchEditPreview operations\[\]/);
+      assert.match(generatedText, /searchEditPreview/);
+      assert.match(generatedText, /targeting:"identifier"/);
+      assert.match(generatedText, /operations\[\]/);
       assert.match(generatedText, /stdin/);
     }
 
@@ -163,7 +165,9 @@ describe("init agent enforcement", () => {
     const agentsText = readFileSync(join(tempDir, "AGENTS.md"), "utf8");
     const codexText = readFileSync(join(tempDir, "CODEX.md"), "utf8");
     for (const generatedText of [agentsText, codexText]) {
-      assert.match(generatedText, /searchEditPreview operations\[\]/);
+      assert.match(generatedText, /searchEditPreview/);
+      assert.match(generatedText, /targeting:"identifier"/);
+      assert.match(generatedText, /operations\[\]/);
       assert.match(generatedText, /stdin/);
     }
 
@@ -256,10 +260,7 @@ describe("init agent enforcement", () => {
     };
 
     for (const [payload, reasonPattern] of [
-      [
-        shellReadPayload,
-        /runtimeExecute/,
-      ],
+      [shellReadPayload, /runtimeExecute/],
       [
         {
           hook_event_name: "PreToolUse",
@@ -309,7 +310,7 @@ describe("init agent enforcement", () => {
             new_string: "new",
           },
         },
-        /symbol\.edit/,
+        /targeting:"identifier"/,
       ],
       [
         {
@@ -333,7 +334,7 @@ describe("init agent enforcement", () => {
               "*** Begin Patch\n*** Update File: src/cli/commands/init.ts\n@@\n-old\n+new\n*** End Patch",
           },
         },
-        /symbol\.edit/,
+        /targeting:"identifier"/,
       ],
       [
         {

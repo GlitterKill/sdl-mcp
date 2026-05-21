@@ -88,13 +88,13 @@ const MANUAL_TEMPLATE = `// SDL-MCP API - use sdl.context for context retrieval,
 // repoId is set in the workflow envelope, not per-step.
 // Reference prior step results with ${"$"}N (e.g., ${"$"}0.results[0].symbolId).
 // Discovery limits: sdl.action.search limit <= 50; workflowContinuationGet limit <= 1000; runtimeExecute maxResponseLines 5..1000; shell runtime requires code.
-// Edit: symbolEdit one symbol; searchEdit operations[] batch; runtimeExecute stdin for multiline.
+// Edit: symbolEdit one symbol; searchEdit identifier/structural/operations[] batches; runtimeExecute stdin for multiline.
 // sdl.context budgets accept maxTokens/maxEstimatedTokens, not maxCards.
 // Use wireFormat:"json" for symbol.search/sliceBuild when ${"$"}N refs need fields.
 
 type RM = "inline"|"auto"|"handle"; type DM = "off"|"auto"; type ResponseHandle = { kind: "responseArtifact"; handle: string; action: "response.get" };
-type SQ = { literal?: string; regex?: string; replacement?: string; global?: boolean; symbolRef?: object; symbolIds?: string[]; replaceLines?: object; insertAt?: object; content?: string; append?: string };
-type EM = "replacePattern"|"replaceLines"|"insertAt"|"append"|"overwrite"; type SEOps = { id?: string; targeting: "text"|"symbol"; query: SQ; editMode: EM; filters?: object; maxFiles?: number; maxMatchesPerFile?: number; maxTotalMatches?: number };
+type SQ = { literal?: string; regex?: string; replacement?: string; global?: boolean; structural?: { language?: "typescript"; treeSitterQuery: string; capture?: string; requiredCaptures?: Record<string,string>; replacement?: string }; symbolRef?: object; symbolIds?: string[]; replaceLines?: object; insertAt?: object; content?: string; append?: string };
+type EM = "replacePattern"|"replaceLines"|"insertAt"|"append"|"overwrite"; type ST = "text"|"symbol"|"identifier"|"structural"; type SEOps = { id?: string; targeting: ST; query: SQ; editMode: EM; filters?: object; maxFiles?: number; maxMatchesPerFile?: number; maxTotalMatches?: number };
 type SEO = { kind: "replaceSymbol"|"replaceBody"|"replaceSignature"|"insertBefore"|"insertAfter"; content: string } | { kind: "renameLocal"; name: string; replacement: string }; type SR = { startLine: number; startCol: number; endLine: number; endCol: number }
 
 // === Query ===
@@ -180,8 +180,8 @@ function usageStats(p: { scope?: "session" | "history" | "both"; since?: string;
 /** Read non-indexed file content (templates, configs, docs) */
 function fileRead(p: { filePath: string; maxBytes?: number; offset?: number; limit?: number; search?: string; searchContext?: number; jsonPath?: string; responseMode?: RM; deltaMode?: DM; maxDeltaLines?: number }): { content: string; bytes: number; totalLines: number; returnedLines: number; truncated: boolean; sessionDelta?: object; delta?: object } | ResponseHandle
 function fileWrite(p: { filePath: string; content?: string; replaceLines?: { start: number; end: number; content: string }; replacePattern?: { pattern: string; replacement: string; global?: boolean }; jsonPath?: string; jsonValue?: unknown; insertAt?: { line: number; content: string }; append?: string; createBackup?: boolean; createIfMissing?: boolean }): { filePath: string; bytesWritten: number; linesWritten: number; mode: string; backupPath?: string; replacementCount?: number }
-/** Cross-file search-and-edit: preview computes a plan; operations[] batches multiple replacements into one shared preview/apply */
-function searchEdit(p: { mode: "preview"; targeting?: "text"|"symbol"; query?: SQ; editMode?: EM; operations?: SEOps[]; filters?: object; maxFiles?: number; createBackup?: boolean; responseMode?: RM } | { mode: "apply"; planHandle: string; createBackup?: boolean }): object | ResponseHandle
+/** Cross-file search-and-edit: preview computes a plan; identifier/structural targeting and operations[] batch safer replacements into one shared preview/apply */
+function searchEdit(p: { mode: "preview"; targeting?: ST; query?: SQ; editMode?: EM; operations?: SEOps[]; filters?: object; maxFiles?: number; createBackup?: boolean; responseMode?: RM } | { mode: "apply"; planHandle: string; createBackup?: boolean }): object | ResponseHandle
 
 // === Data Transforms (workflow-only) ===
 /** Project fields from an object */

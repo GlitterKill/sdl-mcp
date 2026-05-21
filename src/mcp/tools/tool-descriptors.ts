@@ -204,7 +204,7 @@ export function buildFlatToolDescriptors(
     {
       name: "sdl.symbol.edit",
       description:
-        'Symbol-scoped edit preview/apply/applyNow with astFingerprint, range, file sha, draft preconditions, and parse-after validation.',
+        "Symbol-scoped edit preview/apply/applyNow with astFingerprint, range, file sha, draft preconditions, and parse-after validation.",
       schema: SymbolEditRequestSchema,
       handler: handleSymbolEdit,
     },
@@ -387,7 +387,7 @@ export function buildFlatToolDescriptors(
     {
       name: "sdl.search.edit",
       description:
-        'Cross-file search-and-edit in two phases: mode:"preview" returns a planHandle summarizing proposed edits; mode:"apply" executes the plan with sha256/mtime preconditions and rollback on mid-batch failure. Prefer this over composing repeated file.write calls.',
+        'Cross-file search-and-edit in two phases: mode:"preview" returns a planHandle summarizing proposed edits; mode:"apply" executes the plan with sha256/mtime preconditions and rollback on mid-batch failure. Supports text, symbol, identifier, and structural tree-sitter targeting for safer TS/JS edits. Prefer this over composing repeated file.write calls.',
       schema: SearchEditRequestSchema,
       handler: handleSearchEdit,
     },

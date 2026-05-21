@@ -83,7 +83,11 @@ When workflow steps need fields from earlier `$N` references, force JSON-compati
     },
     {
       "fn": "codeSkeleton",
-      "args": { "symbolId": "$0.results.0.symbolId", "maxLines": 120, "maxTokens": 900 }
+      "args": {
+        "symbolId": "$0.results.0.symbolId",
+        "maxLines": 120,
+        "maxTokens": 900
+      }
     },
     {
       "fn": "codeHotPath",
@@ -133,7 +137,8 @@ Use SDL file and edit tools instead of native read/write paths.
 - Write non-indexed files with `file.write` or `sdl.file` `op: "write"` using exactly one targeted write mode.
 - Edit indexed source with `symbol.edit` or `sdl.file` `symbolEditPreview` followed by `symbolEditApply` when the edit is anchored to one symbol.
 - Use `symbolEditApplyNow` only with a fresh `astFingerprint` and range from a current symbol card.
-- Use `search.edit` or `sdl.file` `op: "searchEditPreview"` with `operations[]` for multi-file or multi-replacement batches. Apply the returned plan handle after reviewing the shared preview.
+- Use `search.edit` or `sdl.file` `op: "searchEditPreview"` for cross-file or repeated indexed-source edits. Prefer `targeting: "identifier"` for exact TS/JS identifier replacements that must avoid comments and strings, `targeting: "structural"` for tree-sitter capture edits such as calls, imports, JSX props, or object properties, and `operations[]` for heterogeneous batches.
+- Apply the returned plan handle only after reviewing snippets, file counts, and any `astMatches` capture summaries.
 - Use `sdl.workflow` plus `runtimeExecute` for a targeted script only when SDL edit tools cannot express the indexed-source edit; pass multiline payloads through `stdin`.
 - Track backup paths returned by edit/write tools and remove created `.bak` files after verification through SDL-governed runtime cleanup. Do not run broad native cleanup commands.
 
@@ -149,7 +154,11 @@ Use SDL file and edit tools instead of native read/write paths.
     },
     {
       "fn": "fileRead",
-      "args": { "filePath": "docs/guide.md", "search": "authentication", "searchContext": 3 }
+      "args": {
+        "filePath": "docs/guide.md",
+        "search": "authentication",
+        "searchContext": 3
+      }
     },
     {
       "fn": "fileRead",
@@ -331,6 +340,6 @@ Before the final response:
 - Using `runtimeExecute` to print indexed source.
 - Running `index.refresh` every session or defaulting to full refresh.
 - Reading whole non-indexed files when `search`, `jsonPath`, or bounded ranges would answer.
-- Writing indexed source through native edits instead of `symbol.edit`, symbol edit preview/apply, or `searchEditPreview operations[]`.
+- Writing indexed source through native edits instead of `symbol.edit`, symbol edit preview/apply, or AST-aware `searchEditPreview`.
 - Keeping `.bak` files without reporting them.
 - Omitting `usageStats` after an SDL-MCP-backed task.

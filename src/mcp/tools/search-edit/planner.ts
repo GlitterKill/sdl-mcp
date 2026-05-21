@@ -6,6 +6,8 @@
  *  - `targeting: "text"`: glob-filtered file enumeration + regex match
  *  - `targeting: "symbol"`: resolveSymbolRef + match symbol name in
  *    its home file(s)
+ *  - `targeting: "identifier"` / `"structural"`: tree-sitter-backed
+ *    source ranges for AST-aware replacement in TS/JS/TSX/JSX files
  *  - `editMode` supported: `replacePattern`, `overwrite`,
  *    `replaceLines`, `insertAt`, `append`
  *    (`jsonPath` intentionally excluded)
@@ -16,7 +18,7 @@
 
 import { readdir, readFile, stat } from "fs/promises";
 import { realpathSync } from "fs";
-import { resolve, join, relative } from "path";
+import { resolve, join, relative, extname } from "path";
 import { createHash } from "crypto";
 
 import { getLadybugConn } from "../../../db/ladybug.js";
@@ -36,12 +38,19 @@ import {
 } from "../file-write-internals.js";
 import type { FileWriteRequest, FileWriteResponse } from "../../tools.js";
 import type { PlannedFileEdit, PlanPrecondition } from "./plan-store.js";
+import {
+  collectIdentifierSourceEdits,
+  collectStructuralSourceEdits,
+  type StructuralQueryInput,
+  type StructuralSourceEdit,
+} from "./structural.js";
 
 export interface SearchEditQueryInput {
   literal?: string;
   regex?: string;
   replacement?: string;
   global?: boolean;
+  structural?: StructuralQueryInput;
   symbolRef?: { name: string; file?: string; kind?: string };
   symbolIds?: string[];
   /** For editMode=replaceLines: the replacement line range payload. */
@@ -61,7 +70,7 @@ export interface SearchEditFilters {
 
 export interface SearchEditBatchOperation {
   id?: string;
-  targeting: "text" | "symbol";
+  targeting: "text" | "symbol" | "identifier" | "structural";
   query: SearchEditQueryInput;
   filters?: SearchEditFilters;
   editMode: FileWriteResponse["mode"];
@@ -72,7 +81,7 @@ export interface SearchEditBatchOperation {
 
 export interface SearchEditPreviewRequest {
   repoId: string;
-  targeting?: "text" | "symbol";
+  targeting?: "text" | "symbol" | "identifier" | "structural";
   query?: SearchEditQueryInput;
   filters?: SearchEditFilters;
   editMode?: FileWriteResponse["mode"];
@@ -85,7 +94,7 @@ export interface SearchEditPreviewRequest {
 }
 
 interface SearchEditSingleOperationRequest extends SearchEditPreviewRequest {
-  targeting: "text" | "symbol";
+  targeting: "text" | "symbol" | "identifier" | "structural";
   query: SearchEditQueryInput;
   editMode: FileWriteResponse["mode"];
   operations?: undefined;
@@ -112,12 +121,32 @@ export interface PreviewFileEntry {
   editMode: FileWriteResponse["mode"];
   snippets: PreviewSnippets;
   indexedSource: boolean;
+  astMatches?: PreviewAstMatch[];
   operationIds?: string[];
   operations?: Array<{
     id: string;
     matchCount: number;
     editMode: FileWriteResponse["mode"];
   }>;
+}
+
+export interface PreviewAstCapture {
+  name: string;
+  nodeType: string;
+  text: string;
+  startByte: number;
+  endByte: number;
+  range: {
+    startLine: number;
+    startCol: number;
+    endLine: number;
+    endCol: number;
+  };
+}
+
+export interface PreviewAstMatch {
+  target: PreviewAstCapture;
+  captures: PreviewAstCapture[];
 }
 
 export interface PreviewResult {
@@ -140,6 +169,14 @@ const DEFAULT_MAX_TOTAL_MATCHES = 500;
 const MAX_PLAN_BYTES = 10 * 1024 * 1024; // 10MB aggregate cap per plan
 const DEFAULT_PREVIEW_CONTEXT_LINES = 2;
 const MAX_PREVIEW_SNIPPET_LINES = 80;
+const MAX_AST_MATCH_DETAILS_PER_FILE = 5;
+const MAX_AST_CAPTURE_DETAILS_PER_MATCH = 8;
+const MAX_AST_CAPTURE_TEXT_CHARS = 120;
+const AST_AWARE_SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx"] as const;
+const AST_AWARE_SOURCE_EXTENSION_SET = new Set<string>(
+  AST_AWARE_SOURCE_EXTENSIONS,
+);
+const NO_AST_AWARE_SOURCE_EXTENSION = ".__sdl_no_ast_source__";
 
 /** Directory names that are never descended into. */
 const SKIP_DIRS = new Set([
@@ -236,7 +273,10 @@ function globToRegex(glob: string): RegExp {
         re += "\\{";
       } else {
         const alts = glob.slice(i + 1, close).split(",");
-        re += "(?:" + alts.map((a) => a.replace(/[.+^${}()|[\]\\*?]/g, "\\$&")).join("|") + ")";
+        re +=
+          "(?:" +
+          alts.map((a) => a.replace(/[.+^${}()|[\]\\*?]/g, "\\$&")).join("|") +
+          ")";
         i = close;
       }
     } else if (special.test(ch)) {
@@ -295,15 +335,22 @@ function filterSelectionReason(
 }
 
 const DOTFILE_DENYLIST = new Set([
-  ".npmrc", ".netrc", ".pgpass", ".my.cnf", ".boto",
+  ".npmrc",
+  ".netrc",
+  ".pgpass",
+  ".my.cnf",
+  ".boto",
 ]);
-const SECRET_FILENAME_RE = /^(id_rsa|id_ed25519|id_ecdsa|id_dsa)(\.pub)?$|^\.(htpasswd|htaccess)$/;
+const SECRET_FILENAME_RE =
+  /^(id_rsa|id_ed25519|id_ecdsa|id_dsa)(\.pub)?$|^\.(htpasswd|htaccess)$/;
 
 export function isPathAllowed(
   relPath: string,
   filters: SearchEditFilters | undefined,
 ): { allowed: boolean; reason?: string } {
-  const basename = relPath.includes("/") ? relPath.slice(relPath.lastIndexOf("/") + 1) : relPath;
+  const basename = relPath.includes("/")
+    ? relPath.slice(relPath.lastIndexOf("/") + 1)
+    : relPath;
   // Check each extension segment in basename to prevent double-extension bypass (e.g. foo.dll.txt)
   const extParts = basename.split(".");
   for (let i = 1; i < extParts.length; i++) {
@@ -432,7 +479,7 @@ export async function enumerateRepoFiles(
     }
     for (const entry of entries) {
       if (candidates.length >= maxFiles) return;
-      if (entry.name.startsWith(".")) continue;  // Skip all dotfiles/dotdirs
+      if (entry.name.startsWith(".")) continue; // Skip all dotfiles/dotdirs
       const abs = join(dirAbs, entry.name);
       if (entry.isDirectory()) {
         if (SKIP_DIRS.has(entry.name)) continue;
@@ -442,7 +489,9 @@ export async function enumerateRepoFiles(
           if (visitedRealpaths.has(realDir)) continue;
           validatePathWithinRoot(rootPath, realDir);
           visitedRealpaths.add(realDir);
-        } catch { continue; }
+        } catch {
+          continue;
+        }
         await walk(abs, depth + 1);
       } else if (entry.isFile()) {
         const rel = normalizePath(relative(rootPath, abs));
@@ -544,7 +593,10 @@ function nonEmptyDisplaySpan(
       endIndex: Math.max(0, Math.min(endIndex, lines.length)),
     };
   }
-  const boundedFallback = Math.max(0, Math.min(fallbackIndex, lines.length - 1));
+  const boundedFallback = Math.max(
+    0,
+    Math.min(fallbackIndex, lines.length - 1),
+  );
   return { startIndex: boundedFallback, endIndex: boundedFallback + 1 };
 }
 
@@ -593,7 +645,10 @@ function formatNumberedLines(
     .map((line, offset) => {
       const lineIndex = range.startIndex + offset;
       const lineNumber = lineIndex + 1;
-      const marker = lineIndex >= changedSpan.startIndex && lineIndex < changedSpan.endIndex ? ">" : " ";
+      const marker =
+        lineIndex >= changedSpan.startIndex && lineIndex < changedSpan.endIndex
+          ? ">"
+          : " ";
       return `${marker}${String(lineNumber).padStart(width)} | ${line}`;
     })
     .join("\n");
@@ -613,7 +668,8 @@ export function buildSearchEditPreviewSnippets(
   const afterLines = splitPreviewLines(newContent);
   const changedSpan = findChangedLineSpan(beforeLines, afterLines);
   const regexLine = regex ? findRegexLine(beforeLines, regex) : -1;
-  const beforeFallback = regexLine >= 0 ? regexLine : changedSpan.beforeStartIndex;
+  const beforeFallback =
+    regexLine >= 0 ? regexLine : changedSpan.beforeStartIndex;
   const beforeChangedSpan = boundPreviewChangedSpan(
     beforeLines,
     nonEmptyDisplaySpan(
@@ -636,7 +692,11 @@ export function buildSearchEditPreviewSnippets(
     changedSpan.afterStartIndex,
     contextLines,
   );
-  const beforeRange = buildLineRange(beforeLines, beforeChangedSpan, contextLines);
+  const beforeRange = buildLineRange(
+    beforeLines,
+    beforeChangedSpan,
+    contextLines,
+  );
   const afterRange = buildLineRange(afterLines, afterChangedSpan, contextLines);
 
   return {
@@ -736,6 +796,7 @@ interface OperationFilePlan {
   operationId: string;
   request: SearchEditSingleOperationRequest;
   edit: PlannedFileEdit;
+  astMatches?: PreviewAstMatch[];
 }
 
 interface SourceRange {
@@ -808,7 +869,10 @@ function buildOperationRequest(
   };
 }
 
-function changedSourceEdits(before: string, after: string): Array<Omit<SourceEdit, "operationId">> {
+function changedSourceEdits(
+  before: string,
+  after: string,
+): Array<Omit<SourceEdit, "operationId">> {
   if (before === after) return [];
   const sharedLength = Math.min(before.length, after.length);
   let prefix = 0;
@@ -825,11 +889,13 @@ function changedSourceEdits(before: string, after: string): Array<Omit<SourceEdi
     beforeEnd -= 1;
     afterEnd -= 1;
   }
-  return [{
-    start: prefix,
-    end: beforeEnd,
-    replacement: after.slice(prefix, afterEnd),
-  }];
+  return [
+    {
+      start: prefix,
+      end: beforeEnd,
+      replacement: after.slice(prefix, afterEnd),
+    },
+  ];
 }
 
 function applySourceEdits(content: string, edits: SourceEdit[]): string {
@@ -847,6 +913,193 @@ function applySourceEdits(content: string, edits: SourceEdit[]): string {
   }
   chunks.push(content.slice(cursor));
   return chunks.join("");
+}
+
+function isAstAwareTargeting(
+  request: SearchEditSingleOperationRequest,
+): boolean {
+  return (
+    request.targeting === "identifier" || request.targeting === "structural"
+  );
+}
+
+function validateAstAwareRequest(
+  request: SearchEditSingleOperationRequest,
+): void {
+  if (!isAstAwareTargeting(request)) return;
+  if (request.editMode !== "replacePattern") {
+    throw new ValidationError(
+      `${request.targeting} targeting currently supports editMode="replacePattern" only`,
+    );
+  }
+  if (request.targeting === "identifier") {
+    if (request.query.literal === undefined) {
+      throw new ValidationError("identifier targeting requires query.literal");
+    }
+    if (request.query.regex !== undefined) {
+      throw new ValidationError(
+        "identifier targeting uses AST node text and does not accept query.regex",
+      );
+    }
+    if (request.query.replacement === undefined) {
+      throw new ValidationError(
+        "identifier targeting requires query.replacement",
+      );
+    }
+    return;
+  }
+
+  if (request.query.structural === undefined) {
+    throw new ValidationError("structural targeting requires query.structural");
+  }
+  if (
+    request.query.replacement === undefined &&
+    request.query.structural.replacement === undefined
+  ) {
+    throw new ValidationError(
+      "structural targeting requires query.replacement or query.structural.replacement",
+    );
+  }
+}
+
+function collectAstAwareStructuralEdits(
+  content: string,
+  relPath: string,
+  request: SearchEditSingleOperationRequest,
+  maxMatches?: number,
+): StructuralSourceEdit[] {
+  if (request.targeting === "identifier") {
+    return collectIdentifierSourceEdits({
+      content,
+      relPath,
+      literal: request.query.literal as string,
+      replacement: request.query.replacement as string,
+      global: request.query.global ?? true,
+      ...(maxMatches !== undefined ? { maxMatches } : {}),
+    });
+  }
+  if (request.targeting === "structural") {
+    return collectStructuralSourceEdits({
+      content,
+      relPath,
+      structural: request.query.structural as StructuralQueryInput,
+      replacement: request.query.replacement,
+      global: request.query.global ?? true,
+      ...(maxMatches !== undefined ? { maxMatches } : {}),
+    });
+  }
+  return [];
+}
+
+function toSourceEdits(
+  edits: StructuralSourceEdit[],
+  operationId: string,
+): SourceEdit[] {
+  return edits.map((edit) => ({
+    operationId,
+    start: edit.start,
+    end: edit.end,
+    replacement: edit.replacement,
+  }));
+}
+
+function collectAstAwareSourceEdits(
+  content: string,
+  relPath: string,
+  request: SearchEditSingleOperationRequest,
+  operationId: string,
+  maxMatches?: number,
+): SourceEdit[] {
+  return toSourceEdits(
+    collectAstAwareStructuralEdits(content, relPath, request, maxMatches),
+    operationId,
+  );
+}
+
+function truncateCaptureText(text: string): string {
+  return text.length > MAX_AST_CAPTURE_TEXT_CHARS
+    ? `${text.slice(0, MAX_AST_CAPTURE_TEXT_CHARS)}...`
+    : text;
+}
+
+function toPreviewAstCapture(
+  capture: StructuralSourceEdit["captures"][number],
+): PreviewAstCapture {
+  return {
+    name: capture.name,
+    nodeType: capture.nodeType,
+    text: truncateCaptureText(capture.text),
+    startByte: capture.startByte,
+    endByte: capture.endByte,
+    range: capture.range,
+  };
+}
+
+function buildPreviewAstMatches(
+  edits: StructuralSourceEdit[],
+): PreviewAstMatch[] | undefined {
+  if (edits.length === 0) return undefined;
+  return edits.slice(0, MAX_AST_MATCH_DETAILS_PER_FILE).map((edit) => {
+    const captures = edit.captures
+      .slice(0, MAX_AST_CAPTURE_DETAILS_PER_MATCH)
+      .map(toPreviewAstCapture);
+    const targetCapture =
+      edit.captures.find(
+        (capture) => capture.start === edit.start && capture.end === edit.end,
+      ) ?? edit.captures[0];
+    return {
+      target: toPreviewAstCapture(targetCapture),
+      captures,
+    };
+  });
+}
+
+function narrowQueryForAstAwareTargeting(
+  request: SearchEditSingleOperationRequest,
+): string | null {
+  if (request.targeting === "identifier") {
+    return request.query.literal ?? null;
+  }
+  if (request.targeting !== "structural") {
+    return null;
+  }
+  if (request.query.literal !== undefined && request.query.literal.length > 0) {
+    return request.query.literal;
+  }
+  const required = request.query.structural?.requiredCaptures;
+  if (!required) return null;
+  const values = Object.values(required)
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  return values.length > 0 ? values.join(" ") : null;
+}
+
+function isAstAwareSourcePath(relPath: string): boolean {
+  return AST_AWARE_SOURCE_EXTENSION_SET.has(extname(relPath).toLowerCase());
+}
+
+function normalizeExtensionFilter(extension: string): string {
+  const normalized = extension.toLowerCase();
+  return normalized.startsWith(".") ? normalized : `.${normalized}`;
+}
+
+function filtersForAstAwareCandidates(
+  filters: SearchEditFilters | undefined,
+): SearchEditFilters {
+  const requestedExtensions = filters?.extensions?.map(
+    normalizeExtensionFilter,
+  );
+  const extensions =
+    requestedExtensions && requestedExtensions.length > 0
+      ? requestedExtensions.filter((extension) =>
+          AST_AWARE_SOURCE_EXTENSION_SET.has(extension),
+        )
+      : [...AST_AWARE_SOURCE_EXTENSIONS];
+  return {
+    ...filters,
+    extensions:
+      extensions.length > 0 ? extensions : [NO_AST_AWARE_SOURCE_EXTENSION],
+  };
 }
 
 function dominantEol(content: string): "\r\n" | "\n" {
@@ -929,9 +1182,27 @@ function sourceEditsForPlan(
   content: string,
   plan: OperationFilePlan,
 ): SourceEdit[] {
+  if (isAstAwareTargeting(plan.request)) {
+    const astAware = collectAstAwareSourceEdits(
+      content,
+      plan.edit.relPath,
+      plan.request,
+      plan.operationId,
+    );
+    if (
+      astAware.length > 0 &&
+      applySourceEdits(content, astAware) === plan.edit.newContent
+    ) {
+      return astAware;
+    }
+  }
   const precise =
     plan.request.editMode === "replacePattern"
-      ? collectReplacePatternSourceEdits(content, plan.request, plan.operationId)
+      ? collectReplacePatternSourceEdits(
+          content,
+          plan.request,
+          plan.operationId,
+        )
       : [];
   if (
     precise.length > 0 &&
@@ -988,14 +1259,21 @@ async function planSearchEditBatchPreview(
     retrievalEvidence ??= operationPreview.preview.retrievalEvidence;
     partial = partial || operationPreview.preview.summary.partial === true;
     for (const skipped of operationPreview.preview.summary.filesSkipped) {
-      filesSkipped.push({ ...skipped, operationId: operationPreview.operationId });
+      filesSkipped.push({
+        ...skipped,
+        operationId: operationPreview.operationId,
+      });
     }
     for (const edit of operationPreview.preview.edits) {
+      const previewEntry = operationPreview.preview.summary.fileEntries.find(
+        (entry) => entry.file === edit.relPath,
+      );
       const plans = filePlans.get(edit.relPath) ?? [];
       plans.push({
         operationId: operationPreview.operationId,
         request: operationPreview.request,
         edit,
+        astMatches: previewEntry?.astMatches,
       });
       filePlans.set(edit.relPath, plans);
     }
@@ -1007,15 +1285,16 @@ async function planSearchEditBatchPreview(
   const maxFiles = request.maxFiles ?? DEFAULT_MAX_FILES;
   const maxMatchesPerFile =
     request.maxMatchesPerFile ?? DEFAULT_MAX_MATCHES_PER_FILE;
-  const maxTotalMatches =
-    request.maxTotalMatches ?? DEFAULT_MAX_TOTAL_MATCHES;
+  const maxTotalMatches = request.maxTotalMatches ?? DEFAULT_MAX_TOTAL_MATCHES;
   const contextLines =
     request.previewContextLines ?? DEFAULT_PREVIEW_CONTEXT_LINES;
   const createBackup = request.createBackup ?? true;
   let aggregateBytes = 0;
   let totalMatches = 0;
 
-  for (const [rel, plans] of Array.from(filePlans).sort(([a], [b]) => a.localeCompare(b))) {
+  for (const [rel, plans] of Array.from(filePlans).sort(([a], [b]) =>
+    a.localeCompare(b),
+  )) {
     if (edits.length >= maxFiles) {
       filesSkipped.push({ path: rel, reason: "maxFiles-reached" });
       partial = true;
@@ -1055,6 +1334,9 @@ async function planSearchEditBatchPreview(
     let matchCount = 0;
     const operationSummaries: NonNullable<PreviewFileEntry["operations"]> = [];
     const operationIds: string[] = [];
+    const astMatches = plans
+      .flatMap((plan) => plan.astMatches ?? [])
+      .slice(0, MAX_AST_MATCH_DETAILS_PER_FILE);
     for (const plan of plans) {
       matchCount += plan.edit.matchCount;
       operationIds.push(plan.operationId);
@@ -1065,12 +1347,18 @@ async function planSearchEditBatchPreview(
       });
     }
     if (matchCount > maxMatchesPerFile) {
-      filesSkipped.push({ path: rel, reason: `matches-exceed-per-file-cap:${maxMatchesPerFile}` });
+      filesSkipped.push({
+        path: rel,
+        reason: `matches-exceed-per-file-cap:${maxMatchesPerFile}`,
+      });
       partial = true;
       continue;
     }
     if (totalMatches + matchCount > maxTotalMatches) {
-      filesSkipped.push({ path: rel, reason: `matches-exceed-total-cap:${maxTotalMatches}` });
+      filesSkipped.push({
+        path: rel,
+        reason: `matches-exceed-total-cap:${maxTotalMatches}`,
+      });
       partial = true;
       continue;
     }
@@ -1111,8 +1399,14 @@ async function planSearchEditBatchPreview(
       file: rel,
       matchCount,
       editMode: plans.length === 1 ? plans[0].edit.editMode : "overwrite",
-      snippets: buildSearchEditPreviewSnippets(content, newContent, contextLines, null),
+      snippets: buildSearchEditPreviewSnippets(
+        content,
+        newContent,
+        contextLines,
+        null,
+      ),
       indexedSource,
+      ...(astMatches.length > 0 ? { astMatches } : {}),
       operationIds,
       operations: operationSummaries,
     });
@@ -1163,6 +1457,7 @@ async function planSingleSearchEditPreview(
   const contextLines =
     request.previewContextLines ?? DEFAULT_PREVIEW_CONTEXT_LINES;
   const createBackup = request.createBackup ?? true;
+  validateAstAwareRequest(request);
 
   let candidates: string[];
   let skipped: PreviewFileSkip[];
@@ -1170,14 +1465,19 @@ async function planSingleSearchEditPreview(
   let candidatesCapped = false;
 
   let retrievalEvidence: RetrievalEvidence | undefined;
-  if (request.targeting === "text") {
-    regex = compileSearchRegex(request.query, true);
+  if (request.targeting === "text" || isAstAwareTargeting(request)) {
+    if (request.targeting === "text") {
+      regex = compileSearchRegex(request.query, true);
+    }
     skipped = [];
     candidates = [];
+    const candidateFilters = isAstAwareTargeting(request)
+      ? filtersForAstAwareCandidates(request.filters)
+      : request.filters;
 
     const explicitIncludes = await enumerateExplicitIncludeFiles(
       rootPath,
-      request.filters,
+      candidateFilters,
       maxFiles,
     );
     if (explicitIncludes) {
@@ -1186,18 +1486,59 @@ async function planSingleSearchEditPreview(
       candidatesCapped = explicitIncludes.capped;
     }
 
-    let narrowQuery: string | null = null;
-    if (request.query.literal !== undefined && request.query.literal.length > 0) {
+    let narrowQuery: string | null = narrowQueryForAstAwareTargeting(request);
+    if (
+      narrowQuery === null &&
+      request.query.literal !== undefined &&
+      request.query.literal.length > 0
+    ) {
       narrowQuery = request.query.literal;
-    } else if (request.query.regex !== undefined) {
+    } else if (narrowQuery === null && request.query.regex !== undefined) {
       const KEYWORD_STOPWORDS = new Set([
-        "if", "else", "for", "while", "do", "switch", "case", "break",
-        "return", "throw", "try", "catch", "finally", "new", "delete",
-        "typeof", "instanceof", "void", "this", "super", "class",
-        "extends", "implements", "interface", "enum", "const", "let",
-        "var", "function", "async", "await", "import", "export",
-        "from", "default", "static", "public", "private", "protected",
-        "abstract", "override", "readonly", "type", "namespace",
+        "if",
+        "else",
+        "for",
+        "while",
+        "do",
+        "switch",
+        "case",
+        "break",
+        "return",
+        "throw",
+        "try",
+        "catch",
+        "finally",
+        "new",
+        "delete",
+        "typeof",
+        "instanceof",
+        "void",
+        "this",
+        "super",
+        "class",
+        "extends",
+        "implements",
+        "interface",
+        "enum",
+        "const",
+        "let",
+        "var",
+        "function",
+        "async",
+        "await",
+        "import",
+        "export",
+        "from",
+        "default",
+        "static",
+        "public",
+        "private",
+        "protected",
+        "abstract",
+        "override",
+        "readonly",
+        "type",
+        "namespace",
       ]);
       const tokens = (
         request.query.regex.match(/[A-Za-z_][A-Za-z0-9_]{1,}/g) ?? []
@@ -1219,7 +1560,7 @@ async function planSingleSearchEditPreview(
           const rel = normalizePath(p);
           if (seen.has(rel)) continue;
           seen.add(rel);
-          const { allowed, reason } = isPathAllowed(rel, request.filters);
+          const { allowed, reason } = isPathAllowed(rel, candidateFilters);
           if (!allowed) {
             if (shouldReportSkippedFile(reason)) {
               skipped.push({ path: rel, reason: reason ?? "skipped" });
@@ -1231,7 +1572,7 @@ async function planSingleSearchEditPreview(
         if (candidates.length < maxFiles) {
           const enumerated = await enumerateRepoFiles(
             rootPath,
-            request.filters,
+            candidateFilters,
             maxFiles,
           );
           const retrievalSet = new Set(candidates);
@@ -1252,7 +1593,7 @@ async function planSingleSearchEditPreview(
     if (!explicitIncludes && candidates.length === 0) {
       const enumerated = await enumerateRepoFiles(
         rootPath,
-        request.filters,
+        candidateFilters,
         maxFiles,
       );
       candidates = enumerated.candidates;
@@ -1263,7 +1604,11 @@ async function planSingleSearchEditPreview(
     }
   } else {
     // symbol targeting
-    const symbolRefs: Array<{ symbolId: string; fileId: string; file?: string }> = [];
+    const symbolRefs: Array<{
+      symbolId: string;
+      fileId: string;
+      file?: string;
+    }> = [];
     skipped = [];
     if (request.query.symbolIds && request.query.symbolIds.length > 0) {
       const byId = await ladybugDb.getSymbolsByIds(
@@ -1303,7 +1648,9 @@ async function planSingleSearchEditPreview(
           .getSymbolsByIds(conn, [resolved.symbolId])
           .then((m) => m.get(resolved.symbolId));
         if (sym) {
-          const fileRow = (await ladybugDb.getFilesByIds(conn, [sym.fileId])).get(sym.fileId);
+          const fileRow = (
+            await ladybugDb.getFilesByIds(conn, [sym.fileId])
+          ).get(sym.fileId);
           symbolRefs.push({
             symbolId: resolved.symbolId,
             fileId: sym.fileId,
@@ -1317,7 +1664,9 @@ async function planSingleSearchEditPreview(
       );
     }
     const uniqueFiles = new Set<string>();
-    for (const r of symbolRefs) { if (r.file) uniqueFiles.add(normalizePath(r.file)); }
+    for (const r of symbolRefs) {
+      if (r.file) uniqueFiles.add(normalizePath(r.file));
+    }
     candidates = Array.from(uniqueFiles);
     // Build a regex from the symbol name if using symbolRef literal match.
     if (request.query.symbolRef) {
@@ -1346,11 +1695,18 @@ async function planSingleSearchEditPreview(
       skipped.push({ path: rel, reason: "maxTotalMatches-reached" });
       continue;
     }
-    const { allowed: pathAllowed, reason: pathReason } = isPathAllowed(rel, request.filters);
+    const { allowed: pathAllowed, reason: pathReason } = isPathAllowed(
+      rel,
+      request.filters,
+    );
     if (!pathAllowed) {
       if (shouldReportSkippedFile(pathReason)) {
         skipped.push({ path: rel, reason: pathReason ?? "skipped" });
       }
+      continue;
+    }
+    if (isAstAwareTargeting(request) && !isAstAwareSourcePath(rel)) {
+      skipped.push({ path: rel, reason: "structural-unsupported-extension" });
       continue;
     }
     const abs = resolve(rootPath, rel);
@@ -1418,7 +1774,9 @@ async function planSingleSearchEditPreview(
         matchCount++;
         if (matchCount >= maxMatchesPerFile) break;
         if (Date.now() > matchDeadline) {
-          throw new ValidationError("Regex match counting exceeded time budget");
+          throw new ValidationError(
+            "Regex match counting exceeded time budget",
+          );
         }
         if (m[0].length === 0) countRegex.lastIndex++;
       }
@@ -1429,7 +1787,10 @@ async function planSingleSearchEditPreview(
         matchCount >= maxMatchesPerFile &&
         countRegex.exec(content) !== null
       ) {
-        skipped.push({ path: rel, reason: `matches-exceed-per-file-cap:${maxMatchesPerFile}` });
+        skipped.push({
+          path: rel,
+          reason: `matches-exceed-per-file-cap:${maxMatchesPerFile}`,
+        });
         continue;
       }
       if (matchCount === 0 && request.targeting === "text") {
@@ -1438,41 +1799,80 @@ async function planSingleSearchEditPreview(
       }
     }
 
-    const fileWriteRequest = buildFileWriteRequestForMode(
-      request.repoId,
-      rel,
-      request.editMode,
-      request.query,
-    );
-    validateExactlyOneMode(fileWriteRequest);
+    let result: {
+      newContent: string;
+      replacementCount?: number;
+      mode: FileWriteResponse["mode"];
+    };
+    let astMatches: PreviewAstMatch[] | undefined;
+    if (isAstAwareTargeting(request)) {
+      const structuralEdits = collectAstAwareStructuralEdits(
+        content,
+        rel,
+        request,
+        maxMatchesPerFile + 1,
+      );
+      if (structuralEdits.length > maxMatchesPerFile) {
+        skipped.push({
+          path: rel,
+          reason: `matches-exceed-per-file-cap:${maxMatchesPerFile}`,
+        });
+        continue;
+      }
+      if (structuralEdits.length === 0) {
+        continue;
+      }
+      const sourceEdits = toSourceEdits(structuralEdits, "preview");
+      astMatches = buildPreviewAstMatches(structuralEdits);
+      result = {
+        newContent: applySourceEdits(content, sourceEdits),
+        replacementCount: structuralEdits.length,
+        mode: "replacePattern",
+      };
+    } else {
+      const fileWriteRequest = buildFileWriteRequestForMode(
+        request.repoId,
+        rel,
+        request.editMode,
+        request.query,
+      );
+      validateExactlyOneMode(fileWriteRequest);
 
-    let result;
-    try {
-      result = prepareNewContent({
-        prepared: {
-          repoId: request.repoId,
-          rootPath,
-          relPath: rel,
-          absPath: abs,
-          fileExists: true,
-        },
-        request: fileWriteRequest,
-        existingContent: content,
-        existingBytes: stats.size,
-      });
-    } catch (err) {
-      if (err instanceof ValidationError) throw err;
-      skipped.push({
-        path: rel,
-        reason: `prepare-failed:${
-          err instanceof Error ? err.message : "unknown"
-        }`,
-      });
-      continue;
+      try {
+        result = prepareNewContent({
+          prepared: {
+            repoId: request.repoId,
+            rootPath,
+            relPath: rel,
+            absPath: abs,
+            fileExists: true,
+          },
+          request: fileWriteRequest,
+          existingContent: content,
+          existingBytes: stats.size,
+        });
+      } catch (err) {
+        if (err instanceof ValidationError) throw err;
+        skipped.push({
+          path: rel,
+          reason: `prepare-failed:${
+            err instanceof Error ? err.message : "unknown"
+          }`,
+        });
+        continue;
+      }
     }
 
     if (result.newContent === content) {
       skipped.push({ path: rel, reason: "no-change" });
+      continue;
+    }
+    const plannedMatchCount = (result.replacementCount ?? matchCount) || 1;
+    if (totalMatches + plannedMatchCount > maxTotalMatches) {
+      skipped.push({
+        path: rel,
+        reason: `matches-exceed-total-cap:${maxTotalMatches}`,
+      });
       continue;
     }
 
@@ -1499,17 +1899,23 @@ async function planSingleSearchEditPreview(
       createBackup,
       fileExists: true,
       indexedSource,
-      matchCount: (result.replacementCount ?? matchCount) || 1,
+      matchCount: plannedMatchCount,
       editMode: result.mode,
     });
     fileEntries.push({
       file: rel,
-      matchCount: (result.replacementCount ?? matchCount) || 1,
+      matchCount: plannedMatchCount,
       editMode: result.mode,
-      snippets: buildSearchEditPreviewSnippets(content, result.newContent, contextLines, regex),
+      snippets: buildSearchEditPreviewSnippets(
+        content,
+        result.newContent,
+        contextLines,
+        regex,
+      ),
       indexedSource,
+      ...(astMatches ? { astMatches } : {}),
     });
-    totalMatches += (result.replacementCount ?? matchCount) || 1;
+    totalMatches += plannedMatchCount;
   }
 
   return {
@@ -1523,11 +1929,12 @@ async function planSingleSearchEditPreview(
       filesSkipped: skipped,
       fileEntries,
       ...(candidatesCapped ||
-        skipped.some(
-          (s) =>
-            s.reason === "maxFiles-reached" ||
-            s.reason === "maxTotalMatches-reached",
-        )
+      skipped.some(
+        (s) =>
+          s.reason === "maxFiles-reached" ||
+          s.reason === "maxTotalMatches-reached" ||
+          s.reason.startsWith("matches-exceed-"),
+      )
         ? { partial: true }
         : {}),
     },

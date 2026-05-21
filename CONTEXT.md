@@ -125,3 +125,55 @@ A stable hash combining `repoId + relPath + kind + name + astFingerprint`. Survi
 A port (interface) for loading concrete Code Window text and resolving symbols by ID. Required by Code Window Enforcement. Has at least two Adapters: `LadybugWindowLoader` (production, queries the graph DB) and `FakeWindowLoader` (test fixture). The presence of two Adapters makes this a real Seam, not a hypothetical one.
 
 Defined in `src/code/window-loader.ts`.
+
+## Directory Structure
+
+```
+.
+├── AGENTS.md                        # Task coordination (read this first!)
+├── TASKS.md                         # Current wave plan
+├── CHANGELOG.md                     # Version history
+├── README.md                        # Project overview
+├── docs/                            # Documentation hub (architecture, guides, deep-dives)
+├── devdocs/                         # Design notes, benchmarks, ADRs
+├── config/                          # Config schema + examples
+├── src/                             # TypeScript implementation (~105K lines)
+│   ├── main.ts                      # MCP server entry point (stdio transport)
+│   ├── server.ts                    # MCPServer class - tool dispatch + Zod validation
+│   ├── domain/                      # Pure types + SymbolRepository port (hexagonal core)
+│   ├── cli/                         # CLI commands + transports (stdio, http)
+│   ├── config/                      # Config loading + Zod validation + constants
+│   ├── db/                          # LadybugDB graph backend (schema + queries)
+│   ├── indexer/                     # Symbol extraction + indexing pipeline
+│   │   ├── adapter/                 # 11 language adapters (TS, Python, Go, etc.)
+│   │   └── treesitter/              # AST extraction (symbols, imports, calls)
+│   ├── graph/                       # Slice building, beam search, clustering
+│   ├── delta/                       # Versioning, diff, blast radius
+│   ├── code/                        # Code windows, skeleton IR, hot-path, gating
+│   ├── code-mode/                   # Code Mode surfaces (`sdl.context`, `sdl.workflow`)
+│   ├── memory/                      # File-backed memory sync (.sdl-memory/)
+│   ├── mcp/                         # MCP types, tools, errors, telemetry
+│   ├── gateway/                     # Tool gateway routing + compact schemas
+│   ├── agent/                       # Autopilot orchestrator (plan, execute rungs)
+│   ├── live-index/                  # Real-time draft buffer, overlay, reconcile
+│   ├── policy/                      # Decision engine for context governance
+│   ├── runtime/                     # Runtime execution engine
+│   ├── services/                    # Application service layer
+│   ├── startup/                     # Server initialization
+│   ├── sync/                        # Export/import gzip artifacts (CI/CD)
+│   ├── benchmark/                   # CI regression testing framework
+│   ├── experiments/                 # Event log replay (offline testing)
+│   ├── ts/                          # TypeScript compiler API diagnostics
+│   ├── types/                       # Shared type definitions
+│   ├── ui/                          # UI utilities
+│   ├── util/                        # Helpers (paths, hashing, tokenizer, truncation)
+│   ├── info/                        # Server diagnostics report builder (sdl.info)
+│   ├── retrieval/                   # Task-shaped retrieval orchestrator + ranking
+│   └── scip/                        # SCIP index decoder + ingestion + edge builder
+├── native/                          # Rust addon via napi-rs (~52K lines)
+├── tests/                           # Unit + integration + golden + property + stress tests
+├── scripts/                         # Build, benchmark, migration scripts
+├── templates/                       # MCP client config + agent instruction templates
+├── migrations/                      # Legacy SQLite migrations (removed; directory kept for compat)
+└── dist/                            # Compiled JavaScript (build output)
+```

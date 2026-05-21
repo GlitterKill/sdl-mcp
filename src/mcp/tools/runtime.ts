@@ -117,7 +117,7 @@ function buildStdinMetadata(
 }
 
 function hasUnbalancedQuotes(text: string): boolean {
-  let quote: "'" | "\"" | undefined;
+  let quote: "'" | '"' | undefined;
   for (let index = 0; index < text.length; index += 1) {
     const ch = text[index];
     const escaped =
@@ -139,21 +139,20 @@ function hasUnbalancedQuotes(text: string): boolean {
 function detectQuotingWarnings(
   request: RuntimeExecuteRequest,
 ): string[] | undefined {
-  const commandText = [
-    request.executable,
-    ...request.args,
-    request.code,
-  ]
+  const commandText = [request.executable, ...request.args, request.code]
     .filter((part): part is string => typeof part === "string")
     .join("\n");
   const warnings = new Set<string>();
   const hasStdin = request.stdin !== undefined;
 
-  const nodeEvalIndex = request.args.findIndex((arg) => arg === "-e" || arg === "--eval");
-  const nodeEvalCode = nodeEvalIndex >= 0 ? request.args[nodeEvalIndex + 1] : undefined;
+  const nodeEvalIndex = request.args.findIndex(
+    (arg) => arg === "-e" || arg === "--eval",
+  );
+  const nodeEvalCode =
+    nodeEvalIndex >= 0 ? request.args[nodeEvalIndex + 1] : undefined;
   if (request.runtime === "node" && nodeEvalCode?.includes("\n")) {
     warnings.add(
-      "Multiline node -e code is quoting-sensitive; prefer runtime.execute stdin for script input or searchEditPreview operations[] for edits.",
+      "Multiline node -e code is quoting-sensitive; prefer runtime.execute stdin for script input or searchEditPreview identifier/structural/operations[] targeting for edits.",
     );
   }
   if (/@['"]\r?\n|\r?\n['"]@/.test(commandText)) {
@@ -161,14 +160,18 @@ function detectQuotingWarnings(
       "PowerShell here-string command text is quoting-sensitive; prefer runtime.execute stdin for multiline input.",
     );
   }
-  if (/base64|atob|fromBase64|FromBase64String|certutil\s+-decode/i.test(commandText)) {
+  if (
+    /base64|atob|fromBase64|FromBase64String|certutil\s+-decode/i.test(
+      commandText,
+    )
+  ) {
     warnings.add(
-      "Base64 decode/eval command workarounds add token overhead and hide intent; prefer runtime.execute stdin or searchEditPreview operations[].",
+      "Base64 decode/eval command workarounds add token overhead and hide intent; prefer runtime.execute stdin or searchEditPreview identifier/structural/operations[] targeting.",
     );
   }
   if (!hasStdin && /fs\.writeFileSync|writeFileSync\s*\(/.test(commandText)) {
     warnings.add(
-      "Runtime write scripts without stdin are fragile for multiline edits; prefer searchEditPreview operations[] or pass payloads through runtime.execute stdin.",
+      "Runtime write scripts without stdin are fragile for multiline edits; prefer searchEditPreview identifier/structural/operations[] targeting or pass payloads through runtime.execute stdin.",
     );
   }
   if (hasUnbalancedQuotes(commandText)) {
@@ -179,7 +182,6 @@ function detectQuotingWarnings(
 
   return warnings.size > 0 ? Array.from(warnings) : undefined;
 }
-
 
 // ============================================================================
 // Intent-Only Excerpts (for outputMode: "intent")
@@ -355,7 +357,9 @@ export async function handleRuntimeExecute(
 
   const stdinMetadata = buildStdinMetadata(request.stdin);
   const quotingWarnings = detectQuotingWarnings(request);
-  const augmentResponse = <T extends RuntimeExecuteResponse>(response: T): T => ({
+  const augmentResponse = <T extends RuntimeExecuteResponse>(
+    response: T,
+  ): T => ({
     ...response,
     ...stdinMetadata,
     ...(quotingWarnings ? { quotingWarnings } : {}),
@@ -375,7 +379,7 @@ export async function handleRuntimeExecute(
   const conn = await getLadybugConn();
   const repo = await ladybugDb.getRepo(conn, request.repoId);
   if (!repo) {
-      throw new DatabaseError(`Repository ${request.repoId} not found`);
+    throw new DatabaseError(`Repository ${request.repoId} not found`);
   }
   timer.record("runtime.loadRepo", repoStartedAt);
 
@@ -411,8 +415,6 @@ export async function handleRuntimeExecute(
     timeoutMs,
     envKeys: [], // No custom env in v1
   };
-
-
 
   const policyDecision = decideRuntimeLegacy(
     policyContext,
@@ -559,7 +561,9 @@ export async function handleRuntimeExecute(
           policyDecision: policyDecision.decision,
           auditHash: policyDecision.auditHash,
           artifactHandle: null,
-          diagnostics: request.includeDiagnostics ? timer.snapshot() : undefined,
+          diagnostics: request.includeDiagnostics
+            ? timer.snapshot()
+            : undefined,
         });
 
         if (request.outputMode === "minimal") {
@@ -569,31 +573,34 @@ export async function handleRuntimeExecute(
           const stderrLineCount = compileStderr
             ? compileStderr.split("\n").length
             : 0;
-          return finish(attachRawContext(
-            {
-              status: compileResult.status,
-              exitCode: compileResult.exitCode,
-              signal: compileResult.signal,
-              durationMs: compileResult.durationMs,
-              stdoutSummary: "",
-              stdoutPreview: buildStdoutPreview(compileStdout),
-              stderrSummary: compileStderr ? compileStderr.slice(0, 200) : "",
-              outputLines: stdoutLineCount + stderrLineCount,
-              outputBytes:
-                compileResult.totalStdoutBytes + compileResult.totalStderrBytes,
-              artifactHandle: null,
-              truncation: {
-                stdoutTruncated: compileResult.stdoutTruncated,
-                stderrTruncated: compileResult.stderrTruncated,
-                totalStdoutBytes: compileResult.totalStdoutBytes,
-                totalStderrBytes: compileResult.totalStderrBytes,
+          return finish(
+            attachRawContext(
+              {
+                status: compileResult.status,
+                exitCode: compileResult.exitCode,
+                signal: compileResult.signal,
+                durationMs: compileResult.durationMs,
+                stdoutSummary: "",
+                stdoutPreview: buildStdoutPreview(compileStdout),
+                stderrSummary: compileStderr ? compileStderr.slice(0, 200) : "",
+                outputLines: stdoutLineCount + stderrLineCount,
+                outputBytes:
+                  compileResult.totalStdoutBytes +
+                  compileResult.totalStderrBytes,
+                artifactHandle: null,
+                truncation: {
+                  stdoutTruncated: compileResult.stdoutTruncated,
+                  stderrTruncated: compileResult.stderrTruncated,
+                  totalStdoutBytes: compileResult.totalStdoutBytes,
+                  totalStderrBytes: compileResult.totalStderrBytes,
+                },
+                policyDecision: {
+                  auditHash: policyDecision.auditHash,
+                },
               },
-              policyDecision: {
-                auditHash: policyDecision.auditHash,
-              },
-            },
-            { rawTokens: compileRawTokens },
-          ));
+              { rawTokens: compileRawTokens },
+            ),
+          );
         }
 
         if (request.outputMode === "intent") {
@@ -607,14 +614,48 @@ export async function handleRuntimeExecute(
               ),
             );
           }
-          return finish(attachRawContext(
+          return finish(
+            attachRawContext(
+              {
+                status: compileResult.status,
+                exitCode: compileResult.exitCode,
+                signal: compileResult.signal,
+                durationMs: compileResult.durationMs,
+                stdoutSummary: "",
+                stderrSummary: "",
+                artifactHandle: null,
+                excerpts: excerpts.length > 0 ? excerpts : undefined,
+                truncation: {
+                  stdoutTruncated: compileResult.stdoutTruncated,
+                  stderrTruncated: compileResult.stderrTruncated,
+                  totalStdoutBytes: compileResult.totalStdoutBytes,
+                  totalStderrBytes: compileResult.totalStderrBytes,
+                },
+                policyDecision: {
+                  auditHash: policyDecision.auditHash,
+                },
+              },
+              { rawTokens: compileRawTokens },
+            ),
+          );
+        }
+
+        // "summary" mode — existing behavior
+        const { stdoutSummary, stderrSummary, excerpts } = generateExcerpts(
+          compileStdout,
+          compileStderr,
+          request.maxResponseLines,
+          request.queryTerms,
+        );
+        return finish(
+          attachRawContext(
             {
               status: compileResult.status,
               exitCode: compileResult.exitCode,
               signal: compileResult.signal,
               durationMs: compileResult.durationMs,
-              stdoutSummary: "",
-              stderrSummary: "",
+              stdoutSummary,
+              stderrSummary,
               artifactHandle: null,
               excerpts: excerpts.length > 0 ? excerpts : undefined,
               truncation: {
@@ -628,38 +669,8 @@ export async function handleRuntimeExecute(
               },
             },
             { rawTokens: compileRawTokens },
-          ));
-        }
-
-        // "summary" mode — existing behavior
-        const { stdoutSummary, stderrSummary, excerpts } = generateExcerpts(
-          compileStdout,
-          compileStderr,
-          request.maxResponseLines,
-          request.queryTerms,
+          ),
         );
-        return finish(attachRawContext(
-          {
-            status: compileResult.status,
-            exitCode: compileResult.exitCode,
-            signal: compileResult.signal,
-            durationMs: compileResult.durationMs,
-            stdoutSummary,
-            stderrSummary,
-            artifactHandle: null,
-            excerpts: excerpts.length > 0 ? excerpts : undefined,
-            truncation: {
-              stdoutTruncated: compileResult.stdoutTruncated,
-              stderrTruncated: compileResult.stderrTruncated,
-              totalStdoutBytes: compileResult.totalStdoutBytes,
-              totalStderrBytes: compileResult.totalStderrBytes,
-            },
-            policyDecision: {
-              auditHash: policyDecision.auditHash,
-            },
-          },
-          { rawTokens: compileRawTokens },
-        ));
       }
 
       const compileDurationMs = Date.now() - compileStart;
@@ -778,12 +789,12 @@ export async function handleRuntimeExecute(
         durationMs: result.durationMs,
         stdoutBytes: result.totalStdoutBytes,
         stderrBytes: result.totalStderrBytes,
-          timedOut: result.status === "timeout",
-          policyDecision: policyDecision.decision,
-          auditHash: policyDecision.auditHash,
-          artifactHandle,
-          diagnostics: request.includeDiagnostics ? timer.snapshot() : undefined,
-        });
+        timedOut: result.status === "timeout",
+        policyDecision: policyDecision.decision,
+        auditHash: policyDecision.auditHash,
+        artifactHandle,
+        diagnostics: request.includeDiagnostics ? timer.snapshot() : undefined,
+      });
       const isSmallOutput =
         !result.stdoutTruncated &&
         !result.stderrTruncated &&
@@ -824,7 +835,9 @@ export async function handleRuntimeExecute(
           truncation: minimalBase.truncation,
           policyDecision: minimalBase.policyDecision,
         };
-        return finish(attachRawContext(compact, { rawTokens: rawOutputTokens }));
+        return finish(
+          attachRawContext(compact, { rawTokens: rawOutputTokens }),
+        );
       }
       return finish(
         attachRawContext(minimalBase, { rawTokens: rawOutputTokens }),

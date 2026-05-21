@@ -548,7 +548,7 @@ import re
 import sys
 
 INDEXED_READ_REASON = "Use the SDL-MCP Iris retrieval ladder for indexed source reads. Start with sdl.context, then batch follow-ups through sdl.workflow using symbolSearch, symbolGetCard, codeSkeleton, codeHotPath, and codeNeedWindow only as a last resort with identifiersToFind and expectedLines."
-INDEXED_WRITE_REASON = "Use SDL-MCP indexed-source edit tools instead of native writes. Prefer symbol.edit for symbol-scoped edits or searchEditPreview operations[] for multi-replacement batches. If an edit cannot use those tools, run a targeted script through sdl.workflow runtimeExecute with stdin for multiline payloads."
+INDEXED_WRITE_REASON = "Use SDL-MCP indexed-source edit tools instead of native writes. Prefer symbol.edit for one-symbol edits; use searchEditPreview with targeting:\\"identifier\\" for exact TS/JS identifier replacements, targeting:\\"structural\\" for tree-sitter capture edits, or operations[] for heterogeneous batches. Review astMatches/snippets, then apply the plan handle. If SDL edit tools cannot express the change, run a targeted script through sdl.workflow runtimeExecute with stdin."
 NON_INDEXED_READ_REASON = "Use SDL-MCP file.read for non-indexed repository reads. Prefer sdl.file { op: \\"read\\" } or file.read with search, jsonPath, or bounded offset/limit instead of native file reads."
 NON_INDEXED_WRITE_REASON = "Use SDL-MCP file.write for non-indexed repository writes. Prefer sdl.file { op: \\"write\\" } or file.write with one targeted write mode instead of native Write/Edit/apply_patch."
 
@@ -869,7 +869,7 @@ Follow the same workflow as the SDL-MCP Agent Workflow skill when that skill is 
 5. Use \`codeNeedWindow\` only as a last resort with clear justification
 6. Use \`fileRead\` for non-indexed files with \`search\`, \`jsonPath\`, or bounded ranges
 7. Use \`runtimeExecute\` plus \`runtimeQueryOutput\` for repo-local commands and targeted output retrieval
-8. Use \`symbol.edit\` for symbol-scoped edits, \`searchEditPreview operations[]\` for multi-replacement batches, and Node scripts only as a last resort
+8. Use \`symbol.edit\` for one-symbol edits, \`searchEditPreview\` with \`targeting:"identifier"\`, \`targeting:"structural"\`, or \`operations[]\` for safer cross-file edits, and Node scripts only as a last resort
 9. Use \`usageStats\` before the final answer and report token savings
 `;
 }
@@ -895,7 +895,7 @@ At the start of every new session in this repository, load and follow the \`sdl-
 
 - Never use native repo-local Read, Write, Edit, patch, or Bash while the SDL-MCP PID file is present.
 - Use the Iris ladder for indexed source reads: sdl.context, then symbolSearch, symbolGetCard, codeSkeleton, codeHotPath, and codeNeedWindow only as a last resort.
-- Use symbol.edit for symbol-scoped indexed writes and searchEditPreview operations[] for multi-replacement batches. Use targeted scripts through sdl.workflow runtimeExecute with stdin only when SDL edit tools cannot express the change.
+- Use symbol.edit for one-symbol indexed writes and searchEditPreview with targeting:"identifier", targeting:"structural", or operations[] for cross-file indexed edits. Use targeted scripts through sdl.workflow runtimeExecute with stdin only when SDL edit tools cannot express the change.
 - Use file.read / file.write for non-indexed repository files.
 - Use runtimeExecute inside sdl.workflow for repo-local shell actions; pass multiline scripts/input through stdin.
 - If a native file or Bash call is denied by a hook, switch to SDL-MCP immediately and do not retry the denied tool.
@@ -1091,8 +1091,8 @@ function fallbackSkillBody() {
     "2. Use \`contextMode: \\"precise\\"\` for named symbols, exact paths, narrow bugs, focused reviews, and implementation follow-up.",
     "3. Use \`contextMode: \\"broad\\"\` for subsystem mapping, behavior tracing, unfamiliar code, or broad investigations.",
     "4. Batch follow-up retrieval through \`sdl.workflow\`: \`symbolSearch\`, \`symbolGetCard\`, \`codeSkeleton\`, \`codeHotPath\`, then \`codeNeedWindow\` as a last resort.",
-    "5. Use \`symbol.edit\` for symbol-scoped indexed edits and \`searchEditPreview operations[]\` for multi-replacement batches.",
-    "6. Use \`runtimeExecute\` with \`stdin\` for multiline scripts/input instead of quote-heavy shell or base64 workarounds.",
+    "5. Use \`symbol.edit\` for one-symbol indexed edits; use \`searchEditPreview\` with \`targeting:\\"identifier\\"\`, \`targeting:\\"structural\\"\`, or \`operations[]\` for safer cross-file edits.",
+    "6. Use \`runtimeExecute\` with \`stdin\` for repo-local commands and multiline scripts/input; for indexed-source edits, use runtime only when SDL edit tools cannot express the change.",
     "7. Use memory tools only when \`memory.enabled: true\`; avoid habitual \`index.refresh\`.",
     "8. Finish with \`usageStats\` and report token savings.",
   ].join("\\n");
@@ -1138,7 +1138,7 @@ const RUNTIME_REASON =
 const INDEXED_READ_REASON =
   "Use the SDL-MCP Iris retrieval ladder for indexed source reads. Start with sdl.context, then batch follow-ups through sdl.workflow using symbolSearch, symbolGetCard, codeSkeleton, codeHotPath, and codeNeedWindow only as a last resort with identifiersToFind and expectedLines.";
 const INDEXED_WRITE_REASON =
-  "Use SDL-MCP indexed-source edit tools instead of native writes. Prefer symbol.edit for symbol-scoped edits or searchEditPreview operations[] for multi-replacement batches. If an edit cannot use those tools, run a targeted script through sdl.workflow runtimeExecute with stdin for multiline payloads.";
+  "Use SDL-MCP indexed-source edit tools instead of native writes. Prefer symbol.edit for one-symbol edits; use searchEditPreview with targeting:\\"identifier\\" for exact TS/JS identifier replacements, targeting:\\"structural\\" for tree-sitter capture edits, or operations[] for heterogeneous batches. Review astMatches/snippets, then apply the plan handle. If SDL edit tools cannot express the change, run a targeted script through sdl.workflow runtimeExecute with stdin.";
 const NON_INDEXED_READ_REASON =
   "Use SDL-MCP file.read for non-indexed repository reads. Prefer sdl.file { op: \\"read\\" } or file.read with search, jsonPath, or bounded offset/limit instead of native file reads.";
 const NON_INDEXED_WRITE_REASON =

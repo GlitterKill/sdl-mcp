@@ -156,7 +156,7 @@ const FileGatewayWriteSchema = z.object({
 
 const FileGatewaySearchEditBatchOperationSchema = z.object({
   id: z.string().min(1).max(80).optional(),
-  targeting: z.enum(["text", "symbol"]),
+  targeting: z.enum(["text", "symbol", "identifier", "structural"]),
   query: SearchEditQuerySchema,
   filters: SearchEditFiltersSchema.optional(),
   editMode: SearchEditEditMode,
@@ -169,7 +169,9 @@ const FileGatewaySearchEditPreviewSchema = z
   .object({
     op: z.literal("searchEditPreview"),
     repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-    targeting: z.enum(["text", "symbol"]).optional(),
+    targeting: z
+      .enum(["text", "symbol", "identifier", "structural"])
+      .optional(),
     query: SearchEditQuerySchema.optional(),
     filters: SearchEditFiltersSchema.optional(),
     editMode: SearchEditEditMode.optional(),
@@ -195,16 +197,14 @@ const FileGatewaySearchEditPreviewSchema = z
       const seenOperationIds = new Map<string, number>();
       operations.forEach((operation, index) => {
         const trimmed = operation.id?.trim();
-        const operationId = trimmed && trimmed.length > 0
-          ? trimmed
-          : `op-${index + 1}`;
+        const operationId =
+          trimmed && trimmed.length > 0 ? trimmed : `op-${index + 1}`;
         const firstIndex = seenOperationIds.get(operationId);
         if (firstIndex !== undefined) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["operations", index, "id"],
-            message:
-              `Duplicate search.edit operation id "${operationId}" at operations[${index}] (first used at operations[${firstIndex}]).`,
+            message: `Duplicate search.edit operation id "${operationId}" at operations[${index}] (first used at operations[${firstIndex}]).`,
           });
         } else {
           seenOperationIds.set(operationId, index);

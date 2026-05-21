@@ -700,7 +700,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "file.write":
     "Write to a single file (indexed or non-indexed) with targeted modes (line replace, pattern replace, JSON path, insert, append); use search.edit for cross-file batching",
   "search.edit":
-    "Cross-file search-and-edit in two phases (preview + apply) with server-side plan handles, sha256 preconditions, rollback, and ignored/dot-directory refusal; use operations[] for multi-replacement batches and file.write for explicit single-file writes where allowed.",
+    'Cross-file search-and-edit in two phases (preview + apply) with server-side plan handles, sha256 preconditions, rollback, and ignored/dot-directory refusal; use targeting:"identifier" for exact TS/JS identifier edits, targeting:"structural" for tree-sitter capture edits, operations[] for heterogeneous batches, and file.write for explicit single-file writes where allowed.',
   "scip.ingest":
     "Ingest a pre-built SCIP index to overlay compiler-grade cross-references onto the symbol graph",
   "semantic.enrichment.refresh":
@@ -716,7 +716,7 @@ const META_TOOL_DESCRIPTIONS: Record<string, string> = {
     "Load the focused SDL-MCP manual after discovery. Use this before composing workflow steps.",
   context:
     "Preferred first tool for explain, debug, review, implement, understand, or investigate prompts. Retrieves task-shaped code context directly and should be chosen before workflow for context retrieval.",
-  file: "Unified sdl.file gateway for non-indexed file reads, targeted writes, two-phase search edits (including searchEditPreview operations[] batches), symbol edit wrappers, and plan-bound previewWindow/sourceWindow code windows. previewWindow/sourceWindow need planHandle, reason, expectedLines, identifiersToFind, and symbolId for the planned indexed source file.",
+  file: "Unified sdl.file gateway for non-indexed file reads, targeted writes, two-phase search edits (including searchEditPreview identifier, structural, and operations[] batches), symbol edit wrappers, and plan-bound previewWindow/sourceWindow code windows. previewWindow/sourceWindow need planHandle, reason, expectedLines, identifiersToFind, and symbolId for the planned indexed source file.",
   workflow:
     "Preferred first tool for execute, runtime, transform, batch, or pipeline prompts. Runs multi-step workflows with $N result piping, runtime execution, data transforms, and batch mutations.",
 };
@@ -778,7 +778,15 @@ const META_TOOL_EXAMPLES: Record<string, Record<string, unknown>> = {
     repoId: "<repoId>",
     steps: [
       { fn: "repoStatus" },
-      { fn: "runtimeExecute", args: { runtime: "node", args: ["-e", "process.stdin.pipe(process.stdout)"], stdin: "hello\n", maxResponseLines: 5 } },
+      {
+        fn: "runtimeExecute",
+        args: {
+          runtime: "node",
+          args: ["-e", "process.stdin.pipe(process.stdout)"],
+          stdin: "hello\n",
+          maxResponseLines: 5,
+        },
+      },
     ],
   },
 };
