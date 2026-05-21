@@ -17,19 +17,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added outcome-trained predictive context policy storage and observability: prefetch outcomes now persist to LadybugDB, aggregate by repo/task/client/strategy/resource kind, and surface safe-mode suppression/boost metrics in `repo.status` and `/ui/observability`.
+- **symbol edit workflows**: Added first-class symbol-scoped edit preview/apply support, AST-backed edit operations, schema validation, symbol edit documentation, and integration/unit coverage for MCP and workflow use.
+- **search/file edit windows**: Added plan-bound preview/source windows and fuller diff snippets for search edit plans so agents can inspect only the gated source needed for a planned edit.
+- **SDL enforcement and client init**: Expanded `sdl-mcp init` enforcement asset generation for Codex/Claude-style client templates, refreshed `SDL.md`/template guidance, and added tests for generated hook/template behavior.
+- **predictive prefetch policy**: Added outcome-trained predictive context policy storage, LadybugDB persistence/migration for prefetch outcomes, safe-mode suppression/boost metrics, startup prefetch wiring, and observability UI/status reporting.
+- **runtime and tool diagnostics**: Added deferred runtime work state, compact/minimal runtime output paths, context raw-token baselines, tool-call token-savings telemetry, and additional status/health diagnostics.
+- **specialized semantic embeddings**: Added semantic embedding model planning with `semantic.embeddingProfile`, `symbolEmbeddingModels`, and `fileSummaryEmbeddingModels`, plus tests and docs for specialized Symbol/FileSummary model lanes.
 
 ### Changed
 
-- Default semantic indexing now uses specialized embedding lanes: Jina for Symbol embeddings and Nomic for FileSummary embeddings. Added `semantic.embeddingProfile`, `symbolEmbeddingModels`, and `fileSummaryEmbeddingModels`, with `max-recall` preserving the previous both-models-on-both-lanes behavior.
+- **semantic indexing defaults**: Default semantic indexing now uses specialized lanes: Jina for Symbol embeddings and Nomic for FileSummary embeddings; `max-recall` preserves the previous both-models-on-both-lanes behavior.
+- **SDL agent workflows**: Smoothed `sdl.context`, `sdl.workflow`, action discovery, manual generation, workflow truncation, and response-handle behavior so agents get human-readable guidance and machine-useful fields without internal noise.
+- **tool gateway contracts**: Updated gateway schemas, tool descriptors, compact schema tests, action catalog/manual output, and generated tool inventory to match current `sdl.file`, runtime, memory, transform, and response-handle contracts.
+- **indexing and status behavior**: Let read-only status workflows bypass the foreground dispatch limiter, kept delegated indexing on the server, preserved reindex progress model metadata, and refined derived-refresh finalization.
+- **documentation**: Refreshed README, SDL workflow docs/templates, configuration/reference pages, semantic docs, token-savings, runtime, search-edit, file-read, tool-gateway, and troubleshooting documentation for the new tool surfaces and operational controls.
+- **release/package metadata**: Synchronized root/native/native-platform versions and lockfile entries for `0.11.4`.
 
 ### Fixed
 
-- Fixed config discovery from the package/repo root so CI, tests, and benchmark guardrails read `config/sdlmcp.config.json` before falling back to the global config path.
-- Aligned SDL-MCP action discovery/manual contracts for disabled memory actions, workflow response handles, transform return shapes, file window plan handles, and documented discovery limits.
-- Re-enqueue persisted stale derived-state refresh work on server startup so one-shot CLI indexing deferrals recover when SDL-MCP next serves the repo.
-- Let read-only status workflows bypass the foreground dispatch limiter so `repo.status` remains visible while a long `index.refresh` owns the normal tool slot.
-- Increased the graceful shutdown watchdog to leave room for LadybugDB drain/checkpoint cleanup, bounded shutdown audit flush waits, parallelized read-connection drains, skipped the final checkpoint after a write-connection drain timeout, and named the active cleanup step in forced-exit logs so normal DB close work is not cut off at the old 5-second boundary.
+- **config discovery**: Fixed package/repo-root config resolution so CI, tests, benchmark guardrails, and packaged defaults read `config/sdlmcp.config.json` before falling back to the global config path.
+- **symbol edit stability**: Stabilized symbol edit CI expectations and AST edit handling, including coverage for schema validation and edit application paths.
+- **workflow/tool friction**: Fixed multiple SDL-MCP usability issues around action search pagination, manual signatures, disabled memory action visibility, workflow response handles, transform return shapes, and file-window plan handles.
+- **derived state recovery**: Re-enqueued persisted stale derived-state refresh work on server startup so one-shot CLI indexing deferrals recover when SDL-MCP next serves the repo.
+- **shutdown cleanup**: Increased the graceful shutdown watchdog, bounded audit flush waits, parallelized read-connection drains, skipped final checkpoints after write-drain timeout, and named the active cleanup step in forced-exit logs.
+- **LadybugDB/runtime robustness**: Hardened LadybugDB cleanup and runtime execution paths, including deferred work state, checkpoint-service behavior, and diagnostics around long-running indexing.
+- **security audit cleanup**: Cleared the brace-expansion audit finding and restored build script type checking.
+- **observability accuracy**: Preserved watcher/reindex progress metadata and corrected `sdl.context` token-savings reporting from returned evidence.
+- **CI/test guardrails**: Updated watcher-health fixtures, config-path expectations, release lockfile coverage, and related CI cache/test checks.
+
+### Internal
+
+- Removed the obsolete tool-call performance investigation plan document.
+- Added broad regression coverage across symbol edit, search edit, file gateway, workflow executor/parser/truncation, prefetch outcomes, config paths, runtime execution, dispatch limiting, derived refresh, shutdown, and observability.
+
+_23 non-merge commits plus one merge commit since v0.11.3._
 
 ## [0.11.3] - 2026-05-14
 
