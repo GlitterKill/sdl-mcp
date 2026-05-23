@@ -12,6 +12,7 @@ import { DatabaseError } from "../domain/errors.js";
 import { ConcurrencyLimiter } from "../util/concurrency.js";
 import {
   markExtensionLoaded,
+  markExtensionUnavailable,
   getExtensionCapabilities as getExtCaps,
   resetExtensionCapabilities,
 } from "./extension-caps.js";
@@ -78,6 +79,61 @@ interface LadybugConnectionWithThreads {
 type LadybugModule = typeof import("kuzu");
 type LadybugDatabase = import("kuzu").Database;
 type LadybugConnection = import("kuzu").Connection;
+type ManagedExtension = (typeof MANAGED_EXTENSIONS)[number];
+type ConnectionExtensionLoadState = Partial<Record<ManagedExtension, boolean>>;
+
+let connectionExtensionLoadState = new WeakMap<
+  LadybugConnection,
+  ConnectionExtensionLoadState
+>();
+
+function recordConnectionExtensionLoad(
+  conn: LadybugConnection,
+  ext: ManagedExtension,
+  loaded: boolean,
+): void {
+  const state = connectionExtensionLoadState.get(conn) ?? {};
+  state[ext] = loaded;
+  connectionExtensionLoadState.set(conn, state);
+}
+
+function getActiveConnectionsWithReplacement(
+  replacement?: LadybugConnection,
+  replaced?: LadybugConnection,
+): LadybugConnection[] {
+  const activeConnections: LadybugConnection[] = [];
+  if (writeConn) {
+    activeConnections.push(
+      writeConn === replaced && replacement ? replacement : writeConn,
+    );
+  }
+  for (const conn of readPool) {
+    activeConnections.push(
+      conn === replaced && replacement ? replacement : conn,
+    );
+  }
+  if (replacement && !activeConnections.includes(replacement)) {
+    activeConnections.push(replacement);
+  }
+  return activeConnections;
+}
+
+function publishExtensionCapabilitiesForConnections(
+  activeConnections: readonly LadybugConnection[],
+): void {
+  for (const ext of MANAGED_EXTENSIONS) {
+    const loadedByEveryActiveConnection =
+      activeConnections.length > 0 &&
+      activeConnections.every(
+        (conn) => connectionExtensionLoadState.get(conn)?.[ext] === true,
+      );
+    if (loadedByEveryActiveConnection) {
+      markExtensionLoaded(ext);
+    } else {
+      markExtensionUnavailable(ext);
+    }
+  }
+}
 
 const require = createRequire(import.meta.url);
 
@@ -388,7 +444,14 @@ async function getHealthyConnection(
     clearConnectionPoisoned(conn);
   }
 
-  return createConnection(db);
+  const replacement = await createConnection(db);
+  await loadExtensionsAfterWalCheckpoint(
+    replacement,
+    [replacement],
+    `pre-extension-load-${label}-replacement`,
+    getActiveConnectionsWithReplacement(replacement, conn),
+  );
+  return replacement;
 }
 
 /**
@@ -415,7 +478,7 @@ async function installExtensionsOnce(conn: LadybugConnection): Promise<void> {
 
 /**
  * Attempt to LOAD extensions on a connection (best-effort, per-session).
- * Marks each successfully loaded extension via markExtensionLoaded().
+ * Records each per-connection load; pool-wide publication happens after all active connections are known.
  */
 async function loadExtensionsOnConnection(
   conn: LadybugConnection,
@@ -423,16 +486,48 @@ async function loadExtensionsOnConnection(
   for (const ext of MANAGED_EXTENSIONS) {
     try {
       await execDdl(conn, `LOAD EXTENSION ${ext}`);
-      markExtensionLoaded(ext);
+      recordConnectionExtensionLoad(conn, ext, true);
       logger.debug(`Kuzu extension loaded`, { extension: ext });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      recordConnectionExtensionLoad(conn, ext, false);
       logger.warn(`Kuzu extension LOAD failed`, {
         extension: ext,
         reason: msg,
       });
     }
   }
+}
+
+function markExtensionsUnavailableAfterSkippedLoad(phase: string): void {
+  for (const ext of MANAGED_EXTENSIONS) {
+    markExtensionUnavailable(ext);
+  }
+  logger.warn(
+    "Skipping LOAD EXTENSION â€” WAL is dirty and cannot be checkpointed. " +
+      "FTS will be unavailable until the WAL is resolved. " +
+      "Try stopping all processes using this DB and restarting.",
+    { phase },
+  );
+}
+
+async function loadExtensionsAfterWalCheckpoint(
+  checkpointConn: LadybugConnection,
+  targetConns: readonly LadybugConnection[],
+  phase: string,
+  activeConnections: readonly LadybugConnection[] = targetConns,
+): Promise<boolean> {
+  const walClean = await checkpointWal(checkpointConn, phase);
+  if (walClean) {
+    for (const conn of targetConns) {
+      await loadExtensionsOnConnection(conn);
+    }
+    publishExtensionCapabilitiesForConnections(activeConnections);
+    return true;
+  }
+
+  markExtensionsUnavailableAfterSkippedLoad(phase);
+  return false;
 }
 
 /**
@@ -562,21 +657,11 @@ export async function getLadybugReadConn(): Promise<LadybugConnection> {
         // entirely — loading extensions on a dirty WAL triggers a native
         // abort() that kills the process. The pool operates without FTS
         // until the next clean startup.
-        const walClean = await checkpointWal(
+        await loadExtensionsAfterWalCheckpoint(
           localWriteConn,
+          [localWriteConn, ...localReadPool],
           "pre-extension-load",
         );
-        if (walClean) {
-          for (const c of [localWriteConn, ...localReadPool]) {
-            await loadExtensionsOnConnection(c);
-          }
-        } else {
-          logger.warn(
-            "Skipping LOAD EXTENSION — WAL is dirty and cannot be checkpointed. " +
-              "FTS will be unavailable until the WAL is resolved. " +
-              "Try stopping all processes using this DB and restarting.",
-          );
-        }
 
         // Log extension capabilities after INSTALL+LOAD phase
         logger.info(`LadybugDB extension capabilities after pool init`, {
@@ -668,7 +753,18 @@ export async function recycleReadConnection(
     if (readPool.length === 0) return;
 
     try {
-      readPool[idx] = await createConnection(db);
+      const replacement = await createConnection(db);
+      const phase = `pre-extension-load-read-replacement-${idx}`;
+      const walClean = await runWalCheckpoint(phase, 2_000);
+      if (walClean) {
+        await loadExtensionsOnConnection(replacement);
+        publishExtensionCapabilitiesForConnections(
+          getActiveConnectionsWithReplacement(replacement, unhealthyConn),
+        );
+      } else {
+        markExtensionsUnavailableAfterSkippedLoad(phase);
+      }
+      readPool[idx] = replacement;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.warn(`Failed to recreate read connection [${idx}]: ${msg}`);
@@ -1085,6 +1181,7 @@ export async function closeLadybugDb(): Promise<void> {
   deferredIndexesPending = false;
   extensionsInstallAttempted = false;
   resetExtensionCapabilities();
+  connectionExtensionLoadState = new WeakMap();
   resetJoinHintCache();
   for (const hook of closeHooks) {
     try {

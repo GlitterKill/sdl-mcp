@@ -6,6 +6,8 @@ import {
   getAdapterForExtension,
   getSupportedExtensions,
   getLanguageIdForExtension,
+  getStructuralMatcherEntries,
+  getStructuralMatcherForExtension,
   loadBuiltInAdapters,
 } from "../../dist/indexer/adapter/registry.js";
 import type { LanguageAdapter } from "../../dist/indexer/adapter/LanguageAdapter.js";
@@ -124,5 +126,46 @@ describe("Adapter Registry", () => {
 
     const langId = getLanguageIdForExtension(".ts");
     assert.strictEqual(langId, "typescript");
+  });
+
+  it("registers optional structural matcher descriptors", () => {
+    const mockAdapter: LanguageAdapter = {
+      languageId: "struct-test",
+      fileExtensions: [".struct"],
+      getParser: () => null,
+      parse: () => null,
+      extractSymbols: () => [],
+      extractImports: () => [],
+      extractCalls: () => [],
+    };
+    const structuralMatcher = {
+      identifierNodeTypes: ["identifier"],
+      createQuery: () => {
+        throw new Error("not used in this registry test");
+      },
+    };
+
+    registerAdapter(
+      ".struct",
+      "struct-test",
+      () => mockAdapter,
+      "plugin",
+      "struct-plugin",
+      structuralMatcher,
+    );
+
+    assert.strictEqual(
+      getStructuralMatcherForExtension(".struct"),
+      structuralMatcher,
+    );
+    assert.ok(
+      getStructuralMatcherEntries().some(
+        (entry) =>
+          entry.extension === ".struct" &&
+          entry.languageId === "struct-test" &&
+          entry.pluginName === "struct-plugin" &&
+          entry.structuralMatcher === structuralMatcher,
+      ),
+    );
   });
 });

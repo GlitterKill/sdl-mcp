@@ -6,6 +6,22 @@ import type {
 import type { ExtractedImport } from "../treesitter/extractImports.js";
 import type { EdgeResolutionStrategy } from "../../domain/types.js";
 
+export interface StructuralMatcherDescriptor {
+  /**
+   * Conservative tree-sitter node types that can be treated as identifiers for
+   * AST-aware search.edit replacement. Keep this narrow to avoid touching
+   * comments, strings, or grammar-specific generic tokens.
+   */
+  identifierNodeTypes: readonly string[];
+
+  /**
+   * Compile a grammar-native tree-sitter query. Implementations must throw for
+   * invalid query syntax so callers can distinguish "no matches" from
+   * "malformed query".
+   */
+  createQuery(queryString: string): Parser.Query;
+}
+
 export interface CallResolutionContext {
   call: ExtractedCall;
   importedNameToSymbolIds: Map<string, string[]>;

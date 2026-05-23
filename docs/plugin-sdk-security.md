@@ -110,7 +110,8 @@ flowchart LR
     "paths": [
       "/usr/local/lib/sdl-mcp/plugins/my-lang-plugin/dist/index.js",
       "/usr/local/lib/sdl-mcp/plugins/another-plugin/dist/index.js"
-    ]
+    ],
+    "trustedRoots": ["/usr/local/lib/sdl-mcp/plugins"]
   }
 }
 ```

@@ -9,10 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **AST-aware search edit languages**: Extended `search.edit` `targeting:"identifier"` and `targeting:"structural"` beyond TypeScript/JavaScript to all built-in tree-sitter adapters, with plugin `structuralMatcher` descriptors for opt-in language support.
+
 ### Changed
 
 ### Fixed
 
+- **Cluster refresh crash**: Dropped and rebuilt the Cluster FTS index around topology-changing cluster replacement so LadybugDB does not access-violate when deleting the old cluster set during delegated incremental indexing. Rebuilds now fail closed when FTS is available, skip only when the global Cluster table is empty, and recreate Cluster FTS when rows return after an absent-index state.
+- **FTS bootstrap safety**: Deferred FTS index creation for empty entity tables and made FTS existence checks table-aware so same-name indexes on other tables do not mask missing required indexes.
+- **Plugin adapter startup**: Loaded configured plugin adapters during server, CLI serve, direct indexing, and CLI tool startup so plugin `structuralMatcher` descriptors are available to `search.edit`, and resolved configured plugin paths relative to the config file with trusted-root containment.
+- **Search edit hardening**: Reused realpath-validated, handle-based, size-capped file reads for single and batch previews; capped structural `requiredCaptures` maps to bounded safe keys; and added an aggregate structural query time budget that is checked before candidate parsing.
+- **Batch search edit safety**: Recomputed batch operation ranges from the aggregate-read content instead of diffing against stale per-operation preview output, deduplicated same-file byte accounting across child operation previews, and compacted stored skipped-file summaries.
+- **Index drop confirmation**: Made missing `DROP_FTS_INDEX`/`DROP_VECTOR_INDEX` procedure/function handling fail closed unless strict `SHOW_INDEXES` introspection confirms the table index is absent, with missing table metadata treated as unconfirmed.
+- **LadybugDB extension reloads**: Guarded replacement connection `LOAD EXTENSION` calls with a pre-load WAL checkpoint and cleared global extension capability state on per-connection load failures so recycled sessions do not bypass the dirty-WAL crash guard.
+- **CLI plugin loading**: Delayed direct CLI plugin imports until local adapter registry state is needed, avoiding plugin execution for delegated indexing and metadata-only tool commands.
+- **Gateway validation parity**: Mirrored direct `search.edit` string and array caps in the repo gateway schema.
+- **Structural search-edit validation**: Candidate-specific tree-sitter query compilation failures now surface as validation errors instead of false no-match previews.
 - **LadybugDB algorithm refresh**: Drop and rebuild repo-scoped projected graphs before post-index algorithm refresh so long-lived HTTP server connections do not reuse stale projections during incremental indexing.
 
 ## [0.11.4] - 2026-05-21

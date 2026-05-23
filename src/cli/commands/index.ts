@@ -27,6 +27,7 @@ import { activateCliConfigPath } from "../../config/configPath.js";
 import { findExistingProcess, type PidfileData } from "../../util/pidfile.js";
 import { connectSSE, type SSEEvent } from "../../util/sse-client.js";
 import { printBanner } from "../../util/banner.js";
+import { loadConfiguredAdapterPlugins } from "../../startup/plugins.js";
 
 // ---------------------------------------------------------------------------
 // Progress renderer
@@ -574,6 +575,9 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
   let dbInitialized = false;
   if (!canDelegate) {
     await initGraphDb(config, configPath);
+    await loadConfiguredAdapterPlugins(config, configPath, (message) => {
+      console.log(message);
+    });
     dbInitialized = true;
   }
 

@@ -17,7 +17,7 @@ import type { ToolContext } from "../../../server.js";
 import { maybeCompressToolResponse } from "../../response-compression.js";
 import { applyBatch } from "./batch-executor.js";
 import { getSearchEditPlanStore, type StoredPlan } from "./plan-store.js";
-import { planSearchEditPreview } from "./planner.js";
+import { planSearchEditPreview, type PreviewResult } from "./planner.js";
 
 const MAX_PREVIEW_SKIPPED_FILES = 25;
 const MAX_RETRIEVAL_EVIDENCE_ITEMS = 10;
@@ -56,6 +56,23 @@ function summarizeSkippedFiles(
       reason,
       count,
     })).sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason)),
+  };
+}
+
+type SkippedFilesSummary = ReturnType<typeof summarizeSkippedFiles>;
+
+function compactStoredSummary(
+  summary: PreviewResult["summary"],
+  skippedSummary: SkippedFilesSummary,
+): Record<string, unknown> {
+  return {
+    ...summary,
+    filesSkipped: skippedSummary.filesSkipped,
+    filesSkippedTotal: skippedSummary.filesSkippedTotal,
+    ...(skippedSummary.filesSkippedTruncated
+      ? { filesSkippedTruncated: true }
+      : {}),
+    filesSkippedByReason: skippedSummary.filesSkippedByReason,
   };
 }
 
@@ -122,14 +139,15 @@ async function handlePreview(
   });
 
   const store = getSearchEditPlanStore();
+  const skippedSummary = summarizeSkippedFiles(preview.summary.filesSkipped);
+  const storedSummary = compactStoredSummary(preview.summary, skippedSummary);
   const stored = store.create(
     request.repoId,
     preview.edits,
     preview.preconditions,
-    preview.summary,
+    storedSummary,
     request.createBackup ?? true,
   );
-  const skippedSummary = summarizeSkippedFiles(preview.summary.filesSkipped);
 
   const response: SearchEditPreviewResponse = {
     mode: "preview",

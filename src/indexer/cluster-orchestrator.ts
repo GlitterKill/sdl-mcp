@@ -21,6 +21,11 @@ import {
   upsertShadowClusterMembersBatch,
   deleteShadowClustersByRepo,
 } from "../db/ladybug-queries.js";
+import {
+  dropFtsIndex,
+  ensureFtsIndexForNonEmptyTable,
+  ENTITY_FTS_INDEX_NAMES,
+} from "../retrieval/index-lifecycle.js";
 
 const DEFAULT_MIN_CLUSTER_SIZE = 3;
 const DEFAULT_MAX_PROCESS_DEPTH = 20;
@@ -32,6 +37,29 @@ const DEFAULT_ENTRY_PATTERNS = [
   "^run$",
   "^start$",
 ];
+
+export type ClusterFtsDropStatus = "dropped" | "absent" | "skipped";
+
+// Cluster FTS is table-wide, so rebuild decisions cannot use only the
+// currently refreshed repo's cluster count.
+export function shouldRebuildClusterFtsAfterReplacement(params: {
+  replaceClusters: boolean;
+  replacementError: unknown;
+  dropStatus: ClusterFtsDropStatus;
+  totalClusterCount: number;
+}): boolean {
+  if (!params.replaceClusters) return false;
+  if (params.replacementError !== undefined && params.dropStatus !== "dropped") {
+    return false;
+  }
+  return params.totalClusterCount > 0;
+}
+
+export function shouldFailOnClusterFtsRebuildFailure(params: {
+  dropStatus: ClusterFtsDropStatus;
+}): boolean {
+  return params.dropStatus === "dropped";
+}
 
 export interface ClusterOrchestratorResult {
   clustersComputed: number;
@@ -307,35 +335,110 @@ export async function computeAndStoreClustersAndProcesses(params: {
     const nextClusterState = serializeClusterState(nextClusterStates);
 
     await withWriteConn(async (wConn) => {
-      await ladybugDb.withTransaction(wConn, async (txConn) => {
-        if (existingClusterState !== nextClusterState) {
-          await ladybugDb.deleteClustersByRepo(txConn, repoId);
+      const replaceClusters = existingClusterState !== nextClusterState;
+      let clusterFtsDropStatus: ClusterFtsDropStatus = "skipped";
+      if (replaceClusters) {
+        const dropResult = await dropFtsIndex(
+          wConn,
+          "Cluster",
+          ENTITY_FTS_INDEX_NAMES.cluster,
+        );
+        if (dropResult.status === "failed") {
+          throw new Error(
+            `Cluster FTS index could not be dropped before cluster replacement: ${dropResult.error}`,
+          );
         }
+        clusterFtsDropStatus = dropResult.status;
+      }
 
-        for (const cluster of nextClusterStates) {
-          await ladybugDb.upsertCluster(txConn, {
-            clusterId: cluster.clusterId,
-            repoId,
-            label: cluster.label,
-            symbolCount: cluster.symbolCount,
-            cohesionScore: 0.0,
-            versionId,
-            createdAt: now,
-            searchText: cluster.searchText,
+      let replacementError: unknown;
+      try {
+        await ladybugDb.withTransaction(wConn, async (txConn) => {
+          if (replaceClusters) {
+            await ladybugDb.deleteClustersByRepo(txConn, repoId);
+          }
+
+          for (const cluster of nextClusterStates) {
+            await ladybugDb.upsertCluster(txConn, {
+              clusterId: cluster.clusterId,
+              repoId,
+              label: cluster.label,
+              symbolCount: cluster.symbolCount,
+              cohesionScore: 0.0,
+              versionId,
+              createdAt: now,
+              searchText: cluster.searchText,
+            });
+
+            if (replaceClusters) {
+              await ladybugDb.upsertClusterMembersBatch(
+                txConn,
+                cluster.members.map((member) => ({
+                  symbolId: member.symbolId,
+                  clusterId: cluster.clusterId,
+                  membershipScore: member.membershipScore,
+                })),
+              );
+            }
+          }
+        });
+      } catch (error) {
+        replacementError = error;
+        throw error;
+      } finally {
+        if (clusterFtsDropStatus !== "skipped" || !replaceClusters) {
+          const totalClusterCount = await ladybugDb.countClusters(wConn);
+          const shouldRebuild = shouldRebuildClusterFtsAfterReplacement({
+            replaceClusters,
+            replacementError,
+            dropStatus: clusterFtsDropStatus,
+            totalClusterCount,
           });
+          const shouldRepairMissing =
+            !replaceClusters && totalClusterCount > 0;
 
-          if (existingClusterState !== nextClusterState) {
-            await ladybugDb.upsertClusterMembersBatch(
-              txConn,
-              cluster.members.map((member) => ({
-                symbolId: member.symbolId,
-                clusterId: cluster.clusterId,
-                membershipScore: member.membershipScore,
-              })),
+          if (!shouldRebuild && !shouldRepairMissing) {
+            logger.info(
+              "Cluster FTS index rebuild skipped",
+              {
+                repoId,
+                indexName: ENTITY_FTS_INDEX_NAMES.cluster,
+                dropStatus: clusterFtsDropStatus,
+                totalClusterCount,
+              },
             );
+          } else {
+            const ensureResult = await ensureFtsIndexForNonEmptyTable(
+              wConn,
+              "Cluster",
+              ENTITY_FTS_INDEX_NAMES.cluster,
+            );
+
+            if (ensureResult.status === "failed") {
+              const failedAfter =
+                replacementError === undefined
+                  ? replaceClusters
+                    ? "cluster replacement"
+                    : "cluster FTS repair"
+                  : `failed cluster replacement (${replacementError instanceof Error ? replacementError.message : String(replacementError)})`;
+              const message = `Cluster FTS index could not be rebuilt after ${failedAfter}: ${ensureResult.error}`;
+              if (
+                shouldFailOnClusterFtsRebuildFailure({
+                  dropStatus: clusterFtsDropStatus,
+                })
+              ) {
+                throw new Error(message);
+              }
+              logger.warn(message, {
+                repoId,
+                indexName: ENTITY_FTS_INDEX_NAMES.cluster,
+                dropStatus: clusterFtsDropStatus,
+                totalClusterCount,
+              });
+            }
           }
         }
-      });
+      }
     });
   });
 

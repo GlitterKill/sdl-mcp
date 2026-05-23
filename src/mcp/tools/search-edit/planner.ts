@@ -7,7 +7,7 @@
  *  - `targeting: "symbol"`: resolveSymbolRef + match symbol name in
  *    its home file(s)
  *  - `targeting: "identifier"` / `"structural"`: tree-sitter-backed
- *    source ranges for AST-aware replacement in TS/JS/TSX/JSX files
+ *    source ranges for AST-aware replacement in registered structural languages
  *  - `editMode` supported: `replacePattern`, `overwrite`,
  *    `replaceLines`, `insertAt`, `append`
  *    (`jsonPath` intentionally excluded)
@@ -16,9 +16,9 @@
  *  - Missing/unreadable files are surfaced in `filesSkipped`
  */
 
-import { readdir, readFile, stat } from "fs/promises";
-import { realpathSync } from "fs";
-import { resolve, join, relative, extname } from "path";
+import { lstat, open, readdir, stat } from "fs/promises";
+import { constants, realpathSync, type Stats } from "fs";
+import { resolve, join, relative } from "path";
 import { createHash } from "crypto";
 
 import { getLadybugConn } from "../../../db/ladybug.js";
@@ -41,6 +41,13 @@ import type { PlannedFileEdit, PlanPrecondition } from "./plan-store.js";
 import {
   collectIdentifierSourceEdits,
   collectStructuralSourceEdits,
+  createStructuralQueryCache,
+  getStructuralExtensions,
+  getStructuralLanguageForPath,
+  isStructuralLanguageSupported,
+  STRUCTURAL_QUERY_TIME_BUDGET_ERROR,
+  structuralLanguageMismatchReason,
+  type StructuralQueryCache,
   type StructuralQueryInput,
   type StructuralSourceEdit,
 } from "./structural.js";
@@ -66,6 +73,8 @@ export interface SearchEditFilters {
   include?: string[];
   exclude?: string[];
   extensions?: string[];
+  /** Internal candidate hint used to preserve structural mismatch diagnostics. */
+  structuralLanguage?: string;
 }
 
 export interface SearchEditBatchOperation {
@@ -90,6 +99,7 @@ export interface SearchEditPreviewRequest {
   maxFiles?: number;
   maxMatchesPerFile?: number;
   maxTotalMatches?: number;
+  maxPlanBytes?: number;
   createBackup?: boolean;
 }
 
@@ -98,6 +108,9 @@ interface SearchEditSingleOperationRequest extends SearchEditPreviewRequest {
   query: SearchEditQueryInput;
   editMode: FileWriteResponse["mode"];
   operations?: undefined;
+  structuralLanguage?: string;
+  structuralQueryCache?: StructuralQueryCache;
+  structuralDeadlineMs?: number;
 }
 
 export interface PreviewFileSkip {
@@ -172,10 +185,9 @@ const MAX_PREVIEW_SNIPPET_LINES = 80;
 const MAX_AST_MATCH_DETAILS_PER_FILE = 5;
 const MAX_AST_CAPTURE_DETAILS_PER_MATCH = 8;
 const MAX_AST_CAPTURE_TEXT_CHARS = 120;
-const AST_AWARE_SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx"] as const;
-const AST_AWARE_SOURCE_EXTENSION_SET = new Set<string>(
-  AST_AWARE_SOURCE_EXTENSIONS,
-);
+const STRUCTURAL_PREVIEW_REQUEST_BUDGET_MS = 10_000;
+const STRUCTURAL_QUERY_TIME_BUDGET_SKIP_REASON =
+  STRUCTURAL_QUERY_TIME_BUDGET_ERROR;
 const NO_AST_AWARE_SOURCE_EXTENSION = ".__sdl_no_ast_source__";
 
 /** Directory names that are never descended into. */
@@ -331,6 +343,11 @@ function filterSelectionReason(
       return "excluded";
     }
   }
+  const structuralMismatch = structuralLanguageMismatchReason(
+    relPath,
+    filters.structuralLanguage,
+  );
+  if (structuralMismatch) return structuralMismatch;
   return undefined;
 }
 
@@ -438,6 +455,15 @@ export async function enumerateExplicitIncludeFiles(
       continue;
     }
 
+    const structuralMismatch = structuralLanguageMismatchReason(
+      rel,
+      filters?.structuralLanguage,
+    );
+    if (structuralMismatch) {
+      skipped.push({ path: rel, reason: structuralMismatch });
+      continue;
+    }
+
     const { allowed, reason } = isPathAllowed(rel, filters);
     if (!allowed) {
       if (shouldReportSkippedFile(reason)) {
@@ -465,7 +491,7 @@ export async function enumerateRepoFiles(
   try {
     visitedRealpaths.add(realpathSync(rootPath));
   } catch {
-    // Root unreadable — walk() will handle by returning early.
+    // Root unreadable - walk() will handle by returning early.
   }
   const MAX_WALK_DEPTH = 30;
   async function walk(dirAbs: string, depth = 0): Promise<void> {
@@ -495,8 +521,13 @@ export async function enumerateRepoFiles(
         await walk(abs, depth + 1);
       } else if (entry.isFile()) {
         const rel = normalizePath(relative(rootPath, abs));
+        // Selection filters shape broad enumeration; policy checks still run
+        // for files that are actually inside the requested candidate set.
         const filterReason = filterSelectionReason(rel, filters);
         if (filterReason) {
+          if (shouldReportSkippedFile(filterReason)) {
+            skipped.push({ path: rel, reason: filterReason });
+          }
           continue;
         }
         const { allowed, reason } = isPathAllowed(rel, filters);
@@ -853,6 +884,7 @@ function assertUniqueOperationIds(
 function buildOperationRequest(
   base: SearchEditPreviewRequest,
   operation: SearchEditBatchOperation,
+  structuralDeadlineMs?: number,
 ): SearchEditSingleOperationRequest {
   return {
     repoId: base.repoId,
@@ -864,8 +896,10 @@ function buildOperationRequest(
     maxFiles: operation.maxFiles ?? base.maxFiles,
     maxMatchesPerFile: operation.maxMatchesPerFile ?? base.maxMatchesPerFile,
     maxTotalMatches: operation.maxTotalMatches ?? base.maxTotalMatches,
+    maxPlanBytes: base.maxPlanBytes,
     createBackup: base.createBackup,
     operations: undefined,
+    ...(structuralDeadlineMs !== undefined ? { structuralDeadlineMs } : {}),
   };
 }
 
@@ -962,6 +996,125 @@ function validateAstAwareRequest(
   }
 }
 
+function structuralSourceExtension(extension: string): string | null {
+  if (!extension) return null;
+  const normalized = normalizeExtensionFilter(extension);
+  return getStructuralLanguageForPath(`file${normalized}`) ? normalized : null;
+}
+
+function addStructuralLanguageForExtension(
+  languages: Set<string>,
+  extension: string,
+): void {
+  const normalized = structuralSourceExtension(extension);
+  if (!normalized) return;
+  const languageId = getStructuralLanguageForPath(`file${normalized}`);
+  if (languageId) languages.add(languageId);
+}
+
+function addStructuralExtensionsForIncludePattern(
+  extensions: Set<string>,
+  include: string,
+): boolean {
+  const extension = relPathExtension(include);
+  if (!extension || extension.includes("*") || extension.includes("?")) {
+    return false;
+  }
+
+  if (extension.startsWith(".{") && extension.endsWith("}")) {
+    for (const part of extension.slice(2, -1).split(",")) {
+      const expandedExtension = part.trim();
+      if (expandedExtension && !GLOB_META_RE.test(expandedExtension)) {
+        const normalized = structuralSourceExtension(expandedExtension);
+        if (normalized) extensions.add(normalized);
+      }
+    }
+    return true;
+  }
+
+  if (!GLOB_META_RE.test(extension)) {
+    const normalized = structuralSourceExtension(extension);
+    if (normalized) extensions.add(normalized);
+    return true;
+  }
+  return false;
+}
+
+function addStructuralLanguagesForIncludePattern(
+  languages: Set<string>,
+  include: string,
+): void {
+  const extensions = new Set<string>();
+  addStructuralExtensionsForIncludePattern(extensions, include);
+  for (const extension of extensions) {
+    addStructuralLanguageForExtension(languages, extension);
+  }
+}
+
+function inferStructuralLanguageFromFilters(
+  filters: SearchEditFilters | undefined,
+): string | null {
+  const languages = new Set<string>();
+  for (const extension of filters?.extensions ?? []) {
+    addStructuralLanguageForExtension(languages, extension);
+  }
+  for (const include of filters?.include ?? []) {
+    addStructuralLanguagesForIncludePattern(languages, include);
+  }
+
+  if (languages.size === 1) {
+    return Array.from(languages)[0];
+  }
+  if (languages.size > 1) {
+    throw new ValidationError(
+      `structural targeting spans multiple languages (${Array.from(languages).sort().join(", ")}); use query.structural.language or operations[] with one operation per language`,
+    );
+  }
+  return null;
+}
+
+function resolveStructuralLanguageForRequest(
+  request: SearchEditSingleOperationRequest,
+): string {
+  const explicit = request.query.structural?.language;
+  if (explicit !== undefined) {
+    if (!isStructuralLanguageSupported(explicit)) {
+      throw new ValidationError(`Unsupported structural language: ${explicit}`);
+    }
+    return explicit;
+  }
+
+  const inferred = inferStructuralLanguageFromFilters(request.filters);
+  if (inferred) return inferred;
+
+  throw new ValidationError(
+    "structural targeting requires query.structural.language or filters.include/filters.extensions resolving to exactly one structural language; use operations[] for multi-language structural batches",
+  );
+}
+
+function prepareAstAwareRequest(
+  request: SearchEditSingleOperationRequest,
+): SearchEditSingleOperationRequest {
+  validateAstAwareRequest(request);
+  if (request.targeting !== "structural") return request;
+  if (
+    request.structuralLanguage !== undefined &&
+    request.structuralQueryCache !== undefined
+  ) {
+    return request;
+  }
+
+  const structuralLanguage = resolveStructuralLanguageForRequest(request);
+  return {
+    ...request,
+    structuralLanguage,
+    structuralQueryCache: createStructuralQueryCache(
+      request.query.structural as StructuralQueryInput,
+      structuralLanguage,
+    ),
+  };
+}
+
 function collectAstAwareStructuralEdits(
   content: string,
   relPath: string,
@@ -986,6 +1139,15 @@ function collectAstAwareStructuralEdits(
       replacement: request.query.replacement,
       global: request.query.global ?? true,
       ...(maxMatches !== undefined ? { maxMatches } : {}),
+      ...(request.structuralDeadlineMs !== undefined
+        ? { deadlineMs: request.structuralDeadlineMs }
+        : {}),
+      ...(request.structuralLanguage !== undefined
+        ? { languageIdOverride: request.structuralLanguage }
+        : {}),
+      ...(request.structuralQueryCache !== undefined
+        ? { queryCache: request.structuralQueryCache }
+        : {}),
     });
   }
   return [];
@@ -1075,7 +1237,7 @@ function narrowQueryForAstAwareTargeting(
 }
 
 function isAstAwareSourcePath(relPath: string): boolean {
-  return AST_AWARE_SOURCE_EXTENSION_SET.has(extname(relPath).toLowerCase());
+  return getStructuralLanguageForPath(relPath) !== null;
 }
 
 function normalizeExtensionFilter(extension: string): string {
@@ -1083,20 +1245,36 @@ function normalizeExtensionFilter(extension: string): string {
   return normalized.startsWith(".") ? normalized : `.${normalized}`;
 }
 
+function requestedStructuralExtensions(
+  filters: SearchEditFilters | undefined,
+): { extensions: string[]; hasExtensionHints: boolean } {
+  const extensions = new Set<string>();
+  let hasExtensionHints = false;
+  for (const extension of filters?.extensions ?? []) {
+    hasExtensionHints = true;
+    const normalized = structuralSourceExtension(extension);
+    if (normalized) extensions.add(normalized);
+  }
+  for (const include of filters?.include ?? []) {
+    hasExtensionHints =
+      addStructuralExtensionsForIncludePattern(extensions, include) ||
+      hasExtensionHints;
+  }
+  return { extensions: Array.from(extensions), hasExtensionHints };
+}
+
 function filtersForAstAwareCandidates(
   filters: SearchEditFilters | undefined,
+  structuralLanguage?: string,
 ): SearchEditFilters {
-  const requestedExtensions = filters?.extensions?.map(
-    normalizeExtensionFilter,
-  );
-  const extensions =
-    requestedExtensions && requestedExtensions.length > 0
-      ? requestedExtensions.filter((extension) =>
-          AST_AWARE_SOURCE_EXTENSION_SET.has(extension),
-        )
-      : [...AST_AWARE_SOURCE_EXTENSIONS];
+  const structuralExtensions = getStructuralExtensions(structuralLanguage);
+  const requested = requestedStructuralExtensions(filters);
+  const extensions = requested.hasExtensionHints
+    ? requested.extensions
+    : structuralExtensions;
   return {
     ...filters,
+    ...(structuralLanguage ? { structuralLanguage } : {}),
     extensions:
       extensions.length > 0 ? extensions : [NO_AST_AWARE_SOURCE_EXTENSION],
   };
@@ -1179,38 +1357,46 @@ function collectReplacePatternSourceEdits(
 }
 
 function sourceEditsForPlan(
+  rootPath: string,
   content: string,
   plan: OperationFilePlan,
 ): SourceEdit[] {
   if (isAstAwareTargeting(plan.request)) {
-    const astAware = collectAstAwareSourceEdits(
+    return collectAstAwareSourceEdits(
       content,
       plan.edit.relPath,
       plan.request,
       plan.operationId,
     );
-    if (
-      astAware.length > 0 &&
-      applySourceEdits(content, astAware) === plan.edit.newContent
-    ) {
-      return astAware;
-    }
   }
-  const precise =
-    plan.request.editMode === "replacePattern"
-      ? collectReplacePatternSourceEdits(
-          content,
-          plan.request,
-          plan.operationId,
-        )
-      : [];
-  if (
-    precise.length > 0 &&
-    applySourceEdits(content, precise) === plan.edit.newContent
-  ) {
-    return precise;
+  if (plan.request.editMode === "replacePattern") {
+    return collectReplacePatternSourceEdits(
+      content,
+      plan.request,
+      plan.operationId,
+    );
   }
-  return changedSourceEdits(content, plan.edit.newContent).map((range) => ({
+
+  const fileWriteRequest = buildFileWriteRequestForMode(
+    plan.request.repoId,
+    plan.edit.relPath,
+    plan.request.editMode,
+    plan.request.query,
+  );
+  validateExactlyOneMode(fileWriteRequest);
+  const result = prepareNewContent({
+    prepared: {
+      repoId: plan.request.repoId,
+      rootPath,
+      relPath: plan.edit.relPath,
+      absPath: plan.edit.absPath,
+      fileExists: true,
+    },
+    request: fileWriteRequest,
+    existingContent: content,
+    existingBytes: Buffer.byteLength(content, "utf-8"),
+  });
+  return changedSourceEdits(content, result.newContent).map((range) => ({
     ...range,
     operationId: plan.operationId,
   }));
@@ -1235,19 +1421,157 @@ function describeRange(range: SourceRange): string {
   return `${range.start}-${range.end}`;
 }
 
+function isStructuralBudgetError(error: unknown): boolean {
+  return (
+    error instanceof ValidationError &&
+    error.message === STRUCTURAL_QUERY_TIME_BUDGET_ERROR
+  );
+}
+
+interface SafeReadCandidateResult {
+  content: string;
+  contentSha: string;
+  stats: Stats;
+}
+
+async function readSearchEditCandidateFile(
+  rootPath: string,
+  abs: string,
+): Promise<
+  | { ok: true; value: SafeReadCandidateResult }
+  | { ok: false; reason: string }
+> {
+  try {
+    validatePathWithinRoot(rootPath, abs);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `path-denied:${err instanceof Error ? err.message : "unknown"}`,
+    };
+  }
+
+  try {
+    const linkStats = await lstat(abs);
+    if (linkStats.isSymbolicLink()) {
+      return { ok: false, reason: "symlink-denied" };
+    }
+    if (!linkStats.isFile()) {
+      return { ok: false, reason: "not-a-file" };
+    }
+  } catch {
+    return { ok: false, reason: "file-missing" };
+  }
+
+  const openFlags =
+    constants.O_RDONLY |
+    (typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0);
+  let handle;
+  try {
+    handle = await open(abs, openFlags);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `read-error:${err instanceof Error ? err.message : "unknown"}`,
+    };
+  }
+
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile()) {
+      return { ok: false, reason: "not-a-file" };
+    }
+    if (stats.size > MAX_FILE_SIZE_BYTES) {
+      return { ok: false, reason: "file-too-large" };
+    }
+
+    const resolved = realpathSync(abs);
+    validatePathWithinRoot(rootPath, resolved);
+    const pathStats = await stat(resolved);
+    if (
+      (stats.dev !== 0 || stats.ino !== 0 || pathStats.dev !== 0 || pathStats.ino !== 0) &&
+      (stats.dev !== pathStats.dev || stats.ino !== pathStats.ino)
+    ) {
+      return { ok: false, reason: "path-changed-during-read" };
+    }
+
+    const buf = await handle.readFile();
+    if (buf.length > MAX_FILE_SIZE_BYTES) {
+      return { ok: false, reason: "file-too-large" };
+    }
+
+    const afterRead = realpathSync(abs);
+    validatePathWithinRoot(rootPath, afterRead);
+    const afterReadStats = await stat(afterRead);
+    if (
+      (stats.dev !== 0 ||
+        stats.ino !== 0 ||
+        afterReadStats.dev !== 0 ||
+        afterReadStats.ino !== 0) &&
+      (stats.dev !== afterReadStats.dev || stats.ino !== afterReadStats.ino)
+    ) {
+      return { ok: false, reason: "path-changed-during-read" };
+    }
+
+    if (buf.includes(0)) {
+      return { ok: false, reason: "binary-content" };
+    }
+
+    return {
+      ok: true,
+      value: {
+        content: buf.toString("utf-8"),
+        contentSha: createHash("sha256").update(buf).digest("hex"),
+        stats,
+      },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `path-denied:${err instanceof Error ? err.message : "unknown"}`,
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
 async function planSearchEditBatchPreview(
   request: SearchEditPreviewRequest,
   operations: SearchEditBatchOperation[],
 ): Promise<PreviewResult> {
+  const conn = await getLadybugConn();
+  const repo = await ladybugDb.getRepo(conn, request.repoId);
+  if (!repo) {
+    throw new NotFoundError(`Repository ${request.repoId} not found`);
+  }
+  const rootPath = repo.rootPath;
   assertUniqueOperationIds(operations);
+  const structuralDeadlineMs = Date.now() + STRUCTURAL_PREVIEW_REQUEST_BUDGET_MS;
+  const maxPlanBytes = request.maxPlanBytes ?? MAX_PLAN_BYTES;
+  const previewBytesByFile = new Map<string, number>();
+  let estimatedPreviewBytes = 0;
   const operationPreviews: OperationPreview[] = [];
   for (let index = 0; index < operations.length; index += 1) {
     const operation = operations[index];
-    const operationRequest = buildOperationRequest(request, operation);
+    const operationRequest = prepareAstAwareRequest({
+      ...buildOperationRequest(request, operation, structuralDeadlineMs),
+      maxPlanBytes,
+    });
+    const preview = await planSingleSearchEditPreview(operationRequest);
+    for (const edit of preview.edits) {
+      const previewBytes = Buffer.byteLength(edit.newContent, "utf-8");
+      const previousBytes = previewBytesByFile.get(edit.relPath) ?? 0;
+      if (previewBytes > previousBytes) {
+        estimatedPreviewBytes += previewBytes - previousBytes;
+        previewBytesByFile.set(edit.relPath, previewBytes);
+      }
+    }
+    if (estimatedPreviewBytes > maxPlanBytes) {
+      throw new ValidationError("search.edit batch aggregate byte cap exceeded");
+    }
     operationPreviews.push({
       operationId: operationIdFor(operation, index),
       request: operationRequest,
-      preview: await planSingleSearchEditPreview(operationRequest),
+      preview,
     });
   }
 
@@ -1291,10 +1615,15 @@ async function planSearchEditBatchPreview(
   const createBackup = request.createBackup ?? true;
   let aggregateBytes = 0;
   let totalMatches = 0;
+  let structuralBudgetExhausted = false;
 
   for (const [rel, plans] of Array.from(filePlans).sort(([a], [b]) =>
     a.localeCompare(b),
   )) {
+    if (structuralBudgetExhausted) {
+      partial = true;
+      break;
+    }
     if (edits.length >= maxFiles) {
       filesSkipped.push({ path: rel, reason: "maxFiles-reached" });
       partial = true;
@@ -1308,14 +1637,34 @@ async function planSearchEditBatchPreview(
 
     const firstEdit = plans[0].edit;
     const abs = firstEdit.absPath;
-    const stats = await stat(abs);
-    const buf = await readFile(abs);
-    const content = buf.toString("utf-8");
-    const contentSha = createHash("sha256").update(buf).digest("hex");
+    const readResult = await readSearchEditCandidateFile(rootPath, abs);
+    if (!readResult.ok) {
+      filesSkipped.push({ path: rel, reason: readResult.reason });
+      partial = true;
+      continue;
+    }
+    const { content, contentSha, stats } = readResult.value;
     const sourceEdits: SourceEdit[] = [];
+    const recomputedMatchCounts = new Map<string, number>();
+    let skipFileReason: PreviewFileSkip | undefined;
 
     for (const plan of plans) {
-      const ranges = sourceEditsForPlan(content, plan);
+      let ranges: SourceEdit[];
+      try {
+        ranges = sourceEditsForPlan(rootPath, content, plan);
+      } catch (err) {
+        if (isStructuralBudgetError(err)) {
+          skipFileReason = {
+            path: rel,
+            reason: STRUCTURAL_QUERY_TIME_BUDGET_SKIP_REASON,
+            operationId: plan.operationId,
+          };
+          structuralBudgetExhausted = true;
+          break;
+        }
+        throw err;
+      }
+      recomputedMatchCounts.set(plan.operationId, ranges.length);
       for (const range of ranges) {
         const overlap = sourceEdits.find((candidate) =>
           rangesOverlap(candidate, range),
@@ -1328,6 +1677,11 @@ async function planSearchEditBatchPreview(
         sourceEdits.push(range);
       }
     }
+    if (skipFileReason) {
+      filesSkipped.push(skipFileReason);
+      partial = true;
+      continue;
+    }
 
     sourceEdits.sort((a, b) => a.start - b.start || a.end - b.end);
     const newContent = applySourceEdits(content, sourceEdits);
@@ -1338,11 +1692,13 @@ async function planSearchEditBatchPreview(
       .flatMap((plan) => plan.astMatches ?? [])
       .slice(0, MAX_AST_MATCH_DETAILS_PER_FILE);
     for (const plan of plans) {
-      matchCount += plan.edit.matchCount;
+      const planMatchCount =
+        recomputedMatchCounts.get(plan.operationId) ?? plan.edit.matchCount;
+      matchCount += planMatchCount;
       operationIds.push(plan.operationId);
       operationSummaries.push({
         id: plan.operationId,
-        matchCount: plan.edit.matchCount,
+        matchCount: planMatchCount,
         editMode: plan.edit.editMode,
       });
     }
@@ -1370,7 +1726,7 @@ async function planSearchEditBatchPreview(
 
     const editBytes = Buffer.byteLength(newContent, "utf-8");
     aggregateBytes += editBytes;
-    if (aggregateBytes > MAX_PLAN_BYTES) {
+    if (aggregateBytes > maxPlanBytes) {
       aggregateBytes -= editBytes;
       filesSkipped.push({ path: rel, reason: "aggregate-byte-cap-exceeded" });
       partial = true;
@@ -1457,7 +1813,13 @@ async function planSingleSearchEditPreview(
   const contextLines =
     request.previewContextLines ?? DEFAULT_PREVIEW_CONTEXT_LINES;
   const createBackup = request.createBackup ?? true;
-  validateAstAwareRequest(request);
+  request = prepareAstAwareRequest(request);
+  if (isAstAwareTargeting(request) && request.structuralDeadlineMs === undefined) {
+    request = {
+      ...request,
+      structuralDeadlineMs: Date.now() + STRUCTURAL_PREVIEW_REQUEST_BUDGET_MS,
+    };
+  }
 
   let candidates: string[];
   let skipped: PreviewFileSkip[];
@@ -1472,7 +1834,12 @@ async function planSingleSearchEditPreview(
     skipped = [];
     candidates = [];
     const candidateFilters = isAstAwareTargeting(request)
-      ? filtersForAstAwareCandidates(request.filters)
+      ? filtersForAstAwareCandidates(
+          request.filters,
+          request.targeting === "structural"
+            ? request.structuralLanguage
+            : undefined,
+        )
       : request.filters;
 
     const explicitIncludes = await enumerateExplicitIncludeFiles(
@@ -1686,6 +2053,7 @@ async function planSingleSearchEditPreview(
   let totalMatches = 0;
 
   let aggregateBytes = 0;
+  const maxPlanBytes = request.maxPlanBytes ?? MAX_PLAN_BYTES;
   for (const rel of candidates) {
     if (edits.length >= maxFiles) {
       skipped.push({ path: rel, reason: "maxFiles-reached" });
@@ -1709,61 +2077,23 @@ async function planSingleSearchEditPreview(
       skipped.push({ path: rel, reason: "structural-unsupported-extension" });
       continue;
     }
-    const abs = resolve(rootPath, rel);
-    try {
-      validatePathWithinRoot(rootPath, abs);
-    } catch (err) {
-      skipped.push({
-        path: rel,
-        reason: `path-denied:${err instanceof Error ? err.message : "unknown"}`,
-      });
-      continue;
-    }
-    let stats;
-    try {
-      stats = await stat(abs);
-    } catch {
-      skipped.push({ path: rel, reason: "file-missing" });
-      continue;
-    }
-    try {
-      const resolved = realpathSync(abs);
-      validatePathWithinRoot(rootPath, resolved);
-    } catch (err) {
-      skipped.push({
-        path: rel,
-        reason: `path-denied:${err instanceof Error ? err.message : "unknown"}`,
-      });
-      continue;
-    }
-    if (!stats.isFile()) {
-      skipped.push({ path: rel, reason: "not-a-file" });
-      continue;
-    }
-    if (stats.size > MAX_FILE_SIZE_BYTES) {
-      skipped.push({ path: rel, reason: "file-too-large" });
-      continue;
-    }
-
-    let content: string;
-    let contentSha: string;
-    try {
-      const buf = await readFile(abs);
-      if (buf.includes(0)) {
-        skipped.push({ path: rel, reason: "binary-content" });
+    if (request.targeting === "structural") {
+      const mismatchReason = structuralLanguageMismatchReason(
+        rel,
+        request.structuralLanguage,
+      );
+      if (mismatchReason) {
+        skipped.push({ path: rel, reason: mismatchReason });
         continue;
       }
-      content = buf.toString("utf-8");
-      // Derive sha256 from the same buffer used for content so the
-      // precondition attests to exactly what we planned against.
-      contentSha = createHash("sha256").update(buf).digest("hex");
-    } catch (err) {
-      skipped.push({
-        path: rel,
-        reason: `read-error:${err instanceof Error ? err.message : "unknown"}`,
-      });
+    }
+    const abs = resolve(rootPath, rel);
+    const readResult = await readSearchEditCandidateFile(rootPath, abs);
+    if (!readResult.ok) {
+      skipped.push({ path: rel, reason: readResult.reason });
       continue;
     }
+    const { content, contentSha, stats } = readResult.value;
 
     let matchCount = 0;
     if (regex) {
@@ -1806,12 +2136,24 @@ async function planSingleSearchEditPreview(
     };
     let astMatches: PreviewAstMatch[] | undefined;
     if (isAstAwareTargeting(request)) {
-      const structuralEdits = collectAstAwareStructuralEdits(
-        content,
-        rel,
-        request,
-        maxMatchesPerFile + 1,
-      );
+      let structuralEdits: StructuralSourceEdit[];
+      try {
+        structuralEdits = collectAstAwareStructuralEdits(
+          content,
+          rel,
+          request,
+          maxMatchesPerFile + 1,
+        );
+      } catch (err) {
+        if (isStructuralBudgetError(err)) {
+          skipped.push({
+            path: rel,
+            reason: STRUCTURAL_QUERY_TIME_BUDGET_SKIP_REASON,
+          });
+          break;
+        }
+        throw err;
+      }
       if (structuralEdits.length > maxMatchesPerFile) {
         skipped.push({
           path: rel,
@@ -1880,7 +2222,7 @@ async function planSingleSearchEditPreview(
     // so a capped file does not leave an orphaned precondition behind.
     const editBytes = Buffer.byteLength(result.newContent, "utf-8");
     aggregateBytes += editBytes;
-    if (aggregateBytes > MAX_PLAN_BYTES) {
+    if (aggregateBytes > maxPlanBytes) {
       aggregateBytes -= editBytes;
       skipped.push({ path: rel, reason: "aggregate-byte-cap-exceeded" });
       continue;
@@ -1933,6 +2275,7 @@ async function planSingleSearchEditPreview(
         (s) =>
           s.reason === "maxFiles-reached" ||
           s.reason === "maxTotalMatches-reached" ||
+          s.reason === STRUCTURAL_QUERY_TIME_BUDGET_SKIP_REASON ||
           s.reason.startsWith("matches-exceed-"),
       )
         ? { partial: true }

@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-import type { LanguageAdapter } from "../LanguageAdapter.js";
+import type {
+  LanguageAdapter,
+  StructuralMatcherDescriptor,
+} from "../LanguageAdapter.js";
 
 const PLUGIN_API_VERSION = "1.0.0";
 
@@ -25,6 +28,7 @@ export interface PluginAdapter {
   extension: string;
   languageId: string;
   factory: () => LanguageAdapter;
+  structuralMatcher?: StructuralMatcherDescriptor;
 }
 
 export interface AdapterPlugin {

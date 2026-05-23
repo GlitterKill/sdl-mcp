@@ -286,6 +286,7 @@ export const PluginConfigSchema = z.object({
   paths: z.array(z.string()).default([]),
   enabled: z.boolean().default(true),
   strictVersioning: z.boolean().default(true),
+  trustedRoots: z.array(z.string()).default([]),
 });
 
 export type PluginConfig = z.infer<typeof PluginConfigSchema>;

@@ -111,7 +111,8 @@
   "plugins": {
     "paths": [],
     "enabled": true,
-    "strictVersioning": true
+    "strictVersioning": true,
+    "trustedRoots": []
   },
   "semantic": {
     "enabled": true,

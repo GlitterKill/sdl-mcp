@@ -548,7 +548,7 @@ import re
 import sys
 
 INDEXED_READ_REASON = "Use the SDL-MCP Iris retrieval ladder for indexed source reads. Start with sdl.context, then batch follow-ups through sdl.workflow using symbolSearch, symbolGetCard, codeSkeleton, codeHotPath, and codeNeedWindow only as a last resort with identifiersToFind and expectedLines."
-INDEXED_WRITE_REASON = "Use SDL-MCP indexed-source edit tools instead of native writes. Prefer symbol.edit for one-symbol edits; use searchEditPreview with targeting:\\"identifier\\" for exact TS/JS identifier replacements, targeting:\\"structural\\" for tree-sitter capture edits, or operations[] for heterogeneous batches. Review astMatches/snippets, then apply the plan handle. If SDL edit tools cannot express the change, run a targeted script through sdl.workflow runtimeExecute with stdin."
+INDEXED_WRITE_REASON = "Use SDL-MCP indexed-source edit tools instead of native writes. Prefer symbol.edit for one-symbol edits; use searchEditPreview with targeting:\\"identifier\\" for exact AST identifier replacements in supported structural languages, targeting:\\"structural\\" for tree-sitter capture edits, or operations[] for heterogeneous batches. Review astMatches/snippets, then apply the plan handle. If SDL edit tools cannot express the change, run a targeted script through sdl.workflow runtimeExecute with stdin."
 NON_INDEXED_READ_REASON = "Use SDL-MCP file.read for non-indexed repository reads. Prefer sdl.file { op: \\"read\\" } or file.read with search, jsonPath, or bounded offset/limit instead of native file reads."
 NON_INDEXED_WRITE_REASON = "Use SDL-MCP file.write for non-indexed repository writes. Prefer sdl.file { op: \\"write\\" } or file.write with one targeted write mode instead of native Write/Edit/apply_patch."
 
@@ -1138,7 +1138,7 @@ const RUNTIME_REASON =
 const INDEXED_READ_REASON =
   "Use the SDL-MCP Iris retrieval ladder for indexed source reads. Start with sdl.context, then batch follow-ups through sdl.workflow using symbolSearch, symbolGetCard, codeSkeleton, codeHotPath, and codeNeedWindow only as a last resort with identifiersToFind and expectedLines.";
 const INDEXED_WRITE_REASON =
-  "Use SDL-MCP indexed-source edit tools instead of native writes. Prefer symbol.edit for one-symbol edits; use searchEditPreview with targeting:\\"identifier\\" for exact TS/JS identifier replacements, targeting:\\"structural\\" for tree-sitter capture edits, or operations[] for heterogeneous batches. Review astMatches/snippets, then apply the plan handle. If SDL edit tools cannot express the change, run a targeted script through sdl.workflow runtimeExecute with stdin.";
+  "Use SDL-MCP indexed-source edit tools instead of native writes. Prefer symbol.edit for one-symbol edits; use searchEditPreview with targeting:\\"identifier\\" for exact AST identifier replacements in supported structural languages, targeting:\\"structural\\" for tree-sitter capture edits, or operations[] for heterogeneous batches. Review astMatches/snippets, then apply the plan handle. If SDL edit tools cannot express the change, run a targeted script through sdl.workflow runtimeExecute with stdin.";
 const NON_INDEXED_READ_REASON =
   "Use SDL-MCP file.read for non-indexed repository reads. Prefer sdl.file { op: \\"read\\" } or file.read with search, jsonPath, or bounded offset/limit instead of native file reads.";
 const NON_INDEXED_WRITE_REASON =

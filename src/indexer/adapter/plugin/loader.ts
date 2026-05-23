@@ -1,5 +1,5 @@
 import path from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import type {
@@ -13,30 +13,59 @@ import { logger } from "../../../util/logger.js";
 
 const loadedPlugins = new Map<string, AdapterPlugin>();
 
+function normalizeAllowedRoots(
+  allowedRoots?: string | readonly string[],
+): string[] {
+  if (!allowedRoots) return [];
+  return typeof allowedRoots === "string" ? [allowedRoots] : [...allowedRoots];
+}
+
+function isPathWithinRoot(targetPath: string, rootPath: string): boolean {
+  const relative = path.relative(rootPath, targetPath);
+  return (
+    relative === "" ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
+  );
+}
+
+function validateStructuralMatcherShape(adapter: PluginAdapter): void {
+  const matcher: unknown = adapter.structuralMatcher;
+  if (matcher === undefined) return;
+  if (typeof matcher !== "object" || matcher === null) {
+    throw new Error(
+      `Invalid adapter structuralMatcher for ${adapter.extension}: must be an object`,
+    );
+  }
+
+  const descriptor = matcher as Record<string, unknown>;
+  const identifierNodeTypes = descriptor.identifierNodeTypes;
+  if (
+    !Array.isArray(identifierNodeTypes) ||
+    identifierNodeTypes.length === 0 ||
+    !identifierNodeTypes.every(
+      (nodeType) => typeof nodeType === "string" && nodeType.length > 0,
+    )
+  ) {
+    throw new Error(
+      `Invalid adapter structuralMatcher for ${adapter.extension}: identifierNodeTypes must be a non-empty string array`,
+    );
+  }
+
+  if (typeof descriptor.createQuery !== "function") {
+    throw new Error(
+      `Invalid adapter structuralMatcher for ${adapter.extension}: createQuery must be a function`,
+    );
+  }
+}
+
 export async function loadPlugin(
   pluginPath: string,
-  allowedRoot?: string,
+  allowedRoots?: string | readonly string[],
 ): Promise<PluginLoadResult> {
   const errors: string[] = [];
   const warnings: string[] = [];
 
   const absolutePath = path.resolve(pluginPath);
-
-  // Path containment: if an allowed root is specified, verify the resolved
-  // plugin path is within it.  This prevents config-driven arbitrary code
-  // execution via `import()` by blocking paths that escape the project tree.
-  if (allowedRoot) {
-    const normalizedRoot = path.resolve(allowedRoot) + path.sep;
-    if (!absolutePath.startsWith(normalizedRoot)) {
-      return {
-        plugin: null as never,
-        loaded: false,
-        errors: [
-          `Plugin path escapes allowed root: ${absolutePath} is not within ${normalizedRoot}`,
-        ],
-      };
-    }
-  }
 
   try {
     if (!existsSync(absolutePath)) {
@@ -47,7 +76,34 @@ export async function loadPlugin(
       };
     }
 
-    const importUrl = pathToFileURL(absolutePath).href;
+    const realPluginPath = realpathSync(absolutePath);
+    const resolvedRoots = normalizeAllowedRoots(allowedRoots);
+
+    // Path containment: resolve symlinks before importing so a trusted path
+    // cannot point at code outside the configured trust boundary.
+    if (resolvedRoots.length > 0) {
+      const realRoots = resolvedRoots.map((root) => {
+        const absoluteRoot = path.resolve(root);
+        if (!existsSync(absoluteRoot)) {
+          throw new Error(`Trusted plugin root not found: ${absoluteRoot}`);
+        }
+        return realpathSync(absoluteRoot);
+      });
+      const isTrusted = realRoots.some((root) =>
+        isPathWithinRoot(realPluginPath, root),
+      );
+      if (!isTrusted) {
+        return {
+          plugin: null as never,
+          loaded: false,
+          errors: [
+            `Plugin path escapes trusted roots: ${realPluginPath} is not within ${realRoots.join(", ")}`,
+          ],
+        };
+      }
+    }
+
+    const importUrl = pathToFileURL(realPluginPath).href;
     const module = await import(importUrl);
     const pluginModule: AdapterPlugin = module.default ?? module;
 
@@ -93,12 +149,12 @@ export async function loadPlugin(
       };
     }
 
-    loadedPlugins.set(absolutePath, pluginModule);
+    loadedPlugins.set(realPluginPath, pluginModule);
 
     logger.info("Plugin loaded successfully", {
       name: pluginModule.manifest.name,
       version: pluginModule.manifest.version,
-      path: absolutePath,
+      path: realPluginPath,
     });
 
     if (warnings.length > 0) {
@@ -130,7 +186,7 @@ export async function loadPlugin(
 
 export async function loadPluginsFromConfig(
   pluginPaths: string[] | undefined,
-  allowedRoot?: string,
+  allowedRoots?: string | readonly string[],
 ): Promise<{
   successful: AdapterPlugin[];
   failed: PluginLoadError[];
@@ -143,7 +199,7 @@ export async function loadPluginsFromConfig(
   }
 
   for (const pluginPath of pluginPaths) {
-    const result = await loadPlugin(pluginPath, allowedRoot);
+    const result = await loadPlugin(pluginPath, allowedRoots);
 
     if (result.loaded) {
       successful.push(result.plugin);
@@ -178,6 +234,7 @@ export async function getPluginAdapters(
           `Invalid adapter: must have extension, languageId, and factory function`,
         );
       }
+      validateStructuralMatcherShape(adapter);
     }
 
     return adapters;
@@ -199,15 +256,21 @@ export function getLoadedPlugins(): AdapterPlugin[] {
 
 export function isPluginLoaded(pluginPath: string): boolean {
   const absolutePath = path.resolve(pluginPath);
-  return loadedPlugins.has(absolutePath);
+  const pluginKey = existsSync(absolutePath)
+    ? realpathSync(absolutePath)
+    : absolutePath;
+  return loadedPlugins.has(pluginKey);
 }
 
 export function unloadPlugin(pluginPath: string): boolean {
   const absolutePath = path.resolve(pluginPath);
-  const removed = loadedPlugins.delete(absolutePath);
+  const pluginKey = existsSync(absolutePath)
+    ? realpathSync(absolutePath)
+    : absolutePath;
+  const removed = loadedPlugins.delete(pluginKey);
 
   if (removed) {
-    logger.info("Plugin unloaded", { path: absolutePath });
+    logger.info("Plugin unloaded", { path: pluginKey });
   }
 
   return removed;

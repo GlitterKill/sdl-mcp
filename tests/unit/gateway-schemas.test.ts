@@ -200,6 +200,161 @@ describe("Gateway schemas", () => {
       assert.strictEqual(result.success, true);
     });
 
+    it("mirrors the direct search.edit maxFiles cap", () => {
+      const result = RepoGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "search.edit",
+        mode: "preview",
+        targeting: "text",
+        query: {
+          literal: "oldName",
+          replacement: "newName",
+        },
+        editMode: "replacePattern",
+        maxFiles: 501,
+      });
+      assert.strictEqual(result.success, false);
+    });
+
+    it("validates structural search.edit payloads with the strict MCP query contract", () => {
+      const valid = RepoGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "search.edit",
+        mode: "preview",
+        targeting: "structural",
+        query: {
+          structural: {
+            language: "python",
+            treeSitterQuery: "(identifier) @target",
+            capture: "target",
+            requiredCaptures: { target: "old_name" },
+          },
+          replacement: "new_name",
+        },
+        editMode: "replacePattern",
+      });
+      assert.strictEqual(valid.success, true);
+
+      const longQuery = RepoGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "search.edit",
+        mode: "preview",
+        targeting: "structural",
+        query: {
+          structural: {
+            treeSitterQuery: "x".repeat(5001),
+          },
+        },
+        editMode: "replacePattern",
+      });
+      assert.strictEqual(longQuery.success, false);
+
+      const invalidCapture = RepoGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "search.edit",
+        mode: "preview",
+        targeting: "structural",
+        query: {
+          structural: {
+            treeSitterQuery: "(identifier) @target",
+            capture: "target name",
+          },
+        },
+        editMode: "replacePattern",
+      });
+      assert.strictEqual(invalidCapture.success, false);
+
+      const invalidRequiredCapture = RepoGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "search.edit",
+        mode: "preview",
+        targeting: "structural",
+        query: {
+          structural: {
+            treeSitterQuery: "(identifier) @target",
+            requiredCaptures: { "target name": "old_name" },
+          },
+        },
+        editMode: "replacePattern",
+      });
+      assert.strictEqual(invalidRequiredCapture.success, false);
+
+      const oversizedRequiredValue = RepoGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "search.edit",
+        mode: "preview",
+        targeting: "structural",
+        query: {
+          structural: {
+            treeSitterQuery: "(identifier) @target",
+            requiredCaptures: { target: "x".repeat(501) },
+          },
+        },
+        editMode: "replacePattern",
+      });
+      assert.strictEqual(oversizedRequiredValue.success, false);
+
+      const tooManyRequiredCaptures = RepoGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "search.edit",
+        mode: "preview",
+        targeting: "structural",
+        query: {
+          structural: {
+            treeSitterQuery: "(identifier) @target",
+            requiredCaptures: Object.fromEntries(
+              Array.from({ length: 33 }, (_, index) => [
+                `capture_${index}`,
+                "old_name",
+              ]),
+            ),
+          },
+        },
+        editMode: "replacePattern",
+      });
+      assert.strictEqual(tooManyRequiredCaptures.success, false);
+
+      const blockedRequiredCapture = RepoGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "search.edit",
+        mode: "preview",
+        targeting: "structural",
+        query: {
+          structural: {
+            treeSitterQuery: "(identifier) @target",
+            requiredCaptures: JSON.parse('{"__proto__":"old_name"}'),
+          },
+        },
+        editMode: "replacePattern",
+      });
+      assert.strictEqual(blockedRequiredCapture.success, false);
+
+      const oversizedFilters = RepoGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "search.edit",
+        mode: "preview",
+        targeting: "text",
+        query: { literal: "oldName", replacement: "newName" },
+        filters: {
+          include: Array.from({ length: 51 }, (_, index) => `src/${index}.ts`),
+        },
+        editMode: "replacePattern",
+      });
+      assert.strictEqual(oversizedFilters.success, false);
+
+      const oversizedContent = RepoGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "search.edit",
+        mode: "preview",
+        targeting: "text",
+        query: {
+          content: "x".repeat(512 * 1024 + 1),
+        },
+        editMode: "overwrite",
+      });
+      assert.strictEqual(oversizedContent.success, false);
+    });
+
     it("rejects search.edit preview operations with duplicate ids", () => {
       const result = RepoGatewaySchema.safeParse({
         repoId: "test-repo",

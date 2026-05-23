@@ -43,7 +43,7 @@ export class GrammarLoadError extends Error {
   }
 }
 
-/** Map of languages that failed to load → their GrammarLoadError */
+/** Map of languages that failed to load -> their GrammarLoadError */
 const loadErrors = new Map<SupportedLanguage, GrammarLoadError>();
 
 /**
@@ -94,7 +94,9 @@ const GRAMMAR_PACKAGES: Record<
   bash: { pkg: "tree-sitter-bash" },
 };
 
-function getLanguageModule(language: SupportedLanguage): Parser.Language | null {
+function getLanguageModule(
+  language: SupportedLanguage,
+): Parser.Language | null {
   const cached = languageCache.get(language);
   if (cached !== undefined) {
     return cached;
@@ -188,6 +190,30 @@ export function createQuery(
       query: queryString.substring(0, GRAMMAR_QUERY_LENGTH),
     });
     return null;
+  }
+}
+
+export function createQueryOrThrow(
+  language: SupportedLanguage,
+  queryString: string,
+): Parser.Query {
+  const lang = getLanguageModule(language);
+  if (!lang) {
+    throw new Error(
+      `Cannot create query for ${language}: language module not loaded`,
+    );
+  }
+
+  try {
+    const query = new Parser.Query(lang, queryString);
+    logger.debug(`Created query for ${language}`);
+    return query;
+  } catch (error) {
+    throw new Error(
+      `Failed to create ${language} tree-sitter query: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 }
 

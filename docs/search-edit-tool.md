@@ -110,16 +110,30 @@ merged preview and apply plan.
 - `"symbol"` — resolve `query.symbolRef` (via `resolveSymbolRef`) or
   `query.symbolIds` to get the home file of each symbol. Only indexed
   source files are eligible.
-- `"identifier"` — parse TypeScript, TSX, JavaScript, and JSX files with
-  the existing tree-sitter grammar and replace only exact AST identifier
-  nodes whose text equals `query.literal`. This skips strings, comments,
-  and other non-identifier text while still flowing through the normal
-  preview/apply/rollback plan.
-- `"structural"` — run a bounded tree-sitter query over TypeScript, TSX,
-  JavaScript, and JSX files, select one capture (default: `@target`), and
-  replace that captured range. `query.structural.requiredCaptures` can
-  require exact capture text such as `{ "callee": "oldName" }`, and the
-  replacement string may interpolate captures with `$name` or `${name}`.
+- `"identifier"` — parse supported structural languages with tree-sitter and
+  replace only exact AST identifier nodes whose text equals `query.literal`.
+  This skips strings, comments, and other non-identifier text while still
+  flowing through the normal preview/apply/rollback plan. Built-in support
+  covers TypeScript/JavaScript, Python, Go, Java, C#, C/C++, PHP, Rust,
+  Kotlin, and shell files; plugins can opt in with a structural matcher
+  descriptor.
+- `"structural"` — run a bounded tree-sitter query over supported structural
+  languages, select one capture (default: `@target`), and replace that
+  captured range. `query.structural.requiredCaptures` can require exact
+  capture text such as `{ "callee": "oldName" }`, and the replacement string
+  may interpolate captures with `$name` or `${name}`. `requiredCaptures` is
+  capped at 32 safe capture keys. Structural preview also uses an aggregate
+  query time budget, checks that budget before parsing each candidate, and
+  reports `structural-query-time-budget` when broad queries exhaust it before
+  scanning every candidate. Use
+  `query.structural.language` when a request spans more than one structural
+  language, or split the request into `operations[]` with one language per
+  operation.
+
+Structural queries must compile for each candidate file's actual grammar
+variant. For example, a JSX/TSX-only query should target `.tsx`/`.jsx`
+candidates; including `.ts` files in the same operation fails validation
+instead of silently treating those files as no-match candidates.
 
 Both AST-aware target modes currently require `editMode: "replacePattern"`.
 They do not use regular expressions for matching; the edit mode name is kept
@@ -345,6 +359,10 @@ handle remains usable only after producing a fresh preview.
 - Denied extensions: `.ipynb`, archives, binaries, images, audio, video, `.pdf`, `.wasm`, `.so`, `.dll`, `.dylib`, `.class`, `.jar`, `.exe`.
 - Walker skips `.git`, `node_modules`, `dist`, `build`, `out`, `.next`,
   `.turbo`, `.cache`, `coverage`, `.nyc_output`.
+- Batch previews enforce the aggregate plan byte cap per final target file, so
+  multiple operations against the same file do not double-count the same output
+  buffer. Stored plans keep skipped-file details compact with totals and
+  per-reason counts.
 
 ## Examples
 
@@ -354,7 +372,7 @@ handle remains usable only after producing a fresh preview.
 {
   "mode": "preview",
   "repoId": "myrepo",
-  "targeting": "text",
+  "targeting": "identifier",
   "query": { "literal": "legacyAuth", "replacement": "authV2", "global": true },
   "editMode": "replacePattern",
   "filters": { "include": ["src/**/*.ts"] }

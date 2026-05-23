@@ -38,6 +38,7 @@ npm run build
 {
   "plugins": {
     "paths": ["./my-lang-plugin/dist/index.js"],
+    "trustedRoots": ["./my-lang-plugin"],
     "enabled": true
   }
 }
@@ -51,12 +52,12 @@ sdl-mcp index
 
 ## Documentation Links
 
-| Document                                                               | Description                              |
-| ---------------------------------------------------------------------- | ---------------------------------------- |
-| [plugin-sdk-author-guide.md](./plugin-sdk-author-guide.md)             | Complete guide for creating plugins      |
-| [plugin-sdk-security.md](./plugin-sdk-security.md)                     | Security best practices and threat model |
-| [templates/README.md](../templates/README.md)                          | Template usage guide                     |
-| [examples/example-plugin/README.md](../examples/example-plugin/README.md) | Example plugin documentation          |
+| Document                                                                  | Description                              |
+| ------------------------------------------------------------------------- | ---------------------------------------- |
+| [plugin-sdk-author-guide.md](./plugin-sdk-author-guide.md)                | Complete guide for creating plugins      |
+| [plugin-sdk-security.md](./plugin-sdk-security.md)                        | Security best practices and threat model |
+| [templates/README.md](../templates/README.md)                             | Template usage guide                     |
+| [examples/example-plugin/README.md](../examples/example-plugin/README.md) | Example plugin documentation             |
 
 ## Plugin Manifest
 
@@ -113,11 +114,32 @@ export async function createAdapters() {
       extension: ".mylang",
       languageId: "mylang",
       factory: () => new MyLangAdapter(),
+      // Optional for tree-sitter-backed adapters:
+      // structuralMatcher,
     },
   ];
 }
 export default { manifest, createAdapters };
 ```
+
+## Optional Structural Matcher
+
+```typescript
+import Parser from "tree-sitter";
+import type { StructuralMatcherDescriptor } from "sdl-mcp/dist/indexer/adapter/LanguageAdapter.js";
+import YourLangGrammar from "tree-sitter-yourlang";
+
+const language = YourLangGrammar as Parser.Language;
+
+const structuralMatcher = {
+  identifierNodeTypes: ["identifier"],
+  createQuery(queryString: string): Parser.Query {
+    return new Parser.Query(language, queryString);
+  },
+} satisfies StructuralMatcherDescriptor;
+```
+
+Use `structuralMatcher` only when `parse()` returns a real tree-sitter tree. It enables `search.edit` `targeting:"identifier"` and `targeting:"structural"` for the plugin language.
 
 ## Common Tasks
 
@@ -168,7 +190,8 @@ See [plugin-sdk-security.md](./plugin-sdk-security.md) for complete security gui
   "plugins": {
     "paths": ["./plugin1.js", "./plugin2.js"],
     "enabled": true,
-    "strictVersioning": true
+    "strictVersioning": true,
+    "trustedRoots": ["."]
   }
 }
 ```
@@ -178,6 +201,7 @@ See [plugin-sdk-security.md](./plugin-sdk-security.md) for complete security gui
 | `paths`            | array   | `[]`    | Plugin file paths               |
 | `enabled`          | boolean | `true`  | Enable plugin loading           |
 | `strictVersioning` | boolean | `true`  | Require exact API version match |
+| `trustedRoots`     | array   | `[]`    | Trusted plugin directories      |
 
 ## File Structure
 

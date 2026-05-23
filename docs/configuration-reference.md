@@ -283,6 +283,7 @@ If you set `budgetCaps`, provide both `maxCards` and `maxEstimatedTokens`.
 | `paths`            | `string[]` | `[]`    |
 | `enabled`          | `boolean`  | `true`  |
 | `strictVersioning` | `boolean`  | `true`  |
+| `trustedRoots`     | `string[]` | `[]`    |
 
 ## `semantic`
 

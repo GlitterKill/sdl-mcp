@@ -109,7 +109,8 @@ const SymbolEditAction = z
       if (targetCount !== 1) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "symbol.edit preview requires exactly one of symbolId or symbolRef.",
+          message:
+            "symbol.edit preview requires exactly one of symbolId or symbolRef.",
           path: ["symbolId"],
         });
       }
@@ -202,20 +203,22 @@ const PRRiskAnalyzeAction = z.object({
 
 const ResponseGetAction = z.object({
   action: z.literal("response.get"),
-  handle: z.string().min(1).max(256).regex(/^[A-Za-z0-9_-]+$/),
-  full: z.boolean().default(false).optional(),
-  maxBytes: z
-    .number()
-    .int()
+  handle: z
+    .string()
     .min(1)
-    .max(MAX_RESPONSE_EXCERPT_BYTES)
-    .optional(),
+    .max(256)
+    .regex(/^[A-Za-z0-9_-]+$/),
+  full: z.boolean().default(false).optional(),
+  maxBytes: z.number().int().min(1).max(MAX_RESPONSE_EXCERPT_BYTES).optional(),
   maxTokens: z.number().int().min(1).max(250_000).optional(),
   offsetBytes: z.number().int().min(0).default(0).optional(),
 });
 
 const ResponseModeField = {
-  responseMode: z.enum(["inline", "auto", "handle"]).optional().default("inline"),
+  responseMode: z
+    .enum(["inline", "auto", "handle"])
+    .optional()
+    .default("inline"),
 };
 
 const SessionDeltaFields = {
@@ -397,28 +400,91 @@ const FileReadAction = z.object({
   ...SessionDeltaFields,
 });
 
+const SearchEditStructuralLanguage = z.string().min(1).max(80);
+const SearchEditCaptureName = z
+  .string()
+  .min(1)
+  .max(80)
+  .regex(/^[A-Za-z_][A-Za-z0-9_-]*$/);
+const SearchEditCaptureValue = z.string().max(500);
+const MAX_SEARCH_EDIT_REQUIRED_CAPTURES = 32;
+const BLOCKED_SEARCH_EDIT_CAPTURE_KEYS = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+const SearchEditRequiredCapturesRecord = z
+  .record(SearchEditCaptureName, SearchEditCaptureValue)
+  .superRefine((value, ctx) => {
+    const keys = Object.keys(value);
+    if (keys.length > MAX_SEARCH_EDIT_REQUIRED_CAPTURES) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `requiredCaptures may include at most ${MAX_SEARCH_EDIT_REQUIRED_CAPTURES} entries.`,
+      });
+    }
+    for (const key of keys) {
+      if (BLOCKED_SEARCH_EDIT_CAPTURE_KEYS.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `Blocked requiredCaptures key: ${key}`,
+        });
+      }
+    }
+  });
+const SearchEditRequiredCaptures = z
+  .any()
+  .superRefine((value, ctx) => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return;
+    }
+    for (const key of Object.getOwnPropertyNames(value)) {
+      if (BLOCKED_SEARCH_EDIT_CAPTURE_KEYS.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `Blocked requiredCaptures key: ${key}`,
+        });
+      }
+    }
+  })
+  .pipe(SearchEditRequiredCapturesRecord);
+
 const SearchEditGatewayQuery = z.object({
-  literal: z.string().optional(),
-  regex: z.string().optional(),
-  replacement: z.string().optional(),
+  literal: z.string().min(1).max(500).optional(),
+  regex: z.string().min(1).max(500).optional(),
+  replacement: z.string().max(5000).optional(),
   global: z.boolean().optional(),
+  structural: z
+    .object({
+      language: SearchEditStructuralLanguage.optional(),
+      treeSitterQuery: z.string().min(1).max(5000),
+      capture: SearchEditCaptureName.optional(),
+      requiredCaptures: SearchEditRequiredCaptures.optional(),
+      replacement: z.string().max(5000).optional(),
+    })
+    .optional(),
   symbolRef: SymbolRefFields.optional(),
-  symbolIds: z.array(z.string()).optional(),
+  symbolIds: z.array(z.string().min(1)).max(200).optional(),
   replaceLines: z
     .object({
       start: z.number().int().min(0),
       end: z.number().int().min(0),
-      content: z.string(),
+      content: z.string().max(512 * 1024),
+    })
+    .refine((v) => v.end >= v.start, {
+      message: "replaceLines.end must be >= replaceLines.start",
     })
     .optional(),
   insertAt: z
     .object({
       line: z.number().int().min(0),
-      content: z.string(),
+      content: z.string().max(512 * 1024),
     })
     .optional(),
-  content: z.string().optional(),
-  append: z.string().optional(),
+  content: z.string().max(512 * 1024).optional(),
+  append: z.string().max(512 * 1024).optional(),
 });
 
 const SearchEditGatewayEditMode = z.enum([
@@ -430,14 +496,14 @@ const SearchEditGatewayEditMode = z.enum([
 ]);
 
 const SearchEditGatewayFilters = z.object({
-  include: z.array(z.string()).optional(),
-  exclude: z.array(z.string()).optional(),
-  extensions: z.array(z.string()).optional(),
+  include: z.array(z.string().max(500)).max(50).optional(),
+  exclude: z.array(z.string().max(500)).max(50).optional(),
+  extensions: z.array(z.string().max(20)).max(50).optional(),
 });
 
 const SearchEditGatewayOperation = z.object({
   id: z.string().min(1).max(80).optional(),
-  targeting: z.enum(["text", "symbol"]),
+  targeting: z.enum(["text", "symbol", "identifier", "structural"]),
   query: SearchEditGatewayQuery,
   filters: SearchEditGatewayFilters.optional(),
   editMode: SearchEditGatewayEditMode,
@@ -458,13 +524,15 @@ const SearchEditAction = z
   .object({
     action: z.literal("search.edit"),
     mode: z.enum(["preview", "apply"]),
-    targeting: z.enum(["text", "symbol"]).optional(),
+    targeting: z
+      .enum(["text", "symbol", "identifier", "structural"])
+      .optional(),
     query: SearchEditGatewayQuery.optional(),
     editMode: SearchEditGatewayEditMode.optional(),
     operations: z.array(SearchEditGatewayOperation).min(1).max(50).optional(),
     filters: SearchEditGatewayFilters.optional(),
     previewContextLines: z.number().int().min(0).max(20).optional(),
-    maxFiles: z.number().int().min(1).max(1000).optional(),
+    maxFiles: z.number().int().min(1).max(500).optional(),
     maxMatchesPerFile: z.number().int().min(1).max(5000).optional(),
     maxTotalMatches: z.number().int().min(1).max(50000).optional(),
     planHandle: z.string().min(1).max(200).optional(),
@@ -477,15 +545,13 @@ const SearchEditAction = z
         const seenOperationIds = new Map<string, number>();
         value.operations.forEach((operation, index) => {
           const trimmed = operation.id?.trim();
-          const operationId = trimmed && trimmed.length > 0
-            ? trimmed
-            : `op-${index + 1}`;
+          const operationId =
+            trimmed && trimmed.length > 0 ? trimmed : `op-${index + 1}`;
           const firstIndex = seenOperationIds.get(operationId);
           if (firstIndex !== undefined) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
-              message:
-                `Duplicate search.edit operation id "${operationId}" at operations[${index}] (first used at operations[${firstIndex}]).`,
+              message: `Duplicate search.edit operation id "${operationId}" at operations[${index}] (first used at operations[${firstIndex}]).`,
               path: ["operations", index, "id"],
             });
           } else {

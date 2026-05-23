@@ -198,9 +198,9 @@ describe("FileGatewayRequestSchema", () => {
             targeting: "structural",
             query: {
               structural: {
-                treeSitterQuery:
-                  "(call_expression function: (identifier) @callee) @target",
-                requiredCaptures: { callee: "oldName" },
+                language: "python",
+                treeSitterQuery: "(identifier) @target",
+                requiredCaptures: { target: "old_name" },
               },
               replacement: "newName()",
             },
@@ -212,6 +212,44 @@ describe("FileGatewayRequestSchema", () => {
 
       assert.equal(result.op, "searchEditPreview");
       assert.equal(result.operations[0].targeting, "structural");
+      assert.equal(result.operations[0].query.structural?.language, "python");
+    });
+
+    it("rejects structural requiredCaptures maps with unsafe or excessive keys", () => {
+      assert.throws(() => {
+        FileGatewayRequestSchema.parse({
+          op: "searchEditPreview",
+          repoId: "test-repo",
+          targeting: "structural",
+          query: {
+            structural: {
+              treeSitterQuery: "(identifier) @target",
+              requiredCaptures: Object.fromEntries(
+                Array.from({ length: 33 }, (_, index) => [
+                  `capture_${index}`,
+                  "old_name",
+                ]),
+              ),
+            },
+          },
+          editMode: "replacePattern",
+        });
+      }, /requiredCaptures may include at most 32 entries/);
+
+      assert.throws(() => {
+        FileGatewayRequestSchema.parse({
+          op: "searchEditPreview",
+          repoId: "test-repo",
+          targeting: "structural",
+          query: {
+            structural: {
+              treeSitterQuery: "(identifier) @target",
+              requiredCaptures: JSON.parse('{"constructor":"old_name"}'),
+            },
+          },
+          editMode: "replacePattern",
+        });
+      }, /Blocked requiredCaptures key/);
     });
 
     it("rejects operations batch with duplicate ids", () => {

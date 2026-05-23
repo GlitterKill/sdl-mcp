@@ -15,6 +15,7 @@ import type { ToolDispatchOptions } from "../types.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
+import { loadConfiguredAdapterPlugins } from "../../startup/plugins.js";
 import { createActionMap } from "../../gateway/router.js";
 import {
   ACTION_DEFINITIONS,
@@ -420,6 +421,8 @@ export async function toolDispatchCommand(
     formatCliToolOutput(action, handlerArgs, result, outputFormat);
     return;
   }
+
+  await loadConfiguredAdapterPlugins(config, configPath);
 
   // Initialize DB. Embedded LadybugDB allows a single writer/owner, so provide
   // a direct remediation when the active MCP server already owns the graph file.

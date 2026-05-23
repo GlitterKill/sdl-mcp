@@ -46,6 +46,7 @@ import { SessionManager } from "../../mcp/session-manager.js";
 import { tokenAccumulator } from "../../mcp/token-accumulator.js";
 import { ensureConfiguredReposRegistered } from "../../startup/bootstrap.js";
 import { recoverStaleDerivedStateOnStartup } from "../../startup/derived-state-recovery.js";
+import { loadConfiguredAdapterPlugins } from "../../startup/plugins.js";
 import { detectCpuProfile } from "../../util/cpu-detect.js";
 import {
   BeamExplainStore,
@@ -168,6 +169,10 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   console.error(`PID file written: ${pidfilePath}`);
 
   await initGraphDb(config, configPath);
+
+  await loadConfiguredAdapterPlugins(config, configPath, (message) => {
+    console.error(message);
+  });
 
   await ensureConfiguredReposRegistered(config, (message) => {
     console.error(message);

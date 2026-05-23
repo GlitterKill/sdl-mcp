@@ -113,6 +113,13 @@ direct indexing while the live HTTP server owns the graph DB lock. Do not raise
 `maxToolConcurrency` first unless you have evidence that the database can
 tolerate more concurrent foreground work.
 
+If delegated CLI indexing reports `read ECONNRESET` immediately after
+`Cluster refresh`, the HTTP server likely exited in LadybugDB native code while
+replacing FTS-indexed cluster nodes. Restart the server with a build that drops
+and rebuilds `cluster_search_text_v1` around topology-changing cluster
+replacement, then rerun the incremental refresh. Do not force direct indexing
+while the server-owned graph DB lock is active.
+
 ### Stale Results
 
 - Run `sdl-mcp index`

@@ -48,6 +48,7 @@ Register the compiled plugin entrypoint in your SDL-MCP config.
 {
   "plugins": {
     "paths": ["C:/path/to/my-lang-plugin/dist/index.js"],
+    "trustedRoots": ["C:/path/to/my-lang-plugin"],
     "enabled": true,
     "strictVersioning": true
   }
@@ -84,6 +85,8 @@ export async function createAdapters() {
       extension: ".yourlang",
       languageId: "yourlang",
       factory: () => new YourLangAdapter(),
+      // Optional for tree-sitter-backed adapters:
+      // structuralMatcher,
     },
   ];
 }
@@ -103,11 +106,11 @@ The template also exports `MyLangAdapter` so the bundled unit tests can instanti
 
 An adapter provides three extraction hooks:
 
-| Method | Purpose |
-| ------ | ------- |
+| Method             | Purpose                                                                |
+| ------------------ | ---------------------------------------------------------------------- |
 | `extractSymbols()` | Return functions, classes, methods, types, or other indexable symbols. |
-| `extractImports()` | Return module or file references from import-like syntax. |
-| `extractCalls()` | Return calls that can be resolved to extracted symbols. |
+| `extractImports()` | Return module or file references from import-like syntax.              |
+| `extractCalls()`   | Return calls that can be resolved to extracted symbols.                |
 
 Each hook must return an array and should handle malformed input without throwing. Symbols need stable `nodeId` values, imports need `specifier` metadata, and calls should set `calleeIdentifier` plus `calleeSymbolId` when they resolve locally. Report ranges with 1-based line numbers and 0-based columns.
 
@@ -168,9 +171,12 @@ export class YourLangAdapter extends BaseAdapter {
 
   extractSymbols(tree: Tree, _content: string, filePath: string) {
     const symbols: ExtractedSymbol[] = [];
-    const query = new Parser.Query(language, `
+    const query = new Parser.Query(
+      language,
+      `
       (function_declaration name: (identifier) @name)
-    `);
+    `,
+    );
 
     for (const capture of query.captures(tree.rootNode)) {
       if (capture.name !== "name") continue;
@@ -189,6 +195,12 @@ export class YourLangAdapter extends BaseAdapter {
 }
 ```
 
+## Optional Structural Matcher
+
+Tree-sitter-backed adapters can opt into AST-aware `search.edit` by adding a `structuralMatcher` descriptor to the adapter object returned by `createAdapters()`. See [STRUCTURAL_MATCHER.md](./STRUCTURAL_MATCHER.md) for the contract and a complete example.
+
+Keep this disabled for regex-only adapters. Without a real tree-sitter `Tree`, SDL-MCP cannot safely distinguish identifiers from comments, strings, or broad syntax nodes.
+
 If your language needs exact cross-file references, prefer a compiler-backed SCIP indexer or adapter-specific `resolveCall()` support over expanding regex patterns. Regex improvements can improve recall, but they do not become semantic resolution.
 
 ## File Structure
@@ -199,6 +211,7 @@ my-lang-plugin/
 |-- tsconfig.json         # TypeScript configuration
 |-- index.ts              # Plugin manifest and adapter implementation
 |-- README.md             # Plugin documentation
+|-- STRUCTURAL_MATCHER.md # Optional AST-aware search.edit guidance
 |-- LICENSE               # License text
 |-- test/
 |   `-- plugin.test.ts    # node:test coverage for extraction behavior
@@ -244,7 +257,7 @@ The template includes `files` so published packages contain only runtime artifac
 
 ```json
 {
-  "files": ["dist", "README.md", "LICENSE"]
+  "files": ["dist", "README.md", "STRUCTURAL_MATCHER.md", "LICENSE"]
 }
 ```
 

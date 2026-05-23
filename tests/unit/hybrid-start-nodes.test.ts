@@ -74,9 +74,9 @@ function isHybridRetrievalAvailableLogic(opts: {
 }): boolean {
   if (!opts.semanticEnabled) return false;
 
-  // Explicit hybrid mode -- just check basic FTS capability.
+  // Explicit hybrid mode -- require a healthy FTS index before retrieval paths run.
   if (opts.retrievalMode === "hybrid") {
-    return opts.extensionCaps.fts;
+    return opts.health.fts;
   }
 
   // Legacy mode (default) -- auto-promote when infrastructure is healthy.
@@ -129,7 +129,7 @@ describe("isHybridRetrievalAvailable — logic", () => {
       semanticEnabled: true,
       retrievalMode: "hybrid",
       extensionCaps: { fts: true, vector: true },
-      health: { fts: false, vectorJinaCode: false, vectorNomic: false },
+      health: { fts: true, vectorJinaCode: false, vectorNomic: false },
     });
     assert.strictEqual(result, true);
   });
@@ -138,8 +138,8 @@ describe("isHybridRetrievalAvailable — logic", () => {
     const result = isHybridRetrievalAvailableLogic({
       semanticEnabled: true,
       retrievalMode: "hybrid",
-      extensionCaps: { fts: false, vector: true },
-      health: { fts: true, vectorJinaCode: true, vectorNomic: true },
+      extensionCaps: { fts: true, vector: true },
+      health: { fts: false, vectorJinaCode: true, vectorNomic: true },
     });
     assert.strictEqual(result, false);
   });
@@ -241,14 +241,14 @@ describe("shouldFallbackToLegacy — source verification (Stage 2)", () => {
     );
   });
 
-  it("isHybridRetrievalAvailable checks explicit hybrid mode caps", () => {
+  it("isHybridRetrievalAvailable checks explicit hybrid mode health", () => {
     assert.ok(
       src.includes('retrievalConfig?.mode === "hybrid"'),
       "should check for explicit hybrid mode",
     );
     assert.ok(
-      src.includes("caps.fts"),
-      "should check FTS capability for explicit hybrid mode",
+      src.includes("return health.fts;"),
+      "should check FTS health for explicit hybrid mode",
     );
   });
 

@@ -146,8 +146,10 @@ export function parseFile(
     const isTSX = extension === ".tsx";
     const isJS = extension === ".js";
     const isJSX = extension === ".jsx";
+    const isMJS = extension === ".mjs";
+    const isCJS = extension === ".cjs";
 
-    if (!isTS && !isTSX && !isJS && !isJSX) {
+    if (!isTS && !isTSX && !isJS && !isJSX && !isMJS && !isCJS) {
       return null;
     }
 

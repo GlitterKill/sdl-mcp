@@ -700,7 +700,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   "file.write":
     "Write to a single file (indexed or non-indexed) with targeted modes (line replace, pattern replace, JSON path, insert, append); use search.edit for cross-file batching",
   "search.edit":
-    'Cross-file search-and-edit in two phases (preview + apply) with server-side plan handles, sha256 preconditions, rollback, and ignored/dot-directory refusal; use targeting:"identifier" for exact TS/JS identifier edits, targeting:"structural" for tree-sitter capture edits, operations[] for heterogeneous batches, and file.write for explicit single-file writes where allowed.',
+    'Cross-file search-and-edit in two phases (preview + apply) with server-side plan handles, sha256 preconditions, rollback, and ignored/dot-directory refusal; use targeting:"identifier" for exact AST identifier edits in supported structural languages, targeting:"structural" for tree-sitter capture edits, operations[] for heterogeneous batches, and file.write for explicit single-file writes where allowed.',
   "scip.ingest":
     "Ingest a pre-built SCIP index to overlay compiler-grade cross-references onto the symbol graph",
   "semantic.enrichment.refresh":

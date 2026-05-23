@@ -460,7 +460,10 @@ export function registerCodeModeTools(
         append: { type: "string" },
         createBackup: { type: "boolean" },
         createIfMissing: { type: "boolean" },
-        targeting: { type: "string", enum: ["text", "symbol"] },
+        targeting: {
+          type: "string",
+          enum: ["text", "symbol", "identifier", "structural"],
+        },
         query: { type: "object" },
         operations: {
           type: "array",

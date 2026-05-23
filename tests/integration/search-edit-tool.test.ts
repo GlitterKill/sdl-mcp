@@ -15,9 +15,10 @@
 
 import { describe, it, before, after } from "node:test";
 import { strict as assert } from "node:assert";
-import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { handleSearchEdit } from "../../dist/mcp/tools/search-edit/index.js";
 import { handleResponseGet } from "../../dist/mcp/tools/response.js";
@@ -34,6 +35,11 @@ import {
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { normalizePath } from "../../dist/util/paths.js";
+import { loadConfiguredAdapterPlugins } from "../../dist/startup/plugins.js";
+import {
+  loadBuiltInAdapters,
+  resetRegistry,
+} from "../../dist/indexer/adapter/registry.js";
 
 const REPO_ID = "search-edit-smoke";
 
@@ -199,6 +205,519 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     assert.equal(
       await readFile(join(repoRoot, "calls.ts"), "utf-8"),
       'newName("a");\nother("b");\n',
+    );
+  });
+
+  it("identifier targeting edits non-TypeScript source", async () => {
+    await writeFile(
+      join(repoRoot, "ident.py"),
+      [
+        "old_name = 1",
+        'text = "old_name"',
+        "# old_name stays here",
+        "old_name()",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        targeting: "identifier",
+        query: { literal: "old_name", replacement: "new_name", global: true },
+        editMode: "replacePattern",
+        filters: { include: ["ident.py"] },
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.filesMatched, 1);
+    assert.equal(preview.matchesFound, 2);
+    assert.equal(
+      preview.fileEntries[0].astMatches?.[0]?.target.nodeType,
+      "identifier",
+    );
+
+    const apply = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "apply",
+        repoId: REPO_ID,
+        planHandle: preview.planHandle,
+      }),
+    )) as SearchEditApplyResponse;
+
+    assert.equal(apply.filesWritten, 1);
+    const updated = await readFile(join(repoRoot, "ident.py"), "utf-8");
+    assert.match(updated, /new_name = 1/);
+    assert.match(updated, /new_name\(\)/);
+    assert.match(updated, /text = "old_name"/);
+    assert.match(updated, /# old_name stays here/);
+  });
+
+  it("structural operations batch supports heterogeneous languages", async () => {
+    await writeFile(join(repoRoot, "calls.py"), "old_name()\n", "utf-8");
+    await writeFile(
+      join(repoRoot, "calls.rs"),
+      "fn main() { old_name(); }\n",
+      "utf-8",
+    );
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        operations: [
+          {
+            id: "python-call",
+            targeting: "structural",
+            query: {
+              structural: {
+                language: "python",
+                treeSitterQuery: "(identifier) @target",
+                requiredCaptures: { target: "old_name" },
+              },
+              replacement: "new_name",
+              global: true,
+            },
+            editMode: "replacePattern",
+            filters: { include: ["calls.py"] },
+          },
+          {
+            id: "rust-call",
+            targeting: "structural",
+            query: {
+              structural: {
+                language: "rust",
+                treeSitterQuery: "(identifier) @target",
+                requiredCaptures: { target: "old_name" },
+              },
+              replacement: "new_name",
+              global: true,
+            },
+            editMode: "replacePattern",
+            filters: { include: ["calls.rs"] },
+          },
+        ],
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.filesMatched, 2);
+    assert.equal(preview.matchesFound, 2);
+    assert.deepEqual(
+      preview.fileEntries.map((entry) => entry.operationIds?.[0]).sort(),
+      ["python-call", "rust-call"],
+    );
+    for (const entry of preview.fileEntries) {
+      assert.equal(entry.astMatches?.length, 1);
+      assert.equal(entry.astMatches?.[0]?.target.text, "old_name");
+    }
+
+    const apply = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "apply",
+        repoId: REPO_ID,
+        planHandle: preview.planHandle,
+      }),
+    )) as SearchEditApplyResponse;
+
+    assert.equal(apply.filesWritten, 2);
+    assert.equal(apply.fileEntries?.length, 2);
+    for (const entry of apply.fileEntries ?? []) {
+      assert.equal(entry.astMatches?.length, 1);
+      assert.equal(entry.astMatches?.[0]?.target.text, "old_name");
+    }
+    assert.equal(
+      await readFile(join(repoRoot, "calls.py"), "utf-8"),
+      "new_name()\n",
+    );
+    assert.equal(
+      await readFile(join(repoRoot, "calls.rs"), "utf-8"),
+      "fn main() { new_name(); }\n",
+    );
+  });
+
+  it("loads configured plugin structural matchers before search.edit planning", async () => {
+    const pluginPath = join(repoRoot, "plugin-structural.mjs");
+    const adapterIndex = pathToFileURL(
+      join(process.cwd(), "dist/indexer/adapter/index.js"),
+    ).href;
+    const queryHelper = pathToFileURL(
+      join(process.cwd(), "dist/indexer/treesitter/tsTreesitter.js"),
+    ).href;
+    await writeFile(
+      pluginPath,
+      `
+        import { TypeScriptAdapter } from ${JSON.stringify(adapterIndex)};
+        import { createQueryForExtensionOrThrow } from ${JSON.stringify(queryHelper)};
+
+        export const manifest = {
+          name: "search-edit-structural-plugin",
+          version: "1.0.0",
+          apiVersion: "1.0.0",
+          adapters: [{ extension: ".plug", languageId: "plug-ts" }]
+        };
+
+        export async function createAdapters() {
+          return [{
+            extension: ".plug",
+            languageId: "plug-ts",
+            factory: () => new TypeScriptAdapter(),
+            structuralMatcher: {
+              identifierNodeTypes: ["identifier"],
+              createQuery: (queryString) =>
+                createQueryForExtensionOrThrow(".ts", queryString)
+            }
+          }];
+        }
+
+        export default { manifest, createAdapters };
+      `,
+      "utf-8",
+    );
+    await writeFile(
+      join(repoRoot, "plugin-source.plug"),
+      [
+        "const oldName = 1;",
+        'const text = "oldName";',
+        "// oldName stays here",
+        "oldName();",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    resetRegistry();
+    try {
+      await loadConfiguredAdapterPlugins(
+        {
+          repos: [],
+          plugins: {
+            enabled: true,
+            paths: [pluginPath],
+            strictVersioning: true,
+          },
+        },
+        join(repoRoot, "sdlmcp.config.json"),
+      );
+
+      const preview = (await handleSearchEdit(
+        SearchEditRequestSchema.parse({
+          mode: "preview",
+          repoId: REPO_ID,
+          targeting: "identifier",
+          query: { literal: "oldName", replacement: "newName", global: true },
+          editMode: "replacePattern",
+          filters: { include: ["plugin-source.plug"] },
+        }),
+      )) as SearchEditPreviewResponse;
+
+      assert.equal(preview.filesMatched, 1);
+      assert.equal(preview.matchesFound, 2);
+      assert.equal(
+        preview.fileEntries[0]?.astMatches?.[0]?.target.nodeType,
+        "identifier",
+      );
+    } finally {
+      resetRegistry();
+      loadBuiltInAdapters();
+    }
+  });
+
+  it("infers structural language from same-language brace globs", async () => {
+    const srcDir = join(repoRoot, "src");
+    await mkdir(srcDir, { recursive: true });
+    await writeFile(join(srcDir, "brace.ts"), "old_name();\n", "utf-8");
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        targeting: "structural",
+        query: {
+          structural: {
+            treeSitterQuery:
+              "(call_expression function: (identifier) @target) @call",
+            requiredCaptures: { target: "old_name" },
+            replacement: "new_name",
+          },
+        },
+        editMode: "replacePattern",
+        filters: { include: ["src/**/*.{ts,tsx,js,jsx}"] },
+        maxFiles: 2,
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.filesMatched, 1);
+    assert.equal(preview.fileEntries[0]?.astMatches?.[0]?.target.text, "old_name");
+
+    const apply = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "apply",
+        repoId: REPO_ID,
+        planHandle: preview.planHandle,
+      }),
+    )) as SearchEditApplyResponse;
+
+    assert.equal(apply.filesWritten, 1);
+    assert.equal(await readFile(join(srcDir, "brace.ts"), "utf-8"), "new_name();\n");
+  });
+
+  it("validates TSX structural queries against TSX grammar during warm-up", async () => {
+    const srcDir = join(repoRoot, "src");
+    await mkdir(srcDir, { recursive: true });
+    await writeFile(
+      join(srcDir, "plain.ts"),
+      "export const plain = oldName;\n",
+      "utf-8",
+    );
+    await writeFile(
+      join(srcDir, "view.tsx"),
+      "export const View = () => <Button oldName={value} />;\n",
+      "utf-8",
+    );
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        targeting: "structural",
+        query: {
+          structural: {
+            language: "typescript",
+            treeSitterQuery: `
+              (jsx_attribute
+                (property_identifier) @name) @target
+            `,
+            requiredCaptures: { name: "oldName" },
+            replacement: "newName={value}",
+          },
+        },
+        editMode: "replacePattern",
+        filters: { include: ["src/view.tsx"] },
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.filesMatched, 1);
+    assert.equal(preview.fileEntries[0]?.file, "src/view.tsx");
+    assert.equal(preview.fileEntries[0]?.astMatches?.[0]?.target.text, "oldName={value}");
+
+    await assert.rejects(
+      () =>
+        handleSearchEdit(
+          SearchEditRequestSchema.parse({
+            mode: "preview",
+            repoId: REPO_ID,
+            targeting: "structural",
+            query: {
+              structural: {
+                language: "typescript",
+                treeSitterQuery: `
+                  (jsx_attribute
+                    (property_identifier) @name) @target
+                `,
+                requiredCaptures: { name: "oldName" },
+                replacement: "newName={value}",
+              },
+            },
+            editMode: "replacePattern",
+            filters: { include: ["src/plain.ts", "src/view.tsx"] },
+          }),
+        ),
+      /Invalid structural tree-sitter query for src\/plain\.ts/i,
+    );
+  });
+
+  it("validates malformed structural queries before candidate matching", async () => {
+    await assert.rejects(
+      () =>
+        handleSearchEdit(
+          SearchEditRequestSchema.parse({
+            mode: "preview",
+            repoId: REPO_ID,
+            targeting: "structural",
+            query: {
+              structural: {
+                language: "python",
+                treeSitterQuery: "(identifier",
+                requiredCaptures: { target: "old_name" },
+              },
+              replacement: "new_name",
+              global: true,
+            },
+            editMode: "replacePattern",
+            filters: { include: ["missing/**/*.py"] },
+          }),
+        ),
+      /Invalid structural tree-sitter query/i,
+    );
+  });
+
+  it("requires explicit structural language for ambiguous multi-language requests", async () => {
+    await assert.rejects(
+      () =>
+        handleSearchEdit(
+          SearchEditRequestSchema.parse({
+            mode: "preview",
+            repoId: REPO_ID,
+            targeting: "structural",
+            query: {
+              structural: {
+                treeSitterQuery: "(identifier) @target",
+                requiredCaptures: { target: "old_name" },
+              },
+              replacement: "new_name",
+              global: true,
+            },
+            editMode: "replacePattern",
+            filters: { extensions: [".py", ".rs"] },
+          }),
+        ),
+      /spans multiple languages|requires query\.structural\.language/i,
+    );
+  });
+
+  it("filters explicit structural language before maxFiles capping", async () => {
+    await writeFile(
+      join(repoRoot, "002-before-java.ts"),
+      "oldName();\n",
+      "utf-8",
+    );
+    await writeFile(
+      join(repoRoot, "zzz-java-target.java"),
+      "class Target { void m() { oldName(); } }\n",
+      "utf-8",
+    );
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        targeting: "structural",
+        query: {
+          structural: {
+            language: "java",
+            treeSitterQuery: "(identifier) @target",
+            requiredCaptures: { target: "oldName" },
+          },
+          replacement: "newName",
+          global: true,
+        },
+        editMode: "replacePattern",
+        filters: { include: ["002-before-java.ts", "zzz-java-target.java"] },
+        maxFiles: 1,
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.filesMatched, 1);
+    assert.equal(preview.fileEntries[0].file, "zzz-java-target.java");
+    assert.equal(preview.matchesFound, 1);
+    assert.equal(
+      preview.filesSkipped.some(
+        (entry) =>
+          entry.path === "002-before-java.ts" &&
+          entry.reason === "structural-language-mismatch:typescript->java",
+      ),
+      true,
+      "candidate filtering should report mismatches without counting them against maxFiles",
+    );
+  });
+
+  it("reports explicit structural language mismatches from extension hints", async () => {
+    await writeFile(join(repoRoot, "extension-mismatch.ts"), "oldName();\n", "utf-8");
+    const srcDir = join(repoRoot, "src");
+    await mkdir(srcDir, { recursive: true });
+    await writeFile(join(srcDir, "glob-mismatch.ts"), "oldName();\n", "utf-8");
+
+    const extensionPreview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        targeting: "structural",
+        query: {
+          structural: {
+            language: "java",
+            treeSitterQuery: "(identifier) @target",
+            requiredCaptures: { target: "oldName" },
+          },
+          replacement: "newName",
+          global: true,
+        },
+        editMode: "replacePattern",
+        filters: { extensions: [".ts"] },
+        maxFiles: 5,
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(extensionPreview.filesMatched, 0);
+    assert.equal(
+      extensionPreview.filesSkipped.some(
+        (entry) =>
+          entry.path === "extension-mismatch.ts" &&
+          entry.reason === "structural-language-mismatch:typescript->java",
+      ),
+      true,
+    );
+
+    const globPreview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        targeting: "structural",
+        query: {
+          structural: {
+            language: "java",
+            treeSitterQuery: "(identifier) @target",
+            requiredCaptures: { target: "oldName" },
+          },
+          replacement: "newName",
+          global: true,
+        },
+        editMode: "replacePattern",
+        filters: { include: ["src/**/*.ts"] },
+        maxFiles: 5,
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(globPreview.filesMatched, 0);
+    assert.equal(
+      globPreview.filesSkipped.some(
+        (entry) =>
+          entry.path === "src/glob-mismatch.ts" &&
+          entry.reason === "structural-language-mismatch:typescript->java",
+      ),
+      true,
+    );
+  });
+
+  it("omits unrelated unsupported files from broad structural language skip diagnostics", async () => {
+    await writeFile(join(repoRoot, "README.md"), "old_name()\n", "utf-8");
+    await writeFile(join(repoRoot, "target.py"), "old_name()\n", "utf-8");
+
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        targeting: "structural",
+        query: {
+          structural: {
+            language: "python",
+            treeSitterQuery: "(identifier) @target",
+            requiredCaptures: { target: "old_name" },
+          },
+          replacement: "new_name",
+          global: true,
+        },
+        editMode: "replacePattern",
+        maxFiles: 5,
+      }),
+    )) as SearchEditPreviewResponse;
+
+    assert.equal(preview.filesMatched, 1);
+    assert.equal(preview.fileEntries[0]?.file, "target.py");
+    assert.equal(
+      preview.filesSkipped.some((entry) => entry.path === "README.md"),
+      false,
     );
   });
 

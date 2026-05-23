@@ -76,7 +76,8 @@ const INCLUDE_RESOLUTION_METADATA_ARG: ActionArgDef = {
 const actionSearch: ActionDefinition = {
   action: "action.search",
   namespace: "meta",
-  description: "Search the SDL-MCP action catalog without opening the graph database",
+  description:
+    "Search the SDL-MCP action catalog without opening the graph database",
   args: [
     {
       flag: "--query",
@@ -132,7 +133,8 @@ const actionSearch: ActionDefinition = {
 const manual: ActionDefinition = {
   action: "manual",
   namespace: "meta",
-  description: "Render focused SDL-MCP API manual content without opening the graph database",
+  description:
+    "Render focused SDL-MCP API manual content without opening the graph database",
   args: [
     {
       flag: "--query",
@@ -263,7 +265,8 @@ const symbolEdit: ActionDefinition = {
       flag: "--symbol-ref",
       field: "symbolRef",
       type: "json",
-      description: 'JSON symbol ref, e.g. {"name":"handleAuth","file":"src/auth.ts"}',
+      description:
+        'JSON symbol ref, e.g. {"name":"handleAuth","file":"src/auth.ts"}',
     },
     {
       flag: "--operation",
@@ -1269,7 +1272,8 @@ const responseGet: ActionDefinition = {
       flag: "--full",
       field: "full",
       type: "boolean",
-      description: "Return the full stored response instead of a bounded excerpt",
+      description:
+        "Return the full stored response instead of a bounded excerpt",
     },
     {
       flag: "--max-bytes",
@@ -1499,14 +1503,14 @@ const searchEdit: ActionDefinition = {
       flag: "--targeting",
       field: "targeting",
       type: "string",
-      description: "Preview targeting mode: text|symbol",
+      description: "Preview targeting mode: text|symbol|identifier|structural",
     },
     {
       flag: "--query",
       field: "query",
       type: "json",
       description:
-        "Preview query JSON, e.g. '{\"literal\":\"old\",\"replacement\":\"new\",\"global\":true}'",
+        'Preview query JSON, e.g. \'{"literal":"old","replacement":"new","global":true}\'',
     },
     {
       flag: "--edit-mode",
@@ -1527,7 +1531,7 @@ const searchEdit: ActionDefinition = {
       field: "filters",
       type: "json",
       description:
-        "Preview filters JSON, e.g. '{\"include\":[\"src/**/*.ts\"],\"exclude\":[\"dist/**\"]}'",
+        'Preview filters JSON, e.g. \'{"include":["src/**/*.ts"],"exclude":["dist/**"]}\'',
     },
     {
       flag: "--preview-context-lines",
@@ -1574,6 +1578,8 @@ const searchEdit: ActionDefinition = {
   ],
   examples: [
     'sdl-mcp tool search.edit --repo-id my-repo --mode preview --targeting text --query \'{"literal":"oldName","replacement":"newName","global":true}\' --edit-mode replacePattern --filters \'{"include":["src/**/*.ts"]}\'',
+    'sdl-mcp tool search.edit --repo-id my-repo --mode preview --targeting identifier --query \'{"literal":"old_name","replacement":"new_name","global":true}\' --edit-mode replacePattern --filters \'{"include":["src/**/*.py"]}\'',
+    'sdl-mcp tool search.edit --repo-id my-repo --mode preview --targeting structural --query \'{"structural":{"language":"python","treeSitterQuery":"(identifier) @target","requiredCaptures":{"target":"old_name"}},"replacement":"new_name","global":true}\' --edit-mode replacePattern --filters \'{"include":["src/**/*.py"]}\'',
     'sdl-mcp tool search.edit --repo-id my-repo --mode preview --operations \'[{"id":"rename","targeting":"text","query":{"literal":"oldName","replacement":"newName","global":true},"editMode":"replacePattern"}]\'',
     'sdl-mcp tool search.edit --repo-id my-repo --mode apply --plan-handle "search-edit-my-repo-1770000000000-abc123"',
   ],

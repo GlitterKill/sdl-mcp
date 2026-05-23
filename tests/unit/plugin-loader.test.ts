@@ -77,6 +77,36 @@ describe("Plugin Loader", () => {
       assert.ok(result.errors[0].includes("not found"));
     });
 
+    it("should reject plugins outside trusted roots", async () => {
+      const trustedRoot = path.join(TEST_PLUGINS_DIR, "trusted");
+      const untrustedRoot = path.join(TEST_PLUGINS_DIR, "untrusted");
+      mkdirSync(trustedRoot, { recursive: true });
+      mkdirSync(untrustedRoot, { recursive: true });
+      const pluginPath = path.join(untrustedRoot, "outside-root.mjs");
+      const pluginContent = `
+        export const manifest = {
+          name: "outside-root",
+          version: "1.0.0",
+          apiVersion: "${getHostApiVersion()}",
+          adapters: []
+        };
+
+        export async function createAdapters() {
+          return [];
+        }
+
+        export default { manifest, createAdapters };
+      `;
+      writeFileSync(pluginPath, pluginContent);
+
+      const result = await loadPlugin(pluginPath, trustedRoot);
+
+      assert.strictEqual(result.loaded, false);
+      assert.ok(
+        result.errors.some((error) => error.includes("trusted roots")),
+      );
+    });
+
     it("should fail to load plugin with invalid manifest", async () => {
       const pluginPath = path.join(TEST_PLUGINS_DIR, "invalid-manifest.mjs");
       const pluginContent = `
@@ -349,6 +379,53 @@ describe("Plugin Loader", () => {
       await assert.rejects(async () => {
         await getPluginAdapters(loadResult.plugin);
       }, /must return an array/);
+    });
+
+    it("should reject malformed structural matcher descriptors", async () => {
+      const pluginPath = path.join(
+        TEST_PLUGINS_DIR,
+        "invalid-structural-matcher.mjs",
+      );
+      const pluginContent = `
+        export const manifest = {
+          name: "invalid-structural-plugin",
+          version: "1.0.0",
+          apiVersion: "${getHostApiVersion()}",
+          adapters: [{ extension: ".struct", languageId: "struct-lang" }]
+        };
+
+        export async function createAdapters() {
+          return [
+            {
+              extension: ".struct",
+              languageId: "struct-lang",
+              factory: () => ({
+                languageId: "struct-lang",
+                fileExtensions: [".struct"],
+                getParser: () => null,
+                parse: () => null,
+                extractSymbols: () => [],
+                extractImports: () => [],
+                extractCalls: () => []
+              }),
+              structuralMatcher: {
+                identifierNodeTypes: "identifier",
+                createQuery: "not a function"
+              }
+            }
+          ];
+        }
+
+        export default { manifest, createAdapters };
+      `;
+      writeFileSync(pluginPath, pluginContent);
+
+      const loadResult = await loadPlugin(pluginPath);
+      assert.ok(loadResult.loaded);
+
+      await assert.rejects(async () => {
+        await getPluginAdapters(loadResult.plugin);
+      }, /identifierNodeTypes must be a non-empty string array/);
     });
   });
 

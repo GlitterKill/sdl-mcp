@@ -257,6 +257,15 @@ export async function getClustersForRepo(
   }));
 }
 
+export async function countClusters(conn: Connection): Promise<number> {
+  const row = await querySingle<{ totalClusters: unknown }>(
+    conn,
+    `MATCH (c:Cluster)
+     RETURN COUNT(c) AS totalClusters`,
+  );
+  return toNumber(row?.totalClusters ?? 0);
+}
+
 export async function getClusterMembersForRepo(
   conn: Connection,
   repoId: string,

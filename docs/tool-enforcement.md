@@ -50,7 +50,7 @@ The generated enforcement files also teach:
 - follow structured recovery guidance such as `nextBestAction`, `fallbackTools`, `fallbackRationale`, and candidate lists instead of retrying blocked native tools
 - use `file.read` and `file.write` inside SDL-MCP for non-indexed files with targeted modes
 - use `symbol.edit` or the symbol edit preview/apply path for one-symbol indexed source writes
-- use `searchEditPreview` with `targeting:"identifier"` for exact TS/JS identifier replacements, `targeting:"structural"` for tree-sitter capture edits, and `operations[]` for heterogeneous batches
+- use `searchEditPreview` with `targeting:"identifier"` for exact AST identifier replacements in supported structural languages, `targeting:"structural"` for tree-sitter capture edits, and `operations[]` for heterogeneous batches
 - review snippets, file counts, and `astMatches` before applying the returned plan handle
 - pass multiline runtime input through `runtimeExecute` `stdin` instead of shell quoting or base64 workarounds
 

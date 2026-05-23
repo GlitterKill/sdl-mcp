@@ -105,7 +105,7 @@ For multi-step operations:
 
 - use `sdl.workflow` for batched context follow-ups, runtime execution, data transforms, and batch mutations
 - use `runtimeExecute` inside `sdl.workflow` with `outputMode: "minimal"` for repo-local commands, and use `stdin` for multiline input
-- use `searchEditPreview` `targeting:"identifier"` for exact TS/JS identifier changes and `targeting:"structural"` for tree-sitter capture edits before falling back to runtime scripts
+- use `searchEditPreview` `targeting:"identifier"` for exact AST identifier changes in supported structural languages and `targeting:"structural"` for tree-sitter capture edits before falling back to runtime scripts
 - supported runtimes: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`
 
 Do not retry denied native file or Bash calls. Switch to SDL-MCP immediately and follow the SDL response guidance fields when present.

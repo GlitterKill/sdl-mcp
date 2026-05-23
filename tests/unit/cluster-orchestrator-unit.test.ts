@@ -1,6 +1,6 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +11,11 @@ import {
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
-import { computeAndStoreClustersAndProcesses } from "../../dist/indexer/cluster-orchestrator.js";
+import {
+  computeAndStoreClustersAndProcesses,
+  shouldFailOnClusterFtsRebuildFailure,
+  shouldRebuildClusterFtsAfterReplacement,
+} from "../../dist/indexer/cluster-orchestrator.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -105,6 +109,129 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
 
   it("exports computeAndStoreClustersAndProcesses", () => {
     assert.equal(typeof computeAndStoreClustersAndProcesses, "function");
+  });
+
+  it("drops and rebuilds Cluster FTS around topology-changing replacement", () => {
+    const source = readFileSync(
+      "src/indexer/cluster-orchestrator.ts",
+      "utf8",
+    );
+
+    assert.match(
+      source,
+      /dropFtsIndex\(\s*wConn,\s*"Cluster",\s*ENTITY_FTS_INDEX_NAMES\.cluster/s,
+      "cluster replacement must drop the Cluster FTS index before deleting old Cluster nodes",
+    );
+    assert.match(
+      source,
+      /finally\s*{[\s\S]*ensureFtsIndexForNonEmptyTable\(\s*wConn,\s*"Cluster",\s*ENTITY_FTS_INDEX_NAMES\.cluster/s,
+      "cluster replacement must rebuild the Cluster FTS index after replacement",
+    );
+    assert.doesNotMatch(
+      source,
+      /if\s*\(\s*droppedClusterFtsIndex\s*\)[\s\S]*createFtsIndex\(/s,
+      "Cluster FTS rebuild must not be gated only on a drop that happened in the current run",
+    );
+    assert.match(
+      source,
+      /const totalClusterCount = await ladybugDb\.countClusters\(wConn\)/s,
+      "Cluster FTS empty-table guard must use the global Cluster row count",
+    );
+    assert.match(
+      source,
+      /if\s*\(\s*replaceClusters\s*\)[\s\S]*dropFtsIndex\(/s,
+      "Cluster replacement must prove/drop Cluster FTS before deleting rows regardless of global capability state",
+    );
+    assert.match(
+      source,
+      /shouldRebuildClusterFtsAfterReplacement\(\{[\s\S]*totalClusterCount/s,
+      "non-empty replacements must recreate Cluster FTS even when the index was already absent",
+    );
+    assert.match(
+      source,
+      /const shouldRepairMissing =\s*!\s*replaceClusters && totalClusterCount > 0/s,
+      "Cluster FTS repair must run even when cluster topology is unchanged",
+    );
+    assert.doesNotMatch(
+      source,
+      /replacementError\s*===\s*undefined\s*&&\s*nextClusterStates\.length\s*===\s*0/s,
+      "successful zero-cluster skip must not be based only on the current repo",
+    );
+    assert.match(
+      source,
+      /ensureResult\.status === "failed"/s,
+      "cluster replacement must explicitly handle Cluster FTS rebuild failures",
+    );
+    assert.match(
+      source,
+      /shouldFailOnClusterFtsRebuildFailure/,
+      "Cluster FTS repair failures should be classified before throwing",
+    );
+    assert.ok(
+      source.indexOf("dropFtsIndex(") < source.indexOf("deleteClustersByRepo"),
+      "Cluster FTS drop must happen before deleteClustersByRepo",
+    );
+  });
+
+  it("uses table-wide Cluster FTS rebuild decisions", () => {
+    assert.equal(
+      shouldRebuildClusterFtsAfterReplacement({
+        replaceClusters: true,
+        replacementError: undefined,
+        dropStatus: "absent",
+        totalClusterCount: 1,
+      }),
+      true,
+      "non-empty table must recreate FTS even when the index was already absent",
+    );
+    assert.equal(
+      shouldRebuildClusterFtsAfterReplacement({
+        replaceClusters: true,
+        replacementError: undefined,
+        dropStatus: "dropped",
+        totalClusterCount: 0,
+      }),
+      false,
+      "globally empty Cluster table must not recreate empty-table FTS",
+    );
+    assert.equal(
+      shouldRebuildClusterFtsAfterReplacement({
+        replaceClusters: true,
+        replacementError: new Error("replacement failed"),
+        dropStatus: "absent",
+        totalClusterCount: 1,
+      }),
+      false,
+      "failed replacement does not need restoration when the index was absent before",
+    );
+    assert.equal(
+      shouldRebuildClusterFtsAfterReplacement({
+        replaceClusters: true,
+        replacementError: new Error("replacement failed"),
+        dropStatus: "dropped",
+        totalClusterCount: 1,
+      }),
+      true,
+      "failed replacement must restore a dropped table-wide FTS index when rows remain",
+    );
+  });
+
+  it("fails hard only when a previously present Cluster FTS index must be restored", () => {
+    assert.equal(
+      shouldFailOnClusterFtsRebuildFailure({ dropStatus: "dropped" }),
+      true,
+      "dropped index rebuild failures leave the table without a previously present index",
+    );
+    assert.equal(
+      shouldFailOnClusterFtsRebuildFailure({ dropStatus: "absent" }),
+      false,
+      "absent-index repair is optional and should not fail cluster refresh",
+    );
+    assert.equal(
+      shouldFailOnClusterFtsRebuildFailure({ dropStatus: "skipped" }),
+      false,
+      "unchanged-topology repair is optional and should not fail cluster refresh",
+    );
   });
 
   it("returns zero counts when repo has no symbols", async () => {
@@ -220,6 +347,7 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
 
     assert.ok(result.clustersComputed >= 1);
     assert.ok(result.processesTraced >= 1);
+    assert.ok((await ladybugDb.countClusters(conn)) >= 1);
 
     const cluster = await ladybugDb.getClusterForSymbol(conn, "sym-main");
     assert.ok(cluster);

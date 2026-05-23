@@ -530,12 +530,21 @@
           "type": "boolean",
           "description": "Require plugin API version compatibility",
           "default": true
+        },
+        "trustedRoots": {
+          "type": "array",
+          "description": "Trusted plugin directories. Relative roots resolve from the config file directory; plugin entrypoints must resolve inside one root after symlinks are resolved.",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       },
       "default": {
         "paths": [],
         "enabled": true,
-        "strictVersioning": true
+        "strictVersioning": true,
+        "trustedRoots": []
       }
     },
     "semantic": {

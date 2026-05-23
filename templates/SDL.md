@@ -137,7 +137,7 @@ Use SDL file and edit tools instead of native read/write paths.
 - Write non-indexed files with `file.write` or `sdl.file` `op: "write"` using exactly one targeted write mode.
 - Edit indexed source with `symbol.edit` or `sdl.file` `symbolEditPreview` followed by `symbolEditApply` when the edit is anchored to one symbol.
 - Use `symbolEditApplyNow` only with a fresh `astFingerprint` and range from a current symbol card.
-- Use `search.edit` or `sdl.file` `op: "searchEditPreview"` for cross-file or repeated indexed-source edits. Prefer `targeting: "identifier"` for exact TS/JS identifier replacements that must avoid comments and strings, `targeting: "structural"` for tree-sitter capture edits such as calls, imports, JSX props, or object properties, and `operations[]` for heterogeneous batches.
+- Use `search.edit` or `sdl.file` `op: "searchEditPreview"` for cross-file or repeated indexed-source edits. Prefer `targeting: "identifier"` for exact AST identifier replacements in supported structural languages that must avoid comments and strings, `targeting: "structural"` for tree-sitter capture edits such as calls, imports, properties, or plugin-defined grammar captures, and `operations[]` for heterogeneous batches.
 - Apply the returned plan handle only after reviewing snippets, file counts, and any `astMatches` capture summaries.
 - Use `sdl.workflow` plus `runtimeExecute` for a targeted script only when SDL edit tools cannot express the indexed-source edit; pass multiline payloads through `stdin`.
 - Track backup paths returned by edit/write tools and remove created `.bak` files after verification through SDL-governed runtime cleanup. Do not run broad native cleanup commands.

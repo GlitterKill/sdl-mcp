@@ -35,6 +35,13 @@ export function markExtensionLoaded(ext: keyof ExtensionCapabilities): void {
 }
 
 /**
+ * Mark an extension unavailable for subsequent connection-scoped work.
+ */
+export function markExtensionUnavailable(ext: keyof ExtensionCapabilities): void {
+  extensionCapabilities[ext] = false;
+}
+
+/**
  * Reset capabilities to { fts: false, vector: false }.
  * Called from closeLadybugDb() so state stays in sync when the pool is torn down.
  */

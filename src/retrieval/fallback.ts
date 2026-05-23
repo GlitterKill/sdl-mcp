@@ -14,7 +14,10 @@ import type { RetrievalCapabilities, DegradationReason } from "./types.js";
 import { checkIndexHealth } from "./index-lifecycle.js";
 /** Build structured degradation reasons from index health data. */
 function buildDegradationReasons(
-  health: { fts: { exists: boolean }; vectors: Array<{ model: string; exists: boolean }> },
+  health: {
+    fts: { exists: boolean; healthy: boolean };
+    vectors: Array<{ model: string; exists: boolean; healthy: boolean }>;
+  },
   caps: { fts: boolean; vector: boolean },
 ): DegradationReason[] {
   const reasons: DegradationReason[] = [];
@@ -22,6 +25,8 @@ function buildDegradationReasons(
     reasons.push({ code: "fts-extension-unavailable", message: "FTS extension not loaded", affects: "fts" });
   } else if (!health.fts.exists) {
     reasons.push({ code: "fts-index-missing", message: "FTS index not found in database", affects: "fts" });
+  } else if (!health.fts.healthy) {
+    reasons.push({ code: "fts-index-missing", message: "FTS index is present but not healthy", affects: "fts" });
   }
   if (!caps.vector) {
     reasons.push({ code: "vector-extension-unavailable", message: "Vector extension not loaded", affects: "vector" });
@@ -29,10 +34,38 @@ function buildDegradationReasons(
     for (const v of health.vectors) {
       if (!v.exists) {
         reasons.push({ code: "vector-index-missing", message: "Vector index missing for model " + v.model, affects: "vector" });
+      } else if (!v.healthy) {
+        reasons.push({ code: "vector-index-missing", message: "Vector index is present but not healthy for model " + v.model, affects: "vector" });
       }
     }
   }
   return reasons;
+}
+
+export function buildRetrievalCapabilitiesFromIndexHealth(
+  health: {
+    fts: { exists: boolean; healthy: boolean };
+    vectors: Array<{ model: string; exists: boolean; healthy: boolean }>;
+  },
+  caps: { fts: boolean; vector: boolean },
+): RetrievalCapabilities {
+  let vectorNomic = false;
+  let vectorJinaCode = false;
+
+  for (const v of health.vectors) {
+    if (v.model === "nomic-embed-text-v1.5") {
+      vectorNomic = caps.vector && v.healthy;
+    } else if (v.model === "jina-embeddings-v2-base-code") {
+      vectorJinaCode = caps.vector && v.healthy;
+    }
+  }
+
+  return {
+    fts: caps.fts && health.fts.healthy,
+    vectorNomic,
+    vectorJinaCode,
+    degradationReasons: buildDegradationReasons(health, caps),
+  };
 }
 
 
@@ -74,31 +107,14 @@ export async function checkRetrievalHealth(
     };
   }
 
-  // Extension(s) available — query for real index existence.
+  // Extension(s) available - query for real index existence.
   try {
     const conn = await getLadybugConn();
     const health = await checkIndexHealth(conn);
 
-    // Derive per-model vector availability from the health result.
-    let vectorNomic = false;
-    let vectorJinaCode = false;
-
-    for (const v of health.vectors) {
-      if (v.model === "nomic-embed-text-v1.5") {
-        vectorNomic = v.exists;
-      } else if (v.model === "jina-embeddings-v2-base-code") {
-        vectorJinaCode = v.exists;
-      }
-    }
-
-    return {
-      fts: health.fts.exists,
-      vectorNomic,
-      vectorJinaCode,
-      degradationReasons: buildDegradationReasons(health, caps),
-    };
+    return buildRetrievalCapabilitiesFromIndexHealth(health, caps);
   } catch (err) {
-    // Index health check failed — fall back to extension-based proxy
+    // Index health check failed - fall back to extension-based proxy
     // so we don't block startup or degrade the caller.
     logger.warn(
       `[retrieval] checkIndexHealth failed, falling back to extension proxy: ${
@@ -144,7 +160,7 @@ export function shouldFallbackToLegacy(
     return true;
   }
 
-  // Hybrid mode requested but FTS is unavailable -- cannot run the
+  // Hybrid mode requested but FTS is unavailable or unhealthy -- cannot run the
   // minimum viable hybrid pipeline.
   if (!caps.fts) {
     return true;
@@ -164,8 +180,8 @@ export function shouldFallbackToLegacy(
  * Used by Stage 2 start-node resolution to decide between hybrid and legacy paths.
  * Auto-promotes from legacy to hybrid when:
  * - semantic.enabled is true
- * - FTS index exists
- * - At least one real-model vector index exists
+  * - FTS index is healthy
+  * - At least one real-model vector index is healthy
  */
 export async function isHybridRetrievalAvailable(): Promise<boolean> {
   try {
@@ -175,16 +191,17 @@ export async function isHybridRetrievalAvailable(): Promise<boolean> {
 
     const retrievalConfig = semanticConfig.retrieval;
 
-    // Explicit hybrid mode — just check basic capabilities.
+    // Explicit hybrid mode still needs a healthy FTS index; extension-level
+    // capability alone can leave the retrieval path pointed at a broken index.
     if (retrievalConfig?.mode === "hybrid") {
-      const caps = getExtensionCapabilities();
-      return caps.fts;
+      const health = await checkRetrievalHealth();
+      return health.fts;
     }
 
-    // Legacy mode — auto-promote when infrastructure is healthy.
+    // Legacy mode - auto-promote when infrastructure is healthy.
     const health = await checkRetrievalHealth();
     return health.fts && (health.vectorNomic || health.vectorJinaCode);
   } catch {
     return false;
   }
-}
+}

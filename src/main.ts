@@ -32,6 +32,7 @@ import {
 import { ensureConfiguredReposRegistered } from "./startup/bootstrap.js";
 import { recoverStaleDerivedStateOnStartup } from "./startup/derived-state-recovery.js";
 import { startPrefetchPolicy } from "./startup/prefetch-startup.js";
+import { loadConfiguredAdapterPlugins } from "./startup/plugins.js";
 import { installProcessHandlers } from "./startup/process-handlers.js";
 
 import { resetScorerPool } from "./graph/slice/beam-search-engine.js";
@@ -87,6 +88,7 @@ async function main(): Promise<void> {
     await initGraphDb(config, resolvedConfigPath);
     log(`Graph database initialized at ${graphDbPath}`);
 
+    await loadConfiguredAdapterPlugins(config, resolvedConfigPath, log);
     await ensureConfiguredReposRegistered(config, log);
     await recoverStaleDerivedStateOnStartup(config, log);
     await startPrefetchPolicy(config);

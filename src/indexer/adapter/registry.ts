@@ -1,4 +1,7 @@
-import type { LanguageAdapter } from "./LanguageAdapter.js";
+import type {
+  LanguageAdapter,
+  StructuralMatcherDescriptor,
+} from "./LanguageAdapter.js";
 import { adapters as builtInAdapters } from "./adapters.js";
 import { loadPluginsFromConfig, getPluginAdapters } from "./plugin/index.js";
 import { logger } from "../../util/logger.js";
@@ -11,6 +14,15 @@ interface AdapterEntry {
   adapter: LanguageAdapter | null;
   source: "builtin" | "plugin";
   pluginName?: string;
+  structuralMatcher?: StructuralMatcherDescriptor;
+}
+
+export interface StructuralMatcherRegistryEntry {
+  extension: string;
+  languageId: string;
+  source: "builtin" | "plugin";
+  pluginName?: string;
+  structuralMatcher: StructuralMatcherDescriptor;
 }
 
 const ADAPTER_REGISTRY = new Map<string, AdapterEntry>();
@@ -37,15 +49,16 @@ function loadBuiltInAdapters(): void {
 
 async function loadPlugins(
   pluginPaths: string[] | undefined,
-  allowedRoot?: string,
+  allowedRoots?: string | readonly string[],
 ): Promise<void> {
   if (pluginsLoaded || !pluginPaths || pluginPaths.length === 0) {
     return;
   }
+  loadBuiltInAdapters();
 
   const { successful, failed } = await loadPluginsFromConfig(
     pluginPaths,
-    allowedRoot,
+    allowedRoots,
   );
 
   for (const plugin of successful) {
@@ -72,6 +85,9 @@ async function loadPlugins(
           adapter: null,
           source: "plugin",
           pluginName: plugin.manifest.name,
+          ...(adapter.structuralMatcher
+            ? { structuralMatcher: adapter.structuralMatcher }
+            : {}),
         });
       }
 
@@ -102,9 +118,9 @@ async function loadPlugins(
 
 async function loadPluginsSync(
   pluginPaths: string[] | undefined,
-  allowedRoot?: string,
+  allowedRoots?: string | readonly string[],
 ): Promise<void> {
-  await loadPlugins(pluginPaths, allowedRoot);
+  await loadPlugins(pluginPaths, allowedRoots);
 }
 
 function registerAdapter(
@@ -113,6 +129,7 @@ function registerAdapter(
   factory: AdapterFactory,
   source: "builtin" | "plugin" = "builtin",
   pluginName?: string,
+  structuralMatcher?: StructuralMatcherDescriptor,
 ): void {
   ADAPTER_REGISTRY.set(extension.toLowerCase(), {
     languageId,
@@ -120,14 +137,18 @@ function registerAdapter(
     adapter: null,
     source,
     pluginName,
+    ...(structuralMatcher ? { structuralMatcher } : {}),
   });
 }
 
-function getAdapterForExtension(ext: string): LanguageAdapter | null {
+function getEntryForExtension(ext: string): AdapterEntry | undefined {
   loadBuiltInAdapters();
+  return ADAPTER_REGISTRY.get(ext.toLowerCase());
+}
 
+function getAdapterForExtension(ext: string): LanguageAdapter | null {
   const normalizedExt = ext.toLowerCase();
-  const entry = ADAPTER_REGISTRY.get(normalizedExt);
+  const entry = getEntryForExtension(normalizedExt);
 
   if (!entry) {
     return null;
@@ -155,10 +176,31 @@ function getSupportedExtensions(): string[] {
 }
 
 function getLanguageIdForExtension(ext: string): string | null {
-  loadBuiltInAdapters();
-  const normalizedExt = ext.toLowerCase();
-  const entry = ADAPTER_REGISTRY.get(normalizedExt);
+  const entry = getEntryForExtension(ext);
   return entry ? entry.languageId : null;
+}
+
+function getStructuralMatcherForExtension(
+  ext: string,
+): StructuralMatcherDescriptor | null {
+  const entry = getEntryForExtension(ext);
+  return entry?.structuralMatcher ?? null;
+}
+
+function getStructuralMatcherEntries(): StructuralMatcherRegistryEntry[] {
+  loadBuiltInAdapters();
+  const entries: StructuralMatcherRegistryEntry[] = [];
+  for (const [extension, entry] of ADAPTER_REGISTRY) {
+    if (!entry.structuralMatcher) continue;
+    entries.push({
+      extension,
+      languageId: entry.languageId,
+      source: entry.source,
+      ...(entry.pluginName ? { pluginName: entry.pluginName } : {}),
+      structuralMatcher: entry.structuralMatcher,
+    });
+  }
+  return entries;
 }
 
 function getAdapterInfo(ext: string): {
@@ -166,9 +208,7 @@ function getAdapterInfo(ext: string): {
   source: "builtin" | "plugin" | null;
   pluginName: string | undefined;
 } {
-  loadBuiltInAdapters();
-  const normalizedExt = ext.toLowerCase();
-  const entry = ADAPTER_REGISTRY.get(normalizedExt);
+  const entry = getEntryForExtension(ext);
   return entry
     ? {
         languageId: entry.languageId,
@@ -193,6 +233,8 @@ export {
   getAdapterForExtension,
   getSupportedExtensions,
   getLanguageIdForExtension,
+  getStructuralMatcherForExtension,
+  getStructuralMatcherEntries,
   loadBuiltInAdapters,
   loadPlugins,
   loadPluginsSync,

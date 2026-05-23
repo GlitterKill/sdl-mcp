@@ -7,7 +7,12 @@
  */
 
 import type { Connection } from "kuzu";
-import { execStoredProc, queryStoredProcAll } from "../db/ladybug-core.js";
+import {
+  execStoredProc,
+  querySingle,
+  queryStoredProcAll,
+  toNumber,
+} from "../db/ladybug-core.js";
 import { getExtensionCapabilities } from "../db/extension-caps.js";
 import { logger } from "../util/logger.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
@@ -26,6 +31,8 @@ export interface IndexInfo {
   name: string;
   type: "fts" | "vector";
   property: string;
+  tableName?: string;
+  extensionLoaded?: boolean;
   status: "healthy" | "unknown";
 }
 
@@ -63,6 +70,17 @@ export type DropVectorIndexResult =
   | { status: "absent" }
   | { status: "failed"; error: string };
 
+export type DropFtsIndexResult =
+  | { status: "dropped" }
+  | { status: "absent" }
+  | { status: "failed"; error: string };
+
+export type EnsureFtsIndexResult =
+  | { status: "created" }
+  | { status: "exists" }
+  | { status: "empty" }
+  | { status: "failed"; error: string };
+
 // ---------------------------------------------------------------------------
 // FTS index
 // ---------------------------------------------------------------------------
@@ -82,10 +100,103 @@ export type DropVectorIndexResult =
 function validateIdentifier(name: string, label: string): void {
   if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
     throw new Error(
-      `Invalid ${label}: ${JSON.stringify(name)} — must be an alphanumeric identifier`,
+      `Invalid ${label}: ${JSON.stringify(name)} - must be an alphanumeric identifier`,
     );
   }
 }
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export async function countRowsInTable(
+  conn: Connection,
+  tableName: string,
+): Promise<number> {
+  validateIdentifier(tableName, "table name");
+  const row = await querySingle<{ rowCount: unknown }>(
+    conn,
+    `MATCH (n:${tableName}) RETURN COUNT(n) AS rowCount`,
+  );
+  return toNumber(row?.rowCount ?? 0);
+}
+
+export function indexExistsForTable(
+  indexes: readonly IndexInfo[],
+  tableName: string,
+  indexName: string,
+  type: IndexInfo["type"],
+): boolean {
+  return indexes.some(
+    (index) =>
+      index.name === indexName &&
+      index.type === type &&
+      index.tableName === tableName,
+  );
+}
+
+function hasAmbiguousIndexWithoutTable(
+  indexes: readonly IndexInfo[],
+  indexName: string,
+  type: IndexInfo["type"],
+): boolean {
+  return indexes.some(
+    (index) =>
+      index.name === indexName &&
+      index.type === type &&
+      index.tableName === undefined,
+  );
+}
+
+export async function ensureFtsIndexForNonEmptyTableWithDependencies(
+  conn: Connection,
+  tableName: string,
+  indexName: string,
+  dependencies: {
+    showIndexes: (conn: Connection) => Promise<IndexInfo[]>;
+    countRowsInTable: (conn: Connection, tableName: string) => Promise<number>;
+    createFtsIndex: (
+      conn: Connection,
+      tableName: string,
+      indexName: string,
+    ) => Promise<boolean>;
+  },
+  existingIndexes?: readonly IndexInfo[],
+): Promise<EnsureFtsIndexResult> {
+  const indexes = existingIndexes ?? (await dependencies.showIndexes(conn));
+  if (indexExistsForTable(indexes, tableName, indexName, "fts")) {
+    return { status: "exists" };
+  }
+
+  const rowCount = await dependencies.countRowsInTable(conn, tableName);
+  if (rowCount === 0) {
+    logger.debug(
+      `[index-lifecycle] FTS index '${indexName}' on ${tableName} deferred because table is empty`,
+    );
+    return { status: "empty" };
+  }
+
+  const ok = await dependencies.createFtsIndex(conn, tableName, indexName);
+  return ok
+    ? { status: "created" }
+    : { status: "failed", error: "CREATE_FTS_INDEX returned false" };
+}
+
+export async function ensureFtsIndexForNonEmptyTable(
+  conn: Connection,
+  tableName: string,
+  indexName: string,
+  existingIndexes?: readonly IndexInfo[],
+): Promise<EnsureFtsIndexResult> {
+  return ensureFtsIndexForNonEmptyTableWithDependencies(
+    conn,
+    tableName,
+    indexName,
+    { showIndexes, countRowsInTable, createFtsIndex },
+    existingIndexes,
+  );
+}
+
 export async function createFtsIndex(
   conn: Connection,
   tableName: string,
@@ -111,6 +222,73 @@ export async function createFtsIndex(
       }`,
     );
     return false;
+  }
+}
+
+export async function dropFtsIndex(
+  conn: Connection,
+  tableName: string,
+  indexName: string,
+): Promise<DropFtsIndexResult> {
+  return dropFtsIndexWithDependencies(conn, tableName, indexName, {
+    execStoredProc,
+    showIndexes: showIndexesStrict,
+  });
+}
+
+export async function dropFtsIndexWithDependencies(
+  conn: Connection,
+  tableName: string,
+  indexName: string,
+  dependencies: {
+    execStoredProc: (conn: Connection, statement: string) => Promise<void>;
+    showIndexes: (conn: Connection) => Promise<IndexInfo[]>;
+  },
+): Promise<DropFtsIndexResult> {
+  try {
+    // Kuzu FTS procedures require literal identifiers, not parameterised values.
+    // Validate names to prevent injection before string interpolation.
+    validateIdentifier(tableName, "table name");
+    validateIdentifier(indexName, "index name");
+    await dependencies.execStoredProc(
+      conn,
+      `CALL DROP_FTS_INDEX('${tableName}', '${indexName}')`,
+    );
+    logger.info(
+      `[index-lifecycle] FTS index '${indexName}' dropped on ${tableName}`,
+    );
+    return { status: "dropped" };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (
+      isAbsentFtsIndexError(msg, tableName, indexName) ||
+      isMissingFtsProcedureError(msg)
+    ) {
+      try {
+        const indexes = await dependencies.showIndexes(conn);
+        const stillPresent = indexExistsForTable(
+          indexes,
+          tableName,
+          indexName,
+          "fts",
+        );
+        if (
+          !stillPresent &&
+          !hasAmbiguousIndexWithoutTable(indexes, indexName, "fts")
+        ) {
+          logger.debug(
+            `[index-lifecycle] FTS index '${indexName}' on ${tableName} already absent`,
+          );
+          return { status: "absent" };
+        }
+      } catch {
+        // showIndexes threw - fall through to warn and return a failed result.
+      }
+    }
+    logger.warn(
+      `[index-lifecycle] FTS index '${indexName}' on ${tableName} drop failed: ${msg}`,
+    );
+    return { status: "failed", error: msg };
   }
 }
 
@@ -170,33 +348,96 @@ export async function createVectorIndex(
  * unexpected failure modes.
  *
  * Bulk embedding refreshes use this to remove the live index for the
- * duration of the write phase, avoiding O(N · log N · M · efc) HNSW
+ * duration of the write phase, avoiding O(N * log N * M * efc) HNSW
  * insert/delete cost per row, then recreate the index in one rebuild
  * pass at the end.
  */
 /**
  * Recognise LadybugDB's catalog-miss phrasings emitted by `DROP_VECTOR_INDEX`
- * (and equivalents) when the named index isn't registered on the table.
- * The binder verifies the catalog BEFORE issuing the DROP, so any of these
- * forms is authoritative for "this index does not exist on this table at
- * this moment":
- *
- *   - "Binder exception: Table <T> doesn't have an index with name <N>."
- *     (fresh DB, deferred indexes)
- *   - "... does not exist."  (older / generic phrasing)
- *   - "no such (vector|fts) index ..."  (variant phrasings)
- *
- * The regex stays specific to these binder catalog errors — a broader
- * pattern like "not found" would risk misreading an unrelated failure
- * and stranding callers on the index-dropped fast path while a live
- * HNSW index still rejects vec writes.
+ * when the requested vector index is not registered on the requested table.
+ * Generic "does not exist" messages are not enough: they can also describe a
+ * missing procedure, table, or property and must not be treated as a dropped
+ * HNSW index unless the expected vector index name is present.
  *
  * Exported primarily for unit testing; product callers go through
  * `dropVectorIndex` instead.
  */
-export function isAbsentIndexError(msg: string): boolean {
-  return /does not exist|doesn't have an index with name|no such (vector |fts )?index/i.test(
-    msg,
+export function isAbsentIndexError(
+  msg: string,
+  tableName: string,
+  indexName: string,
+): boolean {
+  const table = escapeRegExp(tableName);
+  const index = escapeRegExp(indexName);
+  const missingOnTable = new RegExp(
+    `table\\s+${table}\\s+(?:doesn'?t|does\\s+not)\\s+have\\s+an\\s+index\\s+with\\s+name\\s+['"]?${index}['"]?`,
+    "i",
+  );
+  const missingNamedIndex = new RegExp(
+    `(?:doesn'?t|does\\s+not)\\s+have\\s+an\\s+index\\s+with\\s+name\\s+['"]?${index}['"]?`,
+    "i",
+  );
+  const noSuchVectorIndex = new RegExp(
+    `no\\s+such\\s+(?:vector\\s+)?index\\s+['"]?${index}['"]?`,
+    "i",
+  );
+  const namedVectorIndexDoesNotExist = new RegExp(
+    `(?:vector\\s+)?index\\s+['"]?${index}['"]?\\s+does\\s+not\\s+exist`,
+    "i",
+  );
+
+  return (
+    missingOnTable.test(msg) ||
+    missingNamedIndex.test(msg) ||
+    noSuchVectorIndex.test(msg) ||
+    namedVectorIndexDoesNotExist.test(msg)
+  );
+}
+
+export function isAbsentFtsIndexError(
+  msg: string,
+  tableName: string,
+  indexName: string,
+): boolean {
+  const table = escapeRegExp(tableName);
+  const index = escapeRegExp(indexName);
+  const missingOnTable = new RegExp(
+    `table\\s+${table}\\s+(?:doesn'?t|does\\s+not)\\s+have\\s+an\\s+index\\s+with\\s+name\\s+['"]?${index}['"]?`,
+    "i",
+  );
+  const missingNamedIndex = new RegExp(
+    `(?:doesn'?t|does\\s+not)\\s+have\\s+an\\s+index\\s+with\\s+name\\s+['"]?${index}['"]?`,
+    "i",
+  );
+  const noSuchFtsIndex = new RegExp(
+    `no\\s+such\\s+fts\\s+index\\s+['"]?${index}['"]?`,
+    "i",
+  );
+  const namedIndexDoesNotExist = new RegExp(
+    `(?:fts\\s+)?index\\s+['"]?${index}['"]?\\s+does\\s+not\\s+exist`,
+    "i",
+  );
+  return (
+    missingOnTable.test(msg) ||
+    missingNamedIndex.test(msg) ||
+    noSuchFtsIndex.test(msg) ||
+    namedIndexDoesNotExist.test(msg)
+  );
+}
+
+function isMissingFtsProcedureError(msg: string): boolean {
+  return (
+    /procedure\s+DROP_FTS_INDEX\s+(?:does\s+not|doesn'?t)\s+exist/i.test(
+      msg,
+    ) || /function\s+DROP_FTS_INDEX\s+is\s+not\s+defined/i.test(msg)
+  );
+}
+
+function isMissingVectorProcedureError(msg: string): boolean {
+  return (
+    /procedure\s+DROP_VECTOR_INDEX\s+(?:does\s+not|doesn'?t)\s+exist/i.test(
+      msg,
+    ) || /function\s+DROP_VECTOR_INDEX\s+is\s+not\s+defined/i.test(msg)
   );
 }
 
@@ -205,10 +446,25 @@ export async function dropVectorIndex(
   tableName: string,
   indexName: string,
 ): Promise<DropVectorIndexResult> {
+  return dropVectorIndexWithDependencies(conn, tableName, indexName, {
+    execStoredProc,
+    showIndexes: showIndexesStrict,
+  });
+}
+
+export async function dropVectorIndexWithDependencies(
+  conn: Connection,
+  tableName: string,
+  indexName: string,
+  dependencies: {
+    execStoredProc: (conn: Connection, statement: string) => Promise<void>;
+    showIndexes: (conn: Connection) => Promise<IndexInfo[]>;
+  },
+): Promise<DropVectorIndexResult> {
   try {
     validateIdentifier(tableName, "table name");
     validateIdentifier(indexName, "index name");
-    await execStoredProc(
+    await dependencies.execStoredProc(
       conn,
       `CALL DROP_VECTOR_INDEX('${tableName}', '${indexName}')`,
     );
@@ -218,7 +474,10 @@ export async function dropVectorIndex(
     return { status: "dropped" };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (isAbsentIndexError(msg)) {
+    if (
+      isAbsentIndexError(msg, tableName, indexName) ||
+      isMissingVectorProcedureError(msg)
+    ) {
       // Belt-and-suspenders: cross-check via SHOW_INDEXES. The binder error
       // is authoritative on its own, but if SHOW_INDEXES happens to be
       // available it lets us catch a hypothetical race where the index was
@@ -226,18 +485,24 @@ export async function dropVectorIndex(
       // returning [] (fresh DB or silent driver failure) is consistent with
       // the binder's catalog verdict and is treated as confirmation.
       try {
-        const indexes = await showIndexes(conn);
-        const stillPresent = indexes.some(
-          (i) => i.name === indexName && i.type === "vector",
+        const indexes = await dependencies.showIndexes(conn);
+        const stillPresent = indexExistsForTable(
+          indexes,
+          tableName,
+          indexName,
+          "vector",
         );
-        if (!stillPresent) {
+        if (
+          !stillPresent &&
+          !hasAmbiguousIndexWithoutTable(indexes, indexName, "vector")
+        ) {
           logger.debug(
             `[index-lifecycle] Vector index '${indexName}' on ${tableName} already absent`,
           );
           return { status: "absent" };
         }
       } catch {
-        // showIndexes threw — fall through to warn and return a failed result.
+        // showIndexes threw - fall through to warn and return a failed result.
       }
     }
     logger.warn(
@@ -261,7 +526,58 @@ interface ShowIndexRow {
   property_name?: string;
   property_names?: string[];
   table_name?: string;
+  extension_loaded?: boolean;
   [key: string]: unknown;
+}
+
+function parseShowIndexRows(rows: ShowIndexRow[]): IndexInfo[] {
+  const results: IndexInfo[] = [];
+  for (const row of rows) {
+    const name = String(row.index_name ?? row.name ?? "");
+    const rawType = String(row.index_type ?? row.type ?? "").toLowerCase();
+
+    // FTS indexes report property_names (array), vector indexes use property_name (string).
+    let property = "";
+    if (Array.isArray(row.property_names) && row.property_names.length > 0) {
+      property = String(row.property_names[0]);
+    } else if (row.property_name) {
+      property = String(row.property_name);
+    } else if (row.property) {
+      property = String(row.property);
+    }
+
+    const type: "fts" | "vector" =
+      rawType.includes("vector") || rawType.includes("hnsw")
+        ? "vector"
+        : "fts";
+
+    const tableName =
+      typeof row.table_name === "string" && row.table_name.length > 0
+        ? row.table_name
+        : undefined;
+    const extensionLoaded =
+      typeof row.extension_loaded === "boolean"
+        ? row.extension_loaded
+        : undefined;
+
+    results.push({
+      name,
+      type,
+      property,
+      ...(tableName ? { tableName } : {}),
+      ...(extensionLoaded !== undefined ? { extensionLoaded } : {}),
+      status: extensionLoaded === false ? "unknown" : "healthy",
+    });
+  }
+  return results;
+}
+
+export async function showIndexesStrict(conn: Connection): Promise<IndexInfo[]> {
+  const rows = await queryStoredProcAll<ShowIndexRow>(
+    conn,
+    "CALL SHOW_INDEXES() RETURN *",
+  );
+  return parseShowIndexRows(rows);
 }
 
 /**
@@ -271,33 +587,7 @@ interface ShowIndexRow {
  */
 export async function showIndexes(conn: Connection): Promise<IndexInfo[]> {
   try {
-    const rows = await queryStoredProcAll<ShowIndexRow>(
-      conn,
-      "CALL SHOW_INDEXES() RETURN *",
-    );
-    const results: IndexInfo[] = [];
-    for (const row of rows) {
-      const name = String(row.index_name ?? row.name ?? "");
-      const rawType = String(row.index_type ?? row.type ?? "").toLowerCase();
-
-      // FTS indexes report property_names (array), vector indexes use property_name (string)
-      let property = "";
-      if (Array.isArray(row.property_names) && row.property_names.length > 0) {
-        property = String(row.property_names[0]);
-      } else if (row.property_name) {
-        property = String(row.property_name);
-      } else if (row.property) {
-        property = String(row.property);
-      }
-
-      const type: "fts" | "vector" =
-        rawType.includes("vector") || rawType.includes("hnsw")
-          ? "vector"
-          : "fts";
-
-      results.push({ name, type, property, status: "healthy" });
-    }
-    return results;
+    return await showIndexesStrict(conn);
   } catch (err) {
     logger.debug(
       `[index-lifecycle] SHOW_INDEXES() RETURN * unavailable: ${
@@ -362,24 +652,31 @@ export async function checkIndexHealth(
   conn: Connection,
 ): Promise<IndexHealthResult> {
   const indexes = await showIndexes(conn);
-  const indexNames = new Set(indexes.map((i) => i.name));
 
-  const ftsExists = indexNames.has(DEFAULT_FTS_INDEX_NAME);
+  const ftsExists = indexExistsForTable(
+    indexes,
+    "Symbol",
+    DEFAULT_FTS_INDEX_NAME,
+    "fts",
+  );
 
   const vectors = Object.entries(EMBEDDING_MODELS).map(([model]) => {
     const fallbackName = getVectorIndexName(model);
     const propName =
       getVecPropertyName(model) ?? getEmbeddingPropertyName(model);
     // Check by property name match as well as the derived index name
-    const byName = fallbackName !== null && indexNames.has(fallbackName);
-    const byProp =
-      propName !== null &&
-      indexes.some((i) => i.type === "vector" && i.property === propName);
-    const exists = byName || byProp;
+    const match = indexes.find(
+      (index) =>
+        index.type === "vector" &&
+        index.tableName === "Symbol" &&
+        ((fallbackName !== null && index.name === fallbackName) ||
+          (propName !== null && index.property === propName)),
+    );
+    const exists = match !== undefined;
     return {
       model,
       exists,
-      healthy: exists,
+      healthy: match?.status === "healthy",
       indexName: fallbackName,
     };
   });
@@ -387,7 +684,15 @@ export async function checkIndexHealth(
   return {
     fts: {
       exists: ftsExists,
-      healthy: ftsExists,
+      healthy:
+        ftsExists &&
+        indexes.some(
+          (index) =>
+            index.name === DEFAULT_FTS_INDEX_NAME &&
+            index.type === "fts" &&
+            index.tableName === "Symbol" &&
+            index.status === "healthy",
+        ),
       indexName: DEFAULT_FTS_INDEX_NAME,
     },
     vectors,
@@ -401,7 +706,7 @@ export async function checkIndexHealth(
 /**
  * Idempotently create all indexes required by the given retrieval config.
  *
- * Checks getExtensionCapabilities() first — if neither FTS nor vector
+ * Checks getExtensionCapabilities() first - if neither FTS nor vector
  * extensions are available, all operations are skipped gracefully.
  *
  * @returns Structured result listing which indexes were created, skipped, or failed.
@@ -416,7 +721,6 @@ export async function ensureIndexes(
 
   // Discover existing indexes once so we can skip already-present ones.
   const existing = await showIndexes(conn);
-  const existingNames = new Set(existing.map((i) => i.name));
 
   // ------------------------------------------------------------------
   // FTS index
@@ -425,23 +729,28 @@ export async function ensureIndexes(
   if (ftsConfig?.enabled !== false) {
     if (!caps.fts) {
       logger.debug(
-        "[index-lifecycle] Skipping FTS index — extension unavailable",
+        "[index-lifecycle] Skipping FTS index - extension unavailable",
       );
       result.skipped.push(ftsConfig?.indexName ?? DEFAULT_FTS_INDEX_NAME);
     } else {
       const ftsIndexName = ftsConfig?.indexName ?? DEFAULT_FTS_INDEX_NAME;
-      if (existingNames.has(ftsIndexName)) {
-        logger.debug(
-          `[index-lifecycle] FTS index '${ftsIndexName}' already exists, skipping`,
-        );
-        result.skipped.push(ftsIndexName);
-      } else {
-        const ok = await createFtsIndex(conn, "Symbol", ftsIndexName);
-        if (ok) {
+      const ensureResult = await ensureFtsIndexForNonEmptyTable(
+        conn,
+        "Symbol",
+        ftsIndexName,
+        existing,
+      );
+      switch (ensureResult.status) {
+        case "created":
           result.created.push(ftsIndexName);
-        } else {
+          break;
+        case "failed":
           result.failed.push(ftsIndexName);
-        }
+          break;
+        case "exists":
+        case "empty":
+          result.skipped.push(ftsIndexName);
+          break;
       }
     }
   } else {
@@ -451,13 +760,13 @@ export async function ensureIndexes(
   }
 
   // ------------------------------------------------------------------
-  // Vector indexes — one per configured model
+  // Vector indexes - one per configured model
   // ------------------------------------------------------------------
   const vectorConfig = config.vector;
   if (vectorConfig?.enabled !== false) {
     if (!caps.vector) {
       logger.debug(
-        "[index-lifecycle] Skipping vector indexes — extension unavailable",
+        "[index-lifecycle] Skipping vector indexes - extension unavailable",
       );
       // Record all expected vector index names as skipped
       for (const model of Object.keys(EMBEDDING_MODELS)) {
@@ -488,7 +797,7 @@ export async function ensureIndexes(
           getVectorIndexName(model) ??
           `symbol_vec_${propName.toLowerCase()}`;
 
-        if (existingNames.has(indexName)) {
+        if (indexExistsForTable(existing, "Symbol", indexName, "vector")) {
           logger.debug(
             `[index-lifecycle] Vector index '${indexName}' already exists, skipping`,
           );
@@ -518,7 +827,7 @@ export async function ensureIndexes(
   }
 
   logger.info(
-    `[index-lifecycle] ensureIndexes complete — created: [${result.created.join(", ")}], skipped: [${result.skipped.join(", ")}], failed: [${result.failed.join(", ")}]`,
+    `[index-lifecycle] ensureIndexes complete - created: [${result.created.join(", ")}], skipped: [${result.skipped.join(", ")}], failed: [${result.failed.join(", ")}]`,
   );
 
   return result;
@@ -545,7 +854,6 @@ export async function ensureEntityIndexes(
 
   const caps = getExtensionCapabilities();
   const existing = await showIndexes(conn);
-  const existingNames = new Set(existing.map((i) => i.name));
 
   // ------------------------------------------------------------------
   // FTS indexes for entity tables
@@ -560,23 +868,28 @@ export async function ensureEntityIndexes(
 
   if (caps.fts) {
     for (const { table, indexName } of ftsTables) {
-      if (existingNames.has(indexName)) {
-        logger.debug(
-          `[index-lifecycle] Entity FTS index '${indexName}' already exists, skipping`,
-        );
-        result.skipped.push(indexName);
-      } else {
-        const ok = await createFtsIndex(conn, table, indexName);
-        if (ok) {
+      const ensureResult = await ensureFtsIndexForNonEmptyTable(
+        conn,
+        table,
+        indexName,
+        existing,
+      );
+      switch (ensureResult.status) {
+        case "created":
           result.created.push(indexName);
-        } else {
+          break;
+        case "failed":
           result.failed.push(indexName);
-        }
+          break;
+        case "exists":
+        case "empty":
+          result.skipped.push(indexName);
+          break;
       }
     }
   } else {
     logger.debug(
-      "[index-lifecycle] Skipping entity FTS indexes — extension unavailable",
+      "[index-lifecycle] Skipping entity FTS indexes - extension unavailable",
     );
     for (const { indexName } of ftsTables) {
       result.skipped.push(indexName);
@@ -598,7 +911,7 @@ export async function ensureEntityIndexes(
   if (caps.vector) {
     for (const [key, { property, dimension }] of vectorEntries) {
       const indexName = FILESUMMARY_VECTOR_INDEX_NAMES[key];
-      if (existingNames.has(indexName)) {
+      if (indexExistsForTable(existing, "FileSummary", indexName, "vector")) {
         logger.debug(
           `[index-lifecycle] FileSummary vector index '${indexName}' already exists, skipping`,
         );
@@ -620,7 +933,7 @@ export async function ensureEntityIndexes(
     }
   } else {
     logger.debug(
-      "[index-lifecycle] Skipping FileSummary vector indexes — extension unavailable",
+      "[index-lifecycle] Skipping FileSummary vector indexes - extension unavailable",
     );
     for (const [key] of vectorEntries) {
       result.skipped.push(FILESUMMARY_VECTOR_INDEX_NAMES[key]);
@@ -642,7 +955,7 @@ export async function ensureEntityIndexes(
   if (caps.vector) {
     for (const [key, { property, dimension }] of afVectorEntries) {
       const indexName = AGENTFEEDBACK_VECTOR_INDEX_NAMES[key];
-      if (existingNames.has(indexName)) {
+      if (indexExistsForTable(existing, "AgentFeedback", indexName, "vector")) {
         logger.debug(
           `[index-lifecycle] AgentFeedback vector index '${indexName}' already exists, skipping`,
         );
@@ -664,7 +977,7 @@ export async function ensureEntityIndexes(
     }
   } else {
     logger.debug(
-      "[index-lifecycle] Skipping AgentFeedback vector indexes — extension unavailable",
+      "[index-lifecycle] Skipping AgentFeedback vector indexes - extension unavailable",
     );
     for (const [key] of afVectorEntries) {
       result.skipped.push(AGENTFEEDBACK_VECTOR_INDEX_NAMES[key]);
@@ -672,7 +985,7 @@ export async function ensureEntityIndexes(
   }
 
   logger.info(
-    `[index-lifecycle] ensureEntityIndexes complete — created: [${result.created.join(", ")}], skipped: [${result.skipped.join(", ")}], failed: [${result.failed.join(", ")}]`,
+    `[index-lifecycle] ensureEntityIndexes complete - created: [${result.created.join(", ")}], skipped: [${result.skipped.join(", ")}], failed: [${result.failed.join(", ")}]`,
   );
 
   return result;

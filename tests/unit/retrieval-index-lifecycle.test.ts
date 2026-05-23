@@ -223,8 +223,22 @@ describe("showIndexes — SHOW_INDEXES() RETURN * compatibility", () => {
     );
   });
 
+  it("ShowIndexRow interface includes extension_loaded field", () => {
+    assert.ok(
+      src.includes("extension_loaded?: boolean"),
+      "ShowIndexRows should preserve extension_loaded so persisted unloaded indexes are not reported healthy",
+    );
+  });
+
+  it("IndexInfo keeps tableName for table-aware index checks", () => {
+    assert.ok(
+      src.includes("tableName?: string"),
+      "IndexInfo should expose tableName so same-name indexes on other tables do not confuse lifecycle checks",
+    );
+  });
+
   it("parsing prioritises index_name over name", () => {
-    const fnStart = src.indexOf("export async function showIndexes");
+    const fnStart = src.indexOf("function parseShowIndexRows");
     const fnBody = src.slice(fnStart, fnStart + 800);
     // The fix: Kuzu RETURN * columns are index_name, not name
     assert.ok(
@@ -234,7 +248,7 @@ describe("showIndexes — SHOW_INDEXES() RETURN * compatibility", () => {
   });
 
   it("parsing handles property_names array for FTS rows", () => {
-    const fnStart = src.indexOf("export async function showIndexes");
+    const fnStart = src.indexOf("function parseShowIndexRows");
     const fnBody = src.slice(fnStart, fnStart + 1000);
     assert.ok(
       fnBody.includes("Array.isArray(row.property_names)"),
@@ -253,6 +267,46 @@ describe("showIndexes — SHOW_INDEXES() RETURN * compatibility", () => {
     assert.ok(
       fnBody.includes("RETURN * unavailable"),
       "Error log should reference 'RETURN *' syntax in message",
+    );
+  });
+});
+
+describe("checkIndexHealth table-aware vector health", () => {
+  it("requires Symbol table for vector health checks", () => {
+    const fnStart = src.indexOf("export async function checkIndexHealth");
+    const fnBody = src.slice(fnStart, fnStart + 1800);
+    assert.ok(
+      fnBody.includes('index.tableName === "Symbol"'),
+      "Symbol vector health should not be satisfied by FileSummary or AgentFeedback vector indexes",
+    );
+    assert.ok(
+      !fnBody.includes("index.tableName === undefined"),
+      "health checks should not treat missing table metadata as Symbol confirmation",
+    );
+    assert.ok(
+      fnBody.includes('match?.status === "healthy"'),
+      "unloaded persisted indexes should exist but not report as healthy",
+    );
+  });
+});
+
+describe("ensureIndexes vector table awareness", () => {
+  it("uses table-aware vector checks for Symbol and entity vector indexes", () => {
+    assert.ok(
+      src.includes('indexExistsForTable(existing, "Symbol", indexName, "vector")'),
+      "Symbol vector ensure should not rely on a global index name set",
+    );
+    assert.ok(
+      src.includes(
+        'indexExistsForTable(existing, "FileSummary", indexName, "vector")',
+      ),
+      "FileSummary vector ensure should be table-aware",
+    );
+    assert.ok(
+      src.includes(
+        'indexExistsForTable(existing, "AgentFeedback", indexName, "vector")',
+      ),
+      "AgentFeedback vector ensure should be table-aware",
     );
   });
 });
@@ -291,6 +345,75 @@ describe("createFtsIndex — safe literal query", () => {
     assert.ok(
       !fnBody.includes("await exec("),
       "should NOT use exec() for Kuzu DDL procedures",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dropFtsIndex - safe literal query path
+// ---------------------------------------------------------------------------
+describe("dropFtsIndex - safe literal query", () => {
+  it("exports a stored-procedure helper for FTS index deletion", () => {
+    const fnStart = src.indexOf("export async function dropFtsIndex");
+    assert.ok(fnStart !== -1, "dropFtsIndex function must exist");
+    const fnBody = src.slice(fnStart, fnStart + 1000);
+    assert.ok(
+      fnBody.includes("execStoredProc("),
+      "dropFtsIndex should use execStoredProc for Kuzu procedure calls",
+    );
+  });
+
+  it("parsing maps extension_loaded false to unknown health", () => {
+    const fnStart = src.indexOf("function parseShowIndexRows");
+    const fnBody = src.slice(fnStart, fnStart + 1600);
+    assert.ok(fnBody.includes("row.extension_loaded"));
+    assert.ok(
+      fnBody.includes(
+        'status: extensionLoaded === false ? "unknown" : "healthy"',
+      ),
+    );
+  });
+
+  it("parsing maps table_name to IndexInfo.tableName", () => {
+    const fnStart = src.indexOf("function parseShowIndexRows");
+    const fnBody = src.slice(fnStart, fnStart + 1600);
+    assert.ok(
+      fnBody.includes("row.table_name"),
+      "showIndexes should read table_name from SHOW_INDEXES rows",
+    );
+    assert.ok(
+      fnBody.includes("tableName"),
+      "showIndexes should preserve table_name as tableName",
+    );
+  });
+
+  it("validates identifiers before DROP_FTS_INDEX interpolation", () => {
+    const fnStart = src.indexOf("export async function dropFtsIndex");
+    const fnBody = src.slice(fnStart, fnStart + 1000);
+    assert.ok(
+      fnBody.includes("validateIdentifier"),
+      "dropFtsIndex should validate identifiers to prevent injection",
+    );
+    assert.ok(
+      fnBody.includes("DROP_FTS_INDEX("),
+      "dropFtsIndex should call DROP_FTS_INDEX",
+    );
+  });
+
+  it("uses FTS-specific absent-index matching plus SHOW_INDEXES confirmation", () => {
+    const fnStart = src.indexOf("export async function dropFtsIndex");
+    const fnBody = src.slice(fnStart, fnStart + 2400);
+    assert.ok(
+      fnBody.includes("isAbsentFtsIndexError(msg, tableName, indexName)"),
+      "dropFtsIndex should not use the generic vector absent-index matcher",
+    );
+    assert.ok(
+      fnBody.includes("dependencies.showIndexes(conn)"),
+      "dropFtsIndex should confirm absent FTS indexes through SHOW_INDEXES",
+    );
+    assert.ok(
+      fnBody.includes("indexExistsForTable("),
+      "dropFtsIndex should check the named FTS index on the requested table specifically",
     );
   });
 });

@@ -36,8 +36,8 @@ Create a new plugin in 5 minutes:
 
 ```bash
 # 1. Create plugin directory
-mkdir my-lang-plugin
-cd my-lang-plugin
+mkdir -p plugins/my-lang-plugin
+cd plugins/my-lang-plugin
 
 # 2. Initialize package.json
 npm init -y
@@ -52,7 +52,7 @@ npm run build
 # Add to config/sdlmcp.config.json:
 {
   "plugins": {
-    "paths": ["./my-lang-plugin/dist/index.js"],
+    "paths": ["./plugins/my-lang-plugin/dist/index.js"],
     "enabled": true
   }
 }
@@ -114,12 +114,15 @@ export async function createAdapters() {
       extension: ".mylang",
       languageId: "mylang",
       factory: () => new MyLangAdapter(),
+      // Optional for tree-sitter-backed adapters: structuralMatcher,
     },
   ];
 }
 
 export default { manifest, createAdapters };
 ```
+
+`structuralMatcher` is optional. Provide it only when your adapter returns a real tree-sitter tree and can compile grammar-native queries; SDL-MCP then enables `search.edit` `targeting:"identifier"` and `targeting:"structural"` for your plugin language.
 
 ## Creating a Plugin
 
@@ -230,18 +233,16 @@ class MyLangAdapter extends BaseAdapter {
       const funcMatch = line.match(/function\s+(\w+)/);
       if (funcMatch) {
         symbols.push({
-          id: `${filePath}:fn:${funcMatch[1]}`,
+          nodeId: `${filePath}:function:${funcMatch[1]}:${index + 1}`,
           name: funcMatch[1],
           kind: "function",
-          filePath,
+          exported: false,
           range: {
             startLine: index + 1,
             startCol: line.indexOf(funcMatch[1]),
             endLine: index + 1,
             endCol: line.indexOf(funcMatch[1]) + funcMatch[1].length,
           },
-          parentId: null,
-          metadata: {},
         });
       }
     });
@@ -252,25 +253,20 @@ class MyLangAdapter extends BaseAdapter {
   extractImports(
     _tree: any,
     content: string,
-    filePath: string,
+    _filePath: string,
   ): ExtractedImport[] {
     const imports: ExtractedImport[] = [];
 
     const lines = content.split("\n");
-    lines.forEach((line, index) => {
+    lines.forEach((line) => {
       const importMatch = line.match(/import\s+"(.+)"/);
       if (importMatch) {
         imports.push({
-          id: `${filePath}:import:${index}`,
-          filePath,
-          range: {
-            startLine: index + 1,
-            startCol: line.indexOf("import"),
-            endLine: index + 1,
-            endCol: line.length,
-          },
-          moduleName: importMatch[1],
-          symbols: [],
+          specifier: importMatch[1],
+          isRelative: importMatch[1].startsWith("."),
+          isExternal: !importMatch[1].startsWith("."),
+          imports: [],
+          isReExport: false,
         });
       }
     });
@@ -281,7 +277,7 @@ class MyLangAdapter extends BaseAdapter {
   extractCalls(
     _tree: any,
     content: string,
-    filePath: string,
+    _filePath: string,
     extractedSymbols: ExtractedSymbol[],
   ): ExtractedCall[] {
     const calls: ExtractedCall[] = [];
@@ -295,15 +291,17 @@ class MyLangAdapter extends BaseAdapter {
 
         if (symbol) {
           calls.push({
-            id: `${filePath}:call:${index}:${functionName}`,
-            filePath,
+            callerNodeId: "global",
+            calleeIdentifier: functionName,
+            isResolved: true,
+            callType: "function",
+            calleeSymbolId: symbol.nodeId,
             range: {
               startLine: index + 1,
               startCol: line.indexOf(functionName),
               endLine: index + 1,
               endCol: line.indexOf(functionName) + functionName.length,
             },
-            targetSymbolId: symbol.id,
           });
         }
       }
@@ -325,6 +323,38 @@ export async function createAdapters(): Promise<PluginAdapter[]> {
 
 export default { manifest, createAdapters };
 ```
+
+### Optional: Enable AST-Aware `search.edit`
+
+Tree-sitter-backed plugins can opt into AST-aware search edits by returning a `structuralMatcher` descriptor from `createAdapters()`. The descriptor declares the node types that are safe for `targeting:"identifier"` and compiles user-supplied tree-sitter queries for `targeting:"structural"`.
+
+```typescript
+import Parser from "tree-sitter";
+import type { StructuralMatcherDescriptor } from "sdl-mcp/dist/indexer/adapter/LanguageAdapter.js";
+import MyLangGrammar from "tree-sitter-mylang";
+
+const language = MyLangGrammar as Parser.Language;
+
+const structuralMatcher = {
+  identifierNodeTypes: ["identifier"],
+  createQuery(queryString: string): Parser.Query {
+    return new Parser.Query(language, queryString);
+  },
+} satisfies StructuralMatcherDescriptor;
+
+export async function createAdapters(): Promise<PluginAdapter[]> {
+  return [
+    {
+      extension: ".mylang",
+      languageId: "mylang",
+      factory: () => new MyLangAdapter(),
+      structuralMatcher,
+    },
+  ];
+}
+```
+
+Keep `identifierNodeTypes` conservative. Include only grammar nodes that represent source identifiers, not string fragments, comment text, or broad expression nodes.
 
 ### Step 4: Build Plugin
 
@@ -426,7 +456,8 @@ Add plugin to `config/sdlmcp.config.json`:
     "allowBreakGlass": true
   },
   "plugins": {
-    "paths": ["./my-lang-plugin/dist/index.js"],
+    "paths": ["./plugins/my-lang-plugin/dist/index.js"],
+    "trustedRoots": ["./plugins"],
     "enabled": true,
     "strictVersioning": true
   }
@@ -441,7 +472,12 @@ Array of plugin file paths. Each path can be:
 
 - Absolute: `/usr/local/lib/sdl-mcp-plugins/my-plugin/dist/index.js`
 - Relative to config dir: `./plugins/my-plugin/dist/index.js`
-- Relative to cwd: `my-plugin/dist/index.js`
+
+Relative paths resolve from the SDL-MCP config file directory, not process cwd.
+If `plugins.trustedRoots` is configured, each plugin entrypoint must resolve
+inside one of those roots after symlinks are resolved. Without `trustedRoots`,
+relative plugin paths trust the config directory and absolute plugin paths trust
+their entrypoint directory.
 
 #### `plugins.enabled` (optional, boolean)
 
@@ -452,6 +488,21 @@ Enable or disable plugin loading. Default: `true`
   "plugins": {
     "paths": ["./plugin1.js"],
     "enabled": false
+  }
+}
+```
+
+#### `plugins.trustedRoots` (optional, array)
+
+Trusted plugin directories. Relative roots resolve from the config directory.
+When set, every configured plugin entrypoint must resolve inside one of these
+directories after symlinks are resolved.
+
+```json
+{
+  "plugins": {
+    "paths": ["./plugins/plugin1/dist/index.js"],
+    "trustedRoots": ["./plugins"]
   }
 }
 ```
@@ -493,7 +544,7 @@ Set to `false` to allow compatible API versions (same major version).
 ```json
 {
   "plugins": {
-    "paths": ["./my-lang-plugin/dist/index.js"],
+    "paths": ["./plugins/my-lang-plugin/dist/index.js"],
     "enabled": true,
     "strictVersioning": false
   }
@@ -538,7 +589,7 @@ describe("MyLang Adapter", () => {
     const imports = adapter.extractImports(null, content, "test.my");
 
     assert.strictEqual(imports.length, 1);
-    assert.strictEqual(imports[0].moduleName, "stdlib");
+    assert.strictEqual(imports[0].specifier, "stdlib");
   });
 
   it("should extract calls", () => {
@@ -546,7 +597,13 @@ describe("MyLang Adapter", () => {
     const symbols = adapter.extractSymbols(null, content, "test.my");
     const calls = adapter.extractCalls(null, content, "test.my", symbols);
 
-    assert.ok(calls.length > 0);
+    assert.ok(
+      calls.some(
+        (call) =>
+          call.calleeIdentifier === "myFunc" &&
+          call.calleeSymbolId === symbols[0]?.nodeId,
+      ),
+    );
   });
 });
 ```
@@ -671,7 +728,8 @@ cp -r my-lang-plugin /shared/sdl-mcp-plugins/
 # Reference in config
 {
   "plugins": {
-    "paths": ["/shared/sdl-mcp-plugins/my-lang-plugin/dist/index.js"]
+    "paths": ["/shared/sdl-mcp-plugins/my-lang-plugin/dist/index.js"],
+    "trustedRoots": ["/shared/sdl-mcp-plugins"]
   }
 }
 ```

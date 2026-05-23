@@ -3351,6 +3351,56 @@ export interface FileWriteResponse {
 // Search/Edit (sdl.search.edit) Schemas
 // ============================================================================
 
+const SearchEditCaptureNameSchema = z
+  .string()
+  .min(1)
+  .max(80)
+  .regex(/^[A-Za-z_][A-Za-z0-9_-]*$/);
+const SearchEditCaptureValueSchema = z.string().max(500);
+const MAX_SEARCH_EDIT_REQUIRED_CAPTURES = 32;
+const BLOCKED_SEARCH_EDIT_CAPTURE_KEYS = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+const SearchEditRequiredCapturesRecordSchema = z
+  .record(SearchEditCaptureNameSchema, SearchEditCaptureValueSchema)
+  .superRefine((value, ctx) => {
+    const keys = Object.keys(value);
+    if (keys.length > MAX_SEARCH_EDIT_REQUIRED_CAPTURES) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `requiredCaptures may include at most ${MAX_SEARCH_EDIT_REQUIRED_CAPTURES} entries.`,
+      });
+    }
+    for (const key of keys) {
+      if (BLOCKED_SEARCH_EDIT_CAPTURE_KEYS.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `Blocked requiredCaptures key: ${key}`,
+        });
+      }
+    }
+  });
+const SearchEditRequiredCapturesSchema = z
+  .any()
+  .superRefine((value, ctx) => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return;
+    }
+    for (const key of Object.getOwnPropertyNames(value)) {
+      if (BLOCKED_SEARCH_EDIT_CAPTURE_KEYS.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `Blocked requiredCaptures key: ${key}`,
+        });
+      }
+    }
+  })
+  .pipe(SearchEditRequiredCapturesRecordSchema);
+
 export const SearchEditQuerySchema = z.object({
   literal: z.string().min(1).max(500).optional(),
   regex: z.string().min(1).max(500).optional(),
@@ -3358,7 +3408,7 @@ export const SearchEditQuerySchema = z.object({
   global: z.boolean().optional(),
   structural: z
     .object({
-      language: z.enum(["typescript"]).optional(),
+      language: z.string().min(1).max(80).optional(),
       treeSitterQuery: z.string().min(1).max(5000),
       capture: z
         .string()
@@ -3366,16 +3416,7 @@ export const SearchEditQuerySchema = z.object({
         .max(80)
         .regex(/^[A-Za-z_][A-Za-z0-9_-]*$/)
         .optional(),
-      requiredCaptures: z
-        .record(
-          z
-            .string()
-            .min(1)
-            .max(80)
-            .regex(/^[A-Za-z_][A-Za-z0-9_-]*$/),
-          z.string().max(500),
-        )
-        .optional(),
+      requiredCaptures: SearchEditRequiredCapturesSchema.optional(),
       replacement: z.string().max(5000).optional(),
     })
     .optional(),

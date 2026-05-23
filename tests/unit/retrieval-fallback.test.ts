@@ -157,6 +157,71 @@ describe("shouldFallbackToLegacy — source verification", () => {
   });
 });
 
+describe("checkRetrievalHealth capability projection", () => {
+  it("requires healthy retrieval indexes rather than catalog presence alone", async () => {
+    const { buildRetrievalCapabilitiesFromIndexHealth } = await import(
+      "../../dist/retrieval/fallback.js"
+    );
+
+    const caps = buildRetrievalCapabilitiesFromIndexHealth(
+      {
+        fts: {
+          exists: true,
+          healthy: false,
+          indexName: "symbol_search_text_v1",
+        },
+        vectors: [
+          {
+            model: "nomic-embed-text-v1.5",
+            exists: true,
+            healthy: false,
+            indexName: "symbol_vec_nomic_v1",
+          },
+          {
+            model: "jina-embeddings-v2-base-code",
+            exists: true,
+            healthy: true,
+            indexName: "symbol_vec_jina_code_v2",
+          },
+        ],
+      },
+      { fts: true, vector: true },
+    );
+
+    assert.equal(caps.fts, false);
+    assert.equal(caps.vectorNomic, false);
+    assert.equal(caps.vectorJinaCode, true);
+  });
+
+  it("also requires loaded retrieval extensions before enabling backends", async () => {
+    const { buildRetrievalCapabilitiesFromIndexHealth } = await import(
+      "../../dist/retrieval/fallback.js"
+    );
+
+    const caps = buildRetrievalCapabilitiesFromIndexHealth(
+      {
+        fts: {
+          exists: true,
+          healthy: true,
+          indexName: "symbol_search_text_v1",
+        },
+        vectors: [
+          {
+            model: "jina-embeddings-v2-base-code",
+            exists: true,
+            healthy: true,
+            indexName: "symbol_vec_jina_code_v2",
+          },
+        ],
+      },
+      { fts: false, vector: false },
+    );
+
+    assert.equal(caps.fts, false);
+    assert.equal(caps.vectorJinaCode, false);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // RetrievalCapabilities structural tests
 // ---------------------------------------------------------------------------
