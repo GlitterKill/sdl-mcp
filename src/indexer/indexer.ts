@@ -65,10 +65,12 @@ import {
   runScipIngestInsideIndex,
   scipIngestWillRun,
 } from "../scip/ingestion.js";
+import type { BatchPersistDrainDiagnostics } from "./parser/batch-persist.js";
 export type { IndexProgress, IndexProgressSubstage } from "./indexer-init.js";
 export interface IndexTimingDiagnostics {
   totalMs: number;
   phases: Record<string, number>;
+  pass1Drain?: BatchPersistDrainDiagnostics;
 }
 
 export interface IndexRepoOptions {
@@ -642,6 +644,7 @@ async function indexRepoImpl(
       workerPool,
       onProgress,
       signal,
+      includeTimings: Boolean(phaseTimings),
     };
 
     let pass1EngineUsed: "rust" | "ts" = useRustEngine ? "rust" : "ts";
@@ -779,7 +782,7 @@ async function indexRepoImpl(
       // 0 edges. The previous full-mode `resolvePass2Targets is a no-op so
       // skip the drain` shortcut was incorrect — the per-file DB reads still
       // need pass-1 settled regardless of mode.
-      await pass1DrainPromise;
+      await measurePhase("pass1Drain", () => pass1DrainPromise);
       const pass2Task = measurePhase("pass2", async () =>
         runPass2Resolvers({
           repoId,
@@ -805,6 +808,13 @@ async function indexRepoImpl(
       // Always settle the drain before moving past pass 2 — finalizeEdges
       // and every downstream phase reads the persisted graph state.
       [pass2Edges] = await Promise.all([pass2Task, pass1DrainPromise]);
+    }
+    if (phaseTimings && pass1Acc.pass1DrainDiagnostics) {
+      for (const [phaseName, phase] of Object.entries(
+        pass1Acc.pass1DrainDiagnostics.phases,
+      )) {
+        phaseTimings[`pass1Drain.write.${phaseName}`] = phase.totalMs;
+      }
     }
     totalEdgesCreated += pass2Edges;
 
@@ -1059,7 +1069,13 @@ async function indexRepoImpl(
       // than the actual wall time on full reindexes with embeddings.
       durationMs: totalMs,
       summaryStats,
-      timings: phaseTimings ? { totalMs, phases: phaseTimings } : undefined,
+      timings: phaseTimings
+        ? {
+            totalMs,
+            phases: phaseTimings,
+            pass1Drain: pass1Acc.pass1DrainDiagnostics,
+          }
+        : undefined,
       // Phase 1 Task 1.12 — surface Pass-1 engine breakdown so tests and
       // tooling can inspect Rust coverage / fallback rates without scraping
       // the audit log.

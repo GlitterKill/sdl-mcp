@@ -16,6 +16,7 @@ import { normalizePath } from "../util/paths.js";
 import type { ConfigEdge } from "./configEdges.js";
 import type { RepoConfig } from "../config/types.js";
 import type { FileMetadata } from "./fileScanner.js";
+import type { BatchPersistDrainDiagnostics } from "./parser/batch-persist.js";
 import type { ParserWorkerPool } from "./workerPool.js";
 import type { SymbolMapFileUpdate } from "./symbol-map-cache.js";
 import {
@@ -123,6 +124,12 @@ export interface Pass1Accumulator {
    * is referenced by both pass-1 and pass-2 modules.
    */
   pass1Extractions: import("./pass2/types.js").Pass1ExtractionCache;
+  /**
+   * Aggregate timing and row-count diagnostics for the queued pass-1 DB writes.
+   * Populated after `drainPromise` settles when indexing runs with timing
+   * diagnostics enabled.
+   */
+  pass1DrainDiagnostics?: BatchPersistDrainDiagnostics;
 }
 
 export interface Pass1Params {
@@ -145,6 +152,7 @@ export interface Pass1Params {
   workerPool?: ParserWorkerPool | null;
   onProgress: ((progress: IndexProgress) => void) | undefined;
   signal?: AbortSignal;
+  includeTimings?: boolean;
 }
 
 // ---------------------------------------------------------------------------

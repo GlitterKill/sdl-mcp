@@ -199,6 +199,36 @@ describe("index.refresh diagnostics", () => {
       "expected pass1 phase timing",
     );
     assert.equal(
+      typeof result.diagnostics.timings.phases.pass1Drain,
+      "number",
+      "expected pass1Drain phase timing",
+    );
+    const pass1Drain = result.diagnostics.timings.pass1Drain;
+    assert.ok(pass1Drain, "expected pass1 drain write diagnostics");
+    assert.ok(pass1Drain.batches > 0, "expected at least one pass1 flush batch");
+    assert.ok(
+      pass1Drain.rows.total >= pass1Drain.rows.files,
+      "expected aggregate pass1 row counts",
+    );
+    for (const phase of [
+      "deleteOldSymbols",
+      "upsertFiles",
+      "insertSymbolReferences",
+      "upsertSymbols",
+      "insertEdges",
+    ] as const) {
+      assert.equal(
+        typeof pass1Drain.phases[phase].totalMs,
+        "number",
+        `expected pass1Drain.${phase} timing`,
+      );
+      assert.equal(
+        typeof pass1Drain.phases[phase].rows,
+        "number",
+        `expected pass1Drain.${phase} row count`,
+      );
+    }
+    assert.equal(
       typeof result.diagnostics.timings.phases["initSharedState.tsResolver"],
       "number",
       "expected initSharedState.tsResolver timing",

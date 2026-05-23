@@ -41,6 +41,7 @@ export async function runPass1WithRustEngine(
     supportsPass2FilePath,
     concurrency,
     onProgress,
+    includeTimings,
   } = params;
 
   const acc: Pass1Accumulator = {
@@ -90,7 +91,9 @@ export async function runPass1WithRustEngine(
   acc.filesProcessed += skippedRustFiles;
   const tsFallbackFiles: FileMetadata[] = [];
 
-  const batchAccumulator = new BatchPersistAccumulator();
+  const batchAccumulator = new BatchPersistAccumulator(undefined, {
+    collectDiagnostics: includeTimings === true,
+  });
 
   // --- Pipelined chunk processing ---
   // Parse chunk N+1 (async, on libuv thread) while processing chunk N's
@@ -360,7 +363,9 @@ export async function runPass1WithRustEngine(
   // pass-2 bridge work. The progress emit gives the CLI a non-stuck-looking
   // substage label while the drain runs in the background.
   attachPass1DrainProgress(batchAccumulator, onProgress);
-  acc.drainPromise = batchAccumulator.drain();
+  acc.drainPromise = batchAccumulator.drain().then(() => {
+    acc.pass1DrainDiagnostics = batchAccumulator.getDiagnostics();
+  });
 
   return { acc, usedRust: true };
 }
@@ -388,6 +393,7 @@ export async function runPass1WithTsEngine(
     concurrency,
     workerPool,
     onProgress,
+    includeTimings,
   } = params;
 
   const acc: Pass1Accumulator = {
@@ -409,7 +415,9 @@ export async function runPass1WithTsEngine(
   // SAFETY: nextIndex++ must remain synchronous — no `await` between reading
   // and incrementing. JavaScript's single-threaded event loop guarantees
   // atomicity only when there is no yield point between the read and write.
-  const batchAccumulator = new BatchPersistAccumulator();
+  const batchAccumulator = new BatchPersistAccumulator(undefined, {
+    collectDiagnostics: includeTimings === true,
+  });
   let nextIndex = 0;
 
   const runWorker = async (): Promise<void> => {
@@ -489,7 +497,9 @@ export async function runPass1WithTsEngine(
   // doesn't masquerade as a stuck "99%" progress bar, and surrender the
   // promise to the caller for overlap with pass-2 bridge work.
   attachPass1DrainProgress(batchAccumulator, onProgress);
-  acc.drainPromise = batchAccumulator.drain();
+  acc.drainPromise = batchAccumulator.drain().then(() => {
+    acc.pass1DrainDiagnostics = batchAccumulator.getDiagnostics();
+  });
   return acc;
 }
 

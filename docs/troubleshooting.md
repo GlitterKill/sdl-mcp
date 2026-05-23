@@ -62,6 +62,22 @@ This catches most setup issues quickly.
 - Tune `indexing.concurrency`
 - Try the native Rust engine (`indexing.engine: "rust"`) for faster pass-1 extraction
 
+If the CLI appears to spend most of its time at `Flushing pass 1 writes`, run a
+diagnostic index against a temporary graph DB so production state is untouched:
+
+```powershell
+$profileDir = Join-Path $PWD ".tmp\pass1-drain-profile"
+New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+$env:SDL_GRAPH_DB_PATH = Join-Path $profileDir "sdl-mcp-graph.lbug"
+npx tsx scripts/index-repo.ts <repo-id> --mode full --config <config-path> --diagnostics --quiet-progress
+Remove-Item Env:SDL_GRAPH_DB_PATH
+```
+
+The timing output includes `pass1Drain`, nested `pass1Drain.write.*` totals, and
+a `Pass 1 Write Drain` row-count summary. Use the largest timings to separate
+stale symbol deletion, file upsert, symbol reference insert, symbol upsert, and
+`DEPENDS_ON` edge insert costs.
+
 ### Indexing or Tool Queue Timeouts
 
 Start by checking the server log named by `sdl-mcp info`. The two timeout

@@ -701,6 +701,28 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
         for (const [phase, ms] of entries) {
           console.log(`    ${ms.toString().padStart(6)}ms  ${phase}`);
         }
+        if (stats.timings.pass1Drain) {
+          const drain = stats.timings.pass1Drain;
+          console.log(
+            `\n  Pass 1 write batches: ${drain.batches} batch(es), ${drain.rows.total} row(s), ${drain.totalMs}ms write wall`,
+          );
+          console.log(
+            `    rows: files=${drain.rows.files}, symbols=${drain.rows.symbols}, refs=${drain.rows.refs}, edges=${drain.rows.edges}, existingFiles=${drain.rows.existingFiles}`,
+          );
+          const writeEntries = Object.entries(drain.phases).sort(
+            (a, b) => b[1].totalMs - a[1].totalMs,
+          );
+          for (const [phase, detail] of writeEntries) {
+            console.log(
+              `    ${detail.totalMs.toString().padStart(6)}ms  ${phase} (${detail.rows} row(s), ${detail.count} call(s), max=${detail.maxMs}ms)`,
+            );
+          }
+          if (drain.largestBatch) {
+            console.log(
+              `    largest batch: ${drain.largestBatch.rows} row(s), ${drain.largestBatch.totalMs}ms`,
+            );
+          }
+        }
       }
 
       // Incremental runs defer cluster/process/algorithm/summary/embedding

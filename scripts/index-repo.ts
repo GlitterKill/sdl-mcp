@@ -16,6 +16,8 @@ interface CliArgs {
   repoId: string;
   mode: "full" | "incremental";
   config?: string;
+  diagnostics: boolean;
+  quietProgress: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -23,7 +25,7 @@ function parseArgs(argv: string[]): CliArgs {
 
   if (args.length < 1) {
     console.error(
-      "Usage: tsx scripts/index-repo.ts <repoId> [--mode full|incremental] [--config path]",
+      "Usage: tsx scripts/index-repo.ts <repoId> [--mode full|incremental] [--config path] [--diagnostics] [--quiet-progress]",
     );
     process.exit(1);
   }
@@ -31,6 +33,8 @@ function parseArgs(argv: string[]): CliArgs {
   const repoId = args[0];
   let mode: "full" | "incremental" = "full";
   let config: string | undefined;
+  const diagnostics = args.includes("--diagnostics");
+  const quietProgress = args.includes("--quiet-progress");
 
   const modeIndex = args.findIndex((arg) => arg === "--mode");
   if (modeIndex !== -1 && modeIndex + 1 < args.length) {
@@ -50,7 +54,7 @@ function parseArgs(argv: string[]): CliArgs {
     }
   }
 
-  return { repoId, mode, config };
+  return { repoId, mode, config, diagnostics, quietProgress };
 }
 
 async function registerRepoIfNotExists(
@@ -92,6 +96,36 @@ function reportResult(result: IndexResult): void {
   console.log(`Symbols indexed: ${result.symbolsIndexed}`);
   console.log(`Edges created: ${result.edgesCreated}`);
   console.log(`Duration: ${(result.durationMs / 1000).toFixed(2)}s`);
+  if (result.timings) {
+    console.log("\n=== Timing Diagnostics ===");
+    for (const [phase, ms] of Object.entries(result.timings.phases).sort(
+      (a, b) => b[1] - a[1],
+    )) {
+      console.log(`${ms.toString().padStart(8)}ms  ${phase}`);
+    }
+    if (result.timings.pass1Drain) {
+      const drain = result.timings.pass1Drain;
+      console.log("\n=== Pass 1 Write Drain ===");
+      console.log(
+        `Batches: ${drain.batches}; rows: ${drain.rows.total}; write wall: ${drain.totalMs}ms`,
+      );
+      console.log(
+        `Rows by kind: files=${drain.rows.files}, symbols=${drain.rows.symbols}, refs=${drain.rows.refs}, edges=${drain.rows.edges}, existingFiles=${drain.rows.existingFiles}`,
+      );
+      for (const [phase, detail] of Object.entries(drain.phases).sort(
+        (a, b) => b[1].totalMs - a[1].totalMs,
+      )) {
+        console.log(
+          `${detail.totalMs.toString().padStart(8)}ms  ${phase} (${detail.rows} row(s), ${detail.count} call(s), max=${detail.maxMs}ms)`,
+        );
+      }
+      if (drain.largestBatch) {
+        console.log(
+          `Largest batch: ${drain.largestBatch.rows} row(s), ${drain.largestBatch.totalMs}ms`,
+        );
+      }
+    }
+  }
 }
 
 async function cleanupCliResources(): Promise<void> {
@@ -104,12 +138,20 @@ async function cleanupCliResources(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const { repoId, mode, config: configArg } = parseArgs(process.argv);
+  const {
+    repoId,
+    mode,
+    config: configArg,
+    diagnostics,
+    quietProgress,
+  } = parseArgs(process.argv);
   disableDerivedRefreshQueue();
+  const previousSdlConfig = process.env.SDL_CONFIG;
 
   try {
     console.log("Loading configuration...");
     const resolvedConfigPath = resolveCliConfigPath(configArg, "read");
+    process.env.SDL_CONFIG = resolvedConfigPath;
     const config: AppConfig = loadConfig(resolvedConfigPath);
 
     await initGraphDb(config, resolvedConfigPath);
@@ -123,10 +165,21 @@ async function main(): Promise<void> {
     await registerRepoIfNotExists(repoId, repoConfig);
 
     console.log(`Starting ${mode} index for repository: ${repoId}`);
-    const result: IndexResult = await indexRepo(repoId, mode, logProgress);
+    const result: IndexResult = await indexRepo(
+      repoId,
+      mode,
+      quietProgress ? undefined : logProgress,
+      undefined,
+      { includeTimings: diagnostics },
+    );
 
     reportResult(result);
   } finally {
+    if (previousSdlConfig === undefined) {
+      delete process.env.SDL_CONFIG;
+    } else {
+      process.env.SDL_CONFIG = previousSdlConfig;
+    }
     await cleanupCliResources();
   }
   process.exit(0);

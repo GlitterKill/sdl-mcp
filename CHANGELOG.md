@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **AST-aware search edit languages**: Extended `search.edit` `targeting:"identifier"` and `targeting:"structural"` beyond TypeScript/JavaScript to all built-in tree-sitter adapters, with plugin `structuralMatcher` descriptors for opt-in language support.
+- **Pass-1 drain diagnostics**: Added opt-in batch row counts and sub-timings for pass-1 write flushing so `deleteOldSymbols`, file upserts, symbol references, symbol upserts, and `DEPENDS_ON` edge inserts can be profiled independently against a temporary graph DB.
 
 ### Changed
 

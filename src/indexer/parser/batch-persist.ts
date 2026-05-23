@@ -1,3 +1,5 @@
+import { performance } from "node:perf_hooks";
+
 import { withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../db/ladybug-symbols.js";
@@ -19,6 +21,55 @@ interface FlushBatch {
   count: number;
 }
 
+export const BATCH_PERSIST_WRITE_PHASES = [
+  "deleteOldSymbols",
+  "upsertFiles",
+  "insertSymbolReferences",
+  "upsertSymbols",
+  "insertEdges",
+] as const;
+
+export type BatchPersistWritePhase =
+  (typeof BATCH_PERSIST_WRITE_PHASES)[number];
+
+export interface BatchPersistPhaseDiagnostics {
+  count: number;
+  skipped: number;
+  rows: number;
+  totalMs: number;
+  maxMs: number;
+}
+
+export interface BatchPersistBatchDiagnostics {
+  rows: number;
+  files: number;
+  symbols: number;
+  edges: number;
+  refs: number;
+  existingFiles: number;
+  totalMs: number;
+  phaseMs: Record<BatchPersistWritePhase, number>;
+}
+
+export interface BatchPersistDrainDiagnostics {
+  batches: number;
+  totalMs: number;
+  rows: {
+    total: number;
+    files: number;
+    symbols: number;
+    edges: number;
+    refs: number;
+    existingFiles: number;
+  };
+  phases: Record<BatchPersistWritePhase, BatchPersistPhaseDiagnostics>;
+  largestBatch: BatchPersistBatchDiagnostics | null;
+}
+
+export interface BatchPersistAccumulatorOptions {
+  collectDiagnostics?: boolean;
+}
+
 function describeBatch(batch: FlushBatch): Record<string, number> {
   return {
     rows: batch.count,
@@ -26,6 +77,63 @@ function describeBatch(batch: FlushBatch): Record<string, number> {
     symbols: batch.symbols.length,
     edges: batch.edges.length,
     refs: batch.refs.length,
+  };
+}
+
+function createPhaseDiagnostics(): Record<
+  BatchPersistWritePhase,
+  BatchPersistPhaseDiagnostics
+> {
+  return Object.fromEntries(
+    BATCH_PERSIST_WRITE_PHASES.map((phase) => [
+      phase,
+      { count: 0, skipped: 0, rows: 0, totalMs: 0, maxMs: 0 },
+    ]),
+  ) as Record<BatchPersistWritePhase, BatchPersistPhaseDiagnostics>;
+}
+
+function createEmptyPhaseMs(): Record<BatchPersistWritePhase, number> {
+  return Object.fromEntries(
+    BATCH_PERSIST_WRITE_PHASES.map((phase) => [phase, 0]),
+  ) as Record<BatchPersistWritePhase, number>;
+}
+
+function createDrainDiagnostics(): BatchPersistDrainDiagnostics {
+  return {
+    batches: 0,
+    totalMs: 0,
+    rows: {
+      total: 0,
+      files: 0,
+      symbols: 0,
+      edges: 0,
+      refs: 0,
+      existingFiles: 0,
+    },
+    phases: createPhaseDiagnostics(),
+    largestBatch: null,
+  };
+}
+
+function cloneDrainDiagnostics(
+  diagnostics: BatchPersistDrainDiagnostics,
+): BatchPersistDrainDiagnostics {
+  return {
+    batches: diagnostics.batches,
+    totalMs: diagnostics.totalMs,
+    rows: { ...diagnostics.rows },
+    phases: Object.fromEntries(
+      BATCH_PERSIST_WRITE_PHASES.map((phase) => [
+        phase,
+        { ...diagnostics.phases[phase] },
+      ]),
+    ) as Record<BatchPersistWritePhase, BatchPersistPhaseDiagnostics>,
+    largestBatch: diagnostics.largestBatch
+      ? {
+          ...diagnostics.largestBatch,
+          phaseMs: { ...diagnostics.largestBatch.phaseMs },
+        }
+      : null,
   };
 }
 
@@ -67,9 +175,16 @@ export class BatchPersistAccumulator {
   private progressCallback:
     | ((state: BatchPersistDrainProgress) => void)
     | null = null;
+  private readonly collectDiagnostics: boolean;
+  private readonly diagnostics: BatchPersistDrainDiagnostics;
 
-  constructor(flushThreshold = 512) {
+  constructor(
+    flushThreshold = 512,
+    options: BatchPersistAccumulatorOptions = {},
+  ) {
     this.flushThreshold = flushThreshold;
+    this.collectDiagnostics = options.collectDiagnostics === true;
+    this.diagnostics = createDrainDiagnostics();
     activeAccumulators.add(this);
   }
 
@@ -100,6 +215,10 @@ export class BatchPersistAccumulator {
 
   get queueDepth(): number {
     return this.writeQueue.length;
+  }
+
+  getDiagnostics(): BatchPersistDrainDiagnostics {
+    return cloneDrainDiagnostics(this.diagnostics);
   }
 
   addFile(
@@ -205,48 +324,116 @@ export class BatchPersistAccumulator {
   }
 
   private async writeBatch(batch: FlushBatch): Promise<void> {
+    const batchStart = performance.now();
+    const phaseMs = createEmptyPhaseMs();
+    const existingFileIds = batch.files
+      .map((e) => e.existingFileId)
+      .filter((id): id is string => id !== null);
+
     logger.debug("BatchPersistAccumulator flushing", {
       files: batch.files.length,
       symbols: batch.symbols.length,
       edges: batch.edges.length,
       refs: batch.refs.length,
+      rows: batch.count,
+      existingFiles: existingFileIds.length,
     });
+
+    const timePhase = async (
+      phase: BatchPersistWritePhase,
+      rows: number,
+      body: () => Promise<void>,
+    ): Promise<void> => {
+      if (rows === 0) {
+        if (this.collectDiagnostics) {
+          this.diagnostics.phases[phase].skipped += 1;
+        }
+        return;
+      }
+
+      const phaseStart = performance.now();
+      try {
+        await body();
+      } finally {
+        const durationMs = Math.round(performance.now() - phaseStart);
+        phaseMs[phase] += durationMs;
+        if (this.collectDiagnostics) {
+          const target = this.diagnostics.phases[phase];
+          target.count += 1;
+          target.rows += rows;
+          target.totalMs += durationMs;
+          target.maxMs = Math.max(target.maxMs, durationMs);
+        }
+      }
+    };
 
     await withWriteConn(async (wConn) => {
       await ladybugDb.withTransaction(wConn, async (txConn) => {
-        const existingFileIds = batch.files
-          .map((e) => e.existingFileId)
-          .filter((id): id is string => id !== null);
-
-        if (existingFileIds.length > 0) {
+        await timePhase("deleteOldSymbols", existingFileIds.length, async () => {
           await ladybugDb.deleteSymbolsByFileIds(txConn, existingFileIds);
-        }
+        });
 
-        if (batch.files.length > 0) {
+        await timePhase("upsertFiles", batch.files.length, async () => {
           await ladybugDb.upsertFileBatch(
             txConn,
             batch.files.map((entry) => entry.file),
           );
-        }
+        });
 
-        if (batch.refs.length > 0) {
-          await ladybugDb.insertSymbolReferences(txConn, batch.refs);
-        }
+        await timePhase(
+          "insertSymbolReferences",
+          batch.refs.length,
+          async () => {
+            await ladybugDb.insertSymbolReferences(txConn, batch.refs);
+          },
+        );
 
-        if (batch.symbols.length > 0) {
+        await timePhase("upsertSymbols", batch.symbols.length, async () => {
           await ladybugDb.upsertSymbolBatch(txConn, batch.symbols);
-        }
+        });
 
-        if (batch.edges.length > 0) {
+        await timePhase("insertEdges", batch.edges.length, async () => {
           await ladybugDb.insertEdges(txConn, batch.edges, {
             skipSourceRepoLink: true,
           });
-        }
+        });
       });
     });
 
+    const durationMs = Math.round(performance.now() - batchStart);
+    if (this.collectDiagnostics) {
+      const batchDiagnostics: BatchPersistBatchDiagnostics = {
+        rows: batch.count,
+        files: batch.files.length,
+        symbols: batch.symbols.length,
+        edges: batch.edges.length,
+        refs: batch.refs.length,
+        existingFiles: existingFileIds.length,
+        totalMs: durationMs,
+        phaseMs,
+      };
+      this.diagnostics.batches += 1;
+      this.diagnostics.totalMs += durationMs;
+      this.diagnostics.rows.total += batch.count;
+      this.diagnostics.rows.files += batch.files.length;
+      this.diagnostics.rows.symbols += batch.symbols.length;
+      this.diagnostics.rows.edges += batch.edges.length;
+      this.diagnostics.rows.refs += batch.refs.length;
+      this.diagnostics.rows.existingFiles += existingFileIds.length;
+      if (
+        !this.diagnostics.largestBatch ||
+        batch.count > this.diagnostics.largestBatch.rows
+      ) {
+        this.diagnostics.largestBatch = batchDiagnostics;
+      }
+    }
+
     logger.debug("BatchPersistAccumulator flush complete", {
       filesWritten: batch.files.length,
+      rows: batch.count,
+      existingFiles: existingFileIds.length,
+      durationMs,
+      phaseMs,
     });
   }
 
