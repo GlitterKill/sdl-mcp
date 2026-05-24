@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Structural search-edit validation**: Candidate-specific tree-sitter query compilation failures now surface as validation errors instead of false no-match previews.
 - **LadybugDB algorithm refresh**: Drop and rebuild repo-scoped projected graphs before post-index algorithm refresh so long-lived HTTP server connections do not reuse stale projections during incremental indexing.
 - **Large-repo indexing memory**: Released pass-1/pass-2 symbol-map bridge caches before version snapshot creation so large full indexes do not carry full-repo symbol maps into post-index finalization.
+- **Incremental metrics recovery**: No-op incremental refreshes now inspect the current graph for incomplete version snapshots, missing metrics/file summaries, stale or absent derived state, and configured SCIP indexes before returning. Missing `Metrics` rows are repaired through a dedicated LadybugDB aggregate/write path instead of hydrating the full edge graph, while SCIP edge changes still use the full recomputation path for correctness.
 
 ## [0.11.4] - 2026-05-21
 

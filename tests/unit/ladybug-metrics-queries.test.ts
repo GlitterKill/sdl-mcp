@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
-import { existsSync, rmSync, mkdirSync } from "fs";
+import { existsSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -105,6 +105,7 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
       summary STRING,
       invariantsJson STRING,
       sideEffectsJson STRING,
+      symbolStatus STRING DEFAULT 'real',
       updatedAt STRING
     )
   `,
@@ -384,6 +385,160 @@ describe("LadybugDB Metrics Queries", () => {
       assert.strictEqual(result.size, 550);
       assert.strictEqual(result.get("large-batch-0")?.fanIn, 0);
       assert.strictEqual(result.get("large-batch-549")?.fanIn, 549);
+    });
+  });
+
+  describe("metrics recovery helpers", { skip: !ladybugAvailable }, () => {
+    async function createRepoSymbol(
+      symbolId: string,
+      repoId: string,
+      symbolStatus = "real",
+    ): Promise<void> {
+      await exec(
+        conn,
+        `
+        CREATE (s:Symbol {symbolId: '${symbolId}', kind: 'function', name: '${symbolId}', exported: true, visibility: 'public', language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 2, rangeEndCol: 0, astFingerprint: '', signatureJson: '{}', summary: '', invariantsJson: 'null', sideEffectsJson: 'null', symbolStatus: '${symbolStatus}', updatedAt: '2024-01-01'})
+      `,
+      );
+      await exec(
+        conn,
+        `
+        MATCH (s:Symbol {symbolId: '${symbolId}'}), (r:Repo {repoId: '${repoId}'})
+        CREATE (s)-[:SYMBOL_IN_REPO]->(r)
+      `,
+      );
+    }
+
+    beforeEach(async () => {
+      await exec(
+        conn,
+        `CREATE (r:Repo {repoId: 'metrics-recovery-repo', rootPath: '/test', configJson: '{}', createdAt: '2024-01-01'})`,
+      );
+      await exec(
+        conn,
+        `CREATE (r:Repo {repoId: 'other-metrics-recovery-repo', rootPath: '/other', configJson: '{}', createdAt: '2024-01-01'})`,
+      );
+    });
+
+    it("finds only real repo symbols missing Metrics rows", async () => {
+      await createRepoSymbol("metrics-present", "metrics-recovery-repo");
+      await createRepoSymbol("metrics-missing", "metrics-recovery-repo");
+      await createRepoSymbol(
+        "metrics-external",
+        "metrics-recovery-repo",
+        "external",
+      );
+      await createRepoSymbol(
+        "metrics-other-repo",
+        "other-metrics-recovery-repo",
+      );
+      await queries.upsertMetrics(
+        conn as unknown as import("kuzu").Connection,
+        {
+          symbolId: "metrics-present",
+          fanIn: 1,
+          fanOut: 2,
+          churn30d: 0,
+          testRefsJson: "[]",
+          canonicalTestJson: null,
+          updatedAt: "2024-01-01T00:00:00Z",
+        },
+      );
+
+      const missing = await queries.getSymbolsMissingMetricsByRepo(
+        conn as unknown as import("kuzu").Connection,
+        "metrics-recovery-repo",
+      );
+
+      assert.deepStrictEqual(
+        missing.map((row) => row.symbolId),
+        ["metrics-missing"],
+      );
+    });
+
+    it("computes grouped fan counts for repo-local dependency edges", async () => {
+      await createRepoSymbol("fan-a", "metrics-recovery-repo");
+      await createRepoSymbol("fan-b", "metrics-recovery-repo");
+      await createRepoSymbol("fan-c", "metrics-recovery-repo");
+      await createRepoSymbol("fan-external", "metrics-recovery-repo", "external");
+      await createRepoSymbol("fan-other", "other-metrics-recovery-repo");
+      for (const [from, to] of [
+        ["fan-a", "fan-b"],
+        ["fan-b", "fan-c"],
+        ["fan-c", "fan-b"],
+        ["fan-external", "fan-b"],
+        ["fan-a", "fan-external"],
+        ["fan-a", "fan-other"],
+      ]) {
+        await exec(
+          conn,
+          `
+          MATCH (a:Symbol {symbolId: '${from}'}), (b:Symbol {symbolId: '${to}'})
+          CREATE (a)-[:DEPENDS_ON {edgeType: 'call', weight: 1.0, confidence: 1.0}]->(b)
+        `,
+        );
+      }
+
+      const fanIn = new Map(
+        (
+          await queries.getRepoFanInCounts(
+            conn as unknown as import("kuzu").Connection,
+            "metrics-recovery-repo",
+          )
+        ).map((row) => [row.symbolId, row.count]),
+      );
+      const fanOut = new Map(
+        (
+          await queries.getRepoFanOutCounts(
+            conn as unknown as import("kuzu").Connection,
+            "metrics-recovery-repo",
+          )
+        ).map((row) => [row.symbolId, row.count]),
+      );
+
+      assert.strictEqual(fanIn.get("fan-b"), 2);
+      assert.strictEqual(fanIn.get("fan-c"), 1);
+      assert.strictEqual(fanIn.has("fan-a"), false);
+      assert.strictEqual(fanOut.get("fan-a"), 1);
+      assert.strictEqual(fanOut.get("fan-b"), 1);
+      assert.strictEqual(fanOut.get("fan-c"), 1);
+    });
+
+    it("copies missing-only Metrics rows with numeric defaults", async () => {
+      const csvPath = join(dirname(TEST_DB_PATH), "metrics-recovery-copy.csv");
+      writeFileSync(
+        csvPath,
+        [
+          "symbolId,fanIn,fanOut,churn30d,testRefsJson,canonicalTestJson,pageRank,kCore,updatedAt",
+          '"copy-metrics-1",3,4,0,"[]",,0,0,"2024-01-01T00:00:00Z"',
+          '"copy-metrics-2",0,1,0,"[]",,0,0,"2024-01-01T00:00:00Z"',
+        ].join("\n"),
+        "utf8",
+      );
+
+      await queries.copyMissingMetricsRows(
+        conn as unknown as import("kuzu").Connection,
+        csvPath,
+      );
+
+      const first = await queries.getMetrics(
+        conn as unknown as import("kuzu").Connection,
+        "copy-metrics-1",
+      );
+      const second = await queries.getMetrics(
+        conn as unknown as import("kuzu").Connection,
+        "copy-metrics-2",
+      );
+
+      assert.ok(first);
+      assert.strictEqual(first.fanIn, 3);
+      assert.strictEqual(first.fanOut, 4);
+      assert.strictEqual(first.canonicalTestJson, null);
+      assert.strictEqual(first.pageRank, 0);
+      assert.ok(second);
+      assert.strictEqual(second.fanIn, 0);
+      assert.strictEqual(second.fanOut, 1);
+      rmSync(csvPath, { force: true });
     });
   });
 

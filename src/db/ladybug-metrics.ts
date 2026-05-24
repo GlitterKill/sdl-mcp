@@ -4,6 +4,7 @@
  */
 import type { Connection } from "kuzu";
 import {
+  execDdl,
   exec,
   queryAll,
   querySingle,
@@ -16,6 +17,19 @@ import type {
   TopSymbolByFanInRow,
   FanInOut,
 } from "./ladybug-repos.js";
+
+export interface SymbolMissingMetricsRow {
+  symbolId: string;
+}
+
+export interface RepoFanCountRow {
+  symbolId: string;
+  count: number;
+}
+
+function escapeCopyPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/'/g, "''");
+}
 
 export async function upsertMetrics(
   conn: Connection,
@@ -85,6 +99,76 @@ export async function upsertMetricsBatch(
       );
     }
   });
+}
+
+export async function getSymbolsMissingMetricsByRepo(
+  conn: Connection,
+  repoId: string,
+  limit?: number,
+): Promise<SymbolMissingMetricsRow[]> {
+  const params: Record<string, unknown> = { repoId };
+  let limitClause = "";
+  if (limit !== undefined) {
+    assertSafeInt(limit, "limit");
+    params.limit = Math.max(0, Math.min(limit, 1_000_000));
+    limitClause = "\n     LIMIT $limit";
+  }
+
+  return await queryAll<SymbolMissingMetricsRow>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     WHERE coalesce(s.symbolStatus, 'real') = 'real'
+     OPTIONAL MATCH (m:Metrics {symbolId: s.symbolId})
+     WITH s, m
+     WHERE m IS NULL
+     RETURN s.symbolId AS symbolId
+     ORDER BY s.symbolId${limitClause}`,
+    params,
+  );
+}
+
+export async function getRepoFanInCounts(
+  conn: Connection,
+  repoId: string,
+): Promise<RepoFanCountRow[]> {
+  const rows = await queryAll<{ symbolId: string; count: unknown }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(src:Symbol)-[d:DEPENDS_ON]->(s:Symbol)-[:SYMBOL_IN_REPO]->(r)
+     WHERE coalesce(src.symbolStatus, 'real') = 'real'
+       AND coalesce(s.symbolStatus, 'real') = 'real'
+     RETURN s.symbolId AS symbolId, count(d) AS count`,
+    { repoId },
+  );
+  return rows.map((row) => ({
+    symbolId: row.symbolId,
+    count: toNumber(row.count),
+  }));
+}
+
+export async function getRepoFanOutCounts(
+  conn: Connection,
+  repoId: string,
+): Promise<RepoFanCountRow[]> {
+  const rows = await queryAll<{ symbolId: string; count: unknown }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[d:DEPENDS_ON]->(dst:Symbol)-[:SYMBOL_IN_REPO]->(r)
+     WHERE coalesce(s.symbolStatus, 'real') = 'real'
+       AND coalesce(dst.symbolStatus, 'real') = 'real'
+     RETURN s.symbolId AS symbolId, count(d) AS count`,
+    { repoId },
+  );
+  return rows.map((row) => ({
+    symbolId: row.symbolId,
+    count: toNumber(row.count),
+  }));
+}
+
+export async function copyMissingMetricsRows(
+  conn: Connection,
+  csvPath: string,
+): Promise<void> {
+  const safePath = escapeCopyPath(csvPath);
+  await execDdl(conn, `COPY Metrics FROM '${safePath}' (HEADER=true)`);
 }
 
 /**

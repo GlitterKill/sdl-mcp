@@ -5,24 +5,15 @@ import { logger } from "../util/logger.js";
 
 const SNAPSHOT_BATCH_SIZE = 200;
 
-export async function createVersionAndSnapshot(params: {
+async function snapshotSymbolsForVersion(params: {
   repoId: string;
   versionId: string;
-  reason: string;
-}): Promise<void> {
-  const { repoId, versionId, reason } = params;
+}): Promise<number> {
+  const { repoId, versionId } = params;
   const readConn = await getLadybugConn();
   const symbols = await ladybugDb.getSymbolsByRepoForSnapshot(readConn, repoId);
   await withWriteConn(async (wConn) => {
     let chunksCommitted = 0;
-    await ladybugDb.createVersion(wConn, {
-      versionId,
-      repoId,
-      createdAt: new Date().toISOString(),
-      reason,
-      prevVersionHash: null,
-      versionHash: null,
-    });
     // Batch snapshots inside transactions to avoid thousands of individual
     // auto-commits which cause WAL pressure and can crash Kuzu on large repos.
     for (let i = 0; i < symbols.length; i += SNAPSHOT_BATCH_SIZE) {
@@ -49,4 +40,31 @@ export async function createVersionAndSnapshot(params: {
       chunksCommitted,
     });
   });
+  return symbols.length;
+}
+
+export async function snapshotCurrentSymbolsForVersion(params: {
+  repoId: string;
+  versionId: string;
+}): Promise<number> {
+  return snapshotSymbolsForVersion(params);
+}
+
+export async function createVersionAndSnapshot(params: {
+  repoId: string;
+  versionId: string;
+  reason: string;
+}): Promise<void> {
+  const { repoId, versionId, reason } = params;
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.createVersion(wConn, {
+      versionId,
+      repoId,
+      createdAt: new Date().toISOString(),
+      reason,
+      prevVersionHash: null,
+      versionHash: null,
+    });
+  });
+  await snapshotSymbolsForVersion({ repoId, versionId });
 }

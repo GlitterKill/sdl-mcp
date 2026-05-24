@@ -1,9 +1,14 @@
-import type { PendingCallEdge, SymbolIndex } from "./edge-builder.js";
+import type {
+  CallResolutionTelemetry,
+  PendingCallEdge,
+  SymbolIndex,
+} from "./edge-builder.js";
 // Repository indexing entry point and watcher orchestrator. Heavy work stays in
 // sibling modules; this file sequences scans, pass1/pass2, finalization, and
 // watcher delegation.
 
 import {
+  createCallResolutionTelemetry,
   isTsCallResolutionFile,
   resolveUnresolvedImportEdges,
 } from "./edge-builder.js";
@@ -11,15 +16,20 @@ import { resolveParserWorkerPoolSize } from "./parser.js";
 import { scanRepoForIndex } from "./scanner.js";
 import {
   finalizeIndexing,
+  materializeFileSummaries,
   type SummaryBatchResult,
 } from "./metrics-updater.js";
 import { finalizeDerivedState } from "./finalize-derived-state.js";
 import { watchRepositoryWithIndexer } from "./watcher.js";
-import type { RepoConfig } from "../config/types.js";
+import type { AppConfig, RepoConfig } from "../config/types.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { buildDeferredIndexes, getLadybugConn } from "../db/ladybug.js";
 import { withPostIndexWriteSession } from "../db/write-session.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import {
+  derivedStateIsStale,
+  getDerivedState,
+} from "../db/ladybug-derived-state.js";
 import { logger } from "../util/logger.js";
 import { flushIndexEvent } from "../mcp/telemetry.js";
 import { getObservabilityTap } from "../observability/event-tap.js";
@@ -30,6 +40,7 @@ import {
 } from "./ts/tsParser.js";
 import { ParserWorkerPool } from "./workerPool.js";
 import { invalidateGraphSnapshot } from "../graph/graphSnapshotCache.js";
+import { recoverMissingMetricsForRepo } from "../graph/metrics-recovery.js";
 import { clearSliceCache } from "../graph/sliceCache.js";
 import { clearOverviewCache } from "../graph/overview.js";
 import { clearFingerprintCollisionLog } from "./fingerprints.js";
@@ -40,7 +51,10 @@ import {
   type Pass1Accumulator,
   type Pass1Params,
 } from "./indexer-init.js";
-import { createVersionAndSnapshot } from "./indexer-version.js";
+import {
+  createVersionAndSnapshot,
+  snapshotCurrentSymbolsForVersion,
+} from "./indexer-version.js";
 import {
   runPass1WithRustEngine,
   runPass1WithTsEngine,
@@ -188,6 +202,132 @@ export function derivePass1EngineTelemetry(acc: {
     rustFallbackFiles: acc.rustFallbackFiles,
     perLanguageFallback: Object.fromEntries(acc.rustFallbackByLanguage),
   };
+}
+
+interface NoOpIncrementalRecoveryAssessment {
+  reasons: string[];
+  symbolCount: number;
+  versionedSymbolCount: number;
+  metricsCount: number;
+  fileSummaryCount: number;
+  needsVersionSnapshot: boolean;
+  needsDerivedState: boolean;
+  needsMetrics: boolean;
+  needsFileSummaries: boolean;
+}
+
+function emptyPass1EngineTelemetry(): NonNullable<IndexResult["pass1Engine"]> {
+  return {
+    rustFiles: 0,
+    tsFiles: 0,
+    rustFallbackFiles: 0,
+    perLanguageFallback: {},
+  };
+}
+
+async function countSymbolVersionsForVersion(versionId: string): Promise<number> {
+  const conn = await getLadybugConn();
+  const row = await ladybugDb.querySingle<{ count: unknown }>(
+    conn,
+    `MATCH (sv:SymbolVersion {versionId: $versionId})
+     RETURN count(sv) AS count`,
+    { versionId },
+  );
+  return ladybugDb.toNumber(row?.count ?? 0);
+}
+
+async function countMetricsForRepo(repoId: string): Promise<number> {
+  const conn = await getLadybugConn();
+  const row = await ladybugDb.querySingle<{ count: unknown }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     WHERE coalesce(s.symbolStatus, 'real') = 'real'
+     MATCH (m:Metrics)
+     WHERE m.symbolId = s.symbolId
+     RETURN count(m) AS count`,
+    { repoId },
+  );
+  return ladybugDb.toNumber(row?.count ?? 0);
+}
+
+async function countFileSummariesForRepo(repoId: string): Promise<number> {
+  const conn = await getLadybugConn();
+  const row = await ladybugDb.querySingle<{ count: unknown }>(
+    conn,
+    `MATCH (fs:FileSummary {repoId: $repoId})
+     RETURN count(fs) AS count`,
+    { repoId },
+  );
+  return ladybugDb.toNumber(row?.count ?? 0);
+}
+
+async function assessNoOpIncrementalRecovery(params: {
+  repoId: string;
+  versionId: string;
+  fileCount: number;
+}): Promise<NoOpIncrementalRecoveryAssessment> {
+  const { repoId, versionId, fileCount } = params;
+  const conn = await getLadybugConn();
+  const [symbolCount, versionedSymbolCount, metricsCount, fileSummaryCount] =
+    await Promise.all([
+      ladybugDb.getSymbolCount(conn, repoId),
+      countSymbolVersionsForVersion(versionId),
+      countMetricsForRepo(repoId),
+      countFileSummariesForRepo(repoId),
+    ]);
+  const derivedState = await getDerivedState(repoId);
+  const reasons: string[] = [];
+
+  const needsVersionSnapshot = versionedSymbolCount < symbolCount;
+  if (needsVersionSnapshot) {
+    reasons.push(
+      `version snapshot incomplete (${versionedSymbolCount}/${symbolCount})`,
+    );
+  }
+
+  const needsDerivedState =
+    !derivedState ||
+    derivedStateIsStale(derivedState) ||
+    derivedState.computedVersionId !== versionId;
+  if (needsDerivedState) {
+    reasons.push("derived state missing or stale");
+  }
+  const needsMetrics = metricsCount < symbolCount;
+  if (needsMetrics) {
+    reasons.push(`metrics incomplete (${metricsCount}/${symbolCount})`);
+  }
+  const needsFileSummaries = fileSummaryCount < fileCount;
+  if (needsFileSummaries) {
+    reasons.push(`file summaries incomplete (${fileSummaryCount}/${fileCount})`);
+  }
+
+  return {
+    reasons,
+    symbolCount,
+    versionedSymbolCount,
+    metricsCount,
+    fileSummaryCount,
+    needsVersionSnapshot,
+    needsDerivedState,
+    needsMetrics,
+    needsFileSummaries,
+  };
+}
+
+function countScipEdgeMutations(
+  result: Awaited<ReturnType<typeof runScipIngestInsideIndex>>,
+): number {
+  return result.results.reduce(
+    (sum, item) =>
+      sum + item.edgesCreated + item.edgesUpgraded + item.edgesReplaced,
+    0,
+  );
+}
+
+function scipIngestMutatedGraph(
+  result: Awaited<ReturnType<typeof runScipIngestInsideIndex>>,
+): boolean {
+  return result.results.some((item) => item.status === "ingested");
 }
 
 const INDEX_DISPATCH_IDLE_TIMEOUT_MS = 30_000;
@@ -372,6 +512,13 @@ async function indexRepoImpl(
     throw new Error(`Corrupt configJson for repo ${repoId}`);
   }
 
+  const appConfig: AppConfig = loadConfig();
+  const postIndexSessionTimeoutMs = resolvePostIndexSessionTimeoutMs(
+    repoId,
+    appConfig.repos,
+    config,
+  );
+
   const {
     files,
     existingByPath,
@@ -435,20 +582,223 @@ async function indexRepoImpl(
       return versionId;
     });
 
+  const runPostIndexFinalization = async (params: {
+    versionId: string;
+    indexMode: "full" | "incremental";
+    filesTotal: number;
+    filesScanned: number;
+    symbolsExtracted: number;
+    edgesExtracted: number;
+    changedFileIdsForFinalize?: Set<string>;
+    changedTestFilePathsForFinalize?: Set<string>;
+    changedFileIdsForMemory: Set<string>;
+    hasIndexMutations: boolean;
+    callResolutionTelemetry: CallResolutionTelemetry;
+    pass1Engine: NonNullable<IndexResult["pass1Engine"]>;
+    preFinalize?: () => Promise<void>;
+  }): Promise<{
+    summaryStats?: SummaryBatchResult;
+    clustersComputed: number;
+    processesTraced: number;
+  }> =>
+    withPostIndexWriteSession(async () => {
+      await params.preFinalize?.();
+      const finalizeResult = await measurePhase("finalizeIndexing", () =>
+        finalizeIndexing({
+          repoId,
+          versionId: params.versionId,
+          appConfig,
+          changedFileIds: params.changedFileIdsForFinalize,
+          changedTestFilePaths: params.changedTestFilePathsForFinalize,
+          hasIndexMutations: params.hasIndexMutations,
+          includeTimings: Boolean(phaseTimings),
+          callResolutionTelemetry: params.callResolutionTelemetry,
+          onProgress,
+        }),
+      );
+      if (phaseTimings && finalizeResult.timings) {
+        for (const [phaseName, phaseDurationMs] of Object.entries(
+          finalizeResult.timings,
+        )) {
+          phaseTimings[`finalizeIndexing.${phaseName}`] = phaseDurationMs;
+        }
+      }
+
+      const freshConn = await getLadybugConn();
+      const derivedResult = await finalizeDerivedState({
+        mode: params.indexMode,
+        conn: freshConn,
+        repoId,
+        versionId: params.versionId,
+        filesTotal: params.filesTotal,
+        phaseTimings,
+        onProgress,
+        sharedGraph: finalizeResult.sharedGraph,
+        measurePhase,
+      });
+
+      await measurePhase("buildDeferredIndexes", async () => {
+        await buildDeferredIndexes();
+      });
+
+      await measurePhase("memorySync", async () => {
+        await flagStaleMemoriesForChangedFiles(
+          freshConn,
+          repoId,
+          params.changedFileIdsForMemory,
+          params.versionId,
+        );
+        await importMemoryFilesFromDisk(
+          repoRow.rootPath,
+          repoId,
+          params.versionId,
+        );
+      });
+
+      await flushIndexEvent({
+        repoId,
+        versionId: params.versionId,
+        stats: {
+          filesScanned: params.filesScanned,
+          symbolsExtracted: params.symbolsExtracted,
+          edgesExtracted: params.edgesExtracted,
+          durationMs: Date.now() - startTime,
+          errors: 0,
+          pass1Engine: params.pass1Engine,
+          fileSummaryEmbeddings: finalizeResult.fileSummaryEmbeddingStats,
+          quality: finalizeResult.qualityStats,
+        },
+      });
+
+      return {
+        summaryStats: finalizeResult.summaryStats,
+        clustersComputed: derivedResult.clustersComputed,
+        processesTraced: derivedResult.processesTraced,
+      };
+    }, { timeoutMs: postIndexSessionTimeoutMs });
+
   if (mode === "incremental" && scanAllFilesUnchanged) {
     return await measurePhase("shortCircuitNoOp", async () => {
       const versionId = await createOrReuseVersion("Incremental index");
-
-      await measurePhase("memorySync", async () => {
-        const memoryConn = await getLadybugConn();
-        await flagStaleMemoriesForChangedFiles(
-          memoryConn,
+      const pass1Engine = emptyPass1EngineTelemetry();
+      const recovery = await measurePhase("noOpRecoveryAssess", () =>
+        assessNoOpIncrementalRecovery({
           repoId,
-          new Set<string>(),
           versionId,
+          fileCount: files.length,
+        }),
+      );
+
+      if (recovery.needsVersionSnapshot) {
+        await measurePhase("versionSnapshotRepair", () =>
+          snapshotCurrentSymbolsForVersion({ repoId, versionId }),
         );
-        await importMemoryFilesFromDisk(repoRow.rootPath, repoId, versionId);
-      });
+      }
+
+      const scipResult = scipIngestWillRun({ scip: appConfig.scip })
+        ? await measurePhase("scipIngest", () =>
+            runScipIngestInsideIndex({
+              repoId,
+              repoRoot: repoRow.rootPath,
+              config: appConfig,
+              onProgress,
+            }),
+          )
+        : { results: [], fullyCoveredPaths: new Set<string>() };
+      if (scipResult.results.length > 0) {
+        const { maybeCleanupGeneratedScipIndex } =
+          await import("../scip/cleanup.js");
+        await maybeCleanupGeneratedScipIndex({
+          generatorEnabled: Boolean(appConfig.scip?.generator?.enabled),
+          cleanupAfterIngest: Boolean(
+            appConfig.scip?.generator?.cleanupAfterIngest,
+          ),
+          args: appConfig.scip?.generator?.args ?? [],
+          repoRootPath: repoRow.rootPath,
+        });
+      }
+
+      const scipEdgeMutations = countScipEdgeMutations(scipResult);
+      const scipMutatedGraph = scipIngestMutatedGraph(scipResult);
+      const recoveryReasons = [...recovery.reasons];
+      if (scipMutatedGraph) {
+        recoveryReasons.push("configured SCIP index ingested");
+      }
+
+      let summaryStats: SummaryBatchResult | undefined;
+      let clustersComputed = 0;
+      let processesTraced = 0;
+      const needsFullPostIndexFinalize = scipMutatedGraph;
+      const needsDirectPostIndexRepair =
+        !needsFullPostIndexFinalize &&
+        (recovery.needsMetrics || recovery.needsFileSummaries);
+      const needsDerivedRecovery =
+        recovery.needsDerivedState ||
+        needsDirectPostIndexRepair ||
+        needsFullPostIndexFinalize;
+      if (needsDerivedRecovery) {
+        logger.info("Recovering incomplete no-op incremental index state", {
+          repoId,
+          versionId,
+          reasons: recoveryReasons,
+          symbolCount: recovery.symbolCount,
+          versionedSymbolCount: recovery.versionedSymbolCount,
+          metricsCount: recovery.metricsCount,
+          fileSummaryCount: recovery.fileSummaryCount,
+        });
+        const postIndexResult = await runPostIndexFinalization({
+          versionId,
+          indexMode: "incremental",
+          filesTotal: files.length,
+          filesScanned: files.length,
+          symbolsExtracted: 0,
+          edgesExtracted: scipEdgeMutations,
+          // Undefined scopes force full post-index repair without reparsing
+          // source files when SCIP changed the graph. Empty sets intentionally
+          // skip the full metrics path after direct missing-row repair.
+          changedFileIdsForFinalize: needsFullPostIndexFinalize
+            ? undefined
+            : new Set<string>(),
+          changedTestFilePathsForFinalize: undefined,
+          changedFileIdsForMemory: new Set<string>(),
+          hasIndexMutations: needsFullPostIndexFinalize,
+          callResolutionTelemetry: createCallResolutionTelemetry({
+            repoId,
+            mode,
+            pass2EligibleFileCount: 0,
+          }),
+          pass1Engine,
+          preFinalize: needsDirectPostIndexRepair
+            ? async () => {
+                if (recovery.needsMetrics) {
+                  await measurePhase("recoverMissingMetrics", () =>
+                    recoverMissingMetricsForRepo(repoId, { onProgress }),
+                  );
+                }
+                if (recovery.needsFileSummaries) {
+                  await measurePhase("recoverFileSummaries", async () => {
+                    const fsConn = await getLadybugConn();
+                    await materializeFileSummaries(fsConn, repoId);
+                  });
+                }
+              }
+            : undefined,
+        });
+        summaryStats = postIndexResult.summaryStats;
+        clustersComputed = postIndexResult.clustersComputed;
+        processesTraced = postIndexResult.processesTraced;
+      } else {
+        await measurePhase("memorySync", async () => {
+          const memoryConn = await getLadybugConn();
+          await flagStaleMemoriesForChangedFiles(
+            memoryConn,
+            repoId,
+            new Set<string>(),
+            versionId,
+          );
+          await importMemoryFilesFromDisk(repoRow.rootPath, repoId, versionId);
+        });
+      }
 
       const totalMs = Date.now() - startTime;
       const result: IndexResult = {
@@ -457,19 +807,15 @@ async function indexRepoImpl(
         changedFiles: 0,
         removedFiles: 0,
         symbolsIndexed: 0,
-        edgesCreated: 0,
-        clustersComputed: 0,
-        processesTraced: 0,
+        edgesCreated: scipEdgeMutations,
+        clustersComputed,
+        processesTraced,
         durationMs: totalMs,
+        summaryStats,
         timings: phaseTimings ? { totalMs, phases: phaseTimings } : undefined,
         // Phase 1 Task 1.12 — no Pass-1 ran in this short-circuit, emit zeros
         // so downstream consumers see a stable shape.
-        pass1Engine: {
-          rustFiles: 0,
-          tsFiles: 0,
-          rustFallbackFiles: 0,
-          perLanguageFallback: {},
-        },
+        pass1Engine,
       };
 
       invalidateGraphSnapshot(repoId);
@@ -482,23 +828,20 @@ async function indexRepoImpl(
       // short-circuit no-op incremental path).
       // Ensure indexRepo() does not resolve while its own audit write is still
       // holding LadybugDB's single-writer slot.
-      await flushIndexEvent({
-        repoId,
-        versionId,
-        stats: {
-          filesScanned: result.filesProcessed,
-          symbolsExtracted: result.symbolsIndexed,
-          edgesExtracted: result.edgesCreated,
-          durationMs: result.durationMs,
-          errors: 0,
-          pass1Engine: {
-            rustFiles: 0,
-            tsFiles: 0,
-            rustFallbackFiles: 0,
-            perLanguageFallback: {},
+      if (!needsDerivedRecovery) {
+        await flushIndexEvent({
+          repoId,
+          versionId,
+          stats: {
+            filesScanned: result.filesProcessed,
+            symbolsExtracted: result.symbolsIndexed,
+            edgesExtracted: result.edgesCreated,
+            durationMs: result.durationMs,
+            errors: 0,
+            pass1Engine,
           },
-        },
-      });
+        });
+      }
       return result;
     });
   }
@@ -518,12 +861,6 @@ async function indexRepoImpl(
   }
 
   onProgress?.({ stage: "parsing", current: 0, total: files.length });
-  const appConfig = loadConfig();
-  const postIndexSessionTimeoutMs = resolvePostIndexSessionTimeoutMs(
-    repoId,
-    appConfig.repos,
-    config,
-  );
   const concurrency = Math.max(
     1,
     Math.min(appConfig.indexing?.concurrency ?? 4, files.length || 1),
