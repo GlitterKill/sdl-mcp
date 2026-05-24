@@ -314,6 +314,34 @@ describe("index.refresh diagnostics", () => {
     );
   });
 
+  it("pre-deletes existing symbols once for full diagnostic refreshes", async () => {
+    const result = await handleIndexRefresh({
+      repoId: REPO_ID,
+      mode: "full",
+      includeDiagnostics: true,
+    });
+
+    assert.equal(result.ok, true);
+    assert.ok(result.diagnostics?.timings, "expected timing diagnostics");
+    assert.equal(
+      typeof result.diagnostics.timings.phases.preDeleteExistingSymbols,
+      "number",
+      "expected full refresh to report upfront stale-symbol deletion",
+    );
+    const pass1Drain = result.diagnostics.timings.pass1Drain;
+    assert.ok(pass1Drain, "expected pass1 drain diagnostics");
+    assert.equal(
+      pass1Drain.rows.existingFiles,
+      0,
+      "full pre-delete should prevent per-batch stale symbol deletion",
+    );
+    assert.equal(
+      pass1Drain.phases.deleteOldSymbols.rows,
+      0,
+      "full pre-delete should remove deleteOldSymbols work from pass1 drain",
+    );
+  });
+
   it("omits diagnostics when the flag is not set", async () => {
     const result = await handleIndexRefresh({
       repoId: REPO_ID,

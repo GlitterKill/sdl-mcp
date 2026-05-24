@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Pass-1 write batching**: Centralized LadybugDB write chunk sizing, raised safe edge/reference/file defaults to reduce pass-1 prepared statement count, let pass-1 skip redundant existing `DEPENDS_ON` refreshes after source-symbol replacement, and moved full-refresh stale-symbol deletion ahead of pass-1 flushes.
+
 ### Fixed
 
 - **Cluster refresh crash**: Dropped and rebuilt the Cluster FTS index around topology-changing cluster replacement so LadybugDB does not access-violate when deleting the old cluster set during delegated incremental indexing. Rebuilds now fail closed when FTS is available, skip only when the global Cluster table is empty, and recreate Cluster FTS when rows return after an absent-index state.
@@ -27,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Gateway validation parity**: Mirrored direct `search.edit` string and array caps in the repo gateway schema.
 - **Structural search-edit validation**: Candidate-specific tree-sitter query compilation failures now surface as validation errors instead of false no-match previews.
 - **LadybugDB algorithm refresh**: Drop and rebuild repo-scoped projected graphs before post-index algorithm refresh so long-lived HTTP server connections do not reuse stale projections during incremental indexing.
+- **Large-repo indexing memory**: Released pass-1/pass-2 symbol-map bridge caches before version snapshot creation so large full indexes do not carry full-repo symbol maps into post-index finalization.
 
 ## [0.11.4] - 2026-05-21
 

@@ -16,6 +16,10 @@ import {
   classifyDependencyTarget,
   type SymbolPlaceholderMeta,
 } from "./symbol-placeholders.js";
+import {
+  resolveLadybugWriteChunkSize,
+  type LadybugWriteChunkOptions,
+} from "./ladybug-batching.js";
 
 // Workaround for LadybugDB 0.16.0 binder bug: when an UNWIND struct mixes
 // integer and fractional Number values for the same field, the binder
@@ -204,7 +208,7 @@ export async function insertEdge(
  * Batch-upsert edges via UNWIND-batched MERGE within a single transaction.
  * Side-effect mode (no RETURN) avoids LadybugDB issue #285.
  */
-export interface InsertEdgesOptions {
+export interface InsertEdgesOptions extends LadybugWriteChunkOptions {
   /**
    * Skip the MERGE that ensures each source symbol has a SYMBOL_IN_REPO
    * relationship. Callers that already ran `upsertSymbolBatch` for the same
@@ -214,6 +218,13 @@ export interface InsertEdgesOptions {
    * creations when the relationship was deleted earlier in the tx).
    */
   skipSourceRepoLink?: boolean;
+  /**
+   * Skip the final existing-DEPENDS_ON mutable-property refresh. This is safe
+   * only for pass-1 fresh-edge writes where old source symbols were already
+   * deleted, or for a fresh DB. General callers keep the default so SCIP/pass-2
+   * writes can refresh pre-existing relationships.
+   */
+  skipExistingRelationshipUpdate?: boolean;
 }
 
 export async function insertEdges(
@@ -235,7 +246,7 @@ export async function insertEdges(
 
   // UNWIND-batched MERGE: chunked to keep param payload bounded. Side-effect
   // mode only (no RETURN) to avoid LadybugDB issue #285.
-  const CHUNK = 256;
+  const chunkSize = resolveLadybugWriteChunkSize("edges", options?.chunkSize);
   await withTransaction(conn, async (txConn) => {
     const edgesByRepo = new Map<string, EdgeRow[]>();
     for (const edge of edges) {
@@ -251,8 +262,8 @@ export async function insertEdges(
         const fromSymbolIds = [
           ...new Set(repoEdges.map((e) => e.fromSymbolId)),
         ];
-        for (let i = 0; i < fromSymbolIds.length; i += CHUNK) {
-          const idChunk = fromSymbolIds.slice(i, i + CHUNK);
+        for (let i = 0; i < fromSymbolIds.length; i += chunkSize) {
+          const idChunk = fromSymbolIds.slice(i, i + chunkSize);
           const rows = idChunk.map((symbolId) => ({ symbolId }));
           await exec(
             txConn,
@@ -275,8 +286,8 @@ export async function insertEdges(
         }
       }
 
-      for (let i = 0; i < repoEdges.length; i += CHUNK) {
-        const edgeChunk = repoEdges.slice(i, i + CHUNK);
+      for (let i = 0; i < repoEdges.length; i += chunkSize) {
+        const edgeChunk = repoEdges.slice(i, i + chunkSize);
         const rows = edgeChunk.map((edge) => {
           return {
             repoId,
@@ -402,29 +413,31 @@ export async function insertEdges(
            }]->(b)`,
           { rows },
         );
-        // 3: refresh mutable props on existing rels (preserves createdAt).
-        // The WHERE guard prevents pass-2 (heuristic, confidence ~0.7-0.85)
-        // from overwriting SCIP-written exact edges (resolution: "exact",
-        // confidence: 0.95). Pass-2 now runs AFTER SCIP ingest, so without
-        // the guard every pass-2 file would clobber SCIP exact edges on
-        // shared (from, to, edgeType) triples. The OR clause keeps an
-        // upgrade path open if a future row carries higher confidence
-        // than the existing exact edge.
-        await exec(
-          txConn,
-          `UNWIND $rows AS row
-           MATCH (a:Symbol {symbolId: row.fromSymbolId})
-           MATCH (b:Symbol {symbolId: row.toSymbolId})
-           MATCH (a)-[d:DEPENDS_ON {edgeType: row.edgeType}]->(b)
-           WHERE d.resolution <> 'exact' OR d.confidence < row.confidence
-           SET d.weight = row.weight,
-               d.confidence = row.confidence,
-               d.resolution = row.resolution,
-               d.resolverId = row.resolverId,
-               d.resolutionPhase = row.resolutionPhase,
-               d.provenance = row.provenance`,
-          { rows },
-        );
+        if (!options?.skipExistingRelationshipUpdate) {
+          // 3: refresh mutable props on existing rels (preserves createdAt).
+          // The WHERE guard prevents pass-2 (heuristic, confidence ~0.7-0.85)
+          // from overwriting SCIP-written exact edges (resolution: "exact",
+          // confidence: 0.95). Pass-2 now runs AFTER SCIP ingest, so without
+          // the guard every pass-2 file would clobber SCIP exact edges on
+          // shared (from, to, edgeType) triples. The OR clause keeps an
+          // upgrade path open if a future row carries higher confidence
+          // than the existing exact edge.
+          await exec(
+            txConn,
+            `UNWIND $rows AS row
+             MATCH (a:Symbol {symbolId: row.fromSymbolId})
+             MATCH (b:Symbol {symbolId: row.toSymbolId})
+             MATCH (a)-[d:DEPENDS_ON {edgeType: row.edgeType}]->(b)
+             WHERE d.resolution <> 'exact' OR d.confidence < row.confidence
+             SET d.weight = row.weight,
+                 d.confidence = row.confidence,
+                 d.resolution = row.resolution,
+                 d.resolverId = row.resolverId,
+                 d.resolutionPhase = row.resolutionPhase,
+                 d.provenance = row.provenance`,
+            { rows },
+          );
+        }
       }
     }
   });

@@ -33,6 +33,7 @@ export {
   assertSafeInt,
   getPreparedStatement,
 } from "./ladybug-core.js";
+export * from "./ladybug-batching.js";
 
 // Repository & File operations
 export * from "./ladybug-repos.js";

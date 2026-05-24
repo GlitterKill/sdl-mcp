@@ -395,6 +395,7 @@ export class BatchPersistAccumulator {
         await timePhase("insertEdges", batch.edges.length, async () => {
           await ladybugDb.insertEdges(txConn, batch.edges, {
             skipSourceRepoLink: true,
+            skipExistingRelationshipUpdate: true,
           });
         });
       });

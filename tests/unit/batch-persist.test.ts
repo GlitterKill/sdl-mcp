@@ -180,4 +180,27 @@ describe("BatchPersistAccumulator", () => {
     assert.strictEqual(typeof stats.queueDepth, "number");
     assert.strictEqual(typeof stats.drainFailures, "number");
   });
+
+  it("passes fresh-edge mode to insertEdges during pass-1 drain writes", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const __filename = fileURLToPath(import.meta.url);
+    const srcPath = path.resolve(
+      path.dirname(__filename),
+      "..",
+      "..",
+      "src",
+      "indexer",
+      "parser",
+      "batch-persist.ts",
+    );
+    const content = fs.readFileSync(srcPath, "utf-8");
+
+    assert.match(
+      content,
+      /insertEdges\(txConn,\s*batch\.edges,\s*\{[\s\S]*skipSourceRepoLink:\s*true,[\s\S]*skipExistingRelationshipUpdate:\s*true,[\s\S]*\}\)/,
+      "BatchPersistAccumulator must opt pass-1 edges into fresh-edge writes",
+    );
+  });
 });

@@ -48,6 +48,7 @@ import {
 import { runPass2Resolvers, finalizeEdges } from "./indexer-pass2.js";
 import {
   applySymbolMapFileUpdates,
+  clearSymbolMapCache,
   syncSymbolIndexFromCache,
 } from "./symbol-map-cache.js";
 import {
@@ -502,6 +503,20 @@ async function indexRepoImpl(
     });
   }
 
+  let pass1ExistingByPath = existingByPath;
+  if (mode === "full" && existingByPath.size > 0) {
+    const existingFileIds = [
+      ...new Set(Array.from(existingByPath.values(), (file) => file.fileId)),
+    ];
+    await measurePhase("preDeleteExistingSymbols", () =>
+      ladybugDb.deleteSymbolsByFileIds(conn, existingFileIds),
+    );
+    // Full refresh has already replaced the old symbol graph up front, so the
+    // pass-1 flush batches can skip per-file stale deletes. File IDs are stable
+    // (`repoId:relPath`), so an empty map still reconstructs the same IDs.
+    pass1ExistingByPath = new Map();
+  }
+
   onProgress?.({ stage: "parsing", current: 0, total: files.length });
   const appConfig = loadConfig();
   const postIndexSessionTimeoutMs = resolvePostIndexSessionTimeoutMs(
@@ -630,7 +645,7 @@ async function indexRepoImpl(
       config,
       mode,
       files,
-      existingByPath,
+      existingByPath: pass1ExistingByPath,
       symbolIndex,
       pendingCallEdges,
       createdCallEdges,
@@ -926,13 +941,20 @@ async function indexRepoImpl(
     // --- Phase: release edge-building memory before version/cluster phases ---
 
     // These accumulators are no longer needed after edge finalization.
-    // Clearing them before cluster computation prevents holding ~3 copies of
-    // all symbols simultaneously (the OOM root cause for 10k+ file repos).
+    // Clearing them before versioning/cluster computation prevents holding
+    // several full-repo symbol maps while the version snapshot reads symbols.
     pendingCallEdges.length = 0;
     createdCallEdges.clear();
     symbolIndex.clear();
+    symbolMapFileUpdates.clear();
+    pass1Acc.pass1Extractions.clear();
+    symbolMapCache.symbolsByFileId.clear();
+    symbolMapCache.filePathById.clear();
+    allSymbolsByName.clear();
     globalNameToSymbolIds.clear();
     globalPreferredSymbolId.clear();
+    symbolMapCache.symbolIndex.clear();
+    clearSymbolMapCache(repoId);
     allConfigEdges.length = 0;
 
     // --- Phase: version management ---

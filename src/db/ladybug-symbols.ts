@@ -18,6 +18,10 @@ import {
   type SymbolPlaceholderMeta,
   type SymbolStatus,
 } from "./symbol-placeholders.js";
+import {
+  resolveLadybugWriteChunkSize,
+  type LadybugWriteChunkOptions,
+} from "./ladybug-batching.js";
 
 const MAX_BATCH_WARNING_THRESHOLD = 5000;
 
@@ -53,6 +57,8 @@ export interface SymbolRow {
   placeholderTarget?: string | null;
   updatedAt: string;
 }
+
+export interface UpsertSymbolBatchOptions extends LadybugWriteChunkOptions {}
 
 export interface SymbolSnapshotRow {
   symbolId: string;
@@ -141,6 +147,7 @@ export async function upsertSymbol(
 export async function upsertSymbolBatch(
   conn: Connection,
   symbols: SymbolRow[],
+  options?: UpsertSymbolBatchOptions,
 ): Promise<void> {
   if (symbols.length === 0) return;
 
@@ -163,10 +170,13 @@ export async function upsertSymbolBatch(
   // UNWIND-batched MERGE: collapses N round-trips to one statement per chunk
   // while preserving idempotency (MERGE) and side-effect-only semantics (no
   // RETURN — avoids LadybugDB issue #285 cardinality bug).
-  const CHUNK = 256;
+  const chunkSize = resolveLadybugWriteChunkSize(
+    "symbols",
+    options?.chunkSize,
+  );
   await withTransaction(conn, async (txConn) => {
-    for (let i = 0; i < symbols.length; i += CHUNK) {
-      const chunk = symbols.slice(i, i + CHUNK);
+    for (let i = 0; i < symbols.length; i += chunkSize) {
+      const chunk = symbols.slice(i, i + chunkSize);
       // Coerce nullable STRING fields to '' — kuzu binder picks ANY type
       // when a struct field is uniformly null AND a sibling Number field
       // mixes integral (0.0 summaryQuality) with fractional (0.55/0.6/0.8)

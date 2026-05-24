@@ -12,6 +12,10 @@ import {
   withTransaction,
   assertSafeInt,
 } from "./ladybug-core.js";
+import {
+  resolveLadybugWriteChunkSize,
+  type LadybugWriteChunkOptions,
+} from "./ladybug-batching.js";
 
 export interface SymbolEmbeddingRow {
   symbolId: string;
@@ -408,6 +412,9 @@ export interface SymbolReferenceRow {
   createdAt: string;
 }
 
+export interface InsertSymbolReferencesOptions
+  extends LadybugWriteChunkOptions {}
+
 export async function insertSymbolReference(
   conn: Connection,
   row: SymbolReferenceRow,
@@ -434,14 +441,18 @@ export async function insertSymbolReference(
 export async function insertSymbolReferences(
   conn: Connection,
   rows: SymbolReferenceRow[],
+  options?: InsertSymbolReferencesOptions,
 ): Promise<void> {
   if (rows.length === 0) return;
 
   // UNWIND-batched MERGE; side-effect mode (no RETURN) avoids LadybugDB#285.
-  const CHUNK = 256;
+  const chunkSize = resolveLadybugWriteChunkSize(
+    "symbolReferences",
+    options?.chunkSize,
+  );
   await withTransaction(conn, async (txConn) => {
-    for (let i = 0; i < rows.length; i += CHUNK) {
-      const chunk = rows.slice(i, i + CHUNK);
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      const chunk = rows.slice(i, i + chunkSize);
       await exec(
         txConn,
         `UNWIND $rows AS row

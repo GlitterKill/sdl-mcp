@@ -13,6 +13,10 @@ import {
 } from "./ladybug-core.js";
 import { normalizePath } from "../util/paths.js";
 import { DEFAULT_QUERY_LIMIT } from "../config/constants.js";
+import {
+  resolveLadybugWriteChunkSize,
+  type LadybugWriteChunkOptions,
+} from "./ladybug-batching.js";
 
 export interface MetricsRow {
   symbolId: string;
@@ -39,6 +43,8 @@ export interface FanInOut {
   fanIn: number;
   fanOut: number;
 }
+
+export interface UpsertFileBatchOptions extends LadybugWriteChunkOptions {}
 
 export interface RepoRow {
   repoId: string;
@@ -323,6 +329,7 @@ export async function upsertFile(
 export async function upsertFileBatch(
   conn: Connection,
   files: Array<Omit<FileRow, "directory">>,
+  options?: UpsertFileBatchOptions,
 ): Promise<void> {
   if (files.length === 0) return;
 
@@ -333,10 +340,10 @@ export async function upsertFileBatch(
     return true;
   });
 
-  const CHUNK = 256;
+  const chunkSize = resolveLadybugWriteChunkSize("files", options?.chunkSize);
   await withTransaction(conn, async (txConn) => {
-    for (let i = 0; i < dedup.length; i += CHUNK) {
-      const chunk = dedup.slice(i, i + CHUNK);
+    for (let i = 0; i < dedup.length; i += chunkSize) {
+      const chunk = dedup.slice(i, i + chunkSize);
       const rows = chunk.map((file) => {
         const relPath = normalizePath(file.relPath);
         return {
