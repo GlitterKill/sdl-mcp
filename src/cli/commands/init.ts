@@ -1821,6 +1821,13 @@ export async function initCommand(options: InitOptions): Promise<void> {
       engine: "rust" as const,
       watchDebounceMs: 300,
       pass2Concurrency: DEFAULT_PASS2_CONCURRENCY,
+      algorithmRefresh: {
+        enabled: true,
+        pageRank: { enabled: true },
+        kCore: { enabled: true },
+        louvain: { enabled: true, maxCallEdges: 50_000 },
+        workerTimeoutMs: 120_000,
+      },
     },
     liveIndex: {
       enabled: true,

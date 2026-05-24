@@ -189,6 +189,36 @@ export const RedactionConfigSchema = z.object({
 
 export type RedactionConfig = z.infer<typeof RedactionConfigSchema>;
 
+export const AlgorithmRefreshConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  pageRank: z
+    .object({
+      enabled: z.boolean().default(true),
+    })
+    .default({ enabled: true }),
+  kCore: z
+    .object({
+      enabled: z.boolean().default(true),
+    })
+    .default({ enabled: true }),
+  louvain: z
+    .object({
+      enabled: z.boolean().default(true),
+      maxCallEdges: z.number().int().min(0).default(50_000),
+    })
+    .default({ enabled: true, maxCallEdges: 50_000 }),
+  workerTimeoutMs: z
+    .number()
+    .int()
+    .min(1000)
+    .max(30 * 60 * 1000)
+    .default(120_000),
+});
+
+export type AlgorithmRefreshConfig = z.infer<
+  typeof AlgorithmRefreshConfigSchema
+>;
+
 export const IndexingConfigSchema = z.object({
   concurrency: z
     .number()
@@ -212,6 +242,13 @@ export const IndexingConfigSchema = z.object({
     .min(1)
     .max(MAX_PASS2_CONCURRENCY)
     .default(DEFAULT_PASS2_CONCURRENCY),
+  algorithmRefresh: AlgorithmRefreshConfigSchema.default({
+    enabled: true,
+    pageRank: { enabled: true },
+    kCore: { enabled: true },
+    louvain: { enabled: true, maxCallEdges: 50_000 },
+    workerTimeoutMs: 120_000,
+  }),
 });
 
 export type IndexingConfig = z.infer<typeof IndexingConfigSchema>;

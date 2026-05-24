@@ -13,7 +13,9 @@
  *      and "index" as the first arg, and `indexRepo()` completes.
  *   3. Enabled but stub exits non-zero: indexing still completes successfully
  *      (non-fatal failure mode).
- *   4. Auto-register: with generator enabled, `loadConfig()` injects an
+ *   4. Oversized merged output: pre-refresh retries with `--no-merge`,
+ *      dedupes split indexes by content hash, and reports skipped diagnostics.
+ *   5. Auto-register: with generator enabled, `loadConfig()` injects an
  *      `{ path: "index.scip" }` entry into `scip.indexes` automatically.
  */
 
@@ -42,6 +44,7 @@ import {
   invalidateConfigCache,
   loadConfig,
 } from "../../dist/config/loadConfig.js";
+import { runScipIoBeforeIndex } from "../../dist/scip/scip-io-runner.js";
 
 const IS_WINDOWS = process.platform === "win32";
 const REPO_ID = "test-scip-io-pre-refresh";
@@ -92,6 +95,55 @@ function makeStubBinary(
   }
   lines.push(`exit ${exitCode}`);
   writeFileSync(path, lines.join("\n") + "\n", "utf-8");
+  chmodSync(path, 0o755);
+  return path;
+}
+
+function makeSplitFallbackStubBinary(
+  dir: string,
+  opts: {
+    logFile: string;
+    mergedContent: string;
+    splitFiles: Record<string, string>;
+  },
+): string {
+  const scriptPath = join(dir, "scip-io-split-stub.mjs");
+  const script = `
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+const opts = ${JSON.stringify(opts)};
+const args = process.argv.slice(2);
+appendFileSync(opts.logFile, \`cwd=\${process.cwd()} args=\${args.join(" ")}\\n\`);
+
+if (args.includes("--no-merge")) {
+  for (const [relPath, content] of Object.entries(opts.splitFiles)) {
+    const target = join(process.cwd(), relPath);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, content);
+  }
+} else {
+  writeFileSync(join(process.cwd(), "index.scip"), opts.mergedContent);
+}
+`;
+  writeFileSync(scriptPath, script.trimStart(), "utf-8");
+
+  if (IS_WINDOWS) {
+    const path = join(dir, "scip-io-split.cmd");
+    writeFileSync(
+      path,
+      `@echo off\r\nnode "${scriptPath}" %*\r\nexit /b %errorlevel%\r\n`,
+      "utf-8",
+    );
+    return path;
+  }
+
+  const path = join(dir, "scip-io-split");
+  writeFileSync(
+    path,
+    `#!/usr/bin/env sh\nnode '${scriptPath}' "$@"\n`,
+    "utf-8",
+  );
   chmodSync(path, 0o755);
   return path;
 }
@@ -311,6 +363,76 @@ describe("scip-io pre-refresh hook", () => {
       true,
       "stub should still have been invoked",
     );
+  });
+
+  it("falls back to split SCIP indexes when the merged generator output is oversized", async () => {
+    if (existsSync(invocationLog)) rmSync(invocationLog);
+    for (const relPath of [
+      "index.scip",
+      "typescript.scip",
+      "javascript.scip",
+      "python.scip",
+    ]) {
+      const path = join(repoDir, relPath);
+      if (existsSync(path)) rmSync(path);
+    }
+
+    const stub = makeSplitFallbackStubBinary(stubBinDir, {
+      logFile: invocationLog,
+      mergedContent: "0123456789",
+      splitFiles: {
+        "typescript.scip": "SAME",
+        "javascript.scip": "SAME",
+        "python.scip": "PY",
+      },
+    });
+
+    const result = await runScipIoBeforeIndex({
+      repoRootPath: repoDir,
+      maxIndexBytes: 8,
+      generatorCfg: {
+        enabled: true,
+        binary: stub,
+        args: [],
+        autoInstall: false,
+        timeoutMs: 30_000,
+        cleanupAfterIngest: false,
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.ok(result.splitRun, "oversized merged output should run --no-merge");
+    const acceptedPaths = result.generatedIndexes
+      .filter((index) => !index.skipped)
+      .map((index) => index.path)
+      .sort();
+    assert.equal(acceptedPaths.length, 2);
+    assert.ok(acceptedPaths.includes("python.scip"));
+    assert.ok(
+      acceptedPaths.includes("javascript.scip") ||
+        acceptedPaths.includes("typescript.scip"),
+      "one scip-typescript split artifact should be accepted",
+    );
+    assert.ok(
+      result.generatedIndexes.some(
+        (index) => index.path === "index.scip" && index.skipped === true,
+      ),
+      "oversized merged index should remain visible as a skipped diagnostic",
+    );
+    assert.ok(
+      result.generatedIndexes.some(
+        (index) =>
+          (index.path === "javascript.scip" ||
+            index.path === "typescript.scip") &&
+          index.skipped === true &&
+          index.skipReason?.startsWith("duplicate-content:"),
+      ),
+      "duplicate split indexes should be skipped by content hash",
+    );
+
+    const log = readFileSync(invocationLog, "utf-8");
+    assert.match(log, /args=index\r?\n/);
+    assert.match(log, /args=index --no-merge/);
   });
 
   it("auto-registers index.scip in scip.indexes when generator is enabled", () => {

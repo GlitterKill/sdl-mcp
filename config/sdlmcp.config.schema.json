@@ -304,6 +304,55 @@
           "minimum": 1,
           "maximum": 16,
           "default": 1
+        },
+        "algorithmRefresh": {
+          "type": "object",
+          "description": "Optional post-index graph algorithm refresh. Canonical clusters/processes always run; PageRank/K-core use a bounded worker and Louvain is skipped above maxCallEdges.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "pageRank": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true }
+              },
+              "default": { "enabled": true }
+            },
+            "kCore": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true }
+              },
+              "default": { "enabled": true }
+            },
+            "louvain": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "maxCallEdges": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 50000
+                }
+              },
+              "default": { "enabled": true, "maxCallEdges": 50000 }
+            },
+            "workerTimeoutMs": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 1800000,
+              "default": 120000
+            }
+          },
+          "default": {
+            "enabled": true,
+            "pageRank": { "enabled": true },
+            "kCore": { "enabled": true },
+            "louvain": { "enabled": true, "maxCallEdges": 50000 },
+            "workerTimeoutMs": 120000
+          }
         }
       },
       "default": {
@@ -312,7 +361,14 @@
         "maxWatchedFiles": 25000,
         "engine": "rust",
         "watchDebounceMs": 300,
-        "pass2Concurrency": 1
+        "pass2Concurrency": 1,
+        "algorithmRefresh": {
+          "enabled": true,
+          "pageRank": { "enabled": true },
+          "kCore": { "enabled": true },
+          "louvain": { "enabled": true, "maxCallEdges": 50000 },
+          "workerTimeoutMs": 120000
+        }
       }
     },
     "liveIndex": {

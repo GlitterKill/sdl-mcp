@@ -12,6 +12,7 @@ import {
   markDerivedStateComputed,
   recordDerivedStateError,
 } from "../db/ladybug-derived-state.js";
+import { loadConfig } from "../config/loadConfig.js";
 import { withIndexingGate } from "../mcp/indexing-gate.js";
 import { runToolDispatch } from "../mcp/dispatch-limiter.js";
 import { logger } from "../util/logger.js";
@@ -22,6 +23,7 @@ import {
   type DeferredWorkProgress,
 } from "../runtime/deferred-work-state.js";
 import type { IndexProgress } from "./indexer-init.js";
+import type { AlgorithmRefreshDiagnostics } from "./cluster-orchestrator.js";
 
 const DERIVED_REFRESH_PROGRESS_TOTAL = 4;
 
@@ -187,13 +189,42 @@ export interface DerivedRefreshHooks {
     versionId: string;
     signal: AbortSignal;
     onProgress?: (progress: IndexProgress) => void;
-  }) => Promise<void>;
+  }) => Promise<AlgorithmRefreshDiagnostics | void>;
 }
 
 // Overridable entry point so tests can swap in a lightweight stub.
 let hooks: DerivedRefreshHooks = {
   refresh: defaultRefreshImpl,
 };
+
+async function markDerivedRefreshComputed(
+  repoId: string,
+  targetVersionId: string,
+  algorithmRefresh?: AlgorithmRefreshDiagnostics | void,
+): Promise<void> {
+  if (!algorithmRefresh) {
+    await markDerivedStateComputed(repoId, targetVersionId);
+    return;
+  }
+  await markDerivedStateComputed(
+    repoId,
+    targetVersionId,
+    {
+      clusters: true,
+      processes: true,
+      algorithms: !algorithmRefresh.dirty,
+      summaries: true,
+      embeddings: true,
+    },
+    { clearError: !algorithmRefresh.dirty },
+  );
+  if (algorithmRefresh.dirty) {
+    await recordDerivedStateError(
+      repoId,
+      algorithmRefresh.failures.join("; ") || "algorithm refresh failed",
+    );
+  }
+}
 
 export function _setDerivedRefreshHooksForTesting(
   override: Partial<DerivedRefreshHooks> | null,
@@ -321,6 +352,8 @@ async function runOne(
             signal,
             async (refreshSignal) => {
               if (refreshSignal.aborted) return;
+              let algorithmRefresh: AlgorithmRefreshDiagnostics | void =
+                undefined;
               // The dispatch slot is intentional: while indexing narrows dispatch
               // concurrency to one, the background refresh must occupy that one slot
               // so foreground read tools cannot overlap its LadybugDB writes.
@@ -328,7 +361,7 @@ async function runOne(
                 writeLockHeld = true;
                 try {
                   if (refreshSignal.aborted) return;
-                  await hooks.refresh({
+                  algorithmRefresh = await hooks.refresh({
                     repoId,
                     versionId: targetVersionId,
                     signal: refreshSignal,
@@ -351,7 +384,11 @@ async function runOne(
                 total: DERIVED_REFRESH_PROGRESS_TOTAL,
                 message: "marking derived state complete",
               });
-              await markDerivedStateComputed(repoId, targetVersionId);
+              await markDerivedRefreshComputed(
+                repoId,
+                targetVersionId,
+                algorithmRefresh,
+              );
             },
             (timeoutMs) => {
               if (!writeLockHeld) return;
@@ -495,9 +532,10 @@ async function defaultRefreshImpl(params: {
   versionId: string;
   signal: AbortSignal;
   onProgress?: (progress: IndexProgress) => void;
-}): Promise<void> {
+}): Promise<AlgorithmRefreshDiagnostics | void> {
   const { repoId, versionId, signal, onProgress } = params;
   if (signal.aborted) return;
+  const appConfig = loadConfig();
   const { computeAndStoreClustersAndProcesses } =
     await import("./cluster-orchestrator.js");
   const conn = await getLadybugConn();
@@ -509,12 +547,14 @@ async function defaultRefreshImpl(params: {
     substage: "clusterRefresh",
     message: "loading graph",
   });
-  await computeAndStoreClustersAndProcesses({
+  const result = await computeAndStoreClustersAndProcesses({
     conn,
     repoId,
     versionId,
+    algorithmRefresh: appConfig.indexing?.algorithmRefresh,
     onProgress,
   });
+  return result.algorithmRefresh;
   // Semantic summaries + embeddings are currently regenerated lazily via
   // index.refresh and the queries that depend on them; leave them to the next
   // full index for now. Dirty flags stay cleared by the caller on success.

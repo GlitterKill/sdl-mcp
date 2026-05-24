@@ -231,6 +231,12 @@ If you set `budgetCaps`, provide both `maxCards` and `maxEstimatedTokens`.
 | `engine`             | `"typescript" \| "rust"` | `"rust"` | Falls back to TS if native addon is unavailable                                                                                                                                                                                                                     |
 | `watchDebounceMs`    | `number`                 | `300`    | `50-5000`                                                                                                                                                                                                                                                           |
 | `pass2Concurrency`   | `number`                 | `1`      | `1-16`. Files resolved in parallel during pass-2. CPU presets default to `12` (extreme tier), `8` (high), `1` (mid). Effective parallelism is gated by writeLimiter saturation; the dispatcher coalesces all writes per concurrency batch into one `withWriteConn`. |
+| `algorithmRefresh.enabled` | `boolean` | `true` | Master toggle for optional PageRank/K-core/Louvain enrichment. Canonical clusters and process traces still run when this is false. |
+| `algorithmRefresh.pageRank.enabled` | `boolean` | `true` | Computes PageRank in a killable worker over the in-memory symbol/call graph, then writes centrality before Louvain starts. |
+| `algorithmRefresh.kCore.enabled` | `boolean` | `true` | Computes K-core in the same bounded worker as PageRank. |
+| `algorithmRefresh.louvain.enabled` | `boolean` | `true` | Enables Louvain shadow communities when the graph is small enough. Louvain failures do not erase PageRank/K-core writes. |
+| `algorithmRefresh.louvain.maxCallEdges` | `number` | `50000` | Louvain is skipped by policy above this call-edge count and does not mark derived state stale. |
+| `algorithmRefresh.workerTimeoutMs` | `number` | `120000` | `1000-1800000`. Timeout for worker-based PageRank/K-core. A timeout leaves `DerivedState.algorithmsDirty=true` and preserves `lastError`. |
 
 ## `liveIndex`
 
@@ -546,9 +552,11 @@ Memory remains opt-in.
 | `generator.args`               | `string[]`                                | `[]`        | Extra args after `index`                                                                                                                                                                                                         |
 | `generator.autoInstall`        | `boolean`                                 | `true`      | Downloads `scip-io` if needed                                                                                                                                                                                                    |
 | `generator.timeoutMs`          | `number`                                  | `600000`    | `1000-1800000`                                                                                                                                                                                                                   |
-| `generator.cleanupAfterIngest` | `boolean`                                 | `true`      | Deletes `<repoRoot>/index.scip` after the post-refresh ingest consumes it. Skipped automatically when `args` contains `--output`/`-o` (custom paths are user-managed). Set to `false` to keep the generated file for inspection. |
+| `generator.cleanupAfterIngest` | `boolean`                                 | `true`      | Deletes generated `.scip` files from the current run after ingest consumes them. Skipped automatically when `args` contains `--output`/`-o` (custom paths are user-managed). Set to `false` to keep generated files for inspection. |
 
 When both `scip.enabled` and `scip.generator.enabled` are true, SDL-MCP auto-adds `index.scip` to `scip.indexes` if you forgot to list it.
+
+Generated SCIP files are decoded up to 512 MiB each. When the generated merged `index.scip` is larger than that, SDL-MCP runs `scip-io index --no-merge`, ingests split files under the cap, deduplicates identical TypeScript/JavaScript artifacts by SHA-256 content hash, and reports skipped oversized split files in CLI/audit diagnostics. Manually configured oversize indexes remain manual: provide smaller files in `scip.indexes`.
 
 ## Example Profiles
 

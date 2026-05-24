@@ -8,6 +8,7 @@
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { logger } from "../util/logger.js";
+import { normalizePath } from "../util/paths.js";
 
 /**
  * Returns `true` when the user has passed an explicit output path to
@@ -27,6 +28,7 @@ export interface ScipCleanupOptions {
   cleanupAfterIngest: boolean;
   args: readonly string[];
   repoRootPath: string;
+  generatedPaths?: readonly string[];
   /** Test seam — defaults to `fs/promises.unlink`. */
   unlinkFn?: (path: string) => Promise<void>;
 }
@@ -55,21 +57,31 @@ export async function maybeCleanupGeneratedScipIndex(
   if (hasCustomOutputArg(opts.args)) {
     return { skipped: true, reason: "custom-output" };
   }
-  const generatedPath = join(opts.repoRootPath, "index.scip");
+  const generatedPaths =
+    opts.generatedPaths && opts.generatedPaths.length > 0
+      ? [...new Set(opts.generatedPaths.map((p) => normalizePath(p)))]
+      : ["index.scip"];
   const fn = opts.unlinkFn ?? unlink;
+  let unlinked = false;
   try {
-    await fn(generatedPath);
-    logger.info("scip-io: cleaned up generated index after ingest", {
-      path: generatedPath,
-    });
-    return { skipped: false, unlinked: true };
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") {
-      return { skipped: false, unlinked: false };
+    for (const generatedPath of generatedPaths) {
+      const absolutePath = join(opts.repoRootPath, generatedPath);
+      try {
+        await fn(absolutePath);
+        unlinked = true;
+        logger.info("scip-io: cleaned up generated index after ingest", {
+          path: absolutePath,
+        });
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") continue;
+        throw err;
+      }
     }
+    return { skipped: false, unlinked };
+  } catch (err) {
     logger.warn("scip-io: cleanup failed (non-fatal, file remains on disk)", {
-      path: generatedPath,
+      paths: generatedPaths,
       error: err instanceof Error ? err.message : String(err),
     });
     return { skipped: false, unlinked: false };

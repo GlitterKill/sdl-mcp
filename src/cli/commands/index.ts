@@ -686,6 +686,23 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       );
       console.log(`  Edges: ${stats.edgesCreated} new (${totalEdges} total)`);
       console.log(`  Duration: ${stats.durationMs}ms`);
+      if (stats.scip) {
+        const skippedGenerated = stats.scip.generatedIndexes.filter(
+          (index) => index.skipped,
+        );
+        for (const index of skippedGenerated) {
+          console.log(
+            `  SCIP skipped ${index.path}: ${index.skipReason ?? "skipped"} (${index.sizeBytes} bytes)`,
+          );
+        }
+        for (const failure of stats.scip.failures) {
+          console.log(
+            `  SCIP ${failure.stage}: ${failure.message}${
+              failure.path ? ` (${failure.path})` : ""
+            }`,
+          );
+        }
+      }
       if (stats.summaryStats) {
         const s = stats.summaryStats;
         console.log(

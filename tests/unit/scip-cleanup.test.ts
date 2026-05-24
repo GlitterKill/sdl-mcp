@@ -148,6 +148,27 @@ describe("maybeCleanupGeneratedScipIndex — happy path", () => {
     assert.strictEqual(recorder.calls.length, 1);
     assert.strictEqual(recorder.calls[0], EXPECTED_PATH);
   });
+
+  it("unlinks all generated files from the current run", async () => {
+    const { maybeCleanupGeneratedScipIndex } =
+      await import("../../dist/scip/cleanup.js");
+    const recorder = recordingUnlink();
+    const result = await maybeCleanupGeneratedScipIndex({
+      generatorEnabled: true,
+      cleanupAfterIngest: true,
+      args: [],
+      repoRootPath: REPO_ROOT,
+      generatedPaths: ["index.scip", "typescript.scip", "javascript.scip"],
+      unlinkFn: recorder.fn,
+    });
+    assert.strictEqual(result.skipped, false);
+    assert.strictEqual(result.unlinked, true);
+    assert.deepStrictEqual(recorder.calls, [
+      join(REPO_ROOT, "index.scip"),
+      join(REPO_ROOT, "typescript.scip"),
+      join(REPO_ROOT, "javascript.scip"),
+    ]);
+  });
 });
 
 describe("maybeCleanupGeneratedScipIndex — error handling", () => {

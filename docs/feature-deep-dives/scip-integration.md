@@ -78,7 +78,7 @@ Add a `scip` section to your `sdlmcp.config.json`:
 }
 ```
 
-The `generator` subsection wires sdl-mcp into the [scip-io](https://github.com/GlitterKill/scip-io) CLI to regenerate `index.scip` automatically before every refresh — see [Automatic Generation with scip-io](#automatic-generation-with-scip-io) below. The minimal opt-in is `scip.enabled: true` plus `scip.generator.enabled: true`; everything else defaults sensibly.
+The `generator` subsection wires sdl-mcp into the [scip-io](https://github.com/GlitterKill/scip-io) CLI to regenerate `index.scip` automatically before every refresh — see [Automatic Generation with scip-io](#automatic-generation-with-scip-io) below. The minimal opt-in is `scip.enabled: true` plus `scip.generator.enabled: true`; everything else defaults sensibly. Generated SCIP indexes are decoded up to 512 MiB per `.scip` file.
 
 ### Field Reference
 
@@ -95,7 +95,7 @@ The `generator` subsection wires sdl-mcp into the [scip-io](https://github.com/G
 | `generator.args`               | array   | `[]`        | Extra string args appended after `index` when invoking scip-io (e.g., `["--no-clean"]`). The first arg is always `index`.                                                                                                                                                                                                                   |
 | `generator.autoInstall`        | boolean | `true`      | When true and the binary is missing from both PATH and the managed location, sdl-mcp downloads it from the scip-io GitHub releases (with mandatory SHA-256 verification) into `~/.sdl-mcp/bin/`. When false, a missing binary just logs a warning and the refresh proceeds without scip-io.                                                 |
 | `generator.timeoutMs`          | integer | `600000`    | Hard timeout for the `scip-io index` invocation, in milliseconds. Min `1000` (1s), max `1800000` (30min). Default 10 minutes. On timeout the process tree is killed and the refresh continues.                                                                                                                                              |
-| `generator.cleanupAfterIngest` | boolean | `true`      | When the post-refresh ingest finishes, delete the generated `<repoRoot>/index.scip` so the regenerated file does not clutter the working tree. Skipped automatically when `args` contains `--output` / `-o` / `--output=...` (custom output paths are user-managed). Set to `false` to keep the file for inspection or third-party tooling. |
+| `generator.cleanupAfterIngest` | boolean | `true`      | When the post-refresh ingest finishes, delete generated `.scip` files from the current generator run so regenerated files do not clutter the working tree. Skipped automatically when `args` contains `--output` / `-o` / `--output=...` (custom output paths are user-managed). Set to `false` to keep files for inspection or third-party tooling. |
 
 ---
 
@@ -194,9 +194,17 @@ That's enough. With `scip.generator.enabled = true`, sdl-mcp:
 1. Auto-injects `{ "path": "index.scip", "label": "scip-io" }` into `scip.indexes` at config-load time, so you don't need to also list the index file manually.
 2. Runs `scip-io index` in the repo root before every `indexRepo()` invocation (CLI `sdl-mcp index`, MCP `sdl.index.refresh`, the file watcher, sync pull, HTTP reindex — every code path is covered).
 3. Picks up the freshly written `index.scip` via the existing `autoIngestOnRefresh` path.
-4. Deletes `<repoRoot>/index.scip` after the post-refresh ingest completes (controlled by `generator.cleanupAfterIngest`, default `true`). The file is regenerated on every refresh, so leaving it around just clutters the working tree (and shows up in `git status`). Cleanup is skipped automatically when `args` contains `--output` / `-o` / `--output=...` because the output path is then under user control. Set `cleanupAfterIngest: false` to keep the file for inspection or third-party tooling.
+4. Deletes generated `.scip` files from the current run after the post-refresh ingest completes (controlled by `generator.cleanupAfterIngest`, default `true`). Files are regenerated on every refresh, so leaving them around just clutters the working tree (and shows up in `git status`). Cleanup is skipped automatically when `args` contains `--output` / `-o` / `--output=...` because the output path is then under user control. Set `cleanupAfterIngest: false` to keep files for inspection or third-party tooling.
 
 All the other `generator.*` fields default to sensible values: a 10-minute timeout, no extra args, `binary: "scip-io"`, and `autoInstall: true`.
+
+### Oversized Generated Indexes
+
+Each SCIP decoder accepts one protobuf file up to 512 MiB. If the normal merged `scip-io index` output is at or below that cap, SDL-MCP ingests `index.scip` as before. If the merged file is larger than 512 MiB, SDL-MCP runs `scip-io index --no-merge`, discovers generated split `*.scip` files, and ingests every split file under the cap.
+
+Split files are deduplicated by SHA-256 content hash. This matters for TypeScript and JavaScript because both can come from the same `scip-typescript` indexer run; SDL-MCP does not force-split that upstream output, and identical `typescript.scip` / `javascript.scip` artifacts are ingested once. A split file that still exceeds 512 MiB is skipped with a visible diagnostic naming the file and byte size.
+
+Index result and audit payloads include `scip.generatedIndexes[]` for generated path, label, size, mode (`"merged"` or `"split"`), and skip reason, plus `scip.failures[]` for non-fatal generator and ingest failures that were previously logger-only warnings.
 
 ### Auto-Install Behavior
 
@@ -218,7 +226,7 @@ If `autoInstall` is `false` and the binary is missing, sdl-mcp logs a warning na
 Two design choices keep scip-io from interfering with sdl-mcp's own indexing throughput:
 
 - **Hook runs OUTSIDE `indexLocks`.** The pre-refresh hook fires in `indexRepo()` _before_ sdl-mcp acquires its per-repo serialization lock. A 10-minute scip-io run never blocks queued watcher-triggered incremental refreshes from grabbing their indexing slot.
-- **Per-repo coalescing.** The runner maintains a per-repo `Map<repoId, Promise<void>>` lock. If a second `indexRepo()` arrives while a previous scip-io run for the same repo is still in flight, the second caller waits on the first's promise instead of starting a parallel `scip-io index` (which would race on writing `index.scip` at the repo root). Different repos still run scip-io concurrently.
+- **Per-repo coalescing.** The runner maintains a per-repo lock for the structured generator result. If a second `indexRepo()` arrives while a previous scip-io run for the same repo is still in flight, the second caller waits on the first's promise instead of starting a parallel `scip-io index` (which would race on writing `.scip` files at the repo root). Different repos still run scip-io concurrently.
 - **Single-flight install lock.** The auto-install path itself uses a separate global lock so two parallel calls cannot both download the binary.
 
 ### Failure Mode: Non-Fatal
@@ -230,7 +238,8 @@ Every failure path on this integration is non-fatal:
 - SHA-256 mismatch / missing checksums file → warn, skip, continue.
 - Archive extraction fails → warn, skip, continue.
 - Smoke test fails → warn, skip, continue.
-- `scip-io index` exits non-zero → warn (with up to 2KB of captured stderr), continue indexing with whatever `index.scip` happens to be on disk.
+- `scip-io index` exits non-zero → warn (with bounded captured stdout/stderr), continue indexing with whatever configured SCIP files happen to be on disk.
+- Generated merged index is over 512 MiB → run `scip-io index --no-merge`, ingest split files under the cap, and surface skipped files in CLI/audit diagnostics.
 - Timeout fires → kill the process tree (Windows: `taskkill /T /F`; Unix: SIGTERM/SIGKILL on the process group), warn, continue.
 
 The indexer always finishes its own pass. A broken scip-io setup will never block you from indexing.
@@ -261,7 +270,7 @@ Use the `sdl.scip.ingest` MCP tool action:
 }
 ```
 
-This reads the SCIP file, decodes it, matches SCIP symbols to existing tree-sitter symbols, creates new symbols and edges, and returns a summary of what changed.
+This reads the SCIP file, decodes it, matches SCIP symbols to existing tree-sitter symbols, creates new symbols and edges, and returns a summary of what changed. Manually configured indexes remain backward-compatible; if a manual index is over 512 MiB, provide smaller index files because split fallback applies only to generated scip-io output.
 
 ### Dry Run
 

@@ -16,6 +16,7 @@ import {
   shouldFailOnClusterFtsRebuildFailure,
   shouldRebuildClusterFtsAfterReplacement,
 } from "../../dist/indexer/cluster-orchestrator.js";
+import { CentralityWorkerTimeoutError } from "../../dist/indexer/centrality-worker-runner.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -245,12 +246,11 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
       versionId: "v1",
     });
 
-    assert.deepStrictEqual(result, {
-      clustersComputed: 0,
-      processesTraced: 0,
-      centralityComputed: 0,
-      shadowClustersComputed: 0,
-    });
+    assert.strictEqual(result.clustersComputed, 0);
+    assert.strictEqual(result.processesTraced, 0);
+    assert.strictEqual(result.centralityComputed, 0);
+    assert.strictEqual(result.shadowClustersComputed, 0);
+    assert.equal(result.algorithmRefresh.dirty, false);
   });
 
   it("returns zero cluster/process counts for a symbol graph with no call edges", async () => {
@@ -271,17 +271,13 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
       versionId: "v1",
     });
 
-    // Clusters/processes require call edges, so these stay at 0.
-    // Centrality (PageRank) still assigns a value to an isolated node in
-    // the projected graph, so centralityComputed can be 1 when the algo
-    // extension is available, or 0 when it falls back (no-op).
+    // Clusters/processes and optional algorithms require call edges, so these
+    // stay at 0 and no native algorithm projection is attempted.
     assert.strictEqual(result.clustersComputed, 0);
     assert.strictEqual(result.processesTraced, 0);
     assert.strictEqual(result.shadowClustersComputed, 0);
-    assert.ok(
-      result.centralityComputed === 0 || result.centralityComputed === 1,
-      `centralityComputed should be 0 (fallback) or 1 (isolated node), got ${result.centralityComputed}`,
-    );
+    assert.strictEqual(result.centralityComputed, 0);
+    assert.equal(result.algorithmRefresh.pageRank.status, "skipped");
   });
 
   it("computes clusters and traces processes for a simple call chain", async () => {
@@ -521,5 +517,317 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
       "repo-stable",
     );
     assert.ok(processSteps.length >= 2);
+  });
+
+  it("keeps centrality writes when Louvain fails", async () => {
+    await resetDb();
+    await seedRepo("repo-louvain-fails");
+    await seedFile("repo-louvain-fails", "file-1", "src/louvain.ts");
+    for (const [symbolId, name] of [
+      ["sym-main", "main"],
+      ["sym-foo", "foo"],
+      ["sym-bar", "bar"],
+    ] as const) {
+      await seedSymbol({
+        repoId: "repo-louvain-fails",
+        fileId: "file-1",
+        symbolId,
+        name,
+      });
+    }
+    const conn = await getLadybugConn();
+    await ladybugDb.insertEdges(conn, [
+      {
+        repoId: "repo-louvain-fails",
+        fromSymbolId: "sym-main",
+        toSymbolId: "sym-foo",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+      {
+        repoId: "repo-louvain-fails",
+        fromSymbolId: "sym-foo",
+        toSymbolId: "sym-bar",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+    ]);
+
+    const result = await computeAndStoreClustersAndProcesses({
+      conn,
+      repoId: "repo-louvain-fails",
+      versionId: "v1",
+      minClusterSize: 2,
+      centralityRunner: async () => ({
+        pageRank: [
+          { symbolId: "sym-main", score: 0.1 },
+          { symbolId: "sym-foo", score: 0.8 },
+          { symbolId: "sym-bar", score: 0.1 },
+        ],
+        kCore: [
+          { symbolId: "sym-main", coreness: 1 },
+          { symbolId: "sym-foo", coreness: 2 },
+          { symbolId: "sym-bar", coreness: 1 },
+        ],
+      }),
+      louvainRunner: async () => {
+        throw new Error("simulated louvain failure");
+      },
+    });
+
+    assert.equal(result.centralityComputed, 3);
+    assert.equal(result.algorithmRefresh.dirty, true);
+    assert.equal(result.algorithmRefresh.louvain.status, "failed");
+    const centrality = await ladybugDb.querySingle<{
+      pageRank: unknown;
+      kCore: unknown;
+    }>(
+      conn,
+      "MATCH (m:Metrics {symbolId: $symbolId}) RETURN m.pageRank AS pageRank, m.kCore AS kCore",
+      { symbolId: "sym-foo" },
+    );
+    assert.equal(Number(centrality?.pageRank), 0.8);
+    assert.equal(Number(centrality?.kCore), 2);
+  });
+
+  it("skips Louvain above maxCallEdges without marking algorithms stale", async () => {
+    await resetDb();
+    await seedRepo("repo-louvain-skipped");
+    await seedFile("repo-louvain-skipped", "file-1", "src/skip.ts");
+    for (const [symbolId, name] of [
+      ["sym-main", "main"],
+      ["sym-foo", "foo"],
+      ["sym-bar", "bar"],
+    ] as const) {
+      await seedSymbol({
+        repoId: "repo-louvain-skipped",
+        fileId: "file-1",
+        symbolId,
+        name,
+      });
+    }
+    const conn = await getLadybugConn();
+    await ladybugDb.insertEdges(conn, [
+      {
+        repoId: "repo-louvain-skipped",
+        fromSymbolId: "sym-main",
+        toSymbolId: "sym-foo",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+      {
+        repoId: "repo-louvain-skipped",
+        fromSymbolId: "sym-foo",
+        toSymbolId: "sym-bar",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+    ]);
+    let louvainCalled = false;
+    await ladybugDb.upsertShadowCluster(conn, {
+      shadowClusterId: "repo-louvain-skipped:louvain:old",
+      repoId: "repo-louvain-skipped",
+      algorithm: "louvain",
+      label: "old community",
+      symbolCount: 2,
+      modularity: 0,
+      versionId: "old",
+      createdAt: "2026-03-19T09:00:00.000Z",
+    });
+
+    const result = await computeAndStoreClustersAndProcesses({
+      conn,
+      repoId: "repo-louvain-skipped",
+      versionId: "v1",
+      algorithmRefresh: {
+        enabled: true,
+        pageRank: { enabled: false },
+        kCore: { enabled: false },
+        louvain: { enabled: true, maxCallEdges: 1 },
+        workerTimeoutMs: 120_000,
+      },
+      louvainRunner: async () => {
+        louvainCalled = true;
+        return [];
+      },
+    });
+
+    assert.equal(louvainCalled, false);
+    assert.equal(result.algorithmRefresh.louvain.status, "skipped");
+    assert.equal(result.algorithmRefresh.dirty, false);
+    const shadowClusters = await ladybugDb.getShadowClustersForRepo(
+      conn,
+      "repo-louvain-skipped",
+    );
+    assert.equal(shadowClusters.length, 0);
+  });
+
+  it("clears stale Louvain shadow clusters when algorithm capability is unavailable", async () => {
+    await resetDb();
+    await seedRepo("repo-louvain-unsupported");
+    await seedFile("repo-louvain-unsupported", "file-1", "src/unsupported.ts");
+    for (const [symbolId, name] of [
+      ["sym-main", "main"],
+      ["sym-foo", "foo"],
+      ["sym-bar", "bar"],
+    ] as const) {
+      await seedSymbol({
+        repoId: "repo-louvain-unsupported",
+        fileId: "file-1",
+        symbolId,
+        name,
+      });
+    }
+    const conn = await getLadybugConn();
+    await ladybugDb.insertEdges(conn, [
+      {
+        repoId: "repo-louvain-unsupported",
+        fromSymbolId: "sym-main",
+        toSymbolId: "sym-foo",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+      {
+        repoId: "repo-louvain-unsupported",
+        fromSymbolId: "sym-foo",
+        toSymbolId: "sym-bar",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+    ]);
+    await ladybugDb.upsertShadowCluster(conn, {
+      shadowClusterId: "repo-louvain-unsupported:louvain:old",
+      repoId: "repo-louvain-unsupported",
+      algorithm: "louvain",
+      label: "old community",
+      symbolCount: 2,
+      modularity: 0,
+      versionId: "old",
+      createdAt: "2026-03-19T09:00:00.000Z",
+    });
+    let louvainCalled = false;
+
+    const result = await computeAndStoreClustersAndProcesses({
+      conn,
+      repoId: "repo-louvain-unsupported",
+      versionId: "v1",
+      algorithmRefresh: {
+        enabled: true,
+        pageRank: { enabled: false },
+        kCore: { enabled: false },
+        louvain: { enabled: true, maxCallEdges: 50_000 },
+        workerTimeoutMs: 120_000,
+      },
+      algorithmCapabilityDetector: async () => ({
+        supported: false,
+        reason: "unit unsupported",
+      }),
+      louvainRunner: async () => {
+        louvainCalled = true;
+        return [];
+      },
+    });
+
+    assert.equal(louvainCalled, false);
+    assert.equal(result.algorithmRefresh.louvain.status, "skipped");
+    assert.equal(result.algorithmRefresh.louvain.reason, "unit unsupported");
+    assert.equal(result.algorithmRefresh.dirty, false);
+    const shadowClusters = await ladybugDb.getShadowClustersForRepo(
+      conn,
+      "repo-louvain-unsupported",
+    );
+    assert.equal(shadowClusters.length, 0);
+  });
+
+  it("marks algorithms dirty when the centrality worker times out", async () => {
+    await resetDb();
+    await seedRepo("repo-centrality-timeout");
+    await seedFile("repo-centrality-timeout", "file-1", "src/timeout.ts");
+    await seedSymbol({
+      repoId: "repo-centrality-timeout",
+      fileId: "file-1",
+      symbolId: "sym-main",
+      name: "main",
+    });
+    await seedSymbol({
+      repoId: "repo-centrality-timeout",
+      fileId: "file-1",
+      symbolId: "sym-foo",
+      name: "foo",
+    });
+    const conn = await getLadybugConn();
+    await ladybugDb.insertEdges(conn, [
+      {
+        repoId: "repo-centrality-timeout",
+        fromSymbolId: "sym-main",
+        toSymbolId: "sym-foo",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+    ]);
+
+    const result = await computeAndStoreClustersAndProcesses({
+      conn,
+      repoId: "repo-centrality-timeout",
+      versionId: "v1",
+      centralityRunner: async () => {
+        throw new CentralityWorkerTimeoutError(1);
+      },
+      algorithmRefresh: {
+        enabled: true,
+        pageRank: { enabled: true },
+        kCore: { enabled: true },
+        louvain: { enabled: false, maxCallEdges: 50_000 },
+        workerTimeoutMs: 1,
+      },
+    });
+
+    assert.equal(result.algorithmRefresh.dirty, true);
+    assert.equal(result.algorithmRefresh.pageRank.status, "timedOut");
+    assert.equal(result.algorithmRefresh.kCore.status, "timedOut");
+    assert.ok(result.clustersComputed >= 0);
+    assert.ok(result.processesTraced >= 0);
   });
 });

@@ -31,6 +31,7 @@ import {
   detectScipIo,
   installScipIo,
   runScipIoIndex,
+  selectGeneratedScipIndexes,
   ScipIoInstallError,
 } from "../../dist/scip/scip-io-runner.js";
 
@@ -170,6 +171,7 @@ describe("scip-io-runner: runScipIoIndex", () => {
     assert.equal(result.ok, true, `expected ok=true, stderr=${result.stderr}`);
     assert.equal(result.exitCode, 0);
     assert.equal(result.timedOut, false);
+    assert.match(result.stdout ?? "", /scip-io stub invoked/);
 
     // Verify cwd and args via the log file the stub wrote.
     const log = (await import("node:fs")).readFileSync(logFile, "utf-8");
@@ -234,6 +236,95 @@ describe("scip-io-runner: runScipIoIndex", () => {
     assert.equal(result.ok, false);
     // exitCode is null on spawn error
     assert.equal(result.exitCode, null);
+  });
+
+  it("captures bounded stdout for diagnostics", async () => {
+    const binDir = join(tmp, "bin-stdout");
+    const repoDir = join(tmp, "repo-stdout");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(repoDir, { recursive: true });
+    const stub = makeStubBinary(binDir, { exitCode: 0 });
+
+    const result = await runScipIoIndex({
+      binaryPath: stub,
+      repoRootPath: repoDir,
+      timeoutMs: 30_000,
+    });
+
+    assert.equal(result.ok, true);
+    assert.match(result.stdout ?? "", /scip-io stub invoked/);
+    assert.equal(result.stdoutTruncated, false);
+  });
+});
+
+describe("scip-io-runner: generated index selection", () => {
+  let tmp = "";
+
+  before(() => {
+    tmp = mkdtempSync(join(tmpdir(), "scip-io-select-"));
+  });
+
+  after(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("selects the merged index when it is under the decoder cap", async () => {
+    const repoDir = join(tmp, "repo-merged");
+    mkdirSync(repoDir, { recursive: true });
+    writeFileSync(join(repoDir, "index.scip"), "small", "utf-8");
+
+    const result = await selectGeneratedScipIndexes({
+      repoRootPath: repoDir,
+      mode: "merged",
+      maxIndexBytes: 10,
+    });
+
+    assert.equal(result.failures.length, 0);
+    assert.equal(result.generatedIndexes.length, 1);
+    assert.deepEqual(result.generatedIndexes[0], {
+      path: "index.scip",
+      label: "scip-io",
+      sizeBytes: 5,
+      mode: "merged",
+      contentHash: result.generatedIndexes[0]?.contentHash,
+    });
+  });
+
+  it("dedupes split indexes by SHA-256 content hash", async () => {
+    const repoDir = join(tmp, "repo-split-dedupe");
+    mkdirSync(repoDir, { recursive: true });
+    writeFileSync(join(repoDir, "typescript.scip"), "same", "utf-8");
+    writeFileSync(join(repoDir, "javascript.scip"), "same", "utf-8");
+
+    const result = await selectGeneratedScipIndexes({
+      repoRootPath: repoDir,
+      mode: "split",
+      maxIndexBytes: 10,
+    });
+
+    const accepted = result.generatedIndexes.filter((index) => !index.skipped);
+    const skipped = result.generatedIndexes.filter((index) => index.skipped);
+    assert.equal(accepted.length, 1);
+    assert.equal(skipped.length, 1);
+    assert.match(skipped[0]?.skipReason ?? "", /duplicate-content/);
+  });
+
+  it("reports oversized split indexes as visible skipped diagnostics", async () => {
+    const repoDir = join(tmp, "repo-split-oversize");
+    mkdirSync(repoDir, { recursive: true });
+    writeFileSync(join(repoDir, "big.scip"), "too-large", "utf-8");
+
+    const result = await selectGeneratedScipIndexes({
+      repoRootPath: repoDir,
+      mode: "split",
+      maxIndexBytes: 4,
+    });
+
+    assert.equal(result.generatedIndexes.length, 1);
+    assert.equal(result.generatedIndexes[0]?.skipped, true);
+    assert.equal(result.generatedIndexes[0]?.skipReason, "over-size");
+    assert.equal(result.failures.length, 1);
+    assert.match(result.failures[0]?.message ?? "", /exceeding/);
   });
 });
 

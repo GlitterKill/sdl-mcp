@@ -30,7 +30,7 @@ pub struct ScipDecodeState {
 impl ScipDecodeState {
     /// Parse a SCIP index file from disk into an in-memory protobuf structure.
     pub fn new(file_path: &str) -> NapiResult<Self> {
-        const MAX_SCIP_INDEX_BYTES: u64 = 256 * 1024 * 1024;
+        const MAX_SCIP_INDEX_BYTES: u64 = 512 * 1024 * 1024;
         let metadata = std::fs::metadata(file_path).map_err(|e| {
             napi::Error::from_reason(format!("Failed to stat SCIP file: {}", e))
         })?;

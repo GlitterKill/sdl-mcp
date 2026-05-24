@@ -41,6 +41,10 @@ import {
   validatePathWithinRootAsync,
 } from "../util/paths.js";
 import { createScipDecoder, getDecoderBackend } from "./decoder-factory.js";
+import type {
+  ScipFailureDiagnostic,
+  ScipGeneratedIndexDiagnostic,
+} from "./diagnostics.js";
 import {
   buildEdgesFromOccurrences,
   buildContainingSymbolMap,
@@ -726,6 +730,7 @@ export async function autoIngestScipIndexes(
   config: ScipConfig,
   repoRootPath: string,
   onProgress?: (event: AutoIngestProgressEvent) => void,
+  onFailure?: (failure: ScipFailureDiagnostic) => void,
 ): Promise<ScipIngestResponse[]> {
   if (!config.enabled || !config.autoIngestOnRefresh) {
     return [];
@@ -821,6 +826,11 @@ export async function autoIngestScipIndexes(
         path: relIndexPath,
         error: message,
       });
+      onFailure?.({
+        stage: "ingest",
+        message,
+        path: relIndexPath,
+      });
       // Continue with next index — don't fail the entire refresh
       return null;
     }
@@ -871,6 +881,8 @@ export function scipIngestWillRun(config: { scip?: ScipConfig }): boolean {
 export interface ScipIngestInsideIndexResult {
   results: ScipIngestResponse[];
   fullyCoveredPaths: ReadonlySet<string>;
+  generatedIndexes: ScipGeneratedIndexDiagnostic[];
+  failures: ScipFailureDiagnostic[];
 }
 
 /**
@@ -905,6 +917,8 @@ export async function runScipIngestInsideIndex(params: {
   repoId: string;
   repoRoot: string;
   config: { scip?: ScipConfig };
+  generatedIndexes?: readonly ScipGeneratedIndexDiagnostic[];
+  generatorFailures?: readonly ScipFailureDiagnostic[];
   onProgress?: (progress: {
     stage: "scipIngest";
     current: number;
@@ -918,6 +932,8 @@ export async function runScipIngestInsideIndex(params: {
   const empty: ScipIngestInsideIndexResult = {
     results: [],
     fullyCoveredPaths: new Set(),
+    generatedIndexes: [...(params.generatedIndexes ?? [])],
+    failures: [...(params.generatorFailures ?? [])],
   };
 
   if (!scipIngestWillRun({ scip })) {
@@ -957,11 +973,39 @@ export async function runScipIngestInsideIndex(params: {
     : undefined;
 
   try {
+    const acceptedGeneratedIndexes = (params.generatedIndexes ?? []).filter(
+      (index) => !index.skipped,
+    );
+    const hasSplitGeneratedIndexes = acceptedGeneratedIndexes.some(
+      (index) => index.mode === "split",
+    );
+    const configuredIndexes = hasSplitGeneratedIndexes
+      ? scip!.indexes.filter(
+          (entry) =>
+            normalizePath(entry.path) !== "index.scip" ||
+            (entry.label !== undefined && entry.label !== "scip-io"),
+        )
+      : scip!.indexes;
+    const indexByPath = new Map(
+      configuredIndexes.map((entry) => [normalizePath(entry.path), entry]),
+    );
+    for (const generated of acceptedGeneratedIndexes) {
+      indexByPath.set(normalizePath(generated.path), {
+        path: generated.path,
+        label: generated.label,
+      });
+    }
+    const effectiveScip: ScipConfig = {
+      ...scip!,
+      indexes: [...indexByPath.values()],
+    };
+    const failures = [...(params.generatorFailures ?? [])];
     const results = await autoIngestScipIndexes(
       repoId,
-      scip!,
+      effectiveScip,
       repoRoot,
       adapter,
+      (failure) => failures.push(failure),
     );
     const fullyCoveredPaths = buildFullyCoveredPathSet(results);
     if (fullyCoveredPaths.size > 0) {
@@ -971,12 +1015,27 @@ export async function runScipIngestInsideIndex(params: {
         indexCount: results.length,
       });
     }
-    return { results, fullyCoveredPaths };
+    return {
+      results,
+      fullyCoveredPaths,
+      generatedIndexes: [...(params.generatedIndexes ?? [])],
+      failures,
+    };
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     logger.warn("SCIP auto-ingest failed (non-fatal)", {
       repoId,
-      error: err instanceof Error ? err.message : String(err),
+      error: message,
     });
-    return empty;
+    return {
+      ...empty,
+      failures: [
+        ...empty.failures,
+        {
+          stage: "ingest",
+          message,
+        },
+      ],
+    };
   }
 }

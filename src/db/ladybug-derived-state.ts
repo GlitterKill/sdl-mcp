@@ -90,6 +90,7 @@ export async function markDerivedStateComputed(
   repoId: string,
   computedVersionId: string,
   clearedFlags?: DerivedStateDirtyFlags,
+  options?: { clearError?: boolean },
 ): Promise<void> {
   const updatedAt = getCurrentTimestamp();
   // When no selective flags are given, clear everything.
@@ -99,10 +100,11 @@ export async function markDerivedStateComputed(
   const clearAlgorithms = clearAll || Boolean(clearedFlags?.algorithms);
   const clearSummaries = clearAll || Boolean(clearedFlags?.summaries);
   const clearEmbeddings = clearAll || Boolean(clearedFlags?.embeddings);
+  const clearError = options?.clearError ?? true;
   await withWriteConn(async (wConn) => {
     await exec(
       wConn,
-      "MERGE (d:DerivedState {repoId: $repoId}) SET d.clustersDirty = CASE WHEN $clearClusters THEN false ELSE d.clustersDirty END, d.processesDirty = CASE WHEN $clearProcesses THEN false ELSE d.processesDirty END, d.algorithmsDirty = CASE WHEN $clearAlgorithms THEN false ELSE d.algorithmsDirty END, d.summariesDirty = CASE WHEN $clearSummaries THEN false ELSE d.summariesDirty END, d.embeddingsDirty = CASE WHEN $clearEmbeddings THEN false ELSE d.embeddingsDirty END, d.computedVersionId = $computedVersionId, d.targetVersionId = $computedVersionId, d.updatedAt = $updatedAt, d.lastError = null",
+      "MERGE (d:DerivedState {repoId: $repoId}) SET d.clustersDirty = CASE WHEN $clearClusters THEN false ELSE d.clustersDirty END, d.processesDirty = CASE WHEN $clearProcesses THEN false ELSE d.processesDirty END, d.algorithmsDirty = CASE WHEN $clearAlgorithms THEN false ELSE d.algorithmsDirty END, d.summariesDirty = CASE WHEN $clearSummaries THEN false ELSE d.summariesDirty END, d.embeddingsDirty = CASE WHEN $clearEmbeddings THEN false ELSE d.embeddingsDirty END, d.computedVersionId = $computedVersionId, d.targetVersionId = $computedVersionId, d.updatedAt = $updatedAt, d.lastError = CASE WHEN $clearError THEN null ELSE d.lastError END",
       {
         repoId,
         clearClusters,
@@ -110,6 +112,7 @@ export async function markDerivedStateComputed(
         clearAlgorithms,
         clearSummaries,
         clearEmbeddings,
+        clearError,
         computedVersionId,
         updatedAt,
       },

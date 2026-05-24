@@ -15,6 +15,11 @@ import { DB_QUERY_LIMIT_MAX } from "../config/constants.js";
 import { safeJsonParse } from "../util/safeJson.js";
 import { z } from "zod";
 import type { ToolTimingDiagnostics } from "./timing-diagnostics.js";
+import type {
+  ScipFailureDiagnostic,
+  ScipGeneratedIndexDiagnostic,
+} from "../scip/diagnostics.js";
+import type { AlgorithmRefreshDiagnostics } from "../indexer/cluster-orchestrator.js";
 
 export type ToolRequest = Record<string, unknown>;
 export type ToolResponse = {
@@ -77,6 +82,11 @@ export interface IndexStats {
     missingSignatureByKind: Record<string, number>;
     scipPhaseCounts: Record<string, number>;
   };
+  scip?: {
+    generatedIndexes: ScipGeneratedIndexDiagnostic[];
+    failures: ScipFailureDiagnostic[];
+  };
+  algorithmRefresh?: AlgorithmRefreshDiagnostics;
 }
 
 export interface IndexEvent {

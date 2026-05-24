@@ -32,6 +32,7 @@
 
 import { spawn } from "child_process";
 import { createHash } from "crypto";
+import { createReadStream } from "fs";
 import {
   access,
   chmod,
@@ -40,6 +41,7 @@ import {
   readdir,
   rename,
   rm,
+  stat,
   writeFile,
 } from "fs/promises";
 import type { Dirent } from "fs";
@@ -51,9 +53,19 @@ import { loadConfig } from "../config/loadConfig.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
-import { normalizePath, validatePathWithinRootAsync } from "../util/paths.js";
+import {
+  getRelativePath,
+  normalizePath,
+  validatePathWithinRootAsync,
+} from "../util/paths.js";
 import { killProcessTree } from "../runtime/executor.js";
 import { resolveExecutable } from "../runtime/runtimes.js";
+import { SCIP_MAX_INDEX_BYTES } from "./limits.js";
+import type {
+  ScipFailureDiagnostic,
+  ScipGeneratedIndexDiagnostic,
+  ScipGeneratedIndexMode,
+} from "./diagnostics.js";
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -164,7 +176,22 @@ export interface ScipIoRunResult {
   exitCode: number | null;
   durationMs: number;
   timedOut: boolean;
+  stdout?: string;
   stderr?: string;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
+}
+
+export interface ScipGeneratedIndexSelection {
+  generatedIndexes: ScipGeneratedIndexDiagnostic[];
+  failures: ScipFailureDiagnostic[];
+}
+
+export interface ScipIoPreRefreshResult extends ScipGeneratedIndexSelection {
+  attempted: boolean;
+  ok: boolean;
+  run?: ScipIoRunResult;
+  splitRun?: ScipIoRunResult;
 }
 
 export class ScipIoUnsupportedPlatformError extends Error {
@@ -281,7 +308,19 @@ let installInFlight: Promise<string> | null = null;
  * auto-ingest. If the first call fails (non-fatal), the second call is
  * free to try again by re-entering the wrapper.
  */
-const perRepoRunLocks = new Map<string, Promise<void>>();
+const perRepoRunLocks = new Map<string, Promise<ScipIoPreRefreshResult>>();
+
+function emptyPreRefreshResult(
+  attempted: boolean,
+  failure?: ScipFailureDiagnostic,
+): ScipIoPreRefreshResult {
+  return {
+    attempted,
+    ok: !attempted && !failure,
+    generatedIndexes: [],
+    failures: failure ? [failure] : [],
+  };
+}
 
 /**
  * Download and install the scip-io binary into the managed bin directory.
@@ -746,6 +785,185 @@ async function smokeTest(
   });
 }
 
+function hasNoMergeArg(args: readonly string[]): boolean {
+  return args.includes("--no-merge");
+}
+
+function hasCustomOutputArg(args: readonly string[]): boolean {
+  return args.some(
+    (arg) => arg === "--output" || arg === "-o" || arg.startsWith("--output="),
+  );
+}
+
+function appendNoMergeArg(args: readonly string[]): string[] {
+  return hasNoMergeArg(args) ? [...args] : [...args, "--no-merge"];
+}
+
+async function sha256File(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(filePath);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolve(hash.digest("hex")));
+    stream.on("error", reject);
+  });
+}
+
+async function discoverSplitIndexPaths(repoRootPath: string): Promise<string[]> {
+  const entries = await readdir(repoRootPath, { withFileTypes: true });
+  return entries
+    .filter((entry: Dirent) => entry.isFile())
+    .map((entry) => entry.name)
+    .filter((name) => name.toLowerCase().endsWith(".scip"))
+    .filter((name) => name.toLowerCase() !== "index.scip")
+    .sort()
+    .map((name) => join(repoRootPath, name));
+}
+
+function repoRelativeScipPath(repoRootPath: string, absolutePath: string): string {
+  const normalizedRoot = normalizePath(repoRootPath);
+  const normalizedPath = normalizePath(absolutePath);
+  return normalizedPath.startsWith(normalizedRoot)
+    ? normalizePath(getRelativePath(normalizedRoot, normalizedPath))
+    : normalizedPath;
+}
+
+/**
+ * Select generated SCIP indexes that are safe to feed into the decoder.
+ *
+ * The merged path is preferred while it remains under the decoder cap. When
+ * the merged file is too large, the caller runs scip-io again with
+ * `--no-merge` and calls this helper in split mode. Split outputs are
+ * SHA-256 deduped because scip-typescript can produce identical
+ * TypeScript/JavaScript indexes from the same project graph.
+ */
+export async function selectGeneratedScipIndexes(opts: {
+  repoRootPath: string;
+  mode: ScipGeneratedIndexMode;
+  maxIndexBytes?: number;
+  candidatePaths?: readonly string[];
+}): Promise<ScipGeneratedIndexSelection> {
+  const maxIndexBytes = opts.maxIndexBytes ?? SCIP_MAX_INDEX_BYTES;
+  const repoRootPath = normalizePath(opts.repoRootPath);
+  const candidatePaths =
+    opts.candidatePaths ??
+    (opts.mode === "merged"
+      ? [join(repoRootPath, "index.scip")]
+      : await discoverSplitIndexPaths(repoRootPath));
+
+  const generatedIndexes: ScipGeneratedIndexDiagnostic[] = [];
+  const failures: ScipFailureDiagnostic[] = [];
+  const acceptedByHash = new Map<string, string>();
+
+  for (const candidatePath of candidatePaths) {
+    const absolutePath = normalizePath(candidatePath);
+    const relPath = repoRelativeScipPath(repoRootPath, absolutePath);
+    let sizeBytes = 0;
+    try {
+      const fileStat = await stat(absolutePath);
+      sizeBytes = fileStat.size;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") continue;
+      const message =
+        err instanceof Error ? err.message : `failed to stat ${relPath}`;
+      failures.push({
+        stage:
+          opts.mode === "merged"
+            ? "generator-select"
+            : "generator-split-select",
+        message,
+        path: relPath,
+      });
+      generatedIndexes.push({
+        path: relPath,
+        label: opts.mode === "merged" ? "scip-io" : relPath,
+        sizeBytes,
+        mode: opts.mode,
+        skipped: true,
+        skipReason: message,
+      });
+      continue;
+    }
+
+    const label = opts.mode === "merged" ? "scip-io" : relPath;
+    if (sizeBytes > maxIndexBytes) {
+      const message = `SCIP index ${relPath} is ${sizeBytes} bytes, exceeding the ${maxIndexBytes} byte decoder limit`;
+      failures.push({
+        stage:
+          opts.mode === "merged"
+            ? "generator-select"
+            : "generator-split-select",
+        message,
+        path: relPath,
+        sizeBytes,
+      });
+      generatedIndexes.push({
+        path: relPath,
+        label,
+        sizeBytes,
+        mode: opts.mode,
+        skipped: true,
+        skipReason: "over-size",
+      });
+      continue;
+    }
+
+    let contentHash: string;
+    try {
+      contentHash = await sha256File(absolutePath);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : `failed to hash ${relPath}`;
+      failures.push({
+        stage:
+          opts.mode === "merged"
+            ? "generator-select"
+            : "generator-split-select",
+        message,
+        path: relPath,
+        sizeBytes,
+      });
+      generatedIndexes.push({
+        path: relPath,
+        label,
+        sizeBytes,
+        mode: opts.mode,
+        skipped: true,
+        skipReason: message,
+      });
+      continue;
+    }
+
+    if (opts.mode === "split") {
+      const firstPath = acceptedByHash.get(contentHash);
+      if (firstPath) {
+        generatedIndexes.push({
+          path: relPath,
+          label,
+          sizeBytes,
+          mode: opts.mode,
+          contentHash,
+          skipped: true,
+          skipReason: `duplicate-content:${firstPath}`,
+        });
+        continue;
+      }
+      acceptedByHash.set(contentHash, relPath);
+    }
+
+    generatedIndexes.push({
+      path: relPath,
+      label,
+      sizeBytes,
+      mode: opts.mode,
+      contentHash,
+    });
+  }
+
+  return { generatedIndexes, failures };
+}
+
 /**
  * Run `scip-io index` (plus any user-supplied args) in `repoRootPath`
  * with the safe spawn pattern. Captures stderr (bounded) for diagnostic
@@ -788,6 +1006,7 @@ export async function runScipIoIndex(args: {
   return new Promise<ScipIoRunResult>((resolve) => {
     let timedOut = false;
     let cancelled = false;
+    const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     let stderrBytes = 0;
     let stderrTruncated = false;
@@ -805,9 +1024,15 @@ export async function runScipIoIndex(args: {
     child.stdout?.on("data", (chunk: Buffer | string) => {
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       stdoutBytes += buf.length;
+      if (stdoutTruncated) return;
       if (stdoutBytes > MAX_STDOUT_BYTES && !stdoutTruncated) {
+        const before = stdoutBytes - buf.length;
+        const remaining = Math.max(0, MAX_STDOUT_BYTES - before);
+        if (remaining > 0) stdoutChunks.push(buf.subarray(0, remaining));
         stdoutTruncated = true;
+        return;
       }
+      stdoutChunks.push(buf);
     });
 
     child.stderr?.on("data", (chunk: Buffer | string) => {
@@ -849,6 +1074,8 @@ export async function runScipIoIndex(args: {
         durationMs: Date.now() - startTime,
         timedOut: false,
         stderr: err.message,
+        stdoutTruncated,
+        stderrTruncated,
       });
     });
 
@@ -856,6 +1083,7 @@ export async function runScipIoIndex(args: {
       clearTimeout(timer);
       args.signal?.removeEventListener("abort", onAbort);
       const durationMs = Date.now() - startTime;
+      const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
       const stderr = Buffer.concat(stderrChunks).toString("utf-8");
       const ok = !timedOut && !cancelled && code === 0;
       resolve({
@@ -863,7 +1091,10 @@ export async function runScipIoIndex(args: {
         exitCode: code,
         durationMs,
         timedOut,
+        stdout: stdout.length > 0 ? stdout : undefined,
         stderr: stderr.length > 0 ? stderr : undefined,
+        stdoutTruncated,
+        stderrTruncated,
       });
     });
   });
@@ -880,26 +1111,34 @@ export async function runScipIoBeforeIndex(opts: {
   repoRootPath: string;
   generatorCfg: ScipGeneratorConfig;
   signal?: AbortSignal;
-}): Promise<void> {
-  const { repoRootPath, generatorCfg, signal } = opts;
+  maxIndexBytes?: number;
+}): Promise<ScipIoPreRefreshResult> {
+  const { repoRootPath, generatorCfg, signal, maxIndexBytes } = opts;
 
   let resolution: ScipIoResolution | null;
   try {
     resolution = await detectScipIo(generatorCfg.binary);
   } catch (err) {
-    logger.warn("scip-io: detection failed", {
-      error: err instanceof Error ? err.message : String(err),
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn("scip-io: detection failed", { error: message });
+    return emptyPreRefreshResult(true, {
+      stage: "generator-detect",
+      message,
     });
-    return;
   }
 
   if (!resolution) {
     if (!generatorCfg.autoInstall) {
+      const message =
+        "scip-io binary not found in PATH or managed location, and autoInstall is disabled";
       logger.warn(
         "scip-io: binary not found in PATH or managed location, and autoInstall is disabled",
         { binary: generatorCfg.binary, managedDir: MANAGED_BIN_DIR },
       );
-      return;
+      return emptyPreRefreshResult(true, {
+        stage: "generator-detect",
+        message,
+      });
     }
     logger.info("scip-io: binary not found, installing from GitHub releases", {
       binary: generatorCfg.binary,
@@ -908,10 +1147,14 @@ export async function runScipIoBeforeIndex(opts: {
       const installed = await installScipIo({ signal });
       resolution = { binaryPath: installed, source: "installed" };
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       logger.warn("scip-io: installation failed (non-fatal)", {
-        error: err instanceof Error ? err.message : String(err),
+        error: message,
       });
-      return;
+      return emptyPreRefreshResult(true, {
+        stage: "generator-install",
+        message,
+      });
     }
   }
 
@@ -942,7 +1185,147 @@ export async function runScipIoBeforeIndex(opts: {
       timedOut: result.timedOut,
       stderr: result.stderr?.slice(0, 2000),
     });
+    return {
+      attempted: true,
+      ok: false,
+      run: result,
+      generatedIndexes: [],
+      failures: [
+        {
+          stage: "generator-run",
+          message:
+            result.stderr?.slice(0, 2000) ??
+            `scip-io exited with ${result.exitCode ?? "unknown"}`,
+        },
+      ],
+    };
   }
+
+  if (hasCustomOutputArg(generatorCfg.args)) {
+    return {
+      attempted: true,
+      ok: true,
+      run: result,
+      generatedIndexes: [],
+      failures: [],
+    };
+  }
+
+  if (hasNoMergeArg(generatorCfg.args)) {
+    const splitSelection = await selectGeneratedScipIndexes({
+      repoRootPath,
+      mode: "split",
+      maxIndexBytes,
+    });
+    const accepted = splitSelection.generatedIndexes.some(
+      (index) => !index.skipped,
+    );
+    return {
+      attempted: true,
+      ok: accepted,
+      run: result,
+      generatedIndexes: splitSelection.generatedIndexes,
+      failures:
+        accepted || splitSelection.failures.length > 0
+          ? splitSelection.failures
+          : [
+              {
+                stage: "generator-split-select",
+                message: "scip-io --no-merge completed but produced no split .scip files",
+              },
+            ],
+    };
+  }
+
+  const mergedSelection = await selectGeneratedScipIndexes({
+    repoRootPath,
+    mode: "merged",
+    maxIndexBytes,
+  });
+  const mergedAccepted = mergedSelection.generatedIndexes.some(
+    (index) => !index.skipped,
+  );
+  const mergedOversized = mergedSelection.generatedIndexes.some(
+    (index) => index.skipped && index.skipReason === "over-size",
+  );
+  if (mergedAccepted || !mergedOversized) {
+    return {
+      attempted: true,
+      ok: mergedAccepted,
+      run: result,
+      generatedIndexes: mergedSelection.generatedIndexes,
+      failures:
+        mergedAccepted || mergedSelection.failures.length > 0
+          ? mergedSelection.failures
+          : [
+              {
+                stage: "generator-select",
+                message: "scip-io completed but did not produce index.scip",
+              },
+            ],
+    };
+  }
+
+  logger.info("scip-io: merged index exceeded decoder cap; generating split indexes", {
+    repoRootPath,
+    maxIndexBytes: SCIP_MAX_INDEX_BYTES,
+  });
+  const splitRun = await runScipIoIndex({
+    binaryPath: resolution.binaryPath,
+    repoRootPath,
+    timeoutMs: generatorCfg.timeoutMs,
+    extraArgs: appendNoMergeArg(generatorCfg.args),
+    signal,
+  });
+  if (!splitRun.ok) {
+    return {
+      attempted: true,
+      ok: false,
+      run: result,
+      splitRun,
+      generatedIndexes: mergedSelection.generatedIndexes,
+      failures: [
+        ...mergedSelection.failures,
+        {
+          stage: "generator-split-run",
+          message:
+            splitRun.stderr?.slice(0, 2000) ??
+            `scip-io --no-merge exited with ${
+              splitRun.exitCode ?? "unknown"
+            }`,
+        },
+      ],
+    };
+  }
+
+  const splitSelection = await selectGeneratedScipIndexes({
+    repoRootPath,
+    mode: "split",
+    maxIndexBytes,
+  });
+  const splitAccepted = splitSelection.generatedIndexes.some(
+    (index) => !index.skipped,
+  );
+  return {
+    attempted: true,
+    ok: splitAccepted,
+    run: result,
+    splitRun,
+    generatedIndexes: [
+      ...mergedSelection.generatedIndexes,
+      ...splitSelection.generatedIndexes,
+    ],
+    failures:
+      splitAccepted || splitSelection.failures.length > 0
+        ? [...mergedSelection.failures, ...splitSelection.failures]
+        : [
+            ...mergedSelection.failures,
+            {
+              stage: "generator-split-select",
+              message: "scip-io --no-merge completed but produced no split .scip files",
+            },
+          ],
+  };
 }
 
 /**
@@ -971,21 +1354,25 @@ export async function maybeRunScipIoPreRefresh(
   repoId: string,
   repoRootPath: string,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<ScipIoPreRefreshResult> {
   // Cheap gate first — if the generator is disabled, skip the lock dance
   // entirely and return without touching any shared state.
   let generatorCfg: ScipGeneratorConfig | undefined;
   try {
     const appConfig = loadConfig();
-    if (!appConfig.scip?.enabled) return;
+    if (!appConfig.scip?.enabled) return emptyPreRefreshResult(false);
     generatorCfg = appConfig.scip.generator;
-    if (!generatorCfg?.enabled) return;
+    if (!generatorCfg?.enabled) return emptyPreRefreshResult(false);
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     logger.warn("scip-io pre-refresh hook failed to load config (non-fatal)", {
       repoId,
-      error: err instanceof Error ? err.message : String(err),
+      error: message,
     });
-    return;
+    return emptyPreRefreshResult(false, {
+      stage: "generator-detect",
+      message,
+    });
   }
 
   // Coalesce parallel calls for the same repo onto a single promise so we
@@ -994,16 +1381,19 @@ export async function maybeRunScipIoPreRefresh(
   if (existing) {
     logger.debug("scip-io: joining in-flight run for repo", { repoId });
     try {
-      await existing;
+      return await existing;
     } catch {
       // The previous run's error was already logged; nothing to do here.
+      return emptyPreRefreshResult(true, {
+        stage: "generator-run",
+        message: "joined in-flight scip-io run failed",
+      });
     }
-    return;
   }
 
   const runPromise = (async () => {
     try {
-      await runScipIoBeforeIndex({
+      return await runScipIoBeforeIndex({
         repoRootPath,
         generatorCfg,
         signal,
@@ -1015,12 +1405,16 @@ export async function maybeRunScipIoPreRefresh(
         repoId,
         error: err instanceof Error ? err.message : String(err),
       });
+      return emptyPreRefreshResult(true, {
+        stage: "generator-run",
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   })();
 
   perRepoRunLocks.set(repoId, runPromise);
   try {
-    await runPromise;
+    return await runPromise;
   } finally {
     if (perRepoRunLocks.get(repoId) === runPromise) {
       perRepoRunLocks.delete(repoId);
@@ -1043,20 +1437,25 @@ export async function maybeRunScipIoPreRefresh(
 export async function runScipIoPreRefreshForIndex(
   repoId: string,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<ScipIoPreRefreshResult> {
   try {
     const appConfig = loadConfig();
     if (!appConfig.scip?.enabled || !appConfig.scip?.generator?.enabled) {
-      return;
+      return emptyPreRefreshResult(false);
     }
     const conn = await getLadybugConn();
     const repoRow = await ladybugDb.getRepo(conn, repoId);
-    if (!repoRow) return;
-    await maybeRunScipIoPreRefresh(repoId, repoRow.rootPath, signal);
+    if (!repoRow) return emptyPreRefreshResult(false);
+    return await maybeRunScipIoPreRefresh(repoId, repoRow.rootPath, signal);
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     logger.warn("scip-io pre-refresh outer hook failed (non-fatal)", {
       repoId,
-      error: err instanceof Error ? err.message : String(err),
+      error: message,
+    });
+    return emptyPreRefreshResult(false, {
+      stage: "generator-detect",
+      message,
     });
   }
 }

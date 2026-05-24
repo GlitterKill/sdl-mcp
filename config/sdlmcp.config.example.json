@@ -75,7 +75,17 @@
     "workerPoolSize": null,
     "engine": "rust",
     "watchDebounceMs": 300,
-    "pass2Concurrency": 1
+    "pass2Concurrency": 1,
+    "algorithmRefresh": {
+      "enabled": true,
+      "pageRank": { "enabled": true },
+      "kCore": { "enabled": true },
+      "louvain": {
+        "enabled": true,
+        "maxCallEdges": 50000
+      },
+      "workerTimeoutMs": 120000
+    }
   },
   "liveIndex": {
     "enabled": true,

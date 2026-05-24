@@ -27,6 +27,7 @@ import type {
   ScipDiagnostic as ProtoScipDiagnostic,
 } from "./proto/scip_pb.js";
 import { ScipDecodeError } from "../domain/errors.js";
+import { SCIP_MAX_INDEX_BYTES } from "./limits.js";
 
 // ---------------------------------------------------------------------------
 // Mapping helpers: proto types -> domain types
@@ -201,8 +202,8 @@ export class TypeScriptScipDecoder implements ScipDecoder {
     this.index = null;
   }
 
-  /** Maximum SCIP index file size (256 MB) for the TS fallback decoder. */
-  private static readonly MAX_INDEX_SIZE = 256 * 1024 * 1024;
+  /** Maximum SCIP index file size for the TS fallback decoder. */
+  public static readonly MAX_INDEX_SIZE = SCIP_MAX_INDEX_BYTES;
   /** Maximum number of documents in a SCIP index for the TS fallback decoder. */
   private static readonly MAX_DOCUMENTS = 50_000;
   /** Maximum total occurrences across all documents for the TS fallback decoder. */

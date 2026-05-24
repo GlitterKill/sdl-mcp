@@ -20,6 +20,7 @@ import {
   type SummaryBatchResult,
 } from "./metrics-updater.js";
 import { finalizeDerivedState } from "./finalize-derived-state.js";
+import type { AlgorithmRefreshDiagnostics } from "./cluster-orchestrator.js";
 import { watchRepositoryWithIndexer } from "./watcher.js";
 import type { AppConfig, RepoConfig } from "../config/types.js";
 import { loadConfig } from "../config/loadConfig.js";
@@ -80,6 +81,10 @@ import {
   runScipIngestInsideIndex,
   scipIngestWillRun,
 } from "../scip/ingestion.js";
+import type {
+  ScipFailureDiagnostic,
+  ScipGeneratedIndexDiagnostic,
+} from "../scip/diagnostics.js";
 import type { BatchPersistDrainDiagnostics } from "./parser/batch-persist.js";
 export type { IndexProgress, IndexProgressSubstage } from "./indexer-init.js";
 export interface IndexTimingDiagnostics {
@@ -118,6 +123,11 @@ export interface IndexResult {
     rustFallbackFiles: number;
     perLanguageFallback: Record<string, number>;
   };
+  scip?: {
+    generatedIndexes: ScipGeneratedIndexDiagnostic[];
+    failures: ScipFailureDiagnostic[];
+  };
+  algorithmRefresh?: AlgorithmRefreshDiagnostics;
 }
 
 export interface IndexWatchHandle {
@@ -359,7 +369,10 @@ export async function indexRepo(
   // src/scip/scip-io-runner.ts::runScipIoPreRefreshForIndex.
   const { runScipIoPreRefreshForIndex } =
     await import("../scip/scip-io-runner.js");
-  await runScipIoPreRefreshForIndex(repoId, signal);
+  const scipPreRefreshResult = await runScipIoPreRefreshForIndex(
+    repoId,
+    signal,
+  );
 
   // Serialize concurrent indexRepo calls for the same repo to prevent
   // LadybugDB write conflicts and race conditions during rapid watcher events.
@@ -406,7 +419,14 @@ export async function indexRepo(
     if (mode === "full") {
       await preIndexCheckpoint();
     }
-    return indexRepoImpl(repoId, mode, onProgress, signal, options);
+    return indexRepoImpl(
+      repoId,
+      mode,
+      onProgress,
+      signal,
+      options,
+      scipPreRefreshResult,
+    );
   };
 
   const resultPromise = withIndexingGate(() =>
@@ -429,6 +449,10 @@ async function indexRepoImpl(
   onProgress?: (progress: IndexProgress) => void,
   signal?: AbortSignal,
   options?: IndexRepoOptions,
+  scipPreRefresh?: {
+    generatedIndexes: ScipGeneratedIndexDiagnostic[];
+    failures: ScipFailureDiagnostic[];
+  },
 ): Promise<IndexResult> {
   // Auto-upgrade incremental → full on a fresh repo (no files indexed yet).
   // Callers (CLI delegated path, MCP `sdl.index.refresh`, watcher first-run)
@@ -595,11 +619,13 @@ async function indexRepoImpl(
     hasIndexMutations: boolean;
     callResolutionTelemetry: CallResolutionTelemetry;
     pass1Engine: NonNullable<IndexResult["pass1Engine"]>;
+    scip?: NonNullable<IndexResult["scip"]>;
     preFinalize?: () => Promise<void>;
   }): Promise<{
     summaryStats?: SummaryBatchResult;
     clustersComputed: number;
     processesTraced: number;
+    algorithmRefresh: AlgorithmRefreshDiagnostics;
   }> =>
     withPostIndexWriteSession(async () => {
       await params.preFinalize?.();
@@ -632,6 +658,7 @@ async function indexRepoImpl(
         versionId: params.versionId,
         filesTotal: params.filesTotal,
         phaseTimings,
+        algorithmRefresh: appConfig.indexing?.algorithmRefresh,
         onProgress,
         sharedGraph: finalizeResult.sharedGraph,
         measurePhase,
@@ -667,6 +694,8 @@ async function indexRepoImpl(
           pass1Engine: params.pass1Engine,
           fileSummaryEmbeddings: finalizeResult.fileSummaryEmbeddingStats,
           quality: finalizeResult.qualityStats,
+          scip: params.scip,
+          algorithmRefresh: derivedResult.algorithmRefresh,
         },
       });
 
@@ -674,6 +703,7 @@ async function indexRepoImpl(
         summaryStats: finalizeResult.summaryStats,
         clustersComputed: derivedResult.clustersComputed,
         processesTraced: derivedResult.processesTraced,
+        algorithmRefresh: derivedResult.algorithmRefresh,
       };
     }, { timeoutMs: postIndexSessionTimeoutMs });
 
@@ -701,10 +731,17 @@ async function indexRepoImpl(
               repoId,
               repoRoot: repoRow.rootPath,
               config: appConfig,
+              generatedIndexes: scipPreRefresh?.generatedIndexes,
+              generatorFailures: scipPreRefresh?.failures,
               onProgress,
             }),
           )
-        : { results: [], fullyCoveredPaths: new Set<string>() };
+        : {
+            results: [],
+            fullyCoveredPaths: new Set<string>(),
+            generatedIndexes: scipPreRefresh?.generatedIndexes ?? [],
+            failures: scipPreRefresh?.failures ?? [],
+          };
       if (scipResult.results.length > 0) {
         const { maybeCleanupGeneratedScipIndex } =
           await import("../scip/cleanup.js");
@@ -715,6 +752,9 @@ async function indexRepoImpl(
           ),
           args: appConfig.scip?.generator?.args ?? [],
           repoRootPath: repoRow.rootPath,
+          generatedPaths: scipResult.generatedIndexes
+            .filter((index) => !index.skipped)
+            .map((index) => index.path),
         });
       }
 
@@ -728,6 +768,7 @@ async function indexRepoImpl(
       let summaryStats: SummaryBatchResult | undefined;
       let clustersComputed = 0;
       let processesTraced = 0;
+      let algorithmRefresh: AlgorithmRefreshDiagnostics | undefined;
       const needsFullPostIndexFinalize = scipMutatedGraph;
       const needsDirectPostIndexRepair =
         !needsFullPostIndexFinalize &&
@@ -768,6 +809,10 @@ async function indexRepoImpl(
             pass2EligibleFileCount: 0,
           }),
           pass1Engine,
+          scip: {
+            generatedIndexes: scipResult.generatedIndexes,
+            failures: scipResult.failures,
+          },
           preFinalize: needsDirectPostIndexRepair
             ? async () => {
                 if (recovery.needsMetrics) {
@@ -787,6 +832,7 @@ async function indexRepoImpl(
         summaryStats = postIndexResult.summaryStats;
         clustersComputed = postIndexResult.clustersComputed;
         processesTraced = postIndexResult.processesTraced;
+        algorithmRefresh = postIndexResult.algorithmRefresh;
       } else {
         await measurePhase("memorySync", async () => {
           const memoryConn = await getLadybugConn();
@@ -816,6 +862,11 @@ async function indexRepoImpl(
         // Phase 1 Task 1.12 — no Pass-1 ran in this short-circuit, emit zeros
         // so downstream consumers see a stable shape.
         pass1Engine,
+        scip: {
+          generatedIndexes: scipResult.generatedIndexes,
+          failures: scipResult.failures,
+        },
+        algorithmRefresh,
       };
 
       invalidateGraphSnapshot(repoId);
@@ -839,6 +890,8 @@ async function indexRepoImpl(
             durationMs: result.durationMs,
             errors: 0,
             pass1Engine,
+            scip: result.scip,
+            algorithmRefresh: result.algorithmRefresh,
           },
         });
       }
@@ -1075,6 +1128,10 @@ async function indexRepoImpl(
     // an unconditional drain await in incremental mode (matches prior code).
     const willRunScip = scipIngestWillRun({ scip: appConfig.scip });
     let pass2Edges: number;
+    let scipDiagnostics = {
+      generatedIndexes: scipPreRefresh?.generatedIndexes ?? [],
+      failures: scipPreRefresh?.failures ?? [],
+    };
     if (willRunScip) {
       // SCIP path: drain → SCIP → pass 2 (sequential, all writeLimiter-bound).
       await measurePhase("pass1Drain", () => pass1DrainPromise);
@@ -1083,9 +1140,15 @@ async function indexRepoImpl(
           repoId,
           repoRoot: repoRow.rootPath,
           config: appConfig,
+          generatedIndexes: scipPreRefresh?.generatedIndexes,
+          generatorFailures: scipPreRefresh?.failures,
           onProgress,
         }),
       );
+      scipDiagnostics = {
+        generatedIndexes: scipResult.generatedIndexes,
+        failures: scipResult.failures,
+      };
       // After ingest, delete the generator-produced `<repoRoot>/index.scip`
       // when the user has enabled both the generator and cleanup. Skipped
       // when `--output` is in args (we can't safely guess the location);
@@ -1099,6 +1162,9 @@ async function indexRepoImpl(
         ),
         args: appConfig.scip?.generator?.args ?? [],
         repoRootPath: repoRow.rootPath,
+        generatedPaths: scipResult.generatedIndexes
+          .filter((index) => !index.skipped)
+          .map((index) => index.path),
       });
       // Per-file coverage feeds the pass-2 file-skip optimisation:
       // resolver work avoided on files SCIP fully resolved. The
@@ -1359,6 +1425,7 @@ async function indexRepoImpl(
         versionId,
         filesTotal: files.length,
         phaseTimings,
+        algorithmRefresh: appConfig.indexing?.algorithmRefresh,
         onProgress,
         sharedGraph: finalizeResult.sharedGraph,
         measurePhase,
@@ -1398,6 +1465,8 @@ async function indexRepoImpl(
           pass1Engine: derivePass1EngineTelemetry(pass1Acc),
           fileSummaryEmbeddings: finalizeResult.fileSummaryEmbeddingStats,
           quality: finalizeResult.qualityStats,
+          scip: scipDiagnostics,
+          algorithmRefresh: derivedResult.algorithmRefresh,
         },
       });
 
@@ -1405,10 +1474,16 @@ async function indexRepoImpl(
         summaryStats: finalizeResult.summaryStats,
         clustersComputed: derivedResult.clustersComputed,
         processesTraced: derivedResult.processesTraced,
+        algorithmRefresh: derivedResult.algorithmRefresh,
       };
     }, { timeoutMs: postIndexSessionTimeoutMs });
 
-    const { summaryStats, clustersComputed, processesTraced } = phaseOutcome;
+    const {
+      summaryStats,
+      clustersComputed,
+      processesTraced,
+      algorithmRefresh,
+    } = phaseOutcome;
     const totalMs = Date.now() - startTime;
 
     const result: IndexResult = {
@@ -1439,6 +1514,8 @@ async function indexRepoImpl(
       // tooling can inspect Rust coverage / fallback rates without scraping
       // the audit log.
       pass1Engine: derivePass1EngineTelemetry(pass1Acc),
+      scip: scipDiagnostics,
+      algorithmRefresh,
     };
 
     invalidateGraphSnapshot(repoId);
