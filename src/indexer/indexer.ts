@@ -94,6 +94,7 @@ import type { BatchPersistDrainDiagnostics } from "./parser/batch-persist.js";
 import {
   executeProviderFirstScipFull,
   resolveProviderFirstExecutionPlan,
+  type ProviderFirstCoverageSummary,
   type ProviderFirstExecutionSummary,
 } from "./provider-first/executor.js";
 import {
@@ -308,6 +309,7 @@ interface ProviderFirstCoverageReport {
   reasons: string[];
   fatalReasons: string[];
   fallbackPaths: Set<string>;
+  summary: ProviderFirstCoverageSummary;
 }
 
 function analyzeProviderFirstCoverage(params: {
@@ -337,6 +339,9 @@ function analyzeProviderFirstCoverage(params: {
   const partialPaths: string[] = [];
   const extraProviderPaths: string[] = [];
   const fallbackPaths = new Set<string>();
+  let fullyCoveredFiles = 0;
+  let partialFiles = 0;
+  let fullFallbackFiles = 0;
 
   for (const relPath of providerPathList) {
     if (seenProviderPaths.has(relPath)) {
@@ -361,9 +366,16 @@ function analyzeProviderFirstCoverage(params: {
       continue;
     }
     const coverage = coverageByPath.get(relPath);
-    if (!coverage || coverage.legacyFallback !== "skip") {
+    if (coverage?.legacyFallback === "skip") {
+      fullyCoveredFiles++;
+    } else {
       partialPaths.push(relPath);
       fallbackPaths.add(relPath);
+      if (coverage?.legacyFallback === "targeted") {
+        partialFiles++;
+      } else {
+        fullFallbackFiles++;
+      }
     }
   }
   for (const relPath of providerPaths) {
@@ -407,7 +419,20 @@ function analyzeProviderFirstCoverage(params: {
     reasons.push(reason);
     fatalReasons.push(reason);
   }
-  return { reasons, fatalReasons, fallbackPaths };
+  return {
+    reasons,
+    fatalReasons,
+    fallbackPaths,
+    summary: {
+      scannedFiles: params.scannedPaths.length,
+      providerFiles: providerPaths.size,
+      fullyCoveredFiles,
+      partialFiles,
+      fullFallbackFiles,
+      uncoveredFiles: missingPaths.length,
+      fallbackFiles: fallbackPaths.size,
+    },
+  };
 }
 
 function applyScannedFileMetadataToProviderRows(params: {
@@ -1135,6 +1160,7 @@ async function indexRepoImpl(
               materializedRows.symbols.length + materializedRows.externalSymbols.length,
             edgesCreated: materializedRows.edges.length,
             externalSymbolsIndexed: materializedRows.externalSymbols.length,
+            coverage: coverageReport.summary,
             reasons: executionReasons,
           };
 

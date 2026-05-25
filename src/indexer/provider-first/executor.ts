@@ -26,6 +26,16 @@ export type ProviderFirstFallbackReasonCode =
   | "lspUnsupported"
   | "providerUnavailable";
 
+export interface ProviderFirstCoverageSummary {
+  scannedFiles: number;
+  providerFiles: number;
+  fullyCoveredFiles: number;
+  partialFiles: number;
+  fullFallbackFiles: number;
+  uncoveredFiles: number;
+  fallbackFiles: number;
+}
+
 export interface ProviderFirstExecutionPlan {
   canExecute: boolean;
   shouldFallbackToLegacy: boolean;
@@ -43,6 +53,7 @@ export interface ProviderFirstExecutionSummary {
   symbolsIndexed: number;
   edgesCreated: number;
   externalSymbolsIndexed: number;
+  coverage?: ProviderFirstCoverageSummary;
 }
 
 export interface ProviderFirstScipExecutionResult {
@@ -313,6 +324,14 @@ async function decodeScipIndexToFacts(params: {
           message: `[${providerId}] documents=${documentsSeen}`,
         });
       }
+    }
+    if (documentsSeen > 0 && documentsSeen % 250 !== 0) {
+      params.onProgress?.({
+        stage: "scipIngest",
+        current: documentsSeen,
+        total: 0,
+        message: `[${providerId}] documents=${documentsSeen}`,
+      });
     }
 
     const externalSymbols = await loadExternalSymbols(decoder, params.scip);

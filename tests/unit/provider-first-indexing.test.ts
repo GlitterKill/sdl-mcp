@@ -590,6 +590,7 @@ describe("provider-first indexing foundation", () => {
         }),
       });
 
+      const progressMessages: string[] = [];
       const result = await executeProviderFirstScipFull({
         repoId: "repo",
         repoRoot,
@@ -602,10 +603,18 @@ describe("provider-first indexing foundation", () => {
           indexing: IndexingConfigSchema.parse({ pipeline: "providerFirst" }),
           repos: [],
         } as AppConfig,
+        onProgress: (progress) => {
+          if (progress.stage === "scipIngest" && progress.message) {
+            progressMessages.push(progress.message);
+          }
+        },
       });
 
       assert.equal(result.summary.filesProcessed, 600);
       assert.equal(result.facts.occurrences.length, 600 * 251);
+      assert.ok(
+        progressMessages.some((message) => message.endsWith("documents=600")),
+      );
     } finally {
       rmSync(repoRoot, { recursive: true, force: true });
     }

@@ -342,6 +342,15 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(result.providerFirstExecution?.symbolsIndexed, 0);
     assert.equal(result.providerFirstExecution?.edgesCreated, 0);
     assert.equal(result.providerFirstExecution?.externalSymbolsIndexed, 0);
+    assert.deepEqual(result.providerFirstExecution?.coverage, {
+      scannedFiles: 1,
+      providerFiles: 1,
+      fullyCoveredFiles: 0,
+      partialFiles: 1,
+      fullFallbackFiles: 0,
+      uncoveredFiles: 0,
+      fallbackFiles: 1,
+    });
 
     const conn = await getLadybugConn();
     const mainSymbols = await ladybugDb.queryAll<{

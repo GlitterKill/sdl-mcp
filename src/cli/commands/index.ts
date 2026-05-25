@@ -6,6 +6,10 @@ import {
   IndexWatchHandle,
   IndexResult,
 } from "../../indexer/indexer.js";
+import type {
+  ProviderFirstCoverageSummary,
+  ProviderFirstExecutionSummary,
+} from "../../indexer/provider-first/executor.js";
 import {
   disableDerivedRefreshQueue,
   enableDerivedRefreshQueue,
@@ -153,6 +157,51 @@ function indexSubstageLabel(substage: IndexProgressSubstage): string {
     default:
       return substage;
   }
+}
+
+type PrintableProviderFirstExecutionSummary =
+  Omit<ProviderFirstExecutionSummary, "executor" | "coverage"> & {
+    executor?: string;
+    coverage?: ProviderFirstCoverageSummary;
+  };
+
+export function formatProviderFirstExecutionSummaryLines(
+  execution: PrintableProviderFirstExecutionSummary | null | undefined,
+): string[] {
+  if (!execution) return [];
+  if (execution.status === "fallback") {
+    return [
+      `  Provider-first fallback: ${execution.reasons.join("; ")}`,
+    ];
+  }
+  if (execution.status !== "executed") return [];
+
+  const lines = [
+    `  Provider-first: ${execution.executor} (${execution.generationId})`,
+  ];
+  const coverage = execution.coverage;
+  if (coverage) {
+    const providerFallbackFiles =
+      coverage.partialFiles + coverage.fullFallbackFiles;
+    const middle: string[] = [];
+    if (providerFallbackFiles > 0) {
+      middle.push(`${providerFallbackFiles} provider fallback`);
+    }
+    if (coverage.uncoveredFiles > 0) {
+      middle.push(`${coverage.uncoveredFiles} uncovered`);
+    }
+
+    let line =
+      `  Provider-first coverage: ${coverage.fullyCoveredFiles}/${coverage.scannedFiles} files fully covered`;
+    if (middle.length > 0) {
+      line += `; ${middle.join(", ")}`;
+    }
+    if (coverage.fallbackFiles > 0) {
+      line += `; legacy fallback parsed ${coverage.fallbackFiles} file(s)`;
+    }
+    lines.push(line);
+  }
+  return lines;
 }
 
 function embeddingStageLabel(substage?: IndexProgressSubstage): string {
@@ -438,6 +487,11 @@ async function delegateIndexToServer(
                 executor?: string;
                 generationId?: string;
                 reasons: string[];
+                filesProcessed: number;
+                symbolsIndexed: number;
+                edgesCreated: number;
+                externalSymbolsIndexed: number;
+                coverage?: ProviderFirstExecutionSummary["coverage"];
               } | null;
               summaryStats?: {
                 generated: number;
@@ -446,14 +500,10 @@ async function delegateIndexToServer(
                 failed: number;
               } | null;
             };
-            if (c.providerFirstExecution?.status === "executed") {
-              console.log(
-                `  Provider-first: ${c.providerFirstExecution.executor} (${c.providerFirstExecution.generationId})`,
-              );
-            } else if (c.providerFirstExecution?.status === "fallback") {
-              console.log(
-                `  Provider-first fallback: ${c.providerFirstExecution.reasons.join("; ")}`,
-              );
+            for (const line of formatProviderFirstExecutionSummaryLines(
+              c.providerFirstExecution,
+            )) {
+              console.log(line);
             }
             console.log(`  Files: ${c.filesProcessed}`);
             console.log(
@@ -695,14 +745,10 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       finishProgress(progressState);
       const totalSymbols = await ladybugDb.getSymbolCount(conn, repo.repoId);
       const totalEdges = await ladybugDb.getEdgeCount(conn, repo.repoId);
-      if (stats.providerFirstExecution?.status === "executed") {
-        console.log(
-          `  Provider-first: ${stats.providerFirstExecution.executor} (${stats.providerFirstExecution.generationId})`,
-        );
-      } else if (stats.providerFirstExecution?.status === "fallback") {
-        console.log(
-          `  Provider-first fallback: ${stats.providerFirstExecution.reasons.join("; ")}`,
-        );
+      for (const line of formatProviderFirstExecutionSummaryLines(
+        stats.providerFirstExecution,
+      )) {
+        console.log(line);
       }
       console.log(`  Files: ${stats.filesProcessed}`);
       console.log(
