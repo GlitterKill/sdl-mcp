@@ -258,7 +258,7 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(result.providerFirstExecution?.status, "executed");
     assert.match(
       result.providerFirstExecution?.reasons.join(" ") ?? "",
-      /legacy fallback indexed 1 uncovered file/i,
+      /legacy fallback indexed 1 uncovered or partial file/i,
     );
     assert.equal(result.filesProcessed, 2);
     assert.ok(result.symbolsIndexed > 0);
@@ -284,7 +284,7 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(result.providerFirstExecution?.status, "executed");
     assert.match(
       result.providerFirstExecution?.reasons.join(" ") ?? "",
-      /legacy fallback indexed 1 uncovered file/i,
+      /legacy fallback indexed 1 uncovered or partial file/i,
     );
     assert.equal(result.filesProcessed, 2);
 
@@ -336,8 +336,12 @@ describe("provider-first indexRepo fallback", () => {
     );
     assert.match(
       result.providerFirstExecution?.reasons.join(" ") ?? "",
-      /legacy fallback indexed 1 uncovered file/i,
+      /legacy fallback indexed 1 uncovered or partial file/i,
     );
+    assert.equal(result.providerFirstExecution?.filesProcessed, 0);
+    assert.equal(result.providerFirstExecution?.symbolsIndexed, 0);
+    assert.equal(result.providerFirstExecution?.edgesCreated, 0);
+    assert.equal(result.providerFirstExecution?.externalSymbolsIndexed, 0);
 
     const conn = await getLadybugConn();
     const mainSymbols = await ladybugDb.queryAll<{
@@ -470,7 +474,7 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(result.providerFirstExecution?.status, "executed");
     assert.match(
       result.providerFirstExecution?.reasons.join(" ") ?? "",
-      /legacy fallback indexed 1 uncovered file/i,
+      /legacy fallback indexed 1 uncovered or partial file/i,
     );
 
     const conn = await getLadybugConn();

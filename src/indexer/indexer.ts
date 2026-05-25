@@ -1125,11 +1125,16 @@ async function indexRepoImpl(
           const executionReasons = [...coverageReport.reasons];
           if (coverageReport.fallbackPaths.size > 0) {
             executionReasons.push(
-              `legacy fallback indexed ${coverageReport.fallbackPaths.size} uncovered file(s) after provider-first materialization`,
+              `legacy fallback indexed ${coverageReport.fallbackPaths.size} uncovered or partial file(s) after provider-first materialization`,
             );
           }
           providerFirstExecutedSummary = {
             ...providerResult.summary,
+            filesProcessed: materializedRows.files.length,
+            symbolsIndexed:
+              materializedRows.symbols.length + materializedRows.externalSymbols.length,
+            edgesCreated: materializedRows.edges.length,
+            externalSymbolsIndexed: materializedRows.externalSymbols.length,
             reasons: executionReasons,
           };
 
