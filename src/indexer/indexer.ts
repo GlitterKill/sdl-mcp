@@ -96,7 +96,10 @@ import {
   resolveProviderFirstExecutionPlan,
   type ProviderFirstExecutionSummary,
 } from "./provider-first/executor.js";
-import { materializeProviderFacts } from "./provider-first/materializer.js";
+import {
+  materializeProviderFacts,
+  type ProviderFirstGraphRows,
+} from "./provider-first/materializer.js";
 import { resolveProviderFirstPipeline } from "./provider-first/planner.js";
 import type { ProviderFirstPipelineSelection } from "./provider-first/types.js";
 export type { IndexProgress, IndexProgressSubstage } from "./indexer-init.js";
@@ -360,9 +363,7 @@ function analyzeProviderFirstCoverage(params: {
     const coverage = coverageByPath.get(relPath);
     if (!coverage || coverage.legacyFallback !== "skip") {
       partialPaths.push(relPath);
-      if (coverage?.legacyFallback === "full") {
-        fallbackPaths.add(relPath);
-      }
+      fallbackPaths.add(relPath);
     }
   }
   for (const relPath of providerPaths) {
@@ -422,6 +423,63 @@ function applyScannedFileMetadataToProviderRows(params: {
       row.byteSize = scanned.size;
     }
   }
+}
+
+function filterProviderRowsForFallback(
+  rows: ProviderFirstGraphRows,
+  fallbackPaths: ReadonlySet<string>,
+): ProviderFirstGraphRows {
+  if (fallbackPaths.size === 0) return rows;
+
+  const files = rows.files.filter((file) => !fallbackPaths.has(file.relPath));
+  const keptFileIds = new Set(files.map((file) => file.fileId));
+  const symbols = rows.symbols.filter((symbol) =>
+    keptFileIds.has(symbol.fileId),
+  );
+  const internalSymbolIds = new Set(symbols.map((symbol) => symbol.symbolId));
+  const externalSymbolIds = new Set(
+    rows.externalSymbols.map((symbol) => symbol.symbolId),
+  );
+  const allowedSymbolIds = new Set([
+    ...internalSymbolIds,
+    ...externalSymbolIds,
+  ]);
+  const edges = rows.edges.filter(
+    (edge) =>
+      allowedSymbolIds.has(edge.fromSymbolId) &&
+      allowedSymbolIds.has(edge.toSymbolId) &&
+      (internalSymbolIds.has(edge.fromSymbolId) ||
+        internalSymbolIds.has(edge.toSymbolId)),
+  );
+  const referencedExternalSymbolIds = new Set<string>();
+  for (const edge of edges) {
+    if (externalSymbolIds.has(edge.fromSymbolId)) {
+      referencedExternalSymbolIds.add(edge.fromSymbolId);
+    }
+    if (externalSymbolIds.has(edge.toSymbolId)) {
+      referencedExternalSymbolIds.add(edge.toSymbolId);
+    }
+  }
+  const externalSymbols = rows.externalSymbols.filter((symbol) =>
+    referencedExternalSymbolIds.has(symbol.symbolId),
+  );
+
+  return {
+    files,
+    symbols,
+    externalSymbols,
+    edges,
+    changedFileIds: new Set(files.map((file) => file.fileId)),
+  };
+}
+
+function providerRowsHaveMaterialization(rows: ProviderFirstGraphRows): boolean {
+  return (
+    rows.files.length > 0 ||
+    rows.symbols.length > 0 ||
+    rows.externalSymbols.length > 0 ||
+    rows.edges.length > 0
+  );
 }
 
 function filterProviderFirstFallbackScan(
@@ -765,9 +823,8 @@ async function indexRepoImpl(
     providerFirst.selectedPipeline === "providerFirst" &&
     providerFirstExecutionPlan.shouldFallbackToLegacy &&
     providerFirst.sources.some((source) => source.type === "scip") &&
-    providerFirstExecutionPlan.reasons.some((reason) =>
-      reason.includes("incremental provider generations"),
-    );
+    providerFirstExecutionPlan.fallbackReasonCode ===
+      "incrementalUnsupported";
   let providerFirstExecutedSummary: ProviderFirstExecutionSummary | undefined;
   let providerFirstScipMaterialized = false;
   let providerFirstMaterializedFiles = 0;
@@ -1017,31 +1074,33 @@ async function indexRepoImpl(
           symbols: providerResult.facts.symbols,
         });
         if (coverageReport.fatalReasons.length > 0) {
-          if (providerFirst.requestedMode === "auto") {
-            logger.warn("indexRepo: provider-first coverage incomplete, using legacy fallback", {
-              repoId,
-              reasons: coverageReport.fatalReasons,
-            });
-            providerFirstExecutionFallback =
-              providerFirstFallbackSummary(coverageReport.fatalReasons);
-            providerFirstScan = undefined;
-          } else {
-            throw new Error(
-              `Provider-first indexing cannot execute for ${repoId}: ${coverageReport.fatalReasons.join("; ")}`,
-            );
-          }
+          throw new Error(
+            `Provider-first indexing cannot execute for ${repoId}: ${coverageReport.fatalReasons.join("; ")}`,
+          );
         } else {
+          const materializedRows = filterProviderRowsForFallback(
+            providerResult.rows,
+            coverageReport.fallbackPaths,
+          );
           applyScannedFileMetadataToProviderRows({
-            rows: providerResult.rows,
+            rows: materializedRows,
             scannedFiles: providerScan.files,
           });
           await measurePhase("providerFirstMaterialize", () =>
             withPostIndexWriteSession(
               async (session) => {
                 await ladybugDb.withTransaction(session.conn, async (txConn) => {
-                  await materializeProviderFacts(txConn, providerResult.rows, {
-                    replaceFileSymbols: true,
-                  });
+                  if (providerRowsHaveMaterialization(materializedRows)) {
+                    await materializeProviderFacts(txConn, materializedRows, {
+                      replaceFileSymbols: true,
+                    });
+                  } else {
+                    await ladybugDb.pruneStaleScipExternalSymbols(
+                      txConn,
+                      repoId,
+                      [],
+                    );
+                  }
                   if (providerScan.removedFileIds.length > 0) {
                     await ladybugDb.deleteFilesByIds(
                       txConn,
@@ -1055,10 +1114,11 @@ async function indexRepoImpl(
           );
           invalidateIndexResultCaches(repoId);
           providerFirstScipMaterialized = true;
-          providerFirstMaterializedFiles = providerResult.summary.filesProcessed;
-          providerFirstMaterializedSymbols = providerResult.summary.symbolsIndexed;
-          providerFirstMaterializedEdges = providerResult.summary.edgesCreated;
-          for (const fileId of providerResult.rows.changedFileIds) {
+          providerFirstMaterializedFiles = materializedRows.files.length;
+          providerFirstMaterializedSymbols =
+            materializedRows.symbols.length + materializedRows.externalSymbols.length;
+          providerFirstMaterializedEdges = materializedRows.edges.length;
+          for (const fileId of materializedRows.changedFileIds) {
             providerFirstChangedFileIds.add(fileId);
           }
 
@@ -1097,13 +1157,14 @@ async function indexRepoImpl(
             const post = await runPostIndexFinalization({
               versionId,
               indexMode: "full",
-              filesTotal: providerResult.summary.filesProcessed,
-              filesScanned: providerResult.summary.filesProcessed,
-              symbolsExtracted: providerResult.summary.symbolsIndexed,
-              edgesExtracted: providerResult.summary.edgesCreated,
+              filesTotal: materializedRows.files.length,
+              filesScanned: materializedRows.files.length,
+              symbolsExtracted:
+                materializedRows.symbols.length + materializedRows.externalSymbols.length,
+              edgesExtracted: materializedRows.edges.length,
               changedFileIdsForFinalize: undefined,
               changedTestFilePathsForFinalize: new Set(),
-              changedFileIdsForMemory: providerResult.rows.changedFileIds,
+              changedFileIdsForMemory: materializedRows.changedFileIds,
               hasIndexMutations: true,
               callResolutionTelemetry: createCallResolutionTelemetry({
                 repoId,
@@ -1119,11 +1180,12 @@ async function indexRepoImpl(
 
             const result: IndexResult = {
               versionId,
-              filesProcessed: providerResult.summary.filesProcessed,
-              changedFiles: providerResult.rows.changedFileIds.size,
+              filesProcessed: materializedRows.files.length,
+              changedFiles: materializedRows.changedFileIds.size,
               removedFiles: providerScan.removedFiles,
-              symbolsIndexed: providerResult.summary.symbolsIndexed,
-              edgesCreated: providerResult.summary.edgesCreated,
+              symbolsIndexed:
+                materializedRows.symbols.length + materializedRows.externalSymbols.length,
+              edgesCreated: materializedRows.edges.length,
               clustersComputed: post.clustersComputed,
               processesTraced: post.processesTraced,
               durationMs: Date.now() - startTime,

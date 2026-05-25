@@ -320,6 +320,171 @@ describe("provider-first indexRepo fallback", () => {
     );
   });
 
+  it("uses legacy fallback for partial provider coverage until targeted fallback exists", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+      partialProviderReference: true,
+    });
+
+    const result = await indexRepo(repoId, "full");
+
+    assert.equal(result.providerFirst?.selectedPipeline, "providerFirst");
+    assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.match(
+      result.providerFirstExecution?.reasons.join(" ") ?? "",
+      /coverage was partial/i,
+    );
+    assert.match(
+      result.providerFirstExecution?.reasons.join(" ") ?? "",
+      /legacy fallback indexed 1 uncovered file/i,
+    );
+
+    const conn = await getLadybugConn();
+    const mainSymbols = await ladybugDb.queryAll<{
+      source: string | null;
+      count: unknown;
+    }>(
+      conn,
+      `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+       WHERE s.name = 'main' AND coalesce(s.external, false) = false
+       RETURN s.source AS source,
+              count(s) AS count`,
+      { repoId },
+    );
+    assert.equal(mainSymbols.length, 1);
+    assert.equal(ladybugDb.toNumber(mainSymbols[0]?.count), 1);
+    assert.notEqual(mainSymbols[0]?.source, "scip");
+
+    const scipInternalCount = await ladybugDb.querySingle<{ count: unknown }>(
+      conn,
+      `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+       WHERE s.source = 'scip' AND coalesce(s.external, false) = false
+       RETURN count(s) AS count`,
+      { repoId },
+    );
+    assert.equal(ladybugDb.toNumber(scipInternalCount?.count), 0);
+  });
+
+  it("prunes stale SCIP externals when all provider rows are filtered to legacy fallback", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+    });
+    await indexRepo(repoId, "full");
+    const firstConn = await getLadybugConn();
+    const initialExternalRows = await ladybugDb.queryAll<{ name: string }>(
+      firstConn,
+      `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+       WHERE s.external = true AND s.source = 'scip'
+       RETURN s.name AS name
+       ORDER BY name`,
+      { repoId },
+    );
+    assert.deepEqual(initialExternalRows, [{ name: "api" }]);
+
+    await writeTestScipIndex(join(repoDir, "index.scip"), {
+      metadata: {
+        toolName: "scip-typescript",
+        toolVersion: "1.0.0",
+      },
+      documents: [
+        {
+          language: "typescript",
+          relativePath: "src/index.ts",
+          occurrences: [
+            {
+              range: [0, 16, 20] as [number, number, number],
+              enclosingRange: [0, 0, 2, 1] as [
+                number,
+                number,
+                number,
+                number,
+              ],
+              symbol:
+                "scip-typescript npm fixture 1.0.0 src/index.ts/main().",
+              symbolRoles: 1,
+            },
+            {
+              range: [1, 9, 15] as [number, number, number],
+              symbol:
+                "scip-typescript npm fixture 1.0.0 src/index.ts/helper().",
+              symbolRoles: 8,
+            },
+            {
+              range: [1, 2, 8] as [number, number, number],
+              symbol:
+                "scip-typescript npm missing 1.0.0 missing/index.ts/missing().",
+              symbolRoles: 8,
+            },
+            {
+              range: [2, 9, 12] as [number, number, number],
+              symbol: "scip-typescript npm dep 1.0.0 dep/index.ts/api().",
+              symbolRoles: 8,
+            },
+            {
+              range: [4, 16, 22] as [number, number, number],
+              enclosingRange: [4, 0, 6, 1] as [
+                number,
+                number,
+                number,
+                number,
+              ],
+              symbol:
+                "scip-typescript npm fixture 1.0.0 src/index.ts/helper().",
+              symbolRoles: 1,
+            },
+          ],
+          symbols: [
+            {
+              symbol:
+                "scip-typescript npm fixture 1.0.0 src/index.ts/main().",
+              kind: 12,
+              displayName: "main",
+              relationships: [
+                {
+                  symbol:
+                    "scip-typescript npm dep 1.0.0 dep/index.ts/api().",
+                  isDefinition: true,
+                },
+              ],
+            },
+            {
+              symbol:
+                "scip-typescript npm fixture 1.0.0 src/index.ts/helper().",
+              kind: 12,
+              displayName: "helper",
+            },
+          ],
+        },
+      ],
+      externalSymbols: [
+        {
+          symbol: "scip-typescript npm dep 1.0.0 dep/index.ts/api().",
+          kind: 12,
+          displayName: "api",
+        },
+      ],
+    });
+
+    const result = await indexRepo(repoId, "full");
+
+    assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.match(
+      result.providerFirstExecution?.reasons.join(" ") ?? "",
+      /legacy fallback indexed 1 uncovered file/i,
+    );
+
+    const conn = await getLadybugConn();
+    const externalRows = await ladybugDb.queryAll<{ name: string }>(
+      conn,
+      `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+       WHERE s.external = true AND s.source = 'scip'
+       RETURN s.name AS name
+       ORDER BY name`,
+      { repoId },
+    );
+    assert.deepEqual(externalRows, []);
+  });
+
   it("uses legacy fallback in auto mode when SCIP reports non-fatal failures", async () => {
     const repoId = await initIndexedRepo("auto", {
       scipFixture: "complete",
@@ -392,6 +557,28 @@ describe("provider-first indexRepo fallback", () => {
 
   it("fails explicit providerFirst before writing duplicate SCIP documents", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+      duplicateProviderDoc: true,
+    });
+
+    await assert.rejects(
+      () => indexRepo(repoId, "full"),
+      /duplicate document facts/i,
+    );
+
+    const conn = await getLadybugConn();
+    const symbolCount = await ladybugDb.querySingle<{ count: unknown }>(
+      conn,
+      `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+       WHERE s.source = 'scip'
+       RETURN count(s) AS count`,
+      { repoId },
+    );
+    assert.equal(ladybugDb.toNumber(symbolCount?.count), 0);
+  });
+
+  it("fails auto providerFirst before writing duplicate SCIP documents", async () => {
+    const repoId = await initIndexedRepo("auto", {
       scipFixture: "complete",
       duplicateProviderDoc: true,
     });
@@ -485,6 +672,7 @@ describe("provider-first indexRepo fallback", () => {
       duplicateProviderDoc?: boolean;
       duplicateProviderSymbol?: boolean;
       duplicateProviderSymbolDocument?: boolean;
+      partialProviderReference?: boolean;
       emptyProviderDocument?: boolean;
       includeMissingScipIndex?: boolean;
       seedRemovedFile?: boolean;
@@ -734,6 +922,16 @@ describe("provider-first indexRepo fallback", () => {
             symbol: "scip-typescript npm dep 1.0.0 dep/index.ts/api().",
             symbolRoles: 8,
           },
+          ...(options.partialProviderReference
+            ? [
+                {
+                  range: [1, 2, 8] as [number, number, number],
+                  symbol:
+                    "scip-typescript npm missing 1.0.0 missing/index.ts/missing().",
+                  symbolRoles: 8,
+                },
+              ]
+            : []),
           {
             range: [4, 16, 22] as [number, number, number],
             enclosingRange: [4, 0, 6, 1] as [

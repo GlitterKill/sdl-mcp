@@ -21,11 +21,16 @@ import type {
 } from "./types.js";
 
 export type ProviderFirstExecutorKind = "scipFull";
+export type ProviderFirstFallbackReasonCode =
+  | "incrementalUnsupported"
+  | "lspUnsupported"
+  | "providerUnavailable";
 
 export interface ProviderFirstExecutionPlan {
   canExecute: boolean;
   shouldFallbackToLegacy: boolean;
   executor?: ProviderFirstExecutorKind;
+  fallbackReasonCode?: ProviderFirstFallbackReasonCode;
   reasons: string[];
 }
 
@@ -89,6 +94,7 @@ export function resolveProviderFirstExecutionPlan(params: {
   if (mode !== "full") {
     return unsupportedPlan({
       fallbackAllowed: fallbackAllowed || selectedSources.length > 0,
+      fallbackReasonCode: "incrementalUnsupported",
       reason:
         "provider-first execution currently supports full refreshes only; incremental provider generations are not materialized yet",
     });
@@ -106,6 +112,7 @@ export function resolveProviderFirstExecutionPlan(params: {
   if (hasLspSource && !hasScipSource) {
     return unsupportedPlan({
       fallbackAllowed,
+      fallbackReasonCode: "lspUnsupported",
       reason:
         "LSP provider-first execution is still capped-planning only; the next executable phase is SCIP full refresh",
     });
@@ -113,6 +120,7 @@ export function resolveProviderFirstExecutionPlan(params: {
 
   return unsupportedPlan({
     fallbackAllowed,
+    fallbackReasonCode: "providerUnavailable",
     reason:
       "provider-first execution needs a configured SCIP index or enabled SCIP generator",
   });
@@ -171,11 +179,13 @@ export async function executeProviderFirstScipFull(
 
 function unsupportedPlan(params: {
   fallbackAllowed: boolean;
+  fallbackReasonCode?: ProviderFirstFallbackReasonCode;
   reason: string;
 }): ProviderFirstExecutionPlan {
   return {
     canExecute: false,
     shouldFallbackToLegacy: params.fallbackAllowed,
+    fallbackReasonCode: params.fallbackReasonCode,
     reasons: [params.reason],
   };
 }

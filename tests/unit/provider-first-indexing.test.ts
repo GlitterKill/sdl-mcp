@@ -525,6 +525,7 @@ describe("provider-first indexing foundation", () => {
 
     assert.equal(plan.canExecute, false);
     assert.equal(plan.shouldFallbackToLegacy, true);
+    assert.equal(plan.fallbackReasonCode, "incrementalUnsupported");
     assert.match(plan.reasons.join(" "), /full refreshes/i);
   });
 
