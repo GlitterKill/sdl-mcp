@@ -433,6 +433,12 @@ async function delegateIndexToServer(
               edgesCreated: number;
               totalEdges: number;
               durationMs: number;
+              providerFirstExecution?: {
+                status: "executed" | "fallback" | "unsupported";
+                executor?: string;
+                generationId?: string;
+                reasons: string[];
+              } | null;
               summaryStats?: {
                 generated: number;
                 totalCostUsd: number;
@@ -440,6 +446,15 @@ async function delegateIndexToServer(
                 failed: number;
               } | null;
             };
+            if (c.providerFirstExecution?.status === "executed") {
+              console.log(
+                `  Provider-first: ${c.providerFirstExecution.executor} (${c.providerFirstExecution.generationId})`,
+              );
+            } else if (c.providerFirstExecution?.status === "fallback") {
+              console.log(
+                `  Provider-first fallback: ${c.providerFirstExecution.reasons.join("; ")}`,
+              );
+            }
             console.log(`  Files: ${c.filesProcessed}`);
             console.log(
               `  Symbols: ${c.symbolsIndexed} new (${c.totalSymbols} total)`,
@@ -680,6 +695,15 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       finishProgress(progressState);
       const totalSymbols = await ladybugDb.getSymbolCount(conn, repo.repoId);
       const totalEdges = await ladybugDb.getEdgeCount(conn, repo.repoId);
+      if (stats.providerFirstExecution?.status === "executed") {
+        console.log(
+          `  Provider-first: ${stats.providerFirstExecution.executor} (${stats.providerFirstExecution.generationId})`,
+        );
+      } else if (stats.providerFirstExecution?.status === "fallback") {
+        console.log(
+          `  Provider-first fallback: ${stats.providerFirstExecution.reasons.join("; ")}`,
+        );
+      }
       console.log(`  Files: ${stats.filesProcessed}`);
       console.log(
         `  Symbols: ${stats.symbolsIndexed} new (${totalSymbols} total)`,

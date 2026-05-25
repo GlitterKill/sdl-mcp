@@ -7,8 +7,8 @@ Provider-first indexing is the new indexing direction for large repositories. It
 `indexing.pipeline` controls selection:
 
 - `"legacy"`: always use the current indexer.
-- `"providerFirst"`: plan a provider-first run and keep legacy fallback available for unsupported or partially covered files.
-- `"auto"`: use provider-first when SCIP or LSP coverage is configured; otherwise use legacy.
+- `"providerFirst"`: require an executable provider-first run. Until shadow LadybugDB activation and partial-coverage fallback land, SCIP full execution is gated and this mode fails with a clear error instead of silently running legacy.
+- `"auto"`: use provider-first when an executable provider path is available; otherwise use legacy. In the current guarded phase, configured SCIP/LSP provider sources are reported and `auto` falls back to legacy.
 
 Provider priority is fixed as:
 
@@ -31,7 +31,7 @@ Provider output is normalized into a provider-neutral IR before any graph write:
 - `CoverageFact`
 - `ProviderRunFact`
 
-SDL symbol IDs are derived from `repoId`, provider type, provider ID, native provider symbol ID, source path, and range. Provider version is intentionally excluded from the SDL ID so ordinary SCIP/LSP version drift does not corrupt identity; native provider IDs and versions are still stored on facts for audit and cache invalidation.
+SDL symbol IDs are derived from `repoId`, provider type, provider ID, native provider symbol ID, and source path. Provider version and definition ranges are intentionally excluded from the SDL ID so ordinary SCIP/LSP version drift and line movement do not corrupt identity; native provider IDs, versions, and ranges are still stored on facts for audit and cache invalidation.
 
 ## Full Builds
 
@@ -47,13 +47,15 @@ The target full-build path is:
 
 Embeddings, LLM summaries, and semantic enrichment are not part of the first ready gate. They advance a separate semantic readiness state.
 
+Current guarded phase: exported staging helpers can collect SCIP documents and external symbols, normalize them into provider facts, and convert those facts into LadybugDB graph rows for the upcoming shadow loader. The public `indexRepo` refresh path does not execute provider-first collection yet: `auto` reports the planned provider source and falls back to legacy, while explicit `providerFirst` fails loudly until shadow `.lbug` activation and targeted legacy fallback for partial coverage are implemented. This avoids replacing the live graph with incomplete provider coverage or failing after a live graph mutation. Provider run, coverage, diagnostic, and occurrence facts are collected in memory by the helper path but are not yet persisted as first-class provider metadata rows.
+
 ## Incremental Builds
 
-Incremental provider-first refreshes stage facts by `generationId`, retire affected file facts, write bounded chunks through the single writer, and flip active generation only for affected files after validation. Files with full provider symbol and reference coverage skip legacy parsing; partial files receive targeted fallback for missing card or code surfaces.
+Target incremental provider-first refreshes will stage facts by `generationId`, retire affected file facts, write bounded chunks through the single writer, and flip active generation only for affected files after validation. Files with full provider symbol and reference coverage will skip legacy parsing; partial files will receive targeted fallback for missing card or code surfaces.
 
 ## Current Implementation Status
 
-The initial foundation is implemented:
+Implemented:
 
 - Config surface: `indexing.pipeline` and `indexing.providerFirst.*`.
 - Provider-neutral IR types.
@@ -61,5 +63,8 @@ The initial foundation is implemented:
 - Durable LSP cache keys.
 - SCIP document normalization into provider facts.
 - Runtime provider-source planning exposed on `IndexResult.providerFirst`.
+- Full-refresh SCIP provider fact staging and LadybugDB row materialization helpers.
+- Conservative SCIP occurrence edge materialization: imports and implementations can become edges, while broad references are retained as occurrences until a syntax-aware call pass proves invocation semantics.
+- Explicit provider-first failure when executable provider activation is not safe.
 
-The existing indexer remains the materialization path while the shadow LadybugDB bulk loader and activation handoff are built out. This keeps current indexing behavior stable while provider facts and planning become testable.
+Still pending: capped LSP execution, incremental provider generations, Parquet/CSV staging artifacts, shadow `.lbug` bulk loading, Windows activation handoff, and targeted legacy fallback for partial provider coverage.

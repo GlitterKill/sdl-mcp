@@ -24,6 +24,7 @@ import {
 } from "./ladybug-batching.js";
 
 const MAX_BATCH_WARNING_THRESHOLD = 5000;
+const PRESERVE_OPTIONAL_SYMBOL_FIELD = "__sdl_preserve_optional_symbol_field__";
 
 export interface SymbolRow {
   symbolId: string;
@@ -49,6 +50,7 @@ export interface SymbolRow {
   searchText?: string | null;
   // SCIP integration fields
   external?: boolean;
+  source?: string | null;
   packageName?: string | null;
   packageVersion?: string | null;
   scipSymbol?: string | null;
@@ -204,6 +206,11 @@ export async function upsertSymbolBatch(
         searchText: symbol.searchText ?? "",
         summaryQuality: symbol.summaryQuality ?? 0.0,
         summarySource: symbol.summarySource ?? "unknown",
+        external: symbol.external ?? false,
+        source: symbol.source ?? PRESERVE_OPTIONAL_SYMBOL_FIELD,
+        packageName: symbol.packageName ?? PRESERVE_OPTIONAL_SYMBOL_FIELD,
+        packageVersion: symbol.packageVersion ?? PRESERVE_OPTIONAL_SYMBOL_FIELD,
+        scipSymbol: symbol.scipSymbol ?? PRESERVE_OPTIONAL_SYMBOL_FIELD,
         symbolStatus: "real",
         placeholderKind: "",
         placeholderTarget: "",
@@ -238,12 +245,32 @@ export async function upsertSymbolBatch(
              s.searchText = row.searchText,
              s.summaryQuality = row.summaryQuality,
              s.summarySource = row.summarySource,
-             s.external = false,
+             s.external = row.external,
+             s.source = CASE
+               WHEN row.source = $preserveOptionalSymbolField
+               THEN coalesce(s.source, 'treesitter')
+               ELSE row.source
+             END,
+             s.packageName = CASE
+               WHEN row.packageName = $preserveOptionalSymbolField
+               THEN s.packageName
+               ELSE row.packageName
+             END,
+             s.packageVersion = CASE
+               WHEN row.packageVersion = $preserveOptionalSymbolField
+               THEN s.packageVersion
+               ELSE row.packageVersion
+             END,
+             s.scipSymbol = CASE
+               WHEN row.scipSymbol = $preserveOptionalSymbolField
+               THEN s.scipSymbol
+               ELSE row.scipSymbol
+             END,
              s.symbolStatus = row.symbolStatus,
              s.placeholderKind = row.placeholderKind,
              s.placeholderTarget = row.placeholderTarget,
              s.updatedAt = row.updatedAt`,
-        { rows },
+        { rows, preserveOptionalSymbolField: PRESERVE_OPTIONAL_SYMBOL_FIELD },
       );
       await exec(
         txConn,

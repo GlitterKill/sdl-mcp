@@ -13,11 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pass-1 drain diagnostics**: Added opt-in batch row counts and sub-timings for pass-1 write flushing so `deleteOldSymbols`, file upserts, symbol references, symbol upserts, and `DEPENDS_ON` edge inserts can be profiled independently against a temporary graph DB.
 - **SCIP generator diagnostics**: Index refresh results and audit payloads now report generated SCIP indexes, skipped generated files, and non-fatal generator/ingest failures.
 - **Algorithm refresh controls**: Added `indexing.algorithmRefresh` config for worker-bounded PageRank/K-core and Louvain policy limits.
+- **Provider-first SCIP staging**: Added the provider-first indexing foundation for SCIP refreshes, including provider fact collection, stable provider IDs, LadybugDB graph-row materialization helpers, CLI/SSE fallback reporting, and explicit errors when `indexing.pipeline: "providerFirst"` is configured before shadow activation is safe.
 
 ### Changed
 
 - **Pass-1 write batching**: Centralized LadybugDB write chunk sizing, raised safe edge/reference/file defaults to reduce pass-1 prepared statement count, let pass-1 skip redundant existing `DEPENDS_ON` refreshes after source-symbol replacement, and moved full-refresh stale-symbol deletion ahead of pass-1 flushes.
 - **SCIP generated index handling**: Raised decoder file caps to 512 MiB and added generated split-index fallback with SHA-256 dedupe for identical TypeScript/JavaScript split artifacts.
+- **Provider-first safety**: Gated active SCIP provider-first execution until shadow `.lbug` activation and partial-coverage fallback are implemented, so `auto` uses legacy fallback and explicit `providerFirst` fails loudly instead of replacing the live graph through the old writer.
 
 ### Fixed
 
@@ -35,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Large-repo indexing memory**: Released pass-1/pass-2 symbol-map bridge caches before version snapshot creation so large full indexes do not carry full-repo symbol maps into post-index finalization.
 - **Incremental metrics recovery**: No-op incremental refreshes now inspect the current graph for incomplete version snapshots, missing metrics/file summaries, stale or absent derived state, and configured SCIP indexes before returning. Missing `Metrics` rows are repaired through a dedicated LadybugDB aggregate/write path instead of hydrating the full edge graph, while SCIP edge changes still use the full recomputation path for correctness.
 - **Algorithm refresh timeouts**: Canonical cluster/process refresh now completes independently of optional graph algorithms; PageRank/K-core run in a killable worker, centrality writes are preserved before Louvain, and large call graphs skip Louvain by policy instead of timing out the post-index session.
+- **Provider-first graph facts**: Kept SCIP provider symbol IDs stable across line movement, stopped promoting broad SCIP reference occurrences to exact call edges, pruned stale SCIP external symbols during full provider materialization, and batched external-symbol writes to avoid thousands of single-writer round trips.
 
 ## [0.11.4] - 2026-05-21
 

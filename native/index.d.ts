@@ -91,6 +91,7 @@ export interface NapiScipDiagnostic {
 }
 export interface NapiScipOccurrence {
   range: NapiScipRange
+  enclosingRange?: NapiScipRange
   symbol: string
   symbolRoles: number
   overrideDocumentation: Array<string>

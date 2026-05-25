@@ -19,3 +19,21 @@ export {
 export { createLspProviderCacheKey } from "./lsp-cache.js";
 export { resolveProviderFirstPipeline } from "./planner.js";
 export { normalizeScipProviderFacts } from "./scip-normalizer.js";
+export {
+  executeProviderFirstScipFull,
+  resolveProviderFirstExecutionPlan,
+} from "./executor.js";
+export {
+  materializeProviderFacts,
+  providerFactsToGraphRows,
+} from "./materializer.js";
+export type {
+  ProviderFirstExecutionPlan,
+  ProviderFirstExecutionSummary,
+  ProviderFirstExecutorKind,
+  ProviderFirstScipExecutionResult,
+} from "./executor.js";
+export type {
+  ProviderFirstExternalSymbolRow,
+  ProviderFirstGraphRows,
+} from "./materializer.js";

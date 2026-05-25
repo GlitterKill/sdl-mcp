@@ -43,13 +43,12 @@ function normalizedRange(range: Range | undefined): Range | null {
  */
 export function createProviderSymbolId(parts: ProviderSymbolIdParts): string {
   return hashValue({
-    schema: "sdl-provider-symbol-id:v1",
+    schema: "sdl-provider-symbol-id:v2",
     repoId: parts.repoId,
     providerType: parts.providerType,
     providerId: parts.providerId,
     providerSymbolId: parts.providerSymbolId,
     sourcePath: parts.sourcePath ? normalizePath(parts.sourcePath) : null,
-    range: normalizedRange(parts.range),
   });
 }
 

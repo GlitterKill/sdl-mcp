@@ -20,6 +20,11 @@ export interface ScipRange {
 
 export interface ScipOccurrence {
   range: ScipRange;
+  /**
+   * SCIP's nearest enclosing AST range. For definition occurrences this is the
+   * best provider-owned body range available to provider-first indexing.
+   */
+  enclosingRange?: ScipRange;
   symbol: string;
   symbolRoles: number;
   overrideDocumentation: string[];

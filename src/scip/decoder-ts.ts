@@ -81,6 +81,8 @@ function mapDiagnostic(d: ProtoScipDiagnostic): ScipDiagnostic {
 function mapOccurrence(o: ProtoScipOccurrence): ScipOccurrence {
   return {
     range: mapRange(o.range),
+    enclosingRange:
+      o.enclosingRange.length > 0 ? mapRange(o.enclosingRange) : undefined,
     symbol: o.symbol,
     symbolRoles: o.symbolRoles,
     overrideDocumentation: o.overrideDocumentation,

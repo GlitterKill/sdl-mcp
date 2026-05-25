@@ -26,6 +26,8 @@ export interface TestScipMetadata {
 export interface TestScipOccurrence {
   /** 3-element [startLine, startCol, endCol] or 4-element [startLine, startCol, endLine, endCol] */
   range: [number, number, number] | [number, number, number, number];
+  /** SCIP enclosing_range field, same packed shape as range. */
+  enclosingRange?: [number, number, number] | [number, number, number, number];
   symbol: string;
   symbolRoles?: number;
   syntaxKind?: number;
@@ -213,7 +215,7 @@ function encodeRelationship(opts: TestScipRelationship): Uint8Array {
  * Encode an Occurrence message.
  * Proto fields: range(1 packed repeated int32), symbol(2 string),
  *               symbolRoles(3 varint), syntaxKind(5 varint),
- *               diagnostics(6 repeated message)
+ *               diagnostics(6 repeated message), enclosingRange(7 packed repeated int32)
  */
 function encodeOccurrence(opts: TestScipOccurrence): Uint8Array {
   const parts: Uint8Array[] = [];
@@ -228,6 +230,12 @@ function encodeOccurrence(opts: TestScipOccurrence): Uint8Array {
   }
   if (opts.syntaxKind !== undefined) {
     parts.push(encodeVarintField(5, opts.syntaxKind));
+  }
+  if (opts.enclosingRange !== undefined) {
+    const enclosingRangeBytes = concat(
+      ...opts.enclosingRange.map((v) => encodeVarint(v)),
+    );
+    parts.push(encodeLengthDelimited(7, enclosingRangeBytes));
   }
   return concat(...parts);
 }

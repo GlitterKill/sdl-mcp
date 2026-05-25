@@ -39,6 +39,7 @@ pub struct NapiScipDiagnostic {
 #[napi(object)]
 pub struct NapiScipOccurrence {
     pub range: NapiScipRange,
+    pub enclosing_range: Option<NapiScipRange>,
     pub symbol: String,
     pub symbol_roles: i32,
     pub override_documentation: Vec<String>,

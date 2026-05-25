@@ -19,6 +19,7 @@ import {
   withTransaction,
 } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
+import { resolveLadybugWriteChunkSize } from "./ladybug-batching.js";
 
 // ---------------------------------------------------------------------------
 // 1. mergeScipSymbolProperties — update existing symbol with SCIP metadata
@@ -724,6 +725,137 @@ export async function batchMergeScipEdges(
 
 const SYMBOL_BATCH_SIZE = 100;
 
+interface ScipExternalSymbolRow {
+  symbolId: string;
+  kind: string;
+  name: string;
+  exported: boolean;
+  language?: string;
+  rangeStartLine?: number;
+  rangeStartCol?: number;
+  rangeEndLine?: number;
+  rangeEndCol?: number;
+  external: boolean;
+  scipSymbol: string;
+  source: "scip";
+  packageName?: string;
+  packageVersion?: string;
+  updatedAt: string;
+}
+
+export async function pruneStaleScipExternalSymbols(
+  conn: Connection,
+  repoId: string,
+  currentSymbolIds: readonly string[],
+): Promise<number> {
+  const current = new Set(currentSymbolIds);
+  const rows = await queryAll<{ symbolId: string }>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+     WHERE coalesce(s.external, false) = true
+       AND coalesce(s.source, '') = 'scip'
+     RETURN s.symbolId AS symbolId`,
+    { repoId },
+  );
+  const staleSymbolIds = rows
+    .map((row) => row.symbolId)
+    .filter((symbolId) => !current.has(symbolId));
+  if (staleSymbolIds.length === 0) return 0;
+
+  const chunkSize = resolveLadybugWriteChunkSize("symbols", SYMBOL_BATCH_SIZE);
+  await withTransaction(conn, async (txConn) => {
+    for (let i = 0; i < staleSymbolIds.length; i += chunkSize) {
+      const symbolIds = staleSymbolIds.slice(i, i + chunkSize);
+      await exec(
+        txConn,
+        `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
+         WHERE s.symbolId IN $symbolIds
+         DELETE d`,
+        { symbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (:Symbol)-[d:DEPENDS_ON]->(s:Symbol)
+         WHERE s.symbolId IN $symbolIds
+         DELETE d`,
+        { symbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (s:Symbol)-[r:SYMBOL_IN_REPO]->(:Repo)
+         WHERE s.symbolId IN $symbolIds
+         DELETE r`,
+        { symbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (s:Symbol)-[r:SYMBOL_IN_FILE]->(:File)
+         WHERE s.symbolId IN $symbolIds
+         DELETE r`,
+        { symbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (s:Symbol)-[r:BELONGS_TO_CLUSTER]->(:Cluster)
+         WHERE s.symbolId IN $symbolIds
+         DELETE r`,
+        { symbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (s:Symbol)-[r:BELONGS_TO_SHADOW_CLUSTER]->(:ShadowCluster)
+         WHERE s.symbolId IN $symbolIds
+         DELETE r`,
+        { symbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (s:Symbol)-[r:PARTICIPATES_IN]->(:Process)
+         WHERE s.symbolId IN $symbolIds
+         DELETE r`,
+        { symbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (mem:Memory)-[r:MEMORY_OF]->(s:Symbol)
+         WHERE s.symbolId IN $symbolIds
+         DELETE r`,
+        { symbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (m:Metrics)
+         WHERE m.symbolId IN $symbolIds
+         DELETE m`,
+        { symbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (e:SymbolEmbedding)
+         WHERE e.symbolId IN $symbolIds
+         DELETE e`,
+        { symbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (sc:SummaryCache)
+         WHERE sc.symbolId IN $symbolIds
+         DELETE sc`,
+        { symbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (s:Symbol {repoId: $repoId})
+         WHERE s.symbolId IN $symbolIds
+         DELETE s`,
+        { repoId, symbolIds },
+      );
+    }
+  });
+
+  return staleSymbolIds.length;
+}
+
 /**
  * Insert or update a batch of external Symbol nodes discovered via SCIP.
  * Wrapped in a single transaction for performance.
@@ -731,108 +863,93 @@ const SYMBOL_BATCH_SIZE = 100;
 export async function batchMergeExternalSymbols(
   conn: Connection,
   repoId: string,
-  symbols: Array<{
-    symbolId: string;
-    kind: string;
-    name: string;
-    exported: boolean;
-    language?: string;
-    rangeStartLine?: number;
-    rangeStartCol?: number;
-    rangeEndLine?: number;
-    rangeEndCol?: number;
-    external: boolean;
-    scipSymbol: string;
-    source: "scip";
-    packageName?: string;
-    packageVersion?: string;
-    updatedAt: string;
-  }>,
+  symbols: ScipExternalSymbolRow[],
 ): Promise<void> {
   if (symbols.length === 0) return;
 
+  const dedupedSymbols = dedupeScipExternalSymbols(symbols);
+  const chunkSize = resolveLadybugWriteChunkSize("symbols", SYMBOL_BATCH_SIZE);
   await withTransaction(conn, async (txConn) => {
-    for (let i = 0; i < symbols.length; i += SYMBOL_BATCH_SIZE) {
-      const batch = symbols.slice(i, i + SYMBOL_BATCH_SIZE);
+    for (let i = 0; i < dedupedSymbols.length; i += chunkSize) {
+      const rows = dedupedSymbols.slice(i, i + chunkSize).map((symbol) => ({
+        symbolId: symbol.symbolId,
+        kind: symbol.kind,
+        name: symbol.name,
+        exported: symbol.exported,
+        language: symbol.language ?? "external",
+        rangeStartLine: symbol.rangeStartLine ?? 0,
+        rangeStartCol: symbol.rangeStartCol ?? 0,
+        rangeEndLine: symbol.rangeEndLine ?? 0,
+        rangeEndCol: symbol.rangeEndCol ?? 0,
+        external: symbol.external,
+        scipSymbol: symbol.scipSymbol,
+        source: symbol.source,
+        packageName: symbol.packageName ?? "",
+        packageVersion: symbol.packageVersion ?? "",
+        symbolStatus: symbol.external ? "external" : "real",
+        placeholderKind: symbol.external ? "scip" : "",
+        placeholderTarget: symbol.external ? symbol.scipSymbol : "",
+        updatedAt: symbol.updatedAt,
+      }));
 
-      for (const symbol of batch) {
-        // Also create the SYMBOL_IN_REPO edge so external symbols are
-        // reachable from the Repo node (required for sdl.symbol.search and
-        // any other query that scopes symbols by repo via <-[:SYMBOL_IN_REPO]-).
-        // Without this edge external symbols are graph-orphaned and the
-        // documented excludeExternal filter in symbol.search has no effect.
-        await exec(
-          txConn,
-          `MATCH (r:Repo {repoId: $repoId})
-           MERGE (s:Symbol {symbolId: $symbolId})
-           ON CREATE SET
-               s.repoId = $repoId,
-               s.kind = $kind,
-               s.name = $name,
-               s.exported = $exported,
-               s.language = $language,
-               s.rangeStartLine = $rangeStartLine,
-               s.rangeStartCol = $rangeStartCol,
-               s.rangeEndLine = $rangeEndLine,
-               s.rangeEndCol = $rangeEndCol,
-               s.external = $external,
-               s.scipSymbol = $scipSymbol,
-               s.source = $source,
-               s.packageName = $packageName,
-               s.packageVersion = $packageVersion,
-               s.symbolStatus = $symbolStatus,
-               s.placeholderKind = $placeholderKind,
-               s.placeholderTarget = $placeholderTarget,
-               s.updatedAt = $updatedAt
-           ON MATCH SET
-               s.repoId = $repoId,
-               s.kind = $kind,
-               s.name = $name,
-               s.exported = $exported,
-               s.language = $language,
-               s.rangeStartLine = $rangeStartLine,
-               s.rangeStartCol = $rangeStartCol,
-               s.rangeEndLine = $rangeEndLine,
-               s.rangeEndCol = $rangeEndCol,
-               s.external = $external,
-               s.scipSymbol = $scipSymbol,
-               s.source = $source,
-               s.packageName = $packageName,
-               s.packageVersion = $packageVersion,
-               s.symbolStatus = $symbolStatus,
-               s.placeholderKind = $placeholderKind,
-               s.placeholderTarget = $placeholderTarget,
-               s.updatedAt = $updatedAt
-           MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
-          {
-            repoId,
-            symbolId: symbol.symbolId,
-            kind: symbol.kind,
-            name: symbol.name,
-            exported: symbol.exported,
-            language: symbol.language ?? null,
-            rangeStartLine: symbol.rangeStartLine ?? null,
-            rangeStartCol: symbol.rangeStartCol ?? null,
-            rangeEndLine: symbol.rangeEndLine ?? null,
-            rangeEndCol: symbol.rangeEndCol ?? null,
-            external: symbol.external,
-            scipSymbol: symbol.scipSymbol,
-            source: symbol.source,
-            packageName: symbol.packageName ?? null,
-            packageVersion: symbol.packageVersion ?? null,
-            symbolStatus: symbol.external ? "external" : "real",
-            placeholderKind: symbol.external ? "scip" : null,
-            placeholderTarget: symbol.external ? symbol.scipSymbol : null,
-            updatedAt: symbol.updatedAt,
-          },
-        );
-      }
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (r:Repo {repoId: $repoId})
+         MERGE (s:Symbol {symbolId: row.symbolId})
+         SET s.repoId = $repoId,
+             s.kind = row.kind,
+             s.name = row.name,
+             s.exported = row.exported,
+             s.language = row.language,
+             s.rangeStartLine = row.rangeStartLine,
+             s.rangeStartCol = row.rangeStartCol,
+             s.rangeEndLine = row.rangeEndLine,
+             s.rangeEndCol = row.rangeEndCol,
+             s.external = row.external,
+             s.scipSymbol = row.scipSymbol,
+             s.source = row.source,
+             s.packageName = row.packageName,
+             s.packageVersion = row.packageVersion,
+             s.symbolStatus = row.symbolStatus,
+             s.placeholderKind = row.placeholderKind,
+             s.placeholderTarget = row.placeholderTarget,
+             s.updatedAt = row.updatedAt`,
+        { repoId, rows },
+      );
+      // W3 workaround: create relationships in a separate OPTIONAL MATCH pass
+      // instead of MERGE-rel inside UNWIND.
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (s:Symbol {symbolId: row.symbolId})
+         MATCH (r:Repo {repoId: $repoId})
+         OPTIONAL MATCH (s)-[existing:SYMBOL_IN_REPO]->(r)
+         WITH s, r, existing
+         WHERE existing IS NULL
+         CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
+        { repoId, rows },
+      );
     }
   });
 
-  if (symbols.length > 50) {
+  if (dedupedSymbols.length > 50) {
     logger.debug("batchMergeExternalSymbols completed", {
-      count: symbols.length,
+      count: dedupedSymbols.length,
+      inputCount: symbols.length,
     });
   }
+}
+
+function dedupeScipExternalSymbols(
+  symbols: readonly ScipExternalSymbolRow[],
+): ScipExternalSymbolRow[] {
+  const seen = new Set<string>();
+  const deduped: ScipExternalSymbolRow[] = [];
+  for (const symbol of symbols) {
+    if (seen.has(symbol.symbolId)) continue;
+    seen.add(symbol.symbolId);
+    deduped.push(symbol);
+  }
+  return deduped;
 }

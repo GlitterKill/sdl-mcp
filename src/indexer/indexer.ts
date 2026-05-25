@@ -86,6 +86,11 @@ import type {
   ScipGeneratedIndexDiagnostic,
 } from "../scip/diagnostics.js";
 import type { BatchPersistDrainDiagnostics } from "./parser/batch-persist.js";
+import {
+  executeProviderFirstScipFull,
+  resolveProviderFirstExecutionPlan,
+  type ProviderFirstExecutionSummary,
+} from "./provider-first/executor.js";
 import { resolveProviderFirstPipeline } from "./provider-first/planner.js";
 import type { ProviderFirstPipelineSelection } from "./provider-first/types.js";
 export type { IndexProgress, IndexProgressSubstage } from "./indexer-init.js";
@@ -130,6 +135,7 @@ export interface IndexResult {
     failures: ScipFailureDiagnostic[];
   };
   providerFirst?: ProviderFirstPipelineSelection;
+  providerFirstExecution?: ProviderFirstExecutionSummary;
   algorithmRefresh?: AlgorithmRefreshDiagnostics;
 }
 
@@ -235,6 +241,19 @@ function emptyPass1EngineTelemetry(): NonNullable<IndexResult["pass1Engine"]> {
     tsFiles: 0,
     rustFallbackFiles: 0,
     perLanguageFallback: {},
+  };
+}
+
+function providerFirstFallbackSummary(
+  reasons: readonly string[],
+): ProviderFirstExecutionSummary {
+  return {
+    status: "fallback",
+    reasons: [...reasons],
+    filesProcessed: 0,
+    symbolsIndexed: 0,
+    edgesCreated: 0,
+    externalSymbolsIndexed: 0,
   };
 }
 
@@ -545,51 +564,40 @@ async function indexRepoImpl(
     scip: appConfig.scip,
     semanticEnrichment: appConfig.semanticEnrichment,
   });
+  const providerFirstExecutionPlan = resolveProviderFirstExecutionPlan({
+    selection: providerFirst,
+    mode,
+    scip: appConfig.scip,
+  });
+  const providerFirstExecutionFallback =
+    providerFirst.selectedPipeline === "providerFirst" &&
+    providerFirstExecutionPlan.shouldFallbackToLegacy
+      ? providerFirstFallbackSummary(providerFirstExecutionPlan.reasons)
+      : undefined;
   if (providerFirst.selectedPipeline === "providerFirst") {
-    logger.info(
-      "indexRepo: provider-first plan selected; legacy materializer remains the fallback path for this refresh",
-      {
+    if (providerFirstExecutionPlan.canExecute) {
+      logger.info("indexRepo: provider-first executor selected", {
         repoId,
+        executor: providerFirstExecutionPlan.executor,
         sources: providerFirst.sources.map((source) => source.type),
         warnings: providerFirst.warnings,
-      },
-    );
+      });
+    } else if (providerFirstExecutionPlan.shouldFallbackToLegacy) {
+      logger.warn("indexRepo: provider-first unavailable, using legacy fallback", {
+        repoId,
+        reasons: providerFirstExecutionPlan.reasons,
+      });
+    } else {
+      throw new Error(
+        `Provider-first indexing cannot execute for ${repoId}: ${providerFirstExecutionPlan.reasons.join("; ")}`,
+      );
+    }
   }
   const postIndexSessionTimeoutMs = resolvePostIndexSessionTimeoutMs(
     repoId,
     appConfig.repos,
     config,
   );
-
-  const {
-    files,
-    existingByPath,
-    removedFiles,
-    removedFileIds,
-    allFilesUnchanged: scanAllFilesUnchanged,
-  } = await measurePhase("scanRepo", () =>
-    scanRepoForIndex({
-      repoId,
-      repoRoot: repoRow.rootPath,
-      config,
-      onProgress,
-    }),
-  );
-  logger.debug("scanRepoForIndex complete", {
-    repoId,
-    fileCount: files.length,
-    removedFiles,
-  });
-
-  const LARGE_REPO_THRESHOLD = 5000;
-  if (files.length > LARGE_REPO_THRESHOLD) {
-    logger.warn(
-      `Large repository detected (${files.length} files). ` +
-        "If indexing runs out of memory, set " +
-        'NODE_OPTIONS="--max-old-space-size=8192" before running sdl-mcp.',
-      { repoId, fileCount: files.length },
-    );
-  }
 
   const createOrReuseVersion = async (
     versionReason: string,
@@ -724,6 +732,106 @@ async function indexRepoImpl(
         algorithmRefresh: derivedResult.algorithmRefresh,
       };
     }, { timeoutMs: postIndexSessionTimeoutMs });
+
+  if (
+    providerFirstExecutionPlan.canExecute &&
+    providerFirstExecutionPlan.executor === "scipFull"
+  ) {
+    const providerResult = await measurePhase("providerFirstScipFull", () =>
+      executeProviderFirstScipFull({
+        repoId,
+        repoRoot: repoRow.rootPath,
+        config: appConfig,
+        generatedIndexes: scipPreRefresh?.generatedIndexes,
+        generatorFailures: scipPreRefresh?.failures,
+        onProgress,
+        signal,
+      }),
+    );
+    const versionId = await createOrReuseVersion(
+      "Provider-first SCIP index",
+      true,
+    );
+    const pass1Engine = emptyPass1EngineTelemetry();
+    const scip = {
+      generatedIndexes: providerResult.generatedIndexes,
+      failures: providerResult.failures,
+    };
+    const post = await runPostIndexFinalization({
+      versionId,
+      indexMode: "full",
+      filesTotal: providerResult.summary.filesProcessed,
+      filesScanned: providerResult.summary.filesProcessed,
+      symbolsExtracted: providerResult.summary.symbolsIndexed,
+      edgesExtracted: providerResult.summary.edgesCreated,
+      changedFileIdsForFinalize: providerResult.rows.changedFileIds,
+      changedTestFilePathsForFinalize: new Set(),
+      changedFileIdsForMemory: providerResult.rows.changedFileIds,
+      hasIndexMutations: true,
+      callResolutionTelemetry: createCallResolutionTelemetry({
+        repoId,
+        mode: "full",
+        pass2EligibleFileCount: 0,
+        registeredResolvers: [],
+      }),
+      pass1Engine,
+      scip,
+    });
+
+    return {
+      versionId,
+      filesProcessed: providerResult.summary.filesProcessed,
+      changedFiles: providerResult.rows.changedFileIds.size,
+      removedFiles: 0,
+      symbolsIndexed: providerResult.summary.symbolsIndexed,
+      edgesCreated: providerResult.summary.edgesCreated,
+      clustersComputed: post.clustersComputed,
+      processesTraced: post.processesTraced,
+      durationMs: Date.now() - startTime,
+      summaryStats: post.summaryStats,
+      timings: phaseTimings
+        ? {
+            totalMs: Date.now() - startTime,
+            phases: phaseTimings,
+          }
+        : undefined,
+      pass1Engine,
+      scip,
+      providerFirst,
+      providerFirstExecution: providerResult.summary,
+      algorithmRefresh: post.algorithmRefresh,
+    };
+  }
+
+  const {
+    files,
+    existingByPath,
+    removedFiles,
+    removedFileIds,
+    allFilesUnchanged: scanAllFilesUnchanged,
+  } = await measurePhase("scanRepo", () =>
+    scanRepoForIndex({
+      repoId,
+      repoRoot: repoRow.rootPath,
+      config,
+      onProgress,
+    }),
+  );
+  logger.debug("scanRepoForIndex complete", {
+    repoId,
+    fileCount: files.length,
+    removedFiles,
+  });
+
+  const LARGE_REPO_THRESHOLD = 5000;
+  if (files.length > LARGE_REPO_THRESHOLD) {
+    logger.warn(
+      `Large repository detected (${files.length} files). ` +
+        "If indexing runs out of memory, set " +
+        'NODE_OPTIONS="--max-old-space-size=8192" before running sdl-mcp.',
+      { repoId, fileCount: files.length },
+    );
+  }
 
   if (mode === "incremental" && scanAllFilesUnchanged) {
     return await measurePhase("shortCircuitNoOp", async () => {
@@ -885,6 +993,7 @@ async function indexRepoImpl(
           failures: scipResult.failures,
         },
         providerFirst,
+        providerFirstExecution: providerFirstExecutionFallback,
         algorithmRefresh,
       };
 
@@ -1535,6 +1644,7 @@ async function indexRepoImpl(
       pass1Engine: derivePass1EngineTelemetry(pass1Acc),
       scip: scipDiagnostics,
       providerFirst,
+      providerFirstExecution: providerFirstExecutionFallback,
       algorithmRefresh,
     };
 

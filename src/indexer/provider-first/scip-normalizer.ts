@@ -56,6 +56,12 @@ interface NormalizedScipContext {
   symbolIdsByProviderId: Map<string, string>;
 }
 
+interface ContainmentSymbol {
+  providerSymbolId: string;
+  symbolId: string;
+  range: ScipRange;
+}
+
 export function normalizeScipProviderFacts(
   options: NormalizeScipProviderFactsOptions,
 ): ProviderFactSet {
@@ -132,7 +138,10 @@ export function normalizeScipProviderFacts(
     facts.coverage.push(
       coverageFact(context, document, relPath, documentOccurrences),
     );
-    facts.edges.push(...relationshipEdges(context, document, edgeKeys));
+    facts.edges.push(
+      ...relationshipEdges(context, document, edgeKeys),
+      ...occurrenceEdges(context, document, edgeKeys),
+    );
   }
 
   facts.providerRuns.push(providerRunFact(options, base, facts));
@@ -322,6 +331,7 @@ function relationshipEdges(
       if (!targetSymbolId || sourceSymbolId === targetSymbolId) continue;
 
       const edgeType = relationshipEdgeType(relationship);
+      if (!edgeType) continue;
       const dedupeKey = createProviderEdgeDedupeKey({
         sourceSymbolId,
         targetSymbolId,
@@ -342,6 +352,52 @@ function relationshipEdges(
       });
     }
   }
+  return edges;
+}
+
+function occurrenceEdges(
+  context: NormalizedScipContext,
+  document: ScipDocument,
+  edgeKeys: Set<string>,
+): EdgeFact[] {
+  const edges: EdgeFact[] = [];
+  const containmentSymbols = buildContainmentSymbols(context, document);
+  const implementationSymbols = getImplementationSymbols(document);
+
+  for (const occurrence of document.occurrences) {
+    if ((occurrence.symbolRoles & SCIP_ROLE_DEFINITION) !== 0) continue;
+
+    const sourceSymbolId = findContainingProviderSymbol(
+      occurrence.range,
+      containmentSymbols,
+    );
+    const targetSymbolId = context.symbolIdsByProviderId.get(occurrence.symbol);
+    if (!sourceSymbolId || !targetSymbolId || sourceSymbolId === targetSymbolId) {
+      continue;
+    }
+
+    const edgeType = occurrenceEdgeType(occurrence, implementationSymbols);
+    if (!edgeType) continue;
+    const dedupeKey = createProviderEdgeDedupeKey({
+      sourceSymbolId,
+      targetSymbolId,
+      edgeType,
+      providerId: context.base.providerId,
+    });
+    if (edgeKeys.has(dedupeKey)) continue;
+    edgeKeys.add(dedupeKey);
+    edges.push({
+      ...context.base,
+      kind: "edge",
+      sourceSymbolId,
+      targetSymbolId,
+      edgeType,
+      resolution: "exact",
+      confidence: context.confidence,
+      dedupeKey,
+    });
+  }
+
   return edges;
 }
 
@@ -369,12 +425,21 @@ function findDefinitionRange(
   document: ScipDocument,
   symbol: string,
 ): Range | undefined {
-  const definition = document.occurrences.find(
+  const definition = findDefinitionOccurrence(document, symbol);
+  return definition
+    ? scipRangeToRange(definition.enclosingRange ?? definition.range)
+    : undefined;
+}
+
+function findDefinitionOccurrence(
+  document: ScipDocument,
+  symbol: string,
+): ScipOccurrence | undefined {
+  return document.occurrences.find(
     (occurrence) =>
       occurrence.symbol === symbol &&
       (occurrence.symbolRoles & SCIP_ROLE_DEFINITION) !== 0,
   );
-  return definition ? scipRangeToRange(definition.range) : undefined;
 }
 
 function displayName(info: { symbol: string; displayName: string }): string {
@@ -391,12 +456,95 @@ function occurrenceRole(
   return "reference";
 }
 
-function relationshipEdgeType(relationship: ScipRelationship): EdgeType {
+function relationshipEdgeType(relationship: ScipRelationship): EdgeType | null {
   if (relationship.isImplementation || relationship.isTypeDefinition) {
     return "implements";
   }
   if (relationship.isDefinition) return "import";
-  return "call";
+  // SCIP relationships alone do not prove invocation semantics. Keep
+  // references/unknown relationships out of exact call edges until the
+  // provider path has syntax-aware call proof.
+  return null;
+}
+
+function occurrenceEdgeType(
+  occurrence: ScipOccurrence,
+  implementationSymbols: ReadonlySet<string>,
+): EdgeType | null {
+  if (implementationSymbols.has(occurrence.symbol)) return "implements";
+  if ((occurrence.symbolRoles & SCIP_ROLE_IMPORT) !== 0) return "import";
+  // A raw SCIP reference occurrence is not enough evidence for call
+  // semantics. Keep broad references in occurrence facts until a syntax-aware
+  // provider pass can prove invocation edges.
+  return null;
+}
+
+function getImplementationSymbols(document: ScipDocument): Set<string> {
+  const implementationSymbols = new Set<string>();
+  for (const info of document.symbols) {
+    if (
+      info.relationships.some(
+        (relationship) =>
+          relationship.isImplementation || relationship.isTypeDefinition,
+      )
+    ) {
+      implementationSymbols.add(info.symbol);
+    }
+  }
+  return implementationSymbols;
+}
+
+function buildContainmentSymbols(
+  context: NormalizedScipContext,
+  document: ScipDocument,
+): ContainmentSymbol[] {
+  const symbols: ContainmentSymbol[] = [];
+  for (const info of document.symbols) {
+    const symbolId = context.symbolIdsByProviderId.get(info.symbol);
+    if (!symbolId) continue;
+
+    const definition = findDefinitionOccurrence(document, info.symbol);
+    if (!definition) continue;
+
+    symbols.push({
+      providerSymbolId: info.symbol,
+      symbolId,
+      range: definition.enclosingRange ?? definition.range,
+    });
+  }
+  return symbols;
+}
+
+function findContainingProviderSymbol(
+  occurrenceRange: ScipRange,
+  symbols: readonly ContainmentSymbol[],
+): string | null {
+  let best: ContainmentSymbol | null = null;
+  let bestSpan = Number.POSITIVE_INFINITY;
+
+  for (const symbol of symbols) {
+    if (!rangeContains(symbol.range, occurrenceRange)) continue;
+    const span =
+      (symbol.range.endLine - symbol.range.startLine) * 100_000 +
+      (symbol.range.endCol - symbol.range.startCol);
+    if (span < bestSpan) {
+      best = symbol;
+      bestSpan = span;
+    }
+  }
+
+  return best?.symbolId ?? null;
+}
+
+function rangeContains(container: ScipRange, inner: ScipRange): boolean {
+  const startsBeforeOrAt =
+    container.startLine < inner.startLine ||
+    (container.startLine === inner.startLine &&
+      container.startCol <= inner.startCol);
+  const endsAfterOrAt =
+    container.endLine > inner.endLine ||
+    (container.endLine === inner.endLine && container.endCol >= inner.endCol);
+  return startsBeforeOrAt && endsAfterOrAt;
 }
 
 function coverageLevel(total: number, matched: number): CoverageLevel {
@@ -415,9 +563,9 @@ function legacyFallback(
 
 function scipRangeToRange(range: ScipRange): Range {
   return {
-    startLine: range.startLine,
+    startLine: range.startLine + 1,
     startCol: range.startCol,
-    endLine: range.endLine,
+    endLine: range.endLine + 1,
     endCol: range.endCol,
   };
 }

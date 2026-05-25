@@ -114,6 +114,11 @@ fn convert_document(doc: &Document) -> NapiScipDocument {
 fn convert_occurrence(occ: &Occurrence) -> NapiScipOccurrence {
     NapiScipOccurrence {
         range: convert_range(&occ.range),
+        enclosing_range: if occ.enclosing_range.is_empty() {
+            None
+        } else {
+            Some(convert_range(&occ.enclosing_range))
+        },
         symbol: occ.symbol.clone(),
         symbol_roles: occ.symbol_roles,
         override_documentation: occ.override_documentation.clone(),

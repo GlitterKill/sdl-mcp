@@ -7,9 +7,15 @@ import {
   SemanticEnrichmentConfigSchema,
 } from "../../dist/config/types.js";
 import { createProviderSymbolId } from "../../dist/indexer/provider-first/ids.js";
+import { resolveProviderFirstExecutionPlan } from "../../dist/indexer/provider-first/executor.js";
 import { createLspProviderCacheKey } from "../../dist/indexer/provider-first/lsp-cache.js";
+import {
+  materializeProviderFacts,
+  providerFactsToGraphRows,
+} from "../../dist/indexer/provider-first/materializer.js";
 import { resolveProviderFirstPipeline } from "../../dist/indexer/provider-first/planner.js";
 import { normalizeScipProviderFacts } from "../../dist/indexer/provider-first/scip-normalizer.js";
+import type { ProviderFactSet } from "../../dist/indexer/provider-first/types.js";
 
 describe("provider-first indexing foundation", () => {
   it("defaults indexing to automatic provider-first selection with shadow activation", () => {
@@ -47,6 +53,26 @@ describe("provider-first indexing foundation", () => {
 
     assert.equal(first, second);
     assert.notEqual(first, differentSymbol);
+  });
+
+  it("keeps provider symbol ids stable when definition ranges move", () => {
+    const base = {
+      repoId: "repo",
+      providerType: "scip" as const,
+      providerId: "scip-typescript",
+      providerSymbolId:
+        "scip-typescript npm example 1.0.0 src/index.ts/buildGraph().",
+      sourcePath: "src/index.ts",
+      range: { startLine: 4, startCol: 9, endLine: 8, endCol: 1 },
+    };
+
+    const first = createProviderSymbolId(base);
+    const shifted = createProviderSymbolId({
+      ...base,
+      range: { startLine: 104, startCol: 9, endLine: 108, endCol: 1 },
+    });
+
+    assert.equal(first, shifted);
   });
 
   it("builds durable LSP cache keys from server, workspace, config, content, and capabilities", () => {
@@ -162,8 +188,536 @@ describe("provider-first indexing foundation", () => {
     assert.equal(facts.symbols[0]?.name, "buildGraph");
     assert.equal(facts.symbols[0]?.symbolKind, "function");
     assert.equal(facts.symbols[0]?.providerSymbolId, symbol);
-    assert.equal(facts.symbols[0]?.range?.startLine, 4);
+    assert.equal(facts.symbols[0]?.range?.startLine, 5);
     assert.equal(facts.occurrences.length, 1);
     assert.equal(facts.coverage[0]?.symbolCoverage, "full");
   });
+
+  it("normalizes SCIP definition enclosing ranges and skips broad reference occurrences as calls", () => {
+    const main =
+      "scip-typescript npm example 1.0.0 src/index.ts/main().";
+    const helper =
+      "scip-typescript npm example 1.0.0 src/index.ts/helper().";
+    const facts = normalizeScipProviderFacts({
+      repoId: "repo",
+      generationId: "gen-1",
+      providerId: "scip-typescript",
+      documents: [
+        {
+          language: "typescript",
+          relativePath: "src/index.ts",
+          occurrences: [
+            {
+              range: { startLine: 0, startCol: 16, endLine: 0, endCol: 20 },
+              enclosingRange: {
+                startLine: 0,
+                startCol: 0,
+                endLine: 3,
+                endCol: 1,
+              },
+              symbol: main,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 1, startCol: 9, endLine: 1, endCol: 15 },
+              symbol: helper,
+              symbolRoles: 8,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 5, startCol: 16, endLine: 5, endCol: 22 },
+              enclosingRange: {
+                startLine: 5,
+                startCol: 0,
+                endLine: 7,
+                endCol: 1,
+              },
+              symbol: helper,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+          ],
+          symbols: [
+            {
+              symbol: main,
+              documentation: [],
+              relationships: [],
+              kind: 12,
+              displayName: "main",
+            },
+            {
+              symbol: helper,
+              documentation: [],
+              relationships: [],
+              kind: 12,
+              displayName: "helper",
+            },
+          ],
+        },
+      ],
+    });
+
+    const mainFact = facts.symbols.find((symbol) => symbol.name === "main");
+    const helperFact = facts.symbols.find((symbol) => symbol.name === "helper");
+    assert.equal(mainFact?.range?.startLine, 1);
+    assert.equal(mainFact?.range?.endLine, 4);
+    assert.equal(helperFact?.range?.startLine, 6);
+
+    assert.equal(facts.edges.length, 0);
+  });
+
+  it("normalizes SCIP import and implementation occurrences into conservative edges", () => {
+    const main =
+      "scip-typescript npm example 1.0.0 src/index.ts/main().";
+    const imported =
+      "scip-typescript npm example 1.0.0 src/imported.ts/imported().";
+    const implemented =
+      "scip-typescript npm example 1.0.0 src/index.ts/Impl#";
+    const facts = normalizeScipProviderFacts({
+      repoId: "repo",
+      generationId: "gen-1",
+      providerId: "scip-typescript",
+      documents: [
+        {
+          language: "typescript",
+          relativePath: "src/index.ts",
+          occurrences: [
+            {
+              range: { startLine: 0, startCol: 16, endLine: 0, endCol: 20 },
+              enclosingRange: {
+                startLine: 0,
+                startCol: 0,
+                endLine: 3,
+                endCol: 1,
+              },
+              symbol: main,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 1, startCol: 9, endLine: 1, endCol: 17 },
+              symbol: imported,
+              symbolRoles: 2,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 2, startCol: 9, endLine: 2, endCol: 13 },
+              symbol: implemented,
+              symbolRoles: 8,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+          ],
+          symbols: [
+            {
+              symbol: main,
+              documentation: [],
+              relationships: [],
+              kind: 12,
+              displayName: "main",
+            },
+            {
+              symbol: imported,
+              documentation: [],
+              relationships: [],
+              kind: 12,
+              displayName: "imported",
+            },
+            {
+              symbol: implemented,
+              documentation: [],
+              relationships: [{ symbol: main, isImplementation: true }],
+              kind: 4,
+              displayName: "Impl",
+            },
+          ],
+        },
+      ],
+    });
+
+    const edgeTypes = facts.edges.map((edge) => edge.edgeType);
+    assert.ok(edgeTypes.includes("implements"));
+    assert.ok(edgeTypes.includes("import"));
+    assert.equal(edgeTypes.includes("call"), false);
+  });
+
+  it("skips SCIP reference relationships instead of staging exact call edges", () => {
+    const source =
+      "scip-typescript npm example 1.0.0 src/index.ts/source().";
+    const target =
+      "scip-typescript npm example 1.0.0 src/index.ts/target().";
+    const facts = normalizeScipProviderFacts({
+      repoId: "repo",
+      generationId: "gen-1",
+      providerId: "scip-typescript",
+      documents: [
+        {
+          language: "typescript",
+          relativePath: "src/index.ts",
+          occurrences: [
+            {
+              range: { startLine: 0, startCol: 16, endLine: 0, endCol: 22 },
+              enclosingRange: {
+                startLine: 0,
+                startCol: 0,
+                endLine: 3,
+                endCol: 1,
+              },
+              symbol: source,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 5, startCol: 16, endLine: 5, endCol: 22 },
+              enclosingRange: {
+                startLine: 5,
+                startCol: 0,
+                endLine: 7,
+                endCol: 1,
+              },
+              symbol: target,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+          ],
+          symbols: [
+            {
+              symbol: source,
+              documentation: [],
+              relationships: [{ symbol: target, isReference: true }],
+              kind: 12,
+              displayName: "source",
+            },
+            {
+              symbol: target,
+              documentation: [],
+              relationships: [],
+              kind: 12,
+              displayName: "target",
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.deepEqual(facts.edges, []);
+  });
+
+  it("gates full SCIP provider-first execution until shadow activation is implemented", () => {
+    const selection = resolveProviderFirstPipeline({
+      indexing: IndexingConfigSchema.parse({ pipeline: "providerFirst" }),
+      scip: ScipConfigSchema.parse({
+        enabled: true,
+        indexes: [{ path: "index.scip" }],
+      }),
+    });
+
+    const plan = resolveProviderFirstExecutionPlan({
+      selection,
+      mode: "full",
+      scip: ScipConfigSchema.parse({
+        enabled: true,
+        indexes: [{ path: "index.scip" }],
+      }),
+    });
+
+    assert.equal(plan.canExecute, false);
+    assert.equal(plan.executor, undefined);
+    assert.equal(plan.shouldFallbackToLegacy, false);
+    assert.match(plan.reasons.join(" "), /shadow.*activation/i);
+  });
+
+  it("does not silently fall back for explicit providerFirst when execution is unsupported", () => {
+    const selection = resolveProviderFirstPipeline({
+      indexing: IndexingConfigSchema.parse({ pipeline: "providerFirst" }),
+      semanticEnrichment: SemanticEnrichmentConfigSchema.parse({
+        enabled: true,
+        providers: {
+          lsp: {
+            enabled: true,
+            servers: {
+              tsserver: {
+                serverId: "tsserver",
+                command: "typescript-language-server",
+                languages: ["typescript"],
+              },
+            },
+          },
+        },
+      }),
+    });
+
+    const plan = resolveProviderFirstExecutionPlan({
+      selection,
+      mode: "full",
+      scip: ScipConfigSchema.parse({ enabled: false }),
+    });
+
+    assert.equal(plan.canExecute, false);
+    assert.equal(plan.shouldFallbackToLegacy, false);
+    assert.match(plan.reasons.join(" "), /LSP provider-first execution/i);
+  });
+
+  it("allows auto mode to fall back when the next provider-first phase cannot execute", () => {
+    const selection = resolveProviderFirstPipeline({
+      indexing: IndexingConfigSchema.parse({ pipeline: "auto" }),
+      scip: ScipConfigSchema.parse({
+        enabled: true,
+        indexes: [{ path: "index.scip" }],
+      }),
+    });
+
+    const plan = resolveProviderFirstExecutionPlan({
+      selection,
+      mode: "incremental",
+      scip: ScipConfigSchema.parse({
+        enabled: true,
+        indexes: [{ path: "index.scip" }],
+      }),
+    });
+
+    assert.equal(plan.canExecute, false);
+    assert.equal(plan.shouldFallbackToLegacy, true);
+    assert.match(plan.reasons.join(" "), /full refreshes/i);
+  });
+
+  it("allows auto mode to fall back while shadow activation execution is gated", () => {
+    const selection = resolveProviderFirstPipeline({
+      indexing: IndexingConfigSchema.parse({ pipeline: "auto" }),
+      scip: ScipConfigSchema.parse({
+        enabled: true,
+        indexes: [{ path: "index.scip" }],
+      }),
+    });
+
+    const plan = resolveProviderFirstExecutionPlan({
+      selection,
+      mode: "full",
+      scip: ScipConfigSchema.parse({
+        enabled: true,
+        indexes: [{ path: "index.scip" }],
+      }),
+    });
+
+    assert.equal(plan.canExecute, false);
+    assert.equal(plan.shouldFallbackToLegacy, true);
+    assert.match(plan.reasons.join(" "), /shadow.*activation/i);
+  });
+
+  it("materializes provider facts into LadybugDB graph rows", () => {
+    const emittedAt = "2026-05-25T12:00:00.000Z";
+    const facts: ProviderFactSet = {
+      files: [
+        {
+          kind: "file",
+          repoId: "repo",
+          generationId: "gen-1",
+          providerType: "scip",
+          providerId: "scip",
+          emittedAt,
+          fileId: "file-1",
+          relPath: "src/index.ts",
+          languageId: "typescript",
+          contentHash: "content",
+        },
+      ],
+      symbols: [
+        {
+          kind: "symbol",
+          repoId: "repo",
+          generationId: "gen-1",
+          providerType: "scip",
+          providerId: "scip",
+          emittedAt,
+          symbolId: "symbol-1",
+          providerSymbolId: "scip npm pkg 1.0.0 src/index.ts/buildGraph().",
+          name: "buildGraph",
+          symbolKind: "function",
+          relPath: "src/index.ts",
+          range: { startLine: 1, startCol: 0, endLine: 3, endCol: 1 },
+          signature: "function buildGraph(): Graph",
+          documentation: ["Builds graph facts."],
+          external: false,
+        },
+      ],
+      occurrences: [],
+      edges: [
+        {
+          kind: "edge",
+          repoId: "repo",
+          generationId: "gen-1",
+          providerType: "scip",
+          providerId: "scip",
+          emittedAt,
+          sourceSymbolId: "symbol-1",
+          targetSymbolId: "symbol-2",
+          edgeType: "call",
+          resolution: "exact",
+          confidence: 0.95,
+          dedupeKey: "edge",
+        },
+      ],
+      externalSymbols: [
+        {
+          kind: "externalSymbol",
+          repoId: "repo",
+          generationId: "gen-1",
+          providerType: "scip",
+          providerId: "scip",
+          emittedAt,
+          symbolId: "symbol-2",
+          providerSymbolId: "scip npm dep 1.0.0 dep/index.ts/api().",
+          name: "api",
+          symbolKind: "function",
+          packageName: "dep",
+          packageVersion: "1.0.0",
+          documentation: [],
+        },
+      ],
+      diagnostics: [],
+      coverage: [],
+      providerRuns: [],
+    };
+
+    const rows = providerFactsToGraphRows({ facts, indexedAt: emittedAt });
+
+    assert.equal(rows.files.length, 1);
+    assert.equal(rows.files[0]?.language, "typescript");
+    assert.equal(rows.symbols.length, 1);
+    assert.equal(rows.symbols[0]?.summarySource, "provider:scip");
+    assert.equal(rows.symbols[0]?.scipSymbol, facts.symbols[0]?.providerSymbolId);
+    assert.deepEqual(JSON.parse(rows.symbols[0]?.signatureJson ?? "{}"), {
+      text: "function buildGraph(): Graph",
+    });
+    assert.equal(rows.externalSymbols.length, 1);
+    assert.equal(rows.externalSymbols[0]?.external, true);
+    assert.equal(rows.edges.length, 1);
+    assert.equal(rows.edges[0]?.resolverId, "provider-first:scip");
+    assert.equal(rows.edges[0]?.resolutionPhase, "provider-first");
+  });
+
+  it("wraps provider materialization helper in a single transaction", async () => {
+    const statements: string[] = [];
+    const rows = providerFactsToGraphRows({
+      indexedAt: "2026-05-25T12:00:00.000Z",
+      facts: providerFactSet({
+        externalSymbols: [
+          {
+            kind: "externalSymbol",
+            repoId: "repo",
+            generationId: "gen-1",
+            providerType: "scip",
+            providerId: "scip",
+            emittedAt: "2026-05-25T12:00:00.000Z",
+            symbolId: "symbol-2",
+            providerSymbolId: "scip npm dep 1.0.0 dep/index.ts/api().",
+            name: "api",
+            symbolKind: "function",
+            packageName: "dep",
+            packageVersion: "1.0.0",
+            documentation: [],
+          },
+        ],
+      }),
+    });
+
+    await materializeProviderFacts(createFakeConnection(statements), rows);
+
+    assert.equal(countStatements(statements, "BEGIN TRANSACTION"), 1);
+    assert.equal(countStatements(statements, "COMMIT"), 1);
+  });
 });
+
+function providerFactSet(
+  overrides: Partial<ProviderFactSet> = {},
+): ProviderFactSet {
+  const emittedAt = "2026-05-25T12:00:00.000Z";
+  return {
+    files: [
+      {
+        kind: "file",
+        repoId: "repo",
+        generationId: "gen-1",
+        providerType: "scip",
+        providerId: "scip",
+        emittedAt,
+        fileId: "file-1",
+        relPath: "src/index.ts",
+        languageId: "typescript",
+      },
+    ],
+    symbols: [
+      {
+        kind: "symbol",
+        repoId: "repo",
+        generationId: "gen-1",
+        providerType: "scip",
+        providerId: "scip",
+        emittedAt,
+        symbolId: "symbol-1",
+        providerSymbolId: "scip npm pkg 1.0.0 src/index.ts/buildGraph().",
+        name: "buildGraph",
+        symbolKind: "function",
+        relPath: "src/index.ts",
+        range: { startLine: 1, startCol: 0, endLine: 3, endCol: 1 },
+        signature: "function buildGraph(): Graph",
+        documentation: [],
+        external: false,
+      },
+    ],
+    occurrences: [],
+    edges: [],
+    externalSymbols: [],
+    diagnostics: [],
+    coverage: [],
+    providerRuns: [],
+    ...overrides,
+  };
+}
+
+class FakeQueryResult {
+  close(): void {}
+  async getAll(): Promise<unknown[]> {
+    return [];
+  }
+}
+
+function createFakeConnection(statements: string[]): import("kuzu").Connection {
+  return {
+    async prepare(statement: string) {
+      return {
+        statement,
+        isSuccess() {
+          return true;
+        },
+        getErrorMessage() {
+          return "";
+        },
+      };
+    },
+    async execute(preparedStatement: { statement: string }) {
+      statements.push(preparedStatement.statement);
+      return new FakeQueryResult();
+    },
+  } as unknown as import("kuzu").Connection;
+}
+
+function countStatements(statements: string[], fragment: string): number {
+  return statements.filter((statement) => statement.includes(fragment)).length;
+}

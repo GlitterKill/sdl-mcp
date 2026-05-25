@@ -196,6 +196,28 @@ describe("SCIP Fixture Builder", () => {
     assert.deepEqual(range, [7, 2, 12]);
   });
 
+  it("should round-trip enclosing ranges", () => {
+    const bytes = buildTestScipIndex({
+      documents: [
+        {
+          relativePath: "src/test.ts",
+          occurrences: [
+            {
+              range: [1, 9, 13],
+              enclosingRange: [0, 0, 3, 1],
+              symbol: "test#call().",
+              symbolRoles: 8,
+            },
+          ],
+        },
+      ],
+    });
+    const index = decodeScipIndex(bytes);
+    assert.deepEqual(index.documents[0].occurrences[0].enclosingRange, [
+      0, 0, 3, 1,
+    ]);
+  });
+
   it("should handle symbol relationships", () => {
     const bytes = buildTestScipIndex({
       documents: [

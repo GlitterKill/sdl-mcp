@@ -1503,6 +1503,7 @@ async function handleRestRequest(
           totalEdges,
           durationMs: result.durationMs,
           summaryStats: result.summaryStats ?? null,
+          providerFirstExecution: result.providerFirstExecution ?? null,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

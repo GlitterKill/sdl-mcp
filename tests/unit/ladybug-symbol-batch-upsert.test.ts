@@ -397,6 +397,57 @@ describe("upsertSymbolBatch — integration", () => {
   );
 });
 
+describe("batchMergeExternalSymbols - unit (fake connection)", () => {
+  it("N external symbols use UNWIND-batched node and relationship passes", async () => {
+    const statements: string[] = [];
+    const conn = createFakeConnection(statements);
+    const { batchMergeExternalSymbols } =
+      await import("../../dist/db/ladybug-queries.js");
+
+    await batchMergeExternalSymbols(conn, "fake-repo", [
+      makeExternalSymbol("external-1", "apiOne"),
+      makeExternalSymbol("external-2", "apiTwo"),
+      makeExternalSymbol("external-3", "apiThree"),
+    ]);
+
+    assert.strictEqual(
+      countStatements(statements, "MERGE (s:Symbol"),
+      1,
+      "external symbols should be merged in one node batch, not one query per symbol",
+    );
+    assert.strictEqual(
+      countStatements(statements, "UNWIND"),
+      2,
+      "external symbols should use node and SYMBOL_IN_REPO relationship passes",
+    );
+    assert.strictEqual(
+      countStatements(statements, "MERGE (s)-[:SYMBOL_IN_REPO]"),
+      0,
+      "relationship writes should avoid MERGE-rel inside UNWIND",
+    );
+  });
+});
+
+function makeExternalSymbol(symbolId: string, name: string) {
+  return {
+    symbolId,
+    kind: "function",
+    name,
+    exported: true,
+    language: "external",
+    rangeStartLine: 0,
+    rangeStartCol: 0,
+    rangeEndLine: 0,
+    rangeEndCol: 0,
+    external: true,
+    scipSymbol: `scip-typescript npm dep 1.0.0 dep/index.ts/${name}().`,
+    source: "scip" as const,
+    packageName: "dep",
+    packageVersion: "1.0.0",
+    updatedAt: "2026-05-25T00:00:00.000Z",
+  };
+}
+
 // ── Unit suite (fake connection — no real DB) ──────────────────────────────
 
 describe("upsertSymbolBatch — unit (fake connection)", () => {

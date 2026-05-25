@@ -51,6 +51,7 @@ interface NapiScipDiagnostic {
 
 interface NapiScipOccurrence {
   range: NapiScipRange;
+  enclosingRange?: NapiScipRange;
   symbol: string;
   symbolRoles: number;
   overrideDocumentation: string[];
@@ -197,6 +198,7 @@ function mapDiagnostic(d: NapiScipDiagnostic): ScipDiagnostic {
 function mapOccurrence(o: NapiScipOccurrence): ScipOccurrence {
   return {
     range: mapRange(o.range),
+    enclosingRange: o.enclosingRange ? mapRange(o.enclosingRange) : undefined,
     symbol: o.symbol,
     symbolRoles: o.symbolRoles,
     overrideDocumentation: o.overrideDocumentation,
