@@ -1815,6 +1815,19 @@ export async function initCommand(options: InitOptions): Promise<void> {
       patterns: [],
     },
     indexing: {
+      pipeline: "auto" as const,
+      providerFirst: {
+        activation: "shadowDb" as const,
+        readyState: "graphPlusAlgorithms" as const,
+        stagingFormat: "parquet" as const,
+        lsp: {
+          mode: "primaryWithCaps" as const,
+          workspaceSymbolLimit: 5_000,
+          documentSymbolFileLimit: 500,
+          referenceCandidateLimit: 200,
+          diagnosticsLimit: 5_000,
+        },
+      },
       concurrency: DEFAULT_INDEXING_CONCURRENCY,
       enableFileWatching: true,
       maxWatchedFiles: WATCHER_DEFAULT_MAX_WATCHED_FILES,

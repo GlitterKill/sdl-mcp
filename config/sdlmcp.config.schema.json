@@ -261,6 +261,90 @@
       "type": "object",
       "description": "Indexing behavior configuration",
       "properties": {
+        "pipeline": {
+          "type": "string",
+          "description": "Indexing pipeline selector. auto uses provider-first when SCIP or LSP coverage is configured, otherwise legacy.",
+          "enum": ["legacy", "providerFirst", "auto"],
+          "default": "auto"
+        },
+        "providerFirst": {
+          "type": "object",
+          "description": "Provider-first indexing options for SCIP/LSP-backed graph facts and shadow database activation.",
+          "properties": {
+            "activation": {
+              "type": "string",
+              "description": "Activation strategy for full provider-first builds.",
+              "enum": ["shadowDb"],
+              "default": "shadowDb"
+            },
+            "readyState": {
+              "type": "string",
+              "description": "Readiness gate for the first usable index state.",
+              "enum": ["graphPlusAlgorithms"],
+              "default": "graphPlusAlgorithms"
+            },
+            "stagingFormat": {
+              "type": "string",
+              "description": "Preferred provider fact staging format for shadow bulk loads. CSV is the fallback when Parquet is unavailable.",
+              "enum": ["parquet", "csv"],
+              "default": "parquet"
+            },
+            "lsp": {
+              "type": "object",
+              "description": "Caps for primary LSP provider collection. LSP servers are consumed from configured commands; SDL-MCP does not install them.",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": ["primaryWithCaps"],
+                  "default": "primaryWithCaps"
+                },
+                "workspaceSymbolLimit": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100000,
+                  "default": 5000
+                },
+                "documentSymbolFileLimit": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 50000,
+                  "default": 500
+                },
+                "referenceCandidateLimit": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 10000,
+                  "default": 200
+                },
+                "diagnosticsLimit": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100000,
+                  "default": 5000
+                }
+              },
+              "default": {
+                "mode": "primaryWithCaps",
+                "workspaceSymbolLimit": 5000,
+                "documentSymbolFileLimit": 500,
+                "referenceCandidateLimit": 200,
+                "diagnosticsLimit": 5000
+              }
+            }
+          },
+          "default": {
+            "activation": "shadowDb",
+            "readyState": "graphPlusAlgorithms",
+            "stagingFormat": "parquet",
+            "lsp": {
+              "mode": "primaryWithCaps",
+              "workspaceSymbolLimit": 5000,
+              "documentSymbolFileLimit": 500,
+              "referenceCandidateLimit": 200,
+              "diagnosticsLimit": 5000
+            }
+          }
+        },
         "concurrency": {
           "type": "integer",
           "description": "Number of concurrent indexing workers",
@@ -356,6 +440,19 @@
         }
       },
       "default": {
+        "pipeline": "auto",
+        "providerFirst": {
+          "activation": "shadowDb",
+          "readyState": "graphPlusAlgorithms",
+          "stagingFormat": "parquet",
+          "lsp": {
+            "mode": "primaryWithCaps",
+            "workspaceSymbolLimit": 5000,
+            "documentSymbolFileLimit": 500,
+            "referenceCandidateLimit": 200,
+            "diagnosticsLimit": 5000
+          }
+        },
         "concurrency": 8,
         "enableFileWatching": true,
         "maxWatchedFiles": 25000,

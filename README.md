@@ -772,6 +772,7 @@ flowchart TD
 | [Agent Context](./docs/feature-deep-dives/agent-context.md)                         | Task-shaped context retrieval, feedback loops, portable context summaries             |
 | [Context Modes](./docs/feature-deep-dives/context-modes.md)                         | Precise vs broad retrieval, adaptive symbol ranking, benchmark trade-offs             |
 | [Indexing & Languages](./docs/feature-deep-dives/indexing-languages.md)             | Rust/TS engines, two-pass architecture, 12-language support                           |
+| [Provider-First Indexing](./docs/feature-deep-dives/provider-first-indexing.md)     | SCIP/LSP-first planning, provider facts, shadow DB readiness, fallback boundaries     |
 | [Runtime Execution](./docs/feature-deep-dives/runtime-execution.md)                 | Sandboxed subprocess execution with governance                                        |
 | [CLI Tool Access](./docs/feature-deep-dives/cli-tool-access.md)                     | Direct CLI access to 36 action aliases, output formats, stdin piping, scripting       |
 | [Tool Gateway](./docs/feature-deep-dives/tool-gateway.md)                           | 35 gateway-routable actions, 4 namespace tools, thin schemas, migration guide         |

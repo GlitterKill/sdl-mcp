@@ -69,6 +69,19 @@
     "patterns": []
   },
   "indexing": {
+    "pipeline": "auto",
+    "providerFirst": {
+      "activation": "shadowDb",
+      "readyState": "graphPlusAlgorithms",
+      "stagingFormat": "parquet",
+      "lsp": {
+        "mode": "primaryWithCaps",
+        "workspaceSymbolLimit": 5000,
+        "documentSymbolFileLimit": 500,
+        "referenceCandidateLimit": 200,
+        "diagnosticsLimit": 5000
+      }
+    },
     "concurrency": 8,
     "enableFileWatching": true,
     "maxWatchedFiles": 25000,

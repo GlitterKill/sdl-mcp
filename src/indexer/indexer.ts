@@ -86,6 +86,8 @@ import type {
   ScipGeneratedIndexDiagnostic,
 } from "../scip/diagnostics.js";
 import type { BatchPersistDrainDiagnostics } from "./parser/batch-persist.js";
+import { resolveProviderFirstPipeline } from "./provider-first/planner.js";
+import type { ProviderFirstPipelineSelection } from "./provider-first/types.js";
 export type { IndexProgress, IndexProgressSubstage } from "./indexer-init.js";
 export interface IndexTimingDiagnostics {
   totalMs: number;
@@ -127,6 +129,7 @@ export interface IndexResult {
     generatedIndexes: ScipGeneratedIndexDiagnostic[];
     failures: ScipFailureDiagnostic[];
   };
+  providerFirst?: ProviderFirstPipelineSelection;
   algorithmRefresh?: AlgorithmRefreshDiagnostics;
 }
 
@@ -537,6 +540,21 @@ async function indexRepoImpl(
   }
 
   const appConfig: AppConfig = loadConfig();
+  const providerFirst = resolveProviderFirstPipeline({
+    indexing: appConfig.indexing,
+    scip: appConfig.scip,
+    semanticEnrichment: appConfig.semanticEnrichment,
+  });
+  if (providerFirst.selectedPipeline === "providerFirst") {
+    logger.info(
+      "indexRepo: provider-first plan selected; legacy materializer remains the fallback path for this refresh",
+      {
+        repoId,
+        sources: providerFirst.sources.map((source) => source.type),
+        warnings: providerFirst.warnings,
+      },
+    );
+  }
   const postIndexSessionTimeoutMs = resolvePostIndexSessionTimeoutMs(
     repoId,
     appConfig.repos,
@@ -866,6 +884,7 @@ async function indexRepoImpl(
           generatedIndexes: scipResult.generatedIndexes,
           failures: scipResult.failures,
         },
+        providerFirst,
         algorithmRefresh,
       };
 
@@ -1515,6 +1534,7 @@ async function indexRepoImpl(
       // the audit log.
       pass1Engine: derivePass1EngineTelemetry(pass1Acc),
       scip: scipDiagnostics,
+      providerFirst,
       algorithmRefresh,
     };
 

@@ -8,6 +8,8 @@
 
 SDL-MCP ships with two indexing engines that can be selected via configuration:
 
+Provider-first indexing is the new large-repository path that plans SCIP and LSP facts before falling back to these engines. See [Provider-First Indexing](./provider-first-indexing.md) for the new `indexing.pipeline` surface and readiness model.
+
 ### Native Rust Engine (Default)
 
 A high-performance, multi-threaded Rust addon compiled via `napi-rs`. This is the **default engine** (`indexing.engine` defaults to `"rust"`). It handles pass-1 symbol extraction at near-native speed. Falls back to the TypeScript engine automatically if the native addon is unavailable.

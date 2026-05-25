@@ -219,7 +219,51 @@ export type AlgorithmRefreshConfig = z.infer<
   typeof AlgorithmRefreshConfigSchema
 >;
 
+export const IndexingPipelineSchema = z.enum([
+  "legacy",
+  "providerFirst",
+  "auto",
+]);
+
+export const ProviderFirstLspIndexingConfigSchema = z
+  .object({
+    mode: z.enum(["primaryWithCaps"]).default("primaryWithCaps"),
+    workspaceSymbolLimit: z.number().int().min(0).max(100_000).default(5_000),
+    documentSymbolFileLimit: z.number().int().min(0).max(50_000).default(500),
+    referenceCandidateLimit: z.number().int().min(0).max(10_000).default(200),
+    diagnosticsLimit: z.number().int().min(0).max(100_000).default(5_000),
+  })
+  .default({
+    mode: "primaryWithCaps",
+    workspaceSymbolLimit: 5_000,
+    documentSymbolFileLimit: 500,
+    referenceCandidateLimit: 200,
+    diagnosticsLimit: 5_000,
+  });
+
+export const ProviderFirstIndexingConfigSchema = z
+  .object({
+    activation: z.enum(["shadowDb"]).default("shadowDb"),
+    readyState: z.enum(["graphPlusAlgorithms"]).default("graphPlusAlgorithms"),
+    stagingFormat: z.enum(["parquet", "csv"]).default("parquet"),
+    lsp: ProviderFirstLspIndexingConfigSchema,
+  })
+  .default({
+    activation: "shadowDb",
+    readyState: "graphPlusAlgorithms",
+    stagingFormat: "parquet",
+    lsp: {
+      mode: "primaryWithCaps",
+      workspaceSymbolLimit: 5_000,
+      documentSymbolFileLimit: 500,
+      referenceCandidateLimit: 200,
+      diagnosticsLimit: 5_000,
+    },
+  });
+
 export const IndexingConfigSchema = z.object({
+  pipeline: IndexingPipelineSchema.default("auto"),
+  providerFirst: ProviderFirstIndexingConfigSchema,
   concurrency: z
     .number()
     .int()
@@ -251,6 +295,13 @@ export const IndexingConfigSchema = z.object({
   }),
 });
 
+export type IndexingPipeline = z.infer<typeof IndexingPipelineSchema>;
+export type ProviderFirstLspIndexingConfig = z.infer<
+  typeof ProviderFirstLspIndexingConfigSchema
+>;
+export type ProviderFirstIndexingConfig = z.infer<
+  typeof ProviderFirstIndexingConfigSchema
+>;
 export type IndexingConfig = z.infer<typeof IndexingConfigSchema>;
 
 export const LiveIndexConfigSchema = z.object({
