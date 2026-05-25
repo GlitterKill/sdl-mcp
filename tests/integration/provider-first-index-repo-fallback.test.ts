@@ -230,7 +230,23 @@ describe("provider-first indexRepo fallback", () => {
     assert.match(derivedState?.lastError ?? "", /call-edge proof is pending/i);
   });
 
-  it("uses legacy fallback in auto mode when SCIP coverage is incomplete", async () => {
+  it("uses legacy fallback for explicit providerFirst incremental refreshes", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+    });
+
+    await indexRepo(repoId, "full");
+    const result = await indexRepo(repoId, "incremental");
+
+    assert.equal(result.providerFirst?.selectedPipeline, "providerFirst");
+    assert.equal(result.providerFirstExecution?.status, "fallback");
+    assert.match(
+      result.providerFirstExecution?.reasons.join(" ") ?? "",
+      /full refreshes only/i,
+    );
+  });
+
+  it("uses legacy only for uncovered files when auto SCIP coverage is incomplete", async () => {
     const repoId = await initIndexedRepo("auto", {
       scipFixture: "complete",
       extraScannedFile: true,
@@ -239,11 +255,12 @@ describe("provider-first indexRepo fallback", () => {
     const result = await indexRepo(repoId, "full");
 
     assert.equal(result.providerFirst?.selectedPipeline, "providerFirst");
-    assert.equal(result.providerFirstExecution?.status, "fallback");
+    assert.equal(result.providerFirstExecution?.status, "executed");
     assert.match(
       result.providerFirstExecution?.reasons.join(" ") ?? "",
-      /did not cover 1 scanned file/i,
+      /legacy fallback indexed 1 uncovered file/i,
     );
+    assert.equal(result.filesProcessed, 2);
     assert.ok(result.symbolsIndexed > 0);
 
     const conn = await getLadybugConn();
@@ -255,15 +272,51 @@ describe("provider-first indexRepo fallback", () => {
     assert.ok(extraFile);
   });
 
-  it("fails explicit providerFirst when SCIP coverage is incomplete", async () => {
+  it("uses legacy only for uncovered files when explicit providerFirst SCIP coverage is incomplete", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
       extraScannedFile: true,
     });
 
-    await assert.rejects(
-      () => indexRepo(repoId, "full"),
-      /did not cover 1 scanned file/i,
+    const result = await indexRepo(repoId, "full");
+
+    assert.equal(result.providerFirst?.selectedPipeline, "providerFirst");
+    assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.match(
+      result.providerFirstExecution?.reasons.join(" ") ?? "",
+      /legacy fallback indexed 1 uncovered file/i,
+    );
+    assert.equal(result.filesProcessed, 2);
+
+    const conn = await getLadybugConn();
+    const symbols = await ladybugDb.queryAll<{
+      name: string;
+      source: string;
+      external: boolean;
+    }>(
+      conn,
+      `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+       RETURN s.name AS name,
+              s.source AS source,
+              s.external AS external
+       ORDER BY name`,
+      { repoId },
+    );
+    assert.ok(
+      symbols.some(
+        (symbol) =>
+          symbol.name === "main" &&
+          symbol.source === "scip" &&
+          symbol.external === false,
+      ),
+    );
+    assert.ok(
+      symbols.some(
+        (symbol) =>
+          symbol.name === "extra" &&
+          symbol.source !== "scip" &&
+          symbol.external === false,
+      ),
     );
   });
 
@@ -306,17 +359,17 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(ladybugDb.toNumber(symbolCount?.count), 0);
   });
 
-  it("leaves old graph rows untouched when explicit providerFirst rejects coverage", async () => {
+  it("deletes removed graph rows when explicit providerFirst uses uncovered-file fallback", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
       extraScannedFile: true,
       seedRemovedFile: true,
     });
 
-    await assert.rejects(
-      () => indexRepo(repoId, "full"),
-      /did not cover 1 scanned file/i,
-    );
+    const result = await indexRepo(repoId, "full");
+
+    assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.equal(result.removedFiles, 1);
 
     const conn = await getLadybugConn();
     const removedFile = await ladybugDb.getFileByRepoPath(
@@ -324,7 +377,7 @@ describe("provider-first indexRepo fallback", () => {
       repoId,
       "src/removed.ts",
     );
-    assert.ok(removedFile);
+    assert.equal(removedFile, null);
     const removedSymbol = await ladybugDb.querySingle<{ count: unknown }>(
       conn,
       `MATCH (s:Symbol {symbolId: $symbolId})-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
@@ -334,7 +387,7 @@ describe("provider-first indexRepo fallback", () => {
         symbolId: `${repoId}:removed-symbol`,
       },
     );
-    assert.equal(ladybugDb.toNumber(removedSymbol?.count), 1);
+    assert.equal(ladybugDb.toNumber(removedSymbol?.count), 0);
   });
 
   it("fails explicit providerFirst before writing duplicate SCIP documents", async () => {

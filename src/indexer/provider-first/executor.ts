@@ -88,7 +88,7 @@ export function resolveProviderFirstExecutionPlan(params: {
 
   if (mode !== "full") {
     return unsupportedPlan({
-      fallbackAllowed,
+      fallbackAllowed: fallbackAllowed || selectedSources.length > 0,
       reason:
         "provider-first execution currently supports full refreshes only; incremental provider generations are not materialized yet",
     });
@@ -419,12 +419,18 @@ function appendProviderFactSet(
   target: ProviderFactSet,
   source: ProviderFactSet,
 ): void {
-  target.files.push(...source.files);
-  target.symbols.push(...source.symbols);
-  target.occurrences.push(...source.occurrences);
-  target.edges.push(...source.edges);
-  target.externalSymbols.push(...source.externalSymbols);
-  target.diagnostics.push(...source.diagnostics);
-  target.coverage.push(...source.coverage);
-  target.providerRuns.push(...source.providerRuns);
+  appendMany(target.files, source.files);
+  appendMany(target.symbols, source.symbols);
+  appendMany(target.occurrences, source.occurrences);
+  appendMany(target.edges, source.edges);
+  appendMany(target.externalSymbols, source.externalSymbols);
+  appendMany(target.diagnostics, source.diagnostics);
+  appendMany(target.coverage, source.coverage);
+  appendMany(target.providerRuns, source.providerRuns);
+}
+
+function appendMany<T>(target: T[], source: readonly T[]): void {
+  for (const item of source) {
+    target.push(item);
+  }
 }

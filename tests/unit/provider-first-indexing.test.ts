@@ -1,13 +1,20 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
+  type AppConfig,
   IndexingConfigSchema,
   ScipConfigSchema,
   SemanticEnrichmentConfigSchema,
 } from "../../dist/config/types.js";
 import { createProviderSymbolId } from "../../dist/indexer/provider-first/ids.js";
-import { resolveProviderFirstExecutionPlan } from "../../dist/indexer/provider-first/executor.js";
+import {
+  executeProviderFirstScipFull,
+  resolveProviderFirstExecutionPlan,
+} from "../../dist/indexer/provider-first/executor.js";
 import { createLspProviderCacheKey } from "../../dist/indexer/provider-first/lsp-cache.js";
 import {
   materializeProviderFacts,
@@ -16,6 +23,7 @@ import {
 import { resolveProviderFirstPipeline } from "../../dist/indexer/provider-first/planner.js";
 import { normalizeScipProviderFacts } from "../../dist/indexer/provider-first/scip-normalizer.js";
 import type { ProviderFactSet } from "../../dist/indexer/provider-first/types.js";
+import { writeTestScipIndex } from "../fixtures/scip/builder.ts";
 
 describe("provider-first indexing foundation", () => {
   it("defaults indexing to automatic provider-first selection with shadow activation", () => {
@@ -497,6 +505,29 @@ describe("provider-first indexing foundation", () => {
     assert.match(plan.reasons.join(" "), /full refreshes/i);
   });
 
+  it("allows explicit providerFirst incremental refreshes to use legacy until provider incrementals exist", () => {
+    const selection = resolveProviderFirstPipeline({
+      indexing: IndexingConfigSchema.parse({ pipeline: "providerFirst" }),
+      scip: ScipConfigSchema.parse({
+        enabled: true,
+        indexes: [{ path: "index.scip" }],
+      }),
+    });
+
+    const plan = resolveProviderFirstExecutionPlan({
+      selection,
+      mode: "incremental",
+      scip: ScipConfigSchema.parse({
+        enabled: true,
+        indexes: [{ path: "index.scip" }],
+      }),
+    });
+
+    assert.equal(plan.canExecute, false);
+    assert.equal(plan.shouldFallbackToLegacy, true);
+    assert.match(plan.reasons.join(" "), /full refreshes/i);
+  });
+
   it("plans auto mode SCIP execution when a full SCIP source is configured", () => {
     const selection = resolveProviderFirstPipeline({
       indexing: IndexingConfigSchema.parse({ pipeline: "auto" }),
@@ -519,6 +550,64 @@ describe("provider-first indexing foundation", () => {
     assert.equal(plan.executor, "scipFull");
     assert.equal(plan.shouldFallbackToLegacy, false);
     assert.deepEqual(plan.reasons, []);
+  });
+
+  it("collects large SCIP fact batches without overflowing the call stack", async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "sdl-provider-first-scip-"));
+    try {
+      await writeTestScipIndex(join(repoRoot, "index.scip"), {
+        metadata: {
+          toolName: "scip-fixture",
+          toolVersion: "1.0.0",
+        },
+        documents: Array.from({ length: 600 }, (_, documentIndex) => {
+          const symbol = `scip-typescript npm fixture 1.0.0 src/file${documentIndex}.ts/main().`;
+          return {
+            language: "typescript",
+            relativePath: `src/file${documentIndex}.ts`,
+            occurrences: [
+              {
+                range: [0, 16, 20],
+                enclosingRange: [0, 0, 2, 1],
+                symbol,
+                symbolRoles: 1,
+              },
+              ...Array.from({ length: 250 }, (_, occurrenceIndex) => ({
+                range: [occurrenceIndex + 1, 2, 6] as [number, number, number],
+                symbol,
+                symbolRoles: 8,
+              })),
+            ],
+            symbols: [
+              {
+                symbol,
+                kind: 12,
+                displayName: "main",
+              },
+            ],
+          };
+        }),
+      });
+
+      const result = await executeProviderFirstScipFull({
+        repoId: "repo",
+        repoRoot,
+        config: {
+          scip: ScipConfigSchema.parse({
+            enabled: true,
+            indexes: [{ path: "index.scip" }],
+            externalSymbols: { enabled: true, maxPerIndex: 10000 },
+          }),
+          indexing: IndexingConfigSchema.parse({ pipeline: "providerFirst" }),
+          repos: [],
+        } as AppConfig,
+      });
+
+      assert.equal(result.summary.filesProcessed, 600);
+      assert.equal(result.facts.occurrences.length, 600 * 251);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
   });
 
   it("materializes provider facts into LadybugDB graph rows", () => {

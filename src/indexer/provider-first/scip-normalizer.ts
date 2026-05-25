@@ -118,10 +118,10 @@ export function normalizeScipProviderFacts(
     const documentOccurrences = document.occurrences.map((occurrence, index) =>
       occurrenceToFact(context, occurrence, relPath, index),
     );
-    facts.occurrences.push(...documentOccurrences);
-    facts.diagnostics.push(
-      ...document.occurrences.flatMap((occurrence, occurrenceIndex) =>
-        occurrence.diagnostics.map((diagnostic, diagnosticIndex) =>
+    appendMany(facts.occurrences, documentOccurrences);
+    for (const [occurrenceIndex, occurrence] of document.occurrences.entries()) {
+      for (const [diagnosticIndex, diagnostic] of occurrence.diagnostics.entries()) {
+        facts.diagnostics.push(
           diagnosticToFact(
             context,
             diagnostic,
@@ -129,16 +129,14 @@ export function normalizeScipProviderFacts(
             occurrenceIndex,
             diagnosticIndex,
           ),
-        ),
-      ),
-    );
+        );
+      }
+    }
     facts.coverage.push(
       coverageFact(context, document, relPath, documentOccurrences),
     );
-    facts.edges.push(
-      ...relationshipEdges(context, document, edgeKeys),
-      ...occurrenceEdges(context, document, edgeKeys),
-    );
+    appendMany(facts.edges, relationshipEdges(context, document, edgeKeys));
+    appendMany(facts.edges, occurrenceEdges(context, document, edgeKeys));
   }
 
   facts.providerRuns.push(providerRunFact(options, base, facts));
@@ -575,4 +573,10 @@ function diagnosticSeverity(
   if (severity === 2) return "warning";
   if (severity === 3) return "information";
   return "hint";
+}
+
+function appendMany<T>(target: T[], source: readonly T[]): void {
+  for (const item of source) {
+    target.push(item);
+  }
 }
