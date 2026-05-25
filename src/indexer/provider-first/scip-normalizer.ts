@@ -545,7 +545,8 @@ function rangeContains(container: ScipRange, inner: ScipRange): boolean {
 }
 
 function coverageLevel(total: number, matched: number): CoverageLevel {
-  if (total === 0 || matched === 0) return "none";
+  if (total === 0) return "full";
+  if (matched === 0) return "none";
   return matched === total ? "full" : "partial";
 }
 

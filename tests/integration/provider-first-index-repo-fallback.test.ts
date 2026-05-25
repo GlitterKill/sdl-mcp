@@ -381,6 +381,48 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(ladybugDb.toNumber(symbolCount?.count), 0);
   });
 
+  it("fails explicit providerFirst before writing cross-document duplicate SCIP symbols", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+      duplicateProviderSymbolDocument: true,
+    });
+
+    await assert.rejects(
+      () => indexRepo(repoId, "full"),
+      /duplicate symbols/i,
+    );
+
+    const conn = await getLadybugConn();
+    const symbolCount = await ladybugDb.querySingle<{ count: unknown }>(
+      conn,
+      `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+       WHERE s.source = 'scip'
+       RETURN count(s) AS count`,
+      { repoId },
+    );
+    assert.equal(ladybugDb.toNumber(symbolCount?.count), 0);
+  });
+
+  it("executes explicit providerFirst when SCIP covers an empty document", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+      emptyProviderDocument: true,
+    });
+
+    const result = await indexRepo(repoId, "full");
+
+    assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.equal(result.filesProcessed, 2);
+
+    const conn = await getLadybugConn();
+    const emptyFile = await ladybugDb.getFileByRepoPath(
+      conn,
+      repoId,
+      "src/empty.ts",
+    );
+    assert.ok(emptyFile);
+  });
+
   async function initIndexedRepo(
     pipeline: "auto" | "providerFirst",
     options: {
@@ -389,6 +431,8 @@ describe("provider-first indexRepo fallback", () => {
       extraScannedFile?: boolean;
       duplicateProviderDoc?: boolean;
       duplicateProviderSymbol?: boolean;
+      duplicateProviderSymbolDocument?: boolean;
+      emptyProviderDocument?: boolean;
       includeMissingScipIndex?: boolean;
       seedRemovedFile?: boolean;
     } = {},
@@ -419,6 +463,16 @@ describe("provider-first indexRepo fallback", () => {
         ["export function extra() {", "  return 2;", "}"].join("\n"),
         "utf8",
       );
+    }
+    if (options.duplicateProviderSymbolDocument) {
+      writeFileSync(
+        join(repoDir, "src", "dupe.ts"),
+        ["export function dupe() {", "  return 3;", "}"].join("\n"),
+        "utf8",
+      );
+    }
+    if (options.emptyProviderDocument) {
+      writeFileSync(join(repoDir, "src", "empty.ts"), "", "utf8");
     }
     writeFileSync(
       configPath,
@@ -677,9 +731,50 @@ describe("provider-first indexRepo fallback", () => {
           toolName: "scip-typescript",
           toolVersion: "1.0.0",
         },
-        documents: options.duplicateProviderDoc
-          ? [mainDocument, mainDocument]
-          : [mainDocument],
+        documents: [
+          mainDocument,
+          ...(options.duplicateProviderDoc ? [mainDocument] : []),
+          ...(options.duplicateProviderSymbolDocument
+            ? [
+                {
+                  language: "typescript",
+                  relativePath: "src/dupe.ts",
+                  occurrences: [
+                    {
+                      range: [0, 16, 20] as [number, number, number],
+                      enclosingRange: [0, 0, 2, 1] as [
+                        number,
+                        number,
+                        number,
+                        number,
+                      ],
+                      symbol:
+                        "scip-typescript npm fixture 1.0.0 src/index.ts/main().",
+                      symbolRoles: 1,
+                    },
+                  ],
+                  symbols: [
+                    {
+                      symbol:
+                        "scip-typescript npm fixture 1.0.0 src/index.ts/main().",
+                      kind: 12,
+                      displayName: "main",
+                    },
+                  ],
+                },
+              ]
+            : []),
+          ...(options.emptyProviderDocument
+            ? [
+                {
+                  language: "typescript",
+                  relativePath: "src/empty.ts",
+                  occurrences: [],
+                  symbols: [],
+                },
+              ]
+            : []),
+        ],
         externalSymbols: [
           {
             symbol: "scip-typescript npm dep 1.0.0 dep/index.ts/api().",

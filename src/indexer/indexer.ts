@@ -307,6 +307,7 @@ function validateProviderFirstFullCoverage(params: {
   }>;
   symbols: Iterable<{
     relPath: string;
+    providerId: string;
     providerSymbolId: string;
   }>;
 }): string[] {
@@ -332,9 +333,9 @@ function validateProviderFirstFullCoverage(params: {
     }
   }
   for (const symbol of params.symbols) {
-    const key = `${symbol.relPath}\0${symbol.providerSymbolId}`;
+    const key = symbol.providerSymbolId;
     if (seenProviderSymbols.has(key)) {
-      duplicateProviderSymbols.add(`${symbol.relPath}:${symbol.providerSymbolId}`);
+      duplicateProviderSymbols.add(symbol.providerSymbolId);
     } else {
       seenProviderSymbols.add(key);
     }
@@ -384,7 +385,7 @@ function validateProviderFirstFullCoverage(params: {
   if (duplicateProviderSymbols.size > 0) {
     const sample = [...duplicateProviderSymbols].slice(0, 5).join(", ");
     reasons.push(
-      `SCIP provider emitted duplicate symbols for ${duplicateProviderSymbols.size} file/symbol pair(s): ${sample}`,
+      `SCIP provider emitted duplicate symbols for ${duplicateProviderSymbols.size} native provider symbol(s): ${sample}`,
     );
   }
   return reasons;
@@ -986,19 +987,22 @@ async function indexRepoImpl(
           await measurePhase("providerFirstMaterialize", () =>
             withPostIndexWriteSession(
               async (session) => {
-                await materializeProviderFacts(session.conn, providerResult.rows, {
-                  replaceFileSymbols: true,
+                await ladybugDb.withTransaction(session.conn, async (txConn) => {
+                  await materializeProviderFacts(txConn, providerResult.rows, {
+                    replaceFileSymbols: true,
+                  });
+                  if (providerScan.removedFileIds.length > 0) {
+                    await ladybugDb.deleteFilesByIds(
+                      txConn,
+                      providerScan.removedFileIds,
+                    );
+                  }
                 });
-                if (providerScan.removedFileIds.length > 0) {
-                  await ladybugDb.deleteFilesByIds(
-                    session.conn,
-                    providerScan.removedFileIds,
-                  );
-                }
               },
               { timeoutMs: postIndexSessionTimeoutMs },
             ),
           );
+          invalidateIndexResultCaches(repoId);
 
           const versionId = await createOrReuseVersion(
             "Provider-first SCIP index",
@@ -1055,7 +1059,6 @@ async function indexRepoImpl(
             providerFirstExecution: providerResult.summary,
             algorithmRefresh: post.algorithmRefresh,
           };
-          invalidateIndexResultCaches(repoId);
           return result;
         }
       }
