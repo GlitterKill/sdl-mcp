@@ -30,12 +30,14 @@ export interface FinalizeIndexingParams {
   hasIndexMutations?: boolean;
   includeTimings?: boolean;
   callResolutionTelemetry: CallResolutionTelemetry;
+  deferSemanticRefresh?: boolean;
   onProgress?: (progress: IndexProgress) => void;
 }
 
 export interface FinalizeIndexingResult {
   summaryStats?: SummaryBatchResult;
   fileSummaryEmbeddingStats?: Record<string, FileSummaryEmbeddingRefreshResult>;
+  semanticDeferred?: boolean;
   qualityStats?: IndexQualityStats;
   timings?: Record<string, number>;
   sharedGraph?: {
@@ -64,6 +66,7 @@ export async function finalizeIndexing({
   hasIndexMutations,
   includeTimings,
   callResolutionTelemetry,
+  deferSemanticRefresh = false,
   onProgress,
 }: FinalizeIndexingParams): Promise<FinalizeIndexingResult> {
   const timings: Record<string, number> | undefined = includeTimings
@@ -192,8 +195,18 @@ export async function finalizeIndexing({
   const shouldRunSemanticRefresh =
     semanticConfig?.enabled &&
     (changedFileIds === undefined || changedFileIds.size > 0);
+  const semanticDeferred = Boolean(
+    shouldRunSemanticRefresh && deferSemanticRefresh,
+  );
 
-  if (shouldRunSemanticRefresh) {
+  if (semanticDeferred) {
+    logger.info("Semantic refresh deferred until semantic readiness", {
+      repoId,
+      versionId,
+    });
+  }
+
+  if (shouldRunSemanticRefresh && !semanticDeferred) {
     const modelPlan = resolveSemanticEmbeddingModelPlan(semanticConfig);
     if (modelPlan.unsupportedModels.length > 0) {
       logger.warn(
@@ -339,6 +352,7 @@ export async function finalizeIndexing({
   return {
     summaryStats,
     fileSummaryEmbeddingStats,
+    semanticDeferred: semanticDeferred || undefined,
     qualityStats,
     timings,
     sharedGraph: metricsResult.sharedGraph,

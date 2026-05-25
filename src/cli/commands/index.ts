@@ -206,6 +206,14 @@ export function formatProviderFirstExecutionSummaryLines(
   return lines;
 }
 
+export function formatSemanticReadinessLines(
+  semanticDeferred: boolean | null | undefined,
+): string[] {
+  return semanticDeferred
+    ? ["  Semantic readiness: deferred summaries/embeddings"]
+    : [];
+}
+
 function embeddingStageLabel(substage?: IndexProgressSubstage): string {
   return substage === "fileSummaryEmbeddings"
     ? "Summary Embeddings"
@@ -495,6 +503,7 @@ async function delegateIndexToServer(
                 externalSymbolsIndexed: number;
                 coverage?: ProviderFirstExecutionSummary["coverage"];
               } | null;
+              semanticDeferred?: boolean | null;
               summaryStats?: {
                 generated: number;
                 totalCostUsd: number;
@@ -505,6 +514,9 @@ async function delegateIndexToServer(
             for (const line of formatProviderFirstExecutionSummaryLines(
               c.providerFirstExecution,
             )) {
+              console.log(line);
+            }
+            for (const line of formatSemanticReadinessLines(c.semanticDeferred)) {
               console.log(line);
             }
             console.log(`  Files: ${c.filesProcessed}`);
@@ -750,6 +762,9 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       for (const line of formatProviderFirstExecutionSummaryLines(
         stats.providerFirstExecution,
       )) {
+        console.log(line);
+      }
+      for (const line of formatSemanticReadinessLines(stats.semanticDeferred)) {
         console.log(line);
       }
       console.log(`  Files: ${stats.filesProcessed}`);

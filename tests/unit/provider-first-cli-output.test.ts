@@ -1,7 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { formatProviderFirstExecutionSummaryLines } from "../../dist/cli/commands/index.js";
+import {
+  formatProviderFirstExecutionSummaryLines,
+  formatSemanticReadinessLines,
+} from "../../dist/cli/commands/index.js";
 
 describe("provider-first CLI output", () => {
   it("explains provider coverage and legacy fallback scope for executed runs", () => {
@@ -30,5 +33,12 @@ describe("provider-first CLI output", () => {
       "  Provider-first: scipFull (provider-first:test)",
       "  Provider-first coverage: 521/1213 files provider-primary (0 full, 521 partial); 22 provider unusable, 670 uncovered; legacy fallback parsed 692 file(s)",
     ]);
+  });
+
+  it("surfaces deferred semantic readiness separately from index readiness", () => {
+    assert.deepEqual(formatSemanticReadinessLines(true), [
+      "  Semantic readiness: deferred summaries/embeddings",
+    ]);
+    assert.deepEqual(formatSemanticReadinessLines(false), []);
   });
 });

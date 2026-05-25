@@ -72,6 +72,7 @@ export interface IndexStats {
     string,
     { embedded: number; skipped: number; missing: number; degraded: boolean }
   >;
+  semanticDeferred?: boolean;
   quality?: {
     unresolvedTargets: number;
     externalTargets: number;

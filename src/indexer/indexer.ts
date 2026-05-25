@@ -146,6 +146,7 @@ export interface IndexResult {
   };
   providerFirst?: ProviderFirstPipelineSelection;
   providerFirstExecution?: ProviderFirstExecutionSummary;
+  semanticDeferred?: boolean;
   algorithmRefresh?: AlgorithmRefreshDiagnostics;
 }
 
@@ -303,6 +304,25 @@ function skippedDerivedStateResult(
       failures: [reason],
     },
   };
+}
+
+async function markDeferredSemanticStateDirty(params: {
+  repoId: string;
+  versionId: string;
+  appConfig: AppConfig;
+}): Promise<void> {
+  const { repoId, versionId, appConfig } = params;
+  try {
+    await markDerivedStateDirty(repoId, versionId, {
+      summaries: appConfig.semantic?.generateSummaries === true,
+      embeddings: true,
+    });
+  } catch (error) {
+    logger.debug("markDerivedStateDirty semantic deferred skipped", {
+      repoId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 interface ProviderFirstCoverageReport {
@@ -942,8 +962,10 @@ async function indexRepoImpl(
     scip?: NonNullable<IndexResult["scip"]>;
     preFinalize?: () => Promise<void>;
     skipDerivedStateReason?: string;
+    deferSemanticRefresh?: boolean;
   }): Promise<{
     summaryStats?: SummaryBatchResult;
+    semanticDeferred?: boolean;
     clustersComputed: number;
     processesTraced: number;
     algorithmRefresh: AlgorithmRefreshDiagnostics;
@@ -960,6 +982,7 @@ async function indexRepoImpl(
           hasIndexMutations: params.hasIndexMutations,
           includeTimings: Boolean(phaseTimings),
           callResolutionTelemetry: params.callResolutionTelemetry,
+          deferSemanticRefresh: params.deferSemanticRefresh,
           onProgress,
         }),
       );
@@ -995,6 +1018,14 @@ async function indexRepoImpl(
             measurePhase,
           });
 
+      if (finalizeResult.semanticDeferred) {
+        await markDeferredSemanticStateDirty({
+          repoId,
+          versionId: params.versionId,
+          appConfig,
+        });
+      }
+
       await measurePhase("buildDeferredIndexes", async () => {
         await buildDeferredIndexes();
       });
@@ -1024,6 +1055,7 @@ async function indexRepoImpl(
           errors: 0,
           pass1Engine: params.pass1Engine,
           fileSummaryEmbeddings: finalizeResult.fileSummaryEmbeddingStats,
+          semanticDeferred: finalizeResult.semanticDeferred,
           quality: finalizeResult.qualityStats,
           scip: params.scip,
           algorithmRefresh: derivedResult.algorithmRefresh,
@@ -1032,6 +1064,7 @@ async function indexRepoImpl(
 
       return {
         summaryStats: finalizeResult.summaryStats,
+        semanticDeferred: finalizeResult.semanticDeferred,
         clustersComputed: derivedResult.clustersComputed,
         processesTraced: derivedResult.processesTraced,
         algorithmRefresh: derivedResult.algorithmRefresh,
@@ -1214,6 +1247,7 @@ async function indexRepoImpl(
               }),
               pass1Engine,
               scip,
+              deferSemanticRefresh: true,
               skipDerivedStateReason:
                 "provider-first SCIP call-edge proof is pending; derived graph algorithms remain dirty",
             });
@@ -1240,6 +1274,7 @@ async function indexRepoImpl(
               scip,
               providerFirst,
               providerFirstExecution: providerFirstExecutedSummary,
+              semanticDeferred: post.semanticDeferred,
               algorithmRefresh: post.algorithmRefresh,
             };
             return result;
@@ -1982,6 +2017,7 @@ async function indexRepoImpl(
       const changedTestFilePathsParam =
         mode === "incremental" ? changedPass2FilePaths : undefined;
       const hasIndexMutations = changedFiles > 0 || totalEdgesCreated > 0;
+      const deferSemanticRefresh = providerFirstScipMaterialized;
       const finalizeResult = await measurePhase("finalizeIndexing", () =>
         finalizeIndexing({
           repoId,
@@ -1992,6 +2028,7 @@ async function indexRepoImpl(
           hasIndexMutations,
           includeTimings: Boolean(phaseTimings),
           callResolutionTelemetry,
+          deferSemanticRefresh,
           onProgress,
         }),
       );
@@ -2017,6 +2054,14 @@ async function indexRepoImpl(
         sharedGraph: finalizeResult.sharedGraph,
         measurePhase,
       });
+
+      if (finalizeResult.semanticDeferred) {
+        await markDeferredSemanticStateDirty({
+          repoId,
+          versionId,
+          appConfig,
+        });
+      }
 
       // --- Phase: build deferred indexes (fresh DB only) ---
       await measurePhase("buildDeferredIndexes", async () => {
@@ -2051,6 +2096,7 @@ async function indexRepoImpl(
           errors: 0,
           pass1Engine: derivePass1EngineTelemetry(pass1Acc),
           fileSummaryEmbeddings: finalizeResult.fileSummaryEmbeddingStats,
+          semanticDeferred: finalizeResult.semanticDeferred,
           quality: finalizeResult.qualityStats,
           scip: scipDiagnostics,
           algorithmRefresh: derivedResult.algorithmRefresh,
@@ -2059,6 +2105,7 @@ async function indexRepoImpl(
 
       return {
         summaryStats: finalizeResult.summaryStats,
+        semanticDeferred: finalizeResult.semanticDeferred,
         clustersComputed: derivedResult.clustersComputed,
         processesTraced: derivedResult.processesTraced,
         algorithmRefresh: derivedResult.algorithmRefresh,
@@ -2067,6 +2114,7 @@ async function indexRepoImpl(
 
     const {
       summaryStats,
+      semanticDeferred,
       clustersComputed,
       processesTraced,
       algorithmRefresh,
@@ -2105,6 +2153,7 @@ async function indexRepoImpl(
       providerFirst,
       providerFirstExecution:
         providerFirstExecutedSummary ?? providerFirstExecutionFallback,
+      semanticDeferred,
       algorithmRefresh,
     };
 

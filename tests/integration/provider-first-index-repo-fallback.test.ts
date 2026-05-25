@@ -230,6 +230,45 @@ describe("provider-first indexRepo fallback", () => {
     assert.match(derivedState?.lastError ?? "", /call-edge proof is pending/i);
   });
 
+  it("defers provider-first semantic embeddings until semantic readiness", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+      semanticProvider: "mock",
+    });
+
+    const result = await indexRepo(repoId, "full", undefined, undefined, {
+      includeTimings: true,
+    });
+
+    assert.equal(result.providerFirst?.selectedPipeline, "providerFirst");
+    assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.equal(result.semanticDeferred, true);
+    assert.equal(result.summaryStats, undefined);
+    assert.equal(result.timings?.phases["finalizeIndexing.semanticSummaries"], undefined);
+    assert.equal(
+      result.timings?.phases["finalizeIndexing.semanticEmbeddings:jina-embeddings-v2-base-code"],
+      undefined,
+    );
+    assert.equal(
+      result.timings?.phases["finalizeIndexing.fileSummaryEmbeddings:nomic-embed-text-v1.5"],
+      undefined,
+    );
+
+    const conn = await getLadybugConn();
+    const derivedState = await ladybugDb.querySingle<{
+      summariesDirty: boolean;
+      embeddingsDirty: boolean;
+    }>(
+      conn,
+      `MATCH (d:DerivedState {repoId: $repoId})
+       RETURN d.summariesDirty AS summariesDirty,
+              d.embeddingsDirty AS embeddingsDirty`,
+      { repoId },
+    );
+    assert.equal(derivedState?.summariesDirty, false);
+    assert.equal(derivedState?.embeddingsDirty, true);
+  });
+
   it("uses legacy fallback for explicit providerFirst incremental refreshes", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
@@ -318,6 +357,41 @@ describe("provider-first indexRepo fallback", () => {
           symbol.external === false,
       ),
     );
+  });
+
+  it("defers semantic embeddings when provider-first uses legacy fallback", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+      extraScannedFile: true,
+      semanticProvider: "mock",
+    });
+
+    const result = await indexRepo(repoId, "full", undefined, undefined, {
+      includeTimings: true,
+    });
+
+    assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.equal(result.providerFirstExecution?.coverage?.fallbackFiles, 1);
+    assert.equal(result.semanticDeferred, true);
+    assert.equal(
+      result.timings?.phases["finalizeIndexing.semanticEmbeddings:jina-embeddings-v2-base-code"],
+      undefined,
+    );
+    assert.equal(
+      result.timings?.phases["finalizeIndexing.fileSummaryEmbeddings:nomic-embed-text-v1.5"],
+      undefined,
+    );
+
+    const conn = await getLadybugConn();
+    const derivedState = await ladybugDb.querySingle<{
+      embeddingsDirty: boolean;
+    }>(
+      conn,
+      `MATCH (d:DerivedState {repoId: $repoId})
+       RETURN d.embeddingsDirty AS embeddingsDirty`,
+      { repoId },
+    );
+    assert.equal(derivedState?.embeddingsDirty, true);
   });
 
   it("materializes SCIP rows for partial reference coverage without legacy reparsing", async () => {
@@ -640,6 +714,7 @@ describe("provider-first indexRepo fallback", () => {
       emptyProviderDocument?: boolean;
       includeMissingScipIndex?: boolean;
       seedRemovedFile?: boolean;
+      semanticProvider?: "api" | "local" | "mock";
     } = {},
   ): Promise<string> {
     graphDbPath = mkdtempSync(join(tmpdir(), "sdl-provider-first-index-db-"));
@@ -691,6 +766,9 @@ describe("provider-first indexRepo fallback", () => {
             enableFileWatching: false,
           },
           semantic: {
+            ...(options.semanticProvider
+              ? { provider: options.semanticProvider }
+              : {}),
             generateSummaries: false,
           },
           scip: {

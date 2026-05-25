@@ -45,13 +45,13 @@ The target full-build path is:
 6. Checkpoint only after writes and index builds are idle.
 7. Activate the shadow DB with lock-aware close/reopen behavior.
 
-Embeddings, LLM summaries, and semantic enrichment are not part of the first ready gate. They advance a separate semantic readiness state.
+Embeddings, LLM summaries, and semantic enrichment are not part of the first ready gate. They advance a separate semantic readiness state. Current provider-first runs now defer semantic summaries and embeddings instead of running them inline during indexing; the CLI reports `Semantic readiness: deferred summaries/embeddings`, and `DerivedState.embeddingsDirty` remains set until a later semantic refresh clears it.
 
 Current executable phase: full SCIP provider-first runs collect SCIP documents and external symbols, normalize them into provider facts, validate coverage against the scanned repository file set, and materialize provider-owned files/symbols/edges through the existing LadybugDB single-writer APIs. Existing symbols for provider-materialized files are removed before the provider rows are written so stale legacy symbols do not survive beside SCIP-owned symbols. Files with usable SCIP symbol facts are provider-primary even when some references are unresolved; unresolved references stay as provider occurrence facts until a later targeted fallback or call-proof phase consumes them. Files whose provider coverage is missing or has no usable symbols are indexed by the legacy path in the same run. `auto` falls back to a pure legacy run when SCIP execution fails before trustworthy facts are available, while unsafe provider facts fail in every mode. Provider run, coverage, diagnostic, and occurrence facts are still collected in memory and are not yet persisted as first-class provider metadata rows.
 
 CLI output reports provider-first coverage separately from total indexed files. The `SCIP ingest` progress count is the number of SCIP documents decoded from provider indexes. The final `Provider-first coverage` line reports how many scanned repository files were provider-primary, how many had full versus partial provider coverage, and how many files were uncovered or provider-unusable and therefore parsed by legacy fallback.
 
-Because broad SCIP references are not promoted into exact `call` edges without syntax-aware call proof, provider-first SCIP execution currently leaves cluster/process/algorithm derived state dirty after graph materialization. Metrics, file summaries, FTS, memory sync, and index events still run; graph-plus-algorithms readiness remains pending until the call-edge proof or pass-2 provider bridge lands.
+Because broad SCIP references are not promoted into exact `call` edges without syntax-aware call proof, provider-first SCIP execution currently leaves cluster/process/algorithm derived state dirty after graph materialization. Metrics, file summaries, FTS, memory sync, and index events still run. Semantic summaries and embeddings are skipped in provider-first post-index finalization and tracked as deferred semantic readiness, so index wall time is no longer dominated by the `Summary Embeddings` and `Symbol Embeddings` phases. Graph-plus-algorithms readiness remains pending until the call-edge proof or pass-2 provider bridge lands.
 
 ## Incremental Builds
 
@@ -72,6 +72,7 @@ Implemented:
 - Full-refresh SCIP provider execution, with active graph materialization for provider-primary files through existing LadybugDB write APIs and derived algorithm gating until call-edge proof lands.
 - Same-run legacy fallback for scanned files with missing or provider-unusable coverage, excluding those files from provider materialization to avoid duplicate provider/legacy symbols.
 - Conservative SCIP occurrence edge materialization: imports and implementations can become edges, while broad references are retained as occurrences until a syntax-aware call pass proves invocation semantics.
+- Semantic-readiness split for provider-first runs: graph finalization skips inline summary/embedding refresh and marks semantic state dirty for later recovery.
 - Explicit provider-first failure when SCIP execution, unsafe coverage validation, LSP execution, or provider graph facts are not safe.
 
 Still pending: syntax-aware SCIP call-edge proof or pass-2 provider bridging, capped LSP execution, incremental provider generations, Parquet/CSV staging artifacts, shadow `.lbug` bulk loading, Windows activation handoff, and targeted fallback for unresolved reference/card/code surfaces inside provider-primary files.

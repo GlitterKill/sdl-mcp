@@ -1504,6 +1504,7 @@ async function handleRestRequest(
           durationMs: result.durationMs,
           summaryStats: result.summaryStats ?? null,
           providerFirstExecution: result.providerFirstExecution ?? null,
+          semanticDeferred: result.semanticDeferred ?? false,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

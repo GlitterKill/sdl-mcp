@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pass-1 write batching**: Centralized LadybugDB write chunk sizing, raised safe edge/reference/file defaults to reduce pass-1 prepared statement count, let pass-1 skip redundant existing `DEPENDS_ON` refreshes after source-symbol replacement, and moved full-refresh stale-symbol deletion ahead of pass-1 flushes.
 - **SCIP generated index handling**: Raised decoder file caps to 512 MiB and added generated split-index fallback with SHA-256 dedupe for identical TypeScript/JavaScript split artifacts.
 - **Provider-first safety**: Allowed active SCIP provider-first execution only after coverage validation, so `auto` uses legacy fallback when SCIP execution or coverage is incomplete and explicit `providerFirst` fails loudly instead of replacing the live graph with partial provider data. Derived graph algorithms stay dirty for this phase until syntax-aware SCIP call-edge proof or a pass-2 bridge lands.
+- **Provider-first readiness**: Split semantic readiness from provider-first graph readiness so SCIP provider-first indexing skips inline summary and embedding refresh, reports deferred semantic readiness in CLI output, and leaves semantic derived state dirty for later refresh.
 
 ### Fixed
 
