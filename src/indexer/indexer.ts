@@ -30,6 +30,8 @@ import * as ladybugDb from "../db/ladybug-queries.js";
 import {
   derivedStateIsStale,
   getDerivedState,
+  markDerivedStateDirty,
+  recordDerivedStateError,
 } from "../db/ladybug-derived-state.js";
 import { logger } from "../util/logger.js";
 import { flushIndexEvent } from "../mcp/telemetry.js";
@@ -91,6 +93,7 @@ import {
   resolveProviderFirstExecutionPlan,
   type ProviderFirstExecutionSummary,
 } from "./provider-first/executor.js";
+import { materializeProviderFacts } from "./provider-first/materializer.js";
 import { resolveProviderFirstPipeline } from "./provider-first/planner.js";
 import type { ProviderFirstPipelineSelection } from "./provider-first/types.js";
 export type { IndexProgress, IndexProgressSubstage } from "./indexer-init.js";
@@ -255,6 +258,134 @@ function providerFirstFallbackSummary(
     edgesCreated: 0,
     externalSymbolsIndexed: 0,
   };
+}
+
+function skippedDerivedStateResult(
+  reason: string,
+): {
+  clustersComputed: number;
+  processesTraced: number;
+  algorithmRefresh: AlgorithmRefreshDiagnostics;
+} {
+  return {
+    clustersComputed: 0,
+    processesTraced: 0,
+    algorithmRefresh: {
+      enabled: false,
+      dirty: true,
+      pageRank: { status: "skipped", count: 0, reason },
+      kCore: { status: "skipped", count: 0, reason },
+      louvain: { status: "skipped", count: 0, reason },
+      failures: [reason],
+    },
+  };
+}
+
+function validateProviderFirstFullCoverage(params: {
+  scannedPaths: readonly string[];
+  providerPaths: Iterable<string>;
+  coverage: Iterable<{
+    relPath: string;
+    legacyFallback: string;
+  }>;
+  symbols: Iterable<{
+    relPath: string;
+    providerSymbolId: string;
+  }>;
+}): string[] {
+  const providerPathList = [...params.providerPaths];
+  const providerPaths = new Set(providerPathList);
+  const coverageByPath = new Map(
+    Array.from(params.coverage, (entry) => [entry.relPath, entry]),
+  );
+  const scannedPathSet = new Set(params.scannedPaths);
+  const seenProviderPaths = new Set<string>();
+  const duplicateProviderPaths = new Set<string>();
+  const seenProviderSymbols = new Set<string>();
+  const duplicateProviderSymbols = new Set<string>();
+  const missingPaths: string[] = [];
+  const partialPaths: string[] = [];
+  const extraProviderPaths: string[] = [];
+
+  for (const relPath of providerPathList) {
+    if (seenProviderPaths.has(relPath)) {
+      duplicateProviderPaths.add(relPath);
+    } else {
+      seenProviderPaths.add(relPath);
+    }
+  }
+  for (const symbol of params.symbols) {
+    const key = `${symbol.relPath}\0${symbol.providerSymbolId}`;
+    if (seenProviderSymbols.has(key)) {
+      duplicateProviderSymbols.add(`${symbol.relPath}:${symbol.providerSymbolId}`);
+    } else {
+      seenProviderSymbols.add(key);
+    }
+  }
+
+  for (const relPath of params.scannedPaths) {
+    if (!providerPaths.has(relPath)) {
+      missingPaths.push(relPath);
+      continue;
+    }
+    const coverage = coverageByPath.get(relPath);
+    if (!coverage || coverage.legacyFallback !== "skip") {
+      partialPaths.push(relPath);
+    }
+  }
+  for (const relPath of providerPaths) {
+    if (!scannedPathSet.has(relPath)) {
+      extraProviderPaths.push(relPath);
+    }
+  }
+
+  const reasons: string[] = [];
+  if (missingPaths.length > 0) {
+    const sample = missingPaths.slice(0, 5).join(", ");
+    reasons.push(
+      `SCIP provider did not cover ${missingPaths.length} scanned file(s): ${sample}`,
+    );
+  }
+  if (partialPaths.length > 0) {
+    const sample = partialPaths.slice(0, 5).join(", ");
+    reasons.push(
+      `SCIP provider coverage was partial for ${partialPaths.length} scanned file(s): ${sample}`,
+    );
+  }
+  if (extraProviderPaths.length > 0) {
+    const sample = extraProviderPaths.slice(0, 5).join(", ");
+    reasons.push(
+      `SCIP provider included ${extraProviderPaths.length} file(s) outside the scanned repo scope: ${sample}`,
+    );
+  }
+  if (duplicateProviderPaths.size > 0) {
+    const sample = [...duplicateProviderPaths].slice(0, 5).join(", ");
+    reasons.push(
+      `SCIP provider emitted duplicate document facts for ${duplicateProviderPaths.size} file(s): ${sample}`,
+    );
+  }
+  if (duplicateProviderSymbols.size > 0) {
+    const sample = [...duplicateProviderSymbols].slice(0, 5).join(", ");
+    reasons.push(
+      `SCIP provider emitted duplicate symbols for ${duplicateProviderSymbols.size} file/symbol pair(s): ${sample}`,
+    );
+  }
+  return reasons;
+}
+
+function applyScannedFileMetadataToProviderRows(params: {
+  rows: Awaited<ReturnType<typeof executeProviderFirstScipFull>>["rows"];
+  scannedFiles: readonly { path: string; size: number }[];
+}): void {
+  const scannedByPath = new Map(
+    params.scannedFiles.map((file) => [file.path, file]),
+  );
+  for (const row of params.rows.files) {
+    const scanned = scannedByPath.get(row.relPath);
+    if (scanned) {
+      row.byteSize = scanned.size;
+    }
+  }
 }
 
 async function countSymbolVersionsForVersion(versionId: string): Promise<number> {
@@ -569,11 +700,14 @@ async function indexRepoImpl(
     mode,
     scip: appConfig.scip,
   });
-  const providerFirstExecutionFallback =
+  let providerFirstExecutionFallback =
     providerFirst.selectedPipeline === "providerFirst" &&
     providerFirstExecutionPlan.shouldFallbackToLegacy
       ? providerFirstFallbackSummary(providerFirstExecutionPlan.reasons)
       : undefined;
+  let providerFirstScan:
+    | Awaited<ReturnType<typeof scanRepoForIndex>>
+    | undefined;
   if (providerFirst.selectedPipeline === "providerFirst") {
     if (providerFirstExecutionPlan.canExecute) {
       logger.info("indexRepo: provider-first executor selected", {
@@ -647,6 +781,7 @@ async function indexRepoImpl(
     pass1Engine: NonNullable<IndexResult["pass1Engine"]>;
     scip?: NonNullable<IndexResult["scip"]>;
     preFinalize?: () => Promise<void>;
+    skipDerivedStateReason?: string;
   }): Promise<{
     summaryStats?: SummaryBatchResult;
     clustersComputed: number;
@@ -677,18 +812,28 @@ async function indexRepoImpl(
       }
 
       const freshConn = await getLadybugConn();
-      const derivedResult = await finalizeDerivedState({
-        mode: params.indexMode,
-        conn: freshConn,
-        repoId,
-        versionId: params.versionId,
-        filesTotal: params.filesTotal,
-        phaseTimings,
-        algorithmRefresh: appConfig.indexing?.algorithmRefresh,
-        onProgress,
-        sharedGraph: finalizeResult.sharedGraph,
-        measurePhase,
-      });
+      const derivedResult = params.skipDerivedStateReason
+        ? await measurePhase("skipDerivedState", async () => {
+            await markDerivedStateDirty(repoId, params.versionId, {
+              clusters: true,
+              processes: true,
+              algorithms: true,
+            });
+            await recordDerivedStateError(repoId, params.skipDerivedStateReason ?? "");
+            return skippedDerivedStateResult(params.skipDerivedStateReason ?? "");
+          })
+        : await finalizeDerivedState({
+            mode: params.indexMode,
+            conn: freshConn,
+            repoId,
+            versionId: params.versionId,
+            filesTotal: params.filesTotal,
+            phaseTimings,
+            algorithmRefresh: appConfig.indexing?.algorithmRefresh,
+            onProgress,
+            sharedGraph: finalizeResult.sharedGraph,
+            measurePhase,
+          });
 
       await measurePhase("buildDeferredIndexes", async () => {
         await buildDeferredIndexes();
@@ -737,70 +882,147 @@ async function indexRepoImpl(
     providerFirstExecutionPlan.canExecute &&
     providerFirstExecutionPlan.executor === "scipFull"
   ) {
-    const providerResult = await measurePhase("providerFirstScipFull", () =>
-      executeProviderFirstScipFull({
-        repoId,
-        repoRoot: repoRow.rootPath,
-        config: appConfig,
-        generatedIndexes: scipPreRefresh?.generatedIndexes,
-        generatorFailures: scipPreRefresh?.failures,
-        onProgress,
-        signal,
-      }),
-    );
-    const versionId = await createOrReuseVersion(
-      "Provider-first SCIP index",
-      true,
-    );
-    const pass1Engine = emptyPass1EngineTelemetry();
-    const scip = {
-      generatedIndexes: providerResult.generatedIndexes,
-      failures: providerResult.failures,
-    };
-    const post = await runPostIndexFinalization({
-      versionId,
-      indexMode: "full",
-      filesTotal: providerResult.summary.filesProcessed,
-      filesScanned: providerResult.summary.filesProcessed,
-      symbolsExtracted: providerResult.summary.symbolsIndexed,
-      edgesExtracted: providerResult.summary.edgesCreated,
-      changedFileIdsForFinalize: providerResult.rows.changedFileIds,
-      changedTestFilePathsForFinalize: new Set(),
-      changedFileIdsForMemory: providerResult.rows.changedFileIds,
-      hasIndexMutations: true,
-      callResolutionTelemetry: createCallResolutionTelemetry({
-        repoId,
-        mode: "full",
-        pass2EligibleFileCount: 0,
-        registeredResolvers: [],
-      }),
-      pass1Engine,
-      scip,
-    });
+    let providerResult:
+      | Awaited<ReturnType<typeof executeProviderFirstScipFull>>
+      | undefined;
+    try {
+      providerResult = await measurePhase("providerFirstScipFull", () =>
+        executeProviderFirstScipFull({
+          repoId,
+          repoRoot: repoRow.rootPath,
+          config: appConfig,
+          generatedIndexes: scipPreRefresh?.generatedIndexes,
+          generatorFailures: scipPreRefresh?.failures,
+          onProgress,
+          signal,
+        }),
+      );
+    } catch (err) {
+      const reason =
+        err instanceof Error
+          ? err.message
+          : `provider-first SCIP execution failed: ${String(err)}`;
+      if (providerFirst.requestedMode === "auto") {
+        logger.warn("indexRepo: provider-first execution failed, using legacy fallback", {
+          repoId,
+          reason,
+        });
+        providerFirstExecutionFallback = providerFirstFallbackSummary([reason]);
+      } else {
+        throw err;
+      }
+    }
 
-    return {
-      versionId,
-      filesProcessed: providerResult.summary.filesProcessed,
-      changedFiles: providerResult.rows.changedFileIds.size,
-      removedFiles: 0,
-      symbolsIndexed: providerResult.summary.symbolsIndexed,
-      edgesCreated: providerResult.summary.edgesCreated,
-      clustersComputed: post.clustersComputed,
-      processesTraced: post.processesTraced,
-      durationMs: Date.now() - startTime,
-      summaryStats: post.summaryStats,
-      timings: phaseTimings
-        ? {
-            totalMs: Date.now() - startTime,
-            phases: phaseTimings,
-          }
-        : undefined,
-      pass1Engine,
-      scip,
-      providerFirst,
-      providerFirstExecution: providerResult.summary,
-      algorithmRefresh: post.algorithmRefresh,
-    };
+    if (providerResult) {
+      const providerScan = await measurePhase("providerFirstCoverageScan", () =>
+        scanRepoForIndex({
+          repoId,
+          repoRoot: repoRow.rootPath,
+          config,
+          onProgress,
+          deleteRemovedFiles: false,
+        }),
+      );
+      providerFirstScan = providerScan;
+      const coverageReasons = validateProviderFirstFullCoverage({
+        scannedPaths: providerScan.files.map((file) => file.path),
+        providerPaths: providerResult.rows.files.map((file) => file.relPath),
+        coverage: providerResult.facts.coverage,
+        symbols: providerResult.facts.symbols,
+      });
+      if (coverageReasons.length > 0) {
+        if (providerFirst.requestedMode === "auto") {
+          logger.warn("indexRepo: provider-first coverage incomplete, using legacy fallback", {
+            repoId,
+            reasons: coverageReasons,
+          });
+          providerFirstExecutionFallback =
+            providerFirstFallbackSummary(coverageReasons);
+          providerFirstScan = undefined;
+        } else {
+          throw new Error(
+            `Provider-first indexing cannot execute for ${repoId}: ${coverageReasons.join("; ")}`,
+          );
+        }
+      } else {
+        applyScannedFileMetadataToProviderRows({
+          rows: providerResult.rows,
+          scannedFiles: providerScan.files,
+        });
+        await measurePhase("providerFirstMaterialize", () =>
+          withPostIndexWriteSession(
+            async (session) => {
+              await materializeProviderFacts(session.conn, providerResult.rows, {
+                replaceFileSymbols: true,
+              });
+              if (providerScan.removedFileIds.length > 0) {
+                await ladybugDb.deleteFilesByIds(
+                  session.conn,
+                  providerScan.removedFileIds,
+                );
+              }
+            },
+            { timeoutMs: postIndexSessionTimeoutMs },
+          ),
+        );
+
+        const versionId = await createOrReuseVersion(
+          "Provider-first SCIP index",
+          true,
+        );
+        const pass1Engine = emptyPass1EngineTelemetry();
+        const scip = {
+          generatedIndexes: providerResult.generatedIndexes,
+          failures: providerResult.failures,
+        };
+        const post = await runPostIndexFinalization({
+          versionId,
+          indexMode: "full",
+          filesTotal: providerResult.summary.filesProcessed,
+          filesScanned: providerResult.summary.filesProcessed,
+          symbolsExtracted: providerResult.summary.symbolsIndexed,
+          edgesExtracted: providerResult.summary.edgesCreated,
+          changedFileIdsForFinalize: undefined,
+          changedTestFilePathsForFinalize: new Set(),
+          changedFileIdsForMemory: providerResult.rows.changedFileIds,
+          hasIndexMutations: true,
+          callResolutionTelemetry: createCallResolutionTelemetry({
+            repoId,
+            mode: "full",
+            pass2EligibleFileCount: 0,
+            registeredResolvers: [],
+          }),
+          pass1Engine,
+          scip,
+          skipDerivedStateReason:
+            "provider-first SCIP call-edge proof is pending; derived graph algorithms remain dirty",
+        });
+
+        return {
+          versionId,
+          filesProcessed: providerResult.summary.filesProcessed,
+          changedFiles: providerResult.rows.changedFileIds.size,
+          removedFiles: providerScan.removedFiles,
+          symbolsIndexed: providerResult.summary.symbolsIndexed,
+          edgesCreated: providerResult.summary.edgesCreated,
+          clustersComputed: post.clustersComputed,
+          processesTraced: post.processesTraced,
+          durationMs: Date.now() - startTime,
+          summaryStats: post.summaryStats,
+          timings: phaseTimings
+            ? {
+                totalMs: Date.now() - startTime,
+                phases: phaseTimings,
+              }
+            : undefined,
+          pass1Engine,
+          scip,
+          providerFirst,
+          providerFirstExecution: providerResult.summary,
+          algorithmRefresh: post.algorithmRefresh,
+        };
+      }
+    }
   }
 
   const {
@@ -809,14 +1031,16 @@ async function indexRepoImpl(
     removedFiles,
     removedFileIds,
     allFilesUnchanged: scanAllFilesUnchanged,
-  } = await measurePhase("scanRepo", () =>
-    scanRepoForIndex({
-      repoId,
-      repoRoot: repoRow.rootPath,
-      config,
-      onProgress,
-    }),
-  );
+  } =
+    providerFirstScan ??
+    (await measurePhase("scanRepo", () =>
+      scanRepoForIndex({
+        repoId,
+        repoRoot: repoRow.rootPath,
+        config,
+        onProgress,
+      }),
+    ));
   logger.debug("scanRepoForIndex complete", {
     repoId,
     fileCount: files.length,

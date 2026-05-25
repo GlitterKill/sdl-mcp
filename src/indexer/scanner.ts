@@ -19,8 +19,15 @@ export async function scanRepoForIndex(params: {
   repoRoot: string;
   config: RepoConfig;
   onProgress?: (progress: IndexProgress) => void;
+  deleteRemovedFiles?: boolean;
 }): Promise<ScanRepoForIndexResult> {
-  const { repoId, repoRoot, config, onProgress } = params;
+  const {
+    repoId,
+    repoRoot,
+    config,
+    onProgress,
+    deleteRemovedFiles = true,
+  } = params;
 
   onProgress?.({ stage: "scanning", current: 0, total: 0 });
   const files = await scanRepository(repoRoot, config);
@@ -45,7 +52,7 @@ export async function scanRepoForIndex(params: {
     }
   }
 
-  if (removedFileIds.length > 0) {
+  if (deleteRemovedFiles && removedFileIds.length > 0) {
     await withWriteConn(async (wConn) => {
       await ladybugDb.deleteFilesByIds(wConn, removedFileIds);
     });

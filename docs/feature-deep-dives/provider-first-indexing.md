@@ -7,8 +7,8 @@ Provider-first indexing is the new indexing direction for large repositories. It
 `indexing.pipeline` controls selection:
 
 - `"legacy"`: always use the current indexer.
-- `"providerFirst"`: require an executable provider-first run. Until shadow LadybugDB activation and partial-coverage fallback land, SCIP full execution is gated and this mode fails with a clear error instead of silently running legacy.
-- `"auto"`: use provider-first when an executable provider path is available; otherwise use legacy. In the current guarded phase, configured SCIP/LSP provider sources are reported and `auto` falls back to legacy.
+- `"providerFirst"`: require an executable provider-first run. Full SCIP execution can materialize the active graph when the SCIP index covers every scanned file with full provider coverage. Incomplete SCIP coverage, LSP-only providers, or incremental mode fail with a clear error instead of silently running legacy.
+- `"auto"`: use provider-first when an executable provider path is available and coverage is complete; otherwise use legacy. SCIP execution or coverage failures are reported as provider-first fallback reasons.
 
 Provider priority is fixed as:
 
@@ -47,7 +47,9 @@ The target full-build path is:
 
 Embeddings, LLM summaries, and semantic enrichment are not part of the first ready gate. They advance a separate semantic readiness state.
 
-Current guarded phase: exported staging helpers can collect SCIP documents and external symbols, normalize them into provider facts, and convert those facts into LadybugDB graph rows for the upcoming shadow loader. The public `indexRepo` refresh path does not execute provider-first collection yet: `auto` reports the planned provider source and falls back to legacy, while explicit `providerFirst` fails loudly until shadow `.lbug` activation and targeted legacy fallback for partial coverage are implemented. This avoids replacing the live graph with incomplete provider coverage or failing after a live graph mutation. Provider run, coverage, diagnostic, and occurrence facts are collected in memory by the helper path but are not yet persisted as first-class provider metadata rows.
+Current executable phase: full SCIP provider-first runs collect SCIP documents and external symbols, normalize them into provider facts, validate coverage against the scanned repository file set, and materialize provider-owned files/symbols/edges through the existing LadybugDB single-writer APIs. Existing symbols for provider-covered files are removed before the provider rows are written so stale legacy symbols do not survive beside SCIP-owned symbols. `auto` falls back to legacy when SCIP execution fails or coverage is incomplete; explicit `providerFirst` fails in those cases. Provider run, coverage, diagnostic, and occurrence facts are still collected in memory and are not yet persisted as first-class provider metadata rows.
+
+Because broad SCIP references are not promoted into exact `call` edges without syntax-aware call proof, provider-first SCIP execution currently leaves cluster/process/algorithm derived state dirty after graph materialization. Metrics, file summaries, FTS, memory sync, and index events still run; graph-plus-algorithms readiness remains pending until the call-edge proof or pass-2 provider bridge lands.
 
 ## Incremental Builds
 
@@ -63,8 +65,8 @@ Implemented:
 - Durable LSP cache keys.
 - SCIP document normalization into provider facts.
 - Runtime provider-source planning exposed on `IndexResult.providerFirst`.
-- Full-refresh SCIP provider fact staging and LadybugDB row materialization helpers.
+- Full-refresh SCIP provider execution for fully covered repositories, with active graph materialization through existing LadybugDB write APIs and derived algorithm gating until call-edge proof lands.
 - Conservative SCIP occurrence edge materialization: imports and implementations can become edges, while broad references are retained as occurrences until a syntax-aware call pass proves invocation semantics.
-- Explicit provider-first failure when executable provider activation is not safe.
+- Explicit provider-first failure when SCIP execution, coverage, LSP execution, or incremental provider execution is not safe.
 
-Still pending: capped LSP execution, incremental provider generations, Parquet/CSV staging artifacts, shadow `.lbug` bulk loading, Windows activation handoff, and targeted legacy fallback for partial provider coverage.
+Still pending: syntax-aware SCIP call-edge proof or pass-2 provider bridging, capped LSP execution, incremental provider generations, Parquet/CSV staging artifacts, shadow `.lbug` bulk loading, Windows activation handoff, and targeted same-run legacy fallback for partial provider coverage.

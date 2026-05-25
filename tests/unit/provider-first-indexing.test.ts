@@ -419,7 +419,7 @@ describe("provider-first indexing foundation", () => {
     assert.deepEqual(facts.edges, []);
   });
 
-  it("gates full SCIP provider-first execution until shadow activation is implemented", () => {
+  it("plans full SCIP provider-first execution when SCIP is configured", () => {
     const selection = resolveProviderFirstPipeline({
       indexing: IndexingConfigSchema.parse({ pipeline: "providerFirst" }),
       scip: ScipConfigSchema.parse({
@@ -437,10 +437,10 @@ describe("provider-first indexing foundation", () => {
       }),
     });
 
-    assert.equal(plan.canExecute, false);
-    assert.equal(plan.executor, undefined);
+    assert.equal(plan.canExecute, true);
+    assert.equal(plan.executor, "scipFull");
     assert.equal(plan.shouldFallbackToLegacy, false);
-    assert.match(plan.reasons.join(" "), /shadow.*activation/i);
+    assert.deepEqual(plan.reasons, []);
   });
 
   it("does not silently fall back for explicit providerFirst when execution is unsupported", () => {
@@ -497,7 +497,7 @@ describe("provider-first indexing foundation", () => {
     assert.match(plan.reasons.join(" "), /full refreshes/i);
   });
 
-  it("allows auto mode to fall back while shadow activation execution is gated", () => {
+  it("plans auto mode SCIP execution when a full SCIP source is configured", () => {
     const selection = resolveProviderFirstPipeline({
       indexing: IndexingConfigSchema.parse({ pipeline: "auto" }),
       scip: ScipConfigSchema.parse({
@@ -515,9 +515,10 @@ describe("provider-first indexing foundation", () => {
       }),
     });
 
-    assert.equal(plan.canExecute, false);
-    assert.equal(plan.shouldFallbackToLegacy, true);
-    assert.match(plan.reasons.join(" "), /shadow.*activation/i);
+    assert.equal(plan.canExecute, true);
+    assert.equal(plan.executor, "scipFull");
+    assert.equal(plan.shouldFallbackToLegacy, false);
+    assert.deepEqual(plan.reasons, []);
   });
 
   it("materializes provider facts into LadybugDB graph rows", () => {
@@ -641,6 +642,48 @@ describe("provider-first indexing foundation", () => {
 
     assert.equal(countStatements(statements, "BEGIN TRANSACTION"), 1);
     assert.equal(countStatements(statements, "COMMIT"), 1);
+  });
+
+  it("uses full-replacement edge options when replacing provider file symbols", async () => {
+    const statements: string[] = [];
+    const rows = providerFactsToGraphRows({
+      indexedAt: "2026-05-25T12:00:00.000Z",
+      facts: providerFactSet({
+        symbols: [],
+        externalSymbols: [],
+        edges: [
+          {
+            kind: "edge",
+            repoId: "repo",
+            generationId: "gen-1",
+            providerType: "scip",
+            providerId: "scip",
+            emittedAt: "2026-05-25T12:00:00.000Z",
+            sourceSymbolId: "symbol-1",
+            targetSymbolId: "symbol-2",
+            edgeType: "import",
+            resolution: "exact",
+            confidence: 0.95,
+            dedupeKey: "symbol-1:symbol-2:import:scip",
+          },
+        ],
+      }),
+    });
+
+    await materializeProviderFacts(createFakeConnection(statements), rows, {
+      replaceFileSymbols: true,
+    });
+
+    assert.equal(
+      countStatements(statements, "SET s.repoId = $repoId"),
+      0,
+      "source SYMBOL_IN_REPO rel refresh should be skipped after symbol replacement",
+    );
+    assert.equal(
+      countStatements(statements, "WHERE d.confidence < row.confidence"),
+      0,
+      "existing relationship update should be skipped after symbol replacement",
+    );
   });
 });
 

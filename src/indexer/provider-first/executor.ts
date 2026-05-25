@@ -49,9 +49,6 @@ export interface ProviderFirstScipExecutionResult {
   summary: ProviderFirstExecutionSummary;
 }
 
-const SHADOW_ACTIVATION_PENDING_REASON =
-  "provider-first SCIP full execution is gated until shadow LadybugDB activation and partial-coverage fallback are implemented";
-
 interface ExecuteProviderFirstScipFullParams {
   repoId: string;
   repoRoot: string;
@@ -98,10 +95,12 @@ export function resolveProviderFirstExecutionPlan(params: {
   }
 
   if (hasScipSource && scipExecutionConfigured(scip)) {
-    return unsupportedPlan({
-      fallbackAllowed,
-      reason: SHADOW_ACTIVATION_PENDING_REASON,
-    });
+    return {
+      canExecute: true,
+      shouldFallbackToLegacy: false,
+      executor: "scipFull",
+      reasons: [],
+    };
   }
 
   if (hasLspSource && !hasScipSource) {
@@ -123,9 +122,9 @@ export async function executeProviderFirstScipFull(
   params: ExecuteProviderFirstScipFullParams,
 ): Promise<ProviderFirstScipExecutionResult> {
   const generationId = `provider-first:${Date.now()}`;
-  // This phase is intentionally SCIP-only and non-destructive: collect facts
-  // and validate graph rows, but do not mutate the active DB until the shadow
-  // loader can hand off atomically.
+  // This phase is intentionally SCIP-only: collect provider facts and validate
+  // graph rows before the indexer decides whether coverage is complete enough
+  // to materialize or must fall back to the legacy parser.
   const collected = await collectScipProviderFacts({
     ...params,
     generationId,
@@ -148,7 +147,7 @@ export async function executeProviderFirstScipFull(
     stage: "finalizing",
     current: 0,
     total: 0,
-    message: "provider facts staged; shadow activation pending",
+    message: "provider facts staged for materialization",
   });
 
   return {
@@ -158,10 +157,10 @@ export async function executeProviderFirstScipFull(
     generatedIndexes: collected.generatedIndexes,
     failures: collected.failures,
     summary: {
-      status: "unsupported",
+      status: "executed",
       executor: "scipFull",
       generationId,
-      reasons: [SHADOW_ACTIVATION_PENDING_REASON],
+      reasons: [],
       filesProcessed: rows.files.length,
       symbolsIndexed: rows.symbols.length + rows.externalSymbols.length,
       edgesCreated: rows.edges.length,

@@ -50,6 +50,15 @@ export interface ProviderFactsToGraphRowsOptions {
   indexedAt?: string;
 }
 
+export interface MaterializeProviderFactsOptions {
+  /**
+   * Full provider-first refreshes replace the symbol graph for provider-owned
+   * files before writing new rows. This keeps stale tree-sitter symbols from
+   * surviving beside compiler-owned SCIP symbols.
+   */
+  replaceFileSymbols?: boolean;
+}
+
 export function providerFactsToGraphRows(
   options: ProviderFactsToGraphRowsOptions,
 ): ProviderFirstGraphRows {
@@ -81,12 +90,16 @@ export function providerFactsToGraphRows(
 export async function materializeProviderFacts(
   conn: Connection,
   rows: ProviderFirstGraphRows,
+  options: MaterializeProviderFactsOptions = {},
 ): Promise<void> {
   // Keep provider-first materialization on the established graph row APIs so
   // LadybugDB batching, relationship workarounds, and placeholder repair stay
   // identical to the legacy writer until the COPY-based shadow loader lands.
   const repoId = resolveRowsRepoId(rows);
   await ladybugDb.withTransaction(conn, async (txConn) => {
+    if (options.replaceFileSymbols) {
+      await deleteProviderFileSymbolsInChunks(txConn, [...rows.changedFileIds]);
+    }
     await ladybugDb.upsertFileBatch(txConn, rows.files);
     await ladybugDb.upsertSymbolBatch(txConn, rows.symbols);
     await ladybugDb.pruneStaleScipExternalSymbols(
@@ -101,8 +114,24 @@ export async function materializeProviderFacts(
         rows.externalSymbols,
       );
     }
-    await ladybugDb.insertEdges(txConn, rows.edges);
+    await ladybugDb.insertEdges(txConn, rows.edges, {
+      skipSourceRepoLink: options.replaceFileSymbols,
+      skipExistingRelationshipUpdate: options.replaceFileSymbols,
+    });
   });
+}
+
+async function deleteProviderFileSymbolsInChunks(
+  conn: Connection,
+  fileIds: string[],
+): Promise<void> {
+  const chunkSize = ladybugDb.resolveLadybugWriteChunkSize("files");
+  for (let i = 0; i < fileIds.length; i += chunkSize) {
+    await ladybugDb.deleteSymbolsByFileIds(
+      conn,
+      fileIds.slice(i, i + chunkSize),
+    );
+  }
 }
 
 function fileFactToRow(
