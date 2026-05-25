@@ -157,7 +157,7 @@ Returns the current indexing state and health metrics for a registered repositor
 | `watcherNote`      | string         | Guidance when watcher is inactive                                                                                                                                                                           |
 | `prefetchStats`    | object         | Predictive prefetch metrics: `enabled`, `queueDepth`, `running`, `completed`, `cancelled`, `cacheHits`, `cacheMisses`, `wastedPrefetch`, `hitRate`, `wasteRate`, `avgLatencyReductionMs`, `lastRunAt`       |
 | `liveIndexStatus`  | object         | Live editor buffer state: `enabled`, `pendingBuffers`, `dirtyBuffers`, `parseQueueDepth`, `checkpointPending`, `lastBufferEventAt`, `lastCheckpointAt`, `lastCheckpointResult`, `reconcileQueueDepth`, etc. |
-| `derivedState`     | object         | Derived-state freshness flags plus `nextBestAction` when cluster/process/summary/embedding state is stale. Current index refreshes recompute this inline; startup recovery may handle stale rows left by older interrupted runs. |
+| `derivedState`     | object         | Derived-state freshness flags plus `nextBestAction` when cluster/process/summary/embedding state is stale. Startup recovery handles stale graph-derived rows for clusters, processes, and algorithms; semantic summary/embedding flags remain separate readiness work. |
 | `memories`         | array \| null  | Relevant development memories auto-surfaced for this repo (when `surfaceMemories` is true)                                                                                                                  |
 
 **Typical use:** Call this first in any session to understand the state of the index before doing deeper queries.

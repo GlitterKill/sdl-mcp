@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pass-1 write batching**: Centralized LadybugDB write chunk sizing, raised safe edge/reference/file defaults to reduce pass-1 prepared statement count, let pass-1 skip redundant existing `DEPENDS_ON` refreshes after source-symbol replacement, and moved full-refresh stale-symbol deletion ahead of pass-1 flushes.
 - **SCIP generated index handling**: Raised decoder file caps to 512 MiB and added generated split-index fallback with SHA-256 dedupe for identical TypeScript/JavaScript split artifacts.
 - **Provider-first safety**: Allowed active SCIP provider-first execution only after coverage validation, so `auto` uses legacy fallback when SCIP execution or coverage is incomplete and explicit `providerFirst` fails loudly instead of replacing the live graph with partial provider data. Derived graph algorithms stay dirty for this phase until syntax-aware SCIP call-edge proof or a pass-2 bridge lands.
-- **Provider-first readiness**: Split semantic readiness from provider-first graph readiness so SCIP provider-first indexing skips inline summary and embedding refresh, reports deferred semantic readiness in CLI output, and leaves semantic derived state dirty for later refresh.
+- **Provider-first readiness**: Split semantic readiness from provider-first graph readiness so SCIP provider-first indexing skips inline semantic refresh, reports deferred semantic readiness in CLI output, and leaves semantic derived state dirty for later refresh.
 
 ### Fixed
 
@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Incremental metrics recovery**: No-op incremental refreshes now inspect the current graph for incomplete version snapshots, missing metrics/file summaries, stale or absent derived state, and configured SCIP indexes before returning. Missing `Metrics` rows are repaired through a dedicated LadybugDB aggregate/write path instead of hydrating the full edge graph, while SCIP edge changes still use the full recomputation path for correctness.
 - **Algorithm refresh timeouts**: Canonical cluster/process refresh now completes independently of optional graph algorithms; PageRank/K-core run in a killable worker, centrality writes are preserved before Louvain, and large call graphs skip Louvain by policy instead of timing out the post-index session.
 - **Provider-first graph facts**: Kept SCIP provider symbol IDs stable across line movement, stopped promoting broad SCIP reference occurrences to exact call edges, pruned stale SCIP external symbols during full provider materialization, and batched external-symbol writes to avoid thousands of single-writer round trips.
+- **Derived-state readiness**: Stopped graph-derived startup recovery from clearing semantic summary/embedding dirty flags, and skipped semantic-only stale rows instead of enqueueing a graph refresh that cannot clear them.
 
 ## [0.11.4] - 2026-05-21
 

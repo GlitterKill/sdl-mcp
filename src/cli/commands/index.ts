@@ -210,7 +210,7 @@ export function formatSemanticReadinessLines(
   semanticDeferred: boolean | null | undefined,
 ): string[] {
   return semanticDeferred
-    ? ["  Semantic readiness: deferred summaries/embeddings"]
+    ? ["  Semantic readiness: deferred"]
     : [];
 }
 

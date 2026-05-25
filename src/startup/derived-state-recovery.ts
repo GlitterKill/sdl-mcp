@@ -30,10 +30,20 @@ function dirtyFlags(summary: DerivedStateSummary): string[] {
   ].filter((flag): flag is string => Boolean(flag));
 }
 
+function graphDirtyFlags(summary: DerivedStateSummary): string[] {
+  return [
+    summary.clustersDirty && "clusters",
+    summary.processesDirty && "processes",
+    summary.algorithmsDirty && "algorithms",
+  ].filter((flag): flag is string => Boolean(flag));
+}
+
 /**
  * Recover derived refreshes that were intentionally deferred by one-shot CLI
- * indexing. The dirty marker is persisted in LadybugDB, but the queue itself
- * is process-local, so server startup must re-enqueue stale targets.
+ * indexing. The dirty marker is persisted in LadybugDB, but the graph-derived
+ * queue itself is process-local, so server startup must re-enqueue stale graph
+ * targets. Semantic-only dirty state is reported but not enqueued here because
+ * this queue does not refresh summaries or embeddings.
  */
 export async function recoverStaleDerivedStateOnStartup(
   config: Pick<AppConfig, "repos">,
@@ -73,6 +83,20 @@ export async function recoverStaleDerivedStateOnStartup(
       }
 
       const flags = dirtyFlags(summary);
+      const graphFlags = graphDirtyFlags(summary);
+      if (graphFlags.length === 0) {
+        result.skipped += 1;
+        const message = `Semantic readiness remains deferred for ${repo.repoId} (dirty=${flags.join(", ") || "unknown"})`;
+        log(message);
+        logInfo("derived-state startup recovery skipped semantic-only state", {
+          repoId: repo.repoId,
+          dirtyFlags: flags,
+          computedVersionId: summary.computedVersionId,
+          targetVersionId: summary.targetVersionId,
+        });
+        continue;
+      }
+
       enqueue(repo.repoId, summary.targetVersionId);
       result.queued += 1;
 

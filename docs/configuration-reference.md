@@ -226,7 +226,7 @@ If you set `budgetCaps`, provide both `maxCards` and `maxEstimatedTokens`.
 | -------------------- | ------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pipeline`           | `"legacy" \| "providerFirst" \| "auto"` | `"auto"` | `auto` selects an executable provider-first path when available, otherwise legacy remains the fallback. Full SCIP provider-first runs materialize provider-primary files and route uncovered or provider-unusable files to same-run legacy fallback. Explicit `providerFirst` allows the same full-run coverage fallback and temporarily uses legacy incremental refreshes, but unsafe provider facts still fail instead of silently falling back. `legacy` forces the existing indexer. |
 | `providerFirst.activation` | `"shadowDb"` | `"shadowDb"` | Target activation model for full provider-first builds. Full SCIP provider-first execution currently materializes through the existing active LadybugDB writer after coverage validation; bulk shadow `.lbug` loading and lock-aware activation handoff remain pending. |
-| `providerFirst.readyState` | `"graphPlusAlgorithms"` | `"graphPlusAlgorithms"` | The target first ready state requires graph data plus derived algorithms. Current SCIP provider-first materialization keeps derived algorithms dirty until syntax-aware call-edge proof or a pass-2 provider bridge lands. Semantic summaries and embeddings are now deferred during provider-first indexing and tracked as separate semantic readiness work. |
+| `providerFirst.readyState` | `"graphPlusAlgorithms"` | `"graphPlusAlgorithms"` | The target first ready state requires graph data plus derived algorithms. Current SCIP provider-first materialization keeps derived algorithms dirty until syntax-aware call-edge proof or a pass-2 provider bridge lands. Semantic refresh is now deferred during provider-first indexing and tracked as separate semantic readiness work. |
 | `providerFirst.stagingFormat` | `"parquet" \| "csv"` | `"parquet"` | Preferred staging format for bulk shadow loads. CSV is the fallback when Parquet is unavailable. |
 | `providerFirst.lsp.mode` | `"primaryWithCaps"` | `"primaryWithCaps"` | LSP is treated as a primary source only through bounded workspace/document symbol, reference, definition, and diagnostic collection. |
 | `providerFirst.lsp.workspaceSymbolLimit` | `number` | `5000` | `0-100000`. Maximum workspace symbols collected from one LSP server. |
@@ -651,7 +651,7 @@ Generated SCIP files are decoded up to 512 MiB each. When the generated merged `
 | `SDL_CONSOLE_LOGGING`            | Mirror logs to stderr                                     |
 | `SDL_LOG_FORMAT`                 | `json` or `text`                                          |
 | `SDL_MCP_DISABLE_NATIVE_ADDON`   | Force TypeScript indexing engine                          |
-| `SDL_DERIVED_REFRESH_TIMEOUT_MS` | Timeout for background startup recovery of stale derived-state rows. Default: `120000` |
+| `SDL_DERIVED_REFRESH_TIMEOUT_MS` | Timeout for background startup recovery of stale graph-derived rows. Default: `120000` |
 | `ANTHROPIC_API_KEY`              | Hosted semantic-summary provider credential               |
 
 `SDL_DERIVED_REFRESH_TIMEOUT_MS` accepts a positive integer number of

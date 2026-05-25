@@ -83,15 +83,14 @@ stale symbol deletion, file upsert, symbol reference insert, symbol upsert, and
 Start by checking the server log named by `sdl-mcp info`. The two timeout
 families have different effects and different controls.
 
-- `derived-refresh timed out after ...` means background startup recovery for a
-  stale persisted `derivedState` row exceeded `SDL_DERIVED_REFRESH_TIMEOUT_MS`
-  (default `120000`). Current index refreshes compute derived state inline
-  before returning, but older interrupted runs can still leave stale rows that
-  startup recovery tries to repair. The worker aborts the refresh signal,
-  records `derivedState.lastError`, leaves derived state stale until a later
-  successful refresh, and logs when timed-out work settles. The startup log
-  includes a `Derived-state recovery: ...` summary so operators can tell whether
-  recovery ran.
+- `derived-refresh timed out after ...` means background startup recovery for
+  stale graph-derived state exceeded `SDL_DERIVED_REFRESH_TIMEOUT_MS` (default
+  `120000`). The queue owns cluster, process, and algorithm refreshes only;
+  semantic summaries and embeddings stay as separate readiness work. The worker
+  aborts the refresh signal, records `derivedState.lastError`, leaves graph
+  derived state stale until a later successful refresh, and logs when timed-out
+  work settles. The startup log includes a `Derived-state recovery: ...` summary
+  so operators can tell whether recovery ran.
 - `Tool dispatch queue timed out after ...` means a foreground MCP tool request
   waited longer than `concurrency.toolQueueTimeoutMs` (default `30000`) for a
   dispatch slot before its handler started. The failed tool response is
@@ -112,12 +111,13 @@ sdl-mcp tool repo.status --repo-id <repo-id>
 ```
 
 Check `derivedState.stale`, the dirty flags, `derivedState.lastError`, and
-`derivedState.nextBestAction`. For stale state from an interrupted run, the
-normal recovery is `sdl.index.refresh` with `mode: "incremental"`; use a full
-refresh if stale flags remain. Increase `SDL_DERIVED_REFRESH_TIMEOUT_MS` only
-when startup recovery is legitimately long-running. If it repeatedly times out
-at the same phase, treat that as an indexing or LadybugDB contention issue
-first.
+`derivedState.nextBestAction`. For stale graph-derived state from an interrupted
+run, the normal recovery is `sdl.index.refresh` with `mode: "incremental"`; use
+a full refresh if stale graph flags remain. Semantic-only dirty flags are not
+enqueued into startup recovery and remain deferred until semantic refresh work
+clears them. Increase `SDL_DERIVED_REFRESH_TIMEOUT_MS` only when startup
+recovery is legitimately long-running. If it repeatedly times out at the same
+phase, treat that as an indexing or LadybugDB contention issue first.
 
 For tool dispatch stalls, inspect the warning fields in the log. When
 `indexingActive` is `true`, SDL-MCP intentionally narrows foreground tool

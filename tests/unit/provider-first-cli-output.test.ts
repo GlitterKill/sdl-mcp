@@ -37,7 +37,7 @@ describe("provider-first CLI output", () => {
 
   it("surfaces deferred semantic readiness separately from index readiness", () => {
     assert.deepEqual(formatSemanticReadinessLines(true), [
-      "  Semantic readiness: deferred summaries/embeddings",
+      "  Semantic readiness: deferred",
     ]);
     assert.deepEqual(formatSemanticReadinessLines(false), []);
   });

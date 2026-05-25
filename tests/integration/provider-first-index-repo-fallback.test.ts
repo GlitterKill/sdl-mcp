@@ -269,6 +269,31 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(derivedState?.embeddingsDirty, true);
   });
 
+  it("marks deferred summaries dirty only when summaries are configured", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+      semanticProvider: "mock",
+      generateSummaries: true,
+    });
+
+    const result = await indexRepo(repoId, "full");
+
+    assert.equal(result.semanticDeferred, true);
+    const conn = await getLadybugConn();
+    const derivedState = await ladybugDb.querySingle<{
+      summariesDirty: boolean;
+      embeddingsDirty: boolean;
+    }>(
+      conn,
+      `MATCH (d:DerivedState {repoId: $repoId})
+       RETURN d.summariesDirty AS summariesDirty,
+              d.embeddingsDirty AS embeddingsDirty`,
+      { repoId },
+    );
+    assert.equal(derivedState?.summariesDirty, true);
+    assert.equal(derivedState?.embeddingsDirty, true);
+  });
+
   it("uses legacy fallback for explicit providerFirst incremental refreshes", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
@@ -715,6 +740,7 @@ describe("provider-first indexRepo fallback", () => {
       includeMissingScipIndex?: boolean;
       seedRemovedFile?: boolean;
       semanticProvider?: "api" | "local" | "mock";
+      generateSummaries?: boolean;
     } = {},
   ): Promise<string> {
     graphDbPath = mkdtempSync(join(tmpdir(), "sdl-provider-first-index-db-"));
@@ -769,7 +795,7 @@ describe("provider-first indexRepo fallback", () => {
             ...(options.semanticProvider
               ? { provider: options.semanticProvider }
               : {}),
-            generateSummaries: false,
+            generateSummaries: options.generateSummaries ?? false,
           },
           scip: {
             enabled: true,

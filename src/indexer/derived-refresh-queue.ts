@@ -1,8 +1,10 @@
 /**
- * Background refresh queue for derived-state (clusters, processes, algorithms,
- * semantic summaries, embeddings). Incremental index runs mark derived state
- * dirty and enqueue here; long-lived processes (serve/watch) drain the queue
- * without blocking the critical path.
+ * Background refresh queue for graph-derived state (clusters, processes, and
+ * algorithms). Incremental index runs mark derived state dirty and enqueue here;
+ * long-lived processes (serve/watch) drain the queue without blocking the
+ * critical path. Semantic summaries and embeddings are tracked on the same
+ * DerivedState row, but they are cleared only by semantic work that actually
+ * refreshes those payloads.
  *
  * See devdocs/plans/2026-04-17-post-pass2-performance-and-feedback-plan.md §5.
  */
@@ -203,7 +205,11 @@ async function markDerivedRefreshComputed(
   algorithmRefresh?: AlgorithmRefreshDiagnostics | void,
 ): Promise<void> {
   if (!algorithmRefresh) {
-    await markDerivedStateComputed(repoId, targetVersionId);
+    await markDerivedStateComputed(repoId, targetVersionId, {
+      clusters: true,
+      processes: true,
+      algorithms: true,
+    });
     return;
   }
   await markDerivedStateComputed(
@@ -213,8 +219,6 @@ async function markDerivedRefreshComputed(
       clusters: true,
       processes: true,
       algorithms: !algorithmRefresh.dirty,
-      summaries: true,
-      embeddings: true,
     },
     { clearError: !algorithmRefresh.dirty },
   );
@@ -556,8 +560,8 @@ async function defaultRefreshImpl(params: {
   });
   return result.algorithmRefresh;
   // Semantic summaries + embeddings are currently regenerated lazily via
-  // index.refresh and the queries that depend on them; leave them to the next
-  // full index for now. Dirty flags stay cleared by the caller on success.
+  // index.refresh and the queries that depend on them. This queue must not
+  // clear their dirty flags because it did not refresh those payloads.
 }
 
 /**

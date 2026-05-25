@@ -1,20 +1,48 @@
 import { afterEach, describe, it } from "node:test";
 import assert from "node:assert";
+import {
+  existsSync,
+  mkdtempSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
+  enableDerivedRefreshQueue,
+  enqueueDerivedRefresh,
+  shutdownDerivedRefreshQueue,
   withRepoWriteHeavyLock,
   waitForDerivedRefreshIdle,
+  _setDerivedRefreshHooksForTesting,
   _seedRunningForTesting,
   _getDerivedRefreshQueueStateForTesting,
   _getDerivedRefreshTimeoutMsForTesting,
   _runWithDerivedRefreshTimeoutForTesting,
 } from "../../dist/indexer/derived-refresh-queue.js";
+import {
+  closeLadybugDb,
+  initLadybugDb,
+} from "../../dist/db/ladybug.js";
+import {
+  getDerivedState,
+  markDerivedStateDirty,
+} from "../../dist/db/ladybug-derived-state.js";
 
 const REPO = "derived-refresh-queue-test";
 const ORIGINAL_DERIVED_REFRESH_TIMEOUT =
   process.env.SDL_DERIVED_REFRESH_TIMEOUT_MS;
+let graphDbPath = "";
 
-afterEach(() => {
+afterEach(async () => {
+  await shutdownDerivedRefreshQueue();
+  _setDerivedRefreshHooksForTesting(null);
+  enableDerivedRefreshQueue();
+  await closeLadybugDb();
+  if (graphDbPath && existsSync(graphDbPath)) {
+    rmSync(graphDbPath, { recursive: true, force: true });
+  }
+  graphDbPath = "";
   if (ORIGINAL_DERIVED_REFRESH_TIMEOUT === undefined) {
     delete process.env.SDL_DERIVED_REFRESH_TIMEOUT_MS;
   } else {
@@ -227,6 +255,43 @@ describe("derived refresh timeout", () => {
       }
     }
     assert.fail("timed-out write-heavy lock marker did not clear");
+  });
+});
+
+describe("derived refresh computed flags", () => {
+  it("preserves semantic dirty flags after graph-only derived refresh", async () => {
+    graphDbPath = mkdtempSync(join(tmpdir(), "sdl-derived-refresh-flags-"));
+    await initLadybugDb(graphDbPath);
+    const repoId = "repo-semantic-dirty";
+    const versionId = "v-semantic-dirty";
+    await markDerivedStateDirty(repoId, versionId, {
+      clusters: true,
+      processes: true,
+      algorithms: true,
+      summaries: true,
+      embeddings: true,
+    });
+    _setDerivedRefreshHooksForTesting({
+      refresh: async () => ({
+        enabled: true,
+        dirty: false,
+        pageRank: { status: "computed", count: 1 },
+        kCore: { status: "computed", count: 1 },
+        louvain: { status: "skipped", count: 0, reason: "test" },
+        failures: [],
+      }),
+    });
+
+    enqueueDerivedRefresh(repoId, versionId);
+    await waitForDerivedRefreshIdle(repoId, 5_000, 10);
+
+    const state = await getDerivedState(repoId);
+    assert.ok(state, "derived state row should remain present");
+    assert.strictEqual(state.clustersDirty, false);
+    assert.strictEqual(state.processesDirty, false);
+    assert.strictEqual(state.algorithmsDirty, false);
+    assert.strictEqual(state.summariesDirty, true);
+    assert.strictEqual(state.embeddingsDirty, true);
   });
 });
 

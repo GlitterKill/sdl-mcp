@@ -69,4 +69,44 @@ describe("recoverStaleDerivedStateOnStartup", () => {
       /Derived-state recovery: checked 3 repo\(s\), queued 1 stale repo\(s\), skipped 2, failed 0\./,
     );
   });
+
+  it("does not enqueue semantic-only stale state for graph refresh", async () => {
+    const enqueued: Array<{ repoId: string; targetVersionId: string }> = [];
+    const logs: string[] = [];
+
+    const result = await recoverStaleDerivedStateOnStartup(
+      {
+        repos: [{ repoId: "repo-semantic-only" }],
+      },
+      (message) => logs.push(message),
+      {
+        getDerivedStateSummary: async () => ({
+          stale: true,
+          clustersDirty: false,
+          processesDirty: false,
+          algorithmsDirty: false,
+          summariesDirty: false,
+          embeddingsDirty: true,
+          targetVersionId: "v3",
+          computedVersionId: "v3",
+          updatedAt: "2026-05-25T22:00:00.000Z",
+        }),
+        enqueueDerivedRefresh: (repoId, targetVersionId) => {
+          enqueued.push({ repoId, targetVersionId });
+        },
+      },
+    );
+
+    assert.deepEqual(enqueued, []);
+    assert.deepEqual(result, {
+      checked: 1,
+      queued: 0,
+      skipped: 1,
+      failed: 0,
+    });
+    assert.match(
+      logs.join("\n"),
+      /Semantic readiness remains deferred for repo-semantic-only/,
+    );
+  });
 });
