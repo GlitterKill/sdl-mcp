@@ -17,17 +17,18 @@ describe("provider-first CLI output", () => {
       coverage: {
         scannedFiles: 1213,
         providerFiles: 543,
+        providerPrimaryFiles: 521,
         fullyCoveredFiles: 0,
         partialFiles: 521,
         fullFallbackFiles: 22,
         uncoveredFiles: 670,
-        fallbackFiles: 1213,
+        fallbackFiles: 692,
       },
     });
 
     assert.deepEqual(lines, [
       "  Provider-first: scipFull (provider-first:test)",
-      "  Provider-first coverage: 0/1213 files fully covered; 543 provider fallback, 670 uncovered; legacy fallback parsed 1213 file(s)",
+      "  Provider-first coverage: 521/1213 files provider-primary (0 full, 521 partial); 22 provider unusable, 670 uncovered; legacy fallback parsed 692 file(s)",
     ]);
   });
 });

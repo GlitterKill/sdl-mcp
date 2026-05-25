@@ -29,6 +29,7 @@ export type ProviderFirstFallbackReasonCode =
 export interface ProviderFirstCoverageSummary {
   scannedFiles: number;
   providerFiles: number;
+  providerPrimaryFiles: number;
   fullyCoveredFiles: number;
   partialFiles: number;
   fullFallbackFiles: number;

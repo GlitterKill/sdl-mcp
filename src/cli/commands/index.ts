@@ -181,18 +181,20 @@ export function formatProviderFirstExecutionSummaryLines(
   ];
   const coverage = execution.coverage;
   if (coverage) {
-    const providerFallbackFiles =
-      coverage.partialFiles + coverage.fullFallbackFiles;
+    const providerPrimaryFiles =
+      coverage.providerPrimaryFiles ??
+      coverage.fullyCoveredFiles + coverage.partialFiles;
     const middle: string[] = [];
-    if (providerFallbackFiles > 0) {
-      middle.push(`${providerFallbackFiles} provider fallback`);
+    if (coverage.fullFallbackFiles > 0) {
+      middle.push(`${coverage.fullFallbackFiles} provider unusable`);
     }
     if (coverage.uncoveredFiles > 0) {
       middle.push(`${coverage.uncoveredFiles} uncovered`);
     }
 
     let line =
-      `  Provider-first coverage: ${coverage.fullyCoveredFiles}/${coverage.scannedFiles} files fully covered`;
+      `  Provider-first coverage: ${providerPrimaryFiles}/${coverage.scannedFiles} files provider-primary ` +
+      `(${coverage.fullyCoveredFiles} full, ${coverage.partialFiles} partial)`;
     if (middle.length > 0) {
       line += `; ${middle.join(", ")}`;
     }

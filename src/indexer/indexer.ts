@@ -337,6 +337,7 @@ function analyzeProviderFirstCoverage(params: {
   const duplicateProviderSymbols = new Set<string>();
   const missingPaths: string[] = [];
   const partialPaths: string[] = [];
+  const fullFallbackPaths: string[] = [];
   const extraProviderPaths: string[] = [];
   const fallbackPaths = new Set<string>();
   let fullyCoveredFiles = 0;
@@ -368,15 +369,16 @@ function analyzeProviderFirstCoverage(params: {
     const coverage = coverageByPath.get(relPath);
     if (coverage?.legacyFallback === "skip") {
       fullyCoveredFiles++;
-    } else {
-      partialPaths.push(relPath);
-      fallbackPaths.add(relPath);
-      if (coverage?.legacyFallback === "targeted") {
-        partialFiles++;
-      } else {
-        fullFallbackFiles++;
-      }
+      continue;
     }
+    if (coverage?.legacyFallback === "targeted") {
+      partialPaths.push(relPath);
+      partialFiles++;
+      continue;
+    }
+    fullFallbackPaths.push(relPath);
+    fallbackPaths.add(relPath);
+    fullFallbackFiles++;
   }
   for (const relPath of providerPaths) {
     if (!scannedPathSet.has(relPath)) {
@@ -395,7 +397,13 @@ function analyzeProviderFirstCoverage(params: {
   if (partialPaths.length > 0) {
     const sample = partialPaths.slice(0, 5).join(", ");
     reasons.push(
-      `SCIP provider coverage was partial for ${partialPaths.length} scanned file(s): ${sample}`,
+      `SCIP provider references were partial for ${partialPaths.length} scanned file(s): ${sample}`,
+    );
+  }
+  if (fullFallbackPaths.length > 0) {
+    const sample = fullFallbackPaths.slice(0, 5).join(", ");
+    reasons.push(
+      `SCIP provider coverage was unusable for ${fullFallbackPaths.length} scanned file(s): ${sample}`,
     );
   }
   if (extraProviderPaths.length > 0) {
@@ -426,6 +434,7 @@ function analyzeProviderFirstCoverage(params: {
     summary: {
       scannedFiles: params.scannedPaths.length,
       providerFiles: providerPaths.size,
+      providerPrimaryFiles: fullyCoveredFiles + partialFiles,
       fullyCoveredFiles,
       partialFiles,
       fullFallbackFiles,
@@ -1150,7 +1159,7 @@ async function indexRepoImpl(
           const executionReasons = [...coverageReport.reasons];
           if (coverageReport.fallbackPaths.size > 0) {
             executionReasons.push(
-              `legacy fallback indexed ${coverageReport.fallbackPaths.size} uncovered or partial file(s) after provider-first materialization`,
+              `legacy fallback indexed ${coverageReport.fallbackPaths.size} uncovered or provider-unusable file(s) after provider-first materialization`,
             );
           }
           providerFirstExecutedSummary = {

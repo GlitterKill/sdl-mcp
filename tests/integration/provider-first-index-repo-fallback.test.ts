@@ -258,7 +258,7 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(result.providerFirstExecution?.status, "executed");
     assert.match(
       result.providerFirstExecution?.reasons.join(" ") ?? "",
-      /legacy fallback indexed 1 uncovered or partial file/i,
+      /legacy fallback indexed 1 uncovered or provider-unusable file/i,
     );
     assert.equal(result.filesProcessed, 2);
     assert.ok(result.symbolsIndexed > 0);
@@ -284,7 +284,7 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(result.providerFirstExecution?.status, "executed");
     assert.match(
       result.providerFirstExecution?.reasons.join(" ") ?? "",
-      /legacy fallback indexed 1 uncovered or partial file/i,
+      /legacy fallback indexed 1 uncovered or provider-unusable file/i,
     );
     assert.equal(result.filesProcessed, 2);
 
@@ -320,7 +320,7 @@ describe("provider-first indexRepo fallback", () => {
     );
   });
 
-  it("uses legacy fallback for partial provider coverage until targeted fallback exists", async () => {
+  it("materializes SCIP rows for partial reference coverage without legacy reparsing", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
       partialProviderReference: true,
@@ -332,24 +332,26 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(result.providerFirstExecution?.status, "executed");
     assert.match(
       result.providerFirstExecution?.reasons.join(" ") ?? "",
-      /coverage was partial/i,
+      /references were partial/i,
     );
-    assert.match(
+    assert.doesNotMatch(
       result.providerFirstExecution?.reasons.join(" ") ?? "",
-      /legacy fallback indexed 1 uncovered or partial file/i,
+      /legacy fallback indexed/i,
     );
-    assert.equal(result.providerFirstExecution?.filesProcessed, 0);
-    assert.equal(result.providerFirstExecution?.symbolsIndexed, 0);
-    assert.equal(result.providerFirstExecution?.edgesCreated, 0);
-    assert.equal(result.providerFirstExecution?.externalSymbolsIndexed, 0);
+    assert.equal(result.filesProcessed, 1);
+    assert.equal(result.providerFirstExecution?.filesProcessed, 1);
+    assert.equal(result.providerFirstExecution?.symbolsIndexed, 3);
+    assert.equal(result.providerFirstExecution?.edgesCreated, 1);
+    assert.equal(result.providerFirstExecution?.externalSymbolsIndexed, 1);
     assert.deepEqual(result.providerFirstExecution?.coverage, {
       scannedFiles: 1,
       providerFiles: 1,
+      providerPrimaryFiles: 1,
       fullyCoveredFiles: 0,
       partialFiles: 1,
       fullFallbackFiles: 0,
       uncoveredFiles: 0,
-      fallbackFiles: 1,
+      fallbackFiles: 0,
     });
 
     const conn = await getLadybugConn();
@@ -366,7 +368,7 @@ describe("provider-first indexRepo fallback", () => {
     );
     assert.equal(mainSymbols.length, 1);
     assert.equal(ladybugDb.toNumber(mainSymbols[0]?.count), 1);
-    assert.notEqual(mainSymbols[0]?.source, "scip");
+    assert.equal(mainSymbols[0]?.source, "scip");
 
     const scipInternalCount = await ladybugDb.querySingle<{ count: unknown }>(
       conn,
@@ -375,10 +377,10 @@ describe("provider-first indexRepo fallback", () => {
        RETURN count(s) AS count`,
       { repoId },
     );
-    assert.equal(ladybugDb.toNumber(scipInternalCount?.count), 0);
+    assert.equal(ladybugDb.toNumber(scipInternalCount?.count), 2);
   });
 
-  it("prunes stale SCIP externals when all provider rows are filtered to legacy fallback", async () => {
+  it("prunes stale SCIP externals when provider rows are unusable and filtered to legacy fallback", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
     });
@@ -412,68 +414,17 @@ describe("provider-first indexRepo fallback", () => {
                 number,
                 number,
               ],
-              symbol:
-                "scip-typescript npm fixture 1.0.0 src/index.ts/main().",
-              symbolRoles: 1,
-            },
-            {
-              range: [1, 9, 15] as [number, number, number],
-              symbol:
-                "scip-typescript npm fixture 1.0.0 src/index.ts/helper().",
-              symbolRoles: 8,
-            },
-            {
-              range: [1, 2, 8] as [number, number, number],
-              symbol:
-                "scip-typescript npm missing 1.0.0 missing/index.ts/missing().",
-              symbolRoles: 8,
-            },
-            {
-              range: [2, 9, 12] as [number, number, number],
-              symbol: "scip-typescript npm dep 1.0.0 dep/index.ts/api().",
-              symbolRoles: 8,
-            },
-            {
-              range: [4, 16, 22] as [number, number, number],
-              enclosingRange: [4, 0, 6, 1] as [
-                number,
-                number,
-                number,
-                number,
-              ],
-              symbol:
-                "scip-typescript npm fixture 1.0.0 src/index.ts/helper().",
+              symbol: "local 1",
               symbolRoles: 1,
             },
           ],
           symbols: [
             {
-              symbol:
-                "scip-typescript npm fixture 1.0.0 src/index.ts/main().",
+              symbol: "local 1",
               kind: 12,
               displayName: "main",
-              relationships: [
-                {
-                  symbol:
-                    "scip-typescript npm dep 1.0.0 dep/index.ts/api().",
-                  isDefinition: true,
-                },
-              ],
-            },
-            {
-              symbol:
-                "scip-typescript npm fixture 1.0.0 src/index.ts/helper().",
-              kind: 12,
-              displayName: "helper",
             },
           ],
-        },
-      ],
-      externalSymbols: [
-        {
-          symbol: "scip-typescript npm dep 1.0.0 dep/index.ts/api().",
-          kind: 12,
-          displayName: "api",
         },
       ],
     });
@@ -483,7 +434,7 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(result.providerFirstExecution?.status, "executed");
     assert.match(
       result.providerFirstExecution?.reasons.join(" ") ?? "",
-      /legacy fallback indexed 1 uncovered or partial file/i,
+      /legacy fallback indexed 1 uncovered or provider-unusable file/i,
     );
 
     const conn = await getLadybugConn();
