@@ -260,6 +260,23 @@ function providerFirstFallbackSummary(
   };
 }
 
+function providerFirstFailureReasons(
+  failures: readonly ScipFailureDiagnostic[],
+): string[] {
+  return failures.map((failure) =>
+    failure.path
+      ? `${failure.message} (${failure.path})`
+      : failure.message,
+  );
+}
+
+function invalidateIndexResultCaches(repoId: string): void {
+  invalidateGraphSnapshot(repoId);
+  clearOverviewCache();
+  clearSliceCache();
+  clearFingerprintCollisionLog();
+}
+
 function skippedDerivedStateResult(
   reason: string,
 ): {
@@ -914,113 +931,133 @@ async function indexRepoImpl(
     }
 
     if (providerResult) {
-      const providerScan = await measurePhase("providerFirstCoverageScan", () =>
-        scanRepoForIndex({
-          repoId,
-          repoRoot: repoRow.rootPath,
-          config,
-          onProgress,
-          deleteRemovedFiles: false,
-        }),
+      const executionFailureReasons = providerFirstFailureReasons(
+        providerResult.failures,
       );
-      providerFirstScan = providerScan;
-      const coverageReasons = validateProviderFirstFullCoverage({
-        scannedPaths: providerScan.files.map((file) => file.path),
-        providerPaths: providerResult.rows.files.map((file) => file.relPath),
-        coverage: providerResult.facts.coverage,
-        symbols: providerResult.facts.symbols,
-      });
-      if (coverageReasons.length > 0) {
+      if (executionFailureReasons.length > 0) {
         if (providerFirst.requestedMode === "auto") {
-          logger.warn("indexRepo: provider-first coverage incomplete, using legacy fallback", {
+          logger.warn("indexRepo: provider-first execution had failures, using legacy fallback", {
             repoId,
-            reasons: coverageReasons,
+            reasons: executionFailureReasons,
           });
           providerFirstExecutionFallback =
-            providerFirstFallbackSummary(coverageReasons);
-          providerFirstScan = undefined;
+            providerFirstFallbackSummary(executionFailureReasons);
         } else {
           throw new Error(
-            `Provider-first indexing cannot execute for ${repoId}: ${coverageReasons.join("; ")}`,
+            `Provider-first indexing cannot execute for ${repoId}: ${executionFailureReasons.join("; ")}`,
           );
         }
       } else {
-        applyScannedFileMetadataToProviderRows({
-          rows: providerResult.rows,
-          scannedFiles: providerScan.files,
-        });
-        await measurePhase("providerFirstMaterialize", () =>
-          withPostIndexWriteSession(
-            async (session) => {
-              await materializeProviderFacts(session.conn, providerResult.rows, {
-                replaceFileSymbols: true,
-              });
-              if (providerScan.removedFileIds.length > 0) {
-                await ladybugDb.deleteFilesByIds(
-                  session.conn,
-                  providerScan.removedFileIds,
-                );
-              }
-            },
-            { timeoutMs: postIndexSessionTimeoutMs },
-          ),
-        );
-
-        const versionId = await createOrReuseVersion(
-          "Provider-first SCIP index",
-          true,
-        );
-        const pass1Engine = emptyPass1EngineTelemetry();
-        const scip = {
-          generatedIndexes: providerResult.generatedIndexes,
-          failures: providerResult.failures,
-        };
-        const post = await runPostIndexFinalization({
-          versionId,
-          indexMode: "full",
-          filesTotal: providerResult.summary.filesProcessed,
-          filesScanned: providerResult.summary.filesProcessed,
-          symbolsExtracted: providerResult.summary.symbolsIndexed,
-          edgesExtracted: providerResult.summary.edgesCreated,
-          changedFileIdsForFinalize: undefined,
-          changedTestFilePathsForFinalize: new Set(),
-          changedFileIdsForMemory: providerResult.rows.changedFileIds,
-          hasIndexMutations: true,
-          callResolutionTelemetry: createCallResolutionTelemetry({
+        const providerScan = await measurePhase("providerFirstCoverageScan", () =>
+          scanRepoForIndex({
             repoId,
-            mode: "full",
-            pass2EligibleFileCount: 0,
-            registeredResolvers: [],
+            repoRoot: repoRow.rootPath,
+            config,
+            onProgress,
+            deleteRemovedFiles: false,
           }),
-          pass1Engine,
-          scip,
-          skipDerivedStateReason:
-            "provider-first SCIP call-edge proof is pending; derived graph algorithms remain dirty",
+        );
+        providerFirstScan = providerScan;
+        const coverageReasons = validateProviderFirstFullCoverage({
+          scannedPaths: providerScan.files.map((file) => file.path),
+          providerPaths: providerResult.rows.files.map((file) => file.relPath),
+          coverage: providerResult.facts.coverage,
+          symbols: providerResult.facts.symbols,
         });
+        if (coverageReasons.length > 0) {
+          if (providerFirst.requestedMode === "auto") {
+            logger.warn("indexRepo: provider-first coverage incomplete, using legacy fallback", {
+              repoId,
+              reasons: coverageReasons,
+            });
+            providerFirstExecutionFallback =
+              providerFirstFallbackSummary(coverageReasons);
+            providerFirstScan = undefined;
+          } else {
+            throw new Error(
+              `Provider-first indexing cannot execute for ${repoId}: ${coverageReasons.join("; ")}`,
+            );
+          }
+        } else {
+          applyScannedFileMetadataToProviderRows({
+            rows: providerResult.rows,
+            scannedFiles: providerScan.files,
+          });
+          await measurePhase("providerFirstMaterialize", () =>
+            withPostIndexWriteSession(
+              async (session) => {
+                await materializeProviderFacts(session.conn, providerResult.rows, {
+                  replaceFileSymbols: true,
+                });
+                if (providerScan.removedFileIds.length > 0) {
+                  await ladybugDb.deleteFilesByIds(
+                    session.conn,
+                    providerScan.removedFileIds,
+                  );
+                }
+              },
+              { timeoutMs: postIndexSessionTimeoutMs },
+            ),
+          );
 
-        return {
-          versionId,
-          filesProcessed: providerResult.summary.filesProcessed,
-          changedFiles: providerResult.rows.changedFileIds.size,
-          removedFiles: providerScan.removedFiles,
-          symbolsIndexed: providerResult.summary.symbolsIndexed,
-          edgesCreated: providerResult.summary.edgesCreated,
-          clustersComputed: post.clustersComputed,
-          processesTraced: post.processesTraced,
-          durationMs: Date.now() - startTime,
-          summaryStats: post.summaryStats,
-          timings: phaseTimings
-            ? {
-                totalMs: Date.now() - startTime,
-                phases: phaseTimings,
-              }
-            : undefined,
-          pass1Engine,
-          scip,
-          providerFirst,
-          providerFirstExecution: providerResult.summary,
-          algorithmRefresh: post.algorithmRefresh,
-        };
+          const versionId = await createOrReuseVersion(
+            "Provider-first SCIP index",
+            true,
+          );
+          const pass1Engine = emptyPass1EngineTelemetry();
+          const scip = {
+            generatedIndexes: providerResult.generatedIndexes,
+            failures: providerResult.failures,
+          };
+          const post = await runPostIndexFinalization({
+            versionId,
+            indexMode: "full",
+            filesTotal: providerResult.summary.filesProcessed,
+            filesScanned: providerResult.summary.filesProcessed,
+            symbolsExtracted: providerResult.summary.symbolsIndexed,
+            edgesExtracted: providerResult.summary.edgesCreated,
+            changedFileIdsForFinalize: undefined,
+            changedTestFilePathsForFinalize: new Set(),
+            changedFileIdsForMemory: providerResult.rows.changedFileIds,
+            hasIndexMutations: true,
+            callResolutionTelemetry: createCallResolutionTelemetry({
+              repoId,
+              mode: "full",
+              pass2EligibleFileCount: 0,
+              registeredResolvers: [],
+            }),
+            pass1Engine,
+            scip,
+            skipDerivedStateReason:
+              "provider-first SCIP call-edge proof is pending; derived graph algorithms remain dirty",
+          });
+
+          const result: IndexResult = {
+            versionId,
+            filesProcessed: providerResult.summary.filesProcessed,
+            changedFiles: providerResult.rows.changedFileIds.size,
+            removedFiles: providerScan.removedFiles,
+            symbolsIndexed: providerResult.summary.symbolsIndexed,
+            edgesCreated: providerResult.summary.edgesCreated,
+            clustersComputed: post.clustersComputed,
+            processesTraced: post.processesTraced,
+            durationMs: Date.now() - startTime,
+            summaryStats: post.summaryStats,
+            timings: phaseTimings
+              ? {
+                  totalMs: Date.now() - startTime,
+                  phases: phaseTimings,
+                }
+              : undefined,
+            pass1Engine,
+            scip,
+            providerFirst,
+            providerFirstExecution: providerResult.summary,
+            algorithmRefresh: post.algorithmRefresh,
+          };
+          invalidateIndexResultCaches(repoId);
+          return result;
+        }
       }
     }
   }
@@ -1221,10 +1258,7 @@ async function indexRepoImpl(
         algorithmRefresh,
       };
 
-      invalidateGraphSnapshot(repoId);
-      clearOverviewCache();
-      clearSliceCache();
-      clearFingerprintCollisionLog();
+      invalidateIndexResultCaches(repoId);
 
       // Phase 1 Task 1.12 — emit `index.refresh.complete` audit event with
       // zero-valued Pass-1 engine telemetry (Pass 1 never ran in this
@@ -1872,10 +1906,7 @@ async function indexRepoImpl(
       algorithmRefresh,
     };
 
-    invalidateGraphSnapshot(repoId);
-    clearOverviewCache();
-    clearSliceCache();
-    clearFingerprintCollisionLog();
+    invalidateIndexResultCaches(repoId);
 
     return result;
   } finally {

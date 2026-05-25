@@ -18,6 +18,15 @@ import {
   withWriteConn,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import {
+  getGraphSnapshotStats,
+  setGraphSnapshot,
+} from "../../dist/graph/graphSnapshotCache.js";
+import {
+  getSliceCacheKey,
+  getSliceCacheStats,
+  setCachedSlice,
+} from "../../dist/graph/sliceCache.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
 import { generateFileId } from "../../dist/util/hashing.js";
 import { writeTestScipIndex } from "../fixtures/scip/builder.ts";
@@ -69,6 +78,19 @@ describe("provider-first indexRepo fallback", () => {
       scipFixture: "complete",
       seedStaleSymbol: true,
     });
+    setGraphSnapshot(repoId, {
+      symbols: new Map(),
+      edges: [],
+      clusters: new Map(),
+    });
+    setCachedSlice(
+      getSliceCacheKey({
+        repoId,
+        versionId: "stale-version",
+        taskText: "provider-first stale cache",
+      }),
+      {},
+    );
 
     const result = await indexRepo(repoId, "full");
 
@@ -76,6 +98,11 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(result.providerFirstExecution?.status, "executed");
     assert.equal(result.filesProcessed, 1);
     assert.ok(result.symbolsIndexed >= 3);
+    assert.equal(
+      getGraphSnapshotStats().entries.some((entry) => entry.repoId === repoId),
+      false,
+    );
+    assert.equal(getSliceCacheStats().currentSize, 0);
 
     const conn = await getLadybugConn();
     const symbols = await ladybugDb.queryAll<{
@@ -240,6 +267,45 @@ describe("provider-first indexRepo fallback", () => {
     );
   });
 
+  it("uses legacy fallback in auto mode when SCIP reports non-fatal failures", async () => {
+    const repoId = await initIndexedRepo("auto", {
+      scipFixture: "complete",
+      includeMissingScipIndex: true,
+    });
+
+    const result = await indexRepo(repoId, "full");
+
+    assert.equal(result.providerFirst?.selectedPipeline, "providerFirst");
+    assert.equal(result.providerFirstExecution?.status, "fallback");
+    assert.match(
+      result.providerFirstExecution?.reasons.join(" ") ?? "",
+      /SCIP index file not found/i,
+    );
+    assert.ok(result.symbolsIndexed > 0);
+  });
+
+  it("fails explicit providerFirst before writing when SCIP reports non-fatal failures", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+      includeMissingScipIndex: true,
+    });
+
+    await assert.rejects(
+      () => indexRepo(repoId, "full"),
+      /SCIP index file not found/i,
+    );
+
+    const conn = await getLadybugConn();
+    const symbolCount = await ladybugDb.querySingle<{ count: unknown }>(
+      conn,
+      `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+       WHERE s.source = 'scip'
+       RETURN count(s) AS count`,
+      { repoId },
+    );
+    assert.equal(ladybugDb.toNumber(symbolCount?.count), 0);
+  });
+
   it("leaves old graph rows untouched when explicit providerFirst rejects coverage", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
@@ -271,7 +337,6 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(ladybugDb.toNumber(removedSymbol?.count), 1);
   });
 
-
   it("fails explicit providerFirst before writing duplicate SCIP documents", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
@@ -294,6 +359,28 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(ladybugDb.toNumber(symbolCount?.count), 0);
   });
 
+  it("fails explicit providerFirst before writing duplicate SCIP symbols", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+      duplicateProviderSymbol: true,
+    });
+
+    await assert.rejects(
+      () => indexRepo(repoId, "full"),
+      /duplicate symbols/i,
+    );
+
+    const conn = await getLadybugConn();
+    const symbolCount = await ladybugDb.querySingle<{ count: unknown }>(
+      conn,
+      `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+       WHERE s.source = 'scip'
+       RETURN count(s) AS count`,
+      { repoId },
+    );
+    assert.equal(ladybugDb.toNumber(symbolCount?.count), 0);
+  });
+
   async function initIndexedRepo(
     pipeline: "auto" | "providerFirst",
     options: {
@@ -301,6 +388,8 @@ describe("provider-first indexRepo fallback", () => {
       seedStaleSymbol?: boolean;
       extraScannedFile?: boolean;
       duplicateProviderDoc?: boolean;
+      duplicateProviderSymbol?: boolean;
+      includeMissingScipIndex?: boolean;
       seedRemovedFile?: boolean;
     } = {},
   ): Promise<string> {
@@ -354,6 +443,9 @@ describe("provider-first indexRepo fallback", () => {
                     ? "index.scip"
                     : "missing.scip",
               },
+              ...(options.includeMissingScipIndex
+                ? [{ path: "missing-extra.scip" }]
+                : []),
             ],
             generator: {
               enabled: false,
@@ -562,6 +654,16 @@ describe("provider-first indexRepo fallback", () => {
               },
             ],
           },
+          ...(options.duplicateProviderSymbol
+            ? [
+                {
+                  symbol:
+                    "scip-typescript npm fixture 1.0.0 src/index.ts/main().",
+                  kind: 12,
+                  displayName: "main",
+                },
+              ]
+            : []),
           {
             symbol:
               "scip-typescript npm fixture 1.0.0 src/index.ts/helper().",

@@ -90,7 +90,6 @@ export function normalizeScipProviderFacts(
     providerRuns: [],
   };
 
-  const seenSymbolIds = new Set<string>();
   for (const document of options.documents) {
     const relPath = normalizePath(document.relativePath);
     facts.files.push(fileFact(context, document, relPath));
@@ -99,8 +98,6 @@ export function normalizeScipProviderFacts(
       const symbolFact = symbolInfoToFact(context, info, relPath, document);
       if (!symbolFact) continue;
       context.symbolIdsByProviderId.set(info.symbol, symbolFact.symbolId);
-      if (seenSymbolIds.has(symbolFact.symbolId)) continue;
-      seenSymbolIds.add(symbolFact.symbolId);
       facts.symbols.push(symbolFact);
     }
   }
