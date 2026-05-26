@@ -1,6 +1,7 @@
-import { access } from "node:fs/promises";
+import { access, readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 
+import { MAX_FILE_BYTES } from "../../config/constants.js";
 import type { AppConfig, ScipConfig } from "../../config/types.js";
 import { createScipDecoder } from "../../scip/decoder-factory.js";
 import type {
@@ -19,6 +20,8 @@ import type {
   ProviderFactSet,
   ProviderFirstPipelineSelection,
 } from "./types.js";
+
+const SOURCE_TEXT_READ_CONCURRENCY = 32;
 
 export type ProviderFirstExecutorKind = "scipFull";
 export type ProviderFirstFallbackReasonCode =
@@ -279,11 +282,17 @@ async function collectScipProviderFacts(params: {
     });
     const facts = await decodeScipIndexToFacts({
       repoId: params.repoId,
+      repoRoot: params.repoRoot,
       generationId: params.generationId,
       indexPath,
       relIndexPath,
       entryLabel: entry.label,
       scip,
+      sourceTextMaxBytes: resolveSourceTextMaxBytes(
+        params.repoId,
+        params.repoRoot,
+        params.config,
+      ),
       onProgress: params.onProgress,
       signal: params.signal,
     });
@@ -299,11 +308,13 @@ async function collectScipProviderFacts(params: {
 
 async function decodeScipIndexToFacts(params: {
   repoId: string;
+  repoRoot: string;
   generationId: string;
   indexPath: string;
   relIndexPath: string;
   entryLabel?: string;
   scip: ScipConfig;
+  sourceTextMaxBytes: number;
   onProgress?: ExecuteProviderFirstScipFullParams["onProgress"];
   signal?: AbortSignal;
 }): Promise<ProviderFactSet> {
@@ -336,6 +347,11 @@ async function decodeScipIndexToFacts(params: {
     }
 
     const externalSymbols = await loadExternalSymbols(decoder, params.scip);
+    const sourceTextByPath = await loadDocumentSourceTexts(
+      params.repoRoot,
+      documents,
+      params.sourceTextMaxBytes,
+    );
     logger.info("provider-first SCIP facts decoded", {
       repoId: params.repoId,
       providerId,
@@ -351,6 +367,7 @@ async function decodeScipIndexToFacts(params: {
       providerVersion: metadata.toolVersion,
       documents,
       externalSymbols,
+      sourceTextByPath,
       sourceIndexPath: params.relIndexPath,
       confidence: params.scip.confidence,
     });
@@ -457,6 +474,89 @@ function appendProviderFactSet(
   appendMany(target.diagnostics, source.diagnostics);
   appendMany(target.coverage, source.coverage);
   appendMany(target.providerRuns, source.providerRuns);
+}
+
+async function loadDocumentSourceTexts(
+  repoRoot: string,
+  documents: readonly ScipDocument[],
+  maxBytes: number,
+): Promise<ReadonlyMap<string, string>> {
+  const sourceTextByPath = new Map<string, string>();
+  const seenRelPaths = new Set<string>();
+  const sourcePaths: Array<{ relPath: string; sourcePath: string }> = [];
+  const normalizedRoot = normalizePath(repoRoot);
+  for (const document of documents) {
+    const relPath = normalizePath(document.relativePath);
+    if (seenRelPaths.has(relPath)) continue;
+    seenRelPaths.add(relPath);
+
+    const sourcePath = resolveDocumentPath(repoRoot, relPath);
+    if (!sourcePath) continue;
+    sourcePaths.push({ relPath, sourcePath });
+  }
+
+  let nextIndex = 0;
+  const workerCount = Math.min(SOURCE_TEXT_READ_CONCURRENCY, sourcePaths.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < sourcePaths.length) {
+        const entry = sourcePaths[nextIndex];
+        nextIndex++;
+        if (!entry) continue;
+
+        try {
+          const realSourcePath = normalizePath(await realpath(entry.sourcePath));
+          if (!isPathInsideRoot(normalizedRoot, realSourcePath)) continue;
+          const sourceStats = await stat(realSourcePath);
+          if (sourceStats.size > maxBytes) continue;
+          sourceTextByPath.set(
+            entry.relPath,
+            await readFile(realSourcePath, "utf8"),
+          );
+        } catch {
+          // Missing or unreadable source leaves the occurrence as a neutral
+          // fact. Coverage validation later decides whether the file can still
+          // be provider-primary or must fall back to legacy parsing.
+        }
+      }
+    }),
+  );
+  return sourceTextByPath;
+}
+
+function resolveSourceTextMaxBytes(
+  repoId: string,
+  repoRoot: string,
+  config: AppConfig,
+): number {
+  const normalizedRoot = normalizePath(repoRoot).toLowerCase();
+  const repoConfig = config.repos.find((repo) => {
+    return (
+      repo.repoId === repoId ||
+      normalizePath(repo.rootPath).toLowerCase() === normalizedRoot
+    );
+  });
+  return repoConfig?.maxFileBytes ?? MAX_FILE_BYTES;
+}
+
+function resolveDocumentPath(repoRoot: string, relPath: string): string | null {
+  const normalizedRoot = normalizePath(repoRoot);
+  const absolutePath = normalizePath(
+    resolve(normalizedRoot, normalizePath(relPath)),
+  );
+  if (isPathInsideRoot(normalizedRoot, absolutePath)) {
+    return absolutePath;
+  }
+  return null;
+}
+
+function isPathInsideRoot(normalizedRoot: string, candidatePath: string): boolean {
+  const comparisonRoot = normalizedRoot.toLowerCase();
+  const comparisonPath = normalizePath(candidatePath).toLowerCase();
+  return (
+    comparisonPath === comparisonRoot ||
+    comparisonPath.startsWith(`${comparisonRoot}/`)
+  );
 }
 
 function appendMany<T>(target: T[], source: readonly T[]): void {

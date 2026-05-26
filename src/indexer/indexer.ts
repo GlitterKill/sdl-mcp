@@ -1248,8 +1248,6 @@ async function indexRepoImpl(
               pass1Engine,
               scip,
               deferSemanticRefresh: true,
-              skipDerivedStateReason:
-                "provider-first SCIP call-edge proof is pending; derived graph algorithms remain dirty",
             });
 
             const result: IndexResult = {

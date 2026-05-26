@@ -31,7 +31,7 @@ describe("provider-first SCIP materialization", () => {
     graphDbPath = "";
   });
 
-  it("materializes SCIP files, symbols, external symbols, ranges, and conservative edges", async () => {
+  it("materializes SCIP files, symbols, external symbols, ranges, and syntax-proved edges", async () => {
     graphDbPath = mkdtempSync(join(tmpdir(), "sdl-provider-first-db-"));
     await initRepo(graphDbPath);
 
@@ -47,6 +47,20 @@ describe("provider-first SCIP materialization", () => {
       providerId: "scip-typescript",
       providerVersion: "1.0.0",
       confidence: 0.95,
+      sourceTextByPath: new Map([
+        [
+          "src/index.ts",
+          [
+            "export function main() {",
+            "  return helper();",
+            "}",
+            "",
+            "export function helper() {",
+            "  return 1;",
+            "}",
+          ].join("\n"),
+        ],
+      ]),
       documents: [
         {
           language: "typescript",
@@ -165,6 +179,12 @@ describe("provider-first SCIP materialization", () => {
         fromName: "main",
         toName: "api",
         edgeType: "import",
+        resolution: "exact",
+      },
+      {
+        fromName: "main",
+        toName: "helper",
+        edgeType: "call",
         resolution: "exact",
       },
     ]);

@@ -51,7 +51,7 @@ Current executable phase: full SCIP provider-first runs collect SCIP documents a
 
 CLI output reports provider-first coverage separately from total indexed files. The `SCIP ingest` progress count is the number of SCIP documents decoded from provider indexes. The final `Provider-first coverage` line reports how many scanned repository files were provider-primary, how many had full versus partial provider coverage, and how many files were uncovered or provider-unusable and therefore parsed by legacy fallback.
 
-Because broad SCIP references are not promoted into exact `call` edges without syntax-aware call proof, provider-first SCIP execution currently leaves cluster/process/algorithm derived state dirty after graph materialization. Metrics, file summaries, FTS, memory sync, and index events still run. Semantic refresh is skipped in provider-first post-index finalization and tracked as deferred semantic readiness, so index wall time is no longer dominated by the `Summary Embeddings` and `Symbol Embeddings` phases. Graph-plus-algorithms readiness remains pending until the call-edge proof or pass-2 provider bridge lands.
+SCIP reference occurrences become exact `call` edges only when repo source text proves invocation syntax such as `helper()` or `helper?.()`. Broad non-call reads and unresolved references remain neutral occurrence facts for later targeted fallback or pass-2 provider work. Provider-first SCIP execution now runs cluster/process/algorithm derived state after graph materialization, while semantic refresh is skipped in provider-first post-index finalization and tracked as deferred semantic readiness so index wall time is no longer dominated by the `Summary Embeddings` and `Symbol Embeddings` phases.
 
 ## Incremental Builds
 
@@ -69,10 +69,10 @@ Implemented:
 - Durable LSP cache keys.
 - SCIP document normalization into provider facts.
 - Runtime provider-source planning exposed on `IndexResult.providerFirst`.
-- Full-refresh SCIP provider execution, with active graph materialization for provider-primary files through existing LadybugDB write APIs and derived algorithm gating until call-edge proof lands.
+- Full-refresh SCIP provider execution, with active graph materialization for provider-primary files through existing LadybugDB write APIs and graph-derived algorithm finalization after source-proved call-edge materialization.
 - Same-run legacy fallback for scanned files with missing or provider-unusable coverage, excluding those files from provider materialization to avoid duplicate provider/legacy symbols.
-- Conservative SCIP occurrence edge materialization: imports and implementations can become edges, while broad references are retained as occurrences until a syntax-aware call pass proves invocation semantics.
+- Conservative SCIP occurrence edge materialization: imports and implementations can become edges, and source-proved invocation references become exact calls, while broad non-call references are retained as occurrences.
 - Semantic-readiness split for provider-first runs: graph finalization skips inline semantic refresh and marks semantic state dirty for later recovery.
 - Explicit provider-first failure when SCIP execution, unsafe coverage validation, LSP execution, or provider graph facts are not safe.
 
-Still pending: syntax-aware SCIP call-edge proof or pass-2 provider bridging, capped LSP execution, incremental provider generations, Parquet/CSV staging artifacts, shadow `.lbug` bulk loading, Windows activation handoff, and targeted fallback for unresolved reference/card/code surfaces inside provider-primary files.
+Still pending: broader pass-2 provider bridging for unresolved references/card/code surfaces inside provider-primary files, capped LSP execution, incremental provider generations, Parquet/CSV staging artifacts, shadow `.lbug` bulk loading, and Windows activation handoff.

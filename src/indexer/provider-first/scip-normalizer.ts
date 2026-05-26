@@ -45,6 +45,7 @@ export interface NormalizeScipProviderFactsOptions {
   providerVersion?: string;
   documents: readonly ScipDocument[];
   externalSymbols?: readonly ScipExternalSymbol[];
+  sourceTextByPath?: ReadonlyMap<string, string>;
   sourceIndexPath?: string;
   confidence?: number;
   emittedAt?: string;
@@ -54,6 +55,7 @@ interface NormalizedScipContext {
   base: ProviderFactBase;
   confidence: number;
   symbolIdsByProviderId: Map<string, string>;
+  sourceTextByPath: ReadonlyMap<string, string>;
 }
 
 interface ContainmentSymbol {
@@ -78,6 +80,7 @@ export function normalizeScipProviderFacts(
     base,
     confidence: options.confidence ?? 0.95,
     symbolIdsByProviderId: new Map(),
+    sourceTextByPath: normalizeSourceTextByPath(options.sourceTextByPath),
   };
   const facts: ProviderFactSet = {
     files: [],
@@ -356,6 +359,8 @@ function occurrenceEdges(
   edgeKeys: Set<string>,
 ): EdgeFact[] {
   const edges: EdgeFact[] = [];
+  const relPath = normalizePath(document.relativePath);
+  const sourceText = context.sourceTextByPath.get(relPath);
   const containmentSymbols = buildContainmentSymbols(context, document);
   const implementationSymbols = getImplementationSymbols(document);
 
@@ -371,7 +376,11 @@ function occurrenceEdges(
       continue;
     }
 
-    const edgeType = occurrenceEdgeType(occurrence, implementationSymbols);
+    const edgeType = occurrenceEdgeType(
+      occurrence,
+      implementationSymbols,
+      sourceText,
+    );
     if (!edgeType) continue;
     const dedupeKey = createProviderEdgeDedupeKey({
       sourceSymbolId,
@@ -465,13 +474,36 @@ function relationshipEdgeType(relationship: ScipRelationship): EdgeType | null {
 function occurrenceEdgeType(
   occurrence: ScipOccurrence,
   implementationSymbols: ReadonlySet<string>,
+  sourceText?: string,
 ): EdgeType | null {
   if (implementationSymbols.has(occurrence.symbol)) return "implements";
   if ((occurrence.symbolRoles & SCIP_ROLE_IMPORT) !== 0) return "import";
-  // A raw SCIP reference occurrence is not enough evidence for call
-  // semantics. Keep broad references in occurrence facts until a syntax-aware
-  // provider pass can prove invocation edges.
+  if (isCallLikeReference(occurrence, sourceText)) return "call";
+  // A raw SCIP reference occurrence is not enough evidence for call semantics.
+  // Keep broad references in occurrence facts unless source text proves the
+  // identifier is immediately used as an invocation target.
   return null;
+}
+
+function isCallLikeReference(
+  occurrence: ScipOccurrence,
+  sourceText: string | undefined,
+): boolean {
+  if (!sourceText) return false;
+  if (occurrence.range.startLine !== occurrence.range.endLine) return false;
+
+  const lines = sourceText.split(/\r?\n/);
+  const line = lines[occurrence.range.endLine];
+  if (line === undefined || occurrence.range.endCol > line.length) {
+    return false;
+  }
+
+  const suffix = line.slice(occurrence.range.endCol).trimStart();
+  return (
+    suffix.startsWith("(") ||
+    suffix.startsWith("?.(") ||
+    (suffix.startsWith("!") && suffix.slice(1).trimStart().startsWith("("))
+  );
 }
 
 function getImplementationSymbols(document: ScipDocument): Set<string> {
@@ -579,4 +611,15 @@ function appendMany<T>(target: T[], source: readonly T[]): void {
   for (const item of source) {
     target.push(item);
   }
+}
+
+function normalizeSourceTextByPath(
+  sourceTextByPath: ReadonlyMap<string, string> | undefined,
+): ReadonlyMap<string, string> {
+  if (!sourceTextByPath) return new Map();
+  const normalized = new Map<string, string>();
+  for (const [relPath, sourceText] of sourceTextByPath) {
+    normalized.set(normalizePath(relPath), sourceText);
+  }
+  return normalized;
 }

@@ -224,10 +224,10 @@ describe("provider-first indexRepo fallback", () => {
               d.lastError AS lastError`,
       { repoId },
     );
-    assert.equal(derivedState?.clustersDirty, true);
-    assert.equal(derivedState?.processesDirty, true);
-    assert.equal(derivedState?.algorithmsDirty, true);
-    assert.match(derivedState?.lastError ?? "", /call-edge proof is pending/i);
+    assert.equal(derivedState?.clustersDirty, false);
+    assert.equal(derivedState?.processesDirty, false);
+    assert.equal(derivedState?.algorithmsDirty, false);
+    assert.equal(derivedState?.lastError, null);
   });
 
   it("defers provider-first semantic embeddings until semantic readiness", async () => {
@@ -440,7 +440,7 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(result.filesProcessed, 1);
     assert.equal(result.providerFirstExecution?.filesProcessed, 1);
     assert.equal(result.providerFirstExecution?.symbolsIndexed, 3);
-    assert.equal(result.providerFirstExecution?.edgesCreated, 1);
+    assert.equal(result.providerFirstExecution?.edgesCreated, 2);
     assert.equal(result.providerFirstExecution?.externalSymbolsIndexed, 1);
     assert.deepEqual(result.providerFirstExecution?.coverage, {
       scannedFiles: 1,
