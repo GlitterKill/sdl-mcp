@@ -191,6 +191,9 @@ export function formatProviderFirstExecutionSummaryLines(
     if (coverage.uncoveredFiles > 0) {
       middle.push(`${coverage.uncoveredFiles} uncovered`);
     }
+    if ((coverage.callProofIncompleteFiles ?? 0) > 0) {
+      middle.push(`${coverage.callProofIncompleteFiles} call-proof incomplete`);
+    }
 
     let line =
       `  Provider-first coverage: ${providerPrimaryFiles}/${coverage.scannedFiles} files provider-primary ` +

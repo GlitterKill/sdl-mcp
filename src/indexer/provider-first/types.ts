@@ -103,11 +103,14 @@ export interface CoverageFact extends ProviderFactBase {
   relPath: string;
   symbolCoverage: CoverageLevel;
   referenceCoverage: CoverageLevel;
+  callProofCoverage: CoverageLevel;
   diagnosticCoverage: CoverageLevel;
   totalSymbols: number;
   emittedSymbols: number;
   totalOccurrences: number;
   unresolvedOccurrences: number;
+  totalResolvedReferences: number;
+  callProofUnavailableReferences: number;
   legacyFallback: LegacyFallbackScope;
 }
 

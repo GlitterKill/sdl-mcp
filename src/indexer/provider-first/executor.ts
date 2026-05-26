@@ -8,10 +8,17 @@ import type {
   ScipFailureDiagnostic,
   ScipGeneratedIndexDiagnostic,
 } from "../../scip/diagnostics.js";
+import {
+  SCIP_ROLE_DEFINITION,
+  SCIP_ROLE_IMPORT,
+} from "../../scip/symbol-matcher.js";
 import type { ScipDocument, ScipExternalSymbol } from "../../scip/types.js";
 import { logger } from "../../util/logger.js";
 import { getRelativePath, normalizePath } from "../../util/paths.js";
-import { normalizeScipProviderFacts } from "./scip-normalizer.js";
+import {
+  normalizeScipProviderFacts,
+  type SourceLinesByPath,
+} from "./scip-normalizer.js";
 import {
   providerFactsToGraphRows,
   type ProviderFirstGraphRows,
@@ -35,6 +42,7 @@ export interface ProviderFirstCoverageSummary {
   providerPrimaryFiles: number;
   fullyCoveredFiles: number;
   partialFiles: number;
+  callProofIncompleteFiles?: number;
   fullFallbackFiles: number;
   uncoveredFiles: number;
   fallbackFiles: number;
@@ -347,7 +355,7 @@ async function decodeScipIndexToFacts(params: {
     }
 
     const externalSymbols = await loadExternalSymbols(decoder, params.scip);
-    const sourceTextByPath = await loadDocumentSourceTexts(
+    const sourceLinesByPath = await loadDocumentSourceLines(
       params.repoRoot,
       documents,
       params.sourceTextMaxBytes,
@@ -367,7 +375,7 @@ async function decodeScipIndexToFacts(params: {
       providerVersion: metadata.toolVersion,
       documents,
       externalSymbols,
-      sourceTextByPath,
+      sourceLinesByPath,
       sourceIndexPath: params.relIndexPath,
       confidence: params.scip.confidence,
     });
@@ -476,20 +484,17 @@ function appendProviderFactSet(
   appendMany(target.providerRuns, source.providerRuns);
 }
 
-async function loadDocumentSourceTexts(
+async function loadDocumentSourceLines(
   repoRoot: string,
   documents: readonly ScipDocument[],
   maxBytes: number,
-): Promise<ReadonlyMap<string, string>> {
-  const sourceTextByPath = new Map<string, string>();
-  const seenRelPaths = new Set<string>();
+): Promise<SourceLinesByPath> {
+  const sourceLinesByPath = new Map<string, ReadonlyMap<number, string>>();
+  const neededLinesByPath = collectNeededSourceLines(documents);
   const sourcePaths: Array<{ relPath: string; sourcePath: string }> = [];
   const normalizedRoot = normalizePath(repoRoot);
-  for (const document of documents) {
-    const relPath = normalizePath(document.relativePath);
-    if (seenRelPaths.has(relPath)) continue;
-    seenRelPaths.add(relPath);
 
+  for (const relPath of neededLinesByPath.keys()) {
     const sourcePath = resolveDocumentPath(repoRoot, relPath);
     if (!sourcePath) continue;
     sourcePaths.push({ relPath, sourcePath });
@@ -509,10 +514,13 @@ async function loadDocumentSourceTexts(
           if (!isPathInsideRoot(normalizedRoot, realSourcePath)) continue;
           const sourceStats = await stat(realSourcePath);
           if (sourceStats.size > maxBytes) continue;
-          sourceTextByPath.set(
-            entry.relPath,
+          const selectedLines = selectNeededLines(
             await readFile(realSourcePath, "utf8"),
+            neededLinesByPath.get(entry.relPath) ?? new Set(),
           );
+          if (selectedLines.size > 0) {
+            sourceLinesByPath.set(entry.relPath, selectedLines);
+          }
         } catch {
           // Missing or unreadable source leaves the occurrence as a neutral
           // fact. Coverage validation later decides whether the file can still
@@ -521,7 +529,39 @@ async function loadDocumentSourceTexts(
       }
     }),
   );
-  return sourceTextByPath;
+  return sourceLinesByPath;
+}
+
+function collectNeededSourceLines(
+  documents: readonly ScipDocument[],
+): Map<string, Set<number>> {
+  const neededLinesByPath = new Map<string, Set<number>>();
+  for (const document of documents) {
+    const relPath = normalizePath(document.relativePath);
+    for (const occurrence of document.occurrences) {
+      if ((occurrence.symbolRoles & SCIP_ROLE_DEFINITION) !== 0) continue;
+      if ((occurrence.symbolRoles & SCIP_ROLE_IMPORT) !== 0) continue;
+      if (occurrence.range.startLine !== occurrence.range.endLine) continue;
+
+      const lines = neededLinesByPath.get(relPath) ?? new Set<number>();
+      lines.add(occurrence.range.startLine);
+      neededLinesByPath.set(relPath, lines);
+    }
+  }
+  return neededLinesByPath;
+}
+
+function selectNeededLines(
+  sourceText: string,
+  neededLines: ReadonlySet<number>,
+): ReadonlyMap<number, string> {
+  const selected = new Map<number, string>();
+  for (const [lineNumber, line] of sourceText.split(/\r?\n/).entries()) {
+    if (neededLines.has(lineNumber)) {
+      selected.set(lineNumber, line);
+    }
+  }
+  return selected;
 }
 
 function resolveSourceTextMaxBytes(

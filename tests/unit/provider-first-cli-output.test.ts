@@ -41,4 +41,33 @@ describe("provider-first CLI output", () => {
     ]);
     assert.deepEqual(formatSemanticReadinessLines(false), []);
   });
+
+  it("surfaces provider call-proof incompleteness in coverage output", () => {
+    const lines = formatProviderFirstExecutionSummaryLines({
+      status: "executed",
+      executor: "scipFull",
+      generationId: "provider-first:test",
+      reasons: [],
+      filesProcessed: 0,
+      symbolsIndexed: 0,
+      edgesCreated: 0,
+      externalSymbolsIndexed: 0,
+      coverage: {
+        scannedFiles: 2,
+        providerFiles: 2,
+        providerPrimaryFiles: 2,
+        fullyCoveredFiles: 2,
+        partialFiles: 0,
+        callProofIncompleteFiles: 1,
+        fullFallbackFiles: 0,
+        uncoveredFiles: 0,
+        fallbackFiles: 0,
+      },
+    });
+
+    assert.deepEqual(lines, [
+      "  Provider-first: scipFull (provider-first:test)",
+      "  Provider-first coverage: 2/2 files provider-primary (2 full, 0 partial); 1 call-proof incomplete",
+    ]);
+  });
 });

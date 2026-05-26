@@ -440,7 +440,7 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(result.filesProcessed, 1);
     assert.equal(result.providerFirstExecution?.filesProcessed, 1);
     assert.equal(result.providerFirstExecution?.symbolsIndexed, 3);
-    assert.equal(result.providerFirstExecution?.edgesCreated, 2);
+    assert.equal(result.providerFirstExecution?.edgesCreated, 3);
     assert.equal(result.providerFirstExecution?.externalSymbolsIndexed, 1);
     assert.deepEqual(result.providerFirstExecution?.coverage, {
       scannedFiles: 1,
@@ -448,6 +448,7 @@ describe("provider-first indexRepo fallback", () => {
       providerPrimaryFiles: 1,
       fullyCoveredFiles: 0,
       partialFiles: 1,
+      callProofIncompleteFiles: 0,
       fullFallbackFiles: 0,
       uncoveredFiles: 0,
       fallbackFiles: 0,
@@ -477,6 +478,47 @@ describe("provider-first indexRepo fallback", () => {
       { repoId },
     );
     assert.equal(ladybugDb.toNumber(scipInternalCount?.count), 2);
+  });
+
+  it("keeps derived graph state dirty when provider call proof cannot validate source text", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+      staleProviderReferenceText: true,
+    });
+
+    const result = await indexRepo(repoId, "full");
+
+    assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.match(
+      result.providerFirstExecution?.reasons.join(" ") ?? "",
+      /call proof was unavailable/i,
+    );
+    assert.equal(
+      result.providerFirstExecution?.coverage?.callProofIncompleteFiles,
+      1,
+    );
+    assert.equal(result.clustersComputed, 0);
+    assert.equal(result.processesTraced, 0);
+
+    const conn = await getLadybugConn();
+    const derivedState = await ladybugDb.querySingle<{
+      clustersDirty: boolean;
+      processesDirty: boolean;
+      algorithmsDirty: boolean;
+      lastError: string | null;
+    }>(
+      conn,
+      `MATCH (d:DerivedState {repoId: $repoId})
+       RETURN d.clustersDirty AS clustersDirty,
+              d.processesDirty AS processesDirty,
+              d.algorithmsDirty AS algorithmsDirty,
+              d.lastError AS lastError`,
+      { repoId },
+    );
+    assert.equal(derivedState?.clustersDirty, true);
+    assert.equal(derivedState?.processesDirty, true);
+    assert.equal(derivedState?.algorithmsDirty, true);
+    assert.match(derivedState?.lastError ?? "", /call proof unavailable/i);
   });
 
   it("prunes stale SCIP externals when provider rows are unusable and filtered to legacy fallback", async () => {
@@ -736,6 +778,7 @@ describe("provider-first indexRepo fallback", () => {
       duplicateProviderSymbol?: boolean;
       duplicateProviderSymbolDocument?: boolean;
       partialProviderReference?: boolean;
+      staleProviderReferenceText?: boolean;
       emptyProviderDocument?: boolean;
       includeMissingScipIndex?: boolean;
       seedRemovedFile?: boolean;
@@ -754,7 +797,10 @@ describe("provider-first indexRepo fallback", () => {
       join(repoDir, "src", "index.ts"),
       [
         "export function main() {",
-        "  return helper();",
+        options.staleProviderReferenceText
+          ? "  return renamed();"
+          : "  return helper();",
+        "  return api();",
         "}",
         "",
         "export function helper() {",
@@ -969,7 +1015,7 @@ describe("provider-first indexRepo fallback", () => {
         occurrences: [
           {
             range: [0, 16, 20] as [number, number, number],
-            enclosingRange: [0, 0, 2, 1] as [
+            enclosingRange: [0, 0, 3, 1] as [
               number,
               number,
               number,
@@ -1001,8 +1047,8 @@ describe("provider-first indexRepo fallback", () => {
               ]
             : []),
           {
-            range: [4, 16, 22] as [number, number, number],
-            enclosingRange: [4, 0, 6, 1] as [
+            range: [5, 16, 22] as [number, number, number],
+            enclosingRange: [5, 0, 7, 1] as [
               number,
               number,
               number,

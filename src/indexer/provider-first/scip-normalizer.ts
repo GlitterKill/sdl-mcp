@@ -45,17 +45,24 @@ export interface NormalizeScipProviderFactsOptions {
   providerVersion?: string;
   documents: readonly ScipDocument[];
   externalSymbols?: readonly ScipExternalSymbol[];
+  sourceLinesByPath?: SourceLinesByPath;
   sourceTextByPath?: ReadonlyMap<string, string>;
   sourceIndexPath?: string;
   confidence?: number;
   emittedAt?: string;
 }
 
+export type SourceLinesByPath = ReadonlyMap<
+  string,
+  ReadonlyMap<number, string>
+>;
+
 interface NormalizedScipContext {
   base: ProviderFactBase;
   confidence: number;
   symbolIdsByProviderId: Map<string, string>;
-  sourceTextByPath: ReadonlyMap<string, string>;
+  symbolNamesByProviderId: Map<string, string>;
+  sourceLinesByPath: SourceLinesByPath;
 }
 
 interface ContainmentSymbol {
@@ -80,7 +87,8 @@ export function normalizeScipProviderFacts(
     base,
     confidence: options.confidence ?? 0.95,
     symbolIdsByProviderId: new Map(),
-    sourceTextByPath: normalizeSourceTextByPath(options.sourceTextByPath),
+    symbolNamesByProviderId: new Map(),
+    sourceLinesByPath: normalizeSourceLinesByPath(options),
   };
   const facts: ProviderFactSet = {
     files: [],
@@ -101,6 +109,7 @@ export function normalizeScipProviderFacts(
       const symbolFact = symbolInfoToFact(context, info, relPath, document);
       if (!symbolFact) continue;
       context.symbolIdsByProviderId.set(info.symbol, symbolFact.symbolId);
+      context.symbolNamesByProviderId.set(info.symbol, symbolFact.name);
       facts.symbols.push(symbolFact);
     }
   }
@@ -112,6 +121,7 @@ export function normalizeScipProviderFacts(
       externalSymbol.symbol,
       externalFact.symbolId,
     );
+    context.symbolNamesByProviderId.set(externalSymbol.symbol, externalFact.name);
     facts.externalSymbols.push(externalFact);
   }
 
@@ -287,6 +297,7 @@ function coverageFact(
   const unresolvedOccurrences = occurrences.filter(
     (occurrence) => occurrence.symbolId === undefined,
   ).length;
+  const callProof = callProofCoverage(context, document, relPath, occurrences);
   const symbolCoverage = coverageLevel(document.symbols.length, emittedSymbols);
   const referenceCoverage = coverageLevel(
     occurrences.length,
@@ -303,11 +314,18 @@ function coverageFact(
     relPath,
     symbolCoverage,
     referenceCoverage,
+    callProofCoverage: coverageLevel(
+      callProof.totalResolvedReferences,
+      callProof.provenReferences,
+    ),
     diagnosticCoverage: diagnosticCount > 0 ? "full" : "none",
     totalSymbols: document.symbols.length,
     emittedSymbols,
     totalOccurrences: occurrences.length,
     unresolvedOccurrences,
+    totalResolvedReferences: callProof.totalResolvedReferences,
+    callProofUnavailableReferences:
+      callProof.totalResolvedReferences - callProof.provenReferences,
     legacyFallback: legacyFallback(symbolCoverage, referenceCoverage),
   };
 }
@@ -360,7 +378,7 @@ function occurrenceEdges(
 ): EdgeFact[] {
   const edges: EdgeFact[] = [];
   const relPath = normalizePath(document.relativePath);
-  const sourceText = context.sourceTextByPath.get(relPath);
+  const sourceLines = context.sourceLinesByPath.get(relPath);
   const containmentSymbols = buildContainmentSymbols(context, document);
   const implementationSymbols = getImplementationSymbols(document);
 
@@ -377,9 +395,10 @@ function occurrenceEdges(
     }
 
     const edgeType = occurrenceEdgeType(
+      context,
       occurrence,
       implementationSymbols,
-      sourceText,
+      sourceLines,
     );
     if (!edgeType) continue;
     const dedupeKey = createProviderEdgeDedupeKey({
@@ -465,20 +484,20 @@ function relationshipEdgeType(relationship: ScipRelationship): EdgeType | null {
     return "implements";
   }
   if (relationship.isDefinition) return "import";
-  // SCIP relationships alone do not prove invocation semantics. Keep
-  // references/unknown relationships out of exact call edges until the
-  // provider path has syntax-aware call proof.
+  // SCIP relationships alone do not prove invocation semantics. Occurrence
+  // facts plus source-line proof handle exact call edges separately.
   return null;
 }
 
 function occurrenceEdgeType(
+  context: NormalizedScipContext,
   occurrence: ScipOccurrence,
   implementationSymbols: ReadonlySet<string>,
-  sourceText?: string,
+  sourceLines: ReadonlyMap<number, string> | undefined,
 ): EdgeType | null {
   if (implementationSymbols.has(occurrence.symbol)) return "implements";
   if ((occurrence.symbolRoles & SCIP_ROLE_IMPORT) !== 0) return "import";
-  if (isCallLikeReference(occurrence, sourceText)) return "call";
+  if (isCallLikeReference(context, occurrence, sourceLines)) return "call";
   // A raw SCIP reference occurrence is not enough evidence for call semantics.
   // Keep broad references in occurrence facts unless source text proves the
   // identifier is immediately used as an invocation target.
@@ -486,24 +505,67 @@ function occurrenceEdgeType(
 }
 
 function isCallLikeReference(
+  context: NormalizedScipContext,
   occurrence: ScipOccurrence,
-  sourceText: string | undefined,
+  sourceLines: ReadonlyMap<number, string> | undefined,
 ): boolean {
-  if (!sourceText) return false;
-  if (occurrence.range.startLine !== occurrence.range.endLine) return false;
+  const match = sourceLineMatchesOccurrence(context, occurrence, sourceLines);
+  if (!match) return false;
 
-  const lines = sourceText.split(/\r?\n/);
-  const line = lines[occurrence.range.endLine];
-  if (line === undefined || occurrence.range.endCol > line.length) {
-    return false;
-  }
-
-  const suffix = line.slice(occurrence.range.endCol).trimStart();
+  const suffix = match.line.slice(occurrence.range.endCol).trimStart();
   return (
     suffix.startsWith("(") ||
     suffix.startsWith("?.(") ||
     (suffix.startsWith("!") && suffix.slice(1).trimStart().startsWith("("))
   );
+}
+
+function callProofCoverage(
+  context: NormalizedScipContext,
+  document: ScipDocument,
+  relPath: string,
+  occurrences: readonly OccurrenceFact[],
+): { totalResolvedReferences: number; provenReferences: number } {
+  const sourceLines = context.sourceLinesByPath.get(relPath);
+  let totalResolvedReferences = 0;
+  let provenReferences = 0;
+
+  for (const [index, occurrenceFact] of occurrences.entries()) {
+    if (occurrenceFact.role !== "reference" || !occurrenceFact.symbolId) {
+      continue;
+    }
+    const occurrence = document.occurrences[index];
+    if (!occurrence) continue;
+
+    totalResolvedReferences++;
+    if (sourceLineMatchesOccurrence(context, occurrence, sourceLines)) {
+      provenReferences++;
+    }
+  }
+
+  return { totalResolvedReferences, provenReferences };
+}
+
+function sourceLineMatchesOccurrence(
+  context: NormalizedScipContext,
+  occurrence: ScipOccurrence,
+  sourceLines: ReadonlyMap<number, string> | undefined,
+): { line: string } | null {
+  const expectedName = context.symbolNamesByProviderId.get(occurrence.symbol);
+  if (!expectedName) return null;
+  if (!sourceLines) return null;
+  if (occurrence.range.startLine !== occurrence.range.endLine) return null;
+
+  const line = sourceLines.get(occurrence.range.startLine);
+  if (line === undefined || occurrence.range.endCol > line.length) {
+    return null;
+  }
+
+  const occurrenceText = line.slice(
+    occurrence.range.startCol,
+    occurrence.range.endCol,
+  );
+  return occurrenceText === expectedName ? { line } : null;
 }
 
 function getImplementationSymbols(document: ScipDocument): Set<string> {
@@ -613,13 +675,23 @@ function appendMany<T>(target: T[], source: readonly T[]): void {
   }
 }
 
-function normalizeSourceTextByPath(
-  sourceTextByPath: ReadonlyMap<string, string> | undefined,
-): ReadonlyMap<string, string> {
-  if (!sourceTextByPath) return new Map();
-  const normalized = new Map<string, string>();
-  for (const [relPath, sourceText] of sourceTextByPath) {
-    normalized.set(normalizePath(relPath), sourceText);
+function normalizeSourceLinesByPath(
+  options: Pick<
+    NormalizeScipProviderFactsOptions,
+    "sourceLinesByPath" | "sourceTextByPath"
+  >,
+): SourceLinesByPath {
+  const normalizedLines = new Map<string, ReadonlyMap<number, string>>();
+  for (const [relPath, sourceLines] of options.sourceLinesByPath ?? []) {
+    normalizedLines.set(normalizePath(relPath), sourceLines);
   }
-  return normalized;
+  for (const [relPath, sourceText] of options.sourceTextByPath ?? []) {
+    if (normalizedLines.has(normalizePath(relPath))) continue;
+    const lineMap = new Map<number, string>();
+    for (const [lineNumber, line] of sourceText.split(/\r?\n/).entries()) {
+      lineMap.set(lineNumber, line);
+    }
+    normalizedLines.set(normalizePath(relPath), lineMap);
+  }
+  return normalizedLines;
 }

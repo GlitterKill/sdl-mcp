@@ -102,7 +102,10 @@ import {
   type ProviderFirstGraphRows,
 } from "./provider-first/materializer.js";
 import { resolveProviderFirstPipeline } from "./provider-first/planner.js";
-import type { ProviderFirstPipelineSelection } from "./provider-first/types.js";
+import type {
+  CoverageLevel,
+  ProviderFirstPipelineSelection,
+} from "./provider-first/types.js";
 export type { IndexProgress, IndexProgressSubstage } from "./indexer-init.js";
 export interface IndexTimingDiagnostics {
   totalMs: number;
@@ -329,6 +332,7 @@ interface ProviderFirstCoverageReport {
   reasons: string[];
   fatalReasons: string[];
   fallbackPaths: Set<string>;
+  callProofIncompletePaths: Set<string>;
   summary: ProviderFirstCoverageSummary;
 }
 
@@ -338,6 +342,9 @@ function analyzeProviderFirstCoverage(params: {
   coverage: Iterable<{
     relPath: string;
     legacyFallback: string;
+    callProofCoverage?: CoverageLevel;
+    totalResolvedReferences?: number;
+    callProofUnavailableReferences?: number;
   }>;
   symbols: Iterable<{
     relPath: string;
@@ -357,6 +364,7 @@ function analyzeProviderFirstCoverage(params: {
   const duplicateProviderSymbols = new Set<string>();
   const missingPaths: string[] = [];
   const partialPaths: string[] = [];
+  const callProofIncompletePaths = new Set<string>();
   const fullFallbackPaths: string[] = [];
   const extraProviderPaths: string[] = [];
   const fallbackPaths = new Set<string>();
@@ -389,11 +397,13 @@ function analyzeProviderFirstCoverage(params: {
     const coverage = coverageByPath.get(relPath);
     if (coverage?.legacyFallback === "skip") {
       fullyCoveredFiles++;
+      addCallProofIncompletePath(relPath, coverage, callProofIncompletePaths);
       continue;
     }
     if (coverage?.legacyFallback === "targeted") {
       partialPaths.push(relPath);
       partialFiles++;
+      addCallProofIncompletePath(relPath, coverage, callProofIncompletePaths);
       continue;
     }
     fullFallbackPaths.push(relPath);
@@ -418,6 +428,12 @@ function analyzeProviderFirstCoverage(params: {
     const sample = partialPaths.slice(0, 5).join(", ");
     reasons.push(
       `SCIP provider references were partial for ${partialPaths.length} scanned file(s): ${sample}`,
+    );
+  }
+  if (callProofIncompletePaths.size > 0) {
+    const sample = [...callProofIncompletePaths].slice(0, 5).join(", ");
+    reasons.push(
+      `SCIP provider call proof was unavailable for ${callProofIncompletePaths.size} provider-primary file(s): ${sample}`,
     );
   }
   if (fullFallbackPaths.length > 0) {
@@ -451,17 +467,43 @@ function analyzeProviderFirstCoverage(params: {
     reasons,
     fatalReasons,
     fallbackPaths,
+    callProofIncompletePaths,
     summary: {
       scannedFiles: params.scannedPaths.length,
       providerFiles: providerPaths.size,
       providerPrimaryFiles: fullyCoveredFiles + partialFiles,
       fullyCoveredFiles,
       partialFiles,
+      callProofIncompleteFiles: callProofIncompletePaths.size,
       fullFallbackFiles,
       uncoveredFiles: missingPaths.length,
       fallbackFiles: fallbackPaths.size,
     },
   };
+}
+
+function addCallProofIncompletePath(
+  relPath: string,
+  coverage: {
+    callProofCoverage?: CoverageLevel;
+    totalResolvedReferences?: number;
+    callProofUnavailableReferences?: number;
+  } | undefined,
+  target: Set<string>,
+): void {
+  if (!coverage) return;
+  if ((coverage.totalResolvedReferences ?? 0) === 0) return;
+  if ((coverage.callProofUnavailableReferences ?? 0) === 0) return;
+  if ((coverage.callProofCoverage ?? "full") === "full") return;
+  target.add(relPath);
+}
+
+function callProofSkipDerivedStateReason(
+  paths: ReadonlySet<string>,
+): string | undefined {
+  if (paths.size === 0) return undefined;
+  const sample = [...paths].slice(0, 5).join(", ");
+  return `provider-first SCIP call proof unavailable for ${paths.size} provider-primary file(s); derived graph algorithms remain dirty: ${sample}`;
 }
 
 function applyScannedFileMetadataToProviderRows(params: {
@@ -884,6 +926,7 @@ async function indexRepoImpl(
   let providerFirstMaterializedFiles = 0;
   let providerFirstMaterializedSymbols = 0;
   let providerFirstMaterializedEdges = 0;
+  let providerFirstSkipDerivedStateReason: string | undefined;
   const providerFirstChangedFileIds = new Set<string>();
   let providerFirstScan:
     | Awaited<ReturnType<typeof scanRepoForIndex>>
@@ -1145,6 +1188,10 @@ async function indexRepoImpl(
             `Provider-first indexing cannot execute for ${repoId}: ${coverageReport.fatalReasons.join("; ")}`,
           );
         } else {
+          providerFirstSkipDerivedStateReason =
+            callProofSkipDerivedStateReason(
+              coverageReport.callProofIncompletePaths,
+            );
           const materializedRows = filterProviderRowsForFallback(
             providerResult.rows,
             coverageReport.fallbackPaths,
@@ -1248,6 +1295,7 @@ async function indexRepoImpl(
               pass1Engine,
               scip,
               deferSemanticRefresh: true,
+              skipDerivedStateReason: providerFirstSkipDerivedStateReason,
             });
 
             const result: IndexResult = {
@@ -2040,18 +2088,33 @@ async function indexRepoImpl(
 
       // Refresh read connection again after version/metrics writes.
       freshConn = await getLadybugConn();
-      const derivedResult = await finalizeDerivedState({
-        mode,
-        conn: freshConn,
-        repoId,
-        versionId,
-        filesTotal: files.length + providerFirstMaterializedFiles,
-        phaseTimings,
-        algorithmRefresh: appConfig.indexing?.algorithmRefresh,
-        onProgress,
-        sharedGraph: finalizeResult.sharedGraph,
-        measurePhase,
-      });
+      const derivedResult = providerFirstSkipDerivedStateReason
+        ? await measurePhase("skipDerivedState", async () => {
+            await markDerivedStateDirty(repoId, versionId, {
+              clusters: true,
+              processes: true,
+              algorithms: true,
+            });
+            await recordDerivedStateError(
+              repoId,
+              providerFirstSkipDerivedStateReason ?? "",
+            );
+            return skippedDerivedStateResult(
+              providerFirstSkipDerivedStateReason ?? "",
+            );
+          })
+        : await finalizeDerivedState({
+            mode,
+            conn: freshConn,
+            repoId,
+            versionId,
+            filesTotal: files.length + providerFirstMaterializedFiles,
+            phaseTimings,
+            algorithmRefresh: appConfig.indexing?.algorithmRefresh,
+            onProgress,
+            sharedGraph: finalizeResult.sharedGraph,
+            measurePhase,
+          });
 
       if (finalizeResult.semanticDeferred) {
         await markDeferredSemanticStateDirty({

@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SCIP generated index handling**: Raised decoder file caps to 512 MiB and added generated split-index fallback with SHA-256 dedupe for identical TypeScript/JavaScript split artifacts.
 - **Provider-first safety**: Allowed active SCIP provider-first execution only after coverage validation, so `auto` uses legacy fallback when SCIP execution or coverage is incomplete and explicit `providerFirst` fails loudly instead of replacing the live graph with partial provider data.
 - **Provider-first readiness**: Split semantic readiness from provider-first graph readiness so SCIP provider-first indexing skips inline semantic refresh, reports deferred semantic readiness in CLI output, and leaves semantic derived state dirty for later refresh.
-- **Provider-first SCIP calls**: Promoted SCIP reference occurrences to exact `call` edges only when repo source text proves invocation syntax, while non-call reads and unresolved references remain neutral occurrence facts. Provider-only SCIP runs now compute graph-derived cluster/process/algorithm state instead of marking algorithms dirty for the former call-proof gate.
+- **Provider-first SCIP calls**: Promoted SCIP reference occurrences to exact `call` edges only when repo source lines prove the expected symbol text plus invocation syntax, while non-call reads, unresolved references, stale SCIP ranges, and unavailable source lines remain neutral occurrence facts. Provider-only SCIP runs compute graph-derived cluster/process/algorithm state only when call proof is complete; otherwise they leave graph-derived readiness dirty with an operator-visible health reason.
 
 ### Fixed
 

@@ -370,6 +370,8 @@ describe("provider-first indexing foundation", () => {
     assert.equal(callEdges.length, 1);
     assert.equal(callEdges[0]?.resolution, "exact");
     assert.equal(callEdges[0]?.confidence, 0.95);
+    assert.equal(facts.coverage[0]?.callProofCoverage, "full");
+    assert.equal(facts.coverage[0]?.callProofUnavailableReferences, 0);
   });
 
   it("does not promote SCIP reference occurrences when source text shows a value read", () => {
@@ -458,6 +460,99 @@ describe("provider-first indexing foundation", () => {
     });
 
     assert.equal(facts.edges.some((edge) => edge.edgeType === "call"), false);
+    assert.equal(facts.coverage[0]?.callProofCoverage, "full");
+    assert.equal(facts.coverage[0]?.callProofUnavailableReferences, 0);
+  });
+
+  it("does not promote stale SCIP ranges when source text no longer matches the symbol", () => {
+    const main =
+      "scip-typescript npm example 1.0.0 src/index.ts/main().";
+    const helper =
+      "scip-typescript npm example 1.0.0 src/index.ts/helper().";
+    const facts = normalizeScipProviderFacts({
+      repoId: "repo",
+      generationId: "gen-1",
+      providerId: "scip-typescript",
+      sourceTextByPath: new Map([
+        [
+          "src/index.ts",
+          [
+            "export function main() {",
+            "  return renamed();",
+            "}",
+            "",
+            "export function helper() {",
+            "  return 1;",
+            "}",
+          ].join("\n"),
+        ],
+      ]),
+      documents: [
+        {
+          language: "typescript",
+          relativePath: "src/index.ts",
+          occurrences: [
+            {
+              range: { startLine: 0, startCol: 16, endLine: 0, endCol: 20 },
+              enclosingRange: {
+                startLine: 0,
+                startCol: 0,
+                endLine: 2,
+                endCol: 1,
+              },
+              symbol: main,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 1, startCol: 9, endLine: 1, endCol: 15 },
+              symbol: helper,
+              symbolRoles: 8,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 4, startCol: 16, endLine: 4, endCol: 22 },
+              enclosingRange: {
+                startLine: 4,
+                startCol: 0,
+                endLine: 6,
+                endCol: 1,
+              },
+              symbol: helper,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+          ],
+          symbols: [
+            {
+              symbol: main,
+              documentation: [],
+              relationships: [],
+              kind: 12,
+              displayName: "main",
+            },
+            {
+              symbol: helper,
+              documentation: [],
+              relationships: [],
+              kind: 12,
+              displayName: "helper",
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(facts.edges.some((edge) => edge.edgeType === "call"), false);
+    assert.equal(facts.coverage[0]?.callProofCoverage, "none");
+    assert.equal(facts.coverage[0]?.totalResolvedReferences, 1);
+    assert.equal(facts.coverage[0]?.callProofUnavailableReferences, 1);
   });
 
   it("normalizes SCIP import and implementation occurrences into conservative edges", () => {
