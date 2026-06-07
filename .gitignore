@@ -182,3 +182,4 @@ brand-spec.md
 .codex/config.toml
 .codex/hooks/force-sdl-mcp.mjs
 .codex/skills/mintlify/SKILL.md
+Python/_cache/last_welcome.txt
