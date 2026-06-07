@@ -93,30 +93,43 @@ function isUnresolvedSymbolId(symbolId: string): boolean {
   return symbolId.startsWith("unresolved:");
 }
 
-function requiresCsvQuoting(value: unknown): boolean {
-  return typeof value === "string" && /[",\r\n]/.test(value);
+function copyRelEndpointIsSafe(value: string): boolean {
+  // LadybugDB relationship COPY resolves endpoints by primary-key literal.
+  // Keep non-literal endpoint ids on the generic repair path.
+  return !/["\r\n]/.test(value);
 }
 
-function isPass2KnownEndpointCopySafe(edge: ladybugDb.EdgeRow): boolean {
-  return ![
-    edge.fromSymbolId,
-    edge.toSymbolId,
-    edge.edgeType,
-    edge.resolution,
-    edge.resolverId,
-    edge.resolutionPhase,
-    edge.provenance,
-    edge.createdAt,
-  ].some(requiresCsvQuoting);
+function sanitizeRelationshipCopyCell(value: string): string {
+  // Relationship COPY in LadybugDB 0.16.0 can reject correctly quoted
+  // relationship-property cells. Keep the fast path by making diagnostic
+  // provenance readable but delimiter-free before COPY.
+  return value.replace(/[",\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** @internal exported for tests; do not import from product code. */
+export function toPass2KnownEndpointCopyEdge(
+  edge: ladybugDb.EdgeRow,
+): ladybugDb.EdgeRow {
+  if (typeof edge.provenance !== "string") return edge;
+  const provenance = sanitizeRelationshipCopyCell(edge.provenance);
+  if (provenance === edge.provenance) return edge;
+  return { ...edge, provenance };
+}
+
+function isPass2KnownEndpointCopyCandidate(edge: ladybugDb.EdgeRow): boolean {
+  return (
+    copyRelEndpointIsSafe(edge.fromSymbolId) &&
+    copyRelEndpointIsSafe(edge.toSymbolId)
+  );
 }
 
 /**
  * Full pass-2 runs after the source file's Symbol rows have been replaced.
  * Resolved call edges can therefore use the known-endpoint relationship COPY
  * path, while unresolved calls still need generic placeholder node repair.
- * Rows whose copied string cells require CSV quoting also stay on the generic
- * parameterized path because LadybugDB relationship COPY can reject those
- * records even when they are quoted correctly.
+ * Known-endpoint provenance is sanitized before COPY because LadybugDB
+ * relationship COPY can reject quoted relationship-property cells even when
+ * the CSV writer escapes them correctly.
  */
 /** @internal exported for tests; do not import from product code. */
 export function splitPass2EdgesForFullMode(
@@ -132,11 +145,11 @@ export function splitPass2EdgesForFullMode(
     if (
       isUnresolvedSymbolId(edge.fromSymbolId) ||
       isUnresolvedSymbolId(edge.toSymbolId) ||
-      !isPass2KnownEndpointCopySafe(edge)
+      !isPass2KnownEndpointCopyCandidate(edge)
     ) {
       repairEdges.push(edge);
     } else {
-      knownEndpointEdges.push(edge);
+      knownEndpointEdges.push(toPass2KnownEndpointCopyEdge(edge));
     }
   }
 

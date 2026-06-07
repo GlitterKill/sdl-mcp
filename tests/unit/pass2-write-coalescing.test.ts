@@ -587,19 +587,62 @@ describe("insertPass2Edges", () => {
     );
   });
 
-  it("keeps CSV-quoted provenance off the full-mode pass-2 COPY path", async () => {
-    const { insertPass2Edges, splitPass2EdgesForFullMode } = await import(
-      "../../dist/indexer/indexer-pass2.js"
-    );
+  it("sanitizes CSV-quoted provenance for the full-mode pass-2 COPY path", async () => {
+    const {
+      insertPass2Edges,
+      splitPass2EdgesForFullMode,
+      toPass2KnownEndpointCopyEdge,
+    } = await import("../../dist/indexer/indexer-pass2.js");
     const statements: string[] = [];
-    const unsafe = edge({
-      fromSymbolId: "from-unsafe",
-      toSymbolId: "to-unsafe",
+    const quotedProvenance = edge({
+      fromSymbolId: "from-quoted-provenance",
+      toSymbolId: "to-quoted-provenance",
       provenance:
         'cpp-call:Accesses[MemAccessInfo(Ptr, false)].insert("x")',
     });
     const edges = [
-      unsafe,
+      quotedProvenance,
+      ...Array.from({ length: 512 }, (_, index) =>
+        edge({
+          fromSymbolId: `from-${index}`,
+          toSymbolId: `to-${index}`,
+        }),
+      ),
+    ];
+
+    const split = splitPass2EdgesForFullMode(edges);
+    assert.strictEqual(split.knownEndpointEdges.length, 513);
+    assert.deepStrictEqual(split.repairEdges, []);
+    assert.equal(
+      toPass2KnownEndpointCopyEdge(quotedProvenance).provenance,
+      "cpp-call:Accesses[MemAccessInfo(Ptr false)].insert( x )",
+    );
+
+    await insertPass2Edges(createFakeConnection(statements), edges, "full");
+
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY DEPENDS_ON FROM"),
+      1,
+      "known endpoint rows should stay on the fast relationship COPY path after provenance sanitization",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "CREATE (a)-[:DEPENDS_ON"),
+      0,
+      "known endpoint provenance punctuation should not force generic endpoint repair",
+    );
+  });
+
+  it("keeps unsafe full-mode pass-2 endpoints on the generic repair path", async () => {
+    const { insertPass2Edges, splitPass2EdgesForFullMode } = await import(
+      "../../dist/indexer/indexer-pass2.js"
+    );
+    const statements: string[] = [];
+    const unsafeEndpoint = edge({
+      fromSymbolId: 'from-"unsafe"',
+      toSymbolId: "to-unsafe",
+    });
+    const edges = [
+      unsafeEndpoint,
       ...Array.from({ length: 512 }, (_, index) =>
         edge({
           fromSymbolId: `from-${index}`,
@@ -610,19 +653,19 @@ describe("insertPass2Edges", () => {
 
     const split = splitPass2EdgesForFullMode(edges);
     assert.strictEqual(split.knownEndpointEdges.length, 512);
-    assert.deepStrictEqual(split.repairEdges, [unsafe]);
+    assert.deepStrictEqual(split.repairEdges, [unsafeEndpoint]);
 
     await insertPass2Edges(createFakeConnection(statements), edges, "full");
 
     assert.strictEqual(
       countStatementsContaining(statements, "COPY DEPENDS_ON FROM"),
       1,
-      "clean rows should still use the fast relationship COPY path",
+      "safe known endpoint rows should still use relationship COPY",
     );
     assert.strictEqual(
       countStatementsContaining(statements, "CREATE (a)-[:DEPENDS_ON"),
       1,
-      "unsafe provenance rows should use the parameterized fallback writer",
+      "unsafe endpoint rows should use generic endpoint repair",
     );
   });
 

@@ -258,7 +258,10 @@ Provider-first fallback note: pass-2 now keeps sequential resolver execution
 deterministic when `indexing.pass2Concurrency <= 1`, but coalesces the
 resulting LadybugDB writes into bounded batches before draining. Incremental
 symbol-only submissions still run the stale-call delete; full-mode symbol-only
-submissions are skipped as no-op writes.
+submissions are skipped as no-op writes. Full-mode known-endpoint pass-2 edges
+sanitize diagnostic provenance before the relationship `COPY` artifact so
+common C++ call provenance punctuation does not force the slow generic writer;
+unresolved targets and unsafe endpoint ids still use the repair path.
 
 ## `liveIndex`
 
