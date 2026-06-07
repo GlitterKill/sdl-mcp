@@ -216,9 +216,9 @@ jobs:
           - os: ubuntu-latest
             native-artifact: native-addon-x86_64-unknown-linux-gnu
             native-addon-file: sdl-mcp-native.linux-x64-gnu.node
-          - os: windows-latest
-            native-artifact: native-addon-x86_64-pc-windows-msvc
-            native-addon-file: sdl-mcp-native.win32-x64-msvc.node
+          # Windows hosted runners can segfault in LadybugDB during benchmark:ci
+          # even with the Rust indexer addon disabled. Keep the native benchmark
+          # guardrail on Linux; Windows remains covered by tests and native parity.
 
     steps:
       - name: Checkout code
@@ -307,17 +307,7 @@ jobs:
         shell: bash
         run: |
           echo "Running benchmark CI against locked OSS repo (zod-oss)..."
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            THRESHOLD_PATH="config/benchmark.ci.windows.config.json"
-            # Windows hosted runners intermittently segfault in the native
-            # addon during benchmark:ci. Keep Windows benchmark guardrails
-            # active against the TypeScript engine; Linux still covers native
-            # benchmark performance in this matrix.
-            export SDL_MCP_DISABLE_NATIVE_ADDON=1
-            unset SDL_MCP_NATIVE_ADDON_PATH
-          else
-            THRESHOLD_PATH="config/benchmark.ci.config.json"
-          fi
+          THRESHOLD_PATH="config/benchmark.ci.config.json"
           echo "Using threshold config: ${THRESHOLD_PATH}"
           npm run build
           node dist/cli/index.js benchmark:ci --repo-id zod-oss --threshold-path "${THRESHOLD_PATH}" --json --out .benchmark/latest-result.json

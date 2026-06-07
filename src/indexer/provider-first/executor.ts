@@ -1276,7 +1276,14 @@ async function loadDocumentSourceLines(
   >();
   const neededLinesByPath = collectNeededSourceLines(documents);
   const sourcePaths: Array<{ relPath: string; sourcePath: string }> = [];
-  const normalizedRoot = normalizePath(repoRoot);
+  let normalizedRoot = normalizePath(repoRoot);
+  try {
+    // Compare canonical paths so Windows short-path expansion cannot make an
+    // in-repo source file look like it escaped the configured repository root.
+    normalizedRoot = normalizePath(await realpath(repoRoot));
+  } catch {
+    normalizedRoot = normalizePath(repoRoot);
+  }
 
   for (const relPath of neededLinesByPath.keys()) {
     const sourcePath = resolveDocumentPath(repoRoot, relPath);

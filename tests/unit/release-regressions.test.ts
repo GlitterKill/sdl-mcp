@@ -124,7 +124,13 @@ describe("release regression guards", () => {
     assert.match(
       benchmarksJob,
       /needs:\s*native-build[\s\S]*uses:\s*actions\/download-artifact@v7[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
-      "benchmarks job should run against the freshly built native addon",
+      "benchmarks job should run against the freshly built Linux native addon",
+    );
+
+    assert.doesNotMatch(
+      benchmarksJob,
+      /os:\s*windows-latest/,
+      "benchmark CI should not schedule the unstable Windows native/LadybugDB benchmark lane",
     );
 
     assert.match(

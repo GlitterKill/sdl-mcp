@@ -7,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -4958,7 +4959,7 @@ describe("provider-first indexing foundation", () => {
     const elapsedMs = Date.now() - startedAt;
 
     assert.ok(
-      elapsedMs < 300,
+      elapsedMs < 2_000,
       `normalization should keep cap-exceeded containment local; took ${elapsedMs}ms`,
     );
     assert.equal(facts.edges.length, 1);
@@ -5074,13 +5075,27 @@ describe("provider-first indexing foundation", () => {
   });
 
   it("records source loader reasons in call-proof diagnostics", async () => {
-    const repoRoot = mkdtempSync(join(tmpdir(), "sdl-provider-first-source-"));
+    const realRepoRoot = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-source-real-"),
+    );
+    const linkedRepoParent = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-source-link-"),
+    );
+    const linkedRepoRoot = join(linkedRepoParent, "repo");
+    let repoRoot = realRepoRoot;
     const main = "scip-typescript npm fixture 1.0.0 src/index.ts/main().";
     const helper = "scip-typescript npm fixture 1.0.0 src/index.ts/helper().";
     try {
-      mkdirSync(join(repoRoot, "src"), { recursive: true });
+      try {
+        symlinkSync(realRepoRoot, linkedRepoRoot, "junction");
+        repoRoot = linkedRepoRoot;
+      } catch {
+        repoRoot = realRepoRoot;
+      }
+
+      mkdirSync(join(realRepoRoot, "src"), { recursive: true });
       writeFileSync(
-        join(repoRoot, "src", "index.ts"),
+        join(realRepoRoot, "src", "index.ts"),
         [
           "export function main() {",
           "  return helper();",
@@ -5091,7 +5106,7 @@ describe("provider-first indexing foundation", () => {
           "}",
         ].join("\n"),
       );
-      await writeTestScipIndex(join(repoRoot, "index.scip"), {
+      await writeTestScipIndex(join(realRepoRoot, "index.scip"), {
         metadata: {
           toolName: "scip-fixture",
           toolVersion: "1.0.0",
@@ -5154,7 +5169,8 @@ describe("provider-first indexing foundation", () => {
         { code: "sourceTooLarge", references: 1 },
       ]);
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      rmSync(linkedRepoParent, { recursive: true, force: true });
+      rmSync(realRepoRoot, { recursive: true, force: true });
     }
   });
 

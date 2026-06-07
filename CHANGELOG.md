@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CI benchmark guardrails**: Limited benchmark CI to the Linux native-addon lane after Windows hosted runners continued to segfault in `benchmark:ci` even with the Rust indexer addon disabled. Windows remains covered by the broad test matrix and native parity job.
 - **Provider-first provider collection**: Normal CLI timing output now breaks down the provider collection bucket into SCIP metadata, document decode, external-symbol loading, source-line loading, normalization, row shaping, and validation subphases. Provider source-line loading also retains broad import-alias context only for alias-bearing import lines, reducing provider-first memory and normalization work for large repos with many plain imports.
 - **Pass-1 write batching**: Centralized LadybugDB write chunk sizing, raised safe edge/reference/file defaults to reduce pass-1 prepared statement count, let pass-1 skip redundant existing `DEPENDS_ON` refreshes after source-symbol replacement, moved full-refresh stale-symbol deletion ahead of pass-1 flushes, and collapsed file-scoped stale symbol relationship cleanup into one `DETACH DELETE` pass while keeping ID-keyed metrics/reference/cache cleanup explicit.
 - **SCIP generated index handling**: Raised decoder file caps to 512 MiB and added generated split-index fallback with SHA-256 dedupe for identical TypeScript/JavaScript split artifacts.
