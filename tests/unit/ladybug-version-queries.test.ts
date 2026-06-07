@@ -174,6 +174,271 @@ describe("LadybugDB Version & Snapshot Queries", () => {
   );
 
   it(
+    "snapshotSymbolVersionsBatch writes multiple symbol versions in one API call",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.snapshotSymbolVersionsBatch(
+        conn as unknown as import("kuzu").Connection,
+        [
+          {
+            versionId: "v-batch",
+            symbolId: "sym-1",
+            astFingerprint: "fp-1",
+            signatureJson: "{}",
+            summary: null,
+            invariantsJson: null,
+            sideEffectsJson: null,
+          },
+          {
+            versionId: "v-batch",
+            symbolId: "sym-2",
+            astFingerprint: "fp-2",
+            signatureJson: null,
+            summary: "summary",
+            invariantsJson: "[]",
+            sideEffectsJson: "[]",
+          },
+        ],
+      );
+
+      const rows = await queries.getSymbolVersionsAtVersion(
+        conn as unknown as import("kuzu").Connection,
+        "v-batch",
+      );
+      assert.deepStrictEqual(
+        rows.map((row) => row.symbolId).sort(),
+        ["sym-1", "sym-2"],
+      );
+      assert.deepStrictEqual(
+        rows.map((row) => row.id).sort(),
+        ["v-batch:sym-1", "v-batch:sym-2"],
+      );
+    },
+  );
+
+  it(
+    "snapshotFreshSymbolVersionsCopy bulk loads a known-fresh version",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.snapshotFreshSymbolVersionsCopy(
+        conn as unknown as import("kuzu").Connection,
+        [
+          {
+            versionId: "v-copy",
+            symbolId: "sym-1",
+            astFingerprint: "fp-1",
+            signatureJson: '{"params":["a,b"]}',
+            summary: "summary\nwith newline",
+            invariantsJson: null,
+            sideEffectsJson: "[]",
+          },
+          {
+            versionId: "v-copy",
+            symbolId: "sym-2",
+            astFingerprint: "fp-2",
+            signatureJson: null,
+            summary: null,
+            invariantsJson: "[]",
+            sideEffectsJson: null,
+          },
+        ],
+      );
+
+      const rows = (
+        await queries.getSymbolVersionsAtVersion(
+          conn as unknown as import("kuzu").Connection,
+          "v-copy",
+        )
+      ).sort((a, b) => a.symbolId.localeCompare(b.symbolId));
+      assert.strictEqual(rows.length, 2);
+      assert.strictEqual(rows[0]!.id, "v-copy:sym-1");
+      assert.strictEqual(rows[0]!.signatureJson, '{"params":["a,b"]}');
+      assert.strictEqual(rows[0]!.summary, "summary\nwith newline");
+      assert.strictEqual(rows[1]!.id, "v-copy:sym-2");
+      assert.strictEqual(rows[1]!.summary, null);
+    },
+  );
+
+  it(
+    "snapshotFreshSymbolVersionsCopyPages bulk loads multiple pages",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.snapshotFreshSymbolVersionsCopyPages(
+        conn as unknown as import("kuzu").Connection,
+        [
+          [
+            {
+              versionId: "v-copy-pages",
+              symbolId: "page-sym-1",
+              astFingerprint: "fp-1",
+              signatureJson: '{"params":["a,b"]}',
+              summary: "summary\nwith newline",
+              invariantsJson: null,
+              sideEffectsJson: "[]",
+            },
+          ],
+          [
+            {
+              versionId: "v-copy-pages",
+              symbolId: "page-sym-2",
+              astFingerprint: "fp-2",
+              signatureJson: null,
+              summary: null,
+              invariantsJson: "[]",
+              sideEffectsJson: null,
+            },
+          ],
+        ],
+      );
+
+      const rows = (
+        await queries.getSymbolVersionsAtVersion(
+          conn as unknown as import("kuzu").Connection,
+          "v-copy-pages",
+        )
+      ).sort((a, b) => a.symbolId.localeCompare(b.symbolId));
+      assert.strictEqual(rows.length, 2);
+      assert.strictEqual(rows[0]!.id, "v-copy-pages:page-sym-1");
+      assert.strictEqual(rows[0]!.signatureJson, '{"params":["a,b"]}');
+      assert.strictEqual(rows[0]!.summary, "summary\nwith newline");
+      assert.strictEqual(rows[1]!.id, "v-copy-pages:page-sym-2");
+      assert.strictEqual(rows[1]!.summary, null);
+    },
+  );
+
+  it(
+    "getSymbolsByRepoForSnapshotPage pages snapshot rows by symbol id cursor",
+    { skip: !ladybugAvailable },
+    async () => {
+      for (const symbolId of ["sym-2", "sym-1", "sym-3"]) {
+        await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
+          symbolId,
+          repoId,
+          fileId,
+          kind: "function",
+          name: symbolId,
+          exported: true,
+          visibility: null,
+          language: "typescript",
+          rangeStartLine: 1,
+          rangeStartCol: 0,
+          rangeEndLine: 1,
+          rangeEndCol: 1,
+          astFingerprint: `fp-${symbolId}`,
+          signatureJson: `{"name":"${symbolId}"}`,
+          summary: `summary ${symbolId}`,
+          invariantsJson: null,
+          sideEffectsJson: null,
+          updatedAt: "2026-03-04T00:00:00Z",
+        });
+      }
+
+      const firstPage = await queries.getSymbolsByRepoForSnapshotPage(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        { limit: 2 },
+      );
+      assert.deepStrictEqual(
+        firstPage.map((row) => row.symbolId),
+        ["sym-1", "sym-2"],
+      );
+
+      const secondPage = await queries.getSymbolsByRepoForSnapshotPage(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        { afterSymbolId: firstPage.at(-1)?.symbolId, limit: 2 },
+      );
+      assert.deepStrictEqual(
+        secondPage.map((row) => row.symbolId),
+        ["sym-3"],
+      );
+    },
+  );
+
+  it(
+    "snapshot symbol queries exclude external symbols even when legacy status is real",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
+        symbolId: "real-sym",
+        repoId,
+        fileId,
+        kind: "function",
+        name: "realSym",
+        exported: true,
+        visibility: null,
+        language: "typescript",
+        rangeStartLine: 1,
+        rangeStartCol: 0,
+        rangeEndLine: 1,
+        rangeEndCol: 1,
+        astFingerprint: "real-fp",
+        signatureJson: "{}",
+        summary: null,
+        invariantsJson: null,
+        sideEffectsJson: null,
+        updatedAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.exec(
+        conn as unknown as import("kuzu").Connection,
+        `MATCH (r:Repo {repoId: $repoId})
+         CREATE (s:Symbol {
+           symbolId: 'external-real-status',
+           repoId: $repoId,
+           kind: 'function',
+           name: 'externalApi',
+           exported: true,
+           visibility: 'public',
+           language: 'external',
+           rangeStartLine: 0,
+           rangeStartCol: 0,
+           rangeEndLine: 0,
+           rangeEndCol: 0,
+           astFingerprint: 'external-fp',
+           signatureJson: '{}',
+           summary: null,
+           invariantsJson: null,
+           sideEffectsJson: null,
+           roleTagsJson: '[]',
+           searchText: 'externalApi',
+           updatedAt: '2026-03-04T00:00:00Z',
+           external: true,
+           symbolStatus: 'real',
+           placeholderKind: 'scip',
+           placeholderTarget: 'scip-typescript npm dep 1.0.0 dep/index.ts/api().'
+         })
+         CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
+        { repoId },
+      );
+
+      const allSnapshotRows = await queries.getSymbolsByRepoForSnapshot(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+      );
+      assert.deepStrictEqual(
+        allSnapshotRows.map((row) => row.symbolId).sort(),
+        ["real-sym"],
+      );
+
+      const pageRows = await queries.getSymbolsByRepoForSnapshotPage(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        { limit: 10 },
+      );
+      assert.deepStrictEqual(
+        pageRows.map((row) => row.symbolId),
+        ["real-sym"],
+      );
+
+      const count = await queries.getSymbolCount(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+      );
+      assert.equal(count, 1);
+    },
+  );
+
+  it(
     "getFanInAtVersion counts only callers present at version",
     { skip: !ladybugAvailable },
     async () => {

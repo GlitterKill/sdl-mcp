@@ -42,6 +42,7 @@ import {
   DEFAULT_MEMORY_SURFACE_LIMIT,
   MIN_POST_INDEX_SESSION_TIMEOUT_MS,
   MAX_POST_INDEX_SESSION_TIMEOUT_MS,
+  DEFAULT_LOUVAIN_MAX_CALL_EDGES,
 } from "./constants.js";
 
 export const LanguageSchema = z.enum([
@@ -99,7 +100,12 @@ export const RepoConfigSchema = z.object({
       "**/dist/**",
       "**/dist-*/**",
       "**/build/**",
+      "**/build-*/**",
+      "**/build_*/**",
+      "**/cmake-build-*/**",
       "**/out/**",
+      "**/out-*/**",
+      "**/out_*/**",
       "**/target/**",
       "**/coverage/**",
       "**/node_modules/**",
@@ -204,9 +210,13 @@ export const AlgorithmRefreshConfigSchema = z.object({
   louvain: z
     .object({
       enabled: z.boolean().default(true),
-      maxCallEdges: z.number().int().min(0).default(50_000),
+      maxCallEdges: z
+        .number()
+        .int()
+        .min(0)
+        .default(DEFAULT_LOUVAIN_MAX_CALL_EDGES),
     })
-    .default({ enabled: true, maxCallEdges: 50_000 }),
+    .default({ enabled: true, maxCallEdges: DEFAULT_LOUVAIN_MAX_CALL_EDGES }),
   workerTimeoutMs: z
     .number()
     .int()
@@ -246,12 +256,19 @@ export const ProviderFirstIndexingConfigSchema = z
     activation: z.enum(["shadowDb"]).default("shadowDb"),
     readyState: z.enum(["graphPlusAlgorithms"]).default("graphPlusAlgorithms"),
     stagingFormat: z.enum(["parquet", "csv"]).default("parquet"),
+    maxLegacyFallbackFiles: z
+      .number()
+      .int()
+      .min(0)
+      .max(1_000_000)
+      .default(5_000),
     lsp: ProviderFirstLspIndexingConfigSchema,
   })
   .default({
     activation: "shadowDb",
     readyState: "graphPlusAlgorithms",
     stagingFormat: "parquet",
+    maxLegacyFallbackFiles: 5_000,
     lsp: {
       mode: "primaryWithCaps",
       workspaceSymbolLimit: 5_000,
@@ -290,7 +307,7 @@ export const IndexingConfigSchema = z.object({
     enabled: true,
     pageRank: { enabled: true },
     kCore: { enabled: true },
-    louvain: { enabled: true, maxCallEdges: 50_000 },
+    louvain: { enabled: true, maxCallEdges: DEFAULT_LOUVAIN_MAX_CALL_EDGES },
     workerTimeoutMs: 120_000,
   }),
 });
@@ -905,7 +922,7 @@ export const ScipGeneratorConfigSchema = z.object({
     .number()
     .int()
     .min(1000)
-    .max(30 * 60 * 1000)
+    .max(5 * 60 * 60 * 1000)
     .default(10 * 60 * 1000),
   /**
    * Delete the generator-produced `<repoRoot>/index.scip` after the post-
@@ -919,6 +936,14 @@ export const ScipGeneratorConfigSchema = z.object({
    * that file's lifecycle yourself.
    */
   cleanupAfterIngest: z.boolean().default(true),
+  /**
+   * Cache generated SCIP artifacts by source/config fingerprint and reuse
+   * them on later unchanged refreshes. This avoids rerunning expensive
+   * compiler indexers on repeated full indexes while still invalidating when
+   * tracked source files, common build manifests, generator args, or the
+   * scip-io binary change.
+   */
+  cacheGeneratedIndexes: z.boolean().default(true),
 });
 
 export type ScipGeneratorConfig = z.infer<typeof ScipGeneratorConfigSchema>;
@@ -940,6 +965,7 @@ export const ScipConfigSchema = z.object({
     autoInstall: true,
     timeoutMs: 10 * 60 * 1000,
     cleanupAfterIngest: true,
+    cacheGeneratedIndexes: true,
   }),
 });
 
@@ -955,7 +981,6 @@ export const SemanticEnrichmentScipProviderConfigSchema =
   SemanticEnrichmentProviderBaseConfigSchema.extend({
     indexes: z.array(ScipIndexEntrySchema).default([]),
   });
-
 
 export const SemanticEnrichmentLspServerConfigSchema = z.object({
   enabled: z.boolean().default(true),

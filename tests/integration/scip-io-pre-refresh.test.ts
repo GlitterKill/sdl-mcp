@@ -9,8 +9,8 @@
  * Cases covered:
  *
  *   1. Disabled (default): the stub is NOT invoked.
- *   2. Enabled with explicit stub path: the stub IS invoked with cwd=repoRoot
- *      and "index" as the first arg, and `indexRepo()` completes.
+ *   2. Enabled with explicit stub path: the stub IS invoked with cwd=repoRoot,
+ *      "index" as the first arg, and a repo-language `--lang` filter.
  *   3. Enabled but stub exits non-zero: indexing still completes successfully
  *      (non-fatal failure mode).
  *   4. Oversized merged output: pre-refresh retries with `--no-merge`,
@@ -116,8 +116,33 @@ const opts = ${JSON.stringify(opts)};
 const args = process.argv.slice(2);
 appendFileSync(opts.logFile, \`cwd=\${process.cwd()} args=\${args.join(" ")}\\n\`);
 
+function requestedLanguages(args) {
+  const values = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--lang" || arg === "-l") {
+      values.push(args[i + 1] ?? "");
+      i++;
+    } else if (arg.startsWith("--lang=")) {
+      values.push(arg.slice("--lang=".length));
+    } else if (arg.startsWith("-l") && arg.length > 2) {
+      values.push(arg.slice(2));
+    }
+  }
+  const langs = values.flatMap((value) =>
+    value
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean),
+  );
+  return langs.length > 0 ? new Set(langs) : null;
+}
+
 if (args.includes("--no-merge")) {
+  const langs = requestedLanguages(args);
   for (const [relPath, content] of Object.entries(opts.splitFiles)) {
+    const language = relPath.replace(/\\.scip$/, "");
+    if (langs && !langs.has(language)) continue;
     const target = join(process.cwd(), relPath);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, content);
@@ -306,7 +331,7 @@ describe("scip-io pre-refresh hook", () => {
     );
   });
 
-  it("invokes scip-io with cwd=repoRoot and 'index' arg when generator is enabled", async () => {
+  it("invokes scip-io with cwd=repoRoot and repo-language filter", async () => {
     if (existsSync(invocationLog)) rmSync(invocationLog);
     const stub = makeStubBinary(stubBinDir, {
       exitCode: 0,
@@ -328,6 +353,12 @@ describe("scip-io pre-refresh hook", () => {
     );
     const log = readFileSync(invocationLog, "utf-8");
     assert.match(log, /args=.*index/, `log was: ${log}`);
+    assert.match(
+      log,
+      /args=.*index --lang typescript(?:\s|$)/,
+      `log was: ${log}`,
+    );
+    assert.doesNotMatch(log, /java|csharp|go|cpp/, `log was: ${log}`);
 
     // The stub wrote index.scip into cwd. Verify it landed in the repo
     // root, which is what the cwd should have been.
@@ -376,6 +407,7 @@ describe("scip-io pre-refresh hook", () => {
       const path = join(repoDir, relPath);
       if (existsSync(path)) rmSync(path);
     }
+    writeFileSync(join(repoDir, "python.scip"), "STALE_PY", "utf-8");
 
     const stub = makeSplitFallbackStubBinary(stubBinDir, {
       logFile: invocationLog,
@@ -390,6 +422,7 @@ describe("scip-io pre-refresh hook", () => {
     const result = await runScipIoBeforeIndex({
       repoRootPath: repoDir,
       maxIndexBytes: 8,
+      repoLanguages: ["ts", "js"],
       generatorCfg: {
         enabled: true,
         binary: stub,
@@ -406,12 +439,21 @@ describe("scip-io pre-refresh hook", () => {
       .filter((index) => !index.skipped)
       .map((index) => index.path)
       .sort();
-    assert.equal(acceptedPaths.length, 2);
-    assert.ok(acceptedPaths.includes("python.scip"));
+    assert.equal(acceptedPaths.length, 1);
+    assert.ok(!acceptedPaths.includes("python.scip"));
     assert.ok(
       acceptedPaths.includes("javascript.scip") ||
         acceptedPaths.includes("typescript.scip"),
       "one scip-typescript split artifact should be accepted",
+    );
+    assert.ok(
+      result.generatedIndexes.some(
+        (index) =>
+          index.path === "python.scip" &&
+          index.skipped === true &&
+          index.skipReason === "stale-generated-output",
+      ),
+      "stale split files from languages outside the filtered run should not be ingested",
     );
     assert.ok(
       result.generatedIndexes.some(
@@ -431,8 +473,8 @@ describe("scip-io pre-refresh hook", () => {
     );
 
     const log = readFileSync(invocationLog, "utf-8");
-    assert.match(log, /args=index\r?\n/);
-    assert.match(log, /args=index --no-merge/);
+    assert.match(log, /args=index --lang typescript,javascript\r?\n/);
+    assert.match(log, /args=index --lang typescript,javascript --no-merge/);
   });
 
   it("auto-registers index.scip in scip.indexes when generator is enabled", () => {

@@ -39,7 +39,30 @@ export type IndexProgressSubstage =
   | "fileSummaryEmbeddings"
   | "clusterRefresh"
   | "processRefresh"
-  | "algorithmRefresh";
+  | "algorithmRefresh"
+  | "coverageScan"
+  | "providerCollection.metadata"
+  | "providerCollection.documents"
+  | "providerCollection.externalSymbols"
+  | "providerCollection.sourceLines"
+  | "providerCollection.normalize"
+  | "providerCollection.rows"
+  | "providerCollection.validate"
+  | "coverageAnalyze"
+  | "materialize.deleteFileSymbols"
+  | "materialize.upsertFiles"
+  | "materialize.upsertSymbols"
+  | "materialize.upsertSymbols.nodeAndRelCreate"
+  | "materialize.upsertSymbols.nodeUpsert"
+  | "materialize.upsertSymbols.fileRelCreate"
+  | "materialize.upsertSymbols.repoRelCreate"
+  | "materialize.pruneExternalSymbols"
+  | "materialize.mergeExternalSymbols"
+  | "materialize.insertEdges"
+  | "legacyFallbackInit"
+  | "shadowStage"
+  | "shadowFinalize"
+  | "shadowActivate";
 
 export interface IndexProgress {
   stage:
@@ -47,6 +70,7 @@ export interface IndexProgress {
     | "parsing"
     | "pass1"
     | "scipIngest"
+    | "providerFirst"
     | "pass2"
     | "finalizing"
     | "summaries"
@@ -150,6 +174,8 @@ export interface Pass1Params {
   supportsPass2FilePath: (relPath: string) => boolean;
   concurrency: number;
   workerPool?: ParserWorkerPool | null;
+  useBatchPersist?: boolean;
+  batchSymbolWriteMode?: "merge" | "fresh-copy";
   onProgress: ((progress: IndexProgress) => void) | undefined;
   signal?: AbortSignal;
   includeTimings?: boolean;

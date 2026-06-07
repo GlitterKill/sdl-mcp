@@ -6,6 +6,10 @@ import { readFileAsync, statAsync } from "../util/asyncFs.js";
 import { logger } from "../util/logger.js";
 
 import { walkRepositoryFiles } from "./fileWalker.js";
+import {
+  getLanguageIdForExtension,
+  getSupportedExtensions,
+} from "./adapter/registry.js";
 
 export interface FileMetadata {
   path: string;
@@ -13,8 +17,70 @@ export interface FileMetadata {
   mtime: number;
 }
 
-function getLanguageExtensions(languages: string[]): string[] {
-  return languages.map((lang) => `.${lang}`);
+const EXACT_CONFIG_LANGUAGE_EXTENSIONS = new Map<string, readonly string[]>([
+  ["ts", [".ts"]],
+  ["tsx", [".tsx"]],
+  ["js", [".js"]],
+  ["jsx", [".jsx"]],
+]);
+
+const CANONICAL_LANGUAGE_IDS_BY_CONFIG = new Map<string, string>([
+  ["py", "python"],
+  ["cs", "csharp"],
+  ["rs", "rust"],
+  ["kt", "kotlin"],
+  ["sh", "shell"],
+]);
+
+const PROVIDER_SCAN_COMPANION_EXTENSIONS = new Map<
+  string,
+  readonly string[]
+>([
+  // scip-clang emits headers and generated include fragments beside C++ source
+  // documents. Keep them in scan scope so provider-first coverage can accept
+  // those facts even though fallback parsing may still route some extensions
+  // through the C adapter or a skipped-file row.
+  ["cpp", [".c", ".h", ".def", ".inc"]],
+  ["python", [".pyi"]],
+]);
+
+export function getLanguageExtensions(languages: string[]): string[] {
+  const extensions = new Set<string>();
+  const supportedExtensions = getSupportedExtensions();
+
+  for (const language of languages) {
+    const normalizedLanguage = language.toLowerCase();
+    const exactExtensions =
+      EXACT_CONFIG_LANGUAGE_EXTENSIONS.get(normalizedLanguage);
+    if (exactExtensions) {
+      for (const extension of exactExtensions) extensions.add(extension);
+      continue;
+    }
+
+    const canonicalLanguageId =
+      CANONICAL_LANGUAGE_IDS_BY_CONFIG.get(normalizedLanguage) ??
+      normalizedLanguage;
+    let matchedAdapterExtension = false;
+    for (const extension of supportedExtensions) {
+      if (getLanguageIdForExtension(extension) !== canonicalLanguageId) {
+        continue;
+      }
+      extensions.add(extension);
+      matchedAdapterExtension = true;
+    }
+
+    if (!matchedAdapterExtension) {
+      extensions.add(`.${normalizedLanguage}`);
+    }
+
+    const companionExtensions =
+      PROVIDER_SCAN_COMPANION_EXTENSIONS.get(canonicalLanguageId);
+    if (companionExtensions) {
+      for (const extension of companionExtensions) extensions.add(extension);
+    }
+  }
+
+  return [...extensions].sort();
 }
 
 async function resolveWorkspaces(

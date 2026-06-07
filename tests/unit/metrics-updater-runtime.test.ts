@@ -155,6 +155,368 @@ describe("materializeFileSummaries incremental targeting", () => {
     assert.equal(unchangedSummary, null);
   });
 
+  it("skips unchanged file summaries and preserves their timestamps", async () => {
+    const { getLadybugConn } = await import("../../dist/db/ladybug.js");
+    const queries = await import("../../dist/db/ladybug-queries.js");
+    const { materializeFileSummaries } = await import(
+      "../../dist/indexer/metrics-updater.js"
+    );
+
+    await resetTestDb();
+    const conn = await getLadybugConn();
+    const repoId = "metrics-summary-stable";
+    const fileId = "file-stable";
+
+    await queries.upsertRepo(conn, {
+      repoId,
+      rootPath: "C:/tmp/metrics-summary-stable",
+      configJson: "{}",
+      createdAt: "2026-04-02T00:00:00Z",
+    });
+    await queries.upsertFile(conn, {
+      fileId,
+      repoId,
+      relPath: "src/stable.ts",
+      contentHash: "stable-hash",
+      language: "ts",
+      byteSize: 10,
+      lastIndexedAt: null,
+    });
+    await queries.upsertSymbol(conn, {
+      symbolId: "symbol-stable",
+      repoId,
+      fileId,
+      kind: "function",
+      name: "stableExport",
+      exported: true,
+      visibility: "public",
+      language: "typescript",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 1,
+      rangeEndCol: 10,
+      astFingerprint: "stable-export",
+      signatureJson: null,
+      summary: null,
+      invariantsJson: null,
+      sideEffectsJson: null,
+      updatedAt: "2026-04-02T00:00:00Z",
+    });
+
+    const materialize = materializeFileSummaries as unknown as (
+      conn: import("kuzu").Connection,
+      repoId: string,
+      options?: { changedFileIds?: Set<string>; includeTimings?: boolean },
+    ) => Promise<{
+      total: number;
+      updated: number;
+      timings?: Record<string, number>;
+    }>;
+
+    const first = await materialize(conn, repoId);
+    assert.deepStrictEqual(first, { total: 1, updated: 1 });
+    const firstSummary = await queries.getFileSummary(conn, fileId);
+    assert.ok(firstSummary);
+
+    const stableTimestamp = "2026-04-02T12:00:00.000Z";
+    await queries.upsertFileSummaryBatch(conn, [
+      {
+        fileId,
+        repoId,
+        summary: firstSummary.summary,
+        searchText: firstSummary.searchText,
+        updatedAt: stableTimestamp,
+      },
+    ]);
+
+    const second = await materialize(conn, repoId, { includeTimings: true });
+
+    assert.equal(second.total, 1);
+    assert.equal(second.updated, 0);
+    assert.equal(typeof second.timings?.loadFiles, "number");
+    assert.equal(typeof second.timings?.loadExistingSummaries, "number");
+    assert.equal(typeof second.timings?.buildPayloads, "number");
+    assert.equal(second.timings?.writeSummaries, 0);
+    assert.equal(second.timings?.writeWait, 0);
+    const secondSummary = await queries.getFileSummary(conn, fileId);
+    assert.equal(secondSummary?.updatedAt, stableTimestamp);
+  });
+
+  it("skips full metrics row rewrite when the metrics payload is unchanged", async () => {
+    const { getLadybugConn } = await import("../../dist/db/ladybug.js");
+    const queries = await import("../../dist/db/ladybug-queries.js");
+    const metrics = await import("../../dist/graph/metrics.js");
+
+    await resetTestDb();
+    const conn = await getLadybugConn();
+    const repoId = "metrics-fingerprint-skip";
+    const fileId = "file-fingerprint-skip";
+    const symbolId = "symbol-fingerprint-skip";
+    const repoRoot = join(tmpdir(), `sdl-mcp-${repoId}`);
+    mkdirSync(repoRoot, { recursive: true });
+
+    metrics._setMetricsGitHooksForTesting({
+      getCurrentCommitHash: async () => "stable-head",
+      getChurnByFile: async () => new Map(),
+    });
+
+    try {
+      await queries.upsertRepo(conn, {
+        repoId,
+        rootPath: repoRoot,
+        configJson: JSON.stringify({ languages: ["ts"] }),
+        createdAt: "2026-04-02T00:00:00Z",
+      });
+      await queries.upsertFile(conn, {
+        fileId,
+        repoId,
+        relPath: "src/fingerprint.ts",
+        contentHash: "fingerprint-hash",
+        language: "ts",
+        byteSize: 10,
+        lastIndexedAt: null,
+      });
+      await queries.upsertSymbol(conn, {
+        symbolId,
+        repoId,
+        fileId,
+        kind: "function",
+        name: "fingerprintExport",
+        exported: true,
+        visibility: "public",
+        language: "typescript",
+        rangeStartLine: 1,
+        rangeStartCol: 0,
+        rangeEndLine: 1,
+        rangeEndCol: 10,
+        astFingerprint: "fingerprint-export",
+        signatureJson: null,
+        summary: null,
+        invariantsJson: null,
+        sideEffectsJson: null,
+        updatedAt: "2026-04-02T00:00:00Z",
+      });
+
+      const first = await metrics.updateMetricsForRepo(repoId, undefined, {
+        includeTimings: true,
+      });
+      assert.equal(typeof first.timings?.writeRows, "number");
+      const firstMetric = await queries.getMetrics(conn, symbolId);
+      assert.ok(firstMetric);
+      const fingerprint = await queries.getMetricsFingerprint(conn, repoId);
+      assert.ok(fingerprint);
+      assert.equal(fingerprint.rowCount, 1);
+
+      const second = await metrics.updateMetricsForRepo(repoId, undefined, {
+        includeTimings: true,
+      });
+      assert.equal(second.timings?.writeMetrics, 0);
+      assert.equal(second.timings?.writeRows, 0);
+      assert.equal(second.timings?.writeWait, 0);
+      assert.equal(typeof second.timings?.metricsFingerprint, "number");
+
+      const secondMetric = await queries.getMetrics(conn, symbolId);
+      assert.equal(secondMetric?.updatedAt, firstMetric.updatedAt);
+    } finally {
+      metrics._setMetricsGitHooksForTesting(null);
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("updates changed existing file summaries without relationship probes", async () => {
+    const { getLadybugConn } = await import("../../dist/db/ladybug.js");
+    const queries = await import("../../dist/db/ladybug-queries.js");
+    const { materializeFileSummaries } = await import(
+      "../../dist/indexer/metrics-updater.js"
+    );
+
+    await resetTestDb();
+    const conn = await getLadybugConn();
+    const repoId = "metrics-summary-existing";
+    const fileId = "file-existing-summary";
+
+    await queries.upsertRepo(conn, {
+      repoId,
+      rootPath: "C:/tmp/metrics-summary-existing",
+      configJson: "{}",
+      createdAt: "2026-04-02T00:00:00Z",
+    });
+    await queries.upsertFile(conn, {
+      fileId,
+      repoId,
+      relPath: "src/existing.ts",
+      contentHash: "existing-hash",
+      language: "ts",
+      byteSize: 10,
+      lastIndexedAt: null,
+    });
+    await queries.upsertSymbol(conn, {
+      symbolId: "symbol-existing",
+      repoId,
+      fileId,
+      kind: "function",
+      name: "existingExport",
+      exported: true,
+      visibility: "public",
+      language: "typescript",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 1,
+      rangeEndCol: 10,
+      astFingerprint: "existing-export",
+      signatureJson: null,
+      summary: "fresh summary",
+      invariantsJson: null,
+      sideEffectsJson: null,
+      updatedAt: "2026-04-02T00:00:00Z",
+    });
+    await queries.upsertFileSummaryBatch(conn, [
+      {
+        fileId,
+        repoId,
+        summary: "stale summary",
+        searchText: "file: src/existing.ts exports: stale summary: stale",
+        updatedAt: "2026-04-02T00:00:00Z",
+      },
+    ]);
+
+    const materialize = materializeFileSummaries as unknown as (
+      conn: import("kuzu").Connection,
+      repoId: string,
+      options?: { includeTimings?: boolean },
+    ) => Promise<{
+      total: number;
+      updated: number;
+      timings?: Record<string, number>;
+    }>;
+
+    const result = await materialize(conn, repoId, { includeTimings: true });
+
+    assert.equal(result.total, 1);
+    assert.equal(result.updated, 1);
+    assert.equal(typeof result.timings?.writeWait, "number");
+    assert.equal(typeof result.timings?.writeExistingSummaries, "number");
+    assert.equal(result.timings?.writeNewSummaries, 0);
+
+    const summary = await queries.getFileSummary(conn, fileId);
+    assert.ok(summary);
+    assert.match(summary.summary ?? "", /existingExport/);
+    assert.match(summary.searchText ?? "", /fresh summary/);
+
+    const repoRelRow = await queries.querySingle<{ count: unknown }>(
+      conn,
+      `MATCH (fs:FileSummary {fileId: $fileId})-[rel:FILE_SUMMARY_IN_REPO]->(:Repo {repoId: $repoId})
+       RETURN count(rel) AS count`,
+      { fileId, repoId },
+    );
+    const fileRelRow = await queries.querySingle<{ count: unknown }>(
+      conn,
+      `MATCH (fs:FileSummary {fileId: $fileId})-[rel:SUMMARY_OF_FILE]->(:File {fileId: $fileId})
+       RETURN count(rel) AS count`,
+      { fileId },
+    );
+    assert.equal(queries.toNumber(repoRelRow?.count ?? 0), 1);
+    assert.equal(queries.toNumber(fileRelRow?.count ?? 0), 1);
+  });
+
+  it("scopes full-refresh file summaries by Symbol.repoId", async () => {
+    const { getLadybugConn } = await import("../../dist/db/ladybug.js");
+    const queries = await import("../../dist/db/ladybug-queries.js");
+    const { materializeFileSummaries } = await import(
+      "../../dist/indexer/metrics-updater.js"
+    );
+
+    await resetTestDb();
+    const conn = await getLadybugConn();
+    const repoId = "metrics-summary-scope";
+    const otherRepoId = "metrics-summary-other";
+    const fileId = "file-summary-scope";
+    const now = "2026-04-02T00:00:00Z";
+
+    await queries.upsertRepo(conn, {
+      repoId,
+      rootPath: "C:/tmp/metrics-summary-scope",
+      configJson: "{}",
+      createdAt: now,
+    });
+    await queries.upsertRepo(conn, {
+      repoId: otherRepoId,
+      rootPath: "C:/tmp/metrics-summary-other",
+      configJson: "{}",
+      createdAt: now,
+    });
+    await queries.upsertFile(conn, {
+      fileId,
+      repoId,
+      relPath: "src/scope.ts",
+      contentHash: "scope-hash",
+      language: "ts",
+      byteSize: 10,
+      lastIndexedAt: null,
+    });
+    await queries.upsertSymbol(conn, {
+      symbolId: "symbol-scope-local",
+      repoId,
+      fileId,
+      kind: "function",
+      name: "localExport",
+      exported: true,
+      visibility: "public",
+      language: "typescript",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 1,
+      rangeEndCol: 10,
+      astFingerprint: "scope-local",
+      signatureJson: null,
+      summary: "local summary",
+      invariantsJson: null,
+      sideEffectsJson: null,
+      updatedAt: now,
+    });
+    await queries.upsertSymbol(conn, {
+      symbolId: "symbol-scope-foreign",
+      repoId: otherRepoId,
+      fileId,
+      kind: "function",
+      name: "foreignExport",
+      exported: true,
+      visibility: "public",
+      language: "typescript",
+      rangeStartLine: 2,
+      rangeStartCol: 0,
+      rangeEndLine: 2,
+      rangeEndCol: 10,
+      astFingerprint: "scope-foreign",
+      signatureJson: null,
+      summary: "foreign summary",
+      invariantsJson: null,
+      sideEffectsJson: null,
+      updatedAt: now,
+    });
+    await queries.exec(
+      conn,
+      `MATCH (s:Symbol {symbolId: 'symbol-scope-foreign'})
+       MATCH (r:Repo {repoId: $repoId})
+       MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
+      { repoId },
+    );
+
+    const materialize = materializeFileSummaries as unknown as (
+      conn: import("kuzu").Connection,
+      repoId: string,
+    ) => Promise<{ total: number; updated: number }>;
+
+    const result = await materialize(conn, repoId);
+
+    assert.deepStrictEqual(result, { total: 1, updated: 1 });
+    const summary = await queries.getFileSummary(conn, fileId);
+    assert.ok(summary);
+    assert.match(summary.searchText ?? "", /localExport/);
+    assert.doesNotMatch(summary.searchText ?? "", /foreignExport/);
+    assert.doesNotMatch(summary.searchText ?? "", /foreign summary/);
+  });
+
   it("treats an empty changed-file set as a no-op", async () => {
     const { getLadybugConn } = await import("../../dist/db/ladybug.js");
     const queries = await import("../../dist/db/ladybug-queries.js");
@@ -216,6 +578,82 @@ describe("materializeFileSummaries incremental targeting", () => {
     assert.deepStrictEqual(result, { total: 0, updated: 0 });
     const summary = await queries.getFileSummary(conn, fileId);
     assert.equal(summary, null);
+  });
+
+  it("uses preloaded provider symbol facts for full-repo file summaries", async () => {
+    const { getLadybugConn } = await import("../../dist/db/ladybug.js");
+    const queries = await import("../../dist/db/ladybug-queries.js");
+    const { materializeFileSummaries } = await import(
+      "../../dist/indexer/metrics-updater.js"
+    );
+
+    await resetTestDb();
+    const conn = await getLadybugConn();
+    const repoId = "metrics-preloaded-symbols";
+    const fileId = "file-preloaded-symbols";
+
+    await queries.upsertRepo(conn, {
+      repoId,
+      rootPath: "C:/tmp/metrics-preloaded-symbols",
+      configJson: "{}",
+      createdAt: "2026-04-02T00:00:00Z",
+    });
+    await queries.upsertFile(conn, {
+      fileId,
+      repoId,
+      relPath: "src/preloaded.ts",
+      contentHash: "preloaded-hash",
+      language: "ts",
+      byteSize: 10,
+      lastIndexedAt: null,
+    });
+
+    const materialize = materializeFileSummaries as unknown as (
+      conn: import("kuzu").Connection,
+      repoId: string,
+      options?: {
+        preloadedSymbolFactsByFile?: Map<
+          string,
+          Array<{
+            fileId: string;
+            name: string;
+            kind: string;
+            exported: boolean;
+            signatureJson: string | null;
+            summary: string | null;
+            rangeStartLine: number;
+          }>
+        >;
+      },
+    ) => Promise<{ total: number; updated: number }>;
+
+    const result = await materialize(conn, repoId, {
+      preloadedSymbolFactsByFile: new Map([
+        [
+          fileId,
+          [
+            {
+              fileId,
+              name: "providerLoaded",
+              kind: "function",
+              exported: true,
+              signatureJson: JSON.stringify({
+                text: "function providerLoaded(): void",
+              }),
+              summary: "loaded from provider rows",
+              rangeStartLine: 1,
+            },
+          ],
+        ],
+      ]),
+    });
+
+    assert.deepStrictEqual(result, { total: 1, updated: 1 });
+    const summary = await queries.getFileSummary(conn, fileId);
+    assert.ok(summary);
+    assert.match(summary.summary ?? "", /providerLoaded/);
+    assert.match(summary.summary ?? "", /loaded from provider rows/);
+    assert.match(summary.searchText ?? "", /providerLoaded/);
   });
 
   it("normalizes file-backed symbols before derived metrics run", async () => {

@@ -364,11 +364,11 @@ The `file.read` tool rejects indexed source code files. Use SDL code tools (`sdl
 | Language              | Extensions                                  |
 | --------------------- | ------------------------------------------- |
 | TypeScript/JavaScript | `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs`     |
-| Python                | `.py` `.pyw`                                |
+| Python                | `.py` `.pyw` `.pyi`                         |
 | Go                    | `.go`                                       |
 | Java                  | `.java`                                     |
 | C#                    | `.cs`                                       |
-| C/C++                 | `.c` `.h` `.cpp` `.hpp` `.cc` `.cxx` `.hxx` |
+| C/C++                 | `.c` `.h` `.cpp` `.hpp` `.cc` `.cxx` `.hxx` `.def` `.inc` |
 | PHP                   | `.php` `.phtml`                             |
 | Rust                  | `.rs`                                       |
 | Kotlin                | `.kt` `.kts`                                |

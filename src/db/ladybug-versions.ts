@@ -2,15 +2,37 @@
  * ladybug-versions.ts - Version and Snapshot Operations
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
+import { createWriteStream } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { finished } from "node:stream/promises";
 import type { Connection } from "kuzu";
 import {
   exec,
+  execDdl,
   queryAll,
   querySingle,
   toNumber,
   assertSafeInt,
+  withTransaction,
 } from "./ladybug-core.js";
 import { DEFAULT_BATCH_QUERY_LIMIT } from "../config/constants.js";
+import { normalizePath } from "../util/paths.js";
+import { resolveLadybugWriteChunkSize } from "./ladybug-batching.js";
+
+const SYMBOL_VERSION_COPY_COLUMNS = [
+  "id",
+  "versionId",
+  "symbolId",
+  "astFingerprint",
+  "signatureJson",
+  "summary",
+  "invariantsJson",
+  "sideEffectsJson",
+] as const;
+const CSV_NULL_SENTINEL = "__sdl_ladybug_csv_null__";
+const SYMBOL_VERSION_CSV_WRITE_BATCH_SIZE = 4096;
 
 export interface VersionRow {
   versionId: string;
@@ -184,6 +206,222 @@ export async function snapshotSymbolVersion(
       sideEffectsJson: row.sideEffectsJson,
     },
   );
+}
+
+/**
+ * Batch snapshot current symbol facts into SymbolVersion nodes. This preserves
+ * the single-row snapshot semantics while avoiding one MERGE round trip per
+ * symbol during full-index versioning.
+ */
+export async function snapshotSymbolVersionsBatch(
+  conn: Connection,
+  rows: Array<Omit<SymbolVersionRow, "id">>,
+  options?: { chunkSize?: number },
+): Promise<void> {
+  if (rows.length === 0) return;
+  const chunkSize = resolveLadybugWriteChunkSize(
+    "symbolVersions",
+    options?.chunkSize,
+  );
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize).map((row) => ({
+      id: `${row.versionId}:${row.symbolId}`,
+      versionId: row.versionId,
+      symbolId: row.symbolId,
+      astFingerprint: row.astFingerprint,
+      signatureJson: row.signatureJson,
+      summary: row.summary,
+      invariantsJson: row.invariantsJson,
+      sideEffectsJson: row.sideEffectsJson,
+    }));
+    await withTransaction(conn, async (txConn) => {
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MERGE (sv:SymbolVersion {id: row.id})
+         SET sv.versionId = row.versionId,
+             sv.symbolId = row.symbolId,
+             sv.astFingerprint = row.astFingerprint,
+             sv.signatureJson = row.signatureJson,
+             sv.summary = row.summary,
+             sv.invariantsJson = row.invariantsJson,
+             sv.sideEffectsJson = row.sideEffectsJson`,
+        { rows: chunk },
+      );
+    });
+  }
+}
+
+/**
+ * Snapshot a known-fresh version through LadybugDB COPY. This is intentionally
+ * separate from snapshotSymbolVersionsBatch because COPY cannot preserve MERGE
+ * semantics for repair/reuse paths that may already contain SymbolVersion ids.
+ */
+export async function snapshotFreshSymbolVersionsCopy(
+  conn: Connection,
+  rows: Array<Omit<SymbolVersionRow, "id">>,
+): Promise<void> {
+  await snapshotFreshSymbolVersionsCopyPages(conn, [rows]);
+}
+
+export interface FreshSymbolVersionCopyWriter {
+  writePage(rows: readonly Omit<SymbolVersionRow, "id">[]): Promise<void>;
+  finish(conn: Connection): Promise<number>;
+  dispose(): Promise<void>;
+}
+
+export async function createFreshSymbolVersionCopyWriter(): Promise<FreshSymbolVersionCopyWriter> {
+  const tempDir = await mkdtemp(join(tmpdir(), "sdl-symbol-versions-"));
+  const filePath = join(tempDir, "symbol-versions.csv");
+  const stream = createWriteStream(filePath, { encoding: "utf8" });
+  let rowCount = 0;
+  let closed = false;
+
+  try {
+    await writeCsvLine(stream, SYMBOL_VERSION_COPY_COLUMNS);
+  } catch (err) {
+    stream.destroy();
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    throw err;
+  }
+
+  return {
+    async writePage(rows): Promise<void> {
+      if (closed) {
+        throw new Error("Cannot write to closed SymbolVersion COPY writer");
+      }
+      rowCount += await writeSymbolVersionRows(stream, rows);
+    },
+    async finish(copyConn): Promise<number> {
+      if (!closed) {
+        stream.end();
+        await finished(stream);
+        closed = true;
+      }
+      if (rowCount > 0) {
+        await execDdl(
+          copyConn,
+          `COPY SymbolVersion FROM '${escapeCopyPath(filePath)}' ` +
+            `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
+        );
+      }
+      return rowCount;
+    },
+    async dispose(): Promise<void> {
+      if (!closed) {
+        stream.destroy();
+        closed = true;
+      }
+      await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    },
+  };
+}
+
+/**
+ * Snapshot a known-fresh version from paged row batches through one streaming
+ * CSV artifact and one COPY call. The caller can keep source reads bounded
+ * while avoiding one temp file and COPY invocation per page.
+ */
+export async function snapshotFreshSymbolVersionsCopyPages(
+  conn: Connection,
+  pages:
+    | Iterable<readonly Omit<SymbolVersionRow, "id">[]>
+    | AsyncIterable<readonly Omit<SymbolVersionRow, "id">[]>,
+): Promise<number> {
+  const writer = await createFreshSymbolVersionCopyWriter();
+  try {
+    for await (const rows of pages) {
+      await writer.writePage(rows);
+    }
+    return await writer.finish(conn);
+  } finally {
+    await writer.dispose();
+  }
+}
+
+async function writeSymbolVersionRows(
+  stream: NodeJS.WritableStream,
+  rows: readonly Omit<SymbolVersionRow, "id">[],
+): Promise<number> {
+  let rowCount = 0;
+  let buffer: string[] = [];
+
+  const flush = async (): Promise<void> => {
+    if (buffer.length === 0) return;
+    const chunk = buffer.join("");
+    buffer = [];
+    if (!stream.write(chunk)) {
+      await waitForDrain(stream);
+    }
+  };
+
+  for (const row of rows) {
+    buffer.push(csvLine([
+      `${row.versionId}:${row.symbolId}`,
+      row.versionId,
+      row.symbolId,
+      row.astFingerprint,
+      row.signatureJson,
+      row.summary,
+      row.invariantsJson,
+      row.sideEffectsJson,
+    ]));
+    rowCount += 1;
+    if (buffer.length >= SYMBOL_VERSION_CSV_WRITE_BATCH_SIZE) {
+      await flush();
+    }
+  }
+  await flush();
+  return rowCount;
+}
+
+async function writeCsvLine(
+  stream: NodeJS.WritableStream,
+  cells: readonly unknown[],
+): Promise<void> {
+  const line = csvLine(cells);
+  if (!stream.write(line)) {
+    await waitForDrain(stream);
+  }
+}
+
+function csvLine(cells: readonly unknown[]): string {
+  return `${cells.map(csvCell).join(",")}\n`;
+}
+
+function waitForDrain(stream: NodeJS.WritableStream): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      stream.removeListener("drain", onDrain);
+      stream.removeListener("error", onError);
+    };
+    const onDrain = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (err: Error): void => {
+      cleanup();
+      reject(err);
+    };
+    stream.once("drain", onDrain);
+    stream.once("error", onError);
+  });
+}
+
+function csvCell(value: unknown): string {
+  if (value === null || value === undefined) return CSV_NULL_SENTINEL;
+  const text = String(value);
+  if (text === "") return '""';
+  const escaped = text.replaceAll('"', '""');
+  return /[",\r\n]/.test(escaped) ? `"${escaped}"` : escaped;
+}
+
+function escapeCopyPath(path: string): string {
+  return normalizePath(path).replace(/'/g, "''");
+}
+
+function escapeCopyOptionString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "''");
 }
 
 export async function getSymbolVersionsByIds(

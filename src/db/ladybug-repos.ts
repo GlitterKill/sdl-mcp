@@ -770,6 +770,7 @@ export async function getFilesByIds(
 export interface FileLiteRow {
   fileId: string;
   relPath: string;
+  contentHash: string;
 }
 
 export async function getFilesByRepoLite(
@@ -780,7 +781,8 @@ export async function getFilesByRepoLite(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)
      RETURN f.fileId AS fileId,
-            f.relPath AS relPath`,
+            f.relPath AS relPath,
+            f.contentHash AS contentHash`,
     { repoId },
   );
 

@@ -313,8 +313,132 @@ describe("renderIndexProgress — pass-1 drain substage", () => {
   });
 });
 
+describe("renderIndexProgress — provider-first stage", () => {
+  it("renders provider-first substages with known counters", async () => {
+    const { createProgressState, renderIndexProgress } =
+      await import("../../dist/cli/commands/index.js");
+    try {
+      const state = createProgressState();
+      renderIndexProgress(state, {
+        stage: "providerFirst",
+        current: 0,
+        total: 0,
+        substage: "providerCollection.sourceLines",
+        stageCurrent: 3,
+        stageTotal: 8,
+      });
+      const output = captured.join("");
+      assert.ok(
+        output.includes("Provider-first source lines"),
+        `output should label the provider-first substage: ${output}`,
+      );
+      assert.ok(
+        output.includes("37%"),
+        `output should compute 3/8 = 37%: ${output}`,
+      );
+      assert.ok(
+        output.includes("(3/8)"),
+        `output should include the raw counter: ${output}`,
+      );
+    } finally {
+      restoreStdout();
+    }
+  });
+
+  it("renders provider-first heartbeat messages without a known total", async () => {
+    const { createProgressState, renderIndexProgress } =
+      await import("../../dist/cli/commands/index.js");
+    try {
+      const state = createProgressState();
+      renderIndexProgress(state, {
+        stage: "providerFirst",
+        current: 1200,
+        total: 0,
+        substage: "providerCollection.documents",
+        message: "[scip-io] documents=1200",
+      });
+      const output = captured.join("");
+      assert.ok(
+        output.includes("Provider-first documents"),
+        `output should label the document decode heartbeat: ${output}`,
+      );
+      assert.ok(
+        output.includes("documents=1200"),
+        `output should include the heartbeat message: ${output}`,
+      );
+    } finally {
+      restoreStdout();
+    }
+  });
+});
+
 describe("renderIndexProgress — known stages have user-facing labels", () => {
-  it("scanning, parsing, pass1, scipIngest, pass2 each render", async () => {
+  it("prints the first non-TTY line when entering a new percent-throttled stage", async () => {
+    const { createProgressState, renderIndexProgress } =
+      await import("../../dist/cli/commands/index.js");
+    try {
+      const state = createProgressState();
+      renderIndexProgress(state, {
+        stage: "parsing",
+        current: 0,
+        total: 2339,
+      });
+      captured = [];
+      renderIndexProgress(state, {
+        stage: "pass1",
+        current: 0,
+        total: 2339,
+        currentFile: "llvm/benchmarks/DummyYAML.cpp",
+      });
+
+      const output = captured.join("");
+      assert.ok(
+        output.includes("Pass 1 (symbols)"),
+        `stage transition should print the first pass1 line: ${output}`,
+      );
+      assert.ok(
+        output.includes("llvm/benchmarks/DummyYAML.cpp"),
+        `stage transition should include the current file: ${output}`,
+      );
+    } finally {
+      restoreStdout();
+    }
+  });
+
+  it("prints each pass1 file for bounded fallback-sized runs", async () => {
+    const { createProgressState, renderIndexProgress } =
+      await import("../../dist/cli/commands/index.js");
+    try {
+      const state = createProgressState();
+      renderIndexProgress(state, {
+        stage: "pass1",
+        current: 0,
+        total: 2339,
+        currentFile: "llvm/benchmarks/DummyYAML.cpp",
+      });
+      captured = [];
+      renderIndexProgress(state, {
+        stage: "pass1",
+        current: 1,
+        total: 2339,
+        currentFile: "llvm/benchmarks/FormatVariadic.cpp",
+      });
+
+      const output = captured.join("");
+      assert.ok(
+        output.includes("(1/2339)"),
+        `bounded pass1 updates should bypass the percent throttle: ${output}`,
+      );
+      assert.ok(
+        output.includes("llvm/benchmarks/FormatVariadic.cpp"),
+        `bounded pass1 updates should include each current file: ${output}`,
+      );
+    } finally {
+      restoreStdout();
+    }
+  });
+
+  it("scanning, parsing, pass1, scipIngest, providerFirst, pass2 each render", async () => {
     const { createProgressState, renderIndexProgress } =
       await import("../../dist/cli/commands/index.js");
     try {
@@ -323,6 +447,7 @@ describe("renderIndexProgress — known stages have user-facing labels", () => {
         "parsing",
         "pass1",
         "scipIngest",
+        "providerFirst",
         "pass2",
       ] as const;
       for (const stage of stages) {

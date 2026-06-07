@@ -175,6 +175,10 @@ describe("extractNameFromDescriptors", () => {
     );
   });
 
+  it("extracts module name from raw namespace descriptor", () => {
+    assert.strictEqual(extractNameFromDescriptors("cluster/"), "cluster");
+  });
+
   it("extracts function name from function descriptor", () => {
     assert.strictEqual(
       extractNameFromDescriptors("src/utils/parse()."),
@@ -361,6 +365,34 @@ describe("mapScipKind", () => {
       );
       assert.strictEqual(result.skip, false);
       if (!result.skip) assert.strictEqual(result.sdlKind, "module");
+    });
+
+    it("maps raw namespace descriptors ending in slash to module", () => {
+      const result = mapScipKind(
+        "rust-analyzer cargo sdl-mcp-native 0.1.0 cluster/",
+        LSP_KIND.Module,
+      );
+      assert.strictEqual(result.skip, false);
+      if (!result.skip) assert.strictEqual(result.sdlKind, "module");
+    });
+
+    it("maps scip-python module initializer descriptors to modules", () => {
+      const result = mapScipKind(
+        "scip-python python sentry 0.0.0 `fixtures.page_objects`/__init__:",
+      );
+      assert.strictEqual(result.skip, false);
+      if (!result.skip) assert.strictEqual(result.sdlKind, "module");
+    });
+
+    it("extracts module name from scip-python initializer descriptors", () => {
+      assert.strictEqual(
+        extractNameFromDescriptors("`fixtures.page_objects`/__init__:"),
+        "fixtures.page_objects",
+      );
+      assert.strictEqual(
+        extractNameFromDescriptors("bin/__init__:"),
+        "bin",
+      );
     });
   });
 

@@ -40,6 +40,7 @@ import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js"
 import { routeConfigAdminApiRequest } from "../../config/admin-api.js";
 import type { LiveIndexCoordinator } from "../../live-index/types.js";
 import { SessionManager } from "../../mcp/session-manager.js";
+import { createRuntimeIdentity } from "../../util/runtime-identity.js";
 import type {
   BeamExplainStore,
   ObservabilityService,
@@ -1503,8 +1504,10 @@ async function handleRestRequest(
           totalEdges,
           durationMs: result.durationMs,
           summaryStats: result.summaryStats ?? null,
+          scip: result.scip ?? null,
           providerFirstExecution: result.providerFirstExecution ?? null,
           semanticDeferred: result.semanticDeferred ?? false,
+          runtimeIdentity: createRuntimeIdentity(import.meta.url),
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

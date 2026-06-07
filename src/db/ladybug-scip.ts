@@ -606,13 +606,24 @@ export async function getScipIngestionRecord(
   conn: Connection,
   repoId: string,
   indexPath: string,
-): Promise<{ id: string; contentHash: string; ingestedAt: string } | null> {
-  return querySingle<{ id: string; contentHash: string; ingestedAt: string }>(
+): Promise<{
+  id: string;
+  contentHash: string;
+  ingestedAt: string;
+  truncated?: boolean;
+} | null> {
+  return querySingle<{
+    id: string;
+    contentHash: string;
+    ingestedAt: string;
+    truncated?: boolean;
+  }>(
     conn,
     `MATCH (r:ScipIngestion {repoId: $repoId, indexPath: $indexPath})
      RETURN r.id AS id,
             r.contentHash AS contentHash,
-            r.ingestedAt AS ingestedAt`,
+            r.ingestedAt AS ingestedAt,
+            r.truncated AS truncated`,
     { repoId, indexPath },
   );
 }

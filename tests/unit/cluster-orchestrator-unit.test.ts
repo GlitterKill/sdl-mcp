@@ -351,6 +351,69 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
     assert.ok(members.length >= 2);
   });
 
+  it("reports cluster and process write subphase timings", async () => {
+    await resetDb();
+    await seedRepo("repo-write-timings");
+    await seedFile("repo-write-timings", "file-1", "src/write-timings.ts");
+    for (const [symbolId, name] of [
+      ["sym-main", "main"],
+      ["sym-foo", "foo"],
+      ["sym-bar", "bar"],
+    ] as const) {
+      await seedSymbol({
+        repoId: "repo-write-timings",
+        fileId: "file-1",
+        symbolId,
+        name,
+      });
+    }
+    const conn = await getLadybugConn();
+    await ladybugDb.insertEdges(conn, [
+      {
+        repoId: "repo-write-timings",
+        fromSymbolId: "sym-main",
+        toSymbolId: "sym-foo",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+      {
+        repoId: "repo-write-timings",
+        fromSymbolId: "sym-foo",
+        toSymbolId: "sym-bar",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+    ]);
+
+    const result = await computeAndStoreClustersAndProcesses({
+      conn,
+      repoId: "repo-write-timings",
+      versionId: "v1",
+      minClusterSize: 2,
+      maxProcessDepth: 5,
+      entryPatterns: ["^main$"],
+      includeTimings: true,
+    });
+
+    assert.ok(result.timings);
+    assert.equal(typeof result.timings["clusterWrite.loadExisting"], "number");
+    assert.equal(typeof result.timings["clusterWrite.writeRows"], "number");
+    assert.equal(typeof result.timings["processWrite.loadExisting"], "number");
+    assert.equal(typeof result.timings["processWrite.writeRows"], "number");
+  });
+
   it("respects maxProcessDepth when storing process steps", async () => {
     await resetDb();
     await seedRepo("repo-depth");

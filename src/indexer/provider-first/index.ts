@@ -37,3 +37,19 @@ export type {
   ProviderFirstExternalSymbolRow,
   ProviderFirstGraphRows,
 } from "./materializer.js";
+export {
+  activateProviderFirstShadowDb,
+  activateProviderFirstShadowDbWithHandoff,
+  summarizeProviderFirstShadowActivationReadiness,
+} from "./shadow-activation.js";
+export type {
+  ActivateProviderFirstShadowDbWithHandoffParams,
+  ProviderFirstShadowActivationSummary,
+  ProviderFirstShadowActivationStatus,
+} from "./shadow-activation.js";
+export { finalizeProviderFirstShadowDb } from "./shadow-finalization.js";
+export type {
+  ProviderFirstShadowFinalizationCounts,
+  ProviderFirstShadowFinalizationStatus,
+  ProviderFirstShadowFinalizationSummary,
+} from "./shadow-finalization.js";

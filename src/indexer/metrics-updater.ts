@@ -27,6 +27,10 @@ export interface FinalizeIndexingParams {
   appConfig: AppConfig;
   changedFileIds?: Set<string>;
   changedTestFilePaths?: Set<string>;
+  preloadedSymbolFactsByFile?: ReadonlyMap<
+    string,
+    readonly ladybugDb.FileSummarySymbolFactRow[]
+  >;
   hasIndexMutations?: boolean;
   includeTimings?: boolean;
   callResolutionTelemetry: CallResolutionTelemetry;
@@ -63,6 +67,7 @@ export async function finalizeIndexing({
   appConfig,
   changedFileIds,
   changedTestFilePaths,
+  preloadedSymbolFactsByFile,
   hasIndexMutations,
   includeTimings,
   callResolutionTelemetry,
@@ -139,7 +144,11 @@ export async function finalizeIndexing({
   );
   const fileSummariesTask = measureSubphase("fileSummaries", async () => {
     const fsConn = await getLadybugConn();
-    return materializeFileSummaries(fsConn, repoId, { changedFileIds });
+    return materializeFileSummaries(fsConn, repoId, {
+      changedFileIds,
+      includeTimings,
+      preloadedSymbolFactsByFile,
+    });
   }).catch((error) => {
     logger.warn(`FileSummary materialisation skipped: ${String(error)}`);
     return null;
@@ -179,6 +188,11 @@ export async function finalizeIndexing({
       metricsResult.timings,
     )) {
       timings[`metrics.${phaseName}`] = durationMs;
+    }
+  }
+  if (timings && fsResult?.timings) {
+    for (const [phaseName, durationMs] of Object.entries(fsResult.timings)) {
+      timings[`fileSummaries.${phaseName}`] = durationMs;
     }
   }
   if (fsResult) {
@@ -504,48 +518,121 @@ export async function materializeFileSummaries(
   repoId: string,
   options?: {
     changedFileIds?: Set<string>;
+    preloadedSymbolFactsByFile?: ReadonlyMap<
+      string,
+      readonly ladybugDb.FileSummarySymbolFactRow[]
+    >;
+    includeTimings?: boolean;
   },
-): Promise<{ total: number; updated: number }> {
+): Promise<{
+  total: number;
+  updated: number;
+  timings?: Record<string, number>;
+}> {
+  const timings: Record<string, number> | undefined = options?.includeTimings
+    ? {}
+    : undefined;
+  const measureSubphase = async <T>(
+    phaseName: string,
+    fn: () => Promise<T>,
+  ): Promise<T> => {
+    const startedAt = Date.now();
+    try {
+      return await fn();
+    } finally {
+      if (timings) {
+        timings[phaseName] = Date.now() - startedAt;
+      }
+    }
+  };
+  const recordSubphase = (phaseName: string, durationMs: number): void => {
+    if (timings) {
+      timings[phaseName] = durationMs;
+    }
+  };
   const changedFileIds = options?.changedFileIds;
   let files: ladybugDb.FileRow[];
+  const buildResult = (total: number, updated: number) => ({
+    total,
+    updated,
+    ...(timings ? { timings } : {}),
+  });
 
   if (changedFileIds) {
     if (changedFileIds.size === 0) {
-      return { total: 0, updated: 0 };
+      return buildResult(0, 0);
     }
 
     // Incremental runs only need to refresh FileSummary rows for files whose
     // symbol exports changed; deleted-file cleanup already happens earlier in
     // the file deletion path.
-    const fileMap = await ladybugDb.getFilesByIds(conn, [...changedFileIds]);
+    const fileMap = await measureSubphase("loadFiles", () =>
+      ladybugDb.getFilesByIds(conn, [...changedFileIds]),
+    );
     files = [...fileMap.values()]
       .filter((file) => file.repoId === repoId)
       .sort((a, b) => a.relPath.localeCompare(b.relPath));
   } else {
-    files = await ladybugDb.getFilesByRepo(conn, repoId);
+    files = await measureSubphase("loadFiles", () =>
+      ladybugDb.getFilesByRepo(conn, repoId),
+    );
   }
   const updatedAt = new Date().toISOString();
 
-  // Grouped read: fetch exported symbol names for all target files in one
-  // round trip instead of one query per file.
   const fileIds = files.map((f) => f.fileId);
-  const exportedByFile = await ladybugDb.getExportedSymbolsByFileIds(
-    conn,
-    fileIds,
+  const targetFileIds = new Set(fileIds);
+  const fullRepoSummaryRefresh = changedFileIds === undefined;
+  const symbolFactsByFile = clonePreloadedFileSummaryFacts(
+    options?.preloadedSymbolFactsByFile,
+    targetFileIds,
   );
-  const symbolFactsByFile = await ladybugDb.getFileSummarySymbolFactsByFileIds(
-    conn,
-    fileIds,
+  const filesMissingPreloadedFacts = files
+    .filter((file) => !symbolFactsByFile.has(file.fileId))
+    .map((file) => file.fileId);
+  const loadedSymbolFactsByFile = await measureSubphase(
+    "loadSymbolFacts",
+    () => {
+      if (filesMissingPreloadedFacts.length === 0) {
+        return Promise.resolve(
+          new Map<string, ladybugDb.FileSummarySymbolFactRow[]>(),
+        );
+      }
+      if (fullRepoSummaryRefresh && symbolFactsByFile.size === 0) {
+        return ladybugDb.getFileSummarySymbolFactsByRepo(conn, repoId);
+      }
+      return ladybugDb.getFileSummarySymbolFactsByFileIds(
+        conn,
+        filesMissingPreloadedFacts,
+      );
+    },
+  );
+  mergeFileSummarySymbolFacts(symbolFactsByFile, loadedSymbolFactsByFile);
+  sortFileSummarySymbolFacts(symbolFactsByFile);
+  const exportedByFile = buildExportedNamesByFile(symbolFactsByFile);
+  recordSubphase("loadExportedSymbols", 0);
+  const existingSummaries = await measureSubphase(
+    "loadExistingSummaries",
+    async () => {
+      if (!fullRepoSummaryRefresh) {
+        return ladybugDb.getFileSummariesByFileIds(conn, fileIds);
+      }
+      const rows = await ladybugDb.getFileSummariesForRepo(conn, repoId);
+      return new Map(rows.map((row) => [row.fileId, row]));
+    },
   );
 
-  const upserts: Array<{
+  type FileSummaryUpsert = {
     fileId: string;
     repoId: string;
     summary: string | null;
     searchText: string | null;
     updatedAt: string;
-  }> = [];
+  };
 
+  const existingUpserts: FileSummaryUpsert[] = [];
+  const newUpserts: FileSummaryUpsert[] = [];
+
+  const buildStartedAt = Date.now();
   for (const file of files) {
     const exportedNames = exportedByFile.get(file.fileId) ?? [];
     const summary = ladybugDb.buildFileSummaryHybridPayload({
@@ -558,20 +645,175 @@ export async function materializeFileSummaries(
       exportedNames,
       summary,
     );
-    upserts.push({
+    const existing = existingSummaries.get(file.fileId);
+    if (
+      existing?.repoId === repoId &&
+      (existing.summary ?? null) === (summary ?? null) &&
+      (existing.searchText ?? null) === (searchText ?? null)
+    ) {
+      continue;
+    }
+    const upsert = {
       fileId: file.fileId,
       repoId,
       summary,
       searchText,
       updatedAt,
-    });
+    };
+    if (existing?.repoId === repoId) {
+      existingUpserts.push(upsert);
+    } else {
+      newUpserts.push(upsert);
+    }
+  }
+  recordSubphase("buildPayloads", Date.now() - buildStartedAt);
+
+  const updated = existingUpserts.length + newUpserts.length;
+  if (updated > 0) {
+    await measureSubphase("writeSummaries", () =>
+      withWriteConn(async (wConn) => {
+        if (existingUpserts.length > 0) {
+          await measureSubphase("writeExistingSummaries", () =>
+            ladybugDb.updateExistingFileSummaryBatch(wConn, existingUpserts),
+          );
+        } else {
+          recordSubphase("writeExistingSummaries", 0);
+        }
+
+        if (newUpserts.length > 0) {
+          await measureSubphase("writeNewSummaries", async () => {
+            try {
+              await ladybugDb.insertNewFileSummaryBatch(wConn, newUpserts);
+            } catch (error) {
+              logger.warn(
+                "FileSummary COPY insert failed; retrying with merge-safe upsert",
+                { error: error instanceof Error ? error.message : String(error) },
+              );
+              await ladybugDb.upsertFileSummaryBatch(wConn, newUpserts);
+            }
+          });
+        } else {
+          recordSubphase("writeNewSummaries", 0);
+        }
+      }),
+    );
+    if (timings) {
+      const activeWriteMs =
+        (timings.writeExistingSummaries ?? 0) +
+        (timings.writeNewSummaries ?? 0);
+      recordSubphase(
+        "writeWait",
+        Math.max(0, (timings.writeSummaries ?? 0) - activeWriteMs),
+      );
+    }
+  } else {
+    recordSubphase("writeSummaries", 0);
+    recordSubphase("writeWait", 0);
+    recordSubphase("writeExistingSummaries", 0);
+    recordSubphase("writeNewSummaries", 0);
   }
 
-  if (upserts.length > 0) {
-    await withWriteConn(async (wConn) => {
-      await ladybugDb.upsertFileSummaryBatch(wConn, upserts);
+  return buildResult(files.length, updated);
+}
+
+export function buildPreloadedFileSummarySymbolFactsFromRows(params: {
+  files: Iterable<Pick<ladybugDb.FileRow, "fileId">>;
+  symbols: Iterable<
+    Pick<
+      ladybugDb.SymbolRow,
+      | "fileId"
+      | "name"
+      | "kind"
+      | "exported"
+      | "signatureJson"
+      | "summary"
+      | "rangeStartLine"
+      | "symbolStatus"
+    >
+  >;
+}): Map<string, ladybugDb.FileSummarySymbolFactRow[]> {
+  const byFile = new Map<string, ladybugDb.FileSummarySymbolFactRow[]>();
+  for (const file of params.files) {
+    byFile.set(file.fileId, []);
+  }
+  for (const symbol of params.symbols) {
+    if ((symbol.symbolStatus ?? "real") !== "real") continue;
+    const list = byFile.get(symbol.fileId);
+    if (!list) continue;
+    list.push({
+      fileId: symbol.fileId,
+      name: symbol.name,
+      kind: symbol.kind,
+      exported: symbol.exported,
+      signatureJson: symbol.signatureJson,
+      summary: symbol.summary,
+      rangeStartLine: symbol.rangeStartLine,
     });
   }
+  sortFileSummarySymbolFacts(byFile);
+  return byFile;
+}
 
-  return { total: files.length, updated: upserts.length };
+function clonePreloadedFileSummaryFacts(
+  preloaded:
+    | ReadonlyMap<string, readonly ladybugDb.FileSummarySymbolFactRow[]>
+    | undefined,
+  targetFileIds: ReadonlySet<string>,
+): Map<string, ladybugDb.FileSummarySymbolFactRow[]> {
+  const cloned = new Map<string, ladybugDb.FileSummarySymbolFactRow[]>();
+  if (!preloaded) return cloned;
+  for (const [fileId, facts] of preloaded) {
+    if (!targetFileIds.has(fileId)) continue;
+    cloned.set(
+      fileId,
+      facts.map((fact) => ({ ...fact })),
+    );
+  }
+  return cloned;
+}
+
+function mergeFileSummarySymbolFacts(
+  target: Map<string, ladybugDb.FileSummarySymbolFactRow[]>,
+  source: ReadonlyMap<string, readonly ladybugDb.FileSummarySymbolFactRow[]>,
+): void {
+  for (const [fileId, facts] of source) {
+    const existing = target.get(fileId);
+    if (existing) {
+      existing.push(...facts.map((fact) => ({ ...fact })));
+    } else {
+      target.set(
+        fileId,
+        facts.map((fact) => ({ ...fact })),
+      );
+    }
+  }
+}
+
+function sortFileSummarySymbolFacts(
+  factsByFile: Map<string, ladybugDb.FileSummarySymbolFactRow[]>,
+): void {
+  for (const facts of factsByFile.values()) {
+    facts.sort((a, b) => {
+      if (a.exported !== b.exported) return a.exported ? -1 : 1;
+      return a.rangeStartLine - b.rangeStartLine;
+    });
+  }
+}
+
+function buildExportedNamesByFile(
+  factsByFile: ReadonlyMap<
+    string,
+    readonly ladybugDb.FileSummarySymbolFactRow[]
+  >,
+): Map<string, string[]> {
+  const exportedByFile = new Map<string, string[]>();
+  for (const [fileId, facts] of factsByFile) {
+    const names = facts
+      .filter((fact) => fact.exported)
+      .map((fact) => fact.name);
+    if (names.length > 0) {
+      exportedByFile.set(fileId, names);
+    }
+  }
+  return exportedByFile;
 }

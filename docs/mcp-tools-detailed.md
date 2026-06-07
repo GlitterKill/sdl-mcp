@@ -107,7 +107,7 @@ Registers a new repository (or updates an existing one) for indexing. This is ty
 | :------------- | :------- | :------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `repoId`       | string   | Yes      | Unique identifier for the repository (e.g., `"my-app"`)                                                                                                           |
 | `rootPath`     | string   | Yes      | Absolute path to the repository root directory                                                                                                                    |
-| `ignore`       | string[] | No       | Glob patterns to ignore (defaults to `node_modules`, `dist`, `.next`, `build`)                                                                                    |
+| `ignore`       | string[] | No       | Glob patterns to ignore (defaults include dependency, dist, generated CMake/build-output, cache, and agent workspace directories)                                 |
 | `languages`    | string[] | No       | Language extensions to index. Defaults to all 12 languages (11 adapters): `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `java`, `cs`, `c`, `cpp`, `php`, `rs`, `kt`, `sh` |
 | `maxFileBytes` | number   | No       | Maximum file size to index in bytes (default: 2,000,000)                                                                                                          |
 
@@ -142,23 +142,23 @@ Returns the current indexing state and health metrics for a registered repositor
 
 **Response:**
 
-| Field              | Type           | Description                                                                                                                                                                                                 |
-| :----------------- | :------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `repoId`           | string         | Repository identifier                                                                                                                                                                                       |
-| `rootPath`         | string         | Absolute path to the repository root                                                                                                                                                                        |
-| `latestVersionId`  | string \| null | Most recent ledger version, or null if never indexed                                                                                                                                                        |
-| `filesIndexed`     | number         | Total files currently tracked                                                                                                                                                                               |
-| `symbolsIndexed`   | number         | Total symbols in the graph                                                                                                                                                                                  |
-| `lastIndexedAt`    | string \| null | ISO timestamp of the most recent indexing                                                                                                                                                                   |
-| `healthScore`      | number (0-100) | Composite health score                                                                                                                                                                                      |
-| `healthComponents` | object         | Breakdown: `freshness`, `coverage`, `errorRate`, `edgeQuality`, `callResolution` (each 0-1)                                                                                                                 |
-| `healthAvailable`  | boolean        | Whether health metrics are populated                                                                                                                                                                        |
-| `watcherHealth`    | object \| null | File watcher state: `enabled`, `running`, `filesWatched`, `eventsReceived`, `eventsProcessed`, `errors`, `queueDepth`, `restartCount`, `stale`, `lastEventAt`, `lastSuccessfulReindexAt`                    |
-| `watcherNote`      | string         | Guidance when watcher is inactive                                                                                                                                                                           |
-| `prefetchStats`    | object         | Predictive prefetch metrics: `enabled`, `queueDepth`, `running`, `completed`, `cancelled`, `cacheHits`, `cacheMisses`, `wastedPrefetch`, `hitRate`, `wasteRate`, `avgLatencyReductionMs`, `lastRunAt`       |
-| `liveIndexStatus`  | object         | Live editor buffer state: `enabled`, `pendingBuffers`, `dirtyBuffers`, `parseQueueDepth`, `checkpointPending`, `lastBufferEventAt`, `lastCheckpointAt`, `lastCheckpointResult`, `reconcileQueueDepth`, etc. |
+| Field              | Type           | Description                                                                                                                                                                                                                                                            |
+| :----------------- | :------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repoId`           | string         | Repository identifier                                                                                                                                                                                                                                                  |
+| `rootPath`         | string         | Absolute path to the repository root                                                                                                                                                                                                                                   |
+| `latestVersionId`  | string \| null | Most recent ledger version, or null if never indexed                                                                                                                                                                                                                   |
+| `filesIndexed`     | number         | Total files currently tracked                                                                                                                                                                                                                                          |
+| `symbolsIndexed`   | number         | Total symbols in the graph                                                                                                                                                                                                                                             |
+| `lastIndexedAt`    | string \| null | ISO timestamp of the most recent indexing                                                                                                                                                                                                                              |
+| `healthScore`      | number (0-100) | Composite health score                                                                                                                                                                                                                                                 |
+| `healthComponents` | object         | Breakdown: `freshness`, `coverage`, `errorRate`, `edgeQuality`, `callResolution` (each 0-1)                                                                                                                                                                            |
+| `healthAvailable`  | boolean        | Whether health metrics are populated                                                                                                                                                                                                                                   |
+| `watcherHealth`    | object \| null | File watcher state: `enabled`, `running`, `filesWatched`, `eventsReceived`, `eventsProcessed`, `errors`, `queueDepth`, `restartCount`, `stale`, `lastEventAt`, `lastSuccessfulReindexAt`                                                                               |
+| `watcherNote`      | string         | Guidance when watcher is inactive                                                                                                                                                                                                                                      |
+| `prefetchStats`    | object         | Predictive prefetch metrics: `enabled`, `queueDepth`, `running`, `completed`, `cancelled`, `cacheHits`, `cacheMisses`, `wastedPrefetch`, `hitRate`, `wasteRate`, `avgLatencyReductionMs`, `lastRunAt`                                                                  |
+| `liveIndexStatus`  | object         | Live editor buffer state: `enabled`, `pendingBuffers`, `dirtyBuffers`, `parseQueueDepth`, `checkpointPending`, `lastBufferEventAt`, `lastCheckpointAt`, `lastCheckpointResult`, `reconcileQueueDepth`, etc.                                                            |
 | `derivedState`     | object         | Derived-state freshness flags plus `nextBestAction` when cluster/process/summary/embedding state is stale. Startup recovery handles stale graph-derived rows for clusters, processes, and algorithms; semantic summary/embedding flags remain separate readiness work. |
-| `memories`         | array \| null  | Relevant development memories auto-surfaced for this repo (when `surfaceMemories` is true)                                                                                                                  |
+| `memories`         | array \| null  | Relevant development memories auto-surfaced for this repo (when `surfaceMemories` is true)                                                                                                                                                                             |
 
 **Typical use:** Call this first in any session to understand the state of the index before doing deeper queries.
 
@@ -493,17 +493,17 @@ Previews or applies a symbol-scoped edit with symbol, file, and draft preconditi
 
 **Parameters:**
 
-| Parameter                | Type                                  | Required    | Description                                                |
-| :----------------------- | :------------------------------------ | :---------- | :--------------------------------------------------------- |
-| `repoId`                 | string                                | Yes         | Repository identifier                                      |
+| Parameter                | Type                                 | Required    | Description                                                    |
+| :----------------------- | :----------------------------------- | :---------- | :------------------------------------------------------------- |
+| `repoId`                 | string                               | Yes         | Repository identifier                                          |
 | `mode`                   | `"preview" \| "apply" \| "applyNow"` | Yes         | Preview creates a plan, apply consumes one, applyNow does both |
-| `symbolId`               | string                                | Conditional | Symbol ID or shorthand. Required for applyNow              |
-| `symbolRef`              | object                                | Conditional | Natural symbol reference for preview                       |
-| `operation`              | object                                | Conditional | Edit operation for preview/applyNow                        |
-| `planHandle`             | string                                | Conditional | Plan handle for apply                                      |
-| `expectedAstFingerprint` | string                                | Conditional | Required for applyNow                                      |
-| `expectedRange`          | object                                | Conditional | Required for applyNow                                      |
-| `createBackup`           | boolean                               | No          | Backup saved files before writing                          |
+| `symbolId`               | string                               | Conditional | Symbol ID or shorthand. Required for applyNow                  |
+| `symbolRef`              | object                               | Conditional | Natural symbol reference for preview                           |
+| `operation`              | object                               | Conditional | Edit operation for preview/applyNow                            |
+| `planHandle`             | string                               | Conditional | Plan handle for apply                                          |
+| `expectedAstFingerprint` | string                               | Conditional | Required for applyNow                                          |
+| `expectedRange`          | object                               | Conditional | Required for applyNow                                          |
+| `createBackup`           | boolean                              | No          | Backup saved files before writing                              |
 
 **Operations:** `replaceSymbol`, `replaceBody`, `replaceSignature`, `insertBefore`, `insertAfter`, and `renameLocal`.
 
@@ -769,19 +769,19 @@ If denied, the response includes `whyDenied` reasons and a `nextBestAction` sugg
 
 **Response (approved):**
 
-| Field                | Type     | Description                                       |
-| :------------------- | :------- | :------------------------------------------------ |
-| `approved`           | true     | Request was approved                              |
-| `symbolId`           | string   | Symbol identifier                                 |
-| `file`               | string   | File path                                         |
-| `range`              | object   | `{startLine, startCol, endLine, endCol}`          |
-| `code`               | string   | The raw source code                               |
-| `whyApproved`        | string[] | Reasons for approval                              |
-| `estimatedTokens`    | number   | Token count                                       |
-| `downgradedFrom`     | string   | If the request was downgraded (e.g., to skeleton) |
-| `matchedIdentifiers` | string[] | Which identifiers were found                      |
-| `matchedLineNumbers` | number[] | Line numbers of matches                           |
-| `sessionDelta`       | object   | Same-session delta metadata when `deltaMode` applies |
+| Field                | Type     | Description                                                                        |
+| :------------------- | :------- | :--------------------------------------------------------------------------------- |
+| `approved`           | true     | Request was approved                                                               |
+| `symbolId`           | string   | Symbol identifier                                                                  |
+| `file`               | string   | File path                                                                          |
+| `range`              | object   | `{startLine, startCol, endLine, endCol}`                                           |
+| `code`               | string   | The raw source code                                                                |
+| `whyApproved`        | string[] | Reasons for approval                                                               |
+| `estimatedTokens`    | number   | Token count                                                                        |
+| `downgradedFrom`     | string   | If the request was downgraded (e.g., to skeleton)                                  |
+| `matchedIdentifiers` | string[] | Which identifiers were found                                                       |
+| `matchedLineNumbers` | number[] | Line numbers of matches                                                            |
+| `sessionDelta`       | object   | Same-session delta metadata when `deltaMode` applies                               |
 | `delta`              | object   | Bounded unified-line diff or unchanged marker when a repeated window is compressed |
 
 When `responseMode` returns a handle, the response is a `responseArtifact` reference with `handle`, `metadata`, `savings`, and `action: "response.get"`. Call `response.get` to retrieve a bounded excerpt or the full stored response.
@@ -809,19 +809,19 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 
 **Parameters:**
 
-| Parameter       | Type   | Required | Default        | Description                                                                                 |
-| :-------------- | :----- | :------- | :------------- | :------------------------------------------------------------------------------------------ |
-| `repoId`        | string | Yes      | —              | Repository identifier                                                                       |
-| `filePath`      | string | Yes      | —              | Path relative to repo root                                                                  |
-| `maxBytes`      | number | No       | 524288 (512KB) | Max bytes to return before truncation                                                       |
-| `offset`        | number | No       | 0              | Start line (0-based) for line range mode                                                    |
+| Parameter       | Type   | Required | Default        | Description                                                                                              |
+| :-------------- | :----- | :------- | :------------- | :------------------------------------------------------------------------------------------------------- |
+| `repoId`        | string | Yes      | —              | Repository identifier                                                                                    |
+| `filePath`      | string | Yes      | —              | Path relative to repo root                                                                               |
+| `maxBytes`      | number | No       | 524288 (512KB) | Max bytes to return before truncation                                                                    |
+| `offset`        | number | No       | 0              | Start line (0-based) for line range mode                                                                 |
 | `limit`         | number | No       | all            | Max lines to return in line range mode; in search mode, caps returned match/context lines after scanning |
-| `search`        | string | No       | —              | Regex pattern for search mode (case-insensitive)                                            |
-| `searchContext` | number | No       | 2              | Lines of context around each match in search mode                                           |
-| `jsonPath`      | string | No       | —              | Dot-separated key path for JSON/YAML extraction (e.g., `"scripts.build"`, `"items.0.name"`) |
-| `responseMode`  | string | No       | `inline`       | `inline`, `auto`, or `handle`; `auto`/`handle` stores large responses behind `response.get`  |
-| `deltaMode`     | string | No       | `off`          | `off` or `auto`; repeated reads in the same session can return a delta instead of content    |
-| `maxDeltaLines` | number | No       | 80             | Maximum diff lines returned for `deltaMode: "auto"`                                         |
+| `search`        | string | No       | —              | Regex pattern for search mode (case-insensitive)                                                         |
+| `searchContext` | number | No       | 2              | Lines of context around each match in search mode                                                        |
+| `jsonPath`      | string | No       | —              | Dot-separated key path for JSON/YAML extraction (e.g., `"scripts.build"`, `"items.0.name"`)              |
+| `responseMode`  | string | No       | `inline`       | `inline`, `auto`, or `handle`; `auto`/`handle` stores large responses behind `response.get`              |
+| `deltaMode`     | string | No       | `off`          | `off` or `auto`; repeated reads in the same session can return a delta instead of content                |
+| `maxDeltaLines` | number | No       | 80             | Maximum diff lines returned for `deltaMode: "auto"`                                                      |
 
 **Modes** (mutually exclusive, checked in priority order):
 
@@ -832,23 +832,23 @@ Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional
 
 **Response:**
 
-| Field           | Type    | Description                                       |
-| :-------------- | :------ | :------------------------------------------------ |
-| `filePath`      | string  | Normalized relative path                          |
-| `content`       | string  | File content (formatted per mode)                 |
-| `bytes`         | number  | Total file size in bytes                          |
-| `totalLines`    | number  | Total line count in the file                      |
-| `returnedLines` | number  | Lines returned in this response                   |
-| `truncated`     | boolean | Whether content was truncated                     |
-| `truncatedAt`   | number  | Byte offset of truncation (only if truncated)     |
-| `matchCount`    | number  | Number of regex matches (search mode only)        |
-| `extractedPath` | string  | JSON path that was extracted (jsonPath mode only) |
-| `sessionDelta`  | object  | Same-session delta metadata when `deltaMode` applies |
+| Field           | Type    | Description                                                                      |
+| :-------------- | :------ | :------------------------------------------------------------------------------- |
+| `filePath`      | string  | Normalized relative path                                                         |
+| `content`       | string  | File content (formatted per mode)                                                |
+| `bytes`         | number  | Total file size in bytes                                                         |
+| `totalLines`    | number  | Total line count in the file                                                     |
+| `returnedLines` | number  | Lines returned in this response                                                  |
+| `truncated`     | boolean | Whether content was truncated                                                    |
+| `truncatedAt`   | number  | Byte offset of truncation (only if truncated)                                    |
+| `matchCount`    | number  | Number of regex matches (search mode only)                                       |
+| `extractedPath` | string  | JSON path that was extracted (jsonPath mode only)                                |
+| `sessionDelta`  | object  | Same-session delta metadata when `deltaMode` applies                             |
 | `delta`         | object  | Bounded unified-line diff or unchanged marker when a repeated read is compressed |
 
 When `responseMode` returns a handle, call `response.get` with the returned handle to fetch an excerpt or the full stored response. This keeps large config, docs, or generated-file reads out of the immediate MCP response.
 
-**Blocked extensions:** `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.pyw`, `.go`, `.java`, `.cs`, `.c`, `.h`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx`, `.php`, `.phtml`, `.rs`, `.kt`, `.kts`, `.sh`, `.bash`, `.zsh`. Use SDL code tools for these.
+**Blocked extensions:** `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.pyw`, `.pyi`, `.go`, `.java`, `.cs`, `.c`, `.h`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx`, `.def`, `.inc`, `.php`, `.phtml`, `.rs`, `.kt`, `.kts`, `.sh`, `.bash`, `.zsh`. Use SDL code tools for these.
 
 **Security:** The file path is resolved against the repository root and validated with `validatePathWithinRoot()` to prevent path traversal. Files exceeding `maxBytes` are truncated.
 
@@ -1111,48 +1111,48 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 
 **Parameters:**
 
-| Parameter          | Type                                     | Required | Description                                                                                                                                                                                                    |
-| :----------------- | :--------------------------------------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `repoId`           | string                                   | Yes      | Repository identifier                                                                                                                                                                                          |
-| `runtime`          | string                                   | Yes      | Runtime to use. Supported: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`                                                 |
-| `executable`       | string                                   | No       | Override the default executable (e.g., `"bun"` instead of `"node"`)                                                                                                                                            |
-| `args`             | string[]                                 | No       | Arguments to pass to the executable                                                                                                                                                                            |
-| `code`             | string                                   | No       | Inline code to execute (written to temp file). Mutually exclusive with args-only mode.                                                                                                                         |
-| `stdin`            | string                                   | No       | UTF-8 text written to child stdin, then closed. Max 512 KiB by encoded byte size. Does not bypass command validation; shell runtime still requires `code`.                                                     |
-| `relativeCwd`      | string                                   | No       | Working directory relative to repo root (default: `"."`)                                                                                                                                                       |
-| `timeoutMs`        | number                                   | No       | Execution timeout in milliseconds                                                                                                                                                                              |
-| `queryTerms`       | string[] (max 10)                        | No       | Keywords for excerpt matching in the output                                                                                                                                                                    |
-| `maxResponseLines` | number (5-1000)                         | No       | Max lines in stdout/stderr summaries (default: 100)                                                                                                                                                            |
-| `persistOutput`    | boolean                                  | No       | Whether to persist full output as a gzip artifact (default: true)                                                                                                                                              |
-| `outputMode`       | `"minimal"` \| `"summary"` \| `"intent"` | No       | Controls response verbosity. `"minimal"` (default): status, artifact handle, and concise stdout/stderr previews. `"summary"`: head+tail output excerpts. `"intent"`: only `queryTerms`-matched excerpts.       |
-| `includeDiagnostics` | boolean                                | No       | Include coarse policy, execution, output decoding, and artifact phase timings                                                                                                                                  |
+| Parameter            | Type                                     | Required | Description                                                                                                                                                                                              |
+| :------------------- | :--------------------------------------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repoId`             | string                                   | Yes      | Repository identifier                                                                                                                                                                                    |
+| `runtime`            | string                                   | Yes      | Runtime to use. Supported: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`                                           |
+| `executable`         | string                                   | No       | Override the default executable (e.g., `"bun"` instead of `"node"`)                                                                                                                                      |
+| `args`               | string[]                                 | No       | Arguments to pass to the executable                                                                                                                                                                      |
+| `code`               | string                                   | No       | Inline code to execute (written to temp file). Mutually exclusive with args-only mode.                                                                                                                   |
+| `stdin`              | string                                   | No       | UTF-8 text written to child stdin, then closed. Max 512 KiB by encoded byte size. Does not bypass command validation; shell runtime still requires `code`.                                               |
+| `relativeCwd`        | string                                   | No       | Working directory relative to repo root (default: `"."`)                                                                                                                                                 |
+| `timeoutMs`          | number                                   | No       | Execution timeout in milliseconds                                                                                                                                                                        |
+| `queryTerms`         | string[] (max 10)                        | No       | Keywords for excerpt matching in the output                                                                                                                                                              |
+| `maxResponseLines`   | number (5-1000)                          | No       | Max lines in stdout/stderr summaries (default: 100)                                                                                                                                                      |
+| `persistOutput`      | boolean                                  | No       | Whether to persist full output as a gzip artifact (default: true)                                                                                                                                        |
+| `outputMode`         | `"minimal"` \| `"summary"` \| `"intent"` | No       | Controls response verbosity. `"minimal"` (default): status, artifact handle, and concise stdout/stderr previews. `"summary"`: head+tail output excerpts. `"intent"`: only `queryTerms`-matched excerpts. |
+| `includeDiagnostics` | boolean                                  | No       | Include coarse policy, execution, output decoding, and artifact phase timings                                                                                                                            |
 
 **Response (varies by `outputMode`):**
 
 **Common fields (all modes):**
 
-| Field            | Type                                                                     | Description                                                     |
-| :--------------- | :----------------------------------------------------------------------- | :-------------------------------------------------------------- |
-| `status`         | `"success"` \| `"failure"` \| `"timeout"` \| `"cancelled"` \| `"denied"` | Execution result                                                |
-| `exitCode`       | number \| null                                                           | Process exit code                                               |
-| `signal`         | string \| null                                                           | Signal that terminated the process (e.g., `"SIGTERM"`)          |
-| `durationMs`     | number                                                                   | Execution duration                                              |
-| `artifactHandle` | string \| null                                                           | Handle for the persisted artifact (if `persistOutput` was true) |
-| `truncation`     | object                                                                   | `{stdoutTruncated, stderrTruncated, totalStdoutBytes, totalStderrBytes}` |
-| `policyDecision` | object                                                                   | `{auditHash, deniedReasons}`                                    |
-| `stdinBytes`     | number                                                                   | Optional byte count when `stdin` was provided                    |
-| `stdinSha256`    | string                                                                   | Optional SHA-256 digest when `stdin` was provided                |
-| `quotingWarnings` | string[]                                                                | Optional diagnostics for quote-heavy/base64/runtime-write patterns |
-| `diagnostics`    | object                                                                   | Optional phase timings returned only when `includeDiagnostics: true` |
+| Field             | Type                                                                     | Description                                                              |
+| :---------------- | :----------------------------------------------------------------------- | :----------------------------------------------------------------------- |
+| `status`          | `"success"` \| `"failure"` \| `"timeout"` \| `"cancelled"` \| `"denied"` | Execution result                                                         |
+| `exitCode`        | number \| null                                                           | Process exit code                                                        |
+| `signal`          | string \| null                                                           | Signal that terminated the process (e.g., `"SIGTERM"`)                   |
+| `durationMs`      | number                                                                   | Execution duration                                                       |
+| `artifactHandle`  | string \| null                                                           | Handle for the persisted artifact (if `persistOutput` was true)          |
+| `truncation`      | object                                                                   | `{stdoutTruncated, stderrTruncated, totalStdoutBytes, totalStderrBytes}` |
+| `policyDecision`  | object                                                                   | `{auditHash, deniedReasons}`                                             |
+| `stdinBytes`      | number                                                                   | Optional byte count when `stdin` was provided                            |
+| `stdinSha256`     | string                                                                   | Optional SHA-256 digest when `stdin` was provided                        |
+| `quotingWarnings` | string[]                                                                 | Optional diagnostics for quote-heavy/base64/runtime-write patterns       |
+| `diagnostics`     | object                                                                   | Optional phase timings returned only when `includeDiagnostics: true`     |
 
 **`outputMode: "minimal"` (default) — adds:**
 
-| Field         | Type   | Description                               |
-| :------------ | :----- | :---------------------------------------- |
-| `outputLines` | number | Total lines captured across stdout+stderr |
-| `outputBytes` | number | Total bytes captured across stdout+stderr |
+| Field           | Type   | Description                                                       |
+| :-------------- | :----- | :---------------------------------------------------------------- |
+| `outputLines`   | number | Total lines captured across stdout+stderr                         |
+| `outputBytes`   | number | Total bytes captured across stdout+stderr                         |
 | `stdoutPreview` | string | First few stdout lines/chars when compact enough to return inline |
-| `stderrSummary` | string | Short stderr excerpt for quick failure diagnosis |
+| `stderrSummary` | string | Short stderr excerpt for quick failure diagnosis                  |
 
 Minimal mode does not return full stdout/stderr dumps or `excerpts`. Use `sdl.runtime.queryOutput` with the `artifactHandle` to retrieve output on demand.
 
@@ -1377,14 +1377,14 @@ Executes a workflow of SDL-MCP operations in a single round-trip with budget tra
 
 **Parameters:**
 
-| Parameter | Type                     | Required | Description                         |
-| :-------- | :----------------------- | :------- | :---------------------------------- |
-| `repoId`  | string                   | Yes      | Repository scope for all steps      |
-| `steps`   | array (min 1)            | Yes      | Workflow steps: `[{ fn, args? }]`   |
-| `budget`  | object                   | No       | Budget constraints for the workflow |
-| `onError` | `"continue"` \| `"stop"` | No       | Error handling mode                 |
-| `trace`   | object                   | No       | Enable execution tracing            |
-| `includeDiagnostics` | boolean             | No       | Include workflow phase timings      |
+| Parameter            | Type                     | Required | Description                         |
+| :------------------- | :----------------------- | :------- | :---------------------------------- |
+| `repoId`             | string                   | Yes      | Repository scope for all steps      |
+| `steps`              | array (min 1)            | Yes      | Workflow steps: `[{ fn, args? }]`   |
+| `budget`             | object                   | No       | Budget constraints for the workflow |
+| `onError`            | `"continue"` \| `"stop"` | No       | Error handling mode                 |
+| `trace`              | object                   | No       | Enable execution tracing            |
+| `includeDiagnostics` | boolean                  | No       | Include workflow phase timings      |
 
 Each step has:
 

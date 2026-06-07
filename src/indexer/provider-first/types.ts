@@ -11,6 +11,18 @@ export type ProviderSourceType = "scip" | "lsp" | "legacy";
 export type ProviderFirstSelectedPipeline = "legacy" | "providerFirst";
 export type CoverageLevel = "none" | "partial" | "full";
 export type LegacyFallbackScope = "skip" | "targeted" | "full";
+export type CallProofUnavailableReasonCode =
+  | "missingExpectedSymbolName"
+  | "sourceUnavailable"
+  | "sourcePathOutsideRoot"
+  | "sourceRealPathOutsideRoot"
+  | "sourceReadFailed"
+  | "sourceTooLarge"
+  | "multiLineRange"
+  | "missingSourceLine"
+  | "rangeOutOfBounds"
+  | "symbolTextMismatch"
+  | "unknown";
 export type ProviderFactKind =
   | "file"
   | "symbol"
@@ -75,6 +87,8 @@ export interface EdgeFact extends ProviderFactBase {
   resolution: EdgeResolutionStrategy;
   confidence: number;
   dedupeKey: string;
+  relPath?: string;
+  sourceIndexPath?: string;
 }
 
 export interface ExternalSymbolFact extends ProviderFactBase {
@@ -98,6 +112,28 @@ export interface DiagnosticFact extends ProviderFactBase {
   range?: Range;
 }
 
+export interface CallProofUnavailableReasonFact {
+  code: CallProofUnavailableReasonCode;
+  references: number;
+}
+
+export interface SkippedProviderSymbolReasonFact {
+  reason: string;
+  symbols: number;
+}
+
+export interface CallProofUnavailableSampleFact {
+  relPath: string;
+  range: Range;
+  expectedText?: string;
+  actualText?: string;
+}
+
+export interface CallProofUnavailableReasonSampleFact
+  extends CallProofUnavailableSampleFact {
+  code: CallProofUnavailableReasonCode;
+}
+
 export interface CoverageFact extends ProviderFactBase {
   kind: "coverage";
   relPath: string;
@@ -111,6 +147,9 @@ export interface CoverageFact extends ProviderFactBase {
   unresolvedOccurrences: number;
   totalResolvedReferences: number;
   callProofUnavailableReferences: number;
+  callProofUnavailableReasons?: CallProofUnavailableReasonFact[];
+  callProofUnavailableSamples?: CallProofUnavailableReasonSampleFact[];
+  skippedSymbolReasons?: SkippedProviderSymbolReasonFact[];
   legacyFallback: LegacyFallbackScope;
 }
 
@@ -137,6 +176,7 @@ export interface ProviderFactSet {
   diagnostics: DiagnosticFact[];
   coverage: CoverageFact[];
   providerRuns: ProviderRunFact[];
+  sourceLinesByPath?: ReadonlyMap<string, ReadonlyMap<number, string>>;
 }
 
 export interface ProviderSourcePlan {

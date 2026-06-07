@@ -69,6 +69,87 @@ export async function upsertCluster(
   );
 }
 
+export async function upsertClustersBatch(
+  conn: Connection,
+  clusters: ClusterRow[],
+): Promise<void> {
+  if (clusters.length === 0) return;
+  const seen = new Set<string>();
+  clusters = clusters.filter((cluster) => {
+    const key = `${cluster.clusterId}\0${cluster.repoId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const CHUNK = 256;
+  await withTransaction(conn, async (txConn) => {
+    for (let i = 0; i < clusters.length; i += CHUNK) {
+      const rows = clusters.slice(i, i + CHUNK).map((cluster) => ({
+        clusterId: cluster.clusterId,
+        repoId: cluster.repoId,
+        label: cluster.label,
+        symbolCount: cluster.symbolCount,
+        cohesionScore: cluster.cohesionScore,
+        versionId: cluster.versionId ?? "",
+        hasVersionId: cluster.versionId !== null,
+        createdAt: cluster.createdAt,
+        searchText: cluster.searchText ?? "",
+        hasSearchText: cluster.searchText !== null
+          && cluster.searchText !== undefined,
+      }));
+      const hasNullVersionIds = rows.some((row) => !row.hasVersionId);
+      const hasNullSearchText = rows.some((row) => !row.hasSearchText);
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (r:Repo {repoId: row.repoId})
+         MERGE (c:Cluster {clusterId: row.clusterId})
+         SET c.repoId = row.repoId,
+             c.label = row.label,
+             c.symbolCount = row.symbolCount,
+             c.cohesionScore = row.cohesionScore,
+             c.versionId = row.versionId,
+             c.createdAt = row.createdAt,
+             c.searchText = row.searchText`,
+        { rows },
+      );
+      if (hasNullVersionIds) {
+        await exec(
+          txConn,
+          `UNWIND $rows AS row
+           WITH row
+           WHERE NOT row.hasVersionId
+           MATCH (c:Cluster {clusterId: row.clusterId})
+           SET c.versionId = NULL`,
+          { rows },
+        );
+      }
+      if (hasNullSearchText) {
+        await exec(
+          txConn,
+          `UNWIND $rows AS row
+           WITH row
+           WHERE NOT row.hasSearchText
+           MATCH (c:Cluster {clusterId: row.clusterId})
+           SET c.searchText = NULL`,
+          { rows },
+        );
+      }
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (r:Repo {repoId: row.repoId})
+         MATCH (c:Cluster {clusterId: row.clusterId})
+         OPTIONAL MATCH (c)-[existing:CLUSTER_IN_REPO]->(r)
+         WITH c, r, existing
+         WHERE existing IS NULL
+         CREATE (c)-[:CLUSTER_IN_REPO]->(r)`,
+        { rows },
+      );
+    }
+  });
+}
+
 /**
  * Build a search-friendly text string for a cluster.
  * Concatenates the label with up to 20 representative member symbol names.

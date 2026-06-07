@@ -25,6 +25,7 @@ import {
   ENTITY_FTS_INDEX_NAMES,
 } from "../retrieval/index-lifecycle.js";
 import type { AlgorithmRefreshConfig } from "../config/types.js";
+import { DEFAULT_LOUVAIN_MAX_CALL_EDGES } from "../config/constants.js";
 import {
   CentralityWorkerTimeoutError,
   runCentralityWorker,
@@ -46,7 +47,7 @@ const DEFAULT_ALGORITHM_REFRESH_CONFIG: AlgorithmRefreshConfig = {
   enabled: true,
   pageRank: { enabled: true },
   kCore: { enabled: true },
-  louvain: { enabled: true, maxCallEdges: 50_000 },
+  louvain: { enabled: true, maxCallEdges: DEFAULT_LOUVAIN_MAX_CALL_EDGES },
   workerTimeoutMs: 120_000,
 };
 
@@ -403,29 +404,51 @@ export async function computeAndStoreClustersAndProcesses(params: {
     },
   );
   await measureSubphase("clusterWrite", async () => {
-    const existingClusters = await ladybugDb.getClustersForRepo(conn, repoId);
-    const existingMembers = await ladybugDb.getClusterMembersWithScoresForRepo(
-      conn,
-      repoId,
+    const { existingClusters, existingMembers } = await measureSubphase(
+      "clusterWrite.loadExisting",
+      async () => ({
+        existingClusters: await ladybugDb.getClustersForRepo(conn, repoId),
+        existingMembers: await ladybugDb.getClusterMembersWithScoresForRepo(
+          conn,
+          repoId,
+        ),
+      }),
     );
+    const existingMembersByClusterId = new Map<
+      string,
+      Array<{ symbolId: string; membershipScore: number }>
+    >();
+    for (const member of existingMembers) {
+      const members = existingMembersByClusterId.get(member.clusterId) ?? [];
+      members.push({
+        symbolId: member.symbolId,
+        membershipScore: member.membershipScore,
+      });
+      existingMembersByClusterId.set(member.clusterId, members);
+    }
     const existingClusterState = serializeClusterState(
       existingClusters.map((cluster) => ({
         clusterId: cluster.clusterId,
         label: cluster.label,
         symbolCount: cluster.symbolCount,
         searchText: cluster.searchText ?? "",
-        members: existingMembers
-          .filter((member) => member.clusterId === cluster.clusterId)
-          .map((member) => ({
-            symbolId: member.symbolId,
-            membershipScore: member.membershipScore,
-          })),
+        members: existingMembersByClusterId.get(cluster.clusterId) ?? [],
       })),
     );
     const nextClusterState = serializeClusterState(nextClusterStates);
+    const replaceClusters = existingClusterState !== nextClusterState;
+    const clusterRows = nextClusterStates.map((cluster) => ({
+      clusterId: cluster.clusterId,
+      repoId,
+      label: cluster.label,
+      symbolCount: cluster.symbolCount,
+      cohesionScore: 0.0,
+      versionId,
+      createdAt: now,
+      searchText: cluster.searchText,
+    }));
 
     await withWriteConn(async (wConn) => {
-      const replaceClusters = existingClusterState !== nextClusterState;
       let clusterFtsDropStatus: ClusterFtsDropStatus = "skipped";
       if (replaceClusters) {
         const dropResult = await dropFtsIndex(
@@ -443,34 +466,40 @@ export async function computeAndStoreClustersAndProcesses(params: {
 
       let replacementError: unknown;
       try {
-        await ladybugDb.withTransaction(wConn, async (txConn) => {
-          if (replaceClusters) {
-            await ladybugDb.deleteClustersByRepo(txConn, repoId);
-          }
+        await measureSubphase("clusterWrite.writeRows", async () => {
+          await ladybugDb.withTransaction(wConn, async (txConn) => {
+            if (replaceClusters) {
+              await measureSubphase(
+                "clusterWrite.deleteRows",
+                () => ladybugDb.deleteClustersByRepo(txConn, repoId),
+              );
+            }
 
-          for (const cluster of nextClusterStates) {
-            await ladybugDb.upsertCluster(txConn, {
-              clusterId: cluster.clusterId,
-              repoId,
-              label: cluster.label,
-              symbolCount: cluster.symbolCount,
-              cohesionScore: 0.0,
-              versionId,
-              createdAt: now,
-              searchText: cluster.searchText,
-            });
+            await measureSubphase(
+              "clusterWrite.upsertClusters",
+              () => ladybugDb.upsertClustersBatch(txConn, clusterRows),
+            );
 
             if (replaceClusters) {
-              await ladybugDb.upsertClusterMembersBatch(
-                txConn,
+              // Flatten relationship rows lazily so stable no-op refreshes do
+              // not allocate rows that will not be written.
+              const clusterMemberRows = nextClusterStates.flatMap((cluster) =>
                 cluster.members.map((member) => ({
                   symbolId: member.symbolId,
                   clusterId: cluster.clusterId,
                   membershipScore: member.membershipScore,
                 })),
               );
+              await measureSubphase(
+                "clusterWrite.upsertMembers",
+                () =>
+                  ladybugDb.upsertClusterMembersBatch(
+                    txConn,
+                    clusterMemberRows,
+                  ),
+              );
             }
-          }
+          });
         });
       } catch (error) {
         replacementError = error;
@@ -596,8 +625,26 @@ export async function computeAndStoreClustersAndProcesses(params: {
   );
 
   await measureSubphase("processWrite", async () => {
-    const existingProcesses = await ladybugDb.getProcessesForRepo(conn, repoId);
-    const existingSteps = await ladybugDb.getProcessStepsForRepo(conn, repoId);
+    const { existingProcesses, existingSteps } = await measureSubphase(
+      "processWrite.loadExisting",
+      async () => ({
+        existingProcesses: await ladybugDb.getProcessesForRepo(conn, repoId),
+        existingSteps: await ladybugDb.getProcessStepsForRepo(conn, repoId),
+      }),
+    );
+    const existingStepsByProcessId = new Map<
+      string,
+      Array<{ symbolId: string; stepOrder: number; role: string }>
+    >();
+    for (const step of existingSteps) {
+      const steps = existingStepsByProcessId.get(step.processId) ?? [];
+      steps.push({
+        symbolId: step.symbolId,
+        stepOrder: step.stepOrder,
+        role: step.role ?? "",
+      });
+      existingStepsByProcessId.set(step.processId, steps);
+    }
     const existingProcessState = serializeProcessState(
       existingProcesses.map((process) => ({
         processId: process.processId,
@@ -605,38 +652,41 @@ export async function computeAndStoreClustersAndProcesses(params: {
         label: process.label,
         depth: process.depth,
         searchText: process.searchText ?? "",
-        steps: existingSteps
-          .filter((step) => step.processId === process.processId)
-          .map((step) => ({
-            symbolId: step.symbolId,
-            stepOrder: step.stepOrder,
-            role: step.role ?? "",
-          })),
+        steps: existingStepsByProcessId.get(process.processId) ?? [],
       })),
     );
     const nextProcessState = serializeProcessState(nextProcessStates);
+    const replaceProcesses = existingProcessState !== nextProcessState;
+    const processRows = nextProcessStates.map((process) => ({
+      processId: process.processId,
+      repoId,
+      entrySymbolId: process.entrySymbolId,
+      label: process.label,
+      depth: process.depth,
+      versionId,
+      createdAt: now,
+      searchText: process.searchText,
+    }));
 
     await withWriteConn(async (wConn) => {
-      await ladybugDb.withTransaction(wConn, async (txConn) => {
-        if (existingProcessState !== nextProcessState) {
-          await ladybugDb.deleteProcessesByRepo(txConn, repoId);
-        }
+      await measureSubphase("processWrite.writeRows", async () => {
+        await ladybugDb.withTransaction(wConn, async (txConn) => {
+          if (replaceProcesses) {
+            await measureSubphase(
+              "processWrite.deleteRows",
+              () => ladybugDb.deleteProcessesByRepo(txConn, repoId),
+            );
+          }
 
-        for (const process of nextProcessStates) {
-          await ladybugDb.upsertProcess(txConn, {
-            processId: process.processId,
-            repoId,
-            entrySymbolId: process.entrySymbolId,
-            label: process.label,
-            depth: process.depth,
-            versionId,
-            createdAt: now,
-            searchText: process.searchText,
-          });
+          await measureSubphase(
+            "processWrite.upsertProcesses",
+            () => ladybugDb.upsertProcessesBatch(txConn, processRows),
+          );
 
-          if (existingProcessState !== nextProcessState) {
-            await ladybugDb.upsertProcessStepsBatch(
-              txConn,
+          if (replaceProcesses) {
+            // Process steps follow the same lazy single-batch write path as
+            // cluster members to avoid per-process single-writer round trips.
+            const processStepRows = nextProcessStates.flatMap((process) =>
               process.steps.map((step) => ({
                 processId: process.processId,
                 symbolId: step.symbolId,
@@ -644,8 +694,12 @@ export async function computeAndStoreClustersAndProcesses(params: {
                 role: step.role,
               })),
             );
+            await measureSubphase(
+              "processWrite.upsertSteps",
+              () => ladybugDb.upsertProcessStepsBatch(txConn, processStepRows),
+            );
           }
-        }
+        });
       });
     });
   });

@@ -20,6 +20,7 @@ import type { FileMetadata } from "./fileScanner.js";
 import { toPass2Target, type Pass2ResolverRegistry } from "./pass2/registry.js";
 import type {
   Pass1ExtractionCache,
+  Pass2ExportedSymbolFull,
   Pass2ImportCache,
   SubmitEdgeWrite,
 } from "./pass2/types.js";
@@ -30,6 +31,8 @@ import {
   type IndexProgress,
   type LadybugConn,
 } from "./indexer-init.js";
+
+const PASS2_KNOWN_ENDPOINT_COPY_THRESHOLD = 512;
 
 /**
  * Build a `submitEdgeWrite` that flushes immediately on each call. Used by the
@@ -52,7 +55,7 @@ export function makeImmediateSubmit(
         );
       }
       if (edges.length > 0) {
-        await ladybugDb.insertEdges(wConn, edges);
+        await insertPass2Edges(wConn, edges, mode);
       }
     });
   };
@@ -61,6 +64,88 @@ export function makeImmediateSubmit(
 interface BatchWriteAccumulator {
   symbolIdsToRefresh: string[];
   edges: ladybugDb.EdgeRow[];
+}
+
+function isUnresolvedSymbolId(symbolId: string): boolean {
+  return symbolId.startsWith("unresolved:");
+}
+
+function requiresCsvQuoting(value: unknown): boolean {
+  return typeof value === "string" && /[",\r\n]/.test(value);
+}
+
+function isPass2KnownEndpointCopySafe(edge: ladybugDb.EdgeRow): boolean {
+  return ![
+    edge.fromSymbolId,
+    edge.toSymbolId,
+    edge.edgeType,
+    edge.resolution,
+    edge.resolverId,
+    edge.resolutionPhase,
+    edge.provenance,
+    edge.createdAt,
+  ].some(requiresCsvQuoting);
+}
+
+/**
+ * Full pass-2 runs after the source file's Symbol rows have been replaced.
+ * Resolved call edges can therefore use the known-endpoint relationship COPY
+ * path, while unresolved calls still need generic placeholder node repair.
+ * Rows whose copied string cells require CSV quoting also stay on the generic
+ * parameterized path because LadybugDB relationship COPY can reject those
+ * records even when they are quoted correctly.
+ */
+/** @internal exported for tests; do not import from product code. */
+export function splitPass2EdgesForFullMode(
+  edges: readonly ladybugDb.EdgeRow[],
+): {
+  knownEndpointEdges: ladybugDb.EdgeRow[];
+  repairEdges: ladybugDb.EdgeRow[];
+} {
+  const knownEndpointEdges: ladybugDb.EdgeRow[] = [];
+  const repairEdges: ladybugDb.EdgeRow[] = [];
+
+  for (const edge of edges) {
+    if (
+      isUnresolvedSymbolId(edge.fromSymbolId) ||
+      isUnresolvedSymbolId(edge.toSymbolId) ||
+      !isPass2KnownEndpointCopySafe(edge)
+    ) {
+      repairEdges.push(edge);
+    } else {
+      knownEndpointEdges.push(edge);
+    }
+  }
+
+  return { knownEndpointEdges, repairEdges };
+}
+
+/** @internal exported for tests; do not import from product code. */
+export async function insertPass2Edges(
+  wConn: LadybugConn,
+  edges: ladybugDb.EdgeRow[],
+  mode: "full" | "incremental",
+): Promise<void> {
+  if (edges.length === 0) return;
+
+  if (mode !== "full") {
+    await ladybugDb.insertEdges(wConn, edges);
+    return;
+  }
+
+  const { knownEndpointEdges, repairEdges } =
+    splitPass2EdgesForFullMode(edges);
+  if (knownEndpointEdges.length >= PASS2_KNOWN_ENDPOINT_COPY_THRESHOLD) {
+    await ladybugDb.insertKnownSymbolEdges(wConn, knownEndpointEdges);
+  } else if (knownEndpointEdges.length > 0) {
+    repairEdges.unshift(...knownEndpointEdges);
+  }
+  if (repairEdges.length > 0) {
+    await ladybugDb.insertEdges(wConn, repairEdges, {
+      skipSourceRepoLink: true,
+      skipExistingRelationshipUpdate: true,
+    });
+  }
 }
 
 /**
@@ -103,7 +188,7 @@ export async function flushBatchAccumulator(
       );
     }
     if (acc.edges.length > 0) {
-      await ladybugDb.insertEdges(wConn, acc.edges);
+      await insertPass2Edges(wConn, acc.edges, mode);
     }
   });
 }
@@ -121,21 +206,165 @@ export async function flushBatchAccumulator(
  * 1000-file TS repo with 20 imports/file × 1.5 candidate paths each, that
  * collapsed ~30k point reads into 2 batched queries.
  */
+interface PreloadedPass2ExportedSymbols {
+  lite: ReadonlyMap<string, readonly ladybugDb.ExportedSymbolLite[]>;
+  full: ReadonlyMap<string, readonly Pass2ExportedSymbolFull[]>;
+}
+
+type Pass2TimingRecorder = (phaseName: string, durationMs: number) => void;
+
+export function buildPreloadedPass2ExportedSymbolsFromRows(params: {
+  files: Iterable<Pick<ladybugDb.FileRow, "fileId">>;
+  symbols: Iterable<
+    Pick<
+      ladybugDb.SymbolRow,
+      | "symbolId"
+      | "repoId"
+      | "fileId"
+      | "kind"
+      | "name"
+      | "exported"
+      | "language"
+      | "rangeStartLine"
+      | "rangeStartCol"
+      | "rangeEndLine"
+      | "rangeEndCol"
+      | "symbolStatus"
+    >
+  >;
+}): {
+  lite: Map<string, ladybugDb.ExportedSymbolLite[]>;
+  full: Map<string, Pass2ExportedSymbolFull[]>;
+} {
+  const lite = new Map<string, ladybugDb.ExportedSymbolLite[]>();
+  const full = new Map<string, Pass2ExportedSymbolFull[]>();
+  for (const file of params.files) {
+    lite.set(file.fileId, []);
+    full.set(file.fileId, []);
+  }
+  for (const symbol of params.symbols) {
+    if ((symbol.symbolStatus ?? "real") !== "real") continue;
+    if (!symbol.exported) continue;
+    const liteList = lite.get(symbol.fileId);
+    const fullList = full.get(symbol.fileId);
+    if (!liteList || !fullList) continue;
+    liteList.push({ symbolId: symbol.symbolId, name: symbol.name });
+    fullList.push({
+      symbolId: symbol.symbolId,
+      repoId: symbol.repoId,
+      fileId: symbol.fileId,
+      kind: symbol.kind,
+      name: symbol.name,
+      exported: symbol.exported,
+      language: symbol.language,
+      rangeStartLine: symbol.rangeStartLine,
+      rangeStartCol: symbol.rangeStartCol,
+      rangeEndLine: symbol.rangeEndLine,
+      rangeEndCol: symbol.rangeEndCol,
+    });
+  }
+  sortPreloadedPass2ExportedSymbols(lite, full);
+  return { lite, full };
+}
+
+function sortPreloadedPass2ExportedSymbols(
+  lite: Map<string, ladybugDb.ExportedSymbolLite[]>,
+  full: Map<string, Pass2ExportedSymbolFull[]>,
+): void {
+  for (const list of lite.values()) {
+    list.sort((a, b) => {
+      if (a.name !== b.name) return a.name.localeCompare(b.name);
+      return a.symbolId.localeCompare(b.symbolId);
+    });
+  }
+  for (const list of full.values()) {
+    list.sort((a, b) => {
+      if (a.rangeStartLine !== b.rangeStartLine) {
+        return a.rangeStartLine - b.rangeStartLine;
+      }
+      if (a.rangeStartCol !== b.rangeStartCol) {
+        return a.rangeStartCol - b.rangeStartCol;
+      }
+      if (a.name !== b.name) return a.name.localeCompare(b.name);
+      return a.symbolId.localeCompare(b.symbolId);
+    });
+  }
+}
+
+function clonePreloadedPass2LiteSymbols(
+  preloaded: ReadonlyMap<
+    string,
+    readonly ladybugDb.ExportedSymbolLite[]
+  > | null,
+  targetFileIds: ReadonlySet<string>,
+): Map<string, ladybugDb.ExportedSymbolLite[]> {
+  const cloned = new Map<string, ladybugDb.ExportedSymbolLite[]>();
+  if (!preloaded) return cloned;
+  for (const [fileId, symbols] of preloaded) {
+    if (!targetFileIds.has(fileId)) continue;
+    cloned.set(
+      fileId,
+      symbols.map((symbol) => ({ ...symbol })),
+    );
+  }
+  return cloned;
+}
+
+function clonePreloadedPass2FullSymbols(
+  preloaded: ReadonlyMap<string, readonly Pass2ExportedSymbolFull[]> | null,
+  targetFileIds: ReadonlySet<string>,
+): Map<string, Pass2ExportedSymbolFull[]> | undefined {
+  if (!preloaded) return undefined;
+  const cloned = new Map<string, Pass2ExportedSymbolFull[]>();
+  for (const [fileId, symbols] of preloaded) {
+    if (!targetFileIds.has(fileId)) continue;
+    cloned.set(
+      fileId,
+      symbols.map((symbol) => ({ ...symbol })),
+    );
+  }
+  return cloned;
+}
+
 async function buildPass2ImportCache(
   repoId: string,
+  preloaded?: PreloadedPass2ExportedSymbols,
 ): Promise<Pass2ImportCache> {
   const conn = await getLadybugConn();
   const files = await ladybugDb.getFilesByRepo(conn, repoId);
   const fileByRelPath = new Map<string, ladybugDb.FileRow>();
+  const fileIds = files.map((f) => f.fileId);
+  const targetFileIds = new Set(fileIds);
   for (const file of files) {
     fileByRelPath.set(file.relPath, file);
   }
-  const exportedSymbolsByFileId =
+  const exportedSymbolsByFileId = clonePreloadedPass2LiteSymbols(
+    preloaded?.lite ?? null,
+    targetFileIds,
+  );
+  const missingExportFileIds = fileIds.filter(
+    (fileId) => !exportedSymbolsByFileId.has(fileId),
+  );
+  const loadedExportedSymbolsByFileId =
     await ladybugDb.getExportedSymbolsLiteByFileIds(
       conn,
-      files.map((f) => f.fileId),
+      missingExportFileIds,
     );
-  return { fileByRelPath, exportedSymbolsByFileId };
+  for (const [fileId, symbols] of loadedExportedSymbolsByFileId) {
+    exportedSymbolsByFileId.set(
+      fileId,
+      symbols.map((symbol) => ({ ...symbol })),
+    );
+  }
+  const exportedFullSymbolsByFileId = clonePreloadedPass2FullSymbols(
+    preloaded?.full ?? null,
+    targetFileIds,
+  );
+  return {
+    fileByRelPath,
+    exportedSymbolsByFileId,
+    exportedFullSymbolsByFileId,
+  };
 }
 
 type FinalizeEdgesPhaseMeasurer = <T>(
@@ -340,6 +569,8 @@ export async function runPass2Resolvers(params: {
    * can omit it.
    */
   pass1Extractions?: Pass1ExtractionCache;
+  preloadedExportedSymbols?: PreloadedPass2ExportedSymbols;
+  recordTiming?: Pass2TimingRecorder;
 }): Promise<number> {
   const {
     repoId,
@@ -360,15 +591,31 @@ export async function runPass2Resolvers(params: {
     signal,
     scipFullyCoveredPaths,
     pass1Extractions,
+    preloadedExportedSymbols,
+    recordTiming,
   } = params;
 
-  const pass2Targets = await resolvePass2Targets({
-    repoId,
-    mode,
-    pass2Files: pass2EligibleFiles,
-    changedPass2FilePaths,
-    supportsPass2FilePath,
-  });
+  const measurePass2Subphase = async <T>(
+    phaseName: string,
+    fn: () => Promise<T> | T,
+  ): Promise<T> => {
+    const startedAt = Date.now();
+    try {
+      return await fn();
+    } finally {
+      recordTiming?.(`pass2.${phaseName}`, Date.now() - startedAt);
+    }
+  };
+
+  const pass2Targets = await measurePass2Subphase("targetSelection", () =>
+    resolvePass2Targets({
+      repoId,
+      mode,
+      pass2Files: pass2EligibleFiles,
+      changedPass2FilePaths,
+      supportsPass2FilePath,
+    }),
+  );
   callResolutionTelemetry.pass2Targets = pass2Targets.length;
 
   // Pre-compute the safe-skip set: files SCIP fully covered MINUS files in
@@ -403,7 +650,9 @@ export async function runPass2Resolvers(params: {
   // resolved target file). Stays read-only for the duration of pass-2 — no
   // writes mutate File or Symbol rows during pass-2 (writes are confined to
   // call edges via `submitEdgeWrite`).
-  const importCache = await buildPass2ImportCache(repoId);
+  const importCache = await measurePass2Subphase("importCache", () =>
+    buildPass2ImportCache(repoId, preloadedExportedSymbols),
+  );
 
   // Snapshot writeLimiter stats so we can report a pass-2-only delta. Reveals
   // whether the phase is genuinely writeLimiter-bound (high totalQueueMs +
@@ -625,10 +874,13 @@ export async function runPass2Resolvers(params: {
   // indicates resolvers were piling on faster than the writer could clear.
   const wlAfter = getPoolStats();
   const wallMs = Date.now() - pass2StartedAt;
+  recordTiming?.("pass2.resolverDispatch", wallMs);
   const writeRuns = wlAfter.writeTotalRuns - wlBefore.writeTotalRuns;
   const writeActiveMs =
     wlAfter.writeTotalActiveMs - wlBefore.writeTotalActiveMs;
   const writeQueueMs = wlAfter.writeTotalQueueMs - wlBefore.writeTotalQueueMs;
+  recordTiming?.("pass2.writeActive", writeActiveMs);
+  recordTiming?.("pass2.writeQueue", writeQueueMs);
   logger.info("Pass-2 writeLimiter telemetry", {
     mode,
     pass2Files: pass2Targets.length,

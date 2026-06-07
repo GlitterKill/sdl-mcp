@@ -261,5 +261,74 @@ describe("kuzu cluster/process queries", () => {
     await ladybugDb.deleteProcessesByRepo(conn, REPO_ID);
     assert.strictEqual((await ladybugDb.getProcessesForSymbol(conn, symbolB)).length, 0);
   });
+
+  it("deduplicates batch parent rows before creating repo relationships", async () => {
+    const conn = await getLadybugConn();
+    const now = new Date().toISOString();
+    const clusterId = `${REPO_ID}-cluster-batch-duplicate`;
+    const processId = `${REPO_ID}-process-batch-duplicate`;
+
+    await ladybugDb.upsertClustersBatch(conn, [
+      {
+        clusterId,
+        repoId: REPO_ID,
+        label: "cluster duplicate first",
+        symbolCount: 1,
+        cohesionScore: 0.5,
+        versionId: null,
+        createdAt: now,
+        searchText: null,
+      },
+      {
+        clusterId,
+        repoId: REPO_ID,
+        label: "cluster duplicate second",
+        symbolCount: 1,
+        cohesionScore: 0.5,
+        versionId: null,
+        createdAt: now,
+        searchText: null,
+      },
+    ]);
+
+    await ladybugDb.upsertProcessesBatch(conn, [
+      {
+        processId,
+        repoId: REPO_ID,
+        entrySymbolId: symbolA,
+        label: "process duplicate first",
+        depth: 1,
+        versionId: null,
+        createdAt: now,
+        searchText: null,
+      },
+      {
+        processId,
+        repoId: REPO_ID,
+        entrySymbolId: symbolA,
+        label: "process duplicate second",
+        depth: 1,
+        versionId: null,
+        createdAt: now,
+        searchText: null,
+      },
+    ]);
+
+    const clusterRels = await ladybugDb.querySingle<{ relCount: unknown }>(
+      conn,
+      `MATCH (c:Cluster {clusterId: $clusterId})-[r:CLUSTER_IN_REPO]->(:Repo {repoId: $repoId})
+       RETURN COUNT(r) AS relCount`,
+      { clusterId, repoId: REPO_ID },
+    );
+    const processRels = await ladybugDb.querySingle<{ relCount: unknown }>(
+      conn,
+      `MATCH (p:Process {processId: $processId})-[r:PROCESS_IN_REPO]->(:Repo {repoId: $repoId})
+       RETURN COUNT(r) AS relCount`,
+      { processId, repoId: REPO_ID },
+    );
+
+    assert.strictEqual(Number(clusterRels?.relCount ?? 0), 1);
+    assert.strictEqual(Number(processRels?.relCount ?? 0), 1);
+  });
 });
 

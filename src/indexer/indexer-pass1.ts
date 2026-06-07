@@ -9,12 +9,27 @@ import { BatchPersistAccumulator } from "./parser/batch-persist.js";
 import { toPass2Target } from "./pass2/registry.js";
 import { logger } from "../util/logger.js";
 import type { FileMetadata } from "./fileScanner.js";
+import type { SymbolIndex } from "./edge-builder.js";
 import {
   fileIdForPath,
   type IndexProgress,
   type Pass1Accumulator,
   type Pass1Params,
 } from "./indexer-init.js";
+
+function collectKnownSymbolIdsForPass1EdgeCopy(
+  symbolIndex: SymbolIndex,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const nameMap of symbolIndex.values()) {
+    for (const kindMap of nameMap.values()) {
+      for (const symbolIds of kindMap.values()) {
+        for (const symbolId of symbolIds) ids.add(symbolId);
+      }
+    }
+  }
+  return ids;
+}
 
 /**
  * Pass 1 — Rust engine path. Returns `usedRust: false` when the native addon
@@ -93,6 +108,9 @@ export async function runPass1WithRustEngine(
 
   const batchAccumulator = new BatchPersistAccumulator(undefined, {
     collectDiagnostics: includeTimings === true,
+    knownSymbolIdsForEdgeCopy:
+      collectKnownSymbolIdsForPass1EdgeCopy(symbolIndex),
+    symbolWriteMode: params.batchSymbolWriteMode ?? "merge",
   });
 
   // --- Pipelined chunk processing ---
@@ -415,15 +433,21 @@ export async function runPass1WithTsEngine(
   // SAFETY: nextIndex++ must remain synchronous — no `await` between reading
   // and incrementing. JavaScript's single-threaded event loop guarantees
   // atomicity only when there is no yield point between the read and write.
-  const batchAccumulator = new BatchPersistAccumulator(undefined, {
-    collectDiagnostics: includeTimings === true,
-  });
+  const batchAccumulator =
+    params.useBatchPersist === false
+      ? null
+      : new BatchPersistAccumulator(undefined, {
+          collectDiagnostics: includeTimings === true,
+          knownSymbolIdsForEdgeCopy:
+            collectKnownSymbolIdsForPass1EdgeCopy(symbolIndex),
+          symbolWriteMode: params.batchSymbolWriteMode ?? "merge",
+        });
   let nextIndex = 0;
 
   const runWorker = async (): Promise<void> => {
     while (true) {
       if (params.signal?.aborted) return;
-      if (batchAccumulator.error) return;
+      if (batchAccumulator?.error) return;
       const index = nextIndex++;
       if (index >= files.length) return;
       const file = files[index];
@@ -456,7 +480,7 @@ export async function runPass1WithTsEngine(
           globalNameToSymbolIds,
           globalPreferredSymbolId,
           supportsPass2FilePath,
-          batchAccumulator,
+          batchAccumulator: batchAccumulator ?? undefined,
           pass1Extractions: acc.pass1Extractions,
         });
         acc.filesProcessed++;
@@ -496,10 +520,12 @@ export async function runPass1WithTsEngine(
   // Match the Rust path: surface the drain phase so a 30-60s queue flush
   // doesn't masquerade as a stuck "99%" progress bar, and surrender the
   // promise to the caller for overlap with pass-2 bridge work.
-  attachPass1DrainProgress(batchAccumulator, onProgress);
-  acc.drainPromise = batchAccumulator.drain().then(() => {
-    acc.pass1DrainDiagnostics = batchAccumulator.getDiagnostics();
-  });
+  if (batchAccumulator) {
+    attachPass1DrainProgress(batchAccumulator, onProgress);
+    acc.drainPromise = batchAccumulator.drain().then(() => {
+      acc.pass1DrainDiagnostics = batchAccumulator.getDiagnostics();
+    });
+  }
   return acc;
 }
 

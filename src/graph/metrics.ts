@@ -1,7 +1,8 @@
 import { createHash } from "crypto";
 import { execFile } from "child_process";
-import { readFile } from "node:fs/promises";
-import { join } from "path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { promisify } from "util";
 import { globSync } from "node:fs";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
@@ -34,6 +35,15 @@ interface FanMetrics {
   fanOut: number;
 }
 
+interface MetricsPayloadFingerprint {
+  metricsHash: string;
+  rowCount: number;
+}
+
+interface MetricsPayloadFingerprintOptions {
+  assumeCanonicalJson?: boolean;
+}
+
 interface ChurnCache {
   repoRoot: string;
   lastCommitHash: string;
@@ -55,14 +65,120 @@ interface MetricsGitTestHooks {
 
 let metricsGitTestHooks: MetricsGitTestHooks | null = null;
 
+function canonicalizeJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    const items = value.map(canonicalizeJsonValue);
+    const allScalar = items.every(
+      (item) =>
+        item === null ||
+        typeof item === "string" ||
+        typeof item === "number" ||
+        typeof item === "boolean",
+    );
+    if (allScalar) {
+      return [...items].sort((a, b) =>
+        JSON.stringify(a).localeCompare(JSON.stringify(b)),
+      );
+    }
+    return items;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(record).sort()) {
+      sorted[key] = canonicalizeJsonValue(record[key]);
+    }
+    return sorted;
+  }
+
+  return value;
+}
+
+function canonicalizeMetricsJson(value: string | null | undefined): string {
+  if (value === null || value === undefined) return "";
+  try {
+    return JSON.stringify(canonicalizeJsonValue(JSON.parse(value)));
+  } catch {
+    return value;
+  }
+}
+
+function buildMetricsPayloadFingerprint(
+  rows: readonly MetricsRow[],
+  options: MetricsPayloadFingerprintOptions = {},
+): MetricsPayloadFingerprint {
+  const hash = createHash("sha256");
+  const sortedRows = [...rows].sort((a, b) =>
+    a.symbolId.localeCompare(b.symbolId),
+  );
+  const stableJson = (value: string | null | undefined): string =>
+    options.assumeCanonicalJson
+      ? (value ?? "")
+      : canonicalizeMetricsJson(value);
+  for (const row of sortedRows) {
+    hash.update(row.symbolId);
+    hash.update("\0");
+    hash.update(String(row.fanIn));
+    hash.update("\0");
+    hash.update(String(row.fanOut));
+    hash.update("\0");
+    hash.update(String(row.churn30d));
+    hash.update("\0");
+    hash.update(stableJson(row.testRefsJson));
+    hash.update("\0");
+    hash.update(stableJson(row.canonicalTestJson));
+    hash.update("\0");
+    hash.update(String(row.pageRank ?? 0));
+    hash.update("\0");
+    hash.update(String(row.kCore ?? 0));
+    hash.update("\0");
+  }
+  return {
+    metricsHash: hash.digest("hex"),
+    rowCount: rows.length,
+  };
+}
+
+function canonicalTestToJson(canonicalTest: CanonicalTest): string {
+  return JSON.stringify({
+    distance: canonicalTest.distance,
+    file: canonicalTest.file,
+    proximity: canonicalTest.proximity,
+    symbolId: canonicalTest.symbolId,
+  });
+}
+
 interface TestRefCache {
   repoRoot: string;
   fileHashes: Map<string, string>;
+  fileStats: Map<string, TestRefFileStat>;
   testRefs: Map<string, Set<string>>;
   cachedAt: number;
 }
 
+interface TestRefFileStat {
+  size: number;
+  mtimeMs: number;
+}
+
+interface SerializedTestRefCache {
+  version: number;
+  repoRootKey: string;
+  fileHashes: Record<string, string>;
+  fileStats: Record<string, TestRefFileStat>;
+  testRefs: Record<string, string[]>;
+  cachedAt: number;
+}
+
+const TEST_REF_CACHE_VERSION = 1;
+const MAX_TEST_REF_SYMBOL_IDS_PER_NAME = 200;
 const testRefCacheByRepo = new Map<string, TestRefCache>();
+
+interface TestRefSymbolLookup {
+  nameToSymbolIds: Map<string, string[]>;
+  symbolNames: Set<string>;
+}
 
 function calculateFanMetrics(
   edges: EdgeLite[],
@@ -175,7 +291,192 @@ async function getChurnByFileCached(
 }
 
 function computeFileHash(content: string): string {
-  return createHash("md5").update(content).digest("hex");
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function testRefRepoCacheKey(repoRoot: string): string {
+  const normalized = normalizePath(repoRoot);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function testRefCachePath(repoRoot: string): string {
+  const keyHash = createHash("sha256")
+    .update(testRefRepoCacheKey(repoRoot))
+    .digest("hex")
+    .slice(0, 32);
+  return join(tmpdir(), "sdl-mcp", "test-ref-cache", `${keyHash}.json`);
+}
+
+export function _getTestRefCachePathForTesting(repoRoot: string): string {
+  return testRefCachePath(repoRoot);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function deserializeStringMap(value: unknown): Map<string, string> {
+  const result = new Map<string, string>();
+  if (!isRecord(value)) return result;
+  for (const [key, rawValue] of Object.entries(value)) {
+    if (typeof rawValue === "string") {
+      result.set(key, rawValue);
+    }
+  }
+  return result;
+}
+
+function deserializeFileStats(value: unknown): Map<string, TestRefFileStat> {
+  const result = new Map<string, TestRefFileStat>();
+  if (!isRecord(value)) return result;
+  for (const [key, rawValue] of Object.entries(value)) {
+    if (!isRecord(rawValue)) continue;
+    const size = rawValue.size;
+    const mtimeMs = rawValue.mtimeMs;
+    if (typeof size === "number" && typeof mtimeMs === "number") {
+      result.set(key, { size, mtimeMs });
+    }
+  }
+  return result;
+}
+
+function deserializeTestRefs(value: unknown): Map<string, Set<string>> {
+  const result = new Map<string, Set<string>>();
+  if (!isRecord(value)) return result;
+  for (const [key, rawValue] of Object.entries(value)) {
+    if (!Array.isArray(rawValue)) continue;
+    const refs = rawValue.filter((ref): ref is string => typeof ref === "string");
+    result.set(key, new Set(refs));
+  }
+  return result;
+}
+
+async function loadPersistedTestRefCache(
+  repoRoot: string,
+): Promise<TestRefCache | null> {
+  try {
+    const raw = JSON.parse(
+      await readFile(testRefCachePath(repoRoot), "utf8"),
+    ) as unknown;
+    if (!isRecord(raw)) return null;
+    if (raw.version !== TEST_REF_CACHE_VERSION) return null;
+    if (raw.repoRootKey !== testRefRepoCacheKey(repoRoot)) return null;
+    const cachedAt = typeof raw.cachedAt === "number" ? raw.cachedAt : 0;
+    return {
+      repoRoot,
+      fileHashes: deserializeStringMap(raw.fileHashes),
+      fileStats: deserializeFileStats(raw.fileStats),
+      testRefs: deserializeTestRefs(raw.testRefs),
+      cachedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function persistTestRefCache(cache: TestRefCache): Promise<void> {
+  const fileHashes = Object.fromEntries(cache.fileHashes.entries());
+  const fileStats = Object.fromEntries(cache.fileStats.entries());
+  const testRefs = Object.fromEntries(
+    Array.from(cache.testRefs.entries(), ([file, refs]) => [
+      file,
+      Array.from(refs).sort(),
+    ]),
+  );
+  const serialized: SerializedTestRefCache = {
+    version: TEST_REF_CACHE_VERSION,
+    repoRootKey: testRefRepoCacheKey(cache.repoRoot),
+    fileHashes,
+    fileStats,
+    testRefs,
+    cachedAt: cache.cachedAt,
+  };
+  const cacheFile = testRefCachePath(cache.repoRoot);
+  await mkdir(dirname(cacheFile), { recursive: true });
+  await writeFile(cacheFile, `${JSON.stringify(serialized)}\n`, "utf8");
+}
+
+function sameTestRefFileStat(
+  expected: TestRefFileStat | undefined,
+  actual: TestRefFileStat,
+): boolean {
+  return (
+    expected !== undefined &&
+    expected.size === actual.size &&
+    expected.mtimeMs === actual.mtimeMs
+  );
+}
+
+function buildTestRefSymbolLookup(
+  symbols: Array<{ symbolId: string; name: string }>,
+  candidateNames: ReadonlySet<string>,
+): TestRefSymbolLookup {
+  const nameCounts = new Map<string, number>();
+  for (const symbol of symbols) {
+    if (!candidateNames.has(symbol.name)) continue;
+    nameCounts.set(symbol.name, (nameCounts.get(symbol.name) ?? 0) + 1);
+  }
+
+  const nameToSymbolIds = new Map<string, string[]>();
+  for (const symbol of symbols) {
+    if (!candidateNames.has(symbol.name)) continue;
+    const count = nameCounts.get(symbol.name) ?? 0;
+    if (count > MAX_TEST_REF_SYMBOL_IDS_PER_NAME) continue;
+    const existing = nameToSymbolIds.get(symbol.name) ?? [];
+    existing.push(symbol.symbolId);
+    nameToSymbolIds.set(symbol.name, existing);
+  }
+
+  return {
+    nameToSymbolIds,
+    symbolNames: new Set(nameToSymbolIds.keys()),
+  };
+}
+
+function isExcludedTestRefPath(normalizedPath: string): boolean {
+  return (
+    normalizedPath.includes("/fixtures/") ||
+    normalizedPath.includes("/__fixtures__/") ||
+    normalizedPath.includes("/testdata/") ||
+    normalizedPath.includes("/test-data/") ||
+    normalizedPath.includes("/mock-data/")
+  );
+}
+
+function hasConfiguredTestRefExtension(
+  normalizedPath: string,
+  languageExts: ReadonlySet<string>,
+): boolean {
+  for (const ext of languageExts) {
+    if (normalizedPath.endsWith(`.${ext}`)) return true;
+  }
+  return false;
+}
+
+function isTestRefCandidateFile(
+  relPath: string,
+  languageExts: ReadonlySet<string>,
+): boolean {
+  const normalizedPath = normalizePath(relPath);
+  const lowerPath = normalizedPath.toLowerCase();
+  if (isExcludedTestRefPath(lowerPath)) return false;
+
+  for (const ext of languageExts) {
+    if (
+      lowerPath.endsWith(`.test.${ext}`) ||
+      lowerPath.endsWith(`.spec.${ext}`)
+    ) {
+      return true;
+    }
+  }
+
+  return (
+    (lowerPath.includes("/tests/") ||
+      lowerPath.startsWith("tests/") ||
+      lowerPath.includes("/__tests__/") ||
+      lowerPath.startsWith("__tests__/")) &&
+    hasConfiguredTestRefExtension(lowerPath, languageExts)
+  );
 }
 
 async function collectTestRefs(
@@ -183,45 +484,118 @@ async function collectTestRefs(
   symbols: Array<{ symbolId: string; name: string }>,
   config: RepoConfig,
   changedTestFilePaths?: Set<string>,
+  indexedRepoFiles?: readonly string[],
+  indexedFileContentHashes?: ReadonlyMap<string, string>,
 ): Promise<Map<string, Set<string>>> {
-  const extGroup = config.languages.join(",");
-  const patterns = [
-    `**/*.test.{${extGroup}}`,
-    `**/*.spec.{${extGroup}}`,
-    `**/__tests__/**/*.${extGroup}`,
-    `**/tests/**/*.${extGroup}`,
-  ];
+  const languageExts = new Set(
+    config.languages.map((language) => language.toLowerCase()),
+  );
+  const testFiles = indexedRepoFiles
+    ? Array.from(
+        new Set(
+          indexedRepoFiles
+            .map((file) => normalizePath(file))
+            .filter((file) => isTestRefCandidateFile(file, languageExts)),
+        ),
+      )
+    : (() => {
+        const extGroup = config.languages.join(",");
+        const patterns = [
+          `**/*.test.{${extGroup}}`,
+          `**/*.spec.{${extGroup}}`,
+          `**/__tests__/**/*.${extGroup}`,
+          `**/tests/**/*.${extGroup}`,
+        ];
 
-  const bracePattern =
-    patterns.length === 1 ? patterns[0] : `{${patterns.join(",")}}`;
-  const testFiles = [
-    ...globSync(bracePattern, {
-      cwd: repoRoot,
-      exclude: [
-        ...(config.ignore ?? []),
-        "**/fixtures/**",
-        "**/__fixtures__/**",
-        "**/testdata/**",
-        "**/test-data/**",
-        "**/mock-data/**",
-      ],
-    }),
-  ];
+        const bracePattern =
+          patterns.length === 1 ? patterns[0] : `{${patterns.join(",")}}`;
+        return globSync(bracePattern, {
+          cwd: repoRoot,
+          exclude: [
+            ...(config.ignore ?? []),
+            "**/fixtures/**",
+            "**/__fixtures__/**",
+            "**/testdata/**",
+            "**/test-data/**",
+            "**/mock-data/**",
+          ],
+        }).map((file) => normalizePath(file));
+      })();
 
-  const nameToSymbolIds = new Map<string, string[]>();
-  for (const symbol of symbols) {
-    const existing = nameToSymbolIds.get(symbol.name) ?? [];
-    existing.push(symbol.symbolId);
-    nameToSymbolIds.set(symbol.name, existing);
+  let cached = testRefCacheByRepo.get(repoRoot);
+  if (!cached) {
+    const persistedCache = await loadPersistedTestRefCache(repoRoot);
+    if (persistedCache) {
+      cached = persistedCache;
+      testRefCacheByRepo.set(repoRoot, persistedCache);
+    }
   }
-
-  const symbolNames = new Set(symbols.map((s) => s.name));
-
-  const cached = testRefCacheByRepo.get(repoRoot);
-  const fileHashes = cached?.fileHashes || new Map<string, string>();
+  const fileHashes = cached?.fileHashes ?? new Map<string, string>();
+  const fileStats = cached?.fileStats ?? new Map<string, TestRefFileStat>();
+  const normalizedIndexedFileContentHashes = indexedFileContentHashes
+    ? new Map(
+        Array.from(indexedFileContentHashes.entries(), ([file, hash]) => [
+          normalizePath(file),
+          hash,
+        ]),
+      )
+    : null;
   const CONCURRENCY_LIMIT = 10;
   const testRefs = new Map<string, Set<string>>();
   const newTestRefs = new Map<string, Set<string>>();
+  const newFileHashes = new Map<string, string>();
+  const newFileStats = new Map<string, TestRefFileStat>();
+  const candidateNames = new Set<string>();
+  const pendingCachedFiles: Array<{
+    file: string;
+    cachedFileRefs: Set<string>;
+    currentStat?: TestRefFileStat;
+  }> = [];
+  const pendingTokenFiles: Array<{
+    file: string;
+    tokens: Set<string>;
+    hash: string;
+    currentStat: TestRefFileStat;
+  }> = [];
+
+  const queueCachedFileRefs = (
+    file: string,
+    cachedFileRefs: Set<string>,
+    currentStat?: TestRefFileStat,
+  ): void => {
+    pendingCachedFiles.push({ file, cachedFileRefs, currentStat });
+    for (const ref of cachedFileRefs) {
+      candidateNames.add(ref);
+    }
+  };
+
+  const hydrateCachedFileRefs = (
+    file: string,
+    cachedFileRefs: Set<string>,
+    lookup: TestRefSymbolLookup,
+    currentStat?: TestRefFileStat,
+  ): void => {
+    const retainedRefs = new Set<string>();
+    for (const ref of cachedFileRefs) {
+      const symbolIds = lookup.nameToSymbolIds.get(ref);
+      if (!symbolIds) continue;
+      retainedRefs.add(ref);
+      for (const symbolId of symbolIds) {
+        const existing = testRefs.get(symbolId) ?? new Set<string>();
+        existing.add(normalizePath(file));
+        testRefs.set(symbolId, existing);
+      }
+    }
+    const hash = fileHashes.get(file);
+    const fileStat = currentStat ?? fileStats.get(file);
+    if (hash) {
+      newFileHashes.set(file, hash);
+    }
+    if (fileStat) {
+      newFileStats.set(file, fileStat);
+    }
+    newTestRefs.set(file, retainedRefs);
+  };
 
   // Scoped incremental: if caller supplied the exact set of changed test file
   // paths AND we have a warm cache, trust cached entries for unchanged files
@@ -249,16 +623,7 @@ async function collectTestRefs(
     for (const file of filesFromCache) {
       const cachedFileRefs = cached.testRefs.get(file);
       if (!cachedFileRefs) continue;
-      for (const ref of cachedFileRefs) {
-        const symbolIds = nameToSymbolIds.get(ref);
-        if (!symbolIds) continue;
-        for (const symbolId of symbolIds) {
-          const existing = testRefs.get(symbolId) ?? new Set<string>();
-          existing.add(normalizePath(file));
-          testRefs.set(symbolId, existing);
-        }
-      }
-      newTestRefs.set(file, cachedFileRefs);
+      queueCachedFileRefs(file, cachedFileRefs);
     }
   }
 
@@ -272,8 +637,45 @@ async function collectTestRefs(
     const results = await Promise.all(
       chunk.map(async (file) => {
         try {
-          const content = await readFile(join(repoRoot, file), "utf-8");
-          return { file, content };
+          const absolutePath = join(repoRoot, file);
+          const forceRead =
+            normalizedChangedPaths?.has(normalizePath(file)) ?? false;
+          const cachedFileRefs = cached?.testRefs.get(file);
+          const indexedHash = normalizedIndexedFileContentHashes?.get(
+            normalizePath(file),
+          );
+          if (
+            !forceRead &&
+            cachedFileRefs &&
+            indexedHash &&
+            cached?.fileHashes.get(file) === indexedHash
+          ) {
+            return {
+              file,
+              cachedFileRefs,
+              currentStat: fileStats.get(file),
+              content: null,
+            };
+          }
+          const fileStat = await stat(absolutePath);
+          const currentStat = {
+            size: fileStat.size,
+            mtimeMs: fileStat.mtimeMs,
+          };
+          if (
+            !forceRead &&
+            cachedFileRefs &&
+            sameTestRefFileStat(fileStats.get(file), currentStat)
+          ) {
+            return {
+              file,
+              cachedFileRefs,
+              currentStat,
+              content: null,
+            };
+          }
+          const content = await readFile(absolutePath, "utf-8");
+          return { file, content, currentStat, cachedFileRefs: null };
         } catch (err) {
           logger.debug("Failed to read test file", {
             file,
@@ -286,58 +688,78 @@ async function collectTestRefs(
 
     for (const result of results) {
       if (!result) continue;
-      const { file, content } = result;
+      const { file, content, currentStat } = result;
+
+      if (result.cachedFileRefs) {
+        queueCachedFileRefs(file, result.cachedFileRefs, currentStat);
+        continue;
+      }
+
+      if (content === null) continue;
 
       const hash = computeFileHash(content);
 
       if (cached && cached.fileHashes.get(file) === hash) {
         const cachedFileRefs = cached.testRefs.get(file);
         if (cachedFileRefs) {
-          for (const ref of cachedFileRefs) {
-            const symbolIds = nameToSymbolIds.get(ref);
-            if (symbolIds) {
-              for (const symbolId of symbolIds) {
-                const existing = testRefs.get(symbolId) ?? new Set<string>();
-                existing.add(normalizePath(file));
-                testRefs.set(symbolId, existing);
-              }
-            }
-          }
-          newTestRefs.set(file, cachedFileRefs);
+          queueCachedFileRefs(file, cachedFileRefs, currentStat);
           continue;
         }
       }
 
-      fileHashes.set(file, hash);
       const tokens = content.match(/[A-Za-z_][A-Za-z0-9_]*/g) || [];
-      const matchedSymbols = new Set<string>();
-
-      for (const token of new Set(tokens)) {
-        if (symbolNames.has(token)) {
-          matchedSymbols.add(token);
-          const symbolIds = nameToSymbolIds.get(token);
-          if (symbolIds) {
-            for (const symbolId of symbolIds) {
-              const existing = testRefs.get(symbolId) ?? new Set<string>();
-              existing.add(normalizePath(file));
-              testRefs.set(symbolId, existing);
-            }
-          }
-        }
+      const uniqueTokens = new Set(tokens);
+      for (const token of uniqueTokens) {
+        candidateNames.add(token);
       }
-      newTestRefs.set(file, matchedSymbols);
+      pendingTokenFiles.push({ file, tokens: uniqueTokens, hash, currentStat });
     }
   }
 
-  testRefCacheByRepo.set(repoRoot, {
+  const lookup = buildTestRefSymbolLookup(symbols, candidateNames);
+
+  for (const { file, cachedFileRefs, currentStat } of pendingCachedFiles) {
+    hydrateCachedFileRefs(file, cachedFileRefs, lookup, currentStat);
+  }
+
+  for (const { file, tokens, hash, currentStat } of pendingTokenFiles) {
+    newFileHashes.set(file, hash);
+    newFileStats.set(file, currentStat);
+    const matchedSymbols = new Set<string>();
+
+    for (const token of tokens) {
+      if (!lookup.symbolNames.has(token)) continue;
+      matchedSymbols.add(token);
+      const symbolIds = lookup.nameToSymbolIds.get(token);
+      if (!symbolIds) continue;
+      for (const symbolId of symbolIds) {
+        const existing = testRefs.get(symbolId) ?? new Set<string>();
+        existing.add(normalizePath(file));
+        testRefs.set(symbolId, existing);
+      }
+    }
+    newTestRefs.set(file, matchedSymbols);
+  }
+
+  const nextCache = {
     repoRoot,
-    fileHashes,
+    fileHashes: newFileHashes,
+    fileStats: newFileStats,
     testRefs: newTestRefs,
     cachedAt: Date.now(),
-  });
+  };
+  testRefCacheByRepo.set(repoRoot, nextCache);
   if (testRefCacheByRepo.size > MAX_METRICS_CACHED_REPOS) {
     const firstKey = testRefCacheByRepo.keys().next().value;
     if (firstKey !== undefined) testRefCacheByRepo.delete(firstKey);
+  }
+  try {
+    await persistTestRefCache(nextCache);
+  } catch (err) {
+    logger.debug("Failed to persist test reference cache", {
+      repoRoot,
+      error: String(err),
+    });
   }
 
   return testRefs;
@@ -359,6 +781,13 @@ export function _setMetricsGitHooksForTesting(
   hooks: MetricsGitTestHooks | null,
 ): void {
   metricsGitTestHooks = hooks;
+}
+
+export function _buildTestRefSymbolLookupForTesting(
+  symbols: Array<{ symbolId: string; name: string }>,
+  candidateNames: ReadonlySet<string>,
+): TestRefSymbolLookup {
+  return buildTestRefSymbolLookup(symbols, candidateNames);
 }
 
 export { collectTestRefs };
@@ -765,6 +1194,11 @@ export async function updateMetricsForRepo(
       }
     }
   };
+  const recordSubphase = (phaseName: string, durationMs: number): void => {
+    if (timings) {
+      timings[phaseName] = durationMs;
+    }
+  };
 
   // An explicitly empty set means the caller already knows there are no file
   // changes, so skip all DB and graph work up front.
@@ -788,6 +1222,7 @@ export async function updateMetricsForRepo(
     ConfigObjectSchema,
     {},
   ) as RepoConfig;
+  const fullRepoMetricsRefresh = changedFileIds === undefined;
   const [files, allSymbols] = await measureSubphase(
     "loadFilesAndSymbols",
     async () => {
@@ -839,6 +1274,8 @@ export async function updateMetricsForRepo(
       allSymbols,
       config,
       options?.changedTestFilePaths,
+      files.map((file) => file.relPath),
+      new Map(files.map((file) => [file.relPath, file.contentHash])),
     ),
   );
 
@@ -872,15 +1309,16 @@ export async function updateMetricsForRepo(
 
   const now = monotonicIsoNow();
 
-  // Build all metrics rows, then batch-write in chunks of 200 to reduce
-  // per-row transaction overhead while keeping individual transactions small.
+  // Build all metrics rows, then hand the complete set to the DB helper. The
+  // helper owns internal statement chunking inside one transaction; splitting
+  // here would multiply transaction overhead during full-index finalization.
   const BATCH_SIZE = 200;
   const rows: MetricsRow[] = [];
   for (const symbol of symbols) {
     const metric = fanMetrics.get(symbol.symbolId) ?? { fanIn: 0, fanOut: 0 };
     const relPath = fileById.get(symbol.fileId);
     const churn = relPath ? (churnByFile.get(relPath) ?? 0) : 0;
-    const refs = Array.from(testRefs.get(symbol.symbolId) ?? []);
+    const refs = Array.from(testRefs.get(symbol.symbolId) ?? []).sort();
     const canonicalTest = batchCanonical.get(symbol.symbolId) ?? null;
     rows.push({
       symbolId: symbol.symbolId,
@@ -888,7 +1326,9 @@ export async function updateMetricsForRepo(
       fanOut: metric.fanOut,
       churn30d: churn,
       testRefsJson: JSON.stringify(refs),
-      canonicalTestJson: canonicalTest ? JSON.stringify(canonicalTest) : null,
+      canonicalTestJson: canonicalTest
+        ? canonicalTestToJson(canonicalTest)
+        : null,
       updatedAt: now,
     });
   }
@@ -916,7 +1356,7 @@ export async function updateMetricsForRepo(
     for (const symbol of allSymbols) {
       if (affectedSet.has(symbol.symbolId)) continue;
       const ct = batchCanonical.get(symbol.symbolId) ?? null;
-      const canonicalTestJson = ct ? JSON.stringify(ct) : null;
+      const canonicalTestJson = ct ? canonicalTestToJson(ct) : null;
       const previousCanonical =
         existingMetrics.get(symbol.symbolId)?.canonicalTestJson ?? null;
       if (previousCanonical === canonicalTestJson) {
@@ -940,14 +1380,64 @@ export async function updateMetricsForRepo(
     }
   }
 
-  await measureSubphase("writeMetrics", async () => {
-    await withWriteConn(async (wConn) => {
-      for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-        const chunk = rows.slice(i, i + BATCH_SIZE);
-        await ladybugDb.upsertMetricsBatch(wConn, chunk);
+  const metricsPayloadFingerprint =
+    fullRepoMetricsRefresh && rows.length > 0
+      ? await measureSubphase("metricsFingerprint", async () => {
+          const next = buildMetricsPayloadFingerprint(rows, {
+            assumeCanonicalJson: true,
+          });
+          const previous = await ladybugDb.getMetricsFingerprint(conn, repoId);
+          return {
+            next,
+            unchanged:
+              previous?.metricsHash === next.metricsHash &&
+              previous.rowCount === next.rowCount,
+          };
+        })
+      : null;
+
+  if (rows.length > 0) {
+    if (metricsPayloadFingerprint?.unchanged) {
+      recordSubphase("writeMetrics", 0);
+      recordSubphase("writeRows", 0);
+      recordSubphase("writeWait", 0);
+    } else {
+      await measureSubphase("writeMetrics", async () => {
+        await withWriteConn(async (wConn) => {
+          await measureSubphase("writeRows", () =>
+            fullRepoMetricsRefresh
+              ? ladybugDb.replaceMetricsForRepoCopy(wConn, repoId, rows)
+              : ladybugDb.upsertMetricsBatch(wConn, rows),
+          );
+          if (metricsPayloadFingerprint) {
+            await measureSubphase("writeFingerprint", () =>
+              ladybugDb.upsertMetricsFingerprint(wConn, {
+                repoId,
+                metricsHash: metricsPayloadFingerprint.next.metricsHash,
+                rowCount: metricsPayloadFingerprint.next.rowCount,
+                updatedAt: now,
+              }),
+            );
+          }
+        });
+      });
+      if (timings) {
+        recordSubphase(
+          "writeWait",
+          Math.max(
+            0,
+            (timings.writeMetrics ?? 0) -
+              (timings.writeRows ?? 0) -
+              (timings.writeFingerprint ?? 0),
+          ),
+        );
       }
-    });
-  });
+    }
+  } else {
+    recordSubphase("writeMetrics", 0);
+    recordSubphase("writeWait", 0);
+    recordSubphase("writeRows", 0);
+  }
 
   // Produce a shared-graph handle so downstream consumers (cluster orchestrator)
   // can reuse the edge load instead of rescanning the repo.
@@ -978,6 +1468,9 @@ export async function updateMetricsForRepo(
     affectedSymbolIds,
   };
 }
+
+export const _buildMetricsPayloadFingerprintForTesting =
+  buildMetricsPayloadFingerprint;
 
 interface Graph {
   repoId: string;

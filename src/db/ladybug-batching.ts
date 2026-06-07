@@ -4,6 +4,7 @@ export const LADYBUG_WRITE_CHUNK_SIZES = {
   edges: 4096,
   symbolReferences: 4096,
   files: 4096,
+  symbolVersions: 4096,
   // Symbol rows carry the largest JSON/searchText payloads, so keep the
   // previous conservative chunk size until profiling shows it is the hotspot.
   symbols: 256,

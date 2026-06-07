@@ -1,51 +1,129 @@
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
-import { withTransaction } from "../db/ladybug-core.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
 
-const SNAPSHOT_BATCH_SIZE = 200;
+type RecordTiming = (phaseName: string, durationMs: number) => void;
+
+async function measureVersionPhase<T>(
+  recordTiming: RecordTiming | undefined,
+  phaseName: string,
+  fn: () => Promise<T> | T,
+): Promise<T> {
+  const startedAt = Date.now();
+  try {
+    return await fn();
+  } finally {
+    recordTiming?.(phaseName, Date.now() - startedAt);
+  }
+}
 
 async function snapshotSymbolsForVersion(params: {
   repoId: string;
   versionId: string;
+  freshVersion?: boolean;
+  recordTiming?: RecordTiming;
 }): Promise<number> {
-  const { repoId, versionId } = params;
+  const { repoId, versionId, freshVersion = false, recordTiming } = params;
   const readConn = await getLadybugConn();
-  const symbols = await ladybugDb.getSymbolsByRepoForSnapshot(readConn, repoId);
-  await withWriteConn(async (wConn) => {
-    let chunksCommitted = 0;
-    // Batch snapshots inside transactions to avoid thousands of individual
-    // auto-commits which cause WAL pressure and can crash Kuzu on large repos.
-    for (let i = 0; i < symbols.length; i += SNAPSHOT_BATCH_SIZE) {
-      const chunk = symbols.slice(i, i + SNAPSHOT_BATCH_SIZE);
-      await withTransaction(wConn, async (txConn) => {
-        for (const symbol of chunk) {
-          await ladybugDb.snapshotSymbolVersion(txConn, {
-            versionId,
-            symbolId: symbol.symbolId,
-            astFingerprint: symbol.astFingerprint,
-            signatureJson: symbol.signatureJson,
-            summary: symbol.summary,
-            invariantsJson: symbol.invariantsJson,
-            sideEffectsJson: symbol.sideEffectsJson,
-          });
+  let afterSymbolId: string | undefined;
+  let symbolCount = 0;
+
+  await measureVersionPhase(
+    recordTiming,
+    "versionSnapshot.snapshot",
+    async () => {
+      if (freshVersion) {
+        const writer = await ladybugDb.createFreshSymbolVersionCopyWriter();
+        try {
+          while (true) {
+            const symbols = await measureVersionPhase(
+              recordTiming,
+              "versionSnapshot.snapshot.readPages",
+              () =>
+                ladybugDb.getSymbolsByRepoForSnapshotPage(readConn, repoId, {
+                  afterSymbolId,
+                }),
+            );
+            if (symbols.length === 0) break;
+
+            const rows = symbols.map((symbol) => ({
+              versionId,
+              symbolId: symbol.symbolId,
+              astFingerprint: symbol.astFingerprint,
+              signatureJson: symbol.signatureJson,
+              summary: symbol.summary,
+              invariantsJson: symbol.invariantsJson,
+              sideEffectsJson: symbol.sideEffectsJson,
+            }));
+            await measureVersionPhase(
+              recordTiming,
+              "versionSnapshot.snapshot.writePages",
+              () => writer.writePage(rows),
+            );
+            symbolCount += symbols.length;
+            afterSymbolId = symbols[symbols.length - 1]?.symbolId;
+          }
+          await measureVersionPhase(
+            recordTiming,
+            "versionSnapshot.snapshot.writePages",
+            () => withWriteConn((wConn) => writer.finish(wConn)),
+          );
+        } finally {
+          await writer.dispose();
         }
-      });
-      chunksCommitted++;
-    }
-    logger.debug("Version snapshot complete", {
-      repoId,
-      versionId,
-      symbolCount: symbols.length,
-      chunksCommitted,
-    });
+        return;
+      }
+
+      while (true) {
+        const symbols = await measureVersionPhase(
+          recordTiming,
+          "versionSnapshot.snapshot.readPages",
+          () =>
+            ladybugDb.getSymbolsByRepoForSnapshotPage(readConn, repoId, {
+              afterSymbolId,
+            }),
+        );
+        if (symbols.length === 0) break;
+
+        const rows = symbols.map((symbol) => ({
+          versionId,
+          symbolId: symbol.symbolId,
+          astFingerprint: symbol.astFingerprint,
+          signatureJson: symbol.signatureJson,
+          summary: symbol.summary,
+          invariantsJson: symbol.invariantsJson,
+          sideEffectsJson: symbol.sideEffectsJson,
+        }));
+        await measureVersionPhase(
+          recordTiming,
+          "versionSnapshot.snapshot.writePages",
+          () =>
+            withWriteConn(async (wConn) => {
+              if (freshVersion) {
+                await ladybugDb.snapshotFreshSymbolVersionsCopy(wConn, rows);
+              } else {
+                await ladybugDb.snapshotSymbolVersionsBatch(wConn, rows);
+              }
+            }),
+        );
+        symbolCount += symbols.length;
+        afterSymbolId = symbols[symbols.length - 1]?.symbolId;
+      }
+    },
+  );
+
+  logger.debug("Version snapshot complete", {
+    repoId,
+    versionId,
+    symbolCount,
   });
-  return symbols.length;
+  return symbolCount;
 }
 
 export async function snapshotCurrentSymbolsForVersion(params: {
   repoId: string;
   versionId: string;
+  recordTiming?: RecordTiming;
 }): Promise<number> {
   return snapshotSymbolsForVersion(params);
 }
@@ -54,17 +132,28 @@ export async function createVersionAndSnapshot(params: {
   repoId: string;
   versionId: string;
   reason: string;
+  recordTiming?: RecordTiming;
 }): Promise<void> {
-  const { repoId, versionId, reason } = params;
-  await withWriteConn(async (wConn) => {
-    await ladybugDb.createVersion(wConn, {
-      versionId,
-      repoId,
-      createdAt: new Date().toISOString(),
-      reason,
-      prevVersionHash: null,
-      versionHash: null,
-    });
+  const { repoId, versionId, reason, recordTiming } = params;
+  await measureVersionPhase(
+    recordTiming,
+    "versionSnapshot.createVersion",
+    () =>
+      withWriteConn(async (wConn) => {
+        await ladybugDb.createVersion(wConn, {
+          versionId,
+          repoId,
+          createdAt: new Date().toISOString(),
+          reason,
+          prevVersionHash: null,
+          versionHash: null,
+        });
+      }),
+  );
+  await snapshotSymbolsForVersion({
+    repoId,
+    versionId,
+    freshVersion: true,
+    recordTiming,
   });
-  await snapshotSymbolsForVersion({ repoId, versionId });
 }

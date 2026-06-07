@@ -16,6 +16,7 @@ import { fileURLToPath } from "url";
 import {
   WATCHER_DEFAULT_MAX_WATCHED_FILES,
   DEFAULT_PASS2_CONCURRENCY,
+  DEFAULT_LOUVAIN_MAX_CALL_EDGES,
 } from "../../config/constants.js";
 import {
   DEFAULT_INDEXING_CONCURRENCY,
@@ -1820,6 +1821,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
         activation: "shadowDb" as const,
         readyState: "graphPlusAlgorithms" as const,
         stagingFormat: "parquet" as const,
+        maxLegacyFallbackFiles: 5_000,
         lsp: {
           mode: "primaryWithCaps" as const,
           workspaceSymbolLimit: 5_000,
@@ -1838,7 +1840,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
         enabled: true,
         pageRank: { enabled: true },
         kCore: { enabled: true },
-        louvain: { enabled: true, maxCallEdges: 50_000 },
+        louvain: { enabled: true, maxCallEdges: DEFAULT_LOUVAIN_MAX_CALL_EDGES },
         workerTimeoutMs: 120_000,
       },
     },

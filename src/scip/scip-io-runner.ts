@@ -36,6 +36,8 @@ import { createReadStream } from "fs";
 import {
   access,
   chmod,
+  copyFile,
+  readFile,
   mkdir,
   mkdtemp,
   readdir,
@@ -46,13 +48,24 @@ import {
 } from "fs/promises";
 import type { Dirent } from "fs";
 import { homedir, tmpdir } from "os";
-import { isAbsolute, join } from "path";
+import { dirname, isAbsolute, join } from "path";
 
-import type { ScipGeneratorConfig } from "../config/types.js";
+import {
+  RepoConfigSchema,
+  type RepoConfig,
+  type ScipGeneratorConfig,
+} from "../config/types.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import {
+  getLanguageExtensions,
+  scanRepository,
+  walkRepositoryFiles,
+} from "../indexer/fileScanner.js";
+import { ConcurrencyLimiter } from "../util/concurrency.js";
 import { logger } from "../util/logger.js";
+import { globToSafeRegex } from "../util/safeRegex.js";
 import {
   getRelativePath,
   normalizePath,
@@ -105,6 +118,72 @@ function wrapForWindowsCmdShim(
 /** Directory where sdl-mcp keeps managed binaries. Mirrors logger.ts. */
 const MANAGED_BIN_DIR = join(homedir(), ".sdl-mcp", "bin");
 
+/** Directory where generated SCIP artifacts can be reused across refreshes. */
+const DEFAULT_SCIP_GENERATOR_CACHE_DIR = join(
+  homedir(),
+  ".sdl-mcp",
+  "cache",
+  "scip-io",
+);
+
+const SCIP_GENERATOR_CACHE_SCHEMA_VERSION = 1;
+
+const SCIP_GENERATOR_CACHE_HASH_CONCURRENCY = 16;
+
+const SCIP_GENERATOR_CACHE_GIT_TIMEOUT_MS = 5_000;
+
+const SCIP_GENERATOR_CACHE_GIT_OUTPUT_LIMIT_BYTES = 512 * 1024;
+
+const SCIP_GENERATOR_CACHE_FAST_DIRTY_INPUT_LIMIT = 1_000;
+
+/**
+ * Non-source files that can change compiler/indexer output even when source
+ * file bytes stay fixed. The cache is still a best-effort generator shortcut,
+ * but including build manifests keeps common TS/Python/Rust/Go/JVM/.NET/C++
+ * changes from reusing stale SCIP output.
+ */
+const SCIP_GENERATOR_CACHE_CONFIG_PATTERNS = [
+  "package.json",
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "bun.lockb",
+  "tsconfig*.json",
+  "**/tsconfig*.json",
+  "jsconfig*.json",
+  "**/jsconfig*.json",
+  "pyproject.toml",
+  "setup.py",
+  "setup.cfg",
+  "requirements*.txt",
+  "poetry.lock",
+  "Pipfile",
+  "Pipfile.lock",
+  "tox.ini",
+  "mypy.ini",
+  "pytest.ini",
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain",
+  "rust-toolchain.toml",
+  "go.mod",
+  "go.sum",
+  "pom.xml",
+  "build.gradle",
+  "build.gradle.kts",
+  "settings.gradle",
+  "settings.gradle.kts",
+  "*.sln",
+  "*.csproj",
+  "*.vbproj",
+  "Directory.Build.props",
+  "Directory.Build.targets",
+  "global.json",
+  "compile_commands.json",
+  "CMakeLists.txt",
+  "**/CMakeLists.txt",
+];
+
 /** GitHub Releases API endpoint for the latest scip-io release. */
 const RELEASES_API_URL =
   "https://api.github.com/repos/GlitterKill/scip-io/releases/latest";
@@ -130,6 +209,47 @@ const MAX_STDERR_BYTES = 1 * 1024 * 1024;
  * serve large release artifacts.
  */
 const ALLOWED_DOWNLOAD_HOSTS = ["github.com", "objects.githubusercontent.com"];
+
+/**
+ * SDL-MCP stores repo languages as file-extension-ish IDs, while scip-io
+ * filters by emitter language names. Unsupported SDL-MCP languages are omitted
+ * so the generator does not probe unrelated ecosystems just because they exist
+ * somewhere in a large repo.
+ */
+const SCIP_IO_LANGUAGE_ALIASES = new Map<string, string>([
+  ["ts", "typescript"],
+  ["tsx", "typescript"],
+  ["typescript", "typescript"],
+  ["js", "javascript"],
+  ["jsx", "javascript"],
+  ["mjs", "javascript"],
+  ["cjs", "javascript"],
+  ["javascript", "javascript"],
+  ["py", "python"],
+  ["python", "python"],
+  ["rs", "rust"],
+  ["rust", "rust"],
+  ["go", "go"],
+  ["golang", "go"],
+  ["java", "java"],
+  ["cs", "csharp"],
+  ["c#", "csharp"],
+  ["csharp", "csharp"],
+  ["kt", "kotlin"],
+  ["kts", "kotlin"],
+  ["kotlin", "kotlin"],
+  ["c", "cpp"],
+  ["cc", "cpp"],
+  ["cxx", "cpp"],
+  ["cpp", "cpp"],
+  ["c++", "cpp"],
+  ["hh", "cpp"],
+  ["hpp", "cpp"],
+  ["hxx", "cpp"],
+  ["ruby", "ruby"],
+  ["rb", "ruby"],
+  ["scala", "scala"],
+]);
 
 /**
  * Validate that a download URL returned by the GitHub API is (a) HTTPS
@@ -182,9 +302,26 @@ export interface ScipIoRunResult {
   stderrTruncated?: boolean;
 }
 
+export interface ScipGeneratorCacheDiagnostic {
+  status: "disabled" | "miss" | "hit" | "stored" | "error";
+  durationMs: number;
+  key?: string;
+  fileCount?: number;
+  prepareDurationMs?: number;
+  restoreDurationMs?: number;
+  saveDurationMs?: number;
+  generatorDurationMs?: number;
+  reason?: string;
+}
+
 export interface ScipGeneratedIndexSelection {
   generatedIndexes: ScipGeneratedIndexDiagnostic[];
   failures: ScipFailureDiagnostic[];
+}
+
+interface ScipSplitIndexStat {
+  mtimeMs: number;
+  sizeBytes: number;
 }
 
 export interface ScipIoPreRefreshResult extends ScipGeneratedIndexSelection {
@@ -192,6 +329,7 @@ export interface ScipIoPreRefreshResult extends ScipGeneratedIndexSelection {
   ok: boolean;
   run?: ScipIoRunResult;
   splitRun?: ScipIoRunResult;
+  cache?: ScipGeneratorCacheDiagnostic;
 }
 
 export class ScipIoUnsupportedPlatformError extends Error {
@@ -209,6 +347,121 @@ export class ScipIoInstallError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ScipIoInstallError";
+  }
+}
+
+export function scipIoLanguagesForRepo(
+  repoLanguages: readonly string[],
+): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const language of repoLanguages) {
+    const normalized = SCIP_IO_LANGUAGE_ALIASES.get(
+      language.trim().replace(/^\./, "").toLowerCase(),
+    );
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function addNormalizedScipIoLanguage(
+  target: string[],
+  seen: Set<string>,
+  language: string,
+): void {
+  const normalized = SCIP_IO_LANGUAGE_ALIASES.get(
+    language.trim().replace(/^\./, "").toLowerCase(),
+  );
+  if (!normalized || seen.has(normalized)) return;
+  seen.add(normalized);
+  target.push(normalized);
+}
+
+function splitScipIoLanguageArg(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function scipIoLanguagesFromArgs(args: readonly string[]): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    let value: string | undefined;
+    if (arg === "--lang" || arg === "-l") {
+      value = args[index + 1];
+      index++;
+    } else if (arg.startsWith("--lang=")) {
+      value = arg.slice("--lang=".length);
+    } else {
+      const shorthand = arg.match(/^-l(.+)$/);
+      value = shorthand?.[1];
+    }
+
+    for (const language of splitScipIoLanguageArg(value)) {
+      addNormalizedScipIoLanguage(result, seen, language);
+    }
+  }
+
+  return result;
+}
+
+function requestedSplitLanguagesForCache(params: {
+  effectiveArgs: readonly string[];
+  repoLanguages?: readonly string[];
+}): string[] {
+  const explicitLanguages = scipIoLanguagesFromArgs(params.effectiveArgs);
+  if (explicitLanguages.length > 0) return explicitLanguages;
+  return params.repoLanguages ? scipIoLanguagesForRepo(params.repoLanguages) : [];
+}
+
+function hasExplicitScipIoLanguageArg(args: readonly string[]): boolean {
+  return args.some(
+    (arg) =>
+      arg === "--lang" ||
+      arg === "-l" ||
+      arg.startsWith("--lang=") ||
+      /^-l\S/.test(arg),
+  );
+}
+
+/**
+ * Compose the exact args after `scip-io index`. User-supplied language filters
+ * always win so `scip.generator.args` can intentionally request a wider or
+ * narrower SCIP generation scope than the repository scanner uses.
+ */
+export function buildScipIoIndexArgs(opts: {
+  generatorArgs?: readonly string[];
+  repoLanguages?: readonly string[];
+}): string[] {
+  const generatorArgs = [...(opts.generatorArgs ?? [])];
+  if (
+    opts.repoLanguages === undefined ||
+    hasExplicitScipIoLanguageArg(generatorArgs)
+  ) {
+    return generatorArgs;
+  }
+
+  const languages = scipIoLanguagesForRepo(opts.repoLanguages);
+  if (languages.length === 0) return generatorArgs;
+  return ["--lang", languages.join(","), ...generatorArgs];
+}
+
+function parseStoredRepoLanguages(
+  configJson: string | null,
+): string[] | undefined {
+  if (!configJson) return undefined;
+  try {
+    const parsed = RepoConfigSchema.safeParse(JSON.parse(configJson));
+    return parsed.success ? parsed.data.languages : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -809,7 +1062,9 @@ async function sha256File(filePath: string): Promise<string> {
   });
 }
 
-async function discoverSplitIndexPaths(repoRootPath: string): Promise<string[]> {
+async function discoverSplitIndexPaths(
+  repoRootPath: string,
+): Promise<string[]> {
   const entries = await readdir(repoRootPath, { withFileTypes: true });
   return entries
     .filter((entry: Dirent) => entry.isFile())
@@ -820,12 +1075,1147 @@ async function discoverSplitIndexPaths(repoRootPath: string): Promise<string[]> 
     .map((name) => join(repoRootPath, name));
 }
 
-function repoRelativeScipPath(repoRootPath: string, absolutePath: string): string {
+function repoRelativeScipPath(
+  repoRootPath: string,
+  absolutePath: string,
+): string {
   const normalizedRoot = normalizePath(repoRootPath);
   const normalizedPath = normalizePath(absolutePath);
   return normalizedPath.startsWith(normalizedRoot)
     ? normalizePath(getRelativePath(normalizedRoot, normalizedPath))
     : normalizedPath;
+}
+
+async function snapshotSplitIndexStats(
+  repoRootPath: string,
+): Promise<Map<string, ScipSplitIndexStat>> {
+  const snapshot = new Map<string, ScipSplitIndexStat>();
+  for (const candidatePath of await discoverSplitIndexPaths(repoRootPath)) {
+    try {
+      const fileStat = await stat(candidatePath);
+      snapshot.set(normalizePath(candidatePath), {
+        mtimeMs: fileStat.mtimeMs,
+        sizeBytes: fileStat.size,
+      });
+    } catch {
+      // Best-effort stale-output protection. Missing files are simply treated
+      // as absent from the pre-run snapshot.
+    }
+  }
+  return snapshot;
+}
+
+function isUnchangedSplitIndex(
+  absolutePath: string,
+  fileStat: { mtimeMs: number; size: number },
+  preRunStats?: ReadonlyMap<string, ScipSplitIndexStat>,
+): boolean {
+  const before = preRunStats?.get(normalizePath(absolutePath));
+  return (
+    before !== undefined &&
+    before.sizeBytes === fileStat.size &&
+    before.mtimeMs === fileStat.mtimeMs
+  );
+}
+
+interface ScipGeneratorCacheContext {
+  cacheDir: string;
+  cacheKey: string;
+  fastReuseKey?: string;
+  inputSignature: string;
+  expectedSplitLanguages: readonly string[];
+  latestPath: string;
+  metadataPath: string;
+  repoCacheRoot: string;
+  repoRootPath: string;
+  prepareDurationMs: number;
+  startedAt: number;
+  sourceFileCount: number;
+}
+
+interface CachedGeneratedIndex {
+  path: string;
+  label: string;
+  sizeBytes: number;
+  mode: ScipGeneratedIndexMode;
+  contentHash: string;
+}
+
+interface ScipGeneratorCacheMetadata {
+  schemaVersion: number;
+  createdAt: string;
+  cacheKey: string;
+  generatedIndexes: CachedGeneratedIndex[];
+  coveredSplitLanguages?: string[];
+}
+
+interface ScipGeneratorLatestCacheMetadata {
+  schemaVersion: number;
+  updatedAt: string;
+  cacheKey: string;
+  fastReuseKey?: string;
+  inputSignature: string;
+  sourceFileCount?: number;
+}
+
+interface ScipGeneratorCacheInput {
+  path: string;
+  size?: number;
+  mtimeMs?: number;
+}
+
+interface ScipGeneratorFastReuseState {
+  key: string;
+  sourceFileCount?: number;
+}
+
+function hashString(input: string): string {
+  return createHash("sha256").update(input).digest("hex");
+}
+
+function safeCacheRepoKey(repoRootPath: string, repoId?: string): string {
+  const prefix = (repoId ?? "repo")
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 64);
+  return `${prefix || "repo"}-${hashString(normalizePath(repoRootPath)).slice(0, 16)}`;
+}
+
+function scipGeneratorCacheDir(): string {
+  return process.env.SDL_SCIP_IO_CACHE_DIR ?? DEFAULT_SCIP_GENERATOR_CACHE_DIR;
+}
+
+function isSafeGeneratedCachePath(relPath: string): boolean {
+  const normalized = normalizePath(relPath);
+  if (!normalized || normalized === ".") return false;
+  if (normalized === ".." || normalized.startsWith("../")) return false;
+  if (normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized)) {
+    return false;
+  }
+  return !normalized.split("/").includes("..");
+}
+
+function cachePathForRel(cacheDir: string, relPath: string): string {
+  return join(cacheDir, ...normalizePath(relPath).split("/"));
+}
+
+async function binaryFingerprint(binaryPath: string): Promise<unknown> {
+  try {
+    const fileStat = await stat(binaryPath);
+    return {
+      path: normalizePath(binaryPath),
+      size: fileStat.size,
+      mtimeMs: Math.trunc(fileStat.mtimeMs),
+    };
+  } catch (err) {
+    return {
+      path: normalizePath(binaryPath),
+      unavailable:
+        err instanceof Error ? err.message : `failed to stat ${binaryPath}`,
+    };
+  }
+}
+
+function sameNormalizedPath(left: string, right: string): boolean {
+  const normalizedLeft = normalizePath(left);
+  const normalizedRight = normalizePath(right);
+  return IS_WINDOWS
+    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    : normalizedLeft === normalizedRight;
+}
+
+function firstOutputLine(output: string): string | null {
+  const line = output.split(/\r?\n/).find((entry) => entry.trim().length > 0);
+  return line?.trim() ?? null;
+}
+
+async function runGitCacheCommand(
+  repoRootPath: string,
+  args: readonly string[],
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    const child = spawn("git", [...args], {
+      cwd: repoRootPath,
+      shell: false,
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stdoutBytes = 0;
+    let settled = false;
+    const timeout = setTimeout(() => {
+      child.kill();
+      finish(null);
+    }, SCIP_GENERATOR_CACHE_GIT_TIMEOUT_MS);
+
+    function finish(value: string | null): void {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(value);
+    }
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > SCIP_GENERATOR_CACHE_GIT_OUTPUT_LIMIT_BYTES) {
+        child.kill();
+        finish(null);
+        return;
+      }
+      stdout += chunk.toString("utf-8");
+    });
+    child.on("error", () => finish(null));
+    child.on("close", (code) => finish(code === 0 ? stdout : null));
+  });
+}
+
+function parseSimpleGitStatusPath(pathText: string): string | null {
+  const trimmed = pathText.trim();
+  if (!trimmed || trimmed.startsWith('"')) return null;
+  return normalizePath(trimmed).replace(/^\.\//, "");
+}
+
+function parseGitStatusPaths(output: string): string[] | null {
+  const paths = new Set<string>();
+  for (const line of output.split(/\r?\n/)) {
+    if (line.trim().length === 0) continue;
+    if (line.length < 4) return null;
+    const payload = line.slice(3).trim();
+    const pathParts = payload.includes(" -> ")
+      ? payload.split(" -> ")
+      : [payload];
+    for (const part of pathParts) {
+      const parsed = parseSimpleGitStatusPath(part);
+      if (parsed === null) return null;
+      paths.add(parsed);
+    }
+  }
+  return [...paths].sort((a, b) => a.localeCompare(b));
+}
+
+function normalizedPathMatchesGlob(pathText: string, glob: string): boolean {
+  const normalizedPath = normalizePath(pathText);
+  const normalizedGlob = normalizePath(glob);
+  const regex = globToSafeRegex(normalizedGlob);
+  if (regex.test(normalizedPath)) return true;
+  if (normalizedGlob.includes("/")) return false;
+  const basename = normalizedPath.split("/").pop();
+  return basename !== undefined && regex.test(basename);
+}
+
+function dirtyPathIsIgnoredByRepoConfig(
+  relPath: string,
+  repoConfig: RepoConfig,
+): boolean {
+  return repoConfig.ignore.some((pattern) =>
+    normalizedPathMatchesGlob(relPath, pattern),
+  );
+}
+
+function dirtyPathMatchesScipGeneratorSource(
+  relPath: string,
+  repoConfig: RepoConfig,
+): boolean {
+  const lowerPath = relPath.toLowerCase();
+  return getLanguageExtensions(repoConfig.languages).some((extension) =>
+    lowerPath.endsWith(extension.toLowerCase()),
+  );
+}
+
+function dirtyPathMatchesScipGeneratorConfig(relPath: string): boolean {
+  return SCIP_GENERATOR_CACHE_CONFIG_PATTERNS.some((pattern) =>
+    normalizedPathMatchesGlob(relPath, pattern),
+  );
+}
+
+function dirtyPathsAffectScipGeneratorInputs(
+  dirtyPaths: readonly string[],
+  repoConfig: RepoConfig,
+): boolean {
+  for (const dirtyPath of dirtyPaths) {
+    const relPath = normalizePath(dirtyPath).replace(/^\.\//, "");
+    if (!relPath || relPath === ".") continue;
+    if (dirtyPathIsIgnoredByRepoConfig(relPath, repoConfig)) continue;
+    if (dirtyPathMatchesScipGeneratorSource(relPath, repoConfig)) return true;
+    if (dirtyPathMatchesScipGeneratorConfig(relPath)) return true;
+  }
+  return false;
+}
+
+function dirtyPathIsScipGeneratorInput(
+  relPath: string,
+  repoConfig: RepoConfig,
+): boolean {
+  if (dirtyPathIsIgnoredByRepoConfig(relPath, repoConfig)) return false;
+  return (
+    dirtyPathMatchesScipGeneratorSource(relPath, repoConfig) ||
+    dirtyPathMatchesScipGeneratorConfig(relPath)
+  );
+}
+
+async function hashFastDirtyInputRecords(
+  repoRootPath: string,
+  dirtyPaths: readonly string[],
+  repoConfig: RepoConfig,
+): Promise<unknown[] | null> {
+  const relevantPaths = dirtyPaths
+    .map((pathText) => normalizePath(pathText).replace(/^\.\//, ""))
+    .filter((relPath) => relPath && relPath !== ".")
+    .filter((relPath) => dirtyPathIsScipGeneratorInput(relPath, repoConfig))
+    .sort((a, b) => a.localeCompare(b));
+
+  if (relevantPaths.length > SCIP_GENERATOR_CACHE_FAST_DIRTY_INPUT_LIMIT) {
+    return null;
+  }
+
+  const records: unknown[] = [];
+  for (const relPath of relevantPaths) {
+    const absolutePath = join(repoRootPath, ...relPath.split("/"));
+    try {
+      const fileStat = await stat(absolutePath);
+      if (!fileStat.isFile()) {
+        records.push({ path: relPath, skipped: "not-file" });
+        continue;
+      }
+      records.push({
+        path: relPath,
+        size: fileStat.size,
+        sha256: await sha256File(absolutePath),
+      });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      records.push({
+        path: relPath,
+        missing: code === "ENOENT",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return records;
+}
+
+async function readScipGeneratorGitState(
+  repoRootPath: string,
+): Promise<{ head: string; dirtyPaths: string[] } | null> {
+  const topLevelOutput = await runGitCacheCommand(repoRootPath, [
+    "rev-parse",
+    "--show-toplevel",
+  ]);
+  const topLevel = topLevelOutput ? firstOutputLine(topLevelOutput) : null;
+  if (!topLevel || !sameNormalizedPath(topLevel, repoRootPath)) return null;
+
+  const headOutput = await runGitCacheCommand(repoRootPath, [
+    "rev-parse",
+    "HEAD",
+  ]);
+  const head = headOutput ? firstOutputLine(headOutput) : null;
+  if (!head || !/^[a-f0-9]{40}$/i.test(head)) return null;
+
+  const statusOutput = await runGitCacheCommand(repoRootPath, [
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+  ]);
+  if (statusOutput === null) return null;
+  const dirtyPaths = parseGitStatusPaths(statusOutput);
+  if (dirtyPaths === null) return null;
+  return { head, dirtyPaths };
+}
+
+function buildScipGeneratorFastReusePayload(params: {
+  repoRootPath: string;
+  repoLanguages?: readonly string[];
+  effectiveArgs: readonly string[];
+  repoConfig: RepoConfig;
+  binary: unknown;
+  gitHead: string;
+  dirtyInputs: readonly unknown[];
+}): unknown {
+  return {
+    schemaVersion: SCIP_GENERATOR_CACHE_SCHEMA_VERSION,
+    strategy: "git-status-input-filter-v1",
+    repoRootPath: normalizePath(params.repoRootPath),
+    repoLanguages: params.repoLanguages
+      ? scipIoLanguagesForRepo(params.repoLanguages)
+      : undefined,
+    effectiveArgs: [...params.effectiveArgs],
+    repoConfig: {
+      languages: params.repoConfig.languages,
+      ignore: params.repoConfig.ignore,
+      maxFileBytes: params.repoConfig.maxFileBytes,
+      workspaceGlobs: params.repoConfig.workspaceGlobs,
+      packageJsonPath: params.repoConfig.packageJsonPath,
+    },
+    binary: params.binary,
+    gitHead: params.gitHead,
+    dirtyInputs: params.dirtyInputs,
+  };
+}
+
+async function buildScipGeneratorFastReuseState(opts: {
+  repoRootPath: string;
+  repoLanguages?: readonly string[];
+  effectiveArgs: readonly string[];
+  repoConfig: RepoConfig;
+  binary: unknown;
+}): Promise<ScipGeneratorFastReuseState | null> {
+  const gitState = await readScipGeneratorGitState(opts.repoRootPath);
+  if (!gitState) return null;
+  const dirtyInputs = await hashFastDirtyInputRecords(
+    opts.repoRootPath,
+    gitState.dirtyPaths,
+    opts.repoConfig,
+  );
+  if (dirtyInputs === null) return null;
+  return {
+    key: hashString(
+      JSON.stringify(
+        buildScipGeneratorFastReusePayload({
+          repoRootPath: opts.repoRootPath,
+          repoLanguages: opts.repoLanguages,
+          effectiveArgs: opts.effectiveArgs,
+          repoConfig: opts.repoConfig,
+          binary: opts.binary,
+          gitHead: gitState.head,
+          dirtyInputs,
+        }),
+      ),
+    ),
+  };
+}
+
+async function discoverScipGeneratorCacheInputs(
+  repoRootPath: string,
+  repoConfig: RepoConfig,
+): Promise<ScipGeneratorCacheInput[]> {
+  const sourceFiles = await scanRepository(repoRootPath, repoConfig);
+  const inputsByPath = new Map<string, ScipGeneratorCacheInput>();
+  for (const file of sourceFiles) {
+    inputsByPath.set(normalizePath(file.path), {
+      path: normalizePath(file.path),
+      size: file.size,
+      mtimeMs: Math.trunc(file.mtime),
+    });
+  }
+
+  let configFiles: string[] = [];
+  try {
+    configFiles = await walkRepositoryFiles(repoRootPath, {
+      patterns: SCIP_GENERATOR_CACHE_CONFIG_PATTERNS,
+      ignorePatterns: repoConfig.ignore,
+    });
+  } catch (err) {
+    logger.debug("scip-io: failed to scan generator cache config files", {
+      repoRootPath,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  for (const configPath of configFiles) {
+    const normalized = normalizePath(configPath);
+    if (!inputsByPath.has(normalized)) {
+      inputsByPath.set(normalized, { path: normalized });
+    }
+  }
+
+  return [...inputsByPath.values()].sort((a, b) =>
+    a.path.localeCompare(b.path),
+  );
+}
+
+async function hashCacheInputFiles(
+  repoRootPath: string,
+  inputs: readonly ScipGeneratorCacheInput[],
+): Promise<unknown[]> {
+  const limiter = new ConcurrencyLimiter({
+    maxConcurrency: SCIP_GENERATOR_CACHE_HASH_CONCURRENCY,
+  });
+  return Promise.all(
+    inputs.map((input) =>
+      limiter.run(async () => {
+        const relPath = input.path;
+        const absolutePath = join(repoRootPath, ...relPath.split("/"));
+        try {
+          if (typeof input.size === "number" && Number.isFinite(input.size)) {
+            return {
+              path: relPath,
+              size: input.size,
+              sha256: await sha256File(absolutePath),
+            };
+          }
+          const fileStat = await stat(absolutePath);
+          if (!fileStat.isFile()) return { path: relPath, skipped: "not-file" };
+          return {
+            path: relPath,
+            size: fileStat.size,
+            sha256: await sha256File(absolutePath),
+          };
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          return {
+            path: relPath,
+            missing: code === "ENOENT",
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      }),
+    ),
+  );
+}
+
+async function statCacheInputFiles(
+  repoRootPath: string,
+  inputs: readonly ScipGeneratorCacheInput[],
+): Promise<unknown[]> {
+  const limiter = new ConcurrencyLimiter({
+    maxConcurrency: SCIP_GENERATOR_CACHE_HASH_CONCURRENCY,
+  });
+  return Promise.all(
+    inputs.map((input) =>
+      limiter.run(async () => {
+        const relPath = input.path;
+        if (
+          typeof input.size === "number" &&
+          Number.isFinite(input.size) &&
+          typeof input.mtimeMs === "number" &&
+          Number.isFinite(input.mtimeMs)
+        ) {
+          return {
+            path: relPath,
+            size: input.size,
+            mtimeMs: Math.trunc(input.mtimeMs),
+          };
+        }
+        const absolutePath = join(repoRootPath, ...relPath.split("/"));
+        try {
+          const fileStat = await stat(absolutePath);
+          if (!fileStat.isFile()) {
+            return { path: relPath, skipped: "not-file" };
+          }
+          return {
+            path: relPath,
+            size: fileStat.size,
+            mtimeMs: Math.trunc(fileStat.mtimeMs),
+          };
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          return {
+            path: relPath,
+            missing: code === "ENOENT",
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      }),
+    ),
+  );
+}
+
+function buildScipGeneratorCachePayload(params: {
+  repoRootPath: string;
+  repoLanguages?: readonly string[];
+  effectiveArgs: readonly string[];
+  repoConfig: RepoConfig;
+  binary: unknown;
+  files: unknown[];
+}): unknown {
+  return {
+    schemaVersion: SCIP_GENERATOR_CACHE_SCHEMA_VERSION,
+    repoRootPath: normalizePath(params.repoRootPath),
+    repoLanguages: params.repoLanguages
+      ? scipIoLanguagesForRepo(params.repoLanguages)
+      : undefined,
+    effectiveArgs: [...params.effectiveArgs],
+    repoConfig: {
+      languages: params.repoConfig.languages,
+      ignore: params.repoConfig.ignore,
+      maxFileBytes: params.repoConfig.maxFileBytes,
+      workspaceGlobs: params.repoConfig.workspaceGlobs,
+      packageJsonPath: params.repoConfig.packageJsonPath,
+    },
+    binary: params.binary,
+    files: params.files,
+  };
+}
+
+function parseLatestCacheMetadata(
+  raw: string,
+): ScipGeneratorLatestCacheMetadata | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<ScipGeneratorLatestCacheMetadata>;
+    if (parsed.schemaVersion !== SCIP_GENERATOR_CACHE_SCHEMA_VERSION) {
+      return null;
+    }
+    if (
+      typeof parsed.cacheKey !== "string" ||
+      !/^[a-f0-9]{64}$/i.test(parsed.cacheKey)
+    ) {
+      return null;
+    }
+    if (
+      typeof parsed.inputSignature !== "string" ||
+      !/^[a-f0-9]{64}$/i.test(parsed.inputSignature)
+    ) {
+      return null;
+    }
+    if (
+      parsed.fastReuseKey !== undefined &&
+      (typeof parsed.fastReuseKey !== "string" ||
+        !/^[a-f0-9]{64}$/i.test(parsed.fastReuseKey))
+    ) {
+      return null;
+    }
+    if (
+      parsed.sourceFileCount !== undefined &&
+      (!Number.isInteger(parsed.sourceFileCount) || parsed.sourceFileCount < 0)
+    ) {
+      return null;
+    }
+    return parsed as ScipGeneratorLatestCacheMetadata;
+  } catch {
+    return null;
+  }
+}
+
+async function readLatestCacheMetadata(
+  latestPath: string,
+): Promise<ScipGeneratorLatestCacheMetadata | null> {
+  try {
+    return parseLatestCacheMetadata(await readFile(latestPath, "utf-8"));
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      logger.debug("scip-io: latest generator cache metadata read failed", {
+        latestPath,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return null;
+  }
+}
+
+function createScipGeneratorCacheContext(params: {
+  repoCacheRoot: string;
+  cacheKey: string;
+  fastReuseKey?: string;
+  inputSignature: string;
+  expectedSplitLanguages: readonly string[];
+  repoRootPath: string;
+  prepareDurationMs: number;
+  startedAt: number;
+  sourceFileCount: number;
+}): ScipGeneratorCacheContext {
+  const cacheDir = join(params.repoCacheRoot, params.cacheKey);
+  return {
+    cacheDir,
+    cacheKey: params.cacheKey,
+    fastReuseKey: params.fastReuseKey,
+    inputSignature: params.inputSignature,
+    expectedSplitLanguages: params.expectedSplitLanguages,
+    latestPath: join(params.repoCacheRoot, "latest.json"),
+    metadataPath: join(cacheDir, "metadata.json"),
+    repoCacheRoot: params.repoCacheRoot,
+    repoRootPath: params.repoRootPath,
+    prepareDurationMs: params.prepareDurationMs,
+    startedAt: params.startedAt,
+    sourceFileCount: params.sourceFileCount,
+  };
+}
+
+async function prepareScipGeneratorCache(opts: {
+  repoRootPath: string;
+  repoId?: string;
+  repoConfig?: RepoConfig;
+  repoLanguages?: readonly string[];
+  effectiveArgs: readonly string[];
+  binaryPath: string;
+  enabled: boolean;
+}): Promise<{
+  context?: ScipGeneratorCacheContext;
+  diagnostic: ScipGeneratorCacheDiagnostic;
+}> {
+  const startedAt = Date.now();
+  if (!opts.enabled) {
+    return {
+      diagnostic: {
+        status: "disabled",
+        durationMs: 0,
+        reason: "disabled by config",
+      },
+    };
+  }
+  if (hasCustomOutputArg(opts.effectiveArgs)) {
+    return {
+      diagnostic: {
+        status: "disabled",
+        durationMs: 0,
+        reason: "custom output path",
+      },
+    };
+  }
+  if (!opts.repoConfig) {
+    return {
+      diagnostic: {
+        status: "disabled",
+        durationMs: 0,
+        reason: "repo config unavailable",
+      },
+    };
+  }
+
+  try {
+    const expectedSplitLanguages = requestedSplitLanguagesForCache({
+      effectiveArgs: opts.effectiveArgs,
+      repoLanguages: opts.repoLanguages,
+    });
+    const binary = await binaryFingerprint(opts.binaryPath);
+    const repoCacheRoot = join(
+      scipGeneratorCacheDir(),
+      safeCacheRepoKey(opts.repoRootPath, opts.repoId),
+    );
+    const latestPath = join(repoCacheRoot, "latest.json");
+    const latest = await readLatestCacheMetadata(latestPath);
+    const fastReuseState = await buildScipGeneratorFastReuseState({
+      repoRootPath: opts.repoRootPath,
+      repoLanguages: opts.repoLanguages,
+      effectiveArgs: opts.effectiveArgs,
+      repoConfig: opts.repoConfig,
+      binary,
+    });
+    if (
+      latest &&
+      fastReuseState &&
+      latest.fastReuseKey === fastReuseState.key
+    ) {
+      const prepareDurationMs = Date.now() - startedAt;
+      return {
+        context: createScipGeneratorCacheContext({
+          repoCacheRoot,
+          cacheKey: latest.cacheKey,
+          fastReuseKey: fastReuseState.key,
+          inputSignature: latest.inputSignature,
+          expectedSplitLanguages,
+          repoRootPath: opts.repoRootPath,
+          prepareDurationMs,
+          startedAt,
+          sourceFileCount: latest.sourceFileCount ?? 0,
+        }),
+        diagnostic: {
+          status: "miss",
+          durationMs: prepareDurationMs,
+          key: latest.cacheKey,
+          fileCount: latest.sourceFileCount,
+          prepareDurationMs,
+        },
+      };
+    }
+
+    const inputPaths = await discoverScipGeneratorCacheInputs(
+      opts.repoRootPath,
+      opts.repoConfig,
+    );
+    const statRecords = await statCacheInputFiles(
+      opts.repoRootPath,
+      inputPaths,
+    );
+    const inputSignature = hashString(
+      JSON.stringify(
+        buildScipGeneratorCachePayload({
+          repoRootPath: opts.repoRootPath,
+          repoLanguages: opts.repoLanguages,
+          effectiveArgs: opts.effectiveArgs,
+          repoConfig: opts.repoConfig,
+          binary,
+          files: statRecords,
+        }),
+      ),
+    );
+    if (latest?.inputSignature === inputSignature) {
+      const prepareDurationMs = Date.now() - startedAt;
+      return {
+        context: createScipGeneratorCacheContext({
+          repoCacheRoot,
+          cacheKey: latest.cacheKey,
+          fastReuseKey: fastReuseState?.key,
+          inputSignature,
+          expectedSplitLanguages,
+          repoRootPath: opts.repoRootPath,
+          prepareDurationMs,
+          startedAt,
+          sourceFileCount: inputPaths.length,
+        }),
+        diagnostic: {
+          status: "miss",
+          durationMs: prepareDurationMs,
+          key: latest.cacheKey,
+          fileCount: inputPaths.length,
+          prepareDurationMs,
+        },
+      };
+    }
+
+    const fileRecords = await hashCacheInputFiles(
+      opts.repoRootPath,
+      inputPaths,
+    );
+    const cachePayload = buildScipGeneratorCachePayload({
+      repoRootPath: opts.repoRootPath,
+      repoLanguages: opts.repoLanguages,
+      effectiveArgs: opts.effectiveArgs,
+      repoConfig: opts.repoConfig,
+      binary,
+      files: fileRecords,
+    });
+    const cacheKey = hashString(JSON.stringify(cachePayload));
+    const prepareDurationMs = Date.now() - startedAt;
+    return {
+      context: createScipGeneratorCacheContext({
+        repoCacheRoot,
+        cacheKey,
+        fastReuseKey: fastReuseState?.key,
+        inputSignature,
+        expectedSplitLanguages,
+        repoRootPath: opts.repoRootPath,
+        prepareDurationMs,
+        startedAt,
+        sourceFileCount: inputPaths.length,
+      }),
+      diagnostic: {
+        status: "miss",
+        durationMs: prepareDurationMs,
+        key: cacheKey,
+        fileCount: inputPaths.length,
+        prepareDurationMs,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn("scip-io: generator cache fingerprint failed", {
+      repoRootPath: opts.repoRootPath,
+      error: message,
+    });
+    return {
+      diagnostic: {
+        status: "error",
+        durationMs: Date.now() - startedAt,
+        reason: message,
+      },
+    };
+  }
+}
+
+async function writeLatestScipGeneratorCacheMetadata(
+  context: ScipGeneratorCacheContext,
+): Promise<void> {
+  const metadata: ScipGeneratorLatestCacheMetadata = {
+    schemaVersion: SCIP_GENERATOR_CACHE_SCHEMA_VERSION,
+    updatedAt: new Date().toISOString(),
+    cacheKey: context.cacheKey,
+    fastReuseKey: context.fastReuseKey,
+    inputSignature: context.inputSignature,
+    sourceFileCount: context.sourceFileCount,
+  };
+  try {
+    await mkdir(context.repoCacheRoot, { recursive: true });
+    await writeFile(
+      context.latestPath,
+      JSON.stringify(metadata, null, 2),
+      "utf-8",
+    );
+  } catch (err) {
+    logger.debug("scip-io: latest generator cache metadata write failed", {
+      cacheKey: context.cacheKey,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+function parseCacheMetadata(raw: string): ScipGeneratorCacheMetadata | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<ScipGeneratorCacheMetadata>;
+    if (parsed.schemaVersion !== SCIP_GENERATOR_CACHE_SCHEMA_VERSION) {
+      return null;
+    }
+    if (!Array.isArray(parsed.generatedIndexes)) return null;
+    if (typeof parsed.cacheKey !== "string") return null;
+    if (
+      parsed.coveredSplitLanguages !== undefined &&
+      (!Array.isArray(parsed.coveredSplitLanguages) ||
+        !parsed.coveredSplitLanguages.every((entry) => typeof entry === "string"))
+    ) {
+      return null;
+    }
+    return parsed as ScipGeneratorCacheMetadata;
+  } catch {
+    return null;
+  }
+}
+
+type CacheCompletenessIndex = Pick<
+  ScipGeneratedIndexDiagnostic,
+  "mode" | "path" | "skipped" | "skipReason"
+>;
+
+function splitLanguageFromGeneratedIndexPath(indexPath: string): string | null {
+  const fileName = normalizePath(indexPath).split("/").pop()?.toLowerCase();
+  if (!fileName || fileName === "index.scip" || !fileName.endsWith(".scip")) {
+    return null;
+  }
+  return fileName.slice(0, -".scip".length);
+}
+
+function coveredSplitLanguagesForGeneratedIndexes(
+  indexes: readonly CacheCompletenessIndex[],
+): string[] {
+  const covered = new Set<string>();
+  for (const index of indexes) {
+    if (index.mode !== "split") continue;
+    if (index.skipped && !index.skipReason?.startsWith("duplicate-content")) {
+      continue;
+    }
+    const language = splitLanguageFromGeneratedIndexPath(index.path);
+    if (language) covered.add(language);
+  }
+  return [...covered].sort((left, right) => left.localeCompare(right));
+}
+
+function missingRequestedSplitLanguages(params: {
+  indexes: readonly CacheCompletenessIndex[];
+  coveredSplitLanguages?: readonly string[];
+  expectedSplitLanguages: readonly string[];
+}): string[] {
+  if (params.expectedSplitLanguages.length === 0) return [];
+  const hasMergedIndex = params.indexes.some(
+    (index) => index.mode === "merged" && !index.skipped,
+  );
+  if (hasMergedIndex) return [];
+
+  const covered = new Set(
+    params.coveredSplitLanguages ??
+      coveredSplitLanguagesForGeneratedIndexes(params.indexes),
+  );
+  return params.expectedSplitLanguages.filter((language) => !covered.has(language));
+}
+
+function missingRequestedSplitLanguagesReason(missing: readonly string[]): string {
+  return `missing requested split language(s): ${missing.join(", ")}`;
+}
+
+async function tryRestoreScipGeneratorCache(
+  context: ScipGeneratorCacheContext,
+): Promise<ScipIoPreRefreshResult | null> {
+  const restoreStartedAt = Date.now();
+  let metadata: ScipGeneratorCacheMetadata | null = null;
+  try {
+    metadata = parseCacheMetadata(
+      await readFile(context.metadataPath, "utf-8"),
+    );
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      logger.debug("scip-io: generator cache metadata read failed", {
+        cacheKey: context.cacheKey,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return null;
+  }
+  if (!metadata || metadata.cacheKey !== context.cacheKey) return null;
+  const missingLanguages = missingRequestedSplitLanguages({
+    indexes: metadata.generatedIndexes,
+    coveredSplitLanguages: metadata.coveredSplitLanguages,
+    expectedSplitLanguages: context.expectedSplitLanguages,
+  });
+  if (missingLanguages.length > 0) {
+    logger.info("scip-io: generator cache entry is incomplete", {
+      cacheKey: context.cacheKey,
+      reason: missingRequestedSplitLanguagesReason(missingLanguages),
+    });
+    return null;
+  }
+
+  const generatedIndexes: ScipGeneratedIndexDiagnostic[] = [];
+  try {
+    for (const cached of metadata.generatedIndexes) {
+      if (!isSafeGeneratedCachePath(cached.path)) return null;
+      const cachedPath = cachePathForRel(context.cacheDir, cached.path);
+      const repoPath = join(context.repoRootPath, ...cached.path.split("/"));
+      await mkdir(dirname(repoPath), { recursive: true });
+      await copyFile(cachedPath, repoPath);
+      const restoredHash = await sha256File(repoPath);
+      if (restoredHash !== cached.contentHash) {
+        logger.warn("scip-io: generator cache hash mismatch after restore", {
+          cacheKey: context.cacheKey,
+          path: cached.path,
+        });
+        return null;
+      }
+      generatedIndexes.push({ ...cached });
+    }
+  } catch (err) {
+    logger.debug("scip-io: generator cache restore failed", {
+      cacheKey: context.cacheKey,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+
+  if (generatedIndexes.length === 0) return null;
+  await writeLatestScipGeneratorCacheMetadata(context);
+  const restoreDurationMs = Date.now() - restoreStartedAt;
+  logger.info("scip-io: reused generated index cache", {
+    cacheKey: context.cacheKey,
+    indexes: generatedIndexes.length,
+    durationMs: Date.now() - context.startedAt,
+    prepareDurationMs: context.prepareDurationMs,
+    restoreDurationMs,
+  });
+  return {
+    attempted: false,
+    ok: true,
+    generatedIndexes,
+    failures: [],
+    cache: {
+      status: "hit",
+      durationMs: Date.now() - context.startedAt,
+      key: context.cacheKey,
+      fileCount: context.sourceFileCount,
+      prepareDurationMs: context.prepareDurationMs,
+      restoreDurationMs,
+    },
+  };
+}
+
+function scipGeneratorExecutionDurationMs(
+  result: ScipIoPreRefreshResult,
+): number | undefined {
+  const durationMs =
+    (result.run?.durationMs ?? 0) + (result.splitRun?.durationMs ?? 0);
+  return durationMs > 0 ? durationMs : undefined;
+}
+
+async function saveScipGeneratorCache(
+  context: ScipGeneratorCacheContext,
+  result: ScipIoPreRefreshResult,
+): Promise<ScipGeneratorCacheDiagnostic> {
+  const saveStartedAt = Date.now();
+  const generatorDurationMs = scipGeneratorExecutionDurationMs(result);
+  const accepted = result.generatedIndexes.filter(
+    (index): index is ScipGeneratedIndexDiagnostic & { contentHash: string } =>
+      !index.skipped &&
+      typeof index.contentHash === "string" &&
+      isSafeGeneratedCachePath(index.path),
+  );
+  if (accepted.length === 0) {
+    return {
+      status: "miss",
+      durationMs: Date.now() - context.startedAt,
+      key: context.cacheKey,
+      fileCount: context.sourceFileCount,
+      prepareDurationMs: context.prepareDurationMs,
+      generatorDurationMs,
+      reason: "no accepted generated indexes",
+    };
+  }
+  const coveredSplitLanguages = coveredSplitLanguagesForGeneratedIndexes(
+    result.generatedIndexes,
+  );
+  const missingLanguages = missingRequestedSplitLanguages({
+    indexes: result.generatedIndexes,
+    coveredSplitLanguages,
+    expectedSplitLanguages: context.expectedSplitLanguages,
+  });
+  if (missingLanguages.length > 0) {
+    return {
+      status: "miss",
+      durationMs: Date.now() - context.startedAt,
+      key: context.cacheKey,
+      fileCount: context.sourceFileCount,
+      prepareDurationMs: context.prepareDurationMs,
+      generatorDurationMs,
+      reason: missingRequestedSplitLanguagesReason(missingLanguages),
+    };
+  }
+
+  try {
+    await rm(context.cacheDir, { recursive: true, force: true });
+    await mkdir(context.cacheDir, { recursive: true });
+    const cachedIndexes: CachedGeneratedIndex[] = [];
+    for (const index of accepted) {
+      const sourcePath = join(context.repoRootPath, ...index.path.split("/"));
+      const cachePath = cachePathForRel(context.cacheDir, index.path);
+      await mkdir(dirname(cachePath), { recursive: true });
+      await copyFile(sourcePath, cachePath);
+      cachedIndexes.push({
+        path: index.path,
+        label: index.label,
+        sizeBytes: index.sizeBytes,
+        mode: index.mode,
+        contentHash: index.contentHash,
+      });
+    }
+    const metadata: ScipGeneratorCacheMetadata = {
+      schemaVersion: SCIP_GENERATOR_CACHE_SCHEMA_VERSION,
+      createdAt: new Date().toISOString(),
+      cacheKey: context.cacheKey,
+      generatedIndexes: cachedIndexes,
+      coveredSplitLanguages:
+        coveredSplitLanguages.length > 0 ? coveredSplitLanguages : undefined,
+    };
+    await writeFile(
+      context.metadataPath,
+      JSON.stringify(metadata, null, 2),
+      "utf-8",
+    );
+    await writeLatestScipGeneratorCacheMetadata(context);
+    const saveDurationMs = Date.now() - saveStartedAt;
+    logger.info("scip-io: stored generated index cache", {
+      cacheKey: context.cacheKey,
+      indexes: cachedIndexes.length,
+      durationMs: Date.now() - context.startedAt,
+      prepareDurationMs: context.prepareDurationMs,
+      saveDurationMs,
+      generatorDurationMs,
+    });
+    return {
+      status: "stored",
+      durationMs: Date.now() - context.startedAt,
+      key: context.cacheKey,
+      fileCount: context.sourceFileCount,
+      prepareDurationMs: context.prepareDurationMs,
+      saveDurationMs,
+      generatorDurationMs,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const saveDurationMs = Date.now() - saveStartedAt;
+    logger.warn("scip-io: failed to store generated index cache", {
+      cacheKey: context.cacheKey,
+      error: message,
+      prepareDurationMs: context.prepareDurationMs,
+      saveDurationMs,
+      generatorDurationMs,
+    });
+    return {
+      status: "error",
+      durationMs: Date.now() - context.startedAt,
+      key: context.cacheKey,
+      fileCount: context.sourceFileCount,
+      prepareDurationMs: context.prepareDurationMs,
+      saveDurationMs,
+      generatorDurationMs,
+      reason: message,
+    };
+  }
+}
+
+async function attachScipGeneratorCacheSave(
+  context: ScipGeneratorCacheContext | undefined,
+  result: ScipIoPreRefreshResult,
+): Promise<ScipIoPreRefreshResult> {
+  if (!context || !result.ok) return result;
+  return {
+    ...result,
+    cache: await saveScipGeneratorCache(context, result),
+  };
 }
 
 /**
@@ -842,6 +2232,7 @@ export async function selectGeneratedScipIndexes(opts: {
   mode: ScipGeneratedIndexMode;
   maxIndexBytes?: number;
   candidatePaths?: readonly string[];
+  preRunSplitIndexStats?: ReadonlyMap<string, ScipSplitIndexStat>;
 }): Promise<ScipGeneratedIndexSelection> {
   const maxIndexBytes = opts.maxIndexBytes ?? SCIP_MAX_INDEX_BYTES;
   const repoRootPath = normalizePath(opts.repoRootPath);
@@ -862,6 +2253,24 @@ export async function selectGeneratedScipIndexes(opts: {
     try {
       const fileStat = await stat(absolutePath);
       sizeBytes = fileStat.size;
+      if (
+        opts.mode === "split" &&
+        isUnchangedSplitIndex(
+          absolutePath,
+          fileStat,
+          opts.preRunSplitIndexStats,
+        )
+      ) {
+        generatedIndexes.push({
+          path: relPath,
+          label: relPath,
+          sizeBytes,
+          mode: opts.mode,
+          skipped: true,
+          skipReason: "stale-generated-output",
+        });
+        continue;
+      }
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "ENOENT") continue;
@@ -1112,8 +2521,38 @@ export async function runScipIoBeforeIndex(opts: {
   generatorCfg: ScipGeneratorConfig;
   signal?: AbortSignal;
   maxIndexBytes?: number;
+  repoLanguages?: readonly string[];
+  repoConfig?: RepoConfig;
+  repoId?: string;
 }): Promise<ScipIoPreRefreshResult> {
-  const { repoRootPath, generatorCfg, signal, maxIndexBytes } = opts;
+  const {
+    repoRootPath,
+    generatorCfg,
+    signal,
+    maxIndexBytes,
+    repoLanguages,
+    repoConfig,
+    repoId,
+  } = opts;
+  const requestedLanguageFilter =
+    repoLanguages === undefined
+      ? undefined
+      : scipIoLanguagesForRepo(repoLanguages);
+  if (
+    repoLanguages !== undefined &&
+    requestedLanguageFilter?.length === 0 &&
+    !hasExplicitScipIoLanguageArg(generatorCfg.args)
+  ) {
+    logger.info("scip-io: skipping index; repo languages are unsupported", {
+      repoRootPath,
+      repoLanguages,
+    });
+    return emptyPreRefreshResult(false);
+  }
+  const effectiveArgs = buildScipIoIndexArgs({
+    generatorArgs: generatorCfg.args,
+    repoLanguages,
+  });
 
   let resolution: ScipIoResolution | null;
   try {
@@ -1163,13 +2602,32 @@ export async function runScipIoBeforeIndex(opts: {
     source: resolution.source,
     cwd: repoRootPath,
     timeoutMs: generatorCfg.timeoutMs,
+    languages: requestedLanguageFilter,
   });
+
+  const cachePreparation = await prepareScipGeneratorCache({
+    repoRootPath,
+    repoId,
+    repoConfig,
+    repoLanguages,
+    effectiveArgs,
+    binaryPath: resolution.binaryPath,
+    enabled: generatorCfg.cacheGeneratedIndexes,
+  });
+  const cached = cachePreparation.context
+    ? await tryRestoreScipGeneratorCache(cachePreparation.context)
+    : null;
+  if (cached) return cached;
+
+  const preRunSplitIndexStats = hasCustomOutputArg(effectiveArgs)
+    ? undefined
+    : await snapshotSplitIndexStats(repoRootPath);
 
   const result = await runScipIoIndex({
     binaryPath: resolution.binaryPath,
     repoRootPath,
     timeoutMs: generatorCfg.timeoutMs,
-    extraArgs: generatorCfg.args,
+    extraArgs: effectiveArgs,
     signal,
   });
 
@@ -1185,6 +2643,66 @@ export async function runScipIoBeforeIndex(opts: {
       timedOut: result.timedOut,
       stderr: result.stderr?.slice(0, 2000),
     });
+    if (!hasCustomOutputArg(effectiveArgs)) {
+      const generatorFailure: ScipFailureDiagnostic = {
+        stage: "generator-run",
+        message:
+          result.stderr?.slice(0, 2000) ??
+          `scip-io exited with ${result.exitCode ?? "unknown"}`,
+      };
+      const failedSelection = await selectGeneratedScipIndexes({
+        repoRootPath,
+        mode: hasNoMergeArg(effectiveArgs) ? "split" : "merged",
+        maxIndexBytes,
+        preRunSplitIndexStats,
+      });
+      const accepted = failedSelection.generatedIndexes.some(
+        (index) => !index.skipped,
+      );
+      if (accepted) {
+        return attachScipGeneratorCacheSave(cachePreparation.context, {
+          attempted: true,
+          ok: true,
+          run: result,
+          generatedIndexes: failedSelection.generatedIndexes,
+          failures: [generatorFailure, ...failedSelection.failures],
+          cache: cachePreparation.diagnostic,
+        });
+      }
+      if (!hasNoMergeArg(effectiveArgs)) {
+        const splitSelection = await selectGeneratedScipIndexes({
+          repoRootPath,
+          mode: "split",
+          maxIndexBytes,
+          preRunSplitIndexStats,
+        });
+        const splitAccepted = splitSelection.generatedIndexes.some(
+          (index) => !index.skipped,
+        );
+        if (splitAccepted) {
+          return attachScipGeneratorCacheSave(cachePreparation.context, {
+            attempted: true,
+            ok: true,
+            run: result,
+            generatedIndexes: [
+              ...failedSelection.generatedIndexes,
+              ...splitSelection.generatedIndexes,
+            ],
+            failures: [
+              generatorFailure,
+              ...failedSelection.failures,
+              {
+                stage: "generator-split-select",
+                message:
+                  "scip-io failed without index.scip; using newly generated split .scip files",
+              },
+              ...splitSelection.failures,
+            ],
+            cache: cachePreparation.diagnostic,
+          });
+        }
+      }
+    }
     return {
       attempted: true,
       ok: false,
@@ -1201,26 +2719,28 @@ export async function runScipIoBeforeIndex(opts: {
     };
   }
 
-  if (hasCustomOutputArg(generatorCfg.args)) {
+  if (hasCustomOutputArg(effectiveArgs)) {
     return {
       attempted: true,
       ok: true,
       run: result,
       generatedIndexes: [],
       failures: [],
+      cache: cachePreparation.diagnostic,
     };
   }
 
-  if (hasNoMergeArg(generatorCfg.args)) {
+  if (hasNoMergeArg(effectiveArgs)) {
     const splitSelection = await selectGeneratedScipIndexes({
       repoRootPath,
       mode: "split",
       maxIndexBytes,
+      preRunSplitIndexStats,
     });
     const accepted = splitSelection.generatedIndexes.some(
       (index) => !index.skipped,
     );
-    return {
+    return attachScipGeneratorCacheSave(cachePreparation.context, {
       attempted: true,
       ok: accepted,
       run: result,
@@ -1231,10 +2751,12 @@ export async function runScipIoBeforeIndex(opts: {
           : [
               {
                 stage: "generator-split-select",
-                message: "scip-io --no-merge completed but produced no split .scip files",
+                message:
+                  "scip-io --no-merge completed but produced no split .scip files",
               },
             ],
-    };
+      cache: cachePreparation.diagnostic,
+    });
   }
 
   const mergedSelection = await selectGeneratedScipIndexes({
@@ -1249,7 +2771,39 @@ export async function runScipIoBeforeIndex(opts: {
     (index) => index.skipped && index.skipReason === "over-size",
   );
   if (mergedAccepted || !mergedOversized) {
-    return {
+    if (!mergedAccepted && !mergedOversized) {
+      const splitSelection = await selectGeneratedScipIndexes({
+        repoRootPath,
+        mode: "split",
+        maxIndexBytes,
+        preRunSplitIndexStats,
+      });
+      const splitAccepted = splitSelection.generatedIndexes.some(
+        (index) => !index.skipped,
+      );
+      if (splitAccepted) {
+        return attachScipGeneratorCacheSave(cachePreparation.context, {
+          attempted: true,
+          ok: true,
+          run: result,
+          generatedIndexes: [
+            ...mergedSelection.generatedIndexes,
+            ...splitSelection.generatedIndexes,
+          ],
+          failures: [
+            ...mergedSelection.failures,
+            {
+              stage: "generator-split-select",
+              message:
+                "scip-io completed without index.scip; using newly generated split .scip files",
+            },
+            ...splitSelection.failures,
+          ],
+          cache: cachePreparation.diagnostic,
+        });
+      }
+    }
+    return attachScipGeneratorCacheSave(cachePreparation.context, {
       attempted: true,
       ok: mergedAccepted,
       run: result,
@@ -1263,18 +2817,23 @@ export async function runScipIoBeforeIndex(opts: {
                 message: "scip-io completed but did not produce index.scip",
               },
             ],
-    };
+      cache: cachePreparation.diagnostic,
+    });
   }
 
-  logger.info("scip-io: merged index exceeded decoder cap; generating split indexes", {
-    repoRootPath,
-    maxIndexBytes: SCIP_MAX_INDEX_BYTES,
-  });
+  logger.info(
+    "scip-io: merged index exceeded decoder cap; generating split indexes",
+    {
+      repoRootPath,
+      maxIndexBytes: SCIP_MAX_INDEX_BYTES,
+    },
+  );
+  const preSplitRunIndexStats = await snapshotSplitIndexStats(repoRootPath);
   const splitRun = await runScipIoIndex({
     binaryPath: resolution.binaryPath,
     repoRootPath,
     timeoutMs: generatorCfg.timeoutMs,
-    extraArgs: appendNoMergeArg(generatorCfg.args),
+    extraArgs: appendNoMergeArg(effectiveArgs),
     signal,
   });
   if (!splitRun.ok) {
@@ -1290,9 +2849,7 @@ export async function runScipIoBeforeIndex(opts: {
           stage: "generator-split-run",
           message:
             splitRun.stderr?.slice(0, 2000) ??
-            `scip-io --no-merge exited with ${
-              splitRun.exitCode ?? "unknown"
-            }`,
+            `scip-io --no-merge exited with ${splitRun.exitCode ?? "unknown"}`,
         },
       ],
     };
@@ -1302,11 +2859,12 @@ export async function runScipIoBeforeIndex(opts: {
     repoRootPath,
     mode: "split",
     maxIndexBytes,
+    preRunSplitIndexStats: preSplitRunIndexStats,
   });
   const splitAccepted = splitSelection.generatedIndexes.some(
     (index) => !index.skipped,
   );
-  return {
+  return attachScipGeneratorCacheSave(cachePreparation.context, {
     attempted: true,
     ok: splitAccepted,
     run: result,
@@ -1322,10 +2880,12 @@ export async function runScipIoBeforeIndex(opts: {
             ...mergedSelection.failures,
             {
               stage: "generator-split-select",
-              message: "scip-io --no-merge completed but produced no split .scip files",
+              message:
+                "scip-io --no-merge completed but produced no split .scip files",
             },
           ],
-  };
+    cache: cachePreparation.diagnostic,
+  });
 }
 
 /**
@@ -1354,6 +2914,7 @@ export async function maybeRunScipIoPreRefresh(
   repoId: string,
   repoRootPath: string,
   signal?: AbortSignal,
+  repoLanguages?: readonly string[],
 ): Promise<ScipIoPreRefreshResult> {
   // Cheap gate first — if the generator is disabled, skip the lock dance
   // entirely and return without touching any shared state.
@@ -1393,10 +2954,20 @@ export async function maybeRunScipIoPreRefresh(
 
   const runPromise = (async () => {
     try {
+      const repoConfig = (() => {
+        try {
+          return loadConfig().repos.find((repo) => repo.repoId === repoId);
+        } catch {
+          return undefined;
+        }
+      })();
       return await runScipIoBeforeIndex({
         repoRootPath,
         generatorCfg,
         signal,
+        repoLanguages,
+        repoConfig,
+        repoId,
       });
     } catch (err) {
       // `runScipIoBeforeIndex` swallows its own errors into warn logs,
@@ -1446,7 +3017,15 @@ export async function runScipIoPreRefreshForIndex(
     const conn = await getLadybugConn();
     const repoRow = await ladybugDb.getRepo(conn, repoId);
     if (!repoRow) return emptyPreRefreshResult(false);
-    return await maybeRunScipIoPreRefresh(repoId, repoRow.rootPath, signal);
+    const repoLanguages =
+      appConfig.repos.find((repo) => repo.repoId === repoId)?.languages ??
+      parseStoredRepoLanguages(repoRow.configJson);
+    return await maybeRunScipIoPreRefresh(
+      repoId,
+      repoRow.rootPath,
+      signal,
+      repoLanguages,
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.warn("scip-io pre-refresh outer hook failed (non-fatal)", {
@@ -1469,6 +3048,17 @@ export async function runScipIoPreRefreshForIndex(
 export function __resetInstallLockForTests(): void {
   installInFlight = null;
 }
+
+/**
+ * Test-only export for cache fast-path predicates. Production callers should
+ * use runScipIoBeforeIndex so cache safety stays centralized.
+ *
+ * @internal
+ */
+export const __SCIP_GENERATOR_CACHE_INTERNALS_FOR_TESTS = {
+  dirtyPathsAffectScipGeneratorInputs,
+  parseGitStatusPaths,
+};
 
 /**
  * Test-only export. The managed bin directory path. Useful for tests that

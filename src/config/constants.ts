@@ -160,6 +160,14 @@ export const SLICE_SCORE_THRESHOLD = 0.2;
 export const CLUSTER_COHESION_SAME_BOOST = 0.15;
 
 /**
+ * Default Louvain shadow-community cutoff. Louvain is additive derived state,
+ * while PageRank/K-core cover the readiness-critical centrality signal; keep
+ * the default below the point where LadybugDB community detection dominates
+ * provider-first full-index wall time.
+ */
+export const DEFAULT_LOUVAIN_MAX_CALL_EDGES = 10_000;
+
+/**
  * Beam-search scoring boost for symbols in clusters related to entry clusters.
  */
 export const CLUSTER_COHESION_RELATED_BOOST = 0.05;

@@ -63,6 +63,29 @@ describe("scip-clang tuning: normalizeClangDescriptors", () => {
     );
   });
 
+  it("normalizes C++ template, constructor, destructor, and operator descriptors", () => {
+    assert.equal(
+      normalizeClangDescriptors("llvm/SmallVector<int>#push_back(const T&)."),
+      "llvm/SmallVector<int>#push_back().",
+    );
+    assert.equal(
+      normalizeClangDescriptors("llvm/isa<T>(const U&)."),
+      "llvm/isa().",
+    );
+    assert.equal(
+      normalizeClangDescriptors("llvm/Foo#~Foo()."),
+      "llvm/Foo#~Foo().",
+    );
+    assert.equal(
+      normalizeClangDescriptors("llvm/Foo#Foo()."),
+      "llvm/Foo#Foo().",
+    );
+    assert.equal(
+      normalizeClangDescriptors("llvm/Optional#operator bool()."),
+      "llvm/Optional#operator bool().",
+    );
+  });
+
   it("is idempotent", () => {
     const once = normalizeClangDescriptors("math/add(int,int)#hash.");
     const twice = normalizeClangDescriptors(once);
@@ -101,6 +124,13 @@ describe("scip-clang tuning: name extraction after normalization", () => {
   it("extracts field name", () => {
     assert.equal(extract("net/Server#port."), "port");
   });
+
+  it("extracts C++ template, operator, constructor, and destructor names", () => {
+    assert.equal(extract("llvm/isa<T>(const U&)."), "isa");
+    assert.equal(extract("llvm/Foo#~Foo()."), "~Foo");
+    assert.equal(extract("llvm/Foo#Foo()."), "Foo");
+    assert.equal(extract("llvm/Optional#operator bool()."), "operator bool");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -119,6 +149,12 @@ describe("scip-clang tuning: mapScipKind", () => {
     const r = mapScipKind(
       "scip-clang cxx my-project 1.0.0 math/add(int,int)#a1b2c3d4.",
     );
+    assert.equal(r.skip, false);
+    assert.equal(r.sdlKind, "function");
+  });
+
+  it("maps the cxx scheme used by some scip-clang artifacts", () => {
+    const r = mapScipKind("cxx . . $ starts_with(b3991cc2f88b8aaa).");
     assert.equal(r.skip, false);
     assert.equal(r.sdlKind, "function");
   });

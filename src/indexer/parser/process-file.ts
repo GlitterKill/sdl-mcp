@@ -8,6 +8,10 @@ import {
 } from "../edge-builder.js";
 import { extractConfigEdgesFromTree, type ConfigEdge } from "../configEdges.js";
 import { buildSymbolAndEdgeRows } from "./build-rows.js";
+import {
+  PASS1_KNOWN_ENDPOINT_COPY_THRESHOLD,
+  splitPass1EdgesForKnownEndpointCopy,
+} from "./batch-persist.js";
 import { resolveFileForIndexing } from "./early-exit.js";
 import { createEmptyProcessFileResult } from "./helpers.js";
 import { parseAndExtract } from "./parse-and-extract.js";
@@ -216,6 +220,24 @@ export async function processFile(
         batchAccumulator.addEdges(edgesToInsert);
       }
     } else {
+      const sameFileSymbolIds = new Set(
+        symbolsToUpsert.map((symbol) => symbol.symbolId),
+      );
+      const { knownEndpointEdges, repairEdges } =
+        splitPass1EdgesForKnownEndpointCopy(
+          edgesToInsert,
+          sameFileSymbolIds,
+        );
+
+      // Keep the direct writer split into committed phases. LadybugDB 0.16.0
+      // can duplicate primary-key nodes when generic MERGE-heavy symbol/edge
+      // writers create related rows in one transaction.
+      const existingSymbolIds = existingSymbols.map((symbol) => symbol.symbolId);
+      if (existingSymbolIds.length > 0) {
+        await withWriteConn(async (wConn) => {
+          await ladybugDb.deleteSymbolsByIds(wConn, existingSymbolIds);
+        });
+      }
       await withWriteConn(async (wConn) => {
         await ladybugDb.withTransaction(wConn, async (txConn) => {
           await ladybugDb.upsertFile(txConn, {
@@ -229,7 +251,6 @@ export async function processFile(
           });
 
           if (existingFile) {
-            await ladybugDb.deleteSymbolsByFileId(txConn, existingFile.fileId);
             await ladybugDb.deleteSymbolReferencesByFileId(
               txConn,
               existingFile.fileId,
@@ -237,8 +258,39 @@ export async function processFile(
           }
 
           await ladybugDb.insertSymbolReferences(txConn, symbolReferences);
-          await ladybugDb.upsertSymbolBatch(txConn, symbolsToUpsert);
-          await ladybugDb.insertEdges(txConn, edgesToInsert);
+        });
+      });
+      if (symbolsToUpsert.length > 0) {
+        await withWriteConn(async (wConn) => {
+          await ladybugDb.deleteSymbolsByIds(
+            wConn,
+            symbolsToUpsert.map((symbol) => symbol.symbolId),
+          );
+        });
+      }
+      await withWriteConn(async (wConn) => {
+        await ladybugDb.withTransaction(wConn, async (txConn) => {
+          await ladybugDb.upsertKnownFileSymbols(txConn, symbolsToUpsert);
+        });
+      });
+      await withWriteConn(async (wConn) => {
+        await ladybugDb.withTransaction(wConn, async (txConn) => {
+          if (
+            knownEndpointEdges.length >= PASS1_KNOWN_ENDPOINT_COPY_THRESHOLD
+          ) {
+            await ladybugDb.ensureDependencyTargetsForKnownSourceEdges(
+              txConn,
+              knownEndpointEdges,
+            );
+            await ladybugDb.insertKnownSymbolEdges(txConn, knownEndpointEdges);
+          } else if (knownEndpointEdges.length > 0) {
+            repairEdges.unshift(...knownEndpointEdges);
+          }
+
+          await ladybugDb.insertEdges(txConn, repairEdges, {
+            skipSourceRepoLink: true,
+            skipExistingRelationshipUpdate: true,
+          });
         });
       });
     }

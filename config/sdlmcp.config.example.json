@@ -9,7 +9,12 @@
         "**/dist/**",
         "**/dist-*/**",
         "**/build/**",
+        "**/build-*/**",
+        "**/build_*/**",
+        "**/cmake-build-*/**",
         "**/out/**",
+        "**/out-*/**",
+        "**/out_*/**",
         "**/target/**",
         "**/coverage/**",
         "**/node_modules/**",
@@ -74,6 +79,7 @@
       "activation": "shadowDb",
       "readyState": "graphPlusAlgorithms",
       "stagingFormat": "parquet",
+      "maxLegacyFallbackFiles": 5000,
       "lsp": {
         "mode": "primaryWithCaps",
         "workspaceSymbolLimit": 5000,
@@ -95,7 +101,7 @@
       "kCore": { "enabled": true },
       "louvain": {
         "enabled": true,
-        "maxCallEdges": 50000
+        "maxCallEdges": 10000
       },
       "workerTimeoutMs": 120000
     }
@@ -141,12 +147,8 @@
     "enabled": true,
     "provider": "local",
     "embeddingProfile": "specialized",
-    "symbolEmbeddingModels": [
-      "jina-embeddings-v2-base-code"
-    ],
-    "fileSummaryEmbeddingModels": [
-      "nomic-embed-text-v1.5"
-    ],
+    "symbolEmbeddingModels": ["jina-embeddings-v2-base-code"],
+    "fileSummaryEmbeddingModels": ["nomic-embed-text-v1.5"],
     "modelCacheDir": null,
     "generateSummaries": false,
     "summaryProvider": null,
@@ -161,9 +163,7 @@
     "fileSummaryEmbeddingMaxChars": 4096,
     "embeddingsSequential": false,
     "modelVariant": "default",
-    "executionProviders": [
-      "cpu"
-    ],
+    "executionProviders": ["cpu"],
     "retrieval": {
       "mode": "hybrid",
       "extensionsOptional": true,
@@ -264,12 +264,7 @@
   },
   "runtime": {
     "enabled": true,
-    "allowedRuntimes": [
-      "node",
-      "typescript",
-      "python",
-      "shell"
-    ],
+    "allowedRuntimes": ["node", "typescript", "python", "shell"],
     "allowedExecutables": [],
     "maxDurationMs": 30000,
     "maxStdoutBytes": 1048576,
@@ -331,7 +326,8 @@
       "args": [],
       "autoInstall": true,
       "timeoutMs": 600000,
-      "cleanupAfterIngest": true
+      "cleanupAfterIngest": true,
+      "cacheGeneratedIndexes": true
     }
   },
   "memory": {

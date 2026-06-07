@@ -120,6 +120,12 @@ export function globToSafeRegex(glob: string): RegExp {
     return new RegExp(`^${litEscaped}$`);
   }
 
+  const trailingDirectorySegment = glob.endsWith("/**")
+    ? (glob.slice(0, -"/**".length).split("/").pop() ?? "")
+    : "";
+  const trailingDirectorySegmentHasWildcard =
+    trailingDirectorySegment.includes("*");
+
   // First, handle glob wildcards with placeholders to protect them
   // **/ must be handled before ** to avoid double-replacement
   let pattern = glob.replace(/\*\*\//g, "GLOB_DOUBLESTAR_SLASH");
@@ -149,11 +155,13 @@ export function globToSafeRegex(glob: string): RegExp {
   // * matches anything except /
   pattern = pattern.replace(/GLOB_SINGLESTAR/g, "[^/]*");
 
-  // Trailing /** should match: nothing, /, or /anything
-  // This ensures **/node_modules/** matches "node_modules" directory itself
+  // Trailing /** should match directory contents. Exact directory globs also
+  // match the directory itself; wildcard directory globs need a slash boundary
+  // so **/dist-*/** does not match source files named dist-runtime.ts.
   // Handle /GLOB_DOUBLESTAR at end (the / was already escaped to /)
   if (pattern.endsWith("/GLOB_DOUBLESTAR")) {
-    pattern = pattern.slice(0, -"/GLOB_DOUBLESTAR".length) + "(?:/.*)?";
+    const suffix = trailingDirectorySegmentHasWildcard ? "(?:/.*)" : "(?:/.*)?";
+    pattern = pattern.slice(0, -"/GLOB_DOUBLESTAR".length) + suffix;
   } else if (pattern.endsWith("GLOB_DOUBLESTAR")) {
     // Bare trailing ** (no preceding /)
     pattern = pattern.slice(0, -"GLOB_DOUBLESTAR".length) + ".*";

@@ -205,6 +205,7 @@ type DescriptorKind =
   | "type"
   | "termWithoutParens"
   | "namespace"
+  | "moduleInitializer"
   | "parameter"
   | "typeParameter"
   | "local"
@@ -217,6 +218,10 @@ function classifyDescriptorSuffix(descriptors: string): DescriptorKind {
 
   // Check for "()." at the end — method/function
   if (descriptors.endsWith("().")) return "termWithParens";
+  if (isPythonModuleInitializerDescriptor(descriptors)) {
+    return "moduleInitializer";
+  }
+  if (descriptors.endsWith("/")) return "namespace";
 
   const lastChar = descriptors[descriptors.length - 1];
 
@@ -236,9 +241,15 @@ function classifyDescriptorSuffix(descriptors: string): DescriptorKind {
       return "local";
     case "!":
       return "meta";
+    case ":":
+      return "meta";
     default:
       return "unknown";
   }
+}
+
+function isPythonModuleInitializerDescriptor(descriptors: string): boolean {
+  return descriptors.endsWith("/__init__:");
 }
 
 /**
@@ -285,7 +296,11 @@ function classifyDotSuffix(descriptors: string): DescriptorKind {
 export function extractNameFromDescriptors(descriptors: string): string {
   if (descriptors.length === 0) return "";
 
-  // Strip trailing suffix characters: (). # . ( [ ) !
+  if (isPythonModuleInitializerDescriptor(descriptors)) {
+    return extractPythonModuleNameFromInitializer(descriptors);
+  }
+
+  // Strip trailing suffix characters: (). # . / ( [ ) !
   let stripped = descriptors;
 
   // Remove trailing `().` for methods
@@ -297,10 +312,12 @@ export function extractNameFromDescriptors(descriptors: string): string {
     if (
       last === "#" ||
       last === "." ||
+      last === "/" ||
       last === "(" ||
       last === "[" ||
       last === ")" ||
-      last === "!"
+      last === "!" ||
+      last === ":"
     ) {
       stripped = stripped.slice(0, -1);
     }
@@ -315,6 +332,20 @@ export function extractNameFromDescriptors(descriptors: string): string {
   if (lastSepIdx === -1) return stripped;
 
   return stripped.slice(lastSepIdx + 1);
+}
+
+function extractPythonModuleNameFromInitializer(descriptors: string): string {
+  const moduleDescriptor = descriptors.slice(0, -"/__init__:".length);
+  if (moduleDescriptor.startsWith("`") && moduleDescriptor.endsWith("`")) {
+    return moduleDescriptor.slice(1, -1);
+  }
+  const lastSepIdx = Math.max(
+    moduleDescriptor.lastIndexOf("/"),
+    moduleDescriptor.lastIndexOf("#"),
+  );
+  return lastSepIdx === -1
+    ? moduleDescriptor
+    : moduleDescriptor.slice(lastSepIdx + 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -391,7 +422,13 @@ export function normalizeClangDescriptors(descriptors: string): string {
     }
   }
 
+  core = stripTerminalTemplateArguments(core);
+
   return core + terminator;
+}
+
+export function isClangStyleSymbolScheme(scheme: string): boolean {
+  return scheme === "scip-clang" || scheme === "cxx";
 }
 
 /**
@@ -414,6 +451,34 @@ function findMatchingOpenParen(s: string): number {
   return -1;
 }
 
+function stripTerminalTemplateArguments(descriptors: string): string {
+  if (!descriptors.endsWith(">")) return descriptors;
+
+  const openIdx = findMatchingOpenAngle(descriptors);
+  if (openIdx === -1) return descriptors;
+  const separatorIdx = Math.max(
+    descriptors.lastIndexOf("/"),
+    descriptors.lastIndexOf("#"),
+    descriptors.lastIndexOf("."),
+  );
+  if (openIdx <= separatorIdx) return descriptors;
+  return descriptors.slice(0, openIdx);
+}
+
+function findMatchingOpenAngle(s: string): number {
+  if (!s.endsWith(">")) return -1;
+  let depth = 0;
+  for (let i = s.length - 1; i >= 0; i--) {
+    const ch = s[i];
+    if (ch === ">") depth++;
+    else if (ch === "<") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
 export function mapScipKind(scipSymbol: string, kind?: number): ScipKindResult {
   const parsed = parseScipSymbol(scipSymbol);
 
@@ -427,7 +492,7 @@ export function mapScipKind(scipSymbol: string, kind?: number): ScipKindResult {
   // parameter lists and overload disambiguator hashes that tree-sitter does
   // not see on the SDL side.
   const descriptors =
-    parsed.scheme === "scip-clang"
+    isClangStyleSymbolScheme(parsed.scheme)
       ? normalizeClangDescriptors(parsed.descriptors)
       : parsed.descriptors;
 
@@ -495,6 +560,10 @@ export function mapScipKind(scipSymbol: string, kind?: number): ScipKindResult {
     }
 
     case "namespace": {
+      return { sdlKind: "module", skip: false };
+    }
+
+    case "moduleInitializer": {
       return { sdlKind: "module", skip: false };
     }
 

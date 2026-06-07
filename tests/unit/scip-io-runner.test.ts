@@ -18,8 +18,10 @@ import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -27,10 +29,14 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
 import {
+  __SCIP_GENERATOR_CACHE_INTERNALS_FOR_TESTS,
   __resetInstallLockForTests,
+  buildScipIoIndexArgs,
   detectScipIo,
   installScipIo,
+  runScipIoBeforeIndex,
   runScipIoIndex,
+  scipIoLanguagesForRepo,
   selectGeneratedScipIndexes,
   ScipIoInstallError,
 } from "../../dist/scip/scip-io-runner.js";
@@ -52,12 +58,26 @@ const IS_WINDOWS = process.platform === "win32";
  */
 function makeStubBinary(
   dir: string,
-  opts: { exitCode?: number; sleepMs?: number; logFile?: string } = {},
+  opts: {
+    exitCode?: number;
+    sleepMs?: number;
+    logFile?: string;
+    writeIndexContent?: string;
+    writeSplitIndexes?: Record<string, string>;
+  } = {},
 ): string {
   const exitCode = opts.exitCode ?? 0;
   if (IS_WINDOWS) {
     const path = join(dir, "scip-io.cmd");
     const lines: string[] = ["@echo off", "echo scip-io stub invoked %*"];
+    if (opts.writeIndexContent) {
+      lines.push(`>"%CD%\\index.scip" echo ${opts.writeIndexContent}`);
+    }
+    for (const [name, content] of Object.entries(
+      opts.writeSplitIndexes ?? {},
+    )) {
+      lines.push(`>"%CD%\\${name}" echo ${content}`);
+    }
     if (opts.logFile) {
       // %CD% records the cwd; %* records all args. Useful for asserting
       // the runner passed the expected cwd and "index" arg.
@@ -79,6 +99,14 @@ function makeStubBinary(
     "#!/usr/bin/env bash",
     'echo "scip-io stub invoked $@"',
   ];
+  if (opts.writeIndexContent) {
+    lines.push(`printf '%s' '${opts.writeIndexContent}' > "$PWD/index.scip"`);
+  }
+  for (const [name, content] of Object.entries(opts.writeSplitIndexes ?? {})) {
+    const escapedContent = content.replaceAll("'", "'\\''");
+    const escapedName = name.replaceAll("'", "'\\''");
+    lines.push(`printf '%s' '${escapedContent}' > "$PWD/${escapedName}"`);
+  }
   if (opts.logFile) {
     lines.push(`echo "cwd=$PWD args=$@" >> "${opts.logFile}"`);
   }
@@ -254,6 +282,505 @@ describe("scip-io-runner: runScipIoIndex", () => {
     assert.equal(result.ok, true);
     assert.match(result.stdout ?? "", /scip-io stub invoked/);
     assert.equal(result.stdoutTruncated, false);
+  });
+});
+
+describe("scip-io-runner: repo language filter args", () => {
+  let tmp = "";
+  const previousCacheDir = process.env.SDL_SCIP_IO_CACHE_DIR;
+
+  before(() => {
+    tmp = mkdtempSync(join(tmpdir(), "scip-io-lang-filter-"));
+    process.env.SDL_SCIP_IO_CACHE_DIR = join(tmp, "cache");
+  });
+
+  after(() => {
+    if (previousCacheDir === undefined) {
+      delete process.env.SDL_SCIP_IO_CACHE_DIR;
+    } else {
+      process.env.SDL_SCIP_IO_CACHE_DIR = previousCacheDir;
+    }
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("maps SDL-MCP repo languages to one scip-io language filter", () => {
+    assert.deepEqual(scipIoLanguagesForRepo(["ts", "tsx", "js", "jsx", "rs"]), [
+      "typescript",
+      "javascript",
+      "rust",
+    ]);
+    assert.deepEqual(
+      buildScipIoIndexArgs({
+        generatorArgs: ["--all-roots"],
+        repoLanguages: ["ts", "tsx", "js", "jsx", "rs"],
+      }),
+      ["--lang", "typescript,javascript,rust", "--all-roots"],
+    );
+  });
+
+  it("preserves explicit scip-io language args", () => {
+    assert.deepEqual(
+      buildScipIoIndexArgs({
+        generatorArgs: ["--lang", "java", "--all-roots"],
+        repoLanguages: ["ts", "rs"],
+      }),
+      ["--lang", "java", "--all-roots"],
+    );
+    assert.deepEqual(
+      buildScipIoIndexArgs({
+        generatorArgs: ["-lpython"],
+        repoLanguages: ["ts", "rs"],
+      }),
+      ["-lpython"],
+    );
+  });
+
+  it("does not synthesize a filter when repo languages have no scip-io backend", () => {
+    assert.deepEqual(scipIoLanguagesForRepo(["php", "sh"]), []);
+    assert.deepEqual(
+      buildScipIoIndexArgs({
+        generatorArgs: ["--all-roots"],
+        repoLanguages: ["php", "sh"],
+      }),
+      ["--all-roots"],
+    );
+  });
+
+  it("classifies only source and generator config dirty paths as cache inputs", () => {
+    const repoConfig = {
+      repoId: "cache-fast-path-test",
+      rootPath: tmp,
+      languages: ["ts", "py", "cpp"],
+      ignore: ["generated/**"],
+      maxFileBytes: 1024 * 1024,
+    };
+    const { dirtyPathsAffectScipGeneratorInputs } =
+      __SCIP_GENERATOR_CACHE_INTERNALS_FOR_TESTS;
+
+    assert.equal(
+      dirtyPathsAffectScipGeneratorInputs(
+        ["README.md", "index.scip", "Python/_cache/last_welcome.txt"],
+        repoConfig,
+      ),
+      false,
+    );
+    assert.equal(
+      dirtyPathsAffectScipGeneratorInputs(["src/main.ts"], repoConfig),
+      true,
+    );
+    assert.equal(
+      dirtyPathsAffectScipGeneratorInputs(["nested/package.json"], repoConfig),
+      true,
+    );
+    assert.equal(
+      dirtyPathsAffectScipGeneratorInputs(
+        ["build/compile_commands.json"],
+        repoConfig,
+      ),
+      true,
+    );
+    assert.equal(
+      dirtyPathsAffectScipGeneratorInputs(["generated/stale.ts"], repoConfig),
+      false,
+    );
+  });
+
+  it("parses simple git status paths and rejects ambiguous quoted paths", () => {
+    const { parseGitStatusPaths } = __SCIP_GENERATOR_CACHE_INTERNALS_FOR_TESTS;
+
+    assert.deepEqual(
+      parseGitStatusPaths(" M src/main.ts\n?? notes.md\nR  old.ts -> new.ts\n"),
+      ["new.ts", "notes.md", "old.ts", "src/main.ts"],
+    );
+    assert.equal(parseGitStatusPaths('?? "path with spaces.ts"\n'), null);
+  });
+
+  it("skips scip-io before binary detection for unsupported-only repo languages", async () => {
+    const binDir = join(tmp, "bin-unsupported");
+    const repoDir = join(tmp, "repo-unsupported");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(repoDir, { recursive: true });
+    const logFile = join(tmp, "unsupported.log");
+    const stub = makeStubBinary(binDir, { exitCode: 0, logFile });
+
+    const result = await runScipIoBeforeIndex({
+      repoRootPath: repoDir,
+      repoLanguages: ["php", "sh"],
+      generatorCfg: {
+        enabled: true,
+        binary: stub,
+        args: [],
+        autoInstall: false,
+        timeoutMs: 30_000,
+        cleanupAfterIngest: false,
+      },
+    });
+
+    assert.equal(result.attempted, false);
+    assert.equal(existsSync(logFile), false);
+  });
+
+  it("runs scip-io for unsupported repo languages when args explicitly request a language", async () => {
+    const binDir = join(tmp, "bin-explicit");
+    const repoDir = join(tmp, "repo-explicit");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(repoDir, { recursive: true });
+    const logFile = join(tmp, "explicit.log");
+    const stub = makeStubBinary(binDir, { exitCode: 0, logFile });
+
+    const result = await runScipIoBeforeIndex({
+      repoRootPath: repoDir,
+      repoLanguages: ["php"],
+      generatorCfg: {
+        enabled: true,
+        binary: stub,
+        args: ["--lang", "python", "--output", "custom.scip"],
+        autoInstall: false,
+        timeoutMs: 30_000,
+        cleanupAfterIngest: false,
+      },
+    });
+
+    assert.equal(result.attempted, true);
+    assert.equal(result.ok, true);
+    const log = readFileSync(logFile, "utf-8");
+    assert.match(log, /args=.*index --lang python --output custom\.scip/);
+  });
+
+  it("uses fresh split indexes when a merged run succeeds without index.scip", async () => {
+    const binDir = join(tmp, "bin-split-without-merged");
+    const repoDir = join(tmp, "repo-split-without-merged");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(repoDir, { recursive: true });
+    writeFileSync(join(repoDir, "cpp.scip"), "stale-cpp", "utf-8");
+    const logFile = join(tmp, "split-without-merged.log");
+    const stub = makeStubBinary(binDir, {
+      exitCode: 0,
+      logFile,
+      writeSplitIndexes: {
+        "python.scip": "fresh-python",
+      },
+    });
+
+    const result = await runScipIoBeforeIndex({
+      repoRootPath: repoDir,
+      repoLanguages: ["py"],
+      generatorCfg: {
+        enabled: true,
+        binary: stub,
+        args: [],
+        autoInstall: false,
+        timeoutMs: 30_000,
+        cleanupAfterIngest: false,
+      },
+    });
+
+    const accepted = result.generatedIndexes.filter((index) => !index.skipped);
+    const skipped = result.generatedIndexes.filter((index) => index.skipped);
+
+    assert.equal(result.ok, true);
+    assert.equal(existsSync(join(repoDir, "index.scip")), false);
+    assert.deepEqual(
+      accepted.map((index) => index.path),
+      ["python.scip"],
+    );
+    assert.equal(skipped.length, 1);
+    assert.equal(skipped[0]?.path, "cpp.scip");
+    assert.equal(skipped[0]?.skipReason, "stale-generated-output");
+    assert.match(
+      result.failures.map((failure) => failure.message).join(" "),
+      /completed without index\.scip/,
+    );
+    assert.match(readFileSync(logFile, "utf-8"), /args=.*index --lang python/);
+  });
+
+  it("keeps fresh split indexes when a merged run fails after partial output", async () => {
+    const binDir = join(tmp, "bin-failed-split-without-merged");
+    const repoDir = join(tmp, "repo-failed-split-without-merged");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(repoDir, { recursive: true });
+    writeFileSync(join(repoDir, "cpp.scip"), "stale-cpp", "utf-8");
+    const stub = makeStubBinary(binDir, {
+      exitCode: 1,
+      writeSplitIndexes: {
+        "python.scip": "fresh-python",
+      },
+    });
+
+    const result = await runScipIoBeforeIndex({
+      repoRootPath: repoDir,
+      repoLanguages: ["py", "cpp"],
+      generatorCfg: {
+        enabled: true,
+        binary: stub,
+        args: [],
+        autoInstall: false,
+        timeoutMs: 30_000,
+        cleanupAfterIngest: false,
+      },
+    });
+
+    const accepted = result.generatedIndexes.filter((index) => !index.skipped);
+    const stale = result.generatedIndexes.find(
+      (index) => index.path === "cpp.scip",
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(
+      accepted.map((index) => index.path),
+      ["python.scip"],
+    );
+    assert.equal(stale?.skipped, true);
+    assert.equal(stale?.skipReason, "stale-generated-output");
+    assert.match(
+      result.failures.map((failure) => failure.message).join(" "),
+      /failed without index\.scip/,
+    );
+    assert.equal(result.failures[0]?.stage, "generator-run");
+  });
+
+  it("reuses a cached generated index when repo inputs are unchanged", async () => {
+    const binDir = join(tmp, "bin-cache");
+    const repoDir = join(tmp, "repo-cache");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(repoDir, { recursive: true });
+    writeFileSync(
+      join(repoDir, "src.ts"),
+      "export const value = 1;\n",
+      "utf-8",
+    );
+    const logFile = join(tmp, "cache.log");
+    const stub = makeStubBinary(binDir, {
+      exitCode: 0,
+      logFile,
+      writeIndexContent: "scip-cache-index",
+    });
+    const generatorCfg = {
+      enabled: true,
+      binary: stub,
+      args: [],
+      autoInstall: false,
+      timeoutMs: 30_000,
+      cleanupAfterIngest: true,
+      cacheGeneratedIndexes: true,
+    };
+    const repoConfig = {
+      repoId: "cache-test",
+      rootPath: repoDir,
+      languages: ["ts"],
+      ignore: [],
+      maxFileBytes: 1024 * 1024,
+    };
+
+    const first = await runScipIoBeforeIndex({
+      repoRootPath: repoDir,
+      repoLanguages: ["ts"],
+      generatorCfg,
+      repoConfig,
+      repoId: "cache-test",
+    });
+    rmSync(join(repoDir, "index.scip"), { force: true });
+    const second = await runScipIoBeforeIndex({
+      repoRootPath: repoDir,
+      repoLanguages: ["ts"],
+      generatorCfg,
+      repoConfig,
+      repoId: "cache-test",
+    });
+
+    assert.equal(first.ok, true);
+    assert.equal(first.cache?.status, "stored");
+    assert.equal(second.ok, true);
+    assert.equal(second.attempted, false);
+    assert.equal(second.cache?.status, "hit");
+    assert.equal(
+      readFileSync(join(repoDir, "index.scip"), "utf-8").trim(),
+      "scip-cache-index",
+    );
+    const invocations = readFileSync(logFile, "utf-8")
+      .split(/\r?\n/)
+      .filter(Boolean);
+    assert.equal(invocations.length, 1);
+  });
+
+  it("reruns scip-io when a cached repo input changes", async () => {
+    const binDir = join(tmp, "bin-cache-invalidate");
+    const repoDir = join(tmp, "repo-cache-invalidate");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(repoDir, { recursive: true });
+    const sourcePath = join(repoDir, "src.ts");
+    writeFileSync(sourcePath, "export const value = 1;\n", "utf-8");
+    const logFile = join(tmp, "cache-invalidate.log");
+    const stub = makeStubBinary(binDir, {
+      exitCode: 0,
+      logFile,
+      writeIndexContent: "scip-cache-index",
+    });
+    const generatorCfg = {
+      enabled: true,
+      binary: stub,
+      args: [],
+      autoInstall: false,
+      timeoutMs: 30_000,
+      cleanupAfterIngest: true,
+      cacheGeneratedIndexes: true,
+    };
+    const repoConfig = {
+      repoId: "cache-invalidate-test",
+      rootPath: repoDir,
+      languages: ["ts"],
+      ignore: [],
+      maxFileBytes: 1024 * 1024,
+    };
+
+    const first = await runScipIoBeforeIndex({
+      repoRootPath: repoDir,
+      repoLanguages: ["ts"],
+      generatorCfg,
+      repoConfig,
+      repoId: "cache-invalidate-test",
+    });
+    rmSync(join(repoDir, "index.scip"), { force: true });
+    writeFileSync(sourcePath, "export const value = 2;\n", "utf-8");
+    const second = await runScipIoBeforeIndex({
+      repoRootPath: repoDir,
+      repoLanguages: ["ts"],
+      generatorCfg,
+      repoConfig,
+      repoId: "cache-invalidate-test",
+    });
+
+    assert.equal(first.ok, true);
+    assert.equal(first.cache?.status, "stored");
+    assert.equal(second.ok, true);
+    assert.equal(second.attempted, true);
+    assert.equal(second.cache?.status, "stored");
+    const invocations = readFileSync(logFile, "utf-8")
+      .split(/\r?\n/)
+      .filter(Boolean);
+    assert.equal(invocations.length, 2);
+  });
+
+  it("caches usable generated indexes from non-fatal language failures", async () => {
+    const binDir = join(tmp, "bin-cache-partial");
+    const repoDir = join(tmp, "repo-cache-partial");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(repoDir, { recursive: true });
+    writeFileSync(join(repoDir, "compile_commands.json"), "[]\n", "utf-8");
+    const logFile = join(tmp, "cache-partial.log");
+    const stub = makeStubBinary(binDir, {
+      exitCode: 1,
+      logFile,
+      writeIndexContent: "scip-partial-index",
+    });
+    const generatorCfg = {
+      enabled: true,
+      binary: stub,
+      args: [],
+      autoInstall: false,
+      timeoutMs: 30_000,
+      cleanupAfterIngest: true,
+      cacheGeneratedIndexes: true,
+    };
+    const repoConfig = {
+      repoId: "cache-partial-test",
+      rootPath: repoDir,
+      languages: ["py", "cpp"],
+      ignore: [],
+      maxFileBytes: 1024 * 1024,
+    };
+
+    const first = await runScipIoBeforeIndex({
+      repoRootPath: repoDir,
+      repoLanguages: ["py", "cpp"],
+      generatorCfg,
+      repoConfig,
+      repoId: "cache-partial-test",
+    });
+    rmSync(join(repoDir, "index.scip"), { force: true });
+    const second = await runScipIoBeforeIndex({
+      repoRootPath: repoDir,
+      repoLanguages: ["py", "cpp"],
+      generatorCfg,
+      repoConfig,
+      repoId: "cache-partial-test",
+    });
+
+    assert.equal(first.ok, true);
+    assert.equal(first.failures[0]?.stage, "generator-run");
+    assert.equal(first.cache?.status, "stored");
+    assert.equal(second.ok, true);
+    assert.equal(second.attempted, false);
+    assert.equal(second.cache?.status, "hit");
+    assert.equal(
+      readFileSync(join(repoDir, "index.scip"), "utf-8").trim(),
+      "scip-partial-index",
+    );
+    const invocations = readFileSync(logFile, "utf-8")
+      .split(/\r?\n/)
+      .filter(Boolean);
+    assert.equal(invocations.length, 1);
+  });
+
+  it("does not cache partial split indexes when a requested language is missing", async () => {
+    const binDir = join(tmp, "bin-cache-missing-language");
+    const repoDir = join(tmp, "repo-cache-missing-language");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(repoDir, { recursive: true });
+    writeFileSync(join(repoDir, "source.py"), "print('ok')\n", "utf-8");
+    writeFileSync(join(repoDir, "source.cpp"), "int main() { return 0; }\n", "utf-8");
+    writeFileSync(join(repoDir, "compile_commands.json"), "[]\n", "utf-8");
+    const logFile = join(tmp, "cache-missing-language.log");
+    const stub = makeStubBinary(binDir, {
+      exitCode: 1,
+      logFile,
+      writeSplitIndexes: {
+        "python.scip": "partial-python",
+      },
+    });
+    const generatorCfg = {
+      enabled: true,
+      binary: stub,
+      args: [],
+      autoInstall: false,
+      timeoutMs: 30_000,
+      cleanupAfterIngest: true,
+      cacheGeneratedIndexes: true,
+    };
+    const repoConfig = {
+      repoId: "cache-missing-language-test",
+      rootPath: repoDir,
+      languages: ["py", "cpp"],
+      ignore: [],
+      maxFileBytes: 1024 * 1024,
+    };
+
+    const first = await runScipIoBeforeIndex({
+      repoRootPath: repoDir,
+      repoLanguages: ["py", "cpp"],
+      generatorCfg,
+      repoConfig,
+      repoId: "cache-missing-language-test",
+    });
+    rmSync(join(repoDir, "python.scip"), { force: true });
+    const second = await runScipIoBeforeIndex({
+      repoRootPath: repoDir,
+      repoLanguages: ["py", "cpp"],
+      generatorCfg,
+      repoConfig,
+      repoId: "cache-missing-language-test",
+    });
+
+    assert.equal(first.ok, true);
+    assert.equal(first.cache?.status, "miss");
+    assert.match(first.cache?.reason ?? "", /missing requested split language/);
+    assert.equal(second.ok, true);
+    assert.equal(second.attempted, true);
+    assert.notEqual(second.cache?.status, "hit");
+    const invocations = readFileSync(logFile, "utf-8")
+      .split(/\r?\n/)
+      .filter(Boolean);
+    assert.equal(invocations.length, 2);
   });
 });
 

@@ -254,6 +254,44 @@ describe("upsertSymbolBatch — integration", () => {
   );
 
   it(
+    "known fresh provider symbols - COPY persists nodes and ownership relationships",
+    { skip: !ladybugAvailable },
+    async () => {
+      const conn_ = conn as unknown as import("kuzu").Connection;
+      const symbols = [
+        makeSymbol("known-copy-1", repoId, fileId, "knownOne", {
+          summary: "first line\nsecond \"quoted\", field",
+          signatureJson: '{"text":"function knownOne()"}',
+          summaryQuality: 0.6,
+          summarySource: "provider:scip",
+          source: "scip",
+          scipSymbol: "scip npm pkg 1.0.0 src/index.ts/knownOne().",
+        }),
+        makeSymbol("known-copy-2", repoId, fileId, "knownTwo", {
+          roleTagsJson: '["provider-primary"]',
+          searchText: "knownTwo provider symbol",
+          external: false,
+          source: "scip",
+          packageName: null,
+          packageVersion: null,
+          scipSymbol: "scip npm pkg 1.0.0 src/index.ts/knownTwo().",
+        }),
+      ];
+
+      await queries.upsertKnownFileSymbols(conn_, symbols);
+
+      const persisted = await queries.getSymbolsByFile(conn_, fileId);
+      assert.strictEqual(persisted.length, 2, "both COPY-loaded symbols exist");
+      const first = persisted.find((symbol) => symbol.symbolId === "known-copy-1");
+      assert.ok(first, "symbol should be readable through file/repo rels");
+      assert.strictEqual(first.repoId, repoId);
+      assert.strictEqual(first.fileId, fileId);
+      assert.strictEqual(first.summary, symbols[0]!.summary);
+      assert.strictEqual(first.scipSymbol, symbols[0]!.scipSymbol);
+    },
+  );
+
+  it(
     "idempotent re-upsert — second call with same data is a no-op",
     { skip: !ladybugAvailable },
     async () => {

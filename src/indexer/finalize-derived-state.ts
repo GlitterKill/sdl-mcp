@@ -23,6 +23,7 @@ export interface FinalizeDerivedStateParams {
   phaseTimings: Record<string, number> | null;
   algorithmRefresh?: AlgorithmRefreshConfig;
   onProgress?: (progress: IndexProgress) => void;
+  extraPhaseTimings?: Record<string, number>;
   sharedGraph?: {
     callEdges: Array<{ callerId: string; calleeId: string }>;
     clusterEdges: Array<{ fromSymbolId: string; toSymbolId: string }>;
@@ -47,6 +48,7 @@ export async function finalizeDerivedState(
     phaseTimings,
     algorithmRefresh,
     onProgress,
+    extraPhaseTimings,
     sharedGraph,
     measurePhase,
   } = params;
@@ -81,7 +83,7 @@ export async function finalizeDerivedState(
         repoId,
         versionId,
         algorithmRefresh,
-        includeTimings: Boolean(phaseTimings),
+        includeTimings: Boolean(phaseTimings || extraPhaseTimings),
         onProgress,
         sharedGraph,
       }),
@@ -92,6 +94,11 @@ export async function finalizeDerivedState(
     if (phaseTimings && result.timings) {
       for (const [phaseName, durationMs] of Object.entries(result.timings)) {
         phaseTimings[`clustersAndProcesses.${phaseName}`] = durationMs;
+      }
+    }
+    if (extraPhaseTimings && result.timings) {
+      for (const [phaseName, durationMs] of Object.entries(result.timings)) {
+        extraPhaseTimings[`clustersAndProcesses.${phaseName}`] = durationMs;
       }
     }
     try {

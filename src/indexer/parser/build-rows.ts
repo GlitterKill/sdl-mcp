@@ -24,10 +24,61 @@ import type {
   BuildRowsParams,
   BuildRowsResult,
   SignatureLike,
+  SymbolDetail,
   SymbolKindLiteral,
 } from "./types.js";
 
 export type { SignatureLike, SymbolKindLiteral } from "./types.js";
+
+const C_CPP_IMPORT_FANOUT_COLLAPSE_THRESHOLD = 512;
+
+function isCOrCppLanguage(languageId: string): boolean {
+  return languageId === "c" || languageId === "cpp";
+}
+
+/** @internal exported for tests; do not import from product code. */
+export function selectImportEdgeSourceNodeIds(params: {
+  symbolDetails: SymbolDetail[];
+  edgeSourceNodeIds: ReadonlySet<string>;
+  importTargetCount: number;
+  languageId: string;
+  skipCallResolution?: boolean;
+}): ReadonlySet<string> {
+  const {
+    symbolDetails,
+    edgeSourceNodeIds,
+    importTargetCount,
+    languageId,
+    skipCallResolution,
+  } = params;
+  const projectedImportEdges = edgeSourceNodeIds.size * importTargetCount;
+  if (
+    skipCallResolution !== true ||
+    importTargetCount === 0 ||
+    !isCOrCppLanguage(languageId) ||
+    projectedImportEdges <= C_CPP_IMPORT_FANOUT_COLLAPSE_THRESHOLD
+  ) {
+    return edgeSourceNodeIds;
+  }
+
+  const moduleNodeIds = symbolDetails
+    .filter(
+      (detail) =>
+        detail.extractedSymbol.kind === "module" &&
+        edgeSourceNodeIds.has(detail.extractedSymbol.nodeId),
+    )
+    .map((detail) => detail.extractedSymbol.nodeId);
+  if (moduleNodeIds.length > 0) {
+    return new Set(moduleNodeIds);
+  }
+
+  const representative = symbolDetails.find((detail) =>
+    edgeSourceNodeIds.has(detail.extractedSymbol.nodeId),
+  );
+  return representative
+    ? new Set([representative.extractedSymbol.nodeId])
+    : edgeSourceNodeIds;
+}
 
 export function buildSignatureJson(
   kind: SymbolKindLiteral,
@@ -123,6 +174,13 @@ export async function buildSymbolAndEdgeRows(
 
   const now = new Date().toISOString();
   let edgesCreated = 0;
+  const importEdgeSourceNodeIds = selectImportEdgeSourceNodeIds({
+    symbolDetails,
+    edgeSourceNodeIds,
+    importTargetCount: importTargets.length,
+    languageId,
+    skipCallResolution,
+  });
 
   for (const detail of symbolDetails) {
     const extractedSymbol = detail.extractedSymbol;
@@ -255,7 +313,7 @@ export async function buildSymbolAndEdgeRows(
     }
 
     // ── Import edges ─────────────────────────────────────────────
-    if (edgeSourceNodeIds.has(extractedSymbol.nodeId)) {
+    if (importEdgeSourceNodeIds.has(extractedSymbol.nodeId)) {
       for (const target of importTargets) {
         const edge: EdgeRow = {
           repoId,

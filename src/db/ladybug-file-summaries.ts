@@ -8,20 +8,52 @@
  *   (FileSummary)-[:FILE_SUMMARY_IN_REPO]->(Repo)
  *   (FileSummary)-[:SUMMARY_OF_FILE]->(File)
  */
+import { createWriteStream } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { finished } from "node:stream/promises";
 import type { Connection } from "kuzu";
 import {
   exec,
+  execDdl,
   queryAll,
   querySingle,
   withTransaction,
 } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
+import { normalizePath } from "../util/paths.js";
 import {
   getCardHashPropertyName,
   getEmbeddingPropertyName,
   getUpdatedAtPropertyName,
   getVecPropertyName,
 } from "../retrieval/model-mapping.js";
+
+const CSV_NULL_SENTINEL = "\\N";
+const CSV_ARRAY_NULL = Symbol("fileSummaryCsvArrayNull");
+
+const FILE_SUMMARY_COPY_COLUMNS = [
+  "fileId",
+  "repoId",
+  "summary",
+  "searchText",
+  "updatedAt",
+  "embeddingMiniLM",
+  "embeddingMiniLMCardHash",
+  "embeddingMiniLMUpdatedAt",
+  "embeddingMiniLMVec",
+  "embeddingNomic",
+  "embeddingNomicCardHash",
+  "embeddingNomicUpdatedAt",
+  "embeddingNomicVec",
+  "embeddingJinaCode",
+  "embeddingJinaCodeCardHash",
+  "embeddingJinaCodeUpdatedAt",
+  "embeddingJinaCodeVec",
+] as const;
+
+const SIMPLE_REL_COPY_COLUMNS = ["from", "to"] as const;
 
 export interface FileSummaryRow {
   fileId: string;
@@ -178,6 +210,225 @@ export async function upsertFileSummaryBatch(
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+}
+
+/**
+ * Insert FileSummary rows that are known to be new for the target files.
+ *
+ * Full provider-first fallback frequently creates the whole FileSummary set
+ * from scratch. COPY avoids the relationship-safe MERGE/probe path used by
+ * `upsertFileSummaryBatch`, while callers keep that merge-safe path for
+ * uncertain or retry writes.
+ */
+export async function insertNewFileSummaryBatch(
+  conn: Connection,
+  rows: Array<{
+    fileId: string;
+    repoId: string;
+    summary: string | null;
+    searchText: string | null;
+    updatedAt: string;
+  }>,
+): Promise<void> {
+  if (rows.length === 0) return;
+  const seen = new Set<string>();
+  rows = rows.filter((row) => {
+    if (seen.has(row.fileId)) return false;
+    seen.add(row.fileId);
+    return true;
+  });
+
+  const tempDir = await mkdtemp(join(tmpdir(), "sdl-file-summaries-"));
+  const summaryPath = join(tempDir, "file-summaries.csv");
+  const summaryInRepoPath = join(tempDir, "file-summary-in-repo.csv");
+  const summaryOfFilePath = join(tempDir, "summary-of-file.csv");
+  try {
+    await writeFileSummariesCsv(summaryPath, rows);
+    await writeSimpleRelCsv(
+      summaryInRepoPath,
+      rows.map((row) => [row.fileId, row.repoId] as const),
+    );
+    await writeSimpleRelCsv(
+      summaryOfFilePath,
+      rows.map((row) => [row.fileId, row.fileId] as const),
+    );
+
+    await withTransaction(conn, async (txConn) => {
+      await copyCsvArtifact(txConn, "FileSummary", summaryPath);
+      await copyCsvArtifact(txConn, "FILE_SUMMARY_IN_REPO", summaryInRepoPath);
+      await copyCsvArtifact(txConn, "SUMMARY_OF_FILE", summaryOfFilePath);
+    });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function writeFileSummariesCsv(
+  filePath: string,
+  rows: readonly {
+    fileId: string;
+    repoId: string;
+    summary: string | null;
+    searchText: string | null;
+    updatedAt: string;
+  }[],
+): Promise<void> {
+  const stream = createWriteStream(filePath, { encoding: "utf8" });
+  try {
+    await writeCsvLine(stream, FILE_SUMMARY_COPY_COLUMNS);
+    for (const row of rows) {
+      await writeCsvLine(stream, [
+        row.fileId,
+        row.repoId,
+        row.summary,
+        row.searchText,
+        row.updatedAt,
+        null,
+        null,
+        null,
+        CSV_ARRAY_NULL,
+        null,
+        null,
+        null,
+        CSV_ARRAY_NULL,
+        null,
+        null,
+        null,
+        CSV_ARRAY_NULL,
+      ]);
+    }
+    stream.end();
+    await finished(stream);
+  } catch (err) {
+    stream.destroy();
+    throw err;
+  }
+}
+
+async function writeSimpleRelCsv(
+  filePath: string,
+  rows: readonly (readonly [string, string])[],
+): Promise<void> {
+  const stream = createWriteStream(filePath, { encoding: "utf8" });
+  try {
+    await writeCsvLine(stream, SIMPLE_REL_COPY_COLUMNS);
+    for (const row of rows) {
+      await writeCsvLine(stream, row);
+    }
+    stream.end();
+    await finished(stream);
+  } catch (err) {
+    stream.destroy();
+    throw err;
+  }
+}
+
+async function copyCsvArtifact(
+  conn: Connection,
+  tableName: string,
+  filePath: string,
+): Promise<void> {
+  await execDdl(
+    conn,
+    `COPY ${tableName} FROM '${escapeCopyPath(filePath)}' ` +
+      `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
+  );
+}
+
+async function writeCsvLine(
+  stream: NodeJS.WritableStream,
+  cells: readonly unknown[],
+): Promise<void> {
+  const line = `${cells.map(csvCell).join(",")}\n`;
+  if (!stream.write(line)) {
+    await waitForDrain(stream);
+  }
+}
+
+function waitForDrain(stream: NodeJS.WritableStream): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      stream.removeListener("drain", onDrain);
+      stream.removeListener("error", onError);
+    };
+    const onDrain = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (err: Error): void => {
+      cleanup();
+      reject(err);
+    };
+    stream.once("drain", onDrain);
+    stream.once("error", onError);
+  });
+}
+
+function csvCell(value: unknown): string {
+  if (value === CSV_ARRAY_NULL) return "";
+  if (value === null || value === undefined) return CSV_NULL_SENTINEL;
+  const text = String(value);
+  if (text === "") return '""';
+  const escaped = text.replaceAll('"', '""');
+  return /[",\r\n]/.test(escaped) ? `"${escaped}"` : escaped;
+}
+
+function escapeCopyPath(path: string): string {
+  return normalizePath(path).replace(/'/g, "''");
+}
+
+function escapeCopyOptionString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "''");
+}
+
+/**
+ * Update FileSummary payload columns for rows known to already exist.
+ *
+ * First-time FileSummary writes still need `upsertFileSummaryBatch` because it
+ * creates the File/Repo ownership relationships. Existing rows can skip those
+ * relationship existence probes, which are a measurable post-index hotspot.
+ */
+export async function updateExistingFileSummaryBatch(
+  conn: Connection,
+  rows: Array<{
+    fileId: string;
+    repoId: string;
+    summary: string | null;
+    searchText: string | null;
+    updatedAt: string;
+  }>,
+  chunkSize = 512,
+): Promise<void> {
+  if (rows.length === 0) return;
+  const seen = new Set<string>();
+  rows = rows.filter((row) => {
+    if (seen.has(row.fileId)) return false;
+    seen.add(row.fileId);
+    return true;
+  });
+
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+    const unwindRows = chunk.map((row) => ({
+      fileId: row.fileId,
+      repoId: row.repoId,
+      summary: row.summary ?? null,
+      searchText: row.searchText ?? null,
+      updatedAt: row.updatedAt,
+    }));
+    await withTransaction(conn, async (txConn) => {
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (fs:FileSummary {fileId: row.fileId})
+         SET fs.repoId = row.repoId,
+             fs.summary = row.summary,
+             fs.searchText = row.searchText,
+             fs.updatedAt = row.updatedAt`,
+        { rows: unwindRows },
+      );
+    });
   }
 }
 

@@ -118,7 +118,7 @@ describe("ensureIndexes source verification", () => {
 
   it("ensureIndexes skips when FTS extension unavailable", () => {
     const fnStart = src.indexOf("export async function ensureIndexes");
-    const fnBody = src.slice(fnStart, fnStart + 1200);
+    const fnBody = src.slice(fnStart, fnStart + 1800);
     assert.ok(
       fnBody.includes("!caps.fts"),
       "ensureIndexes should check !caps.fts before creating FTS index",
@@ -128,10 +128,57 @@ describe("ensureIndexes source verification", () => {
   it("ensureIndexes skips when vector extension unavailable", () => {
     const fnStart = src.indexOf("export async function ensureIndexes");
     // The vector caps check appears after the FTS section; use a wider slice.
-    const fnBody = src.slice(fnStart, fnStart + 3000);
+    const fnBody = src.slice(fnStart, fnStart + 3800);
     assert.ok(
       fnBody.includes("!caps.vector"),
       "ensureIndexes should check !caps.vector before creating vector indexes",
+    );
+  });
+
+  it("ensureIndexes can skip Symbol vector indexes during deferred semantic refresh", () => {
+    const fnStart = src.indexOf("export async function ensureIndexes");
+    const fnBody = src.slice(fnStart, fnStart + 3500);
+    assert.ok(
+      fnBody.includes("includeVectorIndexes"),
+      "ensureIndexes should accept an includeVectorIndexes option",
+    );
+    assert.ok(
+      fnBody.includes("options.includeVectorIndexes !== false"),
+      "ensureIndexes should leave vectors enabled by default",
+    );
+  });
+
+  it("ensureIndexes can skip Symbol FTS during deferred semantic readiness", () => {
+    const fnStart = src.indexOf("export async function ensureIndexes");
+    const fnBody = src.slice(fnStart, fnStart + 3500);
+    assert.ok(
+      fnBody.includes("includeFtsIndex"),
+      "ensureIndexes should accept an includeFtsIndex option",
+    );
+    assert.ok(
+      fnBody.includes("options.includeFtsIndex !== false"),
+      "ensureIndexes should leave Symbol FTS enabled by default",
+    );
+  });
+
+  it("ensureIndexes records deferred retrieval timing subphases", () => {
+    const fnStart = src.indexOf("export async function ensureIndexes");
+    const fnBody = src.slice(fnStart, fnStart + 5000);
+    assert.ok(
+      fnBody.includes("recordTiming"),
+      "ensureIndexes should accept a timing recorder option",
+    );
+    assert.ok(
+      fnBody.includes('"symbolDiscovery"'),
+      "ensureIndexes should time Symbol index discovery",
+    );
+    assert.ok(
+      fnBody.includes('"symbolFts"'),
+      "ensureIndexes should time Symbol FTS work",
+    );
+    assert.ok(
+      fnBody.includes('"symbolVectors"'),
+      "ensureIndexes should time Symbol vector work",
     );
   });
 
@@ -494,6 +541,60 @@ describe("initLadybugDb bootstrap wiring", () => {
     );
   });
 
+  it("deferred index builds can leave semantic vectors for semantic refresh", () => {
+    const fnStart = ladybugSrc.indexOf("export async function buildDeferredIndexes");
+    assert.ok(fnStart !== -1, "buildDeferredIndexes must exist");
+    const fnBody = ladybugSrc.slice(fnStart, fnStart + 5000);
+    assert.ok(
+      fnBody.includes("deferSemanticVectorIndexes"),
+      "buildDeferredIndexes should expose a deferred semantic vector option",
+    );
+    assert.ok(
+      fnBody.includes("includeVectorIndexes: !options.deferSemanticVectorIndexes"),
+      "buildDeferredIndexes should pass Symbol vector suppression to ensureIndexes",
+    );
+    assert.ok(
+      fnBody.includes("includeFileSummaryVectorIndexes: !options.deferSemanticVectorIndexes"),
+      "buildDeferredIndexes should pass FileSummary vector suppression to ensureEntityIndexes",
+    );
+  });
+
+  it("deferred index builds can leave semantic text indexes for readiness recovery", () => {
+    const fnStart = ladybugSrc.indexOf("export async function buildDeferredIndexes");
+    assert.ok(fnStart !== -1, "buildDeferredIndexes must exist");
+    const fnBody = ladybugSrc.slice(fnStart, fnStart + 5000);
+    assert.ok(
+      fnBody.includes("deferSemanticTextIndexes"),
+      "buildDeferredIndexes should expose a deferred semantic text-index option",
+    );
+    assert.ok(
+      fnBody.includes("includeFtsIndex: !options.deferSemanticTextIndexes"),
+      "buildDeferredIndexes should pass Symbol FTS suppression to ensureIndexes",
+    );
+    assert.ok(
+      fnBody.includes("includeEntityFtsIndexes: !options.deferSemanticTextIndexes"),
+      "buildDeferredIndexes should pass entity FTS suppression to ensureEntityIndexes",
+    );
+  });
+
+  it("deferred index builds record retrieval index subphase timings", () => {
+    const fnStart = ladybugSrc.indexOf("export async function buildDeferredIndexes");
+    assert.ok(fnStart !== -1, "buildDeferredIndexes must exist");
+    const fnBody = ladybugSrc.slice(fnStart, fnStart + 5000);
+    assert.ok(
+      fnBody.includes("recordRetrievalIndexTiming"),
+      "buildDeferredIndexes should prefix retrieval lifecycle timing",
+    );
+    assert.ok(
+      fnBody.includes("buildDeferredIndexes.retrieval."),
+      "retrieval index subphases should be reported under the deferred index namespace",
+    );
+    assert.ok(
+      fnBody.includes("recordTiming: recordRetrievalIndexTiming"),
+      "retrieval lifecycle helpers should receive the timing recorder",
+    );
+  });
+
   it("index bootstrap failure does not block DB init", () => {
     const fnStart = ladybugSrc.indexOf("export async function initLadybugDb");
     const fnBody = ladybugSrc.slice(fnStart, fnStart + 8000);
@@ -656,7 +757,7 @@ describe("vector index API — efc/efs config distinction", () => {
 
   it("ensureIndexes reads efc from config with efs fallback", () => {
     const fnStart = src.indexOf("export async function ensureIndexes");
-    const fnBody = src.slice(fnStart, fnStart + 3000);
+    const fnBody = src.slice(fnStart, fnStart + 5000);
     assert.ok(
       fnBody.includes("vectorConfig?.efc"),
       "ensureIndexes should read efc from config",

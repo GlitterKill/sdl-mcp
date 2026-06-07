@@ -139,4 +139,76 @@ describe("fileScanner walkRepositoryFiles", () => {
       join(repoPath, "src", "nested"),
     ]);
   });
+
+  it("does not ignore source files whose basename starts with dist-", async () => {
+    const walkRepositoryFiles = fileScannerModule
+      .walkRepositoryFiles as WalkRepositoryFilesFn | undefined;
+
+    assert.ok(
+      walkRepositoryFiles,
+      "Expected fileScanner to export walkRepositoryFiles for explicit directory traversal",
+    );
+
+    const repoPath = resolve("repo");
+    const closedDirectories: string[] = [];
+    const directories = new Map<string, DirectoryEntryLike[]>([
+      [
+        repoPath,
+        [
+          fileEntry("dist-stdio-smoke.test.ts"),
+          directoryEntry("dist-tests"),
+          directoryEntry("tests"),
+        ],
+      ],
+      [
+        join(repoPath, "dist-tests"),
+        [
+          fileEntry("generated.test.ts"),
+        ],
+      ],
+      [
+        join(repoPath, "tests"),
+        [
+          directoryEntry("stress"),
+        ],
+      ],
+      [
+        join(repoPath, "tests", "stress"),
+        [
+          directoryEntry("infra"),
+        ],
+      ],
+      [
+        join(repoPath, "tests", "stress", "infra"),
+        [
+          fileEntry("dist-runtime.ts"),
+          fileEntry("regular.ts"),
+        ],
+      ],
+    ]);
+
+    const files = await walkRepositoryFiles(repoPath, {
+      patterns: ["**/*.ts"],
+      ignorePatterns: ["**/dist-*/**"],
+      openDirectory: async (directoryPath) => {
+        const entries = directories.get(directoryPath);
+        assert.ok(entries, `Unexpected directory open: ${directoryPath}`);
+        return createDirectoryHandle(entries, () => {
+          closedDirectories.push(directoryPath);
+        });
+      },
+    });
+
+    assert.deepStrictEqual(files.sort(), [
+      "dist-stdio-smoke.test.ts",
+      "tests/stress/infra/dist-runtime.ts",
+      "tests/stress/infra/regular.ts",
+    ]);
+    assert.deepStrictEqual(closedDirectories.sort(), [
+      repoPath,
+      join(repoPath, "tests"),
+      join(repoPath, "tests", "stress"),
+      join(repoPath, "tests", "stress", "infra"),
+    ]);
+  });
 });

@@ -2,6 +2,24 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { BatchPersistAccumulator } from "../../dist/indexer/parser/batch-persist.js";
+import type { EdgeRow } from "../../dist/db/ladybug-queries.js";
+
+function edge(overrides: Partial<EdgeRow> = {}): EdgeRow {
+  return {
+    repoId: "r1",
+    fromSymbolId: "from-1",
+    toSymbolId: "to-1",
+    edgeType: "call",
+    weight: 1.0,
+    confidence: 0.9,
+    resolution: "import-direct",
+    resolverId: "batch-persist-test",
+    resolutionPhase: "pass1",
+    provenance: "test-provenance",
+    createdAt: "2026-05-30T00:00:00.000Z",
+    ...overrides,
+  };
+}
 
 describe("BatchPersistAccumulator", () => {
   it("starts with zero pending count", () => {
@@ -181,7 +199,7 @@ describe("BatchPersistAccumulator", () => {
     assert.strictEqual(typeof stats.drainFailures, "number");
   });
 
-  it("passes fresh-edge mode to insertEdges during pass-1 drain writes", async () => {
+  it("keeps fresh-source COPY semantics during pass-1 drain writes", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const { fileURLToPath } = await import("node:url");
@@ -199,8 +217,105 @@ describe("BatchPersistAccumulator", () => {
 
     assert.match(
       content,
-      /insertEdges\(txConn,\s*batch\.edges,\s*\{[\s\S]*skipSourceRepoLink:\s*true,[\s\S]*skipExistingRelationshipUpdate:\s*true,[\s\S]*\}\)/,
-      "BatchPersistAccumulator must opt pass-1 edges into fresh-edge writes",
+      /ensureDependencyTargetsForKnownSourceEdges\(\s*txConn,\s*knownEndpointEdges,\s*\)/,
+      "BatchPersistAccumulator should prepare placeholder targets before relationship COPY",
     );
+    assert.match(
+      content,
+      /insertKnownSymbolEdges\(txConn,\s*knownEndpointEdges\)/,
+      "BatchPersistAccumulator should route prepared fresh-source edges through relationship COPY",
+    );
+    assert.match(
+      content,
+      /insertEdges\(txConn,\s*repairEdges,\s*\{[\s\S]*skipSourceRepoLink:\s*true,[\s\S]*skipExistingRelationshipUpdate:\s*true,[\s\S]*\}\)/,
+      "BatchPersistAccumulator must keep pass-1 repair edges in fresh-edge mode",
+    );
+  });
+
+  it("supports fresh-copy symbol batches for provider-first fallback", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const __filename = fileURLToPath(import.meta.url);
+    const srcPath = path.resolve(
+      path.dirname(__filename),
+      "..",
+      "..",
+      "src",
+      "indexer",
+      "parser",
+      "batch-persist.ts",
+    );
+    const content = fs.readFileSync(srcPath, "utf-8");
+
+    assert.match(
+      content,
+      /symbolWriteMode\?:\s*"merge"\s*\|\s*"fresh-copy"/,
+      "BatchPersistAccumulator should expose the fresh-copy provider fallback mode",
+    );
+    assert.match(
+      content,
+      /this\.symbolWriteMode\s*===\s*"fresh-copy"/,
+      "fresh-copy mode should have a dedicated write path",
+    );
+    assert.match(
+      content,
+      /deleteSymbolsByIds\(txConn,\s*incomingSymbolIds\)/,
+      "fresh-copy batches should clear colliding stubs or stale symbols before COPY",
+    );
+    assert.match(
+      content,
+      /upsertKnownFileSymbols\(txConn,\s*batch\.symbols\)/,
+      "fresh-copy batches should use the duplicate-key-safe symbol COPY writer",
+    );
+  });
+
+  it("splits pass-1 edges so prepared non-real or known real endpoints use COPY", async () => {
+    const { splitPass1EdgesForKnownEndpointCopy } = await import(
+      "../../dist/indexer/parser/batch-persist.js"
+    );
+
+    const known = edge({
+      fromSymbolId: "symbol-a",
+      toSymbolId: "symbol-b",
+    });
+    const unresolvedTarget = edge({
+      fromSymbolId: "symbol-a",
+      toSymbolId: "unresolved:call:missing",
+    });
+    const unresolvedSource = edge({
+      fromSymbolId: "unresolved:call:source",
+      toSymbolId: "symbol-b",
+    });
+    const providerTarget = edge({
+      fromSymbolId: "symbol-a",
+      toSymbolId: "provider-symbol",
+    });
+    const outsideBatchTarget = edge({
+      fromSymbolId: "symbol-a",
+      toSymbolId: "unknown-symbol",
+    });
+
+    const split = splitPass1EdgesForKnownEndpointCopy(
+      [
+        known,
+        unresolvedTarget,
+        unresolvedSource,
+        providerTarget,
+        outsideBatchTarget,
+      ],
+      new Set(["symbol-a", "symbol-b"]),
+      new Set(["provider-symbol"]),
+    );
+
+    assert.deepStrictEqual(split.knownEndpointEdges, [
+      known,
+      unresolvedTarget,
+      providerTarget,
+    ]);
+    assert.deepStrictEqual(split.repairEdges, [
+      unresolvedSource,
+      outsideBatchTarget,
+    ]);
   });
 });

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { scanRepository } from "../../dist/indexer/fileScanner.js";
-import type { RepoConfig } from "../../dist/config/types.js";
+import { RepoConfigSchema, type RepoConfig } from "../../dist/config/types.js";
 
 const tempDirs: string[] = [];
 
@@ -71,6 +71,144 @@ describe("fileScanner.scanRepository", () => {
     );
     assert.ok(files.every((f) => f.size > 0));
     assert.ok(files.every((f) => f.mtime > 0));
+  });
+
+  it("discovers all built-in adapter extensions for configured C and C++ languages", async () => {
+    const repoPath = makeTempRepo();
+    mkdirSync(join(repoPath, "src"), { recursive: true });
+    for (const fileName of [
+      "main.cpp",
+      "extra.cc",
+      "legacy.cxx",
+      "api.hpp",
+      "detail.hh",
+      "compat.hxx",
+      "bridge.c",
+      "bridge.h",
+      "skip.py",
+    ]) {
+      writeFileSync(join(repoPath, "src", fileName), fileName, "utf8");
+    }
+
+    const files = await scanRepository(
+      repoPath,
+      repoConfig(repoPath, { languages: ["c", "cpp"] }),
+    );
+
+    assert.deepStrictEqual(
+      files.map((f) => f.path),
+      [
+        "src/api.hpp",
+        "src/bridge.c",
+        "src/bridge.h",
+        "src/compat.hxx",
+        "src/detail.hh",
+        "src/extra.cc",
+        "src/legacy.cxx",
+        "src/main.cpp",
+      ],
+    );
+  });
+
+  it("discovers SCIP-emitted C and C++ companion files for configured C++", async () => {
+    const repoPath = makeTempRepo();
+    mkdirSync(join(repoPath, "src"), { recursive: true });
+    for (const fileName of [
+      "api.h",
+      "bridge.c",
+      "fragments.inc",
+      "table.def",
+      "main.cpp",
+      "skip.py",
+    ]) {
+      writeFileSync(join(repoPath, "src", fileName), fileName, "utf8");
+    }
+
+    const files = await scanRepository(
+      repoPath,
+      repoConfig(repoPath, { languages: ["cpp"] }),
+    );
+
+    assert.deepStrictEqual(
+      files.map((f) => f.path),
+      [
+        "src/api.h",
+        "src/bridge.c",
+        "src/fragments.inc",
+        "src/main.cpp",
+        "src/table.def",
+      ],
+    );
+  });
+
+  it("default ignores generated CMake build-output directories", async () => {
+    const repoPath = makeTempRepo();
+    for (const relativeDir of [
+      "src",
+      "build-scip-io-llvm-all-targets",
+      "build_scip_llvm",
+      "cmake-build-debug",
+      "out-scip-io",
+    ]) {
+      mkdirSync(join(repoPath, relativeDir), { recursive: true });
+    }
+    writeFileSync(join(repoPath, "src", "main.cpp"), "int main() {}", "utf8");
+    writeFileSync(
+      join(repoPath, "build-scip-io-llvm-all-targets", "generated.cpp"),
+      "int generated() {}",
+      "utf8",
+    );
+    writeFileSync(
+      join(repoPath, "build_scip_llvm", "generated.cpp"),
+      "int generated() {}",
+      "utf8",
+    );
+    writeFileSync(
+      join(repoPath, "cmake-build-debug", "generated.cpp"),
+      "int generated() {}",
+      "utf8",
+    );
+    writeFileSync(
+      join(repoPath, "out-scip-io", "generated.cpp"),
+      "int generated() {}",
+      "utf8",
+    );
+
+    const files = await scanRepository(
+      repoPath,
+      RepoConfigSchema.parse({
+        repoId: "repo-test",
+        rootPath: repoPath,
+        languages: ["cpp"],
+      }),
+    );
+
+    assert.deepStrictEqual(
+      files.map((file) => file.path),
+      ["src/main.cpp"],
+    );
+  });
+
+  it("discovers Python stub files for configured Python", async () => {
+    const repoPath = makeTempRepo();
+    mkdirSync(join(repoPath, "src"), { recursive: true });
+    writeFileSync(join(repoPath, "src", "api.py"), "def api(): ...", "utf8");
+    writeFileSync(
+      join(repoPath, "src", "api.pyi"),
+      "def api() -> None: ...",
+      "utf8",
+    );
+    writeFileSync(join(repoPath, "src", "skip.ts"), "export {}", "utf8");
+
+    const files = await scanRepository(
+      repoPath,
+      repoConfig(repoPath, { languages: ["py"] }),
+    );
+
+    assert.deepStrictEqual(
+      files.map((f) => f.path),
+      ["src/api.py", "src/api.pyi"],
+    );
   });
 
   it("returns metadata sorted by normalized path", async () => {

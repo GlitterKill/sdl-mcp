@@ -63,6 +63,26 @@ export interface Pass2ImportCache {
    * "no exports" answer.
    */
   exportedSymbolsByFileId: Map<string, ExportedSymbolLite[]>;
+  /**
+   * Optional provider-row-backed exported symbol details. Python pass-2 uses
+   * these fields to map imported classes to their exported methods without
+   * issuing one `getSymbolsByFile` read per imported target. Missing map
+   * entries are not authoritative; resolvers fall back to DB reads for files
+   * that were not preloaded.
+   */
+  exportedFullSymbolsByFileId?: Map<string, Pass2ExportedSymbolFull[]>;
+}
+
+export interface Pass2ExportedSymbolFull extends ExportedSymbolLite {
+  repoId: string;
+  fileId: string;
+  kind: string;
+  exported: boolean;
+  language: string;
+  rangeStartLine: number;
+  rangeStartCol: number;
+  rangeEndLine: number;
+  rangeEndCol: number;
 }
 
 /**

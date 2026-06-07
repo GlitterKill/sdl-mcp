@@ -99,3 +99,12 @@ test("globToSafeRegex trailing /** with dist pattern", () => {
   assert.strictEqual(regex.test("dist/index.js"), true);
   assert.strictEqual(regex.test("packages/dist/foo.js"), true);
 });
+
+test("globToSafeRegex wildcard directory globs do not match same-prefix files", () => {
+  const regex = globToSafeRegex("**/dist-*/**");
+  assert.strictEqual(regex.test("tests/unit/dist-stdio-smoke.test.ts"), false);
+  assert.strictEqual(regex.test("tests/stress/infra/dist-runtime.ts"), false);
+  assert.strictEqual(regex.test("dist-tests/"), true);
+  assert.strictEqual(regex.test("dist-tests/generated.test.ts"), true);
+  assert.strictEqual(regex.test("packages/dist-tests/generated.test.ts"), true);
+});

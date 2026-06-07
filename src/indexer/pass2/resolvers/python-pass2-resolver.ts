@@ -68,6 +68,18 @@ type FilteredSymbolDetail = {
   symbolId: string;
 };
 
+type PythonClassMethodSymbol = Pick<
+  SymbolRow,
+  | "symbolId"
+  | "fileId"
+  | "kind"
+  | "name"
+  | "rangeStartLine"
+  | "rangeStartCol"
+  | "rangeEndLine"
+  | "rangeEndCol"
+>;
+
 type PythonResolvedCall = {
   symbolId: string | null;
   isResolved: boolean;
@@ -342,7 +354,10 @@ function isRangeWithin(
   return true;
 }
 
-function isSymbolRowWithin(inner: SymbolRow, outer: SymbolRow): boolean {
+function isSymbolRowWithin(
+  inner: PythonClassMethodSymbol,
+  outer: PythonClassMethodSymbol,
+): boolean {
   if (
     inner.rangeStartLine < outer.rangeStartLine ||
     inner.rangeEndLine > outer.rangeEndLine
@@ -405,11 +420,11 @@ function buildLocalClassMethodIndex(
 }
 
 function buildPythonClassMethodIndex(
-  symbols: SymbolRow[],
+  symbols: PythonClassMethodSymbol[],
 ): Map<string, Map<string, string[]>> {
   const methodsByClassSymbolId = new Map<string, Map<string, string[]>>();
-  const classesByFileId = new Map<string, SymbolRow[]>();
-  const functionsByFileId = new Map<string, SymbolRow[]>();
+  const classesByFileId = new Map<string, PythonClassMethodSymbol[]>();
+  const functionsByFileId = new Map<string, PythonClassMethodSymbol[]>();
 
   for (const symbol of symbols) {
     if (symbol.kind === "class") {
@@ -432,7 +447,7 @@ function buildPythonClassMethodIndex(
     }
 
     for (const fn of functions) {
-      let ownerClass: SymbolRow | null = null;
+      let ownerClass: PythonClassMethodSymbol | null = null;
       let ownerSize = Number.MAX_SAFE_INTEGER;
 
       for (const clazz of classes) {
@@ -693,10 +708,9 @@ async function resolvePythonImportMaps(params: {
     importCache,
   } = params;
   const importedNameToSymbolIds = new Map<string, string[]>();
-  // Populated below from full SymbolRows fetched per imported file. The
-  // import cache cannot drive this index because it stores only LiteSymbol
-  // (id+name); buildPythonClassMethodIndex needs kind + range to map
-  // methods to their owning classes.
+  // Populated below from exported symbol details. Provider-first passes a
+  // full-field cache for provider-owned files; non-preloaded targets fall
+  // back to the legacy `getSymbolsByFile` read.
   const methodsByImportedClassSymbolId = new Map<
     string,
     Map<string, string[]>
@@ -755,14 +769,25 @@ async function resolvePythonImportMaps(params: {
       targetSymbols.push(...lite);
     }
 
-    // Build the dotted-method index from full SymbolRows regardless of
-    // cache presence. The import cache only stores LiteSymbol (id+name); it
-    // lacks the kind+range data buildPythonClassMethodIndex needs to map
-    // methods to their owning classes. Without this DB query,
-    // `svc.run()`-style receiver-imported-instance calls never resolve.
+    // Build the dotted-method index from full exported symbol details. When
+    // provider-first preloads those details, avoid the per-imported-file
+    // `getSymbolsByFile` round-trip; otherwise fall back to the legacy DB
+    // path so receiver-imported-instance resolution stays complete.
     {
-      const fullSymbols: SymbolRow[] = [];
+      const fullSymbols: PythonClassMethodSymbol[] = [];
       for (const targetFile of targetFiles) {
+        const cached = importCache?.exportedFullSymbolsByFileId?.get(
+          targetFile.fileId,
+        );
+        if (cached) {
+          fullSymbols.push(...cached);
+          continue;
+        }
+        if (
+          importCache?.exportedFullSymbolsByFileId?.has(targetFile.fileId)
+        ) {
+          continue;
+        }
         const symbols = await ladybugDb.getSymbolsByFile(
           conn,
           targetFile.fileId,

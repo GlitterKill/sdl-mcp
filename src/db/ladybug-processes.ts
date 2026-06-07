@@ -73,6 +73,87 @@ export async function upsertProcess(
   );
 }
 
+export async function upsertProcessesBatch(
+  conn: Connection,
+  processes: ProcessRow[],
+): Promise<void> {
+  if (processes.length === 0) return;
+  const seen = new Set<string>();
+  processes = processes.filter((process) => {
+    const key = `${process.processId}\0${process.repoId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const CHUNK = 256;
+  await withTransaction(conn, async (txConn) => {
+    for (let i = 0; i < processes.length; i += CHUNK) {
+      const rows = processes.slice(i, i + CHUNK).map((process) => ({
+        processId: process.processId,
+        repoId: process.repoId,
+        entrySymbolId: process.entrySymbolId,
+        label: process.label,
+        depth: process.depth,
+        versionId: process.versionId ?? "",
+        hasVersionId: process.versionId !== null,
+        createdAt: process.createdAt,
+        searchText: process.searchText ?? "",
+        hasSearchText: process.searchText !== null
+          && process.searchText !== undefined,
+      }));
+      const hasNullVersionIds = rows.some((row) => !row.hasVersionId);
+      const hasNullSearchText = rows.some((row) => !row.hasSearchText);
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (r:Repo {repoId: row.repoId})
+         MERGE (p:Process {processId: row.processId})
+         SET p.repoId = row.repoId,
+             p.entrySymbolId = row.entrySymbolId,
+             p.label = row.label,
+             p.depth = row.depth,
+             p.versionId = row.versionId,
+             p.createdAt = row.createdAt,
+             p.searchText = row.searchText`,
+        { rows },
+      );
+      if (hasNullVersionIds) {
+        await exec(
+          txConn,
+          `UNWIND $rows AS row
+           WITH row
+           WHERE NOT row.hasVersionId
+           MATCH (p:Process {processId: row.processId})
+           SET p.versionId = NULL`,
+          { rows },
+        );
+      }
+      if (hasNullSearchText) {
+        await exec(
+          txConn,
+          `UNWIND $rows AS row
+           WITH row
+           WHERE NOT row.hasSearchText
+           MATCH (p:Process {processId: row.processId})
+           SET p.searchText = NULL`,
+          { rows },
+        );
+      }
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (r:Repo {repoId: row.repoId})
+         MATCH (p:Process {processId: row.processId})
+         OPTIONAL MATCH (p)-[existing:PROCESS_IN_REPO]->(r)
+         WITH p, r, existing
+         WHERE existing IS NULL
+         CREATE (p)-[:PROCESS_IN_REPO]->(r)`,
+        { rows },
+      );
+    }
+  });
+}
+
 /**
  * Build a search-friendly text string for a process.
  * Concatenates the label, entry symbol name, and up to 15 step names.

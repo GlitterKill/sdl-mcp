@@ -5,6 +5,9 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
+  formatIndexStartupLines,
+} from "../../dist/cli/commands/index.js";
+import {
   parseIndexOptions,
 } from "../../dist/cli/argParsing.js";
 import type { CLIOptions } from "../../dist/cli/types.js";
@@ -79,6 +82,27 @@ describe("CLI index command", () => {
       const g: CLIOptions = { config: "/path/to/config.json" };
       const options = parseIndexOptions([], g, {});
       assert.strictEqual(options.config, "/path/to/config.json");
+    });
+  });
+
+  describe("startup output", () => {
+    it("prints useful pre-open context before graph DB initialization", () => {
+      assert.deepStrictEqual(
+        formatIndexStartupLines({
+          repoCount: 1,
+          runtimeIdentity: {
+            version: "0.11.4",
+            node: "v24.14.0",
+            modulePath: "C:\\pkg\\sdl-mcp\\dist\\cli\\commands\\index.js",
+          },
+          graphDbPath: "F:\\Claude\\sdl-mcp\\sdl-mcp-graph.lbug",
+        }),
+        [
+          "Indexing 1 repo(s)...",
+          "Runtime: sdl-mcp 0.11.4; node=v24.14.0; module=C:/pkg/sdl-mcp/dist/cli/commands/index.js",
+          "Graph DB: F:/Claude/sdl-mcp/sdl-mcp-graph.lbug",
+        ],
+      );
     });
   });
 

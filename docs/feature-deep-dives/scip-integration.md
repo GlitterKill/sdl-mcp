@@ -72,7 +72,9 @@ Add a `scip` section to your `sdlmcp.config.json`:
       "binary": "scip-io",
       "args": [],
       "autoInstall": true,
-      "timeoutMs": 600000
+      "timeoutMs": 600000,
+      "cleanupAfterIngest": true,
+      "cacheGeneratedIndexes": true
     }
   }
 }
@@ -92,10 +94,11 @@ The `generator` subsection wires sdl-mcp into the [scip-io](https://github.com/G
 | `autoIngestOnRefresh`          | boolean | `true`      | When true, `sdl.index.refresh` automatically re-ingests SCIP files if they are newer than the last ingestion timestamp.                                                                                                                                                                                                                     |
 | `generator.enabled`            | boolean | `false`     | Master switch for the scip-io generator integration. Has no effect unless `scip.enabled` is also true.                                                                                                                                                                                                                                      |
 | `generator.binary`             | string  | `"scip-io"` | Override the scip-io binary name. The runner looks it up in PATH first (cross-platform `which`/`where`), then falls back to the sdl-mcp managed location at `~/.sdl-mcp/bin/scip-io[.exe]`.                                                                                                                                                 |
-| `generator.args`               | array   | `[]`        | Extra string args appended after `index` when invoking scip-io (e.g., `["--no-clean"]`). The first arg is always `index`.                                                                                                                                                                                                                   |
+| `generator.args`               | array   | `[]`        | Extra string args appended after `index` when invoking scip-io (e.g., `["--all-roots"]`). The first arg is always `index`. SDL-MCP adds a repo-language `--lang` filter automatically unless these args already contain `--lang` / `-l`, in which case the explicit user filter wins.                                                       |
 | `generator.autoInstall`        | boolean | `true`      | When true and the binary is missing from both PATH and the managed location, sdl-mcp downloads it from the scip-io GitHub releases (with mandatory SHA-256 verification) into `~/.sdl-mcp/bin/`. When false, a missing binary just logs a warning and the refresh proceeds without scip-io.                                                 |
-| `generator.timeoutMs`          | integer | `600000`    | Hard timeout for the `scip-io index` invocation, in milliseconds. Min `1000` (1s), max `1800000` (30min). Default 10 minutes. On timeout the process tree is killed and the refresh continues.                                                                                                                                              |
+| `generator.timeoutMs`          | integer | `600000`    | Hard timeout for the `scip-io index` invocation, in milliseconds. Min `1000` (1s), max `18000000` (5h). Default 10 minutes. On timeout the process tree is killed and the refresh continues.                                                                                                                                                 |
 | `generator.cleanupAfterIngest` | boolean | `true`      | When the post-refresh ingest finishes, delete generated `.scip` files from the current generator run so regenerated files do not clutter the working tree. Skipped automatically when `args` contains `--output` / `-o` / `--output=...` (custom output paths are user-managed). Set to `false` to keep files for inspection or third-party tooling. |
+| `generator.cacheGeneratedIndexes` | boolean | `true`   | Cache generated `.scip` files under `~/.sdl-mcp/cache/scip-io/` and restore them on unchanged refreshes. The cache key includes tracked source files, common build manifests, effective generator args, repo language filter, and the scip-io binary. Warm hits first try a git-status fast key when changed paths are unrelated to configured source or generator config inputs, then use a latest stat-signature manifest before falling back to the exact content-hash fingerprint path. Split-only cache entries must cover every requested scip-io language; entries missing a requested language are treated as cache misses. CLI cache diagnostics break out generator, prepare, save, and restore timings when available. Custom `--output` paths opt out. |
 
 ---
 
@@ -168,7 +171,9 @@ The `.scip` file is a protobuf binary. You can inspect it with `scip print index
 
 Manually invoking the right SCIP emitter for every language in a polyglot repo and remembering to re-run it after every change is friction. SDL-MCP supports automating that step via [scip-io](https://github.com/GlitterKill/scip-io) — a polyglot SCIP orchestrator written in Rust that detects which languages your repo contains, downloads the matching upstream emitters, runs them in parallel, and merges everything into a single `index.scip` at the repo root.
 
-When `scip.generator.enabled` is `true`, sdl-mcp runs `scip-io index` in the repo root **before** every `indexRepo()` call. The freshly written `index.scip` is then picked up automatically by the existing post-refresh ingest. There is nothing to wire up beyond the two flags.
+When `scip.generator.enabled` is `true`, sdl-mcp runs `scip-io index` in the repo root **before** every `indexRepo()` call. SDL-MCP derives a `--lang` filter from the repository's configured `languages`, so a repo configured for `ts` / `tsx` / `js` / `jsx` / `rs` invokes scip-io as TypeScript, JavaScript, and Rust instead of probing Java, C#, Go, C++, and other emitters. If `scip.generator.args` already includes `--lang` or `-l`, SDL-MCP treats that as an explicit override and does not add its own filter.
+
+The freshly written `index.scip` is then picked up automatically by the existing post-refresh ingest. There is nothing to wire up beyond the two flags.
 
 ### Languages scip-io Orchestrates
 
@@ -192,19 +197,20 @@ The smallest opt-in is two flags:
 That's enough. With `scip.generator.enabled = true`, sdl-mcp:
 
 1. Auto-injects `{ "path": "index.scip", "label": "scip-io" }` into `scip.indexes` at config-load time, so you don't need to also list the index file manually.
-2. Runs `scip-io index` in the repo root before every `indexRepo()` invocation (CLI `sdl-mcp index`, MCP `sdl.index.refresh`, the file watcher, sync pull, HTTP reindex — every code path is covered).
+2. Runs `scip-io index` in the repo root before every `indexRepo()` invocation (CLI `sdl-mcp index`, MCP `sdl.index.refresh`, the file watcher, sync pull, HTTP reindex — every code path is covered), with an automatic `--lang` filter derived from the repo's configured `languages` unless `generator.args` already supplies one.
 3. Picks up the freshly written `index.scip` via the existing `autoIngestOnRefresh` path.
-4. Deletes generated `.scip` files from the current run after the post-refresh ingest completes (controlled by `generator.cleanupAfterIngest`, default `true`). Files are regenerated on every refresh, so leaving them around just clutters the working tree (and shows up in `git status`). Cleanup is skipped automatically when `args` contains `--output` / `-o` / `--output=...` because the output path is then under user control. Set `cleanupAfterIngest: false` to keep files for inspection or third-party tooling.
+4. Stores complete generated `.scip` file sets in the generator cache and restores them on later unchanged refreshes, so repeated full indexes avoid rerunning expensive compiler emitters. Split-only cache entries that are missing a requested language are degraded to cache misses and retried.
+5. Deletes generated `.scip` files from the current run after the post-refresh ingest completes (controlled by `generator.cleanupAfterIngest`, default `true`). Cleanup is skipped automatically when `args` contains `--output` / `-o` / `--output=...` because the output path is then under user control. Set `cleanupAfterIngest: false` to keep files for inspection or third-party tooling.
 
-All the other `generator.*` fields default to sensible values: a 10-minute timeout, no extra args, `binary: "scip-io"`, and `autoInstall: true`.
+All the other `generator.*` fields default to sensible values: a 10-minute timeout, no extra args, `binary: "scip-io"`, `autoInstall: true`, generated-index caching on, and post-ingest cleanup on.
 
 ### Oversized Generated Indexes
 
 Each SCIP decoder accepts one protobuf file up to 512 MiB. If the normal merged `scip-io index` output is at or below that cap, SDL-MCP ingests `index.scip` as before. If the merged file is larger than 512 MiB, SDL-MCP runs `scip-io index --no-merge`, discovers generated split `*.scip` files, and ingests every split file under the cap.
 
-Split files are deduplicated by SHA-256 content hash. This matters for TypeScript and JavaScript because both can come from the same `scip-typescript` indexer run; SDL-MCP does not force-split that upstream output, and identical `typescript.scip` / `javascript.scip` artifacts are ingested once. A split file that still exceeds 512 MiB is skipped with a visible diagnostic naming the file and byte size.
+Split files are deduplicated by SHA-256 content hash. This matters for TypeScript and JavaScript because both can come from the same `scip-typescript` indexer run; SDL-MCP does not force-split that upstream output, and identical `typescript.scip` / `javascript.scip` artifacts are ingested once. Unchanged split files that existed before the generator run are treated as stale generated output and skipped, which prevents a filtered run from accidentally ingesting an old split artifact for an unrelated language. A split file that still exceeds 512 MiB is skipped with a visible diagnostic naming the file and byte size.
 
-Index result and audit payloads include `scip.generatedIndexes[]` for generated path, label, size, mode (`"merged"` or `"split"`), and skip reason, plus `scip.failures[]` for non-fatal generator and ingest failures that were previously logger-only warnings.
+Index result and audit payloads include `scip.generatedIndexes[]` for generated path, label, size, mode (`"merged"` or `"split"`), and skip reason, `scip.generatorCache` for cache hit/store diagnostics, plus `scip.failures[]` for non-fatal generator and ingest failures that were previously logger-only warnings.
 
 ### Auto-Install Behavior
 

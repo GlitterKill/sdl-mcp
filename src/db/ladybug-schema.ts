@@ -11,7 +11,7 @@
  *              Cluster, Process, FileSummary, SliceHandle, CardHash, Audit,
  *              AgentFeedback (with searchText + embedding columns),
  *              SymbolEmbedding, SummaryCache, SyncArtifact,
- *              SymbolReference, Memory, UsageSnapshot, SchemaVersion,
+ *              SymbolReference, MetricsFingerprint, Memory, UsageSnapshot, SchemaVersion,
  *              ScipIngestion, SemanticProviderRun, SemanticDiagnostic,
  *              SemanticPrecisionMetric
  *
@@ -127,6 +127,13 @@ export const NODE_TABLES: string[] = [
     canonicalTestJson STRING,
     pageRank DOUBLE DEFAULT 0.0,
     kCore INT64 DEFAULT 0,
+    updatedAt STRING
+  )`,
+
+  `CREATE NODE TABLE IF NOT EXISTS MetricsFingerprint (
+    repoId STRING PRIMARY KEY,
+    metricsHash STRING,
+    rowCount INT64,
     updatedAt STRING
   )`,
 
@@ -609,15 +616,46 @@ export async function createBaseSchema(conn: Connection): Promise<void> {
   );
 }
 
-export async function createSecondaryIndexes(conn: Connection): Promise<void> {
-  for (const ddl of INDEXES) {
+export interface SecondaryIndexBuildFailure {
+  statement: string;
+  error: string;
+}
+
+export interface SecondaryIndexBuildSummary {
+  attempted: number;
+  failures: SecondaryIndexBuildFailure[];
+}
+
+export async function createSecondaryIndexes(
+  conn: Connection,
+): Promise<SecondaryIndexBuildSummary> {
+  const failures: SecondaryIndexBuildFailure[] = [];
+  for (let index = 0; index < INDEXES.length; index++) {
+    const ddl = INDEXES[index]!;
     try {
       await execDdl(conn, ddl);
-    } catch {
+    } catch (err) {
       // LadybugDB versions before 0.4 do not support CREATE INDEX. Since indexes
-      // are performance-only (not correctness), silently skipping is safe.
+      // are performance-only (not correctness), callers may choose whether to
+      // surface these failures.
+      const error = errorMessage(err);
+      failures.push({ statement: ddl, error });
+      if (isUnsupportedCreateIndexError(error)) {
+        for (const skippedDdl of INDEXES.slice(index + 1)) {
+          failures.push({ statement: skippedDdl, error });
+        }
+        break;
+      }
     }
   }
+  return { attempted: INDEXES.length, failures };
+}
+
+function isUnsupportedCreateIndexError(error: string): boolean {
+  return (
+    error.includes("Parser exception: Invalid input <CREATE INDEX") &&
+    error.includes("expected rule oC_SingleQuery")
+  );
 }
 
 export async function createSchema(conn: Connection): Promise<void> {
@@ -643,6 +681,10 @@ export async function getSchemaVersion(
 }
 
 export { LADYBUG_SCHEMA_VERSION };
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 export function supportsCallResolutionMetadata(
   schemaVersion: number | null | undefined,

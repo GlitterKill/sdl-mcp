@@ -14,6 +14,7 @@ import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 import {
   closeLadybugDb,
   getLadybugConn,
+  getLadybugDbPath,
   initLadybugDb,
   withWriteConn,
 } from "../../dist/db/ladybug.js";
@@ -96,6 +97,42 @@ describe("provider-first indexRepo fallback", () => {
 
     assert.equal(result.providerFirst?.selectedPipeline, "providerFirst");
     assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.equal(result.providerFirstExecution?.shadowBuild?.status, "staged");
+    assert.equal(result.providerFirstExecution.shadowBuild?.format, "csv");
+    assert.equal(result.providerFirstExecution.shadowBuild?.counts.files, 1);
+    assert.equal(
+      result.providerFirstExecution.shadowBuild?.shadowDb?.status,
+      "loaded",
+    );
+    assert.equal(
+      result.providerFirstExecution.shadowBuild?.activationResult?.status,
+      "activated",
+    );
+    assert.equal(
+      result.providerFirstExecution.shadowBuild?.activationResult?.activeDbPath,
+      getLadybugDbPath(),
+    );
+    assert.equal(
+      existsSync(result.providerFirstExecution.shadowBuild?.shadowDb?.path ?? ""),
+      false,
+    );
+    assert.ok(result.providerFirstExecution.phaseTimings);
+    assert.ok(
+      (result.providerFirstExecution.phaseTimings?.totalMs ?? 0) >=
+        (result.providerFirstExecution.phaseTimings?.phases.providerCollection ??
+          0),
+    );
+    assert.ok(
+      result.providerFirstExecution.phaseTimings?.phases.shadowActivate !==
+        undefined,
+    );
+    assert.ok(
+      result.providerFirstExecution.phaseTimings?.phases.postProviderGc !==
+        undefined,
+    );
+    assert.ok(
+      existsSync(result.providerFirstExecution.shadowBuild?.manifestPath ?? ""),
+    );
     assert.equal(result.filesProcessed, 1);
     assert.ok(result.symbolsIndexed >= 3);
     assert.equal(
@@ -230,6 +267,32 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(derivedState?.lastError, null);
   });
 
+  it("scans before SCIP fact collection so DB reads do not run under retained provider heap", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+    });
+    const progressStages: string[] = [];
+
+    const result = await indexRepo(repoId, "full", (progress) => {
+      progressStages.push(progress.stage);
+    });
+
+    const firstScan = progressStages.indexOf("scanning");
+    const firstScipIngest = progressStages.indexOf("scipIngest");
+    assert.notEqual(firstScan, -1);
+    assert.notEqual(firstScipIngest, -1);
+    assert.ok(
+      firstScan < firstScipIngest,
+      `expected scanning before SCIP ingest, got ${progressStages.join(", ")}`,
+    );
+    assert.equal(
+      result.providerFirstExecution?.phaseTimings?.phases[
+        "materialize.deleteFileSymbols"
+      ],
+      undefined,
+    );
+  });
+
   it("defers provider-first semantic embeddings until semantic readiness", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
@@ -324,6 +387,60 @@ describe("provider-first indexRepo fallback", () => {
       result.providerFirstExecution?.reasons.join(" ") ?? "",
       /legacy fallback indexed 1 uncovered or provider-unusable file/i,
     );
+    assert.equal(
+      result.providerFirstExecution?.legacyFallbackDiagnostics?.files,
+      1,
+    );
+    assert.equal(
+      result.providerFirstExecution?.legacyFallbackDiagnostics?.samplePaths[0],
+      "src/extra.ts",
+    );
+    assert.ok(
+      (result.providerFirstExecution?.legacyFallbackDiagnostics?.durationMs ??
+        0) >= 0,
+    );
+    assert.ok(
+      Object.hasOwn(
+        result.providerFirstExecution?.legacyFallbackDiagnostics?.phases ?? {},
+        "pass1",
+      ),
+    );
+    assert.ok(
+      Object.hasOwn(
+        result.providerFirstExecution?.legacyFallbackDiagnostics?.phases ?? {},
+        "pass1Drain.write.upsertFiles",
+      ),
+    );
+    assert.ok(
+      Object.hasOwn(
+        result.providerFirstExecution?.legacyFallbackDiagnostics?.phases ?? {},
+        "finalizeIndexing.metrics",
+      ),
+    );
+    assert.ok(
+      Object.hasOwn(
+        result.providerFirstExecution?.legacyFallbackDiagnostics?.phases ?? {},
+        "finalizeIndexing.fileSummaries.loadFiles",
+      ),
+    );
+    assert.ok(
+      Object.hasOwn(
+        result.providerFirstExecution?.legacyFallbackDiagnostics?.phases ?? {},
+        "clustersAndProcesses.loadSymbols",
+      ),
+    );
+    assert.ok(
+      Object.hasOwn(
+        result.providerFirstExecution?.legacyFallbackDiagnostics?.phases ?? {},
+        "versionSnapshot.snapshot.writePages",
+      ),
+    );
+    assert.ok(
+      Object.hasOwn(
+        result.providerFirstExecution?.legacyFallbackDiagnostics?.phases ?? {},
+        "buildDeferredIndexes.secondaryIndexes",
+      ),
+    );
     assert.equal(result.filesProcessed, 2);
     assert.ok(result.symbolsIndexed > 0);
 
@@ -340,6 +457,7 @@ describe("provider-first indexRepo fallback", () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
       extraScannedFile: true,
+      extraScannedFileMissingCall: true,
     });
 
     const result = await indexRepo(repoId, "full");
@@ -351,8 +469,55 @@ describe("provider-first indexRepo fallback", () => {
       /legacy fallback indexed 1 uncovered or provider-unusable file/i,
     );
     assert.equal(result.filesProcessed, 2);
+    assert.equal(result.providerFirstExecution?.shadowBuild?.status, "staged");
+    assert.equal(result.providerFirstExecution?.shadowBuild?.counts.files, 2);
+    assert.equal(
+      result.providerFirstExecution?.shadowBuild?.shadowDb?.status,
+      "loaded",
+    );
+    assert.equal(
+      result.providerFirstExecution?.shadowBuild?.finalization?.status,
+      "finalized",
+    );
+    assert.equal(
+      result.providerFirstExecution?.shadowBuild?.finalization?.copyMode,
+      "bulkCsv",
+    );
+    assert.ok(
+      result.providerFirstExecution?.shadowBuild?.finalization?.bulkLoad
+        ?.manifestPath,
+      "shadow finalization should expose the bulk-load manifest for diagnostics",
+    );
+    assert.equal(
+      result.providerFirstExecution?.shadowBuild?.activationResult?.status,
+      "activated",
+    );
+    assert.ok(
+      (result.providerFirstExecution?.legacyFallbackDiagnostics?.phases[
+        "pass1Drain.write.upsertSymbols"
+      ] ?? 0) > 0,
+      "provider-first fallback should collect pass-1 drain write subphases without broad timing diagnostics",
+    );
 
     const conn = await getLadybugConn();
+    const edgeCount = await ladybugDb.getEdgeCount(conn, repoId);
+    const symbolCount = await ladybugDb.getSymbolCount(conn, repoId);
+    assert.equal(
+      result.providerFirstExecution?.shadowBuild?.finalization?.actualCounts
+        .edges,
+      edgeCount,
+    );
+    assert.equal(
+      result.providerFirstExecution?.shadowBuild?.finalization?.actualCounts
+        .symbols,
+      symbolCount,
+      "shadow finalization symbols should match the public real-symbol count",
+    );
+    assert.ok(
+      (result.providerFirstExecution?.shadowBuild?.finalization?.actualCounts
+        .auxiliarySymbols ?? 0) > 0,
+      "shadow finalization should report unresolved dependency placeholders separately",
+    );
     const symbols = await ladybugDb.queryAll<{
       name: string;
       source: string;
@@ -497,8 +662,31 @@ describe("provider-first indexRepo fallback", () => {
       result.providerFirstExecution?.coverage?.callProofIncompleteFiles,
       1,
     );
+    const mismatchReason =
+      result.providerFirstExecution?.coverage?.callProofIncompleteReasons?.find(
+        (reason) => reason.code === "symbolTextMismatch",
+      );
+    assert.equal(mismatchReason?.samples?.length, 1);
+    assert.equal(mismatchReason?.samples?.[0]?.relPath, "src/index.ts");
+    assert.equal(mismatchReason?.samples?.[0]?.actualText, "rename");
     assert.equal(result.clustersComputed, 0);
     assert.equal(result.processesTraced, 0);
+    assert.equal(
+      result.providerFirstExecution?.shadowBuild?.status,
+      "skipped",
+    );
+    assert.match(
+      result.providerFirstExecution?.shadowBuild?.reasons.join(" ") ?? "",
+      /call proof unavailable/i,
+    );
+    assert.equal(
+      result.providerFirstExecution?.shadowBuild?.finalization,
+      undefined,
+    );
+    assert.equal(
+      result.providerFirstExecution?.shadowBuild?.activationResult?.status,
+      "skipped",
+    );
 
     const conn = await getLadybugConn();
     const derivedState = await ladybugDb.querySingle<{
@@ -519,6 +707,29 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(derivedState?.processesDirty, true);
     assert.equal(derivedState?.algorithmsDirty, true);
     assert.match(derivedState?.lastError ?? "", /call proof unavailable/i);
+  });
+
+  it("does not report multi-line import aliases as call-proof mismatches", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+      multiLineAliasedImportReference: true,
+    });
+
+    const result = await indexRepo(repoId, "full");
+
+    assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.doesNotMatch(
+      result.providerFirstExecution?.reasons.join(" ") ?? "",
+      /call proof was unavailable/i,
+    );
+    assert.equal(
+      result.providerFirstExecution?.coverage?.callProofIncompleteFiles,
+      0,
+    );
+    assert.equal(
+      result.providerFirstExecution?.coverage?.callProofIncompleteReasons,
+      undefined,
+    );
   });
 
   it("prunes stale SCIP externals when provider rows are unusable and filtered to legacy fallback", async () => {
@@ -576,6 +787,23 @@ describe("provider-first indexRepo fallback", () => {
     assert.match(
       result.providerFirstExecution?.reasons.join(" ") ?? "",
       /legacy fallback indexed 1 uncovered or provider-unusable file/i,
+    );
+    assert.deepEqual(
+      result.providerFirstExecution?.coverage?.providerUnusableReasons,
+      [
+        {
+          code: "noUsableProviderSymbols",
+          files: 1,
+          samplePaths: ["src/index.ts"],
+          skippedSymbolReasons: [
+            {
+              reason: "local",
+              symbols: 1,
+              samplePaths: ["src/index.ts"],
+            },
+          ],
+        },
+      ],
     );
 
     const conn = await getLadybugConn();
@@ -660,16 +888,16 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(ladybugDb.toNumber(removedSymbol?.count), 0);
   });
 
-  it("fails explicit providerFirst before writing duplicate SCIP documents", async () => {
+  it("coalesces duplicate SCIP documents in explicit providerFirst mode", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
       duplicateProviderDoc: true,
     });
 
-    await assert.rejects(
-      () => indexRepo(repoId, "full"),
-      /duplicate document facts/i,
-    );
+    const result = await indexRepo(repoId, "full");
+
+    assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.equal(result.providerFirstExecution?.shadowBuild?.counts.files, 1);
 
     const conn = await getLadybugConn();
     const symbolCount = await ladybugDb.querySingle<{ count: unknown }>(
@@ -679,19 +907,19 @@ describe("provider-first indexRepo fallback", () => {
        RETURN count(s) AS count`,
       { repoId },
     );
-    assert.equal(ladybugDb.toNumber(symbolCount?.count), 0);
+    assert.equal(ladybugDb.toNumber(symbolCount?.count), 3);
   });
 
-  it("fails auto providerFirst before writing duplicate SCIP documents", async () => {
+  it("coalesces duplicate SCIP documents in auto providerFirst mode", async () => {
     const repoId = await initIndexedRepo("auto", {
       scipFixture: "complete",
       duplicateProviderDoc: true,
     });
 
-    await assert.rejects(
-      () => indexRepo(repoId, "full"),
-      /duplicate document facts/i,
-    );
+    const result = await indexRepo(repoId, "full");
+
+    assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.equal(result.providerFirstExecution?.shadowBuild?.counts.files, 1);
 
     const conn = await getLadybugConn();
     const symbolCount = await ladybugDb.querySingle<{ count: unknown }>(
@@ -701,19 +929,18 @@ describe("provider-first indexRepo fallback", () => {
        RETURN count(s) AS count`,
       { repoId },
     );
-    assert.equal(ladybugDb.toNumber(symbolCount?.count), 0);
+    assert.equal(ladybugDb.toNumber(symbolCount?.count), 3);
   });
 
-  it("fails explicit providerFirst before writing duplicate SCIP symbols", async () => {
+  it("coalesces duplicate SCIP symbols in one document", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
       duplicateProviderSymbol: true,
     });
 
-    await assert.rejects(
-      () => indexRepo(repoId, "full"),
-      /duplicate symbols/i,
-    );
+    const result = await indexRepo(repoId, "full");
+
+    assert.equal(result.providerFirstExecution?.status, "executed");
 
     const conn = await getLadybugConn();
     const symbolCount = await ladybugDb.querySingle<{ count: unknown }>(
@@ -723,7 +950,7 @@ describe("provider-first indexRepo fallback", () => {
        RETURN count(s) AS count`,
       { repoId },
     );
-    assert.equal(ladybugDb.toNumber(symbolCount?.count), 0);
+    assert.equal(ladybugDb.toNumber(symbolCount?.count), 3);
   });
 
   it("fails explicit providerFirst before writing cross-document duplicate SCIP symbols", async () => {
@@ -779,7 +1006,9 @@ describe("provider-first indexRepo fallback", () => {
       duplicateProviderSymbolDocument?: boolean;
       partialProviderReference?: boolean;
       staleProviderReferenceText?: boolean;
+      multiLineAliasedImportReference?: boolean;
       emptyProviderDocument?: boolean;
+      extraScannedFileMissingCall?: boolean;
       includeMissingScipIndex?: boolean;
       seedRemovedFile?: boolean;
       semanticProvider?: "api" | "local" | "mock";
@@ -793,26 +1022,44 @@ describe("provider-first indexRepo fallback", () => {
       `sdl-provider-first-index-${pipeline}-${Date.now()}.json`,
     );
     mkdirSync(join(repoDir, "src"), { recursive: true });
+    const indexSource = options.multiLineAliasedImportReference
+      ? [
+          "import {",
+          "  clearCache as clearGrammarCache,",
+          '} from "./grammarLoader.js";',
+          "",
+          "export function main() {",
+          "  clearGrammarCache();",
+          "}",
+        ]
+      : [
+          "export function main() {",
+          options.staleProviderReferenceText
+            ? "  return renamed();"
+            : "  return helper();",
+          "  return api();",
+          "}",
+          "",
+          "export function helper() {",
+          "  return 1;",
+          "}",
+        ];
     writeFileSync(
       join(repoDir, "src", "index.ts"),
-      [
-        "export function main() {",
-        options.staleProviderReferenceText
-          ? "  return renamed();"
-          : "  return helper();",
-        "  return api();",
-        "}",
-        "",
-        "export function helper() {",
-        "  return 1;",
-        "}",
-      ].join("\n"),
+      indexSource.join("\n"),
       "utf8",
     );
     if (options.extraScannedFile) {
+      const extraSource = [
+        "export function extra() {",
+        options.extraScannedFileMissingCall
+          ? "  return missingLegacy();"
+          : "  return 2;",
+        "}",
+      ];
       writeFileSync(
         join(repoDir, "src", "extra.ts"),
-        ["export function extra() {", "  return 2;", "}"].join("\n"),
+        extraSource.join("\n"),
         "utf8",
       );
     }
@@ -1009,7 +1256,46 @@ describe("provider-first indexRepo fallback", () => {
       }
     });
     if (options.scipFixture === "complete") {
-      const mainDocument = {
+      const mainDocument = options.multiLineAliasedImportReference
+        ? {
+            language: "typescript",
+            relativePath: "src/index.ts",
+            occurrences: [
+              {
+                range: [1, 2, 12] as [number, number, number],
+                symbol:
+                  "scip-typescript npm fixture 1.0.0 src/grammarLoader.ts/clearCache().",
+                symbolRoles: 0,
+              },
+              {
+                range: [4, 16, 20] as [number, number, number],
+                enclosingRange: [4, 0, 6, 1] as [
+                  number,
+                  number,
+                  number,
+                  number,
+                ],
+                symbol:
+                  "scip-typescript npm fixture 1.0.0 src/index.ts/main().",
+                symbolRoles: 1,
+              },
+              {
+                range: [5, 2, 19] as [number, number, number],
+                symbol:
+                  "scip-typescript npm fixture 1.0.0 src/grammarLoader.ts/clearCache().",
+                symbolRoles: 8,
+              },
+            ],
+            symbols: [
+              {
+                symbol:
+                  "scip-typescript npm fixture 1.0.0 src/index.ts/main().",
+                kind: 12,
+                displayName: "main",
+              },
+            ],
+          }
+        : {
         language: "typescript",
         relativePath: "src/index.ts",
         occurrences: [
@@ -1141,11 +1427,18 @@ describe("provider-first indexRepo fallback", () => {
             : []),
         ],
         externalSymbols: [
-          {
-            symbol: "scip-typescript npm dep 1.0.0 dep/index.ts/api().",
-            kind: 12,
-            displayName: "api",
-          },
+          options.multiLineAliasedImportReference
+            ? {
+                symbol:
+                  "scip-typescript npm fixture 1.0.0 src/grammarLoader.ts/clearCache().",
+                kind: 12,
+                displayName: "clearCache",
+              }
+            : {
+                symbol: "scip-typescript npm dep 1.0.0 dep/index.ts/api().",
+                kind: 12,
+                displayName: "api",
+              },
         ],
       });
     }

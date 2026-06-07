@@ -6,6 +6,7 @@ import type { SymbolRow } from "../../db/ladybug-symbols.js";
 import type { EdgeRow } from "../../db/ladybug-edges.js";
 import type { SymbolReferenceRow } from "../../db/ladybug-embeddings.js";
 import type { FileRow } from "../../db/ladybug-repos.js";
+import { classifyDependencyTarget } from "../../db/symbol-placeholders.js";
 import { logger } from "../../util/logger.js";
 
 export interface FileUpsertEntry {
@@ -23,11 +24,14 @@ interface FlushBatch {
 
 export const BATCH_PERSIST_WRITE_PHASES = [
   "deleteOldSymbols",
+  "deleteIncomingSymbols",
   "upsertFiles",
   "insertSymbolReferences",
   "upsertSymbols",
   "insertEdges",
 ] as const;
+
+export const PASS1_KNOWN_ENDPOINT_COPY_THRESHOLD = 128;
 
 export type BatchPersistWritePhase =
   (typeof BATCH_PERSIST_WRITE_PHASES)[number];
@@ -68,6 +72,8 @@ export interface BatchPersistDrainDiagnostics {
 
 export interface BatchPersistAccumulatorOptions {
   collectDiagnostics?: boolean;
+  knownSymbolIdsForEdgeCopy?: ReadonlySet<string>;
+  symbolWriteMode?: "merge" | "fresh-copy";
 }
 
 function describeBatch(batch: FlushBatch): Record<string, number> {
@@ -137,6 +143,48 @@ function cloneDrainDiagnostics(
   };
 }
 
+function isUnresolvedSymbolId(symbolId: string): boolean {
+  return symbolId.startsWith("unresolved:");
+}
+
+/**
+ * Pass 1 replaces a file's symbols before writing its dependency edges. Edges
+ * whose endpoints are both real symbols inserted by the same batch can skip
+ * generic endpoint repair and use the relationship COPY path; everything else
+ * must keep the slower repair writer so unresolved/external placeholders stay
+ * correct.
+ */
+/** @internal exported for tests; do not import from product code. */
+export function splitPass1EdgesForKnownEndpointCopy(
+  edges: readonly EdgeRow[],
+  sameBatchSymbolIds: ReadonlySet<string>,
+  knownPersistedSymbolIds: ReadonlySet<string> = new Set(),
+): {
+  knownEndpointEdges: EdgeRow[];
+  repairEdges: EdgeRow[];
+} {
+  const knownEndpointEdges: EdgeRow[] = [];
+  const repairEdges: EdgeRow[] = [];
+
+  for (const edge of edges) {
+    const targetMeta =
+      edge.targetMeta ?? classifyDependencyTarget(edge.toSymbolId);
+    if (
+      !isUnresolvedSymbolId(edge.fromSymbolId) &&
+      sameBatchSymbolIds.has(edge.fromSymbolId) &&
+      (sameBatchSymbolIds.has(edge.toSymbolId) ||
+        knownPersistedSymbolIds.has(edge.toSymbolId) ||
+        targetMeta.symbolStatus !== "real")
+    ) {
+      knownEndpointEdges.push(edge);
+    } else {
+      repairEdges.push(edge);
+    }
+  }
+
+  return { knownEndpointEdges, repairEdges };
+}
+
 /**
  * Accumulates DB writes and drains them via a background write queue.
  *
@@ -177,6 +225,8 @@ export class BatchPersistAccumulator {
     | null = null;
   private readonly collectDiagnostics: boolean;
   private readonly diagnostics: BatchPersistDrainDiagnostics;
+  private readonly knownSymbolIdsForEdgeCopy: ReadonlySet<string>;
+  private readonly symbolWriteMode: "merge" | "fresh-copy";
 
   constructor(
     flushThreshold = 512,
@@ -185,6 +235,9 @@ export class BatchPersistAccumulator {
     this.flushThreshold = flushThreshold;
     this.collectDiagnostics = options.collectDiagnostics === true;
     this.diagnostics = createDrainDiagnostics();
+    this.knownSymbolIdsForEdgeCopy =
+      options.knownSymbolIdsForEdgeCopy ?? new Set<string>();
+    this.symbolWriteMode = options.symbolWriteMode ?? "merge";
     activeAccumulators.add(this);
   }
 
@@ -354,6 +407,12 @@ export class BatchPersistAccumulator {
       const phaseStart = performance.now();
       try {
         await body();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `BatchPersistAccumulator ${phase} failed while writing ${rows} row(s): ${message}`,
+          { cause: err },
+        );
       } finally {
         const durationMs = Math.round(performance.now() - phaseStart);
         phaseMs[phase] += durationMs;
@@ -367,39 +426,11 @@ export class BatchPersistAccumulator {
       }
     };
 
-    await withWriteConn(async (wConn) => {
-      await ladybugDb.withTransaction(wConn, async (txConn) => {
-        await timePhase("deleteOldSymbols", existingFileIds.length, async () => {
-          await ladybugDb.deleteSymbolsByFileIds(txConn, existingFileIds);
-        });
-
-        await timePhase("upsertFiles", batch.files.length, async () => {
-          await ladybugDb.upsertFileBatch(
-            txConn,
-            batch.files.map((entry) => entry.file),
-          );
-        });
-
-        await timePhase(
-          "insertSymbolReferences",
-          batch.refs.length,
-          async () => {
-            await ladybugDb.insertSymbolReferences(txConn, batch.refs);
-          },
-        );
-
-        await timePhase("upsertSymbols", batch.symbols.length, async () => {
-          await ladybugDb.upsertSymbolBatch(txConn, batch.symbols);
-        });
-
-        await timePhase("insertEdges", batch.edges.length, async () => {
-          await ladybugDb.insertEdges(txConn, batch.edges, {
-            skipSourceRepoLink: true,
-            skipExistingRelationshipUpdate: true,
-          });
-        });
-      });
-    });
+    if (this.symbolWriteMode === "fresh-copy") {
+      await this.writeFreshCopyBatch(batch, existingFileIds, timePhase);
+    } else {
+      await this.writeMergeBatch(batch, existingFileIds, timePhase);
+    }
 
     const durationMs = Math.round(performance.now() - batchStart);
     if (this.collectDiagnostics) {
@@ -435,6 +466,154 @@ export class BatchPersistAccumulator {
       existingFiles: existingFileIds.length,
       durationMs,
       phaseMs,
+    });
+  }
+
+  private async writeMergeBatch(
+    batch: FlushBatch,
+    existingFileIds: string[],
+    timePhase: (
+      phase: BatchPersistWritePhase,
+      rows: number,
+      body: () => Promise<void>,
+    ) => Promise<void>,
+  ): Promise<void> {
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.withTransaction(wConn, async (txConn) => {
+        await timePhase("deleteOldSymbols", existingFileIds.length, async () => {
+          await ladybugDb.deleteSymbolsByFileIds(txConn, existingFileIds);
+        });
+
+        await timePhase("deleteIncomingSymbols", 0, async () => {});
+
+        await timePhase("upsertFiles", batch.files.length, async () => {
+          await ladybugDb.upsertFileBatch(
+            txConn,
+            batch.files.map((entry) => entry.file),
+          );
+        });
+
+        await timePhase(
+          "insertSymbolReferences",
+          batch.refs.length,
+          async () => {
+            await ladybugDb.insertSymbolReferences(txConn, batch.refs);
+          },
+        );
+
+        await timePhase("upsertSymbols", batch.symbols.length, async () => {
+          await ladybugDb.upsertSymbolBatch(txConn, batch.symbols);
+        });
+
+        await this.writeBatchEdges(txConn, batch, timePhase);
+      });
+    });
+  }
+
+  private async writeFreshCopyBatch(
+    batch: FlushBatch,
+    existingFileIds: string[],
+    timePhase: (
+      phase: BatchPersistWritePhase,
+      rows: number,
+      body: () => Promise<void>,
+    ) => Promise<void>,
+  ): Promise<void> {
+    // Provider-first fallback needs the duplicate-key-safe COPY writers from
+    // the direct path, but batching keeps LadybugDB's single writer from
+    // thrashing through several transactions per parsed file.
+    const incomingSymbolIds = [
+      ...new Set(batch.symbols.map((symbol) => symbol.symbolId)),
+    ];
+
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.withTransaction(wConn, async (txConn) => {
+        await timePhase("deleteOldSymbols", existingFileIds.length, async () => {
+          await ladybugDb.deleteSymbolsByFileIds(txConn, existingFileIds);
+        });
+      });
+    });
+
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.withTransaction(wConn, async (txConn) => {
+        await timePhase(
+          "deleteIncomingSymbols",
+          incomingSymbolIds.length,
+          async () => {
+            await ladybugDb.deleteSymbolsByIds(txConn, incomingSymbolIds);
+          },
+        );
+      });
+    });
+
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.withTransaction(wConn, async (txConn) => {
+        await timePhase("upsertFiles", batch.files.length, async () => {
+          await ladybugDb.upsertFileBatch(
+            txConn,
+            batch.files.map((entry) => entry.file),
+          );
+        });
+
+        await timePhase(
+          "insertSymbolReferences",
+          batch.refs.length,
+          async () => {
+            await ladybugDb.insertSymbolReferences(txConn, batch.refs);
+          },
+        );
+      });
+    });
+
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.withTransaction(wConn, async (txConn) => {
+        await timePhase("upsertSymbols", batch.symbols.length, async () => {
+          await ladybugDb.upsertKnownFileSymbols(txConn, batch.symbols);
+        });
+      });
+    });
+
+    await withWriteConn(async (wConn) => {
+      await ladybugDb.withTransaction(wConn, async (txConn) => {
+        await this.writeBatchEdges(txConn, batch, timePhase);
+      });
+    });
+  }
+
+  private async writeBatchEdges(
+    txConn: Parameters<typeof ladybugDb.insertEdges>[0],
+    batch: FlushBatch,
+    timePhase: (
+      phase: BatchPersistWritePhase,
+      rows: number,
+      body: () => Promise<void>,
+    ) => Promise<void>,
+  ): Promise<void> {
+    await timePhase("insertEdges", batch.edges.length, async () => {
+      const sameBatchSymbolIds = new Set(
+        batch.symbols.map((symbol) => symbol.symbolId),
+      );
+      const { knownEndpointEdges, repairEdges } =
+        splitPass1EdgesForKnownEndpointCopy(
+          batch.edges,
+          sameBatchSymbolIds,
+          this.knownSymbolIdsForEdgeCopy,
+        );
+
+      if (knownEndpointEdges.length >= PASS1_KNOWN_ENDPOINT_COPY_THRESHOLD) {
+        await ladybugDb.ensureDependencyTargetsForKnownSourceEdges(
+          txConn,
+          knownEndpointEdges,
+        );
+        await ladybugDb.insertKnownSymbolEdges(txConn, knownEndpointEdges);
+      } else if (knownEndpointEdges.length > 0) {
+        repairEdges.unshift(...knownEndpointEdges);
+      }
+
+      await ladybugDb.insertEdges(txConn, repairEdges, {
+        skipSourceRepoLink: true,
+        skipExistingRelationshipUpdate: true,
+      });
     });
   }
 

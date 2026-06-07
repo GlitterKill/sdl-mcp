@@ -2,6 +2,11 @@
  * ladybug-metrics.ts - Metrics Operations
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
+import { createWriteStream } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { finished } from "node:stream/promises";
 import type { Connection } from "kuzu";
 import {
   execDdl,
@@ -17,6 +22,21 @@ import type {
   TopSymbolByFanInRow,
   FanInOut,
 } from "./ladybug-repos.js";
+import { normalizePath } from "../util/paths.js";
+
+const METRICS_COPY_COLUMNS = [
+  "symbolId",
+  "fanIn",
+  "fanOut",
+  "churn30d",
+  "testRefsJson",
+  "canonicalTestJson",
+  "pageRank",
+  "kCore",
+  "updatedAt",
+] as const;
+const CSV_NULL_SENTINEL = "__sdl_ladybug_csv_null__";
+const METRICS_CSV_WRITE_BATCH_SIZE = 4096;
 
 export interface SymbolMissingMetricsRow {
   symbolId: string;
@@ -27,8 +47,19 @@ export interface RepoFanCountRow {
   count: number;
 }
 
+export interface MetricsFingerprintRow {
+  repoId: string;
+  metricsHash: string;
+  rowCount: number;
+  updatedAt: string;
+}
+
 function escapeCopyPath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/'/g, "''");
+  return normalizePath(path).replace(/'/g, "''");
+}
+
+function escapeCopyOptionString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "''");
 }
 
 export async function upsertMetrics(
@@ -99,6 +130,187 @@ export async function upsertMetricsBatch(
       );
     }
   });
+}
+
+export async function getMetricsFingerprint(
+  conn: Connection,
+  repoId: string,
+): Promise<MetricsFingerprintRow | null> {
+  const row = await querySingle<{
+    repoId: string;
+    metricsHash: string;
+    rowCount: unknown;
+    updatedAt: string;
+  }>(
+    conn,
+    `MATCH (m:MetricsFingerprint {repoId: $repoId})
+     RETURN m.repoId AS repoId,
+            m.metricsHash AS metricsHash,
+            m.rowCount AS rowCount,
+            m.updatedAt AS updatedAt`,
+    { repoId },
+  );
+  if (!row) return null;
+  return {
+    repoId: row.repoId,
+    metricsHash: row.metricsHash,
+    rowCount: toNumber(row.rowCount),
+    updatedAt: row.updatedAt,
+  };
+}
+
+export async function upsertMetricsFingerprint(
+  conn: Connection,
+  row: MetricsFingerprintRow,
+): Promise<void> {
+  await exec(
+    conn,
+    `MERGE (m:MetricsFingerprint {repoId: $repoId})
+     SET m.metricsHash = $metricsHash,
+         m.rowCount = $rowCount,
+         m.updatedAt = $updatedAt`,
+    {
+      repoId: row.repoId,
+      metricsHash: row.metricsHash,
+      rowCount: row.rowCount,
+      updatedAt: row.updatedAt,
+    },
+  );
+}
+
+export async function deleteMetricsFingerprint(
+  conn: Connection,
+  repoId: string,
+): Promise<void> {
+  await exec(
+    conn,
+    `MATCH (m:MetricsFingerprint {repoId: $repoId})
+     DELETE m`,
+    { repoId },
+  );
+}
+
+/**
+ * Replace the complete metrics set for the repo's current symbols through
+ * LadybugDB COPY. This is only for full-repo recomputation; partial
+ * incremental updates must use upsertMetricsBatch so unchanged symbols keep
+ * their previous metrics rows.
+ */
+export async function replaceMetricsForRepoCopy(
+  conn: Connection,
+  repoId: string,
+  rows: MetricsRow[],
+): Promise<void> {
+  const tempDir = await mkdtemp(join(tmpdir(), "sdl-metrics-"));
+  const filePath = join(tempDir, "metrics.csv");
+  try {
+    if (rows.length > 0) {
+      await writeMetricsCsv(filePath, rows);
+    }
+    await withTransaction(conn, async (txConn) => {
+      await exec(
+        txConn,
+        `MATCH (s:Symbol)
+         WHERE s.repoId = $repoId
+         MATCH (m:Metrics {symbolId: s.symbolId})
+         DELETE m`,
+        { repoId },
+      );
+      if (rows.length > 0) {
+        await execDdl(
+          txConn,
+          `COPY Metrics FROM '${escapeCopyPath(filePath)}' ` +
+            `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
+        );
+      }
+    });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function writeMetricsCsv(
+  filePath: string,
+  rows: readonly MetricsRow[],
+): Promise<void> {
+  const stream = createWriteStream(filePath, { encoding: "utf8" });
+  try {
+    await writeCsvLine(stream, METRICS_COPY_COLUMNS);
+    let buffer: string[] = [];
+
+    const flush = async (): Promise<void> => {
+      if (buffer.length === 0) return;
+      const chunk = buffer.join("");
+      buffer = [];
+      if (!stream.write(chunk)) {
+        await waitForDrain(stream);
+      }
+    };
+
+    for (const row of rows) {
+      buffer.push(csvLine([
+        row.symbolId,
+        row.fanIn,
+        row.fanOut,
+        row.churn30d,
+        row.testRefsJson,
+        row.canonicalTestJson,
+        row.pageRank ?? 0,
+        row.kCore ?? 0,
+        row.updatedAt,
+      ]));
+      if (buffer.length >= METRICS_CSV_WRITE_BATCH_SIZE) {
+        await flush();
+      }
+    }
+    await flush();
+    stream.end();
+    await finished(stream);
+  } catch (err) {
+    stream.destroy();
+    throw err;
+  }
+}
+
+async function writeCsvLine(
+  stream: NodeJS.WritableStream,
+  cells: readonly unknown[],
+): Promise<void> {
+  const line = csvLine(cells);
+  if (!stream.write(line)) {
+    await waitForDrain(stream);
+  }
+}
+
+function csvLine(cells: readonly unknown[]): string {
+  return `${cells.map(csvCell).join(",")}\n`;
+}
+
+function waitForDrain(stream: NodeJS.WritableStream): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      stream.removeListener("drain", onDrain);
+      stream.removeListener("error", onError);
+    };
+    const onDrain = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (err: Error): void => {
+      cleanup();
+      reject(err);
+    };
+    stream.once("drain", onDrain);
+    stream.once("error", onError);
+  });
+}
+
+function csvCell(value: unknown): string {
+  if (value === null || value === undefined) return CSV_NULL_SENTINEL;
+  const text = String(value);
+  if (text === "") return '""';
+  const escaped = text.replaceAll('"', '""');
+  return /[",\r\n]/.test(escaped) ? `"${escaped}"` : escaped;
 }
 
 export async function getSymbolsMissingMetricsByRepo(

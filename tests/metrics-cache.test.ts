@@ -83,8 +83,8 @@ describe("test1", () => {
       const result2 = await collectTestRefs(testRepoRoot, symbols, config);
 
       assert.deepStrictEqual(
-        Array.from(result1.get("sym1") || []),
-        Array.from(result2.get("sym1") || []),
+        Array.from(result1.get("sym1") || []).sort(),
+        Array.from(result2.get("sym1") || []).sort(),
       );
     });
 

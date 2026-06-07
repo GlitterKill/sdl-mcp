@@ -2,9 +2,15 @@
  * ladybug-symbols.ts � Symbol Operations
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
+import { createWriteStream } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { finished } from "node:stream/promises";
 import type { Connection } from "kuzu";
 import {
   exec,
+  execDdl,
   queryAll,
   querySingle,
   toNumber,
@@ -13,6 +19,7 @@ import {
   withTransaction,
 } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
+import { normalizePath } from "../util/paths.js";
 import {
   classifyDependencyTarget,
   type SymbolPlaceholderMeta,
@@ -25,6 +32,56 @@ import {
 
 const MAX_BATCH_WARNING_THRESHOLD = 5000;
 const PRESERVE_OPTIONAL_SYMBOL_FIELD = "__sdl_preserve_optional_symbol_field__";
+const CSV_NULL_SENTINEL = "\\N";
+const CSV_ARRAY_NULL = Symbol("symbolCsvArrayNull");
+const DEFAULT_SYMBOL_SNAPSHOT_PAGE_SIZE = 32_768;
+const MAX_SYMBOL_SNAPSHOT_PAGE_SIZE = 65_536;
+
+const SYMBOL_COPY_COLUMNS = [
+  "symbolId",
+  "repoId",
+  "kind",
+  "name",
+  "exported",
+  "visibility",
+  "language",
+  "rangeStartLine",
+  "rangeStartCol",
+  "rangeEndLine",
+  "rangeEndCol",
+  "astFingerprint",
+  "signatureJson",
+  "summary",
+  "summaryQuality",
+  "summarySource",
+  "invariantsJson",
+  "sideEffectsJson",
+  "roleTagsJson",
+  "searchText",
+  "updatedAt",
+  "embeddingMiniLM",
+  "embeddingMiniLMCardHash",
+  "embeddingMiniLMUpdatedAt",
+  "embeddingMiniLMVec",
+  "embeddingNomic",
+  "embeddingNomicCardHash",
+  "embeddingNomicUpdatedAt",
+  "embeddingJinaCode",
+  "embeddingJinaCodeCardHash",
+  "embeddingJinaCodeUpdatedAt",
+  "embeddingNomicVec",
+  "embeddingJinaCodeVec",
+  "external",
+  "scipSymbol",
+  "source",
+  "packageName",
+  "packageVersion",
+  "symbolStatus",
+  "placeholderKind",
+  "placeholderTarget",
+] as const;
+
+const SIMPLE_REL_COPY_COLUMNS = ["from", "to"] as const;
 
 export interface SymbolRow {
   symbolId: string;
@@ -60,6 +117,20 @@ export interface SymbolRow {
   updatedAt: string;
 }
 
+export type KnownFileSymbolWritePhaseName =
+  | "nodeAndRelCreate"
+  | "nodeUpsert"
+  | "fileRelCreate"
+  | "repoRelCreate";
+
+export interface UpsertKnownFileSymbolsOptions
+  extends LadybugWriteChunkOptions {
+  measurePhase?: <T>(
+    phaseName: KnownFileSymbolWritePhaseName,
+    fn: () => Promise<T>,
+  ) => Promise<T>;
+}
+
 export interface UpsertSymbolBatchOptions extends LadybugWriteChunkOptions {}
 
 export interface SymbolSnapshotRow {
@@ -69,6 +140,11 @@ export interface SymbolSnapshotRow {
   summary: string | null;
   invariantsJson: string | null;
   sideEffectsJson: string | null;
+}
+
+export interface SymbolSnapshotPageOptions {
+  afterSymbolId?: string;
+  limit?: number;
 }
 
 export async function upsertSymbol(
@@ -296,6 +372,210 @@ export async function upsertSymbolBatch(
       );
     }
   });
+}
+
+/**
+ * Write a validated fresh set of file-backed symbols when the caller has
+ * already removed old symbols for the same files. This avoids the generic
+ * relationship existence checks and optional-field preservation needed by the
+ * legacy upsert path.
+ */
+export async function upsertKnownFileSymbols(
+  conn: Connection,
+  symbols: SymbolRow[],
+  options?: UpsertKnownFileSymbolsOptions,
+): Promise<void> {
+  if (symbols.length === 0) return;
+
+  const seenSymbolIds = new Set<string>();
+  symbols = symbols.filter((symbol) => {
+    if (seenSymbolIds.has(symbol.symbolId)) return false;
+    seenSymbolIds.add(symbol.symbolId);
+    return true;
+  });
+
+  // COPY streams from temporary artifacts, so chunking the old UNWIND payload
+  // no longer applies. The option is kept for API compatibility with callers
+  // that still pass the standard Ladybug write options.
+  void options?.chunkSize;
+  const measurePhase =
+    options?.measurePhase ??
+    (async <T>(
+      _phaseName: KnownFileSymbolWritePhaseName,
+      fn: () => Promise<T>,
+    ): Promise<T> => await fn());
+  await withTransaction(conn, async (txConn) => {
+    await measurePhase("nodeAndRelCreate", async () => {
+      await copyKnownFileSymbols(txConn, symbols);
+    });
+  });
+}
+
+async function copyKnownFileSymbols(
+  conn: Connection,
+  symbols: readonly SymbolRow[],
+): Promise<void> {
+  const tempDir = await mkdtemp(join(tmpdir(), "sdl-known-symbols-"));
+  const symbolPath = join(tempDir, "symbols.csv");
+  const symbolInFilePath = join(tempDir, "symbol-in-file.csv");
+  const symbolInRepoPath = join(tempDir, "symbol-in-repo.csv");
+  try {
+    await writeKnownSymbolsCsv(symbolPath, symbols);
+    await writeSimpleRelCsv(
+      symbolInFilePath,
+      symbols.map((symbol) => [symbol.symbolId, symbol.fileId] as const),
+    );
+    await writeSimpleRelCsv(
+      symbolInRepoPath,
+      symbols.map((symbol) => [symbol.symbolId, symbol.repoId] as const),
+    );
+
+    await copyCsvArtifact(conn, "Symbol", symbolPath);
+    await copyCsvArtifact(conn, "SYMBOL_IN_FILE", symbolInFilePath);
+    await copyCsvArtifact(conn, "SYMBOL_IN_REPO", symbolInRepoPath);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function copyCsvArtifact(
+  conn: Connection,
+  tableName: string,
+  filePath: string,
+): Promise<void> {
+  await execDdl(
+    conn,
+    `COPY ${tableName} FROM '${escapeCopyPath(filePath)}' ` +
+      `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
+  );
+}
+
+async function writeKnownSymbolsCsv(
+  filePath: string,
+  symbols: readonly SymbolRow[],
+): Promise<void> {
+  const stream = createWriteStream(filePath, { encoding: "utf8" });
+  try {
+    await writeCsvLine(stream, SYMBOL_COPY_COLUMNS);
+    for (const symbol of symbols) {
+      await writeCsvLine(stream, symbolRowToCopyCells(symbol));
+    }
+    stream.end();
+    await finished(stream);
+  } catch (err) {
+    stream.destroy();
+    throw err;
+  }
+}
+
+async function writeSimpleRelCsv(
+  filePath: string,
+  rows: readonly (readonly [string, string])[],
+): Promise<void> {
+  const stream = createWriteStream(filePath, { encoding: "utf8" });
+  try {
+    await writeCsvLine(stream, SIMPLE_REL_COPY_COLUMNS);
+    for (const row of rows) {
+      await writeCsvLine(stream, row);
+    }
+    stream.end();
+    await finished(stream);
+  } catch (err) {
+    stream.destroy();
+    throw err;
+  }
+}
+
+function symbolRowToCopyCells(symbol: SymbolRow): unknown[] {
+  return [
+    symbol.symbolId,
+    symbol.repoId,
+    symbol.kind,
+    symbol.name,
+    symbol.exported,
+    symbol.visibility ?? "",
+    symbol.language,
+    symbol.rangeStartLine,
+    symbol.rangeStartCol,
+    symbol.rangeEndLine,
+    symbol.rangeEndCol,
+    symbol.astFingerprint,
+    symbol.signatureJson ?? "",
+    symbol.summary ?? "",
+    symbol.summaryQuality ?? 0.0,
+    symbol.summarySource ?? "unknown",
+    symbol.invariantsJson ?? "",
+    symbol.sideEffectsJson ?? "",
+    symbol.roleTagsJson ?? "",
+    symbol.searchText ?? "",
+    symbol.updatedAt,
+    null,
+    null,
+    null,
+    CSV_ARRAY_NULL,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    CSV_ARRAY_NULL,
+    CSV_ARRAY_NULL,
+    symbol.external ?? false,
+    symbol.scipSymbol ?? "",
+    symbol.source ?? "treesitter",
+    symbol.packageName ?? "",
+    symbol.packageVersion ?? "",
+    symbol.symbolStatus ?? "real",
+    symbol.placeholderKind ?? "",
+    symbol.placeholderTarget ?? "",
+  ];
+}
+
+async function writeCsvLine(
+  stream: NodeJS.WritableStream,
+  cells: readonly unknown[],
+): Promise<void> {
+  const line = `${cells.map(csvCell).join(",")}\n`;
+  if (!stream.write(line)) {
+    await waitForDrain(stream);
+  }
+}
+
+function waitForDrain(stream: NodeJS.WritableStream): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      stream.removeListener("drain", onDrain);
+      stream.removeListener("error", onError);
+    };
+    const onDrain = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (err: Error): void => {
+      cleanup();
+      reject(err);
+    };
+    stream.once("drain", onDrain);
+    stream.once("error", onError);
+  });
+}
+
+function csvCell(value: unknown): string {
+  if (value === CSV_ARRAY_NULL) return "";
+  if (value === null || value === undefined) return CSV_NULL_SENTINEL;
+  const text = String(value);
+  if (text === "") return '""';
+  const escaped = text.replaceAll('"', '""');
+  return /[",\r\n]/.test(escaped) ? `"${escaped}"` : escaped;
+}
+
+function escapeCopyPath(path: string): string {
+  return normalizePath(path).replace(/'/g, "''");
+}
+
+function escapeCopyOptionString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "''");
 }
 
 export async function normalizeFileBackedSymbolStatuses(
@@ -775,6 +1055,26 @@ export async function getExportedSymbolsByFileIds(
   return result;
 }
 
+export async function getExportedSymbolsByRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<Map<string, string[]>> {
+  const result = new Map<string, string[]>();
+  const rows = await queryAll<{ fileId: string; name: string }>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
+     WHERE s.repoId = $repoId AND s.exported = true
+     RETURN f.fileId AS fileId, s.name AS name`,
+    { repoId },
+  );
+  for (const row of rows) {
+    const list = result.get(row.fileId) ?? [];
+    list.push(row.name);
+    result.set(row.fileId, list);
+  }
+  return result;
+}
+
 /**
  * Lightweight exported-symbol shape used by pass-2 import resolution. Only
  * the fields the resolver actually consumes — keeps the cache footprint
@@ -869,13 +1169,64 @@ export async function getFileSummarySymbolFactsByFileIds(
     result.set(row.fileId, list);
   }
 
+  sortFileSummarySymbolFacts(result);
+  return result;
+}
+
+export async function getFileSummarySymbolFactsByRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<Map<string, FileSummarySymbolFactRow[]>> {
+  const result = new Map<string, FileSummarySymbolFactRow[]>();
+  const rows = await queryAll<{
+    fileId: string;
+    name: string;
+    kind: string;
+    exported: unknown;
+    signatureJson: string | null;
+    summary: string | null;
+    rangeStartLine: unknown;
+  }>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
+     WHERE s.repoId = $repoId AND coalesce(s.symbolStatus, 'real') = 'real'
+     RETURN f.fileId AS fileId,
+            s.name AS name,
+            s.kind AS kind,
+            s.exported AS exported,
+            s.signatureJson AS signatureJson,
+            s.summary AS summary,
+            s.rangeStartLine AS rangeStartLine`,
+    { repoId },
+  );
+
+  for (const row of rows) {
+    const list = result.get(row.fileId) ?? [];
+    list.push({
+      fileId: row.fileId,
+      name: row.name,
+      kind: row.kind,
+      exported: toBoolean(row.exported),
+      signatureJson: row.signatureJson,
+      summary: row.summary,
+      rangeStartLine: toNumber(row.rangeStartLine),
+    });
+    result.set(row.fileId, list);
+  }
+
+  sortFileSummarySymbolFacts(result);
+  return result;
+}
+
+function sortFileSummarySymbolFacts(
+  result: Map<string, FileSummarySymbolFactRow[]>,
+): void {
   for (const list of result.values()) {
     list.sort((a, b) => {
       if (a.exported !== b.exported) return a.exported ? -1 : 1;
       return a.rangeStartLine - b.rangeStartLine;
     });
   }
-  return result;
 }
 
 export async function getSymbolsByFile(
@@ -1139,8 +1490,10 @@ export async function getSymbolsByRepoForSnapshot(
 ): Promise<SymbolSnapshotRow[]> {
   const rows = await queryAll<SymbolSnapshotRow>(
     conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
-     WHERE coalesce(s.symbolStatus, 'real') = 'real'
+     `MATCH (s:Symbol)
+     WHERE s.repoId = $repoId
+       AND coalesce(s.symbolStatus, 'real') = 'real'
+       AND coalesce(s.external, false) = false
      RETURN s.symbolId AS symbolId,
             s.astFingerprint AS astFingerprint,
             s.signatureJson AS signatureJson,
@@ -1152,6 +1505,48 @@ export async function getSymbolsByRepoForSnapshot(
   return rows;
 }
 
+export async function getSymbolsByRepoForSnapshotPage(
+  conn: Connection,
+  repoId: string,
+  options: SymbolSnapshotPageOptions = {},
+): Promise<SymbolSnapshotRow[]> {
+  const limit = resolveSymbolSnapshotPageSize(options.limit);
+  const hasCursor = options.afterSymbolId !== undefined;
+  const rows = await queryAll<SymbolSnapshotRow>(
+    conn,
+    `MATCH (s:Symbol)
+     WHERE s.repoId = $repoId
+       AND coalesce(s.symbolStatus, 'real') = 'real'
+       AND coalesce(s.external, false) = false
+     ${hasCursor ? "AND s.symbolId > $afterSymbolId" : ""}
+     RETURN s.symbolId AS symbolId,
+            s.astFingerprint AS astFingerprint,
+            s.signatureJson AS signatureJson,
+            s.summary AS summary,
+            s.invariantsJson AS invariantsJson,
+            s.sideEffectsJson AS sideEffectsJson
+     ORDER BY s.symbolId ASC
+     LIMIT $limit`,
+    {
+      repoId,
+      afterSymbolId: options.afterSymbolId ?? "",
+      limit,
+    },
+  );
+  return rows;
+}
+
+function resolveSymbolSnapshotPageSize(limit?: number): number {
+  if (limit === undefined) return DEFAULT_SYMBOL_SNAPSHOT_PAGE_SIZE;
+  assertSafeInt(limit, "symbol snapshot page size");
+  if (limit < 1 || limit > MAX_SYMBOL_SNAPSHOT_PAGE_SIZE) {
+    throw new RangeError(
+      `symbol snapshot page size must be between 1 and ${MAX_SYMBOL_SNAPSHOT_PAGE_SIZE}`,
+    );
+  }
+  return limit;
+}
+
 export async function getSymbolCount(
   conn: Connection,
   repoId: string,
@@ -1160,6 +1555,7 @@ export async function getSymbolCount(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
      WHERE coalesce(s.symbolStatus, 'real') = 'real'
+       AND coalesce(s.external, false) = false
      RETURN count(s) AS count`,
     { repoId },
   );
@@ -1430,55 +1826,6 @@ export async function deleteSymbolsByFileIds(
 
   await exec(
     conn,
-    `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
-     WHERE s.symbolId IN $symbolIds
-     DELETE d`,
-    { symbolIds },
-  );
-  await exec(
-    conn,
-    `MATCH (:Symbol)-[d:DEPENDS_ON]->(s:Symbol)
-     WHERE s.symbolId IN $symbolIds
-     DELETE d`,
-    { symbolIds },
-  );
-  await exec(
-    conn,
-    `MATCH (s:Symbol)-[r:SYMBOL_IN_REPO]->(:Repo)
-     WHERE s.symbolId IN $symbolIds
-     DELETE r`,
-    { symbolIds },
-  );
-  await exec(
-    conn,
-    `MATCH (s:Symbol)-[r:SYMBOL_IN_FILE]->(:File)
-     WHERE s.symbolId IN $symbolIds
-     DELETE r`,
-    { symbolIds },
-  );
-  await exec(
-    conn,
-    `MATCH (s:Symbol)-[r:BELONGS_TO_CLUSTER]->(:Cluster)
-     WHERE s.symbolId IN $symbolIds
-     DELETE r`,
-    { symbolIds },
-  );
-  await exec(
-    conn,
-    `MATCH (s:Symbol)-[r:BELONGS_TO_SHADOW_CLUSTER]->(:ShadowCluster)
-     WHERE s.symbolId IN $symbolIds
-     DELETE r`,
-    { symbolIds },
-  );
-  await exec(
-    conn,
-    `MATCH (s:Symbol)-[r:PARTICIPATES_IN]->(:Process)
-     WHERE s.symbolId IN $symbolIds
-     DELETE r`,
-    { symbolIds },
-  );
-  await exec(
-    conn,
     `MATCH (m:Metrics)
      WHERE m.symbolId IN $symbolIds
      DELETE m`,
@@ -1519,11 +1866,14 @@ export async function deleteSymbolsByFileIds(
      DELETE r`,
     { fileIds },
   );
+  // Symbol graph relationships are all incident to Symbol nodes. DETACH DELETE
+  // lets LadybugDB remove them in one indexed symbol pass instead of scanning
+  // every relationship type separately during full-refresh stale cleanup.
   await exec(
     conn,
     `MATCH (s:Symbol)
      WHERE s.symbolId IN $symbolIds
-     DELETE s`,
+     DETACH DELETE s`,
     { symbolIds },
   );
 }

@@ -11,12 +11,22 @@ import { generateFileId, hashValue } from "../../util/hashing.js";
 import { normalizePath } from "../../util/paths.js";
 import { resolveSymbolEnrichment } from "../symbol-enrichment.js";
 import type {
+  IndexProgress,
+  IndexProgressSubstage,
+} from "../indexer-init.js";
+import type {
   EdgeFact,
   ExternalSymbolFact,
   FileFact,
   ProviderFactSet,
   SymbolFact,
 } from "./types.js";
+
+const PROVIDER_MINIMAL_DOCUMENTATION_SUMMARY_QUALITY = 0.4;
+const PROVIDER_STANDARD_DOCUMENTATION_SUMMARY_QUALITY = 0.6;
+const PROVIDER_RICH_DOCUMENTATION_SUMMARY_QUALITY = 0.8;
+const PROVIDER_STANDARD_DOCUMENTATION_CHAR_THRESHOLD = 80;
+const PROVIDER_RICH_DOCUMENTATION_CHAR_THRESHOLD = 160;
 
 export interface ProviderFirstExternalSymbolRow {
   symbolId: string;
@@ -48,6 +58,15 @@ export interface ProviderFirstGraphRows {
 export interface ProviderFactsToGraphRowsOptions {
   facts: ProviderFactSet;
   indexedAt?: string;
+  onProgress?: (progress: {
+    stage: IndexProgress["stage"];
+    current: number;
+    total: number;
+    substage?: IndexProgressSubstage;
+    stageCurrent?: number;
+    stageTotal?: number;
+    message?: string;
+  }) => void;
 }
 
 export interface MaterializeProviderFactsOptions {
@@ -57,12 +76,55 @@ export interface MaterializeProviderFactsOptions {
    * surviving beside compiler-owned SCIP symbols.
    */
   replaceFileSymbols?: boolean;
+  /**
+   * Controls only the stale-row delete pre-pass. Defaults to replaceFileSymbols.
+   * Fresh DBs can skip this while still using provider-owned fast writers.
+   */
+  deleteExistingFileSymbols?: boolean;
+  /**
+   * Use COPY-based symbol and edge writers that require the active graph to
+   * have no existing rows for the same provider-owned symbols/relationships.
+   * Safe for fresh databases or after deleteExistingFileSymbols ran.
+   */
+  useKnownFreshWriters?: boolean;
+  /**
+   * Controls provider edge writes independently from symbol updates. Large
+   * repeat runs may skip edge replacement when stale cleanup was intentionally
+   * bypassed, avoiding duplicate relationship COPYs and the slow generic path.
+   */
+  writeEdges?: boolean;
+  /**
+   * Optional instrumentation hook used by the provider-first orchestrator to
+   * expose the individual LadybugDB write buckets without changing transaction
+   * ownership or write ordering.
+   */
+  measurePhase?: <T>(
+    phaseName: MaterializeProviderFactsPhaseName,
+    fn: () => Promise<T>,
+  ) => Promise<T>;
 }
+
+export type MaterializeProviderFactsPhaseName =
+  | "deleteFileSymbols"
+  | "upsertFiles"
+  | "upsertSymbols"
+  | "upsertSymbols.nodeAndRelCreate"
+  | "upsertSymbols.nodeUpsert"
+  | "upsertSymbols.fileRelCreate"
+  | "upsertSymbols.repoRelCreate"
+  | "pruneExternalSymbols"
+  | "mergeExternalSymbols"
+  | "insertEdges";
+
+const PROVIDER_FIRST_DELETE_SYMBOL_FILE_CHUNK_SIZE = 256;
 
 export function providerFactsToGraphRows(
   options: ProviderFactsToGraphRowsOptions,
 ): ProviderFirstGraphRows {
   const indexedAt = options.indexedAt ?? new Date().toISOString();
+  const totalRows = providerFirstGraphRowTotal(options.facts);
+  let shapedRows = 0;
+  emitProviderRowsProgress(options, shapedRows, totalRows, "starting");
   const fileByPath = new Map(
     options.facts.files.map((fact) => [normalizePath(fact.relPath), fact]),
   );
@@ -70,13 +132,26 @@ export function providerFactsToGraphRows(
   const files = options.facts.files.map((fact) =>
     fileFactToRow(fact, indexedAt),
   );
+  shapedRows += files.length;
+  emitProviderRowsProgress(options, shapedRows, totalRows, "files shaped");
   const symbols = options.facts.symbols.map((fact) =>
     symbolFactToRow(fact, fileByPath, indexedAt),
   );
+  shapedRows += symbols.length;
+  emitProviderRowsProgress(options, shapedRows, totalRows, "symbols shaped");
   const externalSymbols = options.facts.externalSymbols.map((fact) =>
     externalSymbolFactToRow(fact, indexedAt),
   );
+  shapedRows += externalSymbols.length;
+  emitProviderRowsProgress(
+    options,
+    shapedRows,
+    totalRows,
+    "external symbols shaped",
+  );
   const edges = options.facts.edges.map((fact) => edgeFactToRow(fact));
+  shapedRows += edges.length;
+  emitProviderRowsProgress(options, shapedRows, totalRows, "edges shaped");
 
   return {
     files,
@@ -87,36 +162,104 @@ export function providerFactsToGraphRows(
   };
 }
 
+export function providerFirstGraphRowTotal(rows: {
+  files: readonly unknown[];
+  symbols: readonly unknown[];
+  externalSymbols: readonly unknown[];
+  edges: readonly unknown[];
+}): number {
+  return (
+    rows.files.length +
+    rows.symbols.length +
+    rows.externalSymbols.length +
+    rows.edges.length
+  );
+}
+
+function emitProviderRowsProgress(
+  options: ProviderFactsToGraphRowsOptions,
+  current: number,
+  total: number,
+  message: string,
+): void {
+  options.onProgress?.({
+    stage: "providerFirst",
+    current,
+    total,
+    substage: "providerCollection.rows",
+    stageCurrent: current,
+    stageTotal: total,
+    message,
+  });
+}
+
 export async function materializeProviderFacts(
   conn: Connection,
   rows: ProviderFirstGraphRows,
   options: MaterializeProviderFactsOptions = {},
 ): Promise<void> {
-  // Keep provider-first materialization on the established graph row APIs so
-  // LadybugDB batching, relationship workarounds, and placeholder repair stay
-  // identical to the legacy writer until the COPY-based shadow loader lands.
+  // Active materialization still owns the live graph before shadow activation,
+  // but provider-owned replacement rows use known-fresh COPY paths for symbols
+  // and edges while legacy fallback keeps the broader merge-safe writers.
   const repoId = resolveRowsRepoId(rows);
+  const measurePhase =
+    options.measurePhase ??
+    (async <T>(
+      _phaseName: MaterializeProviderFactsPhaseName,
+      fn: () => Promise<T>,
+    ): Promise<T> => await fn());
+  const deleteExistingFileSymbols =
+    options.deleteExistingFileSymbols ?? options.replaceFileSymbols;
+  const useKnownFreshWriters =
+    options.useKnownFreshWriters ?? options.replaceFileSymbols;
+  const writeEdges = options.writeEdges ?? true;
+  if (deleteExistingFileSymbols) {
+    await measurePhase("deleteFileSymbols", async () => {
+      await deleteProviderFileSymbolsInChunks(conn, [...rows.changedFileIds]);
+      await deleteProviderSymbolsByIdInChunks(
+        conn,
+        repoId,
+        rows.symbols.map((symbol) => symbol.symbolId),
+      );
+    });
+  }
   await ladybugDb.withTransaction(conn, async (txConn) => {
-    if (options.replaceFileSymbols) {
-      await deleteProviderFileSymbolsInChunks(txConn, [...rows.changedFileIds]);
-    }
-    await ladybugDb.upsertFileBatch(txConn, rows.files);
-    await ladybugDb.upsertSymbolBatch(txConn, rows.symbols);
-    await ladybugDb.pruneStaleScipExternalSymbols(
-      txConn,
-      repoId,
-      rows.externalSymbols.map((symbol) => symbol.symbolId),
-    );
-    if (rows.externalSymbols.length > 0) {
-      await ladybugDb.batchMergeExternalSymbols(
+    await measurePhase("upsertFiles", async () => {
+      await ladybugDb.upsertFileBatch(txConn, rows.files);
+    });
+    await measurePhase("upsertSymbols", async () => {
+      if (useKnownFreshWriters) {
+        await ladybugDb.upsertKnownFileSymbols(txConn, rows.symbols, {
+          measurePhase: async (phaseName, fn) =>
+            await measurePhase(`upsertSymbols.${phaseName}`, fn),
+        });
+      } else {
+        await ladybugDb.upsertSymbolBatch(txConn, rows.symbols);
+      }
+    });
+    await measurePhase("pruneExternalSymbols", async () => {
+      await ladybugDb.pruneStaleScipExternalSymbols(
         txConn,
         repoId,
-        rows.externalSymbols,
+        rows.externalSymbols.map((symbol) => symbol.symbolId),
       );
+    });
+    if (rows.externalSymbols.length > 0) {
+      await measurePhase("mergeExternalSymbols", async () => {
+        await ladybugDb.batchMergeExternalSymbols(
+          txConn,
+          repoId,
+          rows.externalSymbols,
+        );
+      });
     }
-    await ladybugDb.insertEdges(txConn, rows.edges, {
-      skipSourceRepoLink: options.replaceFileSymbols,
-      skipExistingRelationshipUpdate: options.replaceFileSymbols,
+    await measurePhase("insertEdges", async () => {
+      if (!writeEdges) return;
+      if (useKnownFreshWriters) {
+        await ladybugDb.insertKnownSymbolEdges(txConn, rows.edges);
+      } else {
+        await ladybugDb.insertEdges(txConn, rows.edges);
+      }
     });
   });
 }
@@ -125,12 +268,163 @@ async function deleteProviderFileSymbolsInChunks(
   conn: Connection,
   fileIds: string[],
 ): Promise<void> {
-  const chunkSize = ladybugDb.resolveLadybugWriteChunkSize("files");
+  // Delete fan-out is much larger than file upsert fan-out: one file chunk can
+  // expand into tens of thousands of Symbol ids plus every dependent edge and
+  // enrichment row. Keep this deliberately below the generic file-write chunk.
+  const chunkSize = Math.min(
+    ladybugDb.resolveLadybugWriteChunkSize("files"),
+    PROVIDER_FIRST_DELETE_SYMBOL_FILE_CHUNK_SIZE,
+  );
   for (let i = 0; i < fileIds.length; i += chunkSize) {
-    await ladybugDb.deleteSymbolsByFileIds(
-      conn,
-      fileIds.slice(i, i + chunkSize),
-    );
+    const chunk = fileIds.slice(i, i + chunkSize);
+    await ladybugDb.withTransaction(conn, async (txConn) => {
+      await retireProviderSymbolsByFileIds(txConn, chunk);
+    });
+  }
+}
+
+async function retireProviderSymbolsByFileIds(
+  conn: Connection,
+  fileIds: string[],
+): Promise<void> {
+  if (fileIds.length === 0) return;
+
+  const symbolRows = await ladybugDb.queryAll<{ symbolId: string }>(
+    conn,
+    `MATCH (f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
+     WHERE f.fileId IN $fileIds
+     RETURN s.symbolId AS symbolId`,
+    { fileIds },
+  );
+  if (symbolRows.length === 0) return;
+
+  const symbolIds = symbolRows.map((row) => row.symbolId);
+  const repoIds = await ladybugDb.queryAll<{ repoId: string }>(
+    conn,
+    `MATCH (f:File)
+     WHERE f.fileId IN $fileIds
+     RETURN DISTINCT f.repoId AS repoId`,
+    { fileIds },
+  );
+  const repoId = repoIds[0]?.repoId;
+  if (!repoId) return;
+  await retireProviderSymbolsByIds(conn, repoId, symbolIds, fileIds);
+}
+
+async function deleteProviderSymbolsByIdInChunks(
+  conn: Connection,
+  repoId: string,
+  symbolIds: string[],
+): Promise<void> {
+  const uniqueSymbolIds = [...new Set(symbolIds)];
+  if (uniqueSymbolIds.length === 0) return;
+  const chunkSize = Math.min(
+    ladybugDb.resolveLadybugWriteChunkSize("symbols"),
+    PROVIDER_FIRST_DELETE_SYMBOL_FILE_CHUNK_SIZE * 4,
+  );
+  for (let i = 0; i < uniqueSymbolIds.length; i += chunkSize) {
+    const chunk = uniqueSymbolIds.slice(i, i + chunkSize);
+    await ladybugDb.withTransaction(conn, async (txConn) => {
+      await retireProviderSymbolsByIds(txConn, repoId, chunk);
+    });
+  }
+}
+
+async function retireProviderSymbolsByIds(
+  conn: Connection,
+  repoId: string,
+  symbolIds: string[],
+  fileIds: string[] = [],
+): Promise<void> {
+  if (symbolIds.length === 0) return;
+  for (const [query, params] of [
+    [
+      `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
+       WHERE s.symbolId IN $symbolIds
+       DELETE d`,
+      { symbolIds },
+    ],
+    [
+      `MATCH (:Symbol)-[d:DEPENDS_ON]->(s:Symbol)
+       WHERE s.symbolId IN $symbolIds
+       DELETE d`,
+      { symbolIds },
+    ],
+    [
+      `MATCH (s:Symbol)-[r:SYMBOL_IN_REPO]->(:Repo)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    ],
+    [
+      `MATCH (s:Symbol)-[r:SYMBOL_IN_FILE]->(:File)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    ],
+    [
+      `MATCH (s:Symbol)-[r:BELONGS_TO_CLUSTER]->(:Cluster)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    ],
+    [
+      `MATCH (s:Symbol)-[r:BELONGS_TO_SHADOW_CLUSTER]->(:ShadowCluster)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    ],
+    [
+      `MATCH (s:Symbol)-[r:PARTICIPATES_IN]->(:Process)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    ],
+    [
+      `MATCH (m:Metrics)
+       WHERE m.symbolId IN $symbolIds
+       DELETE m`,
+      { symbolIds },
+    ],
+    [
+      `MATCH (e:SymbolEmbedding)
+       WHERE e.symbolId IN $symbolIds
+       DELETE e`,
+      { symbolIds },
+    ],
+    [
+      `MATCH (sc:SummaryCache)
+       WHERE sc.symbolId IN $symbolIds
+       DELETE sc`,
+      { symbolIds },
+    ],
+    [
+      `MATCH (sr:SymbolReference)
+       WHERE sr.fileId IN $fileIds
+       DELETE sr`,
+      { fileIds },
+    ],
+    [
+      `MATCH (mem:Memory)-[r:MEMORY_OF]->(s:Symbol)
+       WHERE s.symbolId IN $symbolIds
+       DELETE r`,
+      { symbolIds },
+    ],
+    [
+      `MATCH (mem:Memory)-[r:MEMORY_OF_FILE]->(f:File)
+       WHERE f.fileId IN $fileIds
+       DELETE r`,
+      { fileIds },
+    ],
+    [
+      `MATCH (s:Symbol {repoId: $repoId})
+       WHERE s.symbolId IN $symbolIds
+       DELETE s`,
+      { repoId, symbolIds },
+    ],
+  ] as const) {
+    if ("fileIds" in params && params.fileIds.length === 0) continue;
+    await ladybugDb.exec(conn, query, params);
   }
 }
 
@@ -205,7 +499,10 @@ function symbolFactToRow(
     summary,
     invariantsJson: null,
     sideEffectsJson: null,
-    summaryQuality: summary ? 0.6 : 0.0,
+    summaryQuality: providerDocumentationSummaryQuality(
+      fact.documentation,
+      summary,
+    ),
     summarySource: `provider:${fact.providerType}`,
     roleTagsJson: enrichment.roleTagsJson,
     searchText: enrichment.searchText,
@@ -251,7 +548,7 @@ function edgeFactToRow(fact: EdgeFact): EdgeRow {
     resolution: fact.resolution,
     resolverId: `provider-first:${fact.providerId}`,
     resolutionPhase: "provider-first",
-    provenance: fact.dedupeKey,
+    provenance: providerEdgeProvenance(fact),
     createdAt: fact.emittedAt,
   };
 }
@@ -273,6 +570,45 @@ function firstDocumentationLine(documentation: readonly string[]): string | null
     if (line && line.length > 0) return line;
   }
   return null;
+}
+
+function providerDocumentationSummaryQuality(
+  documentation: readonly string[],
+  summary: string | null,
+): number {
+  if (!summary) return 0.0;
+  const documentationLines = documentation
+    .flatMap((entry) => entry.split(/\r?\n/))
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const documentationTextLength = documentationLines.join(" ").length;
+
+  if (
+    documentationLines.length >= 3 ||
+    documentationTextLength >= PROVIDER_RICH_DOCUMENTATION_CHAR_THRESHOLD
+  ) {
+    return PROVIDER_RICH_DOCUMENTATION_SUMMARY_QUALITY;
+  }
+  if (
+    documentationLines.length >= 2 ||
+    documentationTextLength >= PROVIDER_STANDARD_DOCUMENTATION_CHAR_THRESHOLD
+  ) {
+    return PROVIDER_STANDARD_DOCUMENTATION_SUMMARY_QUALITY;
+  }
+  return PROVIDER_MINIMAL_DOCUMENTATION_SUMMARY_QUALITY;
+}
+
+function providerEdgeProvenance(fact: EdgeFact): string {
+  return JSON.stringify({
+    providerId: fact.providerId,
+    providerType: fact.providerType,
+    ...(fact.providerVersion ? { providerVersion: fact.providerVersion } : {}),
+    ...(fact.sourceIndexPath
+      ? { sourceIndexPath: normalizePath(fact.sourceIndexPath) }
+      : {}),
+    ...(fact.relPath ? { relPath: normalizePath(fact.relPath) } : {}),
+    dedupeKey: fact.dedupeKey,
+  });
 }
 
 function providerEdgeWeight(edgeType: EdgeType): number {

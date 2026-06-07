@@ -33,7 +33,12 @@
               "**/dist/**",
               "**/dist-*/**",
               "**/build/**",
+              "**/build-*/**",
+              "**/build_*/**",
+              "**/cmake-build-*/**",
               "**/out/**",
+              "**/out-*/**",
+              "**/out_*/**",
               "**/target/**",
               "**/coverage/**",
               "**/node_modules/**",
@@ -289,6 +294,13 @@
               "enum": ["parquet", "csv"],
               "default": "parquet"
             },
+            "maxLegacyFallbackFiles": {
+              "type": "integer",
+              "description": "Maximum uncovered or provider-unusable files parsed by same-run legacy fallback after provider-first materialization. When the provider gap is larger, SDL-MCP keeps the provider-primary index, skips the expensive fallback parse, and reports the skipped count.",
+              "minimum": 0,
+              "maximum": 1000000,
+              "default": 5000
+            },
             "lsp": {
               "type": "object",
               "description": "Caps for primary LSP provider collection. LSP servers are consumed from configured commands; SDL-MCP does not install them.",
@@ -418,10 +430,10 @@
                 "maxCallEdges": {
                   "type": "integer",
                   "minimum": 0,
-                  "default": 50000
+                  "default": 10000
                 }
               },
-              "default": { "enabled": true, "maxCallEdges": 50000 }
+              "default": { "enabled": true, "maxCallEdges": 10000 }
             },
             "workerTimeoutMs": {
               "type": "integer",
@@ -434,7 +446,7 @@
             "enabled": true,
             "pageRank": { "enabled": true },
             "kCore": { "enabled": true },
-            "louvain": { "enabled": true, "maxCallEdges": 50000 },
+            "louvain": { "enabled": true, "maxCallEdges": 10000 },
             "workerTimeoutMs": 120000
           }
         }
@@ -445,6 +457,7 @@
           "activation": "shadowDb",
           "readyState": "graphPlusAlgorithms",
           "stagingFormat": "parquet",
+          "maxLegacyFallbackFiles": 5000,
           "lsp": {
             "mode": "primaryWithCaps",
             "workspaceSymbolLimit": 5000,
@@ -463,7 +476,7 @@
           "enabled": true,
           "pageRank": { "enabled": true },
           "kCore": { "enabled": true },
-          "louvain": { "enabled": true, "maxCallEdges": 50000 },
+          "louvain": { "enabled": true, "maxCallEdges": 10000 },
           "workerTimeoutMs": 120000
         }
       }
@@ -1185,11 +1198,31 @@
             "enabled": { "type": "boolean", "default": true },
             "mode": { "enum": ["observe", "safe"], "default": "safe" },
             "minSamples": { "type": "integer", "minimum": 1, "default": 20 },
-            "suppressionWasteRate": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.8 },
-            "boostHitRate": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.35 },
+            "suppressionWasteRate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.8
+            },
+            "boostHitRate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.35
+            },
             "retentionDays": { "type": "integer", "minimum": 1, "default": 14 },
-            "maxPriorityBoost": { "type": "integer", "minimum": 0, "maximum": 100, "default": 25 },
-            "maxBudgetTrimPercent": { "type": "integer", "minimum": 0, "maximum": 100, "default": 50 }
+            "maxPriorityBoost": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100,
+              "default": 25
+            },
+            "maxBudgetTrimPercent": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100,
+              "default": 50
+            }
           },
           "default": {
             "enabled": true,
@@ -1728,12 +1761,17 @@
             "timeoutMs": {
               "type": "integer",
               "minimum": 1000,
-              "maximum": 1800000,
+              "maximum": 18000000,
               "default": 600000
             },
             "cleanupAfterIngest": {
               "type": "boolean",
               "description": "Delete <repoRoot>/index.scip after the post-refresh ingest consumes it. The file is regenerated every refresh, so keeping it just clutters the working tree. Only the default output location is cleaned up — passing --output via args opts you out of cleanup automatically.",
+              "default": true
+            },
+            "cacheGeneratedIndexes": {
+              "type": "boolean",
+              "description": "Cache generated SCIP artifacts by source/config fingerprint and reuse them on later unchanged refreshes. The cache invalidates when tracked source files, common build manifests, generator args, or the scip-io binary change.",
               "default": true
             }
           },
@@ -1743,7 +1781,8 @@
             "args": [],
             "autoInstall": true,
             "timeoutMs": 600000,
-            "cleanupAfterIngest": true
+            "cleanupAfterIngest": true,
+            "cacheGeneratedIndexes": true
           }
         }
       }

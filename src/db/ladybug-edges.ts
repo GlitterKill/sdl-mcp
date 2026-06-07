@@ -2,9 +2,15 @@
  * ladybug-edges.ts � Edge (Dependency) Operations
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
+import { createWriteStream } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { finished } from "node:stream/promises";
 import type { Connection } from "kuzu";
 import {
   exec,
+  execDdl,
   queryAll,
   querySingle,
   toNumber,
@@ -20,6 +26,20 @@ import {
   resolveLadybugWriteChunkSize,
   type LadybugWriteChunkOptions,
 } from "./ladybug-batching.js";
+
+const EDGE_COPY_COLUMNS = [
+  "from",
+  "to",
+  "edgeType",
+  "weight",
+  "confidence",
+  "resolution",
+  "resolverId",
+  "resolutionPhase",
+  "provenance",
+  "createdAt",
+] as const;
+const CSV_NULL_SENTINEL = "__sdl_ladybug_csv_null__";
 
 // Workaround for LadybugDB 0.16.0 binder bug: when an UNWIND struct mixes
 // integer and fractional Number values for the same field, the binder
@@ -441,6 +461,180 @@ export async function insertEdges(
       }
     }
   });
+}
+
+/**
+ * Insert edges when the caller has already validated every endpoint and
+ * recreated source symbols in the same replacement materialization. The fresh
+ * source symbols have no outgoing DEPENDS_ON rows, so provider-first can bulk
+ * load relationships directly without endpoint repair or existence probes.
+ */
+export async function insertKnownSymbolEdges(
+  conn: Connection,
+  edges: EdgeRow[],
+  options?: LadybugWriteChunkOptions,
+): Promise<void> {
+  if (edges.length === 0) return;
+
+  const seenEdges = new Set<string>();
+  edges = edges.filter((edge) => {
+    const key =
+      `${edge.repoId}\0${edge.fromSymbolId}\0${edge.toSymbolId}\0${edge.edgeType}`;
+    if (seenEdges.has(key)) return false;
+    seenEdges.add(key);
+    return true;
+  });
+
+  // The old UNWIND writer needed chunks to bound parameter payloads. COPY
+  // streams from a temporary artifact, so a single load is the intended fast
+  // path for provider-first full rebuilds.
+  void options;
+  await withTransaction(conn, async (txConn) => {
+    await copyKnownSymbolEdges(txConn, edges);
+  });
+}
+
+/**
+ * Prepare non-real dependency targets before a fresh-source relationship COPY.
+ * The caller must already have inserted every source Symbol. This preserves
+ * unresolved/external placeholder metadata without running the generic
+ * endpoint-repair writer for each edge batch.
+ */
+export async function ensureDependencyTargetsForKnownSourceEdges(
+  conn: Connection,
+  edges: readonly EdgeRow[],
+  options?: LadybugWriteChunkOptions,
+): Promise<void> {
+  if (edges.length === 0) return;
+
+  const targetRows = buildTargetMetadataRows([...edges]).filter(
+    (row) => row.targetStatus !== "real",
+  );
+  if (targetRows.length === 0) return;
+
+  const chunkSize = resolveLadybugWriteChunkSize("edges", options?.chunkSize);
+  await withTransaction(conn, async (txConn) => {
+    for (let i = 0; i < targetRows.length; i += chunkSize) {
+      const rows = targetRows.slice(i, i + chunkSize);
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MERGE (b:Symbol {symbolId: row.toSymbolId})
+         SET b.repoId = row.repoId,
+             b.external = CASE
+               WHEN row.targetStatus = 'external' THEN true
+               ELSE false
+             END,
+             b.symbolStatus = row.targetStatus,
+             b.placeholderKind = row.targetPlaceholderKind,
+             b.placeholderTarget = row.targetPlaceholderTarget`,
+        { rows },
+      );
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (r:Repo {repoId: row.repoId})
+         MATCH (b:Symbol {symbolId: row.toSymbolId})
+         OPTIONAL MATCH (b)-[existing:SYMBOL_IN_REPO]->(r)
+         WITH b, r, existing
+         WHERE existing IS NULL
+         CREATE (b)-[:SYMBOL_IN_REPO]->(r)`,
+        { rows },
+      );
+    }
+  });
+}
+
+async function copyKnownSymbolEdges(
+  conn: Connection,
+  edges: readonly EdgeRow[],
+): Promise<void> {
+  const tempDir = await mkdtemp(join(tmpdir(), "sdl-known-edges-"));
+  const filePath = join(tempDir, "depends-on.csv");
+  try {
+    await writeKnownSymbolEdgesCsv(filePath, edges);
+    await execDdl(
+      conn,
+      `COPY DEPENDS_ON FROM '${escapeCopyPath(filePath)}' ` +
+        `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function writeKnownSymbolEdgesCsv(
+  filePath: string,
+  edges: readonly EdgeRow[],
+): Promise<void> {
+  const stream = createWriteStream(filePath, { encoding: "utf8" });
+  try {
+    await writeCsvLine(stream, EDGE_COPY_COLUMNS);
+    for (const edge of edges) {
+      await writeCsvLine(stream, [
+        edge.fromSymbolId,
+        edge.toSymbolId,
+        edge.edgeType,
+        edge.weight,
+        edge.confidence,
+        edge.resolution,
+        edge.resolverId ?? "pass1-generic",
+        edge.resolutionPhase ?? "pass1",
+        edge.provenance ?? "",
+        edge.createdAt,
+      ]);
+    }
+    stream.end();
+    await finished(stream);
+  } catch (err) {
+    stream.destroy();
+    throw err;
+  }
+}
+
+async function writeCsvLine(
+  stream: NodeJS.WritableStream,
+  cells: readonly unknown[],
+): Promise<void> {
+  const line = `${cells.map(csvCell).join(",")}\n`;
+  if (!stream.write(line)) {
+    await waitForDrain(stream);
+  }
+}
+
+function waitForDrain(stream: NodeJS.WritableStream): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      stream.removeListener("drain", onDrain);
+      stream.removeListener("error", onError);
+    };
+    const onDrain = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (err: Error): void => {
+      cleanup();
+      reject(err);
+    };
+    stream.once("drain", onDrain);
+    stream.once("error", onError);
+  });
+}
+
+function csvCell(value: unknown): string {
+  if (value === null || value === undefined) return CSV_NULL_SENTINEL;
+  const text = String(value);
+  if (text === "") return '""';
+  const escaped = text.replaceAll('"', '""');
+  return /[",\r\n]/.test(escaped) ? `"${escaped}"` : escaped;
+}
+
+function escapeCopyPath(path: string): string {
+  return normalizePath(path).replace(/'/g, "''");
+}
+
+function escapeCopyOptionString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "''");
 }
 
 function buildTargetMetadataRows(edges: EdgeRow[]): Array<{

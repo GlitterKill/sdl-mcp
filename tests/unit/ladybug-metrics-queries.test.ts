@@ -91,6 +91,7 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
     `
     CREATE NODE TABLE IF NOT EXISTS Symbol (
       symbolId STRING PRIMARY KEY,
+      repoId STRING,
       kind STRING,
       name STRING,
       exported BOOLEAN,
@@ -122,6 +123,17 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
       canonicalTestJson STRING,
       pageRank DOUBLE DEFAULT 0.0,
       kCore INT64 DEFAULT 0,
+      updatedAt STRING
+    )
+  `,
+  );
+  await exec(
+    conn,
+    `
+    CREATE NODE TABLE IF NOT EXISTS MetricsFingerprint (
+      repoId STRING PRIMARY KEY,
+      metricsHash STRING,
+      rowCount INT64,
       updatedAt STRING
     )
   `,
@@ -264,6 +276,172 @@ describe("LadybugDB Metrics Queries", () => {
       assert.strictEqual(result.testRefsJson, '["test path"]');
       assert.strictEqual(result.canonicalTestJson, '{"key": "value"}');
     });
+
+    it("should replace a full repo metrics set with COPY", async () => {
+      await exec(
+        conn,
+        `CREATE (r:Repo {repoId: 'metrics-replace-a', rootPath: '/a', configJson: '{}', createdAt: '2024-01-01'})`,
+      );
+      await exec(
+        conn,
+        `CREATE (r:Repo {repoId: 'metrics-replace-b', rootPath: '/b', configJson: '{}', createdAt: '2024-01-01'})`,
+      );
+      for (const [symbolId, repoId] of [
+        ["replace-a-1", "metrics-replace-a"],
+        ["replace-a-2", "metrics-replace-a"],
+        ["replace-b-1", "metrics-replace-b"],
+      ] as const) {
+        await exec(
+          conn,
+          `CREATE (s:Symbol {symbolId: '${symbolId}', repoId: '${repoId}', symbolStatus: 'real'})`,
+        );
+        await exec(
+          conn,
+          `MATCH (s:Symbol {symbolId: '${symbolId}'}), (r:Repo {repoId: '${repoId}'})
+           CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
+        );
+        await queries.upsertMetrics(
+          conn as unknown as import("kuzu").Connection,
+          {
+            symbolId,
+            fanIn: 1,
+            fanOut: 1,
+            churn30d: 1,
+            testRefsJson: "[]",
+            canonicalTestJson: null,
+            pageRank: 0.5,
+            kCore: 3,
+            updatedAt: "2024-01-01T00:00:00Z",
+          },
+        );
+      }
+
+      await queries.replaceMetricsForRepoCopy(
+        conn as unknown as import("kuzu").Connection,
+        "metrics-replace-a",
+        [
+          {
+            symbolId: "replace-a-1",
+            fanIn: 10,
+            fanOut: 20,
+            churn30d: 30,
+            testRefsJson: '["a,test","b"]',
+            canonicalTestJson: '{"path":"tests/example.test.ts"}',
+            pageRank: 0,
+            kCore: 0,
+            updatedAt: "2024-01-02T00:00:00Z",
+          },
+          {
+            symbolId: "replace-a-2",
+            fanIn: 0,
+            fanOut: 2,
+            churn30d: 0,
+            testRefsJson: "[]",
+            canonicalTestJson: null,
+            pageRank: 0,
+            kCore: 0,
+            updatedAt: "2024-01-02T00:00:00Z",
+          },
+        ],
+      );
+
+      const replaced = await queries.getMetrics(
+        conn as unknown as import("kuzu").Connection,
+        "replace-a-1",
+      );
+      const nullCanonical = await queries.getMetrics(
+        conn as unknown as import("kuzu").Connection,
+        "replace-a-2",
+      );
+      const untouchedOtherRepo = await queries.getMetrics(
+        conn as unknown as import("kuzu").Connection,
+        "replace-b-1",
+      );
+      assert.ok(replaced);
+      assert.strictEqual(replaced.fanIn, 10);
+      assert.strictEqual(replaced.testRefsJson, '["a,test","b"]');
+      assert.strictEqual(
+        replaced.canonicalTestJson,
+        '{"path":"tests/example.test.ts"}',
+      );
+      assert.ok(nullCanonical);
+      assert.strictEqual(nullCanonical.canonicalTestJson, null);
+      assert.ok(untouchedOtherRepo);
+      assert.strictEqual(untouchedOtherRepo.fanIn, 1);
+      assert.strictEqual(untouchedOtherRepo.pageRank, 0.5);
+      assert.strictEqual(untouchedOtherRepo.kCore, 3);
+    });
+  });
+
+  describe("metrics fingerprint", { skip: !ladybugAvailable }, () => {
+    it("stores, replaces, reads, and deletes a repo metrics fingerprint", async () => {
+      const queryModule = queries as unknown as Record<string, unknown>;
+      assert.equal(typeof queryModule.getMetricsFingerprint, "function");
+      assert.equal(typeof queryModule.upsertMetricsFingerprint, "function");
+      assert.equal(typeof queryModule.deleteMetricsFingerprint, "function");
+
+      const getMetricsFingerprint = queryModule.getMetricsFingerprint as (
+        conn: unknown,
+        repoId: string,
+      ) => Promise<{
+        repoId: string;
+        metricsHash: string;
+        rowCount: number;
+        updatedAt: string;
+      } | null>;
+      const upsertMetricsFingerprint =
+        queryModule.upsertMetricsFingerprint as (
+          conn: unknown,
+          row: {
+            repoId: string;
+            metricsHash: string;
+            rowCount: number;
+            updatedAt: string;
+          },
+        ) => Promise<void>;
+      const deleteMetricsFingerprint =
+        queryModule.deleteMetricsFingerprint as (
+          conn: unknown,
+          repoId: string,
+        ) => Promise<void>;
+
+      assert.equal(
+        await getMetricsFingerprint(conn, "fingerprint-repo"),
+        null,
+      );
+
+      await upsertMetricsFingerprint(conn, {
+        repoId: "fingerprint-repo",
+        metricsHash: "hash-a",
+        rowCount: 2,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      assert.deepEqual(await getMetricsFingerprint(conn, "fingerprint-repo"), {
+        repoId: "fingerprint-repo",
+        metricsHash: "hash-a",
+        rowCount: 2,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      await upsertMetricsFingerprint(conn, {
+        repoId: "fingerprint-repo",
+        metricsHash: "hash-b",
+        rowCount: 3,
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      });
+      assert.deepEqual(await getMetricsFingerprint(conn, "fingerprint-repo"), {
+        repoId: "fingerprint-repo",
+        metricsHash: "hash-b",
+        rowCount: 3,
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      });
+
+      await deleteMetricsFingerprint(conn, "fingerprint-repo");
+      assert.equal(
+        await getMetricsFingerprint(conn, "fingerprint-repo"),
+        null,
+      );
+    });
   });
 
   describe("getMetrics", { skip: !ladybugAvailable }, () => {
@@ -397,7 +575,7 @@ describe("LadybugDB Metrics Queries", () => {
       await exec(
         conn,
         `
-        CREATE (s:Symbol {symbolId: '${symbolId}', kind: 'function', name: '${symbolId}', exported: true, visibility: 'public', language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 2, rangeEndCol: 0, astFingerprint: '', signatureJson: '{}', summary: '', invariantsJson: 'null', sideEffectsJson: 'null', symbolStatus: '${symbolStatus}', updatedAt: '2024-01-01'})
+        CREATE (s:Symbol {symbolId: '${symbolId}', repoId: '${repoId}', kind: 'function', name: '${symbolId}', exported: true, visibility: 'public', language: 'typescript', rangeStartLine: 1, rangeStartCol: 0, rangeEndLine: 2, rangeEndCol: 0, astFingerprint: '', signatureJson: '{}', summary: '', invariantsJson: 'null', sideEffectsJson: 'null', symbolStatus: '${symbolStatus}', updatedAt: '2024-01-01'})
       `,
       );
       await exec(

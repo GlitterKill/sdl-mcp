@@ -68,6 +68,38 @@ async function setupSchema(conn: LadybugConnection): Promise<void> {
 
 type Queries = typeof import("../../dist/db/ladybug-queries.js");
 
+class FakeQueryResult {
+  private readonly rows: Record<string, unknown>[];
+
+  constructor(rows: Record<string, unknown>[] = []) {
+    this.rows = rows;
+  }
+
+  async getAll(): Promise<Record<string, unknown>[]> {
+    return this.rows;
+  }
+
+  close(): void {}
+}
+
+function createStatementCapturingConnection(
+  statements: string[],
+  symbolRows: Record<string, unknown>[],
+): import("kuzu").Connection {
+  return {
+    async prepare(statement: string) {
+      return { statement };
+    },
+    async execute(preparedStatement: { statement: string }) {
+      statements.push(preparedStatement.statement);
+      if (preparedStatement.statement.includes("RETURN s.symbolId AS symbolId")) {
+        return new FakeQueryResult(symbolRows);
+      }
+      return new FakeQueryResult();
+    },
+  } as unknown as import("kuzu").Connection;
+}
+
 function makeSymbol(
   symbolId: string,
   repoId: string,
@@ -95,6 +127,41 @@ function makeSymbol(
     updatedAt: "2026-03-08T00:00:00Z",
   };
 }
+
+describe("deleteSymbolsByFileIds — query shape", () => {
+  it("uses one symbol DETACH DELETE instead of relationship-specific symbol deletes", async () => {
+    const statements: string[] = [];
+    const conn = createStatementCapturingConnection(statements, [
+      { symbolId: "sym-a" },
+      { symbolId: "sym-b" },
+    ]);
+    const queries = await import("../../dist/db/ladybug-queries.js");
+
+    await queries.deleteSymbolsByFileIds(conn, ["file-a", "file-b"]);
+
+    const detachDeletes = statements.filter((statement) =>
+      statement.includes("DETACH DELETE s"),
+    );
+    assert.strictEqual(detachDeletes.length, 1);
+    assert.ok(
+      statements.some((statement) => statement.includes("MATCH (m:Metrics)")),
+      "metrics cleanup should remain explicit because metrics are keyed by symbolId",
+    );
+    assert.ok(
+      statements.some((statement) =>
+        statement.includes("MATCH (sr:SymbolReference)"),
+      ),
+      "symbol reference cleanup should remain explicit because references are keyed by fileId",
+    );
+
+    const relationshipSpecificDeletes = statements.filter((statement) =>
+      /MATCH .*-\[(d|r):(DEPENDS_ON|SYMBOL_IN_REPO|SYMBOL_IN_FILE|BELONGS_TO_CLUSTER|BELONGS_TO_SHADOW_CLUSTER|PARTICIPATES_IN)\]/s.test(
+        statement,
+      ),
+    );
+    assert.deepStrictEqual(relationshipSpecificDeletes, []);
+  });
+});
 
 describe("deleteSymbolsByFileId — batch refactor", () => {
   let db: LadybugDatabase;

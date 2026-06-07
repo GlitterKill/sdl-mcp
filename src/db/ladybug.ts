@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, renameSync } from "fs";
 import { createRequire } from "node:module";
 import { totalmem } from "node:os";
 import { dirname } from "path";
@@ -309,6 +309,63 @@ export function resolveLadybugBufferManagerSizeBytes(
   return Math.min(Math.max(autoSized, ONE_GB), FOUR_GB);
 }
 
+export type WalCheckpointSidecarQuarantineResult =
+  | {
+      status: "not-present" | "wal-present";
+      sidecarPath: string;
+      walPath: string;
+    }
+  | {
+      status: "quarantined";
+      sidecarPath: string;
+      walPath: string;
+      quarantinePath: string;
+    }
+  | {
+      status: "failed";
+      sidecarPath: string;
+      walPath: string;
+      error: string;
+    };
+
+function formatQuarantineTimestamp(nowMs: number): string {
+  return String(Math.floor(nowMs));
+}
+
+export function quarantineDanglingWalCheckpointSidecar(
+  dbPath: string,
+  nowMs = Date.now(),
+): WalCheckpointSidecarQuarantineResult {
+  const normalizedPath = normalizePath(normalizeGraphDbPath(dbPath));
+  const sidecarPath = `${normalizedPath}.wal.checkpoint`;
+  const walPath = `${normalizedPath}.wal`;
+
+  if (!existsSync(sidecarPath)) {
+    return { status: "not-present", sidecarPath, walPath };
+  }
+  if (existsSync(walPath)) {
+    return { status: "wal-present", sidecarPath, walPath };
+  }
+
+  const timestamp = formatQuarantineTimestamp(nowMs);
+  let quarantinePath = `${sidecarPath}.quarantined-${timestamp}`;
+  for (let attempt = 1; existsSync(quarantinePath); attempt++) {
+    quarantinePath = `${sidecarPath}.quarantined-${timestamp}-${attempt}`;
+  }
+
+  try {
+    renameSync(sidecarPath, quarantinePath);
+    return { status: "quarantined", sidecarPath, walPath, quarantinePath };
+  } catch (err) {
+    return {
+      status: "failed",
+      sidecarPath,
+      walPath,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export async function getLadybugDb(
   dbPath?: string,
   options?: LadybugDbInitOptions,
@@ -346,6 +403,21 @@ export async function getLadybugDb(
     }
 
     const normalizedPath = normalizePath(resolvedPath);
+    const walCheckpointSidecar =
+      quarantineDanglingWalCheckpointSidecar(normalizedPath);
+    if (walCheckpointSidecar.status === "quarantined") {
+      logger.warn(
+        "Quarantined dangling LadybugDB WAL checkpoint sidecar before open",
+        {
+          sidecarPath: walCheckpointSidecar.sidecarPath,
+          quarantinePath: walCheckpointSidecar.quarantinePath,
+        },
+      );
+    } else if (walCheckpointSidecar.status === "failed") {
+      throw new DatabaseError(
+        `Failed to quarantine dangling LadybugDB WAL checkpoint sidecar at ${walCheckpointSidecar.sidecarPath}: ${walCheckpointSidecar.error}`,
+      );
+    }
 
     const parentDir = dirname(normalizedPath);
     if (parentDir && parentDir !== "." && !existsSync(parentDir)) {
@@ -989,7 +1061,37 @@ export function hasDeferredIndexes(): boolean {
   return deferredIndexesPending;
 }
 
-export async function buildDeferredIndexes(): Promise<void> {
+export interface CloseLadybugDbOptions {
+  preserveCloseHooks?: boolean;
+}
+
+type DeferredIndexTimingRecorder = (
+  phaseName: string,
+  durationMs: number,
+) => void;
+
+async function measureDeferredIndexPhase<T>(
+  recordTiming: DeferredIndexTimingRecorder | undefined,
+  phaseName: string,
+  fn: () => Promise<T> | T,
+): Promise<T> {
+  const startedAt = Date.now();
+  try {
+    return await fn();
+  } finally {
+    recordTiming?.(phaseName, Date.now() - startedAt);
+  }
+}
+
+export interface BuildDeferredIndexesOptions {
+  recordTiming?: DeferredIndexTimingRecorder;
+  deferSemanticVectorIndexes?: boolean;
+  deferSemanticTextIndexes?: boolean;
+}
+
+export async function buildDeferredIndexes(
+  options: BuildDeferredIndexesOptions = {},
+): Promise<void> {
   if (!deferredIndexesPending) return;
 
   const startMs = Date.now();
@@ -1004,17 +1106,48 @@ export async function buildDeferredIndexes(): Promise<void> {
   // session conn so this single call doesn't deadlock on the slot the
   // session already holds.
   await withWriteConn(async (wConn) => {
-    await createSecondaryIndexes(wConn);
+    await measureDeferredIndexPhase(
+      options.recordTiming,
+      "buildDeferredIndexes.secondaryIndexes",
+      () => createSecondaryIndexes(wConn),
+    );
 
     try {
-      const sdlConfig = loadConfig();
+      const sdlConfig = await measureDeferredIndexPhase(
+        options.recordTiming,
+        "buildDeferredIndexes.configLoad",
+        () => loadConfig(),
+      );
       const semanticConfig = sdlConfig.semantic;
       const retrievalConfig = semanticConfig?.retrieval;
       if (semanticConfig?.enabled && retrievalConfig) {
-        const { ensureIndexes, ensureEntityIndexes } =
-          await import("../retrieval/index-lifecycle.js");
-        await ensureIndexes(wConn, retrievalConfig);
-        await ensureEntityIndexes(wConn);
+        await measureDeferredIndexPhase(
+          options.recordTiming,
+          "buildDeferredIndexes.retrievalIndexes",
+          async () => {
+            const { ensureIndexes, ensureEntityIndexes } =
+              await import("../retrieval/index-lifecycle.js");
+            const recordRetrievalIndexTiming = (
+              phaseName: string,
+              durationMs: number,
+            ): void => {
+              options.recordTiming?.(
+                `buildDeferredIndexes.retrieval.${phaseName}`,
+                durationMs,
+              );
+            };
+            await ensureIndexes(wConn, retrievalConfig, {
+              includeFtsIndex: !options.deferSemanticTextIndexes,
+              includeVectorIndexes: !options.deferSemanticVectorIndexes,
+              recordTiming: recordRetrievalIndexTiming,
+            });
+            await ensureEntityIndexes(wConn, {
+              includeEntityFtsIndexes: !options.deferSemanticTextIndexes,
+              includeFileSummaryVectorIndexes: !options.deferSemanticVectorIndexes,
+              recordTiming: recordRetrievalIndexTiming,
+            });
+          },
+        );
       }
     } catch (err) {
       logger.warn(
@@ -1029,7 +1162,9 @@ export async function buildDeferredIndexes(): Promise<void> {
   logger.info("Deferred indexes built", { durationMs: Date.now() - startMs });
 }
 
-export async function closeLadybugDb(): Promise<void> {
+export async function closeLadybugDb(
+  options: CloseLadybugDbOptions = {},
+): Promise<void> {
   // Best-effort flush of any audit events queued by the post-index buffer
   // (src/mcp/audit-buffer.ts). Done before the writeLimiter drain so the
   // events have a chance to commit while the limiter still accepts work.
@@ -1192,7 +1327,9 @@ export async function closeLadybugDb(): Promise<void> {
       });
     }
   }
-  closeHooks.length = 0;
+  if (!options.preserveCloseHooks) {
+    closeHooks.length = 0;
+  }
   logger.debug("LadybugDB closed");
 }
 

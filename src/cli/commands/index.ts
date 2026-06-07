@@ -9,6 +9,8 @@ import {
 import type {
   ProviderFirstCoverageSummary,
   ProviderFirstExecutionSummary,
+  ProviderFirstLegacyFallbackDiagnostics,
+  ProviderFirstPhaseTimings,
 } from "../../indexer/provider-first/executor.js";
 import {
   disableDerivedRefreshQueue,
@@ -30,8 +32,14 @@ import { getCurrentTimestamp } from "../../util/time.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { findExistingProcess, type PidfileData } from "../../util/pidfile.js";
 import { connectSSE, type SSEEvent } from "../../util/sse-client.js";
-import { printBanner } from "../../util/banner.js";
 import { loadConfiguredAdapterPlugins } from "../../startup/plugins.js";
+import { printBanner } from "../../util/banner.js";
+import {
+  createRuntimeIdentity,
+  formatRuntimeIdentityLine,
+  type RuntimeIdentity,
+} from "../../util/runtime-identity.js";
+import { normalizePath } from "../../util/paths.js";
 
 // ---------------------------------------------------------------------------
 // Progress renderer
@@ -111,6 +119,8 @@ function indexStageLabel(stage: IndexProgress["stage"]): string {
       return "Pass 1 (symbols)";
     case "scipIngest":
       return "SCIP ingest";
+    case "providerFirst":
+      return "Provider-first";
     case "pass2":
       return "Pass 2 (edges)";
     case "finalizing":
@@ -121,6 +131,59 @@ function indexStageLabel(stage: IndexProgress["stage"]): string {
       return "Embeddings";
     default:
       return stage;
+  }
+}
+
+function providerFirstSubstageLabel(substage?: IndexProgressSubstage): string {
+  switch (substage) {
+    case "coverageScan":
+      return "Provider-first coverage scan";
+    case "providerCollection.metadata":
+      return "Provider-first metadata";
+    case "providerCollection.documents":
+      return "Provider-first documents";
+    case "providerCollection.externalSymbols":
+      return "Provider-first external symbols";
+    case "providerCollection.sourceLines":
+      return "Provider-first source lines";
+    case "providerCollection.normalize":
+      return "Provider-first normalization";
+    case "providerCollection.rows":
+      return "Provider-first row shaping";
+    case "providerCollection.validate":
+      return "Provider-first validation";
+    case "coverageAnalyze":
+      return "Provider-first coverage analysis";
+    case "materialize.deleteFileSymbols":
+      return "Provider-first materialize: delete file symbols";
+    case "materialize.upsertFiles":
+      return "Provider-first materialize: upsert files";
+    case "materialize.upsertSymbols":
+      return "Provider-first materialize: upsert symbols";
+    case "materialize.upsertSymbols.nodeAndRelCreate":
+      return "Provider-first materialize: symbol COPY";
+    case "materialize.upsertSymbols.nodeUpsert":
+      return "Provider-first materialize: symbol nodes";
+    case "materialize.upsertSymbols.fileRelCreate":
+      return "Provider-first materialize: symbol-file links";
+    case "materialize.upsertSymbols.repoRelCreate":
+      return "Provider-first materialize: symbol-repo links";
+    case "materialize.pruneExternalSymbols":
+      return "Provider-first materialize: prune externals";
+    case "materialize.mergeExternalSymbols":
+      return "Provider-first materialize: merge externals";
+    case "materialize.insertEdges":
+      return "Provider-first materialize: insert edges";
+    case "legacyFallbackInit":
+      return "Provider-first legacy fallback";
+    case "shadowStage":
+      return "Provider-first shadow staging";
+    case "shadowFinalize":
+      return "Provider-first shadow finalization";
+    case "shadowActivate":
+      return "Provider-first shadow activation";
+    default:
+      return "Provider-first";
   }
 }
 
@@ -159,26 +222,117 @@ function indexSubstageLabel(substage: IndexProgressSubstage): string {
   }
 }
 
-type PrintableProviderFirstExecutionSummary =
-  Omit<ProviderFirstExecutionSummary, "executor" | "coverage"> & {
-    executor?: string;
-    coverage?: ProviderFirstCoverageSummary;
-  };
+type PrintableProviderFirstExecutionSummary = Omit<
+  ProviderFirstExecutionSummary,
+  "executor" | "coverage"
+> & {
+  executor?: string;
+  coverage?: ProviderFirstCoverageSummary;
+};
 
 export function formatProviderFirstExecutionSummaryLines(
   execution: PrintableProviderFirstExecutionSummary | null | undefined,
 ): string[] {
   if (!execution) return [];
   if (execution.status === "fallback") {
-    return [
-      `  Provider-first fallback: ${execution.reasons.join("; ")}`,
-    ];
+    return [`  Provider-first fallback: ${execution.reasons.join("; ")}`];
   }
   if (execution.status !== "executed") return [];
 
   const lines = [
     `  Provider-first: ${execution.executor} (${execution.generationId})`,
   ];
+  if (execution.phaseTimings) {
+    lines.push(...formatProviderFirstPhaseTimingLines(execution.phaseTimings));
+  }
+  if (execution.legacyFallbackDiagnostics) {
+    lines.push(
+      ...formatProviderFirstLegacyFallbackDiagnosticLines(
+        execution.legacyFallbackDiagnostics,
+      ),
+    );
+  }
+  const shadowBuild = execution.shadowBuild;
+  if (shadowBuild?.status === "staged") {
+    const counts = shadowBuild.counts;
+    const requested =
+      shadowBuild.requestedFormat !== shadowBuild.format
+        ? ` (${shadowBuild.requestedFormat} requested)`
+        : "";
+    lines.push(
+      `  Provider-first shadow staging: ${shadowBuild.format} ` +
+        `files=${counts.files} symbols=${counts.symbols} ` +
+        `externals=${counts.externalSymbols} edges=${counts.edges}` +
+        requested,
+    );
+    if (shadowBuild.shadowDb?.status === "loaded") {
+      const loaded = shadowBuild.shadowDb.actualCounts;
+      lines.push(
+        `  Provider-first shadow DB loaded: files=${loaded.files} ` +
+          `symbols=${loaded.symbols} edges=${loaded.edges}`,
+      );
+      if (shadowBuild.shadowDb.reasons.length > 0) {
+        lines.push(
+          `  Provider-first shadow DB warning: ${shadowBuild.shadowDb.reasons.join("; ")}`,
+        );
+      }
+    } else if (shadowBuild.shadowDb?.status === "skipped") {
+      lines.push(
+        `  Provider-first shadow DB load skipped: ${shadowBuild.shadowDb.reasons.join("; ")}`,
+      );
+    }
+    if (
+      shadowBuild.finalization?.status === "finalized" &&
+      shadowBuild.finalization.actualCounts
+    ) {
+      const finalized = shadowBuild.finalization.actualCounts;
+      const auxiliarySuffix =
+        finalized.auxiliarySymbols > 0
+          ? ` auxiliarySymbols=${finalized.auxiliarySymbols}`
+          : "";
+      const copySuffix = shadowBuild.finalization.copyMode
+        ? ` copy=${shadowBuild.finalization.copyMode}`
+        : "";
+      const artifactSuffix = shadowBuild.finalization.bulkLoad
+        ? ` artifacts=${shadowBuild.finalization.bulkLoad.artifacts.length}`
+        : "";
+      lines.push(
+        `  Provider-first shadow DB finalized: files=${finalized.files} ` +
+          `symbols=${finalized.symbols} edges=${finalized.edges} ` +
+          `versions=${finalized.versions} metrics=${finalized.metrics} ` +
+          `fileSummaries=${finalized.fileSummaries}${auxiliarySuffix}` +
+          `${copySuffix}${artifactSuffix}`,
+      );
+    } else if (shadowBuild.finalization?.status === "skipped") {
+      lines.push(
+        `  Provider-first shadow DB finalization skipped: ${shadowBuild.finalization.reasons.join("; ")}`,
+      );
+    } else if (shadowBuild.finalization?.status === "failed") {
+      lines.push(
+        `  Provider-first shadow DB finalization failed: ${shadowBuild.finalization.reasons.join("; ")}`,
+      );
+    }
+    if (shadowBuild.activationResult) {
+      const activation = shadowBuild.activationResult;
+      if (activation.status === "activated") {
+        lines.push(
+          `  Provider-first shadow DB activated: ${activation.activeDbPath}`,
+        );
+      } else if (activation.status === "skipped") {
+        lines.push(
+          `  Provider-first shadow DB activation skipped: ${activation.reasons.join("; ")}`,
+        );
+      } else {
+        lines.push(
+          `  Provider-first shadow DB activation failed: ${activation.reasons.join("; ")}`,
+        );
+      }
+    }
+  } else if (shadowBuild?.status === "skipped") {
+    lines.push(
+      `  Provider-first shadow staging skipped: ${shadowBuild.reasons.join("; ")}`,
+    );
+  }
   const coverage = execution.coverage;
   if (coverage) {
     const providerPrimaryFiles =
@@ -189,32 +343,756 @@ export function formatProviderFirstExecutionSummaryLines(
       middle.push(`${coverage.fullFallbackFiles} provider unusable`);
     }
     if (coverage.uncoveredFiles > 0) {
-      middle.push(`${coverage.uncoveredFiles} uncovered`);
+      middle.push(
+        coverage.semanticEligibleFiles !== undefined
+          ? `${coverage.uncoveredFiles} outside semantic eligibility or uncovered`
+          : `${coverage.uncoveredFiles} uncovered`,
+      );
     }
     if ((coverage.callProofIncompleteFiles ?? 0) > 0) {
       middle.push(`${coverage.callProofIncompleteFiles} call-proof incomplete`);
     }
+    if ((coverage.ignoredProviderFiles ?? 0) > 0) {
+      middle.push(
+        `${coverage.ignoredProviderFiles} provider file(s) ignored outside scan scope`,
+      );
+    }
 
     let line =
-      `  Provider-first coverage: ${providerPrimaryFiles}/${coverage.scannedFiles} files provider-primary ` +
-      `(${coverage.fullyCoveredFiles} full, ${coverage.partialFiles} partial)`;
+      coverage.semanticEligibleFiles !== undefined
+        ? `  Provider-first coverage: ${providerPrimaryFiles}/${coverage.semanticEligibleFiles} semantic-eligible files provider-primary ` +
+          `(scan scope ${coverage.scannedFiles}, provider docs ${coverage.providerCoveredFiles ?? coverage.providerFiles}; ` +
+          `${coverage.fullyCoveredFiles} full, ${coverage.partialFiles} partial)`
+        : `  Provider-first coverage: ${providerPrimaryFiles}/${coverage.scannedFiles} files provider-primary ` +
+          `(${coverage.fullyCoveredFiles} full, ${coverage.partialFiles} partial)`;
     if (middle.length > 0) {
       line += `; ${middle.join(", ")}`;
     }
     if (coverage.fallbackFiles > 0) {
       line += `; legacy fallback parsed ${coverage.fallbackFiles} file(s)`;
     }
+    if ((coverage.legacyFallbackSkippedFiles ?? 0) > 0) {
+      const capSuffix =
+        coverage.legacyFallbackFileLimit !== undefined
+          ? ` over cap ${coverage.legacyFallbackFileLimit}`
+          : "";
+      line +=
+        `; legacy fallback skipped ${coverage.legacyFallbackSkippedFiles} file(s)` +
+        capSuffix;
+    }
     lines.push(line);
+    if (
+      coverage.providerUnusableReasons &&
+      coverage.providerUnusableReasons.length > 0
+    ) {
+      lines.push("  Provider-first provider-unusable diagnostics:");
+      for (const reason of coverage.providerUnusableReasons) {
+        const sample =
+          reason.samplePaths.length > 0
+            ? `: ${reason.samplePaths.join(", ")}`
+            : "";
+        lines.push(
+          `    ${providerFirstProviderUnusableReasonLabel(reason.code)}: ` +
+            `${reason.files} file(s)` +
+            sample,
+        );
+        for (const skipped of reason.skippedSymbolReasons ?? []) {
+          const skippedSample =
+            skipped.samplePaths.length > 0
+              ? `: ${skipped.samplePaths.join(", ")}`
+              : "";
+          lines.push(
+            `      skipped symbol reason: ${skipped.reason}, ` +
+              `${skipped.symbols} symbol(s)` +
+              skippedSample,
+          );
+        }
+      }
+    }
+    if (coverage.semanticEligibilityGap) {
+      const gap = coverage.semanticEligibilityGap;
+      if (gap.totalFiles > 0 || gap.outsideSemanticEligibilityFiles > 0) {
+        lines.push("  Provider-first semantic eligibility diagnostics:");
+        if (gap.uncoveredFiles > 0) {
+          lines.push(
+            `    semantic-eligible uncovered: ${gap.uncoveredFiles} file(s)` +
+              formatProviderFirstPathSamples(
+                gap.semanticEligibleUncoveredSamples,
+              ),
+          );
+        }
+        if (gap.providerUnusableFiles > 0) {
+          lines.push(
+            `    semantic-eligible provider-unusable: ${gap.providerUnusableFiles} file(s)` +
+              formatProviderFirstPathSamples(
+                gap.semanticEligibleProviderUnusableSamples,
+              ),
+          );
+        }
+        if (gap.outsideSemanticEligibilityFiles > 0) {
+          lines.push(
+            `    outside semantic eligibility: ${gap.outsideSemanticEligibilityFiles} scanned file(s)` +
+              formatProviderFirstPathSamples(
+                gap.outsideSemanticEligibilitySamples,
+              ),
+          );
+        }
+      }
+    }
+    if (
+      coverage.callProofIncompleteReasons &&
+      coverage.callProofIncompleteReasons.length > 0
+    ) {
+      lines.push("  Provider-first call-proof diagnostics:");
+      for (const reason of coverage.callProofIncompleteReasons) {
+        const sample =
+          reason.samplePaths.length > 0
+            ? `: ${reason.samplePaths.join(", ")}`
+            : "";
+        lines.push(
+          `    ${providerFirstCallProofReasonLabel(reason.code)}: ` +
+            `${reason.references} reference(s), ${reason.files} file(s)` +
+            sample,
+        );
+        for (const mismatch of reason.samples ?? []) {
+          lines.push(
+            `      sample: ${formatProviderFirstCallProofSample(mismatch)}`,
+          );
+        }
+      }
+    }
   }
   return lines;
+}
+
+function formatProviderFirstPathSamples(paths: readonly string[]): string {
+  return paths.length > 0 ? `: ${paths.join(", ")}` : "";
+}
+
+/** @internal exported for tests; do not import from product code. */
+export function formatIndexWallTimeLine(
+  wallDurationMs: number,
+  indexedDurationMs?: number,
+): string {
+  const outsideIndexedPhasesMs =
+    typeof indexedDurationMs === "number" && Number.isFinite(indexedDurationMs)
+      ? wallDurationMs - indexedDurationMs
+      : 0;
+  const suffix =
+    outsideIndexedPhasesMs > 1_000
+      ? ` (includes ${outsideIndexedPhasesMs}ms outside indexed phases)`
+      : "";
+  return `  Wall time: ${wallDurationMs}ms${suffix}`;
+}
+
+/** @internal exported for tests; do not import from product code. */
+export function formatScipGeneratorCacheLine(
+  cache?: NonNullable<IndexResult["scip"]>["generatorCache"],
+): string | undefined {
+  if (!cache) return undefined;
+  if (cache.status === "disabled" || cache.status === "miss") {
+    return undefined;
+  }
+  const timingParts: string[] = [];
+  if (
+    cache.status === "stored" &&
+    typeof cache.generatorDurationMs === "number"
+  ) {
+    timingParts.push(`generator ${cache.generatorDurationMs}ms`);
+  }
+  if (typeof cache.saveDurationMs === "number") {
+    timingParts.push(`save ${cache.saveDurationMs}ms`);
+  }
+  if (typeof cache.restoreDurationMs === "number") {
+    timingParts.push(`restore ${cache.restoreDurationMs}ms`);
+  }
+  if (typeof cache.prepareDurationMs === "number") {
+    timingParts.push(`prepare ${cache.prepareDurationMs}ms`);
+  }
+  const timingPart =
+    timingParts.length > 0 ? timingParts.join(", ") : `${cache.durationMs}ms`;
+  const filePart =
+    typeof cache.fileCount === "number"
+      ? `, ${cache.fileCount} input file(s)`
+      : "";
+  const reasonPart = cache.reason ? `: ${cache.reason}` : "";
+  return `  SCIP generator cache: ${cache.status} (${timingPart}${filePart})${reasonPart}`;
+}
+
+const PROVIDER_FIRST_TIMING_LABELS: Array<[string, string]> = [
+  ["providerCollection", "collect"],
+  ["coverageScan", "scan"],
+  ["shadowStage", "shadowStage"],
+  ["materialize", "materialize"],
+  ["legacyFallback", "legacy"],
+  ["shadowStageFinal", "shadowStage"],
+  ["shadowFinalize", "shadowFinalize"],
+  ["shadowActivate", "activate"],
+];
+
+const PROVIDER_FIRST_MATERIALIZE_TIMING_LABELS: Array<[string, string]> = [
+  ["materialize.deleteFileSymbols", "deleteFileSymbols"],
+  ["materialize.upsertFiles", "upsertFiles"],
+  ["materialize.upsertSymbols", "upsertSymbols"],
+  ["materialize.pruneExternalSymbols", "pruneExternalSymbols"],
+  ["materialize.mergeExternalSymbols", "mergeExternalSymbols"],
+  ["materialize.insertEdges", "insertEdges"],
+];
+
+const PROVIDER_FIRST_PROVIDER_COLLECTION_TIMING_LABELS: Array<
+  [string, string]
+> = [
+  ["providerCollection.cacheRead", "cacheRead"],
+  ["providerCollection.metadata", "metadata"],
+  ["providerCollection.documents", "documents"],
+  ["providerCollection.externalSymbols", "externalSymbols"],
+  ["providerCollection.sourceLines", "sourceLines"],
+  ["providerCollection.normalize", "normalize"],
+  ["providerCollection.rows", "rows"],
+  ["providerCollection.validate", "validate"],
+  ["providerCollection.cacheWrite", "cacheWrite"],
+];
+
+const PROVIDER_FIRST_NORMALIZE_TIMING_LABELS: Array<[string, string]> = [
+  ["providerCollection.normalize.coalesce", "coalesce"],
+  ["providerCollection.normalize.symbolInfoRelPaths", "symbolInfoRelPaths"],
+  [
+    "providerCollection.normalize.symbolDefinitionRelPaths",
+    "symbolDefinitionRelPaths",
+  ],
+  ["providerCollection.normalize.symbols", "symbols"],
+  ["providerCollection.normalize.externalSymbols", "externalSymbols"],
+  ["providerCollection.normalize.occurrenceFacts", "occurrenceFacts"],
+  ["providerCollection.normalize.diagnostics", "diagnostics"],
+  ["providerCollection.normalize.coverage", "coverage"],
+  ["providerCollection.normalize.relationshipEdges", "relationshipEdges"],
+  ["providerCollection.normalize.occurrenceEdges", "occurrenceEdges"],
+];
+
+const PROVIDER_FIRST_SYMBOL_MATERIALIZE_TIMING_LABELS: Array<[string, string]> =
+  [
+    ["materialize.upsertSymbols.nodeAndRelCreate", "nodeAndRelCreate"],
+    ["materialize.upsertSymbols.nodeUpsert", "nodeUpsert"],
+    ["materialize.upsertSymbols.fileRelCreate", "fileRelCreate"],
+    ["materialize.upsertSymbols.repoRelCreate", "repoRelCreate"],
+  ];
+
+const PROVIDER_FIRST_LEGACY_FALLBACK_PHASE_LABELS: Array<[string, string]> = [
+  ["pass1", "pass1"],
+  ["pass1Drain", "pass1Drain"],
+  ["pass2", "pass2"],
+  ["finalizeIndexing", "finalize"],
+];
+
+const PROVIDER_FIRST_LEGACY_FALLBACK_PASS2_LABELS: Array<[string, string]> = [
+  ["pass2.targetSelection", "targetSelection"],
+  ["pass2.importCache", "importCache"],
+  ["pass2.resolverDispatch", "resolverDispatch"],
+  ["pass2.writeActive", "writeActive"],
+  ["pass2.writeQueue", "writeQueue"],
+];
+
+const PROVIDER_FIRST_LEGACY_FALLBACK_PASS1_DRAIN_LABELS: Array<
+  [string, string]
+> = [
+  ["pass1Drain.write.deleteOldSymbols", "deleteOldSymbols"],
+  ["pass1Drain.write.deleteIncomingSymbols", "deleteIncoming"],
+  ["pass1Drain.write.upsertFiles", "upsertFiles"],
+  ["pass1Drain.write.insertSymbolReferences", "symbolRefs"],
+  ["pass1Drain.write.upsertSymbols", "upsertSymbols"],
+  ["pass1Drain.write.insertEdges", "insertEdges"],
+];
+
+const PROVIDER_FIRST_LEGACY_FALLBACK_FINALIZE_LABELS: Array<[string, string]> =
+  [
+    ["finalizeIndexing.symbolStatusNormalize", "symbolStatus"],
+    ["finalizeIndexing.metrics", "metrics"],
+    ["finalizeIndexing.metrics.loadRepoState", "metrics.loadRepo"],
+    ["finalizeIndexing.metrics.loadFilesAndSymbols", "metrics.loadGraph"],
+    ["finalizeIndexing.metrics.fanMetrics", "metrics.fan"],
+    ["finalizeIndexing.metrics.churn", "metrics.churn"],
+    ["finalizeIndexing.metrics.testRefs", "metrics.testRefs"],
+    ["finalizeIndexing.metrics.canonicalTests", "metrics.canonicalTests"],
+    ["finalizeIndexing.metrics.loadExistingCanonical", "metrics.loadExisting"],
+    ["finalizeIndexing.metrics.metricsFingerprint", "metrics.fingerprint"],
+    ["finalizeIndexing.metrics.writeMetrics", "metrics.writeMetrics"],
+    ["finalizeIndexing.metrics.writeWait", "metrics.writeWait"],
+    ["finalizeIndexing.metrics.writeRows", "metrics.writeRows"],
+    ["finalizeIndexing.fileSummaries", "fileSummaries"],
+    ["finalizeIndexing.fileSummaries.loadFiles", "fileSummaries.loadFiles"],
+    [
+      "finalizeIndexing.fileSummaries.loadExportedSymbols",
+      "fileSummaries.exports",
+    ],
+    [
+      "finalizeIndexing.fileSummaries.loadSymbolFacts",
+      "fileSummaries.symbolFacts",
+    ],
+    [
+      "finalizeIndexing.fileSummaries.loadExistingSummaries",
+      "fileSummaries.existing",
+    ],
+    ["finalizeIndexing.fileSummaries.buildPayloads", "fileSummaries.build"],
+    ["finalizeIndexing.fileSummaries.writeSummaries", "fileSummaries.write"],
+    ["finalizeIndexing.fileSummaries.writeWait", "fileSummaries.writeWait"],
+    [
+      "finalizeIndexing.fileSummaries.writeExistingSummaries",
+      "fileSummaries.writeExisting",
+    ],
+    [
+      "finalizeIndexing.fileSummaries.writeNewSummaries",
+      "fileSummaries.writeNew",
+    ],
+    ["finalizeIndexing.audit", "audit"],
+    ["finalizeIndexing.qualityAudit", "qualityAudit"],
+  ];
+
+const PROVIDER_FIRST_LEGACY_FALLBACK_DERIVED_LABELS: Array<[string, string]> = [
+  ["clustersAndProcesses.loadSymbols", "loadSymbols"],
+  ["clustersAndProcesses.loadEdges", "loadEdges"],
+  ["clustersAndProcesses.clusterCompute", "clusterCompute"],
+  ["clustersAndProcesses.loadFiles", "loadFiles"],
+  ["clustersAndProcesses.clusterWrite", "clusterWrite"],
+  ["clustersAndProcesses.processCompute", "processCompute"],
+  ["clustersAndProcesses.processWrite", "processWrite"],
+  ["clustersAndProcesses.algorithmStage", "algorithmStage"],
+];
+
+const PROVIDER_FIRST_LEGACY_FALLBACK_CLUSTER_WRITE_LABELS: Array<
+  [string, string]
+> = [
+  ["clustersAndProcesses.clusterWrite.loadExisting", "loadExisting"],
+  ["clustersAndProcesses.clusterWrite.writeRows", "writeRows"],
+  ["clustersAndProcesses.clusterWrite.deleteRows", "deleteRows"],
+  ["clustersAndProcesses.clusterWrite.upsertClusters", "upsertClusters"],
+  ["clustersAndProcesses.clusterWrite.upsertMembers", "upsertMembers"],
+];
+
+const PROVIDER_FIRST_LEGACY_FALLBACK_PROCESS_WRITE_LABELS: Array<
+  [string, string]
+> = [
+  ["clustersAndProcesses.processWrite.loadExisting", "loadExisting"],
+  ["clustersAndProcesses.processWrite.writeRows", "writeRows"],
+  ["clustersAndProcesses.processWrite.deleteRows", "deleteRows"],
+  ["clustersAndProcesses.processWrite.upsertProcesses", "upsertProcesses"],
+  ["clustersAndProcesses.processWrite.upsertSteps", "upsertSteps"],
+];
+
+const PROVIDER_FIRST_LEGACY_FALLBACK_VERSION_LABELS: Array<[string, string]> = [
+  ["versionSnapshot.latestVersion", "latest"],
+  ["versionSnapshot.createVersion", "create"],
+  ["versionSnapshot.snapshot", "snapshot"],
+  ["versionSnapshot.snapshot.readPages", "readPages"],
+  ["versionSnapshot.snapshot.writePages", "writePages"],
+];
+
+const PROVIDER_FIRST_LEGACY_FALLBACK_DEFERRED_INDEX_LABELS: Array<
+  [string, string]
+> = [
+  ["buildDeferredIndexes.secondaryIndexes", "secondary"],
+  ["buildDeferredIndexes.configLoad", "config"],
+  ["buildDeferredIndexes.retrievalIndexes", "retrieval"],
+];
+
+const PROVIDER_FIRST_LEGACY_FALLBACK_RETRIEVAL_INDEX_LABELS: Array<
+  [string, string]
+> = [
+  ["buildDeferredIndexes.retrieval.symbolDiscovery", "symbolDiscovery"],
+  ["buildDeferredIndexes.retrieval.symbolFts", "symbolFts"],
+  ["buildDeferredIndexes.retrieval.symbolVectors", "symbolVectors"],
+  ["buildDeferredIndexes.retrieval.entityDiscovery", "entityDiscovery"],
+  ["buildDeferredIndexes.retrieval.entityFts", "entityFts"],
+  ["buildDeferredIndexes.retrieval.fileSummaryVectors", "fileSummaryVectors"],
+  [
+    "buildDeferredIndexes.retrieval.agentFeedbackVectors",
+    "agentFeedbackVectors",
+  ],
+];
+
+const PROVIDER_FIRST_LEGACY_FALLBACK_OTHER_LABELS: Array<[string, string]> = [
+  ["preDeleteExistingSymbols", "preDelete"],
+  ["initSharedState", "initSharedState"],
+  ["refreshSymbolIndex", "refreshSymbolIndex"],
+  ["resolveUnresolvedImports", "imports"],
+  ["finalizeEdges", "finalizeEdges"],
+  ["versionSnapshot", "version"],
+  ["buildDeferredIndexes", "deferredIndexes"],
+  ["memorySync", "memorySync"],
+];
+
+function formatProviderFirstLegacyFallbackDiagnosticLines(
+  diagnostics: ProviderFirstLegacyFallbackDiagnostics,
+): string[] {
+  const phaseEntries = Object.entries(diagnostics.phases)
+    .filter(
+      ([phaseName]) =>
+        !hasFallbackDiagnosticChildPhase(diagnostics.phases, phaseName),
+    )
+    .filter(([, durationMs]) => Number.isFinite(durationMs))
+    .map(([phaseName, durationMs]) => ({ phaseName, durationMs }));
+  const slowest = phaseEntries.reduce<
+    { phaseName: string; durationMs: number } | undefined
+  >((current, entry) => {
+    if (!current || entry.durationMs > current.durationMs) return entry;
+    return current;
+  }, undefined);
+  const slowestSuffix = slowest
+    ? `; slowest=${slowest.phaseName} ${slowest.durationMs}ms`
+    : "";
+  const lines = [
+    `  Provider-first legacy fallback diagnostics: files=${diagnostics.files} ` +
+      `total=${diagnostics.durationMs}ms avg=${diagnostics.averageMsPerFile}ms/file` +
+      slowestSuffix,
+  ];
+  const selectedPhases = PROVIDER_FIRST_LEGACY_FALLBACK_PHASE_LABELS.flatMap(
+    ([phaseName, label]) => {
+      const durationMs = diagnostics.phases[phaseName];
+      return typeof durationMs === "number" && Number.isFinite(durationMs)
+        ? [`${label}=${durationMs}ms`]
+        : [];
+    },
+  );
+  if (selectedPhases.length > 0) {
+    lines.push(`    ${selectedPhases.join(", ")}`);
+  }
+  const pass1DrainPhases =
+    PROVIDER_FIRST_LEGACY_FALLBACK_PASS1_DRAIN_LABELS.flatMap(
+      ([phaseName, label]) => {
+        const durationMs = diagnostics.phases[phaseName];
+        return typeof durationMs === "number" && Number.isFinite(durationMs)
+          ? [`${label}=${durationMs}ms`]
+          : [];
+      },
+    );
+  if (pass1DrainPhases.length > 0) {
+    lines.push(`    pass1Drain: ${pass1DrainPhases.join(", ")}`);
+  }
+  const pass2Phases = PROVIDER_FIRST_LEGACY_FALLBACK_PASS2_LABELS.flatMap(
+    ([phaseName, label]) => {
+      const durationMs = diagnostics.phases[phaseName];
+      return typeof durationMs === "number" && Number.isFinite(durationMs)
+        ? [`${label}=${durationMs}ms`]
+        : [];
+    },
+  );
+  if (pass2Phases.length > 0) {
+    lines.push(`    pass2: ${pass2Phases.join(", ")}`);
+  }
+  const finalizePhases = PROVIDER_FIRST_LEGACY_FALLBACK_FINALIZE_LABELS.flatMap(
+    ([phaseName, label]) => {
+      const durationMs = diagnostics.phases[phaseName];
+      return typeof durationMs === "number" && Number.isFinite(durationMs)
+        ? [`${label}=${durationMs}ms`]
+        : [];
+    },
+  );
+  if (finalizePhases.length > 0) {
+    lines.push(`    finalize: ${finalizePhases.join(", ")}`);
+  }
+  const derivedPhases = PROVIDER_FIRST_LEGACY_FALLBACK_DERIVED_LABELS.flatMap(
+    ([phaseName, label]) => {
+      const durationMs = diagnostics.phases[phaseName];
+      return typeof durationMs === "number" && Number.isFinite(durationMs)
+        ? [`${label}=${durationMs}ms`]
+        : [];
+    },
+  );
+  if (derivedPhases.length > 0) {
+    lines.push(`    derived: ${derivedPhases.join(", ")}`);
+  }
+  const clusterWritePhases =
+    PROVIDER_FIRST_LEGACY_FALLBACK_CLUSTER_WRITE_LABELS.flatMap(
+      ([phaseName, label]) => {
+        const durationMs = diagnostics.phases[phaseName];
+        return typeof durationMs === "number" && Number.isFinite(durationMs)
+          ? [`${label}=${durationMs}ms`]
+          : [];
+      },
+    );
+  if (clusterWritePhases.length > 0) {
+    lines.push(`    derived.clusterWrite: ${clusterWritePhases.join(", ")}`);
+  }
+  const processWritePhases =
+    PROVIDER_FIRST_LEGACY_FALLBACK_PROCESS_WRITE_LABELS.flatMap(
+      ([phaseName, label]) => {
+        const durationMs = diagnostics.phases[phaseName];
+        return typeof durationMs === "number" && Number.isFinite(durationMs)
+          ? [`${label}=${durationMs}ms`]
+          : [];
+      },
+    );
+  if (processWritePhases.length > 0) {
+    lines.push(`    derived.processWrite: ${processWritePhases.join(", ")}`);
+  }
+  const versionPhases = PROVIDER_FIRST_LEGACY_FALLBACK_VERSION_LABELS.flatMap(
+    ([phaseName, label]) => {
+      const durationMs = diagnostics.phases[phaseName];
+      return typeof durationMs === "number" && Number.isFinite(durationMs)
+        ? [`${label}=${durationMs}ms`]
+        : [];
+    },
+  );
+  if (versionPhases.length > 0) {
+    lines.push(`    version: ${versionPhases.join(", ")}`);
+  }
+  const deferredIndexPhases =
+    PROVIDER_FIRST_LEGACY_FALLBACK_DEFERRED_INDEX_LABELS.flatMap(
+      ([phaseName, label]) => {
+        const durationMs = diagnostics.phases[phaseName];
+        return typeof durationMs === "number" && Number.isFinite(durationMs)
+          ? [`${label}=${durationMs}ms`]
+          : [];
+      },
+    );
+  if (deferredIndexPhases.length > 0) {
+    lines.push(`    deferredIndexes: ${deferredIndexPhases.join(", ")}`);
+  }
+  const retrievalIndexPhases =
+    PROVIDER_FIRST_LEGACY_FALLBACK_RETRIEVAL_INDEX_LABELS.flatMap(
+      ([phaseName, label]) => {
+        const durationMs = diagnostics.phases[phaseName];
+        return typeof durationMs === "number" && Number.isFinite(durationMs)
+          ? [`${label}=${durationMs}ms`]
+          : [];
+      },
+    );
+  if (retrievalIndexPhases.length > 0) {
+    lines.push(
+      `    deferredIndexes.retrieval: ${retrievalIndexPhases.join(", ")}`,
+    );
+  }
+  const otherPhaseEntries = PROVIDER_FIRST_LEGACY_FALLBACK_OTHER_LABELS.flatMap(
+    ([phaseName, label]) => {
+      const durationMs = diagnostics.phases[phaseName];
+      return typeof durationMs === "number" && Number.isFinite(durationMs)
+        ? [{ phaseName, label, durationMs }]
+        : [];
+    },
+  );
+  if (otherPhaseEntries.length > 0) {
+    const accountedMs = sumKnownLegacyFallbackDiagnosticPhases(
+      diagnostics.phases,
+    );
+    const unaccountedMs = Math.max(0, diagnostics.durationMs - accountedMs);
+    lines.push(
+      `    other: ${[
+        ...otherPhaseEntries.map(
+          (entry) => `${entry.label}=${entry.durationMs}ms`,
+        ),
+        `unaccounted=${unaccountedMs}ms`,
+      ].join(", ")}`,
+    );
+  }
+  if (diagnostics.samplePaths.length > 0) {
+    const omittedSuffix =
+      diagnostics.omittedPathCount && diagnostics.omittedPathCount > 0
+        ? ` (+${diagnostics.omittedPathCount} more)`
+        : "";
+    lines.push(
+      `    fallback files: ${diagnostics.samplePaths.join(", ")}${omittedSuffix}`,
+    );
+  }
+  return lines;
+}
+
+function sumKnownLegacyFallbackDiagnosticPhases(
+  phases: Record<string, number>,
+): number {
+  const phaseNames = new Set([
+    ...PROVIDER_FIRST_LEGACY_FALLBACK_PHASE_LABELS.map(
+      ([phaseName]) => phaseName,
+    ),
+    ...PROVIDER_FIRST_LEGACY_FALLBACK_DERIVED_LABELS.map(
+      ([phaseName]) => phaseName,
+    ),
+    ...PROVIDER_FIRST_LEGACY_FALLBACK_OTHER_LABELS.map(
+      ([phaseName]) => phaseName,
+    ),
+  ]);
+  let total = 0;
+  for (const phaseName of phaseNames) {
+    const durationMs = phases[phaseName];
+    if (typeof durationMs === "number" && Number.isFinite(durationMs)) {
+      total += durationMs;
+    }
+  }
+  return total;
+}
+
+function hasFallbackDiagnosticChildPhase(
+  phases: Record<string, number>,
+  phaseName: string,
+): boolean {
+  const prefix = `${phaseName}.`;
+  return Object.keys(phases).some((candidate) => candidate.startsWith(prefix));
+}
+
+function formatProviderFirstPhaseTimingLines(
+  timings: ProviderFirstPhaseTimings,
+): string[] {
+  const phaseEntries = PROVIDER_FIRST_TIMING_LABELS.flatMap(
+    ([phaseName, label]) => {
+      const ms = timings.phases[phaseName];
+      return typeof ms === "number" && Number.isFinite(ms)
+        ? [{ phaseName, label, ms }]
+        : [];
+    },
+  );
+  const slowest = phaseEntries.reduce<
+    { label: string; ms: number } | undefined
+  >((current, entry) => {
+    if (!current || entry.ms > current.ms) {
+      return { label: entry.label, ms: entry.ms };
+    }
+    return current;
+  }, undefined);
+  const header = slowest
+    ? `  Provider-first timings: total=${timings.totalMs}ms; slowest=${slowest.label} ${slowest.ms}ms`
+    : `  Provider-first timings: total=${timings.totalMs}ms`;
+  const lines = [header];
+  if (phaseEntries.length > 0) {
+    lines.push(
+      `    ${phaseEntries
+        .map((entry) => `${entry.label}=${entry.ms}ms`)
+        .join(", ")}`,
+    );
+  }
+  const providerCollectionEntries =
+    PROVIDER_FIRST_PROVIDER_COLLECTION_TIMING_LABELS.flatMap(
+      ([phaseName, label]) => {
+        const ms = timings.phases[phaseName];
+        return typeof ms === "number" && Number.isFinite(ms)
+          ? [{ label, ms }]
+          : [];
+      },
+    );
+  if (providerCollectionEntries.length > 0) {
+    lines.push(
+      `    collect: ${providerCollectionEntries
+        .map((entry) => `${entry.label}=${entry.ms}ms`)
+        .join(", ")}`,
+    );
+  }
+  const normalizeEntries = PROVIDER_FIRST_NORMALIZE_TIMING_LABELS.flatMap(
+    ([phaseName, label]) => {
+      const ms = timings.phases[phaseName];
+      return typeof ms === "number" && Number.isFinite(ms)
+        ? [{ label, ms }]
+        : [];
+    },
+  );
+  if (normalizeEntries.length > 0) {
+    lines.push(
+      `    collect.normalize: ${normalizeEntries
+        .map((entry) => `${entry.label}=${entry.ms}ms`)
+        .join(", ")}`,
+    );
+  }
+  const materializeEntries = PROVIDER_FIRST_MATERIALIZE_TIMING_LABELS.flatMap(
+    ([phaseName, label]) => {
+      const ms = timings.phases[phaseName];
+      return typeof ms === "number" && Number.isFinite(ms)
+        ? [{ label, ms }]
+        : [];
+    },
+  );
+  if (materializeEntries.length > 0) {
+    lines.push(
+      `    materialize: ${materializeEntries
+        .map((entry) => `${entry.label}=${entry.ms}ms`)
+        .join(", ")}`,
+    );
+  }
+  const symbolMaterializeEntries =
+    PROVIDER_FIRST_SYMBOL_MATERIALIZE_TIMING_LABELS.flatMap(
+      ([phaseName, label]) => {
+        const ms = timings.phases[phaseName];
+        return typeof ms === "number" && Number.isFinite(ms)
+          ? [{ label, ms }]
+          : [];
+      },
+    );
+  if (symbolMaterializeEntries.length > 0) {
+    lines.push(
+      `    materialize.upsertSymbols: ${symbolMaterializeEntries
+        .map((entry) => `${entry.label}=${entry.ms}ms`)
+        .join(", ")}`,
+    );
+  }
+  return lines;
+}
+
+function providerFirstProviderUnusableReasonLabel(code: string): string {
+  switch (code) {
+    case "missingCoverage":
+      return "missing coverage fact";
+    case "noUsableProviderSymbols":
+      return "no usable provider symbols";
+    case "unknown":
+      return "unknown";
+    default:
+      return "unknown";
+  }
+}
+
+function formatProviderFirstCallProofSample(sample: {
+  relPath: string;
+  range: {
+    startLine: number;
+    startCol: number;
+    endLine: number;
+    endCol: number;
+  };
+  expectedText?: string;
+  actualText?: string;
+}): string {
+  const range =
+    `${sample.range.startLine}:${sample.range.startCol}-` +
+    `${sample.range.endLine}:${sample.range.endCol}`;
+  const expected = sample.expectedText ?? "";
+  const actual = sample.actualText ?? "";
+  return (
+    `${sample.relPath}:${range} ` +
+    `expected "${escapeProviderFirstSampleText(expected)}", ` +
+    `actual "${escapeProviderFirstSampleText(actual)}"`
+  );
+}
+
+function escapeProviderFirstSampleText(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+function providerFirstCallProofReasonLabel(code: string): string {
+  switch (code) {
+    case "missingExpectedSymbolName":
+      return "missing expected symbol name";
+    case "sourceUnavailable":
+      return "source unavailable";
+    case "sourcePathOutsideRoot":
+      return "source path outside repo";
+    case "sourceRealPathOutsideRoot":
+      return "source real path outside repo";
+    case "sourceReadFailed":
+      return "source read failed";
+    case "sourceTooLarge":
+      return "source file too large";
+    case "multiLineRange":
+      return "multi-line range";
+    case "missingSourceLine":
+      return "missing source line";
+    case "rangeOutOfBounds":
+      return "range out of bounds";
+    case "symbolTextMismatch":
+      return "symbol text mismatch";
+    default:
+      return "unknown";
+  }
 }
 
 export function formatSemanticReadinessLines(
   semanticDeferred: boolean | null | undefined,
 ): string[] {
-  return semanticDeferred
-    ? ["  Semantic readiness: deferred"]
-    : [];
+  return semanticDeferred ? ["  Semantic readiness: deferred"] : [];
 }
 
 function embeddingStageLabel(substage?: IndexProgressSubstage): string {
@@ -234,10 +1112,13 @@ function writeProgressLine(
   line: string,
   pct: number | null,
   fileLine?: string,
+  forcePrint = false,
 ): void {
+  const stageChanged =
+    state.currentStage !== null && state.currentStage !== stageKey;
   // Stage transition — finalize the previous line so the new stage starts
   // on a fresh line and scrollback shows all stages.
-  if (state.currentStage !== null && state.currentStage !== stageKey) {
+  if (stageChanged) {
     if (isTty()) {
       // Clear file line if present, then move to new line
       if (state.lastFileLine) {
@@ -273,9 +1154,19 @@ function writeProgressLine(
       state.lastFileLine = "";
     }
   } else {
-    // Non-TTY: throttle to ~10% boundaries so CI logs don't drown in ticks.
+    // Non-TTY: throttle to ~1% boundaries unless a bounded diagnostic stage
+    // explicitly requests every update.
+    // Large provider-first fallback runs can spend minutes before 10%; a
+    // one-line-per-percent heartbeat keeps redirected CLI logs useful without
+    // dumping every file.
     // Pass pct=null for "always print" lines (stage headers, spinners).
-    if (pct === null || pct === 100 || pct - state.lastPrintedPct >= 10) {
+    if (
+      forcePrint ||
+      stageChanged ||
+      pct === null ||
+      pct === 100 ||
+      pct - state.lastPrintedPct >= 1
+    ) {
       console.log(line);
       if (fileLine) {
         console.log(`    ${fileLine}`);
@@ -351,6 +1242,24 @@ export function renderIndexProgress(
     } else {
       line = `  ${label}...`;
     }
+  } else if (p.stage === "providerFirst") {
+    const subLabel = providerFirstSubstageLabel(p.substage);
+    const stageCur = p.stageCurrent;
+    const stageTot = p.stageTotal;
+    if (
+      typeof stageCur === "number" &&
+      typeof stageTot === "number" &&
+      stageTot > 0
+    ) {
+      pct = Math.min(100, Math.floor((stageCur / stageTot) * 100));
+      const bar = buildBar(pct);
+      line = `  ${subLabel}: ${bar} ${String(pct).padStart(3)}% (${stageCur}/${stageTot})`;
+      if (p.message) line += ` — ${p.message}`;
+    } else if (p.message) {
+      line = `  ${subLabel} — ${p.message}`;
+    } else {
+      line = `  ${subLabel}...`;
+    }
   } else if (p.stage === "finalizing") {
     const subLabel = p.substage ? indexSubstageLabel(p.substage) : "Finalizing";
     const stageCur = p.stageCurrent;
@@ -418,7 +1327,16 @@ export function renderIndexProgress(
     line = `  ${label}...`;
   }
 
-  writeProgressLine(state, stageKey, line, pct, p.currentFile);
+  const forcePrint =
+    p.stage === "pass1" && p.total > 0 && p.total <= 5000 && p.currentFile;
+  writeProgressLine(
+    state,
+    stageKey,
+    line,
+    pct,
+    p.currentFile,
+    Boolean(forcePrint),
+  );
 }
 
 interface DelegatedIndexResult {
@@ -444,6 +1362,7 @@ async function delegateIndexToServer(
     `  Delegating to running server (PID ${server.pid}, port ${server.port})...`,
   );
 
+  const wallStartedAt = Date.now();
   const progressState = createProgressState();
   let completed = false;
   let serverError: string | undefined;
@@ -504,7 +1423,9 @@ async function delegateIndexToServer(
                 symbolsIndexed: number;
                 edgesCreated: number;
                 externalSymbolsIndexed: number;
+                shadowBuild?: ProviderFirstExecutionSummary["shadowBuild"];
                 coverage?: ProviderFirstExecutionSummary["coverage"];
+                phaseTimings?: ProviderFirstExecutionSummary["phaseTimings"];
               } | null;
               semanticDeferred?: boolean | null;
               summaryStats?: {
@@ -513,13 +1434,25 @@ async function delegateIndexToServer(
                 skipped: number;
                 failed: number;
               } | null;
+              scip?: IndexResult["scip"] | null;
+              runtimeIdentity?: RuntimeIdentity | null;
             };
+            if (c.runtimeIdentity) {
+              console.log(
+                formatRuntimeIdentityLine(
+                  c.runtimeIdentity,
+                  "  Server runtime",
+                ),
+              );
+            }
             for (const line of formatProviderFirstExecutionSummaryLines(
               c.providerFirstExecution,
             )) {
               console.log(line);
             }
-            for (const line of formatSemanticReadinessLines(c.semanticDeferred)) {
+            for (const line of formatSemanticReadinessLines(
+              c.semanticDeferred,
+            )) {
               console.log(line);
             }
             console.log(`  Files: ${c.filesProcessed}`);
@@ -530,6 +1463,13 @@ async function delegateIndexToServer(
               `  Edges: ${c.edgesCreated} new (${c.totalEdges} total)`,
             );
             console.log(`  Duration: ${c.durationMs}ms`);
+            console.log(
+              formatIndexWallTimeLine(Date.now() - wallStartedAt, c.durationMs),
+            );
+            const cacheLine = formatScipGeneratorCacheLine(
+              c.scip?.generatorCache,
+            );
+            if (cacheLine) console.log(cacheLine);
             if (c.summaryStats) {
               const s = c.summaryStats;
               console.log(
@@ -563,7 +1503,8 @@ async function delegateIndexToServer(
     }
     return {
       ok: false,
-      message: serverError ?? "Delegated indexing stream closed before completion.",
+      message:
+        serverError ?? "Delegated indexing stream closed before completion.",
     };
   } catch (error) {
     finishProgress(progressState);
@@ -606,6 +1547,18 @@ export function canDelegateIndexToServer(
   return (
     typeof existing.authToken === "string" && existing.authToken.length > 0
   );
+}
+
+export function formatIndexStartupLines(params: {
+  repoCount: number;
+  runtimeIdentity: RuntimeIdentity;
+  graphDbPath: string;
+}): string[] {
+  return [
+    `Indexing ${params.repoCount} repo(s)...`,
+    formatRuntimeIdentityLine(params.runtimeIdentity),
+    `Graph DB: ${normalizePath(params.graphDbPath)}`,
+  ];
 }
 
 export async function indexCommand(options: IndexOptions): Promise<void> {
@@ -651,6 +1604,14 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
     process.exit(1);
   }
 
+  for (const line of formatIndexStartupLines({
+    repoCount: reposToIndex.length,
+    runtimeIdentity: createRuntimeIdentity(import.meta.url),
+    graphDbPath,
+  })) {
+    console.log(line);
+  }
+
   // If we cannot delegate, initialize the DB for direct indexing. When a live
   // HTTP server owns the graph DB, failed delegation remains a retryable
   // server-side error instead of falling through to local DB initialization.
@@ -662,8 +1623,6 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
     });
     dbInitialized = true;
   }
-
-  console.log(`Indexing ${reposToIndex.length} repo(s)...`);
 
   const errors: Array<{ repoId: string; error: string }> = [];
   const isOneShot = !options.watch;
@@ -749,6 +1708,7 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       // between them (e.g. embeddings -> SCIP externals) produce a clean
       // newline boundary in TTY mode.
       const progressState = createProgressState();
+      const wallStartedAt = Date.now();
       const stats: IndexResult = await indexRepo(
         repo.repoId,
         directMode,
@@ -760,8 +1720,12 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       );
       // Finalize the last indexer stage line before printing summary lines.
       finishProgress(progressState);
-      const totalSymbols = await ladybugDb.getSymbolCount(conn, repo.repoId);
-      const totalEdges = await ladybugDb.getEdgeCount(conn, repo.repoId);
+      const statsConn = await getLadybugConn();
+      const totalSymbols = await ladybugDb.getSymbolCount(
+        statsConn,
+        repo.repoId,
+      );
+      const totalEdges = await ladybugDb.getEdgeCount(statsConn, repo.repoId);
       for (const line of formatProviderFirstExecutionSummaryLines(
         stats.providerFirstExecution,
       )) {
@@ -776,6 +1740,13 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       );
       console.log(`  Edges: ${stats.edgesCreated} new (${totalEdges} total)`);
       console.log(`  Duration: ${stats.durationMs}ms`);
+      console.log(
+        formatIndexWallTimeLine(Date.now() - wallStartedAt, stats.durationMs),
+      );
+      const cacheLine = formatScipGeneratorCacheLine(
+        stats.scip?.generatorCache,
+      );
+      if (cacheLine) console.log(cacheLine);
       if (stats.scip) {
         const skippedGenerated = stats.scip.generatedIndexes.filter(
           (index) => index.skipped,
