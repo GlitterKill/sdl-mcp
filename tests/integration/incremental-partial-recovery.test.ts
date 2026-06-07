@@ -66,7 +66,11 @@ describe("incremental index partial-run recovery", () => {
         {
           repos: [],
           policy: {},
-          indexing: { engine: "typescript", enableFileWatching: false },
+          indexing: {
+            pipeline: "legacy",
+            engine: "typescript",
+            enableFileWatching: false,
+          },
           semantic: { enabled: false },
           liveIndex: { enabled: false },
           scip: {

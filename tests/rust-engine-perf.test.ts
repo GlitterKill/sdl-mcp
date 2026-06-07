@@ -149,10 +149,10 @@ describe("Fix 2+3: Chunked concurrent processing", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Fix 4: Eager TS resolver creation
+// Fix 4: Lazy TS resolver creation
 // ---------------------------------------------------------------------------
-describe("Fix 4: Eager TS resolver creation", () => {
-  it("indexer.ts always creates TS resolver regardless of engine", async () => {
+describe("Fix 4: Lazy TS resolver creation", () => {
+  it("indexer.ts wires a lazy TS resolver regardless of engine", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const { fileURLToPath } = await import("node:url");
@@ -166,26 +166,20 @@ describe("Fix 4: Eager TS resolver creation", () => {
     );
     const content = fs.readFileSync(srcPath, "utf-8");
 
-    // Should NOT have the deferred conditional
+    // The resolver handle must still be available to pass 2 even when the Rust
+    // pass-1 engine parses files, but the heavy ts.Program build is deferred.
     assert.ok(
       !content.includes("useRustEngine\n            ? null"),
       "Should not conditionally skip TS resolver when Rust engine is active",
     );
     assert.ok(
-      !content.includes("Creating deferred TS call resolver"),
-      "Should not have deferred TS resolver creation",
+      content.includes("createLazyTsCallResolver"),
+      "Should wire the lazy TS resolver handle",
     );
-
-    // Should have the eager creation comment
     assert.ok(
-      content.includes("Fix 4: Create TS resolver eagerly"),
-      "Should eagerly create TS resolver",
-    );
-
-    // Should have removed the deferred block
-    assert.ok(
-      content.includes("Fix 4: TS resolver created eagerly in initSharedState"),
-      "Should have replaced deferred block with comment",
+      content.includes("without building") &&
+        content.includes("ts.Program during Pass 1"),
+      "Should document why the TS program build is deferred",
     );
   });
 });
@@ -315,7 +309,7 @@ describe("Review fix: mid-run fallback to TS", () => {
 });
 
 describe("Review fix: eager resolver guards non-TS repos", () => {
-  it("checks for TS/JS files before creating resolver", async () => {
+  it("checks for TS/JS files before building a resolver delegate", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const { fileURLToPath } = await import("node:url");
@@ -325,16 +319,17 @@ describe("Review fix: eager resolver guards non-TS repos", () => {
       "..",
       "src",
       "indexer",
-      "indexer.ts",
+      "ts",
+      "tsParser.ts",
     );
     const content = fs.readFileSync(srcPath, "utf-8");
 
     assert.ok(
       content.includes("hasTsFiles"),
-      "Should check for TS/JS files before creating resolver",
+      "Should check for TS/JS files before creating a resolver delegate",
     );
     assert.ok(
-      content.includes("if (!hasTsFiles) return null"),
+      content.includes("if (!hasTsFiles") && content.includes("return null"),
       "Should return null for pure non-TS repos",
     );
   });

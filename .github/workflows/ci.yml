@@ -309,6 +309,12 @@ jobs:
           echo "Running benchmark CI against locked OSS repo (zod-oss)..."
           if [ "${{ runner.os }}" = "Windows" ]; then
             THRESHOLD_PATH="config/benchmark.ci.windows.config.json"
+            # Windows hosted runners intermittently segfault in the native
+            # addon during benchmark:ci. Keep Windows benchmark guardrails
+            # active against the TypeScript engine; Linux still covers native
+            # benchmark performance in this matrix.
+            export SDL_MCP_DISABLE_NATIVE_ADDON=1
+            unset SDL_MCP_NATIVE_ADDON_PATH
           else
             THRESHOLD_PATH="config/benchmark.ci.config.json"
           fi

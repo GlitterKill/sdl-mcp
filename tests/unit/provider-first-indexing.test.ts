@@ -279,6 +279,59 @@ describe("provider-first indexing foundation", () => {
     });
   });
 
+  it("deduplicates call-proof samples collected from coverage and source analysis", () => {
+    const report = analyzeProviderFirstCoverage({
+      scannedPaths: ["src/index.ts"],
+      providerPaths: ["src/index.ts"],
+      coverage: [
+        {
+          relPath: "src/index.ts",
+          legacyFallback: "skip",
+          symbolCoverage: "full",
+          totalResolvedReferences: 1,
+          callProofUnavailableReferences: 1,
+          callProofCoverage: "none",
+          callProofUnavailableReasons: [
+            { code: "symbolTextMismatch", references: 1 },
+          ],
+          callProofUnavailableSamples: [
+            {
+              code: "symbolTextMismatch",
+              relPath: "src/index.ts",
+              range: { startLine: 1, startCol: 9, endLine: 1, endCol: 15 },
+              expectedText: "helper",
+              actualText: "rename",
+            },
+          ],
+        },
+      ],
+      symbols: [
+        {
+          relPath: "src/index.ts",
+          providerId: "scip",
+          providerSymbolId:
+            "scip-typescript npm fixture 1.0.0 src/index.ts/helper().",
+          name: "helper",
+        },
+      ],
+      occurrences: [
+        {
+          relPath: "src/index.ts",
+          role: "reference",
+          providerSymbolId:
+            "scip-typescript npm fixture 1.0.0 src/index.ts/helper().",
+          range: { startLine: 1, startCol: 9, endLine: 1, endCol: 15 },
+        },
+      ],
+      sourceLinesByPath: new Map([["src/index.ts", new Map([[0, "  return renamed();"]])]]),
+    });
+
+    const mismatchReason = report.summary.callProofIncompleteReasons?.find(
+      (reason) => reason.code === "symbolTextMismatch",
+    );
+    assert.equal(mismatchReason?.samples?.length, 1);
+  });
+
   it("allows shadow staging when only the legacy fallback cap defers readiness", () => {
     const gates = resolveProviderFirstReadinessGates({
       skippedLegacyFallbackReason:
@@ -5612,6 +5665,38 @@ describe("provider-first indexing foundation", () => {
     );
   });
 
+  it("retires provider file symbols through FILE_IN_REPO ownership", async () => {
+    const statements: string[] = [];
+    const rows = providerFactsToGraphRows({
+      indexedAt: "2026-05-25T12:00:00.000Z",
+      facts: providerFactSet(),
+    });
+
+    await materializeProviderFacts(
+      createFakeConnection(statements, (statement) =>
+        statement.includes("RETURN s.symbolId AS symbolId")
+          ? [{ symbolId: "stale-symbol" }]
+          : [],
+      ),
+      rows,
+      { replaceFileSymbols: true },
+    );
+
+    assert.equal(
+      countStatements(statements, "RETURN DISTINCT f.repoId AS repoId"),
+      0,
+      "File nodes do not store repoId; ownership must be resolved through FILE_IN_REPO",
+    );
+    assert.equal(
+      statements.some(
+        (statement) =>
+          statement.includes("FILE_IN_REPO") &&
+          statement.includes("RETURN s.symbolId AS symbolId"),
+      ),
+      true,
+    );
+  });
+
   it("records provider materialization subphase timings in write order", async () => {
     const statements: string[] = [];
     const phases: string[] = [];
@@ -7376,13 +7461,22 @@ function providerFactSet(
 }
 
 class FakeQueryResult {
+  private readonly rows: unknown[];
+
+  constructor(rows: unknown[] = []) {
+    this.rows = rows;
+  }
+
   close(): void {}
   async getAll(): Promise<unknown[]> {
-    return [];
+    return this.rows;
   }
 }
 
-function createFakeConnection(statements: string[]): import("kuzu").Connection {
+function createFakeConnection(
+  statements: string[],
+  resultRowsForStatement: (statement: string) => unknown[] = () => [],
+): import("kuzu").Connection {
   return {
     async prepare(statement: string) {
       return {
@@ -7397,11 +7491,13 @@ function createFakeConnection(statements: string[]): import("kuzu").Connection {
     },
     async execute(preparedStatement: { statement: string }) {
       statements.push(preparedStatement.statement);
-      return new FakeQueryResult();
+      return new FakeQueryResult(
+        resultRowsForStatement(preparedStatement.statement),
+      );
     },
     async query(statement: string) {
       statements.push(statement);
-      return new FakeQueryResult();
+      return new FakeQueryResult(resultRowsForStatement(statement));
     },
   } as unknown as import("kuzu").Connection;
 }

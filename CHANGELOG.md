@@ -56,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **File watcher ignores**: Compiled repository ignore globs into the Chokidar startup predicate so modern Chokidar versions prune ignored directories such as `node_modules`, `.bun`, `dist-*`, and build outputs before opening watches. Watcher event filtering now reuses the same glob semantics and the scanner's language-extension mapping, keeping watcher scope aligned with indexed source files and preventing `EMFILE: too many open files, watch` storms in dependency-heavy repos.
 - **MCP tool schema compatibility**: Flattened root-level `oneOf`/`anyOf`/`allOf` composition in advertised tool input schemas, including `sdl.search.edit`, `sdl.symbol.edit`, and gateway wire schemas, so Claude/Anthropic clients that require top-level `type: "object"` schemas can accept SDL-MCP tool lists while runtime Zod validation remains strict.
 - **Cluster refresh crash**: Dropped and rebuilt the Cluster FTS index around topology-changing cluster replacement so LadybugDB does not access-violate when deleting the old cluster set during delegated incremental indexing. Rebuilds now fail closed when FTS is available, skip only when the global Cluster table is empty, and recreate Cluster FTS when rows return after an absent-index state.
 - **FTS bootstrap safety**: Deferred FTS index creation for empty entity tables and made FTS existence checks table-aware so same-name indexes on other tables do not mask missing required indexes.

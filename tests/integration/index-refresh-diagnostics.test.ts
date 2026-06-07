@@ -234,18 +234,18 @@ describe("index.refresh diagnostics", () => {
       "expected initSharedState.tsResolver timing",
     );
     assert.equal(
-      typeof result.diagnostics.timings.phases[
+      result.diagnostics.timings.phases[
         "initSharedState.tsResolver.sourceFiles"
       ],
-      "number",
-      "expected initSharedState.tsResolver.sourceFiles timing",
+      undefined,
+      "expected lazy TS resolver to skip source-file collection until pass 2 needs the program",
     );
     assert.equal(
-      typeof result.diagnostics.timings.phases[
+      result.diagnostics.timings.phases[
         "initSharedState.tsResolver.programBuild"
       ],
-      "number",
-      "expected initSharedState.tsResolver.programBuild timing",
+      undefined,
+      "expected lazy TS resolver to skip program build until pass 2 needs it",
     );
     assert.equal(
       typeof result.diagnostics.timings.phases["initSharedState.symbolMaps"],

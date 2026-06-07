@@ -1,15 +1,24 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert";
+import { join, resolve } from "node:path";
+
 import {
   getWatcherHealth,
   _setWatcherHealthForTesting,
   _clearWatcherHealthForTesting,
 } from "../../dist/indexer/indexer.js";
-import { isWatcherStale } from "../../dist/indexer/watcher.js";
+import {
+  _createChokidarIgnoredPredicateForTesting,
+  isWatcherStale,
+} from "../../dist/indexer/watcher.js";
 import { RepoStatusResponseSchema } from "../../dist/mcp/tools.js";
 import { WATCHER_ERROR_MAX_COUNT } from "../../dist/config/constants.js";
 
 const TEST_REPO_ID = "watcher-health-test-repo";
+
+function statsLike(isDirectory: boolean): { isDirectory(): boolean } {
+  return { isDirectory: () => isDirectory };
+}
 
 describe("watcher health", () => {
   afterEach(() => {
@@ -185,6 +194,54 @@ describe("watcher health", () => {
         pendingChanges: 1,
       }),
       true,
+    );
+  });
+
+  it("applies SDL ignore globs to absolute chokidar paths", () => {
+    const repoRoot = resolve("repo");
+    const ignored = _createChokidarIgnoredPredicateForTesting(repoRoot, [
+      "**/node_modules/**",
+      "**/.bun/**",
+    ]);
+
+    assert.strictEqual(
+      ignored(join(repoRoot, "node_modules"), statsLike(true)),
+      true,
+      "node_modules directory should be ignored before chokidar descends",
+    );
+    assert.strictEqual(
+      ignored(
+        join(repoRoot, "node_modules", ".bun", "dep", "index.ts"),
+        statsLike(false),
+      ),
+      true,
+      "nested Bun install paths should be ignored through node_modules/.bun",
+    );
+    assert.strictEqual(
+      ignored(join(repoRoot, "src", "index.ts"), statsLike(false)),
+      false,
+      "ordinary source files should remain watchable",
+    );
+  });
+
+  it("keeps wildcard directory ignores from becoming source-file substring filters", () => {
+    const repoRoot = resolve("repo");
+    const ignored = _createChokidarIgnoredPredicateForTesting(repoRoot, [
+      "**/dist-*/**",
+    ]);
+
+    assert.strictEqual(
+      ignored(
+        join(repoRoot, "tests", "stress", "infra", "dist-runtime.ts"),
+        statsLike(false),
+      ),
+      false,
+      "source files whose basename starts with dist- should not be ignored",
+    );
+    assert.strictEqual(
+      ignored(join(repoRoot, "dist-tests"), statsLike(true)),
+      true,
+      "dist-* directories should still be ignored",
     );
   });
 });

@@ -215,7 +215,9 @@ export async function materializeProviderFacts(
   const writeEdges = options.writeEdges ?? true;
   if (deleteExistingFileSymbols) {
     await measurePhase("deleteFileSymbols", async () => {
-      await deleteProviderFileSymbolsInChunks(conn, [...rows.changedFileIds]);
+      await deleteProviderFileSymbolsInChunks(conn, repoId, [
+        ...rows.changedFileIds,
+      ]);
       await deleteProviderSymbolsByIdInChunks(
         conn,
         repoId,
@@ -266,6 +268,7 @@ export async function materializeProviderFacts(
 
 async function deleteProviderFileSymbolsInChunks(
   conn: Connection,
+  repoId: string,
   fileIds: string[],
 ): Promise<void> {
   // Delete fan-out is much larger than file upsert fan-out: one file chunk can
@@ -278,36 +281,28 @@ async function deleteProviderFileSymbolsInChunks(
   for (let i = 0; i < fileIds.length; i += chunkSize) {
     const chunk = fileIds.slice(i, i + chunkSize);
     await ladybugDb.withTransaction(conn, async (txConn) => {
-      await retireProviderSymbolsByFileIds(txConn, chunk);
+      await retireProviderSymbolsByFileIds(txConn, repoId, chunk);
     });
   }
 }
 
 async function retireProviderSymbolsByFileIds(
   conn: Connection,
+  repoId: string,
   fileIds: string[],
 ): Promise<void> {
   if (fileIds.length === 0) return;
 
   const symbolRows = await ladybugDb.queryAll<{ symbolId: string }>(
     conn,
-    `MATCH (f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
+    `MATCH (:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
      WHERE f.fileId IN $fileIds
      RETURN s.symbolId AS symbolId`,
-    { fileIds },
+    { repoId, fileIds },
   );
   if (symbolRows.length === 0) return;
 
   const symbolIds = symbolRows.map((row) => row.symbolId);
-  const repoIds = await ladybugDb.queryAll<{ repoId: string }>(
-    conn,
-    `MATCH (f:File)
-     WHERE f.fileId IN $fileIds
-     RETURN DISTINCT f.repoId AS repoId`,
-    { fileIds },
-  );
-  const repoId = repoIds[0]?.repoId;
-  if (!repoId) return;
   await retireProviderSymbolsByIds(conn, repoId, symbolIds, fileIds);
 }
 

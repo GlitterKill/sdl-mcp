@@ -271,19 +271,23 @@ describe("provider-first indexRepo fallback", () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
     });
-    const progressStages: string[] = [];
+    const progressEvents: string[] = [];
 
     const result = await indexRepo(repoId, "full", (progress) => {
-      progressStages.push(progress.stage);
+      progressEvents.push(`${progress.stage}:${progress.substage ?? ""}`);
     });
 
-    const firstScan = progressStages.indexOf("scanning");
-    const firstScipIngest = progressStages.indexOf("scipIngest");
+    const firstScan = progressEvents.findIndex((event) =>
+      event.startsWith("scanning:"),
+    );
+    const firstProviderCollection = progressEvents.findIndex((event) =>
+      event.startsWith("providerFirst:providerCollection."),
+    );
     assert.notEqual(firstScan, -1);
-    assert.notEqual(firstScipIngest, -1);
+    assert.notEqual(firstProviderCollection, -1);
     assert.ok(
-      firstScan < firstScipIngest,
-      `expected scanning before SCIP ingest, got ${progressStages.join(", ")}`,
+      firstScan < firstProviderCollection,
+      `expected scanning before provider collection, got ${progressEvents.join(", ")}`,
     );
     assert.equal(
       result.providerFirstExecution?.phaseTimings?.phases[
@@ -408,7 +412,7 @@ describe("provider-first indexRepo fallback", () => {
     assert.ok(
       Object.hasOwn(
         result.providerFirstExecution?.legacyFallbackDiagnostics?.phases ?? {},
-        "pass1Drain.write.upsertFiles",
+        "pass1",
       ),
     );
     assert.ok(
@@ -494,10 +498,11 @@ describe("provider-first indexRepo fallback", () => {
     );
     assert.ok(
       (result.providerFirstExecution?.legacyFallbackDiagnostics?.phases[
-        "pass1Drain.write.upsertSymbols"
+        "pass1"
       ] ?? 0) > 0,
-      "provider-first fallback should collect pass-1 drain write subphases without broad timing diagnostics",
+      "provider-first fallback should collect scoped pass-1 timing without broad timing diagnostics",
     );
+    assert.equal(result.timings, undefined);
 
     const conn = await getLadybugConn();
     const edgeCount = await ladybugDb.getEdgeCount(conn, repoId);
@@ -609,7 +614,9 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(result.providerFirstExecution?.externalSymbolsIndexed, 1);
     assert.deepEqual(result.providerFirstExecution?.coverage, {
       scannedFiles: 1,
+      semanticEligibleFiles: undefined,
       providerFiles: 1,
+      providerCoveredFiles: 1,
       providerPrimaryFiles: 1,
       fullyCoveredFiles: 0,
       partialFiles: 1,
@@ -953,26 +960,33 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(ladybugDb.toNumber(symbolCount?.count), 3);
   });
 
-  it("fails explicit providerFirst before writing cross-document duplicate SCIP symbols", async () => {
+  it("falls back before writing cross-document duplicate SCIP symbols", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
       duplicateProviderSymbolDocument: true,
     });
 
-    await assert.rejects(
-      () => indexRepo(repoId, "full"),
-      /duplicate symbols/i,
+    const result = await indexRepo(repoId, "full");
+
+    assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.match(
+      result.providerFirstExecution?.reasons.join(" ") ?? "",
+      /legacy fallback indexed/i,
+    );
+    assert.ok(
+      (result.providerFirstExecution?.legacyFallbackDiagnostics?.files ?? 0) >
+        0,
     );
 
     const conn = await getLadybugConn();
-    const symbolCount = await ladybugDb.querySingle<{ count: unknown }>(
+    const providerMainCount = await ladybugDb.querySingle<{ count: unknown }>(
       conn,
       `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
-       WHERE s.source = 'scip'
+       WHERE s.source = 'scip' AND s.name = 'main'
        RETURN count(s) AS count`,
       { repoId },
     );
-    assert.equal(ladybugDb.toNumber(symbolCount?.count), 0);
+    assert.equal(ladybugDb.toNumber(providerMainCount?.count), 0);
   });
 
   it("executes explicit providerFirst when SCIP covers an empty document", async () => {

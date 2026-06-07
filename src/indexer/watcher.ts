@@ -1,5 +1,5 @@
 import { watch } from "fs";
-import { relative } from "path";
+import { isAbsolute, relative } from "path";
 
 import type { RepoConfig } from "../config/types.js";
 import {
@@ -20,8 +20,10 @@ import * as ladybugDb from "../db/ladybug-queries.js";
 import { normalizePath } from "../util/paths.js";
 import { patchSavedFile } from "../live-index/file-patcher.js";
 import { withIndexingGate } from "../mcp/indexing-gate.js";
+import { globToSafeRegex } from "../util/safeRegex.js";
 
 import type { IndexWatchHandle, WatcherHealth } from "./indexer.js";
+import { getLanguageExtensions } from "./fileScanner.js";
 import { logger } from "../util/logger.js";
 import { logWatcherHealthTelemetry } from "../mcp/telemetry.js";
 
@@ -73,6 +75,10 @@ type ChokidarModule = {
     options?: Record<string, unknown>,
   ) => unknown;
 };
+type ChokidarIgnoredPredicate = (
+  path: string,
+  stats?: { isDirectory?(): boolean },
+) => boolean;
 
 async function loadChokidar(): Promise<ChokidarModule | null> {
   try {
@@ -196,7 +202,8 @@ export async function watchRepositoryWithIndexer(
     throw new Error(`Corrupt configJson for repo ${repoId}`);
   }
   const ignorePatterns = repoConfig.ignore ?? [];
-  const extensions = repoConfig.languages.map((lang) => `.${lang}`);
+  const compiledIgnorePatterns = compileIgnorePatterns(ignorePatterns);
+  const extensions = getLanguageExtensions(repoConfig.languages);
 
   const appConfig = loadConfig();
   const maxWatchedFiles =
@@ -381,7 +388,7 @@ export async function watchRepositoryWithIndexer(
 
   const handler = (relativeFilePath: string): void => {
     const normalizedFilePath = normalizePath(relativeFilePath);
-    if (shouldIgnorePath(normalizedFilePath, ignorePatterns)) {
+    if (shouldIgnorePath(normalizedFilePath, compiledIgnorePatterns)) {
       return;
     }
     if (!matchesExtensions(normalizedFilePath, extensions)) {
@@ -395,7 +402,10 @@ export async function watchRepositoryWithIndexer(
     const chokidar = await loadChokidar();
     if (chokidar) {
       const watcher = chokidar.watch(repoRow.rootPath, {
-        ignored: ignorePatterns,
+        ignored: createChokidarIgnoredPredicate(
+          repoRow.rootPath,
+          compiledIgnorePatterns,
+        ),
         ignoreInitial: true,
         awaitWriteFinish: {
           stabilityThreshold: WATCH_STABILITY_THRESHOLD_MS,
@@ -570,19 +580,81 @@ function matchesExtensions(path: string, extensions: string[]): boolean {
   return extensions.some((ext) => path.endsWith(ext));
 }
 
-function shouldIgnorePath(path: string, ignorePatterns: string[]): boolean {
+function compileIgnorePatterns(ignorePatterns: readonly string[]): RegExp[] {
+  return ignorePatterns.map((pattern) =>
+    globToSafeRegex(normalizePath(pattern)),
+  );
+}
+
+function matchesAnyPattern(path: string, patterns: readonly RegExp[]): boolean {
+  return patterns.some((pattern) => pattern.test(path));
+}
+
+function shouldIgnorePath(
+  path: string,
+  ignorePatterns: readonly RegExp[],
+  isDirectory = false,
+): boolean {
   const normalized = normalizePath(path);
-  for (const pattern of ignorePatterns) {
-    const token = pattern
-      .replace(/\*\*\//g, "")
-      .replace(/\/\*\*/g, "")
-      .replace(/\*/g, "")
-      .replace(/\/+/g, "/")
-      .trim();
-    if (!token) continue;
-    if (normalized.includes(token)) {
-      return true;
-    }
+  if (!normalized || normalized === ".") {
+    return false;
   }
-  return false;
+  if (matchesAnyPattern(normalized, ignorePatterns)) {
+    return true;
+  }
+  return isDirectory && matchesAnyPattern(`${normalized}/`, ignorePatterns);
+}
+
+function toRepoRelativeWatchPath(
+  repoRoot: string,
+  candidatePath: string,
+): string | null {
+  const candidate = candidatePath.trim();
+  if (!candidate) return "";
+
+  const relativePath = isAbsolute(candidate)
+    ? normalizePath(relative(repoRoot, candidate))
+    : normalizePath(candidate).replace(/^\.\//, "");
+
+  if (!relativePath || relativePath === ".") return "";
+  if (
+    relativePath === ".." ||
+    relativePath.startsWith("../") ||
+    isAbsolute(relativePath)
+  ) {
+    return null;
+  }
+  return relativePath;
+}
+
+function createChokidarIgnoredPredicate(
+  repoRoot: string,
+  ignorePatterns: readonly RegExp[],
+): ChokidarIgnoredPredicate {
+  // Chokidar v4+ treats string ignores as exact paths, so compile SDL globs
+  // into a predicate that can prune ignored directories before watcher setup.
+  return (candidatePath, stats) => {
+    const relativePath = toRepoRelativeWatchPath(repoRoot, candidatePath);
+    if (relativePath === null || relativePath.length === 0) {
+      return false;
+    }
+    return shouldIgnorePath(
+      relativePath,
+      ignorePatterns,
+      stats?.isDirectory?.() ?? false,
+    );
+  };
+}
+
+/**
+ * @internal
+ */
+export function _createChokidarIgnoredPredicateForTesting(
+  repoRoot: string,
+  ignorePatterns: readonly string[],
+): ChokidarIgnoredPredicate {
+  return createChokidarIgnoredPredicate(
+    repoRoot,
+    compileIgnorePatterns(ignorePatterns),
+  );
 }

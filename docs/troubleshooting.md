@@ -170,6 +170,11 @@ sdl-mcp serve --no-watch
 
 Then run manual refreshes with `sdl-mcp index` until the underlying issue is fixed.
 
+SDL-MCP applies repository `ignore` globs during watcher startup, not only after
+events arrive. Dependency-heavy package managers such as Bun should normally be
+covered by the default `**/node_modules/**` ignore; add repo-specific `ignore`
+entries only for generated directories that live outside those defaults.
+
 #### Windows: antivirus/endpoint locks
 
 - Symptom: frequent watcher errors, delayed or missing re-index events

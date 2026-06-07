@@ -1225,13 +1225,29 @@ function mergeCallProofSamples(
   >();
   for (const [reason, samples] of [...left.entries(), ...right.entries()]) {
     const existing = merged.get(reason) ?? [];
+    const existingKeys = new Set(existing.map(callProofSampleKey));
     for (const sample of samples) {
       if (existing.length >= CALL_PROOF_SUMMARY_SAMPLE_LIMIT) break;
+      const key = callProofSampleKey(sample);
+      if (existingKeys.has(key)) continue;
       existing.push(sample);
+      existingKeys.add(key);
     }
     if (existing.length > 0) merged.set(reason, existing);
   }
   return merged;
+}
+
+function callProofSampleKey(sample: CallProofUnavailableSampleFact): string {
+  return [
+    normalizePath(sample.relPath),
+    sample.range.startLine,
+    sample.range.startCol,
+    sample.range.endLine,
+    sample.range.endCol,
+    sample.expectedText,
+    sample.actualText,
+  ].join("\u0000");
 }
 
 function multiLineRangeSampleText(

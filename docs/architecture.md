@@ -251,7 +251,7 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 | Node Table        | Key Fields                                                                                                                                                        |
 | :---------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Repo**          | repoId, rootPath, configJson, createdAt                                                                                                                           |
-| **File**          | fileId, repoId, relPath, byteSize, contentHash                                                                                                                    |
+| **File**          | fileId, relPath, byteSize, contentHash, language, lastIndexedAt, directory                                                                                        |
 | **Symbol**        | symbolId, repoId, fileId, kind, name, exported, signatureJson, summary, summaryQuality, summarySource, etag, embeddingJinaCode, embeddingNomic, embeddingJinaCode |
 | **Version**       | versionId, repoId, timestamp, indexedAt                                                                                                                           |
 | **SymbolVersion** | symbolId, versionId, signatureJson, summary                                                                                                                       |
