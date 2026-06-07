@@ -1,17 +1,29 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { EdgeRow } from "../../dist/db/ladybug-queries.js";
+import type { RepoConfig } from "../../dist/config/types.js";
+import type {
+  Pass2Resolver,
+  Pass2ResolverContext,
+  Pass2Target,
+} from "../../dist/indexer/pass2/types.js";
 
 /**
  * Tests for the pass-2 dispatcher write helpers in
  * `src/indexer/indexer-pass2.ts`.
  *
  *   - `makeImmediateSubmit(mode)` → SubmitEdgeWrite that flushes via
- *     `withWriteConn` on each call. Sequential dispatch path.
+ *     `withWriteConn` on each call. Kept as a direct helper for small
+ *     call sites and no-op guards.
  *   - `makeBatchAccumulator()` → returns `{ acc, submit }`; submit pushes
  *     into the in-memory accumulator without touching the DB.
  *   - `flushBatchAccumulator(acc, mode)` → issues the combined write.
+ *   - `shouldFlushBatchAccumulator(acc, filesSinceFlush)` → controls
+ *     bounded sequential dispatch drains.
  *
  * The in-memory accumulator paths (no DB) are testable directly. The
  * actual flush + immediate-submit paths require a DB connection and are
@@ -90,6 +102,113 @@ function edge(overrides: Partial<EdgeRow> = {}): EdgeRow {
   };
 }
 
+function fileMeta(path: string): { path: string; size: number; mtime: number } {
+  return { path, size: 1, mtime: 1 };
+}
+
+class FakeSubmittingResolver implements Pass2Resolver {
+  readonly id = "fake-pass2";
+
+  constructor(
+    private readonly submissionForTarget: (
+      target: Pass2Target,
+      context: Pass2ResolverContext,
+    ) => { symbolIdsToRefresh: string[]; edges: EdgeRow[] },
+  ) {}
+
+  supports(target: Pass2Target): boolean {
+    return target.extension === ".ts";
+  }
+
+  async resolve(
+    target: Pass2Target,
+    context: Pass2ResolverContext,
+  ): Promise<{ edgesCreated: number }> {
+    const submission = this.submissionForTarget(target, context);
+    await context.submitEdgeWrite?.(submission);
+    return { edgesCreated: submission.edges.length };
+  }
+}
+
+async function withTempPass2Db<T>(
+  fn: (params: {
+    repoId: string;
+    getWriteRuns: () => number;
+  }) => Promise<T>,
+): Promise<T> {
+  const { closeLadybugDb, getLadybugConn, getPoolStats, initLadybugDb } =
+    await import("../../dist/db/ladybug.js");
+  const ladybugDb = await import("../../dist/db/ladybug-queries.js");
+
+  const tempDir = mkdtempSync(join(tmpdir(), "sdl-pass2-dispatch-"));
+  const graphDbPath = join(tempDir, "graph.lbug");
+  const repoId = `pass2-dispatch-${Date.now()}`;
+  try {
+    await closeLadybugDb();
+    await initLadybugDb(graphDbPath);
+    const conn = await getLadybugConn();
+    await ladybugDb.upsertRepo(conn, {
+      repoId,
+      rootPath: tempDir,
+      configJson: "{}",
+      createdAt: new Date().toISOString(),
+    });
+    return await fn({
+      repoId,
+      getWriteRuns: () => getPoolStats().writeTotalRuns,
+    });
+  } finally {
+    await closeLadybugDb();
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function runFakeSequentialPass2(params: {
+  repoId: string;
+  mode: "full" | "incremental";
+  files: Array<{ path: string; size: number; mtime: number }>;
+  resolver: Pass2Resolver;
+  changedPaths?: string[];
+}): Promise<{
+  edgesCreated: number;
+  telemetry: import("../../dist/indexer/edge-builder.js").CallResolutionTelemetry;
+}> {
+  const { runPass2Resolvers } = await import(
+    "../../dist/indexer/indexer-pass2.js"
+  );
+  const { createCallResolutionTelemetry } = await import(
+    "../../dist/indexer/edge-builder.js"
+  );
+  const { createPass2ResolverRegistry } = await import(
+    "../../dist/indexer/pass2/registry.js"
+  );
+  const telemetry = createCallResolutionTelemetry({
+    repoId: params.repoId,
+    mode: params.mode,
+    pass2EligibleFileCount: params.files.length,
+    registeredResolvers: [params.resolver.id],
+  });
+  const edgesCreated = await runPass2Resolvers({
+    repoId: params.repoId,
+    repoRoot: tmpdir(),
+    mode: params.mode,
+    pass2EligibleFiles: params.files,
+    changedPass2FilePaths: new Set(params.changedPaths ?? []),
+    supportsPass2FilePath: () => true,
+    pass2ResolverRegistry: createPass2ResolverRegistry([params.resolver]),
+    symbolIndex: new Map(),
+    tsResolver: null,
+    config: { languages: ["typescript"] } as RepoConfig,
+    pass2Concurrency: 1,
+    createdCallEdges: new Set(),
+    globalNameToSymbolIds: new Map(),
+    globalPreferredSymbolId: new Map(),
+    callResolutionTelemetry: telemetry,
+    onProgress: undefined,
+  });
+  return { edgesCreated, telemetry };
+}
+
 describe("makeBatchAccumulator", () => {
   it("starts with empty arrays", async () => {
     const { makeBatchAccumulator } =
@@ -138,6 +257,71 @@ describe("makeBatchAccumulator", () => {
   });
 });
 
+describe("shouldFlushBatchAccumulator", () => {
+  it("does not flush empty accumulators even when the file threshold is reached", async () => {
+    const { shouldFlushBatchAccumulator } = await import(
+      "../../dist/indexer/indexer-pass2.js"
+    );
+
+    assert.equal(
+      shouldFlushBatchAccumulator(
+        { symbolIdsToRefresh: [], edges: [] },
+        64,
+        { maxFiles: 64, maxEdges: 10 },
+      ),
+      false,
+    );
+  });
+
+  it("flushes symbol-only work at the file threshold", async () => {
+    const { shouldFlushBatchAccumulator } = await import(
+      "../../dist/indexer/indexer-pass2.js"
+    );
+
+    assert.equal(
+      shouldFlushBatchAccumulator(
+        { symbolIdsToRefresh: ["from-1"], edges: [] },
+        4,
+        { maxFiles: 4, maxEdges: 10 },
+      ),
+      true,
+    );
+  });
+
+  it("flushes edge-heavy work at the edge threshold", async () => {
+    const { shouldFlushBatchAccumulator } = await import(
+      "../../dist/indexer/indexer-pass2.js"
+    );
+
+    assert.equal(
+      shouldFlushBatchAccumulator(
+        {
+          symbolIdsToRefresh: [],
+          edges: [FAKE_EDGE, FAKE_EDGE, FAKE_EDGE],
+        },
+        1,
+        { maxFiles: 64, maxEdges: 3 },
+      ),
+      true,
+    );
+  });
+
+  it("keeps non-empty work buffered below both thresholds", async () => {
+    const { shouldFlushBatchAccumulator } = await import(
+      "../../dist/indexer/indexer-pass2.js"
+    );
+
+    assert.equal(
+      shouldFlushBatchAccumulator(
+        { symbolIdsToRefresh: ["from-1"], edges: [FAKE_EDGE] },
+        2,
+        { maxFiles: 4, maxEdges: 3 },
+      ),
+      false,
+    );
+  });
+});
+
 describe("flushBatchAccumulator — no-op guards", () => {
   it("returns immediately when both arrays are empty (no DB call)", async () => {
     const { flushBatchAccumulator } =
@@ -154,13 +338,153 @@ describe("flushBatchAccumulator — no-op guards", () => {
   it("returns immediately for full-mode + empty edges (no DB call)", async () => {
     const { flushBatchAccumulator } =
       await import("../../dist/indexer/indexer-pass2.js");
-    // When both arrays are empty the early return fires regardless of
-    // mode — the full-mode DELETE-skip optimisation kicks in only when
-    // we have symbolIdsToRefresh, but no edges either means no work.
     const acc = { symbolIdsToRefresh: [], edges: [] };
     await assert.doesNotReject(
       async () => await flushBatchAccumulator(acc, "full"),
     );
+  });
+
+  it("returns immediately for full-mode + symbol-only work (no DB call)", async () => {
+    const { flushBatchAccumulator } =
+      await import("../../dist/indexer/indexer-pass2.js");
+    // Full-mode pass-2 does not need the incremental outgoing-edge delete,
+    // so symbolIds without new edges would otherwise open a no-op write conn.
+    const acc = { symbolIdsToRefresh: ["from-1"], edges: [] };
+    await assert.doesNotReject(
+      async () => await flushBatchAccumulator(acc, "full"),
+    );
+  });
+});
+
+describe("runPass2Resolvers — sequential dispatcher write batching", () => {
+  it("drains sequential writes at the file threshold and final tail", async () => {
+    await withTempPass2Db(async ({ repoId, getWriteRuns }) => {
+      const files = Array.from({ length: 65 }, (_, index) =>
+        fileMeta(`src/file-${index}.ts`),
+      );
+      const resolver = new FakeSubmittingResolver((target) => {
+        const index = target.filePath.match(/file-(\d+)\.ts$/)?.[1] ?? "x";
+        return {
+          symbolIdsToRefresh: [`from-${index}`],
+          edges: [
+            edge({
+              repoId,
+              fromSymbolId: `from-${index}`,
+              toSymbolId: `to-${index}`,
+            }),
+          ],
+        };
+      });
+
+      const before = getWriteRuns();
+      const { edgesCreated, telemetry } = await runFakeSequentialPass2({
+        repoId,
+        mode: "full",
+        files,
+        resolver,
+      });
+      const after = getWriteRuns();
+
+      assert.equal(edgesCreated, 65);
+      assert.equal(
+        after - before,
+        2,
+        "65 sequential files should flush once at 64 files and once for the final tail",
+      );
+      assert.equal(telemetry.pass2FilesProcessed, 65);
+      assert.equal(telemetry.resolverBreakdown["fake-pass2"]?.targets, 65);
+      assert.equal(
+        telemetry.resolverBreakdown["fake-pass2"]?.edgesCreated,
+        65,
+      );
+
+      const { getLadybugConn } = await import("../../dist/db/ladybug.js");
+      const ladybugDb = await import("../../dist/db/ladybug-queries.js");
+      const conn = await getLadybugConn();
+      const tailEdges = await ladybugDb.getEdgesFrom(conn, "from-64");
+      assert.equal(
+        tailEdges.filter((candidate) => candidate.edgeType === "call").length,
+        1,
+        "the final tail batch should be persisted",
+      );
+    });
+  });
+
+  it("keeps incremental symbol-only submissions as delete writes", async () => {
+    await withTempPass2Db(async ({ repoId, getWriteRuns }) => {
+      const { getLadybugConn } = await import("../../dist/db/ladybug.js");
+      const ladybugDb = await import("../../dist/db/ladybug-queries.js");
+      const conn = await getLadybugConn();
+      await ladybugDb.insertEdges(conn, [
+        edge({
+          repoId,
+          fromSymbolId: "from-stale",
+          toSymbolId: "to-stale",
+        }),
+      ]);
+      assert.equal(
+        (await ladybugDb.getEdgesFrom(conn, "from-stale")).filter(
+          (candidate) => candidate.edgeType === "call",
+        ).length,
+        1,
+      );
+
+      const resolver = new FakeSubmittingResolver(() => ({
+        symbolIdsToRefresh: ["from-stale"],
+        edges: [],
+      }));
+      const before = getWriteRuns();
+      const { edgesCreated, telemetry } = await runFakeSequentialPass2({
+        repoId,
+        mode: "incremental",
+        files: [fileMeta("src/changed.ts")],
+        changedPaths: ["src/changed.ts"],
+        resolver,
+      });
+      const after = getWriteRuns();
+
+      assert.equal(edgesCreated, 0);
+      assert.equal(
+        after - before,
+        1,
+        "incremental symbol-only submissions must still run the stale-call delete",
+      );
+      assert.equal(telemetry.pass2FilesProcessed, 1);
+      assert.equal(
+        (await ladybugDb.getEdgesFrom(conn, "from-stale")).filter(
+          (candidate) => candidate.edgeType === "call",
+        ).length,
+        0,
+        "incremental symbol-only pass-2 should delete stale outgoing call edges",
+      );
+    });
+  });
+
+  it("skips full-mode symbol-only submissions without opening a write run", async () => {
+    await withTempPass2Db(async ({ repoId, getWriteRuns }) => {
+      const resolver = new FakeSubmittingResolver(() => ({
+        symbolIdsToRefresh: ["from-noop"],
+        edges: [],
+      }));
+
+      const before = getWriteRuns();
+      const { edgesCreated, telemetry } = await runFakeSequentialPass2({
+        repoId,
+        mode: "full",
+        files: [fileMeta("src/noop.ts")],
+        resolver,
+      });
+      const after = getWriteRuns();
+
+      assert.equal(edgesCreated, 0);
+      assert.equal(
+        after - before,
+        0,
+        "full-mode symbol-only submissions should not open a no-op write run",
+      );
+      assert.equal(telemetry.pass2FilesProcessed, 1);
+      assert.equal(telemetry.resolverBreakdown["fake-pass2"]?.targets, 1);
+    });
   });
 });
 

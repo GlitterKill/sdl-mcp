@@ -50,15 +50,18 @@ describe("MCP tool registration", () => {
     const queryTool = tools.find((tool) => tool.name === "sdl.query");
     assert.ok(queryTool?.wireSchema, "expected sdl.query wire schema");
     const wireSchema = queryTool.wireSchema as Record<string, unknown>;
-    const variants = wireSchema.oneOf as Array<Record<string, unknown>> | undefined;
-    assert.ok(Array.isArray(variants) && variants.length > 0, "expected oneOf gateway variants");
+    assert.ok(!("oneOf" in wireSchema), "top-level oneOf is not API-compatible");
+    assert.ok(!("anyOf" in wireSchema), "top-level anyOf is not API-compatible");
+    assert.ok(!("allOf" in wireSchema), "top-level allOf is not API-compatible");
 
-    const sliceBuildVariant = variants.find((variant) =>
-      JSON.stringify(variant).includes('"const":"slice.build"'),
+    const properties = wireSchema.properties as Record<string, unknown>;
+    const action = properties.action as Record<string, unknown>;
+    assert.ok(
+      Array.isArray(action.enum) && action.enum.includes("slice.build"),
+      "expected slice.build gateway action",
     );
-    assert.ok(sliceBuildVariant, "expected slice.build gateway variant");
     assert.match(
-      JSON.stringify(sliceBuildVariant),
+      JSON.stringify(wireSchema),
       /Natural language task description|Repository ID|Gateway action name/,
     );
   });

@@ -22,11 +22,15 @@ export interface Pass2ResolverResult {
  * Per-file write submission used by every Pass-2 resolver. The dispatcher
  * decides how to materialise the write:
  *
- * - Sequential dispatch: call `withWriteConn` immediately so the resolver
- *   sees the same single-write-per-file behaviour as before.
+ * - Sequential dispatch: preserve single-file resolver execution order, but
+ *   buffer submissions and drain them in bounded write batches.
  * - Parallel dispatch: stash `(symbolIdsToRefresh, edges)` in a per-batch
  *   buffer and flush ALL files in one `withWriteConn` after `Promise.all`
- *   settles. Cuts writeLimiter handshakes from O(filesPerBatch) to 1.
+ *   settles.
+ *
+ * Treat this as a logical submission, not a durability/commit boundary.
+ * The returned promise only means the dispatcher accepted the submission for
+ * its current write batch; the dispatcher owns the later LadybugDB drain.
  *
  * Resolvers MUST call this exactly once per file when they have any
  * `symbolIdsToRefresh` (the in-memory dedup cleanup of `createdCallEdges`
@@ -176,10 +180,10 @@ export interface Pass2ResolverContext {
   /**
    * Dispatcher-provided write sink. Resolvers MUST call this once per file
    * (after building `edgesToInsert`) instead of calling `withWriteConn`
-   * themselves — the dispatcher decides whether to flush immediately or
-   * batch across the parallel-pass concurrency window. Always defined when
-   * the dispatcher invokes a resolver; the optional marker is only there
-   * so test fakes that construct contexts manually do not have to wire it.
+   * themselves — the dispatcher accepts the submission and decides when to
+   * drain the current LadybugDB write batch. Always defined when the
+   * dispatcher invokes a resolver; the optional marker is only there so test
+   * fakes that construct contexts manually do not have to wire it.
    */
   submitEdgeWrite?: SubmitEdgeWrite;
   /**

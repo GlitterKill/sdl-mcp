@@ -8,7 +8,15 @@ import {
 import {
   PolicySetRequestSchema,
   RuntimeExecuteRequestSchema,
+  SearchEditRequestSchema,
+  SymbolEditRequestSchema,
 } from "../../dist/mcp/tools.js";
+
+function assertNoTopLevelComposition(schema: Record<string, unknown>): void {
+  assert.ok(!("oneOf" in schema), "top-level oneOf is not API-compatible");
+  assert.ok(!("anyOf" in schema), "top-level anyOf is not API-compatible");
+  assert.ok(!("allOf" in schema), "top-level allOf is not API-compatible");
+}
 
 describe("Compact JSON Schema builder", () => {
   it("preserves description fields", () => {
@@ -77,20 +85,36 @@ describe("Compact JSON Schema builder", () => {
     }
   });
 
-  it("produces valid JSON Schema for discriminated unions", () => {
+  it("flattens top-level discriminated unions for custom tool input schemas", () => {
     const schema = z.discriminatedUnion("type", [
       z.object({ type: z.literal("a"), value: z.string() }),
       z.object({ type: z.literal("b"), count: z.number() }),
     ]);
 
     const result = buildCompactJsonSchema(schema);
-    assert.ok(result, "should produce a schema");
-    // Discriminated unions use oneOf or anyOf
-    const json = JSON.stringify(result);
-    assert.ok(
-      json.includes("oneOf") || json.includes("anyOf"),
-      "should use oneOf or anyOf for discriminated unions",
-    );
+    assert.strictEqual(result.type, "object");
+    assertNoTopLevelComposition(result);
+    const properties = result.properties as Record<string, unknown>;
+    const discriminator = properties.type as Record<string, unknown>;
+    assert.deepStrictEqual(discriminator.enum, ["a", "b"]);
+    assert.deepStrictEqual(result.required, ["type"]);
+  });
+
+  it("removes top-level composition from edit tool schemas", () => {
+    for (const [name, schema] of [
+      ["sdl.search.edit", SearchEditRequestSchema],
+      ["sdl.symbol.edit", SymbolEditRequestSchema],
+    ] as const) {
+      const result = buildCompactJsonSchema(schema);
+      assert.strictEqual(result.type, "object", `${name} must be an object`);
+      assertNoTopLevelComposition(result);
+      const properties = result.properties as Record<string, unknown>;
+      const mode = properties.mode as Record<string, unknown>;
+      assert.ok(
+        Array.isArray(mode.enum),
+        `${name} should expose mode values as an enum`,
+      );
+    }
   });
 
   it("handles nested schemas", () => {

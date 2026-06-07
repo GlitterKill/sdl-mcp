@@ -18,13 +18,18 @@ function assertGatewaySchema(
   actions: readonly string[],
 ): void {
   assert.strictEqual(schema.type, "object");
-  assert.ok(Array.isArray(schema.oneOf), "expected oneOf variants");
-  assert.strictEqual((schema.oneOf as unknown[]).length, actions.length);
+  assert.ok(!("oneOf" in schema), "top-level oneOf is not API-compatible");
+  assert.ok(!("anyOf" in schema), "top-level anyOf is not API-compatible");
+  assert.ok(!("allOf" in schema), "top-level allOf is not API-compatible");
+
+  const properties = schema.properties as Record<string, unknown>;
+  const action = properties.action as Record<string, unknown>;
+  assert.deepStrictEqual(action.enum, actions);
 
   for (const action of actions) {
     assert.match(
       JSON.stringify(schema),
-      new RegExp(`"const":"${action.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`),
+      new RegExp(`"${action.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`),
     );
   }
 

@@ -33,19 +33,21 @@ import {
 } from "./indexer-init.js";
 
 const PASS2_KNOWN_ENDPOINT_COPY_THRESHOLD = 512;
+const PASS2_SEQUENTIAL_WRITE_BATCH_FILES = 64;
+const PASS2_SEQUENTIAL_WRITE_BATCH_EDGES = 8_192;
 
 /**
- * Build a `submitEdgeWrite` that flushes immediately on each call. Used by the
- * sequential pass-2 dispatch path — preserves the legacy "one write per file"
- * shape so single-threaded indexing still benefits from the dispatcher-owned
- * delete-then-insert tx without any coalescing semantics.
+ * Build a `submitEdgeWrite` that flushes immediately on each call. Kept for
+ * focused tests and any direct call sites that need explicit one-shot writes;
+ * the normal pass-2 dispatcher uses a coalescing accumulator even when resolver
+ * execution is sequential.
  */
 /** @internal exported for tests; do not import from product code. */
 export function makeImmediateSubmit(
   mode: "full" | "incremental",
 ): SubmitEdgeWrite {
   return async ({ symbolIdsToRefresh, edges }) => {
-    if (symbolIdsToRefresh.length === 0 && edges.length === 0) return;
+    if (!hasPass2WriteWork(symbolIdsToRefresh, edges, mode)) return;
     await withWriteConn(async (wConn) => {
       if (mode !== "full" && symbolIdsToRefresh.length > 0) {
         await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
@@ -64,6 +66,27 @@ export function makeImmediateSubmit(
 interface BatchWriteAccumulator {
   symbolIdsToRefresh: string[];
   edges: ladybugDb.EdgeRow[];
+}
+
+interface BatchWriteFlushLimits {
+  maxFiles: number;
+  maxEdges: number;
+}
+
+interface SequentialPass2TelemetryCredit {
+  resolverId: string;
+  edgesCreated: number;
+  elapsedMs: number;
+}
+
+function hasPass2WriteWork(
+  symbolIdsToRefresh: readonly string[],
+  edges: readonly ladybugDb.EdgeRow[],
+  mode: "full" | "incremental",
+): boolean {
+  return (
+    edges.length > 0 || (mode !== "full" && symbolIdsToRefresh.length > 0)
+  );
 }
 
 function isUnresolvedSymbolId(symbolId: string): boolean {
@@ -174,11 +197,56 @@ export function makeBatchAccumulator(): {
 }
 
 /** @internal exported for tests; do not import from product code. */
+export function shouldFlushBatchAccumulator(
+  acc: BatchWriteAccumulator,
+  filesSinceFlush: number,
+  limits: BatchWriteFlushLimits = {
+    maxFiles: PASS2_SEQUENTIAL_WRITE_BATCH_FILES,
+    maxEdges: PASS2_SEQUENTIAL_WRITE_BATCH_EDGES,
+  },
+): boolean {
+  if (acc.symbolIdsToRefresh.length === 0 && acc.edges.length === 0) {
+    return false;
+  }
+  return (
+    filesSinceFlush >= limits.maxFiles || acc.edges.length >= limits.maxEdges
+  );
+}
+
+function resetBatchAccumulator(acc: BatchWriteAccumulator): void {
+  acc.symbolIdsToRefresh.length = 0;
+  acc.edges.length = 0;
+}
+
+function recordSequentialPass2TelemetryBatch(
+  callResolutionTelemetry: CallResolutionTelemetry,
+  resolverCredits: readonly SequentialPass2TelemetryCredit[],
+  filesProcessed: number,
+): void {
+  callResolutionTelemetry.pass2FilesProcessed += filesProcessed;
+  for (const credit of resolverCredits) {
+    recordPass2ResolverTarget(callResolutionTelemetry, credit.resolverId);
+    recordPass2ResolverResult(callResolutionTelemetry, credit.resolverId, {
+      edgesCreated: credit.edgesCreated,
+      elapsedMs: credit.elapsedMs,
+    });
+  }
+}
+
+async function drainBatchAccumulator(
+  acc: BatchWriteAccumulator,
+  mode: "full" | "incremental",
+): Promise<void> {
+  await flushBatchAccumulator(acc, mode);
+  resetBatchAccumulator(acc);
+}
+
+/** @internal exported for tests; do not import from product code. */
 export async function flushBatchAccumulator(
   acc: BatchWriteAccumulator,
   mode: "full" | "incremental",
 ): Promise<void> {
-  if (acc.symbolIdsToRefresh.length === 0 && acc.edges.length === 0) return;
+  if (!hasPass2WriteWork(acc.symbolIdsToRefresh, acc.edges, mode)) return;
   await withWriteConn(async (wConn) => {
     if (mode !== "full" && acc.symbolIdsToRefresh.length > 0) {
       await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
@@ -664,16 +732,23 @@ export async function runPass2Resolvers(params: {
   let totalEdgesCreated = 0;
   let pass2Processed = 0;
 
-  // Sequential path uses an immediate-flush submit (one withWriteConn per file,
-  // identical to the legacy behaviour). The parallel path replaces it per
-  // batch with a coalescing accumulator.
-  const sequentialSubmit = makeImmediateSubmit(mode);
-
   if (concurrency <= 1) {
-    // --- Sequential path (default, identical to original behaviour) ---
+    // --- Sequential path: deterministic resolver order, bounded write batches ---
+    //
+    // Keep resolver execution single-threaded for the default/mid CPU path, but
+    // coalesce writes exactly like the parallel dispatcher. This cuts
+    // withWriteConn handshakes from O(files) to O(files / batch) while preserving
+    // the in-memory createdCallEdges ordering that the legacy sequential path
+    // relied on for duplicate suppression.
+    const { acc: sequentialWriteAcc, submit: sequentialSubmit } =
+      makeBatchAccumulator();
+    let filesSinceWriteFlush = 0;
+    let filesPendingTelemetryCredit = 0;
+    const pendingResolverTelemetryCredits: SequentialPass2TelemetryCredit[] =
+      [];
+
     for (const fileMeta of pass2Targets) {
       if (signal?.aborted) break;
-      callResolutionTelemetry.pass2FilesProcessed++;
       // SCIP-coverage skip: file fully resolved by SCIP (and not in the
       // changed set), so there is no heuristic edge for pass-2 to add. The
       // `insertEdges` confidence guard would already block downgrade
@@ -693,10 +768,10 @@ export async function runPass2Resolvers(params: {
         toPass2Target({ ...fileMeta, repoId }),
       );
       if (!resolver) {
+        callResolutionTelemetry.pass2FilesProcessed++;
         pass2Processed++;
         continue;
       }
-      recordPass2ResolverTarget(callResolutionTelemetry, resolver.id);
       const resolverStartedAt = Date.now();
       const pass2Result = await resolver.resolve(
         toPass2Target({ ...fileMeta, repoId }),
@@ -716,13 +791,38 @@ export async function runPass2Resolvers(params: {
           pass1Extractions,
         },
       );
-      recordPass2ResolverResult(callResolutionTelemetry, resolver.id, {
+      pendingResolverTelemetryCredits.push({
+        resolverId: resolver.id,
         edgesCreated: pass2Result.edgesCreated,
         elapsedMs: Date.now() - resolverStartedAt,
       });
       totalEdgesCreated += pass2Result.edgesCreated;
+      filesSinceWriteFlush++;
+      filesPendingTelemetryCredit++;
+      if (
+        shouldFlushBatchAccumulator(
+          sequentialWriteAcc,
+          filesSinceWriteFlush,
+        )
+      ) {
+        await drainBatchAccumulator(sequentialWriteAcc, mode);
+        recordSequentialPass2TelemetryBatch(
+          callResolutionTelemetry,
+          pendingResolverTelemetryCredits,
+          filesPendingTelemetryCredit,
+        );
+        pendingResolverTelemetryCredits.length = 0;
+        filesPendingTelemetryCredit = 0;
+        filesSinceWriteFlush = 0;
+      }
       pass2Processed++;
     }
+    await drainBatchAccumulator(sequentialWriteAcc, mode);
+    recordSequentialPass2TelemetryBatch(
+      callResolutionTelemetry,
+      pendingResolverTelemetryCredits,
+      filesPendingTelemetryCredit,
+    );
   } else {
     // --- Parallel path: bounded concurrency with per-file isolated dedup sets ---
     //
