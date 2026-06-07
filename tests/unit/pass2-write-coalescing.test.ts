@@ -109,12 +109,19 @@ function fileMeta(path: string): { path: string; size: number; mtime: number } {
 class FakeSubmittingResolver implements Pass2Resolver {
   readonly id = "fake-pass2";
 
+  private readonly submissionForTarget: (
+    target: Pass2Target,
+    context: Pass2ResolverContext,
+  ) => { symbolIdsToRefresh: string[]; edges: EdgeRow[] };
+
   constructor(
-    private readonly submissionForTarget: (
+    submissionForTarget: (
       target: Pass2Target,
       context: Pass2ResolverContext,
     ) => { symbolIdsToRefresh: string[]; edges: EdgeRow[] },
-  ) {}
+  ) {
+    this.submissionForTarget = submissionForTarget;
+  }
 
   supports(target: Pass2Target): boolean {
     return target.extension === ".ts";
@@ -401,7 +408,10 @@ describe("runPass2Resolvers — sequential dispatcher write batching", () => {
       const { getLadybugConn } = await import("../../dist/db/ladybug.js");
       const ladybugDb = await import("../../dist/db/ladybug-queries.js");
       const conn = await getLadybugConn();
-      const tailEdges = await ladybugDb.getEdgesFrom(conn, "from-64");
+      const tailEdgesBySymbol = await ladybugDb.getEdgesFromSymbolsLite(conn, [
+        "from-64",
+      ]);
+      const tailEdges = tailEdgesBySymbol.get("from-64") ?? [];
       assert.equal(
         tailEdges.filter((candidate) => candidate.edgeType === "call").length,
         1,
