@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 
 import {
   clearTsCallResolverCache,
+  createLazyTsCallResolver,
   createTsCallResolver,
   getTsCallResolverCacheBuildId,
 } from "../../dist/indexer/ts/tsParser.js";
@@ -159,5 +160,50 @@ describe("ts call resolver cache", () => {
     assert.ok(resolverAgain);
     const finalBuildId = getTsCallResolverCacheBuildId(repoDir);
     assert.equal(finalBuildId, initialBuildId);
+  });
+
+  it("defers ts.Program construction until calls are resolved", () => {
+    const repoDir = makeRepo();
+    const files = createFiles(["src/index.ts"]);
+
+    const resolver = createLazyTsCallResolver(repoDir, files, {
+      includeNodeModulesTypes: false,
+    });
+    assert.ok(resolver);
+    assert.equal(
+      getTsCallResolverCacheBuildId(repoDir),
+      null,
+      "lazy resolver should not build the compiler program at construction",
+    );
+
+    const calls = resolver.getResolvedCalls("src/index.ts");
+    assert.ok(Array.isArray(calls));
+    assert.ok(
+      getTsCallResolverCacheBuildId(repoDir),
+      "first call-resolution request should build the compiler program",
+    );
+  });
+
+  it("carries invalidations queued before lazy construction", () => {
+    const repoDir = makeRepo();
+    const files = createFiles(["src/index.ts"]);
+
+    const resolver = createLazyTsCallResolver(repoDir, files, {
+      includeNodeModulesTypes: false,
+    });
+    assert.ok(resolver);
+    resolver.invalidateFiles(["src/index.ts"]);
+
+    const calls = resolver.getResolvedCalls("src/index.ts");
+    assert.ok(Array.isArray(calls));
+    const buildIdAfterFirstUse = getTsCallResolverCacheBuildId(repoDir);
+    assert.ok(buildIdAfterFirstUse);
+
+    const resolverAgain = createLazyTsCallResolver(repoDir, files, {
+      includeNodeModulesTypes: false,
+    });
+    assert.ok(resolverAgain);
+    resolverAgain.getResolvedCalls("src/index.ts");
+    assert.equal(getTsCallResolverCacheBuildId(repoDir), buildIdAfterFirstUse);
   });
 });

@@ -5,9 +5,10 @@
  * compiler options. Rebuilds only happen when the file set, compiler options,
  * or invalidated (dirty) files change — otherwise the cached program is reused.
  *
- * Lifecycle: the resolver is created LAZILY by the Rust Pass-1 engine path in
- * `src/indexer/indexer.ts` (`indexRepoImpl`, see the "Lazily create TS compiler
- * resolver for Pass 2" section). Pass-1 itself runs without a resolver.
+ * Lifecycle: `src/indexer/indexer.ts` creates a cheap lazy resolver handle
+ * before Pass-1 and the real ts.Program is built only when Pass-2 asks for
+ * the first TS/JS call-resolution result. Pass-1 itself runs without a
+ * compiler program resident in memory.
  *
  * Hybrid Pass-1 (Task 1.1 Rust→TS fallback) does NOT invalidate this cache:
  * fallback files are processed by `processFile` with `tsResolver: null`, the
@@ -459,6 +460,53 @@ export function createTsCallResolver(
       visit(sourceFile);
       return resolved;
     },
+  };
+}
+
+export function createLazyTsCallResolver(
+  repoRoot: string,
+  files: FileMetadata[],
+  options?: {
+    includeNodeModulesTypes?: boolean;
+    dirtyRelPaths?: string[];
+    timingsOut?: Record<string, number>;
+  },
+): TsCallResolver | null {
+  const hasTsFiles = files.some((file) =>
+    /\.(?:[cm]?[jt]sx?)$/i.test(file.path),
+  );
+  if (!hasTsFiles) {
+    return null;
+  }
+
+  let delegate: TsCallResolver | null | undefined;
+  let pendingDirtyRelPaths = [...(options?.dirtyRelPaths ?? [])];
+
+  const ensureDelegate = (): TsCallResolver | null => {
+    if (delegate !== undefined) {
+      return delegate;
+    }
+
+    delegate = createTsCallResolver(repoRoot, files, {
+      includeNodeModulesTypes: options?.includeNodeModulesTypes,
+      dirtyRelPaths: pendingDirtyRelPaths,
+      timingsOut: options?.timingsOut,
+    });
+    pendingDirtyRelPaths = [];
+    return delegate;
+  };
+
+  return {
+    invalidateFiles: (relPaths: string[]): void => {
+      if (delegate === undefined) {
+        pendingDirtyRelPaths.push(...relPaths);
+        return;
+      }
+      delegate?.invalidateFiles(relPaths);
+    },
+
+    getResolvedCalls: (relPath: string): ResolvedCall[] =>
+      ensureDelegate()?.getResolvedCalls(relPath) ?? [],
   };
 }
 

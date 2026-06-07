@@ -58,7 +58,7 @@ import { getObservabilityTap } from "../observability/event-tap.js";
 import { isRustEngineAvailable } from "./rustIndexer.js";
 import {
   clearTsCallResolverCache,
-  createTsCallResolver,
+  createLazyTsCallResolver,
 } from "./ts/tsParser.js";
 import { ParserWorkerPool } from "./workerPool.js";
 import { invalidateGraphSnapshot } from "../graph/graphSnapshotCache.js";
@@ -3666,22 +3666,16 @@ async function indexRepoImpl(
     } = await measurePhase("initSharedState", async () => {
       logger.debug("Initializing TS call resolver", { repoId, useRustEngine });
       emitProviderFallbackInitProgress("initializing TS resolver");
-      // When using the Rust engine for Pass 1, defer TS compiler resolver
-      // creation until Pass 2 where it provides type-aware call resolution
-      // that the import-based resolver cannot.
+      // Keep a lazy TS resolver handle available for Pass 2 without building
+      // the heavy ts.Program during Pass 1. Large TS monorepos can otherwise
+      // overlap the compiler program with Rust parse batches and hit V8's heap
+      // ceiling before parsing finishes.
       const tsResolverTimings: Record<string, number> = {};
       const tsResolver = await measureNestedPhase(
         "initSharedState",
         "tsResolver",
-        // Fix 4: Create TS resolver eagerly when repo has TS/JS files,
-        // so it is warm for Pass 1 call resolution and avoids cold-start
-        // penalty before Pass 2. Skip for pure non-TS repos.
-        // Fix 4: TS resolver created eagerly in initSharedState — no deferred
-        // creation needed downstream.
         () => {
-          const hasTsFiles = files.some((f) => /.[cm]?[jt]sx?$/.test(f.path));
-          if (!hasTsFiles) return null;
-          return createTsCallResolver(repoRow.rootPath, files, {
+          return createLazyTsCallResolver(repoRow.rootPath, files, {
             includeNodeModulesTypes: config.includeNodeModulesTypes ?? true,
             dirtyRelPaths: dirtyTsResolverPaths,
             timingsOut: phaseTimings ? tsResolverTimings : undefined,

@@ -62,6 +62,20 @@ This catches most setup issues quickly.
 - Tune `indexing.concurrency`
 - Try the native Rust engine (`indexing.engine: "rust"`) for faster pass-1 extraction
 
+### Indexing Runs Out of Heap
+
+Large TypeScript/JavaScript monorepos can still exhaust V8's default heap when
+the TypeScript pass-2 resolver builds a full compiler program. SDL-MCP keeps
+that compiler program out of pass-1 parsing, but pass 2 still needs memory
+proportional to the selected TS/JS files plus any included type declarations.
+
+- Set `includeNodeModulesTypes: false` unless `@types/*` declarations are
+  important for call-resolution quality in that repo.
+- Lower `indexing.concurrency` and `indexing.pass2Concurrency` to reduce peak
+  overlap with queued database writes.
+- Raise the Node heap for very large repos, for example
+  `NODE_OPTIONS=--max-old-space-size=8192 sdl-mcp index`.
+
 If the CLI appears to spend most of its time at `Flushing pass 1 writes`, run a
 diagnostic index against a temporary graph DB so production state is untouched:
 
