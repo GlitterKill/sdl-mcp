@@ -619,6 +619,32 @@ export class BatchPersistAccumulator {
 
   /**
    * Flush remaining data and wait for all queued writes to complete.
+   * Unlike drain(), this keeps the accumulator active so producers can add more
+   * rows afterwards. Provider-first fallback uses it between native parse
+   * chunks to avoid overlapping LadybugDB COPY work with native tree-sitter
+   * parsing in the same Node process.
+   *
+   * PRECONDITION: No add*() calls may run concurrently with this wait.
+   */
+  async waitForIdle(): Promise<void> {
+    this.enqueueSnapshot();
+
+    if (this.draining && this.drainPromise) {
+      await this.drainPromise;
+    }
+
+    if (this.writeQueue.length > 0 && !this._error) {
+      this.ensureDraining();
+      if (this.drainPromise) await this.drainPromise;
+    }
+
+    if (this._error) {
+      throw this._error;
+    }
+  }
+
+  /**
+   * Flush remaining data and wait for all queued writes to complete.
    * Call at the end of indexing to ensure nothing is lost.
    * Throws if any background write failed.
    *
@@ -626,20 +652,7 @@ export class BatchPersistAccumulator {
    */
   async drain(): Promise<void> {
     try {
-      this.enqueueSnapshot();
-
-      if (this.draining && this.drainPromise) {
-        await this.drainPromise;
-      }
-
-      if (this.writeQueue.length > 0 && !this._error) {
-        this.ensureDraining();
-        if (this.drainPromise) await this.drainPromise;
-      }
-
-      if (this._error) {
-        throw this._error;
-      }
+      await this.waitForIdle();
     } finally {
       activeAccumulators.delete(this);
     }

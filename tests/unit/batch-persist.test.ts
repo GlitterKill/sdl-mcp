@@ -129,6 +129,26 @@ describe("BatchPersistAccumulator", () => {
     assert.equal(acc.pending, 0);
   });
 
+  it("waitForIdle with zero pending is a no-op and keeps accumulator reusable", async () => {
+    const acc = new BatchPersistAccumulator();
+    await acc.waitForIdle();
+    assert.equal(acc.pending, 0);
+
+    acc.addFile(
+      {
+        fileId: "f-after-idle",
+        repoId: "r1",
+        relPath: "src/after-idle.ts",
+        contentHash: "after-idle",
+        language: "ts",
+        byteSize: 100,
+        lastIndexedAt: new Date().toISOString(),
+      },
+      null,
+    );
+    assert.equal(acc.pending, 1);
+  });
+
   it("default threshold is 512", () => {
     const acc = new BatchPersistAccumulator();
     for (let i = 0; i < 511; i++) {

@@ -370,6 +370,49 @@ describe("renderIndexProgress — provider-first stage", () => {
       restoreStdout();
     }
   });
+
+  it("renders provider-first fallback engine selection messages", async () => {
+    const { createProgressState, renderIndexProgress } =
+      await import("../../dist/cli/commands/index.js");
+    try {
+      const state = createProgressState();
+      renderIndexProgress(state, {
+        stage: "providerFirst",
+        current: 0,
+        total: 0,
+        substage: "legacyFallbackInit",
+        message:
+          "pass 1 engine=rust fallback=complete concurrency=8 workers=0 batchPersist=on nativeChunks=serial drainBetweenChunks=on",
+      });
+      const output = captured.join("");
+      assert.ok(
+        output.includes("Provider-first legacy fallback"),
+        `output should label provider-first fallback initialization: ${output}`,
+      );
+      assert.ok(
+        output.includes("engine=rust"),
+        `output should include the selected fallback engine: ${output}`,
+      );
+      assert.ok(
+        output.includes("fallback=complete"),
+        `output should include complete/partial fallback mode: ${output}`,
+      );
+      assert.ok(
+        output.includes("batchPersist=on"),
+        `output should include batch writer selection: ${output}`,
+      );
+      assert.ok(
+        output.includes("nativeChunks=serial"),
+        `output should include native chunk scheduling: ${output}`,
+      );
+      assert.ok(
+        output.includes("drainBetweenChunks=on"),
+        `output should include pass-1 drain scheduling: ${output}`,
+      );
+    } finally {
+      restoreStdout();
+    }
+  });
 });
 
 describe("renderIndexProgress — known stages have user-facing labels", () => {

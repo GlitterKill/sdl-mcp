@@ -3713,6 +3713,8 @@ async function indexRepoImpl(
   const batchSymbolWriteMode = resolvePass1BatchSymbolWriteMode({
     providerFirstLegacyFallbackActive,
   });
+  const stabilizeProviderFirstFallbackPass1 =
+    providerFirstLegacyFallbackActive && useBatchPersist;
   const emitProviderFallbackInitProgress = (message: string): void => {
     if (!providerFirstLegacyFallbackActive) return;
     emitProviderFirstProgress(onProgress, "legacyFallbackInit", { message });
@@ -3723,8 +3725,9 @@ async function indexRepoImpl(
   // Complete fallback can use the tuned legacy engines because there is no
   // intentionally skipped tail preventing a full graph handoff.
   let workerPool: ParserWorkerPool | null = null;
+  let workerPoolSize = 0;
   if (createParserWorkerPool) {
-    const workerPoolSize = resolveParserWorkerPoolSize({
+    workerPoolSize = resolveParserWorkerPoolSize({
       configuredWorkerPoolSize: appConfig.indexing?.workerPoolSize ?? undefined,
       concurrency,
       fileCount: files.length,
@@ -3739,6 +3742,14 @@ async function indexRepoImpl(
       { files: files.length },
     );
   }
+  emitProviderFallbackInitProgress(
+    `pass 1 engine=${useRustEngine ? "rust" : "typescript"} ` +
+      `fallback=${providerFirstLegacyFallbackCompleteForPass ? "complete" : "partial"} ` +
+      `concurrency=${concurrency} workers=${workerPoolSize} ` +
+      `batchPersist=${useBatchPersist ? "on" : "off"} ` +
+      `nativeChunks=${stabilizeProviderFirstFallbackPass1 ? "serial" : "default"} ` +
+      `drainBetweenChunks=${stabilizeProviderFirstFallbackPass1 ? "on" : "off"}`,
+  );
 
   try {
     // --- Phase: initialize shared indexing state ---
@@ -3851,6 +3862,8 @@ async function indexRepoImpl(
       workerPool,
       useBatchPersist,
       batchSymbolWriteMode,
+      serializeNativePass1Chunks: stabilizeProviderFirstFallbackPass1,
+      drainBatchPersistBetweenNativeChunks: stabilizeProviderFirstFallbackPass1,
       onProgress,
       signal,
       includeTimings: shouldCollectPostIndexSubphaseTimings(),

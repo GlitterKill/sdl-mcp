@@ -114,7 +114,10 @@ export async function runPass1WithRustEngine(
   const CONCURRENCY_LIMIT = Math.min(8, concurrency || 4);
   acc.filesProcessed += skippedRustFiles;
   const tsFallbackFiles: FileMetadata[] = [];
-  const serializeNativePass1Chunks = shouldSerializeNativePass1Chunks();
+  const serializeNativePass1Chunks =
+    params.serializeNativePass1Chunks ?? shouldSerializeNativePass1Chunks();
+  const drainBatchPersistBetweenNativeChunks =
+    params.drainBatchPersistBetweenNativeChunks === true;
 
   const batchAccumulator = new BatchPersistAccumulator(undefined, {
     collectDiagnostics: includeTimings === true,
@@ -309,6 +312,10 @@ export async function runPass1WithRustEngine(
       await Promise.all(
         batch.map(({ file, rustResult }) => processOne(file, rustResult)),
       );
+    }
+
+    if (drainBatchPersistBetweenNativeChunks) {
+      await batchAccumulator.waitForIdle();
     }
   }
 

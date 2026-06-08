@@ -176,6 +176,8 @@ export interface Pass1Params {
   workerPool?: ParserWorkerPool | null;
   useBatchPersist?: boolean;
   batchSymbolWriteMode?: "merge" | "fresh-copy";
+  serializeNativePass1Chunks?: boolean;
+  drainBatchPersistBetweenNativeChunks?: boolean;
   onProgress: ((progress: IndexProgress) => void) | undefined;
   signal?: AbortSignal;
   includeTimings?: boolean;
