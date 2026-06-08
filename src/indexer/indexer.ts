@@ -308,11 +308,13 @@ export function shouldUseRustPass1Engine(params: {
   configuredEngine: string | undefined;
   rustEngineAvailable: boolean;
   providerFirstLegacyFallbackActive: boolean;
+  providerFirstLegacyFallbackComplete: boolean;
 }): boolean {
   return (
     params.configuredEngine === "rust" &&
     params.rustEngineAvailable &&
-    !params.providerFirstLegacyFallbackActive
+    (!params.providerFirstLegacyFallbackActive ||
+      params.providerFirstLegacyFallbackComplete)
   );
 }
 
@@ -320,8 +322,13 @@ export function shouldUseRustPass1Engine(params: {
 export function shouldCreateParserWorkerPool(params: {
   useRustEngine: boolean;
   providerFirstLegacyFallbackActive: boolean;
+  providerFirstLegacyFallbackComplete: boolean;
 }): boolean {
-  return !params.useRustEngine && !params.providerFirstLegacyFallbackActive;
+  return (
+    !params.useRustEngine &&
+    (!params.providerFirstLegacyFallbackActive ||
+      params.providerFirstLegacyFallbackComplete)
+  );
 }
 
 /** @internal exported for tests; do not import from product code. */
@@ -340,8 +347,12 @@ export function shouldDeleteExistingFilesBeforeFullPass1(params: {
 /** @internal exported for tests; do not import from product code. */
 export function shouldUseBatchPersistAccumulator(params: {
   providerFirstLegacyFallbackActive: boolean;
+  providerFirstLegacyFallbackComplete: boolean;
 }): boolean {
-  return !params.providerFirstLegacyFallbackActive;
+  return (
+    !params.providerFirstLegacyFallbackActive ||
+    params.providerFirstLegacyFallbackComplete
+  );
 }
 
 /** @internal exported for tests; do not import from product code. */
@@ -356,8 +367,14 @@ export function resolveProviderFirstPass1Concurrency(params: {
   configuredConcurrency: number | undefined;
   fileCount: number;
   providerFirstLegacyFallbackActive: boolean;
+  providerFirstLegacyFallbackComplete: boolean;
 }): number {
-  if (params.providerFirstLegacyFallbackActive) return 1;
+  if (
+    params.providerFirstLegacyFallbackActive &&
+    !params.providerFirstLegacyFallbackComplete
+  ) {
+    return 1;
+  }
   return Math.max(
     1,
     Math.min(params.configuredConcurrency ?? 4, params.fileCount || 1),
@@ -444,6 +461,13 @@ export function resolveProviderFirstLegacyFallbackPlan(params: {
           semanticEligibleFileLimit,
         }),
   };
+}
+
+/** @internal exported for tests; do not import from product code. */
+export function isProviderFirstLegacyFallbackPlanComplete(
+  plan: ProviderFirstLegacyFallbackPlan,
+): boolean {
+  return plan.runLegacyFallback && plan.skippedFiles === 0;
 }
 
 export interface IndexTimingDiagnostics {
@@ -2279,6 +2303,7 @@ async function indexRepoImpl(
   const providerFirstLegacyFallbackPhaseTimings: Record<string, number> = {};
   let providerFirstTimingStartedAt: number | undefined;
   let providerFirstLegacyFallbackStartedAt: number | undefined;
+  let providerFirstLegacyFallbackComplete = false;
   let providerFirstLegacyFallbackFileCount = 0;
   let providerFirstLegacyFallbackSamplePaths: string[] = [];
   // Keep broad timing capture opt-in so normal refreshes pay essentially no
@@ -3269,6 +3294,8 @@ async function indexRepoImpl(
             for (const file of providerFirstScan.files) {
               providerFirstFallbackPaths.add(file.path);
             }
+            providerFirstLegacyFallbackComplete =
+              isProviderFirstLegacyFallbackPlanComplete(legacyFallbackPlan);
             providerFirstLegacyFallbackFileCount =
               legacyFallbackPlan.parsedFiles;
             providerFirstLegacyFallbackSamplePaths = [
@@ -3621,6 +3648,9 @@ async function indexRepoImpl(
 
   const providerFirstLegacyFallbackActive =
     providerFirstLegacyFallbackStartedAt !== undefined;
+  const providerFirstLegacyFallbackCompleteForPass =
+    providerFirstLegacyFallbackActive &&
+    providerFirstLegacyFallbackComplete;
   let pass1ExistingByPath = existingByPath;
   if (mode === "full" && existingByPath.size > 0) {
     const existingFileIds = [
@@ -3654,11 +3684,15 @@ async function indexRepoImpl(
     configuredConcurrency: appConfig.indexing?.concurrency,
     fileCount: files.length,
     providerFirstLegacyFallbackActive,
+    providerFirstLegacyFallbackComplete:
+      providerFirstLegacyFallbackCompleteForPass,
   });
   const useRustEngine = shouldUseRustPass1Engine({
     configuredEngine: appConfig.indexing?.engine,
     rustEngineAvailable: isRustEngineAvailable(),
     providerFirstLegacyFallbackActive,
+    providerFirstLegacyFallbackComplete:
+      providerFirstLegacyFallbackCompleteForPass,
   });
   const dirtyTsResolverPaths = collectDirtyTsResolverPaths({
     mode,
@@ -3668,9 +3702,13 @@ async function indexRepoImpl(
   const createParserWorkerPool = shouldCreateParserWorkerPool({
     useRustEngine,
     providerFirstLegacyFallbackActive,
+    providerFirstLegacyFallbackComplete:
+      providerFirstLegacyFallbackCompleteForPass,
   });
   const useBatchPersist = shouldUseBatchPersistAccumulator({
     providerFirstLegacyFallbackActive,
+    providerFirstLegacyFallbackComplete:
+      providerFirstLegacyFallbackCompleteForPass,
   });
   const batchSymbolWriteMode = resolvePass1BatchSymbolWriteMode({
     providerFirstLegacyFallbackActive,
@@ -3680,9 +3718,10 @@ async function indexRepoImpl(
     emitProviderFirstProgress(onProgress, "legacyFallbackInit", { message });
   };
 
-  // Only create worker pools for normal TypeScript-engine runs. Same-run
-  // provider-first fallback stays inline because this bounded mixed
+  // Partial provider-first fallback stays inline because this bounded mixed
   // provider/fallback path has hit hard worker/native exits on large C++ repos.
+  // Complete fallback can use the tuned legacy engines because there is no
+  // intentionally skipped tail preventing a full graph handoff.
   let workerPool: ParserWorkerPool | null = null;
   if (createParserWorkerPool) {
     const workerPoolSize = resolveParserWorkerPoolSize({
@@ -4352,6 +4391,7 @@ async function indexRepoImpl(
         };
       }
       providerFirstLegacyFallbackStartedAt = undefined;
+      providerFirstLegacyFallbackComplete = false;
     }
     if (
       providerFirstScipMaterialized &&

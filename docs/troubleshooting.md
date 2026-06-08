@@ -150,6 +150,15 @@ and rebuilds `cluster_search_text_v1` around topology-changing cluster
 replacement, then rerun the incremental refresh. Do not force direct indexing
 while the server-owned graph DB lock is active.
 
+If a full index fails with `Deferred retrieval index build failed for required
+index(es): ...`, the graph load reached the post-index retrieval bootstrap but
+LadybugDB failed a required secondary index operation such as
+`symbol_search_text_v1`. This is different from an unavailable FTS/vector
+extension, which SDL-MCP still treats as a graceful retrieval downgrade. Check the
+server log for the preceding `CREATE_FTS_INDEX` or `CREATE_VECTOR_INDEX` warning
+and verify the same command through the `node .../dist/main.js` entrypoint when a
+platform shell wrapper is suspected.
+
 ### Stale Results
 
 - Run `sdl-mcp index`

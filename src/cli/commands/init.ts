@@ -1821,7 +1821,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
         activation: "shadowDb" as const,
         readyState: "graphPlusAlgorithms" as const,
         stagingFormat: "parquet" as const,
-        maxLegacyFallbackFiles: 5_000,
+        maxLegacyFallbackFiles: 1_000_000,
         maxSemanticEligibleFallbackFiles: 0,
         lsp: {
           mode: "primaryWithCaps" as const,

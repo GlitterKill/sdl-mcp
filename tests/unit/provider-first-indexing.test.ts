@@ -27,6 +27,7 @@ import {
   collectCallProofMismatchSamples,
   countExistingProviderPrimaryFiles,
   filterProviderFirstDataToScannedScope,
+  isProviderFirstLegacyFallbackPlanComplete,
   providerFirstFatalFailureReasons,
   analyzeProviderFirstCoverage,
   resolveProviderFirstSemanticEligiblePaths,
@@ -75,66 +76,72 @@ describe("provider-first indexing foundation", () => {
     assert.equal(config.pipeline, "auto");
     assert.equal(config.providerFirst.activation, "shadowDb");
     assert.equal(config.providerFirst.readyState, "graphPlusAlgorithms");
-    assert.equal(config.providerFirst.maxLegacyFallbackFiles, 5_000);
+    assert.equal(config.providerFirst.maxLegacyFallbackFiles, 1_000_000);
     assert.equal(config.providerFirst.maxSemanticEligibleFallbackFiles, 0);
     assert.equal(config.providerFirst.lsp.mode, "primaryWithCaps");
     assert.equal(config.algorithmRefresh.louvain.maxCallEdges, 10_000);
   });
 
-  it("caps provider-first same-run legacy fallback for huge uncovered tails", () => {
+  it("keeps provider-first same-run legacy fallback complete by default", () => {
     assert.deepEqual(
       resolveProviderFirstLegacyFallbackPlan({
         fallbackFileCount: 57,
-        maxLegacyFallbackFiles: 5_000,
+        maxLegacyFallbackFiles: 1_000_000,
       }),
       {
         runLegacyFallback: true,
         parsedFiles: 57,
         skippedFiles: 0,
-        fileLimit: 5_000,
+        fileLimit: 1_000_000,
       },
     );
 
+    const llvmDefaultPlan = resolveProviderFirstLegacyFallbackPlan({
+      fallbackFileCount: 65_832,
+      semanticEligibleFallbackFileCount: 2_339,
+      maxLegacyFallbackFiles: 1_000_000,
+    });
     assert.deepEqual(
-      resolveProviderFirstLegacyFallbackPlan({
-        fallbackFileCount: 39_052,
-        maxLegacyFallbackFiles: 5_000,
-      }),
+      llvmDefaultPlan,
       {
-        runLegacyFallback: false,
-        parsedFiles: 0,
-        skippedFiles: 39_052,
-        fileLimit: 5_000,
+        runLegacyFallback: true,
+        parsedFiles: 65_832,
+        skippedFiles: 0,
+        fileLimit: 1_000_000,
+        semanticEligibleFallbackFiles: 2_339,
+        semanticEligibleFileLimit: 0,
       },
+    );
+    assert.equal(
+      isProviderFirstLegacyFallbackPlanComplete(llvmDefaultPlan),
+      true,
     );
   });
 
-  it("skips semantic-eligible fallback subsets by default when the full fallback gap is over cap", () => {
+  it("caps provider-first same-run legacy fallback only for extreme uncovered tails", () => {
     assert.deepEqual(
       resolveProviderFirstLegacyFallbackPlan({
-        fallbackFileCount: 65_832,
-        semanticEligibleFallbackFileCount: 2_339,
-        maxLegacyFallbackFiles: 5_000,
+        fallbackFileCount: 1_000_001,
+        maxLegacyFallbackFiles: 1_000_000,
       }),
       {
         runLegacyFallback: false,
         parsedFiles: 0,
-        skippedFiles: 65_832,
-        fileLimit: 5_000,
-        semanticEligibleFallbackFiles: 2_339,
-        semanticEligibleFileLimit: 0,
+        skippedFiles: 1_000_001,
+        fileLimit: 1_000_000,
       },
     );
   });
 
   it("can opt in to semantic-eligible fallback before skipping outside-semantic tails", () => {
+    const semanticSubsetPlan = resolveProviderFirstLegacyFallbackPlan({
+      fallbackFileCount: 65_832,
+      semanticEligibleFallbackFileCount: 2_339,
+      maxLegacyFallbackFiles: 5_000,
+      maxSemanticEligibleFallbackFiles: 5_000,
+    });
     assert.deepEqual(
-      resolveProviderFirstLegacyFallbackPlan({
-        fallbackFileCount: 65_832,
-        semanticEligibleFallbackFileCount: 2_339,
-        maxLegacyFallbackFiles: 5_000,
-        maxSemanticEligibleFallbackFiles: 5_000,
-      }),
+      semanticSubsetPlan,
       {
         runLegacyFallback: true,
         parsedFiles: 2_339,
@@ -143,6 +150,10 @@ describe("provider-first indexing foundation", () => {
         semanticEligibleFallbackFiles: 2_339,
         semanticEligibleFileLimit: 5_000,
       },
+    );
+    assert.equal(
+      isProviderFirstLegacyFallbackPlanComplete(semanticSubsetPlan),
+      false,
     );
 
     assert.deepEqual(
@@ -162,12 +173,13 @@ describe("provider-first indexing foundation", () => {
     );
   });
 
-  it("routes same-run provider-first legacy fallback away from native and background pass-1 engines", () => {
+  it("uses tuned legacy engines for complete provider-first fallback only", () => {
     assert.equal(
       shouldUseRustPass1Engine({
         configuredEngine: "rust",
         rustEngineAvailable: true,
         providerFirstLegacyFallbackActive: false,
+        providerFirstLegacyFallbackComplete: false,
       }),
       true,
     );
@@ -176,34 +188,63 @@ describe("provider-first indexing foundation", () => {
         configuredEngine: "rust",
         rustEngineAvailable: true,
         providerFirstLegacyFallbackActive: true,
+        providerFirstLegacyFallbackComplete: false,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldUseRustPass1Engine({
+        configuredEngine: "rust",
+        rustEngineAvailable: true,
+        providerFirstLegacyFallbackActive: true,
+        providerFirstLegacyFallbackComplete: true,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldCreateParserWorkerPool({
+        useRustEngine: false,
+        providerFirstLegacyFallbackActive: false,
+        providerFirstLegacyFallbackComplete: false,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldCreateParserWorkerPool({
+        useRustEngine: false,
+        providerFirstLegacyFallbackActive: true,
+        providerFirstLegacyFallbackComplete: false,
       }),
       false,
     );
     assert.equal(
       shouldCreateParserWorkerPool({
         useRustEngine: false,
-        providerFirstLegacyFallbackActive: false,
+        providerFirstLegacyFallbackActive: true,
+        providerFirstLegacyFallbackComplete: true,
       }),
       true,
     );
     assert.equal(
-      shouldCreateParserWorkerPool({
-        useRustEngine: false,
-        providerFirstLegacyFallbackActive: true,
-      }),
-      false,
-    );
-    assert.equal(
       shouldUseBatchPersistAccumulator({
         providerFirstLegacyFallbackActive: false,
+        providerFirstLegacyFallbackComplete: false,
       }),
       true,
     );
     assert.equal(
       shouldUseBatchPersistAccumulator({
         providerFirstLegacyFallbackActive: true,
+        providerFirstLegacyFallbackComplete: false,
       }),
       false,
+    );
+    assert.equal(
+      shouldUseBatchPersistAccumulator({
+        providerFirstLegacyFallbackActive: true,
+        providerFirstLegacyFallbackComplete: true,
+      }),
+      true,
     );
     assert.equal(
       resolvePass1BatchSymbolWriteMode({
@@ -222,6 +263,7 @@ describe("provider-first indexing foundation", () => {
         configuredConcurrency: 8,
         fileCount: 2_339,
         providerFirstLegacyFallbackActive: true,
+        providerFirstLegacyFallbackComplete: false,
       }),
       1,
     );
@@ -230,6 +272,16 @@ describe("provider-first indexing foundation", () => {
         configuredConcurrency: 8,
         fileCount: 2_339,
         providerFirstLegacyFallbackActive: false,
+        providerFirstLegacyFallbackComplete: false,
+      }),
+      8,
+    );
+    assert.equal(
+      resolveProviderFirstPass1Concurrency({
+        configuredConcurrency: 8,
+        fileCount: 2_339,
+        providerFirstLegacyFallbackActive: true,
+        providerFirstLegacyFallbackComplete: true,
       }),
       8,
     );

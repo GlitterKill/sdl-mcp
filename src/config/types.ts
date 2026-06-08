@@ -261,7 +261,7 @@ export const ProviderFirstIndexingConfigSchema = z
       .int()
       .min(0)
       .max(1_000_000)
-      .default(5_000),
+      .default(1_000_000),
     maxSemanticEligibleFallbackFiles: z
       .number()
       .int()
@@ -274,7 +274,7 @@ export const ProviderFirstIndexingConfigSchema = z
     activation: "shadowDb",
     readyState: "graphPlusAlgorithms",
     stagingFormat: "parquet",
-    maxLegacyFallbackFiles: 5_000,
+    maxLegacyFallbackFiles: 1_000_000,
     maxSemanticEligibleFallbackFiles: 0,
     lsp: {
       mode: "primaryWithCaps",

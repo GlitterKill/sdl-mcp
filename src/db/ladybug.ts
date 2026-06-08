@@ -1070,6 +1070,48 @@ type DeferredIndexTimingRecorder = (
   durationMs: number,
 ) => void;
 
+interface DeferredRetrievalEnsureOptions {
+  includeFtsIndex?: boolean;
+  includeVectorIndexes?: boolean;
+  includeEntityFtsIndexes?: boolean;
+  includeFileSummaryVectorIndexes?: boolean;
+  recordTiming?: DeferredIndexTimingRecorder;
+}
+
+interface DeferredRetrievalIndexDependencies {
+  ensureIndexes: (
+    conn: LadybugConnection,
+    retrievalConfig: NonNullable<
+      NonNullable<ReturnType<typeof loadConfig>["semantic"]>["retrieval"]
+    >,
+    options: DeferredRetrievalEnsureOptions,
+  ) => Promise<IndexEnsureFailureSource>;
+  ensureEntityIndexes: (
+    conn: LadybugConnection,
+    options: DeferredRetrievalEnsureOptions,
+  ) => Promise<IndexEnsureFailureSource>;
+}
+
+export interface BuildDeferredIndexesDependencies {
+  withWriteConn: typeof withWriteConn;
+  createSecondaryIndexes: typeof createSecondaryIndexes;
+  loadConfig: typeof loadConfig;
+  loadRetrievalIndexDependencies: () => Promise<DeferredRetrievalIndexDependencies>;
+}
+
+const defaultBuildDeferredIndexesDependencies: BuildDeferredIndexesDependencies =
+  {
+    withWriteConn,
+    createSecondaryIndexes,
+    loadConfig,
+    loadRetrievalIndexDependencies: async () => {
+      const { ensureIndexes, ensureEntityIndexes } = await import(
+        "../retrieval/index-lifecycle.js"
+      );
+      return { ensureIndexes, ensureEntityIndexes };
+    },
+  };
+
 async function measureDeferredIndexPhase<T>(
   recordTiming: DeferredIndexTimingRecorder | undefined,
   phaseName: string,
@@ -1087,6 +1129,23 @@ export interface BuildDeferredIndexesOptions {
   recordTiming?: DeferredIndexTimingRecorder;
   deferSemanticVectorIndexes?: boolean;
   deferSemanticTextIndexes?: boolean;
+  /** @internal test seam for failure-policy coverage without opening LadybugDB. */
+  _dependenciesForTesting?: BuildDeferredIndexesDependencies;
+}
+
+interface IndexEnsureFailureSource {
+  failed: readonly string[];
+}
+
+function collectIndexEnsureFailures(
+  ...results: IndexEnsureFailureSource[]
+): string[] {
+  return [...new Set(results.flatMap((result) => result.failed))];
+}
+
+/** @internal exported for focused failure-policy tests. */
+export function _setDeferredIndexesPendingForTesting(value: boolean): void {
+  deferredIndexesPending = value;
 }
 
 export async function buildDeferredIndexes(
@@ -1095,6 +1154,8 @@ export async function buildDeferredIndexes(
   if (!deferredIndexesPending) return;
 
   const startMs = Date.now();
+  const dependencies =
+    options._dependenciesForTesting ?? defaultBuildDeferredIndexesDependencies;
   logger.info("Building deferred secondary indexes after fresh load");
 
   // Hold the writeLimiter slot across BOTH halves of the deferred-index
@@ -1105,18 +1166,18 @@ export async function buildDeferredIndexes(
   // post-index session, the ALS shortcut in withWriteConn reuses the
   // session conn so this single call doesn't deadlock on the slot the
   // session already holds.
-  await withWriteConn(async (wConn) => {
+  await dependencies.withWriteConn(async (wConn) => {
     await measureDeferredIndexPhase(
       options.recordTiming,
       "buildDeferredIndexes.secondaryIndexes",
-      () => createSecondaryIndexes(wConn),
+      () => dependencies.createSecondaryIndexes(wConn),
     );
 
     try {
       const sdlConfig = await measureDeferredIndexPhase(
         options.recordTiming,
         "buildDeferredIndexes.configLoad",
-        () => loadConfig(),
+        () => dependencies.loadConfig(),
       );
       const semanticConfig = sdlConfig.semantic;
       const retrievalConfig = semanticConfig?.retrieval;
@@ -1126,7 +1187,7 @@ export async function buildDeferredIndexes(
           "buildDeferredIndexes.retrievalIndexes",
           async () => {
             const { ensureIndexes, ensureEntityIndexes } =
-              await import("../retrieval/index-lifecycle.js");
+              await dependencies.loadRetrievalIndexDependencies();
             const recordRetrievalIndexTiming = (
               phaseName: string,
               durationMs: number,
@@ -1136,25 +1197,34 @@ export async function buildDeferredIndexes(
                 durationMs,
               );
             };
-            await ensureIndexes(wConn, retrievalConfig, {
+            const indexResult = await ensureIndexes(wConn, retrievalConfig, {
               includeFtsIndex: !options.deferSemanticTextIndexes,
               includeVectorIndexes: !options.deferSemanticVectorIndexes,
               recordTiming: recordRetrievalIndexTiming,
             });
-            await ensureEntityIndexes(wConn, {
+            const entityResult = await ensureEntityIndexes(wConn, {
               includeEntityFtsIndexes: !options.deferSemanticTextIndexes,
               includeFileSummaryVectorIndexes: !options.deferSemanticVectorIndexes,
               recordTiming: recordRetrievalIndexTiming,
             });
+            const failedIndexes = collectIndexEnsureFailures(
+              indexResult,
+              entityResult,
+            );
+            if (failedIndexes.length > 0) {
+              throw new DatabaseError(
+                `Deferred retrieval index build failed for required index(es): ${failedIndexes.join(", ")}`,
+              );
+            }
           },
         );
       }
     } catch (err) {
-      logger.warn(
-        `Deferred retrieval index build failed (non-fatal): ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
+      const message = `Deferred retrieval index build failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`;
+      logger.warn(message);
+      throw err instanceof DatabaseError ? err : new DatabaseError(message);
     }
   });
 

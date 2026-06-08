@@ -296,14 +296,14 @@
             },
             "maxLegacyFallbackFiles": {
               "type": "integer",
-              "description": "Maximum uncovered or provider-unusable files parsed by same-run legacy fallback after provider-first materialization. When the provider gap is larger, SDL-MCP keeps the provider-primary index, skips the expensive fallback parse, and reports the skipped count.",
+              "description": "Emergency cap for uncovered or provider-unusable files parsed by same-run legacy fallback after provider-first materialization. Defaults high so full provider-first runs build a complete graph; lower it only for partial iteration or resource protection.",
               "minimum": 0,
               "maximum": 1000000,
-              "default": 5000
+              "default": 1000000
             },
             "maxSemanticEligibleFallbackFiles": {
               "type": "integer",
-              "description": "Maximum semantic-eligible uncovered or provider-unusable files parsed when the full provider-first fallback gap exceeds maxLegacyFallbackFiles. The default of 0 keeps large partial fallback tails provider-only unless this opt-in cap is raised.",
+              "description": "Maximum semantic-eligible uncovered or provider-unusable files parsed when the full provider-first fallback gap exceeds maxLegacyFallbackFiles. The default of 0 avoids a misleading partial semantic subset when the main fallback cap was intentionally lowered or exceeded.",
               "minimum": 0,
               "maximum": 1000000,
               "default": 0
@@ -464,7 +464,7 @@
           "activation": "shadowDb",
           "readyState": "graphPlusAlgorithms",
           "stagingFormat": "parquet",
-          "maxLegacyFallbackFiles": 5000,
+          "maxLegacyFallbackFiles": 1000000,
           "maxSemanticEligibleFallbackFiles": 0,
           "lsp": {
             "mode": "primaryWithCaps",

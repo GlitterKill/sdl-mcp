@@ -79,7 +79,7 @@
       "activation": "shadowDb",
       "readyState": "graphPlusAlgorithms",
       "stagingFormat": "parquet",
-      "maxLegacyFallbackFiles": 5000,
+      "maxLegacyFallbackFiles": 1000000,
       "maxSemanticEligibleFallbackFiles": 0,
       "lsp": {
         "mode": "primaryWithCaps",

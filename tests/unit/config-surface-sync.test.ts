@@ -229,8 +229,9 @@ describe("config surface sync", () => {
     assert.match(docs, /postIndexSessionTimeoutMs/);
   });
 
-  it("keeps provider-first semantic fallback cap surfaced in config docs and schema", () => {
+  it("keeps provider-first fallback caps surfaced in config docs and schema", () => {
     const parsed = IndexingConfigSchema.parse({});
+    assert.strictEqual(parsed.providerFirst.maxLegacyFallbackFiles, 1_000_000);
     assert.strictEqual(
       parsed.providerFirst.maxSemanticEligibleFallbackFiles,
       0,
@@ -239,6 +240,12 @@ describe("config surface sync", () => {
     const schema = JSON.parse(
       readFileSync(resolve(repoRoot, "config/sdlmcp.config.schema.json"), "utf8"),
     );
+    const legacyFallbackSchema =
+      schema.properties.indexing.properties.providerFirst.properties
+        .maxLegacyFallbackFiles;
+    assert.strictEqual(legacyFallbackSchema.default, 1_000_000);
+    assert.strictEqual(legacyFallbackSchema.minimum, 0);
+    assert.strictEqual(legacyFallbackSchema.maximum, 1_000_000);
     const semanticFallbackSchema =
       schema.properties.indexing.properties.providerFirst.properties
         .maxSemanticEligibleFallbackFiles;
@@ -250,6 +257,10 @@ describe("config surface sync", () => {
       readFileSync(resolve(repoRoot, "config/sdlmcp.config.example.json"), "utf8"),
     );
     assert.strictEqual(
+      sample.indexing.providerFirst.maxLegacyFallbackFiles,
+      1_000_000,
+    );
+    assert.strictEqual(
       sample.indexing.providerFirst.maxSemanticEligibleFallbackFiles,
       0,
     );
@@ -258,12 +269,15 @@ describe("config surface sync", () => {
       resolve(repoRoot, "docs/configuration-reference.md"),
       "utf8",
     );
+    assert.match(docs, /maxLegacyFallbackFiles/);
+    assert.match(docs, /1000000/);
     assert.match(docs, /maxSemanticEligibleFallbackFiles/);
 
     const uiConfig = readFileSync(
       resolve(repoRoot, "src/ui/config.js"),
       "utf8",
     );
+    assert.match(uiConfig, /maxLegacyFallbackFiles/);
     assert.match(uiConfig, /maxSemanticEligibleFallbackFiles/);
   });
 });

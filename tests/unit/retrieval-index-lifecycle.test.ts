@@ -595,6 +595,28 @@ describe("initLadybugDb bootstrap wiring", () => {
     );
   });
 
+  it("deferred index builds surface required retrieval index failures", () => {
+    const fnStart = ladybugSrc.indexOf("export async function buildDeferredIndexes");
+    assert.ok(fnStart !== -1, "buildDeferredIndexes must exist");
+    const fnBody = ladybugSrc.slice(fnStart, fnStart + 6000);
+    assert.ok(
+      ladybugSrc.includes("function collectIndexEnsureFailures"),
+      "deferred builds should aggregate failed ensure results",
+    );
+    assert.ok(
+      fnBody.includes("collectIndexEnsureFailures("),
+      "buildDeferredIndexes should inspect ensure failures",
+    );
+    assert.ok(
+      fnBody.includes("Deferred retrieval index build failed for required index(es)"),
+      "buildDeferredIndexes should emit an actionable retrieval-index failure",
+    );
+    assert.ok(
+      fnBody.includes("throw err instanceof DatabaseError"),
+      "buildDeferredIndexes should rethrow retrieval-index failures",
+    );
+  });
+
   it("index bootstrap failure does not block DB init", () => {
     const fnStart = ladybugSrc.indexOf("export async function initLadybugDb");
     const fnBody = ladybugSrc.slice(fnStart, fnStart + 8000);
