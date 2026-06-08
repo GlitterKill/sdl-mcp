@@ -301,6 +301,13 @@
               "maximum": 1000000,
               "default": 5000
             },
+            "maxSemanticEligibleFallbackFiles": {
+              "type": "integer",
+              "description": "Maximum semantic-eligible uncovered or provider-unusable files parsed when the full provider-first fallback gap exceeds maxLegacyFallbackFiles. The default of 0 keeps large partial fallback tails provider-only unless this opt-in cap is raised.",
+              "minimum": 0,
+              "maximum": 1000000,
+              "default": 0
+            },
             "lsp": {
               "type": "object",
               "description": "Caps for primary LSP provider collection. LSP servers are consumed from configured commands; SDL-MCP does not install them.",
@@ -458,6 +465,7 @@
           "readyState": "graphPlusAlgorithms",
           "stagingFormat": "parquet",
           "maxLegacyFallbackFiles": 5000,
+          "maxSemanticEligibleFallbackFiles": 0,
           "lsp": {
             "mode": "primaryWithCaps",
             "workspaceSymbolLimit": 5000,

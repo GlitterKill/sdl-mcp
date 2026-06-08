@@ -98,6 +98,8 @@ export interface ProviderFirstCoverageSummary {
   uncoveredFiles: number;
   legacyFallbackSkippedFiles?: number;
   legacyFallbackFileLimit?: number;
+  semanticEligibleFallbackFiles?: number;
+  semanticEligibleFallbackFileLimit?: number;
   fallbackFiles: number;
   semanticEligibilityGap?: ProviderFirstSemanticEligibilityGapSummary;
 }

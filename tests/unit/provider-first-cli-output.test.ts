@@ -196,6 +196,8 @@ describe("provider-first CLI output", () => {
         uncoveredFiles: 65_831,
         legacyFallbackSkippedFiles: 63_493,
         legacyFallbackFileLimit: 5_000,
+        semanticEligibleFallbackFiles: 2_339,
+        semanticEligibleFallbackFileLimit: 5_000,
         fallbackFiles: 2_339,
         semanticEligibilityGap: {
           totalFiles: 2_339,
@@ -254,7 +256,56 @@ describe("provider-first CLI output", () => {
     ]);
   });
 
-  it("reports fallback-cap shadows as staged but activation-ineligible", () => {
+  it("reports semantic-eligible fallback skipped by the semantic cap", () => {
+    const lines = formatProviderFirstExecutionSummaryLines({
+      status: "executed",
+      executor: "scipFull",
+      generationId: "provider-first:test",
+      reasons: [],
+      filesProcessed: 5_120,
+      symbolsIndexed: 199_278,
+      edgesCreated: 57_401,
+      externalSymbolsIndexed: 0,
+      coverage: {
+        scannedFiles: 70_952,
+        semanticEligibleFiles: 7_459,
+        providerFiles: 5_121,
+        providerCoveredFiles: 5_121,
+        providerPrimaryFiles: 5_120,
+        fullyCoveredFiles: 161,
+        partialFiles: 4_959,
+        fullFallbackFiles: 1,
+        uncoveredFiles: 65_831,
+        legacyFallbackSkippedFiles: 65_832,
+        legacyFallbackFileLimit: 5_000,
+        semanticEligibleFallbackFiles: 2_339,
+        semanticEligibleFallbackFileLimit: 0,
+        fallbackFiles: 0,
+        semanticEligibilityGap: {
+          totalFiles: 2_339,
+          uncoveredFiles: 2_338,
+          providerUnusableFiles: 1,
+          outsideSemanticEligibilityFiles: 63_493,
+          semanticEligibleUncoveredSamples: [
+            "llvm/benchmarks/DummyYAML.cpp",
+          ],
+          semanticEligibleProviderUnusableSamples: ["llvm/utils/lit/lit.py"],
+          outsideSemanticEligibilitySamples: [".ci/cache_lit_timing_files.py"],
+        },
+      },
+    });
+
+    assert.deepEqual(lines, [
+      "  Provider-first: scipFull (provider-first:test)",
+      "  Provider-first coverage: 5120/7459 semantic-eligible files provider-primary (scan scope 70952, provider docs 5121; 161 full, 4959 partial); 1 provider unusable, 65831 outside semantic eligibility or uncovered; legacy fallback skipped 65832 file(s) over semantic cap 0 (semantic-eligible 2339, full cap 5000)",
+      "  Provider-first semantic eligibility diagnostics:",
+      "    semantic-eligible uncovered: 2338 file(s): llvm/benchmarks/DummyYAML.cpp",
+      "    semantic-eligible provider-unusable: 1 file(s): llvm/utils/lit/lit.py",
+      "    outside semantic eligibility: 63493 scanned file(s): .ci/cache_lit_timing_files.py",
+    ]);
+  });
+
+  it("reports fallback-cap shadows as skipped before staging", () => {
     const fallbackCapReason =
       "same-run legacy fallback skipped for 39052 file(s) because providerFirst.maxLegacyFallbackFiles=5000";
     const lines = formatProviderFirstExecutionSummaryLines({
@@ -267,10 +318,9 @@ describe("provider-first CLI output", () => {
       edgesCreated: 41_000,
       externalSymbolsIndexed: 0,
       shadowBuild: {
-        status: "staged",
+        status: "skipped",
         activation: "shadowDb",
         requestedFormat: "csv",
-        format: "csv",
         generationId: "provider-first:test",
         counts: {
           files: 2_257,
@@ -278,48 +328,7 @@ describe("provider-first CLI output", () => {
           externalSymbols: 0,
           edges: 41_000,
         },
-        shadowDb: {
-          status: "loaded",
-          path: "F:/db/provider-first-shadow/repo/provider-first-test/shadow.lbug",
-          actualCounts: {
-            repos: 1,
-            files: 2_257,
-            symbols: 169_411,
-            fileInRepo: 2_257,
-            symbolInFile: 169_411,
-            symbolInRepo: 169_411,
-            edges: 41_000,
-          },
-          expectedCounts: {
-            repos: 1,
-            files: 2_257,
-            symbols: 169_411,
-            fileInRepo: 2_257,
-            symbolInFile: 169_411,
-            symbolInRepo: 169_411,
-            edges: 41_000,
-          },
-          secondaryIndexes: { attempted: 0, failures: [] },
-          loadedAt: "2026-06-02T00:00:00.000Z",
-          reasons: [],
-        },
-        finalization: {
-          status: "skipped",
-          shadowDbPath:
-            "F:/db/provider-first-shadow/repo/provider-first-test/shadow.lbug",
-          reasons: [fallbackCapReason],
-        },
-        activationResult: {
-          status: "skipped",
-          shadowDbPath:
-            "F:/db/provider-first-shadow/repo/provider-first-test/shadow.lbug",
-          rollback: "notNeeded",
-          reasons: [
-            "graph-derived state is not ready in the shadow DB yet",
-            fallbackCapReason,
-          ],
-        },
-        reasons: [],
+        reasons: [fallbackCapReason],
       },
       coverage: {
         scannedFiles: 41_309,
@@ -337,10 +346,7 @@ describe("provider-first CLI output", () => {
 
     assert.deepEqual(lines, [
       "  Provider-first: scipFull (provider-first:test)",
-      "  Provider-first shadow staging: csv files=2257 symbols=169411 externals=0 edges=41000",
-      "  Provider-first shadow DB loaded: files=2257 symbols=169411 edges=41000",
-      `  Provider-first shadow DB finalization skipped: ${fallbackCapReason}`,
-      `  Provider-first shadow DB activation skipped: graph-derived state is not ready in the shadow DB yet; ${fallbackCapReason}`,
+      `  Provider-first shadow staging skipped: ${fallbackCapReason}`,
       "  Provider-first coverage: 2257/41309 files provider-primary (1000 full, 1257 partial); 92 provider unusable, 38960 uncovered; legacy fallback skipped 39052 file(s) over cap 5000",
     ]);
   });

@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  IndexingConfigSchema,
   PolicyConfigSchema,
   PrefetchConfigSchema,
   RepoConfigSchema,
@@ -226,5 +227,43 @@ describe("config surface sync", () => {
       "utf8",
     );
     assert.match(docs, /postIndexSessionTimeoutMs/);
+  });
+
+  it("keeps provider-first semantic fallback cap surfaced in config docs and schema", () => {
+    const parsed = IndexingConfigSchema.parse({});
+    assert.strictEqual(
+      parsed.providerFirst.maxSemanticEligibleFallbackFiles,
+      0,
+    );
+
+    const schema = JSON.parse(
+      readFileSync(resolve(repoRoot, "config/sdlmcp.config.schema.json"), "utf8"),
+    );
+    const semanticFallbackSchema =
+      schema.properties.indexing.properties.providerFirst.properties
+        .maxSemanticEligibleFallbackFiles;
+    assert.strictEqual(semanticFallbackSchema.default, 0);
+    assert.strictEqual(semanticFallbackSchema.minimum, 0);
+    assert.strictEqual(semanticFallbackSchema.maximum, 1_000_000);
+
+    const sample = JSON.parse(
+      readFileSync(resolve(repoRoot, "config/sdlmcp.config.example.json"), "utf8"),
+    );
+    assert.strictEqual(
+      sample.indexing.providerFirst.maxSemanticEligibleFallbackFiles,
+      0,
+    );
+
+    const docs = readFileSync(
+      resolve(repoRoot, "docs/configuration-reference.md"),
+      "utf8",
+    );
+    assert.match(docs, /maxSemanticEligibleFallbackFiles/);
+
+    const uiConfig = readFileSync(
+      resolve(repoRoot, "src/ui/config.js"),
+      "utf8",
+    );
+    assert.match(uiConfig, /maxSemanticEligibleFallbackFiles/);
   });
 });

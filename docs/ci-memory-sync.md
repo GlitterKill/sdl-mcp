@@ -86,6 +86,8 @@ The CI workflow uses these environment variables:
 | `SDL_GRAPH_DB_PATH` | Override graph DB file path                      | (none)                   |
 | `SDL_GRAPH_DB_DIR`  | Legacy directory-style graph DB override         | (none)                   |
 | `SDL_DB_PATH`       | Legacy alias for graph DB path override (v0.7.x) | (none)                   |
+| `SDL_MCP_NATIVE_ADDON_PATH` | Explicit path to the CI-built native addon       | Set by workflow after artifact download |
+| `SDL_MCP_NATIVE_PASS1_SERIAL` | Disable native pass-1 chunk prefetch while keeping Rust parsing active | `1` for benchmark and sync crash isolation |
 
 ### Workflow Configuration
 
@@ -215,7 +217,31 @@ git push origin main --force-with-lease
 # Or trigger manually via GitHub Actions UI
 ```
 
-### Scenario 3: Artifact Import Validation Failure
+### Scenario 3: Native Index Crash
+
+**Symptoms:**
+
+```
+Segmentation fault (core dumped) node dist/cli/index.js index
+[FAIL] Index failed in 372506ms with exit code 139
+```
+
+**Causes:**
+
+- Native Rust pass-1 parser crash in the platform addon
+- Large or pathological file batch reaching a tree-sitter/native boundary
+- Native chunk prefetch overlapping with JavaScript-side DB writes
+
+**Recovery:**
+
+1. Treat the index failure as the root cause. A later `No version found for repository` export error only means indexing did not create a version.
+2. Compare CI with and without `SDL_MCP_NATIVE_PASS1_SERIAL=1`.
+3. If serialized pass-1 succeeds, investigate chunk prefetch overlap before changing sync export logic.
+4. If serialized pass-1 still crashes, isolate the parser input batch or language adapter in the native addon.
+
+The `native-build` job also runs `npm run test:native-index-smoke`, which builds a temporary 240-file TypeScript repo and indexes it through the built CLI with the native addon. That smoke covers the default pipelined native path without touching the developer or CI sync graph.
+
+### Scenario 4: Artifact Import Validation Failure
 
 **Symptoms:**
 
@@ -237,7 +263,7 @@ git push origin main --force-with-lease
 3. Re-trigger the workflow
 4. Manually export artifact locally
 
-### Scenario 4: Cross-Platform Mismatch
+### Scenario 5: Cross-Platform Mismatch
 
 **Symptoms:**
 

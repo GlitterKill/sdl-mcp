@@ -31,6 +31,15 @@ function collectKnownSymbolIdsForPass1EdgeCopy(
   return ids;
 }
 
+/** @internal exported for tests; do not import from product code. */
+export function shouldSerializeNativePass1Chunks(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return /^(1|true|yes)$/i.test(
+    (env.SDL_MCP_NATIVE_PASS1_SERIAL ?? "").trim(),
+  );
+}
+
 /**
  * Pass 1 — Rust engine path. Returns `usedRust: false` when the native addon
  * returns null, signalling the caller to re-run with the TypeScript engine.
@@ -105,6 +114,7 @@ export async function runPass1WithRustEngine(
   const CONCURRENCY_LIMIT = Math.min(8, concurrency || 4);
   acc.filesProcessed += skippedRustFiles;
   const tsFallbackFiles: FileMetadata[] = [];
+  const serializeNativePass1Chunks = shouldSerializeNativePass1Chunks();
 
   const batchAccumulator = new BatchPersistAccumulator(undefined, {
     collectDiagnostics: includeTimings === true,
@@ -113,9 +123,11 @@ export async function runPass1WithRustEngine(
     symbolWriteMode: params.batchSymbolWriteMode ?? "merge",
   });
 
-  // --- Pipelined chunk processing ---
-  // Parse chunk N+1 (async, on libuv thread) while processing chunk N's
-  // results on the main thread. This overlaps Rust CPU work with JS DB writes.
+  // --- Native chunk processing ---
+  // Default mode parses chunk N+1 (async, on libuv thread) while processing
+  // chunk N's results on the main thread. Set SDL_MCP_NATIVE_PASS1_SERIAL=1 to
+  // isolate native-addon crashes by removing that overlap while still using
+  // the async native parser for each chunk.
   const chunks: FileMetadata[][] = [];
   for (let i = 0; i < rustFiles.length; i += CHUNK_SIZE) {
     chunks.push(rustFiles.slice(i, i + CHUNK_SIZE));
@@ -124,8 +136,15 @@ export async function runPass1WithRustEngine(
   let pendingParse: Promise<Array<RustParseResult | null> | null> | null = null;
   let pendingChunkIdx = -1;
 
-  // Kick off first chunk parse (async)
-  if (chunks.length > 0) {
+  if (serializeNativePass1Chunks) {
+    logger.info(
+      "Native pass 1 chunk prefetch disabled by SDL_MCP_NATIVE_PASS1_SERIAL",
+      { repoId, totalChunks: chunks.length },
+    );
+  }
+
+  // Kick off first chunk parse (async) when pipelining is enabled.
+  if (chunks.length > 0 && !serializeNativePass1Chunks) {
     pendingParse = parseFilesRustAsync(
       repoId,
       repoRoot,
@@ -144,6 +163,13 @@ export async function runPass1WithRustEngine(
     if (pendingParse && pendingChunkIdx === ci) {
       chunkResults = await pendingParse;
       pendingParse = null;
+    } else if (serializeNativePass1Chunks) {
+      chunkResults = await parseFilesRustAsync(
+        repoId,
+        repoRoot,
+        chunks[ci],
+        concurrency,
+      );
     } else {
       chunkResults = parseFilesRust(repoId, repoRoot, chunks[ci], concurrency);
     }
@@ -160,7 +186,7 @@ export async function runPass1WithRustEngine(
     }
 
     // Kick off NEXT chunk parse after confirming current chunk succeeded
-    if (ci + 1 < chunks.length) {
+    if (!serializeNativePass1Chunks && ci + 1 < chunks.length) {
       pendingParse = parseFilesRustAsync(
         repoId,
         repoRoot,

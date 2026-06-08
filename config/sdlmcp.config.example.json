@@ -80,6 +80,7 @@
       "readyState": "graphPlusAlgorithms",
       "stagingFormat": "parquet",
       "maxLegacyFallbackFiles": 5000,
+      "maxSemanticEligibleFallbackFiles": 0,
       "lsp": {
         "mode": "primaryWithCaps",
         "workspaceSymbolLimit": 5000,

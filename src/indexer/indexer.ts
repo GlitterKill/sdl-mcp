@@ -338,14 +338,10 @@ export function shouldDeleteExistingFilesBeforeFullPass1(params: {
 }
 
 /** @internal exported for tests; do not import from product code. */
-export function shouldUseBatchPersistAccumulator(_params: {
+export function shouldUseBatchPersistAccumulator(params: {
   providerFirstLegacyFallbackActive: boolean;
 }): boolean {
-  // Provider-first fallback still avoids the native engine and parser worker
-  // pool, but the fresh-copy batch accumulator is now the safe write path for
-  // LLVM-shaped fallback rows. It keeps the parser inline while amortising
-  // LadybugDB writes across batches instead of per file.
-  return true;
+  return !params.providerFirstLegacyFallbackActive;
 }
 
 /** @internal exported for tests; do not import from product code. */
@@ -399,15 +395,22 @@ export interface ProviderFirstLegacyFallbackPlan {
   parsedFiles: number;
   skippedFiles: number;
   fileLimit: number;
+  semanticEligibleFallbackFiles?: number;
+  semanticEligibleFileLimit?: number;
 }
 
 export function resolveProviderFirstLegacyFallbackPlan(params: {
   fallbackFileCount: number;
   semanticEligibleFallbackFileCount?: number;
   maxLegacyFallbackFiles: number;
+  maxSemanticEligibleFallbackFiles?: number;
 }): ProviderFirstLegacyFallbackPlan {
   const fallbackFileCount = Math.max(0, params.fallbackFileCount);
   const fileLimit = Math.max(0, params.maxLegacyFallbackFiles);
+  const semanticEligibleFileLimit = Math.max(
+    0,
+    params.maxSemanticEligibleFallbackFiles ?? 0,
+  );
   const semanticEligibleFallbackFileCount =
     params.semanticEligibleFallbackFileCount === undefined
       ? undefined
@@ -420,7 +423,8 @@ export function resolveProviderFirstLegacyFallbackPlan(params: {
     (fallbackFileCount <= fileLimit ||
       (semanticEligibleFallbackFileCount !== undefined &&
         semanticEligibleFallbackFileCount > 0 &&
-        semanticEligibleFallbackFileCount <= fileLimit));
+        semanticEligibleFallbackFileCount <= fileLimit &&
+        semanticEligibleFallbackFileCount <= semanticEligibleFileLimit));
   const parsedFiles =
     runLegacyFallback && fallbackFileCount <= fileLimit
       ? fallbackFileCount
@@ -433,6 +437,12 @@ export function resolveProviderFirstLegacyFallbackPlan(params: {
     parsedFiles,
     skippedFiles: fallbackFileCount > 0 ? fallbackFileCount - parsedFiles : 0,
     fileLimit,
+    ...(semanticEligibleFallbackFileCount === undefined
+      ? {}
+      : {
+          semanticEligibleFallbackFiles: semanticEligibleFallbackFileCount,
+          semanticEligibleFileLimit,
+        }),
   };
 }
 
@@ -1465,6 +1475,19 @@ function skippedProviderFirstLegacyFallbackReason(
       `because providerFirst.maxLegacyFallbackFiles=${plan.fileLimit}`
     );
   }
+  if (
+    plan.semanticEligibleFallbackFiles !== undefined &&
+    plan.semanticEligibleFallbackFiles > 0 &&
+    plan.semanticEligibleFileLimit !== undefined &&
+    plan.semanticEligibleFallbackFiles > plan.semanticEligibleFileLimit
+  ) {
+    return (
+      `same-run legacy fallback skipped for ${plan.skippedFiles} file(s) ` +
+      `because semantic-eligible fallback files=${plan.semanticEligibleFallbackFiles} ` +
+      `exceeds providerFirst.maxSemanticEligibleFallbackFiles=${plan.semanticEligibleFileLimit} ` +
+      `(full fallback cap providerFirst.maxLegacyFallbackFiles=${plan.fileLimit})`
+    );
+  }
   return `same-run legacy fallback skipped for ${plan.skippedFiles} file(s) because providerFirst.maxLegacyFallbackFiles=${plan.fileLimit}`;
 }
 
@@ -1491,10 +1514,11 @@ export function resolveProviderFirstReadinessGates(params: {
       params.callProofSkipReason,
       params.skippedLegacyFallbackReason,
     ]),
-    // Call-proof gaps mean provider edges cannot be trusted enough for a
-    // shadow graph. A fallback cap only means the shadow is partial; it can be
-    // staged for inspection while finalization and activation remain blocked.
-    shadowStagingSkipReason: params.callProofSkipReason,
+    // Any derived-state blocker makes a staged shadow non-activatable in the
+    // same run, so skip the shadow build instead of loading rows for inspection
+    // that cannot be finalized or swapped into place.
+    shadowStagingSkipReason:
+      params.callProofSkipReason ?? params.skippedLegacyFallbackReason,
   };
 }
 
@@ -2891,6 +2915,8 @@ async function indexRepoImpl(
             semanticEligibleFallbackFileCount:
               coverageReport.summary.semanticEligibilityGap?.totalFiles,
             maxLegacyFallbackFiles: providerFirstConfig.maxLegacyFallbackFiles,
+            maxSemanticEligibleFallbackFiles:
+              providerFirstConfig.maxSemanticEligibleFallbackFiles,
           });
           const skippedLegacyFallbackReason =
             skippedProviderFirstLegacyFallbackReason(legacyFallbackPlan);
@@ -3198,6 +3224,15 @@ async function indexRepoImpl(
               legacyFallbackPlan.skippedFiles;
             coverageSummary.legacyFallbackFileLimit =
               legacyFallbackPlan.fileLimit;
+            if (
+              legacyFallbackPlan.semanticEligibleFallbackFiles !== undefined &&
+              legacyFallbackPlan.semanticEligibleFileLimit !== undefined
+            ) {
+              coverageSummary.semanticEligibleFallbackFiles =
+                legacyFallbackPlan.semanticEligibleFallbackFiles;
+              coverageSummary.semanticEligibleFallbackFileLimit =
+                legacyFallbackPlan.semanticEligibleFileLimit;
+            }
           }
           if (scanScopedProvider.ignoredProviderPaths.length > 0) {
             coverageSummary.ignoredProviderFiles =

@@ -216,6 +216,8 @@ const FIELD_EFFECTS = Object.freeze({
   "/indexing/providerFirst/activation": "Targets shadow database activation for provider-first full builds; current SCIP full execution uses the active writer after coverage validation while bulk shadow handoff is pending.",
   "/indexing/providerFirst/readyState": "Targets graph data plus derived algorithms; current SCIP provider-first materialization keeps algorithms dirty until call-edge proof lands.",
   "/indexing/providerFirst/stagingFormat": "Chooses the preferred staging artifact format for provider-first shadow loads.",
+  "/indexing/providerFirst/maxLegacyFallbackFiles": "Caps same-run legacy fallback when provider-first coverage is incomplete.",
+  "/indexing/providerFirst/maxSemanticEligibleFallbackFiles": "Caps opt-in semantic-eligible fallback when the full provider-first fallback gap is over the main cap.",
   "/indexing/providerFirst/lsp/mode": "Keeps LSP provider collection bounded while using it as a primary source.",
   "/indexing/pass2Concurrency": "Sets parallelism for the second indexing pass that resolves cross-file relationships.",
   "/indexing/enableFileWatching": "Turns automatic file watching on or off after a repository is indexed.",

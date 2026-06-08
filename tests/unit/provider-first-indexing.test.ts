@@ -76,6 +76,7 @@ describe("provider-first indexing foundation", () => {
     assert.equal(config.providerFirst.activation, "shadowDb");
     assert.equal(config.providerFirst.readyState, "graphPlusAlgorithms");
     assert.equal(config.providerFirst.maxLegacyFallbackFiles, 5_000);
+    assert.equal(config.providerFirst.maxSemanticEligibleFallbackFiles, 0);
     assert.equal(config.providerFirst.lsp.mode, "primaryWithCaps");
     assert.equal(config.algorithmRefresh.louvain.maxCallEdges, 10_000);
   });
@@ -108,7 +109,7 @@ describe("provider-first indexing foundation", () => {
     );
   });
 
-  it("prioritizes semantic-eligible fallback files before skipping outside-semantic tails", () => {
+  it("skips semantic-eligible fallback subsets by default when the full fallback gap is over cap", () => {
     assert.deepEqual(
       resolveProviderFirstLegacyFallbackPlan({
         fallbackFileCount: 65_832,
@@ -116,10 +117,31 @@ describe("provider-first indexing foundation", () => {
         maxLegacyFallbackFiles: 5_000,
       }),
       {
+        runLegacyFallback: false,
+        parsedFiles: 0,
+        skippedFiles: 65_832,
+        fileLimit: 5_000,
+        semanticEligibleFallbackFiles: 2_339,
+        semanticEligibleFileLimit: 0,
+      },
+    );
+  });
+
+  it("can opt in to semantic-eligible fallback before skipping outside-semantic tails", () => {
+    assert.deepEqual(
+      resolveProviderFirstLegacyFallbackPlan({
+        fallbackFileCount: 65_832,
+        semanticEligibleFallbackFileCount: 2_339,
+        maxLegacyFallbackFiles: 5_000,
+        maxSemanticEligibleFallbackFiles: 5_000,
+      }),
+      {
         runLegacyFallback: true,
         parsedFiles: 2_339,
         skippedFiles: 63_493,
         fileLimit: 5_000,
+        semanticEligibleFallbackFiles: 2_339,
+        semanticEligibleFileLimit: 5_000,
       },
     );
 
@@ -140,7 +162,7 @@ describe("provider-first indexing foundation", () => {
     );
   });
 
-  it("routes same-run provider-first legacy fallback through inline parsing and batched writes", () => {
+  it("routes same-run provider-first legacy fallback away from native and background pass-1 engines", () => {
     assert.equal(
       shouldUseRustPass1Engine({
         configuredEngine: "rust",
@@ -181,7 +203,7 @@ describe("provider-first indexing foundation", () => {
       shouldUseBatchPersistAccumulator({
         providerFirstLegacyFallbackActive: true,
       }),
-      true,
+      false,
     );
     assert.equal(
       resolvePass1BatchSymbolWriteMode({
@@ -333,13 +355,16 @@ describe("provider-first indexing foundation", () => {
     assert.equal(mismatchReason?.samples?.length, 1);
   });
 
-  it("allows shadow staging when only the legacy fallback cap defers readiness", () => {
+  it("skips shadow staging when only the legacy fallback cap defers readiness", () => {
     const gates = resolveProviderFirstReadinessGates({
       skippedLegacyFallbackReason:
         "same-run legacy fallback skipped for 39052 file(s) because providerFirst.maxLegacyFallbackFiles=5000",
     });
 
-    assert.equal(gates.shadowStagingSkipReason, undefined);
+    assert.equal(
+      gates.shadowStagingSkipReason,
+      "same-run legacy fallback skipped for 39052 file(s) because providerFirst.maxLegacyFallbackFiles=5000",
+    );
     assert.equal(
       gates.skipDerivedStateReason,
       "same-run legacy fallback skipped for 39052 file(s) because providerFirst.maxLegacyFallbackFiles=5000",

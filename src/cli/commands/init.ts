@@ -1822,6 +1822,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
         readyState: "graphPlusAlgorithms" as const,
         stagingFormat: "parquet" as const,
         maxLegacyFallbackFiles: 5_000,
+        maxSemanticEligibleFallbackFiles: 0,
         lsp: {
           mode: "primaryWithCaps" as const,
           workspaceSymbolLimit: 5_000,

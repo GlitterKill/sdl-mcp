@@ -84,6 +84,9 @@ describe("release regression guards", () => {
       ciSource.match(/tests:\s*[\s\S]*?\n  benchmarks:/)?.[0] ?? "";
     const benchmarksJob =
       ciSource.match(/benchmarks:\s*[\s\S]*?\n  native-build:/)?.[0] ?? "";
+    const nativeBuildJob =
+      ciSource.match(/native-build:\s*[\s\S]*?\n  benchmark-matrix-nightly:/)
+        ?.[0] ?? "";
     const syncMemoryJob =
       ciSource.match(/sync-memory:\s*[\s\S]*?\n  sync-validation:/)?.[0] ?? "";
 
@@ -91,6 +94,10 @@ describe("release regression guards", () => {
     assert.ok(
       benchmarksJob,
       "benchmarks job section should be present in ci workflow",
+    );
+    assert.ok(
+      nativeBuildJob,
+      "native-build job section should be present in ci workflow",
     );
     assert.ok(
       syncMemoryJob,
@@ -134,9 +141,33 @@ describe("release regression guards", () => {
     );
 
     assert.match(
+      benchmarksJob,
+      /SDL_MCP_NATIVE_PASS1_SERIAL:\s*"1"/,
+      "benchmark CI should run in native pass-1 serialization isolation mode while the addon crash is investigated",
+    );
+
+    assert.match(
+      nativeBuildJob,
+      /name:\s*Run native full-index smoke[\s\S]*run:\s*npm run test:native-index-smoke/,
+      "native-build should run a real native CLI index smoke after parity tests",
+    );
+
+    assert.match(
       syncMemoryJob,
       /needs:\s*\[[^\]]*tests[^\]]*native-build[^\]]*\][\s\S]*uses:\s*actions\/download-artifact@v7[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
       "sync-memory job should also consume the freshly built native addon",
+    );
+
+    assert.match(
+      syncMemoryJob,
+      /SDL_MCP_NATIVE_PASS1_SERIAL:\s*"1"[\s\S]*set \+e[\s\S]*node dist\/cli\/index\.js index[\s\S]*INDEX_EXIT_CODE=\$\?[\s\S]*if \[ "\$\{INDEX_EXIT_CODE\}" -ne 0 \]; then/s,
+      "sync-memory should fail fast on native index crashes and preserve the real exit code",
+    );
+
+    assert.doesNotMatch(
+      syncMemoryJob,
+      /node dist\/cli\/index\.js index\s*\|\|\s*echo "Index completed"/,
+      "sync-memory should not mask a crashed index command before export",
     );
   });
 

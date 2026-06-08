@@ -305,6 +305,11 @@ jobs:
 
       - name: Run Benchmark CI Guardrails (locked OSS repo)
         shell: bash
+        env:
+          # Isolation mode for the native-addon CI crash under investigation:
+          # keep Rust parsing active, but avoid chunk N+1 parsing while JS is
+          # processing chunk N. If this stabilizes CI, the overlap is suspect.
+          SDL_MCP_NATIVE_PASS1_SERIAL: "1"
         run: |
           echo "Running benchmark CI against locked OSS repo (zod-oss)..."
           THRESHOLD_PATH="config/benchmark.ci.config.json"
@@ -491,6 +496,10 @@ jobs:
       - name: Run native parity tests
         if: matrix.run-tests
         run: npm run test:native-parity
+
+      - name: Run native full-index smoke
+        if: matrix.run-tests
+        run: npm run test:native-index-smoke
 
       - name: Upload native addon
         uses: actions/upload-artifact@v7
@@ -722,10 +731,26 @@ jobs:
       - name: Index repository for CI sync
         id: index
         shell: bash
+        env:
+          # Do not mask native-addon crashes. This isolation flag keeps the
+          # native engine active while disabling pass-1 chunk prefetch so the
+          # next failing run can distinguish native parsing from overlap with
+          # JS-side DB writes.
+          SDL_MCP_NATIVE_PASS1_SERIAL: "1"
         run: |
           echo "Starting CI memory index on ${{ runner.os }}..."
           START_TIME=$(date +%s%3N)
-          node dist/cli/index.js index || echo "Index completed"
+          set +e
+          node dist/cli/index.js index
+          INDEX_EXIT_CODE=$?
+          set -e
+          if [ "${INDEX_EXIT_CODE}" -ne 0 ]; then
+            END_TIME=$(date +%s%3N)
+            DURATION=$((END_TIME - START_TIME))
+            echo "duration_ms=${DURATION}" >> $GITHUB_OUTPUT
+            echo "[FAIL] Index failed in ${DURATION}ms with exit code ${INDEX_EXIT_CODE}"
+            exit "${INDEX_EXIT_CODE}"
+          fi
           END_TIME=$(date +%s%3N)
           DURATION=$((END_TIME - START_TIME))
           echo "duration_ms=${DURATION}" >> $GITHUB_OUTPUT

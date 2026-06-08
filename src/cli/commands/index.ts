@@ -372,10 +372,20 @@ export function formatProviderFirstExecutionSummaryLines(
       line += `; legacy fallback parsed ${coverage.fallbackFiles} file(s)`;
     }
     if ((coverage.legacyFallbackSkippedFiles ?? 0) > 0) {
-      const capSuffix =
-        coverage.legacyFallbackFileLimit !== undefined
-          ? ` over cap ${coverage.legacyFallbackFileLimit}`
-          : "";
+      let capSuffix = "";
+      if (
+        coverage.semanticEligibleFallbackFiles !== undefined &&
+        coverage.semanticEligibleFallbackFiles > 0 &&
+        coverage.semanticEligibleFallbackFileLimit !== undefined &&
+        coverage.semanticEligibleFallbackFiles >
+          coverage.semanticEligibleFallbackFileLimit
+      ) {
+        capSuffix =
+          ` over semantic cap ${coverage.semanticEligibleFallbackFileLimit}` +
+          ` (semantic-eligible ${coverage.semanticEligibleFallbackFiles}, full cap ${coverage.legacyFallbackFileLimit ?? "n/a"})`;
+      } else if (coverage.legacyFallbackFileLimit !== undefined) {
+        capSuffix = ` over cap ${coverage.legacyFallbackFileLimit}`;
+      }
       line +=
         `; legacy fallback skipped ${coverage.legacyFallbackSkippedFiles} file(s)` +
         capSuffix;

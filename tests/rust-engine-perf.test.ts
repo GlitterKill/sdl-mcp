@@ -57,6 +57,26 @@ describe("Fix 2+3: Chunked concurrent processing", () => {
     assert.strictEqual(typeof mod.runPass1WithTsEngine, "function");
   });
 
+  it("can serialize native pass-1 chunks through an env switch", async () => {
+    const mod = await import("../dist/indexer/indexer-pass1.js");
+
+    assert.strictEqual(
+      mod.shouldSerializeNativePass1Chunks({ SDL_MCP_NATIVE_PASS1_SERIAL: "1" }),
+      true,
+    );
+    assert.strictEqual(
+      mod.shouldSerializeNativePass1Chunks({
+        SDL_MCP_NATIVE_PASS1_SERIAL: "true",
+      }),
+      true,
+    );
+    assert.strictEqual(mod.shouldSerializeNativePass1Chunks({}), false);
+    assert.strictEqual(
+      mod.shouldSerializeNativePass1Chunks({ SDL_MCP_NATIVE_PASS1_SERIAL: "0" }),
+      false,
+    );
+  });
+
   it("NATIVE_BATCH_SIZE is reduced to 200", async () => {
     // Read the source to verify the constant
     const fs = await import("node:fs");
@@ -107,6 +127,10 @@ describe("Fix 2+3: Chunked concurrent processing", () => {
     assert.ok(
       content.includes("Promise.all"),
       "Should use Promise.all for concurrent processing",
+    );
+    assert.ok(
+      content.includes("SDL_MCP_NATIVE_PASS1_SERIAL"),
+      "Should expose an env switch to isolate native prefetch crashes",
     );
   });
 

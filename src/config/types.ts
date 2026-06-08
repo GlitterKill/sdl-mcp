@@ -262,6 +262,12 @@ export const ProviderFirstIndexingConfigSchema = z
       .min(0)
       .max(1_000_000)
       .default(5_000),
+    maxSemanticEligibleFallbackFiles: z
+      .number()
+      .int()
+      .min(0)
+      .max(1_000_000)
+      .default(0),
     lsp: ProviderFirstLspIndexingConfigSchema,
   })
   .default({
@@ -269,6 +275,7 @@ export const ProviderFirstIndexingConfigSchema = z
     readyState: "graphPlusAlgorithms",
     stagingFormat: "parquet",
     maxLegacyFallbackFiles: 5_000,
+    maxSemanticEligibleFallbackFiles: 0,
     lsp: {
       mode: "primaryWithCaps",
       workspaceSymbolLimit: 5_000,

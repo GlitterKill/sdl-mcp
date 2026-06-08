@@ -81,6 +81,7 @@
     "test:stress": "npm run build && npx tsc --rootDir tests/stress --outDir dist/tests/stress --module nodenext tests/stress/run-stress.ts && node --expose-gc --max-old-space-size=4096 dist/tests/stress/run-stress.js --skip-build",
     "test:mutation": "stryker run stryker.conf.cjs",
     "test:coverage": "node --experimental-test-coverage scripts/run-tests.mjs",
+    "test:native-index-smoke": "node --experimental-strip-types scripts/native-index-smoke.ts",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit"
   },
   "keywords": [
