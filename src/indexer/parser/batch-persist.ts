@@ -74,6 +74,7 @@ export interface BatchPersistAccumulatorOptions {
   collectDiagnostics?: boolean;
   knownSymbolIdsForEdgeCopy?: ReadonlySet<string>;
   symbolWriteMode?: "merge" | "fresh-copy";
+  autoDrain?: boolean;
 }
 
 function describeBatch(batch: FlushBatch): Record<string, number> {
@@ -227,6 +228,7 @@ export class BatchPersistAccumulator {
   private readonly diagnostics: BatchPersistDrainDiagnostics;
   private readonly knownSymbolIdsForEdgeCopy: ReadonlySet<string>;
   private readonly symbolWriteMode: "merge" | "fresh-copy";
+  private readonly autoDrain: boolean;
 
   constructor(
     flushThreshold = 512,
@@ -238,6 +240,7 @@ export class BatchPersistAccumulator {
     this.knownSymbolIdsForEdgeCopy =
       options.knownSymbolIdsForEdgeCopy ?? new Set<string>();
     this.symbolWriteMode = options.symbolWriteMode ?? "merge";
+    this.autoDrain = options.autoDrain ?? true;
     activeAccumulators.add(this);
   }
 
@@ -326,7 +329,9 @@ export class BatchPersistAccumulator {
     this.pendingCount = 0;
     this.writeQueue.push(batch);
 
-    this.ensureDraining();
+    if (this.autoDrain) {
+      this.ensureDraining();
+    }
   }
 
   private ensureDraining(): void {

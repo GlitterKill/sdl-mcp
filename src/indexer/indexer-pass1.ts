@@ -124,6 +124,7 @@ export async function runPass1WithRustEngine(
     knownSymbolIdsForEdgeCopy:
       collectKnownSymbolIdsForPass1EdgeCopy(symbolIndex),
     symbolWriteMode: params.batchSymbolWriteMode ?? "merge",
+    autoDrain: params.autoDrainBatchPersist,
   });
 
   // --- Native chunk processing ---
@@ -474,6 +475,7 @@ export async function runPass1WithTsEngine(
           knownSymbolIdsForEdgeCopy:
             collectKnownSymbolIdsForPass1EdgeCopy(symbolIndex),
           symbolWriteMode: params.batchSymbolWriteMode ?? "merge",
+          autoDrain: params.autoDrainBatchPersist,
         });
   let nextIndex = 0;
 

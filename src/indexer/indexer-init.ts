@@ -178,6 +178,7 @@ export interface Pass1Params {
   batchSymbolWriteMode?: "merge" | "fresh-copy";
   serializeNativePass1Chunks?: boolean;
   drainBatchPersistBetweenNativeChunks?: boolean;
+  autoDrainBatchPersist?: boolean;
   onProgress: ((progress: IndexProgress) => void) | undefined;
   signal?: AbortSignal;
   includeTimings?: boolean;

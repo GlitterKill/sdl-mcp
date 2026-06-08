@@ -382,7 +382,7 @@ describe("renderIndexProgress — provider-first stage", () => {
         total: 0,
         substage: "legacyFallbackInit",
         message:
-          "pass 1 engine=rust fallback=complete concurrency=8 workers=0 batchPersist=on nativeChunks=serial drainBetweenChunks=on",
+          "pass 1 engine=rust fallback=complete concurrency=8 workers=0 batchPersist=on autoDrain=off nativeChunks=serial drainBetweenChunks=on",
       });
       const output = captured.join("");
       assert.ok(
@@ -400,6 +400,10 @@ describe("renderIndexProgress — provider-first stage", () => {
       assert.ok(
         output.includes("batchPersist=on"),
         `output should include batch writer selection: ${output}`,
+      );
+      assert.ok(
+        output.includes("autoDrain=off"),
+        `output should include batch writer drain mode: ${output}`,
       );
       assert.ok(
         output.includes("nativeChunks=serial"),

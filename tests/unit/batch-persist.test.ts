@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
@@ -147,6 +148,12 @@ describe("BatchPersistAccumulator", () => {
       null,
     );
     assert.equal(acc.pending, 1);
+  });
+
+  it("supports caller-controlled batch draining for provider-first fallback", () => {
+    const source = readFileSync("src/indexer/indexer-pass1.ts", "utf8");
+    assert.match(source, /autoDrain:\s*params\.autoDrainBatchPersist/);
+    assert.match(source, /await batchAccumulator\.waitForIdle\(\)/);
   });
 
   it("default threshold is 512", () => {

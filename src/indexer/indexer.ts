@@ -3747,6 +3747,7 @@ async function indexRepoImpl(
       `fallback=${providerFirstLegacyFallbackCompleteForPass ? "complete" : "partial"} ` +
       `concurrency=${concurrency} workers=${workerPoolSize} ` +
       `batchPersist=${useBatchPersist ? "on" : "off"} ` +
+      `autoDrain=${stabilizeProviderFirstFallbackPass1 ? "off" : "on"} ` +
       `nativeChunks=${stabilizeProviderFirstFallbackPass1 ? "serial" : "default"} ` +
       `drainBetweenChunks=${stabilizeProviderFirstFallbackPass1 ? "on" : "off"}`,
   );
@@ -3864,6 +3865,7 @@ async function indexRepoImpl(
       batchSymbolWriteMode,
       serializeNativePass1Chunks: stabilizeProviderFirstFallbackPass1,
       drainBatchPersistBetweenNativeChunks: stabilizeProviderFirstFallbackPass1,
+      autoDrainBatchPersist: !stabilizeProviderFirstFallbackPass1,
       onProgress,
       signal,
       includeTimings: shouldCollectPostIndexSubphaseTimings(),
