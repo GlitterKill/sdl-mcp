@@ -338,10 +338,14 @@ export function shouldDeleteExistingFilesBeforeFullPass1(params: {
 }
 
 /** @internal exported for tests; do not import from product code. */
-export function shouldUseBatchPersistAccumulator(params: {
+export function shouldUseBatchPersistAccumulator(_params: {
   providerFirstLegacyFallbackActive: boolean;
 }): boolean {
-  return !params.providerFirstLegacyFallbackActive;
+  // Provider-first fallback still avoids the native engine and parser worker
+  // pool, but the fresh-copy batch accumulator is now the safe write path for
+  // LLVM-shaped fallback rows. It keeps the parser inline while amortising
+  // LadybugDB writes across batches instead of per file.
+  return true;
 }
 
 /** @internal exported for tests; do not import from product code. */

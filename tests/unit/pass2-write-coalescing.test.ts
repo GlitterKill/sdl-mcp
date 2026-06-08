@@ -519,21 +519,21 @@ describe("makeImmediateSubmit — early-return guard", () => {
 });
 
 describe("insertPass2Edges", () => {
-  it("splits full-mode known endpoints from unresolved endpoints", async () => {
+  it("keeps full-mode unsafe source endpoints off the COPY path", async () => {
     const { splitPass2EdgesForFullMode } = await import(
       "../../dist/indexer/indexer-pass2.js"
     );
 
     const known = edge({ toSymbolId: "known-target" });
-    const unresolved = edge({
-      fromSymbolId: "from-2",
-      toSymbolId: "unresolved:call:missing",
+    const unresolvedSource = edge({
+      fromSymbolId: "unresolved:call:caller",
+      toSymbolId: "known-target-2",
     });
 
-    const split = splitPass2EdgesForFullMode([known, unresolved]);
+    const split = splitPass2EdgesForFullMode([known, unresolvedSource]);
 
     assert.deepStrictEqual(split.knownEndpointEdges, [known]);
-    assert.deepStrictEqual(split.repairEdges, [unresolved]);
+    assert.deepStrictEqual(split.repairEdges, [unresolvedSource]);
   });
 
   it("uses the generic skip-refresh path for small full-mode resolved pass-2 edge batches", async () => {
@@ -669,32 +669,82 @@ describe("insertPass2Edges", () => {
     );
   });
 
-  it("keeps the generic repair path for full-mode unresolved pass-2 targets", async () => {
-    const { insertPass2Edges } = await import(
+  it("bulk-repairs safe unresolved full-mode pass-2 targets before COPY", async () => {
+    const { insertPass2Edges, splitPass2EdgesForFullMode } = await import(
       "../../dist/indexer/indexer-pass2.js"
     );
     const statements: string[] = [];
+    const unresolved = edge({
+      fromSymbolId: "from-unresolved-target",
+      toSymbolId: "unresolved:call:missing",
+    });
+    const edges = [
+      unresolved,
+      ...Array.from({ length: 512 }, (_, index) =>
+        edge({
+          fromSymbolId: `from-${index}`,
+          toSymbolId: `to-${index}`,
+        }),
+      ),
+    ];
 
-    await insertPass2Edges(
-      createFakeConnection(statements),
-      [edge({ toSymbolId: "unresolved:call:missing" })],
-      "full",
-    );
+    const split = splitPass2EdgesForFullMode(edges);
+    assert.strictEqual(split.knownEndpointEdges.length, 513);
+    assert.deepStrictEqual(split.repairEdges, []);
+
+    await insertPass2Edges(createFakeConnection(statements), edges, "full");
 
     assert.strictEqual(
       countStatementsContaining(statements, "COPY DEPENDS_ON FROM"),
-      0,
-      "unresolved targets still need generic placeholder repair",
-    );
-    assert.strictEqual(
-      countStatementsContaining(statements, "CREATE (a)-[:DEPENDS_ON"),
       1,
-      "unresolved targets should still create DEPENDS_ON through generic MERGE semantics",
+      "safe unresolved targets should still use relationship COPY after placeholder repair",
     );
     assert.strictEqual(
       countStatementsContaining(statements, "row.targetStatus"),
       1,
-      "unresolved targets should still run placeholder metadata repair",
+      "safe unresolved targets should run bulk placeholder metadata repair before COPY",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "CREATE (a)-[:DEPENDS_ON"),
+      0,
+      "safe unresolved targets should not use generic relationship create statements",
+    );
+  });
+
+  it("keeps unsafe unresolved full-mode pass-2 targets on the generic repair path", async () => {
+    const { insertPass2Edges, splitPass2EdgesForFullMode } = await import(
+      "../../dist/indexer/indexer-pass2.js"
+    );
+    const statements: string[] = [];
+    const unsafeUnresolved = edge({
+      fromSymbolId: "from-unsafe-unresolved",
+      toSymbolId: "unresolved:call:getMemoryEffects(Call,AAQIP).getModRef",
+    });
+    const edges = [
+      unsafeUnresolved,
+      ...Array.from({ length: 512 }, (_, index) =>
+        edge({
+          fromSymbolId: `from-${index}`,
+          toSymbolId: `to-${index}`,
+        }),
+      ),
+    ];
+
+    const split = splitPass2EdgesForFullMode(edges);
+    assert.strictEqual(split.knownEndpointEdges.length, 512);
+    assert.deepStrictEqual(split.repairEdges, [unsafeUnresolved]);
+
+    await insertPass2Edges(createFakeConnection(statements), edges, "full");
+
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY DEPENDS_ON FROM"),
+      1,
+      "safe rows should still use relationship COPY",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "CREATE (a)-[:DEPENDS_ON"),
+      1,
+      "unsafe unresolved target rows should use generic relationship create statements",
     );
     assert.strictEqual(
       countStatementsContaining(statements, "SET d.weight = row.weight"),

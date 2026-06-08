@@ -95,8 +95,9 @@ function isUnresolvedSymbolId(symbolId: string): boolean {
 
 function copyRelEndpointIsSafe(value: string): boolean {
   // LadybugDB relationship COPY resolves endpoints by primary-key literal.
-  // Keep non-literal endpoint ids on the generic repair path.
-  return !/["\r\n]/.test(value);
+  // Comma-bearing endpoint ids require CSV quoting, but relationship COPY can
+  // misparse quoted endpoint cells and shift later relationship properties.
+  return !/[",\r\n]/.test(value);
 }
 
 function sanitizeRelationshipCopyCell(value: string): string {
@@ -125,8 +126,9 @@ function isPass2KnownEndpointCopyCandidate(edge: ladybugDb.EdgeRow): boolean {
 
 /**
  * Full pass-2 runs after the source file's Symbol rows have been replaced.
- * Resolved call edges can therefore use the known-endpoint relationship COPY
- * path, while unresolved calls still need generic placeholder node repair.
+ * Copy-safe call edges can therefore use the relationship COPY path. Safe
+ * unresolved targets are bulk-repaired before COPY instead of forcing every
+ * unresolved edge through the generic relationship writer.
  * Known-endpoint provenance is sanitized before COPY because LadybugDB
  * relationship COPY can reject quoted relationship-property cells even when
  * the CSV writer escapes them correctly.
@@ -144,7 +146,6 @@ export function splitPass2EdgesForFullMode(
   for (const edge of edges) {
     if (
       isUnresolvedSymbolId(edge.fromSymbolId) ||
-      isUnresolvedSymbolId(edge.toSymbolId) ||
       !isPass2KnownEndpointCopyCandidate(edge)
     ) {
       repairEdges.push(edge);
@@ -172,6 +173,10 @@ export async function insertPass2Edges(
   const { knownEndpointEdges, repairEdges } =
     splitPass2EdgesForFullMode(edges);
   if (knownEndpointEdges.length >= PASS2_KNOWN_ENDPOINT_COPY_THRESHOLD) {
+    await ladybugDb.ensureDependencyTargetsForKnownSourceEdges(
+      wConn,
+      knownEndpointEdges,
+    );
     await ladybugDb.insertKnownSymbolEdges(wConn, knownEndpointEdges);
   } else if (knownEndpointEdges.length > 0) {
     repairEdges.unshift(...knownEndpointEdges);

@@ -140,7 +140,7 @@ describe("provider-first indexing foundation", () => {
     );
   });
 
-  it("routes same-run provider-first legacy fallback away from the native pass-1 engine", () => {
+  it("routes same-run provider-first legacy fallback through inline parsing and batched writes", () => {
     assert.equal(
       shouldUseRustPass1Engine({
         configuredEngine: "rust",
@@ -181,7 +181,7 @@ describe("provider-first indexing foundation", () => {
       shouldUseBatchPersistAccumulator({
         providerFirstLegacyFallbackActive: true,
       }),
-      false,
+      true,
     );
     assert.equal(
       resolvePass1BatchSymbolWriteMode({
