@@ -267,6 +267,34 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(derivedState?.lastError, null);
   });
 
+  it("keeps source-file-list provider-first runs from activating subset shadows", async () => {
+    const repoId = await initIndexedRepo("providerFirst", {
+      scipFixture: "complete",
+      scopedSourceFileList: ["src/index.ts"],
+    });
+
+    const result = await indexRepo(repoId, "full");
+
+    assert.equal(result.providerFirstExecution?.status, "executed");
+    assert.equal(result.providerFirstExecution?.shadowBuild?.status, "skipped");
+    assert.match(
+      result.providerFirstExecution?.shadowBuild?.reasons.join(" ") ?? "",
+      /sourceFileListPath scopes this run to a benchmark subset/,
+    );
+    assert.match(
+      result.providerFirstExecution?.reasons.join(" ") ?? "",
+      /active row reuse and shadow activation are disabled/,
+    );
+
+    const conn = await getLadybugConn();
+    const activeInputRecord = await ladybugDb.getScipIngestionRecord(
+      conn,
+      repoId,
+      "__providerFirstActiveScipInput__",
+    );
+    assert.equal(activeInputRecord, null);
+  });
+
   it("scans before SCIP fact collection so DB reads do not run under retained provider heap", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
@@ -1024,6 +1052,7 @@ describe("provider-first indexRepo fallback", () => {
       emptyProviderDocument?: boolean;
       extraScannedFileMissingCall?: boolean;
       includeMissingScipIndex?: boolean;
+      scopedSourceFileList?: string[];
       seedRemovedFile?: boolean;
       semanticProvider?: "api" | "local" | "mock";
       generateSummaries?: boolean;
@@ -1087,6 +1116,16 @@ describe("provider-first indexRepo fallback", () => {
     if (options.emptyProviderDocument) {
       writeFileSync(join(repoDir, "src", "empty.ts"), "", "utf8");
     }
+    const sourceFileListPath = options.scopedSourceFileList
+      ? join(repoDir, "source-files.txt")
+      : undefined;
+    if (sourceFileListPath) {
+      writeFileSync(
+        sourceFileListPath,
+        `${options.scopedSourceFileList.join("\n")}\n`,
+        "utf8",
+      );
+    }
     writeFileSync(
       configPath,
       JSON.stringify(
@@ -1143,6 +1182,7 @@ describe("provider-first indexRepo fallback", () => {
           ignore: [],
           languages: ["ts"],
           maxFileBytes: 2_000_000,
+          ...(sourceFileListPath ? { sourceFileListPath } : {}),
           includeNodeModulesTypes: true,
         }),
         createdAt: "2026-05-25T12:00:00.000Z",

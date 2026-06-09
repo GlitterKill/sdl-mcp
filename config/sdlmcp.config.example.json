@@ -45,6 +45,7 @@
         "sh"
       ],
       "maxFileBytes": 2000000,
+      "sourceFileListPath": null,
       "postIndexSessionTimeoutMs": 900000,
       "includeNodeModulesTypes": true,
       "packageJsonPath": null,

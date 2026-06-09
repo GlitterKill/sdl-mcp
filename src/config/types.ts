@@ -145,6 +145,7 @@ export const RepoConfigSchema = z.object({
       "sh",
     ]),
   maxFileBytes: z.number().int().min(1).default(MAX_FILE_BYTES),
+  sourceFileListPath: z.string().nullish(),
   postIndexSessionTimeoutMs: z
     .number()
     .int()

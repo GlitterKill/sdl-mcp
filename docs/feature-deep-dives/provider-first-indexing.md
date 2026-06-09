@@ -2,6 +2,8 @@
 
 Provider-first indexing is the new indexing direction for large repositories. It treats compiler or language-server facts as the first graph source and keeps the existing tree-sitter/Rust indexer as the fallback path.
 
+For performance tuning, use the deterministic subset workflow in [Provider-first fallback benchmark](./provider-first-fallback-benchmark.md). That workflow is the fast iteration loop only; a larger representative run or full target run is still required before declaring an optimization complete.
+
 ## Pipeline Selection
 
 `indexing.pipeline` controls selection:

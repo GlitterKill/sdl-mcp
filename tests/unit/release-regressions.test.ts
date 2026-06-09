@@ -129,6 +129,18 @@ describe("release regression guards", () => {
     );
 
     assert.match(
+      testsJob,
+      /SUMMARY_LINES="\$\{RUNNER_TEMP\}\/test-summary-lines\.txt"[\s\S]*grep -E [^\n]+ > "\$SUMMARY_LINES" \|\| true[\s\S]*head -80 "\$SUMMARY_LINES" >> \$GITHUB_STEP_SUMMARY/s,
+      "tests job should capture failure-summary grep output before truncating it",
+    );
+
+    assert.doesNotMatch(
+      testsJob,
+      /grep -E [^\n]+\|\s*head -80/s,
+      "tests job should avoid grep|head under pipefail because grep can hit SIGPIPE",
+    );
+
+    assert.match(
       benchmarksJob,
       /needs:\s*native-build[\s\S]*uses:\s*actions\/download-artifact@v7[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
       "benchmarks job should run against the freshly built Linux native addon",

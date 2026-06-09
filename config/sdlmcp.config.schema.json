@@ -96,6 +96,10 @@
             "minimum": 1,
             "default": 2000000
           },
+          "sourceFileListPath": {
+            "type": ["string", "null"],
+            "description": "Optional benchmark/tuning file list. When set, repository scanning uses these repo-relative source paths instead of walking the full tree."
+          },
           "postIndexSessionTimeoutMs": {
             "type": "integer",
             "description": "Hard timeout for post-index finalization writes in milliseconds. Covers embeddings, summaries, deferred index builds, memory sync, and audit flushing after pass-1/pass-2 complete.",

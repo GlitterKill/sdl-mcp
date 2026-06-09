@@ -73,6 +73,32 @@ describe("fileScanner.scanRepository", () => {
     assert.ok(files.every((f) => f.mtime > 0));
   });
 
+  it("uses an explicit source file list for deterministic benchmark scans", async () => {
+    const repoPath = makeTempRepo();
+    mkdirSync(join(repoPath, "src"), { recursive: true });
+    writeFileSync(join(repoPath, "src", "a.ts"), "export const a = 1;", "utf8");
+    writeFileSync(join(repoPath, "src", "b.ts"), "export const b = 2;", "utf8");
+    writeFileSync(join(repoPath, "src", "c.ts"), "export const c = 3;", "utf8");
+    const listPath = join(repoPath, "subset.txt");
+    writeFileSync(
+      listPath,
+      ["# benchmark subset", "src/c.ts", "src/a.ts", "../unsafe.ts", ""].join(
+        "\n",
+      ),
+      "utf8",
+    );
+
+    const files = await scanRepository(
+      repoPath,
+      repoConfig(repoPath, { sourceFileListPath: listPath }),
+    );
+
+    assert.deepStrictEqual(
+      files.map((f) => f.path),
+      ["src/a.ts", "src/c.ts"],
+    );
+  });
+
   it("discovers all built-in adapter extensions for configured C and C++ languages", async () => {
     const repoPath = makeTempRepo();
     mkdirSync(join(repoPath, "src"), { recursive: true });

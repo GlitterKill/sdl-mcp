@@ -26,6 +26,10 @@ describe("indexer.ts monolith shattering", () => {
     indexerPass1: join(repoRoot, "src/indexer/indexer-pass1.ts"),
     indexerPass2: join(repoRoot, "src/indexer/indexer-pass2.ts"),
     indexerMemory: join(repoRoot, "src/indexer/indexer-memory.ts"),
+    providerFirstSemanticScope: join(
+      repoRoot,
+      "src/indexer/provider-first/semantic-scope.ts",
+    ),
   } as const;
 
   it("splits into focused ~500-line modules", () => {
@@ -101,6 +105,10 @@ describe("indexer.ts monolith shattering", () => {
       "missing src/indexer/indexer-memory.ts",
     );
     assert.ok(
+      existsSync(modulePaths.providerFirstSemanticScope),
+      "missing src/indexer/provider-first/semantic-scope.ts",
+    );
+    assert.ok(
       countLines(modulePaths.indexerInit) <= extractedModuleMaxLines,
       "indexer-init.ts too large; split further",
     );
@@ -119,6 +127,11 @@ describe("indexer.ts monolith shattering", () => {
     assert.ok(
       countLines(modulePaths.indexerMemory) <= extractedModuleMaxLines,
       "indexer-memory.ts too large; split further",
+    );
+    assert.ok(
+      countLines(modulePaths.providerFirstSemanticScope) <=
+        extractedModuleMaxLines,
+      "provider-first/semantic-scope.ts too large; split further",
     );
   });
 

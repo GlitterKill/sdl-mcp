@@ -3,8 +3,6 @@ import type {
   PendingCallEdge,
   SymbolIndex,
 } from "./edge-builder.js";
-import { readFile } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
 // Repository indexing entry point and watcher orchestrator. Heavy work stays in
 // sibling modules; this file sequences scans, pass1/pass2, finalization, and
 // watcher delegation.
@@ -16,7 +14,6 @@ import {
 } from "./edge-builder.js";
 import { resolveParserWorkerPoolSize } from "./parser.js";
 import { scanRepoForIndex, type ScanRepoForIndexResult } from "./scanner.js";
-import { walkRepositoryFiles } from "./fileScanner.js";
 import {
   buildPreloadedFileSummarySymbolFactsFromRows,
   finalizeIndexing,
@@ -153,6 +150,11 @@ import {
   sourceTextCandidatesForScipSymbol,
   type SourceLinesByPath,
 } from "./provider-first/scip-normalizer.js";
+import {
+  isCppSemanticScanPath,
+  providerPathCanBeIgnoredOutsideScanScope,
+  resolveProviderFirstSemanticEligiblePaths,
+} from "./provider-first/semantic-scope.js";
 import type {
   CallProofUnavailableReasonCode,
   CallProofUnavailableReasonSampleFact,
@@ -162,24 +164,32 @@ import type {
   ProviderFirstPipelineSelection,
 } from "./provider-first/types.js";
 export type { IndexProgress, IndexProgressSubstage } from "./indexer-init.js";
+export { resolveProviderFirstSemanticEligiblePaths } from "./provider-first/semantic-scope.js";
 const CALL_PROOF_SUMMARY_SAMPLE_LIMIT = 5;
 const PROVIDER_FIRST_COVERAGE_SAMPLE_SOURCE_PATH_LIMIT = 5_000;
 const PROVIDER_FIRST_ACTIVE_STALE_DELETE_SYMBOL_LIMIT = 50_000;
 const PROVIDER_FIRST_ACTIVE_INPUT_RECORD_PATH =
   "__providerFirstActiveScipInput__";
 const PROVIDER_FIRST_ACTIVE_INPUT_FINGERPRINT_VERSION = 1;
-const PROVIDER_FIRST_CPP_SEMANTIC_EXTENSIONS = new Set([
-  ".c",
-  ".cc",
-  ".cpp",
-  ".cxx",
-  ".h",
-  ".hh",
-  ".hpp",
-  ".hxx",
-  ".def",
-  ".inc",
-]);
+
+function snapshotPass2ResolverBreakdown(
+  telemetry: CallResolutionTelemetry,
+): CallResolutionTelemetry["resolverBreakdown"] | undefined {
+  const entries = Object.entries(telemetry.resolverBreakdown).filter(
+    ([, resolver]) =>
+      resolver.targets > 0 ||
+      resolver.filesProcessed > 0 ||
+      resolver.edgesCreated > 0 ||
+      resolver.elapsedMs > 0,
+  );
+  if (entries.length === 0) return undefined;
+  return Object.fromEntries(
+    entries.map(([resolverId, resolver]) => [
+      resolverId,
+      { ...resolver },
+    ]),
+  );
+}
 
 function emitProviderFirstProgress(
   onProgress: ((progress: IndexProgress) => void) | undefined,
@@ -1625,197 +1635,6 @@ export function filterProviderFirstDataToScannedScope(params: {
   };
 }
 
-export async function resolveProviderFirstSemanticEligiblePaths(params: {
-  repoRoot: string;
-  scannedPaths: readonly string[];
-  providerPaths: Iterable<string>;
-}): Promise<Set<string>> {
-  const scannedPathSet = new Set(
-    params.scannedPaths.map((path) => normalizePath(path)),
-  );
-  const eligible = new Set<string>();
-
-  for (const relPath of params.providerPaths) {
-    const normalized = normalizePath(relPath);
-    if (scannedPathSet.has(normalized)) {
-      eligible.add(normalized);
-    }
-  }
-
-  if (!params.scannedPaths.some(isCppSemanticScanPath)) {
-    return eligible;
-  }
-
-  const compileDatabases = await discoverProviderFirstCompileDatabases(
-    params.repoRoot,
-  );
-  for (const databaseRelPath of compileDatabases) {
-    const databasePath = resolve(params.repoRoot, databaseRelPath);
-    let entries: unknown;
-    try {
-      entries = JSON.parse(await readFile(databasePath, "utf-8"));
-    } catch (err) {
-      logger.debug("provider-first compile database skipped", {
-        path: databaseRelPath,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      continue;
-    }
-    if (!Array.isArray(entries)) {
-      continue;
-    }
-
-    for (const entry of entries) {
-      const relPath = compileCommandEntryRepoRelativePath({
-        repoRoot: params.repoRoot,
-        databasePath,
-        entry,
-      });
-      if (relPath && scannedPathSet.has(relPath)) {
-        eligible.add(relPath);
-      }
-    }
-  }
-
-  return eligible;
-}
-
-async function discoverProviderFirstCompileDatabases(
-  repoRoot: string,
-): Promise<string[]> {
-  const files = await walkRepositoryFiles(repoRoot, {
-    patterns: ["compile_commands.json", "**/compile_commands.json"],
-    ignorePatterns: [
-      ".git/**",
-      "**/.git/**",
-      "node_modules/**",
-      "**/node_modules/**",
-      "target/**",
-      "**/target/**",
-      "dist/**",
-      "**/dist/**",
-      "vendor/**",
-      "**/vendor/**",
-    ],
-  });
-  return files
-    .map((file) => normalizePath(file))
-    .filter(isProviderFirstCompileDatabaseCandidate)
-    .sort((left, right) => left.localeCompare(right));
-}
-
-function isProviderFirstCompileDatabaseCandidate(relPath: string): boolean {
-  const normalized = normalizePath(relPath);
-  if (normalized === "compile_commands.json") return true;
-  const parts = normalized.split("/");
-  parts.pop();
-  return parts.some(isBuildOutputComponent);
-}
-
-function isBuildOutputComponent(component: string): boolean {
-  return (
-    component === "build" ||
-    component.startsWith("build-") ||
-    component.startsWith("build_") ||
-    component.startsWith("cmake-build-") ||
-    component === "out" ||
-    component.startsWith("out-") ||
-    component.startsWith("out_")
-  );
-}
-
-function compileCommandEntryRepoRelativePath(params: {
-  repoRoot: string;
-  databasePath: string;
-  entry: unknown;
-}): string | null {
-  if (!params.entry || typeof params.entry !== "object") return null;
-  const entry = params.entry as Record<string, unknown>;
-  const file = typeof entry.file === "string" ? entry.file : undefined;
-  if (!file || !isCppSemanticScanPath(file)) return null;
-  const directory =
-    typeof entry.directory === "string" ? entry.directory : undefined;
-  const absolutePath = compileCommandAbsolutePath({
-    databasePath: params.databasePath,
-    directory,
-    file,
-  });
-  const relPath = repoRelativePathFromPossiblyForeignPath(
-    params.repoRoot,
-    absolutePath,
-  );
-  return relPath && isCppSemanticScanPath(relPath) ? relPath : null;
-}
-
-function compileCommandAbsolutePath(params: {
-  databasePath: string;
-  directory?: string;
-  file: string;
-}): string {
-  const normalizedFile = normalizePath(params.file);
-  if (compileCommandPathIsAbsolute(normalizedFile)) {
-    return normalizedFile;
-  }
-  const directory = params.directory
-    ? normalizePath(params.directory)
-    : normalizePath(resolve(params.databasePath, ".."));
-  if (compileCommandPathIsAbsolute(directory) && directory.startsWith("/")) {
-    return normalizePath(`${directory}/${normalizedFile}`);
-  }
-  return normalizePath(resolve(directory, normalizedFile));
-}
-
-function repoRelativePathFromPossiblyForeignPath(
-  repoRoot: string,
-  absolutePath: string,
-): string | null {
-  const normalizedRoot = normalizePotentialWslMountPath(
-    normalizePath(repoRoot),
-  );
-  const normalizedPath = normalizePotentialWslMountPath(
-    normalizePath(absolutePath),
-  );
-  const windowsComparison =
-    /^[A-Za-z]:\//.test(normalizedRoot) || /^[A-Za-z]:\//.test(normalizedPath);
-  const rootKey = windowsComparison
-    ? normalizedRoot.toLowerCase()
-    : normalizedRoot;
-  const pathKey = windowsComparison
-    ? normalizedPath.toLowerCase()
-    : normalizedPath;
-  const rootPrefix = rootKey.endsWith("/") ? rootKey : `${rootKey}/`;
-
-  if (pathKey === rootKey) return null;
-  if (!pathKey.startsWith(rootPrefix)) return null;
-  return normalizePath(normalizedPath.slice(rootPrefix.length));
-}
-
-function normalizePotentialWslMountPath(path: string): string {
-  const match = path.match(/^\/mnt\/([A-Za-z])\/(.+)$/);
-  if (!match) return path;
-  return `${match[1].toUpperCase()}:/${match[2]}`;
-}
-
-function compileCommandPathIsAbsolute(path: string): boolean {
-  return isAbsolute(path) || path.startsWith("/") || /^[A-Za-z]:\//.test(path);
-}
-
-function isCppSemanticScanPath(path: string): boolean {
-  const normalized = normalizePath(path).toLowerCase();
-  const index = normalized.lastIndexOf(".");
-  if (index < 0) return false;
-  return PROVIDER_FIRST_CPP_SEMANTIC_EXTENSIONS.has(normalized.slice(index));
-}
-
-function providerPathCanBeIgnoredOutsideScanScope(relPath: string): boolean {
-  const normalized = normalizePath(relPath);
-  if (normalized === "" || normalized === "." || normalized === "..")
-    return false;
-  if (normalized.startsWith("../") || normalized.includes("/../")) return false;
-  if (normalized.startsWith("/") || normalized.startsWith("//")) return false;
-  return !/^[A-Za-z]:\//.test(normalized);
-}
-
 /** @internal exported for tests; do not import from product code. */
 export function selectProviderFirstLegacyFallbackPaths(params: {
   fallbackPaths: ReadonlySet<string>;
@@ -2459,6 +2278,9 @@ async function indexRepoImpl(
     logger.error("Corrupt configJson for repo", { repoId });
     throw new Error(`Corrupt configJson for repo ${repoId}`);
   }
+  const scopedSourceFileListActive = Boolean(config.sourceFileListPath);
+  const scopedSourceFileListReason =
+    "shadow staging skipped because repo.sourceFileListPath scopes this run to a benchmark subset";
 
   const appConfig: AppConfig = loadConfig();
   const providerFirstConfig =
@@ -2836,6 +2658,7 @@ async function indexRepoImpl(
             generatedIndexes: scipPreRefresh?.generatedIndexes,
             generatorFailures: scipPreRefresh?.failures,
             generatorCacheKey: scipPreRefresh?.cache?.key,
+            scannedPaths: providerCoverageScan.files.map((file) => file.path),
             recordPhaseTiming: recordProviderFirstPhaseTiming,
             onProgress,
             signal,
@@ -2955,6 +2778,12 @@ async function indexRepoImpl(
             readinessGates.skipDerivedStateReason;
           providerFirstShadowStagingSkipReason =
             readinessGates.shadowStagingSkipReason;
+          if (scopedSourceFileListActive) {
+            providerFirstShadowStagingSkipReason =
+              providerFirstShadowStagingSkipReason
+                ? `${providerFirstShadowStagingSkipReason}; ${scopedSourceFileListReason}`
+                : scopedSourceFileListReason;
+          }
           const legacyFallbackPaths = selectProviderFirstLegacyFallbackPaths({
             fallbackPaths: coverageReport.fallbackPaths,
             semanticEligiblePaths,
@@ -3059,9 +2888,11 @@ async function indexRepoImpl(
               }
             }
           }
-          const activeProviderInputHash = providerFirstActiveInputFingerprint(
-            providerResult.generatedIndexes,
-          );
+          const activeProviderInputHash = scopedSourceFileListActive
+            ? null
+            : providerFirstActiveInputFingerprint(
+                providerResult.generatedIndexes,
+              );
           const activeProviderInputRecord = activeProviderInputHash
             ? await ladybugDb.getScipIngestionRecord(
                 conn,
@@ -3130,6 +2961,7 @@ async function indexRepoImpl(
                     useKnownFreshWriters:
                       activeMaterializationPlan.useKnownFreshWriters,
                     writeEdges: activeMaterializationPlan.writeEdges,
+                    pruneExternalSymbols: !scopedSourceFileListActive,
                     measurePhase: async (phaseName, fn) => {
                       const substage =
                         `materialize.${phaseName}` as IndexProgressSubstage;
@@ -3159,7 +2991,7 @@ async function indexRepoImpl(
                       }
                     },
                   });
-                } else {
+                } else if (!scopedSourceFileListActive) {
                   await ladybugDb.withTransaction(conn, async (txConn) => {
                     await ladybugDb.pruneStaleScipExternalSymbols(
                       txConn,
@@ -3228,6 +3060,11 @@ async function indexRepoImpl(
           if (activeMaterializationPlan.reuseExistingProviderRows) {
             executionReasons.push(
               `active provider rows reused for ${materializedRows.symbols.length} large existing symbol row(s); clean rebuild or shadow activation is required to physically retire stale provider rows`,
+            );
+          }
+          if (scopedSourceFileListActive) {
+            executionReasons.push(
+              "repo.sourceFileListPath is set; provider-first active row reuse and shadow activation are disabled so this subset run cannot masquerade as a complete graph",
             );
           }
           if (coverageReport.fallbackPaths.size > 0) {
@@ -3353,7 +3190,9 @@ async function indexRepoImpl(
                 materializedRows.symbols.length +
                 materializedRows.externalSymbols.length,
               edgesExtracted: materializedRows.edges.length,
-              changedFileIdsForFinalize: undefined,
+              changedFileIdsForFinalize: scopedSourceFileListActive
+                ? materializedRows.changedFileIds
+                : undefined,
               changedTestFilePathsForFinalize: new Set(),
               changedFileIdsForMemory: materializedRows.changedFileIds,
               hasIndexMutations: true,
@@ -4248,7 +4087,9 @@ async function indexRepoImpl(
     const phaseOutcome = await withPostIndexWriteSession(
       async () => {
         const changedFileIdsParam =
-          mode === "incremental" ? changedFileIds : undefined;
+          mode === "incremental" || scopedSourceFileListActive
+            ? changedFileIds
+            : undefined;
         const changedTestFilePathsParam =
           mode === "incremental" ? changedPass2FilePaths : undefined;
         const hasIndexMutations = changedFiles > 0 || totalEdgesCreated > 0;
@@ -4402,6 +4243,8 @@ async function indexRepoImpl(
               files - providerFirstLegacyFallbackSamplePaths.length,
             ),
             phases: { ...providerFirstLegacyFallbackPhaseTimings },
+            resolverBreakdown:
+              snapshotPass2ResolverBreakdown(callResolutionTelemetry),
           },
         };
       }

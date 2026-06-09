@@ -5151,6 +5151,85 @@ describe("provider-first indexing foundation", () => {
     }
   });
 
+  it("scopes provider collection to scanned paths for subset benchmarks", async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "sdl-provider-first-subset-"));
+    try {
+      mkdirSync(join(repoRoot, "src"), { recursive: true });
+      writeFileSync(
+        join(repoRoot, "src", "keep.ts"),
+        ["export function keep() {", "  return 1;", "}"].join("\n"),
+        "utf8",
+      );
+      writeFileSync(
+        join(repoRoot, "src", "skip.ts"),
+        ["export function skip() {", "  return 2;", "}"].join("\n"),
+        "utf8",
+      );
+      const keepSymbol =
+        "scip-typescript npm fixture 1.0.0 src/keep.ts/keep().";
+      const skipSymbol =
+        "scip-typescript npm fixture 1.0.0 src/skip.ts/skip().";
+      await writeTestScipIndex(join(repoRoot, "index.scip"), {
+        metadata: {
+          toolName: "scip-fixture",
+          toolVersion: "1.0.0",
+        },
+        documents: [
+          {
+            language: "typescript",
+            relativePath: "src/keep.ts",
+            occurrences: [
+              {
+                range: [0, 16, 20],
+                enclosingRange: [0, 0, 2, 1],
+                symbol: keepSymbol,
+                symbolRoles: 1,
+              },
+            ],
+            symbols: [{ symbol: keepSymbol, kind: 12, displayName: "keep" }],
+          },
+          {
+            language: "typescript",
+            relativePath: "src/skip.ts",
+            occurrences: [
+              {
+                range: [0, 16, 20],
+                enclosingRange: [0, 0, 2, 1],
+                symbol: skipSymbol,
+                symbolRoles: 1,
+              },
+            ],
+            symbols: [{ symbol: skipSymbol, kind: 12, displayName: "skip" }],
+          },
+        ],
+      });
+
+      const result = await executeProviderFirstScipFull({
+        repoId: "repo",
+        repoRoot,
+        scannedPaths: ["src/keep.ts"],
+        config: {
+          scip: ScipConfigSchema.parse({
+            enabled: true,
+            indexes: [{ path: "index.scip" }],
+          }),
+          indexing: IndexingConfigSchema.parse({ pipeline: "providerFirst" }),
+          repos: [],
+        } as AppConfig,
+      });
+
+      assert.deepEqual(
+        result.facts.files.map((file) => file.relPath),
+        ["src/keep.ts"],
+      );
+      assert.equal(result.summary.filesProcessed, 1);
+      assert.equal(result.rows.files.length, 1);
+      assert.equal(result.rows.symbols.length, 1);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
   it("records source loader reasons in call-proof diagnostics", async () => {
     const realRepoRoot = mkdtempSync(
       join(tmpdir(), "sdl-provider-first-source-real-"),
@@ -5851,6 +5930,51 @@ describe("provider-first indexing foundation", () => {
     ]);
   });
 
+  it("skips repo-wide external pruning for scoped provider materialization", async () => {
+    const statements: string[] = [];
+    const phases: string[] = [];
+    const rows = providerFactsToGraphRows({
+      indexedAt: "2026-05-25T12:00:00.000Z",
+      facts: providerFactSet({
+        externalSymbols: [
+          {
+            kind: "externalSymbol",
+            repoId: "repo",
+            generationId: "gen-1",
+            providerType: "scip",
+            providerId: "scip",
+            emittedAt: "2026-05-25T12:00:00.000Z",
+            symbolId: "symbol-2",
+            providerSymbolId: "scip npm dep 1.0.0 dep/index.ts/api().",
+            name: "api",
+            symbolKind: "function",
+            packageName: "dep",
+            packageVersion: "1.0.0",
+            documentation: [],
+          },
+        ],
+      }),
+    });
+
+    await materializeProviderFacts(createFakeConnection(statements), rows, {
+      pruneExternalSymbols: false,
+      measurePhase: async (phaseName, fn) => {
+        phases.push(phaseName);
+        return await fn();
+      },
+    });
+
+    assert.equal(phases.includes("pruneExternalSymbols"), false);
+    assert.equal(
+      statements.some(
+        (statement) =>
+          statement.includes("coalesce(s.external, false) = true") &&
+          statement.includes("coalesce(s.source, '') = 'scip'"),
+      ),
+      false,
+    );
+  });
+
   it("uses provider-first active materialization batch shapes", async () => {
     const statements: string[] = [];
     const emittedAt = "2026-05-25T12:00:00.000Z";
@@ -5992,9 +6116,18 @@ describe("provider-first indexing foundation", () => {
       }),
     });
 
-    await materializeProviderFacts(createFakeConnection(statements), rows, {
-      replaceFileSymbols: true,
-    });
+    await materializeProviderFacts(
+      createFakeConnection(statements, (statement) =>
+        statement.includes("s.symbolId IN $symbolIds") &&
+        statement.includes("RETURN s.symbolId AS symbolId")
+          ? [{ symbolId: "symbol-orphan" }]
+          : [],
+      ),
+      rows,
+      {
+        replaceFileSymbols: true,
+      },
+    );
 
     const symbolDeleteIndex = statements.findIndex(
       (statement) =>

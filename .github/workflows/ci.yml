@@ -115,12 +115,18 @@ jobs:
           TEST_OUT="${RUNNER_TEMP}/test-output.txt"
           npm test > "$TEST_OUT" 2>&1 || true
           cat "$TEST_OUT"
-          grep -c "^not ok" "$TEST_OUT" && FAILURES=true || FAILURES=false
+          if grep -q "^not ok" "$TEST_OUT"; then
+            FAILURES=true
+          else
+            FAILURES=false
+          fi
           # Node 24 changed TAP output prefix from "# " to "ℹ " — accept both
           if [ "$FAILURES" = "true" ] || ! grep -qE "(#|ℹ) fail 0" "$TEST_OUT"; then
             echo "## Test Failures (${{ matrix.os }}, Node ${{ matrix.node-version }})" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
-            grep -E "not ok|failureType|error:.*'|# fail|ℹ fail|# tests|ℹ tests|# pass|ℹ pass" "$TEST_OUT" | head -80 >> $GITHUB_STEP_SUMMARY
+            SUMMARY_LINES="${RUNNER_TEMP}/test-summary-lines.txt"
+            grep -E "not ok|failureType|error:.*'|# fail|ℹ fail|# tests|ℹ tests|# pass|ℹ pass" "$TEST_OUT" > "$SUMMARY_LINES" || true
+            head -80 "$SUMMARY_LINES" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             exit 1
           fi

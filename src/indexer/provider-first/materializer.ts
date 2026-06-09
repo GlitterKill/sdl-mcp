@@ -94,6 +94,12 @@ export interface MaterializeProviderFactsOptions {
    */
   writeEdges?: boolean;
   /**
+   * Repo-wide SCIP external pruning is safe only when rows.externalSymbols is
+   * the full provider truth set. Scoped benchmark runs retain a subset of SCIP
+   * documents, so they must not prune out-of-scope externals.
+   */
+  pruneExternalSymbols?: boolean;
+  /**
    * Optional instrumentation hook used by the provider-first orchestrator to
    * expose the individual LadybugDB write buckets without changing transaction
    * ownership or write ordering.
@@ -213,14 +219,13 @@ export async function materializeProviderFacts(
   const useKnownFreshWriters =
     options.useKnownFreshWriters ?? options.replaceFileSymbols;
   const writeEdges = options.writeEdges ?? true;
+  const pruneExternalSymbols = options.pruneExternalSymbols ?? true;
   if (deleteExistingFileSymbols) {
     await measurePhase("deleteFileSymbols", async () => {
-      await deleteProviderFileSymbolsInChunks(conn, repoId, [
-        ...rows.changedFileIds,
-      ]);
-      await deleteProviderSymbolsByIdInChunks(
+      await deleteProviderReplacementSymbolsInChunks(
         conn,
         repoId,
+        [...rows.changedFileIds],
         rows.symbols.map((symbol) => symbol.symbolId),
       );
     });
@@ -239,13 +244,15 @@ export async function materializeProviderFacts(
         await ladybugDb.upsertSymbolBatch(txConn, rows.symbols);
       }
     });
-    await measurePhase("pruneExternalSymbols", async () => {
-      await ladybugDb.pruneStaleScipExternalSymbols(
-        txConn,
-        repoId,
-        rows.externalSymbols.map((symbol) => symbol.symbolId),
-      );
-    });
+    if (pruneExternalSymbols) {
+      await measurePhase("pruneExternalSymbols", async () => {
+        await ladybugDb.pruneStaleScipExternalSymbols(
+          txConn,
+          repoId,
+          rows.externalSymbols.map((symbol) => symbol.symbolId),
+        );
+      });
+    }
     if (rows.externalSymbols.length > 0) {
       await measurePhase("mergeExternalSymbols", async () => {
         await ladybugDb.batchMergeExternalSymbols(
@@ -266,61 +273,56 @@ export async function materializeProviderFacts(
   });
 }
 
-async function deleteProviderFileSymbolsInChunks(
+async function deleteProviderReplacementSymbolsInChunks(
   conn: Connection,
   repoId: string,
   fileIds: string[],
+  incomingSymbolIds: string[],
 ): Promise<void> {
   // Delete fan-out is much larger than file upsert fan-out: one file chunk can
   // expand into tens of thousands of Symbol ids plus every dependent edge and
   // enrichment row. Keep this deliberately below the generic file-write chunk.
-  const chunkSize = Math.min(
+  const fileChunkSize = Math.min(
     ladybugDb.resolveLadybugWriteChunkSize("files"),
     PROVIDER_FIRST_DELETE_SYMBOL_FILE_CHUNK_SIZE,
   );
-  for (let i = 0; i < fileIds.length; i += chunkSize) {
-    const chunk = fileIds.slice(i, i + chunkSize);
-    await ladybugDb.withTransaction(conn, async (txConn) => {
-      await retireProviderSymbolsByFileIds(txConn, repoId, chunk);
-    });
+  const symbolIds = new Set<string>();
+  for (let i = 0; i < fileIds.length; i += fileChunkSize) {
+    const chunk = fileIds.slice(i, i + fileChunkSize);
+    const rows = await ladybugDb.queryAll<{ symbolId: string }>(
+      conn,
+      `MATCH (:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
+       WHERE f.fileId IN $fileIds
+       RETURN s.symbolId AS symbolId`,
+      { repoId, fileIds: chunk },
+    );
+    for (const row of rows) symbolIds.add(row.symbolId);
   }
-}
 
-async function retireProviderSymbolsByFileIds(
-  conn: Connection,
-  repoId: string,
-  fileIds: string[],
-): Promise<void> {
-  if (fileIds.length === 0) return;
-
-  const symbolRows = await ladybugDb.queryAll<{ symbolId: string }>(
-    conn,
-    `MATCH (:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
-     WHERE f.fileId IN $fileIds
-     RETURN s.symbolId AS symbolId`,
-    { repoId, fileIds },
-  );
-  if (symbolRows.length === 0) return;
-
-  const symbolIds = symbolRows.map((row) => row.symbolId);
-  await retireProviderSymbolsByIds(conn, repoId, symbolIds, fileIds);
-}
-
-async function deleteProviderSymbolsByIdInChunks(
-  conn: Connection,
-  repoId: string,
-  symbolIds: string[],
-): Promise<void> {
-  const uniqueSymbolIds = [...new Set(symbolIds)];
-  if (uniqueSymbolIds.length === 0) return;
-  const chunkSize = Math.min(
+  const uniqueIncomingSymbolIds = [...new Set(incomingSymbolIds)];
+  const symbolChunkSize = Math.min(
     ladybugDb.resolveLadybugWriteChunkSize("symbols"),
     PROVIDER_FIRST_DELETE_SYMBOL_FILE_CHUNK_SIZE * 4,
   );
-  for (let i = 0; i < uniqueSymbolIds.length; i += chunkSize) {
-    const chunk = uniqueSymbolIds.slice(i, i + chunkSize);
+  for (let i = 0; i < uniqueIncomingSymbolIds.length; i += symbolChunkSize) {
+    const chunk = uniqueIncomingSymbolIds.slice(i, i + symbolChunkSize);
+    const rows = await ladybugDb.queryAll<{ symbolId: string }>(
+      conn,
+      `MATCH (s:Symbol {repoId: $repoId})
+       WHERE s.symbolId IN $symbolIds
+       RETURN s.symbolId AS symbolId`,
+      { repoId, symbolIds: chunk },
+    );
+    for (const row of rows) symbolIds.add(row.symbolId);
+  }
+
+  const uniqueSymbolIds = [...symbolIds];
+  if (uniqueSymbolIds.length === 0) return;
+  for (let i = 0; i < uniqueSymbolIds.length; i += symbolChunkSize) {
+    const chunk = uniqueSymbolIds.slice(i, i + symbolChunkSize);
+    const fileCleanupIds = i === 0 ? fileIds : [];
     await ladybugDb.withTransaction(conn, async (txConn) => {
-      await retireProviderSymbolsByIds(txConn, repoId, chunk);
+      await retireProviderSymbolsByIds(txConn, repoId, chunk, fileCleanupIds);
     });
   }
 }

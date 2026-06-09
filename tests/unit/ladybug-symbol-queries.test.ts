@@ -449,4 +449,78 @@ describe("LadybugDB Symbol Queries", () => {
       assert.strictEqual(row.external, false);
     },
   );
+
+  it(
+    "normalizeDependencyPlaceholderSymbols scopes file-backed repairs by file id",
+    { skip: !ladybugAvailable },
+    async () => {
+      const otherFileId = "sym-file-other";
+      await queries.upsertFile(conn as unknown as import("kuzu").Connection, {
+        fileId: otherFileId,
+        repoId,
+        relPath: "src/other.ts",
+        contentHash: "other-hash",
+        language: "ts",
+        byteSize: 10,
+        lastIndexedAt: null,
+      });
+      for (const [symbolId, targetFileId] of [
+        ["sym-external-scoped", fileId],
+        ["sym-external-unscoped", otherFileId],
+      ] as const) {
+        await queries.upsertSymbol(
+          conn as unknown as import("kuzu").Connection,
+          {
+            symbolId,
+            repoId,
+            fileId: targetFileId,
+            kind: "function",
+            name: symbolId,
+            exported: true,
+            visibility: null,
+            language: "typescript",
+            rangeStartLine: 1,
+            rangeStartCol: 0,
+            rangeEndLine: 1,
+            rangeEndCol: 0,
+            astFingerprint: symbolId,
+            signatureJson: null,
+            summary: null,
+            invariantsJson: null,
+            sideEffectsJson: null,
+            updatedAt: "2026-03-04T00:00:00Z",
+          },
+        );
+        await exec(
+          conn,
+          `MATCH (s:Symbol {symbolId: '${symbolId}'})
+           SET s.external = true`,
+        );
+      }
+
+      const result = await queries.normalizeDependencyPlaceholderSymbols(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        { fileIds: new Set([fileId]) },
+      );
+
+      assert.strictEqual(result.fileBackedRepaired, 1);
+      const dbResult = await conn.query(
+        `MATCH (s:Symbol)
+         WHERE s.symbolId IN ['sym-external-scoped', 'sym-external-unscoped']
+         RETURN s.symbolId AS symbolId, coalesce(s.external, false) AS external
+         ORDER BY s.symbolId`,
+      );
+      const rows: Record<string, boolean> = {};
+      while (dbResult.hasNext()) {
+        const row = await dbResult.getNext();
+        rows[String(row.symbolId)] = Boolean(row.external);
+      }
+      dbResult.close();
+      assert.deepStrictEqual(rows, {
+        "sym-external-scoped": false,
+        "sym-external-unscoped": true,
+      });
+    },
+  );
 });

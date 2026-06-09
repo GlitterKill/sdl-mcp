@@ -788,6 +788,11 @@ function formatProviderFirstLegacyFallbackDiagnosticLines(
   if (pass2Phases.length > 0) {
     lines.push(`    pass2: ${pass2Phases.join(", ")}`);
   }
+  const resolverLine =
+    formatProviderFirstLegacyFallbackResolverDiagnosticLine(diagnostics);
+  if (resolverLine) {
+    lines.push(resolverLine);
+  }
   const finalizePhases = PROVIDER_FIRST_LEGACY_FALLBACK_FINALIZE_LABELS.flatMap(
     ([phaseName, label]) => {
       const durationMs = diagnostics.phases[phaseName];
@@ -903,6 +908,36 @@ function formatProviderFirstLegacyFallbackDiagnosticLines(
     );
   }
   return lines;
+}
+
+function formatProviderFirstLegacyFallbackResolverDiagnosticLine(
+  diagnostics: ProviderFirstLegacyFallbackDiagnostics,
+): string | undefined {
+  const entries = Object.entries(diagnostics.resolverBreakdown ?? {})
+    .filter(([, resolver]) =>
+      [
+        resolver.targets,
+        resolver.filesProcessed,
+        resolver.edgesCreated,
+        resolver.elapsedMs,
+      ].some((value) => value > 0),
+    )
+    .sort(([, left], [, right]) => right.elapsedMs - left.elapsedMs);
+  if (entries.length === 0) return undefined;
+  const selected = entries.slice(0, 5).map(([resolverId, resolver]) =>
+    [
+      `${resolverId} targets=${resolver.targets}`,
+      `files=${resolver.filesProcessed}`,
+      `edges=${resolver.edgesCreated}`,
+      `cumulative=${resolver.elapsedMs}ms`,
+      `unresolved=${resolver.unresolved}`,
+      `ambiguous=${resolver.ambiguous}`,
+      `broken=${resolver.brokenChain}`,
+    ].join(" "),
+  );
+  const omittedCount = entries.length - selected.length;
+  const omittedSuffix = omittedCount > 0 ? ` (+${omittedCount} more)` : "";
+  return `    pass2.resolvers: ${selected.join("; ")}${omittedSuffix}`;
 }
 
 function sumKnownLegacyFallbackDiagnosticPhases(

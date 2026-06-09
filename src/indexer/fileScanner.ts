@@ -1,4 +1,4 @@
-import { resolve } from "path";
+import { isAbsolute, resolve } from "path";
 
 import { RepoConfig } from "../config/types.js";
 import { normalizePath } from "../util/paths.js";
@@ -132,6 +132,11 @@ async function discoverFiles(
   repoPath: string,
   config: RepoConfig,
 ): Promise<string[]> {
+  const explicitFileList = await readSourceFileList(repoPath, config);
+  if (explicitFileList) {
+    return explicitFileList;
+  }
+
   const extensions = getLanguageExtensions(config.languages);
   const patterns = extensions.map((ext) => `**/*${ext}`);
 
@@ -155,6 +160,48 @@ async function discoverFiles(
     patterns,
     ignorePatterns,
   });
+}
+
+async function readSourceFileList(
+  repoPath: string,
+  config: RepoConfig,
+): Promise<string[] | undefined> {
+  if (!config.sourceFileListPath) {
+    return undefined;
+  }
+
+  const listPath = isAbsolute(config.sourceFileListPath)
+    ? config.sourceFileListPath
+    : resolve(repoPath, config.sourceFileListPath);
+  const content = await readFileAsync(listPath, "utf-8");
+  const files = new Set<string>();
+
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+
+    const normalized = normalizePath(line);
+    if (
+      normalized.startsWith("../") ||
+      normalized.includes("/../") ||
+      isAbsolute(normalized)
+    ) {
+      logger.warn("Ignoring unsafe source file list entry", {
+        sourceFileListPath: listPath,
+        entry: line,
+      });
+      continue;
+    }
+    files.add(normalized);
+  }
+
+  logger.info("Using explicit source file list for repository scan", {
+    sourceFileListPath: listPath,
+    files: files.size,
+  });
+  return [...files].sort((a, b) => a.localeCompare(b));
 }
 
 async function filterFilesBySize(

@@ -36,6 +36,7 @@ import type {
   IndexProgress,
   IndexProgressSubstage,
 } from "../indexer-init.js";
+import type { Pass2ResolverTelemetry } from "../edge-builder/telemetry.js";
 import {
   normalizeScipProviderFacts,
   PROVIDER_FIRST_OCCURRENCE_FACT_RETENTION_LIMIT,
@@ -182,6 +183,7 @@ export interface ProviderFirstLegacyFallbackDiagnostics {
   samplePaths: string[];
   omittedPathCount?: number;
   phases: Record<string, number>;
+  resolverBreakdown?: Record<string, Pass2ResolverTelemetry>;
 }
 
 export interface ProviderFirstScipExecutionResult {
@@ -200,6 +202,7 @@ interface ExecuteProviderFirstScipFullParams {
   generatedIndexes?: readonly ScipGeneratedIndexDiagnostic[];
   generatorFailures?: readonly ScipFailureDiagnostic[];
   generatorCacheKey?: string;
+  scannedPaths?: readonly string[];
   recordPhaseTiming?: ProviderFirstPhaseTimingRecorder;
   onProgress?: (progress: {
     stage: IndexProgress["stage"];
@@ -318,6 +321,7 @@ export async function executeProviderFirstScipFull(
       params.repoRoot,
       params.config,
     ),
+    scannedPaths: params.scannedPaths,
   });
   const cachedCollection =
     cacheContext &&
@@ -478,6 +482,7 @@ function providerCollectionCacheContext(params: {
   generatedIndexes: readonly ScipGeneratedIndexDiagnostic[];
   generatorCacheKey?: string;
   sourceTextMaxBytes: number;
+  scannedPaths?: readonly string[];
 }): ProviderCollectionCacheContext | null {
   // Full provider fact caching is experimental: on large repos the serialized
   // payload can be multiple GB, so keep it opt-in until a lean summary cache is
@@ -509,6 +514,9 @@ function providerCollectionCacheContext(params: {
       externalSymbols: params.scip.externalSymbols,
     },
     sourceTextMaxBytes: params.sourceTextMaxBytes,
+    scannedPathsHash: params.scannedPaths
+      ? hashValue([...params.scannedPaths].map(normalizePath).sort())
+      : null,
   });
   const repoKey = safeCacheKeyPart(params.repoId);
   return {
@@ -662,6 +670,7 @@ async function collectScipProviderFacts(params: {
   generationId: string;
   generatedIndexes?: readonly ScipGeneratedIndexDiagnostic[];
   generatorFailures?: readonly ScipFailureDiagnostic[];
+  scannedPaths?: readonly string[];
   onProgress?: ExecuteProviderFirstScipFullParams["onProgress"];
   recordPhaseTiming?: ProviderFirstPhaseTimingRecorder;
   signal?: AbortSignal;
@@ -716,6 +725,7 @@ async function collectScipProviderFacts(params: {
       entryLabel: entry.label,
       scip,
       recordPhaseTiming: params.recordPhaseTiming,
+      scannedPaths: params.scannedPaths,
       sourceTextMaxBytes: resolveSourceTextMaxBytes(
         params.repoId,
         params.repoRoot,
@@ -743,6 +753,7 @@ async function decodeScipIndexToFacts(params: {
   entryLabel?: string;
   scip: ScipConfig;
   sourceTextMaxBytes: number;
+  scannedPaths?: readonly string[];
   recordPhaseTiming?: ProviderFirstPhaseTimingRecorder;
   onProgress?: ExecuteProviderFirstScipFullParams["onProgress"];
   signal?: AbortSignal;
@@ -771,12 +782,37 @@ async function decodeScipIndexToFacts(params: {
         `[${providerId}] metadata ${metadata.toolName ?? "unknown"} ${metadata.toolVersion ?? ""}`.trim(),
     });
     const documents: ScipDocument[] = [];
+    const scannedPathSet = params.scannedPaths
+      ? new Set(params.scannedPaths.map(normalizePath))
+      : undefined;
     await measureCollectionPhase("documents", async () => {
       let seen = 0;
+      let retained = 0;
       for await (const document of decoder.documents()) {
         params.signal?.throwIfAborted();
-        documents.push(document);
         seen++;
+        if (
+          scannedPathSet &&
+          !scannedPathSet.has(normalizePath(document.relativePath))
+        ) {
+          if (
+            seen === 1 ||
+            seen % PROVIDER_FIRST_DOCUMENT_PROGRESS_INTERVAL === 0
+          ) {
+            emitProviderFirstProgress(
+              params.onProgress,
+              "providerCollection.documents",
+              {
+                current: retained,
+                total: 0,
+                message: `[${providerId}] documents=${retained} retained (${seen} scanned)`,
+              },
+            );
+          }
+          continue;
+        }
+        documents.push(document);
+        retained++;
         if (
           seen === 1 ||
           seen % PROVIDER_FIRST_DOCUMENT_PROGRESS_INTERVAL === 0
@@ -785,9 +821,11 @@ async function decodeScipIndexToFacts(params: {
             params.onProgress,
             "providerCollection.documents",
           {
-            current: seen,
+            current: retained,
             total: 0,
-            message: `[${providerId}] documents=${seen}`,
+            message: scannedPathSet
+              ? `[${providerId}] documents=${retained} retained (${seen} scanned)`
+              : `[${providerId}] documents=${seen}`,
           },
           );
         }
@@ -800,13 +838,15 @@ async function decodeScipIndexToFacts(params: {
           params.onProgress,
           "providerCollection.documents",
           {
-            current: seen,
+            current: retained,
             total: 0,
-            message: `[${providerId}] documents=${seen}`,
+            message: scannedPathSet
+              ? `[${providerId}] documents=${retained} retained (${seen} scanned)`
+              : `[${providerId}] documents=${seen}`,
           },
         );
       }
-      return seen;
+      return retained;
     });
 
     emitProviderFirstProgress(
@@ -871,8 +911,8 @@ async function decodeScipIndexToFacts(params: {
         message: `[${providerId}] normalizing provider facts`,
       },
     );
-    return await measureCollectionPhase("normalize", () =>
-      normalizeScipProviderFacts({
+    return await measureCollectionPhase("normalize", async () => {
+      const facts = await normalizeScipProviderFacts({
         repoId: params.repoId,
         generationId: params.generationId,
         providerId,
@@ -887,8 +927,9 @@ async function decodeScipIndexToFacts(params: {
         recordPhaseTiming: params.recordPhaseTiming,
         retainOccurrenceFacts,
         onProgress: params.onProgress,
-      }),
-    );
+      });
+      return scannedPathSet ? pruneUnreferencedExternalSymbols(facts) : facts;
+    });
   } finally {
     decoder.close();
   }
@@ -916,6 +957,17 @@ function countScipOccurrences(documents: readonly ScipDocument[]): number {
     count += document.occurrences.length;
   }
   return count;
+}
+
+function pruneUnreferencedExternalSymbols(facts: ProviderFactSet): ProviderFactSet {
+  const referencedSymbolIds = new Set<string>();
+  for (const edge of facts.edges) {
+    referencedSymbolIds.add(edge.targetSymbolId);
+  }
+  facts.externalSymbols = facts.externalSymbols.filter((symbol) =>
+    referencedSymbolIds.has(symbol.symbolId),
+  );
+  return facts;
 }
 
 async function loadExternalSymbols(

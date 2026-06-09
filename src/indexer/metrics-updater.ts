@@ -106,9 +106,14 @@ export async function finalizeIndexing({
 
   await measureSubphase("symbolStatusNormalize", async () => {
     await withWriteConn(async (wConn) => {
+      const normalizeScope =
+        changedFileIds && changedFileIds.size > 0
+          ? { fileIds: changedFileIds }
+          : undefined;
       const repaired = await ladybugDb.normalizeDependencyPlaceholderSymbols(
         wConn,
         repoId,
+        normalizeScope,
       );
       const pruned = await ladybugDb.pruneIsolatedPlaceholderSymbols(
         wConn,

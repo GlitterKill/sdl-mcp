@@ -581,26 +581,30 @@ function escapeCopyOptionString(value: string): string {
 export async function normalizeFileBackedSymbolStatuses(
   conn: Connection,
   repoId: string,
+  fileIds?: readonly string[],
 ): Promise<number> {
+  if (fileIds && fileIds.length === 0) return 0;
   const row = await querySingle<{ count: unknown }>(
     conn,
-    `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(:File)
+    `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
      WHERE s.repoId = $repoId
+       ${fileIds ? "AND f.fileId IN $fileIds" : ""}
        AND (
          coalesce(s.symbolStatus, 'real') <> 'real'
          OR coalesce(s.placeholderKind, '') <> ''
          OR coalesce(s.placeholderTarget, '') <> ''
        )
      RETURN count(DISTINCT s) AS count`,
-    { repoId },
+    { repoId, fileIds },
   );
   const repaired = toNumber(row?.count ?? 0);
   if (repaired === 0) return 0;
 
   await exec(
     conn,
-    `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(:File)
+    `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
      WHERE s.repoId = $repoId
+       ${fileIds ? "AND f.fileId IN $fileIds" : ""}
        AND (
          coalesce(s.symbolStatus, 'real') <> 'real'
          OR coalesce(s.placeholderKind, '') <> ''
@@ -609,7 +613,7 @@ export async function normalizeFileBackedSymbolStatuses(
      SET s.symbolStatus = 'real',
          s.placeholderKind = '',
          s.placeholderTarget = ''`,
-    { repoId },
+    { repoId, fileIds },
   );
   return repaired;
 }
@@ -619,25 +623,36 @@ export interface DependencyPlaceholderNormalizeResult {
   dependencyPlaceholdersRepaired: number;
 }
 
+export interface DependencyPlaceholderNormalizeOptions {
+  fileIds?: ReadonlySet<string>;
+}
+
 export async function normalizeDependencyPlaceholderSymbols(
   conn: Connection,
   repoId: string,
+  options: DependencyPlaceholderNormalizeOptions = {},
 ): Promise<DependencyPlaceholderNormalizeResult> {
   const hasExternalColumn = await symbolExternalColumnExists(conn);
+  const fileIds = options.fileIds ? [...options.fileIds] : undefined;
   const fileBackedRepaired = await countFileBackedDependencyMetadataRepairs(
     conn,
     repoId,
     hasExternalColumn,
+    fileIds,
   );
-  await normalizeFileBackedSymbolStatuses(conn, repoId);
+  await normalizeFileBackedSymbolStatuses(conn, repoId, fileIds);
   if (hasExternalColumn) {
-    await exec(
-      conn,
-      `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(:File)
-       WHERE s.repoId = $repoId AND coalesce(s.external, false) = true
-       SET s.external = false`,
-      { repoId },
-    );
+    if (!fileIds || fileIds.length > 0) {
+      await exec(
+        conn,
+        `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
+         WHERE s.repoId = $repoId
+           ${fileIds ? "AND f.fileId IN $fileIds" : ""}
+           AND coalesce(s.external, false) = true
+         SET s.external = false`,
+        { repoId, fileIds },
+      );
+    }
   }
   const rows = await queryAll<{
     symbolId: string;
@@ -717,11 +732,14 @@ async function countFileBackedDependencyMetadataRepairs(
   conn: Connection,
   repoId: string,
   hasExternalColumn: boolean,
+  fileIds?: readonly string[],
 ): Promise<number> {
+  if (fileIds && fileIds.length === 0) return 0;
   const row = await querySingle<{ count: unknown }>(
     conn,
-    `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(:File)
+    `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
      WHERE s.repoId = $repoId
+       ${fileIds ? "AND f.fileId IN $fileIds" : ""}
        AND (
          coalesce(s.symbolStatus, 'real') <> 'real'
          OR coalesce(s.placeholderKind, '') <> ''
@@ -733,7 +751,7 @@ async function countFileBackedDependencyMetadataRepairs(
          }
        )
      RETURN count(DISTINCT s) AS count`,
-    { repoId },
+    { repoId, fileIds },
   );
   return toNumber(row?.count ?? 0);
 }
