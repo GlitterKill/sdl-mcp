@@ -705,6 +705,19 @@ jobs:
       - name: Build all
         run: npm run build:all
 
+      - name: Cache locked benchmark repos
+        id: cache-sync-benchmark-repos
+        uses: actions/cache@v5
+        with:
+          path: .tmp/external-benchmarks
+          key: ${{ runner.os }}-benchmark-repos-${{ hashFiles('scripts/benchmark/matrix-external-repos.lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-benchmark-repos-
+
+      - name: Setup locked benchmark repos
+        if: steps.cache-sync-benchmark-repos.outputs.cache-hit != 'true'
+        run: npm run benchmark:setup-external
+
       - name: Get Git commit info
         id: git-info
         shell: bash

@@ -195,6 +195,18 @@ describe("release regression guards", () => {
 
     assert.match(
       syncMemoryJob,
+      /name:\s*Cache locked benchmark repos[\s\S]*id:\s*cache-sync-benchmark-repos[\s\S]*path:\s*\.tmp\/external-benchmarks[\s\S]*matrix-external-repos\.lock\.json/s,
+      "sync-memory should cache the locked external repos declared by config/sdlmcp.config.json",
+    );
+
+    assert.match(
+      syncMemoryJob,
+      /name:\s*Setup locked benchmark repos[\s\S]*if:\s*steps\.cache-sync-benchmark-repos\.outputs\.cache-hit != 'true'[\s\S]*run:\s*npm run benchmark:setup-external/s,
+      "sync-memory should prepare configured external repos before indexing",
+    );
+
+    assert.match(
+      syncMemoryJob,
       /SDL_MCP_NATIVE_PASS1_SERIAL:\s*"1"[\s\S]*SDL_MCP_PASS1_STABLE_DB_WRITES:\s*"1"[\s\S]*set \+e[\s\S]*node dist\/cli\/index\.js index[\s\S]*INDEX_EXIT_CODE=\$\?[\s\S]*if \[ "\$\{INDEX_EXIT_CODE\}" -ne 0 \]; then/s,
       "sync-memory should keep native parsing active, stabilize pass-1 DB writes, and preserve real index crash exit codes",
     );
