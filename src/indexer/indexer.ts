@@ -128,6 +128,7 @@ import {
   mergeProviderFirstGraphRows,
 } from "./provider-first/legacy-shadow-rows.js";
 import { resolveProviderFirstPipeline } from "./provider-first/planner.js";
+import { persistProviderFirstProvenance } from "./provider-first/provenance.js";
 import { ProviderFirstGraphValidationError } from "./provider-first/graph-validation.js";
 import {
   stageProviderFirstShadowBuild,
@@ -382,12 +383,20 @@ export function shouldStabilizePass1BatchPersist(params: {
   providerFirstLegacyFallbackActive: boolean;
   useBatchPersist: boolean;
   env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
 }): boolean {
   if (!params.useBatchPersist) return false;
   if (params.providerFirstLegacyFallbackActive) return true;
-  return /^(1|true|yes)$/i.test(
-    ((params.env ?? process.env).SDL_MCP_PASS1_STABLE_DB_WRITES ?? "").trim(),
-  );
+  const raw = (
+    (params.env ?? process.env).SDL_MCP_PASS1_STABLE_DB_WRITES ?? ""
+  ).trim();
+  if (/^(1|true|yes)$/i.test(raw)) return true;
+  if (/^(0|false|no)$/i.test(raw)) return false;
+
+  // LadybugDB 0.16.0 can access-violate on Windows when the legacy Pass 1
+  // parser overlaps with background batch writes. Prefer stable writes for the
+  // simple legacy setup; non-Windows keeps the faster overlapped default.
+  return (params.platform ?? process.platform) === "win32";
 }
 
 /** @internal exported for tests; do not import from product code. */
@@ -1015,7 +1024,10 @@ function summarizeSemanticEligibilityGap(params: {
     uncoveredFiles: semanticEligibleUncoveredPaths.length,
     providerUnusableFiles: semanticEligibleProviderUnusablePaths.length,
     outsideSemanticEligibilityFiles: outsideSemanticEligibilityPaths.length,
-    semanticEligibleUncoveredSamples: semanticEligibleUncoveredPaths.slice(0, 5),
+    semanticEligibleUncoveredSamples: semanticEligibleUncoveredPaths.slice(
+      0,
+      5,
+    ),
     semanticEligibleProviderUnusableSamples:
       semanticEligibleProviderUnusablePaths.slice(0, 5),
     outsideSemanticEligibilitySamples: outsideSemanticEligibilityPaths.slice(
@@ -1598,7 +1610,7 @@ function skippedProviderFirstShadowBuild(params: {
 
 function applyScannedFileMetadataToProviderRows(params: {
   rows: Awaited<ReturnType<typeof executeProviderFirstScipFull>>["rows"];
-  scannedFiles: readonly { path: string; size: number }[];
+  scannedFiles: readonly { path: string; size: number; contentHash: string }[];
 }): void {
   const scannedByPath = new Map(
     params.scannedFiles.map((file) => [file.path, file]),
@@ -1607,6 +1619,7 @@ function applyScannedFileMetadataToProviderRows(params: {
     const scanned = scannedByPath.get(row.relPath);
     if (scanned) {
       row.byteSize = scanned.size;
+      row.contentHash = scanned.contentHash;
     }
   }
 }
@@ -2679,6 +2692,7 @@ async function indexRepoImpl(
             generatorFailures: scipPreRefresh?.failures,
             generatorCacheKey: scipPreRefresh?.cache?.key,
             scannedPaths: providerCoverageScan.files.map((file) => file.path),
+            scannedFiles: providerCoverageScan.files,
             recordPhaseTiming: recordProviderFirstPhaseTiming,
             onProgress,
             signal,
@@ -2817,6 +2831,14 @@ async function indexRepoImpl(
             scanScopedProvider.rows,
             providerRowsExcludedByLegacyFallback,
           );
+          await measureProviderFirstPhase(
+            "persistProvenance",
+            "providerFirstPersistProvenance",
+            () =>
+              withWriteConn((conn) =>
+                persistProviderFirstProvenance(conn, scanScopedProvider.facts),
+              ),
+          );
           // The provider fact set can include every SCIP occurrence and source
           // line. Drop it before legacy fallback and versioning so large repos
           // do not carry decoded provider payloads into post-index finalization.
@@ -2850,7 +2872,8 @@ async function indexRepoImpl(
           let shadowBuild: ProviderFirstExecutionSummary["shadowBuild"];
           if (!legacyFallbackPlan.runLegacyFallback) {
             if (providerFirstShadowStagingSkipReason) {
-              const shadowStageTotal = providerFirstGraphRowTotal(materializedRows);
+              const shadowStageTotal =
+                providerFirstGraphRowTotal(materializedRows);
               emitProviderFirstProgress(onProgress, "shadowStage", {
                 stageCurrent: 0,
                 stageTotal: shadowStageTotal,
@@ -2864,7 +2887,8 @@ async function indexRepoImpl(
                 reason: providerFirstShadowStagingSkipReason,
               });
             } else {
-              const shadowStageTotal = providerFirstGraphRowTotal(materializedRows);
+              const shadowStageTotal =
+                providerFirstGraphRowTotal(materializedRows);
               emitProviderFirstProgress(onProgress, "shadowStage", {
                 stageCurrent: 0,
                 stageTotal: shadowStageTotal,
@@ -2922,9 +2946,9 @@ async function indexRepoImpl(
             : null;
           const activeProviderInputMatches = Boolean(
             activeProviderInputHash &&
-              activeProviderInputRecord?.contentHash ===
-                activeProviderInputHash &&
-              activeProviderInputRecord.truncated !== true,
+            activeProviderInputRecord?.contentHash ===
+              activeProviderInputHash &&
+            activeProviderInputRecord.truncated !== true,
           );
           const existingProviderSymbolCount =
             await countExistingScipProviderSymbols(conn, repoId);
@@ -2944,12 +2968,16 @@ async function indexRepoImpl(
               materializedRows,
               activeMaterializationPlan,
             );
-            emitProviderFirstProgress(onProgress, "materialize.deleteFileSymbols", {
-              stageCurrent: 0,
-              stageTotal: deleteTotal,
-              message:
-                "provider active stale cleanup skipped for large symbol set",
-            });
+            emitProviderFirstProgress(
+              onProgress,
+              "materialize.deleteFileSymbols",
+              {
+                stageCurrent: 0,
+                stageTotal: deleteTotal,
+                message:
+                  "provider active stale cleanup skipped for large symbol set",
+              },
+            );
             const symbolTotal = providerFirstMaterializePhaseTotal(
               "upsertSymbols",
               materializedRows,
@@ -3508,8 +3536,7 @@ async function indexRepoImpl(
   const providerFirstLegacyFallbackActive =
     providerFirstLegacyFallbackStartedAt !== undefined;
   const providerFirstLegacyFallbackCompleteForPass =
-    providerFirstLegacyFallbackActive &&
-    providerFirstLegacyFallbackComplete;
+    providerFirstLegacyFallbackActive && providerFirstLegacyFallbackComplete;
   let pass1ExistingByPath = existingByPath;
   if (mode === "full" && existingByPath.size > 0) {
     const existingFileIds = [
@@ -4277,8 +4304,9 @@ async function indexRepoImpl(
             pass2WriteStats: {
               ...providerFirstLegacyFallbackPass2WriteStats,
             },
-            resolverBreakdown:
-              snapshotPass2ResolverBreakdown(callResolutionTelemetry),
+            resolverBreakdown: snapshotPass2ResolverBreakdown(
+              callResolutionTelemetry,
+            ),
           },
         };
       }
@@ -4294,8 +4322,9 @@ async function indexRepoImpl(
     ) {
       const shadowBuild = providerFirstShadowStagingSkipReason
         ? (() => {
-            const shadowStageTotal =
-              providerFirstGraphRowTotal(providerFirstProviderRows);
+            const shadowStageTotal = providerFirstGraphRowTotal(
+              providerFirstProviderRows,
+            );
             emitProviderFirstProgress(onProgress, "shadowStage", {
               stageCurrent: 0,
               stageTotal: shadowStageTotal,

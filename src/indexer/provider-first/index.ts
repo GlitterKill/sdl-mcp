@@ -27,6 +27,10 @@ export {
   materializeProviderFacts,
   providerFactsToGraphRows,
 } from "./materializer.js";
+export {
+  persistProviderFirstProvenance,
+  providerFactsToSemanticProvenanceRecords,
+} from "./provenance.js";
 export type {
   ProviderFirstExecutionPlan,
   ProviderFirstExecutionSummary,

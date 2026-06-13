@@ -35,12 +35,9 @@ describe("provider-first SCIP materialization", () => {
     graphDbPath = mkdtempSync(join(tmpdir(), "sdl-provider-first-db-"));
     await initRepo(graphDbPath);
 
-    const main =
-      "scip-typescript npm fixture 1.0.0 src/index.ts/main().";
-    const helper =
-      "scip-typescript npm fixture 1.0.0 src/index.ts/helper().";
-    const external =
-      "scip-typescript npm dep 1.0.0 dep/index.ts/api().";
+    const main = "scip-typescript npm fixture 1.0.0 src/index.ts/main().";
+    const helper = "scip-typescript npm fixture 1.0.0 src/index.ts/helper().";
+    const external = "scip-typescript npm dep 1.0.0 dep/index.ts/api().";
     const facts = normalizeScipProviderFacts({
       repoId: REPO_ID,
       generationId: "gen-1",
@@ -266,7 +263,7 @@ describe("provider-first SCIP materialization", () => {
     ]);
   });
 
-  it("deduplicates duplicate SCIP external symbols in one real DB batch", async () => {
+  it("rejects duplicate SCIP external symbols before the DB batch", async () => {
     graphDbPath = mkdtempSync(join(tmpdir(), "sdl-provider-first-db-"));
     await initRepo(graphDbPath);
 
@@ -278,19 +275,11 @@ describe("provider-first SCIP materialization", () => {
       documents: [documentForExternals(["apiOne"])],
       externalSymbols: [externalSymbol("apiOne"), externalSymbol("apiOne")],
     });
-    await materializeFacts(facts);
-
-    const conn = await getLadybugConn();
-    const relRow = await ladybugDb.querySingle<{ relCount: unknown }>(
-      conn,
-      `MATCH (s:Symbol)-[r:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
-       WHERE s.external = true AND s.source = 'scip' AND s.name = 'apiOne'
-       RETURN count(r) AS relCount`,
-      { repoId: REPO_ID },
+    await assert.rejects(
+      () => materializeFacts(facts),
+      /duplicate Symbol primary key/i,
     );
-    assert.equal(ladybugDb.toNumber(relRow?.relCount), 1);
   });
-
 });
 
 async function initRepo(graphDbPath: string): Promise<void> {
@@ -308,6 +297,10 @@ async function initRepo(graphDbPath: string): Promise<void> {
 async function materializeFacts(
   facts: ReturnType<typeof normalizeScipProviderFacts>,
 ): Promise<void> {
+  for (const file of facts.files) {
+    file.contentHash ??= "0".repeat(64);
+    file.byteSize ??= 128;
+  }
   const rows = providerFactsToGraphRows({ facts, indexedAt: NOW });
   await withWriteConn(async (conn) => {
     await materializeProviderFacts(conn, rows);
@@ -319,8 +312,7 @@ function documentForExternal(name: string) {
 }
 
 function documentForExternals(names: string[]) {
-  const local =
-    "scip-typescript npm fixture 1.0.0 src/index.ts/main().";
+  const local = "scip-typescript npm fixture 1.0.0 src/index.ts/main().";
   const externalOccurrences = names.map((name, index) => ({
     range: {
       startLine: index + 1,

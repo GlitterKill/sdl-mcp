@@ -48,6 +48,7 @@ export interface FileFact extends ProviderFactBase {
   relPath: string;
   languageId?: string;
   contentHash?: string;
+  byteSize?: number;
 }
 
 export interface SymbolFact extends ProviderFactBase {
@@ -129,8 +130,7 @@ export interface CallProofUnavailableSampleFact {
   actualText?: string;
 }
 
-export interface CallProofUnavailableReasonSampleFact
-  extends CallProofUnavailableSampleFact {
+export interface CallProofUnavailableReasonSampleFact extends CallProofUnavailableSampleFact {
   code: CallProofUnavailableReasonCode;
 }
 

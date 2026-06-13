@@ -32,6 +32,12 @@ Select explicitly via config:
 }
 ```
 
+On Windows, the legacy TypeScript engine path uses stable pass-1 DB writes by
+default. That avoids native LadybugDB access violations seen when parser work
+overlaps with background batch commits, at the cost of slower pass-1 throughput.
+Use `SDL_MCP_PASS1_STABLE_DB_WRITES=0` only when intentionally benchmarking the
+faster overlapped path.
+
 ---
 
 ## Two-Pass Architecture

@@ -1,5 +1,7 @@
 import type { ProviderFirstGraphRows } from "./materializer.js";
 
+const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
+
 export interface ValidateProviderFirstGraphRowsOptions {
   repoId?: string;
   context?: string;
@@ -28,6 +30,16 @@ export function validateProviderFirstGraphRows(
   for (const file of rows.files) {
     assertRepoId(context, expectedRepoId, "File", file.fileId, file.repoId);
     assertUnique(context, fileIds, "File primary key", file.fileId);
+    if (!SHA256_HEX_PATTERN.test(file.contentHash)) {
+      fail(
+        `${context} file ${file.relPath} has missing or invalid raw SHA-256 contentHash`,
+      );
+    }
+    if (!Number.isSafeInteger(file.byteSize) || file.byteSize < 0) {
+      fail(
+        `${context} file ${file.relPath} has missing or invalid byteSize ${String(file.byteSize)}`,
+      );
+    }
   }
 
   const symbolIds = new Set<string>();
@@ -45,6 +57,12 @@ export function validateProviderFirstGraphRows(
         `${context} symbol ${symbol.symbolId} references missing file ${symbol.fileId}`,
       );
     }
+    assertSensibleRange(context, symbol.symbolId, {
+      startLine: symbol.rangeStartLine,
+      startCol: symbol.rangeStartCol,
+      endLine: symbol.rangeEndLine,
+      endCol: symbol.rangeEndCol,
+    });
   }
 
   for (const symbol of rows.externalSymbols) {
@@ -67,14 +85,12 @@ export function validateProviderFirstGraphRows(
       `${edge.fromSymbolId} -> ${edge.toSymbolId}`,
       edge.repoId,
     );
-    if (
-      !symbolIds.has(edge.fromSymbolId) ||
-      !symbolIds.has(edge.toSymbolId)
-    ) {
+    if (!symbolIds.has(edge.fromSymbolId) || !symbolIds.has(edge.toSymbolId)) {
       fail(
         `${context} edge ${edge.fromSymbolId} -> ${edge.toSymbolId} has a missing endpoint`,
       );
     }
+    assertProviderCallEdgeProof(context, edge);
     assertUnique(
       context,
       edgeKeys,
@@ -85,6 +101,69 @@ export function validateProviderFirstGraphRows(
         edge.edgeType,
         edge.resolverId ?? "",
       ]),
+    );
+  }
+}
+
+function assertSensibleRange(
+  context: string,
+  symbolId: string,
+  range: {
+    startLine: number;
+    startCol: number;
+    endLine: number;
+    endCol: number;
+  },
+): void {
+  for (const [label, value] of Object.entries(range)) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      fail(
+        `${context} symbol ${symbolId} has invalid range ${label}=${String(value)}`,
+      );
+    }
+  }
+  if (range.startLine < 1 || range.endLine < 1) {
+    fail(
+      `${context} symbol ${symbolId} has invalid 1-based line range ${range.startLine}:${range.startCol}-${range.endLine}:${range.endCol}`,
+    );
+  }
+  if (
+    range.endLine < range.startLine ||
+    (range.endLine === range.startLine && range.endCol < range.startCol)
+  ) {
+    fail(
+      `${context} symbol ${symbolId} has non-sensical range ${range.startLine}:${range.startCol}-${range.endLine}:${range.endCol}`,
+    );
+  }
+}
+
+function assertProviderCallEdgeProof(
+  context: string,
+  edge: ProviderFirstGraphRows["edges"][number],
+): void {
+  if (edge.edgeType !== "call") return;
+  if (!edge.resolverId?.startsWith("provider-first:")) return;
+  if (edge.resolution !== "exact" || edge.confidence <= 0) {
+    fail(
+      `${context} provider call edge ${edge.fromSymbolId} -> ${edge.toSymbolId} is not exact source-proofed`,
+    );
+  }
+  if (!edge.provenance) {
+    fail(
+      `${context} provider call edge ${edge.fromSymbolId} -> ${edge.toSymbolId} is missing provenance`,
+    );
+  }
+  try {
+    const parsed = JSON.parse(edge.provenance) as { dedupeKey?: unknown };
+    if (typeof parsed.dedupeKey !== "string" || parsed.dedupeKey.length === 0) {
+      fail(
+        `${context} provider call edge ${edge.fromSymbolId} -> ${edge.toSymbolId} is missing call-proof dedupeKey provenance`,
+      );
+    }
+  } catch (error) {
+    if (error instanceof ProviderFirstGraphValidationError) throw error;
+    fail(
+      `${context} provider call edge ${edge.fromSymbolId} -> ${edge.toSymbolId} has invalid provenance JSON`,
     );
   }
 }

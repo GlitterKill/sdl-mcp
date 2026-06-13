@@ -2,11 +2,11 @@ import type { RepoConfig } from "../config/types.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 
-import { scanRepository, type FileMetadata } from "./fileScanner.js";
+import { scanRepository, type ScannedFileMetadata } from "./fileScanner.js";
 import type { IndexProgress } from "./indexer.js";
 
 export interface ScanRepoForIndexResult {
-  files: FileMetadata[];
+  files: ScannedFileMetadata[];
   existingByPath: Map<string, ladybugDb.FileRow>;
   removedFiles: number;
   removedFileIds: string[];

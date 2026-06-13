@@ -1,8 +1,13 @@
 import { isAbsolute, resolve } from "path";
+import { hash } from "crypto";
 
 import { RepoConfig } from "../config/types.js";
 import { normalizePath } from "../util/paths.js";
-import { readFileAsync, statAsync } from "../util/asyncFs.js";
+import {
+  readFileAsync,
+  readFileBufferAsync,
+  statAsync,
+} from "../util/asyncFs.js";
 import { logger } from "../util/logger.js";
 
 import { walkRepositoryFiles } from "./fileWalker.js";
@@ -15,6 +20,11 @@ export interface FileMetadata {
   path: string;
   size: number;
   mtime: number;
+  contentHash?: string;
+}
+
+export interface ScannedFileMetadata extends FileMetadata {
+  contentHash: string;
 }
 
 const EXACT_CONFIG_LANGUAGE_EXTENSIONS = new Map<string, readonly string[]>([
@@ -32,10 +42,7 @@ const CANONICAL_LANGUAGE_IDS_BY_CONFIG = new Map<string, string>([
   ["sh", "shell"],
 ]);
 
-const PROVIDER_SCAN_COMPANION_EXTENSIONS = new Map<
-  string,
-  readonly string[]
->([
+const PROVIDER_SCAN_COMPANION_EXTENSIONS = new Map<string, readonly string[]>([
   // scip-clang emits headers and generated include fragments beside C++ source
   // documents. Keep them in scan scope so provider-first coverage can accept
   // those facts even though fallback parsing may still route some extensions
@@ -208,23 +215,46 @@ async function filterFilesBySize(
   files: string[],
   repoPath: string,
   maxBytes: number,
-): Promise<FileMetadata[]> {
-  const metadata: FileMetadata[] = [];
+): Promise<ScannedFileMetadata[]> {
+  const metadata: ScannedFileMetadata[] = [];
 
   const stats = await Promise.allSettled(
     files.map((file) => statAsync(resolve(repoPath, file))),
   );
+  const candidates: Array<{
+    file: string;
+    size: number;
+    mtime: number;
+  }> = [];
 
   for (let i = 0; i < files.length; i++) {
     const result = stats[i];
 
     if (result.status === "fulfilled" && result.value.size <= maxBytes) {
-      metadata.push({
-        path: normalizePath(files[i]),
+      candidates.push({
+        file: files[i],
         size: result.value.size,
         mtime: result.value.mtimeMs,
       });
     }
+  }
+
+  const hashed = await Promise.allSettled(
+    candidates.map(async (candidate) => {
+      const content = await readFileBufferAsync(
+        resolve(repoPath, candidate.file),
+      );
+      return {
+        path: normalizePath(candidate.file),
+        size: candidate.size,
+        mtime: candidate.mtime,
+        contentHash: hash("sha256", content, "hex"),
+      };
+    }),
+  );
+
+  for (const result of hashed) {
+    if (result.status === "fulfilled") metadata.push(result.value);
   }
 
   return metadata;
@@ -235,7 +265,9 @@ const TS_SUPERSEDES_JS: Record<string, string> = {
   ".jsx": ".tsx",
 };
 
-function deduplicateCompiledJs(files: FileMetadata[]): FileMetadata[] {
+function deduplicateCompiledJs<TFile extends FileMetadata>(
+  files: TFile[],
+): TFile[] {
   const pathSet = new Set(files.map((f) => f.path));
   return files.filter((f) => {
     const ext = f.path.slice(f.path.lastIndexOf("."));
@@ -259,7 +291,7 @@ function deduplicateCompiledJs(files: FileMetadata[]): FileMetadata[] {
 export async function scanRepository(
   repoPath: string,
   config: RepoConfig,
-): Promise<FileMetadata[]> {
+): Promise<ScannedFileMetadata[]> {
   const discoveredFiles = await discoverFiles(repoPath, config);
   const metadata = await filterFilesBySize(
     discoveredFiles,

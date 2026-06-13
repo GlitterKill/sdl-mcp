@@ -27,6 +27,7 @@ interface WorkerResult {
 }
 
 parentPort?.on("message", (msg: WorkerMessage) => {
+  let treeToDelete: { delete?: () => void } | null = null;
   try {
     const adapter = getAdapterForExtension(msg.ext);
     if (!adapter) {
@@ -48,6 +49,7 @@ parentPort?.on("message", (msg: WorkerMessage) => {
       } as WorkerResult);
       return;
     }
+    treeToDelete = tree as unknown as { delete?: () => void };
 
     let extractedSymbols: ReturnType<typeof adapter.extractSymbols>;
     try {
@@ -154,5 +156,9 @@ parentPort?.on("message", (msg: WorkerMessage) => {
       calls: [],
       error: error instanceof Error ? error.message : String(error),
     } as WorkerResult);
+  } finally {
+    // The worker owns this tree-sitter Tree; release its native memory once
+    // extraction has produced plain serializable data for the parent thread.
+    treeToDelete?.delete?.();
   }
 });

@@ -76,6 +76,12 @@ proportional to the selected TS/JS files plus any included type declarations.
 - Raise the Node heap for very large repos, for example
   `NODE_OPTIONS=--max-old-space-size=8192 sdl-mcp index`.
 
+On Windows, SDL-MCP defaults legacy pass-1 indexing to stable DB writes because
+overlapping parser work with background LadybugDB batch commits can terminate
+Node with a native access violation. This is safer but slower. For controlled
+benchmarking only, set `SDL_MCP_PASS1_STABLE_DB_WRITES=0` to restore overlapped
+writes; if the crash returns, leave the default in place.
+
 If the CLI appears to spend most of its time at `Flushing pass 1 writes`, run a
 diagnostic index against a temporary graph DB so production state is untouched:
 
@@ -218,7 +224,7 @@ entries only for generated directories that live outside those defaults.
   - verify the Rust toolchain is installed: `rustc --version`
   - ensure Node.js major version matches the one used during build
   - check that `native/*.node` exists after build
-  - if you do not need the Rust engine, set `indexing.engine: "typescript"` (the default)
+  - if you do not need the Rust engine, set `indexing.engine: "typescript"`; the default is `indexing.engine: "rust"` when the native addon is available
 
 ### Missing Symbols for JS Files With TS Counterparts
 

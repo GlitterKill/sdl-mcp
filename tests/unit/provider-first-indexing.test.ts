@@ -53,6 +53,7 @@ import {
   materializeProviderFacts,
   providerFactsToGraphRows,
 } from "../../dist/indexer/provider-first/materializer.js";
+import { providerFactsToSemanticProvenanceRecords } from "../../dist/indexer/provider-first/provenance.js";
 import { validateProviderFirstGraphRows } from "../../dist/indexer/provider-first/graph-validation.js";
 import { resolveProviderFirstPipeline } from "../../dist/indexer/provider-first/planner.js";
 import { normalizeScipProviderFacts } from "../../dist/indexer/provider-first/scip-normalizer.js";
@@ -102,17 +103,14 @@ describe("provider-first indexing foundation", () => {
       semanticEligibleFallbackFileCount: 2_339,
       maxLegacyFallbackFiles: 1_000_000,
     });
-    assert.deepEqual(
-      llvmDefaultPlan,
-      {
-        runLegacyFallback: true,
-        parsedFiles: 65_832,
-        skippedFiles: 0,
-        fileLimit: 1_000_000,
-        semanticEligibleFallbackFiles: 2_339,
-        semanticEligibleFileLimit: 0,
-      },
-    );
+    assert.deepEqual(llvmDefaultPlan, {
+      runLegacyFallback: true,
+      parsedFiles: 65_832,
+      skippedFiles: 0,
+      fileLimit: 1_000_000,
+      semanticEligibleFallbackFiles: 2_339,
+      semanticEligibleFileLimit: 0,
+    });
     assert.equal(
       isProviderFirstLegacyFallbackPlanComplete(llvmDefaultPlan),
       true,
@@ -141,35 +139,34 @@ describe("provider-first indexing foundation", () => {
       maxLegacyFallbackFiles: 5_000,
       maxSemanticEligibleFallbackFiles: 5_000,
     });
-    assert.deepEqual(
-      semanticSubsetPlan,
-      {
-        runLegacyFallback: true,
-        parsedFiles: 2_339,
-        skippedFiles: 63_493,
-        fileLimit: 5_000,
-        semanticEligibleFallbackFiles: 2_339,
-        semanticEligibleFileLimit: 5_000,
-      },
-    );
+    assert.deepEqual(semanticSubsetPlan, {
+      runLegacyFallback: true,
+      parsedFiles: 2_339,
+      skippedFiles: 63_493,
+      fileLimit: 5_000,
+      semanticEligibleFallbackFiles: 2_339,
+      semanticEligibleFileLimit: 5_000,
+    });
     assert.equal(
       isProviderFirstLegacyFallbackPlanComplete(semanticSubsetPlan),
       false,
     );
 
     assert.deepEqual(
-      [...selectProviderFirstLegacyFallbackPaths({
-        fallbackPaths: new Set([
-          "llvm/benchmarks/DummyYAML.cpp",
-          "llvm/utils/lit/lit.py",
-          ".ci/cache_lit_timing_files.py",
-        ]),
-        semanticEligiblePaths: new Set([
-          "llvm/benchmarks/DummyYAML.cpp",
-          "llvm/utils/lit/lit.py",
-        ]),
-        parsedFiles: 2,
-      })],
+      [
+        ...selectProviderFirstLegacyFallbackPaths({
+          fallbackPaths: new Set([
+            "llvm/benchmarks/DummyYAML.cpp",
+            "llvm/utils/lit/lit.py",
+            ".ci/cache_lit_timing_files.py",
+          ]),
+          semanticEligiblePaths: new Set([
+            "llvm/benchmarks/DummyYAML.cpp",
+            "llvm/utils/lit/lit.py",
+          ]),
+          parsedFiles: 2,
+        }),
+      ],
       ["llvm/benchmarks/DummyYAML.cpp", "llvm/utils/lit/lit.py"],
     );
   });
@@ -252,6 +249,7 @@ describe("provider-first indexing foundation", () => {
         providerFirstLegacyFallbackActive: false,
         useBatchPersist: true,
         env: {},
+        platform: "linux",
       }),
       false,
     );
@@ -259,9 +257,28 @@ describe("provider-first indexing foundation", () => {
       shouldStabilizePass1BatchPersist({
         providerFirstLegacyFallbackActive: false,
         useBatchPersist: true,
-        env: { SDL_MCP_PASS1_STABLE_DB_WRITES: "1" },
+        env: {},
+        platform: "win32",
       }),
       true,
+    );
+    assert.equal(
+      shouldStabilizePass1BatchPersist({
+        providerFirstLegacyFallbackActive: false,
+        useBatchPersist: true,
+        env: { SDL_MCP_PASS1_STABLE_DB_WRITES: "1" },
+        platform: "linux",
+      }),
+      true,
+    );
+    assert.equal(
+      shouldStabilizePass1BatchPersist({
+        providerFirstLegacyFallbackActive: false,
+        useBatchPersist: true,
+        env: { SDL_MCP_PASS1_STABLE_DB_WRITES: "0" },
+        platform: "win32",
+      }),
+      false,
     );
     const previousStableWritesEnv = process.env.SDL_MCP_PASS1_STABLE_DB_WRITES;
     try {
@@ -277,8 +294,7 @@ describe("provider-first indexing foundation", () => {
       if (previousStableWritesEnv === undefined) {
         delete process.env.SDL_MCP_PASS1_STABLE_DB_WRITES;
       } else {
-        process.env.SDL_MCP_PASS1_STABLE_DB_WRITES =
-          previousStableWritesEnv;
+        process.env.SDL_MCP_PASS1_STABLE_DB_WRITES = previousStableWritesEnv;
       }
     }
     assert.equal(
@@ -449,7 +465,9 @@ describe("provider-first indexing foundation", () => {
           range: { startLine: 1, startCol: 9, endLine: 1, endCol: 15 },
         },
       ],
-      sourceLinesByPath: new Map([["src/index.ts", new Map([[0, "  return renamed();"]])]]),
+      sourceLinesByPath: new Map([
+        ["src/index.ts", new Map([[0, "  return renamed();"]])],
+      ]),
     });
 
     const mismatchReason = report.summary.callProofIncompleteReasons?.find(
@@ -743,9 +761,12 @@ describe("provider-first indexing foundation", () => {
     assert.equal(facts.occurrences.length, 1);
     assert.equal(facts.coverage.length, 1);
     assert.equal(facts.providerRuns[0]?.fileCount, 1);
-    validateProviderFirstGraphRows(providerFactsToGraphRows({ facts }), {
-      repoId: "repo",
-    });
+    validateProviderFirstGraphRows(
+      providerFactsToGraphRows({ facts: withProviderFileMetadata(facts) }),
+      {
+        repoId: "repo",
+      },
+    );
   });
 
   it("coalesces duplicate SCIP symbols and occurrences within one document", () => {
@@ -787,9 +808,12 @@ describe("provider-first indexing foundation", () => {
     assert.equal(facts.occurrences.length, 1);
     assert.equal(facts.coverage[0]?.totalSymbols, 1);
     assert.equal(facts.coverage[0]?.totalOccurrences, 1);
-    validateProviderFirstGraphRows(providerFactsToGraphRows({ facts }), {
-      repoId: "repo",
-    });
+    validateProviderFirstGraphRows(
+      providerFactsToGraphRows({ facts: withProviderFileMetadata(facts) }),
+      {
+        repoId: "repo",
+      },
+    );
   });
 
   it("does not emit duplicate symbols from referenced-only SCIP metadata", () => {
@@ -853,9 +877,12 @@ describe("provider-first indexing foundation", () => {
       facts.coverage.map((coverage) => coverage.symbolCoverage),
       ["full", "full"],
     );
-    validateProviderFirstGraphRows(providerFactsToGraphRows({ facts }), {
-      repoId: "repo",
-    });
+    validateProviderFirstGraphRows(
+      providerFactsToGraphRows({ facts: withProviderFileMetadata(facts) }),
+      {
+        repoId: "repo",
+      },
+    );
   });
 
   it("skips ambiguous C++ provider symbols with definitions in multiple files", () => {
@@ -920,9 +947,12 @@ describe("provider-first indexing foundation", () => {
         [{ reason: "ambiguous provider symbol", symbols: 1 }],
       ],
     );
-    validateProviderFirstGraphRows(providerFactsToGraphRows({ facts }), {
-      repoId: "repo",
-    });
+    validateProviderFirstGraphRows(
+      providerFactsToGraphRows({ facts: withProviderFileMetadata(facts) }),
+      {
+        repoId: "repo",
+      },
+    );
   });
 
   it("normalizes rust-analyzer module descriptors into usable module symbols", () => {
@@ -5141,6 +5171,11 @@ describe("provider-first indexing foundation", () => {
       const result = await executeProviderFirstScipFull({
         repoId: "repo",
         repoRoot,
+        scannedFiles: Array.from({ length: 600 }, (_, documentIndex) => ({
+          path: `src/file${documentIndex}.ts`,
+          size: 1,
+          contentHash: "0".repeat(64),
+        })),
         config: {
           scip: ScipConfigSchema.parse({
             enabled: true,
@@ -5495,21 +5530,21 @@ describe("provider-first indexing foundation", () => {
 
   it("coalesces overlapping configured SCIP indexes before graph validation", async () => {
     const repoRoot = mkdtempSync(join(tmpdir(), "sdl-provider-first-overlap-"));
-    const symbol =
-      "scip-typescript npm fixture 1.0.0 src/index.ts/main().";
+    const symbol = "scip-typescript npm fixture 1.0.0 src/index.ts/main().";
     try {
+      mkdirSync(join(repoRoot, "src"), { recursive: true });
+      writeFileSync(
+        join(repoRoot, "src", "index.ts"),
+        ["export function main() {", "  return 1;", "}"].join("\n"),
+        "utf8",
+      );
       const sharedDocument = {
         language: "typescript",
         relativePath: "src/index.ts",
         occurrences: [
           {
             range: [0, 16, 20] as [number, number, number],
-            enclosingRange: [0, 0, 1, 1] as [
-              number,
-              number,
-              number,
-              number,
-            ],
+            enclosingRange: [0, 0, 1, 1] as [number, number, number, number],
             symbol,
             symbolRoles: 1,
           },
@@ -5570,7 +5605,8 @@ describe("provider-first indexing foundation", () => {
           fileId: "file-1",
           relPath: "src/index.ts",
           languageId: "typescript",
-          contentHash: "content",
+          contentHash: "0".repeat(64),
+          byteSize: 42,
         },
       ],
       symbols: [
@@ -5651,6 +5687,162 @@ describe("provider-first indexing foundation", () => {
     assert.equal(rows.edges[0]?.resolutionPhase, "provider-first");
   });
 
+  it("carries raw file SHA-256 and byte size from provider file facts", () => {
+    const rows = providerFactsToGraphRows({
+      indexedAt: "2026-05-25T12:00:00.000Z",
+      facts: providerFactSet({
+        files: [
+          {
+            kind: "file",
+            repoId: "repo",
+            generationId: "gen-1",
+            providerType: "scip",
+            providerId: "scip",
+            emittedAt: "2026-05-25T12:00:00.000Z",
+            fileId: "file-raw",
+            relPath: "src/raw.ts",
+            languageId: "typescript",
+            contentHash: "2".repeat(64),
+            byteSize: 123,
+          },
+        ],
+      }),
+    });
+
+    assert.equal(rows.files[0]?.contentHash, "2".repeat(64));
+    assert.equal(rows.files[0]?.byteSize, 123);
+  });
+
+  it("rejects provider graph rows with missing raw file hashes and bad endpoints", () => {
+    const rows = providerFactsToGraphRows({
+      indexedAt: "2026-05-25T12:00:00.000Z",
+      facts: providerFactSet({
+        files: [
+          {
+            kind: "file",
+            repoId: "repo",
+            generationId: "gen-1",
+            providerType: "scip",
+            providerId: "scip",
+            emittedAt: "2026-05-25T12:00:00.000Z",
+            fileId: "file-invalid",
+            relPath: "src/index.ts",
+            languageId: "typescript",
+          },
+        ],
+        edges: [
+          {
+            kind: "edge",
+            repoId: "repo",
+            generationId: "gen-1",
+            providerType: "scip",
+            providerId: "scip",
+            emittedAt: "2026-05-25T12:00:00.000Z",
+            sourceSymbolId: "symbol-1",
+            targetSymbolId: "symbol-missing",
+            edgeType: "call",
+            resolution: "exact",
+            confidence: 0.95,
+            dedupeKey: "symbol-1:symbol-missing:call:scip",
+          },
+        ],
+      }),
+    });
+
+    assert.throws(
+      () => validateProviderFirstGraphRows(rows, { repoId: "repo" }),
+      /invalid raw SHA-256 contentHash/i,
+    );
+
+    rows.files[0]!.contentHash = "3".repeat(64);
+    rows.files[0]!.byteSize = 10;
+    assert.throws(
+      () => validateProviderFirstGraphRows(rows, { repoId: "repo" }),
+      /missing endpoint/i,
+    );
+  });
+
+  it("maps provider runs, diagnostics, and coverage summaries to semantic provenance records", () => {
+    const facts = providerFactSet({
+      providerRuns: [
+        {
+          kind: "providerRun",
+          repoId: "repo",
+          generationId: "gen-1",
+          providerType: "scip",
+          providerId: "scip",
+          emittedAt: "2026-05-25T12:00:00.000Z",
+          runId: "gen-1:scip",
+          status: "succeeded",
+          startedAt: "2026-05-25T12:00:00.000Z",
+          finishedAt: "2026-05-25T12:00:00.000Z",
+          sourceIndexPath: "index.scip",
+          fileCount: 1,
+          symbolCount: 1,
+          edgeCount: 0,
+          diagnosticCount: 0,
+        },
+      ],
+      diagnostics: [
+        {
+          kind: "diagnostic",
+          repoId: "repo",
+          generationId: "gen-1",
+          providerType: "scip",
+          providerId: "scip",
+          emittedAt: "2026-05-25T12:00:00.000Z",
+          diagnosticId: "diag-1",
+          relPath: "src/index.ts",
+          severity: "warning",
+          message: "provider warning",
+        },
+      ],
+      coverage: [
+        {
+          kind: "coverage",
+          repoId: "repo",
+          generationId: "gen-1",
+          providerType: "scip",
+          providerId: "scip",
+          emittedAt: "2026-05-25T12:00:00.000Z",
+          relPath: "src/index.ts",
+          symbolCoverage: "full",
+          referenceCoverage: "full",
+          callProofCoverage: "partial",
+          diagnosticCoverage: "full",
+          totalSymbols: 1,
+          emittedSymbols: 1,
+          totalOccurrences: 3,
+          unresolvedOccurrences: 0,
+          totalResolvedReferences: 2,
+          callProofUnavailableReferences: 1,
+          callProofUnavailableReasons: [
+            { code: "symbolTextMismatch", references: 1 },
+          ],
+          legacyFallback: "skip",
+        },
+      ],
+    });
+
+    const records = providerFactsToSemanticProvenanceRecords(facts);
+    assert.equal(records.providerRuns.length, 1);
+    assert.equal(records.providerRuns[0]?.status, "completed");
+    assert.equal(records.providerRuns[0]?.diagnosticsCount, 3);
+    assert.match(
+      records.providerRuns[0]?.metadataJson ?? "",
+      /callProofUnavailableReferences/,
+    );
+    assert.equal(records.diagnostics.length, 3);
+    assert.deepEqual(
+      records.diagnostics.map((diagnostic) => diagnostic.code).sort(),
+      [
+        "providerFirst.callProof.symbolTextMismatch",
+        "providerFirst.coverage.callProof",
+        undefined,
+      ].sort(),
+    );
+  });
+
   it("records provider edge provenance with source path and SCIP index context", () => {
     const emittedAt = "2026-05-25T12:00:00.000Z";
     const rows = providerFactsToGraphRows({
@@ -5702,8 +5894,7 @@ describe("provider-first indexing foundation", () => {
             providerId: "scip",
             emittedAt,
             symbolId: "symbol-minimal",
-            providerSymbolId:
-              "scip npm pkg 1.0.0 src/index.ts/minimal().",
+            providerSymbolId: "scip npm pkg 1.0.0 src/index.ts/minimal().",
             name: "minimal",
             symbolKind: "function",
             relPath: "src/index.ts",
@@ -5770,7 +5961,7 @@ describe("provider-first indexing foundation", () => {
           fileId: "file-legacy",
           repoId: "repo",
           relPath: "src/extra.ts",
-          contentHash: "legacy-content",
+          contentHash: "1".repeat(64),
           language: "typescript",
           byteSize: 42,
           lastIndexedAt: "2026-05-25T12:00:00.000Z",
@@ -5851,8 +6042,6 @@ describe("provider-first indexing foundation", () => {
     const rows = providerFactsToGraphRows({
       indexedAt: "2026-05-25T12:00:00.000Z",
       facts: providerFactSet({
-        symbols: [],
-        externalSymbols: [],
         edges: [
           {
             kind: "edge",
@@ -5862,11 +6051,11 @@ describe("provider-first indexing foundation", () => {
             providerId: "scip",
             emittedAt: "2026-05-25T12:00:00.000Z",
             sourceSymbolId: "symbol-1",
-            targetSymbolId: "symbol-2",
+            targetSymbolId: "symbol-1",
             edgeType: "import",
             resolution: "exact",
             confidence: 0.95,
-            dedupeKey: "symbol-1:symbol-2:import:scip",
+            dedupeKey: "symbol-1:symbol-1:import:scip",
           },
         ],
       }),
@@ -6232,11 +6421,11 @@ describe("provider-first indexing foundation", () => {
             providerId: "scip",
             emittedAt,
             sourceSymbolId: "symbol-1",
-            targetSymbolId: "symbol-2",
+            targetSymbolId: "symbol-1",
             edgeType: "call",
             resolution: "exact",
             confidence: 0.95,
-            dedupeKey: "symbol-1:symbol-2:call:scip",
+            dedupeKey: "symbol-1:symbol-1:call:scip",
           },
         ],
       }),
@@ -6572,7 +6761,8 @@ describe("provider-first indexing foundation", () => {
         indexedAt: "2026-05-25T12:00:00.000Z",
         facts: providerFactSet(),
       });
-      rows.files[0]!.byteSize = Number.NaN;
+      (rows.symbols[0] as { summaryQuality: unknown }).summaryQuality =
+        "not-a-number";
 
       const summary = await stageProviderFirstShadowBuild({
         repoId: "repo",
@@ -6846,7 +7036,7 @@ describe("provider-first indexing foundation", () => {
              v.prevVersionHash = null,
              v.versionHash = 'hash'
          MERGE (v)-[:VERSION_OF_REPO]->(r)`,
-         {
+        {
           repoId,
           sourceSymbolId,
           targetSymbolId,
@@ -7706,6 +7896,8 @@ function providerFactSet(
         fileId: "file-1",
         relPath: "src/index.ts",
         languageId: "typescript",
+        contentHash: "0".repeat(64),
+        byteSize: 42,
       },
     ],
     symbols: [
@@ -7735,6 +7927,14 @@ function providerFactSet(
     providerRuns: [],
     ...overrides,
   };
+}
+
+function withProviderFileMetadata(facts: ProviderFactSet): ProviderFactSet {
+  for (const file of facts.files) {
+    file.contentHash ??= "0".repeat(64);
+    file.byteSize ??= 0;
+  }
+  return facts;
 }
 
 class FakeQueryResult {

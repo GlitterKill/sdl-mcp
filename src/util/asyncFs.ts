@@ -74,6 +74,14 @@ class AsyncFsOperations {
   }
 
   /**
+   * Reads raw file bytes asynchronously with the same limiter as text reads.
+   * Use this for byte-exact hashing where decoding would change semantics.
+   */
+  async readFileBuffer(filePath: string): Promise<Buffer> {
+    return this.readLimiter.run(() => readFile(filePath));
+  }
+
+  /**
    * Reads a file and returns limiter timing attribution for diagnostics.
    *
    * `elapsedMs` is the full caller-observed await time, `queuedMs` is time
@@ -192,6 +200,10 @@ export async function readFileAsync(
   encoding?: BufferEncoding,
 ): Promise<string> {
   return defaultInstance.readFile(filePath, encoding);
+}
+
+export async function readFileBufferAsync(filePath: string): Promise<Buffer> {
+  return defaultInstance.readFileBuffer(filePath);
 }
 
 export async function readFileAsyncWithTiming(

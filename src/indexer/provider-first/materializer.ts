@@ -1,19 +1,12 @@
 import type { Connection } from "kuzu";
 
-import type {
-  EdgeRow,
-  FileRow,
-  SymbolRow,
-} from "../../db/ladybug-queries.js";
+import type { EdgeRow, FileRow, SymbolRow } from "../../db/ladybug-queries.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { EdgeType, SymbolKind } from "../../domain/types.js";
 import { generateFileId, hashValue } from "../../util/hashing.js";
 import { normalizePath } from "../../util/paths.js";
 import { resolveSymbolEnrichment } from "../symbol-enrichment.js";
-import type {
-  IndexProgress,
-  IndexProgressSubstage,
-} from "../indexer-init.js";
+import type { IndexProgress, IndexProgressSubstage } from "../indexer-init.js";
 import type {
   EdgeFact,
   ExternalSymbolFact,
@@ -21,6 +14,7 @@ import type {
   ProviderFactSet,
   SymbolFact,
 } from "./types.js";
+import { validateProviderFirstGraphRows } from "./graph-validation.js";
 
 const PROVIDER_MINIMAL_DOCUMENTATION_SUMMARY_QUALITY = 0.4;
 const PROVIDER_STANDARD_DOCUMENTATION_SUMMARY_QUALITY = 0.6;
@@ -204,6 +198,9 @@ export async function materializeProviderFacts(
   rows: ProviderFirstGraphRows,
   options: MaterializeProviderFactsOptions = {},
 ): Promise<void> {
+  validateProviderFirstGraphRows(rows, {
+    context: "Provider-first materialize",
+  });
   // Active materialization still owns the live graph before shadow activation,
   // but provider-owned replacement rows use known-fresh COPY paths for symbols
   // and edges while legacy fallback keeps the broader merge-safe writers.
@@ -434,15 +431,9 @@ function fileFactToRow(
     fileId: fact.fileId,
     repoId: fact.repoId,
     relPath,
-    contentHash:
-      fact.contentHash ??
-      hashValue({
-        providerType: fact.providerType,
-        providerId: fact.providerId,
-        relPath,
-      }),
+    contentHash: fact.contentHash ?? "",
     language: fact.languageId ?? inferLanguage(relPath),
-    byteSize: 0,
+    byteSize: fact.byteSize ?? -1,
     lastIndexedAt: indexedAt,
   };
 }
@@ -465,7 +456,8 @@ function symbolFactToRow(
     fact.signature,
   );
   const summary = firstDocumentationLine(fact.documentation);
-  const language = fileByPath.get(relPath)?.languageId ?? inferLanguage(relPath);
+  const language =
+    fileByPath.get(relPath)?.languageId ?? inferLanguage(relPath);
   const enrichment = resolveSymbolEnrichment({
     kind: fact.symbolKind,
     name: fact.name,
@@ -476,7 +468,8 @@ function symbolFactToRow(
   return {
     symbolId: fact.symbolId,
     repoId: fact.repoId,
-    fileId: fileByPath.get(relPath)?.fileId ?? generateFileId(fact.repoId, relPath),
+    fileId:
+      fileByPath.get(relPath)?.fileId ?? generateFileId(fact.repoId, relPath),
     kind: fact.symbolKind,
     name: fact.name,
     exported: true,
@@ -561,7 +554,9 @@ function buildProviderSignatureJson(
   return JSON.stringify({ text: `${kind} ${name}` });
 }
 
-function firstDocumentationLine(documentation: readonly string[]): string | null {
+function firstDocumentationLine(
+  documentation: readonly string[],
+): string | null {
   for (const entry of documentation) {
     const line = entry.trim().split(/\r?\n/, 1)[0]?.trim();
     if (line && line.length > 0) return line;

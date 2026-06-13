@@ -1,4 +1,5 @@
 import { deserialize, serialize } from "node:v8";
+import { hash } from "node:crypto";
 import {
   access,
   mkdir,
@@ -32,10 +33,7 @@ import type { ScipDocument, ScipExternalSymbol } from "../../scip/types.js";
 import { logger } from "../../util/logger.js";
 import { hashValue } from "../../util/hashing.js";
 import { getRelativePath, normalizePath } from "../../util/paths.js";
-import type {
-  IndexProgress,
-  IndexProgressSubstage,
-} from "../indexer-init.js";
+import type { IndexProgress, IndexProgressSubstage } from "../indexer-init.js";
 import type { Pass2ResolverTelemetry } from "../edge-builder/telemetry.js";
 import {
   normalizeScipProviderFacts,
@@ -242,6 +240,7 @@ interface ExecuteProviderFirstScipFullParams {
   generatorFailures?: readonly ScipFailureDiagnostic[];
   generatorCacheKey?: string;
   scannedPaths?: readonly string[];
+  scannedFiles?: readonly ProviderFirstSourceFileMetadata[];
   recordPhaseTiming?: ProviderFirstPhaseTimingRecorder;
   onProgress?: (progress: {
     stage: IndexProgress["stage"];
@@ -253,6 +252,12 @@ interface ExecuteProviderFirstScipFullParams {
     message?: string;
   }) => void;
   signal?: AbortSignal;
+}
+
+interface ProviderFirstSourceFileMetadata {
+  path: string;
+  size: number;
+  contentHash: string;
 }
 
 type ProviderFirstProgressCallback =
@@ -361,6 +366,7 @@ export async function executeProviderFirstScipFull(
       params.config,
     ),
     scannedPaths: params.scannedPaths,
+    scannedFiles: params.scannedFiles,
   });
   const cachedCollection =
     cacheContext &&
@@ -396,6 +402,14 @@ export async function executeProviderFirstScipFull(
     );
   }
 
+  await measureCollectionPhase("sourceMetadata", () =>
+    hydrateProviderFileFactsFromSource({
+      repoRoot: params.repoRoot,
+      facts: collected.facts,
+      scannedFiles: params.scannedFiles,
+    }),
+  );
+
   const rows =
     cachedCollection?.rows ??
     (await measureCollectionPhase("rows", () => {
@@ -412,21 +426,30 @@ export async function executeProviderFirstScipFull(
       });
       return shapedRows;
     }));
+  applyProviderFileFactMetadataToRows(rows, collected.facts);
   await measureCollectionPhase("validate", () => {
-    emitProviderFirstProgress(params.onProgress, "providerCollection.validate", {
-      stageCurrent: 0,
-      stageTotal: 1,
-      message: "validating provider graph rows",
-    });
+    emitProviderFirstProgress(
+      params.onProgress,
+      "providerCollection.validate",
+      {
+        stageCurrent: 0,
+        stageTotal: 1,
+        message: "validating provider graph rows",
+      },
+    );
     validateProviderFirstGraphRows(rows, {
       repoId: params.repoId,
       context: "Provider-first",
     });
-    emitProviderFirstProgress(params.onProgress, "providerCollection.validate", {
-      stageCurrent: 1,
-      stageTotal: 1,
-      message: "provider graph rows validated",
-    });
+    emitProviderFirstProgress(
+      params.onProgress,
+      "providerCollection.validate",
+      {
+        stageCurrent: 1,
+        stageTotal: 1,
+        message: "provider graph rows validated",
+      },
+    );
   });
   if (!cachedCollection && cacheContext) {
     await measureCollectionPhase("cacheWrite", () =>
@@ -522,6 +545,7 @@ function providerCollectionCacheContext(params: {
   generatorCacheKey?: string;
   sourceTextMaxBytes: number;
   scannedPaths?: readonly string[];
+  scannedFiles?: readonly ProviderFirstSourceFileMetadata[];
 }): ProviderCollectionCacheContext | null {
   // Full provider fact caching is experimental: on large repos the serialized
   // payload can be multiple GB, so keep it opt-in until a lean summary cache is
@@ -553,9 +577,19 @@ function providerCollectionCacheContext(params: {
       externalSymbols: params.scip.externalSymbols,
     },
     sourceTextMaxBytes: params.sourceTextMaxBytes,
-    scannedPathsHash: params.scannedPaths
-      ? hashValue([...params.scannedPaths].map(normalizePath).sort())
-      : null,
+    scannedFilesHash: params.scannedFiles
+      ? hashValue(
+          params.scannedFiles
+            .map((file) => ({
+              path: normalizePath(file.path),
+              size: file.size,
+              contentHash: file.contentHash,
+            }))
+            .sort((left, right) => left.path.localeCompare(right.path)),
+        )
+      : params.scannedPaths
+        ? hashValue([...params.scannedPaths].map(normalizePath).sort())
+        : null,
   });
   const repoKey = safeCacheKeyPart(params.repoId);
   return {
@@ -702,6 +736,50 @@ function scipExecutionConfigured(scip: ScipConfig | undefined): boolean {
   return scip.indexes.length > 0 || scip.generator.enabled === true;
 }
 
+async function hydrateProviderFileFactsFromSource(params: {
+  repoRoot: string;
+  facts: ProviderFactSet;
+  scannedFiles?: readonly ProviderFirstSourceFileMetadata[];
+}): Promise<void> {
+  const scannedByPath = new Map(
+    params.scannedFiles?.map((file) => [normalizePath(file.path), file]) ?? [],
+  );
+  for (const fact of params.facts.files) {
+    const relPath = normalizePath(fact.relPath);
+    const scanned = scannedByPath.get(relPath);
+    if (scanned) {
+      fact.contentHash = scanned.contentHash;
+      fact.byteSize = scanned.size;
+      continue;
+    }
+
+    const sourcePath = resolveDocumentPath(params.repoRoot, relPath);
+    if (!sourcePath) continue;
+    try {
+      const content = await readFile(sourcePath);
+      fact.contentHash = hash("sha256", content, "hex");
+      fact.byteSize = content.byteLength;
+    } catch {
+      // Validation reports the missing raw hash/size with file context.
+    }
+  }
+}
+
+function applyProviderFileFactMetadataToRows(
+  rows: ProviderFirstGraphRows,
+  facts: ProviderFactSet,
+): void {
+  const factsByPath = new Map(
+    facts.files.map((fact) => [normalizePath(fact.relPath), fact]),
+  );
+  for (const row of rows.files) {
+    const fact = factsByPath.get(normalizePath(row.relPath));
+    if (!fact) continue;
+    row.contentHash = fact.contentHash ?? "";
+    row.byteSize = fact.byteSize ?? -1;
+  }
+}
+
 async function collectScipProviderFacts(params: {
   repoId: string;
   repoRoot: string;
@@ -750,11 +828,15 @@ async function collectScipProviderFacts(params: {
       continue;
     }
 
-    emitProviderFirstProgress(params.onProgress, "providerCollection.documents", {
-      stageCurrent: currentIndex,
-      stageTotal: entries.length,
-      message: `[${entry.label ?? relIndexPath}] decoding`,
-    });
+    emitProviderFirstProgress(
+      params.onProgress,
+      "providerCollection.documents",
+      {
+        stageCurrent: currentIndex,
+        stageTotal: entries.length,
+        message: `[${entry.label ?? relIndexPath}] decoding`,
+      },
+    );
     const facts = await decodeScipIndexToFacts({
       repoId: params.repoId,
       repoRoot: params.repoRoot,
@@ -806,20 +888,28 @@ async function decodeScipIndexToFacts(params: {
     params.relIndexPath,
   );
   try {
-    emitProviderFirstProgress(params.onProgress, "providerCollection.metadata", {
-      stageCurrent: 0,
-      stageTotal: 1,
-      message: `[${providerId}] reading metadata`,
-    });
+    emitProviderFirstProgress(
+      params.onProgress,
+      "providerCollection.metadata",
+      {
+        stageCurrent: 0,
+        stageTotal: 1,
+        message: `[${providerId}] reading metadata`,
+      },
+    );
     const metadata = await measureCollectionPhase("metadata", () =>
       decoder.metadata(),
     );
-    emitProviderFirstProgress(params.onProgress, "providerCollection.metadata", {
-      stageCurrent: 1,
-      stageTotal: 1,
-      message:
-        `[${providerId}] metadata ${metadata.toolName ?? "unknown"} ${metadata.toolVersion ?? ""}`.trim(),
-    });
+    emitProviderFirstProgress(
+      params.onProgress,
+      "providerCollection.metadata",
+      {
+        stageCurrent: 1,
+        stageTotal: 1,
+        message:
+          `[${providerId}] metadata ${metadata.toolName ?? "unknown"} ${metadata.toolVersion ?? ""}`.trim(),
+      },
+    );
     const documents: ScipDocument[] = [];
     const scannedPathSet = params.scannedPaths
       ? new Set(params.scannedPaths.map(normalizePath))
@@ -859,20 +949,17 @@ async function decodeScipIndexToFacts(params: {
           emitProviderFirstProgress(
             params.onProgress,
             "providerCollection.documents",
-          {
-            current: retained,
-            total: 0,
-            message: scannedPathSet
-              ? `[${providerId}] documents=${retained} retained (${seen} scanned)`
-              : `[${providerId}] documents=${seen}`,
-          },
+            {
+              current: retained,
+              total: 0,
+              message: scannedPathSet
+                ? `[${providerId}] documents=${retained} retained (${seen} scanned)`
+                : `[${providerId}] documents=${seen}`,
+            },
           );
         }
       }
-      if (
-        seen > 0 &&
-        seen % PROVIDER_FIRST_DOCUMENT_PROGRESS_INTERVAL !== 0
-      ) {
+      if (seen > 0 && seen % PROVIDER_FIRST_DOCUMENT_PROGRESS_INTERVAL !== 0) {
         emitProviderFirstProgress(
           params.onProgress,
           "providerCollection.documents",
@@ -998,7 +1085,9 @@ function countScipOccurrences(documents: readonly ScipDocument[]): number {
   return count;
 }
 
-function pruneUnreferencedExternalSymbols(facts: ProviderFactSet): ProviderFactSet {
+function pruneUnreferencedExternalSymbols(
+  facts: ProviderFactSet,
+): ProviderFactSet {
   const referencedSymbolIds = new Set<string>();
   for (const edge of facts.edges) {
     referencedSymbolIds.add(edge.targetSymbolId);
@@ -1105,7 +1194,9 @@ function appendProviderFactSet(
 ): void {
   const existingRelPaths = collectProviderFactRelPaths(target);
   const targetFileIds = new Set(target.files.map((file) => file.fileId));
-  const targetSymbolIds = new Set(target.symbols.map((symbol) => symbol.symbolId));
+  const targetSymbolIds = new Set(
+    target.symbols.map((symbol) => symbol.symbolId),
+  );
   const targetSymbolKeys = new Set(target.symbols.map(providerSymbolFactKey));
   const targetOccurrenceIds = new Set(
     target.occurrences.map((occurrence) => occurrence.occurrenceId),
@@ -1270,7 +1361,8 @@ function mergeSourceLinesByPath(
 function collectProviderFactRelPaths(facts: ProviderFactSet): Set<string> {
   const relPaths = new Set<string>();
   for (const file of facts.files) relPaths.add(normalizePath(file.relPath));
-  for (const symbol of facts.symbols) relPaths.add(normalizePath(symbol.relPath));
+  for (const symbol of facts.symbols)
+    relPaths.add(normalizePath(symbol.relPath));
   for (const occurrence of facts.occurrences) {
     relPaths.add(normalizePath(occurrence.relPath));
   }
@@ -1342,12 +1434,9 @@ function providerDiagnosticFactKey(
 
 function providerRangeKey(range: Range | undefined): string {
   if (!range) return "";
-  return [
-    range.startLine,
-    range.startCol,
-    range.endLine,
-    range.endCol,
-  ].join(":");
+  return [range.startLine, range.startCol, range.endLine, range.endCol].join(
+    ":",
+  );
 }
 
 async function loadDocumentSourceLines(

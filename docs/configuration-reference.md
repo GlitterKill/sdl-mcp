@@ -673,6 +673,7 @@ Generated SCIP files are decoded up to 512 MiB each. When the generated merged `
 | `SDL_LOG_FORMAT`                 | `json` or `text`                                                                       |
 | `SDL_MCP_DISABLE_NATIVE_ADDON`   | Force TypeScript indexing engine                                                       |
 | `SDL_MCP_NATIVE_PASS1_SERIAL`    | Disable native pass-1 chunk prefetch while keeping the Rust engine active              |
+| `SDL_MCP_PASS1_STABLE_DB_WRITES` | Force (`1`) or disable (`0`) stable pass-1 DB writes; Windows defaults to stable writes |
 | `SDL_DERIVED_REFRESH_TIMEOUT_MS` | Timeout for background startup recovery of stale graph-derived rows. Default: `120000` |
 | `ANTHROPIC_API_KEY`              | Hosted semantic-summary provider credential                                            |
 
@@ -680,6 +681,13 @@ Generated SCIP files are decoded up to 512 MiB each. When the generated merged `
 indexer crashes. It keeps native Rust parsing enabled, but parses one pass-1
 chunk at a time instead of prefetching the next native chunk while JavaScript
 processes the current chunk's DB writes.
+
+On Windows, legacy pass-1 indexing defaults to stable DB writes to avoid
+LadybugDB native access violations caused by overlapping parser work and
+background batch commits. Set `SDL_MCP_PASS1_STABLE_DB_WRITES=0` only for a
+controlled benchmark or diagnosis where faster overlapped writes are worth the
+risk. On non-Windows platforms the same variable remains an opt-in stability
+switch (`1`, `true`, or `yes`).
 
 `SDL_DERIVED_REFRESH_TIMEOUT_MS` accepts a positive integer number of
 milliseconds. Invalid or non-positive values are ignored. This is intentionally
