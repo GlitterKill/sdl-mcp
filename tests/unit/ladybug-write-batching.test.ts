@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import type {
   EdgeRow,
+  MetricsRow,
   SymbolRow,
   SymbolReferenceRow,
 } from "../../dist/db/ladybug-queries.js";
@@ -16,7 +17,11 @@ import {
   getExportedSymbolsByRepo,
   getFileSummarySymbolFactsByRepo,
   getSymbolsByRepoForSnapshotPage,
+  copyClusterMembersAfterDeleteBatch,
+  copyProcessStepsAfterDeleteBatch,
+  insertClusterMembersAfterDeleteBatch,
   insertNewFileSummaryBatch,
+  insertProcessStepsAfterDeleteBatch,
   insertEdges,
   insertKnownSymbolEdges,
   insertSymbolReferences,
@@ -229,6 +234,54 @@ describe("LadybugDB write batching", () => {
       countStatementsContaining(statements, "CREATE (a)-[:DEPENDS_ON"),
       2,
       "4097 edges should use two DEPENDS_ON create statements by default",
+    );
+  });
+
+  it("keeps non-real target metadata off the file-backed cleanup path", async () => {
+    const statements: string[] = [];
+    const conn = createFakeConnection(statements);
+    const edges: EdgeRow[] = [
+      {
+        repoId: "repo",
+        fromSymbolId: "from-real",
+        toSymbolId: "to-real",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        provenance: "test",
+        createdAt: "2026-03-05T00:00:00.000Z",
+      },
+      {
+        repoId: "repo",
+        fromSymbolId: "from-unresolved",
+        toSymbolId: "unresolved:call:target",
+        edgeType: "call",
+        weight: 0.5,
+        confidence: 0.5,
+        resolution: "unresolved",
+        provenance: "test",
+        createdAt: "2026-03-05T00:00:00.000Z",
+      },
+    ];
+
+    await insertEdges(conn, edges, {
+      skipSourceRepoLink: true,
+      skipExistingRelationshipUpdate: true,
+    });
+
+    assert.strictEqual(
+      countStatementsContaining(
+        statements,
+        "OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]",
+      ),
+      1,
+      "only real targets should need file-backed metadata cleanup",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "b.symbolStatus = row.targetStatus"),
+      1,
+      "non-real target rows should use the direct placeholder metadata update",
     );
   });
 
@@ -498,6 +551,168 @@ describe("LadybugDB write batching", () => {
     );
   });
 
+  it("directly creates replacement cluster members after delete", async () => {
+    const statements: string[] = [];
+    const conn = createFakeConnection(statements);
+
+    await insertClusterMembersAfterDeleteBatch(conn, [
+      { symbolId: "sym-1", clusterId: "cluster-1", membershipScore: 1 },
+      { symbolId: "sym-1", clusterId: "cluster-1", membershipScore: 1 },
+      { symbolId: "sym-2", clusterId: "cluster-1", membershipScore: 0.5 },
+    ]);
+
+    assert.strictEqual(countStatements(statements, "BEGIN TRANSACTION"), 1);
+    assert.strictEqual(countStatements(statements, "COMMIT"), 1);
+    assert.strictEqual(
+      countStatementsContaining(statements, "CREATE (s)-[:BELONGS_TO_CLUSTER"),
+      1,
+      "replacement cluster members should use one direct CREATE pass",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "OPTIONAL MATCH"),
+      0,
+      "replacement cluster members should not probe deleted relationships",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "MATCH (s)-[m:BELONGS_TO_CLUSTER"),
+      0,
+      "replacement cluster members should not run a second update pass",
+    );
+  });
+
+  it("bulk-copies safe replacement cluster members after delete", async () => {
+    const statements: string[] = [];
+    const conn = createFakeConnection(statements);
+
+    await copyClusterMembersAfterDeleteBatch(conn, [
+      { symbolId: "sym-1", clusterId: "cluster-1", membershipScore: 1 },
+      { symbolId: "sym-1", clusterId: "cluster-1", membershipScore: 1 },
+      { symbolId: "sym-2", clusterId: "cluster-1", membershipScore: 0.5 },
+    ]);
+
+    assert.strictEqual(countStatements(statements, "BEGIN TRANSACTION"), 1);
+    assert.strictEqual(countStatements(statements, "COMMIT"), 1);
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY BELONGS_TO_CLUSTER FROM"),
+      1,
+      "safe replacement cluster members should use one relationship COPY load",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "CREATE (s)-[:BELONGS_TO_CLUSTER"),
+      0,
+      "safe replacement cluster members should not use UNWIND direct CREATE",
+    );
+  });
+
+  it("falls back from cluster member COPY for unsafe endpoint ids", async () => {
+    const statements: string[] = [];
+    const conn = createFakeConnection(statements);
+
+    await copyClusterMembersAfterDeleteBatch(conn, [
+      { symbolId: "sym-1", clusterId: "cluster-1", membershipScore: 1 },
+      { symbolId: "sym,2", clusterId: "cluster-1", membershipScore: 0.5 },
+    ]);
+
+    assert.strictEqual(countStatements(statements, "BEGIN TRANSACTION"), 1);
+    assert.strictEqual(countStatements(statements, "COMMIT"), 1);
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY BELONGS_TO_CLUSTER FROM"),
+      1,
+      "safe cluster member rows should still use COPY",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "CREATE (s)-[:BELONGS_TO_CLUSTER"),
+      1,
+      "unsafe cluster member endpoint ids should fall back to direct CREATE",
+    );
+  });
+
+  it("directly creates replacement process steps after delete", async () => {
+    const statements: string[] = [];
+    const conn = createFakeConnection(statements);
+
+    await insertProcessStepsAfterDeleteBatch(conn, [
+      { processId: "process-1", symbolId: "sym-1", stepOrder: 0, role: "entry" },
+      { processId: "process-1", symbolId: "sym-1", stepOrder: 0, role: "entry" },
+      {
+        processId: "process-1",
+        symbolId: "sym-2",
+        stepOrder: 1,
+        role: "exit",
+      },
+    ]);
+
+    assert.strictEqual(countStatements(statements, "BEGIN TRANSACTION"), 1);
+    assert.strictEqual(countStatements(statements, "COMMIT"), 1);
+    assert.strictEqual(
+      countStatementsContaining(statements, "CREATE (s)-[:PARTICIPATES_IN"),
+      1,
+      "replacement process steps should use one direct CREATE pass",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "OPTIONAL MATCH"),
+      0,
+      "replacement process steps should not probe deleted relationships",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "MATCH (s)-[r:PARTICIPATES_IN"),
+      0,
+      "replacement process steps should not run a second update pass",
+    );
+  });
+
+  it("bulk-copies safe replacement process steps after delete", async () => {
+    const statements: string[] = [];
+    const conn = createFakeConnection(statements);
+
+    await copyProcessStepsAfterDeleteBatch(conn, [
+      { processId: "process-1", symbolId: "sym-1", stepOrder: 0, role: "entry" },
+      { processId: "process-1", symbolId: "sym-1", stepOrder: 0, role: "entry" },
+      {
+        processId: "process-1",
+        symbolId: "sym-2",
+        stepOrder: 1,
+        role: "exit",
+      },
+    ]);
+
+    assert.strictEqual(countStatements(statements, "BEGIN TRANSACTION"), 1);
+    assert.strictEqual(countStatements(statements, "COMMIT"), 1);
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY PARTICIPATES_IN FROM"),
+      1,
+      "safe replacement process steps should use one relationship COPY load",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "CREATE (s)-[:PARTICIPATES_IN"),
+      0,
+      "safe replacement process steps should not use UNWIND direct CREATE",
+    );
+  });
+
+  it("falls back from process step COPY for unsafe endpoint ids", async () => {
+    const statements: string[] = [];
+    const conn = createFakeConnection(statements);
+
+    await copyProcessStepsAfterDeleteBatch(conn, [
+      { processId: "process-1", symbolId: "sym-1", stepOrder: 0, role: "entry" },
+      { processId: "process\n2", symbolId: "sym-2", stepOrder: 1, role: "exit" },
+    ]);
+
+    assert.strictEqual(countStatements(statements, "BEGIN TRANSACTION"), 1);
+    assert.strictEqual(countStatements(statements, "COMMIT"), 1);
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY PARTICIPATES_IN FROM"),
+      1,
+      "safe process step rows should still use COPY",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "CREATE (s)-[:PARTICIPATES_IN"),
+      1,
+      "unsafe process step endpoint ids should fall back to direct CREATE",
+    );
+  });
+
   it("uses Symbol.repoId for full-repo FileSummary reads", async () => {
     const statements: string[] = [];
     const conn = createFakeConnection(statements);
@@ -541,6 +756,41 @@ describe("LadybugDB write batching", () => {
     assert.ok(deleteStatement);
     assert.match(deleteStatement, /s\.repoId = \$repoId/);
     assert.doesNotMatch(deleteStatement, /SYMBOL_IN_REPO/);
+  });
+
+  it("measures full-repo Metrics replacement COPY phases", async () => {
+    const statements: string[] = [];
+    const conn = createFakeConnection(statements);
+    const phases: string[] = [];
+    const rows: MetricsRow[] = [
+      {
+        symbolId: "sym-a",
+        fanIn: 1,
+        fanOut: 2,
+        churn30d: 3,
+        testRefsJson: "[]",
+        canonicalTestJson: null,
+        pageRank: 0,
+        kCore: 0,
+        updatedAt: "2024-01-01T00:00:00.000Z",
+      },
+    ];
+
+    await replaceMetricsForRepoCopy(conn, "repo", rows, {
+      measurePhase: async (phaseName, fn) => {
+        phases.push(phaseName);
+        return await fn();
+      },
+    });
+
+    assert.deepStrictEqual(phases, [
+      "csvMaterialize",
+      "deleteExisting",
+      "copyFrom",
+    ]);
+    assert.ok(
+      statements.some((statement) => statement.startsWith("COPY Metrics FROM")),
+    );
   });
 
   it("stops secondary index DDL after CREATE INDEX is unsupported", async () => {

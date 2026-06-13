@@ -32,6 +32,16 @@ import {
   storePass1Extraction,
 } from "../pass2/types.js";
 
+const C_FAMILY_PASS2_SOURCE_CACHE_EXTENSIONS = new Set([
+  ".c",
+  ".h",
+  ".cpp",
+  ".hpp",
+  ".cc",
+  ".cxx",
+  ".hxx",
+]);
+
 /**
  * Process a file using pre-parsed results from the Rust native engine.
  *
@@ -194,13 +204,13 @@ export async function processFileFromRustResult(params: {
       }
     }
 
-    // C1: cache pass-1's extraction outputs so the TS pass-2 resolver can
-    // skip a redundant tree-sitter parse + three `extract*` calls. Mirrors
-    // the JS-engine path in process-file.ts; only TS-resolvable files are
-    // captured because non-TS resolvers consume the live tree handle.
+    // C1: cache pass-1 extraction outputs for pass-2 reuse. TS/JS reuses the
+    // full extraction; C-family resolvers reuse only source text/imports and
+    // still perform their stricter pass-2 call extraction.
     if (
       params.pass1Extractions &&
-      isTsCallResolutionFile(fileMeta.path) &&
+      (isTsCallResolutionFile(fileMeta.path) ||
+        C_FAMILY_PASS2_SOURCE_CACHE_EXTENSIONS.has(extWithDot)) &&
       skipCallResolution
     ) {
       storePass1Extraction(params.pass1Extractions, relPath, {

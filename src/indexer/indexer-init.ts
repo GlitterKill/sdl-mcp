@@ -137,12 +137,12 @@ export interface Pass1Accumulator {
    */
   drainPromise: Promise<void>;
   /**
-   * Pass-1 extraction outputs captured for files that the pass-2 TS
-   * resolver will re-process. Lets pass-2 skip a redundant tree-sitter
-   * parse + three `extract*` calls per file. Populated only for
+   * Pass-1 extraction outputs captured for pass-2 resolvers that can consume
+   * pure extracted data (TS/JS). Lets pass-2 skip redundant file
+   * reads and tree-sitter parse/extract calls. Populated for
    * `isTsCallResolutionFile(path)` matches — other-language pass-2
-   * resolvers consume the live tree handle for scope walkers and stay on
-   * the inline re-parse path. Dropped after pass-2 completes.
+   * resolvers that need live AST handles stay on the inline re-parse path.
+   * Dropped after pass-2 completes.
    *
    * Imported as a value type to avoid a circular import; `Pass1Accumulator`
    * is referenced by both pass-1 and pass-2 modules.

@@ -8,6 +8,7 @@ import {
   getSemanticLspCallEdgeCandidates,
   type SemanticLspCallEdgeCandidateRow,
 } from "../../../db/ladybug-queries.js";
+import { parseUnresolvedCallTarget } from "../../../db/symbol-placeholders.js";
 import type { LanguageAdapter } from "../../../indexer/adapter/LanguageAdapter.js";
 import { getAdapterForExtension } from "../../../indexer/adapter/registry.js";
 import type {
@@ -326,7 +327,7 @@ export function extractCallTargetName(calleeIdentifier: string): string | null {
 
 function targetNameForRow(row: SemanticLspCallEdgeCandidateRow): string | null {
   if (row.targetSymbolId.startsWith("unresolved:call:")) {
-    const name = row.targetSymbolId.slice("unresolved:call:".length).trim();
+    const name = parseUnresolvedCallTarget(row.targetSymbolId);
     return name || null;
   }
   return row.targetName?.trim() || null;

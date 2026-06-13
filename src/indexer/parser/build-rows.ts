@@ -1,4 +1,8 @@
 import type { EdgeRow, SymbolRow } from "../../db/ladybug-queries.js";
+import {
+  unresolvedCallDependencyTarget,
+  unresolvedCallSymbolId,
+} from "../../db/symbol-placeholders.js";
 import type { SymbolKind } from "../../domain/types.js";
 import {
   addToSymbolIndex,
@@ -373,7 +377,9 @@ export async function buildSymbolAndEdgeRows(
         } else if (resolved.targetName) {
           if (isBuiltinCall(resolved.targetName)) continue;
 
-          const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
+          const unresolvedTargetId = unresolvedCallSymbolId(
+            resolved.targetName,
+          );
           const edgeKey = `${symbolId}->${unresolvedTargetId}`;
           if (createdCallEdges && createdCallEdges.has(edgeKey)) continue;
 
@@ -389,6 +395,7 @@ export async function buildSymbolAndEdgeRows(
             resolutionPhase: "pass1",
             provenance: `unresolved-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
             createdAt: now,
+            targetMeta: unresolvedCallDependencyTarget(resolved.targetName),
           };
           edgesToInsert.push(edge);
           createdCallEdges?.add(edgeKey);

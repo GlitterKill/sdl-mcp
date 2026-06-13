@@ -5,8 +5,12 @@ import type { SyntaxNode, Tree } from "tree-sitter";
 import { getLadybugConn, withWriteConn } from "../../../db/ladybug.js";
 import * as ladybugDb from "../../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../../db/ladybug-queries.js";
+import {
+  unresolvedCallDependencyTarget,
+  unresolvedCallSymbolId,
+} from "../../../db/symbol-placeholders.js";
 import type { SymbolKind } from "../../../domain/types.js";
-import { readFileAsync } from "../../../util/asyncFs.js";
+import { readFileAsyncWithTiming } from "../../../util/asyncFs.js";
 import { singleFlight } from "../../../util/concurrency.js";
 import { logger } from "../../../util/logger.js";
 import { normalizePath } from "../../../util/paths.js";
@@ -23,6 +27,10 @@ import type {
 } from "../types.js";
 
 import { confidenceFor } from "../confidence.js";
+import {
+  getCachedCppIncludeIndex,
+  type CppIncludeIndex,
+} from "./cpp-pass2-resolver.js";
 /**
  * C resolver's header-pair confidence differs from the centralized rubric
  * value (0.82). Preserved byte-for-byte from the pre-Phase-2 literal to
@@ -71,7 +79,7 @@ type CResolvedCall = {
   candidateCount?: number;
 };
 
-type CRepoIndex = {
+export type CRepoIndex = {
   fileByRelPath: Map<
     string,
     { fileId: string; relPath: string; language: string }
@@ -234,11 +242,14 @@ function clearLocalCallDedupKeys(
   createdCallEdges: Set<string>,
 ): void {
   if (symbolIds.length === 0) return;
-  for (const symbolId of symbolIds) {
-    for (const edgeKey of Array.from(createdCallEdges)) {
-      if (edgeKey.startsWith(`${symbolId}->`)) {
-        createdCallEdges.delete(edgeKey);
-      }
+  const symbolIdSet = new Set(symbolIds);
+  for (const edgeKey of createdCallEdges) {
+    const separatorIndex = edgeKey.indexOf("->");
+    if (separatorIndex < 0) {
+      continue;
+    }
+    if (symbolIdSet.has(edgeKey.slice(0, separatorIndex))) {
+      createdCallEdges.delete(edgeKey);
     }
   }
 }
@@ -251,6 +262,29 @@ function createNodeIdToSymbolId(
     nodeIdToSymbolId.set(detail.extractedSymbol.nodeId, detail.symbolId);
   }
   return nodeIdToSymbolId;
+}
+
+/**
+ * Assign calls to their owning symbol once per file. This keeps C pass-2 from
+ * repeating the enclosing-symbol range search for every symbol in the file.
+ */
+function groupCallsByCallerSymbol(
+  calls: readonly ExtractedCall[],
+  filteredSymbolDetails: FilteredSymbolDetail[],
+): Map<string, ExtractedCall[]> {
+  const callsByCallerNodeId = new Map<string, ExtractedCall[]>();
+  for (const call of calls) {
+    const callerNodeId =
+      call.callerNodeId ??
+      findEnclosingSymbolByRange(call.range, filteredSymbolDetails);
+    if (!callerNodeId) {
+      continue;
+    }
+    const existing = callsByCallerNodeId.get(callerNodeId) ?? [];
+    existing.push(call);
+    callsByCallerNodeId.set(callerNodeId, existing);
+  }
+  return callsByCallerNodeId;
 }
 
 function pushUniqueSymbolId(
@@ -277,11 +311,53 @@ function addCallableSymbolsByName(
   }
 }
 
+export function deriveCRepoIndexFromCppIncludeIndex(
+  cppIncludeIndex: CppIncludeIndex,
+): CRepoIndex {
+  const fileByRelPath = new Map<
+    string,
+    { fileId: string; relPath: string; language: string }
+  >();
+  const symbolsByFileId = new Map<string, SymbolRow[]>();
+  const symbolsByRelPath = new Map<string, SymbolRow[]>();
+  const cFileIds = new Set<string>();
+
+  for (const [relPath, file] of cppIncludeIndex.filesByRelPath) {
+    if (file.language !== "c") {
+      continue;
+    }
+    fileByRelPath.set(relPath, {
+      fileId: file.fileId,
+      relPath: file.relPath,
+      language: file.language,
+    });
+    cFileIds.add(file.fileId);
+  }
+
+  for (const [relPath, file] of fileByRelPath) {
+    const symbols = cppIncludeIndex.symbolsByFilePath.get(relPath) ?? [];
+    symbolsByRelPath.set(relPath, symbols);
+    symbolsByFileId.set(file.fileId, symbols);
+  }
+
+  return {
+    fileByRelPath,
+    symbolsByFileId,
+    symbolsByRelPath,
+    cFileIds,
+  };
+}
+
 async function buildCRepoIndex(
   repoId: string,
   cache?: Map<string, unknown>,
 ): Promise<CRepoIndex> {
   return singleFlight(cache, `pass2-c:repo-index:${repoId}`, async () => {
+    const cppIncludeIndex = getCachedCppIncludeIndex(cache, repoId);
+    if (cppIncludeIndex) {
+      return deriveCRepoIndexFromCppIncludeIndex(cppIncludeIndex);
+    }
+
     const conn = await getLadybugConn();
     const repoFiles = await ladybugDb.getFilesByRepo(conn, repoId);
     const cFiles = repoFiles.filter((file) => file.language === "c");
@@ -696,6 +772,10 @@ async function resolveCCallEdgesPass2(params: {
   mode?: "full" | "incremental";
   submitEdgeWrite?: Pass2ResolverContext["submitEdgeWrite"];
   importCache?: Pass2ResolverContext["importCache"];
+  recordPhase?: Pass2ResolverContext["recordPhase"];
+  recordMetric?: Pass2ResolverContext["recordMetric"];
+  recordFilePhase?: Pass2ResolverContext["recordFilePhase"];
+  pass1Extractions?: Pass2ResolverContext["pass1Extractions"];
 }): Promise<number> {
   const {
     repoId,
@@ -709,25 +789,69 @@ async function resolveCCallEdgesPass2(params: {
     cache,
     submitEdgeWrite,
     importCache,
+    recordPhase,
+    recordMetric,
+    recordFilePhase,
+    pass1Extractions,
   } = params;
 
-  const conn = await getLadybugConn();
   const filePath = join(repoRoot, fileMeta.path);
   let content: string;
-  try {
-    content = await readFileAsync(filePath, "utf-8");
-  } catch (readError: unknown) {
-    const code = (readError as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "EPERM") {
-      logger.warn(
-        `File disappeared before C pass2 resolution: ${fileMeta.path}`,
-        {
-          code,
-        },
-      );
-      return 0;
+  let phaseStartedAt = Date.now();
+  let contentBytes = 0;
+  const cachedExtraction = pass1Extractions?.get(fileMeta.path);
+  let pass1CacheMiss = false;
+  if (cachedExtraction) {
+    content = cachedExtraction.content;
+    contentBytes = Buffer.byteLength(content, "utf-8");
+    recordMetric?.("readFile.pass1CacheHits", 1);
+    recordMetric?.(
+      "readFile.pass1CacheBytes",
+      contentBytes,
+    );
+  } else {
+    if (pass1Extractions) {
+      recordMetric?.("readFile.pass1CacheMisses", 1);
+      pass1CacheMiss = true;
     }
-    throw readError;
+    try {
+      const readResult = await readFileAsyncWithTiming(filePath, "utf-8");
+      content = readResult.content;
+      contentBytes = Buffer.byteLength(content, "utf-8");
+      if (pass1CacheMiss) {
+        recordMetric?.("readFile.pass1CacheMissBytes", contentBytes);
+      }
+      recordPhase?.("readFile.active", readResult.activeMs);
+      recordPhase?.("readFile.queue", readResult.queuedMs);
+      recordFilePhase?.(
+        "readFile.active",
+        fileMeta.path,
+        readResult.activeMs,
+        contentBytes,
+      );
+      recordFilePhase?.(
+        "readFile.queue",
+        fileMeta.path,
+        readResult.queuedMs,
+        contentBytes,
+      );
+    } catch (readError: unknown) {
+      const code = (readError as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "EPERM") {
+        logger.warn(
+          `File disappeared before C pass2 resolution: ${fileMeta.path}`,
+          {
+            code,
+          },
+        );
+        return 0;
+      }
+      throw readError;
+    } finally {
+      const readElapsedMs = Date.now() - phaseStartedAt;
+      recordPhase?.("readFile", readElapsedMs);
+      recordFilePhase?.("readFile", fileMeta.path, readElapsedMs, contentBytes);
+    }
   }
 
   const inferredExtension = inferFileExtension(fileMeta.path);
@@ -740,7 +864,11 @@ async function resolveCCallEdgesPass2(params: {
     return 0;
   }
 
+  phaseStartedAt = Date.now();
   const tree = adapter.parse(content, filePath);
+  const parseElapsedMs = Date.now() - phaseStartedAt;
+  recordPhase?.("parse", parseElapsedMs);
+  recordFilePhase?.("parse", fileMeta.path, parseElapsedMs, contentBytes);
   if (!tree) {
     return 0;
   }
@@ -749,47 +877,91 @@ async function resolveCCallEdgesPass2(params: {
   let calls: ExtractedCall[];
   let imports: ReturnType<typeof adapter.extractImports>;
   let includeFallbacks: ReturnType<typeof collectIncludeImportFallbacks>;
+  phaseStartedAt = Date.now();
   try {
+    let extractStepStartedAt = Date.now();
     extractedSymbols = adapter.extractSymbols(
       tree,
       content,
       filePath,
     ) as ExtractedSymbol[];
+    const extractSymbolsElapsedMs = Date.now() - extractStepStartedAt;
+    recordPhase?.("extract.symbols", extractSymbolsElapsedMs);
+    recordFilePhase?.(
+      "extract.symbols",
+      fileMeta.path,
+      extractSymbolsElapsedMs,
+      contentBytes,
+    );
+
+    extractStepStartedAt = Date.now();
     calls = adapter.extractCalls(
       tree,
       content,
       filePath,
       extractedSymbols as never,
     ) as ExtractedCall[];
+    const extractCallsElapsedMs = Date.now() - extractStepStartedAt;
+    recordPhase?.("extract.calls", extractCallsElapsedMs);
+    recordFilePhase?.(
+      "extract.calls",
+      fileMeta.path,
+      extractCallsElapsedMs,
+      contentBytes,
+    );
+
+    extractStepStartedAt = Date.now();
     imports = adapter.extractImports(tree, content, filePath);
+    const extractImportsElapsedMs = Date.now() - extractStepStartedAt;
+    recordPhase?.("extract.imports", extractImportsElapsedMs);
+    recordFilePhase?.(
+      "extract.imports",
+      fileMeta.path,
+      extractImportsElapsedMs,
+      contentBytes,
+    );
+
+    extractStepStartedAt = Date.now();
     includeFallbacks = collectIncludeImportFallbacks(tree);
+    const extractIncludeFallbacksElapsedMs =
+      Date.now() - extractStepStartedAt;
+    recordPhase?.(
+      "extract.includeFallbacks",
+      extractIncludeFallbacksElapsedMs,
+    );
+    recordFilePhase?.(
+      "extract.includeFallbacks",
+      fileMeta.path,
+      extractIncludeFallbacksElapsedMs,
+      contentBytes,
+    );
+    recordMetric?.("symbols.extracted", extractedSymbols.length);
+    recordMetric?.("calls.extracted", calls.length);
+    recordMetric?.("imports.extracted", imports.length);
+    recordMetric?.("includeFallbacks.extracted", includeFallbacks.length);
   } finally {
     (tree as unknown as { delete?: () => void }).delete?.();
+    const extractElapsedMs = Date.now() - phaseStartedAt;
+    recordPhase?.("extract", extractElapsedMs);
+    recordFilePhase?.("extract", fileMeta.path, extractElapsedMs, contentBytes);
   }
 
-  const fileRecord = await ladybugDb.getFileByRepoPath(
-    conn,
-    repoId,
-    fileMeta.path,
-  );
-  if (!fileRecord) {
-    return 0;
-  }
-
-  const existingSymbols = await ladybugDb.getSymbolsByFile(
-    conn,
-    fileRecord.fileId,
-  );
+  phaseStartedAt = Date.now();
+  const repoIndex = await buildCRepoIndex(repoId, cache);
+  recordPhase?.("repoIndex", Date.now() - phaseStartedAt);
+  const existingSymbols = repoIndex.symbolsByRelPath.get(fileMeta.path) ?? [];
   if (existingSymbols.length === 0) {
     return 0;
   }
 
+  phaseStartedAt = Date.now();
   const filteredSymbolDetails = mapExtractedSymbolsToExisting(
     fileMeta.path,
     extractedSymbols,
     existingSymbols,
     telemetry,
   );
+  recordPhase?.("mapSymbols", Date.now() - phaseStartedAt);
   if (filteredSymbolDetails.length === 0) {
     return 0;
   }
@@ -800,9 +972,9 @@ async function resolveCCallEdgesPass2(params: {
   clearLocalCallDedupKeys(symbolIdsToRefresh, createdCallEdges);
 
   const nodeIdToSymbolId = createNodeIdToSymbolId(filteredSymbolDetails);
-  const repoIndex = await buildCRepoIndex(repoId, cache);
 
   const importsForResolution = imports.length > 0 ? imports : includeFallbacks;
+  phaseStartedAt = Date.now();
   const includeIndex = await buildIncludedSymbolIndex({
     repoId,
     repoRoot,
@@ -813,29 +985,35 @@ async function resolveCCallEdgesPass2(params: {
     repoIndex,
     importCache,
   });
+  recordPhase?.("includeIndex", Date.now() - phaseStartedAt);
+  phaseStartedAt = Date.now();
   const headerPairNameToSymbolIds = buildHeaderPairNameIndex({
     currentFilePath: fileMeta.path,
     includedHeaderRelPaths: includeIndex.includedHeaderRelPaths,
     repoIndex,
   });
+  recordPhase?.("headerPairIndex", Date.now() - phaseStartedAt);
+  phaseStartedAt = Date.now();
   const sameDirectoryNameToSymbolIds = buildSameDirectoryNameIndex({
     currentFilePath: fileMeta.path,
     repoIndex,
   });
+  recordPhase?.("sameDirectoryIndex", Date.now() - phaseStartedAt);
 
   const now = new Date().toISOString();
   const edgesToInsert: ladybugDb.EdgeRow[] = [];
   let createdEdges = 0;
+  phaseStartedAt = Date.now();
+  const callsByCallerNodeId = groupCallsByCallerSymbol(
+    calls,
+    filteredSymbolDetails,
+  );
+  recordPhase?.("groupCalls", Date.now() - phaseStartedAt);
 
+  phaseStartedAt = Date.now();
   for (const detail of filteredSymbolDetails) {
-    for (const call of calls) {
-      const callerNodeId =
-        call.callerNodeId ??
-        findEnclosingSymbolByRange(call.range, filteredSymbolDetails);
-      if (callerNodeId !== detail.extractedSymbol.nodeId) {
-        continue;
-      }
-
+    for (const call of
+      callsByCallerNodeId.get(detail.extractedSymbol.nodeId) ?? []) {
       const resolved = resolveCPass2CallTarget({
         call,
         nodeIdToSymbolId,
@@ -869,7 +1047,7 @@ async function resolveCCallEdgesPass2(params: {
         createdCallEdges.add(edgeKey);
         createdEdges++;
       } else if (resolved.targetName) {
-        const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
+        const unresolvedTargetId = unresolvedCallSymbolId(resolved.targetName);
         const edgeKey = `${detail.symbolId}->${unresolvedTargetId}`;
         if (createdCallEdges.has(edgeKey)) {
           continue;
@@ -886,18 +1064,24 @@ async function resolveCCallEdgesPass2(params: {
           resolutionPhase: "pass2",
           provenance: `unresolved-c-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
           createdAt: now,
+          targetMeta: unresolvedCallDependencyTarget(resolved.targetName),
         });
         createdCallEdges.add(edgeKey);
         createdEdges++;
       }
     }
   }
+  recordPhase?.("resolveCalls", Date.now() - phaseStartedAt);
 
+  phaseStartedAt = Date.now();
   if (submitEdgeWrite) {
-    await submitEdgeWrite({
+    const submitted = submitEdgeWrite({
       symbolIdsToRefresh,
       edges: edgesToInsert,
     });
+    if (submitted) {
+      await submitted;
+    }
   } else {
     await withWriteConn(async (wConn) => {
       if (mode !== "full" && symbolIdsToRefresh.length > 0) {
@@ -910,6 +1094,7 @@ async function resolveCCallEdgesPass2(params: {
       await ladybugDb.insertEdges(wConn, edgesToInsert);
     });
   }
+  recordPhase?.("writeSubmit", Date.now() - phaseStartedAt);
 
   return createdEdges;
 }
@@ -946,6 +1131,10 @@ export class CPass2Resolver implements Pass2Resolver {
         mode: context.mode,
         submitEdgeWrite: context.submitEdgeWrite,
         importCache: context.importCache,
+        recordPhase: context.recordPhase,
+        recordMetric: context.recordMetric,
+        recordFilePhase: context.recordFilePhase,
+        pass1Extractions: context.pass1Extractions,
       });
       return { edgesCreated };
     } catch (error) {

@@ -4,6 +4,7 @@ export interface ResolveImportCandidatePathsParams {
   importerRelPath: string;
   specifier: string;
   extensions: string[];
+  knownRepoPaths?: { has(relPath: string): boolean };
 }
 
 export interface ImportResolutionAdapter {

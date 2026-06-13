@@ -147,9 +147,40 @@ const FOUR_GB = 4 * ONE_GB;
 // auto-ingest runs immediately after index refresh on ≤16GB systems).
 const DEFAULT_BUFFER_MANAGER_RATIO = 0.25;
 const DEFAULT_CHECKPOINT_THRESHOLD_BYTES = 128 * 1024 * 1024;
+const MIN_CHECKPOINT_THRESHOLD_BYTES = 16 * 1024 * 1024;
+const MAX_CHECKPOINT_THRESHOLD_BYTES = 8 * ONE_GB;
+const CHECKPOINT_THRESHOLD_ENV = "SDL_MCP_LADYBUG_CHECKPOINT_THRESHOLD_BYTES";
 
 export interface LadybugDbInitOptions {
   bufferPoolBytes?: number | null;
+  checkpointThresholdBytes?: number | null;
+}
+
+/** @internal exported for focused config/env tests. */
+export function resolveLadybugCheckpointThresholdBytes(
+  env: NodeJS.ProcessEnv = process.env,
+  explicitValue?: number | null,
+): number {
+  const candidate =
+    explicitValue ?? Number.parseInt((env[CHECKPOINT_THRESHOLD_ENV] ?? "").trim(), 10);
+  if (!Number.isFinite(candidate)) {
+    return DEFAULT_CHECKPOINT_THRESHOLD_BYTES;
+  }
+
+  if (
+    candidate < MIN_CHECKPOINT_THRESHOLD_BYTES ||
+    candidate > MAX_CHECKPOINT_THRESHOLD_BYTES
+  ) {
+    logger.warn("Ignoring LadybugDB checkpoint threshold outside safe bounds", {
+      env: CHECKPOINT_THRESHOLD_ENV,
+      value: candidate,
+      minBytes: MIN_CHECKPOINT_THRESHOLD_BYTES,
+      maxBytes: MAX_CHECKPOINT_THRESHOLD_BYTES,
+    });
+    return DEFAULT_CHECKPOINT_THRESHOLD_BYTES;
+  }
+
+  return Math.trunc(candidate);
 }
 
 function formatReindexGuidanceError(dbPath: string, msg: string): string {
@@ -438,6 +469,10 @@ export async function getLadybugDb(
         undefined,
         options?.bufferPoolBytes ?? undefined,
       );
+      const checkpointThresholdBytes = resolveLadybugCheckpointThresholdBytes(
+        process.env,
+        options?.checkpointThresholdBytes,
+      );
       dbInstance = new modules.Database(
         normalizedPath,
         bufferManagerSize,
@@ -445,13 +480,13 @@ export async function getLadybugDb(
         false,
         0,
         true,
-        DEFAULT_CHECKPOINT_THRESHOLD_BYTES,
+        checkpointThresholdBytes,
       );
       currentDbPath = normalizedPath;
       logger.info("LadybugDB database opened", {
         path: normalizedPath,
         bufferManagerSizeBytes: bufferManagerSize,
-        checkpointThresholdBytes: DEFAULT_CHECKPOINT_THRESHOLD_BYTES,
+        checkpointThresholdBytes,
       });
       return dbInstance;
     } catch (err) {
@@ -617,14 +652,19 @@ async function checkpointWal(
   conn: LadybugConnection,
   phase: string,
 ): Promise<boolean> {
+  const startedAt = Date.now();
   try {
     await execDdl(conn, "CHECKPOINT");
-    logger.debug(`LadybugDB CHECKPOINT completed`, { phase });
+    logger.info(`LadybugDB CHECKPOINT completed`, {
+      phase,
+      durationMs: Date.now() - startedAt,
+    });
     return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn(`LadybugDB CHECKPOINT failed (best-effort)`, {
       phase,
+      durationMs: Date.now() - startedAt,
       reason: msg,
     });
     return false;

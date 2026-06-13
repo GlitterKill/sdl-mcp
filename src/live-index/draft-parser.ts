@@ -6,7 +6,11 @@ import type {
 } from "../db/ladybug-queries.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
-import type { SymbolPlaceholderMeta } from "../db/symbol-placeholders.js";
+import {
+  type SymbolPlaceholderMeta,
+  unresolvedCallDependencyTarget,
+  unresolvedCallSymbolId,
+} from "../db/symbol-placeholders.js";
 import { getAdapterForExtension } from "../indexer/adapter/registry.js";
 import { logger } from "../util/logger.js";
 import {
@@ -363,10 +367,13 @@ export async function parseDraftFile(
             createdAt: timestamp,
           });
         } else if (resolved.targetName && !isBuiltinCall(resolved.targetName)) {
+          const unresolvedTargetId = unresolvedCallSymbolId(
+            resolved.targetName,
+          );
           edges.push({
             repoId: input.repoId,
             fromSymbolId: detail.symbolId,
-            toSymbolId: `unresolved:call:${resolved.targetName}`,
+            toSymbolId: unresolvedTargetId,
             edgeType: "call",
             weight: 0.5,
             confidence: resolved.confidence,
@@ -375,6 +382,7 @@ export async function parseDraftFile(
             resolutionPhase: "pass1",
             provenance: `unresolved-call:${call.calleeIdentifier}`,
             createdAt: timestamp,
+            targetMeta: unresolvedCallDependencyTarget(resolved.targetName),
           });
         }
       }

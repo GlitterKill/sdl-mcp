@@ -277,6 +277,208 @@ describe("LadybugDB Metrics Queries", () => {
       assert.strictEqual(result.canonicalTestJson, '{"key": "value"}');
     });
 
+    it("copies missing incremental metrics rows and updates existing rows", async () => {
+      await queries.upsertMetrics(
+        conn as unknown as import("kuzu").Connection,
+        {
+          symbolId: "metric-mixed-existing",
+          fanIn: 1,
+          fanOut: 1,
+          churn30d: 1,
+          testRefsJson: "[]",
+          canonicalTestJson: null,
+          pageRank: 0,
+          kCore: 0,
+          updatedAt: "2024-01-01T00:00:00Z",
+        },
+      );
+
+      const phases: string[] = [];
+      await queries.upsertMetricsBatch(
+        conn as unknown as import("kuzu").Connection,
+        [
+          {
+            symbolId: "metric-mixed-existing",
+            fanIn: 10,
+            fanOut: 20,
+            churn30d: 30,
+            testRefsJson: "[\"updated\"]",
+            canonicalTestJson: null,
+            pageRank: 0.25,
+            kCore: 2,
+            updatedAt: "2024-01-02T00:00:00Z",
+          },
+          {
+            symbolId: "metric-mixed-new-a",
+            fanIn: 2,
+            fanOut: 3,
+            churn30d: 4,
+            testRefsJson: "[]",
+            canonicalTestJson: "{\"file\":\"a.test.ts\"}",
+            pageRank: 0,
+            kCore: 0,
+            updatedAt: "2024-01-02T00:00:00Z",
+          },
+          {
+            symbolId: "metric-mixed-new-b",
+            fanIn: 5,
+            fanOut: 6,
+            churn30d: 7,
+            testRefsJson: "[]",
+            canonicalTestJson: null,
+            pageRank: 0,
+            kCore: 0,
+            updatedAt: "2024-01-02T00:00:00Z",
+          },
+        ],
+        {
+          copyMissingThresholdRows: 2,
+          measurePhase: async (phaseName, fn) => {
+            phases.push(phaseName);
+            return await fn();
+          },
+        },
+      );
+
+      assert.deepEqual(phases, [
+        "prepareRows",
+        "probeExisting",
+        "copyMissing.csvMaterialize",
+        "copyMissing.copyFrom",
+        "mergeExisting",
+      ]);
+      const existing = await queries.getMetrics(
+        conn as unknown as import("kuzu").Connection,
+        "metric-mixed-existing",
+      );
+      const copied = await queries.getMetrics(
+        conn as unknown as import("kuzu").Connection,
+        "metric-mixed-new-a",
+      );
+      assert.equal(existing?.fanIn, 10);
+      assert.equal(existing?.testRefsJson, "[\"updated\"]");
+      assert.equal(existing?.pageRank, 0.25);
+      assert.equal(copied?.fanOut, 3);
+      assert.equal(copied?.canonicalTestJson, "{\"file\":\"a.test.ts\"}");
+    });
+
+    it("updates centrality on existing metrics rows without touching other fields", async () => {
+      await queries.upsertMetrics(
+        conn as unknown as import("kuzu").Connection,
+        {
+          symbolId: "centrality-existing",
+          fanIn: 7,
+          fanOut: 8,
+          churn30d: 9,
+          testRefsJson: "[\"kept\"]",
+          canonicalTestJson: "{\"path\":\"kept.test.ts\"}",
+          pageRank: 0.1,
+          kCore: 1,
+          updatedAt: "2024-01-01T00:00:00Z",
+        },
+      );
+
+      const phases: string[] = [];
+      const stats = { chunks: 0, existingRows: 0, missingRows: 0 };
+      await queries.upsertCentralityBatch(
+        conn as unknown as import("kuzu").Connection,
+        [
+          {
+            symbolId: "centrality-existing",
+            pageRank: 0.75,
+            kCore: 4,
+            updatedAt: "2024-01-02T00:00:00Z",
+          },
+          {
+            symbolId: "centrality-missing",
+            pageRank: 0.25,
+            kCore: 2,
+            updatedAt: "2024-01-02T00:00:00Z",
+          },
+        ],
+        {
+          stats,
+          measurePhase: async (phaseName, fn) => {
+            phases.push(phaseName);
+            return await fn();
+          },
+        },
+      );
+
+      assert.deepEqual(phases, [
+        "prepareRows",
+        "probeExisting",
+        "updateExisting",
+        "mergeMissing",
+      ]);
+      assert.deepEqual(stats, {
+        chunks: 1,
+        existingRows: 1,
+        missingRows: 1,
+      });
+      const existing = await queries.getMetrics(
+        conn as unknown as import("kuzu").Connection,
+        "centrality-existing",
+      );
+      const missing = await queries.getMetrics(
+        conn as unknown as import("kuzu").Connection,
+        "centrality-missing",
+      );
+      assert.equal(existing?.fanIn, 7);
+      assert.equal(existing?.testRefsJson, "[\"kept\"]");
+      assert.equal(existing?.canonicalTestJson, "{\"path\":\"kept.test.ts\"}");
+      assert.equal(existing?.pageRank, 0.75);
+      assert.equal(existing?.kCore, 4);
+      assert.equal(missing?.pageRank, 0.25);
+      assert.equal(missing?.kCore, 2);
+    });
+
+    it("can update centrality without probing when metrics rows are known to exist", async () => {
+      await queries.upsertMetrics(
+        conn as unknown as import("kuzu").Connection,
+        {
+          symbolId: "centrality-fast-existing",
+          fanIn: 1,
+          fanOut: 2,
+          churn30d: 3,
+          testRefsJson: "[]",
+          canonicalTestJson: null,
+          pageRank: 0,
+          kCore: 0,
+          updatedAt: "2024-01-01T00:00:00Z",
+        },
+      );
+
+      const phases: string[] = [];
+      await queries.upsertCentralityBatch(
+        conn as unknown as import("kuzu").Connection,
+        [
+          {
+            symbolId: "centrality-fast-existing",
+            pageRank: 0.9,
+            kCore: 5,
+            updatedAt: "2024-01-02T00:00:00Z",
+          },
+        ],
+        {
+          assumeRowsExist: true,
+          measurePhase: async (phaseName, fn) => {
+            phases.push(phaseName);
+            return await fn();
+          },
+        },
+      );
+
+      assert.deepEqual(phases, ["prepareRows", "updateExisting"]);
+      const existing = await queries.getMetrics(
+        conn as unknown as import("kuzu").Connection,
+        "centrality-fast-existing",
+      );
+      assert.equal(existing?.fanIn, 1);
+      assert.equal(existing?.pageRank, 0.9);
+      assert.equal(existing?.kCore, 5);
+    });
+
     it("should replace a full repo metrics set with COPY", async () => {
       await exec(
         conn,

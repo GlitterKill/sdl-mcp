@@ -2,14 +2,28 @@
  * ladybug-clusters.ts - Cluster Operations
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
+import { createWriteStream } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { finished } from "node:stream/promises";
 import type { Connection } from "kuzu";
 import {
   exec,
+  execDdl,
   queryAll,
   querySingle,
   toNumber,
   withTransaction,
 } from "./ladybug-core.js";
+import { normalizePath } from "../util/paths.js";
+
+const CSV_NULL_SENTINEL = "__sdl_ladybug_csv_null__";
+const CLUSTER_MEMBER_REL_COPY_COLUMNS = [
+  "from",
+  "to",
+  "membershipScore",
+] as const;
 
 export interface ClusterRow {
   clusterId: string;
@@ -230,6 +244,178 @@ export async function upsertClusterMembersBatch(
       );
     }
   });
+}
+
+export async function insertClusterMembersAfterDeleteBatch(
+  conn: Connection,
+  members: Array<{
+    symbolId: string;
+    clusterId: string;
+    membershipScore: number;
+  }>,
+): Promise<void> {
+  if (members.length === 0) return;
+  // Replacement callers delete old memberships first, so relationship probes
+  // and update passes are wasted. Keep JS-side dedupe to avoid duplicate
+  // CREATE rows inside one UNWIND batch on LadybugDB 0.16.
+  const seen = new Set<string>();
+  members = members.filter((m) => {
+    const key = `${m.symbolId}\0${m.clusterId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const CHUNK = 256;
+  await withTransaction(conn, async (txConn) => {
+    for (let i = 0; i < members.length; i += CHUNK) {
+      const rows = members.slice(i, i + CHUNK);
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (s:Symbol {symbolId: row.symbolId})
+         MATCH (c:Cluster {clusterId: row.clusterId})
+         CREATE (s)-[:BELONGS_TO_CLUSTER {membershipScore: row.membershipScore}]->(c)`,
+        { rows },
+      );
+    }
+  });
+}
+
+export async function copyClusterMembersAfterDeleteBatch(
+  conn: Connection,
+  members: Array<{
+    symbolId: string;
+    clusterId: string;
+    membershipScore: number;
+  }>,
+): Promise<void> {
+  if (members.length === 0) return;
+  const seen = new Set<string>();
+  members = members.filter((m) => {
+    const key = `${m.symbolId}\0${m.clusterId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const copyRows: typeof members = [];
+  const fallbackRows: typeof members = [];
+  for (const member of members) {
+    if (
+      isSafeRelationshipCopyEndpointId(member.symbolId) &&
+      isSafeRelationshipCopyEndpointId(member.clusterId)
+    ) {
+      copyRows.push(member);
+    } else {
+      fallbackRows.push(member);
+    }
+  }
+
+  if (copyRows.length > 0) {
+    const tempDir = await mkdtemp(join(tmpdir(), "sdl-cluster-members-"));
+    const copyPath = join(tempDir, "belongs-to-cluster.csv");
+    try {
+      await writeClusterMemberRelCsv(copyPath, copyRows);
+      await withTransaction(conn, async (txConn) => {
+        await execDdl(
+          txConn,
+          `COPY BELONGS_TO_CLUSTER FROM '${escapeCopyPath(copyPath)}' ` +
+            `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
+        );
+        if (fallbackRows.length > 0) {
+          await insertClusterMembersAfterDeleteBatch(txConn, fallbackRows);
+        }
+      });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
+    return;
+  }
+
+  if (fallbackRows.length > 0) {
+    await insertClusterMembersAfterDeleteBatch(conn, fallbackRows);
+  }
+}
+
+function isSafeRelationshipCopyEndpointId(value: string): boolean {
+  return (
+    value.length > 0 &&
+    !value.includes('"') &&
+    !value.includes(",") &&
+    !value.includes("\r") &&
+    !value.includes("\n")
+  );
+}
+
+async function writeClusterMemberRelCsv(
+  filePath: string,
+  rows: readonly {
+    symbolId: string;
+    clusterId: string;
+    membershipScore: number;
+  }[],
+): Promise<void> {
+  const stream = createWriteStream(filePath, { encoding: "utf8" });
+  try {
+    await writeCsvLine(stream, CLUSTER_MEMBER_REL_COPY_COLUMNS);
+    for (const row of rows) {
+      await writeCsvLine(stream, [
+        row.symbolId,
+        row.clusterId,
+        row.membershipScore,
+      ]);
+    }
+    stream.end();
+    await finished(stream);
+  } catch (err) {
+    stream.destroy();
+    throw err;
+  }
+}
+
+async function writeCsvLine(
+  stream: NodeJS.WritableStream,
+  cells: readonly unknown[],
+): Promise<void> {
+  const line = `${cells.map(csvCell).join(",")}\n`;
+  if (!stream.write(line)) {
+    await waitForDrain(stream);
+  }
+}
+
+function waitForDrain(stream: NodeJS.WritableStream): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      stream.removeListener("drain", onDrain);
+      stream.removeListener("error", onError);
+    };
+    const onDrain = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (err: Error): void => {
+      cleanup();
+      reject(err);
+    };
+    stream.once("drain", onDrain);
+    stream.once("error", onError);
+  });
+}
+
+function csvCell(value: unknown): string {
+  if (value === null || value === undefined) return CSV_NULL_SENTINEL;
+  const text = String(value);
+  if (text === "") return '""';
+  const escaped = text.replaceAll('"', '""');
+  return /[",\r\n]/.test(escaped) ? `"${escaped}"` : escaped;
+}
+
+function escapeCopyPath(path: string): string {
+  return normalizePath(path).replace(/'/g, "''");
+}
+
+function escapeCopyOptionString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "''");
 }
 
 export async function getClusterForSymbol(

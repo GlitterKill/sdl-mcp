@@ -12,6 +12,7 @@ import {
   prepareSymbolEmbeddingInputs,
 } from "../../dist/indexer/symbol-embedding-context.js";
 import type { GraphLabel } from "../../dist/indexer/symbol-embedding-context.js";
+import { unresolvedCallSymbolId } from "../../dist/db/symbol-placeholders.js";
 import { hashContent } from "../../dist/util/hashing.js";
 
 describe("parseUnresolvedTarget", () => {
@@ -19,6 +20,17 @@ describe("parseUnresolvedTarget", () => {
     assert.deepEqual(parseUnresolvedTarget("unresolved:call:doThing"), {
       kind: "call",
       label: "doThing",
+    });
+  });
+
+  it("parses COPY-safe unresolved call targets", () => {
+    const targetId = unresolvedCallSymbolId(
+      'getMemoryEffects(Call,AAQIP).getModRef\r\n.unwrap("x")',
+    );
+
+    assert.deepEqual(parseUnresolvedTarget(targetId), {
+      kind: "call",
+      label: 'getMemoryEffects(Call,AAQIP).getModRef\r\n.unwrap("x")',
     });
   });
 

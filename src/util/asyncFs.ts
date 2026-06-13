@@ -28,6 +28,13 @@ export interface AsyncFsConfig {
   limiter?: ConcurrencyLimiter;
 }
 
+export interface TimedReadFileResult {
+  content: string;
+  elapsedMs: number;
+  queuedMs: number;
+  activeMs: number;
+}
+
 class AsyncFsOperations {
   private readLimiter: ConcurrencyLimiter;
   private statLimiter: ConcurrencyLimiter;
@@ -64,6 +71,36 @@ class AsyncFsOperations {
     encoding: BufferEncoding = "utf-8",
   ): Promise<string> {
     return this.readLimiter.run(() => readFile(filePath, encoding));
+  }
+
+  /**
+   * Reads a file and returns limiter timing attribution for diagnostics.
+   *
+   * `elapsedMs` is the full caller-observed await time, `queuedMs` is time
+   * spent waiting for the shared read limiter, and `activeMs` is the time
+   * spent inside the underlying `fs.promises.readFile` call.
+   */
+  async readFileWithTiming(
+    filePath: string,
+    encoding: BufferEncoding = "utf-8",
+  ): Promise<TimedReadFileResult> {
+    const startedAt = Date.now();
+    let activeMs = 0;
+    const content = await this.readLimiter.run(async () => {
+      const activeStartedAt = Date.now();
+      try {
+        return await readFile(filePath, encoding);
+      } finally {
+        activeMs = Date.now() - activeStartedAt;
+      }
+    });
+    const elapsedMs = Date.now() - startedAt;
+    return {
+      content,
+      elapsedMs,
+      queuedMs: Math.max(0, elapsedMs - activeMs),
+      activeMs,
+    };
   }
 
   /**
@@ -155,6 +192,13 @@ export async function readFileAsync(
   encoding?: BufferEncoding,
 ): Promise<string> {
   return defaultInstance.readFile(filePath, encoding);
+}
+
+export async function readFileAsyncWithTiming(
+  filePath: string,
+  encoding?: BufferEncoding,
+): Promise<TimedReadFileResult> {
+  return defaultInstance.readFileWithTiming(filePath, encoding);
 }
 
 /**

@@ -14,12 +14,14 @@ import {
   queryAll,
   querySingle,
   toNumber,
+  type TransactionPhaseName,
   withTransaction,
 } from "./ladybug-core.js";
 import { logger } from "../util/logger.js";
 import { normalizePath } from "../util/paths.js";
 import {
   classifyDependencyTarget,
+  isSafeUnresolvedCallSymbolId,
   type SymbolPlaceholderMeta,
 } from "./symbol-placeholders.js";
 import {
@@ -39,7 +41,98 @@ const EDGE_COPY_COLUMNS = [
   "provenance",
   "createdAt",
 ] as const;
+// Keep this aligned with ladybug-symbols.ts SYMBOL_COPY_COLUMNS. The
+// placeholder target path cannot import that private helper without coupling
+// edge writes to file-backed symbol materialization.
+const PLACEHOLDER_SYMBOL_COPY_COLUMNS = [
+  "symbolId",
+  "repoId",
+  "kind",
+  "name",
+  "exported",
+  "visibility",
+  "language",
+  "rangeStartLine",
+  "rangeStartCol",
+  "rangeEndLine",
+  "rangeEndCol",
+  "astFingerprint",
+  "signatureJson",
+  "summary",
+  "summaryQuality",
+  "summarySource",
+  "invariantsJson",
+  "sideEffectsJson",
+  "roleTagsJson",
+  "searchText",
+  "updatedAt",
+  "embeddingMiniLM",
+  "embeddingMiniLMCardHash",
+  "embeddingMiniLMUpdatedAt",
+  "embeddingMiniLMVec",
+  "embeddingNomic",
+  "embeddingNomicCardHash",
+  "embeddingNomicUpdatedAt",
+  "embeddingJinaCode",
+  "embeddingJinaCodeCardHash",
+  "embeddingJinaCodeUpdatedAt",
+  "embeddingNomicVec",
+  "embeddingJinaCodeVec",
+  "external",
+  "scipSymbol",
+  "source",
+  "packageName",
+  "packageVersion",
+  "symbolStatus",
+  "placeholderKind",
+  "placeholderTarget",
+] as const;
+const SIMPLE_REL_COPY_COLUMNS = ["from", "to"] as const;
 const CSV_NULL_SENTINEL = "__sdl_ladybug_csv_null__";
+const SYMBOL_CSV_NULL_SENTINEL = "\\N";
+const CSV_ARRAY_NULL = Symbol("edgeCsvArrayNull");
+
+export type DependencyTargetEnsurePhaseName =
+  | "symbolMetadata"
+  | "symbolMetadata.probeExisting"
+  | "symbolMetadata.copyMissing.csvMaterialize"
+  | "symbolMetadata.copyMissing.copyFrom"
+  | "symbolMetadata.matchExisting"
+  | "symbolMetadata.mergeFallback"
+  | "repoLink";
+export type InsertEdgesPhaseName =
+  | "dedupe"
+  | "groupByRepo"
+  | "prepareRows"
+  | "sourceRepoLink.symbolMetadata"
+  | "sourceRepoLink.repoLink"
+  | "endpointMetadata"
+  | "targetMetadata"
+  | "targetRepoLink"
+  | "relationshipCreate"
+  | "relationshipUpdate";
+
+export interface EnsureDependencyTargetsOptions
+  extends LadybugWriteChunkOptions {
+  measurePhase?: <T>(
+    phaseName: DependencyTargetEnsurePhaseName,
+    fn: () => Promise<T>,
+  ) => Promise<T>;
+}
+
+export type KnownSymbolEdgesCopyPhaseName =
+  | TransactionPhaseName
+  | "csvMaterialize"
+  | "copyFrom"
+  | "tempCleanup";
+
+export interface InsertKnownSymbolEdgesOptions
+  extends LadybugWriteChunkOptions {
+  measurePhase?: <T>(
+    phaseName: KnownSymbolEdgesCopyPhaseName,
+    fn: () => Promise<T>,
+  ) => Promise<T>;
+}
 
 // Workaround for LadybugDB 0.16.0 binder bug: when an UNWIND struct mixes
 // integer and fractional Number values for the same field, the binder
@@ -245,6 +338,15 @@ export interface InsertEdgesOptions extends LadybugWriteChunkOptions {
    * writes can refresh pre-existing relationships.
    */
   skipExistingRelationshipUpdate?: boolean;
+  /**
+   * Source symbols were just materialized by the caller, so outgoing
+   * relationships for the inserted edge type are known to be absent.
+   */
+  skipExistingRelationshipProbe?: boolean;
+  measurePhase?: <T>(
+    phaseName: InsertEdgesPhaseName,
+    fn: () => Promise<T> | T,
+  ) => Promise<T>;
 }
 
 export async function insertEdges(
@@ -254,26 +356,39 @@ export async function insertEdges(
 ): Promise<void> {
   if (edges.length === 0) return;
 
-  // Dedup by (repoId, fromSymbolId, toSymbolId, edgeType) — W4 has no
-  // within-batch idempotency, so duplicate triples would CREATE twice.
-  const seenEdges = new Set<string>();
-  edges = edges.filter((e) => {
-    const key = `${e.repoId}\0${e.fromSymbolId}\0${e.toSymbolId}\0${e.edgeType}`;
-    if (seenEdges.has(key)) return false;
-    seenEdges.add(key);
-    return true;
+  const measurePhase =
+    options?.measurePhase ??
+    (async <T>(
+      _phaseName: InsertEdgesPhaseName,
+      fn: () => Promise<T> | T,
+    ): Promise<T> => await fn());
+
+  edges = await measurePhase("dedupe", () => {
+    // Dedup by (repoId, fromSymbolId, toSymbolId, edgeType) — W4 has no
+    // within-batch idempotency, so duplicate triples would CREATE twice.
+    const seenEdges = new Set<string>();
+    return edges.filter((e) => {
+      const key =
+        `${e.repoId}\0${e.fromSymbolId}\0${e.toSymbolId}\0${e.edgeType}`;
+      if (seenEdges.has(key)) return false;
+      seenEdges.add(key);
+      return true;
+    });
   });
 
   // UNWIND-batched MERGE: chunked to keep param payload bounded. Side-effect
   // mode only (no RETURN) to avoid LadybugDB issue #285.
   const chunkSize = resolveLadybugWriteChunkSize("edges", options?.chunkSize);
   await withTransaction(conn, async (txConn) => {
-    const edgesByRepo = new Map<string, EdgeRow[]>();
-    for (const edge of edges) {
-      const bucket = edgesByRepo.get(edge.repoId);
-      if (bucket) bucket.push(edge);
-      else edgesByRepo.set(edge.repoId, [edge]);
-    }
+    const edgesByRepo = await measurePhase("groupByRepo", () => {
+      const grouped = new Map<string, EdgeRow[]>();
+      for (const edge of edges) {
+        const bucket = grouped.get(edge.repoId);
+        if (bucket) bucket.push(edge);
+        else grouped.set(edge.repoId, [edge]);
+      }
+      return grouped;
+    });
 
     for (const [repoId, repoEdges] of edgesByRepo) {
       // W3/W4 workaround for LadybugDB UNWIND+MERGE-rel runtime bug:
@@ -285,154 +400,204 @@ export async function insertEdges(
         for (let i = 0; i < fromSymbolIds.length; i += chunkSize) {
           const idChunk = fromSymbolIds.slice(i, i + chunkSize);
           const rows = idChunk.map((symbolId) => ({ symbolId }));
-          await exec(
-            txConn,
-            `UNWIND $rows AS row
-             MERGE (s:Symbol {symbolId: row.symbolId})
-             SET s.repoId = $repoId`,
-            { repoId, rows },
+          await measurePhase("sourceRepoLink.symbolMetadata", async () =>
+            exec(
+              txConn,
+              `UNWIND $rows AS row
+               MERGE (s:Symbol {symbolId: row.symbolId})
+               SET s.repoId = $repoId`,
+              { repoId, rows },
+            ),
           );
-          await exec(
-            txConn,
-            `UNWIND $rows AS row
-             MATCH (r:Repo {repoId: $repoId})
-             MATCH (s:Symbol {symbolId: row.symbolId})
-             OPTIONAL MATCH (s)-[existing:SYMBOL_IN_REPO]->(r)
-             WITH s, r, existing
-             WHERE existing IS NULL
-             CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
-            { repoId, rows },
+          await measurePhase("sourceRepoLink.repoLink", async () =>
+            exec(
+              txConn,
+              `UNWIND $rows AS row
+               MATCH (r:Repo {repoId: $repoId})
+               MATCH (s:Symbol {symbolId: row.symbolId})
+               OPTIONAL MATCH (s)-[existing:SYMBOL_IN_REPO]->(r)
+               WITH s, r, existing
+               WHERE existing IS NULL
+               CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
+              { repoId, rows },
+            ),
           );
         }
       }
 
       for (let i = 0; i < repoEdges.length; i += chunkSize) {
         const edgeChunk = repoEdges.slice(i, i + chunkSize);
-        const rows = edgeChunk.map((edge) => {
-          return {
-            repoId,
-            fromSymbolId: edge.fromSymbolId,
-            toSymbolId: edge.toSymbolId,
-            edgeType: edge.edgeType,
-            weight: forceDoubleEncoding(edge.weight),
-            confidence: forceDoubleEncoding(edge.confidence),
-            resolution: edge.resolution,
-            resolverId: edge.resolverId ?? "pass1-generic",
-            resolutionPhase: edge.resolutionPhase ?? "pass1",
-            // Coerce nullable STRING to '' — kuzu binder picks ANY type when
-            // a struct field is uniformly null AND a sibling Number field
-            // mixes integral (1.0 weight) with fractional (0.6/0.8 weight)
-            // values. Upstream kuzudb/kuzu#5685, fixed in PR #5705 but not
-            // backported to LadybugDB 0.16.0. Empty string is the workaround.
-            provenance: edge.provenance ?? "",
-            createdAt: edge.createdAt,
-          };
+        const { rows, targetRows } = await measurePhase("prepareRows", () => {
+          const rows = edgeChunk.map((edge) => {
+            return {
+              repoId,
+              fromSymbolId: edge.fromSymbolId,
+              toSymbolId: edge.toSymbolId,
+              edgeType: edge.edgeType,
+              weight: forceDoubleEncoding(edge.weight),
+              confidence: forceDoubleEncoding(edge.confidence),
+              resolution: edge.resolution,
+              resolverId: edge.resolverId ?? "pass1-generic",
+              resolutionPhase: edge.resolutionPhase ?? "pass1",
+              // Coerce nullable STRING to '' — kuzu binder picks ANY type when
+              // a struct field is uniformly null AND a sibling Number field
+              // mixes integral (1.0 weight) with fractional (0.6/0.8 weight)
+              // values. Upstream kuzudb/kuzu#5685, fixed in PR #5705 but not
+              // backported to LadybugDB 0.16.0. Empty string is the workaround.
+              provenance: edge.provenance ?? "",
+              createdAt: edge.createdAt,
+            };
+          });
+          // Keep placeholder metadata in a unique node-update batch. Updating it
+          // from every edge row has previously allowed unrelated UNWIND rows to
+          // smear placeholderTarget text across target nodes in LadybugDB.
+          const targetRows = buildTargetMetadataRows(edgeChunk);
+          return { rows, targetRows };
         });
-        // Keep placeholder metadata in a unique node-update batch. Updating it
-        // from every edge row has previously allowed unrelated UNWIND rows to
-        // smear placeholderTarget text across target nodes in LadybugDB.
-        const targetRows = buildTargetMetadataRows(edgeChunk);
         // 1: ensure both Symbol nodes exist. Real edge endpoints must repair
         // stale placeholder metadata; otherwise a previously unresolved stub
         // can stay excluded after the real file-backed symbol is indexed.
-        await exec(
-          txConn,
-          `UNWIND $rows AS row
-           MERGE (a:Symbol {symbolId: row.fromSymbolId})
-           MERGE (b:Symbol {symbolId: row.toSymbolId})
-           SET a.repoId = row.repoId,
-               a.external = CASE
-                 WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.external, false)
-                 ELSE false
-               END,
-               a.symbolStatus = CASE
-                 WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.symbolStatus, 'unresolved')
-                 ELSE 'real'
-               END,
-               a.placeholderKind = CASE
-                 WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.placeholderKind, '')
-                 ELSE ''
-               END,
-               a.placeholderTarget = CASE
-                 WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.placeholderTarget, '')
-                 ELSE ''
-               END,
-               b.repoId = row.repoId`,
-          { rows },
+        await measurePhase("endpointMetadata", async () =>
+          exec(
+            txConn,
+            `UNWIND $rows AS row
+             MERGE (a:Symbol {symbolId: row.fromSymbolId})
+             MERGE (b:Symbol {symbolId: row.toSymbolId})
+             SET a.repoId = row.repoId,
+                 a.external = CASE
+                   WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.external, false)
+                   ELSE false
+                 END,
+                 a.symbolStatus = CASE
+                   WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.symbolStatus, 'unresolved')
+                   ELSE 'real'
+                 END,
+                 a.placeholderKind = CASE
+                   WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.placeholderKind, '')
+                   ELSE ''
+                 END,
+                 a.placeholderTarget = CASE
+                   WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.placeholderTarget, '')
+                   ELSE ''
+                 END,
+                 b.repoId = row.repoId`,
+            { rows },
+          ),
         );
-        // Target metadata is node-only and one row per target. That avoids
-        // carrying placeholderTarget on every edge row in the relationship
-        // writes below, which is fragile when a target appears multiple times.
-        await exec(
-          txConn,
-          `UNWIND $rows AS row
-           MATCH (b:Symbol {symbolId: row.toSymbolId})
-           OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]->(bf:File)
-           WITH row, b, count(bf) AS targetFileCount
-           SET b.repoId = row.repoId,
-               b.external = CASE
-                 WHEN row.targetStatus = 'external' THEN true
-                 WHEN row.targetStatus <> 'real' THEN false
-                 WHEN targetFileCount > 0 THEN false
-                 ELSE coalesce(b.external, false)
-               END,
-               b.symbolStatus = CASE
-                 WHEN row.targetStatus <> 'real' THEN row.targetStatus
-                 WHEN targetFileCount > 0 THEN 'real'
-                 WHEN coalesce(b.external, false) = true THEN 'external'
-                 ELSE 'real'
-               END,
-               b.placeholderKind = CASE
-                 WHEN row.targetStatus <> 'real' THEN row.targetPlaceholderKind
-                 WHEN targetFileCount > 0 THEN ''
-                 WHEN coalesce(b.external, false) = true THEN b.placeholderKind
-                 ELSE ''
-               END,
-               b.placeholderTarget = CASE
-                 WHEN row.targetStatus <> 'real' THEN row.targetPlaceholderTarget
-                 WHEN targetFileCount > 0 THEN ''
-                 WHEN coalesce(b.external, false) = true THEN b.placeholderTarget
-                 ELSE ''
-               END`,
-          { rows: targetRows },
-        );
+        // Target metadata is node-only and one row per target. Placeholder
+        // rows never consult file-backed state, so keep them off the slower
+        // OPTIONAL MATCH path used to clean/preserve real target metadata.
         const placeholderRows = targetRows.filter(
           (row) => row.targetStatus !== "real",
         );
+        const realTargetRows = targetRows.filter(
+          (row) => row.targetStatus === "real",
+        );
         if (placeholderRows.length > 0) {
-          await exec(
-            txConn,
-            `UNWIND $rows AS row
-             MATCH (r:Repo {repoId: row.repoId})
-             MATCH (b:Symbol {symbolId: row.toSymbolId})
-             OPTIONAL MATCH (b)-[existing:SYMBOL_IN_REPO]->(r)
-             WITH b, r, existing
-             WHERE existing IS NULL
-             CREATE (b)-[:SYMBOL_IN_REPO]->(r)`,
-            { rows: placeholderRows },
+          await measurePhase("targetMetadata", async () =>
+            exec(
+              txConn,
+              `UNWIND $rows AS row
+               MATCH (b:Symbol {symbolId: row.toSymbolId})
+               SET b.repoId = row.repoId,
+                   b.external = CASE
+                     WHEN row.targetStatus = 'external' THEN true
+                     ELSE false
+                   END,
+                   b.symbolStatus = row.targetStatus,
+                   b.placeholderKind = row.targetPlaceholderKind,
+                   b.placeholderTarget = row.targetPlaceholderTarget`,
+              { rows: placeholderRows },
+            ),
+          );
+        }
+        if (realTargetRows.length > 0) {
+          await measurePhase("targetMetadata", async () =>
+            exec(
+              txConn,
+              `UNWIND $rows AS row
+               MATCH (b:Symbol {symbolId: row.toSymbolId})
+               OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]->(bf:File)
+               WITH row, b, count(bf) AS targetFileCount
+               SET b.repoId = row.repoId,
+                   b.external = CASE
+                     WHEN row.targetStatus = 'external' THEN true
+                     WHEN row.targetStatus <> 'real' THEN false
+                     WHEN targetFileCount > 0 THEN false
+                     ELSE coalesce(b.external, false)
+                   END,
+                   b.symbolStatus = CASE
+                     WHEN row.targetStatus <> 'real' THEN row.targetStatus
+                     WHEN targetFileCount > 0 THEN 'real'
+                     WHEN coalesce(b.external, false) = true THEN 'external'
+                     ELSE 'real'
+                   END,
+                   b.placeholderKind = CASE
+                     WHEN row.targetStatus <> 'real' THEN row.targetPlaceholderKind
+                     WHEN targetFileCount > 0 THEN ''
+                     WHEN coalesce(b.external, false) = true THEN b.placeholderKind
+                     ELSE ''
+                   END,
+                   b.placeholderTarget = CASE
+                     WHEN row.targetStatus <> 'real' THEN row.targetPlaceholderTarget
+                     WHEN targetFileCount > 0 THEN ''
+                     WHEN coalesce(b.external, false) = true THEN b.placeholderTarget
+                     ELSE ''
+                   END`,
+              { rows: realTargetRows },
+            ),
+          );
+        }
+        if (placeholderRows.length > 0) {
+          await measurePhase("targetRepoLink", async () =>
+            ensureDependencyTargetRepoLinks(txConn, placeholderRows),
           );
         }
         // 2: create rel if missing — sets createdAt + all props.
-        await exec(
-          txConn,
-          `UNWIND $rows AS row
-           MATCH (a:Symbol {symbolId: row.fromSymbolId})
-           MATCH (b:Symbol {symbolId: row.toSymbolId})
-           OPTIONAL MATCH (a)-[existing:DEPENDS_ON {edgeType: row.edgeType}]->(b)
-           WITH a, b, row, existing
-           WHERE existing IS NULL
-           CREATE (a)-[:DEPENDS_ON {
-             edgeType: row.edgeType,
-             weight: row.weight,
-             confidence: row.confidence,
-             resolution: row.resolution,
-             resolverId: row.resolverId,
-             resolutionPhase: row.resolutionPhase,
-             provenance: row.provenance,
-             createdAt: row.createdAt
-           }]->(b)`,
-          { rows },
-        );
+        if (options?.skipExistingRelationshipProbe) {
+          await measurePhase("relationshipCreate", async () =>
+            exec(
+              txConn,
+              `UNWIND $rows AS row
+               MATCH (a:Symbol {symbolId: row.fromSymbolId})
+               MATCH (b:Symbol {symbolId: row.toSymbolId})
+               CREATE (a)-[:DEPENDS_ON {
+                 edgeType: row.edgeType,
+                 weight: row.weight,
+                 confidence: row.confidence,
+                 resolution: row.resolution,
+                 resolverId: row.resolverId,
+                 resolutionPhase: row.resolutionPhase,
+                 provenance: row.provenance,
+                 createdAt: row.createdAt
+               }]->(b)`,
+              { rows },
+            ),
+          );
+        } else {
+          await measurePhase("relationshipCreate", async () =>
+            exec(
+              txConn,
+              `UNWIND $rows AS row
+               MATCH (a:Symbol {symbolId: row.fromSymbolId})
+               MATCH (b:Symbol {symbolId: row.toSymbolId})
+               OPTIONAL MATCH (a)-[existing:DEPENDS_ON {edgeType: row.edgeType}]->(b)
+               WITH a, b, row, existing
+               WHERE existing IS NULL
+               CREATE (a)-[:DEPENDS_ON {
+                 edgeType: row.edgeType,
+                 weight: row.weight,
+                 confidence: row.confidence,
+                 resolution: row.resolution,
+                 resolverId: row.resolverId,
+                 resolutionPhase: row.resolutionPhase,
+                 provenance: row.provenance,
+                 createdAt: row.createdAt
+               }]->(b)`,
+              { rows },
+            ),
+          );
+        }
         if (!options?.skipExistingRelationshipUpdate) {
           // 3: refresh mutable props on existing rels (preserves createdAt).
           // The WHERE guard prevents pass-2 (heuristic, confidence ~0.7-0.85)
@@ -442,20 +607,22 @@ export async function insertEdges(
           // shared (from, to, edgeType) triples. The OR clause keeps an
           // upgrade path open if a future row carries higher confidence
           // than the existing exact edge.
-          await exec(
-            txConn,
-            `UNWIND $rows AS row
-             MATCH (a:Symbol {symbolId: row.fromSymbolId})
-             MATCH (b:Symbol {symbolId: row.toSymbolId})
-             MATCH (a)-[d:DEPENDS_ON {edgeType: row.edgeType}]->(b)
-             WHERE d.resolution <> 'exact' OR d.confidence < row.confidence
-             SET d.weight = row.weight,
-                 d.confidence = row.confidence,
-                 d.resolution = row.resolution,
-                 d.resolverId = row.resolverId,
-                 d.resolutionPhase = row.resolutionPhase,
-                 d.provenance = row.provenance`,
-            { rows },
+          await measurePhase("relationshipUpdate", async () =>
+            exec(
+              txConn,
+              `UNWIND $rows AS row
+               MATCH (a:Symbol {symbolId: row.fromSymbolId})
+               MATCH (b:Symbol {symbolId: row.toSymbolId})
+               MATCH (a)-[d:DEPENDS_ON {edgeType: row.edgeType}]->(b)
+               WHERE d.resolution <> 'exact' OR d.confidence < row.confidence
+               SET d.weight = row.weight,
+                   d.confidence = row.confidence,
+                   d.resolution = row.resolution,
+                   d.resolverId = row.resolverId,
+                   d.resolutionPhase = row.resolutionPhase,
+                   d.provenance = row.provenance`,
+              { rows },
+            ),
           );
         }
       }
@@ -472,7 +639,7 @@ export async function insertEdges(
 export async function insertKnownSymbolEdges(
   conn: Connection,
   edges: EdgeRow[],
-  options?: LadybugWriteChunkOptions,
+  options?: InsertKnownSymbolEdgesOptions,
 ): Promise<void> {
   if (edges.length === 0) return;
 
@@ -488,10 +655,13 @@ export async function insertKnownSymbolEdges(
   // The old UNWIND writer needed chunks to bound parameter payloads. COPY
   // streams from a temporary artifact, so a single load is the intended fast
   // path for provider-first full rebuilds.
-  void options;
-  await withTransaction(conn, async (txConn) => {
-    await copyKnownSymbolEdges(txConn, edges);
-  });
+  await withTransaction(
+    conn,
+    async (txConn) => {
+      await copyKnownSymbolEdges(txConn, edges, options);
+    },
+    options?.measurePhase ? { measurePhase: options.measurePhase } : undefined,
+  );
 }
 
 /**
@@ -503,7 +673,7 @@ export async function insertKnownSymbolEdges(
 export async function ensureDependencyTargetsForKnownSourceEdges(
   conn: Connection,
   edges: readonly EdgeRow[],
-  options?: LadybugWriteChunkOptions,
+  options?: EnsureDependencyTargetsOptions,
 ): Promise<void> {
   if (edges.length === 0) return;
 
@@ -513,53 +683,338 @@ export async function ensureDependencyTargetsForKnownSourceEdges(
   if (targetRows.length === 0) return;
 
   const chunkSize = resolveLadybugWriteChunkSize("edges", options?.chunkSize);
+  const measurePhase =
+    options?.measurePhase ??
+    (async <T>(
+      _phaseName: DependencyTargetEnsurePhaseName,
+      fn: () => Promise<T>,
+    ): Promise<T> => await fn());
   await withTransaction(conn, async (txConn) => {
-    for (let i = 0; i < targetRows.length; i += chunkSize) {
-      const rows = targetRows.slice(i, i + chunkSize);
-      await exec(
-        txConn,
-        `UNWIND $rows AS row
-         MERGE (b:Symbol {symbolId: row.toSymbolId})
-         SET b.repoId = row.repoId,
-             b.external = CASE
-               WHEN row.targetStatus = 'external' THEN true
-               ELSE false
-             END,
-             b.symbolStatus = row.targetStatus,
-             b.placeholderKind = row.targetPlaceholderKind,
-             b.placeholderTarget = row.targetPlaceholderTarget`,
-        { rows },
+    const copyMissingRows: DependencyTargetMetadataRow[] = [];
+    const mergeRows: DependencyTargetMetadataRow[] = [];
+    for (const row of targetRows) {
+      if (isCopyMissingPlaceholderTarget(row)) {
+        copyMissingRows.push(row);
+      } else {
+        mergeRows.push(row);
+      }
+    }
+
+    for (let i = 0; i < copyMissingRows.length; i += chunkSize) {
+      const rows = copyMissingRows.slice(i, i + chunkSize);
+      await ensureCopyMissingPlaceholderTargets(txConn, rows, measurePhase);
+    }
+
+    for (let i = 0; i < mergeRows.length; i += chunkSize) {
+      const rows = mergeRows.slice(i, i + chunkSize);
+      await measurePhase("symbolMetadata.mergeFallback", async () =>
+        exec(
+          txConn,
+          `UNWIND $rows AS row
+           MERGE (b:Symbol {symbolId: row.toSymbolId})
+           SET b.repoId = row.repoId,
+               b.external = CASE
+                 WHEN row.targetStatus = 'external' THEN true
+                 ELSE false
+               END,
+               b.symbolStatus = row.targetStatus,
+               b.placeholderKind = row.targetPlaceholderKind,
+               b.placeholderTarget = row.targetPlaceholderTarget`,
+          { rows },
+        ),
       );
-      await exec(
-        txConn,
-        `UNWIND $rows AS row
-         MATCH (r:Repo {repoId: row.repoId})
-         MATCH (b:Symbol {symbolId: row.toSymbolId})
-         OPTIONAL MATCH (b)-[existing:SYMBOL_IN_REPO]->(r)
-         WITH b, r, existing
-         WHERE existing IS NULL
-         CREATE (b)-[:SYMBOL_IN_REPO]->(r)`,
-        { rows },
+      await measurePhase("repoLink", async () =>
+        ensureDependencyTargetRepoLinks(txConn, rows),
       );
     }
   });
 }
 
-async function copyKnownSymbolEdges(
+function isCopyMissingPlaceholderTarget(
+  row: DependencyTargetMetadataRow,
+): boolean {
+  return (
+    row.targetStatus === "unresolved" &&
+    row.targetPlaceholderKind === "call" &&
+    isSafeUnresolvedCallSymbolId(row.toSymbolId)
+  );
+}
+
+async function ensureCopyMissingPlaceholderTargets(
   conn: Connection,
-  edges: readonly EdgeRow[],
+  rows: readonly DependencyTargetMetadataRow[],
+  measurePhase: EnsureDependencyTargetsOptions["measurePhase"],
 ): Promise<void> {
-  const tempDir = await mkdtemp(join(tmpdir(), "sdl-known-edges-"));
-  const filePath = join(tempDir, "depends-on.csv");
+  if (!measurePhase || rows.length === 0) return;
+
+  const existingSymbolIds = await measurePhase(
+    "symbolMetadata.probeExisting",
+    async () => await queryExistingSymbolIds(conn, rows),
+  );
+  const existingRows: DependencyTargetMetadataRow[] = [];
+  const missingRows: DependencyTargetMetadataRow[] = [];
+  for (const row of rows) {
+    if (existingSymbolIds.has(row.toSymbolId)) {
+      existingRows.push(row);
+    } else {
+      missingRows.push(row);
+    }
+  }
+
+  if (missingRows.length > 0) {
+    await copyMissingPlaceholderTargets(conn, missingRows, measurePhase);
+  }
+  if (existingRows.length > 0) {
+    await measurePhase("symbolMetadata.matchExisting", async () =>
+      updateExistingPlaceholderTargets(conn, existingRows),
+    );
+    await measurePhase("repoLink", async () =>
+      ensureDependencyTargetRepoLinks(conn, existingRows),
+    );
+  }
+}
+
+async function queryExistingSymbolIds(
+  conn: Connection,
+  rows: readonly DependencyTargetMetadataRow[],
+): Promise<Set<string>> {
+  const symbolIds = rows.map((row) => row.toSymbolId);
+  const result = await queryAll<{ symbolId: unknown }>(
+    conn,
+    `UNWIND $symbolIds AS symbolId
+     MATCH (s:Symbol {symbolId: symbolId})
+     RETURN s.symbolId AS symbolId`,
+    { symbolIds },
+  );
+  return new Set(
+    result
+      .map((row) => (typeof row.symbolId === "string" ? row.symbolId : null))
+      .filter((symbolId): symbolId is string => symbolId !== null),
+  );
+}
+
+async function copyMissingPlaceholderTargets(
+  conn: Connection,
+  rows: readonly DependencyTargetMetadataRow[],
+  measurePhase: NonNullable<EnsureDependencyTargetsOptions["measurePhase"]>,
+): Promise<void> {
+  const tempDir = await mkdtemp(join(tmpdir(), "sdl-placeholder-targets-"));
+  const symbolPath = join(tempDir, "symbols.csv");
+  const symbolInRepoPath = join(tempDir, "symbol-in-repo.csv");
   try {
-    await writeKnownSymbolEdgesCsv(filePath, edges);
-    await execDdl(
-      conn,
-      `COPY DEPENDS_ON FROM '${escapeCopyPath(filePath)}' ` +
-        `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
+    await measurePhase("symbolMetadata.copyMissing.csvMaterialize", async () => {
+      await writePlaceholderSymbolsCsv(symbolPath, rows);
+      await writeSimpleRelCsv(
+        symbolInRepoPath,
+        rows.map((row) => [row.toSymbolId, row.repoId] as const),
+      );
+    });
+    await measurePhase("symbolMetadata.copyMissing.copyFrom", async () =>
+      copyPlaceholderSymbolCsvArtifact(conn, symbolPath),
+    );
+    await measurePhase("repoLink", async () =>
+      copyCsvArtifact(conn, "SYMBOL_IN_REPO", symbolInRepoPath),
     );
   } finally {
     await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function updateExistingPlaceholderTargets(
+  conn: Connection,
+  rows: readonly DependencyTargetMetadataRow[],
+): Promise<void> {
+  await exec(
+    conn,
+    `UNWIND $rows AS row
+     MATCH (b:Symbol {symbolId: row.toSymbolId})
+     OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]->(:File)
+     WITH b, row, count(*) AS fileBackedCount
+     WHERE fileBackedCount = 0
+     SET b.repoId = row.repoId,
+         b.external = CASE
+           WHEN row.targetStatus = 'external' THEN true
+           ELSE false
+         END,
+         b.symbolStatus = row.targetStatus,
+         b.placeholderKind = row.targetPlaceholderKind,
+         b.placeholderTarget = row.targetPlaceholderTarget`,
+    { rows },
+  );
+}
+
+async function ensureDependencyTargetRepoLinks(
+  conn: Connection,
+  rows: readonly DependencyTargetMetadataRow[],
+): Promise<void> {
+  for (const [repoId, symbolIds] of groupTargetSymbolIdsByRepo(rows)) {
+    await exec(
+      conn,
+      `MATCH (r:Repo {repoId: $repoId})
+       UNWIND $symbolIds AS symbolId
+       MATCH (b:Symbol {symbolId: symbolId})
+       OPTIONAL MATCH (b)-[existing:SYMBOL_IN_REPO]->(r)
+       WITH b, r, existing
+       WHERE existing IS NULL
+       CREATE (b)-[:SYMBOL_IN_REPO]->(r)`,
+      { repoId, symbolIds },
+    );
+  }
+}
+
+function groupTargetSymbolIdsByRepo(
+  rows: readonly DependencyTargetMetadataRow[],
+): Map<string, string[]> {
+  const byRepo = new Map<string, string[]>();
+  for (const row of rows) {
+    const symbolIds = byRepo.get(row.repoId);
+    if (symbolIds) {
+      symbolIds.push(row.toSymbolId);
+    } else {
+      byRepo.set(row.repoId, [row.toSymbolId]);
+    }
+  }
+  return byRepo;
+}
+
+async function writePlaceholderSymbolsCsv(
+  filePath: string,
+  rows: readonly DependencyTargetMetadataRow[],
+): Promise<void> {
+  const stream = createWriteStream(filePath, { encoding: "utf8" });
+  try {
+    await writeCsvLine(stream, PLACEHOLDER_SYMBOL_COPY_COLUMNS);
+    for (const row of rows) {
+      await writePlaceholderSymbolCsvLine(
+        stream,
+        placeholderSymbolRowToCopyCells(row),
+      );
+    }
+    stream.end();
+    await finished(stream);
+  } catch (err) {
+    stream.destroy();
+    throw err;
+  }
+}
+
+function placeholderSymbolRowToCopyCells(
+  row: DependencyTargetMetadataRow,
+): unknown[] {
+  return [
+    row.toSymbolId,
+    row.repoId,
+    "placeholder",
+    row.targetPlaceholderTarget || row.toSymbolId,
+    false,
+    "",
+    "",
+    0,
+    0,
+    0,
+    0,
+    "",
+    "",
+    "",
+    0.0,
+    "unknown",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    CSV_ARRAY_NULL,
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    CSV_ARRAY_NULL,
+    CSV_ARRAY_NULL,
+    row.targetStatus === "external",
+    "",
+    "treesitter",
+    "",
+    "",
+    row.targetStatus,
+    row.targetPlaceholderKind,
+    row.targetPlaceholderTarget,
+  ];
+}
+
+async function writeSimpleRelCsv(
+  filePath: string,
+  rows: readonly (readonly [string, string])[],
+): Promise<void> {
+  const stream = createWriteStream(filePath, { encoding: "utf8" });
+  try {
+    await writeCsvLine(stream, SIMPLE_REL_COPY_COLUMNS);
+    for (const row of rows) {
+      await writeCsvLine(stream, row);
+    }
+    stream.end();
+    await finished(stream);
+  } catch (err) {
+    stream.destroy();
+    throw err;
+  }
+}
+
+async function copyCsvArtifact(
+  conn: Connection,
+  tableName: string,
+  filePath: string,
+): Promise<void> {
+  await execDdl(
+    conn,
+    `COPY ${tableName} FROM '${escapeCopyPath(filePath)}' ` +
+      `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
+  );
+}
+
+async function copyPlaceholderSymbolCsvArtifact(
+  conn: Connection,
+  filePath: string,
+): Promise<void> {
+  await execDdl(
+    conn,
+    `COPY Symbol FROM '${escapeCopyPath(filePath)}' ` +
+      `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(SYMBOL_CSV_NULL_SENTINEL)}'])`,
+  );
+}
+
+async function copyKnownSymbolEdges(
+  conn: Connection,
+  edges: readonly EdgeRow[],
+  options?: InsertKnownSymbolEdgesOptions,
+): Promise<void> {
+  const tempDir = await mkdtemp(join(tmpdir(), "sdl-known-edges-"));
+  const filePath = join(tempDir, "depends-on.csv");
+  const measurePhase =
+    options?.measurePhase ??
+    (async <T>(
+      _phaseName: KnownSymbolEdgesCopyPhaseName,
+      fn: () => Promise<T>,
+    ): Promise<T> => await fn());
+  try {
+    await measurePhase("csvMaterialize", async () =>
+      writeKnownSymbolEdgesCsv(filePath, edges),
+    );
+    await measurePhase("copyFrom", async () =>
+      execDdl(
+        conn,
+        `COPY DEPENDS_ON FROM '${escapeCopyPath(filePath)}' ` +
+          `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
+      ),
+    );
+  } finally {
+    await measurePhase("tempCleanup", async () => {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    });
   }
 }
 
@@ -602,6 +1057,16 @@ async function writeCsvLine(
   }
 }
 
+async function writePlaceholderSymbolCsvLine(
+  stream: NodeJS.WritableStream,
+  cells: readonly unknown[],
+): Promise<void> {
+  const line = `${cells.map(placeholderSymbolCsvCell).join(",")}\n`;
+  if (!stream.write(line)) {
+    await waitForDrain(stream);
+  }
+}
+
 function waitForDrain(stream: NodeJS.WritableStream): Promise<void> {
   return new Promise((resolve, reject) => {
     const cleanup = (): void => {
@@ -622,7 +1087,17 @@ function waitForDrain(stream: NodeJS.WritableStream): Promise<void> {
 }
 
 function csvCell(value: unknown): string {
+  if (value === CSV_ARRAY_NULL) return "";
   if (value === null || value === undefined) return CSV_NULL_SENTINEL;
+  const text = String(value);
+  if (text === "") return '""';
+  const escaped = text.replaceAll('"', '""');
+  return /[",\r\n]/.test(escaped) ? `"${escaped}"` : escaped;
+}
+
+function placeholderSymbolCsvCell(value: unknown): string {
+  if (value === CSV_ARRAY_NULL) return "";
+  if (value === null || value === undefined) return SYMBOL_CSV_NULL_SENTINEL;
   const text = String(value);
   if (text === "") return '""';
   const escaped = text.replaceAll('"', '""');
@@ -637,23 +1112,16 @@ function escapeCopyOptionString(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "''");
 }
 
-function buildTargetMetadataRows(edges: EdgeRow[]): Array<{
+interface DependencyTargetMetadataRow {
   repoId: string;
   toSymbolId: string;
   targetStatus: SymbolPlaceholderMeta["symbolStatus"];
   targetPlaceholderKind: string;
   targetPlaceholderTarget: string;
-}> {
-  const rowsBySymbolId = new Map<
-    string,
-    {
-      repoId: string;
-      toSymbolId: string;
-      targetStatus: SymbolPlaceholderMeta["symbolStatus"];
-      targetPlaceholderKind: string;
-      targetPlaceholderTarget: string;
-    }
-  >();
+}
+
+function buildTargetMetadataRows(edges: EdgeRow[]): DependencyTargetMetadataRow[] {
+  const rowsBySymbolId = new Map<string, DependencyTargetMetadataRow>();
 
   for (const edge of edges) {
     if (rowsBySymbolId.has(edge.toSymbolId)) {
@@ -704,6 +1172,32 @@ export async function deleteEdges(
      MATCH (a:Symbol {symbolId: edge.fromSymbolId})-[d:DEPENDS_ON {edgeType: edge.edgeType}]->(b:Symbol {symbolId: edge.toSymbolId})
      DELETE d`,
     { edges },
+  );
+}
+
+export async function deleteCallEdgesToTargetsByRepo(
+  conn: Connection,
+  repoId: string,
+  targetSymbolIds: string[],
+): Promise<void> {
+  const uniqueTargetSymbolIds = Array.from(
+    new Set(targetSymbolIds.filter((symbolId) => symbolId.length > 0)),
+  );
+  if (uniqueTargetSymbolIds.length === 0) {
+    return;
+  }
+
+  await exec(
+    conn,
+    `MATCH (b:Symbol)
+     WHERE b.symbolId IN $targetSymbolIds
+       AND b.symbolId STARTS WITH 'unresolved:call:'
+     MATCH (a:Symbol)-[d:DEPENDS_ON]->(b)
+     MATCH (a)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+     WHERE d.edgeType = 'call'
+     WITH DISTINCT d
+     DELETE d`,
+    { repoId, targetSymbolIds: uniqueTargetSymbolIds },
   );
 }
 
@@ -1178,8 +1672,8 @@ export async function getUnresolvedCallEdgesByRepo(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)
      WHERE d.edgeType = 'call' AND b.symbolId STARTS WITH 'unresolved:call:'
-     RETURN a.symbolId AS fromSymbolId,
-            b.symbolId AS toSymbolId`,
+     RETURN DISTINCT a.symbolId AS fromSymbolId,
+                     b.symbolId AS toSymbolId`,
     { repoId },
   );
 
@@ -1187,6 +1681,21 @@ export async function getUnresolvedCallEdgesByRepo(
     fromSymbolId: row.fromSymbolId,
     toSymbolId: row.toSymbolId,
   }));
+}
+
+export async function getUnresolvedCallTargetIdsByRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<string[]> {
+  const rows = await queryAll<{ symbolId: string }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)
+     WHERE d.edgeType = 'call' AND b.symbolId STARTS WITH 'unresolved:call:'
+     RETURN DISTINCT b.symbolId AS symbolId`,
+    { repoId },
+  );
+
+  return rows.map((row) => row.symbolId);
 }
 
 export async function getCallersOfSymbols(

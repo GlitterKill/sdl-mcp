@@ -2,14 +2,29 @@
  * ladybug-processes.ts - Process Operations
  * Extracted from ladybug-queries.ts as part of the god-object split.
  */
+import { createWriteStream } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { finished } from "node:stream/promises";
 import type { Connection } from "kuzu";
 import {
   exec,
+  execDdl,
   queryAll,
   querySingle,
   toNumber,
   withTransaction,
 } from "./ladybug-core.js";
+import { normalizePath } from "../util/paths.js";
+
+const CSV_NULL_SENTINEL = "__sdl_ladybug_csv_null__";
+const PROCESS_STEP_REL_COPY_COLUMNS = [
+  "from",
+  "to",
+  "stepOrder",
+  "role",
+] as const;
 
 export interface ProcessRow {
   processId: string;
@@ -238,6 +253,181 @@ export async function upsertProcessStepsBatch(
       );
     }
   });
+}
+
+export async function insertProcessStepsAfterDeleteBatch(
+  conn: Connection,
+  steps: Array<{
+    processId: string;
+    symbolId: string;
+    stepOrder: number;
+    role: string;
+  }>,
+): Promise<void> {
+  if (steps.length === 0) return;
+  // Replacement callers delete old steps first. Direct CREATE avoids the
+  // general W4 OPTIONAL-MATCH+SET path while preserving in-batch dedupe.
+  const seen = new Set<string>();
+  steps = steps.filter((s) => {
+    const key = `${s.symbolId}\0${s.processId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const CHUNK = 256;
+  await withTransaction(conn, async (txConn) => {
+    for (let i = 0; i < steps.length; i += CHUNK) {
+      const rows = steps.slice(i, i + CHUNK);
+      await exec(
+        txConn,
+        `UNWIND $rows AS row
+         MATCH (s:Symbol {symbolId: row.symbolId})
+         MATCH (p:Process {processId: row.processId})
+         CREATE (s)-[:PARTICIPATES_IN {stepOrder: row.stepOrder, role: row.role}]->(p)`,
+        { rows },
+      );
+    }
+  });
+}
+
+export async function copyProcessStepsAfterDeleteBatch(
+  conn: Connection,
+  steps: Array<{
+    processId: string;
+    symbolId: string;
+    stepOrder: number;
+    role: string;
+  }>,
+): Promise<void> {
+  if (steps.length === 0) return;
+  const seen = new Set<string>();
+  steps = steps.filter((s) => {
+    const key = `${s.symbolId}\0${s.processId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const copyRows: typeof steps = [];
+  const fallbackRows: typeof steps = [];
+  for (const step of steps) {
+    if (
+      isSafeRelationshipCopyEndpointId(step.symbolId) &&
+      isSafeRelationshipCopyEndpointId(step.processId)
+    ) {
+      copyRows.push(step);
+    } else {
+      fallbackRows.push(step);
+    }
+  }
+
+  if (copyRows.length > 0) {
+    const tempDir = await mkdtemp(join(tmpdir(), "sdl-process-steps-"));
+    const copyPath = join(tempDir, "participates-in.csv");
+    try {
+      await writeProcessStepRelCsv(copyPath, copyRows);
+      await withTransaction(conn, async (txConn) => {
+        await execDdl(
+          txConn,
+          `COPY PARTICIPATES_IN FROM '${escapeCopyPath(copyPath)}' ` +
+            `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
+        );
+        if (fallbackRows.length > 0) {
+          await insertProcessStepsAfterDeleteBatch(txConn, fallbackRows);
+        }
+      });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
+    return;
+  }
+
+  if (fallbackRows.length > 0) {
+    await insertProcessStepsAfterDeleteBatch(conn, fallbackRows);
+  }
+}
+
+function isSafeRelationshipCopyEndpointId(value: string): boolean {
+  return (
+    value.length > 0 &&
+    !value.includes('"') &&
+    !value.includes(",") &&
+    !value.includes("\r") &&
+    !value.includes("\n")
+  );
+}
+
+async function writeProcessStepRelCsv(
+  filePath: string,
+  rows: readonly {
+    processId: string;
+    symbolId: string;
+    stepOrder: number;
+    role: string;
+  }[],
+): Promise<void> {
+  const stream = createWriteStream(filePath, { encoding: "utf8" });
+  try {
+    await writeCsvLine(stream, PROCESS_STEP_REL_COPY_COLUMNS);
+    for (const row of rows) {
+      await writeCsvLine(stream, [
+        row.symbolId,
+        row.processId,
+        row.stepOrder,
+        row.role,
+      ]);
+    }
+    stream.end();
+    await finished(stream);
+  } catch (err) {
+    stream.destroy();
+    throw err;
+  }
+}
+
+async function writeCsvLine(
+  stream: NodeJS.WritableStream,
+  cells: readonly unknown[],
+): Promise<void> {
+  const line = `${cells.map(csvCell).join(",")}\n`;
+  if (!stream.write(line)) {
+    await waitForDrain(stream);
+  }
+}
+
+function waitForDrain(stream: NodeJS.WritableStream): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      stream.removeListener("drain", onDrain);
+      stream.removeListener("error", onError);
+    };
+    const onDrain = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (err: Error): void => {
+      cleanup();
+      reject(err);
+    };
+    stream.once("drain", onDrain);
+    stream.once("error", onError);
+  });
+}
+
+function csvCell(value: unknown): string {
+  if (value === null || value === undefined) return CSV_NULL_SENTINEL;
+  const text = String(value);
+  if (text === "") return '""';
+  const escaped = text.replaceAll('"', '""');
+  return /[",\r\n]/.test(escaped) ? `"${escaped}"` : escaped;
+}
+
+function escapeCopyPath(path: string): string {
+  return normalizePath(path).replace(/'/g, "''");
+}
+
+function escapeCopyOptionString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "''");
 }
 
 export async function getProcessesForSymbol(

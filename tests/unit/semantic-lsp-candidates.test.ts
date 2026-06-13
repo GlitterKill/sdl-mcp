@@ -13,6 +13,7 @@ import {
   planLspCallDefinitionCandidatesFromRows,
   type LspCandidateSkip,
 } from "../../dist/semantic/providers/lsp/candidates.js";
+import { unresolvedCallSymbolId } from "../../dist/db/symbol-placeholders.js";
 import type { SemanticLspCallEdgeCandidateRow } from "../../dist/db/ladybug-semantic.js";
 
 function writeRepoFile(root: string, relPath: string, content: string): void {
@@ -78,6 +79,41 @@ describe("LSP call-definition candidate planning", () => {
         character: 9,
       });
       assert.equal(plan.documents[0].languageId, "typescript");
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("plans candidates from COPY-safe unresolved call IDs", async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-candidate-safe-"));
+    try {
+      writeRepoFile(
+        repoRoot,
+        "src/caller.ts",
+        [
+          "export function caller() {",
+          "  return missingCall();",
+          "}",
+          "",
+        ].join("\n"),
+      );
+
+      const plan = await planLspCallDefinitionCandidatesFromRows({
+        repoId: "repo",
+        repoRoot,
+        languageId: "typescript",
+        candidateLimit: 10,
+        rows: [
+          makeRow({
+            targetSymbolId: unresolvedCallSymbolId("missingCall"),
+            targetName: null,
+          }),
+        ],
+      });
+
+      assert.equal(plan.candidates.length, 1);
+      assert.equal(plan.candidates[0].targetName, "missingCall");
+      assert.equal(plan.skipped.length, 0);
     } finally {
       rmSync(repoRoot, { recursive: true, force: true });
     }

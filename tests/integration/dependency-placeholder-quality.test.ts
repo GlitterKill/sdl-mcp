@@ -16,9 +16,11 @@ import {
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { unresolvedCallSymbolId } from "../../dist/db/symbol-placeholders.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
 
 const REPO_ID = "test-dependency-placeholder-quality";
+const MISSING_CALL_SYMBOL_ID = unresolvedCallSymbolId("missingCall");
 
 function writeRepoFile(
   repoRoot: string,
@@ -208,11 +210,11 @@ describe("dependency placeholder quality integration", () => {
       edgeType: "import",
     });
     assert.equal(
-      bySymbol.get("unresolved:call:missingCall")?.status,
+      bySymbol.get(MISSING_CALL_SYMBOL_ID)?.status,
       "unresolved",
     );
     assert.equal(
-      bySymbol.get("unresolved:call:missingCall")?.placeholderKind,
+      bySymbol.get(MISSING_CALL_SYMBOL_ID)?.placeholderKind,
       "call",
     );
 

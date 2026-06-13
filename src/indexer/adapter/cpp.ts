@@ -209,10 +209,33 @@ class CppAdapter implements LanguageAdapter {
       return undefined;
     }
 
-    function traverseAST(
-      node: Parser.SyntaxNode,
-      context: { className?: string },
-    ): void {
+    function enclosingClassName(node: Parser.SyntaxNode): string | undefined {
+      let current = node.parent;
+      while (current) {
+        if (
+          current.type === "class_specifier" ||
+          current.type === "struct_specifier"
+        ) {
+          return current.childForFieldName("name")?.text;
+        }
+        current = current.parent;
+      }
+
+      return undefined;
+    }
+
+    const symbolNodes = tree.rootNode.descendantsOfType([
+      "namespace_definition",
+      "class_specifier",
+      "struct_specifier",
+      "function_definition",
+      "declaration",
+      "enum_specifier",
+      "alias_declaration",
+    ]);
+
+    for (const node of symbolNodes) {
+      const className = enclosingClassName(node);
       switch (node.type) {
         case "namespace_definition": {
           const nameNode = node.childForFieldName("name");
@@ -270,7 +293,7 @@ class CppAdapter implements LanguageAdapter {
 
           const isDestructor =
             declIdentifier.type === "destructor_name" ||
-            (context.className && name === `~${context.className}`);
+            (className && name === `~${className}`);
 
           if (isDestructor) {
             const fqn = buildFQN(node, name);
@@ -286,7 +309,7 @@ class CppAdapter implements LanguageAdapter {
                 returns,
               },
             });
-          } else if (context.className && name === context.className) {
+          } else if (className && name === className) {
             const fqn = buildFQN(node, name);
             symbols.push({
               nodeId: `${filePath}:${fqn}:constructor`,
@@ -300,7 +323,7 @@ class CppAdapter implements LanguageAdapter {
                 returns,
               },
             });
-          } else if (context.className) {
+          } else if (className) {
             const fqn = buildFQN(node, name);
             symbols.push({
               nodeId: `${filePath}:${fqn}:method`,
@@ -368,25 +391,7 @@ class CppAdapter implements LanguageAdapter {
           break;
         }
       }
-
-      for (const child of node.children) {
-        const newContext = { ...context };
-
-        if (
-          child.type === "class_specifier" ||
-          child.type === "struct_specifier"
-        ) {
-          const nameNode = child.childForFieldName("name");
-          if (nameNode) {
-            newContext.className = nameNode.text;
-          }
-        }
-
-        traverseAST(child, newContext);
-      }
     }
-
-    traverseAST(tree.rootNode, {});
 
     return symbols;
   }
@@ -468,14 +473,16 @@ class CppAdapter implements LanguageAdapter {
       };
     }
 
-    function traverseAST(node: Parser.SyntaxNode): void {
+    const callNodes = tree.rootNode.descendantsOfType([
+      "call_expression",
+      "new_expression",
+    ]);
+
+    for (const node of callNodes) {
       if (node.type === "call_expression") {
         const nodeId = node.id;
         if (seenCallNodes.has(nodeId)) {
-          for (const child of node.children) {
-            traverseAST(child);
-          }
-          return;
+          continue;
         }
         seenCallNodes.add(nodeId);
 
@@ -536,10 +543,7 @@ class CppAdapter implements LanguageAdapter {
       if (node.type === "new_expression") {
         const nodeId = node.id;
         if (seenCallNodes.has(nodeId)) {
-          for (const child of node.children) {
-            traverseAST(child);
-          }
-          return;
+          continue;
         }
         seenCallNodes.add(nodeId);
 
@@ -571,13 +575,7 @@ class CppAdapter implements LanguageAdapter {
           range: extractRange(node),
         });
       }
-
-      for (const child of node.children) {
-        traverseAST(child);
-      }
     }
-
-    traverseAST(tree.rootNode);
 
     return calls;
   }

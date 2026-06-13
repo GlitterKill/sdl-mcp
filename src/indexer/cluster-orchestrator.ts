@@ -6,6 +6,7 @@ import { buildProcessSearchText } from "../db/ladybug-processes.js";
 import { withWriteConn } from "../db/ladybug.js";
 import { logger } from "../util/logger.js";
 import { computeClustersTS } from "../graph/cluster.js";
+import type { FoldedCentralityResult } from "../graph/metrics.js";
 import { traceProcessesTS } from "../graph/process.js";
 import { computeClustersRust, traceProcessesRust } from "./rustIndexer.js";
 import {
@@ -30,7 +31,7 @@ import {
   CentralityWorkerTimeoutError,
   runCentralityWorker,
   type CentralityWorkerResult,
-} from "./centrality-worker-runner.js";
+} from "../graph/centrality-worker-runner.js";
 
 const DEFAULT_MIN_CLUSTER_SIZE = 3;
 const DEFAULT_MAX_PROCESS_DEPTH = 20;
@@ -50,6 +51,34 @@ const DEFAULT_ALGORITHM_REFRESH_CONFIG: AlgorithmRefreshConfig = {
   louvain: { enabled: true, maxCallEdges: DEFAULT_LOUVAIN_MAX_CALL_EDGES },
   workerTimeoutMs: 120_000,
 };
+
+function normalizeAlgorithmRefreshConfig(
+  config: AlgorithmRefreshConfig | undefined,
+): AlgorithmRefreshConfig {
+  return {
+    enabled: config?.enabled ?? DEFAULT_ALGORITHM_REFRESH_CONFIG.enabled,
+    pageRank: {
+      enabled:
+        config?.pageRank?.enabled ??
+        DEFAULT_ALGORITHM_REFRESH_CONFIG.pageRank.enabled,
+    },
+    kCore: {
+      enabled:
+        config?.kCore?.enabled ?? DEFAULT_ALGORITHM_REFRESH_CONFIG.kCore.enabled,
+    },
+    louvain: {
+      enabled:
+        config?.louvain?.enabled ??
+        DEFAULT_ALGORITHM_REFRESH_CONFIG.louvain.enabled,
+      maxCallEdges:
+        config?.louvain?.maxCallEdges ??
+        DEFAULT_ALGORITHM_REFRESH_CONFIG.louvain.maxCallEdges,
+    },
+    workerTimeoutMs:
+      config?.workerTimeoutMs ??
+      DEFAULT_ALGORITHM_REFRESH_CONFIG.workerTimeoutMs,
+  };
+}
 
 export type ClusterFtsDropStatus = "dropped" | "absent" | "skipped";
 
@@ -197,6 +226,8 @@ export async function computeAndStoreClustersAndProcesses(params: {
   algorithmCapabilityDetector?: typeof detectAlgoCapability;
   louvainRunner?: typeof runLouvain;
   includeTimings?: boolean;
+  centralityMetricsMaterialized?: boolean;
+  foldedCentrality?: FoldedCentralityResult;
   onProgress?: (progress: import("./indexer-init.js").IndexProgress) => void;
   sharedGraph?: {
     callEdges: Array<{ callerId: string; calleeId: string }>;
@@ -210,14 +241,17 @@ export async function computeAndStoreClustersAndProcesses(params: {
     entryPatterns = DEFAULT_ENTRY_PATTERNS,
     minClusterSize = DEFAULT_MIN_CLUSTER_SIZE,
     maxProcessDepth = DEFAULT_MAX_PROCESS_DEPTH,
-    algorithmRefresh = DEFAULT_ALGORITHM_REFRESH_CONFIG,
+    algorithmRefresh: rawAlgorithmRefresh,
     centralityRunner = runCentralityWorker,
     algorithmCapabilityDetector = detectAlgoCapability,
     louvainRunner = runLouvain,
     includeTimings = false,
+    centralityMetricsMaterialized = false,
+    foldedCentrality,
     onProgress,
     sharedGraph,
   } = params;
+  const algorithmRefresh = normalizeAlgorithmRefreshConfig(rawAlgorithmRefresh);
   const emitSubstage = (
     substage: import("./indexer-init.js").IndexProgressSubstage,
     message?: string,
@@ -246,7 +280,8 @@ export async function computeAndStoreClustersAndProcesses(params: {
       return await fn();
     } finally {
       if (timings) {
-        timings[phaseName] = Date.now() - phaseStart;
+        timings[phaseName] =
+          (timings[phaseName] ?? 0) + Date.now() - phaseStart;
       }
     }
   };
@@ -493,7 +528,7 @@ export async function computeAndStoreClustersAndProcesses(params: {
               await measureSubphase(
                 "clusterWrite.upsertMembers",
                 () =>
-                  ladybugDb.upsertClusterMembersBatch(
+                  ladybugDb.copyClusterMembersAfterDeleteBatch(
                     txConn,
                     clusterMemberRows,
                   ),
@@ -696,7 +731,11 @@ export async function computeAndStoreClustersAndProcesses(params: {
             );
             await measureSubphase(
               "processWrite.upsertSteps",
-              () => ladybugDb.upsertProcessStepsBatch(txConn, processStepRows),
+              () =>
+                ladybugDb.copyProcessStepsAfterDeleteBatch(
+                  txConn,
+                  processStepRows,
+                ),
             );
           }
         });
@@ -738,75 +777,138 @@ export async function computeAndStoreClustersAndProcesses(params: {
       }
 
       if (algorithmRefresh.pageRank.enabled || algorithmRefresh.kCore.enabled) {
-        try {
-          const centralityResult = await centralityRunner(
-            {
-              symbolIds,
-              callEdges,
-              pageRankEnabled: algorithmRefresh.pageRank.enabled,
-              kCoreEnabled: algorithmRefresh.kCore.enabled,
-            },
-            algorithmRefresh.workerTimeoutMs,
-          );
-          const pageRankMap = new Map<string, number>();
-          for (const row of centralityResult.pageRank) {
-            pageRankMap.set(row.symbolId, row.score);
-          }
-          const kCoreMap = new Map<string, number>();
-          for (const row of centralityResult.kCore) {
-            kCoreMap.set(row.symbolId, row.coreness);
-          }
-          const mergedSymbolIds = new Set<string>([
-            ...pageRankMap.keys(),
-            ...kCoreMap.keys(),
-          ]);
-          const centralityRows = [...mergedSymbolIds].map((symbolId) => ({
-            symbolId,
-            pageRank: pageRankMap.get(symbolId) ?? 0,
-            kCore: kCoreMap.get(symbolId) ?? 0,
-            updatedAt: now,
-          }));
-          if (centralityRows.length > 0) {
-            await withWriteConn(async (wConn) => {
-              await upsertCentralityBatch(wConn, centralityRows);
-            });
-          }
-          centralityComputed = centralityRows.length;
+        const foldedUsable =
+          foldedCentrality &&
+          foldedCentrality.symbolCount === symbolIds.length &&
+          foldedCentrality.callEdgeCount === callEdges.length
+            ? foldedCentrality
+            : undefined;
+        if (foldedUsable?.status === "succeeded") {
+          centralityComputed = foldedUsable.symbolCount;
           algorithmDiagnostics.pageRank = {
             status: algorithmRefresh.pageRank.enabled
               ? "succeeded"
               : "disabled",
-            count: centralityResult.pageRank.length,
+            count: foldedUsable.pageRankCount,
             reason: algorithmRefresh.pageRank.enabled ? undefined : "disabled",
           };
           algorithmDiagnostics.kCore = {
             status: algorithmRefresh.kCore.enabled ? "succeeded" : "disabled",
-            count: centralityResult.kCore.length,
+            count: foldedUsable.kCoreCount,
             reason: algorithmRefresh.kCore.enabled ? undefined : "disabled",
           };
-        } catch (err) {
-          const timedOut = err instanceof CentralityWorkerTimeoutError;
-          const message = err instanceof Error ? err.message : String(err);
+        } else if (foldedUsable?.status === "failed") {
           algorithmDiagnostics.dirty = true;
-          algorithmDiagnostics.failures.push(message);
+          algorithmDiagnostics.failures.push(foldedUsable.reason);
           algorithmDiagnostics.pageRank = {
             status: algorithmRefresh.pageRank.enabled
-              ? timedOut
+              ? foldedUsable.timedOut
                 ? "timedOut"
                 : "failed"
               : "disabled",
             count: 0,
-            reason: message,
+            reason: foldedUsable.reason,
           };
           algorithmDiagnostics.kCore = {
             status: algorithmRefresh.kCore.enabled
-              ? timedOut
+              ? foldedUsable.timedOut
                 ? "timedOut"
                 : "failed"
               : "disabled",
             count: 0,
-            reason: message,
+            reason: foldedUsable.reason,
           };
+        } else {
+          try {
+            const centralityResult = await measureSubphase(
+              "algorithmStage.centralityWorker",
+              () =>
+                centralityRunner(
+                  {
+                    symbolIds,
+                    callEdges,
+                    pageRankEnabled: algorithmRefresh.pageRank.enabled,
+                    kCoreEnabled: algorithmRefresh.kCore.enabled,
+                  },
+                  algorithmRefresh.workerTimeoutMs,
+                ),
+            );
+            const centralityRows = await measureSubphase(
+              "algorithmStage.centralityPrepare",
+              async () => {
+                const pageRankMap = new Map<string, number>();
+                for (const row of centralityResult.pageRank) {
+                  pageRankMap.set(row.symbolId, row.score);
+                }
+                const kCoreMap = new Map<string, number>();
+                for (const row of centralityResult.kCore) {
+                  kCoreMap.set(row.symbolId, row.coreness);
+                }
+                const mergedSymbolIds = new Set<string>([
+                  ...pageRankMap.keys(),
+                  ...kCoreMap.keys(),
+                ]);
+                return [...mergedSymbolIds].map((symbolId) => ({
+                  symbolId,
+                  pageRank: pageRankMap.get(symbolId) ?? 0,
+                  kCore: kCoreMap.get(symbolId) ?? 0,
+                  updatedAt: now,
+                }));
+              },
+            );
+            if (centralityRows.length > 0) {
+              await measureSubphase("algorithmStage.centralityWrite", () =>
+                withWriteConn(async (wConn) => {
+                  await upsertCentralityBatch(wConn, centralityRows, {
+                    assumeRowsExist: centralityMetricsMaterialized,
+                    measurePhase: async (phaseName, fn) =>
+                      await measureSubphase(
+                        `algorithmStage.centralityWrite.${phaseName}`,
+                        async () => await fn(),
+                      ),
+                  });
+                }),
+              );
+            }
+            centralityComputed = centralityRows.length;
+            algorithmDiagnostics.pageRank = {
+              status: algorithmRefresh.pageRank.enabled
+                ? "succeeded"
+                : "disabled",
+              count: centralityResult.pageRank.length,
+              reason: algorithmRefresh.pageRank.enabled
+                ? undefined
+                : "disabled",
+            };
+            algorithmDiagnostics.kCore = {
+              status: algorithmRefresh.kCore.enabled ? "succeeded" : "disabled",
+              count: centralityResult.kCore.length,
+              reason: algorithmRefresh.kCore.enabled ? undefined : "disabled",
+            };
+          } catch (err) {
+            const timedOut = err instanceof CentralityWorkerTimeoutError;
+            const message = err instanceof Error ? err.message : String(err);
+            algorithmDiagnostics.dirty = true;
+            algorithmDiagnostics.failures.push(message);
+            algorithmDiagnostics.pageRank = {
+              status: algorithmRefresh.pageRank.enabled
+                ? timedOut
+                  ? "timedOut"
+                  : "failed"
+                : "disabled",
+              count: 0,
+              reason: message,
+            };
+            algorithmDiagnostics.kCore = {
+              status: algorithmRefresh.kCore.enabled
+                ? timedOut
+                  ? "timedOut"
+                  : "failed"
+                : "disabled",
+              count: 0,
+              reason: message,
+            };
+          }
         }
       } else {
         algorithmDiagnostics.pageRank = {
@@ -830,16 +932,27 @@ export async function computeAndStoreClustersAndProcesses(params: {
         };
         return;
       }
-      if (callEdges.length > algorithmRefresh.louvain.maxCallEdges) {
+      let louvainPolicyCallEdges = callEdges.length;
+      if (louvainPolicyCallEdges <= algorithmRefresh.louvain.maxCallEdges) {
+        const edgeCounts = await measureSubphase(
+          "algorithmStage.louvainPolicyEdgeCount",
+          () => ladybugDb.getEdgeCountsByType(conn, repoId),
+        );
+        louvainPolicyCallEdges = Math.max(
+          louvainPolicyCallEdges,
+          edgeCounts.call ?? 0,
+        );
+      }
+      if (louvainPolicyCallEdges > algorithmRefresh.louvain.maxCallEdges) {
         await clearLouvainShadowClusters(repoId, "max-call-edges");
         algorithmDiagnostics.louvain = {
           status: "skipped",
           count: 0,
-          reason: `call-edge-count ${callEdges.length} exceeds maxCallEdges ${algorithmRefresh.louvain.maxCallEdges}`,
+          reason: `call-edge-count ${louvainPolicyCallEdges} exceeds maxCallEdges ${algorithmRefresh.louvain.maxCallEdges}`,
         };
         logger.info("ladybug-algorithms: skipping Louvain by policy", {
           repoId,
-          callEdges: callEdges.length,
+          callEdges: louvainPolicyCallEdges,
           maxCallEdges: algorithmRefresh.louvain.maxCallEdges,
         });
         return;

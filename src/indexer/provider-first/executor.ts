@@ -183,7 +183,46 @@ export interface ProviderFirstLegacyFallbackDiagnostics {
   samplePaths: string[];
   omittedPathCount?: number;
   phases: Record<string, number>;
+  pass1Drain?: import("../parser/batch-persist.js").BatchPersistDrainDiagnostics;
+  pass2WriteStats?: ProviderFirstLegacyFallbackPass2WriteStats;
   resolverBreakdown?: Record<string, Pass2ResolverTelemetry>;
+}
+
+export interface ProviderFirstLegacyFallbackPass2WriteStats {
+  flushes?: number;
+  totalEdges?: number;
+  incrementalEdges?: number;
+  knownEndpointEdges?: number;
+  repairEdges?: number;
+  copyFlushes?: number;
+  copyEdges?: number;
+  copyPlaceholderTargets?: number;
+  copyPlaceholderRows?: number;
+  copyEnsuredPlaceholderRows?: number;
+  copySkippedPlaceholderRows?: number;
+  copyUnresolvedPlaceholderRows?: number;
+  copyExternalPlaceholderRows?: number;
+  copyEnsureMs?: number;
+  copyEnsureSymbolMetadataMs?: number;
+  copyEnsureSymbolProbeMs?: number;
+  copyEnsureSymbolCopyMissingCsvMs?: number;
+  copyEnsureSymbolCopyMissingFromMs?: number;
+  copyEnsureSymbolMatchExistingMs?: number;
+  copyEnsureSymbolMergeFallbackMs?: number;
+  copyEnsureRepoLinkMs?: number;
+  copyInsertMs?: number;
+  copyInsertCsvMaterializeMs?: number;
+  copyInsertCopyFromMs?: number;
+  smallKnownEndpointFlushes?: number;
+  smallKnownEndpointEdges?: number;
+  repairUnresolvedSourceEdges?: number;
+  repairUnsafeSourceEndpointEdges?: number;
+  repairUnsafeTargetEndpointEdges?: number;
+  repairUnsafeBothEndpointEdges?: number;
+  repairOtherCauseEdges?: number;
+  repairFlushes?: number;
+  repairInsertEdges?: number;
+  repairInsertMs?: number;
 }
 
 export interface ProviderFirstScipExecutionResult {

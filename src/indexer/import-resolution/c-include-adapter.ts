@@ -26,6 +26,17 @@ function buildSpecifierCandidates(
   ];
 }
 
+async function candidateExists(
+  params: ResolveImportCandidatePathsParams,
+  relPath: string,
+): Promise<boolean> {
+  const normalized = normalizePath(relPath);
+  if (params.knownRepoPaths) {
+    return params.knownRepoPaths.has(normalized);
+  }
+  return existsAsync(join(params.repoRoot, normalized));
+}
+
 export class CIncludeImportResolutionAdapter implements ImportResolutionAdapter {
   readonly id = "c-include";
 
@@ -46,14 +57,14 @@ export class CIncludeImportResolutionAdapter implements ImportResolutionAdapter 
       const relativeToImporter = normalizePath(
         join(importerDir, specifierCandidate),
       );
-      if (await existsAsync(join(params.repoRoot, relativeToImporter))) {
+      if (await candidateExists(params, relativeToImporter)) {
         return [relativeToImporter];
       }
     }
 
     for (const specifierCandidate of specifierCandidates) {
       const relativeToRoot = normalizePath(specifierCandidate);
-      if (await existsAsync(join(params.repoRoot, relativeToRoot))) {
+      if (await candidateExists(params, relativeToRoot)) {
         return [relativeToRoot];
       }
     }
@@ -63,7 +74,7 @@ export class CIncludeImportResolutionAdapter implements ImportResolutionAdapter 
         const includeCandidate = normalizePath(
           join(includeDir, specifierCandidate),
         );
-        if (await existsAsync(join(params.repoRoot, includeCandidate))) {
+        if (await candidateExists(params, includeCandidate)) {
           return [includeCandidate];
         }
       }

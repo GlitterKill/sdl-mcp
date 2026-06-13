@@ -1,9 +1,13 @@
 export {
   createCallResolutionTelemetry,
   isTsCallResolutionFile,
+  recordPass2ResolverFilePhase,
+  recordPass2ResolverMetric,
+  recordPass2ResolverPhase,
   recordPass2ResolverResult,
   recordPass2ResolverTarget,
   type CallResolutionTelemetry,
+  type Pass2ResolverTopFile,
 } from "./edge-builder/telemetry.js";
 export { resolveImportTargets } from "./edge-builder/import-resolution.js";
 export { resolveCallTarget } from "./edge-builder/call-resolution.js";

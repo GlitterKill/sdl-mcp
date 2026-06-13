@@ -1,5 +1,6 @@
 import type { Connection } from "kuzu";
 
+import type { FoldedCentralityResult } from "../graph/metrics.js";
 import {
   computeAndStoreClustersAndProcesses,
   type AlgorithmRefreshDiagnostics,
@@ -28,6 +29,7 @@ export interface FinalizeDerivedStateParams {
     callEdges: Array<{ callerId: string; calleeId: string }>;
     clusterEdges: Array<{ fromSymbolId: string; toSymbolId: string }>;
   };
+  foldedCentrality?: FoldedCentralityResult;
   measurePhase: <T>(phaseName: string, fn: () => Promise<T> | T) => Promise<T>;
 }
 
@@ -50,6 +52,7 @@ export async function finalizeDerivedState(
     onProgress,
     extraPhaseTimings,
     sharedGraph,
+    foldedCentrality,
     measurePhase,
   } = params;
 
@@ -84,6 +87,8 @@ export async function finalizeDerivedState(
         versionId,
         algorithmRefresh,
         includeTimings: Boolean(phaseTimings || extraPhaseTimings),
+        centralityMetricsMaterialized: true,
+        foldedCentrality,
         onProgress,
         sharedGraph,
       }),

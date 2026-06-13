@@ -597,9 +597,64 @@ const PROVIDER_FIRST_LEGACY_FALLBACK_PHASE_LABELS: Array<[string, string]> = [
 const PROVIDER_FIRST_LEGACY_FALLBACK_PASS2_LABELS: Array<[string, string]> = [
   ["pass2.targetSelection", "targetSelection"],
   ["pass2.importCache", "importCache"],
+  ["pass2.resolverWarmup", "resolverWarmup"],
   ["pass2.resolverDispatch", "resolverDispatch"],
   ["pass2.writeActive", "writeActive"],
   ["pass2.writeQueue", "writeQueue"],
+  ["pass2.write.copyEnsure", "copyEnsure"],
+  ["pass2.write.copyEnsure.symbolMetadata", "copyEnsure.symbols"],
+  [
+    "pass2.write.copyEnsure.symbolMetadata.probeExisting",
+    "copyEnsure.symbols.probe",
+  ],
+  [
+    "pass2.write.copyEnsure.symbolMetadata.copyMissing.csvMaterialize",
+    "copyEnsure.symbols.copyMissing.csv",
+  ],
+  [
+    "pass2.write.copyEnsure.symbolMetadata.copyMissing.copyFrom",
+    "copyEnsure.symbols.copyMissing.copy",
+  ],
+  [
+    "pass2.write.copyEnsure.symbolMetadata.matchExisting",
+    "copyEnsure.symbols.matchExisting",
+  ],
+  [
+    "pass2.write.copyEnsure.symbolMetadata.mergeFallback",
+    "copyEnsure.symbols.mergeFallback",
+  ],
+  ["pass2.write.copyEnsure.repoLink", "copyEnsure.repoLinks"],
+  ["pass2.write.copyInsert", "copyInsert"],
+  ["pass2.write.copyInsert.txnBegin", "copyInsert.txnBegin"],
+  ["pass2.write.copyInsert.txnBody", "copyInsert.txnBody"],
+  ["pass2.write.copyInsert.txnCommit", "copyInsert.txnCommit"],
+  ["pass2.write.copyInsert.csvMaterialize", "copyInsert.csvMaterialize"],
+  ["pass2.write.copyInsert.copyFrom", "copyInsert.copyFrom"],
+  ["pass2.write.copyInsert.tempCleanup", "copyInsert.tempCleanup"],
+  ["pass2.write.repairInsert", "repairInsert"],
+  ["pass2.write.repairInsert.prepareRows", "repairInsert.prepareRows"],
+  [
+    "pass2.write.repairInsert.sourceRepoLink.symbolMetadata",
+    "repairInsert.sourceRepoLink.symbolMetadata",
+  ],
+  [
+    "pass2.write.repairInsert.sourceRepoLink.repoLink",
+    "repairInsert.sourceRepoLink.repoLink",
+  ],
+  [
+    "pass2.write.repairInsert.endpointMetadata",
+    "repairInsert.endpointMetadata",
+  ],
+  ["pass2.write.repairInsert.targetMetadata", "repairInsert.targetMetadata"],
+  ["pass2.write.repairInsert.targetRepoLink", "repairInsert.targetRepoLink"],
+  [
+    "pass2.write.repairInsert.relationshipCreate",
+    "repairInsert.relationshipCreate",
+  ],
+  [
+    "pass2.write.repairInsert.relationshipUpdate",
+    "repairInsert.relationshipUpdate",
+  ],
 ];
 
 const PROVIDER_FIRST_LEGACY_FALLBACK_PASS1_DRAIN_LABELS: Array<
@@ -611,6 +666,62 @@ const PROVIDER_FIRST_LEGACY_FALLBACK_PASS1_DRAIN_LABELS: Array<
   ["pass1Drain.write.insertSymbolReferences", "symbolRefs"],
   ["pass1Drain.write.upsertSymbols", "upsertSymbols"],
   ["pass1Drain.write.insertEdges", "insertEdges"],
+  ["pass1Drain.write.insertEdges.split", "insertEdges.split"],
+  ["pass1Drain.write.insertEdges.knownEnsure", "insertEdges.knownEnsure"],
+  [
+    "pass1Drain.write.insertEdges.knownEnsure.symbolMetadata.probeExisting",
+    "insertEdges.knownEnsure.probe",
+  ],
+  [
+    "pass1Drain.write.insertEdges.knownEnsure.symbolMetadata.copyMissing.csvMaterialize",
+    "insertEdges.knownEnsure.copyMissing.csv",
+  ],
+  [
+    "pass1Drain.write.insertEdges.knownEnsure.symbolMetadata.copyMissing.copyFrom",
+    "insertEdges.knownEnsure.copyMissing.copy",
+  ],
+  [
+    "pass1Drain.write.insertEdges.knownEnsure.symbolMetadata.matchExisting",
+    "insertEdges.knownEnsure.matchExisting",
+  ],
+  [
+    "pass1Drain.write.insertEdges.knownEnsure.symbolMetadata.mergeFallback",
+    "insertEdges.knownEnsure.mergeFallback",
+  ],
+  [
+    "pass1Drain.write.insertEdges.knownEnsure.repoLink",
+    "insertEdges.knownEnsure.repoLink",
+  ],
+  ["pass1Drain.write.insertEdges.knownCopy", "insertEdges.knownCopy"],
+  ["pass1Drain.write.insertEdges.knownCopy.txnBegin", "insertEdges.knownCopy.txnBegin"],
+  ["pass1Drain.write.insertEdges.knownCopy.txnBody", "insertEdges.knownCopy.txnBody"],
+  ["pass1Drain.write.insertEdges.knownCopy.txnCommit", "insertEdges.knownCopy.txnCommit"],
+  ["pass1Drain.write.insertEdges.knownCopy.csvMaterialize", "insertEdges.knownCopy.csv"],
+  ["pass1Drain.write.insertEdges.knownCopy.copyFrom", "insertEdges.knownCopy.copy"],
+  ["pass1Drain.write.insertEdges.knownCopy.tempCleanup", "insertEdges.knownCopy.cleanup"],
+  ["pass1Drain.write.insertEdges.repair", "insertEdges.repair"],
+  ["pass1Drain.write.insertEdges.repair.dedupe", "insertEdges.repair.dedupe"],
+  ["pass1Drain.write.insertEdges.repair.groupByRepo", "insertEdges.repair.groupByRepo"],
+  ["pass1Drain.write.insertEdges.repair.prepareRows", "insertEdges.repair.prepareRows"],
+  [
+    "pass1Drain.write.insertEdges.repair.sourceRepoLink.symbolMetadata",
+    "insertEdges.repair.sourceRepoLink.symbolMetadata",
+  ],
+  [
+    "pass1Drain.write.insertEdges.repair.sourceRepoLink.repoLink",
+    "insertEdges.repair.sourceRepoLink.repoLink",
+  ],
+  ["pass1Drain.write.insertEdges.repair.endpointMetadata", "insertEdges.repair.endpointMetadata"],
+  ["pass1Drain.write.insertEdges.repair.targetMetadata", "insertEdges.repair.targetMetadata"],
+  ["pass1Drain.write.insertEdges.repair.targetRepoLink", "insertEdges.repair.targetRepoLink"],
+  [
+    "pass1Drain.write.insertEdges.repair.relationshipCreate",
+    "insertEdges.repair.relationshipCreate",
+  ],
+  [
+    "pass1Drain.write.insertEdges.repair.relationshipUpdate",
+    "insertEdges.repair.relationshipUpdate",
+  ],
 ];
 
 const PROVIDER_FIRST_LEGACY_FALLBACK_FINALIZE_LABELS: Array<[string, string]> =
@@ -623,11 +734,39 @@ const PROVIDER_FIRST_LEGACY_FALLBACK_FINALIZE_LABELS: Array<[string, string]> =
     ["finalizeIndexing.metrics.churn", "metrics.churn"],
     ["finalizeIndexing.metrics.testRefs", "metrics.testRefs"],
     ["finalizeIndexing.metrics.canonicalTests", "metrics.canonicalTests"],
+    ["finalizeIndexing.metrics.centralityFold", "metrics.centralityFold"],
     ["finalizeIndexing.metrics.loadExistingCanonical", "metrics.loadExisting"],
     ["finalizeIndexing.metrics.metricsFingerprint", "metrics.fingerprint"],
     ["finalizeIndexing.metrics.writeMetrics", "metrics.writeMetrics"],
     ["finalizeIndexing.metrics.writeWait", "metrics.writeWait"],
     ["finalizeIndexing.metrics.writeRows", "metrics.writeRows"],
+    [
+      "finalizeIndexing.metrics.writeRows.csvMaterialize",
+      "metrics.writeRows.csvMaterialize",
+    ],
+    [
+      "finalizeIndexing.metrics.writeRows.deleteExisting",
+      "metrics.writeRows.deleteExisting",
+    ],
+    ["finalizeIndexing.metrics.writeRows.copyFrom", "metrics.writeRows.copyFrom"],
+    ["finalizeIndexing.metrics.writeRows.prepareRows", "metrics.writeRows.prepare"],
+    ["finalizeIndexing.metrics.writeRows.probeExisting", "metrics.writeRows.probe"],
+    [
+      "finalizeIndexing.metrics.writeRows.copyMissing.csvMaterialize",
+      "metrics.writeRows.copyMissing.csv",
+    ],
+    [
+      "finalizeIndexing.metrics.writeRows.copyMissing.copyFrom",
+      "metrics.writeRows.copyMissing.copy",
+    ],
+    [
+      "finalizeIndexing.metrics.writeRows.createMissing",
+      "metrics.writeRows.createMissing",
+    ],
+    [
+      "finalizeIndexing.metrics.writeRows.mergeExisting",
+      "metrics.writeRows.mergeExisting",
+    ],
     ["finalizeIndexing.fileSummaries", "fileSummaries"],
     ["finalizeIndexing.fileSummaries.loadFiles", "fileSummaries.loadFiles"],
     [
@@ -688,6 +827,30 @@ const PROVIDER_FIRST_LEGACY_FALLBACK_PROCESS_WRITE_LABELS: Array<
   ["clustersAndProcesses.processWrite.upsertSteps", "upsertSteps"],
 ];
 
+const PROVIDER_FIRST_LEGACY_FALLBACK_ALGORITHM_LABELS: Array<
+  [string, string]
+> = [
+  ["clustersAndProcesses.algorithmStage.centralityWorker", "centralityWorker"],
+  ["clustersAndProcesses.algorithmStage.centralityPrepare", "centralityPrepare"],
+  ["clustersAndProcesses.algorithmStage.centralityWrite", "centralityWrite"],
+  [
+    "clustersAndProcesses.algorithmStage.centralityWrite.prepareRows",
+    "centralityWrite.prepare",
+  ],
+  [
+    "clustersAndProcesses.algorithmStage.centralityWrite.probeExisting",
+    "centralityWrite.probe",
+  ],
+  [
+    "clustersAndProcesses.algorithmStage.centralityWrite.updateExisting",
+    "centralityWrite.updateExisting",
+  ],
+  [
+    "clustersAndProcesses.algorithmStage.centralityWrite.mergeMissing",
+    "centralityWrite.mergeMissing",
+  ],
+];
+
 const PROVIDER_FIRST_LEGACY_FALLBACK_VERSION_LABELS: Array<[string, string]> = [
   ["versionSnapshot.latestVersion", "latest"],
   ["versionSnapshot.createVersion", "create"],
@@ -736,7 +899,8 @@ function formatProviderFirstLegacyFallbackDiagnosticLines(
   const phaseEntries = Object.entries(diagnostics.phases)
     .filter(
       ([phaseName]) =>
-        !hasFallbackDiagnosticChildPhase(diagnostics.phases, phaseName),
+        !hasFallbackDiagnosticChildPhase(diagnostics.phases, phaseName) &&
+        !isProviderFirstLegacyFallbackCounterPhase(phaseName),
     )
     .filter(([, durationMs]) => Number.isFinite(durationMs))
     .map(([phaseName, durationMs]) => ({ phaseName, durationMs }));
@@ -777,6 +941,16 @@ function formatProviderFirstLegacyFallbackDiagnosticLines(
   if (pass1DrainPhases.length > 0) {
     lines.push(`    pass1Drain: ${pass1DrainPhases.join(", ")}`);
   }
+  const pass1EdgeStatsLine =
+    formatProviderFirstLegacyFallbackPass1EdgeStatsLine(diagnostics);
+  if (pass1EdgeStatsLine) {
+    lines.push(pass1EdgeStatsLine);
+  }
+  const pass1EdgePhaseStatsLine =
+    formatProviderFirstLegacyFallbackPass1EdgePhaseStatsLine(diagnostics);
+  if (pass1EdgePhaseStatsLine) {
+    lines.push(pass1EdgePhaseStatsLine);
+  }
   const pass2Phases = PROVIDER_FIRST_LEGACY_FALLBACK_PASS2_LABELS.flatMap(
     ([phaseName, label]) => {
       const durationMs = diagnostics.phases[phaseName];
@@ -788,10 +962,41 @@ function formatProviderFirstLegacyFallbackDiagnosticLines(
   if (pass2Phases.length > 0) {
     lines.push(`    pass2: ${pass2Phases.join(", ")}`);
   }
+  const pass1ExtractionCacheLine =
+    formatProviderFirstLegacyFallbackPass1ExtractionCacheLine(diagnostics);
+  if (pass1ExtractionCacheLine) {
+    lines.push(pass1ExtractionCacheLine);
+  }
+  const pass2DispatchLine =
+    formatProviderFirstLegacyFallbackPass2DispatchLine(diagnostics);
+  if (pass2DispatchLine) {
+    lines.push(pass2DispatchLine);
+  }
+  const pass2WriteLine = formatProviderFirstLegacyFallbackPass2WriteLine(
+    diagnostics,
+  );
+  if (pass2WriteLine) {
+    lines.push(pass2WriteLine);
+  }
   const resolverLine =
     formatProviderFirstLegacyFallbackResolverDiagnosticLine(diagnostics);
   if (resolverLine) {
     lines.push(resolverLine);
+  }
+  const resolverPhaseLine =
+    formatProviderFirstLegacyFallbackResolverPhaseDiagnosticLine(diagnostics);
+  if (resolverPhaseLine) {
+    lines.push(resolverPhaseLine);
+  }
+  const resolverMetricLine =
+    formatProviderFirstLegacyFallbackResolverMetricDiagnosticLine(diagnostics);
+  if (resolverMetricLine) {
+    lines.push(resolverMetricLine);
+  }
+  const resolverTopFilesLine =
+    formatProviderFirstLegacyFallbackResolverTopFilesDiagnosticLine(diagnostics);
+  if (resolverTopFilesLine) {
+    lines.push(resolverTopFilesLine);
   }
   const finalizePhases = PROVIDER_FIRST_LEGACY_FALLBACK_FINALIZE_LABELS.flatMap(
     ([phaseName, label]) => {
@@ -838,6 +1043,18 @@ function formatProviderFirstLegacyFallbackDiagnosticLines(
     );
   if (processWritePhases.length > 0) {
     lines.push(`    derived.processWrite: ${processWritePhases.join(", ")}`);
+  }
+  const algorithmPhases =
+    PROVIDER_FIRST_LEGACY_FALLBACK_ALGORITHM_LABELS.flatMap(
+      ([phaseName, label]) => {
+        const durationMs = diagnostics.phases[phaseName];
+        return typeof durationMs === "number" && Number.isFinite(durationMs)
+          ? [`${label}=${durationMs}ms`]
+          : [];
+      },
+    );
+  if (algorithmPhases.length > 0) {
+    lines.push(`    derived.algorithm: ${algorithmPhases.join(", ")}`);
   }
   const versionPhases = PROVIDER_FIRST_LEGACY_FALLBACK_VERSION_LABELS.flatMap(
     ([phaseName, label]) => {
@@ -910,6 +1127,270 @@ function formatProviderFirstLegacyFallbackDiagnosticLines(
   return lines;
 }
 
+function formatProviderFirstLegacyFallbackPass1EdgeStatsLine(
+  diagnostics: ProviderFirstLegacyFallbackDiagnostics,
+): string | undefined {
+  const stats = diagnostics.pass1Drain?.edgeStats;
+  if (!stats || stats.totalEdges === 0) return undefined;
+  const primaryCauseSum =
+    (stats.repairCauseBelowThresholdKnownEdges ?? 0) +
+    (stats.repairCauseUnresolvedSourceEdges ?? 0) +
+    (stats.repairCauseBothEndpointsUnsafeEdges ?? 0) +
+    (stats.repairCauseSourceEndpointUnsafeOnlyEdges ?? 0) +
+    (stats.repairCauseTargetEndpointUnsafeOnlyEdges ?? 0) +
+    (stats.repairCauseTargetRealNotKnownEdges ?? 0) +
+    (stats.repairCauseTargetUnresolvedOrPlaceholderEdges ?? 0) +
+    (stats.repairCauseOtherEdges ?? 0);
+  const causeDrift = stats.repairEdges - primaryCauseSum;
+  const entries: Array<[string, number]> = [
+    ["schema", stats.edgeStatsSchemaVersion],
+    ["splitCalls", stats.splitCalls],
+    ["totalEdges", stats.totalEdges],
+    ["knownEndpointEdges", stats.knownEndpointEdges],
+    ["initialRepairEdges", stats.initialRepairEdges],
+    ["belowThresholdKnownEdges", stats.belowThresholdKnownEdges],
+    ["knownCopyFlushes", stats.knownCopyFlushes],
+    ["knownCopyEdges", stats.knownCopyEdges],
+    ["repairCalls", stats.repairCalls],
+    ["repairEdges", stats.repairEdges],
+    ["repairCauseBelowThresholdKnown", stats.repairCauseBelowThresholdKnownEdges],
+    ["repairCauseUnresolvedSource", stats.repairCauseUnresolvedSourceEdges],
+    ["repairCauseBothUnsafe", stats.repairCauseBothEndpointsUnsafeEdges],
+    [
+      "repairCauseSourceUnsafeOnly",
+      stats.repairCauseSourceEndpointUnsafeOnlyEdges,
+    ],
+    [
+      "repairCauseTargetUnsafeOnly",
+      stats.repairCauseTargetEndpointUnsafeOnlyEdges,
+    ],
+    ["repairCauseTargetRealNotKnown", stats.repairCauseTargetRealNotKnownEdges],
+    [
+      "repairCauseTargetNonReal",
+      stats.repairCauseTargetUnresolvedOrPlaceholderEdges,
+    ],
+    ["repairCauseOther", stats.repairCauseOtherEdges],
+    ["repairCauseSum", primaryCauseSum],
+    ["repairCauseDrift", causeDrift],
+    ["repairSourceKnown", stats.repairSourceKnownEdges],
+    ["repairSourceUnknownOrUnsafe", stats.repairSourceUnknownOrUnsafeEdges],
+    ["repairSourceKnownTargetOnly", stats.repairSourceKnownTargetOnlyEdges],
+    [
+      "repairSourceKnownTargetRealNotKnown",
+      stats.repairSourceKnownTargetRealNotKnownEdges,
+    ],
+    [
+      "repairSourceKnownTargetUnsafe",
+      stats.repairSourceKnownTargetUnsafeEdges,
+    ],
+    [
+      "repairSourceKnownTargetNonReal",
+      stats.repairSourceKnownTargetUnresolvedEdges,
+    ],
+  ];
+  const rendered = entries.flatMap(([label, value]) =>
+    Number.isFinite(value) ? [`${label}=${value}`] : [],
+  );
+  return rendered.length > 0
+    ? `    pass1Drain.edges: ${rendered.join(", ")}`
+    : undefined;
+}
+
+const PROVIDER_FIRST_LEGACY_FALLBACK_PASS1_EDGE_PHASE_STATS: Array<
+  [string, string]
+> = [
+  [
+    "insertEdges.knownEnsure.symbolMetadata.mergeFallback",
+    "knownEnsure.mergeFallback",
+  ],
+  ["insertEdges.knownEnsure.repoLink", "knownEnsure.repoLink"],
+  ["insertEdges.knownCopy.copyFrom", "knownCopy.copy"],
+  ["insertEdges.repair.endpointMetadata", "repair.endpointMetadata"],
+  ["insertEdges.repair.targetMetadata", "repair.targetMetadata"],
+  ["insertEdges.repair.targetRepoLink", "repair.targetRepoLink"],
+  ["insertEdges.repair.relationshipCreate", "repair.relationshipCreate"],
+];
+
+function formatProviderFirstLegacyFallbackPass1EdgePhaseStatsLine(
+  diagnostics: ProviderFirstLegacyFallbackDiagnostics,
+): string | undefined {
+  const phases = diagnostics.pass1Drain?.phases;
+  if (!phases) return undefined;
+  const rendered = PROVIDER_FIRST_LEGACY_FALLBACK_PASS1_EDGE_PHASE_STATS.flatMap(
+    ([phaseName, label]) => {
+      const phase = phases[phaseName as keyof typeof phases];
+      if (!phase || (phase.count === 0 && phase.rows === 0 && phase.maxMs === 0)) {
+        return [];
+      }
+      return [
+        `${label}.count=${phase.count}`,
+        `${label}.rows=${phase.rows}`,
+        `${label}.maxMs=${phase.maxMs}`,
+      ];
+    },
+  );
+  return rendered.length > 0
+    ? `    pass1Drain.edgePhaseStats: ${rendered.join(", ")}`
+    : undefined;
+}
+
+function formatProviderFirstLegacyFallbackPass1ExtractionCacheLine(
+  diagnostics: ProviderFirstLegacyFallbackDiagnostics,
+): string | undefined {
+  const phase = (name: string): number | undefined => {
+    const value = diagnostics.phases[`pass2.cache.pass1Extraction.${name}`];
+    return typeof value === "number" && Number.isFinite(value)
+      ? value
+      : undefined;
+  };
+  const bucket = (name: string, metric: string): number | undefined => {
+    const value =
+      diagnostics.phases[
+        `pass2.cache.pass1Extraction.bucket.${name}.${metric}`
+      ];
+    return typeof value === "number" && Number.isFinite(value)
+      ? value
+      : undefined;
+  };
+  const entries: Array<[string, number | undefined]> = [
+    ["entries", phase("entries")],
+    ["protectedEntries", phase("protectedEntries")],
+    ["protectedBytes", phase("protectedBytes")],
+    ["unprotectedEntries", phase("unprotectedEntries")],
+    ["protectedStores", phase("protectedStores")],
+    ["protectedStoreBytes", phase("protectedStoreBytes")],
+    ["unprotectedStores", phase("unprotectedStores")],
+    ["unprotectedStoreBytes", phase("unprotectedStoreBytes")],
+    ["protectedEvictions", phase("protectedEvictions")],
+    ["protectedEvictionBytes", phase("protectedEvictionBytes")],
+    ["unprotectedEvictions", phase("unprotectedEvictions")],
+    ["unprotectedEvictionBytes", phase("unprotectedEvictionBytes")],
+    ["target.targets", phase("target.targets")],
+    ["target.live", phase("target.live")],
+    ["target.evicted", phase("target.evicted")],
+    ["target.neverStored", phase("target.neverStored")],
+    ["target.targetBytes", phase("target.targetBytes")],
+    ["target.liveBytes", phase("target.liveBytes")],
+    ["target.evictedBytes", phase("target.evictedBytes")],
+    ["target.neverStoredBytes", phase("target.neverStoredBytes")],
+  ];
+  for (const bucketName of ["c", "h", "cc", "cpp", "hpp", "other"]) {
+    for (const metric of [
+      "entries",
+      "bytes",
+      "stores",
+      "storeBytes",
+      "evictions",
+      "evictionBytes",
+    ]) {
+      entries.push([
+        `${bucketName}.${metric}`,
+        bucket(bucketName, metric),
+      ]);
+    }
+    for (const metric of [
+      "targets",
+      "live",
+      "evicted",
+      "neverStored",
+      "targetBytes",
+      "liveBytes",
+      "evictedBytes",
+      "neverStoredBytes",
+    ]) {
+      entries.push([
+        `target.${bucketName}.${metric}`,
+        phase(`target.bucket.${bucketName}.${metric}`),
+      ]);
+    }
+  }
+  const rendered = entries.flatMap(([label, value]) =>
+    typeof value === "number" && Number.isFinite(value)
+      ? [`${label}=${value}`]
+      : [],
+  );
+  return rendered.length > 0
+    ? `    pass2.cache.pass1Extraction: ${rendered.join(", ")}`
+    : undefined;
+}
+
+function isProviderFirstLegacyFallbackCounterPhase(phaseName: string): boolean {
+  return (
+    phaseName.startsWith("pass2.cache.pass1Extraction.") ||
+    phaseName.startsWith("pass2.dispatch.")
+  );
+}
+
+function formatProviderFirstLegacyFallbackPass2DispatchLine(
+  diagnostics: ProviderFirstLegacyFallbackDiagnostics,
+): string | undefined {
+  const skippedNoExistingSymbols =
+    diagnostics.phases["pass2.dispatch.skippedNoExistingSymbols"];
+  if (
+    typeof skippedNoExistingSymbols !== "number" ||
+    !Number.isFinite(skippedNoExistingSymbols) ||
+    skippedNoExistingSymbols === 0
+  ) {
+    return undefined;
+  }
+  return `    pass2.dispatch: skippedNoExistingSymbols=${skippedNoExistingSymbols}`;
+}
+
+function formatProviderFirstLegacyFallbackPass2WriteLine(
+  diagnostics: ProviderFirstLegacyFallbackDiagnostics,
+): string | undefined {
+  const stats = diagnostics.pass2WriteStats;
+  if (!stats) return undefined;
+  const repairCauseSum: number = [
+    stats.repairUnresolvedSourceEdges,
+    stats.repairUnsafeSourceEndpointEdges,
+    stats.repairUnsafeTargetEndpointEdges,
+    stats.repairUnsafeBothEndpointEdges,
+    stats.repairOtherCauseEdges,
+  ].reduce<number>((sum, value) => sum + (value ?? 0), 0);
+  const repairCauseDrift =
+    typeof stats.repairEdges === "number"
+      ? stats.repairEdges - repairCauseSum
+      : undefined;
+  const effectiveRepairRows =
+    typeof stats.repairEdges === "number"
+      ? stats.repairEdges + (stats.smallKnownEndpointEdges ?? 0)
+      : undefined;
+  const entries: Array<[string, number | undefined]> = [
+    ["flushes", stats.flushes],
+    ["edges", stats.totalEdges],
+    ["copyFlushes", stats.copyFlushes],
+    ["copyEdges", stats.copyEdges],
+    ["copyPlaceholders", stats.copyPlaceholderTargets],
+    ["copyPlaceholderRows", stats.copyPlaceholderRows],
+    ["copyEnsuredRows", stats.copyEnsuredPlaceholderRows],
+    ["copySkippedRows", stats.copySkippedPlaceholderRows],
+    ["copyUnresolvedRows", stats.copyUnresolvedPlaceholderRows],
+    ["copyExternalRows", stats.copyExternalPlaceholderRows],
+    ["repairFlushes", stats.repairFlushes],
+    ["repairEdges", stats.repairInsertEdges],
+    ["repairPrimaryEdges", stats.repairEdges],
+    ["repairUnresolvedSource", stats.repairUnresolvedSourceEdges],
+    ["repairUnsafeSource", stats.repairUnsafeSourceEndpointEdges],
+    ["repairUnsafeTarget", stats.repairUnsafeTargetEndpointEdges],
+    ["repairUnsafeBoth", stats.repairUnsafeBothEndpointEdges],
+    ["repairOther", stats.repairOtherCauseEdges],
+    ["repairCauseSum", repairCauseSum],
+    ["repairCauseDrift", repairCauseDrift],
+    ["effectiveRepairRows", effectiveRepairRows],
+    ["smallCopyFlushes", stats.smallKnownEndpointFlushes],
+    ["smallCopyEdges", stats.smallKnownEndpointEdges],
+  ];
+  const rendered = entries.flatMap(([label, value]) =>
+    typeof value === "number" && Number.isFinite(value)
+      ? [`${label}=${value}`]
+      : [],
+  );
+  return rendered.length > 0
+    ? `    pass2.write: ${rendered.join(", ")}`
+    : undefined;
+}
+
 function formatProviderFirstLegacyFallbackResolverDiagnosticLine(
   diagnostics: ProviderFirstLegacyFallbackDiagnostics,
 ): string | undefined {
@@ -938,6 +1419,91 @@ function formatProviderFirstLegacyFallbackResolverDiagnosticLine(
   const omittedCount = entries.length - selected.length;
   const omittedSuffix = omittedCount > 0 ? ` (+${omittedCount} more)` : "";
   return `    pass2.resolvers: ${selected.join("; ")}${omittedSuffix}`;
+}
+
+function formatProviderFirstLegacyFallbackResolverPhaseDiagnosticLine(
+  diagnostics: ProviderFirstLegacyFallbackDiagnostics,
+): string | undefined {
+  const entries = Object.entries(diagnostics.resolverBreakdown ?? {})
+    .map(([resolverId, resolver]) => {
+      const phaseEntries = Object.entries(resolver.phases ?? {})
+        .filter(([, value]) => value > 0)
+        .sort(([, left], [, right]) => right - left);
+      return { resolverId, elapsedMs: resolver.elapsedMs, phaseEntries };
+    })
+    .filter((entry) => entry.phaseEntries.length > 0)
+    .sort((left, right) => right.elapsedMs - left.elapsedMs);
+  if (entries.length === 0) return undefined;
+  const selected = entries.slice(0, 5).map((entry) => {
+    const phases = entry.phaseEntries
+      .map(([phaseName, durationMs]) => `${phaseName}=${durationMs}ms`)
+      .join(",");
+    return `${entry.resolverId} ${phases}`;
+  });
+  const omittedCount = entries.length - selected.length;
+  const omittedSuffix = omittedCount > 0 ? ` (+${omittedCount} more)` : "";
+  return `    pass2.resolverPhases: ${selected.join("; ")}${omittedSuffix}`;
+}
+
+function formatProviderFirstLegacyFallbackResolverMetricDiagnosticLine(
+  diagnostics: ProviderFirstLegacyFallbackDiagnostics,
+): string | undefined {
+  const entries = Object.entries(diagnostics.resolverBreakdown ?? {})
+    .map(([resolverId, resolver]) => {
+      const metricEntries = Object.entries(resolver.metrics ?? {})
+        .filter(([, value]) => value > 0)
+        .sort(([, left], [, right]) => right - left);
+      return { resolverId, elapsedMs: resolver.elapsedMs, metricEntries };
+    })
+    .filter((entry) => entry.metricEntries.length > 0)
+    .sort((left, right) => right.elapsedMs - left.elapsedMs);
+  if (entries.length === 0) return undefined;
+  const selected = entries.slice(0, 5).map((entry) => {
+    const metrics = entry.metricEntries
+      .slice(0, 20)
+      .map(([metricName, value]) => `${metricName}=${value}`)
+      .join(",");
+    return `${entry.resolverId} ${metrics}`;
+  });
+  const omittedCount = entries.length - selected.length;
+  const omittedSuffix = omittedCount > 0 ? ` (+${omittedCount} more)` : "";
+  return `    pass2.resolverMetrics: ${selected.join("; ")}${omittedSuffix}`;
+}
+
+function formatProviderFirstLegacyFallbackResolverTopFilesDiagnosticLine(
+  diagnostics: ProviderFirstLegacyFallbackDiagnostics,
+): string | undefined {
+  const entries = Object.entries(diagnostics.resolverBreakdown ?? {})
+    .map(([resolverId, resolver]) => {
+      const topFileEntries = Object.entries(resolver.topFiles ?? {})
+        .filter(([, files]) => files.length > 0)
+        .sort(([left], [right]) => left.localeCompare(right));
+      return { resolverId, elapsedMs: resolver.elapsedMs, topFileEntries };
+    })
+    .filter((entry) => entry.topFileEntries.length > 0)
+    .sort((left, right) => right.elapsedMs - left.elapsedMs);
+  if (entries.length === 0) return undefined;
+  const selected = entries.slice(0, 3).map((entry) => {
+    const phases = entry.topFileEntries
+      .slice(0, 6)
+      .map(([phaseName, files]) => {
+        const renderedFiles = files
+          .map((file) => {
+            const bytesSuffix =
+              typeof file.bytes === "number" && Number.isFinite(file.bytes)
+                ? `:${file.bytes}b`
+                : "";
+            return `${encodeURIComponent(file.filePath)}:${file.elapsedMs}ms${bytesSuffix}`;
+          })
+          .join("|");
+        return `${phaseName}=[${renderedFiles}]`;
+      })
+      .join(",");
+    return `${entry.resolverId} ${phases}`;
+  });
+  const omittedCount = entries.length - selected.length;
+  const omittedSuffix = omittedCount > 0 ? ` (+${omittedCount} more)` : "";
+  return `    pass2.resolverTopFiles: ${selected.join("; ")}${omittedSuffix}`;
 }
 
 function sumKnownLegacyFallbackDiagnosticPhases(
@@ -1818,9 +2384,11 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
 
       if (options.diagnostics && stats.timings) {
         console.log(`\n  Timings (total=${stats.timings.totalMs}ms):`);
-        const entries = Object.entries(stats.timings.phases).sort(
-          (a, b) => b[1] - a[1],
-        );
+        const entries = Object.entries(stats.timings.phases)
+          .filter(
+            ([phase]) => !isProviderFirstLegacyFallbackCounterPhase(phase),
+          )
+          .sort((a, b) => b[1] - a[1]);
         for (const [phase, ms] of entries) {
           console.log(`    ${ms.toString().padStart(6)}ms  ${phase}`);
         }

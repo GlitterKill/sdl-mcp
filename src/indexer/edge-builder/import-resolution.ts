@@ -61,6 +61,7 @@ export async function resolveImportTargets(
       importerRelPath,
       specifier: imp.specifier,
       extensions,
+      knownRepoPaths: cache?.fileByRelPath,
     });
 
     const importedNames = new Set<string>();

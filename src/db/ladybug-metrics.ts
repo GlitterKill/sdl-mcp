@@ -37,9 +37,75 @@ const METRICS_COPY_COLUMNS = [
 ] as const;
 const CSV_NULL_SENTINEL = "__sdl_ladybug_csv_null__";
 const METRICS_CSV_WRITE_BATCH_SIZE = 4096;
+const DEFAULT_METRICS_MISSING_COPY_THRESHOLD_ROWS = 512;
+const METRICS_EXISTING_PROBE_CHUNK_SIZE = 8192;
+const CENTRALITY_UPDATE_CHUNK_SIZE = 4096;
 
 export interface SymbolMissingMetricsRow {
   symbolId: string;
+}
+
+export type ReplaceMetricsForRepoCopyPhaseName =
+  | "csvMaterialize"
+  | "deleteExisting"
+  | "copyFrom";
+
+export interface ReplaceMetricsForRepoCopyOptions {
+  measurePhase?: <T>(
+    phaseName: ReplaceMetricsForRepoCopyPhaseName,
+    fn: () => Promise<T>,
+  ) => Promise<T>;
+}
+
+export type UpsertMetricsBatchPhaseName =
+  | "prepareRows"
+  | "probeExisting"
+  | "copyMissing.csvMaterialize"
+  | "copyMissing.copyFrom"
+  | "createMissing"
+  | "mergeExisting";
+
+export interface UpsertMetricsBatchStats {
+  chunks: number;
+  missingRows: number;
+  existingRows: number;
+  copyMissingRows: number;
+  createMissingRows: number;
+}
+
+export interface UpsertMetricsBatchOptions {
+  copyMissingThresholdRows?: number;
+  measurePhase?: <T>(
+    phaseName: UpsertMetricsBatchPhaseName,
+    fn: () => Promise<T> | T,
+  ) => Promise<T>;
+  stats?: UpsertMetricsBatchStats;
+}
+
+export type UpsertCentralityBatchPhaseName =
+  | "prepareRows"
+  | "probeExisting"
+  | "updateExisting"
+  | "mergeMissing";
+
+export interface UpsertCentralityBatchStats {
+  chunks: number;
+  missingRows: number;
+  existingRows: number;
+}
+
+export interface UpsertCentralityBatchOptions {
+  /**
+   * Use only when the caller has just materialized Metrics rows for every
+   * symbol in `rows`. This avoids a full existence probe in post-index derived
+   * refresh, where probing can dominate the centrality write.
+   */
+  assumeRowsExist?: boolean;
+  measurePhase?: <T>(
+    phaseName: UpsertCentralityBatchPhaseName,
+    fn: () => Promise<T> | T,
+  ) => Promise<T>;
+  stats?: UpsertCentralityBatchStats;
 }
 
 export interface RepoFanCountRow {
@@ -98,38 +164,155 @@ export async function upsertMetrics(
 export async function upsertMetricsBatch(
   conn: Connection,
   rows: MetricsRow[],
+  options?: UpsertMetricsBatchOptions,
 ): Promise<void> {
   if (rows.length === 0) return;
   const CHUNK = 256;
+  const measurePhase =
+    options?.measurePhase ??
+    (async <T>(
+      _phaseName: UpsertMetricsBatchPhaseName,
+      fn: () => Promise<T> | T,
+    ): Promise<T> => await fn());
+  const copyMissingThresholdRows =
+    options?.copyMissingThresholdRows ??
+    DEFAULT_METRICS_MISSING_COPY_THRESHOLD_ROWS;
+  rows = await measurePhase("prepareRows", () => dedupeMetricsRows(rows));
   await withTransaction(conn, async (txConn) => {
-    for (let i = 0; i < rows.length; i += CHUNK) {
-      const chunk = rows.slice(i, i + CHUNK).map((m) => ({
-        symbolId: m.symbolId,
-        fanIn: m.fanIn,
-        fanOut: m.fanOut,
-        churn30d: m.churn30d,
-        testRefsJson: m.testRefsJson,
-        canonicalTestJson: m.canonicalTestJson,
-        pageRank: m.pageRank ?? 0,
-        kCore: m.kCore ?? 0,
-        updatedAt: m.updatedAt,
-      }));
-      await exec(
-        txConn,
-        `UNWIND $rows AS row
-         MERGE (m:Metrics {symbolId: row.symbolId})
-         SET m.fanIn = row.fanIn,
-             m.fanOut = row.fanOut,
-             m.churn30d = row.churn30d,
-             m.testRefsJson = row.testRefsJson,
-             m.canonicalTestJson = row.canonicalTestJson,
-             m.pageRank = row.pageRank,
-             m.kCore = row.kCore,
-             m.updatedAt = row.updatedAt`,
-        { rows: chunk },
+    const existingSymbolIds = await measurePhase("probeExisting", () =>
+      getExistingMetricSymbolIds(txConn, rows.map((row) => row.symbolId)),
+    );
+    const missingRows: MetricsRow[] = [];
+    const existingRows: MetricsRow[] = [];
+    for (const row of rows) {
+      if (existingSymbolIds.has(row.symbolId)) {
+        existingRows.push(row);
+      } else {
+        missingRows.push(row);
+      }
+    }
+    if (options?.stats) {
+      options.stats.chunks += Math.ceil(rows.length / CHUNK);
+      options.stats.missingRows += missingRows.length;
+      options.stats.existingRows += existingRows.length;
+    }
+
+    if (missingRows.length >= copyMissingThresholdRows) {
+      if (options?.stats) options.stats.copyMissingRows += missingRows.length;
+      const tempDir = await mkdtemp(join(tmpdir(), "sdl-metrics-missing-"));
+      const filePath = join(tempDir, "metrics.csv");
+      try {
+        await measurePhase("copyMissing.csvMaterialize", () =>
+          writeMetricsCsv(filePath, missingRows),
+        );
+        await measurePhase("copyMissing.copyFrom", () =>
+          execDdl(
+            txConn,
+            `COPY Metrics FROM '${escapeCopyPath(filePath)}' ` +
+              `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
+          ),
+        );
+      } finally {
+        await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+      }
+    } else if (missingRows.length > 0) {
+      if (options?.stats) options.stats.createMissingRows += missingRows.length;
+      for (let i = 0; i < missingRows.length; i += CHUNK) {
+        const chunk = toMetricsParamRows(missingRows.slice(i, i + CHUNK));
+        await measurePhase("createMissing", () =>
+          exec(
+            txConn,
+            `UNWIND $rows AS row
+             CREATE (:Metrics {
+               symbolId: row.symbolId,
+               fanIn: row.fanIn,
+               fanOut: row.fanOut,
+               churn30d: row.churn30d,
+               testRefsJson: row.testRefsJson,
+               canonicalTestJson: row.canonicalTestJson,
+               pageRank: row.pageRank,
+               kCore: row.kCore,
+               updatedAt: row.updatedAt
+             })`,
+            { rows: chunk },
+          ),
+        );
+      }
+    }
+
+    for (let i = 0; i < existingRows.length; i += CHUNK) {
+      const chunk = toMetricsParamRows(existingRows.slice(i, i + CHUNK));
+      await measurePhase("mergeExisting", () =>
+        exec(
+          txConn,
+          `UNWIND $rows AS row
+           MATCH (m:Metrics {symbolId: row.symbolId})
+           SET m.fanIn = row.fanIn,
+               m.fanOut = row.fanOut,
+               m.churn30d = row.churn30d,
+               m.testRefsJson = row.testRefsJson,
+               m.canonicalTestJson = row.canonicalTestJson,
+               m.pageRank = row.pageRank,
+               m.kCore = row.kCore,
+               m.updatedAt = row.updatedAt`,
+          { rows: chunk },
+        ),
       );
     }
   });
+}
+
+function dedupeMetricsRows(rows: readonly MetricsRow[]): MetricsRow[] {
+  const bySymbolId = new Map<string, MetricsRow>();
+  for (const row of rows) {
+    bySymbolId.set(row.symbolId, row);
+  }
+  return [...bySymbolId.values()];
+}
+
+function toMetricsParamRows(rows: readonly MetricsRow[]): Array<{
+  symbolId: string;
+  fanIn: number;
+  fanOut: number;
+  churn30d: number;
+  testRefsJson: string | null;
+  canonicalTestJson: string | null;
+  pageRank: number;
+  kCore: number;
+  updatedAt: string;
+}> {
+  return rows.map((m) => ({
+    symbolId: m.symbolId,
+    fanIn: m.fanIn,
+    fanOut: m.fanOut,
+    churn30d: m.churn30d,
+    testRefsJson: m.testRefsJson,
+    canonicalTestJson: m.canonicalTestJson,
+    pageRank: m.pageRank ?? 0,
+    kCore: m.kCore ?? 0,
+    updatedAt: m.updatedAt,
+  }));
+}
+
+async function getExistingMetricSymbolIds(
+  conn: Connection,
+  symbolIds: readonly string[],
+): Promise<Set<string>> {
+  const existing = new Set<string>();
+  for (let i = 0; i < symbolIds.length; i += METRICS_EXISTING_PROBE_CHUNK_SIZE) {
+    const chunk = symbolIds.slice(i, i + METRICS_EXISTING_PROBE_CHUNK_SIZE);
+    const rows = await queryAll<{ symbolId: string }>(
+      conn,
+      `MATCH (m:Metrics)
+       WHERE m.symbolId IN $symbolIds
+       RETURN m.symbolId AS symbolId`,
+      { symbolIds: chunk },
+    );
+    for (const row of rows) {
+      existing.add(row.symbolId);
+    }
+  }
+  return existing;
 }
 
 export async function getMetricsFingerprint(
@@ -200,27 +383,38 @@ export async function replaceMetricsForRepoCopy(
   conn: Connection,
   repoId: string,
   rows: MetricsRow[],
+  options?: ReplaceMetricsForRepoCopyOptions,
 ): Promise<void> {
   const tempDir = await mkdtemp(join(tmpdir(), "sdl-metrics-"));
   const filePath = join(tempDir, "metrics.csv");
+  const measurePhase =
+    options?.measurePhase ??
+    (async <T>(
+      _phaseName: ReplaceMetricsForRepoCopyPhaseName,
+      fn: () => Promise<T>,
+    ): Promise<T> => await fn());
   try {
     if (rows.length > 0) {
-      await writeMetricsCsv(filePath, rows);
+      await measurePhase("csvMaterialize", () => writeMetricsCsv(filePath, rows));
     }
     await withTransaction(conn, async (txConn) => {
-      await exec(
-        txConn,
-        `MATCH (s:Symbol)
-         WHERE s.repoId = $repoId
-         MATCH (m:Metrics {symbolId: s.symbolId})
-         DELETE m`,
-        { repoId },
+      await measurePhase("deleteExisting", () =>
+        exec(
+          txConn,
+          `MATCH (s:Symbol)
+           WHERE s.repoId = $repoId
+           MATCH (m:Metrics {symbolId: s.symbolId})
+           DELETE m`,
+          { repoId },
+        ),
       );
       if (rows.length > 0) {
-        await execDdl(
-          txConn,
-          `COPY Metrics FROM '${escapeCopyPath(filePath)}' ` +
-            `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
+        await measurePhase("copyFrom", () =>
+          execDdl(
+            txConn,
+            `COPY Metrics FROM '${escapeCopyPath(filePath)}' ` +
+              `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
+          ),
         );
       }
     });
@@ -397,23 +591,96 @@ export async function upsertCentralityBatch(
     kCore: number;
     updatedAt: string;
   }>,
+  options?: UpsertCentralityBatchOptions,
 ): Promise<void> {
   if (rows.length === 0) return;
-  const CHUNK = 256;
+  const measurePhase =
+    options?.measurePhase ??
+    (async <T>(
+      _phaseName: UpsertCentralityBatchPhaseName,
+      fn: () => Promise<T> | T,
+    ): Promise<T> => await fn());
+  rows = await measurePhase("prepareRows", () => dedupeCentralityRows(rows));
   await withTransaction(conn, async (txConn) => {
-    for (let i = 0; i < rows.length; i += CHUNK) {
-      const chunk = rows.slice(i, i + CHUNK);
-      await exec(
-        txConn,
-        `UNWIND $rows AS row
-         MERGE (m:Metrics {symbolId: row.symbolId})
-         SET m.pageRank = row.pageRank,
-             m.kCore = row.kCore,
-             m.updatedAt = row.updatedAt`,
-        { rows: chunk },
+    let existingRows: typeof rows = [];
+    const missingRows: typeof rows = [];
+    if (options?.assumeRowsExist) {
+      // Keep the array reference; spreading 250k+ centrality rows overflows
+      // the JS call stack before DB chunking begins.
+      existingRows = rows;
+    } else {
+      const existingSymbolIds = await measurePhase("probeExisting", () =>
+        getExistingMetricSymbolIds(txConn, rows.map((row) => row.symbolId)),
+      );
+      for (const row of rows) {
+        if (existingSymbolIds.has(row.symbolId)) {
+          existingRows.push(row);
+        } else {
+          missingRows.push(row);
+        }
+      }
+    }
+    if (options?.stats) {
+      options.stats.chunks += Math.ceil(rows.length / CENTRALITY_UPDATE_CHUNK_SIZE);
+      options.stats.existingRows += existingRows.length;
+      options.stats.missingRows += missingRows.length;
+    }
+
+    for (let i = 0; i < existingRows.length; i += CENTRALITY_UPDATE_CHUNK_SIZE) {
+      const chunk = existingRows.slice(i, i + CENTRALITY_UPDATE_CHUNK_SIZE);
+      await measurePhase("updateExisting", () =>
+        exec(
+          txConn,
+          `UNWIND $rows AS row
+           MATCH (m:Metrics {symbolId: row.symbolId})
+           SET m.pageRank = row.pageRank,
+               m.kCore = row.kCore,
+               m.updatedAt = row.updatedAt`,
+          { rows: chunk },
+        ),
+      );
+    }
+
+    for (let i = 0; i < missingRows.length; i += CENTRALITY_UPDATE_CHUNK_SIZE) {
+      const chunk = missingRows.slice(i, i + CENTRALITY_UPDATE_CHUNK_SIZE);
+      await measurePhase("mergeMissing", () =>
+        exec(
+          txConn,
+          `UNWIND $rows AS row
+           MERGE (m:Metrics {symbolId: row.symbolId})
+           SET m.pageRank = row.pageRank,
+               m.kCore = row.kCore,
+               m.updatedAt = row.updatedAt`,
+          { rows: chunk },
+        ),
       );
     }
   });
+}
+
+function dedupeCentralityRows(
+  rows: readonly {
+    symbolId: string;
+    pageRank: number;
+    kCore: number;
+    updatedAt: string;
+  }[],
+): Array<{
+  symbolId: string;
+  pageRank: number;
+  kCore: number;
+  updatedAt: string;
+}> {
+  const bySymbolId = new Map<string, {
+    symbolId: string;
+    pageRank: number;
+    kCore: number;
+    updatedAt: string;
+  }>();
+  for (const row of rows) {
+    bySymbolId.set(row.symbolId, row);
+  }
+  return [...bySymbolId.values()];
 }
 
 /**

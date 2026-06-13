@@ -6,6 +6,7 @@ import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { classifyDependencyTarget } from "../db/symbol-placeholders.js";
 import { updateMetricsForRepo } from "../graph/metrics.js";
+import type { FoldedCentralityResult } from "../graph/metrics.js";
 import { logger } from "../util/logger.js";
 import { refreshSymbolEmbeddings } from "./embeddings.js";
 import {
@@ -48,6 +49,7 @@ export interface FinalizeIndexingResult {
     callEdges: Array<{ callerId: string; calleeId: string }>;
     clusterEdges: Array<{ fromSymbolId: string; toSymbolId: string }>;
   };
+  foldedCentrality?: FoldedCentralityResult;
 }
 
 export interface IndexQualityStats {
@@ -145,6 +147,7 @@ export async function finalizeIndexing({
     updateMetricsForRepo(repoId, changedFileIds, {
       includeTimings,
       changedTestFilePaths,
+      algorithmRefresh: appConfig.indexing?.algorithmRefresh,
     }),
   );
   const fileSummariesTask = measureSubphase("fileSummaries", async () => {
@@ -375,6 +378,7 @@ export async function finalizeIndexing({
     qualityStats,
     timings,
     sharedGraph: metricsResult.sharedGraph,
+    foldedCentrality: metricsResult.foldedCentrality,
   };
 }
 

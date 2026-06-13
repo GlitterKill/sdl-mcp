@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 
 import {
   readFileAsync,
+  readFileAsyncWithTiming,
   statAsync,
   existsAsync,
   createAsyncFsOperations,
@@ -47,6 +48,18 @@ describe("asyncFs utilities", () => {
           return true;
         },
       );
+    });
+  });
+
+  describe("readFileAsyncWithTiming", () => {
+    it("reads content and reports non-negative timing buckets", async () => {
+      const result = await readFileAsyncWithTiming(TEST_FILE, "utf-8");
+
+      assert.strictEqual(result.content, TEST_CONTENT);
+      assert.ok(result.elapsedMs >= 0);
+      assert.ok(result.activeMs >= 0);
+      assert.ok(result.queuedMs >= 0);
+      assert.ok(result.elapsedMs >= result.activeMs);
     });
   });
 
@@ -116,6 +129,13 @@ describe("asyncFs utilities", () => {
       const ops = createAsyncFsOperations();
       const content = await ops.readFile(TEST_FILE);
       assert.strictEqual(content, TEST_CONTENT);
+    });
+
+    it("instance reads files with timing attribution", async () => {
+      const ops = createAsyncFsOperations();
+      const result = await ops.readFileWithTiming(TEST_FILE);
+      assert.strictEqual(result.content, TEST_CONTENT);
+      assert.ok(result.elapsedMs >= result.activeMs);
     });
 
     it("instance stat works correctly", async () => {

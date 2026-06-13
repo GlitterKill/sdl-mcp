@@ -391,6 +391,32 @@ describe("C++ Adapter", () => {
       assert.ok(getMethodCalls.length > 0, "Should find get method calls");
     });
 
+    it("assigns calls to innermost enclosing C++ symbol", () => {
+      const content = `
+namespace Demo {
+class Worker {
+public:
+  void helper() {}
+  void outer() {
+    helper();
+  }
+};
+}
+      `;
+
+      const tree = adapter.parse(content, "test.cpp");
+      assert.ok(tree);
+
+      const symbols = adapter.extractSymbols(tree, content, "test.cpp");
+      const calls = adapter.extractCalls(tree, content, "test.cpp", symbols);
+      const outerSymbol = symbols.find((symbol) => symbol.name === "Demo::outer");
+      const helperCall = calls.find((call) => call.calleeIdentifier === "helper");
+
+      assert.ok(outerSymbol);
+      assert.ok(helperCall);
+      assert.strictEqual(helperCall.callerNodeId, outerSymbol.nodeId);
+    });
+
     it("should extract std library method calls", () => {
       const content = readFileSync(
         join(process.cwd(), "tests/fixtures/cpp/calls.cpp"),

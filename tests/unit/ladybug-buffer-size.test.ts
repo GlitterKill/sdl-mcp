@@ -1,9 +1,13 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 
-import { resolveLadybugBufferManagerSizeBytes } from "../../dist/db/ladybug.js";
+import {
+  resolveLadybugBufferManagerSizeBytes,
+  resolveLadybugCheckpointThresholdBytes,
+} from "../../dist/db/ladybug.js";
 
 const ONE_GB = 1024 * 1024 * 1024;
+const ONE_MB = 1024 * 1024;
 
 describe("resolveLadybugBufferManagerSizeBytes", () => {
   it("auto-sizes to 25% of system memory within bounds", () => {
@@ -65,6 +69,49 @@ describe("resolveLadybugBufferManagerSizeBytes", () => {
         String(512 * 1024 * 1024),
       ),
       2 * ONE_GB,
+    );
+  });
+});
+
+describe("resolveLadybugCheckpointThresholdBytes", () => {
+  it("defaults to 128MB", () => {
+    assert.strictEqual(resolveLadybugCheckpointThresholdBytes({}), 128 * ONE_MB);
+  });
+
+  it("honors a bounded environment override", () => {
+    assert.strictEqual(
+      resolveLadybugCheckpointThresholdBytes({
+        SDL_MCP_LADYBUG_CHECKPOINT_THRESHOLD_BYTES: String(512 * ONE_MB),
+      }),
+      512 * ONE_MB,
+    );
+  });
+
+  it("prefers explicit value over environment override", () => {
+    assert.strictEqual(
+      resolveLadybugCheckpointThresholdBytes(
+        {
+          SDL_MCP_LADYBUG_CHECKPOINT_THRESHOLD_BYTES: String(512 * ONE_MB),
+        },
+        256 * ONE_MB,
+      ),
+      256 * ONE_MB,
+    );
+  });
+
+  it("rejects invalid or out-of-bounds overrides", () => {
+    assert.strictEqual(
+      resolveLadybugCheckpointThresholdBytes({
+        SDL_MCP_LADYBUG_CHECKPOINT_THRESHOLD_BYTES: "not-a-number",
+      }),
+      128 * ONE_MB,
+    );
+    assert.strictEqual(
+      resolveLadybugCheckpointThresholdBytes(
+        {},
+        8 * ONE_MB,
+      ),
+      128 * ONE_MB,
     );
   });
 });

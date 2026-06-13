@@ -1,9 +1,14 @@
 import { performance } from "node:perf_hooks";
 
-import { withWriteConn } from "../../db/ladybug.js";
+import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../db/ladybug-symbols.js";
-import type { EdgeRow } from "../../db/ladybug-edges.js";
+import type {
+  DependencyTargetEnsurePhaseName,
+  EdgeRow,
+  InsertEdgesPhaseName,
+  KnownSymbolEdgesCopyPhaseName,
+} from "../../db/ladybug-edges.js";
 import type { SymbolReferenceRow } from "../../db/ladybug-embeddings.js";
 import type { FileRow } from "../../db/ladybug-repos.js";
 import { classifyDependencyTarget } from "../../db/symbol-placeholders.js";
@@ -29,12 +34,46 @@ export const BATCH_PERSIST_WRITE_PHASES = [
   "insertSymbolReferences",
   "upsertSymbols",
   "insertEdges",
+  "insertEdges.split",
+  "insertEdges.knownEnsure",
+  "insertEdges.knownEnsure.symbolMetadata.probeExisting",
+  "insertEdges.knownEnsure.symbolMetadata.copyMissing.csvMaterialize",
+  "insertEdges.knownEnsure.symbolMetadata.copyMissing.copyFrom",
+  "insertEdges.knownEnsure.symbolMetadata.matchExisting",
+  "insertEdges.knownEnsure.symbolMetadata.mergeFallback",
+  "insertEdges.knownEnsure.repoLink",
+  "insertEdges.knownCopy",
+  "insertEdges.knownCopy.txnBegin",
+  "insertEdges.knownCopy.txnBody",
+  "insertEdges.knownCopy.txnCommit",
+  "insertEdges.knownCopy.csvMaterialize",
+  "insertEdges.knownCopy.copyFrom",
+  "insertEdges.knownCopy.tempCleanup",
+  "insertEdges.repair",
+  "insertEdges.repair.dedupe",
+  "insertEdges.repair.groupByRepo",
+  "insertEdges.repair.prepareRows",
+  "insertEdges.repair.sourceRepoLink.symbolMetadata",
+  "insertEdges.repair.sourceRepoLink.repoLink",
+  "insertEdges.repair.endpointMetadata",
+  "insertEdges.repair.targetMetadata",
+  "insertEdges.repair.targetRepoLink",
+  "insertEdges.repair.relationshipCreate",
+  "insertEdges.repair.relationshipUpdate",
 ] as const;
 
 export const PASS1_KNOWN_ENDPOINT_COPY_THRESHOLD = 128;
 
 export type BatchPersistWritePhase =
   (typeof BATCH_PERSIST_WRITE_PHASES)[number];
+
+type BatchPersistTimePhase = (
+  phase: BatchPersistWritePhase,
+  rows: number,
+  body: () => Promise<void>,
+) => Promise<void>;
+
+type LadybugConnection = Parameters<typeof ladybugDb.insertEdges>[0];
 
 export interface BatchPersistPhaseDiagnostics {
   count: number;
@@ -55,6 +94,33 @@ export interface BatchPersistBatchDiagnostics {
   phaseMs: Record<BatchPersistWritePhase, number>;
 }
 
+export interface BatchPersistEdgeDiagnostics {
+  edgeStatsSchemaVersion: number;
+  splitCalls: number;
+  totalEdges: number;
+  knownEndpointEdges: number;
+  initialRepairEdges: number;
+  belowThresholdKnownEdges: number;
+  knownCopyFlushes: number;
+  knownCopyEdges: number;
+  repairCalls: number;
+  repairEdges: number;
+  repairCauseBelowThresholdKnownEdges: number;
+  repairCauseUnresolvedSourceEdges: number;
+  repairCauseBothEndpointsUnsafeEdges: number;
+  repairCauseSourceEndpointUnsafeOnlyEdges: number;
+  repairCauseTargetEndpointUnsafeOnlyEdges: number;
+  repairCauseTargetRealNotKnownEdges: number;
+  repairCauseTargetUnresolvedOrPlaceholderEdges: number;
+  repairCauseOtherEdges: number;
+  repairSourceKnownEdges: number;
+  repairSourceUnknownOrUnsafeEdges: number;
+  repairSourceKnownTargetOnlyEdges: number;
+  repairSourceKnownTargetRealNotKnownEdges: number;
+  repairSourceKnownTargetUnsafeEdges: number;
+  repairSourceKnownTargetUnresolvedEdges: number;
+}
+
 export interface BatchPersistDrainDiagnostics {
   batches: number;
   totalMs: number;
@@ -67,6 +133,7 @@ export interface BatchPersistDrainDiagnostics {
     existingFiles: number;
   };
   phases: Record<BatchPersistWritePhase, BatchPersistPhaseDiagnostics>;
+  edgeStats: BatchPersistEdgeDiagnostics;
   largestBatch: BatchPersistBatchDiagnostics | null;
 }
 
@@ -118,6 +185,32 @@ function createDrainDiagnostics(): BatchPersistDrainDiagnostics {
       existingFiles: 0,
     },
     phases: createPhaseDiagnostics(),
+    edgeStats: {
+      edgeStatsSchemaVersion: 2,
+      splitCalls: 0,
+      totalEdges: 0,
+      knownEndpointEdges: 0,
+      initialRepairEdges: 0,
+      belowThresholdKnownEdges: 0,
+      knownCopyFlushes: 0,
+      knownCopyEdges: 0,
+      repairCalls: 0,
+      repairEdges: 0,
+      repairCauseBelowThresholdKnownEdges: 0,
+      repairCauseUnresolvedSourceEdges: 0,
+      repairCauseBothEndpointsUnsafeEdges: 0,
+      repairCauseSourceEndpointUnsafeOnlyEdges: 0,
+      repairCauseTargetEndpointUnsafeOnlyEdges: 0,
+      repairCauseTargetRealNotKnownEdges: 0,
+      repairCauseTargetUnresolvedOrPlaceholderEdges: 0,
+      repairCauseOtherEdges: 0,
+      repairSourceKnownEdges: 0,
+      repairSourceUnknownOrUnsafeEdges: 0,
+      repairSourceKnownTargetOnlyEdges: 0,
+      repairSourceKnownTargetRealNotKnownEdges: 0,
+      repairSourceKnownTargetUnsafeEdges: 0,
+      repairSourceKnownTargetUnresolvedEdges: 0,
+    },
     largestBatch: null,
   };
 }
@@ -135,6 +228,7 @@ function cloneDrainDiagnostics(
         { ...diagnostics.phases[phase] },
       ]),
     ) as Record<BatchPersistWritePhase, BatchPersistPhaseDiagnostics>,
+    edgeStats: { ...diagnostics.edgeStats },
     largestBatch: diagnostics.largestBatch
       ? {
           ...diagnostics.largestBatch,
@@ -146,6 +240,196 @@ function cloneDrainDiagnostics(
 
 function isUnresolvedSymbolId(symbolId: string): boolean {
   return symbolId.startsWith("unresolved:");
+}
+
+function copyRelEndpointIsSafe(value: string): boolean {
+  return value.length > 0 && !/[",\r\n]/.test(value);
+}
+
+function sanitizeRelationshipCopyCell(value: string): string {
+  return value.replace(/[",\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function toPass1RepairCopyEdge(edge: EdgeRow): EdgeRow {
+  if (typeof edge.provenance !== "string") return edge;
+  const provenance = sanitizeRelationshipCopyCell(edge.provenance);
+  return provenance === edge.provenance ? edge : { ...edge, provenance };
+}
+
+type Pass1RepairCause =
+  | "belowThresholdKnown"
+  | "unresolvedSource"
+  | "unsafeBoth"
+  | "unsafeSourceOnly"
+  | "unsafeTargetOnly"
+  | "targetRealNotKnown"
+  | "targetUnresolvedOrPlaceholder"
+  | "other";
+
+function isPass1SourceKnown(
+  edge: EdgeRow,
+  sameBatchSymbolIds: ReadonlySet<string>,
+  knownPersistedSymbolIds: ReadonlySet<string>,
+): boolean {
+  return (
+    !isUnresolvedSymbolId(edge.fromSymbolId) &&
+    copyRelEndpointIsSafe(edge.fromSymbolId) &&
+    (sameBatchSymbolIds.has(edge.fromSymbolId) ||
+      knownPersistedSymbolIds.has(edge.fromSymbolId))
+  );
+}
+
+function pass1TargetMeta(edge: EdgeRow): ReturnType<typeof classifyDependencyTarget> {
+  return edge.targetMeta ?? classifyDependencyTarget(edge.toSymbolId);
+}
+
+function isPass1TargetRealNotKnown(
+  edge: EdgeRow,
+  sameBatchSymbolIds: ReadonlySet<string>,
+  knownPersistedSymbolIds: ReadonlySet<string>,
+): boolean {
+  const targetMeta = pass1TargetMeta(edge);
+  return (
+    targetMeta.symbolStatus === "real" &&
+    !sameBatchSymbolIds.has(edge.toSymbolId) &&
+    !knownPersistedSymbolIds.has(edge.toSymbolId)
+  );
+}
+
+function classifyPass1RepairCause(
+  edge: EdgeRow,
+  sameBatchSymbolIds: ReadonlySet<string>,
+  knownPersistedSymbolIds: ReadonlySet<string>,
+  belowThresholdKnownEdges: ReadonlySet<EdgeRow>,
+): Pass1RepairCause {
+  if (belowThresholdKnownEdges.has(edge)) {
+    return "belowThresholdKnown";
+  }
+  if (isUnresolvedSymbolId(edge.fromSymbolId)) {
+    return "unresolvedSource";
+  }
+
+  const unsafeSource = !copyRelEndpointIsSafe(edge.fromSymbolId);
+  const unsafeTarget = !copyRelEndpointIsSafe(edge.toSymbolId);
+  if (unsafeSource && unsafeTarget) {
+    return "unsafeBoth";
+  }
+  if (unsafeSource) {
+    return "unsafeSourceOnly";
+  }
+  if (unsafeTarget) {
+    return "unsafeTargetOnly";
+  }
+
+  if (isPass1TargetRealNotKnown(edge, sameBatchSymbolIds, knownPersistedSymbolIds)) {
+    return "targetRealNotKnown";
+  }
+
+  if (pass1TargetMeta(edge).symbolStatus !== "real") {
+    return "targetUnresolvedOrPlaceholder";
+  }
+
+  return "other";
+}
+
+function addPass1RepairCause(
+  stats: BatchPersistEdgeDiagnostics,
+  cause: Pass1RepairCause,
+): void {
+  switch (cause) {
+    case "belowThresholdKnown":
+      stats.repairCauseBelowThresholdKnownEdges += 1;
+      break;
+    case "unresolvedSource":
+      stats.repairCauseUnresolvedSourceEdges += 1;
+      break;
+    case "unsafeSourceOnly":
+      stats.repairCauseSourceEndpointUnsafeOnlyEdges += 1;
+      break;
+    case "unsafeTargetOnly":
+      stats.repairCauseTargetEndpointUnsafeOnlyEdges += 1;
+      break;
+    case "unsafeBoth":
+      stats.repairCauseBothEndpointsUnsafeEdges += 1;
+      break;
+    case "targetRealNotKnown":
+      stats.repairCauseTargetRealNotKnownEdges += 1;
+      break;
+    case "targetUnresolvedOrPlaceholder":
+      stats.repairCauseTargetUnresolvedOrPlaceholderEdges += 1;
+      break;
+    case "other":
+      stats.repairCauseOtherEdges += 1;
+      break;
+  }
+}
+
+function recordPass1RepairCauses(
+  stats: BatchPersistEdgeDiagnostics,
+  repairEdges: readonly EdgeRow[],
+  sameBatchSymbolIds: ReadonlySet<string>,
+  knownPersistedSymbolIds: ReadonlySet<string>,
+  belowThresholdKnownEdges: ReadonlySet<EdgeRow>,
+): void {
+  for (const edge of repairEdges) {
+    addPass1RepairCause(
+      stats,
+      classifyPass1RepairCause(
+        edge,
+        sameBatchSymbolIds,
+        knownPersistedSymbolIds,
+        belowThresholdKnownEdges,
+      ),
+    );
+
+    const sourceKnown = isPass1SourceKnown(
+      edge,
+      sameBatchSymbolIds,
+      knownPersistedSymbolIds,
+    );
+    if (sourceKnown) {
+      stats.repairSourceKnownEdges += 1;
+    } else {
+      stats.repairSourceUnknownOrUnsafeEdges += 1;
+    }
+
+    const targetRealNotKnown = isPass1TargetRealNotKnown(
+      edge,
+      sameBatchSymbolIds,
+      knownPersistedSymbolIds,
+    );
+    const targetUnsafe = !copyRelEndpointIsSafe(edge.toSymbolId);
+    const targetUnresolvedOrPlaceholder = pass1TargetMeta(edge).symbolStatus !== "real";
+    if (
+      sourceKnown &&
+      (belowThresholdKnownEdges.has(edge) ||
+        targetRealNotKnown ||
+        targetUnsafe ||
+        targetUnresolvedOrPlaceholder)
+    ) {
+      stats.repairSourceKnownTargetOnlyEdges += 1;
+    }
+    if (sourceKnown && targetRealNotKnown) {
+      stats.repairSourceKnownTargetRealNotKnownEdges += 1;
+    }
+    if (sourceKnown && targetUnsafe) {
+      stats.repairSourceKnownTargetUnsafeEdges += 1;
+    }
+    if (sourceKnown && targetUnresolvedOrPlaceholder) {
+      stats.repairSourceKnownTargetUnresolvedEdges += 1;
+    }
+  }
+}
+
+async function filterExistingSymbolIds(symbolIds: string[]): Promise<string[]> {
+  if (symbolIds.length === 0) return [];
+  const conn = await getLadybugConn();
+  const existingSymbolIds = await ladybugDb.getExistingSymbolIds(
+    conn,
+    symbolIds,
+  );
+  if (existingSymbolIds.size === 0) return [];
+  return symbolIds.filter((symbolId) => existingSymbolIds.has(symbolId));
 }
 
 /**
@@ -173,11 +457,13 @@ export function splitPass1EdgesForKnownEndpointCopy(
     if (
       !isUnresolvedSymbolId(edge.fromSymbolId) &&
       sameBatchSymbolIds.has(edge.fromSymbolId) &&
+      copyRelEndpointIsSafe(edge.fromSymbolId) &&
+      copyRelEndpointIsSafe(edge.toSymbolId) &&
       (sameBatchSymbolIds.has(edge.toSymbolId) ||
         knownPersistedSymbolIds.has(edge.toSymbolId) ||
         targetMeta.symbolStatus !== "real")
     ) {
-      knownEndpointEdges.push(edge);
+      knownEndpointEdges.push(toPass1RepairCopyEdge(edge));
     } else {
       repairEdges.push(edge);
     }
@@ -397,39 +683,8 @@ export class BatchPersistAccumulator {
       existingFiles: existingFileIds.length,
     });
 
-    const timePhase = async (
-      phase: BatchPersistWritePhase,
-      rows: number,
-      body: () => Promise<void>,
-    ): Promise<void> => {
-      if (rows === 0) {
-        if (this.collectDiagnostics) {
-          this.diagnostics.phases[phase].skipped += 1;
-        }
-        return;
-      }
-
-      const phaseStart = performance.now();
-      try {
-        await body();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        throw new Error(
-          `BatchPersistAccumulator ${phase} failed while writing ${rows} row(s): ${message}`,
-          { cause: err },
-        );
-      } finally {
-        const durationMs = Math.round(performance.now() - phaseStart);
-        phaseMs[phase] += durationMs;
-        if (this.collectDiagnostics) {
-          const target = this.diagnostics.phases[phase];
-          target.count += 1;
-          target.rows += rows;
-          target.totalMs += durationMs;
-          target.maxMs = Math.max(target.maxMs, durationMs);
-        }
-      }
-    };
+    const timePhase: BatchPersistTimePhase = (phase, rows, body) =>
+      this.timeWritePhase(phase, rows, body, phaseMs);
 
     if (this.symbolWriteMode === "fresh-copy") {
       await this.writeFreshCopyBatch(batch, existingFileIds, timePhase);
@@ -477,11 +732,7 @@ export class BatchPersistAccumulator {
   private async writeMergeBatch(
     batch: FlushBatch,
     existingFileIds: string[],
-    timePhase: (
-      phase: BatchPersistWritePhase,
-      rows: number,
-      body: () => Promise<void>,
-    ) => Promise<void>,
+    timePhase: BatchPersistTimePhase,
   ): Promise<void> {
     await withWriteConn(async (wConn) => {
       await ladybugDb.withTransaction(wConn, async (txConn) => {
@@ -518,11 +769,7 @@ export class BatchPersistAccumulator {
   private async writeFreshCopyBatch(
     batch: FlushBatch,
     existingFileIds: string[],
-    timePhase: (
-      phase: BatchPersistWritePhase,
-      rows: number,
-      body: () => Promise<void>,
-    ) => Promise<void>,
+    timePhase: BatchPersistTimePhase,
   ): Promise<void> {
     // Provider-first fallback needs the duplicate-key-safe COPY writers from
     // the direct path, but batching keeps LadybugDB's single writer from
@@ -530,6 +777,8 @@ export class BatchPersistAccumulator {
     const incomingSymbolIds = [
       ...new Set(batch.symbols.map((symbol) => symbol.symbolId)),
     ];
+    const existingIncomingSymbolIds =
+      await filterExistingSymbolIds(incomingSymbolIds);
 
     await withWriteConn(async (wConn) => {
       await ladybugDb.withTransaction(wConn, async (txConn) => {
@@ -543,9 +792,12 @@ export class BatchPersistAccumulator {
       await ladybugDb.withTransaction(wConn, async (txConn) => {
         await timePhase(
           "deleteIncomingSymbols",
-          incomingSymbolIds.length,
+          existingIncomingSymbolIds.length,
           async () => {
-            await ladybugDb.deleteSymbolsByIds(txConn, incomingSymbolIds);
+            await ladybugDb.deleteSymbolsByIds(
+              txConn,
+              existingIncomingSymbolIds,
+            );
           },
         );
       });
@@ -577,7 +829,6 @@ export class BatchPersistAccumulator {
         });
       });
     });
-
     await withWriteConn(async (wConn) => {
       await ladybugDb.withTransaction(wConn, async (txConn) => {
         await this.writeBatchEdges(txConn, batch, timePhase);
@@ -586,38 +837,140 @@ export class BatchPersistAccumulator {
   }
 
   private async writeBatchEdges(
-    txConn: Parameters<typeof ladybugDb.insertEdges>[0],
+    txConn: LadybugConnection,
     batch: FlushBatch,
-    timePhase: (
-      phase: BatchPersistWritePhase,
-      rows: number,
-      body: () => Promise<void>,
-    ) => Promise<void>,
+    timePhase: BatchPersistTimePhase,
   ): Promise<void> {
     await timePhase("insertEdges", batch.edges.length, async () => {
       const sameBatchSymbolIds = new Set(
         batch.symbols.map((symbol) => symbol.symbolId),
       );
-      const { knownEndpointEdges, repairEdges } =
-        splitPass1EdgesForKnownEndpointCopy(
-          batch.edges,
-          sameBatchSymbolIds,
-          this.knownSymbolIdsForEdgeCopy,
+      let splitEdges: {
+        knownEndpointEdges: EdgeRow[];
+        repairEdges: EdgeRow[];
+      } = { knownEndpointEdges: [], repairEdges: [] };
+      await timePhase(
+        "insertEdges.split",
+        batch.edges.length,
+        async () => {
+          splitEdges = splitPass1EdgesForKnownEndpointCopy(
+            batch.edges,
+            sameBatchSymbolIds,
+            this.knownSymbolIdsForEdgeCopy,
+          );
+        },
+      );
+      const { knownEndpointEdges, repairEdges } = splitEdges;
+      if (this.collectDiagnostics) {
+        this.diagnostics.edgeStats.splitCalls += 1;
+        this.diagnostics.edgeStats.totalEdges += batch.edges.length;
+        this.diagnostics.edgeStats.knownEndpointEdges += knownEndpointEdges.length;
+        this.diagnostics.edgeStats.initialRepairEdges += repairEdges.length;
+      }
+
+      const measureKnownEnsurePhase = async <T>(
+        phaseName: DependencyTargetEnsurePhaseName,
+        fn: () => Promise<T>,
+      ): Promise<T> => {
+        let result: T | undefined;
+        await timePhase(
+          `insertEdges.knownEnsure.${phaseName}` as BatchPersistWritePhase,
+          knownEndpointEdges.length,
+          async () => {
+            result = await fn();
+          },
         );
+        return result as T;
+      };
+
+      const measureKnownCopyPhase = async <T>(
+        phaseName: KnownSymbolEdgesCopyPhaseName,
+        fn: () => Promise<T> | T,
+      ): Promise<T> => {
+        let result: T | undefined;
+        await timePhase(
+          `insertEdges.knownCopy.${phaseName}` as BatchPersistWritePhase,
+          knownEndpointEdges.length,
+          async () => {
+            result = await fn();
+          },
+        );
+        return result as T;
+      };
+
+      const measureRepairPhase = async <T>(
+        phaseName: InsertEdgesPhaseName,
+        rows: number,
+        fn: () => Promise<T> | T,
+      ): Promise<T> => {
+        let result: T | undefined;
+        await timePhase(
+          `insertEdges.repair.${phaseName}` as BatchPersistWritePhase,
+          rows,
+          async () => {
+            result = await fn();
+          },
+        );
+        return result as T;
+      };
 
       if (knownEndpointEdges.length >= PASS1_KNOWN_ENDPOINT_COPY_THRESHOLD) {
-        await ladybugDb.ensureDependencyTargetsForKnownSourceEdges(
-          txConn,
-          knownEndpointEdges,
+        if (this.collectDiagnostics) {
+          this.diagnostics.edgeStats.knownCopyFlushes += 1;
+          this.diagnostics.edgeStats.knownCopyEdges += knownEndpointEdges.length;
+        }
+        await timePhase(
+          "insertEdges.knownEnsure",
+          knownEndpointEdges.length,
+          async () => {
+            await ladybugDb.ensureDependencyTargetsForKnownSourceEdges(
+              txConn,
+              knownEndpointEdges,
+              { measurePhase: measureKnownEnsurePhase },
+            );
+          },
         );
-        await ladybugDb.insertKnownSymbolEdges(txConn, knownEndpointEdges);
+        await timePhase(
+          "insertEdges.knownCopy",
+          knownEndpointEdges.length,
+          async () => {
+            await ladybugDb.insertKnownSymbolEdges(txConn, knownEndpointEdges, {
+              measurePhase: measureKnownCopyPhase,
+            });
+          },
+        );
       } else if (knownEndpointEdges.length > 0) {
+        if (this.collectDiagnostics) {
+          this.diagnostics.edgeStats.belowThresholdKnownEdges +=
+            knownEndpointEdges.length;
+        }
         repairEdges.unshift(...knownEndpointEdges);
       }
 
-      await ladybugDb.insertEdges(txConn, repairEdges, {
-        skipSourceRepoLink: true,
-        skipExistingRelationshipUpdate: true,
+      const belowThresholdKnownEdgeSet =
+        knownEndpointEdges.length > 0 &&
+        knownEndpointEdges.length < PASS1_KNOWN_ENDPOINT_COPY_THRESHOLD
+          ? new Set<EdgeRow>(knownEndpointEdges)
+          : new Set<EdgeRow>();
+
+      if (this.collectDiagnostics && repairEdges.length > 0) {
+        this.diagnostics.edgeStats.repairCalls += 1;
+        this.diagnostics.edgeStats.repairEdges += repairEdges.length;
+        recordPass1RepairCauses(
+          this.diagnostics.edgeStats,
+          repairEdges,
+          sameBatchSymbolIds,
+          this.knownSymbolIdsForEdgeCopy,
+          belowThresholdKnownEdgeSet,
+        );
+      }
+      await timePhase("insertEdges.repair", repairEdges.length, async () => {
+        await ladybugDb.insertEdges(txConn, repairEdges, {
+          skipSourceRepoLink: true,
+          skipExistingRelationshipUpdate: true,
+          measurePhase: async (phaseName, fn) =>
+            measureRepairPhase(phaseName, repairEdges.length, fn),
+        });
       });
     });
   }
@@ -673,6 +1026,42 @@ export class BatchPersistAccumulator {
       activeAccumulators.delete(this);
     }
   }
+
+  private async timeWritePhase(
+    phase: BatchPersistWritePhase,
+    rows: number,
+    body: () => Promise<void>,
+    phaseMs?: Record<BatchPersistWritePhase, number>,
+  ): Promise<void> {
+    if (rows === 0) {
+      if (this.collectDiagnostics) {
+        this.diagnostics.phases[phase].skipped += 1;
+      }
+      return;
+    }
+
+    const phaseStart = performance.now();
+    try {
+      await body();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `BatchPersistAccumulator ${phase} failed while writing ${rows} row(s): ${message}`,
+        { cause: err },
+      );
+    } finally {
+      const durationMs = Math.round(performance.now() - phaseStart);
+      if (phaseMs) phaseMs[phase] += durationMs;
+      if (this.collectDiagnostics) {
+        const target = this.diagnostics.phases[phase];
+        target.count += 1;
+        target.rows += rows;
+        target.totalMs += durationMs;
+        target.maxMs = Math.max(target.maxMs, durationMs);
+      }
+    }
+  }
+
 }
 
 // Active-instance registry for observability probes.

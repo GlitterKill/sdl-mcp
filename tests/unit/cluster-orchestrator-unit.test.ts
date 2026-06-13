@@ -16,7 +16,7 @@ import {
   shouldFailOnClusterFtsRebuildFailure,
   shouldRebuildClusterFtsAfterReplacement,
 } from "../../dist/indexer/cluster-orchestrator.js";
-import { CentralityWorkerTimeoutError } from "../../dist/indexer/centrality-worker-runner.js";
+import { CentralityWorkerTimeoutError } from "../../dist/graph/centrality-worker-runner.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -349,6 +349,84 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
     assert.ok(cluster);
     const members = await ladybugDb.getClusterMembers(conn, cluster.clusterId);
     assert.ok(members.length >= 2);
+  });
+
+  it("reuses folded centrality when metrics already covered the same graph", async () => {
+    await resetDb();
+    await seedRepo("repo-folded-centrality");
+    await seedFile("repo-folded-centrality", "file-1", "src/folded.ts");
+    for (const [symbolId, name] of [
+      ["sym-main", "main"],
+      ["sym-foo", "foo"],
+      ["sym-bar", "bar"],
+    ] as const) {
+      await seedSymbol({
+        repoId: "repo-folded-centrality",
+        fileId: "file-1",
+        symbolId,
+        name,
+      });
+    }
+    const conn = await getLadybugConn();
+    await ladybugDb.insertEdges(conn, [
+      {
+        repoId: "repo-folded-centrality",
+        fromSymbolId: "sym-main",
+        toSymbolId: "sym-foo",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+      {
+        repoId: "repo-folded-centrality",
+        fromSymbolId: "sym-foo",
+        toSymbolId: "sym-bar",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+    ]);
+    let centralityCalled = false;
+
+    const result = await computeAndStoreClustersAndProcesses({
+      conn,
+      repoId: "repo-folded-centrality",
+      versionId: "v1",
+      algorithmRefresh: {
+        enabled: true,
+        pageRank: { enabled: true },
+        kCore: { enabled: true },
+        louvain: { enabled: false, maxCallEdges: 10_000 },
+        workerTimeoutMs: 120_000,
+      },
+      foldedCentrality: {
+        status: "succeeded",
+        symbolCount: 3,
+        callEdgeCount: 2,
+        pageRankCount: 3,
+        kCoreCount: 3,
+      },
+      centralityRunner: async () => {
+        centralityCalled = true;
+        return { pageRank: [], kCore: [] };
+      },
+    });
+
+    assert.equal(centralityCalled, false);
+    assert.equal(result.centralityComputed, 3);
+    assert.equal(result.algorithmRefresh.pageRank.status, "succeeded");
+    assert.equal(result.algorithmRefresh.kCore.status, "succeeded");
+    assert.equal(result.algorithmRefresh.dirty, false);
   });
 
   it("reports cluster and process write subphase timings", async () => {
@@ -747,6 +825,83 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
       "repo-louvain-skipped",
     );
     assert.equal(shadowClusters.length, 0);
+  });
+
+  it("uses DB call-edge count for Louvain policy when shared graph undercounts", async () => {
+    await resetDb();
+    await seedRepo("repo-louvain-db-count");
+    await seedFile("repo-louvain-db-count", "file-1", "src/db-count.ts");
+    for (const [symbolId, name] of [
+      ["sym-main", "main"],
+      ["sym-foo", "foo"],
+      ["sym-bar", "bar"],
+    ] as const) {
+      await seedSymbol({
+        repoId: "repo-louvain-db-count",
+        fileId: "file-1",
+        symbolId,
+        name,
+      });
+    }
+    const conn = await getLadybugConn();
+    await ladybugDb.insertEdges(conn, [
+      {
+        repoId: "repo-louvain-db-count",
+        fromSymbolId: "sym-main",
+        toSymbolId: "sym-foo",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+      {
+        repoId: "repo-louvain-db-count",
+        fromSymbolId: "sym-foo",
+        toSymbolId: "sym-bar",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        resolverId: "unit-test",
+        resolutionPhase: "pass2",
+        provenance: "manual",
+        createdAt: "2026-03-19T09:00:00.000Z",
+      },
+    ]);
+    let louvainCalled = false;
+
+    const result = await computeAndStoreClustersAndProcesses({
+      conn,
+      repoId: "repo-louvain-db-count",
+      versionId: "v1",
+      algorithmRefresh: {
+        enabled: true,
+        pageRank: { enabled: false },
+        kCore: { enabled: false },
+        louvain: { enabled: true, maxCallEdges: 1 },
+        workerTimeoutMs: 120_000,
+      },
+      sharedGraph: {
+        callEdges: [{ callerId: "sym-main", calleeId: "sym-foo" }],
+        clusterEdges: [{ fromSymbolId: "sym-main", toSymbolId: "sym-foo" }],
+      },
+      louvainRunner: async () => {
+        louvainCalled = true;
+        return [];
+      },
+    });
+
+    assert.equal(louvainCalled, false);
+    assert.equal(result.algorithmRefresh.louvain.status, "skipped");
+    assert.match(
+      result.algorithmRefresh.louvain.reason ?? "",
+      /call-edge-count 2 exceeds maxCallEdges 1/,
+    );
+    assert.equal(result.algorithmRefresh.dirty, false);
   });
 
   it("clears stale Louvain shadow clusters when algorithm capability is unavailable", async () => {

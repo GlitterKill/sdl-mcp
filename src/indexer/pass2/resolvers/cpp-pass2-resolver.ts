@@ -1,12 +1,16 @@
 import { basename, dirname, extname, join } from "path";
 
-import type { SyntaxNode, Tree } from "tree-sitter";
+import type { Tree } from "tree-sitter";
 
 import { getLadybugConn, withWriteConn } from "../../../db/ladybug.js";
 import * as ladybugDb from "../../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../../db/ladybug-queries.js";
+import {
+  unresolvedCallDependencyTarget,
+  unresolvedCallSymbolId,
+} from "../../../db/symbol-placeholders.js";
 import type { SymbolKind } from "../../../domain/types.js";
-import { readFileAsync } from "../../../util/asyncFs.js";
+import { readFileAsyncWithTiming } from "../../../util/asyncFs.js";
 import { singleFlight } from "../../../util/concurrency.js";
 import { logger } from "../../../util/logger.js";
 import { normalizePath } from "../../../util/paths.js";
@@ -77,7 +81,7 @@ type CppResolvedCall = {
   candidateCount?: number;
 };
 
-type CppIncludeIndex = {
+export type CppIncludeIndex = {
   includedSymbolsByFilePath: Map<
     string,
     Array<SymbolRow & { relPath: string }>
@@ -85,6 +89,8 @@ type CppIncludeIndex = {
   symbolsByFilePath: Map<string, Array<SymbolRow & { relPath: string }>>;
   filesByRelPath: Map<string, ladybugDb.FileRow>;
   symbolById: Map<string, SymbolRow>;
+  namespaceByFilePath: Map<string, string[]>;
+  namespaceMembersByNamespace: Map<string, Map<string, string[]>>;
 };
 
 type CppNamespaceIndex = {
@@ -251,11 +257,14 @@ function clearLocalCallDedupKeys(
   createdCallEdges: Set<string>,
 ): void {
   if (symbolIds.length === 0) return;
-  for (const symbolId of symbolIds) {
-    for (const edgeKey of Array.from(createdCallEdges)) {
-      if (edgeKey.startsWith(`${symbolId}->`)) {
-        createdCallEdges.delete(edgeKey);
-      }
+  const symbolIdSet = new Set(symbolIds);
+  for (const edgeKey of createdCallEdges) {
+    const separatorIndex = edgeKey.indexOf("->");
+    if (separatorIndex < 0) {
+      continue;
+    }
+    if (symbolIdSet.has(edgeKey.slice(0, separatorIndex))) {
+      createdCallEdges.delete(edgeKey);
     }
   }
 }
@@ -268,6 +277,30 @@ function createNodeIdToSymbolId(
     nodeIdToSymbolId.set(detail.extractedSymbol.nodeId, detail.symbolId);
   }
   return nodeIdToSymbolId;
+}
+
+/**
+ * Assign calls to their owning symbol once per file. The old nested
+ * symbol-by-call walk repeated the enclosing-symbol search for every symbol,
+ * which made C++ pass-2 grow with `symbols * calls` on large translation units.
+ */
+function groupCallsByCallerSymbol(
+  calls: readonly ExtractedCall[],
+  filteredSymbolDetails: FilteredSymbolDetail[],
+): Map<string, ExtractedCall[]> {
+  const callsByCallerNodeId = new Map<string, ExtractedCall[]>();
+  for (const call of calls) {
+    const callerNodeId =
+      call.callerNodeId ??
+      findEnclosingSymbolByRange(call.range, filteredSymbolDetails);
+    if (!callerNodeId) {
+      continue;
+    }
+    const existing = callsByCallerNodeId.get(callerNodeId) ?? [];
+    existing.push(call);
+    callsByCallerNodeId.set(callerNodeId, existing);
+  }
+  return callsByCallerNodeId;
 }
 
 function normalizeIdentifier(identifier: string): string {
@@ -369,7 +402,7 @@ function addCandidatesFromIndex(
 function extractUsingNamespaces(tree: Tree): Set<string> {
   const namespaces = new Set<string>();
 
-  const visit = (node: SyntaxNode): void => {
+  for (const node of tree.rootNode.descendantsOfType("using_declaration")) {
     if (node.type === "using_declaration") {
       const text = node.text.replace(/\s+/g, " ").trim();
       const match = text.match(/^using namespace\s+([A-Za-z_][A-Za-z0-9_:]*)/);
@@ -377,12 +410,7 @@ function extractUsingNamespaces(tree: Tree): Set<string> {
         namespaces.add(normalizeIdentifier(match[1]));
       }
     }
-    for (const child of node.children) {
-      visit(child);
-    }
-  };
-
-  visit(tree.rootNode);
+  }
   return namespaces;
 }
 
@@ -440,20 +468,54 @@ async function buildCppIncludeIndex(params: {
   repoRoot: string;
   cache?: Map<string, unknown>;
   importCache?: Pass2ResolverContext["importCache"];
+  targetPaths?: ReadonlySet<string>;
+  recordMetric?: Pass2ResolverContext["recordMetric"];
+  recordPhase?: Pass2ResolverContext["recordPhase"];
+  pass1Extractions?: Pass2ResolverContext["pass1Extractions"];
 }): Promise<CppIncludeIndex> {
-  return singleFlight(
+  const cacheKey = `pass2-cpp:include-index:${params.repoId}`;
+  const valueCacheKey = `${cacheKey}:value`;
+  if (params.cache?.has(cacheKey)) {
+    params.recordMetric?.("includeIndex.cacheHits", 1);
+  } else {
+    params.recordMetric?.("includeIndex.cacheMisses", 1);
+  }
+  const includeIndex = await singleFlight(
     params.cache,
-    `pass2-cpp:include-index:${params.repoId}`,
+    cacheKey,
     async () => {
+      const buildStartedAt = Date.now();
+      let namespaceIndexStartedAt = 0;
+      let includeReadMs = 0;
+      let includeParseMs = 0;
+      let includeResolveMs = 0;
+      let includeSymbolCollectMs = 0;
       const conn = await getLadybugConn();
+      const filesStartedAt = Date.now();
       const files = await ladybugDb.getFilesByRepo(conn, params.repoId);
+      params.recordPhase?.("includeIndex.dbFiles", Date.now() - filesStartedAt);
+      const symbolsStartedAt = Date.now();
       const symbols = await ladybugDb.getSymbolsByRepo(conn, params.repoId);
+      params.recordPhase?.(
+        "includeIndex.dbSymbols",
+        Date.now() - symbolsStartedAt,
+      );
+      params.recordMetric?.("repo.files", files.length);
+      params.recordMetric?.("repo.symbols", symbols.length);
+      if (params.targetPaths) {
+        params.recordMetric?.("includeIndex.targetPaths", params.targetPaths.size);
+      }
+      const repoIndexStartedAt = Date.now();
       const {
         filesByRelPath,
         filePathByFileId,
         symbolsByFilePath,
         symbolById,
       } = buildRepoSymbolIndexes({ files, symbols });
+      params.recordPhase?.(
+        "includeIndex.repoSymbolIndexes",
+        Date.now() - repoIndexStartedAt,
+      );
 
       const adapter = getAdapterForExtension(".cpp");
       const includedSymbolsByFilePath = new Map<
@@ -461,14 +523,31 @@ async function buildCppIncludeIndex(params: {
         Array<SymbolRow & { relPath: string }>
       >();
       if (!adapter) {
+        namespaceIndexStartedAt = Date.now();
+        const namespaceIndex = buildCppNamespaceIndexFromRows({
+          files,
+          symbols,
+        });
+        params.recordPhase?.(
+          "includeIndex.namespaceIndex",
+          Date.now() - namespaceIndexStartedAt,
+        );
+        params.recordPhase?.(
+          "includeIndex.build",
+          Date.now() - buildStartedAt,
+        );
         return {
           includedSymbolsByFilePath,
           symbolsByFilePath,
           filesByRelPath,
           symbolById,
+          namespaceByFilePath: namespaceIndex.namespaceByFilePath,
+          namespaceMembersByNamespace:
+            buildNamespaceMemberIndex(namespaceIndex),
         };
       }
 
+      const cppFilesAll = files.filter((file) => file.language === "cpp");
       const extensionCandidates = new Set<string>(CPP_IMPORT_EXTENSIONS);
       for (const file of files) {
         const extension = extname(file.relPath).toLowerCase();
@@ -477,29 +556,75 @@ async function buildCppIncludeIndex(params: {
         }
       }
 
-      const cppFiles = files.filter((file) => file.language === "cpp");
+      const cppFiles = cppFilesAll.filter(
+        (file) =>
+          (!params.targetPaths || params.targetPaths.has(file.relPath)),
+      );
+      params.recordMetric?.("includeIndex.cppFiles", cppFilesAll.length);
+      params.recordMetric?.("includeIndex.filesSelected", cppFiles.length);
+      let includeFilesRead = 0;
+      let includeBytesRead = 0;
+      let includeReadActiveMs = 0;
+      let includeReadQueueMs = 0;
+      let includeReadMisses = 0;
+      let includeFilesParsed = 0;
+      let includeParseMisses = 0;
+      let includeImports = 0;
+      let includePass1CacheHits = 0;
+      let includePass1CacheMisses = 0;
+      let includePass1CacheBytes = 0;
       for (const file of cppFiles) {
         const absolutePath = join(params.repoRoot, file.relPath);
+        let imports: ReturnType<typeof adapter.extractImports>;
         let content = "";
-        try {
-          content = await readFileAsync(absolutePath, "utf-8");
-        } catch {
-          includedSymbolsByFilePath.set(file.relPath, []);
-          continue;
-        }
 
-        const tree = adapter.parse(content, absolutePath);
-        if (!tree) {
-          includedSymbolsByFilePath.set(file.relPath, []);
-          continue;
-        }
+        const cachedExtraction = params.pass1Extractions?.get(file.relPath);
+        if (cachedExtraction) {
+          imports = cachedExtraction.imports;
+          content = cachedExtraction.content;
+          includePass1CacheHits++;
+          includePass1CacheBytes += Buffer.byteLength(content, "utf8");
+        } else {
+          if (params.pass1Extractions) {
+            includePass1CacheMisses++;
+          }
+          try {
+            const readStartedAt = Date.now();
+            const readResult = await readFileAsyncWithTiming(
+              absolutePath,
+              "utf-8",
+            );
+            content = readResult.content;
+            includeReadMs += Date.now() - readStartedAt;
+            includeReadQueueMs += readResult.queuedMs;
+            includeReadActiveMs += readResult.activeMs;
+            includeFilesRead++;
+            includeBytesRead += Buffer.byteLength(content, "utf8");
+          } catch {
+            includeReadMisses++;
+            includedSymbolsByFilePath.set(file.relPath, []);
+            continue;
+          }
 
-        let imports;
-        try {
-          imports = adapter.extractImports(tree, content, absolutePath);
-        } finally {
-          (tree as unknown as { delete?: () => void }).delete?.();
+          const parseStartedAt = Date.now();
+          const tree = adapter.parse(content, absolutePath);
+          if (!tree) {
+            includeParseMs += Date.now() - parseStartedAt;
+            includeParseMisses++;
+            includedSymbolsByFilePath.set(file.relPath, []);
+            continue;
+          }
+
+          try {
+            imports = adapter.extractImports(tree, content, absolutePath);
+            includeParseMs += Date.now() - parseStartedAt;
+            includeFilesParsed++;
+          } finally {
+            (tree as unknown as { delete?: () => void }).delete?.();
+          }
         }
+        includeImports += imports.length;
+        const resolveStartedAt = Date.now();
         const importResolution = await resolveImportTargets(
           params.repoId,
           params.repoRoot,
@@ -510,7 +635,9 @@ async function buildCppIncludeIndex(params: {
           content,
           params.importCache,
         );
+        includeResolveMs += Date.now() - resolveStartedAt;
 
+        const collectStartedAt = Date.now();
         const includedPaths = new Set<string>();
         for (const target of importResolution.targets) {
           if (target.symbolId.startsWith("unresolved:")) {
@@ -559,16 +686,135 @@ async function buildCppIncludeIndex(params: {
         }
 
         includedSymbolsByFilePath.set(file.relPath, includedSymbols);
+        includeSymbolCollectMs += Date.now() - collectStartedAt;
       }
+      params.recordMetric?.("includeIndex.filesRead", includeFilesRead);
+      params.recordMetric?.("includeIndex.bytesRead", includeBytesRead);
+      params.recordMetric?.("includeIndex.readMisses", includeReadMisses);
+      params.recordMetric?.("includeIndex.filesParsed", includeFilesParsed);
+      params.recordMetric?.("includeIndex.parseMisses", includeParseMisses);
+      params.recordMetric?.("includeIndex.imports", includeImports);
+      params.recordMetric?.("includeIndex.pass1CacheHits", includePass1CacheHits);
+      params.recordMetric?.(
+        "includeIndex.pass1CacheMisses",
+        includePass1CacheMisses,
+      );
+      params.recordMetric?.("includeIndex.pass1CacheBytes", includePass1CacheBytes);
+      params.recordPhase?.("includeIndex.readFiles", includeReadMs);
+      params.recordPhase?.("includeIndex.readFiles.active", includeReadActiveMs);
+      params.recordPhase?.("includeIndex.readFiles.queue", includeReadQueueMs);
+      params.recordPhase?.("includeIndex.parseExtract", includeParseMs);
+      params.recordPhase?.("includeIndex.resolveImports", includeResolveMs);
+      params.recordPhase?.(
+        "includeIndex.collectSymbols",
+        includeSymbolCollectMs,
+      );
 
+      namespaceIndexStartedAt = Date.now();
+      const namespaceIndex = buildCppNamespaceIndexFromRows({
+        files,
+        symbols,
+      });
+      params.recordPhase?.(
+        "includeIndex.namespaceIndex",
+        Date.now() - namespaceIndexStartedAt,
+      );
+      params.recordPhase?.("includeIndex.build", Date.now() - buildStartedAt);
       return {
         includedSymbolsByFilePath,
         symbolsByFilePath,
         filesByRelPath,
         symbolById,
+        namespaceByFilePath: namespaceIndex.namespaceByFilePath,
+        namespaceMembersByNamespace: buildNamespaceMemberIndex(namespaceIndex),
       };
     },
   );
+  params.cache?.set(valueCacheKey, includeIndex);
+  return includeIndex;
+}
+
+function getCachedCppIncludeIndex(
+  cache: Map<string, unknown> | undefined,
+  repoId: string,
+): CppIncludeIndex | undefined {
+  return cache?.get(
+    `pass2-cpp:include-index:${repoId}:value`,
+  ) as CppIncludeIndex | undefined;
+}
+
+function buildCppNamespaceIndexFromRows(params: {
+  files: ladybugDb.FileRow[];
+  symbols: SymbolRow[];
+}): CppNamespaceIndex {
+  const cppFiles = params.files.filter((file) => file.language === "cpp");
+  const cppFileIds = new Set(cppFiles.map((file) => file.fileId));
+  const fileById = new Map(cppFiles.map((file) => [file.fileId, file]));
+  const cppSymbols: Array<SymbolRow & { relPath: string }> = [];
+
+  const namespaceByFilePath = new Map<string, string[]>();
+  const symbolsByNamespace = new Map<
+    string,
+    Array<SymbolRow & { relPath: string }>
+  >();
+  const namespaceNames = new Set<string>();
+
+  for (const symbol of params.symbols) {
+    if (!cppFileIds.has(symbol.fileId)) {
+      continue;
+    }
+    const file = fileById.get(symbol.fileId);
+    if (!file) {
+      continue;
+    }
+    const row = {
+      ...symbol,
+      relPath: file.relPath,
+    };
+    cppSymbols.push(row);
+    if (symbol.kind !== "module") {
+      continue;
+    }
+    namespaceNames.add(symbol.name);
+    const existing = namespaceByFilePath.get(file.relPath) ?? [];
+    if (!existing.includes(symbol.name)) {
+      existing.push(symbol.name);
+    }
+    namespaceByFilePath.set(file.relPath, existing);
+  }
+
+  for (const namespaceName of namespaceNames) {
+    symbolsByNamespace.set(namespaceName, []);
+  }
+
+  for (const symbol of cppSymbols) {
+    for (const namespaceName of namespacePrefixesForSymbol(symbol.name)) {
+      const bucket = symbolsByNamespace.get(namespaceName);
+      if (bucket) {
+        bucket.push(symbol);
+      }
+    }
+  }
+
+  return {
+    namespaceByFilePath,
+    symbolsByNamespace,
+  };
+}
+
+function namespacePrefixesForSymbol(symbolName: string): string[] {
+  const prefixes: string[] = [];
+  let searchFrom = 0;
+  while (true) {
+    const separatorIndex = symbolName.indexOf("::", searchFrom);
+    if (separatorIndex < 0) break;
+    if (separatorIndex > 0) {
+      prefixes.push(symbolName.slice(0, separatorIndex));
+    }
+    searchFrom = separatorIndex + 2;
+  }
+  prefixes.push(symbolName);
+  return prefixes;
 }
 
 async function buildCppNamespaceIndex(
@@ -581,62 +827,8 @@ async function buildCppNamespaceIndex(
     async () => {
       const conn = await getLadybugConn();
       const files = await ladybugDb.getFilesByRepo(conn, repoId);
-      const cppFiles = files.filter((file) => file.language === "cpp");
-      const cppFileIds = new Set(cppFiles.map((file) => file.fileId));
-      const fileById = new Map(cppFiles.map((file) => [file.fileId, file]));
       const symbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
-
-      const namespaceByFilePath = new Map<string, string[]>();
-      const symbolsByNamespace = new Map<
-        string,
-        Array<SymbolRow & { relPath: string }>
-      >();
-      const namespaceNames = new Set<string>();
-
-      for (const symbol of symbols) {
-        if (!cppFileIds.has(symbol.fileId) || symbol.kind !== "module") {
-          continue;
-        }
-        const file = fileById.get(symbol.fileId);
-        if (!file) {
-          continue;
-        }
-        namespaceNames.add(symbol.name);
-        const existing = namespaceByFilePath.get(file.relPath) ?? [];
-        if (!existing.includes(symbol.name)) {
-          existing.push(symbol.name);
-        }
-        namespaceByFilePath.set(file.relPath, existing);
-      }
-
-      for (const namespaceName of namespaceNames) {
-        const bucket: Array<SymbolRow & { relPath: string }> = [];
-        for (const symbol of symbols) {
-          if (!cppFileIds.has(symbol.fileId)) {
-            continue;
-          }
-          if (
-            symbol.name !== namespaceName &&
-            !symbol.name.startsWith(`${namespaceName}::`)
-          ) {
-            continue;
-          }
-          const file = fileById.get(symbol.fileId);
-          if (!file) {
-            continue;
-          }
-          bucket.push({
-            ...symbol,
-            relPath: file.relPath,
-          });
-        }
-        symbolsByNamespace.set(namespaceName, bucket);
-      }
-
-      return {
-        namespaceByFilePath,
-        symbolsByNamespace,
-      };
+      return buildCppNamespaceIndexFromRows({ files, symbols });
     },
   );
 }
@@ -929,6 +1121,11 @@ async function resolveCppCallEdgesPass2(params: {
   mode?: "full" | "incremental";
   submitEdgeWrite?: Pass2ResolverContext["submitEdgeWrite"];
   importCache?: Pass2ResolverContext["importCache"];
+  recordPhase?: Pass2ResolverContext["recordPhase"];
+  recordMetric?: Pass2ResolverContext["recordMetric"];
+  recordFilePhase?: Pass2ResolverContext["recordFilePhase"];
+  pass2TargetPaths?: Pass2ResolverContext["pass2TargetPaths"];
+  pass1Extractions?: Pass2ResolverContext["pass1Extractions"];
 }): Promise<number> {
   const {
     repoId,
@@ -941,27 +1138,14 @@ async function resolveCppCallEdgesPass2(params: {
     mode,
     submitEdgeWrite,
     importCache,
+    recordPhase,
+    recordMetric,
+    recordFilePhase,
+    pass2TargetPaths,
+    pass1Extractions,
   } = params;
 
-  const conn = await getLadybugConn();
   const filePath = join(repoRoot, fileMeta.path);
-  let content: string;
-  try {
-    content = await readFileAsync(filePath, "utf-8");
-  } catch (readError: unknown) {
-    const code = (readError as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "EPERM") {
-      logger.warn(
-        `File disappeared before C++ pass2 resolution: ${fileMeta.path}`,
-        {
-          code,
-        },
-      );
-      return 0;
-    }
-    throw readError;
-  }
-
   const extension = extname(fileMeta.path).toLowerCase();
   const adapter =
     getAdapterForExtension(extension) ?? getAdapterForExtension(".cpp");
@@ -969,7 +1153,77 @@ async function resolveCppCallEdgesPass2(params: {
     return 0;
   }
 
+  let content: string;
+  const cachedExtraction = pass1Extractions?.get(fileMeta.path);
+  let pass1CacheMiss = false;
+  if (cachedExtraction) {
+    content = cachedExtraction.content;
+    recordMetric?.("readFile.pass1CacheHits", 1);
+    recordMetric?.(
+      "readFile.pass1CacheBytes",
+      Buffer.byteLength(content, "utf8"),
+    );
+  } else {
+    if (pass1Extractions) {
+      recordMetric?.("readFile.pass1CacheMisses", 1);
+      pass1CacheMiss = true;
+    }
+    const readStartedAt = Date.now();
+    let readElapsedMs = 0;
+    try {
+      const readResult = await readFileAsyncWithTiming(filePath, "utf-8");
+      content = readResult.content;
+      if (pass1CacheMiss) {
+        recordMetric?.(
+          "readFile.pass1CacheMissBytes",
+          Buffer.byteLength(content, "utf8"),
+        );
+      }
+      recordPhase?.("readFile.active", readResult.activeMs);
+      recordPhase?.("readFile.queue", readResult.queuedMs);
+      recordFilePhase?.(
+        "readFile.active",
+        fileMeta.path,
+        readResult.activeMs,
+        Buffer.byteLength(content, "utf8"),
+      );
+      recordFilePhase?.(
+        "readFile.queue",
+        fileMeta.path,
+        readResult.queuedMs,
+        Buffer.byteLength(content, "utf8"),
+      );
+    } catch (readError: unknown) {
+      const code = (readError as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "EPERM") {
+        logger.warn(
+          `File disappeared before C++ pass2 resolution: ${fileMeta.path}`,
+          {
+            code,
+          },
+        );
+        return 0;
+      }
+      throw readError;
+    } finally {
+      readElapsedMs = Date.now() - readStartedAt;
+      recordPhase?.("readFile", readElapsedMs);
+    }
+    recordFilePhase?.(
+      "readFile",
+      fileMeta.path,
+      readElapsedMs,
+      Buffer.byteLength(content, "utf8"),
+    );
+  }
+  const contentBytes = Buffer.byteLength(content, "utf8");
+  recordMetric?.("readFile.bytes", contentBytes);
+
+  let phaseStartedAt = Date.now();
   const tree = adapter.parse(content, filePath);
+  const parseElapsedMs = Date.now() - phaseStartedAt;
+  recordPhase?.("parse", parseElapsedMs);
+  recordFilePhase?.("parse", fileMeta.path, parseElapsedMs, contentBytes);
   if (!tree) {
     return 0;
   }
@@ -977,46 +1231,94 @@ async function resolveCppCallEdgesPass2(params: {
   let extractedSymbols: ExtractedSymbol[];
   let calls: ExtractedCall[];
   let usingNamespaces: Set<string>;
+  phaseStartedAt = Date.now();
   try {
+    let extractStepStartedAt = Date.now();
     extractedSymbols = adapter.extractSymbols(
       tree,
       content,
       filePath,
     ) as ExtractedSymbol[];
+    const extractSymbolsElapsedMs = Date.now() - extractStepStartedAt;
+    recordPhase?.("extract.symbols", extractSymbolsElapsedMs);
+    recordFilePhase?.(
+      "extract.symbols",
+      fileMeta.path,
+      extractSymbolsElapsedMs,
+      contentBytes,
+    );
+
+    extractStepStartedAt = Date.now();
     calls = adapter.extractCalls(
       tree,
       content,
       filePath,
       extractedSymbols as never,
     ) as ExtractedCall[];
+    const extractCallsElapsedMs = Date.now() - extractStepStartedAt;
+    recordPhase?.("extract.calls", extractCallsElapsedMs);
+    recordFilePhase?.(
+      "extract.calls",
+      fileMeta.path,
+      extractCallsElapsedMs,
+      contentBytes,
+    );
+
+    extractStepStartedAt = Date.now();
     usingNamespaces = extractUsingNamespaces(tree);
+    const extractUsingNamespacesElapsedMs = Date.now() - extractStepStartedAt;
+    recordPhase?.(
+      "extract.usingNamespaces",
+      extractUsingNamespacesElapsedMs,
+    );
+    recordFilePhase?.(
+      "extract.usingNamespaces",
+      fileMeta.path,
+      extractUsingNamespacesElapsedMs,
+      contentBytes,
+    );
+    recordMetric?.("symbols.extracted", extractedSymbols.length);
+    recordMetric?.("calls.extracted", calls.length);
+    recordMetric?.("namespaces.using", usingNamespaces.size);
   } finally {
     (tree as unknown as { delete?: () => void }).delete?.();
+    const extractElapsedMs = Date.now() - phaseStartedAt;
+    recordPhase?.("extract", extractElapsedMs);
+    recordFilePhase?.("extract", fileMeta.path, extractElapsedMs, contentBytes);
   }
 
-  const fileRecord = await ladybugDb.getFileByRepoPath(
-    conn,
-    repoId,
-    fileMeta.path,
-  );
-  if (!fileRecord) {
-    return 0;
+  phaseStartedAt = Date.now();
+  let includeIndex = getCachedCppIncludeIndex(cache, repoId);
+  if (includeIndex) {
+    recordMetric?.("includeIndex.valueCacheHits", 1);
+  } else {
+    includeIndex = await buildCppIncludeIndex({
+      repoId,
+      repoRoot,
+      cache,
+      importCache,
+      targetPaths: pass2TargetPaths,
+      recordMetric,
+      recordPhase,
+      pass1Extractions,
+    });
   }
-
-  const existingSymbols = await ladybugDb.getSymbolsByFile(
-    conn,
-    fileRecord.fileId,
-  );
+  recordPhase?.("includeIndex", Date.now() - phaseStartedAt);
+  const existingSymbols =
+    includeIndex.symbolsByFilePath.get(fileMeta.path) ?? [];
   if (existingSymbols.length === 0) {
     return 0;
   }
 
+  phaseStartedAt = Date.now();
   const filteredSymbolDetails = mapExtractedSymbolsToExisting(
     fileMeta.path,
     extractedSymbols,
     existingSymbols,
     telemetry,
   );
+  recordPhase?.("mapSymbols", Date.now() - phaseStartedAt);
+  recordMetric?.("symbols.mapped", filteredSymbolDetails.length);
   if (filteredSymbolDetails.length === 0) {
     return 0;
   }
@@ -1028,16 +1330,7 @@ async function resolveCppCallEdgesPass2(params: {
 
   const nodeIdToSymbolId = createNodeIdToSymbolId(filteredSymbolDetails);
 
-  const includeIndex = await buildCppIncludeIndex({
-    repoId,
-    repoRoot,
-    cache,
-    importCache,
-  });
-  const namespaceIndex = await buildCppNamespaceIndex(repoId, cache);
-  const namespaceMembersByNamespace = buildNamespaceMemberIndex(namespaceIndex);
-
-  for (const namespaceName of namespaceIndex.namespaceByFilePath.get(
+  for (const namespaceName of includeIndex.namespaceByFilePath.get(
     fileMeta.path,
   ) ?? []) {
     if (namespaceName) {
@@ -1045,37 +1338,44 @@ async function resolveCppCallEdgesPass2(params: {
     }
   }
 
+  phaseStartedAt = Date.now();
   const includeNameToSymbolIds = createNameIndexFromSymbols(
     includeIndex.includedSymbolsByFilePath.get(fileMeta.path) ?? [],
   );
+  recordPhase?.("includeNameIndex", Date.now() - phaseStartedAt);
+  phaseStartedAt = Date.now();
   const headerPairNameToSymbolIds = buildHeaderPairNameIndex({
     currentFilePath: fileMeta.path,
     filesByRelPath: includeIndex.filesByRelPath,
     symbolsByFilePath: includeIndex.symbolsByFilePath,
   });
+  recordPhase?.("headerPairIndex", Date.now() - phaseStartedAt);
+  phaseStartedAt = Date.now();
   const sameDirectoryNameToSymbolIds = buildSameDirectoryNameIndex({
     currentFilePath: fileMeta.path,
     symbolsByFilePath: includeIndex.symbolsByFilePath,
   });
+  recordPhase?.("sameDirectoryIndex", Date.now() - phaseStartedAt);
 
   const now = new Date().toISOString();
   const edgesToInsert: ladybugDb.EdgeRow[] = [];
   let createdEdges = 0;
+  phaseStartedAt = Date.now();
+  const callsByCallerNodeId = groupCallsByCallerSymbol(
+    calls,
+    filteredSymbolDetails,
+  );
+  recordPhase?.("groupCalls", Date.now() - phaseStartedAt);
 
+  phaseStartedAt = Date.now();
   for (const detail of filteredSymbolDetails) {
-    for (const call of calls) {
-      const callerNodeId =
-        call.callerNodeId ??
-        findEnclosingSymbolByRange(call.range, filteredSymbolDetails);
-      if (callerNodeId !== detail.extractedSymbol.nodeId) {
-        continue;
-      }
-
+    for (const call of
+      callsByCallerNodeId.get(detail.extractedSymbol.nodeId) ?? []) {
       const resolved = resolveCppPass2CallTarget({
         call,
         nodeIdToSymbolId,
         includeNameToSymbolIds,
-        namespaceMembersByNamespace,
+        namespaceMembersByNamespace: includeIndex.namespaceMembersByNamespace,
         usingNamespaces,
         headerPairNameToSymbolIds,
         sameDirectoryNameToSymbolIds,
@@ -1106,7 +1406,7 @@ async function resolveCppCallEdgesPass2(params: {
         createdCallEdges.add(edgeKey);
         createdEdges++;
       } else if (resolved.targetName) {
-        const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
+        const unresolvedTargetId = unresolvedCallSymbolId(resolved.targetName);
         const edgeKey = `${detail.symbolId}->${unresolvedTargetId}`;
         if (createdCallEdges.has(edgeKey)) {
           continue;
@@ -1123,18 +1423,25 @@ async function resolveCppCallEdgesPass2(params: {
           resolutionPhase: "pass2",
           provenance: `unresolved-cpp-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
           createdAt: now,
+          targetMeta: unresolvedCallDependencyTarget(resolved.targetName),
         });
         createdCallEdges.add(edgeKey);
         createdEdges++;
       }
     }
   }
+  recordPhase?.("resolveCalls", Date.now() - phaseStartedAt);
+  recordMetric?.("edges.buffered", edgesToInsert.length);
 
+  phaseStartedAt = Date.now();
   if (submitEdgeWrite) {
-    await submitEdgeWrite({
+    const submitted = submitEdgeWrite({
       symbolIdsToRefresh,
       edges: edgesToInsert,
     });
+    if (submitted) {
+      await submitted;
+    }
   } else {
     await withWriteConn(async (wConn) => {
       if (mode !== "full" && symbolIdsToRefresh.length > 0) {
@@ -1147,6 +1454,7 @@ async function resolveCppCallEdgesPass2(params: {
       await ladybugDb.insertEdges(wConn, edgesToInsert);
     });
   }
+  recordPhase?.("writeSubmit", Date.now() - phaseStartedAt);
   return createdEdges;
 }
 
@@ -1157,6 +1465,26 @@ export class CppPass2Resolver implements Pass2Resolver {
     return (
       target.language === "cpp" && CPP_PASS2_EXTENSIONS.has(target.extension)
     );
+  }
+
+  async warmup(
+    targets: readonly Pass2Target[],
+    context: Pass2ResolverContext,
+  ): Promise<void> {
+    const repoId = targets.find((target) => target.repoId)?.repoId;
+    if (!repoId) {
+      return;
+    }
+    await buildCppIncludeIndex({
+      repoId,
+      repoRoot: context.repoRoot,
+      cache: context.cache,
+      importCache: context.importCache,
+      targetPaths: context.pass2TargetPaths,
+      recordMetric: context.recordMetric,
+      recordPhase: context.recordPhase,
+      pass1Extractions: context.pass1Extractions,
+    });
   }
 
   async resolve(
@@ -1183,6 +1511,11 @@ export class CppPass2Resolver implements Pass2Resolver {
         mode: context.mode,
         submitEdgeWrite: context.submitEdgeWrite,
         importCache: context.importCache,
+        recordPhase: context.recordPhase,
+        recordMetric: context.recordMetric,
+        recordFilePhase: context.recordFilePhase,
+        pass2TargetPaths: context.pass2TargetPaths,
+        pass1Extractions: context.pass1Extractions,
       });
       return { edgesCreated };
     } catch (error) {
@@ -1199,8 +1532,11 @@ export class CppPass2Resolver implements Pass2Resolver {
 export {
   buildCppIncludeIndex,
   buildCppNamespaceIndex,
+  buildCppNamespaceIndexFromRows,
   buildHeaderPairCandidatePaths,
   extractUsingNamespaces,
+  getCachedCppIncludeIndex,
+  groupCallsByCallerSymbol,
   normalizeIdentifier,
   resolveCppPass2CallTarget,
 };

@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import type { EdgeRow } from "../../dist/db/ladybug-queries.js";
 import type { RepoConfig } from "../../dist/config/types.js";
+import type { SymbolIndex } from "../../dist/indexer/edge-builder.js";
 import type {
   Pass2Resolver,
   Pass2ResolverContext,
@@ -106,6 +107,19 @@ function fileMeta(path: string): { path: string; size: number; mtime: number } {
   return { path, size: 1, mtime: 1 };
 }
 
+function symbolIndexForFiles(
+  files: readonly Array<{ path: string }>,
+): SymbolIndex {
+  const index: SymbolIndex = new Map();
+  for (const file of files) {
+    index.set(
+      file.path,
+      new Map([["__pass2_test__", new Map([["function", [`sym:${file.path}`]]])]]),
+    );
+  }
+  return index;
+}
+
 class FakeSubmittingResolver implements Pass2Resolver {
   readonly id = "fake-pass2";
 
@@ -113,6 +127,7 @@ class FakeSubmittingResolver implements Pass2Resolver {
     target: Pass2Target,
     context: Pass2ResolverContext,
   ) => { symbolIdsToRefresh: string[]; edges: EdgeRow[] };
+  readonly warmupTargets: string[] = [];
 
   constructor(
     submissionForTarget: (
@@ -134,6 +149,13 @@ class FakeSubmittingResolver implements Pass2Resolver {
     const submission = this.submissionForTarget(target, context);
     await context.submitEdgeWrite?.(submission);
     return { edgesCreated: submission.edges.length };
+  }
+
+  async warmup(
+    targets: Pass2Target[],
+    _context: Pass2ResolverContext,
+  ): Promise<void> {
+    this.warmupTargets.push(...targets.map((target) => target.filePath));
   }
 }
 
@@ -176,6 +198,7 @@ async function runFakeSequentialPass2(params: {
   files: Array<{ path: string; size: number; mtime: number }>;
   resolver: Pass2Resolver;
   changedPaths?: string[];
+  symbolIndex?: SymbolIndex;
 }): Promise<{
   edgesCreated: number;
   telemetry: import("../../dist/indexer/edge-builder.js").CallResolutionTelemetry;
@@ -203,7 +226,7 @@ async function runFakeSequentialPass2(params: {
     changedPass2FilePaths: new Set(params.changedPaths ?? []),
     supportsPass2FilePath: () => true,
     pass2ResolverRegistry: createPass2ResolverRegistry([params.resolver]),
-    symbolIndex: new Map(),
+    symbolIndex: params.symbolIndex ?? symbolIndexForFiles(params.files),
     tsResolver: null,
     config: { languages: ["typescript"] } as RepoConfig,
     pass2Concurrency: 1,
@@ -212,6 +235,7 @@ async function runFakeSequentialPass2(params: {
     globalPreferredSymbolId: new Map(),
     callResolutionTelemetry: telemetry,
     onProgress: undefined,
+    recordTiming: undefined,
   });
   return { edgesCreated, telemetry };
 }
@@ -229,7 +253,12 @@ describe("makeBatchAccumulator", () => {
     const { makeBatchAccumulator } =
       await import("../../dist/indexer/indexer-pass2.js");
     const { acc, submit } = makeBatchAccumulator();
-    await submit({ symbolIdsToRefresh: ["a", "b"], edges: [] });
+    const result = submit({ symbolIdsToRefresh: ["a", "b"], edges: [] });
+    assert.strictEqual(
+      result,
+      undefined,
+      "batch accumulator submit should be synchronous",
+    );
     assert.deepStrictEqual(acc.symbolIdsToRefresh, ["a", "b"]);
     assert.deepStrictEqual(acc.edges, []);
   });
@@ -366,17 +395,18 @@ describe("flushBatchAccumulator — no-op guards", () => {
 describe("runPass2Resolvers — sequential dispatcher write batching", () => {
   it("drains sequential writes at the file threshold and final tail", async () => {
     await withTempPass2Db(async ({ repoId, getWriteRuns }) => {
-      const files = Array.from({ length: 65 }, (_, index) =>
+      const files = Array.from({ length: 257 }, (_, index) =>
         fileMeta(`src/file-${index}.ts`),
       );
       const resolver = new FakeSubmittingResolver((target) => {
         const index = target.filePath.match(/file-(\d+)\.ts$/)?.[1] ?? "x";
+        const sourceSymbolId = `from-${index}`;
         return {
-          symbolIdsToRefresh: [`from-${index}`],
+          symbolIdsToRefresh: [sourceSymbolId],
           edges: [
             edge({
               repoId,
-              fromSymbolId: `from-${index}`,
+              fromSymbolId: sourceSymbolId,
               toSymbolId: `to-${index}`,
             }),
           ],
@@ -392,26 +422,26 @@ describe("runPass2Resolvers — sequential dispatcher write batching", () => {
       });
       const after = getWriteRuns();
 
-      assert.equal(edgesCreated, 65);
+      assert.equal(edgesCreated, 257);
       assert.equal(
         after - before,
-        2,
-        "65 sequential files should flush once at 64 files and once for the final tail",
+        1,
+        "257 sequential full-mode COPY-safe files should coalesce into one final write",
       );
-      assert.equal(telemetry.pass2FilesProcessed, 65);
-      assert.equal(telemetry.resolverBreakdown["fake-pass2"]?.targets, 65);
+      assert.equal(telemetry.pass2FilesProcessed, 257);
+      assert.equal(telemetry.resolverBreakdown["fake-pass2"]?.targets, 257);
       assert.equal(
         telemetry.resolverBreakdown["fake-pass2"]?.edgesCreated,
-        65,
+        257,
       );
 
       const { getLadybugConn } = await import("../../dist/db/ladybug.js");
       const ladybugDb = await import("../../dist/db/ladybug-queries.js");
       const conn = await getLadybugConn();
       const tailEdgesBySymbol = await ladybugDb.getEdgesFromSymbolsLite(conn, [
-        "from-64",
+        "from-256",
       ]);
-      const tailEdges = tailEdgesBySymbol.get("from-64") ?? [];
+      const tailEdges = tailEdgesBySymbol.get("from-256") ?? [];
       assert.equal(
         tailEdges.filter((candidate) => candidate.edgeType === "call").length,
         1,
@@ -496,6 +526,69 @@ describe("runPass2Resolvers — sequential dispatcher write batching", () => {
       assert.equal(telemetry.resolverBreakdown["fake-pass2"]?.targets, 1);
     });
   });
+
+  it("skips files with no source symbols before resolver warmup and dispatch", async () => {
+    await withTempPass2Db(async ({ repoId }) => {
+      const files = [fileMeta("src/has-symbol.ts"), fileMeta("src/no-symbol.ts")];
+      const resolver = new FakeSubmittingResolver((target) => ({
+        symbolIdsToRefresh: [`from-${target.filePath}`],
+        edges: [
+          edge({
+            repoId,
+            fromSymbolId: `from-${target.filePath}`,
+            toSymbolId: `to-${target.filePath}`,
+          }),
+        ],
+      }));
+      const timings = new Map<string, number>();
+      const { runPass2Resolvers } = await import(
+        "../../dist/indexer/indexer-pass2.js"
+      );
+      const { createCallResolutionTelemetry } = await import(
+        "../../dist/indexer/edge-builder.js"
+      );
+      const { createPass2ResolverRegistry } = await import(
+        "../../dist/indexer/pass2/registry.js"
+      );
+      const telemetry = createCallResolutionTelemetry({
+        repoId,
+        mode: "full",
+        pass2EligibleFileCount: files.length,
+        registeredResolvers: [resolver.id],
+      });
+      const symbolIndex = symbolIndexForFiles([files[0]]);
+
+      const edgesCreated = await runPass2Resolvers({
+        repoId,
+        repoRoot: tmpdir(),
+        mode: "full",
+        pass2EligibleFiles: files,
+        changedPass2FilePaths: new Set(),
+        supportsPass2FilePath: () => true,
+        pass2ResolverRegistry: createPass2ResolverRegistry([resolver]),
+        symbolIndex,
+        tsResolver: null,
+        config: { languages: ["typescript"] } as RepoConfig,
+        pass2Concurrency: 1,
+        createdCallEdges: new Set(),
+        globalNameToSymbolIds: new Map(),
+        globalPreferredSymbolId: new Map(),
+        callResolutionTelemetry: telemetry,
+        onProgress: undefined,
+        recordTiming: (phase, elapsedMs) => timings.set(phase, elapsedMs),
+      });
+
+      assert.equal(edgesCreated, 1);
+      assert.deepEqual(resolver.warmupTargets, ["src/has-symbol.ts"]);
+      assert.equal(telemetry.pass2FilesProcessed, 1);
+      assert.equal(telemetry.pass2FilesSkippedNoExistingSymbols, 1);
+      assert.equal(telemetry.resolverBreakdown["fake-pass2"]?.targets, 1);
+      assert.equal(
+        timings.get("pass2.dispatch.skippedNoExistingSymbols"),
+        1,
+      );
+    });
+  });
 });
 
 describe("makeImmediateSubmit — early-return guard", () => {
@@ -503,11 +596,11 @@ describe("makeImmediateSubmit — early-return guard", () => {
     const { makeImmediateSubmit } =
       await import("../../dist/indexer/indexer-pass2.js");
     const submit = makeImmediateSubmit("incremental");
+    const result = submit({ symbolIdsToRefresh: [], edges: [] });
+    assert.ok(result instanceof Promise);
     // The early return inside makeImmediateSubmit must fire before any
     // withWriteConn call that would otherwise need a real DB.
-    await assert.doesNotReject(
-      async () => await submit({ symbolIdsToRefresh: [], edges: [] }),
-    );
+    await assert.doesNotReject(async () => await result);
   });
 
   it("returns a function for both 'full' and 'incremental' modes", async () => {
@@ -585,6 +678,164 @@ describe("insertPass2Edges", () => {
       0,
       "known endpoint COPY writes should not run generic endpoint repair",
     );
+  });
+
+  it("macro-buffers full-mode resolved batches until the COPY cap", async () => {
+    const {
+      DEFAULT_PASS2_KNOWN_ENDPOINT_COPY_BUFFER_MAX_EDGES,
+      createPass2WriteStats,
+      insertPass2Edges,
+    } = await import("../../dist/indexer/indexer-pass2.js");
+    const statements: string[] = [];
+    const stats = createPass2WriteStats();
+    const smallKnownEndpointBuffer = { edges: [] };
+    const cap = DEFAULT_PASS2_KNOWN_ENDPOINT_COPY_BUFFER_MAX_EDGES;
+
+    const firstResult = await insertPass2Edges(
+      createFakeConnection(statements),
+      [edge({ fromSymbolId: "from-buffered-0", toSymbolId: "to-buffered-0" })],
+      "full",
+      stats,
+      smallKnownEndpointBuffer,
+    );
+    assert.deepStrictEqual(firstResult, {
+      persistedEdges: 0,
+      deferredEdges: 1,
+      flushedBufferedEdges: 0,
+    });
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY DEPENDS_ON FROM"),
+      0,
+      "below-threshold coalesced rows should not write immediately",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "CREATE (a)-[:DEPENDS_ON"),
+      0,
+      "below-threshold coalesced rows should not fall back to generic repair",
+    );
+
+    const thresholdResult = await insertPass2Edges(
+      createFakeConnection(statements),
+      Array.from({ length: cap - 1 }, (_, index) =>
+        edge({
+          fromSymbolId: `from-buffered-${index + 1}`,
+          toSymbolId: `to-buffered-${index + 1}`,
+        }),
+      ),
+      "full",
+      stats,
+      smallKnownEndpointBuffer,
+    );
+
+    assert.deepStrictEqual(thresholdResult, {
+      persistedEdges: cap,
+      deferredEdges: 0,
+      flushedBufferedEdges: cap,
+    });
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY DEPENDS_ON FROM"),
+      1,
+      "coalesced rows should flush through relationship COPY at the macro cap",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "CREATE (a)-[:DEPENDS_ON"),
+      0,
+      "coalesced COPY-safe rows should avoid generic relationship create",
+    );
+    assert.strictEqual(stats.smallKnownEndpointFlushes, 1);
+    assert.strictEqual(stats.smallKnownEndpointEdges, 1);
+    assert.strictEqual(stats.copyFlushes, 1);
+    assert.strictEqual(stats.copyEdges, cap);
+    assert.strictEqual(stats.repairInsertEdges, 0);
+  });
+
+  it("allows benchmark runs to override the pass-2 COPY macro-buffer cap", async () => {
+    const {
+      DEFAULT_PASS2_KNOWN_ENDPOINT_COPY_BUFFER_MAX_EDGES,
+      resolvePass2KnownEndpointCopyBufferMaxEdges,
+    } = await import("../../dist/indexer/indexer-pass2.js");
+
+    assert.strictEqual(
+      resolvePass2KnownEndpointCopyBufferMaxEdges({}),
+      DEFAULT_PASS2_KNOWN_ENDPOINT_COPY_BUFFER_MAX_EDGES,
+    );
+    assert.strictEqual(
+      resolvePass2KnownEndpointCopyBufferMaxEdges({
+        SDL_MCP_PASS2_COPY_BUFFER_MAX_EDGES: "8192",
+      }),
+      8192,
+    );
+    assert.strictEqual(
+      resolvePass2KnownEndpointCopyBufferMaxEdges({
+        SDL_MCP_PASS2_COPY_BUFFER_MAX_EDGES: "511",
+      }),
+      DEFAULT_PASS2_KNOWN_ENDPOINT_COPY_BUFFER_MAX_EDGES,
+    );
+  });
+
+  it("drains pending COPY-safe rows before a mixed repair batch", async () => {
+    const { createPass2WriteStats, insertPass2Edges } = await import(
+      "../../dist/indexer/indexer-pass2.js"
+    );
+    const statements: string[] = [];
+    const stats = createPass2WriteStats();
+    const smallKnownEndpointBuffer = { edges: [] };
+
+    const bufferedResult = await insertPass2Edges(
+      createFakeConnection(statements),
+      Array.from({ length: 600 }, (_, index) =>
+        edge({
+          fromSymbolId: `from-pending-${index}`,
+          toSymbolId: `to-pending-${index}`,
+        }),
+      ),
+      "full",
+      stats,
+      smallKnownEndpointBuffer,
+    );
+
+    assert.deepStrictEqual(bufferedResult, {
+      persistedEdges: 0,
+      deferredEdges: 600,
+      flushedBufferedEdges: 0,
+    });
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY DEPENDS_ON FROM"),
+      0,
+      "pending macro-buffer rows should not write before the cap or a forced drain",
+    );
+
+    const mixedResult = await insertPass2Edges(
+      createFakeConnection(statements),
+      [
+        edge({
+          fromSymbolId: "from-safe-after-pending",
+          toSymbolId: "to-safe-after-pending",
+        }),
+        edge({
+          fromSymbolId: 'from-"unsafe"',
+          toSymbolId: "to-repair",
+        }),
+      ],
+      "full",
+      stats,
+      smallKnownEndpointBuffer,
+    );
+
+    assert.deepStrictEqual(mixedResult, {
+      persistedEdges: 602,
+      deferredEdges: 0,
+      flushedBufferedEdges: 600,
+    });
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY DEPENDS_ON FROM"),
+      1,
+      "pending COPY-safe rows should drain through relationship COPY before repair rows persist",
+    );
+    assert.strictEqual(stats.copyFlushes, 1);
+    assert.strictEqual(stats.copyEdges, 600);
+    assert.strictEqual(stats.repairFlushes, 1);
+    assert.strictEqual(stats.repairInsertEdges, 2);
   });
 
   it("sanitizes CSV-quoted provenance for the full-mode pass-2 COPY path", async () => {
@@ -667,6 +918,14 @@ describe("insertPass2Edges", () => {
       1,
       "unsafe endpoint rows should use generic endpoint repair",
     );
+    assert.strictEqual(
+      countStatementsContaining(
+        statements,
+        "OPTIONAL MATCH (a)-[existing:DEPENDS_ON",
+      ),
+      0,
+      "full-mode pass-2 repair should not probe existing call edges for fresh source symbols",
+    );
   });
 
   it("bulk-repairs safe unresolved full-mode pass-2 targets before COPY", async () => {
@@ -711,6 +970,185 @@ describe("insertPass2Edges", () => {
     );
   });
 
+  it("COPY-loads missing versioned unresolved call targets before relationship COPY", async () => {
+    const { insertPass2Edges, createPass2WriteStats } = await import(
+      "../../dist/indexer/indexer-pass2.js"
+    );
+    const { unresolvedCallSymbolId } = await import(
+      "../../dist/db/symbol-placeholders.js"
+    );
+    const statements: string[] = [];
+    const stats = createPass2WriteStats();
+    const versionedTarget = unresolvedCallSymbolId("missing, quoted\ncall");
+    const edges = [
+      edge({
+        fromSymbolId: "from-versioned-unresolved-target",
+        toSymbolId: versionedTarget,
+      }),
+      ...Array.from({ length: 512 }, (_, index) =>
+        edge({
+          fromSymbolId: `from-${index}`,
+          toSymbolId: `to-${index}`,
+        }),
+      ),
+    ];
+
+    await insertPass2Edges(createFakeConnection(statements), edges, "full", stats);
+
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY Symbol FROM"),
+      1,
+      "missing versioned unresolved-call targets should use Symbol COPY",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY SYMBOL_IN_REPO FROM"),
+      1,
+      "new placeholder targets should copy their repo links with the new node rows",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "MERGE (b:Symbol"),
+      0,
+      "versioned unresolved-call targets should skip generic placeholder MERGE",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY DEPENDS_ON FROM"),
+      1,
+      "relationship COPY should still load known-endpoint edges",
+    );
+    assert.ok(stats.copyEnsureSymbolProbeMs >= 0);
+    assert.ok(stats.copyEnsureSymbolCopyMissingCsvMs >= 0);
+    assert.ok(stats.copyEnsureSymbolCopyMissingFromMs >= 0);
+    assert.strictEqual(stats.copyEnsureSymbolMergeFallbackMs, 0);
+  });
+
+  it("records pass-2 write attribution counters for mixed full-mode batches", async () => {
+    const { createPass2WriteStats, insertPass2Edges } = await import(
+      "../../dist/indexer/indexer-pass2.js"
+    );
+    const statements: string[] = [];
+    const stats = createPass2WriteStats();
+    const edges = [
+      edge({
+        fromSymbolId: "from-unresolved-target",
+        toSymbolId: "unresolved:call:missing",
+      }),
+      edge({
+        fromSymbolId: 'from-"unsafe"',
+        toSymbolId: "to-unsafe",
+      }),
+      ...Array.from({ length: 512 }, (_, index) =>
+        edge({
+          fromSymbolId: `from-${index}`,
+          toSymbolId: `to-${index}`,
+        }),
+      ),
+    ];
+
+    await insertPass2Edges(createFakeConnection(statements), edges, "full", stats);
+
+    assert.strictEqual(stats.flushes, 1);
+    assert.strictEqual(stats.totalEdges, 514);
+    assert.strictEqual(stats.knownEndpointEdges, 513);
+    assert.strictEqual(stats.repairEdges, 1);
+    assert.strictEqual(stats.copyFlushes, 1);
+    assert.strictEqual(stats.copyEdges, 513);
+    assert.strictEqual(stats.copyPlaceholderTargets, 1);
+    assert.strictEqual(stats.copyPlaceholderRows, 1);
+    assert.strictEqual(stats.copyEnsuredPlaceholderRows, 1);
+    assert.strictEqual(stats.copySkippedPlaceholderRows, 0);
+    assert.strictEqual(stats.copyUnresolvedPlaceholderRows, 1);
+    assert.strictEqual(stats.copyExternalPlaceholderRows, 0);
+    assert.strictEqual(stats.repairFlushes, 1);
+    assert.strictEqual(stats.repairInsertEdges, 1);
+    assert.strictEqual(stats.repairUnsafeSourceEndpointEdges, 1);
+    assert.strictEqual(stats.repairUnsafeTargetEndpointEdges, 0);
+    assert.strictEqual(stats.repairUnsafeBothEndpointEdges, 0);
+    assert.strictEqual(stats.repairUnresolvedSourceEdges, 0);
+    assert.strictEqual(stats.repairOtherCauseEdges, 0);
+    assert.ok(stats.copyEnsureMs >= 0);
+    assert.ok(stats.copyEnsureSymbolMetadataMs >= 0);
+    assert.ok(stats.copyInsertMs >= 0);
+    assert.ok(stats.copyInsertCsvMaterializeMs >= 0);
+    assert.ok(stats.copyInsertCopyFromMs >= 0);
+    assert.ok(stats.repairInsertMs >= 0);
+  });
+
+  it("skips repeated full-mode placeholder repairs after a successful pass-2 ensure", async () => {
+    const { createPass2WriteStats, insertPass2Edges } = await import(
+      "../../dist/indexer/indexer-pass2.js"
+    );
+    const stats = createPass2WriteStats();
+    const makeEdges = (prefix: string) => [
+      edge({
+        fromSymbolId: `${prefix}-placeholder-source`,
+        toSymbolId: "unresolved:call:reused",
+      }),
+      ...Array.from({ length: 512 }, (_, index) =>
+        edge({
+          fromSymbolId: `${prefix}-from-${index}`,
+          toSymbolId: `${prefix}-to-${index}`,
+        }),
+      ),
+    ];
+
+    await insertPass2Edges(
+      createFakeConnection([]),
+      makeEdges("first"),
+      "full",
+      stats,
+    );
+    await insertPass2Edges(
+      createFakeConnection([]),
+      makeEdges("second"),
+      "full",
+      stats,
+    );
+
+    assert.strictEqual(stats.copyPlaceholderRows, 2);
+    assert.strictEqual(stats.copyEnsuredPlaceholderRows, 1);
+    assert.strictEqual(stats.copySkippedPlaceholderRows, 1);
+  });
+
+  it("records primary repair causes before small COPY-safe rows are folded into repair", async () => {
+    const { createPass2WriteStats, insertPass2Edges } = await import(
+      "../../dist/indexer/indexer-pass2.js"
+    );
+    const stats = createPass2WriteStats();
+    const edges = [
+      edge({
+        fromSymbolId: "unresolved:call:caller",
+        toSymbolId: "target",
+      }),
+      edge({
+        fromSymbolId: 'from-"unsafe"',
+        toSymbolId: "target",
+      }),
+      edge({
+        fromSymbolId: "from-safe",
+        toSymbolId: "target,unsafe",
+      }),
+      edge({
+        fromSymbolId: 'from-"unsafe-both"',
+        toSymbolId: "target,unsafe-both",
+      }),
+      edge({
+        fromSymbolId: "small-copy-safe",
+        toSymbolId: "small-copy-target",
+      }),
+    ];
+
+    await insertPass2Edges(createFakeConnection([]), edges, "full", stats);
+
+    assert.strictEqual(stats.repairEdges, 4);
+    assert.strictEqual(stats.smallKnownEndpointEdges, 1);
+    assert.strictEqual(stats.repairInsertEdges, 5);
+    assert.strictEqual(stats.repairUnresolvedSourceEdges, 1);
+    assert.strictEqual(stats.repairUnsafeSourceEndpointEdges, 1);
+    assert.strictEqual(stats.repairUnsafeTargetEndpointEdges, 1);
+    assert.strictEqual(stats.repairUnsafeBothEndpointEdges, 1);
+    assert.strictEqual(stats.repairOtherCauseEdges, 0);
+  });
+
   it("keeps unsafe unresolved full-mode pass-2 targets on the generic repair path", async () => {
     const { insertPass2Edges, splitPass2EdgesForFullMode } = await import(
       "../../dist/indexer/indexer-pass2.js"
@@ -750,6 +1188,47 @@ describe("insertPass2Edges", () => {
       countStatementsContaining(statements, "SET d.weight = row.weight"),
       0,
       "full-mode unresolved writes should skip existing relationship refresh",
+    );
+  });
+
+  it("keeps COPY-safe unresolved call IDs with unsafe labels on the COPY path", async () => {
+    const { insertPass2Edges, splitPass2EdgesForFullMode } = await import(
+      "../../dist/indexer/indexer-pass2.js"
+    );
+    const { unresolvedCallDependencyTarget, unresolvedCallSymbolId } =
+      await import("../../dist/db/symbol-placeholders.js");
+    const statements: string[] = [];
+    const targetName = 'getMemoryEffects(Call,AAQIP).getModRef\r\n.unwrap("x")';
+    const safeUnresolved = edge({
+      fromSymbolId: "from-safe-encoded-unresolved",
+      toSymbolId: unresolvedCallSymbolId(targetName),
+      targetMeta: unresolvedCallDependencyTarget(targetName),
+    });
+    const edges = [
+      safeUnresolved,
+      ...Array.from({ length: 512 }, (_, index) =>
+        edge({
+          fromSymbolId: `from-${index}`,
+          toSymbolId: `to-${index}`,
+        }),
+      ),
+    ];
+
+    const split = splitPass2EdgesForFullMode(edges);
+    assert.strictEqual(split.knownEndpointEdges.length, 513);
+    assert.deepStrictEqual(split.repairEdges, []);
+
+    await insertPass2Edges(createFakeConnection(statements), edges, "full");
+
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY DEPENDS_ON FROM"),
+      1,
+      "encoded unresolved call IDs should stay relationship-COPY eligible",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "CREATE (a)-[:DEPENDS_ON"),
+      0,
+      "encoded unresolved call IDs should not require generic repair create",
     );
   });
 

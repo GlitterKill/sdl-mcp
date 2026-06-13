@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import {
   classifyDependencyTarget,
   externalImportDependencyTarget,
+  parseUnresolvedCallTarget,
+  unresolvedCallSymbolId,
 } from "../../dist/db/symbol-placeholders.js";
 
 describe("dependency placeholder classification", () => {
@@ -37,6 +39,30 @@ describe("dependency placeholder classification", () => {
       placeholderTarget: "Foo (from src/db/foo.ts)",
     });
     assert.deepEqual(classifyDependencyTarget("unresolved:call:makeSession"), {
+      symbolStatus: "unresolved",
+      placeholderKind: "call",
+      placeholderTarget: "makeSession",
+    });
+  });
+
+  it("encodes new unresolved call targets into COPY-safe symbol IDs", () => {
+    const target = 'getMemoryEffects(Call,AAQIP).getModRef\r\n.unwrap("x")';
+    const symbolId = unresolvedCallSymbolId(target);
+
+    assert.match(symbolId, /^unresolved:call:__sdl_v1__[A-Za-z0-9_-]+$/);
+    assert.equal(/[",\r\n]/.test(symbolId), false);
+    assert.equal(parseUnresolvedCallTarget(symbolId), target);
+    assert.deepEqual(classifyDependencyTarget(symbolId), {
+      symbolStatus: "unresolved",
+      placeholderKind: "call",
+      placeholderTarget: target,
+    });
+  });
+
+  it("keeps legacy unresolved call IDs readable", () => {
+    const legacyId = "unresolved:call:makeSession";
+    assert.equal(parseUnresolvedCallTarget(legacyId), "makeSession");
+    assert.deepEqual(classifyDependencyTarget(legacyId), {
       symbolStatus: "unresolved",
       placeholderKind: "call",
       placeholderTarget: "makeSession",

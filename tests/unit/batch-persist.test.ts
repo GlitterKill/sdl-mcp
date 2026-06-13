@@ -244,18 +244,23 @@ describe("BatchPersistAccumulator", () => {
 
     assert.match(
       content,
-      /ensureDependencyTargetsForKnownSourceEdges\(\s*txConn,\s*knownEndpointEdges,\s*\)/,
-      "BatchPersistAccumulator should prepare placeholder targets before relationship COPY",
+      /ensureDependencyTargetsForKnownSourceEdges\(\s*txConn,\s*knownEndpointEdges,\s*\{[\s\S]*measurePhase:\s*measureKnownEnsurePhase[\s\S]*\}\s*,?\s*\)/,
+      "BatchPersistAccumulator should prepare placeholder targets before relationship COPY with diagnostics",
     );
     assert.match(
       content,
-      /insertKnownSymbolEdges\(txConn,\s*knownEndpointEdges\)/,
-      "BatchPersistAccumulator should route prepared fresh-source edges through relationship COPY",
+      /insertKnownSymbolEdges\(txConn,\s*knownEndpointEdges,\s*\{[\s\S]*measurePhase:\s*measureKnownCopyPhase[\s\S]*\}\s*,?\s*\)/,
+      "BatchPersistAccumulator should route prepared fresh-source edges through relationship COPY with diagnostics",
     );
     assert.match(
       content,
       /insertEdges\(txConn,\s*repairEdges,\s*\{[\s\S]*skipSourceRepoLink:\s*true,[\s\S]*skipExistingRelationshipUpdate:\s*true,[\s\S]*\}\)/,
       "BatchPersistAccumulator must keep pass-1 repair edges in fresh-edge mode",
+    );
+    assert.match(
+      content,
+      /copyRelEndpointIsSafe\(edge\.fromSymbolId\)[\s\S]*copyRelEndpointIsSafe\(edge\.toSymbolId\)/,
+      "BatchPersistAccumulator must keep relationship COPY endpoint safety aligned with pass 2",
     );
   });
 
@@ -287,8 +292,13 @@ describe("BatchPersistAccumulator", () => {
     );
     assert.match(
       content,
-      /deleteSymbolsByIds\(txConn,\s*incomingSymbolIds\)/,
-      "fresh-copy batches should clear colliding stubs or stale symbols before COPY",
+      /filterExistingSymbolIds\(incomingSymbolIds\)/,
+      "fresh-copy batches should prefilter incoming IDs before delete",
+    );
+    assert.match(
+      content,
+      /deleteSymbolsByIds\(\s*txConn,\s*existingIncomingSymbolIds,\s*\)/,
+      "fresh-copy batches should clear only colliding stubs or stale symbols before COPY",
     );
     assert.match(
       content,
@@ -343,6 +353,41 @@ describe("BatchPersistAccumulator", () => {
     assert.deepStrictEqual(split.repairEdges, [
       unresolvedSource,
       outsideBatchTarget,
+    ]);
+  });
+
+  it("keeps unsafe pass-1 COPY endpoints on the generic repair path", async () => {
+    const { splitPass1EdgesForKnownEndpointCopy } = await import(
+      "../../dist/indexer/parser/batch-persist.js"
+    );
+
+    const safeUnresolvedTarget = edge({
+      fromSymbolId: "symbol-a",
+      toSymbolId: "unresolved:call:__sdl_v1__safeTarget",
+    });
+    const commaTarget = edge({
+      fromSymbolId: "symbol-a",
+      toSymbolId: "unresolved:call:target,with-comma",
+    });
+    const quoteTarget = edge({
+      fromSymbolId: "symbol-a",
+      toSymbolId: 'unresolved:call:target"with-quote',
+    });
+    const newlineTarget = edge({
+      fromSymbolId: "symbol-a",
+      toSymbolId: "unresolved:call:target\nwith-newline",
+    });
+
+    const split = splitPass1EdgesForKnownEndpointCopy(
+      [safeUnresolvedTarget, commaTarget, quoteTarget, newlineTarget],
+      new Set(["symbol-a"]),
+    );
+
+    assert.deepStrictEqual(split.knownEndpointEdges, [safeUnresolvedTarget]);
+    assert.deepStrictEqual(split.repairEdges, [
+      commaTarget,
+      quoteTarget,
+      newlineTarget,
     ]);
   });
 });

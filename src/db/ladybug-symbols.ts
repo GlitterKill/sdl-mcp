@@ -1739,6 +1739,30 @@ export async function getSymbolsByIdsLite(
   return result;
 }
 
+export async function getExistingSymbolIds(
+  conn: Connection,
+  symbolIds: string[],
+): Promise<Set<string>> {
+  if (symbolIds.length === 0) return new Set();
+
+  if (symbolIds.length > MAX_BATCH_WARNING_THRESHOLD) {
+    logger.warn("getExistingSymbolIds: large batch size", {
+      count: symbolIds.length,
+      threshold: MAX_BATCH_WARNING_THRESHOLD,
+    });
+  }
+
+  const rows = await queryAll<{ symbolId: string }>(
+    conn,
+    `MATCH (s:Symbol)
+     WHERE s.symbolId IN $symbolIds
+     RETURN s.symbolId AS symbolId`,
+    { symbolIds },
+  );
+
+  return new Set(rows.map((row) => row.symbolId));
+}
+
 export async function findSymbolsInRange(
   conn: Connection,
   repoId: string,

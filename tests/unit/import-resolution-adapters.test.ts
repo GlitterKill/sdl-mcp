@@ -186,6 +186,37 @@ describe("import-resolution adapters", () => {
     assert.deepStrictEqual(paths, ["src/utils.h"]);
   });
 
+  it("resolves C includes through known repo paths when provided", async () => {
+    const repoRoot = createTempRepo("sdl-c-known-includes-");
+
+    const paths = await resolveImportCandidatePaths({
+      language: "c",
+      repoRoot,
+      importerRelPath: "src/main.c",
+      specifier: "utils.h",
+      extensions: [".c", ".h"],
+      knownRepoPaths: new Map([["src/utils.h", true]]),
+    });
+
+    assert.deepStrictEqual(paths, ["src/utils.h"]);
+  });
+
+  it("does not fall back to filesystem checks when known repo paths are provided", async () => {
+    const repoRoot = createTempRepo("sdl-c-known-includes-");
+    writeRepoFile(repoRoot, "src/utils.h", "int helper(void);");
+
+    const paths = await resolveImportCandidatePaths({
+      language: "c",
+      repoRoot,
+      importerRelPath: "src/main.c",
+      specifier: "utils.h",
+      extensions: [".c", ".h"],
+      knownRepoPaths: new Map(),
+    });
+
+    assert.deepStrictEqual(paths, []);
+  });
+
   it("resolves C include with subdirectory path", async () => {
     const repoRoot = createTempRepo("sdl-c-includes-");
     writeRepoFile(repoRoot, "include/mylib/core.h", "");

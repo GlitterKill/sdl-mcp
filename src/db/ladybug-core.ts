@@ -681,9 +681,19 @@ async function beginTransactionWithRetry(conn: Connection): Promise<void> {
   throw lastErr ?? new DatabaseError("BEGIN TRANSACTION failed without error");
 }
 
+export type TransactionPhaseName = "txnBegin" | "txnBody" | "txnCommit";
+
+export interface TransactionTimingOptions {
+  measurePhase?: <T>(
+    phaseName: TransactionPhaseName,
+    fn: () => Promise<T>,
+  ) => Promise<T>;
+}
+
 export async function withTransaction<T>(
   conn: Connection,
   fn: (conn: Connection) => Promise<T>,
+  options?: TransactionTimingOptions,
 ): Promise<T> {
   const store = transactionContext.getStore();
   const depth = transactionDepthByConn.get(conn) ?? 0;
@@ -721,14 +731,21 @@ export async function withTransaction<T>(
     }
     transactionDepthByConn.set(conn, depth + 1);
 
+    const measurePhase =
+      options?.measurePhase ??
+      (async <T>(_phaseName: TransactionPhaseName, phaseFn: () => Promise<T>) =>
+        await phaseFn());
+
     if (depth === 0) {
-      await beginTransactionWithRetry(conn);
+      await measurePhase("txnBegin", async () =>
+        beginTransactionWithRetry(conn),
+      );
     }
 
     try {
-      const result = await fn(conn);
+      const result = await measurePhase("txnBody", async () => fn(conn));
       if (depth === 0) {
-        await exec(conn, "COMMIT");
+        await measurePhase("txnCommit", async () => exec(conn, "COMMIT"));
       }
       return result;
     } catch (err) {

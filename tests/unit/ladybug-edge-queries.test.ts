@@ -1012,6 +1012,222 @@ describe("LadybugDB Edge Queries", () => {
   );
 
   it(
+    "getUnresolvedCallTargetIdsByRepo returns distinct unresolved call targets",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "unresolved:call:console.log",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "unresolved",
+        provenance: "call:console.log",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from-2",
+        toSymbolId: "unresolved:call:console.log",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "unresolved",
+        provenance: "call:console.log",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "unresolved:call:customTarget",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "unresolved",
+        provenance: "call:customTarget",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "edge-to",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        provenance: "call:resolvedTarget",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+
+      const queriesWithUnresolvedTargets = queries as typeof queries & {
+        getUnresolvedCallTargetIdsByRepo?: (
+          conn: import("kuzu").Connection,
+          repoId: string,
+        ) => Promise<string[]>;
+      };
+
+      assert.strictEqual(
+        typeof queriesWithUnresolvedTargets.getUnresolvedCallTargetIdsByRepo,
+        "function",
+      );
+
+      const targetIds =
+        await queriesWithUnresolvedTargets.getUnresolvedCallTargetIdsByRepo!(
+          conn as unknown as import("kuzu").Connection,
+          repoId,
+        );
+
+      assert.deepStrictEqual(targetIds.sort(), [
+        "unresolved:call:console.log",
+        "unresolved:call:customTarget",
+      ]);
+    },
+  );
+
+  it(
+    "deleteCallEdgesToTargetsByRepo deletes only matching repo-scoped call edges",
+    { skip: !ladybugAvailable },
+    async () => {
+      const otherRepoId = "edge-other-repo";
+      await queries.upsertRepo(conn as unknown as import("kuzu").Connection, {
+        repoId: otherRepoId,
+        rootPath: "C:/tmp/edge-other-repo",
+        configJson: "{}",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "unresolved:call:console.log",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "unresolved",
+        provenance: "call:console.log",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from-2",
+        toSymbolId: "unresolved:call:console.log",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "unresolved",
+        provenance: "call:console.log",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "unresolved:call:customTarget",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "unresolved",
+        provenance: "call:customTarget",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "unresolved:call:console.log",
+        edgeType: "import",
+        weight: 0.6,
+        confidence: 1,
+        resolution: "unresolved",
+        provenance: "import:console.log",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        fromSymbolId: "edge-from",
+        toSymbolId: "edge-to",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "exact",
+        provenance: "call:resolvedTarget",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.insertEdge(conn as unknown as import("kuzu").Connection, {
+        repoId: otherRepoId,
+        fromSymbolId: "other-edge-from",
+        toSymbolId: "unresolved:call:console.log",
+        edgeType: "call",
+        weight: 1,
+        confidence: 1,
+        resolution: "unresolved",
+        provenance: "call:console.log",
+        createdAt: "2026-03-04T00:00:00Z",
+      });
+      await exec(
+        conn,
+        "MATCH (r:Repo {repoId: 'edge-repo'}), (s:Symbol {symbolId: 'edge-from'}) CREATE (s)-[:SYMBOL_IN_REPO]->(r)",
+      );
+
+      const queriesWithTargetDelete = queries as typeof queries & {
+        deleteCallEdgesToTargetsByRepo?: (
+          conn: import("kuzu").Connection,
+          repoId: string,
+          targetSymbolIds: string[],
+        ) => Promise<void>;
+      };
+
+      assert.strictEqual(
+        typeof queriesWithTargetDelete.deleteCallEdgesToTargetsByRepo,
+        "function",
+      );
+
+      await queriesWithTargetDelete.deleteCallEdgesToTargetsByRepo!(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        ["unresolved:call:console.log", "edge-to"],
+      );
+
+      const remainingRepoCalls = await queries.getUnresolvedCallEdgesByRepo(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+      );
+      const remainingOtherRepoCalls = await queries.getUnresolvedCallEdgesByRepo(
+        conn as unknown as import("kuzu").Connection,
+        otherRepoId,
+      );
+      const importRows = await queries.getEdgesFrom(
+        conn as unknown as import("kuzu").Connection,
+        "edge-from",
+      );
+
+      assert.deepStrictEqual(remainingRepoCalls, [
+        {
+          fromSymbolId: "edge-from",
+          toSymbolId: "unresolved:call:customTarget",
+        },
+      ]);
+      assert.deepStrictEqual(remainingOtherRepoCalls, [
+        {
+          fromSymbolId: "other-edge-from",
+          toSymbolId: "unresolved:call:console.log",
+        },
+      ]);
+      assert.ok(
+        importRows.some(
+          (edge) =>
+            edge.edgeType === "import" &&
+            edge.toSymbolId === "unresolved:call:console.log",
+        ),
+      );
+      assert.ok(
+        importRows.some(
+          (edge) => edge.edgeType === "call" && edge.toSymbolId === "edge-to",
+        ),
+      );
+    },
+  );
+
+  it(
     "getEdgesByRepoLite returns only lite edge fields",
     { skip: !ladybugAvailable },
     async () => {

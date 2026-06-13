@@ -7,6 +7,9 @@ import type {
 import {
   addToSymbolIndex,
   cleanupUnresolvedEdges,
+  recordPass2ResolverFilePhase,
+  recordPass2ResolverMetric,
+  recordPass2ResolverPhase,
   recordPass2ResolverResult,
   recordPass2ResolverTarget,
   resolvePass2Targets,
@@ -18,13 +21,19 @@ import type { SymbolKind } from "../domain/types.js";
 import type { RepoConfig } from "../config/types.js";
 import type { FileMetadata } from "./fileScanner.js";
 import { toPass2Target, type Pass2ResolverRegistry } from "./pass2/registry.js";
-import type {
-  Pass1ExtractionCache,
-  Pass2ExportedSymbolFull,
-  Pass2ImportCache,
-  SubmitEdgeWrite,
+import {
+  getPass1ExtractionCacheStats,
+  getPass1ExtractionCacheTargetCoverageStats,
+  type Pass1ExtractionCacheBucket,
+  type Pass1ExtractionCacheBucketStats,
+  type Pass1ExtractionCacheTargetBucketStats,
+  type Pass1ExtractionCache,
+  type Pass2ExportedSymbolFull,
+  type Pass2ImportCache,
+  type SubmitEdgeWrite,
 } from "./pass2/types.js";
 import { getLadybugConn, withWriteConn, getPoolStats } from "../db/ladybug.js";
+import { classifyDependencyTarget } from "../db/symbol-placeholders.js";
 import { logger } from "../util/logger.js";
 import {
   buildGlobalPreferredSymbolIds,
@@ -33,8 +42,25 @@ import {
 } from "./indexer-init.js";
 
 const PASS2_KNOWN_ENDPOINT_COPY_THRESHOLD = 512;
-const PASS2_SEQUENTIAL_WRITE_BATCH_FILES = 64;
-const PASS2_SEQUENTIAL_WRITE_BATCH_EDGES = 8_192;
+export const DEFAULT_PASS2_KNOWN_ENDPOINT_COPY_BUFFER_MAX_EDGES = 8_192;
+const PASS2_SEQUENTIAL_WRITE_BATCH_FILES = 256;
+const PASS2_SEQUENTIAL_WRITE_BATCH_EDGES = 32_768;
+
+/** @internal exported for benchmark tuning tests; do not import from product code. */
+export function resolvePass2KnownEndpointCopyBufferMaxEdges(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = env.SDL_MCP_PASS2_COPY_BUFFER_MAX_EDGES?.trim();
+  if (!raw) return DEFAULT_PASS2_KNOWN_ENDPOINT_COPY_BUFFER_MAX_EDGES;
+  const parsed = Number.parseInt(raw, 10);
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < PASS2_KNOWN_ENDPOINT_COPY_THRESHOLD
+  ) {
+    return DEFAULT_PASS2_KNOWN_ENDPOINT_COPY_BUFFER_MAX_EDGES;
+  }
+  return parsed;
+}
 
 /**
  * Build a `submitEdgeWrite` that flushes immediately on each call. Kept for
@@ -45,6 +71,7 @@ const PASS2_SEQUENTIAL_WRITE_BATCH_EDGES = 8_192;
 /** @internal exported for tests; do not import from product code. */
 export function makeImmediateSubmit(
   mode: "full" | "incremental",
+  writeStats?: Pass2WriteStats,
 ): SubmitEdgeWrite {
   return async ({ symbolIdsToRefresh, edges }) => {
     if (!hasPass2WriteWork(symbolIdsToRefresh, edges, mode)) return;
@@ -57,7 +84,12 @@ export function makeImmediateSubmit(
         );
       }
       if (edges.length > 0) {
-        await insertPass2Edges(wConn, edges, mode);
+        await insertPass2Edges(
+          wConn,
+          edges,
+          mode,
+          writeStats,
+        );
       }
     });
   };
@@ -66,6 +98,16 @@ export function makeImmediateSubmit(
 interface BatchWriteAccumulator {
   symbolIdsToRefresh: string[];
   edges: ladybugDb.EdgeRow[];
+}
+
+interface Pass2SmallKnownEndpointBuffer {
+  edges: ladybugDb.EdgeRow[];
+}
+
+interface Pass2WriteFlushResult {
+  persistedEdges: number;
+  deferredEdges: number;
+  flushedBufferedEdges: number;
 }
 
 interface BatchWriteFlushLimits {
@@ -77,6 +119,122 @@ interface SequentialPass2TelemetryCredit {
   resolverId: string;
   edgesCreated: number;
   elapsedMs: number;
+}
+
+function onlyZeroEdgeSequentialCredits(
+  credits: readonly SequentialPass2TelemetryCredit[],
+): boolean {
+  return (
+    credits.length > 0 &&
+    credits.every((credit) => credit.edgesCreated === 0)
+  );
+}
+
+export interface Pass2WriteStats {
+  flushes: number;
+  totalEdges: number;
+  incrementalEdges: number;
+  knownEndpointEdges: number;
+  repairEdges: number;
+  copyFlushes: number;
+  copyEdges: number;
+  copyPlaceholderTargets: number;
+  copyPlaceholderRows: number;
+  copyEnsuredPlaceholderRows: number;
+  copySkippedPlaceholderRows: number;
+  copyUnresolvedPlaceholderRows: number;
+  copyExternalPlaceholderRows: number;
+  copyEnsureMs: number;
+  copyEnsureSymbolMetadataMs: number;
+  copyEnsureSymbolProbeMs: number;
+  copyEnsureSymbolCopyMissingCsvMs: number;
+  copyEnsureSymbolCopyMissingFromMs: number;
+  copyEnsureSymbolMatchExistingMs: number;
+  copyEnsureSymbolMergeFallbackMs: number;
+  copyEnsureRepoLinkMs: number;
+  copyInsertMs: number;
+  copyInsertTxnBeginMs: number;
+  copyInsertTxnBodyMs: number;
+  copyInsertTxnCommitMs: number;
+  copyInsertCsvMaterializeMs: number;
+  copyInsertCopyFromMs: number;
+  copyInsertTempCleanupMs: number;
+  smallKnownEndpointFlushes: number;
+  smallKnownEndpointEdges: number;
+  repairPrepareRowsMs: number;
+  repairSourceRepoLinkSymbolMetadataMs: number;
+  repairSourceRepoLinkRepoLinkMs: number;
+  repairEndpointMetadataMs: number;
+  repairTargetMetadataMs: number;
+  repairTargetRepoLinkMs: number;
+  repairRelationshipCreateMs: number;
+  repairRelationshipUpdateMs: number;
+  repairUnresolvedSourceEdges: number;
+  repairUnsafeSourceEndpointEdges: number;
+  repairUnsafeTargetEndpointEdges: number;
+  repairUnsafeBothEndpointEdges: number;
+  repairOtherCauseEdges: number;
+  repairFlushes: number;
+  repairInsertEdges: number;
+  repairInsertMs: number;
+}
+
+/** @internal exported for tests; do not import from product code. */
+export function createPass2WriteStats(): Pass2WriteStats {
+  return {
+    flushes: 0,
+    totalEdges: 0,
+    incrementalEdges: 0,
+    knownEndpointEdges: 0,
+    repairEdges: 0,
+    copyFlushes: 0,
+    copyEdges: 0,
+    copyPlaceholderTargets: 0,
+    copyPlaceholderRows: 0,
+    copyEnsuredPlaceholderRows: 0,
+    copySkippedPlaceholderRows: 0,
+    copyUnresolvedPlaceholderRows: 0,
+    copyExternalPlaceholderRows: 0,
+    copyEnsureMs: 0,
+    copyEnsureSymbolMetadataMs: 0,
+    copyEnsureSymbolProbeMs: 0,
+    copyEnsureSymbolCopyMissingCsvMs: 0,
+    copyEnsureSymbolCopyMissingFromMs: 0,
+    copyEnsureSymbolMatchExistingMs: 0,
+    copyEnsureSymbolMergeFallbackMs: 0,
+    copyEnsureRepoLinkMs: 0,
+    copyInsertMs: 0,
+    copyInsertTxnBeginMs: 0,
+    copyInsertTxnBodyMs: 0,
+    copyInsertTxnCommitMs: 0,
+    copyInsertCsvMaterializeMs: 0,
+    copyInsertCopyFromMs: 0,
+    copyInsertTempCleanupMs: 0,
+    smallKnownEndpointFlushes: 0,
+    smallKnownEndpointEdges: 0,
+    repairPrepareRowsMs: 0,
+    repairSourceRepoLinkSymbolMetadataMs: 0,
+    repairSourceRepoLinkRepoLinkMs: 0,
+    repairEndpointMetadataMs: 0,
+    repairTargetMetadataMs: 0,
+    repairTargetRepoLinkMs: 0,
+    repairRelationshipCreateMs: 0,
+    repairRelationshipUpdateMs: 0,
+    repairUnresolvedSourceEdges: 0,
+    repairUnsafeSourceEndpointEdges: 0,
+    repairUnsafeTargetEndpointEdges: 0,
+    repairUnsafeBothEndpointEdges: 0,
+    repairOtherCauseEdges: 0,
+    repairFlushes: 0,
+    repairInsertEdges: 0,
+    repairInsertMs: 0,
+  };
+}
+
+const pass2EnsuredPlaceholderTargets = new WeakMap<Pass2WriteStats, Set<string>>();
+
+function emptyPass2WriteFlushResult(): Pass2WriteFlushResult {
+  return { persistedEdges: 0, deferredEdges: 0, flushedBufferedEdges: 0 };
 }
 
 function hasPass2WriteWork(
@@ -162,31 +320,354 @@ export async function insertPass2Edges(
   wConn: LadybugConn,
   edges: ladybugDb.EdgeRow[],
   mode: "full" | "incremental",
-): Promise<void> {
-  if (edges.length === 0) return;
+  writeStats?: Pass2WriteStats,
+  smallKnownEndpointBuffer?: Pass2SmallKnownEndpointBuffer,
+): Promise<Pass2WriteFlushResult> {
+  if (edges.length === 0) return emptyPass2WriteFlushResult();
+  if (writeStats) {
+    writeStats.flushes++;
+    writeStats.totalEdges += edges.length;
+  }
 
   if (mode !== "full") {
+    if (writeStats) writeStats.incrementalEdges += edges.length;
+    const startedAt = Date.now();
     await ladybugDb.insertEdges(wConn, edges);
-    return;
+    if (writeStats) writeStats.repairInsertMs += Date.now() - startedAt;
+    return {
+      persistedEdges: edges.length,
+      deferredEdges: 0,
+      flushedBufferedEdges: 0,
+    };
   }
 
   const { knownEndpointEdges, repairEdges } =
     splitPass2EdgesForFullMode(edges);
-  if (knownEndpointEdges.length >= PASS2_KNOWN_ENDPOINT_COPY_THRESHOLD) {
-    await ladybugDb.ensureDependencyTargetsForKnownSourceEdges(
-      wConn,
-      knownEndpointEdges,
-    );
-    await ladybugDb.insertKnownSymbolEdges(wConn, knownEndpointEdges);
-  } else if (knownEndpointEdges.length > 0) {
-    repairEdges.unshift(...knownEndpointEdges);
+  let persistedEdges = 0;
+  let deferredEdges = 0;
+  let flushedBufferedEdges = 0;
+  if (writeStats) {
+    writeStats.knownEndpointEdges += knownEndpointEdges.length;
+    writeStats.repairEdges += repairEdges.length;
+    recordRepairCauseStats(writeStats, repairEdges);
+  }
+
+  if (
+    smallKnownEndpointBuffer &&
+    repairEdges.length > 0 &&
+    smallKnownEndpointBuffer.edges.length > 0
+  ) {
+    const bufferedEdges = smallKnownEndpointBuffer.edges.splice(0);
+    if (bufferedEdges.length >= PASS2_KNOWN_ENDPOINT_COPY_THRESHOLD) {
+      await insertPass2KnownEndpointCopyEdges(
+        wConn,
+        bufferedEdges,
+        writeStats,
+      );
+      persistedEdges += bufferedEdges.length;
+      flushedBufferedEdges += bufferedEdges.length;
+    } else {
+      repairEdges.unshift(...bufferedEdges);
+    }
+  }
+
+  if (knownEndpointEdges.length > 0) {
+    if (knownEndpointEdges.length < PASS2_KNOWN_ENDPOINT_COPY_THRESHOLD) {
+      if (writeStats) {
+        writeStats.smallKnownEndpointFlushes++;
+        writeStats.smallKnownEndpointEdges += knownEndpointEdges.length;
+      }
+    }
+    if (smallKnownEndpointBuffer && repairEdges.length === 0) {
+      smallKnownEndpointBuffer.edges.push(...knownEndpointEdges);
+      if (
+        smallKnownEndpointBuffer.edges.length >=
+          resolvePass2KnownEndpointCopyBufferMaxEdges()
+      ) {
+        const bufferedEdges = smallKnownEndpointBuffer.edges.splice(0);
+        await insertPass2KnownEndpointCopyEdges(
+          wConn,
+          bufferedEdges,
+          writeStats,
+        );
+        persistedEdges += bufferedEdges.length;
+        flushedBufferedEdges += bufferedEdges.length;
+      } else {
+        deferredEdges += knownEndpointEdges.length;
+      }
+    } else if (
+      knownEndpointEdges.length >= PASS2_KNOWN_ENDPOINT_COPY_THRESHOLD
+    ) {
+      await insertPass2KnownEndpointCopyEdges(
+        wConn,
+        knownEndpointEdges,
+        writeStats,
+      );
+      persistedEdges += knownEndpointEdges.length;
+    } else {
+      repairEdges.unshift(...knownEndpointEdges);
+    }
   }
   if (repairEdges.length > 0) {
-    await ladybugDb.insertEdges(wConn, repairEdges, {
-      skipSourceRepoLink: true,
-      skipExistingRelationshipUpdate: true,
-    });
+    await insertPass2RepairEdges(wConn, repairEdges, writeStats);
+    persistedEdges += repairEdges.length;
   }
+  return { persistedEdges, deferredEdges, flushedBufferedEdges };
+}
+
+async function insertPass2RepairEdges(
+  wConn: LadybugConn,
+  repairEdges: ladybugDb.EdgeRow[],
+  writeStats?: Pass2WriteStats,
+): Promise<void> {
+  if (repairEdges.length === 0) return;
+  if (writeStats) {
+    writeStats.repairFlushes++;
+    writeStats.repairInsertEdges += repairEdges.length;
+  }
+  const startedAt = Date.now();
+  await ladybugDb.insertEdges(wConn, repairEdges, {
+    skipSourceRepoLink: true,
+    skipExistingRelationshipUpdate: true,
+    skipExistingRelationshipProbe: true,
+    measurePhase: writeStats
+      ? async (phaseName, fn) => {
+          const phaseStartedAt = Date.now();
+          try {
+            return await fn();
+          } finally {
+            recordRepairInsertPhaseMs(
+              writeStats,
+              phaseName,
+              Date.now() - phaseStartedAt,
+            );
+          }
+        }
+      : undefined,
+  });
+  if (writeStats) writeStats.repairInsertMs += Date.now() - startedAt;
+  markRepairPlaceholderTargetsEnsured(writeStats, repairEdges);
+}
+
+function recordRepairInsertPhaseMs(
+  writeStats: Pass2WriteStats,
+  phaseName: ladybugDb.InsertEdgesPhaseName,
+  elapsedMs: number,
+): void {
+  switch (phaseName) {
+    case "prepareRows":
+      writeStats.repairPrepareRowsMs += elapsedMs;
+      break;
+    case "sourceRepoLink.symbolMetadata":
+      writeStats.repairSourceRepoLinkSymbolMetadataMs += elapsedMs;
+      break;
+    case "sourceRepoLink.repoLink":
+      writeStats.repairSourceRepoLinkRepoLinkMs += elapsedMs;
+      break;
+    case "endpointMetadata":
+      writeStats.repairEndpointMetadataMs += elapsedMs;
+      break;
+    case "targetMetadata":
+      writeStats.repairTargetMetadataMs += elapsedMs;
+      break;
+    case "targetRepoLink":
+      writeStats.repairTargetRepoLinkMs += elapsedMs;
+      break;
+    case "relationshipCreate":
+      writeStats.repairRelationshipCreateMs += elapsedMs;
+      break;
+    case "relationshipUpdate":
+      writeStats.repairRelationshipUpdateMs += elapsedMs;
+      break;
+    case "dedupe":
+    case "groupByRepo":
+      break;
+  }
+}
+
+async function insertPass2KnownEndpointCopyEdges(
+  wConn: LadybugConn,
+  knownEndpointEdges: ladybugDb.EdgeRow[],
+  writeStats?: Pass2WriteStats,
+): Promise<void> {
+  if (knownEndpointEdges.length === 0) return;
+  if (writeStats) {
+    writeStats.copyFlushes++;
+    writeStats.copyEdges += knownEndpointEdges.length;
+  }
+  const placeholderRepair =
+    writeStats === undefined
+      ? { edgesToEnsure: knownEndpointEdges, targetIdsToMark: [] }
+      : selectUnensuredPlaceholderTargets(writeStats, knownEndpointEdges);
+  let startedAt = Date.now();
+  await ladybugDb.ensureDependencyTargetsForKnownSourceEdges(
+    wConn,
+    placeholderRepair.edgesToEnsure,
+    writeStats
+      ? {
+          measurePhase: async (phaseName, fn) => {
+            const phaseStartedAt = Date.now();
+            try {
+              return await fn();
+            } finally {
+              const elapsedMs = Date.now() - phaseStartedAt;
+              if (phaseName === "symbolMetadata") {
+                writeStats.copyEnsureSymbolMetadataMs += elapsedMs;
+              } else if (phaseName === "repoLink") {
+                writeStats.copyEnsureRepoLinkMs += elapsedMs;
+              } else if (phaseName === "symbolMetadata.probeExisting") {
+                writeStats.copyEnsureSymbolMetadataMs += elapsedMs;
+                writeStats.copyEnsureSymbolProbeMs += elapsedMs;
+              } else if (
+                phaseName === "symbolMetadata.copyMissing.csvMaterialize"
+              ) {
+                writeStats.copyEnsureSymbolMetadataMs += elapsedMs;
+                writeStats.copyEnsureSymbolCopyMissingCsvMs += elapsedMs;
+              } else if (phaseName === "symbolMetadata.copyMissing.copyFrom") {
+                writeStats.copyEnsureSymbolMetadataMs += elapsedMs;
+                writeStats.copyEnsureSymbolCopyMissingFromMs += elapsedMs;
+              } else if (phaseName === "symbolMetadata.matchExisting") {
+                writeStats.copyEnsureSymbolMetadataMs += elapsedMs;
+                writeStats.copyEnsureSymbolMatchExistingMs += elapsedMs;
+              } else {
+                writeStats.copyEnsureSymbolMetadataMs += elapsedMs;
+                writeStats.copyEnsureSymbolMergeFallbackMs += elapsedMs;
+              }
+            }
+          },
+        }
+      : undefined,
+  );
+  if (writeStats && placeholderRepair.targetIdsToMark.length > 0) {
+    const ensuredTargets = getEnsuredPlaceholderTargets(writeStats);
+    for (const targetId of placeholderRepair.targetIdsToMark) {
+      ensuredTargets.add(targetId);
+    }
+  }
+  if (writeStats) writeStats.copyEnsureMs += Date.now() - startedAt;
+  startedAt = Date.now();
+  let copyInsertTempCleanupThisCallMs = 0;
+  await ladybugDb.insertKnownSymbolEdges(
+    wConn,
+    knownEndpointEdges,
+    writeStats
+      ? {
+          measurePhase: async (phaseName, fn) => {
+            const phaseStartedAt = Date.now();
+            try {
+              return await fn();
+            } finally {
+              const elapsedMs = Date.now() - phaseStartedAt;
+              if (phaseName === "txnBegin") {
+                writeStats.copyInsertTxnBeginMs += elapsedMs;
+              } else if (phaseName === "txnBody") {
+                writeStats.copyInsertTxnBodyMs += Math.max(
+                  0,
+                  elapsedMs - copyInsertTempCleanupThisCallMs,
+                );
+              } else if (phaseName === "txnCommit") {
+                writeStats.copyInsertTxnCommitMs += elapsedMs;
+              } else if (phaseName === "csvMaterialize") {
+                writeStats.copyInsertCsvMaterializeMs += elapsedMs;
+              } else if (phaseName === "copyFrom") {
+                writeStats.copyInsertCopyFromMs += elapsedMs;
+              } else {
+                copyInsertTempCleanupThisCallMs += elapsedMs;
+                writeStats.copyInsertTempCleanupMs += elapsedMs;
+              }
+            }
+          },
+        }
+      : undefined,
+  );
+  if (writeStats) writeStats.copyInsertMs += Date.now() - startedAt;
+}
+
+function recordRepairCauseStats(
+  writeStats: Pass2WriteStats,
+  edges: readonly ladybugDb.EdgeRow[],
+): void {
+  for (const edge of edges) {
+    if (isUnresolvedSymbolId(edge.fromSymbolId)) {
+      writeStats.repairUnresolvedSourceEdges++;
+      continue;
+    }
+    const unsafeSource = !copyRelEndpointIsSafe(edge.fromSymbolId);
+    const unsafeTarget = !copyRelEndpointIsSafe(edge.toSymbolId);
+    if (unsafeSource && unsafeTarget) {
+      writeStats.repairUnsafeBothEndpointEdges++;
+    } else if (unsafeSource) {
+      writeStats.repairUnsafeSourceEndpointEdges++;
+    } else if (unsafeTarget) {
+      writeStats.repairUnsafeTargetEndpointEdges++;
+    } else {
+      writeStats.repairOtherCauseEdges++;
+    }
+  }
+}
+
+function getEnsuredPlaceholderTargets(writeStats: Pass2WriteStats): Set<string> {
+  let targetIds = pass2EnsuredPlaceholderTargets.get(writeStats);
+  if (!targetIds) {
+    targetIds = new Set();
+    pass2EnsuredPlaceholderTargets.set(writeStats, targetIds);
+  }
+  return targetIds;
+}
+
+function markRepairPlaceholderTargetsEnsured(
+  writeStats: Pass2WriteStats | undefined,
+  edges: readonly ladybugDb.EdgeRow[],
+): void {
+  if (!writeStats || edges.length === 0) return;
+  const ensuredTargets = getEnsuredPlaceholderTargets(writeStats);
+  for (const edge of edges) {
+    const targetMeta = edge.targetMeta ?? classifyDependencyTarget(edge.toSymbolId);
+    if (targetMeta.symbolStatus !== "real") {
+      ensuredTargets.add(edge.toSymbolId);
+    }
+  }
+}
+
+function selectUnensuredPlaceholderTargets(
+  writeStats: Pass2WriteStats,
+  edges: readonly ladybugDb.EdgeRow[],
+): { edgesToEnsure: ladybugDb.EdgeRow[]; targetIdsToMark: string[] } {
+  const rowsBySymbolId = new Map<
+    string,
+    {
+      edge: ladybugDb.EdgeRow;
+      meta: ReturnType<typeof classifyDependencyTarget>;
+    }
+  >();
+  for (const edge of edges) {
+    const meta = edge.targetMeta ?? classifyDependencyTarget(edge.toSymbolId);
+    if (meta.symbolStatus === "real") continue;
+    writeStats.copyPlaceholderTargets++;
+    if (!rowsBySymbolId.has(edge.toSymbolId)) {
+      rowsBySymbolId.set(edge.toSymbolId, { edge, meta });
+    }
+  }
+
+  writeStats.copyPlaceholderRows += rowsBySymbolId.size;
+  const ensuredTargets = getEnsuredPlaceholderTargets(writeStats);
+  const edgesToEnsure: ladybugDb.EdgeRow[] = [];
+  const targetIdsToMark: string[] = [];
+  for (const [targetId, { edge, meta }] of rowsBySymbolId) {
+    if (meta.symbolStatus === "unresolved") {
+      writeStats.copyUnresolvedPlaceholderRows++;
+    } else if (meta.symbolStatus === "external") {
+      writeStats.copyExternalPlaceholderRows++;
+    }
+    if (ensuredTargets.has(targetId)) {
+      writeStats.copySkippedPlaceholderRows++;
+      continue;
+    }
+    writeStats.copyEnsuredPlaceholderRows++;
+    edgesToEnsure.push(edge);
+    targetIdsToMark.push(targetId);
+  }
+  return { edgesToEnsure, targetIdsToMark };
 }
 
 /**
@@ -203,7 +684,7 @@ export function makeBatchAccumulator(): {
   submit: SubmitEdgeWrite;
 } {
   const acc: BatchWriteAccumulator = { symbolIdsToRefresh: [], edges: [] };
-  const submit: SubmitEdgeWrite = async ({ symbolIdsToRefresh, edges }) => {
+  const submit: SubmitEdgeWrite = ({ symbolIdsToRefresh, edges }) => {
     if (symbolIdsToRefresh.length > 0) {
       acc.symbolIdsToRefresh.push(...symbolIdsToRefresh);
     }
@@ -251,20 +732,48 @@ function recordSequentialPass2TelemetryBatch(
   }
 }
 
+function hasExistingPass2SourceSymbols(
+  symbolIndex: SymbolIndex,
+  relPath: string,
+): boolean {
+  return (symbolIndex.get(relPath)?.size ?? 0) > 0;
+}
+
 async function drainBatchAccumulator(
   acc: BatchWriteAccumulator,
   mode: "full" | "incremental",
-): Promise<void> {
-  await flushBatchAccumulator(acc, mode);
+  writeStats?: Pass2WriteStats,
+  smallKnownEndpointBuffer?: Pass2SmallKnownEndpointBuffer,
+): Promise<Pass2WriteFlushResult> {
+  const result = await flushBatchAccumulator(
+    acc,
+    mode,
+    writeStats,
+    smallKnownEndpointBuffer,
+  );
   resetBatchAccumulator(acc);
+  return result;
 }
 
 /** @internal exported for tests; do not import from product code. */
 export async function flushBatchAccumulator(
   acc: BatchWriteAccumulator,
   mode: "full" | "incremental",
-): Promise<void> {
-  if (!hasPass2WriteWork(acc.symbolIdsToRefresh, acc.edges, mode)) return;
+  writeStats?: Pass2WriteStats,
+  smallKnownEndpointBuffer?: Pass2SmallKnownEndpointBuffer,
+): Promise<Pass2WriteFlushResult> {
+  if (!hasPass2WriteWork(acc.symbolIdsToRefresh, acc.edges, mode)) {
+    return emptyPass2WriteFlushResult();
+  }
+  const deferred = tryDeferSmallKnownEndpointEdges(
+    acc,
+    mode,
+    writeStats,
+    smallKnownEndpointBuffer,
+  );
+  if (deferred) return deferred;
+
+  let result = emptyPass2WriteFlushResult();
   await withWriteConn(async (wConn) => {
     if (mode !== "full" && acc.symbolIdsToRefresh.length > 0) {
       await ladybugDb.deleteOutgoingEdgesByTypeForSymbols(
@@ -274,9 +783,81 @@ export async function flushBatchAccumulator(
       );
     }
     if (acc.edges.length > 0) {
-      await insertPass2Edges(wConn, acc.edges, mode);
+      result = await insertPass2Edges(
+        wConn,
+        acc.edges,
+        mode,
+        writeStats,
+        smallKnownEndpointBuffer,
+      );
     }
   });
+  return result;
+}
+
+function tryDeferSmallKnownEndpointEdges(
+  acc: BatchWriteAccumulator,
+  mode: "full" | "incremental",
+  writeStats: Pass2WriteStats | undefined,
+  smallKnownEndpointBuffer: Pass2SmallKnownEndpointBuffer | undefined,
+): Pass2WriteFlushResult | null {
+  if (
+    mode !== "full" ||
+    !smallKnownEndpointBuffer ||
+    acc.edges.length === 0
+  ) {
+    return null;
+  }
+  const { knownEndpointEdges, repairEdges } =
+    splitPass2EdgesForFullMode(acc.edges);
+  if (
+    repairEdges.length > 0 ||
+    knownEndpointEdges.length === 0 ||
+    smallKnownEndpointBuffer.edges.length + knownEndpointEdges.length >=
+      resolvePass2KnownEndpointCopyBufferMaxEdges()
+  ) {
+    return null;
+  }
+  if (writeStats) {
+    writeStats.flushes++;
+    writeStats.totalEdges += acc.edges.length;
+    writeStats.knownEndpointEdges += knownEndpointEdges.length;
+    writeStats.repairEdges += repairEdges.length;
+    if (knownEndpointEdges.length < PASS2_KNOWN_ENDPOINT_COPY_THRESHOLD) {
+      writeStats.smallKnownEndpointFlushes++;
+      writeStats.smallKnownEndpointEdges += knownEndpointEdges.length;
+    }
+  }
+  smallKnownEndpointBuffer.edges.push(...knownEndpointEdges);
+  return {
+    persistedEdges: 0,
+    deferredEdges: knownEndpointEdges.length,
+    flushedBufferedEdges: 0,
+  };
+}
+
+async function flushSmallKnownEndpointBufferFinal(
+  buffer: Pass2SmallKnownEndpointBuffer,
+  writeStats?: Pass2WriteStats,
+): Promise<Pass2WriteFlushResult> {
+  if (buffer.edges.length === 0) return emptyPass2WriteFlushResult();
+  const bufferedEdges = buffer.edges.splice(0);
+  await withWriteConn(async (wConn) => {
+    if (bufferedEdges.length >= PASS2_KNOWN_ENDPOINT_COPY_THRESHOLD) {
+      await insertPass2KnownEndpointCopyEdges(
+        wConn,
+        bufferedEdges,
+        writeStats,
+      );
+    } else {
+      await insertPass2RepairEdges(wConn, bufferedEdges, writeStats);
+    }
+  });
+  return {
+    persistedEdges: bufferedEdges.length,
+    deferredEdges: 0,
+    flushedBufferedEdges: bufferedEdges.length,
+  };
 }
 
 /**
@@ -554,6 +1135,7 @@ async function runOnePass2Resolver(params: {
   pass2ResolverCache: Map<string, unknown>;
   submitEdgeWrite: SubmitEdgeWrite;
   importCache: Pass2ImportCache;
+  pass2TargetPaths: ReadonlySet<string>;
   pass1Extractions?: Pass1ExtractionCache;
 }): Promise<{
   edgesCreated: number;
@@ -577,6 +1159,7 @@ async function runOnePass2Resolver(params: {
     pass2ResolverCache,
     submitEdgeWrite,
     importCache,
+    pass2TargetPaths,
     pass1Extractions,
   } = params;
 
@@ -605,7 +1188,31 @@ async function runOnePass2Resolver(params: {
     mode,
     submitEdgeWrite,
     importCache,
+    pass2TargetPaths,
     pass1Extractions,
+    recordPhase: (phaseName, elapsedMs) =>
+      recordPass2ResolverPhase(
+        callResolutionTelemetry,
+        resolver.id,
+        phaseName,
+        elapsedMs,
+      ),
+    recordMetric: (metricName, value) =>
+      recordPass2ResolverMetric(
+        callResolutionTelemetry,
+        resolver.id,
+        metricName,
+        value,
+      ),
+    recordFilePhase: (phaseName, filePath, elapsedMs, bytes) =>
+      recordPass2ResolverFilePhase(
+        callResolutionTelemetry,
+        resolver.id,
+        phaseName,
+        filePath,
+        elapsedMs,
+        bytes,
+      ),
   });
 
   return {
@@ -657,6 +1264,7 @@ export async function runPass2Resolvers(params: {
   pass1Extractions?: Pass1ExtractionCache;
   preloadedExportedSymbols?: PreloadedPass2ExportedSymbols;
   recordTiming?: Pass2TimingRecorder;
+  writeStats?: Pass2WriteStats;
 }): Promise<number> {
   const {
     repoId,
@@ -679,6 +1287,7 @@ export async function runPass2Resolvers(params: {
     pass1Extractions,
     preloadedExportedSymbols,
     recordTiming,
+    writeStats,
   } = params;
 
   const measurePass2Subphase = async <T>(
@@ -721,6 +1330,157 @@ export async function runPass2Resolvers(params: {
     }
     return out;
   })();
+  const noExistingSymbolSkipSet = new Set<string>();
+  for (const fileMeta of pass2Targets) {
+    if (
+      !safeSkipSet.has(fileMeta.path) &&
+      !hasExistingPass2SourceSymbols(symbolIndex, fileMeta.path)
+    ) {
+      noExistingSymbolSkipSet.add(fileMeta.path);
+    }
+  }
+  const activePass2TargetPaths = new Set<string>();
+  const activePass2TargetBytes = new Map<string, number>();
+  for (const fileMeta of pass2Targets) {
+    if (
+      !safeSkipSet.has(fileMeta.path) &&
+      !noExistingSymbolSkipSet.has(fileMeta.path)
+    ) {
+      activePass2TargetPaths.add(fileMeta.path);
+      activePass2TargetBytes.set(fileMeta.path, fileMeta.size);
+    }
+  }
+  recordTiming?.(
+    "pass2.dispatch.skippedNoExistingSymbols",
+    noExistingSymbolSkipSet.size,
+  );
+
+  if (pass1Extractions) {
+    const cacheStats = getPass1ExtractionCacheStats(pass1Extractions);
+    const targetCoverageStats = getPass1ExtractionCacheTargetCoverageStats(
+      pass1Extractions,
+      activePass2TargetPaths,
+      activePass2TargetBytes,
+    );
+    const recordCacheBucketStats = (
+      bucketName: Pass1ExtractionCacheBucket,
+      bucket: Pass1ExtractionCacheBucketStats,
+    ): void => {
+      const prefix = `pass2.cache.pass1Extraction.bucket.${bucketName}`;
+      recordTiming?.(`${prefix}.entries`, bucket.entries);
+      recordTiming?.(`${prefix}.bytes`, bucket.bytes);
+      recordTiming?.(`${prefix}.stores`, bucket.stores);
+      recordTiming?.(`${prefix}.storeBytes`, bucket.storeBytes);
+      recordTiming?.(`${prefix}.evictions`, bucket.evictions);
+      recordTiming?.(`${prefix}.evictionBytes`, bucket.evictionBytes);
+    };
+    const recordTargetBucketStats = (
+      bucketName: Pass1ExtractionCacheBucket,
+      bucket: Pass1ExtractionCacheTargetBucketStats,
+    ): void => {
+      const prefix = `pass2.cache.pass1Extraction.target.bucket.${bucketName}`;
+      recordTiming?.(`${prefix}.targets`, bucket.targets);
+      recordTiming?.(`${prefix}.live`, bucket.live);
+      recordTiming?.(`${prefix}.evicted`, bucket.evicted);
+      recordTiming?.(`${prefix}.neverStored`, bucket.neverStored);
+      recordTiming?.(`${prefix}.targetBytes`, bucket.targetBytes);
+      recordTiming?.(`${prefix}.liveBytes`, bucket.liveBytes);
+      recordTiming?.(`${prefix}.evictedBytes`, bucket.evictedBytes);
+      recordTiming?.(`${prefix}.neverStoredBytes`, bucket.neverStoredBytes);
+    };
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.entries",
+      cacheStats.entries,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.protectedEntries",
+      cacheStats.protectedEntries,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.protectedBytes",
+      cacheStats.protectedBytes,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.unprotectedEntries",
+      cacheStats.unprotectedEntries,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.protectedStores",
+      cacheStats.protectedStores,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.protectedStoreBytes",
+      cacheStats.protectedStoreBytes,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.unprotectedStores",
+      cacheStats.unprotectedStores,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.unprotectedStoreBytes",
+      cacheStats.unprotectedStoreBytes,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.protectedEvictions",
+      cacheStats.protectedEvictions,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.protectedEvictionBytes",
+      cacheStats.protectedEvictionBytes,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.unprotectedEvictions",
+      cacheStats.unprotectedEvictions,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.unprotectedEvictionBytes",
+      cacheStats.unprotectedEvictionBytes,
+    );
+    recordCacheBucketStats("c", cacheStats.buckets.c);
+    recordCacheBucketStats("h", cacheStats.buckets.h);
+    recordCacheBucketStats("cc", cacheStats.buckets.cc);
+    recordCacheBucketStats("cpp", cacheStats.buckets.cpp);
+    recordCacheBucketStats("hpp", cacheStats.buckets.hpp);
+    recordCacheBucketStats("other", cacheStats.buckets.other);
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.target.targets",
+      targetCoverageStats.targets,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.target.live",
+      targetCoverageStats.live,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.target.evicted",
+      targetCoverageStats.evicted,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.target.neverStored",
+      targetCoverageStats.neverStored,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.target.targetBytes",
+      targetCoverageStats.targetBytes,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.target.liveBytes",
+      targetCoverageStats.liveBytes,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.target.evictedBytes",
+      targetCoverageStats.evictedBytes,
+    );
+    recordTiming?.(
+      "pass2.cache.pass1Extraction.target.neverStoredBytes",
+      targetCoverageStats.neverStoredBytes,
+    );
+    recordTargetBucketStats("c", targetCoverageStats.buckets.c);
+    recordTargetBucketStats("h", targetCoverageStats.buckets.h);
+    recordTargetBucketStats("cc", targetCoverageStats.buckets.cc);
+    recordTargetBucketStats("cpp", targetCoverageStats.buckets.cpp);
+    recordTargetBucketStats("hpp", targetCoverageStats.buckets.hpp);
+    recordTargetBucketStats("other", targetCoverageStats.buckets.other);
+  }
 
   // Pass-level resolver cache. Promoted from per-batch (was `batchCache`) so
   // parallel batches share the cached symbol/file lookups built by language
@@ -746,9 +1506,76 @@ export async function runPass2Resolvers(params: {
   const wlBefore = getPoolStats();
   const pass2StartedAt = Date.now();
 
+  const activePass2Targets = pass2Targets
+    .filter(
+      (fileMeta) =>
+        !safeSkipSet.has(fileMeta.path) &&
+        !noExistingSymbolSkipSet.has(fileMeta.path),
+    )
+    .map((fileMeta) => toPass2Target({ ...fileMeta, repoId }));
+  const warmupStartedAt = Date.now();
+  for (const resolver of pass2ResolverRegistry.listResolvers()) {
+    if (!resolver.warmup) continue;
+    const resolverTargets = activePass2Targets.filter((target) =>
+      resolver.supports(target),
+    );
+    if (resolverTargets.length === 0) continue;
+    try {
+      await resolver.warmup(resolverTargets, {
+        repoRoot,
+        symbolIndex,
+        tsResolver,
+        languages: config.languages,
+        createdCallEdges,
+        globalNameToSymbolIds,
+        globalPreferredSymbolId,
+        telemetry: callResolutionTelemetry,
+        cache: pass2ResolverCache,
+        mode,
+        importCache,
+        pass2TargetPaths: activePass2TargetPaths,
+        pass1Extractions,
+        recordPhase: (phaseName, elapsedMs) =>
+          recordPass2ResolverPhase(
+            callResolutionTelemetry,
+            resolver.id,
+            phaseName,
+            elapsedMs,
+          ),
+        recordMetric: (metricName, value) =>
+          recordPass2ResolverMetric(
+            callResolutionTelemetry,
+            resolver.id,
+            metricName,
+            value,
+          ),
+        recordFilePhase: (phaseName, filePath, elapsedMs, bytes) =>
+          recordPass2ResolverFilePhase(
+            callResolutionTelemetry,
+            resolver.id,
+            phaseName,
+            filePath,
+            elapsedMs,
+            bytes,
+          ),
+      });
+    } catch (error) {
+      logger.warn(
+        `Pass2 resolver warmup failed for ${resolver.id}; continuing per-file resolution`,
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+  }
+  recordTiming?.("pass2.resolverWarmup", Date.now() - warmupStartedAt);
+
   const concurrency = Math.max(1, params.pass2Concurrency ?? 1);
   let totalEdgesCreated = 0;
   let pass2Processed = 0;
+  const pass2WriteStats = writeStats ?? createPass2WriteStats();
+  const smallKnownEndpointBuffer: Pass2SmallKnownEndpointBuffer | undefined =
+    mode === "full" ? { edges: [] } : undefined;
 
   if (concurrency <= 1) {
     // --- Sequential path: deterministic resolver order, bounded write batches ---
@@ -773,6 +1600,11 @@ export async function runPass2Resolvers(params: {
       // attempts; this skip avoids the wasted resolver execution.
       if (safeSkipSet.has(fileMeta.path)) {
         callResolutionTelemetry.pass2FilesSkippedSCIP++;
+        pass2Processed++;
+        continue;
+      }
+      if (noExistingSymbolSkipSet.has(fileMeta.path)) {
+        callResolutionTelemetry.pass2FilesSkippedNoExistingSymbols++;
         pass2Processed++;
         continue;
       }
@@ -806,7 +1638,31 @@ export async function runPass2Resolvers(params: {
           mode,
           submitEdgeWrite: sequentialSubmit,
           importCache,
+          pass2TargetPaths: activePass2TargetPaths,
           pass1Extractions,
+          recordPhase: (phaseName, elapsedMs) =>
+            recordPass2ResolverPhase(
+              callResolutionTelemetry,
+              resolver.id,
+              phaseName,
+              elapsedMs,
+            ),
+          recordMetric: (metricName, value) =>
+            recordPass2ResolverMetric(
+              callResolutionTelemetry,
+              resolver.id,
+              metricName,
+              value,
+            ),
+          recordFilePhase: (phaseName, filePath, elapsedMs, bytes) =>
+            recordPass2ResolverFilePhase(
+              callResolutionTelemetry,
+              resolver.id,
+              phaseName,
+              filePath,
+              elapsedMs,
+              bytes,
+            ),
         },
       );
       pendingResolverTelemetryCredits.push({
@@ -814,7 +1670,6 @@ export async function runPass2Resolvers(params: {
         edgesCreated: pass2Result.edgesCreated,
         elapsedMs: Date.now() - resolverStartedAt,
       });
-      totalEdgesCreated += pass2Result.edgesCreated;
       filesSinceWriteFlush++;
       filesPendingTelemetryCredit++;
       if (
@@ -823,24 +1678,79 @@ export async function runPass2Resolvers(params: {
           filesSinceWriteFlush,
         )
       ) {
-        await drainBatchAccumulator(sequentialWriteAcc, mode);
-        recordSequentialPass2TelemetryBatch(
-          callResolutionTelemetry,
-          pendingResolverTelemetryCredits,
-          filesPendingTelemetryCredit,
+        const flushResult = await drainBatchAccumulator(
+          sequentialWriteAcc,
+          mode,
+          pass2WriteStats,
+          smallKnownEndpointBuffer,
         );
-        pendingResolverTelemetryCredits.length = 0;
-        filesPendingTelemetryCredit = 0;
+        if (
+          flushResult.persistedEdges > 0 ||
+          (flushResult.deferredEdges === 0 &&
+            onlyZeroEdgeSequentialCredits(pendingResolverTelemetryCredits))
+        ) {
+          totalEdgesCreated += pendingResolverTelemetryCredits.reduce(
+            (sum, credit) => sum + credit.edgesCreated,
+            0,
+          );
+          recordSequentialPass2TelemetryBatch(
+            callResolutionTelemetry,
+            pendingResolverTelemetryCredits,
+            filesPendingTelemetryCredit,
+          );
+          pendingResolverTelemetryCredits.length = 0;
+          filesPendingTelemetryCredit = 0;
+        }
         filesSinceWriteFlush = 0;
       }
       pass2Processed++;
     }
-    await drainBatchAccumulator(sequentialWriteAcc, mode);
-    recordSequentialPass2TelemetryBatch(
-      callResolutionTelemetry,
-      pendingResolverTelemetryCredits,
-      filesPendingTelemetryCredit,
+    const finalFlushResult = await drainBatchAccumulator(
+      sequentialWriteAcc,
+      mode,
+      pass2WriteStats,
+      smallKnownEndpointBuffer,
     );
+    if (
+      finalFlushResult.persistedEdges > 0 ||
+      (finalFlushResult.deferredEdges === 0 &&
+        onlyZeroEdgeSequentialCredits(pendingResolverTelemetryCredits))
+    ) {
+      totalEdgesCreated += pendingResolverTelemetryCredits.reduce(
+        (sum, credit) => sum + credit.edgesCreated,
+        0,
+      );
+      recordSequentialPass2TelemetryBatch(
+        callResolutionTelemetry,
+        pendingResolverTelemetryCredits,
+        filesPendingTelemetryCredit,
+      );
+      pendingResolverTelemetryCredits.length = 0;
+      filesPendingTelemetryCredit = 0;
+    }
+    const finalSmallCopyFlushResult =
+      smallKnownEndpointBuffer
+        ? await flushSmallKnownEndpointBufferFinal(
+            smallKnownEndpointBuffer,
+            pass2WriteStats,
+          )
+        : emptyPass2WriteFlushResult();
+    if (
+      finalSmallCopyFlushResult.persistedEdges > 0 ||
+      onlyZeroEdgeSequentialCredits(pendingResolverTelemetryCredits)
+    ) {
+      totalEdgesCreated += pendingResolverTelemetryCredits.reduce(
+        (sum, credit) => sum + credit.edgesCreated,
+        0,
+      );
+      recordSequentialPass2TelemetryBatch(
+        callResolutionTelemetry,
+        pendingResolverTelemetryCredits,
+        filesPendingTelemetryCredit,
+      );
+      pendingResolverTelemetryCredits.length = 0;
+      filesPendingTelemetryCredit = 0;
+    }
   } else {
     // --- Parallel path: bounded concurrency with per-file isolated dedup sets ---
     //
@@ -856,6 +1766,76 @@ export async function runPass2Resolvers(params: {
     //
     // DB writes inside resolvers are already serialised by withWriteConn and
     // use MERGE semantics, so concurrent writes of the same edge are idempotent.
+    type ParallelBatchResult = Awaited<ReturnType<typeof runOnePass2Resolver>>;
+    type PendingParallelTelemetryCredit = {
+      filesProcessed: number;
+      resolverTargets: string[];
+      resolverResults: Array<{
+        resolverId: string;
+        edgesCreated: number;
+        elapsedMs: number;
+      }>;
+    };
+    const pendingParallelTelemetryCredits: PendingParallelTelemetryCredit[] = [];
+    const buildParallelTelemetryCredit = (
+      batch: FileMetadata[],
+      batchResults: ParallelBatchResult[],
+    ): PendingParallelTelemetryCredit => {
+      const resolverTargets: string[] = [];
+      for (const fileMeta of batch) {
+        const resolver = pass2ResolverRegistry.getResolver(
+          toPass2Target({ ...fileMeta, repoId }),
+        );
+        if (resolver) resolverTargets.push(resolver.id);
+      }
+      const resolverResults: PendingParallelTelemetryCredit["resolverResults"] =
+        [];
+      for (const result of batchResults) {
+        if (result.resolverId !== null) {
+          resolverResults.push({
+            resolverId: result.resolverId,
+            edgesCreated: result.edgesCreated,
+            elapsedMs: result.elapsedMs,
+          });
+        }
+      }
+      return {
+        filesProcessed: batch.length,
+        resolverTargets,
+        resolverResults,
+      };
+    };
+    const mergeParallelCreatedEdges = (
+      batchResults: readonly ParallelBatchResult[],
+    ): void => {
+      for (const result of batchResults) {
+        for (const key of result.localEdgeKeys) {
+          createdCallEdges.add(key);
+        }
+      }
+    };
+    const creditParallelTelemetry = (
+      credit: PendingParallelTelemetryCredit,
+    ): void => {
+      callResolutionTelemetry.pass2FilesProcessed += credit.filesProcessed;
+      for (const resolverId of credit.resolverTargets) {
+        recordPass2ResolverTarget(callResolutionTelemetry, resolverId);
+      }
+      for (const result of credit.resolverResults) {
+        totalEdgesCreated += result.edgesCreated;
+        recordPass2ResolverResult(callResolutionTelemetry, result.resolverId, {
+          edgesCreated: result.edgesCreated,
+          elapsedMs: result.elapsedMs,
+        });
+      }
+    };
+    const creditPendingParallelTelemetry = (): void => {
+      for (const pending of pendingParallelTelemetryCredits) {
+        creditParallelTelemetry(pending);
+      }
+      pendingParallelTelemetryCredits.length = 0;
+    };
+
     for (
       let batchStart = 0;
       batchStart < pass2Targets.length;
@@ -866,15 +1846,17 @@ export async function runPass2Resolvers(params: {
       const batchEnd = Math.min(batchStart + concurrency, pass2Targets.length);
       const rawBatch = pass2Targets.slice(batchStart, batchEnd);
 
-      // SCIP-coverage skip: drop files SCIP fully resolved (and not in the
-      // changed set) before launching resolvers. Counted toward
-      // `pass2FilesSkippedSCIP` and `pass2Processed` so progress + telemetry
-      // stay accurate, but no resolver runs and no DB writes are issued.
+      // Drop files SCIP fully resolved, plus files with no source symbols,
+      // before launching resolvers. Counted toward pass-2 progress so
+      // diagnostics stay accurate, but no resolver runs and no DB writes issue.
       let skippedInBatch = 0;
       const batch: typeof rawBatch = [];
       for (const fileMeta of rawBatch) {
         if (safeSkipSet.has(fileMeta.path)) {
           callResolutionTelemetry.pass2FilesSkippedSCIP++;
+          skippedInBatch++;
+        } else if (noExistingSymbolSkipSet.has(fileMeta.path)) {
+          callResolutionTelemetry.pass2FilesSkippedNoExistingSymbols++;
           skippedInBatch++;
         } else {
           batch.push(fileMeta);
@@ -928,52 +1910,47 @@ export async function runPass2Resolvers(params: {
           pass2ResolverCache,
           submitEdgeWrite: batchSubmit,
           importCache,
+          pass2TargetPaths: activePass2TargetPaths,
           pass1Extractions,
         });
       });
 
       const batchResults = await Promise.all(batchPromises);
+      const telemetryCredit = buildParallelTelemetryCredit(batch, batchResults);
 
       // Single combined write for the whole batch. Runs BEFORE the canonical
       // dedup-set merge so a write failure doesn't leave the in-memory state
       // claiming edges that never made it to disk. A failure here is logged
       // via withWriteConn's pool error path and propagates out — pass-2's
       // existing higher-level catch (in indexer.ts) will record it.
-      await flushBatchAccumulator(batchWriteAcc, mode);
+      const flushResult = await flushBatchAccumulator(
+        batchWriteAcc,
+        mode,
+        pass2WriteStats,
+        smallKnownEndpointBuffer,
+      );
+      mergeParallelCreatedEdges(batchResults);
 
-      // Telemetry only credits files whose edges actually persisted. Bumping
-      // these before the flush would mark files "processed" even on a write
-      // failure that propagates out of this loop without committing edges.
-      for (const fileMeta of batch) {
-        const resolver = pass2ResolverRegistry.getResolver(
-          toPass2Target({ ...fileMeta, repoId }),
-        );
-        if (resolver)
-          recordPass2ResolverTarget(callResolutionTelemetry, resolver.id);
-      }
-      callResolutionTelemetry.pass2FilesProcessed += batch.length;
-
-      // Sequentially merge results back into the canonical state.
-      for (const result of batchResults) {
-        totalEdgesCreated += result.edgesCreated;
-        // Union the resolver's local set (snapshot + new keys) back into canonical.
-        // Re-adding keys already in canonical is a Set no-op.
-        for (const key of result.localEdgeKeys) {
-          createdCallEdges.add(key);
+      if (flushResult.deferredEdges > 0 && flushResult.persistedEdges === 0) {
+        pendingParallelTelemetryCredits.push(telemetryCredit);
+      } else {
+        if (flushResult.flushedBufferedEdges > 0) {
+          creditPendingParallelTelemetry();
         }
-        if (result.resolverId !== null) {
-          recordPass2ResolverResult(
-            callResolutionTelemetry,
-            result.resolverId,
-            {
-              edgesCreated: result.edgesCreated,
-              elapsedMs: result.elapsedMs,
-            },
-          );
-        }
+        creditParallelTelemetry(telemetryCredit);
       }
 
       pass2Processed += batch.length;
+    }
+    const finalSmallCopyFlushResult =
+      smallKnownEndpointBuffer
+        ? await flushSmallKnownEndpointBufferFinal(
+            smallKnownEndpointBuffer,
+            pass2WriteStats,
+          )
+        : emptyPass2WriteFlushResult();
+    if (finalSmallCopyFlushResult.persistedEdges > 0) {
+      creditPendingParallelTelemetry();
     }
   }
 
@@ -999,10 +1976,99 @@ export async function runPass2Resolvers(params: {
   const writeQueueMs = wlAfter.writeTotalQueueMs - wlBefore.writeTotalQueueMs;
   recordTiming?.("pass2.writeActive", writeActiveMs);
   recordTiming?.("pass2.writeQueue", writeQueueMs);
+  recordTiming?.("pass2.write.copyEnsure", pass2WriteStats.copyEnsureMs);
+  recordTiming?.(
+    "pass2.write.copyEnsure.symbolMetadata",
+    pass2WriteStats.copyEnsureSymbolMetadataMs,
+  );
+  recordTiming?.(
+    "pass2.write.copyEnsure.symbolMetadata.probeExisting",
+    pass2WriteStats.copyEnsureSymbolProbeMs,
+  );
+  recordTiming?.(
+    "pass2.write.copyEnsure.symbolMetadata.copyMissing.csvMaterialize",
+    pass2WriteStats.copyEnsureSymbolCopyMissingCsvMs,
+  );
+  recordTiming?.(
+    "pass2.write.copyEnsure.symbolMetadata.copyMissing.copyFrom",
+    pass2WriteStats.copyEnsureSymbolCopyMissingFromMs,
+  );
+  recordTiming?.(
+    "pass2.write.copyEnsure.symbolMetadata.matchExisting",
+    pass2WriteStats.copyEnsureSymbolMatchExistingMs,
+  );
+  recordTiming?.(
+    "pass2.write.copyEnsure.symbolMetadata.mergeFallback",
+    pass2WriteStats.copyEnsureSymbolMergeFallbackMs,
+  );
+  recordTiming?.(
+    "pass2.write.copyEnsure.repoLink",
+    pass2WriteStats.copyEnsureRepoLinkMs,
+  );
+  recordTiming?.("pass2.write.copyInsert", pass2WriteStats.copyInsertMs);
+  recordTiming?.(
+    "pass2.write.copyInsert.txnBegin",
+    pass2WriteStats.copyInsertTxnBeginMs,
+  );
+  recordTiming?.(
+    "pass2.write.copyInsert.txnBody",
+    pass2WriteStats.copyInsertTxnBodyMs,
+  );
+  recordTiming?.(
+    "pass2.write.copyInsert.txnCommit",
+    pass2WriteStats.copyInsertTxnCommitMs,
+  );
+  recordTiming?.(
+    "pass2.write.copyInsert.csvMaterialize",
+    pass2WriteStats.copyInsertCsvMaterializeMs,
+  );
+  recordTiming?.(
+    "pass2.write.copyInsert.copyFrom",
+    pass2WriteStats.copyInsertCopyFromMs,
+  );
+  recordTiming?.(
+    "pass2.write.copyInsert.tempCleanup",
+    pass2WriteStats.copyInsertTempCleanupMs,
+  );
+  recordTiming?.("pass2.write.repairInsert", pass2WriteStats.repairInsertMs);
+  recordTiming?.(
+    "pass2.write.repairInsert.prepareRows",
+    pass2WriteStats.repairPrepareRowsMs,
+  );
+  recordTiming?.(
+    "pass2.write.repairInsert.sourceRepoLink.symbolMetadata",
+    pass2WriteStats.repairSourceRepoLinkSymbolMetadataMs,
+  );
+  recordTiming?.(
+    "pass2.write.repairInsert.sourceRepoLink.repoLink",
+    pass2WriteStats.repairSourceRepoLinkRepoLinkMs,
+  );
+  recordTiming?.(
+    "pass2.write.repairInsert.endpointMetadata",
+    pass2WriteStats.repairEndpointMetadataMs,
+  );
+  recordTiming?.(
+    "pass2.write.repairInsert.targetMetadata",
+    pass2WriteStats.repairTargetMetadataMs,
+  );
+  recordTiming?.(
+    "pass2.write.repairInsert.targetRepoLink",
+    pass2WriteStats.repairTargetRepoLinkMs,
+  );
+  recordTiming?.(
+    "pass2.write.repairInsert.relationshipCreate",
+    pass2WriteStats.repairRelationshipCreateMs,
+  );
+  recordTiming?.(
+    "pass2.write.repairInsert.relationshipUpdate",
+    pass2WriteStats.repairRelationshipUpdateMs,
+  );
   logger.info("Pass-2 writeLimiter telemetry", {
     mode,
     pass2Files: pass2Targets.length,
     pass2FilesSkippedSCIP: callResolutionTelemetry.pass2FilesSkippedSCIP,
+    pass2FilesSkippedNoExistingSymbols:
+      callResolutionTelemetry.pass2FilesSkippedNoExistingSymbols,
     edgesCreated: totalEdgesCreated,
     wallMs,
     writeRuns,
@@ -1012,6 +2078,7 @@ export async function runPass2Resolvers(params: {
     peakQueuedDuringPass: wlAfter.writePeakQueued,
     peakActiveDuringPass: wlAfter.writePeakActive,
     concurrency,
+    writeDetails: pass2WriteStats,
   });
 
   return totalEdgesCreated;

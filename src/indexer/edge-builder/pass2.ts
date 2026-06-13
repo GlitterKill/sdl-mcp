@@ -2,6 +2,10 @@ import { join } from "path";
 
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
+import {
+  unresolvedCallDependencyTarget,
+  unresolvedCallSymbolId,
+} from "../../db/symbol-placeholders.js";
 import { readFileAsync } from "../../util/asyncFs.js";
 import { logger } from "../../util/logger.js";
 import { getAdapterForExtension } from "../adapter/registry.js";
@@ -317,7 +321,9 @@ async function resolveTsCallEdgesPass2(params: {
             if (telemetry) telemetry.adapterCalls.skippedBuiltin++;
             continue;
           }
-          const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
+          const unresolvedTargetId = unresolvedCallSymbolId(
+            resolved.targetName,
+          );
           const edgeKey = `${detail.symbolId}->${unresolvedTargetId}`;
           if (createdCallEdges.has(edgeKey)) {
             if (telemetry) telemetry.adapterCalls.duplicates++;
@@ -335,6 +341,7 @@ async function resolveTsCallEdgesPass2(params: {
             resolutionPhase: "pass2",
             provenance: `unresolved-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
             createdAt: now,
+            targetMeta: unresolvedCallDependencyTarget(resolved.targetName),
           });
           createdCallEdges.add(edgeKey);
           createdEdges++;

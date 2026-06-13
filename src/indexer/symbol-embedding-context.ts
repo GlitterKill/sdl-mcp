@@ -1,5 +1,6 @@
 import type { Connection } from "kuzu";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import { parseUnresolvedCallTarget } from "../db/symbol-placeholders.js";
 import { hashContent } from "../util/hashing.js";
 import { logger } from "../util/logger.js";
 
@@ -96,7 +97,8 @@ export function deriveSearchTerms(
  * Parse an unresolved edge target symbolId into a human-readable label.
  *
  * Formats produced by the indexer:
- *   - `unresolved:call:<targetName>`                      — unresolved call
+ *   - `unresolved:call:<targetName>`                      — legacy unresolved call
+ *   - `unresolved:call:__sdl_v1__<base64urlTargetName>`   — COPY-safe unresolved call
  *   - `unresolved:<specifier>:<name>`                     — unresolved import (named)
  *   - `unresolved:<specifier>:* as <namespaceImport>`     — unresolved import (namespace)
  *
@@ -108,7 +110,7 @@ export function parseUnresolvedTarget(
   if (!targetId.startsWith("unresolved:")) return null;
 
   if (targetId.startsWith("unresolved:call:")) {
-    const name = targetId.slice("unresolved:call:".length).trim();
+    const name = parseUnresolvedCallTarget(targetId);
     if (!name) return null;
     return { kind: "call", label: name };
   }

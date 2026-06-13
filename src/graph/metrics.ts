@@ -12,11 +12,15 @@ import type {
   MetricsRow,
   SymbolLiteRow,
 } from "../db/ladybug-queries.js";
-import type { RepoConfig } from "../config/types.js";
+import type { AlgorithmRefreshConfig, RepoConfig } from "../config/types.js";
 import type { CanonicalTest, StalenessTiers } from "../domain/types.js";
 import { normalizePath } from "../util/paths.js";
 import { logger } from "../util/logger.js";
 import { safeJsonParse, ConfigObjectSchema } from "../util/safeJson.js";
+import {
+  CentralityWorkerTimeoutError,
+  runCentralityWorker,
+} from "./centrality-worker-runner.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,6 +46,27 @@ interface MetricsPayloadFingerprint {
 
 interface MetricsPayloadFingerprintOptions {
   assumeCanonicalJson?: boolean;
+}
+
+export type FoldedCentralityResult =
+  | {
+      status: "succeeded";
+      symbolCount: number;
+      callEdgeCount: number;
+      pageRankCount: number;
+      kCoreCount: number;
+    }
+  | {
+      status: "failed";
+      symbolCount: number;
+      callEdgeCount: number;
+      reason: string;
+      timedOut: boolean;
+    };
+
+interface FoldedCentralityValues {
+  result: FoldedCentralityResult;
+  bySymbolId: Map<string, { pageRank: number; kCore: number }>;
 }
 
 interface ChurnCache {
@@ -1156,12 +1181,87 @@ export function calculateRiskScoresForSymbols(
   return riskScores;
 }
 
+async function maybeComputeFoldedCentrality(params: {
+  metricsRowsCoverAllSymbols: boolean;
+  algorithmRefresh: AlgorithmRefreshConfig | undefined;
+  symbolIds: string[];
+  callEdges: Array<{ callerId: string; calleeId: string }>;
+  measureSubphase: <T>(phaseName: string, fn: () => Promise<T>) => Promise<T>;
+}): Promise<FoldedCentralityValues | undefined> {
+  const algorithmRefresh = params.algorithmRefresh;
+  if (!algorithmRefresh) {
+    return undefined;
+  }
+  const enabled = algorithmRefresh.enabled;
+  const pageRankEnabled = algorithmRefresh.pageRank.enabled;
+  const kCoreEnabled = algorithmRefresh.kCore.enabled;
+  if (
+    !params.metricsRowsCoverAllSymbols ||
+    !enabled ||
+    (!pageRankEnabled && !kCoreEnabled) ||
+    params.callEdges.length === 0 ||
+    params.symbolIds.length === 0
+  ) {
+    return undefined;
+  }
+
+  try {
+    const result = await params.measureSubphase("centralityFold", () =>
+      runCentralityWorker(
+        {
+          symbolIds: params.symbolIds,
+          callEdges: params.callEdges,
+          pageRankEnabled,
+          kCoreEnabled,
+        },
+        algorithmRefresh?.workerTimeoutMs ?? 120_000,
+      ),
+    );
+    const bySymbolId = new Map<string, { pageRank: number; kCore: number }>();
+    for (const symbolId of params.symbolIds) {
+      bySymbolId.set(symbolId, { pageRank: 0, kCore: 0 });
+    }
+    for (const row of result.pageRank) {
+      const entry = bySymbolId.get(row.symbolId);
+      if (entry) entry.pageRank = row.score;
+    }
+    for (const row of result.kCore) {
+      const entry = bySymbolId.get(row.symbolId);
+      if (entry) entry.kCore = row.coreness;
+    }
+    return {
+      result: {
+        status: "succeeded",
+        symbolCount: params.symbolIds.length,
+        callEdgeCount: params.callEdges.length,
+        pageRankCount: result.pageRank.length,
+        kCoreCount: result.kCore.length,
+      },
+      bySymbolId,
+    };
+  } catch (error) {
+    const timedOut = error instanceof CentralityWorkerTimeoutError;
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      result: {
+        status: "failed",
+        symbolCount: params.symbolIds.length,
+        callEdgeCount: params.callEdges.length,
+        reason,
+        timedOut,
+      },
+      bySymbolId: new Map(),
+    };
+  }
+}
+
 export async function updateMetricsForRepo(
   repoId: string,
   changedFileIds?: Set<string>,
   options?: {
     includeTimings?: boolean;
     changedTestFilePaths?: Set<string>;
+    algorithmRefresh?: AlgorithmRefreshConfig;
   },
 ): Promise<{
   timings?: Record<string, number>;
@@ -1177,6 +1277,7 @@ export async function updateMetricsForRepo(
    * instead of paying the full ~8k pre-pass cost.
    */
   affectedSymbolIds?: Set<string>;
+  foldedCentrality?: FoldedCentralityResult;
 }> {
   const timings: Record<string, number> | undefined = options?.includeTimings
     ? {}
@@ -1261,6 +1362,7 @@ export async function updateMetricsForRepo(
       `Incremental metrics: updating ${symbols.length} of ${allSymbols.length} symbols for ${changedFileIds.size} changed files`,
     );
   }
+  const metricsRowsCoverAllSymbols = symbols.length === allSymbols.length;
 
   const fanMetrics = await measureSubphase("fanMetrics", async () =>
     calculateFanMetrics(edges, symbolIds),
@@ -1300,6 +1402,25 @@ export async function updateMetricsForRepo(
     adjacencyIn,
     adjacencyOut,
   };
+  // Build the shared call graph before Metrics row materialization so full
+  // refreshes can fold centrality into the same Metrics write.
+  const sharedClusterEdges: Array<{
+    fromSymbolId: string;
+    toSymbolId: string;
+  }> = [];
+  const sharedCallEdges: Array<{ callerId: string; calleeId: string }> = [];
+  for (const edge of edges) {
+    if (edge.edgeType === "call") {
+      sharedClusterEdges.push({
+        fromSymbolId: edge.fromSymbolId,
+        toSymbolId: edge.toSymbolId,
+      });
+      sharedCallEdges.push({
+        callerId: edge.fromSymbolId,
+        calleeId: edge.toSymbolId,
+      });
+    }
+  }
 
   // Batch-compute all canonical tests in a single BFS pass (O(edges)) rather
   // than running a separate per-symbol BFS (O(symbols × MAX_BFS_VISITED)).
@@ -1308,6 +1429,17 @@ export async function updateMetricsForRepo(
   );
 
   const now = monotonicIsoNow();
+  const foldedCentrality = await maybeComputeFoldedCentrality({
+    metricsRowsCoverAllSymbols,
+    algorithmRefresh: options?.algorithmRefresh,
+    symbolIds: [...symbolIds].sort(),
+    callEdges: sharedCallEdges,
+    measureSubphase,
+  });
+  const centralityBySymbolId =
+    foldedCentrality?.result.status === "succeeded"
+      ? foldedCentrality.bySymbolId
+      : new Map<string, { pageRank: number; kCore: number }>();
 
   // Build all metrics rows, then hand the complete set to the DB helper. The
   // helper owns internal statement chunking inside one transaction; splitting
@@ -1320,6 +1452,7 @@ export async function updateMetricsForRepo(
     const churn = relPath ? (churnByFile.get(relPath) ?? 0) : 0;
     const refs = Array.from(testRefs.get(symbol.symbolId) ?? []).sort();
     const canonicalTest = batchCanonical.get(symbol.symbolId) ?? null;
+    const centrality = centralityBySymbolId.get(symbol.symbolId);
     rows.push({
       symbolId: symbol.symbolId,
       fanIn: metric.fanIn,
@@ -1329,6 +1462,8 @@ export async function updateMetricsForRepo(
       canonicalTestJson: canonicalTest
         ? canonicalTestToJson(canonicalTest)
         : null,
+      pageRank: centrality?.pageRank ?? 0,
+      kCore: centrality?.kCore ?? 0,
       updatedAt: now,
     });
   }
@@ -1406,8 +1541,16 @@ export async function updateMetricsForRepo(
         await withWriteConn(async (wConn) => {
           await measureSubphase("writeRows", () =>
             fullRepoMetricsRefresh
-              ? ladybugDb.replaceMetricsForRepoCopy(wConn, repoId, rows)
-              : ladybugDb.upsertMetricsBatch(wConn, rows),
+              ? ladybugDb.replaceMetricsForRepoCopy(wConn, repoId, rows, {
+                  measurePhase: (phaseName, fn) =>
+                    measureSubphase(`writeRows.${phaseName}`, fn),
+                })
+              : ladybugDb.upsertMetricsBatch(wConn, rows, {
+                  measurePhase: (phaseName, fn) =>
+                    measureSubphase(`writeRows.${phaseName}`, async () =>
+                      await fn(),
+                    ),
+                }),
           );
           if (metricsPayloadFingerprint) {
             await measureSubphase("writeFingerprint", () =>
@@ -1439,26 +1582,6 @@ export async function updateMetricsForRepo(
     recordSubphase("writeRows", 0);
   }
 
-  // Produce a shared-graph handle so downstream consumers (cluster orchestrator)
-  // can reuse the edge load instead of rescanning the repo.
-  const sharedClusterEdges: Array<{
-    fromSymbolId: string;
-    toSymbolId: string;
-  }> = [];
-  const sharedCallEdges: Array<{ callerId: string; calleeId: string }> = [];
-  for (const edge of edges) {
-    if (edge.edgeType === "call") {
-      sharedClusterEdges.push({
-        fromSymbolId: edge.fromSymbolId,
-        toSymbolId: edge.toSymbolId,
-      });
-      sharedCallEdges.push({
-        callerId: edge.fromSymbolId,
-        calleeId: edge.toSymbolId,
-      });
-    }
-  }
-
   return {
     timings,
     sharedGraph: {
@@ -1466,6 +1589,7 @@ export async function updateMetricsForRepo(
       clusterEdges: sharedClusterEdges,
     },
     affectedSymbolIds,
+    foldedCentrality: foldedCentrality?.result,
   };
 }
 

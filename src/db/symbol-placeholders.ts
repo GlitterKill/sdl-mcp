@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 export type SymbolStatus = "real" | "unresolved" | "external";
 
 export interface SymbolPlaceholderMeta {
@@ -53,16 +55,61 @@ const LOCAL_ALIAS_SCOPES = new Set([
   "@utils",
 ]);
 
+const UNRESOLVED_CALL_PREFIX = "unresolved:call:";
+const SAFE_UNRESOLVED_CALL_PREFIX = `${UNRESOLVED_CALL_PREFIX}__sdl_v1__`;
+const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
+
+export function unresolvedCallSymbolId(targetName: string): string {
+  const target = targetName.trim();
+  if (!target) {
+    return UNRESOLVED_CALL_PREFIX;
+  }
+  const encoded = Buffer.from(target, "utf8").toString("base64url");
+  return `${SAFE_UNRESOLVED_CALL_PREFIX}${encoded}`;
+}
+
+export function isSafeUnresolvedCallSymbolId(symbolId: string): boolean {
+  return symbolId.startsWith(SAFE_UNRESOLVED_CALL_PREFIX);
+}
+
+export function parseUnresolvedCallTarget(symbolId: string): string | null {
+  if (!symbolId.startsWith(UNRESOLVED_CALL_PREFIX)) {
+    return null;
+  }
+
+  if (symbolId.startsWith(SAFE_UNRESOLVED_CALL_PREFIX)) {
+    const encoded = symbolId.slice(SAFE_UNRESOLVED_CALL_PREFIX.length);
+    if (encoded && BASE64URL_RE.test(encoded)) {
+      const decoded = Buffer.from(encoded, "base64url").toString("utf8").trim();
+      if (decoded && unresolvedCallSymbolId(decoded) === symbolId) {
+        return decoded;
+      }
+    }
+  }
+
+  const target = symbolId.slice(UNRESOLVED_CALL_PREFIX.length).trim();
+  return target || null;
+}
+
+export function unresolvedCallDependencyTarget(
+  target: string | null | undefined,
+): SymbolPlaceholderMeta {
+  return {
+    symbolStatus: "unresolved",
+    placeholderKind: "call",
+    placeholderTarget: target?.trim() || null,
+  };
+}
+
 /**
  * Classify dependency target IDs that are intentionally represented as Symbol
  * nodes even though they are not indexed code symbols.
  */
 export function classifyDependencyTarget(symbolId: string): SymbolPlaceholderMeta {
   if (symbolId.startsWith("unresolved:call:")) {
-    const target = symbolId.slice("unresolved:call:".length).trim();
+    const target = parseUnresolvedCallTarget(symbolId);
     return {
-      symbolStatus: "unresolved",
-      placeholderKind: "call",
+      ...unresolvedCallDependencyTarget(target),
       placeholderTarget: target || symbolId,
     };
   }

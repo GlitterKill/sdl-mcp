@@ -8,6 +8,13 @@ export function isTsCallResolutionFile(relPath: string): boolean {
 }
 
 const CALL_RESOLUTION_TELEMETRY_SAMPLE_LIMIT = 20;
+const PASS2_RESOLVER_TOP_FILE_LIMIT = 5;
+
+export type Pass2ResolverTopFile = {
+  filePath: string;
+  elapsedMs: number;
+  bytes?: number;
+};
 
 export type Pass2ResolverTelemetry = {
   targets: number;
@@ -30,6 +37,9 @@ export type Pass2ResolverTelemetry = {
   unresolved: number;
   ambiguous: number;
   brokenChain: number;
+  phases: Record<string, number>;
+  metrics: Record<string, number>;
+  topFiles: Record<string, Pass2ResolverTopFile[]>;
 };
 
 export type CallResolutionTelemetry = {
@@ -48,6 +58,13 @@ export type CallResolutionTelemetry = {
   pass2Targets: number;
   pass2FilesProcessed: number;
   pass2FilesNoExistingSymbols: number;
+  /**
+   * Files skipped by the pass-2 dispatcher before resolver invocation because
+   * the refreshed symbol index has no source symbols for that file. Pass-2
+   * resolvers cannot create DEPENDS_ON edges without an existing source symbol,
+   * so this avoids read/parse/extract work that would return zero edges.
+   */
+  pass2FilesSkippedNoExistingSymbols: number;
   pass2FilesNoMappedSymbols: number;
   /**
    * Files skipped by the pass-2 dispatcher because SCIP fully covered every
@@ -125,6 +142,9 @@ export function createCallResolutionTelemetry(params: {
         unresolved: 0,
         ambiguous: 0,
         brokenChain: 0,
+        phases: {},
+        metrics: {},
+        topFiles: {},
       } satisfies Pass2ResolverTelemetry,
     ]),
   );
@@ -138,6 +158,7 @@ export function createCallResolutionTelemetry(params: {
     pass2Targets: 0,
     pass2FilesProcessed: 0,
     pass2FilesNoExistingSymbols: 0,
+    pass2FilesSkippedNoExistingSymbols: 0,
     pass2FilesNoMappedSymbols: 0,
     pass2FilesSkippedSCIP: 0,
     resolverBreakdown,
@@ -191,6 +212,9 @@ function getResolverTelemetryBucket(
       unresolved: 0,
       ambiguous: 0,
       brokenChain: 0,
+      phases: {},
+      metrics: {},
+      topFiles: {},
     };
   }
   return telemetry.resolverBreakdown[resolverId];
@@ -229,6 +253,48 @@ export function recordPass2ResolverResult(
   bucket.unresolved += params.unresolved ?? 0;
   bucket.ambiguous += params.ambiguous ?? 0;
   bucket.brokenChain += params.brokenChain ?? 0;
+}
+
+export function recordPass2ResolverPhase(
+  telemetry: CallResolutionTelemetry,
+  resolverId: string,
+  phaseName: string,
+  elapsedMs: number,
+): void {
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return;
+  const bucket = getResolverTelemetryBucket(telemetry, resolverId);
+  bucket.phases[phaseName] = (bucket.phases[phaseName] ?? 0) + elapsedMs;
+}
+
+export function recordPass2ResolverMetric(
+  telemetry: CallResolutionTelemetry,
+  resolverId: string,
+  metricName: string,
+  value: number,
+): void {
+  if (!Number.isFinite(value) || value < 0) return;
+  const bucket = getResolverTelemetryBucket(telemetry, resolverId);
+  bucket.metrics[metricName] = (bucket.metrics[metricName] ?? 0) + value;
+}
+
+export function recordPass2ResolverFilePhase(
+  telemetry: CallResolutionTelemetry,
+  resolverId: string,
+  phaseName: string,
+  filePath: string,
+  elapsedMs: number,
+  bytes?: number,
+): void {
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0 || !filePath) return;
+  const bucket = getResolverTelemetryBucket(telemetry, resolverId);
+  const topFiles = bucket.topFiles[phaseName] ?? [];
+  topFiles.push({
+    filePath,
+    elapsedMs,
+    bytes: Number.isFinite(bytes) && bytes !== undefined ? bytes : undefined,
+  });
+  topFiles.sort((left, right) => right.elapsedMs - left.elapsedMs);
+  bucket.topFiles[phaseName] = topFiles.slice(0, PASS2_RESOLVER_TOP_FILE_LIMIT);
 }
 
 /**

@@ -5,6 +5,10 @@ import type { SyntaxNode, Tree } from "tree-sitter";
 import { getLadybugConn, withWriteConn } from "../../../db/ladybug.js";
 import * as ladybugDb from "../../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../../db/ladybug-queries.js";
+import {
+  unresolvedCallDependencyTarget,
+  unresolvedCallSymbolId,
+} from "../../../db/symbol-placeholders.js";
 import type { SymbolKind } from "../../../domain/types.js";
 import { readFileAsync } from "../../../util/asyncFs.js";
 import { singleFlight } from "../../../util/concurrency.js";
@@ -744,7 +748,7 @@ async function resolveGoCallEdgesPass2(params: {
         createdCallEdges.add(edgeKey);
         createdEdges++;
       } else if (resolved.targetName) {
-        const unresolvedTargetId = `unresolved:call:${resolved.targetName}`;
+        const unresolvedTargetId = unresolvedCallSymbolId(resolved.targetName);
         const edgeKey = `${detail.symbolId}->${unresolvedTargetId}`;
         if (createdCallEdges.has(edgeKey)) {
           continue;
@@ -761,6 +765,7 @@ async function resolveGoCallEdgesPass2(params: {
           resolutionPhase: "pass2",
           provenance: `unresolved-go-call:${call.calleeIdentifier}${resolved.candidateCount ? `:candidates=${resolved.candidateCount}` : ""}`,
           createdAt: now,
+          targetMeta: unresolvedCallDependencyTarget(resolved.targetName),
         });
         createdCallEdges.add(edgeKey);
         createdEdges++;

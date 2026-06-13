@@ -81,6 +81,7 @@ import {
 } from "./indexer-pass1.js";
 import {
   buildPreloadedPass2ExportedSymbolsFromRows,
+  createPass2WriteStats,
   runPass2Resolvers,
   finalizeEdges,
 } from "./indexer-pass2.js";
@@ -186,7 +187,11 @@ function snapshotPass2ResolverBreakdown(
   return Object.fromEntries(
     entries.map(([resolverId, resolver]) => [
       resolverId,
-      { ...resolver },
+      {
+        ...resolver,
+        phases: { ...resolver.phases },
+        metrics: { ...resolver.metrics },
+      },
     ]),
   );
 }
@@ -2189,6 +2194,7 @@ async function indexRepoImpl(
   ): void => {
     recordIndexSubphaseTiming(phaseName, durationMs);
   };
+  const providerFirstLegacyFallbackPass2WriteStats = createPass2WriteStats();
   const measureIndexSubphase = async <T>(
     phaseName: string,
     fn: () => Promise<T> | T,
@@ -2458,6 +2464,7 @@ async function indexRepoImpl(
               algorithmRefresh: appConfig.indexing?.algorithmRefresh,
               onProgress,
               sharedGraph: finalizeResult.sharedGraph,
+              foldedCentrality: finalizeResult.foldedCentrality,
               measurePhase,
             });
 
@@ -3869,6 +3876,7 @@ async function indexRepoImpl(
           pass1Extractions: pass1Acc.pass1Extractions,
           preloadedExportedSymbols: preloadedPass2ExportedSymbols,
           recordTiming: recordPass2SubphaseTiming,
+          writeStats: providerFirstLegacyFallbackPass2WriteStats,
         }),
       );
     } else {
@@ -3900,6 +3908,7 @@ async function indexRepoImpl(
           pass1Extractions: pass1Acc.pass1Extractions,
           preloadedExportedSymbols: preloadedPass2ExportedSymbols,
           recordTiming: recordPass2SubphaseTiming,
+          writeStats: providerFirstLegacyFallbackPass2WriteStats,
         }),
       );
       // Always settle the drain before moving past pass 2 — finalizeEdges
@@ -4148,6 +4157,7 @@ async function indexRepoImpl(
                   ? providerFirstLegacyFallbackPhaseTimings
                   : undefined,
               sharedGraph: finalizeResult.sharedGraph,
+              foldedCentrality: finalizeResult.foldedCentrality,
               measurePhase,
             });
 
@@ -4243,6 +4253,10 @@ async function indexRepoImpl(
               files - providerFirstLegacyFallbackSamplePaths.length,
             ),
             phases: { ...providerFirstLegacyFallbackPhaseTimings },
+            pass1Drain: pass1Acc.pass1DrainDiagnostics,
+            pass2WriteStats: {
+              ...providerFirstLegacyFallbackPass2WriteStats,
+            },
             resolverBreakdown:
               snapshotPass2ResolverBreakdown(callResolutionTelemetry),
           },

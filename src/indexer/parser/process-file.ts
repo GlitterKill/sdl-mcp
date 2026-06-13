@@ -26,6 +26,16 @@ import { storePass1Extraction } from "../pass2/types.js";
 
 export type { ProcessFileParams, ProcessFileResult };
 
+const C_FAMILY_PASS2_SOURCE_CACHE_EXTENSIONS = new Set([
+  ".c",
+  ".h",
+  ".cpp",
+  ".hpp",
+  ".cc",
+  ".cxx",
+  ".hxx",
+]);
+
 export async function processFile(
   params: ProcessFileParams,
 ): Promise<ProcessFileResult> {
@@ -79,16 +89,13 @@ export async function processFile(
     if (parseResult.status === "skip") return parseResult.result;
     const { data: parsed } = parseResult;
 
-    // C1: cache pass-1's extraction outputs so the TS pass-2 resolver can
-    // skip a redundant tree-sitter parse + three `extract*` calls. Gated on
-    // `isTsCallResolutionFile` because non-TS resolvers consume the live
-    // tree handle for scope walkers and don't benefit from cached
-    // pure-JS extraction. The data deep-copies off the tree-sitter tree
-    // (extract* return plain JS objects keyed by string nodeId), so
-    // downstream `tree.delete()` calls don't invalidate the cached entries.
+    // C1: cache pass-1 extraction outputs for pass-2 reuse. TS/JS reuses the
+    // full extraction; C-family resolvers reuse only source text/imports and
+    // still perform their stricter pass-2 call extraction.
     if (
       params.pass1Extractions &&
-      isTsCallResolutionFile(fileMeta.path) &&
+      (isTsCallResolutionFile(fileMeta.path) ||
+        C_FAMILY_PASS2_SOURCE_CACHE_EXTENSIONS.has(fileData.extWithDot)) &&
       skipCallResolution
     ) {
       storePass1Extraction(params.pass1Extractions, fileData.relPath, {
