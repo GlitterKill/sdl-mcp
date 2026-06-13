@@ -544,6 +544,13 @@ export async function runPass1WithTsEngine(
         acc.filesProcessed++;
         logger.error(`Error processing file ${file.path}`, { error });
       }
+      if (
+        params.drainBatchPersistDuringTsPass === true &&
+        batchAccumulator &&
+        batchAccumulator.queueDepth > 0
+      ) {
+        await batchAccumulator.waitForIdle();
+      }
     }
   };
 

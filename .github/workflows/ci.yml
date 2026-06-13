@@ -294,6 +294,10 @@ jobs:
           # Native parser crash coverage lives in native-build and sync-memory;
           # enabling it here has repeatedly produced Linux exit 139 flakes.
           SDL_MCP_DISABLE_NATIVE_ADDON: "1"
+          # Avoid overlapping pass-1 LadybugDB writes with native tree-sitter
+          # parsing in the same Node process; hosted runners have hit exit 139
+          # at that boundary even when the Rust addon is disabled.
+          SDL_MCP_PASS1_STABLE_DB_WRITES: "1"
         run: |
           echo "Running benchmark CI against locked OSS repo (zod-oss)..."
           THRESHOLD_PATH="config/benchmark.ci.config.json"
@@ -721,6 +725,10 @@ jobs:
           # next failing run can distinguish native parsing from overlap with
           # JS-side DB writes.
           SDL_MCP_NATIVE_PASS1_SERIAL: "1"
+          # Also serialize pass-1 DB flushes against parsing so sync-memory
+          # still exercises the native addon without the known tree-sitter /
+          # LadybugDB overlap crash path.
+          SDL_MCP_PASS1_STABLE_DB_WRITES: "1"
         run: |
           echo "Starting CI memory index on ${{ runner.os }}..."
           START_TIME=$(date +%s%3N)

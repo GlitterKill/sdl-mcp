@@ -39,6 +39,7 @@ import {
   selectProviderFirstLegacyFallbackPaths,
   shouldCreateParserWorkerPool,
   shouldDeleteExistingFilesBeforeFullPass1,
+  shouldStabilizePass1BatchPersist,
   shouldUseBatchPersistAccumulator,
   shouldUseRustPass1Engine,
 } from "../../dist/indexer/indexer.js";
@@ -245,6 +246,56 @@ describe("provider-first indexing foundation", () => {
         providerFirstLegacyFallbackComplete: true,
       }),
       true,
+    );
+    assert.equal(
+      shouldStabilizePass1BatchPersist({
+        providerFirstLegacyFallbackActive: false,
+        useBatchPersist: true,
+        env: {},
+      }),
+      false,
+    );
+    assert.equal(
+      shouldStabilizePass1BatchPersist({
+        providerFirstLegacyFallbackActive: false,
+        useBatchPersist: true,
+        env: { SDL_MCP_PASS1_STABLE_DB_WRITES: "1" },
+      }),
+      true,
+    );
+    const previousStableWritesEnv = process.env.SDL_MCP_PASS1_STABLE_DB_WRITES;
+    try {
+      process.env.SDL_MCP_PASS1_STABLE_DB_WRITES = "1";
+      assert.equal(
+        shouldStabilizePass1BatchPersist({
+          providerFirstLegacyFallbackActive: false,
+          useBatchPersist: true,
+        }),
+        true,
+      );
+    } finally {
+      if (previousStableWritesEnv === undefined) {
+        delete process.env.SDL_MCP_PASS1_STABLE_DB_WRITES;
+      } else {
+        process.env.SDL_MCP_PASS1_STABLE_DB_WRITES =
+          previousStableWritesEnv;
+      }
+    }
+    assert.equal(
+      shouldStabilizePass1BatchPersist({
+        providerFirstLegacyFallbackActive: true,
+        useBatchPersist: true,
+        env: {},
+      }),
+      true,
+    );
+    assert.equal(
+      shouldStabilizePass1BatchPersist({
+        providerFirstLegacyFallbackActive: true,
+        useBatchPersist: false,
+        env: { SDL_MCP_PASS1_STABLE_DB_WRITES: "1" },
+      }),
+      false,
     );
     assert.equal(
       resolvePass1BatchSymbolWriteMode({

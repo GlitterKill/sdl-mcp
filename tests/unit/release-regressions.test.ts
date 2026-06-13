@@ -175,6 +175,11 @@ describe("release regression guards", () => {
       /SDL_MCP_DISABLE_NATIVE_ADDON:\s*"1"/,
       "benchmark CI should explicitly disable the native addon to avoid Linux exit 139 flakes",
     );
+    assert.match(
+      benchmarksJob,
+      /SDL_MCP_PASS1_STABLE_DB_WRITES:\s*"1"/,
+      "benchmark CI should serialize pass-1 DB writes against parser work to avoid hosted-runner exit 139 flakes",
+    );
 
     assert.match(
       nativeBuildJob,
@@ -190,8 +195,8 @@ describe("release regression guards", () => {
 
     assert.match(
       syncMemoryJob,
-      /SDL_MCP_NATIVE_PASS1_SERIAL:\s*"1"[\s\S]*set \+e[\s\S]*node dist\/cli\/index\.js index[\s\S]*INDEX_EXIT_CODE=\$\?[\s\S]*if \[ "\$\{INDEX_EXIT_CODE\}" -ne 0 \]; then/s,
-      "sync-memory should fail fast on native index crashes and preserve the real exit code",
+      /SDL_MCP_NATIVE_PASS1_SERIAL:\s*"1"[\s\S]*SDL_MCP_PASS1_STABLE_DB_WRITES:\s*"1"[\s\S]*set \+e[\s\S]*node dist\/cli\/index\.js index[\s\S]*INDEX_EXIT_CODE=\$\?[\s\S]*if \[ "\$\{INDEX_EXIT_CODE\}" -ne 0 \]; then/s,
+      "sync-memory should keep native parsing active, stabilize pass-1 DB writes, and preserve real index crash exit codes",
     );
 
     assert.doesNotMatch(

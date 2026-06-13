@@ -39,6 +39,7 @@ const C_FAMILY_PASS2_SOURCE_CACHE_EXTENSIONS = new Set([
 export async function processFile(
   params: ProcessFileParams,
 ): Promise<ProcessFileResult> {
+  let parsedTreeToDelete: { delete?: () => void } | null = null;
   const {
     repoId,
     repoRoot,
@@ -88,6 +89,9 @@ export async function processFile(
     });
     if (parseResult.status === "skip") return parseResult.result;
     const { data: parsed } = parseResult;
+    parsedTreeToDelete = parsed.tree as unknown as {
+      delete?: () => void;
+    } | null;
 
     // C1: cache pass-1 extraction outputs for pass-2 reuse. TS/JS reuses the
     // full extraction; C-family resolvers reuse only source text/imports and
@@ -326,5 +330,9 @@ export async function processFile(
   } catch (error) {
     logger.error(`Error processing file ${fileMeta.path}:`, { error });
     return createEmptyProcessFileResult(false);
+  } finally {
+    // tree-sitter Tree objects hold native memory; long pass-1 runs must not
+    // wait for GC finalizers before releasing them.
+    parsedTreeToDelete?.delete?.();
   }
 }

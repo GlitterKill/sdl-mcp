@@ -378,6 +378,19 @@ export function resolvePass1BatchSymbolWriteMode(params: {
 }
 
 /** @internal exported for tests; do not import from product code. */
+export function shouldStabilizePass1BatchPersist(params: {
+  providerFirstLegacyFallbackActive: boolean;
+  useBatchPersist: boolean;
+  env?: NodeJS.ProcessEnv;
+}): boolean {
+  if (!params.useBatchPersist) return false;
+  if (params.providerFirstLegacyFallbackActive) return true;
+  return /^(1|true|yes)$/i.test(
+    ((params.env ?? process.env).SDL_MCP_PASS1_STABLE_DB_WRITES ?? "").trim(),
+  );
+}
+
+/** @internal exported for tests; do not import from product code. */
 export function resolveProviderFirstPass1Concurrency(params: {
   configuredConcurrency: number | undefined;
   fileCount: number;
@@ -3540,17 +3553,6 @@ async function indexRepoImpl(
     providerFirstLegacyFallbackComplete:
       providerFirstLegacyFallbackCompleteForPass,
   });
-  const dirtyTsResolverPaths = collectDirtyTsResolverPaths({
-    mode,
-    files,
-    existingByPath,
-  });
-  const createParserWorkerPool = shouldCreateParserWorkerPool({
-    useRustEngine,
-    providerFirstLegacyFallbackActive,
-    providerFirstLegacyFallbackComplete:
-      providerFirstLegacyFallbackCompleteForPass,
-  });
   const useBatchPersist = shouldUseBatchPersistAccumulator({
     providerFirstLegacyFallbackActive,
     providerFirstLegacyFallbackComplete:
@@ -3559,8 +3561,25 @@ async function indexRepoImpl(
   const batchSymbolWriteMode = resolvePass1BatchSymbolWriteMode({
     providerFirstLegacyFallbackActive,
   });
-  const stabilizeProviderFirstFallbackPass1 =
-    providerFirstLegacyFallbackActive && useBatchPersist;
+  const stabilizePass1BatchPersist = shouldStabilizePass1BatchPersist({
+    providerFirstLegacyFallbackActive,
+    useBatchPersist,
+  });
+  const pass1Concurrency =
+    stabilizePass1BatchPersist && !useRustEngine ? 1 : concurrency;
+  const dirtyTsResolverPaths = collectDirtyTsResolverPaths({
+    mode,
+    files,
+    existingByPath,
+  });
+  const createParserWorkerPool =
+    !stabilizePass1BatchPersist &&
+    shouldCreateParserWorkerPool({
+      useRustEngine,
+      providerFirstLegacyFallbackActive,
+      providerFirstLegacyFallbackComplete:
+        providerFirstLegacyFallbackCompleteForPass,
+    });
   const emitProviderFallbackInitProgress = (message: string): void => {
     if (!providerFirstLegacyFallbackActive) return;
     emitProviderFirstProgress(onProgress, "legacyFallbackInit", { message });
@@ -3591,11 +3610,11 @@ async function indexRepoImpl(
   emitProviderFallbackInitProgress(
     `pass 1 engine=${useRustEngine ? "rust" : "typescript"} ` +
       `fallback=${providerFirstLegacyFallbackCompleteForPass ? "complete" : "partial"} ` +
-      `concurrency=${concurrency} workers=${workerPoolSize} ` +
+      `concurrency=${pass1Concurrency} workers=${workerPoolSize} ` +
       `batchPersist=${useBatchPersist ? "on" : "off"} ` +
-      `autoDrain=${stabilizeProviderFirstFallbackPass1 ? "off" : "on"} ` +
-      `nativeChunks=${stabilizeProviderFirstFallbackPass1 ? "serial" : "default"} ` +
-      `drainBetweenChunks=${stabilizeProviderFirstFallbackPass1 ? "on" : "off"}`,
+      `autoDrain=${stabilizePass1BatchPersist ? "off" : "on"} ` +
+      `nativeChunks=${stabilizePass1BatchPersist ? "serial" : "default"} ` +
+      `drainBetweenChunks=${stabilizePass1BatchPersist ? "on" : "off"}`,
   );
 
   try {
@@ -3705,13 +3724,14 @@ async function indexRepoImpl(
       globalPreferredSymbolId,
       pass2ResolverRegistry,
       supportsPass2FilePath,
-      concurrency,
+      concurrency: pass1Concurrency,
       workerPool,
       useBatchPersist,
       batchSymbolWriteMode,
-      serializeNativePass1Chunks: stabilizeProviderFirstFallbackPass1,
-      drainBatchPersistBetweenNativeChunks: stabilizeProviderFirstFallbackPass1,
-      autoDrainBatchPersist: !stabilizeProviderFirstFallbackPass1,
+      serializeNativePass1Chunks: stabilizePass1BatchPersist,
+      drainBatchPersistBetweenNativeChunks: stabilizePass1BatchPersist,
+      drainBatchPersistDuringTsPass: stabilizePass1BatchPersist,
+      autoDrainBatchPersist: !stabilizePass1BatchPersist,
       onProgress,
       signal,
       includeTimings: shouldCollectPostIndexSubphaseTimings(),
