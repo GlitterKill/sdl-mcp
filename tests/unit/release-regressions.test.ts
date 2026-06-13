@@ -140,10 +140,22 @@ describe("release regression guards", () => {
       "tests job should avoid grep|head under pipefail because grep can hit SIGPIPE",
     );
 
-    assert.match(
+    assert.doesNotMatch(
       benchmarksJob,
-      /needs:\s*native-build[\s\S]*uses:\s*actions\/download-artifact@v7[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}[\s\S]*SDL_MCP_NATIVE_ADDON_PATH=/s,
-      "benchmarks job should run against the freshly built Linux native addon",
+      /needs:\s*native-build/s,
+      "benchmark CI should stay independent from native-build so native crashes do not mask threshold regressions",
+    );
+
+    assert.doesNotMatch(
+      benchmarksJob,
+      /name:\s*Download native addon artifact[\s\S]*name:\s*\$\{\{\s*matrix\.native-artifact\s*\}\}/s,
+      "benchmark CI should not download native artifacts when the lane intentionally disables the native addon",
+    );
+
+    assert.doesNotMatch(
+      benchmarksJob,
+      /SDL_MCP_NATIVE_ADDON_PATH=/s,
+      "benchmark CI should not export a native addon path",
     );
 
     assert.doesNotMatch(
@@ -152,10 +164,16 @@ describe("release regression guards", () => {
       "benchmark CI should not schedule the unstable Windows native/LadybugDB benchmark lane",
     );
 
-    assert.match(
+    assert.doesNotMatch(
       benchmarksJob,
       /SDL_MCP_NATIVE_PASS1_SERIAL:\s*"1"/,
-      "benchmark CI should run in native pass-1 serialization isolation mode while the addon crash is investigated",
+      "benchmark CI should not use native pass-1 isolation when the native addon is disabled",
+    );
+
+    assert.match(
+      benchmarksJob,
+      /SDL_MCP_DISABLE_NATIVE_ADDON:\s*"1"/,
+      "benchmark CI should explicitly disable the native addon to avoid Linux exit 139 flakes",
     );
 
     assert.match(

@@ -21,10 +21,20 @@ describe("indexer.ts monolith shattering", () => {
     watcher: join(repoRoot, "src/indexer/watcher.ts"),
     edgeBuilder: join(repoRoot, "src/indexer/edge-builder.ts"),
     metricsUpdater: join(repoRoot, "src/indexer/metrics-updater.ts"),
+    indexerFinalizeEdges: join(repoRoot, "src/indexer/indexer-finalize-edges.ts"),
     indexerInit: join(repoRoot, "src/indexer/indexer-init.ts"),
     indexerVersion: join(repoRoot, "src/indexer/indexer-version.ts"),
     indexerPass1: join(repoRoot, "src/indexer/indexer-pass1.ts"),
     indexerPass2: join(repoRoot, "src/indexer/indexer-pass2.ts"),
+    indexerPass2ImportCache: join(
+      repoRoot,
+      "src/indexer/indexer-pass2-import-cache.ts",
+    ),
+    indexerPass2SymbolIndex: join(
+      repoRoot,
+      "src/indexer/indexer-pass2-symbol-index.ts",
+    ),
+    indexerPass2Write: join(repoRoot, "src/indexer/indexer-pass2-write.ts"),
     indexerMemory: join(repoRoot, "src/indexer/indexer-memory.ts"),
     providerFirstSemanticScope: join(
       repoRoot,
@@ -49,6 +59,10 @@ describe("indexer.ts monolith shattering", () => {
     assert.ok(
       existsSync(modulePaths.metricsUpdater),
       "missing src/indexer/metrics-updater.ts",
+    );
+    assert.ok(
+      existsSync(modulePaths.indexerFinalizeEdges),
+      "missing src/indexer/indexer-finalize-edges.ts",
     );
 
     // Bumped from 900 → 1100 after the indexing-perf sprint added the
@@ -79,6 +93,10 @@ describe("indexer.ts monolith shattering", () => {
       countLines(modulePaths.metricsUpdater) <= moduleMaxLines,
       "metrics-updater.ts too large; split further",
     );
+    assert.ok(
+      countLines(modulePaths.indexerFinalizeEdges) <= moduleMaxLines,
+      "indexer-finalize-edges.ts too large; split further",
+    );
 
     // Extracted indexer modules keep a tighter budget than the legacy
     // orchestrator, but pass-2 currently owns dispatcher caching and write
@@ -99,6 +117,18 @@ describe("indexer.ts monolith shattering", () => {
     assert.ok(
       existsSync(modulePaths.indexerPass2),
       "missing src/indexer/indexer-pass2.ts",
+    );
+    assert.ok(
+      existsSync(modulePaths.indexerPass2ImportCache),
+      "missing src/indexer/indexer-pass2-import-cache.ts",
+    );
+    assert.ok(
+      existsSync(modulePaths.indexerPass2SymbolIndex),
+      "missing src/indexer/indexer-pass2-symbol-index.ts",
+    );
+    assert.ok(
+      existsSync(modulePaths.indexerPass2Write),
+      "missing src/indexer/indexer-pass2-write.ts",
     );
     assert.ok(
       existsSync(modulePaths.indexerMemory),
@@ -123,6 +153,20 @@ describe("indexer.ts monolith shattering", () => {
     assert.ok(
       countLines(modulePaths.indexerPass2) <= extractedModuleMaxLines,
       "indexer-pass2.ts too large; split further",
+    );
+    assert.ok(
+      countLines(modulePaths.indexerPass2ImportCache) <=
+        extractedModuleMaxLines,
+      "indexer-pass2-import-cache.ts too large; split further",
+    );
+    assert.ok(
+      countLines(modulePaths.indexerPass2SymbolIndex) <=
+        extractedModuleMaxLines,
+      "indexer-pass2-symbol-index.ts too large; split further",
+    );
+    assert.ok(
+      countLines(modulePaths.indexerPass2Write) <= extractedModuleMaxLines,
+      "indexer-pass2-write.ts too large; split further",
     );
     assert.ok(
       countLines(modulePaths.indexerMemory) <= extractedModuleMaxLines,
