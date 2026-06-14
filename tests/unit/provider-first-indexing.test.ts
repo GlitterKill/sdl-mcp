@@ -57,6 +57,7 @@ import { providerFactsToSemanticProvenanceRecords } from "../../dist/indexer/pro
 import { validateProviderFirstGraphRows } from "../../dist/indexer/provider-first/graph-validation.js";
 import { resolveProviderFirstPipeline } from "../../dist/indexer/provider-first/planner.js";
 import { normalizeScipProviderFacts } from "../../dist/indexer/provider-first/scip-normalizer.js";
+import { BatchPersistAccumulator } from "../../dist/indexer/parser/batch-persist.js";
 import { stageProviderFirstShadowBuild } from "../../dist/indexer/provider-first/shadow-build.js";
 import { finalizeProviderFirstShadowDb } from "../../dist/indexer/provider-first/shadow-finalization.js";
 import {
@@ -64,7 +65,10 @@ import {
   activateProviderFirstShadowDbWithHandoff,
   summarizeProviderFirstShadowActivationReadiness,
 } from "../../dist/indexer/provider-first/shadow-activation.js";
-import { mergeProviderFirstGraphRows } from "../../dist/indexer/provider-first/legacy-shadow-rows.js";
+import {
+  collectLegacyFallbackShadowRows,
+  mergeProviderFirstGraphRows,
+} from "../../dist/indexer/provider-first/legacy-shadow-rows.js";
 import {
   resolveProviderFirstSemanticReadinessDeferral,
   runProviderFirstSemanticReadinessRefresh,
@@ -6157,6 +6161,166 @@ describe("provider-first indexing foundation", () => {
       "file-legacy",
     ]);
     validateProviderFirstGraphRows(merged, { repoId: "repo" });
+  });
+
+  it("canonicalizes legacy fallback shadow row languages", async () => {
+    const root = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-fallback-language-"),
+    );
+    const dbPath = join(root, "active.lbug");
+    const kuzu = await import("kuzu");
+    const db = new kuzu.Database(dbPath);
+      const conn = new kuzu.Connection(db);
+      try {
+        await createBaseSchema(conn);
+        await dbExec(
+          conn,
+          `MERGE (r:Repo {repoId: $repoId})
+           SET r.rootPath = $rootPath,
+               r.configJson = '{}',
+               r.createdAt = $indexedAt`,
+        {
+          repoId: "repo",
+          rootPath: root,
+          indexedAt: "2026-05-25T12:00:00.000Z",
+        },
+      );
+      for (const row of [
+        {
+          fileId: "file-ts",
+          relPath: "src/fallback.ts",
+          contentHash: "1".repeat(64),
+          fileLanguage: "ts",
+          symbolId: "symbol-ts",
+          symbolLanguage: "typescript",
+          name: "runTs",
+          byteSize: 128,
+        },
+        {
+          fileId: "file-rs",
+          relPath: "native/fallback.rs",
+          contentHash: "2".repeat(64),
+          fileLanguage: "rs",
+          symbolId: "symbol-rs",
+          symbolLanguage: "rust",
+          name: "runRs",
+          byteSize: 96,
+        },
+      ]) {
+        await dbExec(
+          conn,
+          `MATCH (r:Repo {repoId: $repoId})
+           MERGE (f:File {fileId: $fileId})
+           SET f.relPath = $relPath,
+               f.contentHash = $contentHash,
+               f.language = $fileLanguage,
+               f.byteSize = $byteSize,
+               f.lastIndexedAt = $indexedAt
+           MERGE (f)-[:FILE_IN_REPO]->(r)
+           MERGE (s:Symbol {symbolId: $symbolId})
+           SET s.repoId = $repoId,
+               s.kind = 'function',
+               s.name = $name,
+               s.exported = true,
+               s.visibility = 'public',
+               s.language = $symbolLanguage,
+               s.rangeStartLine = 1,
+               s.rangeStartCol = 0,
+               s.rangeEndLine = 3,
+               s.rangeEndCol = 1,
+               s.astFingerprint = $symbolId,
+               s.signatureJson = '{}',
+               s.summaryQuality = 0.5,
+               s.summarySource = 'test',
+               s.roleTagsJson = '[]',
+               s.searchText = $name,
+               s.external = false,
+               s.source = 'treesitter',
+               s.symbolStatus = 'real',
+               s.updatedAt = $indexedAt
+           MERGE (s)-[:SYMBOL_IN_FILE]->(f)
+           MERGE (s)-[:SYMBOL_IN_REPO]->(r)`,
+          {
+            repoId: "repo",
+            indexedAt: "2026-05-25T12:00:00.000Z",
+            ...row,
+          },
+        );
+      }
+
+      const rows = await collectLegacyFallbackShadowRows({
+        conn,
+        repoId: "repo",
+        relPaths: ["src/fallback.ts", "native/fallback.rs"],
+        providerRows: {
+          files: [],
+          symbols: [],
+          externalSymbols: [],
+          edges: [],
+          changedFileIds: new Set(),
+        },
+      });
+
+      const fileLanguageByPath = new Map(
+        rows.files.map((row) => [row.relPath, row.language]),
+      );
+      assert.equal(fileLanguageByPath.get("src/fallback.ts"), "typescript");
+      assert.equal(fileLanguageByPath.get("native/fallback.rs"), "rust");
+
+      const symbolLanguageById = new Map(
+        rows.symbols.map((row) => [row.symbolId, row.language]),
+      );
+      assert.equal(symbolLanguageById.get("symbol-ts"), "typescript");
+      assert.equal(symbolLanguageById.get("symbol-rs"), "rust");
+    } finally {
+      conn.close();
+      db.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("canonicalizes active fallback batch file languages", () => {
+    const accumulator = new BatchPersistAccumulator(10_000, {
+      autoDrain: false,
+    });
+    accumulator.addFile(
+      {
+        fileId: "file-ts",
+        repoId: "repo",
+        relPath: "src/fallback.ts",
+        contentHash: "1".repeat(64),
+        language: "ts",
+        byteSize: 128,
+        lastIndexedAt: "2026-05-25T12:00:00.000Z",
+      },
+      null,
+    );
+    accumulator.addFile(
+      {
+        fileId: "file-rs",
+        repoId: "repo",
+        relPath: "native/fallback.rs",
+        contentHash: "2".repeat(64),
+        language: "rs",
+        byteSize: 96,
+        lastIndexedAt: "2026-05-25T12:00:00.000Z",
+      },
+      null,
+    );
+
+    const queuedFiles = (
+      accumulator as unknown as {
+        files: Array<{ file: { fileId: string; language: string } }>;
+      }
+    ).files;
+
+    assert.deepEqual(
+      queuedFiles.map((entry) => [entry.file.fileId, entry.file.language]),
+      [
+        ["file-ts", "typescript"],
+        ["file-rs", "rust"],
+      ],
+    );
   });
 
   it("wraps provider materialization helper in a single transaction", async () => {

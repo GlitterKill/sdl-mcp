@@ -1,7 +1,7 @@
 import { extname } from "path";
 
-import { getLanguageIdForExtension } from "../adapter/registry.js";
 import type { FileMetadata } from "../fileScanner.js";
+import { inferLanguageIdFromPath } from "../language.js";
 
 import { GoPass2Resolver } from "./resolvers/go-pass2-resolver.js";
 import { JavaPass2Resolver } from "./resolvers/java-pass2-resolver.js";
@@ -27,8 +27,7 @@ function normalizeExtension(filePath: string): string {
 }
 
 function inferLanguage(filePath: string): string {
-  const languageId = getLanguageIdForExtension(normalizeExtension(filePath));
-  return languageId ?? "unknown";
+  return inferLanguageIdFromPath(filePath);
 }
 
 export function toPass2Target(

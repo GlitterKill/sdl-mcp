@@ -7,6 +7,7 @@ import type {
 } from "../../db/ladybug-queries.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { normalizePath } from "../../util/paths.js";
+import { canonicalizeLanguageId } from "../language.js";
 import type { ProviderFirstGraphRows } from "./materializer.js";
 
 interface CollectLegacyFallbackShadowRowsParams {
@@ -29,6 +30,7 @@ interface SymbolQueryRow {
   symbolId: string;
   repoId: string;
   fileId: string;
+  relPath: string;
   kind: string;
   name: string;
   exported: unknown;
@@ -178,7 +180,7 @@ async function collectFiles(
         repoId,
         relPath: normalizePath(row.relPath),
         contentHash: row.contentHash,
-        language: row.language,
+        language: canonicalizeLanguageId(row.language, row.relPath),
         byteSize: ladybugDb.toNumber(row.byteSize),
         lastIndexedAt: row.lastIndexedAt ?? null,
       })),
@@ -202,6 +204,7 @@ async function collectSymbols(
        RETURN s.symbolId AS symbolId,
               r.repoId AS repoId,
               f.fileId AS fileId,
+              f.relPath AS relPath,
               s.kind AS kind,
               s.name AS name,
               s.exported AS exported,
@@ -292,7 +295,7 @@ function symbolRow(row: SymbolQueryRow, indexedAt: string): SymbolRow {
     name: row.name,
     exported: ladybugDb.toBoolean(row.exported),
     visibility: row.visibility,
-    language: row.language,
+    language: canonicalizeLanguageId(row.language, row.relPath),
     rangeStartLine: ladybugDb.toNumber(row.rangeStartLine),
     rangeStartCol: ladybugDb.toNumber(row.rangeStartCol),
     rangeEndLine: ladybugDb.toNumber(row.rangeEndLine),

@@ -13,6 +13,7 @@ import type { SymbolReferenceRow } from "../../db/ladybug-embeddings.js";
 import type { FileRow } from "../../db/ladybug-repos.js";
 import { classifyDependencyTarget } from "../../db/symbol-placeholders.js";
 import { logger } from "../../util/logger.js";
+import { canonicalizeLanguageId } from "../language.js";
 
 export interface FileUpsertEntry {
   file: Omit<FileRow, "directory">;
@@ -567,7 +568,13 @@ export class BatchPersistAccumulator {
     file: Omit<FileRow, "directory">,
     existingFileId: string | null,
   ): void {
-    this.files.push({ file, existingFileId });
+    this.files.push({
+      file: {
+        ...file,
+        language: canonicalizeLanguageId(file.language, file.relPath),
+      },
+      existingFileId,
+    });
     this.pendingCount++;
     this.maybeEnqueue();
   }

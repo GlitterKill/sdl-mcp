@@ -12,6 +12,7 @@ import type {
   SymbolIndex,
   TsCallResolver,
 } from "../edge-builder.js";
+import { canonicalizeLanguageId } from "../language.js";
 import type { ProcessFileResult } from "./types.js";
 import type { SymbolMapFileUpdate } from "../symbol-map-cache.js";
 
@@ -102,7 +103,7 @@ export async function persistSkippedFile({
       repoId,
       relPath,
       contentHash,
-      language,
+      language: canonicalizeLanguageId(language, relPath),
       byteSize,
       lastIndexedAt: new Date().toISOString(),
     });

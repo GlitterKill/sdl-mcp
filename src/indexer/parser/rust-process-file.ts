@@ -11,6 +11,7 @@ import {
   isTsCallResolutionFile,
   resolveImportTargets,
 } from "../edge-builder.js";
+import { canonicalizeLanguageId } from "../language.js";
 import type {
   PendingCallEdge,
   SymbolIndex,
@@ -154,7 +155,7 @@ export async function processFileFromRustResult(params: {
             repoId,
             relPath,
             contentHash,
-            language: ext,
+            language: canonicalizeLanguageId(ext, relPath),
             byteSize: fileMeta.size,
             lastIndexedAt: new Date().toISOString(),
           });
@@ -176,6 +177,10 @@ export async function processFileFromRustResult(params: {
 
     const extWithDot = `.${ext}`;
     const adapter = getAdapterForExtension(extWithDot);
+    const languageId = canonicalizeLanguageId(
+      adapter?.languageId ?? ext,
+      relPath,
+    );
     const filePath = join(repoRoot, fileMeta.path);
     // Fix 1: Use content from Rust result to avoid double file read.
     // Falls back to async read for older addon versions without content.
@@ -306,7 +311,7 @@ export async function processFileFromRustResult(params: {
       fileMeta.path,
       rustResult.imports,
       extensions,
-      adapter?.languageId ?? ext,
+      languageId,
       content,
     );
 
@@ -342,7 +347,7 @@ export async function processFileFromRustResult(params: {
       importResolution,
       calls: rustResult.calls,
       edgeSourceNodeIds,
-      languageId: adapter?.languageId ?? ext,
+      languageId,
       symbolIndex,
       pendingCallEdges: params.pendingCallEdges,
       createdCallEdges,
@@ -361,7 +366,7 @@ export async function processFileFromRustResult(params: {
           repoId,
           relPath,
           contentHash,
-          language: ext,
+          language: languageId,
           byteSize: fileMeta.size,
           lastIndexedAt: new Date().toISOString(),
         },
@@ -378,7 +383,7 @@ export async function processFileFromRustResult(params: {
             repoId,
             relPath,
             contentHash,
-            language: ext,
+            language: languageId,
             byteSize: fileMeta.size,
             lastIndexedAt: new Date().toISOString(),
           });

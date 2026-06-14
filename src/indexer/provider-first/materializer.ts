@@ -5,6 +5,7 @@ import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { EdgeType, SymbolKind } from "../../domain/types.js";
 import { generateFileId, hashValue } from "../../util/hashing.js";
 import { normalizePath } from "../../util/paths.js";
+import { canonicalizeLanguageId } from "../language.js";
 import { resolveSymbolEnrichment } from "../symbol-enrichment.js";
 import type { IndexProgress, IndexProgressSubstage } from "../indexer-init.js";
 import type {
@@ -442,7 +443,7 @@ function fileFactToRow(
     repoId: fact.repoId,
     relPath,
     contentHash: fact.contentHash ?? "",
-    language: fact.languageId ?? inferLanguage(relPath),
+    language: canonicalizeLanguageId(fact.languageId, relPath),
     byteSize: fact.byteSize ?? -1,
     lastIndexedAt: indexedAt,
   };
@@ -467,8 +468,10 @@ function symbolFactToRow(
     fact.signature,
   );
   const summary = firstDocumentationLine(fact.documentation);
-  const language =
-    fileByPath.get(relPath)?.languageId ?? inferLanguage(relPath);
+  const language = canonicalizeLanguageId(
+    fileByPath.get(relPath)?.languageId,
+    relPath,
+  );
   const enrichment = resolveSymbolEnrichment({
     kind: fact.symbolKind,
     name: fact.name,
@@ -630,27 +633,6 @@ function providerEdgeWeight(edgeType: EdgeType): number {
     default:
       return 0.5;
   }
-}
-
-function inferLanguage(relPath: string): string {
-  const normalized = normalizePath(relPath).toLowerCase();
-  if (normalized.endsWith(".ts") || normalized.endsWith(".tsx")) {
-    return "typescript";
-  }
-  if (normalized.endsWith(".js") || normalized.endsWith(".jsx")) {
-    return "javascript";
-  }
-  if (normalized.endsWith(".py")) return "python";
-  if (normalized.endsWith(".go")) return "go";
-  if (normalized.endsWith(".rs")) return "rust";
-  if (normalized.endsWith(".java")) return "java";
-  if (normalized.endsWith(".cs")) return "csharp";
-  if (normalized.endsWith(".cpp") || normalized.endsWith(".cc")) return "cpp";
-  if (normalized.endsWith(".c")) return "c";
-  if (normalized.endsWith(".kt")) return "kotlin";
-  if (normalized.endsWith(".php")) return "php";
-  if (normalized.endsWith(".sh")) return "shell";
-  return "unknown";
 }
 
 function resolveRowsRepoId(rows: ProviderFirstGraphRows): string {

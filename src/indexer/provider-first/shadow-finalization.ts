@@ -9,6 +9,7 @@ import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { DerivedStateRow } from "../../db/ladybug-derived-state.js";
 import { exec, execDdl, querySingle } from "../../db/ladybug-core.js";
 import { normalizePath } from "../../util/paths.js";
+import { canonicalizeLanguageId } from "../language.js";
 
 export type ProviderFirstShadowFinalizationStatus =
   | "finalized"
@@ -1117,7 +1118,7 @@ async function readEdgeTargetSymbolsForRepo(
     name: row.name ?? row.symbolId,
     exported: ladybugDb.toBoolean(row.exported),
     visibility: row.visibility,
-    language: row.language ?? "unknown",
+    language: canonicalizeLanguageId(row.language),
     rangeStartLine: ladybugDb.toNumber(row.rangeStartLine ?? 0),
     rangeStartCol: ladybugDb.toNumber(row.rangeStartCol ?? 0),
     rangeEndLine: ladybugDb.toNumber(row.rangeEndLine ?? 0),
@@ -1527,7 +1528,7 @@ function symbolRowToFallbackParams(row: AuxiliarySymbolRow): {
     name: row.name,
     exported: row.exported,
     visibility: row.visibility ?? "",
-    language: row.language,
+    language: canonicalizeLanguageId(row.language),
     rangeStartLine: row.rangeStartLine,
     rangeStartCol: row.rangeStartCol,
     rangeEndLine: row.rangeEndLine,
@@ -1669,7 +1670,7 @@ async function readAuxiliarySymbolsForRepo(
     name: row.name ?? row.symbolId,
     exported: ladybugDb.toBoolean(row.exported),
     visibility: row.visibility,
-    language: row.language ?? "unknown",
+    language: canonicalizeLanguageId(row.language),
     rangeStartLine: ladybugDb.toNumber(row.rangeStartLine ?? 0),
     rangeStartCol: ladybugDb.toNumber(row.rangeStartCol ?? 0),
     rangeEndLine: ladybugDb.toNumber(row.rangeEndLine ?? 0),
@@ -1703,7 +1704,7 @@ function auxiliarySymbolToCopyCells(row: AuxiliarySymbolRow): unknown[] {
     row.name,
     row.exported,
     row.visibility,
-    row.language,
+    canonicalizeLanguageId(row.language),
     row.rangeStartLine,
     row.rangeStartCol,
     row.rangeEndLine,

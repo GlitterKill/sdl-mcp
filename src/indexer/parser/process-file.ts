@@ -7,6 +7,7 @@ import {
   resolveImportTargets,
 } from "../edge-builder.js";
 import { extractConfigEdgesFromTree, type ConfigEdge } from "../configEdges.js";
+import { canonicalizeLanguageId } from "../language.js";
 import { buildSymbolAndEdgeRows } from "./build-rows.js";
 import {
   PASS1_KNOWN_ENDPOINT_COPY_THRESHOLD,
@@ -215,7 +216,10 @@ export async function processFile(
           repoId,
           relPath: fileData.relPath,
           contentHash: fileData.contentHash,
-          language: adapter?.languageId ?? fileData.ext,
+          language: canonicalizeLanguageId(
+            adapter?.languageId ?? fileData.ext,
+            fileData.relPath,
+          ),
           byteSize: fileMeta.size,
           lastIndexedAt: new Date().toISOString(),
         },
@@ -256,7 +260,10 @@ export async function processFile(
             repoId,
             relPath: fileData.relPath,
             contentHash: fileData.contentHash,
-            language: adapter?.languageId ?? fileData.ext,
+            language: canonicalizeLanguageId(
+              adapter?.languageId ?? fileData.ext,
+              fileData.relPath,
+            ),
             byteSize: fileMeta.size,
             lastIndexedAt: new Date().toISOString(),
           });
