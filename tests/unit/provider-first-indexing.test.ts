@@ -65,6 +65,10 @@ import {
   summarizeProviderFirstShadowActivationReadiness,
 } from "../../dist/indexer/provider-first/shadow-activation.js";
 import { mergeProviderFirstGraphRows } from "../../dist/indexer/provider-first/legacy-shadow-rows.js";
+import {
+  resolveProviderFirstSemanticReadinessDeferral,
+  runProviderFirstSemanticReadinessRefresh,
+} from "../../dist/indexer/provider-first/semantic-readiness.js";
 import { exec as dbExec, queryAll } from "../../dist/db/ladybug-core.js";
 import { createBaseSchema } from "../../dist/db/ladybug-schema.js";
 import { normalizePath } from "../../dist/util/paths.js";
@@ -115,6 +119,111 @@ describe("provider-first indexing foundation", () => {
       isProviderFirstLegacyFallbackPlanComplete(llvmDefaultPlan),
       true,
     );
+  });
+
+  it("resolves provider-first semantic deferral flags from semantic config", () => {
+    assert.deepEqual(
+      resolveProviderFirstSemanticReadinessDeferral({
+        semantic: {
+          enabled: true,
+          generateSummaries: false,
+        },
+      } as AppConfig),
+      {
+        semanticDeferred: true,
+        summariesDirty: false,
+        embeddingsDirty: true,
+      },
+    );
+
+    assert.deepEqual(
+      resolveProviderFirstSemanticReadinessDeferral({
+        semantic: {
+          enabled: true,
+          generateSummaries: true,
+        },
+      } as AppConfig),
+      {
+        semanticDeferred: true,
+        summariesDirty: true,
+        embeddingsDirty: true,
+      },
+    );
+
+    assert.deepEqual(
+      resolveProviderFirstSemanticReadinessDeferral({
+        semantic: {
+          enabled: false,
+          generateSummaries: true,
+        },
+      } as AppConfig),
+      {
+        semanticDeferred: false,
+        summariesDirty: false,
+        embeddingsDirty: false,
+      },
+    );
+  });
+
+  it("runs provider-first semantic readiness refresh with deferred indexes", async () => {
+    const calls: string[] = [];
+    const result = await runProviderFirstSemanticReadinessRefresh({
+      repoId: "repo-semantic-refresh",
+      versionId: "v-semantic-refresh",
+      appConfig: {
+        semantic: {
+          enabled: true,
+          provider: "mock",
+          generateSummaries: true,
+        },
+      } as AppConfig,
+      deps: {
+        generateSummariesForRepo: async () => {
+          calls.push("summaries");
+          return {
+            generated: 1,
+            skipped: 2,
+            failed: 0,
+            totalCostUsd: 0,
+          };
+        },
+        refreshFileSummaryEmbeddings: async (params) => {
+          calls.push(`file:${params.model}`);
+          return {
+            embedded: 3,
+            skipped: 4,
+            missing: 0,
+            degraded: false,
+          };
+        },
+        refreshSymbolEmbeddings: async (params) => {
+          calls.push(`symbol:${params.model}`);
+          return { embedded: 5, skipped: 6 };
+        },
+        buildDeferredIndexes: async (params) => {
+          calls.push(
+            `indexes:${String(params.deferSemanticVectorIndexes)}:${String(params.deferSemanticTextIndexes)}`,
+          );
+        },
+        markDerivedStateComputed: async (_repoId, _versionId, flags) => {
+          calls.push(
+            `computed:${String(flags?.summaries)}:${String(flags?.embeddings)}`,
+          );
+        },
+        recordDerivedStateError: async () => {
+          throw new Error("recordDerivedStateError should not run");
+        },
+      },
+    });
+
+    assert.equal(result.semanticDeferred, false);
+    assert.deepEqual(calls, [
+      "summaries",
+      "file:nomic-embed-text-v1.5",
+      "symbol:jina-embeddings-v2-base-code",
+      "indexes:false:false",
+      "computed:true:true",
+    ]);
   });
 
   it("caps provider-first same-run legacy fallback only for extreme uncovered tails", () => {

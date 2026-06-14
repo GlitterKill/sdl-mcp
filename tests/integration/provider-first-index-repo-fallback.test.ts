@@ -325,7 +325,7 @@ describe("provider-first indexRepo fallback", () => {
     );
   });
 
-  it("defers provider-first semantic embeddings until semantic readiness", async () => {
+  it("runs provider-first semantic embeddings after graph readiness", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
       semanticProvider: "mock",
@@ -337,7 +337,7 @@ describe("provider-first indexRepo fallback", () => {
 
     assert.equal(result.providerFirst?.selectedPipeline, "providerFirst");
     assert.equal(result.providerFirstExecution?.status, "executed");
-    assert.equal(result.semanticDeferred, true);
+    assert.equal(result.semanticDeferred, undefined);
     assert.equal(result.summaryStats, undefined);
     assert.equal(result.timings?.phases["finalizeIndexing.semanticSummaries"], undefined);
     assert.equal(
@@ -347,6 +347,18 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(
       result.timings?.phases["finalizeIndexing.fileSummaryEmbeddings:nomic-embed-text-v1.5"],
       undefined,
+    );
+    assert.equal(
+      typeof result.timings?.phases[
+        "semanticReadiness.symbolEmbeddings:jina-embeddings-v2-base-code"
+      ],
+      "number",
+    );
+    assert.equal(
+      typeof result.timings?.phases[
+        "semanticReadiness.fileSummaryEmbeddings:nomic-embed-text-v1.5"
+      ],
+      "number",
     );
 
     const conn = await getLadybugConn();
@@ -361,10 +373,10 @@ describe("provider-first indexRepo fallback", () => {
       { repoId },
     );
     assert.equal(derivedState?.summariesDirty, false);
-    assert.equal(derivedState?.embeddingsDirty, true);
+    assert.equal(derivedState?.embeddingsDirty, false);
   });
 
-  it("marks deferred summaries dirty only when summaries are configured", async () => {
+  it("clears deferred summaries after provider-first semantic refresh", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
       semanticProvider: "mock",
@@ -373,7 +385,7 @@ describe("provider-first indexRepo fallback", () => {
 
     const result = await indexRepo(repoId, "full");
 
-    assert.equal(result.semanticDeferred, true);
+    assert.equal(result.semanticDeferred, undefined);
     const conn = await getLadybugConn();
     const derivedState = await ladybugDb.querySingle<{
       summariesDirty: boolean;
@@ -385,8 +397,8 @@ describe("provider-first indexRepo fallback", () => {
               d.embeddingsDirty AS embeddingsDirty`,
       { repoId },
     );
-    assert.equal(derivedState?.summariesDirty, true);
-    assert.equal(derivedState?.embeddingsDirty, true);
+    assert.equal(derivedState?.summariesDirty, false);
+    assert.equal(derivedState?.embeddingsDirty, false);
   });
 
   it("uses legacy fallback for explicit providerFirst incremental refreshes", async () => {
@@ -582,7 +594,7 @@ describe("provider-first indexRepo fallback", () => {
     );
   });
 
-  it("defers semantic embeddings when provider-first uses legacy fallback", async () => {
+  it("runs semantic embeddings after provider-first uses legacy fallback", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
       extraScannedFile: true,
@@ -595,7 +607,7 @@ describe("provider-first indexRepo fallback", () => {
 
     assert.equal(result.providerFirstExecution?.status, "executed");
     assert.equal(result.providerFirstExecution?.coverage?.fallbackFiles, 1);
-    assert.equal(result.semanticDeferred, true);
+    assert.equal(result.semanticDeferred, undefined);
     assert.equal(
       result.timings?.phases["finalizeIndexing.semanticEmbeddings:jina-embeddings-v2-base-code"],
       undefined,
@@ -603,6 +615,18 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(
       result.timings?.phases["finalizeIndexing.fileSummaryEmbeddings:nomic-embed-text-v1.5"],
       undefined,
+    );
+    assert.equal(
+      typeof result.timings?.phases[
+        "semanticReadiness.symbolEmbeddings:jina-embeddings-v2-base-code"
+      ],
+      "number",
+    );
+    assert.equal(
+      typeof result.timings?.phases[
+        "semanticReadiness.fileSummaryEmbeddings:nomic-embed-text-v1.5"
+      ],
+      "number",
     );
 
     const conn = await getLadybugConn();
@@ -614,7 +638,7 @@ describe("provider-first indexRepo fallback", () => {
        RETURN d.embeddingsDirty AS embeddingsDirty`,
       { repoId },
     );
-    assert.equal(derivedState?.embeddingsDirty, true);
+    assert.equal(derivedState?.embeddingsDirty, false);
   });
 
   it("materializes SCIP rows for partial reference coverage without legacy reparsing", async () => {

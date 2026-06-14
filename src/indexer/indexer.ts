@@ -157,6 +157,10 @@ import {
   providerPathCanBeIgnoredOutsideScanScope,
   resolveProviderFirstSemanticEligiblePaths,
 } from "./provider-first/semantic-scope.js";
+import {
+  markProviderFirstSemanticReadinessDeferred,
+  runProviderFirstSemanticReadinessRefresh,
+} from "./provider-first/semantic-readiness.js";
 import type {
   CallProofUnavailableReasonCode,
   CallProofUnavailableReasonSampleFact,
@@ -733,18 +737,7 @@ async function markDeferredSemanticStateDirty(params: {
   versionId: string;
   appConfig: AppConfig;
 }): Promise<void> {
-  const { repoId, versionId, appConfig } = params;
-  try {
-    await markDerivedStateDirty(repoId, versionId, {
-      summaries: appConfig.semantic?.generateSummaries === true,
-      embeddings: true,
-    });
-  } catch (error) {
-    logger.debug("markDerivedStateDirty semantic deferred skipped", {
-      repoId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  await markProviderFirstSemanticReadinessDeferred(params);
 }
 
 interface ProviderFirstCoverageReport {
@@ -2420,6 +2413,15 @@ async function indexRepoImpl(
       return versionId;
     });
 
+  const resolveActiveGraphVersionId = async (
+    fallbackVersionReason: string,
+  ): Promise<string> => {
+    const latestConn = await getLadybugConn();
+    const latestVersion = await ladybugDb.getLatestVersion(latestConn, repoId);
+    if (latestVersion) return latestVersion.versionId;
+    return await createOrReuseVersion(fallbackVersionReason, true);
+  };
+
   const runPostIndexFinalization = async (params: {
     versionId: string;
     indexMode: "full" | "incremental";
@@ -2561,6 +2563,7 @@ async function indexRepoImpl(
   const finalizeProviderFirstShadowBuild = async (
     shadowBuild: ProviderFirstShadowBuildSummary | undefined,
     versionId: string,
+    semanticDeferred?: boolean,
   ): Promise<ProviderFirstShadowBuildSummary | undefined> => {
     if (!shadowBuild) return undefined;
     let finalizedShadowBuild = shadowBuild;
@@ -2637,6 +2640,15 @@ async function indexRepoImpl(
               }),
           }),
       );
+      if (finalizedShadowBuild.activationResult.status === "activated") {
+        if (semanticDeferred) {
+          await markProviderFirstSemanticReadinessDeferred({
+            repoId,
+            versionId,
+            appConfig,
+          });
+        }
+      }
       emitProviderFirstProgress(onProgress, "shadowActivate", {
         message: `shadow DB activation ${finalizedShadowBuild.activationResult.status}`,
       });
@@ -2654,6 +2666,34 @@ async function indexRepoImpl(
         });
     }
     return finalizedShadowBuild;
+  };
+
+  const runProviderFirstDeferredSemanticRefresh = async (params: {
+    versionId: string;
+    semanticDeferred?: boolean;
+  }): Promise<{ semanticDeferred?: boolean; summaryStats?: SummaryBatchResult }> => {
+    if (!params.semanticDeferred) {
+      return { semanticDeferred: params.semanticDeferred };
+    }
+    if (providerFirstSkipDerivedStateReason) {
+      return { semanticDeferred: params.semanticDeferred };
+    }
+
+    const semanticRefresh = await withPostIndexWriteSession(
+      () =>
+        runProviderFirstSemanticReadinessRefresh({
+          repoId,
+          versionId: params.versionId,
+          appConfig,
+          onProgress,
+          recordTiming: recordIndexSubphaseTiming,
+        }),
+      { timeoutMs: postIndexSessionTimeoutMs },
+    );
+    return {
+      semanticDeferred: semanticRefresh.semanticDeferred || undefined,
+      summaryStats: semanticRefresh.summaryStats,
+    };
   };
 
   if (
@@ -3194,11 +3234,26 @@ async function indexRepoImpl(
             providerFirstLegacyFallbackStartedAt = Date.now();
           } else {
             if (activeMaterializationPlan.reuseExistingProviderRows) {
+              const versionId = await resolveActiveGraphVersionId(
+                "Provider-first SCIP active rows reused",
+              );
+              let semanticDeferred: boolean | undefined =
+                await markProviderFirstSemanticReadinessDeferred({
+                  repoId,
+                  versionId,
+                  appConfig,
+                });
+              const semanticRefresh =
+                await runProviderFirstDeferredSemanticRefresh({
+                  versionId,
+                  semanticDeferred,
+                });
+              semanticDeferred = semanticRefresh.semanticDeferred;
               providerFirstExecutedSummary = withProviderFirstPhaseTimings(
                 providerFirstExecutedSummary,
               );
               const result: IndexResult = {
-                versionId: providerResult.generationId,
+                versionId,
                 filesProcessed: 0,
                 changedFiles: 0,
                 removedFiles: 0,
@@ -3215,7 +3270,7 @@ async function indexRepoImpl(
                 },
                 providerFirst,
                 providerFirstExecution: providerFirstExecutedSummary,
-                semanticDeferred: true,
+                semanticDeferred: semanticDeferred || undefined,
                 algorithmRefresh: skippedDerivedStateResult(
                   "provider-first active rows reused",
                 ).algorithmRefresh,
@@ -3270,8 +3325,14 @@ async function indexRepoImpl(
               shadowBuild: await finalizeProviderFirstShadowBuild(
                 providerFirstExecutedSummary.shadowBuild,
                 versionId,
+                post.semanticDeferred,
               ),
             };
+            const semanticRefresh =
+              await runProviderFirstDeferredSemanticRefresh({
+                versionId,
+                semanticDeferred: post.semanticDeferred,
+              });
             providerFirstExecutedSummary = withProviderFirstPhaseTimings(
               providerFirstExecutedSummary,
             );
@@ -3288,7 +3349,7 @@ async function indexRepoImpl(
               clustersComputed: post.clustersComputed,
               processesTraced: post.processesTraced,
               durationMs: Date.now() - startTime,
-              summaryStats: post.summaryStats,
+              summaryStats: semanticRefresh.summaryStats ?? post.summaryStats,
               timings: phaseTimings
                 ? {
                     totalMs: Date.now() - startTime,
@@ -3299,7 +3360,7 @@ async function indexRepoImpl(
               scip,
               providerFirst,
               providerFirstExecution: providerFirstExecutedSummary,
-              semanticDeferred: post.semanticDeferred,
+              semanticDeferred: semanticRefresh.semanticDeferred,
               algorithmRefresh: post.algorithmRefresh,
             };
             return result;
@@ -4276,7 +4337,7 @@ async function indexRepoImpl(
       { timeoutMs: postIndexSessionTimeoutMs },
     );
 
-    const {
+    let {
       summaryStats,
       semanticDeferred,
       clustersComputed,
@@ -4398,12 +4459,19 @@ async function indexRepoImpl(
       const finalizedShadowBuild = await finalizeProviderFirstShadowBuild(
         shadowBuild,
         versionId,
+        semanticDeferred,
       );
       providerFirstExecutedSummary = {
         ...providerFirstExecutedSummary,
         shadowBuild: finalizedShadowBuild,
       };
     }
+    const semanticRefresh = await runProviderFirstDeferredSemanticRefresh({
+      versionId,
+      semanticDeferred,
+    });
+    semanticDeferred = semanticRefresh.semanticDeferred;
+    summaryStats = semanticRefresh.summaryStats ?? summaryStats;
     providerFirstExecutedSummary = withProviderFirstPhaseTimings(
       providerFirstExecutedSummary,
     );

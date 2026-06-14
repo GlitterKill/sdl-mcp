@@ -131,6 +131,45 @@ describe("semantic pipeline regressions", () => {
     );
   });
 
+  it("marks semantic readiness dirty when provider-first reuses active rows", () => {
+    const source = readSource("src/indexer/indexer.ts");
+    const branchStart = source.indexOf(
+      '"Provider-first SCIP active rows reused"',
+    );
+    assert.ok(branchStart !== -1);
+    const branchEnd = source.indexOf(
+      "const versionId = await createOrReuseVersion",
+      branchStart,
+    );
+    assert.ok(branchEnd !== -1 && branchEnd > branchStart);
+
+    const branchBody = source.slice(branchStart, branchEnd);
+    assert.match(
+      branchBody,
+      /markProviderFirstSemanticReadinessDeferred/,
+      "provider-first active row reuse must persist semantic deferred dirty flags",
+    );
+    assert.match(
+      branchBody,
+      /semanticDeferred/,
+      "provider-first active row reuse must report semantic deferral from the helper result",
+    );
+  });
+
+  it("runs semantic readiness refresh after provider-first graph activation", () => {
+    const source = readSource("src/indexer/indexer.ts");
+    assert.match(
+      source,
+      /runProviderFirstSemanticReadinessRefresh/,
+      "provider-first indexing should run a post-activation semantic refresh against the active DB",
+    );
+    assert.match(
+      source,
+      /semanticDeferred\s*=\s*semanticRefresh\.semanticDeferred/,
+      "provider-first result should only remain deferred when semantic refresh does not complete",
+    );
+  });
+
   it("hybrid symbol search uses the same external-filter boundary as lexical search", () => {
     const symbolSource = readSource("src/mcp/tools/symbol.ts");
     const handleStart = symbolSource.indexOf(
