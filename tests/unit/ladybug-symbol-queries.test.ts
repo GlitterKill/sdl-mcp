@@ -451,6 +451,133 @@ describe("LadybugDB Symbol Queries", () => {
   );
 
   it(
+    "normalizeDependencyPlaceholderSymbols preserves provider metadata endpoints",
+    { skip: !ladybugAvailable },
+    async () => {
+      await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
+        symbolId: "sym-provider-metadata",
+        repoId,
+        fileId,
+        kind: "method",
+        name: "default",
+        exported: true,
+        visibility: null,
+        language: "rust",
+        rangeStartLine: 0,
+        rangeStartCol: 0,
+        rangeEndLine: 0,
+        rangeEndCol: 0,
+        astFingerprint: "provider-metadata",
+        signatureJson: null,
+        summary: null,
+        invariantsJson: null,
+        sideEffectsJson: null,
+        updatedAt: "2026-03-04T00:00:00Z",
+      });
+      await exec(
+        conn,
+        `MATCH (s:Symbol {symbolId: 'sym-provider-metadata'})
+         SET s.source = 'scip',
+             s.symbolStatus = 'unresolved',
+             s.placeholderKind = 'provider-metadata',
+             s.placeholderTarget = 'rust-analyzer cargo pkg 1.0.0 src/lib/Foo#default().'`,
+      );
+
+      const result = await queries.normalizeDependencyPlaceholderSymbols(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+      );
+
+      assert.strictEqual(result.fileBackedRepaired, 0);
+      const dbResult = await conn.query(
+        `MATCH (s:Symbol {symbolId: 'sym-provider-metadata'})
+         RETURN s.symbolStatus AS symbolStatus,
+                s.placeholderKind AS placeholderKind,
+                s.placeholderTarget AS placeholderTarget`,
+      );
+      const row = await dbResult.getNext();
+      dbResult.close();
+      assert.strictEqual(row.symbolStatus, "unresolved");
+      assert.strictEqual(row.placeholderKind, "provider-metadata");
+      assert.strictEqual(
+        row.placeholderTarget,
+        "rust-analyzer cargo pkg 1.0.0 src/lib/Foo#default().",
+      );
+    },
+  );
+
+  it(
+    "normalizeProviderFirstCallEdgeProvenance repairs legacy string provenance",
+    { skip: !ladybugAvailable },
+    async () => {
+      for (const symbolId of ["sym-provider-source", "sym-provider-target"]) {
+        await queries.upsertSymbol(
+          conn as unknown as import("kuzu").Connection,
+          {
+            symbolId,
+            repoId,
+            fileId,
+            kind: "function",
+            name: symbolId,
+            exported: true,
+            visibility: null,
+            language: "typescript",
+            rangeStartLine: 1,
+            rangeStartCol: 0,
+            rangeEndLine: 1,
+            rangeEndCol: 1,
+            astFingerprint: symbolId,
+            signatureJson: null,
+            summary: null,
+            invariantsJson: null,
+            sideEffectsJson: null,
+            updatedAt: "2026-03-04T00:00:00Z",
+          },
+        );
+      }
+      await exec(
+        conn,
+        `MATCH (a:Symbol {symbolId: 'sym-provider-source'})
+         MATCH (b:Symbol {symbolId: 'sym-provider-target'})
+         CREATE (a)-[:DEPENDS_ON {
+           edgeType: 'call',
+           weight: 1.0,
+           confidence: 0.95,
+           resolution: 'exact',
+           resolverId: 'provider-first:scip-io',
+           resolutionPhase: 'provider-first',
+           provenance: 'import:legacy',
+           createdAt: '2026-03-04T00:00:00Z'
+         }]->(b)`,
+      );
+
+      const repaired = await queries.normalizeProviderFirstCallEdgeProvenance(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+      );
+
+      assert.strictEqual(repaired, 1);
+      const dbResult = await conn.query(
+        `MATCH (:Symbol {symbolId: 'sym-provider-source'})-[d:DEPENDS_ON]->(:Symbol {symbolId: 'sym-provider-target'})
+         RETURN d.provenance AS provenance`,
+      );
+      const row = await dbResult.getNext();
+      dbResult.close();
+      const provenance = JSON.parse(String(row.provenance)) as {
+        dedupeKey?: unknown;
+        previousProvenance?: unknown;
+        repaired?: unknown;
+      };
+      assert.strictEqual(provenance.repaired, true);
+      assert.strictEqual(provenance.previousProvenance, "import:legacy");
+      assert.strictEqual(
+        provenance.dedupeKey,
+        "sym-provider-source|sym-provider-target|call|scip-io",
+      );
+    },
+  );
+
+  it(
     "normalizeDependencyPlaceholderSymbols scopes file-backed repairs by file id",
     { skip: !ladybugAvailable },
     async () => {

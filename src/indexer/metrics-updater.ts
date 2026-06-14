@@ -117,6 +117,8 @@ export async function finalizeIndexing({
         repoId,
         normalizeScope,
       );
+      const providerCallProvenanceRepaired =
+        await ladybugDb.normalizeProviderFirstCallEdgeProvenance(wConn, repoId);
       const pruned = await ladybugDb.pruneIsolatedPlaceholderSymbols(
         wConn,
         repoId,
@@ -124,6 +126,7 @@ export async function finalizeIndexing({
       if (
         repaired.fileBackedRepaired > 0 ||
         repaired.dependencyPlaceholdersRepaired > 0 ||
+        providerCallProvenanceRepaired > 0 ||
         pruned > 0
       ) {
         logger.info(
@@ -133,6 +136,7 @@ export async function finalizeIndexing({
             fileBackedRepaired: repaired.fileBackedRepaired,
             dependencyPlaceholdersRepaired:
               repaired.dependencyPlaceholdersRepaired,
+            providerCallProvenanceRepaired,
             isolatedPlaceholdersPruned: pruned,
           },
         );

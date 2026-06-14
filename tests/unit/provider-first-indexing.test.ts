@@ -885,6 +885,50 @@ describe("provider-first indexing foundation", () => {
     );
   });
 
+  it("keeps local SCIP metadata without a definition occurrence as a non-real endpoint", () => {
+    const symbol =
+      "scip-typescript npm example 1.0.0 src/index.ts/noDefinition().";
+    const facts = normalizeScipProviderFacts({
+      repoId: "repo",
+      generationId: "gen-1",
+      providerId: "scip-typescript",
+      providerVersion: "1.0.0",
+      documents: [
+        {
+          language: "typescript",
+          relativePath: "src/index.ts",
+          occurrences: [],
+          symbols: [
+            {
+              symbol,
+              documentation: ["Metadata only symbol."],
+              relationships: [],
+              kind: 12,
+              displayName: "noDefinition",
+              signatureDocumentation: "function noDefinition(): void",
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(facts.files.length, 1);
+    assert.equal(facts.symbols.length, 1);
+    assert.equal(facts.symbols[0]?.symbolStatus, "unresolved");
+    assert.equal(facts.symbols[0]?.range, undefined);
+    assert.equal(facts.coverage[0]?.symbolCoverage, "none");
+    assert.equal(facts.coverage[0]?.legacyFallback, "full");
+    assert.deepEqual(facts.coverage[0]?.skippedSymbolReasons, [
+      { reason: "missing definition occurrence", symbols: 1 },
+    ]);
+    const rows = providerFactsToGraphRows({
+      facts: withProviderFileMetadata(facts),
+    });
+    assert.equal(rows.symbols[0]?.symbolStatus, "unresolved");
+    assert.equal(rows.symbols[0]?.rangeStartLine, 0);
+    validateProviderFirstGraphRows(rows, { repoId: "repo" });
+  });
+
   it("skips ambiguous C++ provider symbols with definitions in multiple files", () => {
     const symbol = "cxx . . $ OutputBuffer#";
     const symbolInfo = {
@@ -6167,6 +6211,10 @@ describe("provider-first indexing foundation", () => {
       "pruneExternalSymbols",
       "mergeExternalSymbols",
       "insertEdges",
+      "insertEdges.dedupe",
+      "insertEdges.groupByRepo",
+      "insertEdges.prepareRows",
+      "insertEdges.relationshipCreate",
     ]);
   });
 
@@ -6302,7 +6350,7 @@ describe("provider-first indexing foundation", () => {
     assert.equal(
       countStatements(statements, "row.targetStatus"),
       0,
-      "provider-first materialization should use known-endpoint edge writes",
+      "provider-first materialization should not repair known-fresh edge endpoint metadata",
     );
     assert.equal(
       countStatements(
@@ -6319,13 +6367,13 @@ describe("provider-first indexing foundation", () => {
     );
     assert.equal(
       countStatements(statements, "COPY DEPENDS_ON FROM"),
-      1,
-      "provider-first replacement materialization should bulk-load known-fresh edge relationships",
+      0,
+      "provider-first replacement materialization should avoid relationship COPY for provenance-sensitive edges",
     );
     assert.equal(
       countStatements(statements, "CREATE (a)-[:DEPENDS_ON"),
-      0,
-      "provider-first replacement materialization should not use active-row relationship creation",
+      1,
+      "provider-first replacement materialization should use parameterized relationship creation",
     );
   });
 
@@ -6946,6 +6994,361 @@ describe("provider-first indexing foundation", () => {
         ),
         "newline-bearing edge endpoints should be excluded from relationship COPY",
       );
+    } finally {
+      await activeConn.close().catch(() => {});
+      await activeDb.close().catch(() => {});
+      await shadowConn.close().catch(() => {});
+      await shadowDb.close().catch(() => {});
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("finalizes shadow DBs when auxiliary provider metadata endpoints are file-backed", async () => {
+    const root = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-finalize-file-backed-aux-"),
+    );
+    const activeDbPath = join(root, "active.lbug");
+    const shadowDbPath = join(root, "shadow.lbug");
+    const kuzu = await import("kuzu");
+    const activeDb = new kuzu.Database(activeDbPath);
+    const activeConn = new kuzu.Connection(activeDb);
+    const shadowDb = new kuzu.Database(shadowDbPath);
+    const shadowConn = new kuzu.Connection(shadowDb);
+    const repoId = "repo";
+    const fileId = "file-1";
+    const sourceSymbolId = "source-symbol";
+    const metadataSymbolId = "provider-metadata-symbol";
+    const versionId = "version-1";
+    const now = "2026-05-26T00:00:00.000Z";
+
+    try {
+      await createBaseSchema(activeConn);
+      await createBaseSchema(shadowConn);
+      await seedRepoFileAndSourceSymbol(activeConn, {
+        repoId,
+        fileId,
+        sourceSymbolId,
+        now,
+      });
+      await seedRepoFileAndSourceSymbol(shadowConn, {
+        repoId,
+        fileId,
+        sourceSymbolId,
+        now,
+      });
+      const seedMetadataEndpoint = `
+        MATCH (r:Repo {repoId: $repoId})
+        MATCH (f:File {fileId: $fileId})
+        MERGE (target:Symbol {symbolId: $metadataSymbolId})
+        SET target.repoId = $repoId,
+            target.kind = 'method',
+            target.name = 'default',
+            target.exported = true,
+            target.visibility = '',
+            target.language = 'rust',
+            target.rangeStartLine = 0,
+            target.rangeStartCol = 0,
+            target.rangeEndLine = 0,
+            target.rangeEndCol = 0,
+            target.astFingerprint = $metadataSymbolId,
+            target.signatureJson = '',
+            target.summary = '',
+            target.summaryQuality = 0.0,
+            target.summarySource = 'provider:scip',
+            target.invariantsJson = '',
+            target.sideEffectsJson = '',
+            target.roleTagsJson = '',
+            target.searchText = 'default',
+            target.updatedAt = $now,
+            target.external = false,
+            target.source = 'scip',
+            target.packageName = '',
+            target.packageVersion = '',
+            target.scipSymbol = 'rust-analyzer cargo pkg 1.0.0 src/lib/Foo#default().',
+            target.symbolStatus = 'unresolved',
+            target.placeholderKind = 'provider-metadata',
+            target.placeholderTarget = 'rust-analyzer cargo pkg 1.0.0 src/lib/Foo#default().'
+        MERGE (target)-[:SYMBOL_IN_REPO]->(r)
+        MERGE (target)-[:SYMBOL_IN_FILE]->(f)`;
+      await dbExec(activeConn, seedMetadataEndpoint, {
+        repoId,
+        fileId,
+        metadataSymbolId,
+        now,
+      });
+      await dbExec(shadowConn, seedMetadataEndpoint, {
+        repoId,
+        fileId,
+        metadataSymbolId,
+        now,
+      });
+      await dbExec(
+        activeConn,
+        `MATCH (r:Repo {repoId: $repoId})
+         MERGE (v:Version {versionId: $versionId})
+         SET v.createdAt = $now,
+             v.reason = 'test',
+             v.prevVersionHash = null,
+             v.versionHash = 'hash'
+         MERGE (v)-[:VERSION_OF_REPO]->(r)`,
+        { repoId, versionId, now },
+      );
+      await shadowConn.close();
+      await shadowDb.close();
+
+      const summary = await finalizeProviderFirstShadowDb({
+        activeConn,
+        repoId,
+        versionId,
+        shadowDbPath,
+      });
+
+      assert.equal(summary.status, "finalized", summary.reasons.join("\n"));
+      assert.equal(summary.actualCounts?.auxiliarySymbols, 1);
+    } finally {
+      await activeConn.close().catch(() => {});
+      await activeDb.close().catch(() => {});
+      await shadowConn.close().catch(() => {});
+      await shadowDb.close().catch(() => {});
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("finalizes shadow DBs with semantic provenance and normalized provider call provenance", async () => {
+    const root = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-finalize-provenance-"),
+    );
+    const activeDbPath = join(root, "active.lbug");
+    const shadowDbPath = join(root, "shadow.lbug");
+    const kuzu = await import("kuzu");
+    const activeDb = new kuzu.Database(activeDbPath);
+    const activeConn = new kuzu.Connection(activeDb);
+    const shadowDb = new kuzu.Database(shadowDbPath);
+    const shadowConn = new kuzu.Connection(shadowDb);
+    const repoId = "repo";
+    const fileId = "file-1";
+    const sourceSymbolId = "source-symbol";
+    const targetSymbolId = "target-symbol";
+    const versionId = "version-1";
+    const runId = "provider-first-run-1";
+    const diagnosticId = "provider-first-diag-1";
+    const now = "2026-05-26T00:00:00.000Z";
+
+    try {
+      await createBaseSchema(activeConn);
+      await createBaseSchema(shadowConn);
+      await seedRepoFileAndSourceSymbol(activeConn, {
+        repoId,
+        fileId,
+        sourceSymbolId,
+        now,
+      });
+      await seedRepoFileAndSourceSymbol(shadowConn, {
+        repoId,
+        fileId,
+        sourceSymbolId,
+        now,
+      });
+      await dbExec(
+        activeConn,
+        `MATCH (r:Repo {repoId: $repoId})
+         MATCH (f:File {fileId: $fileId})
+         MATCH (source:Symbol {symbolId: $sourceSymbolId})
+         MERGE (target:Symbol {symbolId: $targetSymbolId})
+         SET target.repoId = $repoId,
+             target.kind = 'function',
+             target.name = 'target',
+             target.exported = true,
+             target.visibility = '',
+             target.language = 'typescript',
+             target.rangeStartLine = 1,
+             target.rangeStartCol = 0,
+             target.rangeEndLine = 1,
+             target.rangeEndCol = 6,
+             target.astFingerprint = $targetSymbolId,
+             target.signatureJson = '',
+             target.summary = '',
+             target.summaryQuality = 0.0,
+             target.summarySource = 'provider:scip',
+             target.invariantsJson = '',
+             target.sideEffectsJson = '',
+             target.roleTagsJson = '',
+             target.searchText = 'target',
+             target.updatedAt = $now,
+             target.external = false,
+             target.source = 'scip',
+             target.packageName = '',
+             target.packageVersion = '',
+             target.scipSymbol = 'scip local target().',
+             target.symbolStatus = 'real',
+             target.placeholderKind = '',
+             target.placeholderTarget = ''
+         MERGE (target)-[:SYMBOL_IN_REPO]->(r)
+         MERGE (target)-[:SYMBOL_IN_FILE]->(f)
+         MERGE (source)-[d:DEPENDS_ON {edgeType: 'call'}]->(target)
+         SET d.weight = 1.0,
+             d.confidence = 0.95,
+             d.resolution = 'exact',
+             d.resolverId = 'provider-first:scip-io',
+             d.resolutionPhase = 'provider-first',
+             d.provenance = 'legacy-provider-call',
+             d.createdAt = $now
+         MERGE (v:Version {versionId: $versionId})
+         SET v.createdAt = $now,
+             v.reason = 'test',
+             v.prevVersionHash = null,
+             v.versionHash = 'hash'
+         MERGE (v)-[:VERSION_OF_REPO]->(r)
+         MERGE (run:SemanticProviderRun {runId: $runId})
+         SET run.repoId = $repoId,
+             run.providerType = 'scip',
+             run.providerId = 'scip-io',
+             run.providerVersion = '0.1.8',
+             run.languagesJson = '["typescript"]',
+             run.sourceIndexPath = 'index.scip',
+             run.sourceHash = 'source-hash',
+             run.cacheKey = 'cache-key',
+             run.configHash = 'config-hash',
+             run.ledgerVersion = $versionId,
+             run.status = 'completed',
+             run.startedAt = $now,
+             run.finishedAt = $now,
+             run.documentsProcessed = 1,
+             run.symbolsMatched = 2,
+             run.edgesCreated = 1,
+             run.edgesUpgraded = 0,
+             run.edgesReplaced = 0,
+             run.edgesSkipped = 1,
+             run.diagnosticsCount = 1,
+             run.precisionScore = 0.95,
+             run.cacheHit = false,
+             run.canAffectPass2 = true,
+             run.selected = true,
+             run.metadataJson = '{"coverage":{"files":1}}',
+             run.error = null
+         MERGE (diag:SemanticDiagnostic {id: $diagnosticId})
+         SET diag.repoId = $repoId,
+             diag.runId = $runId,
+             diag.providerType = 'scip',
+             diag.providerId = 'scip-io',
+             diag.languageId = 'typescript',
+             diag.sourcePath = 'src/example.ts',
+             diag.severity = 'warning',
+             diag.message = 'call proof skipped',
+             diag.code = 'CALL_PROOF',
+             diag.rangeJson = '{"startLine":1}',
+             diag.createdAt = $now`,
+        {
+          repoId,
+          fileId,
+          sourceSymbolId,
+          targetSymbolId,
+          versionId,
+          runId,
+          diagnosticId,
+          now,
+        },
+      );
+      await dbExec(
+        shadowConn,
+        `MATCH (r:Repo {repoId: $repoId})
+         MATCH (f:File {fileId: $fileId})
+         MERGE (target:Symbol {symbolId: $targetSymbolId})
+         SET target.repoId = $repoId,
+             target.kind = 'function',
+             target.name = 'target',
+             target.exported = true,
+             target.visibility = '',
+             target.language = 'typescript',
+             target.rangeStartLine = 1,
+             target.rangeStartCol = 0,
+             target.rangeEndLine = 1,
+             target.rangeEndCol = 6,
+             target.astFingerprint = $targetSymbolId,
+             target.signatureJson = '',
+             target.summary = '',
+             target.summaryQuality = 0.0,
+             target.summarySource = 'provider:scip',
+             target.invariantsJson = '',
+             target.sideEffectsJson = '',
+             target.roleTagsJson = '',
+             target.searchText = 'target',
+             target.updatedAt = $now,
+             target.external = false,
+             target.source = 'scip',
+             target.packageName = '',
+             target.packageVersion = '',
+             target.scipSymbol = 'scip local target().',
+             target.symbolStatus = 'real',
+             target.placeholderKind = '',
+             target.placeholderTarget = ''
+         MERGE (target)-[:SYMBOL_IN_REPO]->(r)
+         MERGE (target)-[:SYMBOL_IN_FILE]->(f)`,
+        {
+          repoId,
+          fileId,
+          targetSymbolId,
+          now,
+        },
+      );
+      await shadowConn.close();
+      await shadowDb.close();
+
+      const summary = await finalizeProviderFirstShadowDb({
+        activeConn,
+        repoId,
+        versionId,
+        shadowDbPath,
+      });
+
+      assert.equal(summary.status, "finalized", summary.reasons.join("\n"));
+
+      const finalizedDb = new kuzu.Database(shadowDbPath);
+      const finalizedConn = new kuzu.Connection(finalizedDb);
+      try {
+        const edgeRows = await queryAll<{ provenance: string | null }>(
+          finalizedConn,
+          `MATCH (:Symbol {symbolId: $sourceSymbolId})-[d:DEPENDS_ON {edgeType: 'call'}]->(:Symbol {symbolId: $targetSymbolId})
+           RETURN d.provenance AS provenance`,
+          { sourceSymbolId, targetSymbolId },
+        );
+        assert.equal(edgeRows.length, 1);
+        const provenance = JSON.parse(edgeRows[0]?.provenance ?? "{}") as {
+          dedupeKey?: unknown;
+          repaired?: unknown;
+          previousProvenance?: unknown;
+        };
+        assert.equal(typeof provenance.dedupeKey, "string");
+        assert.equal(provenance.repaired, true);
+        assert.equal(provenance.previousProvenance, "legacy-provider-call");
+
+        const runRows = await queryAll<{
+          metadataJson: string | null;
+          diagnosticsCount: unknown;
+        }>(
+          finalizedConn,
+          `MATCH (run:SemanticProviderRun {runId: $runId})
+           RETURN run.metadataJson AS metadataJson,
+                  run.diagnosticsCount AS diagnosticsCount`,
+          { runId },
+        );
+        assert.equal(runRows.length, 1);
+        assert.equal(runRows[0]?.metadataJson, '{"coverage":{"files":1}}');
+
+        const diagnosticRows = await queryAll<{ message: string | null }>(
+          finalizedConn,
+          `MATCH (diag:SemanticDiagnostic {id: $diagnosticId})
+           RETURN diag.message AS message`,
+          { diagnosticId },
+        );
+        assert.deepEqual(
+          diagnosticRows.map((row) => row.message),
+          ["call proof skipped"],
+        );
+      } finally {
+        await finalizedConn.close().catch(() => {});
+        await finalizedDb.close().catch(() => {});
+      }
     } finally {
       await activeConn.close().catch(() => {});
       await activeDb.close().catch(() => {});

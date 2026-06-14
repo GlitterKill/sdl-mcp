@@ -107,6 +107,7 @@ interface NormalizedScipContext {
   symbolInfoRelPathsByProviderId: Map<string, ReadonlySet<string>>;
   symbolDefinitionRelPathsByProviderId: Map<string, ReadonlySet<string>>;
   symbolIdsByProviderId: Map<string, string>;
+  unresolvedSymbolProviderIds: Set<string>;
   symbolSourceTextCandidatesByProviderId: Map<string, readonly string[]>;
   sourceLinesByPath: SourceLinesByPath;
   sourceLineUnavailableReasonByPath: SourceLineUnavailableReasonByPath;
@@ -167,6 +168,7 @@ export function normalizeScipProviderFacts(
       () => collectSymbolDefinitionRelPathsByProviderId(documents),
     ),
     symbolIdsByProviderId: new Map(),
+    unresolvedSymbolProviderIds: new Set(),
     symbolSourceTextCandidatesByProviderId: new Map(),
     sourceLinesByPath: normalizeSourceLinesByPath(options),
     sourceLineUnavailableReasonByPath:
@@ -215,6 +217,9 @@ export function normalizeScipProviderFacts(
           continue;
         }
         context.symbolIdsByProviderId.set(info.symbol, symbolFact.symbolId);
+        if (symbolFact.symbolStatus === "unresolved") {
+          context.unresolvedSymbolProviderIds.add(info.symbol);
+        }
         context.symbolSourceTextCandidatesByProviderId.set(
           info.symbol,
           sourceTextCandidatesForScipSymbol(info.symbol, symbolFact.name),
@@ -623,6 +628,15 @@ function symbolInfoToFact(
     signature: info.signatureDocumentation,
     documentation: info.documentation,
     external: false,
+    ...(definitionRange
+      ? { symbolStatus: "real" as const }
+      : {
+          // Metadata-only local symbols can still be useful as relationship
+          // endpoints, but they cannot safely back code windows.
+          symbolStatus: "unresolved" as const,
+          placeholderKind: "provider-metadata",
+          placeholderTarget: info.symbol,
+        }),
   };
 }
 
@@ -805,7 +819,7 @@ function coverageFact(
   neutralCallProofOccurrenceIndexes: NeutralCallProofOccurrenceIndexes,
 ): ProviderFactSet["coverage"][number] {
   const emittedSymbols = document.symbols.filter((info) =>
-    context.symbolIdsByProviderId.has(info.symbol),
+    isRealProviderSymbol(context, info.symbol),
   ).length;
   const skippedSymbolReasons = collectSkippedSymbolReasons(context, document);
   const unresolvedOccurrences = occurrences.filter(
@@ -866,7 +880,7 @@ function collectSkippedSymbolReasons(
   const reasonCounts = new Map<string, number>();
 
   for (const info of document.symbols) {
-    if (context.symbolIdsByProviderId.has(info.symbol)) continue;
+    if (isRealProviderSymbol(context, info.symbol)) continue;
     const kind = mapScipKind(info.symbol, info.kind);
     const reason = skippedSymbolReason(context, info.symbol, kind);
     reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
@@ -880,6 +894,16 @@ function collectSkippedSymbolReasons(
       }
       return left.reason.localeCompare(right.reason);
     });
+}
+
+function isRealProviderSymbol(
+  context: NormalizedScipContext,
+  providerSymbolId: string,
+): boolean {
+  return (
+    context.symbolIdsByProviderId.has(providerSymbolId) &&
+    !context.unresolvedSymbolProviderIds.has(providerSymbolId)
+  );
 }
 
 function skippedSymbolReason(
@@ -896,6 +920,9 @@ function skippedSymbolReason(
     !canCoalesceDuplicateProviderSymbol(providerSymbolId, kind.sdlKind)
   ) {
     return "ambiguous provider symbol";
+  }
+  if (!definitionRelPaths || definitionRelPaths.size === 0) {
+    return "missing definition occurrence";
   }
   return "not materialized";
 }

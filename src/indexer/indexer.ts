@@ -250,6 +250,11 @@ function providerFirstMaterializePhaseTotal(
       return rows.externalSymbols.length;
     case "insertEdges":
       return plan.writeEdges ? rows.edges.length : 0;
+    default:
+      if (phaseName.startsWith("insertEdges.")) {
+        return plan.writeEdges ? rows.edges.length : 0;
+      }
+      return 0;
   }
 }
 

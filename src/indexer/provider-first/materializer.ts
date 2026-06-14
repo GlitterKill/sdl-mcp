@@ -114,7 +114,8 @@ export type MaterializeProviderFactsPhaseName =
   | "upsertSymbols.repoRelCreate"
   | "pruneExternalSymbols"
   | "mergeExternalSymbols"
-  | "insertEdges";
+  | "insertEdges"
+  | `insertEdges.${ladybugDb.InsertEdgesPhaseName}`;
 
 const PROVIDER_FIRST_DELETE_SYMBOL_FILE_CHUNK_SIZE = 256;
 
@@ -261,11 +262,20 @@ export async function materializeProviderFacts(
     }
     await measurePhase("insertEdges", async () => {
       if (!writeEdges) return;
-      if (useKnownFreshWriters) {
-        await ladybugDb.insertKnownSymbolEdges(txConn, rows.edges);
-      } else {
-        await ladybugDb.insertEdges(txConn, rows.edges);
-      }
+      await ladybugDb.insertEdges(txConn, rows.edges, {
+        ...(useKnownFreshWriters
+          ? {
+              skipSourceRepoLink: true,
+              skipExistingRelationshipProbe: true,
+              skipExistingRelationshipUpdate: true,
+              skipEndpointMetadata: true,
+              skipTargetMetadata: true,
+            }
+          : {}),
+        useExistingTransaction: true,
+        measurePhase: async (phaseName, fn) =>
+          await measurePhase(`insertEdges.${phaseName}`, async () => await fn()),
+      });
     });
   });
 }
@@ -450,6 +460,7 @@ function symbolFactToRow(
     endLine: 0,
     endCol: 0,
   };
+  const symbolStatus = fact.symbolStatus ?? "real";
   const signatureJson = buildProviderSignatureJson(
     fact.symbolKind,
     fact.name,
@@ -499,6 +510,9 @@ function symbolFactToRow(
     external: false,
     scipSymbol: fact.providerType === "scip" ? fact.providerSymbolId : null,
     source: fact.providerType,
+    symbolStatus,
+    placeholderKind: fact.placeholderKind,
+    placeholderTarget: fact.placeholderTarget,
     updatedAt: indexedAt,
   };
 }

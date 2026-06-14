@@ -589,6 +589,7 @@ export async function normalizeFileBackedSymbolStatuses(
     `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
      WHERE s.repoId = $repoId
        ${fileIds ? "AND f.fileId IN $fileIds" : ""}
+       AND coalesce(s.placeholderKind, '') <> 'provider-metadata'
        AND (
          coalesce(s.symbolStatus, 'real') <> 'real'
          OR coalesce(s.placeholderKind, '') <> ''
@@ -605,6 +606,7 @@ export async function normalizeFileBackedSymbolStatuses(
     `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
      WHERE s.repoId = $repoId
        ${fileIds ? "AND f.fileId IN $fileIds" : ""}
+       AND coalesce(s.placeholderKind, '') <> 'provider-metadata'
        AND (
          coalesce(s.symbolStatus, 'real') <> 'real'
          OR coalesce(s.placeholderKind, '') <> ''
@@ -740,6 +742,7 @@ async function countFileBackedDependencyMetadataRepairs(
     `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
      WHERE s.repoId = $repoId
        ${fileIds ? "AND f.fileId IN $fileIds" : ""}
+       AND coalesce(s.placeholderKind, '') <> 'provider-metadata'
        AND (
          coalesce(s.symbolStatus, 'real') <> 'real'
          OR coalesce(s.placeholderKind, '') <> ''

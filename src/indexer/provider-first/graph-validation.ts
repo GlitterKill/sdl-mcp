@@ -57,12 +57,17 @@ export function validateProviderFirstGraphRows(
         `${context} symbol ${symbol.symbolId} references missing file ${symbol.fileId}`,
       );
     }
-    assertSensibleRange(context, symbol.symbolId, {
+    const range = {
       startLine: symbol.rangeStartLine,
       startCol: symbol.rangeStartCol,
       endLine: symbol.rangeEndLine,
       endCol: symbol.rangeEndCol,
-    });
+    };
+    if ((symbol.symbolStatus ?? "real") === "real") {
+      assertSensibleRange(context, symbol.symbolId, range);
+    } else {
+      assertNonRealRange(context, symbol.symbolId, range);
+    }
   }
 
   for (const symbol of rows.externalSymbols) {
@@ -133,6 +138,33 @@ function assertSensibleRange(
   ) {
     fail(
       `${context} symbol ${symbolId} has non-sensical range ${range.startLine}:${range.startCol}-${range.endLine}:${range.endCol}`,
+    );
+  }
+}
+
+function assertNonRealRange(
+  context: string,
+  symbolId: string,
+  range: {
+    startLine: number;
+    startCol: number;
+    endLine: number;
+    endCol: number;
+  },
+): void {
+  for (const [label, value] of Object.entries(range)) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      fail(
+        `${context} non-real symbol ${symbolId} has invalid range ${label}=${String(value)}`,
+      );
+    }
+  }
+  if (
+    range.endLine < range.startLine ||
+    (range.endLine === range.startLine && range.endCol < range.startCol)
+  ) {
+    fail(
+      `${context} non-real symbol ${symbolId} has non-sensical range ${range.startLine}:${range.startCol}-${range.endLine}:${range.endCol}`,
     );
   }
 }

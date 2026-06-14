@@ -343,6 +343,22 @@ export interface InsertEdgesOptions extends LadybugWriteChunkOptions {
    * relationships for the inserted edge type are known to be absent.
    */
   skipExistingRelationshipProbe?: boolean;
+  /**
+   * Edge endpoints were just materialized by the caller. Skip node metadata
+   * repair so provider-owned unresolved metadata endpoints keep their status.
+   */
+  skipEndpointMetadata?: boolean;
+  /**
+   * Edge targets were just materialized by the caller. Skip target placeholder
+   * repair and repo-link repair for the same reason as skipEndpointMetadata.
+   */
+  skipTargetMetadata?: boolean;
+  /**
+   * Caller already owns the write transaction. Used by provider-first active
+   * materialization to avoid nested transactions while preserving parameter
+   * binding for provenance-sensitive edge rows.
+   */
+  useExistingTransaction?: boolean;
   measurePhase?: <T>(
     phaseName: InsertEdgesPhaseName,
     fn: () => Promise<T> | T,
@@ -379,7 +395,7 @@ export async function insertEdges(
   // UNWIND-batched MERGE: chunked to keep param payload bounded. Side-effect
   // mode only (no RETURN) to avoid LadybugDB issue #285.
   const chunkSize = resolveLadybugWriteChunkSize("edges", options?.chunkSize);
-  await withTransaction(conn, async (txConn) => {
+  const writeEdges = async (txConn: Connection): Promise<void> => {
     const edgesByRepo = await measurePhase("groupByRepo", () => {
       const grouped = new Map<string, EdgeRow[]>();
       for (const edge of edges) {
@@ -457,33 +473,35 @@ export async function insertEdges(
         // 1: ensure both Symbol nodes exist. Real edge endpoints must repair
         // stale placeholder metadata; otherwise a previously unresolved stub
         // can stay excluded after the real file-backed symbol is indexed.
-        await measurePhase("endpointMetadata", async () =>
-          exec(
-            txConn,
-            `UNWIND $rows AS row
-             MERGE (a:Symbol {symbolId: row.fromSymbolId})
-             MERGE (b:Symbol {symbolId: row.toSymbolId})
-             SET a.repoId = row.repoId,
-                 a.external = CASE
-                   WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.external, false)
-                   ELSE false
-                 END,
-                 a.symbolStatus = CASE
-                   WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.symbolStatus, 'unresolved')
-                   ELSE 'real'
-                 END,
-                 a.placeholderKind = CASE
-                   WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.placeholderKind, '')
-                   ELSE ''
-                 END,
-                 a.placeholderTarget = CASE
-                   WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.placeholderTarget, '')
-                   ELSE ''
-                 END,
-                 b.repoId = row.repoId`,
-            { rows },
-          ),
-        );
+        if (!options?.skipEndpointMetadata) {
+          await measurePhase("endpointMetadata", async () =>
+            exec(
+              txConn,
+              `UNWIND $rows AS row
+               MERGE (a:Symbol {symbolId: row.fromSymbolId})
+               MERGE (b:Symbol {symbolId: row.toSymbolId})
+               SET a.repoId = row.repoId,
+                   a.external = CASE
+                     WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.external, false)
+                     ELSE false
+                   END,
+                   a.symbolStatus = CASE
+                     WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.symbolStatus, 'unresolved')
+                     ELSE 'real'
+                   END,
+                   a.placeholderKind = CASE
+                     WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.placeholderKind, '')
+                     ELSE ''
+                   END,
+                   a.placeholderTarget = CASE
+                     WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.placeholderTarget, '')
+                     ELSE ''
+                   END,
+                   b.repoId = row.repoId`,
+              { rows },
+            ),
+          );
+        }
         // Target metadata is node-only and one row per target. Placeholder
         // rows never consult file-backed state, so keep them off the slower
         // OPTIONAL MATCH path used to clean/preserve real target metadata.
@@ -493,7 +511,7 @@ export async function insertEdges(
         const realTargetRows = targetRows.filter(
           (row) => row.targetStatus === "real",
         );
-        if (placeholderRows.length > 0) {
+        if (!options?.skipTargetMetadata && placeholderRows.length > 0) {
           await measurePhase("targetMetadata", async () =>
             exec(
               txConn,
@@ -511,7 +529,7 @@ export async function insertEdges(
             ),
           );
         }
-        if (realTargetRows.length > 0) {
+        if (!options?.skipTargetMetadata && realTargetRows.length > 0) {
           await measurePhase("targetMetadata", async () =>
             exec(
               txConn,
@@ -548,7 +566,7 @@ export async function insertEdges(
             ),
           );
         }
-        if (placeholderRows.length > 0) {
+        if (!options?.skipTargetMetadata && placeholderRows.length > 0) {
           await measurePhase("targetRepoLink", async () =>
             ensureDependencyTargetRepoLinks(txConn, placeholderRows),
           );
@@ -627,7 +645,86 @@ export async function insertEdges(
         }
       }
     }
-  });
+  };
+
+  if (options?.useExistingTransaction) {
+    await writeEdges(conn);
+  } else {
+    await withTransaction(conn, writeEdges);
+  }
+}
+
+export async function normalizeProviderFirstCallEdgeProvenance(
+  conn: Connection,
+  repoId: string,
+): Promise<number> {
+  const rows = await queryAll<{
+    fromSymbolId: string;
+    toSymbolId: string;
+    edgeType: string;
+    resolverId: string | null;
+    provenance: string | null;
+  }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)
+     WHERE d.edgeType = 'call'
+       AND coalesce(d.resolverId, '') STARTS WITH 'provider-first:'
+     RETURN a.symbolId AS fromSymbolId,
+            b.symbolId AS toSymbolId,
+            d.edgeType AS edgeType,
+            d.resolverId AS resolverId,
+            d.provenance AS provenance`,
+    { repoId },
+  );
+  const repairs = rows
+    .filter((row) => !hasProviderFirstDedupeProvenance(row.provenance))
+    .map((row) => {
+      const providerId =
+        row.resolverId?.replace(/^provider-first:/, "") || "unknown";
+      return {
+        fromSymbolId: row.fromSymbolId,
+        toSymbolId: row.toSymbolId,
+        edgeType: row.edgeType,
+        provenance: JSON.stringify({
+          providerId,
+          providerType: providerId.includes("scip") ? "scip" : "unknown",
+          repaired: true,
+          previousProvenance: row.provenance ?? "",
+          dedupeKey: [
+            row.fromSymbolId,
+            row.toSymbolId,
+            row.edgeType,
+            providerId,
+          ].join("|"),
+        }),
+      };
+    });
+  if (repairs.length === 0) return 0;
+
+  const chunkSize = resolveLadybugWriteChunkSize("edges");
+  for (let i = 0; i < repairs.length; i += chunkSize) {
+    const chunk = repairs.slice(i, i + chunkSize);
+    await exec(
+      conn,
+      `UNWIND $rows AS row
+       MATCH (a:Symbol {symbolId: row.fromSymbolId})
+       MATCH (b:Symbol {symbolId: row.toSymbolId})
+       MATCH (a)-[d:DEPENDS_ON {edgeType: row.edgeType}]->(b)
+       SET d.provenance = row.provenance`,
+      { rows: chunk },
+    );
+  }
+  return repairs.length;
+}
+
+function hasProviderFirstDedupeProvenance(provenance: string | null): boolean {
+  if (!provenance) return false;
+  try {
+    const parsed = JSON.parse(provenance) as { dedupeKey?: unknown };
+    return typeof parsed.dedupeKey === "string" && parsed.dedupeKey.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**

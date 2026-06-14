@@ -201,13 +201,7 @@ async function main(): Promise<void> {
       (symbol) => !args.repoId || symbol.symbolRepoId === args.repoId,
     );
     const symbolIds = new Set(scopedSymbols.map((symbol) => symbol.symbolId));
-    const localRealSymbols = scopedSymbols.filter(
-      (symbol) =>
-        !toBoolean(symbol.external) &&
-        (symbol.symbolStatus === null ||
-          symbol.symbolStatus === "real" ||
-          symbol.symbolStatus === ""),
-    );
+    const localRealSymbols = scopedSymbols.filter(isLocalRealSymbol);
 
     const metrics = await queryAll<{ symbolId: string }>(
       conn,
@@ -327,6 +321,15 @@ function checkSourceFidelity(
   return gate("source-fidelity", files.length, failures);
 }
 
+function isLocalRealSymbol(symbol: SymbolRow): boolean {
+  return (
+    !toBoolean(symbol.external) &&
+    (symbol.symbolStatus === null ||
+      symbol.symbolStatus === "real" ||
+      symbol.symbolStatus === "")
+  );
+}
+
 function checkLocalSymbolUsability(
   symbols: readonly SymbolRow[],
   fileById: ReadonlyMap<string, FileRow>,
@@ -392,11 +395,12 @@ function checkSourceRanges(
     }
     const startText = lines[startLine - 1];
     const endText = lines[endLine - 1];
+    const endsAtEof = endLine === lines.length + 1 && endCol === 0;
     if (
       startText === undefined ||
-      endText === undefined ||
+      (!endsAtEof && endText === undefined) ||
       startCol > startText.length ||
-      endCol > endText.length
+      (!endsAtEof && endCol > endText.length)
     ) {
       failures.push({
         gate: "source-ranges",

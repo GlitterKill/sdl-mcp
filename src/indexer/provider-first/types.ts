@@ -62,6 +62,9 @@ export interface SymbolFact extends ProviderFactBase {
   signature?: string;
   documentation: string[];
   external: boolean;
+  symbolStatus?: "real" | "unresolved";
+  placeholderKind?: string;
+  placeholderTarget?: string;
 }
 
 export interface OccurrenceFact extends ProviderFactBase {

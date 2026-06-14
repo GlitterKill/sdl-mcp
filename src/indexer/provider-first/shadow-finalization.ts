@@ -275,6 +275,51 @@ interface AuxiliarySymbolRow {
   placeholderTarget: string | null;
 }
 
+interface SemanticProviderRunCopyRow {
+  runId: string;
+  repoId: string;
+  providerType: string;
+  providerId: string;
+  providerVersion: string | null;
+  languagesJson: string;
+  sourceIndexPath: string | null;
+  sourceHash: string | null;
+  cacheKey: string | null;
+  configHash: string | null;
+  ledgerVersion: string | null;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  documentsProcessed: number;
+  symbolsMatched: number;
+  edgesCreated: number;
+  edgesUpgraded: number;
+  edgesReplaced: number;
+  edgesSkipped: number;
+  diagnosticsCount: number;
+  precisionScore: number;
+  cacheHit: boolean;
+  canAffectPass2: boolean;
+  selected: boolean;
+  metadataJson: string;
+  error: string | null;
+}
+
+interface SemanticDiagnosticCopyRow {
+  id: string;
+  repoId: string;
+  runId: string;
+  providerType: string;
+  providerId: string;
+  languageId: string | null;
+  sourcePath: string | null;
+  severity: string;
+  message: string;
+  code: string | null;
+  rangeJson: string;
+  createdAt: string;
+}
+
 export async function finalizeProviderFirstShadowDb(
   params: FinalizeProviderFirstShadowDbParams,
 ): Promise<ProviderFirstShadowFinalizationSummary> {
@@ -410,6 +455,14 @@ async function copyFinalizedRows(params: {
     params.repoId,
   );
   const derivedState = await readDerivedStateRow(
+    params.activeConn,
+    params.repoId,
+  );
+  const semanticProviderRuns = await readSemanticProviderRunsForRepo(
+    params.activeConn,
+    params.repoId,
+  );
+  const semanticDiagnostics = await readSemanticDiagnosticsForRepo(
     params.activeConn,
     params.repoId,
   );
@@ -704,6 +757,17 @@ async function copyFinalizedRows(params: {
     fallbackAuxiliarySymbols,
   );
   await upsertFinalizedEdgesFallback(params.shadowConn, fallbackEdges);
+  const callProvenanceRepairs =
+    await ladybugDb.normalizeProviderFirstCallEdgeProvenance(
+      params.shadowConn,
+      params.repoId,
+    );
+  await replaceSemanticProvenanceRows(
+    params.shadowConn,
+    params.repoId,
+    semanticProviderRuns,
+    semanticDiagnostics,
+  );
   await upsertClusterMembersFallback(params.shadowConn, fallbackClusterMembers);
   await upsertProcessStepsFallback(params.shadowConn, fallbackProcessSteps);
   await upsertShadowClusterMembersFallback(
@@ -734,6 +798,9 @@ async function copyFinalizedRows(params: {
           clusterMembers: fallbackClusterMembers.length,
           processSteps: fallbackProcessSteps.length,
           shadowClusterMembers: fallbackShadowClusterMembers.length,
+          semanticProviderRuns: semanticProviderRuns.length,
+          semanticDiagnostics: semanticDiagnostics.length,
+          providerFirstCallProvenanceRepairs: callProvenanceRepairs,
         },
       },
       null,
@@ -742,6 +809,231 @@ async function copyFinalizedRows(params: {
     "utf8",
   );
   return bulkLoad;
+}
+
+async function readSemanticProviderRunsForRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<SemanticProviderRunCopyRow[]> {
+  const rows = await ladybugDb.queryAll<{
+    runId: string;
+    repoId: string;
+    providerType: string | null;
+    providerId: string | null;
+    providerVersion: string | null;
+    languagesJson: string | null;
+    sourceIndexPath: string | null;
+    sourceHash: string | null;
+    cacheKey: string | null;
+    configHash: string | null;
+    ledgerVersion: string | null;
+    status: string | null;
+    startedAt: string | null;
+    finishedAt: string | null;
+    documentsProcessed: unknown;
+    symbolsMatched: unknown;
+    edgesCreated: unknown;
+    edgesUpgraded: unknown;
+    edgesReplaced: unknown;
+    edgesSkipped: unknown;
+    diagnosticsCount: unknown;
+    precisionScore: unknown;
+    cacheHit: unknown;
+    canAffectPass2: unknown;
+    selected: unknown;
+    metadataJson: string | null;
+    error: string | null;
+  }>(
+    conn,
+    `MATCH (r:SemanticProviderRun {repoId: $repoId})
+     RETURN r.runId AS runId,
+            r.repoId AS repoId,
+            r.providerType AS providerType,
+            r.providerId AS providerId,
+            r.providerVersion AS providerVersion,
+            r.languagesJson AS languagesJson,
+            r.sourceIndexPath AS sourceIndexPath,
+            r.sourceHash AS sourceHash,
+            r.cacheKey AS cacheKey,
+            r.configHash AS configHash,
+            r.ledgerVersion AS ledgerVersion,
+            r.status AS status,
+            r.startedAt AS startedAt,
+            r.finishedAt AS finishedAt,
+            coalesce(r.documentsProcessed, 0) AS documentsProcessed,
+            coalesce(r.symbolsMatched, 0) AS symbolsMatched,
+            coalesce(r.edgesCreated, 0) AS edgesCreated,
+            coalesce(r.edgesUpgraded, 0) AS edgesUpgraded,
+            coalesce(r.edgesReplaced, 0) AS edgesReplaced,
+            coalesce(r.edgesSkipped, 0) AS edgesSkipped,
+            coalesce(r.diagnosticsCount, 0) AS diagnosticsCount,
+            coalesce(r.precisionScore, 0.0) AS precisionScore,
+            coalesce(r.cacheHit, false) AS cacheHit,
+            coalesce(r.canAffectPass2, false) AS canAffectPass2,
+            coalesce(r.selected, true) AS selected,
+            r.metadataJson AS metadataJson,
+            r.error AS error
+     ORDER BY runId`,
+    { repoId },
+  );
+  return rows.map((row) => ({
+    runId: row.runId,
+    repoId: row.repoId,
+    providerType: row.providerType ?? "unknown",
+    providerId: row.providerId ?? "unknown",
+    providerVersion: row.providerVersion ?? null,
+    languagesJson: row.languagesJson ?? "[]",
+    sourceIndexPath: row.sourceIndexPath ?? null,
+    sourceHash: row.sourceHash ?? null,
+    cacheKey: row.cacheKey ?? null,
+    configHash: row.configHash ?? null,
+    ledgerVersion: row.ledgerVersion ?? null,
+    status: row.status ?? "completed",
+    startedAt: row.startedAt ?? "",
+    finishedAt: row.finishedAt ?? null,
+    documentsProcessed: ladybugDb.toNumber(row.documentsProcessed),
+    symbolsMatched: ladybugDb.toNumber(row.symbolsMatched),
+    edgesCreated: ladybugDb.toNumber(row.edgesCreated),
+    edgesUpgraded: ladybugDb.toNumber(row.edgesUpgraded),
+    edgesReplaced: ladybugDb.toNumber(row.edgesReplaced),
+    edgesSkipped: ladybugDb.toNumber(row.edgesSkipped),
+    diagnosticsCount: ladybugDb.toNumber(row.diagnosticsCount),
+    precisionScore: ladybugDb.toNumber(row.precisionScore),
+    cacheHit: ladybugDb.toBoolean(row.cacheHit),
+    canAffectPass2: ladybugDb.toBoolean(row.canAffectPass2),
+    selected: ladybugDb.toBoolean(row.selected),
+    metadataJson: row.metadataJson ?? "{}",
+    error: row.error ?? null,
+  }));
+}
+
+async function readSemanticDiagnosticsForRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<SemanticDiagnosticCopyRow[]> {
+  const rows = await ladybugDb.queryAll<{
+    id: string;
+    repoId: string;
+    runId: string | null;
+    providerType: string | null;
+    providerId: string | null;
+    languageId: string | null;
+    sourcePath: string | null;
+    severity: string | null;
+    message: string | null;
+    code: string | null;
+    rangeJson: string | null;
+    createdAt: string | null;
+  }>(
+    conn,
+    `MATCH (d:SemanticDiagnostic {repoId: $repoId})
+     RETURN d.id AS id,
+            d.repoId AS repoId,
+            d.runId AS runId,
+            d.providerType AS providerType,
+            d.providerId AS providerId,
+            d.languageId AS languageId,
+            d.sourcePath AS sourcePath,
+            d.severity AS severity,
+            d.message AS message,
+            d.code AS code,
+            d.rangeJson AS rangeJson,
+            d.createdAt AS createdAt
+     ORDER BY id`,
+    { repoId },
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    repoId: row.repoId,
+    runId: row.runId ?? "",
+    providerType: row.providerType ?? "unknown",
+    providerId: row.providerId ?? "unknown",
+    languageId: row.languageId ?? null,
+    sourcePath: row.sourcePath ?? null,
+    severity: row.severity ?? "info",
+    message: row.message ?? "",
+    code: row.code ?? null,
+    rangeJson: row.rangeJson ?? "{}",
+    createdAt: row.createdAt ?? "",
+  }));
+}
+
+async function replaceSemanticProvenanceRows(
+  conn: Connection,
+  repoId: string,
+  providerRuns: readonly SemanticProviderRunCopyRow[],
+  diagnostics: readonly SemanticDiagnosticCopyRow[],
+): Promise<void> {
+  await exec(
+    conn,
+    `MATCH (d:SemanticDiagnostic {repoId: $repoId})
+     DELETE d`,
+    { repoId },
+  );
+  await exec(
+    conn,
+    `MATCH (r:SemanticProviderRun {repoId: $repoId})
+     DELETE r`,
+    { repoId },
+  );
+
+  const chunkSize = 256;
+  for (let i = 0; i < providerRuns.length; i += chunkSize) {
+    const rows = providerRuns.slice(i, i + chunkSize);
+    await exec(
+      conn,
+      `UNWIND $rows AS row
+       MERGE (r:SemanticProviderRun {runId: row.runId})
+       SET r.repoId = row.repoId,
+           r.providerType = row.providerType,
+           r.providerId = row.providerId,
+           r.providerVersion = row.providerVersion,
+           r.languagesJson = row.languagesJson,
+           r.sourceIndexPath = row.sourceIndexPath,
+           r.sourceHash = row.sourceHash,
+           r.cacheKey = row.cacheKey,
+           r.configHash = row.configHash,
+           r.ledgerVersion = row.ledgerVersion,
+           r.status = row.status,
+           r.startedAt = row.startedAt,
+           r.finishedAt = row.finishedAt,
+           r.documentsProcessed = row.documentsProcessed,
+           r.symbolsMatched = row.symbolsMatched,
+           r.edgesCreated = row.edgesCreated,
+           r.edgesUpgraded = row.edgesUpgraded,
+           r.edgesReplaced = row.edgesReplaced,
+           r.edgesSkipped = row.edgesSkipped,
+           r.diagnosticsCount = row.diagnosticsCount,
+           r.precisionScore = row.precisionScore,
+           r.cacheHit = row.cacheHit,
+           r.canAffectPass2 = row.canAffectPass2,
+           r.selected = row.selected,
+           r.metadataJson = row.metadataJson,
+           r.error = row.error`,
+      { rows },
+    );
+  }
+
+  for (let i = 0; i < diagnostics.length; i += chunkSize) {
+    const rows = diagnostics.slice(i, i + chunkSize);
+    await exec(
+      conn,
+      `UNWIND $rows AS row
+       MERGE (d:SemanticDiagnostic {id: row.id})
+       SET d.repoId = row.repoId,
+           d.runId = row.runId,
+           d.providerType = row.providerType,
+           d.providerId = row.providerId,
+           d.languageId = row.languageId,
+           d.sourcePath = row.sourcePath,
+           d.severity = row.severity,
+           d.message = row.message,
+           d.code = row.code,
+           d.rangeJson = row.rangeJson,
+           d.createdAt = row.createdAt`,
+      { rows },
+    );
+  }
 }
 
 async function readEdgeTargetSymbolsForRepo(
@@ -1275,6 +1567,17 @@ async function resetBulkFinalizationTargets(
     `MATCH (s:Symbol)-[rel:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
      WHERE coalesce(s.symbolStatus, 'real') <> 'real'
         OR coalesce(s.external, false) = true
+     DELETE rel`,
+    { repoId },
+  );
+  await exec(
+    conn,
+    `MATCH (s:Symbol)-[rel:SYMBOL_IN_FILE]->(:File)
+     WHERE s.repoId = $repoId
+       AND (
+         coalesce(s.symbolStatus, 'real') <> 'real'
+         OR coalesce(s.external, false) = true
+       )
      DELETE rel`,
     { repoId },
   );
