@@ -32,7 +32,7 @@ SDL-MCP is a high-performance codebase indexing and context retrieval server. Th
 | Transports   | stdio (CLI agents), HTTP/SSE (network clients)                                                                                                                                                                             |
 | AST parsing  | tree-sitter 0.26.2 (via @keqingmoe/tree-sitter) + language grammars via `sdl-mcp-tree-sitter-*` wrapper packages (peer-range normalized to accept 0.26.x; see [grammar-wrappers/README.md](../grammar-wrappers/README.md)) |
 | Native addon | Rust via napi-rs (optional, multi-threaded pass-1)                                                                                                                                                                         |
-| Embeddings   | ONNX Runtime (jina-embeddings-v2-base-code 768-dim bundled, nomic-embed-text-v1.5 768-dim optional)                                                                                                                        |
+| Embeddings   | ONNX Runtime with two supported local models: `jina-embeddings-v2-base-code` for Symbols and `nomic-embed-text-v1.5` for FileSummary vectors                                                                                |
 | Validation   | Zod schemas for all tool payloads and responses                                                                                                                                                                            |
 
 ---
@@ -252,7 +252,7 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 | :---------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Repo**          | repoId, rootPath, configJson, createdAt                                                                                                                           |
 | **File**          | fileId, relPath, byteSize, contentHash, language, lastIndexedAt, directory                                                                                        |
-| **Symbol**        | symbolId, repoId, fileId, kind, name, exported, signatureJson, summary, summaryQuality, summarySource, etag, embeddingJinaCode, embeddingNomic, embeddingJinaCode |
+| **Symbol**        | symbolId, repoId, fileId, kind, name, exported, signatureJson, summary, summaryQuality, summarySource, etag, embeddingJinaCode*, embeddingNomic*                 |
 | **Version**       | versionId, repoId, timestamp, indexedAt                                                                                                                           |
 | **SymbolVersion** | symbolId, versionId, signatureJson, summary                                                                                                                       |
 | **Metrics**       | symbolId, repoId, fanIn, fanOut, churn, testRefs                                                                                                                  |
@@ -263,7 +263,7 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 | :-------------- | :---------------------------------------------------------------------------------------- |
 | **Cluster**     | clusterId, label, memberCount, searchText                                                 |
 | **Process**     | processId, label, repoId, searchText                                                      |
-| **FileSummary** | fileId, repoId, summary, searchText, embeddingJinaCode, embeddingNomic, embeddingJinaCode |
+| **FileSummary** | fileId, repoId, summary, searchText, embeddingJinaCode*, embeddingNomic*                 |
 
 **Infrastructure nodes:**
 
@@ -272,14 +272,14 @@ Read pool enables concurrent multi-session reads (4-6 MCP sessions). Write seria
 | **SliceHandle**   | handle, createdAt, expiresAt, minVersion, maxVersion                                                     |
 | **CardHash**      | symbolId, hash                                                                                           |
 | **Audit**         | auditId, repoId, action, timestamp                                                                       |
-| **AgentFeedback** | feedbackId, repoId, taskText, taskType, searchText, embeddingJinaCode, embeddingNomic, embeddingJinaCode |
+| **AgentFeedback** | feedbackId, repoId, taskText, taskType, searchText, embeddingJinaCode*, embeddingNomic*                 |
 | **SchemaVersion** | version, appliedAt                                                                                       |
 
 **Semantic nodes:**
 
 | Node Table          | Key Fields                                            |
 | :------------------ | :---------------------------------------------------- |
-| **SymbolEmbedding** | symbolId, embedding, model                            |
+| **SymbolEmbedding** | symbolId, embedding, model (deprecated compatibility table) |
 | **SummaryCache**    | symbolId, summary, provider, model, cardHash, costUsd |
 | **SymbolReference** | referenceId, symbolId, file, line                     |
 
@@ -547,13 +547,14 @@ Three subsystems that enhance code intelligence beyond structural analysis:
 
 ### Embedding Search
 
-Alpha-blended lexical + embedding similarity reranking using ONNX models. Three models available:
+Hybrid retrieval combines LadybugDB FTS and vector indexes with RRF fusion. The legacy alpha-blended reranker remains available as a compatibility fallback.
 
-- **jina-embeddings-v2-base-code** (768-dim, ~110 MB, bundled) — code-optimized, zero-setup
-- **nomic-embed-text-v1.5** (768-dim, ~138 MB, downloaded) — higher-quality text embeddings, longer context (8192 tokens), uses document/query prefixes
-- **jina-embeddings-v2-base-code** (768-dim, ~110 MB, downloaded) — code-specialized for 30+ programming languages, 8192-token context
+Two local ONNX models are supported:
 
-Nomic is a text model that benefit most from LLM summaries. Jina Code is trained on source code and excels at code-to-code similarity without requiring natural-language summaries.
+- **jina-embeddings-v2-base-code** (768-dim, ~110 MB) - default Symbol-lane model, optimized for code.
+- **nomic-embed-text-v1.5** (768-dim, ~138 MB) - default FileSummary-lane model, optimized for prose and natural-language queries.
+
+Both models are fetched into the user model cache by postinstall when possible, or lazily on first use. Nomic benefits most from LLM summaries. Jina Code excels at code-to-code similarity without requiring natural-language summaries.
 
 ### LLM Summaries
 
@@ -624,7 +625,17 @@ MCP logging notifications emit per-call savings meters and end-of-task session s
 
 ## Observability Service
 
-`src/observability/` is a side-channel observer that aggregates the existing telemetry stream and adds runtime probes (CPU, RSS, heap, event-loop lag, write-pool depth, indexer drain depth) for per-repo dashboards. The `ObservabilityTap` interface receives forwarded `log*` events from `src/mcp/telemetry.ts`; the singleton `ObservabilityService` owns one `Aggregator` per repo with dual retention windows (short, default 15 min; long, default 24 h) and a sampling tick at `observability.sampleIntervalMs` (default 2000 ms). A separate `BeamExplainStore` LRU keeps the most-recent beam-search decision traces. The whole subsystem is exposed via bearer-auth-gated `/api/observability/{snapshot,timeseries,beam-explain,stream}` routes plus the `/ui/observability` HTML/JS/CSS surface in the HTTP transport. As an outbound observer it sits **outside the request path** of MCP tool dispatch — no observability code runs synchronously inside a handler, and observability failures cannot block tool calls. See [Observability Dashboard deep dive](./feature-deep-dives/observability-dashboard.md).
+`src/observability/` is a side-channel observer for per-repo operational dashboards. It aggregates the existing telemetry stream and adds runtime probes for CPU, RSS, heap, event-loop lag, write-pool depth, and indexer drain depth.
+
+The main pieces are:
+
+- `ObservabilityTap` receives forwarded `log*` events from `src/mcp/telemetry.ts`.
+- `ObservabilityService` owns one `Aggregator` per repo, with dual retention windows: short, default 15 minutes; long, default 24 hours.
+- The sampling tick runs at `observability.sampleIntervalMs`, which defaults to 2000 ms.
+- `BeamExplainStore` keeps the most-recent beam-search decision traces in an LRU.
+- The HTTP transport exposes bearer-auth-gated `/api/observability/{snapshot,timeseries,beam-explain,stream}` routes and the `/ui/observability` HTML/JS/CSS surface.
+
+As an outbound observer, observability sits **outside the request path** of MCP tool dispatch. No observability code runs synchronously inside a handler, and observability failures cannot block tool calls. See [Observability Dashboard deep dive](./feature-deep-dives/observability-dashboard.md).
 
 ---
 

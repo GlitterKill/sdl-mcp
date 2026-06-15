@@ -348,17 +348,15 @@ LLM summaries produce 1–3 sentence natural-language descriptions for every sym
 The summary system has **three quality tiers**. Each tier builds on the previous one:
 
 ```
-Tier     Embedding Model                    Summaries    Search Quality   Cost
-─────    ────────────────────────────────  ───────────  ───────────────  ────────
-Medium   nomic-embed-text-v1.5 (768d)     None         Better           Free
-Medium+  jina-embeddings-v2-base-code(768d) None       Best for code    Free
-High     any model above                  LLM-gen'd    Best             API cost
+Tier      Embedding Profile              Summaries    Search Quality        Cost
+Base      specialized                    None         Strong defaults       Free
+Recall    max-recall                     None         Broader vector recall Free
+High      specialized or max-recall      LLM-gen'd    Best                  API/local LLM cost
 ```
 
-- **Low** (default) — embeds raw symbol text (name + kind + signature) with a general-purpose model. No API calls needed.
-- **Medium** — swaps in a higher-quality text embedding model with longer context (8192 tokens) for better semantic matching. Still fully offline (~138 MB download).
-- **Medium+** — uses `jina-embeddings-v2-base-code`, a code-specialized model trained on 30+ programming languages. Same 768 dimensions and 8192-token context as Nomic, but optimized for code-to-code semantic search. Fully offline (~110 MB download). Best choice for pure code search without summaries.
-- **High** — adds LLM-generated natural-language summaries to any embedding model. This produces the best search results because the LLM distills code meaning into plain English that embedding models handle well.
+- **Base** (default) - uses the `specialized` profile: Jina Code for Symbol embeddings and Nomic for FileSummary embeddings. No API calls needed.
+- **Recall** - uses `embeddingProfile: "max-recall"` so both supported models populate both lanes. This costs more indexing time but can improve recall.
+- **High** - adds LLM-generated natural-language summaries to the configured embedding profile. This produces the best search results because the LLM distills code meaning into plain English that embedding models handle well.
 
 To reach the **High** tier, you enable `generateSummaries` and configure one of the three summary providers below.
 

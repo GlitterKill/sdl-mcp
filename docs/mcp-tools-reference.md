@@ -155,7 +155,22 @@ In incremental mode, files whose modification time predates their last indexed t
 
 When called with a progress token, the server emits `notifications/progress` messages with the current stage, file path, and completion percentage.
 
-`diagnostics.timings` is only returned for synchronous requests with `includeDiagnostics: true`. `diagnostics.timings.phases` may include nested subphases such as `initSharedState.tsResolver`, `initSharedState.symbolMaps`, `resolveUnresolvedImports.fetchEdges`, `finalizeEdges.cleanupUnresolvedBuiltins`, `finalizeEdges.insertConfigEdges`, `finalizeIndexing.metrics`, `finalizeIndexing.metrics.testRefs`, `finalizeIndexing.fileSummaries`, `clustersAndProcesses.loadSymbols`, and `clustersAndProcesses.processWrite`. The TS resolver is lazy, so compiler-program subphases such as `initSharedState.tsResolver.sourceFiles` and `initSharedState.tsResolver.programBuild` appear only when pass 2 needs the TypeScript program. No-op incremental refreshes may omit later phases entirely and report a `shortCircuitNoOp` phase instead.
+`diagnostics.timings` is only returned for synchronous requests with `includeDiagnostics: true`.
+
+Common `diagnostics.timings.phases` entries include:
+
+- `initSharedState.tsResolver`
+- `initSharedState.symbolMaps`
+- `resolveUnresolvedImports.fetchEdges`
+- `finalizeEdges.cleanupUnresolvedBuiltins`
+- `finalizeEdges.insertConfigEdges`
+- `finalizeIndexing.metrics`
+- `finalizeIndexing.metrics.testRefs`
+- `finalizeIndexing.fileSummaries`
+- `clustersAndProcesses.loadSymbols`
+- `clustersAndProcesses.processWrite`
+
+The TS resolver is lazy, so compiler-program subphases such as `initSharedState.tsResolver.sourceFiles` and `initSharedState.tsResolver.programBuild` appear only when pass 2 needs the TypeScript program. No-op incremental refreshes may omit later phases entirely and report a `shortCircuitNoOp` phase instead.
 
 **Example:**
 
@@ -381,7 +396,12 @@ Search symbols by name or summary text.
 
 When `chatMentions` is non-empty, results are re-ranked via Personalized PageRank seeded at those mentions — see [semantic-engine.md → Chat-Aware PageRank Boost](feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0108). When `chatMentions` is **omitted** (`undefined`), the server auto-extracts identifier-like tokens from the query as seeds. Pass an explicit empty array `[]` to disable PPR entirely. PPR diagnostics surface in `response.pprBoosts` when `includeRetrievalEvidence: true`.
 
-When semantic mode is enabled, the retrieval path depends on `semantic.retrieval.mode`: `"hybrid"` uses FTS + vector search with RRF fusion; `"legacy"` uses alpha-blended lexical + embedding reranking. Falls back to legacy automatically if hybrid indexes are unavailable.
+When semantic mode is enabled, the retrieval path depends on `semantic.retrieval.mode`:
+
+- `"hybrid"` uses FTS + vector search with RRF fusion.
+- `"legacy"` uses alpha-blended lexical + embedding reranking.
+
+SDL-MCP falls back to legacy automatically if hybrid indexes are unavailable.
 
 **Response:** `{ results: [{ symbolId, name, file, kind }], retrievalMode?, retrievalEvidence?, truncation? }`
 

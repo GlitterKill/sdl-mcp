@@ -400,7 +400,7 @@ SDL-MCP currently ships with two supported embedding models, each suited to diff
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
-    Jina["jina-embeddings-v2-base-code<br/>768 dims, 8192 max tokens<br/>~110 MB, bundled<br/>Optimized for code"] e1@--> Symbols["Default Symbol lane"]
+    Jina["jina-embeddings-v2-base-code<br/>768 dims, 8192 max tokens<br/>~110 MB<br/>Optimized for code"] e1@--> Symbols["Default Symbol lane"]
     Nomic["nomic-embed-text-v1.5<br/>768 dims, 8192 max tokens<br/>~138 MB download<br/>Best for NL queries + summaries"] e2@--> FileSummaries["Default FileSummary lane"]
     Jina e3@-. max-recall .-> FileSummaries
     Nomic e4@-. max-recall .-> Symbols
@@ -547,9 +547,8 @@ Embeddings are stored as **inline properties on Symbol nodes** in LadybugDB. Eac
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart TD
-    Symbol["Symbol node"] e1@--> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
-    Symbol e2@--> Nomic["embeddingNomic<br/>embeddingNomicCardHash<br/>embeddingNomicUpdatedAt"]
-    Symbol e3@--> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt"]
+    Symbol["Symbol node"] e1@--> Jina["embeddingJinaCode<br/>embeddingJinaCodeCardHash<br/>embeddingJinaCodeUpdatedAt<br/>embeddingJinaCodeVec"]
+    Symbol e2@--> Nomic["embeddingNomic<br/>embeddingNomicCardHash<br/>embeddingNomicUpdatedAt<br/>embeddingNomicVec"]
 
     classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
     classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
@@ -558,7 +557,7 @@ flowchart TD
     classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
     classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
     classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1,e2,e3 animate;
+    class e1,e2 animate;
 ```
 
 Vectors are compressed for storage: `Float32 -> multiply by 10,000 -> round to Int16 -> base64 encode` (~50% savings vs raw float32, negligible precision loss for cosine similarity).

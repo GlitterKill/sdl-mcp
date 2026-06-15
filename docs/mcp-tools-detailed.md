@@ -240,7 +240,27 @@ Triggers re-indexing of a repository in either full or incremental mode.
 - Incremental mode compares file content hashes to detect changes. Only changed files are re-parsed.
 - If changed files are found, incremental refresh recomputes derived cluster/process state inline before returning. If no tracked files changed, it can short-circuit after `scanRepo`, `versioning`, and `memorySync` while reusing the existing version.
 - After indexing, all slice caches and card caches are invalidated.
-- `diagnostics.timings.totalMs` covers the full synchronous indexing run, while `diagnostics.timings.phases` breaks out coarse stages such as `scanRepo`, `pass1`, `pass1Drain`, `pass2`, and `finalizeIndexing`. Nested keys may also appear for hotspots inside a phase, for example `initSharedState.tsResolver`, `initSharedState.symbolMaps`, `pass1Drain.write.deleteOldSymbols`, `pass1Drain.write.upsertFiles`, `pass1Drain.write.insertSymbolReferences`, `pass1Drain.write.upsertSymbols`, `pass1Drain.write.insertEdges`, `resolveUnresolvedImports.fetchEdges`, `finalizeEdges.cleanupUnresolvedBuiltins`, `finalizeEdges.insertConfigEdges`, `finalizeIndexing.metrics`, `finalizeIndexing.metrics.testRefs`, `finalizeIndexing.fileSummaries`, `clustersAndProcesses.loadSymbols`, or `clustersAndProcesses.processWrite`. The TS resolver is lazy; `initSharedState.tsResolver.sourceFiles`, `initSharedState.tsResolver.programBuild`, and related compiler-program subphases appear only when pass 2 actually asks the resolver to build a TypeScript program. When pass-1 drain diagnostics are collected, `diagnostics.timings.pass1Drain` also reports batch counts, row counts by kind, per-operation write totals, and the largest queued write batch. No-op incremental refreshes may omit later phases and report `shortCircuitNoOp` instead.
+- `diagnostics.timings.totalMs` covers the full synchronous indexing run. `diagnostics.timings.phases` breaks out coarse stages such as `scanRepo`, `pass1`, `pass1Drain`, `pass2`, and `finalizeIndexing`.
+
+  Nested keys may also appear for hotspots inside a phase, including:
+
+  - `initSharedState.tsResolver`
+  - `initSharedState.symbolMaps`
+  - `pass1Drain.write.deleteOldSymbols`
+  - `pass1Drain.write.upsertFiles`
+  - `pass1Drain.write.insertSymbolReferences`
+  - `pass1Drain.write.upsertSymbols`
+  - `pass1Drain.write.insertEdges`
+  - `resolveUnresolvedImports.fetchEdges`
+  - `finalizeEdges.cleanupUnresolvedBuiltins`
+  - `finalizeEdges.insertConfigEdges`
+  - `finalizeIndexing.metrics`
+  - `finalizeIndexing.metrics.testRefs`
+  - `finalizeIndexing.fileSummaries`
+  - `clustersAndProcesses.loadSymbols`
+  - `clustersAndProcesses.processWrite`
+
+  The TS resolver is lazy. `initSharedState.tsResolver.sourceFiles`, `initSharedState.tsResolver.programBuild`, and related compiler-program subphases appear only when pass 2 actually asks the resolver to build a TypeScript program. When pass-1 drain diagnostics are collected, `diagnostics.timings.pass1Drain` also reports batch counts, row counts by kind, per-operation write totals, and the largest queued write batch. No-op incremental refreshes may omit later phases and report `shortCircuitNoOp` instead.
 - `quality.unresolvedTargets` counts repo-local missing or ambiguous dependency targets. `quality.externalTargets` counts outside-repo dependency targets such as runtime modules and packages. Both remain `Symbol` nodes for graph traversal, but graph consumers can distinguish them with `symbolStatus`.
 - `quality.untypedPlaceholderTargets`, `quality.placeholderTargetMismatches`, and `quality.isolatedPlaceholders` should be zero on healthy new indexes. Non-zero values usually mean an old DB needs migration or a writer created no-file dependency targets without deterministic placeholder metadata.
 
@@ -397,7 +417,14 @@ Returns the current state of the live editor buffer system for a repository.
 
 Searches the symbol graph by name, with optional semantic reranking or hybrid retrieval.
 
-**What it does:** Performs a text search across all symbol names in the repository. Returns matching symbols with their IDs, names, file paths, and kinds. When `semantic: true` is specified, the retrieval path depends on the configured mode: with `semantic.retrieval.mode: "hybrid"`, results are found via FTS + vector search fused with Reciprocal Rank Fusion (RRF); with legacy mode, results are reranked using embedding similarity (alpha-blended lexical + semantic scores). Falls back to legacy automatically if hybrid indexes are unavailable. Unresolved dependency placeholders are excluded from search results; SCIP external symbols remain searchable unless `excludeExternal: true` is set. The tool also triggers predictive prefetch of cards for the top 5 results, anticipating follow-up `getCard` calls.
+**What it does:** Performs a text search across all symbol names in the repository. Returns matching symbols with their IDs, names, file paths, and kinds.
+
+When `semantic: true` is specified, retrieval depends on `semantic.retrieval.mode`:
+
+- `"hybrid"` uses FTS + vector search fused with Reciprocal Rank Fusion (RRF).
+- `"legacy"` reranks using embedding similarity with alpha-blended lexical and semantic scores.
+
+SDL-MCP falls back to legacy automatically if hybrid indexes are unavailable. Unresolved dependency placeholders are excluded from search results. SCIP external symbols remain searchable unless `excludeExternal: true` is set. The tool also triggers predictive prefetch of cards for the top 5 results, anticipating follow-up `getCard` calls.
 
 **Parameters:**
 

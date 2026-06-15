@@ -37,7 +37,14 @@ The generated source of truth is [tool-inventory.md](../generated/tool-inventory
 
 ## What the Gateway Actually Covers
 
-The gateway currently exposes `35` of the `36` flat actions through the four namespace schemas. The remaining flat action outside those schemas is `file.write`, which is available in flat mode and through the Code Mode `sdl.file` gateway. `search.edit` and `symbol.edit` are routable through the mutation-capable `sdl.repo` gateway envelope and through Code Mode `sdl.file`; `symbol.edit` is also available through `sdl.workflow`.
+The gateway currently exposes `35` of the `36` flat actions through the four namespace schemas.
+
+Key exceptions and edit paths:
+
+- `file.write` is the only flat action outside the four namespace schemas. It remains available in flat mode and through the Code Mode `sdl.file` gateway.
+- `search.edit` and `symbol.edit` are routable through the mutation-capable `sdl.repo` gateway envelope.
+- Code Mode also exposes those edit flows through `sdl.file`.
+- `symbol.edit` is available through `sdl.workflow` when a workflow step is the better fit.
 
 | Gateway tool | Actions | Current action set                                                                                                                                                                                         |
 | ------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -46,7 +53,13 @@ The gateway currently exposes `35` of the `36` flat actions through the four nam
 | `sdl.repo`   | `13`    | `repo.register`, `repo.status`, `repo.overview`, `index.refresh`, `policy.get`, `policy.set`, `usage.stats`, `file.read`, `search.edit`, `symbol.edit`, `scip.ingest`, `semantic.enrichment.refresh`, `semantic.enrichment.status` |
 | `sdl.agent`  | `11`    | `agent.feedback`, `agent.feedback.query`, `buffer.push`, `buffer.checkpoint`, `buffer.status`, `runtime.execute`, `runtime.queryOutput`, `memory.store`, `memory.query`, `memory.remove`, `memory.surface` |
 
-In Code Mode, use `sdl.file({ op: "searchEditPreview" })` and `sdl.file({ op: "searchEditApply" })` for two-phase cross-file edits: preview first, then apply the stored plan with sha256/mtime preconditions and rollback on mid-batch failure. Use `sdl.file({ op: "symbolEditPreview" })`, `sdl.file({ op: "symbolEditApply" })`, and `sdl.file({ op: "symbolEditApplyNow" })` for one-symbol edits with symbol snapshot preconditions. For indexed source follow-up, `sdl.file({ op: "previewWindow" })` and `sdl.file({ op: "sourceWindow" })` bind a plan handle to the normal `code.needWindow` policy instead of exposing raw file reads. The same `search.edit` action is also callable through `sdl.repo` and via `sdl.workflow`. See [sdl.search.edit - Cross-File Search and Edit](../search-edit-tool.md) and [sdl.symbol.edit](../symbol-edit-tool.md) for request shapes and examples.
+In Code Mode:
+
+- Use `sdl.file({ op: "searchEditPreview" })` and `sdl.file({ op: "searchEditApply" })` for two-phase cross-file edits. Preview first, then apply the stored plan with sha256/mtime preconditions and rollback on mid-batch failure.
+- Use `sdl.file({ op: "symbolEditPreview" })`, `sdl.file({ op: "symbolEditApply" })`, and `sdl.file({ op: "symbolEditApplyNow" })` for one-symbol edits with symbol snapshot preconditions.
+- Use `sdl.file({ op: "previewWindow" })` and `sdl.file({ op: "sourceWindow" })` for indexed source follow-up. These operations bind a plan handle to the normal `code.needWindow` policy instead of exposing raw file reads.
+
+The same `search.edit` action is also callable through `sdl.repo` and via `sdl.workflow`. See [sdl.search.edit - Cross-File Search and Edit](../search-edit-tool.md) and [sdl.symbol.edit](../symbol-edit-tool.md) for request shapes and examples.
 
 ## Routing Path
 

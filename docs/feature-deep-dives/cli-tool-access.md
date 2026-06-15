@@ -145,7 +145,16 @@ Only these two metadata tools are proxied through the CLI today.
 | `memory.remove`        | Remove a development memory                 |
 | `memory.surface`       | Surface relevant memories                   |
 
-`sdl-mcp tool` currently exposes only two Code Mode metadata proxies: `action.search` and `manual` (with `sdl.` aliases). `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only wrapper tools. Use `file.write` for immediate single-file edits, `symbol.edit --mode applyNow` for one-call saved-file symbol edits, and `search.edit` when you want a preview/apply workflow across one or more files. `symbol.edit --mode preview` can inspect the saved-file plan from CLI, but `symbol.edit --mode apply` requires the MCP/server session that created the process-local plan handle. Overlay-aware `symbol.edit` plans also require the MCP server session that owns the live draft.
+`sdl-mcp tool` currently exposes only two Code Mode metadata proxies: `action.search` and `manual` (with `sdl.` aliases). `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only wrapper tools.
+
+Use these CLI edit paths:
+
+- `file.write` for immediate single-file edits.
+- `symbol.edit --mode applyNow` for one-call saved-file symbol edits.
+- `search.edit` when you want a preview/apply workflow across one or more files.
+- `symbol.edit --mode preview` to inspect a saved-file plan from the CLI.
+
+`symbol.edit --mode apply` requires the MCP/server session that created the process-local plan handle. Overlay-aware `symbol.edit` plans also require the MCP server session that owns the live draft.
 
 ---
 

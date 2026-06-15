@@ -62,6 +62,7 @@ Use this page as the entry point for SDL-MCP documentation.
 - [Semantic Engine](./feature-deep-dives/semantic-engine.md)
 - [Semantic Enrichment Bridge](./feature-deep-dives/semantic-enrichment-bridge.md)
 - [Semantic Embeddings Setup](./feature-deep-dives/semantic-embeddings-setup.md)
+- [Provider-First Indexing](./feature-deep-dives/provider-first-indexing.md)
 - [CLI Tool Access](./feature-deep-dives/cli-tool-access.md)
 - [Development Memories](./feature-deep-dives/development-memories.md)
 - [Tool Gateway](./feature-deep-dives/tool-gateway.md)
@@ -89,7 +90,7 @@ Use this page as the entry point for SDL-MCP documentation.
 
 ## Current Scope Snapshot
 
-- **Version**: 0.10.6
+- **Version**: 0.11.6
 - **Supported languages**: TS, JS, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, Shell (11 adapters, 12 languages)
 - **CLI commands** (13): init, doctor, info, index, serve, export, import, pull, benchmark, summary, health, version, tool
 - **Generated tool inventory**: [docs/generated/tool-inventory.md](./generated/tool-inventory.md)
@@ -111,7 +112,7 @@ Use this page as the entry point for SDL-MCP documentation.
   - Code Mode exclusive: 5 tools (`sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, `sdl.file`)
   - Gateway routing covers 35 of the 36 flat tools; `sdl.file.write` remains flat-only
   - `sdl-mcp tool` exposes direct CLI action aliases plus only the `action.search` and `manual` metadata proxies; `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only wrappers
-- **Semantic features**: optional semantic reranking with 2 embedding models (Jina Code bundled, Nomic optional), LLM-generated symbol summaries (Anthropic/Ollama/mock)
+- **Semantic features**: hybrid FTS + vector retrieval with 2 supported local ONNX embedding models (Jina Code for Symbols, Nomic for FileSummary), plus optional LLM-generated symbol summaries (Anthropic/Ollama/mock)
 - **HTTP surface**: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP
 - **Native addon**: Rust via napi-rs for multi-threaded indexing (default engine, TS fallback)
 - **Runtime execution**: 16 supported runtimes (node, typescript, python, shell, ruby, php, perl, r, elixir, go, java, kotlin, rust, c, cpp, csharp)

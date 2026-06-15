@@ -98,7 +98,15 @@ The `generator` subsection wires sdl-mcp into the [scip-io](https://github.com/G
 | `generator.autoInstall`        | boolean | `true`      | When true and the binary is missing from both PATH and the managed location, sdl-mcp downloads it from the scip-io GitHub releases (with mandatory SHA-256 verification) into `~/.sdl-mcp/bin/`. When false, a missing binary just logs a warning and the refresh proceeds without scip-io.                                                 |
 | `generator.timeoutMs`          | integer | `600000`    | Hard timeout for the `scip-io index` invocation, in milliseconds. Min `1000` (1s), max `18000000` (5h). Default 10 minutes. On timeout the process tree is killed and the refresh continues.                                                                                                                                                 |
 | `generator.cleanupAfterIngest` | boolean | `true`      | When the post-refresh ingest finishes, delete generated `.scip` files from the current generator run so regenerated files do not clutter the working tree. Skipped automatically when `args` contains `--output` / `-o` / `--output=...` (custom output paths are user-managed). Set to `false` to keep files for inspection or third-party tooling. |
-| `generator.cacheGeneratedIndexes` | boolean | `true`   | Cache generated `.scip` files under `~/.sdl-mcp/cache/scip-io/` and restore them on unchanged refreshes. The cache key includes tracked source files, common build manifests, effective generator args, repo language filter, and the scip-io binary. Warm hits first try a git-status fast key when changed paths are unrelated to configured source or generator config inputs, then use a latest stat-signature manifest before falling back to the exact content-hash fingerprint path. Split-only cache entries must cover every requested scip-io language; entries missing a requested language are treated as cache misses. CLI cache diagnostics break out generator, prepare, save, and restore timings when available. Custom `--output` paths opt out. |
+| `generator.cacheGeneratedIndexes` | boolean | `true`   | Cache generated `.scip` files under `~/.sdl-mcp/cache/scip-io/` and restore them on unchanged refreshes. See [Generator cache behavior](#generator-cache-behavior). |
+
+#### Generator cache behavior
+
+The generator cache key includes tracked source files, common build manifests, effective generator args, repo language filter, and the scip-io binary.
+
+Warm hits first try a git-status fast key when changed paths are unrelated to configured source or generator config inputs. If that cannot prove freshness, SDL-MCP tries a latest stat-signature manifest before falling back to the exact content-hash fingerprint path.
+
+Split-only cache entries must cover every requested scip-io language. Entries missing a requested language are treated as cache misses. CLI cache diagnostics break out generator, prepare, save, and restore timings when available. Custom `--output` paths opt out.
 
 ---
 

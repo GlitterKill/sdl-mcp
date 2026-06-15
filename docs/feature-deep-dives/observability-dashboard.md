@@ -672,11 +672,11 @@ they are still bytes on the wire.
 
 ### "model not yet downloaded" badge in the embedding-cache panel
 
-The embedding cache reports zero hits because the configured ONNX model has not been
-fetched yet. The bundled model (`all-MiniLM-L6-v2`) is always present; `nomic-embed-text-v1.5`
-and `jina-embeddings-v2-base-code` are fetched on `npm install` postinstall. If postinstall
-was skipped (`npm ci --ignore-scripts`), run `npm rebuild` or wait for the lazy fetch to
-complete on the first semantic search. See
+The embedding cache reports zero hits because the configured ONNX model files have not
+been fetched yet. SDL-MCP currently supports `jina-embeddings-v2-base-code` and
+`nomic-embed-text-v1.5`; both are fetched into the user model cache during `npm install`
+postinstall when possible. If postinstall was skipped (`npm ci --ignore-scripts`), run
+`npm rebuild` or wait for the lazy fetch to complete on the first semantic search. See
 [Semantic Embeddings Setup](./semantic-embeddings-setup.md) for the full model matrix.
 
 ### Beam-explain returns `404` for a slice handle that just resolved

@@ -4,7 +4,7 @@
 
 ---
 
-SDL-MCP's semantic system has three layers � **embedding models**, **LLM summary generation**, and **pass-2 call resolution** � each with its own dependencies and setup. This guide covers installation, configuration, and verification for every tier and provider.
+SDL-MCP's semantic system has three layers: **embedding models**, **LLM summary generation**, and **pass-2 call resolution**. Each layer has its own dependencies and setup. This guide covers installation, configuration, and verification for every tier and provider.
 
 ---
 
@@ -18,8 +18,8 @@ flowchart TD
     Onnx e3@--> Vector["Embedding Vector"]
 
     subgraph Models["Embedding Models"]
-        Jina["jina-embeddings-v2-base-code<br/>768-dim, ~110 MB, bundled"]
-        Nomic["nomic-embed-text-v1.5<br/>768-dim, ~138 MB, downloaded"]
+        Jina["jina-embeddings-v2-base-code<br/>768-dim, ~110 MB<br/>postinstall or lazy download"]
+        Nomic["nomic-embed-text-v1.5<br/>768-dim, ~138 MB<br/>postinstall or lazy download"]
         Mock["Mock fallback<br/>64-dim, deterministic"]
     end
 
@@ -393,12 +393,12 @@ The `summaryProvider: "local"` value sends OpenAI-format requests (`POST /chat/c
 | Profile role          | Code-shaped payloads                      | Prose-heavy payloads                    |
 | Dimensions            | 768                                       | 768                                    |
 | Max input tokens      | 8,192                                     | 8,192                                  |
-| ONNX file size        | ~110 MB (INT8), bundled                   | ~138 MB (INT8), downloaded on demand   |
-| Bundled with npm      | Yes                                       | No                                     |
+| ONNX file size        | ~110 MB (INT8)                            | ~138 MB (INT8)                         |
+| Model file delivery   | Postinstall or lazy download              | Postinstall or lazy download           |
 | Training data         | Source code across many languages         | General text and natural-language data |
 | Input format          | Structured code sections                  | Flowing prose with document/query prefix |
 | Best paired with      | Symbol search and code-to-code matching   | File summaries and NL-heavy queries    |
-| Disk location         | `<pkg>/models/`                          | `<cache>/models/`                      |
+| Disk location         | User model cache                          | User model cache                       |
 | Upstream source       | `jinaai`                                  | `nomic-ai`                             |
 
 **Choosing a profile:**
