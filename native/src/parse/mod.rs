@@ -176,7 +176,8 @@ fn parse_single_file(input: &NativeFileInput) -> NativeParsedFile {
         symbol.summary_quality = if !symbol.summary.is_empty() {
             // Check if summary came from a doc comment by re-extracting
             // (doc comment summaries tend to be longer and don't match auto-gen patterns)
-            let has_doc_comment = extract::summary::has_doc_comment(symbol, &content, &input.language);
+            let has_doc_comment =
+                extract::summary::has_doc_comment(symbol, &content, &input.language);
             if has_doc_comment {
                 Some(1.0)
             } else if matches!(symbol.kind.as_str(), "function" | "method" | "constructor") {
@@ -222,6 +223,47 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn go_parser_emits_symbols_for_valid_file() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before UNIX_EPOCH")
+            .as_nanos();
+        let file_path = std::env::temp_dir().join(format!("sdl_mcp_parse_{unique}.go"));
+        let source = r#"package main
+
+import "fmt"
+
+func main() { fmt.Println(add(1, 2)) }
+
+func add(a int, b int) int { return a + b }
+"#;
+
+        fs::write(&file_path, source).expect("failed to write temporary Go file");
+
+        let input = NativeFileInput {
+            rel_path: "tmp/smoke.go".to_string(),
+            absolute_path: file_path.to_string_lossy().into_owned(),
+            repo_id: "test-repo".to_string(),
+            language: "go".to_string(),
+        };
+
+        let parsed = parse_single_file(&input);
+        let _ = fs::remove_file(file_path);
+
+        assert_eq!(parsed.parse_error.as_deref(), None);
+        assert!(
+            parsed.symbols.iter().any(|symbol| symbol.name == "main"),
+            "expected Go parser to emit main symbol, got {:?}",
+            parsed.symbols
+        );
+        assert!(
+            parsed.symbols.iter().any(|symbol| symbol.name == "add"),
+            "expected Go parser to emit add symbol, got {:?}",
+            parsed.symbols
+        );
+    }
 
     #[test]
     fn oversized_unsupported_language_reports_unsupported_language() {

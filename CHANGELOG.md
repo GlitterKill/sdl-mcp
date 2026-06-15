@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SCIP generator cache**: Generated scip-io artifacts are cached under `~/.sdl-mcp/cache/scip-io/` by source/config fingerprint and restored on unchanged refreshes, avoiding expensive compiler generator runs on repeated full indexes. Warm hits use a latest stat-signature manifest before falling back to the exact content-hash fingerprint path, keeping large unchanged repos from hashing every input file just to restore cached SCIP output. Usable generated indexes are now cached even when `scip-io` exits nonzero because another requested language failed, so mixed-language repos can reuse the successful language artifact on the next unchanged run. CLI summaries report generator cache hit/store diagnostics when the cache participates, including separate generator, prepare, save, and restore timing buckets when available.
 - **Provider-first coverage denominators**: C/C++ provider-first summaries now split the broad SDL-MCP scan scope from SCIP semantic eligibility. The semantic denominator is the union of scan-scope files named by discovered `compile_commands.json` entries and provider-emitted C/C++ header/include documents inside scan scope, while provider document counts still report the SCIP docs emitted inside scan scope.
 
+### Fixed
+
+- **Native Go parser stability**: Updated the native Rust tree-sitter runtime and Go grammar to the 0.25 line so valid Go files parse through the native addon instead of returning `tree-sitter parse returned None` or risking stale grammar crashes. Added Rust and Node-level dependency regressions for the native Go parser path.
+
 ### Changed
 
 - **CI benchmark guardrails**: Kept `benchmark:ci` on Linux but made it a JavaScript/LadybugDB regression gate by explicitly disabling the native addon and removing the native-build dependency. Native crash and parity coverage stays with the native-build and sync-memory jobs, while the benchmark lane continues to catch threshold regressions without Linux exit-139 flakes from the addon path.
