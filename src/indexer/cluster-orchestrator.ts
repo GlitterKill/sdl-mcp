@@ -502,38 +502,40 @@ export async function computeAndStoreClustersAndProcesses(params: {
       let replacementError: unknown;
       try {
         await measureSubphase("clusterWrite.writeRows", async () => {
+          if (!replaceClusters) {
+            logger.debug(
+              "cluster-orchestrator: cluster state unchanged; skipping canonical cluster row rewrite",
+              { repoId, clusterCount: clusterRows.length },
+            );
+            return;
+          }
+
           await ladybugDb.withTransaction(wConn, async (txConn) => {
-            if (replaceClusters) {
-              await measureSubphase(
-                "clusterWrite.deleteRows",
-                () => ladybugDb.deleteClustersByRepo(txConn, repoId),
-              );
-            }
+            await measureSubphase(
+              "clusterWrite.deleteRows",
+              () => ladybugDb.deleteClustersByRepo(txConn, repoId),
+            );
 
             await measureSubphase(
               "clusterWrite.upsertClusters",
               () => ladybugDb.upsertClustersBatch(txConn, clusterRows),
             );
 
-            if (replaceClusters) {
-              // Flatten relationship rows lazily so stable no-op refreshes do
-              // not allocate rows that will not be written.
-              const clusterMemberRows = nextClusterStates.flatMap((cluster) =>
-                cluster.members.map((member) => ({
-                  symbolId: member.symbolId,
-                  clusterId: cluster.clusterId,
-                  membershipScore: member.membershipScore,
-                })),
-              );
-              await measureSubphase(
-                "clusterWrite.upsertMembers",
-                () =>
-                  ladybugDb.copyClusterMembersAfterDeleteBatch(
-                    txConn,
-                    clusterMemberRows,
-                  ),
-              );
-            }
+            const clusterMemberRows = nextClusterStates.flatMap((cluster) =>
+              cluster.members.map((member) => ({
+                symbolId: member.symbolId,
+                clusterId: cluster.clusterId,
+                membershipScore: member.membershipScore,
+              })),
+            );
+            await measureSubphase(
+              "clusterWrite.upsertMembers",
+              () =>
+                ladybugDb.copyClusterMembersAfterDeleteBatch(
+                  txConn,
+                  clusterMemberRows,
+                ),
+            );
           });
         });
       } catch (error) {
@@ -705,39 +707,43 @@ export async function computeAndStoreClustersAndProcesses(params: {
 
     await withWriteConn(async (wConn) => {
       await measureSubphase("processWrite.writeRows", async () => {
+        if (!replaceProcesses) {
+          logger.debug(
+            "cluster-orchestrator: process state unchanged; skipping canonical process row rewrite",
+            { repoId, processCount: processRows.length },
+          );
+          return;
+        }
+
         await ladybugDb.withTransaction(wConn, async (txConn) => {
-          if (replaceProcesses) {
-            await measureSubphase(
-              "processWrite.deleteRows",
-              () => ladybugDb.deleteProcessesByRepo(txConn, repoId),
-            );
-          }
+          await measureSubphase(
+            "processWrite.deleteRows",
+            () => ladybugDb.deleteProcessesByRepo(txConn, repoId),
+          );
 
           await measureSubphase(
             "processWrite.upsertProcesses",
             () => ladybugDb.upsertProcessesBatch(txConn, processRows),
           );
 
-          if (replaceProcesses) {
-            // Process steps follow the same lazy single-batch write path as
-            // cluster members to avoid per-process single-writer round trips.
-            const processStepRows = nextProcessStates.flatMap((process) =>
-              process.steps.map((step) => ({
-                processId: process.processId,
-                symbolId: step.symbolId,
-                stepOrder: step.stepOrder,
-                role: step.role,
-              })),
-            );
-            await measureSubphase(
-              "processWrite.upsertSteps",
-              () =>
-                ladybugDb.copyProcessStepsAfterDeleteBatch(
-                  txConn,
-                  processStepRows,
-                ),
-            );
-          }
+          // Process steps follow the same lazy single-batch write path as
+          // cluster members to avoid per-process single-writer round trips.
+          const processStepRows = nextProcessStates.flatMap((process) =>
+            process.steps.map((step) => ({
+              processId: process.processId,
+              symbolId: step.symbolId,
+              stepOrder: step.stepOrder,
+              role: step.role,
+            })),
+          );
+          await measureSubphase(
+            "processWrite.upsertSteps",
+            () =>
+              ladybugDb.copyProcessStepsAfterDeleteBatch(
+                txConn,
+                processStepRows,
+              ),
+          );
         });
       });
     });

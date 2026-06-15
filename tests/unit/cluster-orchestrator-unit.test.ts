@@ -1,5 +1,6 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -25,16 +26,20 @@ const TEST_DB_PATH = join(
   ".lbug-cluster-orchestrator-unit-test-db.lbug",
 );
 
-async function resetDb(): Promise<void> {
-  await closeLadybugDb();
+function removeLadybugDbFiles(dbPath: string): void {
   for (const p of [
-    TEST_DB_PATH,
-    `${TEST_DB_PATH}.wal`,
-    `${TEST_DB_PATH}.shadow`,
-    `${TEST_DB_PATH}.lock`,
+    dbPath,
+    `${dbPath}.wal`,
+    `${dbPath}.shadow`,
+    `${dbPath}.lock`,
   ]) {
     if (existsSync(p)) rmSync(p, { recursive: true, force: true });
   }
+}
+
+async function resetDb(): Promise<void> {
+  await closeLadybugDb();
+  removeLadybugDbFiles(TEST_DB_PATH);
   mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
   await initLadybugDb(TEST_DB_PATH);
 }
@@ -103,9 +108,7 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
 
   after(async () => {
     await closeLadybugDb();
-    if (existsSync(TEST_DB_PATH)) {
-      rmSync(TEST_DB_PATH, { recursive: true, force: true });
-    }
+    removeLadybugDbFiles(TEST_DB_PATH);
   });
 
   it("exports computeAndStoreClustersAndProcesses", () => {
@@ -569,7 +572,7 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
     );
   });
 
-  it("refreshes cluster and process metadata without changing stable topology", async () => {
+  it("skips canonical cluster and process rewrites for stable topology", async () => {
     await resetDb();
     await seedRepo("repo-stable");
     await seedFile("repo-stable", "file-1", "src/stable.ts");
@@ -641,11 +644,11 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
 
     const clusters = await ladybugDb.getClustersForRepo(conn, "repo-stable");
     assert.ok(clusters.length >= 1);
-    assert.equal(clusters[0]?.versionId, "v2");
+    assert.equal(clusters[0]?.versionId, "v1");
 
     const processes = await ladybugDb.getProcessesForRepo(conn, "repo-stable");
     assert.ok(processes.length >= 1);
-    assert.equal(processes[0]?.versionId, "v2");
+    assert.equal(processes[0]?.versionId, "v1");
 
     const clusterMembers = await ladybugDb.getClusterMembersForRepo(
       conn,
@@ -658,6 +661,170 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
       "repo-stable",
     );
     assert.ok(processSteps.length >= 2);
+  });
+
+  it("survives stable refreshes while cluster/process FTS indexes are active", () => {
+    const childDbPath = join(
+      tmpdir(),
+      `.lbug-cluster-orchestrator-fts-${process.pid}-${Date.now()}.lbug`,
+    );
+    removeLadybugDbFiles(childDbPath);
+    const script = `
+      import { closeLadybugDb, getLadybugConn, initLadybugDb } from "./dist/db/ladybug.js";
+      import * as ladybugDb from "./dist/db/ladybug-queries.js";
+      import { computeAndStoreClustersAndProcesses } from "./dist/indexer/cluster-orchestrator.js";
+      import { ensureFtsIndexForNonEmptyTable, ENTITY_FTS_INDEX_NAMES } from "./dist/retrieval/index-lifecycle.js";
+
+      const dbPath = process.env.TEST_DB_PATH;
+      if (!dbPath) throw new Error("TEST_DB_PATH is required");
+      const repoId = "repo-fts-stable-child";
+      const now = "2026-03-19T09:00:00.000Z";
+      await initLadybugDb(dbPath);
+      const conn = await getLadybugConn();
+      await ladybugDb.upsertRepo(conn, {
+        repoId,
+        rootPath: "C:/cluster-orchestrator-fts-child",
+        configJson: JSON.stringify({ policy: {} }),
+        createdAt: now,
+      });
+      await ladybugDb.upsertFile(conn, {
+        fileId: "file-1",
+        repoId,
+        relPath: "src/fts-stable.ts",
+        contentHash: "file-1-hash",
+        language: "ts",
+        byteSize: 200,
+        lastIndexedAt: now,
+      });
+      for (const [symbolId, name] of [
+        ["sym-main", "main"],
+        ["sym-foo", "foo"],
+        ["sym-bar", "bar"],
+      ]) {
+        await ladybugDb.upsertSymbol(conn, {
+          symbolId,
+          repoId,
+          fileId: "file-1",
+          kind: "function",
+          name,
+          exported: true,
+          visibility: null,
+          language: "ts",
+          rangeStartLine: 1,
+          rangeStartCol: 0,
+          rangeEndLine: 4,
+          rangeEndCol: 0,
+          astFingerprint: symbolId + "-fp",
+          signatureJson: null,
+          summary: null,
+          invariantsJson: null,
+          sideEffectsJson: null,
+          updatedAt: now,
+        });
+      }
+      await ladybugDb.insertEdges(conn, [
+        {
+          repoId,
+          fromSymbolId: "sym-main",
+          toSymbolId: "sym-foo",
+          edgeType: "call",
+          weight: 1,
+          confidence: 1,
+          resolution: "exact",
+          resolverId: "unit-test",
+          resolutionPhase: "pass2",
+          provenance: "manual",
+          createdAt: now,
+        },
+        {
+          repoId,
+          fromSymbolId: "sym-foo",
+          toSymbolId: "sym-bar",
+          edgeType: "call",
+          weight: 1,
+          confidence: 1,
+          resolution: "exact",
+          resolverId: "unit-test",
+          resolutionPhase: "pass2",
+          provenance: "manual",
+          createdAt: now,
+        },
+      ]);
+
+      const compute = (versionId) => computeAndStoreClustersAndProcesses({
+        conn,
+        repoId,
+        versionId,
+        minClusterSize: 2,
+        maxProcessDepth: 5,
+        entryPatterns: ["^main$"],
+        algorithmRefresh: { enabled: false },
+      });
+
+      await compute("v1");
+      const clusterFts = await ensureFtsIndexForNonEmptyTable(
+        conn,
+        "Cluster",
+        ENTITY_FTS_INDEX_NAMES.cluster,
+      );
+      const processFts = await ensureFtsIndexForNonEmptyTable(
+        conn,
+        "Process",
+        ENTITY_FTS_INDEX_NAMES.process,
+      );
+      if (clusterFts.status === "failed" || processFts.status === "failed") {
+        process.stdout.write("fts-unavailable");
+        await closeLadybugDb();
+        process.exit(0);
+      }
+
+      await compute("v2");
+      const clusters = await ladybugDb.getClustersForRepo(conn, repoId);
+      const processes = await ladybugDb.getProcessesForRepo(conn, repoId);
+      if (clusters[0]?.versionId !== "v1") {
+        throw new Error("stable cluster refresh rewrote Cluster rows");
+      }
+      if (processes[0]?.versionId !== "v1") {
+        throw new Error("stable process refresh rewrote Process rows");
+      }
+      process.stdout.write(JSON.stringify({
+        clusterVersionId: clusters[0]?.versionId,
+        processVersionId: processes[0]?.versionId,
+      }));
+      await closeLadybugDb();
+    `;
+
+    try {
+      const result = spawnSync(
+        process.execPath,
+        ["--input-type=module", "--eval", script],
+        {
+          cwd: join(__dirname, "..", ".."),
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            SDL_MCP_DISABLE_NATIVE_ADDON: "1",
+            SDL_LOG_LEVEL: "error",
+            TEST_DB_PATH: childDbPath,
+          },
+        },
+      );
+
+      if (result.stdout.includes("fts-unavailable")) {
+        assert.equal(result.status, 0, result.stderr);
+        return;
+      }
+
+      assert.equal(
+        result.status,
+        0,
+        `child refresh should not crash with active FTS indexes\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+      );
+      assert.match(result.stdout, /"clusterVersionId":"v1"/);
+      assert.match(result.stdout, /"processVersionId":"v1"/);
+    } finally {
+      removeLadybugDbFiles(childDbPath);
+    }
   });
 
   it("keeps centrality writes when Louvain fails", async () => {
