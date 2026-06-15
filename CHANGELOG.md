@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.11.5] - Unreleased
+## [0.11.5] - 2026-06-15
 
 ### Added
 
@@ -90,6 +90,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Provider-first external snapshot boundary**: Version snapshots and shadow finalization now exclude `external=true` dependency support symbols even if stale metadata still labels them as `symbolStatus: "real"`. Shadow parity treats those nodes as auxiliary and copies `SymbolVersion` and `Metrics` rows only for repo-owned non-external symbols, so activated provider-first shadows do not inflate public symbol or version counts.
 - **Scanner glob scope**: Corrected wildcard directory ignores such as `**/dist-*/**` so generated `dist-*` directories remain excluded while checked-in source files named `dist-runtime.ts` or `dist-stdio-smoke.test.ts` stay in the scanned repo scope.
 - **Derived-state readiness**: Stopped graph-derived startup recovery from clearing semantic summary/embedding dirty flags, and skipped semantic-only stale rows instead of enqueueing a graph refresh that cannot clear them.
+
+_48 non-merge commits from 1 contributor since v0.11.4._
 
 ## [0.11.4] - 2026-05-21
 
