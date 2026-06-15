@@ -83,13 +83,13 @@ Register a new repository for indexing.
 
 **Parameters:**
 
-| Parameter      | Type       | Required | Description                                            |
-| -------------- | ---------- | -------- | ------------------------------------------------------ |
-| `repoId`       | `string`   | Yes      | Unique identifier for the repository                   |
-| `rootPath`     | `string`   | Yes      | Absolute path to repository root                       |
-| `ignore`       | `string[]` | No       | Glob patterns for files/dirs to ignore                 |
-| `languages`    | `string[]` | No       | Language extension filter (e.g., `["ts", "py"]`)      |
-| `maxFileBytes` | `integer`  | No       | Max file size to index (min: 1)                        |
+| Parameter      | Type       | Required | Description                                      |
+| -------------- | ---------- | -------- | ------------------------------------------------ |
+| `repoId`       | `string`   | Yes      | Unique identifier for the repository             |
+| `rootPath`     | `string`   | Yes      | Absolute path to repository root                 |
+| `ignore`       | `string[]` | No       | Glob patterns for files/dirs to ignore           |
+| `languages`    | `string[]` | No       | Language extension filter (e.g., `["ts", "py"]`) |
+| `maxFileBytes` | `integer`  | No       | Max file size to index (min: 1)                  |
 
 **Response:** `{ ok: boolean, repoId: string }`
 
@@ -452,17 +452,17 @@ Use this for edits where the target is one symbol. Use `sdl.search.edit` for cro
 
 **Parameters:**
 
-| Parameter                | Type                                    | Required    | Description                                                                 |
-| ------------------------ | --------------------------------------- | ----------- | --------------------------------------------------------------------------- |
-| `repoId`                 | `string`                                | Yes         | Repository identifier                                                       |
-| `mode`                   | `"preview" \| "apply" \| "applyNow"`   | Yes         | Preview creates a plan, apply consumes one, applyNow does both              |
-| `symbolId`               | `string`                                | Conditional | Symbol identifier or shorthand. Required for applyNow                       |
-| `symbolRef`              | `{ name, file?, kind?, exportedOnly? }` | Conditional | Natural symbol reference for preview                                        |
-| `operation`              | `object`                                | Conditional | Edit operation for preview/applyNow                                         |
-| `planHandle`             | `string`                                | Conditional | Plan handle for apply                                                       |
-| `expectedAstFingerprint` | `string`                                | Conditional | Required for applyNow                                                       |
-| `expectedRange`          | `{ startLine, startCol, endLine, endCol }` | Conditional | Required for applyNow                                                    |
-| `createBackup`           | `boolean`                               | No          | Backup saved files before writing. Must match preview when supplied to apply |
+| Parameter                | Type                                       | Required    | Description                                                                  |
+| ------------------------ | ------------------------------------------ | ----------- | ---------------------------------------------------------------------------- |
+| `repoId`                 | `string`                                   | Yes         | Repository identifier                                                        |
+| `mode`                   | `"preview" \| "apply" \| "applyNow"`       | Yes         | Preview creates a plan, apply consumes one, applyNow does both               |
+| `symbolId`               | `string`                                   | Conditional | Symbol identifier or shorthand. Required for applyNow                        |
+| `symbolRef`              | `{ name, file?, kind?, exportedOnly? }`    | Conditional | Natural symbol reference for preview                                         |
+| `operation`              | `object`                                   | Conditional | Edit operation for preview/applyNow                                          |
+| `planHandle`             | `string`                                   | Conditional | Plan handle for apply                                                        |
+| `expectedAstFingerprint` | `string`                                   | Conditional | Required for applyNow                                                        |
+| `expectedRange`          | `{ startLine, startCol, endLine, endCol }` | Conditional | Required for applyNow                                                        |
+| `createBackup`           | `boolean`                                  | No          | Backup saved files before writing. Must match preview when supplied to apply |
 
 **Operations:** `replaceSymbol`, `replaceBody`, `replaceSignature`, `insertBefore`, `insertAfter`, and `renameLocal`. TypeScript, TSX, JavaScript, and JSX support all operations. Other indexed languages support only full-symbol replacement and adjacent inserts when symbol ranges are available and the language adapter can parse before and after the edit.
 
@@ -800,7 +800,7 @@ The `expectedLines` and `maxTokens` values are clamped to the effective policy l
 
 Approval can proceed when one or more requested identifiers match the candidate window. Prefer a short list of precise identifiers instead of long all-or-nothing lists.
 
-**Response (approved):** `{ approved: true, symbolId, file, range, code, whyApproved, estimatedTokens, downgradedFrom?, matchedIdentifiers?, matchedLineNumbers?, truncation? }`
+**Response (approved):** `{ approved: true, symbolId, file, range, code, whyApproved, estimatedTokens, downgradedFrom?, matchedIdentifiers?, matchedLineNumbers?, truncation? }`. When `downgradedFrom` is present, the request was allowed but delivered a smaller representation such as a hot-path excerpt rather than the raw window.
 
 **Response (denied):** `{ approved: false, whyDenied, suggestedNextRequest?, nextBestAction? }`
 
@@ -897,14 +897,14 @@ Retrieve task-shaped code context with rung path selection and evidence capture.
 
 **Parameters:**
 
-| Parameter  | Type                                              | Required | Description                |
-| ---------- | ------------------------------------------------- | -------- | -------------------------- |
-| `repoId`   | `string`                                          | Yes      | Repository identifier      |
-| `taskType` | `"debug" \| "review" \| "implement" \| "explain"` | Yes      | Type of task               |
-| `taskText` | `string`                                          | Yes      | Task description or prompt |
-| `budget`   | `object`                                          | No       | Budget constraints         |
-| `options`  | `object`                                          | No       | Task-specific options      |
-| `includeDiagnostics` | `boolean`                               | No       | Include coarse phase timings in the response |
+| Parameter            | Type                                              | Required | Description                                  |
+| -------------------- | ------------------------------------------------- | -------- | -------------------------------------------- |
+| `repoId`             | `string`                                          | Yes      | Repository identifier                        |
+| `taskType`           | `"debug" \| "review" \| "implement" \| "explain"` | Yes      | Type of task                                 |
+| `taskText`           | `string`                                          | Yes      | Task description or prompt                   |
+| `budget`             | `object`                                          | No       | Budget constraints                           |
+| `options`            | `object`                                          | No       | Task-specific options                        |
+| `includeDiagnostics` | `boolean`                                         | No       | Include coarse phase timings in the response |
 
 `budget` fields (all optional):
 
@@ -916,20 +916,20 @@ Retrieve task-shaped code context with rung path selection and evidence capture.
 
 `options` fields (all optional):
 
-| Field                      | Type                      | Description                                                                                                                                                                                                                                                          |
-| -------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `contextMode`              | `"precise" \| "broad"`    | Context breadth. `"precise"` returns minimal context; `"broad"` (default) returns richer surrounding context                                                                                                                                                         |
-| `focusSymbols`             | `string[]`                | Symbol IDs to focus on                                                                                                                                                                                                                                               |
-| `focusPaths`               | `string[]`                | File paths to focus on                                                                                                                                                                                                                                               |
-| `includeTests`             | `boolean`                 | Include test files in analysis                                                                                                                                                                                                                                       |
-| `requireDiagnostics`       | `boolean`                 | Include diagnostic info (may add a raw rung)                                                                                                                                                                                                                         |
-| `semantic`                 | `boolean`                 | Opt in to hybrid (FTS + vector + RRF) retrieval for context seeding. Default `false`; leave unset for fast path/path-inferred lexical retrieval, or set `true` when task text alone needs semantic expansion.                                                        |
-| `includeRetrievalEvidence` | `boolean`                 | Attach hybrid `retrievalEvidence` to the response (sources, candidate counts, top ranks per source, fusion latency, lane availability). Default `true`                                                                                                               |
-| `evidenceOptimization`   | `"off" \| "dedupe" \| "budgeted" \| "global"` | Enable opt-in evidence optimization for `sdl.context`. `dedupe` removes duplicate/subsumed evidence; `budgeted` greedily selects finalEvidence by value per token under `budget.maxTokens`; `global` also optimizes broad-mode `summary`, `answer`, and `finalEvidence` together under the response budget while preserving supporting cards for selected hot paths. Default `"off"` |
-| `chatMentions`             | `string[]`                | Up to 20 identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank for chat-aware re-ranking. See [semantic-engine.md → Chat-Aware PageRank](feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0108) |
-| `chatMentionWeights`       | `Record<string, number>`  | Per-mention weight overrides; missing entries default to uniform 1.0                                                                                                                                                                                                 |
-| `pprDirection`             | `"out" \| "in" \| "both"` | Walk direction across the dependency graph for chat-aware re-ranking. Default `"both"`                                                                                                                                                                               |
-| `pprWeight`                | `number`                  | PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default `2.0`, range `[0, 2]`                                                                                         |
+| Field                      | Type                                          | Description                                                                                                                                                                                                                                                                                                                                                                          |
+| -------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `contextMode`              | `"precise" \| "broad"`                        | Context breadth. `"precise"` returns minimal context; `"broad"` (default) returns richer surrounding context                                                                                                                                                                                                                                                                         |
+| `focusSymbols`             | `string[]`                                    | Symbol IDs to focus on                                                                                                                                                                                                                                                                                                                                                               |
+| `focusPaths`               | `string[]`                                    | File paths to focus on                                                                                                                                                                                                                                                                                                                                                               |
+| `includeTests`             | `boolean`                                     | Include test files in analysis                                                                                                                                                                                                                                                                                                                                                       |
+| `requireDiagnostics`       | `boolean`                                     | Include diagnostic info (may add a raw rung)                                                                                                                                                                                                                                                                                                                                         |
+| `semantic`                 | `boolean`                                     | Opt in to hybrid (FTS + vector + RRF) retrieval for context seeding. Default `false`; leave unset for fast path/path-inferred lexical retrieval, or set `true` when task text alone needs semantic expansion.                                                                                                                                                                        |
+| `includeRetrievalEvidence` | `boolean`                                     | Attach hybrid `retrievalEvidence` to the response (sources, candidate counts, top ranks per source, fusion latency, lane availability). Default `true`                                                                                                                                                                                                                               |
+| `evidenceOptimization`     | `"off" \| "dedupe" \| "budgeted" \| "global"` | Enable opt-in evidence optimization for `sdl.context`. `dedupe` removes duplicate/subsumed evidence; `budgeted` greedily selects finalEvidence by value per token under `budget.maxTokens`; `global` also optimizes broad-mode `summary`, `answer`, and `finalEvidence` together under the response budget while preserving supporting cards for selected hot paths. Default `"off"` |
+| `chatMentions`             | `string[]`                                    | Up to 20 identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank for chat-aware re-ranking. See [semantic-engine.md → Chat-Aware PageRank](feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0108)                                                                                                                 |
+| `chatMentionWeights`       | `Record<string, number>`                      | Per-mention weight overrides; missing entries default to uniform 1.0                                                                                                                                                                                                                                                                                                                 |
+| `pprDirection`             | `"out" \| "in" \| "both"`                     | Walk direction across the dependency graph for chat-aware re-ranking. Default `"both"`                                                                                                                                                                                                                                                                                               |
+| `pprWeight`                | `number`                                      | PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default `2.0`, range `[0, 2]`                                                                                                                                                                                                         |
 
 **Response:**
 
@@ -1049,16 +1049,16 @@ Query stored feedback records and aggregated statistics. Useful for offline tuni
 
 Read non-indexed files (templates, configs, docs, YAML, SQL, etc.) with optional line range, regex search, or JSON path extraction. Returns content directly without runtime execution overhead.
 
-| Parameter       | Type     | Required | Description                                                                        |
-| --------------- | -------- | -------- | ---------------------------------------------------------------------------------- |
-| `repoId`        | `string` | Yes      | Repository identifier                                                              |
-| `filePath`      | `string` | Yes      | Path relative to repo root                                                         |
-| `maxBytes`      | `number` | No       | Max bytes to read (default 512KB)                                                  |
-| `offset`        | `number` | No       | Start line (0-based)                                                               |
+| Parameter       | Type     | Required | Description                                                                                |
+| --------------- | -------- | -------- | ------------------------------------------------------------------------------------------ |
+| `repoId`        | `string` | Yes      | Repository identifier                                                                      |
+| `filePath`      | `string` | Yes      | Path relative to repo root                                                                 |
+| `maxBytes`      | `number` | No       | Max bytes to read (default 512KB)                                                          |
+| `offset`        | `number` | No       | Start line (0-based)                                                                       |
 | `limit`         | `number` | No       | Max lines to return. In search mode this caps returned match/context lines after scanning. |
-| `search`        | `string` | No       | Regex pattern (case-insensitive)                                                   |
-| `searchContext` | `number` | No       | Context lines around matches (default 2)                                           |
-| `jsonPath`      | `string` | No       | Dot-separated key path for JSON extraction (YAML accepted only if JSON-compatible) |
+| `search`        | `string` | No       | Regex pattern (case-insensitive)                                                           |
+| `searchContext` | `number` | No       | Context lines around matches (default 2)                                                   |
+| `jsonPath`      | `string` | No       | Dot-separated key path for JSON extraction (YAML accepted only if JSON-compatible)         |
 
 **Blocked extensions:** Indexed source files (.ts, .js, .py, .go, .rs, etc.) are rejected with guidance to use SDL code tools.
 
@@ -1108,23 +1108,23 @@ Run a command in a repo-scoped subprocess. Runtime execution is enabled by defau
 
 **Parameters:**
 
-| Parameter          | Type                                     | Required | Description                                                                                                                                                                              |
-| ------------------ | ---------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `repoId`           | `string`                                 | Yes      | Repository identifier                                                                                                                                                                    |
-| `runtime`          | `string`                                 | Yes      | Runtime environment. Supported: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`                      |
-| `executable`       | `string`                                 | No       | Custom executable path                                                                                                                                                                   |
-| `args`             | `string[]`                               | No       | Command arguments (max 100)                                                                                                                                                              |
-| `code`             | `string`                                 | No       | Inline code to execute (max 1 MB)                                                                                                                                                        |
-| `stdin`            | `string`                                 | No       | UTF-8 text written to the child process stdin, then closed. Max 512 KiB by encoded byte size.                                                                                             |
-| `relativeCwd`      | `string`                                 | No       | Working directory relative to repo root (default: `"."`)                                                                                                                                 |
-| `timeoutMs`        | `integer`                                | No       | Timeout in milliseconds (100-300,000)                                                                                                                                                    |
-| `queryTerms`       | `string[]`                               | No       | Filter output to lines matching these terms (max 10)                                                                                                                                     |
-| `maxResponseLines` | `integer`                                | No       | Max output lines returned (5-1,000, default: 100)                                                                                                                                       |
-| `persistOutput`    | `boolean`                                | No       | Save full output to an artifact handle (default: true)                                                                                                                                   |
-| `outputMode`       | `"minimal"` \| `"summary"` \| `"intent"` | No       | Controls response verbosity. `"minimal"` (default): status, artifact handle, and concise stdout/stderr previews. `"summary"`: head+tail excerpts. `"intent"`: only `queryTerms`-matched excerpts. |
-| `includeDiagnostics` | `boolean`                              | No       | Include coarse policy, execution, output decoding, and artifact phase timings                                                                                                             |
+| Parameter            | Type                                     | Required | Description                                                                                                                                                                                       |
+| -------------------- | ---------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repoId`             | `string`                                 | Yes      | Repository identifier                                                                                                                                                                             |
+| `runtime`            | `string`                                 | Yes      | Runtime environment. Supported: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`                               |
+| `executable`         | `string`                                 | No       | Custom executable path                                                                                                                                                                            |
+| `args`               | `string[]`                               | No       | Command arguments (max 100)                                                                                                                                                                       |
+| `code`               | `string`                                 | No       | Inline code to execute (max 1 MB)                                                                                                                                                                 |
+| `stdin`              | `string`                                 | No       | UTF-8 text written to the child process stdin, then closed. Max 512 KiB by encoded byte size.                                                                                                     |
+| `relativeCwd`        | `string`                                 | No       | Working directory relative to repo root (default: `"."`)                                                                                                                                          |
+| `timeoutMs`          | `integer`                                | No       | Timeout in milliseconds (100-300,000)                                                                                                                                                             |
+| `queryTerms`         | `string[]`                               | No       | Filter output to lines matching these terms (max 10)                                                                                                                                              |
+| `maxResponseLines`   | `integer`                                | No       | Max output lines returned (5-1,000, default: 100)                                                                                                                                                 |
+| `persistOutput`      | `boolean`                                | No       | Save full output to an artifact handle (default: true)                                                                                                                                            |
+| `outputMode`         | `"minimal"` \| `"summary"` \| `"intent"` | No       | Controls response verbosity. `"minimal"` (default): status, artifact handle, and concise stdout/stderr previews. `"summary"`: head+tail excerpts. `"intent"`: only `queryTerms`-matched excerpts. |
+| `includeDiagnostics` | `boolean`                                | No       | Include coarse policy, execution, output decoding, and artifact phase timings                                                                                                                     |
 
-Use `stdin` for multiline scripts/input instead of shell quoting or base64 workarounds. SDL-MCP reports `stdinBytes` and `stdinSha256` but does not echo full stdin in visible output or persisted logs. `stdin` does not bypass command validation: the shell runtime still requires `code`. Use `code` for inline snippets or `args` for invoking files/commands. `queryTerms` acts like a built-in grep, extracting only matching lines from long output.
+Use `stdin` for multiline scripts/input instead of shell quoting or base64 workarounds. SDL-MCP reports `stdinBytes` and `stdinSha256` but does not echo full stdin in visible output or persisted logs. `stdin` does not bypass command validation: the shell runtime still requires `code`. Use `code` for inline snippets or `args` for invoking files/commands. Node `code` snippets resolve relative imports from the requested working directory. On Windows shell runtime, use `&` or newlines rather than semicolons for command separation; SDL-MCP surfaces a warning when semicolons appear in shell code. `queryTerms` acts like a built-in grep, extracting only matching lines from long output.
 
 **Response** varies by `outputMode`:
 

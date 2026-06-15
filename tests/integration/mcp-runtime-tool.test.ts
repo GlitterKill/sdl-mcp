@@ -11,7 +11,6 @@ import {
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 
-
 /**
  * Integration tests for the sdl.runtime.execute MCP tool handler.
  *
@@ -153,6 +152,28 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     assert.ok(result.stdoutSummary.includes("hello"));
   });
 
+  it("should resolve node code relative imports from the requested working directory", async () => {
+    const { handleRuntimeExecute } =
+      await import("../../dist/mcp/tools/runtime.js");
+    mkdirSync(join(testDir, "fixtures"), { recursive: true });
+    writeFileSync(
+      join(testDir, "fixtures", "relative-module.mjs"),
+      "export const value = 'relative-ok';\n",
+      "utf-8",
+    );
+
+    const result = await handleRuntimeExecute({
+      repoId,
+      runtime: "node",
+      code: "const mod = await import('./fixtures/relative-module.mjs'); console.log(mod.value);",
+      persistOutput: false,
+      outputMode: "summary",
+    });
+
+    assert.equal(result.status, "success");
+    assert.match(result.stdoutSummary, /relative-ok/);
+  });
+
   it("should pass stdin through the handler without echoing it as metadata", async () => {
     const { handleRuntimeExecute } =
       await import("../../dist/mcp/tools/runtime.js");
@@ -193,10 +214,34 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     });
 
     assert.equal(result.status, "success");
-    assert.ok(result.quotingWarnings?.some((warning) => /base64/i.test(warning)));
     assert.ok(
-      result.quotingWarnings?.some((warning) => /stdin|searchEditPreview/i.test(warning)),
+      result.quotingWarnings?.some((warning) => /base64/i.test(warning)),
     );
+    assert.ok(
+      result.quotingWarnings?.some((warning) =>
+        /stdin|searchEditPreview/i.test(warning),
+      ),
+    );
+  });
+
+  it("warns about Windows shell semicolon command separators", async () => {
+    const { handleRuntimeExecute } =
+      await import("../../dist/mcp/tools/runtime.js");
+
+    const result = await handleRuntimeExecute({
+      repoId,
+      runtime: "shell",
+      code: "echo first; echo second",
+      persistOutput: false,
+      outputMode: "minimal",
+    });
+
+    assert.equal(result.status, "success");
+    if (process.platform === "win32") {
+      assert.ok(
+        result.quotingWarnings?.some((warning) => /semicolon/i.test(warning)),
+      );
+    }
   });
 
   it("should not warn about balanced quotes inside direct argv code", async () => {
@@ -206,14 +251,16 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     const result = await handleRuntimeExecute({
       repoId,
       runtime: "node",
-      args: ["-e", "console.log(\"it's fine\")"],
+      args: ["-e", 'console.log("it\'s fine")'],
       persistOutput: false,
       outputMode: "minimal",
     });
 
     assert.equal(result.status, "success");
     assert.notEqual(
-      result.quotingWarnings?.some((warning) => /unbalanced quotes/i.test(warning)),
+      result.quotingWarnings?.some((warning) =>
+        /unbalanced quotes/i.test(warning),
+      ),
       true,
     );
   });

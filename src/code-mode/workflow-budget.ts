@@ -25,8 +25,9 @@ export class WorkflowBudgetTracker {
   ) {
     this.startTime = Date.now();
 
-    // Request budget can only tighten the configured workflow limits.
-    const requestTokens = budget?.maxTotalTokens ?? null;
+    // Request budget can only tighten the configured workflow limits. maxTokens
+    // is accepted as an alias because sdl.context uses that budget field name.
+    const requestTokens = budget?.maxTotalTokens ?? budget?.maxTokens ?? null;
     const requestSteps = budget?.maxSteps ?? null;
     const requestDuration = budget?.maxDurationMs ?? null;
     const configTokens = configDefaults?.maxTokens ?? null;
@@ -62,8 +63,8 @@ export class WorkflowBudgetTracker {
       return "steps";
     }
     if (
-      this.maxDurationMs !== null
-      && Date.now() - this.startTime >= this.maxDurationMs
+      this.maxDurationMs !== null &&
+      Date.now() - this.startTime >= this.maxDurationMs
     ) {
       return "duration";
     }
@@ -79,7 +80,7 @@ export class WorkflowBudgetTracker {
     const dim = this.exceededDimension();
     if (dim === null) return null;
     if (dim === "tokens") {
-      return `Workflow token budget exhausted (${this.tokensUsed}/${this.maxTokens ?? 0} tokens used). Increase budget.maxTotalTokens to run more steps.`;
+      return `Workflow token budget exhausted (${this.tokensUsed}/${this.maxTokens ?? 0} tokens used). Increase budget.maxTotalTokens or budget.maxTokens to run more steps.`;
     }
     if (dim === "steps") {
       return `Workflow step budget exhausted (${this.stepsExecuted}/${this.maxSteps ?? 0} steps executed). Increase budget.maxSteps to run more steps.`;

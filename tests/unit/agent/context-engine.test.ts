@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it, mock } from "node:test";
-import { ContextEngine } from "../../../dist/agent/context-engine.js";
+import {
+  ContextEngine,
+  selectPathScopedExactSymbol,
+} from "../../../dist/agent/context-engine.js";
 import { Planner } from "../../../dist/agent/planner.js";
 import { Executor } from "../../../dist/agent/executor.js";
 import type {
@@ -39,6 +42,27 @@ const defaultMetrics: ExecutionMetrics = {
 
 afterEach(() => {
   mock.restoreAll();
+});
+
+describe("selectPathScopedExactSymbol", () => {
+  it("prefers exact symbols inside inferred focus paths", () => {
+    const rows = [
+      {
+        symbolId: "benchmark-maxTokens",
+        name: "maxTokens",
+        filePath: "src/benchmark/threshold.ts",
+      },
+      {
+        symbolId: "workflow-budget-maxTokens",
+        name: "maxTokens",
+        filePath: "src/code-mode/types.ts",
+      },
+    ];
+
+    const selected = selectPathScopedExactSymbol(rows, ["src/code-mode/"]);
+
+    assert.equal(selected?.symbolId, "workflow-budget-maxTokens");
+  });
 });
 
 describe("ContextEngine", () => {
@@ -160,7 +184,8 @@ describe("ContextEngine", () => {
   });
 
   it("deduplicates overlapping ladder evidence when evidenceOptimization is dedupe", async () => {
-    const sharedContent = "shared execution branch reused across context surfaces";
+    const sharedContent =
+      "shared execution branch reused across context surfaces";
     const evidence: Evidence[] = [
       {
         type: "symbolCard",
@@ -297,7 +322,8 @@ describe("ContextEngine", () => {
   });
 
   it("restores a supporting card when dominance removes it before budget selection", async () => {
-    const sharedContent = "shared execution branch reused across context surfaces";
+    const sharedContent =
+      "shared execution branch reused across context surfaces";
     const evidence: Evidence[] = [
       {
         type: "symbolCard",
@@ -344,7 +370,8 @@ describe("ContextEngine", () => {
   });
 
   it("keeps a supporting card when the hot path appears first", async () => {
-    const sharedContent = "shared execution branch reused across context surfaces";
+    const sharedContent =
+      "shared execution branch reused across context surfaces";
     const evidence: Evidence[] = [
       {
         type: "hotPath",
@@ -1369,7 +1396,6 @@ describe("ContextEngine", () => {
     assert.ok(capturedContext.includes("symbol:seed-b"));
   });
 });
-
 
 describe("ContextEngine confidence-gated retrieval", () => {
   it("runs seedContext even when focus paths were inferred", async () => {

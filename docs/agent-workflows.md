@@ -91,7 +91,7 @@ SDL-MCP exposes 38 tools in flat default mode (36 flat tools plus `sdl.action.se
 |                            | `sdl.manual`               | Return a compact filtered API reference for a queried or explicit action subset                                                                                      |
 |                            | `sdl.context`              | Retrieve task-shaped context inside Code Mode for explain/debug/review/implement work                                                                                |
 |                            | `sdl.workflow`             | Execute up to 50 actions in a single round trip with `$N` result piping, transforms, and optional traces                                                             |
-|                            | `sdl.file`                 | Unified Code Mode file gateway for read, write, search/edit preview/apply, symbol edit preview/apply, and gated source windows                                      |
+|                            | `sdl.file`                 | Unified Code Mode file gateway for read, write, search/edit preview/apply, symbol edit preview/apply, and gated source windows                                       |
 
 ---
 
@@ -155,7 +155,7 @@ Use this order unless task constraints force escalation:
 - **Feature implementation**: `repo.overview -> search -> card -> slice.build`. Use `editedFiles` in `slice.build` to include symbols from files you're actively modifying. Use `symbol.edit` when the change is one symbol and you want preview/apply safety with AST preconditions.
 - **PR review**: `delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols`.
 - **Live editing**: `buffer.push` as files change (with cursor/selection tracking) → `buffer.checkpoint` to persist → search/card/slice now reflect draft state.
-- **Test execution**: `runtime.execute` with the narrowest useful runtime (`node`, `python`, or `shell`) to run tests and capture structured output.
+- **Test execution**: `runtime.execute` with the narrowest useful runtime (`node`, `python`, or `shell`) to run tests and capture structured output. On Windows shell runtime, use `&` or newlines rather than semicolons for command separation.
 - **Context retrieval** _(Code Mode)_: use `sdl.context` when Code Mode is enabled. If Code Mode is disabled, follow the manual ladder (`repo.overview` -> `symbol.search` -> `symbol.getCard` -> `slice.build` -> code tools).
 - **Multi-step operations** _(Code Mode)_: `sdl.workflow` for runtime execution, data transforms, and batch mutations. Do not use it for context retrieval — route explain/debug/review/implement work to context first.
 - **Symbol-scoped edits** _(Code Mode)_: `sdl.file` with `op: "symbolEditPreview"` -> review `planHandle` -> `op: "symbolEditApply"`. Use `symbolEditApplyNow` only when you already hold the current `astFingerprint` and range from a fresh card.
@@ -196,7 +196,7 @@ Use this order unless task constraints force escalation:
   - Use to search stored output artifacts on-demand after a `minimal`-mode execution.
   - Pass the `artifactHandle` from the execute response plus `queryTerms` to extract relevant excerpts.
 - `sdl.workflow` _(Code Mode)_:
-  - Set `budget.maxTotalTokens` and `budget.maxSteps` to bound chain execution.
+  - Set `budget.maxTotalTokens` (or the accepted alias `budget.maxTokens`) and `budget.maxSteps` to bound chain execution. If a later step references a packed-capable result, `sdl.workflow` requests JSON-compatible output for that referenced step automatically.
   - Use `onError: "continue"` (default) to let the chain proceed past failures, or `"stop"` to halt on first error.
 
 ### 4) Live buffer workflow
@@ -213,7 +213,7 @@ Stale buffer pushes (version ≤ current) are rejected automatically.
 ### 5) Task Context (`sdl.context`) guidance
 
 - Always provide a budget (`maxTokens`, `maxActions`, optionally `maxDurationMs`).
-- Scope with `focusSymbols` and/or `focusPaths` when you have them. Explicit scope and exact symbol mentions stay on the fast path and are the best option for targeted work.
+- Scope with `focusSymbols` and/or `focusPaths` when you have them. Explicit scope and exact symbol mentions stay on the fast path and are the best option for targeted work. If broad mode is noisy or precise mode under-covers a subsystem, use `sdl.symbol.search`/`symbolSearch` for exact symbols before escalating to skeletons or hot paths.
 - Leave `options.semantic` unset for normal use. SDL-MCP uses confidence-gated retrieval: unscoped natural-language tasks can escalate to bounded hybrid retrieval when lexical confidence is low. Set `options.semantic: true` to force hybrid retrieval, and set `options.semantic: false` for lexical-only debugging or tests.
 - Use `contextMode: "precise"` for targeted lookups (max 4 cluster-expanded symbols, minimal tokens — beats manual workflow assembly). Use `"broad"` (default) for investigation tasks needing surrounding context (max 10 cluster-expanded symbols with diversity scoring).
 - Avoid `requireDiagnostics` unless needed; it can add a raw rung.
@@ -293,7 +293,7 @@ Workflow guidance:
 - Start with `sdl.action.search` when the right action is unclear.
 - Use `sdl.manual(query|actions)` to avoid loading the full manual when a subset is enough.
 - Each step has `fn` (action name) and `args`. Use `$N.path.to.field` to reference step N's result (0-based).
-- Set `budget`: `{ maxTotalTokens, maxSteps, maxDurationMs }`.
+- Set `budget`: `{ maxTotalTokens, maxSteps, maxDurationMs }`; `maxTokens` is accepted as an alias for `maxTotalTokens`.
 - `onError`: `"continue"` (default, skip failed steps) or `"stop"` (halt on first error).
 - The workflow enforces the same context-ladder escalation rules as individual tools.
 - Cross-step ETag caching is automatic — no need to pass ETags manually between steps.

@@ -188,6 +188,33 @@ const MAX_AST_CAPTURE_TEXT_CHARS = 120;
 const STRUCTURAL_PREVIEW_REQUEST_BUDGET_MS = 10_000;
 const STRUCTURAL_QUERY_TIME_BUDGET_SKIP_REASON =
   STRUCTURAL_QUERY_TIME_BUDGET_ERROR;
+
+function maxFilesReachedReason(maxFiles: number): string {
+  return `maxFiles-reached:${maxFiles}; raise maxFiles or narrow filters/query`;
+}
+
+function maxTotalMatchesReachedReason(maxTotalMatches: number): string {
+  return `maxTotalMatches-reached:${maxTotalMatches}; raise maxTotalMatches or narrow filters/query`;
+}
+
+function matchesExceedTotalCapReason(maxTotalMatches: number): string {
+  return `matches-exceed-total-cap:${maxTotalMatches}; raise maxTotalMatches or narrow filters/query`;
+}
+
+function aggregateByteCapExceededReason(maxPlanBytes: number): string {
+  return `aggregate-byte-cap-exceeded:${maxPlanBytes}; raise maxPlanBytes or narrow filters/query`;
+}
+
+function isPartialSkipReason(reason: string): boolean {
+  return (
+    reason.startsWith("maxFiles-reached:") ||
+    reason.startsWith("maxTotalMatches-reached:") ||
+    reason === STRUCTURAL_QUERY_TIME_BUDGET_SKIP_REASON ||
+    reason.startsWith("matches-exceed-") ||
+    reason.startsWith("aggregate-byte-cap-exceeded:")
+  );
+}
+
 const NO_AST_AWARE_SOURCE_EXTENSION = ".__sdl_no_ast_source__";
 
 /** Directory names that are never descended into. */
@@ -1438,8 +1465,7 @@ async function readSearchEditCandidateFile(
   rootPath: string,
   abs: string,
 ): Promise<
-  | { ok: true; value: SafeReadCandidateResult }
-  | { ok: false; reason: string }
+  { ok: true; value: SafeReadCandidateResult } | { ok: false; reason: string }
 > {
   try {
     validatePathWithinRoot(rootPath, abs);
@@ -1488,7 +1514,10 @@ async function readSearchEditCandidateFile(
     validatePathWithinRoot(rootPath, resolved);
     const pathStats = await stat(resolved);
     if (
-      (stats.dev !== 0 || stats.ino !== 0 || pathStats.dev !== 0 || pathStats.ino !== 0) &&
+      (stats.dev !== 0 ||
+        stats.ino !== 0 ||
+        pathStats.dev !== 0 ||
+        pathStats.ino !== 0) &&
       (stats.dev !== pathStats.dev || stats.ino !== pathStats.ino)
     ) {
       return { ok: false, reason: "path-changed-during-read" };
@@ -1545,7 +1574,8 @@ async function planSearchEditBatchPreview(
   }
   const rootPath = repo.rootPath;
   assertUniqueOperationIds(operations);
-  const structuralDeadlineMs = Date.now() + STRUCTURAL_PREVIEW_REQUEST_BUDGET_MS;
+  const structuralDeadlineMs =
+    Date.now() + STRUCTURAL_PREVIEW_REQUEST_BUDGET_MS;
   const maxPlanBytes = request.maxPlanBytes ?? MAX_PLAN_BYTES;
   const previewBytesByFile = new Map<string, number>();
   let estimatedPreviewBytes = 0;
@@ -1566,7 +1596,7 @@ async function planSearchEditBatchPreview(
       }
     }
     if (estimatedPreviewBytes > maxPlanBytes) {
-      throw new ValidationError("search.edit batch aggregate byte cap exceeded");
+      throw new ValidationError(aggregateByteCapExceededReason(maxPlanBytes));
     }
     operationPreviews.push({
       operationId: operationIdFor(operation, index),
@@ -1625,12 +1655,15 @@ async function planSearchEditBatchPreview(
       break;
     }
     if (edits.length >= maxFiles) {
-      filesSkipped.push({ path: rel, reason: "maxFiles-reached" });
+      filesSkipped.push({ path: rel, reason: maxFilesReachedReason(maxFiles) });
       partial = true;
       continue;
     }
     if (totalMatches >= maxTotalMatches) {
-      filesSkipped.push({ path: rel, reason: "maxTotalMatches-reached" });
+      filesSkipped.push({
+        path: rel,
+        reason: maxTotalMatchesReachedReason(maxTotalMatches),
+      });
       partial = true;
       continue;
     }
@@ -1705,7 +1738,7 @@ async function planSearchEditBatchPreview(
     if (matchCount > maxMatchesPerFile) {
       filesSkipped.push({
         path: rel,
-        reason: `matches-exceed-per-file-cap:${maxMatchesPerFile}`,
+        reason: `matches-exceed-per-file-cap:${maxMatchesPerFile}; raise maxMatchesPerFile or narrow filters/query`,
       });
       partial = true;
       continue;
@@ -1713,7 +1746,7 @@ async function planSearchEditBatchPreview(
     if (totalMatches + matchCount > maxTotalMatches) {
       filesSkipped.push({
         path: rel,
-        reason: `matches-exceed-total-cap:${maxTotalMatches}`,
+        reason: matchesExceedTotalCapReason(maxTotalMatches),
       });
       partial = true;
       continue;
@@ -1728,7 +1761,10 @@ async function planSearchEditBatchPreview(
     aggregateBytes += editBytes;
     if (aggregateBytes > maxPlanBytes) {
       aggregateBytes -= editBytes;
-      filesSkipped.push({ path: rel, reason: "aggregate-byte-cap-exceeded" });
+      filesSkipped.push({
+        path: rel,
+        reason: aggregateByteCapExceededReason(maxPlanBytes),
+      });
       partial = true;
       continue;
     }
@@ -1814,7 +1850,10 @@ async function planSingleSearchEditPreview(
     request.previewContextLines ?? DEFAULT_PREVIEW_CONTEXT_LINES;
   const createBackup = request.createBackup ?? true;
   request = prepareAstAwareRequest(request);
-  if (isAstAwareTargeting(request) && request.structuralDeadlineMs === undefined) {
+  if (
+    isAstAwareTargeting(request) &&
+    request.structuralDeadlineMs === undefined
+  ) {
     request = {
       ...request,
       structuralDeadlineMs: Date.now() + STRUCTURAL_PREVIEW_REQUEST_BUDGET_MS,
@@ -2056,11 +2095,14 @@ async function planSingleSearchEditPreview(
   const maxPlanBytes = request.maxPlanBytes ?? MAX_PLAN_BYTES;
   for (const rel of candidates) {
     if (edits.length >= maxFiles) {
-      skipped.push({ path: rel, reason: "maxFiles-reached" });
+      skipped.push({ path: rel, reason: maxFilesReachedReason(maxFiles) });
       continue;
     }
     if (totalMatches >= maxTotalMatches) {
-      skipped.push({ path: rel, reason: "maxTotalMatches-reached" });
+      skipped.push({
+        path: rel,
+        reason: maxTotalMatchesReachedReason(maxTotalMatches),
+      });
       continue;
     }
     const { allowed: pathAllowed, reason: pathReason } = isPathAllowed(
@@ -2119,7 +2161,7 @@ async function planSingleSearchEditPreview(
       ) {
         skipped.push({
           path: rel,
-          reason: `matches-exceed-per-file-cap:${maxMatchesPerFile}`,
+          reason: `matches-exceed-per-file-cap:${maxMatchesPerFile}; raise maxMatchesPerFile or narrow filters/query`,
         });
         continue;
       }
@@ -2157,7 +2199,7 @@ async function planSingleSearchEditPreview(
       if (structuralEdits.length > maxMatchesPerFile) {
         skipped.push({
           path: rel,
-          reason: `matches-exceed-per-file-cap:${maxMatchesPerFile}`,
+          reason: `matches-exceed-per-file-cap:${maxMatchesPerFile}; raise maxMatchesPerFile or narrow filters/query`,
         });
         continue;
       }
@@ -2213,7 +2255,7 @@ async function planSingleSearchEditPreview(
     if (totalMatches + plannedMatchCount > maxTotalMatches) {
       skipped.push({
         path: rel,
-        reason: `matches-exceed-total-cap:${maxTotalMatches}`,
+        reason: matchesExceedTotalCapReason(maxTotalMatches),
       });
       continue;
     }
@@ -2224,7 +2266,10 @@ async function planSingleSearchEditPreview(
     aggregateBytes += editBytes;
     if (aggregateBytes > maxPlanBytes) {
       aggregateBytes -= editBytes;
-      skipped.push({ path: rel, reason: "aggregate-byte-cap-exceeded" });
+      skipped.push({
+        path: rel,
+        reason: aggregateByteCapExceededReason(maxPlanBytes),
+      });
       continue;
     }
     const indexedSource = isIndexedSource(rel);
@@ -2270,14 +2315,7 @@ async function planSingleSearchEditPreview(
       filesEligible: candidates.length,
       filesSkipped: skipped,
       fileEntries,
-      ...(candidatesCapped ||
-      skipped.some(
-        (s) =>
-          s.reason === "maxFiles-reached" ||
-          s.reason === "maxTotalMatches-reached" ||
-          s.reason === STRUCTURAL_QUERY_TIME_BUDGET_SKIP_REASON ||
-          s.reason.startsWith("matches-exceed-"),
-      )
+      ...(candidatesCapped || skipped.some((s) => isPartialSkipReason(s.reason))
         ? { partial: true }
         : {}),
     },

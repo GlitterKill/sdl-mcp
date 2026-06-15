@@ -347,6 +347,35 @@ describe("search-edit structural matcher", () => {
     });
   }
 
+  it("keeps identifier ranges aligned after multibyte characters", () => {
+    const emoji = String.fromCodePoint(0x1f600);
+    const content = [
+      `const prefix = "${emoji}";`,
+      "const oldName = 1;",
+      "oldName();",
+      "",
+    ].join("\n");
+
+    const edits = collectIdentifierSourceEdits({
+      content,
+      relPath: "src/example.ts",
+      literal: "oldName",
+      replacement: "newName",
+      global: true,
+    });
+
+    assert.equal(edits.length, 2);
+    assert.equal(
+      applyEdits(content, edits),
+      [
+        `const prefix = "${emoji}";`,
+        "const newName = 1;",
+        "newName();",
+        "",
+      ].join("\n"),
+    );
+  });
+
   it("targets tree-sitter query captures with capture interpolation", () => {
     const content = ['oldName("a");', 'other("b");', ""].join("\n");
 
@@ -374,8 +403,9 @@ describe("search-edit structural matcher", () => {
   });
 
   it("caps structural collection before scanning every query window", () => {
-    const content = Array.from({ length: 8_000 }, (_, index) =>
-      `const oldName${index} = oldName;`,
+    const content = Array.from(
+      { length: 8_000 },
+      (_, index) => `const oldName${index} = oldName;`,
     ).join("\n");
 
     const edits = collectStructuralSourceEdits({

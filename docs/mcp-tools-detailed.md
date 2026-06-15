@@ -769,20 +769,20 @@ If denied, the response includes `whyDenied` reasons and a `nextBestAction` sugg
 
 **Response (approved):**
 
-| Field                | Type     | Description                                                                        |
-| :------------------- | :------- | :--------------------------------------------------------------------------------- |
-| `approved`           | true     | Request was approved                                                               |
-| `symbolId`           | string   | Symbol identifier                                                                  |
-| `file`               | string   | File path                                                                          |
-| `range`              | object   | `{startLine, startCol, endLine, endCol}`                                           |
-| `code`               | string   | The raw source code                                                                |
-| `whyApproved`        | string[] | Reasons for approval                                                               |
-| `estimatedTokens`    | number   | Token count                                                                        |
-| `downgradedFrom`     | string   | If the request was downgraded (e.g., to skeleton)                                  |
-| `matchedIdentifiers` | string[] | Which identifiers were found                                                       |
-| `matchedLineNumbers` | number[] | Line numbers of matches                                                            |
-| `sessionDelta`       | object   | Same-session delta metadata when `deltaMode` applies                               |
-| `delta`              | object   | Bounded unified-line diff or unchanged marker when a repeated window is compressed |
+| Field                | Type     | Description                                                                                                                            |
+| :------------------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------- |
+| `approved`           | true     | Request was approved                                                                                                                   |
+| `symbolId`           | string   | Symbol identifier                                                                                                                      |
+| `file`               | string   | File path                                                                                                                              |
+| `range`              | object   | `{startLine, startCol, endLine, endCol}`                                                                                               |
+| `code`               | string   | The raw source code                                                                                                                    |
+| `whyApproved`        | string[] | Reasons for approval                                                                                                                   |
+| `estimatedTokens`    | number   | Token count                                                                                                                            |
+| `downgradedFrom`     | string   | If present, the request was approved but delivered a smaller representation (for example a hot-path excerpt instead of the raw window) |
+| `matchedIdentifiers` | string[] | Which identifiers were found                                                                                                           |
+| `matchedLineNumbers` | number[] | Line numbers of matches                                                                                                                |
+| `sessionDelta`       | object   | Same-session delta metadata when `deltaMode` applies                                                                                   |
+| `delta`              | object   | Bounded unified-line diff or unchanged marker when a repeated window is compressed                                                     |
 
 When `responseMode` returns a handle, the response is a `responseArtifact` reference with `handle`, `metadata`, `savings`, and `action: "response.get"`. Call `response.get` to retrieve a bounded excerpt or the full stored response.
 
@@ -1181,7 +1181,7 @@ No `stdoutSummary` or `stderrSummary` — only matched excerpts are returned.
 - `node` → `node` (or `bun` if available)
 - `typescript` → `tsx` / `ts-node`
 - `python` → `python3` (Unix) / `python` (Windows)
-- `shell` → `bash` (Unix) / `cmd.exe` (Windows)
+- `shell` → `bash` (Unix) / `cmd.exe` (Windows). On Windows, use `&` or newlines rather than semicolons for command separation; SDL-MCP surfaces a warning when semicolons appear in shell code.
 - `go` → `go run`
 - `rust` → `rustc` then execute
 - `java` → `javac` then `java`

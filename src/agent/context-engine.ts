@@ -45,9 +45,43 @@ const BEHAVIORAL_KINDS = new Set([
   "constructor",
 ]);
 
+export function selectPathScopedExactSymbol<T extends ExactSymbolCandidate>(
+  rows: T[],
+  focusPaths: string[],
+  name?: string,
+): T | undefined {
+  const normalizedFocusPaths = focusPaths
+    .map((path) => path.replace(/\\/g, "/").toLowerCase())
+    .filter(Boolean);
+  const normalizedName = name?.toLowerCase();
+  const exactRows = normalizedName
+    ? rows.filter((row) => row.name?.toLowerCase() === normalizedName)
+    : rows;
+
+  if (normalizedFocusPaths.length > 0) {
+    const scoped = exactRows.find((row) => {
+      const filePath = (row.filePath ?? row.file ?? "")
+        .replace(/\\/g, "/")
+        .toLowerCase();
+      return normalizedFocusPaths.some(
+        (focusPath) => filePath === focusPath || filePath.startsWith(focusPath),
+      );
+    });
+    if (scoped) return scoped;
+  }
+
+  return exactRows[0];
+}
 const MAX_EXACT_SYMBOL_MENTION_SEEDS = 5;
 
 type EvidenceOptimizationMode = "off" | "dedupe" | "budgeted" | "global";
+
+interface ExactSymbolCandidate {
+  symbolId: string;
+  name?: string;
+  filePath?: string;
+  file?: string;
+}
 
 interface EvidenceCandidate {
   evidence: Evidence;
@@ -95,7 +129,9 @@ function optimizeEvidenceForResponse(
     return evidence;
   }
 
-  const exactDeduped = dedupeExactEvidence(evidence.map(normalizeEvidenceCandidate));
+  const exactDeduped = dedupeExactEvidence(
+    evidence.map(normalizeEvidenceCandidate),
+  );
   const shouldPreserveHotPathCards = mode === "budgeted" || mode === "global";
   const dominated = applyEvidenceDominance(exactDeduped, {
     preserveHotPathCards: shouldPreserveHotPathCards,
@@ -196,9 +232,11 @@ function evidenceItemsOverlap(
   }
 
   const sameSubject =
-    current.subjectKey !== undefined && current.subjectKey === candidate.subjectKey;
+    current.subjectKey !== undefined &&
+    current.subjectKey === candidate.subjectKey;
   const sameContent =
-    current.contentValue === candidate.contentValue && current.contentValue.length >= 30;
+    current.contentValue === candidate.contentValue &&
+    current.contentValue.length >= 30;
 
   return (
     (sameSubject || sameContent) &&
@@ -306,7 +344,9 @@ function compareEvidenceValueDensity(
 function evidenceTokenCost(evidence: Evidence): number {
   return Math.max(
     1,
-    estimateTokens(`${evidence.type} ${evidence.reference} ${evidence.summary}`),
+    estimateTokens(
+      `${evidence.type} ${evidence.reference} ${evidence.summary}`,
+    ),
   );
 }
 
@@ -410,10 +450,8 @@ function isLikelyExactSymbolMention(identifier: string): boolean {
 export class ContextEngine {
   private planner: Planner;
 
-
   constructor() {
     this.planner = new Planner();
-
   }
 
   async buildContext(task: AgentTask): Promise<ContextResult> {
@@ -502,10 +540,10 @@ export class ContextEngine {
           const exactRefs = await this.seedExactMentionedSymbols(task);
           exactMentionSeededPreciseContext =
             exactRefs.length > 0 && task.options?.contextMode === "precise";
-          context = exactMentionSeededPreciseContext &&
-            task.options?.semantic !== true
-            ? exactRefs
-            : prependContextRefs(context, exactRefs);
+          context =
+            exactMentionSeededPreciseContext && task.options?.semantic !== true
+              ? exactRefs
+              : prependContextRefs(context, exactRefs);
         } catch (err) {
           logger.debug("Exact symbol seeding failed (non-fatal)", {
             error: err instanceof Error ? err.message : String(err),
@@ -525,7 +563,9 @@ export class ContextEngine {
       // low-priority anchors; retrieval candidates carry the evidence used by
       // final executor ranking. semantic:false keeps this lexical-only.
       let seedCandidates: ContextSeedCandidate[] = [];
-      let seedEvidence: import("../retrieval/types.js").RetrievalEvidence | undefined;
+      let seedEvidence:
+        | import("../retrieval/types.js").RetrievalEvidence
+        | undefined;
       if (
         !hasExplicitScope &&
         task.taskText &&
@@ -652,9 +692,15 @@ export class ContextEngine {
           contextModeHint:
             "precise: Returns focused evidence with minimal metadata. Use for targeted lookups when you know what you're looking for.",
           finalEvidence: optimizedEvidence,
-          summary: this.generateSummary(task, actions, optimizedEvidence, success, {
-            clusterExpandedCount,
-          }),
+          summary: this.generateSummary(
+            task,
+            actions,
+            optimizedEvidence,
+            success,
+            {
+              clusterExpandedCount,
+            },
+          ),
           success,
           metrics,
         };
@@ -679,10 +725,16 @@ export class ContextEngine {
         contextModeHint:
           "broad: Expands context via cluster relationships and graph edges. Returns answer, nextBestAction, and retrievalEvidence. Use for exploratory tasks.",
         finalEvidence: optimizedEvidence,
-        summary: this.generateSummary(task, actions, optimizedEvidence, success, {
-          clusterExpandedCount,
-          compactEvidence: evidenceOptimization === "global",
-        }),
+        summary: this.generateSummary(
+          task,
+          actions,
+          optimizedEvidence,
+          success,
+          {
+            clusterExpandedCount,
+            compactEvidence: evidenceOptimization === "global",
+          },
+        ),
         success,
         metrics,
         answer: this.generateAnswer(task, optimizedEvidence, success, {
@@ -696,16 +748,26 @@ export class ContextEngine {
           symptomType: classifySymptomType({
             taskText: task.taskText,
           }),
-          ...(seedEvidence ? {
-            sources: seedEvidence.sources,
-            candidateCountPerSource: seedEvidence.candidateCountPerSource,
-            topRanksPerSource: seedEvidence.topRanksPerSource,
-            ftsAvailable: (seedEvidence.sources ?? []).includes("fts"),
-            vectorAvailable: (seedEvidence.sources ?? []).some((s) => typeof s === "string" && s.startsWith("vector:")),
-            ...(seedEvidence.fusionLatencyMs !== undefined ? { fusionLatencyMs: seedEvidence.fusionLatencyMs } : {}),
-            ...(seedEvidence.fallbackReason !== undefined ? { fallbackReason: seedEvidence.fallbackReason } : {}),
-            ...(seedEvidence.feedbackBoosts ? { feedbackBoosts: seedEvidence.feedbackBoosts } : {}),
-          } : {}),
+          ...(seedEvidence
+            ? {
+                sources: seedEvidence.sources,
+                candidateCountPerSource: seedEvidence.candidateCountPerSource,
+                topRanksPerSource: seedEvidence.topRanksPerSource,
+                ftsAvailable: (seedEvidence.sources ?? []).includes("fts"),
+                vectorAvailable: (seedEvidence.sources ?? []).some(
+                  (s) => typeof s === "string" && s.startsWith("vector:"),
+                ),
+                ...(seedEvidence.fusionLatencyMs !== undefined
+                  ? { fusionLatencyMs: seedEvidence.fusionLatencyMs }
+                  : {}),
+                ...(seedEvidence.fallbackReason !== undefined
+                  ? { fallbackReason: seedEvidence.fallbackReason }
+                  : {}),
+                ...(seedEvidence.feedbackBoosts
+                  ? { feedbackBoosts: seedEvidence.feedbackBoosts }
+                  : {}),
+              }
+            : {}),
         },
       };
       recordDiagnosticTiming(
@@ -1216,9 +1278,9 @@ export class ContextEngine {
    */
   private async seedExactMentionedSymbols(task: AgentTask): Promise<string[]> {
     const codeQuoted =
-      task.taskText.match(/`([A-Za-z_$][A-Za-z0-9_$]*)`/g)?.map((match) =>
-        match.slice(1, -1),
-      ) ?? [];
+      task.taskText
+        .match(/`([A-Za-z_$][A-Za-z0-9_$]*)`/g)
+        ?.map((match) => match.slice(1, -1)) ?? [];
     const extracted = extractIdentifiersFromText(
       task.taskText,
       task.taskText,
@@ -1242,8 +1304,15 @@ export class ContextEngine {
     const conn = await getLadybugConn();
     const refs: string[] = [];
     const seen = new Set<string>();
+    const focusPaths =
+      task.options?.inferredFocusPaths ?? task.options?.focusPaths ?? [];
     for (const name of candidates) {
-      const row = await ladybugDb.findSymbolByExactName(
+      let row: ExactSymbolCandidate | null | undefined;
+      if (focusPaths.length > 0) {
+        const rows = await ladybugDb.searchSymbols(conn, task.repoId, name, 50);
+        row = selectPathScopedExactSymbol(rows, focusPaths, name);
+      }
+      row ??= await ladybugDb.findSymbolByExactName(
         conn,
         task.repoId,
         name,

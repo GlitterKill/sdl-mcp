@@ -459,30 +459,6 @@ export function createStructuralQueryCache(
   };
 }
 
-function buildByteOffsetConverter(
-  content: string,
-): (byteOffset: number) => number {
-  const boundaries = new Map<number, number>();
-  let byteOffset = 0;
-  for (let index = 0; index < content.length; ) {
-    boundaries.set(byteOffset, index);
-    const codePoint = content.codePointAt(index);
-    if (codePoint === undefined) break;
-    const value = String.fromCodePoint(codePoint);
-    byteOffset += Buffer.byteLength(value, "utf-8");
-    index += value.length;
-  }
-  boundaries.set(byteOffset, content.length);
-
-  return (targetByteOffset: number): number => {
-    const exact = boundaries.get(targetByteOffset);
-    if (exact !== undefined) return exact;
-    throw new ValidationError(
-      `tree-sitter returned a non-boundary byte offset: ${targetByteOffset}`,
-    );
-  };
-}
-
 function buildQueryByteWindows(
   content: string,
 ): Array<{ startByte: number; endByte: number }> {
@@ -520,19 +496,15 @@ function buildQueryByteWindows(
   return windows;
 }
 
-function captureFromNode(
-  name: string,
-  node: SyntaxNode,
-  byteToStringIndex: (byteOffset: number) => number,
-): StructuralCapture {
+function captureFromNode(name: string, node: SyntaxNode): StructuralCapture {
   return {
     name,
     text: node.text,
     nodeType: node.type,
     startByte: node.startIndex,
     endByte: node.endIndex,
-    start: byteToStringIndex(node.startIndex),
-    end: byteToStringIndex(node.endIndex),
+    start: node.startIndex,
+    end: node.endIndex,
     range: {
       startLine: node.startPosition.row + 1,
       startCol: node.startPosition.column,
@@ -586,7 +558,6 @@ function structuralReplacement(
 
 function pushIdentifierEdits(
   node: SyntaxNode,
-  byteToStringIndex: (byteOffset: number) => number,
   identifierNodeTypes: ReadonlySet<string>,
   literal: string,
   replacement: string,
@@ -595,7 +566,7 @@ function pushIdentifierEdits(
 ): void {
   if (edits.length >= maxMatches) return;
   if (identifierNodeTypes.has(node.type) && node.text === literal) {
-    const capture = captureFromNode("target", node, byteToStringIndex);
+    const capture = captureFromNode("target", node);
     edits.push({
       start: capture.start,
       end: capture.end,
@@ -608,7 +579,6 @@ function pushIdentifierEdits(
   for (const child of node.namedChildren) {
     pushIdentifierEdits(
       child,
-      byteToStringIndex,
       identifierNodeTypes,
       literal,
       replacement,
@@ -632,13 +602,11 @@ export function collectIdentifierSourceEdits(
     return [];
   }
 
-  const byteToStringIndex = buildByteOffsetConverter(input.content);
   const maxMatches =
     input.global === false ? 1 : (input.maxMatches ?? Number.MAX_SAFE_INTEGER);
   const edits: StructuralSourceEdit[] = [];
   pushIdentifierEdits(
     tree.rootNode,
-    byteToStringIndex,
     descriptor.identifierNodeTypes,
     input.literal,
     input.replacement,
@@ -764,7 +732,6 @@ export function collectStructuralSourceEdits(
       );
     }
   };
-  const byteToStringIndex = buildByteOffsetConverter(input.content);
   const edits: StructuralSourceEdit[] = [];
   const seenTargets = new Set<string>();
 
@@ -772,7 +739,7 @@ export function collectStructuralSourceEdits(
     for (const match of runQueryWindow(startByte, endByte)) {
       const captures = dedupeCaptures(
         match.captures.map((capture) =>
-          captureFromNode(captureName(capture), capture.node, byteToStringIndex),
+          captureFromNode(captureName(capture), capture.node),
         ),
       );
       if (!requiredCapturesMatch(captures, input.structural.requiredCaptures)) {

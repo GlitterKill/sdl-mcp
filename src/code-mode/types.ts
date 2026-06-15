@@ -14,6 +14,8 @@ export const WorkflowStepSchema = z.object({
 export const WorkflowBudgetSchema = z.object({
   /** Maximum total estimated tokens across all step results */
   maxTotalTokens: z.number().int().min(100).max(500_000).optional(),
+  /** Alias for maxTotalTokens; accepted for compatibility with sdl.context budgets. */
+  maxTokens: z.number().int().min(100).max(500_000).optional(),
   /** Maximum number of steps to execute */
   maxSteps: z.number().int().min(1).max(50).optional(),
   /** Maximum total wall-clock duration in milliseconds */

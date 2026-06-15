@@ -51,10 +51,7 @@ function createMockActionMap() {
     },
     "test.periodicValidation": {
       schema: z.object({
-        code: z
-          .string()
-          .min(1)
-          .describe("Required code value."),
+        code: z.string().min(1).describe("Required code value."),
       }),
       handler: async () => ({ ok: true }),
     },
@@ -224,10 +221,74 @@ describe("code-mode workflow executor", () => {
       result.results.reduce((sum, step) => sum + step.tokens, 0),
     );
     assert.ok(result.totalTokens < 100);
-    assert.strictEqual(result.trace?.steps[0]?.tokens, result.results[0].tokens);
+    assert.strictEqual(
+      result.trace?.steps[0]?.tokens,
+      result.results[0].tokens,
+    );
     assert.strictEqual(result.trace?.totals.tokens, result.totalTokens);
   });
 
+  it("treats workflow budget maxTokens as a maxTotalTokens alias", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        { fn: "testLarge", action: "test.large", args: {} },
+        { fn: "testEcho", action: "test.echo", args: { message: "after" } },
+      ],
+      defaultMaxResponseTokens: 25,
+      budget: { maxTokens: 20 },
+      onError: "continue",
+    };
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+    );
+
+    assert.strictEqual(result.results[0].status, "ok");
+    assert.strictEqual(result.results[1].status, "budget_exceeded");
+    assert.match(result.results[1].error ?? "", /token budget exhausted/);
+    assert.match(result.results[1].error ?? "", /budget\.maxTotalTokens/);
+    assert.match(result.results[1].error ?? "", /budget\.maxTokens/);
+  });
+
+  it("requests JSON output for packed-capable steps referenced later", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        {
+          fn: "symbolSearch",
+          action: "symbol.search",
+          args: { query: "target" },
+        },
+        {
+          fn: "testEcho",
+          action: "test.echo",
+          args: { message: "$0.results[0].symbolId" },
+        },
+      ],
+      onError: "continue",
+    };
+
+    const actionMap = createMockActionMap();
+    actionMap["symbol.search"].handler = async (args: unknown) => {
+      const { wireFormat } = args as { wireFormat?: string };
+      if (wireFormat !== "json") {
+        return { results: "#PACKED/1 fake" };
+      }
+      return { results: [{ symbolId: "sym-target" }] };
+    };
+
+    const result = await executeWorkflow(request, actionMap, testConfig);
+
+    assert.strictEqual(result.results[0].status, "ok");
+    assert.strictEqual(result.results[1].status, "ok");
+    assert.strictEqual(
+      (result.results[1].result as { message?: unknown }).message,
+      "sym-target",
+    );
+  });
 
   it("records truncated response tokens in session usage", async () => {
     tokenAccumulator.reset();
@@ -328,7 +389,10 @@ describe("code-mode workflow executor", () => {
     assert.strictEqual(result.results[1].status, "ok");
     assert.strictEqual(result.trace?.steps.length, 1);
     assert.strictEqual(result.trace?.steps[0]?.stepIndex, 1);
-    assert.strictEqual(result.trace?.steps[0]?.tokens, result.results[1].tokens);
+    assert.strictEqual(
+      result.trace?.steps[0]?.tokens,
+      result.results[1].tokens,
+    );
     assert.doesNotMatch(
       result.trace?.steps[0]?.summary ?? "",
       /suppressed by onlyFinalResult/,

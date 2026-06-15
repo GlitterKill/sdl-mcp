@@ -6,6 +6,7 @@
  */
 
 import { access, mkdtemp, writeFile, rm } from "fs/promises";
+import { randomUUID } from "node:crypto";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { ToolContext } from "../../server.js";
@@ -153,6 +154,15 @@ function detectQuotingWarnings(
   if (request.runtime === "node" && nodeEvalCode?.includes("\n")) {
     warnings.add(
       "Multiline node -e code is quoting-sensitive; prefer runtime.execute stdin for script input or searchEditPreview identifier/structural/operations[] targeting for edits.",
+    );
+  }
+  if (
+    request.runtime === "shell" &&
+    process.platform === "win32" &&
+    /;/.test(request.code ?? "")
+  ) {
+    warnings.add(
+      "Windows cmd.exe does not treat semicolons as command separators; use & or newlines in shell runtime code.",
     );
   }
   if (/@['"]\r?\n|\r?\n['"]@/.test(commandText)) {
@@ -480,6 +490,7 @@ export async function handleRuntimeExecute(
   }
 
   let tempCodeDir: string | undefined;
+  let tempCodePath: string | undefined;
 
   try {
     // 5. Resolve CWD
@@ -501,9 +512,14 @@ export async function handleRuntimeExecute(
     // 6. Handle code mode — write to temp file
     let codePath: string | undefined;
     if (request.code) {
-      tempCodeDir = await mkdtemp(join(tmpdir(), "sdl-runtime-code-"));
       const ext = getRuntimeExtension(request.runtime) ?? ".txt";
-      codePath = join(tempCodeDir, `code${ext}`);
+      if (request.runtime === "node") {
+        tempCodePath = join(cwd, `.sdl-runtime-code-${randomUUID()}${ext}`);
+        codePath = tempCodePath;
+      } else {
+        tempCodeDir = await mkdtemp(join(tmpdir(), "sdl-runtime-code-"));
+        codePath = join(tempCodeDir, `code${ext}`);
+      }
       await writeFile(codePath, request.code, {
         encoding: "utf-8",
         mode: 0o600,
@@ -937,7 +953,17 @@ export async function handleRuntimeExecute(
   } finally {
     tracker.release();
 
-    // Cleanup temp code directory
+    // Cleanup temp code file/directory.
+    if (tempCodePath) {
+      try {
+        await rm(tempCodePath, { force: true });
+      } catch (err) {
+        logger.warn("Failed to cleanup temp code file", {
+          path: tempCodePath,
+          error: String(err),
+        });
+      }
+    }
     if (tempCodeDir) {
       try {
         await rm(tempCodeDir, { recursive: true, force: true });

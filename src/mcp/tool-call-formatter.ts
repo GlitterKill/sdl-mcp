@@ -86,7 +86,6 @@ function appendIndented(lines: string[], text: string, maxChars = 1200): void {
   }
 }
 
-
 function appendDiffPreview(
   lines: string[],
   snippetsValue: unknown,
@@ -200,9 +199,14 @@ function fmtCodeNeedWindow(
   result: Record<string, unknown>,
 ): string | null {
   const approved = result.approved;
-  const status = approved ? "approved" : "denied";
-  const downgraded = result.downgradedFrom
-    ? ` (downgraded from ${str(result.downgradedFrom)})`
+  const downgradedFrom = str(result.downgradedFrom);
+  const status = approved
+    ? downgradedFrom === "raw-code"
+      ? "approved hot-path excerpt"
+      : "approved"
+    : "denied";
+  const downgraded = downgradedFrom
+    ? ` (raw window downgraded from ${downgradedFrom})`
     : "";
   const estimatedTokens = num(result.estimatedTokens);
   if (!approved) {
@@ -437,7 +441,9 @@ function fmtSearchEditApply(result: Record<string, unknown>): string | null {
   const failed = num(result.filesFailed);
   const skipped = num(result.filesSkipped);
   const fileEntriesByPath = new Map(
-    records(result.fileEntries).map((entry) => [str(entry.file), entry] as const),
+    records(result.fileEntries).map(
+      (entry) => [str(entry.file), entry] as const,
+    ),
   );
   const lines = [
     `search.edit apply -> ${written}/${attempted} ${plural(attempted, "file")} written${failed > 0 ? `, ${failed} failed` : ""}${skipped > 0 ? `, ${skipped} skipped` : ""}`,
@@ -471,14 +477,17 @@ function fmtRuntimeExecute(
   result: Record<string, unknown>,
 ): string | null {
   const status = str(result.status) || "complete";
-  const exitCode = typeof result.exitCode === "number" ? result.exitCode : undefined;
-  const duration = typeof result.durationMs === "number" ? result.durationMs : undefined;
+  const exitCode =
+    typeof result.exitCode === "number" ? result.exitCode : undefined;
+  const duration =
+    typeof result.durationMs === "number" ? result.durationMs : undefined;
   const artifact = str(result.artifactHandle);
   const lines = [
     `runtime.execute -> ${status}${exitCode !== undefined ? ` (exit ${exitCode})` : ""}${duration !== undefined ? ` in ${duration}ms` : ""}${artifact ? `; artifact ${artifact}` : ""}`,
   ];
 
-  const stdinBytes = typeof result.stdinBytes === "number" ? result.stdinBytes : undefined;
+  const stdinBytes =
+    typeof result.stdinBytes === "number" ? result.stdinBytes : undefined;
   const stdinSha = str(result.stdinSha256);
   if (stdinBytes !== undefined) {
     lines.push(
@@ -560,7 +569,9 @@ function fmtActionSearch(
   result: Record<string, unknown>,
 ): string | null {
   const summary =
-    result.summary && typeof result.summary === "object" && !Array.isArray(result.summary)
+    result.summary &&
+    typeof result.summary === "object" &&
+    !Array.isArray(result.summary)
       ? (result.summary as Record<string, unknown>)
       : undefined;
   const actions = records(result.actions);
@@ -627,9 +638,12 @@ const GENERIC_DISPLAY_SKIP_FIELDS = new Set([
 ]);
 
 function compactValue(value: unknown, max = 140): string {
-  if (typeof value === "string") return truncName(value.replace(/\s+/g, " "), max);
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? "" : "s"}`;
+  if (typeof value === "string")
+    return truncName(value.replace(/\s+/g, " "), max);
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
+  if (Array.isArray(value))
+    return `${value.length} item${value.length === 1 ? "" : "s"}`;
   if (value && typeof value === "object") return "object";
   return "";
 }
@@ -707,7 +721,6 @@ function fmtGeneric(
   return lines.join("\n");
 }
 
-
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -757,7 +770,9 @@ export function formatToolCallForUser(
   }
   const formatter = formatters[toolName];
   try {
-    return formatter?.(args, recordResult) ?? fmtGeneric(toolName, recordResult);
+    return (
+      formatter?.(args, recordResult) ?? fmtGeneric(toolName, recordResult)
+    );
   } catch {
     return fmtGeneric(toolName, recordResult);
   }

@@ -25,7 +25,7 @@ import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { z } from "zod";
 import { getActiveFnNameMap, getActiveActionToFn } from "./manual-generator.js";
-import { findRefsInArgs } from "./workflow-parser.js";
+import { findRefsInArgs, type ParsedWorkflowStep } from "./workflow-parser.js";
 import {
   attachTimingDiagnostics,
   ToolPhaseTimer,
@@ -94,6 +94,33 @@ function attachStepMetadataToPriorResult(
 function stripTrailingSentencePunctuation(value: string): string {
   return value.replace(/[.!?]+$/u, "");
 }
+const JSON_REFERENCEABLE_WIRE_ACTIONS = new Set([
+  "symbol.search",
+  "slice.build",
+  "sdl.context",
+]);
+
+function findReferencedStepIndexes(steps: ParsedWorkflowStep[]): Set<number> {
+  const referenced = new Set<number>();
+  for (const step of steps) {
+    for (const ref of findRefsInArgs(step.args)) {
+      referenced.add(ref);
+    }
+  }
+  return referenced;
+}
+
+function needsJsonForLaterReference(
+  step: ParsedWorkflowStep,
+  stepIndex: number,
+  referencedStepIndexes: Set<number>,
+): boolean {
+  return (
+    !step.internal &&
+    referencedStepIndexes.has(stepIndex) &&
+    JSON_REFERENCEABLE_WIRE_ACTIONS.has(step.action)
+  );
+}
 
 /**
  * Execute a parsed workflow request sequentially, resolving $N references,
@@ -123,6 +150,7 @@ export async function executeWorkflow(
   const stepResults: WorkflowStepResult[] = [];
   const traceSteps: WorkflowTraceStep[] = [];
   const startTime = Date.now();
+  const referencedStepIndexes = findReferencedStepIndexes(request.steps);
 
   const traceCatalog =
     traceOpts && (traceOpts.includeSchemas || traceOpts.includeExamples)
@@ -259,6 +287,12 @@ export async function executeWorkflow(
     const resolveRefsStartedAt = timer.start();
     try {
       resolvedArgs = resolveRefs(step.args, priorResults);
+      if (
+        needsJsonForLaterReference(step, i, referencedStepIndexes) &&
+        resolvedArgs.wireFormat === undefined
+      ) {
+        resolvedArgs = { ...resolvedArgs, wireFormat: "json" };
+      }
       timer.record("workflow.resolveRefs", resolveRefsStartedAt);
     } catch (error) {
       timer.record("workflow.resolveRefs", resolveRefsStartedAt);
