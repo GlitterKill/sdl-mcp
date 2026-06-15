@@ -1690,6 +1690,507 @@ describe("provider-first indexing foundation", () => {
     assert.equal(facts.coverage[0]?.callProofUnavailableReferences, 0);
   });
 
+  it("proves JVM constructor references whose provider display name is <init>", () => {
+    const main =
+      "semanticdb maven maven/com.example/app 1.0.0 example/CardAdapter#fromJson().";
+    const cardConstructor =
+      "semanticdb maven maven/com.example/app 1.0.0 example/Card#`<init>`(+1).";
+    const facts = normalizeScipProviderFacts({
+      repoId: "repo",
+      generationId: "gen-1",
+      providerId: "scip-java",
+      sourceTextByPath: new Map([
+        [
+          "example/CardAdapter.java",
+          [
+            "class CardAdapter {",
+            "  Card fromJson(char rank) {",
+            "    return new Card(rank);",
+            "  }",
+            "}",
+          ].join("\n"),
+        ],
+      ]),
+      externalSymbols: [
+        {
+          symbol: cardConstructor,
+          documentation: [],
+          relationships: [],
+          kind: 9,
+          displayName: "<init>",
+        },
+      ],
+      documents: [
+        {
+          language: "java",
+          relativePath: "example/CardAdapter.java",
+          occurrences: [
+            {
+              range: { startLine: 1, startCol: 7, endLine: 1, endCol: 15 },
+              enclosingRange: {
+                startLine: 1,
+                startCol: 2,
+                endLine: 3,
+                endCol: 3,
+              },
+              symbol: main,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 2, startCol: 15, endLine: 2, endCol: 19 },
+              symbol: cardConstructor,
+              symbolRoles: 8,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+          ],
+          symbols: [
+            {
+              symbol: main,
+              documentation: [],
+              relationships: [],
+              kind: 6,
+              displayName: "fromJson",
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(
+      facts.edges.some((edge) => edge.edgeType === "call"),
+      true,
+    );
+    assert.equal(facts.coverage[0]?.callProofCoverage, "full");
+    assert.equal(facts.coverage[0]?.callProofUnavailableReferences, 0);
+  });
+
+  it("proves qualified JVM/Kotlin constructor references by terminal name", () => {
+    const main =
+      "semanticdb maven maven/com.example/app 1.0.0 example/BridgeKt#bridge().";
+    const dispatcherConstructor =
+      "semanticdb maven maven/com.example/app 1.0.0 mockwebserver3/Dispatcher#`<init>`().";
+    const facts = normalizeScipProviderFacts({
+      repoId: "repo",
+      generationId: "gen-1",
+      providerId: "scip-java",
+      sourceTextByPath: new Map([
+        [
+          "example/Bridge.kt",
+          [
+            "fun bridge() {",
+            "  object : mockwebserver3.Dispatcher() {}",
+            "}",
+          ].join("\n"),
+        ],
+      ]),
+      externalSymbols: [
+        {
+          symbol: dispatcherConstructor,
+          documentation: [],
+          relationships: [],
+          kind: 9,
+          displayName: "<init>",
+        },
+      ],
+      documents: [
+        {
+          language: "kotlin",
+          relativePath: "example/Bridge.kt",
+          occurrences: [
+            {
+              range: { startLine: 0, startCol: 4, endLine: 0, endCol: 10 },
+              enclosingRange: {
+                startLine: 0,
+                startCol: 0,
+                endLine: 2,
+                endCol: 1,
+              },
+              symbol: main,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 1, startCol: 11, endLine: 1, endCol: 36 },
+              symbol: dispatcherConstructor,
+              symbolRoles: 8,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+          ],
+          symbols: [
+            {
+              symbol: main,
+              documentation: [],
+              relationships: [],
+              kind: 12,
+              displayName: "bridge",
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(
+      facts.edges.some((edge) => edge.edgeType === "call"),
+      true,
+    );
+    assert.equal(facts.coverage[0]?.callProofCoverage, "full");
+    assert.equal(facts.coverage[0]?.callProofUnavailableReferences, 0);
+  });
+
+  it("proves qualified JVM/Kotlin type references with invocation syntax", () => {
+    const main =
+      "semanticdb maven maven/com.example/app 1.0.0 example/BridgeKt#bridge().";
+    const dispatcherType =
+      "semanticdb maven maven/com.example/app 1.0.0 mockwebserver3/Dispatcher#";
+    const facts = normalizeScipProviderFacts({
+      repoId: "repo",
+      generationId: "gen-1",
+      providerId: "scip-java",
+      sourceTextByPath: new Map([
+        [
+          "example/Bridge.kt",
+          [
+            "fun bridge() {",
+            "  object : mockwebserver3.Dispatcher() {}",
+            "}",
+          ].join("\n"),
+        ],
+      ]),
+      externalSymbols: [
+        {
+          symbol: dispatcherType,
+          documentation: [],
+          relationships: [],
+          kind: 5,
+          displayName: "Dispatcher",
+        },
+      ],
+      documents: [
+        {
+          language: "kotlin",
+          relativePath: "example/Bridge.kt",
+          occurrences: [
+            {
+              range: { startLine: 0, startCol: 4, endLine: 0, endCol: 10 },
+              enclosingRange: {
+                startLine: 0,
+                startCol: 0,
+                endLine: 2,
+                endCol: 1,
+              },
+              symbol: main,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 1, startCol: 11, endLine: 1, endCol: 36 },
+              symbol: dispatcherType,
+              symbolRoles: 8,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+          ],
+          symbols: [
+            {
+              symbol: main,
+              documentation: [],
+              relationships: [],
+              kind: 12,
+              displayName: "bridge",
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(
+      facts.edges.some((edge) => edge.edgeType === "call"),
+      true,
+    );
+    assert.equal(facts.coverage[0]?.callProofCoverage, "full");
+    assert.equal(facts.coverage[0]?.callProofUnavailableReferences, 0);
+  });
+
+  it("proves JVM this and super constructor delegation calls through type symbols", () => {
+    const delegatedConstructor =
+      "semanticdb maven maven/com.example/app 1.0.0 example/JsonValueSource#`<init>`().";
+    const delegatedType =
+      "semanticdb maven maven/com.example/app 1.0.0 example/JsonValueSource#";
+    const superType =
+      "semanticdb maven maven/com.example/app 1.0.0 example/JsonReader#";
+    const sourceText = [
+      "class JsonValueSource extends JsonReader {",
+      "  JsonValueSource() {",
+      "    this(null);",
+      "  }",
+      "  JsonValueSource(Object value) {",
+      "    super(value);",
+      "  }",
+      "}",
+    ].join("\n");
+    const facts = normalizeScipProviderFacts({
+      repoId: "repo",
+      generationId: "gen-1",
+      providerId: "scip-java",
+      sourceTextByPath: new Map([["example/JsonValueSource.java", sourceText]]),
+      externalSymbols: [
+        {
+          symbol: delegatedType,
+          documentation: [],
+          relationships: [],
+          kind: 5,
+          displayName: "JsonValueSource",
+        },
+        {
+          symbol: superType,
+          documentation: [],
+          relationships: [],
+          kind: 5,
+          displayName: "JsonReader",
+        },
+      ],
+      documents: [
+        {
+          language: "java",
+          relativePath: "example/JsonValueSource.java",
+          occurrences: [
+            {
+              range: { startLine: 1, startCol: 2, endLine: 1, endCol: 17 },
+              enclosingRange: {
+                startLine: 1,
+                startCol: 2,
+                endLine: 6,
+                endCol: 3,
+              },
+              symbol: delegatedConstructor,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 2, startCol: 4, endLine: 2, endCol: 8 },
+              symbol: delegatedType,
+              symbolRoles: 8,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 5, startCol: 4, endLine: 5, endCol: 9 },
+              symbol: superType,
+              symbolRoles: 8,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+          ],
+          symbols: [
+            {
+              symbol: delegatedConstructor,
+              documentation: [],
+              relationships: [],
+              kind: 9,
+              displayName: "<init>",
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(
+      facts.edges.filter((edge) => edge.edgeType === "call").length,
+      2,
+    );
+    assert.equal(facts.coverage[0]?.callProofCoverage, "full");
+    assert.equal(facts.coverage[0]?.callProofUnavailableReferences, 0);
+  });
+
+  it("keeps broad JVM delegated property spans neutral when ranges exceed source lines", () => {
+    const owner =
+      "semanticdb maven maven/com.example/app 1.0.0 example/Main#";
+    const property =
+      "semanticdb maven maven/com.example/app 1.0.0 example/Main#userAgent.";
+    const getter =
+      "semanticdb maven maven/com.example/app 1.0.0 example/Main#getUserAgent().";
+    const facts = normalizeScipProviderFacts({
+      repoId: "repo",
+      generationId: "gen-1",
+      providerId: "scip-java",
+      sourceTextByPath: new Map([
+        [
+          "example/Main.kt",
+          [
+            "class Main {",
+            "  val userAgent: String by option(",
+            "    \"--user-agent\",",
+            "  )",
+            "}",
+          ].join("\n"),
+        ],
+      ]),
+      documents: [
+        {
+          language: "kotlin",
+          relativePath: "example/Main.kt",
+          occurrences: [
+            {
+              range: { startLine: 0, startCol: 6, endLine: 0, endCol: 10 },
+              enclosingRange: {
+                startLine: 0,
+                startCol: 0,
+                endLine: 4,
+                endCol: 1,
+              },
+              symbol: owner,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 1, startCol: 6, endLine: 1, endCol: 15 },
+              enclosingRange: {
+                startLine: 1,
+                startCol: 2,
+                endLine: 3,
+                endCol: 3,
+              },
+              symbol: property,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 1, startCol: 27, endLine: 1, endCol: 152 },
+              symbol: property,
+              symbolRoles: 8,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 1, startCol: 27, endLine: 1, endCol: 152 },
+              symbol: getter,
+              symbolRoles: 8,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+          ],
+          symbols: [
+            {
+              symbol: owner,
+              documentation: [],
+              relationships: [],
+              kind: 5,
+              displayName: "Main",
+            },
+            {
+              symbol: property,
+              documentation: [],
+              relationships: [],
+              kind: 7,
+              displayName: "userAgent",
+            },
+            {
+              symbol: getter,
+              documentation: [],
+              relationships: [],
+              kind: 6,
+              displayName: "getUserAgent",
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(
+      facts.edges.filter((edge) => edge.edgeType === "call").length,
+      0,
+    );
+    assert.equal(facts.coverage[0]?.callProofUnavailableReferences, 0);
+  });
+
+  it("keeps broad JVM type spans neutral when ranges exceed source lines", () => {
+    const protocol =
+      "semanticdb maven maven/com.example/app 1.0.0 example/Protocol#";
+    const facts = normalizeScipProviderFacts({
+      repoId: "repo",
+      generationId: "gen-1",
+      providerId: "scip-java",
+      sourceTextByPath: new Map([
+        [
+          "example/Protocol.kt",
+          [
+            "/** Protocol docs. */",
+            "enum class Protocol {",
+            "  HTTP_1_1,",
+            "}",
+          ].join("\n"),
+        ],
+      ]),
+      documents: [
+        {
+          language: "kotlin",
+          relativePath: "example/Protocol.kt",
+          occurrences: [
+            {
+              range: { startLine: 1, startCol: 11, endLine: 1, endCol: 19 },
+              enclosingRange: {
+                startLine: 1,
+                startCol: 0,
+                endLine: 3,
+                endCol: 1,
+              },
+              symbol: protocol,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 0, startCol: 0, endLine: 0, endCol: 3901 },
+              symbol: protocol,
+              symbolRoles: 8,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+          ],
+          symbols: [
+            {
+              symbol: protocol,
+              documentation: [],
+              relationships: [],
+              kind: 10,
+              displayName: "Protocol",
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(
+      facts.edges.filter((edge) => edge.edgeType === "call").length,
+      0,
+    );
+    assert.equal(facts.coverage[0]?.callProofUnavailableReferences, 0);
+  });
+
   it("keeps Python module qualifier ranges neutral when source invokes a member", () => {
     const main = "scip-python python example 0.0.0 `pkg.script`/main().";
     const module = "scip-python python example 0.0.0 `lit.util`/__init__:";

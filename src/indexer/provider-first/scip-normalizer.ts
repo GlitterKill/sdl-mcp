@@ -1213,7 +1213,11 @@ function extractDotScopedMemberName(name: string): string {
 
 function isConstructorSymbolName(name: string): boolean {
   const normalized = name.replace(/`/g, "").toLowerCase();
-  return normalized === "<constructor>" || normalized === "constructor";
+  return (
+    normalized === "<constructor>" ||
+    normalized === "<init>" ||
+    normalized === "constructor"
+  );
 }
 
 function extractConstructorOwnerNameFromDescriptors(descriptors: string): string {

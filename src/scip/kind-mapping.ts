@@ -221,6 +221,9 @@ function classifyDescriptorSuffix(descriptors: string): DescriptorKind {
   if (isPythonModuleInitializerDescriptor(descriptors)) {
     return "moduleInitializer";
   }
+  if (isBracketedTypeParameterDescriptor(descriptors)) {
+    return "typeParameter";
+  }
   if (descriptors.endsWith("/")) return "namespace";
 
   const lastChar = descriptors[descriptors.length - 1];
@@ -250,6 +253,11 @@ function classifyDescriptorSuffix(descriptors: string): DescriptorKind {
 
 function isPythonModuleInitializerDescriptor(descriptors: string): boolean {
   return descriptors.endsWith("/__init__:");
+}
+
+function isBracketedTypeParameterDescriptor(descriptors: string): boolean {
+  const openIndex = descriptors.lastIndexOf("[");
+  return openIndex !== -1 && openIndex < descriptors.length - 1 && descriptors.endsWith("]");
 }
 
 /**

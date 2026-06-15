@@ -91,6 +91,12 @@ Go SCIP indexes receive two provider-specific normalization guards before graph 
 
 Rust-analyzer namespace descriptors ending in `/`, such as `cluster/`, are materialized as SDL `module` symbols. Repeated crate namespace descriptors such as `crate/` are coalesced to one provider symbol while every occurrence still resolves to that symbol ID. Remaining `unknown descriptor suffix` diagnostics point at descriptor shapes that still need explicit mapping rather than the standard Rust module form.
 
+JVM SCIP indexes from `scip-java` receive these normalization guards:
+
+- Java/Kotlin constructor descriptors named `` `<init>` `` are treated as constructors even when the descriptor uses SCIP-Java's arity form, such as `` `<init>`(+1).``.
+- JVM type-parameter descriptors written with bracketed suffixes, such as `RecordJsonAdapter#[T]`, are skipped as type parameters instead of being reported as unknown descriptor suffixes.
+- Broad Java/Kotlin declaration spans that exceed the physical source line stay neutral when they describe delegated properties or type/class declarations. These ranges are not source-proven invocations and should not block provider-first shadow activation.
+
 ## Accuracy Gates
 
 Provider-first writes are guarded by five accuracy gates:
@@ -360,6 +366,9 @@ Provider-first SCIP execution runs cluster/process/algorithm derived state after
 Call proof includes several language-aware cases:
 
 - Constructor symbols whose SCIP display name is `` `<constructor>` `` are compared against the owning class name, so `new Executor()` can prove the constructor call without being treated as provider/source drift.
+- JVM constructor symbols whose SCIP display name is `` `<init>` `` are also compared against the owning class name, including parameter-count descriptors such as `` `<init>`(+1).``. This covers Java/Kotlin `new Type(...)`, `this(...)`, and `super(...)` constructor references emitted by `scip-java`.
+- JVM qualified constructor/type references whose source range covers a fully qualified receiver, such as `mockwebserver3.Dispatcher()`, prove the terminal type or constructor name only when the range is followed by invocation syntax.
+- JVM delegated-property spans and broad type/class spans whose provider range exceeds the source line remain neutral instead of being counted as call-proof gaps.
 - Scoped anonymous/type-literal member symbols such as `typeLiteral753:cleanupSession` are compared against their member suffix, so `cleanupSession()` remains provable when SCIP includes the synthetic owner in the symbol name.
 - Python nested callable descriptors such as `eventclass().wrapper` are compared against the terminal callable name, so `wrapper()` can prove the call without globally accepting arbitrary suffix matches.
 - Python import clauses whose SCIP range covers `name as local_name` contribute only the file-local alias as an extra proof candidate, so `_get_op_result_or_value(...)` can prove the imported `get_op_result_or_value` helper while leaving the alias scoped to that document.

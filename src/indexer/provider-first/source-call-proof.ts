@@ -144,6 +144,13 @@ function proveExactSourceOccurrenceCall(
   }
   const sourceRange = resolveSourceColumnRange(line, params.range);
   if (!sourceRange) {
+    if (isNeutralJvmOutOfBoundsReference(params, line)) {
+      return {
+        matched: false,
+        reason: "rangeOutOfBounds",
+        callCandidate: false,
+      };
+    }
     return { matched: false, reason: "rangeOutOfBounds" };
   }
 
@@ -225,6 +232,27 @@ function proveExactSourceOccurrenceCall(
       sourceRange,
       occurrenceText,
       line,
+    )
+  ) {
+    return { matched: true, line, invocationEndLine: params.range.endLine };
+  }
+  if (
+    isQualifiedSourceInvocationForExpectedName(
+      params.providerSymbolId,
+      params.expectedNames,
+      occurrenceText,
+      line,
+      sourceRange.endCol,
+    )
+  ) {
+    return { matched: true, line, invocationEndLine: params.range.endLine };
+  }
+  if (
+    isJvmConstructorSelfOrSuperInvocation(
+      params.providerSymbolId,
+      occurrenceText,
+      line,
+      sourceRange.endCol,
     )
   ) {
     return { matched: true, line, invocationEndLine: params.range.endLine };
@@ -330,6 +358,99 @@ function isPythonModuleQualifierMemberInvocation(
 function isPythonQualifiedName(value: string): boolean {
   if (value.length === 0) return false;
   return value.split(".").every((part) => isIdentifierText(part));
+}
+
+function isQualifiedSourceInvocationForExpectedName(
+  providerSymbolId: string,
+  expectedNames: readonly string[],
+  occurrenceText: string,
+  line: string,
+  endCol: number,
+): boolean {
+  if (!isJvmSymbolScheme(providerSymbolId)) return false;
+  if (!hasInvocationSuffix(line, endCol)) return false;
+  const parts = occurrenceText.split(".");
+  if (parts.length < 2 || !parts.every((part) => isIdentifierText(part))) {
+    return false;
+  }
+  const terminalName = parts[parts.length - 1] ?? "";
+  return expectedNames.includes(terminalName);
+}
+
+function isJvmConstructorSelfOrSuperInvocation(
+  providerSymbolId: string,
+  occurrenceText: string,
+  line: string,
+  endCol: number,
+): boolean {
+  return (
+    isJvmConstructorDelegationTargetSymbol(providerSymbolId) &&
+    (occurrenceText === "this" || occurrenceText === "super") &&
+    hasInvocationSuffix(line, endCol)
+  );
+}
+
+function isJvmSymbolScheme(providerSymbolId: string): boolean {
+  const { scheme } = parseScipSymbol(providerSymbolId);
+  return isJvmScheme(scheme);
+}
+
+function isJvmConstructorDelegationTargetSymbol(providerSymbolId: string): boolean {
+  const parsed = parseScipSymbol(providerSymbolId);
+  if (!isJvmScheme(parsed.scheme)) return false;
+  // scip-java may attach this(...)/super(...) references to either the
+  // constructor descriptor or the owning class/superclass descriptor.
+  return (
+    /#`?<init>`?\([^)]*\)\.$/.test(parsed.descriptors) ||
+    parsed.descriptors.endsWith("#")
+  );
+}
+
+function isNeutralJvmOutOfBoundsReference(
+  params: SourceCallProofParams,
+  line: string,
+): boolean {
+  const parsed = parseScipSymbol(params.providerSymbolId);
+  if (!isJvmScheme(parsed.scheme)) return false;
+  if (params.range.startCol > line.length || params.range.endCol <= line.length) {
+    return false;
+  }
+  if (parsed.descriptors.endsWith("#")) return true;
+
+  const propertyName = jvmAccessorPropertyName(parsed.descriptors);
+  for (const expectedName of [...params.expectedNames, propertyName]) {
+    if (expectedName && isJvmPropertyDeclarationLine(line, expectedName)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function jvmAccessorPropertyName(descriptors: string): string {
+  const descriptorName = descriptorLeafName(descriptors);
+  const match = /^(?:get|set|is)([A-Z].*)$/.exec(descriptorName);
+  if (!match?.[1]) return "";
+  return `${match[1][0]?.toLowerCase() ?? ""}${match[1].slice(1)}`;
+}
+
+function descriptorLeafName(descriptors: string): string {
+  const stripped = descriptors.replace(/\([^)]*\)\.$/, "").replace(/[.#]$/, "");
+  const separatorIndex = Math.max(stripped.lastIndexOf("#"), stripped.lastIndexOf("/"));
+  return stripped.slice(separatorIndex + 1).replace(/`/g, "");
+}
+
+function isJvmPropertyDeclarationLine(line: string, propertyName: string): boolean {
+  return new RegExp(
+    `\\b(?:val|var)\\s+${escapeRegExp(propertyName)}\\b`,
+  ).test(line);
+}
+
+function isJvmScheme(scheme: string): boolean {
+  return (
+    scheme === "semanticdb" ||
+    scheme === "scip-java" ||
+    scheme === "scip-kotlin"
+  );
 }
 
 function isCxxOperatorDeclarationReference(

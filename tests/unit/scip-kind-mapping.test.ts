@@ -384,6 +384,14 @@ describe("mapScipKind", () => {
       if (!result.skip) assert.strictEqual(result.sdlKind, "module");
     });
 
+    it("skips bracketed JVM type parameter descriptors as type parameters", () => {
+      const result = mapScipKind(
+        "semanticdb maven maven/com.squareup.moshi/moshi 1.13.0 com/squareup/moshi/RecordJsonAdapter#[T]",
+      );
+      assert.strictEqual(result.skip, true);
+      if (result.skip) assert.strictEqual(result.reason, "typeParameter");
+    });
+
     it("extracts module name from scip-python initializer descriptors", () => {
       assert.strictEqual(
         extractNameFromDescriptors("`fixtures.page_objects`/__init__:"),
