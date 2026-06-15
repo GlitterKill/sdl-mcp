@@ -103,8 +103,8 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/sdk-trace-base": "^2.6.0",
-    "@opentelemetry/sdk-trace-node": "^2.6.0",
+    "@opentelemetry/sdk-trace-base": "^2.8.0",
+    "@opentelemetry/sdk-trace-node": "^2.8.0",
     "tree-sitter": "npm:@keqingmoe/tree-sitter@0.26.2",
     "tree-sitter-bash": "npm:sdl-mcp-tree-sitter-bash@^1.0.1",
     "tree-sitter-c": "npm:sdl-mcp-tree-sitter-c@^1.0.1",
@@ -140,7 +140,7 @@
   "devDependencies": {
     "@bufbuild/protobuf": "^2.0.0",
     "@napi-rs/cli": "^2.18.0",
-    "@opentelemetry/sdk-trace-web": "^2.6.0",
+    "@opentelemetry/sdk-trace-web": "^2.8.0",
     "@stryker-mutator/core": "^9.6.0",
     "@types/node": "^24.0.0",
     "eslint": "^10.1.0",
