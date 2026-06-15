@@ -213,7 +213,7 @@ The staging directory is created beside the active graph DB at `provider-first-s
 - A loaded `shadow.lbug`.
 - A manifest with staged counts, expected versus actual shadow-load counts, copy order, requested format, actual format, secondary-index warnings, shadow-load status, and validation metadata.
 
-CSV staging uses an explicit LadybugDB `NULL_STRINGS` sentinel so nullable values do not collapse with intentional empty-string sentinels. Shadow `COPY` runs with `PARALLEL=FALSE` because provider symbol names and signatures can contain quoted newlines that LadybugDB's parallel CSV reader rejects. `providerFirst.stagingFormat: "parquet"` currently falls back to CSV and records that reason in the manifest because Parquet writing is not bundled yet.
+CSV staging uses an explicit LadybugDB `NULL_STRINGS` sentinel so nullable values do not collapse with intentional empty-string sentinels. Shadow `COPY` runs with `PARALLEL=FALSE` and `QUOTE='"'` because provider symbol names, signatures, and source paths can contain quoted newlines or late comma-bearing values that LadybugDB's inferred CSV settings may otherwise reject. `providerFirst.stagingFormat: "parquet"` currently falls back to CSV and records that reason in the manifest because Parquet writing is not bundled yet.
 
 When same-run legacy fallback is skipped by the configured cap, SDL-MCP skips shadow staging because finalization and activation remain ineligible while uncovered files are intentionally absent. If provider call-proof gaps already make graph-derived state dirty, shadow staging and finalization are skipped because the provider call edges are not trusted enough for a shadow graph. The active graph still receives normal finalization rows, and the CLI reports the skipped shadow reason.
 
@@ -375,6 +375,7 @@ Call proof includes several language-aware cases:
 - Python module initializer references that expand to a qualified member invocation, such as `lit.util` inside `lit.util.warning(...)`, remain neutral because the module is not the invoked callable.
 - File-local aliases from named imports such as `import { original as localAlias }` are accepted only within the document that declares the alias, so `localAlias()` can prove a call to `original` without globally relaxing the symbol text check.
 - Non-import TypeScript `as` expressions are not treated as aliases.
+- C#/.NET overload arity descriptors from `scip-dotnet`, such as `CharacteristicObject#GetValue(+1).`, are canonicalized to the normal callable descriptor `CharacteristicObject#GetValue().` before symbol identity, name extraction, relationship mapping, and source call proof.
 
 ### C And C++ Proof Rules
 
@@ -501,6 +502,7 @@ Provider normalization:
 - Cross-index SCIP overlap coalescing at the provider fact-set boundary, with provider runs retained but duplicate file-local graph facts suppressed.
 - Definition-owned SCIP symbol materialization so referenced-only `SymbolInformation` metadata resolves occurrences without creating duplicate file-local symbols.
 - scip-go normalization that skips the synthetic empty-path package document and strips backtick-wrapped import paths from Go package descriptors before SDL name extraction.
+- scip-dotnet normalization that strips overload arity descriptors before SDL symbol identity and source-facing name extraction, so method definitions and references share one provider key.
 - Rust-analyzer namespace descriptors ending in `/` are normalized into usable SDL `module` symbols, with repeated crate namespace descriptors coalesced to one provider symbol.
 
 Full-refresh execution:
@@ -523,7 +525,7 @@ Readiness, validation, and provenance:
 
 Shadow DB and diagnostics:
 
-- Shadow staging artifacts and bulk load: provider-materialized rows, plus same-run legacy fallback rows when fallback parsing runs, are written as streaming table-shaped CSV files plus a manifest beside the active graph DB, then loaded into a fresh shadow `.lbug` with node `COPY` before relationship `COPY`, explicit CSV null handling, secondary indexes built after the load, checkpointing, and expected-versus-actual row-count validation.
+- Shadow staging artifacts and bulk load: provider-materialized rows, plus same-run legacy fallback rows when fallback parsing runs, are written as streaming table-shaped CSV files plus a manifest beside the active graph DB, then loaded into a fresh shadow `.lbug` with node `COPY` before relationship `COPY`, explicit CSV quote/null handling, secondary indexes built after the load, checkpointing, and expected-versus-actual row-count validation.
 - Shadow finalization and activation handoff: loaded shadow DBs receive finalized active graph rows through finalization CSV artifacts and LadybugDB `COPY`, active-versus-shadow parity validation, explicit activation eligibility reasons, and a live close/swap/reopen handoff that keeps a previous active DB backup and rolls back if activation or reopen fails.
 - Provider-first phase timing in normal CLI summaries, including provider collection subphase buckets, SCIP normalizer subphase buckets, active materialization subphase buckets, and the combined provider-symbol `nodeAndRelCreate` `COPY` bucket, independent of broad `--diagnostics` output, so optimization work can target the slowest provider-first bucket from ordinary indexing runs.
 

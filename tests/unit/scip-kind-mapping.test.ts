@@ -6,6 +6,8 @@ import {
   extractPackageInfo,
   isExternalSymbol,
   extractNameFromDescriptors,
+  normalizeDotnetDescriptors,
+  normalizeDescriptorsForScipScheme,
   LSP_KIND,
 } from "../../dist/scip/kind-mapping.js";
 
@@ -188,6 +190,29 @@ describe("extractNameFromDescriptors", () => {
 
   it("returns empty string for empty descriptors", () => {
     assert.strictEqual(extractNameFromDescriptors(""), "");
+  });
+});
+
+describe("normalizeDotnetDescriptors", () => {
+  it("normalizes scip-dotnet overload arity to callable descriptors", () => {
+    assert.strictEqual(
+      normalizeDotnetDescriptors("Characteristics/CharacteristicObject#GetValue(+1)."),
+      "Characteristics/CharacteristicObject#GetValue().",
+    );
+    assert.strictEqual(
+      normalizeDotnetDescriptors("Analysers/Conclusion#Equals(+1).(obj)"),
+      "Analysers/Conclusion#Equals().(obj)",
+    );
+  });
+
+  it("runs through scheme-specific descriptor normalization", () => {
+    assert.strictEqual(
+      normalizeDescriptorsForScipScheme(
+        "scip-dotnet",
+        "Analysers/ZeroMeasurementHelper#AreIndistinguishable(+1).",
+      ),
+      "Analysers/ZeroMeasurementHelper#AreIndistinguishable().",
+    );
   });
 });
 

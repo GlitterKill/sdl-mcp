@@ -1843,7 +1843,7 @@ async function copyArtifact(
   await execDdl(
     conn,
     `COPY ${tableName} FROM '${escapeCopyPath(artifact.path)}' ` +
-      `(HEADER=true, PARALLEL=FALSE, NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
+      `(HEADER=true, PARALLEL=FALSE, QUOTE='"', NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
   );
 }
 

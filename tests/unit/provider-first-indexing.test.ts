@@ -3099,6 +3099,107 @@ describe("provider-first indexing foundation", () => {
     assert.deepEqual(facts.coverage[0]?.callProofUnavailableReasons, []);
   });
 
+  it("canonicalizes scip-dotnet overload arity for call proof and symbol identity", () => {
+    const main = "scip-dotnet nuget . . CharacteristicObject#Main().";
+    const getValue = "scip-dotnet nuget . . CharacteristicObject#GetValue().";
+    const getValueArity =
+      "scip-dotnet nuget . . CharacteristicObject#GetValue(+1).";
+    const facts = normalizeScipProviderFacts({
+      repoId: "repo",
+      generationId: "gen-1",
+      providerId: "scip-dotnet",
+      sourceTextByPath: new Map([
+        [
+          "CharacteristicObject.cs",
+          [
+            "class CharacteristicObject {",
+            "  void Main() {",
+            "    GetValue(1);",
+            "  }",
+            "  int GetValue(int value) { return value; }",
+            "}",
+          ].join("\n"),
+        ],
+      ]),
+      documents: [
+        {
+          language: "csharp",
+          relativePath: "CharacteristicObject.cs",
+          occurrences: [
+            {
+              range: { startLine: 1, startCol: 7, endLine: 1, endCol: 11 },
+              enclosingRange: {
+                startLine: 1,
+                startCol: 2,
+                endLine: 3,
+                endCol: 3,
+              },
+              symbol: main,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 2, startCol: 4, endLine: 2, endCol: 12 },
+              symbol: getValueArity,
+              symbolRoles: 8,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+            {
+              range: { startLine: 4, startCol: 6, endLine: 4, endCol: 14 },
+              enclosingRange: {
+                startLine: 4,
+                startCol: 2,
+                endLine: 4,
+                endCol: 47,
+              },
+              symbol: getValue,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+          ],
+          symbols: [
+            {
+              symbol: main,
+              documentation: [],
+              relationships: [],
+              kind: 6,
+              displayName: "",
+            },
+            {
+              symbol: getValue,
+              documentation: [],
+              relationships: [],
+              kind: 6,
+              displayName: "",
+            },
+          ],
+        },
+      ],
+    });
+
+    const callEdges = facts.edges.filter((edge) => edge.edgeType === "call");
+    assert.equal(callEdges.length, 1);
+    assert.equal(callEdges[0]?.resolution, "exact");
+    assert.equal(facts.coverage[0]?.callProofCoverage, "full");
+    assert.equal(facts.coverage[0]?.callProofUnavailableReferences, 0);
+    assert.equal(
+      facts.symbols.some((symbol) => symbol.providerSymbolId === getValueArity),
+      false,
+    );
+    assert.ok(
+      facts.symbols.some(
+        (symbol) =>
+          symbol.providerSymbolId === getValue && symbol.name === "GetValue",
+      ),
+    );
+  });
+
   it("keeps invocation-shaped symbol-text mismatches as call-proof incomplete", () => {
     const main = "scip-typescript npm example 1.0.0 src/index.ts/main().";
     const helper = "scip-typescript npm example 1.0.0 src/index.ts/helper().";
@@ -7652,6 +7753,45 @@ describe("provider-first indexing foundation", () => {
         summary.shadowDb?.path ?? "",
       );
       assert.equal(shadowSymbols[0]?.name, rows.symbols[0]?.name);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loads shadow CSV file paths with late quoted commas", async () => {
+    const root = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-shadow-comma-"),
+    );
+    try {
+      const rows = providerFactsToGraphRows({
+        indexedAt: "2026-05-25T12:00:00.000Z",
+        facts: providerFactSet(),
+      });
+      const baseFile = rows.files[0]!;
+      const extraFiles = Array.from({ length: 650 }, (_, index) => ({
+        ...baseFile,
+        fileId: `file-extra-${index}`,
+        relPath:
+          index === 624
+            ? "obj/Debug/netstandard2.0/.NETStandard,Version=v2.0.AssemblyAttributes.cs"
+            : `src/generated/file-${index}.cs`,
+        contentHash: (index % 16).toString(16).repeat(64),
+        byteSize: 100 + index,
+      }));
+      rows.files = [baseFile, ...extraFiles];
+
+      const summary = await stageProviderFirstShadowBuild({
+        repoId: "repo",
+        generationId: "provider-first:test",
+        activation: "shadowDb",
+        requestedFormat: "csv",
+        activeDbPath: join(root, "active.lbug"),
+        rows,
+      });
+
+      assert.equal(summary.status, "staged");
+      assert.equal(summary.shadowDb?.status, "loaded");
+      assert.equal(summary.shadowDb?.actualCounts.files, rows.files.length);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

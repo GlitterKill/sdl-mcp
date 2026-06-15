@@ -443,6 +443,10 @@ export function isGoStyleSymbolScheme(scheme: string): boolean {
   return scheme === "scip-go";
 }
 
+export function isDotnetStyleSymbolScheme(scheme: string): boolean {
+  return scheme === "scip-dotnet";
+}
+
 export function normalizeDescriptorsForScipScheme(
   scheme: string,
   descriptors: string,
@@ -453,7 +457,21 @@ export function normalizeDescriptorsForScipScheme(
   if (isGoStyleSymbolScheme(scheme)) {
     return normalizeGoDescriptors(descriptors);
   }
+  if (isDotnetStyleSymbolScheme(scheme)) {
+    return normalizeDotnetDescriptors(descriptors);
+  }
   return descriptors;
+}
+
+export function normalizeDotnetDescriptors(descriptors: string): string {
+  // scip-dotnet encodes overload arity in method descriptors, for example
+  // `Type#Method(+1).`, while source ranges and SymbolInformation for the
+  // definition use the callable token `Method`. Canonicalize the descriptor to
+  // the normal SCIP callable shape so references and definitions share one key.
+  return descriptors.replace(
+    /(^|[/#.])([^/#.()[\]]+)\(\+\d+\)(?=\.)/g,
+    "$1$2()",
+  );
 }
 
 export function normalizeGoDescriptors(descriptors: string): string {

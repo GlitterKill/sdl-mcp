@@ -3,6 +3,7 @@ import {
   extractNameFromDescriptors,
   extractPackageInfo,
   isClangStyleSymbolScheme,
+  isDotnetStyleSymbolScheme,
   mapScipKind,
   normalizeDescriptorsForScipScheme,
   parseScipSymbol,
@@ -231,7 +232,8 @@ export function normalizeScipProviderFacts(
   });
 
   measureNormalizePhase(options, "externalSymbols", () => {
-    for (const externalSymbol of options.externalSymbols ?? []) {
+    for (const rawExternalSymbol of options.externalSymbols ?? []) {
+      const externalSymbol = canonicalizeExternalSymbol(rawExternalSymbol);
       const externalFact = externalSymbolToFact(context, externalSymbol);
       if (!externalFact) continue;
       context.symbolIdsByProviderId.set(
@@ -404,21 +406,25 @@ function coalesceScipDocumentsByRelPath(
   const relPathOrder: string[] = [];
 
   for (const document of documents) {
-    if (!isSourceBackedScipDocument(document)) continue;
-    const relPath = normalizePath(document.relativePath);
+    const canonicalDocument = canonicalizeProviderSymbolIds(document);
+    if (!isSourceBackedScipDocument(canonicalDocument)) continue;
+    const relPath = normalizePath(canonicalDocument.relativePath);
     const existing = documentsByPath.get(relPath);
     if (!existing) {
       relPathOrder.push(relPath);
       documentsByPath.set(relPath, {
-        language: document.language,
+        language: canonicalDocument.language,
         relativePath: relPath,
-        occurrences: dedupeScipOccurrences(document.occurrences),
-        symbols: mergeScipSymbolInfos([], document.symbols),
+        occurrences: dedupeScipOccurrences(canonicalDocument.occurrences),
+        symbols: mergeScipSymbolInfos([], canonicalDocument.symbols),
       });
       continue;
     }
 
-    documentsByPath.set(relPath, mergeScipDocuments(existing, document, relPath));
+    documentsByPath.set(
+      relPath,
+      mergeScipDocuments(existing, canonicalDocument, relPath),
+    );
   }
 
   const coalesced: ScipDocument[] = [];
@@ -427,6 +433,62 @@ function coalesceScipDocumentsByRelPath(
     if (document) coalesced.push(document);
   }
   return coalesced;
+}
+
+function canonicalizeProviderSymbolIds(document: ScipDocument): ScipDocument {
+  return {
+    language: document.language,
+    relativePath: document.relativePath,
+    occurrences: document.occurrences.map((occurrence) => ({
+      ...occurrence,
+      symbol: canonicalizeProviderSymbolId(occurrence.symbol),
+    })),
+    symbols: document.symbols.map((info) => ({
+      ...info,
+      symbol: canonicalizeProviderSymbolId(info.symbol),
+      relationships: canonicalizeScipRelationships(info.relationships),
+      ...(info.enclosingSymbol
+        ? { enclosingSymbol: canonicalizeProviderSymbolId(info.enclosingSymbol) }
+        : {}),
+    })),
+  };
+}
+
+function canonicalizeExternalSymbol(
+  externalSymbol: ScipExternalSymbol,
+): ScipExternalSymbol {
+  return {
+    ...externalSymbol,
+    symbol: canonicalizeProviderSymbolId(externalSymbol.symbol),
+    relationships: canonicalizeScipRelationships(externalSymbol.relationships),
+  };
+}
+
+function canonicalizeScipRelationships(
+  relationships: readonly ScipRelationship[] | undefined,
+): ScipRelationship[] {
+  return (relationships ?? []).map((relationship) => ({
+    ...relationship,
+    symbol: canonicalizeProviderSymbolId(relationship.symbol),
+  }));
+}
+
+function canonicalizeProviderSymbolId(providerSymbolId: string): string {
+  const parsed = parseScipSymbol(providerSymbolId);
+  if (!isDotnetStyleSymbolScheme(parsed.scheme)) return providerSymbolId;
+
+  const descriptors = normalizeDescriptorsForScipScheme(
+    parsed.scheme,
+    parsed.descriptors,
+  );
+  if (descriptors === parsed.descriptors) return providerSymbolId;
+  return [
+    parsed.scheme,
+    parsed.manager,
+    parsed.packageName,
+    parsed.packageVersion,
+    descriptors,
+  ].join(" ");
 }
 
 function isSourceBackedScipDocument(document: ScipDocument): boolean {
@@ -1089,13 +1151,27 @@ function collectDefinitionOccurrencesBySymbol(
 }
 
 function displayName(info: { symbol: string; displayName: string }): string {
-  if (info.displayName.length > 0) return info.displayName;
   const parsed = parseScipSymbol(info.symbol);
+  if (info.displayName.length > 0) {
+    return normalizedDisplayNameForScipScheme(parsed.scheme, info.displayName);
+  }
   const descriptors = normalizedDescriptorsForSymbol(
     parsed.scheme,
     parsed.descriptors,
   );
   return extractNameFromDescriptors(descriptors) || info.symbol;
+}
+
+function normalizedDisplayNameForScipScheme(
+  scheme: string,
+  displayNameText: string,
+): string {
+  if (!isDotnetStyleSymbolScheme(scheme)) return displayNameText;
+  const descriptors = normalizeDescriptorsForScipScheme(
+    scheme,
+    `${displayNameText}.`,
+  );
+  return extractNameFromDescriptors(descriptors) || displayNameText;
 }
 
 export function sourceTextCandidatesForScipSymbol(
