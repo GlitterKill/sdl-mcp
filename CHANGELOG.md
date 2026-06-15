@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.6] - 2026-06-15
+
+### Fixed
+
+- **Native Go parser stability**: Updated the native Rust tree-sitter runtime and Go grammar to the 0.25 line so valid Go files parse through the native addon instead of returning `tree-sitter parse returned None` or risking stale grammar crashes. Added Rust and Node-level dependency regressions for the native Go parser path.
+- **Provider-first Go SCIP normalization**: Skipped scip-go's synthetic empty-path package document, normalized backtick-wrapped Go import-path descriptors before SCIP kind/name mapping, and made shadow finalization honor freshly staged unresolved/external symbol classifications when copying active edges, symbol versions, metrics, and parity counts. This prevents fake `.` files, import-path-shaped Go symbol names, and stale active provider metadata rows from blocking provider-first shadow activation.
+- **Stable derived-state startup recovery**: Skipped canonical Cluster and Process row rewrites when computed derived-state topology is unchanged, avoiding LadybugDB FTS access violations from no-op `searchText` updates while still repairing missing Cluster FTS indexes.
+
+### Security
+
+- **Dependency audit cleanup**: Raised the transitive `tar` override to 7.5.16 and refreshed Babel lockfile entries to patched 7.29.7 releases, restoring a clean `npm audit --audit-level=moderate` gate.
+
+_4 commits from 1 contributor_
+
 ## [0.11.5] - 2026-06-15
 
 ### Added
@@ -23,11 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Index runtime provenance**: `sdl-mcp index` now prints the loaded SDL-MCP package version, Node.js version, and command module path, and delegated HTTP indexing reports the server process runtime identity so benchmark logs can distinguish current builds from stale global installs or long-lived servers. Per-repo summaries also report caller-visible wall time separately from indexed-phase duration so SCIP generator/pre-refresh cost is visible in normal logs.
 - **SCIP generator cache**: Generated scip-io artifacts are cached under `~/.sdl-mcp/cache/scip-io/` by source/config fingerprint and restored on unchanged refreshes, avoiding expensive compiler generator runs on repeated full indexes. Warm hits use a latest stat-signature manifest before falling back to the exact content-hash fingerprint path, keeping large unchanged repos from hashing every input file just to restore cached SCIP output. Usable generated indexes are now cached even when `scip-io` exits nonzero because another requested language failed, so mixed-language repos can reuse the successful language artifact on the next unchanged run. CLI summaries report generator cache hit/store diagnostics when the cache participates, including separate generator, prepare, save, and restore timing buckets when available.
 - **Provider-first coverage denominators**: C/C++ provider-first summaries now split the broad SDL-MCP scan scope from SCIP semantic eligibility. The semantic denominator is the union of scan-scope files named by discovered `compile_commands.json` entries and provider-emitted C/C++ header/include documents inside scan scope, while provider document counts still report the SCIP docs emitted inside scan scope.
-
-### Fixed
-
-- **Native Go parser stability**: Updated the native Rust tree-sitter runtime and Go grammar to the 0.25 line so valid Go files parse through the native addon instead of returning `tree-sitter parse returned None` or risking stale grammar crashes. Added Rust and Node-level dependency regressions for the native Go parser path.
-- **Provider-first Go SCIP normalization**: Skipped scip-go's synthetic empty-path package document, normalized backtick-wrapped Go import-path descriptors before SCIP kind/name mapping, and made shadow finalization honor freshly staged unresolved/external symbol classifications when copying active edges, symbol versions, metrics, and parity counts. This prevents fake `.` files, import-path-shaped Go symbol names, and stale active provider metadata rows from blocking provider-first shadow activation.
 
 ### Changed
 
@@ -73,7 +82,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **File watcher ignores**: Compiled repository ignore globs into the Chokidar startup predicate so modern Chokidar versions prune ignored directories such as `node_modules`, `.bun`, `dist-*`, and build outputs before opening watches. Watcher event filtering now reuses the same glob semantics and the scanner's language-extension mapping, keeping watcher scope aligned with indexed source files and preventing `EMFILE: too many open files, watch` storms in dependency-heavy repos.
 - **MCP tool schema compatibility**: Flattened root-level `oneOf`/`anyOf`/`allOf` composition in advertised tool input schemas, including `sdl.search.edit`, `sdl.symbol.edit`, and gateway wire schemas, so Claude/Anthropic clients that require top-level `type: "object"` schemas can accept SDL-MCP tool lists while runtime Zod validation remains strict.
 - **Cluster refresh crash**: Dropped and rebuilt the Cluster FTS index around topology-changing cluster replacement so LadybugDB does not access-violate when deleting the old cluster set during delegated incremental indexing. Rebuilds now fail closed when FTS is available, skip only when the global Cluster table is empty, and recreate Cluster FTS when rows return after an absent-index state.
-- **Stable derived-state startup recovery**: Skipped canonical Cluster and Process row rewrites when computed derived-state topology is unchanged, avoiding LadybugDB FTS access violations from no-op `searchText` updates while still repairing missing Cluster FTS indexes.
 - **FTS bootstrap safety**: Deferred FTS index creation for empty entity tables and made FTS existence checks table-aware so same-name indexes on other tables do not mask missing required indexes.
 - **Plugin adapter startup**: Loaded configured plugin adapters during server, CLI serve, direct indexing, and CLI tool startup so plugin `structuralMatcher` descriptors are available to `search.edit`, and resolved configured plugin paths relative to the config file with trusted-root containment.
 - **Search edit hardening**: Reused realpath-validated, handle-based, size-capped file reads for single and batch previews; capped structural `requiredCaptures` maps to bounded safe keys; and added an aggregate structural query time budget that is checked before candidate parsing.
