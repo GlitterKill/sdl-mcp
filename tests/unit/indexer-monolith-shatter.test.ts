@@ -21,10 +21,14 @@ describe("indexer.ts monolith shattering", () => {
     watcher: join(repoRoot, "src/indexer/watcher.ts"),
     edgeBuilder: join(repoRoot, "src/indexer/edge-builder.ts"),
     metricsUpdater: join(repoRoot, "src/indexer/metrics-updater.ts"),
-    indexerFinalizeEdges: join(repoRoot, "src/indexer/indexer-finalize-edges.ts"),
+    indexerFinalizeEdges: join(
+      repoRoot,
+      "src/indexer/indexer-finalize-edges.ts",
+    ),
     indexerInit: join(repoRoot, "src/indexer/indexer-init.ts"),
     indexerVersion: join(repoRoot, "src/indexer/indexer-version.ts"),
     indexerPass1: join(repoRoot, "src/indexer/indexer-pass1.ts"),
+    indexerPass1Policy: join(repoRoot, "src/indexer/indexer-pass1-policy.ts"),
     indexerPass2: join(repoRoot, "src/indexer/indexer-pass2.ts"),
     indexerPass2ImportCache: join(
       repoRoot,
@@ -115,6 +119,10 @@ describe("indexer.ts monolith shattering", () => {
       "missing src/indexer/indexer-pass1.ts",
     );
     assert.ok(
+      existsSync(modulePaths.indexerPass1Policy),
+      "missing src/indexer/indexer-pass1-policy.ts",
+    );
+    assert.ok(
       existsSync(modulePaths.indexerPass2),
       "missing src/indexer/indexer-pass2.ts",
     );
@@ -149,6 +157,10 @@ describe("indexer.ts monolith shattering", () => {
     assert.ok(
       countLines(modulePaths.indexerPass1) <= extractedModuleMaxLines,
       "indexer-pass1.ts too large; split further",
+    );
+    assert.ok(
+      countLines(modulePaths.indexerPass1Policy) <= extractedModuleMaxLines,
+      "indexer-pass1-policy.ts too large; split further",
     );
     assert.ok(
       countLines(modulePaths.indexerPass2) <= extractedModuleMaxLines,
