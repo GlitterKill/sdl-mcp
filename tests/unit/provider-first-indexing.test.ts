@@ -7387,6 +7387,189 @@ describe("provider-first indexing foundation", () => {
     }
   });
 
+  it("finalizes shadow DBs when staged provider metadata supersedes stale active real rows", async () => {
+    const root = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-finalize-stale-real-metadata-"),
+    );
+    const activeDbPath = join(root, "active.lbug");
+    const shadowDbPath = join(root, "shadow.lbug");
+    const kuzu = await import("kuzu");
+    const activeDb = new kuzu.Database(activeDbPath);
+    const activeConn = new kuzu.Connection(activeDb);
+    const shadowDb = new kuzu.Database(shadowDbPath);
+    const shadowConn = new kuzu.Connection(shadowDb);
+    const repoId = "repo";
+    const fileId = "file-1";
+    const sourceSymbolId = "source-symbol";
+    const metadataSymbolId = "provider-metadata-symbol";
+    const metadataScipSymbol =
+      "scip-go gomod pkg 1.0.0 `example.com/repo/pkg`/Type#default().";
+    const versionId = "version-1";
+    const now = "2026-05-26T00:00:00.000Z";
+
+    try {
+      await createBaseSchema(activeConn);
+      await createBaseSchema(shadowConn);
+      await seedRepoFileAndSourceSymbol(activeConn, {
+        repoId,
+        fileId,
+        sourceSymbolId,
+        now,
+      });
+      await seedRepoFileAndSourceSymbol(shadowConn, {
+        repoId,
+        fileId,
+        sourceSymbolId,
+        now,
+      });
+      await dbExec(
+        activeConn,
+        `MATCH (r:Repo {repoId: $repoId})
+         MATCH (f:File {fileId: $fileId})
+         MERGE (target:Symbol {symbolId: $metadataSymbolId})
+         SET target.repoId = $repoId,
+             target.kind = 'method',
+             target.name = 'default',
+             target.exported = true,
+             target.visibility = '',
+             target.language = 'go',
+             target.rangeStartLine = 0,
+             target.rangeStartCol = 0,
+             target.rangeEndLine = 0,
+             target.rangeEndCol = 0,
+             target.astFingerprint = $metadataSymbolId,
+             target.signatureJson = '',
+             target.summary = '',
+             target.summaryQuality = 0.0,
+             target.summarySource = 'provider:scip',
+             target.invariantsJson = '',
+             target.sideEffectsJson = '',
+             target.roleTagsJson = '',
+             target.searchText = 'default',
+             target.updatedAt = $now,
+             target.external = false,
+             target.source = 'scip',
+             target.packageName = '',
+             target.packageVersion = '',
+             target.scipSymbol = $metadataScipSymbol,
+             target.symbolStatus = 'real',
+             target.placeholderKind = '',
+             target.placeholderTarget = ''
+         MERGE (target)-[:SYMBOL_IN_REPO]->(r)
+         MERGE (target)-[:SYMBOL_IN_FILE]->(f)
+         MERGE (v:Version {versionId: $versionId})
+         SET v.createdAt = $now,
+             v.reason = 'test',
+             v.prevVersionHash = null,
+             v.versionHash = 'hash'
+         MERGE (v)-[:VERSION_OF_REPO]->(r)
+         MERGE (sv:SymbolVersion {id: $metadataSymbolId + ':' + $versionId})
+         SET sv.versionId = $versionId,
+             sv.symbolId = $metadataSymbolId,
+             sv.astFingerprint = $metadataSymbolId,
+             sv.signatureJson = '',
+             sv.summary = '',
+             sv.invariantsJson = '',
+             sv.sideEffectsJson = ''
+         MERGE (m:Metrics {symbolId: $metadataSymbolId})
+         SET m.fanIn = 0,
+             m.fanOut = 0,
+             m.churn30d = 0,
+             m.testRefsJson = '[]',
+             m.canonicalTestJson = '[]',
+             m.pageRank = 0.0,
+             m.kCore = 0,
+             m.updatedAt = $now`,
+        {
+          repoId,
+          fileId,
+          metadataSymbolId,
+          metadataScipSymbol,
+          versionId,
+          now,
+        },
+      );
+      await dbExec(
+        shadowConn,
+        `MATCH (r:Repo {repoId: $repoId})
+         MATCH (f:File {fileId: $fileId})
+         MERGE (target:Symbol {symbolId: $metadataSymbolId})
+         SET target.repoId = $repoId,
+             target.kind = 'method',
+             target.name = 'default',
+             target.exported = true,
+             target.visibility = '',
+             target.language = 'go',
+             target.rangeStartLine = 0,
+             target.rangeStartCol = 0,
+             target.rangeEndLine = 0,
+             target.rangeEndCol = 0,
+             target.astFingerprint = $metadataSymbolId,
+             target.signatureJson = '',
+             target.summary = '',
+             target.summaryQuality = 0.0,
+             target.summarySource = 'provider:scip',
+             target.invariantsJson = '',
+             target.sideEffectsJson = '',
+             target.roleTagsJson = '',
+             target.searchText = 'default',
+             target.updatedAt = $now,
+             target.external = false,
+             target.source = 'scip',
+             target.packageName = '',
+             target.packageVersion = '',
+             target.scipSymbol = $metadataScipSymbol,
+             target.symbolStatus = 'unresolved',
+             target.placeholderKind = 'provider-metadata',
+             target.placeholderTarget = $metadataScipSymbol
+         MERGE (target)-[:SYMBOL_IN_REPO]->(r)
+         MERGE (target)-[:SYMBOL_IN_FILE]->(f)`,
+        {
+          repoId,
+          fileId,
+          metadataSymbolId,
+          metadataScipSymbol,
+          now,
+        },
+      );
+      await shadowConn.close();
+      await shadowDb.close();
+
+      const summary = await finalizeProviderFirstShadowDb({
+        activeConn,
+        repoId,
+        versionId,
+        shadowDbPath,
+      });
+
+      assert.equal(summary.status, "finalized", summary.reasons.join("\n"));
+      assert.equal(summary.expectedCounts?.symbols, 1);
+      assert.equal(summary.expectedCounts?.symbolVersions, 0);
+      assert.equal(summary.expectedCounts?.metrics, 0);
+
+      const finalizedDb = new kuzu.Database(shadowDbPath);
+      const finalizedConn = new kuzu.Connection(finalizedDb);
+      try {
+        const staleRows = await queryAll<{ count: unknown }>(
+          finalizedConn,
+          `MATCH (sv:SymbolVersion {symbolId: $metadataSymbolId})
+           RETURN count(sv) AS count`,
+          { metadataSymbolId },
+        );
+        assert.equal(Number(staleRows[0]?.count ?? 0), 0);
+      } finally {
+        await finalizedConn.close().catch(() => {});
+        await finalizedDb.close().catch(() => {});
+      }
+    } finally {
+      await activeConn.close().catch(() => {});
+      await activeDb.close().catch(() => {});
+      await shadowConn.close().catch(() => {});
+      await shadowDb.close().catch(() => {});
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("finalizes shadow DBs with semantic provenance and normalized provider call provenance", async () => {
     const root = mkdtempSync(
       join(tmpdir(), "sdl-provider-first-finalize-provenance-"),

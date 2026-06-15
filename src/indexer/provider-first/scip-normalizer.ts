@@ -4,7 +4,7 @@ import {
   extractPackageInfo,
   isClangStyleSymbolScheme,
   mapScipKind,
-  normalizeClangDescriptors,
+  normalizeDescriptorsForScipScheme,
   parseScipSymbol,
 } from "../../scip/kind-mapping.js";
 import {
@@ -404,6 +404,7 @@ function coalesceScipDocumentsByRelPath(
   const relPathOrder: string[] = [];
 
   for (const document of documents) {
+    if (!isSourceBackedScipDocument(document)) continue;
     const relPath = normalizePath(document.relativePath);
     const existing = documentsByPath.get(relPath);
     if (!existing) {
@@ -426,6 +427,11 @@ function coalesceScipDocumentsByRelPath(
     if (document) coalesced.push(document);
   }
   return coalesced;
+}
+
+function isSourceBackedScipDocument(document: ScipDocument): boolean {
+  const relPath = normalizePath(document.relativePath);
+  return relPath !== "" && relPath !== ".";
 }
 
 function mergeScipDocuments(
@@ -1085,7 +1091,7 @@ function collectDefinitionOccurrencesBySymbol(
 function displayName(info: { symbol: string; displayName: string }): string {
   if (info.displayName.length > 0) return info.displayName;
   const parsed = parseScipSymbol(info.symbol);
-  const descriptors = clangNormalizedDescriptorsForSymbol(
+  const descriptors = normalizedDescriptorsForSymbol(
     parsed.scheme,
     parsed.descriptors,
   );
@@ -1103,7 +1109,7 @@ export function sourceTextCandidatesForScipSymbol(
   };
 
   const parsed = parseScipSymbol(providerSymbolId);
-  const descriptors = clangNormalizedDescriptorsForSymbol(
+  const descriptors = normalizedDescriptorsForSymbol(
     parsed.scheme,
     parsed.descriptors,
   );
@@ -1170,13 +1176,11 @@ function stripCppTrailingTemplateArguments(name: string): string {
   return "";
 }
 
-function clangNormalizedDescriptorsForSymbol(
+function normalizedDescriptorsForSymbol(
   scheme: string,
   descriptors: string,
 ): string {
-  return scheme === "scip-clang" || scheme === "cxx"
-    ? normalizeClangDescriptors(descriptors)
-    : descriptors;
+  return normalizeDescriptorsForScipScheme(scheme, descriptors);
 }
 
 function extractInvocationOwnerMemberName(name: string): string {
@@ -1353,7 +1357,7 @@ function hasScopedCxxTypeOccurrenceBeforeDeclarator(
     if (!isClangStyleSymbolScheme(parsed.scheme)) continue;
     if (
       extractNameFromDescriptors(
-        clangNormalizedDescriptorsForSymbol(parsed.scheme, parsed.descriptors),
+        normalizedDescriptorsForSymbol(parsed.scheme, parsed.descriptors),
       ) !== sourceType
     ) {
       continue;
@@ -1369,7 +1373,7 @@ function hasScopedCxxTypeOccurrenceBeforeDeclarator(
 function cxxConstructorNameFromProviderSymbol(providerSymbolId: string): string {
   const parsed = parseScipSymbol(providerSymbolId);
   if (!isClangStyleSymbolScheme(parsed.scheme)) return "";
-  const descriptors = clangNormalizedDescriptorsForSymbol(
+  const descriptors = normalizedDescriptorsForSymbol(
     parsed.scheme,
     parsed.descriptors,
   );
@@ -1388,7 +1392,7 @@ function cxxConstructorNameFromProviderSymbol(providerSymbolId: string): string 
 function cxxTypeScopePrefixForSymbol(providerSymbolId: string): string {
   const parsed = parseScipSymbol(providerSymbolId);
   if (!isClangStyleSymbolScheme(parsed.scheme)) return "";
-  const descriptors = clangNormalizedDescriptorsForSymbol(
+  const descriptors = normalizedDescriptorsForSymbol(
     parsed.scheme,
     parsed.descriptors,
   );

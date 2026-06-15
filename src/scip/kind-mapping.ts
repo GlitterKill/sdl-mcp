@@ -431,6 +431,40 @@ export function isClangStyleSymbolScheme(scheme: string): boolean {
   return scheme === "scip-clang" || scheme === "cxx";
 }
 
+export function isGoStyleSymbolScheme(scheme: string): boolean {
+  return scheme === "scip-go";
+}
+
+export function normalizeDescriptorsForScipScheme(
+  scheme: string,
+  descriptors: string,
+): string {
+  if (isClangStyleSymbolScheme(scheme)) {
+    return normalizeClangDescriptors(descriptors);
+  }
+  if (isGoStyleSymbolScheme(scheme)) {
+    return normalizeGoDescriptors(descriptors);
+  }
+  return descriptors;
+}
+
+export function normalizeGoDescriptors(descriptors: string): string {
+  if (!descriptors.startsWith("`")) return descriptors;
+
+  const closingBacktick = descriptors.indexOf("`", 1);
+  if (closingBacktick === -1) return descriptors;
+
+  const suffix = descriptors.slice(closingBacktick + 1);
+  if (!suffix.startsWith("/")) return descriptors;
+
+  const packagePath = descriptors.slice(1, closingBacktick);
+  const packageSegments = packagePath.split("/").filter(Boolean);
+  const packageName = packageSegments.at(-1);
+  if (!packageName) return descriptors;
+
+  return packageName + suffix;
+}
+
 /**
  * Given a string ending in `)`, find the index of the matching `(` by
  * scanning right-to-left with a depth counter. Handles nested parens
@@ -491,10 +525,10 @@ export function mapScipKind(scipSymbol: string, kind?: number): ScipKindResult {
   // see the same descriptor shape used by other emitters. This strips C++
   // parameter lists and overload disambiguator hashes that tree-sitter does
   // not see on the SDL side.
-  const descriptors =
-    isClangStyleSymbolScheme(parsed.scheme)
-      ? normalizeClangDescriptors(parsed.descriptors)
-      : parsed.descriptors;
+  const descriptors = normalizeDescriptorsForScipScheme(
+    parsed.scheme,
+    parsed.descriptors,
+  );
 
   const descriptorKind = classifyDescriptorSuffix(descriptors);
 

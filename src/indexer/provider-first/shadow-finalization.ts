@@ -339,17 +339,23 @@ export async function finalizeProviderFirstShadowDb(
     const db = new kuzu.Database(shadowDbPath);
     const shadowConn = new kuzu.Connection(db);
     try {
+      const stagedAuxiliarySymbolIds = await readStagedAuxiliarySymbolIds(
+        shadowConn,
+        params.repoId,
+      );
       const bulkLoad = await copyFinalizedRows({
         activeConn: params.activeConn,
         shadowConn,
         repoId: params.repoId,
         versionId: params.versionId,
         shadowDbPath,
+        stagedAuxiliarySymbolIds,
       });
       const expectedCounts = await readFinalizationCounts(
         params.activeConn,
         params.repoId,
         params.versionId,
+        stagedAuxiliarySymbolIds,
       );
       const actualCounts = await readFinalizationCounts(
         shadowConn,
@@ -399,6 +405,7 @@ async function copyFinalizedRows(params: {
   repoId: string;
   versionId: string;
   shadowDbPath: string;
+  stagedAuxiliarySymbolIds: ReadonlySet<string>;
 }): Promise<ProviderFirstShadowFinalizationBulkLoadSummary> {
   const version = await ladybugDb.getVersion(params.activeConn, params.versionId);
   if (!version) {
@@ -408,7 +415,13 @@ async function copyFinalizedRows(params: {
   // Keep reads ordered on the active LadybugDB connection; finalization is an
   // activation safety gate, so deterministic driver usage matters more here
   // than overlapping queries on one connection.
-  const edges = await ladybugDb.getEdgesByRepo(params.activeConn, params.repoId);
+  const edges = (
+    await ladybugDb.getEdgesByRepo(params.activeConn, params.repoId)
+  ).filter(
+    (edge) =>
+      !params.stagedAuxiliarySymbolIds.has(edge.fromSymbolId) &&
+      !params.stagedAuxiliarySymbolIds.has(edge.toSymbolId),
+  );
   const auxiliarySymbols = await readAuxiliarySymbolsForRepo(
     params.activeConn,
     params.repoId,
@@ -419,14 +432,19 @@ async function copyFinalizedRows(params: {
   const edgeEndpointSymbols = await readEdgeTargetSymbolsForRepo(
     params.activeConn,
     params.repoId,
-    auxiliarySymbolIds,
+    new Set([...auxiliarySymbolIds, ...params.stagedAuxiliarySymbolIds]),
   );
   const symbolVersions = await readRealSymbolVersionsForRepoAtVersion(
     params.activeConn,
     params.repoId,
     params.versionId,
+    params.stagedAuxiliarySymbolIds,
   );
-  const metrics = await readMetricsForRepo(params.activeConn, params.repoId);
+  const metrics = await readMetricsForRepo(
+    params.activeConn,
+    params.repoId,
+    params.stagedAuxiliarySymbolIds,
+  );
   const fileSummaries = await ladybugDb.getFileSummariesForRepo(
     params.activeConn,
     params.repoId,
@@ -1554,6 +1572,21 @@ function symbolRowToFallbackParams(row: AuxiliarySymbolRow): {
   };
 }
 
+async function readStagedAuxiliarySymbolIds(
+  conn: Connection,
+  repoId: string,
+): Promise<Set<string>> {
+  const rows = await ladybugDb.queryAll<{ symbolId: string }>(
+    conn,
+    `MATCH (:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     WHERE coalesce(s.symbolStatus, 'real') <> 'real'
+        OR coalesce(s.external, false) = true
+     RETURN s.symbolId AS symbolId`,
+    { repoId },
+  );
+  return new Set(rows.map((row) => row.symbolId));
+}
+
 async function resetBulkFinalizationTargets(
   conn: Connection,
   repoId: string,
@@ -1863,7 +1896,11 @@ function escapeCopyOptionString(value: string): string {
 async function readMetricsForRepo(
   conn: Connection,
   repoId: string,
+  excludedSymbolIds: ReadonlySet<string>,
 ): Promise<ladybugDb.MetricsRow[]> {
+  const excluded = [...excludedSymbolIds];
+  const exclusionClause =
+    excluded.length > 0 ? "AND NOT s.symbolId IN $excludedSymbolIds" : "";
   const rows = await ladybugDb.queryAll<{
     symbolId: string;
     fanIn: unknown;
@@ -1879,6 +1916,7 @@ async function readMetricsForRepo(
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
      WHERE coalesce(s.symbolStatus, 'real') = 'real'
        AND coalesce(s.external, false) = false
+       ${exclusionClause}
      MATCH (m:Metrics {symbolId: s.symbolId})
      RETURN m.symbolId AS symbolId,
             m.fanIn AS fanIn,
@@ -1890,7 +1928,7 @@ async function readMetricsForRepo(
             m.kCore AS kCore,
             m.updatedAt AS updatedAt
      ORDER BY m.symbolId`,
-    { repoId },
+    { repoId, excludedSymbolIds: excluded },
   );
   return rows.map((row) => ({
     symbolId: row.symbolId,
@@ -1954,13 +1992,18 @@ async function readRealSymbolVersionsForRepoAtVersion(
   conn: Connection,
   repoId: string,
   versionId: string,
+  excludedSymbolIds: ReadonlySet<string>,
 ): Promise<ladybugDb.SymbolVersionRow[]> {
+  const excluded = [...excludedSymbolIds];
+  const exclusionClause =
+    excluded.length > 0 ? "AND NOT s.symbolId IN $excludedSymbolIds" : "";
   return await ladybugDb.queryAll<ladybugDb.SymbolVersionRow>(
     conn,
     `MATCH (sv:SymbolVersion {versionId: $versionId})
      MATCH (s:Symbol {symbolId: sv.symbolId})-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
      WHERE coalesce(s.symbolStatus, 'real') = 'real'
        AND coalesce(s.external, false) = false
+       ${exclusionClause}
      RETURN sv.id AS id,
             sv.versionId AS versionId,
             sv.symbolId AS symbolId,
@@ -1969,7 +2012,7 @@ async function readRealSymbolVersionsForRepoAtVersion(
             sv.summary AS summary,
             sv.invariantsJson AS invariantsJson,
             sv.sideEffectsJson AS sideEffectsJson`,
-    { repoId, versionId },
+    { repoId, versionId, excludedSymbolIds: excluded },
   );
 }
 
@@ -1977,7 +2020,15 @@ async function readFinalizationCounts(
   conn: Connection,
   repoId: string,
   versionId: string,
+  excludedSymbolIds: ReadonlySet<string> = new Set(),
 ): Promise<ProviderFirstShadowFinalizationCounts> {
+  const excluded = [...excludedSymbolIds];
+  const exclusionClause =
+    excluded.length > 0 ? "AND NOT s.symbolId IN $excludedSymbolIds" : "";
+  const edgeExclusionClause =
+    excluded.length > 0
+      ? "AND NOT s.symbolId IN $excludedSymbolIds AND NOT target.symbolId IN $excludedSymbolIds"
+      : "";
   return {
     files: await count(
       conn,
@@ -1990,8 +2041,9 @@ async function readFinalizationCounts(
       `MATCH (:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
        WHERE coalesce(s.symbolStatus, 'real') = 'real'
          AND coalesce(s.external, false) = false
+         ${exclusionClause}
        RETURN count(s) AS count`,
-      { repoId },
+      { repoId, excludedSymbolIds: excluded },
     ),
     auxiliarySymbols: await count(
       conn,
@@ -2003,9 +2055,11 @@ async function readFinalizationCounts(
     ),
     edges: await count(
       conn,
-      `MATCH (:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
+      `MATCH (:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[d:DEPENDS_ON]->(target:Symbol)
+       WHERE true
+         ${edgeExclusionClause}
        RETURN count(d) AS count`,
-      { repoId },
+      { repoId, excludedSymbolIds: excluded },
     ),
     versions: await count(
       conn,
@@ -2019,17 +2073,19 @@ async function readFinalizationCounts(
        MATCH (s:Symbol {symbolId: sv.symbolId})-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
        WHERE coalesce(s.symbolStatus, 'real') = 'real'
          AND coalesce(s.external, false) = false
+         ${exclusionClause}
        RETURN count(sv) AS count`,
-      { repoId, versionId },
+      { repoId, versionId, excludedSymbolIds: excluded },
     ),
     metrics: await count(
       conn,
       `MATCH (:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
        WHERE coalesce(s.symbolStatus, 'real') = 'real'
          AND coalesce(s.external, false) = false
+         ${exclusionClause}
        MATCH (m:Metrics {symbolId: s.symbolId})
        RETURN count(m) AS count`,
-      { repoId },
+      { repoId, excludedSymbolIds: excluded },
     ),
     fileSummaries: await count(
       conn,

@@ -10,9 +10,8 @@ import type { SymbolKind } from "../domain/types.js";
 import type { ScipSymbolMatch, ScipDocument, ScipRange } from "./types.js";
 import {
   extractNameFromDescriptors,
-  isClangStyleSymbolScheme,
   mapScipKind,
-  normalizeClangDescriptors,
+  normalizeDescriptorsForScipScheme,
   parseScipSymbol,
 } from "./kind-mapping.js";
 
@@ -214,10 +213,10 @@ function extractNameFromScipSymbol(scipSymbol: string): string {
     return parsed.descriptors;
   }
 
-  const descriptors =
-    isClangStyleSymbolScheme(parsed.scheme)
-      ? normalizeClangDescriptors(parsed.descriptors)
-      : parsed.descriptors;
+  const descriptors = normalizeDescriptorsForScipScheme(
+    parsed.scheme,
+    parsed.descriptors,
+  );
 
   return extractNameFromDescriptors(descriptors);
 }

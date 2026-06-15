@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Native Go parser stability**: Updated the native Rust tree-sitter runtime and Go grammar to the 0.25 line so valid Go files parse through the native addon instead of returning `tree-sitter parse returned None` or risking stale grammar crashes. Added Rust and Node-level dependency regressions for the native Go parser path.
+- **Provider-first Go SCIP normalization**: Skipped scip-go's synthetic empty-path package document, normalized backtick-wrapped Go import-path descriptors before SCIP kind/name mapping, and made shadow finalization honor freshly staged unresolved/external symbol classifications when copying active edges, symbol versions, metrics, and parity counts. This prevents fake `.` files, import-path-shaped Go symbol names, and stale active provider metadata rows from blocking provider-first shadow activation.
 
 ### Changed
 
