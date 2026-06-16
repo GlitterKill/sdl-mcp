@@ -119,6 +119,27 @@ describe("SemanticLspClient", () => {
     }
   });
 
+  it("advertises standard initialize capabilities", async () => {
+    const fixturePath = join(
+      process.cwd(),
+      "tests/fixtures/lsp/mock-capabilities-server.mjs",
+    );
+    const client = new SemanticLspClient({
+      serverId: "capabilities-server",
+      command: process.execPath,
+      args: [fixturePath],
+      workspaceRoot: process.cwd(),
+      timeoutMs: 1000,
+    });
+
+    try {
+      const initializeResult = await client.start();
+      assert.equal(initializeResult.serverInfo?.version, "standard");
+    } finally {
+      await client.dispose();
+    }
+  });
+
   it("does not hang when a server ignores shutdown", async () => {
     const fixturePath = join(
       process.cwd(),

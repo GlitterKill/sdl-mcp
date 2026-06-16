@@ -126,10 +126,10 @@
     "parserInstallMode": "on-demand when repo config includes powershell",
     "scipStatus": "no practical SCIP indexer",
     "lspIoServer": "powershell-editor-services",
-    "providerFirstStatus": "LSP server installed; provider-first validation pending",
+    "providerFirstStatus": "LSP provider-first validated",
     "validationRepo": "PowerShell/PowerShellGet",
     "validationEvidence": "devdocs/validation/provider-first-lsp-powershell-2026-06-16.md",
-    "notes": "PowerShell Editor Services 4.6.0 starts with -Stdio but does not answer initialize through SDL yet; provider-first falls back with 0 provider symbols."
+    "notes": "Validated 31/31 provider-primary files and 856 LSP symbols after SDL advertised standard initialize capabilities required by PowerShell Editor Services."
   },
   {
     "language": "Ruby",
@@ -150,10 +150,10 @@
     "parserInstallMode": "on-demand when repo config includes lua",
     "scipStatus": "no practical SCIP indexer",
     "lspIoServer": "lua-language-server",
-    "providerFirstStatus": "LSP provider-first subset validated; full validation pending",
+    "providerFirstStatus": "LSP provider-first validated",
     "validationRepo": "nvim-lua/plenary.nvim",
     "validationEvidence": "devdocs/validation/provider-first-lsp-lua-2026-06-16.md",
-    "notes": "Validated 40-file source-list subset with 3245 provider symbols; full-repo run still needs completion without a source-list cap."
+    "notes": "Validated 113/113 provider-primary files and 11844 LSP symbols across the full validation repository."
   },
   {
     "language": "Dart",

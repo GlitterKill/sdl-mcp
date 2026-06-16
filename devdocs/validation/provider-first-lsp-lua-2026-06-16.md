@@ -1,6 +1,6 @@
-# Provider-First LSP Lua Validation Attempt - 2026-06-16
+# Provider-First LSP Lua Validation - 2026-06-16
 
-This validation uses `nvim-lua/plenary.nvim` as the Lua Wave 1 repository. It proves the Lua lazy language-pack path can install/resolve a parser pack only after Lua is configured, consume `lsp-io` exported server config, materialize LSP-owned provider facts, pass the provider-first graph gate, and serve the normal symbol/card/slice/source-window smoke ladder on a bounded real-repo subset.
+This validation uses `nvim-lua/plenary.nvim` as the Lua Wave 1 repository. It proves the Lua lazy language-pack path can install and resolve a parser pack only after Lua is configured, consume `lsp-io` exported server config, materialize LSP-owned provider facts across the full repository, pass the provider-first graph gate, and serve the normal symbol/card/slice/source-window smoke ladder.
 
 Repository:
 
@@ -8,11 +8,7 @@ Repository:
 
 Graph database:
 
-`F:\Claude\projects\sdl-lsp-provider-first-repos\plenary.nvim\.tmp\sdl-provider-first-lsp-lua-subset.lbug`
-
-Source file list:
-
-`F:\Claude\projects\sdl-lsp-provider-first-repos\plenary.nvim\.tmp\lua-source-list.txt`
+`F:\Claude\projects\sdl-lsp-provider-first-repos\plenary.nvim\.tmp\sdl-provider-first-lsp-lua-full.lbug`
 
 ## LSP-IO Setup
 
@@ -77,36 +73,34 @@ C:\Users\glitt\.sdl-mcp\cache\language-packs\node_modules\tree-sitter-lua
 
 ## Provider-First Index
 
-The full repo attempt was started first, but it remained running without DB progress after the client tool timeout. The validation PIDs were stopped and the run was narrowed to a deterministic 40-file source list for bounded evidence.
-
 Command:
 
 ```powershell
-$env:SDL_CONFIG='F:\Claude\projects\sdl-lsp-provider-first-repos\plenary.nvim\sdlmcp.lua.config.json'
-$env:SDL_GRAPH_DB_PATH='F:\Claude\projects\sdl-lsp-provider-first-repos\plenary.nvim\.tmp\sdl-provider-first-lsp-lua-subset.lbug'
+$env:SDL_CONFIG='F:\Claude\projects\sdl-lsp-provider-first-repos\plenary.nvim\sdlmcp.lua.full.config.json'
+$env:SDL_GRAPH_DB_PATH='F:\Claude\projects\sdl-lsp-provider-first-repos\plenary.nvim\.tmp\sdl-provider-first-lsp-lua-full.lbug'
 node dist\cli\index.js -c $env:SDL_CONFIG index --repo-id plenary-lua --force
 ```
 
 Relevant result:
 
 ```text
-Provider-first: lspFull (provider-first-lsp:1781635876561)
-Provider-first shadow staging skipped: shadow staging skipped because repo.sourceFileListPath scopes this run to a benchmark subset
-Provider-first coverage: 40/40 files provider-primary (0 full, 40 partial)
-Files: 40
-Symbols: 3245 new (3245 total)
+Provider-first: lspFull (provider-first-lsp:1781640159393)
+Provider-first shadow DB activated: F:/Claude/projects/sdl-lsp-provider-first-repos/plenary.nvim/.tmp/sdl-provider-first-lsp-lua-full.lbug
+Provider-first coverage: 113/113 files provider-primary (0 full, 113 partial)
+Files: 113
+Symbols: 11844 new (11844 total)
 Edges: 0 new (0 total)
-Duration: 140532ms
+Duration: 400829ms
 ```
 
-LSP provider-primary rows are partial because this wave materializes document symbols and diagnostics, not references/call proof. Shadow activation is intentionally skipped for source-list subset runs.
+LSP provider-primary rows are partial because this wave materializes document symbols and diagnostics, not references/call proof.
 
 ## Graph Check
 
 Command:
 
 ```powershell
-npm run check:provider-first-graph -- --db F:\Claude\projects\sdl-lsp-provider-first-repos\plenary.nvim\.tmp\sdl-provider-first-lsp-lua-subset.lbug --repo-root F:\Claude\projects\sdl-lsp-provider-first-repos\plenary.nvim
+npm run check:provider-first-graph -- --db F:\Claude\projects\sdl-lsp-provider-first-repos\plenary.nvim\.tmp\sdl-provider-first-lsp-lua-full.lbug --repo-root F:\Claude\projects\sdl-lsp-provider-first-repos\plenary.nvim
 ```
 
 Result:
@@ -136,8 +130,8 @@ signature: function async
 `slice.build` succeeded:
 
 ```text
-sliceHandle: 7a2725546c5eb0319258ee4695856646
-ledgerVersion: v1781635966010
+sliceHandle: f25040a51e779984a0296f5cb711b713
+ledgerVersion: v1781640410729
 ```
 
 `code.needWindow` succeeded:
@@ -151,4 +145,4 @@ whyApproved: Identifiers matched: async
 
 ## Outcome
 
-Lua is implementation-ready and subset-validated for Wave 1 provider-first LSP document-symbol materialization. It should remain marked as partial/pending until full-repo validation completes without requiring a source-list cap and shadow staging can activate.
+Lua is validated for Wave 1 provider-first LSP document-symbol materialization across the full validation repository. Remaining quality work should collect definitions/references from `lua-language-server` so provider coverage can move beyond partial and produce exact edges.

@@ -13,6 +13,7 @@ import {
   StreamMessageWriter,
   type MessageConnection,
 } from "vscode-jsonrpc/node.js";
+import { SymbolKind } from "vscode-languageserver-protocol";
 import type {
   DefinitionParams,
   Diagnostic,
@@ -80,6 +81,89 @@ const DocumentDiagnosticRequestType = new RequestType<
   void
 >("textDocument/diagnostic");
 const SHUTDOWN_TIMEOUT_MS = 1_000;
+
+function buildClientCapabilities(): InitializeParams["capabilities"] {
+  // Some servers, including PowerShell Editor Services, assume standard
+  // capability objects exist while deriving registration options. Advertise the
+  // conservative capabilities SDL actually uses instead of a diagnostics-only
+  // shape that leaves optional protocol branches undefined.
+  return {
+    general: {
+      positionEncodings: ["utf-16"],
+    },
+    window: {
+      workDoneProgress: false,
+    },
+    workspace: {
+      workspaceFolders: true,
+      configuration: false,
+      didChangeConfiguration: {
+        dynamicRegistration: false,
+      },
+    },
+    textDocument: {
+      synchronization: {
+        dynamicRegistration: false,
+        willSave: false,
+        willSaveWaitUntil: false,
+        didSave: true,
+      },
+      documentSymbol: {
+        dynamicRegistration: false,
+        hierarchicalDocumentSymbolSupport: true,
+        symbolKind: {
+          valueSet: [
+            SymbolKind.File,
+            SymbolKind.Module,
+            SymbolKind.Namespace,
+            SymbolKind.Package,
+            SymbolKind.Class,
+            SymbolKind.Method,
+            SymbolKind.Property,
+            SymbolKind.Field,
+            SymbolKind.Constructor,
+            SymbolKind.Enum,
+            SymbolKind.Interface,
+            SymbolKind.Function,
+            SymbolKind.Variable,
+            SymbolKind.Constant,
+            SymbolKind.String,
+            SymbolKind.Number,
+            SymbolKind.Boolean,
+            SymbolKind.Array,
+            SymbolKind.Object,
+            SymbolKind.Key,
+            SymbolKind.Null,
+            SymbolKind.EnumMember,
+            SymbolKind.Struct,
+            SymbolKind.Event,
+            SymbolKind.Operator,
+            SymbolKind.TypeParameter,
+          ],
+        },
+      },
+      definition: {
+        dynamicRegistration: false,
+        linkSupport: false,
+      },
+      references: {
+        dynamicRegistration: false,
+      },
+      hover: {
+        dynamicRegistration: false,
+        contentFormat: ["markdown", "plaintext"],
+      },
+      rename: {
+        dynamicRegistration: false,
+        prepareSupport: false,
+      },
+      diagnostic: {
+        dynamicRegistration: false,
+        relatedDocumentSupport: false,
+      },
+    },
+  };
+}
 
 export interface LspClientOptions {
   serverId: string;
@@ -307,14 +391,7 @@ export class SemanticLspClient {
       {
         processId: process.pid,
         rootUri,
-        capabilities: {
-          textDocument: {
-            diagnostic: {
-              dynamicRegistration: false,
-              relatedDocumentSupport: false,
-            },
-          },
-        },
+        capabilities: buildClientCapabilities(),
         workspaceFolders: [
           {
             uri: rootUri,
