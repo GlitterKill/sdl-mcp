@@ -95,6 +95,30 @@ describe("SemanticLspClient", () => {
     }
   });
 
+  it("passes configured environment variables to the LSP process", async () => {
+    const fixturePath = join(
+      process.cwd(),
+      "tests/fixtures/lsp/mock-env-server.mjs",
+    );
+    const client = new SemanticLspClient({
+      serverId: "env-server",
+      command: process.execPath,
+      args: [fixturePath],
+      workspaceRoot: process.cwd(),
+      timeoutMs: 1000,
+      env: {
+        MOCK_LSP_ENV_VALUE: "configured",
+      },
+    });
+
+    try {
+      const initializeResult = await client.start();
+      assert.equal(initializeResult.serverInfo?.version, "configured");
+    } finally {
+      await client.dispose();
+    }
+  });
+
   it("does not hang when a server ignores shutdown", async () => {
     const fixturePath = join(
       process.cwd(),

@@ -47,6 +47,17 @@ const LANGUAGE_ALIASES = new Map<string, string>([
   ["bash", "shell"],
   ["sh", "shell"],
   ["zsh", "shell"],
+  ["powershell", "powershell"],
+  ["pwsh", "powershell"],
+  ["ps1", "powershell"],
+  ["psm1", "powershell"],
+  ["psd1", "powershell"],
+  ["ruby", "ruby"],
+  ["rb", "ruby"],
+  ["rake", "ruby"],
+  ["lua", "lua"],
+  ["dart", "dart"],
+  ["swift", "swift"],
 ]);
 
 export function inferLanguageIdFromPath(relPath: string): string {

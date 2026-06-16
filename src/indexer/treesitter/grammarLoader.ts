@@ -68,7 +68,12 @@ export type SupportedLanguage =
   | "php"
   | "rust"
   | "kotlin"
-  | "bash";
+  | "bash"
+  | "powershell"
+  | "ruby"
+  | "lua"
+  | "dart"
+  | "swift";
 
 const parserCache = new Map<SupportedLanguage, Parser | null>();
 const languageCache = new Map<SupportedLanguage, Parser.Language | null>();
@@ -94,6 +99,11 @@ const GRAMMAR_PACKAGES: Record<
   rust: { pkg: "tree-sitter-rust" },
   kotlin: { pkg: "tree-sitter-kotlin" },
   bash: { pkg: "tree-sitter-bash" },
+  powershell: { pkg: "tree-sitter-powershell" },
+  ruby: { pkg: "tree-sitter-ruby" },
+  lua: { pkg: "tree-sitter-lua" },
+  dart: { pkg: "tree-sitter-dart" },
+  swift: { pkg: "tree-sitter-swift" },
 };
 
 function getLanguageModule(

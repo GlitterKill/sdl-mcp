@@ -150,6 +150,7 @@ export async function runLspCallDefinitionEnrichment(
     args: options.server.args,
     workspaceRoot: options.repoRoot,
     timeoutMs: options.timeoutMs,
+    env: options.server.env,
     initializationOptions: options.server.initializationOptions,
   });
 

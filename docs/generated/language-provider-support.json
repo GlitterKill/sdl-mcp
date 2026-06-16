@@ -122,62 +122,62 @@
   {
     "language": "PowerShell",
     "popularityRankSource": "Wave 1 rollout priority",
-    "adapterStatus": "planned",
-    "parserInstallMode": "not installed",
+    "adapterStatus": "lazy language pack configured",
+    "parserInstallMode": "on-demand when repo config includes powershell",
     "scipStatus": "no practical SCIP indexer",
-    "lspIoServer": "PowerShellEditorServices",
-    "providerFirstStatus": "not supported",
+    "lspIoServer": "powershell-editor-services",
+    "providerFirstStatus": "LSP provider-first configured; validation pending",
     "validationRepo": "PowerShell/PowerShellGet",
     "validationEvidence": "pending",
-    "notes": "Install tree-sitter only when configured."
+    "notes": "Uses tree-sitter-powershell lazy parser pack and PowerShell document language id."
   },
   {
     "language": "Ruby",
     "popularityRankSource": "Wave 1 rollout priority",
-    "adapterStatus": "planned",
-    "parserInstallMode": "not installed",
+    "adapterStatus": "lazy language pack configured",
+    "parserInstallMode": "on-demand when repo config includes ruby",
     "scipStatus": "no practical SCIP indexer",
     "lspIoServer": "ruby-lsp",
-    "providerFirstStatus": "not supported",
+    "providerFirstStatus": "LSP provider-first configured; validation pending",
     "validationRepo": "sinatra/sinatra",
     "validationEvidence": "pending",
-    "notes": "LSP-IO metadata must own server install/export."
+    "notes": "Uses tree-sitter-ruby lazy parser pack and lsp-io ruby-lsp export."
   },
   {
     "language": "Lua",
     "popularityRankSource": "Wave 1 rollout priority",
-    "adapterStatus": "planned",
-    "parserInstallMode": "not installed",
+    "adapterStatus": "lazy language pack configured",
+    "parserInstallMode": "on-demand when repo config includes lua",
     "scipStatus": "no practical SCIP indexer",
     "lspIoServer": "lua-language-server",
-    "providerFirstStatus": "not supported",
+    "providerFirstStatus": "LSP provider-first subset validated; full validation pending",
     "validationRepo": "nvim-lua/plenary.nvim",
-    "validationEvidence": "pending",
-    "notes": "LSP provider facts must validate before support."
+    "validationEvidence": "devdocs/validation/provider-first-lsp-lua-2026-06-16.md",
+    "notes": "Validated 40-file source-list subset with 3245 provider symbols; full-repo run still needs completion without a source-list cap."
   },
   {
     "language": "Dart",
     "popularityRankSource": "Wave 1 rollout priority",
-    "adapterStatus": "planned",
-    "parserInstallMode": "not installed",
+    "adapterStatus": "lazy language pack configured",
+    "parserInstallMode": "on-demand when repo config includes dart",
     "scipStatus": "no practical SCIP indexer",
-    "lspIoServer": "dart language server",
-    "providerFirstStatus": "not supported",
+    "lspIoServer": "dart-sdk-lsp",
+    "providerFirstStatus": "LSP provider-first configured; validation pending",
     "validationRepo": "dart-lang/http",
     "validationEvidence": "pending",
-    "notes": "Requires lsp-io export metadata."
+    "notes": "Uses tree-sitter-dart lazy parser pack and dart language-server export."
   },
   {
     "language": "Swift",
     "popularityRankSource": "Wave 1 rollout priority",
-    "adapterStatus": "planned",
-    "parserInstallMode": "not installed",
+    "adapterStatus": "lazy language pack configured",
+    "parserInstallMode": "on-demand when repo config includes swift",
     "scipStatus": "no practical SCIP indexer",
     "lspIoServer": "sourcekit-lsp",
-    "providerFirstStatus": "not supported",
+    "providerFirstStatus": "LSP provider-first configured; validation pending",
     "validationRepo": "apple/swift-argument-parser",
     "validationEvidence": "pending",
-    "notes": "Requires sourcekit-lsp readiness metadata."
+    "notes": "Uses tree-sitter-swift lazy parser pack and sourcekit-lsp export."
   },
   {
     "language": "Groovy, Perl, R, Elixir, F#, Fortran, Haskell",

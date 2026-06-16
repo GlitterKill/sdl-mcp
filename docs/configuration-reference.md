@@ -115,7 +115,7 @@ Each entry configures one repository.
 | `repoId`                    | `string`           | Required                | Stable identifier used in all tool calls                                                |
 | `rootPath`                  | `string`           | Required                | Absolute path recommended; relative paths resolve from the config file                  |
 | `ignore`                    | `string[]`         | See below               | Glob patterns excluded from indexing                                                    |
-| `languages`                 | `string[]`         | All supported languages | `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `java`, `cs`, `c`, `cpp`, `php`, `rs`, `kt`, `sh` |
+| `languages`                 | `string[]`         | All supported languages | `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `java`, `cs`, `c`, `cpp`, `php`, `rs`, `kt`, `sh`, `powershell`, `ruby`, `lua`, `dart`, `swift` |
 | `maxFileBytes`              | `number`           | `2000000`               | Files larger than this are skipped                                                      |
 | `postIndexSessionTimeoutMs` | `number`           | `900000`                | `1000-86400000`. Hard timeout for post-index finalization writes after pass-1/pass-2    |
 | `includeNodeModulesTypes`   | `boolean`          | `true`                  | TypeScript-only helper for `@types/*` resolution                                        |
@@ -399,7 +399,7 @@ For one release, stale `semanticEnrichment.providers.lsif` config entries are ig
 | `providers.lsp.confidence`     | `number`                                   | `0.8`     | LSP evidence is marked `resolverId: "lsp:<serverId>"` when it creates or upgrades edges        |
 | `providers.lsp.candidateLimit` | `number`                                   | `200`     | Maximum tree-sitter-assisted call-definition candidates per refresh                            |
 
-Each LSP server entry supports `serverId`, `command`, `args`, `languages`, optional `initializationOptions`, and optional LSP-IO metadata hints: `documentLanguageIds`, `filePatterns`, `capabilities`, and `readiness`. SDL-MCP uses tree-sitter-assisted call-definition enrichment for languages that already have adapters, and generic LSP diagnostic ingestion for configured servers that request or advertise diagnostics.
+Each LSP server entry supports `serverId`, `command`, `args`, `languages`, optional `env`, optional `initializationOptions`, and optional LSP-IO metadata hints: `documentLanguageIds`, `filePatterns`, `capabilities`, and `readiness`. Use `env` for server-local runtime paths such as managed Ruby `GEM_HOME`/`GEM_PATH`; SDL-MCP still does not run package-manager install commands. SDL-MCP uses tree-sitter-assisted call-definition enrichment for languages that already have adapters, and generic LSP diagnostic ingestion for configured servers that request or advertise diagnostics.
 
 `semantic` means embeddings, summaries, and retrieval. `semanticEnrichment` means provider-backed graph precision and provenance.
 
@@ -586,7 +586,7 @@ Memory remains opt-in.
 
 When both `scip.enabled` and `scip.generator.enabled` are true, SDL-MCP auto-adds `index.scip` to `scip.indexes` if you forgot to list it.
 
-The automatic scip-io language filter maps SDL-MCP repo languages to scip-io emitters: `ts`/`tsx` -> `typescript`, `js`/`jsx` -> `javascript`, `rs` -> `rust`, `py` -> `python`, `cs` -> `csharp`, `c`/`cpp` -> `cpp`, plus `go`, `java`, and `kt` -> `kotlin`. Languages without a scip-io backend, such as `php` and `sh`, are omitted from the generated filter.
+The automatic scip-io language filter maps SDL-MCP repo languages to scip-io emitters: `ts`/`tsx` -> `typescript`, `js`/`jsx` -> `javascript`, `rs` -> `rust`, `py` -> `python`, `cs` -> `csharp`, `c`/`cpp` -> `cpp`, plus `go`, `java`, and `kt` -> `kotlin`. Languages without a scip-io backend, such as `php`, `sh`, `powershell`, `ruby`, `lua`, `dart`, and `swift`, are omitted from the generated filter.
 
 Generated SCIP files are decoded up to 512 MiB each. When the generated merged `index.scip` is larger than that, SDL-MCP runs `scip-io index --no-merge`, ingests split files under the cap, deduplicates identical TypeScript/JavaScript artifacts by SHA-256 content hash, ignores unchanged split files that existed before the generator run, and reports skipped stale or oversized split files in CLI/audit diagnostics. Manually configured oversize indexes remain manual: provide smaller files in `scip.indexes`. Repeated unchanged generator runs use the generated-index cache by default; CLI summaries print `SCIP generator cache: hit` or `stored` when the cache participates. If `scip-io` exits nonzero but still writes a safe generated index for another requested language, SDL-MCP can use that artifact for the current run and keeps the language failure as a visible generator diagnostic. Split-only cache entries are stored/restored only when every requested scip-io language has a covered split artifact; incomplete entries are treated as cache misses so the generator can retry missing languages.
 

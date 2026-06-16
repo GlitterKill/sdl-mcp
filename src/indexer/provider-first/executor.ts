@@ -608,6 +608,7 @@ export async function executeProviderFirstLspFull(
       args: server.args,
       workspaceRoot: params.repoRoot,
       timeoutMs: params.config.semanticEnrichment?.timeoutMs ?? 300_000,
+      env: server.env,
       initializationOptions: server.initializationOptions,
     });
     try {
@@ -842,6 +843,11 @@ function documentLanguageIdForLspPath(
   if (server.languages.length > 0) return server.languages[0] ?? "plaintext";
   if (relPath.endsWith(".php") || relPath.endsWith(".phtml")) return "php";
   if (/\.(?:sh|bash|zsh)$/u.test(relPath)) return "shellscript";
+  if (/\.(?:ps1|psm1|psd1)$/u.test(relPath)) return "powershell";
+  if (/\.(?:rb|rake)$/u.test(relPath)) return "ruby";
+  if (relPath.endsWith(".lua")) return "lua";
+  if (relPath.endsWith(".dart")) return "dart";
+  if (relPath.endsWith(".swift")) return "swift";
   return "plaintext";
 }
 

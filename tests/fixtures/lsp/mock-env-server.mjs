@@ -1,0 +1,48 @@
+let buffer = Buffer.alloc(0);
+
+process.stdin.on("data", (chunk) => {
+  buffer = Buffer.concat([buffer, chunk]);
+  while (true) {
+    const separator = buffer.indexOf("\r\n\r\n");
+    if (separator === -1) return;
+    const header = buffer.subarray(0, separator).toString("ascii");
+    const match = /content-length\s*:\s*(\d+)/iu.exec(header);
+    if (!match) return;
+    const length = Number.parseInt(match[1], 10);
+    const bodyStart = separator + 4;
+    const messageEnd = bodyStart + length;
+    if (buffer.length < messageEnd) return;
+    const request = JSON.parse(
+      buffer.subarray(bodyStart, messageEnd).toString("utf8"),
+    );
+    buffer = buffer.subarray(messageEnd);
+    handleMessage(request);
+  }
+});
+
+function handleMessage(request) {
+  if (request.method === "initialize") {
+    writeResponse(request.id, {
+      capabilities: {},
+      serverInfo: {
+        name: "env-server",
+        version: process.env.MOCK_LSP_ENV_VALUE ?? "missing",
+      },
+    });
+    return;
+  }
+  if (request.method === "shutdown") {
+    writeResponse(request.id, null);
+    return;
+  }
+  if (request.method === "exit") {
+    process.exit(0);
+  }
+}
+
+function writeResponse(id, result) {
+  const response = JSON.stringify({ jsonrpc: "2.0", id, result });
+  process.stdout.write(
+    `Content-Length: ${Buffer.byteLength(response)}\r\n\r\n${response}`,
+  );
+}

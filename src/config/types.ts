@@ -60,6 +60,11 @@ export const LanguageSchema = z.enum([
   "rs",
   "kt",
   "sh",
+  "powershell",
+  "ruby",
+  "lua",
+  "dart",
+  "swift",
 ]);
 
 export const MemoryConfigSchema = z.object({
@@ -998,6 +1003,7 @@ export const SemanticEnrichmentLspServerConfigSchema = z.object({
   filePatterns: z.array(z.string()).default([]),
   capabilities: z.array(z.string()).default([]),
   readiness: z.string().optional(),
+  env: z.record(z.string(), z.string()).optional(),
   initializationOptions: z.record(z.string(), z.unknown()).optional(),
 });
 

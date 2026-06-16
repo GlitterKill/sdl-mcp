@@ -70,7 +70,12 @@
                 "php",
                 "rs",
                 "kt",
-                "sh"
+                "sh",
+                "powershell",
+                "ruby",
+                "lua",
+                "dart",
+                "swift"
               ]
             },
             "default": [
@@ -1160,6 +1165,10 @@
                         "default": []
                       },
                       "readiness": { "type": "string" },
+                      "env": {
+                        "type": "object",
+                        "additionalProperties": { "type": "string" }
+                      },
                       "initializationOptions": { "type": "object" }
                     }
                   },

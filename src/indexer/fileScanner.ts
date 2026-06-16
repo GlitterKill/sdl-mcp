@@ -44,6 +44,11 @@ const CANONICAL_LANGUAGE_IDS_BY_CONFIG = new Map<string, string>([
   ["rs", "rust"],
   ["kt", "kotlin"],
   ["sh", "shell"],
+  ["ps1", "powershell"],
+  ["psm1", "powershell"],
+  ["psd1", "powershell"],
+  ["rb", "ruby"],
+  ["rake", "ruby"],
 ]);
 
 const PROVIDER_SCAN_COMPANION_EXTENSIONS = new Map<string, readonly string[]>([

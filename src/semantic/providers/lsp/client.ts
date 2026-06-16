@@ -87,6 +87,7 @@ export interface LspClientOptions {
   args?: string[];
   workspaceRoot: string;
   timeoutMs: number;
+  env?: Record<string, string>;
   initializationOptions?: Record<string, unknown>;
 }
 
@@ -126,9 +127,22 @@ export function resolveLspSpawnCommand(options: {
       options.readFileText ?? ((path) => readFileSync(path, "utf8")),
     );
     if (!entrypoint) {
+      const rubyEntrypoint = resolveRubyGemsCommandShimEntrypoint(
+        resolvedCommand,
+        options.readFileText ?? ((path) => readFileSync(path, "utf8")),
+      );
+      if (rubyEntrypoint) {
+        return {
+          command: "ruby.exe",
+          args: [rubyEntrypoint, ...args],
+          shell: false,
+        };
+      }
+    }
+    if (!entrypoint) {
       throw new Error(
         `Windows LSP command shim ${resolvedCommand} is not a supported npm-style shim; ` +
-          "configure the server's JS entrypoint or native executable instead.",
+          "configure the server's JS/Ruby entrypoint or native executable instead.",
       );
     }
     return {
@@ -221,6 +235,24 @@ function resolveNpmCommandShimEntrypoint(
   return null;
 }
 
+function resolveRubyGemsCommandShimEntrypoint(
+  shimPath: string,
+  readFileText: (path: string) => string,
+): string | null {
+  let shimText: string;
+  try {
+    shimText = readFileText(shimPath);
+  } catch {
+    return null;
+  }
+
+  if (!/@ruby(?:\.exe)?\s+"%~dpn0"\s+%\*/iu.test(shimText)) {
+    return null;
+  }
+  const parsed = win32.parse(shimPath);
+  return win32.join(parsed.dir, parsed.name);
+}
+
 interface DiagnosticWaiter {
   uris: Set<string>;
   resolve: () => void;
@@ -250,6 +282,7 @@ export class SemanticLspClient {
     });
     const child = spawn(spawnCommand.command, spawnCommand.args, {
       cwd: this.options.workspaceRoot,
+      env: { ...process.env, ...this.options.env },
       stdio: "pipe",
       windowsHide: true,
       shell: spawnCommand.shell,

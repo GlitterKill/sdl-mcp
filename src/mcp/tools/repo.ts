@@ -88,8 +88,17 @@ async function getCachedHealthSnapshot(repoId: string): Promise<{
   }
 }
 const SUPPORTED_LANGUAGES = [...LanguageSchema.options];
+const ON_DEMAND_REPO_LANGUAGES = new Set([
+  "php",
+  "sh",
+  "powershell",
+  "ruby",
+  "lua",
+  "dart",
+  "swift",
+]);
 const DEFAULT_REPO_LANGUAGES = SUPPORTED_LANGUAGES.filter(
-  (language) => language !== "php" && language !== "sh",
+  (language) => !ON_DEMAND_REPO_LANGUAGES.has(language),
 );
 
 /**
