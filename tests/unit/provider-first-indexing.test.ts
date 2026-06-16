@@ -534,6 +534,47 @@ describe("provider-first indexing foundation", () => {
     });
   });
 
+  it("keeps targeted LSP coverage in the legacy fallback set", () => {
+    const lspReport = analyzeProviderFirstCoverage({
+      scannedPaths: ["src/caller.ts"],
+      providerPaths: ["src/caller.ts"],
+      coverage: [
+        {
+          relPath: "src/caller.ts",
+          providerType: "lsp",
+          legacyFallback: "targeted",
+          symbolCoverage: "none",
+        },
+      ],
+      symbols: [],
+    });
+
+    assert.deepEqual([...lspReport.fallbackPaths], ["src/caller.ts"]);
+    assert.equal(lspReport.summary.partialFiles, 1);
+    assert.equal(lspReport.summary.fallbackFiles, 1);
+  });
+
+  it("keeps targeted SCIP reference gaps out of the legacy fallback set", () => {
+    const scipReport = analyzeProviderFirstCoverage({
+      scannedPaths: ["src/index.ts"],
+      providerPaths: ["src/index.ts"],
+      coverage: [
+        {
+          relPath: "src/index.ts",
+          providerType: "scip",
+          legacyFallback: "targeted",
+          symbolCoverage: "full",
+          referenceCoverage: "partial",
+        },
+      ],
+      symbols: [],
+    });
+
+    assert.deepEqual([...scipReport.fallbackPaths], []);
+    assert.equal(scipReport.summary.partialFiles, 1);
+    assert.equal(scipReport.summary.fallbackFiles, 0);
+  });
+
   it("deduplicates call-proof samples collected from coverage and source analysis", () => {
     const report = analyzeProviderFirstCoverage({
       scannedPaths: ["src/index.ts"],

@@ -655,6 +655,7 @@ export function analyzeProviderFirstCoverage(params: {
   providerPaths: Iterable<string>;
   coverage: Iterable<{
     relPath: string;
+    providerType?: string;
     legacyFallback: string;
     symbolCoverage?: CoverageLevel;
     referenceCoverage?: CoverageLevel;
@@ -771,6 +772,9 @@ export function analyzeProviderFirstCoverage(params: {
     if (coverage?.legacyFallback === "targeted") {
       partialPaths.push(relPath);
       partialFiles++;
+      if (coverage.providerType === "lsp") {
+        fallbackPaths.add(relPath);
+      }
       addCallProofIncompletePath(
         relPath,
         coverage,
