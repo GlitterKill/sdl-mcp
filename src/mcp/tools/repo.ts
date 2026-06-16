@@ -96,6 +96,13 @@ const ON_DEMAND_REPO_LANGUAGES = new Set([
   "lua",
   "dart",
   "swift",
+  "groovy",
+  "perl",
+  "r",
+  "elixir",
+  "fsharp",
+  "fortran",
+  "haskell",
 ]);
 const DEFAULT_REPO_LANGUAGES = SUPPORTED_LANGUAGES.filter(
   (language) => !ON_DEMAND_REPO_LANGUAGES.has(language),

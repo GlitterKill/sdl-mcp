@@ -848,6 +848,15 @@ function documentLanguageIdForLspPath(
   if (relPath.endsWith(".lua")) return "lua";
   if (relPath.endsWith(".dart")) return "dart";
   if (relPath.endsWith(".swift")) return "swift";
+  if (/\.(?:groovy|gradle|gvy|gy|gsh)$/u.test(relPath)) return "groovy";
+  if (/\.(?:pl|pm|t|pod)$/u.test(relPath)) return "perl";
+  if (/\.[Rr]$/u.test(relPath)) return "r";
+  if (/\.(?:ex|exs)$/u.test(relPath)) return "elixir";
+  if (/\.(?:fs|fsi|fsx)$/u.test(relPath)) return "fsharp";
+  if (/\.(?:f90|f95|f03|f08|f|for|f77)$/u.test(relPath)) {
+    return "fortran";
+  }
+  if (/\.(?:hs|lhs)$/u.test(relPath)) return "haskell";
   return "plaintext";
 }
 

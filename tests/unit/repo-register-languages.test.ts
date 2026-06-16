@@ -22,5 +22,12 @@ describe("repo.register language defaults", () => {
     assert.equal(languages.includes("lua"), false);
     assert.equal(languages.includes("dart"), false);
     assert.equal(languages.includes("swift"), false);
+    assert.equal(languages.includes("groovy"), false);
+    assert.equal(languages.includes("perl"), false);
+    assert.equal(languages.includes("r"), false);
+    assert.equal(languages.includes("elixir"), false);
+    assert.equal(languages.includes("fsharp"), false);
+    assert.equal(languages.includes("fortran"), false);
+    assert.equal(languages.includes("haskell"), false);
   });
 });
