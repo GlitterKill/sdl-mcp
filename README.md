@@ -38,33 +38,7 @@ SDL-MCP fixes this. It indexes your codebase into a searchable **symbol graph** 
 
 ## How it works — in 30 seconds
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
-flowchart TD
-    Codebase["Your Codebase"]
-    Indexer["Indexer<br/>12 languages<br/>Rust native or Tree-sitter fallback"]
-    Graph["LadybugDB graph<br/>symbols, edges, metrics, versions"]
-    MCP["Current MCP surfaces<br/>33 flat, 6 gateway, 4 Code Mode"]
-    CLI["13 CLI commands"]
-    HTTP["HTTP API and graph UI"]
-    Agent["AI coding agent<br/>Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini"]
-
-    Codebase e1@--> Indexer
-    Indexer e2@--> Graph
-    Graph e3@--> MCP
-    Graph e4@--> CLI
-    Graph e5@--> HTTP
-    MCP e6@--> Agent
-
-    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
-    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
-    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
-    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
-    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
-    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
-    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1,e2,e3,e4,e5,e6 animate;
-```
+![SDL-MCP indexing and retrieval flow](./docs/readme-assets/readme-how-it-works.webp)
 
 1. **Index once** — SDL-MCP parses every symbol in your repo and stores it as a compact metadata record (a "Symbol Card") in a graph database
 2. **Query efficiently** — Agents use MCP tools to search, slice, and retrieve exactly the context they need
@@ -117,27 +91,7 @@ Point your MCP client at the server and the agent gains access to SDL-MCP's curr
 
 The core innovation. Named after the adjustable aperture that controls light flow in optics, the Iris Gate Ladder lets agents dial their context "aperture" from a pinhole to wide-open.
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
-flowchart TB
-    R1["~100 tokens<br/>Rung 1: Symbol Card<br/>Name, signature, summary, dependencies, metrics"]
-    R2["~300 tokens<br/>Rung 2: Skeleton IR<br/>Signatures and control flow with bodies elided"]
-    R3["~600 tokens<br/>Rung 3: Hot-Path Excerpt<br/>Identifier-focused lines with context"]
-    R4["~2,000 tokens<br/>Rung 4: Raw Code Window<br/>Policy-gated full source"]
-
-    R1 e1@--> R2
-    R2 e2@--> R3
-    R3 e3@--> R4
-
-    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
-    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
-    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
-    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
-    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
-    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
-    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1,e2,e3 animate;
-```
+![Iris Gate Ladder context escalation tiers](./docs/readme-assets/readme-iris-ladder.webp)
 
 > **Most questions are answered at Rungs 1-2** without ever reading raw code. That's where the token savings come from.
 
@@ -168,41 +122,7 @@ flowchart TB
 
 Every function, class, interface, type, and variable becomes a **Symbol Card**: a compact metadata record (~100 tokens) containing everything an agent needs to _understand_ a symbol without reading its code.
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
-flowchart TB
-    Card["Symbol Card: validateToken"]
-    Kind["Kind: function (exported)"]
-    File["File: src/auth/jwt.ts:42-67"]
-    Signature["Signature: (token: string, opts?: ValidateOpts) -> Promise<DecodedToken>"]
-    Summary["Summary: validates JWT signature and expiration"]
-    Invariants["Invariants: throws on expired token"]
-    SideEffects["Side effects: logs to audit trail"]
-    Deps["Dependencies: verifySignature, checkExpiry, jsonwebtoken, AuditLogger"]
-    Metrics["Metrics: fan-in 12, fan-out 4, churn 3/30d"]
-    Context["Context: auth-module, request-pipeline, auth.test.ts"]
-    ETag["ETag: a7f3c2..."]
-
-    Card e1@--> Kind
-    Kind e2@--> File
-    File e3@--> Signature
-    Signature e4@--> Summary
-    Summary e5@--> Invariants
-    Invariants e6@--> SideEffects
-    SideEffects e7@--> Deps
-    Deps e8@--> Metrics
-    Metrics e9@--> Context
-    Context e10@--> ETag
-
-    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
-    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
-    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
-    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
-    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
-    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
-    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10 animate;
-```
+![Symbol Card fields and relationships](./docs/readme-assets/readme-symbol-card.webp)
 
 Cards include **confidence-scored call resolution** (the pass-2 resolver traces imports, aliases, barrel re-exports, and tagged templates to produce accurate dependency edges), **community detection** (cluster membership), and **call-chain tracing** (process participation with entry/intermediate/exit roles).
 
@@ -222,27 +142,7 @@ Cards include **confidence-scored call resolution** (the pass-2 resolver traces 
 
 Instead of reading files in the same directory, SDL-MCP follows the _dependency graph_. Starting from symbols relevant to your task, it traverses weighted edges (call: 1.0, config: 0.8, import: 0.6), scores each symbol by relevance, and returns the N most important within a token budget.
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
-flowchart TD
-    Task["Task: Fix the auth middleware"] e1@--> Slice["sdl.slice.build"]
-    Slice e2@--> Auth["authenticate"]
-    Slice e3@--> Validate["validateToken"]
-    Slice e4@--> Config["JwtConfig"]
-    Auth e5@--> Hash["hashPassword"]
-    Validate e6@--> User["getUserById"]
-    Config e7@--> Env["envLoader"]
-    Env e8@-. frontier outside budget .-> Frontier["spillover frontier"]
-
-    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
-    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
-    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
-    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
-    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
-    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
-    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1,e2,e3,e4,e5,e6,e7,e8 animate;
-```
+![Graph slicing dependency selection flow](./docs/readme-assets/readme-graph-slicing.webp)
 
 Slices have handles, leases, refresh (delta-only updates), and spillover (paged overflow). You can also skip the symbol search entirely — pass a `taskText` string and SDL-MCP auto-discovers the relevant entry symbols.
 
@@ -261,39 +161,7 @@ Slices have handles, leases, refresh (delta-only updates), and spillover (paged 
 
 `git diff` tells you what lines changed. SDL-MCP tells you what that change _means_ and who's affected.
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
-flowchart TD
-    Change["Modified validateToken() signature"]
-    Sig["signatureDiff<br/>added options?: object"]
-    Inv["invariantDiff<br/>added throws on expired"]
-    Fx["sideEffectDiff<br/>added logs to audit trail"]
-    Blast["Blast radius"]
-    A1["authenticate()<br/>distance 1"]
-    A2["refreshSession()<br/>distance 1"]
-    A3["AuthMiddleware<br/>distance 2"]
-    A4["auth.test.ts<br/>re-run recommended"]
-
-    Change e1@--> Sig
-    Change e2@--> Inv
-    Change e3@--> Fx
-    Sig e4@--> Blast
-    Inv e5@--> Blast
-    Fx e6@--> Blast
-    Blast e7@--> A1
-    Blast e8@--> A2
-    Blast e9@--> A3
-    Blast e10@--> A4
-
-    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
-    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
-    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
-    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
-    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
-    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
-    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10 animate;
-```
+![Delta Packs semantic diff and blast radius flow](./docs/readme-assets/readme-delta-packs.webp)
 
 **PR risk analysis** (`sdl.pr.risk.analyze`) wraps this into a scored assessment with findings, evidence, and test recommendations. **Fan-in trend analysis** detects "amplifier" symbols whose growing dependency count means changes ripple further over time.
 
@@ -312,24 +180,7 @@ flowchart TD
 
 SDL-MCP doesn't wait for you to save. As you type in your editor, buffer updates are pushed to an in-memory overlay store, parsed in the background, and merged with the durable database. Search, cards, and slices reflect your _current_ code, not your last save.
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
-flowchart LR
-    Editor["Editor keystrokes"] e1@--> Push["sdl.buffer.push"]
-    Push e2@--> Overlay["Overlay store"]
-    Overlay e3@--> Reads["Merged reads<br/>search, cards, slices"]
-    Overlay e4@--> Persist["save / idle checkpoint"]
-    Persist e5@--> DB["LadybugDB durable graph"]
-
-    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
-    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
-    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
-    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
-    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
-    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
-    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1,e2,e3,e4,e5 animate;
-```
+![Live indexing buffer overlay flow](./docs/readme-assets/readme-live-indexing.webp)
 
 **Why it matters:**
 
@@ -404,27 +255,7 @@ Run tests, linters, and scripts through SDL-MCP's governance layer instead of un
 
 Agents forget everything between sessions. SDL-MCP fixes this with an **opt-in graph-backed memory system** that lets agents store decisions, bugfix context, and task notes linked directly to the symbols and files they relate to. Memory is **disabled by default** and must be explicitly enabled in the configuration. When enabled, memories are stored both in the graph database (for fast querying) and as checked-in markdown files (for version control and team sharing).
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
-flowchart LR
-    Session1["Agent session 1<br/>records bugfix memory"] e1@--> Store["sdl.memory.store"]
-    Store e2@--> Graph["LadybugDB memory node"]
-    Store e3@--> Files[".sdl-memory/bugfixes/<id>.md"]
-    Graph e4@--> Link1["MEMORY_OF -> authenticate()"]
-    Graph e5@--> Link2["HAS_MEMORY -> repo"]
-    Session2["Agent session 2"] e6@--> Surface["sdl.memory.surface"]
-    Surface e7@--> Graph
-    Graph e8@--> Recall["Relevant memory surfaced<br/>race condition fix in authenticate()"]
-
-    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
-    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
-    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
-    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
-    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
-    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
-    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1,e2,e3,e4,e5,e6,e7,e8 animate;
-```
+![Development Memories storage and surfacing cycle](./docs/readme-assets/readme-development-memories.webp)
 
 When enabled, memories are **automatically surfaced** inside graph slices — when an agent builds a slice touching symbols with linked memories, those memories appear alongside the cards. During re-indexing, memories linked to changed symbols are **flagged as stale**, prompting agents to review and update them. Four MCP tools (`store`, `query`, `remove`, `surface`) provide full CRUD plus intelligent ranking by confidence, recency, and symbol overlap. Memory tools are only available when memory is enabled in the configuration.
 
@@ -444,24 +275,7 @@ When enabled, memories are **automatically surfaced** inside graph slices — wh
 
 Tree-sitter gives SDL-MCP fast, syntax-level symbol extraction across the supported TypeScript/JavaScript, Python, Go, Java, C#, C/C++, PHP, Rust, Kotlin, and Shell surface. SCIP (Source Code Intelligence Protocol) supplements this with **compiler-grade cross-references** from tools like scip-typescript, scip-go, and rust-analyzer. Generate a `.scip` index file, point SDL-MCP at it, and heuristic edges are upgraded to exact compiler-verified edges, external dependency symbols become first-class graph nodes, and new `implements` edges reveal interface/trait relationships that syntax analysis cannot discover.
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
-flowchart LR
-    Compiler["Compiler / Type Checker"] e1@--> SCIP[".scip index file"]
-    SCIP e2@--> Ingest["sdl.scip.ingest"]
-    Ingest e3@--> Upgrade["Heuristic edges → exact edges"]
-    Ingest e4@--> External["External dependency nodes"]
-    Ingest e5@--> Implements["implements edges"]
-
-    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
-    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
-    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
-    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
-    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
-    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
-    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1,e2,e3,e4,e5 animate;
-```
+![SCIP integration compiler cross-reference ingestion flow](./docs/readme-assets/readme-scip-integration.webp)
 
 **Why it matters:**
 
@@ -515,21 +329,7 @@ Features include typed argument coercion (string, number, boolean, string[], jso
 
 The tool gateway projects the 35 gateway-routable SDL actions into **4 namespace-scoped tools** (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`), reducing `tools/list` overhead from the full flat schema surface to a compact gateway surface.
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
-flowchart LR
-    Before["Flat mode<br/>38 tools<br/>2 universal + 36 flat"] e1@--> After["Gateway mode<br/>6 tools<br/>2 universal + 4 gateway"]
-    After e2@--> Savings["Smaller tools/list payload<br/>lower agent startup overhead"]
-
-    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
-    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
-    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
-    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
-    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
-    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
-    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1,e2 animate;
-```
+![Tool Gateway compact registration flow](./docs/readme-assets/readme-tool-gateway.webp)
 
 Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "symbol.search", repoId: "x", query: "auth" }`) and routes to the same handlers with double Zod validation. Thin wire schemas in `tools/list` keep the registration compact while full validation happens server-side. The flat-only `sdl.file.write` action remains outside gateway mode today.
 
@@ -655,7 +455,7 @@ The generated source of truth is [`docs/generated/tool-inventory.md`](./docs/gen
 | `sdl-mcp info`      | Runtime diagnostics — version, Node.js, platform, database, config                     |
 | `sdl-mcp summary`   | Generate copy/paste context summaries from the CLI                                     |
 | `sdl-mcp health`    | Compute composite health score with badge/JSON output                                  |
-| `sdl-mcp benchmark` | Run CI regression benchmarks                                                           |
+| `sdl-mcp benchmark:ci` | Run CI regression benchmarks                                                           |
 | `sdl-mcp export`    | Export sync artifact                                                                   |
 | `sdl-mcp import`    | Import sync artifact                                                                   |
 | `sdl-mcp pull`      | Pull by version/commit with fallback                                                   |
@@ -712,32 +512,7 @@ A **VSCode extension** (`sdl-mcp-vscode/`) provides live buffer integration for 
 
 ## System Architecture
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
-flowchart TD
-    Clients["MCP clients<br/>Claude Code, Claude Desktop, Cursor, Windsurf, Codex, Gemini"]
-    Gateway["Tool gateway<br/>sdl.query, sdl.code, sdl.repo, sdl.agent"]
-    Flat["Flat tools and optional code-mode surfaces"]
-    Policy["Policy engine<br/>proof-of-need, budgets, audit logging"]
-    Graph["LadybugDB graph<br/>symbols, edges, files, versions, memories"]
-    Indexer["Indexer pipeline<br/>Rust native or Tree-sitter fallback<br/>pass 1, pass 2, semantic enrichment"]
-
-    Clients e1@--> Gateway
-    Clients e2@--> Flat
-    Gateway e3@--> Policy
-    Flat e4@--> Policy
-    Policy e5@--> Graph
-    Indexer e6@--> Graph
-
-    classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
-    classDef process fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43;
-    classDef decision fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43;
-    classDef storage fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43;
-    classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
-    classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
-    classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1,e2,e3,e4,e5,e6 animate;
-```
+![SDL-MCP system architecture](./docs/readme-assets/readme-system-architecture.webp)
 
 [Full Architecture Documentation →](./docs/architecture.md)
 
