@@ -186,6 +186,22 @@ describe("SemanticLspClient", () => {
     );
   });
 
+  it("starts Windows RubyGems command shims through ruby entrypoints", () => {
+    assert.deepEqual(
+      resolveLspSpawnCommand({
+        command: "C:\\tools\\ruby-lsp.bat",
+        args: ["--stdio"],
+        platform: "win32",
+        readFileText: () => '@ECHO OFF\r\n@ruby.exe "%~dpn0" %*\r\n',
+      }),
+      {
+        command: "ruby.exe",
+        args: ["C:\\tools\\ruby-lsp", "--stdio"],
+        shell: false,
+      },
+    );
+  });
+
   it("resolves bare Windows commands through PATH and PATHEXT", () => {
     assert.deepEqual(
       resolveLspSpawnCommand({

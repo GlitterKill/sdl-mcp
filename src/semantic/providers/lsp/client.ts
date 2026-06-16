@@ -466,7 +466,12 @@ export class SemanticLspClient {
           .sendNotification(ExitNotification)
           .catch(() => undefined);
       } finally {
-        connection.dispose();
+        try {
+          connection.dispose();
+        } catch {
+          // The transport can already be closed if the language server exited
+          // after answering its final request; cleanup should remain best-effort.
+        }
       }
     }
     if (this.process && !this.process.killed) {
@@ -505,7 +510,12 @@ export class SemanticLspClient {
     let timeout: NodeJS.Timeout | null = null;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeout = setTimeout(() => {
-        cts.cancel();
+        try {
+          cts.cancel();
+        } catch {
+          // The connection may already be closed by a short-lived server. The
+          // timeout error below is the actionable failure for callers.
+        }
         reject(
           new Error(
             `LSP request ${requestType.method} timed out after ${timeoutMs}ms`,

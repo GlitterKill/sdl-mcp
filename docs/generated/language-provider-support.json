@@ -126,10 +126,10 @@
     "parserInstallMode": "on-demand when repo config includes powershell",
     "scipStatus": "no practical SCIP indexer",
     "lspIoServer": "powershell-editor-services",
-    "providerFirstStatus": "LSP provider-first configured; validation pending",
+    "providerFirstStatus": "LSP server installed; provider-first validation pending",
     "validationRepo": "PowerShell/PowerShellGet",
-    "validationEvidence": "pending",
-    "notes": "Uses tree-sitter-powershell lazy parser pack and PowerShell document language id."
+    "validationEvidence": "devdocs/validation/provider-first-lsp-powershell-2026-06-16.md",
+    "notes": "PowerShell Editor Services 4.6.0 starts with -Stdio but does not answer initialize through SDL yet; provider-first falls back with 0 provider symbols."
   },
   {
     "language": "Ruby",
@@ -138,10 +138,10 @@
     "parserInstallMode": "on-demand when repo config includes ruby",
     "scipStatus": "no practical SCIP indexer",
     "lspIoServer": "ruby-lsp",
-    "providerFirstStatus": "LSP provider-first configured; validation pending",
+    "providerFirstStatus": "LSP provider-first validated",
     "validationRepo": "sinatra/sinatra",
-    "validationEvidence": "pending",
-    "notes": "Uses tree-sitter-ruby lazy parser pack and lsp-io ruby-lsp export."
+    "validationEvidence": "devdocs/validation/provider-first-lsp-ruby-2026-06-16.md",
+    "notes": "Validated 147/147 provider-primary files and 1557 LSP symbols using lsp-io ruby-lsp export plus Ruby LSP minimal bundle env."
   },
   {
     "language": "Lua",
@@ -162,10 +162,10 @@
     "parserInstallMode": "on-demand when repo config includes dart",
     "scipStatus": "no practical SCIP indexer",
     "lspIoServer": "dart-sdk-lsp",
-    "providerFirstStatus": "LSP provider-first configured; validation pending",
+    "providerFirstStatus": "LSP provider-first validated",
     "validationRepo": "dart-lang/http",
-    "validationEvidence": "pending",
-    "notes": "Uses tree-sitter-dart lazy parser pack and dart language-server export."
+    "validationEvidence": "devdocs/validation/provider-first-lsp-dart-2026-06-16.md",
+    "notes": "Validated 324/324 provider-primary files and 10173 LSP symbols using Dart SDK language-server export."
   },
   {
     "language": "Swift",
@@ -174,10 +174,10 @@
     "parserInstallMode": "on-demand when repo config includes swift",
     "scipStatus": "no practical SCIP indexer",
     "lspIoServer": "sourcekit-lsp",
-    "providerFirstStatus": "LSP provider-first configured; validation pending",
+    "providerFirstStatus": "LSP provider-first validated",
     "validationRepo": "apple/swift-argument-parser",
-    "validationEvidence": "pending",
-    "notes": "Uses tree-sitter-swift lazy parser pack and sourcekit-lsp export."
+    "validationEvidence": "devdocs/validation/provider-first-lsp-swift-2026-06-16.md",
+    "notes": "Validated 165/165 provider-primary files and 4663 LSP symbols using SourceKit-LSP export."
   },
   {
     "language": "Groovy, Perl, R, Elixir, F#, Fortran, Haskell",
