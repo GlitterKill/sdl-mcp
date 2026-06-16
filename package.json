@@ -107,12 +107,14 @@
     "@opentelemetry/sdk-trace-base": "^2.8.0",
     "@opentelemetry/sdk-trace-node": "^2.8.0",
     "tree-sitter": "npm:@keqingmoe/tree-sitter@0.26.2",
+    "tree-sitter-bash": "npm:sdl-mcp-tree-sitter-bash@^1.0.1",
     "tree-sitter-c": "npm:sdl-mcp-tree-sitter-c@^1.0.1",
     "tree-sitter-c-sharp": "npm:sdl-mcp-tree-sitter-c-sharp@^1.0.1",
     "tree-sitter-cpp": "npm:sdl-mcp-tree-sitter-cpp@^1.0.1",
     "tree-sitter-go": "npm:sdl-mcp-tree-sitter-go@^1.0.1",
     "tree-sitter-java": "npm:sdl-mcp-tree-sitter-java@^1.0.1",
     "tree-sitter-kotlin": "npm:sdl-mcp-tree-sitter-kotlin@^1.0.1",
+    "tree-sitter-php": "npm:sdl-mcp-tree-sitter-php@^1.0.1",
     "tree-sitter-python": "npm:sdl-mcp-tree-sitter-python@^1.0.1",
     "tree-sitter-rust": "npm:sdl-mcp-tree-sitter-rust@^1.0.1",
     "tree-sitter-typescript": "npm:sdl-mcp-tree-sitter-typescript@^1.0.1",
@@ -124,7 +126,7 @@
   "overrides": {
     "@hono/node-server": "1.19.13",
     "flatted": "3.4.2",
-    "hono": "4.12.23",
+    "hono": "4.12.25",
     "ip-address": "10.2.0",
     "tar": "7.5.16",
     "tree-sitter": "$tree-sitter"

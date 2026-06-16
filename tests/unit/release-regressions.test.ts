@@ -429,6 +429,32 @@ describe("release regression guards", () => {
     );
   });
 
+  it("declares every tree-sitter package verified by the CI setup action", () => {
+    const packageJson = JSON.parse(readSource("package.json")) as {
+      dependencies?: Record<string, string>;
+    };
+    const setupTreeSitterSource = readSource(
+      ".github/actions/setup-tree-sitter/action.yml",
+    );
+
+    const verifiedPackages = Array.from(
+      setupTreeSitterSource.matchAll(/"(?<pkg>tree-sitter(?:-[^"]+)?)"/g),
+      (match) => match.groups?.pkg,
+    ).filter((pkg): pkg is string => Boolean(pkg));
+
+    assert.ok(
+      verifiedPackages.length > 0,
+      "setup-tree-sitter should verify at least one package",
+    );
+
+    for (const packageName of verifiedPackages) {
+      assert.ok(
+        packageJson.dependencies?.[packageName],
+        `package.json dependencies must include ${packageName}`,
+      );
+    }
+  });
+
   it("verifies tree-sitter grammars during package postinstall before pruning sources", () => {
     const postinstallSource = readSource("scripts/postinstall.mjs");
     const grammarSource = readSource("scripts/postinstall-tree-sitter.mjs");
