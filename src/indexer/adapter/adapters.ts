@@ -5,10 +5,8 @@ import { PythonAdapter } from "./python.js";
 import { CSharpAdapter } from "./csharp.js";
 import { CAdapter } from "./c.js";
 import { CppAdapter } from "./cpp.js";
-import { PhpAdapter } from "./php.js";
 import { RustAdapter } from "./rust.js";
 import { KotlinAdapter } from "./kotlin.js";
-import { ShellAdapter } from "./shell.js";
 
 export const adapters = [
   {
@@ -92,16 +90,6 @@ export const adapters = [
     factory: () => new CppAdapter(),
   },
   {
-    extension: ".php",
-    languageId: "php",
-    factory: () => new PhpAdapter(),
-  },
-  {
-    extension: ".phtml",
-    languageId: "php",
-    factory: () => new PhpAdapter(),
-  },
-  {
     extension: ".rs",
     languageId: "rust",
     factory: () => new RustAdapter(),
@@ -117,16 +105,6 @@ export const adapters = [
     factory: () => new KotlinAdapter(),
   },
   {
-    extension: ".sh",
-    languageId: "shell",
-    factory: () => new ShellAdapter(),
-  },
-  {
-    extension: ".bash",
-    languageId: "shell",
-    factory: () => new ShellAdapter(),
-  },
-  {
     extension: ".mjs",
     languageId: "typescript",
     factory: () => new TypeScriptAdapter(),
@@ -140,10 +118,5 @@ export const adapters = [
     extension: ".pyw",
     languageId: "python",
     factory: () => new PythonAdapter(),
-  },
-  {
-    extension: ".zsh",
-    languageId: "shell",
-    factory: () => new ShellAdapter(),
   },
 ];

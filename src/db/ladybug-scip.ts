@@ -748,7 +748,7 @@ interface ScipExternalSymbolRow {
   rangeEndCol?: number;
   external: boolean;
   scipSymbol: string;
-  source: "scip";
+  source: "scip" | "lsp";
   packageName?: string;
   packageVersion?: string;
   updatedAt: string;
@@ -758,15 +758,16 @@ export async function pruneStaleScipExternalSymbols(
   conn: Connection,
   repoId: string,
   currentSymbolIds: readonly string[],
+  source: "scip" | "lsp" = "scip",
 ): Promise<number> {
   const current = new Set(currentSymbolIds);
   const rows = await queryAll<{ symbolId: string }>(
     conn,
     `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
      WHERE coalesce(s.external, false) = true
-       AND coalesce(s.source, '') = 'scip'
+       AND coalesce(s.source, '') = $source
      RETURN s.symbolId AS symbolId`,
-    { repoId },
+    { repoId, source },
   );
   const staleSymbolIds = rows
     .map((row) => row.symbolId)

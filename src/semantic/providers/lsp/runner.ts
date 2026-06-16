@@ -8,9 +8,12 @@ import type { Connection } from "kuzu";
 import type {
   DefinitionParams,
   Diagnostic,
+  DocumentSymbol,
+  DocumentSymbolParams,
   InitializeResult,
   Location,
   LocationLink,
+  SymbolInformation,
 } from "vscode-languageserver-protocol";
 
 import type { SemanticEnrichmentLspServerConfig } from "../../../config/types.js";
@@ -43,6 +46,10 @@ export interface SemanticLspClientLike {
     params: DefinitionParams,
     timeoutMs?: number,
   ): Promise<Location | Location[] | LocationLink[] | null>;
+  documentSymbol?(
+    params: DocumentSymbolParams,
+    timeoutMs?: number,
+  ): Promise<Array<DocumentSymbol | SymbolInformation> | null>;
   diagnostics?(uri: string): Diagnostic[];
   pullDiagnostics?(uri: string, timeoutMs?: number): Promise<Diagnostic[]>;
   waitForDiagnostics?(

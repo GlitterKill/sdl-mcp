@@ -16,6 +16,7 @@ interface ParseTask {
   filePath: string;
   content: string;
   ext: string;
+  languages?: string[];
 }
 
 interface ParseResult {
@@ -53,6 +54,7 @@ export const DEFAULT_MAX_QUEUE_SIZE = 10_000;
 export interface ParserWorkerPoolOptions {
   poolSize?: number;
   maxQueueSize?: number;
+  configuredLanguages?: readonly string[];
 }
 
 export class ParserWorkerPool {
@@ -61,6 +63,7 @@ export class ParserWorkerPool {
   private shuttingDown = false;
   private readonly poolSize: number;
   private readonly maxQueueSize: number;
+  private readonly configuredLanguages: readonly string[];
 
   constructor(
     poolSizeOrOptions: number | ParserWorkerPoolOptions = Math.max(
@@ -74,6 +77,7 @@ export class ParserWorkerPool {
         : poolSizeOrOptions;
     this.poolSize = Math.max(1, opts.poolSize ?? Math.max(1, os.cpus().length - 1));
     this.maxQueueSize = Math.max(1, opts.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE);
+    this.configuredLanguages = opts.configuredLanguages ?? [];
   }
 
   /**
@@ -229,7 +233,10 @@ export class ParserWorkerPool {
       }
       availableWorker.busy = true;
       availableWorker.currentTask = item;
-      availableWorker.worker.postMessage(item.task);
+      availableWorker.worker.postMessage({
+        ...item.task,
+        languages: [...this.configuredLanguages],
+      });
     }
   }
 

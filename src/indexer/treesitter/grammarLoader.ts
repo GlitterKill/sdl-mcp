@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import Parser from "tree-sitter";
 import { logger } from "../../util/logger.js";
 import { GRAMMAR_QUERY_LENGTH } from "../../config/constants.js";
@@ -71,6 +72,7 @@ export type SupportedLanguage =
 
 const parserCache = new Map<SupportedLanguage, Parser | null>();
 const languageCache = new Map<SupportedLanguage, Parser.Language | null>();
+const grammarPackageRoots = new Map<string, string>();
 
 /**
  * Map from language ID to npm package name and optional property path.
@@ -109,8 +111,10 @@ function getLanguageModule(
     if (!spec) {
       lang = null;
     } else {
-      const mod = require(spec.pkg);
-      lang = spec.prop ? mod[spec.prop] : mod;
+      const mod = loadGrammarPackage(spec.pkg);
+      lang = spec.prop
+        ? (mod as Record<string, Parser.Language>)[spec.prop]
+        : (mod as Parser.Language);
 
       if (!lang) {
         const err = new GrammarLoadError(
@@ -139,6 +143,33 @@ function getLanguageModule(
 
   languageCache.set(language, lang);
   return lang;
+}
+
+function loadGrammarPackage(packageName: string): unknown {
+  try {
+    return require(packageName);
+  } catch (error) {
+    const packageRoot = grammarPackageRoots.get(packageName);
+    if (!packageRoot) throw error;
+    return require(packageRoot);
+  }
+}
+
+export function registerGrammarPackageRoot(
+  packageName: string,
+  packageRoot: string,
+): void {
+  grammarPackageRoots.set(packageName, packageRoot);
+  for (const [language, spec] of Object.entries(GRAMMAR_PACKAGES)) {
+    if (spec.pkg !== packageName) continue;
+    parserCache.delete(language as SupportedLanguage);
+    languageCache.delete(language as SupportedLanguage);
+    loadErrors.delete(language as SupportedLanguage);
+  }
+  logger.debug("Registered language-pack grammar root", {
+    packageName,
+    packageRoot: join(packageRoot),
+  });
 }
 
 export function getParser(language: SupportedLanguage): Parser | null {

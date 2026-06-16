@@ -1,0 +1,29 @@
+# Language Provider Support
+
+This chart tracks SDL-MCP language support across syntax adapters, parser install mode, SCIP coverage, LSP-IO server authority, provider-first execution, and validation evidence.
+
+SCIP remains the first provider choice. LSP is used for languages without practical SCIP coverage. New LSP language parser support is installed on demand only after a repository config explicitly enables that language.
+
+Every language implementation change must update `docs/generated/language-provider-support.json` and pass `npm run docs:language-support:check`.
+
+<!-- language-support-chart:start -->
+| Language | Popularity rank/source | SDL adapter status | Parser install mode | SCIP status | LSP-IO server | Provider-first status | Validation repo | Validation evidence | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| TypeScript / JavaScript | Tier 0 existing SDL adapter | built-in | root dependency | supported via scip-typescript | not required | SCIP provider-first executable | local fixtures | tests/unit/provider-first-indexing.test.ts | SCIP remains first priority. |
+| Python | Tier 0 existing SDL adapter | built-in | root dependency | supported via scip-python | not required | SCIP provider-first executable | local fixtures | tests/unit/provider-first-indexing.test.ts | Includes .pyi provider scan companion files. |
+| Go | Tier 0 existing SDL adapter | built-in | root dependency | supported via scip-go | not required | SCIP provider-first executable | prometheus/prometheus | devdocs/validation/provider-first-go-prometheus-2026-06-15.md | Go SCIP normalization is active. |
+| Java | Tier 0 existing SDL adapter | built-in | root dependency | supported via scip-java | not required | SCIP provider-first executable | local fixtures | tests/unit/provider-first-indexing.test.ts | JVM constructor normalization is active. |
+| C# | Tier 0 existing SDL adapter | built-in | root dependency | supported via scip-dotnet | not required | SCIP provider-first executable | local fixtures | tests/unit/provider-first-indexing.test.ts | SCIP external symbols are provider-owned. |
+| C / C++ | Tier 0 existing SDL adapter | built-in | root dependency | supported via scip-clang | not required | SCIP provider-first executable | llvm/llvm-project subset | devdocs/benchmarks/provider-first-benchmark-llvm-20000-final-validation1.md | Uses provider scan companion headers and C/C++ call proof. |
+| Rust | Tier 0 existing SDL adapter | built-in | root dependency | supported via rust-analyzer scip | not required | SCIP provider-first executable | local fixtures | tests/unit/provider-first-indexing.test.ts | Module descriptors normalize to SDL modules. |
+| Kotlin | Tier 0 existing SDL adapter | built-in | root dependency | supported via scip-java | not required | SCIP provider-first executable | local fixtures | tests/unit/provider-first-indexing.test.ts | Shares JVM provider normalization. |
+| PHP | Wave 0 rollout priority | lazy language pack | on-demand when repo config includes php | no practical SCIP indexer | phpactor | LSP provider-first validated with capped provider coverage | sebastianbergmann/phpunit | devdocs/validation/provider-first-lsp-php-2026-06-16.md | Validated 50/2574 provider-primary files with legacy fallback for uncovered files; default repo registration no longer enables PHP implicitly. |
+| Shell / Bash | Wave 0 rollout priority | lazy language pack | on-demand when repo config includes sh | no practical SCIP indexer | bash-language-server | LSP provider-first validated with partial provider coverage | bats-core/bats-core | devdocs/validation/provider-first-lsp-shell-2026-06-16.md | Validated 54/54 provider-primary files and 474 LSP symbols; references/call proof still pending. |
+| PowerShell | Wave 1 rollout priority | planned | not installed | no practical SCIP indexer | PowerShellEditorServices | not supported | PowerShell/PowerShellGet | pending | Install tree-sitter only when configured. |
+| Ruby | Wave 1 rollout priority | planned | not installed | no practical SCIP indexer | ruby-lsp | not supported | sinatra/sinatra | pending | LSP-IO metadata must own server install/export. |
+| Lua | Wave 1 rollout priority | planned | not installed | no practical SCIP indexer | lua-language-server | not supported | nvim-lua/plenary.nvim | pending | LSP provider facts must validate before support. |
+| Dart | Wave 1 rollout priority | planned | not installed | no practical SCIP indexer | dart language server | not supported | dart-lang/http | pending | Requires lsp-io export metadata. |
+| Swift | Wave 1 rollout priority | planned | not installed | no practical SCIP indexer | sourcekit-lsp | not supported | apple/swift-argument-parser | pending | Requires sourcekit-lsp readiness metadata. |
+| Groovy, Perl, R, Elixir, F#, Fortran, Haskell | Wave 2 rollout priority | planned | not installed | no practical SCIP indexer | pending lsp-io metadata | not supported | pending | pending | Split into one row per language as each implementation begins. |
+| Julia, Zig, Nix, Clojure, Erlang, OCaml, Ada, Gleam, Elm, Nim, Crystal, D, V, Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML | Wave 3 rollout priority | planned | not installed | no practical SCIP indexer | pending lsp-io metadata | not supported | pending | pending | Keep tree-sitter packages uninstalled until each language is configured. |
+<!-- language-support-chart:end -->

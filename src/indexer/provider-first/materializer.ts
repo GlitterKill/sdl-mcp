@@ -13,6 +13,7 @@ import type {
   ExternalSymbolFact,
   FileFact,
   ProviderFactSet,
+  ProviderSourceType,
   SymbolFact,
 } from "./types.js";
 import { validateProviderFirstGraphRows } from "./graph-validation.js";
@@ -36,7 +37,7 @@ export interface ProviderFirstExternalSymbolRow {
   rangeEndCol?: number;
   external: boolean;
   scipSymbol: string;
-  source: "scip";
+  source: Exclude<ProviderSourceType, "legacy">;
   packageName?: string;
   packageVersion?: string;
   updatedAt: string;
@@ -245,11 +246,16 @@ export async function materializeProviderFacts(
     });
     if (pruneExternalSymbols) {
       await measurePhase("pruneExternalSymbols", async () => {
-        await ladybugDb.pruneStaleScipExternalSymbols(
-          txConn,
-          repoId,
-          rows.externalSymbols.map((symbol) => symbol.symbolId),
-        );
+        for (const source of providerExternalSymbolSources(rows)) {
+          await ladybugDb.pruneStaleScipExternalSymbols(
+            txConn,
+            repoId,
+            rows.externalSymbols
+              .filter((symbol) => symbol.source === source)
+              .map((symbol) => symbol.symbolId),
+            source,
+          );
+        }
       });
     }
     if (rows.externalSymbols.length > 0) {
@@ -279,6 +285,21 @@ export async function materializeProviderFacts(
       });
     });
   });
+}
+
+function providerExternalSymbolSources(
+  rows: ProviderFirstGraphRows,
+): Array<Exclude<ProviderSourceType, "legacy">> {
+  const sources = new Set<Exclude<ProviderSourceType, "legacy">>();
+  for (const symbol of rows.externalSymbols) {
+    sources.add(symbol.source);
+  }
+  for (const symbol of rows.symbols) {
+    if (symbol.source === "scip" || symbol.source === "lsp") {
+      sources.add(symbol.source);
+    }
+  }
+  return [...sources];
 }
 
 async function deleteProviderReplacementSymbolsInChunks(
@@ -537,7 +558,7 @@ function externalSymbolFactToRow(
     rangeEndCol: 0,
     external: true,
     scipSymbol: fact.providerSymbolId,
-    source: "scip",
+    source: fact.providerType,
     packageName: fact.packageName,
     packageVersion: fact.packageVersion,
     updatedAt: indexedAt,

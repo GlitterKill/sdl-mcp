@@ -5237,7 +5237,7 @@ describe("provider-first indexing foundation", () => {
     assert.deepEqual(plan.reasons, []);
   });
 
-  it("does not silently fall back for explicit providerFirst when execution is unsupported", () => {
+  it("plans full LSP provider-first execution when only LSP is configured", () => {
     const selection = resolveProviderFirstPipeline({
       indexing: IndexingConfigSchema.parse({ pipeline: "providerFirst" }),
       semanticEnrichment: SemanticEnrichmentConfigSchema.parse({
@@ -5263,9 +5263,10 @@ describe("provider-first indexing foundation", () => {
       scip: ScipConfigSchema.parse({ enabled: false }),
     });
 
-    assert.equal(plan.canExecute, false);
+    assert.equal(plan.canExecute, true);
+    assert.equal(plan.executor, "lspFull");
     assert.equal(plan.shouldFallbackToLegacy, false);
-    assert.match(plan.reasons.join(" "), /LSP provider-first execution/i);
+    assert.deepEqual(plan.reasons, []);
   });
 
   it("allows auto mode to fall back when the next provider-first phase cannot execute", () => {
@@ -6444,6 +6445,35 @@ describe("provider-first indexing foundation", () => {
     assert.equal(rows.edges.length, 1);
     assert.equal(rows.edges[0]?.resolverId, "provider-first:scip");
     assert.equal(rows.edges[0]?.resolutionPhase, "provider-first");
+  });
+
+  it("preserves LSP provenance when shaping provider graph rows", () => {
+    const emittedAt = "2026-06-16T12:00:00.000Z";
+    const rows = providerFactsToGraphRows({
+      indexedAt: emittedAt,
+      facts: providerFactSet({
+        externalSymbols: [
+          {
+            kind: "externalSymbol",
+            repoId: "repo",
+            generationId: "gen-lsp",
+            providerType: "lsp",
+            providerId: "phpactor",
+            emittedAt,
+            symbolId: "external:lsp:phpactor:vendor/autoload.php:Acme\\\\Tool",
+            providerSymbolId: "phpactor:Acme\\\\Tool",
+            name: "Tool",
+            symbolKind: "class",
+            packageName: "acme/tool",
+            documentation: [],
+          },
+        ],
+      }),
+    });
+
+    assert.equal(rows.externalSymbols.length, 1);
+    assert.equal(rows.externalSymbols[0]?.source, "lsp");
+    assert.equal(rows.externalSymbols[0]?.scipSymbol, "phpactor:Acme\\\\Tool");
   });
 
   it("carries raw file SHA-256 and byte size from provider file facts", () => {

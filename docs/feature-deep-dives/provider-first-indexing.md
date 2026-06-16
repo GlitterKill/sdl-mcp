@@ -2,6 +2,8 @@
 
 Provider-first indexing is the indexing direction for large repositories. It treats compiler or language-server facts as the first graph source and keeps the existing tree-sitter/Rust indexer as the fallback path.
 
+Language support status is tracked in [Language Provider Support](./language-provider-support.md). That chart is backed by `docs/generated/language-provider-support.json` and checked by `npm run docs:language-support:check`.
+
 Provider-first is its own indexing mode. Its symbol IDs are stable within the provider-first pipeline, but they are not intended to be interchangeable with legacy symbol IDs. Consumers should resolve symbols through current graph queries, provider provenance, source path, kind, name, and range rather than assuming a legacy/provider-first ID can be reused across modes.
 
 For performance tuning, use the deterministic subset workflow in [Provider-first fallback benchmark](./provider-first-fallback-benchmark.md). That workflow is the fast iteration loop only. A larger representative run or full target run is still required before declaring an optimization complete.
@@ -27,8 +29,8 @@ For performance tuning, use the deterministic subset workflow in [Provider-first
 | Value | Behavior |
 | --- | --- |
 | `"legacy"` | Always use the current indexer. |
-| `"providerFirst"` | Require an executable provider-first run for full SCIP refreshes. SCIP-covered files with usable symbol facts are materialized from provider facts even when references are partial. Uncovered or provider-unusable files are routed to the legacy indexer in the same run. Incremental refreshes temporarily use the legacy incremental path. |
-| `"auto"` | Use provider-first when an executable provider path is available; otherwise use legacy. Full SCIP runs can mix provider materialization with same-run legacy fallback. If SCIP execution fails before trustworthy facts are available, `auto` falls back to a pure legacy run. |
+| `"providerFirst"` | Require an executable provider-first run for full SCIP or LSP refreshes. SCIP-covered files with usable symbol facts are materialized from provider facts even when references are partial. LSP-covered files can materialize bounded document-symbol and diagnostic facts. Uncovered or provider-unusable files are routed to the legacy indexer in the same run. Incremental refreshes temporarily use the legacy incremental path. |
+| `"auto"` | Use provider-first when an executable provider path is available; otherwise use legacy. Full SCIP and LSP runs can mix provider materialization with same-run legacy fallback. If provider execution fails before trustworthy facts are available, `auto` falls back to a pure legacy run. |
 
 `providerFirst.maxLegacyFallbackFiles` defaults to `1000000`. That high default is intentional: normal full builds should complete the graph rather than adopt a provider-only subset. Larger gaps keep the provider-primary graph, skip the expensive legacy parse, and report skipped file counts only when the emergency cap is exceeded or intentionally lowered.
 
@@ -40,7 +42,7 @@ Provider priority is fixed:
 2. LSP
 3. Legacy fallback
 
-SCIP wins because it provides compiler-grade definitions, references, relationships, external symbols, and per-document coverage quickly. LSP is primary only through bounded collection: workspace symbols, document symbols, definitions, references, diagnostics, and optional hierarchy calls when the server advertises support. SDL-MCP consumes configured LSP commands; it does not run package-manager install recipes for servers.
+SCIP wins because it provides compiler-grade definitions, references, relationships, external symbols, and per-document coverage quickly. LSP is primary only through bounded collection. The current executable LSP path materializes document symbols and diagnostics into provider facts; definitions, references, workspace symbols, and hierarchy calls remain planned provider facts. SDL-MCP consumes configured LSP commands exported by lsp-io; it does not run package-manager install recipes for servers.
 
 ## Provider Facts
 

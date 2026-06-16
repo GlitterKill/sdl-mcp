@@ -14,6 +14,7 @@ interface WorkerMessage {
   filePath: string;
   content: string;
   ext: string;
+  languages?: string[];
 }
 
 export type SymbolWithNodeId = ExtractedSymbol & { astFingerprint: string };
@@ -27,8 +28,16 @@ interface WorkerResult {
 }
 
 parentPort?.on("message", (msg: WorkerMessage) => {
+  void handleWorkerMessage(msg);
+});
+
+async function handleWorkerMessage(msg: WorkerMessage): Promise<void> {
   let treeToDelete: { delete?: () => void } | null = null;
   try {
+    const { ensureConfiguredLanguagePackAdapters } = await import(
+      "./language-packs.js"
+    );
+    await ensureConfiguredLanguagePackAdapters(msg.languages ?? []);
     const adapter = getAdapterForExtension(msg.ext);
     if (!adapter) {
       parentPort?.postMessage({
@@ -161,4 +170,4 @@ parentPort?.on("message", (msg: WorkerMessage) => {
     // extraction has produced plain serializable data for the parent thread.
     treeToDelete?.delete?.();
   }
-});
+}

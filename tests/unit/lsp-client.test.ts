@@ -73,6 +73,53 @@ describe("SemanticLspClient", () => {
     }
   });
 
+  it("accepts LSP responses with Content-Type before Content-Length", async () => {
+    const fixturePath = join(
+      process.cwd(),
+      "tests/fixtures/lsp/mock-content-type-first-server.mjs",
+    );
+    const client = new SemanticLspClient({
+      serverId: "content-type-first",
+      command: process.execPath,
+      args: [fixturePath],
+      workspaceRoot: process.cwd(),
+      timeoutMs: 1000,
+    });
+
+    try {
+      const initializeResult = await client.start();
+      assert.equal(initializeResult.serverInfo?.name, "content-type-first");
+      assert.equal(initializeResult.capabilities.documentSymbolProvider, true);
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it("does not hang when a server ignores shutdown", async () => {
+    const fixturePath = join(
+      process.cwd(),
+      "tests/fixtures/lsp/mock-no-shutdown-server.mjs",
+    );
+    const client = new SemanticLspClient({
+      serverId: "no-shutdown",
+      command: process.execPath,
+      args: [fixturePath],
+      workspaceRoot: process.cwd(),
+      timeoutMs: 5_000,
+    });
+
+    const initializeResult = await client.start();
+    assert.equal(initializeResult.serverInfo?.name, "no-shutdown");
+
+    const startedAt = Date.now();
+    await client.dispose();
+
+    assert.ok(
+      Date.now() - startedAt < 2_000,
+      "dispose should use the bounded shutdown timeout",
+    );
+  });
+
   it("starts explicit Windows npm command shims through node entrypoints", () => {
     assert.deepEqual(
       resolveLspSpawnCommand({

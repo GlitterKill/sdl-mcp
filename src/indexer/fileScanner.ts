@@ -15,6 +15,10 @@ import {
   getLanguageIdForExtension,
   getSupportedExtensions,
 } from "./adapter/registry.js";
+import {
+  ensureConfiguredLanguagePackAdapters,
+  resolveConfiguredLanguagePacks,
+} from "./language-packs.js";
 
 export interface FileMetadata {
   path: string;
@@ -78,6 +82,10 @@ export function getLanguageExtensions(languages: string[]): string[] {
 
     if (!matchedAdapterExtension) {
       extensions.add(`.${normalizedLanguage}`);
+    }
+
+    for (const pack of resolveConfiguredLanguagePacks([normalizedLanguage])) {
+      for (const extension of pack.extensions) extensions.add(extension);
     }
 
     const companionExtensions =
@@ -292,6 +300,7 @@ export async function scanRepository(
   repoPath: string,
   config: RepoConfig,
 ): Promise<ScannedFileMetadata[]> {
+  await ensureConfiguredLanguagePackAdapters(config.languages);
   const discoveredFiles = await discoverFiles(repoPath, config);
   const metadata = await filterFilesBySize(
     discoveredFiles,

@@ -13,9 +13,9 @@ describe("repo.register language defaults", () => {
     assert.ok(languages.includes("cs"));
     assert.ok(languages.includes("c"));
     assert.ok(languages.includes("cpp"));
-    assert.ok(languages.includes("php"));
     assert.ok(languages.includes("rs"));
     assert.ok(languages.includes("kt"));
-    assert.ok(languages.includes("sh"));
+    assert.equal(languages.includes("php"), false);
+    assert.equal(languages.includes("sh"), false);
   });
 });

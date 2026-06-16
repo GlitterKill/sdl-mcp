@@ -88,6 +88,9 @@ async function getCachedHealthSnapshot(repoId: string): Promise<{
   }
 }
 const SUPPORTED_LANGUAGES = [...LanguageSchema.options];
+const DEFAULT_REPO_LANGUAGES = SUPPORTED_LANGUAGES.filter(
+  (language) => language !== "php" && language !== "sh",
+);
 
 /**
  * Checks whether a resolved repository root path is within at least one of the
@@ -133,7 +136,7 @@ export function resolveRepoLanguages(
   languages?: string[],
 ): RepoConfig["languages"] {
   if (!languages || languages.length === 0) {
-    return [...SUPPORTED_LANGUAGES] as RepoConfig["languages"];
+    return [...DEFAULT_REPO_LANGUAGES] as RepoConfig["languages"];
   }
 
   const invalid = languages.filter(

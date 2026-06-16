@@ -17,6 +17,8 @@ import type {
   DefinitionParams,
   Diagnostic,
   DidChangeTextDocumentParams,
+  DocumentSymbol,
+  DocumentSymbolParams,
   DocumentDiagnosticParams,
   DocumentDiagnosticReport,
   DidOpenTextDocumentParams,
@@ -27,6 +29,7 @@ import type {
   LocationLink,
   PublishDiagnosticsParams,
   ReferenceParams,
+  SymbolInformation,
   TextDocumentContentChangeEvent,
   TextDocumentItem,
   VersionedTextDocumentIdentifier,
@@ -58,6 +61,11 @@ const ReferencesRequest = new RequestType<
   Location[] | null,
   void
 >("textDocument/references");
+const DocumentSymbolRequest = new RequestType<
+  DocumentSymbolParams,
+  Array<DocumentSymbol | SymbolInformation> | null,
+  void
+>("textDocument/documentSymbol");
 const HoverRequest = new RequestType<
   {
     textDocument: { uri: string };
@@ -71,6 +79,7 @@ const DocumentDiagnosticRequestType = new RequestType<
   DocumentDiagnosticReport,
   void
 >("textDocument/diagnostic");
+const SHUTDOWN_TIMEOUT_MS = 1_000;
 
 export interface LspClientOptions {
   serverId: string;
@@ -335,6 +344,14 @@ export class SemanticLspClient {
     return this.sendRequest(ReferencesRequest, params);
   }
 
+  async documentSymbol(
+    params: DocumentSymbolParams,
+    timeoutMs?: number,
+  ): Promise<Array<DocumentSymbol | SymbolInformation> | null> {
+    this.ensureInitialized();
+    return this.sendRequest(DocumentSymbolRequest, params, timeoutMs);
+  }
+
   async hover(
     uri: string,
     position: { line: number; character: number },
@@ -400,11 +417,24 @@ export class SemanticLspClient {
   async dispose(): Promise<void> {
     const connection = this.connection;
     if (connection) {
-      if (this.initialized) {
-        await this.sendRequest(ShutdownRequest, undefined);
-        await connection.sendNotification(ExitNotification);
+      try {
+        if (this.initialized) {
+          await this.sendRequest(
+            ShutdownRequest,
+            undefined,
+            SHUTDOWN_TIMEOUT_MS,
+          );
+          await connection.sendNotification(ExitNotification);
+        }
+      } catch {
+        // Some language servers ignore shutdown once indexing is complete. SDL
+        // still owns the transport and must release the child process promptly.
+        await connection
+          .sendNotification(ExitNotification)
+          .catch(() => undefined);
+      } finally {
+        connection.dispose();
       }
-      connection.dispose();
     }
     if (this.process && !this.process.killed) {
       this.process.kill();
@@ -439,13 +469,24 @@ export class SemanticLspClient {
       throw new Error(`LSP client ${this.options.serverId} is not running`);
     }
     const cts = new CancellationTokenSource();
-    const timeout = setTimeout(() => {
-      cts.cancel();
-    }, timeoutMs);
+    let timeout: NodeJS.Timeout | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => {
+        cts.cancel();
+        reject(
+          new Error(
+            `LSP request ${requestType.method} timed out after ${timeoutMs}ms`,
+          ),
+        );
+      }, timeoutMs);
+    });
     try {
-      return await this.connection.sendRequest(requestType, params, cts.token);
+      return await Promise.race([
+        this.connection.sendRequest(requestType, params, cts.token),
+        timeoutPromise,
+      ]);
     } finally {
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
       cts.dispose();
     }
   }

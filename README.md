@@ -273,7 +273,7 @@ When enabled, memories are **automatically surfaced** inside graph slices — wh
 
 ### SCIP Integration — Compiler-Grade Cross-References
 
-Tree-sitter gives SDL-MCP fast, syntax-level symbol extraction across the supported TypeScript/JavaScript, Python, Go, Java, C#, C/C++, PHP, Rust, Kotlin, and Shell surface. SCIP (Source Code Intelligence Protocol) supplements this with **compiler-grade cross-references** from tools like scip-typescript, scip-go, and rust-analyzer. Generate a `.scip` index file, point SDL-MCP at it, and heuristic edges are upgraded to exact compiler-verified edges, external dependency symbols become first-class graph nodes, and new `implements` edges reveal interface/trait relationships that syntax analysis cannot discover.
+Tree-sitter gives SDL-MCP fast, syntax-level symbol extraction across the built-in TypeScript/JavaScript, Python, Go, Java, C#, C/C++, Rust, and Kotlin surface. PHP and Shell/Bash are explicit opt-in language packs for LSP provider-first work and are not enabled by default. SCIP (Source Code Intelligence Protocol) supplements this with **compiler-grade cross-references** from tools like scip-typescript, scip-go, and rust-analyzer. Generate a `.scip` index file, point SDL-MCP at it, and heuristic edges are upgraded to exact compiler-verified edges, external dependency symbols become first-class graph nodes, and new `implements` edges reveal interface/trait relationships that syntax analysis cannot discover.
 
 ![SCIP integration compiler cross-reference ingestion flow](./docs/readme-assets/readme-scip-integration.webp)
 
@@ -546,7 +546,8 @@ A **VSCode extension** (`sdl-mcp-vscode/`) provides live buffer integration for 
 | [Governance & Policy](./docs/feature-deep-dives/governance-policy.md)               | Proof-of-need gating, audit logging, runtime sandboxing                               |
 | [Agent Context](./docs/feature-deep-dives/agent-context.md)                         | Task-shaped context retrieval, feedback loops, portable context summaries             |
 | [Context Modes](./docs/feature-deep-dives/context-modes.md)                         | Precise vs broad retrieval, adaptive symbol ranking, benchmark trade-offs             |
-| [Indexing & Languages](./docs/feature-deep-dives/indexing-languages.md)             | Rust/TS engines, two-pass architecture, 12-language support                           |
+| [Indexing & Languages](./docs/feature-deep-dives/indexing-languages.md)             | Rust/TS engines, two-pass architecture, built-in and opt-in language support          |
+| [Language Provider Support](./docs/feature-deep-dives/language-provider-support.md) | Language chart for adapters, parser install mode, SCIP/LSP status, and validation     |
 | [Provider-First Indexing](./docs/feature-deep-dives/provider-first-indexing.md)     | SCIP/LSP-first planning, provider facts, shadow DB readiness, fallback boundaries     |
 | [Runtime Execution](./docs/feature-deep-dives/runtime-execution.md)                 | Sandboxed subprocess execution with governance                                        |
 | [CLI Tool Access](./docs/feature-deep-dives/cli-tool-access.md)                     | Direct CLI access to 36 action aliases, output formats, stdin piping, scripting       |

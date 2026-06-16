@@ -2,6 +2,7 @@ import { deserialize, serialize } from "node:v8";
 import { hash } from "node:crypto";
 import {
   access,
+  readdir,
   mkdir,
   readFile,
   realpath,
@@ -12,10 +13,22 @@ import {
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { MAX_FILE_BYTES } from "../../config/constants.js";
-import type { AppConfig, ScipConfig } from "../../config/types.js";
+import type {
+  AppConfig,
+  ScipConfig,
+  SemanticEnrichmentLspServerConfig,
+} from "../../config/types.js";
 import type { Range } from "../../domain/types.js";
+import type {
+  Diagnostic,
+  DocumentSymbol,
+  DocumentSymbolParams,
+  InitializeResult,
+  SymbolInformation,
+} from "vscode-languageserver-protocol";
 import { createScipDecoder } from "../../scip/decoder-factory.js";
 import {
   isClangStyleSymbolScheme,
@@ -54,6 +67,14 @@ import type {
   ProviderFactBase,
   ProviderFirstPipelineSelection,
 } from "./types.js";
+import {
+  SemanticLspClient,
+  type LspClientOptions,
+} from "../../semantic/providers/lsp/client.js";
+import {
+  normalizeLspProviderFacts,
+  type LspProviderDocument,
+} from "./lsp-normalizer.js";
 
 const SOURCE_TEXT_READ_CONCURRENCY = 32;
 const SOURCE_TEXT_IMPORT_ALIAS_BLOCK_SCAN_LIMIT = 80;
@@ -74,7 +95,7 @@ type ProviderFirstPhaseTimingRecorder = (
   durationMs: number,
 ) => void;
 
-export type ProviderFirstExecutorKind = "scipFull";
+export type ProviderFirstExecutorKind = "scipFull" | "lspFull";
 export type ProviderFirstFallbackReasonCode =
   | "incrementalUnsupported"
   | "lspUnsupported"
@@ -232,6 +253,34 @@ export interface ProviderFirstScipExecutionResult {
   summary: ProviderFirstExecutionSummary;
 }
 
+export interface ProviderFirstLspExecutionResult {
+  generationId: string;
+  facts: ProviderFactSet;
+  rows: ProviderFirstGraphRows;
+  summary: ProviderFirstExecutionSummary;
+}
+
+export interface ProviderFirstLspClientLike {
+  start(timeoutMs?: number): Promise<InitializeResult>;
+  openDocument(document: {
+    uri: string;
+    languageId: string;
+    version: number;
+    text: string;
+  }): Promise<void>;
+  documentSymbol(
+    params: DocumentSymbolParams,
+    timeoutMs?: number,
+  ): Promise<Array<DocumentSymbol | SymbolInformation> | null>;
+  diagnostics?(uri: string): Diagnostic[];
+  pullDiagnostics?(uri: string, timeoutMs?: number): Promise<Diagnostic[]>;
+  waitForDiagnostics?(
+    uris: readonly string[],
+    timeoutMs: number,
+  ): Promise<void>;
+  dispose(): Promise<void>;
+}
+
 interface ExecuteProviderFirstScipFullParams {
   repoId: string;
   repoRoot: string;
@@ -252,6 +301,23 @@ interface ExecuteProviderFirstScipFullParams {
     message?: string;
   }) => void;
   signal?: AbortSignal;
+}
+
+interface ExecuteProviderFirstLspFullParams {
+  repoId: string;
+  repoRoot: string;
+  config: AppConfig;
+  scannedFiles?: readonly ProviderFirstSourceFileMetadata[];
+  recordPhaseTiming?: ProviderFirstPhaseTimingRecorder;
+  clientFactory?: (options: LspClientOptions) => ProviderFirstLspClientLike;
+  signal?: AbortSignal;
+}
+
+interface CollectedLspProviderDocument extends LspProviderDocument {
+  uri: string;
+  text: string;
+  symbols?: Array<DocumentSymbol | SymbolInformation>;
+  diagnostics?: Diagnostic[];
 }
 
 interface ProviderFirstSourceFileMetadata {
@@ -330,12 +396,12 @@ export function resolveProviderFirstExecutionPlan(params: {
   }
 
   if (hasLspSource && !hasScipSource) {
-    return unsupportedPlan({
-      fallbackAllowed,
-      fallbackReasonCode: "lspUnsupported",
-      reason:
-        "LSP provider-first execution is still capped-planning only; the next executable phase is SCIP full refresh",
-    });
+    return {
+      canExecute: true,
+      shouldFallbackToLegacy: false,
+      executor: "lspFull",
+      reasons: [],
+    };
   }
 
   return unsupportedPlan({
@@ -482,6 +548,329 @@ export async function executeProviderFirstScipFull(
       externalSymbolsIndexed: rows.externalSymbols.length,
     },
   };
+}
+
+export async function executeProviderFirstLspFull(
+  params: ExecuteProviderFirstLspFullParams,
+): Promise<ProviderFirstLspExecutionResult> {
+  const generationId = `provider-first-lsp:${Date.now()}`;
+  const indexedAt = new Date().toISOString();
+  const measurePhase = providerFirstPhaseMeasurer(params.recordPhaseTiming);
+  const lspConfig = params.config.semanticEnrichment?.providers.lsp;
+  const servers = Object.entries(lspConfig?.servers ?? {}).filter(
+    ([, server]) => server.enabled !== false,
+  );
+  const facts: ProviderFactSet = emptyProviderFactSet();
+  const clientFactory =
+    params.clientFactory ??
+    ((options: LspClientOptions): ProviderFirstLspClientLike =>
+      new SemanticLspClient(options));
+
+  for (const [serverKey, server] of servers) {
+    params.signal?.throwIfAborted();
+    const providerId = server.serverId || serverKey;
+    const serverStartedAt = new Date().toISOString();
+    const documents = await measurePhase(`lsp.${providerId}.documents`, () =>
+      collectLspProviderDocuments({
+        repoRoot: params.repoRoot,
+        server,
+        scannedFiles: params.scannedFiles,
+        fileLimit:
+          params.config.indexing?.providerFirst?.lsp.documentSymbolFileLimit ??
+          500,
+      }),
+    );
+    if (documents.length === 0) {
+      appendProviderFactSet(
+        facts,
+        normalizeLspProviderFacts({
+          repoId: params.repoId,
+          generationId,
+          providerId,
+          providerVersion: lspConfig?.providerVersion,
+          emittedAt: indexedAt,
+          documents: [],
+          run: {
+            runId: `${generationId}:${providerId}`,
+            status: "skipped",
+            startedAt: serverStartedAt,
+            finishedAt: new Date().toISOString(),
+            errorMessage: "no matching documents for configured LSP server",
+          },
+        }),
+      );
+      continue;
+    }
+
+    const client = clientFactory({
+      serverId: providerId,
+      command: server.command,
+      args: server.args,
+      workspaceRoot: params.repoRoot,
+      timeoutMs: params.config.semanticEnrichment?.timeoutMs ?? 300_000,
+      initializationOptions: server.initializationOptions,
+    });
+    try {
+      const initializeResult = await measurePhase(
+        `lsp.${providerId}.initialize`,
+        () => client.start(params.config.semanticEnrichment?.timeoutMs),
+      );
+      const canCollectSymbols = Boolean(
+        initializeResult.capabilities.documentSymbolProvider,
+      );
+      for (const document of documents) {
+        params.signal?.throwIfAborted();
+        await client.openDocument({
+          uri: document.uri,
+          languageId: document.languageId ?? "plaintext",
+          version: 1,
+          text: document.text,
+        });
+        if (canCollectSymbols) {
+          document.symbols =
+            (await client.documentSymbol(
+              { textDocument: { uri: document.uri } },
+              params.config.semanticEnrichment?.timeoutMs,
+            )) ?? [];
+        }
+        document.diagnostics = await collectLspProviderDiagnostics({
+          client,
+          uri: document.uri,
+          timeoutMs: params.config.semanticEnrichment?.timeoutMs,
+        });
+      }
+      appendProviderFactSet(
+        facts,
+        normalizeLspProviderFacts({
+          repoId: params.repoId,
+          generationId,
+          providerId,
+          providerVersion:
+            lspConfig?.providerVersion ?? initializeResult.serverInfo?.version,
+          emittedAt: indexedAt,
+          documents,
+          run: {
+            runId: `${generationId}:${providerId}`,
+            status: "succeeded",
+            startedAt: serverStartedAt,
+            finishedAt: new Date().toISOString(),
+          },
+        }),
+      );
+    } catch (error) {
+      appendProviderFactSet(
+        facts,
+        normalizeLspProviderFacts({
+          repoId: params.repoId,
+          generationId,
+          providerId,
+          providerVersion: lspConfig?.providerVersion,
+          emittedAt: indexedAt,
+          documents: [],
+          run: {
+            runId: `${generationId}:${providerId}`,
+            status: "failed",
+            startedAt: serverStartedAt,
+            finishedAt: new Date().toISOString(),
+            errorMessage: error instanceof Error ? error.message : String(error),
+          },
+        }),
+      );
+    } finally {
+      await client.dispose().catch(() => undefined);
+    }
+  }
+
+  const rows = await measurePhase("lsp.rows", () =>
+    providerFactsToGraphRows({ facts, indexedAt }),
+  );
+  validateProviderFirstGraphRows(rows, {
+    repoId: params.repoId,
+    context: "Provider-first LSP execution",
+  });
+  const summary: ProviderFirstExecutionSummary = {
+    status: "executed",
+    executor: "lspFull",
+    generationId,
+    reasons: [],
+    filesProcessed: facts.files.length,
+    symbolsIndexed: facts.symbols.length,
+    edgesCreated: facts.edges.length,
+    externalSymbolsIndexed: facts.externalSymbols.length,
+    coverage: {
+      scannedFiles: facts.files.length,
+      providerFiles: facts.files.length,
+      providerCoveredFiles: facts.files.length,
+      providerPrimaryFiles: facts.files.length,
+      fullyCoveredFiles: facts.coverage.filter(
+        (coverage) => coverage.symbolCoverage === "full",
+      ).length,
+      partialFiles: facts.coverage.filter(
+        (coverage) => coverage.symbolCoverage === "partial",
+      ).length,
+      fullFallbackFiles: 0,
+      uncoveredFiles: facts.coverage.filter(
+        (coverage) => coverage.symbolCoverage === "none",
+      ).length,
+      fallbackFiles: facts.coverage.filter(
+        (coverage) => coverage.legacyFallback !== "skip",
+      ).length,
+    },
+  };
+  return { generationId, facts, rows, summary };
+}
+
+async function collectLspProviderDocuments(params: {
+  repoRoot: string;
+  server: SemanticEnrichmentLspServerConfig;
+  scannedFiles?: readonly ProviderFirstSourceFileMetadata[];
+  fileLimit: number;
+}): Promise<CollectedLspProviderDocument[]> {
+  const candidates =
+    params.scannedFiles?.map((file) => file.path) ??
+    (await collectLspProviderCandidatePaths(params.repoRoot, params.server));
+  const documents: CollectedLspProviderDocument[] = [];
+  for (const candidate of candidates) {
+    if (documents.length >= params.fileLimit) break;
+    const relPath = normalizePath(candidate);
+    if (!matchesLspProviderFilePatterns(relPath, params.server.filePatterns)) {
+      continue;
+    }
+    const absolutePath = resolve(params.repoRoot, relPath);
+    let content: string;
+    let byteSize: number;
+    try {
+      const fileStat = await stat(absolutePath);
+      if (!fileStat.isFile() || fileStat.size > MAX_FILE_BYTES) continue;
+      content = await readFile(absolutePath, "utf8");
+      byteSize = fileStat.size;
+    } catch {
+      continue;
+    }
+    documents.push({
+      relPath,
+      uri: pathToFileURL(absolutePath).toString(),
+      text: content,
+      languageId: documentLanguageIdForLspPath(relPath, params.server),
+      contentHash: hash("sha256", content, "hex"),
+      byteSize,
+      symbols: [],
+      diagnostics: [],
+    });
+  }
+  return documents;
+}
+
+async function collectLspProviderCandidatePaths(
+  repoRoot: string,
+  server: SemanticEnrichmentLspServerConfig,
+): Promise<string[]> {
+  const paths: string[] = [];
+  await walkLspProviderCandidatePaths(repoRoot, "", server, paths);
+  return paths.sort((a, b) => a.localeCompare(b));
+}
+
+async function walkLspProviderCandidatePaths(
+  repoRoot: string,
+  relativeDir: string,
+  server: SemanticEnrichmentLspServerConfig,
+  paths: string[],
+): Promise<void> {
+  let entries;
+  try {
+    entries = await readdir(resolve(repoRoot, relativeDir), {
+      withFileTypes: true,
+    });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const relPath = normalizePath(join(relativeDir, entry.name));
+    if (entry.isDirectory()) {
+      if (shouldSkipLspProviderDirectory(entry.name)) continue;
+      await walkLspProviderCandidatePaths(repoRoot, relPath, server, paths);
+      continue;
+    }
+    if (
+      entry.isFile() &&
+      matchesLspProviderFilePatterns(relPath, server.filePatterns)
+    ) {
+      paths.push(relPath);
+    }
+  }
+}
+
+function shouldSkipLspProviderDirectory(name: string): boolean {
+  return new Set([
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "vendor",
+    "dist",
+    "build",
+    "target",
+    ".next",
+    ".nuxt",
+  ]).has(name);
+}
+
+function matchesLspProviderFilePatterns(
+  relPath: string,
+  patterns: readonly string[],
+): boolean {
+  if (patterns.length === 0) return false;
+  return patterns.some((pattern) => {
+    const normalizedPattern = normalizePath(pattern);
+    if (normalizedPattern.startsWith("**/*")) {
+      return relPath.endsWith(normalizedPattern.slice(4));
+    }
+    if (normalizedPattern.startsWith("*")) {
+      return relPath.endsWith(normalizedPattern.slice(1));
+    }
+    return relPath === normalizedPattern || relPath.endsWith(normalizedPattern);
+  });
+}
+
+function documentLanguageIdForLspPath(
+  relPath: string,
+  server: SemanticEnrichmentLspServerConfig,
+): string {
+  if (server.documentLanguageIds.length > 0) {
+    return server.documentLanguageIds[0] ?? server.languages[0] ?? "plaintext";
+  }
+  if (server.languages.length > 0) return server.languages[0] ?? "plaintext";
+  if (relPath.endsWith(".php") || relPath.endsWith(".phtml")) return "php";
+  if (/\.(?:sh|bash|zsh)$/u.test(relPath)) return "shellscript";
+  return "plaintext";
+}
+
+async function collectLspProviderDiagnostics(params: {
+  client: ProviderFirstLspClientLike;
+  uri: string;
+  timeoutMs?: number;
+}): Promise<Diagnostic[]> {
+  if (params.client.pullDiagnostics) {
+    try {
+      return await params.client.pullDiagnostics(params.uri, params.timeoutMs);
+    } catch {
+      // Some LSP servers advertise diagnostics through LSP-IO metadata but do
+      // not implement textDocument/diagnostic. Keep symbol facts usable and
+      // fall back to publishDiagnostics snapshots when available.
+    }
+  }
+  if (params.client.waitForDiagnostics) {
+    try {
+      await params.client.waitForDiagnostics([params.uri], 2_000);
+    } catch {
+      // Diagnostics are enrichment, not a provider-primary symbol gate.
+    }
+  }
+  try {
+    return params.client.diagnostics?.(params.uri) ?? [];
+  } catch {
+    return [];
+  }
 }
 
 function formatNoScipFactsDiagnostics(params: {

@@ -122,6 +122,7 @@ import type {
 import type { ScipGeneratorCacheDiagnostic } from "../scip/scip-io-runner.js";
 import type { BatchPersistDrainDiagnostics } from "./parser/batch-persist.js";
 import {
+  executeProviderFirstLspFull,
   executeProviderFirstScipFull,
   resolveProviderFirstExecutionPlan,
   type ProviderFirstCoverageSummary,
@@ -2590,7 +2591,8 @@ async function indexRepoImpl(
 
   if (
     providerFirstExecutionPlan.canExecute &&
-    providerFirstExecutionPlan.executor === "scipFull"
+    (providerFirstExecutionPlan.executor === "scipFull" ||
+      providerFirstExecutionPlan.executor === "lspFull")
   ) {
     providerFirstTimingStartedAt = Date.now();
     emitProviderFirstProgress(onProgress, "coverageScan", {
@@ -2615,13 +2617,26 @@ async function indexRepoImpl(
     });
     let providerResult:
       | Awaited<ReturnType<typeof executeProviderFirstScipFull>>
+      | Awaited<ReturnType<typeof executeProviderFirstLspFull>>
       | undefined;
     try {
       providerResult = await measureProviderFirstPhase(
         "providerCollection",
-        "providerFirstScipFull",
-        () =>
-          executeProviderFirstScipFull({
+        providerFirstExecutionPlan.executor === "lspFull"
+          ? "providerFirstLspFull"
+          : "providerFirstScipFull",
+        () => {
+          if (providerFirstExecutionPlan.executor === "lspFull") {
+            return executeProviderFirstLspFull({
+              repoId,
+              repoRoot: repoRow.rootPath,
+              config: appConfig,
+              scannedFiles: providerCoverageScan.files,
+              recordPhaseTiming: recordProviderFirstPhaseTiming,
+              signal,
+            });
+          }
+          return executeProviderFirstScipFull({
             repoId,
             repoRoot: repoRow.rootPath,
             config: appConfig,
@@ -2633,7 +2648,8 @@ async function indexRepoImpl(
             recordPhaseTiming: recordProviderFirstPhaseTiming,
             onProgress,
             signal,
-          }),
+          });
+        },
       );
     } catch (err) {
       if (err instanceof ProviderFirstGraphValidationError) {
@@ -2659,7 +2675,7 @@ async function indexRepoImpl(
 
     if (providerResult) {
       const executionFailureReasons = providerFirstFatalFailureReasons({
-        failures: providerResult.failures,
+        failures: "failures" in providerResult ? providerResult.failures : [],
         providerRowsAvailable: providerResult.rows.files.length > 0,
       });
       if (executionFailureReasons.length > 0) {
@@ -2871,9 +2887,11 @@ async function indexRepoImpl(
           }
           const activeProviderInputHash = scopedSourceFileListActive
             ? null
-            : providerFirstActiveInputFingerprint(
-                providerResult.generatedIndexes,
-              );
+            : "generatedIndexes" in providerResult
+              ? providerFirstActiveInputFingerprint(
+                  providerResult.generatedIndexes,
+                )
+              : null;
           const activeProviderInputRecord = activeProviderInputHash
             ? await ladybugDb.getScipIngestionRecord(
                 conn,
@@ -3144,6 +3162,14 @@ async function indexRepoImpl(
               providerFirstExecutedSummary = withProviderFirstPhaseTimings(
                 providerFirstExecutedSummary,
               );
+              const resultScip =
+                "generatedIndexes" in providerResult
+                  ? {
+                      generatedIndexes: providerResult.generatedIndexes,
+                      failures: providerResult.failures,
+                      generatorCache: scipPreRefresh?.cache,
+                    }
+                  : undefined;
               const result: IndexResult = {
                 versionId,
                 filesProcessed: 0,
@@ -3155,11 +3181,7 @@ async function indexRepoImpl(
                 processesTraced: 0,
                 durationMs: Date.now() - startTime,
                 pass1Engine: emptyPass1EngineTelemetry(),
-                scip: {
-                  generatedIndexes: providerResult.generatedIndexes,
-                  failures: providerResult.failures,
-                  generatorCache: scipPreRefresh?.cache,
-                },
+                scip: resultScip,
                 providerFirst,
                 providerFirstExecution: providerFirstExecutedSummary,
                 semanticDeferred: semanticDeferred || undefined,
@@ -3172,15 +3194,20 @@ async function indexRepoImpl(
             }
 
             const versionId = await createOrReuseVersion(
-              "Provider-first SCIP index",
+              providerResult.summary.executor === "lspFull"
+                ? "Provider-first LSP index"
+                : "Provider-first SCIP index",
               true,
             );
             const pass1Engine = emptyPass1EngineTelemetry();
-            const scip = {
-              generatedIndexes: providerResult.generatedIndexes,
-              failures: providerResult.failures,
-              generatorCache: scipPreRefresh?.cache,
-            };
+            const scip =
+              "generatedIndexes" in providerResult
+                ? {
+                    generatedIndexes: providerResult.generatedIndexes,
+                    failures: providerResult.failures,
+                    generatorCache: scipPreRefresh?.cache,
+                  }
+                : undefined;
             const post = await runPostIndexFinalization({
               versionId,
               indexMode: "full",
@@ -3582,7 +3609,10 @@ async function indexRepoImpl(
       concurrency,
       fileCount: files.length,
     });
-    workerPool = new ParserWorkerPool(workerPoolSize);
+    workerPool = new ParserWorkerPool({
+      poolSize: workerPoolSize,
+      configuredLanguages: config.languages,
+    });
   }
   if (useRustEngine) {
     logger.info("Using native Rust indexer engine for Pass 1");
