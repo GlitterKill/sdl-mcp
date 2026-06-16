@@ -8,7 +8,7 @@ import {
 import { getLanguageExtensions } from "../../dist/indexer/fileScanner.js";
 
 describe("on-demand language pack registry", () => {
-  it("describes Wave 0 and Wave 1 packs as configured-only parser installs", () => {
+  it("describes Wave 0, Wave 1, and Wave 2 packs as configured-only parser installs", () => {
     const expected = [
       ["php", "php", "tree-sitter-php", "phpactor"],
       ["sh", "shell", "tree-sitter-bash", "bash-language-server"],
@@ -22,6 +22,18 @@ describe("on-demand language pack registry", () => {
       ["lua", "lua", "tree-sitter-lua", "lua-language-server"],
       ["dart", "dart", "tree-sitter-dart", "dart-sdk-lsp"],
       ["swift", "swift", "tree-sitter-swift", "sourcekit-lsp"],
+      ["groovy", "groovy", "tree-sitter-groovy", "groovy-language-server"],
+      ["perl", "perl", "tree-sitter-perl", "perl-navigator"],
+      ["r", "r", "@davisvaughan/tree-sitter-r", "r-languageserver"],
+      ["elixir", "elixir", "tree-sitter-elixir", "expert"],
+      ["fsharp", "fsharp", "tree-sitter-fsharp", "fsautocomplete"],
+      ["fortran", "fortran", "tree-sitter-fortran", "fortls"],
+      [
+        "haskell",
+        "haskell",
+        "tree-sitter-haskell",
+        "haskell-language-server",
+      ],
     ] as const;
 
     for (const [alias, languageId, parserPackage, lspServerId] of expected) {
@@ -45,6 +57,13 @@ describe("on-demand language pack registry", () => {
         "lua",
         "dart",
         "swift",
+        "groovy",
+        "perl",
+        "r",
+        "elixir",
+        "fsharp",
+        "fortran",
+        "haskell",
       ]).map((pack) => ({
         languageId: pack.languageId,
         parserPackage: pack.parserPackage,
@@ -60,6 +79,13 @@ describe("on-demand language pack registry", () => {
         { languageId: "lua", parserPackage: "tree-sitter-lua" },
         { languageId: "dart", parserPackage: "tree-sitter-dart" },
         { languageId: "swift", parserPackage: "tree-sitter-swift" },
+        { languageId: "groovy", parserPackage: "tree-sitter-groovy" },
+        { languageId: "perl", parserPackage: "tree-sitter-perl" },
+        { languageId: "r", parserPackage: "@davisvaughan/tree-sitter-r" },
+        { languageId: "elixir", parserPackage: "tree-sitter-elixir" },
+        { languageId: "fsharp", parserPackage: "tree-sitter-fsharp" },
+        { languageId: "fortran", parserPackage: "tree-sitter-fortran" },
+        { languageId: "haskell", parserPackage: "tree-sitter-haskell" },
       ],
     );
   });
@@ -73,6 +99,13 @@ describe("on-demand language pack registry", () => {
       ".lua",
       ".dart",
       ".swift",
+      ".groovy",
+      ".pl",
+      ".R",
+      ".ex",
+      ".fs",
+      ".f90",
+      ".hs",
     ]) {
       assert.equal(getLanguageExtensions(["ts", "py"]).includes(extension), false);
     }
@@ -84,5 +117,12 @@ describe("on-demand language pack registry", () => {
     assert.ok(getLanguageExtensions(["lua"]).includes(".lua"));
     assert.ok(getLanguageExtensions(["dart"]).includes(".dart"));
     assert.ok(getLanguageExtensions(["swift"]).includes(".swift"));
+    assert.ok(getLanguageExtensions(["groovy"]).includes(".groovy"));
+    assert.ok(getLanguageExtensions(["perl"]).includes(".pl"));
+    assert.ok(getLanguageExtensions(["r"]).includes(".R"));
+    assert.ok(getLanguageExtensions(["elixir"]).includes(".ex"));
+    assert.ok(getLanguageExtensions(["fsharp"]).includes(".fs"));
+    assert.ok(getLanguageExtensions(["fortran"]).includes(".f90"));
+    assert.ok(getLanguageExtensions(["haskell"]).includes(".hs"));
   });
 });

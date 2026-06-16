@@ -65,6 +65,13 @@ export const LanguageSchema = z.enum([
   "lua",
   "dart",
   "swift",
+  "groovy",
+  "perl",
+  "r",
+  "elixir",
+  "fsharp",
+  "fortran",
+  "haskell",
 ]);
 
 export const MemoryConfigSchema = z.object({

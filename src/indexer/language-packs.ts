@@ -215,6 +215,157 @@ const LANGUAGE_PACKS: readonly LanguagePackManifest[] = [
     lspServerId: "sourcekit-lsp",
     installMode: "onDemand",
   },
+  {
+    languageId: "groovy",
+    aliases: ["groovy", "gradle"],
+    extensions: [".groovy", ".gradle", ".gvy", ".gy", ".gsh"],
+    parserPackage: "tree-sitter-groovy",
+    parserPackageSpec: "tree-sitter-groovy@^0.1.2",
+    genericAdapter: {
+      languageId: "groovy",
+      grammarLanguage: "groovy",
+      fileExtensions: [".groovy", ".gradle", ".gvy", ".gy", ".gsh"],
+      symbolRules: [
+        { nodeTypes: ["class_declaration"], kind: "class" },
+        { nodeTypes: ["interface_declaration"], kind: "interface" },
+        { nodeTypes: ["enum_declaration"], kind: "type" },
+        { nodeTypes: ["method_declaration"], kind: "method" },
+      ],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-groovy@^0.1.2",
+    lspServerId: "groovy-language-server",
+    installMode: "onDemand",
+  },
+  {
+    languageId: "perl",
+    aliases: ["perl", "pl", "pm"],
+    extensions: [".pl", ".pm", ".t", ".pod"],
+    parserPackage: "tree-sitter-perl",
+    parserPackageSpec: "tree-sitter-perl@^1.1.2",
+    genericAdapter: {
+      languageId: "perl",
+      grammarLanguage: "perl",
+      fileExtensions: [".pl", ".pm", ".t", ".pod"],
+      symbolRules: [
+        {
+          nodeTypes: [
+            "subroutine_declaration_statement",
+            "subroutine_declaration",
+            "subroutine_definition",
+          ],
+          kind: "function",
+        },
+        { nodeTypes: ["package_statement"], kind: "module" },
+      ],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-perl@^1.1.2",
+    lspServerId: "perl-navigator",
+    installMode: "onDemand",
+  },
+  {
+    languageId: "r",
+    aliases: ["r", "rstats"],
+    extensions: [".R", ".r"],
+    parserPackage: "@davisvaughan/tree-sitter-r",
+    parserPackageSpec: "@davisvaughan/tree-sitter-r@^1.2.0",
+    genericAdapter: {
+      languageId: "r",
+      grammarLanguage: "r",
+      fileExtensions: [".R", ".r"],
+      symbolRules: [{ nodeTypes: ["function_definition"], kind: "function" }],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps @davisvaughan/tree-sitter-r@^1.2.0",
+    lspServerId: "r-languageserver",
+    installMode: "onDemand",
+  },
+  {
+    languageId: "elixir",
+    aliases: ["elixir", "ex", "exs"],
+    extensions: [".ex", ".exs"],
+    parserPackage: "tree-sitter-elixir",
+    parserPackageSpec: "tree-sitter-elixir@^0.3.5",
+    genericAdapter: {
+      languageId: "elixir",
+      grammarLanguage: "elixir",
+      fileExtensions: [".ex", ".exs"],
+      symbolRules: [
+        { nodeTypes: ["module"], kind: "module" },
+        { nodeTypes: ["call"], kind: "function", nameFields: ["target"] },
+      ],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-elixir@^0.3.5",
+    lspServerId: "expert",
+    installMode: "onDemand",
+  },
+  {
+    languageId: "fsharp",
+    aliases: ["fsharp", "f#", "fs", "fsi", "fsx"],
+    extensions: [".fs", ".fsi", ".fsx"],
+    parserPackage: "tree-sitter-fsharp",
+    parserPackageSpec: "tree-sitter-fsharp@^0.1.0",
+    genericAdapter: {
+      languageId: "fsharp",
+      grammarLanguage: "fsharp",
+      fileExtensions: [".fs", ".fsi", ".fsx"],
+      symbolRules: [
+        { nodeTypes: ["module_declaration"], kind: "module" },
+        { nodeTypes: ["type_definition"], kind: "type" },
+        { nodeTypes: ["let_binding"], kind: "function" },
+      ],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-fsharp@^0.1.0",
+    lspServerId: "fsautocomplete",
+    installMode: "onDemand",
+  },
+  {
+    languageId: "fortran",
+    aliases: ["fortran", "f90", "f95", "f03", "f08", "f77"],
+    extensions: [".f90", ".f95", ".f03", ".f08", ".f", ".for", ".f77"],
+    parserPackage: "tree-sitter-fortran",
+    parserPackageSpec:
+      "tree-sitter-fortran@git+https://github.com/stadelmanma/tree-sitter-fortran.git#v0.6.0",
+    genericAdapter: {
+      languageId: "fortran",
+      grammarLanguage: "fortran",
+      fileExtensions: [".f90", ".f95", ".f03", ".f08", ".f", ".for", ".f77"],
+      symbolRules: [
+        { nodeTypes: ["program_statement"], kind: "module" },
+        { nodeTypes: ["module_statement"], kind: "module" },
+        { nodeTypes: ["subroutine_statement"], kind: "function" },
+        { nodeTypes: ["function_statement"], kind: "function" },
+      ],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-fortran@git+https://github.com/stadelmanma/tree-sitter-fortran.git#v0.6.0",
+    lspServerId: "fortls",
+    installMode: "onDemand",
+  },
+  {
+    languageId: "haskell",
+    aliases: ["haskell", "hs", "lhs"],
+    extensions: [".hs", ".lhs"],
+    parserPackage: "tree-sitter-haskell",
+    parserPackageSpec: "tree-sitter-haskell@^0.23.1",
+    genericAdapter: {
+      languageId: "haskell",
+      grammarLanguage: "haskell",
+      fileExtensions: [".hs", ".lhs"],
+      symbolRules: [
+        { nodeTypes: ["module"], kind: "module" },
+        { nodeTypes: ["function"], kind: "function" },
+        { nodeTypes: ["data_type", "newtype"], kind: "type" },
+      ],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-haskell@^0.23.1",
+    lspServerId: "haskell-language-server",
+    installMode: "onDemand",
+  },
 ] as const;
 
 const packsByLanguage = new Map<string, LanguagePackManifest>();

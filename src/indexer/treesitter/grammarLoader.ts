@@ -73,7 +73,14 @@ export type SupportedLanguage =
   | "ruby"
   | "lua"
   | "dart"
-  | "swift";
+  | "swift"
+  | "groovy"
+  | "perl"
+  | "r"
+  | "elixir"
+  | "fsharp"
+  | "fortran"
+  | "haskell";
 
 const parserCache = new Map<SupportedLanguage, Parser | null>();
 const languageCache = new Map<SupportedLanguage, Parser.Language | null>();
@@ -104,6 +111,13 @@ const GRAMMAR_PACKAGES: Record<
   lua: { pkg: "tree-sitter-lua" },
   dart: { pkg: "tree-sitter-dart" },
   swift: { pkg: "tree-sitter-swift" },
+  groovy: { pkg: "tree-sitter-groovy" },
+  perl: { pkg: "tree-sitter-perl" },
+  r: { pkg: "@davisvaughan/tree-sitter-r" },
+  elixir: { pkg: "tree-sitter-elixir" },
+  fsharp: { pkg: "tree-sitter-fsharp" },
+  fortran: { pkg: "tree-sitter-fortran" },
+  haskell: { pkg: "tree-sitter-haskell" },
 };
 
 function getLanguageModule(
