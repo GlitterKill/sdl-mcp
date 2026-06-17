@@ -246,10 +246,10 @@
     "parserInstallMode": "on-demand when repo config includes fortran",
     "scipStatus": "no practical SCIP indexer",
     "lspIoServer": "fortls",
-    "providerFirstStatus": "not validated",
-    "validationRepo": "pending",
-    "validationEvidence": "pending",
-    "notes": "Parser package remains lazy and uninstalled until this language is configured for a repository."
+    "providerFirstStatus": "LSP provider-first validated with bounded provider coverage",
+    "validationRepo": "fortran-lang/stdlib",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-fortran-2026-06-17.md",
+    "notes": "Validated 109/408 provider-primary files and 114 LSP symbols using Fortls launched by LSP-IO as python -m fortls; provider-unusable and uncovered files use full legacy fallback."
   },
   {
     "language": "Haskell",

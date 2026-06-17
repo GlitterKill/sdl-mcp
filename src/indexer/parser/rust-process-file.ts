@@ -112,7 +112,9 @@ export async function processFileFromRustResult(params: {
     }
 
     const ext = fileMeta.path.split(".").pop() || "";
-    const contentHash = rustResult.contentHash;
+    // The scanner hash is byte-exact. Native parser hashes can reflect decoded
+    // text, which breaks source-fidelity checks for CRLF files.
+    const contentHash = fileMeta.contentHash ?? rustResult.contentHash;
     const relPath = normalizePath(fileMeta.path);
     const fileId = existingFile?.fileId ?? `${repoId}:${relPath}`;
 

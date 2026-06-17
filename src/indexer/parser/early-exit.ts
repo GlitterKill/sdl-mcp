@@ -45,7 +45,9 @@ export async function resolveFileForIndexing(params: {
     throw readError;
   }
 
-  const contentHash = hashContent(content);
+  // Prefer the scanner's raw-byte hash so graph source-fidelity checks compare
+  // DB rows to exact file bytes even when decoding normalizes newlines.
+  const contentHash = fileMeta.contentHash ?? hashContent(content);
   const ext = fileMeta.path.split(".").pop() || "";
   const extWithDot = `.${ext}`;
   const relPath = normalizePath(fileMeta.path);

@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -102,10 +103,14 @@ describe("provider-first LSP normalization", () => {
     const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-provider-"));
     try {
       mkdirSync(join(repoRoot, "src"));
-      writeFileSync(
-        join(repoRoot, "src", "Tool.php"),
-        "<?php\nclass Tool { function run() {} }\n",
+      const sourceBytes = Buffer.from(
+        "<?php\r\nclass Tool { function run() {} }\r\n",
+        "utf8",
       );
+      const expectedRawHash = createHash("sha256")
+        .update(sourceBytes)
+        .digest("hex");
+      writeFileSync(join(repoRoot, "src", "Tool.php"), sourceBytes);
 
       const result = await executeProviderFirstLspFull({
         repoId: "repo",
@@ -179,6 +184,7 @@ describe("provider-first LSP normalization", () => {
       assert.equal(result.summary.status, "executed");
       assert.equal(result.summary.executor, "lspFull");
       assert.equal(result.facts.files.length, 1);
+      assert.equal(result.facts.files[0]?.contentHash, expectedRawHash);
       assert.equal(result.facts.symbols[0]?.providerType, "lsp");
       assert.equal(result.rows.symbols[0]?.source, "lsp");
       validateProviderFirstGraphRows(result.rows, { repoId: "repo" });

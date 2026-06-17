@@ -964,23 +964,21 @@ async function collectLspProviderDocuments(params: {
       continue;
     }
     const absolutePath = resolve(params.repoRoot, relPath);
-    let content: string;
-    let byteSize: number;
+    let contentBytes: Buffer;
     try {
       const fileStat = await stat(absolutePath);
       if (!fileStat.isFile() || fileStat.size > MAX_FILE_BYTES) continue;
-      content = await readFile(absolutePath, "utf8");
-      byteSize = fileStat.size;
+      contentBytes = await readFile(absolutePath);
     } catch {
       continue;
     }
     documents.push({
       relPath,
       uri: pathToFileURL(absolutePath).toString(),
-      text: content,
+      text: contentBytes.toString("utf8"),
       languageId: documentLanguageIdForLspPath(relPath, params.server),
-      contentHash: hash("sha256", content, "hex"),
-      byteSize,
+      contentHash: hash("sha256", contentBytes, "hex"),
+      byteSize: contentBytes.byteLength,
       symbols: [],
       diagnostics: [],
     });
