@@ -925,13 +925,19 @@ async function collectLspDocumentSymbols(params: {
   const retryCount = params.retryCount ?? 0;
   for (let attempt = 0; attempt <= retryCount; attempt += 1) {
     params.signal?.throwIfAborted();
-    const symbols =
-      (await params.client.documentSymbol(
-        { textDocument: { uri: params.document.uri } },
-        params.documentSymbolTimeoutMs,
-      )) ?? [];
-    if (symbols.length > 0 || attempt >= retryCount) {
-      return symbols;
+    try {
+      const symbols =
+        (await params.client.documentSymbol(
+          { textDocument: { uri: params.document.uri } },
+          params.documentSymbolTimeoutMs,
+        )) ?? [];
+      if (symbols.length > 0 || attempt >= retryCount) {
+        return symbols;
+      }
+    } catch (error) {
+      if (attempt >= retryCount) {
+        throw error;
+      }
     }
     const delayMs = params.retryDelayMs ?? 0;
     if (delayMs > 0) {

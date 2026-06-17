@@ -269,6 +269,88 @@ describe("provider-first LSP normalization", () => {
     }
   });
 
+  it("retries transient document symbol failures when a server is still loading projects", async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-project-load-retry-"));
+    try {
+      mkdirSync(join(repoRoot, "src"));
+      writeFileSync(join(repoRoot, "src", "Operators.fs"), "module Operators\nlet map x = x\n");
+
+      let documentSymbolRequests = 0;
+      const result = await executeProviderFirstLspFull({
+        repoId: "repo",
+        repoRoot,
+        config: {
+          indexing: {
+            providerFirst: {
+              lsp: {
+                documentSymbolFileLimit: 10,
+                diagnosticsLimit: 10,
+              },
+            },
+          },
+          semanticEnrichment: {
+            enabled: true,
+            providers: {
+              lsp: {
+                enabled: true,
+                servers: {
+                  fsautocomplete: {
+                    enabled: true,
+                    serverId: "fsautocomplete",
+                    command: "fsautocomplete",
+                    args: [],
+                    languages: ["fsharp"],
+                    documentLanguageIds: ["fsharp"],
+                    filePatterns: ["**/*.fs"],
+                    capabilities: ["documentSymbol"],
+                    documentSymbolRetryCount: 1,
+                    documentSymbolRetryDelayMs: 0,
+                  },
+                },
+              },
+            },
+          },
+        },
+        clientFactory: () => ({
+          async start() {
+            return { capabilities: { documentSymbolProvider: true } };
+          },
+          async openDocument() {},
+          async documentSymbol() {
+            documentSymbolRequests += 1;
+            if (documentSymbolRequests === 1) {
+              throw new Error("projects have not loaded yet");
+            }
+            return [
+              {
+                name: "Operators",
+                kind: 2,
+                range: {
+                  start: { line: 0, character: 0 },
+                  end: { line: 1, character: 13 },
+                },
+                selectionRange: {
+                  start: { line: 0, character: 7 },
+                  end: { line: 0, character: 16 },
+                },
+              },
+            ];
+          },
+          diagnostics() {
+            return [];
+          },
+          async dispose() {},
+        }),
+      });
+
+      assert.equal(documentSymbolRequests, 2);
+      assert.equal(result.facts.symbols[0]?.name, "Operators");
+      assert.equal(result.facts.coverage[0]?.legacyFallback, "targeted");
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
   it("keeps LSP document symbols when pull diagnostics are unsupported", async () => {
     const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-diagnostic-fallback-"));
     try {

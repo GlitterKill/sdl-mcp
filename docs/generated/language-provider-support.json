@@ -234,10 +234,10 @@
     "parserInstallMode": "on-demand when repo config includes fsharp",
     "scipStatus": "no practical SCIP indexer",
     "lspIoServer": "fsautocomplete",
-    "providerFirstStatus": "not validated",
-    "validationRepo": "pending",
-    "validationEvidence": "pending",
-    "notes": "Parser package remains lazy and uninstalled until this language is configured for a repository."
+    "providerFirstStatus": "LSP provider-first validated with bounded provider coverage",
+    "validationRepo": "fsprojects/FSharpPlus",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-fsharp-2026-06-17.md",
+    "notes": "Validated 145/217 provider-primary files and 6090 LSP symbols using FsAutoComplete with AutomaticWorkspaceInit and first-document retry; provider-unusable and uncovered files use full legacy fallback."
   },
   {
     "language": "Fortran",
