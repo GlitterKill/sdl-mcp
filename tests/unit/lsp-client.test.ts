@@ -165,6 +165,46 @@ describe("SemanticLspClient", () => {
     );
   });
 
+  it("reports request timeouts without dispatching cancellation", async () => {
+    const fixturePath = join(
+      process.cwd(),
+      "tests/fixtures/lsp/mock-cancel-sensitive-server.mjs",
+    );
+    const client = new SemanticLspClient({
+      serverId: "cancel-sensitive",
+      command: process.execPath,
+      args: [fixturePath],
+      workspaceRoot: process.cwd(),
+      timeoutMs: 5_000,
+    });
+
+    try {
+      await client.start();
+      await client.openDocument({
+        uri: "file:///tmp/timeout.fs",
+        languageId: "fsharp",
+        version: 1,
+        text: "module Timeout\n",
+      });
+
+      await assert.rejects(
+        () =>
+          client.documentSymbol(
+            { textDocument: { uri: "file:///tmp/timeout.fs" } },
+            20,
+          ),
+        /textDocument\/documentSymbol timed out after 20ms/,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const processOwner = client as unknown as {
+        process?: { exitCode: number | null };
+      };
+      assert.equal(processOwner.process?.exitCode, null);
+    } finally {
+      await client.dispose();
+    }
+  });
+
   it("starts explicit Windows npm command shims through node entrypoints", () => {
     assert.deepEqual(
       resolveLspSpawnCommand({

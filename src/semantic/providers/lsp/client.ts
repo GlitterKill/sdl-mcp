@@ -4,7 +4,6 @@ import { win32 } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
-  CancellationTokenSource,
   createMessageConnection,
   NullLogger,
   NotificationType,
@@ -623,16 +622,13 @@ export class SemanticLspClient {
     if (!this.connection) {
       throw new Error(`LSP client ${this.options.serverId} is not running`);
     }
-    const cts = new CancellationTokenSource();
     let timeout: NodeJS.Timeout | null = null;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeout = setTimeout(() => {
-        try {
-          cts.cancel();
-        } catch {
-          // The connection may already be closed by a short-lived server. The
-          // timeout error below is the actionable failure for callers.
-        }
+        // Do not dispatch JSON-RPC cancellation here. Several real LSP servers
+        // close the transport while a long request is timing out; sending
+        // $/cancelRequest through a closed connection leaks a second failure
+        // after the actionable timeout error. dispose() owns transport cleanup.
         reject(
           new Error(
             `LSP request ${requestType.method} timed out after ${timeoutMs}ms`,
@@ -642,12 +638,11 @@ export class SemanticLspClient {
     });
     try {
       return await Promise.race([
-        this.connection.sendRequest(requestType, params, cts.token),
+        this.connection.sendRequest(requestType, params),
         timeoutPromise,
       ]);
     } finally {
       if (timeout) clearTimeout(timeout);
-      cts.dispose();
     }
   }
 
