@@ -222,10 +222,10 @@
     "parserInstallMode": "on-demand when repo config includes elixir",
     "scipStatus": "no practical SCIP indexer",
     "lspIoServer": "expert",
-    "providerFirstStatus": "not validated",
-    "validationRepo": "pending",
-    "validationEvidence": "pending",
-    "notes": "Parser package remains lazy and uninstalled until this language is configured for a repository."
+    "providerFirstStatus": "LSP provider-first validated with bounded provider coverage",
+    "validationRepo": "elixir-plug/plug",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-elixir-2026-06-17.md",
+    "notes": "Validated 43/78 provider-primary files and 1176 LSP symbols using Expert with first-document warm-up retry; provider-unusable files use full legacy fallback."
   },
   {
     "language": "F#",

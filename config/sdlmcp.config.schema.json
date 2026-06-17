@@ -1205,6 +1205,16 @@
                         "type": "string",
                         "enum": ["workspace", "document"]
                       },
+                      "documentSymbolRetryCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 10
+                      },
+                      "documentSymbolRetryDelayMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 120000
+                      },
                       "env": {
                         "type": "object",
                         "additionalProperties": { "type": "string" }

@@ -1043,6 +1043,13 @@ export const SemanticEnrichmentLspServerConfigSchema = z.object({
   capabilities: z.array(z.string()).default([]),
   readiness: z.string().optional(),
   documentSessionMode: z.enum(["workspace", "document"]).optional(),
+  documentSymbolRetryCount: z.number().int().min(0).max(10).optional(),
+  documentSymbolRetryDelayMs: z
+    .number()
+    .int()
+    .min(0)
+    .max(120_000)
+    .optional(),
   env: z.record(z.string(), z.string()).optional(),
   initializationOptions: z.record(z.string(), z.unknown()).optional(),
 });

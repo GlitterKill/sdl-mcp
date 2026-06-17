@@ -13,6 +13,7 @@ import {
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
 import { MAX_FILE_BYTES } from "../../config/constants.js";
@@ -647,6 +648,9 @@ export async function executeProviderFirstLspFull(
             timeoutMs: params.config.semanticEnrichment?.timeoutMs,
             documentSymbolTimeoutMs,
             diagnosticsTimeoutMs,
+            documentSymbolRetryCount: server.documentSymbolRetryCount ?? 0,
+            documentSymbolRetryDelayMs: server.documentSymbolRetryDelayMs ?? 0,
+            signal: params.signal,
           });
         } catch (error) {
           const message = errorMessage(error);
@@ -749,10 +753,16 @@ export async function executeProviderFirstLspFull(
         if (canCollectSymbols) {
           try {
             document.symbols =
-              (await client.documentSymbol(
-                { textDocument: { uri: document.uri } },
+              (await collectLspDocumentSymbols({
+                client,
+                document,
                 documentSymbolTimeoutMs,
-              )) ?? [];
+                retryCount:
+                  documentIndex === 0 ? (server.documentSymbolRetryCount ?? 0) : 0,
+                retryDelayMs:
+                  documentIndex === 0 ? (server.documentSymbolRetryDelayMs ?? 0) : 0,
+                signal: params.signal,
+              })) ?? [];
           } catch (error) {
             const message = `documentSymbol failed: ${errorMessage(error)}`;
             document.symbolError = message;
@@ -875,6 +885,9 @@ async function collectLspProviderDocumentWithClient(params: {
   timeoutMs?: number;
   documentSymbolTimeoutMs: number;
   diagnosticsTimeoutMs: number;
+  documentSymbolRetryCount?: number;
+  documentSymbolRetryDelayMs?: number;
+  signal?: AbortSignal;
 }): Promise<void> {
   const initializeResult = await params.client.start(params.timeoutMs);
   await params.client.openDocument({
@@ -885,16 +898,47 @@ async function collectLspProviderDocumentWithClient(params: {
   });
   if (initializeResult.capabilities.documentSymbolProvider) {
     params.document.symbols =
-      (await params.client.documentSymbol(
-        { textDocument: { uri: params.document.uri } },
-        params.documentSymbolTimeoutMs,
-      )) ?? [];
+      (await collectLspDocumentSymbols({
+        client: params.client,
+        document: params.document,
+        documentSymbolTimeoutMs: params.documentSymbolTimeoutMs,
+        retryCount: params.documentSymbolRetryCount,
+        retryDelayMs: params.documentSymbolRetryDelayMs,
+        signal: params.signal,
+      })) ?? [];
   }
   params.document.diagnostics = await collectLspProviderDiagnostics({
     client: params.client,
     uri: params.document.uri,
     timeoutMs: params.diagnosticsTimeoutMs,
   });
+}
+
+async function collectLspDocumentSymbols(params: {
+  client: ProviderFirstLspClientLike;
+  document: CollectedLspProviderDocument;
+  documentSymbolTimeoutMs: number;
+  retryCount?: number;
+  retryDelayMs?: number;
+  signal?: AbortSignal;
+}): Promise<Array<DocumentSymbol | SymbolInformation>> {
+  const retryCount = params.retryCount ?? 0;
+  for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+    params.signal?.throwIfAborted();
+    const symbols =
+      (await params.client.documentSymbol(
+        { textDocument: { uri: params.document.uri } },
+        params.documentSymbolTimeoutMs,
+      )) ?? [];
+    if (symbols.length > 0 || attempt >= retryCount) {
+      return symbols;
+    }
+    const delayMs = params.retryDelayMs ?? 0;
+    if (delayMs > 0) {
+      await sleep(delayMs, undefined, { signal: params.signal });
+    }
+  }
+  return [];
 }
 
 async function collectLspProviderDocuments(params: {

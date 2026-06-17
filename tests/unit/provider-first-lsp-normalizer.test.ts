@@ -187,6 +187,88 @@ describe("provider-first LSP normalization", () => {
     }
   });
 
+  it("retries empty document symbols when a server needs project warm-up", async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-warmup-retry-"));
+    try {
+      mkdirSync(join(repoRoot, "lib"));
+      writeFileSync(join(repoRoot, "lib", "plug.ex"), "defmodule Plug do\nend\n");
+
+      let documentSymbolRequests = 0;
+      const result = await executeProviderFirstLspFull({
+        repoId: "repo",
+        repoRoot,
+        config: {
+          indexing: {
+            providerFirst: {
+              lsp: {
+                documentSymbolFileLimit: 10,
+                diagnosticsLimit: 10,
+              },
+            },
+          },
+          semanticEnrichment: {
+            enabled: true,
+            providers: {
+              lsp: {
+                enabled: true,
+                servers: {
+                  expert: {
+                    enabled: true,
+                    serverId: "expert",
+                    command: "expert",
+                    args: ["--stdio"],
+                    languages: ["elixir"],
+                    documentLanguageIds: ["elixir"],
+                    filePatterns: ["**/*.ex"],
+                    capabilities: ["documentSymbol"],
+                    documentSymbolRetryCount: 1,
+                    documentSymbolRetryDelayMs: 0,
+                  },
+                },
+              },
+            },
+          },
+        },
+        clientFactory: () => ({
+          async start() {
+            return { capabilities: { documentSymbolProvider: true } };
+          },
+          async openDocument() {},
+          async documentSymbol() {
+            documentSymbolRequests += 1;
+            if (documentSymbolRequests === 1) {
+              return [];
+            }
+            return [
+              {
+                name: "Plug",
+                kind: 2,
+                range: {
+                  start: { line: 0, character: 0 },
+                  end: { line: 1, character: 3 },
+                },
+                selectionRange: {
+                  start: { line: 0, character: 10 },
+                  end: { line: 0, character: 14 },
+                },
+              },
+            ];
+          },
+          diagnostics() {
+            return [];
+          },
+          async dispose() {},
+        }),
+      });
+
+      assert.equal(documentSymbolRequests, 2);
+      assert.equal(result.facts.symbols[0]?.name, "Plug");
+      assert.equal(result.facts.coverage[0]?.symbolCoverage, "full");
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
   it("keeps LSP document symbols when pull diagnostics are unsupported", async () => {
     const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-diagnostic-fallback-"));
     try {
