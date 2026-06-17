@@ -258,10 +258,10 @@
     "parserInstallMode": "on-demand when repo config includes haskell",
     "scipStatus": "no practical SCIP indexer",
     "lspIoServer": "haskell-language-server",
-    "providerFirstStatus": "not validated",
-    "validationRepo": "pending",
-    "validationEvidence": "pending",
-    "notes": "Parser package remains lazy and uninstalled until this language is configured for a repository."
+    "providerFirstStatus": "LSP provider-first validated with bounded provider coverage",
+    "validationRepo": "haskell/parsec",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-haskell-2026-06-17.md",
+    "notes": "Validated 38/39 provider-primary files and 542 LSP symbols using Haskell Language Server exported by LSP-IO as --lsp --log-stderr False; provider-unusable Setup.hs uses full legacy fallback."
   },
   {
     "language": "Julia, Zig, Nix, Clojure, Erlang, OCaml, Ada, Gleam, Elm, Nim, Crystal, D, V, Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",

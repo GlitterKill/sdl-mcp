@@ -159,7 +159,7 @@ Fortran remains pending until `fortls` can launch successfully from the `lsp-io`
 
 ## Haskell
 
-Status: blocked by missing system/manual Haskell toolchain.
+Status: resolved by later validation in `devdocs/validation/provider-first-lsp-haskell-2026-06-17.md`.
 
 Evidence:
 
@@ -168,7 +168,7 @@ haskell-language-server            Haskell                missing        system/
 Get-Command ghcup,haskell-language-server-wrapper,haskell-language-server,ghc,cabal,stack -> no result
 ```
 
-Haskell remains pending until HLS is installed through GHCup or another package manager and `haskell-language-server-wrapper` is on PATH.
+Haskell was unblocked after installing GHCup-managed GHC, Cabal, and HLS. The final validation used `haskell/parsec`, `haskell-language-server-wrapper --lsp --log-stderr False` from the `lsp-io` SDL-MCP export, and a provider-first graph gate plus smoke ladder.
 
 ## SDL-MCP Hardening From This Pass
 
