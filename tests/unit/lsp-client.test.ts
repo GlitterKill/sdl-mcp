@@ -140,6 +140,39 @@ describe("SemanticLspClient", () => {
     }
   });
 
+  it("answers server-to-client dynamic registration requests", async () => {
+    const fixturePath = join(
+      process.cwd(),
+      "tests/fixtures/lsp/mock-client-registration-server.mjs",
+    );
+    const client = new SemanticLspClient({
+      serverId: "client-registration",
+      command: process.execPath,
+      args: [fixturePath],
+      workspaceRoot: process.cwd(),
+      timeoutMs: 1_000,
+    });
+
+    try {
+      const initializeResult = await client.start();
+      assert.equal(initializeResult.serverInfo?.name, "client-registration");
+      const uri = "file:///tmp/registered.ex";
+      await client.openDocument({
+        uri,
+        languageId: "elixir",
+        version: 1,
+        text: "defmodule RegisteredSymbol, do: nil\n",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const symbols = await client.documentSymbol({ textDocument: { uri } });
+
+      assert.equal(symbols?.[0]?.name, "RegisteredSymbol");
+    } finally {
+      await client.dispose();
+    }
+  });
+
   it("does not hang when a server ignores shutdown", async () => {
     const fixturePath = join(
       process.cwd(),

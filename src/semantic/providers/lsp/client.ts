@@ -66,6 +66,22 @@ const DocumentSymbolRequest = new RequestType<
   Array<DocumentSymbol | SymbolInformation> | null,
   void
 >("textDocument/documentSymbol");
+const ClientRegisterCapabilityRequest = new RequestType<unknown, null, void>(
+  "client/registerCapability",
+);
+const ClientUnregisterCapabilityRequest = new RequestType<unknown, null, void>(
+  "client/unregisterCapability",
+);
+const WorkspaceConfigurationRequest = new RequestType<
+  { items?: unknown[] },
+  unknown[],
+  void
+>("workspace/configuration");
+const WorkspaceFoldersRequest = new RequestType<
+  void,
+  Array<{ uri: string; name: string }> | null,
+  void
+>("workspace/workspaceFolders");
 const HoverRequest = new RequestType<
   {
     textDocument: { uri: string };
@@ -455,6 +471,18 @@ export class SemanticLspClient {
       new StreamMessageWriter(child.stdin),
       NullLogger,
     );
+    const rootUri = pathToFileURL(this.options.workspaceRoot).toString();
+    connection.onRequest(ClientRegisterCapabilityRequest, () => null);
+    connection.onRequest(ClientUnregisterCapabilityRequest, () => null);
+    connection.onRequest(WorkspaceConfigurationRequest, (params) =>
+      new Array(params.items?.length ?? 0).fill(null),
+    );
+    connection.onRequest(WorkspaceFoldersRequest, () => [
+      {
+        uri: rootUri,
+        name: this.options.serverId,
+      },
+    ]);
     connection.onNotification(PublishDiagnosticsNotification, (params) => {
       this.diagnosticsByUri.set(params.uri, params.diagnostics);
       this.notifyDiagnosticWaiters();
@@ -464,7 +492,6 @@ export class SemanticLspClient {
     this.process = child;
     this.connection = connection;
 
-    const rootUri = pathToFileURL(this.options.workspaceRoot).toString();
     const result = await this.sendRequest(
       InitializeRequest,
       {
