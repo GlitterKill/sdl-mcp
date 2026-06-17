@@ -186,10 +186,10 @@
     "parserInstallMode": "on-demand when repo config includes groovy",
     "scipStatus": "no practical SCIP indexer",
     "lspIoServer": "groovy-language-server",
-    "providerFirstStatus": "not validated",
-    "validationRepo": "pending",
-    "validationEvidence": "pending",
-    "notes": "Parser package remains lazy and uninstalled until this language is configured for a repository."
+    "providerFirstStatus": "LSP provider-first validated with bounded provider coverage",
+    "validationRepo": "spockframework/spock",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-groovy-2026-06-17.md",
+    "notes": "Validated 33/540 provider-primary files and 415 LSP symbols using document-session mode; provider-unusable and uncovered Groovy files use full legacy fallback."
   },
   {
     "language": "Perl",

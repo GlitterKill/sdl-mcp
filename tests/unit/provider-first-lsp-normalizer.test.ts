@@ -483,4 +483,91 @@ describe("provider-first LSP normalization", () => {
       rmSync(repoRoot, { recursive: true, force: true });
     }
   });
+
+  it("can restart an LSP server per document for single-document servers", async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-document-session-"));
+    try {
+      mkdirSync(join(repoRoot, "src"));
+      writeFileSync(join(repoRoot, "src", "A.groovy"), "class A {}\n");
+      writeFileSync(join(repoRoot, "src", "B.groovy"), "class B {}\n");
+
+      let clientStarts = 0;
+      const result = await executeProviderFirstLspFull({
+        repoId: "repo",
+        repoRoot,
+        config: {
+          indexing: {
+            providerFirst: {
+              lsp: {
+                documentSymbolFileLimit: 10,
+                diagnosticsLimit: 10,
+              },
+            },
+          },
+          semanticEnrichment: {
+            enabled: true,
+            providers: {
+              lsp: {
+                enabled: true,
+                servers: {
+                  "groovy-language-server": {
+                    enabled: true,
+                    serverId: "groovy-language-server",
+                    command: "groovy-language-server",
+                    args: [],
+                    languages: ["groovy"],
+                    documentLanguageIds: ["groovy"],
+                    filePatterns: ["**/*.groovy"],
+                    capabilities: ["documentSymbol"],
+                    documentSessionMode: "document",
+                  },
+                },
+              },
+            },
+          },
+        },
+        clientFactory: () => ({
+          async start() {
+            clientStarts += 1;
+            return { capabilities: { documentSymbolProvider: true } };
+          },
+          async openDocument() {},
+          async documentSymbol(params) {
+            const name = params.textDocument.uri.endsWith("/A.groovy")
+              ? "A"
+              : "B";
+            return [
+              {
+                name,
+                kind: 5,
+                range: {
+                  start: { line: 0, character: 0 },
+                  end: { line: 0, character: 10 },
+                },
+                selectionRange: {
+                  start: { line: 0, character: 6 },
+                  end: { line: 0, character: 7 },
+                },
+              },
+            ];
+          },
+          diagnostics() {
+            return [];
+          },
+          async dispose() {},
+        }),
+      });
+
+      assert.equal(clientStarts, 2);
+      assert.deepEqual(
+        result.facts.symbols.map((symbol) => symbol.name),
+        ["A", "B"],
+      );
+      assert.equal(result.facts.coverage[0]?.legacyFallback, "targeted");
+      assert.equal(result.facts.coverage[1]?.legacyFallback, "targeted");
+      assert.equal(result.rows.symbols.length, 2);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
 });

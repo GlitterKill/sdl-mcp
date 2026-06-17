@@ -223,6 +223,26 @@ describe("SemanticLspClient", () => {
     );
   });
 
+  it("starts Windows Java jar command shims without invoking cmd.exe", () => {
+    assert.deepEqual(
+      resolveLspSpawnCommand({
+        command:
+          "C:\\Users\\me\\AppData\\Local\\lsp-io\\servers\\groovy-language-server\\bin\\groovy-language-server.cmd",
+        platform: "win32",
+        readFileText: () =>
+          '@echo off\r\njava -jar "%~dp0\\..\\source\\build\\libs\\source-all.jar" %*\r\n',
+      }),
+      {
+        command: "java.exe",
+        args: [
+          "-jar",
+          "C:\\Users\\me\\AppData\\Local\\lsp-io\\servers\\groovy-language-server\\source\\build\\libs\\source-all.jar",
+        ],
+        shell: false,
+      },
+    );
+  });
+
   it("resolves bare Windows commands through PATH and PATHEXT", () => {
     assert.deepEqual(
       resolveLspSpawnCommand({
@@ -255,7 +275,7 @@ describe("SemanticLspClient", () => {
           platform: "win32",
           readFileText: () => "echo unsafe %*",
         }),
-      /not a supported npm-style shim/,
+      /not a supported JS\/Ruby\/Java shim/,
     );
   });
 

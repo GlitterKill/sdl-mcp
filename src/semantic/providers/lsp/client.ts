@@ -224,9 +224,22 @@ export function resolveLspSpawnCommand(options: {
       }
     }
     if (!entrypoint) {
+      const javaJarEntrypoint = resolveJavaJarCommandShimEntrypoint(
+        resolvedCommand,
+        options.readFileText ?? ((path) => readFileSync(path, "utf8")),
+      );
+      if (javaJarEntrypoint) {
+        return {
+          command: "java.exe",
+          args: ["-jar", javaJarEntrypoint, ...args],
+          shell: false,
+        };
+      }
+    }
+    if (!entrypoint) {
       throw new Error(
-        `Windows LSP command shim ${resolvedCommand} is not a supported npm-style shim; ` +
-          "configure the server's JS/Ruby entrypoint or native executable instead.",
+        `Windows LSP command shim ${resolvedCommand} is not a supported JS/Ruby/Java shim; ` +
+          "configure the server's JS/Ruby/Java entrypoint or native executable instead.",
       );
     }
     return {
@@ -335,6 +348,33 @@ function resolveRubyGemsCommandShimEntrypoint(
   }
   const parsed = win32.parse(shimPath);
   return win32.join(parsed.dir, parsed.name);
+}
+
+function resolveJavaJarCommandShimEntrypoint(
+  shimPath: string,
+  readFileText: (path: string) => string,
+): string | null {
+  let shimText: string;
+  try {
+    shimText = readFileText(shimPath);
+  } catch {
+    return null;
+  }
+
+  const shimDir = win32.dirname(shimPath);
+  for (const line of shimText.split(/\r?\n/u)) {
+    if (!line.includes("%*")) continue;
+    const match = line.match(
+      /(?:^|\s)(?:@?java(?:\.exe)?)\s+-jar\s+"?([^"\r\n]+?\.jar)"?\s+%\*/iu,
+    );
+    const jarPath = match?.[1];
+    if (!jarPath) continue;
+    return win32.normalize(
+      jarPath.replace(/%~?dp0%?[\\/]?/giu, `${shimDir}\\`),
+    );
+  }
+
+  return null;
 }
 
 interface DiagnosticWaiter {

@@ -1201,6 +1201,10 @@
                         "default": []
                       },
                       "readiness": { "type": "string" },
+                      "documentSessionMode": {
+                        "type": "string",
+                        "enum": ["workspace", "document"]
+                      },
                       "env": {
                         "type": "object",
                         "additionalProperties": { "type": "string" }

@@ -616,6 +616,81 @@ export async function executeProviderFirstLspFull(
       continue;
     }
 
+    if (server.documentSessionMode === "document") {
+      const documentFailures: string[] = [];
+      const documentCollectionDeadline =
+        Date.now() + documentSymbolCollectionTimeoutMs;
+      for (const [documentIndex, document] of documents.entries()) {
+        params.signal?.throwIfAborted();
+        if (Date.now() >= documentCollectionDeadline) {
+          markRemainingLspDocumentsSkipped(
+            documents,
+            documentIndex,
+            documentFailures,
+            "documentSymbol skipped after collection timeout",
+          );
+          break;
+        }
+        const client = clientFactory({
+          serverId: providerId,
+          command: server.command,
+          args: server.args,
+          workspaceRoot: params.repoRoot,
+          timeoutMs: params.config.semanticEnrichment?.timeoutMs ?? 300_000,
+          env: server.env,
+          initializationOptions: server.initializationOptions,
+        });
+        try {
+          await collectLspProviderDocumentWithClient({
+            client,
+            document,
+            timeoutMs: params.config.semanticEnrichment?.timeoutMs,
+            documentSymbolTimeoutMs,
+            diagnosticsTimeoutMs,
+          });
+        } catch (error) {
+          const message = errorMessage(error);
+          document.symbolError = message;
+          document.symbols = [];
+          document.diagnostics = [];
+          documentFailures.push(`${document.relPath}: ${message}`);
+          if (documentFailures.length >= documentSymbolFailureLimit) {
+            markRemainingLspDocumentsSkipped(
+              documents,
+              documentIndex + 1,
+              documentFailures,
+              "documentSymbol skipped after failure limit",
+            );
+            break;
+          }
+        } finally {
+          await client.dispose().catch(() => undefined);
+        }
+      }
+      appendProviderFactSet(
+        facts,
+        normalizeLspProviderFacts({
+          repoId: params.repoId,
+          generationId,
+          providerId,
+          providerVersion: lspConfig?.providerVersion,
+          emittedAt: indexedAt,
+          documents,
+          run: {
+            runId: `${generationId}:${providerId}`,
+            status: "succeeded",
+            startedAt: serverStartedAt,
+            finishedAt: new Date().toISOString(),
+            errorMessage:
+              documentFailures.length > 0
+                ? summarizeLspDocumentFailures(documentFailures)
+                : undefined,
+          },
+        }),
+      );
+      continue;
+    }
+
     const client = clientFactory({
       serverId: providerId,
       command: server.command,
@@ -792,6 +867,34 @@ export async function executeProviderFirstLspFull(
     },
   };
   return { generationId, facts, rows, summary };
+}
+
+async function collectLspProviderDocumentWithClient(params: {
+  client: ProviderFirstLspClientLike;
+  document: CollectedLspProviderDocument;
+  timeoutMs?: number;
+  documentSymbolTimeoutMs: number;
+  diagnosticsTimeoutMs: number;
+}): Promise<void> {
+  const initializeResult = await params.client.start(params.timeoutMs);
+  await params.client.openDocument({
+    uri: params.document.uri,
+    languageId: params.document.languageId ?? "plaintext",
+    version: 1,
+    text: params.document.text,
+  });
+  if (initializeResult.capabilities.documentSymbolProvider) {
+    params.document.symbols =
+      (await params.client.documentSymbol(
+        { textDocument: { uri: params.document.uri } },
+        params.documentSymbolTimeoutMs,
+      )) ?? [];
+  }
+  params.document.diagnostics = await collectLspProviderDiagnostics({
+    client: params.client,
+    uri: params.document.uri,
+    timeoutMs: params.diagnosticsTimeoutMs,
+  });
 }
 
 async function collectLspProviderDocuments(params: {

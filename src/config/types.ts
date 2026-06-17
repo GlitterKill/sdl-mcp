@@ -1042,6 +1042,7 @@ export const SemanticEnrichmentLspServerConfigSchema = z.object({
   filePatterns: z.array(z.string()).default([]),
   capabilities: z.array(z.string()).default([]),
   readiness: z.string().optional(),
+  documentSessionMode: z.enum(["workspace", "document"]).optional(),
   env: z.record(z.string(), z.string()).optional(),
   initializationOptions: z.record(z.string(), z.unknown()).optional(),
 });
