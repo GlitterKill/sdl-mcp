@@ -210,10 +210,10 @@
     "parserInstallMode": "on-demand when repo config includes r",
     "scipStatus": "no practical SCIP indexer",
     "lspIoServer": "r-languageserver",
-    "providerFirstStatus": "not validated",
-    "validationRepo": "pending",
-    "validationEvidence": "pending",
-    "notes": "Parser package remains lazy and uninstalled until this language is configured for a repository."
+    "providerFirstStatus": "LSP provider-first validated with bounded provider coverage",
+    "validationRepo": "r-lib/pkgdown",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-r-2026-06-17.md",
+    "notes": "Validated 99/133 provider-primary files and 761 LSP symbols using R languageserver; provider-unusable files use full legacy fallback."
   },
   {
     "language": "Elixir",

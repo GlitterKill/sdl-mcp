@@ -283,6 +283,38 @@ describe("SemanticLspClient", () => {
     );
   });
 
+  it("starts Windows R language server shims through Rscript entrypoints", () => {
+    assert.deepEqual(
+      resolveLspSpawnCommand({
+        command:
+          "C:\\Users\\me\\AppData\\Local\\lsp-io\\servers\\r-languageserver\\bin\\R-languageserver.cmd",
+        args: ["--debug"],
+        platform: "win32",
+        readFileText: () =>
+          '@echo off\r\n"C:\\Users\\me\\AppData\\Local\\Programs\\R\\R-4.6.0\\bin\\Rscript.exe" -e "languageserver::run()" %*\r\n',
+      }),
+      {
+        command:
+          "C:\\Users\\me\\AppData\\Local\\Programs\\R\\R-4.6.0\\bin\\Rscript.exe",
+        args: ["-e", "languageserver::run()", "--debug"],
+        shell: false,
+      },
+    );
+  });
+
+  it("rejects Windows Rscript shims that run arbitrary R code", () => {
+    assert.throws(
+      () =>
+        resolveLspSpawnCommand({
+          command: "C:\\tools\\R-languageserver.cmd",
+          platform: "win32",
+          readFileText: () =>
+            '@echo off\r\nRscript.exe -e "source(\\\"server.R\\\")" %*\r\n',
+        }),
+      /not a supported JS\/Ruby\/Java\/Rscript shim/,
+    );
+  });
+
   it("resolves bare Windows commands through PATH and PATHEXT", () => {
     assert.deepEqual(
       resolveLspSpawnCommand({
@@ -315,7 +347,7 @@ describe("SemanticLspClient", () => {
           platform: "win32",
           readFileText: () => "echo unsafe %*",
         }),
-      /not a supported JS\/Ruby\/Java shim/,
+      /not a supported JS\/Ruby\/Java\/Rscript shim/,
     );
   });
 

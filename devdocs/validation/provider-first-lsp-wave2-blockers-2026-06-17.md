@@ -1,10 +1,10 @@
 # Provider-First LSP Wave 2 Blockers - 2026-06-17
 
-This note records failed prerequisite and server-readiness checks for the remaining Wave 2 languages after Groovy and Perl were validated. These languages remain pending in the language provider support chart; none of the checks below are support evidence.
+This note records failed prerequisite and server-readiness checks for the remaining Wave 2 languages after Groovy and Perl were validated. R was later unblocked and validated in `devdocs/validation/provider-first-lsp-r-2026-06-17.md`; the other languages below remain pending in the language provider support chart. None of the unresolved checks below are support evidence.
 
 ## R
 
-Status: blocked by missing system R toolchain.
+Status: resolved by a direct user-local R install and validated separately.
 
 Evidence:
 
@@ -35,7 +35,16 @@ choco install r.project -y --no-progress
 Access to the path 'C:\ProgramData\chocolatey\lib-bad' is denied.
 ```
 
-R remains pending until R and the R `languageserver` package can be installed non-interactively or pre-provisioned.
+Resolution:
+
+```text
+C:\Users\glitt\AppData\Local\Programs\R\R-4.6.0\bin\Rscript.exe
+Rscript (R) version 4.6.0 (2026-04-24)
+```
+
+R validation evidence:
+
+`devdocs/validation/provider-first-lsp-r-2026-06-17.md`
 
 ## Elixir
 

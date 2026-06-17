@@ -236,9 +236,22 @@ export function resolveLspSpawnCommand(options: {
       }
     }
     if (!entrypoint) {
+      const rscriptEntrypoint = resolveRscriptCommandShimEntrypoint(
+        resolvedCommand,
+        options.readFileText ?? ((path) => readFileSync(path, "utf8")),
+      );
+      if (rscriptEntrypoint) {
+        return {
+          command: rscriptEntrypoint.command,
+          args: [...rscriptEntrypoint.args, ...args],
+          shell: false,
+        };
+      }
+    }
+    if (!entrypoint) {
       throw new Error(
-        `Windows LSP command shim ${resolvedCommand} is not a supported JS/Ruby/Java shim; ` +
-          "configure the server's JS/Ruby/Java entrypoint or native executable instead.",
+        `Windows LSP command shim ${resolvedCommand} is not a supported JS/Ruby/Java/Rscript shim; ` +
+          "configure the server's JS/Ruby/Java/Rscript entrypoint or native executable instead.",
       );
     }
     return {
@@ -371,6 +384,33 @@ function resolveJavaJarCommandShimEntrypoint(
     return win32.normalize(
       jarPath.replace(/%~?dp0%?[\\/]?/giu, `${shimDir}\\`),
     );
+  }
+
+  return null;
+}
+
+function resolveRscriptCommandShimEntrypoint(
+  shimPath: string,
+  readFileText: (path: string) => string,
+): { command: string; args: string[] } | null {
+  let shimText: string;
+  try {
+    shimText = readFileText(shimPath);
+  } catch {
+    return null;
+  }
+
+  for (const line of shimText.split(/\r?\n/u)) {
+    if (!line.includes("%*")) continue;
+    const match = line.match(
+      /(?:^|\s)(?:"([^"]*Rscript(?:\.exe)?)"|([^"\s]*Rscript(?:\.exe)?))\s+-e\s+"languageserver::run\(\)"\s+%\*/iu,
+    );
+    const command = match?.[1] ?? match?.[2];
+    if (!command) continue;
+    return {
+      command: win32.normalize(command),
+      args: ["-e", "languageserver::run()"],
+    };
   }
 
   return null;
