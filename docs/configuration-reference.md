@@ -238,8 +238,12 @@ If you set `budgetCaps`, provide both `maxCards` and `maxEstimatedTokens`.
 | `providerFirst.lsp.mode` | `"primaryWithCaps"` | `"primaryWithCaps"` | Treats LSP as a bounded primary provider for workspace/document symbols, references, definitions, and diagnostics. |
 | `providerFirst.lsp.workspaceSymbolLimit` | `number` | `5000` | `0-100000`. Maximum workspace symbols collected from one LSP server. |
 | `providerFirst.lsp.documentSymbolFileLimit` | `number` | `500` | `0-50000`. Maximum files opened for document symbol collection from one LSP server. |
+| `providerFirst.lsp.documentSymbolTimeoutMs` | `number` | `10000` | `500-300000`. Per-file timeout for `textDocument/documentSymbol`; bounded so one slow file cannot discard or stall the full LSP provider run. |
+| `providerFirst.lsp.documentSymbolFailureLimit` | `number` | `20` | `1-100000`. Stops document-symbol collection for a server after repeated per-file failures and sends remaining files to legacy fallback. |
+| `providerFirst.lsp.documentSymbolCollectionTimeoutMs` | `number` | `120000` | `1000-1800000`. Total per-server wall-clock cap for document-symbol collection before remaining files fall back. |
 | `providerFirst.lsp.referenceCandidateLimit` | `number` | `200` | `0-10000`. Maximum bounded reference/definition probes from one LSP server. |
 | `providerFirst.lsp.diagnosticsLimit` | `number` | `5000` | `0-100000`. Maximum diagnostics captured from one LSP provider run. |
+| `providerFirst.lsp.diagnosticsTimeoutMs` | `number` | `5000` | `500-300000`. Per-file timeout for LSP diagnostic pulls. |
 | Provider-first fallback diagnostics | CLI output | Always on for provider-first fallback runs | Prints fallback counts, phase buckets, subphase timings, and bounded sample paths when same-run legacy fallback parses uncovered or provider-unusable files. |
 | `concurrency` | `number` | `8` | `1-32`. General indexing concurrency. |
 | `enableFileWatching` | `boolean` | `true` | Usually disable in CI. |

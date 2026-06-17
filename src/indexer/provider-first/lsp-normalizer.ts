@@ -24,7 +24,9 @@ export interface LspProviderDocument {
   languageId?: string;
   contentHash?: string;
   byteSize?: number;
+  text?: string;
   symbols?: readonly LspDocumentSymbolLike[];
+  symbolError?: string;
   diagnostics?: readonly Diagnostic[];
 }
 
@@ -87,7 +89,7 @@ export function normalizeLspProviderFacts(
     });
 
     for (const symbol of documentSymbols) {
-      const range = lspRangeToSdlRange(symbol.range);
+      const range = lspRangeToSdlRange(symbol.range, document.text);
       const providerSymbolId = [
         params.providerId,
         relPath,
@@ -122,7 +124,7 @@ export function normalizeLspProviderFacts(
 
     for (const diagnostic of document.diagnostics ?? []) {
       const range = diagnostic.range
-        ? lspRangeToSdlRange(diagnostic.range)
+        ? lspRangeToSdlRange(diagnostic.range, document.text)
         : undefined;
       diagnostics.push({
         ...base,
@@ -145,11 +147,21 @@ export function normalizeLspProviderFacts(
       });
     }
 
+    const symbolCoverage = documentSymbols.length > 0 ? "full" : "none";
+    const skippedSymbolReasons = document.symbolError
+      ? [
+          {
+            reason: "documentSymbol request failed",
+            symbols: 1,
+          },
+        ]
+      : undefined;
+
     coverage.push({
       ...base,
       kind: "coverage" as const,
       relPath,
-      symbolCoverage: documentSymbols.length > 0 ? "full" : "none",
+      symbolCoverage,
       referenceCoverage: "none" as const,
       callProofCoverage: "none" as const,
       diagnosticCoverage:
@@ -160,7 +172,9 @@ export function normalizeLspProviderFacts(
       unresolvedOccurrences: 0,
       totalResolvedReferences: 0,
       callProofUnavailableReferences: 0,
-      legacyFallback: "targeted" as const,
+      skippedSymbolReasons,
+      legacyFallback:
+        symbolCoverage === "none" ? ("full" as const) : ("targeted" as const),
     });
   }
 
@@ -226,13 +240,35 @@ function isDocumentSymbol(symbol: LspDocumentSymbolLike): symbol is DocumentSymb
   return "range" in symbol && "selectionRange" in symbol;
 }
 
-function lspRangeToSdlRange(range: LspRange): Range {
-  return {
+function lspRangeToSdlRange(range: LspRange, sourceText?: string): Range {
+  const unclamped = {
     startLine: range.start.line + 1,
     startCol: range.start.character,
     endLine: range.end.line + 1,
     endCol: range.end.character,
   };
+  if (sourceText === undefined) return unclamped;
+
+  const sourceLines = sourceText.split(/\r?\n/u);
+  const maxLine = Math.max(sourceLines.length, 1);
+  const startLine = clamp(unclamped.startLine, 1, maxLine);
+  const endLine = clamp(unclamped.endLine, startLine, maxLine);
+  const startCol = clamp(
+    unclamped.startCol,
+    0,
+    sourceLines[startLine - 1]?.length ?? 0,
+  );
+  const endCol = clamp(
+    unclamped.endCol,
+    startLine === endLine ? startCol : 0,
+    sourceLines[endLine - 1]?.length ?? 0,
+  );
+
+  return { startLine, startCol, endLine, endCol };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 function lspSymbolKindToSdlKind(kind: number): SymbolKind {

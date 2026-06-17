@@ -338,6 +338,24 @@
                   "maximum": 50000,
                   "default": 500
                 },
+                "documentSymbolTimeoutMs": {
+                  "type": "integer",
+                  "minimum": 500,
+                  "maximum": 300000,
+                  "default": 10000
+                },
+                "documentSymbolFailureLimit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100000,
+                  "default": 20
+                },
+                "documentSymbolCollectionTimeoutMs": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 1800000,
+                  "default": 120000
+                },
                 "referenceCandidateLimit": {
                   "type": "integer",
                   "minimum": 0,
@@ -349,14 +367,24 @@
                   "minimum": 0,
                   "maximum": 100000,
                   "default": 5000
+                },
+                "diagnosticsTimeoutMs": {
+                  "type": "integer",
+                  "minimum": 500,
+                  "maximum": 300000,
+                  "default": 5000
                 }
               },
               "default": {
                 "mode": "primaryWithCaps",
                 "workspaceSymbolLimit": 5000,
                 "documentSymbolFileLimit": 500,
+                "documentSymbolTimeoutMs": 10000,
+                "documentSymbolFailureLimit": 20,
+                "documentSymbolCollectionTimeoutMs": 120000,
                 "referenceCandidateLimit": 200,
-                "diagnosticsLimit": 5000
+                "diagnosticsLimit": 5000,
+                "diagnosticsTimeoutMs": 5000
               }
             }
           },
@@ -368,8 +396,12 @@
               "mode": "primaryWithCaps",
               "workspaceSymbolLimit": 5000,
               "documentSymbolFileLimit": 500,
+              "documentSymbolTimeoutMs": 10000,
+              "documentSymbolFailureLimit": 20,
+              "documentSymbolCollectionTimeoutMs": 120000,
               "referenceCandidateLimit": 200,
-              "diagnosticsLimit": 5000
+              "diagnosticsLimit": 5000,
+              "diagnosticsTimeoutMs": 5000
             }
           }
         },
@@ -479,8 +511,12 @@
             "mode": "primaryWithCaps",
             "workspaceSymbolLimit": 5000,
             "documentSymbolFileLimit": 500,
+            "documentSymbolTimeoutMs": 10000,
+            "documentSymbolFailureLimit": 20,
+            "documentSymbolCollectionTimeoutMs": 120000,
             "referenceCandidateLimit": 200,
-            "diagnosticsLimit": 5000
+            "diagnosticsLimit": 5000,
+            "diagnosticsTimeoutMs": 5000
           }
         },
         "concurrency": 8,

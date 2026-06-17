@@ -275,4 +275,212 @@ describe("provider-first LSP normalization", () => {
       rmSync(repoRoot, { recursive: true, force: true });
     }
   });
+
+  it("preserves successful LSP documents when one documentSymbol request fails", async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-document-failure-"));
+    try {
+      mkdirSync(join(repoRoot, "src"));
+      writeFileSync(join(repoRoot, "src", "A.php"), "<?php\nfunction a() {}\n");
+      writeFileSync(join(repoRoot, "src", "B.php"), "<?php\nfunction b() {}\n");
+      writeFileSync(join(repoRoot, "src", "C.php"), "<?php\nfunction c() {}\n");
+
+      const result = await executeProviderFirstLspFull({
+        repoId: "repo",
+        repoRoot,
+        config: {
+          indexing: {
+            providerFirst: {
+              lsp: {
+                documentSymbolFileLimit: 10,
+                diagnosticsLimit: 10,
+              },
+            },
+          },
+          semanticEnrichment: {
+            enabled: true,
+            providers: {
+              lsp: {
+                enabled: true,
+                servers: {
+                  phpactor: {
+                    enabled: true,
+                    serverId: "phpactor",
+                    command: "phpactor",
+                    args: [],
+                    languages: ["php"],
+                    documentLanguageIds: ["php"],
+                    filePatterns: ["**/*.php"],
+                    capabilities: ["documentSymbol", "diagnostic"],
+                  },
+                },
+              },
+            },
+          },
+        },
+        clientFactory: () => ({
+          async start() {
+            return {
+              capabilities: {
+                documentSymbolProvider: true,
+                diagnosticProvider: {
+                  interFileDependencies: false,
+                  workspaceDiagnostics: false,
+                },
+              },
+            };
+          },
+          async openDocument() {},
+          async documentSymbol(params) {
+            const uri = params.textDocument.uri;
+            if (uri.endsWith("/B.php")) {
+              throw new Error("documentSymbol timed out");
+            }
+            const name = uri.endsWith("/A.php") ? "a" : "c";
+            return [
+              {
+                name,
+                kind: 12,
+                range: {
+                  start: { line: 1, character: 0 },
+                  end: { line: 1, character: 15 },
+                },
+                selectionRange: {
+                  start: { line: 1, character: 9 },
+                  end: { line: 1, character: 10 },
+                },
+              },
+            ];
+          },
+          diagnostics() {
+            return [];
+          },
+          async pullDiagnostics() {
+            return [];
+          },
+          async dispose() {},
+        }),
+      });
+
+      const coverageByPath = new Map(
+        result.facts.coverage.map((coverage) => [coverage.relPath, coverage]),
+      );
+
+      assert.equal(result.facts.providerRuns[0]?.status, "succeeded");
+      assert.match(
+        result.facts.providerRuns[0]?.errorMessage ?? "",
+        /failed for 1 document/,
+      );
+      assert.equal(result.facts.files.length, 3);
+      assert.deepEqual(
+        result.facts.symbols.map((symbol) => symbol.name),
+        ["a", "c"],
+      );
+      assert.equal(coverageByPath.get("src/A.php")?.legacyFallback, "targeted");
+      assert.equal(coverageByPath.get("src/B.php")?.symbolCoverage, "none");
+      assert.equal(coverageByPath.get("src/B.php")?.legacyFallback, "full");
+      assert.deepEqual(coverageByPath.get("src/B.php")?.skippedSymbolReasons, [
+        {
+          reason: "documentSymbol request failed",
+          symbols: 1,
+        },
+      ]);
+      assert.equal(result.rows.symbols.length, 2);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("stops LSP document symbol collection after the failure limit", async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "sdl-lsp-failure-limit-"));
+    try {
+      mkdirSync(join(repoRoot, "src"));
+      writeFileSync(join(repoRoot, "src", "A.php"), "<?php\nfunction a() {}\n");
+      writeFileSync(join(repoRoot, "src", "B.php"), "<?php\nfunction b() {}\n");
+      writeFileSync(join(repoRoot, "src", "C.php"), "<?php\nfunction c() {}\n");
+
+      const result = await executeProviderFirstLspFull({
+        repoId: "repo",
+        repoRoot,
+        config: {
+          indexing: {
+            providerFirst: {
+              lsp: {
+                documentSymbolFileLimit: 10,
+                documentSymbolTimeoutMs: 1_000,
+                documentSymbolFailureLimit: 1,
+                diagnosticsLimit: 10,
+              },
+            },
+          },
+          semanticEnrichment: {
+            enabled: true,
+            providers: {
+              lsp: {
+                enabled: true,
+                servers: {
+                  phpactor: {
+                    enabled: true,
+                    serverId: "phpactor",
+                    command: "phpactor",
+                    args: [],
+                    languages: ["php"],
+                    documentLanguageIds: ["php"],
+                    filePatterns: ["**/*.php"],
+                    capabilities: ["documentSymbol"],
+                  },
+                },
+              },
+            },
+          },
+        },
+        clientFactory: () => ({
+          async start() {
+            return { capabilities: { documentSymbolProvider: true } };
+          },
+          async openDocument() {},
+          async documentSymbol(params) {
+            const uri = params.textDocument.uri;
+            if (uri.endsWith("/B.php")) {
+              throw new Error("documentSymbol timed out");
+            }
+            return [
+              {
+                name: "a",
+                kind: 12,
+                range: {
+                  start: { line: 1, character: 0 },
+                  end: { line: 1, character: 15 },
+                },
+                selectionRange: {
+                  start: { line: 1, character: 9 },
+                  end: { line: 1, character: 10 },
+                },
+              },
+            ];
+          },
+          diagnostics() {
+            return [];
+          },
+          async dispose() {},
+        }),
+      });
+
+      const coverageByPath = new Map(
+        result.facts.coverage.map((coverage) => [coverage.relPath, coverage]),
+      );
+
+      assert.deepEqual(
+        result.facts.symbols.map((symbol) => symbol.name),
+        ["a"],
+      );
+      assert.equal(coverageByPath.get("src/B.php")?.legacyFallback, "full");
+      assert.equal(coverageByPath.get("src/C.php")?.legacyFallback, "full");
+      assert.match(
+        result.facts.providerRuns[0]?.errorMessage ?? "",
+        /failed for 2 document/,
+      );
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
 });

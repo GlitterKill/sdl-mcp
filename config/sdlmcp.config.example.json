@@ -86,8 +86,12 @@
         "mode": "primaryWithCaps",
         "workspaceSymbolLimit": 5000,
         "documentSymbolFileLimit": 500,
+        "documentSymbolTimeoutMs": 10000,
+        "documentSymbolFailureLimit": 20,
+        "documentSymbolCollectionTimeoutMs": 120000,
         "referenceCandidateLimit": 200,
-        "diagnosticsLimit": 5000
+        "diagnosticsLimit": 5000,
+        "diagnosticsTimeoutMs": 5000
       }
     },
     "concurrency": 8,

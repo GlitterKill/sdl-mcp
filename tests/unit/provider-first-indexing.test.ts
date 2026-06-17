@@ -543,7 +543,7 @@ describe("provider-first indexing foundation", () => {
           relPath: "src/caller.ts",
           providerType: "lsp",
           legacyFallback: "targeted",
-          symbolCoverage: "none",
+          symbolCoverage: "full",
         },
       ],
       symbols: [],

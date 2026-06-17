@@ -1579,6 +1579,31 @@ export function selectProviderFirstLegacyFallbackPaths(params: {
   return selected;
 }
 
+function selectProviderRowsExcludedByLegacyFallback(params: {
+  fallbackPaths: ReadonlySet<string>;
+  coverage: ReadonlyArray<ProviderFactSet["coverage"][number]>;
+}): Set<string> {
+  const coverageByPath = new Map(
+    params.coverage.map((coverage) => [
+      normalizePath(coverage.relPath),
+      coverage,
+    ]),
+  );
+  const excludedPaths = new Set<string>();
+  for (const relPath of params.fallbackPaths) {
+    const normalizedPath = normalizePath(relPath);
+    const coverage = coverageByPath.get(normalizedPath);
+    if (
+      !coverage ||
+      coverage.legacyFallback === "full" ||
+      coverage.symbolCoverage === "none"
+    ) {
+      excludedPaths.add(normalizedPath);
+    }
+  }
+  return excludedPaths;
+}
+
 function filterProviderRowsForFallback(
   rows: ProviderFirstGraphRows,
   fallbackPaths: ReadonlySet<string>,
@@ -2782,7 +2807,10 @@ async function indexRepoImpl(
           });
           const providerRowsExcludedByLegacyFallback =
             legacyFallbackPlan.runLegacyFallback
-              ? legacyFallbackPaths
+              ? selectProviderRowsExcludedByLegacyFallback({
+                  fallbackPaths: legacyFallbackPaths,
+                  coverage: scanScopedProvider.facts.coverage,
+                })
               : new Set<string>();
           const materializedRows = filterProviderRowsForFallback(
             scanScopedProvider.rows,

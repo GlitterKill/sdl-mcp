@@ -251,15 +251,43 @@ export const ProviderFirstLspIndexingConfigSchema = z
     mode: z.enum(["primaryWithCaps"]).default("primaryWithCaps"),
     workspaceSymbolLimit: z.number().int().min(0).max(100_000).default(5_000),
     documentSymbolFileLimit: z.number().int().min(0).max(50_000).default(500),
+    documentSymbolTimeoutMs: z
+      .number()
+      .int()
+      .min(500)
+      .max(300_000)
+      .default(10_000),
+    documentSymbolFailureLimit: z
+      .number()
+      .int()
+      .min(1)
+      .max(100_000)
+      .default(20),
+    documentSymbolCollectionTimeoutMs: z
+      .number()
+      .int()
+      .min(1_000)
+      .max(30 * 60 * 1000)
+      .default(120_000),
     referenceCandidateLimit: z.number().int().min(0).max(10_000).default(200),
     diagnosticsLimit: z.number().int().min(0).max(100_000).default(5_000),
+    diagnosticsTimeoutMs: z
+      .number()
+      .int()
+      .min(500)
+      .max(300_000)
+      .default(5_000),
   })
   .default({
     mode: "primaryWithCaps",
     workspaceSymbolLimit: 5_000,
     documentSymbolFileLimit: 500,
+    documentSymbolTimeoutMs: 10_000,
+    documentSymbolFailureLimit: 20,
+    documentSymbolCollectionTimeoutMs: 120_000,
     referenceCandidateLimit: 200,
     diagnosticsLimit: 5_000,
+    diagnosticsTimeoutMs: 5_000,
   });
 
 export const ProviderFirstIndexingConfigSchema = z
@@ -291,8 +319,12 @@ export const ProviderFirstIndexingConfigSchema = z
       mode: "primaryWithCaps",
       workspaceSymbolLimit: 5_000,
       documentSymbolFileLimit: 500,
+      documentSymbolTimeoutMs: 10_000,
+      documentSymbolFailureLimit: 20,
+      documentSymbolCollectionTimeoutMs: 120_000,
       referenceCandidateLimit: 200,
       diagnosticsLimit: 5_000,
+      diagnosticsTimeoutMs: 5_000,
     },
   });
 

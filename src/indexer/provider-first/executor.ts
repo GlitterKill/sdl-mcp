@@ -557,6 +557,20 @@ export async function executeProviderFirstLspFull(
   const indexedAt = new Date().toISOString();
   const measurePhase = providerFirstPhaseMeasurer(params.recordPhaseTiming);
   const lspConfig = params.config.semanticEnrichment?.providers.lsp;
+  const providerLspConfig = params.config.indexing?.providerFirst?.lsp;
+  const semanticTimeoutMs = params.config.semanticEnrichment?.timeoutMs;
+  const documentSymbolTimeoutMs = Math.min(
+    providerLspConfig?.documentSymbolTimeoutMs ?? 10_000,
+    semanticTimeoutMs ?? 300_000,
+  );
+  const documentSymbolFailureLimit =
+    providerLspConfig?.documentSymbolFailureLimit ?? 20;
+  const documentSymbolCollectionTimeoutMs =
+    providerLspConfig?.documentSymbolCollectionTimeoutMs ?? 120_000;
+  const diagnosticsTimeoutMs = Math.min(
+    providerLspConfig?.diagnosticsTimeoutMs ?? 5_000,
+    semanticTimeoutMs ?? 300_000,
+  );
   const servers = Object.entries(lspConfig?.servers ?? {}).filter(
     ([, server]) => server.enabled !== false,
   );
@@ -619,25 +633,80 @@ export async function executeProviderFirstLspFull(
       const canCollectSymbols = Boolean(
         initializeResult.capabilities.documentSymbolProvider,
       );
-      for (const document of documents) {
+      const documentFailures: string[] = [];
+      const documentCollectionDeadline =
+        Date.now() + documentSymbolCollectionTimeoutMs;
+      for (const [documentIndex, document] of documents.entries()) {
         params.signal?.throwIfAborted();
-        await client.openDocument({
-          uri: document.uri,
-          languageId: document.languageId ?? "plaintext",
-          version: 1,
-          text: document.text,
-        });
+        if (Date.now() >= documentCollectionDeadline) {
+          markRemainingLspDocumentsSkipped(
+            documents,
+            documentIndex,
+            documentFailures,
+            "documentSymbol skipped after collection timeout",
+          );
+          break;
+        }
+        try {
+          await client.openDocument({
+            uri: document.uri,
+            languageId: document.languageId ?? "plaintext",
+            version: 1,
+            text: document.text,
+          });
+        } catch (error) {
+          const message = `openDocument failed: ${errorMessage(error)}`;
+          document.symbolError = message;
+          document.symbols = [];
+          document.diagnostics = [];
+          documentFailures.push(`${document.relPath}: ${message}`);
+          if (documentFailures.length >= documentSymbolFailureLimit) {
+            markRemainingLspDocumentsSkipped(
+              documents,
+              documentIndex + 1,
+              documentFailures,
+              "documentSymbol skipped after failure limit",
+            );
+            break;
+          }
+          continue;
+        }
         if (canCollectSymbols) {
-          document.symbols =
-            (await client.documentSymbol(
-              { textDocument: { uri: document.uri } },
-              params.config.semanticEnrichment?.timeoutMs,
-            )) ?? [];
+          try {
+            document.symbols =
+              (await client.documentSymbol(
+                { textDocument: { uri: document.uri } },
+                documentSymbolTimeoutMs,
+              )) ?? [];
+          } catch (error) {
+            const message = `documentSymbol failed: ${errorMessage(error)}`;
+            document.symbolError = message;
+            document.symbols = [];
+            documentFailures.push(`${document.relPath}: ${message}`);
+            if (documentFailures.length >= documentSymbolFailureLimit) {
+              markRemainingLspDocumentsSkipped(
+                documents,
+                documentIndex + 1,
+                documentFailures,
+                "documentSymbol skipped after failure limit",
+              );
+              break;
+            }
+          }
+        }
+        if (Date.now() >= documentCollectionDeadline) {
+          markRemainingLspDocumentsSkipped(
+            documents,
+            documentIndex + 1,
+            documentFailures,
+            "documentSymbol skipped after collection timeout",
+          );
+          break;
         }
         document.diagnostics = await collectLspProviderDiagnostics({
           client,
           uri: document.uri,
-          timeoutMs: params.config.semanticEnrichment?.timeoutMs,
+          timeoutMs: diagnosticsTimeoutMs,
         });
       }
       appendProviderFactSet(
@@ -655,6 +724,10 @@ export async function executeProviderFirstLspFull(
             status: "succeeded",
             startedAt: serverStartedAt,
             finishedAt: new Date().toISOString(),
+            errorMessage:
+              documentFailures.length > 0
+                ? summarizeLspDocumentFailures(documentFailures)
+                : undefined,
           },
         }),
       );
@@ -2092,4 +2165,29 @@ function appendMany<T>(target: T[], source: readonly T[]): void {
   for (const item of source) {
     target.push(item);
   }
+}
+
+function markRemainingLspDocumentsSkipped(
+  documents: CollectedLspProviderDocument[],
+  startIndex: number,
+  failures: string[],
+  message: string,
+): void {
+  for (const document of documents.slice(startIndex)) {
+    document.symbolError = message;
+    document.symbols = [];
+    document.diagnostics = [];
+    failures.push(`${document.relPath}: ${message}`);
+  }
+}
+
+function summarizeLspDocumentFailures(failures: readonly string[]): string {
+  const sample = failures.slice(0, 5).join("; ");
+  const omitted = failures.length - Math.min(failures.length, 5);
+  const suffix = omitted > 0 ? `; ${omitted} more` : "";
+  return `LSP document collection failed for ${failures.length} document(s): ${sample}${suffix}`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
