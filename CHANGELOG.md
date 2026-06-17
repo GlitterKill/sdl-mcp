@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.8] - Unreleased
+
+### Added
+
+### Changed
+
+### Fixed
+
+## [0.11.7] - 2026-06-17
+
+### Added
+
+- **Provider-first LSP indexing**: Added provider-first LSP execution, normalization, lazy language-pack loading, and validation coverage across the wave 0, wave 1, and wave 2 provider set, including Dart, Elixir, F#, Fortran, Groovy, Haskell, Lua, Perl, PowerShell, R, Ruby, and Swift.
+- **PHP and shell provider coverage**: Extended provider-first coverage to PHP and shell adapters so those languages participate in the same language-provider support inventory and validation path.
+- **Language provider inventory**: Added a generated language-provider support report and checker script so documented provider, parser, and fallback support stays synchronized with the package surface.
+
+### Changed
+
+- **README and provider docs**: Replaced README Mermaid diagrams with optimized image assets and refreshed provider-first indexing, SCIP, configuration, tool, and semantic documentation for the expanded provider-first language support.
+- **Dependency coverage**: Updated OpenTelemetry trace packages to 2.8.0 and added missing tree-sitter grammar package coverage required by the release guard.
+
+### Fixed
+
+- **LSP client robustness**: Handled dynamic LSP client registration requests and hardened request timeout handling so provider-first LSP runs behave predictably with slower or capability-negotiating servers.
+- **Provider normalization edge cases**: Normalized JVM constructor/type references and scip-dotnet descriptors, and tightened shadow CSV quoting so provider-first materialization handles .NET and JVM edge cases.
+- **Release guardrails**: Tightened release regressions around grammar availability and provider-first language coverage so missing runtime support is caught before publishing.
+
+_21 commits from 1 contributor_
+
 ## [0.11.6] - 2026-06-15
 
 ### Fixed
