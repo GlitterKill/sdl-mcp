@@ -139,6 +139,9 @@ export interface WatcherHealthTelemetryEvent {
   repoId: RepoId;
   enabled: boolean;
   running: boolean;
+  provider?: "watchman" | "chokidar" | "fsWatch" | null;
+  configuredProvider?: "auto" | "watchman" | "chokidar" | "fsWatch";
+  fallbackReason?: string | null;
   stale: boolean;
   errors: number;
   queueDepth: number;
@@ -146,6 +149,14 @@ export interface WatcherHealthTelemetryEvent {
   eventsProcessed: number;
   /** Cumulative restarts since service start. */
   restartCount?: number;
+  watchmanVersion?: string;
+  watchmanWarningCount?: number;
+  watchmanWarnings?: string[];
+  watchmanRecrawlCount?: number;
+  watchmanFreshInstanceCount?: number;
+  watchmanWatchRoot?: string;
+  watchmanRelativePath?: string | null;
+  watchmanLastClock?: string | null;
 }
 
 export interface EdgeResolutionTelemetryEvent {

@@ -94,6 +94,7 @@
         "diagnosticsTimeoutMs": 5000
       }
     },
+    "watchProvider": "auto",
     "concurrency": 8,
     "enableFileWatching": true,
     "maxWatchedFiles": 25000,

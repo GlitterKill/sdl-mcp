@@ -382,8 +382,19 @@ same counters grouped by tool name.
 | `score`             | number 0–100 | Composite health score (matches `repo.status.healthScore`).                                              |
 | `components`        | object       | Individual contributors 0–1 each: `freshness`, `coverage`, `errorRate`, `edgeQuality`, `callResolution`. |
 | `watcherRunning`    | boolean      | True when the file watcher loop is alive.                                                                |
+| `watcherProvider`   | string \| null | Active watcher provider: `watchman`, `chokidar`, `fsWatch`, or null before startup.                    |
+| `watcherConfiguredProvider` | string \| null | Configured provider policy, usually `auto`.                                                   |
+| `watcherFallbackReason` | string \| null | Reason `auto` skipped a preferred provider.                                                       |
 | `watcherQueueDepth` | number       | Pending watcher events. Sustained nonzero depth = watcher saturating.                                    |
 | `watcherStale`      | boolean      | True when the watcher reports it has not made forward progress.                                          |
+| `watcherWatchmanWarningCount` | number | Watchman warnings observed since service start.                                                   |
+| `watcherWatchmanWarnings` | string[] | Recent Watchman warning messages retained for operator diagnostics.                                |
+| `watcherWatchmanVersion` | string | Watchman service version when reported.                                                            |
+| `watcherWatchmanWatchRoot` | string | Watchman root selected by `watch-project`.                                                       |
+| `watcherWatchmanRelativePath` | string \| null | Watchman relative root selected by `watch-project`, if any.                             |
+| `watcherWatchmanLastClock` | string \| null | Last Watchman clock token observed from `clock` or subscription events.                  |
+| `watcherWatchmanRecrawlCount` | number | Watchman recrawl warnings observed since service start.                                           |
+| `watcherWatchmanFreshInstanceCount` | number | Watchman fresh-instance resync boundaries observed since service start.                        |
 
 ### `latency: LatencyMetrics`
 

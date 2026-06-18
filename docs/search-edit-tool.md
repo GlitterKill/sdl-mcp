@@ -349,8 +349,8 @@ handle remains usable only after producing a fresh preview.
   and the failing file is reported with `status: "failed"`.
 - Live-index sync failures do **not** trigger rollback. They are
   surfaced as `indexUpdate.applied = false` with an error message,
-  matching current `file.write` behavior. Chokidar + periodic
-  `index.refresh` eventually reconcile.
+  matching current `file.write` behavior. The configured file watcher
+  provider plus periodic `index.refresh` eventually reconcile.
 - Backups are cleaned up after a fully successful batch.
 
 ## Limits and deny-list

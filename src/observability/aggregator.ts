@@ -258,10 +258,21 @@ export class Aggregator {
 
   // ----- watcher / health -----
   private watcherRunning = false;
+  private watcherProvider: string | null = null;
+  private watcherConfiguredProvider: string | null = null;
+  private watcherFallbackReason: string | null = null;
   private watcherErrors = 0;
   private watcherRestartCount = 0;
   private watcherQueueDepth = 0;
   private watcherStale = false;
+  private watcherWatchmanWarningCount = 0;
+  private watcherWatchmanWarnings: string[] = [];
+  private watcherWatchmanVersion: string | undefined;
+  private watcherWatchmanWatchRoot: string | undefined;
+  private watcherWatchmanRelativePath: string | null | undefined;
+  private watcherWatchmanLastClock: string | null | undefined;
+  private watcherWatchmanRecrawlCount = 0;
+  private watcherWatchmanFreshInstanceCount = 0;
   private healthScore = 0;
   private healthComponents: HealthMetrics["components"] = {
     freshness: 0,
@@ -732,6 +743,11 @@ export class Aggregator {
       stale?: boolean;
     };
     if (typeof evt.running === "boolean") this.watcherRunning = evt.running;
+    if ("provider" in evt) this.watcherProvider = evt.provider ?? null;
+    if ("configuredProvider" in evt)
+      this.watcherConfiguredProvider = evt.configuredProvider ?? null;
+    if ("fallbackReason" in evt)
+      this.watcherFallbackReason = evt.fallbackReason ?? null;
     if (typeof evt.errors === "number" && Number.isFinite(evt.errors))
       this.watcherErrors = evt.errors;
     if (
@@ -742,6 +758,32 @@ export class Aggregator {
     if (typeof evt.queueDepth === "number")
       this.watcherQueueDepth = evt.queueDepth;
     if (typeof evt.stale === "boolean") this.watcherStale = evt.stale;
+    if (
+      typeof evt.watchmanWarningCount === "number" &&
+      Number.isFinite(evt.watchmanWarningCount)
+    )
+      this.watcherWatchmanWarningCount = evt.watchmanWarningCount;
+    if (Array.isArray(evt.watchmanWarnings))
+      this.watcherWatchmanWarnings = evt.watchmanWarnings.slice(0, 5);
+    if (typeof evt.watchmanVersion === "string")
+      this.watcherWatchmanVersion = evt.watchmanVersion;
+    if (typeof evt.watchmanWatchRoot === "string")
+      this.watcherWatchmanWatchRoot = evt.watchmanWatchRoot;
+    if ("watchmanRelativePath" in evt)
+      this.watcherWatchmanRelativePath = evt.watchmanRelativePath;
+    if ("watchmanLastClock" in evt)
+      this.watcherWatchmanLastClock = evt.watchmanLastClock;
+    if (
+      typeof evt.watchmanRecrawlCount === "number" &&
+      Number.isFinite(evt.watchmanRecrawlCount)
+    )
+      this.watcherWatchmanRecrawlCount = evt.watchmanRecrawlCount;
+    if (
+      typeof evt.watchmanFreshInstanceCount === "number" &&
+      Number.isFinite(evt.watchmanFreshInstanceCount)
+    )
+      this.watcherWatchmanFreshInstanceCount =
+        evt.watchmanFreshInstanceCount;
   }
 
   recordEdgeResolution(_event: EdgeResolutionTelemetryEvent): void {
@@ -1342,10 +1384,21 @@ export class Aggregator {
       score: this.healthScore,
       components: this.healthComponents,
       watcherRunning: this.watcherRunning,
+      watcherProvider: this.watcherProvider,
+      watcherConfiguredProvider: this.watcherConfiguredProvider,
+      watcherFallbackReason: this.watcherFallbackReason,
       watcherErrors: this.watcherErrors,
       watcherRestartCount: this.watcherRestartCount,
       watcherQueueDepth: this.watcherQueueDepth,
       watcherStale: this.watcherStale,
+      watcherWatchmanWarningCount: this.watcherWatchmanWarningCount,
+      watcherWatchmanWarnings: this.watcherWatchmanWarnings,
+      watcherWatchmanVersion: this.watcherWatchmanVersion,
+      watcherWatchmanWatchRoot: this.watcherWatchmanWatchRoot,
+      watcherWatchmanRelativePath: this.watcherWatchmanRelativePath,
+      watcherWatchmanLastClock: this.watcherWatchmanLastClock,
+      watcherWatchmanRecrawlCount: this.watcherWatchmanRecrawlCount,
+      watcherWatchmanFreshInstanceCount: this.watcherWatchmanFreshInstanceCount,
     };
   }
 

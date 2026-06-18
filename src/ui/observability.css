@@ -856,6 +856,16 @@ input:focus {
   font-size: 0.78rem;
 }
 
+.mono-row {
+  margin-top: 0.45rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
 table.layer-breakdown,
 table.per-encoder {
   width: 100%;

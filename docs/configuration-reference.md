@@ -245,12 +245,13 @@ If you set `budgetCaps`, provide both `maxCards` and `maxEstimatedTokens`.
 | `providerFirst.lsp.diagnosticsLimit` | `number` | `5000` | `0-100000`. Maximum diagnostics captured from one LSP provider run. |
 | `providerFirst.lsp.diagnosticsTimeoutMs` | `number` | `5000` | `500-300000`. Per-file timeout for LSP diagnostic pulls. |
 | Provider-first fallback diagnostics | CLI output | Always on for provider-first fallback runs | Prints fallback counts, phase buckets, subphase timings, and bounded sample paths when same-run legacy fallback parses uncovered or provider-unusable files. |
+| `watchProvider` | `"auto" \| "watchman" \| "chokidar" \| "fsWatch"` | `"auto"` | File watcher event source. `auto` tries Watchman, then Chokidar, then Node `fs.watch`. Explicit providers fail visibly when unavailable instead of silently falling back. |
 | `concurrency` | `number` | `8` | `1-32`. General indexing concurrency. |
 | `enableFileWatching` | `boolean` | `true` | Usually disable in CI. |
-| `maxWatchedFiles` | `number` | `25000` | Hard guard for watcher scale. |
+| `maxWatchedFiles` | `number` | `25000` | Hard guard for watcher scale. Applies to Watchman, Chokidar, and `fs.watch` startup. |
 | `workerPoolSize` | `number` | `4` | Tree-sitter worker pool size. |
-| `engine` | `"auto" \| "ts" \| "rust"` | `"auto"` | Pass-1 engine preference. `auto` uses the native addon when available and falls back to TypeScript. |
-| `watchDebounceMs` | `number` | `500` | Debounce window for file-watch refreshes. |
+| `engine` | `"typescript" \| "rust"` | `"rust"` | Pass-1 engine preference. Use `typescript` to force the TypeScript path when the native addon is not desired. |
+| `watchDebounceMs` | `number` | `300` | Debounce window for file-watch refreshes. |
 | `pass2Concurrency` | `number` | `1` | `1-16`. Files resolved in parallel during pass-2. |
 | `algorithmRefresh.enabled` | `boolean` | `true` | Master toggle for optional PageRank/K-core/Louvain enrichment. Canonical clusters and process traces still run when false. |
 | `algorithmRefresh.pageRank.enabled` | `boolean` | `true` | Computes PageRank over the in-memory symbol/call graph and writes centrality before Louvain starts. |
@@ -270,6 +271,15 @@ Use [Provider-First Indexing](./feature-deep-dives/provider-first-indexing.md) f
 - **Fallback caps:** keep `maxLegacyFallbackFiles` high for complete full builds. Lower it only for partial iteration or resource protection. `maxSemanticEligibleFallbackFiles` is opt-in because parsing a semantic subset does not unblock shadow activation when the outside-semantic tail is skipped.
 - **Fallback diagnostics:** complete provider-first fallback uses the tuned legacy pass-1 engines, parser workers, normal concurrency, and batch persistence. Intentionally partial fallback stays on inline TypeScript parsing and direct per-file LadybugDB writes because activation is already blocked and the mixed partial path has hit worker/native exits on large C++ repos.
 - **LSP caps:** LSP remains bounded. SDL-MCP collects configured LSP facts; it does not install language servers or run package-manager setup recipes.
+
+### File watcher providers
+
+SDL-MCP keeps the downstream live-index path unchanged for every provider: provider events normalize to repo-relative paths, pass through SDL ignore/extension guards, and then use the existing saved-file patch path with repo-wide incremental indexing as the fallback.
+
+- `auto` is the recommended default. It selects Watchman when available and healthy, falls back to Chokidar when Watchman cannot start, and uses Node `fs.watch` as the last-resort zero-install provider.
+- `watchman`, `chokidar`, and `fsWatch` are authoritative settings. If the configured provider cannot start, SDL-MCP reports an actionable watcher failure rather than silently switching to another provider.
+- Watchman fresh-instance and recrawl signals are treated as uncertain boundaries. SDL-MCP marks watcher health stale and schedules one bounded repo-wide incremental refresh instead of treating every file in the notification as precise.
+- SDL-MCP does not write `.watchmanconfig` into repositories. Add one manually only when you want Watchman-level ignored-directory optimization in addition to SDL's canonical ignore filtering.
 
 ## `liveIndex`
 

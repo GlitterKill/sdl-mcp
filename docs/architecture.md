@@ -86,7 +86,7 @@ flowchart TD
 3. ensureConfiguredReposRegistered()     Bootstrap repos into graph
 4. getDefaultLiveIndexCoordinator()      Singleton overlay service
 5. registerTools(server, services)       Wire discovery/info tools plus flat, gateway, and/or code-mode tools
-6. setupFileWatchers()                   chokidar for incremental re-index
+6. setupFileWatchers()                   Watchman -> Chokidar -> fs.watch incremental re-index
 7. ShutdownManager.register(callbacks)   Graceful cleanup handlers
 8. server.start()                        Begin accepting MCP requests
 ```

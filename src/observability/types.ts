@@ -161,6 +161,12 @@ export interface HealthMetrics {
   };
   /** Watcher running flag. */
   watcherRunning: boolean;
+  /** Active watcher provider, if one has started. */
+  watcherProvider?: string | null;
+  /** Configured watcher provider policy. */
+  watcherConfiguredProvider?: string | null;
+  /** Provider fallback reason when auto skipped a preferred provider. */
+  watcherFallbackReason?: string | null;
   /** Watcher event queue depth. */
   watcherQueueDepth: number;
   /** True when watcher is reporting stale state. */
@@ -169,6 +175,22 @@ export interface HealthMetrics {
   watcherErrors: number;
   /** Cumulative watcher restart count observed since service start. */
   watcherRestartCount: number;
+  /** Count of Watchman warnings observed since service start. */
+  watcherWatchmanWarningCount?: number;
+  /** Recent Watchman warning messages. */
+  watcherWatchmanWarnings?: string[];
+  /** Watchman service version reported by the client. */
+  watcherWatchmanVersion?: string;
+  /** Watchman watch root selected by watch-project. */
+  watcherWatchmanWatchRoot?: string;
+  /** Watchman relative path selected by watch-project, if any. */
+  watcherWatchmanRelativePath?: string | null;
+  /** Last Watchman clock value observed. */
+  watcherWatchmanLastClock?: string | null;
+  /** Count of Watchman recrawl warnings observed since service start. */
+  watcherWatchmanRecrawlCount?: number;
+  /** Count of Watchman fresh-instance boundaries observed since service start. */
+  watcherWatchmanFreshInstanceCount?: number;
 }
 
 export interface LatencyMetrics {

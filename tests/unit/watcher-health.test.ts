@@ -141,7 +141,15 @@ describe("watcher health", () => {
   });
 
   it("getWatcherHealth returns a snapshot (not a live reference)", () => {
-    _setWatcherHealthForTesting(TEST_REPO_ID, { errors: 0, stale: false });
+    _setWatcherHealthForTesting(TEST_REPO_ID, {
+      errors: 0,
+      stale: false,
+      provider: "watchman",
+      configuredProvider: "auto",
+      fallbackReason: null,
+      watchmanWarnings: ["initial warning"],
+      watchmanWarningCount: 1,
+    });
 
     const snapshot = getWatcherHealth(TEST_REPO_ID);
     assert.ok(snapshot !== null);
@@ -155,6 +163,80 @@ describe("watcher health", () => {
       0,
       "snapshot should not reflect subsequent mutations",
     );
+    assert.deepStrictEqual(
+      snapshot!.watchmanWarnings,
+      ["initial warning"],
+      "watchman warning snapshots should not share live arrays",
+    );
+  });
+
+  it("repo status schema accepts watcher provider diagnostics", () => {
+    const parsed = RepoStatusResponseSchema.parse({
+      repoId: "test-repo",
+      rootPath: "/tmp/test",
+      latestVersionId: "v1",
+      filesIndexed: 0,
+      symbolsIndexed: 0,
+      lastIndexedAt: null,
+      healthScore: 100,
+      healthComponents: {
+        freshness: 1,
+        coverage: 1,
+        errorRate: 1,
+        edgeQuality: 1,
+      },
+      healthAvailable: true,
+      watcherHealth: {
+        enabled: true,
+        running: true,
+        filesWatched: 10,
+        eventsReceived: 2,
+        eventsProcessed: 2,
+        errors: 0,
+        queueDepth: 0,
+        restartCount: 0,
+        stale: false,
+        lastEventAt: "2026-06-18T00:00:00.000Z",
+        lastSuccessfulReindexAt: "2026-06-18T00:00:01.000Z",
+        provider: "watchman",
+        configuredProvider: "auto",
+        fallbackReason: null,
+        watchmanVersion: "2026.06.16.00",
+        watchmanWarningCount: 1,
+        watchmanWarnings: ["recrawl warning"],
+        watchmanRecrawlCount: 1,
+        watchmanFreshInstanceCount: 1,
+        watchmanWatchRoot: "/tmp/test",
+        watchmanRelativePath: null,
+        watchmanLastClock: "c:1700000000:1:1",
+      },
+      prefetchStats: {
+        enabled: false,
+        queueDepth: 0,
+        running: false,
+        completed: 0,
+        cancelled: 0,
+        cacheHits: 0,
+        cacheMisses: 0,
+        wastedPrefetch: 0,
+        hitRate: 0,
+        wasteRate: 0,
+        avgLatencyReductionMs: 0,
+        lastRunAt: null,
+        modelEnabled: true,
+        strategyMetrics: [],
+        deterministicFallback: false,
+        policyMode: "disabled",
+        outcomeSamples: 0,
+        suppressedPrefetch: 0,
+        acceptedPrefetch: 0,
+        topStrategies: [],
+      },
+    });
+
+    assert.equal(parsed.watcherHealth?.provider, "watchman");
+    assert.equal(parsed.watcherHealth?.configuredProvider, "auto");
+    assert.equal(parsed.watcherHealth?.watchmanRecrawlCount, 1);
   });
 
   it("does not consider an idle watcher stale before any events are received", () => {

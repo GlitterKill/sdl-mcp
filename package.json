@@ -133,6 +133,7 @@
   },
   "optionalDependencies": {
     "chokidar": "^5.0.0",
+    "fb-watchman": "^2.0.2",
     "kuzu": "npm:@ladybugdb/core@0.16.0",
     "onnxruntime-node": "^1.24.3",
     "sdl-mcp-native": "0.11.7",
@@ -143,6 +144,7 @@
     "@napi-rs/cli": "^2.18.0",
     "@opentelemetry/sdk-trace-web": "^2.8.0",
     "@stryker-mutator/core": "^9.6.0",
+    "@types/fb-watchman": "^2.0.6",
     "@types/node": "^24.0.0",
     "eslint": "^10.1.0",
     "eslint-plugin-import-x": "^4.16.2",

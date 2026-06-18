@@ -1835,6 +1835,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
           diagnosticsTimeoutMs: 5_000,
         },
       },
+      watchProvider: "auto" as const,
       concurrency: DEFAULT_INDEXING_CONCURRENCY,
       enableFileWatching: true,
       maxWatchedFiles: WATCHER_DEFAULT_MAX_WATCHED_FILES,

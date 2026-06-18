@@ -121,6 +121,7 @@
   "indexing": {
     "concurrency": 4,
     "enableFileWatching": true,
+    "watchProvider": "auto",
     "maxWatchedFiles": 25000
   },
   "slice": {

@@ -230,7 +230,7 @@ After the initial full index, subsequent runs use incremental mode:
 3. **Targeted pass-2** — only affected call edges are re-resolved
 4. **Version bumping** — a new ledger version is created
 
-File watching (`chokidar`) can trigger incremental re-indexing automatically when files change on disk.
+File watching can trigger incremental re-indexing automatically when files change on disk. The default provider policy tries Watchman first, then Chokidar, then Node `fs.watch`; every provider still feeds SDL's saved-file change pipeline with normalized repo-relative paths.
 
 ---
 

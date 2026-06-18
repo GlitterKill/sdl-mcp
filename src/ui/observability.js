@@ -445,10 +445,44 @@ function updateHealth(h) {
     sort: false,
   });
   setVal(panel, "watcherRunning", h.watcherRunning ? "ON" : "OFF");
+  setVal(panel, "watcherProvider", h.watcherProvider || "—");
+  setVal(panel, "watcherConfiguredProvider", h.watcherConfiguredProvider || "—");
   setVal(panel, "watcherErrors", fmtNum(h.watcherErrors ?? 0));
   setVal(panel, "watcherRestartCount", fmtNum(h.watcherRestartCount ?? 0));
   setVal(panel, "watcherQueueDepth", fmtNum(h.watcherQueueDepth));
   setVal(panel, "watcherStale", h.watcherStale ? "STALE" : "FRESH");
+  setVal(
+    panel,
+    "watcherWatchmanWarningCount",
+    fmtNum(h.watcherWatchmanWarningCount ?? 0),
+  );
+  setVal(
+    panel,
+    "watcherWatchmanRecrawlCount",
+    fmtNum(h.watcherWatchmanRecrawlCount ?? 0),
+  );
+  setVal(
+    panel,
+    "watcherWatchmanFreshInstanceCount",
+    fmtNum(h.watcherWatchmanFreshInstanceCount ?? 0),
+  );
+  setVal(panel, "watcherWatchmanVersion", h.watcherWatchmanVersion || "—");
+  setVal(panel, "watcherWatchmanLastClock", h.watcherWatchmanLastClock || "—");
+  const watchRoot = h.watcherWatchmanWatchRoot
+    ? `watch ${h.watcherWatchmanWatchRoot}${
+        h.watcherWatchmanRelativePath
+          ? ` / ${h.watcherWatchmanRelativePath}`
+          : ""
+      }`
+    : "—";
+  const watchmanWarnings =
+    Array.isArray(h.watcherWatchmanWarnings) &&
+    h.watcherWatchmanWarnings.length > 0
+      ? `wm warnings ${h.watcherWatchmanWarnings.join(" | ")}`
+      : "—";
+  setVal(panel, "watcherWatchmanRoot", watchRoot);
+  setVal(panel, "watcherWatchmanWarnings", watchmanWarnings);
+  setVal(panel, "watcherFallbackReason", h.watcherFallbackReason || "—");
 }
 
 function updateLatency(l) {

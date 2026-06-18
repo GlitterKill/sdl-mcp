@@ -185,10 +185,33 @@ sdl-mcp serve --no-watch
 
 Then run manual refreshes with `sdl-mcp index` until the underlying issue is fixed.
 
-SDL-MCP applies repository `ignore` globs during watcher startup, not only after
-events arrive. Dependency-heavy package managers such as Bun should normally be
-covered by the default `**/node_modules/**` ignore; add repo-specific `ignore`
-entries only for generated directories that live outside those defaults.
+The default provider policy is `indexing.watchProvider: "auto"`, which tries
+Watchman, then Chokidar, then Node `fs.watch`. Set `watchProvider` explicitly
+only when you want startup to fail visibly if that provider is unavailable. In
+`auto`, Watchman startup/runtime failures are recorded in `watcherHealth` as a
+fallback reason before SDL-MCP switches to the next provider.
+
+Chokidar applies repository `ignore` globs during watcher startup. Watchman
+subscribes with source-file suffix filters and then applies SDL's canonical
+ignore/extension guards as events arrive. Dependency-heavy package managers
+such as Bun should normally be covered by the default `**/node_modules/**`
+ignore; add repo-specific `ignore` entries only for generated directories that
+live outside those defaults.
+
+#### Watchman recrawls or fresh instances
+
+- Symptom: `watcherHealth.provider` is `watchman` and Watchman warning,
+  recrawl, or fresh-instance counters increase.
+- Cause: Watchman lost a precise event boundary and sent a conservative resync
+  notification.
+- Resolution:
+  - let SDL-MCP run the scheduled incremental refresh; it intentionally avoids
+    treating every Watchman file in that notification as a precise saved-file
+    patch
+  - inspect Watchman logs if recrawls repeat frequently
+  - add a repo-owned `.watchmanconfig` with ignored generated directories only
+    if you want Watchman to prune them at the OS watcher layer; SDL-MCP does not
+    create or modify `.watchmanconfig`
 
 #### Windows: antivirus/endpoint locks
 

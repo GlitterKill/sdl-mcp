@@ -912,6 +912,9 @@ export interface HealthComponents {
 export interface WatcherHealth {
   enabled: boolean;
   running: boolean;
+  provider: "watchman" | "chokidar" | "fsWatch" | null;
+  configuredProvider: "auto" | "watchman" | "chokidar" | "fsWatch";
+  fallbackReason: string | null;
   filesWatched: number;
   eventsReceived: number;
   eventsProcessed: number;
@@ -921,6 +924,14 @@ export interface WatcherHealth {
   stale: boolean;
   lastEventAt: string | null;
   lastSuccessfulReindexAt: string | null;
+  watchmanVersion?: string;
+  watchmanWarningCount?: number;
+  watchmanWarnings?: string[];
+  watchmanRecrawlCount?: number;
+  watchmanFreshInstanceCount?: number;
+  watchmanWatchRoot?: string;
+  watchmanRelativePath?: string | null;
+  watchmanLastClock?: string | null;
 }
 
 // ============================================================================

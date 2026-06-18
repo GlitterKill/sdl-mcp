@@ -90,6 +90,15 @@ describe("provider-first indexing foundation", () => {
     assert.equal(config.providerFirst.maxSemanticEligibleFallbackFiles, 0);
     assert.equal(config.providerFirst.lsp.mode, "primaryWithCaps");
     assert.equal(config.algorithmRefresh.louvain.maxCallEdges, 10_000);
+    assert.equal(config.watchProvider, "auto");
+  });
+
+  it("validates watcher provider configuration", () => {
+    for (const watchProvider of ["auto", "watchman", "chokidar", "fsWatch"] as const) {
+      assert.equal(IndexingConfigSchema.parse({ watchProvider }).watchProvider, watchProvider);
+    }
+
+    assert.throws(() => IndexingConfigSchema.parse({ watchProvider: "native" }));
   });
 
   it("keeps provider-first same-run legacy fallback complete by default", () => {

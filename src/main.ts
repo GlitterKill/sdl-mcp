@@ -122,10 +122,32 @@ async function main(): Promise<void> {
           try {
             log("Starting file watchers...");
             const { watchRepository } = await import("./indexer/indexer.js");
-            const handles = await Promise.all(
-              config.repos.map((repo) => watchRepository(repo.repoId)),
+            const results = await Promise.allSettled(
+              config.repos.map(async (repo) => {
+                try {
+                  return {
+                    repoId: repo.repoId,
+                    handle: await watchRepository(repo.repoId),
+                  };
+                } catch (error) {
+                  const msg =
+                    error instanceof Error ? error.message : String(error);
+                  throw new Error(`[${repo.repoId}] ${msg}`);
+                }
+              }),
             );
-            watchers.push(...handles);
+
+            for (const result of results) {
+              if (result.status === "fulfilled") {
+                watchers.push(result.value.handle);
+              } else {
+                process.stderr.write(
+                  `[sdl-mcp] Failed to start watcher: ${String(
+                    result.reason,
+                  )}\n`,
+                );
+              }
+            }
             log(`File watchers started for ${watchers.length} repo(s).`);
           } catch (error) {
             process.stderr.write(

@@ -121,7 +121,7 @@ Get status for one repository including latest version, indexed files/symbols, t
 
 - `repoId`, `rootPath`, `latestVersionId`, `filesIndexed`, `symbolsIndexed`, `lastIndexedAt`
 - `healthScore` (0-100), `healthComponents` (freshness, coverage, errorRate, edgeQuality, callResolution), `healthAvailable`
-- `watcherHealth` (nullable) — runtime telemetry: enabled, running, filesWatched, eventsReceived/Processed, errors, queueDepth, restartCount, stale, lastEventAt, lastSuccessfulReindexAt
+- `watcherHealth` (nullable) — runtime telemetry: provider/configuredProvider/fallbackReason, enabled/running state, filesWatched, eventsReceived/Processed, errors, queueDepth, restartCount, stale timestamps, and Watchman warning/recrawl/fresh-instance diagnostics when Watchman is active or was attempted
 - `prefetchStats` — queue depth, hit/waste rates, latency reduction, last run
 - `liveIndexStatus` — live buffer overlay state: enabled, pendingBuffers, dirtyBuffers, parseQueueDepth, checkpointPending, reconcileQueueDepth, etc.
 - `derivedState` — derived-state freshness: stale flag, dirty cluster/process/algorithm/summary/embedding flags, target/computed version ids, `lastError` when recomputation failed, and `nextBestAction` when recovery is needed. Current index refreshes compute derived state inline; server startup still scans stale persisted rows from older interrupted runs and can enqueue background recovery.

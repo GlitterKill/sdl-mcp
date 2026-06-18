@@ -405,6 +405,12 @@
             }
           }
         },
+        "watchProvider": {
+          "type": "string",
+          "description": "File watcher event source. auto tries Watchman, then Chokidar, then fs.watch. Explicit providers fail visibly when unavailable.",
+          "enum": ["auto", "watchman", "chokidar", "fsWatch"],
+          "default": "auto"
+        },
         "concurrency": {
           "type": "integer",
           "description": "Number of concurrent indexing workers",
@@ -519,6 +525,7 @@
             "diagnosticsTimeoutMs": 5000
           }
         },
+        "watchProvider": "auto",
         "concurrency": 8,
         "enableFileWatching": true,
         "maxWatchedFiles": 25000,

@@ -580,11 +580,23 @@ export async function handleRepoStatus(
         repoId,
         enabled: watcherHealth.enabled,
         running: watcherHealth.running,
+        provider: watcherHealth.provider,
+        configuredProvider: watcherHealth.configuredProvider,
+        fallbackReason: watcherHealth.fallbackReason,
         stale: watcherHealth.stale,
         errors: watcherHealth.errors,
         queueDepth: watcherHealth.queueDepth,
         eventsReceived: watcherHealth.eventsReceived,
         eventsProcessed: watcherHealth.eventsProcessed,
+        restartCount: watcherHealth.restartCount,
+        watchmanVersion: watcherHealth.watchmanVersion,
+        watchmanWarningCount: watcherHealth.watchmanWarningCount,
+        watchmanWarnings: watcherHealth.watchmanWarnings,
+        watchmanRecrawlCount: watcherHealth.watchmanRecrawlCount,
+        watchmanFreshInstanceCount: watcherHealth.watchmanFreshInstanceCount,
+        watchmanWatchRoot: watcherHealth.watchmanWatchRoot,
+        watchmanRelativePath: watcherHealth.watchmanRelativePath,
+        watchmanLastClock: watcherHealth.watchmanLastClock,
       });
     }
     if (prefetchStats) {

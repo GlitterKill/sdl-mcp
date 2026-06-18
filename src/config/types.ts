@@ -246,6 +246,13 @@ export const IndexingPipelineSchema = z.enum([
   "auto",
 ]);
 
+export const WatchProviderSchema = z.enum([
+  "auto",
+  "watchman",
+  "chokidar",
+  "fsWatch",
+]);
+
 export const ProviderFirstLspIndexingConfigSchema = z
   .object({
     mode: z.enum(["primaryWithCaps"]).default("primaryWithCaps"),
@@ -331,6 +338,7 @@ export const ProviderFirstIndexingConfigSchema = z
 export const IndexingConfigSchema = z.object({
   pipeline: IndexingPipelineSchema.default("auto"),
   providerFirst: ProviderFirstIndexingConfigSchema,
+  watchProvider: WatchProviderSchema.default("auto"),
   concurrency: z
     .number()
     .int()
@@ -363,6 +371,7 @@ export const IndexingConfigSchema = z.object({
 });
 
 export type IndexingPipeline = z.infer<typeof IndexingPipelineSchema>;
+export type WatchProvider = z.infer<typeof WatchProviderSchema>;
 export type ProviderFirstLspIndexingConfig = z.infer<
   typeof ProviderFirstLspIndexingConfigSchema
 >;
