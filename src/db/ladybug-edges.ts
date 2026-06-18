@@ -618,13 +618,12 @@ export async function insertEdges(
         }
         if (!options?.skipExistingRelationshipUpdate) {
           // 3: refresh mutable props on existing rels (preserves createdAt).
-          // The WHERE guard prevents pass-2 (heuristic, confidence ~0.7-0.85)
-          // from overwriting SCIP-written exact edges (resolution: "exact",
-          // confidence: 0.95). Pass-2 now runs AFTER SCIP ingest, so without
-          // the guard every pass-2 file would clobber SCIP exact edges on
-          // shared (from, to, edgeType) triples. The OR clause keeps an
-          // upgrade path open if a future row carries higher confidence
-          // than the existing exact edge.
+          // The WHERE guard prevents lower-confidence rows from overwriting
+          // provider-written exact edges (resolution: "exact", confidence
+          // 0.95). This still matters for provider-first same-run legacy
+          // fallback when pass 2 sees triples already materialized from
+          // provider facts. The OR clause keeps an upgrade path open if a
+          // future row carries higher confidence than the existing exact edge.
           await measurePhase("relationshipUpdate", async () =>
             exec(
               txConn,

@@ -26,11 +26,11 @@ SDL-MCP's default indexer uses tree-sitter to extract symbols and infer dependen
 - **Interface implementations are not tracked.** Tree-sitter cannot determine that `MyService` implements `IService` without type information.
 - **Barrel re-exports require guesswork.** The pass-2 resolver handles many cases, but complex re-export chains can defeat heuristic resolution.
 
-SCIP supplements tree-sitter with exact compiler knowledge. After ingesting a SCIP index, SDL-MCP upgrades heuristic edges to compiler-verified edges, adds external dependency symbols as first-class graph nodes, and creates new relationship edges (like `implements`) that tree-sitter cannot discover.
+SCIP supplements tree-sitter with exact compiler knowledge. Provider-first indexing materializes SCIP facts, upgrades heuristic edges to compiler-verified edges, adds external dependency symbols as first-class graph nodes, and creates new relationship edges (like `implements`) that tree-sitter cannot discover.
 
 **Tree-sitter and SCIP are complementary.** Tree-sitter provides the structural backbone (symbol extraction, skeleton IR, hot-path excerpts), while SCIP upgrades the semantic edges and fills in the gaps that syntax-only analysis misses.
 
-SCIP is also the highest-priority provider in the [Semantic Enrichment Bridge](./semantic-enrichment-bridge.md). The bridge can report SCIP before LSP status, but SCIP keeps its optimized indexing path: `scip-io` can run before refresh, ingest runs after pass-1 writes drain, and pass 2 can skip files with full SCIP coverage. See [Language Provider Support](./language-provider-support.md) for the maintained chart of SCIP and LSP coverage by language.
+SCIP is the highest-priority provider for [provider-first indexing](./provider-first-indexing.md). The semantic enrichment bridge can report SCIP before LSP status, but graph-mutating SCIP facts enter through provider-first only. `scip-io` can run before refresh, then provider-first collects and materializes the generated provider facts. See [Language Provider Support](./language-provider-support.md) for the maintained chart of SCIP and LSP coverage by language.
 
 ---
 
@@ -46,9 +46,9 @@ SCIP is also the highest-priority provider in the [Semantic Enrichment Bridge](.
 | C# / .NET               | scip-dotnet        | [sourcegraph/scip-dotnet](https://github.com/sourcegraph/scip-dotnet)                              |
 | C / C++                 | scip-clang         | [sourcegraph/scip-clang](https://github.com/sourcegraph/scip-clang)                                |
 
-You can ingest multiple SCIP files (e.g., one for TypeScript and one for Go in a polyglot repo) by listing them in the `scip.indexes` array.
+You can provide multiple SCIP files (e.g., one for TypeScript and one for Go in a polyglot repo) by listing them in the `scip.indexes` array. Provider-first indexing coalesces and materializes those inputs.
 
-> **Note on `scip-clang`**: Support is best-effort. The decoder and symbol matcher are emitter-agnostic, so scip-clang `.scip` files decode and ingest cleanly, and the C/C++ tree-sitter adapters provide the SDL-side symbols to match against. C++ specific quirks (overload disambiguation by parameter types, template specializations, header/implementation splits, `operator()` descriptors) may match less precisely than first-class emitters until emitter-specific tuning is added to `src/scip/symbol-matcher.ts` and `src/scip/kind-mapping.ts`.
+> **Note on `scip-clang`**: Support is best-effort. The decoder and symbol matcher are emitter-agnostic, so provider-first can decode scip-clang `.scip` files, and the C/C++ tree-sitter adapters provide the SDL-side symbols to match against. C++ specific quirks (overload disambiguation by parameter types, template specializations, header/implementation splits, `operator()` descriptors) may match less precisely than first-class emitters until emitter-specific tuning is added to `src/scip/symbol-matcher.ts` and `src/scip/kind-mapping.ts`.
 
 ---
 
@@ -86,18 +86,18 @@ The `generator` subsection wires sdl-mcp into the [scip-io](https://github.com/G
 
 | Field                          | Type    | Default     | Description                                                                                                                                                                                                                                                                                                                                 |
 | :----------------------------- | :------ | :---------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `enabled`                      | boolean | `false`     | Master switch for SCIP integration. When false, all SCIP features are disabled.                                                                                                                                                                                                                                                             |
-| `indexes`                      | array   | `[]`        | List of SCIP index files to ingest. Each entry has a `path` (relative to repo root) and an optional `label` (e.g., `"typescript"`, `"go"`) for diagnostics. When `generator.enabled` is true, `{ "path": "index.scip", "label": "scip-io" }` is auto-injected if not already present.                                                       |
+| `enabled`                      | boolean | `false`     | Master switch for SCIP provider-first input. When false, SCIP features are disabled and legacy indexing stays pure tree-sitter/Rust.                                                                                                                                                                                                         |
+| `indexes`                      | array   | `[]`        | List of SCIP index files for provider-first indexing. Each entry has a `path` (relative to repo root) and an optional `label` (e.g., `"typescript"`, `"go"`) for diagnostics. When `generator.enabled` is true, `{ "path": "index.scip", "label": "scip-io" }` is auto-injected if not already present.                                      |
 | `externalSymbols.enabled`      | boolean | `true`      | Whether to create graph nodes for external dependency symbols (symbols from packages outside the repo).                                                                                                                                                                                                                                     |
-| `externalSymbols.maxPerIndex`  | number  | `10000`     | Cap on the number of external symbols ingested per index file. Prevents the graph from growing unbounded when a large dependency tree is present.                                                                                                                                                                                           |
+| `externalSymbols.maxPerIndex`  | number  | `10000`     | Cap on the number of external symbols materialized per index file. Prevents the graph from growing unbounded when a large dependency tree is present.                                                                                                                                                                                        |
 | `confidence`                   | number  | `0.95`      | Confidence score assigned to SCIP-resolved edges. Reflects compiler-grade certainty (higher than heuristic edges, which typically score 0.5-0.8).                                                                                                                                                                                           |
-| `autoIngestOnRefresh`          | boolean | `true`      | When true, `sdl.index.refresh` automatically re-ingests SCIP files if they are newer than the last ingestion timestamp.                                                                                                                                                                                                                     |
+| `autoIngestOnRefresh`          | boolean | `true`      | Deprecated compatibility field. `sdl.index.refresh` no longer runs legacy SCIP overlay ingestion; provider-first owns SCIP materialization whenever SCIP inputs are enabled.                                                                                                                                                                |
 | `generator.enabled`            | boolean | `false`     | Master switch for the scip-io generator integration. Has no effect unless `scip.enabled` is also true.                                                                                                                                                                                                                                      |
 | `generator.binary`             | string  | `"scip-io"` | Override the scip-io binary name. The runner looks it up in PATH first (cross-platform `which`/`where`), then falls back to the sdl-mcp managed location at `~/.sdl-mcp/bin/scip-io[.exe]`.                                                                                                                                                 |
 | `generator.args`               | array   | `[]`        | Extra string args appended after `index` when invoking scip-io (e.g., `["--all-roots"]`). The first arg is always `index`. SDL-MCP adds a repo-language `--lang` filter automatically unless these args already contain `--lang` / `-l`, in which case the explicit user filter wins.                                                       |
 | `generator.autoInstall`        | boolean | `true`      | When true and the binary is missing from both PATH and the managed location, sdl-mcp downloads it from the scip-io GitHub releases (with mandatory SHA-256 verification) into `~/.sdl-mcp/bin/`. When false, a missing binary just logs a warning and the refresh proceeds without scip-io.                                                 |
 | `generator.timeoutMs`          | integer | `600000`    | Hard timeout for the `scip-io index` invocation, in milliseconds. Min `1000` (1s), max `18000000` (5h). Default 10 minutes. On timeout the process tree is killed and the refresh continues.                                                                                                                                                 |
-| `generator.cleanupAfterIngest` | boolean | `true`      | When the post-refresh ingest finishes, delete generated `.scip` files from the current generator run so regenerated files do not clutter the working tree. Skipped automatically when `args` contains `--output` / `-o` / `--output=...` (custom output paths are user-managed). Set to `false` to keep files for inspection or third-party tooling. |
+| `generator.cleanupAfterIngest` | boolean | `true`      | Deprecated compatibility field for legacy post-refresh ingest cleanup. Provider-first keeps generated indexes under normal generator/cache ownership.                                                                                                                           |
 | `generator.cacheGeneratedIndexes` | boolean | `true`   | Cache generated `.scip` files under `~/.sdl-mcp/cache/scip-io/` and restore them on unchanged refreshes. See [Generator cache behavior](#generator-cache-behavior). |
 
 #### Generator cache behavior
@@ -181,7 +181,7 @@ Manually invoking the right SCIP emitter for every language in a polyglot repo a
 
 When `scip.generator.enabled` is `true`, sdl-mcp runs `scip-io index` in the repo root **before** every `indexRepo()` call. SDL-MCP derives a `--lang` filter from the repository's configured `languages`, so a repo configured for `ts` / `tsx` / `js` / `jsx` / `rs` invokes scip-io as TypeScript, JavaScript, and Rust instead of probing Java, C#, Go, C++, and other emitters. If `scip.generator.args` already includes `--lang` or `-l`, SDL-MCP treats that as an explicit override and does not add its own filter.
 
-The freshly written `index.scip` is then picked up automatically by the existing post-refresh ingest. There is nothing to wire up beyond the two flags.
+The freshly written `index.scip` is then picked up automatically by provider-first indexing. There is nothing to wire up beyond the two flags.
 
 ### Languages scip-io Orchestrates
 
@@ -206,19 +206,19 @@ That's enough. With `scip.generator.enabled = true`, sdl-mcp:
 
 1. Auto-injects `{ "path": "index.scip", "label": "scip-io" }` into `scip.indexes` at config-load time, so you don't need to also list the index file manually.
 2. Runs `scip-io index` in the repo root before every `indexRepo()` invocation (CLI `sdl-mcp index`, MCP `sdl.index.refresh`, the file watcher, sync pull, HTTP reindex — every code path is covered), with an automatic `--lang` filter derived from the repo's configured `languages` unless `generator.args` already supplies one.
-3. Picks up the freshly written `index.scip` via the existing `autoIngestOnRefresh` path.
+3. Hands the freshly written `index.scip` to provider-first indexing as a provider input.
 4. Stores complete generated `.scip` file sets in the generator cache and restores them on later unchanged refreshes, so repeated full indexes avoid rerunning expensive compiler emitters. Split-only cache entries that are missing a requested language are degraded to cache misses and retried.
-5. Deletes generated `.scip` files from the current run after the post-refresh ingest completes (controlled by `generator.cleanupAfterIngest`, default `true`). Cleanup is skipped automatically when `args` contains `--output` / `-o` / `--output=...` because the output path is then under user control. Set `cleanupAfterIngest: false` to keep files for inspection or third-party tooling.
+5. Leaves generated `.scip` files under generator/cache ownership. `generator.cleanupAfterIngest` is retained only as a compatibility field for legacy configs.
 
-All the other `generator.*` fields default to sensible values: a 10-minute timeout, no extra args, `binary: "scip-io"`, `autoInstall: true`, generated-index caching on, and post-ingest cleanup on.
+All the other `generator.*` fields default to sensible values: a 10-minute timeout, no extra args, `binary: "scip-io"`, `autoInstall: true`, and generated-index caching on.
 
 ### Oversized Generated Indexes
 
-Each SCIP decoder accepts one protobuf file up to 512 MiB. If the normal merged `scip-io index` output is at or below that cap, SDL-MCP ingests `index.scip` as before. If the merged file is larger than 512 MiB, SDL-MCP runs `scip-io index --no-merge`, discovers generated split `*.scip` files, and ingests every split file under the cap.
+Each SCIP decoder accepts one protobuf file up to 512 MiB. If the normal merged `scip-io index` output is at or below that cap, provider-first consumes `index.scip`. If the merged file is larger than 512 MiB, SDL-MCP runs `scip-io index --no-merge`, discovers generated split `*.scip` files, and provider-first consumes every split file under the cap.
 
-Split files are deduplicated by SHA-256 content hash. This matters for TypeScript and JavaScript because both can come from the same `scip-typescript` indexer run; SDL-MCP does not force-split that upstream output, and identical `typescript.scip` / `javascript.scip` artifacts are ingested once. Unchanged split files that existed before the generator run are treated as stale generated output and skipped, which prevents a filtered run from accidentally ingesting an old split artifact for an unrelated language. A split file that still exceeds 512 MiB is skipped with a visible diagnostic naming the file and byte size.
+Split files are deduplicated by SHA-256 content hash. This matters for TypeScript and JavaScript because both can come from the same `scip-typescript` indexer run; SDL-MCP does not force-split that upstream output, and identical `typescript.scip` / `javascript.scip` artifacts are collected once. Unchanged split files that existed before the generator run are treated as stale generated output and skipped, which prevents a filtered run from accidentally using an old split artifact for an unrelated language. A split file that still exceeds 512 MiB is skipped with a visible diagnostic naming the file and byte size.
 
-Index result and audit payloads include `scip.generatedIndexes[]` for generated path, label, size, mode (`"merged"` or `"split"`), and skip reason, `scip.generatorCache` for cache hit/store diagnostics, plus `scip.failures[]` for non-fatal generator and ingest failures that were previously logger-only warnings.
+Index result and audit payloads include `scip.generatedIndexes[]` for generated path, label, size, mode (`"merged"` or `"split"`), and skip reason, `scip.generatorCache` for cache hit/store diagnostics, plus `scip.failures[]` for non-fatal generator/provider failures that were previously logger-only warnings.
 
 ### Auto-Install Behavior
 
@@ -253,7 +253,7 @@ Every failure path on this integration is non-fatal:
 - Archive extraction fails → warn, skip, continue.
 - Smoke test fails → warn, skip, continue.
 - `scip-io index` exits non-zero → warn (with bounded captured stdout/stderr), continue indexing with whatever configured SCIP files happen to be on disk.
-- Generated merged index is over 512 MiB → run `scip-io index --no-merge`, ingest split files under the cap, and surface skipped files in CLI/audit diagnostics.
+- Generated merged index is over 512 MiB → run `scip-io index --no-merge`, collect split files under the cap, and surface skipped files in CLI/audit diagnostics.
 - Timeout fires → kill the process tree (Windows: `taskkill /T /F`; Unix: SIGTERM/SIGKILL on the process group), warn, continue.
 
 The indexer always finishes its own pass. A broken scip-io setup will never block you from indexing.
@@ -267,52 +267,40 @@ You should leave `scip.generator.enabled = false` (the default) when:
 - You need a specific upstream indexer version that scip-io does not pin to.
 - You want minimum-overhead refreshes during heavy live-editing — scip-io adds wall-clock time even when sdl-mcp's own indexer would short-circuit.
 
-In all of those cases, the legacy path (`autoIngestOnRefresh: true` + manually-managed `index.scip` + entries in `scip.indexes`) still works exactly as before.
+In all of those cases, keep `scip.enabled: true` and list the manually-managed indexes in `scip.indexes`; provider-first will consume those files on the next full refresh. Users who want quick/simple legacy indexing should leave `scip.enabled: false` and omit LSP provider inputs.
 
 ---
 
-## Ingestion
+## Provider-First Indexing
 
-### Explicit Ingestion
+SCIP files are no longer ingested through a direct MCP tool or a legacy post-refresh overlay. When `scip.enabled: true` or semantic SCIP inputs are configured, provider-first owns SCIP facts.
 
-Use the `sdl.scip.ingest` MCP tool action:
+Run a full provider-first refresh after generating or updating SCIP inputs:
 
 ```json
 {
   "repoId": "my-repo",
-  "indexPath": "index.scip"
+  "mode": "full",
+  "reason": "refresh SCIP provider facts"
 }
 ```
 
-This reads the SCIP file, decodes it, matches SCIP symbols to existing tree-sitter symbols, creates new symbols and edges, and returns a summary of what changed. Manually configured indexes remain backward-compatible; if a manual index is over 512 MiB, provide smaller index files because split fallback applies only to generated scip-io output.
+Pipeline selection follows the provider-first rules:
 
-### Dry Run
+- `indexing.pipeline: "legacy"` uses pure legacy indexing only when SCIP/LSP provider inputs are disabled.
+- If SCIP/LSP inputs are enabled, explicit `legacy` is coerced to provider-first and emits a diagnostic.
+- `indexing.pipeline: "auto"` may fall back to pure legacy when provider-first cannot execute, but it does not run a SCIP overlay ingest.
+- Same-run legacy fallback remains available inside provider-first for uncovered or provider-unusable files; that fallback parses source files only and never ingests `.scip` overlays.
 
-Preview what would happen without writing to the database:
-
-```json
-{
-  "repoId": "my-repo",
-  "indexPath": "index.scip",
-  "dryRun": true
-}
-```
-
-The response includes counts of symbols matched, created, and edges upgraded, but no graph mutations are applied.
-
-### Auto-Ingest on Refresh
-
-When `scip.autoIngestOnRefresh` is `true` (the default when SCIP is enabled), `sdl.index.refresh` automatically checks each configured SCIP index file. If the file's modification time is newer than the last ingestion, it is re-ingested after the tree-sitter indexing pass completes.
-
-This means you can regenerate your `.scip` file (e.g., in a pre-commit hook or CI step) and SDL-MCP picks it up automatically on the next refresh.
+`scip.autoIngestOnRefresh` remains in the config schema as a deprecated compatibility field. It no longer causes legacy full or incremental indexing to ingest SCIP files.
 
 ---
 
-## What Changes After Ingestion
+## What Changes After Provider-First Materialization
 
 ### Symbol Enrichment
 
-| Before (tree-sitter only)                  | After (SCIP ingested)                                                                                  |
+| Before (tree-sitter only)                  | After (SCIP provider-first materialized)                                                               |
 | :----------------------------------------- | :----------------------------------------------------------------------------------------------------- |
 | `source: "treesitter"`                     | `source: "both"`                                                                                       |
 | No `scipSymbol` field                      | `scipSymbol: "scip-typescript npm @sourcegraph/scip-typescript 0.1.0 src/`index.ts`/validateToken()."` |
@@ -362,7 +350,7 @@ SCIP data integrates cleanly with SDL-MCP's live indexing system:
 
 - **SCIP-only symbols survive reconciliation.** When `sdl.buffer.checkpoint` or `patchSavedFile` reconciles overlay symbols with the durable database, symbols with `source: "scip"` are preserved even if tree-sitter does not produce a matching symbol for that file. This prevents SCIP-discovered symbols from being deleted during live editing.
 - **File deletion removes SCIP symbols.** If a file is deleted from the repository, all SCIP symbols associated with that file are removed during the next `index.refresh`.
-- **SCIP edges on modified symbols are refreshed.** When a symbol is re-indexed by tree-sitter after an edit, its SCIP edges are preserved. The next `sdl.scip.ingest` (or auto-ingest on refresh) will re-verify and update them.
+- **SCIP edges on modified symbols are refreshed by provider-first.** Regenerate the `.scip` file after source edits, then run a full provider-first refresh to re-verify and update provider edges.
 
 ---
 
@@ -385,15 +373,15 @@ The decoder is selected automatically at runtime. You can force the TypeScript f
 
 **Symptom**: Edges reference symbols that no longer exist, or new symbols are missing SCIP data.
 
-**Fix**: Re-run the SCIP emitter after source changes. If using `autoIngestOnRefresh`, regenerate the `.scip` file before running `sdl.index.refresh`. A CI step or pre-commit hook is a good place for this.
+**Fix**: Re-run the SCIP emitter after source changes, then run a full provider-first `sdl.index.refresh`. A CI step or pre-commit hook is a good place to generate the `.scip` file.
 
 ### Large External Symbol Count
 
-**Symptom**: Ingestion is slow or the graph has thousands of external symbols cluttering search results.
+**Symptom**: Provider-first materialization is slow or the graph has thousands of external symbols cluttering search results.
 
 **Fix**: Reduce `externalSymbols.maxPerIndex` (e.g., from 10000 to 2000), or disable external symbols entirely with `externalSymbols.enabled: false`. Use `excludeExternal: true` in `sdl.symbol.search` to filter them from results without removing them from the graph.
 
-### Missing Symbols After Ingestion
+### Missing Symbols After Provider-First Materialization
 
 **Symptom**: Symbols you expect to see are not matched or created.
 
@@ -409,8 +397,7 @@ The decoder is selected automatically at runtime. You can force the TypeScript f
 
 ## Related Tools
 
-- [`sdl.scip.ingest`](../mcp-tools-detailed.md#sdlscipingest) - Ingest a SCIP index file
-- [`sdl.index.refresh`](../mcp-tools-detailed.md#sdlindexrefresh) - Trigger re-indexing (auto-ingests SCIP when configured)
+- [`sdl.index.refresh`](../mcp-tools-detailed.md#sdlindexrefresh) - Trigger provider-first indexing for configured SCIP inputs
 - [`sdl.symbol.search`](../mcp-tools-detailed.md#sdlsymbolsearch) - Search symbols (with `excludeExternal` filter)
 - [`sdl.symbol.getCard`](../mcp-tools-detailed.md#sdlsymbolgetcard) - View SCIP-enriched symbol cards
 

@@ -118,8 +118,7 @@ Only these two metadata tools are proxied through the CLI today.
 | `repo.status`                 | Get repository status                        |
 | `repo.overview`               | Get a token-efficient repository overview    |
 | `index.refresh`               | Trigger indexing                             |
-| `scip.ingest`                 | Ingest a SCIP index                          |
-| `semantic.enrichment.refresh` | Run provider-backed graph enrichment         |
+| `semantic.enrichment.refresh` | Report provider source selection; provider facts are indexed by provider-first |
 | `semantic.enrichment.status`  | Inspect enrichment source selection and runs |
 | `policy.get`                  | Read the current policy                      |
 | `policy.set`                  | Update the current policy                    |

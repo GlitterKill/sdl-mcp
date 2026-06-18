@@ -51,7 +51,6 @@ export const FN_NAME_MAP: Record<string, string> = {
   fileRead: "file.read",
   fileWrite: "file.write",
   searchEdit: "search.edit",
-  scipIngest: "scip.ingest",
   semanticEnrichmentRefresh: "semantic.enrichment.refresh",
   semanticEnrichmentStatus: "semantic.enrichment.status",
 };
@@ -137,9 +136,7 @@ function policyGet(): { policy: object }
 /** Set policy config */
 function policySet(p: { policyPatch: { maxWindowLines?: number; maxWindowTokens?: number; requireIdentifiers?: boolean; allowBreakGlass?: boolean; defaultDenyRaw?: boolean } }): { policy: object }
 
-// === SCIP ===
-/** Ingest a pre-built SCIP index to overlay compiler-grade cross-references */
-function scipIngest(p: { indexPath: string; dryRun?: boolean }): object
+// === Semantic Providers ===
 /** Refresh semantic enrichment source selection */
 function semanticEnrichmentRefresh(p: { dryRun?: boolean; force?: boolean; install?: boolean; languages?: string[] }): { status: string }
 /** Report semantic enrichment status */

@@ -43,7 +43,6 @@ import {
   FileReadRequestSchema,
   FileWriteRequestSchema,
   SearchEditRequestSchema,
-  ScipIngestRequestSchema,
   SemanticEnrichmentRefreshRequestSchema,
   SemanticEnrichmentStatusRequestSchema,
 } from "../mcp/tools.js";
@@ -92,7 +91,6 @@ import {
 import { handleUsageStats } from "../mcp/tools/usage.js";
 import { handleFileRead } from "../mcp/tools/file-read.js";
 import { handleFileWrite } from "../mcp/tools/file-write.js";
-import { handleScipIngest } from "../mcp/tools/scip.js";
 import {
   handleSemanticEnrichmentRefresh,
   handleSemanticEnrichmentStatus,
@@ -214,10 +212,6 @@ export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
     "search.edit": {
       schema: SearchEditRequestSchema,
       handler: handleSearchEdit,
-    },
-    "scip.ingest": {
-      schema: ScipIngestRequestSchema,
-      handler: handleScipIngest,
     },
     "semantic.enrichment.refresh": {
       schema: SemanticEnrichmentRefreshRequestSchema,

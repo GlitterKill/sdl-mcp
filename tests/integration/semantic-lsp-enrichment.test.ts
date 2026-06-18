@@ -161,7 +161,7 @@ describe("semantic enrichment LSP integration", () => {
     if (existsSync(root)) rmSync(root, { recursive: true, force: true });
   });
 
-  it("replaces an unresolved call edge with the exact LSP definition target", async () => {
+  it("reports LSP refresh as provider-first-only without mutating call edges", async () => {
     const indexed = await indexRepo(REPO_ID, "full");
     assert.ok(indexed.symbolsIndexed >= 2);
 
@@ -210,8 +210,11 @@ describe("semantic enrichment LSP integration", () => {
       { repoId: REPO_ID, languages: ["typescript"] },
       config,
     );
-    assert.equal(result.runs.length, 1);
-    assert.equal(result.runs[0].status, "completed");
+    assert.equal(result.runs.length, 0);
+    assert.equal(result.skipped.length, 1);
+    assert.equal(result.skipped[0].providerType, "lsp");
+    assert.equal(result.skipped[0].languageId, "typescript");
+    assert.match(result.skipped[0].reason, /provider-first/i);
 
     const conn = await getLadybugConn();
     const rows = await ladybugDb.queryAll<{
@@ -232,9 +235,7 @@ describe("semantic enrichment LSP integration", () => {
       {},
     );
 
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].resolution, "exact");
-    assert.equal(rows[0].resolverId, "lsp:mock-ts-lsp");
+    assert.equal(rows.length, 0);
 
     const unresolvedRows = await ladybugDb.queryAll<{ targetName: string }>(
       conn,
@@ -244,6 +245,6 @@ describe("semantic enrichment LSP integration", () => {
        RETURN target.name AS targetName`,
       {},
     );
-    assert.equal(unresolvedRows.length, 0);
+    assert.equal(unresolvedRows.length, 1);
   });
 });

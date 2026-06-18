@@ -23,7 +23,6 @@ import { z } from "zod";
 //   - Memory                (Memory*, opt-in)
 //   - UsageStats            (UsageStats*)
 //   - FileRead / FileWrite  (file gateway ops)
-//   - ScipIngest            (SCIP overlay)
 //   - SearchEdit            (cross-file batched edits)
 //
 // Shared primitives lifted to ./tools/schemas/_shared.ts candidates: Range,
@@ -3149,36 +3148,6 @@ export type FileReadResponse =
   | FileReadInlineResponse
   | ResponseArtifactReference;
 
-// ============================================================================
-// SCIP Ingest Schemas
-// ============================================================================
-
-export const ScipIngestRequestSchema = z.object({
-  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  indexPath: z
-    .string()
-    .min(1)
-    .describe(
-      "Path to the SCIP protobuf index file (.scip). " +
-        "Can be absolute or relative to the repository root.",
-    ),
-  dryRun: z
-    .boolean()
-    .optional()
-    .default(false)
-    .describe(
-      "If true, validate and parse the SCIP index without writing to the graph database.",
-    ),
-  includePerFileCoverage: z
-    .boolean()
-    .optional()
-    .default(false)
-    .describe(
-      "If true, include verbose per-file coverage details. Defaults to summary-only output.",
-    ),
-});
-
-export type ScipIngestRequest = z.infer<typeof ScipIngestRequestSchema>;
 // ============================================================================
 // Semantic Enrichment Schemas
 // ============================================================================

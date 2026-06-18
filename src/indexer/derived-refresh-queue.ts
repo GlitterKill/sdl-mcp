@@ -100,7 +100,7 @@ function getDerivedRefreshTimeoutMs(): number {
 
 /**
  * Per-repo serialization for write-heavy refresh phases (cluster/process
- * computation, SCIP auto-ingest). LadybugDB allows one write transaction at
+ * computation and provider materialization). LadybugDB allows one write transaction at
  * a time and `writeLimiter` has a 30s queue timeout — running two long
  * write-heavy phases concurrently against the same repo starves both.
  *
@@ -580,8 +580,8 @@ export async function shutdownDerivedRefreshQueue(): Promise<void> {
 
 /**
  * Block until the derived-refresh queue has no pending or running entries
- * for `repoId`. Used by post-refresh hooks (SCIP auto-ingest) to avoid
- * racing the cluster/process write transaction for the single LadybugDB
+ * for `repoId`. Used by foreground refresh work to avoid racing
+ * cluster/process write transactions for the single LadybugDB
  * write connection — concurrent writers exceeded the 30s queue timeout.
  *
  * Times out (logs warn + returns) after `timeoutMs` so a wedged background

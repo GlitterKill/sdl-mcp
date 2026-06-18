@@ -74,10 +74,10 @@ function makeStubBinary(
       lines.push(`>>"${opts.logFile}" echo cwd=%CD% args=%*`);
     }
     if (writeScip) {
-      // Write a minimal placeholder index.scip into cwd. The content is
-      // not a valid SCIP encoding, but the post-refresh ingest will only
-      // attempt to parse it if scip.indexes contains "index.scip", and
-      // even on parse failure the refresh continues (non-fatal).
+      // Write a minimal placeholder index.scip into cwd. The content is not a
+      // valid SCIP encoding, but provider-first will only attempt to parse it
+      // when SCIP inputs are enabled, and parse failures remain non-fatal for
+      // generator diagnostics.
       lines.push(`>"%CD%\\index.scip" echo SCIP_STUB`);
     }
     lines.push(`exit /b ${exitCode}`);

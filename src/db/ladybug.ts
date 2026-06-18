@@ -143,8 +143,8 @@ let currentDbPath: string | null = null;
 
 const ONE_GB = 1024 * 1024 * 1024;
 const FOUR_GB = 4 * ONE_GB;
-// 25% of system RAM (was 50%/8GB cap; reduced to avoid OOM when SCIP
-// auto-ingest runs immediately after index refresh on ≤16GB systems).
+// 25% of system RAM (was 50%/8GB cap; reduced to avoid OOM during large
+// provider-first SCIP materialization on <=16GB systems).
 const DEFAULT_BUFFER_MANAGER_RATIO = 0.25;
 const DEFAULT_CHECKPOINT_THRESHOLD_BYTES = 128 * 1024 * 1024;
 const MIN_CHECKPOINT_THRESHOLD_BYTES = 16 * 1024 * 1024;

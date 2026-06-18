@@ -1837,7 +1837,7 @@
             },
             "cleanupAfterIngest": {
               "type": "boolean",
-              "description": "Delete <repoRoot>/index.scip after the post-refresh ingest consumes it. The file is regenerated every refresh, so keeping it just clutters the working tree. Only the default output location is cleaned up — passing --output via args opts you out of cleanup automatically.",
+              "description": "Deprecated compatibility field for legacy post-refresh SCIP ingest cleanup. Provider-first does not delete generated indexes after collection.",
               "default": true
             },
             "cacheGeneratedIndexes": {

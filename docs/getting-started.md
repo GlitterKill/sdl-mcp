@@ -269,7 +269,7 @@ The HTTP server also exposes a built-in operational dashboard at
 `/api/observability/*`. The dashboard is enabled by default
 (`observability.enabled = true`) and surfaces cache hit rates, hybrid-retrieval
 breakdowns, beam-search decision traces, indexing throughput, write-pool / drain
-saturation, packed-wire savings, SCIP ingest health, a deterministic bottleneck
+saturation, packed-wire savings, SCIP provider health, a deterministic bottleneck
 classifier, and OS-level resource samples.
 
 The bearer token is the same one printed at server startup (or the static value of

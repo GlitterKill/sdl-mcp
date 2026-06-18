@@ -273,7 +273,7 @@ When enabled, memories are **automatically surfaced** inside graph slices — wh
 
 ### SCIP Integration — Compiler-Grade Cross-References
 
-Tree-sitter gives SDL-MCP fast, syntax-level symbol extraction across the built-in TypeScript/JavaScript, Python, Go, Java, C#, C/C++, Rust, and Kotlin surface. PHP and Shell/Bash are explicit opt-in language packs for LSP provider-first work and are not enabled by default. SCIP (Source Code Intelligence Protocol) supplements this with **compiler-grade cross-references** from tools like scip-typescript, scip-go, and rust-analyzer. Generate a `.scip` index file, point SDL-MCP at it, and heuristic edges are upgraded to exact compiler-verified edges, external dependency symbols become first-class graph nodes, and new `implements` edges reveal interface/trait relationships that syntax analysis cannot discover.
+Tree-sitter gives SDL-MCP fast, syntax-level symbol extraction across the built-in TypeScript/JavaScript, Python, Go, Java, C#, C/C++, Rust, and Kotlin surface. PHP and Shell/Bash are explicit opt-in language packs for LSP provider-first work and are not enabled by default. SCIP (Source Code Intelligence Protocol) supplies **compiler-grade cross-references** from tools like scip-typescript, scip-go, and rust-analyzer. When `scip.enabled` is true, SDL-MCP uses provider-first indexing to materialize those facts directly, with legacy parsing retained only for uncovered or provider-unusable files.
 
 ![SCIP integration compiler cross-reference ingestion flow](./docs/readme-assets/readme-scip-integration.webp)
 
@@ -282,7 +282,7 @@ Tree-sitter gives SDL-MCP fast, syntax-level symbol extraction across the built-
 - Upgrades heuristic call resolution to **compiler-verified exact edges** (confidence 0.95)
 - External dependencies (npm packages, Go modules, crate deps) become searchable graph nodes
 - Interface/trait implementations tracked via `implements` edges
-- Auto-ingest on `sdl.index.refresh` keeps SCIP data current with zero manual steps
+- Provider-first indexing keeps SCIP/LSP facts owned by the provider path; legacy indexing does not ingest `.scip` overlays
 - Complementary: tree-sitter provides structure, SCIP provides semantic precision
 
 [SCIP Integration Deep Dive →](./docs/feature-deep-dives/scip-integration.md)
@@ -422,9 +422,6 @@ The generated source of truth is [`docs/generated/tool-inventory.md`](./docs/gen
 <tr><td><code>sdl.workflow</code></td><td>Multi-step operations with budget tracking, ETag caching, and transforms</td></tr>
 <tr><td><code>sdl.manual</code></td><td>Self-documentation — query usage guide, action schemas, output format reference</td></tr>
 
-<tr><td><strong>SCIP</strong></td>
-    <td><code>sdl.scip.ingest</code></td><td>Ingest a pre-built SCIP index for compiler-grade cross-references (with dry-run support)</td></tr>
-
 <tr><td rowspan="2"><strong>File</strong></td>
     <td><code>sdl.file.read</code></td><td>Read non-indexed files (configs, docs, templates) with line-range, search, or JSON-path modes</td></tr>
 <tr><td><code>sdl.file.write</code></td><td>Policy-aware write helper for non-indexed files and templates</td></tr>
@@ -556,7 +553,7 @@ A **VSCode extension** (`sdl-mcp-vscode/`) provides live buffer integration for 
 | [Semantic Embeddings Setup](./docs/feature-deep-dives/semantic-embeddings-setup.md) | Dependencies, model installation, provider configuration, tier-by-tier setup          |
 | [Code Mode](./docs/feature-deep-dives/code-mode.md)                                 | `sdl.context`, `sdl.workflow`, action discovery, manual reference, one-call workflows |
 | [Development Memories](./docs/feature-deep-dives/development-memories.md)           | Graph-backed cross-session memory, file sync, staleness detection, auto-surfacing     |
-| [SCIP Integration](./docs/feature-deep-dives/scip-integration.md)                   | Compiler-grade cross-references, external deps, implements edges, auto-ingest         |
+| [SCIP Integration](./docs/feature-deep-dives/scip-integration.md)                   | Provider-first compiler-grade cross-references, external deps, implements edges       |
 | [Token Savings Meter](./docs/feature-deep-dives/token-savings-meter.md)             | Per-call meter, session summaries, lifetime tracking, `sdl.usage.stats`               |
 
 <br/>

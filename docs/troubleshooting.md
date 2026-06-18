@@ -273,7 +273,7 @@ entries only for generated directories that live outside those defaults.
 - Symptom: `<graphDatabase.path>.wal` is large, or its modified time is newer than the main `.lbug` database file
 - Cause:
   - LadybugDB commits can remain in the WAL until a checkpoint; the main `.lbug` timestamp is not a reliable "last write" signal
-  - Indexing, SCIP ingest, embeddings, and derived-state refreshes can create large WAL bursts
+  - Indexing, provider-first SCIP materialization, embeddings, and derived-state refreshes can create large WAL bursts
   - MCP tool calls also write compact Audit rows, so read-heavy work can keep the WAL timestamp current even when graph content is unchanged
 - Resolution:
   - `sdl-mcp serve` runs best-effort WAL maintenance after startup

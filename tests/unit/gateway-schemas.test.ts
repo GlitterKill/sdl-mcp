@@ -171,6 +171,15 @@ describe("Gateway schemas", () => {
       assert.strictEqual(result.success, true);
     });
 
+    it("rejects direct SCIP ingest because provider inputs are provider-first only", () => {
+      const result = RepoGatewaySchema.safeParse({
+        repoId: "test-repo",
+        action: "scip.ingest",
+        indexPath: "index.scip",
+      });
+      assert.strictEqual(result.success, false);
+    });
+
     it("rejects partial policy.set budgetCaps patches", () => {
       const result = RepoGatewaySchema.safeParse({
         repoId: "test-repo",
@@ -447,16 +456,16 @@ describe("Gateway schemas", () => {
       assert.strictEqual(CODE_ACTIONS.length, 3);
     });
 
-    it("REPO_ACTIONS has 13 actions", () => {
-      assert.strictEqual(REPO_ACTIONS.length, 13);
+    it("REPO_ACTIONS has 12 actions", () => {
+      assert.strictEqual(REPO_ACTIONS.length, 12);
     });
 
     it("AGENT_ACTIONS has 11 actions", () => {
       assert.strictEqual(AGENT_ACTIONS.length, 11);
     });
 
-    it("ALL_ACTIONS has 35 total actions", () => {
-      assert.strictEqual(ALL_ACTIONS.length, 35);
+    it("ALL_ACTIONS has 34 total actions", () => {
+      assert.strictEqual(ALL_ACTIONS.length, 34);
     });
   });
 });

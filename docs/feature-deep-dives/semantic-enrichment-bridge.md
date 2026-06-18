@@ -15,14 +15,11 @@ Only the selected source runs for a language. Lower-priority providers are repor
 
 ## Current Behavior
 
-- `sdl.semantic.enrichment.refresh` runs selected providers explicitly only when `semanticEnrichment.enabled` is true.
+- `sdl.semantic.enrichment.refresh` reports selected providers explicitly only when `semanticEnrichment.enabled` is true.
 - `sdl.semantic.enrichment.status` reports source selection, skipped providers, last runs, and precision scores even when refresh is disabled.
-- SCIP remains compatible with `sdl.scip.ingest` and keeps its existing optimized index-refresh placement: pass-1 drain, SCIP ingest, then pass 2.
-- LSP uses a lightweight stdio JSON-RPC client. Tree-sitter-backed languages can run call-definition candidates derived from call ranges and replace unresolved or heuristic call edges with exact provider-backed edges.
-- Configured LSP servers can also run generic diagnostic ingestion when diagnostics are requested in config or advertised by the server, even when SDL-MCP does not have a tree-sitter adapter for that language. Generic document-symbol persistence is intentionally deferred until symbols have durable graph semantics.
-- LSP remains post-index only. It does not execute package-manager install recipes or affect pass-2 scheduling.
-- Combined SCIP indexes are supported. Language-scoped refresh filters provider documents to the requested language set instead of requiring one index file per language.
-- `force` bypasses compatible cache decisions where they exist. In V2, that means the SCIP ingestion content-hash shortcut; LSP has no durable response cache yet.
+- SCIP and LSP graph facts are materialized only by provider-first indexing. Refresh returns skipped-provider diagnostics that direct users to `sdl.index.refresh` with provider inputs enabled.
+- Combined SCIP indexes are still valid provider-first inputs. Language-scoped refresh can report source selection, but it does not filter or ingest provider documents.
+- `dryRun` and `force` remain accepted for compatibility but do not cause graph writes.
 
 ## Configuration
 
@@ -76,7 +73,7 @@ Only the selected source runs for a language. Lower-priority providers are repor
 
 When `providers.scip.indexes` is empty, the bridge reuses `scip.indexes`. `scip.generator` remains configured under `scip` and still gates verified `scip-io` generation.
 
-`cacheDir` and `concurrency` are reserved compatibility knobs for future provider caches and cross-provider scheduling. V2 runs selected providers serially and writes provider results directly to the graph.
+`cacheDir` and `concurrency` are reserved compatibility knobs for future provider caches and cross-provider scheduling. Provider graph writes happen through provider-first indexing, not this bridge.
 
 ## Install Model
 

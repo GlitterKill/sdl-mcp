@@ -835,34 +835,6 @@ const indexRefresh: ActionDefinition = {
   ],
 };
 
-const scipIngest: ActionDefinition = {
-  action: "scip.ingest",
-  namespace: "repo",
-  description:
-    "Ingest a SCIP index file to overlay compiler-grade cross-references",
-  args: [
-    { ...REPO_ID_ARG },
-    {
-      flag: "--index-path",
-      field: "indexPath",
-      type: "string",
-      required: true,
-      description:
-        "Path to .scip index file (absolute or relative to repo root)",
-    },
-    {
-      flag: "--dry-run",
-      field: "dryRun",
-      type: "boolean",
-      description: "Compute counters without writing to the database",
-    },
-  ],
-  examples: [
-    "sdl-mcp tool scip.ingest --repo-id my-repo --index-path index.scip",
-    "sdl-mcp tool scip.ingest --repo-id my-repo --index-path .scip/typescript.scip --dry-run",
-  ],
-};
-
 const semanticEnrichmentRefresh: ActionDefinition = {
   action: "semantic.enrichment.refresh",
   namespace: "repo",
@@ -1784,7 +1756,6 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   repoStatus,
   repoOverview,
   indexRefresh,
-  scipIngest,
   semanticEnrichmentRefresh,
   semanticEnrichmentStatus,
   policyGet,
