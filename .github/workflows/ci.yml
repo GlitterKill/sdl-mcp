@@ -604,6 +604,13 @@ jobs:
           "
 
       - name: Run full benchmark matrix
+        shell: bash
+        env:
+          # Keep benchmark matrix claim validation on the stable JS/LadybugDB path.
+          # Native parser crash coverage lives in native-build and sync-memory.
+          SDL_MCP_DISABLE_NATIVE_ADDON: "1"
+          # Serialize pass-1 DB writes against parser work to avoid hosted-runner exit 139 flakes.
+          SDL_MCP_PASS1_STABLE_DB_WRITES: "1"
         run: npm run benchmark:matrix -- --matrix benchmarks/real-world/matrix.json --config benchmarks/real-world/benchmark.config.json --out-dir .benchmark/matrix-nightly
 
       - name: Audit realism benchmark claims (non-blocking)
@@ -620,10 +627,12 @@ jobs:
           echo "- Realism claim validation is audit-only on the scheduled workflow until the benchmark matrix is retuned to satisfy the published claim floors again." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload matrix artifacts
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: benchmark-matrix-nightly
           path: .benchmark/matrix-nightly/**
+          if-no-files-found: warn
           retention-days: 14
 
   sync-memory:
