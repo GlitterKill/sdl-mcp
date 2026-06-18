@@ -87,6 +87,9 @@ describe("release regression guards", () => {
     const nativeBuildJob =
       ciSource.match(/native-build:\s*[\s\S]*?\n  benchmark-matrix-nightly:/)
         ?.[0] ?? "";
+    const benchmarkMatrixNightlyJob =
+      ciSource.match(/benchmark-matrix-nightly:\s*[\s\S]*?\n  sync-memory:/)
+        ?.[0] ?? "";
     const syncMemoryJob =
       ciSource.match(/sync-memory:\s*[\s\S]*?\n  sync-validation:/)?.[0] ?? "";
 
@@ -98,6 +101,10 @@ describe("release regression guards", () => {
     assert.ok(
       nativeBuildJob,
       "native-build job section should be present in ci workflow",
+    );
+    assert.ok(
+      benchmarkMatrixNightlyJob,
+      "benchmark-matrix-nightly job section should be present in ci workflow",
     );
     assert.ok(
       syncMemoryJob,
@@ -179,6 +186,18 @@ describe("release regression guards", () => {
       benchmarksJob,
       /SDL_MCP_PASS1_STABLE_DB_WRITES:\s*"1"/,
       "benchmark CI should serialize pass-1 DB writes against parser work to avoid hosted-runner exit 139 flakes",
+    );
+
+    assert.match(
+      benchmarkMatrixNightlyJob,
+      /name:\s*Run full benchmark matrix[\s\S]*SDL_MCP_DISABLE_NATIVE_ADDON:\s*"1"[\s\S]*SDL_MCP_PASS1_STABLE_DB_WRITES:\s*"1"[\s\S]*npm run benchmark:matrix/s,
+      "nightly benchmark matrix should use the same stable non-native benchmark path as benchmark CI",
+    );
+
+    assert.match(
+      benchmarkMatrixNightlyJob,
+      /name:\s*Upload matrix artifacts[\s\S]*if:\s*always\(\)[\s\S]*uses:\s*actions\/upload-artifact@v7[\s\S]*if-no-files-found:\s*warn/s,
+      "nightly benchmark matrix should upload partial artifacts even when matrix execution fails",
     );
 
     assert.match(
