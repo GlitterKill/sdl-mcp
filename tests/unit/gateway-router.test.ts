@@ -8,6 +8,44 @@ import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 
 const originalSdlConfig = process.env.SDL_CONFIG;
 
+const EXPECTED_ACTIONS = [
+  "agent.feedback",
+  "agent.feedback.query",
+  "buffer.checkpoint",
+  "buffer.push",
+  "buffer.status",
+  "code.getHotPath",
+  "code.getSkeleton",
+  "code.needWindow",
+  "delta.get",
+  "file.read",
+  "file.write",
+  "index.refresh",
+  "memory.query",
+  "memory.remove",
+  "memory.store",
+  "memory.surface",
+  "policy.get",
+  "policy.set",
+  "pr.risk.analyze",
+  "repo.overview",
+  "repo.register",
+  "repo.status",
+  "response.get",
+  "runtime.execute",
+  "runtime.queryOutput",
+  "search.edit",
+  "semantic.enrichment.refresh",
+  "semantic.enrichment.status",
+  "slice.build",
+  "slice.refresh",
+  "slice.spillover.get",
+  "symbol.edit",
+  "symbol.getCard",
+  "symbol.search",
+  "usage.stats",
+];
+
 describe("Gateway router", () => {
   let tmpDir: string;
 
@@ -34,10 +72,10 @@ describe("Gateway router", () => {
   });
 
   describe("createActionMap", () => {
-    it("contains all 36 actions", () => {
+    it("contains all current actions", () => {
       const map = createActionMap();
       const actions = Object.keys(map);
-      assert.strictEqual(actions.length, 36);
+      assert.deepStrictEqual(actions.sort(), EXPECTED_ACTIONS);
     });
 
     it("each entry has schema and handler", () => {
@@ -53,40 +91,7 @@ describe("Gateway router", () => {
 
     it("contains known actions", () => {
       const map = createActionMap();
-      const expected = [
-        "symbol.search",
-        "symbol.getCard",
-        "symbol.edit",
-        "slice.build",
-        "slice.refresh",
-        "slice.spillover.get",
-        "delta.get",
-        "pr.risk.analyze",
-        "code.needWindow",
-        "code.getSkeleton",
-        "code.getHotPath",
-        "repo.register",
-        "repo.status",
-        "repo.overview",
-        "index.refresh",
-        "policy.get",
-        "policy.set",
-        "usage.stats",
-        "file.read",
-        "agent.feedback",
-        "agent.feedback.query",
-        "buffer.push",
-        "buffer.checkpoint",
-        "buffer.status",
-        "runtime.execute",
-        "runtime.queryOutput",
-        "response.get",
-        "memory.store",
-        "memory.query",
-        "memory.remove",
-        "memory.surface",
-      ];
-      for (const name of expected) {
+      for (const name of EXPECTED_ACTIONS) {
         assert.ok(name in map, `Missing action: ${name}`);
       }
     });

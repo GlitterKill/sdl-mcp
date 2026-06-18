@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { registerTools } from "../../dist/mcp/tools/index.js";
+import { buildFlatToolDescriptors } from "../../dist/mcp/tools/tool-descriptors.js";
 
 function makeFakeGatewayServer(names: string[]) {
   return {
@@ -79,7 +80,7 @@ describe("Gateway tool registration", () => {
     );
   });
 
-  it("registers 34 tools when gateway disabled (32 flat + 2 universal)", () => {
+  it("registers all flat tools plus 2 universal tools when gateway disabled", () => {
     const names: string[] = [];
     const fakeServer = {
       registerTool(name: string): void {
@@ -96,6 +97,8 @@ describe("Gateway tool registration", () => {
       },
     );
 
+    const expectedCount = buildFlatToolDescriptors({}).length + 2;
+
     assert.ok(
       names.includes("sdl.repo.register"),
       "expected sdl.repo.register",
@@ -111,12 +114,12 @@ describe("Gateway tool registration", () => {
     assert.ok(names.includes("sdl.info"), "expected sdl.info");
     assert.strictEqual(
       names.length,
-      34,
-      "expected 34 tools (32 flat + 2 universal)",
+      expectedCount,
+      `expected ${expectedCount} tools (${expectedCount - 2} flat + 2 universal)`,
     );
   });
 
-  it("registers 34 tools when no gateway config (32 flat + 2 universal)", () => {
+  it("registers all flat tools plus 2 universal tools when no gateway config", () => {
     const names: string[] = [];
     const fakeServer = {
       registerTool(name: string): void {
@@ -126,6 +129,8 @@ describe("Gateway tool registration", () => {
     };
 
     registerTools(fakeServer as any);
+
+    const expectedCount = buildFlatToolDescriptors({}).length + 2;
 
     assert.ok(
       names.includes("sdl.slice.refresh"),
@@ -138,8 +143,8 @@ describe("Gateway tool registration", () => {
     assert.ok(names.includes("sdl.info"), "expected sdl.info");
     assert.strictEqual(
       names.length,
-      34,
-      "expected 34 tools (32 flat + 2 universal)",
+      expectedCount,
+      `expected ${expectedCount} tools (${expectedCount - 2} flat + 2 universal)`,
     );
   });
 

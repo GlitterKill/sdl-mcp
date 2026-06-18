@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleManual } from "../../dist/code-mode/index.js";
 import { invalidateCatalog } from "../../dist/code-mode/action-catalog.js";
+import { createActionMap } from "../../dist/gateway/router.js";
 
 import {
   generateManual,
@@ -99,8 +100,13 @@ describe("code-mode manual generator", () => {
     );
   });
 
-  it("FN_NAME_MAP covers all 36 actions", () => {
-    assert.strictEqual(Object.keys(FN_NAME_MAP).length, 36);
+  it("FN_NAME_MAP covers all current actions", () => {
+    const actionNames = Object.keys(createActionMap());
+
+    assert.strictEqual(Object.keys(FN_NAME_MAP).length, actionNames.length);
+    for (const action of actionNames) {
+      assert.ok(ACTION_TO_FN[action], `Missing function name for ${action}`);
+    }
   });
 
   it("documents current workflow response shapes and limits", () => {
