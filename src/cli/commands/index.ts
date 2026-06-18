@@ -2441,12 +2441,10 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
         }
       }
 
-      // SCIP auto-ingest now runs INSIDE `indexRepoImpl` between pass 1 and
-      // pass 2 (see indexer.ts). Progress is rendered through the same
-      // `renderIndexProgress` pipeline as the rest of the index phases via
-      // a new `stage: "scipIngest"` event. The CLI no longer needs its own
-      // post-refresh SCIP block — it would duplicate work and miss the
-      // edge-quality + embedding-quality wins of running pre-pass-2.
+      // SCIP provider facts are now collected by provider-first indexing.
+      // The CLI does not run a post-refresh SCIP block; doing so would
+      // reintroduce legacy overlay ingestion outside the provider-first
+      // ownership boundary.
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.error(`  Error indexing: ${msg}`);

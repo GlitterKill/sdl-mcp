@@ -948,8 +948,7 @@ export type ScipIndexEntry = z.infer<typeof ScipIndexEntrySchema>;
  * Configuration for the scip-io CLI integration that auto-generates the
  * SCIP index before each refresh. When enabled (and `scip.enabled` is also
  * true), `indexRepo` runs `scip-io index` in the repo root before its own
- * indexing pass; the existing post-refresh ingest then picks up the freshly
- * written `index.scip`.
+ * indexing pass; provider-first then consumes the freshly written `index.scip`.
  *
  * If the binary is not found in PATH and `autoInstall` is true, sdl-mcp
  * downloads the platform-matched binary directly from the scip-io GitHub
@@ -975,15 +974,9 @@ export const ScipGeneratorConfigSchema = z.object({
     .max(5 * 60 * 60 * 1000)
     .default(10 * 60 * 1000),
   /**
-   * Delete the generator-produced `<repoRoot>/index.scip` after the post-
-   * refresh ingest has consumed it. The file is regenerated on every
-   * refresh so keeping it around just clutters the working tree (and
-   * shows up in `git status`). Set to `false` if you want to inspect
-   * the file out-of-band or have other tooling that consumes it.
-   *
-   * Only the default output location is cleaned up — if you pass
-   * `--output <custom-path>` via `args` you are on the hook for managing
-   * that file's lifecycle yourself.
+   * Deprecated compatibility field for legacy post-refresh SCIP ingest
+   * cleanup. Provider-first does not delete generated indexes after
+   * collection; keep this only so older configs continue to parse.
    */
   cleanupAfterIngest: z.boolean().default(true),
   /**

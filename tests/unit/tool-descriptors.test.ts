@@ -46,6 +46,11 @@ describe("buildFlatToolDescriptors", () => {
     }
   });
 
+  it("does not expose direct SCIP ingest as a flat MCP tool", () => {
+    const names = new Set(descriptors.map((d) => d.name));
+    assert.ok(!names.has("sdl.scip.ingest"));
+  });
+
   it("has no duplicate tool names", () => {
     const names = descriptors.map((d) => d.name);
     const unique = new Set(names);

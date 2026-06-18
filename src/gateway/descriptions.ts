@@ -28,7 +28,7 @@ export const REPO_DESCRIPTION =
   `repo.overview(level,includeHotspots?,directories?,maxDirectories?) | ` +
   `index.refresh(mode,reason?) | policy.get() | policy.set(policyPatch; budgetCaps requires maxCards+maxEstimatedTokens) | ` +
   `search.edit(mode,targeting?,query?,editMode?,operations?,planHandle?,responseMode?) | ` +
-  `scip.ingest(indexPath,dryRun?) | semantic.enrichment.refresh(dryRun?,force?,install?,languages?) | ` +
+  `semantic.enrichment.refresh(dryRun?,force?,install?,languages?) | ` +
   `semantic.enrichment.status(languages?) | usage.stats(scope?,since?,limit?,persist?)`;
 
 const AGENT_DESCRIPTION_BASE =

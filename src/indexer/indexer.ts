@@ -111,10 +111,6 @@ import {
   runToolDispatch,
   waitForToolDispatchIdle,
 } from "../mcp/dispatch-limiter.js";
-import {
-  runScipIngestInsideIndex,
-  scipIngestWillRun,
-} from "../scip/ingestion.js";
 import type {
   ScipFailureDiagnostic,
   ScipGeneratedIndexDiagnostic,
@@ -1909,22 +1905,6 @@ async function assessNoOpIncrementalRecovery(params: {
   };
 }
 
-function countScipEdgeMutations(
-  result: Awaited<ReturnType<typeof runScipIngestInsideIndex>>,
-): number {
-  return result.results.reduce(
-    (sum, item) =>
-      sum + item.edgesCreated + item.edgesUpgraded + item.edgesReplaced,
-    0,
-  );
-}
-
-function scipIngestMutatedGraph(
-  result: Awaited<ReturnType<typeof runScipIngestInsideIndex>>,
-): boolean {
-  return result.results.some((item) => item.status === "ingested");
-}
-
 const INDEX_DISPATCH_IDLE_TIMEOUT_MS = 30_000;
 
 export function resolvePostIndexSessionTimeoutMs(
@@ -2250,11 +2230,6 @@ async function indexRepoImpl(
     providerFirstExecutionPlan.shouldFallbackToLegacy
       ? providerFirstFallbackSummary(providerFirstExecutionPlan.reasons)
       : undefined;
-  const skipLegacyScipIngest =
-    providerFirst.selectedPipeline === "providerFirst" &&
-    providerFirstExecutionPlan.shouldFallbackToLegacy &&
-    providerFirst.sources.some((source) => source.type === "scip") &&
-    providerFirstExecutionPlan.fallbackReasonCode === "incrementalUnsupported";
   let providerFirstExecutedSummary: ProviderFirstExecutionSummary | undefined;
   let providerFirstScipMaterialized = false;
   let providerFirstMaterializedFiles = 0;
@@ -3374,59 +3349,22 @@ async function indexRepoImpl(
         );
       }
 
-      const scipResult =
-        !skipLegacyScipIngest && scipIngestWillRun({ scip: appConfig.scip })
-          ? await measurePhase("scipIngest", () =>
-              runScipIngestInsideIndex({
-                repoId,
-                repoRoot: repoRow.rootPath,
-                config: appConfig,
-                generatedIndexes: scipPreRefresh?.generatedIndexes,
-                generatorFailures: scipPreRefresh?.failures,
-                onProgress,
-              }),
-            )
-          : {
-              results: [],
-              fullyCoveredPaths: new Set<string>(),
-              generatedIndexes: scipPreRefresh?.generatedIndexes ?? [],
-              failures: scipPreRefresh?.failures ?? [],
-            };
-      if (scipResult.results.length > 0) {
-        const { maybeCleanupGeneratedScipIndex } =
-          await import("../scip/cleanup.js");
-        await maybeCleanupGeneratedScipIndex({
-          generatorEnabled: Boolean(appConfig.scip?.generator?.enabled),
-          cleanupAfterIngest: Boolean(
-            appConfig.scip?.generator?.cleanupAfterIngest,
-          ),
-          args: appConfig.scip?.generator?.args ?? [],
-          repoRootPath: repoRow.rootPath,
-          generatedPaths: scipResult.generatedIndexes
-            .filter((index) => !index.skipped)
-            .map((index) => index.path),
-        });
-      }
-
-      const scipEdgeMutations = countScipEdgeMutations(scipResult);
-      const scipMutatedGraph = scipIngestMutatedGraph(scipResult);
+      const scipDiagnostics = {
+        generatedIndexes: scipPreRefresh?.generatedIndexes ?? [],
+        failures: scipPreRefresh?.failures ?? [],
+        generatorCache: scipPreRefresh?.cache,
+      };
       const recoveryReasons = [...recovery.reasons];
-      if (scipMutatedGraph) {
-        recoveryReasons.push("configured SCIP index ingested");
-      }
 
       let summaryStats: SummaryBatchResult | undefined;
       let clustersComputed = 0;
       let processesTraced = 0;
       let algorithmRefresh: AlgorithmRefreshDiagnostics | undefined;
-      const needsFullPostIndexFinalize = scipMutatedGraph;
       const needsDirectPostIndexRepair =
-        !needsFullPostIndexFinalize &&
-        (recovery.needsMetrics || recovery.needsFileSummaries);
+        recovery.needsMetrics || recovery.needsFileSummaries;
       const needsDerivedRecovery =
         recovery.needsDerivedState ||
-        needsDirectPostIndexRepair ||
-        needsFullPostIndexFinalize;
+        needsDirectPostIndexRepair;
       if (needsDerivedRecovery) {
         logger.info("Recovering incomplete no-op incremental index state", {
           repoId,
@@ -3443,27 +3381,20 @@ async function indexRepoImpl(
           filesTotal: files.length,
           filesScanned: files.length,
           symbolsExtracted: 0,
-          edgesExtracted: scipEdgeMutations,
-          // Undefined scopes force full post-index repair without reparsing
-          // source files when SCIP changed the graph. Empty sets intentionally
-          // skip the full metrics path after direct missing-row repair.
-          changedFileIdsForFinalize: needsFullPostIndexFinalize
-            ? undefined
-            : new Set<string>(),
+          edgesExtracted: 0,
+          // No source files changed in this short-circuit. Empty scopes keep
+          // post-index repair limited to the missing derived rows below.
+          changedFileIdsForFinalize: new Set<string>(),
           changedTestFilePathsForFinalize: undefined,
           changedFileIdsForMemory: new Set<string>(),
-          hasIndexMutations: needsFullPostIndexFinalize,
+          hasIndexMutations: false,
           callResolutionTelemetry: createCallResolutionTelemetry({
             repoId,
             mode,
             pass2EligibleFileCount: 0,
           }),
           pass1Engine,
-          scip: {
-            generatedIndexes: scipResult.generatedIndexes,
-            failures: scipResult.failures,
-            generatorCache: scipPreRefresh?.cache,
-          },
+          scip: scipDiagnostics,
           preFinalize: needsDirectPostIndexRepair
             ? async () => {
                 if (recovery.needsMetrics) {
@@ -3504,7 +3435,7 @@ async function indexRepoImpl(
         changedFiles: 0,
         removedFiles: 0,
         symbolsIndexed: 0,
-        edgesCreated: scipEdgeMutations,
+        edgesCreated: 0,
         clustersComputed,
         processesTraced,
         durationMs: totalMs,
@@ -3513,11 +3444,7 @@ async function indexRepoImpl(
         // Phase 1 Task 1.12 — no Pass-1 ran in this short-circuit, emit zeros
         // so downstream consumers see a stable shape.
         pass1Engine,
-        scip: {
-          generatedIndexes: scipResult.generatedIndexes,
-          failures: scipResult.failures,
-          generatorCache: scipPreRefresh?.cache,
-        },
+        scip: scipDiagnostics,
         providerFirst,
         providerFirstExecution: providerFirstExecutionFallback,
         algorithmRefresh,
@@ -3841,34 +3768,15 @@ async function indexRepoImpl(
       syncSymbolIndexFromCache(symbolMapCache, symbolIndex);
     });
 
-    // --- Phase: SCIP ingest (between pass 1 and pass 2) ---
+    // --- Phase: pass 2 ---
     //
-    // SCIP overlays compiler-grade exact cross-references onto the heuristic
-    // graph pass 1 just wrote. Running it BEFORE pass 2 means:
-    //   1. Pass 2's heuristic resolvers see SCIP exact edges already in DB.
-    //      `insertEdges` carries a confidence-aware guard so pass 2 cannot
-    //      downgrade `resolution: "exact"` rows to its lower-confidence
-    //      heuristic resolutions (see ladybug-edges.ts).
-    //   2. Embeddings (later in finalize) build their import/call labels off
-    //      exact resolutions instead of `unresolved:call:*` strings, so
-    //      first-run cardhashes match what the next refresh would produce.
-    //   3. SCIP-created external Symbol nodes (npm packages etc.) become
-    //      visible to the embedding pre-pass and get embedded immediately
-    //      rather than waiting for the next index run.
-    //
-    // SCIP must observe pass-1 writes — it MERGEs against symbolIds pass 1
-    // just wrote. So we need pass1DrainPromise settled before SCIP starts.
-    //
-    // When SCIP is not configured (`scipIngestWillRun === false`), preserve
-    // the previous full-mode optimisation: pass-1 drain ↔ pass-2 overlap via
-    // Promise.all. SCIP-not-configured repos see no behaviour change beyond
-    // an unconditional drain await in incremental mode (matches prior code).
-    const willRunScip =
-      scipIngestWillRun({ scip: appConfig.scip }) &&
-      !providerFirstScipMaterialized &&
-      !skipLegacyScipIngest;
+    // SCIP/LSP provider facts are provider-first owned. The legacy path and
+    // provider-first same-run legacy fallback only parse uncovered source
+    // files; they do not ingest `.scip` overlays or upgrade edges from
+    // provider data. Pass 2 still waits for pass-1 writes so per-file DB reads
+    // see the File/Symbol rows it depends on.
     let pass2Edges: number;
-    let scipDiagnostics = {
+    const scipDiagnostics = {
       generatedIndexes: scipPreRefresh?.generatedIndexes ?? [],
       failures: scipPreRefresh?.failures ?? [],
       generatorCache: scipPreRefresh?.cache,
@@ -3880,108 +3788,35 @@ async function indexRepoImpl(
             symbols: providerFirstProviderRows.symbols,
           })
         : undefined;
-    if (willRunScip) {
-      // SCIP path: drain → SCIP → pass 2 (sequential, all writeLimiter-bound).
-      await measurePhase("pass1Drain", () => pass1DrainPromise);
-      const scipResult = await measurePhase("scipIngest", () =>
-        runScipIngestInsideIndex({
-          repoId,
-          repoRoot: repoRow.rootPath,
-          config: appConfig,
-          generatedIndexes: scipPreRefresh?.generatedIndexes,
-          generatorFailures: scipPreRefresh?.failures,
-          onProgress,
-        }),
-      );
-      scipDiagnostics = {
-        generatedIndexes: scipResult.generatedIndexes,
-        failures: scipResult.failures,
-        generatorCache: scipPreRefresh?.cache,
-      };
-      // After ingest, delete the generator-produced `<repoRoot>/index.scip`
-      // when the user has enabled both the generator and cleanup. Skipped
-      // when `--output` is in args (we can't safely guess the location);
-      // those users opt out by setting `cleanupAfterIngest: false`.
-      const { maybeCleanupGeneratedScipIndex } =
-        await import("../scip/cleanup.js");
-      await maybeCleanupGeneratedScipIndex({
-        generatorEnabled: Boolean(appConfig.scip?.generator?.enabled),
-        cleanupAfterIngest: Boolean(
-          appConfig.scip?.generator?.cleanupAfterIngest,
-        ),
-        args: appConfig.scip?.generator?.args ?? [],
-        repoRootPath: repoRow.rootPath,
-        generatedPaths: scipResult.generatedIndexes
-          .filter((index) => !index.skipped)
-          .map((index) => index.path),
-      });
-      // Per-file coverage feeds the pass-2 file-skip optimisation:
-      // resolver work avoided on files SCIP fully resolved. The
-      // `insertEdges` confidence guard already protected SCIP exact edges
-      // from being downgraded; this skip avoids the wasted CPU of running
-      // resolvers whose writes the guard would have ignored anyway.
-      pass2Edges = await measurePhase("pass2", async () =>
-        runPass2Resolvers({
-          repoId,
-          repoRoot: repoRow.rootPath,
-          mode,
-          pass2EligibleFiles,
-          changedPass2FilePaths,
-          supportsPass2FilePath,
-          pass2ResolverRegistry,
-          symbolIndex,
-          tsResolver,
-          config,
-          pass2Concurrency: appConfig.indexing?.pass2Concurrency ?? 4,
-          createdCallEdges,
-          globalNameToSymbolIds,
-          globalPreferredSymbolId,
-          callResolutionTelemetry,
-          onProgress,
-          signal,
-          scipFullyCoveredPaths: scipResult.fullyCoveredPaths,
-          pass1Extractions: pass1Acc.pass1Extractions,
-          preloadedExportedSymbols: preloadedPass2ExportedSymbols,
-          recordTiming: recordPass2SubphaseTiming,
-          writeStats: providerFirstLegacyFallbackPass2WriteStats,
-        }),
-      );
-    } else {
-      // No-SCIP path. Pass 2 calls getFileByRepoPath/getSymbolsByFile per file. Those
-      // reads must see pass-1's File/Symbol writes settled or pass 2 returns
-      // 0 edges. The previous full-mode `resolvePass2Targets is a no-op so
-      // skip the drain` shortcut was incorrect — the per-file DB reads still
-      // need pass-1 settled regardless of mode.
-      await measurePhase("pass1Drain", () => pass1DrainPromise);
-      const pass2Task = measurePhase("pass2", async () =>
-        runPass2Resolvers({
-          repoId,
-          repoRoot: repoRow.rootPath,
-          mode,
-          pass2EligibleFiles,
-          changedPass2FilePaths,
-          supportsPass2FilePath,
-          pass2ResolverRegistry,
-          symbolIndex,
-          tsResolver,
-          config,
-          pass2Concurrency: appConfig.indexing?.pass2Concurrency ?? 4,
-          createdCallEdges,
-          globalNameToSymbolIds,
-          globalPreferredSymbolId,
-          callResolutionTelemetry,
-          onProgress,
-          signal,
-          pass1Extractions: pass1Acc.pass1Extractions,
-          preloadedExportedSymbols: preloadedPass2ExportedSymbols,
-          recordTiming: recordPass2SubphaseTiming,
-          writeStats: providerFirstLegacyFallbackPass2WriteStats,
-        }),
-      );
-      // Always settle the drain before moving past pass 2 — finalizeEdges
-      // and every downstream phase reads the persisted graph state.
-      [pass2Edges] = await Promise.all([pass2Task, pass1DrainPromise]);
-    }
+    await measurePhase("pass1Drain", () => pass1DrainPromise);
+    const pass2Task = measurePhase("pass2", async () =>
+      runPass2Resolvers({
+        repoId,
+        repoRoot: repoRow.rootPath,
+        mode,
+        pass2EligibleFiles,
+        changedPass2FilePaths,
+        supportsPass2FilePath,
+        pass2ResolverRegistry,
+        symbolIndex,
+        tsResolver,
+        config,
+        pass2Concurrency: appConfig.indexing?.pass2Concurrency ?? 4,
+        createdCallEdges,
+        globalNameToSymbolIds,
+        globalPreferredSymbolId,
+        callResolutionTelemetry,
+        onProgress,
+        signal,
+        pass1Extractions: pass1Acc.pass1Extractions,
+        preloadedExportedSymbols: preloadedPass2ExportedSymbols,
+        recordTiming: recordPass2SubphaseTiming,
+        writeStats: providerFirstLegacyFallbackPass2WriteStats,
+      }),
+    );
+    // Always settle the drain before moving past pass 2: finalizeEdges and
+    // every downstream phase reads the persisted graph state.
+    [pass2Edges] = await Promise.all([pass2Task, pass1DrainPromise]);
     if (phaseTimings && pass1Acc.pass1DrainDiagnostics) {
       for (const [phaseName, phase] of Object.entries(
         pass1Acc.pass1DrainDiagnostics.phases,

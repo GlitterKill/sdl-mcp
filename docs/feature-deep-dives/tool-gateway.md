@@ -50,7 +50,7 @@ Key exceptions and edit paths:
 | ------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `sdl.query`  | `8`     | `symbol.search`, `symbol.getCard`, `slice.build`, `slice.refresh`, `slice.spillover.get`, `delta.get`, `pr.risk.analyze`, `response.get`                                                                    |
 | `sdl.code`   | `3`     | `code.needWindow`, `code.getSkeleton`, `code.getHotPath`                                                                                                                                                   |
-| `sdl.repo`   | `13`    | `repo.register`, `repo.status`, `repo.overview`, `index.refresh`, `policy.get`, `policy.set`, `usage.stats`, `file.read`, `search.edit`, `symbol.edit`, `scip.ingest`, `semantic.enrichment.refresh`, `semantic.enrichment.status` |
+| `sdl.repo`   | `12`    | `repo.register`, `repo.status`, `repo.overview`, `index.refresh`, `policy.get`, `policy.set`, `usage.stats`, `file.read`, `search.edit`, `symbol.edit`, `semantic.enrichment.refresh`, `semantic.enrichment.status` |
 | `sdl.agent`  | `11`    | `agent.feedback`, `agent.feedback.query`, `buffer.push`, `buffer.checkpoint`, `buffer.status`, `runtime.execute`, `runtime.queryOutput`, `memory.store`, `memory.query`, `memory.remove`, `memory.surface` |
 
 In Code Mode:

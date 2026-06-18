@@ -28,9 +28,9 @@ For performance tuning, use the deterministic subset workflow in [Provider-first
 
 | Value | Behavior |
 | --- | --- |
-| `"legacy"` | Always use the current indexer. |
+| `"legacy"` | Use the tree-sitter/Rust legacy indexer only when SCIP and LSP provider inputs are disabled. If SCIP or LSP inputs are enabled, SDL-MCP coerces the run to provider-first and emits a diagnostic because provider facts are provider-first owned. |
 | `"providerFirst"` | Require an executable provider-first run for full SCIP or LSP refreshes. SCIP-covered files with usable symbol facts are materialized from provider facts even when references are partial. LSP-covered files can materialize bounded document-symbol and diagnostic facts. Uncovered or provider-unusable files are routed to the legacy indexer in the same run. Incremental refreshes temporarily use the legacy incremental path. |
-| `"auto"` | Use provider-first when an executable provider path is available; otherwise use legacy. Full SCIP and LSP runs can mix provider materialization with same-run legacy fallback. If provider execution fails before trustworthy facts are available, `auto` falls back to a pure legacy run. |
+| `"auto"` | Use provider-first when an executable provider path is available; otherwise use legacy. Full SCIP and LSP runs can mix provider materialization with same-run legacy fallback. If provider execution fails before trustworthy facts are available, `auto` falls back to a pure legacy run without SCIP/LSP overlay ingestion. |
 
 `providerFirst.maxLegacyFallbackFiles` defaults to `1000000`. That high default is intentional: normal full builds should complete the graph rather than adopt a provider-only subset. Larger gaps keep the provider-primary graph, skip the expensive legacy parse, and report skipped file counts only when the emergency cap is exceeded or intentionally lowered.
 
@@ -296,7 +296,7 @@ Repeated unchanged generator runs use the generated-index cache by default. Summ
 
 ### Provider Timing Block
 
-Provider-first live progress replaces the old `SCIP ingest` document counter for provider runs. The `scipIngest` stage remains for legacy SCIP ingestion.
+Provider-first live progress replaces the old `SCIP ingest` document counter for provider runs. Legacy indexing no longer ingests SCIP overlays; provider inputs are collected and materialized by provider-first only.
 
 The final summary includes a provider-first timing block with:
 

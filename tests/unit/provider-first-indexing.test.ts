@@ -783,6 +783,82 @@ describe("provider-first indexing foundation", () => {
     );
   });
 
+  it("forces provider-first when explicit legacy mode has SCIP provider inputs", () => {
+    const selection = resolveProviderFirstPipeline({
+      indexing: IndexingConfigSchema.parse({ pipeline: "legacy" }),
+      scip: ScipConfigSchema.parse({
+        enabled: true,
+        indexes: [{ path: "index.scip" }],
+      }),
+    });
+
+    assert.equal(selection.requestedMode, "legacy");
+    assert.equal(selection.selectedPipeline, "providerFirst");
+    assert.deepEqual(
+      selection.sources.map((source) => source.type),
+      ["scip", "legacy"],
+    );
+    assert.match(selection.warnings.join(" "), /provider-first/i);
+  });
+
+  it("forces provider-first when explicit legacy mode has SCIP enabled without indexes yet", () => {
+    const selection = resolveProviderFirstPipeline({
+      indexing: IndexingConfigSchema.parse({ pipeline: "legacy" }),
+      scip: ScipConfigSchema.parse({ enabled: true }),
+    });
+
+    assert.equal(selection.requestedMode, "legacy");
+    assert.equal(selection.selectedPipeline, "providerFirst");
+    assert.deepEqual(
+      selection.sources.map((source) => source.type),
+      ["scip", "legacy"],
+    );
+    assert.match(selection.warnings.join(" "), /provider-first/i);
+  });
+
+  it("keeps explicit legacy mode when provider inputs are disabled", () => {
+    const selection = resolveProviderFirstPipeline({
+      indexing: IndexingConfigSchema.parse({ pipeline: "legacy" }),
+      scip: ScipConfigSchema.parse({ enabled: false }),
+    });
+
+    assert.equal(selection.selectedPipeline, "legacy");
+    assert.deepEqual(
+      selection.sources.map((source) => source.type),
+      ["legacy"],
+    );
+    assert.deepEqual(selection.warnings, []);
+  });
+
+  it("forces provider-first when explicit legacy mode has LSP provider inputs", () => {
+    const selection = resolveProviderFirstPipeline({
+      indexing: IndexingConfigSchema.parse({ pipeline: "legacy" }),
+      semanticEnrichment: SemanticEnrichmentConfigSchema.parse({
+        enabled: true,
+        providers: {
+          lsp: {
+            enabled: true,
+            servers: {
+              tsserver: {
+                serverId: "tsserver",
+                command: "typescript-language-server",
+                languages: ["typescript"],
+              },
+            },
+          },
+        },
+      }),
+    });
+
+    assert.equal(selection.requestedMode, "legacy");
+    assert.equal(selection.selectedPipeline, "providerFirst");
+    assert.deepEqual(
+      selection.sources.map((source) => source.type),
+      ["lsp", "legacy"],
+    );
+    assert.match(selection.warnings.join(" "), /provider-first/i);
+  });
+
   it("normalizes SCIP documents into provider-neutral facts", () => {
     const symbol =
       "scip-typescript npm example 1.0.0 src/index.ts/buildGraph().";

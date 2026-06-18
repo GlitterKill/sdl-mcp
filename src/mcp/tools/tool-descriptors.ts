@@ -46,7 +46,6 @@ import {
   UsageStatsRequestSchema,
   FileReadRequestSchema,
   FileWriteRequestSchema,
-  ScipIngestRequestSchema,
   SemanticEnrichmentRefreshRequestSchema,
   SemanticEnrichmentStatusRequestSchema,
   SearchEditRequestSchema,
@@ -94,7 +93,6 @@ import {
 import { handleUsageStats } from "./usage.js";
 import { handleFileRead } from "./file-read.js";
 import { handleFileWrite } from "./file-write.js";
-import { handleScipIngest } from "./scip.js";
 import {
   handleSemanticEnrichmentRefresh,
   handleSemanticEnrichmentStatus,
@@ -362,13 +360,6 @@ export function buildFlatToolDescriptors(
         "Write to a single file (indexed or non-indexed) with targeted modes; use sdl.search.edit for cross-file batching: full content, line replacement, pattern replacement, JSON path update, insert, or append",
       schema: FileWriteRequestSchema,
       handler: handleFileWrite,
-    },
-    {
-      name: "sdl.scip.ingest",
-      description:
-        "Ingest a pre-built SCIP index file to overlay compiler-grade cross-references onto the symbol graph. Supports dry-run mode.",
-      schema: ScipIngestRequestSchema,
-      handler: handleScipIngest,
     },
     {
       name: "sdl.semantic.enrichment.refresh",

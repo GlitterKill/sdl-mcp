@@ -556,10 +556,10 @@ let installInFlight: Promise<string> | null = null;
  *
  * A second caller that arrives while the first is still running will await
  * the first's promise (without re-running scip-io). If the first call
- * completes successfully, the fresh `index.scip` is already on disk — the
- * second caller's indexer will pick it up via the existing post-refresh
- * auto-ingest. If the first call fails (non-fatal), the second call is
- * free to try again by re-entering the wrapper.
+ * completes successfully, the fresh `index.scip` is already on disk and the
+ * second caller's provider-first indexer can collect it. If the first call
+ * fails (non-fatal), the second call is free to try again by re-entering the
+ * wrapper.
  */
 const perRepoRunLocks = new Map<string, Promise<ScipIoPreRefreshResult>>();
 

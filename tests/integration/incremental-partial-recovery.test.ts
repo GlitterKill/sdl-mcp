@@ -21,7 +21,6 @@ import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { getDerivedState } from "../../dist/db/ladybug-derived-state.js";
 import { getScipIngestionRecord } from "../../dist/db/ladybug-scip.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
-import { buildTestScipIndex } from "../fixtures/scip/builder.ts";
 
 const REPO_ID = "incremental-partial-recovery-repo";
 
@@ -55,6 +54,11 @@ describe("incremental index partial-run recovery", () => {
       "utf8",
     );
     writeFileSync(
+      join(repoDir, "index.scip"),
+      "disabled legacy SCIP input should not be ingested",
+      "utf8",
+    );
+    writeFileSync(
       join(repoDir, "package.json"),
       JSON.stringify({ name: "partial-recovery-fixture", version: "1.0.0" }),
       "utf8",
@@ -74,7 +78,7 @@ describe("incremental index partial-run recovery", () => {
           semantic: { enabled: false },
           liveIndex: { enabled: false },
           scip: {
-            enabled: true,
+            enabled: false,
             indexes: [{ path: "index.scip" }],
             externalSymbols: { enabled: true, maxPerIndex: 10_000 },
             confidence: 0.95,
@@ -143,9 +147,14 @@ describe("incremental index partial-run recovery", () => {
     }
   });
 
-  it("recovers configured SCIP and derived state during no-op incremental refresh", async () => {
+  it("recovers derived state during no-op incremental refresh without legacy SCIP ingestion", async () => {
     const full = await indexRepo(REPO_ID, "full");
     assert.ok(full.versionId.length > 0);
+    assert.equal(
+      await getScipIngestionRecord(await getLadybugConn(), REPO_ID, "index.scip"),
+      null,
+      "legacy full indexing should not ingest SCIP indexes when SCIP is disabled",
+    );
 
     await withWriteConn(async (wConn) => {
       await exec(wConn, "MATCH (d:DerivedState {repoId: $repoId}) DETACH DELETE d", {
@@ -185,45 +194,14 @@ describe("incremental index partial-run recovery", () => {
       null,
     );
 
-    const greetScipSymbol =
-      "scip-typescript npm partial-recovery-fixture 1.0.0 src/main.ts/greet().";
-    const farewellScipSymbol =
-      "scip-typescript npm partial-recovery-fixture 1.0.0 src/main.ts/farewell().";
-    writeFileSync(
-      join(repoDir, "index.scip"),
-      buildTestScipIndex({
-        metadata: {
-          version: 0,
-          toolName: "scip-typescript",
-          toolVersion: "0.3.0",
-          projectRoot: `file://${repoDir}`,
-        },
-        documents: [
-          {
-            language: "TypeScript",
-            relativePath: "src/main.ts",
-            symbols: [
-              { symbol: greetScipSymbol, kind: 17, displayName: "greet" },
-              { symbol: farewellScipSymbol, kind: 17, displayName: "farewell" },
-            ],
-            occurrences: [
-              { range: [0, 16, 21], symbol: greetScipSymbol, symbolRoles: 1 },
-              { range: [4, 16, 24], symbol: farewellScipSymbol, symbolRoles: 1 },
-              { range: [1, 9, 17], symbol: farewellScipSymbol, symbolRoles: 8 },
-            ],
-          },
-        ],
-        externalSymbols: [],
-      }),
-    );
-
     const incremental = await indexRepo(REPO_ID, "incremental");
 
     assert.equal(incremental.changedFiles, 0);
     const conn = await getLadybugConn();
-    assert.ok(
+    assert.equal(
       await getScipIngestionRecord(conn, REPO_ID, "index.scip"),
-      "no-op incremental recovery should ingest configured SCIP indexes",
+      null,
+      "legacy no-op incremental recovery should not ingest SCIP indexes",
     );
     const derived = await getDerivedState(REPO_ID);
     assert.ok(derived, "no-op incremental recovery should recreate DerivedState");

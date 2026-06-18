@@ -266,37 +266,21 @@ Triggers re-indexing of a repository in either full or incremental mode.
 
 ---
 
-### sdl.scip.ingest
-
-Ingests a pre-built SCIP protobuf index (`.scip`) and overlays compiler-grade cross-references onto the existing tree-sitter symbol graph.
-
-**Parameters:**
-
-| Parameter   | Type    | Required | Description                                 |
-| :---------- | :------ | :------- | :------------------------------------------ |
-| `repoId`    | string  | Yes      | Repository identifier                       |
-| `indexPath` | string  | Yes      | Absolute or repo-relative `.scip` file path |
-| `dryRun`    | boolean | No       | Parse/count without writing to the graph DB |
-
-This compatibility action remains SCIP-only. LSP runs through the semantic enrichment bridge.
-
----
-
 ### sdl.semantic.enrichment.refresh
 
-Runs provider-backed graph precision enrichment. Selection is one source per language in priority order: SCIP, then LSP. SCIP keeps its optimized pass-1-drain -> SCIP-ingest -> pass-2 placement when indexing is configured; LSP runs as post-index enrichment.
+Reports provider-backed semantic source selection. SCIP and LSP facts are graph-mutating provider inputs, so refresh does not ingest them directly; run `sdl.index.refresh` with provider inputs enabled to materialize provider-first facts.
 
 **Parameters:**
 
 | Parameter   | Type     | Required | Description                                                                   |
 | :---------- | :------- | :------- | :---------------------------------------------------------------------------- |
 | `repoId`    | string   | Yes      | Repository identifier                                                         |
-| `dryRun`    | boolean  | No       | Plan and parse without graph writes                                           |
-| `force`     | boolean  | No       | Bypass compatible cache decisions where supported                             |
+| `dryRun`    | boolean  | No       | Preserve response compatibility; no graph writes are performed                |
+| `force`     | boolean  | No       | Preserved for compatibility                                                   |
 | `install`   | boolean  | No       | Allow verified downloads only when `semanticEnrichment.installPolicy` permits |
 | `languages` | string[] | No       | Restrict refresh to specific language IDs                                     |
 
-**Response includes:** provider selections, skipped-provider reasons, provider run records, SCIP compatibility results, and non-fatal skips such as disabled install policy.
+**Response includes:** provider selections and skipped-provider reasons. SCIP/LSP selections are skipped with provider-first guidance.
 
 ---
 

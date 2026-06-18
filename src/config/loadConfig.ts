@@ -210,10 +210,10 @@ export function loadConfig(configPath?: string): AppConfig {
       }
     }
 
-    // scip-io integration: when the generator is enabled (and SCIP ingest is
-    // also enabled), ensure the produced index.scip is in scip.indexes so the
-    // existing post-refresh auto-ingest picks it up. Users only need
-    // `scip.generator.enabled = true` to opt in — they don't have to also
+    // scip-io integration: when the generator is enabled (and SCIP provider
+    // input is also enabled), ensure the produced index.scip is in scip.indexes
+    // so provider-first indexing can collect it. Users only need
+    // `scip.generator.enabled = true` to opt in; they do not have to also
     // remember to add `{ "path": "index.scip" }` to scip.indexes.
     if (finalConfig.scip?.enabled && finalConfig.scip?.generator?.enabled) {
       const hasIndexEntry = finalConfig.scip.indexes.some(

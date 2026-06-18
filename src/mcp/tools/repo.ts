@@ -746,12 +746,9 @@ export async function handleIndexRefresh(
     return response;
   };
 
-  // Post-refresh cache invalidation. SCIP auto-ingest used to live here
-  // wrapped in `withRepoWriteHeavyLock` + `waitForDerivedRefreshIdle` +
-  // `flushStaleFinalizers`. It now runs INSIDE `indexRepoImpl` between
-  // pass 1 and pass 2, so every consumer (CLI, MCP, watcher) gets the
-  // same exact-edge-aware embeddings on the first index pass — see
-  // `runScipIngestInsideIndex` in src/scip/ingestion.ts.
+  // Post-refresh cache invalidation. Provider facts are now owned by the
+  // provider-first indexer; this hook only handles caches and optional semantic
+  // enrichment after `indexRepo` has finished.
   const runPostRefresh = async (_conn: Connection): Promise<void> => {
     clearSliceCache();
     clearOverviewCache();

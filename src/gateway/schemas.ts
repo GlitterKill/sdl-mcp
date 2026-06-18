@@ -600,24 +600,6 @@ const SearchEditAction = z
     }
   });
 
-const ScipIngestAction = z.object({
-  action: z.literal("scip.ingest"),
-  indexPath: z
-    .string()
-    .min(1)
-    .describe(
-      "Path to the SCIP protobuf index file (.scip). " +
-        "Can be absolute or relative to the repository root.",
-    ),
-  dryRun: z
-    .boolean()
-    .optional()
-    .default(false)
-    .describe(
-      "If true, validate and parse the SCIP index without writing to the graph database.",
-    ),
-});
-
 const SemanticEnrichmentRefreshAction = z.object({
   action: z.literal("semantic.enrichment.refresh"),
   dryRun: z.boolean().optional().default(false),
@@ -647,7 +629,6 @@ export const RepoGatewaySchema = z
       FileReadAction,
       SearchEditAction,
       SymbolEditAction,
-      ScipIngestAction,
       SemanticEnrichmentRefreshAction,
       SemanticEnrichmentStatusAction,
     ]),
@@ -843,7 +824,6 @@ export const REPO_ACTIONS = [
   "repo.status",
   "repo.overview",
   "index.refresh",
-  "scip.ingest",
   "policy.get",
   "policy.set",
   "usage.stats",

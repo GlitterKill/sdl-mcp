@@ -1,30 +1,18 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  ScipConfigSchema,
   SemanticEnrichmentConfigSchema,
   type AppConfig,
-  type ScipConfig,
   type ScipIndexEntry,
   type SemanticEnrichmentConfig,
-  type SemanticEnrichmentLspServerConfig,
 } from "../config/types.js";
-import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
+import { getLadybugConn } from "../db/ladybug.js";
 import {
   getLatestSemanticProviderRuns,
-  mergeSemanticProviderRun,
 } from "../db/ladybug-semantic.js";
 import { getRepo } from "../db/ladybug-repos.js";
-import { getLatestVersion } from "../db/ladybug-versions.js";
-import { markDerivedStateDirty } from "../db/ladybug-derived-state.js";
 import { ScipIngestionError } from "../domain/errors.js";
-import { clearOverviewCache } from "../graph/overview.js";
-import { clearSliceCache } from "../graph/sliceCache.js";
-import { symbolCardCache } from "../graph/cache.js";
-import { invalidateGraphSnapshot } from "../graph/graphSnapshotCache.js";
-import { ingestScipIndex } from "../scip/ingestion.js";
 import type { ScipIngestResponse } from "../scip/types.js";
-import { logger } from "../util/logger.js";
 import { normalizePath } from "../util/paths.js";
 import {
   deriveSemanticLanguagePacks,
@@ -39,8 +27,6 @@ import type {
   PersistedSemanticProviderRun,
   SemanticProviderRun,
 } from "./types.js";
-import { runLspCallDefinitionEnrichment } from "./providers/lsp/runner.js";
-import { writeSemanticIndex } from "./writer.js";
 
 export interface SemanticEnrichmentRefreshRequest {
   repoId: string;
@@ -140,111 +126,25 @@ export async function refreshSemanticEnrichment(
   for (const providerType of request.skipProviders ?? []) {
     selectedProviderTypes.delete(providerType);
   }
-  const shouldFilterProviderLanguages = config.languages.length > 0;
 
-  if (selectedProviderTypes.has("scip")) {
-    const scipConfig = resolveScipConfig(appConfig);
-    const indexes = resolveScipIndexes(appConfig, config);
-    const scipLanguages = selectedLanguages(selections, "scip");
-    for (const index of indexes) {
-      const result = await ingestScipIndex(
-        {
-          repoId: request.repoId,
-          indexPath: index.path,
-          dryRun,
-          force: request.force === true,
-          languages: shouldFilterProviderLanguages ? scipLanguages : undefined,
-        },
-        scipConfig,
-      );
-      scipResults.push(result);
-      const run = scipResultToProviderRun({
-        repoId: request.repoId,
-        indexPath: index.path,
-        result,
-        languages: scipLanguages,
-        dryRun,
+  const providerFirstOnlyReason =
+    "SCIP and LSP provider facts are indexed only by provider-first indexing; run sdl.index.refresh with provider inputs enabled";
+  for (const providerType of selectedProviderTypes) {
+    const languages = selectedLanguages(selections, providerType);
+    if (languages.length === 0) {
+      skipped.push({
+        providerType,
+        reason: providerFirstOnlyReason,
       });
-      runs.push(run);
-      if (!dryRun) {
-        await withWriteConn((writeConn) =>
-          mergeSemanticProviderRun(writeConn, run),
-        );
-      }
+      continue;
     }
-  }
-
-  if (selectedProviderTypes.has("lsp")) {
-    for (const languageId of selectedLanguages(selections, "lsp")) {
-      const serverEntry = resolveLspServer(config, languageId);
-      if (!serverEntry) {
-        skipped.push({
-          providerType: "lsp",
-          languageId,
-          reason: "no enabled LSP server configured for language",
-        });
-        continue;
-      }
-
-      const result = await runLspCallDefinitionEnrichment({
-        conn,
-        repoId: request.repoId,
-        repoRoot: repo.rootPath,
+    for (const languageId of languages) {
+      skipped.push({
+        providerType,
         languageId,
-        serverKey: serverEntry.serverKey,
-        server: serverEntry.server,
-        providerVersion: config.providers.lsp?.providerVersion,
-        confidence: config.providers.lsp?.confidence ?? 0.8,
-        timeoutMs: config.timeoutMs,
-        candidateLimit: config.providers.lsp?.candidateLimit ?? 200,
+        reason: providerFirstOnlyReason,
       });
-      for (const skip of result.skipped) {
-        skipped.push({
-          providerType: "lsp",
-          languageId: skip.languageId,
-          reason: skip.reason,
-        });
-      }
-
-      if (result.failedRun) {
-        runs.push(result.failedRun);
-        if (!dryRun) {
-          await withWriteConn((writeConn) =>
-            mergeSemanticProviderRun(writeConn, result.failedRun!),
-          );
-        }
-        continue;
-      }
-
-      if (result.skippedRun) {
-        runs.push(result.skippedRun);
-        if (!dryRun) {
-          await withWriteConn((writeConn) =>
-            mergeSemanticProviderRun(writeConn, result.skippedRun!),
-          );
-        }
-        continue;
-      }
-
-      if (result.index) {
-        const index = result.index;
-        const writeResult = dryRun
-          ? await writeSemanticIndex(conn, index, {
-              dryRun: true,
-              extraEdgesSkipped: result.skipped.length,
-            })
-          : await withWriteConn((writeConn) =>
-              writeSemanticIndex(writeConn, index, {
-                extraEdgesSkipped: result.skipped.length,
-              }),
-            );
-        runs.push(writeResult.run);
-      }
     }
-  }
-
-  if (!dryRun && semanticRefreshTouchedEdges(runs, scipResults)) {
-    await invalidateSemanticEnrichmentState(request.repoId);
   }
 
   return {
@@ -287,47 +187,6 @@ export async function getSemanticEnrichmentStatus(
     selections,
     lastRuns,
   };
-}
-
-function semanticRefreshTouchedEdges(
-  runs: readonly SemanticProviderRun[],
-  scipResults: readonly ScipIngestResponse[],
-): boolean {
-  return (
-    runs.some(
-      (run) =>
-        run.status === "completed" &&
-        run.edgesCreated + run.edgesUpgraded + run.edgesReplaced > 0,
-    ) ||
-    scipResults.some(
-      (result) =>
-        result.edgesCreated + result.edgesUpgraded + result.edgesReplaced > 0,
-    )
-  );
-}
-
-async function invalidateSemanticEnrichmentState(repoId: string): Promise<void> {
-  clearSliceCache();
-  clearOverviewCache();
-  symbolCardCache.clear();
-  invalidateGraphSnapshot(repoId);
-
-  const conn = await getLadybugConn();
-  const latestVersion = await getLatestVersion(conn, repoId);
-  if (!latestVersion) {
-    logger.debug("Semantic enrichment cache invalidation skipped derived state", {
-      repoId,
-      reason: "no latest version",
-    });
-    return;
-  }
-
-  await markDerivedStateDirty(repoId, latestVersion.versionId, {
-    clusters: true,
-    processes: true,
-    algorithms: true,
-    embeddings: true,
-  });
 }
 
 function filterProviderRunsByLanguages(
@@ -391,10 +250,6 @@ function detectSemanticTools(
   return detected;
 }
 
-function resolveScipConfig(appConfig: AppConfig): ScipConfig {
-  return ScipConfigSchema.parse(appConfig.scip ?? {});
-}
-
 function resolveScipIndexes(
   appConfig: AppConfig,
   config: SemanticEnrichmentConfig,
@@ -412,21 +267,6 @@ function selectedLanguages(
   return selections
     .filter((selection) => selection.selected?.providerType === providerType)
     .map((selection) => selection.languageId);
-}
-
-function resolveLspServer(
-  config: SemanticEnrichmentConfig,
-  languageId: string,
-): { serverKey: string; server: SemanticEnrichmentLspServerConfig } | null {
-  for (const [serverKey, server] of Object.entries(
-    config.providers.lsp?.servers ?? {},
-  )) {
-    if (server.enabled === false) continue;
-    if (server.languages.includes(languageId)) {
-      return { serverKey, server };
-    }
-  }
-  return null;
 }
 
 export function scipResultToProviderRun(params: {

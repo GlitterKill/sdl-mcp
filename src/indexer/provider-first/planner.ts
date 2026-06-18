@@ -18,7 +18,12 @@ export function resolveProviderFirstPipeline(
   input: ResolveProviderFirstPipelineInput,
 ): ProviderFirstPipelineSelection {
   const requestedMode = input.indexing?.pipeline ?? "auto";
-  if (requestedMode === "legacy") {
+  const providerSources = [
+    ...scipSources(input.scip, input.semanticEnrichment),
+    ...lspSources(input.semanticEnrichment),
+  ];
+
+  if (requestedMode === "legacy" && providerSources.length === 0) {
     return {
       requestedMode,
       selectedPipeline: "legacy",
@@ -26,11 +31,6 @@ export function resolveProviderFirstPipeline(
       warnings: [],
     };
   }
-
-  const providerSources = [
-    ...scipSources(input.scip, input.semanticEnrichment),
-    ...lspSources(input.semanticEnrichment),
-  ];
 
   if (providerSources.length === 0 && requestedMode === "auto") {
     return {
@@ -42,7 +42,11 @@ export function resolveProviderFirstPipeline(
   }
 
   const warnings =
-    providerSources.length === 0
+    requestedMode === "legacy"
+      ? [
+          "indexing.pipeline is legacy but SCIP or LSP provider inputs are enabled; provider-first is required for provider-owned facts",
+        ]
+      : providerSources.length === 0
       ? ["indexing.pipeline is providerFirst but no SCIP or LSP providers are configured"]
       : [];
 
@@ -65,15 +69,15 @@ function scipSources(
   semanticEnrichment: SemanticEnrichmentConfig | undefined,
 ): ProviderSourcePlan[] {
   const sources: ProviderSourcePlan[] = [];
-  const topLevelScipConfigured =
-    scip?.enabled === true &&
-    (scip.indexes.length > 0 || scip.generator.enabled === true);
-  if (topLevelScipConfigured) {
+  if (scip?.enabled === true) {
     sources.push({
       type: "scip",
       providerId: "scip",
       priority: 0,
-      reason: "top-level SCIP indexes or generator configured",
+      reason:
+        scip.indexes.length > 0 || scip.generator.enabled === true
+          ? "top-level SCIP indexes or generator configured"
+          : "top-level SCIP provider enabled",
     });
   }
 
