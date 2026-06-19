@@ -459,6 +459,21 @@ describe("LadybugDB Search Queries", () => {
     assert.strictEqual(results.length, 2);
   });
 
+  it("batch search preserves token order and per-token limits", { skip: !ladybugAvailable }, async () => {
+    const [fooResults, configResults] = await queries.searchSymbolsLiteBatch(
+      conn as unknown as import("kuzu").Connection,
+      repoId,
+      ["Foo", "resolveConfig"],
+      1,
+      ["class", "function"],
+    );
+
+    assert.strictEqual(fooResults.length, 1);
+    assert.strictEqual(fooResults[0]!.symbolId, "sym-foo-class");
+    assert.strictEqual(configResults.length, 1);
+    assert.strictEqual(configResults[0]!.symbolId, "sym-resolve-exported");
+  });
+
   it(
     "prefers src symbols over tests for multi-term ties",
     { skip: !ladybugAvailable },

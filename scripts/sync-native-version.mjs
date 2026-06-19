@@ -1,20 +1,24 @@
 #!/usr/bin/env node
 
-// Sync native version across all platform npm dirs and main optionalDependencies.
+// Sync release-coupled optional package versions across native packages,
+// Watchman packages, and the main package.
 //
 // Usage:
 //   node scripts/sync-native-version.mjs [version]
 //
 // If no version is provided, reads from native/package.json.
-// Propagates to all native/npm/*/package.json, native/package.json
-// optionalDependencies, and the main package.json sdl-mcp-native entry.
-
-import { readFileSync, writeFileSync, readdirSync, statSync } from "fs";
-import { join, dirname } from "path";
+import { readFileSync, readdirSync, statSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
+const RELEASE_ROOT_OPTIONAL_DEPENDENCIES = [
+  "sdl-mcp-native",
+  "sdl-mcp-watchman",
+  "sdl-mcp-watchman-linux-x64",
+  "sdl-mcp-watchman-win32-x64",
+];
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf-8"));
@@ -24,83 +28,129 @@ function writeJson(path, data) {
   writeFileSync(path, JSON.stringify(data, null, 2) + "\n", "utf-8");
 }
 
-// Determine version
+function syncPackageVersion(pkgPath, label, version) {
+  const pkg = readJson(pkgPath);
+  let changed = false;
+  if (pkg.version !== version) {
+    pkg.version = version;
+    changed = true;
+  }
+  if (pkg.optionalDependencies) {
+    for (const dep of Object.keys(pkg.optionalDependencies)) {
+      if (pkg.optionalDependencies[dep] !== version) {
+        pkg.optionalDependencies[dep] = version;
+        changed = true;
+      }
+    }
+  }
+  if (changed) {
+    writeJson(pkgPath, pkg);
+    console.log(`  Updated ${label} -> ${version}`);
+  } else {
+    console.log(`  ${label} already at ${version}`);
+  }
+  return pkg;
+}
+
+function syncPackageDirVersions(dirPath, label, version) {
+  let count = 0;
+  for (const entry of readdirSync(dirPath)) {
+    const pkgPath = join(dirPath, entry, "package.json");
+    try {
+      if (!statSync(pkgPath).isFile()) continue;
+    } catch {
+      continue;
+    }
+    syncPackageVersion(pkgPath, `${label}/${entry}/package.json`, version);
+    count++;
+  }
+  return count;
+}
+
 const explicitVersion = process.argv[2];
 const nativePkgPath = join(root, "native", "package.json");
 const nativePkg = readJson(nativePkgPath);
 const version = explicitVersion || nativePkg.version;
 
-console.log(`Syncing native version: ${version}`);
+console.log(`Syncing release-coupled package versions: ${version}`);
 
-// 1. Update native/package.json version + optionalDependencies
-let nativeChanged = false;
-if (nativePkg.version !== version) {
-  nativePkg.version = version;
-  nativeChanged = true;
-}
-if (nativePkg.optionalDependencies) {
-  for (const dep of Object.keys(nativePkg.optionalDependencies)) {
-    if (nativePkg.optionalDependencies[dep] !== version) {
-      nativePkg.optionalDependencies[dep] = version;
-      nativeChanged = true;
-    }
-  }
-}
-if (nativeChanged) {
-  writeJson(nativePkgPath, nativePkg);
-  console.log(`  Updated native/package.json -> ${version}`);
-} else {
-  console.log(`  native/package.json already at ${version}`);
-}
+const syncedNativePkg = syncPackageVersion(
+  nativePkgPath,
+  "native/package.json",
+  version,
+);
+const nativePlatformCount = syncPackageDirVersions(
+  join(root, "native", "npm"),
+  "native/npm",
+  version,
+);
 
-// 2. Update all native/npm/*/package.json
-const npmDir = join(root, "native", "npm");
-let platformCount = 0;
-for (const entry of readdirSync(npmDir)) {
-  const pkgPath = join(npmDir, entry, "package.json");
-  try {
-    if (!statSync(pkgPath).isFile()) continue;
-  } catch {
-    continue;
-  }
+const watchmanPkgPath = join(root, "watchman", "package.json");
+const syncedWatchmanPkg = syncPackageVersion(
+  watchmanPkgPath,
+  "watchman/package.json",
+  version,
+);
+const watchmanPlatformCount = syncPackageDirVersions(
+  join(root, "watchman", "npm"),
+  "watchman/npm",
+  version,
+);
 
-  const pkg = readJson(pkgPath);
-  if (pkg.version !== version) {
-    pkg.version = version;
-    writeJson(pkgPath, pkg);
-    console.log(`  Updated native/npm/${entry}/package.json -> ${version}`);
-  } else {
-    console.log(`  native/npm/${entry}/package.json already at ${version}`);
-  }
-  platformCount++;
-}
-
-// 3. Update main package.json optionalDependencies
 const mainPkgPath = join(root, "package.json");
 const mainPkg = readJson(mainPkgPath);
-if (
-  mainPkg.optionalDependencies &&
-  mainPkg.optionalDependencies["sdl-mcp-native"] !== version
-) {
-  mainPkg.optionalDependencies["sdl-mcp-native"] = version;
+let mainChanged = false;
+for (const depName of RELEASE_ROOT_OPTIONAL_DEPENDENCIES) {
+  if (
+    mainPkg.optionalDependencies &&
+    mainPkg.optionalDependencies[depName] !== version
+  ) {
+    mainPkg.optionalDependencies[depName] = version;
+    mainChanged = true;
+    console.log(`  Updated package.json ${depName} -> ${version}`);
+  } else {
+    console.log(`  package.json ${depName} already at ${version}`);
+  }
+}
+if (mainChanged) {
   writeJson(mainPkgPath, mainPkg);
-  console.log(`  Updated package.json sdl-mcp-native -> ${version}`);
-} else {
-  console.log(`  package.json sdl-mcp-native already at ${version}`);
 }
 
-// 4. Update package-lock.json native entries when present
 const lockPath = join(root, "package-lock.json");
 let lockChanged = false;
 try {
   const lock = readJson(lockPath);
   const lockRoot = lock.packages?.[""];
-  if (
-    lockRoot?.optionalDependencies &&
-    lockRoot.optionalDependencies["sdl-mcp-native"] !== version
-  ) {
-    lockRoot.optionalDependencies["sdl-mcp-native"] = version;
+  for (const depName of RELEASE_ROOT_OPTIONAL_DEPENDENCIES) {
+    if (
+      lockRoot?.optionalDependencies &&
+      lockRoot.optionalDependencies[depName] !== version
+    ) {
+      lockRoot.optionalDependencies[depName] = version;
+      lockChanged = true;
+    }
+  }
+
+  for (const depName of Object.keys(syncedWatchmanPkg.optionalDependencies ?? {})) {
+    const depEntry = lock.packages?.[`node_modules/${depName}`];
+    if (depEntry?.version && depEntry.version !== version) {
+      depEntry.version = version;
+      lockChanged = true;
+    }
+  }
+
+  const watchmanLockEntry = lock.packages?.["node_modules/sdl-mcp-watchman"];
+  if (watchmanLockEntry?.version && watchmanLockEntry.version !== version) {
+    watchmanLockEntry.version = version;
     lockChanged = true;
+  }
+  if (watchmanLockEntry?.optionalDependencies) {
+    for (const depName of Object.keys(watchmanLockEntry.optionalDependencies)) {
+      if (watchmanLockEntry.optionalDependencies[depName] !== version) {
+        watchmanLockEntry.optionalDependencies[depName] = version;
+        lockChanged = true;
+      }
+    }
   }
 
   const nativeLockEntry = lock.packages?.["node_modules/sdl-mcp-native"];
@@ -119,26 +169,24 @@ try {
     }
   }
 
-  if (nativePkg.optionalDependencies) {
-    for (const depName of Object.keys(nativePkg.optionalDependencies)) {
-      const depEntry = lock.packages?.[`node_modules/${depName}`];
-      if (depEntry?.version && depEntry.version !== version) {
-        depEntry.version = version;
-        lockChanged = true;
-      }
+  for (const depName of Object.keys(syncedNativePkg.optionalDependencies ?? {})) {
+    const depEntry = lock.packages?.[`node_modules/${depName}`];
+    if (depEntry?.version && depEntry.version !== version) {
+      depEntry.version = version;
+      lockChanged = true;
     }
   }
 
   if (lockChanged) {
     writeJson(lockPath, lock);
-    console.log(`  Updated package-lock.json native entries -> ${version}`);
+    console.log(`  Updated package-lock.json release-coupled optional entries -> ${version}`);
   } else {
-    console.log("  package-lock.json native entries already in sync");
+    console.log("  package-lock.json release-coupled optional entries already in sync");
   }
 } catch {
   console.log("  package-lock.json not found or unreadable, skipping lock sync");
 }
 
 console.log(
-  `\nDone. Synced version ${version} across ${platformCount} platform packages.`
+  `\nDone. Synced version ${version} across ${nativePlatformCount} native platform packages and ${watchmanPlatformCount} Watchman platform packages.`,
 );

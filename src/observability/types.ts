@@ -49,6 +49,8 @@ export interface RetrievalMetrics {
   byMode: Record<string, number>;
   /** FTS / vector / PPR / hybrid candidate volume per source. */
   candidateCountPerSource: Record<string, number>;
+  /** Per-phase retrieval latency buckets keyed by phase name. */
+  phaseLatencyMs: Record<string, LatencyPhaseMetrics>;
   /** Count by retrievalType (e.g. "context", "search"). */
   byRetrievalType: Record<string, number>;
   /** Count of empty-result retrievals. */
@@ -68,8 +70,29 @@ export interface BeamSummary {
   avgEvicted: number;
   /** Average rejected node count per slice. */
   avgRejected: number;
+  /** Average maximum frontier size reached during slice builds. */
+  avgFrontierMaxSize: number;
+  /** P95 maximum frontier size reached during slice builds. */
+  p95FrontierMaxSize: number;
   /** Number of slice handles currently retained for explain queries. */
   retainedExplainHandles: number;
+}
+
+export interface DeltaMetrics {
+  /** Total blast-radius computations observed. */
+  totalBlastRadiusComputations: number;
+  /** Average blast-radius computation duration in milliseconds. */
+  avgBlastRadiusLatencyMs: number;
+  /** P95 blast-radius computation duration in milliseconds. */
+  p95BlastRadiusLatencyMs: number;
+  /** Average DB round trips per changed symbol across blast-radius runs. */
+  avgDbRoundTripsPerChangedSymbol: number;
+  /** Average fallback shortest-path explanation latency in milliseconds. */
+  avgPathExplanationLatencyMs: number;
+  /** P95 fallback shortest-path explanation latency in milliseconds. */
+  p95PathExplanationLatencyMs: number;
+  /** Total fallback shortest-path queries issued for explanations. */
+  fallbackPathQueryCount: number;
 }
 
 export interface IndexingMetrics {
@@ -458,6 +481,7 @@ export interface ObservabilitySnapshot {
   cache: CacheMetrics;
   retrieval: RetrievalMetrics;
   beam: BeamSummary;
+  delta: DeltaMetrics;
   indexing: IndexingMetrics;
   tokenEfficiency: TokenEfficiencyMetrics;
   predictiveContext: PredictiveContextMetrics;

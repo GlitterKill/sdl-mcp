@@ -3,10 +3,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
+const root = process.cwd();
+
 describe("npx packaging metadata", () => {
   it("includes correct bin entry and runtime asset files", () => {
     const pkg = JSON.parse(
-      readFileSync(join(process.cwd(), "package.json"), "utf8"),
+      readFileSync(join(root, "package.json"), "utf8"),
     ) as {
       bin?: Record<string, string>;
       files?: string[];
@@ -19,6 +21,7 @@ describe("npx packaging metadata", () => {
     assert.ok(files.has("templates/*.json"));
     assert.ok(files.has("templates/*.template"));
     assert.ok(files.has("scripts/postinstall.mjs"));
+    assert.ok(files.has("scripts/postinstall-watchman.mjs"));
     assert.ok(files.has("scripts/postinstall-tree-sitter.mjs"));
     assert.ok(files.has("scripts/postinstall-prune.mjs"));
     assert.ok(files.has("scripts/postinstall-models.mjs"));

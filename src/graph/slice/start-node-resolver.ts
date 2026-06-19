@@ -586,33 +586,31 @@ export async function resolveStartNodesLadybug(
         }
       }
     } else {
-      // Legacy fallback: token-by-token searchSymbolsLite fan-out
+      // Legacy fallback: batch the token search, then replay token order
+      // locally so start-node priority remains stable.
       const taskTokens = collectTaskTextSeedTokens(request.taskText);
       let taskTextSeedCount = 0;
-      for (const token of taskTokens) {
+      const perTokenLimit = Math.max(
+        1,
+        Math.min(
+          DB_QUERY_LIMIT_DEFAULT,
+          TASK_TEXT_TOKEN_QUERY_LIMIT,
+          effectiveTaskTextLimit,
+        ),
+      );
+      const resultsByToken = await ladybugDb.searchSymbolsLiteBatch(
+        conn,
+        repoId,
+        taskTokens,
+        perTokenLimit,
+      );
+      for (const results of resultsByToken) {
         if (
           taskTextSeedCount >= effectiveTaskTextLimit ||
           startNodes.size >= limits.maxTotalStartNodes
         ) {
           break;
         }
-        const remaining = effectiveTaskTextLimit - taskTextSeedCount;
-        const perTokenLimit = Math.max(
-          1,
-          Math.min(
-            DB_QUERY_LIMIT_DEFAULT,
-            TASK_TEXT_TOKEN_QUERY_LIMIT,
-            remaining,
-          ),
-        );
-
-        const results = await ladybugDb.searchSymbolsLite(
-          conn,
-          repoId,
-          token,
-          perTokenLimit,
-        );
-
         for (const result of results) {
           if (
             taskTextSeedCount >= effectiveTaskTextLimit ||
@@ -639,9 +637,18 @@ export async function resolveStartNodesLadybug(
       .toLowerCase()
       .split(/[\s,;:!?()]+/)
       .filter((w) => w.length >= TASK_TEXT_MIN_TOKEN_LENGTH && /[a-z]/.test(w));
-    for (const word of rawWords) {
+    const cappedRawWords = Array.from(new Set(rawWords)).slice(
+      0,
+      TASK_TEXT_TOKEN_MAX,
+    );
+    const resultsByWord = await ladybugDb.searchSymbolsLiteBatch(
+      conn,
+      repoId,
+      cappedRawWords,
+      5,
+    );
+    for (const results of resultsByWord) {
       if (startNodes.size >= limits.maxTotalStartNodes) break;
-      const results = await ladybugDb.searchSymbolsLite(conn, repoId, word, 5);
       for (const result of results) {
         if (startNodes.size >= limits.maxTotalStartNodes) break;
         addStartNode(result.symbolId, "taskText");

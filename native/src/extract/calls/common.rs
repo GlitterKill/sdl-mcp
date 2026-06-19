@@ -37,27 +37,67 @@ pub fn make_node_id(name: &str, range: &NativeRange) -> String {
 /// the same name inside a single file (overloaded functions, methods on
 /// different classes) remain distinguishable in the caller→callee edge map.
 pub fn find_enclosing_symbol(node: Node<'_>, symbols: &[NativeParsedSymbol]) -> String {
-    let node_start_line = node.start_position().row + 1;
-    let node_end_line = node.end_position().row + 1;
+    let node_start = node.start_position();
+    let node_end = node.end_position();
+    let node_start_line = (node_start.row + 1) as u32;
+    let node_start_col = node_start.column as u32;
+    let node_end_line = (node_end.row + 1) as u32;
+    let node_end_col = node_end.column as u32;
 
-    let mut best: Option<&NativeParsedSymbol> = None;
-    let mut best_size = u32::MAX;
+    let mut best_non_variable: Option<&NativeParsedSymbol> = None;
+    let mut best_non_variable_size = u64::MAX;
+    let mut best_any: Option<&NativeParsedSymbol> = None;
+    let mut best_any_size = u64::MAX;
 
     for sym in symbols {
-        let sym_start = sym.range.start_line;
-        let sym_end = sym.range.end_line;
-
-        if sym_start <= node_start_line as u32 && sym_end >= node_end_line as u32 {
-            let size = sym_end - sym_start;
-            if size < best_size {
-                best = Some(sym);
-                best_size = size;
+        if symbol_contains_range(
+            sym,
+            node_start_line,
+            node_start_col,
+            node_end_line,
+            node_end_col,
+        ) {
+            let size = symbol_range_size(sym);
+            if size < best_any_size {
+                best_any = Some(sym);
+                best_any_size = size;
+            }
+            if sym.kind != "variable" && size < best_non_variable_size {
+                best_non_variable = Some(sym);
+                best_non_variable_size = size;
             }
         }
     }
 
-    best.map(|s| s.node_id.clone())
+    best_non_variable
+        .or(best_any)
+        .map(|s| s.node_id.clone())
         .unwrap_or_else(|| "<module>".to_string())
+}
+
+fn symbol_contains_range(
+    sym: &NativeParsedSymbol,
+    start_line: u32,
+    start_col: u32,
+    end_line: u32,
+    end_col: u32,
+) -> bool {
+    if start_line < sym.range.start_line || end_line > sym.range.end_line {
+        return false;
+    }
+    if start_line == sym.range.start_line && start_col < sym.range.start_col {
+        return false;
+    }
+    if end_line == sym.range.end_line && end_col > sym.range.end_col {
+        return false;
+    }
+    true
+}
+
+fn symbol_range_size(sym: &NativeParsedSymbol) -> u64 {
+    let line_span = sym.range.end_line.saturating_sub(sym.range.start_line) as u64;
+    let col_span = sym.range.end_col.saturating_sub(sym.range.start_col) as u64;
+    (line_span * 1_000_000) + col_span
 }
 
 pub fn node_text<'a>(node: Node<'a>, source: &'a [u8]) -> &'a str {
@@ -81,6 +121,17 @@ mod tests {
     use crate::types::{NativeParsedSymbol, NativeRange};
 
     fn sym(node_id: &str, name: &str, start_line: u32, end_line: u32) -> NativeParsedSymbol {
+        sym_with_cols(node_id, name, start_line, 0, end_line, 0)
+    }
+
+    fn sym_with_cols(
+        node_id: &str,
+        name: &str,
+        start_line: u32,
+        start_col: u32,
+        end_line: u32,
+        end_col: u32,
+    ) -> NativeParsedSymbol {
         NativeParsedSymbol {
             node_id: node_id.to_string(),
             symbol_id: format!("test:{}", name),
@@ -91,9 +142,9 @@ mod tests {
             visibility: String::new(),
             range: NativeRange {
                 start_line,
-                start_col: 0,
+                start_col,
                 end_line,
-                end_col: 0,
+                end_col,
             },
             signature: None,
             summary: String::new(),
@@ -135,5 +186,15 @@ mod tests {
         // distinct nodeIds — this is exactly the overload case that the
         // old caller_name-based approach silently corrupted.
         assert_ne!(make_node_id("handle", &r1), make_node_id("handle", &r2));
+    }
+
+    #[test]
+    fn symbol_contains_range_respects_same_line_columns() {
+        let owner = sym_with_cols("owner", "owner", 10, 5, 10, 20);
+
+        assert!(symbol_contains_range(&owner, 10, 5, 10, 20));
+        assert!(symbol_contains_range(&owner, 10, 8, 10, 12));
+        assert!(!symbol_contains_range(&owner, 10, 4, 10, 12));
+        assert!(!symbol_contains_range(&owner, 10, 8, 10, 21));
     }
 }

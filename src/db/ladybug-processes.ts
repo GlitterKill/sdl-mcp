@@ -52,6 +52,19 @@ export interface ProcessForSymbolRow {
   role: string | null;
 }
 
+export interface ProcessStepAfterSymbolRow {
+  changedSymbolId: string;
+  processId: string;
+  entrySymbolId: string;
+  label: string;
+  depth: number;
+  startOrder: number;
+  symbolId: string;
+  stepOrder: number;
+  stepDistance: number;
+  role: string | null;
+}
+
 export interface ProcessStepForRepoRow {
   processId: string;
   symbolId: string;
@@ -710,6 +723,59 @@ export async function getProcessStepsAfterSymbol(
     stepOrder: toNumber(row.stepOrder),
     role: row.role,
   }));
+}
+
+export async function getProcessStepsAfterSymbols(
+  conn: Connection,
+  symbolIds: string[],
+): Promise<ProcessStepAfterSymbolRow[]> {
+  if (symbolIds.length === 0) return [];
+
+  const rows = await queryAll<{
+    changedSymbolId: string;
+    processId: string;
+    entrySymbolId: string;
+    label: string;
+    depth: unknown;
+    startOrder: unknown;
+    symbolId: string;
+    stepOrder: unknown;
+    role: string | null;
+  }>(
+    conn,
+    `MATCH (seed:Symbol)-[start:PARTICIPATES_IN]->(p:Process)
+     WHERE seed.symbolId IN $symbolIds
+     MATCH (downstream:Symbol)-[after:PARTICIPATES_IN]->(p)
+     WHERE after.stepOrder > start.stepOrder
+     RETURN seed.symbolId AS changedSymbolId,
+            p.processId AS processId,
+            p.entrySymbolId AS entrySymbolId,
+            p.label AS label,
+            p.depth AS depth,
+            start.stepOrder AS startOrder,
+            downstream.symbolId AS symbolId,
+            after.stepOrder AS stepOrder,
+            after.role AS role
+     ORDER BY changedSymbolId ASC, start.stepOrder ASC, processId ASC, stepOrder ASC, symbolId ASC`,
+    { symbolIds },
+  );
+
+  return rows.map((row) => {
+    const startOrder = toNumber(row.startOrder);
+    const stepOrder = toNumber(row.stepOrder);
+    return {
+      changedSymbolId: row.changedSymbolId,
+      processId: row.processId,
+      entrySymbolId: row.entrySymbolId,
+      label: row.label,
+      depth: toNumber(row.depth),
+      startOrder,
+      symbolId: row.symbolId,
+      stepOrder,
+      stepDistance: stepOrder - startOrder,
+      role: row.role,
+    };
+  });
 }
 
 /**

@@ -2497,6 +2497,11 @@ export interface SearchSymbolLiteRow {
   exported: boolean;
 }
 
+interface SearchSymbolLiteBatchCandidate extends SearchSymbolLiteRow {
+  summary: string;
+  searchText: string;
+}
+
 /**
  * Split a search query into individual terms for OR matching.
  * Single words (no spaces) return as a single-element array.
@@ -2670,6 +2675,198 @@ export async function searchSymbolsLite(
     })
     .map((entry) => entry.row)
     .slice(0, safeLimit);
+}
+
+export async function searchSymbolsLiteBatch(
+  conn: Connection,
+  repoId: string,
+  tokens: string[],
+  perTokenLimit: number,
+  kinds?: string[],
+  excludeExternal?: boolean,
+): Promise<SearchSymbolLiteRow[][]> {
+  assertSafeInt(perTokenLimit, "perTokenLimit");
+  const safeLimit = Math.max(1, Math.min(perTokenLimit, 1000));
+  const normalizedTokens = tokens.map((token) => token.trim()).filter(Boolean);
+  if (normalizedTokens.length === 0) {
+    return tokens.map(() => []);
+  }
+
+  const uniqueTokens = Array.from(new Set(normalizedTokens));
+  const candidateLimit = Math.max(
+    safeLimit,
+    Math.min(5000, uniqueTokens.length * Math.max(20, safeLimit * 8)),
+  );
+  const params: Record<string, unknown> = { repoId, candidateLimit };
+  const tokenClauses = uniqueTokens.map((token, index) => {
+    params[`query${index}`] = token.toLowerCase();
+    return `(lower(coalesce(s.name, '')) CONTAINS $query${index}
+        OR lower(coalesce(s.summary, '')) CONTAINS $query${index}
+        OR lower(coalesce(s.searchText, '')) CONTAINS $query${index})`;
+  });
+  if (kinds && kinds.length > 0) {
+    params.kinds = kinds;
+  }
+
+  const candidates = await queryAll<SearchSymbolLiteBatchCandidate>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     OPTIONAL MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
+     WITH s, f
+     WHERE ${SEARCHABLE_SYMBOL_BOUNDARY}
+       AND (${tokenClauses.join(" OR ")})
+     ${kinds && kinds.length > 0 ? "AND s.kind IN $kinds" : ""}
+     ${excludeExternal ? "AND coalesce(s.external, false) = false" : ""}
+     WITH s, f,
+          CASE
+            WHEN coalesce(f.relPath, '') CONTAINS '/adapter/' THEN 2
+            WHEN coalesce(f.relPath, '') CONTAINS '/tests/' OR coalesce(f.relPath, '') STARTS WITH 'tests/' THEN 2
+            WHEN coalesce(f.relPath, '') STARTS WITH 'scripts/' THEN 2
+            WHEN coalesce(f.relPath, '') CONTAINS '.test.' OR coalesce(f.relPath, '') CONTAINS '.spec.' THEN 2
+            WHEN coalesce(f.relPath, '') CONTAINS 'target/' THEN 2
+            WHEN coalesce(f.relPath, '') CONTAINS 'vendor/' THEN 2
+            ELSE 0
+          END AS filePenalty,
+          CASE s.kind
+            WHEN 'class' THEN 0
+            WHEN 'function' THEN 1
+            WHEN 'interface' THEN 2
+            WHEN 'type' THEN 3
+            WHEN 'method' THEN 4
+            WHEN 'constructor' THEN 5
+            WHEN 'module' THEN 6
+            ELSE 7
+          END AS kindRank
+     RETURN s.symbolId AS symbolId,
+            s.name AS name,
+            coalesce(f.fileId, '') AS fileId,
+            coalesce(f.relPath, '') AS file,
+            s.kind AS kind,
+            s.exported AS exported,
+            coalesce(s.summary, '') AS summary,
+            coalesce(s.searchText, '') AS searchText
+     ORDER BY filePenalty, kindRank, s.name
+     LIMIT $candidateLimit`,
+    params,
+  );
+
+  const candidatesByToken = new Map<string, SearchSymbolLiteRow[]>();
+  for (const token of uniqueTokens) {
+    const tokenLower = token.toLowerCase();
+    const queryPadded = ` ${tokenLower} `;
+    const queryStart = `${tokenLower} `;
+    const queryEnd = ` ${tokenLower}`;
+    const matches = candidates
+      .filter((candidate) => {
+        const name = candidate.name.toLowerCase();
+        const summary = candidate.summary.toLowerCase();
+        const searchText = candidate.searchText.toLowerCase();
+        return (
+          name.includes(tokenLower) ||
+          summary.includes(tokenLower) ||
+          searchText.includes(tokenLower)
+        );
+      })
+      .sort((a, b) => {
+        const rankA = rankSearchSymbolLiteCandidate(
+          a,
+          token,
+          tokenLower,
+          queryPadded,
+          queryStart,
+          queryEnd,
+        );
+        const rankB = rankSearchSymbolLiteCandidate(
+          b,
+          token,
+          tokenLower,
+          queryPadded,
+          queryStart,
+          queryEnd,
+        );
+        for (let index = 0; index < rankA.length; index++) {
+          const diff = rankA[index] - rankB[index];
+          if (diff !== 0) return diff;
+        }
+        return a.symbolId.localeCompare(b.symbolId);
+      })
+      .slice(0, safeLimit)
+      .map(({ summary: _summary, searchText: _searchText, ...row }) => row);
+    if (matches.length < safeLimit) {
+      const seen = new Set(matches.map((row) => row.symbolId));
+      const fallbackRows = await searchSymbolsLiteSingleTerm(
+        conn,
+        repoId,
+        token,
+        kinds,
+        excludeExternal,
+      );
+      for (const row of fallbackRows) {
+        if (seen.has(row.symbolId)) continue;
+        matches.push(row);
+        seen.add(row.symbolId);
+        if (matches.length >= safeLimit) break;
+      }
+    }
+    candidatesByToken.set(token, matches);
+  }
+
+  return tokens.map((token) => candidatesByToken.get(token.trim()) ?? []);
+}
+
+function rankSearchSymbolLiteCandidate(
+  row: SearchSymbolLiteBatchCandidate,
+  query: string,
+  queryLower: string,
+  queryPadded: string,
+  queryStart: string,
+  queryEnd: string,
+): number[] {
+  const name = row.name.toLowerCase();
+  const searchText = row.searchText.toLowerCase();
+  return [
+    row.name === query ? 0 : 1,
+    name === queryLower ? 0 : 1,
+    searchText.includes(queryPadded) ||
+    searchText.startsWith(queryStart) ||
+    searchText.endsWith(queryEnd)
+      ? 0
+      : 1,
+    getSearchSymbolLiteFilePenalty(row.file),
+    getSearchSymbolLiteKindRank(row.kind),
+    name.includes(queryLower) ? 0 : 1,
+  ];
+}
+
+function getSearchSymbolLiteFilePenalty(file: string): number {
+  if (file.includes("/adapter/")) return 2;
+  if (file.includes("/tests/") || file.startsWith("tests/")) return 2;
+  if (file.startsWith("scripts/")) return 2;
+  if (file.includes(".test.") || file.includes(".spec.")) return 2;
+  if (file.includes("target/")) return 2;
+  if (file.includes("vendor/")) return 2;
+  return 0;
+}
+
+function getSearchSymbolLiteKindRank(kind: string): number {
+  switch (kind) {
+    case "class":
+      return 0;
+    case "function":
+      return 1;
+    case "interface":
+      return 2;
+    case "type":
+      return 3;
+    case "method":
+      return 4;
+    case "constructor":
+      return 5;
+    case "module":
+      return 6;
+    default:
+      return 7;
+  }
 }
 
 /**

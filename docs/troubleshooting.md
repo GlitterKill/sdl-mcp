@@ -189,7 +189,9 @@ The default provider policy is `indexing.watchProvider: "auto"`, which tries
 Watchman, then Chokidar, then Node `fs.watch`. Set `watchProvider` explicitly
 only when you want startup to fail visibly if that provider is unavailable. In
 `auto`, Watchman startup/runtime failures are recorded in `watcherHealth` as a
-fallback reason before SDL-MCP switches to the next provider.
+fallback reason before SDL-MCP switches to the next provider. Missing-Watchman startup probes are cached for the current server process, so
+additional repos reuse the fallback without repeating the same missing-binary
+warning.
 
 Chokidar applies repository `ignore` globs during watcher startup. Watchman
 subscribes with source-file suffix filters and then applies SDL's canonical

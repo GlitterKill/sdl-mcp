@@ -119,6 +119,7 @@
         </div>
         <div class="stack-bar" data-field="hybridMix" aria-label="Hybrid mix"></div>
         <div class="bar-list" data-field="candidateCounts" aria-label="Candidate counts per source"></div>
+        <div class="bar-list" data-field="phaseLatencyMs" aria-label="Retrieval phase latency"></div>
       </section>
 
       <section class="panel" data-panel="beam" aria-label="Beam">
@@ -141,6 +142,12 @@
           <span class="kv-val" data-field="avgEvicted">—</span>
           <span class="kv-key">REJECT</span>
           <span class="kv-val" data-field="avgRejected">—</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">FRONTIER AVG</span>
+          <span class="kv-val" data-field="avgFrontierMaxSize">—</span>
+          <span class="kv-key">FRONTIER P95</span>
+          <span class="kv-val" data-field="p95FrontierMaxSize">—</span>
         </div>
         <form id="beamExplainForm" class="beam-form">
           <input id="beamSliceHandle" placeholder="sliceHandle" autocomplete="off" spellcheck="false" />

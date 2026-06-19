@@ -2,7 +2,9 @@ use tree_sitter::Node;
 
 use crate::types::NativeParsedSymbol;
 
-use super::common::{find_child_node, make_symbol, node_text, ParamInfo};
+use super::common::{
+    find_child_node, make_symbol, make_symbol_with_forced_signature, node_text, ParamInfo,
+};
 
 pub fn extract_symbols_python(
     root: Node<'_>,
@@ -60,7 +62,7 @@ fn process_function_definition(
     let decorators = extract_decorators(node, source);
     let visibility = extract_visibility(&name);
 
-    let mut symbol = make_symbol(
+    let mut symbol = make_symbol_with_forced_signature(
         &name,
         "function",
         node,
@@ -88,7 +90,7 @@ fn process_class_definition(
     let visibility = extract_visibility(&name);
     let decorators = extract_decorators(node, source);
 
-    let mut symbol = make_symbol(
+    let mut symbol = make_symbol_with_forced_signature(
         &name,
         "class",
         node,

@@ -17,22 +17,42 @@ describe("prepare-release helpers", () => {
     const mismatches = helpers.findNativeVersionMismatches(
       {
         version: "1.2.3",
-        optionalDependencies: { "sdl-mcp-native": "1.2.3" },
+        optionalDependencies: {
+          "sdl-mcp-native": "1.2.3",
+          "sdl-mcp-watchman": "1.2.3",
+          "sdl-mcp-watchman-linux-x64": "1.2.3",
+          "sdl-mcp-watchman-win32-x64": "1.2.3",
+        },
       },
       { version: "1.2.3" },
       [{ name: "win32-x64-msvc", version: "1.2.3" }],
+      {
+        version: "1.2.3",
+        optionalDependencies: { "sdl-mcp-watchman-linux-x64": "1.2.3" },
+      },
+      [{ name: "linux-x64", version: "1.2.3" }],
     );
     assert.deepStrictEqual(mismatches, []);
 
     const mismatchResult = helpers.findNativeVersionMismatches(
       {
         version: "1.2.3",
-        optionalDependencies: { "sdl-mcp-native": "1.2.2" },
+        optionalDependencies: {
+          "sdl-mcp-native": "1.2.2",
+          "sdl-mcp-watchman": "1.2.2",
+          "sdl-mcp-watchman-linux-x64": "1.2.2",
+          "sdl-mcp-watchman-win32-x64": "1.2.2",
+        },
       },
       { version: "1.2.1" },
       [{ name: "win32-x64-msvc", version: "1.2.0" }],
+      {
+        version: "1.2.0",
+        optionalDependencies: { "sdl-mcp-watchman-linux-x64": "1.2.0" },
+      },
+      [{ name: "linux-x64", version: "1.2.0" }],
     );
-    assert.ok(mismatchResult.length >= 2);
+    assert.ok(mismatchResult.length >= 5);
 
     assert.deepStrictEqual(
       helpers.findNativeLockfileMismatches(
@@ -107,6 +127,11 @@ describe("prepare-release helpers", () => {
       [],
     );
     assert.ok(helpers.getRequiredPackEntries().includes("templates/SDL.md"));
+    assert.ok(
+      helpers
+        .getRequiredPackEntries()
+        .includes("scripts/postinstall-watchman.mjs"),
+    );
     assert.ok(
       helpers
         .getRequiredPackEntries()

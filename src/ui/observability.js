@@ -321,6 +321,17 @@ function updateRetrieval(r) {
     valueFormatter: (v) => fmtNum(v),
     limit: 6,
   });
+
+  const phaseEntries = Object.entries(r.phaseLatencyMs || {}).map(
+    ([k, v]) => ({
+      key: k,
+      value: v && typeof v.avgMs === "number" ? v.avgMs : 0,
+    }),
+  );
+  renderBarList(panelField(panel, "phaseLatencyMs"), phaseEntries, {
+    valueFormatter: (v) => fmtMs(v),
+    limit: 6,
+  });
 }
 
 function updateBeam(b) {
@@ -333,6 +344,8 @@ function updateBeam(b) {
   setVal(panel, "avgAccepted", fmtNum(b.avgAccepted, 1));
   setVal(panel, "avgEvicted", fmtNum(b.avgEvicted, 1));
   setVal(panel, "avgRejected", fmtNum(b.avgRejected, 1));
+  setVal(panel, "avgFrontierMaxSize", fmtNum(b.avgFrontierMaxSize, 1));
+  setVal(panel, "p95FrontierMaxSize", fmtNum(b.p95FrontierMaxSize, 1));
 }
 
 function updateIndexing(i) {

@@ -52,7 +52,7 @@ fn process_source_command(node: Node<'_>, source: &[u8]) -> Option<NativeParsedI
         return None;
     }
 
-    let is_external = specifier.starts_with('/');
+    let is_external = false;
     let is_relative = specifier.starts_with('.') || !specifier.starts_with('/');
 
     Some(NativeParsedImport {

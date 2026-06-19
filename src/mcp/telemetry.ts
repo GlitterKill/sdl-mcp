@@ -180,6 +180,8 @@ export interface SemanticSearchTelemetryEvent {
   candidateCountPerSource?: Record<string, number>;
   /** Time spent in RRF fusion step (ms) */
   fusionLatencyMs?: number;
+  /** Per-phase retrieval latency timings in milliseconds. */
+  phaseLatencyMs?: Record<string, number>;
   /** Whether FTS extension was available */
   ftsAvailable?: boolean;
   /** Whether vector extension was available */
@@ -644,6 +646,9 @@ export function logSemanticSearchTelemetry(
   }
   if (event.fusionLatencyMs !== undefined) {
     fields.fusionLatencyMs = event.fusionLatencyMs;
+  }
+  if (event.phaseLatencyMs !== undefined) {
+    fields.phaseLatencyMs = event.phaseLatencyMs;
   }
   if (event.ftsAvailable !== undefined) {
     fields.ftsAvailable = event.ftsAvailable;

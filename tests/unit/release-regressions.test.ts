@@ -559,4 +559,14 @@ describe("release regression guards", () => {
       "no-op incremental runs should still import memory files",
     );
   });
+  it("publishes managed Watchman packages before the main package", () => {
+    const workflow = readSource(".github/workflows/release-publish.yml");
+
+    assert.match(
+      workflow,
+      /name:\s*Prepare Watchman platform packages[\s\S]*name:\s*Publish platform Watchman packages[\s\S]*name:\s*Publish Watchman umbrella package[\s\S]*name:\s*Build runtime package[\s\S]*name:\s*Publish main package/s,
+      "release publish should stage and publish Watchman packages before sdl-mcp",
+    );
+  });
+
 });

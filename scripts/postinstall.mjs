@@ -1,20 +1,21 @@
 #!/usr/bin/env node
 /**
- * postinstall.mjs — top-level npm postinstall entrypoint.
+ * postinstall.mjs - top-level npm postinstall entrypoint.
  *
  * Runs each sub-step as a separate Node process. Sub-step failures are
  * warnings by default; CI can set SDL_MCP_STRICT_TREE_SITTER_POSTINSTALL=1
  * to fail fast when grammar bindings cannot be verified.
  */
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const STEPS = [
   { name: "tree-sitter", script: "postinstall-tree-sitter.mjs" },
+  { name: "watchman", script: "postinstall-watchman.mjs" },
   { name: "prune", script: "postinstall-prune.mjs" },
   { name: "models", script: "postinstall-models.mjs" },
 ];

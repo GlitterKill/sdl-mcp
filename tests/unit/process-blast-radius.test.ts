@@ -264,6 +264,28 @@ describe("process-aware blast radius", () => {
     assert.ok(exitItem.rank > laterItem.rank);
   });
 
+  it("batch-loads downstream process steps for all changed symbols", async () => {
+    const conn = await getLadybugConn();
+    const rows = await ladybugDb.getProcessStepsAfterSymbols(conn, [
+      changed,
+      otherChanged,
+    ]);
+
+    const changedRows = rows.filter((row) => row.changedSymbolId === changed);
+    assert.deepStrictEqual(
+      changedRows.map((row) => row.symbolId),
+      [mid, exit, later, foreignStep],
+    );
+    assert.deepStrictEqual(
+      changedRows.map((row) => row.stepDistance),
+      [1, 2, 3, 4],
+    );
+    assert.ok(
+      rows.every((row) => row.changedSymbolId !== otherChanged),
+      "symbols without process memberships should not produce rows",
+    );
+  });
+
   it("degrades gracefully when no process data exists", async () => {
     const conn = await getLadybugConn();
     const result = await computeBlastRadius(conn, [otherChanged], {

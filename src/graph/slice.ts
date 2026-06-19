@@ -204,6 +204,7 @@ export async function buildSlice(
   let frontier: FrontierItem[];
   let wasTruncated: boolean;
   let droppedCandidates: number;
+  let maxFrontierSize: number;
 
   // Beam-search decision trace setup. Only active when an observability store
   // is registered AND the slice request has a versionId we can publish under.
@@ -267,6 +268,7 @@ export async function buildSlice(
     frontier = result.frontier;
     wasTruncated = result.wasTruncated;
     droppedCandidates = result.droppedCandidates;
+    maxFrontierSize = result.maxFrontierSize;
   } else {
     // DB-backed path with batch prefetching
     const result = await beamSearchLadybug(
@@ -284,6 +286,7 @@ export async function buildSlice(
     frontier = result.frontier;
     wasTruncated = result.wasTruncated;
     droppedCandidates = result.droppedCandidates;
+    maxFrontierSize = result.maxFrontierSize;
   }
 
   try {
@@ -293,6 +296,7 @@ export async function buildSlice(
       accepted: beamAcceptedCount,
       evicted: beamEvictedCount,
       rejected: beamRejectedCount,
+      maxFrontierSize,
     });
   } catch {
     // observability is best-effort

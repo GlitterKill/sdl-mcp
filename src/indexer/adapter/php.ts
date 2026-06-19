@@ -403,7 +403,7 @@ function extractMethodParameters(
   node: Parser.SyntaxNode,
 ): Array<{ name: string; type?: string }> {
   const params: Array<{ name: string; type?: string }> = [];
-  const parametersNode = node.childForFieldName("formal_parameters");
+  const parametersNode = node.childForFieldName("parameters");
 
   if (!parametersNode) return params;
 
@@ -428,7 +428,7 @@ function extractFunctionParameters(
   node: Parser.SyntaxNode,
 ): Array<{ name: string; type?: string }> {
   const params: Array<{ name: string; type?: string }> = [];
-  const parametersNode = node.childForFieldName("formal_parameters");
+  const parametersNode = node.childForFieldName("parameters");
 
   if (!parametersNode) return params;
 
@@ -738,11 +738,11 @@ function extractCalls(
       (variable_name) @var_callee)
 
     (member_call_expression
-      object: (variable_name) @recv
+      object: (_) @recv
       name: (name) @attr)
 
     (member_call_expression
-      object: (variable_name) @recv
+      object: (_) @recv
       name: (variable_name) @var_attr)
 
     (scoped_call_expression

@@ -1621,6 +1621,106 @@ export async function getEdgesToSymbols(
   return result;
 }
 
+export async function getEdgesToSymbolsInRepo(
+  conn: Connection,
+  repoId: string,
+  symbolIds: string[],
+  options?: EdgeQueryOptions,
+): Promise<Map<string, EdgeRow[]>> {
+  if (symbolIds.length === 0) return new Map();
+
+  const result = new Map<string, EdgeRow[]>();
+  for (const id of symbolIds) result.set(id, []);
+
+  const minCallConfidenceClause = buildMinCallConfidenceClause(
+    "d",
+    options?.minCallConfidence,
+  );
+
+  const queryWithHint = `MATCH (b:Symbol)
+     WHERE b.symbolId IN $symbolIds
+     MATCH (a:Symbol)-[d:DEPENDS_ON]->(b)
+     WHERE 1 = 1${minCallConfidenceClause}
+     MATCH (a)-[:SYMBOL_IN_REPO]->(r:Repo {repoId: $repoId})
+     WITH b, d, a, r
+     HINT (b JOIN (d JOIN a))
+     RETURN r.repoId AS repoId,
+            a.symbolId AS fromSymbolId,
+            b.symbolId AS toSymbolId,
+            d.edgeType AS edgeType,
+            d.weight AS weight,
+            d.confidence AS confidence,
+            d.resolution AS resolution,
+            d.resolverId AS resolverId,
+            d.resolutionPhase AS resolutionPhase,
+            d.provenance AS provenance,
+            d.createdAt AS createdAt
+     ORDER BY a.symbolId`;
+
+  const queryWithoutHint = `MATCH (b:Symbol)
+     WHERE b.symbolId IN $symbolIds
+     MATCH (a:Symbol)-[d:DEPENDS_ON]->(b)
+     WHERE 1 = 1${minCallConfidenceClause}
+     MATCH (a)-[:SYMBOL_IN_REPO]->(r:Repo {repoId: $repoId})
+     RETURN r.repoId AS repoId,
+            a.symbolId AS fromSymbolId,
+            b.symbolId AS toSymbolId,
+            d.edgeType AS edgeType,
+            d.weight AS weight,
+            d.confidence AS confidence,
+            d.resolution AS resolution,
+            d.resolverId AS resolverId,
+            d.resolutionPhase AS resolutionPhase,
+            d.provenance AS provenance,
+            d.createdAt AS createdAt
+     ORDER BY a.symbolId`;
+
+  const useJoinHint = await getJoinHintSupported(conn);
+  const rows = await queryAll<{
+    repoId: string;
+    fromSymbolId: string;
+    toSymbolId: string;
+    edgeType: string;
+    weight: unknown;
+    confidence: unknown;
+    resolution: string;
+    resolverId: string | null;
+    resolutionPhase: string | null;
+    provenance: string | null;
+    createdAt: string;
+  }>(
+    conn,
+    useJoinHint ? queryWithHint : queryWithoutHint,
+    {
+      repoId,
+      symbolIds,
+      ...(options?.minCallConfidence !== undefined
+        ? { minCallConfidence: options.minCallConfidence }
+        : {}),
+    },
+  );
+
+  for (const row of rows) {
+    const bucket = result.get(row.toSymbolId);
+    if (!bucket) continue;
+    bucket.push({
+      repoId: row.repoId,
+      fromSymbolId: row.fromSymbolId,
+      toSymbolId: row.toSymbolId,
+      edgeType: row.edgeType,
+      weight: toNumber(row.weight),
+      confidence: toNumber(row.confidence),
+      resolution: row.resolution,
+      resolverId: row.resolverId ?? undefined,
+      resolutionPhase: row.resolutionPhase ?? undefined,
+      provenance: row.provenance,
+      createdAt: row.createdAt,
+    });
+  }
+
+  return result;
+}
+
 export async function getEdgesByRepo(
   conn: Connection,
   repoId: string,

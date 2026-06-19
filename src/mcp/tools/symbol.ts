@@ -481,6 +481,9 @@ export async function handleSymbolSearch(
     ...(retrievalEvidence?.fusionLatencyMs != null && {
       fusionLatencyMs: retrievalEvidence.fusionLatencyMs,
     }),
+    ...(retrievalEvidence?.diagnosticTimings && {
+      phaseLatencyMs: retrievalEvidence.diagnosticTimings,
+    }),
     ...(fallbackReason && { fallbackReason }),
     finalResultCount: results.length,
     ...(semanticRequested &&

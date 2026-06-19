@@ -155,14 +155,34 @@ fn process_import_from_statement(
         named_imports.push("*".to_string());
     }
 
+    let normalized_relative_specifier = specifier
+        .trim_start_matches('.')
+        .trim_start_matches('/')
+        .to_string();
+    let emit_normalized_relative = is_relative
+        && specifier.starts_with('.')
+        && !normalized_relative_specifier.is_empty()
+        && normalized_relative_specifier != specifier;
+
     imports.push(build_import(
         node,
         &specifier,
         is_relative,
-        named_imports,
+        named_imports.clone(),
         None,
         is_re_export,
     ));
+
+    if emit_normalized_relative {
+        imports.push(build_import(
+            node,
+            &normalized_relative_specifier,
+            true,
+            named_imports,
+            None,
+            is_re_export,
+        ));
+    }
 }
 
 fn extract_from_specifier(node: Node<'_>, source: &[u8]) -> String {

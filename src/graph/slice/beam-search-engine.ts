@@ -233,6 +233,7 @@ export interface BeamSearchResult {
   frontier: FrontierItem[];
   wasTruncated: boolean;
   droppedCandidates: number;
+  maxFrontierSize: number;
 }
 
 export interface BeamSearchRequest {
@@ -312,6 +313,7 @@ interface BeamCoreState {
   sliceCards: Set<SymbolId>;
   visited: Set<SymbolId>;
   frontier: MinHeap<FrontierItem>;
+  maxFrontierSize: number;
   droppedCandidates: number;
   sequence: number;
   effectiveCardCap: number;
@@ -355,6 +357,7 @@ function createBeamCoreState(
     sliceCards: new Set<SymbolId>(),
     visited: new Set<SymbolId>(),
     frontier: new MinHeap<FrontierItem>(),
+    maxFrontierSize: 0,
     droppedCandidates: 0,
     sequence: 0,
     effectiveCardCap: budget.maxCards,
@@ -381,6 +384,13 @@ function createBeamCoreState(
     iterationCounter: 0,
   };
 
+}
+
+function trackFrontierMaxSize(state: BeamCoreState): void {
+  state.maxFrontierSize = Math.max(
+    state.maxFrontierSize,
+    state.frontier.size(),
+  );
 }
 
 /** Builds the SliceContext used for symbol scoring. */
@@ -492,18 +502,20 @@ function insertCandidateIntoFrontier(
   };
   if (state.frontier.size() < MAX_FRONTIER) {
     state.frontier.insert(item);
+    trackFrontierMaxSize(state);
     return;
   }
   // Frontier is full — find the worst (least-promising) item among leaf
   // nodes (O(n/2)) and replace it in-place (O(log n)) if the new
   // candidate is better. The min-heap root is the BEST item, so the
   // worst is always a leaf.
-  const worstIdx = state.frontier.findWorstIndex(compareFrontierItems);
-  if (worstIdx === -1) return;
-  const worstItem = state.frontier.toHeapArray()[worstIdx];
+  const worstEntry = state.frontier.findWorstEntry(compareFrontierItems);
+  if (!worstEntry) return;
+  const { index: worstIdx, item: worstItem } = worstEntry;
   if (compareFrontierItems(item, worstItem) < 0) {
     const evicted = worstItem;
     state.frontier.replaceAt(worstIdx, item);
+    trackFrontierMaxSize(state);
     if (state.traceCollector !== null) {
       try {
         state.traceCollector.recordEvict({
@@ -567,6 +579,7 @@ function buildBeamSearchResult(
     frontier: frontierArray,
     wasTruncated: state.wasTruncated,
     droppedCandidates: state.droppedCandidates,
+    maxFrontierSize: state.maxFrontierSize,
   };
 }
 
@@ -588,6 +601,7 @@ function seedFrontierFromGraph(
         priority: 0,
         sequence: state.sequence++,
       });
+      trackFrontierMaxSize(state);
       state.visited.add(symbolId);
     }
   }
@@ -1192,6 +1206,7 @@ export async function beamSearchLadybug(
       priority: 0,
       sequence: state.sequence++,
     });
+    trackFrontierMaxSize(state);
     state.visited.add(symbolId);
   }
 

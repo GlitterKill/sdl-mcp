@@ -24,6 +24,7 @@ import { globToSafeRegex } from "../util/safeRegex.js";
 
 import type { IndexWatchHandle, WatcherHealth } from "./indexer.js";
 import { getLanguageExtensions } from "./fileScanner.js";
+import { resolveWatchmanBinary } from "./watchman-binary.js";
 import { logger } from "../util/logger.js";
 import { logWatcherHealthTelemetry } from "../mcp/telemetry.js";
 
@@ -81,14 +82,79 @@ type ChokidarIgnoredPredicate = (
 ) => boolean;
 
 type WatcherProviderName = Exclude<WatchProvider, "auto">;
+type ProviderAvailabilityStatus = { available: boolean; reason?: string };
 type ProviderAvailability = Record<
   WatcherProviderName,
-  { available: boolean; reason?: string }
+  ProviderAvailabilityStatus
 >;
 type ProviderSelection = {
   provider: WatcherProviderName;
   fallbackReason: string | null;
 };
+
+const cachedAutoWatchmanFailure = {
+  reason: null as string | null,
+};
+
+function getCachedAutoWatchmanFailure(
+  configuredProvider: WatchProvider,
+  provider: WatcherProviderName,
+): string | null {
+  if (configuredProvider !== "auto" || provider !== "watchman") {
+    return null;
+  }
+  return cachedAutoWatchmanFailure.reason;
+}
+
+function isCacheableAutoWatchmanFailure(reason: string): boolean {
+  const normalized = reason.toLowerCase();
+  return (
+    normalized.includes("watchman was not found in path") ||
+    normalized.includes("fb-watchman is not installed") ||
+    normalized.includes("could not be loaded")
+  );
+}
+
+function cacheAutoWatchmanFailure(
+  configuredProvider: WatchProvider,
+  provider: WatcherProviderName,
+  reason: string,
+): void {
+  if (
+    configuredProvider === "auto" &&
+    provider === "watchman" &&
+    isCacheableAutoWatchmanFailure(reason)
+  ) {
+    cachedAutoWatchmanFailure.reason = reason;
+  }
+}
+
+function resetCachedAutoWatchmanFailure(): void {
+  cachedAutoWatchmanFailure.reason = null;
+}
+
+async function checkWatchmanAvailabilityWithCache(
+  configuredProvider: WatchProvider,
+  probe: () => Promise<ProviderAvailabilityStatus>,
+): Promise<ProviderAvailabilityStatus> {
+  const cachedReason = getCachedAutoWatchmanFailure(
+    configuredProvider,
+    "watchman",
+  );
+  if (cachedReason) {
+    return { available: false, reason: cachedReason };
+  }
+
+  const availability = await probe();
+  if (!availability.available) {
+    cacheAutoWatchmanFailure(
+      configuredProvider,
+      "watchman",
+      availability.reason ?? "watchman unavailable",
+    );
+  }
+  return availability;
+}
 type ProviderEvent =
   | { type: "path"; relativePath: string }
   | { type: "resync"; reason: string; warning?: string };
@@ -98,7 +164,9 @@ type RuntimeWatcher = {
   ready: Promise<void>;
   startupResync?: ProviderEvent;
 };
-type WatchmanModule = { Client: new () => WatchmanClient };
+type WatchmanModule = {
+  Client: new (options?: { watchmanBinaryPath?: string }) => WatchmanClient;
+};
 type WatchmanCapabilityResponse = {
   version?: string;
   capabilities?: Record<string, boolean>;
@@ -398,6 +466,14 @@ export function _selectWatcherProviderForTesting(
 ): ProviderSelection {
   return selectWatcherProvider(configuredProvider, availability);
 }
+
+/**
+ * @internal
+ */
+export const _watchmanAvailabilityForTesting = {
+  check: checkWatchmanAvailabilityWithCache,
+  resetCache: resetCachedAutoWatchmanFailure,
+};
 
 /**
  * @internal
@@ -965,7 +1041,13 @@ export async function watchRepositoryWithIndexer(
       );
     }
 
-    const client = new watchman.Client();
+    const watchmanBinary = resolveWatchmanBinary();
+    if (!watchmanBinary.binaryPath) {
+      throw new Error(
+        watchmanBinary.reason ?? "SDL-managed Watchman binary could not be resolved",
+      );
+    }
+    const client = new watchman.Client({ watchmanBinaryPath: watchmanBinary.binaryPath });
     let closing = false;
     let runtimeFailed = false;
     let subscribed = false;
@@ -1302,7 +1384,9 @@ export async function watchRepositoryWithIndexer(
       configuredProvider === "auto" ? PROVIDER_ORDER : [configuredProvider];
 
     for (const provider of order) {
-      const disabledReason = disabledAutoProviders.get(provider);
+      const disabledReason =
+        disabledAutoProviders.get(provider) ??
+        getCachedAutoWatchmanFailure(configuredProvider, provider);
       if (configuredProvider === "auto" && disabledReason) {
         fallbackReasons.push(`${provider}: ${disabledReason}`);
         continue;
@@ -1331,6 +1415,7 @@ export async function watchRepositoryWithIndexer(
             `Configured watcher provider '${configuredProvider}' failed: ${reason}`,
           );
         }
+        cacheAutoWatchmanFailure(configuredProvider, provider, reason);
         fallbackReasons.push(`${provider}: ${reason}`);
         health.fallbackReason = fallbackReasons.join("; ");
         logger.warn("Watcher provider unavailable; trying fallback", {

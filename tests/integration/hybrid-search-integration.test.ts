@@ -189,6 +189,7 @@ describe("Stage 1 wiring verification", () => {
     const src = fs.readFileSync(path.join(repoRoot, "src/mcp/tools/symbol.ts"), "utf8");
     assert.ok(src.includes("retrievalMode"), "missing retrievalMode in telemetry");
     assert.ok(src.includes("fusionLatencyMs"), "missing fusionLatencyMs in telemetry");
+    assert.ok(src.includes("phaseLatencyMs"), "missing phaseLatencyMs in telemetry");
     assert.ok(src.includes("finalResultCount"), "missing finalResultCount in telemetry");
   });
 
@@ -212,6 +213,7 @@ describe("Stage 1 wiring verification", () => {
     assert.ok(src.includes("retrievalMode"), "missing retrievalMode field");
     assert.ok(src.includes("candidateCountPerSource"), "missing candidateCountPerSource");
     assert.ok(src.includes("fusionLatencyMs"), "missing fusionLatencyMs");
+    assert.ok(src.includes("phaseLatencyMs"), "missing phaseLatencyMs");
     assert.ok(src.includes("ftsAvailable"), "missing ftsAvailable");
     assert.ok(src.includes("vectorAvailable"), "missing vectorAvailable");
     assert.ok(src.includes("fallbackReason"), "missing fallbackReason");

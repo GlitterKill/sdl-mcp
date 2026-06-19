@@ -25,6 +25,11 @@ pub fn extract_symbols_shell(
                     symbols.push(symbol);
                 }
             }
+            "command" => {
+                if let Some(symbol) = process_alias_command(node, source, repo_id, rel_path) {
+                    symbols.push(symbol);
+                }
+            }
             _ => {}
         }
 
@@ -95,6 +100,62 @@ fn process_variable_assignment(
     );
     symbol.exported = has_export_keyword(node, source);
     Some(symbol)
+}
+
+fn process_alias_command(
+    node: Node<'_>,
+    source: &[u8],
+    repo_id: &str,
+    rel_path: &str,
+) -> Option<NativeParsedSymbol> {
+    let command_name = node.child_by_field_name("name")?;
+    if node_text(command_name, source) != "alias" {
+        return None;
+    }
+
+    let mut saw_alias = false;
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if !saw_alias {
+            saw_alias = child.id() == command_name.id();
+            continue;
+        }
+
+        let text = node_text(child, source).trim();
+        if text.is_empty() {
+            continue;
+        }
+
+        let alias_name = if let Some((name, _)) = text.split_once('=') {
+            name.trim()
+        } else if child.kind() == "word" {
+            text
+        } else {
+            continue;
+        };
+
+        if alias_name.is_empty() {
+            continue;
+        }
+
+        let mut symbol = make_symbol(
+            alias_name,
+            "variable",
+            node,
+            source,
+            repo_id,
+            rel_path,
+            &[],
+            None,
+            &[],
+            "public",
+            &[],
+        );
+        symbol.exported = true;
+        return Some(symbol);
+    }
+
+    None
 }
 
 fn extract_function_name(node: Node<'_>, source: &[u8]) -> Option<String> {

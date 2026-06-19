@@ -315,6 +315,7 @@ Hybrid retrieval pipeline (FTS + vector + PPR + RRF fusion).
 | `p95LatencyMs`            | number                   | 95th percentile latency. The dashboard "Retrieval" panel surfaces this prominently.                             |
 | `byMode`                  | `Record<string, number>` | Dispatch counts per retrieval mode (`hybrid`, `lexical`, `semantic`, etc.).                                     |
 | `candidateCountPerSource` | `Record<string, number>` | Volume of candidates per source — `fts`, `vector`, `ppr`, `hybrid`, etc. Imbalance suggests a mis-tuned source. |
+| `phaseLatencyMs`          | `Record<string, LatencyPhaseMetrics>` | Per-phase retrieval timing buckets. Common keys include `embedding`, `fts`, `vector`, `fusion`, `snapshot`, `ppr`, and `ppr.applyBoost`. |
 | `byRetrievalType`         | `Record<string, number>` | Counts by call site (`context`, `search`, ...).                                                                 |
 | `emptyResultCount`        | number                   | Number of retrievals returning zero results. A rising number is an early warning for index drift.               |
 
@@ -344,7 +345,20 @@ Beam-search slice builds. Detailed per-slice traces live behind `/api/observabil
 | `totalSliceBuilds`                           | number | Lifetime slice builds.                                                                                                                                                                                                |
 | `avgBuildMs` / `p95BuildMs`                  | number | Mean / P95 wall-clock duration.                                                                                                                                                                                       |
 | `avgAccepted` / `avgEvicted` / `avgRejected` | number | Mean per-slice frontier statistics — accepted nodes win and stay, evicted nodes lost the score race, rejected nodes were filtered before scoring. High eviction with low acceptance suggests the budget is too tight. |
+| `avgFrontierMaxSize` / `p95FrontierMaxSize`  | number | Mean / P95 peak frontier size reached during slice builds. Use this with build latency to spot beam-width pressure.                                                                                                  |
 | `retainedExplainHandles`                     | number | Live entries in the beam-explain LRU. Bounded by `beamExplainCapacity`.                                                                                                                                               |
+
+### `delta: DeltaMetrics`
+
+Blast-radius computation metrics.
+
+| Field                                 | Type   | Meaning                                                                                                 |
+| :------------------------------------ | :----- | :------------------------------------------------------------------------------------------------------ |
+| `totalBlastRadiusComputations`        | number | Lifetime blast-radius computations observed, including cache hits.                                      |
+| `avgBlastRadiusLatencyMs` / `p95BlastRadiusLatencyMs` | number | Mean / P95 blast-radius wall-clock duration.                                         |
+| `avgDbRoundTripsPerChangedSymbol`     | number | Average counted DB round trips divided by changed symbols for each run, then averaged across runs.      |
+| `avgPathExplanationLatencyMs` / `p95PathExplanationLatencyMs` | number | Mean / P95 latency for fallback shortest-path explanation work.                       |
+| `fallbackPathQueryCount`              | number | Total fallback shortest-path queries issued when BFS predecessor paths could not satisfy an explanation. |
 
 ### `indexing: IndexingMetrics`
 

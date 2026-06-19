@@ -1,0 +1,23 @@
+{
+  "name": "sdl-mcp-watchman-win32-x64",
+  "version": "0.11.7",
+  "description": "Watchman binary for SDL-MCP - Windows x64",
+  "license": "SEE LICENSE IN LICENSE",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "vendor/**"
+  ],
+  "sdlMcp": {
+    "watchmanBinary": "vendor/bin/watchman.exe"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GlitterKill/sdl-mcp.git",
+    "directory": "watchman"
+  }
+}

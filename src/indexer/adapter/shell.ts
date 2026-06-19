@@ -111,6 +111,10 @@ function extractImports(tree: Parser.Tree): ExtractedImport[] {
     (command
       name: (command_name) @source_keyword
       argument: (string) @source_file)
+
+    (command
+      name: (command_name) @source_keyword
+      argument: (raw_string) @source_file)
   `,
   );
 

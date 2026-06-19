@@ -279,8 +279,10 @@ jobs:
             const root = pkg('package.json');
             const native = pkg(path.join('native', 'package.json'));
             if (root.version !== expected) throw new Error('package.json version mismatch');
-            if ((root.optionalDependencies || {})['sdl-mcp-native'] !== expected) {
-              throw new Error('package.json optionalDependencies.sdl-mcp-native mismatch');
+            for (const depName of ['sdl-mcp-native', 'sdl-mcp-watchman', 'sdl-mcp-watchman-linux-x64', 'sdl-mcp-watchman-win32-x64']) {
+              if ((root.optionalDependencies || {})[depName] !== expected) {
+                throw new Error('package.json optionalDependencies.' + depName + ' mismatch');
+              }
             }
             if (native.version !== expected) throw new Error('native/package.json version mismatch');
             for (const [name, depVersion] of Object.entries(native.optionalDependencies || {})) {
@@ -292,6 +294,19 @@ jobs:
               const platformPkg = pkg(p);
               if (platformPkg.version !== expected) {
                 throw new Error('platform package version mismatch: ' + platformPkg.name);
+              }
+            }
+            const watchman = pkg(path.join('watchman', 'package.json'));
+            if (watchman.version !== expected) throw new Error('watchman/package.json version mismatch');
+            for (const [name, depVersion] of Object.entries(watchman.optionalDependencies || {})) {
+              if (depVersion !== expected) throw new Error('watchman optional dependency mismatch: ' + name);
+            }
+            for (const dir of fs.readdirSync(path.join('watchman', 'npm'))) {
+              const p = path.join('watchman', 'npm', dir, 'package.json');
+              if (!fs.existsSync(p)) continue;
+              const platformPkg = pkg(p);
+              if (platformPkg.version !== expected) {
+                throw new Error('Watchman platform package version mismatch: ' + platformPkg.name);
               }
             }
             console.log('Version sync validation passed for ' + expected);
@@ -427,6 +442,94 @@ jobs:
             fi
           fi
 
+      - name: Prepare Watchman platform packages
+        run: node scripts/prepare-watchman-packages.mjs
+
+      - name: Verify Watchman package binaries exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          for dir in watchman/npm/*/; do
+            pkg_name=$(node -e "console.log(require('./${dir}package.json').name)")
+            binary_path=$(node -e "console.log(require('./${dir}package.json').sdlMcp.watchmanBinary)")
+            if [[ ! -f "${dir}${binary_path}" ]]; then
+              echo "Missing Watchman binary for ${pkg_name}: ${dir}${binary_path}"
+              exit 1
+            fi
+            echo "OK ${pkg_name}: ${binary_path}"
+          done
+
+      - name: Publish platform Watchman packages
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          FAILED=0
+
+          for dir in watchman/npm/*/; do
+            pkg_name=$(node -e "console.log(require('./${dir}package.json').name)")
+            echo "Publishing ${pkg_name}@${VERSION} (${NPM_DIST_TAG})"
+
+            if [[ "${DRY_RUN}" == "true" ]]; then
+              npm publish "${dir}" --access public --tag "${NPM_DIST_TAG}" --dry-run
+              continue
+            fi
+
+            existing=$(npm view "${pkg_name}@${VERSION}" version 2>/dev/null || true)
+            if [[ "${existing}" == "${VERSION}" ]]; then
+              echo "SKIP ${pkg_name}@${VERSION} already exists"
+              continue
+            fi
+
+            if npm publish "${dir}" --access public --tag "${NPM_DIST_TAG}" 2>&1; then
+              echo "OK ${pkg_name}@${VERSION} published"
+            else
+              recheck=$(npm view "${pkg_name}@${VERSION}" version 2>/dev/null || true)
+              if [[ "${recheck}" == "${VERSION}" ]]; then
+                echo "SKIP ${pkg_name}@${VERSION} already published (confirmed after retry)"
+              else
+                echo "FAIL ${pkg_name}@${VERSION} publish failed"
+                FAILED=1
+              fi
+            fi
+          done
+
+          if [[ "${FAILED}" -eq 1 ]]; then
+            echo "ERROR: Some Watchman platform packages failed to publish"
+            exit 1
+          fi
+
+      - name: Publish Watchman umbrella package
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "Publishing sdl-mcp-watchman@${VERSION} (${NPM_DIST_TAG})"
+
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            npm publish watchman/ --access public --tag "${NPM_DIST_TAG}" --dry-run
+            exit 0
+          fi
+
+          existing=$(npm view "sdl-mcp-watchman@${VERSION}" version 2>/dev/null || true)
+          if [[ "${existing}" == "${VERSION}" ]]; then
+            echo "SKIP sdl-mcp-watchman@${VERSION} already exists"
+            exit 0
+          fi
+
+          if npm publish watchman/ --access public --tag "${NPM_DIST_TAG}" --ignore-scripts 2>&1; then
+            echo "OK sdl-mcp-watchman@${VERSION} published"
+          else
+            recheck=$(npm view "sdl-mcp-watchman@${VERSION}" version 2>/dev/null || true)
+            if [[ "${recheck}" == "${VERSION}" ]]; then
+              echo "SKIP sdl-mcp-watchman@${VERSION} already published (confirmed after retry)"
+            else
+              echo "FAIL sdl-mcp-watchman@${VERSION} publish failed"
+              exit 1
+            fi
+          fi
       - name: Build runtime package
         run: npm run build:all
 

@@ -22,6 +22,7 @@
     "templates/*.md",
     "templates/*.template",
     "scripts/postinstall.mjs",
+    "scripts/postinstall-watchman.mjs",
     "scripts/postinstall-tree-sitter.mjs",
     "scripts/postinstall-prune.mjs",
     "scripts/postinstall-models.mjs",
@@ -56,6 +57,7 @@
     "benchmark:claims": "node scripts/check-benchmark-claims.ts",
     "benchmark:sweep": "node scripts/budget-sensitivity-sweep.ts",
     "bench:ppr": "node scripts/bench-ppr-weight.ts",
+    "bench:delta-slice": "node scripts/bench-delta-slice-set-oriented.ts",
     "benchmark:provider-first-fallback": "node scripts/provider-first-fallback-benchmark.ts",
     "benchmark:record-trace": "node scripts/record-trace.ts",
     "benchmark:setup-external": "node scripts/setup-external-benchmark-repos.ts",
@@ -71,7 +73,7 @@
     "prepare-release": "node scripts/prepare-release.mjs",
     "inspector": "npx @modelcontextprotocol/inspector node dist/main.js",
     "test:native-parity": "node tests/native/parity-test.ts",
-    "test:integration": "node --experimental-strip-types --test-concurrency=1 --test tests/integration",
+    "test:integration": "node --experimental-strip-types --test-concurrency=1 --test tests/integration/*.test.ts",
     "test:parity": "node --experimental-strip-types --test-concurrency=1 --test tests/integration/engine-parity.test.ts",
     "check:config-sync": "node scripts/check-config-sync.ts",
     "check:schema-sync": "node scripts/check-schema-sync.mjs",
@@ -137,7 +139,10 @@
     "kuzu": "npm:@ladybugdb/core@0.16.0",
     "onnxruntime-node": "^1.24.3",
     "sdl-mcp-native": "0.11.7",
-    "tokenizers": "npm:@anush008/tokenizers@^0.6.0"
+    "sdl-mcp-watchman": "0.11.7",
+    "tokenizers": "npm:@anush008/tokenizers@^0.6.0",
+    "sdl-mcp-watchman-linux-x64": "0.11.7",
+    "sdl-mcp-watchman-win32-x64": "0.11.7"
   },
   "devDependencies": {
     "@bufbuild/protobuf": "^2.0.0",

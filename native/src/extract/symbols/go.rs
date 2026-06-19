@@ -358,12 +358,11 @@ fn extract_param_infos(parameter_list: Node<'_>, source: &[u8]) -> Vec<ParamInfo
             }
             "variadic_parameter_declaration" => {
                 let names = extract_parameter_names(child, source, true);
-                let type_annotation = extract_parameter_type(child, source);
 
                 for name in names {
                     params.push(ParamInfo {
                         name,
-                        type_annotation: type_annotation.clone(),
+                        type_annotation: None,
                     });
                 }
             }
@@ -425,10 +424,11 @@ fn extract_parameter_type(node: Node<'_>, source: &[u8]) -> Option<String> {
 
 fn extract_results(node: Node<'_>, source: &[u8]) -> Option<String> {
     let parameter_lists = collect_parameter_lists(node);
-    if parameter_lists.len() >= 2 {
+    let result_list_index = if node.kind() == "method_declaration" { 2 } else { 1 };
+    if let Some(result_list) = parameter_lists.get(result_list_index) {
         let mut result_types = Vec::new();
-        let mut cursor = parameter_lists[1].walk();
-        for child in parameter_lists[1].children(&mut cursor) {
+        let mut cursor = result_list.walk();
+        for child in result_list.children(&mut cursor) {
             if child.kind() == "parameter_declaration" {
                 if let Some(result_type) = extract_parameter_type(child, source) {
                     result_types.push(result_type);
@@ -453,7 +453,6 @@ fn extract_results(node: Node<'_>, source: &[u8]) -> Option<String> {
             }
         }
     }
-
     None
 }
 

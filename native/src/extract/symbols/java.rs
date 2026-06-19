@@ -15,9 +15,7 @@ pub fn extract_symbols_java(
 
     while let Some(node) = stack.pop() {
         match node.kind() {
-            "package_declaration" => {
-                process_package_declaration(node, source, repo_id, rel_path, &mut symbols)
-            }
+            "package_declaration" => {}
             "class_declaration" => {
                 if let Some(symbol) = process_type_like(node, source, repo_id, rel_path, "class") {
                     symbols.push(symbol);
@@ -69,41 +67,6 @@ pub fn extract_symbols_java(
     }
 
     symbols
-}
-
-fn process_package_declaration(
-    node: Node<'_>,
-    source: &[u8],
-    repo_id: &str,
-    rel_path: &str,
-    symbols: &mut Vec<NativeParsedSymbol>,
-) {
-    let package_node =
-        find_child_node(node, "scoped_identifier").or_else(|| find_child_node(node, "identifier"));
-    let Some(package_node) = package_node else {
-        return;
-    };
-
-    let name = node_text(package_node, source).to_string();
-    if name.is_empty() {
-        return;
-    }
-
-    let mut symbol = make_symbol(
-        &name,
-        "module",
-        node,
-        source,
-        repo_id,
-        rel_path,
-        &[],
-        None,
-        &[],
-        "public",
-        &extract_decorators(node, source),
-    );
-    symbol.exported = true;
-    symbols.push(symbol);
 }
 
 fn process_type_like(

@@ -4,15 +4,15 @@ import type { RepoId, SymbolId } from "../domain/types.js";
 import {
   batchComputeFanInOut,
   batchGetFanInAtVersion,
-  getEdgesToSymbols,
+  getEdgesToSymbolsInRepo,
   getFilesByIds,
-  getProcessStepsAfterSymbol,
-  getProcessesForSymbol,
+  getProcessStepsAfterSymbols,
   getSymbolsByIds,
 } from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
 import { DatabaseError } from "../domain/errors.js";
 import { shortestPath } from "../db/ladybug-algorithms.js";
+import { getObservabilityTap } from "../observability/event-tap.js";
 import type {
   BlastRadiusItem,
   DiagnosticSuspect,
@@ -36,6 +36,7 @@ interface BlastRadiusCacheEntry {
 const blastRadiusCache = new Map<string, BlastRadiusCacheEntry>();
 const BLAST_RADIUS_CACHE_TTL_MS = 60_000; // 1 minute TTL
 const BLAST_RADIUS_CACHE_MAX_ENTRIES = 50;
+const PROCESS_STEP_LOOKUP_CHUNK_SIZE = 500;
 
 function computeBlastRadiusCacheKey(
   repoId: RepoId,
@@ -102,6 +103,11 @@ interface ProcessDependentMetrics {
   distance: number;
   rank: number;
   reason: string;
+}
+
+interface PathExplanationStats {
+  fallbackPathQueryCount: number;
+  pathExplanationLatencyMs: number;
 }
 
 function assertSafeInt(value: number, name: string): void {
@@ -180,7 +186,11 @@ export async function attachPathExplanations(
   changedSymbols: SymbolId[],
   items: BlastRadiusItem[],
   maxHops: number,
-): Promise<void> {
+): Promise<PathExplanationStats> {
+  const stats: PathExplanationStats = {
+    fallbackPathQueryCount: 0,
+    pathExplanationLatencyMs: 0,
+  };
   try {
     const mustPriority = items.filter((i) => i.signal === "directDependent");
     const topN = items.slice(0, BLAST_RADIUS_PATH_TOP_N);
@@ -188,10 +198,15 @@ export async function attachPathExplanations(
     const targets: BlastRadiusItem[] = [];
     for (const item of [...mustPriority, ...topN]) {
       if (seen.has(item.symbolId)) continue;
+      if (item.explanationPath && item.explanationPath.length > 0) continue;
       seen.add(item.symbolId);
       targets.push(item);
     }
     for (const item of targets) {
+      const pathStartedAt = Date.now();
+      stats.fallbackPathQueryCount += changedSymbols.includes(item.symbolId)
+        ? 0
+        : changedSymbols.length;
       const path = await selectMinimalPathExplanation(
         conn,
         repoId,
@@ -202,13 +217,32 @@ export async function attachPathExplanations(
       if (path && path.length > 0) {
         item.explanationPath = path;
       }
+      stats.pathExplanationLatencyMs += Date.now() - pathStartedAt;
     }
   } catch (err) {
     logger.debug("blastRadius: attachPathExplanations bailed", {
       error: err instanceof Error ? err.message : String(err),
     });
   }
+  return stats;
 }
+
+function emitBlastRadiusMetrics(input: {
+  repoId: RepoId;
+  changedSymbolCount: number;
+  blastRadiusCount: number;
+  durationMs: number;
+  dbRoundTrips: number;
+  fallbackPathQueryCount: number;
+  pathExplanationLatencyMs: number;
+}): void {
+  try {
+    getObservabilityTap()?.deltaBlastRadius(input);
+  } catch {
+    // Observability is best-effort and must never affect delta computation.
+  }
+}
+
 export async function computeBlastRadius(
   conn: Connection,
   changedSymbols: SymbolId[],
@@ -240,11 +274,21 @@ export async function computeBlastRadius(
   );
   const cached = getCachedBlastRadius(cacheKey);
   if (cached) {
+    const durationMs = Date.now() - startTime;
     logger.debug("Blast radius cache hit", {
       repoId,
       changedSymbols: changedSymbols.length,
       resultCount: cached.length,
-      durationMs: Date.now() - startTime,
+      durationMs,
+    });
+    emitBlastRadiusMetrics({
+      repoId,
+      changedSymbolCount: changedSymbols.length,
+      blastRadiusCount: cached.length,
+      durationMs,
+      dbRoundTrips: 0,
+      fallbackPathQueryCount: 0,
+      pathExplanationLatencyMs: 0,
     });
     return cached;
   }
@@ -265,25 +309,29 @@ export async function computeBlastRadius(
   const changedSet = new Set(changedSymbols);
   const visited = new Set<SymbolId>(changedSet);
   const distanceBySymbol = new Map<SymbolId, DependentMetrics>();
+  const predecessorBySymbol = new Map<SymbolId, SymbolId>();
+  let dbRoundTrips = 0;
+  let fallbackPathQueryCount = 0;
+  let pathExplanationLatencyMs = 0;
 
   let frontier: SymbolId[] = Array.from(changedSet);
 
   for (let distance = 1; distance <= safeMaxHops; distance++) {
     if (frontier.length === 0) break;
 
-    const incoming = await getEdgesToSymbols(conn, frontier);
+    const incoming = await getEdgesToSymbolsInRepo(conn, repoId, frontier);
+    dbRoundTrips += 1;
     const nextFrontier: SymbolId[] = [];
 
     for (const edges of incoming.values()) {
       for (const edge of edges) {
-        if (repoId && edge.repoId !== repoId) continue;
-
         const dependentId = edge.fromSymbolId;
         if (changedSet.has(dependentId)) continue;
         if (visited.has(dependentId)) continue;
 
         visited.add(dependentId);
         distanceBySymbol.set(dependentId, { distance });
+        predecessorBySymbol.set(dependentId, edge.toSymbolId);
         nextFrontier.push(dependentId);
       }
     }
@@ -303,6 +351,7 @@ export async function computeBlastRadius(
       fileIds.add(symbol.fileId);
     }
     const filesMap = await getFilesByIds(conn, Array.from(fileIds));
+    dbRoundTrips += 3;
 
     for (const [symbolId, { distance }] of distanceBySymbol) {
       const fanIn = fanInOutMap.get(symbolId)?.fanIn ?? 0;
@@ -340,35 +389,60 @@ export async function computeBlastRadius(
     ProcessDependentMetrics
   >();
 
-  // TODO: Batch process lookups for all changed symbols in a single query
-  // to reduce O(N) sequential DB round trips per changed symbol.
   try {
-    for (const changedSymbolId of changedSet) {
-      const processes = await getProcessesForSymbol(conn, changedSymbolId);
-      for (const proc of processes) {
-        const downstream = await getProcessStepsAfterSymbol(
-          conn,
-          proc.processId,
-          changedSymbolId,
-        );
+    const changedSymbolOrder = Array.from(changedSet);
+    const processRowsByChangedSymbol = new Map<
+      SymbolId,
+      Awaited<ReturnType<typeof getProcessStepsAfterSymbols>>
+    >();
 
-        for (const step of downstream) {
-          const symbolId = step.symbolId;
-          if (changedSet.has(symbolId)) continue;
+    for (
+      let start = 0;
+      start < changedSymbolOrder.length;
+      start += PROCESS_STEP_LOOKUP_CHUNK_SIZE
+    ) {
+      const chunk = changedSymbolOrder.slice(
+        start,
+        start + PROCESS_STEP_LOOKUP_CHUNK_SIZE,
+      );
+      const rows = await getProcessStepsAfterSymbols(conn, chunk);
+      dbRoundTrips += 1;
+      for (const row of rows) {
+        const rowsForSymbol =
+          processRowsByChangedSymbol.get(row.changedSymbolId) ?? [];
+        rowsForSymbol.push(row);
+        processRowsByChangedSymbol.set(row.changedSymbolId, rowsForSymbol);
+      }
+    }
 
-          const stepDistance = step.stepOrder - proc.stepOrder;
-          if (stepDistance <= 0) continue;
+    // Replay the previous per-symbol/per-process order so equal-distance
+    // process matches keep the same first-wins dedup semantics.
+    for (const changedSymbolId of changedSymbolOrder) {
+      const rows = processRowsByChangedSymbol.get(changedSymbolId) ?? [];
+      rows.sort(
+        (a, b) =>
+          a.startOrder - b.startOrder ||
+          a.processId.localeCompare(b.processId) ||
+          a.stepOrder - b.stepOrder ||
+          a.symbolId.localeCompare(b.symbolId),
+      );
 
-          const existing = processDependentsBySymbol.get(symbolId);
-          if (existing && existing.distance <= stepDistance) continue;
+      for (const row of rows) {
+        const symbolId = row.symbolId;
+        if (changedSet.has(symbolId)) continue;
 
-          const rank = Math.max(0, Math.min(1, 1 - stepDistance / 20));
-          processDependentsBySymbol.set(symbolId, {
-            distance: stepDistance,
-            rank,
-            reason: `downstream in ${proc.label}`,
-          });
-        }
+        const stepDistance = row.stepDistance;
+        if (stepDistance <= 0) continue;
+
+        const existing = processDependentsBySymbol.get(symbolId);
+        if (existing && existing.distance <= stepDistance) continue;
+
+        const rank = Math.max(0, Math.min(1, 1 - stepDistance / 20));
+        processDependentsBySymbol.set(symbolId, {
+          distance: stepDistance,
+          rank,
+          reason: `downstream in ${row.label}`,
+        });
       }
     }
   } catch (error) {
@@ -397,6 +471,15 @@ export async function computeBlastRadius(
 
   const mergedDependents = Array.from(mergedBySymbol.values());
   if (mergedDependents.length === 0) {
+    emitBlastRadiusMetrics({
+      repoId,
+      changedSymbolCount: changedSymbols.length,
+      blastRadiusCount: 0,
+      durationMs: Date.now() - startTime,
+      dbRoundTrips,
+      fallbackPathQueryCount,
+      pathExplanationLatencyMs,
+    });
     return [];
   }
 
@@ -406,11 +489,21 @@ export async function computeBlastRadius(
       conn,
       mergedDependents.map((item) => item.symbolId),
     );
+    dbRoundTrips += 1;
     filteredDependents = mergedDependents.filter(
       (item) => dependentSymbols.get(item.symbolId)?.repoId === repoId,
     );
   }
   if (filteredDependents.length === 0) {
+    emitBlastRadiusMetrics({
+      repoId,
+      changedSymbolCount: changedSymbols.length,
+      blastRadiusCount: 0,
+      durationMs: Date.now() - startTime,
+      dbRoundTrips,
+      fallbackPathQueryCount,
+      pathExplanationLatencyMs,
+    });
     return [];
   }
 
@@ -432,6 +525,7 @@ export async function computeBlastRadius(
       rankedSymbolIds,
       toVersionId,
     );
+    dbRoundTrips += 2;
 
     for (const item of ranked) {
       const previous = previousMap.get(item.symbolId) ?? 0;
@@ -466,13 +560,28 @@ export async function computeBlastRadius(
   // top-ranked items. Strictly additive; errors are swallowed by
   // attachPathExplanations so this cannot regress the main flow.
   if (repoId) {
-    await attachPathExplanations(
+    for (const item of ranked) {
+      if (item.signal === "process") continue;
+      const path = reconstructPredecessorPath(
+        item.symbolId,
+        changedSet,
+        predecessorBySymbol,
+        Math.max(2, Math.min(maxHops, 6)),
+      );
+      if (path) {
+        item.explanationPath = path;
+      }
+    }
+    const pathStats = await attachPathExplanations(
       conn,
       repoId,
       changedSymbols,
       ranked,
       Math.max(2, Math.min(maxHops, 6)),
     );
+    fallbackPathQueryCount += pathStats.fallbackPathQueryCount;
+    pathExplanationLatencyMs += pathStats.pathExplanationLatencyMs;
+    dbRoundTrips += pathStats.fallbackPathQueryCount;
   }
 
   // Cache and log timing before returning
@@ -494,8 +603,41 @@ export async function computeBlastRadius(
       durationMs,
     });
   }
+  emitBlastRadiusMetrics({
+    repoId,
+    changedSymbolCount: changedSymbols.length,
+    blastRadiusCount: ranked.length,
+    durationMs,
+    dbRoundTrips,
+    fallbackPathQueryCount,
+    pathExplanationLatencyMs,
+  });
 
   return ranked;
+}
+
+function reconstructPredecessorPath(
+  target: SymbolId,
+  changedSet: Set<SymbolId>,
+  predecessorBySymbol: Map<SymbolId, SymbolId>,
+  maxHops: number,
+): SymbolId[] | null {
+  if (changedSet.has(target)) return [target];
+
+  const path: SymbolId[] = [target];
+  const seen = new Set<SymbolId>([target]);
+  let current = target;
+
+  for (let hops = 0; hops < maxHops; hops++) {
+    const predecessor = predecessorBySymbol.get(current);
+    if (!predecessor || seen.has(predecessor)) return null;
+    path.push(predecessor);
+    if (changedSet.has(predecessor)) return path;
+    seen.add(predecessor);
+    current = predecessor;
+  }
+
+  return null;
 }
 
 export function rankDependents(

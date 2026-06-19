@@ -83,7 +83,13 @@ fn extract_source_specifier(node: Node<'_>, source: &[u8]) -> Option<String> {
 fn parse_import_node(node: Node<'_>, specifier: &str, source: &[u8]) -> NativeParsedImport {
     let is_re_export = node.kind() == "export_statement";
     let is_relative = specifier.starts_with("./") || specifier.starts_with("../");
-    let is_external = !is_relative && !BUILTIN_MODULES.contains(&specifier);
+    let normalized_builtin = specifier
+        .strip_prefix("node:")
+        .unwrap_or(specifier)
+        .split('/')
+        .next()
+        .unwrap_or(specifier);
+    let is_external = !is_relative && !BUILTIN_MODULES.contains(&normalized_builtin);
 
     let mut result = NativeParsedImport {
         specifier: specifier.to_string(),

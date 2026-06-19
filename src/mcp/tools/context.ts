@@ -156,6 +156,14 @@ function recordContextSubTimings(
   if (typeof fusionLatencyMs === "number") {
     timer.add("context.retrievalFusion", fusionLatencyMs);
   }
+  const retrievalTimings = response.retrievalEvidence?.diagnosticTimings;
+  if (retrievalTimings && typeof retrievalTimings === "object") {
+    for (const [phase, durationMs] of Object.entries(retrievalTimings)) {
+      if (typeof durationMs === "number") {
+        timer.add(`context.retrieval.${sanitizePhaseSegment(phase)}`, durationMs);
+      }
+    }
+  }
 }
 
 export function shouldAttachPackedPayloadForContext(

@@ -717,6 +717,9 @@ function extractCalls(
     name: (identifier) @name)) @call
 
 (call_expression
+  function: (scoped_identifier) @scoped) @call
+
+(call_expression
   function: (field_expression
     value: (_) @recv
     field: (field_identifier) @field)) @call
@@ -798,6 +801,9 @@ function extractCalls(
     const fieldCapture = match.captures.find(
       (c: QueryCapture) => c.name === "field",
     );
+    const scopedCapture = match.captures.find(
+      (c: QueryCapture) => c.name === "scoped",
+    );
 
     let calleeIdentifier = "";
     let callType: ExtractedCall["callType"] = "function";
@@ -824,6 +830,9 @@ function extractCalls(
         isResolved = true;
         calleeSymbolId = methodNodeId;
       }
+    } else if (scopedCapture) {
+      calleeIdentifier = scopedCapture.node.text;
+      callType = "function";
     } else if (recvCapture && fieldCapture) {
       const recvText = recvCapture.node.text;
       const fieldName = fieldCapture.node.text;

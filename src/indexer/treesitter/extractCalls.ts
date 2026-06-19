@@ -1,5 +1,5 @@
 import { Tree, SyntaxNode, QueryCapture } from "tree-sitter";
-import { queryTree } from "./tsTreesitter.js";
+import { queryTreeForExtension } from "./tsTreesitter.js";
 import { findEnclosingSymbol } from "./symbolUtils.js";
 
 export interface ExtractedSymbol {
@@ -160,6 +160,7 @@ function resolveSpecialMemberCall(
 export function extractCalls(
   tree: Tree,
   extractedSymbols: ExtractedSymbol[],
+  extension = ".ts",
 ): ExtractedCall[] {
   const calls: ExtractedCall[] = [];
   const seenCallNodes = new Set<number>(); // Track processed nodes to avoid duplicates
@@ -276,22 +277,22 @@ export function extractCalls(
 
   // Collect all matches
   const standardMatches = [
-    ...queryTree(tree, functionQuery),
-    ...queryTree(tree, memberCallQuery),
-    ...queryTree(tree, newExpressionQuery),
-    ...queryTree(tree, newMemberExpressionQuery),
-    ...queryTree(tree, superCallQuery),
+    ...queryTreeForExtension(tree, extension, functionQuery),
+    ...queryTreeForExtension(tree, extension, memberCallQuery),
+    ...queryTreeForExtension(tree, extension, newExpressionQuery),
+    ...queryTreeForExtension(tree, extension, newMemberExpressionQuery),
+    ...queryTreeForExtension(tree, extension, superCallQuery),
   ];
 
-  const optionalChainedCallMatches = queryTree(tree, optionalChainedCallQuery);
-  const optionalChainedNewMatches = queryTree(tree, optionalChainedNewQuery);
+  const optionalChainedCallMatches = queryTreeForExtension(tree, extension, optionalChainedCallQuery);
+  const optionalChainedNewMatches = queryTreeForExtension(tree, extension, optionalChainedNewQuery);
 
-  const computedMatches = queryTree(tree, computedCallQuery);
+  const computedMatches = queryTreeForExtension(tree, extension, computedCallQuery);
   // Tagged templates are just call_expressions with template_string arguments
   // The taggedTemplateQuery and taggedTemplateMemberQuery handle these cases
   const taggedMatches = [
-    ...queryTree(tree, taggedTemplateQuery),
-    ...queryTree(tree, taggedTemplateMemberQuery),
+    ...queryTreeForExtension(tree, extension, taggedTemplateQuery),
+    ...queryTreeForExtension(tree, extension, taggedTemplateMemberQuery),
   ];
 
   // Process standard calls
@@ -717,6 +718,36 @@ function extractChainedCalls(
  * - await expressions: await fetchData()
  * - arrow functions: array.map(x => process(x))
  */
+function extractRecoverableErrorCall(
+  node: SyntaxNode,
+  extractedSymbols: ExtractedSymbol[],
+): ExtractedCall | null {
+  if (node.type !== "ERROR") return null;
+
+  const calleeNode = node.children.find((child) =>
+    child.type === "identifier" || child.type === "property_identifier",
+  );
+  if (!calleeNode) return null;
+
+  const calleeIdentifier = calleeNode.text;
+  const relativeStart = calleeNode.startPosition.column - node.startPosition.column;
+  const closingParenOffset = node.text.indexOf(")", Math.max(0, relativeStart));
+  if (closingParenOffset < 0) return null;
+
+  return {
+    callerNodeId: findEnclosingSymbol(node, extractedSymbols),
+    calleeIdentifier,
+    isResolved: false,
+    callType: "function",
+    range: {
+      startLine: calleeNode.startPosition.row + 1,
+      startCol: calleeNode.startPosition.column,
+      endLine: node.startPosition.row + 1,
+      endCol: node.startPosition.column + closingParenOffset + 1,
+    },
+  };
+}
+
 function extractNestedCalls(
   node: SyntaxNode,
   extractedSymbols: ExtractedSymbol[],
@@ -725,6 +756,12 @@ function extractNestedCalls(
   seenCallNodes: Set<number>,
 ): void {
   if (!node) return;
+
+  const recoveredCall = extractRecoverableErrorCall(node, extractedSymbols);
+  if (recoveredCall && !seenCallNodes.has(node.id)) {
+    seenCallNodes.add(node.id);
+    calls.push(recoveredCall);
+  }
 
   // 36-1.2: Handle await expressions - ensure the call inside is captured
   if (node.type === "await_expression") {

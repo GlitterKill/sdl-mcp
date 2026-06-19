@@ -108,6 +108,17 @@ export interface SliceBuildTapEvent {
   accepted: number;
   evicted: number;
   rejected: number;
+  maxFrontierSize?: number;
+}
+
+export interface DeltaBlastRadiusTapEvent {
+  repoId?: string;
+  changedSymbolCount: number;
+  blastRadiusCount: number;
+  durationMs: number;
+  dbRoundTrips: number;
+  fallbackPathQueryCount: number;
+  pathExplanationLatencyMs: number;
 }
 
 export interface IndexPhaseTapEvent {
@@ -166,6 +177,7 @@ export interface ObservabilityTap {
   indexPhase(event: IndexPhaseTapEvent): void;
   cacheLookup(event: CacheLookupTapEvent): void;
   sliceBuild(event: SliceBuildTapEvent): void;
+  deltaBlastRadius(event: DeltaBlastRadiusTapEvent): void;
   auditBufferSample(event: AuditBufferTapEvent): void;
   postIndexSession(event: PostIndexSessionTapEvent): void;
   dbLatency(event: DbLatencyTapEvent): void;

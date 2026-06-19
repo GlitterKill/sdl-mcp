@@ -937,7 +937,7 @@ Retrieve task-shaped code context with rung path selection and evidence capture.
 
 **Response:**
 
-In **broad** mode (default, compact): `taskId`, `taskType`, `success`, `summary`, `answer`, `finalEvidence`, `nextBestAction?`, `retrievalEvidence?`, `diagnostics?`, `error?` — the fields `actionsTaken`, `path`, and `metrics` are omitted from the model-visible response. `finalEvidence` is the primary evidence surface. `retrievalEvidence` carries `sources`, `candidateCountPerSource`, `topRanksPerSource`, `fusionLatencyMs`, `ftsAvailable`, and `vectorAvailable` from hybrid seeding when available. `diagnostics` is returned only when `includeDiagnostics: true`. The `answer` field is always preserved on successful responses.
+In **broad** mode (default, compact): `taskId`, `taskType`, `success`, `summary`, `answer`, `finalEvidence`, `nextBestAction?`, `retrievalEvidence?`, `diagnostics?`, `error?` — the fields `actionsTaken`, `path`, and `metrics` are omitted from the model-visible response. `finalEvidence` is the primary evidence surface. `retrievalEvidence` carries `sources`, `candidateCountPerSource`, `topRanksPerSource`, `fusionLatencyMs`, `diagnosticTimings`, `ftsAvailable`, and `vectorAvailable` from hybrid seeding when available. `diagnostics` is returned only when `includeDiagnostics: true`. The `answer` field is always preserved on successful responses.
 
 In **precise** mode: `taskId`, `taskType`, `success`, `path`, `finalEvidence`, `metrics` — envelope fields stripped for token efficiency.
 

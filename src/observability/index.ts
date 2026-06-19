@@ -18,6 +18,7 @@ export type {
   BottleneckSummary,
   CacheMetrics,
   CacheSourceMetrics,
+  DeltaMetrics,
   HealthMetrics,
   IndexingMetrics,
   LatencyMetrics,
@@ -43,6 +44,7 @@ export { BEAM_EXPLAIN_MAX_ENTRIES, TOKEN_SAVINGS_SOURCES } from "./types.js";
 
 export type {
   CacheLookupTapEvent,
+  DeltaBlastRadiusTapEvent,
   IndexPhaseTapEvent,
   ObservabilityTap,
   PackedWireTapEvent,

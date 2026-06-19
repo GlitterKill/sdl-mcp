@@ -427,7 +427,7 @@ SDL-MCP falls back to legacy automatically if hybrid indexes are unavailable. Un
 | :------------------ | :----- | :-------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `results`           | array  | Each result: `{symbolId, name, file, kind}` where kind is one of `function`, `class`, `interface`, `type`, `module`, `method`, `constructor`, `variable`  |
 | `truncation`        | object | Present if results were truncated: `{truncated, droppedCount, howToResume}`                                                                               |
-| `retrievalEvidence` | object | Present when `includeRetrievalEvidence: true`. Contains `{mode, ftsAvailable, vectorAvailable, candidateCountPerSource, fusionLatencyMs, fallbackReason}` |
+| `retrievalEvidence` | object | Present when `includeRetrievalEvidence: true`. Contains `{mode, ftsAvailable, vectorAvailable, candidateCountPerSource, fusionLatencyMs, diagnosticTimings, fallbackReason}` |
 | `retrievalMode`     | string | `"hybrid"` or `"legacy"` — indicates which retrieval path was used                                                                                        |
 
 **Token guidance:** Start with `limit: 5-20`. Only increase if the initial results don't contain what you need.
@@ -616,7 +616,7 @@ Supports three wire format versions for encoding efficiency:
 | `lease`             | object | `{expiresAt, minVersion, maxVersion}` — slice validity window                                                                                                                                                                                   |
 | `sliceEtag`         | object | `{handle, version, sliceHash}` for conditional refresh                                                                                                                                                                                          |
 | `slice`             | object | The graph slice containing `cards`, `cardRefs`, `edges`, `frontier`, `truncation`, `symbolIndex`, `budget`, `startSymbols`, `confidenceDistribution`                                                                                            |
-| `retrievalEvidence` | object | Present when `includeRetrievalEvidence: true`. Contains `{mode, symptomType, candidateCountPerSource, fusionLatencyMs, fallbackReason}`. `symptomType` classifies the input: `"taskText"`, `"stackTrace"`, `"failingTest"`, or `"editedFiles"`. |
+| `retrievalEvidence` | object | Present when `includeRetrievalEvidence: true`. Contains `{mode, symptomType, candidateCountPerSource, fusionLatencyMs, diagnosticTimings, fallbackReason}`. `symptomType` classifies the input: `"taskText"`, `"stackTrace"`, `"failingTest"`, or `"editedFiles"`. |
 
 **Token guidance:**
 

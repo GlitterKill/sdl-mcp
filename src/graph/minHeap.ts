@@ -163,8 +163,23 @@ export class MinHeap<
    * @returns Index of the worst item, or -1 if empty
    */
   findWorstIndex(compareFn: (a: T, b: T) => number): number {
+    return this.findWorstEntry(compareFn)?.index ?? -1;
+  }
+
+  /**
+   * Find the maximum item (worst in a min-heap) and its index.
+   * In a min-heap the maximum must be a leaf node, so this scans only
+   * the leaf range and does not copy the backing heap array.
+   * Time complexity: O(n/2)
+   *
+   * @param compareFn - Comparison function (a > b -> positive)
+   * @returns Worst heap entry, or undefined if empty
+   */
+  findWorstEntry(
+    compareFn: (a: T, b: T) => number,
+  ): { index: number; item: T } | undefined {
     const n = this.heap.length;
-    if (n === 0) return -1;
+    if (n === 0) return undefined;
     const leafStart = Math.floor(n / 2);
     let worstIdx = leafStart;
     for (let i = leafStart + 1; i < n; i++) {
@@ -172,7 +187,7 @@ export class MinHeap<
         worstIdx = i;
       }
     }
-    return worstIdx;
+    return { index: worstIdx, item: this.heap[worstIdx] };
   }
 
   /**

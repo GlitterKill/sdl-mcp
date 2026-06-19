@@ -417,6 +417,7 @@ export async function hybridSearch(
   }
 
   const rankings: SourceRanking[] = [];
+  const diagnosticTimings = new Map<string, number>();
 
   const fusionStart = performance.now();
 
@@ -429,6 +430,7 @@ export async function hybridSearch(
     const ftsIndexName = config.fts.indexName ?? DEFAULT_FTS_INDEX_NAME;
     const ftsConjunctive = config.fts.conjunctive ?? false;
 
+    const ftsStartedAt = performance.now();
     const ftsRows = await queryFts(
       conn,
       ftsIndexName,
@@ -436,6 +438,7 @@ export async function hybridSearch(
       ftsTopK,
       ftsConjunctive,
     );
+    recordRetrievalTiming(diagnosticTimings, "fts", ftsStartedAt);
 
     if (ftsRows.length > 0) {
       const ranks = new Map<string, number>();
@@ -510,6 +513,7 @@ export async function hybridSearch(
 
       // Generate query embedding.
       let queryEmbedding: number[];
+      const embedStartedAt = performance.now();
       try {
         const prefixedQuery = applyQueryPrefix(modelName, options.query);
         const embeddings = await provider.embed([prefixedQuery]);
@@ -527,14 +531,28 @@ export async function hybridSearch(
           }`,
         );
         continue;
+      } finally {
+        recordRetrievalTiming(diagnosticTimings, "embedding", embedStartedAt);
+        recordRetrievalTiming(
+          diagnosticTimings,
+          `embedding.${timingKeySegment(modelName)}`,
+          embedStartedAt,
+        );
       }
 
       // Query the vector index.
+      const vectorStartedAt = performance.now();
       const vecResults = await queryVectorIndex(
         conn,
         indexName,
         queryEmbedding,
         vectorTopK,
+      );
+      recordRetrievalTiming(diagnosticTimings, "vector", vectorStartedAt);
+      recordRetrievalTiming(
+        diagnosticTimings,
+        `vector.${timingKeySegment(modelName)}`,
+        vectorStartedAt,
       );
 
       if (vecResults.length > 0) {
@@ -567,17 +585,21 @@ export async function hybridSearch(
 
     logger.debug(`[hybrid-search] No results from any backend: ${reason}`);
 
+    if (options.includeEvidence) {
+      const evidence = buildEvidence([], [], fusionLatencyMs, reason);
+      const timingRecord = retrievalTimingsToRecord(diagnosticTimings);
+      if (timingRecord) evidence.diagnosticTimings = timingRecord;
+      return { results: [], evidence };
+    }
     return {
       results: [],
-      ...(options.includeEvidence
-        ? { evidence: buildEvidence([], [], fusionLatencyMs, reason) }
-        : {}),
     };
   }
 
   // ----- RRF fusion -----
-  // ----- RRF fusion -----
+  const rrfStartedAt = performance.now();
   const fusedResults = rrfFuse(rankings, rrfK, limit);
+  recordRetrievalTiming(diagnosticTimings, "fusion", rrfStartedAt);
 
   logger.debug(
     `[hybrid-search] Fused ${rankings.length} source(s) into ${fusedResults.length} results (${fusionLatencyMs}ms)`,
@@ -595,14 +617,17 @@ export async function hybridSearch(
         options.chatMentions,
         options.chatMentionWeights,
       );
+      const snapshotStartedAt = performance.now();
       let snapshot = getGraphSnapshot(options.repoId);
       if (!snapshot) {
         snapshot = await loadAndCacheGraphSnapshot(conn, options.repoId);
       }
+      recordRetrievalTiming(diagnosticTimings, "snapshot", snapshotStartedAt);
       let backend: NonNullable<RetrievalEvidence["pprBoosts"]>["backend"] =
         "js";
       let symbolsBoosted = 0;
       if (snapshot && seedResolution.seeds.size > 0) {
+        const pprComputeStartedAt = performance.now();
         const pprResult = await computePpr({
           graph: snapshot,
           snapshotCreatedAt:
@@ -613,6 +638,12 @@ export async function hybridSearch(
             direction: options.pprDirection,
           },
         });
+        recordRetrievalTiming(diagnosticTimings, "ppr", pprComputeStartedAt);
+        recordRetrievalTiming(
+          diagnosticTimings,
+          "ppr.compute",
+          pprComputeStartedAt,
+        );
         backend = pprResult.backend;
         try {
           getObservabilityTap()?.pprResult({
@@ -626,11 +657,17 @@ export async function hybridSearch(
         const originalScores = new Map(
           fusedResults.map((r) => [r.symbolId, r.score] as const),
         );
+        const pprApplyStartedAt = performance.now();
         const boost = applyPprBoost(fusedResults, pprResult.scores, {
           pprWeight: options.pprWeight,
           combinedCap: 4,
           originalScores,
         });
+        recordRetrievalTiming(
+          diagnosticTimings,
+          "ppr.applyBoost",
+          pprApplyStartedAt,
+        );
         pprAdjusted = boost.items;
         symbolsBoosted = boost.symbolsBoosted;
       }
@@ -656,6 +693,8 @@ export async function hybridSearch(
   }
   const evidence = buildEvidence(rankings, pprAdjusted, fusionLatencyMs);
   if (pprBoosts) evidence.pprBoosts = pprBoosts;
+  const timingRecord = retrievalTimingsToRecord(diagnosticTimings);
+  if (timingRecord) evidence.diagnosticTimings = timingRecord;
   return { results: pprAdjusted, evidence };
 }
 
@@ -1031,11 +1070,12 @@ export async function entitySearch(
       !ftsEnabled && !vectorEnabled
         ? "all-backends-disabled"
         : "all-backends-returned-empty";
+    const evidence = buildEntityEvidence([], [], fusionLatencyMs, reason);
+    const timingRecord = retrievalTimingsToRecord(diagnosticTimings);
+    if (timingRecord) evidence.diagnosticTimings = timingRecord;
     return {
       results: [],
-      ...(options.includeEvidence
-        ? { evidence: buildEntityEvidence([], [], fusionLatencyMs, reason) }
-        : {}),
+      ...(options.includeEvidence ? { evidence } : {}),
     };
   }
 

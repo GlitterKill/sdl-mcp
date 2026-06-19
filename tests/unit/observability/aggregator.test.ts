@@ -195,6 +195,81 @@ describe("Aggregator", () => {
     assert.equal(ppr.fallbackCount, 1);
   });
 
+  it("aggregates retrieval phase timings and beam frontier peaks", () => {
+    const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
+    agg.recordSemanticSearch({
+      repoId: REPO,
+      semanticEnabled: true,
+      latencyMs: 40,
+      candidateCount: 3,
+      alpha: 0.6,
+      retrievalMode: "hybrid",
+      retrievalType: "hybrid",
+      phaseLatencyMs: { fts: 6, vector: 14, fusion: 2 },
+    });
+    agg.recordSemanticSearch({
+      repoId: REPO,
+      semanticEnabled: true,
+      latencyMs: 80,
+      candidateCount: 5,
+      alpha: 0.6,
+      retrievalMode: "hybrid",
+      retrievalType: "hybrid",
+      phaseLatencyMs: { fts: 10, vector: 20, ppr: 12 },
+    });
+    agg.recordBeamBuild({
+      durationMs: 10,
+      accepted: 2,
+      evicted: 1,
+      rejected: 0,
+      maxFrontierSize: 3,
+    });
+    agg.recordBeamBuild({
+      durationMs: 20,
+      accepted: 4,
+      evicted: 0,
+      rejected: 2,
+      maxFrontierSize: 7,
+    });
+
+    const snap = agg.getSnapshot(REPO);
+    assert.equal(snap.retrieval.avgLatencyMs, 60);
+    assert.equal(snap.retrieval.phaseLatencyMs.fts.count, 2);
+    assert.equal(snap.retrieval.phaseLatencyMs.fts.avgMs, 8);
+    assert.equal(snap.retrieval.phaseLatencyMs.vector.p95Ms, 20);
+    assert.equal(snap.retrieval.phaseLatencyMs.ppr.count, 1);
+    assert.equal(snap.beam.avgFrontierMaxSize, 5);
+    assert.equal(snap.beam.p95FrontierMaxSize, 7);
+  });
+
+  it("aggregates delta blast-radius metrics", () => {
+    const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
+    agg.recordDeltaBlastRadius({
+      changedSymbolCount: 2,
+      blastRadiusCount: 5,
+      durationMs: 30,
+      dbRoundTrips: 8,
+      fallbackPathQueryCount: 2,
+      pathExplanationLatencyMs: 12,
+    });
+    agg.recordDeltaBlastRadius({
+      changedSymbolCount: 4,
+      blastRadiusCount: 8,
+      durationMs: 90,
+      dbRoundTrips: 12,
+      fallbackPathQueryCount: 0,
+      pathExplanationLatencyMs: 0,
+    });
+
+    const delta = agg.getSnapshot(REPO).delta;
+    assert.equal(delta.totalBlastRadiusComputations, 2);
+    assert.equal(delta.avgBlastRadiusLatencyMs, 60);
+    assert.equal(delta.p95BlastRadiusLatencyMs, 90);
+    assert.equal(delta.avgDbRoundTripsPerChangedSymbol, 3.5);
+    assert.equal(delta.fallbackPathQueryCount, 2);
+    assert.equal(delta.avgPathExplanationLatencyMs, 12);
+  });
+
   it("emits timeseries with the requested window", () => {
     const agg = new Aggregator(DEFAULT_AGGREGATOR_OPTIONS);
     agg.recordResourceSample({

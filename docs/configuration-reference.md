@@ -276,7 +276,8 @@ Use [Provider-First Indexing](./feature-deep-dives/provider-first-indexing.md) f
 
 SDL-MCP keeps the downstream live-index path unchanged for every provider: provider events normalize to repo-relative paths, pass through SDL ignore/extension guards, and then use the existing saved-file patch path with repo-wide incremental indexing as the fallback.
 
-- `auto` is the recommended default. It selects Watchman when available and healthy, falls back to Chokidar when Watchman cannot start, and uses Node `fs.watch` as the last-resort zero-install provider.
+- `auto` is the recommended default. It selects Watchman when available and healthy, falls back to Chokidar when Watchman cannot start, and uses Node `fs.watch` as the last-resort zero-install provider. A missing-Watchman startup probe is cached for the current server process so multi-repo startup reuses the same fallback instead of repeating the missing-binary warning for every repo.
+- SDL-MCP resolves managed Watchman binaries in this order: `SDL_WATCHMAN_BINARY`, `sdl-mcp-watchman`, then the matching platform package such as `sdl-mcp-watchman-win32-x64` or `sdl-mcp-watchman-linux-x64`. Runtime passes the resolved binary path directly to `fb-watchman`; users do not need to add the managed binary to `PATH`.
 - `watchman`, `chokidar`, and `fsWatch` are authoritative settings. If the configured provider cannot start, SDL-MCP reports an actionable watcher failure rather than silently switching to another provider.
 - Watchman fresh-instance and recrawl signals are treated as uncertain boundaries. SDL-MCP marks watcher health stale and schedules one bounded repo-wide incremental refresh instead of treating every file in the notification as precise.
 - SDL-MCP does not write `.watchmanconfig` into repositories. Add one manually only when you want Watchman-level ignored-directory optimization in addition to SDL's canonical ignore filtering.

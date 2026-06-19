@@ -38,6 +38,7 @@ import type {
   BeamSummary,
   CacheMetrics,
   CacheSourceMetrics,
+  DeltaMetrics,
   HealthMetrics,
   IndexingMetrics,
   LatencyMetrics,
@@ -232,6 +233,7 @@ export class Aggregator {
   private readonly retrievalByMode = new Map<string, number>();
   private readonly retrievalByType = new Map<string, number>();
   private readonly retrievalCandidatesPerSource = new Map<string, number>();
+  private readonly retrievalPhaseLatencies = new Map<string, LatencyPhaseBucket>();
 
   // ----- indexing -----
   private indexEventTotal = 0;
@@ -372,7 +374,18 @@ export class Aggregator {
   private beamAcceptedSum = 0;
   private beamEvictedSum = 0;
   private beamRejectedSum = 0;
+  private beamFrontierMaxSizeSum = 0;
+  private readonly beamFrontierMaxSizes: number[] = [];
   private beamRetainedHandles = 0;
+
+  // ----- delta / blast radius tracking -----
+  private deltaBlastRadiusTotal = 0;
+  private readonly deltaBlastRadiusLatencies: number[] = [];
+  private deltaDbRoundTripsPerChangedSymbolSum = 0;
+  private deltaPathExplanationLatencySum = 0;
+  private deltaPathExplanationLatencyCount = 0;
+  private readonly deltaPathExplanationLatencies: number[] = [];
+  private deltaFallbackPathQueryCount = 0;
 
   // ----- DB latency tracking (for bottleneck input) -----
   private readonly dbLatencies: number[] = [];
@@ -690,9 +703,14 @@ export class Aggregator {
       retrievalMode?: string;
       retrievalType?: string;
       candidateCountPerSource?: Record<string, number>;
+      phaseLatencyMs?: Record<string, number>;
       resultCount?: number;
     };
-    const dur = Number.isFinite(evt.durationMs) ? (evt.durationMs ?? 0) : 0;
+    const dur = Number.isFinite(evt.latencyMs)
+      ? evt.latencyMs
+      : Number.isFinite(evt.durationMs)
+        ? (evt.durationMs ?? 0)
+        : 0;
     this.retrievalDurationSum += dur;
     pushBoundedSorted(this.retrievalLatencies, dur, LATENCY_WINDOW_SIZE);
     if ((evt.resultCount ?? 0) === 0) this.retrievalEmpty += 1;
@@ -708,6 +726,19 @@ export class Aggregator {
           (this.retrievalCandidatesPerSource.get(src) ?? 0) + n,
         );
       }
+    }
+    for (const [phaseName, latencyMs] of Object.entries(
+      evt.phaseLatencyMs ?? {},
+    )) {
+      if (!Number.isFinite(latencyMs)) continue;
+      const bucket =
+        this.retrievalPhaseLatencies.get(phaseName) ??
+        { count: 0, durationSum: 0, latencies: [], maxMs: 0 };
+      bucket.count += 1;
+      bucket.durationSum += latencyMs;
+      bucket.maxMs = Math.max(bucket.maxMs, latencyMs);
+      pushBoundedSorted(bucket.latencies, latencyMs, LATENCY_WINDOW_SIZE);
+      this.retrievalPhaseLatencies.set(phaseName, bucket);
     }
   }
 
@@ -1030,6 +1061,7 @@ export class Aggregator {
     accepted: number;
     evicted: number;
     rejected: number;
+    maxFrontierSize?: number;
   }): void {
     this.beamTotalBuilds += 1;
     if (Number.isFinite(rec.durationMs)) {
@@ -1042,10 +1074,63 @@ export class Aggregator {
     if (Number.isFinite(rec.accepted)) this.beamAcceptedSum += rec.accepted;
     if (Number.isFinite(rec.evicted)) this.beamEvictedSum += rec.evicted;
     if (Number.isFinite(rec.rejected)) this.beamRejectedSum += rec.rejected;
+    if (
+      rec.maxFrontierSize !== undefined &&
+      Number.isFinite(rec.maxFrontierSize)
+    ) {
+      const maxFrontierSize = Math.max(0, rec.maxFrontierSize);
+      this.beamFrontierMaxSizeSum += maxFrontierSize;
+      pushBoundedSorted(
+        this.beamFrontierMaxSizes,
+        maxFrontierSize,
+        LATENCY_WINDOW_SIZE,
+      );
+    }
   }
 
   setBeamRetainedHandles(n: number): void {
     if (Number.isFinite(n) && n >= 0) this.beamRetainedHandles = n;
+  }
+
+  recordDeltaBlastRadius(rec: {
+    changedSymbolCount: number;
+    blastRadiusCount: number;
+    durationMs: number;
+    dbRoundTrips: number;
+    fallbackPathQueryCount: number;
+    pathExplanationLatencyMs: number;
+  }): void {
+    this.deltaBlastRadiusTotal += 1;
+    if (Number.isFinite(rec.durationMs)) {
+      pushBoundedSorted(
+        this.deltaBlastRadiusLatencies,
+        rec.durationMs,
+        LATENCY_WINDOW_SIZE,
+      );
+    }
+    const changedCount = Math.max(1, rec.changedSymbolCount);
+    if (Number.isFinite(rec.dbRoundTrips)) {
+      this.deltaDbRoundTripsPerChangedSymbolSum +=
+        Math.max(0, rec.dbRoundTrips) / changedCount;
+    }
+    if (Number.isFinite(rec.fallbackPathQueryCount)) {
+      this.deltaFallbackPathQueryCount += Math.max(
+        0,
+        rec.fallbackPathQueryCount,
+      );
+    }
+    if (
+      Number.isFinite(rec.pathExplanationLatencyMs) &&
+      rec.pathExplanationLatencyMs > 0
+    ) {
+      this.deltaPathExplanationLatencySum += rec.pathExplanationLatencyMs;
+      this.deltaPathExplanationLatencyCount += 1;
+      pushBoundedSorted(
+        this.deltaPathExplanationLatencies,
+        rec.pathExplanationLatencyMs,
+        LATENCY_WINDOW_SIZE,
+      );
+    }
   }
 
   recordAuditBufferSample(rec: {
@@ -1095,6 +1180,7 @@ export class Aggregator {
     const cache = this.computeCache();
     const retrieval = this.computeRetrieval();
     const beam = this.computeBeam();
+    const delta = this.computeDelta();
     const indexing = this.computeIndexing();
     const tokenEfficiency = this.computeTokenEfficiency();
     const predictiveContext = this.computePredictiveContext();
@@ -1133,6 +1219,7 @@ export class Aggregator {
       cache,
       retrieval,
       beam,
+      delta,
       indexing,
       tokenEfficiency,
       predictiveContext,
@@ -1247,6 +1334,15 @@ export class Aggregator {
   private computeRetrieval(): RetrievalMetrics {
     const total = this.retrievalTotal;
     const avgLatencyMs = total === 0 ? 0 : this.retrievalDurationSum / total;
+    const phaseLatencyMs: RetrievalMetrics["phaseLatencyMs"] = {};
+    for (const [phaseName, bucket] of this.retrievalPhaseLatencies.entries()) {
+      phaseLatencyMs[phaseName] = {
+        count: bucket.count,
+        avgMs: bucket.count === 0 ? 0 : bucket.durationSum / bucket.count,
+        p95Ms: percentile(bucket.latencies, 0.95),
+        maxMs: bucket.maxMs,
+      };
+    }
     return {
       totalRetrievals: total,
       avgLatencyMs,
@@ -1255,6 +1351,7 @@ export class Aggregator {
       candidateCountPerSource: Object.fromEntries(
         this.retrievalCandidatesPerSource,
       ),
+      phaseLatencyMs,
       byRetrievalType: Object.fromEntries(this.retrievalByType),
       emptyResultCount: this.retrievalEmpty,
     };
@@ -1270,7 +1367,35 @@ export class Aggregator {
       avgAccepted: builds === 0 ? 0 : this.beamAcceptedSum / builds,
       avgEvicted: builds === 0 ? 0 : this.beamEvictedSum / builds,
       avgRejected: builds === 0 ? 0 : this.beamRejectedSum / builds,
+      avgFrontierMaxSize:
+        builds === 0 ? 0 : this.beamFrontierMaxSizeSum / builds,
+      p95FrontierMaxSize: percentile(this.beamFrontierMaxSizes, 0.95),
       retainedExplainHandles: this.beamRetainedHandles,
+    };
+  }
+
+  private computeDelta(): DeltaMetrics {
+    const total = this.deltaBlastRadiusTotal;
+    return {
+      totalBlastRadiusComputations: total,
+      avgBlastRadiusLatencyMs:
+        total === 0 ? 0 : avg(this.deltaBlastRadiusLatencies),
+      p95BlastRadiusLatencyMs: percentile(
+        this.deltaBlastRadiusLatencies,
+        0.95,
+      ),
+      avgDbRoundTripsPerChangedSymbol:
+        total === 0 ? 0 : this.deltaDbRoundTripsPerChangedSymbolSum / total,
+      avgPathExplanationLatencyMs:
+        this.deltaPathExplanationLatencyCount === 0
+          ? 0
+          : this.deltaPathExplanationLatencySum /
+            this.deltaPathExplanationLatencyCount,
+      p95PathExplanationLatencyMs: percentile(
+        this.deltaPathExplanationLatencies,
+        0.95,
+      ),
+      fallbackPathQueryCount: this.deltaFallbackPathQueryCount,
     };
   }
 

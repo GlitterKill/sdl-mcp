@@ -52,6 +52,7 @@ const RUST_UNSUPPORTED_EXTENSIONS = new Set(["kt", "kts"]);
 // never computes these fields, so they would always diff.
 const SYMBOL_FIELD_EXCLUDES = new Set<string>([
   "symbolId",        // Exclude because: Rust-only fingerprint hash.
+  "nodeId",          // Exclude because: TS/Rust encode node ids differently.
   "astFingerprint",  // Exclude because: Rust-only enrichment.
   "summary",         // Exclude because: Rust-only enrichment.
   "invariantsJson",  // Exclude because: Rust-only enrichment (JSON string).
@@ -67,6 +68,7 @@ const SYMBOL_FIELD_EXCLUDES = new Set<string>([
 const CALL_FIELD_EXCLUDES = new Set<string>([
   "isResolved",
   "calleeSymbolId",
+  "callerNodeId",
   "candidateCount",
 ]);
 
@@ -84,6 +86,76 @@ function sortByRange<T extends HasRange & { name?: string; calleeIdentifier?: st
 // a deterministic order.
 function sortImports(arr: ExtractedImport[]): ExtractedImport[] {
   return [...arr].sort((a, b) => a.specifier.localeCompare(b.specifier));
+}
+
+function symbolOwnerKey(sym: ExtractedSymbol | RustExtractedSymbol): string {
+  return `${sym.kind}:${sym.name}@${sym.range.startLine}:${sym.range.startCol}`;
+}
+
+interface OwnerEntry {
+  key: string;
+  range: ExtractedSymbol["range"] | RustExtractedSymbol["range"];
+}
+
+type OwnerIndex = Map<string, OwnerEntry[]>;
+
+function addOwner(owners: OwnerIndex, id: string, entry: OwnerEntry): void {
+  const existing = owners.get(id);
+  if (existing) {
+    existing.push(entry);
+  } else {
+    owners.set(id, [entry]);
+  }
+}
+
+function buildNodeOwnerMap(symbols: Array<ExtractedSymbol | RustExtractedSymbol>): OwnerIndex {
+  const owners: OwnerIndex = new Map();
+  for (const sym of symbols) {
+    const entry: OwnerEntry = { key: symbolOwnerKey(sym), range: sym.range };
+    addOwner(owners, entry.key, entry);
+    const nodeId = (sym as { nodeId?: unknown }).nodeId;
+    if (typeof nodeId === "string" && nodeId.length > 0) {
+      addOwner(owners, nodeId, entry);
+    }
+  }
+  addOwner(owners, "global", { key: "<module>", range: { startLine: 0, startCol: 0, endLine: Number.MAX_SAFE_INTEGER, endCol: 0 } });
+  addOwner(owners, "<module>", { key: "<module>", range: { startLine: 0, startCol: 0, endLine: Number.MAX_SAFE_INTEGER, endCol: 0 } });
+  return owners;
+}
+
+function ownerContainsCall(owner: OwnerEntry, call: ExtractedCall): boolean {
+  const startsBefore =
+    owner.range.startLine < call.range.startLine ||
+    (owner.range.startLine === call.range.startLine && owner.range.startCol <= call.range.startCol);
+  const endsAfter =
+    owner.range.endLine > call.range.endLine ||
+    (owner.range.endLine === call.range.endLine && owner.range.endCol >= call.range.endCol);
+  return startsBefore && endsAfter;
+}
+
+function rangeSize(range: OwnerEntry["range"]): number {
+  return ((range.endLine - range.startLine) * 1_000_000) + (range.endCol - range.startCol);
+}
+
+function projectCallerOwner(call: ExtractedCall, owners: OwnerIndex): string | undefined {
+  const callerNodeId = (call as { callerNodeId?: unknown }).callerNodeId;
+  if (callerNodeId === undefined || callerNodeId === null || callerNodeId === "") {
+    return undefined;
+  }
+  if (typeof callerNodeId !== "string") {
+    return String(callerNodeId);
+  }
+  const candidates = owners.get(callerNodeId);
+  if (!candidates || candidates.length === 0) {
+    return `unresolved:${callerNodeId}`;
+  }
+  if (candidates.length === 1) {
+    return candidates[0]!.key;
+  }
+  const containing = candidates
+    .filter((owner) => ownerContainsCall(owner, call))
+    .sort((a, b) => rangeSize(a.range) - rangeSize(b.range));
+  return (containing[0] ?? candidates[0])!.key;
 }
 
 function projectSymbol(sym: ExtractedSymbol | RustExtractedSymbol): Record<string, unknown> {
@@ -112,12 +184,13 @@ function projectSymbol(sym: ExtractedSymbol | RustExtractedSymbol): Record<strin
   return out;
 }
 
-function projectCall(call: ExtractedCall): Record<string, unknown> {
+function projectCall(call: ExtractedCall, owners: OwnerIndex): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(call)) {
     if (CALL_FIELD_EXCLUDES.has(k)) continue;
     out[k] = v;
   }
+  out.callerOwner = projectCallerOwner(call, owners);
   return out;
 }
 
@@ -152,20 +225,25 @@ function deepEqual(a: unknown, b: unknown): boolean {
   return false;
 }
 
-function diffArrays<T>(ts: T[], rust: T[], project: (v: T) => Record<string, unknown>, labelOf: (v: T) => string): ParityDiff[] {
+function diffArrays<T>(
+  ts: T[],
+  rust: T[],
+  project: (v: T, side: "ts" | "rust") => Record<string, unknown>,
+  labelOf: (v: T) => string,
+): ParityDiff[] {
   const diffs: ParityDiff[] = [];
   const len = Math.max(ts.length, rust.length);
   for (let i = 0; i < len; i++) {
     if (i >= rust.length) {
-      diffs.push({ kind: "missing-in-rust", index: i, path: labelOf(ts[i]!), ts: project(ts[i]!) });
+      diffs.push({ kind: "missing-in-rust", index: i, path: labelOf(ts[i]!), ts: project(ts[i]!, "ts") });
       continue;
     }
     if (i >= ts.length) {
-      diffs.push({ kind: "extra-in-rust", index: i, path: labelOf(rust[i]!), rust: project(rust[i]!) });
+      diffs.push({ kind: "extra-in-rust", index: i, path: labelOf(rust[i]!), rust: project(rust[i]!, "rust") });
       continue;
     }
-    const a = project(ts[i]!);
-    const b = project(rust[i]!);
+    const a = project(ts[i]!, "ts");
+    const b = project(rust[i]!, "rust");
     if (!deepEqual(a, b)) {
       diffs.push({ kind: "field-mismatch", index: i, path: labelOf(ts[i]!), ts: a, rust: b });
     }
@@ -213,6 +291,9 @@ export async function runEngineParityCheck(fixturePath: string, repoRoot: string
     return { symbolDiffs: [], importDiffs: [], callDiffs: [], skipped: `rust-parse-error` };
   }
 
+  const tsOwnerMap = buildNodeOwnerMap(tsSymbols);
+  const rustOwnerMap = buildNodeOwnerMap(rustResult.symbols);
+
   return {
     symbolDiffs: diffArrays(
       sortByRange(tsSymbols),
@@ -229,7 +310,7 @@ export async function runEngineParityCheck(fixturePath: string, repoRoot: string
     callDiffs: diffArrays(
       sortByRange(tsCalls),
       sortByRange(rustResult.calls),
-      projectCall,
+      (call, side) => projectCall(call, side === "ts" ? tsOwnerMap : rustOwnerMap),
       (c) => `call:${c.calleeIdentifier}@${c.range.startLine}:${c.range.startCol}`,
     ),
   };

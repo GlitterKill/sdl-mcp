@@ -49,10 +49,11 @@ fn process_import_declaration(node: Node<'_>, source: &[u8]) -> Option<NativePar
     let namespace_import: Option<String> = None;
 
     Some(NativeParsedImport {
-        specifier,
+        specifier: specifier.clone(),
         is_relative: false,
-        // TS java.ts emits is_external: false for all java imports.
-        is_external: false,
+        is_external: !specifier.starts_with("java.")
+            && !specifier.starts_with("javax.")
+            && !specifier.starts_with("jdk."),
         named_imports,
         default_import: None,
         namespace_import,

@@ -186,3 +186,7 @@ brand-spec.md
 .codex/hooks/force-sdl-mcp.mjs
 .codex/skills/mintlify/SKILL.md
 Python/_cache/last_welcome.txt
+# Generated Watchman npm package artifacts
+watchman/npm/*/vendor/
+watchman/npm/*/bin/
+watchman/npm/*/README.md

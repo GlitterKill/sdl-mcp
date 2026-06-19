@@ -117,44 +117,16 @@ class GoAdapter extends BaseAdapter {
       "(call_expression function: (selector_expression operand: (_) @obj field: (field_identifier) @prop) arguments: (argument_list) @args) @call",
     );
 
-    const goIdentifierQuery = createQuery(
-      "go",
-      "(go_statement (call_expression function: (identifier) @callee arguments: (argument_list) @args)) @call",
-    );
-
-    const goSelectorQuery = createQuery(
-      "go",
-      "(go_statement (call_expression function: (selector_expression operand: (_) @obj field: (field_identifier) @prop) arguments: (argument_list) @args)) @call",
-    );
-
-    const deferIdentifierQuery = createQuery(
-      "go",
-      "(defer_statement (call_expression function: (identifier) @callee arguments: (argument_list) @args)) @call",
-    );
-
-    const deferSelectorQuery = createQuery(
-      "go",
-      "(defer_statement (call_expression function: (selector_expression operand: (_) @obj field: (field_identifier) @prop) arguments: (argument_list) @args)) @call",
-    );
-
-    if (
-      !callQuery ||
-      !selectorQuery ||
-      !goIdentifierQuery ||
-      !goSelectorQuery ||
-      !deferIdentifierQuery ||
-      !deferSelectorQuery
-    ) {
+    if (!callQuery || !selectorQuery) {
       return [];
     }
 
+    // The plain call-expression queries already match calls wrapped by go/defer
+    // statements. Querying the wrappers separately reports duplicate calls with
+    // the statement range instead of the source call range.
     const matches = [
       ...callQuery.matches(tree.rootNode),
       ...selectorQuery.matches(tree.rootNode),
-      ...goIdentifierQuery.matches(tree.rootNode),
-      ...goSelectorQuery.matches(tree.rootNode),
-      ...deferIdentifierQuery.matches(tree.rootNode),
-      ...deferSelectorQuery.matches(tree.rootNode),
     ];
 
     for (const match of matches) {

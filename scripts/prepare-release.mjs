@@ -26,8 +26,16 @@ const PACKAGE_PATH = join(ROOT, "package.json");
 const PACKAGE_LOCK_PATH = join(ROOT, "package-lock.json");
 const NATIVE_PACKAGE_PATH = join(ROOT, "native", "package.json");
 const NATIVE_NPM_DIR = join(ROOT, "native", "npm");
+const WATCHMAN_PACKAGE_PATH = join(ROOT, "watchman", "package.json");
+const WATCHMAN_NPM_DIR = join(ROOT, "watchman", "npm");
 const TARBALL_WARN_BYTES = 25 * 1024 * 1024;
 const NPM_COMMAND = "npm";
+const RELEASE_ROOT_OPTIONAL_DEPENDENCIES = [
+  "sdl-mcp-native",
+  "sdl-mcp-watchman",
+  "sdl-mcp-watchman-linux-x64",
+  "sdl-mcp-watchman-win32-x64",
+];
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf-8"));
@@ -55,10 +63,18 @@ export function hasChangelogEntry(changelogSource, version) {
   return pattern.test(changelogSource);
 }
 
-export function findNativeVersionMismatches(packageJson, nativePackageJson, nativePlatformPackages) {
+export function findNativeVersionMismatches(
+  packageJson,
+  nativePackageJson,
+  nativePlatformPackages,
+  watchmanPackageJson = null,
+  watchmanPlatformPackages = [],
+) {
   const mismatches = [];
-  if (packageJson.optionalDependencies?.["sdl-mcp-native"] !== packageJson.version) {
-    mismatches.push("package.json optionalDependencies.sdl-mcp-native");
+  for (const depName of RELEASE_ROOT_OPTIONAL_DEPENDENCIES) {
+    if (packageJson.optionalDependencies?.[depName] !== packageJson.version) {
+      mismatches.push(`package.json optionalDependencies.${depName}`);
+    }
   }
   if (nativePackageJson.version !== packageJson.version) {
     mismatches.push("native/package.json version");
@@ -68,9 +84,23 @@ export function findNativeVersionMismatches(packageJson, nativePackageJson, nati
       mismatches.push(`native/npm/${pkg.name}/package.json version`);
     }
   }
+  if (watchmanPackageJson) {
+    if (watchmanPackageJson.version !== packageJson.version) {
+      mismatches.push("watchman/package.json version");
+    }
+    for (const depName of Object.keys(watchmanPackageJson.optionalDependencies ?? {})) {
+      if (watchmanPackageJson.optionalDependencies[depName] !== packageJson.version) {
+        mismatches.push(`watchman/package.json optionalDependencies.${depName}`);
+      }
+    }
+  }
+  for (const pkg of watchmanPlatformPackages) {
+    if (pkg.version !== packageJson.version) {
+      mismatches.push(`watchman/npm/${pkg.name}/package.json version`);
+    }
+  }
   return mismatches;
 }
-
 export function findNativeLockfileMismatches(
   packageJson,
   nativePackageJson,
@@ -161,6 +191,7 @@ export function getRequiredPackEntries() {
     "dist/main.js",
     "dist/cli/index.js",
     "scripts/postinstall.mjs",
+    "scripts/postinstall-watchman.mjs",
     "scripts/postinstall-tree-sitter.mjs",
     "scripts/postinstall-prune.mjs",
     "scripts/postinstall-models.mjs",
@@ -235,10 +266,10 @@ async function runJsonRpcSmokeTest() {
   }
 }
 
-function readNativePlatformPackages() {
-  return readdirSync(NATIVE_NPM_DIR)
+function readPlatformPackages(packageDir) {
+  return readdirSync(packageDir)
     .map((entry) => {
-      const packagePath = join(NATIVE_NPM_DIR, entry, "package.json");
+      const packagePath = join(packageDir, entry, "package.json");
       if (!existsSync(packagePath) || !statSync(packagePath).isFile()) {
         return null;
       }
@@ -259,7 +290,9 @@ async function main() {
   const pkg = readJson(PACKAGE_PATH);
   const packageLock = readJson(PACKAGE_LOCK_PATH);
   const nativePkg = readJson(NATIVE_PACKAGE_PATH);
-  const nativePlatformPackages = readNativePlatformPackages();
+  const nativePlatformPackages = readPlatformPackages(NATIVE_NPM_DIR);
+  const watchmanPkg = readJson(WATCHMAN_PACKAGE_PATH);
+  const watchmanPlatformPackages = readPlatformPackages(WATCHMAN_NPM_DIR);
   const changelog = readFileSync(CHANGELOG_PATH, "utf-8");
 
   const branchName = runCommand("git", ["branch", "--show-current"], {
@@ -281,6 +314,8 @@ async function main() {
     pkg,
     nativePkg,
     nativePlatformPackages,
+    watchmanPkg,
+    watchmanPlatformPackages,
   );
   if (mismatches.length > 0) {
     fail(`version mismatch detected: ${mismatches.join(", ")}`);

@@ -48,6 +48,23 @@ describe("release publish lockfile guards", () => {
       expectedVersion,
       "package-lock root package should pin sdl-mcp-native to the release version",
     );
+    for (const depName of [
+      "sdl-mcp-watchman",
+      "sdl-mcp-watchman-linux-x64",
+      "sdl-mcp-watchman-win32-x64",
+    ]) {
+      assert.equal(
+        rootPkg.optionalDependencies?.[depName],
+        expectedVersion,
+        `package.json should pin ${depName} to the release version`,
+      );
+      assert.equal(
+        lockRoot?.optionalDependencies?.[depName],
+        expectedVersion,
+        `package-lock root package should pin ${depName} to the release version`,
+      );
+    }
+
     assert.equal(
       lockNative?.version,
       expectedVersion,

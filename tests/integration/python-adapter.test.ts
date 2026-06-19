@@ -175,6 +175,22 @@ describe("Python Adapter Tests (ML-C1.x)", () => {
       assert.ok(typingImport.imports.includes("List"));
     });
 
+    it("should mark same-name from-import aliases as re-exports", () => {
+      const filePath = resolve(fixturesDir, "reexport.py");
+      const content = ["from .foo import bar as bar", "from .baz import qux"].join("\n");
+      const tree = adapter.parse(content, filePath);
+      assert.ok(tree);
+
+      const imports = adapter.extractImports(tree, content, filePath);
+      const reExport = imports.find((i) => i.specifier === ".foo");
+      const plainImport = imports.find((i) => i.specifier === ".baz");
+
+      assert.ok(reExport, "Should extract same-name alias import");
+      assert.strictEqual(reExport.isReExport, true);
+      assert.ok(plainImport, "Should extract normal from-import");
+      assert.strictEqual(plainImport.isReExport, false);
+    });
+
     it("should parse wildcard imports", () => {
       const filePath = resolve(fixturesDir, "imports.py");
       const content = readFileSync(filePath, "utf-8");

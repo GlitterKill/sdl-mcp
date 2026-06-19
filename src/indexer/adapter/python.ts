@@ -467,6 +467,10 @@ function extractImports(tree: Tree): ExtractedImport[] {
         } else if (child.type === "aliased_import") {
           const name = child.childForFieldName("name");
           const alias = child.childForFieldName("alias");
+          if (name?.text && alias?.text && name.text === alias.text) {
+            // `from x import y as y` is Python's explicit re-export marker.
+            result.isReExport = true;
+          }
           result.imports.push(alias?.text || name?.text || "");
         }
       }

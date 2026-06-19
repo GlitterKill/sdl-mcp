@@ -164,7 +164,11 @@ fn process_method_declaration(
     repo_id: &str,
     rel_path: &str,
 ) -> Option<NativeParsedSymbol> {
-    let name = extract_identifier(node, source)?;
+    let name = node
+        .child_by_field_name("name")
+        .map(|name_node| node_text(name_node, source).to_string())
+        .filter(|name| !name.is_empty())
+        .or_else(|| extract_identifier(node, source))?;
     let visibility = extract_visibility(node, source);
     let modifiers = extract_modifiers(node, source);
     let params = extract_parameters(node, source);

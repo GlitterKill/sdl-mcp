@@ -21,6 +21,7 @@ import { Aggregator, DEFAULT_AGGREGATOR_OPTIONS } from "./aggregator.js";
 import type {
   IndexPhaseTapEvent,
   CacheLookupTapEvent,
+  DeltaBlastRadiusTapEvent,
   ObservabilityTap,
   PackedWireTapEvent,
   PoolSampleTapEvent,
@@ -563,9 +564,25 @@ export class ObservabilityService implements ObservabilityTap {
         accepted: event.accepted,
         evicted: event.evicted,
         rejected: event.rejected,
+        maxFrontierSize: event.maxFrontierSize,
       });
     } catch (err) {
       this.logWarn("sliceBuild failed", err);
+    }
+  }
+
+  deltaBlastRadius(event: DeltaBlastRadiusTapEvent): void {
+    try {
+      this.getAggregator(event.repoId ?? "_global").recordDeltaBlastRadius({
+        changedSymbolCount: event.changedSymbolCount,
+        blastRadiusCount: event.blastRadiusCount,
+        durationMs: event.durationMs,
+        dbRoundTrips: event.dbRoundTrips,
+        fallbackPathQueryCount: event.fallbackPathQueryCount,
+        pathExplanationLatencyMs: event.pathExplanationLatencyMs,
+      });
+    } catch (err) {
+      this.logWarn("deltaBlastRadius failed", err);
     }
   }
 

@@ -12,6 +12,7 @@ import {
   _normalizeWatchmanFileNameForTesting,
   _rotateAbortControllerForTesting,
   _selectWatcherProviderForTesting,
+  _watchmanAvailabilityForTesting,
   _watchmanCommandWithTimeoutForTesting,
   _watchmanResponseHasResyncSignalForTesting,
 } from "../../dist/indexer/watcher.js";
@@ -88,6 +89,29 @@ describe("watcher provider selection", () => {
         }),
       /watchman service not running/,
     );
+  });
+
+  it("reuses Watchman auto fallback after the first failed probe", async () => {
+    let probeCount = 0;
+    _watchmanAvailabilityForTesting.resetCache();
+
+    const first = await _watchmanAvailabilityForTesting.check("auto", async () => {
+      probeCount++;
+      return { available: false, reason: "Watchman was not found in PATH" };
+    });
+    const second = await _watchmanAvailabilityForTesting.check("auto", async () => {
+      probeCount++;
+      return { available: true };
+    });
+
+    assert.equal(probeCount, 1);
+    assert.deepEqual(first, {
+      available: false,
+      reason: "Watchman was not found in PATH",
+    });
+    assert.deepEqual(second, first);
+
+    _watchmanAvailabilityForTesting.resetCache();
   });
 });
 

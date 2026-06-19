@@ -2421,6 +2421,7 @@ const AgentContextPayloadSchema = z.object({
       candidateCountPerSource: z.record(z.string(), z.number()).optional(),
       topRanksPerSource: z.record(z.string(), z.array(z.number())).optional(),
       fusionLatencyMs: z.number().optional(),
+      diagnosticTimings: z.record(z.string(), z.number()).optional(),
       fallbackReason: z.string().optional(),
       ftsAvailable: z.boolean().optional(),
       vectorAvailable: z.boolean().optional(),
