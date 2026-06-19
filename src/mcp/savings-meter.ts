@@ -21,6 +21,19 @@ const SECTIONS = 10;
 const BORDER = "\u2500"; // ─ BOX DRAWINGS LIGHT HORIZONTAL
 const PIPE = "\u2502"; // │ BOX DRAWINGS LIGHT VERTICAL
 
+// Control-plane tools stay in structured accounting, but not in visual savings rankings.
+const NON_SAVING_REPORT_TOOLS = new Set([
+  "policy.get",
+  "policyGet",
+  "repo.status",
+  "repoStatus",
+  "sdl.policy.get",
+  "sdl.repo.status",
+  "sdl.usage.stats",
+  "usage.stats",
+  "usageStats",
+]);
+
 // ---------------------------------------------------------------------------
 // Aggregate usage shape (mirrors getAggregateUsage return)
 // ---------------------------------------------------------------------------
@@ -105,7 +118,9 @@ function renderToolRows(
   entries: ToolUsageEntry[],
   maxNameLen: number,
 ): string[] {
-  const sorted = [...entries].sort((a, b) => b.savedTokens - a.savedTokens);
+  const sorted = entries
+    .filter((entry) => !NON_SAVING_REPORT_TOOLS.has(entry.tool))
+    .sort((a, b) => b.savedTokens - a.savedTokens);
   const lines: string[] = [];
   for (const entry of sorted) {
     const name = shortToolName(entry.tool).padEnd(maxNameLen);
@@ -133,6 +148,7 @@ function maxToolNameWidth(...arrays: ToolUsageEntry[][]): number {
   let max = 0;
   for (const arr of arrays) {
     for (const e of arr) {
+      if (NON_SAVING_REPORT_TOOLS.has(e.tool)) continue;
       max = Math.max(max, shortToolName(e.tool).length);
     }
   }

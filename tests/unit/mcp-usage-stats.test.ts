@@ -180,6 +180,23 @@ describe("handleUsageStats session scope (no DB required)", () => {
     );
   });
 
+  it("omits non-saving meta tools from formattedSummary", async (t) => {
+    if (!usageAvailable) return t.skip("usage module not available");
+    tokenAccumulator.reset();
+    tokenAccumulator.recordUsage("sdl.symbol.search", 100, 500);
+    tokenAccumulator.recordUsage("repoStatus", 100, 100);
+    tokenAccumulator.recordUsage("usageStats", 100, 100);
+    tokenAccumulator.recordUsage("policyGet", 100, 100);
+
+    const result = (await handleUsageStats({ scope: "session" })) as Record<string, unknown>;
+    const summary = result.formattedSummary as string;
+
+    assert.match(summary, /symbol\.search/);
+    assert.doesNotMatch(summary, /repoStatus/);
+    assert.doesNotMatch(summary, /usageStats/);
+    assert.doesNotMatch(summary, /policyGet/);
+  });
+
   it("session data reflects accumulated usage", async (t) => {
     if (!usageAvailable) return t.skip("usage module not available");
     tokenAccumulator.reset();
