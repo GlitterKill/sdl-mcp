@@ -33,7 +33,7 @@ const SEARCH_QUERIES = [
   "Service",
   "Controller",
   "Middleware",
-  "Router",
+  "Route",
   "Engine",
 ];
 
