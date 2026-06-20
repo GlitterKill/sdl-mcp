@@ -1,7 +1,8 @@
 import assert from "node:assert";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import {
   configureLoggerFromEnvironment,
@@ -51,6 +52,41 @@ describe("Logger", () => {
       const testPath = join(tempDir, "test-log-file.log");
       enableFileLogging(testPath);
       assert.strictEqual(getLogFilePath(), testPath);
+    });
+
+    it("uses a new default log file for each server session", () => {
+      const tempHome = mkdtempSync(join(tmpdir(), "sdl-logger-home-"));
+      const loggerModuleUrl = new URL("../../dist/util/logger.js", import.meta.url).href;
+      const script = `
+        import { disableFileLogging, enableFileLogging, getLogFilePath } from ${JSON.stringify(loggerModuleUrl)};
+        disableFileLogging();
+        enableFileLogging();
+        const firstPath = getLogFilePath();
+        disableFileLogging();
+        enableFileLogging();
+        const secondPath = getLogFilePath();
+        console.log(JSON.stringify({ firstPath, secondPath }));
+      `;
+      const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          HOME: tempHome,
+          USERPROFILE: tempHome,
+          SDL_LOG_FILE: "",
+          SDL_CONSOLE_LOGGING: "",
+        },
+      });
+
+      assert.strictEqual(result.status, 0, result.stderr);
+      const { firstPath, secondPath } = JSON.parse(result.stdout.trim()) as {
+        firstPath: string;
+        secondPath: string;
+      };
+
+      assert.notStrictEqual(secondPath, firstPath);
+      assert.match(basename(firstPath), /^sdl-mcp-\d{8}T\d{6}\.\d{3}Z-\d+-\d+\.log$/);
+      assert.match(basename(secondPath), /^sdl-mcp-\d{8}T\d{6}\.\d{3}Z-\d+-\d+\.log$/);
     });
 
     it("falls back to temp dir when configured path cannot be created", () => {

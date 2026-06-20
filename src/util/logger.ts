@@ -14,7 +14,7 @@ const LOG_FILE_MAX_ROTATIONS = 3;
 const LOG_ROTATION_CHECK_INTERVAL_BYTES = 64 * 1024;
 const DEFAULT_LOG_DIR = join(homedir(), ".sdl-mcp", "logs");
 const FALLBACK_LOG_DIR = join(tmpdir(), "sdl-mcp");
-const DEFAULT_LOG_FILE_NAME = "sdl-mcp.log";
+const DEFAULT_LOG_FILE_PREFIX = "sdl-mcp";
 
 interface LoggerDiagnostics {
   configuredPath: string | null;
@@ -31,6 +31,7 @@ let consoleMirroringEnabled = false;
 let fallbackUsed = false;
 let logStream: WriteStream | null = null;
 let logWriteErrorCount = 0;
+let defaultLogSessionCounter = 0;
 
 function isLogLevel(value: string | undefined): value is LogLevel {
   return value === "debug" || value === "info" || value === "warn" || value === "error";
@@ -40,12 +41,20 @@ function ensureDirectory(dirPath: string): void {
   mkdirSync(dirPath, { recursive: true });
 }
 
+function createSessionLogFileName(): string {
+  // Include a monotonic process-local counter so repeated enable/disable cycles
+  // in one process cannot collide even when they happen in the same millisecond.
+  defaultLogSessionCounter++;
+  const timestamp = new Date().toISOString().replaceAll("-", "").replaceAll(":", "");
+  return `${DEFAULT_LOG_FILE_PREFIX}-${timestamp}-${process.pid}-${defaultLogSessionCounter}.log`;
+}
+
 function resolveDefaultLogPath(): string {
-  return join(DEFAULT_LOG_DIR, DEFAULT_LOG_FILE_NAME);
+  return join(DEFAULT_LOG_DIR, createSessionLogFileName());
 }
 
 function resolveFallbackLogPath(): string {
-  return join(FALLBACK_LOG_DIR, DEFAULT_LOG_FILE_NAME);
+  return join(FALLBACK_LOG_DIR, createSessionLogFileName());
 }
 
 function rotateLogFile(filePath: string): void {

@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Default server file logging now creates a unique session log file instead of appending every run to `sdl-mcp.log`; set `SDL_LOG_FILE` to keep using an explicit stable path.
+
 ### Fixed
 
 ## [0.11.7] - 2026-06-17

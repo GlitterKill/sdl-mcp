@@ -95,6 +95,7 @@ type ProviderSelection = {
 const cachedAutoWatchmanFailure = {
   reason: null as string | null,
 };
+let pendingWatchmanAvailabilityProbe: Promise<ProviderAvailabilityStatus> | null = null;
 
 function getCachedAutoWatchmanFailure(
   configuredProvider: WatchProvider,
@@ -111,7 +112,9 @@ function isCacheableAutoWatchmanFailure(reason: string): boolean {
   return (
     normalized.includes("watchman was not found in path") ||
     normalized.includes("fb-watchman is not installed") ||
-    normalized.includes("could not be loaded")
+    normalized.includes("could not be loaded") ||
+    normalized.includes("failed to spawn watchman server") ||
+    normalized.includes("get-sockname returned")
   );
 }
 
@@ -131,6 +134,7 @@ function cacheAutoWatchmanFailure(
 
 function resetCachedAutoWatchmanFailure(): void {
   cachedAutoWatchmanFailure.reason = null;
+  pendingWatchmanAvailabilityProbe = null;
 }
 
 async function checkWatchmanAvailabilityWithCache(
@@ -145,15 +149,26 @@ async function checkWatchmanAvailabilityWithCache(
     return { available: false, reason: cachedReason };
   }
 
-  const availability = await probe();
-  if (!availability.available) {
-    cacheAutoWatchmanFailure(
-      configuredProvider,
-      "watchman",
-      availability.reason ?? "watchman unavailable",
-    );
+  if (pendingWatchmanAvailabilityProbe) {
+    return pendingWatchmanAvailabilityProbe;
   }
-  return availability;
+
+  pendingWatchmanAvailabilityProbe = probe()
+    .then((availability) => {
+      if (!availability.available) {
+        cacheAutoWatchmanFailure(
+          configuredProvider,
+          "watchman",
+          availability.reason ?? "watchman unavailable",
+        );
+      }
+      return availability;
+    })
+    .finally(() => {
+      pendingWatchmanAvailabilityProbe = null;
+    });
+
+  return pendingWatchmanAvailabilityProbe;
 }
 type ProviderEvent =
   | { type: "path"; relativePath: string }
@@ -1047,7 +1062,38 @@ export async function watchRepositoryWithIndexer(
         watchmanBinary.reason ?? "SDL-managed Watchman binary could not be resolved",
       );
     }
-    const client = new watchman.Client({ watchmanBinaryPath: watchmanBinary.binaryPath });
+    const watchmanBinaryPath = watchmanBinary.binaryPath;
+    const daemonAvailability = await checkWatchmanAvailabilityWithCache(
+      configuredProvider,
+      async () => {
+        const startupClient = new watchman.Client({
+          watchmanBinaryPath,
+        });
+        try {
+          await watchmanCapabilityCheckWithTimeout(
+            startupClient,
+            WATCHMAN_STARTUP_COMMAND_TIMEOUT_MS,
+          );
+          return { available: true };
+        } catch (error) {
+          return {
+            available: false,
+            reason: error instanceof Error ? error.message : String(error),
+          };
+        } finally {
+          try {
+            startupClient.end();
+          } catch {
+            // Best-effort cleanup for the temporary startup probe client.
+          }
+        }
+      },
+    );
+    if (!daemonAvailability.available) {
+      throw new Error(daemonAvailability.reason ?? "Watchman unavailable");
+    }
+
+    const client = new watchman.Client({ watchmanBinaryPath });
     let closing = false;
     let runtimeFailed = false;
     let subscribed = false;

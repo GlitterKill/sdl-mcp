@@ -91,6 +91,30 @@ describe("watcher provider selection", () => {
     );
   });
 
+  it("shares concurrent Watchman auto startup probes", async () => {
+    let probeCount = 0;
+    let releaseProbe!: () => void;
+    _watchmanAvailabilityForTesting.resetCache();
+
+    const probe = async () => {
+      probeCount++;
+      await new Promise<void>((resolve) => {
+        releaseProbe = resolve;
+      });
+      return { available: true };
+    };
+
+    const first = _watchmanAvailabilityForTesting.check("auto", probe);
+    const second = _watchmanAvailabilityForTesting.check("auto", probe);
+
+    assert.equal(probeCount, 1);
+    releaseProbe();
+    assert.deepEqual(await first, { available: true });
+    assert.deepEqual(await second, { available: true });
+
+    _watchmanAvailabilityForTesting.resetCache();
+  });
+
   it("reuses Watchman auto fallback after the first failed probe", async () => {
     let probeCount = 0;
     _watchmanAvailabilityForTesting.resetCache();

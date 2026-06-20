@@ -685,7 +685,7 @@ Generated SCIP files are decoded up to 512 MiB each. When the generated merged `
 | `SDL_GRAPH_DB_DIR`               | Override the directory that contains `sdl-mcp-graph.lbug`                              |
 | `SDL_ALLOWED_REPO_ROOTS`         | Extra comma-separated allowed repo roots                                               |
 | `SDL_LOG_LEVEL`                  | Logging level                                                                          |
-| `SDL_LOG_FILE`                   | Explicit log file path                                                                 |
+| `SDL_LOG_FILE`                   | Explicit stable log file path; when unset, server sessions use unique default log files |
 | `SDL_CONSOLE_LOGGING`            | Mirror logs to stderr                                                                  |
 | `SDL_LOG_FORMAT`                 | `json` or `text`                                                                       |
 | `SDL_MCP_DISABLE_NATIVE_ADDON`   | Force TypeScript indexing engine                                                       |

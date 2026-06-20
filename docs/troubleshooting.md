@@ -262,12 +262,12 @@ live outside those defaults.
 - Ensure agent points to `sdl-mcp serve --stdio`
 - Validate generated client config from `init --client <name>`
 - Use `sdl-mcp info` to confirm the resolved config path, log file path, and native-addon status
-- Confirm process logs in the configured log file; enable `SDL_CONSOLE_LOGGING=true` if you want stderr mirroring during manual debugging
+- Confirm process logs in the active log file. Default server logs are session-scoped under `~/.sdl-mcp/logs/sdl-mcp-<timestamp>-<pid>-<counter>.log`; set `SDL_LOG_FILE` only when you want a stable path. Enable `SDL_CONSOLE_LOGGING=true` if you want stderr mirroring during manual debugging
 
 ### Log File Missing or Unexpected
 
 - Symptom: no logs in the configured location, or logs appear under a temp directory
-- Cause: `SDL_LOG_FILE` or the derived default path is not writable
+- Cause: `SDL_LOG_FILE` or the derived session log path is not writable
 - Resolution:
   - run `sdl-mcp info` and inspect `logging.path` and `logging.fallbackUsed`
   - fix permissions or choose a writable `SDL_LOG_FILE`

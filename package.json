@@ -68,7 +68,7 @@
     "prepack": "npm run build:runtime",
     "build:native": "napi build --release --cargo-cwd native --config native/package.json native",
     "build:native:debug": "napi build --cargo-cwd native --config native/package.json native",
-    "native:artifacts": "napi artifacts --config native/package.json --npm-dir native/npm",
+    "native:artifacts": "napi artifacts --config native/package.json --dir native/npm",
     "native:version": "node scripts/sync-native-version.mjs",
     "prepare-release": "node scripts/prepare-release.mjs",
     "inspector": "npx @modelcontextprotocol/inspector node dist/main.js",

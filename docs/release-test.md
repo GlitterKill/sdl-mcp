@@ -132,9 +132,9 @@ node dist/cli/index.js index
 node dist/cli/index.js serve --stdio
 ```
 
-**Expected:** Server starts cleanly. Stdout remains reserved for JSON-RPC traffic. Operational logs go to the configured log file by default and only mirror to stderr when `SDL_CONSOLE_LOGGING=true`.
+**Expected:** Server starts cleanly. Stdout remains reserved for JSON-RPC traffic. Operational logs go to a new session log file by default and only mirror to stderr when `SDL_CONSOLE_LOGGING=true`.
 
-- [ ] `sdl-mcp info` shows the expected log file path before the test
+- [ ] `sdl-mcp info` shows the active session log file path before the test
 - [ ] If `SDL_CONSOLE_LOGGING=true`, startup messages appear on stderr
 - [ ] No stdout output (stdout reserved for JSON-RPC)
 - [ ] Ctrl+C gracefully shuts down
