@@ -65,6 +65,58 @@ function Invoke-Native {
   }
 }
 
+function Resolve-InstalledWatchmanBinary {
+  param([Parameter(Mandatory = $true)][string]$GlobalSdlMcpRoot)
+
+  $resolverScript = @'
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const packageRoot = process.env.SDL_MCP_VERIFY_PACKAGE_ROOT;
+if (!packageRoot) {
+  console.error("SDL_MCP_VERIFY_PACKAGE_ROOT was not set");
+  process.exit(1);
+}
+
+const modulePath = join(packageRoot, "dist", "indexer", "watchman-binary.js");
+if (!existsSync(modulePath)) {
+  console.error(`Installed SDL-MCP Watchman resolver was not found at ${modulePath}`);
+  process.exit(1);
+}
+
+const { resolveWatchmanBinary } = await import(pathToFileURL(modulePath).href);
+const result = resolveWatchmanBinary();
+if (!result.binaryPath) {
+  console.error(result.reason ?? "No managed Watchman binary resolved");
+  process.exit(1);
+}
+
+console.log(result.binaryPath);
+'@
+
+  $previousVerifyRoot = [Environment]::GetEnvironmentVariable("SDL_MCP_VERIFY_PACKAGE_ROOT", "Process")
+  $env:SDL_MCP_VERIFY_PACKAGE_ROOT = $GlobalSdlMcpRoot
+  try {
+    $resolved = & node --input-type=module --eval $resolverScript
+    if ($LASTEXITCODE -ne 0) {
+      throw "Global sdl-mcp could not resolve its managed Watchman binary."
+    }
+  } finally {
+    if ($null -eq $previousVerifyRoot) {
+      Remove-Item Env:\SDL_MCP_VERIFY_PACKAGE_ROOT -ErrorAction SilentlyContinue
+    } else {
+      $env:SDL_MCP_VERIFY_PACKAGE_ROOT = $previousVerifyRoot
+    }
+  }
+
+  $binaryPath = ($resolved | Select-Object -Last 1).Trim()
+  if (-not $binaryPath) {
+    throw "Global sdl-mcp returned an empty managed Watchman binary path."
+  }
+  return $binaryPath
+}
+
 $scriptDir = Split-Path -Parent $PSCommandPath
 $repoRoot = Resolve-Path (Join-Path $scriptDir "..")
 Set-Location $repoRoot
@@ -141,12 +193,19 @@ Invoke-Step "Verify global sdl-mcp command" {
   Invoke-Native sdl-mcp version
 }
 
-Invoke-Step "Verify managed Watchman binary" {
+Invoke-Step "Verify managed Watchman resolver" {
   $globalRoot = (npm root -g).Trim()
-  $globalWatchman = Join-Path $globalRoot "sdl-mcp-watchman-win32-x64/vendor/bin/watchman.exe"
-  if (-not (Test-Path $globalWatchman)) {
-    throw "Global managed Watchman binary was not found at $globalWatchman"
+  $globalSdlMcpRoot = Join-Path $globalRoot "sdl-mcp"
+  if (-not (Test-Path $globalSdlMcpRoot)) {
+    throw "Global sdl-mcp package was not found at $globalSdlMcpRoot"
   }
+
+  $globalWatchman = Resolve-InstalledWatchmanBinary -GlobalSdlMcpRoot $globalSdlMcpRoot
+  if (-not (Test-Path $globalWatchman)) {
+    throw "Global sdl-mcp resolved a missing managed Watchman binary at $globalWatchman"
+  }
+
+  Write-Host "Resolved managed Watchman: $globalWatchman"
   Invoke-Native $globalWatchman --version
   Invoke-Native $globalWatchman --no-pretty get-sockname
 }
