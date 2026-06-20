@@ -116,6 +116,7 @@ describe("code-mode manual generator", () => {
     assert.match(manual, /workflowContinuationGet limit <= 1000/);
     assert.match(manual, /runtimeExecute maxResponseLines 5\.\.1000/);
     assert.match(manual, /shell runtime requires code/);
+    assert.match(manual, /Continuation recipe: symbolSearch/);
     assert.match(manual, /not maxCards/);
     assert.match(manual, /wireFormat:\"json\"/);
     assert.match(manual, /sliceHandle: string/);
@@ -131,6 +132,7 @@ describe("code-mode manual generator", () => {
     assert.ok(bufferPushLine);
     assert.doesNotMatch(bufferPushLine, /content\?: string/);
     assert.match(manual, /dataTemplate[\s\S]*\): string/);
+    assert.match(manual, /workflowContinuationGet[\s\S]*path\?: string/);
   });
 
   it("focused manual requests can expand disabled memory wildcards", () => {

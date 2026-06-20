@@ -10,10 +10,15 @@ import {
   resolveRefs,
   RefResolutionError,
 } from "./ref-resolver.js";
-import { executeTransform, TransformError } from "./transforms.js";
+import {
+  executeTransform,
+  INTERNAL_TRANSFORMS,
+  TransformError,
+} from "./transforms.js";
 import { truncateStepResult } from "./workflow-truncation.js";
 import {
   type WorkflowResponse,
+  type WorkflowFailureTrace,
   type WorkflowStepResult,
   type WorkflowTraceOptions,
   type WorkflowTraceStep,
@@ -122,6 +127,61 @@ function needsJsonForLaterReference(
   );
 }
 
+function failureTrace(params: {
+  stepIndex: number;
+  step: ParsedWorkflowStep;
+  status: WorkflowStepResult["status"];
+  message: string;
+  resolvedArgs?: Record<string, unknown>;
+  fallbackTools?: string[];
+}): WorkflowFailureTrace {
+  return {
+    stepIndex: params.stepIndex,
+    fn: params.step.fn,
+    action: params.step.action,
+    kind: params.step.internal ? "internal" : "gateway",
+    status: params.status,
+    message: params.message,
+    ...(params.resolvedArgs
+      ? { resolvedArgKeys: Object.keys(params.resolvedArgs).sort() }
+      : {}),
+    ...(params.fallbackTools?.length
+      ? { fallbackTools: params.fallbackTools }
+      : {}),
+  };
+}
+
+function findBlockingDependency(
+  step: ParsedWorkflowStep,
+  stepResults: WorkflowStepResult[],
+): WorkflowStepResult | null {
+  for (const ref of findRefsInArgs(step.args)) {
+    const prior = stepResults[ref];
+    if (prior && prior.status !== "ok") {
+      return prior;
+    }
+  }
+  return null;
+}
+
+function zodIssueLines(error: z.ZodError): string[] {
+  return error.issues.map((issue) => {
+    const path = issue.path.length > 0 ? issue.path.join(".") + ": " : "";
+    return `${path}${issue.message}`;
+  });
+}
+
+function dryRunFixHint(action: string, issues: string[]): string {
+  const missing = issues
+    .map((issue) => issue.match(/^([A-Za-z_]\w*):/)?.[1])
+    .filter((field): field is string => Boolean(field));
+  const shape =
+    missing.length > 0
+      ? `{"${missing[0]}":"<value>"}`
+      : '{"<field>":"<value>"}';
+  return `Fix args like ${shape}; see sdl.manual({ actions: ["${action}"], includeSchemas: true }).`;
+}
+
 /**
  * Execute a parsed workflow request sequentially, resolving $N references,
  * tracking budget, validating the context ladder, and caching ETags.
@@ -169,6 +229,8 @@ export async function executeWorkflow(
       action: string;
       valid: boolean;
       issues: string[];
+      pendingSchemaValidation?: boolean;
+      fixHint?: string;
     }[] = [];
     const fnNameMap = getActiveFnNameMap();
     const actionToFn = getActiveActionToFn();
@@ -180,7 +242,11 @@ export async function executeWorkflow(
 
       // Check if function exists
       const fnExists =
-        step.fn in fnNameMap || step.fn in actionToFn || step.internal;
+        step.fn in fnNameMap ||
+        step.fn in actionToFn ||
+        step.action in actionMap ||
+        step.fn in actionMap ||
+        step.internal;
       if (!fnExists) {
         issues.push(`Unknown function: ${step.fn}`);
       }
@@ -194,6 +260,20 @@ export async function executeWorkflow(
           );
         }
       }
+      const pendingSchemaValidation = refs.length > 0;
+      let fixHint: string | undefined;
+
+      if (!pendingSchemaValidation && fnExists && issues.length === 0) {
+        const schema = step.internal
+          ? INTERNAL_TRANSFORMS[step.fn]?.schema
+          : (actionMap[step.action] ?? actionMap[step.fn])?.schema;
+        const parsed = schema?.safeParse(step.args);
+        if (parsed && !parsed.success) {
+          const schemaIssues = zodIssueLines(parsed.error);
+          issues.push(...schemaIssues);
+          fixHint = dryRunFixHint(step.action, schemaIssues);
+        }
+      }
 
       validation.push({
         stepIndex: i,
@@ -201,6 +281,8 @@ export async function executeWorkflow(
         action: step.action,
         valid: issues.length === 0,
         issues,
+        ...(pendingSchemaValidation ? { pendingSchemaValidation } : {}),
+        ...(fixHint ? { fixHint } : {}),
       });
     }
 
@@ -230,6 +312,7 @@ export async function executeWorkflow(
     // `onError: "continue"` was set. Emit an error result and let sibling
     // steps proceed.
     if (step.skip) {
+      const message = step.skipReason ?? `Step ${i}: skipped (validation failure).`;
       stepResults.push({
         stepIndex: i,
         fn: step.fn,
@@ -237,7 +320,13 @@ export async function executeWorkflow(
         tokens: 0,
         durationMs: 0,
         status: "error",
-        error: step.skipReason ?? `Step ${i}: skipped (validation failure).`,
+        error: message,
+        failureTrace: failureTrace({
+          stepIndex: i,
+          step,
+          status: "error",
+          message,
+        }),
       });
       priorResults.push(null);
       continue;
@@ -283,6 +372,37 @@ export async function executeWorkflow(
       break;
     }
 
+    if (request.onError === "continue") {
+      const blocker = findBlockingDependency(step, stepResults);
+      if (blocker) {
+        const blockedByError =
+          blocker.error ??
+          blocker.failureTrace?.message ??
+          `Step ${blocker.stepIndex} ended with status ${blocker.status}`;
+        const message = `Skipped: step ${i} depends on failed step ${blocker.stepIndex} (${blocker.fn}).`;
+        stepResults.push({
+          stepIndex: i,
+          fn: step.fn,
+          result: null,
+          tokens: 0,
+          durationMs: 0,
+          status: "skipped",
+          error: message,
+          blockedByStep: blocker.stepIndex,
+          blockedByFn: blocker.fn,
+          blockedByError,
+          failureTrace: failureTrace({
+            stepIndex: i,
+            step,
+            status: "skipped",
+            message: `${message} Upstream error: ${blockedByError}`,
+          }),
+        });
+        priorResults.push(null);
+        continue;
+      }
+    }
+
     let resolvedArgs: Record<string, unknown>;
     const resolveRefsStartedAt = timer.start();
     try {
@@ -308,6 +428,12 @@ export async function executeWorkflow(
         durationMs: 0,
         status: "error",
         error: errorMessage,
+        failureTrace: failureTrace({
+          stepIndex: i,
+          step,
+          status: "error",
+          message: errorMessage,
+        }),
       });
       priorResults.push(null);
 
@@ -399,6 +525,13 @@ export async function executeWorkflow(
           durationMs: stepDuration,
           status: "error",
           error: errorMessage,
+          failureTrace: failureTrace({
+            stepIndex: i,
+            step,
+            status: "error",
+            message: errorMessage,
+            resolvedArgs,
+          }),
         });
         priorResults.push(null);
 
@@ -549,6 +682,10 @@ export async function executeWorkflow(
           errorMessage = `Step execution failed: ${String(error)}`;
         }
 
+        const meta = actionCatalog.find((a) => a.action === step.action);
+        const fallbackTools = meta?.fallbacks?.length
+          ? meta.fallbacks
+          : undefined;
         stepResults.push({
           stepIndex: i,
           fn: step.fn,
@@ -557,12 +694,15 @@ export async function executeWorkflow(
           durationMs: stepDuration,
           status: "error",
           error: errorMessage,
-          ...(() => {
-            const meta = actionCatalog.find((a) => a.action === step.action);
-            return meta?.fallbacks?.length
-              ? { fallbackTools: meta.fallbacks }
-              : {};
-          })(),
+          ...(fallbackTools ? { fallbackTools } : {}),
+          failureTrace: failureTrace({
+            stepIndex: i,
+            step,
+            status: "error",
+            message: errorMessage,
+            resolvedArgs,
+            fallbackTools,
+          }),
         });
         priorResults.push(null);
 
@@ -698,6 +838,14 @@ export async function executeWorkflow(
           tokens: 0,
           durationMs: r.durationMs,
           result: null,
+          ...(r.error ? { error: r.error } : {}),
+          ...(r.fallbackTools ? { fallbackTools: r.fallbackTools } : {}),
+          ...(r.blockedByStep !== undefined
+            ? { blockedByStep: r.blockedByStep }
+            : {}),
+          ...(r.blockedByFn ? { blockedByFn: r.blockedByFn } : {}),
+          ...(r.blockedByError ? { blockedByError: r.blockedByError } : {}),
+          ...(r.failureTrace ? { failureTrace: r.failureTrace } : {}),
         };
       }
       return r;

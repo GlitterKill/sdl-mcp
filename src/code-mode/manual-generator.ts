@@ -90,6 +90,7 @@ const MANUAL_TEMPLATE = `// SDL-MCP API - use sdl.context for context retrieval,
 // Edit: symbolEdit one symbol; searchEdit identifier/structural/operations[] batches; runtimeExecute stdin for multiline.
 // sdl.context budgets accept maxTokens/maxEstimatedTokens, not maxCards.
 // Use wireFormat:"json" for symbol.search/sliceBuild when ${"$"}N refs need fields.
+// Continuation recipe: symbolSearch(maxResponseTokens) -> workflowContinuationGet({handle:"${"$"}0.truncatedResponse.continuationHandle", path:"results", offset:0, limit:10}) -> dataMap/dataTemplate.
 
 type RM = "inline"|"auto"|"handle"; type DM = "off"|"auto"; type ResponseHandle = { kind: "responseArtifact"; handle: string; action: "response.get" };
 type SQ = { literal?: string; regex?: string; replacement?: string; global?: boolean; structural?: { language?: string; treeSitterQuery: string; capture?: string; requiredCaptures?: Record<string,string>; replacement?: string }; symbolRef?: object; symbolIds?: string[]; replaceLines?: object; insertAt?: object; content?: string; append?: string };
@@ -191,17 +192,13 @@ function dataFilter(p: { input: unknown[]; clauses: Array<{path: string; op: "eq
 function dataSort(p: { input: unknown[]; by: {path: string; direction?: "asc"|"desc"; type?: "string"|"number"|"date"|"boolean"} }): object[]
 /** Render {{mustache}} template strings from object(s) */
 function dataTemplate(p: { input: Record<string, unknown> | unknown[]; template: string; joinWith?: string }): string
+/** Retrieve continuation data; path pages a selected array/string instead of byte chunks */
+function workflowContinuationGet(p: { handle: string; path?: string; offset?: number; limit?: number }): { data: unknown; totalTokens: number; hasMore: boolean }
 
-// === Compact Wire Format Decode Guide (sliceBuild with wireFormat: "compact") ===
-// Top-level: wf=wireFormat, wv=wireVersion, vid=versionId, b={mc=maxCards, mt=maxTokens}
-// ss=seedSymbols(truncated IDs), si=symbolIndex(truncated IDs), fp=filePaths, et=edgeTypes
-// Card (c[]): fi=fileIndex(into fp), r=[startLine,startCol,endLine,endCol], k=kind, n=name
-//   x=exported, d={i=imports[], c=calls[]}, sig=signature, sum=summary, inv=invariants
-//   se=sideEffects, m={fi=fanIn,fo=fanOut,ch=churn30d,t=testRefs}, dl=detailLevel
-// Edge (e[]): [fromCardIdx, toCardIdx, edgeTypeIdx, weight]
-// Frontier (f[]): ci=cardIndex(-1=not in slice), s=score, w=why(c=call,i=import,e=entry)
-// Truncation (t): tr=truncated, dc=droppedCards, de=droppedEdges, res={t=type, v=value}
-// CardRef (cr[]): ci=cardIndex, sid=fullSymbolId, e=etag, dl=detailLevel (used with knownCardEtags)
+// === Compact Wire Format (sliceBuild wireFormat:"compact") ===
+// wf/wv/vid=wire metadata; fp=file paths; c=cards; e=edges; f=frontier.
+// Card: fi=file index, r=range, k=kind, n=name, sig/signature, sum/summary, d=deps, m=metrics.
+// Truncation: t.tr with dropped counts and res continuation data.
 `;
 
 export function generateManual(_liveIndex?: LiveIndexCoordinator): string {

@@ -4,8 +4,6 @@ Token-lean playbook for agents consuming an SDL-MCP server. Replace native `Read
 
 Applies to any SDL-MCP consumer. Replace `<repoId>` with the target repository ID (see `sdl.repo.status` output or local config).
 
-> Verified against **SDL-MCP v0.10.7** live manual: 42 actions — 4 meta + 32 gateway + 6 workflow-only transforms.
-
 ---
 
 ## 1. Session Bootstrap (once)

@@ -61,6 +61,53 @@ export interface ContinuationResult {
   hasMore: boolean;
 }
 
+function navigatePath(obj: unknown, path: string): unknown {
+  const segments = path
+    .replace(/\[(\d+)\]/g, ".$1")
+    .split(".")
+    .filter(Boolean);
+  let current = obj;
+
+  for (const segment of segments) {
+    if (current === null || current === undefined) return undefined;
+    if (/^\d+$/.test(segment)) {
+      if (!Array.isArray(current)) return undefined;
+      current = current[Number(segment)];
+    } else {
+      if (typeof current !== "object" || Array.isArray(current)) {
+        return undefined;
+      }
+      current = (current as Record<string, unknown>)[segment];
+    }
+  }
+
+  return current;
+}
+
+function stringChunk(
+  source: string,
+  offset: number | undefined,
+  limit: number | undefined,
+  encoding: "text" | "json",
+): ContinuationResult {
+  const start = Math.min(offset ?? 0, source.length);
+  const requestedChars = limit ?? 12000;
+  const charLimit = Math.max(1, Math.min(requestedChars, 12000));
+  const end = Math.min(start + charLimit, source.length);
+  const data = {
+    content: source.slice(start, end),
+    encoding,
+    offset: start,
+    nextOffset: end < source.length ? end : null,
+    totalBytes: source.length,
+  };
+  return {
+    data,
+    totalTokens: estimateJsonTokens(JSON.stringify(data)),
+    hasMore: end < source.length,
+  };
+}
+
 // --- Smart truncation ---
 
 function smartTruncate(result: unknown, maxTokens: number): unknown {
@@ -171,6 +218,7 @@ export function getContinuation(
   handle: string,
   offset?: number,
   limit?: number,
+  path?: string,
 ): ContinuationResult | null {
   evictExpired();
   const entry = CONTINUATION_STORE.get(handle);
@@ -178,6 +226,50 @@ export function getContinuation(
 
   const parsed: unknown = JSON.parse(entry.data);
   const totalTokens = estimateJsonTokens(entry.data);
+
+  if (path) {
+    const selected = navigatePath(parsed, path);
+    if (selected === undefined) {
+      throw new Error(`Continuation path not found: ${path}`);
+    }
+    if (Array.isArray(selected)) {
+      if (offset !== undefined || limit !== undefined) {
+        const start = offset ?? 0;
+        const end = limit !== undefined ? start + limit : selected.length;
+        const data = selected.slice(start, end);
+        return {
+          data,
+          totalTokens: estimateJsonTokens(safeJsonStringify(data)),
+          hasMore: end < selected.length,
+        };
+      }
+      return {
+        data: selected,
+        totalTokens: estimateJsonTokens(safeJsonStringify(selected)),
+        hasMore: false,
+      };
+    }
+    if (typeof selected === "string") {
+      if (offset !== undefined || limit !== undefined) {
+        return stringChunk(selected, offset, limit, "text");
+      }
+      return {
+        data: selected,
+        totalTokens: estimateJsonTokens(safeJsonStringify(selected)),
+        hasMore: false,
+      };
+    }
+    if (offset !== undefined || limit !== undefined) {
+      throw new Error(
+        `Continuation path ${path} is not an array or string; remove offset/limit.`,
+      );
+    }
+    return {
+      data: selected,
+      totalTokens: estimateJsonTokens(safeJsonStringify(selected)),
+      hasMore: false,
+    };
+  }
 
   if (Array.isArray(parsed) && (offset !== undefined || limit !== undefined)) {
     const start = offset ?? 0;
@@ -192,23 +284,7 @@ export function getContinuation(
   const maxInlineTokens = 4000;
   if (offset !== undefined || limit !== undefined || totalTokens > maxInlineTokens) {
     const source = typeof parsed === "string" ? parsed : entry.data;
-    const start = Math.min(offset ?? 0, source.length);
-    const requestedChars = limit ?? 12000;
-    const charLimit = Math.max(1, Math.min(requestedChars, 12000));
-    const end = Math.min(start + charLimit, source.length);
-    const chunk = source.slice(start, end);
-    const data = {
-      content: chunk,
-      encoding: typeof parsed === "string" ? "text" : "json",
-      offset: start,
-      nextOffset: end < source.length ? end : null,
-      totalBytes: source.length,
-    };
-    return {
-      data,
-      totalTokens: estimateJsonTokens(JSON.stringify(data)),
-      hasMore: end < source.length,
-    };
+    return stringChunk(source, offset, limit, typeof parsed === "string" ? "text" : "json");
   }
 
   return { data: parsed, totalTokens, hasMore: false };

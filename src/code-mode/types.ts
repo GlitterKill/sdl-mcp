@@ -42,8 +42,8 @@ export const WorkflowRequestSchema = z.object({
   steps: z.array(WorkflowStepSchema).min(1).max(50),
   /** Optional budget envelope for the entire workflow */
   budget: WorkflowBudgetSchema.optional(),
-  /** Error handling policy: continue to next step or stop workflow */
-  onError: z.enum(["continue", "stop"]).default("continue"),
+  /** Error handling policy: dependency-aware continue, legacy continueAll, or stop workflow */
+  onError: z.enum(["continue", "continueAll", "stop"]).default("continue"),
   /** Default max tokens per step response (overridden by per-step maxResponseTokens) */
   defaultMaxResponseTokens: z.number().int().min(50).max(100_000).optional(),
   /** When true, intermediate step results are stripped to save tokens */
@@ -67,6 +67,17 @@ export type WorkflowRequest = z.infer<typeof WorkflowRequestSchema>;
 
 export type WorkflowStepStatus = "ok" | "error" | "skipped" | "budget_exceeded";
 
+export interface WorkflowFailureTrace {
+  stepIndex: number;
+  fn: string;
+  action?: string;
+  kind?: "gateway" | "internal";
+  status: WorkflowStepStatus;
+  message: string;
+  resolvedArgKeys?: string[];
+  fallbackTools?: string[];
+}
+
 export interface WorkflowStepResult {
   /** Zero-based step index */
   stepIndex: number;
@@ -84,6 +95,14 @@ export interface WorkflowStepResult {
   error?: string;
   /** Suggested fallback action names from catalog when this step failed */
   fallbackTools?: string[];
+  /** Failed/skipped prior step that blocked this step under onError:"continue" */
+  blockedByStep?: number;
+  /** Function name for blockedByStep */
+  blockedByFn?: string;
+  /** Upstream error text from blockedByStep */
+  blockedByError?: string;
+  /** Compact failure context, present on failed and dependency-skipped steps */
+  failureTrace?: WorkflowFailureTrace;
   /** Present when step result was truncated due to maxResponseTokens */
   truncatedResponse?: {
     originalTokens: number;
@@ -141,6 +160,8 @@ export interface WorkflowResponse {
       action: string;
       valid: boolean;
       issues: string[];
+      pendingSchemaValidation?: boolean;
+      fixHint?: string;
     }[];
     stepCount: number;
     budgetLimits: object;

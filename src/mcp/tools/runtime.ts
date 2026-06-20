@@ -9,6 +9,7 @@ import { access, mkdtemp, writeFile, rm } from "fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "path";
 import { tmpdir } from "os";
+import { z } from "zod";
 import type { ToolContext } from "../../server.js";
 import {
   RuntimeExecuteRequestSchema,
@@ -20,6 +21,7 @@ import * as ladybugDb from "../../db/ladybug-queries.js";
 import {
   DatabaseError,
   RuntimePolicyDeniedError,
+  ValidationError,
 } from "../../domain/errors.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { RuntimeConfigSchema } from "../../config/types.js";
@@ -388,13 +390,35 @@ function generateExcerpts(
 // Handler
 // ============================================================================
 
+function runtimeValidationMessage(error: z.ZodError): string {
+  const issues = error.issues
+    .map((issue) => {
+      const path = issue.path.length > 0 ? issue.path.join(".") + ": " : "";
+      return `${path}${issue.message}`;
+    })
+    .join("; ");
+  const example =
+    process.platform === "win32"
+      ? '{ runtime: "shell", code: "Write-Output ok" }'
+      : '{ runtime: "shell", code: "echo ok" }';
+  return `${issues}. Active platform: ${process.platform}. Valid shell example for this platform: ${example}`;
+}
+
 export async function handleRuntimeExecute(
   args: unknown,
   context?: ToolContext,
 ): Promise<RuntimeExecuteResponse> {
   const timer = new ToolPhaseTimer();
   const parseStartedAt = timer.start();
-  const request = RuntimeExecuteRequestSchema.parse(args);
+  let request: RuntimeExecuteRequest;
+  try {
+    request = RuntimeExecuteRequestSchema.parse(args);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new ValidationError(runtimeValidationMessage(error));
+    }
+    throw error;
+  }
   timer.record("runtime.validate", parseStartedAt);
 
   const stdinMetadata = buildStdinMetadata(request.stdin);

@@ -1393,7 +1393,7 @@ Executes a workflow of SDL-MCP operations in a single round-trip with budget tra
 | `repoId`             | string                   | Yes      | Repository scope for all steps      |
 | `steps`              | array (min 1)            | Yes      | Workflow steps: `[{ fn, args? }]`   |
 | `budget`             | object                   | No       | Budget constraints for the workflow |
-| `onError`            | `"continue"` \| `"stop"` | No       | Error handling mode                 |
+| `onError`            | `"continue"` \| `"continueAll"` \| `"stop"` | No       | Error handling mode                 |
 | `trace`              | object                   | No       | Enable execution tracing            |
 | `includeDiagnostics` | boolean                  | No       | Include workflow phase timings      |
 

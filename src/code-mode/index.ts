@@ -380,7 +380,7 @@ export function registerCodeModeTools(
           minItems: 1,
         },
         budget: { type: "object" },
-        onError: { type: "string", enum: ["continue", "stop"] },
+        onError: { type: "string", enum: ["continue", "continueAll", "stop"] },
         trace: { type: "object" },
         includeDiagnostics: { type: "boolean" },
       },

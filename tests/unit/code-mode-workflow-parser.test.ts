@@ -169,4 +169,16 @@ describe("code-mode workflow parser", () => {
       assert.strictEqual(result.request.onError, "continue");
     }
   });
+
+  it("accepts onError=continueAll", () => {
+    const result = parseWorkflowRequest({
+      repoId: "test",
+      steps: [{ fn: "repoStatus", args: {} }],
+      onError: "continueAll",
+    });
+    assert.strictEqual(result.ok, true);
+    if (result.ok) {
+      assert.strictEqual(result.request.onError, "continueAll");
+    }
+  });
 });

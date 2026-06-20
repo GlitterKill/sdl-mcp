@@ -11,7 +11,7 @@ export interface ParsedWorkflowStep {
   maxResponseTokens?: number;
   /**
    * When true, the executor must skip this step and emit an `error`-status
-   * result for it. Set by the parser when `onError: "continue"` lets us
+   * result for it. Set by the parser when non-stop onError modes let us
    * tolerate per-step validation failures (unknown fn, disabled tool) so
    * sibling steps can still execute.
    */
@@ -24,7 +24,7 @@ export interface ParsedWorkflowRequest {
   repoId: string;
   steps: ParsedWorkflowStep[];
   budget?: WorkflowBudget;
-  onError: "continue" | "stop";
+  onError: "continue" | "continueAll" | "stop";
   defaultMaxResponseTokens?: number;
   onlyFinalResult?: boolean;
   /** When true, validate steps and references without executing */
@@ -149,11 +149,11 @@ export function parseWorkflowRequest(
           "'. Available: " +
           availSummary +
           ", dataPick, dataMap, dataFilter, dataSort, dataTemplate, workflowContinuationGet";
-      // With `onError: "continue"` we record the bad step as a soft skip
+      // With non-stop error handling we record the bad step as a soft skip
       // and let the executor emit a per-step `error` result, so sibling
       // steps in the same envelope still run. Without `continue`, this
       // remains a hard validation failure that aborts the workflow.
-      if (onError === "continue") {
+      if (onError !== "stop") {
         parsedSteps.push({
           fn: step.fn,
           action: step.fn,

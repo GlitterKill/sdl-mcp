@@ -119,6 +119,19 @@ describe("workflow-truncation", () => {
     assert.ok(continuation.totalTokens < result.originalTokens);
   });
 
+  it("continuation pages arrays selected by path", () => {
+    const data = {
+      results: Array.from({ length: 8 }, (_, id) => ({ id })),
+      meta: { source: "test" },
+    };
+    const result = truncateStepResult(data, 20);
+    const continuation = getContinuation(result.handle, 2, 3, "results");
+
+    assert.ok(continuation);
+    assert.deepEqual(continuation.data, [{ id: 2 }, { id: 3 }, { id: 4 }]);
+    assert.equal(continuation.hasMore, true);
+  });
+
   it("nonexistent handle returns null", () => {
     const result = getContinuation("nonexistent-handle");
     assert.equal(result, null);

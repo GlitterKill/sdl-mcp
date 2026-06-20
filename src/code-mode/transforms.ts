@@ -393,6 +393,11 @@ export type InternalTransformName = (typeof INTERNAL_TRANSFORM_NAMES)[number];
 
 const WorkflowContinuationGetSchema = z.object({
   handle: z.string().min(1),
+  path: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Optional parsed-object path to page, e.g. results or results[0].name."),
   offset: z.number().int().min(0).optional(),
   limit: z
     .number()
@@ -439,6 +444,7 @@ export const INTERNAL_TRANSFORMS: Record<string, InternalTransformEntry> = {
         parsed.handle,
         parsed.offset,
         parsed.limit,
+        parsed.path,
       );
       if (!result)
         throw new TransformError("Continuation handle expired or not found");

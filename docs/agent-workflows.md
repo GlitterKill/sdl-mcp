@@ -197,7 +197,7 @@ Use this order unless task constraints force escalation:
   - Pass the `artifactHandle` from the execute response plus `queryTerms` to extract relevant excerpts.
 - `sdl.workflow` _(Code Mode)_:
   - Set `budget.maxTotalTokens` (or the accepted alias `budget.maxTokens`) and `budget.maxSteps` to bound chain execution. If a later step references a packed-capable result, `sdl.workflow` requests JSON-compatible output for that referenced step automatically.
-  - Use `onError: "continue"` (default) to let the chain proceed past failures, or `"stop"` to halt on first error.
+  - Use `onError: "continue"` (default) to skip only steps that reference failed/skipped prior steps, `"continueAll"` to run later steps even when their dependencies failed, or `"stop"` to halt on first error.
 
 ### 4) Live buffer workflow
 
@@ -294,7 +294,7 @@ Workflow guidance:
 - Use `sdl.manual(query|actions)` to avoid loading the full manual when a subset is enough.
 - Each step has `fn` (action name) and `args`. Use `$N.path.to.field` to reference step N's result (0-based).
 - Set `budget`: `{ maxTotalTokens, maxSteps, maxDurationMs }`; `maxTokens` is accepted as an alias for `maxTotalTokens`.
-- `onError`: `"continue"` (default, skip failed steps) or `"stop"` (halt on first error).
+- `onError`: `"continue"` (default, skip only dependency-blocked steps), `"continueAll"` (legacy run-every-later-step behavior), or `"stop"` (halt on first error).
 - The workflow enforces the same context-ladder escalation rules as individual tools.
 - Cross-step ETag caching is automatic — no need to pass ETags manually between steps.
 - Use workflows for multi-step operations: runtime execution, data shaping, batch mutations, and CI pipelines. Do not use them for context retrieval (use `sdl.context` in Code Mode or `sdl.context` directly). Do not use them for single actions.

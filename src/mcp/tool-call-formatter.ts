@@ -297,7 +297,34 @@ function fmtWorkflow(
   if (err > 0) line += `, ${err} errors`;
   line += ")";
   if (total > 0) line += ` ~${tok(total)} tokens`;
-  return line;
+  const lines = [line];
+  const failed = results.find((step) => step.status === "error");
+  if (failed) {
+    lines.push(
+      `first error: step ${num(failed.stepIndex)} ${str(failed.fn)} - ${truncName(str(failed.error) || str((failed.failureTrace as Record<string, unknown> | undefined)?.message))}`,
+    );
+  }
+  const blocked = results.find(
+    (step) => step.status === "skipped" && step.blockedByStep !== undefined,
+  );
+  if (blocked) {
+    lines.push(
+      `first block: step ${num(blocked.stepIndex)} blocked by step ${num(blocked.blockedByStep)} ${str(blocked.blockedByFn)}`,
+    );
+  }
+  const continuation = results.find(
+    (step) =>
+      (step.truncatedResponse as Record<string, unknown> | undefined)
+        ?.continuationHandle,
+  );
+  if (continuation) {
+    lines.push(
+      `continuation: $${num(continuation.stepIndex)}.truncatedResponse.continuationHandle`,
+    );
+  }
+  const suppressed = num(result.intermediateResultsSuppressed);
+  if (suppressed > 0) lines.push(`suppressed: ${suppressed} intermediate results`);
+  return lines.join("\n");
 }
 
 function fmtAgentContext(

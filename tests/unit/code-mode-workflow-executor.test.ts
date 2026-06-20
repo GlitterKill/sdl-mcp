@@ -59,6 +59,18 @@ function createMockActionMap() {
       schema: RuntimeExecuteRequestSchema,
       handler: async () => ({ ok: true }),
     },
+    "test.results": {
+      schema: z.object({}).passthrough(),
+      handler: async () => ({
+        results: Array.from({ length: 12 }, (_, index) => ({
+          symbolId: `sym-${index}`,
+          name: `name-${index}`,
+          file: `src/file-${index}.ts`,
+          kind: "function",
+          summary: "long result payload ".repeat(12),
+        })),
+      }),
+    },
     "test.fail": {
       schema: z.object({}).passthrough(),
       handler: async () => {
@@ -600,4 +612,134 @@ describe("code-mode workflow executor", () => {
       "durationMs should be at least 50ms for slow step",
     );
   });
+
+  it("onError=continue skips dependent failed-reference steps but keeps independent siblings", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        { fn: "testFail", action: "test.fail", args: {} },
+        {
+          fn: "testEcho",
+          action: "test.echo",
+          args: { message: "$0.missing" },
+        },
+        {
+          fn: "testEcho",
+          action: "test.echo",
+          args: { message: "independent" },
+        },
+      ],
+      onError: "continue",
+    };
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+    );
+
+    assert.strictEqual(result.results[0].status, "error");
+    assert.strictEqual(result.results[1].status, "skipped");
+    assert.strictEqual(result.results[2].status, "ok");
+    assert.strictEqual((result.results[1] as any).blockedByStep, 0);
+    assert.strictEqual((result.results[1] as any).blockedByFn, "testFail");
+    assert.match((result.results[1] as any).blockedByError, /Intentional test failure/);
+    assert.match((result.results[1] as any).failureTrace?.message, /depends on failed step/);
+    assert.match((result.results[0] as any).failureTrace?.message, /Intentional test failure/);
+  });
+
+  it("onError=continueAll preserves legacy dependent ref-resolution errors", async () => {
+    const request = {
+      repoId: "test",
+      steps: [
+        { fn: "testFail", action: "test.fail", args: {} },
+        {
+          fn: "testEcho",
+          action: "test.echo",
+          args: { message: "$0.missing" },
+        },
+      ],
+      onError: "continueAll",
+    } as ParsedWorkflowRequest;
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+    );
+
+    assert.strictEqual(result.results[0].status, "error");
+    assert.strictEqual(result.results[1].status, "error");
+    assert.match(result.results[1].error ?? "", /Cannot navigate|Expected object|Field/);
+  });
+
+  it("dryRun validates static args and marks ref-backed schemas pending", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        { fn: "testAdd", action: "test.add", args: { a: 1 } },
+        { fn: "testEcho", action: "test.echo", args: { message: "$0.sum" } },
+      ],
+      onError: "continue",
+      dryRun: true,
+    };
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+    );
+    const dryRun = result.dryRun as any;
+
+    assert.strictEqual(dryRun.valid, false);
+    assert.match(dryRun.validation[0].issues.join("\n"), /b|number|required/i);
+    assert.match(dryRun.validation[0].fixHint, /sdl\.manual/);
+    assert.strictEqual(dryRun.validation[1].pendingSchemaValidation, true);
+  });
+
+  it("workflowContinuationGet can page a structured path for later transforms", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        { fn: "testResults", action: "test.results", args: {}, maxResponseTokens: 50 },
+        {
+          fn: "workflowContinuationGet",
+          action: "workflowContinuationGet",
+          internal: true,
+          args: {
+            handle: "$0.truncatedResponse.continuationHandle",
+            path: "results",
+            offset: 2,
+            limit: 3,
+          },
+        },
+        {
+          fn: "dataMap",
+          action: "dataMap",
+          internal: true,
+          args: { input: "$1.data", fields: { name: "name" } },
+        },
+      ],
+      onError: "continue",
+    };
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+    );
+
+    assert.strictEqual(result.results[0].status, "ok");
+    assert.ok(result.results[0].truncatedResponse?.continuationHandle);
+    assert.strictEqual(result.results[1].status, "ok");
+    assert.strictEqual((result.results[1].result as any).data.length, 3);
+    assert.strictEqual((result.results[1].result as any).data[0].name, "name-2");
+    assert.strictEqual(result.results[2].status, "ok");
+    assert.deepStrictEqual(result.results[2].result, [
+      { name: "name-2" },
+      { name: "name-3" },
+      { name: "name-4" },
+    ]);
+  });
+
 });

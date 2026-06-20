@@ -172,6 +172,46 @@ Internal transforms include:
 - `dataFilter`
 - `dataSort`
 - `dataTemplate`
+- `workflowContinuationGet`
+
+Canonical structured continuation recipe:
+
+```json
+{
+  "repoId": "[repoid]",
+  "steps": [
+    {
+      "fn": "symbolSearch",
+      "args": { "query": "WorkflowExecutor", "limit": 50 },
+      "maxResponseTokens": 300
+    },
+    {
+      "fn": "workflowContinuationGet",
+      "args": {
+        "handle": "$0.truncatedResponse.continuationHandle",
+        "path": "results",
+        "offset": 0,
+        "limit": 10
+      }
+    },
+    {
+      "fn": "dataMap",
+      "args": {
+        "input": "$1.data",
+        "fields": { "symbolId": "symbolId", "name": "name", "file": "file" }
+      }
+    },
+    {
+      "fn": "dataTemplate",
+      "args": {
+        "input": "$2",
+        "template": "{{name}} - {{file}}",
+        "joinWith": "\n"
+      }
+    }
+  ]
+}
+```
 
 The workflow engine also provides:
 
