@@ -95,14 +95,18 @@ if (!result.binaryPath) {
 console.log(result.binaryPath);
 '@
 
+  $resolverScriptPath = Join-Path ([System.IO.Path]::GetTempPath()) "sdl-mcp-watchman-resolver-$PID.mjs"
+  Set-Content -LiteralPath $resolverScriptPath -Value $resolverScript -Encoding utf8
+
   $previousVerifyRoot = [Environment]::GetEnvironmentVariable("SDL_MCP_VERIFY_PACKAGE_ROOT", "Process")
   $env:SDL_MCP_VERIFY_PACKAGE_ROOT = $GlobalSdlMcpRoot
   try {
-    $resolved = & node --input-type=module --eval $resolverScript
+    $resolved = & node $resolverScriptPath
     if ($LASTEXITCODE -ne 0) {
       throw "Global sdl-mcp could not resolve its managed Watchman binary."
     }
   } finally {
+    Remove-Item -LiteralPath $resolverScriptPath -Force -ErrorAction SilentlyContinue
     if ($null -eq $previousVerifyRoot) {
       Remove-Item Env:\SDL_MCP_VERIFY_PACKAGE_ROOT -ErrorAction SilentlyContinue
     } else {
@@ -131,6 +135,39 @@ function Stop-ManagedWatchmanBinary {
   }
   Start-Sleep -Milliseconds 500
 }
+
+function Set-NodeModuleJunction {
+  param(
+    [Parameter(Mandatory = $true)][string]$NodeModulesRoot,
+    [Parameter(Mandatory = $true)][string]$PackageName,
+    [Parameter(Mandatory = $true)][string]$TargetPath
+  )
+
+  $destination = Join-Path $NodeModulesRoot $PackageName
+  if (Test-Path $destination) {
+    $existing = Get-Item -LiteralPath $destination -Force
+    if ($existing.LinkType) {
+      Remove-Item -LiteralPath $destination -Force
+    } else {
+      Remove-Item -LiteralPath $destination -Recurse -Force
+    }
+  }
+  New-Item -ItemType Junction -Path $destination -Target $TargetPath | Out-Null
+}
+
+function Install-CheckoutWatchmanPackages {
+  param(
+    [Parameter(Mandatory = $true)][string]$RepoRoot,
+    [Parameter(Mandatory = $true)][string]$WatchmanPackage,
+    [Parameter(Mandatory = $true)][string]$WatchmanPlatformPackage
+  )
+
+  $nodeModules = Join-Path $RepoRoot "node_modules"
+  New-Item -ItemType Directory -Path $nodeModules -Force | Out-Null
+  Set-NodeModuleJunction -NodeModulesRoot $nodeModules -PackageName "sdl-mcp-watchman" -TargetPath $WatchmanPackage
+  Set-NodeModuleJunction -NodeModulesRoot $nodeModules -PackageName "sdl-mcp-watchman-win32-x64" -TargetPath $WatchmanPlatformPackage
+}
+
 $scriptDir = Split-Path -Parent $PSCommandPath
 $repoRoot = Resolve-Path (Join-Path $scriptDir "..")
 Set-Location $repoRoot
@@ -144,7 +181,19 @@ $watchmanBinary = Join-Path $watchmanPlatformPackage "vendor/bin/watchman.exe"
 
 if (-not $SkipNpmInstall) {
   Invoke-Step "Install repo dependencies" {
-    Invoke-Native npm install --legacy-peer-deps
+    $previousWatchmanBinary = [Environment]::GetEnvironmentVariable("SDL_WATCHMAN_BINARY", "Process")
+    if (Test-Path $watchmanBinary) {
+      $env:SDL_WATCHMAN_BINARY = $watchmanBinary
+    }
+    try {
+      Invoke-Native npm install --legacy-peer-deps
+    } finally {
+      if ($null -eq $previousWatchmanBinary) {
+        Remove-Item Env:\SDL_WATCHMAN_BINARY -ErrorAction SilentlyContinue
+      } else {
+        $env:SDL_WATCHMAN_BINARY = $previousWatchmanBinary
+      }
+    }
   }
 }
 
@@ -184,6 +233,10 @@ if (-not $SkipWatchmanStage) {
 
 if (-not (Test-Path $watchmanBinary)) {
   throw "Managed Watchman binary was not found at $watchmanBinary"
+}
+
+Invoke-Step "Link Watchman packages into checkout" {
+  Install-CheckoutWatchmanPackages -RepoRoot $repoRoot -WatchmanPackage (Join-Path $repoRoot "watchman") -WatchmanPlatformPackage $watchmanPlatformPackage
 }
 
 Invoke-Step "Remove existing global SDL-MCP packages" {

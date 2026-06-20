@@ -29,4 +29,23 @@ describe("install-local-global.ps1", () => {
       /Stop-ManagedWatchmanBinary -BinaryPath \$watchmanBinary[\s\S]*Invoke-Native node scripts\/prepare-watchman-packages\.mjs/,
     );
   });
+
+  it("links managed Watchman packages into the checkout for symlinked global installs", () => {
+    assert.match(script, /function Install-CheckoutWatchmanPackages/);
+    assert.match(script, /New-Item -ItemType Junction/);
+    assert.doesNotMatch(script, /npm install --no-save/);
+    assert.match(script, /Install-CheckoutWatchmanPackages -RepoRoot \$repoRoot/);
+  });
+
+  it("runs the Watchman resolver from a temp mjs file to preserve Node import quotes", () => {
+    assert.match(script, /Set-Content -LiteralPath \$resolverScriptPath/);
+    assert.match(script, /node \$resolverScriptPath/);
+    assert.doesNotMatch(script, /node --input-type=module --eval \$resolverScript/);
+  });
+
+  it("uses an existing staged Watchman binary during repo dependency install", () => {
+    assert.match(script, /SDL_WATCHMAN_BINARY/);
+    assert.ok(script.includes("$env:SDL_WATCHMAN_BINARY = $watchmanBinary"));
+    assert.match(script, /Invoke-Native npm install --legacy-peer-deps/);
+  });
 });
