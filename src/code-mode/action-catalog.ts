@@ -1273,12 +1273,29 @@ const ACTION_SEARCH_SYNONYMS: Record<string, string[]> = {
   execute: ["runtime"],
 };
 
+function normalizeActionSearchTerm(term: string): string {
+  switch (term) {
+    case "sdl.action.search":
+      return "action.search";
+    case "sdl.context":
+      return "context";
+    case "sdl.file":
+      return "file";
+    case "sdl.manual":
+      return "manual";
+    case "sdl.workflow":
+      return "workflow";
+    default:
+      return term.startsWith("sdl.") ? term.slice("sdl.".length) : term;
+  }
+}
+
 export function rankCatalog(
   catalog: ActionDescriptor[],
   query: string,
 ): ActionDescriptor[] {
   const q = query.toLowerCase();
-  const rawTerms = q.split(/\s+/).filter(Boolean);
+  const rawTerms = q.split(/\s+/).filter(Boolean).map(normalizeActionSearchTerm);
 
   // Expand synonyms: add related terms for better matching
   const terms = rawTerms.flatMap((term) => {

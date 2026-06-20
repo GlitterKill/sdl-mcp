@@ -129,6 +129,66 @@ describe("sdl.file.read token usage metadata", () => {
     assert.equal(response.returnedLines, 1);
   });
 
+  it("applies maxBytes after line-range extraction", async () => {
+    const longPath = join(docsDir, "late-range.md");
+    const content = Array.from({ length: 120 }, (_, index) =>
+      "line " + (index + 1),
+    ).join("\n");
+    writeFileSync(longPath, content, "utf-8");
+
+    const response = await handleFileRead({
+      repoId,
+      filePath: "docs/late-range.md",
+      offset: 99,
+      limit: 1,
+      maxBytes: 20,
+    }) as Record<string, unknown>;
+
+    assert.equal(response.content, "100: line 100");
+    assert.equal(response.totalLines, 120);
+    assert.equal(response.truncated, false);
+  });
+
+  it("searches past maxBytes before applying response limits", async () => {
+    const longPath = join(docsDir, "late-search.md");
+    const content = Array.from({ length: 120 }, (_, index) =>
+      index === 99 ? "needle appears late" : "ordinary line " + (index + 1),
+    ).join("\n");
+    writeFileSync(longPath, content, "utf-8");
+
+    const response = await handleFileRead({
+      repoId,
+      filePath: "docs/late-search.md",
+      search: "needle",
+      searchContext: 0,
+      maxBytes: 40,
+    }) as Record<string, unknown>;
+
+    assert.match(String(response.content), />100: needle appears late/);
+    assert.equal(response.totalLines, 120);
+    assert.equal(response.matchCount, 1);
+  });
+
+  it("caps search response content after matching", async () => {
+    const longPath = join(docsDir, "wide-search.md");
+    writeFileSync(longPath, "needle " + "x".repeat(200), "utf-8");
+
+    const response = await handleFileRead({
+      repoId,
+      filePath: "docs/wide-search.md",
+      search: "needle",
+      searchContext: 0,
+      maxBytes: 40,
+    }) as Record<string, unknown>;
+
+    assert.ok(Buffer.byteLength(String(response.content), "utf-8") <= 40);
+    assert.match(String(response.content), /^>1: needle/);
+    assert.ok(Number(response.bytes) > 40);
+    assert.equal(response.truncated, true);
+    assert.equal(response.truncatedAt, 40);
+    assert.equal(response.matchCount, 1);
+  });
+
   it("returns a response artifact handle when responseMode is handle", async () => {
     const response = await handleFileRead({
       repoId,

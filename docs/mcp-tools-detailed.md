@@ -1111,7 +1111,7 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 3. **Executable validation** — Custom executables must be compatible with the selected runtime (e.g., you can't use `powershell` with the `node` runtime).
 4. **Scrubbed environment** — Subprocesses receive only `PATH` and explicitly allowlisted env vars. Secrets do not leak.
 5. **CWD jailing** — The working directory is validated to stay within the repository root.
-6. **Code mode** — Inline code strings are written to a temp file, executed, then cleaned up.
+6. **Code mode** — Inline code strings are written to a temp file, executed, then cleaned up. For `runtime: "node"`, that temp file follows the repository's module type; in ESM repos use `import`, or use args-only Node execution such as `args: ["-e", "..."]` for CommonJS-style `require` snippets.
 7. **Concurrency limiting** — A configurable `maxConcurrentJobs` cap prevents resource exhaustion.
 8. **Timeout enforcement** — Hard timeout with process-tree kill.
 9. **Output handling** — Stdout/stderr are captured with configurable byte limits and persisted as gzip artifacts. The `outputMode` parameter (`"minimal"`, `"summary"`, `"intent"`) controls how much output is returned inline. Use `sdl.runtime.queryOutput` to search artifacts on demand.

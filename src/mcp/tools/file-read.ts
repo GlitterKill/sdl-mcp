@@ -60,12 +60,16 @@ export function computeFileReadLimit(
   return needsFullFile ? fileSize : Math.min(fileSize, maxBytes);
 }
 
-export function assertJsonPathSourceFitsExtractionLimit(fileSize: number): void {
+function assertFullFileSourceFitsExtractionLimit(fileSize: number, reason: string): void {
   if (fileSize > MAX_FILE_SIZE_BYTES) {
     throw new ValidationError(
-      `File size ${fileSize} bytes exceeds the JSON/YAML extraction limit ${MAX_FILE_SIZE_BYTES}. Use a smaller file or search by text instead.`,
+      "File size " + fileSize + " bytes exceeds the file.read " + reason + " limit " + MAX_FILE_SIZE_BYTES + ". Use a smaller file or a byte-limited full read instead.",
     );
   }
+}
+
+export function assertJsonPathSourceFitsExtractionLimit(fileSize: number): void {
+  assertFullFileSourceFitsExtractionLimit(fileSize, "JSON/YAML extraction");
 }
 
 /**
@@ -371,14 +375,21 @@ export async function handleFileRead(
   const maxBytes = request.maxBytes ?? MAX_FILE_SIZE_BYTES;
   const fileStat = await stat(openPath);
 
-  const needsFullFile = request.jsonPath !== undefined; // JSON/YAML parsing needs full content
+  const needsFullFile = request.jsonPath !== undefined ||
+    request.search !== undefined ||
+    request.offset !== undefined ||
+    request.limit !== undefined;
   const readLimit = computeFileReadLimit(
     fileStat.size,
     maxBytes,
     needsFullFile,
   );
 
-  if (needsFullFile) assertJsonPathSourceFitsExtractionLimit(fileStat.size);
+  if (request.jsonPath !== undefined) {
+    assertJsonPathSourceFitsExtractionLimit(fileStat.size);
+  } else if (needsFullFile) {
+    assertFullFileSourceFitsExtractionLimit(fileStat.size, "search/range extraction");
+  }
 
   let rawContent: string;
   if (readLimit < fileStat.size) {
@@ -517,16 +528,23 @@ export async function handleFileRead(
     const finalContent = warnings.length > 0
       ? `// WARNING: ${warnings.join(" ")}\n${result.content}`
       : result.content;
+    const finalBytes = Buffer.byteLength(finalContent, "utf-8");
+    const searchContent = finalBytes > maxBytes
+      ? Buffer.from(finalContent, "utf-8").subarray(0, maxBytes).toString("utf-8")
+      : finalContent;
+    const searchTruncated =
+      result.matchesTruncated || result.linesTruncated || finalBytes > maxBytes;
     return finalizeFileReadResponse(
       request,
       context,
       {
         filePath,
-        content: finalContent,
-        bytes: Buffer.byteLength(finalContent, "utf-8"),
+        content: searchContent,
+        bytes: finalBytes,
         totalLines,
         returnedLines: result.returnedLines,
-        truncated: result.matchesTruncated || result.linesTruncated,
+        truncated: searchTruncated,
+        ...(finalBytes > maxBytes ? { truncatedAt: maxBytes } : {}),
         matchCount: result.matchCount,
       },
       totalBytes,

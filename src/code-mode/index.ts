@@ -83,34 +83,53 @@ export function handleActionSearch(
   rawArgs: unknown,
   services: ToolServices = {},
 ): object {
+  const rawRecord = rawArgs != null && typeof rawArgs === "object"
+    ? rawArgs as Record<string, unknown>
+    : {};
+  const includeSchemasSpecified = Object.hasOwn(rawRecord, "includeSchemas");
+  const includeExamplesSpecified = Object.hasOwn(rawRecord, "includeExamples");
   const args = ActionSearchRequestSchema.parse(rawArgs);
   // Auto-enable schemas + examples when the caller is obviously homing in
   // on a single action (limit=1 or an exact dotted-name query). Without
   // this, the default payload omits enum values so callers frequently
   // guess param shapes wrong.
-  const trimmed = args.query.trim();
+  const trimmed = normalizeManualActionSelector(args.query.trim());
   const looksLikeExactName =
     /^[a-zA-Z][\w.]*$/.test(trimmed) && trimmed.includes(".");
   const narrowLookup = args.limit === 1 || looksLikeExactName;
-  const effectiveIncludeSchemas = args.includeSchemas || narrowLookup;
-  const effectiveIncludeExamples = args.includeExamples || narrowLookup;
+  const autoIncludeSchemas = narrowLookup && !includeSchemasSpecified;
+  const autoIncludeExamples = narrowLookup && !includeExamplesSpecified;
+  const effectiveIncludeSchemas = args.includeSchemas || autoIncludeSchemas;
+  const effectiveIncludeExamples = args.includeExamples || autoIncludeExamples;
   const catalog = buildCatalog({
     liveIndex: services.liveIndex,
     includeSchemas: effectiveIncludeSchemas,
     includeExamples: effectiveIncludeExamples,
   });
 
-  const allRanked = rankCatalog(catalog, args.query);
-  const filteredRanked = args.excludeDisabled
+  const allRanked = rankCatalog(catalog, trimmed);
+  const disabledRanked = allRanked.filter((a) => a.disabled);
+  let filteredRanked = args.excludeDisabled
     ? allRanked.filter((a) => !a.disabled)
     : allRanked;
+  const queryTerms = trimmed.toLowerCase().split(/\s+/).filter(Boolean);
+  const disabledNamespaces = new Set(
+    disabledRanked
+      .map((a) => a.action.split(".")[0])
+      .filter((namespace) => queryTerms.includes(namespace)),
+  );
+  if (args.excludeDisabled && disabledNamespaces.size > 0) {
+    filteredRanked = filteredRanked.filter((a) =>
+      disabledNamespaces.has(a.action.split(".")[0]),
+    );
+  }
   const offset = args.offset ?? 0;
   const ranked = filteredRanked.slice(offset, offset + args.limit);
   const autoEnabled =
-    narrowLookup && (!args.includeSchemas || !args.includeExamples)
+    autoIncludeSchemas || autoIncludeExamples
       ? {
-          includeSchemas: !args.includeSchemas,
-          includeExamples: !args.includeExamples,
+          includeSchemas: autoIncludeSchemas,
+          includeExamples: autoIncludeExamples,
           reason: args.limit === 1 ? "limit=1" : "exact-name-query",
         }
       : undefined;
@@ -141,7 +160,7 @@ export function handleActionSearch(
   }
 
   // Compute disabled action hints.
-  const disabledActions = ranked.filter((a) => a.disabled);
+  const disabledActions = args.excludeDisabled ? disabledRanked : ranked.filter((a) => a.disabled);
   const disabledHint =
     disabledActions.length > 0
       ? {

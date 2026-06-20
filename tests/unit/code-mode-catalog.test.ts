@@ -9,6 +9,7 @@ import {
   zodToSchemaSummary,
   invalidateCatalog,
 } from "../../dist/code-mode/action-catalog.js";
+import { handleActionSearch } from "../../dist/code-mode/index.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 import { SearchEditRequestSchema } from "../../dist/mcp/tools.js";
 import { z } from "zod";
@@ -17,11 +18,12 @@ const originalSdlConfig = process.env.SDL_CONFIG;
 
 describe("code-mode action catalog", () => {
   let tmpDir: string;
+  let configPath: string;
 
   before(() => {
     // Create a config with memory enabled so all actions are present
     tmpDir = mkdtempSync(join(tmpdir(), "sdl-catalog-"));
-    const configPath = join(tmpDir, "config.json");
+    configPath = join(tmpDir, "config.json");
     writeFileSync(configPath, JSON.stringify({
       repos: [{ repoId: "test", rootPath: tmpDir, memory: { enabled: true } }],
       policy: {},
@@ -205,6 +207,63 @@ describe("code-mode action catalog", () => {
         "workflow",
         `expected workflow first, got ${ranked.slice(0, 5).map((d) => d.action).join(", ")}`,
       );
+    });
+
+    it("matches documented sdl-prefixed action names", () => {
+      invalidateCatalog();
+      const catalog = buildCatalog();
+
+      assert.strictEqual(rankCatalog(catalog, "sdl.context")[0]?.action, "context");
+      assert.strictEqual(
+        rankCatalog(catalog, "sdl.runtime.execute")[0]?.action,
+        "runtime.execute",
+      );
+    });
+
+    it("honors explicit schema/example opt-outs for exact action lookups", () => {
+      invalidateCatalog();
+      const result = handleActionSearch({
+        query: "runtime.execute",
+        includeSchemas: false,
+        includeExamples: false,
+        limit: 3,
+      }) as { actions: Array<Record<string, unknown>>; autoEnabled?: unknown };
+
+      assert.strictEqual(result.actions[0]?.action, "runtime.execute");
+      assert.strictEqual(result.actions[0]?.schemaSummary, undefined);
+      assert.strictEqual(result.actions[0]?.example, undefined);
+      assert.strictEqual(result.autoEnabled, undefined);
+    });
+
+    it("returns a disabled-memory hint instead of unrelated tools", () => {
+      const disabledConfigPath = join(tmpDir, "memory-disabled.json");
+      writeFileSync(disabledConfigPath, JSON.stringify({
+        repos: [{ repoId: "test", rootPath: tmpDir, memory: { enabled: false } }],
+        policy: {},
+      }));
+      process.env.SDL_CONFIG = disabledConfigPath;
+      invalidateConfigCache();
+      invalidateCatalog();
+
+      try {
+        const result = handleActionSearch({
+          query: "memory store query surface remove",
+          excludeDisabled: true,
+          limit: 8,
+        }) as {
+          actions: Array<Record<string, unknown>>;
+          disabledHint?: { actions?: Array<{ action: string }> };
+        };
+
+        assert.deepStrictEqual(result.actions, []);
+        assert.ok(
+          result.disabledHint?.actions?.some((action) => action.action === "memory.store"),
+        );
+      } finally {
+        process.env.SDL_CONFIG = configPath;
+        invalidateConfigCache();
+        invalidateCatalog();
+      }
     });
   });
 

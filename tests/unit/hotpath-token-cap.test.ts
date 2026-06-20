@@ -14,6 +14,10 @@ import assert from "node:assert";
  * - no-match branch returns at most maxLines lines
  */
 
+import {
+  buildHotPathExcerpt,
+  findVariableDeclarationEndLine,
+} from "../../dist/code/hotpath.js";
 import { estimateTokens } from "../../dist/util/tokenize.js";
 
 describe("hotpath token cap in no-match branch", () => {
@@ -86,5 +90,47 @@ describe("hotpath token cap in no-match branch", () => {
       maxLines,
       `Should return exactly ${maxLines} lines`,
     );
+  });
+
+  it("reports only identifiers visible in the returned excerpt", () => {
+    const lines = [
+      "const RuntimeExecuteAction = z",
+      "  .object({",
+      "    outputMode: z.string(),",
+      "  });",
+    ];
+
+    const hidden = buildHotPathExcerpt(
+      lines,
+      new Set([1]),
+      0,
+      1,
+      999,
+      new Set(["outputMode"]),
+    );
+    assert.deepStrictEqual(hidden.matchedIdentifiers, []);
+
+    const visible = buildHotPathExcerpt(
+      lines,
+      new Set([3]),
+      0,
+      1,
+      999,
+      new Set(["outputMode"]),
+    );
+    assert.deepStrictEqual(visible.matchedIdentifiers, ["outputMode"]);
+  });
+
+  it("expands one-line variable symbol ranges through chained initializers", () => {
+    const lines = [
+      "const RuntimeExecuteAction = z",
+      "  .object({",
+      "    outputMode: z.string(),",
+      "  })",
+      "  .describe(\"runtime.execute\");",
+      "const next = true;",
+    ];
+
+    assert.strictEqual(findVariableDeclarationEndLine(lines, 1), 5);
   });
 });

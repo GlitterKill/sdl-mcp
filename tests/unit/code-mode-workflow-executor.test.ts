@@ -562,6 +562,38 @@ describe("code-mode workflow executor", () => {
     assert.strictEqual(result.results[1].status, "skipped");
   });
 
+  it("onError=stop halts chain when a gateway action returns failure", async () => {
+    const actionMap = createMockActionMap();
+    (actionMap["runtime.execute"] as { handler: () => Promise<unknown> }).handler =
+      async () => ({
+        status: "failure",
+        exitCode: 1,
+        durationMs: 1,
+        artifactHandle: "runtime-test-failure",
+        stdoutSummary: "",
+        stderrSummary: "boom",
+      });
+
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        {
+          fn: "runtimeExecute",
+          action: "runtime.execute",
+          args: { runtime: "node", code: "throw new Error('boom')" },
+        },
+        { fn: "testEcho", action: "test.echo", args: { message: "ok" } },
+      ],
+      onError: "stop",
+    };
+
+    const result = await executeWorkflow(request, actionMap, testConfig);
+
+    assert.strictEqual(result.results[0].status, "error");
+    assert.match(result.results[0].error ?? "", /runtime.execute failed/);
+    assert.strictEqual(result.results[1].status, "skipped");
+  });
+
   it("results array length matches input steps length", async () => {
     const request: ParsedWorkflowRequest = {
       repoId: "test",

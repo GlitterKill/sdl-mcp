@@ -116,12 +116,43 @@ function findLinesMatchingIdentifiers(
   return { matchedLines, confirmedIdentifiers };
 }
 
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function filterVisibleIdentifiers(
+  excerpt: string,
+  identifiers: Set<string>,
+): string[] {
+  return Array.from(identifiers).filter((identifier) =>
+    new RegExp("\\b" + escapeRegExp(identifier) + "\\b").test(excerpt),
+  );
+}
+
+export function findVariableDeclarationEndLine(
+  lines: string[],
+  startLine: number,
+): number {
+  let depth = 0;
+  const startIdx = Math.max(0, startLine - 1);
+  const endIdx = Math.min(lines.length, startIdx + 200);
+  for (let i = startIdx; i < endIdx; i++) {
+    for (const char of lines[i]) {
+      if (char === "{" || char === "(" || char === "[") depth++;
+      if (char === "}" || char === ")" || char === "]") depth = Math.max(0, depth - 1);
+    }
+    // ponytail: bounded scan for chained const initializers; parser-backed ranges can replace this if needed.
+    if (depth === 0 && lines[i].trimEnd().endsWith(";")) return i + 1;
+  }
+  return startLine;
+}
+
 export function buildHotPathExcerpt(
   lines: string[],
   matchedLines: Set<number>,
   contextLines: number,
   maxLines: number,
   maxTokens: number,
+  confirmedIdentifiers: Set<string> = new Set(),
 ): {
   excerpt: string;
   matchedIdentifiers: string[];
@@ -220,7 +251,7 @@ export function buildHotPathExcerpt(
 
   return {
     excerpt,
-    matchedIdentifiers: [],
+    matchedIdentifiers: filterVisibleIdentifiers(excerpt, confirmedIdentifiers),
     matchedLineNumbers,
     truncated,
     actualRange,
@@ -293,7 +324,10 @@ export async function extractHotPath(
 
     // Filter matched lines to symbol range so we don't return unrelated code
     const symStart = symbol.rangeStartLine ?? 1;
-    const symEnd = symbol.rangeEndLine ?? lines.length;
+    let symEnd = symbol.rangeEndLine ?? lines.length;
+    if (symbol.kind === "variable" && symEnd === symStart) {
+      symEnd = findVariableDeclarationEndLine(lines, symStart);
+    }
     const rangeFilteredLines = new Set<number>();
     matchedLines.forEach((line) => {
       if (line >= symStart && line <= symEnd) {
@@ -307,20 +341,21 @@ export async function extractHotPath(
       ? rangeFilteredLines
       : new Set<number>([symStart]);
 
-    const { excerpt, matchedLineNumbers, truncated, actualRange } =
+    const { excerpt, matchedIdentifiers, matchedLineNumbers, truncated, actualRange } =
       buildHotPathExcerpt(
         lines,
         effectiveMatchedLines,
         contextLines,
         maxLines,
         maxTokens,
+        confirmedIdentifiers,
       );
 
     return {
       excerpt,
       actualRange,
       estimatedTokens: estimateTokenCount(excerpt),
-      matchedIdentifiers: Array.from(confirmedIdentifiers),
+      matchedIdentifiers,
       matchedLineNumbers,
       truncated,
     };

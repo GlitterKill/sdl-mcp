@@ -64,6 +64,23 @@ function applyStepTruncation(
   }
 }
 
+function getGatewayFailureMessage(action: string, result: unknown): string | null {
+  if (result == null || typeof result !== "object") return null;
+  const record = result as Record<string, unknown>;
+  if (record.status !== "failure") return null;
+  const detail =
+    typeof record.stderrSummary === "string" && record.stderrSummary.trim()
+      ? record.stderrSummary.trim()
+      : typeof record.error === "string" && record.error.trim()
+        ? record.error.trim()
+        : typeof record.message === "string" && record.message.trim()
+          ? record.message.trim()
+          : typeof record.exitCode === "number"
+            ? "exit code " + record.exitCode
+            : "returned failure status";
+  return action + " failed: " + detail;
+}
+
 function attachStepMetadataToPriorResult(
   priorResults: unknown[],
   stepIndex: number,
@@ -630,14 +647,27 @@ export async function executeWorkflow(
           timer.record("workflow.etagExtract", etagExtractStartedAt);
         }
 
-        priorResults.push(result);
+        const gatewayFailureMessage = getGatewayFailureMessage(step.action, result);
+        priorResults.push(gatewayFailureMessage ? null : result);
         const stepResult: WorkflowStepResult = {
           stepIndex: i,
           fn: step.fn,
           result,
           tokens,
           durationMs: stepDuration,
-          status: "ok",
+          status: gatewayFailureMessage ? "error" : "ok",
+          ...(gatewayFailureMessage
+            ? {
+                error: gatewayFailureMessage,
+                failureTrace: failureTrace({
+                  stepIndex: i,
+                  step,
+                  status: "error",
+                  message: gatewayFailureMessage,
+                  resolvedArgs,
+                }),
+              }
+            : {}),
         };
         applyStepTruncation(stepResult, step, request.defaultMaxResponseTokens);
         budget.record(stepResult.tokens, stepDuration);
@@ -652,15 +682,31 @@ export async function executeWorkflow(
               step.fn,
               step.action,
               "gateway",
-              "ok",
+              gatewayFailureMessage ? "error" : "ok",
               stepDuration,
               stepResult.tokens,
               traceOpts,
               traceCatalog,
               resolvedArgs,
               stepResult.result,
+              gatewayFailureMessage ?? undefined,
             ),
           );
+        }
+
+        if (gatewayFailureMessage && request.onError === "stop") {
+          for (let j = i + 1; j < request.steps.length; j++) {
+            stepResults.push({
+              stepIndex: j,
+              fn: request.steps[j].fn,
+              result: null,
+              tokens: 0,
+              durationMs: 0,
+              status: "skipped",
+            });
+            priorResults.push(null);
+          }
+          break;
         }
       } catch (error) {
         const stepDuration = Date.now() - stepStart;

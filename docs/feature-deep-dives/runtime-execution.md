@@ -15,6 +15,11 @@ quote-heavy payloads. SDL-MCP writes it to the child process as UTF-8, closes
 stdin, reports `stdinBytes` and `stdinSha256`, and does not echo the full input
 in visible output or persisted logs. The limit is 512 KiB.
 
+For `runtime: "node"`, inline `code` runs as a temp `.js` file under the
+repository's module type. In ESM repos, use `import` inside `code`; use
+args-only execution such as `args: ["-e", "..."]` when you need CommonJS-style
+`require` snippets.
+
 ---
 
 ## Supported Runtimes (16)
