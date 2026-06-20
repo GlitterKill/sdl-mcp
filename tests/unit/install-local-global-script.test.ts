@@ -20,4 +20,13 @@ describe("install-local-global.ps1", () => {
       /Join-Path \$globalRoot "sdl-mcp-watchman-win32-x64\/vendor\/bin\/watchman\.exe"/,
     );
   });
+
+  it("stops managed Watchman before restaging package files", () => {
+    assert.match(script, /function Stop-ManagedWatchmanBinary/);
+    assert.match(script, /shutdown-server/);
+    assert.match(
+      script,
+      /Stop-ManagedWatchmanBinary -BinaryPath \$watchmanBinary[\s\S]*Invoke-Native node scripts\/prepare-watchman-packages\.mjs/,
+    );
+  });
 });

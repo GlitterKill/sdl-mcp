@@ -117,6 +117,20 @@ console.log(result.binaryPath);
   return $binaryPath
 }
 
+function Stop-ManagedWatchmanBinary {
+  param([Parameter(Mandatory = $true)][string]$BinaryPath)
+
+  if (-not (Test-Path $BinaryPath)) {
+    return
+  }
+
+  Write-Host "Stopping managed Watchman before restaging: $BinaryPath"
+  & $BinaryPath --no-pretty --no-spawn shutdown-server *> $null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Watchman shutdown-server exited with $LASTEXITCODE; continuing." -ForegroundColor Yellow
+  }
+  Start-Sleep -Milliseconds 500
+}
 $scriptDir = Split-Path -Parent $PSCommandPath
 $repoRoot = Resolve-Path (Join-Path $scriptDir "..")
 Set-Location $repoRoot
@@ -159,6 +173,11 @@ if (-not $SkipWatchmanStage) {
     if (-not (Get-Command unzip -ErrorAction SilentlyContinue)) {
       throw "scripts/prepare-watchman-packages.mjs requires unzip on PATH. Install Git for Windows/MSYS2 unzip, or rerun with -SkipWatchmanStage if $watchmanBinary already exists."
     }
+
+    Stop-ManagedWatchmanBinary -BinaryPath $watchmanBinary
+    $globalRootBeforeStage = (npm root -g).Trim()
+    Stop-ManagedWatchmanBinary -BinaryPath (Join-Path $globalRootBeforeStage "sdl-mcp-watchman-win32-x64/vendor/bin/watchman.exe")
+
     Invoke-Native node scripts/prepare-watchman-packages.mjs
   }
 }
