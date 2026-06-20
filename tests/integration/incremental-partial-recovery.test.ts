@@ -54,6 +54,16 @@ describe("incremental index partial-run recovery", () => {
       "utf8",
     );
     writeFileSync(
+      join(repoDir, "src", "helper.ts"),
+      [
+        "export function helper(value: string): string {",
+        "  return value.trim();",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    writeFileSync(
       join(repoDir, "index.scip"),
       "disabled legacy SCIP input should not be ingested",
       "utf8",
@@ -226,5 +236,76 @@ describe("incremental index partial-run recovery", () => {
       { repoId: REPO_ID },
     );
     assert.equal(ladybugDb.toNumber(metricsCount?.count ?? 0), symbolCount);
+  });
+
+  it("repairs only missing file summaries during no-op incremental recovery", async () => {
+    await indexRepo(REPO_ID, "full");
+    const conn = await getLadybugConn();
+    const summaries = await ladybugDb.queryAll<{
+      fileId: string;
+      relPath: string;
+    }>(
+      conn,
+      `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)
+       MATCH (fs:FileSummary {repoId: $repoId})
+       WHERE fs.fileId = f.fileId
+       RETURN f.fileId AS fileId, f.relPath AS relPath
+       ORDER BY f.relPath`,
+      { repoId: REPO_ID },
+    );
+    const preserved = summaries.find((row) => row.relPath === "src/main.ts");
+    const missing = summaries.find((row) => row.relPath === "src/helper.ts");
+    assert.ok(preserved, "full index should create a main.ts file summary");
+    assert.ok(missing, "full index should create a helper.ts file summary");
+
+    const sentinelSummary = "sentinel summary must survive missing-row repair";
+    const sentinelSearchText = "sentinel search text must survive repair";
+    await withWriteConn(async (wConn) => {
+      await exec(
+        wConn,
+        `MATCH (fs:FileSummary {fileId: $fileId})
+         SET fs.summary = $summary,
+             fs.searchText = $searchText,
+             fs.updatedAt = $updatedAt`,
+        {
+          fileId: preserved.fileId,
+          summary: sentinelSummary,
+          searchText: sentinelSearchText,
+          updatedAt: "2000-01-01T00:00:00.000Z",
+        },
+      );
+      await exec(
+        wConn,
+        `MATCH (fs:FileSummary {fileId: $fileId})
+         DETACH DELETE fs`,
+        { fileId: missing.fileId },
+      );
+      await exec(
+        wConn,
+        `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)
+         SET f.lastIndexedAt = $lastIndexedAt`,
+        {
+          repoId: REPO_ID,
+          lastIndexedAt: "2999-01-01T00:00:00.000Z",
+        },
+      );
+    });
+
+    const incremental = await indexRepo(REPO_ID, "incremental");
+
+    assert.equal(incremental.changedFiles, 0);
+    const repairedConn = await getLadybugConn();
+    const preservedAfter = await ladybugDb.getFileSummary(
+      repairedConn,
+      preserved.fileId,
+    );
+    const missingAfter = await ladybugDb.getFileSummary(
+      repairedConn,
+      missing.fileId,
+    );
+    assert.equal(preservedAfter?.summary, sentinelSummary);
+    assert.equal(preservedAfter?.searchText, sentinelSearchText);
+    assert.ok(missingAfter, "no-op recovery should recreate the missing summary");
+    assert.notEqual(missingAfter.summary, sentinelSummary);
   });
 });

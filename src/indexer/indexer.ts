@@ -550,6 +550,7 @@ interface NoOpIncrementalRecoveryAssessment {
   versionedSymbolCount: number;
   metricsCount: number;
   fileSummaryCount: number;
+  missingFileSummaryFileIds: string[];
   needsVersionSnapshot: boolean;
   needsDerivedState: boolean;
   needsMetrics: boolean;
@@ -1850,31 +1851,38 @@ async function countMetricsForRepo(repoId: string): Promise<number> {
   return ladybugDb.toNumber(row?.count ?? 0);
 }
 
-async function countFileSummariesForRepo(repoId: string): Promise<number> {
+async function getFileSummaryFileIdsForRepo(repoId: string): Promise<string[]> {
   const conn = await getLadybugConn();
-  const row = await ladybugDb.querySingle<{ count: unknown }>(
+  const rows = await ladybugDb.queryAll<{ fileId: string }>(
     conn,
     `MATCH (fs:FileSummary {repoId: $repoId})
-     RETURN count(fs) AS count`,
+     RETURN fs.fileId AS fileId`,
     { repoId },
   );
-  return ladybugDb.toNumber(row?.count ?? 0);
+  return rows.map((row) => row.fileId);
 }
 
 async function assessNoOpIncrementalRecovery(params: {
   repoId: string;
   versionId: string;
-  fileCount: number;
+  fileIds: readonly string[];
 }): Promise<NoOpIncrementalRecoveryAssessment> {
-  const { repoId, versionId, fileCount } = params;
+  const { repoId, versionId, fileIds } = params;
+  const fileCount = fileIds.length;
   const conn = await getLadybugConn();
-  const [symbolCount, versionedSymbolCount, metricsCount, fileSummaryCount] =
+  const [
+    symbolCount,
+    versionedSymbolCount,
+    metricsCount,
+    fileSummaryFileIds,
+  ] =
     await Promise.all([
       ladybugDb.getSymbolCount(conn, repoId),
       countSymbolVersionsForVersion(versionId),
       countMetricsForRepo(repoId),
-      countFileSummariesForRepo(repoId),
+      getFileSummaryFileIdsForRepo(repoId),
     ]);
+  const fileSummaryCount = fileSummaryFileIds.length;
   const derivedState = await getDerivedState(repoId);
   const reasons: string[] = [];
 
@@ -1896,7 +1904,13 @@ async function assessNoOpIncrementalRecovery(params: {
   if (needsMetrics) {
     reasons.push(`metrics incomplete (${metricsCount}/${symbolCount})`);
   }
-  const needsFileSummaries = fileSummaryCount < fileCount;
+  // Recovery should only materialize absent FileSummary rows; unchanged files
+  // can carry large summary/searchText payloads and do not need rewrites.
+  const fileSummaryFileIdSet = new Set(fileSummaryFileIds);
+  const missingFileSummaryFileIds = fileIds.filter(
+    (fileId) => !fileSummaryFileIdSet.has(fileId),
+  );
+  const needsFileSummaries = missingFileSummaryFileIds.length > 0;
   if (needsFileSummaries) {
     reasons.push(
       `file summaries incomplete (${fileSummaryCount}/${fileCount})`,
@@ -1909,6 +1923,7 @@ async function assessNoOpIncrementalRecovery(params: {
     versionedSymbolCount,
     metricsCount,
     fileSummaryCount,
+    missingFileSummaryFileIds,
     needsVersionSnapshot,
     needsDerivedState,
     needsMetrics,
@@ -3346,7 +3361,9 @@ async function indexRepoImpl(
         assessNoOpIncrementalRecovery({
           repoId,
           versionId,
-          fileCount: files.length,
+          fileIds: files
+            .map((file) => existingByPath.get(file.path)?.fileId)
+            .filter((fileId): fileId is string => typeof fileId === "string"),
         }),
       );
 
@@ -3416,7 +3433,11 @@ async function indexRepoImpl(
                 if (recovery.needsFileSummaries) {
                   await measurePhase("recoverFileSummaries", async () => {
                     const fsConn = await getLadybugConn();
-                    await materializeFileSummaries(fsConn, repoId);
+                    await materializeFileSummaries(fsConn, repoId, {
+                      changedFileIds: new Set(
+                        recovery.missingFileSummaryFileIds,
+                      ),
+                    });
                   });
                 }
               }
