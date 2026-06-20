@@ -32,6 +32,7 @@ export async function handleResponseGet(
       maxBytes: request.maxBytes,
       maxTokens: request.maxTokens,
       offsetBytes: request.offsetBytes,
+      jsonPath: request.jsonPath,
       artifactBaseDir: runtimeConfig.artifactBaseDir,
       maxFullBytes: runtimeConfig.maxArtifactBytes,
       sessionId: context?.sessionId,

@@ -45,6 +45,7 @@ import { logRuntimeExecution, logPolicyDecision } from "../telemetry.js";
 import { attachRawContext } from "../token-usage.js";
 import { hashContent } from "../../util/hashing.js";
 import { logger } from "../../util/logger.js";
+import { getServerInfo } from "../../util/runtime-identity.js";
 import {
   attachTimingDiagnostics,
   ToolPhaseTimer,
@@ -61,6 +62,54 @@ import {
 
 let concurrencyTracker: ConcurrencyTracker | undefined;
 let concurrencyTrackerLimit: number | undefined;
+
+function summarizeCommand(
+  executable: string,
+  args: string[],
+  hasCode: boolean,
+  hasStdin: boolean,
+): string {
+  const executableName = executable.replace(/\\/g, "/").split("/").pop() || executable;
+  return [
+    `executable=${executableName}`,
+    `argCount=${args.length}`,
+    `code=${hasCode ? "yes" : "no"}`,
+    `stdin=${hasStdin ? "yes" : "no"}`,
+  ].join(" ");
+}
+
+function buildRuntimeNextAction(
+  response: RuntimeExecuteResponse,
+): RuntimeExecuteResponse["nextAction"] {
+  if (response.status === "timeout") {
+    return {
+      kind: "increaseTimeout",
+      message: "Increase timeoutMs if the command is expected to run this long.",
+    };
+  }
+  if (response.status === "denied") {
+    if (response.stderrSummary.includes("Concurrency limit")) {
+      return {
+        kind: "retry",
+        message: "Wait for current runtime jobs to finish, then retry.",
+      };
+    }
+    return {
+      kind: "inspectPolicy",
+      message: "Inspect policyDecision.deniedReasons and adjust the request or policy.",
+    };
+  }
+  if (response.status !== "success" && response.artifactHandle) {
+    return {
+      kind: "queryOutput",
+      action: "runtime.queryOutput",
+      message: "Query the failure artifact with runtime.queryOutput.",
+      queryTerms: ["error", "failed", "exception"],
+    };
+  }
+  return undefined;
+}
+
 
 function getOrCreateConcurrencyTracker(maxJobs: number): ConcurrencyTracker {
   // Recreate tracker if limit changed and no active slots
@@ -90,23 +139,6 @@ function truncateLine(line: string): string {
   );
 }
 
-// ============================================================================
-// Stdout Preview (for minimal mode)
-// ============================================================================
-
-const PREVIEW_MAX_LINES = 3;
-const PREVIEW_MAX_CHARS = 200;
-
-function buildStdoutPreview(stdout: string): string {
-  if (!stdout) return "";
-  const lines = stdout.split("\n");
-  const firstLines = lines
-    .slice(0, PREVIEW_MAX_LINES)
-    .map((l) => l.slice(0, PREVIEW_MAX_CHARS))
-    .join("\n");
-  if (firstLines.length <= PREVIEW_MAX_CHARS) return firstLines;
-  return firstLines.slice(0, PREVIEW_MAX_CHARS) + "…";
-}
 function buildStdinMetadata(
   stdin: string | undefined,
 ): Pick<RuntimeExecuteResponse, "stdinBytes" | "stdinSha256"> {
@@ -367,13 +399,21 @@ export async function handleRuntimeExecute(
 
   const stdinMetadata = buildStdinMetadata(request.stdin);
   const quotingWarnings = detectQuotingWarnings(request);
+  const serverInfo = getServerInfo();
   const augmentResponse = <T extends RuntimeExecuteResponse>(
     response: T,
-  ): T => ({
-    ...response,
-    ...stdinMetadata,
-    ...(quotingWarnings ? { quotingWarnings } : {}),
-  });
+  ): T => {
+    const nextAction = buildRuntimeNextAction(response);
+    return {
+      ...response,
+      ...stdinMetadata,
+      ...(quotingWarnings ? { quotingWarnings } : {}),
+      ...(serverInfo.driftWarnings.length > 0
+        ? { serverDriftWarnings: serverInfo.driftWarnings }
+        : {}),
+      ...(nextAction ? { nextAction } : {}),
+    };
+  };
   const finish = <T extends RuntimeExecuteResponse>(response: T): T => {
     const augmented = augmentResponse(response);
     return request.includeDiagnostics
@@ -536,6 +576,60 @@ export async function handleRuntimeExecute(
     const requiredKeys = getRuntimeRequiredEnvKeys(request.runtime);
     const env = buildScrubbedEnv(runtimeConfig.envAllowlist, requiredKeys);
 
+    const persistRuntimeArtifact = async (
+      result: Awaited<ReturnType<typeof execute>>,
+      phase: "compile" | "execute",
+    ): Promise<string | null> => {
+      if (
+        !request.persistOutput ||
+        (result.stdout.length === 0 && result.stderr.length === 0)
+      ) {
+        return null;
+      }
+
+      try {
+        const artifactStartedAt = timer.start();
+        const argsHash = hashContent(
+          JSON.stringify({ runtime: request.runtime, args: request.args, phase }),
+        );
+        const artifactResult = await writeArtifact({
+          repoId: request.repoId,
+          runtime: request.runtime,
+          phase,
+          argsHash,
+          relativeCwd: request.relativeCwd,
+          outputMode: request.outputMode,
+          serverVersion: serverInfo.version,
+          commandSummary: summarizeCommand(
+            cmd.executable,
+            cmd.args,
+            Boolean(request.code),
+            request.stdin !== undefined,
+          ),
+          exitCode: result.exitCode,
+          signal: result.signal,
+          durationMs: result.durationMs,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          policyAuditHash: policyDecision.auditHash,
+          artifactTtlHours: runtimeConfig.artifactTtlHours,
+          maxArtifactBytes: runtimeConfig.maxArtifactBytes,
+          artifactBaseDir: runtimeConfig.artifactBaseDir,
+          redactionConfig: appConfig.redaction,
+        });
+        timer.record("runtime.persistArtifact", artifactStartedAt);
+        return artifactResult.artifactHandle;
+      } catch (err) {
+        logger.error("Failed to persist runtime artifact", {
+          error: String(err),
+          repoId: request.repoId,
+          phase,
+        });
+        return null;
+      }
+    };
+
+
     // 8b. Compile-then-execute orchestration
     const COMPILE_MIN_EXEC_BUDGET_MS = 1000;
     let effectiveTimeoutMs = timeoutMs;
@@ -564,6 +658,11 @@ export async function handleRuntimeExecute(
         const compileRawTokens = Math.ceil(
           (compileResult.totalStdoutBytes + compileResult.totalStderrBytes) / 4,
         );
+        const artifactHandle = await persistRuntimeArtifact(
+          compileResult,
+          "compile",
+        );
+
 
         logRuntimeExecution({
           repoId: request.repoId,
@@ -576,19 +675,13 @@ export async function handleRuntimeExecute(
           timedOut: compileResult.status === "timeout",
           policyDecision: policyDecision.decision,
           auditHash: policyDecision.auditHash,
-          artifactHandle: null,
+          artifactHandle,
           diagnostics: request.includeDiagnostics
             ? timer.snapshot()
             : undefined,
         });
 
         if (request.outputMode === "minimal") {
-          const stdoutLineCount = compileStdout
-            ? compileStdout.split("\n").length
-            : 0;
-          const stderrLineCount = compileStderr
-            ? compileStderr.split("\n").length
-            : 0;
           return finish(
             attachRawContext(
               {
@@ -597,13 +690,8 @@ export async function handleRuntimeExecute(
                 signal: compileResult.signal,
                 durationMs: compileResult.durationMs,
                 stdoutSummary: "",
-                stdoutPreview: buildStdoutPreview(compileStdout),
-                stderrSummary: compileStderr ? compileStderr.slice(0, 200) : "",
-                outputLines: stdoutLineCount + stderrLineCount,
-                outputBytes:
-                  compileResult.totalStdoutBytes +
-                  compileResult.totalStderrBytes,
-                artifactHandle: null,
+                stderrSummary: "",
+                artifactHandle,
                 truncation: {
                   stdoutTruncated: compileResult.stdoutTruncated,
                   stderrTruncated: compileResult.stderrTruncated,
@@ -639,7 +727,7 @@ export async function handleRuntimeExecute(
                 durationMs: compileResult.durationMs,
                 stdoutSummary: "",
                 stderrSummary: "",
-                artifactHandle: null,
+                artifactHandle,
                 excerpts: excerpts.length > 0 ? excerpts : undefined,
                 truncation: {
                   stdoutTruncated: compileResult.stdoutTruncated,
@@ -672,7 +760,7 @@ export async function handleRuntimeExecute(
               durationMs: compileResult.durationMs,
               stdoutSummary,
               stderrSummary,
-              artifactHandle: null,
+              artifactHandle,
               excerpts: excerpts.length > 0 ? excerpts : undefined,
               truncation: {
                 stdoutTruncated: compileResult.stdoutTruncated,
@@ -754,39 +842,7 @@ export async function handleRuntimeExecute(
     timer.record("runtime.decodeOutput", decodeStartedAt);
 
     // 11. Persist artifact (all modes)
-    let artifactHandle: string | null = null;
-    if (
-      request.persistOutput &&
-      (result.stdout.length > 0 || result.stderr.length > 0)
-    ) {
-      try {
-        const artifactStartedAt = timer.start();
-        const argsHash = hashContent(JSON.stringify(request.args));
-        const artifactResult = await writeArtifact({
-          repoId: request.repoId,
-          runtime: request.runtime,
-          argsHash,
-          exitCode: result.exitCode,
-          signal: result.signal,
-          durationMs: result.durationMs,
-          stdout: result.stdout,
-          stderr: result.stderr,
-          policyAuditHash: policyDecision.auditHash,
-          artifactTtlHours: runtimeConfig.artifactTtlHours,
-          maxArtifactBytes: runtimeConfig.maxArtifactBytes,
-          artifactBaseDir: runtimeConfig.artifactBaseDir,
-          redactionConfig: appConfig.redaction,
-        });
-        artifactHandle = artifactResult.artifactHandle;
-        timer.record("runtime.persistArtifact", artifactStartedAt);
-      } catch (err) {
-        logger.error("Failed to persist runtime artifact", {
-          error: String(err),
-          repoId: request.repoId,
-        });
-        // Continue without artifact — don't fail the entire request
-      }
-    }
+    const artifactHandle = await persistRuntimeArtifact(result, "execute");
 
     // 12. Compute raw token equivalent
     const rawOutputTokens = Math.ceil(
@@ -795,8 +851,6 @@ export async function handleRuntimeExecute(
 
     // 13. Branch on outputMode
     if (request.outputMode === "minimal") {
-      const stdoutLineCount = stdoutStr ? stdoutStr.split("\n").length : 0;
-      const stderrLineCount = stderrStr ? stderrStr.split("\n").length : 0;
       logRuntimeExecution({
         repoId: request.repoId,
         runtime: request.runtime,
@@ -811,52 +865,28 @@ export async function handleRuntimeExecute(
         artifactHandle,
         diagnostics: request.includeDiagnostics ? timer.snapshot() : undefined,
       });
-      const isSmallOutput =
-        !result.stdoutTruncated &&
-        !result.stderrTruncated &&
-        result.totalStdoutBytes + result.totalStderrBytes < 4096;
-      const minimalBase = {
-        status: result.status,
-        exitCode: result.exitCode,
-        signal: result.signal,
-        durationMs: result.durationMs,
-        stdoutSummary: "",
-        stdoutPreview: buildStdoutPreview(stdoutStr),
-        stderrSummary: stderrStr ? stderrStr.slice(0, 200) : "",
-        outputLines: stdoutLineCount + stderrLineCount,
-        outputBytes: result.totalStdoutBytes + result.totalStderrBytes,
-        artifactHandle,
-        truncation: {
-          stdoutTruncated: result.stdoutTruncated,
-          stderrTruncated: result.stderrTruncated,
-          totalStdoutBytes: result.totalStdoutBytes,
-          totalStderrBytes: result.totalStderrBytes,
-        },
-        policyDecision: {
-          auditHash: policyDecision.auditHash,
-        },
-      };
-      // For small, non-truncated output, omit empty/zero fields to reduce token overhead
-      // while keeping the shape schema-compliant
-      if (isSmallOutput) {
-        const compact = {
-          status: minimalBase.status,
-          exitCode: minimalBase.exitCode,
-          signal: minimalBase.signal,
-          durationMs: minimalBase.durationMs,
-          stdoutSummary: "",
-          stdoutPreview: minimalBase.stdoutPreview,
-          stderrSummary: minimalBase.stderrSummary,
-          artifactHandle,
-          truncation: minimalBase.truncation,
-          policyDecision: minimalBase.policyDecision,
-        };
-        return finish(
-          attachRawContext(compact, { rawTokens: rawOutputTokens }),
-        );
-      }
       return finish(
-        attachRawContext(minimalBase, { rawTokens: rawOutputTokens }),
+        attachRawContext(
+          {
+            status: result.status,
+            exitCode: result.exitCode,
+            signal: result.signal,
+            durationMs: result.durationMs,
+            stdoutSummary: "",
+            stderrSummary: "",
+            artifactHandle,
+            truncation: {
+              stdoutTruncated: result.stdoutTruncated,
+              stderrTruncated: result.stderrTruncated,
+              totalStdoutBytes: result.totalStdoutBytes,
+              totalStderrBytes: result.totalStderrBytes,
+            },
+            policyDecision: {
+              auditHash: policyDecision.auditHash,
+            },
+          },
+          { rawTokens: rawOutputTokens },
+        ),
       );
     }
 

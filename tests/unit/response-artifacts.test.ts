@@ -98,6 +98,51 @@ describe("response artifact storage", () => {
     assert.deepStrictEqual(read.content, payload);
   });
 
+  it("extracts JSON paths without returning an invalid partial JSON string", async () => {
+    const baseDir = makeTempDir();
+    const payload = {
+      finalEvidence: [
+        { reference: "symbol:alpha", summary: "alpha" },
+        { reference: "symbol:target", summary: "target" },
+      ],
+      padding: "x".repeat(5000),
+    };
+
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "sdl.context",
+      payload,
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+      entropy: () => "abcdefabcdefabcd",
+    });
+
+    assert.strictEqual(stored.responseMode, "handle");
+    assert.equal(
+      ResponseGetRequestSchema.parse({
+        repoId: "repo-a",
+        handle: stored.payload.handle,
+        jsonPath: "finalEvidence.1",
+      }).jsonPath,
+      "finalEvidence.1",
+    );
+
+    const read = await readResponseArtifact({
+      repoId: "repo-a",
+      handle: stored.payload.handle,
+      artifactBaseDir: baseDir,
+      jsonPath: "finalEvidence.1",
+      maxBytes: 12,
+    });
+
+    assert.deepStrictEqual(read.content, {
+      reference: "symbol:target",
+      summary: "target",
+    });
+    assert.equal(read.full, false);
+    assert.equal(read.truncated, false);
+  });
+
   it("stores automatically only when the estimated token threshold is exceeded", async () => {
     const baseDir = makeTempDir();
 

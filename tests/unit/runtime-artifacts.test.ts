@@ -9,6 +9,7 @@ import {
   getArtifactBaseDir,
   applyRedaction,
   writeArtifact,
+  queryArtifactContent,
   sweepExpiredArtifacts,
   readArtifactManifest,
 } from "../../dist/runtime/artifacts.js";
@@ -376,5 +377,72 @@ describe("readArtifactManifest", () => {
     assert.strictEqual(result.artifactId, handle);
     assert.strictEqual(result.repoId, "test");
     assert.strictEqual(result.exitCode, 0);
+  });
+});
+
+describe("queryArtifactContent trust metadata", () => {
+  async function writeSearchArtifact(stdout: string, stderr = "") {
+    const baseDir = makeTempDir();
+    const artifact = await writeArtifact({
+      repoId: "search-repo",
+      runtime: "node",
+      argsHash: "args",
+      exitCode: 1,
+      signal: null,
+      durationMs: 10,
+      stdout: Buffer.from(stdout, "utf8"),
+      stderr: Buffer.from(stderr, "utf8"),
+      policyAuditHash: "audit",
+      artifactTtlHours: 1,
+      maxArtifactBytes: 1024 * 1024,
+      artifactBaseDir: baseDir,
+    });
+    return { baseDir, handle: artifact.artifactHandle };
+  }
+
+  it("queryArtifactContent reports match metadata", async () => {
+    const { baseDir, handle } = await writeSearchArtifact(
+      "alpha\nneedle one\nmiddle\nneedle two\nomega",
+    );
+
+    const result = await queryArtifactContent(handle, ["needle"], {
+      baseDir,
+      stream: "stdout",
+      maxExcerpts: 1,
+      contextLines: 0,
+    });
+
+    assert.strictEqual(result.matchStatus, "matched");
+    assert.strictEqual(result.matchCount, 2);
+    assert.deepStrictEqual(result.nextCursor, { stream: "stdout", afterLine: 2 });
+    assert.strictEqual(result.excerpts.length, 1);
+  });
+
+  it("queryArtifactContent labels fallback excerpts when no terms match", async () => {
+    const { baseDir, handle } = await writeSearchArtifact("alpha\nbeta\ngamma");
+
+    const result = await queryArtifactContent(handle, ["missing"], {
+      baseDir,
+      stream: "stdout",
+      maxExcerpts: 2,
+      contextLines: 0,
+    });
+
+    assert.strictEqual(result.matchStatus, "noMatchFallback");
+    assert.strictEqual(result.matchCount, 0);
+    assert.strictEqual(result.excerpts[0]?.content, "alpha\nbeta");
+  });
+
+  it("queryArtifactContent can read an exact line range without query terms", async () => {
+    const { baseDir, handle } = await writeSearchArtifact("one\ntwo\nthree\nfour");
+
+    const result = await queryArtifactContent(handle, [], {
+      baseDir,
+      lineRange: { stream: "stdout", startLine: 2, endLine: 3 },
+    });
+
+    assert.strictEqual(result.matchStatus, "lineRange");
+    assert.strictEqual(result.matchCount, 0);
+    assert.strictEqual(result.excerpts[0]?.content, "two\nthree");
   });
 });

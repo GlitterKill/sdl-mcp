@@ -29,3 +29,12 @@ describe("runtime identity formatting", () => {
     );
   });
 });
+
+it("getServerInfo exposes version and optional drift warnings", async () => {
+  const { getServerInfo } = await import("../../dist/util/runtime-identity.js");
+  const info = getServerInfo();
+
+  assert.strictEqual(typeof info.version, "string");
+  assert.strictEqual(typeof info.startedAt, "string");
+  assert.ok(Array.isArray(info.driftWarnings));
+});

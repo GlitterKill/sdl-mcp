@@ -83,7 +83,7 @@ describe("runtime minimal mode compact response", () => {
     }
   });
 
-  it("strips outputLines and outputBytes for small non-truncated output in minimal mode", async () => {
+  it("omits output content fields for small non-truncated output in minimal mode", async () => {
     const { handleRuntimeExecute } =
       await import("../../dist/mcp/tools/runtime.js");
 
@@ -96,9 +96,12 @@ describe("runtime minimal mode compact response", () => {
     });
 
     assert.strictEqual(result.status, "success");
-    assert.ok(
-      result.stdoutPreview?.includes("hello"),
-      "stdoutPreview should contain output",
+    assert.strictEqual(result.stdoutSummary, "");
+    assert.strictEqual(result.stderrSummary, "");
+    assert.strictEqual(
+      result.stdoutPreview,
+      undefined,
+      "minimal mode should not inline stdout content",
     );
     // Small output should NOT have outputLines/outputBytes
     assert.strictEqual(
@@ -149,7 +152,7 @@ describe("runtime minimal mode compact response", () => {
     assert.ok("stdoutSummary" in result, "stdoutSummary should be present");
   });
 
-  it("still includes policyDecision and stdoutPreview in compact minimal mode", async () => {
+  it("still includes policyDecision without stdoutPreview in compact minimal mode", async () => {
     const { handleRuntimeExecute } =
       await import("../../dist/mcp/tools/runtime.js");
 
@@ -167,9 +170,10 @@ describe("runtime minimal mode compact response", () => {
       result.policyDecision.auditHash,
       "auditHash must always be present",
     );
-    assert.ok(
-      result.stdoutPreview !== undefined,
-      "stdoutPreview must always be present",
+    assert.strictEqual(
+      result.stdoutPreview,
+      undefined,
+      "stdoutPreview should stay out of minimal responses",
     );
   });
 });

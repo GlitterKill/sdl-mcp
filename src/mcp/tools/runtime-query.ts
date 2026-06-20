@@ -25,13 +25,22 @@ export async function handleRuntimeQueryOutput(
   const appConfig = loadConfig();
   const runtimeConfig = RuntimeConfigSchema.parse(appConfig.runtime ?? {});
 
-  const { excerpts, totalLines, totalBytes, searchedStreams } =
-    await queryArtifactContent(request.artifactHandle, request.queryTerms, {
-      baseDir: runtimeConfig.artifactBaseDir,
-      maxExcerpts: request.maxExcerpts,
-      contextLines: request.contextLines,
-      stream: request.stream,
-    });
+  const {
+    excerpts,
+    totalLines,
+    totalBytes,
+    searchedStreams,
+    matchStatus,
+    matchCount,
+    nextCursor,
+  } = await queryArtifactContent(request.artifactHandle, request.queryTerms, {
+    baseDir: runtimeConfig.artifactBaseDir,
+    maxExcerpts: request.maxExcerpts,
+    contextLines: request.contextLines,
+    stream: request.stream,
+    cursor: request.cursor,
+    lineRange: request.lineRange,
+  });
 
   logger.debug("runtime.queryOutput completed", {
     artifactHandle: request.artifactHandle,
@@ -39,6 +48,8 @@ export async function handleRuntimeQueryOutput(
     excerptCount: excerpts.length,
     totalLines,
     totalBytes,
+    matchStatus,
+    matchCount,
   });
 
   const response: RuntimeQueryOutputResponse = {
@@ -47,6 +58,9 @@ export async function handleRuntimeQueryOutput(
     totalLines,
     totalBytes,
     searchedStreams,
+    matchStatus,
+    matchCount,
+    ...(nextCursor ? { nextCursor } : {}),
   };
 
   // Raw equivalent = what it would cost to read the full artifact

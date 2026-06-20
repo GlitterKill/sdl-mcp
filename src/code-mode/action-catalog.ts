@@ -587,6 +587,7 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   },
   "response.get": {
     handle: "response-myrepo-1770000000000-0123456789abcdef",
+    jsonPath: "finalEvidence.0",
     maxBytes: 8192,
   },
   "memory.store": {

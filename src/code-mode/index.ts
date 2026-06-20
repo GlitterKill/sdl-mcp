@@ -11,6 +11,8 @@ import {
 } from "../mcp/tools/file-gateway.js";
 import type { MCPServer, ToolContext } from "../server.js";
 import { estimateTokens } from "../util/tokenize.js";
+import { getServerInfo } from "../util/runtime-identity.js";
+
 import {
   buildCatalog,
   rankCatalog,
@@ -254,10 +256,10 @@ export function handleManual(
   } else if (args.query) {
     catalog = rankCatalog(fullCatalog, args.query);
   }
-
   if (format === "json") {
     return {
       actions: catalog,
+      serverInfo: getServerInfo(),
       tokenEstimate: estimateTokens(JSON.stringify(catalog)),
     };
   }

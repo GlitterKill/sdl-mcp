@@ -534,7 +534,13 @@ export class ContextEngine {
       // response before broader lexical/semantic seeding. This preserves the
       // intended symbol for prompts like "explain handleSymbolSearch" even
       // when hybrid retrieval finds many related SymbolSearch types first.
-      if (!hasExplicitScope && task.taskText) {
+      const hasExplicitExactSeed = !!(
+        task.options?.focusSymbols?.length || task.options?.chatMentions?.length
+      );
+      const shouldSeedExactSymbols = !!(
+        (!hasExplicitScope && task.taskText) || hasExplicitExactSeed
+      );
+      if (shouldSeedExactSymbols) {
         const exactStartedAt = performance.now();
         try {
           const exactRefs = await this.seedExactMentionedSymbols(task);
@@ -1291,6 +1297,9 @@ export class ContextEngine {
     );
     const candidates = [
       ...new Set([
+        ...(task.options?.focusSymbols ?? []).filter((mention) =>
+          /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(mention),
+        ),
         ...(task.options?.chatMentions ?? []).filter((mention) =>
           /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(mention),
         ),

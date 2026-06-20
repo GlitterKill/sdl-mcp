@@ -420,6 +420,7 @@ export interface CodeWindowRequest {
 
 export interface CodeWindowResponseApproved {
   approved: true;
+  status?: "approvedRaw" | "downgraded";
   repoId?: RepoId;
   symbolId: SymbolId;
   file: string;
@@ -432,6 +433,7 @@ export interface CodeWindowResponseApproved {
 
 export interface CodeWindowResponseDenied {
   approved: false;
+  status?: "denied";
   whyDenied: string[];
   suggestedNextRequest?: Partial<CodeWindowRequest>;
   nextBestAction?: NextBestActionCallable;

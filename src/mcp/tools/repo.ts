@@ -25,6 +25,8 @@ import { normalizePath } from "../../util/paths.js";
 import { DatabaseError, ConfigError, ValidationError } from "../errors.js";
 import { logger } from "../../util/logger.js";
 import { loadConfig } from "../../config/loadConfig.js";
+import { getServerInfo } from "../../util/runtime-identity.js";
+
 import { MAX_FILE_BYTES } from "../../config/constants.js";
 import { buildRepoOverview, clearOverviewCache } from "../../graph/overview.js";
 import { clearSliceCache } from "../../graph/sliceCache.js";
@@ -697,6 +699,7 @@ export async function handleRepoStatus(
       liveIndexStatus,
       memories,
       derivedState: derivedState ?? undefined,
+      serverInfo: getServerInfo(),
     };
   };
 

@@ -232,8 +232,14 @@ async function finalizeCodeNeedWindowResponse(
   response: Extract<CodeNeedWindowResponse, { approved: true }>,
   fileId: string,
 ): Promise<CodeNeedWindowResponse> {
+  const responseWithStatus = {
+    ...response,
+    status: response.downgradedFrom
+      ? ("downgraded" as const)
+      : ("approvedRaw" as const),
+  };
   const rawContext = { fileIds: [fileId] };
-  let enriched = attachRawContext(response, rawContext);
+  let enriched = attachRawContext(responseWithStatus, rawContext);
   recordRawWindowAvoidance(request, response.downgradedFrom === "raw-code");
 
   if (request.deltaMode === "auto") {
@@ -272,7 +278,7 @@ async function finalizeCodeNeedWindowResponse(
     if (deltaResult.metadata.deltaApplied && deltaResult.delta) {
       enriched = attachRawContext(
         {
-          ...response,
+          ...responseWithStatus,
           code: "",
           sessionDelta: deltaResult.metadata,
           delta: deltaResult.delta,
@@ -496,6 +502,7 @@ export async function handleCodeNeedWindow(
 
     return {
       approved: false,
+      status: "denied",
       whyDenied: policyDecision.deniedReasons ?? ["Policy denied request"],
       suggestedNextRequest,
       nextBestAction: policyAction,
@@ -946,6 +953,7 @@ export async function handleCodeNeedWindow(
 
     return {
       approved: false,
+      status: "denied",
       whyDenied: gateResult.whyDenied,
       suggestedNextRequest: gateResult.suggestedNextRequest,
       nextBestAction: gateResult.nextBestAction,

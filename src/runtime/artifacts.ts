@@ -32,7 +32,12 @@ async function maybeSweepExpired(baseDir?: string | null): Promise<void> {
 interface WriteArtifactOptions {
   repoId: string;
   runtime: string;
+  phase?: "compile" | "execute";
   argsHash: string;
+  relativeCwd?: string;
+  outputMode?: string;
+  serverVersion?: string;
+  commandSummary?: string;
   exitCode: number | null;
   signal: string | null;
   durationMs: number;
@@ -154,7 +159,12 @@ export async function writeArtifact(
     artifactId,
     repoId: opts.repoId,
     runtime: opts.runtime,
+    ...(opts.phase ? { phase: opts.phase } : {}),
     argsHash: opts.argsHash,
+    ...(opts.relativeCwd ? { relativeCwd: opts.relativeCwd } : {}),
+    ...(opts.outputMode ? { outputMode: opts.outputMode } : {}),
+    ...(opts.serverVersion ? { serverVersion: opts.serverVersion } : {}),
+    ...(opts.commandSummary ? { commandSummary: opts.commandSummary } : {}),
     exitCode: opts.exitCode,
     signal: opts.signal,
     durationMs: opts.durationMs,
@@ -412,6 +422,34 @@ export async function readArtifactContent(
   return { stdout, stderr, totalBytes };
 }
 
+export interface QueryArtifactCursor {
+  stream: "stdout" | "stderr";
+  afterLine: number;
+}
+
+export interface QueryArtifactLineRange {
+  stream: "stdout" | "stderr";
+  startLine: number;
+  endLine: number;
+}
+
+export interface QueryArtifactExcerpt {
+  lineStart: number;
+  lineEnd: number;
+  content: string;
+  source: "stdout" | "stderr";
+}
+
+export interface QueryArtifactContentResult {
+  excerpts: QueryArtifactExcerpt[];
+  totalLines: number;
+  totalBytes: number;
+  searchedStreams: Array<"stdout" | "stderr">;
+  matchStatus: "matched" | "noMatchFallback" | "lineRange";
+  matchCount: number;
+  nextCursor?: QueryArtifactCursor;
+}
+
 /**
  * Search artifact content for query terms and return focused excerpts.
  */
@@ -424,22 +462,15 @@ export async function queryArtifactContent(
     contextLines?: number;
     stream?: "stdout" | "stderr" | "both";
     maxLineLength?: number;
+    cursor?: QueryArtifactCursor;
+    lineRange?: QueryArtifactLineRange;
   } = {},
-): Promise<{
-  excerpts: Array<{
-    lineStart: number;
-    lineEnd: number;
-    content: string;
-    source: "stdout" | "stderr";
-  }>;
-  totalLines: number;
-  totalBytes: number;
-  searchedStreams: Array<"stdout" | "stderr">;
-}> {
+): Promise<QueryArtifactContentResult> {
   const maxExcerpts = options.maxExcerpts ?? 10;
   const contextLines = options.contextLines ?? 3;
   const maxLineLength = options.maxLineLength ?? 500;
-  const streamFilter = options.stream ?? "both";
+  const streamFilter =
+    options.lineRange?.stream ?? options.cursor?.stream ?? options.stream ?? "both";
 
   const { stdout, stderr, totalBytes } = await readArtifactContent(
     artifactHandle,
@@ -447,15 +478,13 @@ export async function queryArtifactContent(
     streamFilter,
   );
 
-  const excerpts: Array<{
-    lineStart: number;
-    lineEnd: number;
-    content: string;
-    source: "stdout" | "stderr";
-  }> = [];
+  const excerpts: QueryArtifactExcerpt[] = [];
   const lowerTerms = queryTerms.map((t) => t.toLowerCase());
   const searchedStreams: Array<"stdout" | "stderr"> = [];
   let totalLines = 0;
+  let matchCount = 0;
+  let emittedMatchCount = 0;
+  let nextCursor: QueryArtifactCursor | undefined;
 
   const truncLine = (line: string): string => {
     if (line.length <= maxLineLength) return line;
@@ -467,20 +496,82 @@ export async function queryArtifactContent(
     );
   };
 
+  const addStreamTotals = (
+    content: string | null,
+    source: "stdout" | "stderr",
+  ): string[] | null => {
+    if (content === null) return null;
+    searchedStreams.push(source);
+    const lines = content.split("\n");
+    totalLines += lines.length;
+    return lines;
+  };
+
+  if (options.lineRange) {
+    const content = options.lineRange.stream === "stdout" ? stdout : stderr;
+    const lines = addStreamTotals(content, options.lineRange.stream);
+    if (!lines) {
+      return {
+        excerpts,
+        totalLines,
+        totalBytes,
+        searchedStreams,
+        matchStatus: "lineRange",
+        matchCount: 0,
+      };
+    }
+
+    const start = Math.max(1, options.lineRange.startLine);
+    const end = Math.min(lines.length, options.lineRange.endLine);
+    if (start <= end) {
+      excerpts.push({
+        lineStart: start,
+        lineEnd: end,
+        content: lines
+          .slice(start - 1, end)
+          .map(truncLine)
+          .join("\n"),
+        source: options.lineRange.stream,
+      });
+    }
+
+    return {
+      excerpts,
+      totalLines,
+      totalBytes,
+      searchedStreams,
+      matchStatus: "lineRange",
+      matchCount: 0,
+    };
+  }
+
   const searchStream = (
     content: string | null,
     source: "stdout" | "stderr",
   ) => {
-    if (!content) return;
-    searchedStreams.push(source);
-    const lines = content.split("\n");
-    totalLines += lines.length;
+    const lines = addStreamTotals(content, source);
+    if (!lines || lowerTerms.length === 0) return;
 
-    for (let i = 0; i < lines.length && excerpts.length < maxExcerpts; i++) {
+    const afterLine =
+      options.cursor?.stream === source ? options.cursor.afterLine : 0;
+    const matchLines: number[] = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      const lineNumber = i + 1;
+      if (lineNumber <= afterLine) continue;
       const lower = lines[i].toLowerCase();
       if (lowerTerms.some((t) => lower.includes(t))) {
-        const start = Math.max(0, i - contextLines);
-        const end = Math.min(lines.length - 1, i + contextLines);
+        matchLines.push(lineNumber);
+      }
+    }
+    matchCount += matchLines.length;
+
+    let coveredThrough = 0;
+    for (const lineNumber of matchLines) {
+      if (lineNumber <= coveredThrough) continue;
+      if (excerpts.length < maxExcerpts) {
+        const lineIndex = lineNumber - 1;
+        const start = Math.max(0, lineIndex - contextLines);
+        const end = Math.min(lines.length - 1, lineIndex + contextLines);
         excerpts.push({
           lineStart: start + 1,
           lineEnd: end + 1,
@@ -490,7 +581,9 @@ export async function queryArtifactContent(
             .join("\n"),
           source,
         });
-        i = end;
+        emittedMatchCount += 1;
+        nextCursor = { stream: source, afterLine: lineNumber };
+        coveredThrough = end + 1;
       }
     }
   };
@@ -498,13 +591,12 @@ export async function queryArtifactContent(
   searchStream(stdout, "stdout");
   searchStream(stderr, "stderr");
 
-  // Fallback: if no keyword matches found, return first lines of output
   if (excerpts.length === 0) {
     const fallbackStream = (
       streamContent: string | null,
       source: "stdout" | "stderr",
     ): void => {
-      if (!streamContent) return;
+      if (streamContent === null) return;
       const lines = streamContent.split("\n");
       if (lines.length === 0 || (lines.length === 1 && lines[0] === "")) return;
       const end = Math.min(lines.length - 1, maxExcerpts - 1);
@@ -522,5 +614,13 @@ export async function queryArtifactContent(
     if (excerpts.length === 0) fallbackStream(stderr, "stderr");
   }
 
-  return { excerpts, totalLines, totalBytes, searchedStreams };
+  return {
+    excerpts,
+    totalLines,
+    totalBytes,
+    searchedStreams,
+    matchStatus: matchCount > 0 ? "matched" : "noMatchFallback",
+    matchCount,
+    ...(matchCount > emittedMatchCount && nextCursor ? { nextCursor } : {}),
+  };
 }

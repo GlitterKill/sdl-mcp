@@ -163,11 +163,11 @@ function bufferCheckpoint(): { checkpointed: boolean }
 /** Get buffer status */
 function bufferStatus(): { status: object }
 /** Execute runtime command; pass stdin for multiline scripts/input instead of quote-heavy shell payloads */
-function runtimeExecute(p: { runtime: string; executable?: string; args?: string[]; code?: string; stdin?: string; relativeCwd?: string; timeoutMs?: number; queryTerms?: string[]; maxResponseLines?: number; persistOutput?: boolean; outputMode?: "minimal"|"summary"|"intent" }): { status: string; exitCode: number; durationMs: number; artifactHandle?: string; stdoutSummary?: string; stdinBytes?: number; stdinSha256?: string; quotingWarnings?: string[] }
-/** Query stored runtime output by keywords */
-function runtimeQueryOutput(p: { artifactHandle: string; queryTerms: string[]; maxExcerpts?: number; contextLines?: number; stream?: "stdout"|"stderr"|"both" }): { excerpts: object[] }
+function runtimeExecute(p: { runtime: string; executable?: string; args?: string[]; code?: string; stdin?: string; relativeCwd?: string; timeoutMs?: number; queryTerms?: string[]; maxResponseLines?: number; persistOutput?: boolean; outputMode?: "minimal"|"summary"|"intent" }): { status: string; exitCode: number; durationMs: number; artifactHandle?: string; stdoutSummary?: string; stdinBytes?: number; stdinSha256?: string; quotingWarnings?: string[]; serverDriftWarnings?: string[]; nextAction?: object }
+/** Query stored runtime output by keywords or exact line range */
+function runtimeQueryOutput(p: { artifactHandle: string; queryTerms?: string[]; cursor?: { stream: "stdout"|"stderr"; afterLine: number }; lineRange?: { stream: "stdout"|"stderr"; startLine: number; endLine: number }; maxExcerpts?: number; contextLines?: number; stream?: "stdout"|"stderr"|"both" }): { excerpts: object[]; matchStatus: "matched"|"noMatchFallback"|"lineRange"; matchCount: number; nextCursor?: object }
 /** Retrieve a large tool response by handle */
-function responseGet(p: { handle: string; full?: boolean; maxBytes?: number; maxTokens?: number; offsetBytes?: number }): { content: unknown; truncated: boolean; metadata: object }
+function responseGet(p: { handle: string; full?: boolean; maxBytes?: number; maxTokens?: number; offsetBytes?: number; jsonPath?: string }): { content: unknown; truncated: boolean; metadata: object }
 
 // === Usage ===
 /** Get cumulative token savings statistics */

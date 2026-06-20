@@ -102,7 +102,12 @@ export interface ArtifactManifest {
   artifactId: string;
   repoId: string;
   runtime: string;
+  phase?: "compile" | "execute";
   argsHash: string;
+  relativeCwd?: string;
+  outputMode?: string;
+  serverVersion?: string;
+  commandSummary?: string;
   exitCode: number | null;
   signal: string | null;
   durationMs: number;

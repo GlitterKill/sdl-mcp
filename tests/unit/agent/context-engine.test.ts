@@ -871,6 +871,58 @@ describe("ContextEngine", () => {
     assert.deepEqual(capturedContext, ["symbol:exact-handleSymbolSearch"]);
   });
 
+  it("lets explicit focus symbols override broader selected context in precise mode", async () => {
+    const seedContextMock = mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async () => {
+        throw new Error("hybrid seeding should be skipped");
+      },
+    );
+    const exactSeedMock = mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedExactMentionedSymbols",
+      async () => ["symbol:exact-handleRuntimeExecute"],
+    );
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => [
+      "symbol:related-truncateLine",
+      "symbol:related-loadConfig",
+    ]);
+
+    let capturedContext: string[] = [];
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task: unknown, _rungs: unknown, context: string[]) => {
+        capturedContext = context;
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        taskType: "debug",
+        taskText:
+          "Find handleRuntimeExecute in src/mcp/tools/runtime.ts and explain artifactHandle",
+        options: {
+          contextMode: "precise",
+          focusPaths: ["src/mcp/tools/runtime.ts"],
+          focusSymbols: ["handleRuntimeExecute"],
+        },
+      }),
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(exactSeedMock.mock.callCount(), 1);
+    assert.equal(seedContextMock.mock.callCount(), 0);
+    assert.deepEqual(capturedContext, ["symbol:exact-handleRuntimeExecute"]);
+  });
+
   it("lets forced semantic precise mode merge exact and semantic seeds", async () => {
     const seedContextMock = mock.method(
       ContextEngine.prototype as Record<string, unknown>,

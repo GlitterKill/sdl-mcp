@@ -749,6 +749,16 @@ export const RepoStatusResponseSchema = z.object({
       nextBestAction: z.string().optional(),
     })
     .optional(),
+  serverInfo: z
+    .object({
+      version: z.string(),
+      node: z.string(),
+      startedAt: z.string(),
+      modulePath: z.string().optional(),
+      driftWarnings: z.array(z.string()),
+    })
+    .optional(),
+
 });
 
 export const IndexRefreshRequestSchema = z.object({
@@ -1681,6 +1691,7 @@ export const CodeNeedWindowRequestSchema = z.object({
 
 const CodeWindowResponseApprovedSchema = z.object({
   approved: z.literal(true),
+  status: z.enum(["approvedRaw", "downgraded"]).optional(),
   repoId: z.string().optional(),
   symbolId: z.string(),
   file: z.string(),
@@ -1720,6 +1731,7 @@ const CodeWindowResponseApprovedSchema = z.object({
 
 const CodeWindowResponseDeniedSchema = z.object({
   approved: z.literal(false),
+  status: z.literal("denied").optional(),
   whyDenied: z.array(z.string()),
   suggestedNextRequest: CodeWindowRequestSchema.partial().optional(),
   nextBestAction: z
@@ -2731,12 +2743,21 @@ export const RuntimeExecuteResponseSchema = z.object({
   stdoutPreview: z
     .string()
     .optional()
-    .describe("First 3 lines / 200 chars of stdout (minimal mode only)"),
+    .describe("Deprecated; minimal mode no longer inlines stdout content"),
   stderrSummary: z.string().describe("Tail, truncated"),
   artifactHandle: z.string().nullable(),
   stdinBytes: z.number().int().nonnegative().optional(),
   stdinSha256: z.string().length(64).optional(),
   quotingWarnings: z.array(z.string()).optional(),
+  serverDriftWarnings: z.array(z.string()).optional(),
+  nextAction: z
+    .object({
+      kind: z.enum(["queryOutput", "increaseTimeout", "retry", "inspectPolicy"]),
+      message: z.string(),
+      action: z.string().optional(),
+      queryTerms: z.array(z.string()).optional(),
+    })
+    .optional(),
   excerpts: z
     .array(RuntimeExecuteExcerptSchema)
     .optional()
@@ -2764,41 +2785,81 @@ export type RuntimeExecuteResponse = z.infer<
 // Runtime Query Output Schemas
 // ============================================================================
 
-export const RuntimeQueryOutputRequestSchema = z.object({
-  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  artifactHandle: z
-    .string()
-    .min(1)
-    .max(256)
-    .regex(/^[A-Za-z0-9_-]+$/, {
-      message:
-        "artifactHandle must contain only alphanumerics, dashes, and underscores",
-    })
-    .describe("Artifact handle from a previous runtime.execute call"),
-  queryTerms: z
-    .array(z.string())
-    .min(1)
-    .max(RUNTIME_MAX_QUERY_TERMS)
-    .describe("Keywords to search for in stored output"),
-  maxExcerpts: z
-    .number()
-    .int()
-    .min(1)
-    .max(50)
-    .default(10)
-    .describe("Maximum number of excerpt windows to return"),
-  contextLines: z
-    .number()
-    .int()
-    .min(0)
-    .max(10)
-    .default(3)
-    .describe("Lines of context around each match"),
-  stream: z
-    .enum(["stdout", "stderr", "both"])
-    .default("both")
-    .describe("Which output stream(s) to search"),
+export const RuntimeQueryOutputCursorSchema = z.object({
+  stream: z.enum(["stdout", "stderr"]),
+  afterLine: z.number().int().min(0),
 });
+
+export const RuntimeQueryOutputLineRangeSchema = z
+  .object({
+    stream: z.enum(["stdout", "stderr"]),
+    startLine: z.number().int().min(1),
+    endLine: z.number().int().min(1),
+  })
+  .superRefine((val, ctx) => {
+    if (val.endLine < val.startLine) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["endLine"],
+        message: "endLine must be greater than or equal to startLine",
+      });
+    }
+  });
+
+export const RuntimeQueryOutputRequestSchema = z
+  .object({
+    repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+    artifactHandle: z
+      .string()
+      .min(1)
+      .max(256)
+      .regex(/^[A-Za-z0-9_-]+$/, {
+        message:
+          "artifactHandle must contain only alphanumerics, dashes, and underscores",
+      })
+      .describe("Artifact handle from a previous runtime.execute call"),
+    queryTerms: z
+      .array(z.string())
+      .max(RUNTIME_MAX_QUERY_TERMS)
+      .default([])
+      .describe("Keywords to search for in stored output"),
+    cursor: RuntimeQueryOutputCursorSchema.optional(),
+    lineRange: RuntimeQueryOutputLineRangeSchema.optional(),
+    maxExcerpts: z
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .default(10)
+      .describe("Maximum number of excerpt windows to return"),
+    contextLines: z
+      .number()
+      .int()
+      .min(0)
+      .max(10)
+      .default(3)
+      .describe("Lines of context around each match"),
+    stream: z
+      .enum(["stdout", "stderr", "both"])
+      .default("both")
+      .describe("Which output stream(s) to search"),
+  })
+  .superRefine((val, ctx) => {
+    if (val.queryTerms.length === 0 && !val.lineRange) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["queryTerms"],
+        message: "queryTerms are required unless lineRange is provided",
+      });
+    }
+    if (val.cursor && val.stream !== "both" && val.stream !== val.cursor.stream) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["stream"],
+        message: "stream must match cursor.stream when both are provided",
+      });
+    }
+  });
 
 export const RuntimeQueryOutputResponseSchema = z.object({
   artifactHandle: z.string(),
@@ -2806,6 +2867,9 @@ export const RuntimeQueryOutputResponseSchema = z.object({
   totalLines: z.number().int().describe("Total lines in stored output"),
   totalBytes: z.number().int().describe("Total bytes in stored output"),
   searchedStreams: z.array(z.enum(["stdout", "stderr"])),
+  matchStatus: z.enum(["matched", "noMatchFallback", "lineRange"]),
+  matchCount: z.number().int().nonnegative(),
+  nextCursor: RuntimeQueryOutputCursorSchema.optional(),
 });
 
 export type RuntimeQueryOutputRequest = z.infer<
@@ -2850,6 +2914,12 @@ export const ResponseGetRequestSchema = z.object({
     .min(0)
     .default(0)
     .describe("Byte offset for excerpt retrieval when full=false"),
+  jsonPath: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Dot-separated path to extract from JSON artifacts before byte slicing"),
 });
 
 export const ResponseGetResponseSchema = z.object({

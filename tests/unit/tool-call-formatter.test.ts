@@ -273,3 +273,25 @@ describe("formatToolCallForUser", () => {
     assert.ok(result.includes("3 items"));
   });
 });
+
+it("formats runtime.execute nextAction hints", () => {
+  const result = formatToolCallForUser("sdl.runtime.execute", {}, {
+    status: "failure",
+    exitCode: 1,
+    signal: null,
+    durationMs: 12,
+    artifactHandle: "runtime-sdl-mcp-123",
+    stdoutSummary: "",
+    stderrSummary: "",
+    truncation: { stdoutTruncated: false, stderrTruncated: false, totalStdoutBytes: 0, totalStderrBytes: 0 },
+    nextAction: {
+      kind: "queryOutput",
+      message: "Query the failure artifact",
+      args: { artifactHandle: "runtime-sdl-mcp-123", queryTerms: ["Error"] },
+    },
+  });
+
+  assert.ok(result !== null);
+  assert.ok(result.includes("next: Query the failure artifact"));
+  assert.ok(result.includes("runtime.queryOutput"));
+});

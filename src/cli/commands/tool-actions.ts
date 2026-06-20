@@ -5,6 +5,9 @@
  * specifying types, required/optional, and descriptions for help rendering.
  */
 
+import { RUNTIME_NAMES } from "../../runtime/runtimes.js";
+
+
 export interface ActionArgDef {
   /** CLI flag name, e.g. "--query" */
   flag: string;
@@ -1120,7 +1123,7 @@ const runtimeExecute: ActionDefinition = {
       field: "runtime",
       type: "string",
       required: true,
-      description: "Runtime: node|python|shell",
+      description: `Runtime: ${RUNTIME_NAMES.join("|")}`,
     },
     {
       flag: "--executable",
@@ -1176,6 +1179,13 @@ const runtimeExecute: ActionDefinition = {
       type: "boolean",
       description: "Persist full output as artifact",
     },
+    {
+      flag: "--output-mode",
+      field: "outputMode",
+      type: "string",
+      description: "Response verbosity: minimal|summary|intent",
+    },
+
   ],
   examples: [
     'sdl-mcp tool runtime.execute --repo-id my-repo --runtime shell --code "ls -la"',
@@ -1202,6 +1212,20 @@ const runtimeQueryOutput: ActionDefinition = {
       field: "queryTerms",
       type: "string[]",
       description: "Comma-separated keywords to search for",
+    },
+    {
+      flag: "--cursor",
+      field: "cursor",
+      type: "json",
+      description:
+        "Resume after a prior match cursor, e.g. {\"stream\":\"stdout\",\"afterLine\":120}",
+    },
+    {
+      flag: "--line-range",
+      field: "lineRange",
+      type: "json",
+      description:
+        "Read an exact range, e.g. {\"stream\":\"stderr\",\"startLine\":10,\"endLine\":40}",
     },
     {
       flag: "--max-excerpts",
@@ -1265,9 +1289,17 @@ const responseGet: ActionDefinition = {
       type: "number",
       description: "Byte offset for excerpt retrieval",
     },
+    {
+      flag: "--json-path",
+      field: "jsonPath",
+      type: "string",
+      description:
+        "Dot-separated path for extracting a JSON response subtree before slicing",
+    },
   ],
   examples: [
     'sdl-mcp tool response.get --repo-id my-repo --handle "response-myrepo-1770000000000-0123456789abcdef" --max-bytes 8192',
+    'sdl-mcp tool response.get --repo-id my-repo --handle "response-myrepo-1770000000000-0123456789abcdef" --json-path finalEvidence.0',
   ],
 };
 

@@ -120,6 +120,7 @@ export interface ResponseArtifactReadOptions {
   maxBytes?: number;
   maxTokens?: number;
   offsetBytes?: number;
+  jsonPath?: string;
   artifactBaseDir?: string | null;
   maxFullBytes?: number;
   sessionId?: string;
@@ -144,6 +145,33 @@ export interface ResponseArtifactReadResult {
 
 function estimateTokensFromBytes(bytes: number): number {
   return Math.ceil(bytes / 4);
+}
+
+const BLOCKED_JSON_PATH_SEGMENTS = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+
+function extractJsonPath(obj: unknown, keyPath: string): unknown {
+  const normalized = keyPath.startsWith("$.")
+    ? keyPath.slice(2)
+    : keyPath.startsWith("$")
+      ? keyPath.slice(1)
+      : keyPath;
+  let current: unknown = obj;
+  for (const segment of normalized.split(".")) {
+    if (!segment || BLOCKED_JSON_PATH_SEGMENTS.has(segment)) return undefined;
+    if (current == null || typeof current !== "object") return undefined;
+    if (Array.isArray(current)) {
+      const index = Number(segment);
+      if (!Number.isInteger(index) || index < 0) return undefined;
+      current = current[index];
+    } else {
+      current = (current as Record<string, unknown>)[segment];
+    }
+  }
+  return current;
 }
 
 function safeRepoId(repoId: string): string {
@@ -528,6 +556,32 @@ export async function readResponseArtifact(
       `Response artifact exceeds retrieval size limit (${decompressed.length} > ${maxFullBytes})`,
     );
   }
+
+  if (opts.jsonPath !== undefined) {
+    if (metadata.contentKind !== "json") {
+      throw new Error("jsonPath is only supported for JSON response artifacts");
+    }
+    const parsed = JSON.parse(decompressed.toString("utf-8")) as unknown;
+    const content = extractJsonPath(parsed, opts.jsonPath);
+    const returnedText = content === undefined ? "" : JSON.stringify(content);
+    const returnedBytes = Buffer.byteLength(returnedText, "utf-8");
+    return {
+      handle: opts.handle,
+      full: false,
+      truncated: false,
+      contentKind: metadata.contentKind,
+      content,
+      metadata,
+      range: {
+        offsetBytes: 0,
+        returnedBytes,
+        totalBytes: metadata.originalBytes,
+        estimatedReturnedTokens: estimateTokensFromBytes(returnedBytes),
+      },
+      savings: createSavings(metadata, returnedBytes),
+    };
+  }
+
   const offsetBytes = Math.min(
     Math.max(0, opts.offsetBytes ?? 0),
     decompressed.length,

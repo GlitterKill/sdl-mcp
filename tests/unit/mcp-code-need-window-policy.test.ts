@@ -182,6 +182,7 @@ describe("code.needWindow policy remediation", () => {
     });
 
     assert.equal(response.approved, false);
+    assert.equal(response.status, "denied");
     if (response.approved) throw new Error("Expected denial response");
     assert.deepStrictEqual(response.whyDenied, [
       "Raw code access denied by custom policy",
@@ -221,6 +222,7 @@ describe("code.needWindow policy remediation", () => {
     }) as Record<string, unknown>;
     const content = full.content as Record<string, unknown>;
     assert.equal(content.approved, true);
+    assert.equal(content.status, "approvedRaw");
     assert.match(String(content.code), /importantFlag/);
   });
 

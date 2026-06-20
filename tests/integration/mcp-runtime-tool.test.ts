@@ -265,7 +265,7 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     );
   });
 
-  it("should preserve minimal stderr summaries for short failures", async () => {
+  it("should omit minimal stderr summaries for short failures", async () => {
     const { handleRuntimeExecute } =
       await import("../../dist/mcp/tools/runtime.js");
 
@@ -279,7 +279,9 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
 
     assert.equal(result.status, "failure");
     assert.equal(result.exitCode, 2);
-    assert.match(result.stderrSummary, /short-failure/);
+    assert.equal(result.stderrSummary, "");
+    assert.equal(result.stdoutSummary, "");
+    assert.equal(result.stdoutPreview, undefined);
   });
 
   it("should include denied reasons in the response", async () => {
@@ -401,4 +403,124 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     assert.strictEqual(result.status, "success");
     assert.ok(result.stdoutSummary.includes("hello-runtime"));
   });
+
+
+  describe("runtime trust metadata", () => {
+  it("runtime.queryOutput exposes match metadata", async () => {
+    const { handleRuntimeExecute } = await import("../../dist/mcp/tools/runtime.js");
+    const { handleRuntimeQueryOutput } = await import("../../dist/mcp/tools/runtime-query.js");
+
+    const run = await handleRuntimeExecute({
+      repoId,
+      runtime: "node",
+      args: ["-e", "console.log('trust alpha')"],
+      outputMode: "minimal",
+      persistOutput: true,
+      timeoutMs: 10000,
+    });
+
+    assert.ok(run.artifactHandle);
+    const query = await handleRuntimeQueryOutput({
+      repoId,
+      artifactHandle: run.artifactHandle,
+      queryTerms: ["not-present"],
+      maxExcerpts: 1,
+      contextLines: 0,
+      stream: "stdout",
+    });
+
+    assert.strictEqual(query.matchStatus, "noMatchFallback");
+    assert.strictEqual(query.matchCount, 0);
+  });
+
+  it("runtime.execute persists artifacts for TypeScript compile failures", async () => {
+    const { handleRuntimeExecute } = await import("../../dist/mcp/tools/runtime.js");
+    const { handleRuntimeQueryOutput } = await import("../../dist/mcp/tools/runtime-query.js");
+
+    const run = await handleRuntimeExecute({
+      repoId,
+      runtime: "typescript",
+      code: "const value: = ;\nconsole.log(value);\n",
+      outputMode: "minimal",
+      persistOutput: true,
+      timeoutMs: 30000,
+    });
+
+    assert.notStrictEqual(run.status, "success");
+    assert.ok(run.artifactHandle, "compile failures should persist stderr/stdout artifacts");
+    const query = await handleRuntimeQueryOutput({
+      repoId,
+      artifactHandle: run.artifactHandle,
+      queryTerms: ["error", "TS"],
+      maxExcerpts: 3,
+      contextLines: 1,
+      stream: "stderr",
+    });
+    assert.strictEqual(query.matchStatus, "matched");
+  });
+
+  it("runtime.execute artifact provenance does not store raw args", async () => {
+    const { handleRuntimeExecute } = await import("../../dist/mcp/tools/runtime.js");
+    const { readArtifactManifest } = await import("../../dist/runtime/artifacts.js");
+
+    const run = await handleRuntimeExecute({
+      repoId,
+      runtime: "node",
+      args: ["-e", "console.log('provenance ok')", "SECRET_SHOULD_NOT_APPEAR"],
+      outputMode: "minimal",
+      persistOutput: true,
+      timeoutMs: 10000,
+    });
+
+    assert.strictEqual(run.status, "success");
+    assert.ok(run.artifactHandle);
+    const manifest = await readArtifactManifest(run.artifactHandle);
+    assert.ok(manifest?.commandSummary);
+    assert.match(manifest.commandSummary, /argCount=3/);
+    assert.doesNotMatch(manifest.commandSummary, /SECRET_SHOULD_NOT_APPEAR/);
+  });
+
+  it("repo.status schema preserves serverInfo", async () => {
+    const { handleRepoStatus } = await import("../../dist/mcp/tools/repo.js");
+    const { RepoStatusResponseSchema } = await import("../../dist/mcp/tools.js");
+
+    const status = await handleRepoStatus({ repoId, detail: "minimal" });
+    const parsed = RepoStatusResponseSchema.parse(status);
+
+    assert.ok(parsed.serverInfo);
+    assert.strictEqual(typeof parsed.serverInfo.version, "string");
+    assert.ok(Array.isArray(parsed.serverInfo.driftWarnings));
+  });
+
+  it("gateway runtime.queryOutput rejects mismatched cursor stream", async () => {
+    const { AgentGatewaySchema } = await import("../../dist/gateway/schemas.js");
+
+    assert.throws(
+      () =>
+        AgentGatewaySchema.parse({
+          action: "runtime.queryOutput",
+          repoId,
+          artifactHandle: "runtime-test-123",
+          queryTerms: ["error"],
+          cursor: { stream: "stdout", afterLine: 10 },
+          stream: "stderr",
+        }),
+      /stream must match cursor\.stream/,
+    );
+  });
+
+
+  it("gateway runtime.execute accepts all registered runtime names", async () => {
+    const { AgentGatewaySchema } = await import("../../dist/gateway/schemas.js");
+    const parsed = AgentGatewaySchema.parse({
+      action: "runtime.execute",
+      repoId,
+      runtime: "rust",
+      args: ["--version"],
+      outputMode: "minimal",
+    });
+
+    assert.strictEqual(parsed.runtime, "rust");
+  });
+});
 });

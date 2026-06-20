@@ -279,6 +279,7 @@ sdl-mcp tool semantic.enrichment.refresh --repo-id my-repo --dry-run
 sdl-mcp tool search.edit --repo-id my-repo --mode preview --targeting text --query '{"literal":"old","replacement":"new"}' --edit-mode replacePattern
 sdl-mcp tool file.write --repo-id my-repo --file-path config/app.json --json-path server.port --json-value 8080
 sdl-mcp tool response.get --repo-id my-repo --handle response-myrepo-1770000000000-0123456789abcdef --max-bytes 8192
+sdl-mcp tool response.get --repo-id my-repo --handle response-myrepo-1770000000000-0123456789abcdef --json-path finalEvidence.0
 sdl-mcp tool action.search --query manual --summary-only
 sdl-mcp tool action.search '{"query":"manual","limit":1}' --json
 sdl-mcp tool sdl.manual --actions action.search --format json

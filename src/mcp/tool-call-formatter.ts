@@ -502,6 +502,16 @@ function fmtRuntimeExecute(
     lines.push(`  warning: ${warning}`);
   }
 
+  const nextAction = record(result.nextAction);
+  if (nextAction) {
+    const message = str(nextAction.message);
+    const action =
+      str(nextAction.action) ||
+      (str(nextAction.kind) === "queryOutput" ? "runtime.queryOutput" : "");
+    if (message) lines.push(`  next: ${message}${action ? ` (${action})` : ""}`);
+  }
+
+
   const stdout = str(result.stdoutSummary) || str(result.stdoutPreview);
   if (stdout) {
     lines.push("  stdout:");

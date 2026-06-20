@@ -49,6 +49,9 @@ SDL-MCP is Windows-first but supports all major platforms (Windows, Linux, macOS
 
 Compiled runtimes use a compile-then-execute workflow: SDL-MCP compiles the source, runs the resulting binary, then cleans up.
 
+When compilation fails and `persistOutput` is enabled, compiler stdout/stderr are persisted with the same artifact store, so `sdl.runtime.queryOutput` can inspect noisy TS/Rust/C/C++ failures by handle.
+
+
 ---
 
 ## Sandboxed Execution Flow
@@ -103,7 +106,7 @@ flowchart LR
 }
 ```
 
-**Response (~50 tokens):**
+**Response (~50 tokens plus metadata):**
 
 ```json
 {
@@ -111,9 +114,21 @@ flowchart LR
   "exitCode": 1,
   "signal": null,
   "durationMs": 4200,
-  "outputLines": 312,
-  "outputBytes": 18400,
-  "artifactHandle": "runtime-my-repo-1774356909696-fc5aa1f22e33e17c"
+  "stdoutSummary": "",
+  "stderrSummary": "",
+  "artifactHandle": "runtime-my-repo-1774356909696-fc5aa1f22e33e17c",
+  "truncation": {
+    "stdoutTruncated": false,
+    "stderrTruncated": false,
+    "totalStdoutBytes": 18400,
+    "totalStderrBytes": 0
+  },
+  "nextAction": {
+    "kind": "queryOutput",
+    "action": "runtime.queryOutput",
+    "message": "Query the failure artifact with runtime.queryOutput.",
+    "queryTerms": ["error", "failed", "exception"]
+  }
 }
 ```
 
@@ -143,9 +158,13 @@ flowchart LR
   ],
   "totalLines": 312,
   "totalBytes": 18400,
-  "searchedStreams": ["stdout", "stderr"]
+  "searchedStreams": ["stdout", "stderr"],
+  "matchStatus": "matched",
+  "matchCount": 1
 }
 ```
+
+If the running server detects that runtime-critical source files are newer than built `dist` files, `sdl.runtime.execute` includes `serverDriftWarnings`. `repo.status` and JSON `sdl.manual` also expose `serverInfo` with version, start time, and drift warnings.
 
 ---
 
@@ -158,7 +177,9 @@ Retrieves and searches stored runtime output artifacts on demand. Use this after
 | Parameter | Type | Required | Description |
 |:----------|:-----|:---------|:------------|
 | `artifactHandle` | string | Yes | Handle returned by `sdl.runtime.execute` |
-| `queryTerms` | string[] | Yes | Keywords to search for in the output |
+| `queryTerms` | string[] | Yes, unless `lineRange` is set | Keywords to search for in the output |
+| `cursor` | object | No | Resume a prior search from `{stream, afterLine}` returned as `nextCursor` |
+| `lineRange` | object | No | Return an exact `{stream, startLine, endLine}` without keyword matching |
 | `maxExcerpts` | integer | No | Maximum excerpt windows to return (default: 10) |
 | `contextLines` | integer | No | Lines of context around each match (default: 3) |
 | `stream` | `"stdout"` \| `"stderr"` \| `"both"` | No | Which stream(s) to search (default: `"both"`) |
@@ -172,6 +193,9 @@ Retrieves and searches stored runtime output artifacts on demand. Use this after
 | `totalLines` | integer | Total lines in the artifact |
 | `totalBytes` | integer | Total bytes in the artifact |
 | `searchedStreams` | string[] | Streams that were searched |
+| `matchStatus` | `"matched"` \| `"noMatchFallback"` \| `"lineRange"` | Whether excerpts came from term matches, fallback preview, or an exact range |
+| `matchCount` | integer | Number of matching lines after the cursor; `0` means no query terms matched |
+| `nextCursor` | object | Cursor for the next page when more matches exist |
 
 
 ## Example

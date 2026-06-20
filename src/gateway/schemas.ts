@@ -18,6 +18,7 @@ import {
   RUNTIME_MAX_QUERY_TERMS,
   RUNTIME_DEFAULT_MAX_RESPONSE_LINES,
 } from "../config/constants.js";
+import { RUNTIME_NAMES } from "../runtime/runtimes.js";
 import { MAX_RESPONSE_EXCERPT_BYTES } from "../runtime/response-artifacts.js";
 
 // ============================================================================
@@ -212,6 +213,7 @@ const ResponseGetAction = z.object({
   maxBytes: z.number().int().min(1).max(MAX_RESPONSE_EXCERPT_BYTES).optional(),
   maxTokens: z.number().int().min(1).max(250_000).optional(),
   offsetBytes: z.number().int().min(0).default(0).optional(),
+  jsonPath: z.string().min(1).max(200).optional(),
 });
 
 const ResponseModeField = {
@@ -702,43 +704,95 @@ const BufferCheckpointAction = z.object({
 const BufferStatusAction = z.object({
   action: z.literal("buffer.status"),
 });
+const RuntimeExecuteAction = z
+  .object({
+    action: z.literal("runtime.execute"),
+    runtime: z.enum(RUNTIME_NAMES),
+    executable: z.string().min(1).optional(),
+    args: z.array(z.string()).max(RUNTIME_MAX_ARG_COUNT).default([]),
+    code: z.string().max(RUNTIME_MAX_CODE_LENGTH).optional(),
+    stdin: RuntimeStdinAction.optional(),
+    relativeCwd: z.string().default("."),
+    timeoutMs: z
+      .number()
+      .int()
+      .min(RUNTIME_MIN_TIMEOUT_MS)
+      .max(RUNTIME_MAX_TIMEOUT_MS)
+      .optional(),
+    queryTerms: z.array(z.string()).max(RUNTIME_MAX_QUERY_TERMS).optional(),
+    maxResponseLines: z
+      .number()
+      .int()
+      .min(5)
+      .max(1000)
+      .default(RUNTIME_DEFAULT_MAX_RESPONSE_LINES),
+    persistOutput: z.boolean().default(true),
+    outputMode: z
+      .enum(["minimal", "summary", "intent"])
+      .default("minimal")
+      .optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.runtime === "shell" && !val.code) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["code"],
+        message:
+          "Shell runtime requires the code parameter. Direct args execution is not supported for security reasons.",
+      });
+    }
+  });
 
-const RuntimeExecuteAction = z.object({
-  action: z.literal("runtime.execute"),
-  runtime: z.enum(["node", "python", "shell"]),
-  executable: z.string().min(1).optional(),
-  args: z.array(z.string()).max(RUNTIME_MAX_ARG_COUNT).default([]),
-  code: z.string().max(RUNTIME_MAX_CODE_LENGTH).optional(),
-  stdin: RuntimeStdinAction.optional(),
-  relativeCwd: z.string().default("."),
-  timeoutMs: z
-    .number()
-    .int()
-    .min(RUNTIME_MIN_TIMEOUT_MS)
-    .max(RUNTIME_MAX_TIMEOUT_MS)
-    .optional(),
-  queryTerms: z.array(z.string()).max(RUNTIME_MAX_QUERY_TERMS).optional(),
-  maxResponseLines: z
-    .number()
-    .int()
-    .min(5)
-    .max(1000)
-    .default(RUNTIME_DEFAULT_MAX_RESPONSE_LINES),
-  persistOutput: z.boolean().default(true),
-  outputMode: z
-    .enum(["minimal", "summary", "intent"])
-    .default("minimal")
-    .optional(),
+const RuntimeQueryOutputCursorAction = z.object({
+  stream: z.enum(["stdout", "stderr"]),
+  afterLine: z.number().int().min(0),
 });
 
-const RuntimeQueryOutputAction = z.object({
-  action: z.literal("runtime.queryOutput"),
-  artifactHandle: z.string().min(1),
-  queryTerms: z.array(z.string()).min(1).max(10),
-  maxExcerpts: z.number().int().min(1).max(50).default(10).optional(),
-  contextLines: z.number().int().min(0).max(10).default(3).optional(),
-  stream: z.enum(["stdout", "stderr", "both"]).default("both").optional(),
-});
+const RuntimeQueryOutputLineRangeAction = z
+  .object({
+    stream: z.enum(["stdout", "stderr"]),
+    startLine: z.number().int().min(1),
+    endLine: z.number().int().min(1),
+  })
+  .superRefine((val, ctx) => {
+    if (val.endLine < val.startLine) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["endLine"],
+        message: "endLine must be greater than or equal to startLine",
+      });
+    }
+  });
+
+const RuntimeQueryOutputAction = z
+  .object({
+    action: z.literal("runtime.queryOutput"),
+    artifactHandle: z.string().min(1),
+    queryTerms: z.array(z.string()).max(10).default([]),
+    cursor: RuntimeQueryOutputCursorAction.optional(),
+    lineRange: RuntimeQueryOutputLineRangeAction.optional(),
+    maxExcerpts: z.number().int().min(1).max(50).default(10).optional(),
+    contextLines: z.number().int().min(0).max(10).default(3).optional(),
+    stream: z.enum(["stdout", "stderr", "both"]).default("both").optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.queryTerms.length === 0 && !val.lineRange) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["queryTerms"],
+        message: "queryTerms are required unless lineRange is provided",
+      });
+    }
+    if (val.cursor && val.stream !== undefined && val.stream !== "both" && val.stream !== val.cursor.stream) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["stream"],
+        message: "stream must match cursor.stream when both are provided",
+      });
+    }
+
+  });
+
 
 const MemoryTypeGateway = z.enum(["decision", "bugfix", "task_context"]);
 
