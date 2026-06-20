@@ -13,37 +13,73 @@ pub fn extract_symbols_python(
     rel_path: &str,
 ) -> Vec<NativeParsedSymbol> {
     let mut symbols = Vec::new();
-    let mut stack = vec![root];
-
-    while let Some(node) = stack.pop() {
-        match node.kind() {
-            "function_definition" => {
-                if let Some(symbol) = process_function_definition(node, source, repo_id, rel_path) {
-                    symbols.push(symbol);
-                }
-            }
-            "class_definition" => {
-                if let Some(symbol) = process_class_definition(node, source, repo_id, rel_path) {
-                    symbols.push(symbol);
-                }
-            }
-            "assignment" => {
-                if let Some(symbol) = process_assignment(node, source, repo_id, rel_path) {
-                    symbols.push(symbol);
-                }
-            }
-            _ => {}
-        }
-
-        let child_count = node.child_count();
-        for i in (0..child_count).rev() {
-            if let Some(child) = node.child(i) {
-                stack.push(child);
-            }
-        }
-    }
+    traverse_symbols(root, source, repo_id, rel_path, None, &mut symbols);
 
     symbols
+}
+
+fn traverse_symbols(
+    node: Node<'_>,
+    source: &[u8],
+    repo_id: &str,
+    rel_path: &str,
+    parent_class: Option<&str>,
+    symbols: &mut Vec<NativeParsedSymbol>,
+) {
+    match node.kind() {
+        "function_definition" => {
+            if let Some(symbol) =
+                process_function_definition(node, source, repo_id, rel_path, parent_class)
+            {
+                symbols.push(symbol);
+            }
+        }
+        "class_definition" => {
+            let class_name = node
+                .child_by_field_name("name")
+                .map(|name_node| node_text(name_node, source).to_string());
+            if let Some(symbol) = process_class_definition(node, source, repo_id, rel_path) {
+                symbols.push(symbol);
+            }
+
+            // Match the TypeScript Python adapter: class bodies are traversed
+            // with the current class name so contained function_definition
+            // nodes become method symbols with owner-qualified names.
+            traverse_child_symbols(
+                node,
+                source,
+                repo_id,
+                rel_path,
+                class_name.as_deref().or(parent_class),
+                symbols,
+            );
+            return;
+        }
+        "assignment" => {
+            if let Some(symbol) = process_assignment(node, source, repo_id, rel_path) {
+                symbols.push(symbol);
+            }
+        }
+        _ => {}
+    }
+
+    traverse_child_symbols(node, source, repo_id, rel_path, parent_class, symbols);
+}
+
+fn traverse_child_symbols(
+    node: Node<'_>,
+    source: &[u8],
+    repo_id: &str,
+    rel_path: &str,
+    parent_class: Option<&str>,
+    symbols: &mut Vec<NativeParsedSymbol>,
+) {
+    let child_count = node.child_count();
+    for i in 0..child_count {
+        if let Some(child) = node.child(i) {
+            traverse_symbols(child, source, repo_id, rel_path, parent_class, symbols);
+        }
+    }
 }
 
 fn process_function_definition(
@@ -51,9 +87,18 @@ fn process_function_definition(
     source: &[u8],
     repo_id: &str,
     rel_path: &str,
+    parent_class: Option<&str>,
 ) -> Option<NativeParsedSymbol> {
     let name_node = node.child_by_field_name("name")?;
     let name = node_text(name_node, source).to_string();
+    let qualified_name = parent_class
+        .map(|class_name| format!("{class_name}.{name}"))
+        .unwrap_or_else(|| name.clone());
+    let kind = if parent_class.is_some() {
+        "method"
+    } else {
+        "function"
+    };
 
     let params = extract_parameters(node, source);
     let returns = node
@@ -63,8 +108,8 @@ fn process_function_definition(
     let visibility = extract_visibility(&name);
 
     let mut symbol = make_symbol_with_forced_signature(
-        &name,
-        "function",
+        &qualified_name,
+        kind,
         node,
         source,
         repo_id,

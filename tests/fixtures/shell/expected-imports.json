@@ -63,6 +63,20 @@
     "isReExport": false
   },
   {
+    "specifier": "./single-quoted.sh",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
+    "specifier": "./single-dot-quoted.sh",
+    "isRelative": true,
+    "isExternal": false,
+    "imports": [],
+    "isReExport": false
+  },
+  {
     "specifier": "./init.sh",
     "isRelative": true,
     "isExternal": false,

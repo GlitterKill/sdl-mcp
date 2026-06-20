@@ -576,7 +576,7 @@ describe("Shell Adapter", () => {
 
       const imports = adapter.extractImports(tree, content, "test.sh");
 
-      assert.strictEqual(imports.length, 12, "Should extract 12 imports");
+      assert.strictEqual(imports.length, 14, "Should extract 14 imports");
     });
 
     it("should match expected calls output", () => {

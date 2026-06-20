@@ -98,7 +98,9 @@ describe("PHP Adapter", () => {
       const findMethod = symbols.find((s) => s.name === "find");
       assert.ok(findMethod, "Should extract find method");
       assert.ok(findMethod?.signature);
-      assert.strictEqual(findMethod?.signature?.params.length, 0);
+      assert.deepStrictEqual(findMethod?.signature?.params, [
+        { name: "id", type: "int" },
+      ]);
       assert.strictEqual(findMethod?.signature?.returns, "?object");
     });
 
@@ -458,14 +460,23 @@ describe("PHP Adapter", () => {
       );
       assert.strictEqual(
         indexCalls.length,
-        3,
-        "Should find 3 calls in index function",
+        4,
+        "Should find 4 calls in index function",
       );
 
       const cacheCalls = indexCalls.filter((c) =>
         c.calleeIdentifier.includes("Cache::"),
       );
       assert.strictEqual(cacheCalls.length, 2, "Should find 2 Cache calls");
+
+      const databaseCalls = indexCalls.filter((c) =>
+        c.calleeIdentifier.includes("Database::connect"),
+      );
+      assert.strictEqual(
+        databaseCalls.length,
+        2,
+        "Should find Database connect and chained query calls",
+      );
     });
 
     it("should handle variable function name patterns", () => {
@@ -530,13 +541,19 @@ describe("PHP Adapter", () => {
       const symbols = adapter.extractSymbols(tree, content, "test.php");
       const calls = adapter.extractCalls(tree, content, "test.php", symbols);
 
-      assert.strictEqual(calls.length, 16, "Should extract 16 calls");
+      assert.strictEqual(calls.length, 22, "Should extract 22 calls");
       assert.deepStrictEqual(
         calls.map((call) => call.calleeIdentifier),
         [
+          "$this->userRepository.create",
+          "$this->userRepository.update",
           "Validator::validate",
           "$callback",
           "$obj.$method",
+          "$this->userRepository.with",
+          `$this->userRepository
+            ->with('roles').find`,
+          "$this->logger.log",
           "\\App\\Config::get",
           "$this.getUserById",
           "$this.transformUser",
@@ -546,6 +563,7 @@ describe("PHP Adapter", () => {
           "$fn",
           "Cache::get",
           "Database::connect",
+          "Database::connect().query",
           "Cache::set",
           "$this.getHandler",
           "$handler",
