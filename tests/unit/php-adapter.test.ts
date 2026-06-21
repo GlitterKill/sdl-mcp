@@ -571,6 +571,28 @@ describe("PHP Adapter", () => {
         ],
       );
     });
+
+    it("should normalize multiline call identifiers from CRLF fixtures", () => {
+      const content = readFileSync(
+        join(process.cwd(), "tests/fixtures/php/calls.php"),
+        "utf-8",
+      ).replace(/\r?\n/g, "\r\n");
+      const tree = adapter.parse(content, "test.php");
+      assert.ok(tree);
+
+      const symbols = adapter.extractSymbols(tree, content, "test.php");
+      const calls = adapter.extractCalls(tree, content, "test.php", symbols);
+      const multiline = calls
+        .map((call) => call.calleeIdentifier)
+        .find((identifier) => identifier.includes("with('roles').find"));
+
+      assert.strictEqual(
+        multiline,
+        `$this->userRepository
+            ->with('roles').find`,
+      );
+      assert.ok(!multiline?.includes("\r"));
+    });
   });
 
   describe("Integration", () => {

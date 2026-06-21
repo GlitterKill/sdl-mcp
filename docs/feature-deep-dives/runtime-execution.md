@@ -54,7 +54,7 @@ SDL-MCP is Windows-first but supports all major platforms (Windows, Linux, macOS
 
 Compiled runtimes use a compile-then-execute workflow: SDL-MCP compiles the source, runs the resulting binary, then cleans up.
 
-When compilation fails and `persistOutput` is enabled, compiler stdout/stderr are persisted with the same artifact store, so `sdl.runtime.queryOutput` can inspect noisy TS/Rust/C/C++ failures by handle.
+When compilation fails and `persistOutput` is enabled, compiler stdout/stderr are persisted with the same artifact store, so `sdl.runtime.queryOutput` can inspect noisy TS/Rust/C/C++ failures by handle. If a runtime fails before emitting output, SDL-MCP persists a small stderr marker so the failure phase remains queryable by artifact handle.
 
 
 ---

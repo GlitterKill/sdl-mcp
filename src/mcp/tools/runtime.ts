@@ -621,15 +621,24 @@ export async function handleRuntimeExecute(
       result: Awaited<ReturnType<typeof execute>>,
       phase: "compile" | "execute",
     ): Promise<string | null> => {
-      if (
-        !request.persistOutput ||
-        (result.stdout.length === 0 && result.stderr.length === 0)
-      ) {
+      if (!request.persistOutput) {
         return null;
       }
 
       try {
         const artifactStartedAt = timer.start();
+        // Some runtimes fail before emitting bytes; keep a searchable artifact marker.
+        const stderr =
+          result.stderr.length > 0 || result.status === "success"
+            ? result.stderr
+            : Buffer.from(
+                `${phase} phase error: ${request.runtime} runtime failed without captured stdout/stderr (exitCode=${result.exitCode ?? "none"}, signal=${result.signal ?? "none"}).`,
+                "utf-8",
+              );
+
+        if (result.stdout.length === 0 && stderr.length === 0) {
+          return null;
+        }
         const argsHash = hashContent(
           JSON.stringify({ runtime: request.runtime, args: request.args, phase }),
         );
@@ -651,7 +660,7 @@ export async function handleRuntimeExecute(
           signal: result.signal,
           durationMs: result.durationMs,
           stdout: result.stdout,
-          stderr: result.stderr,
+          stderr,
           policyAuditHash: policyDecision.auditHash,
           artifactTtlHours: runtimeConfig.artifactTtlHours,
           maxArtifactBytes: runtimeConfig.maxArtifactBytes,

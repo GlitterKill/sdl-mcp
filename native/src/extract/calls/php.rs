@@ -49,6 +49,7 @@ fn parse_call_expression(
         "scoped_call_expression" => parse_scoped_call(node, source)?,
         _ => return None,
     };
+    let callee_identifier = normalize_call_identifier(callee_identifier);
 
     if callee_identifier.is_empty() {
         return None;
@@ -60,6 +61,10 @@ fn parse_call_expression(
         call_type,
         range: extract_range(node),
     })
+}
+
+fn normalize_call_identifier(identifier: String) -> String {
+    identifier.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 fn parse_function_call(node: Node<'_>, source: &[u8]) -> Option<(String, String)> {

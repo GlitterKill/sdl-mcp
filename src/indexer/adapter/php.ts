@@ -832,6 +832,8 @@ function extractCalls(
       }
     }
 
+    calleeIdentifier = normalizeCallIdentifier(calleeIdentifier);
+
     const callerNodeId = findEnclosingSymbolUtil(callNode, extractedSymbols);
 
     calls.push({
@@ -845,6 +847,10 @@ function extractCalls(
   }
 
   return calls;
+}
+
+function normalizeCallIdentifier(identifier: string): string {
+  return identifier.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
 function clearCache(): void {

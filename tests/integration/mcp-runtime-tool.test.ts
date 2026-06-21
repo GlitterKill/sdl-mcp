@@ -499,6 +499,32 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     assert.strictEqual(query.matchStatus, "matched");
   });
 
+  it("runtime.execute persists a marker for no-output failures", async () => {
+    const { handleRuntimeExecute } = await import("../../dist/mcp/tools/runtime.js");
+    const { handleRuntimeQueryOutput } = await import("../../dist/mcp/tools/runtime-query.js");
+
+    const run = await handleRuntimeExecute({
+      repoId,
+      runtime: "node",
+      args: ["-e", "process.exit(7)"],
+      outputMode: "minimal",
+      persistOutput: true,
+      timeoutMs: 10000,
+    });
+
+    assert.strictEqual(run.status, "failure");
+    assert.ok(run.artifactHandle, "no-output failures should persist an artifact marker");
+    const query = await handleRuntimeQueryOutput({
+      repoId,
+      artifactHandle: run.artifactHandle,
+      queryTerms: ["error", "failed"],
+      maxExcerpts: 3,
+      contextLines: 0,
+      stream: "stderr",
+    });
+    assert.strictEqual(query.matchStatus, "matched");
+  });
+
   it("runtime.execute artifact provenance does not store raw args", async () => {
     const { handleRuntimeExecute } = await import("../../dist/mcp/tools/runtime.js");
     const { readArtifactManifest } = await import("../../dist/runtime/artifacts.js");
