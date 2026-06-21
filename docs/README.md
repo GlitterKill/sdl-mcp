@@ -106,11 +106,11 @@ Use this page as the entry point for SDL-MCP documentation.
   - SCIP: ingest
   - Usage: stats
   - Universal: `sdl.action.search` and `sdl.info`
-  - Default flat mode: 38 tools (`36` flat tools + `sdl.action.search` + `sdl.info`)
-  - Gateway-only mode: 6 tools (`4` gateway tools + `sdl.action.search` + `sdl.info`)
-  - Gateway + legacy mode: 42 tools (`4` gateway + `36` legacy flat + `sdl.action.search` + `sdl.info`)
-  - Code Mode exclusive: 5 tools (`sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, `sdl.file`)
-  - Gateway routing covers 35 of the 36 flat tools; `sdl.file.write` remains flat-only
+  - Default flat mode registers the direct action surface plus universal discovery and diagnostics.
+  - Gateway-only mode registers the compact namespace projection plus universal discovery and diagnostics.
+  - Gateway + legacy mode registers both the gateway projection and legacy flat actions.
+  - Code Mode exclusive registers `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`.
+  - Gateway routing covers most flat actions; `sdl.file.write` remains flat-only. Exact counts live in the generated tool inventory.
   - `sdl-mcp tool` exposes direct CLI action aliases plus only the `action.search` and `manual` metadata proxies; `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only wrappers
 - **Semantic features**: hybrid FTS + vector retrieval with 2 supported local ONNX embedding models (Jina Code for Symbols, Nomic for FileSummary), plus optional LLM-generated symbol summaries (Anthropic/Ollama/mock)
 - **HTTP surface**: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP

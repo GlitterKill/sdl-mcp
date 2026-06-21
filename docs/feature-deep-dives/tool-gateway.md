@@ -2,14 +2,14 @@
 
 [Back to README](../../README.md) | [Documentation Hub](../README.md) | [Generated Tool Inventory](../generated/tool-inventory.md)
 
-The gateway compresses most of the flat SDL-MCP surface into four namespace tools: `sdl.query`, `sdl.code`, `sdl.repo`, and `sdl.agent`. It exists to reduce `tools/list` overhead without changing the underlying handler behavior.
+The gateway compresses most of the flat SDL-MCP surface into namespace tools: `sdl.query`, `sdl.code`, `sdl.repo`, and `sdl.agent`. It exists to reduce `tools/list` overhead without changing the underlying handler behavior.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
-    Flat["Flat mode<br/>38 tools<br/>2 universal + 36 flat"]
-    Shrink["Gateway projection<br/>35 gateway-routable actions"]
-    Gateway["Gateway mode<br/>6 tools<br/>2 universal + 4 gateway"]
+    Flat["Flat mode<br/>direct actions"]
+    Shrink["Gateway projection<br/>routable actions"]
+    Gateway["Gateway mode<br/>namespace tools"]
 
     Flat e1@--> Shrink
     Shrink e2@--> Gateway
@@ -26,32 +26,32 @@ flowchart LR
 
 ## Current Surface Matrix
 
-| Mode                | Tool count | Composition                                                                  |
-| ------------------- | ---------- | ---------------------------------------------------------------------------- |
-| Flat                | `38`       | `2` universal + `36` flat tools                                              |
-| Gateway             | `6`        | `2` universal + `4` gateway tools                                            |
-| Gateway + legacy    | `42`       | `2` universal + `4` gateway + `36` flat tools                                |
-| Code Mode exclusive | `5`        | `sdl.action.search`, `sdl.context`, `sdl.file`, `sdl.manual`, `sdl.workflow` |
+| Mode                | Composition                                                                  |
+| ------------------- | ---------------------------------------------------------------------------- |
+| Flat                | Direct action surface plus universal discovery and diagnostics                |
+| Gateway             | Namespace projection over gateway-routable actions                            |
+| Gateway + legacy    | Gateway projection plus legacy flat actions                                   |
+| Code Mode exclusive | `sdl.action.search`, `sdl.context`, `sdl.file`, `sdl.manual`, `sdl.workflow` |
 
 The generated source of truth is [tool-inventory.md](../generated/tool-inventory.md).
 
 ## What the Gateway Actually Covers
 
-The gateway currently exposes `35` of the `36` flat actions through the four namespace schemas.
+The gateway exposes most flat actions through namespace schemas.
 
 Key exceptions and edit paths:
 
-- `file.write` is the only flat action outside the four namespace schemas. It remains available in flat mode and through the Code Mode `sdl.file` gateway.
+- `file.write` is the only flat action outside the gateway namespace schemas. It remains available in flat mode and through the Code Mode `sdl.file` gateway.
 - `search.edit` and `symbol.edit` are routable through the mutation-capable `sdl.repo` gateway envelope.
 - Code Mode also exposes those edit flows through `sdl.file`.
 - `symbol.edit` is available through `sdl.workflow` when a workflow step is the better fit.
 
-| Gateway tool | Actions | Current action set                                                                                                                                                                                         |
-| ------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sdl.query`  | `8`     | `symbol.search`, `symbol.getCard`, `slice.build`, `slice.refresh`, `slice.spillover.get`, `delta.get`, `pr.risk.analyze`, `response.get`                                                                    |
-| `sdl.code`   | `3`     | `code.needWindow`, `code.getSkeleton`, `code.getHotPath`                                                                                                                                                   |
-| `sdl.repo`   | `12`    | `repo.register`, `repo.status`, `repo.overview`, `index.refresh`, `policy.get`, `policy.set`, `usage.stats`, `file.read`, `search.edit`, `symbol.edit`, `semantic.enrichment.refresh`, `semantic.enrichment.status` |
-| `sdl.agent`  | `11`    | `agent.feedback`, `agent.feedback.query`, `buffer.push`, `buffer.checkpoint`, `buffer.status`, `runtime.execute`, `runtime.queryOutput`, `memory.store`, `memory.query`, `memory.remove`, `memory.surface` |
+| Gateway tool | Current action set                                                                                                                                                                                         |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdl.query`  | `symbol.search`, `symbol.getCard`, `slice.build`, `slice.refresh`, `slice.spillover.get`, `delta.get`, `pr.risk.analyze`, `response.get`                                                                    |
+| `sdl.code`   | `code.needWindow`, `code.getSkeleton`, `code.getHotPath`                                                                                                                                                   |
+| `sdl.repo`   | `repo.register`, `repo.status`, `repo.overview`, `index.refresh`, `policy.get`, `policy.set`, `usage.stats`, `file.read`, `search.edit`, `symbol.edit`, `semantic.enrichment.refresh`, `semantic.enrichment.status` |
+| `sdl.agent`  | `agent.feedback`, `agent.feedback.query`, `buffer.push`, `buffer.checkpoint`, `buffer.status`, `runtime.execute`, `runtime.queryOutput`, `memory.store`, `memory.query`, `memory.remove`, `memory.surface` |
 
 In Code Mode:
 

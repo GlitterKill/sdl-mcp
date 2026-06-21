@@ -1,318 +1,345 @@
-# SDL.md — SDL-MCP Optimized Agent Workflow
+# SDL.md - SDL-MCP Agent Workflow
 
-Token-lean playbook for agents consuming an SDL-MCP server. Replace native `Read`/`Write` with `sdl.file`. Route indexed source through the context ladder. Escalate only when the current rung can't answer.
+Use this file as the repository fallback for the `sdl-mcp-agent-workflow` skill. If that skill is loaded by the client or by a session-start hook, treat the skill as authoritative and use this file as a compact local reference.
 
-Applies to any SDL-MCP consumer. Replace `<repoId>` with the target repository ID (see `sdl.repo.status` output or local config).
-
----
-
-## 1. Session Bootstrap (once)
-
-```
-1. sdl.repo.status({ repoId })             # health + version; cache result
-2. sdl.policy.get({ repoId })              # honor maxWindowLines / maxWindowTokens / requireIdentifiers
-3. sdl.index.refresh({ mode: "incremental" }) # only if repo.status reports stale
-```
-
-Skip step 3 unless `repo.status` says indexing is stale. Never run `mode: "full"` unless you registered the repo this session or policy demands it.
+SDL-MCP is the normal repository interface. Native filesystem and shell tools are fallback-only when SDL-MCP is unavailable, or when accessing agent memory and other internal client data outside the indexed repository.
 
 ---
 
-## 2. Action Inventory
+## 1. Start Every Task
 
-### Meta (always available; prefer these as entry points)
+1. Confirm server and repository state with `repo.status`.
+2. Start task context with `sdl.context`, not raw file reads.
+3. Use `options.contextMode: "precise"` for named symbols, exact paths, narrow bugs, focused reviews, and implementation follow-up.
+4. Use `options.contextMode: "broad"` for subsystem mapping, behavior tracing, unfamiliar areas, or broad investigation.
+5. Keep `responseMode: "auto"` for potentially large responses. If a response handle is returned, use `response.get` only for the needed excerpt.
+6. Use focused `sdl.manual` only when composing a non-obvious request. Use `sdl.action.search` when the correct SDL action is unclear.
 
-| Action              | Use when                                                                    |
-| ------------------- | --------------------------------------------------------------------------- |
-| `sdl.action.search` | Unsure which action fits — pass a keyword, read ranked candidates           |
-| `sdl.manual`        | Need exact schema / example for a known action; `actions: [...]` or `query` |
-| `sdl.context`       | Explain / debug / review / implement — task-shaped context                  |
-| `sdl.workflow`      | 2+ steps with `$N` piping, runtime, or batch mutations                      |
-
-### Internal transforms (valid only inside `sdl.workflow` steps)
-
-`dataPick`, `dataMap`, `dataFilter`, `dataSort`, `dataTemplate`, `workflowContinuationGet`
-
-For full schemas: `sdl.manual({ actions: ["<name>"], includeExamples: true })`.
+Do not run `index.refresh` by habit. Refresh only when `repo.status` shows stale or missing indexed state and the task depends on current code.
 
 ---
 
-## 3. Decision Ladder — Pick By Intent
+## 2. Retrieval Ladder
 
-| Task intent                          | First call                                                                 | Stop here if                                  |
-| ------------------------------------ | -------------------------------------------------------------------------- | --------------------------------------------- |
-| Explain / debug / review / implement | `sdl.context` (`precise` default, `broad` for wide exploration)            | Autopilot returns cards/skeletons that answer |
-| Find a named symbol                  | `sdl.symbol.search` (`limit: 5-20`, `kinds: [...]`)                        | Single clear match                            |
-| Inspect one symbol                   | `sdl.symbol.getCard` (`symbolRef` if no ID)                                | Card answers question                         |
-| Dependency subgraph                  | `sdl.slice.build` (budget + `minConfidence`)                               | Cards cover the task                          |
-| Re-use prior slice                   | `sdl.slice.refresh` (`sliceHandle`)                                        | Delta returned, no rebuild                    |
-| Fetch overflow from slice            | `sdl.slice.spillover.get`                                                  | —                                             |
-| See code structure                   | `sdl.code.getSkeleton` (`symbolId` or `file`)                              | Signatures / control flow enough              |
-| Find logic inside a symbol           | `sdl.code.getHotPath` (`symbolId` + `identifiersToFind`)                   | Hot-path shows the lines                      |
-| Raw lines (last resort)              | `sdl.code.needWindow` (`reason`, `expectedLines≤180`, `identifiersToFind`) | —                                             |
-| Read non-source file                 | `sdl.file` `op:"read"` with `offset/limit` OR `search` OR `jsonPath`       | —                                             |
-| Write any file                       | `sdl.file` `op:"write"` (targeted mode)                                    | Auto-syncs DB for indexed                     |
-| Cross-file edit                      | `sdl.file` `op:"searchEditPreview"` → `op:"searchEditApply"`               | —                                             |
-| Run command                          | `sdl.runtime.execute` (`outputMode:"minimal"`, `timeoutMs`)                | Result fits minimal response                  |
-| Probe large output                   | `sdl.runtime.queryOutput` (`artifactHandle` + `queryTerms`)                | —                                             |
-| Version diff                         | `sdl.delta.get`                                                            | —                                             |
-| PR risk                              | `sdl.pr.risk.analyze` (`fromVersion` + `toVersion`)                        | —                                             |
-| Multi-step dependent calls           | `sdl.workflow` with `$N` refs                                              | —                                             |
-| Discover action                      | `sdl.action.search` (`limit: 5`, `summaryOnly` for triage)                 | —                                             |
+Start with `sdl.context`. If the answer still needs more evidence, batch follow-up operations through `sdl.workflow` in this order:
 
-**Never skip down the ladder.** `needWindow` denials cite the missing prerequisite.
+1. `symbolSearch`
+2. `symbolGetCard`
+3. `codeSkeleton`
+4. `codeHotPath`
+5. `codeNeedWindow`
 
----
+Use `codeNeedWindow` only as a last resort. Include a concrete `reason`, bounded `expectedLines`, and precise `identifiersToFind`. If SDL-MCP returns `nextBestAction`, `fallbackTools`, `fallbackRationale`, or denial guidance, follow that guidance instead of retrying broader native reads or larger raw windows.
 
-## 4. Context Retrieval (the 90% path)
+When workflow steps need fields from earlier `$N` references, force JSON-compatible output on the earlier step. Keep limits tight and pass ETags back when available.
+
+### Precise Context
 
 ```json
-sdl.context({
+{
   "repoId": "<repoId>",
-  "taskType": "explain" | "debug" | "review" | "implement",
-  "taskText": "<one-sentence intent>",
+  "taskType": "debug",
+  "taskText": "Check why parseConfig rejects valid timeout values",
+  "responseMode": "auto",
   "options": {
     "contextMode": "precise",
-    "focusPaths": ["src/auth/*.ts"],
-    "focusSymbols": ["<symbolId>"],
-    "semantic": true,
+    "focusPaths": ["src/config/parse.ts"],
     "includeRetrievalEvidence": false
   },
   "budget": { "maxTokens": 4000 }
-})
+}
 ```
 
-Rung cost: card ≈50 · skeleton ≈200 · hotPath ≈500 · raw ≈2000 tokens. Planner trims rungs from the end if `budget.maxTokens` is tight. `budget.maxEstimatedTokens` is accepted as a `maxTokens` alias for slice-build compatibility; `budget.maxCards` is slice-only and is rejected by `sdl.context`.
-
-**When `sdl.context` returns too little**, escalate manually:
+### Broad Context
 
 ```json
-// 1. Narrow to a symbol
-sdl.symbol.search({ "repoId": "<repoId>", "query": "handleRequest", "kinds": ["function"], "limit": 10 })
-
-// 2. Get the card (ETag-aware)
-sdl.symbol.getCard({ "repoId": "<repoId>", "symbolRef": { "name": "handleRequest", "file": "src/server.ts" }, "ifNoneMatch": "<prevEtag>" })
-
-// 3. Build a bounded slice
-sdl.slice.build({
+{
   "repoId": "<repoId>",
-  "entrySymbols": ["<symbolId>"],
-  "taskText": "trace auth failure",
-  "budget": { "maxCards": 30, "maxEstimatedTokens": 4000 },
-  "minConfidence": 0.5,
-  "wireFormat": "compact",
-  "cardDetail": "signature",
-  "knownCardEtags": { "<symId>": "<etag>" }
-})
-
-// 4. If still need code
-sdl.code.getSkeleton({ "repoId": "<repoId>", "symbolId": "<id>", "maxLines": 120, "maxTokens": 900 })
-sdl.code.getHotPath({ "repoId": "<repoId>", "symbolId": "<id>", "identifiersToFind": ["validate","throw"], "contextLines": 2 })
-
-// 5. Last resort — must cite reason + identifiers
-sdl.code.needWindow({ "repoId": "<repoId>", "symbolId": "<id>", "reason": "confirm branch ordering", "expectedLines": 60, "identifiersToFind": ["validate"] })
+  "taskType": "explain",
+  "taskText": "Trace the request dispatch path from server entrypoint to tool handler",
+  "responseMode": "auto",
+  "options": {
+    "contextMode": "broad",
+    "semantic": true,
+    "includeRetrievalEvidence": false
+  },
+  "budget": { "maxTokens": 7000 }
+}
 ```
 
-Reuse the returned `sliceHandle` with `sdl.slice.refresh` instead of rebuilding.
-
----
-
-## 5. File I/O — `sdl.file` Replaces Native Read/Write
-
-`sdl.file` is the unified gateway. It is smarter and cheaper than native `Read`/`Write`:
-
-- `read` supports `offset/limit`, `search`+`searchContext`, `jsonPath`, `maxBytes` — never pulls the whole file unless asked.
-- `write` modes avoid rewriting entire files.
-- **Indexed sources auto-sync to the graph DB** via `syncLiveIndex` → `patchSavedFile` inside `file-write-internals.ts`. No follow-up `buffer.push` or `index.refresh` needed after a saved write to `.ts/.js/.py/.go/.rs/...` files. The symbol graph is consistent when `file.write` returns.
-- `searchEditPreview` / `searchEditApply` add sha256 + mtime preconditions and rollback on mid-batch failure — safer than N separate writes.
-
-### Read modes
+### Batched Escalation
 
 ```json
-// Line range
-sdl.file({ "op":"read", "repoId":"<repoId>", "filePath":"config/app.yaml", "offset":10, "limit":20 })
-
-// Keyword slice
-sdl.file({ "op":"read", "repoId":"<repoId>", "filePath":"docs/guide.md", "search":"authentication", "searchContext":3 })
-
-// JSON pointer
-sdl.file({ "op":"read", "repoId":"<repoId>", "filePath":"package.json", "jsonPath":"dependencies" })
-```
-
-Prefer `search` or `jsonPath` over raw `offset/limit` when you don't know where the match lives.
-
-### Write modes (mutually exclusive — pick one)
-
-| Mode            | Field(s)                                            | Use when                           |
-| --------------- | --------------------------------------------------- | ---------------------------------- |
-| Full replace    | `content`                                           | File is small or new               |
-| Line replace    | `replaceLines: { start, end, content }`             | You know the line range            |
-| Pattern replace | `replacePattern: { pattern, replacement, global? }` | Regex fits                         |
-| JSON mutate     | `jsonPath`, `jsonValue`                             | JSON/YAML/TOML value swap          |
-| Insert          | `insertAt: { line, content }`                       | Add without shifting unknown lines |
-| Append          | `append`                                            | Tack onto end                      |
-
-`createBackup: true` (default) writes `.bak` and rolls back on failure. Set `createIfMissing: true` for new-file writes.
-
-### Cross-file edits (two-phase)
-
-```json
-// Phase 1 — preview, no filesystem mutation
-sdl.file({
-  "op": "searchEditPreview",
-  "repoId": "<repoId>",
-  "targeting": "text",                         // or "symbol"
-  "query": { "literal": "oldName", "replacement": "newName", "global": true },
-  "editMode": "replacePattern",
-  "previewContextLines": 2,
-  "maxFiles": 50
-})
-// → planHandle + per-file diffs
-
-// Phase 2 — commit with preconditions + rollback
-sdl.file({ "op": "searchEditApply", "repoId": "<repoId>", "planHandle": "<handle>" })
-```
-
-Server holds the plan; stale mtimes/hashes abort the apply cleanly.
-
----
-
-## 6. Runtime Execution
-
-```json
-sdl.runtime.execute({
-  "repoId": "<repoId>",
-  "runtime": "node",              // node|typescript|python|shell|ruby|php|perl|r|elixir|go|java|kotlin|rust|c|cpp|csharp
-  "args": ["-e", "console.log('hi')"], // OR
-  "code": "console.log('hi')",    // inline → temp file
-  "outputMode": "minimal",        // ~50 tokens; summary|intent for more
-  "timeoutMs": 30000,             // ALWAYS set
-  "persistOutput": true
-})
-// → artifactHandle, exitCode, minimal tail
-```
-
-If you need detail after `minimal`:
-
-```json
-sdl.runtime.queryOutput({
-  "artifactHandle": "<handle>",
-  "queryTerms": ["error","failed"],
-  "maxExcerpts": 10,
-  "contextLines": 3,
-  "stream": "both"
-})
-```
-
-Never use `runtime.execute` as a workaround to read indexed source. Hooks may block it.
-
----
-
-## 7. Multi-Step via `sdl.workflow`
-
-Use when 2+ steps share data. `$N` references prior step output. Transforms (`dataPick`, `dataMap`, `dataFilter`, `dataSort`, `dataTemplate`) exist only inside workflow steps.
-
-```json
-sdl.workflow({
+{
   "repoId": "<repoId>",
   "steps": [
-    { "fn": "symbolSearch", "args": { "query": "parseConfig", "kinds":["function"], "limit": 5 } },
-    { "fn": "dataPick",     "args": { "from": "$0.results", "path": "symbolId", "limit": 3 } },
-    { "fn": "symbolGetCard","args": { "symbolIds": "$1" } },
-    { "fn": "codeSkeleton", "args": { "symbolId": "$0.results[0].symbolId", "maxLines": 80 } }
+    {
+      "fn": "symbolSearch",
+      "args": { "query": "handleRequest", "limit": 10, "wireFormat": "json" }
+    },
+    {
+      "fn": "symbolGetCard",
+      "args": { "symbolIds": ["$0.results.0.symbolId"] }
+    },
+    {
+      "fn": "codeSkeleton",
+      "args": {
+        "symbolId": "$0.results.0.symbolId",
+        "maxLines": 120,
+        "maxTokens": 900
+      }
+    },
+    {
+      "fn": "codeHotPath",
+      "args": {
+        "symbolId": "$0.results.0.symbolId",
+        "identifiersToFind": ["validate", "throw"],
+        "contextLines": 2,
+        "maxTokens": 900
+      }
+    }
   ],
   "budget": { "maxTokens": 6000 },
   "onError": "stop"
-})
+}
 ```
 
-For context retrieval, prefer `sdl.context` — the planner picks rungs for you. Reserve `sdl.workflow` for runtime, batch mutations, and pipelines.
-
----
-
-## 8. Token-Budget Patterns
-
-1. **Ladder, don't leap.** Card (≈50) → skeleton (≈200) → hotPath (≈500) → window (≈2000).
-2. **Bound everything.** `limit: 5-20` on search; `maxCards`/`maxEstimatedTokens` on slices; `maxLines`/`maxTokens` on code.
-3. **Pass ETags.** `ifNoneMatch` on `getCard`/`getSkeleton`; `knownCardEtags` / `knownVersion` on slice calls — server returns `notModified` instead of bytes.
-4. **Compact wire.** Leave `wireFormat: "compact"` and `wireFormatVersion: 2+` defaults. Only use `cardDetail: "full"` when necessary.
-5. **Tighten confidence.** Default `minConfidence: 0.5`. Raise to `0.8`/`0.95` when payload is heavy or precision matters.
-6. **Targeted reads.** `file.read` with `search`/`jsonPath` instead of full files.
-7. **Persist-then-probe runtimes.** `outputMode: "minimal"` first, `runtime.queryOutput` for detail.
-8. **Refresh, don't rebuild.** `slice.refresh` + `slice.spillover.get` reuse server state.
-9. **Stats before full.** `repo.overview({ level: "stats" })` before `"directories"` or `"full"`.
-10. **Check `usage.stats`.** Confirms savings and flags hot tools.
-
----
-
-## 9. Task-Specific Recipes
-
-| Task         | Sequence                                                                                                              |
-| ------------ | --------------------------------------------------------------------------------------------------------------------- |
-| Bug hunt     | `context(taskType:"debug", stackTrace)` → `slice.build` → `code.getHotPath` → `needWindow` only if still ambiguous    |
-| Add feature  | `repo.overview(stats)` → `symbol.search` → `getCard` → `slice.build(taskText)` → edit via `file.write` / `searchEdit` |
-| PR review    | `delta.get` → `pr.risk.analyze(riskThreshold:80)` → `getCard` / `getHotPath` on high-risk symbols                     |
-| Rename       | `searchEditPreview` (targeting:`symbol`) → review plan → `searchEditApply`                                            |
-| Config tweak | `file.read(jsonPath)` → `file.write(jsonPath, jsonValue)`                                                             |
-| Run tests    | `runtime.execute(shell, timeoutMs)` → `runtime.queryOutput(["fail","error"])`                                         |
-
----
-
-## 10. Anti-Patterns
-
-- Native `Read` / `Write` on any repo file → use `sdl.file`.
-- `code.needWindow` before `getSkeleton` / `getHotPath` — will be denied.
-- `symbol.search` with no `limit` (defaults to 50, max 1000) — wastes tokens.
-- `repo.overview({ level: "full" })` when `"stats"` answers.
-- Rebuilding slices instead of `slice.refresh`.
-- Running `index.refresh({ mode: "full" })` every session.
-- Reading entire config files instead of `jsonPath` / `search`.
-- Using `runtime.execute` to `cat` or `grep` indexed source — hooks block it and native tools have a cheaper equivalent anyway.
-- Parallel full-file reads when one `sdl.context` call returns the same evidence.
-
----
-
-## 11. When Hooks Block
-
-If a native tool is denied by a hook:
-
-1. Read the hook message — it lists the SDL action to use.
-2. Follow `nextBestAction` / `fallbackTools` / `fallbackRationale` on the SDL response.
-3. Don't retry the blocked native tool.
-4. If still stuck, `sdl.action.search({ query: "<intent>" })` for candidates.
-
----
-
-## 12. Deep Reference
+### Last-Resort Window
 
 ```json
-sdl.manual({ actions: ["slice.build","code.needWindow"], includeExamples: true })
-sdl.action.search({ query: "risk analyze", includeSchemas: true, limit: 5 })
+{
+  "repoId": "<repoId>",
+  "steps": [
+    {
+      "fn": "codeNeedWindow",
+      "args": {
+        "symbolId": "src/auth.ts::handleAuth",
+        "reason": "Need exact branch ordering for token refresh regression",
+        "expectedLines": 70,
+        "identifiersToFind": ["refreshToken", "catch", "expired"],
+        "maxTokens": 1200,
+        "responseMode": "auto"
+      }
+    }
+  ],
+  "budget": { "maxTokens": 2000 },
+  "onError": "stop"
+}
 ```
 
-`sdl.manual` with no args returns the full API (~60 KB — use focused queries in a live session).
+---
+
+## 3. File And Edit Rules
+
+Use SDL file and edit tools instead of native read/write paths.
+
+- Read non-indexed files with `file.read` or `sdl.file` `op: "read"`. Prefer `search`, `jsonPath`, or bounded ranges over full reads.
+- Write non-indexed files with `file.write` or `sdl.file` `op: "write"` using exactly one targeted write mode.
+- Edit indexed source with `symbol.edit` or `sdl.file` `symbolEditPreview` followed by `symbolEditApply` when the edit is anchored to one symbol.
+- Use `symbolEditApplyNow` only with a fresh `astFingerprint` and range from a current symbol card.
+- Use `search.edit` or `sdl.file` `op: "searchEditPreview"` for cross-file or repeated indexed-source edits. Prefer `targeting: "identifier"` for exact AST identifier replacements in supported structural languages that must avoid comments and strings, `targeting: "structural"` for tree-sitter capture edits such as calls, imports, properties, or plugin-defined grammar captures, and `operations[]` for heterogeneous batches.
+- Apply the returned plan handle only after reviewing snippets, file counts, and any `astMatches` capture summaries.
+- Use `sdl.workflow` plus `runtimeExecute` for a targeted script only when SDL edit tools cannot express the indexed-source edit; pass multiline payloads through `stdin`.
+- Track backup paths returned by edit/write tools and remove created `.bak` files after verification through SDL-governed runtime cleanup. Do not run broad native cleanup commands.
+
+### Non-Indexed Reads
+
+```json
+{
+  "repoId": "<repoId>",
+  "steps": [
+    {
+      "fn": "fileRead",
+      "args": { "filePath": "package.json", "jsonPath": "scripts" }
+    },
+    {
+      "fn": "fileRead",
+      "args": {
+        "filePath": "docs/guide.md",
+        "search": "authentication",
+        "searchContext": 3
+      }
+    },
+    {
+      "fn": "fileRead",
+      "args": { "filePath": "config/app.yaml", "offset": 10, "limit": 40 }
+    }
+  ],
+  "budget": { "maxTokens": 4000 },
+  "onError": "stop"
+}
+```
+
+### Non-Indexed Writes
+
+```json
+{
+  "repoId": "<repoId>",
+  "steps": [
+    {
+      "fn": "fileWrite",
+      "args": {
+        "filePath": "config/app.json",
+        "jsonPath": "server.port",
+        "jsonValue": 8080,
+        "createBackup": true
+      }
+    }
+  ],
+  "budget": { "maxTokens": 2000 },
+  "onError": "stop"
+}
+```
+
+### Indexed Source Edits
+
+```json
+{
+  "repoId": "<repoId>",
+  "steps": [
+    {
+      "fn": "symbolEditPreview",
+      "args": {
+        "symbolId": "src/config/parse.ts::parseConfig",
+        "edit": {
+          "mode": "replacePattern",
+          "pattern": "oldTimeout",
+          "replacement": "newTimeout"
+        }
+      }
+    },
+    {
+      "fn": "symbolEditApply",
+      "args": { "planHandle": "$0.planHandle" }
+    }
+  ],
+  "budget": { "maxTokens": 4000 },
+  "onError": "stop"
+}
+```
 
 ---
 
-## 13. Feedback loop (`sdl.agent.feedback`)
+## 4. Runtime Output Control
 
-After completing a task, call `sdl.agent.feedback` with:
-- `versionId` (from `sdl.repo.status`), `sliceHandle` (from `sdl.slice.build`).
-- `usefulSymbols` (required, min 1), `missingSymbols` (optional).
-- `taskType` (`"debug"` | `"review"` | `"implement"` | `"explain"`), `taskText`, `taskTags`.
+Run repo-local commands through `runtimeExecute` inside `sdl.workflow`.
 
-This trains the slice ranker and improves future context quality.
+Default to `outputMode: "minimal"`, `persistOutput: true`, and an explicit `timeoutMs`. Use `stdin` for multiline scripts/input instead of PowerShell here-strings, quote-heavy `node -e`, or base64 decode/eval workarounds. Query stored logs only when needed with `runtimeQueryOutput` and focused `queryTerms`. Use `outputMode: "intent"` when the command intent is already tied to known terms such as `FAIL`, `Error`, or a test name.
 
-Use `sdl.agent.feedback.query` with `limit` and `since` (ISO timestamp) to review aggregated stats on which symbols are most frequently useful/missing.
+Do not use runtime execution to print indexed source. Use the retrieval ladder instead.
+
+### Execute First
+
+```json
+{
+  "repoId": "<repoId>",
+  "steps": [
+    {
+      "fn": "runtimeExecute",
+      "args": {
+        "runtime": "node",
+        "args": ["--test", "tests/config.test.ts"],
+        "outputMode": "minimal",
+        "persistOutput": true,
+        "timeoutMs": 30000
+      }
+    }
+  ],
+  "budget": { "maxTokens": 1000 },
+  "onError": "stop"
+}
+```
+
+### Query Only Needed Output
+
+```json
+{
+  "repoId": "<repoId>",
+  "steps": [
+    {
+      "fn": "runtimeQueryOutput",
+      "args": {
+        "artifactHandle": "runtime-<repoId>-...",
+        "queryTerms": ["FAIL", "Error", "AssertionError", "config.test"],
+        "maxExcerpts": 8,
+        "contextLines": 3,
+        "stream": "both"
+      }
+    }
+  ],
+  "budget": { "maxTokens": 3000 },
+  "onError": "stop"
+}
+```
+
+For shell runtime, provide `code` when a shell wrapper is the right abstraction.
 
 ---
 
-## Appendix — Live-Index Sync Semantics
+## 5. Memory And Indexing
 
-`sdl.file` `op:"write"` on an indexed extension (`.ts .tsx .js .jsx .mjs .cjs .py .pyw .go .java .cs .c .h .cpp .hpp .cc .cxx .hxx .php .phtml .rs .kt .kts .sh .bash .zsh`) triggers `syncLiveIndex(repoId, relPath, newContent)` which calls `patchSavedFile` against the live-index overlay. On return:
+Assume SDL memory is disabled unless `repo.status`, config, or tool discovery shows `memory.enabled: true`. If disabled, do not repeatedly call memory tools.
 
-- Symbol graph reflects the new content.
-- File-level card ETags bump.
-- Slices referencing touched files can refresh via `sdl.slice.refresh`.
+When memory is enabled:
 
-For **unsaved** IDE draft state (not yet written to disk), push with `sdl.buffer.push({ eventType: "change"|"save" })` and finalize with `sdl.buffer.checkpoint`. Saved-file writes go through `sdl.file` directly — no buffer calls required.
+- Use `memory.query` for task-text lookup.
+- Use `memory.surface` after relevant symbol IDs are known.
+- At completion, store durable decisions, bugfixes, patterns, conventions, architecture notes, performance findings, or security notes with `memory.store`.
+- Link `symbolIds` and `fileRelPaths` when useful.
+
+For indexing:
+
+- Do not refresh by habit.
+- Run `index.refresh` only when `repo.status` shows stale or missing indexed state and the task depends on current code.
+- Prefer incremental refresh.
+- If refresh runs asynchronously, poll `repo.status` and wait for completion before continuing graph-backed retrieval.
+- Avoid full refresh unless the repo is newly registered, unindexed, or explicitly required.
+
+---
+
+## 6. Delegated Exploration
+
+When code exploration needs a sub-agent, team agent, or delegated codebase investigation and the client supports agents, use SDL Explorer instead of a generic Explore agent.
+
+Keep the assignment read-only unless the user explicitly requests implementation. Tell SDL Explorer to follow the SDL-MCP Agent Workflow and return symbol IDs, files, card summaries, slice handles, runtime artifact handles, and unresolved questions rather than raw source dumps.
+
+---
+
+## 7. Hook Enforcement
+
+Generated enforcement is conditional on the SDL-MCP PID file.
+
+- When the PID file is absent, native tools are allowed.
+- When the PID file is present, repo-targeting native shell, file read/write/edit, apply-patch, and non-SDL MCP file/search tools are denied.
+- Repo `.codex/**`, repo `.claude/**`, and non-repo agent skills, memories, and session internals remain allowed.
+
+If a hook denies a native tool:
+
+1. Read the hook message; it lists the SDL action to use.
+2. Follow SDL response guidance such as `nextBestAction`, `fallbackTools`, and `fallbackRationale`.
+3. Do not retry the blocked native tool.
+4. If still stuck, call `sdl.action.search({ query: "<intent>" })`.
+
+---
+
+## 8. Completion Checklist
+
+Before the final response:
+
+1. Verify the requested work through SDL-MCP runtime or focused SDL checks when applicable.
+2. Remove `.bak` files created during the task, or clearly report any kept intentionally.
+3. Call `usageStats` with `scope: "session"` and `persist: true` when SDL-MCP was used.
+4. Report the session token savings summary to the user.
+
+---
+
+## 9. Anti-Patterns
+
+- Starting with native `Read`, `Grep`, shell search, or repo-wide listing instead of `sdl.context`.
+- Calling `codeNeedWindow` before `symbolGetCard`, `codeSkeleton`, and `codeHotPath`.
+- Using `runtimeExecute` to print indexed source.
+- Running `index.refresh` every session or defaulting to full refresh.
+- Reading whole non-indexed files when `search`, `jsonPath`, or bounded ranges would answer.
+- Writing indexed source through native edits instead of `symbol.edit`, symbol edit preview/apply, or AST-aware `searchEditPreview`.
+- Keeping `.bak` files without reporting them.
+- Omitting `usageStats` after an SDL-MCP-backed task.

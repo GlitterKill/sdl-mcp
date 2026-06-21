@@ -99,10 +99,11 @@ Startup is sequenced (not parallel) — the DB must be ready before tools regist
 
 All MCP tools flow through a single dispatch path in `src/server.ts`. The exact surface is configuration-dependent:
 
-- Flat mode: 38 tools (`36` flat tools + `sdl.action.search` + `sdl.info`)
-- Gateway-only mode: 6 tools (`4` gateway tools + `sdl.action.search` + `sdl.info`)
-- Gateway + legacy mode: 42 tools (`4` gateway tools + `36` legacy flat tools + `sdl.action.search` + `sdl.info`)
-- Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`, or can run in exclusive mode with just `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`
+- Flat mode registers the direct action surface plus discovery and diagnostics.
+- Gateway-only mode registers the compact namespace projection plus discovery and diagnostics.
+- Gateway + legacy mode registers both the gateway projection and legacy flat actions.
+- Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`, or can run exclusive with `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`.
+- Exact registration counts live in the generated tool inventory and are checked by `npm run docs:tools:check`.
 
 Before strict Zod validation, requests also pass through a shared normalization layer. Flat and gateway calls therefore accept the same canonical camelCase fields plus common aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, and `spillover_handle`.
 
@@ -673,7 +674,7 @@ As an outbound observer, observability sits **outside the request path** of MCP 
 Current command/tool registration notes:
 
 - CLI commands: 13 (`init`, `doctor`, `info`, `index`, `serve`, `version`, `export`, `import`, `pull`, `benchmark:ci`, `summary`, `health`, `tool`)
-- Gateway mode keeps `sdl.action.search` and `sdl.info` outside the 4 namespace tools
+- Gateway mode keeps `sdl.action.search` and `sdl.info` outside the gateway namespace tools
 - Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`, or can run exclusive with `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`
 
 ```mermaid
@@ -735,8 +736,8 @@ graph TD
     C e11@--> J[MCP Tool Layer]
 
     subgraph Tool Registration Modes
-        J1[Flat Mode: 38 tools]
-        J2[Gateway Mode: 6 tools]
+        J1[Flat Mode]
+        J2[Gateway Mode]
         J3[Code Mode adds manual, context, and workflow]
     end
     J e12@--- J1
@@ -782,11 +783,12 @@ graph TD
     class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13,e14,e15,e16,e17,e18,e19,e20,e21,e22,e23,e24,e25,e26,e27,e28,e29,e30,e31,e32,e33,e34 animate;
 ```
 
-Registration-mode counts in the current implementation:
+Registration-mode summary:
 
-- Flat mode: 38 tools
-- Gateway-only mode: 6 tools
-- Gateway + legacy mode: 42 tools
-- Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`
+- Flat mode registers the direct action surface.
+- Gateway-only mode registers the compact namespace projection.
+- Gateway + legacy mode registers both surfaces.
+- Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`.
+- Exact counts live in the generated tool inventory.
 
 [Back to README](../README.md)

@@ -50,7 +50,7 @@ flowchart LR
 
 ## Complete Tool Reference
 
-SDL-MCP exposes 38 tools in flat default mode (36 flat tools plus `sdl.action.search` and `sdl.info`). Gateway mode replaces 35 of those flat actions with 4 namespace surfaces, while `sdl.file.write` remains flat-only. Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`, and can also run in exclusive mode with only those 5 tools.
+SDL-MCP exposes flat, gateway, and Code Mode tool surfaces. Exact tool counts move with the generated inventory, so use `npm run docs:tools:check` for current schema coverage. Agents should prefer `responseMode: "auto"` for large responses, run repo-local commands through `runtimeExecute`, and finish SDL-backed work with `usageStats`.
 
 | Category                   | Tool                       | Purpose                                                                                                                                                              |
 | :------------------------- | :------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -100,7 +100,7 @@ SDL-MCP exposes 38 tools in flat default mode (36 flat tools plus `sdl.action.se
 Copy this block into `AGENTS.md` for token-efficient SDL-MCP usage on the current codebase/tooling. Replace `[repoid]` with your repo's ID.
 
 ````md
-## SDL-MCP Token-Efficient Protocol (v0.10)
+## SDL-MCP Token-Efficient Protocol
 
 - Repository ID: `[repoid]`
 - MCP Server: `sdl-mcp`
