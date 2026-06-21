@@ -53,10 +53,7 @@ pub fn scan_directory(
         }
 
         // Check file extension and language
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         let lang = match extension_to_language(ext) {
             Some(l) => l,

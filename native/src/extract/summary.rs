@@ -34,8 +34,6 @@ const SUFFIX_PATTERNS: &[(&str, &str)] = &[
     ("Args", "Arguments type"),
 ];
 
-
-
 /// Maximum lines to scan in a function body for behavioral signals.
 const MAX_BODY_SCAN_LINES: usize = 200;
 
@@ -87,7 +85,8 @@ fn analyze_body_patterns(symbol: &NativeParsedSymbol, file_content: &str) -> Bod
 
     let mut in_block_comment = false;
     let mut else_if_count = 0;
-    let mut call_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut call_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
 
     let name_pattern = format!(r"\b{}\s*\(", regex::escape(&symbol.name));
     let name_regex = Regex::new(&name_pattern).ok();
@@ -97,85 +96,119 @@ fn analyze_body_patterns(symbol: &NativeParsedSymbol, file_content: &str) -> Bod
 
         // Skip comment lines
         if in_block_comment {
-            if line.contains("*/") { in_block_comment = false; }
+            if line.contains("*/") {
+                in_block_comment = false;
+            }
             continue;
         }
         if line.starts_with("/*") {
             in_block_comment = true;
-            if line.contains("*/") { in_block_comment = false; }
+            if line.contains("*/") {
+                in_block_comment = false;
+            }
             continue;
         }
-        if line.starts_with("//") { continue; }
-        if line.is_empty() { continue; }
+        if line.starts_with("//") {
+            continue;
+        }
+        if line.is_empty() {
+            continue;
+        }
 
         // Throws
         static RE_THROW: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bthrow\s+").unwrap());
-        if RE_THROW.is_match(line) { signals.throws = true; }
+        if RE_THROW.is_match(line) {
+            signals.throws = true;
+        }
 
         // Validates: guard clause with throw or early return
         static RE_IF_BANG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"if\s*\(!").unwrap());
         static RE_THROW_KW: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bthrow\b").unwrap());
         static RE_RETURN_KW: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\breturn\b").unwrap());
-        if RE_IF_BANG.is_match(line) && (RE_THROW_KW.is_match(line) || RE_RETURN_KW.is_match(line)) {
+        if RE_IF_BANG.is_match(line) && (RE_THROW_KW.is_match(line) || RE_RETURN_KW.is_match(line))
+        {
             signals.validates = true;
         }
         static RE_IF_THROW_NEW: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"if\s*\(").unwrap());
-        static RE_THROW_NEW: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"throw\s+new\b").unwrap());
+        static RE_THROW_NEW: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"throw\s+new\b").unwrap());
         if RE_IF_THROW_NEW.is_match(line) && RE_THROW_NEW.is_match(line) {
             signals.validates = true;
         }
 
         // Async
         static RE_AWAIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bawait\s").unwrap());
-        if RE_AWAIT.is_match(line) { signals.is_async = true; }
+        if RE_AWAIT.is_match(line) {
+            signals.is_async = true;
+        }
 
         // Iteration
         static RE_ITER: LazyLock<Regex> = LazyLock::new(|| {
             Regex::new(r"(\.forEach\s*\(|\.map\s*\(|\.filter\s*\(|\.reduce\s*\(|\bfor\s*\(|\bwhile\s*\(|\bfor\s+of\b|\bfor\s+in\b)").unwrap()
         });
-        if RE_ITER.is_match(line) { signals.iterates = true; }
+        if RE_ITER.is_match(line) {
+            signals.iterates = true;
+        }
 
         // Transform
         static RE_TRANSFORM: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"(\.map\s*\(|\.flatMap\s*\(|Object\.assign\s*\(|\{\.\.\.|Array\.from\s*\()").unwrap()
+            Regex::new(r"(\.map\s*\(|\.flatMap\s*\(|Object\.assign\s*\(|\{\.\.\.|Array\.from\s*\()")
+                .unwrap()
         });
-        if RE_TRANSFORM.is_match(line) { signals.transforms = true; }
+        if RE_TRANSFORM.is_match(line) {
+            signals.transforms = true;
+        }
 
         // Aggregation
-        static RE_AGG: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"(\.reduce\s*\(|Math\.(min|max|abs)\s*\()").unwrap()
-        });
-        if RE_AGG.is_match(line) { signals.aggregates = true; }
+        static RE_AGG: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"(\.reduce\s*\(|Math\.(min|max|abs)\s*\()").unwrap());
+        if RE_AGG.is_match(line) {
+            signals.aggregates = true;
+        }
 
         // Sort
-        static RE_SORT: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"(\.sort\s*\(|\.toSorted\s*\()").unwrap()
-        });
-        if RE_SORT.is_match(line) { signals.sorts = true; }
+        static RE_SORT: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"(\.sort\s*\(|\.toSorted\s*\()").unwrap());
+        if RE_SORT.is_match(line) {
+            signals.sorts = true;
+        }
 
         // Merge
         static RE_MERGE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"(Object\.assign\s*\(|(?i:deepMerge)\s*\(|\{\.\.\.[^,]*,\s*\.\.\.)" ).unwrap()
+            Regex::new(r"(Object\.assign\s*\(|(?i:deepMerge)\s*\(|\{\.\.\.[^,]*,\s*\.\.\.)")
+                .unwrap()
         });
-        if RE_MERGE.is_match(line) { signals.merges = true; }
+        if RE_MERGE.is_match(line) {
+            signals.merges = true;
+        }
 
         // Cache
         static RE_CACHE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"(?i)(cache\.(get|set|has)\s*\(|\.memoize\s*\(|new\s+WeakMap|new\s+WeakRef)").unwrap()
+            Regex::new(
+                r"(?i)(cache\.(get|set|has)\s*\(|\.memoize\s*\(|new\s+WeakMap|new\s+WeakRef)",
+            )
+            .unwrap()
         });
-        if RE_CACHE.is_match(line) { signals.caches = true; }
+        if RE_CACHE.is_match(line) {
+            signals.caches = true;
+        }
 
         // Network I/O
         static RE_NET: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"(\bfetch\s*\(|axios\.|http\.request\s*\(|http\.get\s*\(|http\.post\s*\()").unwrap()
+            Regex::new(r"(\bfetch\s*\(|axios\.|http\.request\s*\(|http\.get\s*\(|http\.post\s*\()")
+                .unwrap()
         });
-        if RE_NET.is_match(line) { signals.has_network_io = true; }
+        if RE_NET.is_match(line) {
+            signals.has_network_io = true;
+        }
 
         // File I/O
         static RE_FILE: LazyLock<Regex> = LazyLock::new(|| {
             Regex::new(r"(fs\.(readFile|writeFile|appendFile|unlink|mkdir|rmdir|existsSync|readFileSync|writeFileSync)|\b(readFileSync|writeFileSync)\s*\()").unwrap()
         });
-        if RE_FILE.is_match(line) { signals.has_file_io = true; }
+        if RE_FILE.is_match(line) {
+            signals.has_file_io = true;
+        }
 
         // DB I/O
         static RE_DB: LazyLock<Regex> = LazyLock::new(|| {
@@ -192,50 +225,84 @@ fn analyze_body_patterns(symbol: &NativeParsedSymbol, file_content: &str) -> Bod
         static RE_EMIT: LazyLock<Regex> = LazyLock::new(|| {
             Regex::new(r"(\.emit\s*\(|\.dispatch\s*\(|\.trigger\s*\(|\.publish\s*\()").unwrap()
         });
-        if RE_EMIT.is_match(line) { signals.emits_events = true; }
+        if RE_EMIT.is_match(line) {
+            signals.emits_events = true;
+        }
 
         // Event listeners
         static RE_LISTEN: LazyLock<Regex> = LazyLock::new(|| {
             Regex::new(r#"(\.on\s*\(\s*['"`]|\.addEventListener\s*\(|\.subscribe\s*\()"#).unwrap()
         });
-        if RE_LISTEN.is_match(line) { signals.registers_listeners = true; }
+        if RE_LISTEN.is_match(line) {
+            signals.registers_listeners = true;
+        }
 
         // Early returns
-        static RE_EARLY_RETURN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*return\b").unwrap());
-        if RE_EARLY_RETURN.is_match(raw_line) { signals.early_returns += 1; }
+        static RE_EARLY_RETURN: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"^\s*return\b").unwrap());
+        if RE_EARLY_RETURN.is_match(raw_line) {
+            signals.early_returns += 1;
+        }
 
         // Switch
         static RE_SWITCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bswitch\s*\(").unwrap());
-        if RE_SWITCH.is_match(line) { signals.switch_or_chain = true; }
+        if RE_SWITCH.is_match(line) {
+            signals.switch_or_chain = true;
+        }
 
         // Else-if chain
-        static RE_ELSE_IF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\belse\s+if\b").unwrap());
-        if RE_ELSE_IF.is_match(line) { else_if_count += 1; }
+        static RE_ELSE_IF: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"\belse\s+if\b").unwrap());
+        if RE_ELSE_IF.is_match(line) {
+            else_if_count += 1;
+        }
 
         // Recursion
         if let Some(ref re) = name_regex {
-            if re.is_match(line) { signals.recursion = true; }
+            if re.is_match(line) {
+                signals.recursion = true;
+            }
         }
 
         // Track call targets for delegation detection
         static RE_CALL: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"(?:this\.)?([a-zA-Z_$][a-zA-Z0-9_$]*(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*)*)\s*\(").unwrap()
+            Regex::new(r"(?:this\.)?([a-zA-Z_$][a-zA-Z0-9_$]*(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*)*)\s*\(")
+                .unwrap()
         });
-        static RE_SKIP_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"^(function |const |if |while |for |switch )").unwrap()
-        });
+        static RE_SKIP_PREFIX: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"^(function |const |if |while |for |switch )").unwrap());
         if !RE_SKIP_PREFIX.is_match(line) {
             if let Some(cap) = RE_CALL.captures(line) {
                 let target = cap.get(1).unwrap().as_str().to_string();
-                static SKIP_CALLS: LazyLock<std::collections::HashSet<&str>> = LazyLock::new(|| {
-                    [
-                        "console.log", "console.warn", "console.error",
-                        "Math.min", "Math.max", "Math.abs", "Math.floor", "Math.ceil", "Math.round",
-                        "Array.isArray", "Object.keys", "Object.values", "Object.entries",
-                        "JSON.stringify", "JSON.parse", "String", "Number", "Boolean",
-                        "parseInt", "parseFloat", "Promise.all", "Promise.resolve",
-                    ].into_iter().collect()
-                });
+                static SKIP_CALLS: LazyLock<std::collections::HashSet<&str>> =
+                    LazyLock::new(|| {
+                        [
+                            "console.log",
+                            "console.warn",
+                            "console.error",
+                            "Math.min",
+                            "Math.max",
+                            "Math.abs",
+                            "Math.floor",
+                            "Math.ceil",
+                            "Math.round",
+                            "Array.isArray",
+                            "Object.keys",
+                            "Object.values",
+                            "Object.entries",
+                            "JSON.stringify",
+                            "JSON.parse",
+                            "String",
+                            "Number",
+                            "Boolean",
+                            "parseInt",
+                            "parseFloat",
+                            "Promise.all",
+                            "Promise.resolve",
+                        ]
+                        .into_iter()
+                        .collect()
+                    });
                 if !SKIP_CALLS.contains(target.as_str()) {
                     *call_counts.entry(target).or_insert(0) += 1;
                 }
@@ -244,16 +311,25 @@ fn analyze_body_patterns(symbol: &NativeParsedSymbol, file_content: &str) -> Bod
     }
 
     // Switch/chain: flag if >2 else-if branches
-    if else_if_count > 2 { signals.switch_or_chain = true; }
+    if else_if_count > 2 {
+        signals.switch_or_chain = true;
+    }
 
     // Delegation: if one call dominates a short body AND no more-specific
     // behavioral signal was detected
-    let has_specific_signal =
-        signals.iterates || signals.transforms || signals.aggregates ||
-        signals.sorts || signals.merges || signals.caches ||
-        signals.has_network_io || signals.has_file_io || signals.has_db_io ||
-        signals.emits_events || signals.registers_listeners ||
-        signals.recursion || signals.validates;
+    let has_specific_signal = signals.iterates
+        || signals.transforms
+        || signals.aggregates
+        || signals.sorts
+        || signals.merges
+        || signals.caches
+        || signals.has_network_io
+        || signals.has_file_io
+        || signals.has_db_io
+        || signals.emits_events
+        || signals.registers_listeners
+        || signals.recursion
+        || signals.validates;
     if !call_counts.is_empty() && body_lines.len() <= 10 && !has_specific_signal {
         let total_calls: usize = call_counts.values().sum();
         if let Some((top_target, &top_count)) = call_counts.iter().max_by_key(|(_, v)| *v) {
@@ -272,57 +348,134 @@ fn analyze_body_patterns(symbol: &NativeParsedSymbol, file_content: &str) -> Bod
 /// Mirrors countActiveSignals in summaries.ts.
 fn count_active_signals(signals: &BodySignals) -> usize {
     let mut count = 0;
-    if signals.throws { count += 1; }
-    if signals.validates { count += 1; }
-    if signals.delegates.is_some() { count += 1; }
-    if signals.iterates { count += 1; }
-    if signals.has_network_io { count += 1; }
-    if signals.has_file_io { count += 1; }
-    if signals.has_db_io { count += 1; }
-    if signals.transforms { count += 1; }
-    if signals.aggregates { count += 1; }
-    if signals.caches { count += 1; }
-    if signals.sorts { count += 1; }
-    if signals.merges { count += 1; }
-    if signals.switch_or_chain { count += 1; }
-    if signals.recursion { count += 1; }
-    if signals.emits_events { count += 1; }
-    if signals.registers_listeners { count += 1; }
+    if signals.throws {
+        count += 1;
+    }
+    if signals.validates {
+        count += 1;
+    }
+    if signals.delegates.is_some() {
+        count += 1;
+    }
+    if signals.iterates {
+        count += 1;
+    }
+    if signals.has_network_io {
+        count += 1;
+    }
+    if signals.has_file_io {
+        count += 1;
+    }
+    if signals.has_db_io {
+        count += 1;
+    }
+    if signals.transforms {
+        count += 1;
+    }
+    if signals.aggregates {
+        count += 1;
+    }
+    if signals.caches {
+        count += 1;
+    }
+    if signals.sorts {
+        count += 1;
+    }
+    if signals.merges {
+        count += 1;
+    }
+    if signals.switch_or_chain {
+        count += 1;
+    }
+    if signals.recursion {
+        count += 1;
+    }
+    if signals.emits_events {
+        count += 1;
+    }
+    if signals.registers_listeners {
+        count += 1;
+    }
     count
 }
 
 /// Verb prefixes that convey a clear intent and should take priority over
 /// generic body-pattern templates. Mirrors STRONG_VERB_PREFIXES in summaries.ts.
 const STRONG_VERB_PREFIXES: &[&str] = &[
-    "build", "compose", "create", "make", "construct",
-    "compute", "calculate", "calc",
-    "load", "fetch", "read",
-    "save", "write", "store", "persist",
-    "parse", "decode",
-    "format", "render", "stringify",
-    "normalize", "clean",
-    "init", "initialize", "setup",
-    "register", "subscribe",
-    "remove", "delete", "destroy", "unregister",
-    "update", "patch",
-    "validate", "sanitize",
-    "extract", "derive",
-    "apply", "execute", "run", "invoke",
-    "reset", "clear", "flush", "purge",
-    "compare", "diff",
-    "count", "measure", "estimate",
-    "clone", "copy", "duplicate",
+    "build",
+    "compose",
+    "create",
+    "make",
+    "construct",
+    "compute",
+    "calculate",
+    "calc",
+    "load",
+    "fetch",
+    "read",
+    "save",
+    "write",
+    "store",
+    "persist",
+    "parse",
+    "decode",
+    "format",
+    "render",
+    "stringify",
+    "normalize",
+    "clean",
+    "init",
+    "initialize",
+    "setup",
+    "register",
+    "subscribe",
+    "remove",
+    "delete",
+    "destroy",
+    "unregister",
+    "update",
+    "patch",
+    "validate",
+    "sanitize",
+    "extract",
+    "derive",
+    "apply",
+    "execute",
+    "run",
+    "invoke",
+    "reset",
+    "clear",
+    "flush",
+    "purge",
+    "compare",
+    "diff",
+    "count",
+    "measure",
+    "estimate",
+    "clone",
+    "copy",
+    "duplicate",
 ];
 
 /// Build a summary from a verb-prefixed function name. Returns None when the
 /// first word is not a recognized action verb. Mirrors generatePrefixSummary
 /// in summaries.ts (minimal subset — just the most common verbs).
-fn generate_prefix_summary(first_word: &str, subject: &str, signals: &BodySignals) -> Option<String> {
-    let io_detail_get = if signals.has_db_io { " from database" }
-        else if signals.has_network_io { " from network" }
-        else if signals.has_file_io { " from filesystem" }
-        else if signals.caches { " (cached)" }
-        else { "" };
+fn generate_prefix_summary(
+    first_word: &str,
+    subject: &str,
+    signals: &BodySignals,
+) -> Option<String> {
+    let io_detail_get = if signals.has_db_io {
+        " from database"
+    } else if signals.has_network_io {
+        " from network"
+    } else if signals.has_file_io {
+        " from filesystem"
+    } else if signals.caches {
+        " (cached)"
+    } else {
+        ""
+    };
     match first_word {
         "get" => Some(format!("Retrieves {}{}", subject, io_detail_get)),
         "set" => Some(format!("Sets {}", subject)),
@@ -332,17 +485,29 @@ fn generate_prefix_summary(first_word: &str, subject: &str, signals: &BodySignal
         "build" | "compose" => Some(format!(
             "Builds {}{}",
             subject,
-            if signals.iterates { " from components" } else { "" }
+            if signals.iterates {
+                " from components"
+            } else {
+                ""
+            }
         )),
         "compute" | "calculate" | "calc" => Some(format!(
             "Computes {}{}",
             subject,
-            if signals.aggregates { " by aggregating values" } else { "" }
+            if signals.aggregates {
+                " by aggregating values"
+            } else {
+                ""
+            }
         )),
         "check" | "verify" | "assert" => Some(format!(
             "Checks {}{}",
             subject,
-            if signals.throws { ", throws on failure" } else { "" }
+            if signals.throws {
+                ", throws on failure"
+            } else {
+                ""
+            }
         )),
         "ensure" | "require" => Some(format!(
             "Ensures {} is valid{}",
@@ -352,7 +517,11 @@ fn generate_prefix_summary(first_word: &str, subject: &str, signals: &BodySignal
         "parse" | "decode" => Some(format!(
             "Parses {}{}",
             subject,
-            if signals.validates { " with validation" } else { "" }
+            if signals.validates {
+                " with validation"
+            } else {
+                ""
+            }
         )),
         "format" | "render" | "stringify" => Some(format!("Formats {} for output", subject)),
         "normalize" | "clean" => Some(format!("Normalizes {} to canonical form", subject)),
@@ -360,37 +529,62 @@ fn generate_prefix_summary(first_word: &str, subject: &str, signals: &BodySignal
         "register" | "subscribe" => Some(format!(
             "Registers {}{}",
             subject,
-            if signals.registers_listeners { " as event listener" } else { "" }
+            if signals.registers_listeners {
+                " as event listener"
+            } else {
+                ""
+            }
         )),
         "remove" | "delete" | "destroy" | "unregister" => Some(format!("Removes {}", subject)),
         "update" | "patch" => Some(format!(
             "Updates {}{}",
             subject,
-            if signals.has_db_io { " in database" } else { "" }
+            if signals.has_db_io {
+                " in database"
+            } else {
+                ""
+            }
         )),
         "load" | "fetch" | "read" => {
-            let io = if signals.has_db_io { " from database" }
-                else if signals.has_network_io { " from network" }
-                else if signals.has_file_io { " from disk" }
-                else { "" };
+            let io = if signals.has_db_io {
+                " from database"
+            } else if signals.has_network_io {
+                " from network"
+            } else if signals.has_file_io {
+                " from disk"
+            } else {
+                ""
+            };
             Some(format!("Loads {}{}", subject, io))
         }
         "save" | "write" | "store" | "persist" => {
-            let io = if signals.has_db_io { " to database" }
-                else if signals.has_file_io { " to disk" }
-                else { "" };
+            let io = if signals.has_db_io {
+                " to database"
+            } else if signals.has_file_io {
+                " to disk"
+            } else {
+                ""
+            };
             Some(format!("Saves {}{}", subject, io))
         }
         "validate" | "sanitize" => Some(format!(
             "Validates {}{}",
             subject,
-            if signals.throws { ", throws on invalid input" } else { "" }
+            if signals.throws {
+                ", throws on invalid input"
+            } else {
+                ""
+            }
         )),
         "extract" | "derive" => Some(format!("Extracts {}", subject)),
         "apply" | "execute" | "run" | "invoke" => Some(format!(
             "Executes {}{}",
             subject,
-            if signals.is_async { " asynchronously" } else { "" }
+            if signals.is_async {
+                " asynchronously"
+            } else {
+                ""
+            }
         )),
         "reset" => Some(format!("Resets {} to initial state", subject)),
         "clear" | "flush" | "purge" => Some(format!("Clears {}", subject)),
@@ -401,18 +595,29 @@ fn generate_prefix_summary(first_word: &str, subject: &str, signals: &BodySignal
     }
 }
 
-fn generate_behavioral_function_summary(symbol: &NativeParsedSymbol, file_content: &str) -> Option<String> {
+fn generate_behavioral_function_summary(
+    symbol: &NativeParsedSymbol,
+    file_content: &str,
+) -> Option<String> {
     let signals = analyze_body_patterns(symbol, file_content);
 
     // Derive subject from name: split camelCase, drop the first word (verb)
     let words = split_camel_case(&symbol.name);
     let first_word = words.first().map(|w| w.to_lowercase()).unwrap_or_default();
     let rest_words = if words.len() > 1 {
-        words[1..].iter().map(|w| w.to_lowercase()).collect::<Vec<_>>().join(" ")
+        words[1..]
+            .iter()
+            .map(|w| w.to_lowercase())
+            .collect::<Vec<_>>()
+            .join(" ")
     } else {
         String::new()
     };
-    let subject = if rest_words.is_empty() { None } else { Some(rest_words.clone()) };
+    let subject = if rest_words.is_empty() {
+        None
+    } else {
+        Some(rest_words.clone())
+    };
 
     // Prefix-based action verbs (build/get/load/save/...) describe what the
     // function does at a higher level than the generic transform/iterate
@@ -428,7 +633,10 @@ fn generate_behavioral_function_summary(symbol: &NativeParsedSymbol, file_conten
     // Length gate: long functions with only weak generic signals should
     // return None — the name alone is more honest than a vague summary.
     let active_count = count_active_signals(&signals);
-    let body_length = symbol.range.end_line.saturating_sub(symbol.range.start_line);
+    let body_length = symbol
+        .range
+        .end_line
+        .saturating_sub(symbol.range.start_line);
     if body_length > 60 && active_count <= 2 {
         return None;
     }
@@ -445,7 +653,11 @@ fn generate_behavioral_function_summary(symbol: &NativeParsedSymbol, file_conten
 
     // 2. Validation (but not if recursion/iteration/transform detected)
     if signals.validates && !signals.iterates && !signals.transforms && !signals.recursion {
-        let throw_clause = if signals.throws { ", throws on failure" } else { "" };
+        let throw_clause = if signals.throws {
+            ", throws on failure"
+        } else {
+            ""
+        };
         return Some(match &subject {
             Some(s) => format!("Validates {}{}", s, throw_clause),
             None => format!("Validates input{}", throw_clause),
@@ -606,38 +818,47 @@ pub fn generate_summary(symbol: &NativeParsedSymbol, file_content: &str, languag
     // Dispatch to per-kind generators for non-function/method symbols.
     match symbol.kind.as_str() {
         "function" | "method" => {
-            return generate_behavioral_function_summary(symbol, file_content)
-                .unwrap_or_default();
+            return generate_behavioral_function_summary(symbol, file_content).unwrap_or_default();
         }
         "class" => {
-            if let Some(s) = generate_class_summary(symbol) { return s; }
+            if let Some(s) = generate_class_summary(symbol) {
+                return s;
+            }
             return String::new();
         }
         "interface" => {
-            if let Some(s) = generate_interface_summary(symbol) { return s; }
+            if let Some(s) = generate_interface_summary(symbol) {
+                return s;
+            }
             return String::new();
         }
         "type" | "type_alias" => {
-            if let Some(s) = generate_type_summary(symbol) { return s; }
+            if let Some(s) = generate_type_summary(symbol) {
+                return s;
+            }
             return String::new();
         }
         "enum" => {
-            if let Some(s) = generate_enum_summary(symbol) { return s; }
+            if let Some(s) = generate_enum_summary(symbol) {
+                return s;
+            }
             return String::new();
         }
         "variable" => {
-            if let Some(s) = generate_variable_summary(symbol) { return s; }
+            if let Some(s) = generate_variable_summary(symbol) {
+                return s;
+            }
             return String::new();
         }
         "constructor" => {
-            if let Some(s) = generate_constructor_summary(symbol) { return s; }
+            if let Some(s) = generate_constructor_summary(symbol) {
+                return s;
+            }
             return String::new();
         }
         _ => return String::new(),
     }
-
 }
-
 
 /// Check whether a symbol has a doc comment (without generating the summary).
 pub fn has_doc_comment(symbol: &NativeParsedSymbol, file_content: &str, language: &str) -> bool {
@@ -978,7 +1199,10 @@ fn generate_class_summary(symbol: &NativeParsedSymbol) -> Option<String> {
             if !generics.is_empty() {
                 let type_params = generics.join(", ");
                 let base = split_camel_case(name).join(" ").to_lowercase();
-                return Some(format!("Generic {} class parameterized by {}", base, type_params));
+                return Some(format!(
+                    "Generic {} class parameterized by {}",
+                    base, type_params
+                ));
             }
         }
     }
@@ -1005,7 +1229,10 @@ fn generate_interface_summary(symbol: &NativeParsedSymbol) -> Option<String> {
             if !generics.is_empty() {
                 let type_params = generics.join(", ");
                 let base = split_camel_case(name).join(" ").to_lowercase();
-                return Some(format!("Generic interface defining {} contract for {}", base, type_params));
+                return Some(format!(
+                    "Generic interface defining {} contract for {}",
+                    base, type_params
+                ));
             }
         }
     }
@@ -1027,7 +1254,10 @@ fn generate_type_summary(symbol: &NativeParsedSymbol) -> Option<String> {
             if !generics.is_empty() {
                 let type_params = generics.join(", ");
                 let base = split_camel_case(name).join(" ").to_lowercase();
-                return Some(format!("Generic type alias for {} over {}", base, type_params));
+                return Some(format!(
+                    "Generic type alias for {} over {}",
+                    base, type_params
+                ));
             }
         }
     }
@@ -1043,22 +1273,34 @@ fn generate_enum_summary(symbol: &NativeParsedSymbol) -> Option<String> {
 fn generate_variable_summary(symbol: &NativeParsedSymbol) -> Option<String> {
     let name = &symbol.name;
     let is_screaming = name.len() > 1
-        && name.chars().next().map_or(false, |c| c.is_ascii_uppercase())
-        && name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+        && name
+            .chars()
+            .next()
+            .map_or(false, |c| c.is_ascii_uppercase())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
     if is_screaming {
         return Some(format!("Constant defining {}", split_snake_case(name)));
     }
     if name.ends_with("Schema") && name.len() > 6 {
-        let base = split_camel_case(&name[..name.len() - 6]).join(" ").to_lowercase();
+        let base = split_camel_case(&name[..name.len() - 6])
+            .join(" ")
+            .to_lowercase();
         return Some(format!("Validation schema for {}", base));
     }
     if name.ends_with("Validator") && name.len() > 9 {
-        let base = split_camel_case(&name[..name.len() - 9]).join(" ").to_lowercase();
+        let base = split_camel_case(&name[..name.len() - 9])
+            .join(" ")
+            .to_lowercase();
         return Some(format!("Validator for {}", base));
     }
     // Default/default prefix
     if name.starts_with("default") || name.starts_with("Default") {
-        let rest = name.trim_start_matches("default").trim_start_matches("Default").trim_start_matches('_');
+        let rest = name
+            .trim_start_matches("default")
+            .trim_start_matches("Default")
+            .trim_start_matches('_');
         if !rest.is_empty() {
             let words = split_camel_case(rest).join(" ").to_lowercase();
             return Some(format!("Default {} value", words));
@@ -1076,7 +1318,9 @@ fn generate_constructor_summary(_symbol: &NativeParsedSymbol) -> Option<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{NativeParsedSymbol, NativeSymbolSignature, NativeSymbolSignatureParam, NativeRange};
+    use crate::types::{
+        NativeParsedSymbol, NativeRange, NativeSymbolSignature, NativeSymbolSignatureParam,
+    };
 
     fn make_symbol(name: &str, kind: &str) -> NativeParsedSymbol {
         NativeParsedSymbol {
@@ -1112,7 +1356,10 @@ mod tests {
     fn test_class_with_provider_suffix() {
         let s = make_symbol("AuthProvider", "class");
         let result = generate_class_summary(&s);
-        assert_eq!(result, Some("Implements the provider pattern for auth".to_string()));
+        assert_eq!(
+            result,
+            Some("Implements the provider pattern for auth".to_string())
+        );
     }
 
     #[test]
@@ -1120,7 +1367,10 @@ mod tests {
         let mut s = make_symbol("Repository", "class");
         s.signature.as_mut().unwrap().generics = Some(vec!["T".to_string()]);
         let result = generate_class_summary(&s);
-        assert_eq!(result, Some("Generic repository class parameterized by T".to_string()));
+        assert_eq!(
+            result,
+            Some("Generic repository class parameterized by T".to_string())
+        );
     }
 
     #[test]
@@ -1169,8 +1419,14 @@ mod tests {
     fn test_constructor_with_typed_params() {
         let mut s = make_symbol("constructor", "constructor");
         s.signature.as_mut().unwrap().params = Some(vec![
-            NativeSymbolSignatureParam { name: "name".to_string(), type_name: Some("string".to_string()) },
-            NativeSymbolSignatureParam { name: "age".to_string(), type_name: Some("number".to_string()) },
+            NativeSymbolSignatureParam {
+                name: "name".to_string(),
+                type_name: Some("string".to_string()),
+            },
+            NativeSymbolSignatureParam {
+                name: "age".to_string(),
+                type_name: Some("number".to_string()),
+            },
         ]);
         let result = generate_constructor_summary(&s);
         assert_eq!(result, None);

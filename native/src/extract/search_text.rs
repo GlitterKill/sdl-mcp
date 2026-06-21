@@ -90,7 +90,9 @@ fn extract_signature_terms(signature: &Option<crate::types::NativeSymbolSignatur
 
 #[cfg(test)]
 mod tests {
-    use crate::types::{NativeParsedSymbol, NativeRange, NativeSymbolSignature, NativeSymbolSignatureParam};
+    use crate::types::{
+        NativeParsedSymbol, NativeRange, NativeSymbolSignature, NativeSymbolSignatureParam,
+    };
 
     use super::build_search_text;
 

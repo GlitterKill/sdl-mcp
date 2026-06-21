@@ -29,4 +29,3 @@ pub struct NativeProcess {
     pub steps: Vec<NativeProcessStep>,
     pub depth: u32,
 }
-

@@ -10,8 +10,8 @@ fn main() {
     std::fs::create_dir_all(&out_dir).expect("Failed to create src/scip directory");
 
     // Use protox (pure-Rust protobuf compiler) instead of shelling out to protoc
-    let file_descriptor_set = protox::compile(["proto/scip.proto"], ["proto/"])
-        .expect("Failed to compile SCIP protobuf");
+    let file_descriptor_set =
+        protox::compile(["proto/scip.proto"], ["proto/"]).expect("Failed to compile SCIP protobuf");
 
     prost_build::Config::new()
         .out_dir(&out_dir)

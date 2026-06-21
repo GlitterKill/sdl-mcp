@@ -1,6 +1,6 @@
-use std::sync::Mutex;
 use napi::Result as NapiResult;
 use prost::Message;
+use std::sync::Mutex;
 
 // Include the prost-generated code from build.rs output.
 // build.rs writes to CARGO_MANIFEST_DIR/src/scip/ so the generated file
@@ -8,8 +8,8 @@ use prost::Message;
 #[path = "scip.rs"]
 mod scip_proto;
 
-use scip_proto::*;
 use super::types::*;
+use scip_proto::*;
 
 struct DocumentIterState {
     docs: Vec<Document>,
@@ -31,9 +31,8 @@ impl ScipDecodeState {
     /// Parse a SCIP index file from disk into an in-memory protobuf structure.
     pub fn new(file_path: &str) -> NapiResult<Self> {
         const MAX_SCIP_INDEX_BYTES: u64 = 512 * 1024 * 1024;
-        let metadata = std::fs::metadata(file_path).map_err(|e| {
-            napi::Error::from_reason(format!("Failed to stat SCIP file: {}", e))
-        })?;
+        let metadata = std::fs::metadata(file_path)
+            .map_err(|e| napi::Error::from_reason(format!("Failed to stat SCIP file: {}", e)))?;
         if metadata.len() > MAX_SCIP_INDEX_BYTES {
             return Err(napi::Error::from_reason(format!(
                 "SCIP index file too large: {} bytes (max {} bytes)",
@@ -65,14 +64,14 @@ impl ScipDecodeState {
             tool_version: tool_info.map(|t| t.version.clone()).unwrap_or_default(),
             tool_arguments: tool_info.map(|t| t.arguments.clone()).unwrap_or_default(),
             project_root: meta.map(|m| m.project_root.clone()).unwrap_or_default(),
-            text_document_encoding: meta.map(|m| {
-                match m.text_document_encoding {
+            text_document_encoding: meta
+                .map(|m| match m.text_document_encoding {
                     0 => "UnspecifiedTextEncoding".to_string(),
                     1 => "UTF8".to_string(),
                     2 => "UTF16".to_string(),
                     _ => format!("Unknown({})", m.text_document_encoding),
-                }
-            }).unwrap_or_else(|| "UnspecifiedTextEncoding".to_string()),
+                })
+                .unwrap_or_else(|| "UnspecifiedTextEncoding".to_string()),
         })
     }
 
@@ -83,7 +82,9 @@ impl ScipDecodeState {
     /// `std::mem::take`, releasing its occurrences and symbol data immediately
     /// rather than keeping the full decoded index resident until drop.
     pub fn next_document(&self) -> NapiResult<Option<NapiScipDocument>> {
-        let mut state = self.doc_state.lock()
+        let mut state = self
+            .doc_state
+            .lock()
             .map_err(|e| napi::Error::from_reason(format!("Lock poisoned: {}", e)))?;
         let idx = state.cursor;
         if idx >= state.docs.len() {
@@ -96,7 +97,11 @@ impl ScipDecodeState {
 
     /// Return all external symbols from the SCIP index.
     pub fn external_symbols(&self) -> NapiResult<Vec<NapiScipExternalSymbol>> {
-        Ok(self.external_symbols.iter().map(convert_external_symbol).collect())
+        Ok(self
+            .external_symbols
+            .iter()
+            .map(convert_external_symbol)
+            .collect())
     }
 }
 

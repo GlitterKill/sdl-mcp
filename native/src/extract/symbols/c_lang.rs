@@ -189,7 +189,6 @@ fn process_type_definition(
     Some(symbol)
 }
 
-
 fn find_identifier_in_declarator(node: Node<'_>) -> Option<Node<'_>> {
     if matches!(node.kind(), "identifier" | "type_identifier") {
         return Some(node);

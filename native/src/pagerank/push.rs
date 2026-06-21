@@ -218,7 +218,10 @@ mod tests {
         let s3 = score_for(&scores, 3);
         let s5 = score_for(&scores, 5);
         // Seed always retains the highest mass.
-        assert!(s0 > s3, "seed should dominate downstream nodes (s0={s0} s3={s3})");
+        assert!(
+            s0 > s3,
+            "seed should dominate downstream nodes (s0={s0} s3={s3})"
+        );
         // Symmetry: nodes 4 and 5 have identical paths, scores should match.
         let s4 = score_for(&scores, 4);
         assert!(
@@ -252,7 +255,13 @@ mod tests {
         let max = 2000;
         let single_a = run(six_node_graph(), seeds(&[(0, 1.0)]), alpha, eps, max);
         let single_b = run(six_node_graph(), seeds(&[(3, 1.0)]), alpha, eps, max);
-        let combined = run(six_node_graph(), seeds(&[(0, 0.5), (3, 0.5)]), alpha, eps, max);
+        let combined = run(
+            six_node_graph(),
+            seeds(&[(0, 0.5), (3, 0.5)]),
+            alpha,
+            eps,
+            max,
+        );
 
         for node in 0..6 {
             let expected = 0.5 * score_for(&single_a, node) + 0.5 * score_for(&single_b, node);
@@ -272,6 +281,9 @@ mod tests {
         // does not panic / loop forever when the budget is small.
         let unbounded = run(six_node_graph(), seeds(&[(0, 1.0)]), 0.15, 1e-4, 2000);
         let bounded = run(six_node_graph(), seeds(&[(0, 1.0)]), 0.15, 1e-4, 3);
-        assert!(bounded.len() <= unbounded.len(), "cap should not grow result");
+        assert!(
+            bounded.len() <= unbounded.len(),
+            "cap should not grow result"
+        );
     }
 }

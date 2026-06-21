@@ -401,19 +401,16 @@ describe("provider-first indexRepo fallback", () => {
     assert.equal(derivedState?.embeddingsDirty, false);
   });
 
-  it("uses legacy fallback for explicit providerFirst incremental refreshes", async () => {
+  it("requires scip.generator for explicit providerFirst incremental refreshes", async () => {
     const repoId = await initIndexedRepo("providerFirst", {
       scipFixture: "complete",
     });
 
     await indexRepo(repoId, "full");
-    const result = await indexRepo(repoId, "incremental");
 
-    assert.equal(result.providerFirst?.selectedPipeline, "providerFirst");
-    assert.equal(result.providerFirstExecution?.status, "fallback");
-    assert.match(
-      result.providerFirstExecution?.reasons.join(" ") ?? "",
-      /full refreshes only/i,
+    await assert.rejects(
+      () => indexRepo(repoId, "incremental"),
+      /provider-first SCIP incremental execution requires an enabled scip\.generator/i,
     );
   });
 

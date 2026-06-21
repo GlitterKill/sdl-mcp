@@ -45,9 +45,7 @@ pub fn extract_calls_ts(
     // First-wins symbol map keyed on name (matches TS `symbolMap`).
     let mut symbol_map: HashMap<&str, &NativeParsedSymbol> = HashMap::new();
     for sym in symbols {
-        symbol_map
-            .entry(sym.name.as_str())
-            .or_insert(sym);
+        symbol_map.entry(sym.name.as_str()).or_insert(sym);
     }
 
     let mut calls: Vec<NativeParsedCall> = Vec::new();
@@ -325,9 +323,7 @@ fn walk_nested_calls(
         if let Some(child) = node.child(0) {
             if child.kind() == "call_expression" && !seen.contains(&child.id()) {
                 seen.insert(child.id());
-                if let Some(call) =
-                    extract_single_call(child, source, symbols, symbol_map, None)
-                {
+                if let Some(call) = extract_single_call(child, source, symbols, symbol_map, None) {
                     calls.push(call);
                 }
             }
@@ -408,7 +404,15 @@ fn walk_for_calls(
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        walk_for_calls(child, caller_node_id, source, symbols, symbol_map, calls, seen);
+        walk_for_calls(
+            child,
+            caller_node_id,
+            source,
+            symbols,
+            symbol_map,
+            calls,
+            seen,
+        );
     }
 }
 

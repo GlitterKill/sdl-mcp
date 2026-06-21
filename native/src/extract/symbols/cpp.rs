@@ -2,9 +2,7 @@ use tree_sitter::Node;
 
 use crate::types::NativeParsedSymbol;
 
-use super::common::{
-    find_child_by_kind, find_child_node, make_symbol, node_text, ParamInfo,
-};
+use super::common::{find_child_by_kind, find_child_node, make_symbol, node_text, ParamInfo};
 
 pub fn extract_symbols_cpp(
     root: Node<'_>,
@@ -23,32 +21,38 @@ pub fn extract_symbols_cpp(
                 }
             }
             "class_specifier" | "struct_specifier" => {
-                if let Some(symbol) = process_class_like(node, source, repo_id, rel_path) {
-                    symbols.push(symbol);
+                if !is_template_declaration_subject(node) {
+                    if let Some(symbol) = process_class_like(node, source, repo_id, rel_path) {
+                        symbols.push(symbol);
+                    }
                 }
             }
             "enum_specifier" => {
-                if let Some(symbol) = process_enum(node, source, repo_id, rel_path) {
-                    symbols.push(symbol);
+                if !is_template_declaration_subject(node) {
+                    if let Some(symbol) = process_enum(node, source, repo_id, rel_path) {
+                        symbols.push(symbol);
+                    }
                 }
             }
             "type_definition" | "alias_declaration" => {
-                if let Some(symbol) = process_type_alias(node, source, repo_id, rel_path) {
-                    symbols.push(symbol);
+                if !is_template_declaration_subject(node) {
+                    if let Some(symbol) = process_type_alias(node, source, repo_id, rel_path) {
+                        symbols.push(symbol);
+                    }
                 }
             }
             "template_declaration" => {
                 process_template_declaration(node, source, repo_id, rel_path, &mut symbols);
             }
             "function_definition" => {
-                if !is_under_template_declaration(node) {
+                if !is_template_declaration_subject(node) {
                     if let Some(symbol) = process_function_like(node, source, repo_id, rel_path) {
                         symbols.push(symbol);
                     }
                 }
             }
             "declaration" => {
-                if !is_under_template_declaration(node) {
+                if !is_template_declaration_subject(node) {
                     process_declaration(node, source, repo_id, rel_path, &mut symbols);
                 }
             }
@@ -693,9 +697,15 @@ fn extract_terminal_name(name: &str) -> String {
     name.rsplit("::").next().unwrap_or(name).trim().to_string()
 }
 
-fn is_under_template_declaration(node: Node<'_>) -> bool {
+fn is_template_declaration_subject(node: Node<'_>) -> bool {
     let mut current = node.parent();
     while let Some(candidate) = current {
+        if matches!(
+            candidate.kind(),
+            "class_specifier" | "struct_specifier" | "enum_specifier"
+        ) {
+            return false;
+        }
         if candidate.kind() == "template_declaration" {
             return true;
         }

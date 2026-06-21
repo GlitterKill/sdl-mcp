@@ -63,7 +63,10 @@ impl ProcessTracer {
         let mut id_to_index: HashMap<&'a str, usize> = HashMap::new();
         let mut index_to_id: Vec<&'a str> = Vec::new();
 
-        let get_or_insert = |id: &'a str, id_to_index: &mut HashMap<&'a str, usize>, index_to_id: &mut Vec<&'a str>| -> usize {
+        let get_or_insert = |id: &'a str,
+                             id_to_index: &mut HashMap<&'a str, usize>,
+                             index_to_id: &mut Vec<&'a str>|
+         -> usize {
             if let Some(&idx) = id_to_index.get(id) {
                 idx
             } else {
@@ -107,7 +110,11 @@ impl ProcessTracer {
         self.trace_with_graph(entry_symbol_id, &graph)
     }
 
-    pub fn trace_multiple(&self, entry_symbol_ids: &[String], edges: &[CallEdge]) -> Vec<TraceResult> {
+    pub fn trace_multiple(
+        &self,
+        entry_symbol_ids: &[String],
+        edges: &[CallEdge],
+    ) -> Vec<TraceResult> {
         let entry_refs: Vec<&str> = entry_symbol_ids.iter().map(|s| s.as_str()).collect();
         let graph = self.build_graph(&entry_refs, edges);
         entry_refs
@@ -219,11 +226,7 @@ mod tests {
     #[test]
     fn test_linear_chain() {
         let tracer = ProcessTracer::new(None);
-        let edges = vec![
-            edge("a", "b"),
-            edge("b", "c"),
-            edge("c", "d"),
-        ];
+        let edges = vec![edge("a", "b"), edge("b", "c"), edge("c", "d")];
 
         let result = tracer.trace("a", &edges);
 
@@ -269,11 +272,7 @@ mod tests {
     #[test]
     fn test_cycle() {
         let tracer = ProcessTracer::new(None);
-        let edges = vec![
-            edge("a", "b"),
-            edge("b", "c"),
-            edge("c", "a"),
-        ];
+        let edges = vec![edge("a", "b"), edge("b", "c"), edge("c", "a")];
 
         let result = tracer.trace("a", &edges);
 
@@ -288,9 +287,7 @@ mod tests {
 
     #[test]
     fn test_depth_limit() {
-        let config = TracerConfig {
-            max_depth: 3,
-        };
+        let config = TracerConfig { max_depth: 3 };
         let tracer = ProcessTracer::new(Some(config));
 
         let edges: Vec<CallEdge> = (0..10)
@@ -382,10 +379,7 @@ mod tests {
     #[test]
     fn test_disconnected_graph() {
         let tracer = ProcessTracer::new(None);
-        let edges = vec![
-            edge("a", "b"),
-            edge("x", "y"),
-        ];
+        let edges = vec![edge("a", "b"), edge("x", "y")];
 
         let result = tracer.trace("a", &edges);
 
@@ -400,9 +394,7 @@ mod tests {
     #[test]
     fn test_self_loop() {
         let tracer = ProcessTracer::new(None);
-        let edges = vec![
-            edge("a", "a"),
-        ];
+        let edges = vec![edge("a", "a")];
 
         let result = tracer.trace("a", &edges);
 

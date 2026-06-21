@@ -3,8 +3,8 @@ use tree_sitter::Node;
 use crate::types::NativeParsedSymbol;
 
 use super::common::{
-    extract_range, find_child_by_kind, make_symbol, make_symbol_with_forced_signature,
-    node_text, ParamInfo,
+    extract_range, find_child_by_kind, make_symbol, make_symbol_with_forced_signature, node_text,
+    ParamInfo,
 };
 
 pub fn extract_symbols_ts(
@@ -59,8 +59,9 @@ fn traverse_ast(
                     let mut cursor = node.walk();
                     for child in node.children(&mut cursor) {
                         if child.kind() == "variable_declarator" {
-                            let var_symbols =
-                                process_variable_declaration(child, source, repo_id, rel_path, node);
+                            let var_symbols = process_variable_declaration(
+                                child, source, repo_id, rel_path, node,
+                            );
                             symbols.extend(var_symbols);
                         }
                     }
@@ -312,7 +313,8 @@ fn process_method_definition(
     // signatures (no body) produce empty generics.
     let has_body = {
         let mut cursor = node.walk();
-        let result = node.children(&mut cursor)
+        let result = node
+            .children(&mut cursor)
             .any(|c| c.kind() == "statement_block");
         result
     };

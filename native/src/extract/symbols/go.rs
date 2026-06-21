@@ -148,9 +148,7 @@ fn process_method_declaration(
     // TS go.ts extractParameters for methods inserts TWO synthetic params
     // for the receiver: first the receiver type as name+type, then the
     // receiver name with the receiver type as type. Replicate that.
-    if let Some((receiver_type, receiver_name)) =
-        extract_receiver_info(node, source)
-    {
+    if let Some((receiver_type, receiver_name)) = extract_receiver_info(node, source) {
         params.insert(
             0,
             ParamInfo {
@@ -288,10 +286,7 @@ fn extract_receiver_type(node: Node<'_>, source: &[u8]) -> Option<String> {
     extract_receiver_info(node, source).map(|(ty, _)| ty)
 }
 
-fn extract_receiver_info(
-    node: Node<'_>,
-    source: &[u8],
-) -> Option<(String, Option<String>)> {
+fn extract_receiver_info(node: Node<'_>, source: &[u8]) -> Option<(String, Option<String>)> {
     let param_lists = collect_parameter_lists(node);
     let receiver_list = param_lists.first().copied()?;
 
@@ -424,7 +419,11 @@ fn extract_parameter_type(node: Node<'_>, source: &[u8]) -> Option<String> {
 
 fn extract_results(node: Node<'_>, source: &[u8]) -> Option<String> {
     let parameter_lists = collect_parameter_lists(node);
-    let result_list_index = if node.kind() == "method_declaration" { 2 } else { 1 };
+    let result_list_index = if node.kind() == "method_declaration" {
+        2
+    } else {
+        1
+    };
     if let Some(result_list) = parameter_lists.get(result_list_index) {
         let mut result_types = Vec::new();
         let mut cursor = result_list.walk();

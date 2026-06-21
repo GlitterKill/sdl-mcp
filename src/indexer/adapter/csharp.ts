@@ -459,7 +459,7 @@ class CSharpAdapter implements LanguageAdapter {
     node: Parser.SyntaxNode,
     filePath: string,
   ): ExtractedSymbol | null {
-    const name = this.extractIdentifier(node);
+    const name = node.childForFieldName("name")?.text ?? this.extractIdentifier(node);
     if (!name) return null;
 
     const visibility = this.extractVisibility(node);

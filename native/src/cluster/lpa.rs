@@ -85,7 +85,10 @@ pub fn label_propagation(
         if adj[node].is_empty() {
             unclustered.push(node);
         } else {
-            communities.entry(final_labels[node]).or_default().push(node);
+            communities
+                .entry(final_labels[node])
+                .or_default()
+                .push(node);
         }
     }
     for nodes in communities.values_mut() {
@@ -227,8 +230,15 @@ mod tests {
         let result = label_propagation(&edges, node_count, 100);
         let duration = start.elapsed();
         let total: usize = result.communities.values().map(|v| v.len()).sum();
-        println!("{} nodes, {} edges, {} comms, {} clustered, {} unclustered, {:?}",
-            node_count, edges.len(), result.communities.len(), total, result.unclustered.len(), duration);
+        println!(
+            "{} nodes, {} edges, {} comms, {} clustered, {} unclustered, {:?}",
+            node_count,
+            edges.len(),
+            result.communities.len(),
+            total,
+            result.unclustered.len(),
+            duration
+        );
         assert!(duration.as_millis() < 100, "took {:?}", duration);
     }
 }

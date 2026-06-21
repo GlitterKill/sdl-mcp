@@ -20,4 +20,3 @@ pub struct NativeClusterAssignment {
     pub cluster_id: String,
     pub membership_score: f64,
 }
-

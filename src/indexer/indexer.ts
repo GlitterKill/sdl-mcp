@@ -221,9 +221,10 @@ function providerFirstLspExecutor(
   return executor === "lspFull" || executor === "lspIncremental";
 }
 
-function shouldDeferScipIoPreRefreshToIncrementalProvider(
+async function shouldDeferScipIoPreRefreshToIncrementalProvider(
+  repoId: string,
   mode: "full" | "incremental",
-): boolean {
+): Promise<boolean> {
   if (mode !== "incremental") return false;
   try {
     const appConfig = loadConfig();
@@ -235,7 +236,8 @@ function shouldDeferScipIoPreRefreshToIncrementalProvider(
     return (
       providerFirst.selectedPipeline === "providerFirst" &&
       appConfig.scip?.enabled === true &&
-      appConfig.scip.generator.enabled === true
+      appConfig.scip.generator.enabled === true &&
+      (await hasProviderFirstBootstrap(await getLadybugConn(), repoId))
     );
   } catch {
     return false;
@@ -2126,10 +2128,9 @@ export async function indexRepo(
   // src/scip/scip-io-runner.ts::runScipIoPreRefreshForIndex.
   const { runScipIoPreRefreshForIndex } =
     await import("../scip/scip-io-runner.js");
-  const scipPreRefreshResult =
-    shouldDeferScipIoPreRefreshToIncrementalProvider(mode)
-      ? undefined
-      : await runScipIoPreRefreshForIndex(repoId, signal);
+  const scipPreRefreshResult = (await shouldDeferScipIoPreRefreshToIncrementalProvider(repoId, mode))
+    ? undefined
+    : await runScipIoPreRefreshForIndex(repoId, signal);
 
   // Serialize concurrent indexRepo calls for the same repo to prevent
   // LadybugDB write conflicts and race conditions during rapid watcher events.

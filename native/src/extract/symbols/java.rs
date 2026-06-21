@@ -15,7 +15,11 @@ pub fn extract_symbols_java(
 
     while let Some(node) = stack.pop() {
         match node.kind() {
-            "package_declaration" => {}
+            "package_declaration" => {
+                if let Some(symbol) = process_package_declaration(node, source, repo_id, rel_path) {
+                    symbols.push(symbol);
+                }
+            }
             "class_declaration" => {
                 if let Some(symbol) = process_type_like(node, source, repo_id, rel_path, "class") {
                     symbols.push(symbol);
@@ -69,6 +73,35 @@ pub fn extract_symbols_java(
     symbols
 }
 
+fn process_package_declaration(
+    node: Node<'_>,
+    source: &[u8],
+    repo_id: &str,
+    rel_path: &str,
+) -> Option<NativeParsedSymbol> {
+    let name_node = find_child_node(node, "scoped_identifier")?;
+    let name = node_text(name_node, source).to_string();
+    if name.is_empty() {
+        return None;
+    }
+
+    let mut symbol = make_symbol(
+        &name,
+        "module",
+        node,
+        source,
+        repo_id,
+        rel_path,
+        &[],
+        None,
+        &[],
+        "public",
+        &[],
+    );
+    symbol.exported = true;
+    Some(symbol)
+}
+
 fn process_type_like(
     node: Node<'_>,
     source: &[u8],
@@ -80,12 +113,11 @@ fn process_type_like(
     let generics = extract_generics(node, source);
     let visibility = extract_visibility(node, source);
 
-    // TS java.ts emits signature for class_declaration and
-    // interface_declaration but NOT for enum_declaration /
-    // record_declaration / annotation_type_declaration.
+    // TS java.ts emits a signature for class, interface, and record declarations,
+    // but not enum or annotation declarations.
     let should_force_signature = matches!(
         node.kind(),
-        "class_declaration" | "interface_declaration"
+        "class_declaration" | "interface_declaration" | "record_declaration"
     );
 
     let mut symbol = if should_force_signature {
@@ -313,10 +345,7 @@ fn extract_reference_parameter_type(node: Node<'_>, source: &[u8]) -> Option<Str
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
-            "type_identifier"
-            | "scoped_type_identifier"
-            | "generic_type"
-            | "array_type" => {
+            "type_identifier" | "scoped_type_identifier" | "generic_type" | "array_type" => {
                 let text = node_text(child, source).to_string();
                 if !text.is_empty() {
                     return Some(text);

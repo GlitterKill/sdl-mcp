@@ -116,12 +116,8 @@ class CppAdapter implements LanguageAdapter {
           }
         }
         if (lastSpecifier) return lastSpecifier;
-        if (
-          current.type === "class_specifier" ||
-          current.type === "struct_specifier"
-        ) {
-          break;
-        }
+        if (current.type === "struct_specifier") return "public";
+        if (current.type === "class_specifier") return "private";
         current = current.parent;
       }
 

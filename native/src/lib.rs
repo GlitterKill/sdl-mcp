@@ -6,10 +6,10 @@ use std::collections::HashMap;
 use regex::Regex;
 
 pub mod cluster;
-pub mod pagerank;
 pub mod error;
 pub mod extract;
 pub mod lang;
+pub mod pagerank;
 pub mod parse;
 pub mod process;
 pub mod scanner;
@@ -18,15 +18,11 @@ pub mod types;
 
 use types::{
     NativeClusterAssignment, NativeClusterEdge, NativeClusterSymbol, NativeFileInput,
-    NativeParsedFile, NativeProcess, NativeProcessCallEdge, NativeProcessStep,
-    NativeProcessSymbol,
+    NativeParsedFile, NativeProcess, NativeProcessCallEdge, NativeProcessStep, NativeProcessSymbol,
 };
 
 #[napi]
-pub fn parse_files(
-    files: Vec<NativeFileInput>,
-    thread_count: u32,
-) -> Vec<NativeParsedFile> {
+pub fn parse_files(files: Vec<NativeFileInput>, thread_count: u32) -> Vec<NativeParsedFile> {
     let count = if thread_count == 0 {
         num_cpus()
     } else {
@@ -70,7 +66,6 @@ pub fn parse_files_async(
         thread_count: count,
     })
 }
-
 
 #[napi]
 pub fn hash_content_native(content: String) -> String {
@@ -184,13 +179,7 @@ pub fn compute_personalized_pagerank(
     epsilon: f64,
     max_nodes_touched: u32,
 ) -> Vec<pagerank::NativePprScore> {
-    pagerank::push::run(
-        adjacency,
-        seeds,
-        alpha,
-        epsilon,
-        max_nodes_touched as usize,
-    )
+    pagerank::push::run(adjacency, seeds, alpha, epsilon, max_nodes_touched as usize)
 }
 
 #[napi]
@@ -253,10 +242,8 @@ pub fn trace_processes(
                 .collect();
 
             // Deterministic process IDs (hash-based).
-            let process_id = parse::content_hash::hash_content(&format!(
-                "process:{}",
-                trace.entry_symbol_id,
-            ));
+            let process_id =
+                parse::content_hash::hash_content(&format!("process:{}", trace.entry_symbol_id,));
 
             NativeProcess {
                 process_id,
@@ -275,11 +262,10 @@ fn num_cpus() -> usize {
     cpus.saturating_sub(1).max(1)
 }
 
-
 // --- SCIP decoder napi exports ---
 
-use std::sync::Arc;
 use scip::decoder::ScipDecodeState;
+use std::sync::Arc;
 
 #[napi]
 pub struct ScipDecodeHandle {
@@ -311,4 +297,3 @@ impl ScipDecodeHandle {
         self.state.external_symbols()
     }
 }
-
