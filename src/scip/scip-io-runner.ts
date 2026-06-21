@@ -439,18 +439,27 @@ function hasExplicitScipIoLanguageArg(args: readonly string[]): boolean {
 export function buildScipIoIndexArgs(opts: {
   generatorArgs?: readonly string[];
   repoLanguages?: readonly string[];
+  filesFromPath?: string;
+  outputPath?: string;
 }): string[] {
   const generatorArgs = [...(opts.generatorArgs ?? [])];
+  const scopedArgs: string[] = [];
+  if (opts.filesFromPath) {
+    scopedArgs.push("--files-from", opts.filesFromPath);
+  }
+  if (opts.outputPath) {
+    scopedArgs.push("--output", opts.outputPath);
+  }
   if (
     opts.repoLanguages === undefined ||
     hasExplicitScipIoLanguageArg(generatorArgs)
   ) {
-    return generatorArgs;
+    return [...generatorArgs, ...scopedArgs];
   }
 
   const languages = scipIoLanguagesForRepo(opts.repoLanguages);
-  if (languages.length === 0) return generatorArgs;
-  return ["--lang", languages.join(","), ...generatorArgs];
+  if (languages.length === 0) return [...generatorArgs, ...scopedArgs];
+  return ["--lang", languages.join(","), ...generatorArgs, ...scopedArgs];
 }
 
 function parseStoredRepoLanguages(
@@ -2524,6 +2533,8 @@ export async function runScipIoBeforeIndex(opts: {
   repoLanguages?: readonly string[];
   repoConfig?: RepoConfig;
   repoId?: string;
+  filesFromPath?: string;
+  outputPath?: string;
 }): Promise<ScipIoPreRefreshResult> {
   const {
     repoRootPath,
@@ -2533,6 +2544,8 @@ export async function runScipIoBeforeIndex(opts: {
     repoLanguages,
     repoConfig,
     repoId,
+    filesFromPath,
+    outputPath,
   } = opts;
   const requestedLanguageFilter =
     repoLanguages === undefined
@@ -2552,6 +2565,8 @@ export async function runScipIoBeforeIndex(opts: {
   const effectiveArgs = buildScipIoIndexArgs({
     generatorArgs: generatorCfg.args,
     repoLanguages,
+    filesFromPath,
+    outputPath,
   });
 
   let resolution: ScipIoResolution | null;
@@ -2603,6 +2618,8 @@ export async function runScipIoBeforeIndex(opts: {
     cwd: repoRootPath,
     timeoutMs: generatorCfg.timeoutMs,
     languages: requestedLanguageFilter,
+    filesFromPath,
+    outputPath,
   });
 
   const cachePreparation = await prepareScipGeneratorCache({
@@ -2720,12 +2737,34 @@ export async function runScipIoBeforeIndex(opts: {
   }
 
   if (hasCustomOutputArg(effectiveArgs)) {
+    const customSelection = outputPath
+      ? await selectGeneratedScipIndexes({
+          repoRootPath,
+          mode: "merged",
+          maxIndexBytes,
+          candidatePaths: [outputPath],
+        })
+      : { generatedIndexes: [], failures: [] };
+    const customAccepted = customSelection.generatedIndexes.some(
+      (index) => !index.skipped,
+    );
     return {
       attempted: true,
-      ok: true,
+      ok: outputPath ? customAccepted : true,
       run: result,
-      generatedIndexes: [],
-      failures: [],
+      generatedIndexes: customSelection.generatedIndexes,
+      failures: outputPath
+        ? customAccepted || customSelection.failures.length > 0
+          ? customSelection.failures
+          : [
+              {
+                stage: "generator-select",
+                message:
+                  "scip-io completed but produced no custom output .scip file",
+                path: outputPath,
+              },
+            ]
+        : [],
       cache: cachePreparation.diagnostic,
     };
   }

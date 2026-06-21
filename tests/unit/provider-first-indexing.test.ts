@@ -5395,12 +5395,12 @@ describe("provider-first indexing foundation", () => {
     assert.deepEqual(plan.reasons, []);
   });
 
-  it("allows auto mode to fall back when the next provider-first phase cannot execute", () => {
+  it("plans auto mode SCIP incremental execution when SCIP is configured", () => {
     const selection = resolveProviderFirstPipeline({
       indexing: IndexingConfigSchema.parse({ pipeline: "auto" }),
       scip: ScipConfigSchema.parse({
         enabled: true,
-        indexes: [{ path: "index.scip" }],
+        generator: { enabled: true },
       }),
     });
 
@@ -5409,21 +5409,22 @@ describe("provider-first indexing foundation", () => {
       mode: "incremental",
       scip: ScipConfigSchema.parse({
         enabled: true,
-        indexes: [{ path: "index.scip" }],
+        generator: { enabled: true },
       }),
     });
 
-    assert.equal(plan.canExecute, false);
-    assert.equal(plan.shouldFallbackToLegacy, true);
-    assert.match(plan.reasons.join(" "), /full refreshes/i);
+    assert.equal(plan.canExecute, true);
+    assert.equal(plan.executor, "scipIncremental");
+    assert.equal(plan.shouldFallbackToLegacy, false);
+    assert.deepEqual(plan.reasons, []);
   });
 
-  it("allows explicit providerFirst incremental refreshes to use legacy until provider incrementals exist", () => {
+  it("plans explicit providerFirst SCIP incremental execution when SCIP is configured", () => {
     const selection = resolveProviderFirstPipeline({
       indexing: IndexingConfigSchema.parse({ pipeline: "providerFirst" }),
       scip: ScipConfigSchema.parse({
         enabled: true,
-        indexes: [{ path: "index.scip" }],
+        generator: { enabled: true },
       }),
     });
 
@@ -5432,14 +5433,46 @@ describe("provider-first indexing foundation", () => {
       mode: "incremental",
       scip: ScipConfigSchema.parse({
         enabled: true,
-        indexes: [{ path: "index.scip" }],
+        generator: { enabled: true },
       }),
     });
 
-    assert.equal(plan.canExecute, false);
-    assert.equal(plan.shouldFallbackToLegacy, true);
-    assert.equal(plan.fallbackReasonCode, "incrementalUnsupported");
-    assert.match(plan.reasons.join(" "), /full refreshes/i);
+    assert.equal(plan.canExecute, true);
+    assert.equal(plan.executor, "scipIncremental");
+    assert.equal(plan.shouldFallbackToLegacy, false);
+    assert.deepEqual(plan.reasons, []);
+  });
+
+  it("plans LSP incremental execution when LSP is configured without SCIP", () => {
+    const selection = resolveProviderFirstPipeline({
+      indexing: IndexingConfigSchema.parse({ pipeline: "providerFirst" }),
+      semanticEnrichment: SemanticEnrichmentConfigSchema.parse({
+        enabled: true,
+        providers: {
+          lsp: {
+            enabled: true,
+            servers: {
+              tsserver: {
+                serverId: "tsserver",
+                command: "typescript-language-server",
+                languages: ["typescript"],
+              },
+            },
+          },
+        },
+      }),
+    });
+
+    const plan = resolveProviderFirstExecutionPlan({
+      selection,
+      mode: "incremental",
+      scip: ScipConfigSchema.parse({ enabled: false }),
+    });
+
+    assert.equal(plan.canExecute, true);
+    assert.equal(plan.executor, "lspIncremental");
+    assert.equal(plan.shouldFallbackToLegacy, false);
+    assert.deepEqual(plan.reasons, []);
   });
 
   it("plans auto mode SCIP execution when a full SCIP source is configured", () => {

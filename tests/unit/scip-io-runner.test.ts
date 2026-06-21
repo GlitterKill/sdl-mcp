@@ -63,6 +63,7 @@ function makeStubBinary(
     sleepMs?: number;
     logFile?: string;
     writeIndexContent?: string;
+    writeCustomOutputContent?: string;
     writeSplitIndexes?: Record<string, string>;
   } = {},
 ): string {
@@ -72,6 +73,11 @@ function makeStubBinary(
     const lines: string[] = ["@echo off", "echo scip-io stub invoked %*"];
     if (opts.writeIndexContent) {
       lines.push(`>"%CD%\\index.scip" echo ${opts.writeIndexContent}`);
+    }
+    if (opts.writeCustomOutputContent) {
+      lines.push(
+        `node -e "const fs=require('fs'); const args=process.argv.slice(1); const i=args.indexOf('--output'); if (i >= 0 && args[i+1]) fs.writeFileSync(args[i+1], '${opts.writeCustomOutputContent.replaceAll("'", "\\'")}');" %*`,
+      );
     }
     for (const [name, content] of Object.entries(
       opts.writeSplitIndexes ?? {},
@@ -101,6 +107,14 @@ function makeStubBinary(
   ];
   if (opts.writeIndexContent) {
     lines.push(`printf '%s' '${opts.writeIndexContent}' > "$PWD/index.scip"`);
+  }
+  if (opts.writeCustomOutputContent) {
+    const escapedContent = opts.writeCustomOutputContent.replaceAll("'", "'\\''");
+    lines.push(
+      `out=""`,
+      `while [ "$#" -gt 0 ]; do if [ "$1" = "--output" ]; then out="$2"; shift; fi; shift; done`,
+      `if [ -n "$out" ]; then printf '%s' '${escapedContent}' > "$out"; fi`,
+    );
   }
   for (const [name, content] of Object.entries(opts.writeSplitIndexes ?? {})) {
     const escapedContent = content.replaceAll("'", "'\\''");
@@ -335,6 +349,26 @@ describe("scip-io-runner: repo language filter args", () => {
     );
   });
 
+  it("adds scoped file selection and output args for incremental provider runs", () => {
+    assert.deepEqual(
+      buildScipIoIndexArgs({
+        generatorArgs: ["--all-roots"],
+        repoLanguages: ["ts", "rs"],
+        filesFromPath: "C:/tmp/changed-files.txt",
+        outputPath: "C:/tmp/incremental.scip",
+      }),
+      [
+        "--lang",
+        "typescript,rust",
+        "--all-roots",
+        "--files-from",
+        "C:/tmp/changed-files.txt",
+        "--output",
+        "C:/tmp/incremental.scip",
+      ],
+    );
+  });
+
   it("does not synthesize a filter when repo languages have no scip-io backend", () => {
     assert.deepEqual(scipIoLanguagesForRepo(["php", "sh"]), []);
     assert.deepEqual(
@@ -445,6 +479,53 @@ describe("scip-io-runner: repo language filter args", () => {
     assert.equal(result.ok, true);
     const log = readFileSync(logFile, "utf-8");
     assert.match(log, /args=.*index --lang python --output custom\.scip/);
+  });
+
+  it("returns generated custom output indexes for scoped incremental runs", async () => {
+    const binDir = join(tmp, "bin-scoped-output");
+    const repoDir = join(tmp, "repo-scoped-output");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(repoDir, { recursive: true });
+    const logFile = join(tmp, "scoped-output.log");
+    const outputPath = join(repoDir, "incremental.scip");
+    const filesFromPath = join(repoDir, "changed-files.txt");
+    writeFileSync(filesFromPath, "src/main.ts\n", "utf-8");
+    const stub = makeStubBinary(binDir, {
+      exitCode: 0,
+      logFile,
+      writeCustomOutputContent: "scoped index",
+    });
+
+    const result = await runScipIoBeforeIndex({
+      repoRootPath: repoDir,
+      repoLanguages: ["ts"],
+      filesFromPath,
+      outputPath,
+      generatorCfg: {
+        enabled: true,
+        binary: stub,
+        args: [],
+        autoInstall: false,
+        timeoutMs: 30_000,
+        cleanupAfterIngest: false,
+        cacheGeneratedIndexes: true,
+      },
+    });
+
+    assert.equal(result.attempted, true);
+    assert.equal(result.ok, true);
+    assert.deepEqual(
+      result.generatedIndexes.map((index) => ({
+        path: index.path,
+        skipped: index.skipped,
+        mode: index.mode,
+      })),
+      [{ path: "incremental.scip", skipped: undefined, mode: "merged" }],
+    );
+    assert.equal(result.cache?.status, "disabled");
+    const log = readFileSync(logFile, "utf-8");
+    assert.match(log, /--files-from/);
+    assert.match(log, /--output/);
   });
 
   it("uses fresh split indexes when a merged run succeeds without index.scip", async () => {

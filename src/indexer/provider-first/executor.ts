@@ -96,7 +96,11 @@ type ProviderFirstPhaseTimingRecorder = (
   durationMs: number,
 ) => void;
 
-export type ProviderFirstExecutorKind = "scipFull" | "lspFull";
+export type ProviderFirstExecutorKind =
+  | "scipFull"
+  | "lspFull"
+  | "scipIncremental"
+  | "lspIncremental";
 export type ProviderFirstFallbackReasonCode =
   | "incrementalUnsupported"
   | "lspUnsupported"
@@ -286,6 +290,8 @@ interface ExecuteProviderFirstScipFullParams {
   repoId: string;
   repoRoot: string;
   config: AppConfig;
+  executorKind?: ProviderFirstExecutorKind;
+  disableProviderCollectionCache?: boolean;
   generatedIndexes?: readonly ScipGeneratedIndexDiagnostic[];
   generatorFailures?: readonly ScipFailureDiagnostic[];
   generatorCacheKey?: string;
@@ -308,6 +314,7 @@ interface ExecuteProviderFirstLspFullParams {
   repoId: string;
   repoRoot: string;
   config: AppConfig;
+  executorKind?: ProviderFirstExecutorKind;
   scannedFiles?: readonly ProviderFirstSourceFileMetadata[];
   recordPhaseTiming?: ProviderFirstPhaseTimingRecorder;
   clientFactory?: (options: LspClientOptions) => ProviderFirstLspClientLike;
@@ -378,6 +385,39 @@ export function resolveProviderFirstExecutionPlan(params: {
   );
   const hasLspSource = selectedSources.some((source) => source.type === "lsp");
 
+  if (mode === "incremental") {
+    if (hasScipSource && scip?.enabled && scip.generator.enabled === true) {
+      return {
+        canExecute: true,
+        shouldFallbackToLegacy: false,
+        executor: "scipIncremental",
+        reasons: [],
+      };
+    }
+    if (hasScipSource) {
+      return unsupportedPlan({
+        fallbackAllowed,
+        fallbackReasonCode: "providerUnavailable",
+        reason:
+          "provider-first SCIP incremental execution requires an enabled scip.generator so changed files can be selected",
+      });
+    }
+    if (hasLspSource) {
+      return {
+        canExecute: true,
+        shouldFallbackToLegacy: false,
+        executor: "lspIncremental",
+        reasons: [],
+      };
+    }
+    return unsupportedPlan({
+      fallbackAllowed,
+      fallbackReasonCode: "providerUnavailable",
+      reason:
+        "provider-first incremental execution needs an enabled SCIP generator or LSP provider",
+    });
+  }
+
   if (mode !== "full") {
     return unsupportedPlan({
       fallbackAllowed: fallbackAllowed || selectedSources.length > 0,
@@ -416,25 +456,31 @@ export function resolveProviderFirstExecutionPlan(params: {
 export async function executeProviderFirstScipFull(
   params: ExecuteProviderFirstScipFullParams,
 ): Promise<ProviderFirstScipExecutionResult> {
-  const generationId = `provider-first:${Date.now()}`;
+  const executorKind = params.executorKind ?? "scipFull";
+  const generationId =
+    executorKind === "scipIncremental"
+      ? `provider-first-scip-incremental:${Date.now()}`
+      : `provider-first:${Date.now()}`;
   const measureCollectionPhase = providerFirstPhaseMeasurer(
     params.recordPhaseTiming,
   );
   const indexedAt = new Date().toISOString();
-  const cacheContext = providerCollectionCacheContext({
-    repoId: params.repoId,
-    repoRoot: params.repoRoot,
-    scip: params.config.scip,
-    generatedIndexes: params.generatedIndexes ?? [],
-    generatorCacheKey: params.generatorCacheKey,
-    sourceTextMaxBytes: resolveSourceTextMaxBytes(
-      params.repoId,
-      params.repoRoot,
-      params.config,
-    ),
-    scannedPaths: params.scannedPaths,
-    scannedFiles: params.scannedFiles,
-  });
+  const cacheContext = params.disableProviderCollectionCache
+    ? null
+    : providerCollectionCacheContext({
+        repoId: params.repoId,
+        repoRoot: params.repoRoot,
+        scip: params.config.scip,
+        generatedIndexes: params.generatedIndexes ?? [],
+        generatorCacheKey: params.generatorCacheKey,
+        sourceTextMaxBytes: resolveSourceTextMaxBytes(
+          params.repoId,
+          params.repoRoot,
+          params.config,
+        ),
+        scannedPaths: params.scannedPaths,
+        scannedFiles: params.scannedFiles,
+      });
   const cachedCollection =
     cacheContext &&
     (await measureCollectionPhase("cacheRead", () =>
@@ -540,7 +586,7 @@ export async function executeProviderFirstScipFull(
     failures: collected.failures,
     summary: {
       status: "executed",
-      executor: "scipFull",
+      executor: executorKind,
       generationId,
       reasons: [],
       filesProcessed: rows.files.length,
@@ -551,10 +597,24 @@ export async function executeProviderFirstScipFull(
   };
 }
 
+export async function executeProviderFirstScipIncremental(
+  params: ExecuteProviderFirstScipFullParams,
+): Promise<ProviderFirstScipExecutionResult> {
+  return executeProviderFirstScipFull({
+    ...params,
+    executorKind: "scipIncremental",
+    disableProviderCollectionCache: true,
+  });
+}
+
 export async function executeProviderFirstLspFull(
   params: ExecuteProviderFirstLspFullParams,
 ): Promise<ProviderFirstLspExecutionResult> {
-  const generationId = `provider-first-lsp:${Date.now()}`;
+  const executorKind = params.executorKind ?? "lspFull";
+  const generationId =
+    executorKind === "lspIncremental"
+      ? `provider-first-lsp-incremental:${Date.now()}`
+      : `provider-first-lsp:${Date.now()}`;
   const indexedAt = new Date().toISOString();
   const measurePhase = providerFirstPhaseMeasurer(params.recordPhaseTiming);
   const lspConfig = params.config.semanticEnrichment?.providers.lsp;
@@ -849,7 +909,7 @@ export async function executeProviderFirstLspFull(
   });
   const summary: ProviderFirstExecutionSummary = {
     status: "executed",
-    executor: "lspFull",
+    executor: executorKind,
     generationId,
     reasons: [],
     filesProcessed: facts.files.length,
@@ -877,6 +937,15 @@ export async function executeProviderFirstLspFull(
     },
   };
   return { generationId, facts, rows, summary };
+}
+
+export async function executeProviderFirstLspIncremental(
+  params: ExecuteProviderFirstLspFullParams,
+): Promise<ProviderFirstLspExecutionResult> {
+  return executeProviderFirstLspFull({
+    ...params,
+    executorKind: "lspIncremental",
+  });
 }
 
 async function collectLspProviderDocumentWithClient(params: {

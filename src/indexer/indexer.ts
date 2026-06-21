@@ -1,3 +1,5 @@
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type {
   CallResolutionTelemetry,
   PendingCallEdge,
@@ -115,10 +117,11 @@ import type {
   ScipFailureDiagnostic,
   ScipGeneratedIndexDiagnostic,
 } from "../scip/diagnostics.js";
-import type { ScipGeneratorCacheDiagnostic } from "../scip/scip-io-runner.js";
 import type { BatchPersistDrainDiagnostics } from "./parser/batch-persist.js";
 import {
+  executeProviderFirstLspIncremental,
   executeProviderFirstLspFull,
+  executeProviderFirstScipIncremental,
   executeProviderFirstScipFull,
   resolveProviderFirstExecutionPlan,
   type ProviderFirstCoverageSummary,
@@ -177,6 +180,10 @@ import type {
   ProviderFactSet,
   ProviderFirstPipelineSelection,
 } from "./provider-first/types.js";
+import {
+  runScipIoBeforeIndex,
+  type ScipGeneratorCacheDiagnostic,
+} from "../scip/scip-io-runner.js";
 export type { IndexProgress, IndexProgressSubstage } from "./indexer-init.js";
 export { resolveProviderFirstSemanticEligiblePaths } from "./provider-first/semantic-scope.js";
 export {
@@ -196,6 +203,45 @@ const PROVIDER_FIRST_ACTIVE_INPUT_RECORD_PATH =
   "__providerFirstActiveScipInput__";
 const PROVIDER_FIRST_ACTIVE_INPUT_FINGERPRINT_VERSION = 1;
 
+type ScipPreRefreshDiagnostics = {
+  generatedIndexes: ScipGeneratedIndexDiagnostic[];
+  failures: ScipFailureDiagnostic[];
+  cache?: ScipGeneratorCacheDiagnostic;
+};
+
+function providerFirstIncrementalExecutor(
+  executor: ProviderFirstExecutionSummary["executor"] | undefined,
+): boolean {
+  return executor === "scipIncremental" || executor === "lspIncremental";
+}
+
+function providerFirstLspExecutor(
+  executor: ProviderFirstExecutionSummary["executor"] | undefined,
+): boolean {
+  return executor === "lspFull" || executor === "lspIncremental";
+}
+
+function shouldDeferScipIoPreRefreshToIncrementalProvider(
+  mode: "full" | "incremental",
+): boolean {
+  if (mode !== "incremental") return false;
+  try {
+    const appConfig = loadConfig();
+    const providerFirst = resolveProviderFirstPipeline({
+      indexing: appConfig.indexing,
+      scip: appConfig.scip,
+      semanticEnrichment: appConfig.semanticEnrichment,
+    });
+    return (
+      providerFirst.selectedPipeline === "providerFirst" &&
+      appConfig.scip?.enabled === true &&
+      appConfig.scip.generator.enabled === true
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function countExistingScipProviderSymbols(
   conn: Awaited<ReturnType<typeof getLadybugConn>>,
   repoId: string,
@@ -208,6 +254,21 @@ async function countExistingScipProviderSymbols(
     { repoId },
   );
   return ladybugDb.toNumber(row?.count ?? 0);
+}
+
+async function hasProviderFirstBootstrap(
+  conn: Awaited<ReturnType<typeof getLadybugConn>>,
+  repoId: string,
+): Promise<boolean> {
+  const row = await ladybugDb.querySingle<{ count: unknown }>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+     WHERE (s.source = 'scip' OR s.source = 'lsp')
+       AND coalesce(s.symbolStatus, 'real') = 'real'
+     RETURN count(DISTINCT s) AS count`,
+    { repoId },
+  );
+  return ladybugDb.toNumber(row?.count ?? 0) > 0;
 }
 
 function snapshotPass2ResolverBreakdown(
@@ -1824,6 +1885,95 @@ function filterProviderFirstFallbackScan(
   };
 }
 
+function providerFirstIncrementalChangedFiles(
+  scan: ScanRepoForIndexResult,
+): ScanRepoForIndexResult["files"] {
+  return scan.files.filter((file) => {
+    const existing = scan.existingByPath.get(file.path);
+    if (!existing?.lastIndexedAt) return true;
+    const lastIndexedMs = new Date(existing.lastIndexedAt).getTime();
+    return !Number.isFinite(lastIndexedMs) || file.mtime > lastIndexedMs;
+  });
+}
+
+function filterProviderFirstIncrementalScan(
+  scan: ScanRepoForIndexResult,
+  changedFiles: ScanRepoForIndexResult["files"],
+): ScanRepoForIndexResult {
+  const changedPaths = new Set(changedFiles.map((file) => file.path));
+  const existingByPath = new Map<string, ladybugDb.FileRow>();
+  for (const [relPath, file] of scan.existingByPath) {
+    if (changedPaths.has(relPath)) {
+      existingByPath.set(relPath, file);
+    }
+  }
+
+  return {
+    ...scan,
+    files: changedFiles,
+    existingByPath,
+    allFilesUnchanged: changedFiles.length === 0 && scan.removedFileIds.length === 0,
+  };
+}
+
+async function runProviderFirstIncrementalScipIo(params: {
+  repoId: string;
+  repoRoot: string;
+  repoConfig: RepoConfig;
+  appConfig: AppConfig;
+  changedFiles: ScanRepoForIndexResult["files"];
+  signal?: AbortSignal;
+}): Promise<{
+  diagnostics: ScipPreRefreshDiagnostics;
+  tempPaths: string[];
+}> {
+  const generatorCfg = params.appConfig.scip?.generator;
+  if (!generatorCfg?.enabled) {
+    throw new Error(
+      "Provider-first SCIP incremental execution requires an enabled scip.generator",
+    );
+  }
+  const relPaths = params.changedFiles.map((file) => normalizePath(file.path));
+  const tempRoot = join(
+    params.repoRoot,
+    ".sdl-mcp",
+    "provider-first-incremental",
+  );
+  await mkdir(tempRoot, { recursive: true });
+  const runKey = hashValue({
+    repoId: params.repoId,
+    relPaths,
+    startedAt: Date.now(),
+  }).slice(0, 16);
+  const manifestPath = join(tempRoot, `${runKey}.files.txt`);
+  const outputPath = join(tempRoot, `${runKey}.scip`);
+  await writeFile(manifestPath, `${relPaths.join("\n")}\n`, "utf-8");
+
+  const diagnostics = await runScipIoBeforeIndex({
+    repoRootPath: params.repoRoot,
+    generatorCfg,
+    signal: params.signal,
+    repoLanguages: params.repoConfig.languages,
+    repoConfig: params.repoConfig,
+    repoId: params.repoId,
+    filesFromPath: manifestPath,
+    outputPath,
+  });
+
+  return {
+    diagnostics,
+    tempPaths: [manifestPath, outputPath],
+  };
+}
+
+async function cleanupProviderFirstIncrementalTempPaths(
+  tempPaths: readonly string[],
+): Promise<void> {
+  await Promise.all(
+    tempPaths.map((tempPath) => rm(tempPath, { force: true }).catch(() => undefined)),
+  );
+}
+
 async function countSymbolVersionsForVersion(
   versionId: string,
 ): Promise<number> {
@@ -1960,10 +2110,10 @@ export async function indexRepo(
   // src/scip/scip-io-runner.ts::runScipIoPreRefreshForIndex.
   const { runScipIoPreRefreshForIndex } =
     await import("../scip/scip-io-runner.js");
-  const scipPreRefreshResult = await runScipIoPreRefreshForIndex(
-    repoId,
-    signal,
-  );
+  const scipPreRefreshResult =
+    shouldDeferScipIoPreRefreshToIncrementalProvider(mode)
+      ? undefined
+      : await runScipIoPreRefreshForIndex(repoId, signal);
 
   // Serialize concurrent indexRepo calls for the same repo to prevent
   // LadybugDB write conflicts and race conditions during rapid watcher events.
@@ -2040,11 +2190,7 @@ async function indexRepoImpl(
   onProgress?: (progress: IndexProgress) => void,
   signal?: AbortSignal,
   options?: IndexRepoOptions,
-  scipPreRefresh?: {
-    generatedIndexes: ScipGeneratedIndexDiagnostic[];
-    failures: ScipFailureDiagnostic[];
-    cache?: ScipGeneratorCacheDiagnostic;
-  },
+  scipPreRefresh?: ScipPreRefreshDiagnostics,
 ): Promise<IndexResult> {
   // Auto-upgrade incremental → full on a fresh repo (no files indexed yet).
   // Callers (CLI delegated path, MCP `sdl.index.refresh`, watcher first-run)
@@ -2251,6 +2397,7 @@ async function indexRepoImpl(
     mode,
     scip: appConfig.scip,
   });
+  let activeScipPreRefresh = scipPreRefresh;
   let providerFirstExecutionFallback =
     providerFirst.selectedPipeline === "providerFirst" &&
     providerFirstExecutionPlan.shouldFallbackToLegacy
@@ -2619,10 +2766,27 @@ async function indexRepoImpl(
     };
   };
 
+  const providerFirstExecutor = providerFirstExecutionPlan.executor;
+  const providerFirstIncrementalActive =
+    mode === "incremental" &&
+    providerFirstIncrementalExecutor(providerFirstExecutor);
+  const providerFirstIncrementalBootstrapped = providerFirstIncrementalActive
+    ? await hasProviderFirstBootstrap(conn, repoId)
+    : true;
+  if (providerFirstIncrementalActive && !providerFirstIncrementalBootstrapped) {
+    const reason =
+      "provider-first incremental skipped because no successful provider-first bootstrap exists for this repo";
+    providerFirstExecutionFallback = providerFirstFallbackSummary([reason]);
+    logger.info("indexRepo: provider-first incremental using legacy bootstrap fallback", {
+      repoId,
+      executor: providerFirstExecutor,
+      reason,
+    });
+  }
   if (
     providerFirstExecutionPlan.canExecute &&
-    (providerFirstExecutionPlan.executor === "scipFull" ||
-      providerFirstExecutionPlan.executor === "lspFull")
+    providerFirstExecutor &&
+    providerFirstIncrementalBootstrapped
   ) {
     providerFirstTimingStartedAt = Date.now();
     emitProviderFirstProgress(onProgress, "coverageScan", {
@@ -2645,61 +2809,149 @@ async function indexRepoImpl(
       stageTotal: providerCoverageScan.files.length,
       message: `scanned ${providerCoverageScan.files.length} file(s) for provider-first coverage`,
     });
+    let providerFirstRemovedFilesDeleted = false;
+    if (
+      providerFirstIncrementalActive &&
+      providerCoverageScan.removedFileIds.length > 0
+    ) {
+      await measureProviderFirstPhase(
+        "deleteRemovedFiles",
+        "providerFirstIncrementalDeleteRemovedFiles",
+        () =>
+          withWriteConn(async (conn) => {
+            await ladybugDb.withTransaction(conn, async (txConn) => {
+              await ladybugDb.deleteFilesByIds(
+                txConn,
+                providerCoverageScan.removedFileIds,
+              );
+            });
+          }, postIndexSessionTimeoutMs),
+      );
+      providerFirstRemovedFilesDeleted = true;
+    }
+    const providerChangedFiles = providerFirstIncrementalActive
+      ? providerFirstIncrementalChangedFiles(providerCoverageScan)
+      : providerCoverageScan.files;
+    const providerExecutionScan = providerFirstIncrementalActive
+      ? filterProviderFirstIncrementalScan(
+          providerCoverageScan,
+          providerChangedFiles,
+        )
+      : providerCoverageScan;
+    if (providerFirstIncrementalActive && providerChangedFiles.length === 0) {
+      providerFirstScan = providerCoverageScan;
+      emitProviderFirstProgress(onProgress, "coverageScan", {
+        stageCurrent: 0,
+        stageTotal: 0,
+        message: "no changed files for provider-first incremental execution",
+      });
+    }
     let providerResult:
       | Awaited<ReturnType<typeof executeProviderFirstScipFull>>
+      | Awaited<ReturnType<typeof executeProviderFirstScipIncremental>>
       | Awaited<ReturnType<typeof executeProviderFirstLspFull>>
+      | Awaited<ReturnType<typeof executeProviderFirstLspIncremental>>
       | undefined;
-    try {
-      providerResult = await measureProviderFirstPhase(
-        "providerCollection",
-        providerFirstExecutionPlan.executor === "lspFull"
-          ? "providerFirstLspFull"
-          : "providerFirstScipFull",
-        () => {
-          if (providerFirstExecutionPlan.executor === "lspFull") {
-            return executeProviderFirstLspFull({
-              repoId,
-              repoRoot: repoRow.rootPath,
-              config: appConfig,
-              scannedFiles: providerCoverageScan.files,
-              recordPhaseTiming: recordProviderFirstPhaseTiming,
-              signal,
-            });
+    if (!providerFirstIncrementalActive || providerChangedFiles.length > 0) {
+      try {
+        let providerScipPreRefresh = activeScipPreRefresh;
+        let providerIncrementalTempPaths: string[] = [];
+        try {
+          if (providerFirstExecutor === "scipIncremental") {
+            const scopedScip = await measureProviderFirstPhase(
+              "scipIncrementalGenerate",
+              "providerFirstScipIncrementalGenerate",
+              () =>
+                runProviderFirstIncrementalScipIo({
+                  repoId,
+                  repoRoot: repoRow.rootPath,
+                  repoConfig: config,
+                  appConfig,
+                  changedFiles: providerChangedFiles,
+                  signal,
+                }),
+            );
+            providerScipPreRefresh = scopedScip.diagnostics;
+            activeScipPreRefresh = scopedScip.diagnostics;
+            providerIncrementalTempPaths = scopedScip.tempPaths;
           }
-          return executeProviderFirstScipFull({
-            repoId,
-            repoRoot: repoRow.rootPath,
-            config: appConfig,
-            generatedIndexes: scipPreRefresh?.generatedIndexes,
-            generatorFailures: scipPreRefresh?.failures,
-            generatorCacheKey: scipPreRefresh?.cache?.key,
-            scannedPaths: providerCoverageScan.files.map((file) => file.path),
-            scannedFiles: providerCoverageScan.files,
-            recordPhaseTiming: recordProviderFirstPhaseTiming,
-            onProgress,
-            signal,
-          });
-        },
-      );
-    } catch (err) {
-      if (err instanceof ProviderFirstGraphValidationError) {
-        throw err;
-      }
-      const reason =
-        err instanceof Error
-          ? err.message
-          : `provider-first SCIP execution failed: ${String(err)}`;
-      if (providerFirst.requestedMode === "auto") {
-        logger.warn(
-          "indexRepo: provider-first execution failed, using legacy fallback",
-          {
-            repoId,
+          providerResult = await measureProviderFirstPhase(
+            "providerCollection",
+            providerFirstLspExecutor(providerFirstExecutor)
+              ? providerFirstIncrementalActive
+                ? "providerFirstLspIncremental"
+                : "providerFirstLspFull"
+              : providerFirstIncrementalActive
+                ? "providerFirstScipIncremental"
+                : "providerFirstScipFull",
+            () => {
+              if (providerFirstExecutor === "lspFull") {
+                return executeProviderFirstLspFull({
+                  repoId,
+                  repoRoot: repoRow.rootPath,
+                  config: appConfig,
+                  scannedFiles: providerExecutionScan.files,
+                  recordPhaseTiming: recordProviderFirstPhaseTiming,
+                  signal,
+                });
+              }
+              if (providerFirstExecutor === "lspIncremental") {
+                return executeProviderFirstLspIncremental({
+                  repoId,
+                  repoRoot: repoRow.rootPath,
+                  config: appConfig,
+                  scannedFiles: providerExecutionScan.files,
+                  recordPhaseTiming: recordProviderFirstPhaseTiming,
+                  signal,
+                });
+              }
+              const scipParams = {
+                repoId,
+                repoRoot: repoRow.rootPath,
+                config: appConfig,
+                generatedIndexes: providerScipPreRefresh?.generatedIndexes,
+                generatorFailures: providerScipPreRefresh?.failures,
+                generatorCacheKey: providerScipPreRefresh?.cache?.key,
+                scannedPaths: providerExecutionScan.files.map(
+                  (file) => file.path,
+                ),
+                scannedFiles: providerExecutionScan.files,
+                recordPhaseTiming: recordProviderFirstPhaseTiming,
+                onProgress,
+                signal,
+              };
+              return providerFirstExecutor === "scipIncremental"
+                ? executeProviderFirstScipIncremental(scipParams)
+                : executeProviderFirstScipFull(scipParams);
+            },
+          );
+        } finally {
+          await cleanupProviderFirstIncrementalTempPaths(
+            providerIncrementalTempPaths,
+          );
+        }
+      } catch (err) {
+        if (err instanceof ProviderFirstGraphValidationError) {
+          throw err;
+        }
+        const reason =
+          err instanceof Error
+            ? err.message
+            : `provider-first SCIP execution failed: ${String(err)}`;
+        if (providerFirst.requestedMode === "auto") {
+          logger.warn(
+            "indexRepo: provider-first execution failed, using legacy fallback",
+            {
+              repoId,
+              reason,
+            },
+          );
+          providerFirstExecutionFallback = providerFirstFallbackSummary([
             reason,
-          },
-        );
-        providerFirstExecutionFallback = providerFirstFallbackSummary([reason]);
-      } else {
-        throw err;
+          ]);
+        } else {
+          throw err;
+        }
       }
     }
 
@@ -2726,7 +2978,7 @@ async function indexRepoImpl(
           );
         }
       } else {
-        const providerScan = providerCoverageScan;
+        const providerScan = providerExecutionScan;
         providerFirstScan = providerScan;
         if (providerFactsShouldDropCoveragePayloads(providerResult.facts)) {
           clearProviderFactPayloadsForCoverageAnalysis(providerResult.facts);
@@ -2800,6 +3052,14 @@ async function indexRepoImpl(
               providerFirstShadowStagingSkipReason
                 ? `${providerFirstShadowStagingSkipReason}; ${scopedSourceFileListReason}`
                 : scopedSourceFileListReason;
+          }
+          if (providerFirstIncrementalActive) {
+            const incrementalShadowSkipReason =
+              "shadow staging skipped because provider-first incremental materializes only changed files";
+            providerFirstShadowStagingSkipReason =
+              providerFirstShadowStagingSkipReason
+                ? `${providerFirstShadowStagingSkipReason}; ${incrementalShadowSkipReason}`
+                : incrementalShadowSkipReason;
           }
           const legacyFallbackPaths = selectProviderFirstLegacyFallbackPaths({
             fallbackPaths: coverageReport.fallbackPaths,
@@ -2918,7 +3178,8 @@ async function indexRepoImpl(
               }
             }
           }
-          const activeProviderInputHash = scopedSourceFileListActive
+          const activeProviderInputHash =
+            scopedSourceFileListActive || providerFirstIncrementalActive
             ? null
             : "generatedIndexes" in providerResult
               ? providerFirstActiveInputFingerprint(
@@ -2940,16 +3201,23 @@ async function indexRepoImpl(
           );
           const existingProviderSymbolCount =
             await countExistingScipProviderSymbols(conn, repoId);
-          const activeMaterializationPlan =
-            resolveProviderFirstActiveMaterializationPlan({
-              existingProviderFileCount: countExistingProviderPrimaryFiles({
-                providerFiles: materializedRows.files,
-                existingByPath: providerScan.existingByPath,
-              }),
-              providerSymbolCount: materializedRows.symbols.length,
-              activeProviderInputMatches,
-              existingProviderSymbolCount,
-            });
+          const activeMaterializationPlan: ProviderFirstActiveMaterializationPlan =
+            providerFirstIncrementalActive
+              ? {
+                  deleteExistingFileSymbols: true,
+                  useKnownFreshWriters: true,
+                  writeEdges: true,
+                  reuseExistingProviderRows: false,
+                }
+              : resolveProviderFirstActiveMaterializationPlan({
+                  existingProviderFileCount: countExistingProviderPrimaryFiles({
+                    providerFiles: materializedRows.files,
+                    existingByPath: providerScan.existingByPath,
+                  }),
+                  providerSymbolCount: materializedRows.symbols.length,
+                  activeProviderInputMatches,
+                  existingProviderSymbolCount,
+                });
           if (activeMaterializationPlan.reuseExistingProviderRows) {
             const deleteTotal = providerFirstMaterializePhaseTotal(
               "deleteFileSymbols",
@@ -2997,7 +3265,9 @@ async function indexRepoImpl(
                     useKnownFreshWriters:
                       activeMaterializationPlan.useKnownFreshWriters,
                     writeEdges: activeMaterializationPlan.writeEdges,
-                    pruneExternalSymbols: !scopedSourceFileListActive,
+                    pruneExternalSymbols:
+                      !scopedSourceFileListActive &&
+                      !providerFirstIncrementalActive,
                     symbolFtsIndexName:
                       appConfig.semantic?.retrieval?.fts?.indexName,
                     measurePhase: async (phaseName, fn) => {
@@ -3029,7 +3299,10 @@ async function indexRepoImpl(
                       }
                     },
                   });
-                } else if (!scopedSourceFileListActive) {
+                } else if (
+                  !scopedSourceFileListActive &&
+                  !providerFirstIncrementalActive
+                ) {
                   await ladybugDb.withTransaction(conn, async (txConn) => {
                     await ladybugDb.pruneStaleScipExternalSymbols(
                       txConn,
@@ -3038,7 +3311,10 @@ async function indexRepoImpl(
                     );
                   });
                 }
-                if (providerScan.removedFileIds.length > 0) {
+                if (
+                  !providerFirstRemovedFilesDeleted &&
+                  providerScan.removedFileIds.length > 0
+                ) {
                   await ladybugDb.withTransaction(conn, async (txConn) => {
                     await ladybugDb.deleteFilesByIds(
                       txConn,
@@ -3202,7 +3478,7 @@ async function indexRepoImpl(
                   ? {
                       generatedIndexes: providerResult.generatedIndexes,
                       failures: providerResult.failures,
-                      generatorCache: scipPreRefresh?.cache,
+                      generatorCache: activeScipPreRefresh?.cache,
                     }
                   : undefined;
               const result: IndexResult = {
@@ -3229,9 +3505,13 @@ async function indexRepoImpl(
             }
 
             const versionId = await createOrReuseVersion(
-              providerResult.summary.executor === "lspFull"
-                ? "Provider-first LSP index"
-                : "Provider-first SCIP index",
+              providerFirstLspExecutor(providerResult.summary.executor)
+                ? providerFirstIncrementalActive
+                  ? "Provider-first LSP incremental index"
+                  : "Provider-first LSP index"
+                : providerFirstIncrementalActive
+                  ? "Provider-first SCIP incremental index"
+                  : "Provider-first SCIP index",
               true,
             );
             const pass1Engine = emptyPass1EngineTelemetry();
@@ -3240,19 +3520,22 @@ async function indexRepoImpl(
                 ? {
                     generatedIndexes: providerResult.generatedIndexes,
                     failures: providerResult.failures,
-                    generatorCache: scipPreRefresh?.cache,
+                    generatorCache: activeScipPreRefresh?.cache,
                   }
                 : undefined;
             const post = await runPostIndexFinalization({
               versionId,
-              indexMode: "full",
-              filesTotal: materializedRows.files.length,
+              indexMode: providerFirstIncrementalActive ? "incremental" : "full",
+              filesTotal: providerFirstIncrementalActive
+                ? providerCoverageScan.files.length
+                : materializedRows.files.length,
               filesScanned: materializedRows.files.length,
               symbolsExtracted:
                 materializedRows.symbols.length +
                 materializedRows.externalSymbols.length,
               edgesExtracted: materializedRows.edges.length,
-              changedFileIdsForFinalize: scopedSourceFileListActive
+              changedFileIdsForFinalize:
+                scopedSourceFileListActive || providerFirstIncrementalActive
                 ? materializedRows.changedFileIds
                 : undefined,
               changedTestFilePathsForFinalize: new Set(),
@@ -3260,7 +3543,7 @@ async function indexRepoImpl(
               hasIndexMutations: true,
               callResolutionTelemetry: createCallResolutionTelemetry({
                 repoId,
-                mode: "full",
+                mode: providerFirstIncrementalActive ? "incremental" : "full",
                 pass2EligibleFileCount: 0,
                 registeredResolvers: [],
               }),
@@ -3380,9 +3663,9 @@ async function indexRepoImpl(
       }
 
       const scipDiagnostics = {
-        generatedIndexes: scipPreRefresh?.generatedIndexes ?? [],
-        failures: scipPreRefresh?.failures ?? [],
-        generatorCache: scipPreRefresh?.cache,
+        generatedIndexes: activeScipPreRefresh?.generatedIndexes ?? [],
+        failures: activeScipPreRefresh?.failures ?? [],
+        generatorCache: activeScipPreRefresh?.cache,
       };
       const recoveryReasons = [...recovery.reasons];
 
@@ -3811,9 +4094,9 @@ async function indexRepoImpl(
     // see the File/Symbol rows it depends on.
     let pass2Edges: number;
     const scipDiagnostics = {
-      generatedIndexes: scipPreRefresh?.generatedIndexes ?? [],
-      failures: scipPreRefresh?.failures ?? [],
-      generatorCache: scipPreRefresh?.cache,
+      generatedIndexes: activeScipPreRefresh?.generatedIndexes ?? [],
+      failures: activeScipPreRefresh?.failures ?? [],
+      generatorCache: activeScipPreRefresh?.cache,
     };
     const preloadedPass2ExportedSymbols =
       providerFirstScipMaterialized && providerFirstProviderRows
