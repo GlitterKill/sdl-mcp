@@ -2998,6 +2998,8 @@ async function indexRepoImpl(
                       activeMaterializationPlan.useKnownFreshWriters,
                     writeEdges: activeMaterializationPlan.writeEdges,
                     pruneExternalSymbols: !scopedSourceFileListActive,
+                    symbolFtsIndexName:
+                      appConfig.semantic?.retrieval?.fts?.indexName,
                     measurePhase: async (phaseName, fn) => {
                       const substage =
                         `materialize.${phaseName}` as IndexProgressSubstage;

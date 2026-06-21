@@ -7184,6 +7184,48 @@ describe("provider-first indexing foundation", () => {
     );
   });
 
+  it("drops and rebuilds Symbol FTS around provider replacement materialization", async () => {
+    const statements: string[] = [];
+    const rows = providerFactsToGraphRows({
+      indexedAt: "2026-05-25T12:00:00.000Z",
+      facts: providerFactSet(),
+    });
+
+    await materializeProviderFacts(
+      createFakeConnection(statements, (statement) => {
+        if (statement.includes("RETURN s.symbolId AS symbolId")) {
+          return [{ symbolId: "stale-symbol" }];
+        }
+        if (statement.includes("COUNT(n) AS rowCount")) {
+          return [{ rowCount: 1 }];
+        }
+        return [];
+      }),
+      rows,
+      { replaceFileSymbols: true },
+    );
+
+    const dropIndex = statements.findIndex((statement) =>
+      statement.includes("CALL DROP_FTS_INDEX('Symbol', 'symbol_search_text_v1')"),
+    );
+    const staleLookupIndex = statements.findIndex((statement) =>
+      statement.includes("RETURN s.symbolId AS symbolId"),
+    );
+    const createIndex = statements.findIndex((statement) =>
+      statement.includes("CALL CREATE_FTS_INDEX('Symbol', 'symbol_search_text_v1'"),
+    );
+
+    assert.ok(dropIndex >= 0, "provider replacement must drop Symbol FTS first");
+    assert.ok(
+      staleLookupIndex > dropIndex,
+      "stale symbol cleanup must run after Symbol FTS is dropped",
+    );
+    assert.ok(
+      createIndex > staleLookupIndex,
+      "Symbol FTS must be rebuilt after replacement materialization",
+    );
+  });
+
   it("records provider materialization subphase timings in write order", async () => {
     const statements: string[] = [];
     const phases: string[] = [];

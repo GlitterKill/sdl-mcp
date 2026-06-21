@@ -3,6 +3,10 @@ import type { Connection } from "kuzu";
 import type { EdgeRow, FileRow, SymbolRow } from "../../db/ladybug-queries.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { EdgeType, SymbolKind } from "../../domain/types.js";
+import {
+  dropFtsIndex,
+  ensureFtsIndexForNonEmptyTable,
+} from "../../retrieval/index-lifecycle.js";
 import { generateFileId, hashValue } from "../../util/hashing.js";
 import { normalizePath } from "../../util/paths.js";
 import { canonicalizeLanguageId } from "../language.js";
@@ -23,6 +27,7 @@ const PROVIDER_STANDARD_DOCUMENTATION_SUMMARY_QUALITY = 0.6;
 const PROVIDER_RICH_DOCUMENTATION_SUMMARY_QUALITY = 0.8;
 const PROVIDER_STANDARD_DOCUMENTATION_CHAR_THRESHOLD = 80;
 const PROVIDER_RICH_DOCUMENTATION_CHAR_THRESHOLD = 160;
+const DEFAULT_SYMBOL_FTS_INDEX_NAME = "symbol_search_text_v1";
 
 export interface ProviderFirstExternalSymbolRow {
   symbolId: string;
@@ -95,6 +100,11 @@ export interface MaterializeProviderFactsOptions {
    * documents, so they must not prune out-of-scope externals.
    */
   pruneExternalSymbols?: boolean;
+  /**
+   * Configured Symbol.searchText FTS index name. Provider replacement drops it
+   * around bulk Symbol writes because LadybugDB maintains FTS indexes eagerly.
+   */
+  symbolFtsIndexName?: string;
   /**
    * Optional instrumentation hook used by the provider-first orchestrator to
    * expose the individual LadybugDB write buckets without changing transaction
@@ -220,71 +230,119 @@ export async function materializeProviderFacts(
     options.useKnownFreshWriters ?? options.replaceFileSymbols;
   const writeEdges = options.writeEdges ?? true;
   const pruneExternalSymbols = options.pruneExternalSymbols ?? true;
-  if (deleteExistingFileSymbols) {
-    await measurePhase("deleteFileSymbols", async () => {
-      await deleteProviderReplacementSymbolsInChunks(
-        conn,
-        repoId,
-        [...rows.changedFileIds],
-        rows.symbols.map((symbol) => symbol.symbolId),
-      );
-    });
-  }
-  await ladybugDb.withTransaction(conn, async (txConn) => {
-    await measurePhase("upsertFiles", async () => {
-      await ladybugDb.upsertFileBatch(txConn, rows.files);
-    });
-    await measurePhase("upsertSymbols", async () => {
-      if (useKnownFreshWriters) {
-        await ladybugDb.upsertKnownFileSymbols(txConn, rows.symbols, {
-          measurePhase: async (phaseName, fn) =>
-            await measurePhase(`upsertSymbols.${phaseName}`, fn),
-        });
-      } else {
-        await ladybugDb.upsertSymbolBatch(txConn, rows.symbols);
-      }
-    });
-    if (pruneExternalSymbols) {
-      await measurePhase("pruneExternalSymbols", async () => {
-        for (const source of providerExternalSymbolSources(rows)) {
-          await ladybugDb.pruneStaleScipExternalSymbols(
-            txConn,
-            repoId,
-            rows.externalSymbols
-              .filter((symbol) => symbol.source === source)
-              .map((symbol) => symbol.symbolId),
-            source,
-          );
-        }
-      });
-    }
-    if (rows.externalSymbols.length > 0) {
-      await measurePhase("mergeExternalSymbols", async () => {
-        await ladybugDb.batchMergeExternalSymbols(
-          txConn,
+
+  const runMaterialization = async (): Promise<void> => {
+    if (deleteExistingFileSymbols) {
+      await measurePhase("deleteFileSymbols", async () => {
+        await deleteProviderReplacementSymbolsInChunks(
+          conn,
           repoId,
-          rows.externalSymbols,
+          [...rows.changedFileIds],
+          rows.symbols.map((symbol) => symbol.symbolId),
         );
       });
     }
-    await measurePhase("insertEdges", async () => {
-      if (!writeEdges) return;
-      await ladybugDb.insertEdges(txConn, rows.edges, {
-        ...(useKnownFreshWriters
-          ? {
-              skipSourceRepoLink: true,
-              skipExistingRelationshipProbe: true,
-              skipExistingRelationshipUpdate: true,
-              skipEndpointMetadata: true,
-              skipTargetMetadata: true,
-            }
-          : {}),
-        useExistingTransaction: true,
-        measurePhase: async (phaseName, fn) =>
-          await measurePhase(`insertEdges.${phaseName}`, async () => await fn()),
+    await ladybugDb.withTransaction(conn, async (txConn) => {
+      await measurePhase("upsertFiles", async () => {
+        await ladybugDb.upsertFileBatch(txConn, rows.files);
+      });
+      await measurePhase("upsertSymbols", async () => {
+        if (useKnownFreshWriters) {
+          await ladybugDb.upsertKnownFileSymbols(txConn, rows.symbols, {
+            measurePhase: async (phaseName, fn) =>
+              await measurePhase(`upsertSymbols.${phaseName}`, fn),
+          });
+        } else {
+          await ladybugDb.upsertSymbolBatch(txConn, rows.symbols);
+        }
+      });
+      if (pruneExternalSymbols) {
+        await measurePhase("pruneExternalSymbols", async () => {
+          for (const source of providerExternalSymbolSources(rows)) {
+            await ladybugDb.pruneStaleScipExternalSymbols(
+              txConn,
+              repoId,
+              rows.externalSymbols
+                .filter((symbol) => symbol.source === source)
+                .map((symbol) => symbol.symbolId),
+              source,
+            );
+          }
+        });
+      }
+      if (rows.externalSymbols.length > 0) {
+        await measurePhase("mergeExternalSymbols", async () => {
+          await ladybugDb.batchMergeExternalSymbols(
+            txConn,
+            repoId,
+            rows.externalSymbols,
+          );
+        });
+      }
+      await measurePhase("insertEdges", async () => {
+        if (!writeEdges) return;
+        await ladybugDb.insertEdges(txConn, rows.edges, {
+          ...(useKnownFreshWriters
+            ? {
+                skipSourceRepoLink: true,
+                skipExistingRelationshipProbe: true,
+                skipExistingRelationshipUpdate: true,
+                skipEndpointMetadata: true,
+                skipTargetMetadata: true,
+              }
+            : {}),
+          useExistingTransaction: true,
+          measurePhase: async (phaseName, fn) =>
+            await measurePhase(
+              `insertEdges.${phaseName}`,
+              async () => await fn(),
+            ),
+        });
       });
     });
-  });
+  };
+
+  if (!options.replaceFileSymbols) {
+    await runMaterialization();
+    return;
+  }
+
+  const symbolFtsIndexName =
+    options.symbolFtsIndexName ?? DEFAULT_SYMBOL_FTS_INDEX_NAME;
+  const dropResult = await dropFtsIndex(conn, "Symbol", symbolFtsIndexName);
+  if (dropResult.status === "failed") {
+    throw new Error(
+      `Symbol FTS index '${symbolFtsIndexName}' could not be dropped before provider replacement: ${dropResult.error}`,
+    );
+  }
+
+  let materializationError: unknown;
+  try {
+    await runMaterialization();
+  } catch (error) {
+    materializationError = error;
+    throw error;
+  } finally {
+    if (dropResult.status === "dropped") {
+      const ensureResult = await ensureFtsIndexForNonEmptyTable(
+        conn,
+        "Symbol",
+        symbolFtsIndexName,
+      );
+      if (ensureResult.status === "failed") {
+        const rebuildError = new Error(
+          `Symbol FTS index '${symbolFtsIndexName}' could not be rebuilt after provider replacement: ${ensureResult.error}`,
+        );
+        if (materializationError !== undefined) {
+          throw new AggregateError(
+            [materializationError, rebuildError],
+            "Provider replacement failed and Symbol FTS rebuild also failed",
+          );
+        }
+        throw rebuildError;
+      }
+    }
+  }
 }
 
 function providerExternalSymbolSources(
