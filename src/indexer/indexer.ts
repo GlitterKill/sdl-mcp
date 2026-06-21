@@ -2949,6 +2949,20 @@ async function indexRepoImpl(
           providerFirstExecutionFallback = providerFirstFallbackSummary([
             reason,
           ]);
+          if (providerFirstIncrementalActive) {
+            // Keep provider-first incremental failures scoped; otherwise the
+            // legacy safety fallback degenerates into a full repo pass.
+            providerFirstScan = providerExecutionScan;
+            for (const file of providerExecutionScan.files) {
+              providerFirstFallbackPaths.add(file.path);
+            }
+            providerFirstLegacyFallbackComplete = true;
+            providerFirstLegacyFallbackFileCount = providerExecutionScan.files.length;
+            providerFirstLegacyFallbackSamplePaths = providerExecutionScan.files
+              .map((file) => file.path)
+              .slice(0, 10);
+            providerFirstLegacyFallbackStartedAt = Date.now();
+          }
         } else {
           throw err;
         }
