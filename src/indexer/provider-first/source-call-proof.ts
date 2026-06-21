@@ -142,7 +142,11 @@ function proveExactSourceOccurrenceCall(
   if (line === undefined) {
     return { matched: false, reason: "missingSourceLine" };
   }
-  const sourceRange = resolveSourceColumnRange(line, params.range);
+  const sourceRange = resolveSourceColumnRange(
+    line,
+    params.range,
+    params.expectedNames,
+  );
   if (!sourceRange) {
     if (isNeutralJvmOutOfBoundsReference(params, line)) {
       return {
@@ -301,16 +305,44 @@ function proveExactSourceOccurrenceCall(
 function resolveSourceColumnRange(
   line: string,
   range: ScipRange,
+  expectedNames: readonly string[],
 ): SourceColumnRange | undefined {
-  if (range.startCol <= line.length && range.endCol <= line.length) {
-    return { startCol: range.startCol, endCol: range.endCol };
+  const byteStartCol = utf8ByteColumnToUtf16Index(line, range.startCol);
+  const byteEndCol = utf8ByteColumnToUtf16Index(line, range.endCol);
+  const utf8Range =
+    byteStartCol === undefined ||
+    byteEndCol === undefined ||
+    byteStartCol > byteEndCol
+      ? undefined
+      : { startCol: byteStartCol, endCol: byteEndCol };
+  const utf16Range =
+    range.startCol <= line.length &&
+    range.endCol <= line.length &&
+    range.startCol <= range.endCol
+      ? { startCol: range.startCol, endCol: range.endCol }
+      : undefined;
+  if (!utf8Range) return utf16Range;
+  if (
+    !utf16Range ||
+    (utf8Range.startCol === utf16Range.startCol &&
+      utf8Range.endCol === utf16Range.endCol)
+  ) {
+    return utf8Range;
   }
-  const startCol = utf8ByteColumnToUtf16Index(line, range.startCol);
-  const endCol = utf8ByteColumnToUtf16Index(line, range.endCol);
-  if (startCol === undefined || endCol === undefined || startCol > endCol) {
-    return undefined;
-  }
-  return { startCol, endCol };
+
+  const score = (candidate: SourceColumnRange): number => {
+    const occurrenceText = line.slice(candidate.startCol, candidate.endCol);
+    const expectedMatch = expectedNames.some(
+      (name) =>
+        occurrenceText === name ||
+        occurrenceText.startsWith(name + ".") ||
+        occurrenceText.endsWith("." + name),
+    );
+    return (expectedMatch ? 2 : 0) +
+      (hasInvocationSuffix(line, candidate.endCol) ? 1 : 0);
+  };
+
+  return score(utf16Range) > score(utf8Range) ? utf16Range : utf8Range;
 }
 
 function utf8ByteColumnToUtf16Index(
