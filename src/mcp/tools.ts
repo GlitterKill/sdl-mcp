@@ -2644,7 +2644,7 @@ const RuntimeExecuteRequestObjectSchema = z
       .max(RUNTIME_MAX_CODE_LENGTH)
       .optional()
       .describe(
-        "Code mode: write to temp file and execute. Mutually exclusive with args-only mode.",
+        "Code mode: execute inline source via runtime-safe stdin/temp handling. Mutually exclusive with args-only mode.",
       ),
     stdin: RuntimeStdinSchema.optional().describe(
       "UTF-8 text written to the child process stdin and then closed (max 512 KiB).",

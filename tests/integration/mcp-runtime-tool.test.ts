@@ -165,13 +165,53 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     const result = await handleRuntimeExecute({
       repoId,
       runtime: "node",
-      code: "const mod = await import('./fixtures/relative-module.mjs'); console.log(mod.value);",
+      code: [
+        "import { readdirSync } from 'node:fs';",
+        "const mod = await import('./fixtures/relative-module.mjs');",
+        "const repoTemps = readdirSync(process.cwd()).filter((name) => name.startsWith('.sdl-runtime-code-'));",
+        "console.log(JSON.stringify({ value: mod.value, repoTemps }));",
+      ].join("\n"),
       persistOutput: false,
       outputMode: "summary",
     });
 
     assert.equal(result.status, "success");
-    assert.match(result.stdoutSummary, /relative-ok/);
+    const payload = JSON.parse(result.stdoutSummary.trim()) as {
+      value: string;
+      repoTemps: string[];
+    };
+    assert.equal(payload.value, "relative-ok");
+    assert.deepEqual(payload.repoTemps, []);
+  });
+
+  it("should keep node code temp files out of cwd when stdin is provided", async () => {
+    const { handleRuntimeExecute } =
+      await import("../../dist/mcp/tools/runtime.js");
+    const stdin = "payload\n";
+
+    const result = await handleRuntimeExecute({
+      repoId,
+      runtime: "node",
+      code: [
+        "import { readdirSync } from 'node:fs';",
+        "process.stdin.setEncoding('utf8');",
+        "let input = '';",
+        "for await (const chunk of process.stdin) input += chunk;",
+        "const repoTemps = readdirSync(process.cwd()).filter((name) => name.startsWith('.sdl-runtime-code-'));",
+        "console.log(JSON.stringify({ input, repoTemps }));",
+      ].join("\n"),
+      stdin,
+      persistOutput: false,
+      outputMode: "summary",
+    });
+
+    assert.equal(result.status, "success", result.stderrSummary);
+    const payload = JSON.parse(result.stdoutSummary.trim()) as {
+      input: string;
+      repoTemps: string[];
+    };
+    assert.equal(payload.input, stdin);
+    assert.deepEqual(payload.repoTemps, []);
   });
 
   it("should pass stdin through the handler without echoing it as metadata", async () => {

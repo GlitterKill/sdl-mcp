@@ -6,7 +6,6 @@
  */
 
 import { access, mkdtemp, writeFile, rm } from "fs/promises";
-import { randomUUID } from "node:crypto";
 import { join } from "path";
 import { tmpdir } from "os";
 import { z } from "zod";
@@ -34,6 +33,7 @@ import {
   getRuntimeExtension,
   getRuntimeRequiredEnvKeys,
   isCompileThenExecute,
+  normalizeExecutableName,
 } from "../../runtime/runtimes.js";
 import {
   execute,
@@ -78,6 +78,11 @@ function summarizeCommand(
     `code=${hasCode ? "yes" : "no"}`,
     `stdin=${hasStdin ? "yes" : "no"}`,
   ].join(" ");
+}
+
+function isNodeJsExecutable(executable: string): boolean {
+  const name = normalizeExecutableName(executable);
+  return name === "node" || name === "node.exe";
 }
 
 function buildRuntimeNextAction(
@@ -554,7 +559,6 @@ export async function handleRuntimeExecute(
   }
 
   let tempCodeDir: string | undefined;
-  let tempCodePath: string | undefined;
 
   try {
     // 5. Resolve CWD
@@ -573,28 +577,41 @@ export async function handleRuntimeExecute(
     }
     timer.record("runtime.resolveCwd", cwdStartedAt);
 
-    // 6. Handle code mode — write to temp file
+    // 6. Handle code mode.
     let codePath: string | undefined;
+    let executionStdin = request.stdin;
+    let nodeCodeFromStdin = false;
     if (request.code) {
-      const ext = getRuntimeExtension(request.runtime) ?? ".txt";
-      if (request.runtime === "node") {
-        tempCodePath = join(cwd, `.sdl-runtime-code-${randomUUID()}${ext}`);
-        codePath = tempCodePath;
+      if (
+        request.runtime === "node" &&
+        request.stdin === undefined &&
+        isNodeJsExecutable(executable)
+      ) {
+        executionStdin = request.code;
+        nodeCodeFromStdin = true;
       } else {
+        // ponytail: code+stdin needs child stdin for user input; use a temp
+        // .mjs in %TEMP% instead of a loader shim.
+        const ext =
+          request.runtime === "node"
+            ? ".mjs"
+            : getRuntimeExtension(request.runtime) ?? ".txt";
         tempCodeDir = await mkdtemp(join(tmpdir(), "sdl-runtime-code-"));
         codePath = join(tempCodeDir, `code${ext}`);
+        await writeFile(codePath, request.code, {
+          encoding: "utf-8",
+          mode: 0o600,
+        });
       }
-      await writeFile(codePath, request.code, {
-        encoding: "utf-8",
-        mode: 0o600,
-      });
     }
 
     // 7. Build command
-    let cmd = runtimeDescriptor.buildCommand(request.args, {
-      codePath,
-      executable,
-    });
+    let cmd = nodeCodeFromStdin
+      ? { executable, args: ["--input-type=module", "-", ...request.args] }
+      : runtimeDescriptor.buildCommand(request.args, {
+          codePath,
+          executable,
+        });
 
     // 8. Build env
     const requiredKeys = getRuntimeRequiredEnvKeys(request.runtime);
@@ -855,7 +872,7 @@ export async function handleRuntimeExecute(
       maxStderrBytes: runtimeConfig.maxStderrBytes,
       signal: context?.signal,
       codePath,
-      stdin: request.stdin,
+      stdin: executionStdin,
     });
     timer.record("runtime.execute", executeStartedAt);
 
@@ -1007,17 +1024,7 @@ export async function handleRuntimeExecute(
   } finally {
     tracker.release();
 
-    // Cleanup temp code file/directory.
-    if (tempCodePath) {
-      try {
-        await rm(tempCodePath, { force: true });
-      } catch (err) {
-        logger.warn("Failed to cleanup temp code file", {
-          path: tempCodePath,
-          error: String(err),
-        });
-      }
-    }
+    // Cleanup temp code directory.
     if (tempCodeDir) {
       try {
         await rm(tempCodeDir, { recursive: true, force: true });
