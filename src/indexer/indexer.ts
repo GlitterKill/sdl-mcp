@@ -627,6 +627,22 @@ function emptyPass1EngineTelemetry(): NonNullable<IndexResult["pass1Engine"]> {
   };
 }
 
+const EMPTY_INCREMENTAL_PROVIDER_FACTS_MESSAGE =
+  "Provider-first SCIP execution produced no file facts";
+
+export function formatProviderFirstAutoFallbackReason(params: {
+  reason: string;
+  providerFirstIncrementalActive: boolean;
+}): string {
+  if (
+    params.providerFirstIncrementalActive &&
+    params.reason.includes(EMPTY_INCREMENTAL_PROVIDER_FACTS_MESSAGE)
+  ) {
+    return "provider-first incremental produced no provider facts for selected changed files; using legacy fallback";
+  }
+  return params.reason;
+}
+
 function providerFirstFallbackSummary(
   reasons: readonly string[],
 ): ProviderFirstExecutionSummary {
@@ -2939,15 +2955,19 @@ async function indexRepoImpl(
             ? err.message
             : `provider-first SCIP execution failed: ${String(err)}`;
         if (providerFirst.requestedMode === "auto") {
+          const fallbackReason = formatProviderFirstAutoFallbackReason({
+            reason,
+            providerFirstIncrementalActive,
+          });
           logger.warn(
             "indexRepo: provider-first execution failed, using legacy fallback",
             {
               repoId,
-              reason,
+              reason: fallbackReason,
             },
           );
           providerFirstExecutionFallback = providerFirstFallbackSummary([
-            reason,
+            fallbackReason,
           ]);
           if (providerFirstIncrementalActive) {
             // Keep provider-first incremental failures scoped; otherwise the
