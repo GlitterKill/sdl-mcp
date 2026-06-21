@@ -152,12 +152,12 @@ Use this order unless task constraints force escalation:
 
 - **Debug**: `search -> card -> slice.build -> hotPath -> needWindow (only if still ambiguous)`.
 - **Debug (auto-discovery)**: `slice.build` with `taskText` describing the bug + `stackTrace` and/or `failingTestPath` if available → SDL-MCP finds symbols automatically. Pass the same context via `sliceContext` to `code.needWindow` if raw code is needed.
-- **Feature implementation**: `repo.overview -> search -> card -> slice.build`. Use `editedFiles` in `slice.build` to include symbols from files you're actively modifying. Use `symbol.edit` when the change is one symbol and you want preview/apply safety with AST preconditions.
+- **Feature implementation**: use `sdl.context` when you need task-shaped understanding, `symbol.search -> symbol.getCard` for exact targets, and `slice.build` when you need likely files or a dependency frontier before editing. Use `symbol.edit` for one-symbol changes and `search.edit` for bounded batch edits.
 - **PR review**: `delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols`.
 - **Live editing**: `buffer.push` as files change (with cursor/selection tracking) → `buffer.checkpoint` to persist → search/card/slice now reflect draft state.
 - **Test execution**: `runtime.execute` with the narrowest useful runtime (`node`, `python`, or `shell`) to run tests and capture structured output. On Windows shell runtime, use `&` or newlines rather than semicolons for command separation.
-- **Context retrieval** _(Code Mode)_: use `sdl.context` when Code Mode is enabled. If Code Mode is disabled, follow the manual ladder (`repo.overview` -> `symbol.search` -> `symbol.getCard` -> `slice.build` -> code tools).
-- **Multi-step operations** _(Code Mode)_: `sdl.workflow` for runtime execution, data transforms, and batch mutations. Do not use it for context retrieval — route explain/debug/review/implement work to context first.
+- **Context retrieval** _(Code Mode)_: use `sdl.context` for task-shaped explain/debug/review/implement context, `symbol.search`/`symbol.getCard` for exact symbols, and `slice.build` for graph/file frontiers. If Code Mode is disabled, follow the manual ladder (`repo.overview` -> `symbol.search` -> `symbol.getCard` -> `slice.build` -> code tools).
+- **Multi-step operations** _(Code Mode)_: `sdl.workflow` for runtime execution, data transforms, batch mutations, and retrieval ladders after the first SDL discovery surface. Do not wrap a single `sdl.context` call in workflow.
 - **Symbol-scoped edits** _(Code Mode)_: `sdl.file` with `op: "symbolEditPreview"` -> review `planHandle` -> `op: "symbolEditApply"`. Use `symbolEditApplyNow` only when you already hold the current `astFingerprint` and range from a fresh card.
 
 ### 3) Token controls by tool
@@ -279,14 +279,14 @@ When `codeMode.enabled: true` is set in config, four Code Mode tools sit alongsi
 
 - `sdl.action.search` — returns the most relevant SDL actions for a query, optionally with schema and example metadata.
 - `sdl.manual` — returns a compact filtered API reference for all or part of the action surface.
-- `sdl.context` — retrieves task-shaped context inside Code Mode. Start here for `explain`, `debug`, `review`, and most `implement` requests.
+- `sdl.context` — retrieves task-shaped context inside Code Mode. Use it for explain/debug/review/implement understanding, not as a wrapper around exact symbol lookup or edit planning.
 - `sdl.workflow` — executes up to 50 actions in a single round trip with `$N` result piping, internal data transforms, and optional traces.
 - `sdl.file` — performs Code Mode file read/write, two-phase search/edit, symbol edit, and gated source-window operations through one `op` discriminator.
 
 Routing guidance:
 
-- Start with `sdl.context` for explain/debug/review work, and for implement work when you need understanding before execution.
-- Use `sdl.workflow` only when the task is genuinely multi-step: runtime execution, data shaping, batch mutations, or a reusable operation pipeline.
+- Use `sdl.context` for task-shaped understanding, `symbol.search`/`symbol.getCard` for exact targets, and `slice.build` when you need a likely file/symbol frontier before editing.
+- Use `sdl.workflow` only when the task is genuinely multi-step: retrieval ladder escalation, runtime execution, data shaping, batch mutations, or a reusable operation pipeline.
 
 Workflow guidance:
 
@@ -297,7 +297,7 @@ Workflow guidance:
 - `onError`: `"continue"` (default, skip only dependency-blocked steps), `"continueAll"` (legacy run-every-later-step behavior), or `"stop"` (halt on first error).
 - The workflow enforces the same context-ladder escalation rules as individual tools.
 - Cross-step ETag caching is automatic — no need to pass ETags manually between steps.
-- Use workflows for multi-step operations: runtime execution, data shaping, batch mutations, and CI pipelines. Do not use them for context retrieval (use `sdl.context` in Code Mode or `sdl.context` directly). Do not use them for single actions.
+- Use workflows for multi-step operations: retrieval ladder escalation, runtime execution, data shaping, batch mutations, and CI pipelines. Do not use them merely to wrap a single `sdl.context` call or any other single action.
 
 ### 8) Feedback loop (`sdl.agent.feedback`)
 
@@ -335,7 +335,7 @@ When memory is disabled, memory tools return a clear error and no memory surfaci
 
 ### 11) Do not
 
-- Do not jump directly to raw file reads if SDL tools can answer the question.
+- Do not use `file.read` or raw native reads for indexed source. Use `sdl.context`, `symbol.search`/`symbol.getCard`, `slice.build`, skeletons, hot paths, or gated windows.
 - Do not call `sdl.code.needWindow` before trying `sdl.code.getSkeleton`/`sdl.code.getHotPath`.
 - Do not use broad `sdl.symbol.search` limits by default.
 - Do not rebuild slices repeatedly when `sdl.slice.refresh` can provide incremental deltas.
@@ -346,7 +346,7 @@ When memory is disabled, memory tools return a clear error and no memory surfaci
 - Do not ignore `nextBestAction`, `fallbackTools`, or `fallbackRationale` in denied or ambiguous responses — they tell you what to try instead.
 - Do not ignore stale memories surfaced in slices — review and update or remove them.
 - Do not store trivial or ephemeral notes as memories — they add noise to future surfacing.
-- Do not use `sdl.workflow` for context retrieval. Use `sdl.context` in Code Mode, or use the manual ladder when Code Mode is disabled. Workflow is for multi-step operations (runtime, data transforms, mutations).
+- Do not use `sdl.workflow` just to wrap a single `sdl.context` call. Use workflow for multi-step retrieval ladders, runtime, data transforms, and mutations.
 - Do not use `sdl.workflow` for a single action — it adds overhead. Use the direct tool instead.
 - Do not hardcode step indices in `$N` references without checking the actual step order in your chain.
 

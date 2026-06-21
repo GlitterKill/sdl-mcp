@@ -31,10 +31,9 @@ The generated files steer Claude toward:
 1. `sdl.repo.status`
 2. `sdl.action.search`
 3. focused `sdl.manual`
-4. `sdl.context` for direct code context retrieval (`contextMode: "precise"` or `"broad"`)
-5. `sdl.context` first for Code Mode explain/debug/review/implement requests
-6. `sdl.workflow` for batched follow-ups, runtime execution, data transforms, and batch mutations
-7. `runtimeExecute` inside `sdl.workflow` for repo-local commands
+4. `sdl.context` for task-shaped context, `symbolSearch`/`symbolGetCard` for exact symbols, or `slice.build` for graph/file frontiers
+5. `sdl.workflow` for batched escalation, runtime execution, data transforms, and batch operations
+6. `runtimeExecute` inside `sdl.workflow` for repo-local commands
 
 They also teach Claude to use `symbolRef` / `symbolRefs` when it knows a symbol name but not the canonical ID, and to follow SDL fallback guidance instead of retrying blocked native tools. Enforcement is conditional on the SDL-MCP server being active.
 
@@ -60,7 +59,7 @@ They also teach Claude to use `symbolRef` / `symbolRefs` when it knows a symbol 
 
 That instruction layer now includes natural-identifier lookup and guidance fields such as `fallbackTools` and `fallbackRationale`.
 
-The generated `explore-sdl` agent mirrors the SDL-MCP Agent Workflow skill: it starts code exploration with `sdl.context`, escalates through batched SDL workflow steps only when needed, uses SDL runtime with minimal persisted output for repo-local commands, avoids habitual index refreshes, and reports session token savings when SDL-MCP was used.
+The generated `explore-sdl` agent mirrors the SDL-MCP Agent Workflow skill: it chooses the cheapest SDL discovery surface (`sdl.context`, `symbolSearch`/`symbolGetCard`, or `slice.build`), escalates through batched SDL workflow steps only when needed, uses SDL runtime with minimal persisted output for repo-local commands, avoids habitual index refreshes, and reports session token savings when SDL-MCP was used.
 
 SDL-MCP also advertises server-level MCP instructions that tell clients to load `sdl-mcp-agent-workflow` at session start when skills are supported. Codex enforcement adds a stronger `.codex/hooks/load-sdl-skill.mjs` `SessionStart` hook that injects the lean skill body as a system message.
 
@@ -93,7 +92,7 @@ For code understanding:
 2. `sdl.action.search` (when the correct SDL action is unclear)
 3. `sdl.manual(query|actions|format)` for focused reference
 4. `sdl.context` with `contextMode: "precise"` for targeted lookups or `"broad"` for exploration
-5. `sdl.context` when Claude is already operating inside Code Mode and needs task-shaped context
+5. `symbolSearch`/`symbolGetCard` for exact symbols, or `slice.build` when Claude needs a graph/file frontier before editing
 6. Provide `focusSymbols` and/or `focusPaths` to scope retrieval; always set a budget
 
 For symbol lookup:

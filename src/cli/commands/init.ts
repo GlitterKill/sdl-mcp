@@ -548,7 +548,7 @@ import os
 import re
 import sys
 
-INDEXED_READ_REASON = "Use the SDL-MCP Iris retrieval ladder for indexed source reads. Start with sdl.context, then batch follow-ups through sdl.workflow using symbolSearch, symbolGetCard, codeSkeleton, codeHotPath, and codeNeedWindow only as a last resort with identifiersToFind and expectedLines."
+INDEXED_READ_REASON = "Use the SDL-MCP retrieval ladder for indexed source reads. Use sdl.context for task-shaped understanding, symbolSearch/symbolGetCard for exact symbols, or slice.build for dependency/file frontiers; then batch follow-ups through sdl.workflow using symbolSearch, symbolGetCard, sliceBuild, codeSkeleton, codeHotPath, and codeNeedWindow only as a last resort with identifiersToFind and expectedLines. Never use \`file.read\` for indexed source."
 INDEXED_WRITE_REASON = "Use SDL-MCP indexed-source edit tools instead of native writes. Prefer symbol.edit for one-symbol edits; use searchEditPreview with targeting:\\"identifier\\" for exact AST identifier replacements in supported structural languages, targeting:\\"structural\\" for tree-sitter capture edits, or operations[] for heterogeneous batches. Review astMatches/snippets, then apply the plan handle. If SDL edit tools cannot express the change, run a targeted script through sdl.workflow runtimeExecute with stdin."
 NON_INDEXED_READ_REASON = "Use SDL-MCP file.read for non-indexed repository reads. Prefer sdl.file { op: \\"read\\" } or file.read with search, jsonPath, or bounded offset/limit instead of native file reads."
 NON_INDEXED_WRITE_REASON = "Use SDL-MCP file.write for non-indexed repository writes. Prefer sdl.file { op: \\"write\\" } or file.write with one targeted write mode instead of native Write/Edit/apply_patch."
@@ -819,18 +819,19 @@ Follow the same workflow as the SDL-MCP Agent Workflow skill when that skill is 
 
 4. **Use \`sdl.manual\`** with \`query\` or \`actions\` to load a focused reference for specific tools.
 
-5. **Start real context gathering with \`sdl.context\`**:
-   - \`contextMode: "precise"\` — targeted symbol/file lookups.
-   - \`contextMode: "broad"\` — exploratory codebase understanding.
-   - Provide \`focusSymbols\` and/or \`focusPaths\` to scope the retrieval.
+5. **Choose the cheapest SDL discovery surface before code windows**:
+   - Use \`sdl.context\` for task-shaped explain/debug/review/implement context.
+   - Use \`symbolSearch\` / \`sdl.symbol.search\` plus \`symbolGetCard\` / \`sdl.symbol.getCard\` for exact symbols, APIs, and focused edit targets.
+   - Use \`sliceBuild\` / \`sdl.slice.build\` when you need likely files, a dependency frontier, blast radius, or an edit-planning set.
+   - For \`sdl.context\`, set \`contextMode: "precise"\` for named symbols, exact paths, narrow bugs, and focused reviews; use \`contextMode: "broad"\` for unfamiliar subsystems.
    - Set \`responseMode: "auto"\` for potentially large responses and use \`response.get\` only for needed excerpts.
-   - Always set a tight budget (\`maxTokens\`; use slice tools, not \`sdl.context\`, when card-count budgets are required).
+   - Keep budgets tight; use slice budgets when file/card counts matter.
 
-6. **Use \`sdl.workflow\`** for multi-step follow-ups, runtime execution, data transforms, and batch operations. Start retrieval with \`sdl.context\`; use workflow for batched escalation or procedural work.
+6. **Use \`sdl.workflow\`** for multi-step follow-ups, runtime execution, data transforms, and batch operations after the first SDL discovery surface. Do not wrap a single \`sdl.context\` call just to retrieve context.
 
 7. **Use \`symbolRef\` or \`symbolRefs\`** when you know a symbol name but not the canonical \`symbolId\`. SDL-MCP will resolve the best match.
 
-8. **Follow the Context Ladder** — escalate only when needed:
+8. **Follow the retrieval ladder only when more detail is needed** and batch follow-ups through \`sdl.workflow\`:
    - \`sdl.symbol.search\` — Find symbols by name/pattern. Add \`semantic: true\` for conceptual queries.
    - \`sdl.symbol.getCard\` — Get symbol metadata, signature, dependencies.
    - \`sdl.slice.build\` — Get related symbols for a task. Use \`taskText\` for auto-discovery.
@@ -848,9 +849,9 @@ Follow the same workflow as the SDL-MCP Agent Workflow skill when that skill is 
 
 10. **Follow SDL fallback guidance** — when a request is denied or ambiguous, use the \`nextBestAction\`, \`fallbackTools\`, \`fallbackRationale\`, and ranked candidates from the response instead of retrying native tools.
 
-11. **Use native tools only as fallback or for non-repository internal data.** Avoid native \`Grep\`/\`Glob\` for repo-local source discovery when SDL-MCP can answer with \`sdl.context\`, \`symbolSearch\`, \`file.read\`, or \`sdl.action.search\`.
+11. **Use native tools only as fallback or for non-repository internal data.** Avoid native \`Grep\`/\`Glob\` for repo-local source discovery when SDL-MCP can answer with \`sdl.context\`, \`symbolSearch\`, \`slice.build\`, or \`sdl.action.search\`.
 
-12. **For non-code files** (\`.md\`, \`.json\`, \`.yaml\`, \`.toml\`, \`.xml\`, \`.sql\`, \`.css\`, \`.html\`, \`.txt\`, config files, lock files), use \`file.read\` inside \`sdl.workflow\`. Prefer targeted modes over full reads:
+12. **For non-indexed files** (\`.md\`, \`.json\`, \`.yaml\`, \`.toml\`, \`.xml\`, \`.sql\`, \`.css\`, \`.html\`, \`.txt\`, config files, lock files), use \`file.read\` inside \`sdl.workflow\`. Prefer targeted modes over full reads:
    - **Line range**: \`{ "fn": "file.read", "args": { "filePath": "docs/guide.md", "offset": 10, "limit": 20 } }\`
    - **Search**: \`{ "fn": "file.read", "args": { "filePath": "docs/guide.md", "search": "authentication", "searchContext": 3 } }\`
    - **JSON path**: \`{ "fn": "file.read", "args": { "filePath": "package.json", "jsonPath": "dependencies" } }\`
@@ -864,9 +865,9 @@ Follow the same workflow as the SDL-MCP Agent Workflow skill when that skill is 
 ## Workflow
 
 1. Use \`sdl.repo.status\` to check repo state and health
-2. Use \`sdl.context\` with the appropriate \`contextMode\` for the exploration question
+2. Choose \`sdl.context\` for task-shaped questions, \`symbolSearch\`/\`symbolGetCard\` for exact symbols, or \`slice.build\` for likely files/frontiers
 3. Use \`sdl.action.search\` or focused \`sdl.manual\` if the next SDL tool is unclear
-4. Use \`sdl.workflow\` to batch \`symbolSearch\`, \`symbolGetCard\`, \`codeSkeleton\`, and \`codeHotPath\` when context needs follow-up
+4. Use \`sdl.workflow\` to batch \`symbolSearch\`, \`symbolGetCard\`, \`sliceBuild\`, \`codeSkeleton\`, and \`codeHotPath\` when context needs follow-up
 5. Use \`codeNeedWindow\` only as a last resort with clear justification
 6. Use \`fileRead\` for non-indexed files with \`search\`, \`jsonPath\`, or bounded ranges
 7. Use \`runtimeExecute\` plus \`runtimeQueryOutput\` for repo-local commands and targeted output retrieval
@@ -887,15 +888,15 @@ At the start of every new session in this repository, load and follow the \`sdl-
 1. Start with sdl.repo.status.
 2. Use sdl.action.search when the correct SDL action is unclear.
 3. Use sdl.manual(query|actions|format) for focused reference instead of loading the full manual.
-4. Use sdl.context for context retrieval (contextMode: "precise" for targeted lookups, "broad" for exploration).
-5. Use sdl.workflow for multi-step follow-ups, runtime execution, data transforms, and batch operations. Start retrieval with sdl.context; use workflow for batched escalation or procedural work.
+4. Use sdl.context for task-shaped context, symbolSearch/symbolGetCard for exact symbols, and slice.build for dependency or file frontiers.
+5. Use sdl.workflow for multi-step follow-ups, runtime execution, data transforms, and batch operations after the initial SDL discovery surface is chosen.
 6. Use symbolRef / symbolRefs when you know a symbol name but not the canonical symbolId.
 7. Follow nextBestAction, fallbackTools, fallbackRationale, and candidate guidance from SDL responses instead of retrying blocked native tools.
 
 ## Native Tool Restrictions
 
 - Never use native repo-local Read, Write, Edit, patch, or Bash while the SDL-MCP PID file is present.
-- Use the Iris ladder for indexed source reads: sdl.context, then symbolSearch, symbolGetCard, codeSkeleton, codeHotPath, and codeNeedWindow only as a last resort.
+- Use the Iris ladder for indexed source reads: sdl.context for task-shaped context, symbolSearch/symbolGetCard for exact symbols, slice.build for graph/file frontiers, then codeSkeleton, codeHotPath, and codeNeedWindow only as a last resort. Never use \`file.read\` for indexed source.
 - Use symbol.edit for one-symbol indexed writes and searchEditPreview with targeting:"identifier", targeting:"structural", or operations[] for cross-file indexed edits. Use targeted scripts through sdl.workflow runtimeExecute with stdin only when SDL edit tools cannot express the change.
 - Use file.read / file.write for non-indexed repository files.
 - Use runtimeExecute inside sdl.workflow for repo-local shell actions; pass multiline scripts/input through stdin.
@@ -909,7 +910,7 @@ All SDL-MCP enforcement is conditional on the server being active (PID file exis
 
 ## Context Retrieval
 
-Start understanding tasks with sdl.context, then use sdl.workflow for batched follow-up steps when cards, skeletons, hot paths, or bounded windows are needed:
+Start understanding tasks with sdl.context, exact symbol tasks with symbolSearch/symbolGetCard, and edit-planning tasks with slice.build; then use sdl.workflow for batched follow-up steps when cards, skeletons, hot paths, or bounded windows are needed:
 - contextMode: "precise" — targeted symbol/file lookups
 - contextMode: "broad" — exploratory codebase understanding
 Provide focusSymbols and/or focusPaths to scope the retrieval. Always set a budget (maxTokens, maxActions).
@@ -976,7 +977,7 @@ export const EnforceSDL: Plugin = async () => {
         const loweredPath = rawPath.toLowerCase();
         if (BLOCKED_EXTENSIONS.some((ext) => loweredPath.endsWith(ext))) {
           throw new Error(
-            "Use SDL-MCP tools for indexed source code. Start with sdl.repo.status, then use sdl.context for context retrieval, or sdl.action.search to find the right tool. Use symbolRef when the symbol name is known but the ID is not."
+            "Use SDL-MCP tools for indexed source code. Start with sdl.repo.status, then use sdl.context for task-shaped context, symbolSearch/symbolGetCard for exact symbols, slice.build for graph/file frontiers, or sdl.action.search to find the right tool. Use symbolRef when the symbol name is known but the ID is not. Never use \`file.read\` for indexed source."
           );
         }
       }
@@ -1088,10 +1089,10 @@ function fallbackSkillBody() {
     "# SDL-MCP Agent Workflow",
     "",
     "Load and follow the \`sdl-mcp-agent-workflow\` skill when available. Fallback rules:",
-    "1. Start every repository task with \`repo.status\`, then \`sdl.context\`.",
+    "1. Start every repository task with \`repo.status\`, then choose \`sdl.context\`, \`symbolSearch\`/\`symbolGetCard\`, or \`slice.build\` based on the task.",
     "2. Use \`contextMode: \\"precise\\"\` for named symbols, exact paths, narrow bugs, focused reviews, and implementation follow-up.",
     "3. Use \`contextMode: \\"broad\\"\` for subsystem mapping, behavior tracing, unfamiliar code, or broad investigations.",
-    "4. Batch follow-up retrieval through \`sdl.workflow\`: \`symbolSearch\`, \`symbolGetCard\`, \`codeSkeleton\`, \`codeHotPath\`, then \`codeNeedWindow\` as a last resort.",
+    "4. Batch follow-up retrieval through \`sdl.workflow\`: \`symbolSearch\`, \`symbolGetCard\`, \`sliceBuild\` for graph/file frontiers, \`codeSkeleton\`, \`codeHotPath\`, then \`codeNeedWindow\` as a last resort.",
     "5. Use \`symbol.edit\` for one-symbol indexed edits; use \`searchEditPreview\` with \`targeting:\\"identifier\\"\`, \`targeting:\\"structural\\"\`, or \`operations[]\` for safer cross-file edits.",
     "6. Use \`runtimeExecute\` with \`stdin\` for repo-local commands and multiline scripts/input; for indexed-source edits, use runtime only when SDL edit tools cannot express the change.",
     "7. Use memory tools only when \`memory.enabled: true\`; avoid habitual \`index.refresh\`.",
@@ -1137,7 +1138,7 @@ const indexedExtensions = new Set(${indexedExtensions});
 const RUNTIME_REASON =
   "Run repo-local shell actions through SDL-MCP instead of native shell. Use sdl.workflow with runtimeExecute, default outputMode: \\"minimal\\", persistOutput: true, an explicit timeoutMs, stdin for multiline input, and runtimeQueryOutput only for focused follow-up output.";
 const INDEXED_READ_REASON =
-  "Use the SDL-MCP Iris retrieval ladder for indexed source reads. Start with sdl.context, then batch follow-ups through sdl.workflow using symbolSearch, symbolGetCard, codeSkeleton, codeHotPath, and codeNeedWindow only as a last resort with identifiersToFind and expectedLines.";
+  "Use the SDL-MCP retrieval ladder for indexed source reads. Use sdl.context for task-shaped understanding, symbolSearch/symbolGetCard for exact symbols, or slice.build for dependency/file frontiers; then batch follow-ups through sdl.workflow using symbolSearch, symbolGetCard, sliceBuild, codeSkeleton, codeHotPath, and codeNeedWindow only as a last resort with identifiersToFind and expectedLines. Never use \`file.read\` for indexed source.";
 const INDEXED_WRITE_REASON =
   "Use SDL-MCP indexed-source edit tools instead of native writes. Prefer symbol.edit for one-symbol edits; use searchEditPreview with targeting:\\"identifier\\" for exact AST identifier replacements in supported structural languages, targeting:\\"structural\\" for tree-sitter capture edits, or operations[] for heterogeneous batches. Review astMatches/snippets, then apply the plan handle. If SDL edit tools cannot express the change, run a targeted script through sdl.workflow runtimeExecute with stdin.";
 const NON_INDEXED_READ_REASON =

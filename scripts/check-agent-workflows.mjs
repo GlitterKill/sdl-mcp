@@ -11,6 +11,10 @@ const exactCopies = ["SDL.md", "tests/stress/fixtures/SDL.md"];
 
 const syncSurfaces = [
   {
+    path: "templates/SDL.md",
+    required: ["slice.build", "file.read` for indexed source", "symbol.edit", "symbolEditPreview", "search.edit", "previewWindow"],
+  },
+  {
     path: "templates/AGENTS.md.template",
     required: ["sdl-mcp-agent-workflow", "SDL.md", "SDL runtime", "searchEditPreview", "file.read", "file.write"],
   },
@@ -44,15 +48,29 @@ const syncSurfaces = [
   },
   {
     path: "src/mcp/server-instructions.ts",
-    required: ["sdl-mcp-agent-workflow", "repo.status", "sdl.context", "response.get", "usageStats"],
+    required: ["sdl-mcp-agent-workflow", "repo.status", "sdl.context", "slice.build", "file.read` for indexed source", "symbol.edit", "response.get", "usageStats"],
   },
   {
     path: "src/cli/commands/init.ts",
-    required: ["buildClaudeExploreAgent", "buildCodexSessionStartHook", "sdl-mcp-agent-workflow", "sdl.context", "runtimeExecute", "usageStats"],
+    required: ["buildClaudeExploreAgent", "buildCodexSessionStartHook", "sdl-mcp-agent-workflow", "sdl.context", "slice.build", "Never use \\`file.read\\` for indexed source", "symbol.edit", "runtimeExecute", "usageStats"],
+  },
+  {
+    path: ".codex/hooks/load-sdl-skill.mjs",
+    required: ["sdl-mcp-agent-workflow", "choose `sdl.context`, `symbolSearch`/`symbolGetCard`, or `slice.build`", "sliceBuild", "symbol.edit", "usageStats"],
+  },
+  {
+    path: ".codex/agents/explore-sdl.toml",
+    required: ["Choose the cheapest SDL discovery surface", "symbolSearch", "sliceBuild", "Never use native `Read`", "file.read` or `sdl.file` `op: \"read\"", "usageStats"],
+  },
+  {
+    path: ".claude/agents/explore-sdl.md",
+    required: ["Choose the cheapest SDL discovery surface", "symbolSearch", "sliceBuild", "NEVER use the native `Read`", "For non-indexed files", "usageStats"],
   },
 ];
 
 const narrativeDocs = [
+  "AGENTS.md",
+  "CLAUDE.md",
   "docs/agent-workflows.md",
   "docs/tool-enforcement.md",
   "docs/tool-enforcement-for-claude.md",
@@ -68,6 +86,22 @@ const forbiddenNarrativePatterns = [
   {
     pattern: /\b\d+\s+(?:flat\s+|namespace\s+|meta\s+)?tools\b/gi,
     message: "omit exact tool counts in narrative docs; generated tool inventory owns counts",
+  },
+  {
+    pattern: /\b\d+\s+MCP tool actions\b/gi,
+    message: "omit exact MCP tool action counts in narrative docs; generated tool inventory owns counts",
+  },
+  {
+    pattern: /\b\d+\s+internal workflow transforms\b/gi,
+    message: "omit exact internal workflow transform counts in narrative docs",
+  },
+  {
+    pattern: /\b\d+\s+opt-in memory actions\b/gi,
+    message: "omit exact memory action counts in narrative docs",
+  },
+  {
+    pattern: /per\s+v\d+(?:\.\d+)*/gi,
+    message: "omit stale version labels in narrative workflow docs",
   },
   {
     pattern: /replaces\s+\d+\s+of those flat actions/gi,

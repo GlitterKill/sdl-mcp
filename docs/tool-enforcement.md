@@ -39,10 +39,9 @@ SDL-MCP's token savings depend on the model actually using SDL tools:
 1. `sdl.repo.status`
 2. `sdl.action.search`
 3. focused `sdl.manual`
-4. `sdl.context` for direct code context retrieval (`contextMode: "precise"` or `"broad"`)
-5. `sdl.context` first for Code Mode explain/debug/review/implement requests
-6. `sdl.workflow` for batched follow-ups, runtime execution, data transforms, and batch mutations
-7. `runtimeExecute` inside `sdl.workflow` for repo-local commands
+4. `sdl.context` for task-shaped context, `symbolSearch`/`symbolGetCard` for exact symbols, or `slice.build` for graph/file frontiers
+5. `sdl.workflow` for batched escalation, runtime execution, data transforms, and batch operations
+6. `runtimeExecute` inside `sdl.workflow` for repo-local commands
 
 The generated enforcement files also teach:
 
