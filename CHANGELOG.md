@@ -5,15 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.11.8] - Unreleased
+## [0.11.8] - 2026-06-21
 
 ### Added
 
+- **Provider-first incremental indexing**: Added provider-first incremental indexing and rebuilt Symbol FTS around provider replacement so incremental provider runs keep search state aligned.
+
 ### Changed
 
-- Default server file logging now creates a unique session log file instead of appending every run to `sdl-mcp.log`; set `SDL_LOG_FILE` to keep using an explicit stable path.
+- **SDL workflow guidance**: Refined context retrieval, workflow dependency handling, edit guidance, runtime docs, file-read extraction, and generated tool documentation/templates.
+- **Runtime logging and Watchman setup**: Default server file logging now creates a unique session log file instead of appending every run to `sdl-mcp.log`; Watchman install/probe handling and managed package restaging were hardened.
+- **Provider-first behavior**: Scoped provider-first fallback failures, clarified auto fallback reasons, and constrained provider inputs to provider-first paths.
 
 ### Fixed
+
+- **Runtime and CI stability**: Fixed Node runtime code execution with stdin, CI runtime artifacts, PHP CRLF call handling, CI parity, provider-first test gates, and nightly benchmark matrix isolation.
+- **Index and retrieval correctness**: Preferred expected-name matches in source call proof, repaired missing file summaries during no-op recovery, aligned gateway tests with the current action set, and excluded control-plane tools from savings rankings.
+
+_27 commits from 2 contributors_
 
 ## [0.11.7] - 2026-06-17
 

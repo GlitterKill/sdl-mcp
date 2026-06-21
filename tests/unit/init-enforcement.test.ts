@@ -297,7 +297,7 @@ describe("init agent enforcement", () => {
             file_path: join(tempDir, "src", "cli", "commands", "init.ts"),
           },
         },
-        /Iris retrieval ladder/,
+        /SDL-MCP retrieval ladder/,
       ],
       [
         {
