@@ -20,7 +20,9 @@ export { createLspProviderCacheKey } from "./lsp-cache.js";
 export { resolveProviderFirstPipeline } from "./planner.js";
 export { normalizeScipProviderFacts } from "./scip-normalizer.js";
 export {
+  executeProviderFirstLspIncremental,
   executeProviderFirstLspFull,
+  executeProviderFirstScipIncremental,
   executeProviderFirstScipFull,
   resolveProviderFirstExecutionPlan,
 } from "./executor.js";

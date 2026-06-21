@@ -29,8 +29,8 @@ For performance tuning, use the deterministic subset workflow in [Provider-first
 | Value | Behavior |
 | --- | --- |
 | `"legacy"` | Use the tree-sitter/Rust legacy indexer only when SCIP and LSP provider inputs are disabled. If SCIP or LSP inputs are enabled, SDL-MCP coerces the run to provider-first and emits a diagnostic because provider facts are provider-first owned. |
-| `"providerFirst"` | Require an executable provider-first run for full SCIP or LSP refreshes. SCIP-covered files with usable symbol facts are materialized from provider facts even when references are partial. LSP-covered files can materialize bounded document-symbol and diagnostic facts. Uncovered or provider-unusable files are routed to the legacy indexer in the same run. Incremental refreshes temporarily use the legacy incremental path. |
-| `"auto"` | Use provider-first when an executable provider path is available; otherwise use legacy. Full SCIP and LSP runs can mix provider materialization with same-run legacy fallback. If provider execution fails before trustworthy facts are available, `auto` falls back to a pure legacy run without SCIP/LSP overlay ingestion. |
+| `"providerFirst"` | Require an executable provider-first run for SCIP or LSP refreshes. SCIP-covered files with usable symbol facts are materialized from provider facts even when references are partial. LSP-covered files can materialize bounded document-symbol and diagnostic facts. Uncovered or provider-unusable files are routed to the legacy indexer in the same run. Incremental SCIP refreshes require `scip.generator.enabled` so changed files can be passed to `scip-io`; static SCIP index files without a generator fall back rather than treating stale provider output as fresh. |
+| `"auto"` | Use provider-first when an executable provider path is available; otherwise use legacy. SCIP and LSP runs can mix provider materialization with same-run legacy fallback. If provider execution fails before trustworthy facts are available, `auto` falls back to a pure legacy run without SCIP/LSP overlay ingestion. |
 
 `providerFirst.maxLegacyFallbackFiles` defaults to `1000000`. That high default is intentional: normal full builds should complete the graph rather than adopt a provider-only subset. Larger gaps keep the provider-primary graph, skip the expensive legacy parse, and report skipped file counts only when the emergency cap is exceeded or intentionally lowered.
 
@@ -155,6 +155,17 @@ Existing symbols for provider-materialized files are removed before the provider
 Generator warnings from `scip-io` remain visible in SCIP diagnostics but do not abort explicit `providerFirst` after a usable index decodes into provider rows. Missing configured SCIP index files still fail explicit provider-first runs because the configured source of truth was unavailable.
 
 Provider runs are persisted to `SemanticProviderRun`. Provider diagnostics and grouped coverage/call-proof diagnostics are persisted to `SemanticDiagnostic`. Bounded coverage summaries are stored in `SemanticProviderRun.metadataJson`.
+
+### Incremental Refreshes
+
+Provider-first incremental refreshes start with the normal repository scan so removed files and unchanged files are still detected against LadybugDB metadata. Only changed files enter provider collection:
+
+- SCIP incremental writes a temporary newline manifest of changed repo-relative paths and runs `scip-io index --files-from <manifest> --output <temp.scip>`. The generated temp index is decoded for the current run and does not update the full `index.scip` generator cache.
+- LSP incremental passes only changed scanned files into document-symbol collection. Unchanged files keep their existing graph rows.
+- Provider-covered changed files are materialized into the active graph with existing symbols for those files deleted first, known-fresh writers enabled, provider edges written, and repo-wide external-symbol pruning disabled.
+- Changed files that are uncovered or provider-unusable route through the same legacy incremental fallback path. Users with `indexing.pipeline: "legacy"` keep the legacy incremental process.
+
+Provider-first incremental runs skip shadow staging/finalization because the provider output is intentionally scoped to changed files and cannot represent a complete shadow graph. Post-index finalization receives the changed provider file ids so metrics, memory invalidation, and derived-state work stay scoped to the incremental change set.
 
 ### Scan Scope And Coverage
 
@@ -482,9 +493,9 @@ These runs report `provider active rows reused for existing large symbol set`, r
 
 ## Incremental Builds
 
-Target incremental provider-first refreshes will stage facts by `generationId`, retire affected file facts, write bounded chunks through the single writer, and flip active generation only for affected files after validation. Files with full provider symbol and reference coverage will skip legacy parsing; partial files will receive targeted fallback for missing card or code surfaces.
+Provider-first incremental refreshes require a prior provider-first bootstrap in the active graph. Repos without real SCIP or LSP provider symbols use the legacy incremental lane until a full provider-first run establishes the provider baseline.
 
-Current executable phase: provider-first incremental refreshes use the legacy incremental path with a structured fallback reason. This avoids mixing old SCIP overlay ingestion with incomplete provider generation semantics until active-generation flips are implemented.
+For bootstrapped repos, only changed scanned files enter SCIP/LSP provider collection. Provider-covered changed files are replaced in place, deleted files are removed through the normal `File` deletion path, unchanged files keep their existing graph rows, and uncovered or provider-unusable changed files route to legacy incremental fallback. Scoped incremental provider output skips repo-wide external pruning and shadow staging because it is not a complete provider truth set.
 
 ## Current Implementation Status
 
@@ -536,5 +547,5 @@ Shadow DB and diagnostics:
 - Reducing the active-graph read side of shadow finalization for very large graphs.
 - Broader pass-2 provider bridging for unresolved references/card/code surfaces inside provider-primary files.
 - Capped LSP execution.
-- Incremental provider generations.
+- Active-generation flip metadata for affected files after incremental validation.
 - Parquet staging.
