@@ -105,6 +105,8 @@ devdocs/validation/*
 !devdocs/validation/provider-first-lsp-*.md
 AGENTS.md
 CLAUDE.md
+!/AGENTS.md
+!/CLAUDE.md
 CODEX.md
 GEMINI.md
 OPENCODE.md
