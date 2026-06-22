@@ -896,7 +896,7 @@ Follow the same workflow as the SDL-MCP Agent Workflow skill when that skill is 
 
 14. **Use SDL memory only when enabled.** If \`repo.status\`, config, or tool discovery does not show \`memory.enabled: true\`, do not repeatedly call memory tools. When enabled, use \`memory.query\` for task-text lookup and \`memory.surface\` after relevant symbol IDs are known.
 
-15. **Finish with usage stats when SDL-MCP was used.** Call \`usageStats\` with \`scope: "session"\` and \`persist: true\`; report token savings in the final exploration answer.
+15. **Finish with usage stats when SDL-MCP was used.** Call \`usageStats\` with \`scope: "session"\` and \`persist: true\`; pass through the full session token meter, including per-tool savings, in the final exploration answer. Do not replace it with a one-line summary.
 
 ## Workflow
 
@@ -908,7 +908,7 @@ Follow the same workflow as the SDL-MCP Agent Workflow skill when that skill is 
 6. Use \`fileRead\` for non-indexed files with \`search\`, \`jsonPath\`, or bounded ranges
 7. Use \`runtimeExecute\` plus \`runtimeQueryOutput\` for repo-local commands and targeted output retrieval
 8. Use \`symbol.edit\` for one-symbol edits, \`searchEditPreview\` with \`targeting:"identifier"\`, \`targeting:"structural"\`, or \`operations[]\` for safer cross-file edits, and Node scripts only as a last resort
-9. Use \`usageStats\` before the final answer and report token savings
+9. Use \`usageStats\` before the final answer and pass through the full session token meter, including per-tool savings
 `;
 }
 
@@ -1132,7 +1132,7 @@ function fallbackSkillBody() {
     "5. Use \`symbol.edit\` for one-symbol indexed edits; use \`searchEditPreview\` with \`targeting:\\"identifier\\"\`, \`targeting:\\"structural\\"\`, or \`operations[]\` for safer cross-file edits.",
     "6. Use \`runtimeExecute\` with \`stdin\` for repo-local commands and multiline scripts/input; for indexed-source edits, use runtime only when SDL edit tools cannot express the change.",
     "7. Use memory tools only when \`memory.enabled: true\`; avoid habitual \`index.refresh\`.",
-    "8. Finish with \`usageStats\` and report token savings.",
+    "8. Finish with \`usageStats\` and pass through the full session token meter, including per-tool savings; do not replace it with a one-line summary.",
   ].join("\\n");
 }
 

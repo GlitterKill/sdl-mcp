@@ -406,7 +406,7 @@ Before the final response:
 1. Verify the requested work through SDL-MCP runtime or focused SDL checks when applicable.
 2. Remove `.bak` files created during the task, or clearly report any kept intentionally.
 3. Call `usageStats` with `scope: "session"` and `persist: true` when SDL-MCP was used.
-4. Report the session token savings summary to the user.
+4. Pass through the full session token meter from `usageStats` to the user, including per-tool token savings. Do not replace it with a one-line summary.
 
 ---
 

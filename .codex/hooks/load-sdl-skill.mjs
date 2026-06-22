@@ -53,7 +53,7 @@ function fallbackSkillBody() {
     '5. Use `symbol.edit` for one-symbol indexed edits; use `searchEditPreview` with `targeting:"identifier"`, `targeting:"structural"`, or `operations[]` for safer cross-file edits.',
     "6. Use `runtimeExecute` with `stdin` for repo-local commands and multiline scripts/input; for indexed-source edits, use runtime only when SDL edit tools cannot express the change.",
     "7. Use memory tools only when `memory.enabled: true`; avoid habitual `index.refresh`.",
-    "8. Finish with `usageStats` and report token savings.",
+    "8. Finish with `usageStats` and pass through the full session token meter, including per-tool savings; do not replace it with a one-line summary.",
   ].join("\n");
 }
 
