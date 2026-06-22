@@ -122,7 +122,9 @@ nul
 !.codex/hooks/load-sdl-skill.mjs
 !.codex/agents/
 !.codex/agents/explore-sdl.toml
-.claude/
+.claude/*
+!.claude/agents/
+!.claude/agents/explore-sdl.md
 
 # Nested temp scripts
 sdl-mcp/.tmp-scripts/
