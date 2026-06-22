@@ -339,6 +339,14 @@ SDL-MCP keeps the downstream live-index path unchanged for every provider: provi
 
 `semantic` now centers on retrieval and vector index configuration. It does not configure SCIP or LSP graph enrichment; those settings live under `semanticEnrichment`.
 
+Setup Wizard semantic tiers map directly to this block:
+
+- `Code` enables local Jina code embeddings for symbols only and keeps `generateSummaries: false`.
+- `Enhanced` uses the existing `embeddingProfile: "specialized"` profile: Jina symbols plus Nomic file-summary embeddings, still with `generateSummaries: false`.
+- `Off` writes `semantic.enabled: false` and skips ONNX embedding downloads.
+
+The wizard's Language Providers prompt writes `indexing.pipeline: "auto"` for Yes and `"legacy"` for No. Strict `"providerFirst"` remains an advanced manual setting.
+
 | Field                           | Type                                    | Default                            | Notes                                                                                                                                                                                                                                                                                               |
 | ------------------------------- | --------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `enabled`                       | `boolean`                               | `true`                             |                                                                                                                                                                                                                                                                                                     |

@@ -64,6 +64,11 @@ export function parseInitOptions(
         | "codex"
         | "gemini"
         | "opencode";
+    } else if (arg === "--agents") {
+      if (i + 1 >= args.length) {
+        throw new Error("--agents requires a value");
+      }
+      options.agents = args[++i].split(",").map((agent) => agent.trim());
     } else if (arg === "--repo-path") {
       if (i + 1 >= args.length) {
         throw new Error("--repo-path requires a value");
@@ -88,11 +93,16 @@ export function parseInitOptions(
       options.dryRun = true;
     } else if (arg === "--enforce-agent-tools") {
       options.enforceAgentTools = true;
+    } else if (arg === "--from-postinstall") {
+      options.fromPostinstall = true;
     }
   }
 
   if (typeof values.client === "string") {
     options.client = values.client;
+  }
+  if (typeof values.agents === "string") {
+    options.agents = values.agents.split(",").map((agent: string) => agent.trim());
   }
 
   const repoPathValue =
@@ -127,6 +137,9 @@ export function parseInitOptions(
   }
   if (values["enforce-agent-tools"] === true) {
     options.enforceAgentTools = true;
+  }
+  if (values["from-postinstall"] === true) {
+    options.fromPostinstall = true;
   }
 
   return options;

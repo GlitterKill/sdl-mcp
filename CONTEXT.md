@@ -108,6 +108,10 @@ Lives in `src/policy/runtime.ts` as `decideRuntime(ctx, cfg, tracker?)`.
 
 A place where an Interface lives — where behavior can be altered without editing in place. Use this term, not "boundary." A Seam earns its keep when at least two Adapters satisfy it; one Adapter is a hypothetical Seam.
 
+## Setup Wizard
+
+A guided first-run flow that turns repository, agent, language-provider, embedding, size-profile, and storage-location choices into an SDL-MCP configuration before the server is used.
+
 ## Skeleton IR
 
 A deterministic outline of a symbol or file: signatures, structure, control-flow shape, with bodies elided. The second rung of the Context Ladder. Computed by `src/code/skeleton.ts`.
@@ -177,3 +181,7 @@ Defined in `src/code/window-loader.ts`.
 ├── migrations/                      # Legacy SQLite migrations (removed; directory kept for compat)
 └── dist/                            # Compiled JavaScript (build output)
 ```
+
+## Setup Wizard Context
+
+`sdl-mcp init` owns setup decisions and config writes. npm `postinstall` is only a guarded launcher: it offers the wizard in a human TTY, skips in CI/non-TTY/`SDL_MCP_SKIP_SETUP_WIZARD=1`, times out to skip, and prints `sdl-mcp init` plus `npx --yes sdl-mcp@latest init` for later setup. The wizard maps Language Providers to `indexing.pipeline`, semantic tiers to `semantic`, repo size to watcher/index defaults, and selected agents to repo-local generated assets.

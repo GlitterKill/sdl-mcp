@@ -18,6 +18,7 @@ export interface CommandContext {
 
 export interface InitOptions extends CLIOptions {
   client?: string;
+  agents?: string[];
   repoPath?: string;
   languages?: string[];
   force?: boolean;
@@ -25,6 +26,7 @@ export interface InitOptions extends CLIOptions {
   autoIndex?: boolean;
   dryRun?: boolean;
   enforceAgentTools?: boolean;
+  fromPostinstall?: boolean;
 }
 
 export interface DoctorOptions extends CLIOptions {}

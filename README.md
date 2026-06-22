@@ -67,8 +67,9 @@ SDL-MCP fixes this. It indexes your codebase into a searchable **symbol graph** 
 ```bash
 # Install (requires Node.js 24+)
 npm install -g sdl-mcp
+# In an interactive terminal, postinstall offers the Setup Wizard and times out to skip.
 
-# Initialize, auto-detect languages, index your repo, and run health checks
+# Non-interactive setup: initialize, auto-detect languages, index, and run health checks
 sdl-mcp init -y --auto-index
 
 # Start the MCP server for your coding agent

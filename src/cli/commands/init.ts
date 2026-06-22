@@ -46,6 +46,17 @@ import { indexRepo } from "../../indexer/indexer.js";
 import { logSetupPipelineEvent } from "../../mcp/telemetry.js";
 import { normalizePath } from "../../util/paths.js";
 import { InitOptions } from "../types.js";
+import { runSetupWizard, shouldRunSetupWizard } from "../setup-wizard/run.js";
+import {
+  applySetupWizardConfig,
+  resolveSelectedAgents,
+} from "../setup-wizard/recommendations.js";
+import type { SetupWizardResult } from "../setup-wizard/types.js";
+import {
+  applyMissingConfigRecommendations,
+  summarizeMissingConfigKeys,
+} from "../setup-wizard/config-diff.js";
+import { confirm } from "../setup-wizard/terminal.js";
 import { doctorCommand } from "./doctor.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -328,6 +339,31 @@ function sanitizeRepoId(raw: string): string {
     .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "");
   return value || "my-repo";
+}
+
+function countSourceFiles(repoRoot: string): number {
+  const skipDirs = new Set([".git", "node_modules", "dist", "build", "target", "coverage"]);
+  const stack = [repoRoot];
+  let count = 0;
+  while (stack.length > 0 && count <= 100_000) {
+    const dir = stack.pop();
+    if (!dir) {
+      continue;
+    }
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (!skipDirs.has(entry.name)) {
+          stack.push(join(dir, entry.name));
+        }
+        continue;
+      }
+      const extension = entry.name.split(".").pop();
+      if (extension && extension in LANGUAGE_BY_EXTENSION) {
+        count += 1;
+      }
+    }
+  }
+  return count;
 }
 
 export function detectRepoId(repoRoot: string): string {
@@ -1448,6 +1484,32 @@ if (isNonSdlMcpFileTool(toolName)) {
 `;
 }
 
+function buildAgentInstructionAssets(
+  repoRoot: string,
+  repoId: string,
+  clients: readonly ClientType[],
+): GeneratedAsset[] {
+  const markdownTemplateByClient: Record<ClientType, string> = {
+    "claude-code": "CLAUDE.md.template",
+    codex: "CODEX.md.template",
+    gemini: "GEMINI.md.template",
+    opencode: "OPENCODE.md.template",
+  };
+  const markdownNameByClient: Record<ClientType, string> = {
+    "claude-code": "CLAUDE.md",
+    codex: "CODEX.md",
+    gemini: "GEMINI.md",
+    opencode: "OPENCODE.md",
+  };
+
+  return clients.map((client) => ({
+    path: join(repoRoot, markdownNameByClient[client]),
+    content: renderTextTemplate(markdownTemplateByClient[client], {
+      REPO_ID: repoId,
+    }),
+  }));
+}
+
 function buildEnforcementAssets(
   repoRoot: string,
   repoId: string,
@@ -1743,16 +1805,97 @@ function printDryRunPreview(
     }
   }
 }
-
 export async function initCommand(options: InitOptions): Promise<void> {
+  const initialConfigPath = resolveCliConfigPath(options.config, "write");
+  if (
+    existsSync(initialConfigPath) &&
+    !options.force &&
+    !options.dryRun &&
+    process.stdin.isTTY &&
+    process.stdout.isTTY
+  ) {
+    const rawConfig = JSON.parse(readFileSync(initialConfigPath, "utf-8")) as Record<string, unknown>;
+    const recommendations = summarizeMissingConfigKeys(rawConfig);
+    if (recommendations.length === 0) {
+      console.log(`Configuration already exists and is current: ${initialConfigPath}`);
+      return;
+    }
+    console.log(`Configuration already exists: ${initialConfigPath}`);
+    console.log("Missing recommended setup keys:");
+    for (const item of recommendations) {
+      console.log(`  - ${item.path}: ${JSON.stringify(item.recommendedValue)} (${item.reason})`);
+    }
+    if (!(await confirm("Apply missing recommendations?", false))) {
+      console.log("Existing configuration left unchanged.");
+      return;
+    }
+    applyMissingConfigRecommendations(rawConfig, recommendations);
+    writeFileSync(initialConfigPath, JSON.stringify(rawConfig, null, 2));
+    console.log(`Configuration updated: ${normalizePath(initialConfigPath)}`);
+    return;
+  }
+
+  let wizardResult: SetupWizardResult | undefined;
+  if (shouldRunSetupWizard(options, Boolean(process.stdin.isTTY && process.stdout.isTTY))) {
+    const defaultRepoRoot = resolve(options.repoPath ?? process.env.INIT_CWD ?? process.cwd());
+    const detectedAgents = detectInstalledClients().map(
+      (client) => client.templateClient ?? client.name,
+    );
+    const detectedLanguages = options.languages?.length
+      ? validateLanguages(options.languages)
+      : detectLanguagesFromRepo(defaultRepoRoot);
+    wizardResult = await runSetupWizard({
+      defaultRepoPath: defaultRepoRoot,
+      detectedAgents,
+      detectedLanguages,
+      sourceFileCount: countSourceFiles(defaultRepoRoot),
+      fromPostinstall: options.fromPostinstall,
+    });
+    if (!wizardResult.writeConfig) {
+      console.log("Setup skipped. No files written.");
+      return;
+    }
+    options = {
+      ...options,
+      config: wizardResult.paths.configPath ?? options.config,
+      repoPath: wizardResult.repoPath,
+      languages: wizardResult.languages,
+      agents: wizardResult.agents,
+      autoIndex: wizardResult.firstIndex,
+    };
+  }
+
   const startedAt = Date.now();
   const configPath = resolveCliConfigPath(options.config, "write");
   const repoRoot = resolve(options.repoPath ?? process.cwd());
   const normalizedRepoPath = normalizePath(repoRoot);
-  const nonInteractive = options.yes === true;
-  const autoIndex = options.autoIndex ?? nonInteractive;
+  const nonInteractive =
+    options.yes === true || !process.stdin.isTTY || !process.stdout.isTTY;
+  const autoIndex = options.autoIndex ?? options.yes === true;
 
   if (existsSync(configPath) && !options.force && !options.dryRun) {
+    if (process.stdin.isTTY && process.stdout.isTTY) {
+      const rawConfig = JSON.parse(readFileSync(configPath, "utf-8")) as Record<string, unknown>;
+      const recommendations = summarizeMissingConfigKeys(rawConfig);
+      if (recommendations.length === 0) {
+        console.log(`Configuration already exists and is current: ${configPath}`);
+        return;
+      }
+      console.log(`Configuration already exists: ${configPath}`);
+      console.log("Missing recommended setup keys:");
+      for (const item of recommendations) {
+        console.log(`  - ${item.path}: ${JSON.stringify(item.recommendedValue)} (${item.reason})`);
+      }
+      if (!(await confirm("Apply missing recommendations?", false))) {
+        console.log("Existing configuration left unchanged.");
+        return;
+      }
+      applyMissingConfigRecommendations(rawConfig, recommendations);
+      writeFileSync(configPath, JSON.stringify(rawConfig, null, 2));
+      console.log(`Configuration updated: ${normalizePath(configPath)}`);
+      return;
+    }
+
     console.error(`Configuration file already exists: ${configPath}`);
     console.error(
       "To reinitialize, remove the existing file first or use --force.",
@@ -1933,17 +2076,37 @@ export async function initCommand(options: InitOptions): Promise<void> {
       : {}),
   };
 
+  if (wizardResult) {
+    applySetupWizardConfig(config, wizardResult);
+  }
+
+  const selectedClients =
+    options.client || options.agents?.length || wizardResult
+      ? resolveSelectedAgents(
+          options,
+          detectInstalledClients().map((client) => client.templateClient ?? client.name),
+        )
+      : [];
+
   // SDL.md + baseline AGENTS.md are dropped regardless of enforcement so the
   // optimized-tool-use playbook is always present before any agent touches
   // the repo. Client-specific hooks/settings only ship when enforcement is on.
-  const generatedAssets = buildEnforcementAssets(
+  const baseGeneratedAssets = buildEnforcementAssets(repoRoot, repoId, configPath);
+  const agentInstructionAssets = buildAgentInstructionAssets(
     repoRoot,
     repoId,
-    configPath,
-    options.enforceAgentTools
-      ? (options.client as ClientType | undefined)
-      : undefined,
+    selectedClients as ClientType[],
   );
+  const enforcementAssets = options.enforceAgentTools
+    ? selectedClients.flatMap((client) =>
+        buildEnforcementAssets(repoRoot, repoId, configPath, client as ClientType).slice(3),
+      )
+    : [];
+  const generatedAssets = [
+    ...baseGeneratedAssets,
+    ...agentInstructionAssets,
+    ...enforcementAssets,
+  ];
 
   if (options.dryRun) {
     printDryRunPreview(configPath, config, generatedAssets);
@@ -2001,18 +2164,16 @@ export async function initCommand(options: InitOptions): Promise<void> {
     console.log(`Repository: ${normalizedRepoPath} (id: ${repoId})`);
     console.log(`Languages: ${languages.join(", ")}`);
 
-    if (options.client) {
-      // Client validation already done at line ~1052; this is post-success client config generation
-      const template = await loadClientTemplate(options.client as ClientType);
+    for (const client of selectedClients) {
+      const template = await loadClientTemplate(client as ClientType);
       const clientConfig = generateClientConfig(template, configPath);
-      const clientConfigPath = resolve(`${options.client}-mcp-config.json`);
+      const clientConfigPath = resolve(`${client}-mcp-config.json`);
       writeFileSync(clientConfigPath, clientConfig);
       createdPaths.push(clientConfigPath);
       console.log(
-        `${options.client} config created: ${normalizePath(clientConfigPath)}`,
+        `${client} config created: ${normalizePath(clientConfigPath)}`,
       );
     }
-
     if (generatedAssets.length > 0) {
       console.log("Generated agent enforcement assets:");
       for (const asset of generatedAssets) {
@@ -2021,6 +2182,13 @@ export async function initCommand(options: InitOptions): Promise<void> {
     }
 
     await emitClientConfigBlocks(configPath);
+
+    if (wizardResult?.lspManualCommands.length) {
+      console.log("Missing LSP install commands:");
+      for (const command of wizardResult.lspManualCommands) {
+        console.log(`  - ${command}`);
+      }
+    }
 
     if (autoIndex) {
       const setupStartedAt = Date.now();

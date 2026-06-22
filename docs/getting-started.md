@@ -55,6 +55,8 @@ npm install -g sdl-mcp
 sdl-mcp version
 ```
 
+When install runs in a human TTY, npm `postinstall` offers the Setup Wizard. It skips automatically in CI, non-TTY installs, after the timeout, or when `SDL_MCP_SKIP_SETUP_WIZARD=1` is set. Run it later with `sdl-mcp init` or `npx --yes sdl-mcp@latest init`.
+
 ### Run Without Installing
 
 ```bash
@@ -78,7 +80,7 @@ npm link
 # 1) Set config location variable then open a new terminal
 setx SDL_CONFIG_HOME "C:\[your path]"
 
-# 2) One-line non-interactive setup (init + index + doctor)
+# 2) One-line non-interactive setup (init + index + doctor); omit -y for the Setup Wizard
 sdl-mcp init -y --auto-index --config "C:\[same path as SDL_CONFIG_HOME]"
 
 # 3) Start MCP server (stdio for coding agents)
