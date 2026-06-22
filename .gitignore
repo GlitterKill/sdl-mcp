@@ -117,7 +117,11 @@ nul
 
 # Tool caches
 .ruff_cache/
-.codex/
+.codex/*
+!.codex/hooks/
+!.codex/hooks/load-sdl-skill.mjs
+!.codex/agents/
+!.codex/agents/explore-sdl.toml
 .claude/
 
 # Nested temp scripts

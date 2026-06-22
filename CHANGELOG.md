@@ -21,8 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Runtime and CI stability**: Fixed Node runtime code execution with stdin, CI runtime artifacts, PHP CRLF call handling, CI parity, provider-first test gates, and nightly benchmark matrix isolation.
 - **Index and retrieval correctness**: Preferred expected-name matches in source call proof, repaired missing file summaries during no-op recovery, aligned gateway tests with the current action set, and excluded control-plane tools from savings rankings.
+- **Release workflow surfaces**: Tracked required Codex SessionStart hook and SDL Explorer agent files so CI docs workflow checks use the same surfaces as local release gates.
 
-_27 commits from 2 contributors_
+_28 commits from 2 contributors_
 
 ## [0.11.7] - 2026-06-17
 
