@@ -67,7 +67,9 @@ SDL-MCP fixes this. It indexes your codebase into a searchable **symbol graph** 
 ```bash
 # Install (requires Node.js 24+)
 npm install -g sdl-mcp
-# In an interactive terminal, postinstall offers the Setup Wizard and times out to skip.
+# Plain npm installs run lifecycle scripts in the background, so run
+# `sdl-mcp init` after install. Use `--foreground-scripts` only when you
+# specifically want npm to show the install-time wizard and lifecycle output.
 
 # Non-interactive setup: initialize, auto-detect languages, index, and run health checks
 sdl-mcp init -y --auto-index
@@ -75,6 +77,14 @@ sdl-mcp init -y --auto-index
 # Start the MCP server for your coding agent
 sdl-mcp serve --stdio
 ```
+
+For a clean foreground installer flow, use the tiny wrapper package:
+
+```bash
+npx create-sdl-mcp
+```
+
+Run `npx create-sdl-mcp --update` for the fast update path: it installs the server binaries, skips repo setup, and prints the repo-init commands to run later.
 
 Point your MCP client at the server and the agent gains access to SDL-MCP's current configured surface. By default that is exclusive Code Mode; set `codeMode.exclusive: false` when you want Code Mode plus the regular flat or gateway tools in one session.
 

@@ -36,6 +36,7 @@ import {
   RUNTIME_DEFAULT_MAX_STDOUT_BYTES,
   RUNTIME_DEFAULT_TIMEOUT_MS,
 } from "../../config/constants.js";
+import { LanguageSchema } from "../../config/types.js";
 import { resolveCliConfigPath } from "../../config/configPath.js";
 import { defaultGraphDbPath } from "../../db/graph-db-path.js";
 import { resolvePidfilePath } from "../../util/pidfile.js";
@@ -51,7 +52,11 @@ import {
   applySetupWizardConfig,
   resolveSelectedAgents,
 } from "../setup-wizard/recommendations.js";
-import type { SetupWizardResult } from "../setup-wizard/types.js";
+import {
+  CORE_LANGUAGE_DEFAULTS,
+  type SetupWizardAgent,
+  type SetupWizardResult,
+} from "../setup-wizard/types.js";
 import {
   applyMissingConfigRecommendations,
   summarizeMissingConfigKeys,
@@ -64,22 +69,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const VALID_CLIENTS = ["claude-code", "codex", "gemini", "opencode"] as const;
 type ClientType = (typeof VALID_CLIENTS)[number];
 
-const VALID_LANGUAGES = [
-  "ts",
-  "tsx",
-  "js",
-  "jsx",
-  "py",
-  "go",
-  "java",
-  "cs",
-  "c",
-  "cpp",
-  "php",
-  "rs",
-  "kt",
-  "sh",
-] as const;
+export const VALID_LANGUAGES = LanguageSchema.options;
 type LanguageType = (typeof VALID_LANGUAGES)[number];
 
 const DEFAULT_IGNORE_PATTERNS = [
@@ -156,6 +146,32 @@ const LANGUAGE_BY_EXTENSION: Record<string, LanguageType> = {
   sh: "sh",
   bash: "sh",
   zsh: "sh",
+  ps1: "powershell",
+  psm1: "powershell",
+  psd1: "powershell",
+  rb: "ruby",
+  lua: "lua",
+  dart: "dart",
+  swift: "swift",
+  groovy: "groovy",
+  gradle: "groovy",
+  pl: "perl",
+  pm: "perl",
+  r: "r",
+  ex: "elixir",
+  exs: "elixir",
+  fs: "fsharp",
+  fsi: "fsharp",
+  fsx: "fsharp",
+  f90: "fortran",
+  f95: "fortran",
+  f03: "fortran",
+  f08: "fortran",
+  f: "fortran",
+  for: "fortran",
+  f77: "fortran",
+  hs: "haskell",
+  lhs: "haskell",
 };
 
 const SKIP_SCAN_DIRS = new Set([
@@ -255,7 +271,7 @@ const SDL_RUNTIME_REDIRECT_PREFIXES = [
   "cargo test",
 ];
 
-type GeneratedAsset = {
+export type GeneratedAsset = {
   path: string;
   content: string;
   executable?: boolean;
@@ -327,9 +343,87 @@ export function detectLanguagesFromRepo(repoRoot: string): LanguageType[] {
 
   walk(repoRoot);
   if (found.size === 0) {
-    return [...VALID_LANGUAGES];
+    return [...CORE_LANGUAGE_DEFAULTS];
   }
   return [...found].sort();
+}
+
+export function isRepoRoot(candidate: string): boolean {
+  return existsSync(join(candidate, ".git")) || existsSync(join(candidate, "package.json"));
+}
+
+export function findRepoRoot(startPath: string): string | undefined {
+  let current = resolve(startPath);
+  while (true) {
+    if (isRepoRoot(current)) {
+      return current;
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      return undefined;
+    }
+    current = parent;
+  }
+}
+
+export function detectInitialRepoRoot(
+  options: Pick<InitOptions, "repoPath">,
+  env: NodeJS.ProcessEnv = process.env,
+  cwd = process.cwd(),
+): string | undefined {
+  if (options.repoPath) {
+    return resolve(options.repoPath);
+  }
+  return findRepoRoot(env.INIT_CWD ?? cwd);
+}
+
+export function globalResourceRoot(home = homedir()): string {
+  return join(home, ".sdl-mcp", "resources");
+}
+
+export function userAgentConfigRoot(home = homedir()): string {
+  return join(home, ".sdl-mcp", "configs");
+}
+
+function isClientType(agent: string): agent is ClientType {
+  return VALID_CLIENTS.includes(agent as ClientType);
+}
+
+function detectedAgentName(detection: { name: string; templateClient?: string }): string {
+  return detection.templateClient ?? detection.name;
+}
+
+function buildUndetectedAgentConfigAssets(
+  agents: readonly SetupWizardAgent[],
+  detections: readonly { name: string; templateClient?: string }[],
+  configPath: string,
+  outputRoot = userAgentConfigRoot(),
+): GeneratedAsset[] {
+  const detectedAgents = new Set(detections.map(detectedAgentName));
+  return agents
+    .filter((agent) => !detectedAgents.has(agent) && !isClientType(agent))
+    .map((agent) => ({
+      path: join(outputRoot, `${agent}-mcp-config.json`),
+      content: buildGenericClientConfig(configPath),
+    }));
+}
+
+function buildUndetectedClientConfigAssets(
+  agents: readonly SetupWizardAgent[],
+  detections: readonly { name: string; templateClient?: string }[],
+  configPath: string,
+  outputRoot: string,
+): GeneratedAsset[] {
+  const detectedAgents = new Set(detections.map(detectedAgentName));
+  return agents
+    .filter(
+      (agent): agent is ClientType =>
+        isClientType(agent) && !detectedAgents.has(agent),
+    )
+    .map((client) => ({
+      path: join(outputRoot, `${client}-mcp-config.json`),
+      content: generateClientConfig(loadClientTemplateSync(client), configPath),
+    }));
 }
 
 function sanitizeRepoId(raw: string): string {
@@ -350,7 +444,13 @@ function countSourceFiles(repoRoot: string): number {
     if (!dir) {
       continue;
     }
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
       if (entry.isDirectory()) {
         if (!skipDirs.has(entry.name)) {
           stack.push(join(dir, entry.name));
@@ -480,7 +580,7 @@ export function mergeIgnorePatterns(repoRoot: string): string[] {
   return merged;
 }
 
-async function loadClientTemplate(client: ClientType): Promise<unknown> {
+function loadClientTemplateSync(client: ClientType): unknown {
   const templatesDir = resolve(__dirname, "../../../templates");
   const templatePath = resolve(templatesDir, `${client}.json`);
   if (!templatePath.startsWith(templatesDir)) {
@@ -494,6 +594,10 @@ async function loadClientTemplate(client: ClientType): Promise<unknown> {
       `Failed to load client template '${client}' from ${templatePath}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+async function loadClientTemplate(client: ClientType): Promise<unknown> {
+  return loadClientTemplateSync(client);
 }
 
 function loadTextTemplate(templateName: string): string {
@@ -1629,6 +1733,78 @@ function buildEnforcementAssets(
   return assets;
 }
 
+export function buildGlobalResourceAssets(
+  result: SetupWizardResult,
+  detections: readonly { name: string; templateClient?: string }[] = detectInstalledClients(),
+): GeneratedAsset[] {
+  const root = globalResourceRoot();
+  const repoId = "global";
+  const configPath = join(root, "sdlmcp.config.json");
+  const selectedClients = result.agents.filter(isClientType);
+  const configRoot = join(root, "configs");
+  return [
+    ...buildEnforcementAssets(root, repoId, configPath),
+    ...buildAgentInstructionAssets(root, repoId, selectedClients),
+    ...buildUndetectedClientConfigAssets(
+      result.agents,
+      detections,
+      configPath,
+      configRoot,
+    ),
+    ...buildUndetectedAgentConfigAssets(
+      result.agents,
+      detections,
+      configPath,
+      configRoot,
+    ),
+  ];
+}
+
+function printInitCommands(): void {
+  console.log("");
+  console.log("Repository setup commands:");
+  console.log("  cd <repo>");
+  console.log("  sdl-mcp init");
+  console.log('  sdl-mcp init --repo-path "<repo>"');
+  console.log(
+    '  sdl-mcp init --repo-path "<repo>" --client codex --enforce-agent-tools',
+  );
+}
+
+function writeGlobalInstallResources(
+  result: SetupWizardResult,
+  options: Pick<InitOptions, "dryRun" | "force">,
+): void {
+  const assets = buildGlobalResourceAssets(result);
+  const root = globalResourceRoot();
+  if (options.dryRun) {
+    console.log("Global install selected. No repository config will be written.");
+    console.log(`Global resources directory: ${normalizePath(root)}`);
+    console.log("Resources that would be created:");
+    for (const asset of assets) {
+      console.log(`  - ${normalizePath(asset.path)}`);
+    }
+    printInitCommands();
+    return;
+  }
+
+  const createdPaths: string[] = [];
+  const createdDirs: string[] = [];
+  for (const asset of assets) {
+    writeGeneratedAsset(asset, createdPaths, createdDirs, options.force);
+  }
+
+  console.log("Global install selected. No repository config was written.");
+  console.log(`Global resources directory: ${normalizePath(root)}`);
+  if (assets.length > 0) {
+    console.log("Generated global resources:");
+    for (const asset of assets) {
+      console.log(`  - ${normalizePath(asset.path)}`);
+    }
+  }
+  printInitCommands();
+}
+
 function generateClientConfig(template: unknown, configPath: string): string {
   // Template is JSON-parsed client config with mcpServers shape
   const tpl = template as {
@@ -1676,10 +1852,33 @@ export type ClientDetection = {
   templateClient?: ClientType;
 };
 
+function packageJsonHasDependency(packageJsonPath: string, dependencyName: string): boolean {
+  try {
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    return Boolean(
+      packageJson.dependencies?.[dependencyName] ||
+        packageJson.devDependencies?.[dependencyName],
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function detectInstalledClients(): ClientDetection[] {
   // USERPROFILE is Windows-only — fall back to homedir() so detection works on macOS/Linux.
   const userProfile = process.env.USERPROFILE ?? homedir();
   const appData = process.env.APPDATA ?? "";
+  const configHome = process.env.XDG_CONFIG_HOME?.trim() || join(userProfile, ".config");
+  const cwd = process.cwd();
+  const codexHome = process.env.CODEX_HOME?.trim() || join(userProfile, ".codex");
+  const vibeHome = process.env.VIBE_HOME?.trim() || join(userProfile, ".vibe");
+  const hermesHome = process.env.HERMES_HOME?.trim() || join(userProfile, ".hermes");
+  const autohandHome =
+    process.env.AUTOHAND_HOME?.trim() || join(userProfile, ".autohand");
+  const zedFlatpakConfigHome = process.env.FLATPAK_XDG_CONFIG_HOME?.trim();
   // CLAUDE_CONFIG_DIR overrides ~/.claude when set (issue #17). When set, it is
   // authoritative — we do NOT fall through to legacy paths, since users set this
   // env var precisely to redirect Claude Code config away from ~/.claude. The
@@ -1697,43 +1896,152 @@ export function detectInstalledClients(): ClientDetection[] {
       : [
           join(userProfile, ".claude.json"),
           join(userProfile, ".claude", "settings.json"),
+          join(userProfile, ".claude"),
           join(appData, "Claude", "claude_desktop_config.json"),
         ];
   const detections: Array<{
     name: string;
     templateClient?: ClientType;
-    candidates: string[];
+    candidates: Array<string | undefined>;
   }> = [
+    { name: "adal", candidates: [join(userProfile, ".adal")] },
+    { name: "aider-desk", candidates: [join(userProfile, ".aider-desk")] },
+    { name: "amp", candidates: [join(configHome, "amp")] },
+    { name: "antigravity", candidates: [join(userProfile, ".gemini", "antigravity")] },
+    {
+      name: "antigravity-cli",
+      candidates: [join(userProfile, ".gemini", "antigravity-cli")],
+    },
+    {
+      name: "astrbot",
+      candidates: [join(cwd, "data", "skills"), join(userProfile, ".astrbot")],
+    },
+    { name: "augment", candidates: [join(userProfile, ".augment")] },
+    { name: "autohand-code", candidates: [autohandHome] },
+    { name: "bob", candidates: [join(userProfile, ".bob")] },
     {
       name: "claude-code",
       templateClient: "claude-code",
       candidates: claudeCandidates,
     },
+    { name: "cline", candidates: [join(userProfile, ".cline")] },
+    { name: "codearts-agent", candidates: [join(userProfile, ".codeartsdoer")] },
     {
-      name: "cursor",
-      candidates: [
-        join(userProfile, ".cursor", "mcp.json"),
-        join(appData, "Cursor", "User", "settings.json"),
-      ],
+      name: "codebuddy",
+      candidates: [join(cwd, ".codebuddy"), join(userProfile, ".codebuddy")],
     },
+    { name: "codemaker", candidates: [join(userProfile, ".codemaker")] },
+    { name: "codestudio", candidates: [join(userProfile, ".codestudio")] },
     {
       name: "codex",
       templateClient: "codex",
-      candidates: [join(userProfile, ".codex", "config.json")],
+      candidates: [codexHome, "/etc/codex"],
     },
+    { name: "command-code", candidates: [join(userProfile, ".commandcode")] },
+    {
+      name: "continue",
+      candidates: [join(cwd, ".continue"), join(userProfile, ".continue")],
+    },
+    { name: "cortex", candidates: [join(userProfile, ".snowflake", "cortex")] },
+    { name: "crush", candidates: [join(configHome, "crush")] },
+    {
+      name: "cursor",
+      candidates: [
+        join(userProfile, ".cursor"),
+        join(userProfile, ".cursor", "mcp.json"),
+        appData ? join(appData, "Cursor", "User", "settings.json") : undefined,
+      ],
+    },
+    { name: "deepagents", candidates: [join(userProfile, ".deepagents")] },
+    { name: "devin", candidates: [join(configHome, "devin")] },
+    { name: "dexto", candidates: [join(userProfile, ".dexto")] },
+    { name: "droid", candidates: [join(userProfile, ".factory")] },
+    {
+      name: "eve",
+      candidates:
+        existsSync(join(cwd, "agent")) &&
+        packageJsonHasDependency(join(cwd, "package.json"), "eve")
+          ? [join(cwd, "agent")]
+          : [],
+    },
+    { name: "firebender", candidates: [join(userProfile, ".firebender")] },
+    { name: "forgecode", candidates: [join(userProfile, ".forge")] },
     {
       name: "gemini",
       templateClient: "gemini",
-      candidates: [join(userProfile, ".gemini", "settings.json")],
+      candidates: [join(userProfile, ".gemini")],
+    },
+    { name: "github-copilot", candidates: [join(userProfile, ".copilot")] },
+    { name: "goose", candidates: [join(configHome, "goose")] },
+    { name: "hermes-agent", candidates: [hermesHome] },
+    { name: "iflow-cli", candidates: [join(userProfile, ".iflow")] },
+    { name: "inference-sh", candidates: [join(userProfile, ".inferencesh")] },
+    { name: "jazz", candidates: [join(userProfile, ".jazz"), join(cwd, ".jazz")] },
+    { name: "junie", candidates: [join(userProfile, ".junie")] },
+    { name: "kilo", candidates: [join(userProfile, ".kilocode")] },
+    {
+      name: "kimi-code-cli",
+      candidates: [join(userProfile, ".kimi-code"), join(userProfile, ".kimi")],
+    },
+    { name: "kiro-cli", candidates: [join(userProfile, ".kiro")] },
+    { name: "kode", candidates: [join(userProfile, ".kode")] },
+    { name: "lingma", candidates: [join(userProfile, ".lingma")] },
+    { name: "loaf", candidates: [join(userProfile, ".loaf")] },
+    { name: "mcpjam", candidates: [join(userProfile, ".mcpjam")] },
+    { name: "mistral-vibe", candidates: [vibeHome] },
+    { name: "moxby", candidates: [join(userProfile, ".moxby")] },
+    { name: "mux", candidates: [join(userProfile, ".mux")] },
+    { name: "neovate", candidates: [join(userProfile, ".neovate")] },
+    { name: "ona", candidates: [join(userProfile, ".ona")] },
+    {
+      name: "openclaw",
+      candidates: [
+        join(userProfile, ".openclaw"),
+        join(userProfile, ".clawdbot"),
+        join(userProfile, ".moltbot"),
+      ],
     },
     {
       name: "opencode",
       templateClient: "opencode",
       candidates: [
+        join(configHome, "opencode"),
+        join(userProfile, ".opencode"),
         join(userProfile, ".opencode", "config.json"),
-        join(appData, "opencode", "config.json"),
+        appData ? join(appData, "opencode", "config.json") : undefined,
       ],
     },
+    { name: "openhands", candidates: [join(userProfile, ".openhands")] },
+    { name: "pi", candidates: [join(userProfile, ".pi", "agent")] },
+    { name: "pochi", candidates: [join(userProfile, ".pochi")] },
+    {
+      name: "promptscript",
+      candidates: [join(cwd, ".promptscript"), join(cwd, "promptscript.yaml")],
+    },
+    { name: "qoder", candidates: [join(userProfile, ".qoder")] },
+    { name: "qoder-cn", candidates: [join(userProfile, ".qoder-cn")] },
+    { name: "qwen-code", candidates: [join(userProfile, ".qwen")] },
+    { name: "reasonix", candidates: [join(userProfile, ".reasonix")] },
+    { name: "replit", candidates: [join(cwd, ".replit")] },
+    { name: "roo", candidates: [join(userProfile, ".roo")] },
+    { name: "rovodev", candidates: [join(userProfile, ".rovodev")] },
+    { name: "tabnine-cli", candidates: [join(userProfile, ".tabnine")] },
+    { name: "terramind", candidates: [join(userProfile, ".terramind")] },
+    { name: "tinycloud", candidates: [join(userProfile, ".tinycloud")] },
+    { name: "trae", candidates: [join(userProfile, ".trae")] },
+    { name: "trae-cn", candidates: [join(userProfile, ".trae-cn")] },
+    { name: "warp", candidates: [join(userProfile, ".warp")] },
+    { name: "windsurf", candidates: [join(userProfile, ".codeium", "windsurf")] },
+    {
+      name: "zed",
+      candidates: [
+        join(configHome, "zed"),
+        appData ? join(appData, "Zed") : undefined,
+        zedFlatpakConfigHome ? join(zedFlatpakConfigHome, "zed") : undefined,
+      ],
+    },
+    { name: "zencoder", candidates: [join(userProfile, ".zencoder")] },
+    { name: "zenflow", candidates: [join(userProfile, ".zencoder")] },
   ];
 
   const installed: ClientDetection[] = [];
@@ -1837,22 +2145,38 @@ export async function initCommand(options: InitOptions): Promise<void> {
 
   let wizardResult: SetupWizardResult | undefined;
   if (shouldRunSetupWizard(options, Boolean(process.stdin.isTTY && process.stdout.isTTY))) {
-    const defaultRepoRoot = resolve(options.repoPath ?? process.env.INIT_CWD ?? process.cwd());
+    const defaultRepoRoot = detectInitialRepoRoot(options);
     const detectedAgents = detectInstalledClients().map(
       (client) => client.templateClient ?? client.name,
     );
-    const detectedLanguages = options.languages?.length
-      ? validateLanguages(options.languages)
-      : detectLanguagesFromRepo(defaultRepoRoot);
+    const scanRepo = (repoPath: string) => {
+      const resolvedRepoPath = resolve(repoPath);
+      return {
+        detectedLanguages: options.languages?.length
+          ? validateLanguages(options.languages)
+          : detectLanguagesFromRepo(resolvedRepoPath),
+        sourceFileCount: countSourceFiles(resolvedRepoPath),
+      };
+    };
+    const initialScan = defaultRepoRoot
+      ? scanRepo(defaultRepoRoot)
+      : { detectedLanguages: [], sourceFileCount: 0 };
     wizardResult = await runSetupWizard({
       defaultRepoPath: defaultRepoRoot,
       detectedAgents,
-      detectedLanguages,
-      sourceFileCount: countSourceFiles(defaultRepoRoot),
+      detectedLanguages: initialScan.detectedLanguages,
+      defaultLanguages: [...CORE_LANGUAGE_DEFAULTS],
+      supportedLanguages: [...VALID_LANGUAGES],
+      sourceFileCount: initialScan.sourceFileCount,
       fromPostinstall: options.fromPostinstall,
+      scanRepo,
     });
     if (!wizardResult.writeConfig) {
       console.log("Setup skipped. No files written.");
+      return;
+    }
+    if (wizardResult.globalInstall) {
+      writeGlobalInstallResources(wizardResult, options);
       return;
     }
     options = {
@@ -2080,13 +2404,15 @@ export async function initCommand(options: InitOptions): Promise<void> {
     applySetupWizardConfig(config, wizardResult);
   }
 
-  const selectedClients =
+  const detections = detectInstalledClients();
+  const selectedAgents: SetupWizardAgent[] =
     options.client || options.agents?.length || wizardResult
       ? resolveSelectedAgents(
           options,
-          detectInstalledClients().map((client) => client.templateClient ?? client.name),
+          detections.map(detectedAgentName),
         )
       : [];
+  const selectedClients = selectedAgents.filter(isClientType);
 
   // SDL.md + baseline AGENTS.md are dropped regardless of enforcement so the
   // optimized-tool-use playbook is always present before any agent touches
@@ -2095,17 +2421,18 @@ export async function initCommand(options: InitOptions): Promise<void> {
   const agentInstructionAssets = buildAgentInstructionAssets(
     repoRoot,
     repoId,
-    selectedClients as ClientType[],
+    selectedClients,
   );
   const enforcementAssets = options.enforceAgentTools
     ? selectedClients.flatMap((client) =>
-        buildEnforcementAssets(repoRoot, repoId, configPath, client as ClientType).slice(3),
+        buildEnforcementAssets(repoRoot, repoId, configPath, client).slice(3),
       )
     : [];
   const generatedAssets = [
     ...baseGeneratedAssets,
     ...agentInstructionAssets,
     ...enforcementAssets,
+    ...buildUndetectedAgentConfigAssets(selectedAgents, detections, configPath),
   ];
 
   if (options.dryRun) {
@@ -2165,7 +2492,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
     console.log(`Languages: ${languages.join(", ")}`);
 
     for (const client of selectedClients) {
-      const template = await loadClientTemplate(client as ClientType);
+      const template = await loadClientTemplate(client);
       const clientConfig = generateClientConfig(template, configPath);
       const clientConfigPath = resolve(`${client}-mcp-config.json`);
       writeFileSync(clientConfigPath, clientConfig);

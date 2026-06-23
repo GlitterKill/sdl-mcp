@@ -31,6 +31,7 @@ describe("prepare-release helpers", () => {
         optionalDependencies: { "sdl-mcp-watchman-linux-x64": "1.2.3" },
       },
       [{ name: "linux-x64", version: "1.2.3" }],
+      { version: "1.2.3" },
     );
     assert.deepStrictEqual(mismatches, []);
 
@@ -51,8 +52,12 @@ describe("prepare-release helpers", () => {
         optionalDependencies: { "sdl-mcp-watchman-linux-x64": "1.2.0" },
       },
       [{ name: "linux-x64", version: "1.2.0" }],
+      { version: "1.2.0" },
     );
     assert.ok(mismatchResult.length >= 5);
+    assert.ok(
+      mismatchResult.includes("packages/create-sdl-mcp/package.json version"),
+    );
 
     assert.deepStrictEqual(
       helpers.findNativeLockfileMismatches(

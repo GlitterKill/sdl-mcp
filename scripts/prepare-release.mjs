@@ -24,6 +24,7 @@ const ROOT = join(__dirname, "..");
 const CHANGELOG_PATH = join(ROOT, "CHANGELOG.md");
 const PACKAGE_PATH = join(ROOT, "package.json");
 const PACKAGE_LOCK_PATH = join(ROOT, "package-lock.json");
+const CREATE_PACKAGE_PATH = join(ROOT, "packages", "create-sdl-mcp", "package.json");
 const NATIVE_PACKAGE_PATH = join(ROOT, "native", "package.json");
 const NATIVE_NPM_DIR = join(ROOT, "native", "npm");
 const WATCHMAN_PACKAGE_PATH = join(ROOT, "watchman", "package.json");
@@ -69,6 +70,7 @@ export function findNativeVersionMismatches(
   nativePlatformPackages,
   watchmanPackageJson = null,
   watchmanPlatformPackages = [],
+  createPackageJson = null,
 ) {
   const mismatches = [];
   for (const depName of RELEASE_ROOT_OPTIONAL_DEPENDENCIES) {
@@ -98,6 +100,9 @@ export function findNativeVersionMismatches(
     if (pkg.version !== packageJson.version) {
       mismatches.push(`watchman/npm/${pkg.name}/package.json version`);
     }
+  }
+  if (createPackageJson?.version !== packageJson.version) {
+    mismatches.push("packages/create-sdl-mcp/package.json version");
   }
   return mismatches;
 }
@@ -290,6 +295,7 @@ async function main() {
   const pkg = readJson(PACKAGE_PATH);
   const packageLock = readJson(PACKAGE_LOCK_PATH);
   const nativePkg = readJson(NATIVE_PACKAGE_PATH);
+  const createPkg = readJson(CREATE_PACKAGE_PATH);
   const nativePlatformPackages = readPlatformPackages(NATIVE_NPM_DIR);
   const watchmanPkg = readJson(WATCHMAN_PACKAGE_PATH);
   const watchmanPlatformPackages = readPlatformPackages(WATCHMAN_NPM_DIR);
@@ -316,6 +322,7 @@ async function main() {
     nativePlatformPackages,
     watchmanPkg,
     watchmanPlatformPackages,
+    createPkg,
   );
   if (mismatches.length > 0) {
     fail(`version mismatch detected: ${mismatches.join(", ")}`);

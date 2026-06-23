@@ -1,0 +1,17 @@
+{
+  "name": "create-sdl-mcp",
+  "version": "0.11.8",
+  "description": "Clean foreground installer for SDL-MCP",
+  "type": "module",
+  "bin": {
+    "create-sdl-mcp": "bin/create-sdl-mcp.mjs"
+  },
+  "files": [
+    "bin",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "license": "SEE LICENSE IN LICENSE"
+}

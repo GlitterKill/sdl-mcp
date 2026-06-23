@@ -11,16 +11,25 @@ describe("detectInstalledClients — CLAUDE_CONFIG_DIR (issue #17)", () => {
   let originalUserProfile: string | undefined;
   let originalAppData: string | undefined;
   let originalClaudeConfigDir: string | undefined;
+  let originalCodexHome: string | undefined;
+  let originalXdgConfigHome: string | undefined;
+  let originalFlatpakXdgConfigHome: string | undefined;
 
   beforeEach(() => {
     fakeHome = mkdtempSync(join(tmpdir(), "sdl-init-home-"));
     originalUserProfile = process.env.USERPROFILE;
     originalAppData = process.env.APPDATA;
     originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    originalCodexHome = process.env.CODEX_HOME;
+    originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
+    originalFlatpakXdgConfigHome = process.env.FLATPAK_XDG_CONFIG_HOME;
     process.env.USERPROFILE = fakeHome;
     // Point APPDATA somewhere harmless so Claude Desktop config doesn't accidentally hit.
     process.env.APPDATA = join(fakeHome, "appdata-empty");
     delete process.env.CLAUDE_CONFIG_DIR;
+    delete process.env.CODEX_HOME;
+    delete process.env.XDG_CONFIG_HOME;
+    delete process.env.FLATPAK_XDG_CONFIG_HOME;
   });
 
   afterEach(() => {
@@ -38,6 +47,21 @@ describe("detectInstalledClients — CLAUDE_CONFIG_DIR (issue #17)", () => {
       delete process.env.CLAUDE_CONFIG_DIR;
     } else {
       process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
+    }
+    if (originalCodexHome === undefined) {
+      delete process.env.CODEX_HOME;
+    } else {
+      process.env.CODEX_HOME = originalCodexHome;
+    }
+    if (originalXdgConfigHome === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
+    }
+    if (originalFlatpakXdgConfigHome === undefined) {
+      delete process.env.FLATPAK_XDG_CONFIG_HOME;
+    } else {
+      process.env.FLATPAK_XDG_CONFIG_HOME = originalFlatpakXdgConfigHome;
     }
     rmSync(fakeHome, { recursive: true, force: true });
   });
@@ -149,5 +173,50 @@ describe("detectInstalledClients — CLAUDE_CONFIG_DIR (issue #17)", () => {
       claude.configPath.includes("first-claude"),
       `expected first listed dir to be synthesis target, got ${claude.configPath}`,
     );
+  });
+
+  it("detects Codex from the Codex home directory", () => {
+    mkdirSync(join(fakeHome, ".codex"), { recursive: true });
+
+    const detections = detectInstalledClients();
+    const codex = detections.find((d) => d.name === "codex");
+
+    assert.ok(codex, "expected codex detection");
+    assert.equal(codex.templateClient, "codex");
+    assert.ok(
+      codex.configPath.endsWith(".codex"),
+      `expected Codex home path, got ${codex.configPath}`,
+    );
+  });
+
+  it("honors CODEX_HOME for Codex detection", () => {
+    const codexHome = join(fakeHome, "custom-codex");
+    mkdirSync(codexHome, { recursive: true });
+    process.env.CODEX_HOME = codexHome;
+
+    const detections = detectInstalledClients();
+    const codex = detections.find((d) => d.name === "codex");
+
+    assert.ok(codex, "expected codex detection");
+    assert.ok(
+      codex.configPath.includes("custom-codex"),
+      `expected CODEX_HOME path, got ${codex.configPath}`,
+    );
+  });
+
+  it("detects generic agents from the reference installer roots", () => {
+    const configHome = join(fakeHome, ".config");
+    process.env.XDG_CONFIG_HOME = configHome;
+    mkdirSync(join(fakeHome, ".cursor"), { recursive: true });
+    mkdirSync(join(fakeHome, ".firebender"), { recursive: true });
+    mkdirSync(join(configHome, "opencode"), { recursive: true });
+    mkdirSync(join(fakeHome, ".copilot"), { recursive: true });
+
+    const names = detectInstalledClients().map((d) => d.name);
+
+    assert.ok(names.includes("cursor"));
+    assert.ok(names.includes("firebender"));
+    assert.ok(names.includes("opencode"));
+    assert.ok(names.includes("github-copilot"));
   });
 });

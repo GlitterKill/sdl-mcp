@@ -115,7 +115,7 @@ Each entry configures one repository.
 | `repoId`                    | `string`           | Required                | Stable identifier used in all tool calls                                                |
 | `rootPath`                  | `string`           | Required                | Absolute path recommended; relative paths resolve from the config file                  |
 | `ignore`                    | `string[]`         | See below               | Glob patterns excluded from indexing                                                    |
-| `languages`                 | `string[]`         | All supported languages | `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `java`, `cs`, `c`, `cpp`, `php`, `rs`, `kt`, `sh`, `powershell`, `ruby`, `lua`, `dart`, `swift` |
+| `languages`                 | `string[]`         | Core built-ins          | `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `java`, `cs`, `c`, `cpp`, `php`, `rs`, `kt`, `sh`, `powershell`, `ruby`, `lua`, `dart`, `swift`, `groovy`, `perl`, `r`, `elixir`, `fsharp`, `fortran`, `haskell` |
 | `maxFileBytes`              | `number`           | `2000000`               | Files larger than this are skipped                                                      |
 | `postIndexSessionTimeoutMs` | `number`           | `900000`                | `1000-86400000`. Hard timeout for post-index finalization writes after pass-1/pass-2    |
 | `includeNodeModulesTypes`   | `boolean`          | `true`                  | TypeScript-only helper for `@types/*` resolution                                        |

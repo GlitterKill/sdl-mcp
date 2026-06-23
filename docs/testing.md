@@ -16,7 +16,7 @@
 </details>
 </div>
 
-Guide for testing SDL-MCP across all supported languages: TypeScript, JavaScript, Python, Go, Java, C#, C, C++, PHP, Rust, Kotlin, and Shell.
+Guide for testing SDL-MCP across core adapters and lazy provider languages. See [Language Provider Support](./feature-deep-dives/language-provider-support.md) for the current support matrix.
 
 ---
 

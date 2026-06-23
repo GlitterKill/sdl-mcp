@@ -5,7 +5,7 @@ import {
   applySetupWizardConfig,
   detectRepoSizeProfile,
   semanticConfigForTier,
-} from "../../src/cli/setup-wizard/recommendations.ts";
+} from "../../dist/cli/setup-wizard/recommendations.js";
 
 test("semantic tiers map to config without enabling LLM summaries", () => {
   assert.deepEqual(semanticConfigForTier("code"), {

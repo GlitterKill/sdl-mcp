@@ -5,7 +5,7 @@ import type {
   SetupWizardAgent,
   SetupWizardPaths,
 } from "./types.js";
-const SETUP_WIZARD_AGENTS = ["claude-code", "codex", "gemini", "opencode"] as const;
+import { SETUP_WIZARD_AGENTS } from "./types.js";
 
 export function detectRepoSizeProfile(sourceFileCount: number): RepoSizeProfile {
   if (sourceFileCount < 2_000) {
@@ -87,7 +87,7 @@ export function resolveSelectedAgents(
       ? [options.client]
       : detectedAgents;
   const selected = raw.filter((agent): agent is SetupWizardAgent =>
-    SETUP_WIZARD_AGENTS.includes(agent as SetupWizardAgent),
+    SETUP_WIZARD_AGENTS.includes(agent),
   );
-  return selected.length > 0 ? [...new Set(selected)] : ["codex"];
+  return [...new Set(selected)];
 }

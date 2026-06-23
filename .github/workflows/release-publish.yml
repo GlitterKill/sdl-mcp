@@ -278,7 +278,9 @@ jobs:
             const pkg = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
             const root = pkg('package.json');
             const native = pkg(path.join('native', 'package.json'));
+            const createPackage = pkg(path.join('packages', 'create-sdl-mcp', 'package.json'));
             if (root.version !== expected) throw new Error('package.json version mismatch');
+            if (createPackage.version !== expected) throw new Error('packages/create-sdl-mcp/package.json version mismatch');
             for (const depName of ['sdl-mcp-native', 'sdl-mcp-watchman', 'sdl-mcp-watchman-linux-x64', 'sdl-mcp-watchman-win32-x64']) {
               if ((root.optionalDependencies || {})[depName] !== expected) {
                 throw new Error('package.json optionalDependencies.' + depName + ' mismatch');
@@ -560,6 +562,37 @@ jobs:
               echo "SKIP sdl-mcp@${VERSION} already published (confirmed after retry)"
             else
               echo "FAIL sdl-mcp@${VERSION} publish failed"
+              exit 1
+            fi
+          fi
+
+      - name: Publish create-sdl-mcp wrapper package
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "Publishing create-sdl-mcp@${VERSION} (${NPM_DIST_TAG})"
+
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            npm publish packages/create-sdl-mcp/ --access public --tag "${NPM_DIST_TAG}" --dry-run
+            exit 0
+          fi
+
+          existing=$(npm view "create-sdl-mcp@${VERSION}" version 2>/dev/null || true)
+          if [[ "${existing}" == "${VERSION}" ]]; then
+            echo "SKIP create-sdl-mcp@${VERSION} already exists"
+            exit 0
+          fi
+
+          if npm publish packages/create-sdl-mcp/ --access public --tag "${NPM_DIST_TAG}" 2>&1; then
+            echo "OK create-sdl-mcp@${VERSION} published"
+          else
+            recheck=$(npm view "create-sdl-mcp@${VERSION}" version 2>/dev/null || true)
+            if [[ "${recheck}" == "${VERSION}" ]]; then
+              echo "SKIP create-sdl-mcp@${VERSION} already published (confirmed after retry)"
+            else
+              echo "FAIL create-sdl-mcp@${VERSION} publish failed"
               exit 1
             fi
           fi

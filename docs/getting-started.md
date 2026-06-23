@@ -55,7 +55,19 @@ npm install -g sdl-mcp
 sdl-mcp version
 ```
 
-When install runs in a human TTY, npm `postinstall` offers the Setup Wizard. It skips automatically in CI, non-TTY installs, after the timeout, or when `SDL_MCP_SKIP_SETUP_WIZARD=1` is set. Run it later with `sdl-mcp init` or `npx --yes sdl-mcp@latest init`.
+By default, npm runs lifecycle scripts in the background, so plain installs do not reliably show the Setup Wizard. Run `sdl-mcp init` after install, or use `npm install -g --foreground-scripts sdl-mcp` when you want npm `postinstall` to offer the wizard during installation. If the wizard is launched outside a repo, leave the repository path blank for a global install; SDL-MCP writes reusable resources to `~/.sdl-mcp/resources`, writes selected-but-undetected agent config snippets to `~/.sdl-mcp/resources/configs`, and prints repo setup commands. The offer skips automatically in CI, non-TTY installs, update installs, after the timeout, or when `SDL_MCP_SKIP_SETUP_WIZARD=1` is set. Run it later with `sdl-mcp init` or `npx --yes sdl-mcp@latest init`.
+
+For a clean foreground installer that owns the prompt and hides npm dependency noise, use:
+
+```bash
+npx create-sdl-mcp
+```
+
+For an experienced-user update that only installs binaries and prints follow-up commands:
+
+```bash
+npx create-sdl-mcp --update
+```
 
 ### Run Without Installing
 

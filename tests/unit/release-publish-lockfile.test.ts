@@ -153,4 +153,30 @@ describe("release publish lockfile guards", () => {
       "publish job should use the Node 24 bootstrap path with npm registry URL for trusted publishing",
     );
   });
+
+  it("publishes the create-sdl-mcp wrapper after the main package", () => {
+    const workflow = readSource(".github/workflows/release-publish.yml");
+    const publishJob = workflow.match(/publish:\s*[\s\S]*$/)?.[0] ?? "";
+
+    assert.match(
+      publishJob,
+      /if \(createPackage\.version !== expected\) throw new Error\('packages\/create-sdl-mcp\/package\.json version mismatch'\);/,
+      "release validation should fail if create-sdl-mcp is not versioned with the release",
+    );
+    assert.match(
+      publishJob,
+      /name:\s*Publish main package[\s\S]*name:\s*Publish create-sdl-mcp wrapper package/s,
+      "wrapper should publish only after the main sdl-mcp package succeeds",
+    );
+    assert.match(
+      publishJob,
+      /npm view "create-sdl-mcp@\$\{VERSION\}" version/,
+      "wrapper publish should be idempotent against existing registry versions",
+    );
+    assert.match(
+      publishJob,
+      /npm publish packages\/create-sdl-mcp\/ --access public --tag "\$\{NPM_DIST_TAG\}"/,
+      "wrapper package should be published to npm",
+    );
+  });
 });

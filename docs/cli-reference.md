@@ -84,8 +84,9 @@ sdl-mcp init -y --dry-run
 Key options:
 
 - `--client <claude-code|codex|gemini|opencode>`
+- `--agents <comma-separated>` (multiple agent targets; selected-but-undetected targets get MCP config snippets under `~/.sdl-mcp/configs`)
 - `--repo-path <PATH>` (default: current directory)
-- `--languages <comma-separated>` (default: all supported languages)
+- `--languages <comma-separated>` (default: detected languages, or core built-ins when nothing is detected)
 - `-f, --force`
 - `-y, --yes` (non-interactive mode with repo/language auto-detection)
 - `--auto-index` (run inline incremental index and doctor checks)

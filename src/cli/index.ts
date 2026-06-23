@@ -297,8 +297,9 @@ Global Options:
 
  Init Options:
     --client NAME         Client template: claude-code, codex, gemini, opencode
+    --agents LIST         Comma-separated agent targets; undetected targets get configs in ~/.sdl-mcp/configs
     --repo-path PATH      Repository root path (default: current directory)
-    --languages LIST      Comma-separated languages: ts, tsx, js, jsx, py, go, java, cs, c, cpp, php, rs, kt, sh (default: all)
+    --languages LIST      Comma-separated languages; defaults to detected/core SDL-supported languages
     -f, --force           Force overwrite existing configuration
     -y, --yes             Non-interactive mode (auto-detect repo/languages)
     --auto-index          Run index + doctor automatically after init

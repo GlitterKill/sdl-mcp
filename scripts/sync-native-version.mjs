@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-// Sync release-coupled optional package versions across native packages,
-// Watchman packages, and the main package.
+// Sync release-coupled package versions across native packages, Watchman
+// packages, the create wrapper package, and the main package.
 //
 // Usage:
 //   node scripts/sync-native-version.mjs [version]
@@ -97,6 +97,12 @@ const watchmanPlatformCount = syncPackageDirVersions(
   version,
 );
 
+syncPackageVersion(
+  join(root, "packages", "create-sdl-mcp", "package.json"),
+  "packages/create-sdl-mcp/package.json",
+  version,
+);
+
 const mainPkgPath = join(root, "package.json");
 const mainPkg = readJson(mainPkgPath);
 let mainChanged = false;
@@ -188,5 +194,5 @@ try {
 }
 
 console.log(
-  `\nDone. Synced version ${version} across ${nativePlatformCount} native platform packages and ${watchmanPlatformCount} Watchman platform packages.`,
+  `\nDone. Synced version ${version} across ${nativePlatformCount} native platform packages, ${watchmanPlatformCount} Watchman platform packages, and create-sdl-mcp.`,
 );
