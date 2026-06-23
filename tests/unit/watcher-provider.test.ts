@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +11,7 @@ import {
   _decrementPendingChangeForGenerationForTesting,
   _drainPendingWatcherChangesForTesting,
   _normalizeWatchmanFileNameForTesting,
+  _probeWatchmanClientAvailabilityForTesting,
   _rotateAbortControllerForTesting,
   _selectWatcherProviderForTesting,
   _watchmanAvailabilityForTesting,
@@ -28,6 +30,22 @@ type WatchmanSmokeClient = {
   ): void;
   end(): void;
 };
+
+class FailingProbeWatchmanClient extends EventEmitter {
+  ended = false;
+
+  capabilityCheck(): void {
+    queueMicrotask(() => {
+      this.emit("error", new Error("watchman binary failed to load libglog"));
+    });
+  }
+
+  command(): void {}
+
+  end(): void {
+    this.ended = true;
+  }
+}
 
 function watchmanSmokeCommand<T>(
   client: WatchmanSmokeClient,
@@ -231,6 +249,18 @@ describe("watchman provider helpers", () => {
       _watchmanCommandWithTimeoutForTesting(neverResponds, ["clock", "root"], 5),
       /timed out after 5ms/,
     );
+  });
+
+  it("turns Watchman startup error events into availability failures", async () => {
+    const client = new FailingProbeWatchmanClient();
+
+    const availability = await _probeWatchmanClientAvailabilityForTesting(
+      () => client,
+    );
+
+    assert.equal(availability.available, false);
+    assert.match(availability.reason ?? "", /failed to load libglog/);
+    assert.equal(client.ended, true);
   });
 
   it("drains queued precise watcher work before a resync refresh", async () => {

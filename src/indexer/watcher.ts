@@ -110,6 +110,7 @@ export {
   _buildWatchmanStartupResyncForTesting,
   _buildWatchmanSubscriptionForTesting,
   _normalizeWatchmanFileNameForTesting,
+  _probeWatchmanClientAvailabilityForTesting,
   _selectWatcherProviderForTesting,
   _watchmanAvailabilityForTesting,
   _watchmanCommandWithTimeoutForTesting,

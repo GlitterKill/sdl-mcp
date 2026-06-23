@@ -374,6 +374,40 @@ export function watchmanCapabilityCheckWithTimeout(
   );
 }
 
+export async function probeWatchmanClientAvailability(
+  createClient: () => WatchmanClient,
+): Promise<ProviderAvailabilityStatus> {
+  const client = createClient();
+  const clientFailure = new Promise<never>((_, reject) => {
+    client.on("error", reject);
+    client.on("end", () => {
+      reject(new Error("Watchman connection ended during startup probe"));
+    });
+  });
+
+  try {
+    await Promise.race([
+      watchmanCapabilityCheckWithTimeout(
+        client,
+        WATCHMAN_STARTUP_COMMAND_TIMEOUT_MS,
+      ),
+      clientFailure,
+    ]);
+    return { available: true };
+  } catch (error) {
+    return {
+      available: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    try {
+      client.end();
+    } catch {
+      // Best-effort cleanup for the temporary startup probe client.
+    }
+  }
+}
+
 export function buildWatchmanStartupResync(
   warning: string | undefined,
 ): ProviderEvent | null {
@@ -458,6 +492,15 @@ export function _watchmanCommandWithTimeoutForTesting<T>(
   return watchmanCommandWithTimeout<T>(client, args, timeoutMs);
 }
 
+/**
+ * @internal
+ */
+export function _probeWatchmanClientAvailabilityForTesting(
+  createClient: () => WatchmanClient,
+): Promise<ProviderAvailabilityStatus> {
+  return probeWatchmanClientAvailability(createClient);
+}
+
 
 
 export type StartWatchmanRuntimeWatcherParams = {
@@ -497,29 +540,13 @@ export async function startWatchmanRuntimeWatcher({
   const watchmanBinaryPath = watchmanBinary.binaryPath;
   const daemonAvailability = await checkWatchmanAvailabilityWithCache(
     configuredProvider,
-    async () => {
-      const startupClient = new watchman.Client({
-        watchmanBinaryPath,
-      });
-      try {
-        await watchmanCapabilityCheckWithTimeout(
-          startupClient,
-          WATCHMAN_STARTUP_COMMAND_TIMEOUT_MS,
-        );
-        return { available: true };
-      } catch (error) {
-        return {
-          available: false,
-          reason: error instanceof Error ? error.message : String(error),
-        };
-      } finally {
-        try {
-          startupClient.end();
-        } catch {
-          // Best-effort cleanup for the temporary startup probe client.
-        }
-      }
-    },
+    () =>
+      probeWatchmanClientAvailability(
+        () =>
+          new watchman.Client({
+            watchmanBinaryPath,
+          }),
+      ),
   );
   if (!daemonAvailability.available) {
     throw new Error(daemonAvailability.reason ?? "Watchman unavailable");
