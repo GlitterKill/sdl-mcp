@@ -9,6 +9,7 @@
   - [Iris Gate Ladder](./feature-deep-dives/iris-gate-ladder.md)
   - [Architecture](./architecture.md)
   - [Getting Started](./getting-started.md)
+  - [Config Examples](./config-examples.md)
   - [CLI Reference](./cli-reference.md)
   - [MCP Tools Reference](./mcp-tools-reference.md)
   - [Configuration Reference](./configuration-reference.md)
@@ -29,6 +30,8 @@ Use this page as the entry point for SDL-MCP documentation.
   - [Getting Started](./getting-started.md)
 - I need command syntax and examples:
   - [CLI Reference](./cli-reference.md)
+- I need copy-paste SDL-MCP config snippets:
+  - [Config Examples](./config-examples.md)
 - I need MCP tool payloads and responses:
   - [MCP Tools Reference](./mcp-tools-reference.md)
   - [MCP Tools Detailed](./mcp-tools-detailed.md)
@@ -75,6 +78,7 @@ Use this page as the entry point for SDL-MCP documentation.
 ## Advanced and Supporting Docs
 
 - [Sync Artifacts](./sync-artifacts.md)
+- [Config Examples](./config-examples.md)
 - [Benchmark Guardrails](./benchmark-guardrails.md)
 - [Benchmark Baseline Management](./benchmark-baseline-management.md)
 - [Benchmark Failure Guide](./benchmark-failure-guide.md)
@@ -90,9 +94,9 @@ Use this page as the entry point for SDL-MCP documentation.
 
 ## Current Scope Snapshot
 
-- **Version**: 0.11.6
+- **Version**: 0.11.8
 - **Supported languages**: Core adapters plus lazy provider languages; see [Language Provider Support](./feature-deep-dives/language-provider-support.md)
-- **CLI commands** (13): init, doctor, info, index, serve, export, import, pull, benchmark, summary, health, version, tool
+- **CLI commands** (13): init, doctor, info, index, serve, export, import, pull, benchmark:ci, summary, health, version, tool
 - **Generated tool inventory**: [docs/generated/tool-inventory.md](./generated/tool-inventory.md)
 - **MCP surfaces**:
   - Core: repo register/status/overview, index refresh, symbol search/getCard/edit, slice build/refresh/spillover, delta get, PR risk analyze
