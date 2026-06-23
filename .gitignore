@@ -100,9 +100,7 @@ grammar-wrappers/*/package.json.bak
 # Local-only project artifacts
 /data/
 devdocs/*
-!devdocs/validation/
-devdocs/validation/*
-!devdocs/validation/provider-first-lsp-*.md
+/devdocs/validation/
 # Root agent/context files
 /AGENTS.md
 /AGENTS.old
