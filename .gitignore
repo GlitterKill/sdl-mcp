@@ -200,3 +200,5 @@ watchman/npm/*/bin/
 watchman/npm/*/README.md
 AGENTS.md
 CLAUDE.md
+/AGENTS.md
+/CLAUDE.md
