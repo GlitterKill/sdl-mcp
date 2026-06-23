@@ -184,17 +184,4 @@ npm run golden:update         # Regenerate golden snapshots
 ### ALWAYS USE SDL-MCP TOOLS TO READ CODE FILES IN REPOS
 
 
-
-### 11) Development memories
-
-Store cross-session knowledge that auto-surfaces in future slice builds:
-
-- **Store**: `sdl.memory.store` with `type` (`"decision"` | `"bugfix"` | `"task_context"` | `"pattern"` | `"convention"` | `"architecture"` | `"performance"` | `"security"`), `title`, `content`, optional `symbolIds`, `fileRelPaths`, `tags`, `confidence`.
-- **Query**: `sdl.memory.query` with `query` (text search), `types`, `tags`, `symbolIds`, `staleOnly`, `limit`, `sortBy` (`"recency"` | `"confidence"`).
-- **Surface**: `sdl.memory.surface` with `symbolIds` and/or `taskType` — returns ranked by confidence × recency × symbol overlap.
-- **Remove**: `sdl.memory.remove` with `memoryId`; add `deleteFile: true` to also remove the `.sdl-memory/` file.
-- **Automatic surfacing**: `sdl.slice.build` includes relevant memories by default. Set `includeMemories: false` to disable, or `memoryLimit: N` to control count.
-- **Staleness**: after refactors, query `sdl.memory.query` with `staleOnly: true` and update or remove outdated memories.
-- **Team sharing**: memories save to `.sdl-memory/` files; commit to Git. On `sdl.index.refresh`, other team members' files are imported into the graph.
-
 ```

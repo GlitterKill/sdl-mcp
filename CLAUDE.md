@@ -33,7 +33,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current State
 
-**Version**: 0.11.7
+**Version**: 0.11.9
 
 Indexed: 1,272 files, ~25.1K symbols, ~12.5K edges (per latest `repo.status` / `repo.overview`).
 

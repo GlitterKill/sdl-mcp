@@ -9543,6 +9543,130 @@ describe("provider-first indexing foundation", () => {
     }
   });
 
+  it("finalizes shadow DBs when copied derived relationships point at fallback-only real symbols", async () => {
+    const root = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-finalize-derived-symbol-"),
+    );
+    const activeDbPath = join(root, "active.lbug");
+    const shadowDbPath = join(root, "shadow.lbug");
+    const kuzu = await import("kuzu");
+    const activeDb = new kuzu.Database(activeDbPath);
+    const activeConn = new kuzu.Connection(activeDb);
+    const shadowDb = new kuzu.Database(shadowDbPath);
+    const shadowConn = new kuzu.Connection(shadowDb);
+    const repoId = "repo";
+    const fileId = "file-1";
+    const fallbackSymbolId =
+      "404b9898636576d8e639533e7f94be05bc6fa669326d537ddc4c6fea65637ec5";
+    const clusterId = "repo:cluster:1";
+    const processId = "repo:process:1";
+    const shadowClusterId = "repo:louvain:1";
+    const versionId = "version-1";
+    const now = "2026-05-26T00:00:00.000Z";
+
+    try {
+      await createBaseSchema(activeConn);
+      await createBaseSchema(shadowConn);
+      await seedRepoFileAndSourceSymbol(activeConn, {
+        repoId,
+        fileId,
+        sourceSymbolId: fallbackSymbolId,
+        now,
+      });
+      await dbExec(
+        shadowConn,
+        `MERGE (r:Repo {repoId: $repoId})
+         SET r.rootPath = "",
+             r.configJson = "{}",
+             r.createdAt = $now
+         MERGE (f:File {fileId: $fileId})
+         SET f.relPath = "src/index.ts",
+             f.contentHash = "hash",
+             f.language = "typescript",
+             f.byteSize = 10,
+             f.lastIndexedAt = $now,
+             f.directory = "src"
+         MERGE (f)-[:FILE_IN_REPO]->(r)`,
+        { repoId, fileId, now },
+      );
+      await dbExec(
+        activeConn,
+        `MATCH (r:Repo {repoId: $repoId})
+         MATCH (symbol:Symbol {symbolId: $fallbackSymbolId})
+         MERGE (cluster:Cluster {clusterId: $clusterId})
+         SET cluster.repoId = $repoId,
+             cluster.label = "fallback real symbols",
+             cluster.symbolCount = 1,
+             cluster.cohesionScore = 0.7,
+             cluster.versionId = $versionId,
+             cluster.createdAt = $now,
+             cluster.searchText = "fallback real symbols"
+         MERGE (cluster)-[:CLUSTER_IN_REPO]->(r)
+         MERGE (symbol)-[clusterMember:BELONGS_TO_CLUSTER]->(cluster)
+         SET clusterMember.membershipScore = 0.9
+         MERGE (process:Process {processId: $processId})
+         SET process.repoId = $repoId,
+             process.entrySymbolId = $fallbackSymbolId,
+             process.label = "fallback process",
+             process.depth = 1,
+             process.versionId = $versionId,
+             process.createdAt = $now,
+             process.searchText = "fallback process"
+         MERGE (process)-[:PROCESS_IN_REPO]->(r)
+         MERGE (symbol)-[step:PARTICIPATES_IN]->(process)
+         SET step.stepOrder = 1,
+             step.role = "caller"
+         MERGE (shadowCluster:ShadowCluster {shadowClusterId: $shadowClusterId})
+         SET shadowCluster.repoId = $repoId,
+             shadowCluster.algorithm = "louvain",
+             shadowCluster.label = "fallback real symbols",
+             shadowCluster.symbolCount = 1,
+             shadowCluster.modularity = 0.42,
+             shadowCluster.versionId = $versionId,
+             shadowCluster.createdAt = $now
+         MERGE (shadowCluster)-[:SHADOW_CLUSTER_IN_REPO]->(r)
+         MERGE (symbol)-[member:BELONGS_TO_SHADOW_CLUSTER]->(shadowCluster)
+         SET member.membershipScore = 1.0
+         MERGE (v:Version {versionId: $versionId})
+         SET v.createdAt = $now,
+             v.reason = "test",
+             v.prevVersionHash = null,
+             v.versionHash = "hash"
+         MERGE (v)-[:VERSION_OF_REPO]->(r)`,
+        {
+          repoId,
+          fallbackSymbolId,
+          clusterId,
+          processId,
+          shadowClusterId,
+          versionId,
+          now,
+        },
+      );
+      await shadowConn.close();
+      await shadowDb.close();
+
+      const summary = await finalizeProviderFirstShadowDb({
+        activeConn,
+        repoId,
+        versionId,
+        shadowDbPath,
+      });
+
+      assert.equal(summary.status, "finalized", summary.reasons.join("\n"));
+      assert.equal(summary.actualCounts?.symbols, 1);
+      assert.equal(summary.actualCounts?.clusterMembers, 1);
+      assert.equal(summary.actualCounts?.processSteps, 1);
+      assert.equal(summary.actualCounts?.shadowClusterMembers, 1);
+    } finally {
+      await activeConn.close().catch(() => {});
+      await activeDb.close().catch(() => {});
+      await shadowConn.close().catch(() => {});
+      await shadowDb.close().catch(() => {});
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("reports shadow activation as ineligible until shadow contains the final graph", () => {
     const activation = summarizeProviderFirstShadowActivationReadiness({
       shadowBuild: {

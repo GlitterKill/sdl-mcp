@@ -198,3 +198,5 @@ Python/_cache/last_welcome.txt
 watchman/npm/*/vendor/
 watchman/npm/*/bin/
 watchman/npm/*/README.md
+AGENTS.md
+CLAUDE.md
