@@ -1660,11 +1660,18 @@
           "type": "boolean",
           "description": "When gateway is enabled, also register the 25 legacy tool names for backward compatibility. Deprecated: will be removed in a future version.",
           "default": false
+        },
+        "toolNameFormat": {
+          "type": "string",
+          "enum": ["canonical", "openai"],
+          "description": "Tool name format advertised to MCP clients. Use openai to replace dots with underscores for strict tool-name validators.",
+          "default": "canonical"
         }
       },
       "default": {
         "enabled": true,
-        "emitLegacyTools": false
+        "emitLegacyTools": false,
+        "toolNameFormat": "canonical"
       }
     },
     "httpAuth": {

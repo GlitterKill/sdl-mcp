@@ -288,7 +288,8 @@
   },
   "gateway": {
     "enabled": true,
-    "emitLegacyTools": false
+    "emitLegacyTools": false,
+    "toolNameFormat": "canonical"
   },
   "httpAuth": {
     "enabled": false,

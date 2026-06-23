@@ -278,12 +278,7 @@ export const ProviderFirstLspIndexingConfigSchema = z
       .default(120_000),
     referenceCandidateLimit: z.number().int().min(0).max(10_000).default(200),
     diagnosticsLimit: z.number().int().min(0).max(100_000).default(5_000),
-    diagnosticsTimeoutMs: z
-      .number()
-      .int()
-      .min(500)
-      .max(300_000)
-      .default(5_000),
+    diagnosticsTimeoutMs: z.number().int().min(500).max(300_000).default(5_000),
   })
   .default({
     mode: "primaryWithCaps",
@@ -882,9 +877,16 @@ export const RuntimeConfigSchema = z.object({
 
 export type RuntimeConfig = z.infer<typeof RuntimeConfigSchema>;
 
+export const ToolNameFormatSchema = z
+  .enum(["canonical", "openai"])
+  .default("canonical");
+export type ToolNameFormat = z.infer<typeof ToolNameFormatSchema>;
+
 export const GatewayConfigSchema = z.object({
   enabled: z.boolean().default(true),
   emitLegacyTools: z.boolean().default(false),
+  /** Use "openai" to advertise tool names without dots for strict clients. */
+  toolNameFormat: ToolNameFormatSchema,
 });
 
 export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;
@@ -1046,12 +1048,7 @@ export const SemanticEnrichmentLspServerConfigSchema = z.object({
   readiness: z.string().optional(),
   documentSessionMode: z.enum(["workspace", "document"]).optional(),
   documentSymbolRetryCount: z.number().int().min(0).max(10).optional(),
-  documentSymbolRetryDelayMs: z
-    .number()
-    .int()
-    .min(0)
-    .max(120_000)
-    .optional(),
+  documentSymbolRetryDelayMs: z.number().int().min(0).max(120_000).optional(),
   env: z.record(z.string(), z.string()).optional(),
   initializationOptions: z.record(z.string(), z.unknown()).optional(),
 });

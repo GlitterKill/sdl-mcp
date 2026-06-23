@@ -529,9 +529,10 @@ Supported runtimes: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `per
 
 ## `gateway`
 
-| Field     | Type      | Default |
-| --------- | --------- | ------- |
-| `enabled` | `boolean` | `true`  |
+| Field            | Type                       | Default       | Notes                                                          |
+| ---------------- | -------------------------- | ------------- | -------------------------------------------------------------- |
+| `enabled`        | `boolean`                  | `true`        |                                                                |
+| `toolNameFormat` | `"canonical" \| "openai"` | `"canonical"` | Use `"openai"` to advertise dot-free names like `sdl_repo_status`. |
 
 With current defaults, `gateway.enabled` matters only when `codeMode.exclusive` is `false` or `codeMode.enabled` is `false`.
 

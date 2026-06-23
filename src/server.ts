@@ -27,7 +27,11 @@ import {
 } from "./mcp/savings-meter.js";
 import { formatToolCallForUser } from "./mcp/tool-call-formatter.js";
 import type { LiveIndexCoordinator } from "./live-index/types.js";
-import type { CodeModeConfig } from "./config/types.js";
+import type {
+  CodeModeConfig,
+  GatewayConfig,
+  ToolNameFormat,
+} from "./config/types.js";
 import { normalizeToolArguments } from "./mcp/request-normalization.js";
 import {
   buildToolPresentation,
@@ -79,13 +83,20 @@ function classifyUserAgent(userAgent: string): string {
   if (lower.includes("codex")) return "codex";
   if (lower.includes("claude")) return "claude";
   if (lower.includes("cursor")) return "cursor";
-  if (lower.includes("vscode") || lower.includes("visual studio code")) return "vscode";
+  if (lower.includes("vscode") || lower.includes("visual studio code"))
+    return "vscode";
   if (lower.includes("cline")) return "cline";
   const firstProduct = userAgent.split(/\s+/)[0] ?? "unknown";
-  return sanitizeClientKeyPart(firstProduct.split("/")[0] ?? firstProduct) || "unknown";
+  return (
+    sanitizeClientKeyPart(firstProduct.split("/")[0] ?? firstProduct) ||
+    "unknown"
+  );
 }
 
-export function deriveClientKey(sessionId?: string, requestInfo?: unknown): string {
+export function deriveClientKey(
+  sessionId?: string,
+  requestInfo?: unknown,
+): string {
   const explicitClient = readRequestHeader(requestInfo, "x-sdl-client");
   if (explicitClient) {
     return `client:${sanitizeClientKeyPart(explicitClient)}`;
@@ -100,7 +111,10 @@ export function deriveClientKey(sessionId?: string, requestInfo?: unknown): stri
   return "stdio";
 }
 
-function readRequestHeader(requestInfo: unknown, name: string): string | undefined {
+function readRequestHeader(
+  requestInfo: unknown,
+  name: string,
+): string | undefined {
   if (!requestInfo || typeof requestInfo !== "object") return undefined;
   const headers = (requestInfo as { headers?: unknown }).headers;
   const lowerName = name.toLowerCase();
@@ -109,7 +123,9 @@ function readRequestHeader(requestInfo: unknown, name: string): string | undefin
     return typeof value === "string" && value.length > 0 ? value : undefined;
   }
   if (headers && typeof headers === "object") {
-    for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+    for (const [key, value] of Object.entries(
+      headers as Record<string, unknown>,
+    )) {
       if (key.toLowerCase() !== lowerName) continue;
       if (typeof value === "string") return value;
       if (Array.isArray(value) && typeof value[0] === "string") return value[0];
@@ -118,7 +134,10 @@ function readRequestHeader(requestInfo: unknown, name: string): string | undefin
   return undefined;
 }
 
-function inferTaskType(toolName: string, args: Record<string, unknown>): string {
+function inferTaskType(
+  toolName: string,
+  args: Record<string, unknown>,
+): string {
   const explicit = extractStringField(args, "taskType");
   if (explicit) return explicit;
   const normalized = toolName.replace(/^sdl\./, "");
@@ -233,13 +252,21 @@ export function buildToolResponseEnvelope(
     : { content, structuredContent };
 }
 
+export interface MCPServerOptions {
+  /** OpenAI-compatible clients reject dots in tool names; keep canonical by default. */
+  toolNameFormat?: ToolNameFormat;
+}
+
 export class MCPServer {
   private server: Server;
   private tools: Map<string, ToolDefinition> = new Map();
+  private clientToolNameToCanonical: Map<string, string> = new Map();
+  private readonly toolNameFormat: ToolNameFormat;
   private _gatewayMode = false;
   private postDispatchHooks: PostDispatchHook[] = [];
 
-  constructor() {
+  constructor(options: MCPServerOptions = {}) {
+    this.toolNameFormat = options.toolNameFormat ?? "canonical";
     this.server = new Server(
       {
         name: "sdl-mcp",
@@ -282,7 +309,7 @@ export class MCPServer {
       try {
         return {
           tools: Array.from(this.tools.values()).map((tool) => ({
-            name: tool.name,
+            name: this.formatToolNameForClient(tool.name),
             title: tool.presentation.title,
             description:
               tool.presentation.includeVersionInDescription === false
@@ -314,12 +341,17 @@ export class MCPServer {
           sendNotification: extra.sendNotification,
           signal: extra.signal,
           sessionId: extraContext.sessionId,
-          clientKey: deriveClientKey(extraContext.sessionId, extraContext.requestInfo),
+          clientKey: deriveClientKey(
+            extraContext.sessionId,
+            extraContext.requestInfo,
+          ),
           requestInfo: extraContext.requestInfo,
         };
 
         try {
-          const tool = this.tools.get(request.params.name);
+          const requestedToolName = request.params.name;
+          const toolName = this.resolveCanonicalToolName(requestedToolName);
+          const tool = this.tools.get(toolName);
           if (!tool) {
             const notFoundResponse = {
               error: {
@@ -332,7 +364,7 @@ export class MCPServer {
                 notFoundResponse,
                 null,
                 "",
-                request.params.name,
+                toolName,
                 {},
               ),
               isError: true,
@@ -350,7 +382,7 @@ export class MCPServer {
           const repoId = extractStringField(normalizedArgs, "repoId");
           const symbolId = extractStringField(normalizedArgs, "symbolId");
           toolContext.taskType = inferTaskType(
-            request.params.name,
+            toolName,
             normalizedArgs as Record<string, unknown>,
           );
 
@@ -376,14 +408,14 @@ export class MCPServer {
               },
             };
             process.stderr.write(
-              `[sdl-mcp] Tool ${request.params.name} validation error: ${JSON.stringify(validationError)}
+              `[sdl-mcp] Tool ${toolName} validation error: ${JSON.stringify(validationError)}
 `,
             );
             const responseForLog = includeDiagnostics
               ? attachTimingDiagnostics(validationError, timer.snapshot())
               : validationError;
             logToolCall({
-              tool: request.params.name,
+              tool: toolName,
               request: normalizedArgs as Record<string, unknown>,
               response: responseForLog,
               durationMs: Date.now() - start,
@@ -398,7 +430,7 @@ export class MCPServer {
                 responseForLog,
                 null,
                 "",
-                request.params.name,
+                toolName,
                 normalizedArgs as Record<string, unknown>,
               ),
               isError: true,
@@ -408,15 +440,12 @@ export class MCPServer {
           try {
             // Pass the parsed (validated + coerced) data to the handler
             const dispatchStartedAt = timer.start();
-            const result = shouldBypassToolDispatch(
-              request.params.name,
-              parseResult.data,
-            )
+            const result = shouldBypassToolDispatch(toolName, parseResult.data)
               ? await tool.handler(parseResult.data, toolContext)
               : await runToolDispatch(
                   () => tool.handler(parseResult.data, toolContext),
                   undefined,
-                  request.params.name,
+                  toolName,
                 );
             timer.record("server.dispatch", dispatchStartedAt);
 
@@ -431,12 +460,12 @@ export class MCPServer {
               const r = result as Record<string, unknown>;
               const usageAccountingResult =
                 projectContextResultForUsageAccounting(
-                  request.params.name,
+                  toolName,
                   r,
                   normalizedArgs as Record<string, unknown>,
                 );
               if (
-                shouldAttachUsage(request.params.name) &&
+                shouldAttachUsage(toolName) &&
                 usageAccountingResult._rawContext
               ) {
                 r._tokenUsage = await computeTokenUsage(usageAccountingResult);
@@ -445,7 +474,7 @@ export class MCPServer {
               if (r._tokenUsage) {
                 const usage = r._tokenUsage as TokenUsageMetadata;
                 tokenAccumulator.recordUsage(
-                  request.params.name,
+                  toolName,
                   usage.sdlTokens,
                   usage.rawEquivalent,
                 );
@@ -471,13 +500,13 @@ export class MCPServer {
                     /* non-critical */
                   });
               } else if (
-                shouldAttachUsage(request.params.name) &&
+                shouldAttachUsage(toolName) &&
                 typeof r.totalTokens === "number" &&
                 r.totalTokens > 0
               ) {
                 // Neutral accounting: count the call but model zero savings
                 tokenAccumulator.recordUsage(
-                  request.params.name,
+                  toolName,
                   r.totalTokens,
                   r.totalTokens,
                 );
@@ -487,7 +516,7 @@ export class MCPServer {
 
               // Send human-readable tool call summary to user (MCP logging)
               userDisplay = formatToolCallForUser(
-                request.params.name,
+                toolName,
                 normalizedArgs as Record<string, unknown>,
                 r,
               );
@@ -518,10 +547,7 @@ export class MCPServer {
                 delete (finalResult as Record<string, unknown>)._tokenUsage;
               }
               // Compact broad context responses — hide actionsTaken, path, metrics, retrievalEvidence
-              finalResult = projectBroadContextResult(
-                request.params.name,
-                finalResult,
-              );
+              finalResult = projectBroadContextResult(toolName, finalResult);
             }
 
             // Capture formatted summary for content block before it gets deleted
@@ -529,7 +555,7 @@ export class MCPServer {
 
             // Send formatted summary as user notification for usage stats
             if (
-              request.params.name === "sdl.usage.stats" &&
+              toolName === "sdl.usage.stats" &&
               finalResult &&
               typeof finalResult === "object" &&
               "formattedSummary" in finalResult
@@ -577,12 +603,7 @@ export class MCPServer {
               try {
                 const hookStartedAt = timer.start();
                 await Promise.race([
-                  hook(
-                    request.params.name,
-                    parseResult.data,
-                    finalResult,
-                    hookContext,
-                  ),
+                  hook(toolName, parseResult.data, finalResult, hookContext),
                   new Promise((_, reject) =>
                     (timeoutHandle = setTimeout(() => {
                       hookAbortController.abort();
@@ -593,7 +614,7 @@ export class MCPServer {
                 timer.record("server.postDispatchHook", hookStartedAt);
               } catch (err) {
                 process.stderr.write(
-                  `[sdl-mcp] Post-dispatch hook failed for tool ${request.params.name}: ${err instanceof Error ? err.message : String(err)}
+                  `[sdl-mcp] Post-dispatch hook failed for tool ${toolName}: ${err instanceof Error ? err.message : String(err)}
 `,
                 );
               } finally {
@@ -615,7 +636,7 @@ export class MCPServer {
             }
 
             logToolCall({
-              tool: request.params.name,
+              tool: toolName,
               request: normalizedArgs as Record<string, unknown>,
               response: finalResult as Record<string, unknown>,
               durationMs: Date.now() - start,
@@ -645,19 +666,19 @@ export class MCPServer {
               primaryPayload,
               userDisplay,
               footerText,
-              request.params.name,
+              toolName,
               normalizedArgs as Record<string, unknown>,
             );
           } catch (error) {
             process.stderr.write(
-              `[sdl-mcp] Tool ${request.params.name} error: ${error}\n`,
+              `[sdl-mcp] Tool ${toolName} error: ${error}\n`,
             );
             const errorResponse = errorToMcpResponse(error);
             const responseForLog = includeDiagnostics
               ? attachTimingDiagnostics(errorResponse, timer.snapshot())
               : errorResponse;
             logToolCall({
-              tool: request.params.name,
+              tool: toolName,
               request: normalizedArgs as Record<string, unknown>,
               response: responseForLog,
               durationMs: Date.now() - start,
@@ -674,7 +695,7 @@ export class MCPServer {
                 responseForLog,
                 null,
                 "",
-                request.params.name,
+                toolName,
                 normalizedArgs as Record<string, unknown>,
               ),
               isError: true,
@@ -711,6 +732,7 @@ export class MCPServer {
     if (this.tools.has(name)) {
       logger.warn("Duplicate tool registration", { name });
     }
+    this.registerToolNameAlias(name);
     this.tools.set(name, {
       name,
       description,
@@ -721,6 +743,27 @@ export class MCPServer {
     });
   }
 
+  private formatToolNameForClient(name: string): string {
+    if (this.toolNameFormat !== "openai") {
+      return name;
+    }
+    return name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 128);
+  }
+
+  private registerToolNameAlias(name: string): void {
+    const clientName = this.formatToolNameForClient(name);
+    const existing = this.clientToolNameToCanonical.get(clientName);
+    if (existing && existing !== name) {
+      throw new Error(
+        `Tool name alias collision for ${clientName}: ${existing} and ${name}`,
+      );
+    }
+    this.clientToolNameToCanonical.set(clientName, name);
+  }
+
+  private resolveCanonicalToolName(name: string): string {
+    return this.clientToolNameToCanonical.get(name) ?? name;
+  }
   async start(): Promise<void> {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
@@ -877,7 +920,7 @@ function convertSchema(
  */
 export interface MCPServerServices {
   liveIndex?: LiveIndexCoordinator;
-  gatewayConfig?: { enabled?: boolean; emitLegacyTools?: boolean };
+  gatewayConfig?: GatewayConfig;
   codeModeConfig?: CodeModeConfig;
 }
 
@@ -890,7 +933,9 @@ export async function createMCPServer(
   services: MCPServerServices = {},
 ): Promise<MCPServer> {
   const { registerTools } = await import("./mcp/tools/index.js");
-  const server = new MCPServer();
+  const server = new MCPServer({
+    toolNameFormat: services.gatewayConfig?.toolNameFormat,
+  });
   registerTools(
     server,
     { liveIndex: services.liveIndex },

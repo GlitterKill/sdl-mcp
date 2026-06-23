@@ -8,7 +8,7 @@ import {
   registerActionSearchTool,
   registerCodeModeTools,
 } from "../../code-mode/index.js";
-import type { CodeModeConfig } from "../../config/types.js";
+import type { CodeModeConfig, GatewayConfig } from "../../config/types.js";
 import {
   buildFlatToolDescriptors,
   registerFlatTools,
@@ -17,7 +17,7 @@ import {
 export function registerTools(
   server: MCPServer,
   services: ToolServices = {},
-  gatewayConfig?: { enabled?: boolean; emitLegacyTools?: boolean },
+  gatewayConfig?: GatewayConfig,
   codeModeConfig?: CodeModeConfig,
 ): void {
   // Register memory hint hook for all modes
@@ -55,6 +55,7 @@ export function registerTools(
       {
         enabled: true,
         emitLegacyTools: gatewayConfig.emitLegacyTools ?? true,
+        toolNameFormat: gatewayConfig.toolNameFormat,
       },
       sharedActionMap,
     );
