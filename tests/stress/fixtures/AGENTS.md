@@ -1,0 +1,7 @@
+# AGENTS.md
+
+Use SDL-MCP as the default path for repository `stress-fixtures`.
+
+SDL-MCP (Symbol Delta Ledger MCP Server) - an MCP server providing cards-first code context for polyglot repositories. Replaces bulk code reads with structured symbol cards, graph slices, delta packs, and gated code windows. Uses LadybugDB (graph DB), tree-sitter (AST parsing), and optional Rust native addon (napi-rs) for performance.
+
+> Optimized tool-use workflow for agents: see [SDL.md](./SDL.md).

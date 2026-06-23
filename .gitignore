@@ -103,14 +103,15 @@ devdocs/*
 !devdocs/validation/
 devdocs/validation/*
 !devdocs/validation/provider-first-lsp-*.md
-AGENTS.md
-CLAUDE.md
-!/AGENTS.md
-!/CLAUDE.md
-CODEX.md
-GEMINI.md
-OPENCODE.md
-TASKS.md
+# Root agent/context files
+/AGENTS.md
+/AGENTS.old
+/CLAUDE.md
+/CODEX.md
+/CONTEXT.md
+/GEMINI.md
+/OPENCODE.md
+/TASKS.md
 V06-*.md
 nul
 
@@ -170,7 +171,6 @@ src/code-mode/descriptions.ts.bak
 tests/unit/file-gateway.test.ts.bak
 tune-results.json
 scripts/fix-agent-frontmatter.py
-AGENTS.old
 brand-spec.md
 .claude/docs/ai/sdl-mcp/10x/session-3.md
 .claude/docs/ai/sdl-mcp/10x/session-2.md
