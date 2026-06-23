@@ -429,10 +429,19 @@ async function copyFinalizedRows(params: {
   const auxiliarySymbolIds = new Set(
     auxiliarySymbols.map((symbol) => symbol.symbolId),
   );
-  const edgeEndpointSymbols = await readEdgeTargetSymbolsForRepo(
+  const excludedEdgeEndpointSymbolIds = new Set([
+    ...auxiliarySymbolIds,
+    ...params.stagedAuxiliarySymbolIds,
+  ]);
+  const edgeSourceSymbols = await readEdgeSourceSymbolsForRepo(
     params.activeConn,
     params.repoId,
-    new Set([...auxiliarySymbolIds, ...params.stagedAuxiliarySymbolIds]),
+    excludedEdgeEndpointSymbolIds,
+  );
+  const edgeTargetSymbols = await readEdgeTargetSymbolsForRepo(
+    params.activeConn,
+    params.repoId,
+    excludedEdgeEndpointSymbolIds,
   );
   const symbolVersions = await readRealSymbolVersionsForRepoAtVersion(
     params.activeConn,
@@ -767,7 +776,11 @@ async function copyFinalizedRows(params: {
   ];
 
   await resetBulkFinalizationTargets(params.shadowConn, params.repoId);
-  await ensureEdgeEndpointSymbols(params.shadowConn, edgeEndpointSymbols);
+  await ensureEdgeEndpointSymbols(params.shadowConn, [
+    ...edgeSourceSymbols,
+    ...edgeTargetSymbols,
+  ]);
+  await ensureEdgeEndpointRepoLinks(params.shadowConn, edgeSourceSymbols);
   for (const artifact of artifacts) {
     await copyArtifact(params.shadowConn, artifact.targetTable, artifact);
   }
@@ -1055,6 +1068,113 @@ async function replaceSemanticProvenanceRows(
   }
 }
 
+async function readEdgeSourceSymbolsForRepo(
+  conn: Connection,
+  repoId: string,
+  excludedSymbolIds: ReadonlySet<string>,
+): Promise<AuxiliarySymbolRow[]> {
+  const excluded = [...excludedSymbolIds];
+  const exclusionClause =
+    excluded.length > 0 ? "WHERE NOT source.symbolId IN $excludedSymbolIds" : "";
+  const rows = await ladybugDb.queryAll<{
+    symbolId: string;
+    repoId: string | null;
+    kind: string | null;
+    name: string | null;
+    exported: unknown;
+    visibility: string | null;
+    language: string | null;
+    rangeStartLine: unknown;
+    rangeStartCol: unknown;
+    rangeEndLine: unknown;
+    rangeEndCol: unknown;
+    astFingerprint: string | null;
+    signatureJson: string | null;
+    summary: string | null;
+    summaryQuality: unknown;
+    summarySource: string | null;
+    invariantsJson: string | null;
+    sideEffectsJson: string | null;
+    roleTagsJson: string | null;
+    searchText: string | null;
+    updatedAt: string | null;
+    external: unknown;
+    scipSymbol: string | null;
+    source: string | null;
+    packageName: string | null;
+    packageVersion: string | null;
+    symbolStatus: string | null;
+    placeholderKind: string | null;
+    placeholderTarget: string | null;
+  }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(source:Symbol)-[:DEPENDS_ON]->(:Symbol)
+     ${exclusionClause}
+     RETURN DISTINCT source.symbolId AS symbolId,
+            r.repoId AS repoId,
+            source.kind AS kind,
+            source.name AS name,
+            coalesce(source.exported, false) AS exported,
+            source.visibility AS visibility,
+            source.language AS language,
+            coalesce(source.rangeStartLine, 0) AS rangeStartLine,
+            coalesce(source.rangeStartCol, 0) AS rangeStartCol,
+            coalesce(source.rangeEndLine, 0) AS rangeEndLine,
+            coalesce(source.rangeEndCol, 0) AS rangeEndCol,
+            source.astFingerprint AS astFingerprint,
+            source.signatureJson AS signatureJson,
+            source.summary AS summary,
+            coalesce(source.summaryQuality, 0.0) AS summaryQuality,
+            coalesce(source.summarySource, 'unknown') AS summarySource,
+            source.invariantsJson AS invariantsJson,
+            source.sideEffectsJson AS sideEffectsJson,
+            source.roleTagsJson AS roleTagsJson,
+            source.searchText AS searchText,
+            source.updatedAt AS updatedAt,
+            coalesce(source.external, false) AS external,
+            source.scipSymbol AS scipSymbol,
+            source.source AS source,
+            source.packageName AS packageName,
+            source.packageVersion AS packageVersion,
+            source.symbolStatus AS symbolStatus,
+            source.placeholderKind AS placeholderKind,
+            source.placeholderTarget AS placeholderTarget
+     ORDER BY symbolId`,
+    { repoId, excludedSymbolIds: excluded },
+  );
+  return rows.map((row) => ({
+    symbolId: row.symbolId,
+    repoId: row.repoId ?? repoId,
+    kind: row.kind ?? "unknown",
+    name: row.name ?? row.symbolId,
+    exported: ladybugDb.toBoolean(row.exported),
+    visibility: row.visibility,
+    language: canonicalizeLanguageId(row.language),
+    rangeStartLine: ladybugDb.toNumber(row.rangeStartLine ?? 0),
+    rangeStartCol: ladybugDb.toNumber(row.rangeStartCol ?? 0),
+    rangeEndLine: ladybugDb.toNumber(row.rangeEndLine ?? 0),
+    rangeEndCol: ladybugDb.toNumber(row.rangeEndCol ?? 0),
+    astFingerprint: row.astFingerprint ?? row.symbolId,
+    signatureJson: row.signatureJson,
+    summary: row.summary,
+    summaryQuality: ladybugDb.toNumber(row.summaryQuality ?? 0),
+    summarySource: row.summarySource ?? "unknown",
+    invariantsJson: row.invariantsJson,
+    sideEffectsJson: row.sideEffectsJson,
+    roleTagsJson: row.roleTagsJson,
+    searchText: row.searchText,
+    updatedAt: row.updatedAt,
+    external: ladybugDb.toBoolean(row.external),
+    scipSymbol: row.scipSymbol,
+    source: row.source,
+    packageName: row.packageName,
+    packageVersion: row.packageVersion,
+    symbolStatus: row.symbolStatus ?? "real",
+    placeholderKind: row.placeholderKind,
+    placeholderTarget: row.placeholderTarget,
+  }));
+}
+
 async function readEdgeTargetSymbolsForRepo(
   conn: Connection,
   repoId: string,
@@ -1277,6 +1397,31 @@ async function ensureEdgeEndpointSymbols(
            s.symbolStatus = row.symbolStatus,
            s.placeholderKind = row.placeholderKind,
            s.placeholderTarget = row.placeholderTarget`,
+      { rows: chunk },
+    );
+  }
+}
+
+async function ensureEdgeEndpointRepoLinks(
+  conn: Connection,
+  rows: AuxiliarySymbolRow[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  const chunkSize = 256;
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize).map(symbolRowToFallbackParams);
+    // Source endpoints selected from the active repo graph already had
+    // SYMBOL_IN_REPO membership. Preserve that membership when the shadow
+    // database was built from partial provider coverage and lacks the node.
+    await exec(
+      conn,
+      `UNWIND $rows AS row
+       MATCH (r:Repo {repoId: row.repoId})
+       MATCH (s:Symbol {symbolId: row.symbolId})
+       OPTIONAL MATCH (s)-[existing:SYMBOL_IN_REPO]->(r)
+       WITH s, r, existing
+       WHERE existing IS NULL
+       CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
       { rows: chunk },
     );
   }

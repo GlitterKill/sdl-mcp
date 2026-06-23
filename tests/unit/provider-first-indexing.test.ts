@@ -9408,6 +9408,141 @@ describe("provider-first indexing foundation", () => {
     }
   });
 
+  it("finalizes shadow DBs when active edge sources are absent from shadow", async () => {
+    const root = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-finalize-missing-source-"),
+    );
+    const activeDbPath = join(root, "active.lbug");
+    const shadowDbPath = join(root, "shadow.lbug");
+    const kuzu = await import("kuzu");
+    const activeDb = new kuzu.Database(activeDbPath);
+    const activeConn = new kuzu.Connection(activeDb);
+    const shadowDb = new kuzu.Database(shadowDbPath);
+    const shadowConn = new kuzu.Connection(shadowDb);
+    const repoId = "repo";
+    const fileId = "file-1";
+    const sourceSymbolId = "fallback-source";
+    const targetSymbolId = "unlinked-target";
+    const versionId = "version-1";
+    const now = "2026-05-26T00:00:00.000Z";
+
+    try {
+      await createBaseSchema(activeConn);
+      await createBaseSchema(shadowConn);
+      await seedRepoFileAndSourceSymbol(activeConn, {
+        repoId,
+        fileId,
+        sourceSymbolId,
+        now,
+      });
+      await dbExec(
+        shadowConn,
+        `MERGE (r:Repo {repoId: $repoId})
+         SET r.rootPath = "",
+             r.configJson = "{}",
+             r.createdAt = $now
+         MERGE (f:File {fileId: $fileId})
+         SET f.relPath = "src/index.ts",
+             f.contentHash = "hash",
+             f.language = "typescript",
+             f.byteSize = 10,
+             f.lastIndexedAt = $now,
+             f.directory = "src"
+         MERGE (f)-[:FILE_IN_REPO]->(r)`,
+        { repoId, fileId, now },
+      );
+      await dbExec(
+        activeConn,
+        `MATCH (r:Repo {repoId: $repoId})
+         MATCH (source:Symbol {symbolId: $sourceSymbolId})
+         MERGE (target:Symbol {symbolId: $targetSymbolId})
+         SET target.repoId = $repoId,
+             target.kind = "function",
+             target.name = "target",
+             target.exported = false,
+             target.visibility = "",
+             target.language = "typescript",
+             target.rangeStartLine = 5,
+             target.rangeStartCol = 0,
+             target.rangeEndLine = 6,
+             target.rangeEndCol = 1,
+             target.astFingerprint = $targetSymbolId,
+             target.signatureJson = "",
+             target.summary = "",
+             target.summaryQuality = 0.0,
+             target.summarySource = "unknown",
+             target.invariantsJson = "",
+             target.sideEffectsJson = "",
+             target.roleTagsJson = "",
+             target.searchText = "target",
+             target.updatedAt = $now,
+             target.external = false,
+             target.source = "treesitter",
+             target.packageName = "",
+             target.packageVersion = "",
+             target.scipSymbol = "",
+             target.symbolStatus = "real",
+             target.placeholderKind = "",
+             target.placeholderTarget = ""
+         MERGE (source)-[d:DEPENDS_ON {edgeType: "call"}]->(target)
+         SET d.weight = 1.0,
+             d.confidence = 0.9,
+             d.resolution = "provider-first-partial",
+             d.resolverId = "test",
+             d.resolutionPhase = "pass2",
+             d.provenance = "unit-test",
+             d.createdAt = $now
+         MERGE (v:Version {versionId: $versionId})
+         SET v.createdAt = $now,
+             v.reason = "test",
+             v.prevVersionHash = null,
+             v.versionHash = "hash"
+         MERGE (v)-[:VERSION_OF_REPO]->(r)`,
+        {
+          repoId,
+          sourceSymbolId,
+          targetSymbolId,
+          versionId,
+          now,
+        },
+      );
+      await shadowConn.close();
+      await shadowDb.close();
+
+      const summary = await finalizeProviderFirstShadowDb({
+        activeConn,
+        repoId,
+        versionId,
+        shadowDbPath,
+      });
+
+      assert.equal(summary.status, "finalized", summary.reasons.join("\n"));
+      assert.equal(summary.actualCounts?.symbols, 1);
+      assert.equal(summary.actualCounts?.edges, 1);
+
+      const finalizedDb = new kuzu.Database(shadowDbPath);
+      const finalizedConn = new kuzu.Connection(finalizedDb);
+      try {
+        const edgeRows = await queryAll<{ count: unknown }>(
+          finalizedConn,
+          `MATCH (:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(source:Symbol {symbolId: $sourceSymbolId})-[d:DEPENDS_ON]->(:Symbol {symbolId: $targetSymbolId})
+           RETURN count(d) AS count`,
+          { repoId, sourceSymbolId, targetSymbolId },
+        );
+        assert.equal(Number(edgeRows[0]?.count ?? 0), 1);
+      } finally {
+        await finalizedConn.close().catch(() => {});
+        await finalizedDb.close().catch(() => {});
+      }
+    } finally {
+      await activeConn.close().catch(() => {});
+      await activeDb.close().catch(() => {});
+      await shadowConn.close().catch(() => {});
+      await shadowDb.close().catch(() => {});
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("reports shadow activation as ineligible until shadow contains the final graph", () => {
     const activation = summarizeProviderFirstShadowActivationReadiness({
       shadowBuild: {

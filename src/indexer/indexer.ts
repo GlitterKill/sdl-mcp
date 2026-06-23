@@ -15,7 +15,11 @@ import {
   resolveUnresolvedImportEdges,
 } from "./edge-builder.js";
 import { resolveParserWorkerPoolSize } from "./parser.js";
-import { scanRepoForIndex, type ScanRepoForIndexResult } from "./scanner.js";
+import {
+  isScannedFileChanged,
+  scanRepoForIndex,
+  type ScanRepoForIndexResult,
+} from "./scanner.js";
 import {
   buildPreloadedFileSummarySymbolFactsFromRows,
   finalizeIndexing,
@@ -1906,12 +1910,9 @@ function filterProviderFirstFallbackScan(
 function providerFirstIncrementalChangedFiles(
   scan: ScanRepoForIndexResult,
 ): ScanRepoForIndexResult["files"] {
-  return scan.files.filter((file) => {
-    const existing = scan.existingByPath.get(file.path);
-    if (!existing?.lastIndexedAt) return true;
-    const lastIndexedMs = new Date(existing.lastIndexedAt).getTime();
-    return !Number.isFinite(lastIndexedMs) || file.mtime > lastIndexedMs;
-  });
+  return scan.files.filter((file) =>
+    isScannedFileChanged(file, scan.existingByPath.get(file.path)),
+  );
 }
 
 function filterProviderFirstIncrementalScan(

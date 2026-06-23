@@ -10,8 +10,24 @@ export interface ScanRepoForIndexResult {
   existingByPath: Map<string, ladybugDb.FileRow>;
   removedFiles: number;
   removedFileIds: string[];
-  /** True when incremental mode can short-circuit: no removed files and all scanned file mtimes match DB. */
+  /** True when incremental mode can short-circuit: no removed files and all scanned files match DB state. */
   allFilesUnchanged: boolean;
+}
+
+export function isScannedFileChanged(
+  file: ScannedFileMetadata,
+  existing?: ladybugDb.FileRow,
+): boolean {
+  if (!existing?.lastIndexedAt) return true;
+  if (existing.contentHash && existing.contentHash === file.contentHash) {
+    return false;
+  }
+  if (existing.contentHash && existing.contentHash !== file.contentHash) {
+    return true;
+  }
+
+  const lastIndexedMs = new Date(existing.lastIndexedAt).getTime();
+  return !Number.isFinite(lastIndexedMs) || file.mtime > lastIndexedMs;
 }
 
 export async function scanRepoForIndex(params: {
@@ -58,15 +74,12 @@ export async function scanRepoForIndex(params: {
     });
   }
 
-  // Check if all files have unchanged mtimes (enables fast early-exit in indexer)
+  // Prefer content hashes; mtime remains a fallback for old file rows without hashes.
   const allFilesUnchanged =
     removedFiles === 0 &&
-    files.every((f) => {
-      const existing = existingByPath.get(f.path);
-      if (!existing?.lastIndexedAt) return false;
-      const lastIndexedMs = new Date(existing.lastIndexedAt).getTime();
-      return f.mtime <= lastIndexedMs;
-    });
+    files.every((file) =>
+      !isScannedFileChanged(file, existingByPath.get(file.path)),
+    );
 
   return {
     files,
