@@ -1,6 +1,6 @@
 {
   "name": "sdl-mcp-watchman-linux-x64",
-  "version": "0.11.8",
+  "version": "0.11.9",
   "description": "Watchman binary for SDL-MCP - Linux x64",
   "license": "SEE LICENSE IN LICENSE",
   "os": [

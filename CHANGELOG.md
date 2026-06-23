@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.9] - 2026-06-23
+
+### Added
+
+- **Setup wizard**: Added guided `sdl-mcp init` and postinstall setup flows, including the `create-sdl-mcp` wrapper and agent configuration checks.
+
+### Changed
+
+- **Indexing and retrieval workflows**: Refined SDL setup, indexing, retrieval, and token-meter docs/configuration for the updated workflow surfaces.
+- **Watchman startup**: Extracted the startup probe helper and tightened provider coverage around Watchman startup behavior.
+- **Agent guidance**: Refactored repository AGENTS guidance, root agent file ignores, and repo ID handling across the root, Codex, Claude, native, source, and fixture surfaces.
+
+### Fixed
+
+- **Provider-first shadow finalization**: Fixed missing edge-source handling so provider-first shadow finalization preserves expected dependency relationships.
+- **Release workflow surfaces**: Tracked required root agent instructions plus Codex/Claude SessionStart and SDL Explorer agent files so CI docs workflow checks use the same surfaces as local release gates.
+
+_11 commits from 1 contributor_
+
 ## [0.11.8] - 2026-06-21
 
 ### Added
@@ -21,9 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Runtime and CI stability**: Fixed Node runtime code execution with stdin, CI runtime artifacts, PHP CRLF call handling, CI parity, provider-first test gates, and nightly benchmark matrix isolation.
 - **Index and retrieval correctness**: Preferred expected-name matches in source call proof, repaired missing file summaries during no-op recovery, aligned gateway tests with the current action set, and excluded control-plane tools from savings rankings.
-- **Release workflow surfaces**: Tracked required root agent instructions plus Codex/Claude SessionStart and SDL Explorer agent files so CI docs workflow checks use the same surfaces as local release gates.
 
-_31 commits from 2 contributors_
+_27 commits from 2 contributors_
 
 ## [0.11.7] - 2026-06-17
 
