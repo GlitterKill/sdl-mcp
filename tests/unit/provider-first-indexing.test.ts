@@ -45,6 +45,7 @@ import {
 } from "../../dist/indexer/indexer.js";
 import { createProviderSymbolId } from "../../dist/indexer/provider-first/ids.js";
 import {
+  executeProviderFirstScipIncremental,
   executeProviderFirstScipFull,
   resolveProviderFirstExecutionPlan,
 } from "../../dist/indexer/provider-first/executor.js";
@@ -6230,6 +6231,168 @@ describe("provider-first indexing foundation", () => {
       assert.equal(result.summary.filesProcessed, 1);
       assert.equal(result.rows.files.length, 1);
       assert.equal(result.rows.symbols.length, 1);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("uses only scoped generated SCIP indexes for incremental provider collection", async () => {
+    const repoRoot = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-incremental-scope-"),
+    );
+    try {
+      const scopedDir = join(repoRoot, ".sdl-mcp", "provider-first-incremental");
+      mkdirSync(join(repoRoot, "src"), { recursive: true });
+      mkdirSync(scopedDir, { recursive: true });
+      writeFileSync(
+        join(repoRoot, "src", "keep.ts"),
+        ["export function fresh() {", "  return 1;", "}"].join("\n"),
+        "utf8",
+      );
+
+      const staleSymbol =
+        "scip-typescript npm fixture 1.0.0 src/keep.ts/stale().";
+      const freshSymbol =
+        "scip-typescript npm fixture 1.0.0 src/keep.ts/fresh().";
+      await writeTestScipIndex(join(repoRoot, "index.scip"), {
+        metadata: {
+          toolName: "scip-fixture",
+          toolVersion: "1.0.0",
+        },
+        documents: [
+          {
+            language: "typescript",
+            relativePath: "src/keep.ts",
+            occurrences: [
+              {
+                range: [0, 16, 21],
+                enclosingRange: [0, 0, 2, 1],
+                symbol: staleSymbol,
+                symbolRoles: 1,
+              },
+            ],
+            symbols: [{ symbol: staleSymbol, kind: 12, displayName: "stale" }],
+          },
+        ],
+      });
+      const scopedRelPath = ".sdl-mcp/provider-first-incremental/run.scip";
+      const scopedPath = join(scopedDir, "run.scip");
+      await writeTestScipIndex(scopedPath, {
+        metadata: {
+          toolName: "scip-fixture",
+          toolVersion: "1.0.0",
+        },
+        documents: [
+          {
+            language: "typescript",
+            relativePath: "src/keep.ts",
+            occurrences: [
+              {
+                range: [0, 16, 21],
+                enclosingRange: [0, 0, 2, 1],
+                symbol: freshSymbol,
+                symbolRoles: 1,
+              },
+            ],
+            symbols: [{ symbol: freshSymbol, kind: 12, displayName: "fresh" }],
+          },
+        ],
+      });
+
+      const result = await executeProviderFirstScipIncremental({
+        repoId: "repo",
+        repoRoot,
+        scannedPaths: ["src/keep.ts"],
+        generatedIndexes: [
+          {
+            path: scopedRelPath,
+            label: "scoped-scip",
+            sizeBytes: readFileSync(scopedPath).byteLength,
+            mode: "merged",
+          },
+        ],
+        config: {
+          scip: ScipConfigSchema.parse({
+            enabled: true,
+            generator: { enabled: true },
+            indexes: [{ path: "index.scip", label: "scip-io" }],
+          }),
+          indexing: IndexingConfigSchema.parse({ pipeline: "providerFirst" }),
+          repos: [],
+        } as AppConfig,
+      });
+
+      assert.deepEqual(
+        result.facts.symbols.map((symbol) => symbol.name),
+        ["fresh"],
+      );
+      assert.deepEqual(
+        result.rows.symbols.map((symbol) => symbol.name),
+        ["fresh"],
+      );
+      assert.equal(result.summary.filesProcessed, 1);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not use configured SCIP indexes when incremental generation has no accepted output", async () => {
+    const repoRoot = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-incremental-empty-"),
+    );
+    try {
+      mkdirSync(join(repoRoot, "src"), { recursive: true });
+      writeFileSync(
+        join(repoRoot, "src", "keep.ts"),
+        ["export function stale() {", "  return 1;", "}"].join("\n"),
+        "utf8",
+      );
+
+      const staleSymbol =
+        "scip-typescript npm fixture 1.0.0 src/keep.ts/stale().";
+      await writeTestScipIndex(join(repoRoot, "index.scip"), {
+        metadata: {
+          toolName: "scip-fixture",
+          toolVersion: "1.0.0",
+        },
+        documents: [
+          {
+            language: "typescript",
+            relativePath: "src/keep.ts",
+            occurrences: [
+              {
+                range: [0, 16, 21],
+                enclosingRange: [0, 0, 2, 1],
+                symbol: staleSymbol,
+                symbolRoles: 1,
+              },
+            ],
+            symbols: [{ symbol: staleSymbol, kind: 12, displayName: "stale" }],
+          },
+        ],
+      });
+
+      await assert.rejects(
+        () =>
+          executeProviderFirstScipIncremental({
+            repoId: "repo",
+            repoRoot,
+            scannedPaths: ["src/keep.ts"],
+            generatedIndexes: [],
+            config: {
+              scip: ScipConfigSchema.parse({
+                enabled: true,
+                generator: { enabled: true },
+                indexes: [{ path: "index.scip", label: "scip-io" }],
+              }),
+              indexing: IndexingConfigSchema.parse({
+                pipeline: "providerFirst",
+              }),
+              repos: [],
+            } as AppConfig,
+          }),
+        /Provider-first SCIP execution produced no file facts/,
+      );
     } finally {
       rmSync(repoRoot, { recursive: true, force: true });
     }

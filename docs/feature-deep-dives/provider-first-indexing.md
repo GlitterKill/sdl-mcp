@@ -160,7 +160,7 @@ Provider runs are persisted to `SemanticProviderRun`. Provider diagnostics and g
 
 Provider-first incremental refreshes start with the normal repository scan so removed files and unchanged files are still detected against LadybugDB metadata. Only changed files enter provider collection:
 
-- SCIP incremental writes a temporary newline manifest of changed repo-relative paths and runs `scip-io index --files-from <manifest> --output <temp.scip>`. The generated temp index is decoded for the current run and does not update the full `index.scip` generator cache.
+- SCIP incremental writes a temporary newline manifest of changed repo-relative paths and runs `scip-io index --files-from <manifest> --output <temp.scip>`. Only that generated temp index is decoded for the current run; configured root SCIP indexes are ignored so stale provider ranges cannot re-enter changed-file materialization. The temp output does not update the full `index.scip` generator cache.
 - LSP incremental passes only changed scanned files into document-symbol collection. Unchanged files keep their existing graph rows.
 - Provider-covered changed files are materialized into the active graph with existing symbols for those files deleted first, known-fresh writers enabled, provider edges written, and repo-wide external-symbol pruning disabled.
 - Changed files that are uncovered or provider-unusable route through the same legacy incremental fallback path. Users with `indexing.pipeline: "legacy"` keep the legacy incremental process.

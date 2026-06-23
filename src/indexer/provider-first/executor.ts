@@ -291,6 +291,7 @@ interface ExecuteProviderFirstScipFullParams {
   repoRoot: string;
   config: AppConfig;
   executorKind?: ProviderFirstExecutorKind;
+  generatedIndexesOnly?: boolean;
   disableProviderCollectionCache?: boolean;
   generatedIndexes?: readonly ScipGeneratedIndexDiagnostic[];
   generatorFailures?: readonly ScipFailureDiagnostic[];
@@ -503,6 +504,8 @@ export async function executeProviderFirstScipFull(
         await collectScipProviderFacts({
           ...params,
           generationId,
+          generatedIndexesOnly:
+            params.generatedIndexesOnly ?? executorKind === "scipIncremental",
         });
 
   if (collected.facts.files.length === 0) {
@@ -603,6 +606,7 @@ export async function executeProviderFirstScipIncremental(
   return executeProviderFirstScipFull({
     ...params,
     executorKind: "scipIncremental",
+    generatedIndexesOnly: true,
     disableProviderCollectionCache: true,
   });
 }
@@ -1483,6 +1487,7 @@ async function collectScipProviderFacts(params: {
   config: AppConfig;
   generationId: string;
   generatedIndexes?: readonly ScipGeneratedIndexDiagnostic[];
+  generatedIndexesOnly?: boolean;
   generatorFailures?: readonly ScipFailureDiagnostic[];
   scannedPaths?: readonly string[];
   onProgress?: ExecuteProviderFirstScipFullParams["onProgress"];
@@ -1502,7 +1507,9 @@ async function collectScipProviderFacts(params: {
   const combinedFacts = emptyProviderFactSet();
   const failures = [...(params.generatorFailures ?? [])];
   const generatedIndexes = [...(params.generatedIndexes ?? [])];
-  const entries = resolveEffectiveScipEntries(scip, generatedIndexes);
+  const entries = resolveEffectiveScipEntries(scip, generatedIndexes, {
+    generatedOnly: params.generatedIndexesOnly,
+  });
   let currentIndex = 0;
 
   for (const entry of entries) {
@@ -1807,8 +1814,15 @@ async function loadExternalSymbols(
 function resolveEffectiveScipEntries(
   scip: ScipConfig,
   generatedIndexes: readonly ScipGeneratedIndexDiagnostic[],
+  options: { generatedOnly?: boolean } = {},
 ): ScipConfig["indexes"] {
   const acceptedGenerated = generatedIndexes.filter((index) => !index.skipped);
+  if (options.generatedOnly) {
+    return acceptedGenerated.map((generated) => ({
+      path: generated.path,
+      label: generated.label,
+    }));
+  }
   const hasSplitGeneratedIndexes = acceptedGenerated.some(
     (index) => index.mode === "split",
   );
