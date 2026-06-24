@@ -39,6 +39,33 @@ describe("init agent enforcement", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it("bootstraps root agent docs from templates", async () => {
+    const { ensureBaselineEnforcementAssets } =
+      await import("../../dist/cli/commands/enforcement-bootstrap.js");
+
+    const touched = ensureBaselineEnforcementAssets(tempDir, "test-repo");
+
+    assert.deepStrictEqual(touched, [
+      join(tempDir, "SDL.md"),
+      join(tempDir, "AGENTS.md"),
+      join(tempDir, "CLAUDE.md"),
+    ]);
+    assert.strictEqual(
+      readFileSync(join(tempDir, "AGENTS.md"), "utf8"),
+      readFileSync(join("templates", "AGENTS.md.template"), "utf8").replaceAll(
+        "{{REPO_ID}}",
+        "test-repo",
+      ),
+    );
+    assert.strictEqual(
+      readFileSync(join(tempDir, "CLAUDE.md"), "utf8"),
+      readFileSync(join("templates", "CLAUDE.md.template"), "utf8").replaceAll(
+        "{{REPO_ID}}",
+        "test-repo",
+      ),
+    );
+  });
+
   it("writes runtime and code-mode config when enforceAgentTools is enabled", async () => {
     const configPath = join(tempDir, "sdlmcp.config.json");
     const { initCommand } = await import("../../dist/cli/commands/init.js");

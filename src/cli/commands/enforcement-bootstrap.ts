@@ -13,6 +13,11 @@ const SDL_LINK_LINE =
 // link is always restored.
 const SDL_LINK_REGEX = /\]\(\.\/SDL\.md\)/;
 
+const ROOT_AGENT_DOCS = [
+  ["AGENTS.md", "AGENTS.md.template"],
+  ["CLAUDE.md", "CLAUDE.md.template"],
+] as const;
+
 const CLIENT_MD_FILES = [
   "CLAUDE.md",
   "AGENTS.md",
@@ -48,7 +53,7 @@ function renderTemplateText(
 ): string {
   let rendered = readTemplateText(name);
   for (const [key, value] of Object.entries(values)) {
-    rendered = rendered.replaceAll(`{{${key}}}`, value);
+    rendered = rendered.replaceAll("{{" + key + "}}", value);
   }
   return rendered;
 }
@@ -85,10 +90,9 @@ function appendSdlLinkIfMissing(path: string): boolean {
  * Ensure the baseline SDL-MCP enforcement assets are present in a repo root.
  *
  * - Always drops `SDL.md` (from `templates/SDL.md`) if missing.
- * - If any recognised client MD file already exists in the root, ensures the
- *   SDL.md markdown link is present (appending if absent).
- * - Otherwise creates a new `AGENTS.md` from `templates/AGENTS.md.template`
- *   (the empty-repo / no-profile fallback).
+ * - Creates missing root `AGENTS.md` / `CLAUDE.md` docs from templates.
+ * - If any recognized root agent doc already exists, ensures the SDL.md
+ *   markdown link is present (appending if absent).
  *
  * Returns the list of absolute paths written or modified.
  */
@@ -103,24 +107,23 @@ export function ensureBaselineEnforcementAssets(
     touched.push(sdlPath);
   }
 
-  const existingClientMd = CLIENT_MD_FILES.filter((name) =>
-    existsSync(join(repoRoot, name)),
+  const createdRootDocs = new Set<string>();
+  for (const [name, template] of ROOT_AGENT_DOCS) {
+    const p = join(repoRoot, name);
+    if (writeIfMissing(p, renderTemplateText(template, { REPO_ID: repoId }))) {
+      touched.push(p);
+      createdRootDocs.add(name);
+    }
+  }
+
+  const existingClientMd = CLIENT_MD_FILES.filter(
+    (name) => !createdRootDocs.has(name) && existsSync(join(repoRoot, name)),
   );
 
-  if (existingClientMd.length === 0) {
-    const agentsPath = join(repoRoot, "AGENTS.md");
-    const agentsContent = renderTemplateText("AGENTS.md.template", {
-      REPO_ID: repoId,
-    });
-    if (writeIfMissing(agentsPath, agentsContent)) {
-      touched.push(agentsPath);
-    }
-  } else {
-    for (const name of existingClientMd) {
-      const p = join(repoRoot, name);
-      if (appendSdlLinkIfMissing(p)) {
-        touched.push(p);
-      }
+  for (const name of existingClientMd) {
+    const p = join(repoRoot, name);
+    if (appendSdlLinkIfMissing(p)) {
+      touched.push(p);
     }
   }
 

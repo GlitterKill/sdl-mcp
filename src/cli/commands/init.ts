@@ -349,7 +349,10 @@ export function detectLanguagesFromRepo(repoRoot: string): LanguageType[] {
 }
 
 export function isRepoRoot(candidate: string): boolean {
-  return existsSync(join(candidate, ".git")) || existsSync(join(candidate, "package.json"));
+  return (
+    existsSync(join(candidate, ".git")) ||
+    existsSync(join(candidate, "package.json"))
+  );
 }
 
 export function findRepoRoot(startPath: string): string | undefined {
@@ -389,7 +392,10 @@ function isClientType(agent: string): agent is ClientType {
   return VALID_CLIENTS.includes(agent as ClientType);
 }
 
-function detectedAgentName(detection: { name: string; templateClient?: string }): string {
+function detectedAgentName(detection: {
+  name: string;
+  templateClient?: string;
+}): string {
   return detection.templateClient ?? detection.name;
 }
 
@@ -436,7 +442,14 @@ function sanitizeRepoId(raw: string): string {
 }
 
 function countSourceFiles(repoRoot: string): number {
-  const skipDirs = new Set([".git", "node_modules", "dist", "build", "target", "coverage"]);
+  const skipDirs = new Set([
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    "target",
+    "coverage",
+  ]);
   const stack = [repoRoot];
   let count = 0;
   while (stack.length > 0 && count <= 100_000) {
@@ -1593,25 +1606,34 @@ function buildAgentInstructionAssets(
   repoId: string,
   clients: readonly ClientType[],
 ): GeneratedAsset[] {
-  const markdownTemplateByClient: Record<ClientType, string> = {
+  const markdownTemplateByClient: Partial<Record<ClientType, string>> = {
     "claude-code": "CLAUDE.md.template",
     codex: "CODEX.md.template",
     gemini: "GEMINI.md.template",
     opencode: "OPENCODE.md.template",
   };
-  const markdownNameByClient: Record<ClientType, string> = {
+  const markdownNameByClient: Partial<Record<ClientType, string>> = {
     "claude-code": "CLAUDE.md",
     codex: "CODEX.md",
     gemini: "GEMINI.md",
     opencode: "OPENCODE.md",
   };
 
-  return clients.map((client) => ({
-    path: join(repoRoot, markdownNameByClient[client]),
-    content: renderTextTemplate(markdownTemplateByClient[client], {
-      REPO_ID: repoId,
-    }),
-  }));
+  return clients.flatMap((client) => {
+    const templateName = markdownTemplateByClient[client];
+    const markdownName = markdownNameByClient[client];
+    if (!templateName || !markdownName) {
+      return [];
+    }
+    return [
+      {
+        path: join(repoRoot, markdownName),
+        content: renderTextTemplate(templateName, {
+          REPO_ID: repoId,
+        }),
+      },
+    ];
+  });
 }
 
 function buildEnforcementAssets(
@@ -1627,7 +1649,9 @@ function buildEnforcementAssets(
     },
     {
       path: join(repoRoot, "AGENTS.md"),
-      content: renderTextTemplate("AGENTS.md.template", { REPO_ID: repoId }),
+      content: renderTextTemplate("AGENTS.md.template", {
+        REPO_ID: repoId,
+      }),
     },
   ];
 
@@ -1635,26 +1659,30 @@ function buildEnforcementAssets(
     return assets;
   }
 
-  const markdownTemplateByClient: Record<ClientType, string> = {
+  const markdownTemplateByClient: Partial<Record<ClientType, string>> = {
     "claude-code": "CLAUDE.md.template",
     codex: "CODEX.md.template",
     gemini: "GEMINI.md.template",
     opencode: "OPENCODE.md.template",
   };
 
-  const markdownNameByClient: Record<ClientType, string> = {
+  const markdownNameByClient: Partial<Record<ClientType, string>> = {
     "claude-code": "CLAUDE.md",
     codex: "CODEX.md",
     gemini: "GEMINI.md",
     opencode: "OPENCODE.md",
   };
 
-  assets.push({
-    path: join(repoRoot, markdownNameByClient[client]),
-    content: renderTextTemplate(markdownTemplateByClient[client], {
-      REPO_ID: repoId,
-    }),
-  });
+  const templateName = markdownTemplateByClient[client];
+  const markdownName = markdownNameByClient[client];
+  if (templateName && markdownName) {
+    assets.push({
+      path: join(repoRoot, markdownName),
+      content: renderTextTemplate(templateName, {
+        REPO_ID: repoId,
+      }),
+    });
+  }
 
   if (client === "claude-code") {
     const graphDbPath = defaultGraphDbPath(configPath);
@@ -1735,7 +1763,10 @@ function buildEnforcementAssets(
 
 export function buildGlobalResourceAssets(
   result: SetupWizardResult,
-  detections: readonly { name: string; templateClient?: string }[] = detectInstalledClients(),
+  detections: readonly {
+    name: string;
+    templateClient?: string;
+  }[] = detectInstalledClients(),
 ): GeneratedAsset[] {
   const root = globalResourceRoot();
   const repoId = "global";
@@ -1778,7 +1809,9 @@ function writeGlobalInstallResources(
   const assets = buildGlobalResourceAssets(result);
   const root = globalResourceRoot();
   if (options.dryRun) {
-    console.log("Global install selected. No repository config will be written.");
+    console.log(
+      "Global install selected. No repository config will be written.",
+    );
     console.log(`Global resources directory: ${normalizePath(root)}`);
     console.log("Resources that would be created:");
     for (const asset of assets) {
@@ -1852,7 +1885,10 @@ export type ClientDetection = {
   templateClient?: ClientType;
 };
 
-function packageJsonHasDependency(packageJsonPath: string, dependencyName: string): boolean {
+function packageJsonHasDependency(
+  packageJsonPath: string,
+  dependencyName: string,
+): boolean {
   try {
     const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as {
       dependencies?: Record<string, string>;
@@ -1860,7 +1896,7 @@ function packageJsonHasDependency(packageJsonPath: string, dependencyName: strin
     };
     return Boolean(
       packageJson.dependencies?.[dependencyName] ||
-        packageJson.devDependencies?.[dependencyName],
+      packageJson.devDependencies?.[dependencyName],
     );
   } catch {
     return false;
@@ -1871,11 +1907,14 @@ export function detectInstalledClients(): ClientDetection[] {
   // USERPROFILE is Windows-only — fall back to homedir() so detection works on macOS/Linux.
   const userProfile = process.env.USERPROFILE ?? homedir();
   const appData = process.env.APPDATA ?? "";
-  const configHome = process.env.XDG_CONFIG_HOME?.trim() || join(userProfile, ".config");
+  const configHome =
+    process.env.XDG_CONFIG_HOME?.trim() || join(userProfile, ".config");
   const cwd = process.cwd();
-  const codexHome = process.env.CODEX_HOME?.trim() || join(userProfile, ".codex");
+  const codexHome =
+    process.env.CODEX_HOME?.trim() || join(userProfile, ".codex");
   const vibeHome = process.env.VIBE_HOME?.trim() || join(userProfile, ".vibe");
-  const hermesHome = process.env.HERMES_HOME?.trim() || join(userProfile, ".hermes");
+  const hermesHome =
+    process.env.HERMES_HOME?.trim() || join(userProfile, ".hermes");
   const autohandHome =
     process.env.AUTOHAND_HOME?.trim() || join(userProfile, ".autohand");
   const zedFlatpakConfigHome = process.env.FLATPAK_XDG_CONFIG_HOME?.trim();
@@ -1907,7 +1946,10 @@ export function detectInstalledClients(): ClientDetection[] {
     { name: "adal", candidates: [join(userProfile, ".adal")] },
     { name: "aider-desk", candidates: [join(userProfile, ".aider-desk")] },
     { name: "amp", candidates: [join(configHome, "amp")] },
-    { name: "antigravity", candidates: [join(userProfile, ".gemini", "antigravity")] },
+    {
+      name: "antigravity",
+      candidates: [join(userProfile, ".gemini", "antigravity")],
+    },
     {
       name: "antigravity-cli",
       candidates: [join(userProfile, ".gemini", "antigravity-cli")],
@@ -1925,7 +1967,10 @@ export function detectInstalledClients(): ClientDetection[] {
       candidates: claudeCandidates,
     },
     { name: "cline", candidates: [join(userProfile, ".cline")] },
-    { name: "codearts-agent", candidates: [join(userProfile, ".codeartsdoer")] },
+    {
+      name: "codearts-agent",
+      candidates: [join(userProfile, ".codeartsdoer")],
+    },
     {
       name: "codebuddy",
       candidates: [join(cwd, ".codebuddy"), join(userProfile, ".codebuddy")],
@@ -1976,7 +2021,10 @@ export function detectInstalledClients(): ClientDetection[] {
     { name: "hermes-agent", candidates: [hermesHome] },
     { name: "iflow-cli", candidates: [join(userProfile, ".iflow")] },
     { name: "inference-sh", candidates: [join(userProfile, ".inferencesh")] },
-    { name: "jazz", candidates: [join(userProfile, ".jazz"), join(cwd, ".jazz")] },
+    {
+      name: "jazz",
+      candidates: [join(userProfile, ".jazz"), join(cwd, ".jazz")],
+    },
     { name: "junie", candidates: [join(userProfile, ".junie")] },
     { name: "kilo", candidates: [join(userProfile, ".kilocode")] },
     {
@@ -2031,7 +2079,10 @@ export function detectInstalledClients(): ClientDetection[] {
     { name: "trae", candidates: [join(userProfile, ".trae")] },
     { name: "trae-cn", candidates: [join(userProfile, ".trae-cn")] },
     { name: "warp", candidates: [join(userProfile, ".warp")] },
-    { name: "windsurf", candidates: [join(userProfile, ".codeium", "windsurf")] },
+    {
+      name: "windsurf",
+      candidates: [join(userProfile, ".codeium", "windsurf")],
+    },
     {
       name: "zed",
       candidates: [
@@ -2122,16 +2173,22 @@ export async function initCommand(options: InitOptions): Promise<void> {
     process.stdin.isTTY &&
     process.stdout.isTTY
   ) {
-    const rawConfig = JSON.parse(readFileSync(initialConfigPath, "utf-8")) as Record<string, unknown>;
+    const rawConfig = JSON.parse(
+      readFileSync(initialConfigPath, "utf-8"),
+    ) as Record<string, unknown>;
     const recommendations = summarizeMissingConfigKeys(rawConfig);
     if (recommendations.length === 0) {
-      console.log(`Configuration already exists and is current: ${initialConfigPath}`);
+      console.log(
+        `Configuration already exists and is current: ${initialConfigPath}`,
+      );
       return;
     }
     console.log(`Configuration already exists: ${initialConfigPath}`);
     console.log("Missing recommended setup keys:");
     for (const item of recommendations) {
-      console.log(`  - ${item.path}: ${JSON.stringify(item.recommendedValue)} (${item.reason})`);
+      console.log(
+        `  - ${item.path}: ${JSON.stringify(item.recommendedValue)} (${item.reason})`,
+      );
     }
     if (!(await confirm("Apply missing recommendations?", false))) {
       console.log("Existing configuration left unchanged.");
@@ -2144,7 +2201,12 @@ export async function initCommand(options: InitOptions): Promise<void> {
   }
 
   let wizardResult: SetupWizardResult | undefined;
-  if (shouldRunSetupWizard(options, Boolean(process.stdin.isTTY && process.stdout.isTTY))) {
+  if (
+    shouldRunSetupWizard(
+      options,
+      Boolean(process.stdin.isTTY && process.stdout.isTTY),
+    )
+  ) {
     const defaultRepoRoot = detectInitialRepoRoot(options);
     const detectedAgents = detectInstalledClients().map(
       (client) => client.templateClient ?? client.name,
@@ -2199,16 +2261,23 @@ export async function initCommand(options: InitOptions): Promise<void> {
 
   if (existsSync(configPath) && !options.force && !options.dryRun) {
     if (process.stdin.isTTY && process.stdout.isTTY) {
-      const rawConfig = JSON.parse(readFileSync(configPath, "utf-8")) as Record<string, unknown>;
+      const rawConfig = JSON.parse(readFileSync(configPath, "utf-8")) as Record<
+        string,
+        unknown
+      >;
       const recommendations = summarizeMissingConfigKeys(rawConfig);
       if (recommendations.length === 0) {
-        console.log(`Configuration already exists and is current: ${configPath}`);
+        console.log(
+          `Configuration already exists and is current: ${configPath}`,
+        );
         return;
       }
       console.log(`Configuration already exists: ${configPath}`);
       console.log("Missing recommended setup keys:");
       for (const item of recommendations) {
-        console.log(`  - ${item.path}: ${JSON.stringify(item.recommendedValue)} (${item.reason})`);
+        console.log(
+          `  - ${item.path}: ${JSON.stringify(item.recommendedValue)} (${item.reason})`,
+        );
       }
       if (!(await confirm("Apply missing recommendations?", false))) {
         console.log("Existing configuration left unchanged.");
@@ -2314,7 +2383,10 @@ export async function initCommand(options: InitOptions): Promise<void> {
         enabled: true,
         pageRank: { enabled: true },
         kCore: { enabled: true },
-        louvain: { enabled: true, maxCallEdges: DEFAULT_LOUVAIN_MAX_CALL_EDGES },
+        louvain: {
+          enabled: true,
+          maxCallEdges: DEFAULT_LOUVAIN_MAX_CALL_EDGES,
+        },
         workerTimeoutMs: 120_000,
       },
     },
@@ -2407,25 +2479,31 @@ export async function initCommand(options: InitOptions): Promise<void> {
   const detections = detectInstalledClients();
   const selectedAgents: SetupWizardAgent[] =
     options.client || options.agents?.length || wizardResult
-      ? resolveSelectedAgents(
-          options,
-          detections.map(detectedAgentName),
-        )
+      ? resolveSelectedAgents(options, detections.map(detectedAgentName))
       : [];
   const selectedClients = selectedAgents.filter(isClientType);
 
-  // SDL.md + baseline AGENTS.md are dropped regardless of enforcement so the
-  // optimized-tool-use playbook is always present before any agent touches
-  // the repo. Client-specific hooks/settings only ship when enforcement is on.
-  const baseGeneratedAssets = buildEnforcementAssets(repoRoot, repoId, configPath);
+  // SDL.md and AGENTS.md are the baseline playbook. Client-specific
+  // hooks/settings and root docs are generated from templates when selected.
+  const baseGeneratedAssets = buildEnforcementAssets(
+    repoRoot,
+    repoId,
+    configPath,
+  );
   const agentInstructionAssets = buildAgentInstructionAssets(
     repoRoot,
     repoId,
     selectedClients,
   );
+  const baseGeneratedAssetCount = baseGeneratedAssets.length;
+  const agentInstructionPaths = new Set(
+    agentInstructionAssets.map((asset) => asset.path),
+  );
   const enforcementAssets = options.enforceAgentTools
     ? selectedClients.flatMap((client) =>
-        buildEnforcementAssets(repoRoot, repoId, configPath, client).slice(3),
+        buildEnforcementAssets(repoRoot, repoId, configPath, client)
+          .slice(baseGeneratedAssetCount)
+          .filter((asset) => !agentInstructionPaths.has(asset.path)),
       )
     : [];
   const generatedAssets = [

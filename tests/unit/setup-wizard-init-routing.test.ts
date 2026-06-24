@@ -110,7 +110,7 @@ test("global resource rich client configs are created when selected but not dete
     repoPath: "",
     globalInstall: true,
     languages: ["ts"],
-    agents: ["codex"],
+    agents: ["claude-code", "codex"],
     languageProviders: true,
     semanticTier: "code",
     repoSizeProfile: "small",
@@ -121,6 +121,8 @@ test("global resource rich client configs are created when selected but not dete
   }, []).map((asset) => asset.path);
 
   assert.ok(paths.includes(join(root, "configs", "codex-mcp-config.json")));
+  assert.ok(paths.some((path) => path.endsWith("AGENTS.md")));
+  assert.ok(paths.some((path) => path.endsWith("CLAUDE.md")));
 });
 
 test("global setup wizard asks for embeddings before writing resources", () => {
@@ -152,7 +154,8 @@ test("init language validation includes supported provider languages only", asyn
 
   assert.ok(VALID_LANGUAGES.includes("haskell"));
   assert.ok(VALID_LANGUAGES.includes("fsharp"));
-  assert.equal(VALID_LANGUAGES.includes("zig"), false);
+  assert.ok(VALID_LANGUAGES.includes("zig"));
+  assert.equal(VALID_LANGUAGES.includes("not-a-language"), false);
 });
 
 test("setup wizard labels JSX variants by file extension", () => {
@@ -181,12 +184,14 @@ test("generic agent dry-run assets go to user config snippets without duplicatin
         "--repo-path",
         repo,
         "--agents",
-        "codex,promptscript",
+        "claude-code,codex,promptscript",
       ],
       { cwd: process.cwd(), encoding: "utf8" },
     );
 
     assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /AGENTS\.md/);
+    assert.match(result.stdout, /CLAUDE\.md/);
     assert.match(result.stdout, /CODEX\.md/);
     assert.match(result.stdout, /promptscript-mcp-config\.json/);
     assert.doesNotMatch(result.stdout, /configs\/codex-mcp-config\.json/);

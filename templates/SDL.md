@@ -416,7 +416,7 @@ Before the final response:
 - Starting with native `Read`, `Grep`, shell search, or repo-wide listing instead of SDL discovery (`sdl.context`, `symbolSearch`, or `slice.build`).
 - Calling `codeNeedWindow` before `symbolGetCard`, `sliceBuild`, `codeSkeleton`, and `codeHotPath`.
 - Using `runtimeExecute` to print indexed source.
-- Using `sdl.file` `sourceWindow` to read arbitrary source. It is only for inspecting files inside an edit preview plan and requires `planHandle`. Use `codeNeedWindow` for raw indexed source.
+- Do not use `sdl.file` `sourceWindow` to read arbitrary source. It is only for inspecting files inside an edit preview plan and requires `planHandle`. Use `codeNeedWindow` for raw indexed source.
 - Running `index.refresh` every session or defaulting to full refresh.
 - Reading whole non-indexed files when `search`, `jsonPath`, or bounded ranges would answer.
 - Writing indexed source through native edits instead of `symbol.edit`, symbol edit preview/apply, or AST-aware `searchEditPreview`.
