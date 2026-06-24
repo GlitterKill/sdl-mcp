@@ -82,7 +82,8 @@ export type SupportedLanguage =
   | "fortran"
   | "haskell"
   | "julia"
-  | "zig";
+  | "zig"
+  | "gleam";
 
 const parserCache = new Map<SupportedLanguage, Parser | null>();
 const languageCache = new Map<SupportedLanguage, Parser.Language | null>();
@@ -122,6 +123,7 @@ const GRAMMAR_PACKAGES: Record<
   haskell: { pkg: "tree-sitter-haskell" },
   julia: { pkg: "tree-sitter-julia" },
   zig: { pkg: "tree-sitter-zig" },
+  gleam: { pkg: "tree-sitter-gleam" },
 };
 
 function getLanguageModule(

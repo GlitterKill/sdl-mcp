@@ -74,6 +74,7 @@ export const LanguageSchema = z.enum([
   "haskell",
   "julia",
   "zig",
+  "gleam",
 ]);
 
 export const MemoryConfigSchema = z.object({

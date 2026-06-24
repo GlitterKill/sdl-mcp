@@ -73,6 +73,7 @@ const CANONICAL_LANGUAGE_IDS_BY_CONFIG = new Map<string, string>([
   ["lhs", "haskell"],
   ["jl", "julia"],
   ["zig", "zig"],
+  ["gleam", "gleam"],
 ]);
 
 const PROVIDER_SCAN_COMPANION_EXTENSIONS = new Map<string, readonly string[]>([

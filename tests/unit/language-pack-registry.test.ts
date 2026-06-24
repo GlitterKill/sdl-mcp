@@ -35,6 +35,7 @@ describe("on-demand language pack registry", () => {
         "haskell-language-server",
       ],
       ["julia", "julia", "tree-sitter-julia", "julia-language-server"],
+      ["gleam", "gleam", "tree-sitter-gleam", "gleam-lsp"],
       ["zig", "zig", "tree-sitter-zig", "zls"],
     ] as const;
 
@@ -67,6 +68,7 @@ describe("on-demand language pack registry", () => {
         "fortran",
         "haskell",
         "julia",
+        "gleam",
         "zig",
       ]).map((pack) => ({
         languageId: pack.languageId,
@@ -91,6 +93,7 @@ describe("on-demand language pack registry", () => {
         { languageId: "fortran", parserPackage: "tree-sitter-fortran" },
         { languageId: "haskell", parserPackage: "tree-sitter-haskell" },
         { languageId: "julia", parserPackage: "tree-sitter-julia" },
+        { languageId: "gleam", parserPackage: "tree-sitter-gleam" },
         { languageId: "zig", parserPackage: "tree-sitter-zig" },
       ],
     );
@@ -132,6 +135,7 @@ describe("on-demand language pack registry", () => {
     assert.ok(getLanguageExtensions(["fortran"]).includes(".f90"));
     assert.ok(getLanguageExtensions(["haskell"]).includes(".hs"));
     assert.ok(getLanguageExtensions(["julia"]).includes(".jl"));
+    assert.ok(getLanguageExtensions(["gleam"]).includes(".gleam"));
     assert.ok(getLanguageExtensions(["zig"]).includes(".zig"));
   });
 });

@@ -1156,6 +1156,7 @@ function documentLanguageIdForLspPath(
   if (/\.(?:hs|lhs)$/u.test(relPath)) return "haskell";
   if (/\.jl$/u.test(relPath)) return "julia";
   if (/\.zig$/u.test(relPath)) return "zig";
+  if (/\.gleam$/u.test(relPath)) return "gleam";
   return "plaintext";
 }
 

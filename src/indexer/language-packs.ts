@@ -392,6 +392,30 @@ const LANGUAGE_PACKS: readonly LanguagePackManifest[] = [
     installMode: "onDemand",
   },
   {
+    languageId: "gleam",
+    aliases: ["gleam"],
+    extensions: [".gleam"],
+    parserPackage: "tree-sitter-gleam",
+    parserPackageSpec: "tree-sitter-gleam@^0.1.5",
+    genericAdapter: {
+      languageId: "gleam",
+      grammarLanguage: "gleam",
+      fileExtensions: [".gleam"],
+      symbolRules: [
+        { nodeTypes: ["function", "external_function"], kind: "function" },
+        { nodeTypes: ["constant"], kind: "variable" },
+        {
+          nodeTypes: ["type_definition", "type_alias", "external_type"],
+          kind: "type",
+        },
+      ],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-gleam@^0.1.5",
+    lspServerId: "gleam-lsp",
+    installMode: "onDemand",
+  },
+  {
     languageId: "zig",
     aliases: ["zig"],
     extensions: [".zig"],
