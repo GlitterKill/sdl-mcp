@@ -1,5 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import { TypeScriptAdapter } from "../../dist/indexer/adapter/index.js";
 import {
@@ -7,6 +10,12 @@ import {
   registerAdapter,
   resetRegistry,
 } from "../../dist/indexer/adapter/registry.js";
+import {
+  clearCache,
+  getParser,
+  registerGrammarPackageRoot,
+  type SupportedLanguage,
+} from "../../dist/indexer/treesitter/grammarLoader.js";
 import { createQueryForExtensionOrThrow } from "../../dist/indexer/treesitter/tsTreesitter.js";
 import {
   collectIdentifierSourceEdits,
@@ -37,6 +46,11 @@ interface LanguageFixture {
   replacement: string;
   content: string;
   structuralQuery: string;
+}
+
+interface LazyLanguageFixture extends LanguageFixture {
+  grammarLanguage: SupportedLanguage;
+  parserPackage: string;
 }
 
 const LANGUAGE_FIXTURES: readonly LanguageFixture[] = [
@@ -180,6 +194,232 @@ const LANGUAGE_FIXTURES: readonly LanguageFixture[] = [
   },
 ];
 
+const LAZY_LANGUAGE_FIXTURES: readonly LazyLanguageFixture[] = [
+  {
+    languageId: "powershell",
+    grammarLanguage: "powershell",
+    parserPackage: "tree-sitter-powershell",
+    relPath: "scripts/example.ps1",
+    literal: "oldName",
+    replacement: "newName",
+    content: [
+      "function oldName { oldName }",
+      '$text = "oldName"',
+      "# oldName should stay in comments",
+      "",
+    ].join("\n"),
+    structuralQuery: "(function_name) @target",
+  },
+  {
+    languageId: "ruby",
+    grammarLanguage: "ruby",
+    parserPackage: "tree-sitter-ruby",
+    relPath: "src/example.rb",
+    literal: "old_name",
+    replacement: "new_name",
+    content: [
+      "def old_name",
+      "end",
+      "old_name",
+      'text = "old_name"',
+      "# old_name should stay in comments",
+      "",
+    ].join("\n"),
+    structuralQuery: "(identifier) @target",
+  },
+  {
+    languageId: "lua",
+    grammarLanguage: "lua",
+    parserPackage: "@tree-sitter-grammars/tree-sitter-lua",
+    relPath: "src/example.lua",
+    literal: "old_name",
+    replacement: "new_name",
+    content: [
+      "local old_name = 1",
+      "old_name()",
+      'text = "old_name"',
+      "-- old_name should stay in comments",
+      "",
+    ].join("\n"),
+    structuralQuery: "(identifier) @target",
+  },
+  {
+    languageId: "dart",
+    grammarLanguage: "dart",
+    parserPackage: "@sengac/tree-sitter-dart",
+    relPath: "lib/example.dart",
+    literal: "oldName",
+    replacement: "newName",
+    content: [
+      "void oldName() {}",
+      'void main() { oldName(); var text = "oldName"; }',
+      "// oldName should stay in comments",
+      "",
+    ].join("\n"),
+    structuralQuery: "(identifier) @target",
+  },
+  {
+    languageId: "swift",
+    grammarLanguage: "swift",
+    parserPackage: "tree-sitter-swift",
+    relPath: "Sources/example.swift",
+    literal: "oldName",
+    replacement: "newName",
+    content: [
+      "func oldName() {}",
+      'let text = "oldName"',
+      "oldName()",
+      "// oldName should stay in comments",
+      "",
+    ].join("\n"),
+    structuralQuery: "(simple_identifier) @target",
+  },
+  {
+    languageId: "groovy",
+    grammarLanguage: "groovy",
+    parserPackage: "tree-sitter-groovy",
+    relPath: "src/example.groovy",
+    literal: "oldName",
+    replacement: "newName",
+    content: [
+      "def oldName() {}",
+      "oldName()",
+      'def text = "oldName"',
+      "// oldName should stay in comments",
+      "",
+    ].join("\n"),
+    structuralQuery: "(identifier) @target",
+  },
+  {
+    languageId: "perl",
+    grammarLanguage: "perl",
+    parserPackage: "tree-sitter-perl",
+    relPath: "src/example.pl",
+    literal: "old_name",
+    replacement: "new_name",
+    content: [
+      "sub old_name {}",
+      "old_name();",
+      'my $text = "old_name";',
+      "# old_name should stay in comments",
+      "",
+    ].join("\n"),
+    structuralQuery: "(bareword) @target",
+  },
+  {
+    languageId: "r",
+    grammarLanguage: "r",
+    parserPackage: "@davisvaughan/tree-sitter-r",
+    relPath: "R/example.R",
+    literal: "old_name",
+    replacement: "new_name",
+    content: [
+      "old_name <- function() {}",
+      "old_name()",
+      'text <- "old_name"',
+      "# old_name should stay in comments",
+      "",
+    ].join("\n"),
+    structuralQuery: "(identifier) @target",
+  },
+  {
+    languageId: "elixir",
+    grammarLanguage: "elixir",
+    parserPackage: "tree-sitter-elixir",
+    relPath: "lib/example.ex",
+    literal: "old_name",
+    replacement: "new_name",
+    content: [
+      "defmodule Example do",
+      "  def old_name do",
+      "    old_name()",
+      '    text = "old_name"',
+      "  end",
+      "end",
+      "# old_name should stay in comments",
+      "",
+    ].join("\n"),
+    structuralQuery: "(identifier) @target",
+  },
+  {
+    languageId: "fsharp",
+    grammarLanguage: "fsharp",
+    parserPackage: "tree-sitter-fsharp",
+    relPath: "src/Example.fs",
+    literal: "oldName",
+    replacement: "newName",
+    content: [
+      "let oldName = 1",
+      "let value = oldName",
+      'let text = "oldName"',
+      "// oldName should stay in comments",
+      "",
+    ].join("\n"),
+    structuralQuery: "(identifier_pattern) @target",
+  },
+  {
+    languageId: "fortran",
+    grammarLanguage: "fortran",
+    parserPackage: "tree-sitter-fortran",
+    relPath: "src/example.f90",
+    literal: "old_name",
+    replacement: "new_name",
+    content: [
+      "program old_name",
+      'print *, "old_name"',
+      "! old_name should stay in comments",
+      "end program old_name",
+      "",
+    ].join("\n"),
+    structuralQuery: "(name) @target",
+  },
+  {
+    languageId: "haskell",
+    grammarLanguage: "haskell",
+    parserPackage: "tree-sitter-haskell",
+    relPath: "src/Example.hs",
+    literal: "oldName",
+    replacement: "newName",
+    content: [
+      "oldName = 1",
+      "main = print oldName",
+      'text = "oldName"',
+      "-- oldName should stay in comments",
+      "",
+    ].join("\n"),
+    structuralQuery: "(variable) @target",
+  },
+];
+
+function packageRootFor(parserPackage: string): string {
+  return join(
+    homedir(),
+    ".sdl-mcp",
+    "cache",
+    "language-packs",
+    "node_modules",
+    ...parserPackage.split("/"),
+  );
+}
+
+type LazyParserAvailability =
+  | { status: "missing"; packageRoot: string }
+  | { status: "available"; packageRoot: string }
+  | { status: "unavailable"; packageRoot: string };
+
+function cachedLazyParserAvailability(
+  fixture: LazyLanguageFixture,
+): LazyParserAvailability {
+  const packageRoot = packageRootFor(fixture.parserPackage);
+  if (!existsSync(packageRoot)) return { status: "missing", packageRoot };
+
+  clearCache(fixture.grammarLanguage);
+  registerGrammarPackageRoot(fixture.parserPackage, packageRoot);
+  return getParser(fixture.grammarLanguage) === null
+    ? { status: "unavailable", packageRoot }
+    : { status: "available", packageRoot };
+}
+
 describe("search-edit structural matcher", () => {
   it("maps built-in structural extensions to public language ids", () => {
     const expected = new Map<string, string>([
@@ -210,6 +450,39 @@ describe("search-edit structural matcher", () => {
       ["scripts/example.sh", "shell"],
       ["scripts/example.bash", "shell"],
       ["scripts/example.zsh", "shell"],
+      ["scripts/example.ps1", "powershell"],
+      ["scripts/example.psm1", "powershell"],
+      ["scripts/example.psd1", "powershell"],
+      ["src/example.rb", "ruby"],
+      ["src/example.rake", "ruby"],
+      ["src/example.lua", "lua"],
+      ["lib/example.dart", "dart"],
+      ["Sources/example.swift", "swift"],
+      ["src/example.groovy", "groovy"],
+      ["src/example.gradle", "groovy"],
+      ["src/example.gvy", "groovy"],
+      ["src/example.gy", "groovy"],
+      ["src/example.gsh", "groovy"],
+      ["src/example.pl", "perl"],
+      ["src/example.pm", "perl"],
+      ["src/example.t", "perl"],
+      ["src/example.pod", "perl"],
+      ["R/example.R", "r"],
+      ["R/example.r", "r"],
+      ["lib/example.ex", "elixir"],
+      ["lib/example.exs", "elixir"],
+      ["src/Example.fs", "fsharp"],
+      ["src/Example.fsi", "fsharp"],
+      ["src/Example.fsx", "fsharp"],
+      ["src/example.f90", "fortran"],
+      ["src/example.f95", "fortran"],
+      ["src/example.f03", "fortran"],
+      ["src/example.f08", "fortran"],
+      ["src/example.f", "fortran"],
+      ["src/example.for", "fortran"],
+      ["src/example.f77", "fortran"],
+      ["src/Example.hs", "haskell"],
+      ["src/Example.lhs", "haskell"],
     ]);
 
     for (const [filePath, languageId] of expected) {
@@ -221,7 +494,11 @@ describe("search-edit structural matcher", () => {
     }
     assert.equal(getStructuralLanguageForPath("README.md"), null);
     assert.ok(getStructuralLanguageIds().includes("python"));
+    assert.ok(getStructuralLanguageIds().includes("powershell"));
+    assert.ok(getStructuralLanguageIds().includes("haskell"));
     assert.ok(getStructuralExtensions("typescript").includes(".mjs"));
+    assert.ok(getStructuralExtensions("powershell").includes(".ps1"));
+    assert.ok(getStructuralExtensions("fortran").includes(".f90"));
   });
 
   it("covers descriptor-specific identifier node types", () => {
@@ -347,6 +624,65 @@ describe("search-edit structural matcher", () => {
     });
   }
 
+  for (const fixture of LAZY_LANGUAGE_FIXTURES) {
+    it(`uses the ${fixture.languageId} lazy parser for AST identifiers when available`, (t) => {
+      const availability = cachedLazyParserAvailability(fixture);
+      if (availability.status === "missing") {
+        t.skip(
+          `${fixture.parserPackage} is not installed in ${availability.packageRoot}`,
+        );
+        return;
+      }
+      assert.equal(availability.status, "available", availability.packageRoot);
+
+      const edits = collectIdentifierSourceEdits({
+        content: fixture.content,
+        relPath: fixture.relPath,
+        literal: fixture.literal,
+        replacement: fixture.replacement,
+        global: true,
+      });
+
+      assert.ok(edits.length >= 1, fixture.languageId);
+      const updated = applyEdits(fixture.content, edits);
+      assert.match(updated, new RegExp(fixture.replacement));
+      assert.match(updated, new RegExp(`"${fixture.literal}"`));
+      assert.match(
+        updated,
+        new RegExp(`${fixture.literal} should stay in comments`),
+      );
+    });
+
+    it(`runs ${fixture.languageId} lazy structural queries when available`, (t) => {
+      const availability = cachedLazyParserAvailability(fixture);
+      if (availability.status === "missing") {
+        t.skip(
+          `${fixture.parserPackage} is not installed in ${availability.packageRoot}`,
+        );
+        return;
+      }
+      assert.equal(availability.status, "available", availability.packageRoot);
+
+      const edits = collectStructuralSourceEdits({
+        content: fixture.content,
+        relPath: fixture.relPath,
+        structural: {
+          language: fixture.languageId,
+          treeSitterQuery: fixture.structuralQuery,
+          requiredCaptures: { target: fixture.literal },
+        },
+        replacement: fixture.replacement,
+        global: false,
+      });
+
+      assert.equal(edits.length, 1, fixture.languageId);
+      assert.equal(edits[0].captures[0]?.text, fixture.literal);
+      assert.match(
+        applyEdits(fixture.content, edits),
+        new RegExp(fixture.replacement),
+      );
+    });
+  }
   it("keeps identifier ranges aligned after multibyte characters", () => {
     const emoji = String.fromCodePoint(0x1f600);
     const content = [

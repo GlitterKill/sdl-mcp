@@ -196,12 +196,123 @@ const BUILT_IN_STRUCTURAL_LANGUAGES: readonly BuiltInStructuralLanguage[] = [
     extensions: [".sh", ".bash", ".zsh"],
     identifierNodeTypes: ["variable_name", "command_name"],
   },
+  // Lazy language-pack descriptors reuse the shared grammar loader. A pack must
+  // still register or install its parser before AST-aware matching can parse it.
+  {
+    publicLanguageId: "powershell",
+    grammarLanguage: "powershell",
+    extensions: [".ps1", ".psm1", ".psd1"],
+    identifierNodeTypes: [
+      "variable",
+      "braced_variable",
+      "command_name",
+      "function_name",
+      "member_name",
+      "simple_name",
+      "type_identifier",
+    ],
+  },
+  {
+    publicLanguageId: "ruby",
+    grammarLanguage: "ruby",
+    extensions: [".rb", ".rake"],
+    identifierNodeTypes: [
+      "identifier",
+      "constant",
+      "instance_variable",
+      "class_variable",
+      "global_variable",
+    ],
+  },
+  {
+    publicLanguageId: "lua",
+    grammarLanguage: "lua",
+    extensions: [".lua"],
+    identifierNodeTypes: ["identifier"],
+  },
+  {
+    publicLanguageId: "dart",
+    grammarLanguage: "dart",
+    extensions: [".dart"],
+    identifierNodeTypes: ["identifier", "type_identifier"],
+  },
+  {
+    publicLanguageId: "swift",
+    grammarLanguage: "swift",
+    extensions: [".swift"],
+    identifierNodeTypes: ["identifier", "simple_identifier", "type_identifier"],
+  },
+  {
+    publicLanguageId: "groovy",
+    grammarLanguage: "groovy",
+    extensions: [".groovy", ".gradle", ".gvy", ".gy", ".gsh"],
+    identifierNodeTypes: ["identifier", "type_identifier"],
+  },
+  {
+    publicLanguageId: "perl",
+    grammarLanguage: "perl",
+    extensions: [".pl", ".pm", ".t", ".pod"],
+    identifierNodeTypes: [
+      "identifier",
+      "bareword",
+      "function",
+      "varname",
+      "container_variable",
+      "keyval_container_variable",
+    ],
+  },
+  {
+    publicLanguageId: "r",
+    grammarLanguage: "r",
+    extensions: [".R", ".r"],
+    identifierNodeTypes: ["identifier"],
+  },
+  {
+    publicLanguageId: "elixir",
+    grammarLanguage: "elixir",
+    extensions: [".ex", ".exs"],
+    identifierNodeTypes: ["identifier", "operator_identifier"],
+  },
+  {
+    publicLanguageId: "fsharp",
+    grammarLanguage: "fsharp",
+    extensions: [".fs", ".fsi", ".fsx"],
+    identifierNodeTypes: [
+      "identifier",
+      "identifier_pattern",
+      "op_identifier",
+      "type_name",
+    ],
+  },
+  {
+    publicLanguageId: "fortran",
+    grammarLanguage: "fortran",
+    extensions: [".f90", ".f95", ".f03", ".f08", ".f", ".for", ".f77"],
+    identifierNodeTypes: [
+      "identifier",
+      "method_name",
+      "module_name",
+      "name",
+      "type_name",
+    ],
+  },
+  {
+    publicLanguageId: "haskell",
+    grammarLanguage: "haskell",
+    extensions: [".hs", ".lhs"],
+    identifierNodeTypes: [
+      "variable",
+      "constructor",
+      "field_name",
+      "import_name",
+    ],
+  },
 ];
 
 const BUILT_IN_BY_EXTENSION = new Map<string, BuiltInStructuralLanguage>();
 for (const descriptor of BUILT_IN_STRUCTURAL_LANGUAGES) {
   for (const extension of descriptor.extensions) {
-    BUILT_IN_BY_EXTENSION.set(extension, descriptor);
+    BUILT_IN_BY_EXTENSION.set(extension.toLowerCase(), descriptor);
   }
 }
 
@@ -486,10 +597,8 @@ function buildQueryByteWindows(
     currentEndTarget = currentStartByte + STRUCTURAL_QUERY_WINDOW_BYTES;
   }
 
-  if (
-    windows.length === 0 ||
-    windows[windows.length - 1]!.endByte < totalBytes
-  ) {
+  const lastWindow = windows.at(-1);
+  if (!lastWindow || lastWindow.endByte < totalBytes) {
     windows.push({ startByte: currentStartByte, endByte: totalBytes });
   }
 

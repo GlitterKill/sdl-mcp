@@ -115,8 +115,12 @@ merged preview and apply plan.
   This skips strings, comments, and other non-identifier text while still
   flowing through the normal preview/apply/rollback plan. Built-in support
   covers TypeScript/JavaScript, Python, Go, Java, C#, C/C++, PHP, Rust,
-  Kotlin, and shell files; plugins can opt in with a structural matcher
-  descriptor.
+  Kotlin, shell files, and the lazy language packs for PowerShell, Ruby, Lua,
+  Dart, Swift, Groovy, Perl, R, Elixir, F#, Fortran, and Haskell. Lazy packs
+  reuse the same parser package registered for indexing; if that parser is not
+  installed or cannot be loaded, AST-aware matching fails closed instead of
+  falling back to regex text replacement. Plugins can opt in with a structural
+  matcher descriptor.
 - `"structural"` — run a bounded tree-sitter query over supported structural
   languages, select one capture (default: `@target`), and replace that
   captured range. `query.structural.requiredCaptures` can require exact
@@ -138,7 +142,9 @@ instead of silently treating those files as no-match candidates.
 Both AST-aware target modes currently require `editMode: "replacePattern"`.
 They do not use regular expressions for matching; the edit mode name is kept
 so previews and applies can reuse the existing search-edit write machinery.
-Unsupported file extensions are skipped before parsing.
+Unsupported file extensions are skipped before parsing. Lazy language-pack
+extensions are eligible as soon as the pack's tree-sitter grammar is available
+through the shared grammar loader.
 
 AST-aware previews include a bounded `astMatches` sample in each affected
 `fileEntries[]` item. Each sample carries the selected target capture plus

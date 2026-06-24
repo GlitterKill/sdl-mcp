@@ -197,7 +197,7 @@ export class YourLangAdapter extends BaseAdapter {
 
 ## Optional Structural Matcher
 
-Tree-sitter-backed adapters can opt into AST-aware `search.edit` by adding a `structuralMatcher` descriptor to the adapter object returned by `createAdapters()`. See [STRUCTURAL_MATCHER.md](./STRUCTURAL_MATCHER.md) for the contract and a complete example.
+Tree-sitter-backed adapters can opt into AST-aware `search.edit` by adding a `structuralMatcher` descriptor to the adapter object returned by `createAdapters()`. See [STRUCTURAL_MATCHER.md](./STRUCTURAL_MATCHER.md) for the contract, future-language checklist, and fixture template.
 
 Keep this disabled for regex-only adapters. Without a real tree-sitter `Tree`, SDL-MCP cannot safely distinguish identifiers from comments, strings, or broad syntax nodes.
 

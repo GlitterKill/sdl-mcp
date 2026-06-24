@@ -62,8 +62,7 @@ const LANGUAGE_PACKS: readonly LanguagePackManifest[] = [
     aliases: ["sh", "shell", "bash"],
     extensions: [".sh", ".bash", ".zsh"],
     parserPackage: "tree-sitter-bash",
-    parserPackageSpec:
-      "tree-sitter-bash@npm:sdl-mcp-tree-sitter-bash@^1.0.1",
+    parserPackageSpec: "tree-sitter-bash@npm:sdl-mcp-tree-sitter-bash@^1.0.1",
     adapterModule: "./adapter/shell.js",
     installCommand:
       "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-bash@npm:sdl-mcp-tree-sitter-bash@^1.0.1",
@@ -129,8 +128,8 @@ const LANGUAGE_PACKS: readonly LanguagePackManifest[] = [
     languageId: "lua",
     aliases: ["lua"],
     extensions: [".lua"],
-    parserPackage: "tree-sitter-lua",
-    parserPackageSpec: "tree-sitter-lua@^2.1.3",
+    parserPackage: "@tree-sitter-grammars/tree-sitter-lua",
+    parserPackageSpec: "@tree-sitter-grammars/tree-sitter-lua@^0.4.1",
     genericAdapter: {
       languageId: "lua",
       grammarLanguage: "lua",
@@ -147,7 +146,7 @@ const LANGUAGE_PACKS: readonly LanguagePackManifest[] = [
       ],
     },
     installCommand:
-      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-lua@^2.1.3",
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps @tree-sitter-grammars/tree-sitter-lua@^0.4.1",
     lspServerId: "lua-language-server",
     installMode: "onDemand",
   },
@@ -155,8 +154,8 @@ const LANGUAGE_PACKS: readonly LanguagePackManifest[] = [
     languageId: "dart",
     aliases: ["dart"],
     extensions: [".dart"],
-    parserPackage: "tree-sitter-dart",
-    parserPackageSpec: "tree-sitter-dart@^1.0.0",
+    parserPackage: "@sengac/tree-sitter-dart",
+    parserPackageSpec: "@sengac/tree-sitter-dart@^1.1.6",
     genericAdapter: {
       languageId: "dart",
       grammarLanguage: "dart",
@@ -179,7 +178,7 @@ const LANGUAGE_PACKS: readonly LanguagePackManifest[] = [
       ],
     },
     installCommand:
-      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-dart@^1.0.0",
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps @sengac/tree-sitter-dart@^1.1.6",
     lspServerId: "dart-sdk-lsp",
     installMode: "onDemand",
   },

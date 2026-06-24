@@ -40,7 +40,42 @@ export async function createAdapters(): Promise<PluginAdapter[]> {
 
 Keep `identifierNodeTypes` conservative. Include only node types whose complete node text is safe to replace as an identifier. Do not include comments, strings, literals, broad expressions, blocks, or declarations whose text includes more than the identifier.
 
-Good candidates are usually named nodes such as `identifier`, `simple_identifier`, `name`, or grammar-specific field identifier nodes. Confirm them with small fixtures and parser output before publishing.
+Good candidates are usually named nodes such as `identifier`, `simple_identifier`, `name`, or grammar-specific field identifier nodes. Confirm them with small fixtures and parser output before publishing. When the grammar package includes `src/node-types.json`, start from that file and choose the narrowest identifier-like node names instead of broad parent nodes such as scoped expressions.
+
+## Future Language Adapter Checklist
+
+Use this checklist when adding structural support for a new language adapter or language pack:
+
+1. Reuse the adapter's existing tree-sitter parser and grammar object. Do not add a second parser stack for search/edit.
+2. Add a structural matcher descriptor with conservative `identifierNodeTypes` and a `createQuery()` function that compiles against the same grammar used by `parse()`.
+3. Add a fixture where `targeting: "identifier"` replaces a real identifier but leaves the same text inside a string and comment unchanged.
+4. Add a structural-query fixture for one common shape, such as a call callee, import specifier, object property, JSX prop, or language-specific declaration name.
+5. Verify malformed tree-sitter queries surface a validation error and malformed source returns no AST-aware edits rather than throwing.
+6. Document parser install/activation requirements if the language lives in a lazy pack.
+
+Template fixture shape:
+
+```typescript
+const structuralMatcher = {
+  identifierNodeTypes: ["identifier", "type_identifier"],
+  createQuery(queryString: string): Parser.Query {
+    return new Parser.Query(language, queryString);
+  },
+} satisfies StructuralMatcherDescriptor;
+
+const identifierFixture = {
+  relPath: "src/example.yourlang",
+  literal: "oldName",
+  replacement: "newName",
+  content: [
+    "function oldName() {}",
+    "oldName()",
+    '"oldName"',
+    "// oldName should stay in comments",
+  ].join("\n"),
+  structuralQuery: "(identifier) @target",
+};
+```
 
 ## Tests To Add
 

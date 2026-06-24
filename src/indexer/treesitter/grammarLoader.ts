@@ -108,14 +108,14 @@ const GRAMMAR_PACKAGES: Record<
   bash: { pkg: "tree-sitter-bash" },
   powershell: { pkg: "tree-sitter-powershell" },
   ruby: { pkg: "tree-sitter-ruby" },
-  lua: { pkg: "tree-sitter-lua" },
-  dart: { pkg: "tree-sitter-dart" },
+  lua: { pkg: "@tree-sitter-grammars/tree-sitter-lua" },
+  dart: { pkg: "@sengac/tree-sitter-dart" },
   swift: { pkg: "tree-sitter-swift" },
   groovy: { pkg: "tree-sitter-groovy" },
   perl: { pkg: "tree-sitter-perl" },
   r: { pkg: "@davisvaughan/tree-sitter-r" },
   elixir: { pkg: "tree-sitter-elixir" },
-  fsharp: { pkg: "tree-sitter-fsharp" },
+  fsharp: { pkg: "tree-sitter-fsharp", prop: "fsharp" },
   fortran: { pkg: "tree-sitter-fortran" },
   haskell: { pkg: "tree-sitter-haskell" },
 };
@@ -175,7 +175,26 @@ function loadGrammarPackage(packageName: string): unknown {
   } catch (error) {
     const packageRoot = grammarPackageRoots.get(packageName);
     if (!packageRoot) throw error;
-    return require(packageRoot);
+    try {
+      return require(packageRoot);
+    } catch (rootError) {
+      return loadNativeGrammarBinding(packageRoot, rootError);
+    }
+  }
+}
+
+function loadNativeGrammarBinding(
+  packageRoot: string,
+  cause: unknown,
+): unknown {
+  try {
+    const packageRequire = createRequire(join(packageRoot, "package.json"));
+    const nodeGypBuild = packageRequire("node-gyp-build") as (
+      root: string,
+    ) => unknown;
+    return nodeGypBuild(packageRoot);
+  } catch {
+    throw cause;
   }
 }
 

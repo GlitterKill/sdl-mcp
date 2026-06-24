@@ -153,7 +153,7 @@
     "providerFirstStatus": "LSP provider-first validated",
     "validationRepo": "nvim-lua/plenary.nvim",
     "validationEvidence": "internal validation evidence",
-    "notes": "Validated 113/113 provider-primary files and 11844 LSP symbols across the full validation repository."
+    "notes": "Validated 113/113 provider-primary files and 11844 LSP symbols across the full validation repository; lazy tree-sitter installs use @tree-sitter-grammars/tree-sitter-lua for current ABI compatibility."
   },
   {
     "language": "Dart",
@@ -165,7 +165,7 @@
     "providerFirstStatus": "LSP provider-first validated",
     "validationRepo": "dart-lang/http",
     "validationEvidence": "internal validation evidence",
-    "notes": "Validated 324/324 provider-primary files and 10173 LSP symbols using Dart SDK language-server export."
+    "notes": "Validated 324/324 provider-primary files and 10173 LSP symbols using Dart SDK language-server export; lazy tree-sitter installs use @sengac/tree-sitter-dart for current ABI compatibility."
   },
   {
     "language": "Swift",
