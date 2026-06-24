@@ -84,6 +84,7 @@ const LANGUAGE_ALIASES = new Map<string, string>([
   ["lhs", "haskell"],
   ["julia", "julia"],
   ["jl", "julia"],
+  ["nix", "nix"],
   ["zig", "zig"],
   ["gleam", "gleam"],
 ]);

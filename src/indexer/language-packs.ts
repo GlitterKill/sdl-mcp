@@ -416,6 +416,28 @@ const LANGUAGE_PACKS: readonly LanguagePackManifest[] = [
     installMode: "onDemand",
   },
   {
+    languageId: "nix",
+    aliases: ["nix"],
+    extensions: [".nix"],
+    parserPackage: "tree-sitter-nix",
+    parserPackageSpec: "tree-sitter-nix@^0.0.2",
+    genericAdapter: {
+      languageId: "nix",
+      grammarLanguage: "nix",
+      fileExtensions: [".nix"],
+      symbolRules: [
+        { nodeTypes: ["binding"], kind: "variable" },
+        { nodeTypes: ["function_expression"], kind: "function" },
+        { nodeTypes: ["rec_attrset", "attrset"], kind: "module" },
+      ],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-nix@^0.0.2",
+    lspServerId: "nil",
+    installMode: "onDemand",
+  },
+
+  {
     languageId: "zig",
     aliases: ["zig"],
     extensions: [".zig"],

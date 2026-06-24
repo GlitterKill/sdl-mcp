@@ -72,6 +72,7 @@ const CANONICAL_LANGUAGE_IDS_BY_CONFIG = new Map<string, string>([
   ["hs", "haskell"],
   ["lhs", "haskell"],
   ["jl", "julia"],
+  ["nix", "nix"],
   ["zig", "zig"],
   ["gleam", "gleam"],
 ]);

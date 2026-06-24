@@ -106,6 +106,7 @@ const ON_DEMAND_REPO_LANGUAGES = new Set([
   "fortran",
   "haskell",
   "julia",
+  "nix",
   "zig",
   "gleam",
 ]);

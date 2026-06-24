@@ -288,6 +288,18 @@
     "notes": "Validated 2/2 provider-primary files and 100 graph symbols using zls installed through lsp-io; tree-sitter-zig installed only after the Zig-configured index run."
   },
   {
+    "language": "Nix",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "lazy language pack configured",
+    "parserInstallMode": "on-demand when repo config includes nix",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "nil",
+    "providerFirstStatus": "not supported: LSP server unavailable in local validation",
+    "validationRepo": "pending",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-nix-2026-06-24.md",
+    "notes": "SDL lazy metadata is configured without installing tree-sitter-nix. lsp-io reports nil as system/manual and install nil fails in this Windows environment, so provider-first validation remains pending."
+  },
+  {
     "language": "Gleam",
     "popularityRankSource": "Wave 3 rollout priority",
     "adapterStatus": "lazy language pack configured",
@@ -300,7 +312,7 @@
     "notes": "Validated 18/42 provider-primary files and 518 graph symbols using gleam-lsp exported by lsp-io with args [\"lsp\"]; tree-sitter-gleam was installed only after the Gleam-configured index run."
   },
   {
-    "language": "Nix, Clojure, Erlang, OCaml, Ada, Elm, Nim, Crystal, D, V, Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
+    "language": "Clojure, Erlang, OCaml, Ada, Elm, Nim, Crystal, D, V, Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
     "popularityRankSource": "Wave 3 rollout priority",
     "adapterStatus": "planned",
     "parserInstallMode": "not installed",

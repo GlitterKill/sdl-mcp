@@ -35,6 +35,7 @@ describe("on-demand language pack registry", () => {
         "haskell-language-server",
       ],
       ["julia", "julia", "tree-sitter-julia", "julia-language-server"],
+      ["nix", "nix", "tree-sitter-nix", "nil"],
       ["gleam", "gleam", "tree-sitter-gleam", "gleam-lsp"],
       ["zig", "zig", "tree-sitter-zig", "zls"],
     ] as const;
@@ -68,6 +69,7 @@ describe("on-demand language pack registry", () => {
         "fortran",
         "haskell",
         "julia",
+        "nix",
         "gleam",
         "zig",
       ]).map((pack) => ({
@@ -93,6 +95,7 @@ describe("on-demand language pack registry", () => {
         { languageId: "fortran", parserPackage: "tree-sitter-fortran" },
         { languageId: "haskell", parserPackage: "tree-sitter-haskell" },
         { languageId: "julia", parserPackage: "tree-sitter-julia" },
+        { languageId: "nix", parserPackage: "tree-sitter-nix" },
         { languageId: "gleam", parserPackage: "tree-sitter-gleam" },
         { languageId: "zig", parserPackage: "tree-sitter-zig" },
       ],

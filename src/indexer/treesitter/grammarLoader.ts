@@ -82,6 +82,7 @@ export type SupportedLanguage =
   | "fortran"
   | "haskell"
   | "julia"
+  | "nix"
   | "zig"
   | "gleam";
 
@@ -122,6 +123,7 @@ const GRAMMAR_PACKAGES: Record<
   fortran: { pkg: "tree-sitter-fortran" },
   haskell: { pkg: "tree-sitter-haskell" },
   julia: { pkg: "tree-sitter-julia" },
+  nix: { pkg: "tree-sitter-nix" },
   zig: { pkg: "tree-sitter-zig" },
   gleam: { pkg: "tree-sitter-gleam" },
 };
