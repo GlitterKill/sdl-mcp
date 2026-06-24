@@ -86,6 +86,7 @@ export type SupportedLanguage =
   | "clojure"
   | "ocaml"
   | "d"
+  | "haxe"
   | "zig"
   | "gleam";
 
@@ -130,6 +131,7 @@ const GRAMMAR_PACKAGES: Record<
   clojure: { pkg: "@yogthos/tree-sitter-clojure" },
   ocaml: { pkg: "tree-sitter-ocaml" },
   d: { pkg: "tree-sitter-d" },
+  haxe: { pkg: "tree-sitter-haxe" },
   zig: { pkg: "tree-sitter-zig" },
   gleam: { pkg: "tree-sitter-gleam" },
 };

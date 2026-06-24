@@ -1159,6 +1159,7 @@ function documentLanguageIdForLspPath(
   if (/\.(?:clj|cljs|cljc|edn)$/u.test(relPath)) return "clojure";
   if (/\.(?:ml|mli)$/u.test(relPath)) return "ocaml";
   if (/\.(?:d|di)$/u.test(relPath)) return "d";
+  if (/\.hx$/u.test(relPath)) return "haxe";
   if (/\.zig$/u.test(relPath)) return "zig";
   if (/\.gleam$/u.test(relPath)) return "gleam";
   return "plaintext";

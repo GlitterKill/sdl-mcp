@@ -39,6 +39,7 @@ describe("on-demand language pack registry", () => {
       ["clojure", "clojure", "@yogthos/tree-sitter-clojure", "clojure-lsp"],
       ["ocaml", "ocaml", "tree-sitter-ocaml", "ocamllsp"],
       ["d", "d", "tree-sitter-d", "serve-d"],
+      ["haxe", "haxe", "tree-sitter-haxe", "haxe-language-server"],
       ["gleam", "gleam", "tree-sitter-gleam", "gleam-lsp"],
       ["zig", "zig", "tree-sitter-zig", "zls"],
     ] as const;
@@ -76,6 +77,7 @@ describe("on-demand language pack registry", () => {
         "clojure",
         "ocaml",
         "d",
+        "haxe",
         "gleam",
         "zig",
       ]).map((pack) => ({
@@ -105,6 +107,7 @@ describe("on-demand language pack registry", () => {
         { languageId: "clojure", parserPackage: "@yogthos/tree-sitter-clojure" },
         { languageId: "ocaml", parserPackage: "tree-sitter-ocaml" },
         { languageId: "d", parserPackage: "tree-sitter-d" },
+        { languageId: "haxe", parserPackage: "tree-sitter-haxe" },
         { languageId: "gleam", parserPackage: "tree-sitter-gleam" },
         { languageId: "zig", parserPackage: "tree-sitter-zig" },
       ],
@@ -149,6 +152,7 @@ describe("on-demand language pack registry", () => {
     assert.ok(getLanguageExtensions(["julia"]).includes(".jl"));
     assert.ok(getLanguageExtensions(["ocaml"]).includes(".ml"));
     assert.ok(getLanguageExtensions(["d"]).includes(".d"));
+    assert.ok(getLanguageExtensions(["haxe"]).includes(".hx"));
     assert.ok(getLanguageExtensions(["gleam"]).includes(".gleam"));
     assert.ok(getLanguageExtensions(["zig"]).includes(".zig"));
   });

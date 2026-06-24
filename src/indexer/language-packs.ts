@@ -458,6 +458,28 @@ const LANGUAGE_PACKS: readonly LanguagePackManifest[] = [
   },
 
   {
+    languageId: "haxe",
+    aliases: ["haxe", "hx"],
+    extensions: [".hx"],
+    parserPackage: "tree-sitter-haxe",
+    parserPackageSpec: "tree-sitter-haxe@^0.13.0",
+    genericAdapter: {
+      languageId: "haxe",
+      grammarLanguage: "haxe",
+      fileExtensions: [".hx"],
+      symbolRules: [
+        { nodeTypes: ["function_declaration", "method_declaration"], kind: "function" },
+        { nodeTypes: ["class_declaration", "interface_declaration", "enum_declaration"], kind: "class" },
+        { nodeTypes: ["typedef_declaration", "abstract_declaration"], kind: "type" },
+      ],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-haxe@^0.13.0",
+    lspServerId: "haxe-language-server",
+    installMode: "onDemand",
+  },
+
+  {
     languageId: "gleam",
     aliases: ["gleam"],
     extensions: [".gleam"],

@@ -420,7 +420,31 @@
     "notes": "lsp-io installed v-analyzer and SDL export now includes **/*.v without relaxing detection. tree-sitter-v installed only during explicit V-configured validation, but failed Parser.setLanguage with Invalid language object; the package was removed and SDL lazy metadata was not committed."
   },
   {
-    "language": "Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
+    "language": "Vala",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "not configured",
+    "parserInstallMode": "not installed; no npm parser package found",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "vala-language-server",
+    "providerFirstStatus": "not supported: parser package and LSP server unavailable in local validation",
+    "validationRepo": "pending",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-vala-2026-06-24.md",
+    "notes": "lsp-io reports vala-language-server as system/manual and install vala-language-server requires upstream/package-manager installation. tree-sitter-vala and @tree-sitter-grammars/tree-sitter-vala are not published to npm, so SDL lazy metadata is intentionally not configured yet."
+  },
+  {
+    "language": "Haxe",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "lazy language pack configured",
+    "parserInstallMode": "on-demand when repo config includes haxe",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "haxe-language-server",
+    "providerFirstStatus": "not supported: LSP server unavailable in local validation",
+    "validationRepo": "pending",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-haxe-2026-06-24.md",
+    "notes": "SDL lazy metadata is configured without installing tree-sitter-haxe. npm reports tree-sitter-haxe@0.13.0, but lsp-io reports haxe-language-server as system/manual and install haxe-language-server requires Haxe/haxelib or upstream installation, so provider-first validation remains pending."
+  },
+  {
+    "language": "Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
     "popularityRankSource": "Wave 3 rollout priority",
     "adapterStatus": "planned",
     "parserInstallMode": "not installed",

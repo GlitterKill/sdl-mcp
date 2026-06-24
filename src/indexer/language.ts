@@ -95,6 +95,8 @@ const LANGUAGE_ALIASES = new Map<string, string>([
   ["mli", "ocaml"],
   ["d", "d"],
   ["di", "d"],
+  ["haxe", "haxe"],
+  ["hx", "haxe"],
   ["zig", "zig"],
   ["gleam", "gleam"],
 ]);
