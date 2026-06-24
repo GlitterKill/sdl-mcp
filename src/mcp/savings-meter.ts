@@ -166,6 +166,7 @@ export function renderSessionSummary(
   session: SessionUsageSnapshot,
   lifetime: AggregateUsage,
   lifetimeToolBreakdown: ToolUsageEntry[],
+  includeLifetime = lifetime.totalCalls > 0 || lifetime.sessionCount > 0,
 ): string {
   const headerLine = `${BORDER.repeat(2)} Token Savings ${BORDER.repeat(30)}`;
   const footerLine = BORDER.repeat(47);
@@ -186,8 +187,8 @@ export function renderSessionSummary(
 
   lines.push(...renderToolRows(session.toolBreakdown, nameWidth));
 
-  // --- Lifetime section (skip when no data, e.g. DB unavailable) ---
-  if (lifetime.totalCalls > 0 || lifetime.sessionCount > 0) {
+  // --- Lifetime section (included for All scope, skipped for session-only) ---
+  if (includeLifetime) {
     const ltMeter = renderMeter(lifetime.overallSavingsPercent);
     const ltSaved = formatTokenCount(lifetime.totalSavedTokens);
 

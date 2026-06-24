@@ -172,7 +172,7 @@ function responseGet(p: { handle: string; full?: boolean; maxBytes?: number; max
 
 // === Usage ===
 /** Get cumulative token savings statistics */
-function usageStats(p: { scope?: "session" | "history" | "both"; since?: string; limit?: number }): { totalSdlTokens: number; totalSavedTokens: number; savingsPercent: number }
+function usageStats(p: { scope?: "session" | "history" | "lifetime" | "both" | "all"; since?: string; limit?: number }): { totalSdlTokens: number; totalSavedTokens: number; savingsPercent: number }
 
 // === File ===
 /** Read non-indexed file content (templates, configs, docs) */

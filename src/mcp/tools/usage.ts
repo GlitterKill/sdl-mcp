@@ -64,24 +64,7 @@ function toAggregateUsage(aggregate: Record<string, number>): AggregateUsage {
   };
 }
 
-async function fetchLifetimeAggregate(
-  repoId: string | undefined,
-): Promise<{ ltAggregate: AggregateUsage; allToolEntries: import("../token-accumulator.js").ToolUsageEntry[] }> {
-  try {
-    const conn = await getLadybugConn();
-    const aggregate = await getAggregateUsage(conn, { repoId });
-    const snapshots = await getUsageSnapshots(conn, { repoId, limit: 100 });
-    const allToolEntries = aggregateToolBreakdowns(
-      snapshots.map((s) => s.toolBreakdownJson),
-    );
-    return { ltAggregate: toAggregateUsage(aggregate), allToolEntries };
-  } catch {
-    process.stderr.write(
-      "[sdl-mcp] Usage stats: could not fetch lifetime data from LadybugDB\n",
-    );
-    return { ltAggregate: EMPTY_AGGREGATE, allToolEntries: [] };
-  }
-}
+
 
 export async function handleUsageStats(
   args: unknown,
@@ -100,6 +83,10 @@ export async function handleUsageStats(
 
   try {
   const response: UsageStatsResponse = {};
+  const scope = request.scope;
+  const wantsSession = scope === "session" || scope === "both" || scope === "all";
+  const wantsLifetime = scope === "history" || scope === "lifetime" || scope === "both" || scope === "all";
+  const wantsAll = scope === "both" || scope === "all";
 
   // Optionally persist current session snapshot first
   if (request.persist && tokenAccumulator.hasUsage) {
@@ -110,7 +97,7 @@ export async function handleUsageStats(
   }
 
   // Session scope — in-memory accumulator
-  if (request.scope === "session" || request.scope === "both") {
+  if (wantsSession) {
     response.session = limitSessionToolBreakdown(
       tokenAccumulator.getSnapshot(),
       request.limit,
@@ -134,7 +121,7 @@ export async function handleUsageStats(
   }
 
   // History scope — from LadybugDB
-  if (request.scope === "history" || request.scope === "both") {
+  if (wantsLifetime) {
     const conn = await getLadybugConn();
 
     const snapshots = await getUsageSnapshots(conn, {
@@ -188,13 +175,14 @@ export async function handleUsageStats(
     // Build formatted summary for history-aware scopes
     const ltAggregate: AggregateUsage = toAggregateUsage(aggregate);
 
-    if (request.scope === "both" && response.session) {
+    if (wantsAll && response.session) {
       response.formattedSummary = renderSessionSummary(
         response.session,
         ltAggregate,
         displayToolEntries,
+        true,
       );
-    } else if (request.scope === "history") {
+    } else if (scope === "history" || scope === "lifetime") {
       response.formattedSummary = renderLifetimeSummary(
         ltAggregate,
         displayToolEntries,
@@ -202,17 +190,10 @@ export async function handleUsageStats(
     }
   }
 
-  // Session-only: still fetch lifetime for the combined summary
-  if (request.scope === "session" && response.session) {
-    const { ltAggregate, allToolEntries } = await fetchLifetimeAggregate(request.repoId);
-    const displayToolEntries = limitEntries(allToolEntries, request.limit);
-    response.formattedSummary = renderSessionSummary(
-      response.session,
-      ltAggregate,
-      displayToolEntries,
-    );
+  // Session-only: render the existing Session chart without querying lifetime data.
+  if (scope === "session" && response.session) {
+    response.formattedSummary = renderSessionSummary(response.session, EMPTY_AGGREGATE, []);
   }
-
   return response;
   } catch (error) {
     if (error instanceof ValidationError || error instanceof DatabaseError) {

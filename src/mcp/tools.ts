@@ -3085,7 +3085,7 @@ const TopToolSavingsSchema = z.object({
 
 export const UsageStatsRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH).optional(),
-  scope: z.enum(["session", "history", "both"]).default("both"),
+  scope: z.enum(["session", "history", "lifetime", "both", "all"]).default("both"),
   since: z.string().optional(),
   limit: z.number().int().min(1).max(100).optional(),
   persist: z.boolean().optional(),

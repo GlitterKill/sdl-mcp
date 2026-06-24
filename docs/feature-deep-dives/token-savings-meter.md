@@ -92,7 +92,7 @@ Call `sdl.usage.stats` with `scope: "session"`:
 }
 ```
 
-Response includes the session snapshot plus a formatted summary sent as an MCP notification.
+Response includes the session snapshot plus only the existing Session chart in `formattedSummary`.
 
 ---
 
@@ -124,19 +124,33 @@ CREATE NODE TABLE IF NOT EXISTS UsageSnapshot (
 
 ### Viewing Lifetime Stats
 
-Call `sdl.usage.stats` with `scope: "both"` (default):
+Call `sdl.usage.stats` with `scope: "lifetime"` (or legacy `scope: "history"`):
 
 ```json
 {
-  "scope": "both"
+  "scope": "lifetime"
 }
 ```
+
+Response includes lifetime snapshots and aggregate data plus only the existing Lifetime chart in `formattedSummary`.
+
+### Viewing All Stats
+
+Call `sdl.usage.stats` with `scope: "all"` (or legacy/default `scope: "both"`):
+
+```json
+{
+  "scope": "all"
+}
+```
+
+Response includes both session and lifetime data plus the existing Session and Lifetime charts in `formattedSummary`.
 
 ---
 
 ## The Formatted Summary
 
-When `sdl.usage.stats` is called, it renders a formatted summary showing both session and lifetime data:
+When `sdl.usage.stats` is called, it renders the existing chart sections for the requested scope:
 
 ```
 ── Token Savings ──────────────────────────────────

@@ -37,6 +37,22 @@ describe("UsageStatsRequestSchema validation", () => {
     }
   });
 
+  it("parses request with scope 'lifetime'", () => {
+    const parsed = UsageStatsRequestSchema.safeParse({ scope: "lifetime" });
+    assert.strictEqual(parsed.success, true);
+    if (parsed.success) {
+      assert.strictEqual(parsed.data.scope, "lifetime");
+    }
+  });
+
+  it("parses request with scope 'all'", () => {
+    const parsed = UsageStatsRequestSchema.safeParse({ scope: "all" });
+    assert.strictEqual(parsed.success, true);
+    if (parsed.success) {
+      assert.strictEqual(parsed.data.scope, "all");
+    }
+  });
+
   it("rejects invalid scope value", () => {
     const parsed = UsageStatsRequestSchema.safeParse({ scope: "invalid" });
     assert.strictEqual(parsed.success, false);
@@ -179,6 +195,51 @@ describe("handleUsageStats session scope (no DB required)", () => {
       "formattedSummary should not be empty",
     );
   });
+
+  it("formats session scope with only the Session chart", async (t) => {
+    if (!usageAvailable) return t.skip("usage module not available");
+    tokenAccumulator.reset();
+    tokenAccumulator.recordUsage("sdl.symbol.search", 100, 500);
+
+    const result = (await handleUsageStats({ scope: "session" })) as Record<string, unknown>;
+    const summary = result.formattedSummary as string;
+
+    assert.match(summary, /Session:/);
+    assert.doesNotMatch(summary, /Lifetime:/);
+  });
+
+
+  it("formats all scope with both Session and Lifetime charts", async (t) => {
+    if (!usageAvailable) return t.skip("usage module not available");
+    const [{ mkdtemp, rm }, { join }, { tmpdir }, { initLadybugDb, closeLadybugDb }] = await Promise.all([
+      import("node:fs/promises"),
+      import("node:path"),
+      import("node:os"),
+      import("../../dist/db/ladybug.js"),
+    ]);
+    const tempDir = await mkdtemp(join(tmpdir(), "sdl-usage-stats-"));
+
+    try {
+      await initLadybugDb(join(tempDir, "test.lbug"));
+      tokenAccumulator.reset();
+      tokenAccumulator.recordUsage("sdl.symbol.search", 100, 500);
+
+      const result = (await handleUsageStats({
+        scope: "all",
+        repoId: "usage-scope-test",
+      })) as Record<string, unknown>;
+      const summary = result.formattedSummary as string;
+
+      assert.ok(result.session, "should have session data");
+      assert.ok(result.history, "should have lifetime data");
+      assert.match(summary, /Session:/);
+      assert.match(summary, /Lifetime:/);
+    } finally {
+      await closeLadybugDb();
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
 
   it("omits non-saving meta tools from formattedSummary", async (t) => {
     if (!usageAvailable) return t.skip("usage module not available");

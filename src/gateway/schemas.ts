@@ -378,7 +378,7 @@ const PolicySetAction = z.object({
 
 const UsageStatsAction = z.object({
   action: z.literal("usage.stats"),
-  scope: z.enum(["session", "history", "both"]).default("both"),
+  scope: z.enum(["session", "history", "lifetime", "both", "all"]).default("both"),
   since: z.string().optional(),
   limit: z.number().int().min(1).max(100).optional(),
   persist: z.boolean().optional(),
