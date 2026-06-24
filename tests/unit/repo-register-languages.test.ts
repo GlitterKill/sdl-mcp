@@ -30,5 +30,6 @@ describe("repo.register language defaults", () => {
     assert.equal(languages.includes("fortran"), false);
     assert.equal(languages.includes("haskell"), false);
     assert.equal(languages.includes("julia"), false);
+    assert.equal(languages.includes("zig"), false);
   });
 });

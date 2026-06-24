@@ -84,6 +84,7 @@ const LANGUAGE_ALIASES = new Map<string, string>([
   ["lhs", "haskell"],
   ["julia", "julia"],
   ["jl", "julia"],
+  ["zig", "zig"],
 ]);
 
 export function inferLanguageIdFromPath(relPath: string): string {

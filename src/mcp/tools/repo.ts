@@ -106,6 +106,7 @@ const ON_DEMAND_REPO_LANGUAGES = new Set([
   "fortran",
   "haskell",
   "julia",
+  "zig",
 ]);
 const DEFAULT_REPO_LANGUAGES = SUPPORTED_LANGUAGES.filter(
   (language) => !ON_DEMAND_REPO_LANGUAGES.has(language),

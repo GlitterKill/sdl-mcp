@@ -391,6 +391,37 @@ const LANGUAGE_PACKS: readonly LanguagePackManifest[] = [
     lspServerId: "julia-language-server",
     installMode: "onDemand",
   },
+  {
+    languageId: "zig",
+    aliases: ["zig"],
+    extensions: [".zig"],
+    parserPackage: "tree-sitter-zig",
+    parserPackageSpec: "tree-sitter-zig@^0.2.0",
+    genericAdapter: {
+      languageId: "zig",
+      grammarLanguage: "zig",
+      fileExtensions: [".zig"],
+      symbolRules: [
+        { nodeTypes: ["function_declaration"], kind: "function" },
+        { nodeTypes: ["variable_declaration"], kind: "variable" },
+        {
+          nodeTypes: [
+            "struct_declaration",
+            "enum_declaration",
+            "union_declaration",
+            "opaque_declaration",
+            "error_set_declaration",
+          ],
+          kind: "type",
+        },
+        { nodeTypes: ["test_declaration"], kind: "function" },
+      ],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-zig@^0.2.0",
+    lspServerId: "zls",
+    installMode: "onDemand",
+  },
 ] as const;
 
 const packsByLanguage = new Map<string, LanguagePackManifest>();

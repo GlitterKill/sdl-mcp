@@ -73,6 +73,7 @@ export const LanguageSchema = z.enum([
   "fortran",
   "haskell",
   "julia",
+  "zig",
 ]);
 
 export const MemoryConfigSchema = z.object({
