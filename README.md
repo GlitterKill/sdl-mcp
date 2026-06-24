@@ -23,11 +23,11 @@ _Stop feeding entire files into the context window.<br/>Start giving agents exac
 <br/>
 
 <div align="center">
-  <a href="https://raw.githubusercontent.com/GlitterKill/sdl-mcp/main/docs/readme-assets/SDL-Token-Savings.mp4">
+  <a href="https://github.com/GlitterKill/sdl-mcp/blob/main/docs/readme-assets/SDL-Token-Savings-web.mp4">
     <img src="./docs/readme-assets/SDL-Token-Savings-poster.webp" alt="Watch the SDL-MCP token savings demo" width="800" />
   </a>
   <br/>
-  <sub><a href="https://raw.githubusercontent.com/GlitterKill/sdl-mcp/main/docs/readme-assets/SDL-Token-Savings.mp4">Watch the token savings demo (MP4)</a></sub>
+  <sub><a href="https://github.com/GlitterKill/sdl-mcp/blob/main/docs/readme-assets/SDL-Token-Savings-web.mp4">Watch the token savings demo</a></sub>
 </div>
 
 ## What's the problem?
