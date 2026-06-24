@@ -444,7 +444,43 @@
     "notes": "SDL lazy metadata is configured without installing tree-sitter-haxe. npm reports tree-sitter-haxe@0.13.0, but lsp-io reports haxe-language-server as system/manual and install haxe-language-server requires Haxe/haxelib or upstream installation, so provider-first validation remains pending."
   },
   {
-    "language": "Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
+    "language": "Racket",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "not configured",
+    "parserInstallMode": "not installed; no npm parser package found",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "racket-langserver",
+    "providerFirstStatus": "not supported: parser package and LSP server unavailable in local validation",
+    "validationRepo": "pending",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-racket-2026-06-24.md",
+    "notes": "lsp-io reports racket-langserver as system/manual and install racket-langserver requires Racket package tools/upstream installation. tree-sitter-racket and @tree-sitter-grammars/tree-sitter-racket are not published to npm, so SDL lazy metadata is intentionally not configured yet."
+  },
+  {
+    "language": "Raku",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "not configured",
+    "parserInstallMode": "not installed; no npm parser package found",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "raku-navigator",
+    "providerFirstStatus": "not supported: parser package and LSP server unavailable in local validation",
+    "validationRepo": "pending",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-raku-2026-06-24.md",
+    "notes": "lsp-io reports raku-navigator as system/manual and install raku-navigator requires upstream installation. tree-sitter-raku and @tree-sitter-grammars/tree-sitter-raku are not published to npm, so SDL lazy metadata is intentionally not configured yet."
+  },
+  {
+    "language": "ReScript",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "not configured",
+    "parserInstallMode": "not installed; no npm parser package found",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "rescript-language-server",
+    "providerFirstStatus": "not supported: parser package and LSP server unavailable in local validation",
+    "validationRepo": "pending",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-rescript-2026-06-24.md",
+    "notes": "lsp-io reports rescript-language-server as system/manual and install rescript-language-server requires ReScript editor tooling/upstream installation. tree-sitter-rescript and @tree-sitter-grammars/tree-sitter-rescript are not published to npm, so SDL lazy metadata is intentionally not configured yet."
+  },
+  {
+    "language": "Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
     "popularityRankSource": "Wave 3 rollout priority",
     "adapterStatus": "planned",
     "parserInstallMode": "not installed",
