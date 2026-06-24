@@ -10,6 +10,8 @@ import {
   _buildWatchmanStartupResyncForTesting,
   _decrementPendingChangeForGenerationForTesting,
   _drainPendingWatcherChangesForTesting,
+  _finishWatcherReindexForTesting,
+  _startWatcherReindexForTesting,
   _normalizeWatchmanFileNameForTesting,
   _probeWatchmanClientAvailabilityForTesting,
   _rotateAbortControllerForTesting,
@@ -306,6 +308,18 @@ describe("watchman provider helpers", () => {
     assert.equal(original.signal.aborted, true);
     assert.equal(next.signal.aborted, false);
     assert.notEqual(next, original);
+  });
+
+  it("coalesces watcher reindex requests while one is active", () => {
+    const state = { active: false, dirty: false };
+
+    assert.equal(_startWatcherReindexForTesting(state), true);
+    assert.equal(_startWatcherReindexForTesting(state), false);
+    assert.deepEqual(state, { active: true, dirty: true });
+
+    assert.equal(_finishWatcherReindexForTesting(state), true);
+    assert.deepEqual(state, { active: false, dirty: false });
+    assert.equal(_finishWatcherReindexForTesting(state), false);
   });
 
   it(

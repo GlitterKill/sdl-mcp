@@ -151,6 +151,24 @@ export function _rotateAbortControllerForTesting(
   return rotateAbortController(controller);
 }
 
+/**
+ * @internal
+ */
+export function _startWatcherReindexForTesting(
+  state: WatcherReindexCoalescer,
+): boolean {
+  return startWatcherReindex(state);
+}
+
+/**
+ * @internal
+ */
+export function _finishWatcherReindexForTesting(
+  state: WatcherReindexCoalescer,
+): boolean {
+  return finishWatcherReindex(state);
+}
+
 const watcherErrors: string[] = [];
 type MutableWatcherHealth = WatcherHealth & { pendingChanges: number };
 type PendingWatcherChange = {
@@ -162,6 +180,10 @@ type PendingWatcherChange = {
 type PendingWatcherHealthCounters = {
   pendingChanges: number;
   queueDepth: number;
+};
+type WatcherReindexCoalescer = {
+  active: boolean;
+  dirty: boolean;
 };
 
 const watcherHealthByRepo = new Map<string, MutableWatcherHealth>();
@@ -188,6 +210,30 @@ function decrementPendingChangeForGeneration(
   }
   health.pendingChanges = Math.max(0, health.pendingChanges - 1);
   return true;
+}
+
+function startWatcherReindex(state: WatcherReindexCoalescer): boolean {
+  if (state.active) {
+    state.dirty = true;
+    return false;
+  }
+  state.active = true;
+  return true;
+}
+
+function finishWatcherReindex(state: WatcherReindexCoalescer): boolean {
+  if (!state.active) {
+    return false;
+  }
+  state.active = false;
+  const shouldRunFollowUp = state.dirty;
+  state.dirty = false;
+  return shouldRunFollowUp;
+}
+
+function resetWatcherReindex(state: WatcherReindexCoalescer): void {
+  state.active = false;
+  state.dirty = false;
 }
 
 function rotateAbortController(controller: AbortController): AbortController {
@@ -369,6 +415,11 @@ export async function watchRepositoryWithIndexer(
   // restartWatcher() abort it so a late-completing reindex doesn't decrement
   // pendingChanges twice or schedule retries against a stale watcher state.
   let abortController = new AbortController();
+  const reindexCoalescer: WatcherReindexCoalescer = {
+    active: false,
+    dirty: false,
+  };
+  let scheduleFollowUpReindex: (() => void) | null = null;
   const staleCheckIntervalMs = Math.max(
     5_000,
     Math.floor(WATCHER_STALE_THRESHOLD_MS / 4),
@@ -381,6 +432,7 @@ export async function watchRepositoryWithIndexer(
   const clearPendingChanges = (): void => {
     watcherGeneration += 1;
     abortController = rotateAbortController(abortController);
+    resetWatcherReindex(reindexCoalescer);
     drainPendingWatcherChanges(pending, health);
   };
 
@@ -415,8 +467,14 @@ export async function watchRepositoryWithIndexer(
     // still tracks the cancellation we care about for THIS reindex.
     const abortSignal = abortController.signal;
     const generation = options.generation ?? watcherGeneration;
+    const ownsReindex =
+      attempt === 0 ? startWatcherReindex(reindexCoalescer) : true;
     let scheduledRetry = false;
+    let attemptTimedOut = false;
     try {
+      if (attempt === 0 && !ownsReindex) {
+        return;
+      }
       // Health gate: bail before touching the DB if the read pool is
       // already wedged. Avoids piling on more 60s reindex timeouts when
       // a native call is hung. The catch block below schedules a
@@ -439,10 +497,11 @@ export async function watchRepositoryWithIndexer(
       // timeout — but if the in-flight write itself stalls inside Ladybug,
       // the call hangs indefinitely, freezing pendingChanges and turning
       // watcher stale-restart into a no-op. The timeout treats the attempt
-      // as a failure so the retry/backoff path can run.
+      // as a failure without spawning retries behind uncancelled work.
       let timeoutTimer: NodeJS.Timeout | undefined;
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutTimer = setTimeout(() => {
+          attemptTimedOut = true;
           reject(
             new Error(
               `reindex attempt timed out after ${WATCHER_REINDEX_OPERATION_TIMEOUT_MS}ms`,
@@ -488,6 +547,7 @@ export async function watchRepositoryWithIndexer(
         `[sdl-mcp] Failed incremental index for ${filePath}: ${msg}`,
       );
       if (
+        !attemptTimedOut &&
         attempt + 1 < WATCHER_REINDEX_MAX_ATTEMPTS &&
         !closed &&
         !abortSignal.aborted &&
@@ -524,6 +584,17 @@ export async function watchRepositoryWithIndexer(
       }
       // exhausted retries fall through to finally for decrement
     } finally {
+      if (ownsReindex && !scheduledRetry) {
+        const shouldRunFollowUp = finishWatcherReindex(reindexCoalescer);
+        if (
+          shouldRunFollowUp &&
+          !closed &&
+          !abortSignal.aborted &&
+          generation === watcherGeneration
+        ) {
+          scheduleFollowUpReindex?.();
+        }
+      }
       if (!scheduledRetry) {
         decrementPendingChangeForGeneration(
           health,
@@ -570,6 +641,12 @@ export async function watchRepositoryWithIndexer(
       generation,
     });
     updateQueueDepth();
+  };
+
+  scheduleFollowUpReindex = () => {
+    // Coalesced changes may combine path events and provider resyncs from an
+    // active run, so one incremental pass catches the final repository state.
+    schedule(repoRow.rootPath, { forceIncremental: true });
   };
 
   const handler = (relativeFilePath: string): void => {
