@@ -16,18 +16,11 @@ _Stop feeding entire files into the context window.<br/>Start giving agents exac
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/w/GlitterKill/sdl-mcp?style=for-the-badge)<br/>
 [![RoastMyCode: A](https://roastmycode.ai/badge/GlitterKill/sdl-mcp)](https://roastmycode.ai/roast/latest/GlitterKill/sdl-mcp)
 
-</div>
-
 ---
 
 <br/>
 
-<div align="center">
-  <a href="https://github.com/GlitterKill/sdl-mcp/blob/main/docs/readme-assets/SDL-Token-Savings-web.mp4">
-    <img src="./docs/readme-assets/SDL-Token-Savings-poster.webp" alt="Watch the SDL-MCP token savings demo" width="800" />
-  </a>
-  <br/>
-  <sub><a href="https://github.com/GlitterKill/sdl-mcp/blob/main/docs/readme-assets/SDL-Token-Savings-web.mp4">Watch the token savings demo</a></sub>
+[SDL Token Savings](https://github.com/user-attachments/assets/cdf535a0-dc6e-4c63-ba52-646acfab8999)
 </div>
 
 ## What's the problem?
