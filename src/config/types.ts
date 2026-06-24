@@ -76,6 +76,7 @@ export const LanguageSchema = z.enum([
   "nix",
   "clojure",
   "ocaml",
+  "d",
   "zig",
   "gleam",
 ]);

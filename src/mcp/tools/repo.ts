@@ -109,6 +109,7 @@ const ON_DEMAND_REPO_LANGUAGES = new Set([
   "nix",
   "clojure",
   "ocaml",
+  "d",
   "zig",
   "gleam",
 ]);

@@ -80,6 +80,8 @@ const CANONICAL_LANGUAGE_IDS_BY_CONFIG = new Map<string, string>([
   ["ocaml", "ocaml"],
   ["ml", "ocaml"],
   ["mli", "ocaml"],
+  ["d", "d"],
+  ["di", "d"],
   ["zig", "zig"],
   ["gleam", "gleam"],
 ]);

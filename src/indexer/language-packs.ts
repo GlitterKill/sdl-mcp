@@ -436,6 +436,28 @@ const LANGUAGE_PACKS: readonly LanguagePackManifest[] = [
   },
 
   {
+    languageId: "d",
+    aliases: ["d", "di"],
+    extensions: [".d", ".di"],
+    parserPackage: "tree-sitter-d",
+    parserPackageSpec: "tree-sitter-d@^0.8.2",
+    genericAdapter: {
+      languageId: "d",
+      grammarLanguage: "d",
+      fileExtensions: [".d", ".di"],
+      symbolRules: [
+        { nodeTypes: ["function_declaration", "template_declaration"], kind: "function" },
+        { nodeTypes: ["class_declaration", "interface_declaration", "struct_declaration"], kind: "class" },
+        { nodeTypes: ["module_declaration"], kind: "module" },
+      ],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-d@^0.8.2",
+    lspServerId: "serve-d",
+    installMode: "onDemand",
+  },
+
+  {
     languageId: "gleam",
     aliases: ["gleam"],
     extensions: [".gleam"],

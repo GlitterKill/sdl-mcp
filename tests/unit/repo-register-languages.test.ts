@@ -33,6 +33,7 @@ describe("repo.register language defaults", () => {
     assert.equal(languages.includes("nix"), false);
     assert.equal(languages.includes("clojure"), false);
     assert.equal(languages.includes("ocaml"), false);
+    assert.equal(languages.includes("d"), false);
     assert.equal(languages.includes("gleam"), false);
     assert.equal(languages.includes("zig"), false);
   });

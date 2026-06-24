@@ -93,6 +93,8 @@ const LANGUAGE_ALIASES = new Map<string, string>([
   ["ocaml", "ocaml"],
   ["ml", "ocaml"],
   ["mli", "ocaml"],
+  ["d", "d"],
+  ["di", "d"],
   ["zig", "zig"],
   ["gleam", "gleam"],
 ]);

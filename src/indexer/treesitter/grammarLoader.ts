@@ -85,6 +85,7 @@ export type SupportedLanguage =
   | "nix"
   | "clojure"
   | "ocaml"
+  | "d"
   | "zig"
   | "gleam";
 
@@ -128,6 +129,7 @@ const GRAMMAR_PACKAGES: Record<
   nix: { pkg: "tree-sitter-nix" },
   clojure: { pkg: "@yogthos/tree-sitter-clojure" },
   ocaml: { pkg: "tree-sitter-ocaml" },
+  d: { pkg: "tree-sitter-d" },
   zig: { pkg: "tree-sitter-zig" },
   gleam: { pkg: "tree-sitter-gleam" },
 };

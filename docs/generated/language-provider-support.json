@@ -396,7 +396,19 @@
     "notes": "lsp-io reports crystalline as system/manual and tree-sitter-crystal is not published to npm. SDL lazy metadata is intentionally not configured until both prerequisites can be resolved."
   },
   {
-    "language": "D, V, Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
+    "language": "D",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "lazy language pack configured",
+    "parserInstallMode": "on-demand when repo config includes d",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "serve-d",
+    "providerFirstStatus": "LSP provider-first validated with bounded provider coverage",
+    "validationRepo": "dlang/dub",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-d-2026-06-24.md",
+    "notes": "Validated 4/40 provider-primary files and 718 graph symbols on a bounded dlang/dub source list using serve-d exported by lsp-io; tree-sitter-d installed only after the D-configured index run."
+  },
+  {
+    "language": "V, Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
     "popularityRankSource": "Wave 3 rollout priority",
     "adapterStatus": "planned",
     "parserInstallMode": "not installed",
