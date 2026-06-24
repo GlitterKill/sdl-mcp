@@ -23,7 +23,7 @@ _Stop feeding entire files into the context window.<br/>Start giving agents exac
 <br/>
 
 <div align="center">
-<video width="854" controls> <source src="https://github.com/GlitterKill/sdl-mcp/blob/7099b2c5edff0f89bc2d8d6f9a80b900da0ee74f/docs/readme-assets/SDL-Token-Savings-web.mp4" type="video/mp4"> Your browser does not support the video tag. </video>
+<video width="854" controls> <source src="[https://github.com/GlitterKill/sdl-mcp/blob/7099b2c5edff0f89bc2d8d6f9a80b900da0ee74f/docs/readme-assets/SDL-Token-Savings-web.mp4](https://github.com/GlitterKill/sdl-mcp/blob/7099b2c5edff0f89bc2d8d6f9a80b900da0ee74f/docs/readme-assets/SDL-Token-Savings-web.mp4)" type="video/mp4"> Your browser does not support the video tag. </video>
 </div>
 
 ## What's the problem?
