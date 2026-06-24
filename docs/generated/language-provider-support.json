@@ -348,7 +348,19 @@
     "notes": "SDL lazy metadata is configured without installing tree-sitter-ocaml. lsp-io reports ocamllsp as system/manual and install ocamllsp requires opam/upstream installation, so provider-first validation remains pending."
   },
   {
-    "language": "Ada, Elm, Nim, Crystal, D, V, Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
+    "language": "Ada",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "not configured",
+    "parserInstallMode": "not installed; no npm parser package found",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "ada-language-server",
+    "providerFirstStatus": "not supported: parser package unavailable in local validation",
+    "validationRepo": "pending",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-ada-2026-06-24.md",
+    "notes": "lsp-io has ada-language-server managed and installed, but tree-sitter-ada and @tree-sitter-grammars/tree-sitter-ada are not published to npm. SDL lazy metadata is intentionally not configured until a loadable parser package artifact exists."
+  },
+  {
+    "language": "Elm, Nim, Crystal, D, V, Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
     "popularityRankSource": "Wave 3 rollout priority",
     "adapterStatus": "planned",
     "parserInstallMode": "not installed",
