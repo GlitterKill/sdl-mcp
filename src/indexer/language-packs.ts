@@ -414,6 +414,28 @@ const LANGUAGE_PACKS: readonly LanguagePackManifest[] = [
   },
 
   {
+    languageId: "ocaml",
+    aliases: ["ocaml", "ml", "mli"],
+    extensions: [".ml", ".mli"],
+    parserPackage: "tree-sitter-ocaml",
+    parserPackageSpec: "tree-sitter-ocaml@^0.24.2",
+    genericAdapter: {
+      languageId: "ocaml",
+      grammarLanguage: "ocaml",
+      fileExtensions: [".ml", ".mli"],
+      symbolRules: [
+        { nodeTypes: ["value_definition"], kind: "function" },
+        { nodeTypes: ["module_definition", "module_type_definition"], kind: "module" },
+        { nodeTypes: ["type_definition"], kind: "type" },
+      ],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-ocaml@^0.24.2",
+    lspServerId: "ocamllsp",
+    installMode: "onDemand",
+  },
+
+  {
     languageId: "gleam",
     aliases: ["gleam"],
     extensions: [".gleam"],

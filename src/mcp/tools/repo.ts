@@ -108,6 +108,7 @@ const ON_DEMAND_REPO_LANGUAGES = new Set([
   "julia",
   "nix",
   "clojure",
+  "ocaml",
   "zig",
   "gleam",
 ]);

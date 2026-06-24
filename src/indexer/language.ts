@@ -90,6 +90,9 @@ const LANGUAGE_ALIASES = new Map<string, string>([
   ["cljs", "clojure"],
   ["cljc", "clojure"],
   ["edn", "clojure"],
+  ["ocaml", "ocaml"],
+  ["ml", "ocaml"],
+  ["mli", "ocaml"],
   ["zig", "zig"],
   ["gleam", "gleam"],
 ]);
