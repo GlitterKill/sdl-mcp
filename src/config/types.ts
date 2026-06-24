@@ -74,6 +74,7 @@ export const LanguageSchema = z.enum([
   "haskell",
   "julia",
   "nix",
+  "clojure",
   "zig",
   "gleam",
 ]);

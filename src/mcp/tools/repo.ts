@@ -107,6 +107,7 @@ const ON_DEMAND_REPO_LANGUAGES = new Set([
   "haskell",
   "julia",
   "nix",
+  "clojure",
   "zig",
   "gleam",
 ]);

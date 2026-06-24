@@ -83,6 +83,7 @@ export type SupportedLanguage =
   | "haskell"
   | "julia"
   | "nix"
+  | "clojure"
   | "zig"
   | "gleam";
 
@@ -124,6 +125,7 @@ const GRAMMAR_PACKAGES: Record<
   haskell: { pkg: "tree-sitter-haskell" },
   julia: { pkg: "tree-sitter-julia" },
   nix: { pkg: "tree-sitter-nix" },
+  clojure: { pkg: "@yogthos/tree-sitter-clojure" },
   zig: { pkg: "tree-sitter-zig" },
   gleam: { pkg: "tree-sitter-gleam" },
 };

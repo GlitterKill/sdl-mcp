@@ -36,6 +36,7 @@ describe("on-demand language pack registry", () => {
       ],
       ["julia", "julia", "tree-sitter-julia", "julia-language-server"],
       ["nix", "nix", "tree-sitter-nix", "nil"],
+      ["clojure", "clojure", "@yogthos/tree-sitter-clojure", "clojure-lsp"],
       ["gleam", "gleam", "tree-sitter-gleam", "gleam-lsp"],
       ["zig", "zig", "tree-sitter-zig", "zls"],
     ] as const;
@@ -70,6 +71,7 @@ describe("on-demand language pack registry", () => {
         "haskell",
         "julia",
         "nix",
+        "clojure",
         "gleam",
         "zig",
       ]).map((pack) => ({
@@ -96,6 +98,7 @@ describe("on-demand language pack registry", () => {
         { languageId: "haskell", parserPackage: "tree-sitter-haskell" },
         { languageId: "julia", parserPackage: "tree-sitter-julia" },
         { languageId: "nix", parserPackage: "tree-sitter-nix" },
+        { languageId: "clojure", parserPackage: "@yogthos/tree-sitter-clojure" },
         { languageId: "gleam", parserPackage: "tree-sitter-gleam" },
         { languageId: "zig", parserPackage: "tree-sitter-zig" },
       ],

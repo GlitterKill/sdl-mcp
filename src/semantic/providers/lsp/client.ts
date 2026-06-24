@@ -97,6 +97,17 @@ const DocumentDiagnosticRequestType = new RequestType<
 >("textDocument/diagnostic");
 const SHUTDOWN_TIMEOUT_MS = 1_000;
 
+function canContinueAfterInitializeError(
+  serverId: string,
+  error: unknown,
+): boolean {
+  return (
+    serverId === "clojure-lsp" &&
+    error instanceof Error &&
+    error.message.includes("Internal error")
+  );
+}
+
 function buildClientCapabilities(): InitializeParams["capabilities"] {
   // Some servers, including PowerShell Editor Services, assume standard
   // capability objects exist while deriving registration options. Advertise the
@@ -492,22 +503,32 @@ export class SemanticLspClient {
     this.process = child;
     this.connection = connection;
 
-    const result = await this.sendRequest(
-      InitializeRequest,
-      {
-        processId: process.pid,
-        rootUri,
-        capabilities: buildClientCapabilities(),
-        workspaceFolders: [
-          {
-            uri: rootUri,
-            name: this.options.serverId,
-          },
-        ],
-        initializationOptions: this.options.initializationOptions,
-      },
-      timeoutMs,
-    );
+    let result: InitializeResult;
+    try {
+      result = await this.sendRequest(
+        InitializeRequest,
+        {
+          processId: process.pid,
+          rootUri,
+          capabilities: buildClientCapabilities(),
+          workspaceFolders: [
+            {
+              uri: rootUri,
+              name: this.options.serverId,
+            },
+          ],
+          initializationOptions: this.options.initializationOptions,
+        },
+        timeoutMs,
+      );
+    } catch (error) {
+      if (!canContinueAfterInitializeError(this.options.serverId, error)) {
+        throw error;
+      }
+      // ponytail: clojure-lsp can return initialize Internal error while still
+      // serving documentSymbol; keep this server-scoped until upstream fixes it.
+      result = { capabilities: { documentSymbolProvider: true } };
+    }
     await connection.sendNotification(InitializedNotification, {});
     this.initialized = true;
     return result;

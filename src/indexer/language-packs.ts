@@ -392,6 +392,28 @@ const LANGUAGE_PACKS: readonly LanguagePackManifest[] = [
     installMode: "onDemand",
   },
   {
+    languageId: "clojure",
+    aliases: ["clojure", "clj", "cljs", "cljc"],
+    extensions: [".clj", ".cljs", ".cljc", ".edn"],
+    parserPackage: "@yogthos/tree-sitter-clojure",
+    parserPackageSpec: "@yogthos/tree-sitter-clojure@^0.0.14",
+    genericAdapter: {
+      languageId: "clojure",
+      grammarLanguage: "clojure",
+      fileExtensions: [".clj", ".cljs", ".cljc", ".edn"],
+      symbolRules: [
+        { nodeTypes: ["list_lit"], kind: "function" },
+        { nodeTypes: ["sym_lit"], kind: "variable" },
+        { nodeTypes: ["map_lit"], kind: "module" },
+      ],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps @yogthos/tree-sitter-clojure@^0.0.14",
+    lspServerId: "clojure-lsp",
+    installMode: "onDemand",
+  },
+
+  {
     languageId: "gleam",
     aliases: ["gleam"],
     extensions: [".gleam"],
