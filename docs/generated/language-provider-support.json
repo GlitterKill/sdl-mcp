@@ -288,7 +288,19 @@
     "notes": "Validated 2/2 provider-primary files and 100 graph symbols using zls installed through lsp-io; tree-sitter-zig installed only after the Zig-configured index run."
   },
   {
-    "language": "Nix, Clojure, Erlang, OCaml, Ada, Gleam, Elm, Nim, Crystal, D, V, Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
+    "language": "Gleam",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "lazy language pack configured",
+    "parserInstallMode": "on-demand when repo config includes gleam",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "gleam-lsp",
+    "providerFirstStatus": "LSP provider-first validated with bounded provider coverage",
+    "validationRepo": "gleam-lang/stdlib",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-gleam-2026-06-24.md",
+    "notes": "Validated 18/42 provider-primary files and 518 graph symbols using gleam-lsp exported by lsp-io with args [\"lsp\"]; tree-sitter-gleam was installed only after the Gleam-configured index run."
+  },
+  {
+    "language": "Nix, Clojure, Erlang, OCaml, Ada, Elm, Nim, Crystal, D, V, Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
     "popularityRankSource": "Wave 3 rollout priority",
     "adapterStatus": "planned",
     "parserInstallMode": "not installed",
