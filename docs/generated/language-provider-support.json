@@ -408,7 +408,19 @@
     "notes": "Validated 4/40 provider-primary files and 718 graph symbols on a bounded dlang/dub source list using serve-d exported by lsp-io; tree-sitter-d installed only after the D-configured index run."
   },
   {
-    "language": "V, Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
+    "language": "V",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "not configured",
+    "parserInstallMode": "not installed; npm parser package failed runtime compatibility check",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "v-analyzer",
+    "providerFirstStatus": "not supported: parser package incompatible and LSP symbols unavailable in local validation",
+    "validationRepo": "vlang/v",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-v-2026-06-24.md",
+    "notes": "lsp-io installed v-analyzer and SDL export now includes **/*.v without relaxing detection. tree-sitter-v installed only during explicit V-configured validation, but failed Parser.setLanguage with Invalid language object; the package was removed and SDL lazy metadata was not committed."
+  },
+  {
+    "language": "Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
     "popularityRankSource": "Wave 3 rollout priority",
     "adapterStatus": "planned",
     "parserInstallMode": "not installed",
