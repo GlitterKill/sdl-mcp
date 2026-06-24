@@ -324,7 +324,19 @@
     "notes": "Validated 9/10 provider-primary files and 199 graph symbols using clojure-lsp exported by lsp-io; @yogthos/tree-sitter-clojure installed only after the Clojure-configured index run. clojure-lsp initialize Internal error is tolerated only for documentSymbol-capable Clojure sessions."
   },
   {
-    "language": "Erlang, OCaml, Ada, Elm, Nim, Crystal, D, V, Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
+    "language": "Erlang",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "not configured",
+    "parserInstallMode": "not installed; no usable npm parser package found",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "elp",
+    "providerFirstStatus": "not supported: parser package and LSP server unavailable in local validation",
+    "validationRepo": "pending",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-erlang-2026-06-24.md",
+    "notes": "lsp-io reports elp as system/manual and install elp prints the upstream/manual install requirement. npm tree-sitter-erlang is a security placeholder, and @tree-sitter-grammars/tree-sitter-erlang is not published, so SDL lazy metadata is intentionally not configured yet."
+  },
+  {
+    "language": "OCaml, Ada, Elm, Nim, Crystal, D, V, Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
     "popularityRankSource": "Wave 3 rollout priority",
     "adapterStatus": "planned",
     "parserInstallMode": "not installed",
