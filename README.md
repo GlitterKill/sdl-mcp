@@ -20,7 +20,7 @@ _Stop feeding entire files into the context window.<br/>Start giving agents exac
 
 <br/>
 
-[SDL Token Savings](https://github.com/user-attachments/assets/adaadfc0-7d6e-490c-8c2c-777df6d42438)
+[SDL Token Savings](https://github.com/user-attachments/assets/cdf535a0-dc6e-4c63-ba52-646acfab8999)
 </div>
 
 ## What's the problem?
