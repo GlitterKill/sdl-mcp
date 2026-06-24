@@ -32,7 +32,7 @@
     "lspIoServer": "not required",
     "providerFirstStatus": "SCIP provider-first executable",
     "validationRepo": "prometheus/prometheus",
-    "validationEvidence": "devdocs/validation/provider-first-go-prometheus-2026-06-15.md",
+    "validationEvidence": "internal validation evidence",
     "notes": "Go SCIP normalization is active."
   },
   {
@@ -104,7 +104,7 @@
     "lspIoServer": "phpactor",
     "providerFirstStatus": "LSP provider-first validated with capped provider coverage",
     "validationRepo": "sebastianbergmann/phpunit",
-    "validationEvidence": "devdocs/validation/provider-first-lsp-php-2026-06-16.md",
+    "validationEvidence": "internal validation evidence",
     "notes": "Validated 50/2574 provider-primary files with legacy fallback for uncovered files; default repo registration no longer enables PHP implicitly."
   },
   {
@@ -116,7 +116,7 @@
     "lspIoServer": "bash-language-server",
     "providerFirstStatus": "LSP provider-first validated with partial provider coverage",
     "validationRepo": "bats-core/bats-core",
-    "validationEvidence": "devdocs/validation/provider-first-lsp-shell-2026-06-16.md",
+    "validationEvidence": "internal validation evidence",
     "notes": "Validated 54/54 provider-primary files and 474 LSP symbols; references/call proof still pending."
   },
   {
@@ -128,7 +128,7 @@
     "lspIoServer": "powershell-editor-services",
     "providerFirstStatus": "LSP provider-first validated",
     "validationRepo": "PowerShell/PowerShellGet",
-    "validationEvidence": "devdocs/validation/provider-first-lsp-powershell-2026-06-16.md",
+    "validationEvidence": "internal validation evidence",
     "notes": "Validated 31/31 provider-primary files and 856 LSP symbols after SDL advertised standard initialize capabilities required by PowerShell Editor Services."
   },
   {
@@ -140,7 +140,7 @@
     "lspIoServer": "ruby-lsp",
     "providerFirstStatus": "LSP provider-first validated",
     "validationRepo": "sinatra/sinatra",
-    "validationEvidence": "devdocs/validation/provider-first-lsp-ruby-2026-06-16.md",
+    "validationEvidence": "internal validation evidence",
     "notes": "Validated 147/147 provider-primary files and 1557 LSP symbols using lsp-io ruby-lsp export plus Ruby LSP minimal bundle env."
   },
   {
@@ -152,7 +152,7 @@
     "lspIoServer": "lua-language-server",
     "providerFirstStatus": "LSP provider-first validated",
     "validationRepo": "nvim-lua/plenary.nvim",
-    "validationEvidence": "devdocs/validation/provider-first-lsp-lua-2026-06-16.md",
+    "validationEvidence": "internal validation evidence",
     "notes": "Validated 113/113 provider-primary files and 11844 LSP symbols across the full validation repository."
   },
   {
@@ -164,7 +164,7 @@
     "lspIoServer": "dart-sdk-lsp",
     "providerFirstStatus": "LSP provider-first validated",
     "validationRepo": "dart-lang/http",
-    "validationEvidence": "devdocs/validation/provider-first-lsp-dart-2026-06-16.md",
+    "validationEvidence": "internal validation evidence",
     "notes": "Validated 324/324 provider-primary files and 10173 LSP symbols using Dart SDK language-server export."
   },
   {
@@ -176,7 +176,7 @@
     "lspIoServer": "sourcekit-lsp",
     "providerFirstStatus": "LSP provider-first validated",
     "validationRepo": "apple/swift-argument-parser",
-    "validationEvidence": "devdocs/validation/provider-first-lsp-swift-2026-06-16.md",
+    "validationEvidence": "internal validation evidence",
     "notes": "Validated 165/165 provider-primary files and 4663 LSP symbols using SourceKit-LSP export."
   },
   {
@@ -188,7 +188,7 @@
     "lspIoServer": "groovy-language-server",
     "providerFirstStatus": "LSP provider-first validated with bounded provider coverage",
     "validationRepo": "spockframework/spock",
-    "validationEvidence": "devdocs/validation/provider-first-lsp-groovy-2026-06-17.md",
+    "validationEvidence": "internal validation evidence",
     "notes": "Validated 33/540 provider-primary files and 415 LSP symbols using document-session mode; provider-unusable and uncovered Groovy files use full legacy fallback."
   },
   {
@@ -200,7 +200,7 @@
     "lspIoServer": "perl-navigator",
     "providerFirstStatus": "LSP provider-first validated with bounded provider coverage",
     "validationRepo": "Perl-Critic/Perl-Critic",
-    "validationEvidence": "devdocs/validation/provider-first-lsp-perl-2026-06-17.md",
+    "validationEvidence": "internal validation evidence",
     "notes": "Validated 67/259 provider-primary files and 516 LSP symbols; provider-unusable Perl Navigator files use full legacy fallback."
   },
   {
@@ -212,7 +212,7 @@
     "lspIoServer": "r-languageserver",
     "providerFirstStatus": "LSP provider-first validated with bounded provider coverage",
     "validationRepo": "r-lib/pkgdown",
-    "validationEvidence": "devdocs/validation/provider-first-lsp-r-2026-06-17.md",
+    "validationEvidence": "internal validation evidence",
     "notes": "Validated 99/133 provider-primary files and 761 LSP symbols using R languageserver; provider-unusable files use full legacy fallback."
   },
   {
@@ -224,7 +224,7 @@
     "lspIoServer": "expert",
     "providerFirstStatus": "LSP provider-first validated with bounded provider coverage",
     "validationRepo": "elixir-plug/plug",
-    "validationEvidence": "devdocs/validation/provider-first-lsp-elixir-2026-06-17.md",
+    "validationEvidence": "internal validation evidence",
     "notes": "Validated 43/78 provider-primary files and 1176 LSP symbols using Expert with first-document warm-up retry; provider-unusable files use full legacy fallback."
   },
   {
@@ -236,7 +236,7 @@
     "lspIoServer": "fsautocomplete",
     "providerFirstStatus": "LSP provider-first validated with bounded provider coverage",
     "validationRepo": "fsprojects/FSharpPlus",
-    "validationEvidence": "devdocs/validation/provider-first-lsp-fsharp-2026-06-17.md",
+    "validationEvidence": "internal validation evidence",
     "notes": "Validated 145/217 provider-primary files and 6090 LSP symbols using FsAutoComplete with AutomaticWorkspaceInit and first-document retry; provider-unusable and uncovered files use full legacy fallback."
   },
   {
@@ -248,7 +248,7 @@
     "lspIoServer": "fortls",
     "providerFirstStatus": "LSP provider-first validated with bounded provider coverage",
     "validationRepo": "fortran-lang/stdlib",
-    "validationEvidence": "devdocs/validation/provider-first-lsp-fortran-2026-06-17.md",
+    "validationEvidence": "internal validation evidence",
     "notes": "Validated 109/408 provider-primary files and 114 LSP symbols using Fortls launched by LSP-IO as python -m fortls; provider-unusable and uncovered files use full legacy fallback."
   },
   {
@@ -260,7 +260,7 @@
     "lspIoServer": "haskell-language-server",
     "providerFirstStatus": "LSP provider-first validated with bounded provider coverage",
     "validationRepo": "haskell/parsec",
-    "validationEvidence": "devdocs/validation/provider-first-lsp-haskell-2026-06-17.md",
+    "validationEvidence": "internal validation evidence",
     "notes": "Validated 38/39 provider-primary files and 542 LSP symbols using Haskell Language Server exported by LSP-IO as --lsp --log-stderr False; provider-unusable Setup.hs uses full legacy fallback."
   },
   {
