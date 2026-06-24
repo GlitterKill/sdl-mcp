@@ -22,6 +22,12 @@ _Stop feeding entire files into the context window.<br/>Start giving agents exac
 
 <br/>
 
+<div align="center">
+  <video src="docs/readme-assets/SDL-Token-Savings.mp4" controls width="800">
+    Your browser does not support the video tag.
+  </video>
+</div>
+
 ## What's the problem?
 
 Every time an AI coding agent reads a file to answer a question, it consumes thousands of tokens. Most of those tokens are irrelevant to the task. The agent doesn't need 500 lines of a file to know that `validateToken` takes a `string` and returns a `Promise<User>` — but it reads them anyway, because that's all it has.
