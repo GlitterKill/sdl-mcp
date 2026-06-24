@@ -365,6 +365,32 @@ const LANGUAGE_PACKS: readonly LanguagePackManifest[] = [
     lspServerId: "haskell-language-server",
     installMode: "onDemand",
   },
+  {
+    languageId: "julia",
+    aliases: ["julia", "jl"],
+    extensions: [".jl"],
+    parserPackage: "tree-sitter-julia",
+    parserPackageSpec: "tree-sitter-julia@^0.23.1",
+    genericAdapter: {
+      languageId: "julia",
+      grammarLanguage: "julia",
+      fileExtensions: [".jl"],
+      symbolRules: [
+        { nodeTypes: ["module_definition"], kind: "module" },
+        { nodeTypes: ["function_definition"], kind: "function" },
+        { nodeTypes: ["macro_definition"], kind: "function" },
+        { nodeTypes: ["struct_definition"], kind: "class" },
+        {
+          nodeTypes: ["abstract_definition", "primitive_definition"],
+          kind: "type",
+        },
+      ],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-julia@^0.23.1",
+    lspServerId: "julia-language-server",
+    installMode: "onDemand",
+  },
 ] as const;
 
 const packsByLanguage = new Map<string, LanguagePackManifest>();

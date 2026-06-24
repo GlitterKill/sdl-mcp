@@ -1154,6 +1154,7 @@ function documentLanguageIdForLspPath(
     return "fortran";
   }
   if (/\.(?:hs|lhs)$/u.test(relPath)) return "haskell";
+  if (/\.jl$/u.test(relPath)) return "julia";
   return "plaintext";
 }
 

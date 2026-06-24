@@ -80,7 +80,8 @@ export type SupportedLanguage =
   | "elixir"
   | "fsharp"
   | "fortran"
-  | "haskell";
+  | "haskell"
+  | "julia";
 
 const parserCache = new Map<SupportedLanguage, Parser | null>();
 const languageCache = new Map<SupportedLanguage, Parser.Language | null>();
@@ -118,6 +119,7 @@ const GRAMMAR_PACKAGES: Record<
   fsharp: { pkg: "tree-sitter-fsharp", prop: "fsharp" },
   fortran: { pkg: "tree-sitter-fortran" },
   haskell: { pkg: "tree-sitter-haskell" },
+  julia: { pkg: "tree-sitter-julia" },
 };
 
 function getLanguageModule(

@@ -19,8 +19,8 @@ describe("on-demand language pack registry", () => {
         "powershell-editor-services",
       ],
       ["ruby", "ruby", "tree-sitter-ruby", "ruby-lsp"],
-      ["lua", "lua", "tree-sitter-lua", "lua-language-server"],
-      ["dart", "dart", "tree-sitter-dart", "dart-sdk-lsp"],
+      ["lua", "lua", "@tree-sitter-grammars/tree-sitter-lua", "lua-language-server"],
+      ["dart", "dart", "@sengac/tree-sitter-dart", "dart-sdk-lsp"],
       ["swift", "swift", "tree-sitter-swift", "sourcekit-lsp"],
       ["groovy", "groovy", "tree-sitter-groovy", "groovy-language-server"],
       ["perl", "perl", "tree-sitter-perl", "perl-navigator"],
@@ -34,6 +34,7 @@ describe("on-demand language pack registry", () => {
         "tree-sitter-haskell",
         "haskell-language-server",
       ],
+      ["julia", "julia", "tree-sitter-julia", "julia-language-server"],
     ] as const;
 
     for (const [alias, languageId, parserPackage, lspServerId] of expected) {
@@ -64,6 +65,7 @@ describe("on-demand language pack registry", () => {
         "fsharp",
         "fortran",
         "haskell",
+        "julia",
       ]).map((pack) => ({
         languageId: pack.languageId,
         parserPackage: pack.parserPackage,
@@ -76,8 +78,8 @@ describe("on-demand language pack registry", () => {
           parserPackage: "tree-sitter-powershell",
         },
         { languageId: "ruby", parserPackage: "tree-sitter-ruby" },
-        { languageId: "lua", parserPackage: "tree-sitter-lua" },
-        { languageId: "dart", parserPackage: "tree-sitter-dart" },
+        { languageId: "lua", parserPackage: "@tree-sitter-grammars/tree-sitter-lua" },
+        { languageId: "dart", parserPackage: "@sengac/tree-sitter-dart" },
         { languageId: "swift", parserPackage: "tree-sitter-swift" },
         { languageId: "groovy", parserPackage: "tree-sitter-groovy" },
         { languageId: "perl", parserPackage: "tree-sitter-perl" },
@@ -86,6 +88,7 @@ describe("on-demand language pack registry", () => {
         { languageId: "fsharp", parserPackage: "tree-sitter-fsharp" },
         { languageId: "fortran", parserPackage: "tree-sitter-fortran" },
         { languageId: "haskell", parserPackage: "tree-sitter-haskell" },
+        { languageId: "julia", parserPackage: "tree-sitter-julia" },
       ],
     );
   });
@@ -106,6 +109,7 @@ describe("on-demand language pack registry", () => {
       ".fs",
       ".f90",
       ".hs",
+      ".jl",
     ]) {
       assert.equal(getLanguageExtensions(["ts", "py"]).includes(extension), false);
     }
@@ -124,5 +128,6 @@ describe("on-demand language pack registry", () => {
     assert.ok(getLanguageExtensions(["fsharp"]).includes(".fs"));
     assert.ok(getLanguageExtensions(["fortran"]).includes(".f90"));
     assert.ok(getLanguageExtensions(["haskell"]).includes(".hs"));
+    assert.ok(getLanguageExtensions(["julia"]).includes(".jl"));
   });
 });

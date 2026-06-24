@@ -71,6 +71,7 @@ const CANONICAL_LANGUAGE_IDS_BY_CONFIG = new Map<string, string>([
   ["f77", "fortran"],
   ["hs", "haskell"],
   ["lhs", "haskell"],
+  ["jl", "julia"],
 ]);
 
 const PROVIDER_SCAN_COMPANION_EXTENSIONS = new Map<string, readonly string[]>([
