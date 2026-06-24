@@ -167,6 +167,7 @@ This summary is delivered in two ways:
 2. As a **content block** appended to the tool response
 
 Agents reporting SDL-backed completion should copy the returned `formattedSummary` verbatim inside a fenced `text` block. Do not paraphrase, shorten, reformat, or strip the bar characters; if the stats call cannot be captured, state the reason.
+
 ---
 
 ## `sdl.usage.stats` Tool Reference
