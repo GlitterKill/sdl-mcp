@@ -78,6 +78,7 @@ export const LanguageSchema = z.enum([
   "ocaml",
   "d",
   "haxe",
+  "commonlisp",
   "zig",
   "gleam",
 ]);

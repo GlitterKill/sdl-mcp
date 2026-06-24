@@ -480,6 +480,27 @@ const LANGUAGE_PACKS: readonly LanguagePackManifest[] = [
   },
 
   {
+    languageId: "commonlisp",
+    aliases: ["commonlisp", "common-lisp", "lisp", "lsp", "asd"],
+    extensions: [".lisp", ".lsp", ".asd"],
+    parserPackage: "tree-sitter-commonlisp",
+    parserPackageSpec: "tree-sitter-commonlisp@^0.4.1",
+    genericAdapter: {
+      languageId: "commonlisp",
+      grammarLanguage: "commonlisp",
+      fileExtensions: [".lisp", ".lsp", ".asd"],
+      symbolRules: [
+        { nodeTypes: ["list_lit"], kind: "function" },
+        { nodeTypes: ["sym_lit"], kind: "variable" },
+      ],
+    },
+    installCommand:
+      "npm install --prefix <sdl-cache>/language-packs --legacy-peer-deps tree-sitter-commonlisp@^0.4.1",
+    lspServerId: "cl-lsp",
+    installMode: "onDemand",
+  },
+
+  {
     languageId: "gleam",
     aliases: ["gleam"],
     extensions: [".gleam"],

@@ -480,15 +480,87 @@
     "notes": "lsp-io reports rescript-language-server as system/manual and install rescript-language-server requires ReScript editor tooling/upstream installation. tree-sitter-rescript and @tree-sitter-grammars/tree-sitter-rescript are not published to npm, so SDL lazy metadata is intentionally not configured yet."
   },
   {
-    "language": "Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
+    "language": "Ballerina",
     "popularityRankSource": "Wave 3 rollout priority",
-    "adapterStatus": "planned",
-    "parserInstallMode": "not installed",
+    "adapterStatus": "not configured",
+    "parserInstallMode": "not installed; no npm parser package found",
     "scipStatus": "no practical SCIP indexer",
-    "lspIoServer": "pending lsp-io metadata",
-    "providerFirstStatus": "not supported",
+    "lspIoServer": "ballerina-language-server",
+    "providerFirstStatus": "not supported: parser package and LSP server unavailable in local validation",
     "validationRepo": "pending",
-    "validationEvidence": "pending",
-    "notes": "Keep tree-sitter packages uninstalled until each language is configured."
+    "validationEvidence": "devdocs/validation/provider-first-lsp-ballerina-2026-06-24.md",
+    "notes": "lsp-io reports ballerina-language-server as system/manual and install ballerina-language-server requires Ballerina on PATH. tree-sitter-ballerina and @tree-sitter-grammars/tree-sitter-ballerina are not published to npm, so SDL lazy metadata is intentionally not configured yet."
+  },
+  {
+    "language": "Chapel",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "not configured",
+    "parserInstallMode": "not installed; no npm parser package found",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "chapel-language-server",
+    "providerFirstStatus": "not supported: parser package and LSP server unavailable in local validation",
+    "validationRepo": "pending",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-chapel-2026-06-24.md",
+    "notes": "lsp-io reports chapel-language-server as system/manual and install chapel-language-server requires Chapel tooling on PATH. tree-sitter-chapel and @tree-sitter-grammars/tree-sitter-chapel are not published to npm, so SDL lazy metadata is intentionally not configured yet."
+  },
+  {
+    "language": "Idris2",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "not configured",
+    "parserInstallMode": "not installed; no npm parser package found",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "idris2-lsp",
+    "providerFirstStatus": "not supported: parser package and LSP server unavailable in local validation",
+    "validationRepo": "pending",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-idris2-2026-06-24.md",
+    "notes": "lsp-io reports idris2-lsp as system/manual and install idris2-lsp requires Idris2 package tooling. tree-sitter-idris, tree-sitter-idris2, and @tree-sitter-grammars/tree-sitter-idris are not published to npm, so SDL lazy metadata is intentionally not configured yet."
+  },
+  {
+    "language": "Lean4",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "not configured",
+    "parserInstallMode": "not installed; no npm parser package found",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "lean-language-server",
+    "providerFirstStatus": "not supported: parser package and LSP server unavailable in local validation",
+    "validationRepo": "pending",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-lean4-2026-06-24.md",
+    "notes": "lsp-io reports lean-language-server as system/manual and install lean-language-server requires Lean 4 via elan/lake/lean. tree-sitter-lean, tree-sitter-lean4, and @tree-sitter-grammars/tree-sitter-lean are not published to npm, so SDL lazy metadata is intentionally not configured yet."
+  },
+  {
+    "language": "Coq",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "not configured",
+    "parserInstallMode": "not installed; no npm parser package found",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "coq-lsp",
+    "providerFirstStatus": "not supported: parser package and LSP server unavailable in local validation",
+    "validationRepo": "pending",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-coq-2026-06-24.md",
+    "notes": "lsp-io reports coq-lsp as system/manual and install coq-lsp requires opam/upstream installation. tree-sitter-coq and @tree-sitter-grammars/tree-sitter-coq are not published to npm, so SDL lazy metadata is intentionally not configured yet."
+  },
+  {
+    "language": "Common Lisp",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "lazy language pack configured",
+    "parserInstallMode": "on-demand when repo config includes commonlisp",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "cl-lsp",
+    "providerFirstStatus": "not supported: LSP server unavailable in local validation",
+    "validationRepo": "pending",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-common-lisp-2026-06-24.md",
+    "notes": "SDL lazy metadata is configured without installing tree-sitter-commonlisp. npm reports tree-sitter-commonlisp@0.4.1, but lsp-io reports cl-lsp as system/manual and install cl-lsp requires upstream installation, so provider-first validation remains pending."
+  },
+  {
+    "language": "Standard ML",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "not configured",
+    "parserInstallMode": "not installed; no npm parser package found",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "millet",
+    "providerFirstStatus": "not supported: parser package unavailable in local validation",
+    "validationRepo": "pending",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-standard-ml-2026-06-24.md",
+    "notes": "lsp-io has millet as a managed Standard ML server, but tree-sitter-sml, tree-sitter-standard-ml, and @tree-sitter-grammars/tree-sitter-sml are not published to npm. SDL lazy metadata is intentionally not configured until a loadable parser package artifact exists."
   }
 ]

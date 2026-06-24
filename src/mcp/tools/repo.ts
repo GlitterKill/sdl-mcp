@@ -111,6 +111,7 @@ const ON_DEMAND_REPO_LANGUAGES = new Set([
   "ocaml",
   "d",
   "haxe",
+  "commonlisp",
   "zig",
   "gleam",
 ]);

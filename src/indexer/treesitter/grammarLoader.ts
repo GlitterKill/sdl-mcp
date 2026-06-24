@@ -87,6 +87,7 @@ export type SupportedLanguage =
   | "ocaml"
   | "d"
   | "haxe"
+  | "commonlisp"
   | "zig"
   | "gleam";
 
@@ -132,6 +133,7 @@ const GRAMMAR_PACKAGES: Record<
   ocaml: { pkg: "tree-sitter-ocaml" },
   d: { pkg: "tree-sitter-d" },
   haxe: { pkg: "tree-sitter-haxe" },
+  commonlisp: { pkg: "tree-sitter-commonlisp" },
   zig: { pkg: "tree-sitter-zig" },
   gleam: { pkg: "tree-sitter-gleam" },
 };

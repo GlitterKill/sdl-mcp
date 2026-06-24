@@ -97,6 +97,11 @@ const LANGUAGE_ALIASES = new Map<string, string>([
   ["di", "d"],
   ["haxe", "haxe"],
   ["hx", "haxe"],
+  ["commonlisp", "commonlisp"],
+  ["common-lisp", "commonlisp"],
+  ["lisp", "commonlisp"],
+  ["lsp", "commonlisp"],
+  ["asd", "commonlisp"],
   ["zig", "zig"],
   ["gleam", "gleam"],
 ]);

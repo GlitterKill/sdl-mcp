@@ -1160,6 +1160,7 @@ function documentLanguageIdForLspPath(
   if (/\.(?:ml|mli)$/u.test(relPath)) return "ocaml";
   if (/\.(?:d|di)$/u.test(relPath)) return "d";
   if (/\.hx$/u.test(relPath)) return "haxe";
+  if (/\.(?:lisp|lsp|asd)$/u.test(relPath)) return "commonlisp";
   if (/\.zig$/u.test(relPath)) return "zig";
   if (/\.gleam$/u.test(relPath)) return "gleam";
   return "plaintext";
