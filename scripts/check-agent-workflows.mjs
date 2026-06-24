@@ -69,8 +69,6 @@ const syncSurfaces = [
 ];
 
 const narrativeDocs = [
-  "AGENTS.md",
-  "CLAUDE.md",
   "docs/agent-workflows.md",
   "docs/tool-enforcement.md",
   "docs/tool-enforcement-for-claude.md",
