@@ -50,7 +50,7 @@ flowchart LR
 
 ## Complete Tool Reference
 
-SDL-MCP exposes flat, gateway, and Code Mode tool surfaces. Exact tool counts move with the generated inventory, so use `npm run docs:tools:check` for current schema coverage. Agents should prefer `responseMode: "auto"` for large responses, run repo-local commands through `runtimeExecute`, and finish SDL-backed work with `usageStats`.
+SDL-MCP exposes flat, gateway, and Code Mode tool surfaces. Exact tool counts move with the generated inventory, so use `npm run docs:tools:check` for current schema coverage. Agents should prefer `responseMode: "auto"` for large responses, run repo-local commands through `runtimeExecute`, and finish SDL-backed work with `usageStats`. Final responses should include the returned `formattedSummary` verbatim in a fenced `text` block so the token-meter bars remain intact; if stats cannot be captured, say why.
 
 | Category                   | Tool                       | Purpose                                                                                                                                                              |
 | :------------------------- | :------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
