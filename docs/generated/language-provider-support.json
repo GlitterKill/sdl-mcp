@@ -360,7 +360,19 @@
     "notes": "lsp-io has ada-language-server managed and installed, but tree-sitter-ada and @tree-sitter-grammars/tree-sitter-ada are not published to npm. SDL lazy metadata is intentionally not configured until a loadable parser package artifact exists."
   },
   {
-    "language": "Elm, Nim, Crystal, D, V, Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
+    "language": "Elm",
+    "popularityRankSource": "Wave 3 rollout priority",
+    "adapterStatus": "not configured",
+    "parserInstallMode": "not installed; npm parser package failed runtime compatibility check",
+    "scipStatus": "no practical SCIP indexer",
+    "lspIoServer": "elm-language-server",
+    "providerFirstStatus": "not supported: parser package incompatible and LSP symbols unavailable in local validation",
+    "validationRepo": "elm/http",
+    "validationEvidence": "devdocs/validation/provider-first-lsp-elm-2026-06-24.md",
+    "notes": "lsp-io installed elm-language-server and detected elm/http. tree-sitter-elm installed only during an explicit Elm-configured validation attempt, but failed Parser.setLanguage with Invalid language object; the package was removed and SDL lazy metadata was not committed."
+  },
+  {
+    "language": "Nim, Crystal, D, V, Vala, Haxe, Racket, Raku, ReScript, Ballerina, Chapel, Idris2, Lean4, Coq, Common Lisp, Standard ML",
     "popularityRankSource": "Wave 3 rollout priority",
     "adapterStatus": "planned",
     "parserInstallMode": "not installed",
