@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.10] - 2026-06-24
+
+### Added
+
+- **OpenAI tool naming**: Added an OpenAI-compatible tool-name format option for tool metadata surfaces.
+
+### Changed
+
+- **Agent workflow guidance**: Clarified `sourceWindow` usage and adjusted agent workflow validation around root-only agent docs and local agent files.
+- **Validation docs**: Moved validation evidence and devdocs artifacts to internal surfaces so public release contents stay clean.
+
+### Fixed
+
+- **Provider-first shadow finalization**: Fixed endpoint handling in provider-first shadow finalization.
+
+_11 commits from 1 contributor_
+
 ## [0.11.9] - 2026-06-23
 
 ### Added
