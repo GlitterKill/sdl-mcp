@@ -48,6 +48,7 @@ export interface ProviderFirstShadowFinalizationBulkLoadSummary {
   manifestPath: string;
   copiedAt: string;
   artifacts: ProviderFirstShadowFinalizationBulkArtifact[];
+  restoredRelationshipEndpointSymbolIds?: string[];
 }
 
 export interface ProviderFirstShadowFinalizationSummary {
@@ -388,6 +389,7 @@ export async function finalizeProviderFirstShadowDb(
         params.repoId,
         params.versionId,
         stagedAuxiliarySymbolIds,
+        new Set(bulkLoad.restoredRelationshipEndpointSymbolIds ?? []),
       );
       const actualCounts = await readFinalizationCounts(
         shadowConn,
@@ -479,6 +481,9 @@ async function copyFinalizedRows(params: {
     params.repoId,
     excludedEdgeEndpointSymbolIds,
   );
+  const edgeTargetSymbolIds = new Set(
+    edgeTargetSymbols.map((symbol) => symbol.symbolId),
+  );
   const symbolVersions = await readRealSymbolVersionsForRepoAtVersion(
     params.activeConn,
     params.repoId,
@@ -518,6 +523,39 @@ async function copyFinalizedRows(params: {
     params.activeConn,
     params.repoId,
   );
+  // Derived relationship COPY also resolves Symbol endpoints. Restore active
+  // real symbols that only appear through cluster/process memberships.
+  const derivedRelationshipSymbolIds = new Set([
+    ...clusterMembers.map((member) => member.symbolId),
+    ...processSteps.map((step) => step.symbolId),
+    ...shadowClusterMembers.map((member) => member.symbolId),
+  ]);
+  const derivedRelationshipSymbols =
+    derivedRelationshipSymbolIds.size > 0
+      ? (
+          await readRealSymbolsForRepo(
+            params.activeConn,
+            params.repoId,
+            new Set([
+              ...auxiliarySymbolIds,
+              ...activeRealSymbolIds,
+              ...edgeTargetSymbolIds,
+            ]),
+          )
+        ).filter((symbol) => derivedRelationshipSymbolIds.has(symbol.symbolId))
+      : [];
+  const relationshipEndpointSymbols = uniqueAuxiliarySymbolsById([
+    ...activeRealSymbols,
+    ...edgeTargetSymbols,
+    ...derivedRelationshipSymbols,
+  ]);
+  const relationshipEndpointRepoLinkSymbols = uniqueAuxiliarySymbolsById([
+    ...activeRealSymbols,
+    ...derivedRelationshipSymbols,
+  ]);
+  const restoredRelationshipEndpointSymbolIds = relationshipEndpointRepoLinkSymbols
+    .map((symbol) => symbol.symbolId)
+    .filter((symbolId) => params.stagedAuxiliarySymbolIds.has(symbolId));
   const derivedState = await readDerivedStateRow(
     params.activeConn,
     params.repoId,
@@ -812,13 +850,13 @@ async function copyFinalizedRows(params: {
   ];
 
   await resetBulkFinalizationTargets(params.shadowConn, params.repoId);
-  await ensureRelationshipEndpointSymbols(params.shadowConn, [
-    ...activeRealSymbols,
-    ...edgeTargetSymbols,
-  ]);
+  await ensureRelationshipEndpointSymbols(
+    params.shadowConn,
+    relationshipEndpointSymbols,
+  );
   await ensureRelationshipEndpointRepoLinks(
     params.shadowConn,
-    activeRealSymbols,
+    relationshipEndpointRepoLinkSymbols,
   );
   for (const artifact of artifacts) {
     await copyArtifact(params.shadowConn, artifact.targetTable, artifact);
@@ -852,6 +890,7 @@ async function copyFinalizedRows(params: {
     manifestPath: normalizePath(manifestPath),
     copiedAt: new Date().toISOString(),
     artifacts,
+    restoredRelationshipEndpointSymbolIds,
   };
   await writeFile(
     manifestPath,
@@ -1276,6 +1315,18 @@ function pass2CppProvenanceIsCopySafe(row: ladybugDb.EdgeRow): boolean {
 
 function requiresCsvQuoting(value: unknown): boolean {
   return typeof value === "string" && /[",\r\n]/.test(value);
+}
+
+function uniqueAuxiliarySymbolsById(
+  rows: AuxiliarySymbolRow[],
+): AuxiliarySymbolRow[] {
+  const bySymbolId = new Map<string, AuxiliarySymbolRow>();
+  for (const row of rows) {
+    if (!bySymbolId.has(row.symbolId)) {
+      bySymbolId.set(row.symbolId, row);
+    }
+  }
+  return [...bySymbolId.values()];
 }
 
 function symbolRowFromQuery(
@@ -2064,10 +2115,18 @@ async function readFinalizationCounts(
   repoId: string,
   versionId: string,
   excludedSymbolIds: ReadonlySet<string> = new Set(),
+  includedSymbolIds: ReadonlySet<string> = new Set(),
 ): Promise<ProviderFirstShadowFinalizationCounts> {
   const excluded = [...excludedSymbolIds];
+  const included = [...includedSymbolIds];
   const exclusionClause =
     excluded.length > 0 ? "AND NOT s.symbolId IN $excludedSymbolIds" : "";
+  const symbolExclusionClause =
+    excluded.length > 0
+      ? included.length > 0
+        ? "AND (NOT s.symbolId IN $excludedSymbolIds OR s.symbolId IN $includedSymbolIds)"
+        : "AND NOT s.symbolId IN $excludedSymbolIds"
+      : "";
   const edgeExclusionClause =
     excluded.length > 0
       ? "AND NOT s.symbolId IN $excludedSymbolIds AND NOT target.symbolId IN $excludedSymbolIds"
@@ -2084,9 +2143,9 @@ async function readFinalizationCounts(
       `MATCH (:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
        WHERE coalesce(s.symbolStatus, 'real') = 'real'
          AND coalesce(s.external, false) = false
-         ${exclusionClause}
+         ${symbolExclusionClause}
        RETURN count(s) AS count`,
-      { repoId, excludedSymbolIds: excluded },
+      { repoId, excludedSymbolIds: excluded, includedSymbolIds: included },
     ),
     auxiliarySymbols: await count(
       conn,

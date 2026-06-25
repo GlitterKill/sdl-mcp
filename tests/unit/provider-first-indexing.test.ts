@@ -9667,6 +9667,160 @@ describe("provider-first indexing foundation", () => {
     }
   });
 
+  it("finalizes shadow DBs when copied derived relationships point at active real symbols that shadow staged as auxiliary", async () => {
+    const root = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-finalize-derived-staged-aux-"),
+    );
+    const activeDbPath = join(root, "active.lbug");
+    const shadowDbPath = join(root, "shadow.lbug");
+    const kuzu = await import("kuzu");
+    const activeDb = new kuzu.Database(activeDbPath);
+    const activeConn = new kuzu.Connection(activeDb);
+    const shadowDb = new kuzu.Database(shadowDbPath);
+    const shadowConn = new kuzu.Connection(shadowDb);
+    const repoId = "repo";
+    const fileId = "file-1";
+    const fallbackSymbolId =
+      "404b9898636576d8e639533e7f94be05bc6fa669326d537ddc4c6fea65637ec5";
+    const clusterId = "repo:cluster:staged-aux";
+    const processId = "repo:process:staged-aux";
+    const shadowClusterId = "repo:louvain:staged-aux";
+    const versionId = "version-1";
+    const now = "2026-05-26T00:00:00.000Z";
+
+    try {
+      await createBaseSchema(activeConn);
+      await createBaseSchema(shadowConn);
+      await seedRepoFileAndSourceSymbol(activeConn, {
+        repoId,
+        fileId,
+        sourceSymbolId: fallbackSymbolId,
+        now,
+      });
+      await dbExec(
+        shadowConn,
+        `MERGE (r:Repo {repoId: $repoId})
+         SET r.rootPath = "",
+             r.configJson = "{}",
+             r.createdAt = $now
+         MERGE (f:File {fileId: $fileId})
+         SET f.relPath = "src/index.ts",
+             f.contentHash = "hash",
+             f.language = "typescript",
+             f.byteSize = 10,
+             f.lastIndexedAt = $now,
+             f.directory = "src"
+         MERGE (f)-[:FILE_IN_REPO]->(r)
+         MERGE (symbol:Symbol {symbolId: $fallbackSymbolId})
+         SET symbol.repoId = $repoId,
+             symbol.kind = "unknown",
+             symbol.name = $fallbackSymbolId,
+             symbol.exported = false,
+             symbol.visibility = "",
+             symbol.language = "unknown",
+             symbol.rangeStartLine = 0,
+             symbol.rangeStartCol = 0,
+             symbol.rangeEndLine = 0,
+             symbol.rangeEndCol = 0,
+             symbol.astFingerprint = $fallbackSymbolId,
+             symbol.signatureJson = "",
+             symbol.summary = "",
+             symbol.summaryQuality = 0.0,
+             symbol.summarySource = "provider:scip",
+             symbol.invariantsJson = "",
+             symbol.sideEffectsJson = "",
+             symbol.roleTagsJson = "",
+             symbol.searchText = $fallbackSymbolId,
+             symbol.updatedAt = $now,
+             symbol.external = true,
+             symbol.source = "scip",
+             symbol.packageName = "",
+             symbol.packageVersion = "",
+             symbol.scipSymbol = $fallbackSymbolId,
+             symbol.symbolStatus = "external",
+             symbol.placeholderKind = "scip",
+             symbol.placeholderTarget = $fallbackSymbolId
+         MERGE (symbol)-[:SYMBOL_IN_REPO]->(r)
+         MERGE (symbol)-[:SYMBOL_IN_FILE]->(f)`,
+        { repoId, fileId, fallbackSymbolId, now },
+      );
+      await dbExec(
+        activeConn,
+        `MATCH (r:Repo {repoId: $repoId})
+         MATCH (symbol:Symbol {symbolId: $fallbackSymbolId})
+         MERGE (cluster:Cluster {clusterId: $clusterId})
+         SET cluster.repoId = $repoId,
+             cluster.label = "staged auxiliary collision",
+             cluster.symbolCount = 1,
+             cluster.cohesionScore = 0.7,
+             cluster.versionId = $versionId,
+             cluster.createdAt = $now,
+             cluster.searchText = "staged auxiliary collision"
+         MERGE (cluster)-[:CLUSTER_IN_REPO]->(r)
+         MERGE (symbol)-[clusterMember:BELONGS_TO_CLUSTER]->(cluster)
+         SET clusterMember.membershipScore = 0.9
+         MERGE (process:Process {processId: $processId})
+         SET process.repoId = $repoId,
+             process.entrySymbolId = $fallbackSymbolId,
+             process.label = "staged auxiliary process",
+             process.depth = 1,
+             process.versionId = $versionId,
+             process.createdAt = $now,
+             process.searchText = "staged auxiliary process"
+         MERGE (process)-[:PROCESS_IN_REPO]->(r)
+         MERGE (symbol)-[step:PARTICIPATES_IN]->(process)
+         SET step.stepOrder = 1,
+             step.role = "caller"
+         MERGE (shadowCluster:ShadowCluster {shadowClusterId: $shadowClusterId})
+         SET shadowCluster.repoId = $repoId,
+             shadowCluster.algorithm = "louvain",
+             shadowCluster.label = "staged auxiliary collision",
+             shadowCluster.symbolCount = 1,
+             shadowCluster.modularity = 0.42,
+             shadowCluster.versionId = $versionId,
+             shadowCluster.createdAt = $now
+         MERGE (shadowCluster)-[:SHADOW_CLUSTER_IN_REPO]->(r)
+         MERGE (symbol)-[member:BELONGS_TO_SHADOW_CLUSTER]->(shadowCluster)
+         SET member.membershipScore = 1.0
+         MERGE (v:Version {versionId: $versionId})
+         SET v.createdAt = $now,
+             v.reason = "test",
+             v.prevVersionHash = null,
+             v.versionHash = "hash"
+         MERGE (v)-[:VERSION_OF_REPO]->(r)`,
+        {
+          repoId,
+          fallbackSymbolId,
+          clusterId,
+          processId,
+          shadowClusterId,
+          versionId,
+          now,
+        },
+      );
+      await shadowConn.close();
+      await shadowDb.close();
+
+      const summary = await finalizeProviderFirstShadowDb({
+        activeConn,
+        repoId,
+        versionId,
+        shadowDbPath,
+      });
+
+      assert.equal(summary.status, "finalized", summary.reasons.join("\n"));
+      assert.equal(summary.actualCounts?.clusterMembers, 1);
+      assert.equal(summary.actualCounts?.processSteps, 1);
+      assert.equal(summary.actualCounts?.shadowClusterMembers, 1);
+    } finally {
+      await activeConn.close().catch(() => {});
+      await activeDb.close().catch(() => {});
+      await shadowConn.close().catch(() => {});
+      await shadowDb.close().catch(() => {});
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("reports shadow activation as ineligible until shadow contains the final graph", () => {
     const activation = summarizeProviderFirstShadowActivationReadiness({
       shadowBuild: {
