@@ -26,9 +26,32 @@ const dispatchContext = new AsyncLocalStorage<boolean>();
  */
 let configuredMax = 8;
 
+// Labels are dispatch-only diagnostics; keep them out of the generic limiter.
+const activeDispatchLabels = new Map<string, number>();
+
+function addActiveDispatchLabel(label: string): void {
+  activeDispatchLabels.set(label, (activeDispatchLabels.get(label) ?? 0) + 1);
+}
+
+function deleteActiveDispatchLabel(label: string): void {
+  const nextCount = (activeDispatchLabels.get(label) ?? 0) - 1;
+  if (nextCount <= 0) {
+    activeDispatchLabels.delete(label);
+    return;
+  }
+  activeDispatchLabels.set(label, nextCount);
+}
+
+function getActiveDispatchLabels(): string[] {
+  return Array.from(activeDispatchLabels.entries()).map(([label, count]) =>
+    count > 1 ? `${label}x${count}` : label,
+  );
+}
+
 export interface ToolDispatchStats extends ConcurrencyLimiterStats {
   configuredMax: number;
   indexingActive: boolean;
+  activeLabels?: string[];
   deferredWork?: DeferredWorkStatus;
 }
 
@@ -40,9 +63,12 @@ export class ToolDispatchQueueTimeoutError extends Error {
   readonly details: string[];
 
   constructor(timeoutMs: number, stats: ToolDispatchStats, label: string) {
+    const activeLabels = stats.activeLabels?.length
+      ? `, activeLabels=${stats.activeLabels.join(",")}`
+      : "";
     super(
       `Tool dispatch queue timed out after ${timeoutMs}ms for ${label} ` +
-        `(active=${stats.active}, queued=${stats.queued}, max=${stats.maxConcurrency})`,
+        `(active=${stats.active}, queued=${stats.queued}, max=${stats.maxConcurrency}${activeLabels})`,
     );
     this.name = "ToolDispatchQueueTimeoutError";
     this.details = [
@@ -51,6 +77,9 @@ export class ToolDispatchQueueTimeoutError extends Error {
       `queued=${stats.queued}`,
       `max=${stats.maxConcurrency}`,
       `indexingActive=${stats.indexingActive}`,
+      ...(stats.activeLabels?.length
+        ? [`activeLabels=${stats.activeLabels.join(",")}`]
+        : []),
       ...(stats.deferredWork
         ? [
             `deferredWork=${stats.deferredWork.kind}`,
@@ -121,7 +150,15 @@ export async function runToolDispatch<T>(
   }
   try {
     return await getToolDispatchLimiter().run(
-      () => dispatchContext.run(true, fn),
+      () =>
+        dispatchContext.run(true, async () => {
+          addActiveDispatchLabel(label);
+          try {
+            return await fn();
+          } finally {
+            deleteActiveDispatchLabel(label);
+          }
+        }),
       queueTimeoutMs,
     );
   } catch (error) {
@@ -134,6 +171,7 @@ export async function runToolDispatch<T>(
         queued: stats.queued,
         maxConcurrency: stats.maxConcurrency,
         configuredMax: stats.configuredMax,
+        activeLabels: stats.activeLabels,
         indexingActive: stats.indexingActive,
         deferredWork: stats.deferredWork,
       });
@@ -156,6 +194,7 @@ export function getToolDispatchStats(): ToolDispatchStats {
     queued: stats?.queued ?? 0,
     maxConcurrency,
     configuredMax,
+    activeLabels: getActiveDispatchLabels(),
     indexingActive: isIndexingActive(),
     totalActiveMs: stats?.totalActiveMs ?? 0,
     totalQueueMs: stats?.totalQueueMs ?? 0,
@@ -244,5 +283,6 @@ export function resetToolDispatchLimiter(): void {
   }
   limiter = null;
   configuredMax = 8;
+  activeDispatchLabels.clear();
   setIndexingStateListener(null);
 }

@@ -161,6 +161,12 @@ describe("tool dispatch limiter", () => {
         );
         assert.strictEqual((err as { retryable?: boolean }).retryable, true);
         assert.match(err.message, /Tool dispatch queue timed out/);
+        assert.match(err.message, /activeLabels=first/);
+        assert.ok(
+          (err as { details?: string[] }).details?.includes(
+            "activeLabels=first",
+          ),
+        );
         return true;
       },
     );
@@ -220,6 +226,38 @@ describe("tool dispatch limiter", () => {
       releaseStatus();
       await first.catch(() => undefined);
       await second.catch(() => undefined);
+    }
+  });
+
+  it("clears active dispatch labels on reset", async () => {
+    configureToolDispatchLimiter({ maxConcurrency: 1, queueTimeoutMs: 123 });
+
+    let release: (() => void) | undefined;
+    const blocker = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+
+    const first = runToolDispatch(
+      async () => {
+        markStarted?.();
+        return blocker;
+      },
+      undefined,
+      "first",
+    );
+
+    try {
+      await started;
+      assert.deepStrictEqual(getToolDispatchStats().activeLabels, ["first"]);
+      resetToolDispatchLimiter();
+      assert.deepStrictEqual(getToolDispatchStats().activeLabels, []);
+    } finally {
+      release?.();
+      await first.catch(() => undefined);
     }
   });
 
