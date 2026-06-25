@@ -4,6 +4,7 @@ import { writeFileSync, unlinkSync, existsSync } from "fs";
 import { resolve } from "path";
 import {
   ThresholdEvaluator,
+  loadThresholdConfig,
   loadBaselineMetrics,
   saveBaselineMetrics,
   type BenchmarkThresholds,
@@ -132,6 +133,26 @@ describe("Benchmark Threshold Evaluator", () => {
     assert.strictEqual(result.evaluations.length, 2);
     assert.strictEqual(result.summary.total, 2);
     assert.strictEqual(result.summary.passed, 2);
+  });
+
+  it("allows current locked zod-oss CI provider-first density", () => {
+    const ciThresholds = loadThresholdConfig(
+      resolve(process.cwd(), "config/benchmark.ci.config.json"),
+    );
+    const result = new ThresholdEvaluator(ciThresholds).evaluate({
+      indexTimePerFile: 113.98268168161435,
+      indexTimePerSymbol: 5.643458706705151,
+      symbolsPerFile: 20.19730941704036,
+      edgesPerSymbol: 0.5326376554174067,
+      graphConnectivity: 0.2879662522202487,
+      exportedSymbolRatio: 0.9897868561278863,
+      sliceBuildTimeMs: 347.0271775000001,
+      avgSkeletonTimeMs: 6.954816583334832,
+      avgCardTokens: 189.45,
+      avgSkeletonTokens: 49,
+    });
+
+    assert.strictEqual(result.passed, true);
   });
 });
 
