@@ -10,6 +10,9 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   IndexingConfigSchema,
   PolicyConfigSchema,
@@ -22,7 +25,16 @@ import {
   PrefetchConfigSchema,
   TracingConfigSchema,
   ParallelScorerConfigSchema,
+  ProviderFirstIndexingConfigSchema,
+  ScipConfigSchema,
+  SemanticEnrichmentConfigSchema,
 } from "../../dist/config/types.js";
+import { loadConfig } from "../../dist/config/loadConfig.js";
+import {
+  applyMissingConfigRecommendations,
+  summarizeMissingConfigKeys,
+} from "../../dist/cli/setup-wizard/config-diff.js";
+import { semanticConfigForTier } from "../../dist/cli/setup-wizard/recommendations.js";
 
 // ---------------------------------------------------------------------------
 // IndexingConfigSchema boolean defaults
@@ -274,5 +286,82 @@ describe("ParallelScorerConfigSchema defaults", () => {
   it("ParallelScorerConfigSchema.enabled defaults to true", () => {
     const result = ParallelScorerConfigSchema.parse({});
     assert.strictEqual(result.enabled, true);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCIP and semantic enrichment defaults
+// ---------------------------------------------------------------------------
+
+describe("SCIP and semantic enrichment defaults", () => {
+  it("enables SCIP, semantic enrichment, and provider-first LSP by default", () => {
+    const scip = ScipConfigSchema.parse({});
+    assert.strictEqual(scip.enabled, true);
+    assert.deepStrictEqual(scip.indexes, [{ path: "index.scip" }]);
+    assert.deepStrictEqual(scip.externalSymbols, {
+      enabled: true,
+      maxPerIndex: 10_000,
+    });
+    assert.strictEqual(scip.confidence, 0.95);
+    assert.strictEqual(scip.autoIngestOnRefresh, true);
+    assert.deepStrictEqual(scip.generator, {
+      enabled: true,
+      binary: "scip-io",
+      args: ["--include-additional-configs", "--timeout", "3600"],
+      autoInstall: true,
+      timeoutMs: 18_000_000,
+      cleanupAfterIngest: true,
+      cacheGeneratedIndexes: true,
+    });
+
+    const semanticEnrichment = SemanticEnrichmentConfigSchema.parse({});
+    assert.strictEqual(semanticEnrichment.enabled, true);
+
+    const providerFirst = ProviderFirstIndexingConfigSchema.parse({});
+    assert.strictEqual(providerFirst.lsp.mode, "primaryWithCaps");
+
+    const dir = mkdtempSync(join(tmpdir(), "sdl-config-defaults-"));
+    try {
+      const configPath = join(dir, "sdlmcp.config.json");
+      writeFileSync(configPath, JSON.stringify({ repos: [], policy: {} }));
+
+      const appConfig = loadConfig(configPath);
+      assert.strictEqual(appConfig.scip?.enabled, true);
+      assert.strictEqual(appConfig.semanticEnrichment?.enabled, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Setup wizard semantic recommendations
+// ---------------------------------------------------------------------------
+
+describe("setup wizard semantic recommendations", () => {
+  it("keeps standard semantic recommendations aligned with specialized embeddings", () => {
+    assert.deepStrictEqual(semanticConfigForTier("standard"), {
+      enabled: true,
+      provider: "local",
+      symbolEmbeddingModels: ["jina-embeddings-v2-base-code"],
+      fileSummaryEmbeddingModels: ["nomic-embed-text-v1.5"],
+      generateSummaries: false,
+    });
+
+    const recommendations = summarizeMissingConfigKeys({});
+    assert.deepStrictEqual(
+      recommendations.find((item) => item.path === "semantic.fileSummaryEmbeddingModels")
+        ?.recommendedValue,
+      ["nomic-embed-text-v1.5"],
+    );
+
+    const rawConfig = {};
+    applyMissingConfigRecommendations(rawConfig, recommendations);
+    assert.deepStrictEqual(rawConfig.semantic, {
+      embeddingProfile: "specialized",
+      symbolEmbeddingModels: ["jina-embeddings-v2-base-code"],
+      fileSummaryEmbeddingModels: ["nomic-embed-text-v1.5"],
+    });
   });
 });

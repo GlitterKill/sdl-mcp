@@ -29,8 +29,8 @@ export function summarizeMissingConfigKeys(rawConfig: unknown): ConfigRecommenda
     },
     {
       path: "semantic.fileSummaryEmbeddingModels",
-      recommendedValue: [],
-      reason: "Code tier skips file-summary embeddings.",
+      recommendedValue: ["nomic-embed-text-v1.5"],
+      reason: "File-summary embeddings default to Nomic.",
     },
     {
       path: "indexing.providerFirst.lsp",

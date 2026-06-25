@@ -9,6 +9,7 @@ import {
   RuntimeConfigSchema,
   ScipConfigSchema,
   SemanticConfigSchema,
+  SemanticEnrichmentConfigSchema,
 } from "./types.js";
 import { ConfigError } from "../domain/errors.js";
 import { resolveCliConfigPath } from "./configPath.js";
@@ -112,7 +113,13 @@ export function loadConfig(configPath?: string): AppConfig {
       throw new ConfigError(`Config validation failed:\n${errors}`);
     }
 
-    const config = result.data;
+    const config = {
+      ...result.data,
+      semanticEnrichment: SemanticEnrichmentConfigSchema.parse(
+        result.data.semanticEnrichment ?? {},
+      ),
+      scip: ScipConfigSchema.parse(result.data.scip ?? {}),
+    };
 
     // -------------------------------------------------------------------------
     // CPU tier preset resolution

@@ -1095,7 +1095,7 @@
       "type": "object",
       "description": "Provider-backed graph precision enrichment. Separate from semantic embeddings/retrieval.",
       "properties": {
-        "enabled": { "type": "boolean", "default": false },
+        "enabled": { "type": "boolean", "default": true },
         "autoRunOnIndexRefresh": {
           "type": "boolean",
           "default": false,
@@ -1238,7 +1238,7 @@
         }
       },
       "default": {
-        "enabled": false,
+        "enabled": true,
         "autoRunOnIndexRefresh": false,
         "installPolicy": "never",
         "cacheDir": null,
@@ -1792,7 +1792,7 @@
       "type": "object",
       "description": "SCIP index ingestion configuration",
       "properties": {
-        "enabled": { "type": "boolean", "default": false },
+        "enabled": { "type": "boolean", "default": true },
         "indexes": {
           "type": "array",
           "items": {
@@ -1803,7 +1803,7 @@
             },
             "required": ["path"]
           },
-          "default": []
+          "default": [{ "path": "index.scip" }]
         },
         "externalSymbols": {
           "type": "object",
@@ -1835,19 +1835,19 @@
           "type": "object",
           "description": "Auto-generate index.scip via the scip-io CLI before each refresh. Has no effect unless scip.enabled is also true. When enabled and the binary is missing, sdl-mcp downloads it from GitHub releases into ~/.sdl-mcp/bin/ with mandatory SHA-256 verification against the release's SHA256SUMS.txt; installs are refused if the checksum file is absent.",
           "properties": {
-            "enabled": { "type": "boolean", "default": false },
+            "enabled": { "type": "boolean", "default": true },
             "binary": { "type": "string", "default": "scip-io" },
             "args": {
               "type": "array",
               "items": { "type": "string" },
-              "default": []
+              "default": ["--include-additional-configs", "--timeout", "3600"]
             },
             "autoInstall": { "type": "boolean", "default": true },
             "timeoutMs": {
               "type": "integer",
               "minimum": 1000,
               "maximum": 18000000,
-              "default": 600000
+              "default": 18000000
             },
             "cleanupAfterIngest": {
               "type": "boolean",
@@ -1861,11 +1861,11 @@
             }
           },
           "default": {
-            "enabled": false,
+            "enabled": true,
             "binary": "scip-io",
-            "args": [],
+            "args": ["--include-additional-configs", "--timeout", "3600"],
             "autoInstall": true,
-            "timeoutMs": 600000,
+            "timeoutMs": 18000000,
             "cleanupAfterIngest": true,
             "cacheGeneratedIndexes": true
           }

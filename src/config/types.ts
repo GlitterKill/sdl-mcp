@@ -979,11 +979,13 @@ export type ScipIndexEntry = z.infer<typeof ScipIndexEntrySchema>;
  */
 export const ScipGeneratorConfigSchema = z.object({
   /** Master enable for the generator. Has no effect unless `scip.enabled` is also true. */
-  enabled: z.boolean().default(false),
+  enabled: z.boolean().default(true),
   /** Override the binary name. Default 'scip-io' (or 'scip-io.exe' on Windows). */
   binary: z.string().default("scip-io"),
-  /** Extra args appended after `index` (e.g. ["--no-clean"]). Default []. */
-  args: z.array(z.string()).default([]),
+  /** Extra args appended after `index`. */
+  args: z
+    .array(z.string())
+    .default(["--include-additional-configs", "--timeout", "3600"]),
   /** Auto-download scip-io from GitHub releases if not found in PATH. */
   autoInstall: z.boolean().default(true),
   /** Hard timeout for the `scip-io index` command. */
@@ -992,7 +994,7 @@ export const ScipGeneratorConfigSchema = z.object({
     .int()
     .min(1000)
     .max(5 * 60 * 60 * 1000)
-    .default(10 * 60 * 1000),
+    .default(18_000_000),
   /**
    * Deprecated compatibility field for legacy post-refresh SCIP ingest
    * cleanup. Provider-first does not delete generated indexes after
@@ -1012,8 +1014,8 @@ export const ScipGeneratorConfigSchema = z.object({
 export type ScipGeneratorConfig = z.infer<typeof ScipGeneratorConfigSchema>;
 
 export const ScipConfigSchema = z.object({
-  enabled: z.boolean().default(false),
-  indexes: z.array(ScipIndexEntrySchema).default([]),
+  enabled: z.boolean().default(true),
+  indexes: z.array(ScipIndexEntrySchema).default([{ path: "index.scip" }]),
   externalSymbols: ScipExternalSymbolsConfigSchema.default({
     enabled: true,
     maxPerIndex: 10_000,
@@ -1022,11 +1024,11 @@ export const ScipConfigSchema = z.object({
   autoIngestOnRefresh: z.boolean().default(true),
   ingestConcurrency: z.number().int().min(1).max(8).default(1),
   generator: ScipGeneratorConfigSchema.default({
-    enabled: false,
+    enabled: true,
     binary: "scip-io",
-    args: [],
+    args: ["--include-additional-configs", "--timeout", "3600"],
     autoInstall: true,
-    timeoutMs: 10 * 60 * 1000,
+    timeoutMs: 18_000_000,
     cleanupAfterIngest: true,
     cacheGeneratedIndexes: true,
   }),
@@ -1082,7 +1084,7 @@ export const SemanticEnrichmentProvidersConfigSchema = z.object({
  * retrieval behavior.
  */
 export const SemanticEnrichmentConfigSchema = z.object({
-  enabled: z.boolean().default(false),
+  enabled: z.boolean().default(true),
   autoRunOnIndexRefresh: z.boolean().default(false),
   installPolicy: z.enum(["never", "verified"]).default("never"),
   // Reserved for durable provider caches; V2 currently keeps provider output

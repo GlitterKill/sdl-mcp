@@ -36,7 +36,7 @@ export function semanticConfigForTier(tier: SemanticTier): Record<string, unknow
     enabled: true,
     provider: "local",
     symbolEmbeddingModels: ["jina-embeddings-v2-base-code"],
-    fileSummaryEmbeddingModels: [],
+    fileSummaryEmbeddingModels: ["nomic-embed-text-v1.5"],
     generateSummaries: false,
   };
 }

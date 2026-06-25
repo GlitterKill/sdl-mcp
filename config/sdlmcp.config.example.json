@@ -202,7 +202,7 @@
     }
   },
   "semanticEnrichment": {
-    "enabled": false,
+    "enabled": true,
     "autoRunOnIndexRefresh": false,
     "installPolicy": "never",
     "cacheDir": null,
@@ -212,7 +212,7 @@
     "providers": {
       "scip": {
         "enabled": true,
-        "indexes": []
+        "indexes": [{ "path": "index.scip" }]
       },
       "lsp": {
         "enabled": true,
@@ -315,7 +315,7 @@
     "allowedRepoRoots": []
   },
   "scip": {
-    "enabled": false,
+    "enabled": true,
     "indexes": [
       {
         "path": "index.scip",
@@ -329,11 +329,11 @@
     "confidence": 0.95,
     "autoIngestOnRefresh": true,
     "generator": {
-      "enabled": false,
+      "enabled": true,
       "binary": "scip-io",
-      "args": [],
+      "args": ["--include-additional-configs", "--timeout", "3600"],
       "autoInstall": true,
-      "timeoutMs": 600000,
+      "timeoutMs": 18000000,
       "cleanupAfterIngest": true,
       "cacheGeneratedIndexes": true
     }
