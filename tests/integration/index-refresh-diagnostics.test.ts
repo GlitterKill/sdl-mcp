@@ -80,6 +80,8 @@ describe("index.refresh diagnostics", () => {
           repos: [],
           policy: {},
           indexing: { engine: "typescript", enableFileWatching: false },
+          semanticEnrichment: { enabled: false },
+          scip: { enabled: false },
         },
         null,
         2,

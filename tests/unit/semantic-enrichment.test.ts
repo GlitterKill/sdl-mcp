@@ -18,10 +18,10 @@ import type { SemanticEdge } from "../../dist/semantic/types.js";
 import type { AppConfig } from "../../dist/config/types.js";
 
 describe("semantic enrichment bridge core", () => {
-  it("defaults to explicit-only enrichment separate from semantic retrieval", () => {
+  it("defaults to enabled enrichment separate from semantic retrieval", () => {
     const config = SemanticEnrichmentConfigSchema.parse({});
 
-    assert.equal(config.enabled, false);
+    assert.equal(config.enabled, true);
     assert.equal(config.autoRunOnIndexRefresh, false);
     assert.equal(config.installPolicy, "never");
     assert.equal(config.concurrency, 1);
@@ -31,7 +31,11 @@ describe("semantic enrichment bridge core", () => {
   it("does not refresh providers when semantic enrichment is disabled", async () => {
     const result = await refreshSemanticEnrichment(
       { repoId: "missing-repo" },
-      { repos: [], policy: {} } as AppConfig,
+      {
+        repos: [],
+        policy: {},
+        semanticEnrichment: { enabled: false },
+      } as AppConfig,
     );
 
     assert.equal(result.enabled, false);

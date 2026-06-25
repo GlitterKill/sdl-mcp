@@ -93,6 +93,8 @@ describe("Ladybug E2E (clusters + processes + slices + delta)", () => {
           repos: [],
           policy: {},
           indexing: { engine: "typescript", enableFileWatching: false },
+          semanticEnrichment: { enabled: false },
+          scip: { enabled: false },
         },
         null,
         2,

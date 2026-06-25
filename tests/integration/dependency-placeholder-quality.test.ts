@@ -97,6 +97,8 @@ describe("dependency placeholder quality integration", () => {
           policy: {},
           indexing: { engine: "typescript", enableFileWatching: false },
           semantic: { enabled: false },
+          semanticEnrichment: { enabled: false },
+          scip: { enabled: false },
         },
         null,
         2,
