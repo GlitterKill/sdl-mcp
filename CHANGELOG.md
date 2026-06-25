@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.11] - 2026-06-25
+
+### Added
+
+- **Provider-first language coverage**: Added Zig, Julia, Gleam, Nix, OCaml, and Haxe provider metadata/support, validated Clojure and D provider-first support, and added lazy language-pack structural matcher support.
+- **SDLBench**: Added the SDLBench benchmark harness.
+
+### Changed
+
+- **Semantic defaults**: Enabled SCIP and semantic enrichment by default.
+- **Provider-first validation docs**: Completed the Wave 3 language chart, refreshed provider-first fixture snapshots, and recorded blockers for Ada, Elm, Erlang, Nim, Crystal, V, Racket, Raku, and ReScript.
+- **Token savings demo**: Replaced checked-in demo media with README and presentation video/poster links, and documented verbatim usage-stats reporting.
+- **CI benchmark guardrails**: Relaxed provider-first SCIP CI guardrails and refreshed benchmark DB connections after indexing.
+
+### Fixed
+
+- **Provider-first shadow finalization**: Fixed derived endpoint handling during shadow finalization.
+- **Watcher retries and diagnostics**: Coalesced watcher reindex retries, added active dispatch labels to timeout diagnostics, and tightened generated init-enforcement assets.
+- **README demo links**: Fixed README formatting and SDL Token Savings video links.
+
+_41 commits from 2 contributors_
+
 ## [0.11.10] - 2026-06-24
 
 ### Added
