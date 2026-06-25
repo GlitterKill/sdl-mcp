@@ -1,0 +1,17 @@
+{
+  "name": "sdlbench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "sdlbench": "src/cli.mjs"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "setup": "node src/cli.mjs setup all",
+    "run:baseline": "node src/cli.mjs run --matrix sdlbench/tasks/matrix.json --agent codex --variant baseline",
+    "run:sdl": "node src/cli.mjs run --matrix sdlbench/tasks/matrix.json --agent codex --variant sdl",
+    "analyze": "node src/cli.mjs analyze --in sdlbench/results/sessions.jsonl",
+    "view": "node src/cli.mjs view"
+  }
+}

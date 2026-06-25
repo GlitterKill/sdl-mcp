@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "defaultModel": "gpt-5.5",
+  "default": {
+    "model": "gpt-5.5",
+    "encoding": "o200k_base",
+    "inputPerMTok": 5,
+    "outputPerMTok": 30,
+    "contextPerMTok": 0
+  },
+  "models": {
+    "gpt-5.5": {
+      "encoding": "o200k_base",
+      "inputPerMTok": 5,
+      "outputPerMTok": 30,
+      "contextPerMTok": 0
+    }
+  }
+}

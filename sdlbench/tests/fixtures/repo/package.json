@@ -1,0 +1,6 @@
+{
+  "type": "module",
+  "scripts": {
+    "test": "node tests/discount-tax.test.mjs && node tests/tiered-checkout.test.mjs && node tests/order-audit.test.mjs && node tests/review-report.test.mjs"
+  }
+}

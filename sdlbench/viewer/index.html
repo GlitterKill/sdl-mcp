@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SDLBench</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <img src="/assets/agent-trace.png" alt="" />
+      <div>
+        <p>SDLBench</p>
+        <h1>Agent Savings Benchmark</h1>
+      </div>
+    </header>
+
+    <main>
+      <section class="toolbar" aria-label="Data and filters">
+        <label>Data <input id="data-file" type="file" accept=".jsonl,application/x-ndjson,text/plain" /></label>
+        <button id="reload-data" type="button">Load Current JSONL</button>
+        <label>Variant <select id="variant-filter"></select></label>
+        <label>Task <select id="task-filter"></select></label>
+        <button id="export-token-chart" type="button">Export PNG</button>
+        <span class="source">Source <b id="data-source">unloaded</b></span>
+      </section>
+
+      <section class="stats" aria-label="Run summary">
+        <div><span id="session-count">0</span><small>sessions</small></div>
+        <div><span id="variant-count">0</span><small>variants</small></div>
+        <div><span id="saved-count">0</span><small>tokens saved</small></div>
+        <div><span id="avg-time">0ms</span><small>avg time</small></div>
+        <div><span id="pass-rate">0%</span><small>correctness</small></div>
+      </section>
+
+      <section class="grid">
+        <article>
+          <h2>Token Use</h2>
+          <svg id="token-chart" viewBox="0 0 900 230" role="img" aria-label="Token savings chart"></svg>
+        </article>
+        <article>
+          <h2>Cost Delta</h2>
+          <svg id="cost-chart" viewBox="0 0 900 230" role="img" aria-label="Cost chart"></svg>
+        </article>
+        <article>
+          <h2>Time To Completion</h2>
+          <svg id="time-chart" viewBox="0 0 900 230" role="img" aria-label="Time to completion chart"></svg>
+        </article>
+        <article>
+          <h2>Correctness</h2>
+          <svg id="correctness-chart" viewBox="0 0 900 230" role="img" aria-label="Correctness pass rate chart"></svg>
+        </article>
+        <article>
+          <h2>Timeline</h2>
+          <svg id="timeline-chart" viewBox="0 0 900 180" role="img" aria-label="Completion timeline"></svg>
+        </article>
+        <article>
+          <h2>Product Matrix</h2>
+          <div id="matrix" class="matrix"></div>
+        </article>
+      </section>
+
+      <section class="empty">
+        <img src="/assets/report-card.png" alt="" />
+        <p>No matching benchmark records.</p>
+      </section>
+    </main>
+
+    <script type="module" src="./app.mjs"></script>
+  </body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "agent": "claude",
+  "commandTemplate": "claude --cwd {repo} < {prompt}",
+  "transcriptGlobs": [".claude/**/*.jsonl"],
+  "timeoutMs": 600000,
+  "envPassthrough": ["ANTHROPIC_API_KEY"],
+  "promptInjection": "Use the configured product context for this benchmark variant."
+}
