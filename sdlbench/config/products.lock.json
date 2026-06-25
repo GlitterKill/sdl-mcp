@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "products": [
+    { "name": "baseline", "version": "builtin", "adapterKind": "none", "supportedAgents": ["codex", "claude"], "smokeCommand": "node --version" },
+    { "name": "sdl", "version": "local", "adapterKind": "sdl-mcp", "supportedAgents": ["codex", "claude"], "smokeCommand": "node ../dist/main.js --help" },
+    { "name": "crg", "version": "dry-run", "adapterKind": "external", "supportedAgents": ["codex", "claude"], "installerCommand": "npm install", "smokeCommand": "npx code-review-graph --help" },
+    { "name": "repomix", "version": "dry-run", "adapterKind": "external", "supportedAgents": ["codex", "claude"], "installerCommand": "npm install", "smokeCommand": "npx repomix --version" }
+  ]
+}

@@ -1,0 +1,5 @@
+.work/
+results/*.jsonl
+results/*.json
+results/*.png
+results/*.log

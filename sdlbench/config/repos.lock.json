@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "repos": [
+    { "repoId": "fixture-js", "sourcePath": "sdlbench/tests/fixtures/repo", "pinnedRef": "local", "languageTags": ["javascript"], "ignoreGlobs": ["node_modules/**"], "sizeClass": "tiny" },
+    { "repoId": "moshi", "cloneUrl": "https://github.com/square/moshi.git", "pinnedRef": "main", "languageTags": ["java", "kotlin"], "ignoreGlobs": [".gradle/**"], "sizeClass": "small" },
+    { "repoId": "rust-analyzer", "cloneUrl": "https://github.com/rust-lang/rust-analyzer.git", "pinnedRef": "master", "languageTags": ["rust"], "ignoreGlobs": ["target/**"], "sizeClass": "medium" },
+    { "repoId": "kubernetes", "cloneUrl": "https://github.com/kubernetes/kubernetes.git", "pinnedRef": "master", "languageTags": ["go"], "ignoreGlobs": ["_output/**"], "sizeClass": "large" }
+  ]
+}

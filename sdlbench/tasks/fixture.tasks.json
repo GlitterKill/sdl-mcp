@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "tasks": [
+    {
+      "schemaVersion": 1,
+      "taskId": "bugfix-discount-tax",
+      "repoId": "fixture-js",
+      "category": "bug-fix",
+      "prompt": "Fix checkout tax calculation so promotional and customer discounts reduce the taxable subtotal. Preserve existing cart summary formatting and product lookup behavior.",
+      "repo": {
+        "sourcePath": "sdlbench/tests/fixtures/repo"
+      },
+      "context": {
+        "raw": "The fixture checkout repository has src/catalog.js for SKU metadata, src/discounts.js for promo and customer discount calculations, src/money.js for display formatting, and src/cart.js for cart construction. The failing behavior appears when a cart has growth-plan and integration-pack with the LAUNCH10 promo. The cart subtotal is 6400 cents and the promo discount is 640 cents. The existing buildCart flow collects entries, calculates subtotalCents, resolves the promo, resolves customerAdjustment, filters discounts, sums discountCents, then calculates taxCents. Inspect src/cart.js carefully: tax is currently calculated from subtotalCents before discountCents is subtracted, which makes discounted orders overpay tax. The verifier tests subtotal, discount, tax, final total, and summarizeCart formatting. Change the shared calculation in buildCart rather than patching only the test case.",
+        "sdl": "Symbol cart.buildCart: taxCents currently uses subtotalCents. Discount flow already computes discountCents. Change taxable base to subtotalCents - discountCents before TAX_RATE. Test ref: tests/discount-tax.test.mjs expects subtotal 6400, discount 640, tax 475, total 6235.",
+        "sdlQueries": [
+          "buildCart",
+          "resolvePromo"
+        ]
+      },
+      "verify": {
+        "command": "node tests/discount-tax.test.mjs",
+        "timeoutMs": 10000
+      },
+      "rubric": {
+        "maxScore": 1
+      },
+      "solution": {
+        "files": {
+          "src/cart.js": "import { getProduct } from \"./catalog.js\";\nimport { customerAdjustment, resolvePromo } from \"./discounts.js\";\nimport { formatMoney } from \"./money.js\";\n\nconst TAX_RATE = 0.0825;\n\nexport function buildCart(lines, options = {}) {\n  const entries = lines.map((line) => {\n    const product = getProduct(line.sku);\n    return {\n      sku: product.sku,\n      name: product.name,\n      quantity: line.quantity,\n      unitPriceCents: product.priceCents,\n      lineTotalCents: product.priceCents * line.quantity\n    };\n  });\n  const subtotalCents = entries.reduce((sum, entry) => sum + entry.lineTotalCents, 0);\n  const promo = resolvePromo(options.promoCode, subtotalCents);\n  const customerDiscount = customerAdjustment(options.customer, subtotalCents);\n  const discounts = [promo, customerDiscount].filter((discount) => discount.amountCents > 0);\n  const discountCents = discounts.reduce((sum, discount) => sum + discount.amountCents, 0);\n  const taxableCents = Math.max(0, subtotalCents - discountCents);\n  const taxCents = Math.round(taxableCents * TAX_RATE);\n  const totalCents = subtotalCents - discountCents + taxCents;\n\n  return { entries, subtotalCents, discounts, discountCents, taxCents, totalCents };\n}\n\nexport function summarizeCart(cart) {\n  return {\n    itemCount: cart.entries.reduce((sum, entry) => sum + entry.quantity, 0),\n    subtotal: formatMoney(cart.subtotalCents),\n    discounts: formatMoney(cart.discountCents),\n    tax: formatMoney(cart.taxCents),\n    total: formatMoney(cart.totalCents)\n  };\n}\n"
+        }
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "taskId": "feature-tiered-checkout",
+      "repoId": "fixture-js",
+      "category": "feature-change",
+      "prompt": "Implement tier-aware checkout summary support. Gold customers older than one year receive a GOLD5 loyalty discount, and large gold carts should get priority free shipping. Return a checkout summary with display total and flags without breaking existing cart totals.",
+      "repo": {
+        "sourcePath": "sdlbench/tests/fixtures/repo"
+      },
+      "context": {
+        "raw": "This is a multi-step feature in the checkout fixture. You need to inspect src/cart.js, src/discounts.js, src/shipping.js, src/money.js, and tests/tiered-checkout.test.mjs. Existing cart construction handles product lookup, promo discounts, customerAdjustment, tax, and formatted summaries. src/discounts.js has a customerAdjustment placeholder that always returns zero. src/shipping.js estimates standard, international, and free shipping from subtotal but has no tier-aware priority path. The new test constructs a gold US customer with accountAgeDays 420 and a cart containing growth-plan, two integration-pack items, and priority-support with LAUNCH10. Expected flow: subtotal 10400, promo LAUNCH10 1040, gold loyalty discount GOLD5 520, taxable subtotal 8840, tax 729, total 9569. Then createCheckoutSummary should add priority free shipping, keep grandTotalCents 9569, displayTotal $95.69, and include the gold-loyalty flag. This requires edits across discount logic, cart summary orchestration, and shipping logic.",
+        "sdl": "Slice: discounts.customerAdjustment -> cart.buildCart -> shipping.estimateShipping -> cart.createCheckoutSummary. Add GOLD5 = 5% subtotal for gold customers with accountAgeDays >= 365. buildCart must tax after all discounts. createCheckoutSummary should call estimateShipping, add grandTotal/displayTotal, and include gold-loyalty flag.",
+        "sdlQueries": [
+          "buildCart",
+          "customerAdjustment",
+          "estimateShipping"
+        ]
+      },
+      "verify": {
+        "command": "node tests/tiered-checkout.test.mjs",
+        "timeoutMs": 10000
+      },
+      "rubric": {
+        "maxScore": 1
+      },
+      "solution": {
+        "files": {
+          "src/discounts.js": "export function resolvePromo(code, subtotalCents) {\n  if (code === \"LAUNCH10\") {\n    return { code, amountCents: Math.round(subtotalCents * 0.1), reason: \"launch promotion\" };\n  }\n  if (code === \"BUNDLE15\" && subtotalCents >= 6500) {\n    return { code, amountCents: 1500, reason: \"bundle promotion\" };\n  }\n  return { code: null, amountCents: 0, reason: null };\n}\n\nexport function customerAdjustment(customer = {}, subtotalCents) {\n  if (customer.tier === \"gold\" && customer.accountAgeDays >= 365) {\n    return { code: \"GOLD5\", amountCents: Math.round(subtotalCents * 0.05), reason: \"gold loyalty\" };\n  }\n  return { code: null, amountCents: 0, reason: null };\n}\n",
+          "src/shipping.js": "export function estimateShipping(cart, customer = {}) {\n  const priority = customer.tier === \"gold\" && cart.subtotalCents >= 9000;\n  const free = priority || cart.subtotalCents >= 6500;\n  return {\n    method: priority ? \"priority\" : customer.region === \"EU\" ? \"international\" : \"standard\",\n    etaDays: priority ? 2 : customer.region === \"EU\" ? 8 : 5,\n    shippingCents: free ? 0 : 799\n  };\n}\n",
+          "src/cart.js": "import { getProduct } from \"./catalog.js\";\nimport { customerAdjustment, resolvePromo } from \"./discounts.js\";\nimport { formatMoney } from \"./money.js\";\nimport { estimateShipping } from \"./shipping.js\";\n\nconst TAX_RATE = 0.0825;\n\nexport function buildCart(lines, options = {}) {\n  const entries = lines.map((line) => {\n    const product = getProduct(line.sku);\n    return {\n      sku: product.sku,\n      name: product.name,\n      quantity: line.quantity,\n      unitPriceCents: product.priceCents,\n      lineTotalCents: product.priceCents * line.quantity\n    };\n  });\n  const subtotalCents = entries.reduce((sum, entry) => sum + entry.lineTotalCents, 0);\n  const promo = resolvePromo(options.promoCode, subtotalCents);\n  const customerDiscount = customerAdjustment(options.customer, subtotalCents);\n  const discounts = [promo, customerDiscount].filter((discount) => discount.amountCents > 0);\n  const discountCents = discounts.reduce((sum, discount) => sum + discount.amountCents, 0);\n  const taxableCents = Math.max(0, subtotalCents - discountCents);\n  const taxCents = Math.round(taxableCents * TAX_RATE);\n  const totalCents = subtotalCents - discountCents + taxCents;\n\n  return { entries, subtotalCents, discounts, discountCents, taxCents, totalCents };\n}\n\nexport function summarizeCart(cart) {\n  return {\n    itemCount: cart.entries.reduce((sum, entry) => sum + entry.quantity, 0),\n    subtotal: formatMoney(cart.subtotalCents),\n    discounts: formatMoney(cart.discountCents),\n    tax: formatMoney(cart.taxCents),\n    total: formatMoney(cart.totalCents)\n  };\n}\n\nexport function createCheckoutSummary(cart, options = {}) {\n  const shipping = estimateShipping(cart, options.customer);\n  const grandTotalCents = cart.totalCents + shipping.shippingCents;\n  const flags = [];\n  if (cart.discounts.some((discount) => discount.code === \"GOLD5\")) flags.push(\"gold-loyalty\");\n  if (shipping.method === \"priority\") flags.push(\"priority-shipping\");\n  return {\n    ...summarizeCart(cart),\n    shipping,\n    grandTotalCents,\n    displayTotal: formatMoney(grandTotalCents),\n    flags\n  };\n}\n"
+        }
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "taskId": "security-order-audit",
+      "repoId": "fixture-js",
+      "category": "bug-fix",
+      "prompt": "Harden order placement and audit output. Do not store or expose raw payment tokens, avoid Date.now-based IDs, and prevent callers from mutating stored orders through listOrders().",
+      "repo": {
+        "sourcePath": "sdlbench/tests/fixtures/repo"
+      },
+      "context": {
+        "raw": "This security hardening task spans src/orders.js and src/audit.js and is verified by tests/order-audit.test.mjs. placeOrder currently requires payment.token, creates an id with Date.now(), stores paymentToken directly on the returned order, pushes the same object into an in-memory array, and listOrders returns that internal array. auditOrder then serializes order.id, order.paymentToken, totalCents, and status. The expected behavior is safer: generated order ids should match ord_ plus twelve lowercase hex characters, raw payment tokens must not appear in returned orders or audit output, audit output should include a paymentFingerprint marker instead, and listOrders should return defensive copies so changing the listed order does not mutate the stored paid order. Keep the API names placeOrder, listOrders, and auditOrder stable.",
+        "sdl": "Hot path: orders.placeOrder stores paymentToken and Date.now id; orders.listOrders returns internal array; audit.auditOrder prints paymentToken. Replace raw token with fingerprint, random hex id, and cloned list/order returns.",
+        "sdlQueries": [
+          "placeOrder",
+          "listOrders",
+          "auditOrder"
+        ]
+      },
+      "verify": {
+        "command": "node tests/order-audit.test.mjs",
+        "timeoutMs": 10000
+      },
+      "rubric": {
+        "maxScore": 1
+      },
+      "solution": {
+        "files": {
+          "src/orders.js": "import { createHash, randomBytes } from \"node:crypto\";\n\nconst orders = [];\n\nexport function placeOrder(cart, payment) {\n  if (!payment?.token) throw new Error(\"payment token required\");\n  const order = {\n    id: `ord_${randomBytes(6).toString(\"hex\")}`,\n    lines: cart.entries.map((entry) => ({ ...entry })),\n    totalCents: cart.totalCents,\n    paymentFingerprint: fingerprint(payment.token),\n    status: \"paid\"\n  };\n  orders.push(order);\n  return cloneOrder(order);\n}\n\nexport function listOrders() {\n  return orders.map(cloneOrder);\n}\n\nfunction fingerprint(token) {\n  return createHash(\"sha256\").update(token).digest(\"hex\").slice(0, 12);\n}\n\nfunction cloneOrder(order) {\n  return { ...order, lines: order.lines.map((line) => ({ ...line })) };\n}\n",
+          "src/audit.js": "export function auditOrder(order) {\n  return `${order.id}:paymentFingerprint=${order.paymentFingerprint}:${order.totalCents}:${order.status}`;\n}\n"
+        }
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "taskId": "review-checkout-risk",
+      "repoId": "fixture-js",
+      "category": "review-or-impact",
+      "prompt": "Perform a major code review of the checkout fixture. Prioritize correctness, security, and operational risks across cart, discount, shipping, order, audit, and catalog flows. Save findings in review-report.md.",
+      "repo": {
+        "sourcePath": "sdlbench/tests/fixtures/repo"
+      },
+      "context": {
+        "raw": "Review the full fixture repository: src/catalog.js defines product stock and prices; src/discounts.js resolves launch and bundle promos plus a placeholder customerAdjustment; src/cart.js builds entries, resolves discounts, calculates tax and totals, and summarizes money; src/shipping.js estimates shipping by subtotal and region; src/orders.js places in-memory paid orders; src/audit.js serializes order audit lines. The review should identify important risks rather than style nits. Expected high-value findings include raw payment token storage and audit exposure, Date.now order id collisions/predictability, no inventory reservation or stock validation despite catalog stock fields, mutable listOrders exposure, tax correctness around discounts, and priority shipping/business-rule gaps. Write review-report.md with prioritized findings and concise remediation guidance.",
+        "sdl": "Review slice: catalog stock fields unused by orders; cart tax/discount boundary; shipping priority rules absent; orders stores paymentToken and Date.now id; listOrders exposes mutable array; audit prints payment token. Save review-report.md.",
+        "sdlQueries": [
+          "buildCart",
+          "placeOrder",
+          "auditOrder",
+          "estimateShipping",
+          "PRODUCTS"
+        ]
+      },
+      "verify": {
+        "command": "node tests/review-report.test.mjs",
+        "timeoutMs": 10000
+      },
+      "rubric": {
+        "maxScore": 1
+      },
+      "solution": {
+        "files": {
+          "review-report.md": "# Checkout Risk Review\n\n## Priority Findings\n\n1. Raw payment token is stored on orders and then emitted by auditOrder. Replace the payment token with a one-way payment fingerprint and never include the token in audit output.\n2. Order ids use Date.now, which is predictable and can collide under concurrent order placement. Use random or monotonic ids with enough entropy.\n3. Catalog products expose stock, but placeOrder never checks inventory or reserves stock before marking an order paid. Add an inventory validation/reservation boundary before payment capture is treated as final.\n4. listOrders returns mutable internal order objects, so callers can change stored status. Return defensive copies or immutable records.\n5. Cart tax calculation must be checked around discounts; tax should be calculated on the discounted taxable subtotal, not the pre-discount subtotal.\n6. Shipping rules have no priority path for high-value loyalty customers, so priority support purchases do not affect fulfillment. Make priority shipping rules explicit and covered by tests.\n"
+        }
+      }
+    }
+  ]
+}
