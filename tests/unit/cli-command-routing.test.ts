@@ -301,6 +301,11 @@ describe("CLI command routing", () => {
 
   // ----- benchmark:ci -----
   describe("benchmark:ci command routing", () => {
+    const benchmarkCommandSource = readFileSync(
+      join(process.cwd(), "src", "cli", "commands", "benchmark.ts"),
+      "utf8",
+    );
+
     it("routes to parseBenchmarkOptions and returns BenchmarkOptions", () => {
       const options = parseBenchmarkOptions([], global, {
         "repo-id": "my-repo",
@@ -323,6 +328,21 @@ describe("CLI command routing", () => {
       assert.strictEqual(options.baselinePath, "/tmp/base.json");
       assert.strictEqual(options.thresholdPath, "/tmp/thresh.json");
       assert.strictEqual(options.outputPath, "/tmp/results.json");
+    });
+
+    it("refreshes the DB connection after benchmark indexing", () => {
+      assert.doesNotMatch(
+        benchmarkCommandSource,
+        /async function collectBenchmarkMetrics\(\s*conn: Connection,/,
+      );
+      assert.doesNotMatch(
+        benchmarkCommandSource,
+        /collectBenchmarkMetrics\(\s*conn,\s*repoId,/,
+      );
+      assert.match(
+        benchmarkCommandSource,
+        /const conn = await getLadybugConn\(\);[\s\S]*const allSymbols = await ladybugDb\.getSymbolsByRepo\(conn, repoId\)/,
+      );
     });
   });
 

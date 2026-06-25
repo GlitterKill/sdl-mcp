@@ -2,7 +2,6 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { dirname, resolve } from "path";
-import type { Connection } from "kuzu";
 import type { BenchmarkOptions } from "../types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
@@ -176,7 +175,6 @@ function estimateTokens(text: string): number {
 }
 
 async function collectBenchmarkMetrics(
-  conn: Connection,
   repoId: string,
   _repoPath: string,
   skipIndexing: boolean,
@@ -191,6 +189,7 @@ async function collectBenchmarkMetrics(
     filesIndexed = indexResult.filesProcessed;
   }
 
+  const conn = await getLadybugConn();
   const allSymbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
   const edges = await ladybugDb.getEdgesByRepo(conn, repoId);
   const files = await ladybugDb.getFilesByRepo(conn, repoId);
@@ -482,7 +481,6 @@ export async function benchmarkCICommand(
       thresholds.smoothing,
       () =>
         collectBenchmarkMetrics(
-          conn,
           repoId,
           repoPath,
           options.skipIndexing ?? false,
@@ -493,7 +491,6 @@ export async function benchmarkCICommand(
   } else {
     console.log(`\nRunning benchmark (single run)...`);
     benchmarkMetrics = await collectBenchmarkMetrics(
-      conn,
       repoId,
       repoPath,
       options.skipIndexing ?? false,
