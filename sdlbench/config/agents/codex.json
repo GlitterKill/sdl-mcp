@@ -3,7 +3,7 @@
   "agent": "codex",
   "model": "gpt-5.5",
   "reasoningEffort": "xhigh",
-  "commandTemplate": "codex exec --model {model} -c model_reasoning_effort=\"xhigh\" --cd {repo} - < {prompt}",
+  "commandTemplate": "codex exec --model {model} -c model_reasoning_effort=\"xhigh\" {sdlMcpConfig} --cd {repo} - < {prompt}",
   "transcriptGlobs": [".codex/**/*.jsonl"],
   "timeoutMs": 600000,
   "envPassthrough": ["OPENAI_API_KEY"],

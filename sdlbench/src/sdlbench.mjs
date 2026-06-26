@@ -1,7 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { createServer as createNetServer } from "node:net";
 import { performance } from "node:perf_hooks";
@@ -55,84 +56,108 @@ export async function runBenchmark(options = {}) {
     await rm(runRoot, { force: true, recursive: true });
     await cp(abs(root, task.repo.sourcePath), runRoot, { recursive: true });
 
-    const setupStart = performance.now();
-    const sdlEvidence = variant === "sdl"
-      ? await collectSdlHttpEvidence({ root, workDir, runRoot, task, taskRunId, options })
-      : null;
-    let promptPath = null;
-    let agentResult = null;
-    let agentMs = 0;
-    let changedFiles = Object.keys(task.solution?.files ?? {});
-    let outputText;
+    let sdlSession = null;
+    try {
+      const setupStart = performance.now();
+      sdlSession = variant === "sdl"
+        ? await startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, options })
+        : null;
+      const sdlEvidence = sdlSession?.evidence ?? null;
+      const setupMs = Math.round(performance.now() - setupStart);
+      const activeStart = performance.now();
+      let promptPath = null;
+      let agentResult = null;
+      let agentMs = 0;
+      let agentStartedAt = 0;
+      let changedFiles = Object.keys(task.solution?.files ?? {});
+      let outputText;
 
-    if (executionMode === "behavior") {
-      promptPath = join(runRoot, ".sdlbench-prompt.md");
-      await writeFile(promptPath, renderAgentPrompt(task, variant, sdlEvidence?.context), "utf8");
-      const before = await snapshotFiles(runRoot);
-      const agentStart = performance.now();
-      agentResult = runAgentCommand(agentConfig, { runRoot, promptPath, task, variant, model });
-      agentMs = Math.round(performance.now() - agentStart);
-      changedFiles = diffSnapshots(before, await snapshotFiles(runRoot));
-      outputText = [agentResult.stdout, agentResult.stderr].filter(Boolean).join("\n");
-    } else {
-      await applySolution(runRoot, task);
+      if (executionMode === "behavior") {
+        if (sdlSession) await installSdlBenchmarkReinforcement(runRoot, sdlSession);
+        promptPath = join(runRoot, ".sdlbench-prompt.md");
+        await writeFile(promptPath, renderAgentPrompt(task, variant), "utf8");
+        const before = await snapshotFiles(runRoot);
+        agentStartedAt = Date.now();
+        const agentStart = performance.now();
+        agentResult = runAgentCommand(agentConfig, { runRoot, promptPath, task, variant, model, sdlSession });
+        agentMs = Math.round(performance.now() - agentStart);
+        changedFiles = diffSnapshots(before, await snapshotFiles(runRoot));
+        outputText = [agentResult.stdout, agentResult.stderr].filter(Boolean).join("\n");
+      } else {
+        await applySolution(runRoot, task);
+      }
+
+      const verify = runCommand(task.verify.command, runRoot, task.verify.timeoutMs ?? 10000);
+      const durationMs = Math.round(performance.now() - activeStart);
+      const wallMs = Math.round(performance.now() - started);
+      const passed = verify.exitCode === 0 && (!agentResult || agentResult.exitCode === 0);
+      const estimatedTokens = countSessionTokens(task, variant, tokenizerCommand, promptContextForVariant(task, variant), outputText, {
+        model,
+        encoding: modelPricing.encoding,
+      });
+      const codexTokenCounts = executionMode === "behavior"
+        ? await findCodexSessionTokenCounts({
+          runRoot,
+          sessionsDir: options.codexSessionsDir,
+          sinceMs: agentStartedAt ? agentStartedAt - 120_000 : 0,
+        })
+        : null;
+      const tokens = codexTokenCounts
+        ? tokensFromCodexSessionCounts(codexTokenCounts, estimatedTokens)
+        : estimatedTokens;
+      const record = {
+        schemaVersion: SCHEMA_VERSION,
+        runId: taskRunId,
+        sessionId: randomUUID(),
+        timestamp: new Date().toISOString(),
+        agent,
+        model,
+        variant,
+        product: variant,
+        repoId: task.repoId,
+        taskId: task.taskId,
+        category: task.category,
+        status: passed ? "pass" : "fail",
+        durationMs,
+        wallMs,
+        setupMs,
+        agentMs: agentResult ? agentMs : durationMs,
+        tokens,
+        cost: estimateCost(tokens, modelPricing),
+        quality: {
+          passed,
+          errorRate: passed ? 0 : 1,
+          weightedErrorRate: passed ? 0 : 1,
+          rubricScore: passed ? task.rubric?.maxScore ?? 1 : 0,
+        },
+        workflow: {
+          executionMode,
+          turns: task.workflow?.turns ?? 1,
+          toolCalls: task.workflow?.toolCalls ?? (variant === "sdl" ? 2 : 0),
+          fileReads: task.workflow?.fileReads ?? (variant === "sdl" ? 1 : 3),
+          shellCommands: 1 + (agentResult ? 1 : 0),
+          testsRun: 1,
+          filesChanged: changedFiles.length,
+          humanInterventions: 0,
+        },
+        artifacts: {
+          worktree: runRoot,
+          promptPath,
+          agent: agentResult,
+          changedFiles,
+          codexSession: codexTokenCounts ? codexSessionArtifact(codexTokenCounts) : undefined,
+          estimatedTokens: codexTokenCounts ? estimatedTokens : undefined,
+          sdl: sdlEvidence,
+          verifyStdout: verify.stdout.slice(-4000),
+          verifyStderr: verify.stderr.slice(-4000),
+        },
+      };
+
+      records.push(record);
+      await appendFile(resultsPath, `${JSON.stringify(record)}\n`, "utf8");
+    } finally {
+      await sdlSession?.stop?.();
     }
-    const setupMs = Math.max(0, Math.round(performance.now() - setupStart) - agentMs);
-
-    const verify = runCommand(task.verify.command, runRoot, task.verify.timeoutMs ?? 10000);
-    const durationMs = Math.round(performance.now() - started);
-    const passed = verify.exitCode === 0 && (!agentResult || agentResult.exitCode === 0);
-    const tokens = countSessionTokens(task, variant, tokenizerCommand, sdlEvidence?.context, outputText, {
-      model,
-      encoding: modelPricing.encoding,
-    });
-    const record = {
-      schemaVersion: SCHEMA_VERSION,
-      runId: taskRunId,
-      sessionId: randomUUID(),
-      timestamp: new Date().toISOString(),
-      agent,
-      model,
-      variant,
-      product: variant,
-      repoId: task.repoId,
-      taskId: task.taskId,
-      category: task.category,
-      status: passed ? "pass" : "fail",
-      durationMs,
-      setupMs,
-      agentMs: agentResult ? agentMs : Math.max(0, durationMs - setupMs),
-      tokens,
-      cost: estimateCost(tokens, modelPricing),
-      quality: {
-        passed,
-        errorRate: passed ? 0 : 1,
-        weightedErrorRate: passed ? 0 : 1,
-        rubricScore: passed ? task.rubric?.maxScore ?? 1 : 0,
-      },
-      workflow: {
-        executionMode,
-        turns: task.workflow?.turns ?? 1,
-        toolCalls: task.workflow?.toolCalls ?? (variant === "sdl" ? 2 : 0),
-        fileReads: task.workflow?.fileReads ?? (variant === "sdl" ? 1 : 3),
-        shellCommands: 1 + (agentResult ? 1 : 0),
-        testsRun: 1,
-        filesChanged: changedFiles.length,
-        humanInterventions: 0,
-      },
-      artifacts: {
-        worktree: runRoot,
-        promptPath,
-        agent: agentResult,
-        changedFiles,
-        sdl: sdlEvidence,
-        verifyStdout: verify.stdout.slice(-4000),
-        verifyStderr: verify.stderr.slice(-4000),
-      },
-    };
-
-    records.push(record);
-    await appendFile(resultsPath, `${JSON.stringify(record)}\n`, "utf8");
   }
 
   return { records, resultsPath };
@@ -289,8 +314,8 @@ async function loadAgentConfig(root, agent, options, { requireCommand = false } 
   }
 }
 
-function renderAgentPrompt(task, variant, sdlContext) {
-  const context = variant === "sdl" ? sdlContext : task.context.raw;
+function renderAgentPrompt(task, variant) {
+  const context = promptContextForVariant(task, variant);
   return [
     `Task: ${task.taskId}`,
     task.prompt,
@@ -300,17 +325,101 @@ function renderAgentPrompt(task, variant, sdlContext) {
   ].join("\n\n");
 }
 
-function runAgentCommand(config, { runRoot, promptPath, task, variant, model }) {
-  const command = renderCommandTemplate(config.commandTemplate, { repo: runRoot, prompt: promptPath, taskId: task.taskId, variant, model });
+function promptContextForVariant(task, variant) {
+  if (variant !== "sdl") return task.context.raw;
+  return "Use the configured SDL-MCP server for repository context. Follow the sdl-mcp-agent-workflow retrieval ladder, edit policy, runtime policy, and usageStats completion step.";
+}
+
+function runAgentCommand(config, { runRoot, promptPath, task, variant, model, sdlSession }) {
+  const command = renderCommandTemplate(config.commandTemplate, {
+    repo: runRoot,
+    prompt: promptPath,
+    taskId: task.taskId,
+    variant,
+    model,
+    sdlMcpConfig: sdlMcpConfigArgs(sdlSession),
+    sdlMcpUrl: sdlSession?.mcpUrl ?? "",
+  });
   return { command, ...runCommand(command, runRoot, config.timeoutMs ?? 600_000) };
 }
 
 function renderCommandTemplate(template, values) {
-  return template.replace(/\{(repo|prompt|taskId|variant|model)\}/g, (_match, key) => shellArg(values[key]));
+  return template.replace(/\{(repo|prompt|taskId|variant|model|sdlMcpConfig|sdlMcpUrl)\}/g, (_match, key) => {
+    if (key === "sdlMcpConfig") return values[key] || "";
+    return shellArg(values[key] ?? "");
+  });
 }
 
 function shellArg(value) {
   return JSON.stringify(String(value));
+}
+
+function sdlMcpConfigArgs(sdlSession) {
+  if (!sdlSession?.mcpUrl) return "";
+  return [
+    "--dangerously-bypass-hook-trust",
+    "-c mcp_servers.sdl-mcp.enabled=true",
+    "-c mcp_servers.sdl-mcp.url=" + JSON.stringify(sdlSession.mcpUrl),
+  ].join(" ");
+}
+
+async function installSdlBenchmarkReinforcement(runRoot, sdlSession) {
+  const hookDir = join(runRoot, ".codex", "hooks");
+  await mkdir(hookDir, { recursive: true });
+  await writeFile(join(runRoot, "AGENTS.md"), sdlBenchmarkInstructions(), "utf8");
+  await writeFile(join(runRoot, "SDL.md"), sdlBenchmarkInstructions(), "utf8");
+  await writeFile(join(runRoot, ".codex", "hooks.json"), JSON.stringify({
+    hooks: {
+      SessionStart: [{
+        hooks: [{
+          type: "command",
+          command: `node ${JSON.stringify(join(hookDir, "load-sdl-skill.mjs"))}`,
+          timeout: 5,
+          statusMessage: "Loading SDL-MCP workflow skill",
+        }],
+      }],
+      PreToolUse: [{
+        matcher: ".*",
+        hooks: [{
+          type: "command",
+          command: `node ${JSON.stringify(join(hookDir, "force-sdl-mcp.mjs"))}`,
+          timeout: 10,
+          statusMessage: "Checking SDL-MCP tool policy",
+        }],
+      }],
+    },
+  }, null, 2), "utf8");
+
+  const sourceHookDir = join(defaultRoot(), ".codex", "hooks");
+  await writeFile(
+    join(hookDir, "load-sdl-skill.mjs"),
+    await readFile(join(sourceHookDir, "load-sdl-skill.mjs"), "utf8"),
+    "utf8",
+  );
+  const pidfilePath = sdlSession.evidence?.configPath
+    ? join(dirname(sdlSession.evidence.configPath), "sdl-mcp.pid")
+    : join(runRoot, ".sdlbench-sdl.pid");
+  const forceHook = (await readFile(join(sourceHookDir, "force-sdl-mcp.mjs"), "utf8"))
+    .replace(
+      /const pidfilePath = ".*?";/,
+      "const pidfilePath = " + JSON.stringify(pidfilePath) + ";",
+    )
+    .replace(
+      'normalized === "shell_command" ||',
+      'normalized === "shell_command" ||\n    normalized === "exec" ||\n    normalized.endsWith(".exec") ||',
+    );
+  await writeFile(join(hookDir, "force-sdl-mcp.mjs"), forceHook, "utf8");
+}
+
+function sdlBenchmarkInstructions() {
+  return [
+    "# SDL-MCP Benchmark Instructions",
+    "",
+    "Use SDL-MCP as the repository interface.",
+    "Start with repo.status, then use sdl.context or sdl.workflow before reading or editing indexed source.",
+    "Use SDL edit tools for indexed source and SDL runtime tools for repo-local commands.",
+    "Call usageStats with scope session and persist true before the final answer.",
+  ].join("\n");
 }
 
 async function snapshotFiles(root) {
@@ -345,15 +454,22 @@ function runCommand(command, cwd, timeoutMs) {
 }
 
 
-async function collectSdlHttpEvidence({ root, workDir, runRoot, task, taskRunId, options }) {
+async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, options }) {
   const authToken = options.sdlAuthToken ?? "sdlbench-" + taskRunId;
   if (options.sdlHttpBaseUrl) {
-    return retrieveSdlHttpContext({
+    const baseUrl = trimSlash(options.sdlHttpBaseUrl);
+    const evidence = await retrieveSdlHttpContext({
       baseUrl: options.sdlHttpBaseUrl,
       authToken,
       task,
       timeoutMs: options.sdlHttpTimeoutMs ?? 120_000,
     });
+    return {
+      baseUrl,
+      mcpUrl: baseUrl + "/mcp",
+      evidence,
+      stop: async () => {},
+    };
   }
 
   const sdlRoot = join(workDir, taskRunId + ".sdl");
@@ -403,17 +519,23 @@ async function collectSdlHttpEvidence({ root, workDir, runRoot, task, taskRunId,
       timeoutMs: options.sdlHttpTimeoutMs ?? 120_000,
     });
     return {
-      ...evidence,
-      configPath,
-      dbPath,
-      server: { port, logTail: logs.join("").slice(-4000) },
+      baseUrl,
+      mcpUrl: baseUrl + "/mcp",
+      evidence: {
+        ...evidence,
+        configPath,
+        dbPath,
+        server: { port, logTail: logs.join("").slice(-4000) },
+      },
+      stop: async () => stopChild(child),
     };
-  } finally {
+  } catch (error) {
     await stopChild(child);
+    throw error;
   }
 }
 
-function createSdlHttpConfig({ task, runRoot, dbPath, authToken }) {
+export function createSdlHttpConfig({ task, runRoot, dbPath }) {
   return {
     repos: [{
       repoId: task.repoId,
@@ -525,7 +647,7 @@ function createSdlHttpConfig({ task, runRoot, dbPath, authToken }) {
     },
     prefetch: { enabled: false, maxBudgetPercent: 20, warmTopN: 50 },
     http: { allowRemote: false },
-    httpAuth: { enabled: true, token: authToken },
+    httpAuth: { enabled: false },
   };
 }
 
@@ -742,6 +864,134 @@ function normalizeTokens({ input, output, productContext = 0, rawEquivalent, tok
     tokenizerVersion: tokenizer.tokenizerVersion,
     tokenizerSource: tokenizer.tokenizerSource,
   };
+}
+
+export async function findCodexSessionTokenCounts({ runRoot, sessionsDir = defaultCodexSessionsDir(), sinceMs = 0 } = {}) {
+  if (!runRoot) return null;
+  const sessionFiles = await findSessionJsonlFiles(sessionsDir, sinceMs);
+  const normalizedRunRoot = normalizeSessionPath(runRoot);
+  const matches = [];
+
+  for (const sessionFile of sessionFiles) {
+    const match = await readCodexSessionTokenFile(sessionFile, normalizedRunRoot);
+    if (match) matches.push(match);
+  }
+
+  matches.sort((a, b) => (b.mtimeMs - a.mtimeMs) || String(b.sessionFile).localeCompare(String(a.sessionFile)));
+  return matches[0] ?? null;
+}
+
+function defaultCodexSessionsDir() {
+  return join(process.env.CODEX_HOME ?? join(homedir(), ".codex"), "sessions");
+}
+
+async function findSessionJsonlFiles(root, sinceMs) {
+  try {
+    const entries = await readdir(root, { withFileTypes: true });
+    const files = [];
+    for (const entry of entries) {
+      const path = join(root, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...await findSessionJsonlFiles(path, sinceMs));
+      } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+        const info = await stat(path);
+        if (!sinceMs || info.mtimeMs >= sinceMs) files.push({ path, mtimeMs: info.mtimeMs });
+      }
+    }
+    return files;
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function readCodexSessionTokenFile(sessionFile, normalizedRunRoot) {
+  const text = await readFile(sessionFile.path, "utf8");
+  let metadata = null;
+  let tokenInfo = null;
+
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (event.type === "session_meta") {
+      metadata = event.payload ?? null;
+    } else if (event.type === "event_msg" && event.payload?.type === "token_count") {
+      // Codex writes cumulative tiktoken session counts; the final one is the full run.
+      tokenInfo = event.payload.info ?? tokenInfo;
+    }
+  }
+
+  if (!metadata?.cwd || normalizeSessionPath(metadata.cwd) !== normalizedRunRoot || !tokenInfo?.total_token_usage) {
+    return null;
+  }
+
+  return {
+    sessionFile: sessionFile.path,
+    mtimeMs: sessionFile.mtimeMs,
+    sessionId: metadata.session_id ?? metadata.id,
+    cwd: metadata.cwd,
+    source: metadata.source,
+    cliVersion: metadata.cli_version,
+    modelProvider: metadata.model_provider,
+    modelContextWindow: tokenInfo.model_context_window,
+    usage: tokenInfo.total_token_usage,
+  };
+}
+
+function normalizeSessionPath(value) {
+  return resolve(String(value).replace(/^\\\\\?\\/, "")).replace(/\\/g, "/").toLowerCase();
+}
+
+function tokensFromCodexSessionCounts(sessionCounts, estimatedTokens) {
+  const usage = sessionCounts.usage ?? {};
+  const input = wholeNumber(usage.input_tokens);
+  const output = wholeNumber(usage.output_tokens);
+  const total = wholeNumber(usage.total_tokens) || input + output;
+  const cachedInput = wholeNumber(usage.cached_input_tokens);
+  const reasoningOutput = wholeNumber(usage.reasoning_output_tokens);
+  return {
+    input,
+    output,
+    total,
+    cachedInput,
+    uncachedInput: Math.max(0, input - cachedInput),
+    reasoningOutput,
+    productContext: 0,
+    rawEquivalent: total,
+    saved: 0,
+    savingsPercent: 0,
+    model: estimatedTokens.model,
+    encoding: estimatedTokens.encoding,
+    modelHint: estimatedTokens.modelHint,
+    tokenizerResolution: "tiktoken_session_count",
+    tokenizerVersion: sessionCounts.cliVersion,
+    tokenizerSource: "codex-session",
+    usageSource: "codex_session_token_count",
+    sessionId: sessionCounts.sessionId,
+    sessionFile: sessionCounts.sessionFile,
+    modelContextWindow: sessionCounts.modelContextWindow,
+  };
+}
+
+function codexSessionArtifact(sessionCounts) {
+  return {
+    sessionId: sessionCounts.sessionId,
+    sessionFile: sessionCounts.sessionFile,
+    cwd: sessionCounts.cwd,
+    source: sessionCounts.source,
+    cliVersion: sessionCounts.cliVersion,
+    modelProvider: sessionCounts.modelProvider,
+  };
+}
+
+function wholeNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
 }
 
 function ensureTiktoken(root) {

@@ -40,7 +40,7 @@ Each task copies `sdlbench/tests/fixtures/repo` into `sdlbench/.work/repos/<task
 
 For `--variant sdl`, the runner indexes and retrieves context through the SDL-MCP HTTP server before applying task solution files. By default it starts a temporary `serve --http` process for the copied fixture repo, waits on `/health`, runs `POST /api/repo/:repoId/reindex-stream` with `mode: "full"`, and retrieves task context with `GET /api/symbol/:repoId/search` for each task's `context.sdlQueries`. Tests can pass `sdlHttpBaseUrl` to use an existing HTTP server.
 
-The temporary config mirrors the production SDL-MCP shape closely enough for benchmark evidence: Rust indexing with `pipeline: "auto"`, concurrency 12, pass2 concurrency 8, provider-first LSP `primaryWithCaps`, file watching enabled, policy windows at 180 lines / 1400 tokens, local semantic embeddings with DML/CPU fallback and hybrid retrieval, SCIP auto-ingest/generation, prefetch off, HTTP local-only, and bearer auth enabled. Provider-first only counts as evidence when the HTTP indexing response reports provider-first execution; otherwise the record still proves real HTTP indexing/retrieval but not provider-first savings.
+The temporary config mirrors the production SDL-MCP shape closely enough for benchmark evidence: Rust indexing with `pipeline: "auto"`, concurrency 12, pass2 concurrency 8, provider-first LSP `primaryWithCaps`, file watching enabled, policy windows at 180 lines / 1400 tokens, local semantic embeddings with DML/CPU fallback and hybrid retrieval, SCIP auto-ingest/generation, prefetch off, HTTP local-only, and auth disabled for local Codex MCP access. Provider-first only counts as evidence when the HTTP indexing response reports provider-first execution; otherwise the record still proves real HTTP indexing/retrieval but not provider-first savings.
 
 
 
@@ -50,7 +50,7 @@ SDL token counts use the retrieved HTTP context, not the canned `context.sdl` ta
 
 `results/sessions.jsonl` is the canonical chart source. `analyze` writes `results/summary.json`; the viewer reads the JSONL directly and renders token use, cost, time to completion, correctness, timeline, and product matrix charts with per-chart PNG export.
 
-Token counts use the selected model first: `--model`, then `config/agents/<agent>.json` `model`, then `config/pricing.json` `defaultModel`. The tokenizer subprocess calls `tiktoken.encoding_for_model(model)` and falls back to the configured encoding only when tiktoken does not know that model. Records include `model`, `encoding`, `modelHint`, `tokenizerResolution`, `tokenizerVersion`, and `tokenizerSource`.
+Token counts use the selected model first: `--model`, then `config/agents/<agent>.json` `model`, then `config/pricing.json` `defaultModel`. Fixture-mode records use the tokenizer subprocess, which calls `tiktoken.encoding_for_model(model)` and falls back to the configured encoding only when tiktoken does not know that model. Codex behavior-mode records prefer Codex session JSONL `token_count` totals for the matching run worktree, including `input`, `cachedInput`, `output`, `reasoningOutput`, and `total`; the prompt estimate is kept at `artifacts.estimatedTokens` only when session counts are available.
 
 Cost estimates use `sdlbench/config/pricing.json`. When that file declares a `models` map, the selected model must have a matching pricing entry; otherwise the run fails instead of silently using another model's rates. `contextPerMTok` defaults to `0` for API cost estimates because prompt/context tokens are already included in input token charges.
 
@@ -58,6 +58,6 @@ Cost estimates use `sdlbench/config/pricing.json`. When that file declares a `mo
 
 Default runs stay in fixture mode: they apply task-local `solution.files`, then run the verifier. Use this for harness and token plumbing checks.
 
-Pass `--behavior` to test model behavior. In behavior mode, SDLBench writes `.sdlbench-prompt.md` into the copied repo, runs the configured agent command template from `config/agents/<agent>.json`, then verifies the files the command changed. The checked-in Codex config defaults to `gpt-5.5` with `model_reasoning_effort="xhigh"`. The command template can use `{repo}`, `{prompt}`, `{taskId}`, `{variant}`, and `{model}` placeholders. Override it directly with `--agent-command "cmd {repo} {prompt}"` for local smoke tests.
+Pass `--behavior` to test model behavior. In behavior mode, SDLBench writes `.sdlbench-prompt.md` into the copied repo, runs the configured agent command template from `config/agents/<agent>.json`, then verifies the files the command changed. The checked-in Codex config defaults to `gpt-5.5` with `model_reasoning_effort="xhigh"`. The command template can use `{repo}`, `{prompt}`, `{taskId}`, `{variant}`, `{model}`, `{sdlMcpConfig}`, and `{sdlMcpUrl}` placeholders. Override it directly with `--agent-command "cmd {repo} {prompt}"` for local smoke tests.
 
 Behavior records include `artifacts.promptPath`, `artifacts.agent`, and `artifacts.changedFiles`. A pass means the agent command exited successfully and the verifier passed.

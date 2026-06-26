@@ -7,6 +7,8 @@ import test from "node:test";
 
 import {
   analyzeSessions,
+  createSdlHttpConfig,
+  findCodexSessionTokenCounts,
   importTranscript,
   runBenchmark,
 } from "../src/sdlbench.mjs";
@@ -146,6 +148,108 @@ test("behavior mode runs an agent command instead of applying canned solution fi
     assert.equal(record.workflow.filesChanged, 1);
     assert.match(await readFile(join(record.artifacts.worktree, "src", "value.js"), "utf8"), /agent/);
     assert.match(await readFile(record.artifacts.promptPath, "utf8"), /RAW_CONTEXT_ONLY/);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+
+test("behavior mode records Codex tiktoken session counts when available", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-codex-tokens-"));
+  const repo = join(root, "repo");
+  const matrixPath = join(root, "matrix.json");
+  const agentPath = join(root, "agent.mjs");
+  const codexSessionsDir = join(root, "codex-sessions");
+  const dayDir = join(codexSessionsDir, "2026", "06", "26");
+
+  try {
+    await mkdir(dayDir, { recursive: true });
+    await mkdir(join(repo, "src"), { recursive: true });
+    await mkdir(join(repo, "tests"), { recursive: true });
+    await writeFile(join(repo, "package.json"), "{\"type\":\"module\"}\n");
+    await writeFile(join(repo, "src", "value.js"), "export const value = \"broken\";\n");
+    await writeFile(join(repo, "tests", "value.test.mjs"), `
+      import assert from "node:assert/strict";
+      import { value } from "../src/value.js";
+      assert.equal(value, "actual-session");
+    `);
+    await writeFile(matrixPath, JSON.stringify({
+      schemaVersion: 1,
+      tasks: [{
+        schemaVersion: 1,
+        taskId: "actual-codex-usage",
+        repoId: "behavior-fixture",
+        category: "bug-fix",
+        prompt: "Make value export actual-session.",
+        repo: { sourcePath: repo },
+        context: { raw: "tiny raw context", sdl: "tiny sdl context" },
+        verify: { command: "node tests/value.test.mjs", timeoutMs: 10000 },
+        rubric: { maxScore: 1 },
+        solution: { files: { "src/value.js": "export const value = \"canned\";\n" } }
+      }]
+    }));
+    await writeFile(agentPath, `
+      import { mkdirSync, writeFileSync } from "node:fs";
+      import { join } from "node:path";
+      const repo = process.argv[process.argv.indexOf("--repo") + 1];
+      const sessions = process.argv[process.argv.indexOf("--sessions") + 1];
+      mkdirSync(sessions, { recursive: true });
+      writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"actual-session\\\";\\n");
+      writeFileSync(join(sessions, "rollout-test.jsonl"), [
+        JSON.stringify({ timestamp: "2026-06-26T00:00:00.000Z", type: "session_meta", payload: { session_id: "session-test", cwd: repo, source: "exec", cli_version: "0.test" } }),
+        JSON.stringify({ timestamp: "2026-06-26T00:00:01.000Z", type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 111, cached_input_tokens: 22, output_tokens: 33, reasoning_output_tokens: 7, total_tokens: 144 }, model_context_window: 258400 } } }),
+        JSON.stringify({ timestamp: "2026-06-26T00:00:02.000Z", type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 1234, cached_input_tokens: 900, output_tokens: 456, reasoning_output_tokens: 123, total_tokens: 1690 }, model_context_window: 258400 } } })
+      ].join("\\n") + "\\n");
+    `);
+
+    const result = await runBenchmark({
+      agent: "local",
+      agentCommand: `node ${JSON.stringify(agentPath)} --repo {repo} --sessions ${JSON.stringify(dayDir)}`,
+      codexSessionsDir,
+      executionMode: "behavior",
+      matrixPath,
+      resultsPath: join(root, "sessions.jsonl"),
+      tokenizerCommand: await fakeTokenizer(root),
+      variant: "baseline",
+      workDir: join(root, "work"),
+    });
+    const [record] = result.records;
+
+    assert.equal(record.status, "pass");
+    assert.equal(record.tokens.tokenizerSource, "codex-session");
+    assert.equal(record.tokens.input, 1234);
+    assert.equal(record.tokens.cachedInput, 900);
+    assert.equal(record.tokens.output, 456);
+    assert.equal(record.tokens.reasoningOutput, 123);
+    assert.equal(record.tokens.total, 1690);
+    assert.equal(record.tokens.modelContextWindow, 258400);
+    assert.equal(record.artifacts.estimatedTokens.tokenizerSource, "tiktoken");
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("findCodexSessionTokenCounts ignores other worktrees", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-codex-scan-"));
+  const sessionsDir = join(root, "sessions", "2026", "06", "26");
+  const runRoot = join(root, "repo");
+
+  try {
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(join(sessionsDir, "rollout-other.jsonl"), [
+      JSON.stringify({ type: "session_meta", payload: { cwd: join(root, "other"), source: "exec" } }),
+      JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } } })
+    ].join("\n"));
+    await writeFile(join(sessionsDir, "rollout-match.jsonl"), [
+      JSON.stringify({ type: "session_meta", payload: { cwd: runRoot, source: "exec", session_id: "match" } }),
+      JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 10, cached_input_tokens: 5, output_tokens: 4, reasoning_output_tokens: 2, total_tokens: 14 } } } })
+    ].join("\n"));
+
+    const usage = await findCodexSessionTokenCounts({ runRoot, sessionsDir: join(root, "sessions") });
+
+    assert.equal(usage.sessionId, "match");
+    assert.equal(usage.usage.input_tokens, 10);
+    assert.equal(usage.usage.reasoning_output_tokens, 2);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -313,6 +417,113 @@ test("sdl variant indexes and retrieves context through HTTP before applying sol
     server.close();
     await rm(root, { force: true, recursive: true });
   }
+});
+
+test("SDL behavior mode exposes a live MCP server instead of pasted lookup context", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-sdl-agent-"));
+  const repo = join(root, "repo");
+  const matrixPath = join(root, "matrix.json");
+  const agentPath = join(root, "agent.mjs");
+  const requests = [];
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    requests.push({ method: req.method, pathname: url.pathname });
+
+    if (url.pathname.endsWith("/reindex-stream")) {
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.end('event: complete\ndata: {"ok":true,"providerFirstExecution":{"selectedPipeline":"providerFirst"}}\n\n');
+      return;
+    }
+
+    if (url.pathname.endsWith("/search")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        results: [
+          { symbolId: "sym-value", name: "value", kind: "variable", file: "src/value.js", summary: "from-http-retrieval" }
+        ]
+      }));
+      return;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end('{"status":"ok"}');
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+
+  try {
+    await mkdir(repo, { recursive: true });
+    await writeFile(join(repo, "package.json"), "{\"type\":\"module\"}\n");
+    await mkdir(join(repo, "src"), { recursive: true });
+    await mkdir(join(repo, "tests"), { recursive: true });
+    await writeFile(join(repo, "src", "value.js"), "export const value = \"broken\";\n");
+    await writeFile(join(repo, "tests", "value.test.mjs"), `
+      import assert from "node:assert/strict";
+      import { value } from "../src/value.js";
+      assert.equal(value, "sdl-agent");
+    `);
+    await writeFile(matrixPath, JSON.stringify({
+      schemaVersion: 1,
+      tasks: [{
+        schemaVersion: 1,
+        taskId: "sdl-agent-live-server",
+        repoId: "sdl-agent-fixture",
+        category: "bug-fix",
+        prompt: "Make value export sdl-agent.",
+        repo: { sourcePath: repo },
+        context: {
+          raw: "RAW_CONTEXT_ONLY",
+          sdl: "PASTED_SDL_CONTEXT_SHOULD_NOT_APPEAR",
+          sdlQueries: ["value"]
+        },
+        verify: { command: "node tests/value.test.mjs", timeoutMs: 10000 },
+        rubric: { maxScore: 1 },
+        solution: { files: { "src/value.js": "export const value = \"canned\";\n" } }
+      }]
+    }));
+    await writeFile(agentPath, `
+      import { readFileSync, writeFileSync } from "node:fs";
+      import { join } from "node:path";
+      const repo = process.argv[process.argv.indexOf("--repo") + 1];
+      const prompt = readFileSync(process.argv[process.argv.indexOf("--prompt") + 1], "utf8");
+      if (prompt.includes("from-http-retrieval")) process.exit(2);
+      if (!prompt.includes("configured SDL-MCP server")) process.exit(3);
+      if (!process.argv.join(" ").includes("mcp_servers.sdl-mcp.url")) process.exit(4);
+      writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"sdl-agent\\\";\\n");
+    `);
+
+    const result = await runBenchmark({
+      agent: "local",
+      agentCommand: `node ${JSON.stringify(agentPath)} --repo {repo} --prompt {prompt} {sdlMcpConfig}`,
+      executionMode: "behavior",
+      matrixPath,
+      resultsPath: join(root, "sessions.jsonl"),
+      sdlHttpBaseUrl: `http://127.0.0.1:${port}`,
+      tokenizerCommand: await fakeTokenizer(root),
+      variant: "sdl",
+      workDir: join(root, "work"),
+    });
+    const [record] = result.records;
+
+    assert.equal(record.status, "pass");
+    assert.match(record.artifacts.agent.command, /mcp_servers\.sdl-mcp\.url/);
+    assert.match(record.artifacts.agent.command, new RegExp(`127\\.0\\.0\\.1:${port}`));
+    assert.ok(requests.some((request) => request.pathname.endsWith("/reindex-stream")));
+    assert.ok(requests.some((request) => request.pathname.endsWith("/search")));
+  } finally {
+    server.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("temporary SDL benchmark server disables HTTP auth for Codex MCP access", () => {
+  const config = createSdlHttpConfig({
+    task: { repoId: "fixture-js" },
+    runRoot: "F:/tmp/repo",
+    dbPath: "F:/tmp/graph.lbug",
+  });
+
+  assert.deepEqual(config.httpAuth, { enabled: false });
 });
 
 test("runBenchmark fails instead of estimating when tokenizer is unavailable", async () => {
