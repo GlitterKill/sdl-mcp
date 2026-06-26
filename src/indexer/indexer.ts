@@ -1569,6 +1569,24 @@ export function resolveProviderFirstReadinessGates(params: {
   };
 }
 
+export function resolveProviderFirstShadowRepoScopeSkipReason(
+  repoId: string,
+  activeRepoIds: readonly string[],
+): string | undefined {
+  const otherRepoIds = [
+    ...new Set(activeRepoIds.filter((activeRepoId) => activeRepoId !== repoId)),
+  ].sort();
+  if (otherRepoIds.length === 0) return undefined;
+
+  const sample = otherRepoIds.slice(0, 3).join(", ");
+  const omitted =
+    otherRepoIds.length > 3 ? ` (+${otherRepoIds.length - 3} more)` : "";
+  return (
+    "shadow staging skipped because provider-first shadow DBs are " +
+    `single-repo scoped and the active DB contains other repo(s): ${sample}${omitted}`
+  );
+}
+
 function skippedProviderFirstShadowBuild(params: {
   generationId: string;
   rows: ProviderFirstGraphRows;
@@ -2432,6 +2450,14 @@ async function indexRepoImpl(
   let providerFirstGenerationId: string | undefined;
   const providerFirstFallbackPaths = new Set<string>();
   const providerFirstChangedFileIds = new Set<string>();
+  const providerFirstShadowRepoScopeSkipReason =
+    providerFirst.selectedPipeline === "providerFirst" &&
+    providerFirstExecutionPlan.canExecute
+      ? resolveProviderFirstShadowRepoScopeSkipReason(
+          repoId,
+          (await ladybugDb.listRepos(conn)).map((repo) => repo.repoId),
+        )
+      : undefined;
   let providerFirstScan:
     | Awaited<ReturnType<typeof scanRepoForIndex>>
     | undefined;
@@ -3088,6 +3114,14 @@ async function indexRepoImpl(
               providerFirstShadowStagingSkipReason
                 ? `${providerFirstShadowStagingSkipReason}; ${scopedSourceFileListReason}`
                 : scopedSourceFileListReason;
+          }
+          if (providerFirstShadowRepoScopeSkipReason) {
+            // ponytail: revisit multi-repo shadow DBs when shadow builds can copy
+            // a complete DB, including non-target repos, before activation.
+            providerFirstShadowStagingSkipReason =
+              providerFirstShadowStagingSkipReason
+                ? `${providerFirstShadowStagingSkipReason}; ${providerFirstShadowRepoScopeSkipReason}`
+                : providerFirstShadowRepoScopeSkipReason;
           }
           if (providerFirstIncrementalActive) {
             const incrementalShadowSkipReason =

@@ -34,6 +34,7 @@ import {
   resolveProviderFirstReadinessGates,
   resolveProviderFirstActiveMaterializationPlan,
   resolveProviderFirstLegacyFallbackPlan,
+  resolveProviderFirstShadowRepoScopeSkipReason,
   resolveProviderFirstPass1Concurrency,
   resolvePass1BatchSymbolWriteMode,
   selectProviderFirstLegacyFallbackPaths,
@@ -100,6 +101,25 @@ describe("provider-first indexing foundation", () => {
     }
 
     assert.throws(() => IndexingConfigSchema.parse({ watchProvider: "native" }));
+  });
+
+  it("skips provider-first shadow staging when the active DB has other repos", () => {
+    assert.equal(
+      resolveProviderFirstShadowRepoScopeSkipReason("repo", []),
+      undefined,
+    );
+    assert.equal(
+      resolveProviderFirstShadowRepoScopeSkipReason("repo", ["repo"]),
+      undefined,
+    );
+
+    const reason = resolveProviderFirstShadowRepoScopeSkipReason("repo", [
+      "other-repo",
+      "repo",
+    ]);
+
+    assert.match(reason ?? "", /other-repo/);
+    assert.match(reason ?? "", /single-repo scoped/);
   });
 
   it("keeps provider-first same-run legacy fallback complete by default", () => {

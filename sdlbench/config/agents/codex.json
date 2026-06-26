@@ -3,7 +3,7 @@
   "agent": "codex",
   "model": "gpt-5.5",
   "reasoningEffort": "xhigh",
-  "commandTemplate": "codex exec --model {model} -c model_reasoning_effort=\"xhigh\" {sdlMcpConfig} --cd {repo} - < {prompt}",
+  "commandTemplate": "codex exec --disable plugins --disable memories --disable multi_agent --disable goals --disable apps --disable browser_use --disable browser_use_external --disable browser_use_full_cdp_access --disable computer_use --disable image_generation --disable shell_snapshot --disable personality --disable tool_suggest --disable skill_mcp_dependency_install --sandbox danger-full-access -c approval_policy=\"never\" --model {model} -c model_reasoning_effort=\"xhigh\" {sdlMcpConfig} --skip-git-repo-check --cd {repo} - < {prompt}",
   "transcriptGlobs": [".codex/**/*.jsonl"],
   "timeoutMs": 600000,
   "envPassthrough": ["OPENAI_API_KEY"],

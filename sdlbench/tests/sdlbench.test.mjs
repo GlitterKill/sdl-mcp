@@ -10,6 +10,7 @@ import {
   createSdlHttpConfig,
   findCodexSessionTokenCounts,
   importTranscript,
+  inspectCodexSessionSterility,
   runBenchmark,
 } from "../src/sdlbench.mjs";
 import { buildChartModel, parseJsonl } from "../viewer/app.mjs";
@@ -224,6 +225,96 @@ test("behavior mode records Codex tiktoken session counts when available", async
     assert.equal(record.tokens.total, 1690);
     assert.equal(record.tokens.modelContextWindow, 258400);
     assert.equal(record.artifacts.estimatedTokens.tokenizerSource, "tiktoken");
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Codex behavior mode uses a sterile temporary CODEX_HOME", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-codex-sterile-"));
+  const repo = join(root, "repo");
+  const matrixPath = join(root, "matrix.json");
+  const agentPath = join(root, "agent.mjs");
+
+  try {
+    await mkdir(join(repo, "src"), { recursive: true });
+    await mkdir(join(repo, "tests"), { recursive: true });
+    await writeFile(join(repo, "package.json"), "{\"type\":\"module\"}\n");
+    await writeFile(join(repo, "src", "value.js"), "export const value = \"broken\";\n");
+    await writeFile(join(repo, "tests", "value.test.mjs"), `
+      import assert from "node:assert/strict";
+      import { value } from "../src/value.js";
+      assert.equal(value, "sterile");
+    `);
+    await writeFile(matrixPath, JSON.stringify({
+      schemaVersion: 1,
+      tasks: [{
+        schemaVersion: 1,
+        taskId: "sterile-codex-home",
+        repoId: "behavior-fixture",
+        category: "bug-fix",
+        prompt: "Make value export sterile.",
+        repo: { sourcePath: repo },
+        context: { raw: "tiny raw context", sdl: "tiny sdl context" },
+        verify: { command: "node tests/value.test.mjs", timeoutMs: 10000 },
+        rubric: { maxScore: 1 },
+        solution: { files: { "src/value.js": "export const value = \"canned\";\n" } }
+      }]
+    }));
+    await writeFile(agentPath, `
+      import { mkdirSync, writeFileSync } from "node:fs";
+      import { join } from "node:path";
+      const repo = process.argv[process.argv.indexOf("--repo") + 1];
+      const codexHome = process.env.CODEX_HOME;
+      if (!codexHome || codexHome.includes(".codex")) process.exit(5);
+      writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"sterile\\\";\\n");
+      const sessions = join(codexHome, "sessions", "2026", "06", "26");
+      mkdirSync(sessions, { recursive: true });
+      writeFileSync(join(sessions, "rollout-sterile.jsonl"), [
+        JSON.stringify({ type: "session_meta", payload: { session_id: "sterile-session", cwd: repo, source: "exec", cli_version: "0.test" } }),
+        JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 20, cached_input_tokens: 3, output_tokens: 5, reasoning_output_tokens: 2, total_tokens: 25 }, model_context_window: 123 } } })
+      ].join("\\n") + "\\n");
+    `);
+
+    const result = await runBenchmark({
+      agent: "codex",
+      agentCommand: `node ${JSON.stringify(agentPath)} --repo {repo}`,
+      executionMode: "behavior",
+      matrixPath,
+      resultsPath: join(root, "sessions.jsonl"),
+      tokenizerCommand: await fakeTokenizer(root),
+      variant: "baseline",
+    });
+    const [record] = result.records;
+
+    assert.equal(record.status, "pass");
+    assert.equal(record.tokens.tokenizerSource, "codex-session");
+    assert.equal(record.artifacts.codexSterility.passed, true);
+    assert.equal(record.artifacts.codexSession.sessionId, "sterile-session");
+    assert.equal(record.artifacts.worktree.replace(/\\/g, "/").startsWith(root.replace(/\\/g, "/")), false);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Codex sterility inspection rejects plugin, skill, memory, and Ponytail context", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-sterility-inspect-"));
+  const sessionPath = join(root, "rollout-contaminated.jsonl");
+
+  try {
+    await writeFile(sessionPath, [
+      JSON.stringify({ type: "session_meta", payload: { cwd: root, source: "exec" } }),
+      JSON.stringify({ type: "response_item", content: "<skills_instructions>\\n### Available skills\\nPONYTAIL MODE ACTIVE\\n<plugins_instructions>\\n<apps_instructions>\\nMEMORY_SUMMARY BEGINS" })
+    ].join("\n"));
+
+    const inspection = await inspectCodexSessionSterility(sessionPath);
+
+    assert.equal(inspection.passed, false);
+    assert.ok(inspection.forbidden.includes("ponytail"));
+    assert.ok(inspection.forbidden.includes("plugin instructions"));
+    assert.ok(inspection.forbidden.includes("app connector instructions"));
+    assert.ok(inspection.forbidden.includes("skill registry"));
+    assert.ok(inspection.forbidden.includes("memory context"));
   } finally {
     await rm(root, { force: true, recursive: true });
   }

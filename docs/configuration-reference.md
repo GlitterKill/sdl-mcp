@@ -230,7 +230,7 @@ If you set `budgetCaps`, provide both `maxCards` and `maxEstimatedTokens`.
 | Field | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `pipeline` | `"legacy" \| "providerFirst" \| "auto"` | `"auto"` | Chooses the indexing engine. `auto` uses provider-first when an executable provider path is available and otherwise uses legacy. |
-| `providerFirst.activation` | `"shadowDb"` | `"shadowDb"` | Stages a fresh shadow `.lbug`, validates it, and swaps it into place when graph readiness allows activation. |
+| `providerFirst.activation` | `"shadowDb"` | `"shadowDb"` | Stages a fresh shadow `.lbug`, validates it, and swaps it into place when graph readiness allows activation. Multi-repo active DBs skip shadow staging and use active materialization until shadow builds can copy a complete DB. |
 | `providerFirst.readyState` | `"graphPlusAlgorithms"` | `"graphPlusAlgorithms"` | First-ready gate for graph rows plus derived algorithms. Semantic refresh remains separate readiness work. |
 | `providerFirst.stagingFormat` | `"parquet" \| "csv"` | `"parquet"` | Preferred shadow-staging format. Current runs emit CSV; `parquet` requests fall back to CSV and record the reason in the manifest. |
 | `providerFirst.maxLegacyFallbackFiles` | `number` | `1000000` | Emergency cap for uncovered or provider-unusable files parsed by same-run legacy fallback. The high default keeps full builds complete. |

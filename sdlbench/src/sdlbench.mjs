@@ -1,8 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { createServer as createNetServer } from "node:net";
 import { performance } from "node:perf_hooks";
@@ -12,6 +12,30 @@ const DEFAULT_RESULTS = "sdlbench/results/sessions.jsonl";
 const DEFAULT_ENCODING = "o200k_base";
 const DEFAULT_MODEL = "gpt-5.5";
 const TIKTOKEN_SPEC = "git+https://github.com/openai/tiktoken@0.13.0";
+const CODEX_SYSTEM_SKILLS = ["imagegen", "openai-docs", "plugin-creator", "skill-creator", "skill-installer"];
+const CODEX_STERILE_FEATURES = [
+  "plugins",
+  "memories",
+  "multi_agent",
+  "goals",
+  "apps",
+  "browser_use",
+  "browser_use_external",
+  "browser_use_full_cdp_access",
+  "computer_use",
+  "image_generation",
+  "shell_snapshot",
+  "personality",
+  "tool_suggest",
+  "skill_mcp_dependency_install",
+];
+const CODEX_FORBIDDEN_CONTEXT_MARKERS = [
+  { name: "ponytail", pattern: /PONYTAIL MODE ACTIVE|ponytail:ponytail|plugins[\\/]+cache[\\/]+ponytail/i },
+  { name: "plugin instructions", pattern: /<plugins_instructions>|plugins[\\/]+cache/i },
+  { name: "app connector instructions", pattern: /<apps_instructions>/i },
+  { name: "skill registry", pattern: /<skills_instructions>|### Available skills/i },
+  { name: "memory context", pattern: /MEMORY_SUMMARY BEGINS|<oai-mem-citation>/i },
+];
 const DEFAULT_PRICING = {
   model: DEFAULT_MODEL,
   encoding: DEFAULT_ENCODING,
@@ -32,12 +56,12 @@ export async function runBenchmark(options = {}) {
   const root = options.root ?? defaultRoot();
   const matrixPath = abs(root, options.matrixPath ?? "sdlbench/tasks/matrix.json");
   const resultsPath = abs(root, options.resultsPath ?? DEFAULT_RESULTS);
-  const workDir = abs(root, options.workDir ?? "sdlbench/.work/repos");
   const agent = options.agent ?? "codex";
   const variant = options.variant ?? "baseline";
   const tokenizerCommand = options.tokenizerCommand ?? defaultTokenizerCommand(root);
   const executionMode = options.executionMode ?? (options.behavior ? "behavior" : "fixture");
   if (!["fixture", "behavior"].includes(executionMode)) throw new Error(`Unknown executionMode ${executionMode}`);
+  const workDir = abs(root, options.workDir ?? defaultWorkDir(root, executionMode));
   const pricing = await loadPricing(root, options.pricingPath);
   const agentConfig = await loadAgentConfig(root, agent, options, { requireCommand: executionMode === "behavior" });
   const model = resolveModel({ options, agentConfig, pricing });
@@ -71,15 +95,20 @@ export async function runBenchmark(options = {}) {
       let agentStartedAt = 0;
       let changedFiles = Object.keys(task.solution?.files ?? {});
       let outputText;
+      let codexRuntime = null;
 
       if (executionMode === "behavior") {
         if (sdlSession) await installSdlBenchmarkReinforcement(runRoot, sdlSession);
+        if (agent === "codex") {
+          assertCodexWorktreeIsSterile(root, runRoot);
+          codexRuntime = await prepareCodexSterileRuntime({ root, workDir, taskRunId });
+        }
         promptPath = join(runRoot, ".sdlbench-prompt.md");
         await writeFile(promptPath, renderAgentPrompt(task, variant), "utf8");
         const before = await snapshotFiles(runRoot);
         agentStartedAt = Date.now();
         const agentStart = performance.now();
-        agentResult = runAgentCommand(agentConfig, { runRoot, promptPath, task, variant, model, sdlSession });
+        agentResult = runAgentCommand(agentConfig, { runRoot, promptPath, task, variant, model, sdlSession, codexRuntime });
         agentMs = Math.round(performance.now() - agentStart);
         changedFiles = diffSnapshots(before, await snapshotFiles(runRoot));
         outputText = [agentResult.stdout, agentResult.stderr].filter(Boolean).join("\n");
@@ -98,10 +127,19 @@ export async function runBenchmark(options = {}) {
       const codexTokenCounts = executionMode === "behavior"
         ? await findCodexSessionTokenCounts({
           runRoot,
-          sessionsDir: options.codexSessionsDir,
+          sessionsDir: codexRuntime?.sessionsDir ?? options.codexSessionsDir,
           sinceMs: agentStartedAt ? agentStartedAt - 120_000 : 0,
         })
         : null;
+      if (executionMode === "behavior" && agent === "codex" && !codexTokenCounts) {
+        throw new Error(`Codex behavior benchmark did not find matching session token_count JSONL for ${runRoot}`);
+      }
+      const codexSterility = agent === "codex" && codexTokenCounts?.sessionFile
+        ? await inspectCodexSessionSterility(codexTokenCounts.sessionFile)
+        : null;
+      if (codexSterility && !codexSterility.passed) {
+        throw new Error(`Non-sterile Codex session ${codexTokenCounts.sessionFile}: ${codexSterility.forbidden.join(", ")}`);
+      }
       const tokens = codexTokenCounts
         ? tokensFromCodexSessionCounts(codexTokenCounts, estimatedTokens)
         : estimatedTokens;
@@ -146,6 +184,7 @@ export async function runBenchmark(options = {}) {
           agent: agentResult,
           changedFiles,
           codexSession: codexTokenCounts ? codexSessionArtifact(codexTokenCounts) : undefined,
+          codexSterility: codexSterility ?? undefined,
           estimatedTokens: codexTokenCounts ? estimatedTokens : undefined,
           sdl: sdlEvidence,
           verifyStdout: verify.stdout.slice(-4000),
@@ -330,7 +369,7 @@ function promptContextForVariant(task, variant) {
   return "Use the configured SDL-MCP server for repository context. Follow the sdl-mcp-agent-workflow retrieval ladder, edit policy, runtime policy, and usageStats completion step.";
 }
 
-function runAgentCommand(config, { runRoot, promptPath, task, variant, model, sdlSession }) {
+function runAgentCommand(config, { runRoot, promptPath, task, variant, model, sdlSession, codexRuntime }) {
   const command = renderCommandTemplate(config.commandTemplate, {
     repo: runRoot,
     prompt: promptPath,
@@ -340,7 +379,7 @@ function runAgentCommand(config, { runRoot, promptPath, task, variant, model, sd
     sdlMcpConfig: sdlMcpConfigArgs(sdlSession),
     sdlMcpUrl: sdlSession?.mcpUrl ?? "",
   });
-  return { command, ...runCommand(command, runRoot, config.timeoutMs ?? 600_000) };
+  return { command, ...runCommand(command, runRoot, config.timeoutMs ?? 600_000, codexRuntime?.env) };
 }
 
 function renderCommandTemplate(template, values) {
@@ -361,6 +400,100 @@ function sdlMcpConfigArgs(sdlSession) {
     "-c mcp_servers.sdl-mcp.enabled=true",
     "-c mcp_servers.sdl-mcp.url=" + JSON.stringify(sdlSession.mcpUrl),
   ].join(" ");
+}
+
+async function prepareCodexSterileRuntime({ root, workDir, taskRunId }) {
+  const sourceHome = sourceCodexHome();
+  const codexHome = join(dirname(workDir), "codex-home", taskRunId);
+  await rm(codexHome, { force: true, recursive: true });
+  await mkdir(codexHome, { recursive: true });
+
+  const authPath = join(sourceHome, "auth.json");
+  if (existsSync(authPath)) await copyFile(authPath, join(codexHome, "auth.json"));
+
+  const disabledSkillPaths = await codexDisabledSkillPaths({ root, sourceHome, codexHome });
+  await writeFile(join(codexHome, "config.toml"), renderCodexSterileConfig(disabledSkillPaths), "utf8");
+
+  return {
+    codexHome,
+    sessionsDir: join(codexHome, "sessions"),
+    env: { CODEX_HOME: codexHome },
+  };
+}
+
+function sourceCodexHome() {
+  return process.env.SDLBENCH_SOURCE_CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), ".codex");
+}
+
+async function codexDisabledSkillPaths({ root, sourceHome, codexHome }) {
+  const paths = new Set();
+  const skillRoots = [
+    join(homedir(), ".agents", "skills"),
+    join(sourceHome, "skills"),
+    join(sourceHome, "plugins", "cache"),
+    join(root, ".agents", "skills"),
+    join(root, ".codex", "skills"),
+  ];
+
+  for (const skillRoot of skillRoots) {
+    for (const path of await findSkillFiles(skillRoot)) paths.add(path);
+  }
+  for (const name of CODEX_SYSTEM_SKILLS) {
+    paths.add(join(codexHome, "skills", ".system", name, "SKILL.md"));
+  }
+
+  return [...paths].sort((a, b) => a.localeCompare(b));
+}
+
+async function findSkillFiles(root) {
+  try {
+    const entries = await readdir(root, { withFileTypes: true });
+    const files = [];
+    for (const entry of entries) {
+      const path = join(root, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...await findSkillFiles(path));
+      } else if (entry.isFile() && entry.name === "SKILL.md") {
+        files.push(path);
+      }
+    }
+    return files;
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+function renderCodexSterileConfig(disabledSkillPaths) {
+  const lines = [
+    'approval_policy = "never"',
+    'sandbox_mode = "danger-full-access"',
+    "",
+    "[features]",
+    "hooks = true",
+    "shell_tool = true",
+  ];
+  for (const feature of CODEX_STERILE_FEATURES) lines.push(`${feature} = false`);
+
+  for (const path of disabledSkillPaths) {
+    lines.push(
+      "",
+      "[[skills.config]]",
+      `path = "${tomlString(path)}"`,
+      "enabled = false"
+    );
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function tomlString(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function assertCodexWorktreeIsSterile(root, runRoot) {
+  if (!isPathInside(root, runRoot)) return;
+  throw new Error(`Codex behavior worktree must be outside the benchmark repo to avoid parent AGENTS.md/rules: ${runRoot}`);
 }
 
 async function installSdlBenchmarkReinforcement(runRoot, sdlSession) {
@@ -444,12 +577,31 @@ function diffSnapshots(before, after) {
     .sort();
 }
 
-function runCommand(command, cwd, timeoutMs) {
-  const result = spawnSync(command, { cwd, encoding: "utf8", shell: true, timeout: timeoutMs });
+function runCommand(command, cwd, timeoutMs, env = undefined) {
+  const result = spawnSync(command, {
+    cwd,
+    encoding: "utf8",
+    env: env ? { ...process.env, ...env } : process.env,
+    shell: true,
+    timeout: timeoutMs,
+  });
   return {
     exitCode: result.status ?? 1,
     stdout: result.stdout ?? "",
     stderr: result.stderr ?? result.error?.message ?? "",
+  };
+}
+
+export async function inspectCodexSessionSterility(sessionFile) {
+  const text = await readFile(sessionFile, "utf8");
+  const forbidden = CODEX_FORBIDDEN_CONTEXT_MARKERS
+    .filter((marker) => marker.pattern.test(text))
+    .map((marker) => marker.name);
+
+  return {
+    passed: forbidden.length === 0,
+    forbidden,
+    inspectedBytes: Buffer.byteLength(text, "utf8"),
   };
 }
 
@@ -1107,6 +1259,17 @@ function defaultRoot() {
   return cwd.endsWith("sdlbench") ? dirname(cwd) : cwd;
 }
 
+function defaultWorkDir(root, executionMode) {
+  if (executionMode !== "behavior") return "sdlbench/.work/repos";
+  return join(tmpdir(), "sdlbench", hash(root).slice(0, 12), "repos");
+}
+
 function abs(root, path) {
   return isAbsolute(path) ? path : resolve(root, path);
+}
+
+function isPathInside(parent, child) {
+  const normalizedParent = normalizeSessionPath(parent);
+  const normalizedChild = normalizeSessionPath(child);
+  return normalizedChild === normalizedParent || normalizedChild.startsWith(normalizedParent + "/");
 }

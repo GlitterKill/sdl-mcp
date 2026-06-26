@@ -15,7 +15,7 @@ Token fields include `input`, `output`, `total`, `productContext`, `rawEquivalen
 
 Cost fields include `inputUsd`, `outputUsd`, `contextUsd`, `totalUsd`, `pricingModel`, `pricingSource`, `inputPerMTok`, `outputPerMTok`, and `contextPerMTok`. If `config/pricing.json` declares a `models` map, the selected model must have a matching pricing row.
 
-For behavior-mode records, `artifacts.promptPath` points at the rendered prompt, `artifacts.agent` contains the command, exit code, stdout, and stderr, and `artifacts.changedFiles` lists files changed by the agent command. Codex records with session counts include `artifacts.codexSession`; the prompt-tokenizer fallback is retained as `artifacts.estimatedTokens`.
+For behavior-mode records, `artifacts.promptPath` points at the rendered prompt, `artifacts.agent` contains the command, exit code, stdout, and stderr, and `artifacts.changedFiles` lists files changed by the agent command. Codex records with session counts include `artifacts.codexSession` and `artifacts.codexSterility`; the prompt-tokenizer fallback is retained as `artifacts.estimatedTokens`. Codex behavior runs fail before writing a record if the matching Codex session is missing token-count totals or contains Ponytail, generic plugin/app/skill instructions, or memory context.
 
 For SDL-variant records, `artifacts.sdl` contains the HTTP evidence used for token counts: `transport`, `repoId`, `durationMs`, `index`, `retrieval`, and the retrieved `context`. `transport` is `"http"`; `index` is the `/reindex-stream` completion payload; `retrieval` contains query summaries and `/api/symbol/:repoId/search` results used to build the context. Missing or empty retrieval fails the run instead of writing estimator-backed savings.
 
