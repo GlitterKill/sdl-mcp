@@ -133,6 +133,8 @@ import {
   type ProviderFirstProviderUnusableReasonCode,
 } from "./provider-first/executor.js";
 import {
+  filterProviderFactsByExcludedPaths,
+  filterProviderRowsByExcludedPaths,
   materializeProviderFacts,
   providerFirstGraphRowTotal,
   type MaterializeProviderFactsPhaseName,
@@ -1774,126 +1776,6 @@ export function clearProviderGraphRowsForGc(
   rows.changedFileIds.clear();
 }
 
-function filterProviderRowsByExcludedPaths(
-  rows: ProviderFirstGraphRows,
-  excludedPaths: ReadonlySet<string>,
-): ProviderFirstGraphRows {
-  if (excludedPaths.size === 0) return rows;
-
-  const files = rows.files.filter((file) => !excludedPaths.has(file.relPath));
-  const keptFileIds = new Set(files.map((file) => file.fileId));
-  const symbols = rows.symbols.filter((symbol) =>
-    keptFileIds.has(symbol.fileId),
-  );
-  const internalSymbolIds = new Set(symbols.map((symbol) => symbol.symbolId));
-  const externalSymbolIds = new Set(
-    rows.externalSymbols.map((symbol) => symbol.symbolId),
-  );
-  const allowedSymbolIds = new Set([
-    ...internalSymbolIds,
-    ...externalSymbolIds,
-  ]);
-  const edges = rows.edges.filter(
-    (edge) =>
-      allowedSymbolIds.has(edge.fromSymbolId) &&
-      allowedSymbolIds.has(edge.toSymbolId) &&
-      (internalSymbolIds.has(edge.fromSymbolId) ||
-        internalSymbolIds.has(edge.toSymbolId)),
-  );
-  const referencedExternalSymbolIds = new Set<string>();
-  for (const edge of edges) {
-    if (externalSymbolIds.has(edge.fromSymbolId)) {
-      referencedExternalSymbolIds.add(edge.fromSymbolId);
-    }
-    if (externalSymbolIds.has(edge.toSymbolId)) {
-      referencedExternalSymbolIds.add(edge.toSymbolId);
-    }
-  }
-  const externalSymbols = rows.externalSymbols.filter((symbol) =>
-    referencedExternalSymbolIds.has(symbol.symbolId),
-  );
-
-  return {
-    files,
-    symbols,
-    externalSymbols,
-    edges,
-    changedFileIds: new Set(files.map((file) => file.fileId)),
-  };
-}
-
-function filterProviderFactsByExcludedPaths(
-  facts: ProviderFactSet,
-  excludedPaths: ReadonlySet<string>,
-): ProviderFactSet {
-  const filePathAllowed = (relPath: string): boolean =>
-    !excludedPaths.has(normalizePath(relPath));
-  const files = facts.files.filter((fact) => filePathAllowed(fact.relPath));
-  const symbols = facts.symbols.filter((fact) => filePathAllowed(fact.relPath));
-  const internalSymbolIds = new Set(symbols.map((symbol) => symbol.symbolId));
-  const externalSymbolIds = new Set(
-    facts.externalSymbols.map((symbol) => symbol.symbolId),
-  );
-  const allowedSymbolIds = new Set([
-    ...internalSymbolIds,
-    ...externalSymbolIds,
-  ]);
-  const edges = facts.edges.filter(
-    (edge) =>
-      allowedSymbolIds.has(edge.sourceSymbolId) &&
-      allowedSymbolIds.has(edge.targetSymbolId) &&
-      (internalSymbolIds.has(edge.sourceSymbolId) ||
-        internalSymbolIds.has(edge.targetSymbolId)),
-  );
-  const referencedExternalSymbolIds = new Set<string>();
-  for (const edge of edges) {
-    if (externalSymbolIds.has(edge.sourceSymbolId)) {
-      referencedExternalSymbolIds.add(edge.sourceSymbolId);
-    }
-    if (externalSymbolIds.has(edge.targetSymbolId)) {
-      referencedExternalSymbolIds.add(edge.targetSymbolId);
-    }
-  }
-  const externalSymbols = facts.externalSymbols.filter((symbol) =>
-    referencedExternalSymbolIds.has(symbol.symbolId),
-  );
-  const diagnostics = facts.diagnostics.filter((fact) =>
-    filePathAllowed(fact.relPath),
-  );
-  const coverage = facts.coverage.filter((fact) =>
-    filePathAllowed(fact.relPath),
-  );
-  const occurrences = facts.occurrences.filter((fact) =>
-    filePathAllowed(fact.relPath),
-  );
-  const sourceLinesByPath =
-    facts.sourceLinesByPath &&
-    new Map(
-      [...facts.sourceLinesByPath.entries()].filter(([relPath]) =>
-        filePathAllowed(relPath),
-      ),
-    );
-  const providerRuns = facts.providerRuns.map((run) => ({
-    ...run,
-    fileCount: files.length,
-    symbolCount: symbols.length + externalSymbols.length,
-    edgeCount: edges.length,
-    diagnosticCount: diagnostics.length,
-  }));
-
-  return {
-    files,
-    symbols,
-    occurrences,
-    edges,
-    externalSymbols,
-    diagnostics,
-    coverage,
-    providerRuns,
-    ...(sourceLinesByPath ? { sourceLinesByPath } : {}),
-  };
-}
-
 function providerRowsHaveMaterialization(
   rows: ProviderFirstGraphRows,
 ): boolean {
@@ -1949,7 +1831,8 @@ function filterProviderFirstIncrementalScan(
     ...scan,
     files: changedFiles,
     existingByPath,
-    allFilesUnchanged: changedFiles.length === 0 && scan.removedFileIds.length === 0,
+    allFilesUnchanged:
+      changedFiles.length === 0 && scan.removedFileIds.length === 0,
   };
 }
 
