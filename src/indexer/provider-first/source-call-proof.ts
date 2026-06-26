@@ -45,6 +45,10 @@ export function proveSourceOccurrenceCall(
 ): SourceCallProofResult {
   const exactResult = proveExactSourceOccurrenceCall(params);
   if (exactResult.matched) return exactResult;
+  if (exactResult.reason === "multiLineRange") {
+    const rustOperatorResult = proveRustPartialEqOperatorComparison(params);
+    if (rustOperatorResult) return rustOperatorResult;
+  }
   if (
     exactResult.reason === "symbolTextMismatch" &&
     exactResult.skipFallback === true
@@ -117,6 +121,31 @@ function shouldTryCppCallProofFallback(
   // or member invocation span. The bounded C++ proof window can still verify
   // the invoked token, but only when repo source lines were actually retained.
   return reason === "multiLineRange" && sourceLines !== undefined;
+}
+
+function proveRustPartialEqOperatorComparison(
+  params: SourceCallProofParams,
+): SourceCallProofResult | undefined {
+  if (!params.sourceLines || !params.expectedNames.includes("eq")) {
+    return undefined;
+  }
+  const parsed = parseScipSymbol(params.providerSymbolId);
+  if (
+    parsed.scheme !== "rust-analyzer" ||
+    !parsed.descriptors.endsWith("eq().") ||
+    !parsed.descriptors.includes("PartialEq<")
+  ) {
+    return undefined;
+  }
+
+  const endLine = params.sourceLines.get(params.range.endLine);
+  if (!endLine) return undefined;
+  // Rust Analyzer can attach PartialEq::eq to the whitespace before `==` when
+  // a comparison is split across lines. The operator token at the range end is
+  // enough source proof that this reference is the comparison call.
+  return endLine.slice(params.range.endCol).trimStart().startsWith("==")
+    ? { matched: true, line: endLine, invocationEndLine: params.range.endLine }
+    : undefined;
 }
 
 function proveExactSourceOccurrenceCall(
