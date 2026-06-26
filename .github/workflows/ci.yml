@@ -738,14 +738,14 @@ jobs:
         id: index
         shell: bash
         env:
-          # Do not mask native-addon crashes. This isolation flag keeps the
-          # native engine active while disabling pass-1 chunk prefetch so the
-          # next failing run can distinguish native parsing from overlap with
-          # JS-side DB writes.
+          # Linux hosted runners still hit exit 139 under serialized native
+          # pass 1. Keep sync artifact generation on the stable TS path there;
+          # native crash coverage stays in native-build's native-index smoke.
+          SDL_MCP_DISABLE_NATIVE_ADDON: ${{ runner.os == 'Linux' && '1' || '' }}
+          # Windows keeps native sync coverage, but without chunk prefetch.
           SDL_MCP_NATIVE_PASS1_SERIAL: "1"
-          # Also serialize pass-1 DB flushes against parsing so sync-memory
-          # still exercises the native addon without the known tree-sitter /
-          # LadybugDB overlap crash path.
+          # Serialize pass-1 DB flushes against parsing so sync-memory avoids
+          # the known tree-sitter / LadybugDB overlap crash path.
           SDL_MCP_PASS1_STABLE_DB_WRITES: "1"
         run: |
           echo "Starting CI memory index on ${{ runner.os }}..."
