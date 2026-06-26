@@ -576,3 +576,14 @@ test("viewer parses loaded JSONL and exposes token, time, and correctness metric
   assert.equal(model.correctness.find((row) => row.variant === "sdl").passRate, 100);
   assert.equal(model.timeline.length, 2);
 });
+
+test("viewer filters stay reusable and bar charts have room", async () => {
+  const [appSource, html] = await Promise.all([
+    readFile("sdlbench/viewer/app.mjs", "utf8"),
+    readFile("sdlbench/viewer/index.html", "utf8"),
+  ]);
+
+  assert.match(appSource, /variantFilter\.onchange/);
+  assert.doesNotMatch(appSource, /once:\s*true/);
+  assert.match(html, /token-chart" viewBox="0 0 900 270"/);
+});

@@ -88,14 +88,16 @@ function wireFilters(state) {
   const model = buildChartModel(state.records);
   fillSelect("variant-filter", ["all", ...model.variants]);
   fillSelect("task-filter", ["all", ...model.tasks]);
-  document.querySelector("#variant-filter")?.addEventListener("change", (event) => {
+  const variantFilter = document.querySelector("#variant-filter");
+  const taskFilter = document.querySelector("#task-filter");
+  if (variantFilter) variantFilter.onchange = (event) => {
     state.variant = event.target.value;
     render(state);
-  }, { once: true });
-  document.querySelector("#task-filter")?.addEventListener("change", (event) => {
+  };
+  if (taskFilter) taskFilter.onchange = (event) => {
     state.task = event.target.value;
     render(state);
-  }, { once: true });
+  };
 }
 
 function render(state) {
@@ -122,10 +124,16 @@ function render(state) {
 function drawBars(id, rows, field, label) {
   const svg = document.querySelector(`#${id}`);
   const max = Math.max(1, ...rows.map((row) => row[field]));
+  const barX = 180;
+  const barMax = 560;
+  const top = 58;
+  const rowGap = 52;
+  const barHeight = 28;
   svg.innerHTML = rows.map((row, index) => {
-    const width = Math.max(2, (row[field] / max) * 84);
-    const y = 28 + index * 42;
-    return `<g><text x="6" y="${y}" class="axis">${escapeHtml(row.variant)}</text><rect x="92" y="${y - 14}" width="${width}%" height="20" rx="2"/><text x="${Math.min(92 + width, 174)}" y="${y}" class="value">${format(row[field])}</text></g>`;
+    const width = Math.max(10, (row[field] / max) * barMax);
+    const y = top + index * rowGap;
+    const valueX = Math.min(barX + width + 14, 815);
+    return `<g><text x="16" y="${y}" class="axis">${escapeHtml(row.variant)}</text><rect x="${barX}" y="${y - 22}" width="${width}" height="${barHeight}" rx="3"/><text x="${valueX}" y="${y}" class="value">${format(row[field])}</text></g>`;
   }).join("") + `<text x="6" y="18" class="title">${label}</text>`;
 }
 
