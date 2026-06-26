@@ -152,6 +152,75 @@ test("behavior mode runs an agent command instead of applying canned solution fi
 });
 
 
+test("agentTimeoutMs overrides timeout from behavior agent config", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-timeout-"));
+  const repo = join(root, "repo");
+  const matrixPath = join(root, "matrix.json");
+  const agentPath = join(root, "agent.mjs");
+  const agentConfigPath = join(root, "agent.json");
+
+  try {
+    await mkdir(repo, { recursive: true });
+    await writeFile(join(repo, "package.json"), "{\"type\":\"module\"}\n");
+    await mkdir(join(repo, "src"), { recursive: true });
+    await mkdir(join(repo, "tests"), { recursive: true });
+    await writeFile(join(repo, "src", "value.js"), "export const value = \"broken\";\n");
+    await writeFile(join(repo, "tests", "value.test.mjs"), `
+      import assert from "node:assert/strict";
+      import { value } from "../src/value.js";
+      assert.equal(value, "agent-timeout");
+    `);
+    await writeFile(matrixPath, JSON.stringify({
+      schemaVersion: 1,
+      tasks: [{
+        schemaVersion: 1,
+        taskId: "agent-timeout-override",
+        repoId: "behavior-fixture",
+        category: "bug-fix",
+        prompt: "Make value export agent-timeout.",
+        repo: { sourcePath: repo },
+        context: { raw: "RAW_CONTEXT_ONLY", sdl: "SDL_CONTEXT_ONLY" },
+        verify: { command: "node tests/value.test.mjs", timeoutMs: 10000 },
+        rubric: { maxScore: 1 },
+        solution: { files: { "src/value.js": "export const value = \"canned\";\n" } }
+      }]
+    }));
+    await writeFile(agentPath, `
+      import { writeFileSync } from "node:fs";
+      import { join } from "node:path";
+      const repo = process.argv[process.argv.indexOf("--repo") + 1];
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"agent-timeout\\\";\\n");
+    `);
+    await writeFile(agentConfigPath, JSON.stringify({
+      schemaVersion: 1,
+      agent: "local",
+      commandTemplate: `node ${JSON.stringify(agentPath)} --repo {repo}`,
+      timeoutMs: 1
+    }));
+
+    const result = await runBenchmark({
+      agent: "local",
+      agentConfigPath,
+      agentTimeoutMs: 5000,
+      executionMode: "behavior",
+      matrixPath,
+      resultsPath: join(root, "sessions.jsonl"),
+      tokenizerCommand: await fakeTokenizer(root),
+      variant: "baseline",
+      workDir: join(root, "work"),
+    });
+    const [record] = result.records;
+
+    assert.equal(record.status, "pass");
+    assert.equal(record.artifacts.agent.exitCode, 0);
+    assert.equal(record.artifacts.agent.error, undefined);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+
 test("runBenchmark appends baseline and sdl fixture records with tokenizer-backed counts", async () => {
   const root = await mkdtemp(join(tmpdir(), "sdlbench-"));
 

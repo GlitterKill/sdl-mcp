@@ -277,7 +277,12 @@ async function loadAgentConfig(root, agent, options, { requireCommand = false } 
   try {
     const config = await readJson(configPath);
     if (requireCommand && !config.commandTemplate) throw new Error(`Agent config ${configPath} missing commandTemplate`);
-    return { ...config, configPath };
+    return {
+      ...config,
+      // CLI overrides must still win when the command comes from an agent config.
+      timeoutMs: options.agentTimeoutMs ?? config.timeoutMs,
+      configPath,
+    };
   } catch (error) {
     if (requireCommand || error?.code !== "ENOENT") throw error;
     return { model: options.model };
