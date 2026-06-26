@@ -36,7 +36,11 @@ export function shouldSerializeNativePass1Chunks(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   return /^(1|true|yes)$/i.test(
-    (env.SDL_MCP_NATIVE_PASS1_SERIAL ?? "").trim(),
+    (
+      env.SDL_MCP_NATIVE_PASS1_SERIAL ??
+      env.SDL_MCP_PASS1_STABLE_DB_WRITES ??
+      ""
+    ).trim(),
   );
 }
 

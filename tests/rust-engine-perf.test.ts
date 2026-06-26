@@ -70,6 +70,12 @@ describe("Fix 2+3: Chunked concurrent processing", () => {
       }),
       true,
     );
+    assert.strictEqual(
+      mod.shouldSerializeNativePass1Chunks({
+        SDL_MCP_PASS1_STABLE_DB_WRITES: "1",
+      }),
+      true,
+    );
     assert.strictEqual(mod.shouldSerializeNativePass1Chunks({}), false);
     assert.strictEqual(
       mod.shouldSerializeNativePass1Chunks({ SDL_MCP_NATIVE_PASS1_SERIAL: "0" }),
