@@ -23,7 +23,10 @@ import { mean, stdDev, bootstrapCI, mannWhitneyU } from "../src/stats.mjs";
 import { auditFairness } from "../src/fairness.mjs";
 import { validateClaims } from "../src/claim-gates.mjs";
 import { extractClaudeSessionUsage } from "../src/agents/claude.mjs";
+import { extractCursorSessionUsage } from "../src/agents/cursor.mjs";
+import { extractAiderSessionUsage } from "../src/agents/aider.mjs";
 import { extractOpencodeSessionUsage } from "../src/agents/opencode.mjs";
+import { runScalingCurve } from "../src/scaling.mjs";
 
 async function fakeTokenizer(root) {
   const path = join(root, "fake-tokenizer.mjs");
@@ -1906,3 +1909,47 @@ test("behavior mode with agent=opencode passes the sterile runtime env to the ag
     await rm(root, { force: true, recursive: true });
   }
 });
+
+test("extractCursorSessionUsage is a documented stub that throws not-implemented", () => {
+  assert.throws(
+    () => extractCursorSessionUsage(),
+    /cursor session usage extraction not implemented/i,
+  );
+});
+
+test("extractAiderSessionUsage is a documented stub that throws not-implemented", () => {
+  assert.throws(
+    () => extractAiderSessionUsage(),
+    /aider session usage extraction not implemented/i,
+  );
+});
+
+test("runScalingCurve refuses to launch without --i-understand-cost and prints a budget estimate", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-scaling-cost-"));
+  const reposLockPath = join(root, "repos.lock.json");
+  await writeFile(reposLockPath, JSON.stringify({
+    schemaVersion: 1,
+    repos: [
+      { repoId: "fixture-js", sourcePath: "sdlbench/tests/fixtures/repo", sizeClass: "tiny" },
+      { repoId: "moshi", sourcePath: "sdlbench/tests/fixtures/repo", sizeClass: "small" },
+    ],
+  }));
+  try {
+    await assert.rejects(
+      runScalingCurve({
+        root,
+        matrixPath: "sdlbench/tasks/matrix.json",
+        sizeClasses: ["tiny", "small"],
+        agent: "codex",
+        model: "gpt-5.5",
+        variant: "baseline,sdl",
+        reposLockPath,
+        iUnderstandCost: false,
+      }),
+      /Scaling run requires --i-understand-cost/,
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
