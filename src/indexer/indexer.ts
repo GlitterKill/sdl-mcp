@@ -38,6 +38,7 @@ import { loadConfig } from "../config/loadConfig.js";
 import {
   buildDeferredIndexes,
   closeLadybugDb,
+  ensureCriticalSymbolFtsIndex,
   flushStaleFinalizers,
   getLadybugConn,
   getLadybugDbPath,
@@ -2465,6 +2466,12 @@ async function indexRepoImpl(
         );
         recordFinalizeIndexingSubphaseTimings(finalizeResult.timings);
 
+        await measurePhase("ensureCriticalSymbolFts", async () => {
+          await ensureCriticalSymbolFtsIndex({
+            recordTiming: recordIndexSubphaseTiming,
+          });
+        });
+
         const freshConn = await getLadybugConn();
         const derivedResult = params.skipDerivedStateReason
           ? await measurePhase("skipDerivedState", async () => {
@@ -2716,6 +2723,7 @@ async function indexRepoImpl(
     providerFirstIncrementalBootstrapped
   ) {
     providerFirstTimingStartedAt = Date.now();
+   try {
     emitProviderFirstProgress(onProgress, "coverageScan", {
       message: "scanning repository for provider-first coverage",
     });
@@ -3558,6 +3566,23 @@ async function indexRepoImpl(
         }
       }
     }
+    } catch (err) {
+      if (err instanceof ProviderFirstGraphValidationError) throw err;
+      if (providerFirst.requestedMode !== "auto") throw err;
+      const reason = err instanceof Error ? err.message : String(err);
+      const fallbackReason = formatProviderFirstAutoFallbackReason({
+        reason,
+        providerFirstIncrementalActive,
+      });
+      logger.warn(
+        "indexRepo: provider-first phase failed (coverage scan or collection), using legacy fallback",
+        { repoId, reason: fallbackReason },
+      );
+      providerFirstExecutionFallback = providerFirstFallbackSummary([
+        fallbackReason,
+      ]);
+      // providerFirstScan stays undefined; legacy scanRepoForIndex will run below.
+    }
   }
 
   const {
@@ -4297,6 +4322,12 @@ async function indexRepoImpl(
           }),
         );
         recordFinalizeIndexingSubphaseTimings(finalizeResult.timings);
+
+        await measurePhase("ensureCriticalSymbolFts", async () => {
+          await ensureCriticalSymbolFtsIndex({
+            recordTiming: recordIndexSubphaseTiming,
+          });
+        });
 
         // Refresh read connection again after version/metrics writes.
         freshConn = await getLadybugConn();

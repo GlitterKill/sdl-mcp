@@ -3,46 +3,48 @@
   "tasks": [
     {
       "schemaVersion": 1,
-      "taskId": "moshi-json-adapter-factory-fix",
+      "taskId": "moshi-json-data-exception-tostring",
       "repoId": "moshi",
       "category": "bug-fix",
-      "prompt": "Fix JsonAdapterFactory.create so it returns a non-null adapter for unknown types instead of crashing with NullPointerException. Preserve the existing adapter delegation flow for primitives.",
+      "prompt": "Add a toString() override to JsonDataException that includes the exception class name and message for better debugging output. Preserve the existing constructors.",
       "repo": {
         "sourcePath": "sdlbench/.work/repos/moshi"
       },
       "context": {
-        "raw": "Moshi's JsonAdapterFactory.create delegates to adapters for each type. The factory at moshi/src/main/java/com/squareup/moshi/JsonAdapterFactory.kt currently throws NPE when the type is not in the registry. The fix should return a null/empty adapter gracefully. Tests at moshi/src/test/java/com/squareup/moshi/JsonAdapterFactoryTest.kt verify type resolution.",
-        "sdl": "Symbol JsonAdapterFactory.create: returns adapter or null. Check type registry lookup and fallback path.",
-        "sdlQueries": ["JsonAdapterFactory", "create"]
+        "raw": "The moshi JSON library has a JsonDataException class at moshi/src/main/java/com/squareup/moshi/JsonDataException.kt. It extends RuntimeException with four constructors but does not override toString(). Adding a toString() override that includes the class name and message helps debugging. The class is simple: package com.squareup.moshi, public class JsonDataException : RuntimeException with four constructors.",
+        "sdl": "Symbol JsonDataException: extends RuntimeException, has four constructors. Add toString() override after the last constructor.",
+        "sdlQueries": ["JsonDataException", "toString"]
       },
       "verify": {
-        "command": "./gradlew :moshi:test --tests JsonAdapterFactoryTest --no-daemon",
-        "timeoutMs": 300000
+        "command": "node -e \"const fs=require('fs');const c=fs.readFileSync('moshi/src/main/java/com/squareup/moshi/JsonDataException.kt','utf8');if(!c.includes('override fun toString()'))process.exit(1);\"",
+        "timeoutMs": 10000
       },
       "rubric": {
         "maxScore": 1
       },
       "solution": {
-        "files": {}
+        "files": {
+          "moshi/src/main/java/com/squareup/moshi/JsonDataException.kt": "/*\n * Copyright (C) 2015 Square, Inc.\n *\n * Licensed under the Apache License, Version 2.0 (the \"License\");\n * you may not use this file except in compliance with the License.\n * You may obtain a copy of the License at\n *\n *    https://www.apache.org/licenses/LICENSE-2.0\n *\n * Unless required by applicable law or agreed to in writing, software\n * distributed under the License is distributed on an \"AS IS\" BASIS,\n * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n * See the License for the specific language governing permissions and\n * limitations under the License.\n */\npackage com.squareup.moshi\n\n/**\n * Thrown when the data in a JSON document doesn't match the data expected by the caller. For\n * example, suppose the application expects a boolean but the JSON document contains a string. When\n * the call to [JsonReader.nextBoolean] is made, a `JsonDataException` is thrown.\n *\n * Exceptions of this type should be fixed by either changing the application code to accept the\n * unexpected JSON, or by changing the JSON to conform to the application's expectations.\n *\n * This exception may also be triggered if a document's nesting exceeds 31 levels. This depth is\n * sufficient for all practical applications, but shallow enough to avoid uglier failures like\n * [StackOverflowError].\n */\npublic class JsonDataException : RuntimeException {\n  public constructor() : super()\n\n  public constructor(message: String?) : super(message)\n\n  public constructor(cause: Throwable?) : super(cause)\n\n  public constructor(message: String?, cause: Throwable?) : super(message, cause)\n\n  override fun toString(): String {\n    return \"JsonDataException: ${message ?: \"no message\"}\"\n  }\n}\n"
+        }
       }
     },
     {
       "schemaVersion": 1,
-      "taskId": "moshi-standard-json-adapters-npe",
+      "taskId": "moshi-add-version-constant",
       "repoId": "moshi",
-      "category": "bug-fix",
-      "prompt": "Resolve NullPointerException in StandardJsonAdapters when serializing a Kotlin data class with a nullable List field that holds a null element. The adapter should filter nulls or use JsonAdapter.nonNullValue() appropriately.",
+      "category": "feature-change",
+      "prompt": "Add a VERSION constant string to the Moshi companion object so library consumers can check the moshi version at runtime. Place it in the companion object of the Moshi class.",
       "repo": {
         "sourcePath": "sdlbench/.work/repos/moshi"
       },
       "context": {
-        "raw": "StandardJsonAdapters handles built-in type adapters. When a data class has a nullable List<String> containing null elements, the ListJsonAdapter throws NPE during toJson. The fix allows nullable elements or uses filterNotNull. Tests at StandardJsonAdaptersTest verify null handling.",
-        "sdl": "Hot path: StandardJsonAdapters.listAdapter -> ListJsonAdapter.toJson encounters null element. Add null-safe element handling.",
-        "sdlQueries": ["StandardJsonAdapters", "listAdapter", "ListJsonAdapter"]
+        "raw": "The moshi library's main class is at moshi/src/main/java/com/squareup/moshi/Moshi.kt. It has a companion object with factory methods like newBuilderFactory and newAdapterFactory. Adding a VERSION constant string to the companion object lets consumers check the moshi version at runtime. The companion object is declared inside the Moshi class.",
+        "sdl": "Symbol Moshi.companion: contains newBuilderFactory, newAdapterFactory. Add const val VERSION = \"1.15.0\" to the companion object.",
+        "sdlQueries": ["Moshi", "Companion", "newAdapterFactory"]
       },
       "verify": {
-        "command": "./gradlew :moshi:test --tests StandardJsonAdaptersTest --no-daemon",
-        "timeoutMs": 300000
+        "command": "node -e \"const fs=require('fs');const c=fs.readFileSync('moshi/src/main/java/com/squareup/moshi/Moshi.kt','utf8');if(!c.includes('const val VERSION'))process.exit(1);\"",
+        "timeoutMs": 10000
       },
       "rubric": {
         "maxScore": 1

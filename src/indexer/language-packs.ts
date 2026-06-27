@@ -699,6 +699,23 @@ function formatInstallCommand(pack: LanguagePackManifest): string {
     .replace("<sdl-cache>", dirname(DEFAULT_LANGUAGE_PACK_CACHE_DIR));
 }
 
+async function importAdapterModule(
+  adapterModule: string,
+): Promise<AdapterFactoryModule> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return (await import(adapterModule)) as AdapterFactoryModule;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 async function loadLanguagePackAdapter(
   pack: LanguagePackManifest,
 ): Promise<() => LanguageAdapter> {
@@ -712,7 +729,7 @@ async function loadLanguagePackAdapter(
     );
   }
 
-  const module = (await import(pack.adapterModule)) as AdapterFactoryModule;
+  const module = (await importAdapterModule(pack.adapterModule)) as AdapterFactoryModule;
   if (pack.languageId === "php" && module.PhpAdapter) {
     return () => new module.PhpAdapter!();
   }
