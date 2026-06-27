@@ -1948,6 +1948,15 @@ test("runScalingCurve refuses to launch without --i-understand-cost and prints a
       }),
       /Scaling run requires --i-understand-cost/,
     );
+    // Also verify the explicit-root guard: omitting root should throw a clear
+    // error rather than failing deep in node:path:join with ERR_INVALID_ARG_TYPE.
+    await assert.rejects(
+      runScalingCurve({
+        matrixPath: "sdlbench/tasks/matrix.json",
+        iUnderstandCost: true,
+      }),
+      /root is required/,
+    );
   } finally {
     await rm(root, { force: true, recursive: true });
   }

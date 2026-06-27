@@ -127,6 +127,7 @@ async function dispatch() {
   } else if (command === "scaling") {
     const sizes = (opts.sizes ?? "tiny,small").split(",").map((s) => s.trim());
     const result = await runScalingCurve({
+      root: process.cwd(),
       matrixPath: opts.matrix ?? "sdlbench/tasks/matrix.json",
       sizeClasses: sizes,
       agent: opts.agent ?? "codex",

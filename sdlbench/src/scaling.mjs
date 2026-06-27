@@ -2,6 +2,7 @@ import { runBenchmark } from "./sdlbench.mjs";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
+import { percentile } from "./stats.mjs";
 
 export async function runScalingCurve({
   root,
@@ -15,6 +16,7 @@ export async function runScalingCurve({
   iUnderstandCost = false,
   tokenizerCommand,
 }) {
+  if (!root) throw new Error("runScalingCurve: root is required (pass process.cwd() or repo root)");
   if (!iUnderstandCost) {
     const budget = await estimateBudget({ root, reposLockPath, sizeClasses, agent, model });
     throw new Error(
@@ -51,17 +53,36 @@ export async function runScalingCurve({
     }
 
     const sizeRecords = allRecords.filter((r) => r.repo?.sizeClass === sizeClass);
-    const baseline = sizeRecords.find((r) => r.variant === "baseline" && r.quality?.passed);
-    const sdl = sizeRecords.find((r) => r.variant === "sdl" && r.quality?.passed);
-    if (baseline && sdl) {
+    const baselineByTask = new Map();
+    const sdlByTask = new Map();
+    for (const r of sizeRecords) {
+      if (!r.quality?.passed) continue;
+      const bucket = r.variant === "baseline" ? baselineByTask : (r.variant === "sdl" ? sdlByTask : null);
+      if (!bucket) continue;
+      bucket.set(r.taskId, r);
+    }
+    const pairedTasks = [...baselineByTask.keys()].filter((id) => sdlByTask.has(id));
+    if (pairedTasks.length > 0) {
+      const baselineToks = pairedTasks.map((id) => baselineByTask.get(id).tokens?.total ?? 0);
+      const sdlToks = pairedTasks.map((id) => sdlByTask.get(id).tokens?.total ?? 0);
+      const baselineTok = baselineToks.reduce((a, b) => a + b, 0);
+      const sdlTok = sdlToks.reduce((a, b) => a + b, 0);
+      const perTaskDeltaPcts = pairedTasks.map((id) => {
+        const b = baselineByTask.get(id).tokens?.total ?? 0;
+        const s = sdlByTask.get(id).tokens?.total ?? 0;
+        return b > 0 ? Math.round(((b - s) / b) * 10000) / 100 : 0;
+      });
       scalingRows.push({
         sizeClass,
-        symbolCount: sdl.artifacts?.sdl?.observability?.indexing_totalEvents ?? 0,
-        baselineTok: baseline.tokens?.total ?? 0,
-        sdlTok: sdl.tokens?.total ?? 0,
-        deltaPct: baseline.tokens?.total > 0
-          ? Math.round(((baseline.tokens.total - sdl.tokens.total) / baseline.tokens.total) * 10000) / 100
+        symbolCount: sdlByTask.get(pairedTasks[0])?.artifacts?.sdl?.observability?.indexing_totalEvents ?? 0,
+        baselineTok,
+        sdlTok,
+        deltaPct: baselineTok > 0
+          ? Math.round(((baselineTok - sdlTok) / baselineTok) * 10000) / 100
           : 0,
+        pairedCount: pairedTasks.length,
+        medianDeltaPct: percentile(perTaskDeltaPcts, 50),
+        perTaskDeltaPcts,
       });
     }
   }
