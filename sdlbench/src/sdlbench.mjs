@@ -171,10 +171,10 @@ export async function runBenchmark(options = {}) {
       }
       let opencodeSessionCounts = null;
       if (executionMode === "behavior" && agent === "opencode") {
-        const storageDir = agentRuntime?.storageDir;
-        opencodeSessionCounts = await extractOpencodeSessionUsage({ storageDir });
+        const storageDir = agentRuntime?.storageRoot;
+        opencodeSessionCounts = extractOpencodeSessionUsage({ storageDir, runRoot });
         if (!opencodeSessionCounts.input && !opencodeSessionCounts.output) {
-          throw new Error(`Opencode behavior benchmark did not find session usage under ${storageDir ?? "<unset OPENCODE_DATA_DIR>"} for ${runRoot}`);
+          throw new Error(`Opencode behavior benchmark did not find session usage under ${storageDir ?? "<unset XDG_DATA_HOME>"} for ${runRoot}`);
         }
       }
       const tokens = codexTokenCounts

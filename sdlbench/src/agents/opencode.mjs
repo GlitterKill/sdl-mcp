@@ -1,79 +1,121 @@
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 /**
- * Extract OpenCode session usage from the fragmented per-run storage tree.
+ * Extract OpenCode session usage from the per-run isolated SQLite database.
  *
- * OpenCode writes session/message/part records to separate JSON files under
- * <OPENCODE_DATA_DIR>/storage/ — caller is expected to pass that root here.
- * The per-run sterile runtime (sdlbench/src/agents/opencode-runtime.mjs)
- * already isolates OPENCODE_DATA_DIR per-taskRunId, so any usage record
- * found in storageDir belongs to the current benchmark run.
+ * opencode v1.17.11+ stores sessions, messages, and parts in opencode.db
+ * (validated via direct schema inspection). The session table exposes
+ * per-session aggregated token counts as direct columns:
  *
- * Sums provider usage fields exposed by opencode's getUsage activation:
- *   - inputTokens
- *   - outputTokens
- *   - reasoningTokens (charged at output rate per Kimi K2.7 Code thinking mode
- *     and GLM-5.2 reasoning; returned here as reasoningOutput for parity with
- *     the Codex usage path)
- *   - cacheReadInputTokens (cached prompt-token reads)
- *   - cacheWriteInputTokens (prompt-cache write; billed like input)
+ *   - tokens_input           -> input
+ *   - tokens_output          -> output
+ *   - tokens_reasoning       -> reasoningOutput
+ *   - tokens_cache_read      -> cachedInput
+ *   - tokens_cache_write     -> cachedWriteInput
  *
- * Files without a top-level `usage` object are skipped (coverage for metadata
- * files like info.json and index.json).
+ * The session.directory column contains the absolute path of the worktree
+ * opencode was invoked in (set by SDLBench to runRoot), so we match it
+ * against the expected runRoot to find the per-task session.
+ *
+ * Calls should pass storageDir = agentRuntime.storageRoot from
+ * prepareOpencodeSterileRuntime (which sets XDG_DATA_HOME to redirect the
+ * SQLite db to a per-run temp dir).
  */
-export async function extractOpencodeSessionUsage({ storageDir }) {
-  let input = 0;
-  let output = 0;
-  let total = 0;
-  let reasoningOutput = 0;
-  let cachedInput = 0;
-  let cachedWriteInput = 0;
-  const sessionFiles = [];
-
-  if (storageDir) {
-    const files = await findJsonFiles(storageDir);
-    for (const file of files) {
-      const text = await readFile(file, "utf8").catch(() => null);
-      if (!text) continue;
-      let parsed;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        continue;
-      }
-      const usage = parsed?.usage;
-      if (!usage || typeof usage !== "object") continue;
-      const fileInput = whole(usage.inputTokens);
-      const fileOutput = whole(usage.outputTokens);
-      const fileReasoning = whole(usage.reasoningTokens);
-      const fileCacheRead = whole(usage.cacheReadInputTokens);
-      const fileCacheWrite = whole(usage.cacheWriteInputTokens);
-      const fileTotal = whole(usage.totalTokens) || fileInput + fileOutput + fileReasoning;
-      // Skip records that have no usage signal at all (e.g. cached write-only
-      // entries that some providers emit as zero-stat frames).
-      if (!fileInput && !fileOutput && !fileReasoning && !fileCacheRead && !fileCacheWrite) continue;
-      input += fileInput;
-      output += fileOutput;
-      reasoningOutput += fileReasoning;
-      cachedInput += fileCacheRead;
-      cachedWriteInput += fileCacheWrite;
-      total += fileTotal;
-      sessionFiles.push(file);
-    }
+export function extractOpencodeSessionUsage({ storageDir, runRoot }) {
+  const dbPath = join(storageDir, "opencode", "opencode.db");
+  if (!existsSync(dbPath)) {
+    return emptyUsage();
   }
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    return querySessions(db, runRoot, dbPath);
+  } finally {
+    db.close();
+  }
+}
 
+function querySessions(db, runRoot, dbPath) {
+  // Try to match by directory first (most rigorous).
+  const normalizedRunRoot = runRoot ? normalizeSessionPath(runRoot) : null;
+  let sessions = [];
+  if (normalizedRunRoot) {
+    const stmt = db.prepare(`
+      SELECT id, directory, time_created, time_updated,
+             tokens_input, tokens_output, tokens_reasoning,
+             tokens_cache_read, tokens_cache_write, cost
+      FROM session
+      WHERE lower(directory) = ?
+      ORDER BY time_updated DESC
+    `);
+    sessions = stmt.all(normalizedRunRoot);
+  }
+  // Fallback: if no directory match (older opencode or different path scheme),
+  // take the most-recently-updated session. Callers requiring strict
+  // runRoot-matching should assert rather than accept this fallback.
+  if (sessions.length === 0) {
+    const stmt = db.prepare(`
+      SELECT id, directory, time_created, time_updated,
+             tokens_input, tokens_output, tokens_reasoning,
+             tokens_cache_read, tokens_cache_write, cost
+      FROM session
+      ORDER BY time_updated DESC
+      LIMIT 1
+    `);
+    const row = stmt.all();
+    sessions = row ? row : [];
+  }
+  if (sessions.length === 0) return emptyUsage();
+
+  // Use the most-recent session.
+  const session = sessions[0];
+  const input = whole(session.tokens_input);
+  const output = whole(session.tokens_output);
+  const reasoningOutput = whole(session.tokens_reasoning);
+  const cachedInput = whole(session.tokens_cache_read);
+  const cachedWriteInput = whole(session.tokens_cache_write);
+  const total = input + output + reasoningOutput;
   return {
     input,
     output,
-    total: total || input + output + reasoningOutput,
+    total,
     reasoningOutput,
     cachedInput,
     cachedWriteInput,
     uncachedInput: Math.max(0, input - cachedInput - cachedWriteInput),
     tokenizerSource: "opencode-session",
-    sessionFiles,
+    usageSource: "opencode_session_usage",
+    sessionId: session.id,
+    sessionDirectory: session.directory,
+    sessionFiles: [dbPath],
   };
+}
+
+function emptyUsage() {
+  return {
+    input: 0,
+    output: 0,
+    total: 0,
+    reasoningOutput: 0,
+    cachedInput: 0,
+    cachedWriteInput: 0,
+    uncachedInput: 0,
+    tokenizerSource: "opencode-session",
+    usageSource: "opencode_session_usage",
+    sessionId: null,
+    sessionDirectory: null,
+    sessionFiles: [],
+  };
+}
+
+function whole(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
+}
+
+function normalizeSessionPath(value) {
+  return resolve(String(value).replace(/^\\\\\?\\/, "")).replace(/\\/g, "/").toLowerCase();
 }
 
 /**
@@ -112,27 +154,4 @@ export function tokensFromOpencodeSessionCounts(sessionCounts, estimatedTokens) 
     usageSource: "opencode_session_usage",
     sessionFiles: sessionCounts.sessionFiles ?? [],
   };
-}
-
-function whole(value) {
-  const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
-}
-
-async function findJsonFiles(root) {
-  let files = [];
-  try {
-    const entries = await readdir(root, { withFileTypes: true });
-    for (const entry of entries) {
-      const path = join(root, entry.name);
-      if (entry.isDirectory()) {
-        files = files.concat(await findJsonFiles(path));
-      } else if (entry.isFile() && (entry.name.endsWith(".json"))) {
-        files.push(path);
-      }
-    }
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
-  return files;
 }

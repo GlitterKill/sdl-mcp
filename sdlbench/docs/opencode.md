@@ -38,53 +38,61 @@ Values shipped: `glm-5.2` and `kimi-k2.7-code`. The agent's default model
 opencode behavior runs are isolated from the developer's normal opencode
 environment by:
 
-- **Per-run storage redirection**: `OPENCODE_DATA_DIR` is set to a per-`taskRunId`
-  temp dir under `<workDir>/../opencode-home/<taskRunId>/storage/`, so opencode
-  does not read from or write to the user's
-  `~/.local/share/opencode/storage/`. This prevents contamination from prior
-  user sessions and means the per-run isolated tree is the only place
-  `extractOpencodeSessionUsage` needs to walk.
+- **Per-run storage redirection (opencode v1.17.11+)**: `XDG_DATA_HOME` is set
+  to a per-`taskRunId` temp dir under `<workDir>/../opencode-home/<taskRunId>/`.
+  opencode v1.17.11 honors `XDG_DATA_HOME` and writes its SQLite database
+  (`opencode.db`), `snapshot/`, `log/`, and `bin/` under that dir.
+  (`OPENCODE_DATA_DIR` env var was added in opencode PR #8963 (Jan 2026) but
+  did not ship until v1.2+; opencode 1.1.6 ignores it. The harness uses
+  `XDG_DATA_HOME` which is honored across versions.)
 - **Inline config override**: `OPENCODE_CONFIG_CONTENT` is set to a JSON object
   containing only the SDL MCP remote server entry (for `--variant sdl`) or an
-  empty `mcp: {}` block (for `--variant baseline`). No user-installed opencode
+  empty `mcp: {}` block (for `--variant baseline`). It also sets `plugin: []`
+  to override any plugins declared in the user's global
+  `~/.config/opencode/opencode.json` (e.g. `code-mode` MCP) that would
+  otherwise fail to start or pollute the benchmark. No user-installed opencode
   plugins, skills, or memory entries are loaded.
 
 A behavior run **fails instead of writing a fake-evidence record** when no
-session usage records are found under the isolated `OPENCODE_DATA_DIR` (mirrors
-the Codex `did not find matching session token_count JSONL` rejection).
+session usage records are found in `opencode.db` under the isolated
+`XDG_DATA_HOME` (mirrors the Codex `did not find matching session token_count
+JSONL` rejection).
 
 ## Token Extraction
 
-opencode writes fragmented session storage at
-`<OPENCODE_DATA_DIR>/storage/session/<sessionId>/info.json`,
-`<OPENCODE_DATA_DIR>/storage/session/<sessionId>/message/<msgId>/index.json`,
-and `<OPENCODE_DATA_DIR>/storage/message/<msgId>/part/<partId>.json`. Assistant
-parts carry a top-level `usage` object populated by opencode's `getUsage`
-activation from the provider response.
+opencode v1.17.11+ stores sessions, messages, and parts in a SQLite database
+at `<XDG_DATA_HOME>/opencode/opencode.db`. The `session` table exposes
+per-session aggregated token counts as direct columns:
 
-`extractOpencodeSessionUsage({ storageDir })` (in
-`sdlbench/src/agents/opencode.mjs`) walks every JSON file under the per-run
-isolated storage tree and sums the provider usage fields:
+| SQLite column         | Tokens field        |
+|-----------------------|---------------------|
+| `tokens_input`        | `input`             |
+| `tokens_output`       | `output`            |
+| `tokens_reasoning`    | `reasoningOutput`   |
+| `tokens_cache_read`   | `cachedInput`       |
+| `tokens_cache_write`  | `cachedWriteInput`  |
 
-| Field | Map |
-|---|---|
-| `usage.inputTokens` | `tokens.input` |
-| `usage.outputTokens` | `tokens.output` |
-| `usage.reasoningTokens` | `tokens.reasoningOutput` |
-| `usage.cacheReadInputTokens` | `tokens.cachedInput` |
-| `usage.cacheWriteInputTokens` | `tokens.cachedWriteInput` |
-| `usage.totalTokens` | `tokens.total` |
+`extractOpencodeSessionUsage({ storageDir, runRoot })` (in
+`sdlbench/src/agents/opencode.mjs`) opens the SQLite DB read-only and matches
+the `session.directory` column against `runRoot` (normalized to forward-slash
+lowercase), returning the most-recent matching session's token totals. If no
+directory match is found, it falls back to the most-recently-updated session
+overall. If the DB file doesn't exist, it returns zero totals.
 
-Files without a top-level `usage` object (e.g. `info.json`, message
-`index.json`, parts without consumption frames) are skipped. Zero-stat
-frames (records where every field is 0) are also skipped to stay defensive
-against provider-emitted cache-write-only entries.
-
-`tokensFromOpencodeSessionCounts` resphes the summed counts into the v2
+`tokensFromOpencodeSessionCounts` reshapes the summed counts into the v2
 tokens schema, populating `tokenizerSource: "opencode-session"`,
 `usageSource: "opencode_session_usage"`, and the standard
 `cachedInput`/`uncachedInput`/`reasoningOutput` fields used by
 `estimateCost` and the viewer.
+
+### Note on opencode version compatibility
+
+The earlier opencode v1.1.6 used a fragmented JSON storage layout
+(`storage/session/<sid>/info.json`, `storage/message/<sid>/part/<pid>.json`,
+etc.) with a different `tokens: { input, output, reasoning, cache: { read,
+write } }` shape inside part files. v1.17.11 moved all of this to SQLite with
+direct scalar columns per session. Current parser targets v1.17.11+. Support
+for v1.1.6's JSON layout can be re-added later if needed.
 
 ## Pricing
 

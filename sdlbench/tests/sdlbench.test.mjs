@@ -1161,80 +1161,106 @@ test("extractClaudeSessionUsage reads usage records from .claude JSONL files", a
   }
 });
 
-test("extractOpencodeSessionUsage sums usage records across fragmented session storage", async () => {
-  const root = await mkdtemp(join(tmpdir(), "sdlbench-opencode-usage-"));
+test("extractOpencodeSessionUsage returns zero totals when no opencode.db exists at storageDir", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-opencode-empty-"));
   const storageDir = join(root, "storage");
-  // opencode writes fragmented storage:
-  //   storage/session/<sid>/info.json
-  //   storage/session/<sid>/message/<mid>/index.json
-  //   storage/message/<mid>/part/<pid>.json  (assistant parts carry usage)
-  const sessionDir = join(storageDir, "session", "ses_test1");
-  await mkdir(join(sessionDir, "message", "msg_test1"), { recursive: true });
-  await mkdir(join(storageDir, "message", "msg_test1", "part"), { recursive: true });
-
-  await writeFile(join(sessionDir, "info.json"), JSON.stringify({
-    cwd: "/tmp/fake-run",
-    modelID: "neuralwatt/glm-5.2",
-    title: "sdlbench benchmark run",
-  }));
-  await writeFile(join(sessionDir, "message", "msg_test1", "index.json"), JSON.stringify({
-    role: "assistant",
-    sessionId: "ses_test1",
-  }));
-  await writeFile(join(storageDir, "message", "msg_test1", "part", "p1.json"), JSON.stringify({
-    type: "assistant",
-    model: "neuralwatt/glm-5.2",
-    usage: {
-      inputTokens: 1000,
-      outputTokens: 200,
-      reasoningTokens: 50,
-      cacheReadInputTokens: 800,
-      cacheWriteInputTokens: 100,
-      totalTokens: 2050,
-    },
-  }));
-  await writeFile(join(storageDir, "message", "msg_test1", "part", "p2.json"), JSON.stringify({
-    type: "assistant",
-    usage: {
-      inputTokens: 1500,
-      outputTokens: 300,
-      reasoningTokens: 75,
-      cacheReadInputTokens: 1200,
-      cacheWriteInputTokens: 0,
-      totalTokens: 3075,
-    },
-  }));
-  // Non-usage part (should be ignored).
-  await writeFile(join(storageDir, "message", "msg_test1", "part", "p3.txt"), "not a json usage record");
+  await mkdir(storageDir, { recursive: true });
 
   try {
-    const usage = await extractOpencodeSessionUsage({ storageDir });
-    assert.equal(usage.input, 2500);
-    assert.equal(usage.output, 500);
-    assert.equal(usage.total, 5125);
-    assert.equal(usage.reasoningOutput, 125);
-    assert.equal(usage.cachedInput, 2000);
-    assert.equal(usage.cachedWriteInput, 100);
+    const usage = extractOpencodeSessionUsage({ storageDir, runRoot: root });
+    assert.equal(usage.input, 0);
+    assert.equal(usage.output, 0);
+    assert.equal(usage.total, 0);
+    assert.equal(usage.reasoningOutput, 0);
+    assert.equal(usage.cachedInput, 0);
+    assert.equal(usage.cachedWriteInput, 0);
     assert.equal(usage.tokenizerSource, "opencode-session");
-    assert.ok(usage.sessionFiles.length >= 1, "sessionFiles should list files with usage records");
+    assert.equal(usage.usageSource, "opencode_session_usage");
+    assert.deepEqual(usage.sessionFiles, []);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
 });
 
-test("extractOpencodeSessionUsage returns zero totals when no usage records are found", async () => {
-  const root = await mkdtemp(join(tmpdir(), "sdlbench-opencode-empty-"));
+test("extractOpencodeSessionUsage reads session tokens from opencode.db and matches by directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-opencode-sql-"));
   const storageDir = join(root, "storage");
-  await mkdir(join(storageDir, "session", "ses_empty"), { recursive: true });
-  await writeFile(join(storageDir, "session", "ses_empty", "info.json"), JSON.stringify({ cwd: "/nope" }));
+  const opencodeDir = join(storageDir, "opencode");
+  await mkdir(opencodeDir, { recursive: true });
+  const dbPath = join(opencodeDir, "opencode.db");
+
+  // Create an opencode.db with the v1.17.11 session schema and one matching
+  // session row pointed at the runRoot directory.
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(dbPath);
+  db.exec(`
+    CREATE TABLE session (
+      id TEXT PRIMARY KEY,
+      project_id TEXT,
+      workspace_id TEXT,
+      parent_id TEXT,
+      slug TEXT,
+      directory TEXT,
+      path TEXT,
+      title TEXT,
+      version TEXT,
+      share_url TEXT,
+      summary_additions INTEGER,
+      summary_deletions INTEGER,
+      summary_files INTEGER,
+      summary_diffs TEXT,
+      metadata TEXT,
+      cost REAL,
+      tokens_input INTEGER,
+      tokens_output INTEGER,
+      tokens_reasoning INTEGER,
+      tokens_cache_read INTEGER,
+      tokens_cache_write INTEGER,
+      revert TEXT,
+      permission TEXT,
+      agent TEXT,
+      model TEXT,
+      time_created INTEGER,
+      time_updated INTEGER
+    )
+  `);
+  const runRoot = join(root, "repo").replace(/\\/g, "/");
+  await mkdir(join(root, "repo"), { recursive: true });
+  db.prepare(`
+    INSERT INTO session (id, directory, time_created, time_updated, version,
+                          tokens_input, tokens_output, tokens_reasoning,
+                          tokens_cache_read, tokens_cache_write, cost)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).all(
+    "ses_test1", runRoot, 1782566720622, 1782566736740, "1.17.11",
+    18352, 3, 0, 704, 0, 0.0266239,
+  );
+  // Insert a decoy session with a different directory to verify the matcher
+  // picks the runRoot-matching session, not just the latest.
+  db.prepare(`
+    INSERT INTO session (id, directory, time_created, time_updated, version,
+                          tokens_input, tokens_output, tokens_reasoning,
+                          tokens_cache_read, tokens_cache_write, cost)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).all(
+    "ses_decoy", "/some/other/dir", 1782566720622, 1782569999999, "1.17.11",
+    99999, 99999, 99999, 99999, 99999, 9.99,
+  );
+  db.close();
 
   try {
-    const usage = await extractOpencodeSessionUsage({ storageDir });
-    assert.equal(usage.input, 0);
-    assert.equal(usage.output, 0);
-    assert.equal(usage.total, 0);
+    const usage = extractOpencodeSessionUsage({ storageDir, runRoot: join(root, "repo") });
+    assert.equal(usage.input, 18352);
+    assert.equal(usage.output, 3);
+    assert.equal(usage.reasoningOutput, 0);
+    assert.equal(usage.cachedInput, 704);
+    assert.equal(usage.cachedWriteInput, 0);
+    assert.equal(usage.total, 18355);
     assert.equal(usage.tokenizerSource, "opencode-session");
-    assert.equal(usage.sessionFiles.length, 0);
+    assert.equal(usage.usageSource, "opencode_session_usage");
+    assert.equal(usage.sessionId, "ses_test1");
+    assert.equal(usage.sessionDirectory, runRoot);
+    assert.deepEqual(usage.sessionFiles, [dbPath]);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -1271,27 +1297,38 @@ test("behavior mode with agent=opencode records session usage as opencode-sessio
         solution: { files: { "src/value.js": "export const value = \"canned\";\n" } }
       }]
     }));
-    // Fake agent captures OPENCODE_DATA_DIR, writes fragmented usage records,
-    // then applies the expected source file so the verifier passes.
     await writeFile(agentPath, `
       import { mkdirSync, writeFileSync } from "node:fs";
       import { join } from "node:path";
+      import { DatabaseSync } from "node:sqlite";
       const repo = process.argv[process.argv.indexOf("--repo") + 1];
-      const storage = process.env.OPENCODE_DATA_DIR;
+      const storage = process.env.XDG_DATA_HOME;
       if (!storage) process.exit(2);
-      const msgDir = join(storage, "message", "msg_fake", "part");
-      mkdirSync(msgDir, { recursive: true });
-      writeFileSync(join(msgDir, "p1.json"), JSON.stringify({
-        type: "assistant",
-        usage: {
-          inputTokens: 2200,
-          outputTokens: 400,
-          reasoningTokens: 175,
-          cacheReadInputTokens: 1800,
-          cacheWriteInputTokens: 50,
-          totalTokens: 4625,
-        },
-      }));
+      const opencodeDir = join(storage, "opencode");
+      mkdirSync(opencodeDir, { recursive: true });
+      const db = new DatabaseSync(join(opencodeDir, "opencode.db"));
+      const createSql = [
+        "CREATE TABLE session (",
+        "  id TEXT PRIMARY KEY,",
+        "  directory TEXT,",
+        "  time_created INTEGER,",
+        "  time_updated INTEGER,",
+        "  version TEXT,",
+        "  tokens_input INTEGER,",
+        "  tokens_output INTEGER,",
+        "  tokens_reasoning INTEGER,",
+        "  tokens_cache_read INTEGER,",
+        "  tokens_cache_write INTEGER,",
+        "  cost REAL",
+        ")"
+      ].join(" ");
+      db.exec(createSql);
+      const repoPath = repo.replace(/\\\\\\\\/g, "/");
+      db.prepare("INSERT INTO session (id, directory, time_created, time_updated, version, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").all(
+        "ses_fake_opencode", repoPath, 1782566720622, 1782566999999, "1.17.11",
+        2200, 400, 175, 1800, 50, 0.05,
+      );
+      db.close();
       writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"opencode-session\\\";\\n");
     `);
 
@@ -1315,7 +1352,9 @@ test("behavior mode with agent=opencode records session usage as opencode-sessio
     assert.equal(record.tokens.reasoningOutput, 175);
     assert.equal(record.tokens.cachedInput, 1800);
     assert.equal(record.tokens.cachedWriteInput, 50);
-    assert.equal(record.tokens.total, 4625);
+    // Total excludes cache (cache is a component of input per OpenAI convention):
+    // total = input + output + reasoning = 2775
+    assert.equal(record.tokens.total, 2775);
     assert.equal(record.tokens.usageSource, "opencode_session_usage");
     assert.equal(record.cost.pricingModel, "glm-5.2");
     assert.equal(record.cost.pricingSource, "model");
@@ -1717,10 +1756,13 @@ test("prepareOpencodeSterileRuntime places SDL MCP remote config in OPENCODE_CON
     assert.equal(cfg.mcp["sdl-mcp"].type, "remote");
     assert.equal(cfg.mcp["sdl-mcp"].url, "http://127.0.0.1:12345/mcp");
     assert.equal(cfg.mcp["sdl-mcp"].enabled, true);
-    assert.ok(runtime.env.OPENCODE_DATA_DIR, "OPENCODE_DATA_DIR must be set");
-    assert.ok(runtime.env.OPENCODE_DATA_DIR.includes("test-run-id"),
-      "OPENCODE_DATA_DIR should live under a per-run temp dir, not the user's home");
-    assert.ok(runtime.storageDir && runtime.storageDir === runtime.env.OPENCODE_DATA_DIR);
+    assert.deepEqual(cfg.plugin, [], "plugin array must be empty to disable user-installed plugins");
+    assert.ok(runtime.env.XDG_DATA_HOME, "XDG_DATA_HOME must be set");
+    assert.ok(runtime.env.XDG_DATA_HOME.includes("test-run-id"),
+      "XDG_DATA_HOME should live under a per-run temp dir, not the user's home");
+    assert.ok(runtime.storageRoot && runtime.storageRoot === runtime.env.XDG_DATA_HOME);
+    assert.ok(runtime.dbPath && (runtime.dbPath.endsWith("opencode/opencode.db") || runtime.dbPath.endsWith("opencode\\opencode.db")),
+      "dbPath must point at the expected opencode.db location under the per-run XDG_DATA_HOME");
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -1739,7 +1781,8 @@ test("prepareOpencodeSterileRuntime omits MCP server entry when sdlSession is nu
     });
     const cfg = JSON.parse(runtime.env.OPENCODE_CONFIG_CONTENT);
     assert.deepEqual(cfg.mcp, {});
-    assert.ok(runtime.env.OPENCODE_DATA_DIR.includes("test-run-id"));
+    assert.deepEqual(cfg.plugin, []);
+    assert.ok(runtime.env.XDG_DATA_HOME.includes("test-run-id"));
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -1801,24 +1844,37 @@ test("behavior mode with agent=opencode passes the sterile runtime env to the ag
     await writeFile(agentPath, `
       import { mkdirSync, writeFileSync } from "node:fs";
       import { join } from "node:path";
+      import { DatabaseSync } from "node:sqlite";
       const repo = process.argv[process.argv.indexOf("--repo") + 1];
       const cfg = process.env.OPENCODE_CONFIG_CONTENT;
-      const storage = process.env.OPENCODE_DATA_DIR;
+      const storage = process.env.XDG_DATA_HOME;
       writeFileSync(${JSON.stringify(probePath)}, JSON.stringify({ cfg, storage }));
-      // Minimum usage record required by the Task 6 token-extraction dispatch.
-      const partDir = join(storage, "message", "msg_probe", "part");
-      mkdirSync(partDir, { recursive: true });
-      writeFileSync(join(partDir, "p1.json"), JSON.stringify({
-        type: "assistant",
-        usage: {
-          inputTokens: 100,
-          outputTokens: 50,
-          reasoningTokens: 10,
-          cacheReadInputTokens: 80,
-          cacheWriteInputTokens: 0,
-          totalTokens: 160,
-        },
-      }));
+      // Minimum session row required by the Task 6 token-extraction dispatch.
+      const opencodeDir = join(storage, "opencode");
+      mkdirSync(opencodeDir, { recursive: true });
+      const db = new DatabaseSync(join(opencodeDir, "opencode.db"));
+      const createSql = [
+        "CREATE TABLE session (",
+        "  id TEXT PRIMARY KEY,",
+        "  directory TEXT,",
+        "  time_created INTEGER,",
+        "  time_updated INTEGER,",
+        "  version TEXT,",
+        "  tokens_input INTEGER,",
+        "  tokens_output INTEGER,",
+        "  tokens_reasoning INTEGER,",
+        "  tokens_cache_read INTEGER,",
+        "  tokens_cache_write INTEGER,",
+        "  cost REAL",
+        ")"
+      ].join(" ");
+      db.exec(createSql);
+      const repoPath = repo.replace(/\\\\\\\\/g, "/");
+      db.prepare("INSERT INTO session (id, directory, time_created, time_updated, version, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").all(
+        "ses_probe", repoPath, 1, 2, "1.17.11",
+        100, 50, 10, 80, 0, 0.01,
+      );
+      db.close();
       writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"opencode\\\";\\n");
     `);
 
@@ -1841,7 +1897,8 @@ test("behavior mode with agent=opencode passes the sterile runtime env to the ag
     assert.ok(probe.cfg, "OPENCODE_CONFIG_CONTENT reached the agent process");
     const parsedCfg = JSON.parse(probe.cfg);
     assert.deepEqual(parsedCfg.mcp, {}, "baseline variant should not wire an MCP server");
-    assert.ok(probe.storage, "OPENCODE_DATA_DIR reached the agent process");
+    assert.deepEqual(parsedCfg.plugin, [], "plugin array must be empty");
+    assert.ok(probe.storage, "XDG_DATA_HOME reached the agent process");
     assert.ok(probe.storage.includes(record.runId), "storage dir is per-run isolated");
     assert.ok(!probe.storage.includes(".local/share/opencode/storage"),
       "storage path must not match the user's default opencode storage location");
