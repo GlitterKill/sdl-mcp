@@ -1240,6 +1240,148 @@ test("extractOpencodeSessionUsage returns zero totals when no usage records are 
   }
 });
 
+test("behavior mode with agent=opencode records session usage as opencode-session tokens", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-opencode-tokens-"));
+  const repo = join(root, "repo");
+  const matrixPath = join(root, "matrix.json");
+  const agentPath = join(root, "agent.mjs");
+
+  try {
+    await mkdir(join(repo, "src"), { recursive: true });
+    await mkdir(join(repo, "tests"), { recursive: true });
+    await writeFile(join(repo, "package.json"), "{\"type\":\"module\"}\n");
+    await writeFile(join(repo, "src", "value.js"), "export const value = \"broken\";\n");
+    await writeFile(join(repo, "tests", "value.test.mjs"), `
+      import assert from "node:assert/strict";
+      import { value } from "../src/value.js";
+      assert.equal(value, "opencode-session");
+    `);
+    await writeFile(matrixPath, JSON.stringify({
+      schemaVersion: 1,
+      tasks: [{
+        schemaVersion: 1,
+        taskId: "opencode-session-usage",
+        repoId: "fixture-js",
+        category: "bug-fix",
+        prompt: "Make value export opencode-session.",
+        repo: { sourcePath: repo },
+        context: { raw: "RAW_CONTEXT_ONLY", sdl: "SDL_CONTEXT_ONLY" },
+        verify: { command: "node tests/value.test.mjs", timeoutMs: 10000 },
+        rubric: { maxScore: 1 },
+        solution: { files: { "src/value.js": "export const value = \"canned\";\n" } }
+      }]
+    }));
+    // Fake agent captures OPENCODE_DATA_DIR, writes fragmented usage records,
+    // then applies the expected source file so the verifier passes.
+    await writeFile(agentPath, `
+      import { mkdirSync, writeFileSync } from "node:fs";
+      import { join } from "node:path";
+      const repo = process.argv[process.argv.indexOf("--repo") + 1];
+      const storage = process.env.OPENCODE_DATA_DIR;
+      if (!storage) process.exit(2);
+      const msgDir = join(storage, "message", "msg_fake", "part");
+      mkdirSync(msgDir, { recursive: true });
+      writeFileSync(join(msgDir, "p1.json"), JSON.stringify({
+        type: "assistant",
+        usage: {
+          inputTokens: 2200,
+          outputTokens: 400,
+          reasoningTokens: 175,
+          cacheReadInputTokens: 1800,
+          cacheWriteInputTokens: 50,
+          totalTokens: 4625,
+        },
+      }));
+      writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"opencode-session\\\";\\n");
+    `);
+
+    const result = await runBenchmark({
+      agent: "opencode",
+      agentCommand: `node ${JSON.stringify(agentPath)} --repo {repo}`,
+      executionMode: "behavior",
+      matrixPath,
+      model: "glm-5.2",
+      resultsPath: join(root, "sessions.jsonl"),
+      tokenizerCommand: await fakeTokenizer(root),
+      variant: "baseline",
+      workDir: join(root, "work"),
+    });
+    const [record] = result.records;
+
+    assert.equal(record.status, "pass");
+    assert.equal(record.tokens.tokenizerSource, "opencode-session");
+    assert.equal(record.tokens.input, 2200);
+    assert.equal(record.tokens.output, 400);
+    assert.equal(record.tokens.reasoningOutput, 175);
+    assert.equal(record.tokens.cachedInput, 1800);
+    assert.equal(record.tokens.cachedWriteInput, 50);
+    assert.equal(record.tokens.total, 4625);
+    assert.equal(record.tokens.usageSource, "opencode_session_usage");
+    assert.equal(record.cost.pricingModel, "glm-5.2");
+    assert.equal(record.cost.pricingSource, "model");
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("behavior mode with agent=opencode throws when no session usage is found", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-opencode-no-usage-"));
+  const repo = join(root, "repo");
+  const matrixPath = join(root, "matrix.json");
+  const agentPath = join(root, "agent.mjs");
+
+  try {
+    await mkdir(join(repo, "src"), { recursive: true });
+    await mkdir(join(repo, "tests"), { recursive: true });
+    await writeFile(join(repo, "package.json"), "{\"type\":\"module\"}\n");
+    await writeFile(join(repo, "src", "value.js"), "export const value = \"broken\";\n");
+    await writeFile(join(repo, "tests", "value.test.mjs"), `
+      import assert from "node:assert/strict";
+      import { value } from "../src/value.js";
+      assert.equal(value, "ok");
+    `);
+    await writeFile(matrixPath, JSON.stringify({
+      schemaVersion: 1,
+      tasks: [{
+        schemaVersion: 1,
+        taskId: "opencode-no-usage",
+        repoId: "fixture-js",
+        category: "bug-fix",
+        prompt: "Make value export ok.",
+        repo: { sourcePath: repo },
+        context: { raw: "X", sdl: "Y" },
+        verify: { command: "node tests/value.test.mjs", timeoutMs: 10000 },
+        rubric: { maxScore: 1 },
+        solution: { files: { "src/value.js": "export const value = \"canned\";\n" } }
+      }]
+    }));
+    // Fake agent: does NOT write a usage record.
+    await writeFile(agentPath, `
+      import { writeFileSync } from "node:fs";
+      import { join } from "node:path";
+      const repo = process.argv[process.argv.indexOf("--repo") + 1];
+      writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"ok\\\";\\n");
+    `);
+
+    await assert.rejects(
+      runBenchmark({
+        agent: "opencode",
+        agentCommand: `node ${JSON.stringify(agentPath)} --repo {repo}`,
+        executionMode: "behavior",
+        matrixPath,
+        model: "glm-5.2",
+        resultsPath: join(root, "sessions.jsonl"),
+        tokenizerCommand: await fakeTokenizer(root),
+        variant: "baseline",
+        workDir: join(root, "work"),
+      }),
+      /Opencode behavior benchmark did not find session usage/,
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test("validateClaims returns gates for smoke/efficient/realism profiles on paired data", () => {
   const paired = [
     { deltaPct: 60, coverage: { contextCoverage: 0.8, fileCoverage: 0.9 }, fairness: { netSavingsPct: 50 } },
@@ -1657,12 +1799,26 @@ test("behavior mode with agent=opencode passes the sterile runtime env to the ag
       }]
     }));
     await writeFile(agentPath, `
-      import { writeFileSync } from "node:fs";
+      import { mkdirSync, writeFileSync } from "node:fs";
       import { join } from "node:path";
       const repo = process.argv[process.argv.indexOf("--repo") + 1];
       const cfg = process.env.OPENCODE_CONFIG_CONTENT;
       const storage = process.env.OPENCODE_DATA_DIR;
       writeFileSync(${JSON.stringify(probePath)}, JSON.stringify({ cfg, storage }));
+      // Minimum usage record required by the Task 6 token-extraction dispatch.
+      const partDir = join(storage, "message", "msg_probe", "part");
+      mkdirSync(partDir, { recursive: true });
+      writeFileSync(join(partDir, "p1.json"), JSON.stringify({
+        type: "assistant",
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          reasoningTokens: 10,
+          cacheReadInputTokens: 80,
+          cacheWriteInputTokens: 0,
+          totalTokens: 160,
+        },
+      }));
       writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"opencode\\\";\\n");
     `);
 

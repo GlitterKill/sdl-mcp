@@ -10,6 +10,7 @@ import { signalsForLoss } from "./attribution-signals.mjs";
 import { computeCoverage } from "./coverage.mjs";
 import { mean, stdDev, bootstrapCI, mannWhitneyU } from "./stats.mjs";
 import { prepareOpencodeSterileRuntime } from "./agents/opencode-runtime.mjs";
+import { extractOpencodeSessionUsage, tokensFromOpencodeSessionCounts } from "./agents/opencode.mjs";
 
 const SCHEMA_VERSION = 2;
 const DEFAULT_RESULTS = "sdlbench/results/sessions.jsonl";
@@ -168,9 +169,19 @@ export async function runBenchmark(options = {}) {
       if (codexSterility && !codexSterility.passed) {
         throw new Error(`Non-sterile Codex session ${codexTokenCounts.sessionFile}: ${codexSterility.forbidden.join(", ")}`);
       }
+      let opencodeSessionCounts = null;
+      if (executionMode === "behavior" && agent === "opencode") {
+        const storageDir = agentRuntime?.storageDir;
+        opencodeSessionCounts = await extractOpencodeSessionUsage({ storageDir });
+        if (!opencodeSessionCounts.input && !opencodeSessionCounts.output) {
+          throw new Error(`Opencode behavior benchmark did not find session usage under ${storageDir ?? "<unset OPENCODE_DATA_DIR>"} for ${runRoot}`);
+        }
+      }
       const tokens = codexTokenCounts
         ? tokensFromCodexSessionCounts(codexTokenCounts, estimatedTokens)
-        : estimatedTokens;
+        : opencodeSessionCounts
+          ? tokensFromOpencodeSessionCounts(opencodeSessionCounts, estimatedTokens)
+          : estimatedTokens;
       const claimGrade = resolveClaimGrade(executionMode, tokens.tokenizerSource);
       const repoMeta = resolveRepoMeta(task.repoId, reposLock);
       const workflowSteps = Array.isArray(task.workflow) ? task.workflow : [];

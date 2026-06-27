@@ -76,6 +76,44 @@ export async function extractOpencodeSessionUsage({ storageDir }) {
   };
 }
 
+/**
+ * Reshape extracted OpenCode session usage into the v2 tokens schema used by
+ * estimateCost and the SessionRecord tokens field.
+ *
+ * Mirrors tokensFromCodexSessionCounts in sdlbench.mjs (kept here so all
+ * OpenCode-specific token logic lives in one agent module, isolating new
+ * work per the project's bundling policy).
+ */
+export function tokensFromOpencodeSessionCounts(sessionCounts, estimatedTokens) {
+  const input = sessionCounts.input ?? 0;
+  const output = sessionCounts.output ?? 0;
+  const total = sessionCounts.total || input + output;
+  const cachedInput = sessionCounts.cachedInput ?? 0;
+  const reasoningOutput = sessionCounts.reasoningOutput ?? 0;
+  const cachedWriteInput = sessionCounts.cachedWriteInput ?? 0;
+  return {
+    input,
+    output,
+    total,
+    cachedInput,
+    uncachedInput: Math.max(0, input - cachedInput - cachedWriteInput),
+    cachedWriteInput,
+    reasoningOutput,
+    productContext: 0,
+    rawEquivalent: total,
+    saved: 0,
+    savingsPercent: 0,
+    model: estimatedTokens.model,
+    encoding: estimatedTokens.encoding,
+    modelHint: estimatedTokens.modelHint,
+    tokenizerResolution: "tiktoken_session_count",
+    tokenizerVersion: "opencode",
+    tokenizerSource: "opencode-session",
+    usageSource: "opencode_session_usage",
+    sessionFiles: sessionCounts.sessionFiles ?? [],
+  };
+}
+
 function whole(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
