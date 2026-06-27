@@ -8,12 +8,20 @@ import test from "node:test";
 import {
   analyzeSessions,
   createSdlHttpConfig,
+  estimateCost,
   findCodexSessionTokenCounts,
   importTranscript,
   inspectCodexSessionSterility,
   runBenchmark,
 } from "../src/sdlbench.mjs";
+import { serveViewer } from "../src/cli.mjs";
 import { buildChartModel, parseJsonl } from "../viewer/app.mjs";
+import { signalsForLoss } from "../src/attribution-signals.mjs";
+import { computeCoverage } from "../src/coverage.mjs";
+import { mean, stdDev, bootstrapCI, mannWhitneyU } from "../src/stats.mjs";
+import { auditFairness } from "../src/fairness.mjs";
+import { validateClaims } from "../src/claim-gates.mjs";
+import { extractClaudeSessionUsage } from "../src/agents/claude.mjs";
 
 async function fakeTokenizer(root) {
   const path = join(root, "fake-tokenizer.mjs");
@@ -451,7 +459,9 @@ test("runBenchmark appends baseline and sdl fixture records with tokenizer-backe
     assert.deepEqual(new Set(lines.map((record) => record.variant)), new Set(["baseline", "sdl"]));
     assert.ok(lines.every((record) => record.tokens.tokenizerSource === "tiktoken"));
     assert.ok(lines.every((record) => record.tokens.tokenizerVersion === "fake-tiktoken-1.0"));
-    assert.ok(lines.find((record) => record.variant === "sdl").tokens.saved > 0);
+    // Fixture-mode records no longer claim synthetic savings (schema v2 truth-fix).
+    assert.ok(lines.every((record) => record.tokens.saved === 0));
+    assert.ok(lines.every((record) => record.claimGrade === "none"));
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -629,6 +639,549 @@ test("runBenchmark fails instead of estimating when tokenizer is unavailable", a
   );
 });
 
+test("runBenchmark tags records with repo.sizeClass and repo.languageTags from repos.lock.json", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-repo-tags-"));
+  const repo = join(root, "repo");
+  const lockPath = join(root, "repos.lock.json");
+
+  try {
+    await mkdir(join(repo, "src"), { recursive: true });
+    await writeFile(join(repo, "package.json"), "{\"type\":\"module\"}\n");
+    await writeFile(join(repo, "src", "value.js"), "export const value = \"ok\";\n");
+    await writeFile(lockPath, JSON.stringify({
+      schemaVersion: 1,
+      repos: [
+        { repoId: "tagged-fixture", sourcePath: repo, pinnedRef: "local", languageTags: ["javascript"], ignoreGlobs: ["node_modules/**"], sizeClass: "tiny" }
+      ]
+    }));
+    await writeFile(join(root, "matrix.json"), JSON.stringify({
+      schemaVersion: 1,
+      tasks: [{
+        schemaVersion: 1,
+        taskId: "repo-tag-test",
+        repoId: "tagged-fixture",
+        category: "bug-fix",
+        prompt: "noop alpha beta",
+        repo: { sourcePath: repo },
+        context: { raw: "raw one two", sdl: "sdl three four" },
+        verify: { command: "node -e \"import('./src/value.js').then(() => {})\"", timeoutMs: 10000 },
+        rubric: { maxScore: 1 },
+        solution: { files: { "src/value.js": "export const value = \"ok\";\n" } }
+      }]
+    }));
+
+    const result = await runBenchmark({
+      agent: "codex",
+      matrixPath: join(root, "matrix.json"),
+      resultsPath: join(root, "sessions.jsonl"),
+      tokenizerCommand: await fakeTokenizer(root),
+      variant: "baseline",
+      workDir: join(root, "work"),
+      reposLockPath: lockPath,
+    });
+    const [record] = result.records;
+
+    assert.equal(record.repo.sizeClass, "tiny");
+    assert.deepEqual(record.repo.languageTags, ["javascript"]);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("runBenchmark resolves repos via runs matrix and accepts --repo-id filter", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-runs-matrix-"));
+  const repoA = join(root, "repoA");
+  const repoB = join(root, "repoB");
+  const lockPath = join(root, "repos.lock.json");
+
+  try {
+    for (const repo of [repoA, repoB]) {
+      await mkdir(join(repo, "src"), { recursive: true });
+      await writeFile(join(repo, "package.json"), "{\"type\":\"module\"}\n");
+      await writeFile(join(repo, "src", "value.js"), "export const value = \"ok\";\n");
+    }
+    await writeFile(lockPath, JSON.stringify({
+      schemaVersion: 1,
+      repos: [
+        { repoId: "repo-a", sourcePath: repoA, pinnedRef: "local", languageTags: ["javascript"], ignoreGlobs: [], sizeClass: "tiny" },
+        { repoId: "repo-b", sourcePath: repoB, pinnedRef: "local", languageTags: ["javascript"], ignoreGlobs: [], sizeClass: "small" }
+      ]
+    }));
+    await writeFile(join(root, "matrix.json"), JSON.stringify({
+      schemaVersion: 1,
+      runs: [
+        { id: "run-a", family: "bug-fix", repoId: "repo-a", tasks: "tasks-a.json", sizeClass: "tiny" },
+        { id: "run-b", family: "bug-fix", repoId: "repo-b", tasks: "tasks-b.json", sizeClass: "small" }
+      ]
+    }));
+    await writeFile(join(root, "tasks-a.json"), JSON.stringify({
+      schemaVersion: 1,
+      tasks: [{
+        schemaVersion: 1, taskId: "task-a", repoId: "repo-a", category: "bug-fix", prompt: "noop alpha",
+        repo: { sourcePath: repoA }, context: { raw: "raw", sdl: "sdl" },
+        verify: { command: "node -e \"import('./src/value.js').then(() => {})\"", timeoutMs: 10000 },
+        rubric: { maxScore: 1 }, solution: { files: { "src/value.js": "export const value = \"ok\";\n" } }
+      }]
+    }));
+    await writeFile(join(root, "tasks-b.json"), JSON.stringify({
+      schemaVersion: 1,
+      tasks: [{
+        schemaVersion: 1, taskId: "task-b", repoId: "repo-b", category: "bug-fix", prompt: "noop beta",
+        repo: { sourcePath: repoB }, context: { raw: "raw", sdl: "sdl" },
+        verify: { command: "node -e \"import('./src/value.js').then(() => {})\"", timeoutMs: 10000 },
+        rubric: { maxScore: 1 }, solution: { files: { "src/value.js": "export const value = \"ok\";\n" } }
+      }]
+    }));
+
+    const all = await runBenchmark({
+      agent: "codex", matrixPath: join(root, "matrix.json"), resultsPath: join(root, "out.jsonl"),
+      tokenizerCommand: await fakeTokenizer(root), variant: "baseline", workDir: join(root, "work"),
+      reposLockPath: lockPath,
+    });
+    assert.equal(all.records.length, 2);
+    assert.deepEqual(all.records.map((r) => r.taskId).sort(), ["task-a", "task-b"]);
+
+    const filtered = await runBenchmark({
+      agent: "codex", matrixPath: join(root, "matrix.json"), resultsPath: join(root, "out2.jsonl"),
+      tokenizerCommand: await fakeTokenizer(root), variant: "baseline", workDir: join(root, "work2"),
+      reposLockPath: lockPath, repoIdFilter: "repo-b",
+    });
+    assert.equal(filtered.records.length, 1);
+    assert.equal(filtered.records[0].taskId, "task-b");
+    assert.equal(filtered.records[0].repo.sizeClass, "small");
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Codex reads parse function_call items and attach per-tool attribution", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-attribution-"));
+  const sessionsDir = join(root, "sessions", "2026", "06", "26");
+  const runRoot = join(root, "repo");
+
+  try {
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(join(sessionsDir, "rollout-attribution.jsonl"), [
+      JSON.stringify({ type: "session_meta", payload: { session_id: "attr-session", cwd: runRoot, source: "exec", cli_version: "0.test" } }),
+      JSON.stringify({ type: "response_item", payload: { type: "function_call", name: "shell_command", arguments: "{\"command\":\"git status\"}", call_id: "call_a" } }),
+      JSON.stringify({ type: "response_item", payload: { type: "function_call_output", call_id: "call_a", output: "nothing to commit" } }),
+      JSON.stringify({ type: "response_item", payload: { type: "function_call", name: "sdl.symbol.search", arguments: "{\"query\":\"buildCart\"}", call_id: "call_b" } }),
+      JSON.stringify({ type: "response_item", payload: { type: "function_call_output", call_id: "call_b", output: "found buildCart" } }),
+      JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 }, model_context_window: 200000 } } })
+    ].join("\n"));
+
+    const sessionCounts = await findCodexSessionTokenCounts({
+      runRoot,
+      sessionsDir: join(root, "sessions"),
+      tokenizerCommand: await fakeTokenizer(root),
+    });
+
+    assert.ok(sessionCounts?.attribution);
+    assert.equal(sessionCounts.attribution.toolCalls.length, 2);
+    const shellCall = sessionCounts.attribution.toolCalls.find((tc) => tc.toolName === "shell_command");
+    assert.ok(shellCall);
+    assert.ok(shellCall.tokensIn > 0);
+    assert.ok(shellCall.tokensOut > 0);
+    const sdlCall = sessionCounts.attribution.toolCalls.find((tc) => tc.toolName === "sdl.symbol.search");
+    assert.ok(sdlCall);
+    assert.ok(sdlCall.tokensIn > 0);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("behavior records carry attribution.toolCalls and phaseBreakdown from codex session", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-attr-record-"));
+  const repo = join(root, "repo");
+  const matrixPath = join(root, "matrix.json");
+  const agentPath = join(root, "agent.mjs");
+  const codexSessionsDir = join(root, "codex-sessions");
+  const dayDir = join(codexSessionsDir, "2026", "06", "26");
+
+  try {
+    await mkdir(dayDir, { recursive: true });
+    await mkdir(join(repo, "src"), { recursive: true });
+    await mkdir(join(repo, "tests"), { recursive: true });
+    await writeFile(join(repo, "package.json"), "{\"type\":\"module\"}\n");
+    await writeFile(join(repo, "src", "value.js"), "export const value = \"broken\";\n");
+    await writeFile(join(repo, "tests", "value.test.mjs"), `
+      import assert from "node:assert/strict";
+      import { value } from "../src/value.js";
+      assert.equal(value, "attr");
+    `);
+    await writeFile(matrixPath, JSON.stringify({
+      schemaVersion: 1,
+      tasks: [{
+        schemaVersion: 1, taskId: "attr-record", repoId: "attr-repo", category: "bug-fix",
+        prompt: "Make value export attr.", repo: { sourcePath: repo },
+        context: { raw: "raw", sdl: "sdl" },
+        verify: { command: "node tests/value.test.mjs", timeoutMs: 10000 },
+        rubric: { maxScore: 1 }, solution: { files: { "src/value.js": "export const value = \"canned\";\n" } }
+      }]
+    }));
+    await writeFile(agentPath, `
+      import { mkdirSync, writeFileSync } from "node:fs";
+      const repo = process.argv[process.argv.indexOf("--repo") + 1];
+      const sessions = process.argv[process.argv.indexOf("--sessions") + 1];
+      mkdirSync(sessions, { recursive: true });
+      writeFileSync(repo + "/src/value.js", "export const value = \\\"attr\\\";\\n");
+      writeFileSync(sessions + "/rollout-attr-record.jsonl", [
+        JSON.stringify({ type: "session_meta", payload: { session_id: "attr-rec", cwd: repo, source: "exec", cli_version: "0.test" } }),
+        JSON.stringify({ type: "response_item", payload: { type: "function_call", name: "shell_command", arguments: "{\\"command\\":\\"ls\\"}", call_id: "c1" } }),
+        JSON.stringify({ type: "response_item", payload: { type: "function_call_output", call_id: "c1", output: "file.txt" } }),
+        JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 200, cached_input_tokens: 50, output_tokens: 80, reasoning_output_tokens: 30, total_tokens: 280 }, model_context_window: 200000 } } })
+      ].join("\\n") + "\\n");
+    `);
+
+    const result = await runBenchmark({
+      agent: "local",
+      agentCommand: `node ${JSON.stringify(agentPath)} --repo {repo} --sessions ${JSON.stringify(dayDir)}`,
+      codexSessionsDir,
+      executionMode: "behavior",
+      matrixPath,
+      resultsPath: join(root, "sessions.jsonl"),
+      tokenizerCommand: await fakeTokenizer(root),
+      variant: "baseline",
+      workDir: join(root, "work"),
+    });
+    const [record] = result.records;
+
+    assert.ok(record.attribution);
+    assert.ok(record.attribution.toolCalls.length >= 1);
+    assert.ok(record.attribution.phaseBreakdown);
+    assert.equal(record.attribution.phaseBreakdown.reasoning, 30);
+    assert.equal(record.attribution.phaseBreakdown.output, 80);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("SDL runs poll observability snapshot and carry observabilityDelta onto the sdl record", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-obs-"));
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname.endsWith("/reindex-stream")) {
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.end('event: complete\ndata: {"ok":true,"providerFirstExecution":{"selectedPipeline":"providerFirst"}}\n\n');
+      return;
+    }
+    if (url.pathname.endsWith("/search")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ results: [{ symbolId: "s1", name: "buildCart", kind: "function", file: "src/cart.mjs", summary: "obs" }] }));
+      return;
+    }
+    if (url.pathname.endsWith("/api/observability/snapshot")) {
+      const calls = parseInt(url.searchParams.get("_c") ?? "0", 10);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        repoId: "fixture-js",
+        uptimeMs: 1000 + calls * 500,
+        retrieval: { totalRetrievals: 1 + calls, emptyResultCount: 0, avgLatencyMs: 10, p95LatencyMs: 20, byMode: {}, candidateCountPerSource: {}, phaseLatencyMs: {}, byRetrievalType: {} },
+        beam: { totalSliceBuilds: 1, avgBuildMs: 10, p95BuildMs: 20, avgAccepted: 5, avgEvicted: 0, avgRejected: 0, avgFrontierMaxSize: 5, p95FrontierMaxSize: 10, retainedExplainHandles: 0 },
+        delta: { totalBlastRadiusComputations: 0, avgBlastRadiusLatencyMs: 0, p95BlastRadiusLatencyMs: 0, avgDbRoundTripsPerChangedSymbol: 0, avgPathExplanationLatencyMs: 0, p95PathExplanationLatencyMs: 0, fallbackPathQueryCount: 0 },
+        indexing: { totalEvents: 10 + calls * 5, filesPerMinute: 60, avgPass1Ms: 100, avgPass2Ms: 50, phaseCounts: {}, perLanguageAvgMs: {}, engineDispatch: { rust: 1, ts: 0 }, failures: 0, derivedStateLagMs: null },
+        tokenEfficiency: { totalUsed: 100, totalSaved: 50 + calls * 10, savingsRatio: 0.33, avgPerCall: 10, compressionLayers: {} },
+        health: { score: 80 + calls, components: { freshness: 1, coverage: 0.8, errorRate: 0, edgeQuality: 0.9, callResolution: 0.85 }, watcherRunning: true, watcherQueueDepth: 0, watcherStale: false, watcherErrors: 0, watcherRestartCount: 0 },
+        latency: { avgMs: 50, p50Ms: 40, p95Ms: 80, p99Ms: 100, maxMs: 200, perTool: {} },
+        pool: { totalAcquired: 1, totalReleased: 1, active: 0, maxActive: 1, avgWaitMs: 0, p95WaitMs: 0, timeoutCount: 0, evictionCount: 0, writeQueueDepth: 0, writeQueueMaxDepth: 0 },
+        scip: { totalIndexes: 0, totalSymbols: 0, externalSymbols: 0, autoIngestedIndexes: 0, generatorRuns: 0, generatorFailures: 0 },
+        packed: { totalEvents: 0, totalSymbols: 0, totalFiles: 0, avgSizeBytes: 0, maxSizeBytes: 0, deduplicatedCount: 0, compressionRatio: 0 },
+        ppr: { totalRuns: 0, totalNodes: 0, totalEdges: 0, avgNodesPerRun: 0, avgDurationMs: 0, p95DurationMs: 0 },
+        resources: { rssMb: 100, heapMb: 50, heapUsedMb: 30, cpuPercent: 5, eventLoopDelayMs: 0 },
+        bottleneck: { class: "idle", confidence: 0.9, components: [] },
+        toolVolume: { totalCalls: 1 + calls, perTool: {}, perToolErrors: {}, callsPerMinute: 10 },
+        auditBuffer: { depth: 0, maxDepth: 0, droppedTotal: 0, sessionActive: false },
+        postIndexSession: { totalSessions: 0, avgSessionDurationMs: 0, activeWriteCount: 0, totalWriteOps: 0, maxWriteOps: 0 },
+        predictiveContext: { enabled: false, strategy: null, hits: 0, misses: 0, evictions: 0, hitRatePct: 0 },
+      }));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json" }).end('{"status":"ok"}');
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+
+  try {
+    const result = await runBenchmark({
+      agent: "codex",
+      matrixPath: "sdlbench/tasks/matrix.json",
+      resultsPath: join(root, "sessions.jsonl"),
+      tokenizerCommand: await fakeTokenizer(root),
+      variant: "sdl",
+      workDir: join(root, "work"),
+      sdlAuthToken: "test-token",
+      sdlHttpBaseUrl: `http://127.0.0.1:${port}`,
+    });
+
+    assert.ok(result.records.every((r) => r.artifacts.sdl?.observability));
+    const obs = result.records[0].artifacts.sdl.observability;
+    assert.ok(typeof obs.health_score === "number" || typeof obs.healthScore === "number");
+  } finally {
+    server.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("signalsForLoss returns concrete signals on negative deltaPct and none on positive", () => {
+  const lossSignals = signalsForLoss({
+    baselineTok: 100,
+    sdlTok: 150,
+    attribution: { repoSizeClass: "tiny", cachedInput: 140, total: 150 },
+    observability: {
+      retrieval_totalRetrievals: 5,
+      retrieval_emptyResultCount: 2,
+      toolVolume_totalCalls: 15,
+      indexing_totalEvents: 30,
+    },
+  });
+  assert.ok(lossSignals.length >= 3);
+  assert.ok(lossSignals.some((s) => s.signal === "lowRetrievalRecall"));
+  assert.ok(lossSignals.some((s) => s.signal === "forcedLadderOnSmallRepo"));
+  assert.ok(lossSignals.some((s) => s.signal === "coldIndexPerTask"));
+  assert.ok(lossSignals.some((s) => s.signal === "contextBallooning"));
+
+  const winSignals = signalsForLoss({
+    baselineTok: 100,
+    sdlTok: 50,
+    attribution: {},
+    observability: {},
+  });
+  assert.equal(winSignals.length, 0);
+});
+
+test("computeCoverage returns file/symbol coverage, precision, and recall", () => {
+  const coverage = computeCoverage({
+    changedFiles: ["src/cart.js", "src/discounts.js"],
+    retrievedSymbols: ["buildCart", "resolvePromo", "estimateShipping"],
+    contextTargets: {
+      files: ["src/cart.js", "src/discounts.js", "src/shipping.js"],
+      symbols: ["buildCart", "resolvePromo"],
+    },
+  });
+
+  assert.equal(coverage.fileCoverage, 66.67);
+  assert.equal(coverage.symbolCoverage, 100);
+  assert.equal(coverage.precision, 80);
+  assert.equal(coverage.recall, 80);
+  assert.deepEqual(coverage.filesFound, ["src/cart.js", "src/discounts.js"]);
+  assert.deepEqual(coverage.symbolsFound, ["buildCart", "resolvePromo"]);
+});
+
+test("computeCoverage returns null when contextTargets is absent", () => {
+  assert.equal(computeCoverage({ changedFiles: [], retrievedSymbols: [], contextTargets: null }), null);
+  assert.equal(computeCoverage({ changedFiles: [], retrievedSymbols: [], contextTargets: { files: [], symbols: [] } }), null);
+});
+
+test("warmSession reuses SDL server across tasks and only charges indexCost on first task", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-warm-"));
+  let reindexCount = 0;
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname.endsWith("/reindex-stream")) {
+      reindexCount++;
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.end('event: complete\ndata: {"ok":true,"providerFirstExecution":{"selectedPipeline":"providerFirst"}}\n\n');
+      return;
+    }
+    if (url.pathname.endsWith("/search")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ results: [{ symbolId: "s1", name: "buildCart", kind: "function", file: "src/cart.mjs", summary: "warm" }] }));
+      return;
+    }
+    if (url.pathname.endsWith("/api/observability/snapshot")) {
+      res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({
+        schemaVersion: 1, generatedAt: new Date().toISOString(), repoId: "fixture-js", uptimeMs: 500,
+        retrieval: { totalRetrievals: 1, emptyResultCount: 0, avgLatencyMs: 1, p95LatencyMs: 2, byMode: {}, candidateCountPerSource: {}, phaseLatencyMs: {}, byRetrievalType: {} },
+        beam: { totalSliceBuilds: 1, avgBuildMs: 1, p95BuildMs: 2, avgAccepted: 1, avgEvicted: 0, avgRejected: 0, avgFrontierMaxSize: 1, p95FrontierMaxSize: 1, retainedExplainHandles: 0 },
+        delta: { totalBlastRadiusComputations: 0, avgBlastRadiusLatencyMs: 0, p95BlastRadiusLatencyMs: 0, avgDbRoundTripsPerChangedSymbol: 0, avgPathExplanationLatencyMs: 0, p95PathExplanationLatencyMs: 0, fallbackPathQueryCount: 0 },
+        indexing: { totalEvents: 10, filesPerMinute: 60, avgPass1Ms: 1, avgPass2Ms: 1, phaseCounts: {}, perLanguageAvgMs: {}, engineDispatch: { rust: 1, ts: 0 }, failures: 0, derivedStateLagMs: null },
+        tokenEfficiency: { totalUsed: 100, totalSaved: 50, savingsRatio: 0.33, avgPerCall: 10, compressionLayers: {} },
+        health: { score: 80, components: { freshness: 1, coverage: 0.8, errorRate: 0, edgeQuality: 0.9, callResolution: 0.85 }, watcherRunning: true, watcherQueueDepth: 0, watcherStale: false, watcherErrors: 0, watcherRestartCount: 0 },
+        latency: { avgMs: 1, p50Ms: 1, p95Ms: 2, p99Ms: 3, maxMs: 5, perTool: {} },
+        pool: { totalAcquired: 1, totalReleased: 1, active: 0, maxActive: 1, avgWaitMs: 0, p95WaitMs: 0, timeoutCount: 0, evictionCount: 0, writeQueueDepth: 0, writeQueueMaxDepth: 0 },
+        scip: { totalIndexes: 0, totalSymbols: 0, externalSymbols: 0, autoIngestedIndexes: 0, generatorRuns: 0, generatorFailures: 0 },
+        packed: { totalEvents: 0, totalSymbols: 0, totalFiles: 0, avgSizeBytes: 0, maxSizeBytes: 0, deduplicatedCount: 0, compressionRatio: 0 },
+        ppr: { totalRuns: 0, totalNodes: 0, totalEdges: 0, avgNodesPerRun: 0, avgDurationMs: 0, p95DurationMs: 0 },
+        resources: { rssMb: 50, heapMb: 20, heapUsedMb: 10, cpuPercent: 1, eventLoopDelayMs: 0 },
+        bottleneck: { class: "idle", confidence: 0.9, components: [] },
+        toolVolume: { totalCalls: 1, perTool: {}, perToolErrors: {}, callsPerMinute: 10 },
+        auditBuffer: { depth: 0, maxDepth: 0, droppedTotal: 0, sessionActive: false },
+        postIndexSession: { totalSessions: 0, avgSessionDurationMs: 0, activeWriteCount: 0, totalWriteOps: 0, maxWriteOps: 0 },
+        predictiveContext: { enabled: false, strategy: null, hits: 0, misses: 0, evictions: 0, hitRatePct: 0 },
+      }));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json" }).end('{"status":"ok"}');
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+
+  try {
+    const result = await runBenchmark({
+      agent: "codex",
+      matrixPath: "sdlbench/tasks/matrix.json",
+      resultsPath: join(root, "sessions.jsonl"),
+      tokenizerCommand: await fakeTokenizer(root),
+      variant: "sdl",
+      workDir: join(root, "work"),
+      sdlAuthToken: "test-token",
+      sdlHttpBaseUrl: `http://127.0.0.1:${port}`,
+      warmSession: true,
+    });
+
+    assert.ok(result.records.length >= 2);
+    assert.ok(result.records.every((r) => r.warmSession === true));
+    // With warmSession, we reindex once (the first task reuses for the rest).
+    assert.ok(reindexCount <= result.records.length);
+    const firstWithIndex = result.records.find((r) => (r.tokens?.indexCost ?? 0) > 0);
+    const restWithout = result.records.filter((r) => (r.tokens?.indexCost ?? 0) === 0);
+    assert.ok(firstWithIndex || restWithout.length === result.records.length);
+  } finally {
+    server.close();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("validateTask accepts multi-turn workflow[] and runBenchmark records perTurnTokens", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-multiturn-"));
+  const matrixPath = join(root, "matrix.json");
+
+  try {
+    await writeFile(matrixPath, JSON.stringify({
+      schemaVersion: 1,
+      tasks: [{
+        schemaVersion: 1,
+        taskId: "multi-turn-incident",
+        repoId: "fixture-js",
+        category: "bug-fix",
+        prompt: "Debug a multi-step incident.",
+        repo: { sourcePath: "sdlbench/tests/fixtures/repo" },
+        context: { raw: "raw", sdl: "sdl", sdlQueries: ["buildCart"] },
+        workflow: [
+          { id: "triage", phase: "triage", goal: "Triage", prompt: "Triage the incident" },
+          { id: "investigate", phase: "investigate", goal: "Investigate", prompt: "Investigate the flow" },
+          { id: "validate", phase: "validate", goal: "Validate", prompt: "Validate the fix" }
+        ],
+        verify: { command: "node tests/discount-tax.test.mjs", timeoutMs: 10000 },
+        rubric: { maxScore: 1 },
+        solution: { files: {} }
+      }]
+    }));
+
+    const result = await runBenchmark({
+      agent: "codex",
+      matrixPath,
+      resultsPath: join(root, "sessions.jsonl"),
+      tokenizerCommand: await fakeTokenizer(root),
+      variant: "baseline",
+      workDir: join(root, "work"),
+    });
+    const [record] = result.records;
+
+    assert.equal(record.workflow.turns, 3);
+    assert.ok(Array.isArray(record.perTurnTokens));
+    assert.equal(record.perTurnTokens.length, 3);
+    assert.ok(record.perTurnTokens.every((turn) => typeof turn.tokens === "number"));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("stats: mean, stdDev, bootstrapCI, mannWhitneyU work on N>=3 samples", () => {
+  const a = [100, 120, 80];
+  const b = [50, 60, 55];
+  assert.ok(mean(a) > mean(b));
+  assert.ok(stdDev(a) > 0);
+  const ci = bootstrapCI(a);
+  assert.ok(ci.lower <= ci.mean);
+  assert.ok(ci.upper >= ci.mean);
+  const mw = mannWhitneyU(a, b);
+  assert.equal(typeof mw.u, "number");
+  assert.equal(typeof mw.pValue, "number");
+  assert.equal(typeof mw.significant, "boolean");
+});
+
+test("analyzeSessions computes deltasMean/Std/bootstrap95 when N>=3 paired repeats exist", () => {
+  const base = { agent: "codex", model: "m", quality: { errorRate: 0 }, cost: { totalUsd: 0 }, workflow: { executionMode: "fixture" }, durationMs: 0 };
+  const records = [];
+  for (let i = 0; i < 3; i++) {
+    records.push({ ...base, variant: "baseline", taskId: `t${i}`, tokens: { total: 100 + i * 10 }, quality: { passed: true } });
+    records.push({ ...base, variant: "sdl", taskId: `t${i}`, tokens: { total: 60 + i * 5 }, quality: { passed: true } });
+  }
+  const summary = analyzeSessions(records);
+  assert.ok(summary.deltas.sdl.deltasMean !== undefined);
+  assert.ok(summary.deltas.sdl.deltasStd !== undefined);
+  assert.ok(summary.deltas.sdl.bootstrap95);
+  assert.equal(typeof summary.deltas.sdl.significant, "boolean");
+});
+
+test("auditFairness measures SDL prompt injection token imbalance and recommends deduction", () => {
+  const largeContent = "Use SDL-MCP as the repository interface. ".repeat(50);
+  const result = auditFairness({
+    baselinePromptTokens: 500,
+    sdlPromptTokens: 400,
+    sdlInjectedFiles: [
+      { path: "AGENTS.md", content: largeContent },
+      { path: "SDL.md", content: largeContent },
+      { path: ".codex/hooks/force-sdl-mcp.mjs", content: largeContent },
+    ],
+    baselineInjectedFiles: [],
+  });
+
+  assert.ok(result.promptTokenImbalance > 0, `expected positive imbalance, got ${result.promptTokenImbalance}`);
+  assert.ok(result.toolBudgetImbalance > 0);
+  assert.ok(result.recommendedDeduction > 0);
+  assert.equal(result.sdlInjectedFiles.length, 3);
+  assert.ok(typeof result.netSavingsPct === "number");
+});
+
+test("extractClaudeSessionUsage reads usage records from .claude JSONL files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-claude-"));
+  const sessionDir = join(root, ".claude", "sessions");
+
+  try {
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(join(sessionDir, "session-1.jsonl"), [
+      JSON.stringify({ type: "usage", usage: { input_tokens: 500, output_tokens: 100, total_tokens: 600 } }),
+      JSON.stringify({ type: "usage", usage: { input_tokens: 300, output_tokens: 50, total_tokens: 350 } }),
+    ].join("\n"));
+
+    const usage = await extractClaudeSessionUsage({ sessionDir });
+
+    assert.equal(usage.input, 800);
+    assert.equal(usage.output, 150);
+    assert.equal(usage.total, 950);
+    assert.equal(usage.tokenizerSource, "claude-session");
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("validateClaims returns gates for smoke/efficient/realism profiles on paired data", () => {
+  const paired = [
+    { deltaPct: 60, coverage: { contextCoverage: 0.8, fileCoverage: 0.9 }, fairness: { netSavingsPct: 50 } },
+    { deltaPct: 50, coverage: { contextCoverage: 0.7, fileCoverage: 0.8 }, fairness: { netSavingsPct: 40 } },
+    { deltaPct: 35, coverage: { contextCoverage: 0.6, fileCoverage: 0.5 }, fairness: { netSavingsPct: 25 } },
+  ];
+
+  const realism = validateClaims({ paired, profile: "realism" });
+  assert.ok(realism.gates.length >= 5);
+  assert.equal(typeof realism.passed, "boolean");
+  assert.ok(realism.gates.find((g) => g.name === "p50_paired_savings"));
+
+  const smoke = validateClaims({ paired, profile: "smoke" });
+  assert.ok(smoke.passed, "smoke profile should pass with good data");
+
+  const efficient = validateClaims({ paired, profile: "efficient" });
+  assert.ok(efficient.passed, "efficient profile should pass with good data");
+
+  const badPaired = [{ deltaPct: 5, coverage: {}, fairness: {} }];
+  const badRealism = validateClaims({ paired: badPaired, profile: "realism" });
+  assert.equal(badRealism.passed, false);
+});
+
 test("analyzeSessions returns baseline deltas and imports transcript records", async () => {
   const tokenizerCommand = await fakeTokenizer(await mkdtemp(join(tmpdir(), "sdlbench-tokenizer-")));
   const imported = importTranscript({
@@ -645,13 +1198,125 @@ test("analyzeSessions returns baseline deltas and imports transcript records", a
   assert.equal(imported.tokens.tokenizerSource, "tiktoken");
 
   const summary = analyzeSessions([
-    { ...imported, variant: "baseline", tokens: { total: 100, saved: 0 }, cost: { totalUsd: 0.1 }, quality: { passed: true, errorRate: 0 } },
-    { ...imported, variant: "sdl", tokens: { total: 45, saved: 55 }, cost: { totalUsd: 0.045 }, quality: { passed: true, errorRate: 0 } },
+    { ...imported, variant: "baseline", taskId: "t1", agent: "codex", model: "m", tokens: { total: 100, saved: 0 }, cost: { totalUsd: 0.1 }, quality: { passed: true, errorRate: 0 }, workflow: { executionMode: "fixture" } },
+    { ...imported, variant: "sdl", taskId: "t1", agent: "codex", model: "m", tokens: { total: 45, saved: 0 }, cost: { totalUsd: 0.045 }, quality: { passed: true, errorRate: 0 }, workflow: { executionMode: "fixture" } },
   ]);
 
   assert.equal(summary.totals.sessions, 2);
-  assert.equal(summary.byVariant.sdl.savingsPercent, 55);
+  assert.equal(summary.byVariant.sdl.byExecutionMode.fixture.sessions, 1);
+  assert.equal(summary.paired.length, 1);
+  assert.equal(summary.paired[0].baselineTok, 100);
+  assert.equal(summary.paired[0].sdlTok, 45);
+  assert.equal(summary.paired[0].deltaTok, 55);
+  assert.equal(summary.paired[0].bothPass, true);
   assert.equal(summary.deltas.sdl.tokensSaved, 55);
+});
+
+test("analyzeSessions builds a pass-gated paired ledger that excludes failures and separates execution modes", () => {
+  const base = { agent: "codex", model: "m", quality: { errorRate: 0 }, cost: { totalUsd: 0 }, workflow: { executionMode: "fixture" }, durationMs: 0 };
+  const summary = analyzeSessions([
+    { ...base, variant: "baseline", taskId: "t1", tokens: { total: 100 }, quality: { passed: true } },
+    { ...base, variant: "sdl", taskId: "t1", tokens: { total: 60 }, quality: { passed: true } },
+    { ...base, variant: "baseline", taskId: "t2", tokens: { total: 100 }, quality: { passed: false } },
+    { ...base, variant: "sdl", taskId: "t2", tokens: { total: 70 }, quality: { passed: true } },
+    { ...base, variant: "baseline", taskId: "t3", agent: "local", model: "x", tokens: { total: 200 }, quality: { passed: true }, workflow: { executionMode: "behavior" } },
+  ]);
+
+  // Paired contains only t1 (the task where both baseline and sdl passed).
+  assert.equal(summary.paired.length, 1);
+  assert.equal(summary.paired[0].taskId, "t1");
+  assert.equal(summary.paired[0].executionMode, "fixture");
+  assert.equal(summary.paired[0].baselineTok, 100);
+  assert.equal(summary.paired[0].sdlTok, 60);
+  assert.equal(summary.paired[0].deltaTok, 40);
+  assert.equal(summary.paired[0].deltaPct, 40);
+
+  // Cross-mode sums are absent: byVariant has no mixed top-level totals, only per-mode buckets.
+  assert.equal(summary.byVariant.sdl.byExecutionMode.fixture.tokens, 130);
+  assert.equal(summary.byVariant.baseline.byExecutionMode.behavior.tokens, 200);
+  assert.equal(summary.byVariant.sdl.tokens, undefined);
+  assert.equal(summary.byVariant.sdl.mixedFixtureBehavior, undefined);
+
+  // deltas computed from paired only (t1 delta = 40).
+  assert.equal(summary.deltas.sdl.tokensSaved, 40);
+  assert.equal(summary.deltas.sdl.pairedCount, 1);
+
+  assert.match(summary.headlineClaim, /median paired savings on tasks both solved/);
+});
+
+test("estimateCost splits cached-input and reasoning pricing without double counting", () => {
+  const cost = estimateCost(
+    { input: 1000, output: 200, productContext: 0, cachedInput: 800, reasoningOutput: 100 },
+    {
+      model: "gpt-5.5",
+      encoding: "o200k_base",
+      inputPerMTok: 10,
+      outputPerMTok: 10,
+      contextPerMTok: 0,
+      cachedInputPerMTok: 5,
+      reasoningOutputPerMTok: 15,
+    }
+  );
+
+  assert.equal(cost.inputUsd, 0.01);
+  assert.equal(cost.outputUsd, 0.002);
+  assert.equal(cost.cachedInputUsd, 0.004);
+  assert.equal(cost.uncachedInputUsd, 0.002);
+  assert.equal(cost.reasoningOutputUsd, 0.0015);
+  assert.equal(cost.nonReasoningOutputUsd, 0.001);
+  assert.ok(cost.cachedInputUsd < cost.inputUsd / 2);
+  const effective = cost.cachedInputUsd + cost.uncachedInputUsd + cost.nonReasoningOutputUsd + cost.reasoningOutputUsd + cost.contextUsd;
+  assert.equal(cost.totalUsd, effective);
+  assert.ok(cost.totalUsd < cost.inputUsd + cost.outputUsd);
+});
+
+test("estimateCost falls back to full rates when split rates are absent", () => {
+  const cost = estimateCost(
+    { input: 1000, output: 200, cachedInput: 900, reasoningOutput: 100 },
+    { model: "gpt-5.5", encoding: "o200k_base", inputPerMTok: 5, outputPerMTok: 30, contextPerMTok: 0 }
+  );
+  assert.equal(cost.cachedInputUsd, 900 / 1_000_000 * 5);
+  assert.equal(cost.totalUsd, cost.inputUsd + cost.outputUsd + cost.contextUsd);
+});
+
+test("pricing.json exposes Neuralwatt rates for glm-5.2 and kimi-k2.7-code with split lines", async () => {
+  const pricing = JSON.parse(await readFile("sdlbench/config/pricing.json", "utf8"));
+  // Scaled to keep split-out lines well inside round4 precision (4 dp).
+  const tokens = { input: 1_000_000, output: 200_000, cachedInput: 900_000, reasoningOutput: 100_000 };
+
+  const glmCost = estimateCost(tokens, { ...pricing.models["glm-5.2"], model: "glm-5.2", pricingSource: "model" });
+  assert.equal(glmCost.pricingModel, "glm-5.2");
+  assert.equal(glmCost.inputUsd, 1.45);
+  assert.equal(glmCost.outputUsd, 0.9);
+  assert.equal(glmCost.cachedInputUsd, 0.324);
+  assert.equal(glmCost.reasoningOutputUsd, 0.45);
+  assert.ok(glmCost.cachedInputUsd < glmCost.inputUsd / 2);
+
+  const kimiCost = estimateCost(tokens, { ...pricing.models["kimi-k2.7-code"], model: "kimi-k2.7-code", pricingSource: "model" });
+  assert.equal(kimiCost.pricingModel, "kimi-k2.7-code");
+  assert.equal(kimiCost.inputUsd, 0.95);
+  assert.equal(kimiCost.outputUsd, 0.8);
+  assert.equal(kimiCost.cachedInputUsd, 0.216);
+  assert.equal(kimiCost.reasoningOutputUsd, 0.4);
+  assert.ok(kimiCost.cachedInputUsd < kimiCost.inputUsd / 2);
+});
+
+test("buildChartModel exposes paired deltas, execution modes, and mixed-mode warnings", () => {
+  const records = parseJsonl(`
+{"variant":"baseline","taskId":"t1","agent":"codex","model":"m","durationMs":1000,"tokens":{"total":100},"cost":{"totalUsd":0.1},"quality":{"passed":true},"workflow":{"executionMode":"fixture"},"claimGrade":"none"}
+{"variant":"sdl","taskId":"t1","agent":"codex","model":"m","durationMs":900,"tokens":{"total":40},"cost":{"totalUsd":0.04},"quality":{"passed":true},"workflow":{"executionMode":"fixture"},"claimGrade":"none"}
+{"variant":"baseline","taskId":"t2","agent":"codex","model":"m","durationMs":800,"tokens":{"total":300},"cost":{"totalUsd":0.2},"quality":{"passed":true},"workflow":{"executionMode":"behavior"},"claimGrade":"primary"}
+{"variant":"sdl","taskId":"t2","agent":"codex","model":"m","durationMs":700,"tokens":{"total":120},"cost":{"totalUsd":0.08},"quality":{"passed":true},"workflow":{"executionMode":"behavior"},"claimGrade":"primary"}
+`);
+  const model = buildChartModel(records);
+
+  assert.ok(model.executionModes.includes("fixture"));
+  assert.ok(model.executionModes.includes("behavior"));
+  assert.equal(model.pairedDeltas.length, 2);
+  const behaviorPair = model.pairedDeltas.find((pair) => pair.executionMode === "behavior");
+  assert.equal(behaviorPair.deltaTok, 180);
+  assert.equal(behaviorPair.deltaPct, 60);
+  assert.ok(model.warnings.includes("mixed fixture and behavior sessions"));
 });
 
 test("viewer parses loaded JSONL and exposes token, time, and correctness metrics", () => {
@@ -675,6 +1340,126 @@ test("viewer filters stay reusable and bar charts have room", async () => {
   ]);
 
   assert.match(appSource, /variantFilter\.onchange/);
+  assert.match(appSource, /modeFilter\.onchange/);
   assert.doesNotMatch(appSource, /once:\s*true/);
   assert.match(html, /token-chart" viewBox="0 0 900 270"/);
+  assert.match(html, /id="execution-mode-filter"/);
+  assert.match(html, /id="paired-chart"/);
+  assert.match(html, /id="warning-banner"/);
+  assert.match(html, /id="load-sidecars"/);
+});
+
+test("serveViewer lists sidecar jsonl files and serves them", async () => {
+  const resultsRoot = await mkdtemp(join(tmpdir(), "sdlbench-serve-"));
+  const resultsPath = join(resultsRoot, "sessions.jsonl");
+  await writeFile(resultsPath, '{"variant":"baseline","taskId":"t1","quality":{"passed":true}}\n');
+  await writeFile(join(resultsRoot, "behavior-1.jsonl"), '{"variant":"sdl","taskId":"t1","quality":{"passed":true}}\n');
+
+  const { port, close } = await serveViewer({ port: 0, resultsPath });
+  try {
+    const listRes = await fetch(`http://127.0.0.1:${port}/results/list.json`);
+    assert.ok(listRes.ok);
+    const list = await listRes.json();
+    assert.ok(list.files.includes("sessions.jsonl"));
+    assert.ok(list.files.includes("behavior-1.jsonl"));
+
+    const sidecarRes = await fetch(`http://127.0.0.1:${port}/results/behavior-1.jsonl`);
+    assert.ok(sidecarRes.ok);
+    const sidecarText = await sidecarRes.text();
+    assert.match(sidecarText, /sdl/);
+  } finally {
+    await close();
+    await rm(resultsRoot, { force: true, recursive: true });
+  }
+});
+
+test("fixture records carry claimGrade=none and zeroed savings after schema v2", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-claim-fixture-"));
+
+  try {
+    const result = await runBenchmark({
+      agent: "codex",
+      matrixPath: "sdlbench/tasks/matrix.json",
+      resultsPath: join(root, "sessions.jsonl"),
+      tokenizerCommand: await fakeTokenizer(root),
+      variant: "sdl",
+      workDir: join(root, "work"),
+    });
+
+    assert.ok(result.records.every((record) => record.schemaVersion === 2));
+    assert.ok(result.records.every((record) => record.claimGrade === "none"));
+    assert.ok(result.records.every((record) => record.tokens.saved === 0));
+    assert.ok(result.records.every((record) => record.tokens.savingsPercent === 0));
+    assert.ok(result.records.every((record) => record.tokens.rawEquivalent === record.tokens.total));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("behavior records carry claimGrade=primary when codex session counts are present", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-claim-behavior-"));
+  const repo = join(root, "repo");
+  const matrixPath = join(root, "matrix.json");
+  const agentPath = join(root, "agent.mjs");
+  const codexSessionsDir = join(root, "codex-sessions");
+  const dayDir = join(codexSessionsDir, "2026", "06", "26");
+
+  try {
+    await mkdir(dayDir, { recursive: true });
+    await mkdir(join(repo, "src"), { recursive: true });
+    await mkdir(join(repo, "tests"), { recursive: true });
+    await writeFile(join(repo, "package.json"), "{\"type\":\"module\"}\n");
+    await writeFile(join(repo, "src", "value.js"), "export const value = \"broken\";\n");
+    await writeFile(join(repo, "tests", "value.test.mjs"), `
+      import assert from "node:assert/strict";
+      import { value } from "../src/value.js";
+      assert.equal(value, "claim-primary");
+    `);
+    await writeFile(matrixPath, JSON.stringify({
+      schemaVersion: 1,
+      tasks: [{
+        schemaVersion: 1,
+        taskId: "claim-primary-behavior",
+        repoId: "claim-behavior",
+        category: "bug-fix",
+        prompt: "Make value export claim-primary.",
+        repo: { sourcePath: repo },
+        context: { raw: "tiny raw context", sdl: "tiny sdl context" },
+        verify: { command: "node tests/value.test.mjs", timeoutMs: 10000 },
+        rubric: { maxScore: 1 },
+        solution: { files: { "src/value.js": "export const value = \"canned\";\n" } }
+      }]
+    }));
+    await writeFile(agentPath, `
+      import { mkdirSync, writeFileSync } from "node:fs";
+      import { join } from "node:path";
+      const repo = process.argv[process.argv.indexOf("--repo") + 1];
+      const sessions = process.argv[process.argv.indexOf("--sessions") + 1];
+      mkdirSync(sessions, { recursive: true });
+      writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"claim-primary\\\";\\n");
+      writeFileSync(join(sessions, "rollout-claim.jsonl"), [
+        JSON.stringify({ timestamp: "2026-06-26T00:00:00.000Z", type: "session_meta", payload: { session_id: "claim-session", cwd: repo, source: "exec", cli_version: "0.test" } }),
+        JSON.stringify({ timestamp: "2026-06-26T00:00:01.000Z", type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 1234, cached_input_tokens: 900, output_tokens: 456, reasoning_output_tokens: 123, total_tokens: 1690 }, model_context_window: 258400 } } })
+      ].join("\\n") + "\\n");
+    `);
+
+    const result = await runBenchmark({
+      agent: "local",
+      agentCommand: `node ${JSON.stringify(agentPath)} --repo {repo} --sessions ${JSON.stringify(dayDir)}`,
+      codexSessionsDir,
+      executionMode: "behavior",
+      matrixPath,
+      resultsPath: join(root, "sessions.jsonl"),
+      tokenizerCommand: await fakeTokenizer(root),
+      variant: "baseline",
+      workDir: join(root, "work"),
+    });
+    const [record] = result.records;
+
+    assert.equal(record.schemaVersion, 2);
+    assert.equal(record.claimGrade, "primary");
+    assert.equal(record.tokens.tokenizerSource, "codex-session");
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
 });

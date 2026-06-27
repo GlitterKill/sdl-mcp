@@ -6,6 +6,8 @@
     "encoding": "o200k_base",
     "inputPerMTok": 5,
     "outputPerMTok": 30,
+    "cachedInputPerMTok": 2.5,
+    "reasoningOutputPerMTok": 30,
     "contextPerMTok": 0
   },
   "models": {
@@ -13,6 +15,24 @@
       "encoding": "o200k_base",
       "inputPerMTok": 5,
       "outputPerMTok": 30,
+      "cachedInputPerMTok": 2.5,
+      "reasoningOutputPerMTok": 30,
+      "contextPerMTok": 0
+    },
+    "glm-5.2": {
+      "encoding": "o200k_base",
+      "inputPerMTok": 1.45,
+      "outputPerMTok": 4.5,
+      "cachedInputPerMTok": 0.36,
+      "reasoningOutputPerMTok": 4.5,
+      "contextPerMTok": 0
+    },
+    "kimi-k2.7-code": {
+      "encoding": "o200k_base",
+      "inputPerMTok": 0.95,
+      "outputPerMTok": 4,
+      "cachedInputPerMTok": 0.24,
+      "reasoningOutputPerMTok": 4,
       "contextPerMTok": 0
     }
   }
