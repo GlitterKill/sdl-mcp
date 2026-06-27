@@ -1,5 +1,10 @@
 # Benchmark Claim Policy
 
+> **Behavior-mode claims belong in `sdlbench/docs/claims.md`.** This document
+> covers the real-world workflow benchmark matrix only. SDLBench behavior-mode
+> paired claims (schema v2, pass-gated `paired[]` deltas, `claimGrade`)
+> are governed by `sdlbench/docs/claims.md` and validated via `sdlbench claims`.
+
 This document defines what SDL-MCP token-reduction claims are currently supported.
 
 ## Approved Claim Language

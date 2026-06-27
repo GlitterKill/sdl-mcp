@@ -91,13 +91,23 @@ button:hover { border-color: var(--win); color: var(--win); }
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   margin: 14px 0;
 }
 .stats div { padding: 18px; border-right: 1px solid rgba(35, 215, 255, 0.16); }
 .stats div:last-child { border-right: 0; }
-.stats span { display: block; font-size: clamp(24px, 4vw, 44px); color: var(--win); }
+.stats span { display: block; font-size: clamp(20px, 3.4vw, 40px); color: var(--win); }
 .stats small { color: var(--muted); text-transform: uppercase; }
+
+.warnings { margin: 14px 0; }
+.warning-banner { padding: 0; background: transparent; border: 0; }
+.warning-banner.has-warnings {
+  padding: 12px 16px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  border: 1px solid rgba(255, 59, 145, 0.55);
+  box-shadow: 0 0 0 1px rgba(255, 59, 145, 0.08), 0 14px 38px rgba(0, 0, 0, 0.22);
+}
+.warning-banner p { margin: 4px 0; color: var(--warn); font-size: 13px; }
 
 .grid {
   display: grid;

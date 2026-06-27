@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "tasks": [
+    {
+      "schemaVersion": 1,
+      "taskId": "moshi-json-adapter-factory-fix",
+      "repoId": "moshi",
+      "category": "bug-fix",
+      "prompt": "Fix JsonAdapterFactory.create so it returns a non-null adapter for unknown types instead of crashing with NullPointerException. Preserve the existing adapter delegation flow for primitives.",
+      "repo": {
+        "sourcePath": "sdlbench/.work/repos/moshi"
+      },
+      "context": {
+        "raw": "Moshi's JsonAdapterFactory.create delegates to adapters for each type. The factory at moshi/src/main/java/com/squareup/moshi/JsonAdapterFactory.kt currently throws NPE when the type is not in the registry. The fix should return a null/empty adapter gracefully. Tests at moshi/src/test/java/com/squareup/moshi/JsonAdapterFactoryTest.kt verify type resolution.",
+        "sdl": "Symbol JsonAdapterFactory.create: returns adapter or null. Check type registry lookup and fallback path.",
+        "sdlQueries": ["JsonAdapterFactory", "create"]
+      },
+      "verify": {
+        "command": "./gradlew :moshi:test --tests JsonAdapterFactoryTest --no-daemon",
+        "timeoutMs": 300000
+      },
+      "rubric": {
+        "maxScore": 1
+      },
+      "solution": {
+        "files": {}
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "taskId": "moshi-standard-json-adapters-npe",
+      "repoId": "moshi",
+      "category": "bug-fix",
+      "prompt": "Resolve NullPointerException in StandardJsonAdapters when serializing a Kotlin data class with a nullable List field that holds a null element. The adapter should filter nulls or use JsonAdapter.nonNullValue() appropriately.",
+      "repo": {
+        "sourcePath": "sdlbench/.work/repos/moshi"
+      },
+      "context": {
+        "raw": "StandardJsonAdapters handles built-in type adapters. When a data class has a nullable List<String> containing null elements, the ListJsonAdapter throws NPE during toJson. The fix allows nullable elements or uses filterNotNull. Tests at StandardJsonAdaptersTest verify null handling.",
+        "sdl": "Hot path: StandardJsonAdapters.listAdapter -> ListJsonAdapter.toJson encounters null element. Add null-safe element handling.",
+        "sdlQueries": ["StandardJsonAdapters", "listAdapter", "ListJsonAdapter"]
+      },
+      "verify": {
+        "command": "./gradlew :moshi:test --tests StandardJsonAdaptersTest --no-daemon",
+        "timeoutMs": 300000
+      },
+      "rubric": {
+        "maxScore": 1
+      },
+      "solution": {
+        "files": {}
+      }
+    }
+  ]
+}

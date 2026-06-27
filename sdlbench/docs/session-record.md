@@ -2,6 +2,19 @@
 
 Each line in `sdlbench/results/sessions.jsonl` is one session record.
 
+> **Schema v2 (current).** Records now carry a top-level `claimGrade` field and
+> the tiktoken (fixture / prompt-estimate) path no longer reports synthetic
+> `tokens.saved`. Under v1, fixture-mode SDL records advertised a `saved` value
+> derived from a hand-written `context.raw` line (`saved = rawEquivalent - total`),
+> which is a tautology — it is not a measured agent-session saving. v2 forces
+> `saved = 0`, `savingsPercent = 0`, and `rawEquivalent = total` for every
+> tiktoken-path record (fixture, behavior prompt-estimates, and imports). Only
+> behavior-mode records backed by Codex session `token_count` totals can claim
+> savings, and even those report `saved = 0` until paired against a baseline in
+> `analyzeSessions` (`paired[].deltaPct`). Migrate v1 fixture summaries by
+> re-running `sdlbench analyze`; do not trust v1 `byVariant.sdl.saved`/
+> `savingsPercent`/`deltas.sdl.tokensSaved` from fixture-only runs.
+
 Required top-level fields:
 
 - `schemaVersion`, `runId`, `sessionId`, `timestamp`

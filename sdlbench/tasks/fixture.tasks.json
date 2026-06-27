@@ -18,6 +18,10 @@
           "resolvePromo"
         ]
       },
+      "contextTargets": {
+        "files": ["src/cart.js"],
+        "symbols": ["buildCart", "resolvePromo"]
+      },
       "verify": {
         "command": "node tests/discount-tax.test.mjs",
         "timeoutMs": 10000

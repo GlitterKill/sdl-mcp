@@ -1,4 +1,19 @@
 {
-  "schemaVersion": 1,
-  "taskFiles": ["fixture.tasks.json"]
+  "schemaVersion": 2,
+  "runs": [
+    {
+      "id": "fixture-js-tiny",
+      "family": "bug-fix",
+      "repoId": "fixture-js",
+      "tasks": "fixture.tasks.json",
+      "sizeClass": "tiny"
+    },
+    {
+      "id": "moshi-small",
+      "family": "bug-fix",
+      "repoId": "moshi",
+      "tasks": "moshi.tasks.json",
+      "sizeClass": "small"
+    }
+  ]
 }

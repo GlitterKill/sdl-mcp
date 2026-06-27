@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "tasks": [
+    {
+      "schemaVersion": 1,
+      "taskId": "incident-slice-timeout",
+      "repoId": "fixture-js",
+      "category": "bug-fix",
+      "prompt": "Debug an intermittent slice timeout incident. Triage the codebase, investigate the failure path, and validate the fix.",
+      "repo": { "sourcePath": "sdlbench/tests/fixtures/repo" },
+      "context": {
+        "raw": "The checkout fixture repo has src/cart.js (cart building), src/discounts.js (promo/discount logic), src/shipping.js (shipping estimation), src/orders.js (order placement), src/audit.js (audit output), and src/catalog.js (product lookup). An intermittent timeout appears when orders are placed with large carts and multiple discounts. Investigate the cart construction and order placement flow.",
+        "sdl": "Slice: cart.buildCart -> discounts.resolvePromo -> orders.placeOrder. Investigate tax calculation and order serialization paths for timeout under load.",
+        "sdlQueries": ["buildCart", "placeOrder", "resolvePromo"]
+      },
+      "workflow": [
+        {
+          "id": "incident-slice-timeout-triage",
+          "phase": "triage",
+          "goal": "Localize the highest-impact code paths quickly.",
+          "prompt": "Triage: identify the primary modules and likely risk hotspots for the timeout."
+        },
+        {
+          "id": "incident-slice-timeout-investigate",
+          "phase": "investigate",
+          "goal": "Trace control/data flow across the relevant components.",
+          "prompt": "Investigate: follow the cart-to-order flow and find the likely failure point."
+        },
+        {
+          "id": "incident-slice-timeout-validate",
+          "phase": "validate",
+          "goal": "Define verification criteria and regression checks.",
+          "prompt": "Validate: list the tests and checks that prove the timeout is resolved."
+        }
+      ],
+      "verify": {
+        "command": "node tests/discount-tax.test.mjs",
+        "timeoutMs": 10000
+      },
+      "rubric": { "maxScore": 1 },
+      "solution": { "files": { "src/cart.js": "import { getProduct } from \"./catalog.js\";\nimport { customerAdjustment, resolvePromo } from \"./discounts.js\";\nimport { formatMoney } from \"./money.js\";\n\nconst TAX_RATE = 0.0825;\n\nexport function buildCart(lines, options = {}) {\n  const entries = lines.map((line) => {\n    const product = getProduct(line.sku);\n    return {\n      sku: product.sku,\n      name: product.name,\n      quantity: line.quantity,\n      unitPriceCents: product.priceCents,\n      lineTotalCents: product.priceCents * line.quantity\n    };\n  });\n  const subtotalCents = entries.reduce((sum, entry) => sum + entry.lineTotalCents, 0);\n  const promo = resolvePromo(options.promoCode, subtotalCents);\n  const customerDiscount = customerAdjustment(options.customer, subtotalCents);\n  const discounts = [promo, customerDiscount].filter((discount) => discount.amountCents > 0);\n  const discountCents = discounts.reduce((sum, discount) => sum + discount.amountCents, 0);\n  const taxableCents = Math.max(0, subtotalCents - discountCents);\n  const taxCents = Math.round(taxableCents * TAX_RATE);\n  const totalCents = subtotalCents - discountCents + taxCents;\n  return { entries, subtotalCents, discounts, discountCents, taxCents, totalCents };\n}\n\nexport function summarizeCart(cart) {\n  return {\n    itemCount: cart.entries.reduce((sum, entry) => sum + entry.quantity, 0),\n    subtotal: formatMoney(cart.subtotalCents),\n    discounts: formatMoney(cart.discountCents),\n    tax: formatMoney(cart.taxCents),\n    total: formatMoney(cart.totalCents)\n  };\n}\n" } }
+    },
+    {
+      "schemaVersion": 1,
+      "taskId": "incident-order-audit-hardening",
+      "repoId": "fixture-js",
+      "category": "security",
+      "prompt": "Harden order placement and audit output against token exposure and mutation. Investigate the security boundary, then validate.",
+      "repo": { "sourcePath": "sdlbench/tests/fixtures/repo" },
+      "context": {
+        "raw": "src/orders.js places in-memory orders and src/audit.js serializes them. Security review found raw payment token storage and mutable listOrders.",
+        "sdl": "Hot path: orders.placeOrder stores paymentToken; audit.auditOrder prints it. Replace with fingerprint and defensive copies.",
+        "sdlQueries": ["placeOrder", "listOrders", "auditOrder"]
+      },
+      "workflow": [
+        {
+          "id": "incident-order-audit-triage",
+          "phase": "triage",
+          "goal": "Identify security risks in the order/audit flow.",
+          "prompt": "Triage: list the security risks in order placement and audit output."
+        },
+        {
+          "id": "incident-order-audit-fix",
+          "phase": "investigate",
+          "goal": "Trace the token exposure path end to end.",
+          "prompt": "Investigate: trace how the payment token flows from placeOrder to auditOrder."
+        }
+      ],
+      "verify": {
+        "command": "node tests/order-audit.test.mjs",
+        "timeoutMs": 10000
+      },
+      "rubric": { "maxScore": 1 },
+      "solution": { "files": {} }
+    }
+  ]
+}
