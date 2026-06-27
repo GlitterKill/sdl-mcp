@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.13] - 2026-06-27
+
+### Added
+
+- **SDLBench**: Added the OpenCode agent integration, sterile runtime dispatch path, session token extraction, product lock entry, Neuralwatt pricing, and the P1/P2 proof surfaces.
+
+### Changed
+
+- **Provider-first indexing**: Honored the stable DB writes flag during native pass1 serialization.
+- **SDLBench**: Added OpenCode + GLM-5.2 validating run data and refreshed OpenCode documentation.
+
+### Fixed
+
+- **Server shutdown and startup**: Handled broken stdio pipes during shutdown and hardened startup DB cleanup plus FTS bootstrap.
+- **Provider-first validation**: Fixed coverage-scan fallback behavior, Moshi real targets, and import retry handling.
+- **SDLBench**: Fixed scaling runner aggregation, CLI root argument handling, sample-run coverage, OpenCode runtime/parser handling, and OpenCode CLI command templating.
+
+_18 commits from 1 contributor_
+
 ## [0.11.12] - 2026-06-26
 
 ### Changed
