@@ -23,6 +23,7 @@ import { mean, stdDev, bootstrapCI, mannWhitneyU } from "../src/stats.mjs";
 import { auditFairness } from "../src/fairness.mjs";
 import { validateClaims } from "../src/claim-gates.mjs";
 import { extractClaudeSessionUsage } from "../src/agents/claude.mjs";
+import { extractOpencodeSessionUsage } from "../src/agents/opencode.mjs";
 
 async function fakeTokenizer(root) {
   const path = join(root, "fake-tokenizer.mjs");
@@ -1155,6 +1156,85 @@ test("extractClaudeSessionUsage reads usage records from .claude JSONL files", a
     assert.equal(usage.output, 150);
     assert.equal(usage.total, 950);
     assert.equal(usage.tokenizerSource, "claude-session");
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("extractOpencodeSessionUsage sums usage records across fragmented session storage", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-opencode-usage-"));
+  const storageDir = join(root, "storage");
+  // opencode writes fragmented storage:
+  //   storage/session/<sid>/info.json
+  //   storage/session/<sid>/message/<mid>/index.json
+  //   storage/message/<mid>/part/<pid>.json  (assistant parts carry usage)
+  const sessionDir = join(storageDir, "session", "ses_test1");
+  await mkdir(join(sessionDir, "message", "msg_test1"), { recursive: true });
+  await mkdir(join(storageDir, "message", "msg_test1", "part"), { recursive: true });
+
+  await writeFile(join(sessionDir, "info.json"), JSON.stringify({
+    cwd: "/tmp/fake-run",
+    modelID: "neuralwatt/glm-5.2",
+    title: "sdlbench benchmark run",
+  }));
+  await writeFile(join(sessionDir, "message", "msg_test1", "index.json"), JSON.stringify({
+    role: "assistant",
+    sessionId: "ses_test1",
+  }));
+  await writeFile(join(storageDir, "message", "msg_test1", "part", "p1.json"), JSON.stringify({
+    type: "assistant",
+    model: "neuralwatt/glm-5.2",
+    usage: {
+      inputTokens: 1000,
+      outputTokens: 200,
+      reasoningTokens: 50,
+      cacheReadInputTokens: 800,
+      cacheWriteInputTokens: 100,
+      totalTokens: 2050,
+    },
+  }));
+  await writeFile(join(storageDir, "message", "msg_test1", "part", "p2.json"), JSON.stringify({
+    type: "assistant",
+    usage: {
+      inputTokens: 1500,
+      outputTokens: 300,
+      reasoningTokens: 75,
+      cacheReadInputTokens: 1200,
+      cacheWriteInputTokens: 0,
+      totalTokens: 3075,
+    },
+  }));
+  // Non-usage part (should be ignored).
+  await writeFile(join(storageDir, "message", "msg_test1", "part", "p3.txt"), "not a json usage record");
+
+  try {
+    const usage = await extractOpencodeSessionUsage({ storageDir });
+    assert.equal(usage.input, 2500);
+    assert.equal(usage.output, 500);
+    assert.equal(usage.total, 5125);
+    assert.equal(usage.reasoningOutput, 125);
+    assert.equal(usage.cachedInput, 2000);
+    assert.equal(usage.cachedWriteInput, 100);
+    assert.equal(usage.tokenizerSource, "opencode-session");
+    assert.ok(usage.sessionFiles.length >= 1, "sessionFiles should list files with usage records");
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("extractOpencodeSessionUsage returns zero totals when no usage records are found", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-opencode-empty-"));
+  const storageDir = join(root, "storage");
+  await mkdir(join(storageDir, "session", "ses_empty"), { recursive: true });
+  await writeFile(join(storageDir, "session", "ses_empty", "info.json"), JSON.stringify({ cwd: "/nope" }));
+
+  try {
+    const usage = await extractOpencodeSessionUsage({ storageDir });
+    assert.equal(usage.input, 0);
+    assert.equal(usage.output, 0);
+    assert.equal(usage.total, 0);
+    assert.equal(usage.tokenizerSource, "opencode-session");
+    assert.equal(usage.sessionFiles.length, 0);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
