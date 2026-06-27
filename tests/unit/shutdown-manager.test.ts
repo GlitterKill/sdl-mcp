@@ -191,6 +191,32 @@ describe("main.ts shutdown wiring", () => {
     );
   });
 
+  it("registers DB cleanup before opening LadybugDB", () => {
+    const source = readFileSync(join(process.cwd(), "src", "main.ts"), "utf8");
+    const initIndex = source.indexOf("await initGraphDb(");
+    const cleanupIndex = source.indexOf(
+      'shutdownMgr.addCleanup("db", () => closeLadybugDb())',
+    );
+    const signalsIndex = source.indexOf("shutdownMgr.registerSignals()");
+    const stdinIndex = source.indexOf("shutdownMgr.monitorStdin()");
+
+    assert.ok(cleanupIndex >= 0, "main.ts should register DB cleanup");
+    assert.ok(signalsIndex >= 0, "main.ts should register signal handlers");
+    assert.ok(stdinIndex >= 0, "main.ts should monitor stdin");
+    assert.ok(cleanupIndex < initIndex, "DB cleanup must precede DB init");
+    assert.ok(signalsIndex < initIndex, "signals must precede DB init");
+    assert.ok(stdinIndex < initIndex, "stdin monitoring must precede DB init");
+  });
+
+  it("closes LadybugDB when startup fails after DB init", () => {
+    const source = readFileSync(join(process.cwd(), "src", "main.ts"), "utf8");
+    const closeIndex = source.indexOf("await closeDbAfterStartupFailure()");
+    const exitIndex = source.indexOf("process.exit(1)", closeIndex);
+
+    assert.ok(closeIndex >= 0, "startup catch should close DB");
+    assert.ok(closeIndex < exitIndex, "DB close must happen before exit");
+  });
+
   it("unrefs cleanup interval so it cannot keep process alive", () => {
     const source = readFileSync(join(process.cwd(), "src", "main.ts"), "utf8");
 
@@ -253,5 +279,37 @@ describe("serve.ts shutdown wiring", () => {
       stdioBlock,
       "stdin monitoring must be gated on options.transport === 'stdio'",
     );
+  });
+
+  it("registers stdio shutdown before opening LadybugDB", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src", "cli", "commands", "serve.ts"),
+      "utf8",
+    );
+    const initIndex = source.indexOf("await initGraphDb(");
+    const cleanupIndex = source.indexOf(
+      'shutdownMgr.addCleanup("db", () => closeLadybugDb())',
+    );
+    const signalsIndex = source.indexOf("shutdownMgr.registerSignals()");
+    const stdinIndex = source.indexOf("shutdownMgr.monitorStdin()");
+
+    assert.ok(cleanupIndex >= 0, "serve.ts should register DB cleanup");
+    assert.ok(signalsIndex >= 0, "serve.ts should register signal handlers");
+    assert.ok(stdinIndex >= 0, "serve.ts should monitor stdin");
+    assert.ok(cleanupIndex < initIndex, "DB cleanup must precede DB init");
+    assert.ok(signalsIndex < initIndex, "signals must precede DB init");
+    assert.ok(stdinIndex < initIndex, "stdin monitoring must precede DB init");
+  });
+
+  it("closes LadybugDB when serve startup fails after DB init", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src", "cli", "commands", "serve.ts"),
+      "utf8",
+    );
+    const closeIndex = source.indexOf("await closeDbAfterStartupFailure()");
+    const exitIndex = source.indexOf("process.exit(1)", closeIndex);
+
+    assert.ok(closeIndex >= 0, "startup catch should close DB");
+    assert.ok(closeIndex < exitIndex, "DB close must happen before exit");
   });
 });

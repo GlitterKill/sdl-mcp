@@ -56,13 +56,60 @@ if (!getLogFilePath()) {
 
 const log = (msg: string) => process.stderr.write(`[sdl-mcp] ${msg}\n`);
 
+async function closeDbAfterStartupFailure(): Promise<void> {
+  try {
+    await closeLadybugDb();
+  } catch (error) {
+    log(
+      `LadybugDB cleanup after startup failure failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
   const server = new MCPServer();
   const watchers: Array<{ close: () => Promise<void> }> = [];
+  let cleanupInterval: NodeJS.Timeout | undefined;
   let watcherStartTimer: NodeJS.Timeout | undefined;
+  let idleMonitor: IdleMonitor | undefined;
   const shutdownMgr = new ShutdownManager({ log });
   const uninstallProcessHandlers = installProcessHandlers(shutdownMgr);
   shutdownMgr.addCleanup("processHandlers", uninstallProcessHandlers);
+  shutdownMgr.addCleanup("cleanupInterval", () => {
+    if (cleanupInterval) clearInterval(cleanupInterval);
+  });
+  shutdownMgr.addCleanup("watcherStartTimer", () => {
+    if (watcherStartTimer) clearTimeout(watcherStartTimer);
+  });
+  shutdownMgr.addCleanup("idleMonitor", () => {
+    idleMonitor?.stop();
+  });
+  shutdownMgr.addCleanup("server", () => server.stop());
+  shutdownMgr.addCleanup("persistUsage", async () => {
+    try {
+      if (tokenAccumulator.hasUsage) {
+        await persistUsageSnapshot(tokenAccumulator.getSnapshot());
+      }
+    } catch {
+      // Non-critical — don't block shutdown.
+    }
+  });
+  shutdownMgr.addCleanup("scorerPool", () => resetScorerPool());
+  shutdownMgr.addCleanup("watchers", async () => {
+    for (const watcher of watchers) {
+      try {
+        await watcher.close();
+      } catch (error) {
+        process.stderr.write(
+          `[sdl-mcp] Watcher close error during shutdown: ${error}\n`,
+        );
+      }
+    }
+  });
+  shutdownMgr.addCleanup("db", () => closeLadybugDb());
+  shutdownMgr.addCleanup("logger", () => shutdownLogger());
 
   // Hoisted so the catch handler can clean up if startup fails after the pidfile is claimed.
   let pidfilePath: string | undefined;
@@ -85,6 +132,9 @@ async function main(): Promise<void> {
     shutdownMgr.setPidfilePath(pidfilePath);
     log(`PID file written: ${pidfilePath}`);
 
+    shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP
+    shutdownMgr.monitorStdin();
+
     await initGraphDb(config, resolvedConfigPath);
     log(`Graph database initialized at ${graphDbPath}`);
 
@@ -102,7 +152,7 @@ async function main(): Promise<void> {
       maxDraftFiles: config.liveIndex?.maxDraftFiles,
     });
     const liveIndex = getDefaultLiveIndexCoordinator();
-    const idleMonitor = new IdleMonitor({
+    idleMonitor = new IdleMonitor({
       overlayStore: getDefaultOverlayStore(),
       checkpointRepo: (request) => liveIndex.checkpointRepo(request),
       intervalMs: DEFAULT_IDLE_CHECKPOINT_INTERVAL_MS,
@@ -161,7 +211,7 @@ async function main(): Promise<void> {
 
     log("Starting slice handle cleanup scheduler (interval: 1 hour)...");
     const { cleanupExpiredSliceHandles } = await import("./mcp/tools/slice.js");
-    const cleanupInterval = setInterval(() => {
+    cleanupInterval = setInterval(() => {
       try {
         void Promise.resolve(cleanupExpiredSliceHandles())
           .then((deleted: number) => {
@@ -183,46 +233,6 @@ async function main(): Promise<void> {
     // Do not keep process alive solely because of periodic cleanup timer.
     cleanupInterval.unref();
 
-    // Register cleanup callbacks (run in order during shutdown).
-    shutdownMgr.addCleanup("cleanupInterval", () => {
-      clearInterval(cleanupInterval);
-    });
-    shutdownMgr.addCleanup("watcherStartTimer", () => {
-      if (watcherStartTimer) clearTimeout(watcherStartTimer);
-    });
-    shutdownMgr.addCleanup("idleMonitor", () => {
-      idleMonitor.stop();
-    });
-    shutdownMgr.addCleanup("server", () => server.stop());
-    shutdownMgr.addCleanup("persistUsage", async () => {
-      // Match serve.ts behavior - flush token accumulator before DB closes
-      try {
-        if (tokenAccumulator.hasUsage) {
-          await persistUsageSnapshot(tokenAccumulator.getSnapshot());
-        }
-      } catch {
-        // Non-critical — don't block shutdown
-      }
-    });
-    shutdownMgr.addCleanup("scorerPool", () => resetScorerPool());
-    shutdownMgr.addCleanup("db", () => closeLadybugDb());
-    shutdownMgr.addCleanup("logger", () => shutdownLogger());
-    shutdownMgr.addCleanup("watchers", async () => {
-      for (const watcher of watchers) {
-        try {
-          await watcher.close();
-        } catch (error) {
-          process.stderr.write(
-            `[sdl-mcp] Watcher close error during shutdown: ${error}\n`,
-          );
-        }
-      }
-    });
-
-    // Register all shutdown triggers.
-    shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP
-    shutdownMgr.monitorStdin();
-
     const activeLogFile = getLogFilePath();
     if (activeLogFile) {
       log(`File logging enabled: ${activeLogFile}`);
@@ -243,6 +253,7 @@ async function main(): Promise<void> {
     if (pidfilePath) {
       try { removePidfile(pidfilePath); } catch { /* best-effort */ }
     }
+    await closeDbAfterStartupFailure();
     if (error instanceof ConfigError) {
       process.stderr.write(`[sdl-mcp] Configuration error: ${error.message}\n`);
       process.exit(1);

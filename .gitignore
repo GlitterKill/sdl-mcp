@@ -146,6 +146,9 @@ tmp-agent-feedback-regression-*/
 .stryker-tmp/
 .sisyphus/
 
+# Deepwork session state (local only)
+.slim/deepwork/
+
 # Rust analyzer
 target/
 

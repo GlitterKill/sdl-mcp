@@ -1173,6 +1173,12 @@ export interface BuildDeferredIndexesOptions {
   _dependenciesForTesting?: BuildDeferredIndexesDependencies;
 }
 
+export interface EnsureCriticalSymbolFtsIndexOptions {
+  recordTiming?: DeferredIndexTimingRecorder;
+  /** @internal test seam for failure-policy coverage without opening LadybugDB. */
+  _dependenciesForTesting?: BuildDeferredIndexesDependencies;
+}
+
 interface IndexEnsureFailureSource {
   failed: readonly string[];
 }
@@ -1186,6 +1192,61 @@ function collectIndexEnsureFailures(
 /** @internal exported for focused failure-policy tests. */
 export function _setDeferredIndexesPendingForTesting(value: boolean): void {
   deferredIndexesPending = value;
+}
+
+export async function ensureCriticalSymbolFtsIndex(
+  options: EnsureCriticalSymbolFtsIndexOptions = {},
+): Promise<void> {
+  const dependencies =
+    options._dependenciesForTesting ?? defaultBuildDeferredIndexesDependencies;
+
+  await dependencies.withWriteConn(async (wConn) => {
+    try {
+      const sdlConfig = await measureDeferredIndexPhase(
+        options.recordTiming,
+        "ensureCriticalSymbolFts.configLoad",
+        () => dependencies.loadConfig(),
+      );
+      const semanticConfig = sdlConfig.semantic;
+      const retrievalConfig = semanticConfig?.retrieval;
+      if (!semanticConfig?.enabled || !retrievalConfig) return;
+
+      await measureDeferredIndexPhase(
+        options.recordTiming,
+        "ensureCriticalSymbolFts.retrievalIndexes",
+        async () => {
+          const { ensureIndexes } =
+            await dependencies.loadRetrievalIndexDependencies();
+          const recordRetrievalIndexTiming = (
+            phaseName: string,
+            durationMs: number,
+          ): void => {
+            options.recordTiming?.(
+              `ensureCriticalSymbolFts.retrieval.${phaseName}`,
+              durationMs,
+            );
+          };
+          const indexResult = await ensureIndexes(wConn, retrievalConfig, {
+            includeFtsIndex: true,
+            includeVectorIndexes: false,
+            recordTiming: recordRetrievalIndexTiming,
+          });
+          const failedIndexes = collectIndexEnsureFailures(indexResult);
+          if (failedIndexes.length > 0) {
+            throw new DatabaseError(
+              `Deferred retrieval index build failed for required index(es): ${failedIndexes.join(", ")}`,
+            );
+          }
+        },
+      );
+    } catch (err) {
+      const message = `Critical Symbol FTS index build failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`;
+      logger.warn(message);
+      throw err instanceof DatabaseError ? err : new DatabaseError(message);
+    }
+  });
 }
 
 export async function buildDeferredIndexes(

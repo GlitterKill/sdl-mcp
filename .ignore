@@ -1,0 +1,3 @@
+# Deepwork session state: keep out of git but readable to OpenCode tools
+!.slim/deepwork/
+!.slim/deepwork/**

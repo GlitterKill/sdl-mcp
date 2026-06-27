@@ -510,6 +510,10 @@ describe("initLadybugDb bootstrap wiring", () => {
     join(process.cwd(), "src/db/ladybug.ts"),
     "utf8",
   );
+  const indexerSrc = readFileSync(
+    join(process.cwd(), "src/indexer/indexer.ts"),
+    "utf8",
+  );
 
   it("imports ensureIndexes and ensureEntityIndexes", () => {
     assert.ok(
@@ -614,6 +618,45 @@ describe("initLadybugDb bootstrap wiring", () => {
     assert.ok(
       fnBody.includes("throw err instanceof DatabaseError"),
       "buildDeferredIndexes should rethrow retrieval-index failures",
+    );
+  });
+
+  it("critical Symbol FTS does not depend on process-local deferred state", () => {
+    const fnStart = ladybugSrc.indexOf("export async function ensureCriticalSymbolFtsIndex");
+    assert.ok(fnStart !== -1, "ensureCriticalSymbolFtsIndex must exist");
+    const fnEnd = ladybugSrc.indexOf(
+      "export async function buildDeferredIndexes",
+      fnStart,
+    );
+    assert.ok(fnEnd > fnStart, "buildDeferredIndexes should follow critical FTS");
+    const fnBody = ladybugSrc.slice(fnStart, fnEnd);
+    assert.ok(
+      !fnBody.includes("deferredIndexesPending"),
+      "critical Symbol FTS must not depend on deferredIndexesPending",
+    );
+    assert.ok(
+      fnBody.includes("includeFtsIndex: true"),
+      "critical Symbol FTS should force Symbol FTS creation",
+    );
+    assert.ok(
+      fnBody.includes("includeVectorIndexes: false"),
+      "critical Symbol FTS should not move vector work before algorithms",
+    );
+    assert.ok(
+      fnBody.includes("Deferred retrieval index build failed for required index(es)"),
+      "critical Symbol FTS should use required-index failure policy",
+    );
+  });
+
+  it("builds critical Symbol FTS before derived algorithm refresh", () => {
+    const ensureIndex = indexerSrc.indexOf("await ensureCriticalSymbolFtsIndex(");
+    const derivedIndex = indexerSrc.indexOf("finalizeDerivedState({");
+
+    assert.ok(ensureIndex >= 0, "indexer should call ensureCriticalSymbolFtsIndex");
+    assert.ok(derivedIndex >= 0, "indexer should call finalizeDerivedState");
+    assert.ok(
+      ensureIndex < derivedIndex,
+      "critical Symbol FTS must be built before derived algorithms",
     );
   });
 
