@@ -82,17 +82,29 @@ describe("HTTP shutdown wiring", () => {
       join(process.cwd(), "src", "cli", "commands", "serve.ts"),
       "utf8",
     );
-
-    assert.match(
-      source,
-      /shutdownMgr\.addCleanup\("httpServer", \(\) => httpHandle\.close\(\)\);\s*registerFinalCleanups\(\);/s,
-      "HTTP transport cleanup must run before final DB/logger cleanup",
+    const httpCleanupIndex = source.indexOf(
+      'shutdownMgr.addCleanup("httpServer"',
+    );
+    const persistUsageIndex = source.indexOf(
+      'shutdownMgr.addCleanup("persistUsage"',
+    );
+    const dbCleanupIndex = source.indexOf('shutdownMgr.addCleanup("db"');
+    const loggerCleanupIndex = source.indexOf(
+      'shutdownMgr.addCleanup("logger"',
     );
 
-    assert.match(
-      source,
-      /if \(options\.transport === "stdio"\) \{\s*registerFinalCleanups\(\);\s*\}/s,
-      "stdio transport must still register final DB/logger cleanup before waiting for shutdown",
+    assert.ok(httpCleanupIndex >= 0, "HTTP cleanup should be registered");
+    assert.ok(
+      persistUsageIndex >= 0,
+      "usage persistence cleanup should be registered",
+    );
+    assert.ok(dbCleanupIndex >= 0, "DB cleanup should be registered");
+    assert.ok(loggerCleanupIndex >= 0, "logger cleanup should be registered");
+    assert.ok(
+      httpCleanupIndex < persistUsageIndex &&
+        persistUsageIndex < dbCleanupIndex &&
+        dbCleanupIndex < loggerCleanupIndex,
+      "HTTP transport cleanup must run before usage persistence and final DB/logger cleanup",
     );
   });
 });
