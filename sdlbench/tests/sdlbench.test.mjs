@@ -1301,6 +1301,20 @@ test("pricing.json exposes Neuralwatt rates for glm-5.2 and kimi-k2.7-code with 
   assert.ok(kimiCost.cachedInputUsd < kimiCost.inputUsd / 2);
 });
 
+test("sdlbench/config/agents/opencode.json declares the opencode agent with Neuralwatt wiring", async () => {
+  const cfg = JSON.parse(await readFile("sdlbench/config/agents/opencode.json", "utf8"));
+  assert.equal(cfg.schemaVersion, 1);
+  assert.equal(cfg.agent, "opencode");
+  assert.equal(cfg.model, "glm-5.2");
+  assert.match(cfg.commandTemplate, /opencode run/);
+  assert.match(cfg.commandTemplate, /\{repo\}/);
+  assert.match(cfg.commandTemplate, /\{prompt\}/);
+  assert.match(cfg.commandTemplate, /--model neuralwatt\/\{model\}/);
+  assert.match(cfg.commandTemplate, /--dangerously-skip-permissions/);
+  assert.ok(cfg.envPassthrough.includes("NEURALWATT_API_KEY"));
+  assert.ok(cfg.timeoutMs >= 60_000);
+});
+
 test("buildChartModel exposes paired deltas, execution modes, and mixed-mode warnings", () => {
   const records = parseJsonl(`
 {"variant":"baseline","taskId":"t1","agent":"codex","model":"m","durationMs":1000,"tokens":{"total":100},"cost":{"totalUsd":0.1},"quality":{"passed":true},"workflow":{"executionMode":"fixture"},"claimGrade":"none"}

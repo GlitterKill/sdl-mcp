@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "agent": "opencode",
+  "model": "glm-5.2",
+  "commandTemplate": "opencode run --dir {repo} --model neuralwatt/{model} --dangerously-skip-permissions < {prompt}",
+  "transcriptGlobs": ["~/.local/share/opencode/storage/**"],
+  "timeoutMs": 600000,
+  "envPassthrough": ["NEURALWATT_API_KEY"],
+  "promptInjection": "Use the configured SDL-MCP server as the repository interface."
+}
