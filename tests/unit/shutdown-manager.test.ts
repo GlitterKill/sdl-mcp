@@ -147,6 +147,32 @@ describe("main.ts shutdown wiring", () => {
     }
   });
 
+  it("does not let stderr EPIPE abort shutdown logging", async () => {
+    const originalExit = process.exit;
+    const originalWrite = process.stderr.write;
+    let exitCode: number | undefined;
+    process.exit = ((code?: string | number | null | undefined): never => {
+      exitCode = typeof code === "number" ? code : Number(code ?? 0);
+      return undefined as never;
+    }) as NodeJS.Process["exit"];
+    process.stderr.write = (() => {
+      const err = new Error("broken pipe") as NodeJS.ErrnoException;
+      err.code = "EPIPE";
+      throw err;
+    }) as typeof process.stderr.write;
+
+    try {
+      const mgr = new ShutdownManager({ forceTimeoutMs: 10_000 });
+
+      await assert.doesNotReject(() => mgr.shutdown("test"));
+
+      assert.strictEqual(exitCode, 0);
+    } finally {
+      process.stderr.write = originalWrite;
+      process.exit = originalExit;
+    }
+  });
+
   it("unrefs the force timer so it does not keep the process alive", () => {
     const source = readFileSync(
       join(process.cwd(), "src", "util", "shutdown.ts"),
@@ -264,6 +290,24 @@ describe("serve.ts shutdown wiring", () => {
     );
   });
 
+  it("installs process handlers before first startup stderr write", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src", "cli", "commands", "serve.ts"),
+      "utf8",
+    );
+    const installIndex = source.indexOf("installProcessHandlers(shutdownMgr)");
+    const firstConfigLogIndex = source.indexOf(
+      'writeServeStderrLine(`[sdl-mcp] Config:',
+    );
+
+    assert.ok(installIndex >= 0, "serve.ts should install process handlers");
+    assert.ok(firstConfigLogIndex >= 0, "serve.ts should log config source");
+    assert.ok(
+      installIndex < firstConfigLogIndex,
+      "stdio pipe errors must be handled before startup writes to stderr",
+    );
+  });
+
   it("gates stdin monitoring on stdio transport only", () => {
     const source = readFileSync(
       join(process.cwd(), "src", "cli", "commands", "serve.ts"),
@@ -301,6 +345,26 @@ describe("serve.ts shutdown wiring", () => {
     assert.ok(stdinIndex < initIndex, "stdin monitoring must precede DB init");
   });
 
+  it("checks for early stdio shutdown before opening LadybugDB", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src", "cli", "commands", "serve.ts"),
+      "utf8",
+    );
+    const pidfileIndex = source.indexOf("shutdownMgr.setPidfilePath(pidfilePath)");
+    const earlyShutdownIndex = source.indexOf("shutdownMgr.isShuttingDown", pidfileIndex);
+    const initIndex = source.indexOf("await initGraphDb(");
+
+    assert.ok(pidfileIndex >= 0, "serve.ts should register pidfile");
+    assert.ok(
+      earlyShutdownIndex >= 0,
+      "serve.ts should check for early shutdown",
+    );
+    assert.ok(
+      pidfileIndex < earlyShutdownIndex && earlyShutdownIndex < initIndex,
+      "early stdio shutdown check must happen after pidfile registration and before DB init",
+    );
+  });
+
   it("closes LadybugDB when serve startup fails after DB init", () => {
     const source = readFileSync(
       join(process.cwd(), "src", "cli", "commands", "serve.ts"),
@@ -311,5 +375,25 @@ describe("serve.ts shutdown wiring", () => {
 
     assert.ok(closeIndex >= 0, "startup catch should close DB");
     assert.ok(closeIndex < exitIndex, "DB close must happen before exit");
+  });
+
+  it("wraps serve DB init in the startup cleanup catch", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src", "cli", "commands", "serve.ts"),
+      "utf8",
+    );
+    const pidfileIndex = source.indexOf("shutdownMgr.setPidfilePath(pidfilePath)");
+    const tryIndex = source.indexOf("try {", pidfileIndex);
+    const initIndex = source.indexOf("await initGraphDb(");
+    const closeIndex = source.indexOf("await closeDbAfterStartupFailure()");
+
+    assert.ok(pidfileIndex >= 0, "serve.ts should register pidfile");
+    assert.ok(tryIndex >= 0, "serve.ts should have startup try/catch");
+    assert.ok(initIndex >= 0, "serve.ts should initialize DB");
+    assert.ok(closeIndex >= 0, "serve.ts should close DB in catch");
+    assert.ok(
+      tryIndex < initIndex && initIndex < closeIndex,
+      "DB init must be inside the startup cleanup catch",
+    );
   });
 });

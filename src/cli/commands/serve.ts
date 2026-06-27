@@ -40,6 +40,7 @@ import {
   logger,
   shutdownLogger,
 } from "../../util/logger.js";
+import { safeWriteStderr } from "../../util/stdio-safety.js";
 import { configureToolDispatchLimiter } from "../../mcp/dispatch-limiter.js";
 import { isIndexingActive } from "../../mcp/indexing-gate.js";
 import { SessionManager } from "../../mcp/session-manager.js";
@@ -58,11 +59,15 @@ import {
 } from "../../observability/index.js";
 import type { ObservabilityService } from "../../observability/index.js";
 
+function writeStderrLine(message: string): boolean {
+  return safeWriteStderr(`${message}\n`);
+}
+
 async function closeDbAfterStartupFailure(): Promise<void> {
   try {
     await closeLadybugDb();
   } catch (error) {
-    console.error(
+    writeStderrLine(
       `[sdl-mcp] LadybugDB cleanup after startup failure failed: ${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -87,6 +92,77 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     enableFileLogging();
   }
 
+  const transport: "stdio" | "http" =
+    options.transport === "stdio" ? "stdio" : "http";
+  let pidfilePath: string | undefined;
+  const watchers: IndexWatchHandle[] = [];
+  let idleMonitor: IdleMonitor | undefined;
+  let walMaintenance:
+    | ReturnType<typeof createWalCheckpointMaintenance>
+    | undefined;
+  let stdioServer: MCPServer | undefined;
+  let observabilityService: ObservabilityService | null = null;
+  let beamExplainStore: BeamExplainStore | null = null;
+  let httpHandle: Awaited<ReturnType<typeof setupHttpTransport>> | undefined;
+  let dashboardHandle:
+    | Awaited<ReturnType<typeof setupObservabilityDashboardSidecar>>
+    | undefined;
+
+  const shutdownMgr = new ShutdownManager({
+    log: (msg) => safeWriteStderr(`[sdl-mcp] ${msg}\n`),
+  });
+  const writeServeStderrLine = (message: string): void => {
+    if (!writeStderrLine(message)) {
+      void shutdownMgr.shutdown("stdio pipe error", 1);
+    }
+  };
+  const uninstallProcessHandlers = installProcessHandlers(shutdownMgr);
+  shutdownMgr.addCleanup("processHandlers", uninstallProcessHandlers);
+  shutdownMgr.addCleanup("idleMonitor", () => {
+    idleMonitor?.stop();
+  });
+  shutdownMgr.addCleanup("walMaintenance", () => {
+    walMaintenance?.stop();
+  });
+  shutdownMgr.addCleanup("observability", () => {
+    stopRuntimeProbes();
+    observabilityService?.stop();
+  });
+  shutdownMgr.addCleanup("server", () => stdioServer?.stop());
+  shutdownMgr.addCleanup("observabilityDashboard", () =>
+    dashboardHandle?.close(),
+  );
+  shutdownMgr.addCleanup("httpServer", () => httpHandle?.close());
+  shutdownMgr.addCleanup("persistUsage", async () => {
+    try {
+      if (tokenAccumulator.hasUsage) {
+        await persistUsageSnapshot(tokenAccumulator.getSnapshot());
+      }
+    } catch (err) {
+      // Non-critical — don't block shutdown.
+      writeServeStderrLine(
+        "[sdl-mcp] Failed to persist usage snapshot: " +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
+  });
+  shutdownMgr.addCleanup("watchers", async () => {
+    for (const watcher of watchers) {
+      try {
+        await watcher.close();
+      } catch (error) {
+        writeServeStderrLine(
+          `[sdl-mcp] Watcher close error during shutdown: ${error}`,
+        );
+      }
+    }
+  });
+  shutdownMgr.addCleanup("db", () => closeLadybugDb());
+  shutdownMgr.addCleanup("logger", () => shutdownLogger());
+  shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP
+  if (options.transport === "stdio") {
+    shutdownMgr.monitorStdin();
+  }
 
 
   const configPath = activateCliConfigPath(options.config);
@@ -97,7 +173,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       : process.env.SDL_CONFIG_PATH
         ? "SDL_CONFIG_PATH"
         : "auto-discovery";
-  console.error(`[sdl-mcp] Config: ${configPath} (${configSource})`);
+  writeServeStderrLine(`[sdl-mcp] Config: ${configPath} (${configSource})`);
   const config = loadConfig(configPath);
 
   configureLogger(options.logLevel ?? "info", options.logFormat ?? "pretty");
@@ -108,7 +184,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     config.performanceTier === "auto"
       ? cpuProfile.detectedTier
       : config.performanceTier;
-  console.error(
+  writeServeStderrLine(
     `[sdl-mcp] CPU tier: ${effectiveTier} (${cpuProfile.logicalCores} logical cores` +
       (cpuProfile.physicalCores
         ? `, ~${cpuProfile.physicalCores} physical`
@@ -120,12 +196,12 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   // repro environment looks like. These envs are the standard isolation
   // levers when investigating native-layer aborts.
   if (process.env.SDL_MCP_DISABLE_NATIVE_ADDON) {
-    console.error(
+    writeServeStderrLine(
       "[sdl-mcp] SDL_MCP_DISABLE_NATIVE_ADDON is set — Rust indexer & SCIP native decoder disabled (TS fallback active). Use this to isolate native-addon crashes.",
     );
   }
   if (process.execArgv.some((a) => a.includes("abort-on-uncaught-exception"))) {
-    console.error(
+    writeServeStderrLine(
       "[sdl-mcp] Node started with --abort-on-uncaught-exception — uncaught errors will produce a core dump (set NODE_OPTIONS=--abort-on-uncaught-exception or pass the flag on the shebang line to enable).",
     );
   }
@@ -163,100 +239,51 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
         : config.graphDatabase?.path
           ? "config"
           : "default (beside config)";
-  console.error(`[sdl-mcp] Graph DB: ${graphDbPath} (${graphDbSource})`);
+  writeServeStderrLine(`[sdl-mcp] Graph DB: ${graphDbPath} (${graphDbSource})`);
 
   // Check for an existing live server process (stale PIDs are auto-cleaned).
   const existing = findExistingProcess(graphDbPath);
   if (existing) {
-    console.error(formatExistingProcessMessage(graphDbPath, existing));
+    writeServeStderrLine(formatExistingProcessMessage(graphDbPath, existing));
     process.exit(1);
   }
 
   // Claim the singleton + pidfile BEFORE opening the WAL so two concurrent
   // stdio servers cannot both open the DB and corrupt it (issue #19).
   // HTTP transport re-writes the pidfile after listen() with the bound port.
-  const transport: "stdio" | "http" =
-    options.transport === "stdio" ? "stdio" : "http";
-  let pidfilePath: string | undefined = writePidfile(graphDbPath, transport);
-  console.error(`PID file written: ${pidfilePath}`);
-
-  const watchers: IndexWatchHandle[] = [];
-  let idleMonitor: IdleMonitor | undefined;
-  let walMaintenance:
-    | ReturnType<typeof createWalCheckpointMaintenance>
-    | undefined;
-  let stdioServer: MCPServer | undefined;
-  let observabilityService: ObservabilityService | null = null;
-  let beamExplainStore: BeamExplainStore | null = null;
-  let httpHandle: Awaited<ReturnType<typeof setupHttpTransport>> | undefined;
-  let dashboardHandle:
-    | Awaited<ReturnType<typeof setupObservabilityDashboardSidecar>>
-    | undefined;
-
-  const shutdownMgr = new ShutdownManager({
-    log: (msg) => console.error(`[sdl-mcp] ${msg}`),
-  });
-  const uninstallProcessHandlers = installProcessHandlers(shutdownMgr);
-  shutdownMgr.addCleanup("processHandlers", uninstallProcessHandlers);
+  pidfilePath = writePidfile(graphDbPath, transport);
+  writeServeStderrLine(`PID file written: ${pidfilePath}`);
   shutdownMgr.setPidfilePath(pidfilePath);
-  shutdownMgr.addCleanup("idleMonitor", () => {
-    idleMonitor?.stop();
-  });
-  shutdownMgr.addCleanup("walMaintenance", () => {
-    walMaintenance?.stop();
-  });
-  shutdownMgr.addCleanup("observability", () => {
-    stopRuntimeProbes();
-    observabilityService?.stop();
-  });
-  shutdownMgr.addCleanup("server", () => stdioServer?.stop());
-  shutdownMgr.addCleanup("observabilityDashboard", () =>
-    dashboardHandle?.close(),
-  );
-  shutdownMgr.addCleanup("httpServer", () => httpHandle?.close());
-  shutdownMgr.addCleanup("persistUsage", async () => {
-    try {
-      if (tokenAccumulator.hasUsage) {
-        await persistUsageSnapshot(tokenAccumulator.getSnapshot());
-      }
-    } catch (err) {
-      // Non-critical — don't block shutdown.
-      console.error(
-        "[sdl-mcp] Failed to persist usage snapshot: " +
-          (err instanceof Error ? err.message : String(err)),
-      );
-    }
-  });
-  shutdownMgr.addCleanup("watchers", async () => {
-    for (const watcher of watchers) {
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  if (options.transport === "stdio" && !safeWriteStderr("")) {
+    void shutdownMgr.shutdown("stdio pipe error", 1);
+  }
+  if (shutdownMgr.isShuttingDown) {
+    if (pidfilePath) {
       try {
-        await watcher.close();
-      } catch (error) {
-        console.error(
-          `[sdl-mcp] Watcher close error during shutdown: ${error}`,
-        );
+        removePidfile(pidfilePath);
+      } catch {
+        /* best-effort */
       }
     }
-  });
-  shutdownMgr.addCleanup("db", () => closeLadybugDb());
-  shutdownMgr.addCleanup("logger", () => shutdownLogger());
-  shutdownMgr.registerSignals(); // SIGINT, SIGTERM, SIGHUP
-  if (options.transport === "stdio") {
-    shutdownMgr.monitorStdin();
+    await shutdownMgr.shutdown("early stdio close", 1);
+    return;
   }
 
+  try {
   await initGraphDb(config, configPath);
 
   await loadConfiguredAdapterPlugins(config, configPath, (message) => {
-    console.error(message);
+    writeServeStderrLine(message);
   });
 
   await ensureConfiguredReposRegistered(config, (message) => {
-    console.error(message);
+    writeServeStderrLine(message);
   });
 
   await recoverStaleDerivedStateOnStartup(config, (message) => {
-    console.error(message);
+    writeServeStderrLine(message);
   });
 
   await startPrefetchPolicy(config);
@@ -295,7 +322,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   }
 
   if (config.indexing?.enableFileWatching && !options.noWatch) {
-    console.error(
+    writeServeStderrLine(
       `Starting file watchers for ${config.repos.length} repo(s)...`,
     );
     const results = await Promise.allSettled(
@@ -316,12 +343,12 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       if (result.status === "fulfilled") {
         watchers.push(result.value.handle);
       } else {
-        console.error(`Failed to start watcher: ${String(result.reason)}`);
+        writeServeStderrLine(`Failed to start watcher: ${String(result.reason)}`);
       }
     }
-    console.error(`Watching ${watchers.length} repo(s)`);
+    writeServeStderrLine(`Watching ${watchers.length} repo(s)`);
   } else if (config.indexing?.enableFileWatching && options.noWatch) {
-    console.error("File watching disabled by --no-watch");
+    writeServeStderrLine("File watching disabled by --no-watch");
   }
 
   await configureDefaultLiveIndexCoordinator({
@@ -392,19 +419,18 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
 
   const activeLogFile = getLogFilePath();
   if (activeLogFile) {
-    console.error(`[sdl-mcp] File logging enabled: ${activeLogFile}`);
+    writeServeStderrLine(`[sdl-mcp] File logging enabled: ${activeLogFile}`);
   }
 
   if (stdioServer) {
     // Mirror the direct entrypoint so stdio client disconnects flow through
     // the centralized shutdown path before Node can exit on its own.
     stdioServer.getServer().onclose = () => {
-      console.error("[sdl-mcp] MCP transport closed, initiating shutdown...");
+      writeServeStderrLine("[sdl-mcp] MCP transport closed, initiating shutdown...");
       void shutdownMgr.shutdown("transport closed");
     };
   }
 
-  try {
     if (options.transport === "stdio") {
 
       if (options.dashboardPort !== undefined) {
@@ -425,20 +451,20 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
           dashboardHandle.port,
           dashboardHandle.authToken ?? undefined,
         );
-        console.error(`PID file written: ${pidfilePath}`);
+        writeServeStderrLine(`PID file written: ${pidfilePath}`);
         shutdownMgr.setPidfilePath(pidfilePath);
-        console.error(
+        writeServeStderrLine(
           `[sdl-mcp] Observability dashboard: http://127.0.0.1:${dashboardHandle.port}/ui/observability`,
         );
       }
 
-      console.error("Starting MCP server on stdio transport...");
+      writeServeStderrLine("Starting MCP server on stdio transport...");
       await setupStdioTransport(stdioServer!);
       // Wait for shutdown signal (triggered by transport close or signal handlers)
       await shutdownMgr.shutdownInitiated;
     } else {
       const host = options.host ?? "localhost";
-      console.error(`Starting MCP server on http://${host}:${httpPort}...`);
+      writeServeStderrLine(`Starting MCP server on http://${host}:${httpPort}...`);
       httpHandle = await setupHttpTransport(
         host,
         httpPort,
@@ -464,7 +490,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
         httpHandle.port,
         httpHandle.authToken ?? undefined,
       );
-      console.error(`PID file written: ${pidfilePath}`);
+      writeServeStderrLine(`PID file written: ${pidfilePath}`);
       shutdownMgr.setPidfilePath(pidfilePath);
 
       // Block until the server closes
@@ -479,7 +505,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       }
     }
     await closeDbAfterStartupFailure();
-    console.error(
+    writeServeStderrLine(
       `Fatal error: ${error instanceof Error ? error.message : String(error)}`,
     );
     process.exit(1);

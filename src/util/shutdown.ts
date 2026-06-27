@@ -19,6 +19,7 @@
 
 import { SHUTDOWN_FORCE_EXIT_TIMEOUT_MS } from "../config/constants.js";
 import { removePidfile } from "./pidfile.js";
+import { isBrokenPipeError, safeWriteStderr } from "./stdio-safety.js";
 
 export type CleanupFn = () => void | Promise<void>;
 
@@ -42,18 +43,32 @@ export class ShutdownManager {
   private forceTimeoutMs: number;
   private log: (msg: string) => void;
   private shutdownResolve: (() => void) | null = null;
+  private shutdownCompleteResolve: (() => void) | null = null;
   /** Promise that resolves when shutdown is initiated (before cleanup runs) */
   readonly shutdownInitiated: Promise<void>;
+  /** Promise that resolves immediately before the managed process exit. */
+  readonly shutdownComplete: Promise<void>;
 
   constructor(options: ShutdownManagerOptions = {}) {
     this.forceTimeoutMs =
       options.forceTimeoutMs ?? SHUTDOWN_FORCE_EXIT_TIMEOUT_MS;
     this.log =
       options.log ??
-      ((msg: string) => process.stderr.write(`[sdl-mcp] ${msg}\n`));
+      ((msg: string) => safeWriteStderr(`[sdl-mcp] ${msg}\n`));
     this.shutdownInitiated = new Promise((resolve) => {
       this.shutdownResolve = resolve;
     });
+    this.shutdownComplete = new Promise((resolve) => {
+      this.shutdownCompleteResolve = resolve;
+    });
+  }
+
+  private writeLog(msg: string): void {
+    try {
+      this.log(msg);
+    } catch (error) {
+      if (!isBrokenPipeError(error)) throw error;
+    }
   }
 
   /**
@@ -115,7 +130,7 @@ export class ShutdownManager {
    */
   async shutdown(reason: string, exitCode = 0): Promise<void> {
     if (this.shutdownCalled) {
-      return;
+      return this.shutdownComplete;
     }
     this.shutdownCalled = true;
 
@@ -125,7 +140,7 @@ export class ShutdownManager {
       this.shutdownResolve = null;
     }
 
-    this.log(`Received ${reason}, shutting down gracefully...`);
+    this.writeLog(`Received ${reason}, shutting down gracefully...`);
 
     let activeCleanup: string | null = null;
 
@@ -134,7 +149,7 @@ export class ShutdownManager {
       const activeCleanupSuffix = activeCleanup
         ? ` while running cleanup "${activeCleanup}"`
         : "";
-      this.log(
+      this.writeLog(
         `Cleanup did not finish within ${this.forceTimeoutMs}ms${activeCleanupSuffix} — forcing exit.`,
       );
       // Remove PID file even on forced exit.
@@ -152,13 +167,13 @@ export class ShutdownManager {
       try {
         await fn();
       } catch (error) {
-        this.log(
+        this.writeLog(
           `Cleanup "${name}" error: ${error instanceof Error ? error.message : String(error)}`,
         );
       } finally {
         const durationMs = Date.now() - cleanupStartedAt;
         if (durationMs >= 1000) {
-          this.log(`Cleanup "${name}" completed in ${durationMs}ms`);
+          this.writeLog(`Cleanup "${name}" completed in ${durationMs}ms`);
         }
         activeCleanup = null;
       }
@@ -170,6 +185,10 @@ export class ShutdownManager {
     }
 
     clearTimeout(forceTimer);
+    if (this.shutdownCompleteResolve) {
+      this.shutdownCompleteResolve();
+      this.shutdownCompleteResolve = null;
+    }
     process.exit(exitCode);
   }
 

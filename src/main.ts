@@ -34,13 +34,14 @@ import { recoverStaleDerivedStateOnStartup } from "./startup/derived-state-recov
 import { startPrefetchPolicy } from "./startup/prefetch-startup.js";
 import { loadConfiguredAdapterPlugins } from "./startup/plugins.js";
 import { installProcessHandlers } from "./startup/process-handlers.js";
+import { safeWriteStderr } from "./util/stdio-safety.js";
 
 import { resetScorerPool } from "./graph/slice/beam-search-engine.js";
 
 // Fail fast with a clear message on unsupported Node.js versions.
 const _nodeMajor = parseInt(process.version.slice(1).split(".")[0], 10);
 if (_nodeMajor < NODE_MIN_MAJOR_VERSION) {
-  process.stderr.write(
+  safeWriteStderr(
     "[sdl-mcp] Error: sdl-mcp requires Node.js " + NODE_MIN_MAJOR_VERSION + "+, found " + process.version + ".\n" +
     "[sdl-mcp] Please upgrade: https://nodejs.org/\n",
   );
@@ -54,7 +55,7 @@ if (!getLogFilePath()) {
   enableFileLogging();
 }
 
-const log = (msg: string) => process.stderr.write(`[sdl-mcp] ${msg}\n`);
+const log = (msg: string) => safeWriteStderr(`[sdl-mcp] ${msg}\n`);
 
 async function closeDbAfterStartupFailure(): Promise<void> {
   try {
@@ -102,7 +103,7 @@ async function main(): Promise<void> {
       try {
         await watcher.close();
       } catch (error) {
-        process.stderr.write(
+        safeWriteStderr(
           `[sdl-mcp] Watcher close error during shutdown: ${error}\n`,
         );
       }
@@ -191,7 +192,7 @@ async function main(): Promise<void> {
               if (result.status === "fulfilled") {
                 watchers.push(result.value.handle);
               } else {
-                process.stderr.write(
+                safeWriteStderr(
                   `[sdl-mcp] Failed to start watcher: ${String(
                     result.reason,
                   )}\n`,
@@ -200,7 +201,7 @@ async function main(): Promise<void> {
             }
             log(`File watchers started for ${watchers.length} repo(s).`);
           } catch (error) {
-            process.stderr.write(
+            safeWriteStderr(
               `[sdl-mcp] File watcher startup error: ${error}\n`,
             );
           }
@@ -220,12 +221,12 @@ async function main(): Promise<void> {
             }
           })
           .catch((error: unknown) => {
-            process.stderr.write(
+            safeWriteStderr(
               `[sdl-mcp] Slice handle cleanup error: ${error}\n`,
             );
           });
       } catch (error) {
-        process.stderr.write(
+        safeWriteStderr(
           `[sdl-mcp] Slice handle cleanup error: ${error}\n`,
         );
       }
@@ -255,23 +256,23 @@ async function main(): Promise<void> {
     }
     await closeDbAfterStartupFailure();
     if (error instanceof ConfigError) {
-      process.stderr.write(`[sdl-mcp] Configuration error: ${error.message}\n`);
+      safeWriteStderr(`[sdl-mcp] Configuration error: ${error.message}\n`);
       process.exit(1);
     }
     if (error instanceof DatabaseError) {
-      process.stderr.write(`[sdl-mcp] Database error: ${error.message}\n`);
+      safeWriteStderr(`[sdl-mcp] Database error: ${error.message}\n`);
       process.exit(1);
     }
     if (error instanceof Error) {
-      process.stderr.write(`[sdl-mcp] Fatal error: ${error.message}\n`);
+      safeWriteStderr(`[sdl-mcp] Fatal error: ${error.message}\n`);
       process.exit(1);
     }
-    process.stderr.write(`[sdl-mcp] Fatal error: ${String(error)}\n`);
+    safeWriteStderr(`[sdl-mcp] Fatal error: ${String(error)}\n`);
     process.exit(1);
   }
 }
 
 main().catch((error) => {
-  process.stderr.write(`[sdl-mcp] Uncaught error: ${error}\n`);
+  safeWriteStderr(`[sdl-mcp] Uncaught error: ${error}\n`);
   process.exit(1);
 });

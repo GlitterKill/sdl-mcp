@@ -41,4 +41,31 @@ describe("process handler installer", () => {
       beforeRejection,
     );
   });
+
+  it("turns stdio EPIPE into managed shutdown", async () => {
+    const calls: Array<{ reason: string; code?: number }> = [];
+    const shutdownMgr = {
+      shutdown: async (reason: string, code?: number) => {
+        calls.push({ reason, code });
+      },
+    };
+
+    const uninstall = installProcessHandlers(shutdownMgr);
+    try {
+      const err = new Error("broken pipe") as NodeJS.ErrnoException;
+      err.code = "EPIPE";
+
+      assert.doesNotThrow(() => {
+        process.stdout.emit("error", err);
+      });
+
+      await new Promise((resolve) => setImmediate(resolve));
+
+      assert.deepStrictEqual(calls, [
+        { reason: "stdio pipe error", code: 1 },
+      ]);
+    } finally {
+      uninstall();
+    }
+  });
 });

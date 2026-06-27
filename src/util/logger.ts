@@ -6,6 +6,7 @@ import {
   isTracingEnabled,
   shutdownTracing as shutdownTracingInternal,
 } from "./tracing.js";
+import { safeWriteStderr } from "./stdio-safety.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -116,7 +117,9 @@ function writeToLogFile(msg: string): void {
   } catch (err) {
     logWriteErrorCount++;
     if (logWriteErrorCount === 1 || logWriteErrorCount % 100 === 0) {
-      process.stderr.write(`[sdl-mcp] Log file write failed (count: ${logWriteErrorCount}): ${err}\n`);
+      safeWriteStderr(
+        `[sdl-mcp] Log file write failed (count: ${logWriteErrorCount}): ${err}\n`,
+      );
     }
   }
 }
@@ -125,7 +128,7 @@ function writeToStderr(msg: string): void {
   if (!consoleMirroringEnabled) {
     return;
   }
-  process.stderr.write(msg + "\n");
+  safeWriteStderr(msg + "\n");
 }
 
 function safeStringify(obj: Record<string, unknown>): string {

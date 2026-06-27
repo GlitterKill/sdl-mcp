@@ -1,5 +1,6 @@
 import type { ShutdownManager } from "../util/shutdown.js";
 import { logger } from "../util/logger.js";
+import { isBrokenPipeError, safeWriteStderr } from "../util/stdio-safety.js";
 
 type ProcessHandlerShutdown = Pick<ShutdownManager, "shutdown">;
 
@@ -8,6 +9,7 @@ let installedHandlers:
   | {
       uncaughtException: (error: Error) => void;
       unhandledRejection: (reason: unknown) => void;
+      stdioError: (error: Error) => void;
     }
   | null = null;
 
@@ -23,8 +25,13 @@ export function installProcessHandlers(
 ): () => void {
   if (installed) return () => {};
 
+  const stdioError = (error: Error): void => {
+    if (!isBrokenPipeError(error)) throw error;
+    void shutdownMgr.shutdown("stdio pipe error", 1);
+  };
+
   const uncaughtException = (error: Error): void => {
-    process.stderr.write(
+    safeWriteStderr(
       `[sdl-mcp] Fatal uncaught exception: ${error.message}\n`,
     );
     logger.error("Uncaught exception", {
@@ -36,7 +43,7 @@ export function installProcessHandlers(
 
   const unhandledRejection = (reason: unknown): void => {
     const message = reason instanceof Error ? reason.message : String(reason);
-    process.stderr.write(`[sdl-mcp] Unhandled rejection: ${message}\n`);
+    safeWriteStderr(`[sdl-mcp] Unhandled rejection: ${message}\n`);
     logger.error("Unhandled rejection", {
       error: message,
       stack: reason instanceof Error ? reason.stack : undefined,
@@ -47,13 +54,17 @@ export function installProcessHandlers(
 
   process.on("uncaughtException", uncaughtException);
   process.on("unhandledRejection", unhandledRejection);
+  process.stdout.on("error", stdioError);
+  process.stderr.on("error", stdioError);
   installed = true;
-  installedHandlers = { uncaughtException, unhandledRejection };
+  installedHandlers = { uncaughtException, unhandledRejection, stdioError };
 
   return () => {
     if (!installedHandlers) return;
     process.off("uncaughtException", installedHandlers.uncaughtException);
     process.off("unhandledRejection", installedHandlers.unhandledRejection);
+    process.stdout.off("error", installedHandlers.stdioError);
+    process.stderr.off("error", installedHandlers.stdioError);
     installedHandlers = null;
     installed = false;
   };
