@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "agent": "opencode",
   "model": "glm-5.2",
-  "commandTemplate": "opencode run --dir {repo} --model neuralwatt/{model} --dangerously-skip-permissions < {prompt}",
+  "commandTemplate": "opencode run --model neuralwatt/{model} \"Read and follow the task in .sdlbench-prompt.md. Edit this repository in place. Keep changes limited to the task.\"",
   "transcriptGlobs": ["~/.local/share/opencode/storage/**"],
   "timeoutMs": 600000,
   "envPassthrough": ["NEURALWATT_API_KEY"],

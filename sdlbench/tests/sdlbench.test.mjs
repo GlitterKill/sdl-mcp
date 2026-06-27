@@ -1530,10 +1530,10 @@ test("sdlbench/config/agents/opencode.json declares the opencode agent with Neur
   assert.equal(cfg.agent, "opencode");
   assert.equal(cfg.model, "glm-5.2");
   assert.match(cfg.commandTemplate, /opencode run/);
-  assert.match(cfg.commandTemplate, /\{repo\}/);
-  assert.match(cfg.commandTemplate, /\{prompt\}/);
   assert.match(cfg.commandTemplate, /--model neuralwatt\/\{model\}/);
-  assert.match(cfg.commandTemplate, /--dangerously-skip-permissions/);
+  // Prompt is delivered via relative .sdlbench-prompt.md path (runCommand sets
+  // cwd=runRoot; avoids multi-line shell quoting on Windows).
+  assert.match(cfg.commandTemplate, /\.sdlbench-prompt\.md/);
   assert.ok(cfg.envPassthrough.includes("NEURALWATT_API_KEY"));
   assert.ok(cfg.timeoutMs >= 60_000);
 });
