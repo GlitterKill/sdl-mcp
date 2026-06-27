@@ -14,6 +14,7 @@ import {
   inspectCodexSessionSterility,
   runBenchmark,
 } from "../src/sdlbench.mjs";
+import { prepareOpencodeSterileRuntime } from "../src/agents/opencode-runtime.mjs";
 import { serveViewer } from "../src/cli.mjs";
 import { buildChartModel, parseJsonl } from "../viewer/app.mjs";
 import { signalsForLoss } from "../src/attribution-signals.mjs";
@@ -1473,6 +1474,141 @@ test("behavior records carry claimGrade=primary when codex session counts are pr
     assert.equal(record.schemaVersion, 2);
     assert.equal(record.claimGrade, "primary");
     assert.equal(record.tokens.tokenizerSource, "codex-session");
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("prepareOpencodeSterileRuntime places SDL MCP remote config in OPENCODE_CONFIG_CONTENT", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-opencode-prep-"));
+  const workDir = join(root, "work");
+  await mkdir(workDir, { recursive: true });
+  try {
+    const runtime = await prepareOpencodeSterileRuntime({
+      root,
+      workDir,
+      taskRunId: "test-run-id",
+      sdlSession: { mcpUrl: "http://127.0.0.1:12345/mcp" },
+    });
+    assert.ok(runtime.env.OPENCODE_CONFIG_CONTENT, "OPENCODE_CONFIG_CONTENT must be set");
+    const cfg = JSON.parse(runtime.env.OPENCODE_CONFIG_CONTENT);
+    assert.equal(cfg.mcp["sdl-mcp"].type, "remote");
+    assert.equal(cfg.mcp["sdl-mcp"].url, "http://127.0.0.1:12345/mcp");
+    assert.equal(cfg.mcp["sdl-mcp"].enabled, true);
+    assert.ok(runtime.env.OPENCODE_DATA_DIR, "OPENCODE_DATA_DIR must be set");
+    assert.ok(runtime.env.OPENCODE_DATA_DIR.includes("test-run-id"),
+      "OPENCODE_DATA_DIR should live under a per-run temp dir, not the user's home");
+    assert.ok(runtime.storageDir && runtime.storageDir === runtime.env.OPENCODE_DATA_DIR);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("prepareOpencodeSterileRuntime omits MCP server entry when sdlSession is null (baseline variant)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-opencode-prep-null-"));
+  const workDir = join(root, "work");
+  await mkdir(workDir, { recursive: true });
+  try {
+    const runtime = await prepareOpencodeSterileRuntime({
+      root,
+      workDir,
+      taskRunId: "test-run-id",
+      sdlSession: null,
+    });
+    const cfg = JSON.parse(runtime.env.OPENCODE_CONFIG_CONTENT);
+    assert.deepEqual(cfg.mcp, {});
+    assert.ok(runtime.env.OPENCODE_DATA_DIR.includes("test-run-id"));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("prepareOpencodeSterileRuntime passes NEURALWATT_API_KEY through when present in process env", async () => {
+  const prev = process.env.NEURALWATT_API_KEY;
+  process.env.NEURALWATT_API_KEY = "sk-test-key";
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-opencode-key-"));
+  const workDir = join(root, "work");
+  await mkdir(workDir, { recursive: true });
+  try {
+    const runtime = await prepareOpencodeSterileRuntime({
+      root,
+      workDir,
+      taskRunId: "test-run-id",
+      sdlSession: null,
+    });
+    assert.equal(runtime.env.NEURALWATT_API_KEY, "sk-test-key");
+  } finally {
+    if (prev === undefined) delete process.env.NEURALWATT_API_KEY;
+    else process.env.NEURALWATT_API_KEY = prev;
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("behavior mode with agent=opencode passes the sterile runtime env to the agent process", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-opencode-behavior-"));
+  const repo = join(root, "repo");
+  const matrixPath = join(root, "matrix.json");
+  const agentPath = join(root, "agent.mjs");
+  const probePath = join(root, "env-probe.json");
+
+  try {
+    await mkdir(join(repo, "src"), { recursive: true });
+    await mkdir(join(repo, "tests"), { recursive: true });
+    await writeFile(join(repo, "package.json"), "{\"type\":\"module\"}\n");
+    await writeFile(join(repo, "src", "value.js"), "export const value = \"broken\";\n");
+    await writeFile(join(repo, "tests", "value.test.mjs"), `
+      import assert from "node:assert/strict";
+      import { value } from "../src/value.js";
+      assert.equal(value, "opencode");
+    `);
+    await writeFile(matrixPath, JSON.stringify({
+      schemaVersion: 1,
+      tasks: [{
+        schemaVersion: 1,
+        taskId: "opencode-env-probe",
+        repoId: "fixture-js",
+        category: "bug-fix",
+        prompt: "Make value export opencode.",
+        repo: { sourcePath: repo },
+        context: { raw: "RAW_CONTEXT_ONLY", sdl: "SDL_CONTEXT_ONLY" },
+        verify: { command: "node tests/value.test.mjs", timeoutMs: 10000 },
+        rubric: { maxScore: 1 },
+        solution: { files: { "src/value.js": "export const value = \"canned\";\n" } }
+      }]
+    }));
+    await writeFile(agentPath, `
+      import { writeFileSync } from "node:fs";
+      import { join } from "node:path";
+      const repo = process.argv[process.argv.indexOf("--repo") + 1];
+      const cfg = process.env.OPENCODE_CONFIG_CONTENT;
+      const storage = process.env.OPENCODE_DATA_DIR;
+      writeFileSync(${JSON.stringify(probePath)}, JSON.stringify({ cfg, storage }));
+      writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"opencode\\\";\\n");
+    `);
+
+    const result = await runBenchmark({
+      agent: "opencode",
+      agentCommand: `node ${JSON.stringify(agentPath)} --repo {repo}`,
+      executionMode: "behavior",
+      matrixPath,
+      resultsPath: join(root, "sessions.jsonl"),
+      tokenizerCommand: await fakeTokenizer(root),
+      variant: "baseline",
+      workDir: join(root, "work"),
+    });
+    const [record] = result.records;
+
+    assert.equal(record.status, "pass");
+    assert.equal(record.agent, "opencode");
+    assert.equal(record.workflow.executionMode, "behavior");
+    const probe = JSON.parse(await readFile(probePath, "utf8"));
+    assert.ok(probe.cfg, "OPENCODE_CONFIG_CONTENT reached the agent process");
+    const parsedCfg = JSON.parse(probe.cfg);
+    assert.deepEqual(parsedCfg.mcp, {}, "baseline variant should not wire an MCP server");
+    assert.ok(probe.storage, "OPENCODE_DATA_DIR reached the agent process");
+    assert.ok(probe.storage.includes(record.runId), "storage dir is per-run isolated");
+    assert.ok(!probe.storage.includes(".local/share/opencode/storage"),
+      "storage path must not match the user's default opencode storage location");
   } finally {
     await rm(root, { force: true, recursive: true });
   }

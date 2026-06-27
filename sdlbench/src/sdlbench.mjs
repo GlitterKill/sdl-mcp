@@ -6,11 +6,16 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { createServer as createNetServer } from "node:net";
 import { performance } from "node:perf_hooks";
+import { signalsForLoss } from "./attribution-signals.mjs";
+import { computeCoverage } from "./coverage.mjs";
+import { mean, stdDev, bootstrapCI, mannWhitneyU } from "./stats.mjs";
+import { prepareOpencodeSterileRuntime } from "./agents/opencode-runtime.mjs";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const DEFAULT_RESULTS = "sdlbench/results/sessions.jsonl";
 const DEFAULT_ENCODING = "o200k_base";
 const DEFAULT_MODEL = "gpt-5.5";
+const DEFAULT_REPOS_LOCK = "sdlbench/config/repos.lock.json";
 const TIKTOKEN_SPEC = "git+https://github.com/openai/tiktoken@0.13.0";
 const CODEX_SYSTEM_SKILLS = ["imagegen", "openai-docs", "plugin-creator", "skill-creator", "skill-installer"];
 const CODEX_STERILE_FEATURES = [
@@ -67,13 +72,19 @@ export async function runBenchmark(options = {}) {
   const model = resolveModel({ options, agentConfig, pricing });
   const modelPricing = resolveModelPricing(pricing, model);
   const matrix = await readJson(matrixPath);
+  const reposLock = await loadReposLock(root, options.reposLockPath);
   const tasks = await loadTasks(root, dirname(matrixPath), matrix);
+  const filteredTasks = options.repoIdFilter
+    ? tasks.filter((task) => task.repoId === options.repoIdFilter)
+    : tasks;
   const records = [];
+  const warmSessions = new Map();
+  const indexedRepos = new Set();
 
   await mkdir(dirname(resultsPath), { recursive: true });
   await mkdir(workDir, { recursive: true });
 
-  for (const task of tasks) {
+  for (const task of filteredTasks) {
     const started = performance.now();
     const taskRunId = `${Date.now()}-${task.taskId}-${variant}`.replace(/[^a-zA-Z0-9_.-]/g, "-");
     const runRoot = join(workDir, taskRunId);
@@ -81,11 +92,23 @@ export async function runBenchmark(options = {}) {
     await cp(abs(root, task.repo.sourcePath), runRoot, { recursive: true });
 
     let sdlSession = null;
+    let ownsSdlSession = false;
     try {
       const setupStart = performance.now();
-      sdlSession = variant === "sdl"
-        ? await startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, options })
-        : null;
+      if (variant === "sdl") {
+        if (options.warmSession) {
+          const warmKey = task.repoId;
+          sdlSession = warmSessions.get(warmKey) ?? null;
+          if (!sdlSession) {
+            sdlSession = await startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, options });
+            warmSessions.set(warmKey, sdlSession);
+            indexedRepos.add(warmKey);
+          }
+        } else {
+          sdlSession = await startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, options });
+          ownsSdlSession = true;
+        }
+      }
       const sdlEvidence = sdlSession?.evidence ?? null;
       const setupMs = Math.round(performance.now() - setupStart);
       const activeStart = performance.now();
@@ -96,19 +119,23 @@ export async function runBenchmark(options = {}) {
       let changedFiles = Object.keys(task.solution?.files ?? {});
       let outputText;
       let codexRuntime = null;
+      let agentRuntime = null;
 
       if (executionMode === "behavior") {
         if (sdlSession) await installSdlBenchmarkReinforcement(runRoot, sdlSession);
         if (agent === "codex") {
           assertCodexWorktreeIsSterile(root, runRoot);
           codexRuntime = await prepareCodexSterileRuntime({ root, workDir, taskRunId });
+          agentRuntime = codexRuntime;
+        } else if (agent === "opencode") {
+          agentRuntime = await prepareOpencodeSterileRuntime({ root, workDir, taskRunId, sdlSession });
         }
         promptPath = join(runRoot, ".sdlbench-prompt.md");
         await writeFile(promptPath, renderAgentPrompt(task, variant), "utf8");
         const before = await snapshotFiles(runRoot);
         agentStartedAt = Date.now();
         const agentStart = performance.now();
-        agentResult = runAgentCommand(agentConfig, { runRoot, promptPath, task, variant, model, sdlSession, codexRuntime });
+        agentResult = runAgentCommand(agentConfig, { runRoot, promptPath, task, variant, model, sdlSession, agentRuntime });
         agentMs = Math.round(performance.now() - agentStart);
         changedFiles = diffSnapshots(before, await snapshotFiles(runRoot));
         outputText = [agentResult.stdout, agentResult.stderr].filter(Boolean).join("\n");
@@ -129,6 +156,7 @@ export async function runBenchmark(options = {}) {
           runRoot,
           sessionsDir: codexRuntime?.sessionsDir ?? options.codexSessionsDir,
           sinceMs: agentStartedAt ? agentStartedAt - 120_000 : 0,
+          tokenizerCommand,
         })
         : null;
       if (executionMode === "behavior" && agent === "codex" && !codexTokenCounts) {
@@ -143,6 +171,18 @@ export async function runBenchmark(options = {}) {
       const tokens = codexTokenCounts
         ? tokensFromCodexSessionCounts(codexTokenCounts, estimatedTokens)
         : estimatedTokens;
+      const claimGrade = resolveClaimGrade(executionMode, tokens.tokenizerSource);
+      const repoMeta = resolveRepoMeta(task.repoId, reposLock);
+      const workflowSteps = Array.isArray(task.workflow) ? task.workflow : [];
+      const turns = workflowSteps.length || task.workflow?.turns || 1;
+      const perTurnTokens = workflowSteps.length > 0
+        ? workflowSteps.map((step, i) => ({ turn: i + 1, phase: step.phase ?? `turn-${i + 1}`, tokens: Math.round(tokens.total / workflowSteps.length) }))
+        : [];
+      const isFirstWarmTask = options.warmSession && variant === "sdl" && indexedRepos.has(task.repoId) && !records.some((r) => r.repoId === task.repoId && r.variant === variant);
+      const indexCost = sdlSession?.evidence?.index
+        ? (isFirstWarmTask ? estimateIndexCost(sdlSession.evidence.index, tokenizerCommand, { model, encoding: modelPricing.encoding }) : 0)
+        : (variant === "sdl" ? estimateIndexCost(null, tokenizerCommand, { model, encoding: modelPricing.encoding }) : 0);
+      tokens.indexCost = indexCost;
       const record = {
         schemaVersion: SCHEMA_VERSION,
         runId: taskRunId,
@@ -152,7 +192,10 @@ export async function runBenchmark(options = {}) {
         model,
         variant,
         product: variant,
+        claimGrade,
+        warmSession: options.warmSession ?? false,
         repoId: task.repoId,
+        repo: repoMeta,
         taskId: task.taskId,
         category: task.category,
         status: passed ? "pass" : "fail",
@@ -162,6 +205,19 @@ export async function runBenchmark(options = {}) {
         agentMs: agentResult ? agentMs : durationMs,
         tokens,
         cost: estimateCost(tokens, modelPricing),
+        attribution: codexTokenCounts?.attribution
+          ? buildAttribution(codexTokenCounts.attribution, tokens)
+          : undefined,
+        coverage: task.contextTargets
+          ? computeCoverage({
+              changedFiles,
+              retrievedSymbols: variant === "sdl"
+                ? (sdlEvidence?.retrieval?.results ?? []).map((r) => r.name).filter(Boolean)
+                : [],
+              contextTargets: task.contextTargets,
+            })
+          : undefined,
+        perTurnTokens: perTurnTokens.length > 0 ? perTurnTokens : undefined,
         quality: {
           passed,
           errorRate: passed ? 0 : 1,
@@ -170,7 +226,7 @@ export async function runBenchmark(options = {}) {
         },
         workflow: {
           executionMode,
-          turns: task.workflow?.turns ?? 1,
+          turns,
           toolCalls: task.workflow?.toolCalls ?? (variant === "sdl" ? 2 : 0),
           fileReads: task.workflow?.fileReads ?? (variant === "sdl" ? 1 : 3),
           shellCommands: 1 + (agentResult ? 1 : 0),
@@ -186,7 +242,7 @@ export async function runBenchmark(options = {}) {
           codexSession: codexTokenCounts ? codexSessionArtifact(codexTokenCounts) : undefined,
           codexSterility: codexSterility ?? undefined,
           estimatedTokens: codexTokenCounts ? estimatedTokens : undefined,
-          sdl: sdlEvidence,
+          sdl: { ...sdlEvidence, observability: sdlSession?.observability ?? undefined },
           verifyStdout: verify.stdout.slice(-4000),
           verifyStderr: verify.stderr.slice(-4000),
         },
@@ -195,9 +251,11 @@ export async function runBenchmark(options = {}) {
       records.push(record);
       await appendFile(resultsPath, `${JSON.stringify(record)}\n`, "utf8");
     } finally {
-      await sdlSession?.stop?.();
+      if (ownsSdlSession) await sdlSession?.stop?.();
     }
   }
+
+  for (const session of warmSessions.values()) await session?.stop?.();
 
   return { records, resultsPath };
 }
@@ -215,7 +273,6 @@ export function importTranscript({ agent, variant, text, repoId = "unknown", tas
     input,
     output,
     productContext: 0,
-    rawEquivalent: total,
     tokenizer: counted,
   });
 
@@ -227,6 +284,7 @@ export function importTranscript({ agent, variant, text, repoId = "unknown", tas
     agent,
     variant,
     product: variant,
+    claimGrade: "none",
     repoId,
     taskId,
     status: "imported",
@@ -244,41 +302,134 @@ export function importTranscript({ agent, variant, text, repoId = "unknown", tas
 export function analyzeSessions(records) {
   const byVariant = {};
   for (const record of records) {
-    const bucket = byVariant[record.variant] ??= { sessions: 0, passed: 0, tokens: 0, saved: 0, costUsd: 0, durationMs: [] };
-    bucket.sessions += 1;
-    bucket.passed += record.quality?.passed ? 1 : 0;
-    bucket.tokens += record.tokens?.total ?? 0;
-    bucket.saved += record.tokens?.saved ?? 0;
-    bucket.costUsd += record.cost?.totalUsd ?? 0;
+    const executionMode = record.workflow?.executionMode ?? "unknown";
+    const bucket = byVariant[record.variant] ??= { byExecutionMode: {}, durationMs: [] };
+    const modeBucket = bucket.byExecutionMode[executionMode] ??= { sessions: 0, passed: 0, tokens: 0, costUsd: 0, durationMs: [] };
+    modeBucket.sessions += 1;
+    modeBucket.passed += record.quality?.passed ? 1 : 0;
+    modeBucket.tokens += record.tokens?.total ?? 0;
+    modeBucket.costUsd += record.cost?.totalUsd ?? 0;
+    modeBucket.durationMs.push(record.durationMs ?? 0);
     bucket.durationMs.push(record.durationMs ?? 0);
   }
 
   for (const bucket of Object.values(byVariant)) {
-    bucket.passRate = pct(bucket.passed, bucket.sessions);
-    bucket.savingsPercent = pct(bucket.saved, bucket.tokens + bucket.saved);
+    for (const modeBucket of Object.values(bucket.byExecutionMode)) {
+      modeBucket.passRate = pct(modeBucket.passed, modeBucket.sessions);
+      modeBucket.p50DurationMs = percentile(modeBucket.durationMs, 50);
+      delete modeBucket.durationMs;
+    }
     bucket.p50DurationMs = percentile(bucket.durationMs, 50);
     delete bucket.durationMs;
   }
 
-  const baseline = byVariant.baseline;
+  const paired = buildPairedDeltas(records);
   const deltas = {};
+
+  const baseline = byVariant.baseline;
   if (baseline) {
     for (const [variant, bucket] of Object.entries(byVariant)) {
       if (variant === "baseline") continue;
+      const pairedForVariant = paired.filter((row) => row.sdlVariant === variant);
+      const tokensSaved = pairedForVariant.reduce((sum, row) => sum + row.deltaTok, 0);
+      const costSavedUsd = round4(pairedForVariant.reduce((sum, row) => sum + (row.baselineCostUsd - row.sdlCostUsd), 0));
+      const deltaPctValues = pairedForVariant.map((row) => row.deltaPct);
+
+      const stats = deltaPctValues.length >= 3
+        ? {
+            deltasMean: round4(mean(deltaPctValues)),
+            deltasStd: round4(stdDev(deltaPctValues)),
+            bootstrap95: {
+              lower: round4(bootstrapCI(deltaPctValues).lower),
+              upper: round4(bootstrapCI(deltaPctValues).upper),
+            },
+            significant: mannWhitneyU(
+              pairedForVariant.map((p) => p.baselineTok),
+              pairedForVariant.map((p) => p.sdlTok),
+            ).significant,
+          }
+        : {};
+
       deltas[variant] = {
-        tokensSaved: baseline.tokens - bucket.tokens,
-        costSavedUsd: round4(baseline.costUsd - bucket.costUsd),
-        durationDeltaMs: bucket.p50DurationMs - baseline.p50DurationMs,
+        tokensSaved,
+        costSavedUsd,
+        pairedCount: pairedForVariant.length,
+        medianDeltaPct: round4(median(deltaPctValues)),
+        ...stats,
       };
     }
   }
 
+  const deltaPcts = paired.map((row) => row.deltaPct).sort((a, b) => a - b);
+
   return {
     schemaVersion: SCHEMA_VERSION,
-    totals: { sessions: records.length, variants: Object.keys(byVariant).length },
+    totals: { sessions: records.length, variants: Object.keys(byVariant).length, paired: paired.length },
     byVariant,
+    paired,
     deltas,
+    headlineClaim: "median paired savings on tasks both solved",
+    pairedMedianDeltaPct: round4(median(deltaPcts)),
   };
+}
+
+function buildPairedDeltas(records) {
+  const byKey = new Map();
+  for (const record of records) {
+    if (!record.quality?.passed) continue;
+    const mode = record.workflow?.executionMode ?? "unknown";
+    const key = `${record.taskId}|${record.agent ?? "unknown"}|${record.model ?? "unknown"}|${mode}`;
+    let slot = byKey.get(key);
+    if (!slot) {
+      slot = {};
+      byKey.set(key, slot);
+    }
+    slot[record.variant] = record;
+  }
+
+  const paired = [];
+  for (const slot of byKey.values()) {
+    const baseline = slot.baseline;
+    const sdl = slot.sdl;
+    if (!baseline || !sdl) continue;
+    const baselineTok = baseline.tokens?.total ?? 0;
+    const sdlTok = sdl.tokens?.total ?? 0;
+    const deltaTok = baselineTok - sdlTok;
+    const deltaPctVal = pct(deltaTok, baselineTok);
+    paired.push({
+      taskId: baseline.taskId,
+      agent: baseline.agent,
+      model: baseline.model,
+      executionMode: baseline.workflow?.executionMode ?? "unknown",
+      baselineTok,
+      sdlTok,
+      deltaTok,
+      deltaPct: deltaPctVal,
+      bothPass: Boolean(baseline.quality?.passed) && Boolean(sdl.quality?.passed),
+      baselineCostUsd: baseline.cost?.totalUsd ?? 0,
+      sdlCostUsd: sdl.cost?.totalUsd ?? 0,
+      sdlVariant: sdl.variant,
+      lossSignals: deltaPctVal < 0
+        ? signalsForLoss({
+            baselineTok,
+            sdlTok,
+            attribution: {
+              repoSizeClass: sdl.repo?.sizeClass,
+              cachedInput: sdl.tokens?.cachedInput ?? 0,
+              total: sdl.tokens?.total ?? 0,
+            },
+            observability: sdl.artifacts?.sdl?.observability ?? {},
+          })
+        : [],
+    });
+  }
+  return paired;
+}
+
+function median(sortedValues) {
+  if (!sortedValues.length) return 0;
+  const mid = Math.floor(sortedValues.length / 2);
+  return sortedValues.length % 2 ? sortedValues[mid] : (sortedValues[mid - 1] + sortedValues[mid]) / 2;
 }
 
 export async function readJsonl(path) {
@@ -300,12 +451,32 @@ export async function writeAnalysis({ inPath, outPath }) {
 async function loadTasks(root, matrixDir, matrix) {
   const files = matrix.taskFiles ?? [];
   const inline = matrix.tasks ?? [];
+  const runs = matrix.runs ?? [];
   const fromFiles = [];
   for (const file of files) {
     const data = await readJson(abs(matrixDir, file));
     fromFiles.push(...(Array.isArray(data.tasks) ? data.tasks : data));
   }
-  return [...inline, ...fromFiles].map((task) => validateTask(root, task));
+  const fromRuns = [];
+  for (const run of runs) {
+    const data = await readJson(abs(matrixDir, run.tasks));
+    const tasks = Array.isArray(data.tasks) ? data.tasks : data;
+    for (const task of tasks) {
+      fromRuns.push({ ...task, repoId: run.repoId ?? task.repoId, _runId: run.id, _family: run.family });
+    }
+  }
+  const all = [...inline, ...fromFiles, ...fromRuns];
+  const validated = [];
+  for (const task of all) {
+    const validatedTask = validateTask(root, task);
+    // Skip tasks whose local sourcePath doesn't exist (e.g. repos not cloned yet).
+    // Cloneable repos (cloneUrl) are loaded — cloning happens in startSdlHttpSession/runBenchmark.
+    if (validatedTask.repo?.sourcePath && !existsSync(abs(root, validatedTask.repo.sourcePath))) {
+      continue;
+    }
+    validated.push(validatedTask);
+  }
+  return validated;
 }
 
 function validateTask(root, task) {
@@ -369,7 +540,7 @@ function promptContextForVariant(task, variant) {
   return "Use the configured SDL-MCP server for repository context. Follow the sdl-mcp-agent-workflow retrieval ladder, edit policy, runtime policy, and usageStats completion step.";
 }
 
-function runAgentCommand(config, { runRoot, promptPath, task, variant, model, sdlSession, codexRuntime }) {
+function runAgentCommand(config, { runRoot, promptPath, task, variant, model, sdlSession, agentRuntime }) {
   const command = renderCommandTemplate(config.commandTemplate, {
     repo: runRoot,
     prompt: promptPath,
@@ -379,7 +550,7 @@ function runAgentCommand(config, { runRoot, promptPath, task, variant, model, sd
     sdlMcpConfig: sdlMcpConfigArgs(sdlSession),
     sdlMcpUrl: sdlSession?.mcpUrl ?? "",
   });
-  return { command, ...runCommand(command, runRoot, config.timeoutMs ?? 600_000, codexRuntime?.env) };
+  return { command, ...runCommand(command, runRoot, config.timeoutMs ?? 600_000, agentRuntime?.env) };
 }
 
 function renderCommandTemplate(template, values) {
@@ -616,11 +787,14 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
       task,
       timeoutMs: options.sdlHttpTimeoutMs ?? 120_000,
     });
+    const observability = startObservabilityPolling(baseUrl, authToken, task.repoId, options);
+    const stop = observability.stop;
     return {
       baseUrl,
       mcpUrl: baseUrl + "/mcp",
       evidence,
-      stop: async () => {},
+      get observability() { return observability.getDelta(); },
+      stop: async () => { stop(); },
     };
   }
 
@@ -670,6 +844,7 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
       task,
       timeoutMs: options.sdlHttpTimeoutMs ?? 120_000,
     });
+    const observability = startObservabilityPolling(baseUrl, authToken, task.repoId, options);
     return {
       baseUrl,
       mcpUrl: baseUrl + "/mcp",
@@ -679,7 +854,8 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
         dbPath,
         server: { port, logTail: logs.join("").slice(-4000) },
       },
-      stop: async () => stopChild(child),
+      get observability() { return observability.getDelta(); },
+      stop: async () => { observability.stop(); await stopChild(child); },
     };
   } catch (error) {
     await stopChild(child);
@@ -801,6 +977,73 @@ export function createSdlHttpConfig({ task, runRoot, dbPath }) {
     http: { allowRemote: false },
     httpAuth: { enabled: false },
   };
+}
+
+function startObservabilityPolling(baseUrl, authToken, repoId, options) {
+  const intervalMs = options.sdlObservabilityPollMs ?? 2000;
+  const samples = [];
+  let first = null;
+  let last = null;
+  let timer = null;
+  let callCounter = 0;
+
+  async function poll() {
+    try {
+      const url = `${trimSlash(baseUrl)}/api/observability/snapshot?repoId=${encodeURIComponent(repoId)}&_c=${callCounter++}`;
+      const snapshot = await getJson(url, authToken, 5000);
+      if (!first) first = snapshot;
+      last = snapshot;
+      samples.push(snapshot);
+    } catch {
+      // Observability may not be ready yet; silently skip.
+    }
+  }
+
+  // Fire one immediate poll, then start interval.
+  poll();
+  timer = setInterval(poll, intervalMs);
+  timer.unref?.();
+
+  return {
+    stop() {
+      if (timer) { clearInterval(timer); timer = null; }
+    },
+    getDelta() {
+      if (!first || !last) return null;
+      return computeObservabilityDelta(first, last);
+    },
+  };
+}
+
+function computeObservabilityDelta(first, last) {
+  const delta = {};
+  const interesting = [
+    "retrieval", "beam", "indexing", "tokenEfficiency",
+    "health", "toolVolume", "delta",
+  ];
+  for (const key of interesting) {
+    const f = first[key];
+    const l = last[key];
+    if (!f || !l) continue;
+    delta[key] = {};
+    for (const [k, v] of Object.entries(l)) {
+      const fv = f[k];
+      if (typeof v === "number" && typeof fv === "number") {
+        delta[key][k] = v - fv;
+      }
+    }
+  }
+  return flattenObservabilityDelta(delta);
+}
+
+function flattenObservabilityDelta(delta) {
+  const flat = {};
+  for (const [section, fields] of Object.entries(delta)) {
+    for (const [field, value] of Object.entries(fields)) {
+      flat[`${section}_${field}`] = value;
+    }
+  }
+  return flat;
 }
 
 async function retrieveSdlHttpContext({ baseUrl, authToken, task, timeoutMs }) {
@@ -977,7 +1220,6 @@ function countSessionTokens(task, variant, tokenizerCommand, sdlContext, outputO
     input: counted.counts.input,
     output: counted.counts.output,
     productContext: counted.counts.productContext,
-    rawEquivalent: counted.counts.rawInput + counted.counts.output,
     tokenizer: counted,
   });
 }
@@ -997,18 +1239,22 @@ function runTokenizer(command, texts, { model = DEFAULT_MODEL, encoding = DEFAUL
   }
 }
 
-function normalizeTokens({ input, output, productContext = 0, rawEquivalent, tokenizer }) {
+function normalizeTokens({ input, output, productContext = 0, tokenizer }) {
   const total = input + output;
-  const raw = Math.max(rawEquivalent ?? total, total);
-  const saved = Math.max(0, raw - total);
+  // tiktoken-path records (fixture + behavior prompt estimates + imports) never
+  // claim savings: the `rawEquivalent` line is a hand-written prompt-size proxy,
+  // not a measured agent session. Setting saved=0/rawEquivalent=total closes the
+  // fixture-mode tautology where saved = rawEquivalent - total. Behavior-mode
+  // Codex session counts (tokensFromCodexSessionCounts) build their own honest
+  // token object without this helper.
   return {
     input,
     output,
     total,
     productContext,
-    rawEquivalent: raw,
-    saved,
-    savingsPercent: pct(saved, raw),
+    rawEquivalent: total,
+    saved: 0,
+    savingsPercent: 0,
     model: tokenizer.model ?? tokenizer.modelHint,
     encoding: tokenizer.encoding,
     modelHint: tokenizer.modelHint,
@@ -1018,14 +1264,14 @@ function normalizeTokens({ input, output, productContext = 0, rawEquivalent, tok
   };
 }
 
-export async function findCodexSessionTokenCounts({ runRoot, sessionsDir = defaultCodexSessionsDir(), sinceMs = 0 } = {}) {
+export async function findCodexSessionTokenCounts({ runRoot, sessionsDir = defaultCodexSessionsDir(), sinceMs = 0, tokenizerCommand } = {}) {
   if (!runRoot) return null;
   const sessionFiles = await findSessionJsonlFiles(sessionsDir, sinceMs);
   const normalizedRunRoot = normalizeSessionPath(runRoot);
   const matches = [];
 
   for (const sessionFile of sessionFiles) {
-    const match = await readCodexSessionTokenFile(sessionFile, normalizedRunRoot);
+    const match = await readCodexSessionTokenFile(sessionFile, normalizedRunRoot, tokenizerCommand);
     if (match) matches.push(match);
   }
 
@@ -1057,10 +1303,12 @@ async function findSessionJsonlFiles(root, sinceMs) {
   }
 }
 
-async function readCodexSessionTokenFile(sessionFile, normalizedRunRoot) {
+async function readCodexSessionTokenFile(sessionFile, normalizedRunRoot, tokenizerCommand) {
   const text = await readFile(sessionFile.path, "utf8");
   let metadata = null;
   let tokenInfo = null;
+  const functionCalls = [];
+  const functionOutputs = new Map();
 
   for (const line of text.split(/\r?\n/)) {
     if (!line.trim()) continue;
@@ -1073,14 +1321,29 @@ async function readCodexSessionTokenFile(sessionFile, normalizedRunRoot) {
     if (event.type === "session_meta") {
       metadata = event.payload ?? null;
     } else if (event.type === "event_msg" && event.payload?.type === "token_count") {
-      // Codex writes cumulative tiktoken session counts; the final one is the full run.
       tokenInfo = event.payload.info ?? tokenInfo;
+    } else if (event.type === "response_item") {
+      const payload = event.payload;
+      if (payload?.type === "function_call" && payload.call_id) {
+        functionCalls.push({
+          callId: payload.call_id,
+          toolName: payload.name ?? "unknown",
+          arguments: payload.arguments ?? "",
+          ts: event.timestamp ?? null,
+        });
+      } else if (payload?.type === "function_call_output" && payload.call_id) {
+        functionOutputs.set(payload.call_id, payload.output ?? "");
+      }
     }
   }
 
   if (!metadata?.cwd || normalizeSessionPath(metadata.cwd) !== normalizedRunRoot || !tokenInfo?.total_token_usage) {
     return null;
   }
+
+  const toolCalls = tokenizerCommand
+    ? tokenizeFunctionCalls(functionCalls, functionOutputs, tokenizerCommand)
+    : functionCalls.map((fc) => ({ toolName: fc.toolName, tokensIn: 0, tokensOut: 0, ts: fc.ts }));
 
   return {
     sessionFile: sessionFile.path,
@@ -1092,11 +1355,49 @@ async function readCodexSessionTokenFile(sessionFile, normalizedRunRoot) {
     modelProvider: metadata.model_provider,
     modelContextWindow: tokenInfo.model_context_window,
     usage: tokenInfo.total_token_usage,
+    attribution: { toolCalls },
   };
+}
+
+function tokenizeFunctionCalls(calls, outputs, tokenizerCommand) {
+  if (!calls.length) return [];
+  const texts = {};
+  calls.forEach((call, i) => {
+    texts[`in_${i}`] = call.arguments ?? "";
+    texts[`out_${i}`] = outputs.get(call.callId) ?? "";
+  });
+  let counted;
+  try {
+    counted = runTokenizer(tokenizerCommand, texts);
+  } catch {
+    return calls.map((call) => ({ toolName: call.toolName, tokensIn: 0, tokensOut: 0, ts: call.ts }));
+  }
+  return calls.map((call, i) => ({
+    toolName: call.toolName,
+    tokensIn: counted.counts[`in_${i}`] ?? 0,
+    tokensOut: counted.counts[`out_${i}`] ?? 0,
+    ts: call.ts,
+  }));
 }
 
 function normalizeSessionPath(value) {
   return resolve(String(value).replace(/^\\\\\?\\/, "")).replace(/\\/g, "/").toLowerCase();
+}
+
+function buildAttribution(rawAttribution, tokens) {
+  const toolCalls = rawAttribution.toolCalls ?? [];
+  const retrievalTokens = toolCalls
+    .filter((tc) => tc.toolName?.startsWith("sdl."))
+    .reduce((sum, tc) => sum + tc.tokensIn + tc.tokensOut, 0);
+  return {
+    toolCalls,
+    phaseBreakdown: {
+      coldIndex: 0,
+      retrieval: retrievalTokens,
+      reasoning: tokens.reasoningOutput ?? 0,
+      output: tokens.output ?? 0,
+    },
+  };
 }
 
 function tokensFromCodexSessionCounts(sessionCounts, estimatedTokens) {
@@ -1128,6 +1429,24 @@ function tokensFromCodexSessionCounts(sessionCounts, estimatedTokens) {
     sessionFile: sessionCounts.sessionFile,
     modelContextWindow: sessionCounts.modelContextWindow,
   };
+}
+
+function resolveClaimGrade(executionMode, tokenizerSource) {
+  if (executionMode === "fixture") return "none";
+  if (tokenizerSource === "codex-session") return "primary";
+  return "secondary";
+}
+
+function estimateIndexCost(indexPayload, tokenizerCommand, { model, encoding } = {}) {
+  if (!tokenizerCommand) return 0;
+  try {
+    const text = indexPayload ? JSON.stringify(indexPayload) : "";
+    if (!text.trim()) return 0;
+    const counted = runTokenizer(tokenizerCommand, { indexPayload: text }, { model, encoding });
+    return counted.counts.indexPayload ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 function codexSessionArtifact(sessionCounts) {
@@ -1198,20 +1517,43 @@ function round4(value) {
   return Math.round(value * 10000) / 10000;
 }
 
-function estimateCost(tokens, pricing = DEFAULT_PRICING) {
+export function estimateCost(tokens, pricing = DEFAULT_PRICING) {
   const rates = { ...DEFAULT_PRICING, ...pricing };
-  const inputUsd = (tokens.input / 1_000_000) * rates.inputPerMTok;
-  const outputUsd = (tokens.output / 1_000_000) * rates.outputPerMTok;
-  const contextUsd = (tokens.productContext / 1_000_000) * rates.contextPerMTok;
+  const input = tokens.input ?? 0;
+  const output = tokens.output ?? 0;
+  const productContext = tokens.productContext ?? 0;
+  const cachedInput = tokens.cachedInput ?? 0;
+  const reasoningOutput = tokens.reasoningOutput ?? 0;
+  const uncachedInput = Math.max(0, input - cachedInput);
+  const nonReasoningOutput = Math.max(0, output - reasoningOutput);
+  const cachedInputPerMTok = rates.cachedInputPerMTok ?? rates.inputPerMTok;
+  const reasoningOutputPerMTok = rates.reasoningOutputPerMTok ?? rates.outputPerMTok;
+
+  const cachedInputUsd = (cachedInput / 1_000_000) * cachedInputPerMTok;
+  const uncachedInputUsd = (uncachedInput / 1_000_000) * rates.inputPerMTok;
+  const nonReasoningOutputUsd = (nonReasoningOutput / 1_000_000) * rates.outputPerMTok;
+  const reasoningOutputUsd = (reasoningOutput / 1_000_000) * reasoningOutputPerMTok;
+  const contextUsd = (productContext / 1_000_000) * rates.contextPerMTok;
+  // Comparability lines: what all input/output would cost at full rates with no
+  // cache discount. They are reported for comparison only and are NOT part of totalUsd.
+  const inputUsd = (input / 1_000_000) * rates.inputPerMTok;
+  const outputUsd = (output / 1_000_000) * rates.outputPerMTok;
+
   return {
     inputUsd: round4(inputUsd),
     outputUsd: round4(outputUsd),
+    cachedInputUsd: round4(cachedInputUsd),
+    uncachedInputUsd: round4(uncachedInputUsd),
+    nonReasoningOutputUsd: round4(nonReasoningOutputUsd),
+    reasoningOutputUsd: round4(reasoningOutputUsd),
     contextUsd: round4(contextUsd),
-    totalUsd: round4(inputUsd + outputUsd + contextUsd),
+    totalUsd: round4(cachedInputUsd + uncachedInputUsd + nonReasoningOutputUsd + reasoningOutputUsd + contextUsd),
     pricingModel: rates.model ?? tokens.model ?? DEFAULT_MODEL,
     inputPerMTok: rates.inputPerMTok,
     outputPerMTok: rates.outputPerMTok,
     contextPerMTok: rates.contextPerMTok,
+    cachedInputPerMTok,
+    reasoningOutputPerMTok,
     pricingSource: rates.pricingSource ?? "default",
   };
 }
@@ -1232,6 +1574,25 @@ async function loadPricing(root, pricingPath) {
     if (error?.code !== "ENOENT") throw error;
     return { defaultModel: DEFAULT_MODEL, default: DEFAULT_PRICING, models: {} };
   }
+}
+
+async function loadReposLock(root, lockPath) {
+  const path = abs(root, lockPath ?? DEFAULT_REPOS_LOCK);
+  try {
+    return await readJson(path);
+  } catch (error) {
+    if (error?.code !== "ENOENT") return { repos: [] };
+    return { repos: [] };
+  }
+}
+
+function resolveRepoMeta(repoId, reposLock) {
+  const entry = reposLock?.repos?.find((repo) => repo.repoId === repoId);
+  if (!entry) return { sizeClass: null, languageTags: [] };
+  return {
+    sizeClass: entry.sizeClass ?? null,
+    languageTags: entry.languageTags ?? [],
+  };
 }
 
 function resolveModel({ options, agentConfig, pricing }) {
