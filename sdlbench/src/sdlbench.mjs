@@ -548,7 +548,13 @@ function renderAgentPrompt(task, variant) {
 
 function promptContextForVariant(task, variant) {
   if (variant !== "sdl") return task.context.raw;
-  return "Use the configured SDL-MCP server for repository context. Follow the sdl-mcp-agent-workflow retrieval ladder, edit policy, runtime policy, and usageStats completion step.";
+  return [
+    "Use the configured SDL-MCP server for repository context.",
+    `The repository is already registered and indexed under repoId "${task.repoId}".`,
+    "Start with sdl.repo.status, then use sdl.context or sdl.workflow before reading or editing indexed source.",
+    "Use SDL edit tools for indexed source and SDL runtime tools for repo-local commands.",
+    "Call sdl.usageStats with scope session and persist true before the final answer.",
+  ].join("\n");
 }
 
 function runAgentCommand(config, { runRoot, promptPath, task, variant, model, sdlSession, agentRuntime }) {
@@ -681,8 +687,8 @@ function assertCodexWorktreeIsSterile(root, runRoot) {
 async function installSdlBenchmarkReinforcement(runRoot, sdlSession) {
   const hookDir = join(runRoot, ".codex", "hooks");
   await mkdir(hookDir, { recursive: true });
-  await writeFile(join(runRoot, "AGENTS.md"), sdlBenchmarkInstructions(), "utf8");
-  await writeFile(join(runRoot, "SDL.md"), sdlBenchmarkInstructions(), "utf8");
+  await writeFile(join(runRoot, "AGENTS.md"), sdlBenchmarkInstructions(sdlSession), "utf8");
+  await writeFile(join(runRoot, "SDL.md"), sdlBenchmarkInstructions(sdlSession), "utf8");
   await writeFile(join(runRoot, ".codex", "hooks.json"), JSON.stringify({
     hooks: {
       SessionStart: [{
@@ -726,14 +732,16 @@ async function installSdlBenchmarkReinforcement(runRoot, sdlSession) {
   await writeFile(join(hookDir, "force-sdl-mcp.mjs"), forceHook, "utf8");
 }
 
-function sdlBenchmarkInstructions() {
+function sdlBenchmarkInstructions(sdlSession) {
+  const repoId = sdlSession?.repoId ?? "fixture-js";
   return [
     "# SDL-MCP Benchmark Instructions",
     "",
+    `The repository is registered and indexed under repoId "${repoId}".`,
     "Use SDL-MCP as the repository interface.",
-    "Start with repo.status, then use sdl.context or sdl.workflow before reading or editing indexed source.",
+    `Start with sdl.repo.status (repoId: "${repoId}"), then use sdl.context or sdl.workflow before reading or editing indexed source.`,
     "Use SDL edit tools for indexed source and SDL runtime tools for repo-local commands.",
-    "Call usageStats with scope session and persist true before the final answer.",
+    "Call sdl.usageStats with scope session and persist true before the final answer.",
   ].join("\n");
 }
 
@@ -803,6 +811,7 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
     return {
       baseUrl,
       mcpUrl: baseUrl + "/mcp",
+      repoId: task.repoId,
       evidence,
       get observability() { return observability.getDelta(); },
       stop: async () => { stop(); },
@@ -859,6 +868,7 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
     return {
       baseUrl,
       mcpUrl: baseUrl + "/mcp",
+      repoId: task.repoId,
       evidence: {
         ...evidence,
         configPath,
