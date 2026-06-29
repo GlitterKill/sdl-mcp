@@ -340,6 +340,11 @@ function summaryStorageMetadata(providerName: string): {
     : { quality: 1.0, source: "llm" };
 }
 
+function isCodeFenceOnlySummary(summary: string | null | undefined): boolean {
+  const trimmed = summary?.trim() ?? "";
+  return trimmed === "```" || /^```[A-Za-z0-9_-]+$/.test(trimmed);
+}
+
 interface PendingSymbolSummaryUpdate {
   symbolId: string;
   summary: string | null;
@@ -639,6 +644,7 @@ export async function generateSummariesForRepo(
     // Quality thresholds: JSDoc=1.0, LLM=0.8, NN-direct=0.6, NN-adapted=0.5,
     // heuristic=0.3-0.4. We only regenerate below 0.8.
     if (
+      !isCodeFenceOnlySummary(sym.summary) &&
       sym.summaryQuality !== undefined &&
       sym.summaryQuality !== null &&
       sym.summaryQuality >= 0.8

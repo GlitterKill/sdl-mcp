@@ -1,8 +1,12 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 import {
   createSummaryProvider,
+  generateSummariesForRepo,
   AnthropicSummaryProvider,
   OpenAICompatibleSummaryProvider,
   summaryCacheKey,
@@ -12,6 +16,43 @@ import type {
   SummaryBatchResult,
   GeneratedSummaryResult,
 } from "../../dist/indexer/summary-generator.js";
+import type { AppConfig } from "../../dist/config/types.js";
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+} from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+
+const TEST_DB_PATH = join(
+  tmpdir(),
+  `.lbug-summary-generator-unit-test-${process.pid}.lbug`,
+);
+
+async function resetDb(): Promise<void> {
+  await closeLadybugDb();
+  for (const path of [
+    TEST_DB_PATH,
+    `${TEST_DB_PATH}.wal`,
+    `${TEST_DB_PATH}.shadow`,
+    `${TEST_DB_PATH}.lock`,
+  ]) {
+    if (existsSync(path)) rmSync(path, { recursive: true, force: true });
+  }
+  mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
+  await initLadybugDb(TEST_DB_PATH);
+}
+
+function mockSummaryConfig(): AppConfig {
+  return {
+    semantic: {
+      enabled: true,
+      provider: "local",
+      generateSummaries: true,
+      summaryProvider: "mock",
+    },
+  } as AppConfig;
+}
 
 describe("createSummaryProvider", () => {
   let originalApiKey: string | undefined;
@@ -261,5 +302,76 @@ describe("OpenAICompatibleSummaryProvider construction", () => {
     // If it had used ANTHROPIC_API_KEY, it would still be openai-compatible,
     // but the test confirms the provider was created (not null) without
     // requiring an env var.
+  });
+});
+
+describe("generateSummariesForRepo", () => {
+  after(async () => {
+    await closeLadybugDb();
+    if (existsSync(TEST_DB_PATH)) {
+      rmSync(TEST_DB_PATH, { recursive: true, force: true });
+    }
+  });
+
+  it("regenerates code-fence-only summaries even when quality is high", async () => {
+    await resetDb();
+    const conn = await getLadybugConn();
+    const repoId = "summary-generator-test";
+    const fileId = "summary-generator-test-file";
+    const symbolId = "summary-generator-test-symbol";
+    const now = "2026-06-29T00:00:00.000Z";
+
+    await ladybugDb.upsertRepo(conn, {
+      repoId,
+      rootPath: "F:/tmp/summary-generator-test",
+      configJson: "{}",
+      createdAt: now,
+    });
+    await ladybugDb.upsertFile(conn, {
+      fileId,
+      repoId,
+      relPath: "src/service.ts",
+      contentHash: "summary-generator-test-hash",
+      language: "ts",
+      byteSize: 128,
+      lastIndexedAt: now,
+    });
+    await ladybugDb.upsertSymbol(conn, {
+      symbolId,
+      repoId,
+      fileId,
+      kind: "function",
+      name: "staleCodeFence",
+      exported: true,
+      visibility: "public",
+      language: "ts",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 3,
+      rangeEndCol: 1,
+      astFingerprint: "summary-generator-test-fp",
+      signatureJson: JSON.stringify({
+        text: "function staleCodeFence(): void",
+      }),
+      summary: "```ts",
+      summaryQuality: 0.8,
+      summarySource: "provider:scip",
+      invariantsJson: null,
+      sideEffectsJson: null,
+      roleTagsJson: null,
+      searchText: null,
+      updatedAt: now,
+    });
+
+    const result = await generateSummariesForRepo(repoId, mockSummaryConfig());
+    const rows = await ladybugDb.getSymbolsByRepo(conn, repoId);
+    const symbol = rows.find((row) => row.symbolId === symbolId);
+
+    assert.strictEqual(result.generated, 1);
+    assert.ok(symbol);
+    assert.notStrictEqual(symbol.summary, "```ts");
+    assert.match(symbol.summary ?? "", /^function staleCodeFence/);
+    assert.strictEqual(symbol.summaryQuality, 0.6);
+    assert.strictEqual(symbol.summarySource, "heuristic-typed");
   });
 });
