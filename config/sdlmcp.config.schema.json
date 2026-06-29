@@ -820,13 +820,16 @@
         },
         "generateSummaries": {
           "type": "boolean",
-          "default": false
+          "default": true
         },
         "summaryProvider": {
-          "type": "string",
-          "enum": ["api", "local", "mock"],
-          "description": "Summary LLM backend, independent from the embedding provider. 'api' = Anthropic, 'local' = OpenAI-compatible (Ollama), 'mock' = deterministic. Defaults to the embedding 'provider' value."
+          "type": ["string", "null"],
+          "enum": ["api", "local", "mock", null],
+          "default": "mock",
+          "description": "Summary backend, independent from the embedding provider. 'api' = Anthropic, 'local' = OpenAI-compatible (Ollama), 'mock' = deterministic concise prose. Null is treated as unset and resolves to 'mock'."
         },
+
+
         "summaryModel": {
           "type": "string",
           "description": "Model name for summary generation. Defaults per-provider: 'api' uses 'claude-haiku-4-5-20251001', 'local' uses 'gpt-4o-mini'."
@@ -1084,7 +1087,8 @@
         "embeddingProfile": "specialized",
         "symbolEmbeddingModels": ["jina-embeddings-v2-base-code"],
         "fileSummaryEmbeddingModels": ["nomic-embed-text-v1.5"],
-        "generateSummaries": false,
+        "generateSummaries": true,
+        "summaryProvider": "mock",
         "summaryModel": "claude-haiku-4-5-20251001",
         "summaryMaxConcurrency": 5,
         "summaryBatchSize": 20,

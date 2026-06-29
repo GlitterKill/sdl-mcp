@@ -88,37 +88,68 @@ describe("createSummaryProvider", () => {
 });
 
 describe("MockSummaryProvider.generate", () => {
-  it("returns heuristic summary when available", async () => {
+  it("uses prepared embedding input for concise prose", async () => {
     const provider = createSummaryProvider("mock");
     assert.ok(provider);
 
     const result = await provider.generate({
-      symbolName: "processFile",
+      symbolName: "loadUser",
+      kind: "function",
+      signature: "async function loadUser(id: string): Promise<UserProfile>",
+      embeddingInput: {
+        symbol: {
+          name: "loadUser",
+          kind: "function",
+        },
+        signatureText:
+          "async function loadUser(id: string): Promise<UserProfile>",
+        roleTags: ["request handler", "http"],
+        sideEffects: ["reads from the user profile cache"],
+        searchTerms: ["user", "profile"],
+        imports: [{ label: "UserProfile", confidence: 1, resolved: true }],
+        calls: [{ label: "readCache", confidence: 1, resolved: true }],
+        invariants: [],
+        relPath: "src/users/load-user.ts",
+        language: "typescript",
+        summaryFreshness: "absent",
+        summaryText: null,
+      },
+    });
+
+    assert.match(result, /^function loadUser request handler/);
+    assert.match(result, /returns Promise<UserProfile>/);
+    assert.match(result, /reads from the user profile cache/);
+    assert.ok(!result.includes("UserProfile,"), "imports are ignored");
+    assert.ok(!result.includes("readCache"), "calls are ignored");
+    assert.ok(!result.includes("participates in"));
+  });
+
+  it("uses kind, name, and signature fallback when embedding input is absent", async () => {
+    const provider = createSummaryProvider("mock");
+    assert.ok(provider);
+
+    const result = await provider.generate({
+      symbolName: "parseConfig",
+      kind: "function",
+      signature: "function parseConfig(raw: string): RepoConfig",
       heuristicSummary: "Processes a single file for indexing.",
     });
-    assert.strictEqual(result, "Processes a single file for indexing.");
+
+    assert.match(result, /^function parseConfig/);
+    assert.match(result, /returns RepoConfig/);
+    assert.ok(!result.includes("Processes a single file"));
+    assert.ok(!result.includes("participates in"));
   });
 
-  it("returns generic summary when heuristic is empty", async () => {
-    const provider = createSummaryProvider("mock");
-    assert.ok(provider);
-
-    const result = await provider.generate({
-      symbolName: "processFile",
-      heuristicSummary: "",
-    });
-    assert.ok(result.includes("processFile"));
-    assert.ok(result.includes("participates in"));
-  });
-
-  it("returns generic summary when heuristic is undefined", async () => {
+  it("returns a name-based fallback when no structural input exists", async () => {
     const provider = createSummaryProvider("mock");
     assert.ok(provider);
 
     const result = await provider.generate({
       symbolName: "myFunction",
     });
-    assert.ok(result.includes("myFunction"));
+    assert.match(result, /^symbol myFunction/);
+    assert.ok(!result.includes("participates in"));
   });
 });
 

@@ -9,7 +9,93 @@
  * - Jina (code-specialized): structured labeled sections
  * - Nomic (general text): natural-language prose
  */
+import { SYMBOL_CARD_SUMMARY_MAX_CHARS } from "../config/constants.js";
 import type { PreparedSymbolEmbeddingInput } from "./symbol-embedding-context.js";
+
+
+export const CONCISE_SYMBOL_SUMMARY_BUILDER_VERSION = "concise-symbol-summary-v1";
+
+function firstNonEmpty(values: readonly string[]): string | null {
+  for (const value of values) {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
+function stripTrailingSentencePunctuation(value: string): string {
+  return value.replace(/[.;:]$/u, "").trim();
+}
+
+function capSummary(text: string): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  if (oneLine.length <= SYMBOL_CARD_SUMMARY_MAX_CHARS) {
+    return oneLine;
+  }
+  return `${oneLine.slice(0, SYMBOL_CARD_SUMMARY_MAX_CHARS - 3).trimEnd()}...`;
+}
+
+function normalizeReturnType(value: string | undefined): string | null {
+  const normalized = value?.replace(/\s+/g, " ").trim();
+  if (!normalized || /^(?:void|undefined|never)$/i.test(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+function extractObviousReturnType(signatureText: string | null): string | null {
+  const signature = signatureText?.replace(/\s+/g, " ").trim();
+  if (!signature) {
+    return null;
+  }
+
+  const tsReturn = signature.match(/\)\s*:\s*([^;={]+?)(?=\s*(?:=>|\{|$))/u);
+  if (tsReturn) {
+    return normalizeReturnType(tsReturn[1]);
+  }
+
+  const rustReturn = signature.match(/->\s*([^;={]+?)(?=\s*(?:where|\{|$))/u);
+  if (rustReturn) {
+    return normalizeReturnType(rustReturn[1]);
+  }
+
+  const goReturn = signature.match(
+    /\)\s*(?:\(([^)]*)\)|([A-Za-z_][\w.\[\]*<>]*(?:\s*,\s*[A-Za-z_][\w.\[\]*<>]*)?))\s*(?=\{|$)/u,
+  );
+  if (goReturn) {
+    return normalizeReturnType(goReturn[1] ?? goReturn[2]);
+  }
+
+  return null;
+}
+
+/**
+ * Builds deterministic one-sentence prose for mock summary generation.
+ * The output intentionally avoids dependency lists so mock summaries stay short.
+ */
+export function buildConciseSymbolSummary(
+  input: PreparedSymbolEmbeddingInput,
+): string {
+  const kind = (input.symbol.kind ?? "symbol").trim() || "symbol";
+  const name = (input.symbol.name ?? "symbol").trim() || "symbol";
+  const role = firstNonEmpty(input.roleTags);
+  const returnType = extractObviousReturnType(input.signatureText);
+  const sideEffect = firstNonEmpty(input.sideEffects);
+
+  const clauses = [
+    `${kind} ${name}${role ? ` ${stripTrailingSentencePunctuation(role)}` : ""}`,
+  ];
+  if (returnType) {
+    clauses.push(`returns ${returnType}`);
+  }
+  if (sideEffect) {
+    clauses.push(stripTrailingSentencePunctuation(sideEffect));
+  }
+
+  return capSummary(`${clauses.join("; ")}.`);
+}
 
 /**
  * Build a structured embedding payload for Jina code models.

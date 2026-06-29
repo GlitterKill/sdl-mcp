@@ -4,6 +4,14 @@ import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import type { AppConfig } from "../config/types.js";
 import type { IndexProgress } from "./indexer.js";
+import {
+  prepareSymbolEmbeddingInputs,
+  type PreparedSymbolEmbeddingInput,
+} from "./symbol-embedding-context.js";
+import {
+  buildConciseSymbolSummary,
+  CONCISE_SYMBOL_SUMMARY_BUILDER_VERSION,
+} from "./symbol-embedding-text.js";
 
 export interface GeneratedSummaryResult {
   summary: string;
@@ -19,23 +27,49 @@ export interface SummaryProvider {
     kind?: string;
     signature?: string;
     heuristicSummary?: string;
+    embeddingInput?: PreparedSymbolEmbeddingInput;
   }): Promise<string>;
 }
 
 const ANTHROPIC_SYSTEM_PROMPT =
   "You are a code documentation assistant. Write a 1-3 sentence summary of what this TypeScript/JavaScript symbol does. Be specific, not generic. Focus on behavior, not structure.";
 
+function buildFallbackPreparedInput(input: {
+  symbolName: string;
+  kind?: string;
+  signature?: string;
+}): PreparedSymbolEmbeddingInput {
+  return {
+    symbol: {
+      name: input.symbolName,
+      kind: input.kind ?? "symbol",
+    } as PreparedSymbolEmbeddingInput["symbol"],
+    signatureText: input.signature ?? null,
+    relPath: null,
+    language: null,
+    roleTags: [],
+    searchTerms: [],
+    invariants: [],
+    sideEffects: [],
+    imports: [],
+    calls: [],
+    summaryFreshness: "absent",
+    summaryText: null,
+  };
+}
+
 class MockSummaryProvider implements SummaryProvider {
   name = "mock";
 
   async generate(input: {
     symbolName: string;
-    heuristicSummary?: string;
+    kind?: string;
+    signature?: string;
+    embeddingInput?: PreparedSymbolEmbeddingInput;
   }): Promise<string> {
-    if (input.heuristicSummary && input.heuristicSummary.trim().length > 0) {
-      return input.heuristicSummary;
-    }
-    return `${input.symbolName} participates in repository control flow and dependencies.`;
+    return buildConciseSymbolSummary(
+      input.embeddingInput ?? buildFallbackPreparedInput(input),
+    );
   }
 }
 
@@ -249,6 +283,137 @@ function tokenDistance(a: string, b: string): number {
   return 1 - overlap / Math.max(1, union);
 }
 
+function firstSummaryContextValue(values: readonly string[] | undefined): string {
+  for (const value of values ?? []) {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
+  return "";
+}
+
+function buildSummaryCardHash(input: {
+  symbolName: string;
+  kind?: string | null;
+  signature?: string | null;
+  astFingerprint?: string | null;
+  providerName: string;
+  modelName: string;
+  embeddingInput?: PreparedSymbolEmbeddingInput;
+}): string {
+  const signatureText = input.embeddingInput?.signatureText ?? input.signature ?? "";
+  if (input.providerName === "mock") {
+    return hashContent(
+      [
+        input.symbolName,
+        input.kind ?? "",
+        input.providerName,
+        input.modelName,
+        CONCISE_SYMBOL_SUMMARY_BUILDER_VERSION,
+        signatureText,
+        firstSummaryContextValue(input.embeddingInput?.roleTags),
+        firstSummaryContextValue(input.embeddingInput?.sideEffects),
+      ].join("|"),
+    );
+  }
+
+  return hashContent(
+    [
+      input.symbolName,
+      input.kind ?? "",
+      input.signature ?? "",
+      input.astFingerprint ?? "",
+      input.providerName,
+      input.modelName,
+    ].join("|"),
+  );
+}
+
+
+function summaryStorageMetadata(providerName: string): {
+  quality: number;
+  source: string;
+} {
+  return providerName === "mock"
+    ? { quality: 0.6, source: "heuristic-typed" }
+    : { quality: 1.0, source: "llm" };
+}
+
+interface PendingSymbolSummaryUpdate {
+  symbolId: string;
+  summary: string | null;
+  summaryQuality: number;
+  summarySource: string;
+}
+
+interface PendingGeneratedSummary extends PendingSymbolSummaryUpdate {
+  provider: string;
+  model: string;
+  cardHash: string;
+  costUsd: number;
+}
+
+async function updateSymbolSummariesInTransaction(
+  rows: readonly PendingSymbolSummaryUpdate[],
+): Promise<void> {
+  if (rows.length === 0) {
+    return;
+  }
+
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.withTransaction(wConn, async (txConn) => {
+      const updatedAt = new Date().toISOString();
+      for (const row of rows) {
+        await ladybugDb.updateSymbolSummary(
+          txConn,
+          row.symbolId,
+          row.summary,
+          row.summaryQuality,
+          row.summarySource,
+          updatedAt,
+        );
+      }
+    });
+  });
+}
+
+async function persistGeneratedSummariesInTransaction(
+  rows: readonly PendingGeneratedSummary[],
+): Promise<void> {
+  if (rows.length === 0) {
+    return;
+  }
+
+  await withWriteConn(async (wConn) => {
+    await ladybugDb.withTransaction(wConn, async (txConn) => {
+      const now = new Date().toISOString();
+      for (const row of rows) {
+        await ladybugDb.upsertSummaryCache(txConn, {
+          symbolId: row.symbolId,
+          summary: row.summary ?? "",
+          provider: row.provider,
+          model: row.model,
+          cardHash: row.cardHash,
+          costUsd: row.costUsd,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await ladybugDb.updateSymbolSummary(
+          txConn,
+          row.symbolId,
+          row.summary,
+          row.summaryQuality,
+          row.summarySource,
+          now,
+        );
+      }
+    });
+  });
+}
+
+
+
 export async function generateSummaryWithGuardrails(input: {
   symbolName: string;
   symbolId?: string;
@@ -256,11 +421,15 @@ export async function generateSummaryWithGuardrails(input: {
   signature?: string;
   astFingerprint?: string;
   heuristicSummary?: string;
+  embeddingInput?: PreparedSymbolEmbeddingInput;
   provider: string;
   summaryModel?: string;
   summaryApiKey?: string;
   summaryApiBaseUrl?: string;
+  skipCacheLookup?: boolean;
+  persistCache?: boolean;
 }): Promise<GeneratedSummaryResult> {
+
   const conn = await getLadybugConn();
   const summaryProvider = createSummaryProvider(input.provider, {
     summaryModel: input.summaryModel,
@@ -288,24 +457,23 @@ export async function generateSummaryWithGuardrails(input: {
     return { summary: "", provider: "skipped", costUsd: 0, divergenceScore: 0 };
   }
 
-  // Compute card hash for cache keying — includes astFingerprint so
-  // body-only changes (no signature change) still invalidate the cache.
-  // Also includes the resolved provider name and model so that switching
-  // providers or models invalidates the cache and triggers regeneration.
+  // Compute card hash for cache keying. Mock summaries include only the concise
+  // builder inputs that can change deterministic prose.
   const resolvedModel = input.summaryModel ?? summaryProvider.name;
-  const cardHash = hashContent(
-    [
-      input.symbolName,
-      input.kind ?? "",
-      input.signature ?? "",
-      input.astFingerprint ?? "",
-      summaryProvider.name,
-      resolvedModel,
-    ].join("|"),
-  );
+  const cardHash = buildSummaryCardHash({
+    symbolName: input.symbolName,
+    kind: input.kind,
+    signature: input.signature,
+    astFingerprint: input.astFingerprint,
+    providerName: summaryProvider.name,
+    modelName: resolvedModel,
+    embeddingInput: input.embeddingInput,
+  });
 
-  // Check summary cache when symbolId is available
-  if (input.symbolId) {
+  // Check summary cache when symbolId is available. Batch callers pass a bulk
+  // cache snapshot and skip this standalone read.
+  if (input.symbolId && input.skipCacheLookup !== true) {
+
     const cached = await ladybugDb.getSummaryCache(conn, input.symbolId);
     if (cached != null && cached.cardHash === cardHash) {
       const divergenceScore = tokenDistance(
@@ -328,14 +496,18 @@ export async function generateSummaryWithGuardrails(input: {
     kind: input.kind,
     signature: input.signature,
     heuristicSummary: input.heuristicSummary,
+    embeddingInput: input.embeddingInput,
   });
+
 
   const divergenceScore = tokenDistance(summary, input.heuristicSummary ?? "");
   const estimatedTokens = Math.max(1, Math.ceil(summary.length / 4));
   const costUsd = estimatedTokens * 0.000002;
 
-  // Persist to cache when symbolId is available
-  if (input.symbolId) {
+  // Persist to cache for standalone callers. Batch generation persists cache
+  // and Symbol rows together in one transaction.
+  if (input.symbolId && input.persistCache !== false) {
+
     const symbolId = input.symbolId;
     const now = new Date().toISOString();
     await withWriteConn(async (wConn) => {
@@ -397,9 +569,7 @@ export async function generateSummariesForRepo(
 
   const batchSize = semantic.summaryBatchSize ?? 20;
   const maxConcurrency = semantic.summaryMaxConcurrency ?? 5;
-  // Use dedicated summaryProvider when set; fall back to the embedding
-  // provider for backward compatibility.
-  const provider = semantic.summaryProvider ?? semantic.provider ?? "mock";
+  const provider = semantic.summaryProvider ?? "mock";
   const summaryModel = semantic.summaryModel;
   const summaryApiKey = semantic.summaryApiKey;
   const summaryApiBaseUrl = semantic.summaryApiBaseUrl;
@@ -416,7 +586,7 @@ export async function generateSummariesForRepo(
   // skip summary generation entirely to preserve existing summaries.
   if (resolvedSummaryProvider == null) {
     logger.warn(
-      `Summary provider "${provider}" could not be created — skipping summary generation for repo ${repoId}. ` +
+      `Summary provider "${provider}" could not be created - skipping summary generation for repo ${repoId}. ` +
         "Existing summaries are preserved.",
     );
     const symbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
@@ -430,74 +600,122 @@ export async function generateSummariesForRepo(
 
   const resolvedProviderName = resolvedSummaryProvider.name;
   const resolvedModelName = summaryModel ?? resolvedProviderName;
+  const isMockProvider = resolvedProviderName === "mock";
 
   // Fetch all symbols for the repo
   const symbols = await ladybugDb.getSymbolsByRepo(conn, repoId);
+  const parseSignatureText = (sym: (typeof symbols)[number]): string | undefined => {
+    if (!sym.signatureJson) {
+      return undefined;
+    }
+    try {
+      const parsed = JSON.parse(sym.signatureJson) as { text?: string } | string;
+      return typeof parsed === "string" ? parsed : (parsed?.text ?? sym.signatureJson);
+    } catch (err) {
+      logger.debug("Failed to parse signatureJson for summary card hash", {
+        symbolId: sym.symbolId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return sym.signatureJson;
+    }
+  };
 
   // Determine which symbols need a new summary by checking the cache (bulk)
   const cachedSummaries = await ladybugDb.getSummaryCaches(
     conn,
     symbols.map((s) => s.symbolId),
   );
-  const needsSummary: typeof symbols = [];
+  let needsSummary: typeof symbols = [];
+  const preparedInputBySymbolId = new Map<string, PreparedSymbolEmbeddingInput>();
+
+  const summaryRepairs: PendingSymbolSummaryUpdate[] = [];
+
   for (const sym of symbols) {
-    // Hash must match what generateSummaryWithGuardrails stores: it uses
-    // parsed signature text (not raw signatureJson), so we must parse here too.
-    const parsedSig = sym.signatureJson
-      ? (() => {
-          try {
-            const parsed = JSON.parse(sym.signatureJson) as
-              | { text?: string }
-              | string;
-            return typeof parsed === "string"
-              ? parsed
-              : (parsed?.text ?? sym.signatureJson);
-          } catch (err) {
-            logger.debug("Failed to parse signatureJson for card hash", {
-              symbolId: sym.symbolId,
-              error: err instanceof Error ? err.message : String(err),
-            });
-            return sym.signatureJson;
-          }
-        })()
-      : "";
-    const cardHash = hashContent(
-      [
-        sym.name,
-        sym.kind ?? "",
-        parsedSig,
-        sym.astFingerprint ?? "",
-        resolvedProviderName,
-        resolvedModelName,
-      ].join("|"),
-    );
-    const cached = cachedSummaries.get(sym.symbolId);
-    // Skip only if cache is fresh (hash includes provider+model, so switching
-    // providers or models automatically invalidates)
-    if (cached != null && cached.cardHash === cardHash) {
-      // Backfill: if cache write succeeded but symbol row update didn't
-      // (e.g., process crash between the two writes), repair the symbol row.
-      if (sym.summary !== cached.summary) {
-        await withWriteConn(async (wConn) => {
-          await ladybugDb.updateSymbolSummary(
-            wConn,
-            sym.symbolId,
-            cached.summary,
-            1.0,
-            "llm",
-          );
-        });
-      }
+    if (isMockProvider && sym.summarySource === "llm") {
       continue;
     }
+
     // Skip symbols that already have good summaries (JSDoc or LLM-generated).
     // Quality thresholds: JSDoc=1.0, LLM=0.8, NN-direct=0.6, NN-adapted=0.5,
     // heuristic=0.3-0.4. We only regenerate below 0.8.
-    if (sym.summaryQuality !== undefined && sym.summaryQuality !== null && sym.summaryQuality >= 0.8) {
+    if (
+      sym.summaryQuality !== undefined &&
+      sym.summaryQuality !== null &&
+      sym.summaryQuality >= 0.8
+    ) {
       continue;
     }
+
+    if (!isMockProvider) {
+      const signatureText = parseSignatureText(sym);
+      const cardHash = buildSummaryCardHash({
+        symbolName: sym.name,
+        kind: sym.kind,
+        signature: signatureText,
+        astFingerprint: sym.astFingerprint,
+        providerName: resolvedProviderName,
+        modelName: resolvedModelName,
+      });
+      const cached = cachedSummaries.get(sym.symbolId);
+      if (cached != null && cached.cardHash === cardHash) {
+        if (sym.summary !== cached.summary) {
+          const metadata = summaryStorageMetadata(cached.provider);
+          summaryRepairs.push({
+            symbolId: sym.symbolId,
+            summary: cached.summary,
+            summaryQuality: metadata.quality,
+            summarySource: metadata.source,
+          });
+        }
+        continue;
+      }
+    }
+
     needsSummary.push(sym);
   }
+
+  if (isMockProvider && needsSummary.length > 0) {
+    const preparedInputs = await prepareSymbolEmbeddingInputs(conn, needsSummary, {
+      summaryCacheMap: cachedSummaries,
+    });
+    for (const embeddingInput of preparedInputs) {
+      preparedInputBySymbolId.set(embeddingInput.symbol.symbolId, embeddingInput);
+    }
+
+
+    const staleMockSummaries: typeof symbols = [];
+    for (const sym of needsSummary) {
+      const embeddingInput = preparedInputBySymbolId.get(sym.symbolId);
+      const signatureText = embeddingInput?.signatureText ?? parseSignatureText(sym);
+      const cardHash = buildSummaryCardHash({
+        symbolName: sym.name,
+        kind: sym.kind,
+        signature: signatureText,
+        astFingerprint: sym.astFingerprint,
+        providerName: resolvedProviderName,
+        modelName: resolvedModelName,
+        embeddingInput,
+      });
+      const cached = cachedSummaries.get(sym.symbolId);
+      if (cached != null && cached.cardHash === cardHash) {
+        if (sym.summary !== cached.summary) {
+          const metadata = summaryStorageMetadata(cached.provider);
+          summaryRepairs.push({
+            symbolId: sym.symbolId,
+            summary: cached.summary,
+            summaryQuality: metadata.quality,
+            summarySource: metadata.source,
+          });
+        }
+        continue;
+      }
+      staleMockSummaries.push(sym);
+    }
+    needsSummary = staleMockSummaries;
+  }
+
+  await updateSymbolSummariesInTransaction(summaryRepairs);
+
 
   const result: SummaryBatchResult = {
     generated: 0,
@@ -528,27 +746,21 @@ export async function generateSummariesForRepo(
     let batchGenerated = 0;
     let batchFailed = 0;
     let batchCost = 0;
+    const generatedRows: PendingGeneratedSummary[] = [];
 
     for (const sym of batch) {
       try {
-        const signatureText = sym.signatureJson
-          ? (() => {
-              try {
-                const parsed = JSON.parse(sym.signatureJson) as
-                  | { text?: string }
-                  | string;
-                return typeof parsed === "string"
-                  ? parsed
-                  : (parsed?.text ?? sym.signatureJson);
-              } catch (err) {
-                logger.debug("Failed to parse signatureJson for summary", {
-                  symbolId: sym.symbolId,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-                return sym.signatureJson;
-              }
-            })()
-          : undefined;
+        const embeddingInput = preparedInputBySymbolId.get(sym.symbolId);
+        const signatureText = embeddingInput?.signatureText ?? parseSignatureText(sym);
+        const cardHash = buildSummaryCardHash({
+          symbolName: sym.name,
+          kind: sym.kind,
+          signature: signatureText,
+          astFingerprint: sym.astFingerprint,
+          providerName: resolvedProviderName,
+          modelName: resolvedModelName,
+          embeddingInput,
+        });
 
         const genResult = await generateSummaryWithGuardrails({
           symbolName: sym.name,
@@ -557,24 +769,26 @@ export async function generateSummariesForRepo(
           signature: signatureText,
           astFingerprint: sym.astFingerprint ?? undefined,
           heuristicSummary: sym.summary ?? undefined,
+          embeddingInput,
           provider,
           summaryModel: summaryModel ?? undefined,
           summaryApiKey: summaryApiKey ?? undefined,
           summaryApiBaseUrl: summaryApiBaseUrl ?? undefined,
+          skipCacheLookup: true,
+          persistCache: false,
         });
 
-        // Update the symbol row with the new summary
-        await withWriteConn(async (wConn) => {
-          await ladybugDb.updateSymbolSummary(
-            wConn,
-            sym.symbolId,
-            genResult.summary,
-            1.0,
-            "llm",
-          );
+        const metadata = summaryStorageMetadata(genResult.provider);
+        generatedRows.push({
+          symbolId: sym.symbolId,
+          summary: genResult.summary,
+          provider: genResult.provider,
+          model: summaryModel ?? genResult.provider,
+          cardHash,
+          costUsd: genResult.costUsd,
+          summaryQuality: metadata.quality,
+          summarySource: metadata.source,
         });
-
-        batchGenerated += 1;
         batchCost += genResult.costUsd;
       } catch (err) {
         logger.warn(
@@ -584,12 +798,21 @@ export async function generateSummariesForRepo(
       }
     }
 
+    try {
+      await persistGeneratedSummariesInTransaction(generatedRows);
+      batchGenerated += generatedRows.length;
+    } catch (err) {
+      logger.warn(`Failed to persist summary batch: ${String(err)}`);
+      batchFailed += generatedRows.length;
+    }
+
     return {
       generated: batchGenerated,
       failed: batchFailed,
       costUsd: batchCost,
     };
   };
+
 
   // Run batches with maxConcurrency slots
   while (batchIndex < batches.length) {
@@ -606,7 +829,7 @@ export async function generateSummariesForRepo(
         result.failed += outcome.value.failed;
         result.totalCostUsd += outcome.value.costUsd;
       } else {
-        // Entire batch threw — count all as failed
+        // Entire batch threw - count all as failed
         result.failed += chunkBatchSize;
         logger.warn(`Batch failed entirely: ${String(outcome.reason)}`);
       }

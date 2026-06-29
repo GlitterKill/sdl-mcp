@@ -6,6 +6,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildConciseSymbolSummary,
   buildJinaSymbolEmbeddingText,
   buildNomicSymbolEmbeddingText,
   buildSymbolEmbeddingText,
@@ -55,6 +56,52 @@ function makeInput(
     ...overrides,
   };
 }
+
+describe("buildConciseSymbolSummary", () => {
+  it("builds a one-sentence summary from role, obvious return type, and side effect", () => {
+    const input = makeInput({
+      roleTags: ["request handler", "http"],
+      signatureText:
+        "async function loadUser(id: string): Promise<UserProfile>",
+      sideEffects: ["reads from the user profile cache"],
+    });
+    input.symbol.name = "loadUser";
+    input.symbol.kind = "function";
+
+    const summary = buildConciseSymbolSummary(input);
+
+    assert.match(summary, /^function loadUser request handler/);
+    assert.match(summary, /returns Promise<UserProfile>/);
+    assert.match(summary, /reads from the user profile cache/);
+    assert.ok(!summary.includes("http"), "only the primary role is used");
+    assert.ok(!summary.includes("\n"), "summary stays one sentence");
+  });
+
+  it("omits the return clause when the signature return type is not obvious", () => {
+    const input = makeInput({
+      signatureText: "function configurePipeline(options)",
+      roleTags: ["configuration"],
+      sideEffects: [],
+    });
+    input.symbol.name = "configurePipeline";
+
+    const summary = buildConciseSymbolSummary(input);
+
+    assert.match(summary, /^function configurePipeline configuration/);
+    assert.ok(!summary.includes("returns"));
+  });
+
+  it("caps the summary for card display", () => {
+    const input = makeInput({
+      roleTags: ["x".repeat(500)],
+      sideEffects: ["y".repeat(500)],
+    });
+
+    const summary = buildConciseSymbolSummary(input);
+
+    assert.ok(summary.length <= 240);
+  });
+});
 
 describe("buildJinaSymbolEmbeddingText", () => {
   describe("symbol identity and signature", () => {

@@ -241,4 +241,72 @@ describe("semantic pipeline regressions", () => {
       "local provider should not skip summary generation when summaryModel is omitted",
     );
   });
+
+  it("does not let mock summaries overwrite LLM summaries", () => {
+    const source = readSource("src/indexer/summary-generator.ts");
+    const fnStart = source.indexOf("export async function generateSummariesForRepo(");
+    assert.ok(fnStart !== -1);
+    const fnBody = source.slice(fnStart);
+    const llmSkipIdx = fnBody.indexOf(
+      'isMockProvider && sym.summarySource === "llm"',
+    );
+    const enqueueIdx = fnBody.indexOf("needsSummary.push(sym)");
+
+    assert.ok(
+      llmSkipIdx !== -1,
+      "mock summary generation should skip existing LLM-authored summaries",
+    );
+    assert.ok(
+      enqueueIdx !== -1 && llmSkipIdx < enqueueIdx,
+      "LLM-authored summaries must be filtered before mock generation is queued",
+    );
+  });
+
+  it("limits mock summary cache hash to deterministic prose inputs", () => {
+    const source = readSource("src/indexer/summary-generator.ts");
+    const fnStart = source.indexOf("function buildSummaryCardHash(");
+    assert.ok(fnStart !== -1);
+    const fnEnd = source.indexOf("function summaryStorageMetadata", fnStart);
+    assert.ok(fnEnd !== -1 && fnEnd > fnStart);
+    const fnBody = source.slice(fnStart, fnEnd);
+    const mockBranchStart = fnBody.indexOf('input.providerName === "mock"');
+    const nonMockAstHashIdx = fnBody.indexOf("input.astFingerprint", mockBranchStart);
+    assert.ok(mockBranchStart !== -1);
+    assert.ok(nonMockAstHashIdx !== -1 && nonMockAstHashIdx > mockBranchStart);
+
+    const mockBranch = fnBody.slice(mockBranchStart, nonMockAstHashIdx);
+    assert.doesNotMatch(
+      mockBranch,
+      /astFingerprint/,
+      "mock summary hash should not change for body-only AST updates",
+    );
+    assert.match(
+      mockBranch,
+      /CONCISE_SYMBOL_SUMMARY_BUILDER_VERSION[\s\S]*signatureText[\s\S]*roleTags[\s\S]*sideEffects/,
+      "mock summary hash should include only output-affecting prose builder inputs",
+    );
+
+  });
+
+  it("batch summary generation avoids standalone cache reads and transactional split writes", () => {
+    const source = readSource("src/indexer/summary-generator.ts");
+    const fnStart = source.indexOf("export async function generateSummariesForRepo(");
+    assert.ok(fnStart !== -1);
+    const fnBody = source.slice(fnStart);
+
+    assert.doesNotMatch(
+      fnBody,
+      /getSummaryCache\(/,
+      "batch generation should rely on the bulk getSummaryCaches snapshot",
+    );
+    assert.match(fnBody, /skipCacheLookup:\s*true/);
+    assert.match(fnBody, /persistCache:\s*false/);
+    assert.match(
+      fnBody,
+      /persistGeneratedSummariesInTransaction\(generatedRows\)/,
+      "batch generation should persist cache and Symbol summary rows together",
+    );
+  });
+
+
 });

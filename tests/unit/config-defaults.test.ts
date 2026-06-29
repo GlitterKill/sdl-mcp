@@ -236,7 +236,7 @@ describe("SemanticConfigSchema defaults", () => {
     expected: boolean;
   }> = [
     { field: "enabled", expected: true },
-    { field: "generateSummaries", expected: false },
+    { field: "generateSummaries", expected: true },
   ];
 
   for (const { field, expected } of booleanDefaults) {
@@ -249,6 +249,18 @@ describe("SemanticConfigSchema defaults", () => {
       );
     });
   }
+
+  it("SemanticConfigSchema.summaryProvider defaults to mock", () => {
+    const result = SemanticConfigSchema.parse({});
+    assert.strictEqual(result.summaryProvider, "mock");
+  });
+
+  it("SemanticConfigSchema.summaryProvider accepts legacy null as unset", () => {
+    const result = SemanticConfigSchema.parse({ summaryProvider: null });
+    assert.strictEqual(result.summaryProvider, null);
+  });
+
+
 });
 
 // ---------------------------------------------------------------------------

@@ -563,11 +563,12 @@ export const SemanticConfigSchema = z.object({
   /** @deprecated Use per-lane model arrays or `embeddingProfile` instead. */
   additionalModels: z.array(z.string()).optional(),
   modelCacheDir: z.string().nullish(),
-  generateSummaries: z.boolean().default(false),
-  /** Summary LLM backend — independent from embedding provider.
-   *  "api" = Anthropic, "local" = OpenAI-compatible (Ollama), "mock" = deterministic.
-   *  Defaults to the embedding `provider` value for backward compatibility. */
-  summaryProvider: z.enum(["api", "local", "mock"]).nullish(),
+  generateSummaries: z.boolean().default(true),
+  /** Summary backend, independent from the embedding provider.
+   *  "api" = Anthropic, "local" = OpenAI-compatible (Ollama), "mock" = deterministic concise prose.
+   *  Defaults to "mock" so summary generation never requires LLM credentials unless explicitly configured. */
+  summaryProvider: z.enum(["api", "local", "mock"]).nullish().default("mock"),
+
   /** Model name for summary generation. Defaults per-provider:
    *  "api" → "claude-haiku-4-5-20251001", "local" → "gpt-4o-mini" (OpenAI-compatible). */
   summaryModel: z.string().nullish(),
