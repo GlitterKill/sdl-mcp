@@ -157,9 +157,9 @@ describe("MockSummaryProvider.generate", () => {
       },
     });
 
-    assert.match(result, /^function loadUser request handler/);
-    assert.match(result, /returns Promise<UserProfile>/);
-    assert.match(result, /reads from the user profile cache/);
+    assert.match(result, /^Loads user as request handler/);
+    assert.match(result, /returning Promise<UserProfile>/);
+    assert.match(result, /reading from the user profile cache/);
     assert.ok(!result.includes("UserProfile,"), "imports are ignored");
     assert.ok(!result.includes("readCache"), "calls are ignored");
     assert.ok(!result.includes("participates in"));
@@ -176,8 +176,8 @@ describe("MockSummaryProvider.generate", () => {
       heuristicSummary: "Processes a single file for indexing.",
     });
 
-    assert.match(result, /^function parseConfig/);
-    assert.match(result, /returns RepoConfig/);
+    assert.match(result, /^Parses config/);
+    assert.match(result, /returning RepoConfig/);
     assert.ok(!result.includes("Processes a single file"));
     assert.ok(!result.includes("participates in"));
   });
@@ -189,7 +189,7 @@ describe("MockSummaryProvider.generate", () => {
     const result = await provider.generate({
       symbolName: "myFunction",
     });
-    assert.match(result, /^symbol myFunction/);
+    assert.match(result, /^Symbol my function/);
     assert.ok(!result.includes("participates in"));
   });
 });
@@ -370,7 +370,7 @@ describe("generateSummariesForRepo", () => {
     assert.strictEqual(result.generated, 1);
     assert.ok(symbol);
     assert.notStrictEqual(symbol.summary, "```ts");
-    assert.match(symbol.summary ?? "", /^function staleCodeFence/);
+    assert.match(symbol.summary ?? "", /^Function stale code fence/);
     assert.strictEqual(symbol.summaryQuality, 0.6);
     assert.strictEqual(symbol.summarySource, "heuristic-typed");
   });

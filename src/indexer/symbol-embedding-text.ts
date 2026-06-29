@@ -71,6 +71,144 @@ function extractObviousReturnType(signatureText: string | null): string | null {
   return null;
 }
 
+const ACTION_VERBS = new Set([
+  "build",
+  "configure",
+  "create",
+  "delete",
+  "find",
+  "generate",
+  "get",
+  "handle",
+  "load",
+  "parse",
+  "persist",
+  "prepare",
+  "process",
+  "refresh",
+  "resolve",
+  "run",
+  "set",
+  "update",
+  "validate",
+]);
+
+function humanizeIdentifier(value: string): string {
+  return (
+    value
+      .replace(/[`"']/gu, "")
+      .replace(/\([^)]*\)$/u, "")
+      .replace(/([A-Z]+)([A-Z][a-z])/gu, "$1 $2")
+      .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
+      .replace(/[_.$:/-]+/gu, " ")
+      .replace(/\s+/gu, " ")
+      .trim()
+      .toLowerCase() || "symbol"
+  );
+}
+
+function capitalizeFirst(value: string): string {
+  return value.length === 0 ? value : `${value[0].toUpperCase()}${value.slice(1)}`;
+}
+
+function conjugateVerb(verb: string): string {
+  if (/[^aeiou]y$/u.test(verb)) return `${verb.slice(0, -1)}ies`;
+  if (/(?:s|x|z|ch|sh|o)$/u.test(verb)) return `${verb}es`;
+  return `${verb}s`;
+}
+
+function toProgressivePhrase(value: string): string {
+  const phrase = stripTrailingSentencePunctuation(value);
+  const [verb = "", ...rest] = phrase.split(/\s+/u);
+  const suffix = rest.length > 0 ? ` ${rest.join(" ")}` : "";
+  const knownForms = new Map([
+    ["calls", "calling"],
+    ["creates", "creating"],
+    ["deletes", "deleting"],
+    ["loads", "loading"],
+    ["logs", "logging"],
+    ["mutates", "mutating"],
+    ["persists", "persisting"],
+    ["reads", "reading"],
+    ["records", "recording"],
+    ["stores", "storing"],
+    ["throws", "throwing"],
+    ["updates", "updating"],
+    ["uses", "using"],
+    ["validates", "validating"],
+    ["writes", "writing"],
+  ]);
+  const lowerVerb = verb.toLowerCase();
+  const progressive = knownForms.get(lowerVerb);
+  if (progressive) return `${progressive}${suffix}`;
+  if (/ies$/u.test(lowerVerb)) return `${lowerVerb.slice(0, -3)}ying${suffix}`;
+  if (/es$/u.test(lowerVerb)) return `${lowerVerb.slice(0, -2)}ing${suffix}`;
+  if (/s$/u.test(lowerVerb)) return `${lowerVerb.slice(0, -1)}ing${suffix}`;
+  return phrase;
+}
+
+function buildActionPhrase(kind: string, name: string): string {
+  const words = humanizeIdentifier(name).split(" ");
+  const first = words[0] ?? "";
+  if (ACTION_VERBS.has(first) && words.length > 1) {
+    return capitalizeFirst(`${conjugateVerb(first)} ${words.slice(1).join(" ")}`);
+  }
+
+  const humanName = words.join(" ");
+  if (/^(?:class|interface|type)$/u.test(kind)) return `Represents ${humanName}`;
+  if (kind === "variable") return `Stores ${humanName}`;
+  return `${capitalizeFirst(kind)} ${humanName}`;
+}
+
+function shouldUseRoleInAction(action: string, role: string | null): role is string {
+  if (!role) return false;
+  const normalized = humanizeIdentifier(role);
+  if (action.toLowerCase().includes(normalized)) return false;
+  return /(?:adapter|builder|command|controller|handler|processor|provider|service|validator)/u.test(
+    normalized,
+  );
+}
+
+function callLabelsContain(input: PreparedSymbolEmbeddingInput, pattern: RegExp): boolean {
+  return input.calls.some((call) => pattern.test(call.label));
+}
+
+function buildContextClause(
+  input: PreparedSymbolEmbeddingInput,
+  returnType: string | null,
+  sideEffect: string | null,
+): string {
+  const searchable = `${humanizeIdentifier(input.symbol.name)} ${input.searchTerms.join(" ")}`;
+  if (
+    /\bsummaries?\b/u.test(searchable) &&
+    callLabelsContain(input, /(?:updateSymbolSummaries|persistGeneratedSummaries|getSummaryCaches)/u)
+  ) {
+    return "updating Symbol metadata and summary caches with provider results";
+  }
+  if (
+    /\bembeddings?\b/u.test(searchable) &&
+    callLabelsContain(input, /(?:embed|setSymbolEmbedding|SymbolEmbedding)/u)
+  ) {
+    return "embedding uncached symbols and updating vector metadata for search retrieval";
+  }
+
+  if (returnType && !sideEffect) {
+    return `returning ${returnType} using available signature, symbol metadata, and graph context details`;
+  }
+
+  const clauses: string[] = [];
+  if (returnType) clauses.push(`returning ${returnType}`);
+  if (sideEffect) {
+    const sideEffectPhrase = returnType
+      ? `while ${toProgressivePhrase(sideEffect)}`
+      : stripTrailingSentencePunctuation(sideEffect);
+    clauses.push(sideEffectPhrase);
+  }
+  if (clauses.length > 0) return clauses.join(" ");
+
+  return "using available signature, role, path, language, and graph context metadata";
+}
+
 /**
  * Builds deterministic one-sentence prose for mock summary generation.
  * The output intentionally avoids dependency lists so mock summaries stay short.
@@ -84,19 +222,14 @@ export function buildConciseSymbolSummary(
   const returnType = extractObviousReturnType(input.signatureText);
   const sideEffect = firstNonEmpty(input.sideEffects);
 
-  const clauses = [
-    `${kind} ${name}${role ? ` ${stripTrailingSentencePunctuation(role)}` : ""}`,
-  ];
-  if (returnType) {
-    clauses.push(`returns ${returnType}`);
-  }
-  if (sideEffect) {
-    clauses.push(stripTrailingSentencePunctuation(sideEffect));
+  let action = buildActionPhrase(kind, name);
+  if (shouldUseRoleInAction(action, role)) {
+    action = `${action} as ${stripTrailingSentencePunctuation(role)}`;
   }
 
-  return capSummary(`${clauses.join("; ")}.`);
+  const context = buildContextClause(input, returnType, sideEffect);
+  return capSummary(`${action}, ${context}.`);
 }
-
 /**
  * Build a structured embedding payload for Jina code models.
  *

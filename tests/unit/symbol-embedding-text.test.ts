@@ -58,7 +58,9 @@ function makeInput(
 }
 
 describe("buildConciseSymbolSummary", () => {
-  it("builds a one-sentence summary from role, obvious return type, and side effect", () => {
+  const wordCount = (summary: string): number => summary.split(/\s+/).length;
+
+  it("builds a 12-20 word action summary from role, return type, and side effect", () => {
     const input = makeInput({
       roleTags: ["request handler", "http"],
       signatureText:
@@ -70,11 +72,47 @@ describe("buildConciseSymbolSummary", () => {
 
     const summary = buildConciseSymbolSummary(input);
 
-    assert.match(summary, /^function loadUser request handler/);
-    assert.match(summary, /returns Promise<UserProfile>/);
-    assert.match(summary, /reads from the user profile cache/);
+    assert.strictEqual(
+      summary,
+      "Loads user as request handler, returning Promise<UserProfile> while reading from the user profile cache.",
+    );
+    assert.ok(wordCount(summary) >= 12 && wordCount(summary) <= 20);
     assert.ok(!summary.includes("http"), "only the primary role is used");
     assert.ok(!summary.includes("\n"), "summary stays one sentence");
+  });
+
+  it("humanizes summary generation functions with useful update context", () => {
+    const input = makeInput({
+      signatureText: "function generateSummariesForRepo",
+      roleTags: ["repo"],
+      calls: [
+        {
+          label: "updateSymbolSummariesInTransaction (function)",
+          confidence: 0.95,
+          resolved: true,
+        },
+        {
+          label: "getSummaryCaches (function)",
+          confidence: 0.95,
+          resolved: true,
+        },
+        {
+          label: "generateSummaryWithGuardrails (function)",
+          confidence: 0.95,
+          resolved: true,
+        },
+      ],
+    });
+    input.symbol.name = "generateSummariesForRepo";
+    input.symbol.kind = "function";
+
+    const summary = buildConciseSymbolSummary(input);
+
+    assert.strictEqual(
+      summary,
+      "Generates summaries for repo, updating Symbol metadata and summary caches with provider results.",
+    );
+    assert.ok(wordCount(summary) >= 12 && wordCount(summary) <= 20);
   });
 
   it("omits the return clause when the signature return type is not obvious", () => {
@@ -87,8 +125,9 @@ describe("buildConciseSymbolSummary", () => {
 
     const summary = buildConciseSymbolSummary(input);
 
-    assert.match(summary, /^function configurePipeline configuration/);
+    assert.match(summary, /^Configures pipeline/);
     assert.ok(!summary.includes("returns"));
+    assert.ok(wordCount(summary) >= 12 && wordCount(summary) <= 20);
   });
 
   it("caps the summary for card display", () => {
@@ -102,7 +141,6 @@ describe("buildConciseSymbolSummary", () => {
     assert.ok(summary.length <= 240);
   });
 });
-
 describe("buildJinaSymbolEmbeddingText", () => {
   describe("symbol identity and signature", () => {
     it("includes name, kind, and language in header", () => {
