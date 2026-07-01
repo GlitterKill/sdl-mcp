@@ -677,10 +677,11 @@ async function resolveRequestedSymbolId(
     return resolution.symbolId;
   }
 
-  throw createSymbolResolutionError(resolution);
+  throw createSymbolResolutionError(request.repoId, resolution);
 }
 
 function createSymbolResolutionError(
+  repoId: string,
   resolution: Exclude<SymbolRefResolution, { status: "resolved" }>,
 ): Error {
   const fallbackTools = ["sdl.symbol.search", "sdl.action.search"];
@@ -690,6 +691,10 @@ function createSymbolResolutionError(
     file: candidate.file,
     kind: candidate.kind,
     score: candidate.score,
+    nextCall: {
+      tool: "sdl.symbol.getCard",
+      args: { repoId, symbolId: candidate.symbolId },
+    },
   }));
 
   if (resolution.status === "ambiguous") {
@@ -902,7 +907,7 @@ async function handleBatchCards(
     }
 
     failures.push(
-      toBatchFailure(symbolRef, createSymbolResolutionError(resolution)),
+      toBatchFailure(symbolRef, createSymbolResolutionError(repoId, resolution)),
     );
   }
 

@@ -180,5 +180,15 @@ describe("conditional cache-aware tool handlers", () => {
     });
   });
 
+  it("code.getHotPath resolves symbolRef targets", async () => {
+    const response = await handleGetHotPath({
+      repoId: REPO_ID,
+      symbolRef: { name: "greet", file: relPath },
+      identifiersToFind: ["buildMessage"],
+    });
+
+    assert.ok("excerpt" in response);
+    assert.match(response.excerpt, /buildMessage/);
+  });
 
 });

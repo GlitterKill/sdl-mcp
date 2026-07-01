@@ -49,6 +49,19 @@ describe("formatToolCallForUser", () => {
     assert.ok(result.includes("…and 3 more"));
   });
 
+  it("formats packed symbol.search payloads without treating bytes as rows", () => {
+    const packedPayload = "#PACKED/1\nss1\n" + "x".repeat(389);
+    const result = formatToolCallForUser("sdl.symbol.search", { query: "cart" }, {
+      results: packedPayload,
+      _packedStats: { gateDecision: "packed", encoderId: "ss1", packedBytes: packedPayload.length },
+    });
+    assert.ok(result !== null);
+    assert.ok(result.includes('symbol.search "cart"'));
+    assert.ok(result.includes("packed"));
+    assert.ok(!result.includes(`${packedPayload.length} results`));
+    assert.ok(!result.includes("undefined"));
+  });
+
   // --- symbol.getCard ---
 
   it("formats symbol.getCard with card data", () => {
@@ -122,6 +135,20 @@ describe("formatToolCallForUser", () => {
     });
     assert.ok(result !== null);
     assert.ok(result.includes("(truncated)"));
+  });
+
+  it("formats code.getSkeleton without fake zero counts when metadata is omitted", () => {
+    const result = formatToolCallForUser("sdl.code.getSkeleton", {}, {
+      file: "src/cart.js",
+      skeleton: "export function buildCart() { ... }",
+      range: { startLine: 1, endLine: 12 },
+    });
+    assert.ok(result !== null);
+    assert.ok(result.includes("code.getSkeleton"));
+    assert.ok(result.includes("cart.js"));
+    assert.ok(result.includes("L1–12"));
+    assert.ok(!result.includes("0 -> skeleton"));
+    assert.ok(!result.includes("~0 tokens"));
   });
 
   // --- code.getHotPath ---
@@ -294,4 +321,26 @@ it("formats runtime.execute nextAction hints", () => {
   assert.ok(result !== null);
   assert.ok(result.includes("next: Query the failure artifact"));
   assert.ok(result.includes("runtime.queryOutput"));
+});
+
+it("formats compact runtime corrective hints", () => {
+  const result = formatToolCallForUser("sdl.runtime.execute", {}, {
+    status: "failure",
+    exitCode: 1,
+    signal: null,
+    durationMs: 8,
+    artifactHandle: "runtime-sdl-mcp-456",
+    stdoutSummary: "",
+    stderrSummary: "ReferenceError: require is not defined in ES module scope",
+    truncation: {
+      stdoutTruncated: false,
+      stderrTruncated: false,
+      totalStdoutBytes: 0,
+      totalStderrBytes: 64,
+    },
+    runtimeHints: ["ESM context: use import or createRequire instead of require()."],
+  });
+
+  assert.ok(result !== null);
+  assert.ok(result.includes("hint: ESM context"));
 });

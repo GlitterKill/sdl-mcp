@@ -200,6 +200,22 @@ describe("code.needWindow policy remediation", () => {
     });
   });
 
+  it("resolves symbolRef targets for raw code windows", async () => {
+    const response = await handleCodeNeedWindow({
+      repoId: "repo-test",
+      symbolRef: { name: "demoWindow", file: "src/example.ts" },
+      reason: "inspect important flag handling",
+      expectedLines: 20,
+      maxTokens: 120,
+      identifiersToFind: ["importantFlag"],
+    });
+
+    assert.equal(response.approved, true);
+    if (!response.approved) throw new Error("Expected approved response");
+    assert.equal(response.symbolId, "sym-demo");
+    assert.match(response.code, /importantFlag/);
+  });
+
   it("stores approved windows behind response.get when responseMode is handle", async () => {
     const response = await handleCodeNeedWindow({
       repoId: "repo-test",

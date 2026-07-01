@@ -8,7 +8,9 @@ import {
   type GetSkeletonRequest,
   GetSkeletonResponse,
   type GetHotPathRequest,
+  GetHotPathRequestSchema,
   GetHotPathResponse,
+  type SymbolRef,
 } from "../tools.js";
 import {
   DEFAULT_MAX_LINES_HOTPATH,
@@ -73,12 +75,42 @@ import {
   recordTokenSavings,
 } from "../response-compression.js";
 
-function estimateRawWindowTokens(request: CodeNeedWindowRequest): number {
+type ResolvedCodeNeedWindowRequest = Omit<
+  CodeNeedWindowRequest,
+  "symbolId" | "symbolRef"
+> & { symbolId: string };
+
+type ResolvedGetHotPathRequest = Omit<
+  GetHotPathRequest,
+  "symbolId" | "symbolRef"
+> & { symbolId: string };
+
+async function resolveCodeTargetSymbolId(
+  conn: Awaited<ReturnType<typeof getLadybugConn>>,
+  repoId: string,
+  target: { symbolId?: string; symbolRef?: SymbolRef },
+  toolName: string,
+): Promise<string> {
+  if (target.symbolId) {
+    const resolved = await resolveSymbolId(conn, repoId, target.symbolId);
+    return resolved.symbolId;
+  }
+  if (target.symbolRef) {
+    const resolved = await resolveSymbolRef(conn, repoId, target.symbolRef);
+    if (resolved.status !== "resolved") {
+      throw new NotFoundError(`${resolved.message} Use symbolRef.file or symbolRef.kind to refine ${toolName}.`);
+    }
+    return resolved.symbolId;
+  }
+  throw new ValidationError(`Provide exactly one of symbolId or symbolRef for ${toolName}.`);
+}
+
+function estimateRawWindowTokens(request: ResolvedCodeNeedWindowRequest): number {
   return Math.max(0, Math.ceil(request.expectedLines * 12));
 }
 
 function recordRawWindowAvoidance(
-  request: CodeNeedWindowRequest,
+  request: ResolvedCodeNeedWindowRequest,
   avoided: boolean,
 ): void {
   recordTokenSavings({
@@ -93,7 +125,7 @@ function recordRawWindowAvoidance(
 }
 
 function buildPolicyNextBestAction(params: {
-  request: CodeNeedWindowRequest;
+  request: ResolvedCodeNeedWindowRequest;
   policyNextBestAction?: NextBestAction;
   requiredFieldsForNext?: RequiredFieldsForNext;
   deniedReasons?: string[];
@@ -227,7 +259,7 @@ function buildPolicyNextBestAction(params: {
 }
 
 async function finalizeCodeNeedWindowResponse(
-  request: CodeNeedWindowRequest,
+  request: ResolvedCodeNeedWindowRequest,
   context: ToolContext | undefined,
   response: Extract<CodeNeedWindowResponse, { approved: true }>,
   fileId: string,
@@ -314,12 +346,17 @@ export async function handleCodeNeedWindow(
   const rawRequest = CodeNeedWindowRequestSchema.parse(args);
 
   const conn = await getLadybugConn();
-  const { symbolId: resolvedSymbolId } = await resolveSymbolId(
+  const resolvedSymbolId = await resolveCodeTargetSymbolId(
     conn,
     rawRequest.repoId,
-    rawRequest.symbolId,
+    rawRequest,
+    "sdl.code.needWindow",
   );
-  const request = { ...rawRequest, symbolId: resolvedSymbolId };
+  const { symbolRef: _symbolRef, ...rawRequestWithoutRef } = rawRequest;
+  const request: ResolvedCodeNeedWindowRequest = {
+    ...rawRequestWithoutRef,
+    symbolId: resolvedSymbolId,
+  };
 
   recordToolTrace({
     repoId: request.repoId,
@@ -1180,15 +1217,20 @@ export async function handleGetHotPath(
   args: unknown,
   context?: ToolContext,
 ): Promise<GetHotPathResponse> {
-  const rawHotPathRequest = args as GetHotPathRequest;
+  const rawHotPathRequest = GetHotPathRequestSchema.parse(args);
 
   const conn = await getLadybugConn();
-  const { symbolId: resolvedHotPathSymbolId } = await resolveSymbolId(
+  const resolvedHotPathSymbolId = await resolveCodeTargetSymbolId(
     conn,
     rawHotPathRequest.repoId,
-    rawHotPathRequest.symbolId,
+    rawHotPathRequest,
+    "sdl.code.getHotPath",
   );
-  const request = { ...rawHotPathRequest, symbolId: resolvedHotPathSymbolId };
+  const { symbolRef: _symbolRef, ...rawRequestWithoutRef } = rawHotPathRequest;
+  const request: ResolvedGetHotPathRequest = {
+    ...rawRequestWithoutRef,
+    symbolId: resolvedHotPathSymbolId,
+  };
 
   recordToolTrace({
     repoId: request.repoId,

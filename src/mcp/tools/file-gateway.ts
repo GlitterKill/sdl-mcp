@@ -10,7 +10,7 @@ import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
 import type { ToolContext } from "../../server.js";
 import { NotFoundError, ValidationError } from "../errors.js";
 import {
-  CodeNeedWindowRequestSchema,
+  CodeNeedWindowRequestObjectSchema,
   FileWriteReplaceLinesSchema,
   FileWriteReplacePatternSchema,
   FileWriteInsertAtSchema,
@@ -308,9 +308,10 @@ const FileGatewaySymbolEditApplyNowSchema = z.object({
   includeDiagnostics: z.boolean().optional(),
 });
 
-const FileGatewayWindowBaseSchema = CodeNeedWindowRequestSchema.omit({
+const FileGatewayWindowBaseSchema = CodeNeedWindowRequestObjectSchema.omit({
   repoId: true,
   symbolId: true,
+  symbolRef: true,
 }).extend({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   symbolId: z
@@ -321,6 +322,7 @@ const FileGatewayWindowBaseSchema = CodeNeedWindowRequestSchema.omit({
     .describe(
       "Symbol ID to inspect inside the planned file. Required for source-window retrieval; the plan handle constrains the file but does not identify a symbol.",
     ),
+  symbolRef: z.never().optional(),
   planHandle: z
     .string()
     .min(1)
@@ -345,11 +347,11 @@ const FileGatewayWindowBaseSchema = CodeNeedWindowRequestSchema.omit({
 
 const FileGatewayPreviewWindowSchema = FileGatewayWindowBaseSchema.extend({
   op: z.literal("previewWindow"),
-});
+}).strict();
 
 const FileGatewaySourceWindowSchema = FileGatewayWindowBaseSchema.extend({
   op: z.literal("sourceWindow"),
-});
+}).strict();
 
 export const FileGatewayRequestSchema = z.discriminatedUnion("op", [
   FileGatewayReadSchema,

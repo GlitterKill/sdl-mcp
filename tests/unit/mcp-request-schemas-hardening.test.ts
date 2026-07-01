@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   CodeNeedWindowRequestSchema,
+  GetHotPathRequestSchema,
   SliceSpilloverGetRequestSchema,
 } from "../../dist/mcp/tools.js";
 
@@ -24,6 +25,23 @@ describe("CodeNeedWindowRequestSchema hardening", () => {
   it("accepts a well-formed request", () => {
     const parsed = CodeNeedWindowRequestSchema.safeParse(base);
     assert.strictEqual(parsed.success, true);
+  });
+
+  it("accepts symbolRef as the code window target", () => {
+    const parsed = CodeNeedWindowRequestSchema.safeParse({
+      ...base,
+      symbolId: undefined,
+      symbolRef: { name: "buildCart", file: "src/cart.js" },
+    });
+    assert.strictEqual(parsed.success, true);
+  });
+
+  it("rejects mixed symbolId and symbolRef targets", () => {
+    const parsed = CodeNeedWindowRequestSchema.safeParse({
+      ...base,
+      symbolRef: { name: "buildCart" },
+    });
+    assert.strictEqual(parsed.success, false);
   });
 
   it("rejects empty-string identifiersToFind elements (proof-of-need bypass)", () => {
@@ -49,6 +67,31 @@ describe("CodeNeedWindowRequestSchema hardening", () => {
     const parsed = CodeNeedWindowRequestSchema.safeParse({
       ...base,
       expectedLines: 1_000_000_000,
+    });
+    assert.strictEqual(parsed.success, false);
+  });
+});
+
+describe("GetHotPathRequestSchema target affordances", () => {
+  const base = {
+    repoId: "repo",
+    symbolId: "s".repeat(8),
+    identifiersToFind: ["discountCents"],
+  };
+
+  it("accepts symbolRef as the hot-path target", () => {
+    const parsed = GetHotPathRequestSchema.safeParse({
+      ...base,
+      symbolId: undefined,
+      symbolRef: { name: "buildCart", file: "src/cart.js" },
+    });
+    assert.strictEqual(parsed.success, true);
+  });
+
+  it("rejects mixed symbolId and symbolRef targets", () => {
+    const parsed = GetHotPathRequestSchema.safeParse({
+      ...base,
+      symbolRef: { name: "buildCart" },
     });
     assert.strictEqual(parsed.success, false);
   });

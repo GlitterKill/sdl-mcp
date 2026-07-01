@@ -758,13 +758,15 @@ Get an identifier-focused code excerpt showing only lines that match the request
 | Parameter           | Type       | Required | Description                                          |
 | ------------------- | ---------- | -------- | ---------------------------------------------------- |
 | `repoId`            | `string`   | Yes      | Repository identifier                                |
-| `symbolId`          | `string`   | Yes      | Symbol to search within                              |
+| `symbolId`          | `string`   | Conditional | Symbol to search within                          |
+| `symbolRef`         | `{ name, file?, kind?, exportedOnly? }` | Conditional | Natural symbol reference when the canonical ID is not known |
 | `identifiersToFind` | `string[]` | Yes      | Identifiers to locate (min: 1)                       |
 | `contextLines`      | `integer`  | No       | Lines of context around matches (default: 3, min: 0) |
 | `maxLines`          | `integer`  | No       | Max output lines (min: 1)                            |
 | `maxTokens`         | `integer`  | No       | Max output tokens (min: 1)                           |
 
 The `matchedIdentifiers` field in the response contains only identifiers that were actually found in the AST, not the full request list.
+Provide exactly one of `symbolId` or `symbolRef`.
 
 **Response:** `{ excerpt, file, range, estimatedTokens, matchedIdentifiers, matchedLineNumbers, truncated }`
 
@@ -790,7 +792,8 @@ Request raw code for a symbol. This is policy-gated and should be used as a last
 | Parameter           | Type                                  | Required | Description                                                |
 | ------------------- | ------------------------------------- | -------- | ---------------------------------------------------------- |
 | `repoId`            | `string`                              | Yes      | Repository identifier                                      |
-| `symbolId`          | `string`                              | Yes      | Symbol to get code for                                     |
+| `symbolId`          | `string`                              | Conditional | Symbol to get code for                                  |
+| `symbolRef`         | `{ name, file?, kind?, exportedOnly? }` | Conditional | Natural symbol reference when the canonical ID is not known |
 | `reason`            | `string`                              | Yes      | Justification for raw code access (min length: 1)          |
 | `expectedLines`     | `integer`                             | Yes      | Expected lines needed (min: 1, clamped to policy max: 180) |
 | `identifiersToFind` | `string[]`                            | Yes      | Identifiers expected in the code (required by policy)      |
@@ -799,6 +802,7 @@ Request raw code for a symbol. This is policy-gated and should be used as a last
 | `sliceContext`      | `object`                              | No       | Slice context for approval scoring                         |
 
 `sliceContext` fields: `taskText`, `stackTrace`, `failingTestPath`, `editedFiles`, `entrySymbols`, `budget`.
+Provide exactly one of `symbolId` or `symbolRef`.
 
 The `expectedLines` and `maxTokens` values are clamped to the effective policy limits, so requests exceeding policy caps are silently reduced rather than rejected.
 
@@ -1128,11 +1132,11 @@ Run a command in a repo-scoped subprocess. Runtime execution is enabled by defau
 | `outputMode`         | `"minimal"` \| `"summary"` \| `"intent"` | No       | Controls response verbosity. `"minimal"` (default): status, artifact handle, and concise stdout/stderr previews. `"summary"`: head+tail excerpts. `"intent"`: only `queryTerms`-matched excerpts. |
 | `includeDiagnostics` | `boolean`                                | No       | Include coarse policy, execution, output decoding, and artifact phase timings                                                                                                                     |
 
-Use `stdin` for multiline scripts/input instead of shell quoting or base64 workarounds. SDL-MCP reports `stdinBytes` and `stdinSha256` but does not echo full stdin in visible output or persisted logs. `stdin` does not bypass command validation: the shell runtime still requires `code`. Use `code` for inline snippets or `args` for invoking files/commands. Default Node `code` snippets resolve relative imports from the requested working directory without repo-local temp files. When Node `code` also needs user `stdin`, SDL-MCP runs a temp `.mjs` from the OS temp directory so stdin remains available to the child process. On Windows shell runtime, use `&` or newlines rather than semicolons for command separation; SDL-MCP surfaces a warning when semicolons appear in shell code. `queryTerms` acts like a built-in grep, extracting only matching lines from long output.
+Use `stdin` for multiline scripts/input instead of shell quoting or base64 workarounds. SDL-MCP reports `stdinBytes` and `stdinSha256` but does not echo full stdin in visible output or persisted logs. `stdin` does not bypass command validation: the shell runtime still requires `code`. Use `code` for inline snippets or `args` for invoking files/commands. Default Node `code` snippets resolve relative imports from the requested working directory without repo-local temp files. When Node `code` also needs user `stdin`, SDL-MCP runs a temp `.mjs` from the OS temp directory so stdin remains available to the child process. On Windows shell runtime, use `&` or newlines rather than semicolons for command separation; SDL-MCP surfaces a warning when semicolons appear in shell code. Predictable failures can include compact `runtimeHints`, such as using ESM imports instead of `require()` or avoiding Bash syntax under Windows `cmd.exe`. `queryTerms` acts like a built-in grep, extracting only matching lines from long output.
 
 **Response** varies by `outputMode`:
 
-- **All modes:** `status`, `exitCode`, `signal`, `durationMs`, `artifactHandle`, `truncation`, `policyDecision`, `diagnostics?`, plus `stdinBytes`/`stdinSha256` when stdin was provided and `quotingWarnings` when risky quoting patterns are detected
+- **All modes:** `status`, `exitCode`, `signal`, `durationMs`, `artifactHandle`, `truncation`, `policyDecision`, `diagnostics?`, plus `stdinBytes`/`stdinSha256` when stdin was provided, `quotingWarnings` when risky quoting patterns are detected, and `runtimeHints` for compact corrective guidance
 - **`"minimal"` (default):** returns concise `stdoutPreview` and short `stderrSummary` when output is small enough to show inline. Use `sdl.runtime.queryOutput` to search the artifact for full output.
 - **`"summary"`:** adds `stdoutSummary`, `stderrSummary`, `excerpts`, `truncation` (legacy behavior)
 - **`"intent"`:** adds `excerpts`, `truncation` — only `queryTerms`-matched windows, no head/tail summary

@@ -232,6 +232,45 @@ function detectQuotingWarnings(
   return warnings.size > 0 ? Array.from(warnings) : undefined;
 }
 
+function mergeRuntimeHints(
+  current: string[] | undefined,
+  next: string[] | undefined,
+): string[] | undefined {
+  const merged = new Set([...(current ?? []), ...(next ?? [])]);
+  return merged.size > 0 ? Array.from(merged) : undefined;
+}
+
+function detectRuntimeHints(
+  request: RuntimeExecuteRequest,
+  outputText = "",
+): string[] | undefined {
+  const hints = new Set<string>();
+  const code = request.code ?? "";
+
+  if (
+    request.runtime === "node" &&
+    /require is not defined in ES module scope|ReferenceError:\s*require is not defined/i.test(
+      outputText,
+    )
+  ) {
+    hints.add("ESM context: use import or createRequire instead of require().");
+  }
+
+  if (
+    request.runtime === "shell" &&
+    process.platform === "win32" &&
+    /(^|\n)\s*(export\s+\w+=|source\s+|set\s+-[a-z]+|cat\s+<<|rm\s+-|ls\s+-)/i.test(
+      code,
+    )
+  ) {
+    hints.add(
+      "Windows shell runtime uses cmd.exe; use cmd syntax or a portable node/python script.",
+    );
+  }
+
+  return hints.size > 0 ? Array.from(hints) : undefined;
+}
+
 // ============================================================================
 // Intent-Only Excerpts (for outputMode: "intent")
 // ============================================================================
@@ -404,11 +443,8 @@ function runtimeValidationMessage(error: z.ZodError): string {
       return `${path}${issue.message}`;
     })
     .join("; ");
-  const example =
-    process.platform === "win32"
-      ? '{ runtime: "shell", code: "Write-Output ok" }'
-      : '{ runtime: "shell", code: "echo ok" }';
-  return `${issues}. Active platform: ${process.platform}. Valid shell example for this platform: ${example}`;
+  const example = '{ runtime: "shell", code: "echo ok" }';
+  return `${issues}. Use code, not args. Active platform: ${process.platform}. Valid shell example for this platform: ${example}`;
 }
 
 export async function handleRuntimeExecute(
@@ -430,6 +466,7 @@ export async function handleRuntimeExecute(
 
   const stdinMetadata = buildStdinMetadata(request.stdin);
   const quotingWarnings = detectQuotingWarnings(request);
+  let runtimeHints = detectRuntimeHints(request);
   const serverInfo = getServerInfo();
   const augmentResponse = <T extends RuntimeExecuteResponse>(
     response: T,
@@ -439,6 +476,7 @@ export async function handleRuntimeExecute(
       ...response,
       ...stdinMetadata,
       ...(quotingWarnings ? { quotingWarnings } : {}),
+      ...(runtimeHints ? { runtimeHints } : {}),
       ...(serverInfo.driftWarnings.length > 0
         ? { serverDriftWarnings: serverInfo.driftWarnings }
         : {}),
@@ -892,6 +930,10 @@ export async function handleRuntimeExecute(
     const decodeStartedAt = timer.start();
     const stdoutStr = result.stdout.toString("utf-8");
     const stderrStr = result.stderr.toString("utf-8");
+    runtimeHints = mergeRuntimeHints(
+      runtimeHints,
+      detectRuntimeHints(request, `${stderrStr}\n${stdoutStr}`),
+    );
     timer.record("runtime.decodeOutput", decodeStartedAt);
 
     // 11. Persist artifact (all modes)

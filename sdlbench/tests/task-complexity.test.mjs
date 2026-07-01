@@ -28,6 +28,7 @@ test("fixture suite contains longer agentic workflows", async () => {
       tokenizerCommand: await fakeTokenizer(root),
       variant: "sdl",
       workDir: join(root, "work"),
+      repoIdFilter: "fixture-js",
     });
     const records = (await readFile(join(root, "sessions.jsonl"), "utf8"))
       .trim()

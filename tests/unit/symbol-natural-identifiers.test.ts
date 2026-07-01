@@ -190,7 +190,15 @@ describe("symbol natural identifiers", () => {
             classification?: string;
             retryable?: boolean;
             fallbackTools?: string[];
-            candidates?: Array<{ symbolId: string; file: string }>;
+            candidates?: Array<{
+              symbolId: string;
+              kind: string;
+              file: string;
+              nextCall?: {
+                tool?: string;
+                args?: { repoId?: string; symbolId?: string };
+              };
+            }>;
           };
         };
 
@@ -204,6 +212,13 @@ describe("symbol natural identifiers", () => {
           (response.error?.candidates?.length ?? 0) >= 2,
           "expected ranked candidates in the error response",
         );
+        const [candidate] = response.error?.candidates ?? [];
+        assert.equal(candidate?.kind, "function");
+        assert.equal(candidate?.nextCall?.tool, "sdl.symbol.getCard");
+        assert.deepEqual(candidate?.nextCall?.args, {
+          repoId: "repo",
+          symbolId: candidate?.symbolId,
+        });
         return true;
       },
     );

@@ -73,13 +73,13 @@ Each task copies `sdlbench/tests/fixtures/repo` into `sdlbench/.work/repos/<task
 
 ## SDL Evidence
 
-For `--variant sdl`, the runner indexes and retrieves context through the SDL-MCP HTTP server before applying task solution files. By default it starts a temporary `serve --http` process for the copied fixture repo, waits on `/health`, runs `POST /api/repo/:repoId/reindex-stream` with `mode: "full"`, and retrieves task context with `GET /api/symbol/:repoId/search` for each task's `context.sdlQueries`. Tests can pass `sdlHttpBaseUrl` to use an existing HTTP server.
+For `--variant sdl`, the runner prepares a normal SDL-MCP HTTP server and indexes the copied fixture repo before the task starts. By default it starts a temporary `serve --http` process, waits on `/health`, and runs `POST /api/repo/:repoId/reindex-stream` with `mode: "full"`. It does not pre-run task-specific symbol searches, paste `context.sdl`, or convert `context.sdlQueries` into seeded slice entries; behavior-mode agents must discover context through the live SDL tools during the measured session. Tests can pass `sdlHttpBaseUrl` to use an existing HTTP server.
 
-The temporary config mirrors the production SDL-MCP shape closely enough for benchmark evidence: Rust indexing with `pipeline: "auto"`, concurrency 12, pass2 concurrency 8, provider-first LSP `primaryWithCaps`, file watching enabled, policy windows at 180 lines / 1400 tokens, local semantic embeddings with DML/CPU fallback and hybrid retrieval, SCIP auto-ingest/generation, prefetch off, HTTP local-only, and auth disabled for local Codex MCP access. Provider-first only counts as evidence when the HTTP indexing response reports provider-first execution; otherwise the record still proves real HTTP indexing/retrieval but not provider-first savings.
+The temporary config starts from `config/sdlmcp.config.example.json` so provider-first indexing, the Rust indexer, SCIP, semantic retrieval/enrichment, file watching, policy, prefetch, and exclusive Code Mode track the default SDL-MCP configuration. SDLBench only overrides the copied repo root, graph DB path, local HTTP/auth settings, benchmark ignore globs, and repo languages from `repos.lock`. Provider-first only counts as evidence when the HTTP indexing response reports provider-first execution; otherwise the record still proves real HTTP indexing/setup but not provider-first savings.
 
 
 
-SDL token counts use the retrieved HTTP context, not the canned `context.sdl` task text. If indexing or retrieval returns no symbols, the SDL run fails instead of writing savings evidence.
+SDL token counts use the rendered prompt plus measured agent session data when available. `context.sdl` and `context.sdlQueries` are fixture metadata, not privileged prompt input. If HTTP indexing fails, the SDL run fails instead of writing savings evidence.
 
 ## Metrics
 
@@ -94,6 +94,7 @@ Cost estimates use `sdlbench/config/pricing.json`. When that file declares a `mo
 Default runs stay in fixture mode: they apply task-local `solution.files`, then run the verifier. Use this for harness and token plumbing checks.
 
 Pass `--behavior` to test model behavior. In behavior mode, SDLBench writes `.sdlbench-prompt.md` into the copied repo, runs the configured agent command template from `config/agents/<agent>.json`, then verifies the files the command changed. The checked-in Codex config defaults to `gpt-5.5` with `model_reasoning_effort="xhigh"`. The command template can use `{repo}`, `{prompt}`, `{taskId}`, `{variant}`, `{model}`, `{sdlMcpConfig}`, and `{sdlMcpUrl}` placeholders. Override it directly with `--agent-command "cmd {repo} {prompt}"` for local smoke tests.
+For SDL behavior runs, the rendered prompt includes generic SDL guidance and passes the live MCP server config so the agent can discover task context with tools during the measured session.
 
 Codex behavior runs are isolated from the developer's normal Codex environment. By default, behavior worktrees are copied outside this repository under the OS temp directory so parent `AGENTS.md` files cannot bleed into the baseline. For each Codex task, SDLBench creates a temporary `CODEX_HOME`, copies only `auth.json`, disables plugin/app/memory/personality/browser/computer-use features, and disables every discovered user/plugin/system skill path in the temporary config. SDL hooks remain enabled so the `sdl` variant can still use the benchmark-installed SDL workflow hooks and local SDL instructions. A Codex behavior run fails instead of writing benchmark evidence if no matching Codex session token-count JSONL is found or if the captured session contains Ponytail, generic plugin/app/skill instructions, or memory context.
 

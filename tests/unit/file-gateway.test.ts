@@ -361,6 +361,21 @@ describe("FileGatewayRequestSchema", () => {
       assert.equal(result.symbolId, undefined);
     });
 
+    it("rejects previewWindow symbolRef until plan windows resolve refs", () => {
+      assert.throws(() => {
+        FileGatewayRequestSchema.parse({
+          op: "previewWindow",
+          repoId: "test-repo",
+          planHandle: "plan-abc-123",
+          filePath: "src/index.ts",
+          symbolRef: { name: "target", file: "src/index.ts" },
+          reason: "Inspect the planned edit before applying it",
+          expectedLines: 12,
+          identifiersToFind: ["target"],
+        });
+      });
+    });
+
     it("parses sourceWindow as an alias for the same gated path", () => {
       const result = FileGatewayRequestSchema.parse({
         op: "sourceWindow",

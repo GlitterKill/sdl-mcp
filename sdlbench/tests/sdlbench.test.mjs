@@ -9,6 +9,7 @@ import {
   analyzeSessions,
   createSdlHttpConfig,
   estimateCost,
+  extractRetrievedSymbolsFromAttribution,
   findCodexSessionTokenCounts,
   importTranscript,
   inspectCodexSessionSterility,
@@ -476,7 +477,7 @@ test("runBenchmark appends baseline and sdl fixture records with tokenizer-backe
   }
 });
 
-test("sdl variant indexes and retrieves context through HTTP before applying solutions", async () => {
+test("sdl variant indexes through HTTP without pre-retrieving tailored task context", async () => {
   const root = await mkdtemp(join(tmpdir(), "sdlbench-http-"));
   const requests = [];
   const server = createServer((req, res) => {
@@ -486,16 +487,6 @@ test("sdl variant indexes and retrieves context through HTTP before applying sol
     if (url.pathname.endsWith("/reindex-stream")) {
       res.writeHead(200, { "Content-Type": "text/event-stream" });
       res.end('event: complete\ndata: {"ok":true,"providerFirstExecution":{"selectedPipeline":"providerFirst"}}\n\n');
-      return;
-    }
-
-    if (url.pathname.endsWith("/search")) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        results: [
-          { symbolId: "sym-build-cart", name: "buildCart", kind: "function", file: "src/cart.mjs", summary: "from-http-retrieval" }
-        ]
-      }));
       return;
     }
 
@@ -520,17 +511,19 @@ test("sdl variant indexes and retrieves context through HTTP before applying sol
     assert.ok(result.records.length >= 4, `expected at least 4 records, got ${result.records.length}`);
     assert.ok(result.records.some((r) => r.repoId === "fixture-js"), "should include fixture-js tasks");
     assert.ok(requests.some((request) => request.pathname.endsWith("/reindex-stream")));
-    assert.ok(requests.some((request) => request.pathname.endsWith("/search")));
+    assert.equal(requests.some((request) => request.pathname.endsWith("/search")), false);
     assert.ok(requests.every((request) => request.auth === "Bearer test-token"));
     assert.ok(result.records.every((record) => record.artifacts.sdl?.transport === "http"));
-    assert.ok(result.records.every((record) => record.artifacts.sdl.context.includes("from-http-retrieval")));
+    assert.ok(result.records.every((record) => record.artifacts.sdl?.retrieval?.resultCount === 0));
+    assert.ok(result.records.every((record) => record.artifacts.sdl?.retrieval?.queries?.length === 0));
+    assert.ok(result.records.every((record) => !record.artifacts.sdl.context.includes("slice.build entrySymbols")));
   } finally {
     server.close();
     await rm(root, { force: true, recursive: true });
   }
 });
 
-test("SDL behavior mode exposes a live MCP server instead of pasted lookup context", async () => {
+test("SDL behavior mode exposes a live MCP server without seeded lookup context", async () => {
   const root = await mkdtemp(join(tmpdir(), "sdlbench-sdl-agent-"));
   const repo = join(root, "repo");
   const matrixPath = join(root, "matrix.json");
@@ -543,16 +536,6 @@ test("SDL behavior mode exposes a live MCP server instead of pasted lookup conte
     if (url.pathname.endsWith("/reindex-stream")) {
       res.writeHead(200, { "Content-Type": "text/event-stream" });
       res.end('event: complete\ndata: {"ok":true,"providerFirstExecution":{"selectedPipeline":"providerFirst"}}\n\n');
-      return;
-    }
-
-    if (url.pathname.endsWith("/search")) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        results: [
-          { symbolId: "sym-value", name: "value", kind: "variable", file: "src/value.js", summary: "from-http-retrieval" }
-        ]
-      }));
       return;
     }
 
@@ -597,9 +580,13 @@ test("SDL behavior mode exposes a live MCP server instead of pasted lookup conte
       import { join } from "node:path";
       const repo = process.argv[process.argv.indexOf("--repo") + 1];
       const prompt = readFileSync(process.argv[process.argv.indexOf("--prompt") + 1], "utf8");
-      if (prompt.includes("from-http-retrieval")) process.exit(2);
+      if (prompt.includes("PRESEEDED_LOOKUP_SHOULD_NOT_APPEAR")) process.exit(2);
       if (!prompt.includes("configured SDL-MCP server")) process.exit(3);
       if (!process.argv.join(" ").includes("mcp_servers.sdl-mcp.url")) process.exit(4);
+      if (prompt.includes("PASTED_SDL_CONTEXT_SHOULD_NOT_APPEAR")) process.exit(5);
+      if (prompt.includes("sdl.repo.status")) process.exit(6);
+      if (/usageStats|usage\.stats|usage stats/i.test(prompt)) process.exit(7);
+      if (prompt.includes("slice.build entrySymbols")) process.exit(8);
       writeFileSync(join(repo, "src", "value.js"), "export const value = \\\"sdl-agent\\\";\\n");
     `);
 
@@ -620,7 +607,7 @@ test("SDL behavior mode exposes a live MCP server instead of pasted lookup conte
     assert.match(record.artifacts.agent.command, /mcp_servers\.sdl-mcp\.url/);
     assert.match(record.artifacts.agent.command, new RegExp(`127\\.0\\.0\\.1:${port}`));
     assert.ok(requests.some((request) => request.pathname.endsWith("/reindex-stream")));
-    assert.ok(requests.some((request) => request.pathname.endsWith("/search")));
+    assert.equal(requests.some((request) => request.pathname.endsWith("/search")), false);
   } finally {
     server.close();
     await rm(root, { force: true, recursive: true });
@@ -629,12 +616,40 @@ test("SDL behavior mode exposes a live MCP server instead of pasted lookup conte
 
 test("temporary SDL benchmark server disables HTTP auth for Codex MCP access", () => {
   const config = createSdlHttpConfig({
+    task: { repoId: "moshi" },
+    runRoot: "F:/tmp/repo",
+    dbPath: "F:/tmp/graph.lbug",
+    repoMeta: { languageTags: ["java", "kotlin"], ignoreGlobs: [".gradle/**"] },
+  });
+
+  assert.deepEqual(config.repos[0].languages, ["java", "kt"]);
+  assert.ok(config.repos[0].ignore.includes(".gradle/**"));
+  assert.deepEqual(config.httpAuth, { enabled: false });
+  assert.equal(config.indexing.pipeline, "auto");
+  assert.equal(config.indexing.engine, "rust");
+  assert.equal(config.indexing.providerFirst.lsp.mode, "primaryWithCaps");
+  assert.equal(config.semantic.enabled, true);
+  assert.equal(config.semantic.retrieval.mode, "hybrid");
+  assert.equal(config.semanticEnrichment.enabled, true);
+  assert.equal(config.scip.enabled, true);
+  assert.equal(config.scip.generator.enabled, true);
+  assert.deepEqual(config.codeMode, {
+    enabled: true,
+    exclusive: true,
+    maxWorkflowSteps: 20,
+    maxWorkflowTokens: 50_000,
+    maxWorkflowDurationMs: 60_000,
+    ladderValidation: "warn",
+    etagCaching: true,
+  });
+
+  const fixtureConfig = createSdlHttpConfig({
     task: { repoId: "fixture-js" },
     runRoot: "F:/tmp/repo",
     dbPath: "F:/tmp/graph.lbug",
+    repoMeta: { languageTags: ["javascript"] },
   });
-
-  assert.deepEqual(config.httpAuth, { enabled: false });
+  assert.deepEqual(fixtureConfig.repos[0].languages, ["js", "jsx"]);
 });
 
 test("runBenchmark fails instead of estimating when tokenizer is unavailable", async () => {
@@ -693,6 +708,7 @@ test("runBenchmark tags records with repo.sizeClass and repo.languageTags from r
 
     assert.equal(record.repo.sizeClass, "tiny");
     assert.deepEqual(record.repo.languageTags, ["javascript"]);
+    assert.deepEqual(record.repo.ignoreGlobs, ["node_modules/**"]);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -795,6 +811,26 @@ test("Codex reads parse function_call items and attach per-tool attribution", as
     const sdlCall = sessionCounts.attribution.toolCalls.find((tc) => tc.toolName === "sdl.symbol.search");
     assert.ok(sdlCall);
     assert.ok(sdlCall.tokensIn > 0);
+    assert.equal(sdlCall.arguments, "{\"query\":\"buildCart\"}");
+    assert.equal(sdlCall.output, "found buildCart");
+    assert.deepEqual(
+      extractRetrievedSymbolsFromAttribution(sessionCounts.attribution, {
+        symbols: ["buildCart", "resolvePromo"],
+      }),
+      ["buildCart"],
+    );
+    assert.deepEqual(
+      extractRetrievedSymbolsFromAttribution({
+        toolCalls: [{
+          toolName: "sdl.symbol.search",
+          arguments: "{\"query\":\"resolvePromo\"}",
+          output: "",
+        }],
+      }, {
+        symbols: ["resolvePromo"],
+      }),
+      [],
+    );
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -875,11 +911,6 @@ test("SDL runs poll observability snapshot and carry observabilityDelta onto the
       res.end('event: complete\ndata: {"ok":true,"providerFirstExecution":{"selectedPipeline":"providerFirst"}}\n\n');
       return;
     }
-    if (url.pathname.endsWith("/search")) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ results: [{ symbolId: "s1", name: "buildCart", kind: "function", file: "src/cart.mjs", summary: "obs" }] }));
-      return;
-    }
     if (url.pathname.endsWith("/api/observability/snapshot")) {
       const calls = parseInt(url.searchParams.get("_c") ?? "0", 10);
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -923,8 +954,10 @@ test("SDL runs poll observability snapshot and carry observabilityDelta onto the
       workDir: join(root, "work"),
       sdlAuthToken: "test-token",
       sdlHttpBaseUrl: `http://127.0.0.1:${port}`,
+      repoIdFilter: "fixture-js",
     });
 
+    assert.ok(result.records.length >= 1, "expected at least one fixture-js record");
     assert.ok(result.records.every((r) => r.artifacts.sdl?.observability));
     const obs = result.records[0].artifacts.sdl.observability;
     assert.ok(typeof obs.health_score === "number" || typeof obs.healthScore === "number");
@@ -984,6 +1017,31 @@ test("computeCoverage returns null when contextTargets is absent", () => {
   assert.equal(computeCoverage({ changedFiles: [], retrievedSymbols: [], contextTargets: { files: [], symbols: [] } }), null);
 });
 
+test("warmSession requires an external SDL server to avoid reusing a stale copied worktree", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdlbench-warm-local-"));
+  const matrixPath = join(root, "matrix.json");
+
+  try {
+    await writeFile(matrixPath, JSON.stringify({ schemaVersion: 1, tasks: [] }));
+    const tokenizerCommand = await fakeTokenizer(root);
+
+    await assert.rejects(
+      () => runBenchmark({
+        agent: "codex",
+        matrixPath,
+        resultsPath: join(root, "sessions.jsonl"),
+        tokenizerCommand,
+        variant: "sdl",
+        workDir: join(root, "work"),
+        warmSession: true,
+      }),
+      /warmSession.*sdlHttpBaseUrl/,
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test("warmSession reuses SDL server across tasks and only charges indexCost on first task", async () => {
   const root = await mkdtemp(join(tmpdir(), "sdlbench-warm-"));
   let reindexCount = 0;
@@ -993,11 +1051,6 @@ test("warmSession reuses SDL server across tasks and only charges indexCost on f
       reindexCount++;
       res.writeHead(200, { "Content-Type": "text/event-stream" });
       res.end('event: complete\ndata: {"ok":true,"providerFirstExecution":{"selectedPipeline":"providerFirst"}}\n\n');
-      return;
-    }
-    if (url.pathname.endsWith("/search")) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ results: [{ symbolId: "s1", name: "buildCart", kind: "function", file: "src/cart.mjs", summary: "warm" }] }));
       return;
     }
     if (url.pathname.endsWith("/api/observability/snapshot")) {

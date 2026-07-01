@@ -8,7 +8,7 @@ import { anyRepoHasMemoryTools } from "../config/memory-config.js";
 
 export const QUERY_DESCRIPTION =
   `sdl.query - Read-only SDL intelligence. Pass { repoId, action, ...params }.` +
-  `\nActions: symbol.search(query,limit?,semantic?) | symbol.getCard(symbolId|symbolIds[],ifNoneMatch?,knownEtags?) | slice.build(taskText?,entrySymbols?,editedFiles?,budget?,wireFormat?) | ` +
+  `\nActions: symbol.search(query,limit?,semantic?) | symbol.getCard(symbolId|symbolRef|symbolIds[]|symbolRefs[],ifNoneMatch?,knownEtags?) | slice.build(taskText?,entrySymbols?,editedFiles?,budget?,wireFormat?) | ` +
   `slice.refresh(sliceHandle,knownVersion) | slice.spillover.get(spilloverHandle,cursor?,pageSize?) | ` +
   `delta.get(fromVersion,toVersion,budget?) | ` +
   `pr.risk.analyze(fromVersion,toVersion,riskThreshold?) | ` +
@@ -17,9 +17,9 @@ export const QUERY_DESCRIPTION =
 
 export const CODE_DESCRIPTION =
   `sdl.code - Gated raw code access. Pass { repoId, action, ...params }.` +
-  `\nActions: code.needWindow(symbolId,reason,expectedLines,identifiersToFind[],granularity?,maxTokens?,sliceContext?) | ` +
+  `\nActions: code.needWindow(symbolId|symbolRef,reason,expectedLines,identifiersToFind[],granularity?,maxTokens?,sliceContext?) | ` +
   `code.getSkeleton(symbolId?,file?,exportedOnly?,maxLines?,maxTokens?,identifiersToFind?) | ` +
-  `code.getHotPath(symbolId,identifiersToFind[],maxLines?,maxTokens?,contextLines?)` +
+  `code.getHotPath(symbolId|symbolRef,identifiersToFind[],maxLines?,maxTokens?,contextLines?)` +
   `\nPrefer: code.getSkeleton -> code.getHotPath -> code.needWindow.`;
 
 export const REPO_DESCRIPTION =
@@ -29,7 +29,7 @@ export const REPO_DESCRIPTION =
   `index.refresh(mode,reason?) | policy.get() | policy.set(policyPatch; budgetCaps requires maxCards+maxEstimatedTokens) | ` +
   `search.edit(mode,targeting?,query?,editMode?,operations?,planHandle?,responseMode?) | ` +
   `semantic.enrichment.refresh(dryRun?,force?,install?,languages?) | ` +
-  `semantic.enrichment.status(languages?) | usage.stats(scope?,since?,limit?,persist?)`;
+    `semantic.enrichment.status(languages?)`;
 
 const AGENT_DESCRIPTION_BASE =
   `sdl.agent - Agentic + live-edit operations. Pass { repoId, action, ...params }.` +

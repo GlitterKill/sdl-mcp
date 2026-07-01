@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFile, copyFile, cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { createServer as createNetServer } from "node:net";
@@ -18,6 +18,7 @@ const DEFAULT_ENCODING = "o200k_base";
 const DEFAULT_MODEL = "gpt-5.5";
 const DEFAULT_REPOS_LOCK = "sdlbench/config/repos.lock.json";
 const TIKTOKEN_SPEC = "git+https://github.com/openai/tiktoken@0.13.0";
+const ATTRIBUTION_TEXT_LIMIT = 2000;
 const CODEX_SYSTEM_SKILLS = ["imagegen", "openai-docs", "plugin-creator", "skill-creator", "skill-installer"];
 const CODEX_STERILE_FEATURES = [
   "plugins",
@@ -67,6 +68,9 @@ export async function runBenchmark(options = {}) {
   const tokenizerCommand = options.tokenizerCommand ?? defaultTokenizerCommand(root);
   const executionMode = options.executionMode ?? (options.behavior ? "behavior" : "fixture");
   if (!["fixture", "behavior"].includes(executionMode)) throw new Error(`Unknown executionMode ${executionMode}`);
+  if (variant === "sdl" && options.warmSession && !options.sdlHttpBaseUrl) {
+    throw new Error("warmSession requires sdlHttpBaseUrl so SDL and the agent operate on the same reused worktree.");
+  }
   const workDir = abs(root, options.workDir ?? defaultWorkDir(root, executionMode));
   const pricing = await loadPricing(root, options.pricingPath);
   const agentConfig = await loadAgentConfig(root, agent, options, { requireCommand: executionMode === "behavior" });
@@ -101,12 +105,12 @@ export async function runBenchmark(options = {}) {
           const warmKey = task.repoId;
           sdlSession = warmSessions.get(warmKey) ?? null;
           if (!sdlSession) {
-            sdlSession = await startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, options });
+            sdlSession = await startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, options, repoMeta: resolveRepoMeta(task.repoId, reposLock) });
             warmSessions.set(warmKey, sdlSession);
             indexedRepos.add(warmKey);
           }
         } else {
-          sdlSession = await startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, options });
+          sdlSession = await startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, options, repoMeta: resolveRepoMeta(task.repoId, reposLock) });
           ownsSdlSession = true;
         }
       }
@@ -182,6 +186,12 @@ export async function runBenchmark(options = {}) {
         : opencodeSessionCounts
           ? tokensFromOpencodeSessionCounts(opencodeSessionCounts, estimatedTokens)
           : estimatedTokens;
+      const attribution = codexTokenCounts?.attribution
+        ? buildAttribution(codexTokenCounts.attribution, tokens)
+        : undefined;
+      const sdlRetrievedSymbols = variant === "sdl"
+        ? extractRetrievedSymbolsFromAttribution(attribution, task.contextTargets)
+        : [];
       const claimGrade = resolveClaimGrade(executionMode, tokens.tokenizerSource);
       const repoMeta = resolveRepoMeta(task.repoId, reposLock);
       const workflowSteps = Array.isArray(task.workflow) ? task.workflow : [];
@@ -216,15 +226,11 @@ export async function runBenchmark(options = {}) {
         agentMs: agentResult ? agentMs : durationMs,
         tokens,
         cost: estimateCost(tokens, modelPricing),
-        attribution: codexTokenCounts?.attribution
-          ? buildAttribution(codexTokenCounts.attribution, tokens)
-          : undefined,
+        attribution,
         coverage: task.contextTargets
           ? computeCoverage({
               changedFiles,
-              retrievedSymbols: variant === "sdl"
-                ? (sdlEvidence?.retrieval?.results ?? []).map((r) => r.name).filter(Boolean)
-                : [],
+              retrievedSymbols: sdlRetrievedSymbols,
               contextTargets: task.contextTargets,
             })
           : undefined,
@@ -551,9 +557,8 @@ function promptContextForVariant(task, variant) {
   return [
     "Use the configured SDL-MCP server for repository context.",
     `The repository is already registered and indexed under repoId "${task.repoId}".`,
-    "Start with sdl.repo.status, then use sdl.context or sdl.workflow before reading or editing indexed source.",
-    "Use SDL edit tools for indexed source and SDL runtime tools for repo-local commands.",
-    "Call sdl.usageStats with scope session and persist true before the final answer.",
+    "Use sdl.context or sdl.workflow before reading or editing indexed source.",
+    "Use Code Mode actions for indexed-source edits and repo-local commands.",
   ].join("\n");
 }
 
@@ -739,9 +744,8 @@ function sdlBenchmarkInstructions(sdlSession) {
     "",
     `The repository is registered and indexed under repoId "${repoId}".`,
     "Use SDL-MCP as the repository interface.",
-    `Start with sdl.repo.status (repoId: "${repoId}"), then use sdl.context or sdl.workflow before reading or editing indexed source.`,
-    "Use SDL edit tools for indexed source and SDL runtime tools for repo-local commands.",
-    "Call sdl.usageStats with scope session and persist true before the final answer.",
+    "Use sdl.context or sdl.workflow before reading or editing indexed source.",
+    "Use Code Mode actions for indexed-source edits and repo-local commands.",
   ].join("\n");
 }
 
@@ -796,11 +800,11 @@ export async function inspectCodexSessionSterility(sessionFile) {
 }
 
 
-async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, options }) {
+async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, options, repoMeta }) {
   const authToken = options.sdlAuthToken ?? "sdlbench-" + taskRunId;
   if (options.sdlHttpBaseUrl) {
     const baseUrl = trimSlash(options.sdlHttpBaseUrl);
-    const evidence = await retrieveSdlHttpContext({
+    const evidence = await prepareSdlHttpEvidence({
       baseUrl: options.sdlHttpBaseUrl,
       authToken,
       task,
@@ -823,7 +827,7 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
   await mkdir(sdlRoot, { recursive: true });
   const configPath = join(sdlRoot, "sdlmcp.config.json");
   const dbPath = join(sdlRoot, "graph.lbug");
-  await writeFile(configPath, JSON.stringify(createSdlHttpConfig({ task, runRoot, dbPath, authToken }), null, 2), "utf8");
+  await writeFile(configPath, JSON.stringify(createSdlHttpConfig({ task, runRoot, dbPath, repoMeta }), null, 2), "utf8");
 
   const cliPath = join(root, "dist/cli/index.js");
   if (!existsSync(cliPath)) {
@@ -858,7 +862,7 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
   try {
     const baseUrl = "http://127.0.0.1:" + port;
     await waitForHttpHealth(baseUrl, child, logs, options.sdlHttpTimeoutMs ?? 120_000);
-    const evidence = await retrieveSdlHttpContext({
+    const evidence = await prepareSdlHttpEvidence({
       baseUrl,
       authToken,
       task,
@@ -884,120 +888,54 @@ async function startSdlHttpSession({ root, workDir, runRoot, task, taskRunId, op
   }
 }
 
-export function createSdlHttpConfig({ task, runRoot, dbPath }) {
+export function createSdlHttpConfig({ task, runRoot, dbPath, repoMeta }) {
+  const config = JSON.parse(readFileSync(new URL("../../config/sdlmcp.config.example.json", import.meta.url), "utf8"));
+  const templateRepo = config.repos?.[0] ?? {};
+  const languages = languagesForRepo(repoMeta, templateRepo.languages ?? []);
+
   return {
+    ...config,
     repos: [{
+      ...templateRepo,
       repoId: task.repoId,
       rootPath: runRoot,
       ignore: [
-        "**/.git/**",
-        "**/dist/**",
-        "**/build/**",
-        "**/out/**",
-        "**/target/**",
-        "**/coverage/**",
-        "**/node_modules/**",
-        "**/.sdlbench/**",
-        "**/.tmp/**",
+        ...new Set([
+          ...(templateRepo.ignore ?? []),
+          ...(repoMeta?.ignoreGlobs ?? []),
+          "**/.sdlbench/**",
+        ]),
       ],
-      languages: ["ts", "tsx", "js", "jsx", "py", "go", "java", "cs", "c", "cpp", "php", "rs", "kt", "sh"],
-      maxFileBytes: 2_000_000,
-      includeNodeModulesTypes: true,
+      languages,
     }],
-    graphDatabase: { path: dbPath },
-    policy: {
-      maxWindowLines: 180,
-      maxWindowTokens: 1400,
-      requireIdentifiers: true,
-      allowBreakGlass: true,
-    },
-    redaction: { enabled: true, includeDefaults: true, patterns: [] },
-    indexing: {
-      pipeline: "auto",
-      engine: "rust",
-      concurrency: 12,
-      pass2Concurrency: 8,
-      enableFileWatching: true,
-      maxWatchedFiles: 35000,
-      watchDebounceMs: 750,
-      providerFirst: {
-        lsp: {
-          mode: "primaryWithCaps",
-        },
-      },
-    },
-    slice: {
-      defaultMaxCards: 60,
-      defaultMaxTokens: 12000,
-      edgeWeights: { call: 1, import: 0.6, config: 0.8 },
-    },
-    cache: {
-      enabled: true,
-      symbolCardMaxEntries: 2000,
-      symbolCardMaxSizeBytes: 104857600,
-      graphSliceMaxEntries: 1000,
-      graphSliceMaxSizeBytes: 52428800,
-    },
-    semantic: {
-      enabled: true,
-      provider: "local",
-      onnx: {
-        intraOpNumThreads: 4,
-        interOpNumThreads: 1,
-        executionMode: "parallel",
-      },
-      executionProviders: ["dml", "cpu"],
-      embeddingProfile: "specialized",
-      embeddingConcurrency: 4,
-      embeddingBatchSize: 32,
-      fileSummaryEmbeddingBatchSize: 4,
-      retrieval: {
-        mode: "hybrid",
-        fts: {
-          enabled: true,
-          indexName: "symbol_search_text_v1",
-          topK: 75,
-          conjunctive: false,
-        },
-        vector: {
-          enabled: true,
-          topK: 75,
-          efs: 200,
-        },
-        fusion: {
-          strategy: "rrf",
-          rrfK: 60,
-        },
-        candidateLimit: 100,
-      },
-      symbolEmbeddingModels: ["jina-embeddings-v2-base-code"],
-      fileSummaryEmbeddingModels: ["nomic-embed-text-v1.5"],
-    },
-    scip: {
-      enabled: true,
-      indexes: [
-        {
-          path: "index.scip",
-        },
-      ],
-      externalSymbols: {
-        enabled: true,
-        maxPerIndex: 10000,
-      },
-      confidence: 0.95,
-      autoIngestOnRefresh: true,
-      generator: {
-        enabled: true,
-        binary: "scip-io",
-        args: ["--include-additional-configs", "--timeout", "3600"],
-        autoInstall: true,
-        timeoutMs: 18000000,
-      },
-    },
-    prefetch: { enabled: false, maxBudgetPercent: 20, warmTopN: 50 },
-    http: { allowRemote: false },
+    graphDatabase: { ...(config.graphDatabase ?? {}), path: dbPath },
+    http: { ...(config.http ?? {}), allowRemote: false },
     httpAuth: { enabled: false },
   };
+}
+
+function languagesForRepo(repoMeta, defaultLanguages) {
+  const map = {
+    javascript: ["js", "jsx"],
+    typescript: ["ts", "tsx", "js", "jsx"],
+    python: ["py"],
+    go: ["go"],
+    java: ["java"],
+    kotlin: ["kt"],
+    rust: ["rs"],
+    csharp: ["cs"],
+    "c#": ["cs"],
+    c: ["c"],
+    cpp: ["cpp"],
+    "c++": ["cpp"],
+    php: ["php"],
+    shell: ["sh"],
+    bash: ["sh"],
+  };
+  const wanted = new Set((repoMeta?.languageTags ?? []).flatMap((tag) => map[String(tag).toLowerCase()] ?? []));
+  if (wanted.size === 0) return defaultLanguages;
+  const selected = defaultLanguages.filter((language) => wanted.has(language));
+  return selected.length > 0 ? selected : defaultLanguages;
 }
 
 function startObservabilityPolling(baseUrl, authToken, repoId, options) {
@@ -1067,67 +1005,26 @@ function flattenObservabilityDelta(delta) {
   return flat;
 }
 
-async function retrieveSdlHttpContext({ baseUrl, authToken, task, timeoutMs }) {
+async function prepareSdlHttpEvidence({ baseUrl, authToken, task, timeoutMs }) {
   const started = performance.now();
   const repoId = encodeURIComponent(task.repoId);
   const index = await postSseJson(trimSlash(baseUrl) + "/api/repo/" + repoId + "/reindex-stream", { mode: "full" }, authToken, timeoutMs);
-  const searches = [];
-  for (const query of sdlQueriesForTask(task)) {
-    const url = trimSlash(baseUrl) + "/api/symbol/" + repoId + "/search?q=" + encodeURIComponent(query) + "&limit=8";
-    const payload = await getJson(url, authToken, timeoutMs);
-    const results = normalizeHttpSearchResults(payload.results);
-    searches.push({ query, results });
-  }
-  const resultCount = searches.reduce((sum, search) => sum + search.results.length, 0);
-  if (resultCount === 0) {
-    throw new Error("SDL HTTP retrieval returned no symbols for " + task.taskId);
-  }
-  const context = formatSdlHttpContext(task, index, searches);
+  const context = [
+    "SDL HTTP indexed " + task.repoId + " for " + task.taskId,
+    "providerFirst=" + (index.providerFirstExecution ? "yes" : "unknown"),
+  ].join("\n");
   return {
     transport: "http",
     repoId: task.repoId,
     durationMs: Math.round(performance.now() - started),
     index,
     retrieval: {
-      queries: searches.map((search) => ({ query: search.query, resultCount: search.results.length })),
-      resultCount,
-      results: searches.flatMap((search) => search.results).slice(0, 20),
+      queries: [],
+      resultCount: 0,
+      results: [],
     },
     context,
   };
-}
-
-function sdlQueriesForTask(task) {
-  const configured = task.context?.sdlQueries;
-  if (Array.isArray(configured) && configured.length > 0) return configured.map(String);
-  const candidates = String((task.context?.sdl ?? "") + " " + (task.prompt ?? "")).match(/\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?\b/g) ?? [];
-  const skip = new Set(["the", "and", "for", "with", "should", "from", "task", "context", "slice", "symbol"]);
-  const picked = candidates.find((word) => word.includes(".")) ?? candidates.find((word) => word.length > 3 && !skip.has(word.toLowerCase()));
-  return [picked ? picked.split(".").pop() : task.taskId];
-}
-
-function normalizeHttpSearchResults(raw) {
-  if (Array.isArray(raw)) return raw;
-  if (raw == null || raw === "") return [];
-  return [{ summary: String(raw) }];
-}
-
-function formatSdlHttpContext(task, index, searches) {
-  const lines = [
-    "SDL HTTP indexed " + task.repoId + " for " + task.taskId,
-    "providerFirst=" + (index.providerFirstExecution ? "yes" : "unknown"),
-  ];
-  for (const search of searches) {
-    lines.push("query " + search.query + ":");
-    for (const result of search.results.slice(0, 5)) {
-      if (typeof result === "string") {
-        lines.push("- " + result);
-      } else {
-        lines.push(("- " + (result.kind ?? "symbol") + " " + (result.name ?? result.symbolId ?? "unknown") + " " + (result.file ?? "") + " " + (result.summary ?? "")).trim());
-      }
-    }
-  }
-  return lines.join("\n");
 }
 
 async function getJson(url, authToken, timeoutMs) {
@@ -1364,7 +1261,17 @@ async function readCodexSessionTokenFile(sessionFile, normalizedRunRoot, tokeniz
 
   const toolCalls = tokenizerCommand
     ? tokenizeFunctionCalls(functionCalls, functionOutputs, tokenizerCommand)
-    : functionCalls.map((fc) => ({ toolName: fc.toolName, tokensIn: 0, tokensOut: 0, ts: fc.ts }));
+    : functionCalls.map((fc) => {
+        const output = functionOutputs.get(fc.callId) ?? "";
+        return {
+          toolName: fc.toolName,
+          tokensIn: 0,
+          tokensOut: 0,
+          ts: fc.ts,
+          arguments: boundAttributionText(fc.arguments),
+          output: boundAttributionText(output),
+        };
+      });
 
   return {
     sessionFile: sessionFile.path,
@@ -1391,14 +1298,46 @@ function tokenizeFunctionCalls(calls, outputs, tokenizerCommand) {
   try {
     counted = runTokenizer(tokenizerCommand, texts);
   } catch {
-    return calls.map((call) => ({ toolName: call.toolName, tokensIn: 0, tokensOut: 0, ts: call.ts }));
+    return calls.map((call) => ({
+      toolName: call.toolName,
+      tokensIn: 0,
+      tokensOut: 0,
+      ts: call.ts,
+      arguments: boundAttributionText(call.arguments),
+      output: boundAttributionText(outputs.get(call.callId) ?? ""),
+    }));
   }
   return calls.map((call, i) => ({
     toolName: call.toolName,
     tokensIn: counted.counts[`in_${i}`] ?? 0,
     tokensOut: counted.counts[`out_${i}`] ?? 0,
     ts: call.ts,
+    arguments: boundAttributionText(call.arguments),
+    output: boundAttributionText(outputs.get(call.callId) ?? ""),
   }));
+}
+
+function boundAttributionText(value) {
+  const text = String(value ?? "");
+  return text.length > ATTRIBUTION_TEXT_LIMIT
+    ? text.slice(0, ATTRIBUTION_TEXT_LIMIT) + "..."
+    : text;
+}
+
+export function extractRetrievedSymbolsFromAttribution(attribution, contextTargets) {
+  const targetSymbols = (contextTargets?.symbols ?? []).map(String).filter(Boolean);
+  if (targetSymbols.length === 0) return [];
+
+  const sdlCalls = (attribution?.toolCalls ?? [])
+    .filter((call) => String(call.toolName ?? "").startsWith("sdl."));
+  if (sdlCalls.length === 0) return [];
+
+  const outputText = sdlCalls
+    .map((call) => call.output ?? "")
+    .join("\n")
+    .toLowerCase();
+
+  return targetSymbols.filter((symbol) => outputText.includes(symbol.toLowerCase()));
 }
 
 function normalizeSessionPath(value) {
@@ -1609,10 +1548,11 @@ async function loadReposLock(root, lockPath) {
 
 function resolveRepoMeta(repoId, reposLock) {
   const entry = reposLock?.repos?.find((repo) => repo.repoId === repoId);
-  if (!entry) return { sizeClass: null, languageTags: [] };
+  if (!entry) return { sizeClass: null, languageTags: [], ignoreGlobs: [] };
   return {
     sizeClass: entry.sizeClass ?? null,
     languageTags: entry.languageTags ?? [],
+    ignoreGlobs: entry.ignoreGlobs ?? [],
   };
 }
 

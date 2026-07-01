@@ -16,6 +16,7 @@ describe("runtime.execute validation", () => {
         assert.match(message, new RegExp(process.platform));
         assert.match(message, /runtime:\s*\"shell\"|runtime: 'shell'/);
         assert.match(message, /code/);
+        assert.match(message, /Use code, not args/);
         return true;
       },
     );

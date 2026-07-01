@@ -49,6 +49,10 @@ function num(v: unknown): number {
   return typeof v === "number" ? v : 0;
 }
 
+function maybeNum(v: unknown): number | undefined {
+  return typeof v === "number" ? v : undefined;
+}
+
 function records(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) return [];
   return value.filter(
@@ -129,9 +133,20 @@ function fmtSymbolSearch(
   args: Record<string, unknown>,
   result: Record<string, unknown>,
 ): string | null {
-  const results = result.results as Array<Record<string, unknown>> | undefined;
-  if (!results) return null;
   const query = str(args.query);
+  if (typeof result.results === "string") {
+    const stats = record(result._packedStats);
+    const bytes = maybeNum(stats?.packedBytes) ?? result.results.length;
+    const encoder = str(stats?.encoderId);
+    const decision = str(stats?.gateDecision) || "packed";
+    return [
+      `symbol.search "${query}" -> ${decision} payload${encoder ? ` (${encoder})` : ""}`,
+      `  ${tok(bytes)} bytes; request wireFormat:"json" for readable rows`,
+    ].join("\n");
+  }
+
+  const results = records(result.results);
+  if (!Array.isArray(result.results)) return null;
   const lines = [
     `symbol.search "${query}" -> ${results.length} result${results.length !== 1 ? "s" : ""}`,
   ];
@@ -174,10 +189,22 @@ function fmtCodeSkeleton(
     return "code.getSkeleton -> not modified (ETag hit)";
   }
   const file = str(result.file);
-  const originalLines = num(result.originalLines);
-  const estimatedTokens = num(result.estimatedTokens);
+  const originalLines = maybeNum(result.originalLines);
+  const estimatedTokens = maybeNum(result.estimatedTokens);
+  const skeleton = str(result.skeleton) || str(result.code);
+  const skeletonLines = skeleton ? skeleton.split(/\r?\n/).length : undefined;
   const truncated = result.truncated ? " (truncated)" : "";
-  return `code.getSkeleton -> ${shortPath(file)}\n  ${originalLines} -> skeleton ${rng(safeRange(result.range))}${truncated} (~${tok(estimatedTokens)} tokens)`;
+  let details =
+    originalLines !== undefined ? `${originalLines} -> skeleton` : "skeleton";
+  const range = rng(safeRange(result.range));
+  if (range) details += ` ${range}`;
+  details += truncated;
+  if (estimatedTokens !== undefined) {
+    details += ` (~${tok(estimatedTokens)} tokens)`;
+  } else if (skeletonLines !== undefined) {
+    details += ` (${skeletonLines} ${plural(skeletonLines, "line")})`;
+  }
+  return `code.getSkeleton -> ${shortPath(file)}\n  ${details}`;
 }
 
 function fmtCodeHotPath(
@@ -523,6 +550,13 @@ function fmtRuntimeExecute(
     : [];
   for (const warning of warnings.slice(0, 3)) {
     lines.push(`  warning: ${warning}`);
+  }
+
+  const hints = Array.isArray(result.runtimeHints)
+    ? result.runtimeHints.map(String)
+    : [];
+  for (const hint of hints.slice(0, 3)) {
+    lines.push(`  hint: ${hint}`);
   }
 
   const nextAction = record(result.nextAction);

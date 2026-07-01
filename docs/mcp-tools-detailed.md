@@ -730,7 +730,8 @@ Extracts only the lines containing specific identifiers, plus surrounding contex
 | Parameter           | Type            | Required | Description                                          |
 | :------------------ | :-------------- | :------- | :--------------------------------------------------- |
 | `repoId`            | string          | Yes      | Repository identifier                                |
-| `symbolId`          | string          | Yes      | Symbol to search within                              |
+| `symbolId`          | string          | Conditional | Symbol to search within                          |
+| `symbolRef`         | object          | Conditional | Natural symbol reference `{name, file?, kind?, exportedOnly?}` |
 | `identifiersToFind` | string[] (1-50) | Yes      | Identifiers to locate in the source                  |
 | `maxLines`          | number          | No       | Maximum total lines to return                        |
 | `maxTokens`         | number          | No       | Maximum tokens to return                             |
@@ -750,6 +751,8 @@ Extracts only the lines containing specific identifiers, plus surrounding contex
 
 **Token cost:** ~400-800 tokens. This is Rung 3 of the Iris Gate Ladder.
 
+Provide exactly one of `symbolId` or `symbolRef`.
+
 ---
 
 ### sdl.code.needWindow
@@ -767,7 +770,8 @@ If denied, the response includes `whyDenied` reasons and a `nextBestAction` sugg
 | Parameter           | Type                                      | Required | Description                                                                                                            |
 | :------------------ | :---------------------------------------- | :------- | :--------------------------------------------------------------------------------------------------------------------- |
 | `repoId`            | string                                    | Yes      | Repository identifier                                                                                                  |
-| `symbolId`          | string                                    | Yes      | Symbol to read                                                                                                         |
+| `symbolId`          | string                                    | Conditional | Symbol to read                                                                                                      |
+| `symbolRef`         | object                                    | Conditional | Natural symbol reference `{name, file?, kind?, exportedOnly?}`                                                      |
 | `reason`            | string                                    | Yes      | Justification for why raw code is needed                                                                               |
 | `expectedLines`     | number                                    | Yes      | How many lines the agent expects (policy enforces `<= maxWindowLines`)                                                 |
 | `identifiersToFind` | string[] (max 50)                         | Yes      | Identifiers the agent expects to find (required by policy)                                                             |
@@ -777,6 +781,8 @@ If denied, the response includes `whyDenied` reasons and a `nextBestAction` sugg
 | `responseMode`      | `"inline"` \| `"auto"` \| `"handle"`      | No       | Large-response handling. Default `inline`; `auto`/`handle` can return a `response.get` handle                          |
 | `deltaMode`         | `"off"` \| `"auto"`                       | No       | Same-session delta mode for repeated raw windows. Default `off`                                                        |
 | `maxDeltaLines`     | number                                    | No       | Maximum diff lines when `deltaMode: "auto"` returns a changed-window delta                                             |
+
+Provide exactly one of `symbolId` or `symbolRef`.
 
 **Response (approved):**
 
@@ -1118,7 +1124,8 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 10. **Artifact persistence** — Full output can be persisted as gzip artifacts with SHA-256 hashing, TTL, and size limits.
 11. **Stdin support** — Optional UTF-8 `stdin` is written to the child process and closed. SDL-MCP reports byte count and SHA-256 metadata but does not echo full stdin in visible output or persisted logs.
 12. **Quoting diagnostics** — Risky command patterns such as multiline `node -e`, PowerShell here-strings, base64 decode/eval workarounds, and write scripts without stdin can return `quotingWarnings`.
-13. **Audit trail** — Every execution is logged with the policy audit hash, duration, exit code, and byte counts.
+13. **Runtime hints** — Predictable failures can return compact `runtimeHints`, such as using ESM imports instead of `require()` or avoiding Bash syntax under Windows `cmd.exe`.
+14. **Audit trail** — Every execution is logged with the policy audit hash, duration, exit code, and byte counts.
 
 **Parameters:**
 
@@ -1154,6 +1161,7 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 | `stdinBytes`      | number                                                                   | Optional byte count when `stdin` was provided                            |
 | `stdinSha256`     | string                                                                   | Optional SHA-256 digest when `stdin` was provided                        |
 | `quotingWarnings` | string[]                                                                 | Optional diagnostics for quote-heavy/base64/runtime-write patterns       |
+| `runtimeHints`    | string[]                                                                 | Optional compact corrective guidance for predictable runtime failures    |
 | `diagnostics`     | object                                                                   | Optional phase timings returned only when `includeDiagnostics: true`     |
 
 **`outputMode: "minimal"` (default) — adds:**

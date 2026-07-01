@@ -29,7 +29,7 @@ flowchart LR
     Understand["3. Understand context<br/>symbol.getCard<br/>slice.build<br/>memory.surface"]
     Read["4. Read code<br/>getSkeleton<br/>getHotPath<br/>needWindow"]
     Execute["5. Execute and verify<br/>runtime.execute<br/>runtime.queryOutput"]
-    Record["6. Record feedback<br/>agent.feedback<br/>memory.store<br/>usage.stats"]
+    Record["6. Record feedback<br/>agent.feedback<br/>memory.store"]
 
     Task e1@--> State
     State e2@--> Discover
@@ -69,8 +69,8 @@ SDL-MCP exposes flat, gateway, and Code Mode tool surfaces. Exact tool counts mo
 |                            | `sdl.slice.refresh`        | Refresh an existing slice handle; returns incremental delta only                                                                                                     |
 |                            | `sdl.slice.spillover.get`  | Paginated fetch for overflow symbols beyond budget                                                                                                                   |
 | **Code Access**            | `sdl.code.getSkeleton`     | Deterministic skeleton IR (signatures + control flow, elided bodies)                                                                                                 |
-|                            | `sdl.code.getHotPath`      | Hot-path excerpt: only lines matching specified identifiers                                                                                                          |
-|                            | `sdl.code.needWindow`      | Full raw code window (gated — requires proof-of-need justification); accepts `sliceContext`                                                                          |
+|                            | `sdl.code.getHotPath`      | Hot-path excerpt by `symbolId` or `symbolRef`: only lines matching specified identifiers                                                                              |
+|                            | `sdl.code.needWindow`      | Full raw code window by `symbolId` or `symbolRef` (gated — requires proof-of-need justification); accepts `sliceContext`                                              |
 | **Deltas**                 | `sdl.delta.get`            | Delta pack between two versions with blast radius and fan-in trends                                                                                                  |
 | **Policy**                 | `sdl.policy.get`           | Read current policy settings                                                                                                                                         |
 |                            | `sdl.policy.set`           | Update policy (merge patch)                                                                                                                                          |
@@ -142,6 +142,7 @@ Use this order unless task constraints force escalation:
 7. `sdl.code.getSkeleton` before `hotPath` or raw windows. In file mode, prefer `exportedOnly: true` when possible.
 8. `sdl.code.getHotPath` with focused identifiers (`1-3` identifiers, low `contextLines`, default `3`).
 9. `sdl.code.needWindow` last. Keep requests tight:
+   - Provide exactly one of `symbolId` or `symbolRef`; use `symbolRef` when the agent knows the name and optional file/kind but not the canonical ID.
    - `expectedLines <= 180`
    - `maxTokens <= 1400`
    - Non-empty `identifiersToFind` (required by policy)
@@ -192,6 +193,7 @@ Use this order unless task constraints force escalation:
   - Use `outputMode: "summary"` for head+tail output excerpts (legacy behavior).
   - Use `outputMode: "intent"` to return only `queryTerms`-matched excerpts without head/tail summary; set `contextLines: 0` when the agent needs exact matched lines only.
   - Set `timeoutMs` and `maxResponseLines` to bound output. Use `queryTerms` to extract relevant excerpts from long output.
+  - Follow compact `runtimeHints` when present; they call out predictable fixes such as ESM import syntax or Windows `cmd.exe` shell syntax.
 - `sdl.runtime.queryOutput`:
   - Use to search stored output artifacts on-demand after a `minimal`-mode execution.
   - Pass the `artifactHandle` from the execute response plus `queryTerms` to extract relevant excerpts.

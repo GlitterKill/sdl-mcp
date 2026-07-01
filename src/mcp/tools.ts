@@ -1644,9 +1644,10 @@ export const SliceSpilloverGetResponseSchema = z.object({
   symbols: z.array(SymbolCardSchema),
 });
 
-export const CodeNeedWindowRequestSchema = z.object({
+export const CodeNeedWindowRequestObjectSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH),
+  symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH).optional(),
+  symbolRef: SymbolRefSchema.optional(),
   reason: z.string().min(1).max(10000),
   expectedLines: z.number().int().min(1).max(100000),
   identifiersToFind: z.array(z.string().min(1).max(256)).max(50),
@@ -1686,6 +1687,19 @@ export const CodeNeedWindowRequestSchema = z.object({
       "Maximum diff lines when deltaMode=auto returns changed content.",
     ),
 });
+export const CodeNeedWindowRequestSchema = CodeNeedWindowRequestObjectSchema
+  .superRefine((value, ctx) => {
+    const targetCount =
+      Number(value.symbolId !== undefined) +
+      Number(value.symbolRef !== undefined);
+    if (targetCount !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide exactly one of symbolId or symbolRef.",
+        path: targetCount === 0 ? ["symbolId"] : ["symbolRef"],
+      });
+    }
+  });
 
 const CodeWindowResponseApprovedSchema = z.object({
   approved: z.literal(true),
@@ -1811,15 +1825,29 @@ export const GetSkeletonResponseSchema = z.union([
   ConditionalNotModifiedResponseSchema,
 ]);
 
-export const GetHotPathRequestSchema = z.object({
-  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-  symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH),
-  identifiersToFind: z.array(z.string().min(1).max(256)).min(1).max(50),
-  maxLines: z.number().int().min(1).optional(),
-  maxTokens: z.number().int().min(1).optional(),
-  contextLines: z.number().int().min(0).optional(),
-  ifNoneMatch: z.string().optional(),
-});
+export const GetHotPathRequestSchema = z
+  .object({
+    repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+    symbolId: z.string().min(1).max(MAX_SYMBOL_ID_LENGTH).optional(),
+    symbolRef: SymbolRefSchema.optional(),
+    identifiersToFind: z.array(z.string().min(1).max(256)).min(1).max(50),
+    maxLines: z.number().int().min(1).optional(),
+    maxTokens: z.number().int().min(1).optional(),
+    contextLines: z.number().int().min(0).optional(),
+    ifNoneMatch: z.string().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const targetCount =
+      Number(value.symbolId !== undefined) +
+      Number(value.symbolRef !== undefined);
+    if (targetCount !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide exactly one of symbolId or symbolRef.",
+        path: targetCount === 0 ? ["symbolId"] : ["symbolRef"],
+      });
+    }
+  });
 
 const GetHotPathPayloadSchema = z.object({
   excerpt: z.string(),
@@ -2754,6 +2782,7 @@ export const RuntimeExecuteResponseSchema = z.object({
   stdinBytes: z.number().int().nonnegative().optional(),
   stdinSha256: z.string().length(64).optional(),
   quotingWarnings: z.array(z.string()).optional(),
+  runtimeHints: z.array(z.string()).optional(),
   serverDriftWarnings: z.array(z.string()).optional(),
   nextAction: z
     .object({

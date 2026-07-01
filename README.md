@@ -402,8 +402,8 @@ The generated source of truth is [`docs/generated/tool-inventory.md`](./docs/gen
 
 <tr><td rowspan="3"><strong>Code Access</strong></td>
     <td><code>sdl.code.getSkeleton</code></td><td>Signatures + control flow, bodies elided, with conditional ETag fetch support</td></tr>
-<tr><td><code>sdl.code.getHotPath</code></td><td>Lines matching specific identifiers + context, with conditional ETag fetch support</td></tr>
-<tr><td><code>sdl.code.needWindow</code></td><td>Full source code (policy-gated, requires justification)</td></tr>
+<tr><td><code>sdl.code.getHotPath</code></td><td>Lines matching specific identifiers + context by <code>symbolId</code> or <code>symbolRef</code>, with conditional ETag fetch support</td></tr>
+<tr><td><code>sdl.code.needWindow</code></td><td>Full source code by <code>symbolId</code> or <code>symbolRef</code> (policy-gated, requires justification)</td></tr>
 
 <tr><td><strong>Deltas</strong></td>
     <td><code>sdl.delta.get</code></td><td>Semantic diff + blast radius between versions</td></tr>
@@ -420,7 +420,7 @@ The generated source of truth is [`docs/generated/tool-inventory.md`](./docs/gen
 <tr><td><code>sdl.agent.feedback.query</code></td><td>Query aggregated feedback statistics</td></tr>
 
 <tr><td rowspan="2"><strong>Runtime</strong></td>
-    <td><code>sdl.runtime.execute</code></td><td>Sandboxed subprocess execution with outputMode (minimal/summary/intent)</td></tr>
+    <td><code>sdl.runtime.execute</code></td><td>Sandboxed subprocess execution with outputMode (minimal/summary/intent) and compact corrective hints</td></tr>
 <tr><td><code>sdl.runtime.queryOutput</code></td><td>On-demand retrieval and keyword search of stored output artifacts</td></tr>
 
 <tr><td rowspan="4"><strong>Memory</strong></td>
