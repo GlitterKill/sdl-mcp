@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-07-01
+
+### Added
+
+- **Response projection**: Added handle-first response artifact projection with public metadata, hidden token usage accounting, and focused response retrieval coverage.
+- **Summary generation**: Added embedding-oriented symbol summary text and defaulted the summary prose builder to mock-safe behavior.
+
+### Changed
+
+- **Code-mode workflows**: Improved workflow metadata, tool response envelopes, usage surfaces, and server instructions for indexed-source access.
+
+### Fixed
+
+- **SDLBench**: Injected repo IDs into agent prompts and instructions for fixture-scoped benchmark runs.
+- **Release validation**: Updated response artifact metadata tests and clarified `file.read` guidance for indexed source.
+
+_8 commits from 2 contributors_
+
 ## [0.11.13] - 2026-06-27
 
 ### Added
