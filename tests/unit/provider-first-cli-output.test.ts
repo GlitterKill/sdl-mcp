@@ -3,12 +3,50 @@ import assert from "node:assert/strict";
 
 import {
   formatIndexWallTimeLine,
+  formatSummaryStatsLine,
   formatProviderFirstExecutionSummaryLines,
   formatScipGeneratorCacheLine,
   formatSemanticReadinessLines,
 } from "../../dist/cli/commands/index.js";
 
 describe("provider-first CLI output", () => {
+  it("prints summary cost only for API summary providers", () => {
+    const apiLine = formatSummaryStatsLine({
+      generated: 849,
+      skipped: 24324,
+      failed: 0,
+      totalCostUsd: 0.0472,
+      provider: "api",
+    });
+    const mockLine = formatSummaryStatsLine({
+      generated: 849,
+      skipped: 24324,
+      failed: 0,
+      totalCostUsd: 0.0472,
+      provider: "mock",
+    });
+    const localLine = formatSummaryStatsLine({
+      generated: 849,
+      skipped: 24324,
+      failed: 0,
+      totalCostUsd: 0.0472,
+      provider: "local",
+    });
+
+    assert.equal(
+      apiLine,
+      "  Summaries: 849 new ($0.0472), 24324 cached, 0 failed",
+    );
+    assert.equal(
+      mockLine,
+      "  Summaries: 849 new, 24324 cached, 0 failed",
+    );
+    assert.equal(
+      localLine,
+      "  Summaries: 849 new, 24324 cached, 0 failed",
+    );
+  });
+
   it("reports repo wall time separately from index duration", () => {
     assert.equal(
       formatIndexWallTimeLine(406_700, 69_775),

@@ -27,14 +27,12 @@ export const RetrieveRequestSchema = z.object({
   op: RetrieveOpSchema,
   args: z.record(z.string(), z.unknown()).optional().default({}),
   responseMode: z.enum(["inline", "auto", "handle"]).optional(),
-  includeDiagnostics: z.boolean().optional().default(false),
 });
 
 type RetrieveOp = z.infer<typeof RetrieveOpSchema>;
 
 interface RetrieveOptions {
   responseMode?: "inline" | "auto" | "handle";
-  includeDiagnostics?: boolean;
 }
 
 export function normalizeRetrieveArgs(
@@ -60,10 +58,6 @@ export function normalizeRetrieveArgs(
     normalized.responseMode = opts.responseMode ?? "auto";
   }
 
-  if (opts.includeDiagnostics) {
-    normalized.includeDiagnostics = true;
-  }
-
   return normalized;
 }
 
@@ -84,7 +78,6 @@ export async function handleRetrieve(
 
   const normalizedArgs = normalizeRetrieveArgs(request.op, request.args, {
     responseMode: request.responseMode,
-    includeDiagnostics: request.includeDiagnostics,
   });
   const gatewayArgs = {
     repoId: request.repoId,

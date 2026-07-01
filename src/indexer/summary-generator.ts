@@ -550,6 +550,7 @@ export interface SummaryBatchResult {
   skipped: number;
   failed: number;
   totalCostUsd: number;
+  provider?: string;
 }
 
 /**
@@ -728,6 +729,7 @@ export async function generateSummariesForRepo(
     skipped: symbols.length - needsSummary.length,
     failed: 0,
     totalCostUsd: 0,
+    provider,
   };
 
   if (needsSummary.length === 0) {

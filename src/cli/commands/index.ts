@@ -1700,6 +1700,27 @@ function providerFirstCallProofReasonLabel(code: string): string {
   }
 }
 
+interface PrintableSummaryStats {
+  generated: number;
+  skipped: number;
+  failed: number;
+  totalCostUsd: number;
+  provider?: string | null;
+}
+
+export function formatSummaryStatsLine(
+  summaryStats: PrintableSummaryStats,
+): string {
+  const cost =
+    summaryStats.provider === "api"
+      ? " ($" + summaryStats.totalCostUsd.toFixed(4) + ")"
+      : "";
+  return (
+    `  Summaries: ${summaryStats.generated} new${cost}, ` +
+    `${summaryStats.skipped} cached, ${summaryStats.failed} failed`
+  );
+}
+
 export function formatSemanticReadinessLines(
   semanticDeferred: boolean | null | undefined,
 ): string[] {
@@ -2083,9 +2104,7 @@ async function delegateIndexToServer(
             if (cacheLine) console.log(cacheLine);
             if (c.summaryStats) {
               const s = c.summaryStats;
-              console.log(
-                `  Summaries: ${s.generated} new ($${s.totalCostUsd.toFixed(4)}), ${s.skipped} cached, ${s.failed} failed`,
-              );
+              console.log(formatSummaryStatsLine(s));
             }
             completed = true;
           } catch {
@@ -2377,9 +2396,7 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
       }
       if (stats.summaryStats) {
         const s = stats.summaryStats;
-        console.log(
-          `  Summaries: ${s.generated} new ($${s.totalCostUsd.toFixed(4)}), ${s.skipped} cached, ${s.failed} failed`,
-        );
+        console.log(formatSummaryStatsLine(s));
       }
 
       if (options.diagnostics && stats.timings) {

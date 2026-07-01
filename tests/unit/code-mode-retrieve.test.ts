@@ -142,6 +142,45 @@ describe("sdl.retrieve", () => {
     assert.equal(Object.hasOwn(result as object, "intermediateResultsSuppressed"), false);
   });
 
+  it("does not forward diagnostics through retrieve actions", async () => {
+    const calls: unknown[] = [];
+    const actionMap = {
+      "symbol.search": {
+        schema: z
+          .object({
+            repoId: z.string(),
+            action: z.literal("symbol.search"),
+            query: z.string(),
+            wireFormat: z.literal("auto"),
+          })
+          .passthrough(),
+        handler: async (args: unknown) => {
+          calls.push(args);
+          return { results: [] };
+        },
+      },
+    };
+
+    await handleRetrieve(
+      {
+        repoId: "repo",
+        op: "symbolSearch",
+        args: { query: "foo" },
+        includeDiagnostics: true,
+      },
+      actionMap as never,
+    );
+
+    assert.deepEqual(calls, [
+      {
+        repoId: "repo",
+        action: "symbol.search",
+        query: "foo",
+        wireFormat: "auto",
+      },
+    ]);
+  });
+
   it("registers sdl.retrieve as a top-level Code Mode tool", () => {
     const registered: string[] = [];
     const fakeServer = {
@@ -173,7 +212,9 @@ describe("sdl.retrieve", () => {
 
     assert.ok(retrieve);
     assert.ok(retrieve.schemaSummary);
-    assert.match(JSON.stringify(retrieve.schemaSummary), /symbolSearch/);
-    assert.match(JSON.stringify(retrieve.schemaSummary), /codeNeedWindow/);
+    const schemaSummary = JSON.stringify(retrieve.schemaSummary);
+    assert.match(schemaSummary, /symbolSearch/);
+    assert.match(schemaSummary, /codeNeedWindow/);
+    assert.doesNotMatch(schemaSummary, /includeDiagnostics/);
   });
 });
