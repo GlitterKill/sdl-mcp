@@ -77,6 +77,7 @@ export interface WorkflowFailureTrace {
   message: string;
   resolvedArgKeys?: string[];
   fallbackTools?: string[];
+  details?: Record<string, unknown>;
 }
 
 export interface WorkflowStepResult {

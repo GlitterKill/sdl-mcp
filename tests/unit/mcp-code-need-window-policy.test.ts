@@ -216,6 +216,50 @@ describe("code.needWindow policy remediation", () => {
     assert.match(response.code, /importantFlag/);
   });
 
+  it("resolves stringified symbolRef targets for raw code windows", async () => {
+    const response = await handleCodeNeedWindow({
+      repoId: "repo-test",
+      symbolRef: JSON.stringify({ name: "demoWindow", file: "src/example.ts" }),
+      reason: "inspect important flag handling",
+      expectedLines: 20,
+      maxTokens: 120,
+      identifiersToFind: ["importantFlag"],
+    });
+
+    assert.equal(response.approved, true);
+    if (!response.approved) throw new Error("Expected approved response");
+    assert.equal(response.symbolId, "sym-demo");
+    assert.match(response.code, /importantFlag/);
+  });
+
+  it("rejects file-path symbolId targets with corrective next calls", async () => {
+    await assert.rejects(
+      () => handleCodeNeedWindow({
+        repoId: "repo-test",
+        symbolId: "src/example.ts",
+        reason: "inspect important flag handling",
+        expectedLines: 20,
+        identifiersToFind: ["importantFlag"],
+      }),
+      (error) => {
+        const richError = error as Error & {
+          fallbackTools?: string[];
+          nextCalls?: Array<{ tool: string; args: Record<string, unknown> }>;
+        };
+        assert.match(richError.message, /looks like a file path/);
+        assert.deepEqual(richError.fallbackTools, [
+          "sdl.code.getSkeleton",
+          "sdl.symbol.search",
+        ]);
+        assert.deepEqual(richError.nextCalls?.[0], {
+          tool: "sdl.code.getSkeleton",
+          args: { repoId: "repo-test", file: "src/example.ts" },
+        });
+        return true;
+      },
+    );
+  });
+
   it("stores approved windows behind response.get when responseMode is handle", async () => {
     const response = await handleCodeNeedWindow({
       repoId: "repo-test",

@@ -85,6 +85,42 @@ type ResolvedGetHotPathRequest = Omit<
   "symbolId" | "symbolRef"
 > & { symbolId: string };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeCodeToolArgs(args: unknown): unknown {
+  if (!isRecord(args) || typeof args.symbolRef !== "string") return args;
+  try {
+    const parsed = JSON.parse(args.symbolRef) as unknown;
+    return isRecord(parsed) ? { ...args, symbolRef: parsed } : args;
+  } catch {
+    return args;
+  }
+}
+
+function looksLikeFilePathSymbolId(symbolId: string): boolean {
+  return normalizePath(symbolId).includes("/");
+}
+
+function filePathSymbolIdError(repoId: string, toolName: string, symbolId: string): Error {
+  const file = normalizePath(symbolId);
+  const error = new ValidationError(
+    `Invalid symbolId "${symbolId}" for ${toolName}: this looks like a file path. Use sdl.code.getSkeleton with file, or find a symbol in the file and retry with symbolRef.`,
+  );
+  return Object.assign(error, {
+    classification: "invalid_input",
+    retryable: false,
+    fallbackTools: ["sdl.code.getSkeleton", "sdl.symbol.search"],
+    fallbackRationale:
+      "code.needWindow and code.getHotPath need a symbol target, not a file path.",
+    nextCalls: [
+      { tool: "sdl.code.getSkeleton", args: { repoId, file } },
+      { tool: "sdl.symbol.search", args: { repoId, query: file.split("/").pop() ?? file } },
+    ],
+  });
+}
+
 async function resolveCodeTargetSymbolId(
   conn: Awaited<ReturnType<typeof getLadybugConn>>,
   repoId: string,
@@ -92,6 +128,9 @@ async function resolveCodeTargetSymbolId(
   toolName: string,
 ): Promise<string> {
   if (target.symbolId) {
+    if (looksLikeFilePathSymbolId(target.symbolId)) {
+      throw filePathSymbolIdError(repoId, toolName, target.symbolId);
+    }
     const resolved = await resolveSymbolId(conn, repoId, target.symbolId);
     return resolved.symbolId;
   }
@@ -343,7 +382,7 @@ export async function handleCodeNeedWindow(
   args: unknown,
   context?: ToolContext,
 ): Promise<CodeNeedWindowResponse> {
-  const rawRequest = CodeNeedWindowRequestSchema.parse(args);
+  const rawRequest = CodeNeedWindowRequestSchema.parse(normalizeCodeToolArgs(args));
 
   const conn = await getLadybugConn();
   const resolvedSymbolId = await resolveCodeTargetSymbolId(
@@ -1217,7 +1256,7 @@ export async function handleGetHotPath(
   args: unknown,
   context?: ToolContext,
 ): Promise<GetHotPathResponse> {
-  const rawHotPathRequest = GetHotPathRequestSchema.parse(args);
+  const rawHotPathRequest = GetHotPathRequestSchema.parse(normalizeCodeToolArgs(args));
 
   const conn = await getLadybugConn();
   const resolvedHotPathSymbolId = await resolveCodeTargetSymbolId(

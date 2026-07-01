@@ -86,6 +86,23 @@ function createMockActionMap() {
         throw new Error("Intentional test failure");
       },
     },
+    "test.richFail": {
+      schema: z.object({}).passthrough(),
+      handler: async () => {
+        throw Object.assign(new Error("Rich failure"), {
+          classification: "ambiguous_input",
+          fallbackTools: ["test.echo"],
+          candidates: [
+            {
+              symbolId: "sym-1",
+              kind: "function",
+              file: "src/a.ts",
+              nextCall: { tool: "symbol.getCard", args: { symbolId: "sym-1" } },
+            },
+          ],
+        });
+      },
+    },
     "test.slow": {
       schema: z.object({}).passthrough(),
       handler: async () => {
@@ -760,6 +777,32 @@ describe("code-mode workflow executor", () => {
     assert.match((result.results[1] as any).blockedByError, /Intentional test failure/);
     assert.match((result.results[1] as any).failureTrace?.message, /depends on failed step/);
     assert.match((result.results[0] as any).failureTrace?.message, /Intentional test failure/);
+  });
+
+  it("preserves structured gateway error details in failure traces", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [{ fn: "testRichFail", action: "test.richFail", args: {} }],
+      onError: "continueAll",
+    };
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+    );
+
+    const trace = (result.results[0] as any).failureTrace;
+    assert.deepStrictEqual(trace?.fallbackTools, ["test.echo"]);
+    assert.strictEqual(trace?.details?.classification, "ambiguous_input");
+    assert.deepStrictEqual(trace?.details?.candidates, [
+      {
+        symbolId: "sym-1",
+        kind: "function",
+        file: "src/a.ts",
+        nextCall: { tool: "symbol.getCard", args: { symbolId: "sym-1" } },
+      },
+    ]);
   });
 
   it("onError=continueAll preserves legacy dependent ref-resolution errors", async () => {

@@ -151,6 +151,7 @@ function failureTrace(params: {
   message: string;
   resolvedArgs?: Record<string, unknown>;
   fallbackTools?: string[];
+  details?: Record<string, unknown>;
 }): WorkflowFailureTrace {
   return {
     stepIndex: params.stepIndex,
@@ -165,7 +166,36 @@ function failureTrace(params: {
     ...(params.fallbackTools?.length
       ? { fallbackTools: params.fallbackTools }
       : {}),
+    ...(params.details && Object.keys(params.details).length > 0
+      ? { details: params.details }
+      : {}),
   };
+}
+
+function failureDetailsFrom(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const source = value as Record<string, unknown>;
+  const details: Record<string, unknown> = {};
+  for (const key of [
+    "classification",
+    "retryable",
+    "fallbackRationale",
+    "candidates",
+    "runtimeHints",
+    "quotingWarnings",
+    "nextCalls",
+  ]) {
+    if (source[key] !== undefined) details[key] = source[key];
+  }
+  return Object.keys(details).length > 0 ? details : undefined;
+}
+
+function fallbackToolsFrom(value: unknown): string[] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const fallbackTools = (value as Record<string, unknown>).fallbackTools;
+  return Array.isArray(fallbackTools) && fallbackTools.every((tool) => typeof tool === "string")
+    ? fallbackTools
+    : undefined;
 }
 
 function findBlockingDependency(
@@ -654,6 +684,9 @@ export async function executeWorkflow(
         }
 
         const gatewayFailureMessage = getGatewayFailureMessage(step.action, result);
+        const gatewayFailureDetails = gatewayFailureMessage
+          ? failureDetailsFrom(result)
+          : undefined;
         priorResults.push(gatewayFailureMessage ? null : result);
         const stepResult: WorkflowStepResult = {
           stepIndex: i,
@@ -671,6 +704,7 @@ export async function executeWorkflow(
                   status: "error",
                   message: gatewayFailureMessage,
                   resolvedArgs,
+                  details: gatewayFailureDetails,
                 }),
               }
             : {}),
@@ -735,9 +769,10 @@ export async function executeWorkflow(
         }
 
         const meta = actionCatalog.find((a) => a.action === step.action);
-        const fallbackTools = meta?.fallbacks?.length
+        const fallbackTools = fallbackToolsFrom(error) ?? (meta?.fallbacks?.length
           ? meta.fallbacks
-          : undefined;
+          : undefined);
+        const errorDetails = failureDetailsFrom(error);
         stepResults.push({
           stepIndex: i,
           fn: step.fn,
@@ -754,6 +789,7 @@ export async function executeWorkflow(
             message: errorMessage,
             resolvedArgs,
             fallbackTools,
+            details: errorDetails,
           }),
         });
         priorResults.push(null);
