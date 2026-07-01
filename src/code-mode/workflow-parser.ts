@@ -28,10 +28,26 @@ export interface ParsedWorkflowRequest {
   defaultMaxResponseTokens?: number;
   onlyFinalResult?: boolean;
   /** When true, validate steps and references without executing */
-  /** Prior workflow etagCache to seed */
+  /** Internal legacy cache seed; not exposed in the public workflow schema. */
   etagCache?: Record<string, string>;
   dryRun?: boolean;
   includeDiagnostics?: boolean;
+}
+
+function readLegacyEtagCache(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
+  }
+
+  const value = (raw as Record<string, unknown>).etagCache;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const entries = Object.entries(value).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string",
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 /**
@@ -96,8 +112,8 @@ export function parseWorkflowRequest(
     onlyFinalResult,
     dryRun,
     includeDiagnostics,
-    etagCache,
   } = parsed.data;
+  const etagCache = readLegacyEtagCache(raw);
   const errors: string[] = [];
   const parsedSteps: ParsedWorkflowStep[] = [];
   const fnNameMap = getActiveFnNameMap();

@@ -217,7 +217,7 @@ The workflow engine also provides:
 
 - budget tracking
 - context-ladder validation
-- cross-step ETag caching
+- internal cross-step ETag caching
 - optional execution traces
 
 ---

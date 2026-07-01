@@ -11,6 +11,7 @@ import { RuntimeConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { readResponseArtifact } from "../../runtime/response-artifacts.js";
 import { recordTokenSavings } from "../response-compression.js";
+import { attachTokenUsage, computeSavings } from "../token-usage.js";
 import {
   ResponseGetRequestSchema,
   type ResponseGetResponse,
@@ -33,20 +34,37 @@ export async function handleResponseGet(
       maxTokens: request.maxTokens,
       offsetBytes: request.offsetBytes,
       jsonPath: request.jsonPath,
+      raw: request.raw,
+      offset: request.offset,
+      limit: request.limit,
       artifactBaseDir: runtimeConfig.artifactBaseDir,
       maxFullBytes: runtimeConfig.maxArtifactBytes,
       sessionId: context?.sessionId,
     });
+    const { savings, metadata, range, ...rest } = response;
+    const { estimatedOriginalTokens: _estimatedOriginalTokens, ...publicMetadata } = metadata;
+    const { estimatedReturnedTokens: _estimatedReturnedTokens, ...publicRange } = range;
+    const publicResponse = {
+      ...rest,
+      metadata: publicMetadata,
+      range: publicRange,
+    };
     recordTokenSavings({
       repoId: request.repoId,
       source: "responseArtifact",
       tool: "sdl.response.get",
-      estimatedTokensAvoided: response.savings.savedTokens,
+      estimatedTokensAvoided: savings.savedTokens,
+      originalTokens: savings.originalTokens,
+      returnedTokens: savings.returnedTokens,
+      savedTokens: savings.savedTokens,
       opportunity: true,
       hit: true,
       realized: true,
     });
-    return response;
+    return attachTokenUsage(
+      publicResponse,
+      computeSavings(savings.returnedTokens, savings.originalTokens),
+    );
   } catch (error) {
     recordTokenSavings({
       repoId: request.repoId,

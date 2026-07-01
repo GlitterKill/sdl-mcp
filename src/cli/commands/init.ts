@@ -977,7 +977,7 @@ Follow the same workflow as the SDL-MCP Agent Workflow skill when that skill is 
    - Use \`symbolSearch\` / \`sdl.symbol.search\` plus \`symbolGetCard\` / \`sdl.symbol.getCard\` for exact symbols, APIs, and focused edit targets.
    - Use \`sliceBuild\` / \`sdl.slice.build\` when you need likely files, a dependency frontier, blast radius, or an edit-planning set.
    - For \`sdl.context\`, set \`contextMode: "precise"\` for named symbols, exact paths, narrow bugs, and focused reviews; use \`contextMode: "broad"\` for unfamiliar subsystems.
-   - Set \`responseMode: "auto"\` for potentially large responses and use \`response.get\` only for needed excerpts.
+   - Set \`responseMode: "auto"\` for potentially large responses and use \`response.get\` only for needed excerpts. For JSON artifacts, prefer \`jsonPath\` with dot or bracket array paths, add \`offset\`/\`limit\` for large arrays, and use \`raw: true\` only when byte-slicing JSON text is intentional.
    - Keep budgets tight; use slice budgets when file/card counts matter.
 
 6. **Use \`sdl.workflow\`** for multi-step follow-ups, runtime execution, data transforms, and batch operations after the first SDL discovery surface. Do not wrap a single \`sdl.context\` call just to retrieve context.
@@ -996,7 +996,7 @@ Follow the same workflow as the SDL-MCP Agent Workflow skill when that skill is 
     - Default to \`outputMode: "minimal"\`, \`persistOutput: true\`, and an explicit \`timeoutMs\`.
     - Use \`stdin\` for multiline scripts/input instead of PowerShell here-strings, quote-heavy \`node -e\`, or base64 decode/eval workarounds.
     - If output details are needed, call \`runtimeQueryOutput\` with the \`artifactHandle\` and targeted \`queryTerms\`.
-   - Use \`outputMode: "intent"\` when the command is already tied to known terms such as \`FAIL\`, \`Error\`, or a test name.
+   - Use \`outputMode: "intent"\` when the command is already tied to known terms such as \`FAIL\`, \`Error\`, or a test name; set \`contextLines: 0\` when exact matched lines are cleaner than surrounding context.
    - Always set \`timeoutMs\` to prevent hangs.
    - Never use runtime execution to print indexed source.
 
@@ -1013,7 +1013,7 @@ Follow the same workflow as the SDL-MCP Agent Workflow skill when that skill is 
 
 14. **Use SDL memory only when enabled.** If \`repo.status\`, config, or tool discovery does not show \`memory.enabled: true\`, do not repeatedly call memory tools. When enabled, use \`memory.query\` for task-text lookup and \`memory.surface\` after relevant symbol IDs are known.
 
-15. **Finish with usage stats when SDL-MCP was used.** Call \`usageStats\` with \`scope: "session"\` and \`persist: true\`; include the returned \`formattedSummary\` verbatim in a fenced \`text\` block in the final exploration answer. Do not paraphrase, shorten, reformat, or strip the bar characters. If \`usageStats\` cannot be captured, say why.
+15. **Usage stats are explicit, not habitual.** Call \`usageStats\` only when the user asks for token savings, when debugging telemetry, or when persisting a usage snapshot. Compact output returns \`formattedSummary\`; use \`detail: "full"\` only for structured \`session\`, \`history\`, or \`wire\` diagnostics.
 
 ## Workflow
 
@@ -1025,7 +1025,7 @@ Follow the same workflow as the SDL-MCP Agent Workflow skill when that skill is 
 6. Use \`fileRead\` for non-indexed files with \`search\`, \`jsonPath\`, or bounded ranges
 7. Use \`runtimeExecute\` plus \`runtimeQueryOutput\` for repo-local commands and targeted output retrieval
 8. Use \`symbol.edit\` for one-symbol edits, \`searchEditPreview\` with \`targeting:"identifier"\`, \`targeting:"structural"\`, or \`operations[]\` for safer cross-file edits, and Node scripts only as a last resort
-9. Use \`usageStats\` before the final answer and include the returned \`formattedSummary\` verbatim, including token-meter bars
+9. Use \`usageStats\` only for requested savings reports, telemetry debugging, or persisted usage snapshots; compact output returns \`formattedSummary\` and \`detail: "full"\` returns structured diagnostics
 `;
 }
 
@@ -1249,7 +1249,7 @@ function fallbackSkillBody() {
     "5. Use \`symbol.edit\` for one-symbol indexed edits; use \`searchEditPreview\` with \`targeting:\\"identifier\\"\`, \`targeting:\\"structural\\"\`, or \`operations[]\` for safer cross-file edits.",
     "6. Use \`runtimeExecute\` with \`stdin\` for repo-local commands and multiline scripts/input; for indexed-source edits, use runtime only when SDL edit tools cannot express the change.",
     "7. Use memory tools only when \`memory.enabled: true\`; avoid habitual \`index.refresh\`.",
-    "8. Finish with \`usageStats\`; include the returned \`formattedSummary\` verbatim in a fenced \`text\` block, including token-meter bars. If stats cannot be captured, say why.",
+    "8. Call \`usageStats\` only for requested savings reports, telemetry debugging, or persisted usage snapshots; compact output returns \`formattedSummary\` and \`detail:\\"full\\"\` returns structured diagnostics.",
   ].join("\\n");
 }
 

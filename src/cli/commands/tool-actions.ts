@@ -1294,12 +1294,31 @@ const responseGet: ActionDefinition = {
       field: "jsonPath",
       type: "string",
       description:
-        "Dot-separated path for extracting a JSON response subtree before slicing",
+        "Dot or bracket path for extracting a JSON response subtree before serialization or array paging",
+    },
+    {
+      flag: "--raw",
+      field: "raw",
+      type: "boolean",
+      description: "Return raw text excerpts when byte-slicing JSON is intentional",
+    },
+    {
+      flag: "--offset",
+      field: "offset",
+      type: "number",
+      description: "Array item offset after --json-path extraction",
+    },
+    {
+      flag: "--limit",
+      field: "limit",
+      type: "number",
+      description: "Maximum array items to return after --json-path extraction",
     },
   ],
   examples: [
-    'sdl-mcp tool response.get --repo-id my-repo --handle "response-myrepo-1770000000000-0123456789abcdef" --max-bytes 8192',
-    'sdl-mcp tool response.get --repo-id my-repo --handle "response-myrepo-1770000000000-0123456789abcdef" --json-path finalEvidence.0',
+    'sdl-mcp tool response.get --repo-id my-repo --handle "response-myrepo-1770000000000-0123456789abcdef" --raw --max-bytes 8192',
+    'sdl-mcp tool response.get --repo-id my-repo --handle "response-myrepo-1770000000000-0123456789abcdef" --json-path finalEvidence[0]',
+    'sdl-mcp tool response.get --repo-id my-repo --handle "response-myrepo-1770000000000-0123456789abcdef" --json-path finalEvidence --offset 0 --limit 5',
   ],
 };
 
@@ -1314,6 +1333,12 @@ const usageStats: ActionDefinition = {
       field: "scope",
       type: "string",
       description: "Usage scope: session|history|both",
+    },
+    {
+      flag: "--detail",
+      field: "detail",
+      type: "string",
+      description: "Response detail level: compact|full",
     },
     {
       flag: "--since",

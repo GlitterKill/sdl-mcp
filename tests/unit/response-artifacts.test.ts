@@ -11,12 +11,30 @@ import {
   maybeStoreLargeResponse,
   readResponseArtifact,
 } from "../../dist/runtime/response-artifacts.js";
+import { maybeCompressToolResponse } from "../../dist/mcp/response-compression.js";
 import { handleResponseGet } from "../../dist/mcp/tools/response.js";
 import { ResponseGetRequestSchema } from "../../dist/mcp/tools.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 
 const originalSdlConfig = process.env.SDL_CONFIG;
 let tempDirs: string[] = [];
+
+interface InternalTokenUsage {
+  sdlTokens: number;
+  rawEquivalent: number;
+}
+
+function getHiddenTokenUsage(value: unknown): InternalTokenUsage {
+  assert.equal(typeof value, "object");
+  assert.notEqual(value, null);
+  assert.equal(
+    Object.prototype.propertyIsEnumerable.call(value, "_tokenUsage"),
+    false,
+  );
+  const usage = (value as { _tokenUsage?: InternalTokenUsage })._tokenUsage;
+  assert.ok(usage, "expected hidden token usage metadata");
+  return usage;
+}
 
 function makeTempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "sdl-response-artifacts-"));
@@ -83,7 +101,14 @@ describe("response artifact storage", () => {
     assert.ok(result.metadata.storedBytes > 0);
     assert.ok(result.metadata.sha256);
     assert.strictEqual(result.metadata.etag, result.metadata.sha256);
-    assert.ok(result.payload.savings.savedBytes > 0);
+    assert.deepStrictEqual(Object.keys(result.payload).sort(), [
+      "action",
+      "handle",
+      "kind",
+      "responseMode",
+    ]);
+    assert.equal("metadata" in result.payload, false);
+    assert.equal("savings" in result.payload, false);
 
     const read = await readResponseArtifact({
       repoId: "repo-a",
@@ -141,6 +166,282 @@ describe("response artifact storage", () => {
     });
     assert.equal(read.full, false);
     assert.equal(read.truncated, false);
+  });
+
+
+  it("supports bracket JSON path array indexes", async () => {
+    const baseDir = makeTempDir();
+    const payload = {
+      finalEvidence: [
+        { reference: "symbol:alpha", summary: "alpha" },
+        { reference: "symbol:target", summary: "target" },
+      ],
+    };
+
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "sdl.context",
+      payload,
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+      entropy: () => "3333333333333333",
+    });
+    assert.strictEqual(stored.responseMode, "handle");
+
+    const first = await readResponseArtifact({
+      repoId: "repo-a",
+      handle: stored.payload.handle,
+      artifactBaseDir: baseDir,
+      jsonPath: "finalEvidence[0]",
+    });
+    const second = await readResponseArtifact({
+      repoId: "repo-a",
+      handle: stored.payload.handle,
+      artifactBaseDir: baseDir,
+      jsonPath: "$.finalEvidence[1]",
+    });
+
+    assert.deepStrictEqual(first.content, payload.finalEvidence[0]);
+    assert.deepStrictEqual(second.content, payload.finalEvidence[1]);
+  });
+
+  it("rejects JSON paths that do not match", async () => {
+    const baseDir = makeTempDir();
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "sdl.context",
+      payload: { finalEvidence: [{ reference: "symbol:alpha" }] },
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+      entropy: () => "4444444444444444",
+    });
+    assert.strictEqual(stored.responseMode, "handle");
+
+    await assert.rejects(
+      () =>
+        readResponseArtifact({
+          repoId: "repo-a",
+          handle: stored.payload.handle,
+          artifactBaseDir: baseDir,
+          jsonPath: "finalEvidence[9]",
+        }),
+      /jsonPath not found: finalEvidence\[9\]/,
+    );
+  });
+
+  it("rejects inherited JSON path properties", async () => {
+    const baseDir = makeTempDir();
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "sdl.context",
+      payload: { finalEvidence: [{ reference: "symbol:alpha" }] },
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+      entropy: () => "4545454545454545",
+    });
+    assert.strictEqual(stored.responseMode, "handle");
+
+    await assert.rejects(
+      () =>
+        readResponseArtifact({
+          repoId: "repo-a",
+          handle: stored.payload.handle,
+          artifactBaseDir: baseDir,
+          jsonPath: "toString",
+        }),
+      /jsonPath not found: toString/,
+    );
+  });
+
+  it("paginates JSON path arrays before returning content", async () => {
+    const baseDir = makeTempDir();
+    const payload = {
+      finalEvidence: [
+        { reference: "symbol:alpha", summary: "alpha" },
+        { reference: "symbol:target", summary: "target" },
+        { reference: "symbol:omega", summary: "omega" },
+      ],
+    };
+
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "sdl.context",
+      payload,
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+      entropy: () => "5555555555555555",
+    });
+    assert.strictEqual(stored.responseMode, "handle");
+
+    const page = await readResponseArtifact({
+      repoId: "repo-a",
+      handle: stored.payload.handle,
+      artifactBaseDir: baseDir,
+      jsonPath: "finalEvidence",
+      offset: 1,
+      limit: 1,
+    });
+
+    assert.deepStrictEqual(page.content, [payload.finalEvidence[1]]);
+    assert.deepStrictEqual(page.pagination, {
+      offset: 1,
+      limit: 1,
+      total: 3,
+      returned: 1,
+      hasMore: true,
+      nextOffset: 2,
+    });
+    assert.equal(page.truncated, true);
+  });
+
+  it("rejects paged JSON path results that exceed requested byte bounds", async () => {
+    const baseDir = makeTempDir();
+    const payload = {
+      finalEvidence: [
+        { reference: "symbol:target", summary: "x".repeat(1000) },
+      ],
+    };
+
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "sdl.context",
+      payload,
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+      entropy: () => "5656565656565656",
+    });
+    assert.strictEqual(stored.responseMode, "handle");
+
+    await assert.rejects(
+      () =>
+        readResponseArtifact({
+          repoId: "repo-a",
+          handle: stored.payload.handle,
+          artifactBaseDir: baseDir,
+          jsonPath: "finalEvidence",
+          offset: 0,
+          limit: 1,
+          maxBytes: 10,
+        }),
+      /JSON path result exceeds requested byte\/token bound/,
+    );
+  });
+
+  it("returns bounded JSON byte excerpts by default for handle compatibility", async () => {
+    const baseDir = makeTempDir();
+    const payload = {
+      finalEvidence: [{ reference: "symbol:alpha" }],
+      padding: "x".repeat(2000),
+    };
+
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "sdl.context",
+      payload,
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+      entropy: () => "6666666666666666",
+    });
+    assert.strictEqual(stored.responseMode, "handle");
+
+    const excerpt = await readResponseArtifact({
+      repoId: "repo-a",
+      handle: stored.payload.handle,
+      artifactBaseDir: baseDir,
+      maxBytes: 20,
+    });
+
+    const raw = await readResponseArtifact({
+      repoId: "repo-a",
+      handle: stored.payload.handle,
+      artifactBaseDir: baseDir,
+      maxBytes: 20,
+      raw: true,
+    });
+
+    assert.equal(typeof excerpt.content, "string");
+    assert.equal(excerpt.truncated, true);
+    assert.equal(typeof raw.content, "string");
+    assert.equal(raw.truncated, true);
+  });
+
+  it("omits token savings from response.get output", async () => {
+    const baseDir = makeTempDir();
+    const configPath = join(baseDir, "sdl.config.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({ repos: [], policy: {}, runtime: { artifactBaseDir: baseDir } }),
+    );
+    process.env.SDL_CONFIG = configPath;
+    invalidateConfigCache();
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "sdl.context",
+      payload: { finalEvidence: [{ reference: "symbol:alpha" }] },
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+      entropy: () => "4646464646464646",
+    });
+    assert.strictEqual(stored.responseMode, "handle");
+
+    const response = await handleResponseGet({
+      repoId: "repo-a",
+      handle: stored.payload.handle,
+      jsonPath: "finalEvidence[0]",
+    });
+    const serialized = JSON.stringify(response);
+    const internalUsage = getHiddenTokenUsage(response);
+
+    assert.ok(internalUsage.sdlTokens > 0);
+    assert.ok(internalUsage.rawEquivalent > internalUsage.sdlTokens);
+    assert.equal("estimatedOriginalTokens" in response.metadata, false);
+    assert.equal("estimatedReturnedTokens" in response.range, false);
+    assert.equal("_tokenUsage" in JSON.parse(serialized), false);
+    assert.equal("savings" in response, false);
+    assert.equal(serialized.includes("estimatedOriginalTokens"), false);
+    assert.equal(serialized.includes("estimatedReturnedTokens"), false);
+    assert.equal(serialized.includes("originalTokens"), false);
+    assert.equal(serialized.includes("returnedTokens"), false);
+    assert.equal(serialized.includes("savedTokens"), false);
+  });
+
+  it("uses a lower auto threshold for sdl.context responses", async () => {
+    const baseDir = makeTempDir();
+    const configPath = join(baseDir, "sdl.config.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({ repos: [], policy: {}, runtime: { artifactBaseDir: baseDir } }),
+    );
+    process.env.SDL_CONFIG = configPath;
+    invalidateConfigCache();
+
+    const summary = Array.from({ length: 2200 }, (_, i) => `term${i}`).join(" ");
+    const response = await maybeCompressToolResponse({
+      repoId: "repo-a",
+      toolName: "sdl.context",
+      payload: {
+        success: true,
+        taskType: "review",
+        summary,
+        finalEvidence: [{ summary: "focused evidence" }],
+      },
+      responseMode: "auto",
+    });
+
+    if (!("handle" in response)) {
+      assert.fail("expected response artifact handle");
+    }
+    assert.strictEqual(response.responseMode, "handle");
+    assert.strictEqual(response.kind, "responseArtifact");
+    assert.deepStrictEqual(Object.keys(response).sort(), [
+      "action",
+      "handle",
+      "kind",
+      "responseMode",
+    ]);
+    const internalUsage = getHiddenTokenUsage(response);
+    assert.ok(internalUsage.rawEquivalent > internalUsage.sdlTokens);
+    assert.ok(isValidResponseArtifactHandle(response.handle));
   });
 
   it("stores automatically only when the estimated token threshold is exceeded", async () => {

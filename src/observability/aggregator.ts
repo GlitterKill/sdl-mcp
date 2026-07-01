@@ -133,6 +133,9 @@ interface TokenSavingsRec {
   source: TokenSavingsSource;
   tool?: string;
   estimatedTokensAvoided?: number;
+  originalTokens?: number;
+  returnedTokens?: number;
+  savedTokens?: number;
   storedBytes?: number;
   opportunity?: boolean;
   hit?: boolean;
@@ -143,6 +146,9 @@ interface TokenSavingsBucket {
   events: number;
   realizedEvents: number;
   estimatedTokensAvoided: number;
+  originalTokens: number;
+  returnedTokens: number;
+  savedTokens: number;
   opportunities: number;
   hits: number;
   storedBytes: number;
@@ -590,6 +596,24 @@ export class Aggregator {
           0,
           rec.estimatedTokensAvoided,
         );
+      }
+      if (
+        typeof rec.originalTokens === "number" &&
+        Number.isFinite(rec.originalTokens)
+      ) {
+        bucket.originalTokens += Math.max(0, rec.originalTokens);
+      }
+      if (
+        typeof rec.returnedTokens === "number" &&
+        Number.isFinite(rec.returnedTokens)
+      ) {
+        bucket.returnedTokens += Math.max(0, rec.returnedTokens);
+      }
+      if (
+        typeof rec.savedTokens === "number" &&
+        Number.isFinite(rec.savedTokens)
+      ) {
+        bucket.savedTokens += Math.max(0, rec.savedTokens);
       }
       if (
         typeof rec.storedBytes === "number" &&
@@ -1484,6 +1508,9 @@ export class Aggregator {
         acc.events += bucket.events;
         acc.realizedEvents += bucket.realizedEvents;
         acc.estimatedTokensAvoided += bucket.estimatedTokensAvoided;
+        acc.originalTokens += bucket.originalTokens;
+        acc.returnedTokens += bucket.returnedTokens;
+        acc.savedTokens += bucket.savedTokens;
         acc.storedBytes += bucket.storedBytes;
         return acc;
       },
@@ -1491,6 +1518,9 @@ export class Aggregator {
         events: 0,
         realizedEvents: 0,
         estimatedTokensAvoided: 0,
+        originalTokens: 0,
+        returnedTokens: 0,
+        savedTokens: 0,
         storedBytes: 0,
       },
     );
@@ -1498,6 +1528,9 @@ export class Aggregator {
       totalEvents: totals.events,
       totalRealizedEvents: totals.realizedEvents,
       totalEstimatedTokensAvoided: totals.estimatedTokensAvoided,
+      totalOriginalTokens: totals.originalTokens,
+      totalReturnedTokens: totals.returnedTokens,
+      totalSavedTokens: totals.savedTokens,
       totalStoredBytes: totals.storedBytes,
       bySource,
       byTool,
@@ -1759,6 +1792,9 @@ function newTokenSavingsBucket(): TokenSavingsBucket {
     events: 0,
     realizedEvents: 0,
     estimatedTokensAvoided: 0,
+    originalTokens: 0,
+    returnedTokens: 0,
+    savedTokens: 0,
     opportunities: 0,
     hits: 0,
     storedBytes: 0,
@@ -1775,6 +1811,9 @@ function tokenSavingsLayerMetrics(
     events: b.events,
     realizedEvents: b.realizedEvents,
     estimatedTokensAvoided: b.estimatedTokensAvoided,
+    originalTokens: b.originalTokens,
+    returnedTokens: b.returnedTokens,
+    savedTokens: b.savedTokens,
     opportunities: b.opportunities,
     hits: b.hits,
     hitRatePct: b.opportunities === 0 ? 0 : (b.hits / b.opportunities) * 100,

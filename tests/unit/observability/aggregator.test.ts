@@ -98,6 +98,9 @@ describe("Aggregator", () => {
     const layers = agg.getSnapshot(REPO).tokenEfficiency.compressionLayers;
     assert.equal(layers.totalEvents, 0);
     assert.equal(layers.totalEstimatedTokensAvoided, 0);
+    assert.equal(layers.totalOriginalTokens, 0);
+    assert.equal(layers.totalReturnedTokens, 0);
+    assert.equal(layers.totalSavedTokens, 0);
     assert.equal(layers.bySource.etag.events, 0);
     assert.equal(layers.bySource.etag.opportunities, 0);
     assert.equal(layers.bySource.etag.hitRatePct, 0);
@@ -109,6 +112,9 @@ describe("Aggregator", () => {
       source: "responseArtifact",
       tool: "sdl.context",
       estimatedTokensAvoided: 120,
+      originalTokens: 150,
+      returnedTokens: 30,
+      savedTokens: 120,
       storedBytes: 2048,
       opportunity: true,
       hit: true,
@@ -117,6 +123,9 @@ describe("Aggregator", () => {
       source: "responseArtifact",
       tool: "sdl.context",
       estimatedTokensAvoided: 30,
+      originalTokens: 60,
+      returnedTokens: 30,
+      savedTokens: 30,
       storedBytes: 512,
       opportunity: true,
       hit: false,
@@ -126,22 +135,40 @@ describe("Aggregator", () => {
       source: "rawWindowAvoidance",
       tool: "code.getHotPath",
       estimatedTokensAvoided: 80,
+      originalTokens: 100,
+      returnedTokens: 20,
+      savedTokens: 80,
     });
 
     const layers = agg.getSnapshot(REPO).tokenEfficiency.compressionLayers;
     assert.equal(layers.totalEvents, 3);
     assert.equal(layers.totalRealizedEvents, 2);
     assert.equal(layers.totalEstimatedTokensAvoided, 200);
+    assert.equal(layers.totalOriginalTokens, 250);
+    assert.equal(layers.totalReturnedTokens, 50);
+    assert.equal(layers.totalSavedTokens, 200);
     assert.equal(layers.totalStoredBytes, 2048);
     assert.equal(layers.bySource.responseArtifact.events, 2);
     assert.equal(layers.bySource.responseArtifact.realizedEvents, 1);
     assert.equal(layers.bySource.responseArtifact.estimatedTokensAvoided, 120);
+    assert.equal(layers.bySource.responseArtifact.originalTokens, 150);
+    assert.equal(layers.bySource.responseArtifact.returnedTokens, 30);
+    assert.equal(layers.bySource.responseArtifact.savedTokens, 120);
     assert.equal(layers.bySource.responseArtifact.hitRatePct, 50);
     assert.equal(layers.bySource.rawWindowAvoidance.estimatedTokensAvoided, 80);
+    assert.equal(layers.bySource.rawWindowAvoidance.originalTokens, 100);
+    assert.equal(layers.bySource.rawWindowAvoidance.returnedTokens, 20);
+    assert.equal(layers.bySource.rawWindowAvoidance.savedTokens, 80);
     assert.equal(layers.byTool["sdl.context"].events, 2);
     assert.equal(layers.byTool["sdl.context"].estimatedTokensAvoided, 120);
+    assert.equal(layers.byTool["sdl.context"].originalTokens, 150);
+    assert.equal(layers.byTool["sdl.context"].returnedTokens, 30);
+    assert.equal(layers.byTool["sdl.context"].savedTokens, 120);
     assert.equal(layers.byTool["sdl.context"].storedBytes, 2048);
     assert.equal(layers.byTool["code.getHotPath"].estimatedTokensAvoided, 80);
+    assert.equal(layers.byTool["code.getHotPath"].originalTokens, 100);
+    assert.equal(layers.byTool["code.getHotPath"].returnedTokens, 20);
+    assert.equal(layers.byTool["code.getHotPath"].savedTokens, 80);
   });
 
   it("counts SCIP failures separately from successes", () => {

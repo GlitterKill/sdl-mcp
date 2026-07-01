@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { executeWorkflow } from "../../dist/code-mode/workflow-executor.js";
 import type { ParsedWorkflowRequest } from "../../dist/code-mode/workflow-parser.js";
 import type { CodeModeConfig } from "../../dist/config/types.js";
+import type { ToolContext } from "../../dist/server.js";
 import { RuntimeExecuteRequestSchema } from "../../dist/mcp/tools.js";
 import { tokenAccumulator } from "../../dist/mcp/token-accumulator.js";
 import { z } from "zod";
@@ -33,6 +34,14 @@ const testConfig: CodeModeConfig = {
   ladderValidation: "warn",
   etagCaching: true,
 };
+
+function createTestToolContext(sessionId: string): ToolContext {
+  return {
+    sendNotification: async () => {},
+    signal: new AbortController().signal,
+    sessionId,
+  };
+}
 
 // Mock action map with test actions
 function createMockActionMap() {
@@ -300,6 +309,79 @@ describe("code-mode workflow executor", () => {
       (result.results[1].result as { message?: unknown }).message,
       "sym-target",
     );
+  });
+
+  it("reuses etags automatically across workflows in the same session", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        {
+          fn: "symbolGetCard",
+          action: "symbol.getCard",
+          args: { symbolId: "sym-cache" },
+        },
+      ],
+      onError: "continue",
+    };
+    const actionMap = createMockActionMap();
+    const seenArgs: Array<Record<string, unknown>> = [];
+    actionMap["symbol.getCard"].handler = async (args: unknown) => {
+      seenArgs.push({ ...(args as Record<string, unknown>) });
+      return {
+        card: { symbolId: "sym-cache", name: "sym-cache", kind: "function" },
+        etag: "etag-sym-cache",
+      };
+    };
+    const context = createTestToolContext("workflow-etag-session");
+
+    const first = await executeWorkflow(request, actionMap, testConfig, context);
+    const second = await executeWorkflow(request, actionMap, testConfig, context);
+
+    assert.strictEqual(first.results[0].status, "ok");
+    assert.strictEqual(second.results[0].status, "ok");
+    assert.strictEqual(seenArgs[0].ifNoneMatch, undefined);
+    assert.strictEqual(seenArgs[1].ifNoneMatch, "etag-sym-cache");
+    assert.strictEqual(
+      (first as unknown as Record<string, unknown>).etagCache,
+      undefined,
+    );
+    assert.strictEqual(
+      (second as unknown as Record<string, unknown>).etagCache,
+      undefined,
+    );
+  });
+
+  it("hides etag fields from verbose trace previews", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        {
+          fn: "testEcho",
+          action: "test.echo",
+          args: { message: "trace" },
+        },
+      ],
+      onError: "continue",
+    };
+    const actionMap = createMockActionMap();
+    actionMap["test.echo"].handler = async () => ({
+      ok: true,
+      etag: "trace-etag",
+      etagCache: { step: "cache-etag" },
+      sliceEtag: "slice-etag",
+      nested: { etag: "nested-etag" },
+    });
+
+    const result = await executeWorkflow(
+      request,
+      actionMap,
+      testConfig,
+      undefined,
+      { level: "verbose", includeResolvedArgs: true },
+    );
+
+    const preview = result.trace?.steps[0]?.resultPreview ?? "";
+    assert.doesNotMatch(preview, /etag|etagCache|sliceEtag|trace-etag|cache-etag|slice-etag|nested-etag/i);
   });
 
   it("records truncated response tokens in session usage", async () => {

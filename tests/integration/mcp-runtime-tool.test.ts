@@ -264,6 +264,29 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     );
   });
 
+  it("returns exact intent matches when contextLines is zero", async () => {
+    const { handleRuntimeExecute } =
+      await import("../../dist/mcp/tools/runtime.js");
+
+    const result = await handleRuntimeExecute({
+      repoId,
+      runtime: "node",
+      args: [
+        "-e",
+        "console.log('noise before'); console.log('TARGET only'); console.log('noise after')",
+      ],
+      persistOutput: false,
+      outputMode: "intent",
+      queryTerms: ["TARGET"],
+      contextLines: 0,
+    });
+
+    assert.equal(result.status, "success");
+    assert.deepEqual(result.excerpts?.map((excerpt) => excerpt.content), [
+      "TARGET only",
+    ]);
+  });
+
   it("warns about Windows shell semicolon command separators", async () => {
     const { handleRuntimeExecute } =
       await import("../../dist/mcp/tools/runtime.js");
@@ -279,7 +302,9 @@ describe("sdl.runtime.execute - MCP Tool Handler", () => {
     assert.equal(result.status, "success");
     if (process.platform === "win32") {
       assert.ok(
-        result.quotingWarnings?.some((warning) => /semicolon/i.test(warning)),
+        result.quotingWarnings?.some((warning) =>
+          /Use newlines or & between commands/.test(warning),
+        ),
       );
     }
   });

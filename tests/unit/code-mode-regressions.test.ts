@@ -11,6 +11,7 @@ import {
 import {
   registerActionSearchTool,
 } from "../../dist/code-mode/index.js";
+import { SDL_MCP_SERVER_INSTRUCTIONS } from "../../dist/mcp/server-instructions.js";
 import { resolveRefs } from "../../dist/code-mode/ref-resolver.js";
 import { invalidateConfigCache } from "../../dist/config/loadConfig.js";
 
@@ -53,6 +54,10 @@ describe("code-mode regressions", () => {
     );
     assert.match(
       manual,
+      /function repoStatus\(p\?: \{ detail\?: "minimal" \| "standard" \| "full"; includeTelemetry\?: boolean \}\): \{ status: object \}/,
+    );
+    assert.match(
+      manual,
       /function repoOverview\(p: \{ level\?: "stats" \| "directories" \| "full"; ifNoneMatch\?: string \}\): object/,
     );
     // agentContext was removed from the API
@@ -64,8 +69,18 @@ describe("code-mode regressions", () => {
       manual,
       /function memoryStore\(p: \{ type: "decision"\|"bugfix"\|"task_context"\|"pattern"\|"convention"\|"architecture"\|"performance"\|"security"; title: string; content: string; tags\?: string\[]; symbolIds\?: string\[]; fileRelPaths\?: string\[] \}\)/,
     );
+    assert.match(
+      manual,
+      /function usageStats\(p: \{ scope\?: "session" \| "history" \| "lifetime" \| "both" \| "all"; since\?: string; limit\?: number; persist\?: boolean; detail\?: "compact" \| "full" \}\): \{ formattedSummary: string \} \| object/,
+    );
+    assert.doesNotMatch(manual, /totalSdlTokens: number; totalSavedTokens: number; savingsPercent: number/);
   });
 
+
+  it("does not instruct agents to call usageStats by habit", () => {
+    assert.doesNotMatch(SDL_MCP_SERVER_INSTRUCTIONS, /Before completion, call `usageStats`/);
+    assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /Call `usageStats` only when/);
+  });
   it("action.search supports offset-based pagination", async () => {
     let handler: ((args: unknown) => Promise<unknown>) | null = null;
     let inputSchema: Record<string, unknown> | null = null;

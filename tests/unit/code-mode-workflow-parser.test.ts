@@ -2,6 +2,7 @@ import { after, before, describe, it } from "node:test";
 import assert from "node:assert";
 import { resolve } from "node:path";
 import { parseWorkflowRequest } from "../../dist/code-mode/workflow-parser.js";
+import { WorkflowRequestSchema } from "../../dist/code-mode/types.js";
 
 const originalSdlConfig = process.env.SDL_CONFIG;
 const workflowParserConfigPath = resolve("config/sdlmcp.config.json");
@@ -42,6 +43,31 @@ describe("code-mode workflow parser", () => {
     assert.strictEqual(result.ok, true);
     if (result.ok) {
       assert.strictEqual(result.request.steps.length, 2);
+    }
+  });
+
+  it("keeps etagCache out of the public schema while accepting legacy seeds", () => {
+    const raw = {
+      repoId: "test",
+      steps: [{ fn: "repoStatus", args: {} }],
+      etagCache: { "repo.status": "etag-1", ignored: 1 },
+    };
+
+    const schemaResult = WorkflowRequestSchema.safeParse(raw);
+    assert.strictEqual(schemaResult.success, true);
+    if (schemaResult.success) {
+      assert.strictEqual(
+        (schemaResult.data as Record<string, unknown>).etagCache,
+        undefined,
+      );
+    }
+
+    const parsed = parseWorkflowRequest(raw);
+    assert.strictEqual(parsed.ok, true);
+    if (parsed.ok) {
+      assert.deepStrictEqual(parsed.request.etagCache, {
+        "repo.status": "etag-1",
+      });
     }
   });
 

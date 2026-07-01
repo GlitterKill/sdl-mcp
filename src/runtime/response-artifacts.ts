@@ -60,6 +60,11 @@ export interface ResponseArtifactMetadata {
   sessionKeyHash?: string;
 }
 
+export type ResponseArtifactPublicMetadata = Omit<
+  ResponseArtifactMetadata,
+  "estimatedOriginalTokens"
+>;
+
 export interface ResponseArtifactSavings {
   originalTokens: number;
   returnedTokens: number;
@@ -74,8 +79,7 @@ export interface ResponseArtifactReference {
   kind: "responseArtifact";
   handle: string;
   action: "response.get";
-  metadata: ResponseArtifactMetadata;
-  savings: ResponseArtifactSavings;
+  metadata: ResponseArtifactPublicMetadata;
 }
 
 export type MaybeStoreLargeResponseResult<T> =
@@ -121,10 +125,22 @@ export interface ResponseArtifactReadOptions {
   maxTokens?: number;
   offsetBytes?: number;
   jsonPath?: string;
+  raw?: boolean;
+  offset?: number;
+  limit?: number;
   artifactBaseDir?: string | null;
   maxFullBytes?: number;
   sessionId?: string;
   now?: () => Date;
+}
+
+export interface ResponseArtifactPagination {
+  offset: number;
+  limit: number;
+  total: number;
+  returned: number;
+  hasMore: boolean;
+  nextOffset?: number;
 }
 
 export interface ResponseArtifactReadResult {
@@ -140,6 +156,7 @@ export interface ResponseArtifactReadResult {
     totalBytes: number;
     estimatedReturnedTokens: number;
   };
+  pagination?: ResponseArtifactPagination;
   savings: ResponseArtifactSavings;
 }
 
@@ -153,14 +170,24 @@ const BLOCKED_JSON_PATH_SEGMENTS = new Set([
   "prototype",
 ]);
 
-function extractJsonPath(obj: unknown, keyPath: string): unknown {
-  const normalized = keyPath.startsWith("$.")
+function normalizeJsonPathSegments(keyPath: string): string[] | undefined {
+  const withoutRoot = keyPath.startsWith("$.")
     ? keyPath.slice(2)
     : keyPath.startsWith("$")
       ? keyPath.slice(1)
       : keyPath;
+  const normalized = withoutRoot.replace(/\[(\d+)\]/g, ".$1");
+  if (normalized.includes("[") || normalized.includes("]")) return undefined;
+  const segments = normalized.split(".");
+  return segments.length > 0 ? segments : undefined;
+}
+
+function extractJsonPath(obj: unknown, keyPath: string): unknown {
+  const segments = normalizeJsonPathSegments(keyPath);
+  if (!segments) return undefined;
+
   let current: unknown = obj;
-  for (const segment of normalized.split(".")) {
+  for (const segment of segments) {
     if (!segment || BLOCKED_JSON_PATH_SEGMENTS.has(segment)) return undefined;
     if (current == null || typeof current !== "object") return undefined;
     if (Array.isArray(current)) {
@@ -168,6 +195,9 @@ function extractJsonPath(obj: unknown, keyPath: string): unknown {
       if (!Number.isInteger(index) || index < 0) return undefined;
       current = current[index];
     } else {
+      if (!Object.prototype.hasOwnProperty.call(current, segment)) {
+        return undefined;
+      }
       current = (current as Record<string, unknown>)[segment];
     }
   }
@@ -276,23 +306,13 @@ function createSavings(
 }
 
 function createReference(metadata: ResponseArtifactMetadata): ResponseArtifactReference {
-  const handlePayloadBytes = Buffer.byteLength(
-    JSON.stringify({
-      responseMode: "handle",
-      kind: "responseArtifact",
-      handle: metadata.handle,
-      action: "response.get",
-      metadata,
-    }),
-    "utf-8",
-  );
+  const { estimatedOriginalTokens: _estimatedOriginalTokens, ...publicMetadata } = metadata;
   return {
     responseMode: "handle",
     kind: "responseArtifact",
     handle: metadata.handle,
     action: "response.get",
-    metadata,
-    savings: createSavings(metadata, handlePayloadBytes),
+    metadata: publicMetadata,
   };
 }
 
@@ -562,13 +582,47 @@ export async function readResponseArtifact(
       throw new Error("jsonPath is only supported for JSON response artifacts");
     }
     const parsed = JSON.parse(decompressed.toString("utf-8")) as unknown;
-    const content = extractJsonPath(parsed, opts.jsonPath);
-    const returnedText = content === undefined ? "" : JSON.stringify(content);
+    const extractedContent = extractJsonPath(parsed, opts.jsonPath);
+    if (extractedContent === undefined) {
+      throw new Error(`jsonPath not found: ${opts.jsonPath}`);
+    }
+
+    let content = extractedContent;
+    let pagination: ResponseArtifactPagination | undefined;
+    if (Array.isArray(extractedContent) && (opts.offset !== undefined || opts.limit !== undefined)) {
+      const offset = Math.min(Math.max(0, opts.offset ?? 0), extractedContent.length);
+      const limit = Math.max(1, opts.limit ?? extractedContent.length);
+      const page = extractedContent.slice(offset, offset + limit);
+      const nextOffset = offset + page.length;
+      const hasMore = nextOffset < extractedContent.length;
+      content = page;
+      pagination = {
+        offset,
+        limit,
+        total: extractedContent.length,
+        returned: page.length,
+        hasMore,
+        ...(hasMore ? { nextOffset } : {}),
+      };
+    }
+
+    const returnedText = JSON.stringify(content);
     const returnedBytes = Buffer.byteLength(returnedText, "utf-8");
+    if (Array.isArray(extractedContent)) {
+      const tokenBoundBytes =
+        opts.maxTokens === undefined ? undefined : Math.max(1, opts.maxTokens * 4);
+      const requestedMaxBytes = opts.maxBytes ?? tokenBoundBytes;
+      if (requestedMaxBytes !== undefined && returnedBytes > requestedMaxBytes) {
+        throw new Error(
+          "JSON path result exceeds requested byte/token bound; use offset/limit to page array results.",
+        );
+      }
+    }
+
     return {
       handle: opts.handle,
       full: false,
-      truncated: false,
+      truncated: pagination?.hasMore ?? false,
       contentKind: metadata.contentKind,
       content,
       metadata,
@@ -578,6 +632,7 @@ export async function readResponseArtifact(
         totalBytes: metadata.originalBytes,
         estimatedReturnedTokens: estimateTokensFromBytes(returnedBytes),
       },
+      ...(pagination ? { pagination } : {}),
       savings: createSavings(metadata, returnedBytes),
     };
   }
@@ -594,11 +649,11 @@ export async function readResponseArtifact(
     MAX_RESPONSE_EXCERPT_BYTES,
     tokenBoundBytes ?? MAX_RESPONSE_EXCERPT_BYTES,
   );
-  const returnedBuffer = opts.full
+  const full = opts.full ?? false;
+  const returnedBuffer = full
     ? decompressed
     : decompressed.subarray(offsetBytes, offsetBytes + boundedMaxBytes);
   const returnedText = returnedBuffer.toString("utf-8");
-  const full = opts.full ?? false;
   const truncated = !full && offsetBytes + returnedBuffer.length < decompressed.length;
   const content =
     full && metadata.contentKind === "json"

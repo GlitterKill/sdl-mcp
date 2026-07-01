@@ -44,4 +44,13 @@ describe("CLI tool actions", () => {
       true,
     );
   });
+
+  it("exposes usage.stats detail selection", () => {
+    const definition = ACTION_MAP.get("usage.stats");
+    assert.ok(definition);
+
+    const detailArg = definition.args.find((arg) => arg.flag === "--detail");
+    assert.equal(detailArg?.field, "detail");
+    assert.equal(detailArg?.type, "string");
+  });
 });

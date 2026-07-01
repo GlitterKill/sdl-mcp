@@ -109,6 +109,27 @@ export function attachRawContext<T>(result: T, hint: RawContextHint): T {
   return result;
 }
 
+/**
+ * Attach precomputed usage metadata for the server accounting pass without
+ * making it part of the serialized tool response.
+ */
+export function attachTokenUsage<T>(
+  result: T,
+  usage: TokenUsageMetadata,
+): T {
+  if (result && typeof result === "object") {
+    const clone = { ...(result as Record<string, unknown>) };
+    Object.defineProperty(clone, "_tokenUsage", {
+      value: usage,
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+    return clone as T;
+  }
+  return result;
+}
+
 export function stripRawContext<T>(result: T): T {
   if (result && typeof result === "object" && "_rawContext" in result) {
     const { _rawContext: _, ...rest } = result as Record<string, unknown>;

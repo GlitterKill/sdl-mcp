@@ -148,6 +148,12 @@ export interface TokenSavingsLayerMetrics {
   realizedEvents: number;
   /** Realized estimated tokens avoided. Candidate-only events do not increment this. */
   estimatedTokensAvoided: number;
+  /** Original response token estimate before the savings layer. */
+  originalTokens: number;
+  /** Returned token estimate after the savings layer. */
+  returnedTokens: number;
+  /** Saved token estimate reported by the savings layer. */
+  savedTokens: number;
   /** Hit denominator when the source reports opportunities. */
   opportunities: number;
   /** Hit numerator when the source reports opportunities. */
@@ -166,6 +172,9 @@ export interface TokenSavingsBreakdownMetrics {
   totalEvents: number;
   totalRealizedEvents: number;
   totalEstimatedTokensAvoided: number;
+  totalOriginalTokens: number;
+  totalReturnedTokens: number;
+  totalSavedTokens: number;
   totalStoredBytes: number;
   bySource: Record<string, TokenSavingsLayerMetrics>;
   byTool: Record<string, TokenSavingsToolMetrics>;

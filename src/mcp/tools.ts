@@ -599,11 +599,12 @@ export const RepoRegisterResponseSchema = z.object({
 export const RepoStatusRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   surfaceMemories: z.boolean().optional().default(false),
-  /** "minimal" returns only core counts (fastest). "standard" includes health/watcher/prefetch. "full" adds live-index. */
+  /** "minimal" is compact/default. "standard" includes health/watcher/prefetch. "full" adds live-index. */
   detail: z
     .enum(["minimal", "standard", "full"])
     .optional()
-    .default("standard"),
+    .default("minimal"),
+  includeTelemetry: z.boolean().optional().default(false),
 });
 
 export const RepoStatusResponseSchema = z.object({
@@ -614,14 +615,16 @@ export const RepoStatusResponseSchema = z.object({
   symbolsIndexed: z.number().int(),
   lastIndexedAt: z.string().nullable(),
   healthScore: z.number().int().min(0).max(100).nullable().optional(),
-  healthComponents: z.object({
-    freshness: z.number().min(0).max(1),
-    coverage: z.number().min(0).max(1),
-    errorRate: z.number().min(0).max(1),
-    edgeQuality: z.number().min(0).max(1),
-    callResolution: z.number().min(0).max(1).optional(),
-    embeddingFailures: z.number().int().min(0).optional(),
-  }),
+  healthComponents: z
+    .object({
+      freshness: z.number().min(0).max(1),
+      coverage: z.number().min(0).max(1),
+      errorRate: z.number().min(0).max(1),
+      edgeQuality: z.number().min(0).max(1),
+      callResolution: z.number().min(0).max(1).optional(),
+      embeddingFailures: z.number().int().min(0).optional(),
+    })
+    .optional(),
   healthAvailable: z.boolean().optional(),
   /**
    * Watcher health states:
@@ -655,7 +658,8 @@ export const RepoStatusResponseSchema = z.object({
       watchmanRelativePath: z.string().nullable().optional(),
       watchmanLastClock: z.string().nullable().optional(),
     })
-    .nullable(),
+    .nullable()
+    .optional(),
   watcherNote: z.string().optional(),
   prefetchStats: z
     .object({
@@ -1036,13 +1040,8 @@ const ResponseArtifactMetadataSchema = z.object({
   sessionKeyHash: z.string().optional(),
 });
 
-const ResponseArtifactSavingsSchema = z.object({
-  originalTokens: z.number().int(),
-  returnedTokens: z.number().int(),
-  savedTokens: z.number().int(),
-  originalBytes: z.number().int(),
-  returnedBytes: z.number().int(),
-  savedBytes: z.number().int(),
+const ResponseArtifactPublicMetadataSchema = ResponseArtifactMetadataSchema.omit({
+  estimatedOriginalTokens: true,
 });
 
 export const ToolTimingDiagnosticsSchema = z.object({
@@ -1057,8 +1056,7 @@ export const ResponseArtifactReferenceSchema = z.object({
   kind: z.literal("responseArtifact"),
   handle: z.string(),
   action: z.literal("response.get"),
-  metadata: ResponseArtifactMetadataSchema,
-  savings: ResponseArtifactSavingsSchema,
+  metadata: ResponseArtifactPublicMetadataSchema,
 });
 
 const SessionDeltaMetadataSchema = z.object({
@@ -2678,6 +2676,13 @@ const RuntimeExecuteRequestObjectSchema = z
       .describe(
         "Keywords for excerpt matching — up to 10 terms scanned against output",
       ),
+    contextLines: z
+      .number()
+      .int()
+      .min(0)
+      .max(20)
+      .optional()
+      .describe("Context lines around queryTerms matches when outputMode='intent'"),
     maxResponseLines: z
       .number()
       .int()
@@ -2919,7 +2924,25 @@ export const ResponseGetRequestSchema = z.object({
     .min(1)
     .max(200)
     .optional()
-    .describe("Dot-separated path to extract from JSON artifacts before byte slicing"),
+    .describe("Dot or bracket path to extract from JSON artifacts before serialization or array paging"),
+  raw: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Return raw text excerpts for JSON artifacts; required for byte slicing JSON without jsonPath"),
+  offset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("Array item offset after jsonPath extraction"),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(1000)
+    .optional()
+    .describe("Maximum array items to return after jsonPath extraction"),
 });
 
 export const ResponseGetResponseSchema = z.object({
@@ -2928,14 +2951,22 @@ export const ResponseGetResponseSchema = z.object({
   truncated: z.boolean(),
   contentKind: z.enum(["json", "text"]),
   content: z.unknown(),
-  metadata: ResponseArtifactMetadataSchema,
+  metadata: ResponseArtifactPublicMetadataSchema,
   range: z.object({
     offsetBytes: z.number().int(),
     returnedBytes: z.number().int(),
     totalBytes: z.number().int(),
-    estimatedReturnedTokens: z.number().int(),
   }),
-  savings: ResponseArtifactSavingsSchema,
+  pagination: z
+    .object({
+      offset: z.number().int().min(0),
+      limit: z.number().int().min(1),
+      total: z.number().int().min(0),
+      returned: z.number().int().min(0),
+      hasMore: z.boolean(),
+      nextOffset: z.number().int().min(0).optional(),
+    })
+    .optional(),
 });
 
 export type ResponseGetRequest = z.infer<typeof ResponseGetRequestSchema>;
@@ -3089,6 +3120,7 @@ export const UsageStatsRequestSchema = z.object({
   since: z.string().optional(),
   limit: z.number().int().min(1).max(100).optional(),
   persist: z.boolean().optional(),
+  detail: z.enum(["compact", "full"]).optional().default("compact"),
 });
 
 const PackedEncoderUsageSchema = z.object({

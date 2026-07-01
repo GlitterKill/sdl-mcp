@@ -60,6 +60,12 @@ export interface TokenSavingsTapEvent {
   tool?: string;
   /** Estimated tokens avoided when the event produced realized emitted savings. */
   estimatedTokensAvoided?: number;
+  /** Full original token estimate before compression, for diagnostics only. */
+  originalTokens?: number;
+  /** Returned token estimate after compression, for diagnostics only. */
+  returnedTokens?: number;
+  /** Saved token estimate after compression, for diagnostics only. */
+  savedTokens?: number;
   /** Stored or avoided bytes when the compression layer can report them. */
   storedBytes?: number;
   /** Whether this event should count in hit-rate denominators. */

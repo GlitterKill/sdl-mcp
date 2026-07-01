@@ -11,7 +11,7 @@ export const WORKFLOW_DESCRIPTION =
   "(dataPick, dataMap, dataFilter, dataSort, dataTemplate). Use $N references " +
   "(e.g., $0.results[0].symbolId) to pass results " +
   "between steps. Includes budget tracking, context-ladder validation, " +
-  "cross-step ETag caching, and opt-in execution tracing.";
+  "internal ETag caching, and opt-in execution tracing.";
 
 export const CONTEXT_DESCRIPTION =
   "Retrieve task-shaped code context for explain, debug, review, or implement " +

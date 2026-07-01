@@ -144,7 +144,7 @@ Cards include **confidence-scored call resolution** (the pass-2 resolver traces 
 - Confidence-scored dependency edges trace real call relationships across files
 - Community detection and call-chain tracing reveal architectural structure
 - ETag-based conditional requests avoid re-fetching unchanged symbols
-- Workflow ETag caching now seeds `slice.build` with `knownCardEtags` so repeated slice builds can skip unchanged cards
+- Workflow ETag caching now seeds `slice.build` internally so repeated slice builds can skip unchanged cards automatically
 
 [Indexing & Language Support Deep Dive →](./docs/feature-deep-dives/indexing-languages.md)
 

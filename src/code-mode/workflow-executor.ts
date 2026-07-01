@@ -3,7 +3,7 @@ import type { ToolContext } from "../server.js";
 import type { CodeModeConfig } from "../config/types.js";
 import { estimateTokens } from "../util/tokenize.js";
 import { buildCatalog, type ActionDescriptor } from "./action-catalog.js";
-import { WorkflowEtagCache } from "./etag-cache.js";
+import { getWorkflowEtagCache } from "./etag-cache.js";
 import { validateLadder } from "./ladder-validator.js";
 import {
   attachRefMetadata,
@@ -219,7 +219,13 @@ export async function executeWorkflow(
     maxDurationMs: config.maxWorkflowDurationMs,
   });
 
-  const etagCache = config.etagCaching ? new WorkflowEtagCache() : null;
+  const etagCache = config.etagCaching
+    ? getWorkflowEtagCache({
+        repoId: request.repoId,
+        sessionId: context?.sessionId,
+        clientKey: context?.clientKey,
+      })
+    : null;
   if (etagCache && request.etagCache) {
     etagCache.seed(request.etagCache);
   }
@@ -799,9 +805,6 @@ export async function executeWorkflow(
 
   const responseStartedAt = timer.start();
   const budgetState = budget.state();
-  const etagCacheState = etagCache?.getCache();
-  const hasEtags =
-    etagCacheState !== undefined && Object.keys(etagCacheState).length > 0;
   const totalDurationMs = Date.now() - startTime;
   const responseWasTruncated = stepResults.some(
     (result) =>
@@ -843,7 +846,6 @@ export async function executeWorkflow(
       });
       return filtered.length > 0 ? filtered : undefined;
     })(),
-    etagCache: hasEtags ? etagCacheState : undefined,
   };
 
   if (aggregatedFileIds.size > 0 || aggregatedRawTokens > 0) {
@@ -929,9 +931,35 @@ export async function executeWorkflow(
 // --- Trace Helpers ---
 
 const DEFAULT_MAX_PREVIEW_TOKENS = 200;
+const TRACE_PREVIEW_INTERNAL_FIELDS = new Set([
+  "etag",
+  "etagCache",
+  "sliceEtag",
+  "ifNoneMatch",
+  "knownEtags",
+  "knownCardEtags",
+  "knownSliceEtag",
+]);
+
+function scrubTracePreviewValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(scrubTracePreviewValue);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const projected: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (!TRACE_PREVIEW_INTERNAL_FIELDS.has(key)) {
+      projected[key] = scrubTracePreviewValue(item);
+    }
+  }
+  return projected;
+}
 
 function truncatePreview(value: unknown, maxTokens: number): string {
-  const json = JSON.stringify(value);
+  const json = JSON.stringify(scrubTracePreviewValue(value));
   const estimatedTokens = estimateTokens(json);
   if (estimatedTokens <= maxTokens) {
     return json;

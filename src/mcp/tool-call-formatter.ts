@@ -290,7 +290,7 @@ function fmtWorkflow(
 ): string | null {
   const results = result.results as Array<Record<string, unknown>> | undefined;
   if (!results) return null;
-  const ok = results.filter((step) => step.status === "ok").length;
+  const ok = results.filter((step) => step.status === "ok" || step.status === undefined).length;
   const err = results.filter((step) => step.status === "error").length;
   const total = num(result.totalTokens);
   let line = `workflow -> ${results.length} steps (${ok} ok`;
@@ -350,10 +350,6 @@ function fmtAgentContext(
     if (summary) lines.push(`summary: ${summary}`);
   }
 
-  const etag = str(result.etag);
-  if (etag) {
-    lines.push("", `etag: ${etag}`);
-  }
 
   return lines.join("\n");
 }
@@ -663,11 +659,14 @@ const GENERIC_DISPLAY_SKIP_FIELDS = new Set([
   "actionsTaken",
   "backupPath",
   "diagnostics",
+  "etag",
+  "etagCache",
   "indexUpdate",
   "metrics",
   "path",
   "preconditionSnapshot",
   "retrievalEvidence",
+  "sliceEtag",
   "taskId",
   "timings",
   "totalTokens",
@@ -728,7 +727,6 @@ function fmtGeneric(
     "planHandle",
     "sliceHandle",
     "responseHandle",
-    "etag",
     "summary",
     "nextBestAction",
   ]) {

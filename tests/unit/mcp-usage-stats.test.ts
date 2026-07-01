@@ -170,7 +170,7 @@ describe("handleUsageStats session scope (no DB required)", () => {
     if (!usageAvailable) return t.skip("usage module not available");
     tokenAccumulator.reset();
 
-    const result = (await handleUsageStats({ scope: "session" })) as Record<string, unknown>;
+    const result = (await handleUsageStats({ scope: "session", detail: "full" })) as Record<string, unknown>;
     assert.ok(result, "should return a response");
     assert.ok(result.session, "should have session data");
 
@@ -182,12 +182,25 @@ describe("handleUsageStats session scope (no DB required)", () => {
     assert.ok(typeof session.callCount === "number", "session should have callCount");
   });
 
-  it("includes formattedSummary for session scope", async (t) => {
+  it("returns only formattedSummary for compact session scope", async (t) => {
     if (!usageAvailable) return t.skip("usage module not available");
     tokenAccumulator.reset();
     tokenAccumulator.recordUsage("sdl.symbol.search", 100, 500);
 
     const result = (await handleUsageStats({ scope: "session" })) as Record<string, unknown>;
+
+    assert.ok(typeof result.formattedSummary === "string", "should have formattedSummary");
+    assert.strictEqual(result.session, undefined);
+    assert.strictEqual(result.history, undefined);
+    assert.strictEqual(result.wire, undefined);
+  });
+
+  it("includes formattedSummary for session scope", async (t) => {
+    if (!usageAvailable) return t.skip("usage module not available");
+    tokenAccumulator.reset();
+    tokenAccumulator.recordUsage("sdl.symbol.search", 100, 500);
+
+    const result = (await handleUsageStats({ scope: "session", detail: "full" })) as Record<string, unknown>;
     assert.ok(result.session, "should have session data");
     assert.ok(typeof result.formattedSummary === "string", "should have formattedSummary");
     assert.ok(
@@ -201,7 +214,7 @@ describe("handleUsageStats session scope (no DB required)", () => {
     tokenAccumulator.reset();
     tokenAccumulator.recordUsage("sdl.symbol.search", 100, 500);
 
-    const result = (await handleUsageStats({ scope: "session" })) as Record<string, unknown>;
+    const result = (await handleUsageStats({ scope: "session", detail: "full" })) as Record<string, unknown>;
     const summary = result.formattedSummary as string;
 
     assert.match(summary, /Session:/);
@@ -227,6 +240,7 @@ describe("handleUsageStats session scope (no DB required)", () => {
       const result = (await handleUsageStats({
         scope: "all",
         repoId: "usage-scope-test",
+        detail: "full",
       })) as Record<string, unknown>;
       const summary = result.formattedSummary as string;
 
@@ -249,7 +263,7 @@ describe("handleUsageStats session scope (no DB required)", () => {
     tokenAccumulator.recordUsage("usageStats", 100, 100);
     tokenAccumulator.recordUsage("policyGet", 100, 100);
 
-    const result = (await handleUsageStats({ scope: "session" })) as Record<string, unknown>;
+    const result = (await handleUsageStats({ scope: "session", detail: "full" })) as Record<string, unknown>;
     const summary = result.formattedSummary as string;
 
     assert.match(summary, /symbol\.search/);
@@ -264,7 +278,7 @@ describe("handleUsageStats session scope (no DB required)", () => {
     tokenAccumulator.recordUsage("sdl.symbol.search", 100, 500);
     tokenAccumulator.recordUsage("sdl.slice.build", 200, 1000);
 
-    const result = (await handleUsageStats({ scope: "session" })) as Record<string, unknown>;
+    const result = (await handleUsageStats({ scope: "session", detail: "full" })) as Record<string, unknown>;
     const session = result.session as Record<string, unknown>;
     assert.strictEqual(session.totalSdlTokens, 300);
     assert.strictEqual(session.totalRawEquivalent, 1500);
@@ -277,7 +291,7 @@ describe("handleUsageStats session scope (no DB required)", () => {
     tokenAccumulator.reset();
     tokenAccumulator.recordUsage("sdl.symbol.search", 50, 200);
 
-    const result = (await handleUsageStats({ scope: "session" })) as Record<string, unknown>;
+    const result = (await handleUsageStats({ scope: "session", detail: "full" })) as Record<string, unknown>;
     const session = result.session as Record<string, unknown>;
     assert.ok(Array.isArray(session.toolBreakdown), "should have toolBreakdown array");
     const breakdown = session.toolBreakdown as Array<Record<string, unknown>>;
@@ -305,7 +319,7 @@ describe("handleUsageStats session scope (no DB required)", () => {
     if (!usageAvailable) return t.skip("usage module not available");
     tokenAccumulator.reset();
 
-    const result = (await handleUsageStats({ scope: "session" })) as Record<string, unknown>;
+    const result = (await handleUsageStats({ scope: "session", detail: "full" })) as Record<string, unknown>;
     const session = result.session as Record<string, unknown>;
     assert.strictEqual(session.totalSdlTokens, 0);
     assert.strictEqual(session.totalRawEquivalent, 0);

@@ -795,7 +795,7 @@ If denied, the response includes `whyDenied` reasons and a `nextBestAction` sugg
 | `sessionDelta`       | object   | Same-session delta metadata when `deltaMode` applies                                                                                   |
 | `delta`              | object   | Bounded unified-line diff or unchanged marker when a repeated window is compressed                                                     |
 
-When `responseMode` returns a handle, the response is a `responseArtifact` reference with `handle`, `metadata`, `savings`, and `action: "response.get"`. Call `response.get` to retrieve a bounded excerpt or the full stored response.
+When `responseMode` returns a handle, the response is a compact `responseArtifact` reference with `handle`, `kind`, `responseMode`, and `action: "response.get"`. Call `response.get` to retrieve a bounded excerpt or the full stored response.
 
 **Response (denied):**
 
@@ -1162,10 +1162,7 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 | :-------------- | :----- | :---------------------------------------------------------------- |
 | `outputLines`   | number | Total lines captured across stdout+stderr                         |
 | `outputBytes`   | number | Total bytes captured across stdout+stderr                         |
-| `stdoutPreview` | string | First few stdout lines/chars when compact enough to return inline |
-| `stderrSummary` | string | Short stderr excerpt for quick failure diagnosis                  |
-
-Minimal mode does not return full stdout/stderr dumps or `excerpts`. Use `sdl.runtime.queryOutput` with the `artifactHandle` to retrieve output on demand.
+Minimal mode does not return stdout/stderr previews, full dumps, or `excerpts`. Use `sdl.runtime.queryOutput` with the `artifactHandle` to retrieve output on demand.
 
 **`outputMode: "summary"` — adds:**
 
@@ -1252,7 +1249,7 @@ Retrieves large tool responses stored behind an opaque handle.
 | `maxTokens`   | number  | No       | Estimated token bound for excerpt retrieval                   |
 | `offsetBytes` | number  | No       | Byte offset for paged excerpt retrieval                       |
 
-**Response:** `content`, `metadata`, `range`, `truncated`, and `savings`. Full JSON payloads are returned as JSON; excerpts are returned as strings so partial JSON is never misrepresented as complete structured data.
+**Response:** `content`, `metadata`, `range`, `truncated`, and optional `pagination` for paged JSON-array results. Full JSON payloads are returned as JSON; excerpts are returned as strings so partial JSON is never misrepresented as complete structured data. Token-savings metadata is kept internal and is not returned.
 
 ---
 
@@ -1357,6 +1354,7 @@ Returns cumulative token usage statistics and savings metrics.
 | `persist` | boolean                                | No       | Whether to persist current session stats      |
 | `since`   | string                                 | No       | ISO timestamp to filter historical stats from |
 | `limit`   | number (1-100)                         | No       | Max historical entries to return              |
+| `detail`  | `"compact"` \| `"full"`                | No       | Response detail level                         |
 
 **Response:** Token usage counters, savings estimates, compression ratios, and per-tool breakdowns when available.
 
@@ -1384,7 +1382,7 @@ Retrieves task-shaped code context inside Code Mode.
 
 Executes a workflow of SDL-MCP operations in a single round-trip with budget tracking and cross-step result passing.
 
-**What it does:** Takes an array of steps, each calling an action from the API manual or an internal transform (`dataPick`, `dataMap`, `dataFilter`, `dataSort`, `dataTemplate`). Results flow between steps via `$N` references (e.g., `$0.results[0].symbolId` or `$0.symbols[0].symbolId`). Includes budget tracking, context-ladder validation, cross-step ETag caching, and optional execution tracing.
+**What it does:** Takes an array of steps, each calling an action from the API manual or an internal transform (`dataPick`, `dataMap`, `dataFilter`, `dataSort`, `dataTemplate`). Results flow between steps via `$N` references (e.g., `$0.results[0].symbolId` or `$0.symbols[0].symbolId`). Includes budget tracking, context-ladder validation, internal ETag caching, and optional execution tracing.
 
 **Parameters:**
 

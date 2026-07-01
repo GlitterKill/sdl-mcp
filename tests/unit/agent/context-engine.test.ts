@@ -474,7 +474,7 @@ describe("ContextEngine", () => {
     assert.ok(result.truncation?.fieldsAffected.includes("summary"));
   });
 
-  it("uses bundle-aware fallback trimming for global hot-path evidence", async () => {
+  it("preserves bundle-aware global hot-path evidence when the bundle fits", async () => {
     const evidence: Evidence[] = [
       {
         type: "hotPath",
@@ -511,11 +511,11 @@ describe("ContextEngine", () => {
 
     assert.deepEqual(
       result.finalEvidence.map((item) => item.type),
-      ["symbolCard"],
+      ["hotPath", "symbolCard"],
     );
-    assert.match(result.summary, /Evidence: 1 symbolCard/);
-    assert.match(result.answer ?? "", /Selected evidence: 1 symbolCard/);
-    assert.ok(result.truncation?.fieldsAffected.includes("finalEvidence"));
+    assert.match(result.summary, /Evidence: 1 hotPath, 1 symbolCard/);
+    assert.match(result.answer ?? "", /Selected evidence: 1 hotPath, 1 symbolCard/);
+    assert.equal(result.truncation, undefined);
   });
 
   it("enforces planner budget constraints for token and duration", async () => {

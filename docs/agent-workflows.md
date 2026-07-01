@@ -50,7 +50,7 @@ flowchart LR
 
 ## Complete Tool Reference
 
-SDL-MCP exposes flat, gateway, and Code Mode tool surfaces. Exact tool counts move with the generated inventory, so use `npm run docs:tools:check` for current schema coverage. Agents should prefer `responseMode: "auto"` for large responses, run repo-local commands through `runtimeExecute`, and finish SDL-backed work with `usageStats`. Final responses should include the returned `formattedSummary` verbatim in a fenced `text` block so the token-meter bars remain intact; if stats cannot be captured, say why.
+SDL-MCP exposes flat, gateway, and Code Mode tool surfaces. Exact tool counts move with the generated inventory, so use `npm run docs:tools:check` for current schema coverage. Agents should prefer `responseMode: "auto"` for large responses and run repo-local commands through `runtimeExecute`. Call `usageStats` only when the user asks for token savings, when debugging telemetry, or when persisting/reporting a usage snapshot; when explicitly needed, include the returned `formattedSummary` verbatim in a fenced `text` block.
 
 | Category                   | Tool                       | Purpose                                                                                                                                                              |
 | :------------------------- | :------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -134,7 +134,7 @@ Use this order unless task constraints force escalation:
    - Use `minConfidence` to drop low-trust edges (default `0.5`; adaptive thresholds can tighten to `0.8` and `0.95` as token usage approaches budget).
    - Use `minCallConfidence` to filter low-confidence call edges within slice cards.
    - Always provide `entrySymbols` when available.
-   - Provide `knownCardEtags` to avoid resending unchanged cards (`cardRefs` are returned instead).
+   - `sdl.workflow` seeds `knownCardEtags` automatically. Only pass them yourself when calling `sdl.slice.build` directly outside a workflow.
    - `cardDetail` levels: `"minimal"` | `"signature"` | `"deps"` | `"compact"` | `"full"`. Leave unset for mixed compact/full behavior. Use `"full"` only when you truly need full cards for all slice symbols. Use `adaptiveDetail: true` to let SDL-MCP choose detail levels per-card based on relevance.
    - **Auto-discovery mode**: pass `taskText` (and optionally `stackTrace`, `failingTestPath`, or `editedFiles`) instead of `entrySymbols` to let SDL-MCP find relevant symbols automatically.
 5. `sdl.slice.refresh` if you already have a `sliceHandle`; prefer refresh over rebuilding.
@@ -190,7 +190,7 @@ Use this order unless task constraints force escalation:
 - `sdl.runtime.execute`:
   - Use `outputMode: "minimal"` (default) for ~50-token responses with just status and artifact handle.
   - Use `outputMode: "summary"` for head+tail output excerpts (legacy behavior).
-  - Use `outputMode: "intent"` to return only `queryTerms`-matched excerpts without head/tail summary.
+  - Use `outputMode: "intent"` to return only `queryTerms`-matched excerpts without head/tail summary; set `contextLines: 0` when the agent needs exact matched lines only.
   - Set `timeoutMs` and `maxResponseLines` to bound output. Use `queryTerms` to extract relevant excerpts from long output.
 - `sdl.runtime.queryOutput`:
   - Use to search stored output artifacts on-demand after a `minimal`-mode execution.

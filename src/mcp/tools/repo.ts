@@ -518,7 +518,7 @@ export async function handleRepoStatus(
   args: unknown,
 ): Promise<RepoStatusResponse> {
   const request = args as RepoStatusRequest;
-  const { repoId, surfaceMemories, detail = "standard" } = request;
+  const { repoId, surfaceMemories, detail = "minimal", includeTelemetry = false } = request;
 
   const executeStatus = async () => {
     recordToolTrace({
@@ -533,9 +533,8 @@ export async function handleRepoStatus(
       throw new DatabaseError(`Repository ${repoId} not found`);
     }
 
-    // "minimal" skips health computation entirely (fastest path)
-    const includeHealth = detail !== "minimal";
-    const includeLiveIndex = detail === "full";
+    const includeExpensiveStatus = detail !== "minimal" || includeTelemetry;
+    const includeLiveIndex = detail === "full" || includeTelemetry;
 
     const unavailableHealth = {
       snapshot: {
@@ -555,7 +554,7 @@ export async function handleRepoStatus(
     const filesIndexed = await ladybugDb.getFileCount(conn, repoId);
     const symbolsIndexed = await ladybugDb.getSymbolCount(conn, repoId);
     const lastIndexedAt = await ladybugDb.getLastIndexedAt(conn, repoId);
-    const healthResult = includeHealth
+    const healthResult = includeExpensiveStatus
       ? await Promise.race([
           getCachedHealthSnapshot(repoId),
           new Promise<typeof unavailableHealth>((resolve) =>
@@ -573,8 +572,12 @@ export async function handleRepoStatus(
       : ([] as Awaited<ReturnType<typeof ladybugDb.getVersionsByRepo>>);
     const health = healthResult.snapshot;
     const healthIsStale = healthResult.isStale;
-    const watcherHealth = includeHealth ? getWatcherHealth(repoId) : null;
-    const prefetchStats = includeHealth ? getPrefetchStats(repoId) : null;
+    const watcherHealth = includeExpensiveStatus
+      ? getWatcherHealth(repoId)
+      : null;
+    const prefetchStats = includeExpensiveStatus
+      ? getPrefetchStats(repoId)
+      : undefined;
     const liveIndexStatus = includeLiveIndex
       ? await getDefaultLiveIndexCoordinator()
           .getLiveStatus(repoId)
@@ -682,33 +685,31 @@ export async function handleRepoStatus(
       healthScore: health.score,
       healthComponents: health.components,
       healthAvailable: health.available,
-      ...(!includeHealth
+      ...(!includeExpensiveStatus
         ? {
             healthNote:
-              "Health omitted because detail:\"minimal\" skips health computation. Use detail:\"standard\" to inspect health.",
+              'Health omitted because detail:"minimal" skips health computation. Use detail:"standard" to inspect health.',
           }
         : !health.available
-        ? {
-            healthNote:
-              "Health computation timed out or is pending. Run sdl.index.refresh (incremental) to populate, or retry — a cached result may become available shortly.",
-          }
-        : healthIsStale
           ? {
               healthNote:
-                "Health data may be stale (last known result). Fresh computation failed — retry or run sdl.index.refresh.",
+                "Health computation timed out or is pending. Run sdl.index.refresh (incremental) to populate, or retry; a cached result may become available shortly.",
+            }
+          : healthIsStale
+          ? {
+              healthNote:
+                "Health data may be stale (last known result). Fresh computation failed; retry or run sdl.index.refresh.",
             }
           : {}),
-      watcherHealth: includeHealth ? watcherHealth : null,
-      watcherNote: !includeHealth
-        ? "Watcher health omitted because detail:\"minimal\" skips watcher checks. Use detail:\"standard\" to inspect watcher health."
-        : watcherHealth === null
-          ? "Watcher not active. Run 'sdl-mcp serve' or call sdl.index.refresh after edits."
-          : undefined,
-      prefetchStats: includeHealth ? (prefetchStats ?? undefined) : undefined,
+      watcherHealth,
+      watcherNote: includeExpensiveStatus && watcherHealth === null
+        ? "Watcher not active. Run 'sdl-mcp serve' or call sdl.index.refresh after edits."
+        : undefined,
+      prefetchStats: prefetchStats ?? undefined,
+      serverInfo: getServerInfo(),
       liveIndexStatus,
       memories,
       derivedState: derivedState ?? undefined,
-      serverInfo: getServerInfo(),
     };
   };
 

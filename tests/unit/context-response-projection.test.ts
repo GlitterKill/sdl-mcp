@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  BROAD_VISIBLE_FIELDS,
   isBroadContextResult,
   projectBroadContextResult,
   projectContextResultForUsageAccounting,
@@ -23,6 +24,12 @@ describe("context-response-projection", () => {
     retrievalEvidence: { symptomType: "taskText" },
     etag: "etag-123",
   };
+
+  it("keeps structured metadata through broad pre-compaction", () => {
+    assert.equal(BROAD_VISIBLE_FIELDS.has("etag"), true);
+    assert.equal(BROAD_VISIBLE_FIELDS.has("diagnostics"), true);
+    assert.equal(BROAD_VISIBLE_FIELDS.has("retrievalEvidence"), true);
+  });
 
   describe("isBroadContextResult", () => {
     it("returns true for sdl.context broad result", () => {
@@ -62,21 +69,20 @@ describe("context-response-projection", () => {
         broadResult,
       ) as Record<string, unknown>;
 
-      assert.equal(projected.taskId, "task-123");
+      assert.equal(projected.taskId, undefined);
       assert.equal(projected.taskType, "explain");
       assert.equal(projected.success, true);
       assert.equal(projected.summary, "Task completed");
       assert.ok(projected.answer);
       assert.ok(projected.finalEvidence);
       assert.equal(projected.nextBestAction, "none");
-      assert.equal(projected.etag, "etag-123");
+      assert.equal(projected.etag, undefined);
 
       // Hidden fields
       assert.equal(projected.actionsTaken, undefined);
       assert.equal(projected.path, undefined);
       assert.equal(projected.metrics, undefined);
-      // retrievalEvidence is model-visible in compact broad responses.
-      assert.deepEqual(projected.retrievalEvidence, broadResult.retrievalEvidence);
+      assert.equal(projected.retrievalEvidence, undefined);
     });
 
     it("preserves error field when present", () => {
@@ -104,13 +110,13 @@ describe("context-response-projection", () => {
       assert.deepEqual(projected.truncation, truncated.truncation);
     });
 
-    it("preserves _displayFooter", () => {
+    it("hides _displayFooter token meter", () => {
       const withFooter = { ...broadResult, _displayFooter: "meter text" };
       const projected = projectBroadContextResult(
         "sdl.context",
         withFooter,
       ) as Record<string, unknown>;
-      assert.equal(projected._displayFooter, "meter text");
+      assert.equal(projected._displayFooter, undefined);
     });
 
     it("returns non-context tool results unchanged", () => {
@@ -170,7 +176,7 @@ describe("context-response-projection", () => {
       );
     });
 
-    it("projects usage accounting payloads while preserving raw baseline hints", () => {
+    it("uses projected context payloads for usage accounting while preserving baseline hints", () => {
       const withRawContext = {
         ...broadResult,
         _rawContext: { rawTokens: 1000 },
@@ -180,19 +186,143 @@ describe("context-response-projection", () => {
         withRawContext,
       );
 
+      assert.notStrictEqual(projected, withRawContext);
       assert.equal(projected.actionsTaken, undefined);
       assert.equal(projected.path, undefined);
       assert.equal(projected.metrics, undefined);
       assert.equal(projected.taskId, undefined);
       assert.equal(projected.summary, undefined);
       assert.equal(projected.retrievalEvidence, undefined);
-      assert.equal(projected.etag, "etag-123");
+      assert.equal(projected.etag, undefined);
       assert.equal(projected.answer, broadResult.answer);
       assert.deepEqual(projected._rawContext, { rawTokens: 1000 });
     });
   });
 
   describe("projectToolResultForModelContent", () => {
+    it("compacts successful workflow telemetry by default", () => {
+      const projected = projectToolResultForModelContent(
+        "sdl.workflow",
+        {
+          results: [
+            {
+              stepIndex: 0,
+              fn: "repoStatus",
+              result: {
+                repoId: "sdl-mcp",
+                truncated: false,
+                warnings: [],
+              },
+              tokens: 100,
+              durationMs: 12,
+              status: "ok",
+            },
+          ],
+          totalTokens: 100,
+          durationMs: 12,
+          etagCache: { "repo.status": "etag-1" },
+          truncated: false,
+        },
+        {},
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(projected, {
+        results: [
+          {
+            fn: "repoStatus",
+            result: { repoId: "sdl-mcp" },
+          },
+        ],
+      });
+    });
+
+    it("drops no-op runtime truncation objects in compact workflow output", () => {
+      const projected = projectToolResultForModelContent(
+        "sdl.workflow",
+        {
+          results: [
+            {
+              fn: "runtimeExecute",
+              status: "ok",
+              result: {
+                status: "success",
+                exitCode: 0,
+                signal: null,
+                artifactHandle: "runtime-1",
+                truncation: {
+                  stdoutTruncated: false,
+                  stderrTruncated: false,
+                  totalStdoutBytes: 2,
+                  totalStderrBytes: 0,
+                },
+              },
+            },
+          ],
+        },
+        {},
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(projected, {
+        results: [
+          {
+            fn: "runtimeExecute",
+            result: {
+              status: "success",
+              exitCode: 0,
+              artifactHandle: "runtime-1",
+            },
+          },
+        ],
+      });
+    });
+
+    it("keeps actionable workflow failure context", () => {
+      const projected = projectToolResultForModelContent(
+        "sdl.workflow",
+        {
+          results: [
+            {
+              stepIndex: 0,
+              fn: "repoStatus",
+              result: null,
+              tokens: 0,
+              durationMs: 1,
+              status: "error",
+              error: "boom",
+              fallbackTools: ["repo.overview"],
+              failureTrace: {
+                stepIndex: 0,
+                fn: "repoStatus",
+                status: "error",
+                message: "boom",
+                resolvedArgKeys: ["repoId"],
+              },
+            },
+          ],
+          durationMs: 1,
+          truncated: false,
+        },
+        {},
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(projected, {
+        results: [
+          {
+            fn: "repoStatus",
+            status: "error",
+            error: "boom",
+            fallbackTools: ["repo.overview"],
+            failureTrace: {
+              stepIndex: 0,
+              fn: "repoStatus",
+              status: "error",
+              message: "boom",
+            },
+          },
+        ],
+      });
+    });
+
     it("keeps requested workflow trace data visible in MCP content", () => {
       const projected = projectToolResultForModelContent(
         "sdl.workflow",
@@ -207,6 +337,603 @@ describe("context-response-projection", () => {
       ) as Record<string, unknown>;
 
       assert.ok(projected.trace);
+    });
+
+    it("restores workflow wrapper and child result telemetry at full detail", () => {
+      const projected = projectToolResultForModelContent(
+        "sdl.workflow",
+        {
+          results: [
+            {
+              stepIndex: 0,
+              fn: "repoStatus",
+              result: {
+                repoId: "sdl-mcp",
+                rootPath: ".",
+                filesIndexed: 1,
+                symbolsIndexed: 2,
+                healthAvailable: true,
+                healthComponents: { freshness: 1 },
+                watcherHealth: {
+                  enabled: true,
+                  running: true,
+                  filesWatched: 10,
+                },
+                serverInfo: { node: "v24.0.0" },
+                derivedState: { stale: false, clustersDirty: false },
+                diagnostics: { timings: { dbMs: 1 } },
+                etag: "repo-etag",
+                etagCache: { "repo.status": "etag-1" },
+                sliceEtag: "slice-etag",
+                nested: { etag: "nested-etag" },
+                truncated: false,
+                warnings: [],
+              },
+              tokens: 100,
+              durationMs: 12,
+              status: "ok",
+            },
+          ],
+          totalTokens: 100,
+          durationMs: 12,
+          etagCache: { "repo.status": "etag-1" },
+          truncated: false,
+        },
+        { detail: "full" },
+      ) as Record<string, unknown>;
+
+      const [step] = projected.results as Array<Record<string, unknown>>;
+      assert.equal(step.stepIndex, 0);
+      assert.equal(step.tokens, 100);
+      assert.equal(step.durationMs, 12);
+      assert.equal(step.status, "ok");
+      assert.equal(projected.totalTokens, 100);
+      assert.equal(projected.durationMs, 12);
+      assert.equal(projected.etagCache, undefined);
+      assert.equal(projected.truncated, undefined);
+      assert.deepEqual(step.result, {
+        repoId: "sdl-mcp",
+        rootPath: ".",
+        filesIndexed: 1,
+        symbolsIndexed: 2,
+        healthAvailable: true,
+        healthComponents: { freshness: 1 },
+        watcherHealth: {
+          enabled: true,
+          running: true,
+          filesWatched: 10,
+        },
+        serverInfo: { node: "v24.0.0" },
+        derivedState: { stale: false, clustersDirty: false },
+        diagnostics: { timings: { dbMs: 1 } },
+        nested: {},
+        truncated: false,
+        warnings: [],
+      });
+    });
+
+    it("honors child workflow detail and telemetry args", () => {
+      const projected = projectToolResultForModelContent(
+        "sdl.workflow",
+        {
+          results: [
+            {
+              fn: "repoStatus",
+              status: "ok",
+              result: {
+                repoId: "sdl-mcp",
+                rootPath: ".",
+                filesIndexed: 1,
+                symbolsIndexed: 2,
+                healthAvailable: true,
+                healthComponents: { freshness: 1 },
+                watcherHealth: { enabled: true, running: true },
+                prefetchStats: { hitRate: 0.75 },
+                serverInfo: { node: "v24.0.0" },
+                derivedState: { stale: false, clustersDirty: false },
+              },
+            },
+          ],
+        },
+        {
+          steps: [
+            {
+              fn: "repoStatus",
+              args: { detail: "standard", includeTelemetry: true },
+            },
+          ],
+        },
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(projected, {
+        results: [
+          {
+            fn: "repoStatus",
+            result: {
+              repoId: "sdl-mcp",
+              rootPath: ".",
+              filesIndexed: 1,
+              symbolsIndexed: 2,
+              healthAvailable: true,
+              healthComponents: { freshness: 1 },
+              watcherHealth: { enabled: true, running: true },
+              prefetchStats: { hitRate: 0.75 },
+              serverInfo: { node: "v24.0.0" },
+              derivedState: { stale: false, clustersDirty: false },
+            },
+          },
+        ],
+      });
+    });
+
+    it("returns only formattedSummary for compact usage stats", () => {
+      const projected = projectToolResultForModelContent(
+        "usage.stats",
+        {
+          formattedSummary: "summary",
+          session: { callCount: 1 },
+          history: { snapshots: [], aggregate: {} },
+          wire: { packed: { encodings: 1 } },
+        },
+        {},
+      );
+
+      assert.deepEqual(projected, { formattedSummary: "summary" });
+    });
+
+    it("keeps action search summary-only payloads in compact mode", () => {
+      const projected = projectToolResultForModelContent(
+        "action.search",
+        {
+          summary: {
+            total: 2,
+            byKind: { gateway: 2 },
+            byNamespace: { repo: 1, symbol: 1 },
+            matchedActions: ["repo.status", "symbol.search"],
+          },
+          tokenEstimate: 123,
+        },
+        { summaryOnly: true },
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(projected, {
+        summary: {
+          total: 2,
+          byKind: { gateway: 2 },
+          byNamespace: { repo: 1, symbol: 1 },
+          matchedActions: ["repo.status", "symbol.search"],
+        },
+      });
+    });
+
+    it("keeps actionable schema enum values in compact action search", () => {
+      const projected = projectToolResultForModelContent(
+        "action.search",
+        {
+          actions: [
+            {
+              action: "runtime.execute",
+              fn: "runtimeExecute",
+              schemaSummary: {
+                fields: [
+                  {
+                    name: "runtime",
+                    type: "enum",
+                    required: true,
+                    description: "Runtime to execute",
+                    default: "shell",
+                    enumValues: ["shell", "node"],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        { includeSchemas: true },
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(projected, {
+        actions: [
+          {
+            action: "runtime.execute",
+            fn: "runtimeExecute",
+            schemaSummary: {
+              fields: [
+                {
+                  name: "runtime",
+                  type: "enum",
+                  required: true,
+                  default: "shell",
+                  enumValues: ["shell", "node"],
+                },
+              ],
+            },
+          },
+        ],
+      });
+    });
+
+    it("keeps compact action search guidance for disabled actions", () => {
+      const projected = projectToolResultForModelContent(
+        "action.search",
+        {
+          actions: [
+            {
+              action: "repo.status",
+              fn: "repoStatus",
+              requiredParams: ["repoId"],
+              disabled: true,
+              disabledReason: "Disabled in config",
+              tags: ["repo"],
+              kind: "gateway",
+              schemaSummary: {
+                fields: [
+                  {
+                    name: "detail",
+                    type: "enum",
+                    required: false,
+                    description: "verbosity",
+                    default: "minimal",
+                    enumValues: ["minimal", "standard", "full"],
+                  },
+                ],
+              },
+            },
+          ],
+          disabledHint: {
+            count: 1,
+            message: "1 action(s) are disabled.",
+            actions: [{ action: "repo.status", reason: "Disabled in config" }],
+          },
+          schemaHint: "Tip: Add includeSchemas: true.",
+          tokenEstimate: 123,
+        },
+        {},
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(projected, {
+        actions: [
+          {
+            action: "repo.status",
+            fn: "repoStatus",
+            requiredParams: ["repoId"],
+            disabled: true,
+            disabledReason: "Disabled in config",
+            schemaSummary: {
+              fields: [
+                {
+                  default: "minimal",
+                  enumValues: ["minimal", "standard", "full"],
+                  name: "detail",
+                  type: "enum",
+                  required: false,
+                },
+              ],
+            },
+          },
+        ],
+        disabledHint: {
+          count: 1,
+          message: "1 action(s) are disabled.",
+          actions: [{ action: "repo.status", reason: "Disabled in config" }],
+        },
+        schemaHint: "Tip: Add includeSchemas: true.",
+      });
+    });
+
+    it("restores workflow telemetry when trace or diagnostics are requested", () => {
+      const raw = {
+        results: [
+          {
+            stepIndex: 0,
+            fn: "repoStatus",
+            result: {
+              repoId: "sdl-mcp",
+              rootPath: ".",
+              filesIndexed: 1,
+              symbolsIndexed: 2,
+              watcherHealth: {
+                enabled: true,
+                running: true,
+                filesWatched: 10,
+              },
+              serverInfo: { node: "v24.0.0" },
+              derivedState: { stale: false, clustersDirty: false },
+            },
+            tokens: 100,
+            durationMs: 12,
+            status: "ok",
+          },
+        ],
+        totalTokens: 100,
+        durationMs: 12,
+        etagCache: { "repo.status": "etag-1" },
+        truncated: false,
+      };
+
+      for (const args of [
+        { trace: { level: "summary" } },
+        { includeDiagnostics: true },
+        { includeTelemetry: true },
+      ]) {
+        const projected = projectToolResultForModelContent(
+          "sdl.workflow",
+          raw,
+          args,
+        ) as Record<string, unknown>;
+        const [step] = projected.results as Array<Record<string, unknown>>;
+
+        assert.equal(step.stepIndex, 0);
+        assert.equal(step.tokens, 100);
+        assert.equal(step.durationMs, 12);
+        assert.equal(step.status, "ok");
+        assert.equal(projected.totalTokens, 100);
+        assert.equal(projected.durationMs, 12);
+        assert.equal(projected.etagCache, undefined);
+        assert.deepEqual(step.result, {
+          repoId: "sdl-mcp",
+          rootPath: ".",
+          filesIndexed: 1,
+          symbolsIndexed: 2,
+          derivedState: { stale: false },
+        });
+      }
+    });
+
+    it("removes requested symbol and slice debug fields in compact mode", () => {
+      const symbolSearch = projectToolResultForModelContent(
+        "symbol.search",
+        {
+          results: [
+            {
+              symbolId: "sym-1",
+              name: "target",
+              repoId: "sdl-mcp",
+              shortId: "abc123",
+              relevance: 0.987654,
+              retrievalEvidence: [{ reason: "debug" }],
+              pprBoosts: { inbound: 1 },
+            },
+          ],
+          truncation: false,
+          _packedStats: { tokens: 10 },
+        },
+        {},
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(symbolSearch, {
+        results: [{ symbolId: "sym-1", name: "target" }],
+      });
+
+      const slice = projectToolResultForModelContent(
+        "slice.build",
+        {
+          slice: {
+            symbols: ["sym-1"],
+            budget: { maxCards: 12 },
+          },
+          lease: "lease-1",
+          sliceEtag: "etag-1",
+          retrievalEvidence: [{ reason: "debug" }],
+          symptomType: "debug",
+          _packedStats: { tokens: 10 },
+          symbolIndex: { "sym-1": 0 },
+          confidenceDistribution: { high: 1 },
+          detailLevelMetadata: { level: "debug" },
+          staleSymbols: [],
+        },
+        {},
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(slice, {
+        slice: { symbols: ["sym-1"] },
+      });
+    });
+
+    it("projects noisy workflow repoStatus child results with repo status rules", () => {
+      const rawRepoStatus = {
+        repoId: "sdl-mcp",
+        rootPath: ".",
+        filesIndexed: 1,
+        symbolsIndexed: 2,
+        etag: "repo-etag",
+        healthAvailable: true,
+        healthComponents: { freshness: 1 },
+        watcherHealth: {
+          enabled: true,
+          running: true,
+          filesWatched: 10,
+          eventsReceived: 20,
+          watchmanVersion: "2026.1",
+        },
+        prefetchStats: { hitRate: 1 },
+        serverInfo: { node: "v24.0.0" },
+        derivedState: {
+          stale: false,
+          clustersDirty: false,
+        },
+      };
+      const projected = projectToolResultForModelContent(
+        "sdl.workflow",
+        {
+          results: [
+            {
+              fn: "repoStatus",
+              status: "ok",
+              result: rawRepoStatus,
+            },
+          ],
+        },
+        {},
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(projected, {
+        results: [
+          {
+            fn: "repoStatus",
+            result: {
+              repoId: "sdl-mcp",
+              rootPath: ".",
+              filesIndexed: 1,
+              symbolsIndexed: 2,
+              healthAvailable: true,
+              derivedState: { stale: false },
+            },
+          },
+        ],
+      });
+      assert.deepEqual(rawRepoStatus.watcherHealth, {
+        enabled: true,
+        running: true,
+        filesWatched: 10,
+        eventsReceived: 20,
+        watchmanVersion: "2026.1",
+      });
+      assert.deepEqual(rawRepoStatus.prefetchStats, { hitRate: 1 });
+      assert.deepEqual(rawRepoStatus.serverInfo, { node: "v24.0.0" });
+    });
+
+    it("keeps repo status telemetry at standard detail", () => {
+      const projected = projectToolResultForModelContent(
+        "repo.status",
+        {
+          repoId: "sdl-mcp",
+          healthAvailable: true,
+          healthComponents: { freshness: 1 },
+          prefetchStats: { wasteRate: 0 },
+        },
+        { detail: "standard" },
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(projected, {
+        repoId: "sdl-mcp",
+        healthAvailable: true,
+        healthComponents: { freshness: 1 },
+        prefetchStats: { wasteRate: 0 },
+      });
+    });
+
+    it("keeps delta.get delta payload while hiding amplifiers by default", () => {
+      const projected = projectToolResultForModelContent(
+        "delta.get",
+        {
+          delta: {
+            repoId: "sdl-mcp",
+            fromVersion: "v1",
+            toVersion: "v2",
+            changedSymbols: [{ symbolId: "sym-1" }],
+            blastRadius: [],
+          },
+          amplifiers: [{ symbolId: "sym-2" }],
+          blastRadiusTruncated: false,
+        },
+        {},
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(projected, {
+        delta: {
+          repoId: "sdl-mcp",
+          fromVersion: "v1",
+          toVersion: "v2",
+          changedSymbols: [{ symbolId: "sym-1" }],
+          blastRadius: [],
+        },
+      });
+    });
+
+    it("keeps edit precondition fields for edit tools", () => {
+      const projected = projectToolResultForModelContent(
+        "search.edit",
+        {
+          planHandle: "plan-1",
+          preconditionSnapshot: {
+            sha256: "abc",
+            mtimeMs: 123,
+            astFingerprint: "ast-1",
+          },
+          expiresAt: "2026-01-01T00:00:00.000Z",
+        },
+        {},
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(projected, {
+        planHandle: "plan-1",
+        preconditionSnapshot: {
+          sha256: "abc",
+          mtimeMs: 123,
+          astFingerprint: "ast-1",
+        },
+      });
+    });
+
+    it("keeps file edit preconditions in real workflow child results", () => {
+      const projected = projectToolResultForModelContent(
+        "sdl.workflow",
+        {
+          results: [
+            {
+              fn: "file",
+              status: "ok",
+              result: {
+                planHandle: "plan-1",
+                mode: "preview",
+                sha256: "abc",
+                mtimeMs: 123,
+                astFingerprint: "ast-1",
+                expiresAt: "2026-01-01T00:00:00.000Z",
+                _packedStats: { tokens: 1 },
+              },
+            },
+          ],
+        },
+        {
+          steps: [
+            {
+              fn: "file",
+              args: { op: "searchEditPreview" },
+            },
+          ],
+        },
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(projected, {
+        results: [
+          {
+            fn: "file",
+            result: {
+              planHandle: "plan-1",
+              mode: "preview",
+              sha256: "abc",
+              mtimeMs: 123,
+              astFingerprint: "ast-1",
+            },
+          },
+        ],
+      });
+    });
+
+    it("keeps symbol card fingerprints for edit workflows", () => {
+      const projected = projectToolResultForModelContent(
+        "symbol.getCard",
+        {
+          symbolId: "sym-1",
+          name: "target",
+          etag: "etag-1",
+          astFingerprint: "ast-1",
+          sha256: "abc",
+          mtimeMs: 123,
+          detailLevel: "full",
+        },
+        {},
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(projected, {
+        symbolId: "sym-1",
+        name: "target",
+        astFingerprint: "ast-1",
+        sha256: "abc",
+        mtimeMs: 123,
+      });
     });
 
     it("continues to hide trace-like internal fields from other tools", () => {

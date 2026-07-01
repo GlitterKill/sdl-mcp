@@ -8,11 +8,16 @@ import {
 } from "../runtime/response-artifacts.js";
 import {
   attachRawContext,
+  attachTokenUsage,
+  computeSavings,
   stripRawContext,
   type RawContextHint,
 } from "./token-usage.js";
 
 export type { ResponseMode, ResponseArtifactReference };
+
+// sdl.context responses become hard to scan before they hit the generic cap.
+const SDL_CONTEXT_AUTO_RESPONSE_THRESHOLD_TOKENS = 1500;
 
 export interface MaybeCompressToolResponseOptions<T> {
   repoId: string;
@@ -22,6 +27,10 @@ export interface MaybeCompressToolResponseOptions<T> {
   rawContext?: RawContextHint;
   threshold?: number;
   sessionId?: string;
+}
+
+function estimateTokensFromPayload(payload: unknown): number {
+  return Math.ceil(Buffer.byteLength(JSON.stringify(payload), "utf-8") / 4);
 }
 
 export function recordTokenSavings(event: {
@@ -35,6 +44,9 @@ export function recordTokenSavings(event: {
     | "packedWire";
   tool?: string;
   estimatedTokensAvoided?: number;
+  originalTokens?: number;
+  returnedTokens?: number;
+  savedTokens?: number;
   storedBytes?: number;
   opportunity?: boolean;
   hit?: boolean;
@@ -52,7 +64,6 @@ export async function maybeCompressToolResponse<T>(
 ): Promise<T | ResponseArtifactReference> {
   const appConfig = loadConfig();
   const runtimeConfig = RuntimeConfigSchema.parse(appConfig.runtime ?? {});
-  const rawContext = opts.rawContext ?? extractRawContext(opts.payload);
   const payloadForStorage = stripRawContext(opts.payload);
 
   const result = await maybeStoreLargeResponse({
@@ -60,7 +71,11 @@ export async function maybeCompressToolResponse<T>(
     toolName: opts.toolName,
     payload: payloadForStorage,
     responseMode: opts.responseMode,
-    threshold: opts.threshold,
+    threshold:
+      opts.threshold ??
+      (opts.responseMode === "auto" && opts.toolName === "sdl.context"
+        ? SDL_CONTEXT_AUTO_RESPONSE_THRESHOLD_TOKENS
+        : undefined),
     artifactBaseDir: runtimeConfig.artifactBaseDir,
     artifactTtlHours: runtimeConfig.artifactTtlHours,
     maxArtifactBytes: runtimeConfig.maxArtifactBytes,
@@ -86,26 +101,38 @@ export async function maybeCompressToolResponse<T>(
     }
     return opts.payload;
   }
+  const returnedTokens = estimateTokensFromPayload(result.payload);
+  const savedTokens = Math.max(
+    0,
+    result.metadata.estimatedOriginalTokens - returnedTokens,
+  );
 
   recordTokenSavings({
     repoId: opts.repoId,
     source: "responseArtifact",
     tool: opts.toolName,
-    estimatedTokensAvoided: result.payload.savings.savedTokens,
+    estimatedTokensAvoided: savedTokens,
+    originalTokens: result.metadata.estimatedOriginalTokens,
+    returnedTokens,
+    savedTokens,
     storedBytes: result.metadata.storedBytes,
     opportunity: true,
     hit: true,
     realized: true,
   });
 
-  return rawContext
-    ? attachRawContext(result.payload, rawContext)
-    : result.payload;
-}
+  const responsePayload =
+    opts.payload &&
+    typeof opts.payload === "object" &&
+    "_rawContext" in opts.payload
+      ? attachRawContext(
+          result.payload,
+          (opts.payload as { _rawContext: RawContextHint })._rawContext,
+        )
+      : result.payload;
 
-function extractRawContext(payload: unknown): RawContextHint | undefined {
-  if (!payload || typeof payload !== "object") return undefined;
-  const rawContext = (payload as Record<string, unknown>)._rawContext;
-  if (!rawContext || typeof rawContext !== "object") return undefined;
-  return rawContext as RawContextHint;
+  return attachTokenUsage(
+    responsePayload,
+    computeSavings(returnedTokens, result.metadata.estimatedOriginalTokens),
+  );
 }

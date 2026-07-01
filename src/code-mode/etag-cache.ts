@@ -3,6 +3,70 @@ const MAX_KNOWN_CARD_ETAGS = 1000;
 
 import { getObservabilityTap } from "../observability/event-tap.js";
 
+interface WorkflowEtagCacheScope {
+  repoId: string;
+  sessionId?: string;
+  clientKey?: string;
+}
+
+interface WorkflowEtagCacheBucket {
+  cache: WorkflowEtagCache;
+  lastAccessMs: number;
+}
+
+const WORKFLOW_ETAG_CACHE_TTL_MS = 10 * 60 * 1000;
+const MAX_WORKFLOW_ETAG_CACHE_SCOPES = 64;
+const workflowEtagCaches = new Map<string, WorkflowEtagCacheBucket>();
+
+// Keep workflow ETags in process-local memory; persist only if cross-process hits become important.
+export function getWorkflowEtagCache(
+  scope: WorkflowEtagCacheScope,
+  nowMs = Date.now(),
+): WorkflowEtagCache {
+  pruneExpiredWorkflowEtagCaches(nowMs);
+
+  const key = workflowEtagCacheKey(scope);
+  let bucket = workflowEtagCaches.get(key);
+  if (!bucket) {
+    bucket = { cache: new WorkflowEtagCache(), lastAccessMs: nowMs };
+    workflowEtagCaches.set(key, bucket);
+    evictOldestWorkflowEtagCacheScope();
+  }
+  bucket.lastAccessMs = nowMs;
+  return bucket.cache;
+}
+
+function workflowEtagCacheKey(scope: WorkflowEtagCacheScope): string {
+  const owner = [scope.sessionId, scope.clientKey].filter(Boolean).join("\0") || "stdio";
+  return scope.repoId + "\0" + owner;
+}
+
+function pruneExpiredWorkflowEtagCaches(nowMs: number): void {
+  for (const [key, bucket] of workflowEtagCaches) {
+    if (nowMs - bucket.lastAccessMs > WORKFLOW_ETAG_CACHE_TTL_MS) {
+      workflowEtagCaches.delete(key);
+    }
+  }
+}
+
+function evictOldestWorkflowEtagCacheScope(): void {
+  if (workflowEtagCaches.size <= MAX_WORKFLOW_ETAG_CACHE_SCOPES) {
+    return;
+  }
+
+  let oldestKey: string | undefined;
+  let oldestAccess = Number.POSITIVE_INFINITY;
+  for (const [key, bucket] of workflowEtagCaches) {
+    if (bucket.lastAccessMs < oldestAccess) {
+      oldestAccess = bucket.lastAccessMs;
+      oldestKey = key;
+    }
+  }
+  if (oldestKey !== undefined) {
+    workflowEtagCaches.delete(oldestKey);
+  }
+}
+
 export class WorkflowEtagCache {
   private cache: Map<string, string> = new Map();
 
@@ -148,12 +212,12 @@ export class WorkflowEtagCache {
     }
   }
 
-  /** Get the current cache state for returning in WorkflowResponse. */
+  /** Get a copy of the current cache state for diagnostics and legacy seeding. */
   getCache(): Record<string, string> {
     return Object.fromEntries(this.cache);
   }
 
-  /** Pre-seed from a prior workflow etagCache. */
+  /** Pre-seed from a legacy workflow etagCache input. */
   seed(cache: Record<string, string>): void {
     for (const [key, value] of Object.entries(cache)) {
       this.cache.set(key, value);

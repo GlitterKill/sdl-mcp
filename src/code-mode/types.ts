@@ -54,9 +54,10 @@ export const WorkflowRequestSchema = z.object({
   dryRun: z.boolean().optional(),
   /** Include phase timing diagnostics for performance investigation. */
   includeDiagnostics: z.boolean().optional(),
-
-  /** Prior workflow etagCache to seed - enables cross-workflow cache hits */
-  etagCache: z.record(z.string(), z.string()).optional(),
+  /** Include successful step timing/token telemetry in agent-visible responses. */
+  includeTelemetry: z.boolean().optional().default(false),
+  /** Response detail for agent-visible workflow projection. */
+  detail: z.enum(["compact", "standard", "full"]).optional().default("compact"),
 });
 
 // --- TypeScript Types ---
@@ -166,8 +167,6 @@ export interface WorkflowResponse {
     stepCount: number;
     budgetLimits: object;
   };
-  /** ETag cache state at end of workflow - pass back in next workflow for savings */
-  etagCache?: Record<string, string>;
   /** Execution trace (only present when trace options are provided) */
   trace?: WorkflowTrace;
   /** Count of intermediate step results suppressed due to onlyFinalResult */

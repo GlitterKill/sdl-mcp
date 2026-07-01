@@ -16,7 +16,7 @@ SDL-MCP is the normal repository interface. Native filesystem and shell tools ar
 3. Never use `file.read` for indexed source. It is only for non-indexed files such as docs, configs, templates, JSON, and YAML.
 4. Use `options.contextMode: "precise"` for named symbols, exact paths, narrow bugs, focused reviews, and implementation follow-up.
 5. Use `options.contextMode: "broad"` for subsystem mapping, behavior tracing, unfamiliar areas, or broad investigation.
-6. Keep `responseMode: "auto"` for potentially large responses. If a response handle is returned, use `response.get` only for the needed excerpt.
+6. Keep `responseMode: "auto"` for potentially large responses. If a response handle is returned, use `response.get` only for the needed excerpt. For JSON artifacts, prefer `jsonPath` with dot or bracket array paths, add `offset`/`limit` for large arrays, and use `raw: true` only when byte-slicing JSON text is intentional.
 7. Use focused `sdl.manual` only when composing a non-obvious request. Use `sdl.action.search` when the correct SDL action is unclear.
 
 Do not run `index.refresh` by habit. Refresh only when `repo.status` shows stale or missing indexed state and the task depends on current code.
@@ -38,7 +38,7 @@ Escalate through `sdl.workflow` in this order:
 
 Use `codeNeedWindow` only as a last resort. Include a concrete `reason`, bounded `expectedLines`, and precise `identifiersToFind`. If SDL-MCP returns `nextBestAction`, `fallbackTools`, `fallbackRationale`, or denial guidance, follow that guidance instead of retrying broader native reads, `file.read` on indexed source, or larger raw windows.
 
-When workflow steps need fields from earlier `$N` references, force JSON-compatible output on the earlier step. Keep limits tight and pass ETags back when available. Do not include retrieval evidence unless you are debugging retrieval quality.
+When workflow steps need fields from earlier `$N` references, force JSON-compatible output on the earlier step. Keep limits tight; `sdl.workflow` manages ETags automatically. Do not include retrieval evidence unless you are debugging retrieval quality.
 
 ### Precise Context
 
@@ -301,7 +301,7 @@ Use this after `sdl.context` or `slice.build` identifies the affected files or s
 
 Run repo-local commands through `runtimeExecute` inside `sdl.workflow`.
 
-Default to `outputMode: "minimal"`, `persistOutput: true`, and an explicit `timeoutMs`. Use `stdin` for multiline scripts/input instead of PowerShell here-strings, quote-heavy `node -e`, or base64 decode/eval workarounds. Query stored logs only when needed with `runtimeQueryOutput` and focused `queryTerms`. Use `outputMode: "intent"` when the command intent is already tied to known terms such as `FAIL`, `Error`, or a test name.
+Default to `outputMode: "minimal"`, `persistOutput: true`, and an explicit `timeoutMs`. Use `stdin` for multiline scripts/input instead of PowerShell here-strings, quote-heavy `node -e`, or base64 decode/eval workarounds. Query stored logs only when needed with `runtimeQueryOutput` and focused `queryTerms`. Use `outputMode: "intent"` when the command intent is already tied to known terms such as `FAIL`, `Error`, or a test name; set `contextLines: 0` when exact matched lines are cleaner than surrounding context.
 
 Do not use runtime execution to print indexed source. Use the retrieval ladder instead.
 
@@ -405,9 +405,8 @@ Before the final response:
 
 1. Verify the requested work through SDL-MCP runtime or focused SDL checks when applicable.
 2. Remove `.bak` files created during the task, or clearly report any kept intentionally.
-3. Call `usageStats` with `scope: "session"` and `persist: true` when SDL-MCP was used.
-4. Include the returned `formattedSummary` verbatim in the final response inside a fenced `text` block.
-5. Do not paraphrase, shorten, reformat, or strip the bar characters from the token meter. If `usageStats` cannot be captured, say so explicitly and include the reason.
+3. Call `usageStats` only when the user asks for token savings, you are debugging telemetry, or you need to persist/report a usage snapshot.
+4. When `usageStats` is explicitly needed, compact output returns `formattedSummary`; use `detail: "full"` only for structured `session`, `history`, or `wire` diagnostics.
 
 ---
 
@@ -421,4 +420,4 @@ Before the final response:
 - Reading whole non-indexed files when `search`, `jsonPath`, or bounded ranges would answer.
 - Writing indexed source through native edits instead of `symbol.edit`, symbol edit preview/apply, or AST-aware `searchEditPreview`.
 - Keeping `.bak` files without reporting them.
-- Omitting `usageStats` after an SDL-MCP-backed task.
+- Calling `usageStats` by habit when no user-facing savings report or telemetry debugging is needed.

@@ -21,10 +21,7 @@ import {
   type TokenUsageMetadata,
 } from "./mcp/token-usage.js";
 import { tokenAccumulator } from "./mcp/token-accumulator.js";
-import {
-  renderUserNotificationLine,
-  formatTokenCount,
-} from "./mcp/savings-meter.js";
+import { renderUserNotificationLine } from "./mcp/savings-meter.js";
 import { formatToolCallForUser } from "./mcp/tool-call-formatter.js";
 import type { LiveIndexCoordinator } from "./live-index/types.js";
 import type {
@@ -164,7 +161,7 @@ export function attachDisplayFooter(
 ): unknown {
   if (
     !footerText ||
-    !result ||
+    result === null ||
     typeof result !== "object" ||
     Array.isArray(result)
   ) {
@@ -184,6 +181,14 @@ export function attachDisplayFooter(
   };
 }
 
+function shouldIncludeDisplayFooter(toolArgs: Record<string, unknown>): boolean {
+  const options = isRecordValue(toolArgs.options) ? toolArgs.options : {};
+  return toolArgs.includeTelemetry === true
+    || options.includeTelemetry === true
+    || toolArgs.detail === "full"
+    || options.detail === "full";
+}
+
 interface ToolResponseContentBlock {
   type: "text";
   text: string;
@@ -195,12 +200,111 @@ interface ToolResponseEnvelope extends Record<string, unknown> {
   _displayFooter?: string;
 }
 
-function asStructuredContent(value: unknown): Record<string, unknown> {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return { value };
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
+
+const STRUCTURED_CONTENT_INTERNAL_KEYS = new Set([
+  "_packedPayload",
+  "_packedStats",
+  "_tokenUsage",
+  "_displayFooter",
+  "actionsTaken",
+  "contextModeHint",
+  "metrics",
+  "rungs",
+  "taskId",
+  "tokenEstimate",
+]);
+
+function asStructuredContent(
+  value: unknown,
+  toolArgs: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const optionsFromArgs = (args: Record<string, unknown>) => {
+    const options = isRecordValue(args.options) ? args.options : {};
+    const detail = args.detail ?? options.detail;
+    const fullDetail = detail === "full";
+    return {
+      includeDiagnostics:
+        fullDetail || args.includeDiagnostics === true || options.includeDiagnostics === true,
+      includeRetrievalEvidence:
+        fullDetail
+        || args.includeRetrievalEvidence === true
+        || options.includeRetrievalEvidence === true,
+    };
+  };
+  const workflowSteps = Array.isArray(toolArgs.steps) ? toolArgs.steps : [];
+
+  const sanitize = (
+    item: unknown,
+    activeOptions: ReturnType<typeof optionsFromArgs>,
+    isRoot = false,
+  ): unknown => {
+    if (Array.isArray(item)) {
+      return item.map((child) => sanitize(child, activeOptions));
+    }
+    if (!isRecordValue(item)) {
+      return item;
+    }
+
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, itemValue] of Object.entries(item)) {
+      if (STRUCTURED_CONTENT_INTERNAL_KEYS.has(key) || (isRoot && key === "path")) {
+        continue;
+      }
+      if (key === "diagnostics" && !activeOptions.includeDiagnostics) {
+        continue;
+      }
+      if (key === "retrievalEvidence" && !activeOptions.includeRetrievalEvidence) {
+        continue;
+      }
+      if (key === "finalEvidence" && Array.isArray(itemValue)) {
+        sanitized.finalEvidence = itemValue.map((evidenceItem) => {
+          if (!isRecordValue(evidenceItem)) {
+            return evidenceItem;
+          }
+          const { timestamp: _timestamp, ...evidence } = evidenceItem;
+          return sanitize(evidence, activeOptions);
+        });
+        continue;
+      }
+      if (isRoot && key === "results" && Array.isArray(itemValue)) {
+        sanitized.results = itemValue.map((step, index) => {
+          if (!isRecordValue(step)) {
+            return sanitize(step, activeOptions);
+          }
+          const sourceStepIndex = typeof step.stepIndex === "number"
+            ? step.stepIndex
+            : index;
+          const workflowStep = workflowSteps[sourceStepIndex];
+          const childArgs =
+            isRecordValue(workflowStep) && isRecordValue(workflowStep.args)
+              ? workflowStep.args
+              : {};
+          const childOptions = optionsFromArgs(childArgs);
+          const sanitizedStep: Record<string, unknown> = {};
+          for (const [stepKey, stepValue] of Object.entries(step)) {
+            sanitizedStep[stepKey] = sanitize(
+              stepValue,
+              stepKey === "result" ? childOptions : activeOptions,
+            );
+          }
+          return sanitizedStep;
+        });
+        continue;
+      }
+      sanitized[key] = sanitize(itemValue, activeOptions);
+    }
+    return sanitized;
+  };
+
+  const structured = isRecordValue(value)
+    ? sanitize(value, optionsFromArgs(toolArgs), true)
+    : { value };
+  return structured as Record<string, unknown>;
+}
+
 
 export function buildToolResponseContentBlocks(
   primaryPayload: unknown,
@@ -218,7 +322,7 @@ export function buildToolResponseContentBlocks(
     },
   ];
 
-  if (footerText) {
+  if (footerText && shouldIncludeDisplayFooter(toolArgs)) {
     contentBlocks.push({
       type: "text",
       text: footerText,
@@ -233,22 +337,36 @@ export function buildToolResponseEnvelope(
   footerText: string,
   toolName = "",
   toolArgs: Record<string, unknown> = {},
+  structuredPayload: unknown = primaryPayload,
 ): ToolResponseEnvelope {
-  const content = buildToolResponseContentBlocks(
-    primaryPayload,
-    userDisplay,
-    footerText,
-    toolName,
-    toolArgs,
-  );
   const modelPayload = projectToolResultForModelContent(
     toolName,
     primaryPayload,
     toolArgs,
   );
-  const structuredContent = asStructuredContent(modelPayload);
-  return footerText
-    ? { content, structuredContent, _displayFooter: footerText }
+  const safeUserDisplay =
+    (toolName === "usage.stats" || toolName === "sdl.usage.stats")
+      ? userDisplay
+      : null;
+  const content = buildToolResponseContentBlocks(
+    modelPayload,
+    safeUserDisplay,
+    footerText,
+    toolName,
+    toolArgs,
+  );
+  const sanitizedStructuredPayload = asStructuredContent(structuredPayload, toolArgs);
+  const structuredModelPayload = projectToolResultForModelContent(
+    toolName,
+    sanitizedStructuredPayload,
+    toolArgs,
+  );
+  const structuredContent = isRecordValue(structuredModelPayload)
+    ? structuredModelPayload
+    : { value: structuredModelPayload };
+  const visibleFooterText = shouldIncludeDisplayFooter(toolArgs) ? footerText : "";
+  return visibleFooterText
+    ? { content, structuredContent, _displayFooter: visibleFooterText }
     : { content, structuredContent };
 }
 
@@ -452,7 +570,7 @@ export class MCPServer {
             // Inject _tokenUsage and strip _rawContext before serialization
             const responseProcessingStartedAt = timer.start();
             let finalResult = result;
-            let capturedUsage: TokenUsageMetadata | undefined;
+            let structuredResult: unknown = finalResult;
             let tokensUsedForObs: number | undefined;
             let tokensSavedForObs: number | undefined;
             let userDisplay: string | null = null;
@@ -535,9 +653,11 @@ export class MCPServer {
                   });
               }
 
-              // Capture token usage before stripping internal fields
-              capturedUsage = r._tokenUsage as TokenUsageMetadata | undefined;
               finalResult = stripRawContext(r);
+              structuredResult =
+                finalResult && typeof finalResult === "object" && !Array.isArray(finalResult)
+                  ? { ...(finalResult as Record<string, unknown>) }
+                  : finalResult;
               // Also strip _tokenUsage (stripRawContext only handles _rawContext)
               if (
                 finalResult &&
@@ -575,7 +695,7 @@ export class MCPServer {
                   .catch(() => {
                     /* non-critical */
                   });
-                // Strip from tool response — summary is for the user, not the LLM
+                userDisplay = summary;
                 capturedSummary = summary;
                 delete (finalResult as Record<string, unknown>)
                   .formattedSummary;
@@ -629,9 +749,14 @@ export class MCPServer {
               responseProcessingStartedAt,
             );
             if (includeDiagnostics) {
+              const diagnosticsSnapshot = timer.snapshot();
               finalResult = attachTimingDiagnostics(
                 finalResult,
-                timer.snapshot(),
+                diagnosticsSnapshot,
+              );
+              structuredResult = attachTimingDiagnostics(
+                structuredResult,
+                diagnosticsSnapshot,
               );
             }
 
@@ -649,13 +774,6 @@ export class MCPServer {
               diagnostics: extractTimingDiagnostics(finalResult),
             });
             const footerLines: string[] = [];
-            if (
-              capturedUsage &&
-              capturedUsage.sdlTokens < capturedUsage.rawEquivalent
-            ) {
-              const meterLine = `📊 ${formatTokenCount(capturedUsage.sdlTokens)} / ${formatTokenCount(capturedUsage.rawEquivalent)} tokens (SDL/raw-equiv) ${capturedUsage.meter}`;
-              footerLines.push(meterLine);
-            }
             if (capturedSummary) {
               footerLines.push(capturedSummary);
             }
@@ -668,6 +786,7 @@ export class MCPServer {
               footerText,
               toolName,
               normalizedArgs as Record<string, unknown>,
+              structuredResult,
             );
           } catch (error) {
             process.stderr.write(

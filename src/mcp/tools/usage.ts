@@ -194,6 +194,13 @@ export async function handleUsageStats(
   if (scope === "session" && response.session) {
     response.formattedSummary = renderSessionSummary(response.session, EMPTY_AGGREGATE, []);
   }
+
+  if (request.detail !== "full") {
+    return response.formattedSummary
+      ? { formattedSummary: response.formattedSummary }
+      : {};
+  }
+
   return response;
   } catch (error) {
     if (error instanceof ValidationError || error instanceof DatabaseError) {

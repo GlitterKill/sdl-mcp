@@ -201,7 +201,7 @@ function detectQuotingWarnings(
     /;/.test(request.code ?? "")
   ) {
     warnings.add(
-      "Windows cmd.exe does not treat semicolons as command separators; use & or newlines in shell runtime code.",
+      "Windows cmd.exe does not treat semicolons as command separators. Use newlines or & between commands in shell runtime code.",
     );
   }
   if (/@['"]\r?\n|\r?\n['"]@/.test(commandText)) {
@@ -240,9 +240,11 @@ function generateIntentExcerpts(
   stdout: string,
   stderr: string,
   queryTerms: string[],
+  contextLines = RUNTIME_KEYWORD_CONTEXT_LINES,
 ): OutputExcerpt[] {
   const excerpts: OutputExcerpt[] = [];
   const lowerTerms = queryTerms.map((t) => t.toLowerCase());
+  const boundedContextLines = Math.max(0, Math.min(20, contextLines));
 
   const searchStream = (lines: string[], source: "stdout" | "stderr") => {
     for (
@@ -252,10 +254,10 @@ function generateIntentExcerpts(
     ) {
       const lower = lines[i].toLowerCase();
       if (lowerTerms.some((t) => lower.includes(t))) {
-        const start = Math.max(0, i - RUNTIME_KEYWORD_CONTEXT_LINES);
+        const start = Math.max(0, i - boundedContextLines);
         const end = Math.min(
           lines.length - 1,
-          i + RUNTIME_KEYWORD_CONTEXT_LINES,
+          i + boundedContextLines,
         );
         excerpts.push({
           lineStart: start + 1,
@@ -765,6 +767,7 @@ export async function handleRuntimeExecute(
                 compileStdout,
                 compileStderr,
                 request.queryTerms,
+                request.contextLines,
               ),
             );
           }
@@ -944,7 +947,12 @@ export async function handleRuntimeExecute(
       const excerpts: OutputExcerpt[] = [];
       if (request.queryTerms && request.queryTerms.length > 0) {
         excerpts.push(
-          ...generateIntentExcerpts(stdoutStr, stderrStr, request.queryTerms),
+          ...generateIntentExcerpts(
+            stdoutStr,
+            stderrStr,
+            request.queryTerms,
+            request.contextLines,
+          ),
         );
       }
       logRuntimeExecution({

@@ -77,7 +77,7 @@ function captureConsoleLog(run: () => void): string {
 }
 
 describe("visible tool output", () => {
-  it("returns human-readable MCP content first and projected structured content", () => {
+  it("suppresses token-meter footer output by default", () => {
     const footer = "100 / 1.0k tokens (SDL/raw-equiv)";
     const envelope = buildToolResponseEnvelope(
       {
@@ -96,12 +96,27 @@ describe("visible tool output", () => {
 
     assert.match(envelope.content[0]?.text ?? "", /file\.write \(replacePattern\)/);
     assert.doesNotMatch(envelope.content[0]?.text ?? "", /^\s*\{/);
-    assert.equal(envelope.content[1]?.text, footer);
-    assert.equal(envelope._displayFooter, footer);
-    assert.equal(envelope.structuredContent?.etag, "file-etag");
+    assert.equal(envelope.content[1], undefined);
+    assert.equal(envelope._displayFooter, undefined);
+    assert.equal(envelope.structuredContent?.etag, undefined);
     assert.equal(envelope.structuredContent?.diagnostics, undefined);
     assert.equal(envelope.structuredContent?._packedStats, undefined);
     assert.equal(envelope.structuredContent?._displayFooter, undefined);
+  });
+
+  it("shows display footers when telemetry is explicitly requested", () => {
+    const footer = "100 / 1.0k tokens (SDL/raw-equiv)";
+    const envelope = buildToolResponseEnvelope(
+      { filePath: "src/server.ts", mode: "replacePattern", etag: "file-etag" },
+      null,
+      footer,
+      "file.write",
+      { includeTelemetry: true },
+    );
+
+    assert.equal(envelope.content[1]?.text, footer);
+    assert.equal(envelope._displayFooter, footer);
+    assert.equal(envelope.structuredContent?.etag, undefined);
   });
 
   it("formats sdl.context as an evidence list without internal noise", () => {
@@ -147,11 +162,10 @@ describe("visible tool output", () => {
         "",
         "hotpath:def",
         "summary: symbol | Hot path (0 matches, ~42 tokens): code",
-        "",
-        "etag: abc123",
       ].join("\n"),
     );
     assert.doesNotMatch(blocks[0]?.text ?? "", /diagnostics|actionsTaken|taskId|rungs|internal action summary/);
+    assert.doesNotMatch(blocks[0]?.text ?? "", /etag|abc123/);
   });
 
   it("keeps task-relevant structured content and omits internal fields by default", () => {
@@ -184,7 +198,7 @@ describe("visible tool output", () => {
     assert.equal(envelope.structuredContent?.taskType, "debug");
     assert.equal(envelope.structuredContent?.success, true);
     assert.equal(envelope.structuredContent?.answer, "# Debug Results");
-    assert.equal(envelope.structuredContent?.etag, "abc123");
+    assert.equal(envelope.structuredContent?.etag, undefined);
     assert.equal(envelope.structuredContent?.retrievalEvidence, undefined);
     assert.equal(envelope.structuredContent?.diagnostics, undefined);
     assert.equal(envelope.structuredContent?._packedStats, undefined);
@@ -194,6 +208,25 @@ describe("visible tool output", () => {
     const evidence = envelope.structuredContent?.finalEvidence as Record<string, unknown>[];
     assert.equal(evidence[0]?.reference, "symbol:1");
     assert.equal(evidence[0]?.timestamp, undefined);
+  });
+
+  it("omits workflow etag cache from agent-visible output", () => {
+    const envelope = buildToolResponseEnvelope(
+      {
+        results: [],
+        totalTokens: 0,
+        durationMs: 1,
+        truncated: false,
+        etagCache: { sym: "etag-sym" },
+      },
+      null,
+      "",
+      "sdl.workflow",
+      { includeTelemetry: true },
+    );
+
+    assert.equal(envelope.structuredContent?.etagCache, undefined);
+    assert.doesNotMatch(envelope.content[0]?.text ?? "", /etag-sym|etagCache/);
   });
 
   it("keeps requested diagnostics in structured content without adding them to visible text", () => {
@@ -254,6 +287,18 @@ describe("visible tool output", () => {
     }
   });
 
+  it("hides etag fields in generic fallback output", () => {
+    const display = formatToolCallForUser("sdl.unformatted", {}, {
+      status: "ok",
+      etag: "generic-etag",
+      etagCache: { step: "cache-etag" },
+      sliceEtag: "slice-etag",
+    });
+
+    assert.ok(display);
+    assert.doesNotMatch(display ?? "", /etag|etagCache|sliceEtag|generic-etag|cache-etag|slice-etag/i);
+  });
+
   it("formats CLI direct-action pretty output through the tool formatter", () => {
     const output = captureConsoleLog(() =>
       formatCliToolOutput(
@@ -272,6 +317,86 @@ describe("visible tool output", () => {
     assert.doesNotMatch(output, /^\s*\{/);
     assert.match(output, /repo\.status ->/);
     assert.doesNotMatch(output, /diagnostics|timings|totalMs/);
+  });
+
+  it("projects sdl.context structured fields after compact visible projection", async () => {
+    const server = new MCPServer();
+    server.registerTool(
+      "sdl.context",
+      "Context test tool",
+      z.object({
+        includeDiagnostics: z.boolean().optional(),
+        options: z.object({ includeRetrievalEvidence: z.boolean().optional() }).optional(),
+      }),
+      async () => ({
+        taskType: "debug",
+        success: true,
+        answer: "Debug answer",
+        finalEvidence: [],
+        etag: "context-etag",
+        diagnostics: { timings: { totalMs: 12 } },
+        retrievalEvidence: { fusionLatencyMs: 7 },
+      }),
+    );
+
+    const handler = getCallToolHandler(server);
+    const result = await handler(
+      {
+        method: "tools/call",
+        params: {
+          name: "sdl.context",
+          arguments: {
+            includeDiagnostics: true,
+            options: { includeRetrievalEvidence: true },
+          },
+        },
+      },
+      {
+        _meta: {},
+        sendNotification: async () => {},
+        signal: new AbortController().signal,
+      },
+    );
+
+    const content = result.content as Array<Record<string, unknown>>;
+    const structuredContent = result.structuredContent as Record<string, unknown>;
+    assert.equal(structuredContent.etag, undefined);
+    assert.deepEqual(structuredContent.retrievalEvidence, { fusionLatencyMs: 7 });
+    assert.ok(structuredContent.diagnostics);
+    assert.doesNotMatch(String(content[0]?.text), /fusionLatencyMs|totalMs/);
+    assert.doesNotMatch(String(content[0]?.text), /context-etag/);
+  });
+
+  it("keeps compact usageStats formattedSummary in structured content", async () => {
+    const server = new MCPServer();
+    server.registerTool(
+      "sdl.usage.stats",
+      "Usage stats test tool",
+      z.object({}),
+      async () => ({ formattedSummary: "usage summary" }),
+    );
+
+    const handler = getCallToolHandler(server);
+    const result = await handler(
+      {
+        method: "tools/call",
+        params: { name: "sdl.usage.stats", arguments: {} },
+      },
+      {
+        _meta: {},
+        sendNotification: async () => {},
+        signal: new AbortController().signal,
+      },
+    );
+
+    const structuredContent = result.structuredContent as Record<string, unknown>;
+    assert.equal(structuredContent.formattedSummary, "usage summary");
+    assert.match(
+      (result.content as Array<Record<string, unknown>>)
+        .map((block) => String(block.text))
+        .join("\n"),
+      /usage summary/,
+    );
   });
 
   it("projects actual server validation errors into structured content", async () => {
@@ -326,7 +451,7 @@ describe("visible tool output", () => {
     );
 
     assert.match(envelope.content[0]?.text ?? "", /Invalid tool arguments/);
-    assert.equal(envelope.structuredContent?.etag, "err-etag");
+    assert.equal(envelope.structuredContent?.etag, undefined);
     assert.deepEqual((envelope.structuredContent?.error as Record<string, unknown>)?.details, [
       { path: "filePath", message: "Required" },
     ]);

@@ -69,14 +69,16 @@ export const ActionSearchRequestSchema = z.object({
   /** When true, return only counts and categories instead of full action details */
   summaryOnly: z.boolean().default(false),
   excludeDisabled: z.boolean().default(false),
+  detail: z.enum(["compact", "full"]).optional().default("compact"),
 });
 
 export const ManualRequestSchema = z.object({
   query: z.string().min(1).optional(),
   actions: z.array(z.string().min(1)).optional(),
   format: z.enum(["typescript", "markdown", "json"]).default("typescript"),
-  includeSchemas: z.boolean().default(true),
+  includeSchemas: z.boolean().default(false),
   includeExamples: z.boolean().default(false),
+  detail: z.enum(["compact", "full"]).optional().default("compact"),
 });
 
 export function handleActionSearch(
