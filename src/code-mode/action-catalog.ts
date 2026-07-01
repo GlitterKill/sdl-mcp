@@ -13,6 +13,7 @@ import {
   MemorySurfaceRequestSchema,
 } from "../mcp/tools.js";
 import { FileGatewayRequestSchema } from "../mcp/tools/file-gateway.js";
+import { RetrieveRequestSchema } from "./retrieve.js";
 import { WorkflowRequestSchema } from "./types.js";
 
 // Meta-tool schemas. ActionSearchRequestSchema is also exported from
@@ -47,6 +48,7 @@ const META_TOOL_SCHEMAS: Record<string, z.ZodType> = {
   manual: META_MANUAL_SCHEMA,
   context: AgentContextRequestSchema,
   file: FileGatewayRequestSchema,
+  retrieve: RetrieveRequestSchema,
   workflow: WorkflowRequestSchema,
 };
 
@@ -715,6 +717,8 @@ const META_TOOL_DESCRIPTIONS: Record<string, string> = {
   context:
     "Preferred first tool for explain, debug, review, implement, understand, or investigate prompts. Retrieves task-shaped code context directly and should be chosen before workflow for context retrieval.",
   file: "Unified sdl.file gateway for non-indexed file reads, targeted writes, two-phase search edits (including searchEditPreview identifier, structural, and operations[] batches), symbol edit wrappers, and plan-bound previewWindow/sourceWindow code windows. previewWindow/sourceWindow need planHandle, reason, expectedLines, identifiersToFind, and symbolId for the planned indexed source file.",
+  retrieve:
+    "Top-level compact retrieval for one-hop symbol/card/slice/skeleton/hot-path/window reads. Use workflow for pipelines, transforms, runtime execution, mutations, or $N result piping.",
   workflow:
     "Preferred first tool for execute, runtime, transform, batch, or pipeline prompts. Runs multi-step workflows with $N result piping, runtime execution, data transforms, and batch mutations.",
 };
@@ -771,6 +775,11 @@ const META_TOOL_EXAMPLES: Record<string, Record<string, unknown>> = {
     reason: "Inspect planned source edit",
     expectedLines: 40,
     identifiersToFind: ["targetFunction"],
+  },
+  retrieve: {
+    repoId: "my-repo",
+    op: "symbolSearch",
+    args: { query: "executeWorkflow", limit: 5 },
   },
   workflow: {
     repoId: "<repoId>",
@@ -991,6 +1000,11 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
     recommendedNextActions: ["agent.feedback"],
     fallbacks: ["slice.build"],
   },
+  retrieve: {
+    prerequisites: ["repo.status"],
+    recommendedNextActions: ["context", "workflow"],
+    fallbacks: ["context", "workflow"],
+  },
   workflow: {
     prerequisites: ["action.search", "manual"],
     recommendedNextActions: ["runtime.execute", "runtime.queryOutput"],
@@ -1200,6 +1214,7 @@ function buildBaseCatalogFromMap(
     "manual",
     "context",
     "file",
+    "retrieve",
     "workflow",
   ]) {
     catalog.push({

@@ -63,6 +63,7 @@ describe("dist stdio smoke", () => {
         "sdl.context",
         "sdl.file",
         "sdl.manual",
+        "sdl.retrieve",
         "sdl.workflow",
       ]);
 

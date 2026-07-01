@@ -18,6 +18,12 @@ export const CONTEXT_DESCRIPTION =
   "work. This is the Code Mode equivalent of sdl.context and should be " +
   "preferred over sdl.workflow for context retrieval.";
 
+export const RETRIEVE_DESCRIPTION =
+  "Retrieve compact SDL graph/code context in one step. Use for " +
+  "symbolSearch, symbolGetCard, sliceBuild, codeSkeleton, codeHotPath, " +
+  "and justified codeNeedWindow calls. Prefer sdl.workflow for multi-step " +
+  "pipelines, transforms, runtime execution, mutations, or $N result piping.";
+
 export const ACTION_SEARCH_DESCRIPTION =
   "Search for SDL-MCP actions by keyword. Returns ranked matches with optional " +
   "schema summaries and examples. Use this as the first discovery step before " +

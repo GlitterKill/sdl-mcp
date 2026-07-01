@@ -141,6 +141,10 @@ describe("MCP tool registration", () => {
       names.includes("sdl.context"),
       "expected sdl.context to be registered alongside flat tools",
     );
+    assert.ok(
+      names.includes("sdl.retrieve"),
+      "expected sdl.retrieve to be registered alongside flat tools",
+    );
   });
 
   it("registers only code-mode tools when exclusive mode is enabled", () => {
@@ -178,13 +182,17 @@ describe("MCP tool registration", () => {
       "expected sdl.file in exclusive mode",
     );
     assert.ok(
+      names.includes("sdl.retrieve"),
+      "expected sdl.retrieve in exclusive mode",
+    );
+    assert.ok(
       !names.includes("sdl.info"),
       "sdl.info should NOT be registered in exclusive mode",
     );
     assert.strictEqual(
       names.length,
-      5,
-      `exclusive mode should register exactly 5 tools, got ${names.length}: ${names.join(", ")}`,
+      6,
+      `exclusive mode should register exactly 6 tools, got ${names.length}: ${names.join(", ")}`,
     );
 
     // No flat tools
@@ -234,6 +242,10 @@ describe("MCP tool registration", () => {
     assert.ok(
       names.includes("sdl.context"),
       "expected sdl.context alongside gateway",
+    );
+    assert.ok(
+      names.includes("sdl.retrieve"),
+      "expected sdl.retrieve alongside gateway",
     );
   });
 

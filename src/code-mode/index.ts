@@ -23,9 +23,14 @@ import {
   CONTEXT_DESCRIPTION,
   MANUAL_DESCRIPTION,
   FILE_GATEWAY_DESCRIPTION,
+  RETRIEVE_DESCRIPTION,
   WORKFLOW_DESCRIPTION,
 } from "./descriptions.js";
 import { INTERNAL_TRANSFORM_NAMES } from "./transforms.js";
+import {
+  handleRetrieve,
+  RetrieveRequestSchema,
+} from "./retrieve.js";
 import { executeWorkflow } from "./workflow-executor.js";
 import {
   getManualCached,
@@ -357,6 +362,14 @@ export function registerCodeModeTools(
       },
       additionalProperties: false,
     },
+  );
+
+  server.registerTool(
+    "sdl.retrieve",
+    RETRIEVE_DESCRIPTION,
+    RetrieveRequestSchema,
+    async (rawArgs: unknown, context?: ToolContext) =>
+      handleRetrieve(rawArgs, actionMap, context),
   );
 
   server.registerTool(
