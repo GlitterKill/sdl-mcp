@@ -1378,27 +1378,26 @@ Provide a unified Code Mode file gateway for read, write, search/edit preview/ap
 Use tools in this order for most tasks:
 
 1. `sdl.repo.status` — check repo state and version
-2. `sdl.repo.overview` — understand codebase structure (start with `level: "stats"`)
-3. `sdl.symbol.search` — find relevant symbols (start with tight limits)
-4. `sdl.context` — get task-shaped context first when Code Mode is available
-5. `sdl.symbol.getCard` — understand what symbols do; batch through the same tool when you already have many IDs or refs
-6. `sdl.slice.build` — get related symbols for a task (auto-surfaces relevant memories when memory is enabled)
+2. `sdl.context` — get task-shaped context first for explain/debug/review/implement/understand/investigate work when Code Mode is available
+3. `sdl.symbol.search` — find exact symbols or APIs (start with tight limits)
+4. `sdl.symbol.getCard` — understand what symbols do; batch through the same tool when you already have many IDs or refs
+5. `sdl.slice.build` — get related symbols when you need a dependency frontier, likely files, blast radius, or edit-planning set
+6. `sdl.repo.overview` — understand repo shape, directories, stats, or hotspots when task-shaped context is not the right surface
 7. `sdl.code.getSkeleton` — see code structure without full bodies
 8. `sdl.code.getHotPath` — find specific identifiers in code
 9. `sdl.code.needWindow` — raw code only when necessary
-10. `sdl.agent.feedback` — record which symbols were useful after completing a task
+10. `sdl.agent.feedback` — record useful/missing symbols when a slice-backed task produced durable training signal
 11. `sdl.memory.store` — persist important decisions, bugfixes, or context for future sessions (requires memory enabled in config)
 
 ### Task-Specific Workflows
 
 | Task                         | Workflow                                                                                |
 | ---------------------------- | --------------------------------------------------------------------------------------- |
-| **Explain / Debug / Review** | `sdl.context` first in Code Mode -> direct ladder follow-up only if still ambiguous     |
-| **Debug (manual)**           | search -> card -> slice.build -> hotPath -> needWindow (if still ambiguous)             |
-| **Debug (auto)**             | slice.build with `taskText` + `stackTrace` -> hotPath -> needWindow with `sliceContext` |
-| **Feature**                  | repo.overview -> search -> card -> slice.build (use `editedFiles` for impact)           |
+| **Explain / Debug / Review** | `sdl.context` first in Code Mode -> exact symbol or hot-path follow-up only if still ambiguous |
+| **Debug (frontier/manual)**  | `slice.build` with `taskText` + `stackTrace` when you need related files -> hotPath -> needWindow with `sliceContext` |
+| **Feature**                  | `sdl.context` for task-shaped understanding -> exact symbol/card or slice frontier before editing |
 | **PR Review**                | delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols                      |
-| **Cross-session**            | memory.surface -> slice.build -> work -> memory.store when done                         |
+| **Cross-session**            | memory.surface -> slice.build -> work -> memory.store only for durable decisions/context |
 
 ---
 

@@ -114,29 +114,26 @@ Copy this block into `AGENTS.md` for token-efficient SDL-MCP usage on the curren
    - `maxWindowTokens: 1400`
    - `requireIdentifiers: true`
 
-### 1) The Iris Gate Ladder (Token-Efficient Context Escalation)
+### 1) The SDL Context Gate Ladder (Token-Efficient Context Escalation)
 
 Use this order unless task constraints force escalation:
 
-1. `sdl.repo.overview` (start with `level: "stats"`; use `directories`/`full` only when needed).
-2. `sdl.symbol.search` with a tight `limit` (`5-20` to start; default is `50`, max is `1000`).
-   - Add `semantic: true` to enable embedding-based reranking for fuzzy or conceptual queries.
-3. `sdl.symbol.getCard` for single lookups; send `ifNoneMatch` to get `notModified` responses.
-   - Provide exactly one of `symbolId` or `symbolRef`. Use `symbolRef` when you know a symbol name and optional file or kind hints but do not yet have the canonical ID.
-   - Use `sdl.symbol.getCard` (batch, up to 100 IDs) when fetching multiple symbols — one round trip instead of many.
-   - `sdl.symbol.getCard` also accepts `symbolRefs`; mixed batches can return `partial`, `succeeded`, `failed`, and structured `failures[]` metadata instead of failing the whole request.
-   - Pass `knownEtags` to `getCards` for delta fetching (unchanged cards return as refs, not full payloads).
+1. `sdl.context` for explain/debug/review/implement/understand/investigate prompts. Set `responseMode: "auto"`, use `contextMode: "precise"` for named symbols or focused paths, `"broad"` for unfamiliar subsystems, and always provide a budget.
+2. `sdl.symbol.search` + `sdl.symbol.getCard` for exact symbol names, APIs, or focused edit targets.
+   - Keep `limit` low (`5-20`) to start; default is `50`, max is `1000`.
+   - Use `symbolRef` when you know a symbol name and optional file or kind hints but do not yet have the canonical ID.
+   - Batch multiple IDs or refs through `sdl.symbol.getCard` instead of N separate calls.
+   - Pass `knownEtags` to batch card requests for delta fetching; unchanged cards return as refs, not full payloads.
    - Use `minCallConfidence` to filter low-confidence call edges from card responses.
-4. `sdl.slice.build` with explicit budget and compact output:
-   - Use `wireFormat: "compact"` and `wireFormatVersion: 3` (the only accepted version since 0.11.0; v1/v2 retired). Or use `wireFormat: "auto"` (the schema default) to let SDL-MCP pick between compact JSON and a packed string based on token savings.
-   - Use `wireFormat: "readable"` when debugging slice payloads or developing integrations and the compact legend is getting in the way.
+3. `sdl.slice.build` when you need a compact dependency frontier, likely file list, blast radius, or edit-planning set.
+   - Use `wireFormat: "auto"` (schema default) so SDL-MCP picks compact JSON or packed strings based on token savings.
+   - Use `wireFormat: "readable"` only when debugging slice payloads or developing integrations.
    - Set budget early, for example: `{ "maxCards": 30, "maxEstimatedTokens": 4000 }`.
-   - Use `minConfidence` to drop low-trust edges (default `0.5`; adaptive thresholds can tighten to `0.8` and `0.95` as token usage approaches budget).
-   - Use `minCallConfidence` to filter low-confidence call edges within slice cards.
-   - Always provide `entrySymbols` when available.
-   - `sdl.workflow` seeds `knownCardEtags` automatically. Only pass them yourself when calling `sdl.slice.build` directly outside a workflow.
-   - `cardDetail` levels: `"minimal"` | `"signature"` | `"deps"` | `"compact"` | `"full"`. Leave unset for mixed compact/full behavior. Use `"full"` only when you truly need full cards for all slice symbols. Use `adaptiveDetail: true` to let SDL-MCP choose detail levels per-card based on relevance.
-   - **Auto-discovery mode**: pass `taskText` (and optionally `stackTrace`, `failingTestPath`, or `editedFiles`) instead of `entrySymbols` to let SDL-MCP find relevant symbols automatically.
+   - Use `minConfidence` and `minCallConfidence` to drop low-trust edges when precision matters.
+   - Provide `entrySymbols` when available; otherwise use auto-discovery with `taskText`, `stackTrace`, `failingTestPath`, or `editedFiles`.
+   - `sdl.workflow` seeds `knownCardEtags` automatically. Pass them manually only when calling `sdl.slice.build` directly outside a workflow.
+   - Use `adaptiveDetail: true` or a low `cardDetail` (`"minimal"`/`"signature"`) before asking for full cards.
+4. `sdl.repo.overview` only when the task needs repository shape, directory stats, or hotspots rather than task-shaped code context. Start with `level: "stats"`; use `directories`/`full` only when needed.
 5. `sdl.slice.refresh` if you already have a `sliceHandle`; prefer refresh over rebuilding.
 6. `sdl.slice.spillover.get` only when necessary; keep `pageSize` small (default `20`, max `100`).
 7. `sdl.code.getSkeleton` before `hotPath` or raw windows. In file mode, prefer `exportedOnly: true` when possible.
@@ -151,7 +148,7 @@ Use this order unless task constraints force escalation:
 
 ### 2) Task-specific workflows
 
-- **Debug**: `search -> card -> slice.build -> hotPath -> needWindow (only if still ambiguous)`.
+- **Debug**: `sdl.context` first with `contextMode: "precise"` and focused `taskText`; follow with exact `symbol.search`/`symbol.getCard`, `codeHotPath`, or `codeNeedWindow` only if still ambiguous.
 - **Debug (auto-discovery)**: `slice.build` with `taskText` describing the bug + `stackTrace` and/or `failingTestPath` if available → SDL-MCP finds symbols automatically. Pass the same context via `sliceContext` to `code.needWindow` if raw code is needed.
 - **Feature implementation**: use `sdl.context` when you need task-shaped understanding, `symbol.search -> symbol.getCard` for exact targets, and `slice.build` when you need likely files or a dependency frontier before editing. Use `symbol.edit` for one-symbol changes and `search.edit` for bounded batch edits.
 - **PR review**: `delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols`.
@@ -303,13 +300,13 @@ Workflow guidance:
 
 ### 8) Feedback loop (`sdl.agent.feedback`)
 
-After completing a task, call `sdl.agent.feedback` with:
+Use `sdl.agent.feedback` when a slice-backed task produced durable signal about which symbols were useful or missing. Skip it for trivial lookups, tasks that did not use a slice, or cases where you have no concrete useful/missing-symbol signal.
 
-- `versionId` (from `sdl.repo.status`), `sliceHandle` (from `sdl.slice.build`).
+When feedback is useful, include:
+
+- `versionId` (from `sdl.repo.status`) and `sliceHandle` (from `sdl.slice.build`).
 - `usefulSymbols` (required, min 1), `missingSymbols` (optional).
 - `taskType` (`"debug"` | `"review"` | `"implement"` | `"explain"`), `taskText`, `taskTags`.
-
-This trains the slice ranker and improves future context quality.
 
 Use `sdl.agent.feedback.query` with `limit` and `since` (ISO timestamp) to review aggregated stats on which symbols are most frequently useful/missing.
 
@@ -342,7 +339,7 @@ When memory is disabled, memory tools return a clear error and no memory surfaci
 - Do not use broad `sdl.symbol.search` limits by default.
 - Do not rebuild slices repeatedly when `sdl.slice.refresh` can provide incremental deltas.
 - Do not call `sdl.symbol.getCard` N times when `sdl.symbol.getCard` can fetch all N in one call.
-- Do not skip `sdl.agent.feedback` after completing a task — it improves future context quality.
+- Do not record trivial `sdl.agent.feedback` just because a task ended; use it when a slice-backed task produced concrete useful/missing-symbol signal.
 - Do not call `sdl.runtime.execute` without setting `timeoutMs` — long-running processes will hang.
 - Do not use `outputMode: "summary"` when you only need pass/fail status — use `"minimal"` and query the artifact on failure.
 - Do not ignore `nextBestAction`, `fallbackTools`, or `fallbackRationale` in denied or ambiguous responses — they tell you what to try instead.

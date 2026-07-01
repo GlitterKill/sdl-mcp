@@ -109,7 +109,7 @@ After generating the enforcement setup:
 
 1. connect the client to SDL-MCP
 2. start the session with `sdl.repo.status`
-3. confirm the agent uses `sdl.context` or `sdl.context` for code context retrieval
+3. confirm the agent uses `sdl.context` first for task-shaped code context retrieval
 4. confirm explain/debug/review requests route to context first
 5. confirm `sdl.workflow` is used for runtime execution and multi-step operations, not context retrieval
 6. confirm symbol lookups can use `symbolRef` / `symbolRefs` when IDs are not yet known

@@ -59,7 +59,7 @@ They also teach Claude to use `symbolRef` / `symbolRefs` when it knows a symbol 
 
 That instruction layer now includes natural-identifier lookup and guidance fields such as `fallbackTools` and `fallbackRationale`.
 
-The generated `explore-sdl` agent mirrors the SDL-MCP Agent Workflow skill: it chooses the cheapest SDL discovery surface (`sdl.context`, `symbolSearch`/`symbolGetCard`, or `slice.build`), escalates through batched SDL workflow steps only when needed, uses SDL runtime with minimal persisted output for repo-local commands, avoids habitual index refreshes, and reports session token savings when SDL-MCP was used.
+The generated `explore-sdl` agent mirrors the SDL-MCP Agent Workflow skill: it chooses the cheapest SDL discovery surface (`sdl.context`, `symbolSearch`/`symbolGetCard`, or `slice.build`), escalates through batched SDL workflow steps only when needed, uses SDL runtime with minimal persisted output for repo-local commands, avoids habitual index refreshes, and calls `usageStats` only for requested savings reports, telemetry debugging, or persisted usage snapshots.
 
 SDL-MCP also advertises server-level MCP instructions that tell clients to load `sdl-mcp-agent-workflow` at session start when skills are supported. Codex enforcement adds a stronger `.codex/hooks/load-sdl-skill.mjs` `SessionStart` hook that injects the lean skill body as a system message.
 
@@ -102,7 +102,7 @@ For symbol lookup:
 
 For multi-step operations:
 
-- use `sdl.workflow` for batched context follow-ups, runtime execution, data transforms, and batch mutations
+- use `sdl.workflow` for batched retrieval follow-ups after the first SDL discovery surface, runtime execution, data transforms, and batch mutations
 - use `runtimeExecute` inside `sdl.workflow` with `outputMode: "minimal"` for repo-local commands, and use `stdin` for multiline input
 - use `searchEditPreview` `targeting:"identifier"` for exact AST identifier changes in supported structural languages and `targeting:"structural"` for tree-sitter capture edits before falling back to runtime scripts
 - supported runtimes: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`
