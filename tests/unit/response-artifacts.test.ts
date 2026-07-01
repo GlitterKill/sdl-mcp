@@ -105,9 +105,12 @@ describe("response artifact storage", () => {
       "action",
       "handle",
       "kind",
+      "metadata",
       "responseMode",
     ]);
-    assert.equal("metadata" in result.payload, false);
+    assert.equal(result.payload.metadata.handle, result.payload.handle);
+    assert.equal(result.payload.metadata.etag, result.metadata.etag);
+    assert.equal("estimatedOriginalTokens" in result.payload.metadata, false);
     assert.equal("savings" in result.payload, false);
 
     const read = await readResponseArtifact({
@@ -437,8 +440,10 @@ describe("response artifact storage", () => {
       "action",
       "handle",
       "kind",
+      "metadata",
       "responseMode",
     ]);
+    assert.equal("estimatedOriginalTokens" in response.metadata, false);
     const internalUsage = getHiddenTokenUsage(response);
     assert.ok(internalUsage.rawEquivalent > internalUsage.sdlTokens);
     assert.ok(isValidResponseArtifactHandle(response.handle));
