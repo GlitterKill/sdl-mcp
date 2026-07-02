@@ -26,7 +26,7 @@ export const REPO_DESCRIPTION =
   `sdl.repo - Repository lifecycle. Pass { repoId, action, ...params }.` +
   `\nActions: repo.register(rootPath,ignore?,languages?,maxFileBytes?) | repo.status() | ` +
   `repo.overview(level,includeHotspots?,directories?,maxDirectories?) | ` +
-  `index.refresh(mode,reason?) | policy.get() | policy.set(policyPatch; budgetCaps requires maxCards+maxEstimatedTokens) | ` +
+  `index.refresh(mode,reason?) | policy.get() | policy.set(policyPatch; budgetCaps accepts partial maxCards/maxEstimatedTokens patches) | ` +
   `search.edit(mode,targeting?,query?,editMode?,operations?,planHandle?,responseMode?) | ` +
   `semantic.enrichment.refresh(dryRun?,force?,install?,languages?) | ` +
     `semantic.enrichment.status(languages?)`;

@@ -1,17 +1,9 @@
 /**
  * Golden contract test for the `sdl.search.edit` response shapes.
  *
- * Validates that `SearchEditPreviewResponse` and `SearchEditApplyResponse`
- * carry the fields the tool-enhancement plan promised (planHandle, per-file
- * entries, preconditions, rollback metadata, retrievalEvidence). Shape
- * drift here is a public-API break.
- *
- * Modeled on `scip-ingest-response.test.ts` — structural golden, does not
- * require a running server or live index. Live-server golden snapshots
- * (`search-edit-preview.json`, `search-edit-apply.json`, and the
- * `sdl.action.search` fixture that picks up the new tool) are regenerated
- * via `npm run golden:update` in environments that can boot the stdio
- * server; the plan's deferred items document that.
+ * The plan handle carries server-side preconditions for apply. Agent-visible
+ * responses intentionally omit sha/mtime precondition snapshots and AST byte
+ * capture internals.
  */
 
 import { describe, it } from "node:test";
@@ -22,12 +14,8 @@ import type {
 } from "../../dist/mcp/tools.js";
 import type { RetrievalEvidence } from "../../dist/retrieval/types.js";
 
-// These tests validate response interfaces at compile time (TypeScript type
-// checking) and detect field drift at runtime (key-set snapshots). Value
-// assertions on hand-crafted literals are intentionally minimal since the
-// primary value is ensuring the interface shape remains stable.
 describe("sdl.search.edit response golden", () => {
-  it("SearchEditPreviewResponse carries planHandle + fileEntries + preconditions", () => {
+  it("SearchEditPreviewResponse carries planHandle + compact fileEntries", () => {
     const evidence: RetrievalEvidence = {
       sources: ["fts"],
       topRanksPerSource: { fts: [1, 2] },
@@ -48,26 +36,25 @@ describe("sdl.search.edit response golden", () => {
           editMode: "replacePattern",
           snippets: { before: "oldName", after: "newName" },
           indexedSource: false,
+          astMatches: [
+            {
+              target: { name: "target", nodeType: "identifier", text: "oldName" },
+              captures: [{ name: "target", nodeType: "identifier", text: "oldName" }],
+            },
+          ],
         },
       ],
       requiresApply: true,
       expiresAt: new Date(0).toISOString(),
-      preconditionSnapshot: [
-        { file: "a.txt", sha256: "deadbeef", mtimeMs: 1 },
-        { file: "b.txt", sha256: null, mtimeMs: null },
-      ],
       retrievalEvidence: evidence,
     };
 
-    // Structural shape validation — compile-time type check is the primary guard;
-    // these runtime checks verify the object is well-formed for downstream consumers.
     const keys = Object.keys(response).sort();
     assert.ok(keys.includes("mode"));
     assert.ok(keys.includes("planHandle"));
     assert.ok(keys.includes("fileEntries"));
-    assert.ok(keys.includes("preconditionSnapshot"));
+    assert.equal(keys.includes("preconditionSnapshot"), false);
     assert.ok(Array.isArray(response.fileEntries));
-    assert.ok(Array.isArray(response.preconditionSnapshot));
     assert.ok(response.fileEntries.length > 0);
 
     const entry = response.fileEntries[0];
@@ -76,12 +63,8 @@ describe("sdl.search.edit response golden", () => {
     assert.equal(typeof entry.indexedSource, "boolean");
     assert.equal(typeof entry.snippets.before, "string");
     assert.equal(typeof entry.snippets.after, "string");
-
-    const pc = response.preconditionSnapshot[0];
-    assert.equal(typeof pc.file, "string");
-    // sha256 and mtimeMs are nullable to support freshly-created files.
-    assert.ok(pc.sha256 === null || typeof pc.sha256 === "string");
-    assert.ok(pc.mtimeMs === null || typeof pc.mtimeMs === "number");
+    assert.equal(entry.astMatches?.[0]?.target.name, "target");
+    assert.equal("startByte" in (entry.astMatches?.[0]?.target ?? {}), false);
 
     assert.ok(response.retrievalEvidence);
     assert.ok(Array.isArray(response.retrievalEvidence!.sources));
@@ -106,7 +89,6 @@ describe("sdl.search.edit response golden", () => {
       fileEntries: [],
       requiresApply: false,
       expiresAt: new Date(0).toISOString(),
-      preconditionSnapshot: [],
       retrievalEvidence: {
         sources: [],
         topRanksPerSource: {},
@@ -140,7 +122,6 @@ describe("sdl.search.edit response golden", () => {
       ],
       requiresApply: true,
       expiresAt: new Date(0).toISOString(),
-      preconditionSnapshot: [],
     };
     assert.equal(response.retrievalEvidence, undefined);
   });
@@ -154,38 +135,16 @@ describe("sdl.search.edit response golden", () => {
       filesSkipped: 0,
       filesFailed: 1,
       results: [
-        {
-          file: "a.txt",
-          status: "written",
-          bytes: 42,
-          indexUpdate: { applied: true },
-        },
-        {
-          file: "b.txt",
-          status: "written",
-          bytes: 57,
-          indexUpdate: {
-            applied: false,
-            error: "overlay-unavailable",
-          },
-        },
-        {
-          file: "c.txt",
-          status: "failed",
-          reason: "EACCES",
-        },
+        { file: "a.txt", status: "written", bytes: 42, indexUpdate: { applied: true } },
+        { file: "b.txt", status: "written", bytes: 57, indexUpdate: { applied: false, error: "overlay-unavailable" } },
+        { file: "c.txt", status: "failed", reason: "EACCES" },
       ],
-      rollback: {
-        triggered: true,
-        restoredFiles: ["a.txt", "b.txt"],
-      },
+      rollback: { triggered: true, restoredFiles: ["a.txt", "b.txt"] },
     };
 
-    // Structural: verify results array has all expected status variants
     const statuses = new Set(response.results.map((r) => r.status));
     assert.ok(statuses.has("written"));
     assert.ok(statuses.has("failed"));
-    assert.ok(response.results.length === 3);
     assert.ok(Array.isArray(response.rollback.restoredFiles));
   });
 
@@ -205,8 +164,7 @@ describe("sdl.search.edit response golden", () => {
     assert.equal(response.rollback.restoredFiles.length, 0);
   });
 
-
-  it("preview response key set matches golden snapshot (catches field drift)", () => {
+  it("preview response key set matches golden snapshot", () => {
     const response: SearchEditPreviewResponse = {
       mode: "preview",
       planHandle: "se-keysnap",
@@ -223,7 +181,6 @@ describe("sdl.search.edit response golden", () => {
       }],
       requiresApply: true,
       expiresAt: "2026-01-01T00:00:00.000Z",
-      preconditionSnapshot: [{ file: "a.ts", sha256: "abc", mtimeMs: 1 }],
       retrievalEvidence: {
         sources: ["fts"],
         topRanksPerSource: { fts: [1] },
@@ -234,9 +191,9 @@ describe("sdl.search.edit response golden", () => {
     const EXPECTED_PREVIEW_KEYS = [
       "mode", "planHandle", "filesMatched", "matchesFound",
       "filesEligible", "filesSkipped", "fileEntries", "requiresApply",
-      "expiresAt", "preconditionSnapshot", "retrievalEvidence",
+      "expiresAt", "retrievalEvidence",
     ].sort();
-    assert.equal(EXPECTED_PREVIEW_KEYS.length, 11, "preview key count drift — update golden keys when interface changes");
+    assert.equal(EXPECTED_PREVIEW_KEYS.length, 10, "preview key count drift — update golden keys when interface changes");
     assert.deepEqual(Object.keys(response).sort(), EXPECTED_PREVIEW_KEYS);
 
     const EXPECTED_ENTRY_KEYS = [
@@ -245,7 +202,7 @@ describe("sdl.search.edit response golden", () => {
     assert.deepEqual(Object.keys(response.fileEntries[0]).sort(), EXPECTED_ENTRY_KEYS);
   });
 
-  it("apply response key set matches golden snapshot (catches field drift)", () => {
+  it("apply response key set matches golden snapshot", () => {
     const response: SearchEditApplyResponse = {
       mode: "apply",
       planHandle: "se-keysnap-apply",
@@ -253,12 +210,7 @@ describe("sdl.search.edit response golden", () => {
       filesWritten: 1,
       filesSkipped: 0,
       filesFailed: 0,
-      results: [{
-        file: "a.ts",
-        status: "written",
-        bytes: 100,
-        indexUpdate: { applied: true },
-      }],
+      results: [{ file: "a.ts", status: "written", bytes: 100, indexUpdate: { applied: true } }],
       rollback: { triggered: false, restoredFiles: [] },
     };
 
@@ -268,10 +220,5 @@ describe("sdl.search.edit response golden", () => {
     ].sort();
     assert.equal(EXPECTED_APPLY_KEYS.length, 8, "apply key count drift — update golden keys when interface changes");
     assert.deepEqual(Object.keys(response).sort(), EXPECTED_APPLY_KEYS);
-
-    const EXPECTED_RESULT_KEYS = [
-      "file", "status", "bytes", "indexUpdate",
-    ].sort();
-    assert.deepEqual(Object.keys(response.results[0]).sort(), EXPECTED_RESULT_KEYS);
   });
 });

@@ -173,7 +173,7 @@ Use SDL file and edit tools instead of native read/write paths.
 - Use `symbol.edit` `mode: "applyNow"` only with a fresh `astFingerprint` and range from a current symbol card.
 - For cross-file or repeated indexed-source edits, use `search.edit` `mode: "preview"` then `mode: "apply"`, or `sdl.file` `searchEditPreview` followed by `searchEditApply`. Bound the edit with files or symbols from `sdl.context`, `sdl.retrieve`, or `slice.build` first.
 - Prefer `targeting: "identifier"` for exact AST identifier replacements in supported structural languages that must avoid comments and strings, `targeting: "structural"` for tree-sitter capture edits such as calls, imports, properties, or plugin-defined grammar captures, and `operations[]` for heterogeneous batches.
-- Apply a returned plan handle only after reviewing snippets, file counts, and any `astMatches` capture summaries.
+- Apply a returned plan handle only after reviewing snippets, file counts, and operation summaries.
 - If preview snippets are insufficient, use plan-bound `previewWindow` or `sourceWindow` with the `planHandle`, `symbolId`, `reason`, `expectedLines`, and `identifiersToFind`; do not fall back to `file.read`.
 - `file.write` can make a targeted single-file write, including indexed files, but treat it as fallback for indexed source when `symbol.edit` cannot anchor the change and `search.edit` would be broader than necessary.
 - Use `sdl.workflow` plus `runtimeExecute` for a targeted script only when SDL edit tools cannot express the edit; pass multiline payloads through `stdin`.

@@ -640,23 +640,11 @@ export const RepoStatusResponseSchema = z.object({
       provider: z.enum(["watchman", "chokidar", "fsWatch"]).nullable(),
       configuredProvider: z.enum(["auto", "watchman", "chokidar", "fsWatch"]),
       fallbackReason: z.string().nullable(),
-      filesWatched: z.number().int().min(0),
-      eventsReceived: z.number().int().min(0),
-      eventsProcessed: z.number().int().min(0),
       errors: z.number().int().min(0),
       queueDepth: z.number().int().min(0),
-      restartCount: z.number().int().min(0),
       stale: z.boolean(),
-      lastEventAt: z.string().nullable(),
-      lastSuccessfulReindexAt: z.string().nullable(),
-      watchmanVersion: z.string().optional(),
-      watchmanWarningCount: z.number().int().min(0).optional(),
-      watchmanWarnings: z.array(z.string()).optional(),
-      watchmanRecrawlCount: z.number().int().min(0).optional(),
-      watchmanFreshInstanceCount: z.number().int().min(0).optional(),
-      watchmanWatchRoot: z.string().optional(),
-      watchmanRelativePath: z.string().nullable().optional(),
-      watchmanLastClock: z.string().nullable().optional(),
+      lastEventAt: z.string().nullable().optional(),
+      lastSuccessfulReindexAt: z.string().nullable().optional(),
     })
     .nullable()
     .optional(),
@@ -666,45 +654,13 @@ export const RepoStatusResponseSchema = z.object({
       enabled: z.boolean(),
       queueDepth: z.number().int().min(0),
       running: z.boolean(),
-      completed: z.number().int().min(0),
-      cancelled: z.number().int().min(0),
-      cacheHits: z.number().int().min(0),
-      cacheMisses: z.number().int().min(0),
-      wastedPrefetch: z.number().int().min(0),
       hitRate: z.number().min(0).max(1),
       wasteRate: z.number().min(0),
       avgLatencyReductionMs: z.number().min(0),
       lastRunAt: z.string().nullable(),
-      modelEnabled: z.boolean(),
-      strategyMetrics: z.array(
-        z.object({
-          strategy: z.string(),
-          hitRate: z.number().min(0),
-          wasteRate: z.number().min(0),
-          avgLatencyReductionMs: z.number().min(0),
-          samples: z.number().int().min(0),
-          cacheHits: z.number().int().min(0),
-          cacheMisses: z.number().int().min(0),
-          wastedPrefetch: z.number().int().min(0),
-        }),
-      ),
-      deterministicFallback: z.boolean(),
       policyMode: z.enum(["disabled", "observe", "safe"]),
-      outcomeSamples: z.number().int().min(0),
       suppressedPrefetch: z.number().int().min(0),
       acceptedPrefetch: z.number().int().min(0),
-      topStrategies: z.array(
-        z.object({
-          strategy: z.string(),
-          resourceKind: z.enum(["card", "slice", "window", "tool"]),
-          samples: z.number().int().min(0),
-          hitRate: z.number().min(0),
-          acceptedRate: z.number().min(0),
-          wasteRate: z.number().min(0),
-          score: z.number(),
-          suppressed: z.number().int().min(0),
-        }),
-      ),
     })
     .optional(),
   liveIndexStatus: z
@@ -1206,7 +1162,6 @@ export interface SymbolEditPreviewResponse {
   writeTarget: "file" | "draft";
   requiresApply: boolean;
   expiresAt: string;
-  preconditions: SymbolEditPreconditions;
   validation: SymbolEditValidationSummary;
   fileEntries: Array<{
     file: string;
@@ -1886,6 +1841,23 @@ const PolicyConfigSchema = z.object({
     .optional(),
 });
 
+export const PolicyPatchSchema = z
+  .object({
+    maxWindowLines: z.number().int().min(1).optional(),
+    maxWindowTokens: z.number().int().min(1).optional(),
+    requireIdentifiers: z.boolean().optional(),
+    allowBreakGlass: z.boolean().optional(),
+    defaultMinCallConfidence: z.number().min(0).max(1).optional(),
+    defaultDenyRaw: z.boolean().optional(),
+    budgetCaps: z
+      .object({
+        maxCards: z.number().int().min(1).optional(),
+        maxEstimatedTokens: z.number().int().min(100).optional(),
+      })
+      .optional(),
+  })
+  .strict();
+
 export const PolicyGetRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
 });
@@ -1901,9 +1873,9 @@ export const PolicyGetResponseSchema = z.object({
 export const PolicySetRequestSchema = z
   .object({
     repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
-    policyPatch: PolicyConfigSchema.partial().optional(),
+    policyPatch: PolicyPatchSchema.optional(),
   })
-  .merge(PolicyConfigSchema.partial())
+  .merge(PolicyPatchSchema)
   .transform(({ repoId, policyPatch, ...flat }) => {
     const mergedPatch = { ...flat, ...(policyPatch ?? {}) };
     return { repoId, policyPatch: mergedPatch };
@@ -2210,7 +2182,7 @@ export const PRRiskAnalysisRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   fromVersion: z.string(),
   toVersion: z.string(),
-  riskThreshold: z.number().int().min(0).max(100).optional(),
+  riskThreshold: z.number().min(0).max(100).optional(),
   budget: z
     .object({
       maxChangedSymbols: z.number().int().min(1).max(200).optional(),
@@ -3692,17 +3664,11 @@ export interface SearchEditPreviewResponse {
         name: string;
         nodeType: string;
         text: string;
-        startByte: number;
-        endByte: number;
-        range: Range;
       };
       captures: Array<{
         name: string;
         nodeType: string;
         text: string;
-        startByte: number;
-        endByte: number;
-        range: Range;
       }>;
     }>;
     operationIds?: string[];
@@ -3714,11 +3680,6 @@ export interface SearchEditPreviewResponse {
   }>;
   requiresApply: boolean;
   expiresAt: string;
-  preconditionSnapshot: Array<{
-    file: string;
-    sha256: string | null;
-    mtimeMs: number | null;
-  }>;
   partial?: boolean;
   retrievalEvidence?: RetrievalEvidence;
   diagnostics?: z.infer<typeof ToolTimingDiagnosticsSchema>;

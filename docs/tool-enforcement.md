@@ -50,7 +50,7 @@ The generated enforcement files also teach:
 - use `file.read` and `file.write` inside SDL-MCP for non-indexed files with targeted modes
 - use `symbol.edit` or the symbol edit preview/apply path for one-symbol indexed source writes
 - use `searchEditPreview` with `targeting:"identifier"` for exact AST identifier replacements in supported structural languages, `targeting:"structural"` for tree-sitter capture edits, and `operations[]` for heterogeneous batches
-- review snippets, file counts, and `astMatches` before applying the returned plan handle
+- review snippets, file counts, and operation summaries before applying the returned plan handle
 - pass multiline runtime input through `runtimeExecute` `stdin` instead of shell quoting or base64 workarounds
 
 If an agent falls back to native repo file tools or native shell commands while SDL-MCP is active, you lose much of the token-efficiency benefit and bypass the graph-aware policy.

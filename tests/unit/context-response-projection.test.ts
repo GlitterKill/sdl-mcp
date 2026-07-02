@@ -841,7 +841,7 @@ describe("context-response-projection", () => {
       });
     });
 
-    it("keeps edit precondition fields for edit tools", () => {
+    it("hides edit precondition fields for edit tools", () => {
       const projected = projectToolResultForModelContent(
         "search.edit",
         {
@@ -858,15 +858,34 @@ describe("context-response-projection", () => {
 
       assert.deepEqual(projected, {
         planHandle: "plan-1",
-        preconditionSnapshot: {
-          sha256: "abc",
-          mtimeMs: 123,
-          astFingerprint: "ast-1",
-        },
       });
     });
 
-    it("keeps file edit preconditions in real workflow child results", () => {
+    it("hides edit precondition fields even at full detail", () => {
+      const projected = projectToolResultForModelContent(
+        "search.edit",
+        {
+          mode: "preview",
+          planHandle: "se-test",
+          preconditionSnapshot: [{ file: "a.ts", sha256: "abc", mtimeMs: 1 }],
+          fileEntries: [
+            {
+              file: "a.ts",
+              astFingerprint: "fp",
+              expectedRange: { startLine: 1, endLine: 2 },
+            },
+          ],
+        },
+        { detail: "full" },
+      ) as Record<string, unknown>;
+
+      assert.equal("preconditionSnapshot" in projected, false);
+      const entry = (projected.fileEntries as Array<Record<string, unknown>>)[0];
+      assert.equal("astFingerprint" in entry, false);
+      assert.equal("expectedRange" in entry, false);
+    });
+
+    it("hides file edit preconditions in real workflow child results", () => {
       const projected = projectToolResultForModelContent(
         "sdl.workflow",
         {
@@ -903,16 +922,52 @@ describe("context-response-projection", () => {
             result: {
               planHandle: "plan-1",
               mode: "preview",
-              sha256: "abc",
-              mtimeMs: 123,
-              astFingerprint: "ast-1",
             },
           },
         ],
       });
     });
 
-    it("keeps symbol card fingerprints for edit workflows", () => {
+    it("hides file edit preconditions in full-detail workflow child results", () => {
+      const projected = projectToolResultForModelContent(
+        "sdl.workflow",
+        {
+          results: [
+            {
+              fn: "file",
+              status: "ok",
+              result: {
+                planHandle: "plan-1",
+                mode: "preview",
+                preconditionSnapshot: [{ file: "a.ts", sha256: "abc", mtimeMs: 123 }],
+                sha256: "abc",
+                mtimeMs: 123,
+                astFingerprint: "ast-1",
+                expiresAt: "2026-01-01T00:00:00.000Z",
+              },
+            },
+          ],
+        },
+        {
+          detail: "full",
+          steps: [
+            {
+              fn: "file",
+              args: { op: "searchEditPreview" },
+            },
+          ],
+        },
+      ) as Record<string, unknown>;
+
+      const child = (projected.results as Array<Record<string, unknown>>)[0]
+        .result as Record<string, unknown>;
+      assert.equal("preconditionSnapshot" in child, false);
+      assert.equal("sha256" in child, false);
+      assert.equal("mtimeMs" in child, false);
+      assert.equal("astFingerprint" in child, false);
+    });
+
+    it("hides top-level symbol card fingerprint fields from model content", () => {
       const projected = projectToolResultForModelContent(
         "symbol.getCard",
         {
@@ -930,9 +985,6 @@ describe("context-response-projection", () => {
       assert.deepEqual(projected, {
         symbolId: "sym-1",
         name: "target",
-        astFingerprint: "ast-1",
-        sha256: "abc",
-        mtimeMs: 123,
       });
     });
 

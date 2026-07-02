@@ -603,7 +603,6 @@ async function buildPreview(
     writeTarget: target.writeTarget,
     requiresApply: true,
     expiresAt: new Date(plan.expiresAt).toISOString(),
-    preconditions,
     validation: planned.validation,
     fileEntries,
   };

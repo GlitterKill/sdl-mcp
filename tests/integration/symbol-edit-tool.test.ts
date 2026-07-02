@@ -222,7 +222,7 @@ describe("sdl.symbol.edit", { concurrency: false }, () => {
     })) as SymbolEditPreviewResponse;
 
     assert.equal(preview.writeTarget, "draft");
-    assert.equal(preview.preconditions.draft?.version, 1);
+    assert.equal("preconditions" in preview, false);
 
     const apply = (await handleSymbolEdit({
       mode: "apply",

@@ -144,6 +144,31 @@ export async function handleBufferCheckpoint(
   }
 }
 
+export function compactBufferStatusForAgent(
+  status: BufferStatusResponse,
+): BufferStatusResponse {
+  const compact: BufferStatusResponse = {
+    repoId: status.repoId,
+    enabled: status.enabled,
+    pendingBuffers: status.pendingBuffers,
+    dirtyBuffers: status.dirtyBuffers,
+    parseQueueDepth: status.parseQueueDepth,
+    checkpointPending: status.checkpointPending,
+    lastBufferEventAt: status.lastBufferEventAt,
+    lastCheckpointAt: status.lastCheckpointAt,
+  };
+  if (status.lastCheckpointAttemptAt != null) compact.lastCheckpointAttemptAt = status.lastCheckpointAttemptAt;
+  if (status.lastCheckpointResult != null) compact.lastCheckpointResult = status.lastCheckpointResult;
+  if (status.lastCheckpointError != null) compact.lastCheckpointError = status.lastCheckpointError;
+  if (status.lastCheckpointReason != null) compact.lastCheckpointReason = status.lastCheckpointReason;
+  if (status.reconcileQueueDepth !== undefined) compact.reconcileQueueDepth = status.reconcileQueueDepth;
+  if (status.oldestReconcileAt != null) compact.oldestReconcileAt = status.oldestReconcileAt;
+  if (status.lastReconciledAt != null) compact.lastReconciledAt = status.lastReconciledAt;
+  if (status.reconcileInflight !== undefined) compact.reconcileInflight = status.reconcileInflight;
+  if (status.reconcileLastError != null) compact.reconcileLastError = status.reconcileLastError;
+  return compact;
+}
+
 export async function handleBufferStatus(
   args: unknown,
   _context?: ToolContext,
@@ -151,7 +176,8 @@ export async function handleBufferStatus(
 ): Promise<BufferStatusResponse> {
   try {
     const request = BufferStatusRequestSchema.parse(args);
-    return await resolveLiveIndex(liveIndex).getLiveStatus(request.repoId);
+    const status = await resolveLiveIndex(liveIndex).getLiveStatus(request.repoId);
+    return compactBufferStatusForAgent(status);
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(

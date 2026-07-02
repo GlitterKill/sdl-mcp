@@ -153,26 +153,11 @@ const REPO_ID_VISIBLE_TOOLS = new Set([
 
 const PRECONDITION_MODEL_FIELDS = new Set([
   "astFingerprint",
+  "expectedAstFingerprint",
+  "expectedRange",
   "mtimeMs",
   "preconditionSnapshot",
   "sha256",
-]);
-
-const PRECONDITION_VISIBLE_TOOLS = new Set([
-  "search.edit",
-  "sdl.search.edit",
-  "symbol.edit",
-  "sdl.symbol.edit",
-  "symbol.getCard",
-  "sdl.symbol.getCard",
-]);
-
-const FILE_PRECONDITION_OPS = new Set([
-  "searchEditPreview",
-  "searchEditApply",
-  "symbolEditPreview",
-  "symbolEditApply",
-  "symbolEditApplyNow",
 ]);
 
 const WORKFLOW_CHILD_TOOL_NAMES: Record<string, string> = {
@@ -207,9 +192,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function stripEtagFieldsForModel(value: unknown): unknown {
+function stripFullDetailHiddenFieldsForModel(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map(stripEtagFieldsForModel);
+    return value.map(stripFullDetailHiddenFieldsForModel);
   }
   if (!isRecord(value)) {
     return value;
@@ -217,9 +202,10 @@ function stripEtagFieldsForModel(value: unknown): unknown {
 
   const projected: Record<string, unknown> = {};
   for (const [key, itemValue] of Object.entries(value)) {
-    if (!HIDDEN_ETAG_MODEL_FIELDS.has(key)) {
-      projected[key] = stripEtagFieldsForModel(itemValue);
+    if (HIDDEN_ETAG_MODEL_FIELDS.has(key) || PRECONDITION_MODEL_FIELDS.has(key)) {
+      continue;
     }
+    projected[key] = stripFullDetailHiddenFieldsForModel(itemValue);
   }
   return projected;
 }
@@ -327,29 +313,19 @@ function shouldDropNoOpField(key: string, value: unknown): boolean {
   return false;
 }
 
-function keepsPreconditionField(
-  toolName: string,
-  options: ModelContentProjectionOptions,
-): boolean {
-  return PRECONDITION_VISIBLE_TOOLS.has(toolName)
-    || ((toolName === "sdl.file" || toolName === "file")
-      && typeof options.fileOp === "string"
-      && FILE_PRECONDITION_OPS.has(options.fileOp));
-}
-
 function shouldKeepModelField(
   toolName: string,
   key: string,
   options: ModelContentProjectionOptions,
 ): boolean {
+  if (PRECONDITION_MODEL_FIELDS.has(key)) {
+    return false;
+  }
   if (isFullDetail(options)) {
     return true;
   }
   if (key === "trace") {
     return toolName === "sdl.workflow" && options.includeTrace;
-  }
-  if (PRECONDITION_MODEL_FIELDS.has(key) && keepsPreconditionField(toolName, options)) {
-    return true;
   }
   if (ALWAYS_INTERNAL_MODEL_FIELDS.has(key)) {
     return false;
@@ -531,7 +507,7 @@ function projectWorkflowStepResultForModel(
   const childArgOptions = isRecord(args) ? modelOptionsFromArgs(args) : undefined;
   const fileOp = inferWorkflowFileOp(childToolName, result, args);
   if (isFullDetail(options)) {
-    return stripEtagFieldsForModel(result);
+    return stripFullDetailHiddenFieldsForModel(result);
   }
   const childOptions: ModelContentProjectionOptions = {
     ...options,
@@ -545,7 +521,7 @@ function projectWorkflowStepResultForModel(
   };
 
   if (isFullDetail(childOptions)) {
-    return stripEtagFieldsForModel(result);
+    return stripFullDetailHiddenFieldsForModel(result);
   }
 
   if (childToolName === "repo.status") {
@@ -863,7 +839,7 @@ export function projectToolResultForModelContent(
     return projectWorkflowResultForModel(result, options, args);
   }
   if (isFullDetail(options)) {
-    return result;
+    return stripFullDetailHiddenFieldsForModel(result);
   }
   if (CONTEXT_TOOLS.has(toolName) && ("answer" in result || "finalEvidence" in result)) {
     return projectContextResultForModel(result, options);

@@ -266,6 +266,27 @@ describe("code-mode workflow executor", () => {
     assert.strictEqual(result.trace?.totals.tokens, result.totalTokens);
   });
 
+
+  it("uses workflow token budget as the default per-step response cap", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [{ fn: "testLarge", action: "test.large", args: {} }],
+      budget: { maxTokens: 300 },
+      onError: "continue",
+    };
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+    );
+
+    assert.strictEqual(result.results[0].status, "ok");
+    assert.ok(result.results[0].truncatedResponse);
+    assert.ok(result.totalTokens <= 300);
+    assert.ok(result.results[0].truncatedResponse.continuationHandle);
+  });
+
   it("treats workflow budget maxTokens as a maxTotalTokens alias", async () => {
     const request: ParsedWorkflowRequest = {
       repoId: "test",

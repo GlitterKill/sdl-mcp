@@ -15,6 +15,19 @@ import { logger } from "../util/logger.js";
 
 const IS_WINDOWS = process.platform === "win32";
 
+export function classifyRuntimeStatus(input: {
+  cancelled: boolean;
+  timedOut: boolean;
+  exitCode: number | null;
+  signal: string | null;
+}): ExecutionResult["status"] {
+  if (input.cancelled) return "cancelled";
+  if (input.timedOut && !(input.exitCode === 0 && input.signal === null)) {
+    return "timeout";
+  }
+  return input.exitCode === 0 ? "success" : "failure";
+}
+
 export function killProcessTree(pid: number): void {
   if (!Number.isInteger(pid) || pid <= 0) {
     logger.warn("killProcessTree: invalid PID, skipping", { pid });
@@ -235,7 +248,14 @@ export async function execute(
   clearTimeout(timer);
   request.signal?.removeEventListener("abort", onAbort);
 
-  if (timedOut) {
+  const status = classifyRuntimeStatus({
+    cancelled,
+    timedOut,
+    exitCode,
+    signal: signal ?? null,
+  });
+
+  if (status === "timeout") {
     logger.warn("Runtime execution timed out", {
       timeoutMs: request.timeoutMs,
       error: `Runtime execution timed out after ${request.timeoutMs}ms`,
@@ -244,13 +264,7 @@ export async function execute(
   }
 
   return {
-    status: cancelled
-      ? "cancelled"
-      : timedOut
-        ? "timeout"
-        : exitCode === 0
-          ? "success"
-          : "failure",
+    status,
     exitCode,
     signal: signal ?? null,
     durationMs: Date.now() - startTime,

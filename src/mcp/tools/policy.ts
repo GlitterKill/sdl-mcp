@@ -3,6 +3,7 @@ import {
   PolicyGetResponse,
   PolicySetRequestSchema,
   PolicySetResponse,
+  PolicyPatchSchema,
 } from "../tools.js";
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
@@ -10,6 +11,41 @@ import { PolicyConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { DatabaseError } from "../errors.js";
 import { safeJsonParseOrThrow, ConfigObjectSchema } from "../../util/safeJson.js";
+
+type PolicyPatch = {
+  maxWindowLines?: number;
+  maxWindowTokens?: number;
+  requireIdentifiers?: boolean;
+  allowBreakGlass?: boolean;
+  defaultMinCallConfidence?: number;
+  defaultDenyRaw?: boolean;
+  budgetCaps?: {
+    maxCards?: number;
+    maxEstimatedTokens?: number;
+  };
+};
+
+function mergePolicyOverrides(
+  existingPolicyOverrides: PolicyPatch,
+  validatedPatch: PolicyPatch,
+): PolicyPatch {
+  const mergedOverrides: PolicyPatch = {
+    ...existingPolicyOverrides,
+    ...validatedPatch,
+  };
+
+  // budgetCaps is itself a patch; preserve the unspecified cap when only one is changed.
+  if (existingPolicyOverrides.budgetCaps || validatedPatch.budgetCaps) {
+    mergedOverrides.budgetCaps = {
+      ...(existingPolicyOverrides.budgetCaps ?? {}),
+      ...(validatedPatch.budgetCaps ?? {}),
+    };
+  }
+
+  return mergedOverrides;
+}
+
+export const _policyToolTesting = { mergePolicyOverrides };
 
 /**
  * Handles policy retrieval requests.
@@ -83,13 +119,11 @@ export async function handlePolicySet(
       configJson.policy && typeof configJson.policy === "object"
         ? configJson.policy
         : {};
-    const validatedPatch = PolicyConfigSchema.partial().strict().parse(
-      policyPatch,
+    const validatedPatch = PolicyPatchSchema.parse(policyPatch);
+    const mergedOverrides = mergePolicyOverrides(
+      existingPolicyOverrides as PolicyPatch,
+      validatedPatch,
     );
-    const mergedOverrides = {
-      ...existingPolicyOverrides,
-      ...validatedPatch,
-    };
     PolicyConfigSchema.parse({
       ...appConfig.policy,
       ...mergedOverrides,

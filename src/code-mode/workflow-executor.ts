@@ -64,6 +64,16 @@ function applyStepTruncation(
   }
 }
 
+function getDefaultStepResponseTokens(
+  request: ParsedWorkflowRequest,
+): number | undefined {
+  return (
+    request.defaultMaxResponseTokens ??
+    request.budget?.maxTotalTokens ??
+    request.budget?.maxTokens
+  );
+}
+
 function getGatewayFailureMessage(action: string, result: unknown): string | null {
   if (result == null || typeof result !== "object") return null;
   const record = result as Record<string, unknown>;
@@ -540,7 +550,7 @@ export async function executeWorkflow(
           durationMs: stepDuration,
           status: "ok",
         };
-        applyStepTruncation(stepResult, step, request.defaultMaxResponseTokens);
+        applyStepTruncation(stepResult, step, getDefaultStepResponseTokens(request));
         budget.record(stepResult.tokens, stepDuration);
         attachStepMetadataToPriorResult(priorResults, i, result, stepResult);
         stepResults.push(stepResult);
@@ -709,7 +719,7 @@ export async function executeWorkflow(
               }
             : {}),
         };
-        applyStepTruncation(stepResult, step, request.defaultMaxResponseTokens);
+        applyStepTruncation(stepResult, step, getDefaultStepResponseTokens(request));
         budget.record(stepResult.tokens, stepDuration);
         tokenAccumulator.recordUsage(step.fn, stepResult.tokens, rawEquivalent);
         attachStepMetadataToPriorResult(priorResults, i, result, stepResult);

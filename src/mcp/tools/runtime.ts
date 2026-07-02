@@ -275,7 +275,11 @@ function detectRuntimeHints(
 // Intent-Only Excerpts (for outputMode: "intent")
 // ============================================================================
 
-function generateIntentExcerpts(
+function isWindowsCmdEchoLine(line: string): boolean {
+  return /^[A-Za-z]:\\[^>]*>/.test(line) || /^\\\\[^>]+>/.test(line);
+}
+
+export function generateIntentExcerpts(
   stdout: string,
   stderr: string,
   queryTerms: string[],
@@ -291,6 +295,9 @@ function generateIntentExcerpts(
       i < lines.length && excerpts.length < RUNTIME_MAX_KEYWORD_EXCERPTS;
       i++
     ) {
+      if (source === "stdout" && isWindowsCmdEchoLine(lines[i])) {
+        continue;
+      }
       const lower = lines[i].toLowerCase();
       if (lowerTerms.some((t) => lower.includes(t))) {
         const start = Math.max(0, i - boundedContextLines);
@@ -303,6 +310,10 @@ function generateIntentExcerpts(
           lineEnd: end + 1,
           content: lines
             .slice(start, end + 1)
+            .filter(
+              (line) =>
+                !(source === "stdout" && isWindowsCmdEchoLine(line)),
+            )
             .map(truncateLine)
             .join("\n"),
           source,
@@ -314,8 +325,10 @@ function generateIntentExcerpts(
 
   if (stdout) searchStream(stdout.split("\n"), "stdout");
   if (stderr) searchStream(stderr.split("\n"), "stderr");
-  return excerpts;
+  return excerpts.filter((excerpt) => excerpt.content.length > 0);
 }
+
+export const _runtimeToolTesting = { generateIntentExcerpts };
 
 // ============================================================================
 // Excerpt Generation

@@ -3,6 +3,7 @@ import { loadConfig } from "../../config/loadConfig.js";
 import {
   refreshSemanticEnrichment,
   getSemanticEnrichmentStatus,
+  type SemanticEnrichmentStatusResult,
 } from "../../semantic/enrichment.js";
 import {
   SemanticEnrichmentRefreshRequestSchema,
@@ -17,10 +18,24 @@ export async function handleSemanticEnrichmentRefresh(
   return refreshSemanticEnrichment(request, loadConfig());
 }
 
+export function compactSemanticEnrichmentStatusForAgent(
+  result: SemanticEnrichmentStatusResult,
+): object {
+  return {
+    ...result,
+    selections: result.selections.map(({ languageId, selected }) => ({
+      languageId,
+      ...(selected ? { selected } : {}),
+    })),
+    lastRuns: result.lastRuns.map(({ metadataJson: _metadataJson, ...run }) => run),
+  };
+}
+
 export async function handleSemanticEnrichmentStatus(
   args: unknown,
   _context?: ToolContext,
 ): Promise<object> {
   const request = SemanticEnrichmentStatusRequestSchema.parse(args);
-  return getSemanticEnrichmentStatus(request, loadConfig());
+  const status = await getSemanticEnrichmentStatus(request, loadConfig());
+  return compactSemanticEnrichmentStatusForAgent(status);
 }

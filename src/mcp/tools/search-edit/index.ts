@@ -61,12 +61,37 @@ function summarizeSkippedFiles(
 
 type SkippedFilesSummary = ReturnType<typeof summarizeSkippedFiles>;
 
+function compactSearchEditFileEntries(
+  fileEntries: PreviewResult["summary"]["fileEntries"],
+): SearchEditPreviewResponse["fileEntries"] {
+  return fileEntries.map(({ astMatches, ...entry }) => ({
+    ...entry,
+    ...(astMatches
+      ? {
+          astMatches: astMatches.map((match) => ({
+            target: {
+              name: match.target.name,
+              nodeType: match.target.nodeType,
+              text: match.target.text,
+            },
+            captures: match.captures.map((capture) => ({
+              name: capture.name,
+              nodeType: capture.nodeType,
+              text: capture.text,
+            })),
+          })),
+        }
+      : {}),
+  }));
+}
+
 function compactStoredSummary(
   summary: PreviewResult["summary"],
   skippedSummary: SkippedFilesSummary,
 ): Record<string, unknown> {
   return {
     ...summary,
+    fileEntries: compactSearchEditFileEntries(summary.fileEntries),
     filesSkipped: skippedSummary.filesSkipped,
     filesSkippedTotal: skippedSummary.filesSkippedTotal,
     ...(skippedSummary.filesSkippedTruncated
@@ -161,14 +186,9 @@ async function handlePreview(
       ? { filesSkippedTruncated: true }
       : {}),
     filesSkippedByReason: skippedSummary.filesSkippedByReason,
-    fileEntries: preview.summary.fileEntries,
+    fileEntries: compactSearchEditFileEntries(preview.summary.fileEntries),
     requiresApply: preview.edits.length > 0,
     expiresAt: new Date(stored.expiresAt).toISOString(),
-    preconditionSnapshot: preview.preconditions.map((pc) => ({
-      file: pc.relPath,
-      sha256: pc.sha256,
-      mtimeMs: pc.mtimeMs,
-    })),
     ...(preview.summary.partial ? { partial: true } : {}),
     ...(preview.retrievalEvidence
       ? { retrievalEvidence: compactRetrievalEvidence(preview.retrievalEvidence) }

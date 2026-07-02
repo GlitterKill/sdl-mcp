@@ -100,7 +100,7 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     assert.equal(response.filesMatched, 2);
     assert.ok(response.matchesFound >= 2);
     assert.ok(response.requiresApply);
-    assert.equal(response.preconditionSnapshot.length, 2);
+    assert.equal("preconditionSnapshot" in response, false);
     const files = response.fileEntries.map((e) => e.file).sort();
     assert.deepEqual(files, ["a.txt", "b.txt"]);
   });

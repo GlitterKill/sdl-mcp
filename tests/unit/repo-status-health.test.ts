@@ -28,7 +28,7 @@ describe("repo status health fields", () => {
     assert.ok(source.includes("serverInfo: getServerInfo(),"));
   });
 
-  it("allows compact repo status without full health telemetry fields", () => {
+  it("allows compact repo status without health or telemetry fields", () => {
     const parsed = RepoStatusResponseSchema.parse({
       repoId: "sdl-mcp",
       rootPath: ".",
@@ -36,7 +36,6 @@ describe("repo status health fields", () => {
       filesIndexed: 1,
       symbolsIndexed: 1,
       lastIndexedAt: new Date().toISOString(),
-      healthAvailable: false,
       derivedState: {
         stale: false,
         clustersDirty: false,
@@ -50,6 +49,7 @@ describe("repo status health fields", () => {
       },
     });
 
+    assert.strictEqual(parsed.healthAvailable, undefined);
     assert.strictEqual(parsed.healthComponents, undefined);
     assert.strictEqual(parsed.watcherHealth, undefined);
     assert.strictEqual(parsed.prefetchStats, undefined);
@@ -58,7 +58,7 @@ describe("repo status health fields", () => {
     assert.strictEqual(parsed.derivedState?.stale, false);
   });
 
-  it("accepts standard/full telemetry fields when requested", () => {
+  it("accepts compact standard/full telemetry fields when requested", () => {
     const parsed = RepoStatusResponseSchema.parse({
       repoId: "sdl-mcp",
       rootPath: ".",
@@ -74,28 +74,27 @@ describe("repo status health fields", () => {
         edgeQuality: 1,
       },
       healthAvailable: true,
-      watcherHealth: null,
+      watcherHealth: {
+        enabled: true,
+        running: true,
+        provider: "watchman",
+        configuredProvider: "auto",
+        fallbackReason: null,
+        errors: 0,
+        queueDepth: 0,
+        stale: false,
+      },
       prefetchStats: {
         enabled: false,
         queueDepth: 0,
         running: false,
-        completed: 0,
-        cancelled: 0,
-        cacheHits: 0,
-        cacheMisses: 0,
-        wastedPrefetch: 0,
         hitRate: 0,
         wasteRate: 5.5,
         avgLatencyReductionMs: 0,
         lastRunAt: null,
-        modelEnabled: true,
-        strategyMetrics: [],
-        deterministicFallback: false,
         policyMode: "safe",
-        outcomeSamples: 0,
         suppressedPrefetch: 0,
         acceptedPrefetch: 0,
-        topStrategies: [],
       },
       liveIndexStatus: {
         enabled: true,
@@ -125,13 +124,12 @@ describe("repo status health fields", () => {
 
     assert.strictEqual(parsed.healthScore, 88);
     assert.strictEqual(parsed.healthAvailable, true);
+    assert.ok(parsed.watcherHealth);
+    assert.equal("watchmanVersion" in parsed.watcherHealth, false);
     assert.ok(parsed.prefetchStats);
     assert.strictEqual(parsed.prefetchStats.wasteRate, 5.5);
-    assert.strictEqual(parsed.prefetchStats.modelEnabled, true);
-    assert.deepStrictEqual(parsed.prefetchStats.strategyMetrics, []);
-    assert.strictEqual(parsed.prefetchStats.deterministicFallback, false);
-    assert.strictEqual(parsed.prefetchStats.policyMode, "safe");
-    assert.deepStrictEqual(parsed.prefetchStats.topStrategies, []);
+    assert.equal("strategyMetrics" in parsed.prefetchStats, false);
+    assert.equal("topStrategies" in parsed.prefetchStats, false);
     assert.strictEqual(parsed.liveIndexStatus?.enabled, true);
     assert.strictEqual(parsed.liveIndexStatus?.lastCheckpointResult, "success");
     assert.strictEqual(parsed.serverInfo?.version, "0.0.0-test");

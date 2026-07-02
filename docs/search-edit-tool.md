@@ -146,11 +146,10 @@ Unsupported file extensions are skipped before parsing. Lazy language-pack
 extensions are eligible as soon as the pack's tree-sitter grammar is available
 through the shared grammar loader.
 
-AST-aware previews include a bounded `astMatches` sample in each affected
-`fileEntries[]` item. Each sample carries the selected target capture plus
-named captures with byte offsets and 1-based line ranges. Capture text is
-truncated, and only the first few matches/captures are included to preserve
-the normal token budget.
+AST-aware previews keep parser internals server-side. Agent-visible
+`fileEntries[]` include match counts, snippets, operation summaries, and compact
+AST match text (`name`, `nodeType`, `text`). Byte offsets, ranges, and
+precondition hashes stay behind the plan handle used by apply.
 
 Identifier-aware rename example:
 
@@ -251,9 +250,6 @@ payload.
   ],
   "requiresApply": true,
   "expiresAt": "2026-04-20T03:30:00.000Z",
-  "preconditionSnapshot": [
-    { "file": "src/auth/token.ts", "sha256": "<hex>", "mtimeMs": 1776643997401 }
-  ],
   "retrievalEvidence": {
     "sources": ["fts", "vector"],
     "topRanksPerSource": { "fts": [1, 3], "vector": [2] },

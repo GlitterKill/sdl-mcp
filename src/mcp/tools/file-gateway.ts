@@ -592,7 +592,9 @@ async function handleFileGatewayPreviewWindow(
     planHandle: request.planHandle,
     file: relPath,
     indexedSource: true,
-    snippets: findPlanPreviewEntry(plan, relPath)?.snippets,
+    ...(request.op === "previewWindow"
+      ? { snippets: findPlanPreviewEntry(plan, relPath)?.snippets }
+      : {}),
     codeWindow,
   };
 }

@@ -470,7 +470,7 @@ Use this for edits where the target is one symbol. Use `sdl.search.edit` for cro
 
 **Operations:** `replaceSymbol`, `replaceBody`, `replaceSignature`, `insertBefore`, `insertAfter`, and `renameLocal`. TypeScript, TSX, JavaScript, and JSX support all operations. Other indexed languages support only full-symbol replacement and adjacent inserts when symbol ranges are available and the language adapter can parse before and after the edit.
 
-**Response:** preview returns `{ mode, planHandle, symbolId, file, writeTarget, preconditions, validation, fileEntries }`; apply returns `{ mode, filesWritten, results, validation, draftUpdate? }`.
+**Response:** preview returns `{ mode, planHandle, symbolId, file, writeTarget, validation, fileEntries }`; apply returns `{ mode, filesWritten, results, validation, draftUpdate? }`. Preconditions are held server-side by the plan handle and rechecked on apply.
 
 **Examples:**
 
@@ -689,7 +689,7 @@ Assess PR-level risk from delta and blast radius, producing findings, impact ana
 | `repoId`        | `string`  | Yes      | Repository identifier                                         |
 | `fromVersion`   | `string`  | Yes      | Base version ID                                               |
 | `toVersion`     | `string`  | Yes      | Target version ID                                             |
-| `riskThreshold` | `integer` | No       | Risk threshold 0-100 (raise to focus on highest-risk changes) |
+| `riskThreshold` | `number`  | No       | Risk threshold 0-100 (raise to focus on highest-risk changes) |
 
 **Response includes:**
 

@@ -9,8 +9,6 @@ import { z } from "zod";
 import {
   SYMBOL_SEARCH_MAX_RESULTS,
   PAGE_SIZE_MAX,
-  DEFAULT_MAX_WINDOW_LINES,
-  DEFAULT_MAX_WINDOW_TOKENS,
   RUNTIME_MIN_TIMEOUT_MS,
   RUNTIME_MAX_TIMEOUT_MS,
   RUNTIME_MAX_ARG_COUNT,
@@ -199,7 +197,7 @@ const PRRiskAnalyzeAction = z.object({
   action: z.literal("pr.risk.analyze"),
   fromVersion: z.string(),
   toVersion: z.string(),
-  riskThreshold: z.number().int().min(0).max(100).optional(),
+  riskThreshold: z.number().min(0).max(100).optional(),
 });
 
 const ResponseGetAction = z.object({
@@ -347,13 +345,11 @@ const PolicySetAction = z.object({
       .number()
       .int()
       .min(1)
-      .default(DEFAULT_MAX_WINDOW_LINES)
       .optional(),
     maxWindowTokens: z
       .number()
       .int()
       .min(1)
-      .default(DEFAULT_MAX_WINDOW_TOKENS)
       .optional(),
     requireIdentifiers: z.boolean().optional(),
     allowBreakGlass: z.boolean().optional(),
@@ -364,14 +360,6 @@ const PolicySetAction = z.object({
         maxCards: z.number().int().min(1).optional(),
         maxEstimatedTokens: z.number().int().min(1).optional(),
       })
-      .refine(
-        (caps) =>
-          caps.maxCards !== undefined && caps.maxEstimatedTokens !== undefined,
-        {
-          message:
-            "budgetCaps patch must include both maxCards and maxEstimatedTokens",
-        },
-      )
       .optional(),
   }),
 });

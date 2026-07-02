@@ -518,7 +518,7 @@ Previews or applies a symbol-scoped edit with symbol, file, and draft preconditi
 
 **Operations:** `replaceSymbol`, `replaceBody`, `replaceSignature`, `insertBefore`, `insertAfter`, and `renameLocal`.
 
-**Response:** Preview returns a `planHandle`, target symbol, file, write target (`file` or `draft`), preconditions, validation status, and diff snippets. Apply returns write results, validation status, rollback metadata, and `draftUpdate` when the plan targeted a live overlay.
+**Response:** Preview returns a `planHandle`, target symbol, file, write target (`file` or `draft`), validation status, and diff snippets. Preconditions stay server-side in the plan handle and are rechecked on apply. Apply returns write results, validation status, rollback metadata, and `draftUpdate` when the plan targeted a live overlay.
 
 **Safety:** Apply rejects stale `astFingerprint`, stale range, stale saved-file sha, and stale draft version/content. Parse-after validation rejects invalid edits before writing.
 

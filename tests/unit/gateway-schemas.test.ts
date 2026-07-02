@@ -171,6 +171,16 @@ describe("Gateway schemas", () => {
       assert.strictEqual(result.success, true);
     });
 
+    it("keeps empty policy.set patches empty", () => {
+      const result = RepoGatewaySchema.parse({
+        repoId: "test-repo",
+        action: "policy.set",
+        policyPatch: {},
+      });
+
+      assert.deepStrictEqual(result.policyPatch, {});
+    });
+
     it("rejects direct SCIP ingest because provider inputs are provider-first only", () => {
       const result = RepoGatewaySchema.safeParse({
         repoId: "test-repo",
@@ -180,7 +190,7 @@ describe("Gateway schemas", () => {
       assert.strictEqual(result.success, false);
     });
 
-    it("rejects partial policy.set budgetCaps patches", () => {
+    it("accepts partial policy.set budgetCaps patches", () => {
       const result = RepoGatewaySchema.safeParse({
         repoId: "test-repo",
         action: "policy.set",
@@ -190,7 +200,11 @@ describe("Gateway schemas", () => {
           },
         },
       });
-      assert.strictEqual(result.success, false);
+      assert.strictEqual(result.success, true);
+
+      assert.deepStrictEqual(result.data.policyPatch.budgetCaps, {
+        maxCards: 10,
+      });
     });
 
     it("validates search.edit preview with responseMode", () => {

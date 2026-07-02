@@ -550,6 +550,42 @@ export async function handleRepoStatus(
       },
       isStale: false,
     };
+
+function compactWatcherHealthForStatus(
+  watcherHealth: ReturnType<typeof getWatcherHealth>,
+) {
+  if (!watcherHealth) return watcherHealth;
+  return {
+    enabled: watcherHealth.enabled,
+    running: watcherHealth.running,
+    provider: watcherHealth.provider,
+    configuredProvider: watcherHealth.configuredProvider,
+    fallbackReason: watcherHealth.fallbackReason,
+    errors: watcherHealth.errors,
+    queueDepth: watcherHealth.queueDepth,
+    stale: watcherHealth.stale,
+    lastEventAt: watcherHealth.lastEventAt,
+    lastSuccessfulReindexAt: watcherHealth.lastSuccessfulReindexAt,
+  };
+}
+
+function compactPrefetchStatsForStatus(
+  prefetchStats: ReturnType<typeof getPrefetchStats> | undefined,
+) {
+  if (!prefetchStats) return undefined;
+  return {
+    enabled: prefetchStats.enabled,
+    queueDepth: prefetchStats.queueDepth,
+    running: prefetchStats.running,
+    hitRate: prefetchStats.hitRate,
+    wasteRate: prefetchStats.wasteRate,
+    avgLatencyReductionMs: prefetchStats.avgLatencyReductionMs,
+    lastRunAt: prefetchStats.lastRunAt,
+    policyMode: prefetchStats.policyMode,
+    suppressedPrefetch: prefetchStats.suppressedPrefetch,
+    acceptedPrefetch: prefetchStats.acceptedPrefetch,
+  };
+}
     const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
     const filesIndexed = await ladybugDb.getFileCount(conn, repoId);
     const symbolsIndexed = await ladybugDb.getSymbolCount(conn, repoId);
@@ -682,9 +718,13 @@ export async function handleRepoStatus(
       filesIndexed,
       symbolsIndexed,
       lastIndexedAt,
-      healthScore: health.score,
-      healthComponents: health.components,
-      healthAvailable: health.available,
+      ...(includeExpensiveStatus
+        ? {
+            healthScore: health.score,
+            healthComponents: health.components,
+            healthAvailable: health.available,
+          }
+        : {}),
       ...(!includeExpensiveStatus
         ? {
             healthNote:
@@ -701,11 +741,13 @@ export async function handleRepoStatus(
                 "Health data may be stale (last known result). Fresh computation failed; retry or run sdl.index.refresh.",
             }
           : {}),
-      watcherHealth,
+      watcherHealth: includeExpensiveStatus
+        ? compactWatcherHealthForStatus(watcherHealth)
+        : undefined,
       watcherNote: includeExpensiveStatus && watcherHealth === null
         ? "Watcher not active. Run 'sdl-mcp serve' or call sdl.index.refresh after edits."
         : undefined,
-      prefetchStats: prefetchStats ?? undefined,
+      prefetchStats: compactPrefetchStatsForStatus(prefetchStats),
       serverInfo: getServerInfo(),
       liveIndexStatus,
       memories,
