@@ -215,6 +215,7 @@ payload.
 {
   "mode": "preview",
   "planHandle": "se-mf0abc-<random>",
+  "defaultCreateBackup": true,
   "filesMatched": 3,
   "matchesFound": 7,
   "filesEligible": 42,
@@ -304,8 +305,7 @@ metadata so callers can reason about narrowing quality:
 }
 ```
 
-`createBackup` on apply must match the value used during preview (or be
-omitted). To change the backup setting, re-run preview with the desired value.
+`createBackup` on apply must match the preview response's `defaultCreateBackup` value (or be omitted). To change the backup setting, re-run preview with the desired value.
 
 ## Apply response
 

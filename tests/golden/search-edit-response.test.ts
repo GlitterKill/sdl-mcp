@@ -25,6 +25,7 @@ describe("sdl.search.edit response golden", () => {
     const response: SearchEditPreviewResponse = {
       mode: "preview",
       planHandle: "se-0123456789abcdef",
+      defaultCreateBackup: true,
       filesMatched: 2,
       matchesFound: 3,
       filesEligible: 4,
@@ -53,6 +54,8 @@ describe("sdl.search.edit response golden", () => {
     assert.ok(keys.includes("mode"));
     assert.ok(keys.includes("planHandle"));
     assert.ok(keys.includes("fileEntries"));
+    assert.ok(keys.includes("defaultCreateBackup"));
+    assert.equal(response.defaultCreateBackup, true);
     assert.equal(keys.includes("preconditionSnapshot"), false);
     assert.ok(Array.isArray(response.fileEntries));
     assert.ok(response.fileEntries.length > 0);
@@ -82,6 +85,7 @@ describe("sdl.search.edit response golden", () => {
     const response: SearchEditPreviewResponse = {
       mode: "preview",
       planHandle: "se-fallback-path",
+      defaultCreateBackup: true,
       filesMatched: 0,
       matchesFound: 0,
       filesEligible: 0,
@@ -107,6 +111,7 @@ describe("sdl.search.edit response golden", () => {
     const response: SearchEditPreviewResponse = {
       mode: "preview",
       planHandle: "se-symbol-target",
+      defaultCreateBackup: true,
       filesMatched: 1,
       matchesFound: 1,
       filesEligible: 1,
@@ -168,6 +173,7 @@ describe("sdl.search.edit response golden", () => {
     const response: SearchEditPreviewResponse = {
       mode: "preview",
       planHandle: "se-keysnap",
+      defaultCreateBackup: true,
       filesMatched: 1,
       matchesFound: 1,
       filesEligible: 5,
@@ -189,11 +195,11 @@ describe("sdl.search.edit response golden", () => {
     };
 
     const EXPECTED_PREVIEW_KEYS = [
-      "mode", "planHandle", "filesMatched", "matchesFound",
+      "mode", "planHandle", "defaultCreateBackup", "filesMatched", "matchesFound",
       "filesEligible", "filesSkipped", "fileEntries", "requiresApply",
       "expiresAt", "retrievalEvidence",
     ].sort();
-    assert.equal(EXPECTED_PREVIEW_KEYS.length, 10, "preview key count drift — update golden keys when interface changes");
+    assert.equal(EXPECTED_PREVIEW_KEYS.length, 11, "preview key count drift — update golden keys when interface changes");
     assert.deepEqual(Object.keys(response).sort(), EXPECTED_PREVIEW_KEYS);
 
     const EXPECTED_ENTRY_KEYS = [

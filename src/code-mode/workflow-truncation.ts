@@ -122,6 +122,9 @@ function smartTruncate(result: unknown, maxTokens: number): unknown {
       kept.push(item);
       chars += itemJson.length + 1;
     }
+    if (result.length > 0 && kept.length === 0) {
+      return truncationMarker();
+    }
     return kept;
   }
 
@@ -154,6 +157,9 @@ function smartTruncate(result: unknown, maxTokens: number): unknown {
       truncatedObj[key] = value;
       chars += entrySize;
     }
+    if (Object.keys(obj).length > 0 && Object.keys(truncatedObj).length === 0) {
+      return truncationMarker();
+    }
     return truncatedObj;
   }
 
@@ -171,6 +177,27 @@ function smartTruncate(result: unknown, maxTokens: number): unknown {
  * Returns the original result unchanged if it fits.
  * Otherwise, stores the full result for continuation retrieval and returns a truncated version.
  */
+function isEmptyTruncationPreview(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length === 0;
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    Object.keys(value as Record<string, unknown>).length === 0
+  );
+}
+
+function truncationMarker(): Record<string, unknown> {
+  return {
+    truncated: true,
+    reason:
+      "maxResponseTokens is too low to include result fields; use truncatedResponse.continuationHandle to fetch the full result.",
+  };
+}
+
+function ensureVisibleTruncationPreview(value: unknown): unknown {
+  return isEmptyTruncationPreview(value) ? truncationMarker() : value;
+}
+
 export function truncateStepResult(
   result: unknown,
   maxTokens: number,
@@ -204,7 +231,9 @@ export function truncateStepResult(
     expiresAt: Date.now() + CONTINUATION_TTL_MS,
   });
 
-  const truncated = smartTruncate(result, maxTokens);
+  const truncated = ensureVisibleTruncationPreview(
+    smartTruncate(result, maxTokens),
+  );
   const keptTokens = estimateJsonTokens(safeJsonStringify(truncated));
 
   return { truncated, handle, originalTokens, keptTokens };

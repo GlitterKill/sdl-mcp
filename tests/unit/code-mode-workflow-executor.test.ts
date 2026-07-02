@@ -851,6 +851,84 @@ describe("code-mode workflow executor", () => {
     assert.match(result.results[1].error ?? "", /Cannot navigate|Expected object|Field/);
   });
 
+
+  it("keeps failed gateway result fields available to later references", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        {
+          fn: "testEcho",
+          action: "test.echo",
+          args: {
+            status: "failure",
+            error: "boom",
+            artifactHandle: "artifact-test-failure",
+          },
+        },
+        {
+          fn: "testEcho",
+          action: "test.echo",
+          args: { message: "$0.artifactHandle" },
+        },
+      ],
+      onError: "continueAll",
+    };
+
+    const result = await executeWorkflow(request, createMockActionMap(), testConfig);
+
+    assert.strictEqual(result.results[0].status, "error");
+    assert.strictEqual(result.results[1].status, "ok");
+    assert.deepStrictEqual(result.results[1].result, {
+      message: "artifact-test-failure",
+      repoId: "test",
+    });
+  });
+
+  it("returns an explanatory truncation preview when maxResponseTokens is too low", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        {
+          fn: "testResults",
+          action: "test.results",
+          args: {},
+          maxResponseTokens: 1,
+        },
+      ],
+      onError: "stop",
+    };
+
+    const result = await executeWorkflow(request, createMockActionMap(), testConfig);
+    const step = result.results[0];
+
+    assert.strictEqual(step.status, "ok");
+    assert.ok(step.truncatedResponse);
+    assert.notDeepStrictEqual(step.result, {});
+    assert.match(JSON.stringify(step.result), /truncated/i);
+  });
+
+  it("preserves real empty fields in truncation previews", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        {
+          fn: "testEcho",
+          action: "test.echo",
+          args: { emptyList: [], emptyObject: {}, body: "x".repeat(5_000) },
+          maxResponseTokens: 40,
+        },
+      ],
+      onError: "stop",
+    };
+
+    const result = await executeWorkflow(request, createMockActionMap(), testConfig);
+    const stepResult = result.results[0].result as Record<string, unknown>;
+
+    assert.deepStrictEqual(stepResult.emptyList, []);
+    assert.deepStrictEqual(stepResult.emptyObject, {});
+    assert.match(String(stepResult.body), /truncated/i);
+  });
+
   it("dryRun validates static args and marks ref-backed schemas pending", async () => {
     const request: ParsedWorkflowRequest = {
       repoId: "test",

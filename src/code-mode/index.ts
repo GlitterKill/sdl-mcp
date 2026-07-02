@@ -223,6 +223,7 @@ export function handleManual(
     includeExamples,
   });
   let catalog = fullCatalog.filter((entry) => !entry.disabled);
+  let unknownActions: string[] = [];
 
   if (args.actions && args.actions.length > 0) {
     const activeFnMap = getActiveFnNameMap();
@@ -256,19 +257,22 @@ export function handleManual(
       raw: action,
       normalized: normalizeManualActionSelector(action),
     }));
-    const unknowns = requestedActions
+    unknownActions = requestedActions
       .filter((action) => !knownSelector(action.normalized))
       .map((action) => action.raw);
-    if (unknowns.length > 0) {
+    const knownRequestedActions = requestedActions.filter((action) =>
+      knownSelector(action.normalized),
+    );
+    if (unknownActions.length > 0 && knownRequestedActions.length === 0) {
       return {
         error: "UNKNOWN_ACTIONS",
-        unknownActions: unknowns,
+        unknownActions,
         validActions: Array.from(validNames).sort(),
       };
     }
 
     const filtered: ActionDescriptor[] = [];
-    for (const { normalized: name } of requestedActions) {
+    for (const { normalized: name } of knownRequestedActions) {
       const matches = fullCatalog.filter((entry) =>
         matchesSelector(entry, name),
       );
@@ -287,6 +291,12 @@ export function handleManual(
       actions: catalog,
       serverInfo: getServerInfo(),
       tokenEstimate: estimateTokens(JSON.stringify(catalog)),
+      ...(unknownActions.length > 0
+        ? {
+            unknownActions,
+            warning: `Ignored unknown action selector(s): ${unknownActions.join(", ")}`,
+          }
+        : {}),
     };
   }
 
@@ -296,6 +306,12 @@ export function handleManual(
   return {
     manual: withTransforms,
     tokenEstimate: estimateTokens(withTransforms),
+    ...(unknownActions.length > 0
+      ? {
+          unknownActions,
+          warning: `Ignored unknown action selector(s): ${unknownActions.join(", ")}`,
+        }
+      : {}),
   };
 }
 

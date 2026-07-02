@@ -781,6 +781,10 @@ function collectEvidence(
   delta: ComputedDeltaWithTiers,
   blastRadiusItems: BlastRadiusItem[],
 ): RiskEvidence[] {
+  if (delta.changedSymbols.length === 0 && blastRadiusItems.length === 0) {
+    return [];
+  }
+
   const evidence: RiskEvidence[] = [];
 
   evidence.push({

@@ -68,6 +68,10 @@ describe("repo overview cluster/process stats", () => {
     for (const [symbolId, name] of [
       [symbolA, "a"],
       [symbolB, "b"],
+      [`${REPO_ID}-dirname-1`, "__dirname"],
+      [`${REPO_ID}-dirname-2`, "__dirname"],
+      [`${REPO_ID}-type-literal`, "Config().(params)typeLiteral151:clock"],
+      [`${REPO_ID}-real-type-literal`, "typeLiteralParser"],
     ] as const) {
       await ladybugDb.upsertSymbol(conn, {
         symbolId,
@@ -203,5 +207,21 @@ describe("repo overview cluster/process stats", () => {
     assert.strictEqual(statsOverview.clusters.totalClusters, 1);
     assert.ok(statsOverview.processes);
     assert.strictEqual(statsOverview.processes.totalProcesses, 1);
+  });
+
+  it("omits duplicate and synthetic directory exports", async () => {
+    clearOverviewCache();
+
+    const overview = await buildRepoOverview({
+      repoId: REPO_ID,
+      level: "directories",
+      maxExportsPerDirectory: 10,
+    });
+
+    assert.deepStrictEqual(overview.directories[0]!.exports, [
+      "a",
+      "b",
+      "typeLiteralParser",
+    ]);
   });
 });

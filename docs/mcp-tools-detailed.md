@@ -186,7 +186,7 @@ Returns a token-efficient summary of the entire codebase structure, tunable from
 | Field          | Type   | Description                                                                                                                                                                                                                            |
 | :------------- | :----- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `stats`        | object | `fileCount`, `symbolCount`, `edgeCount`, `exportedSymbolCount`, `byKind` (function/class/interface/type/method/variable/module/constructor counts), `byEdgeType` (call/import/config counts), `avgSymbolsPerFile`, `avgEdgesPerSymbol` |
-| `directories`  | array  | Per-directory: `path`, `fileCount`, `symbolCount`, `exportedCount`, `byKind`, `exports`, `topByFanIn`, `topByChurn`, `subdirectories`, `estimatedFullTokens`, `summaryTokens`                                                          |
+| `directories`  | array  | Per-directory: `path`, `fileCount`, `symbolCount`, `exportedCount`, `byKind`, compact unique `exports`, `topByFanIn`, `topByChurn`, `subdirectories`, `estimatedFullTokens`, `summaryTokens`                                           |
 | `hotspots`     | object | `mostDepended` (highest fan-in symbols), `mostChanged` (highest churn), `largestFiles`, `mostConnected` (files with most edges)                                                                                                        |
 | `clusters`     | object | `totalClusters`, `averageClusterSize`, `largestClusters` (list of `{clusterId, label, size}`)                                                                                                                                          |
 | `processes`    | object | `totalProcesses`, `averageDepth`, `entryPoints`, `longestProcesses` (list of `{processId, label, depth}`)                                                                                                                              |
@@ -1026,7 +1026,7 @@ Analyzes the risk of a code change between two versions, computing a risk score,
 | `analysis.riskLevel`           | `"low"` \| `"medium"` \| `"high"` | Risk category                                              |
 | `analysis.findings`            | array                             | Each: `{type, severity: "low"                              | "medium" | "high", message, affectedSymbols, metadata}` |
 | `analysis.impactedSymbols`     | string[]                          | All symbols affected by the changes                        |
-| `analysis.evidence`            | array                             | Each: `{type, description, symbolId, data}`                |
+| `analysis.evidence`            | array                             | Each: `{type, description, symbolId, data}`; empty when there are no changes and no blast radius |
 | `analysis.recommendedTests`    | array                             | Each: `{type, description, targetSymbols, priority: "high" | "medium" | "low"}`                                      |
 | `analysis.changedSymbolsCount` | number                            | Total changed symbols                                      |
 | `analysis.blastRadiusCount`    | number                            | Total symbols in the blast radius                          |
@@ -1450,4 +1450,4 @@ Returns the SDL-MCP API manual — a compact reference listing all available fun
 | `includeSchemas`  | boolean                                    | No       | Include full parameter schemas    |
 | `includeExamples` | boolean                                    | No       | Include usage examples            |
 
-**Response:** `{ manual, tokenEstimate }`
+**Response:** `{ manual, tokenEstimate }` for rendered formats or `{ actions, serverInfo, tokenEstimate }` for `format: "json"`. When a focused `actions` request mixes known and unknown selectors, the known actions are returned and `unknownActions` plus `warning` identify the ignored selectors; an all-unknown request still returns `UNKNOWN_ACTIONS`.

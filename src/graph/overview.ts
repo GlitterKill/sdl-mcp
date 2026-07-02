@@ -648,6 +648,13 @@ async function buildDirectorySummaries(
 
     const exportNames = exportsByDir.get(agg.directory) ?? [];
     exportNames.sort((a, b) => a.localeCompare(b));
+    // Keep generated runtime/synthetic symbols from crowding out useful exports.
+    const usefulExportNames = [...new Set(exportNames)].filter(
+      (name) =>
+        name !== "__dirname" &&
+        name !== "__filename" &&
+        !/typeLiteral\d+[:.]/.test(name),
+    );
 
     const summary: DirectorySummary = {
       path: agg.directory || "(root)",
@@ -655,7 +662,7 @@ async function buildDirectorySummaries(
       symbolCount: agg.symbolCount,
       exportedCount: agg.exportedCount,
       byKind: agg.byKind,
-      exports: exportNames.slice(0, maxExportsPerDirectory),
+      exports: usefulExportNames.slice(0, maxExportsPerDirectory),
       topByFanIn: topFanInByDir.get(agg.directory) ?? [],
       topByChurn: topChurnByDir.get(agg.directory) ?? [],
       estimatedFullTokens: agg.symbolCount * SYMBOL_TOKEN_MAX,

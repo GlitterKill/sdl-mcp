@@ -177,6 +177,7 @@ async function handlePreview(
   const response: SearchEditPreviewResponse = {
     mode: "preview",
     planHandle: stored.planHandle,
+    defaultCreateBackup: stored.defaultCreateBackup,
     filesMatched: preview.summary.filesMatched,
     matchesFound: preview.summary.matchesFound,
     filesEligible: preview.summary.filesEligible,

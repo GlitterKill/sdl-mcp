@@ -277,6 +277,17 @@ describe("PR Risk Analysis Tool", () => {
     });
   });
 
+  it("omits empty evidence entries when no symbols changed", async () => {
+    const response = await handlePRRiskAnalysis({
+      repoId,
+      fromVersion: "v1",
+      toVersion: "v1",
+    });
+
+    assert.deepStrictEqual(response.analysis.evidence.items, []);
+    assert.strictEqual(response.analysis.evidence.totalCount, 0);
+  });
+
   it("reports blast-radius truncation when more impacts exist than the display budget", async () => {
     const conn = await getLadybugConn();
     const now = new Date().toISOString();

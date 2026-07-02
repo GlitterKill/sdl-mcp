@@ -3646,6 +3646,7 @@ export type SearchEditRequest = z.infer<typeof SearchEditRequestSchema>;
 export interface SearchEditPreviewResponse {
   mode: "preview";
   planHandle: string;
+  defaultCreateBackup: boolean;
   filesMatched: number;
   matchesFound: number;
   filesEligible: number;

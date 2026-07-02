@@ -697,7 +697,7 @@ export async function executeWorkflow(
         const gatewayFailureDetails = gatewayFailureMessage
           ? failureDetailsFrom(result)
           : undefined;
-        priorResults.push(gatewayFailureMessage ? null : result);
+        priorResults.push(result);
         const stepResult: WorkflowStepResult = {
           stepIndex: i,
           fn: step.fn,

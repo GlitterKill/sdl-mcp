@@ -213,6 +213,8 @@ Canonical structured continuation recipe:
 }
 ```
 
+When `maxResponseTokens` is too small to include any result fields, the step result includes a visible `truncated: true` marker and `truncatedResponse.continuationHandle` points to the full stored result.
+
 The workflow engine also provides:
 
 - budget tracking

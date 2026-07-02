@@ -191,4 +191,34 @@ describe("code-mode manual generator", () => {
     assert.ok(result.actions?.some((entry) => entry.action === "file"));
     assert.ok(result.actions?.some((entry) => entry.action === "workflow"));
   });
+
+  it("returns known focused manual actions when some requested actions are stale", () => {
+    const result = handleManual(
+      {
+        actions: ["workflow", "summary.get"],
+        format: "json",
+        includeSchemas: false,
+        includeExamples: false,
+      },
+      {},
+    ) as {
+      actions?: Array<{ action: string }>;
+      error?: string;
+      unknownActions?: string[];
+    };
+
+    assert.equal(result.error, undefined);
+    assert.deepEqual(result.unknownActions, ["summary.get"]);
+    assert.ok(result.actions?.some((entry) => entry.action === "workflow"));
+  });
+
+  it("keeps all-unknown focused manual requests as UNKNOWN_ACTIONS", () => {
+    const result = handleManual(
+      { actions: ["summary.get"], format: "json" },
+      {},
+    ) as { error?: string; unknownActions?: string[] };
+
+    assert.equal(result.error, "UNKNOWN_ACTIONS");
+    assert.deepEqual(result.unknownActions, ["summary.get"]);
+  });
 });

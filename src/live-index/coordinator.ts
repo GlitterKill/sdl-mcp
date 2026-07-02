@@ -133,7 +133,7 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
 
     // Close events are lifecycle signals — always accept them regardless of version
     if (input.eventType === "close") {
-      if (existing && input.version !== existing.version) {
+      if (existing && input.version < existing.version) {
         warnings.push(
           `Close event version ${input.version} does not match draft version ${existing.version}.`,
         );

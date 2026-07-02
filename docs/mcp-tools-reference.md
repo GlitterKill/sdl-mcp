@@ -236,7 +236,7 @@ Start with `level: "stats"` (cheapest). Escalate to `"directories"` or `"full"` 
 **Response includes:**
 
 - `stats` — fileCount, symbolCount, edgeCount, exportedSymbolCount, byKind, byEdgeType, avgSymbolsPerFile, avgEdgesPerSymbol
-- `directories` — array of summaries with path, fileCount, symbolCount, exports, topByFanIn, topByChurn
+- `directories` — array of summaries with path, fileCount, symbolCount, compact unique exports, topByFanIn, topByChurn
 - `hotspots` (optional) — mostDepended, mostChanged, largestFiles, mostConnected
 - `clusters` (optional) — totalClusters, averageClusterSize, largestClusters
 - `processes` (optional) — totalProcesses, averageDepth, entryPoints, longestProcesses
@@ -1365,7 +1365,7 @@ Use this for runtime execution, data shaping, batch mutations, and reusable mult
 
 Return a compact API reference for the SDL action surface.
 
-Use this before `sdl.context` or `sdl.workflow` when the model needs a narrow, typed subset of the API instead of the full tool surface.
+Use this before `sdl.context` or `sdl.workflow` when the model needs a narrow, typed subset of the API instead of the full tool surface. Focused `actions` lookups return known selectors even when the request includes stale names; ignored selectors appear in `unknownActions` and `warning`.
 
 ### `sdl.file`
 
