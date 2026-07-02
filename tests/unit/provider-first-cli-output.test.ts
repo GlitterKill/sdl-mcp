@@ -5,6 +5,7 @@ import {
   formatIndexWallTimeLine,
   formatSummaryStatsLine,
   formatProviderFirstExecutionSummaryLines,
+  formatScipFailureLine,
   formatScipGeneratorCacheLine,
   formatSemanticReadinessLines,
 } from "../../dist/cli/commands/index.js";
@@ -83,6 +84,19 @@ describe("provider-first CLI output", () => {
         fileCount: 42_111,
       }),
       "  SCIP generator cache: stored (generator 358200ms, save 564ms, prepare 2000ms, 42111 input file(s))",
+    );
+  });
+
+  it("prints SCIP generator failures as compact non-fatal diagnostics", () => {
+    assert.equal(
+      formatScipFailureLine({
+        stage: "generator-run",
+        message:
+          "  x rust failed: rust-analyzer produced invalid rust SCIP output after normalization: empty_index: Index contains no documents\n" +
+          "  x typescript failed: scip-typescript produced invalid typescript SCIP output after normalization: empty_index: Index contains no documents\n" +
+          "Error: All 2 indexer(s) failed\n",
+      }),
+      "  SCIP generator-run (non-fatal): x rust failed: rust-analyzer produced invalid rust SCIP output after normalization: empty_index: Index contains no documents; x typescript failed: scip-typescript produced invalid typescript SCIP output after normalization: empty_index: Index contains no documents",
     );
   });
 

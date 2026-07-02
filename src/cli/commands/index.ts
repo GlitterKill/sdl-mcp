@@ -529,6 +529,21 @@ export function formatScipGeneratorCacheLine(
   return `  SCIP generator cache: ${cache.status} (${timingPart}${filePart})${reasonPart}`;
 }
 
+/** @internal exported for tests; do not import from product code. */
+export function formatScipFailureLine(
+  failure: NonNullable<IndexResult["scip"]>["failures"][number],
+): string {
+  const message = failure.message
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !/^Error: All \d+ indexer\(s\) failed$/.test(line))
+    .join("; ");
+  return `  SCIP ${failure.stage} (non-fatal): ${message}${
+    failure.path ? ` (${failure.path})` : ""
+  }`;
+}
+
 const PROVIDER_FIRST_TIMING_LABELS: Array<[string, string]> = [
   ["providerCollection", "collect"],
   ["coverageScan", "scan"],
@@ -2387,11 +2402,7 @@ export async function indexCommand(options: IndexOptions): Promise<void> {
           );
         }
         for (const failure of stats.scip.failures) {
-          console.log(
-            `  SCIP ${failure.stage}: ${failure.message}${
-              failure.path ? ` (${failure.path})` : ""
-            }`,
-          );
+          console.log(formatScipFailureLine(failure));
         }
       }
       if (stats.summaryStats) {
