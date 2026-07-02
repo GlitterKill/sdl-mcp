@@ -202,6 +202,7 @@ export async function handleRepoRegister(
     maxFileBytes,
     dryRun,
     updateExisting,
+    detail,
   } = request;
 
   recordToolTrace({
@@ -342,6 +343,13 @@ export async function handleRepoRegister(
       }));
   const toConfigRecord = (config: RepoConfig): Record<string, unknown> =>
     JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
+  const dryRunConfigSnapshots =
+    detail === "full"
+      ? {
+          currentConfig: currentConfig ? toConfigRecord(currentConfig) : undefined,
+          proposedConfig: toConfigRecord(proposedConfig),
+        }
+      : {};
 
   if (dryRun) {
     return {
@@ -350,8 +358,7 @@ export async function handleRepoRegister(
       dryRun: true,
       changed: configChanges.length > 0,
       configChanges,
-      currentConfig: currentConfig ? toConfigRecord(currentConfig) : undefined,
-      proposedConfig: toConfigRecord(proposedConfig),
+      ...dryRunConfigSnapshots,
       message: existingRepo
         ? "Dry run only; existing repo registration was not changed."
         : "Dry run only; repo would be registered.",

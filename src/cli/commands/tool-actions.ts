@@ -521,6 +521,18 @@ const prRiskAnalyze: ActionDefinition = {
       type: "number",
       description: "Risk threshold (0-100)",
     },
+    {
+      flag: "--detail",
+      field: "detail",
+      type: "string",
+      description: "Output detail: compact|full",
+    },
+    {
+      flag: "--limit",
+      field: "limit",
+      type: "number",
+      description: "Compact output item limit (default: 5)",
+    },
   ],
   examples: [
     "sdl-mcp tool pr.risk.analyze --repo-id my-repo --from-version v1 --to-version v2",
@@ -747,6 +759,12 @@ const repoRegister: ActionDefinition = {
       type: "boolean",
       description: "Apply config changes to an already registered repo",
     },
+    {
+      flag: "--detail",
+      field: "detail",
+      type: "string",
+      description: "Dry-run output detail: compact|full",
+    },
   ],
   examples: [
     "sdl-mcp tool repo.register --repo-id my-repo --root-path /path/to/repo",
@@ -889,6 +907,18 @@ const semanticEnrichmentStatus: ActionDefinition = {
       field: "languages",
       type: "string[]",
       description: "Comma-separated language IDs to inspect",
+    },
+    {
+      flag: "--detail",
+      field: "detail",
+      type: "string",
+      description: "Output detail: compact|full",
+    },
+    {
+      flag: "--limit",
+      field: "limit",
+      type: "number",
+      description: "Compact last-run limit (default: 5)",
     },
   ],
   examples: [

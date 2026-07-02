@@ -574,6 +574,11 @@ export const RepoRegisterRequestSchema = z.object({
     .describe(
       "Required to apply config changes to an already registered repo. Exact re-registers remain no-ops.",
     ),
+  detail: z
+    .enum(["compact", "full"])
+    .optional()
+    .default("compact")
+    .describe("Use full to include dry-run current/proposed config snapshots."),
 });
 
 export const RepoRegisterResponseSchema = z.object({
@@ -2183,6 +2188,15 @@ export const PRRiskAnalysisRequestSchema = z.object({
   fromVersion: z.string(),
   toVersion: z.string(),
   riskThreshold: z.number().min(0).max(100).optional(),
+  detail: z.enum(["compact", "full"]).optional().default("compact"),
+  limit: z
+    .number()
+    .int()
+    .min(0)
+    .max(50)
+    .optional()
+    .default(5)
+    .describe("Default compact item limit for changed symbols and blast radius."),
   budget: z
     .object({
       maxChangedSymbols: z.number().int().min(1).max(200).optional(),
@@ -3296,6 +3310,8 @@ export type SemanticEnrichmentRefreshRequest = z.infer<
 export const SemanticEnrichmentStatusRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   languages: SemanticEnrichmentLanguageListSchema,
+  detail: z.enum(["compact", "full"]).optional().default("compact"),
+  limit: z.number().int().min(0).max(100).optional().default(5),
 });
 
 export type SemanticEnrichmentStatusRequest = z.infer<

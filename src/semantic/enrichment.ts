@@ -40,6 +40,8 @@ export interface SemanticEnrichmentRefreshRequest {
 export interface SemanticEnrichmentStatusRequest {
   repoId: string;
   languages?: string[];
+  detail?: "compact" | "full";
+  limit?: number;
 }
 
 export interface SemanticEnrichmentRefreshResult {

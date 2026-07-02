@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import {
   PolicySetRequestSchema,
   PRRiskAnalysisRequestSchema,
+  RepoRegisterRequestSchema,
+  SemanticEnrichmentStatusRequestSchema,
   type SearchEditPreviewResponse,
   type SearchEditApplyResponse,
   type SymbolEditPreviewResponse,
@@ -13,6 +15,7 @@ import { classifyRuntimeStatus } from "../../dist/runtime/executor.js";
 import {
   compactSemanticEnrichmentStatusForAgent,
 } from "../../dist/mcp/tools/semantic-enrichment.js";
+import { compactPRRiskResponse } from "../../dist/mcp/tools/prRisk.js";
 import { compactBufferStatusForAgent } from "../../dist/mcp/tools/buffer.js";
 import { _policyToolTesting } from "../../dist/mcp/tools/policy.js";
 
@@ -58,6 +61,56 @@ describe("agent-facing SDL tool contracts", () => {
     assert.equal(parsed.riskThreshold, 0.5);
   });
 
+  it("agent-noisy tools default to compact detail and bounded output", () => {
+    assert.equal(
+      PRRiskAnalysisRequestSchema.parse({
+        repoId: "r",
+        fromVersion: "v1",
+        toVersion: "v2",
+      }).detail,
+      "compact",
+    );
+    assert.equal(
+      PRRiskAnalysisRequestSchema.parse({
+        repoId: "r",
+        fromVersion: "v1",
+        toVersion: "v2",
+      }).limit,
+      5,
+    );
+
+    const semanticStatus = SemanticEnrichmentStatusRequestSchema.parse({
+      repoId: "r",
+    });
+    assert.equal(semanticStatus.detail, "compact");
+    assert.equal(semanticStatus.limit, 5);
+
+    const repoRegister = RepoRegisterRequestSchema.parse({
+      repoId: "r",
+      rootPath: ".",
+      dryRun: true,
+    });
+    assert.equal(repoRegister.detail, "compact");
+  });
+
+  it("compact pr risk responses omit verbose analysis arrays", () => {
+    const compact = compactPRRiskResponse({
+      summary: { riskScore: 31, riskLevel: "low" },
+      analysis: {
+        fromVersion: "v1",
+        toVersion: "v2",
+        changedSymbols: { items: [{ symbolId: "sym-a" }], totalCount: 1 },
+        findings: { items: [{ affectedSymbols: ["sym-a"] }], totalCount: 1 },
+        recommendedTests: { items: [{ targetSymbols: ["sym-a"] }], totalCount: 1 },
+      },
+      escalationRequired: false,
+    });
+
+    assert.equal("changedSymbols" in compact.analysis, false);
+    assert.equal("findings" in compact.analysis, false);
+    assert.equal("recommendedTests" in compact.analysis, false);
+  });
+
   it("runtime intent excerpts ignore Windows cmd echo lines", () => {
     const excerpts = _runtimeToolTesting.generateIntentExcerpts(
       "F:\\repo>if exist target echo echoed\nactual output\n",
@@ -80,7 +133,7 @@ describe("agent-facing SDL tool contracts", () => {
     );
   });
 
-  it("semantic enrichment status hides raw metadataJson and repeated skip details", () => {
+  it("semantic enrichment status hides raw metadataJson, repeated skip details, and old runs", () => {
     const compact = compactSemanticEnrichmentStatusForAgent({
       ok: true,
       repoId: "r",
@@ -112,11 +165,29 @@ describe("agent-facing SDL tool contracts", () => {
           diagnosticsCount: 0,
           metadataJson: "{\"internal\":true}",
         },
+        {
+          runId: "run-2",
+          repoId: "r",
+          providerType: "scip",
+          providerId: "scip",
+          languages: ["typescript"],
+          status: "completed",
+          startedAt: "2026-01-02T00:00:00.000Z",
+          documentsProcessed: 1,
+          symbolsMatched: 1,
+          edgesCreated: 1,
+          edgesUpgraded: 0,
+          edgesReplaced: 0,
+          edgesSkipped: 0,
+          diagnosticsCount: 0,
+          metadataJson: "{\"internal\":true}",
+        },
       ],
-    });
+    }, 1);
 
     assert.equal("metadataJson" in compact.lastRuns[0], false);
     assert.equal("skipped" in compact.selections[0], false);
+    assert.equal(compact.lastRuns.length, 1);
   });
 
   it("buffer.status omits null diagnostic fields", () => {

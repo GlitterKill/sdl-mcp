@@ -110,6 +110,8 @@ Registers a new repository (or updates an existing one) for indexing. This is ty
 | `ignore`       | string[] | No       | Glob patterns to ignore (defaults include dependency, dist, generated CMake/build-output, cache, and agent workspace directories)                                 |
 | `languages`    | string[] | No       | Language extensions to index. Defaults to all 12 languages (11 adapters): `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `java`, `cs`, `c`, `cpp`, `php`, `rs`, `kt`, `sh` |
 | `maxFileBytes` | number   | No       | Maximum file size to index in bytes (default: 2,000,000)                                                                                                          |
+| `dryRun`       | boolean  | No       | Validate and preview registration without writing config changes                                                                                                  |
+| `detail`       | `"compact"` \| `"full"` | No | Defaults to `"compact"`; use `"full"` to include dry-run current/proposed config snapshots                                                                     |
 
 **Response:**
 
@@ -124,6 +126,7 @@ Registers a new repository (or updates an existing one) for indexing. This is ty
 
 - Re-registering an existing `repoId` updates the configuration without losing indexed data.
 - The tool does not trigger indexing. Call `sdl.index.refresh` afterward.
+- Dry-run responses are compact by default; request `detail: "full"` only when an agent needs the full current/proposed config snapshots.
 
 ---
 
@@ -294,8 +297,10 @@ Reports semantic enrichment configuration and last-run state for a repository.
 | :---------- | :------- | :------- | :--------------------------------------- |
 | `repoId`    | string   | Yes      | Repository identifier                    |
 | `languages` | string[] | No       | Restrict status to specific language IDs |
+| `detail`    | `"compact"` \| `"full"` | No | Defaults to `"compact"`; use `"full"` for untrimmed provider run metadata |
+| `limit`     | number   | No       | Defaults to `5`; maximum compact `lastRuns` entries to return |
 
-**Response includes:** `enabled`, `autoRunOnIndexRefresh`, `installPolicy`, selected provider per language, skipped providers, and latest provider runs with precision scores.
+**Response includes:** `enabled`, `autoRunOnIndexRefresh`, `installPolicy`, selected provider per language, skipped providers, and latest provider runs with precision scores. Compact responses omit raw `metadataJson`, collapse repeated skip details, and limit `lastRuns` to the requested `limit`.
 
 ---
 
@@ -1017,21 +1022,23 @@ Analyzes the risk of a code change between two versions, computing a risk score,
 | `fromVersion`   | string         | Yes      | Starting version ID                        |
 | `toVersion`     | string         | Yes      | Ending version ID                          |
 | `riskThreshold` | number (0-100) | No       | Only return findings above this risk score |
+| `detail`        | `"compact"` \| `"full"` | No | Defaults to `"compact"`; use `"full"` for verbose changed symbols, blast radius, findings, evidence, and recommended tests |
+| `limit`         | number (0-50) | No       | Defaults to `5`; compact item limit for changed symbols and blast radius |
 
 **Response:**
 
-| Field                          | Type                              | Description                                                |
-| :----------------------------- | :-------------------------------- | :--------------------------------------------------------- | -------- | -------------------------------------------- |
-| `analysis.riskScore`           | number (0-100)                    | Composite risk score                                       |
-| `analysis.riskLevel`           | `"low"` \| `"medium"` \| `"high"` | Risk category                                              |
-| `analysis.findings`            | array                             | Each: `{type, severity: "low"                              | "medium" | "high", message, affectedSymbols, metadata}` |
-| `analysis.impactedSymbols`     | string[]                          | All symbols affected by the changes                        |
-| `analysis.evidence`            | array                             | Each: `{type, description, symbolId, data}`; empty when there are no changes and no blast radius |
-| `analysis.recommendedTests`    | array                             | Each: `{type, description, targetSymbols, priority: "high" | "medium" | "low"}`                                      |
-| `analysis.changedSymbolsCount` | number                            | Total changed symbols                                      |
-| `analysis.blastRadiusCount`    | number                            | Total symbols in the blast radius                          |
-| `escalationRequired`           | boolean                           | Whether the risk level warrants review escalation          |
-| `policyDecision`               | object                            | `{decision, deniedReasons, auditHash}`                     |
+| Field                       | Type                              | Description |
+| :-------------------------- | :-------------------------------- | :---------- |
+| `analysis.riskScore`        | number (0-100)                    | Composite risk score |
+| `analysis.riskLevel`        | `"low"` \| `"medium"` \| `"high"` | Risk category |
+| `analysis.summary`          | object                            | Compact counts and high-level risk summary |
+| `analysis.changedSymbols`   | object                            | Full detail only; changed symbol items and total count |
+| `analysis.blastRadius`      | object                            | Full detail only; blast-radius items and total count |
+| `analysis.findings`         | object                            | Full detail only; bounded findings with severity and affected symbols |
+| `analysis.evidence`         | object                            | Full detail only; evidence items supporting findings and blast radius |
+| `analysis.recommendedTests` | object                            | Full detail only; prioritized test targets |
+| `escalationRequired`        | boolean                           | Whether the risk level warrants review escalation |
+| `policyDecision`            | object                            | `{decision, deniedReasons, auditHash}` |
 
 ---
 

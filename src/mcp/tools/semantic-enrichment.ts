@@ -10,6 +10,8 @@ import {
   SemanticEnrichmentStatusRequestSchema,
 } from "../tools.js";
 
+const DEFAULT_SEMANTIC_STATUS_LIMIT = 5;
+
 export async function handleSemanticEnrichmentRefresh(
   args: unknown,
   _context?: ToolContext,
@@ -20,6 +22,7 @@ export async function handleSemanticEnrichmentRefresh(
 
 export function compactSemanticEnrichmentStatusForAgent(
   result: SemanticEnrichmentStatusResult,
+  limit = DEFAULT_SEMANTIC_STATUS_LIMIT,
 ): object {
   return {
     ...result,
@@ -27,7 +30,9 @@ export function compactSemanticEnrichmentStatusForAgent(
       languageId,
       ...(selected ? { selected } : {}),
     })),
-    lastRuns: result.lastRuns.map(({ metadataJson: _metadataJson, ...run }) => run),
+    lastRuns: result.lastRuns
+      .slice(0, limit)
+      .map(({ metadataJson: _metadataJson, ...run }) => run),
   };
 }
 
@@ -37,5 +42,7 @@ export async function handleSemanticEnrichmentStatus(
 ): Promise<object> {
   const request = SemanticEnrichmentStatusRequestSchema.parse(args);
   const status = await getSemanticEnrichmentStatus(request, loadConfig());
-  return compactSemanticEnrichmentStatusForAgent(status);
+  return request.detail === "full"
+    ? status
+    : compactSemanticEnrichmentStatusForAgent(status, request.limit);
 }

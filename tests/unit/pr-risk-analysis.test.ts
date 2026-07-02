@@ -219,6 +219,7 @@ describe("PR Risk Analysis Tool", () => {
   it("returns findings collection with severity levels", async () => {
     const request = {
       repoId,
+      detail: "full",
       fromVersion: "v1",
       toVersion: "v2",
     };
@@ -247,6 +248,7 @@ describe("PR Risk Analysis Tool", () => {
   it("returns changedSymbols with items array", async () => {
     const response = await handlePRRiskAnalysis({
       repoId,
+      detail: "full",
       fromVersion: "v1",
       toVersion: "v2",
     });
@@ -258,6 +260,7 @@ describe("PR Risk Analysis Tool", () => {
   it("returns evidence collection", async () => {
     const response = await handlePRRiskAnalysis({
       repoId,
+      detail: "full",
       fromVersion: "v1",
       toVersion: "v2",
     });
@@ -280,6 +283,7 @@ describe("PR Risk Analysis Tool", () => {
   it("omits empty evidence entries when no symbols changed", async () => {
     const response = await handlePRRiskAnalysis({
       repoId,
+      detail: "full",
       fromVersion: "v1",
       toVersion: "v1",
     });
@@ -330,6 +334,7 @@ describe("PR Risk Analysis Tool", () => {
 
     const response = await handlePRRiskAnalysis({
       repoId,
+      detail: "full",
       fromVersion: "v1",
       toVersion: "v2",
       budget: { maxBlastRadius: 1 },
@@ -343,6 +348,7 @@ describe("PR Risk Analysis Tool", () => {
   it("surfaces dependency chains in blast-radius evidence and recommended tests", async () => {
     const response = await handlePRRiskAnalysis({
       repoId,
+      detail: "full",
       fromVersion: "v1",
       toVersion: "v2",
     });

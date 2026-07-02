@@ -55,6 +55,28 @@ interface RecommendedTest {
   priority: "high" | "medium" | "low";
 }
 
+type CompactPRRiskResponseInput = {
+  summary: unknown;
+  analysis: Record<string, unknown>;
+  escalationRequired: boolean;
+  policyDecision?: unknown;
+  truncationWarning?: string;
+};
+
+export function compactPRRiskResponse(
+  response: CompactPRRiskResponseInput,
+): CompactPRRiskResponseInput {
+  const {
+    changedSymbols: _changedSymbols,
+    blastRadius: _blastRadius,
+    findings: _findings,
+    evidence: _evidence,
+    recommendedTests: _recommendedTests,
+    ...analysis
+  } = response.analysis;
+  return { ...response, analysis };
+}
+
 interface BlastRadiusSeedCandidate {
   symbolId: string;
   tiers?: { riskScore?: number };
@@ -106,32 +128,35 @@ export function selectBlastRadiusSeedSymbols(
 
 export async function handlePRRiskAnalysis(args: unknown) {
   const validated = PRRiskAnalysisRequestSchema.parse(args);
+  const compactLimit = validated.detail === "compact" ? validated.limit : undefined;
+  const compactSmallLimit =
+    compactLimit === undefined ? undefined : Math.min(compactLimit, 3);
 
   // --- Budget: allow caller to cap response size ---
   const MAX_CHANGED_SYMBOLS_CAP = 200;
   const maxChangedSymbols = Math.min(
-    validated.budget?.maxChangedSymbols ?? DEFAULT_MAX_CHANGED_SYMBOLS,
+    validated.budget?.maxChangedSymbols ?? compactLimit ?? DEFAULT_MAX_CHANGED_SYMBOLS,
     MAX_CHANGED_SYMBOLS_CAP,
   );
   const MAX_BLAST_RADIUS_CAP = 200;
   const maxBlastRadius = Math.min(
-    validated.budget?.maxBlastRadius ?? DEFAULT_MAX_BLAST_RADIUS,
+    validated.budget?.maxBlastRadius ?? compactLimit ?? DEFAULT_MAX_BLAST_RADIUS,
     MAX_BLAST_RADIUS_CAP,
   );
   const maxFindings = Math.min(
-    validated.budget?.maxFindings ?? MAX_FINDINGS,
+    validated.budget?.maxFindings ?? compactSmallLimit ?? MAX_FINDINGS,
     MAX_FINDINGS,
   );
   const maxEvidenceItems = Math.min(
-    validated.budget?.maxEvidenceItems ?? MAX_EVIDENCE_ITEMS,
+    validated.budget?.maxEvidenceItems ?? compactSmallLimit ?? MAX_EVIDENCE_ITEMS,
     MAX_EVIDENCE_ITEMS,
   );
   const maxRecommendedTests = Math.min(
-    validated.budget?.maxRecommendedTests ?? MAX_RECOMMENDED_TESTS,
+    validated.budget?.maxRecommendedTests ?? compactSmallLimit ?? MAX_RECOMMENDED_TESTS,
     MAX_RECOMMENDED_TESTS,
   );
   const maxNestedSymbols = Math.min(
-    validated.budget?.maxNestedSymbols ?? MAX_AFFECTED_SYMBOLS_PER_FINDING,
+    validated.budget?.maxNestedSymbols ?? compactSmallLimit ?? MAX_AFFECTED_SYMBOLS_PER_FINDING,
     MAX_AFFECTED_SYMBOLS_PER_FINDING,
   );
   recordToolTrace({
@@ -495,7 +520,7 @@ export async function handlePRRiskAnalysis(args: unknown) {
     findingsCount: totalFindings,
   });
 
-  return response;
+  return validated.detail === "full" ? response : compactPRRiskResponse(response);
 }
 
 function generateFindings(
