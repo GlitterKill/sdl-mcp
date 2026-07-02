@@ -7,7 +7,9 @@ import {
 } from "../../dist/gateway/compact-schema.js";
 import {
   PolicySetRequestSchema,
+  RepoRegisterRequestSchema,
   RuntimeExecuteRequestSchema,
+  SemanticEnrichmentStatusRequestSchema,
   SearchEditRequestSchema,
   SymbolEditRequestSchema,
 } from "../../dist/mcp/tools.js";
@@ -255,6 +257,23 @@ describe("Pre-transform input shape (io: 'input')", () => {
         stdin: "\u00e9".repeat(256 * 1024 + 1),
       });
     });
+  });
+
+  it("defaults repo.register dry-run detail to summary", () => {
+    const parsed = RepoRegisterRequestSchema.parse({
+      repoId: "test",
+      rootPath: ".",
+      dryRun: true,
+    });
+
+    assert.equal(parsed.detail, "summary");
+  });
+
+  it("defaults semantic status to compact recent runs", () => {
+    const parsed = SemanticEnrichmentStatusRequestSchema.parse({ repoId: "test" });
+
+    assert.equal(parsed.detail, "compact");
+    assert.equal(parsed.lastRunsLimit, 3);
   });
 
   it("does not throw on transform-bearing tool schemas (the regression)", () => {

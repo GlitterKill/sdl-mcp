@@ -212,7 +212,7 @@ Triggers re-indexing of a repository in either full or incremental mode.
 | `repoId`             | string                      | Yes      | Repository identifier                                                                         |
 | `mode`               | `"full"` \| `"incremental"` | Yes      | `full` re-indexes everything; `incremental` only processes files changed since the last index |
 | `reason`             | string                      | No       | Optional reason for the refresh (logged)                                                      |
-| `includeDiagnostics` | boolean                     | No       | When `true`, include coarse phase timings in the synchronous response                         |
+| `includeDiagnostics` | boolean                     | No       | Accepted for compatibility; timing diagnostics stay internal and are not returned             |
 | `async`              | boolean                     | No       | When `true`, start indexing in the background and return immediately with an `operationId`    |
 
 **Response:**
@@ -226,7 +226,7 @@ Triggers re-indexing of a repository in either full or incremental mode.
 | `async`        | boolean | Present when the refresh was accepted for background execution                                      |
 | `operationId`  | string  | Background operation identifier when `async: true`                                                  |
 | `message`      | string  | Human-readable status for async refresh requests                                                    |
-| `diagnostics`  | object  | Optional diagnostics envelope returned only when `includeDiagnostics: true` on synchronous requests |
+
 
 **Audit metadata:** `sdl.index.refresh` also writes an `index.refresh.complete` audit event. Its `stats` object can include:
 
@@ -240,7 +240,7 @@ Triggers re-indexing of a repository in either full or incremental mode.
 - Incremental mode compares file content hashes to detect changes. Only changed files are re-parsed.
 - If changed files are found, incremental refresh recomputes derived cluster/process state inline before returning. If no tracked files changed, it can short-circuit after `scanRepo`, `versioning`, and `memorySync` while reusing the existing version.
 - After indexing, all slice caches and card caches are invalidated.
-- `diagnostics.timings.totalMs` covers the full synchronous indexing run. `diagnostics.timings.phases` breaks out coarse stages such as `scanRepo`, `pass1`, `pass1Drain`, `pass2`, and `finalizeIndexing`.
+- Internal timing diagnostics cover the full synchronous indexing run and break out coarse stages such as `scanRepo`, `pass1`, `pass1Drain`, `pass2`, and `finalizeIndexing`. They are available through logs or observability surfaces, not agent-visible responses.
 
   Nested keys may also appear for hotspots inside a phase, including:
 
@@ -260,7 +260,7 @@ Triggers re-indexing of a repository in either full or incremental mode.
   - `clustersAndProcesses.loadSymbols`
   - `clustersAndProcesses.processWrite`
 
-  The TS resolver is lazy. `initSharedState.tsResolver.sourceFiles`, `initSharedState.tsResolver.programBuild`, and related compiler-program subphases appear only when pass 2 actually asks the resolver to build a TypeScript program. When pass-1 drain diagnostics are collected, `diagnostics.timings.pass1Drain` also reports batch counts, row counts by kind, per-operation write totals, and the largest queued write batch. No-op incremental refreshes may omit later phases and report `shortCircuitNoOp` instead.
+  The TS resolver is lazy. `initSharedState.tsResolver.sourceFiles`, `initSharedState.tsResolver.programBuild`, and related compiler-program subphases appear only when pass 2 actually asks the resolver to build a TypeScript program. Internal pass-1 drain diagnostics can also report batch counts, row counts by kind, per-operation write totals, and the largest queued write batch. No-op incremental refreshes may omit later phases and report `shortCircuitNoOp` instead.
 - `quality.unresolvedTargets` counts repo-local missing or ambiguous dependency targets. `quality.externalTargets` counts outside-repo dependency targets such as runtime modules and packages. Both remain `Symbol` nodes for graph traversal, but graph consumers can distinguish them with `symbolStatus`.
 - `quality.untypedPlaceholderTargets`, `quality.placeholderTargetMismatches`, and `quality.isolatedPlaceholders` should be zero on healthy new indexes. Non-zero values usually mean an old DB needs migration or a writer created no-file dependency targets without deterministic placeholder metadata.
 
@@ -1136,14 +1136,14 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 | `executable`         | string                                   | No       | Override the default executable (e.g., `"bun"` instead of `"node"`)                                                                                                                                      |
 | `args`               | string[]                                 | No       | Arguments to pass to the executable                                                                                                                                                                      |
 | `code`               | string                                   | No       | Inline code to execute via runtime-safe stdin/temp handling. Mutually exclusive with args-only mode.                                                                                                      |
-| `stdin`              | string                                   | No       | UTF-8 text written to child stdin, then closed. Max 512 KiB by encoded byte size. Does not bypass command validation; shell runtime still requires `code`.                                               |
+| `stdin`              | string                                   | No       | UTF-8 text written to child stdin, then closed. Max 512 KiB by encoded byte size. Does not bypass command validation; shell runtime requires `code`, or `command` as a compatibility alias for `code`.                                               |
 | `relativeCwd`        | string                                   | No       | Working directory relative to repo root (default: `"."`)                                                                                                                                                 |
 | `timeoutMs`          | number                                   | No       | Execution timeout in milliseconds                                                                                                                                                                        |
 | `queryTerms`         | string[] (max 10)                        | No       | Keywords for excerpt matching in the output                                                                                                                                                              |
 | `maxResponseLines`   | number (5-1000)                          | No       | Max lines in stdout/stderr summaries (default: 100)                                                                                                                                                      |
 | `persistOutput`      | boolean                                  | No       | Whether to persist full output as a gzip artifact (default: true)                                                                                                                                        |
 | `outputMode`         | `"minimal"` \| `"summary"` \| `"intent"` | No       | Controls response verbosity. `"minimal"` (default): status, artifact handle, and concise stdout/stderr previews. `"summary"`: head+tail output excerpts. `"intent"`: only `queryTerms`-matched excerpts. |
-| `includeDiagnostics` | boolean                                  | No       | Include coarse policy, execution, output decoding, and artifact phase timings                                                                                                                            |
+| `includeDiagnostics` | boolean                                  | No       | Accepted for compatibility; timing diagnostics stay internal                                                                                                                                              |
 
 **Response (varies by `outputMode`):**
 
@@ -1162,7 +1162,7 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 | `stdinSha256`     | string                                                                   | Optional SHA-256 digest when `stdin` was provided                        |
 | `quotingWarnings` | string[]                                                                 | Optional diagnostics for quote-heavy/base64/runtime-write patterns       |
 | `runtimeHints`    | string[]                                                                 | Optional compact corrective guidance for predictable runtime failures    |
-| `diagnostics`     | object                                                                   | Optional phase timings returned only when `includeDiagnostics: true`     |
+
 
 **`outputMode: "minimal"` (default) — adds:**
 
@@ -1376,7 +1376,7 @@ Retrieves task-shaped code context inside Code Mode.
 
 **What it does:** Mirrors `sdl.context` but lives alongside `sdl.manual` and `sdl.workflow`. Use it first for `explain`, `debug`, `review`, and most `implement` requests when you are already operating through the Code Mode surfaces.
 
-**Parameters:** Same as `sdl.context`, with optional `responseMode` for handle-backed responses and optional `includeDiagnostics` for coarse server/context phase timings.
+**Parameters:** Same as `sdl.context`, with optional `responseMode` for handle-backed responses and optional `includeDiagnostics` compatibility flag; server/context timing diagnostics stay internal.
 
 `responseMode: "auto"` or `"handle"` can store large context responses behind `response.get`; the default `inline` preserves the legacy response shape.
 
@@ -1401,7 +1401,7 @@ Executes a workflow of SDL-MCP operations in a single round-trip with budget tra
 | `budget`             | object                   | No       | Budget constraints for the workflow |
 | `onError`            | `"continue"` \| `"continueAll"` \| `"stop"` | No       | Error handling mode                 |
 | `trace`              | object                   | No       | Enable execution tracing            |
-| `includeDiagnostics` | boolean                  | No       | Include workflow phase timings      |
+| `includeDiagnostics` | boolean                  | No       | Accepted for compatibility; timings stay internal |
 
 Each step has:
 

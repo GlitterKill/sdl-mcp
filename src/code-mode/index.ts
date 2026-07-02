@@ -167,7 +167,7 @@ export function handleActionSearch(
   }
 
   // Compute disabled action hints.
-  const disabledActions = args.excludeDisabled ? disabledRanked : ranked.filter((a) => a.disabled);
+  const disabledActions = args.excludeDisabled ? [] : ranked.filter((a) => a.disabled);
   const disabledHint =
     disabledActions.length > 0
       ? {
@@ -183,7 +183,7 @@ export function handleActionSearch(
   return {
     actions: ranked,
     total: filteredRanked.length,
-    disabledHint,
+    ...(disabledHint ? { disabledHint } : {}),
     // Hint when schemas not included.
     ...(!effectiveIncludeSchemas
       ? {

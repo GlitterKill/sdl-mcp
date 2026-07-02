@@ -105,12 +105,9 @@ describe("response artifact storage", () => {
       "action",
       "handle",
       "kind",
-      "metadata",
       "responseMode",
     ]);
-    assert.equal(result.payload.metadata.handle, result.payload.handle);
-    assert.equal(result.payload.metadata.etag, result.metadata.etag);
-    assert.equal("estimatedOriginalTokens" in result.payload.metadata, false);
+    assert.equal("metadata" in result.payload, false);
     assert.equal("savings" in result.payload, false);
 
     const read = await readResponseArtifact({
@@ -124,6 +121,8 @@ describe("response artifact storage", () => {
     assert.strictEqual(read.full, true);
     assert.strictEqual(read.truncated, false);
     assert.deepStrictEqual(read.content, payload);
+    assert.equal("sessionKeyHash" in read.metadata, false);
+    assert.equal("sha256" in read.metadata, false);
   });
 
   it("extracts JSON paths without returning an invalid partial JSON string", async () => {
@@ -171,6 +170,32 @@ describe("response artifact storage", () => {
     assert.equal(read.truncated, false);
   });
 
+
+  it("omits evidence timestamps from response content", async () => {
+    const baseDir = makeTempDir();
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "sdl.context",
+      payload: {
+        finalEvidence: [
+          { reference: "symbol:alpha", summary: "alpha", timestamp: 12345 },
+        ],
+      },
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+      entropy: () => "2222222222222222",
+    });
+    assert.strictEqual(stored.responseMode, "handle");
+
+    const read = await readResponseArtifact({
+      repoId: "repo-a",
+      handle: stored.payload.handle,
+      artifactBaseDir: baseDir,
+      full: true,
+    });
+
+    assert.equal("timestamp" in read.content.finalEvidence[0], false);
+  });
 
   it("supports bracket JSON path array indexes", async () => {
     const baseDir = makeTempDir();
@@ -440,10 +465,9 @@ describe("response artifact storage", () => {
       "action",
       "handle",
       "kind",
-      "metadata",
       "responseMode",
     ]);
-    assert.equal("estimatedOriginalTokens" in response.metadata, false);
+    assert.equal("metadata" in response, false);
     const internalUsage = getHiddenTokenUsage(response);
     assert.ok(internalUsage.rawEquivalent > internalUsage.sdlTokens);
     assert.ok(isValidResponseArtifactHandle(response.handle));

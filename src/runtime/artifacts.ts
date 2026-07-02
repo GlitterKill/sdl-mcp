@@ -496,13 +496,21 @@ export async function queryArtifactContent(
     );
   };
 
+
+  const stripShellPromptEchoLines = (lines: string[]): string[] => {
+    const filtered = lines.filter((line) => !/^[A-Za-z]:\\[^>]*>.*$/.test(line.trimEnd()));
+    while (filtered[0]?.trim() === "") filtered.shift();
+    while (filtered.at(-1)?.trim() === "") filtered.pop();
+    return filtered.map((line) => line.replace(/\r$/, ""));
+  };
+
   const addStreamTotals = (
     content: string | null,
     source: "stdout" | "stderr",
   ): string[] | null => {
     if (content === null) return null;
     searchedStreams.push(source);
-    const lines = content.split("\n");
+    const lines = stripShellPromptEchoLines(content.split("\n"));
     totalLines += lines.length;
     return lines;
   };
@@ -597,7 +605,7 @@ export async function queryArtifactContent(
       source: "stdout" | "stderr",
     ): void => {
       if (streamContent === null) return;
-      const lines = streamContent.split("\n");
+      const lines = stripShellPromptEchoLines(streamContent.split("\n"));
       if (lines.length === 0 || (lines.length === 1 && lines[0] === "")) return;
       const end = Math.min(lines.length - 1, maxExcerpts - 1);
       excerpts.push({

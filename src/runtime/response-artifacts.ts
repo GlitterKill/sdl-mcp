@@ -60,10 +60,7 @@ export interface ResponseArtifactMetadata {
   sessionKeyHash?: string;
 }
 
-export type ResponseArtifactPublicMetadata = Omit<
-  ResponseArtifactMetadata,
-  "estimatedOriginalTokens"
->;
+export type ResponseArtifactPublicMetadata = Pick<ResponseArtifactMetadata, "toolName">;
 
 export interface ResponseArtifactSavings {
   originalTokens: number;
@@ -79,7 +76,7 @@ export interface ResponseArtifactReference {
   kind: "responseArtifact";
   handle: string;
   action: "response.get";
-  metadata: ResponseArtifactPublicMetadata;
+  metadata?: ResponseArtifactPublicMetadata;
 }
 
 export type MaybeStoreLargeResponseResult<T> =
@@ -149,7 +146,7 @@ export interface ResponseArtifactReadResult {
   truncated: boolean;
   contentKind: ResponseContentKind;
   content: unknown;
-  metadata: ResponseArtifactMetadata;
+  metadata: ResponseArtifactPublicMetadata;
   range: {
     offsetBytes: number;
     returnedBytes: number;
@@ -306,15 +303,28 @@ function createSavings(
 }
 
 function createReference(metadata: ResponseArtifactMetadata): ResponseArtifactReference {
-  const { estimatedOriginalTokens: _estimatedOriginalTokens, ...publicMetadata } = metadata;
   return {
     responseMode: "handle",
     kind: "responseArtifact",
     handle: metadata.handle,
     action: "response.get",
-    metadata: publicMetadata,
   };
 }
+
+function toPublicMetadata(metadata: ResponseArtifactMetadata): ResponseArtifactPublicMetadata {
+  return { toolName: metadata.toolName };
+}
+
+function stripTimestampFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripTimestampFields);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => key !== "timestamp")
+      .map(([key, entry]) => [key, stripTimestampFields(entry)]),
+  );
+}
+
 
 export async function maybeStoreLargeResponse<T>(
   opts: MaybeStoreLargeResponseOptions<T>,
@@ -624,8 +634,8 @@ export async function readResponseArtifact(
       full: false,
       truncated: pagination?.hasMore ?? false,
       contentKind: metadata.contentKind,
-      content,
-      metadata,
+      content: stripTimestampFields(content),
+      metadata: toPublicMetadata(metadata),
       range: {
         offsetBytes: 0,
         returnedBytes,
@@ -666,8 +676,8 @@ export async function readResponseArtifact(
     full,
     truncated,
     contentKind: metadata.contentKind,
-    content,
-    metadata,
+    content: stripTimestampFields(content),
+    metadata: toPublicMetadata(metadata),
     range: {
       offsetBytes: full ? 0 : offsetBytes,
       returnedBytes,

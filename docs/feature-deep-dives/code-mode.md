@@ -35,7 +35,7 @@ Code Mode keeps those flows inside SDL-MCP:
 
 Code Mode tool output is human-first. The first MCP `content` text block is concise terminal-friendly text, while task-relevant machine-readable data is carried in `structuredContent`. Agents should read the visible text for the human-facing summary and use `structuredContent` for follow-up identifiers such as `etag`, handles, file paths, symbol IDs, references, summaries, errors, and next-action hints.
 
-SDL-MCP internal bookkeeping is not duplicated into model-visible output by default. Timing diagnostics, packed-wire stats, raw-context baselines, action traces, precondition snapshots, backup paths, and retrieval-debug details stay in logs or diagnostics surfaces. Set `includeDiagnostics: true` or the relevant retrieval-evidence option only when the task actually needs those details; even then, the normal visible text stays concise.
+SDL-MCP internal bookkeeping is not duplicated into model-visible output. Timing diagnostics, packed-wire stats, raw-context baselines, action traces, precondition snapshots, backup paths, and retrieval-debug details stay in logs or observability surfaces. `includeDiagnostics` remains accepted for compatibility, but timing diagnostics are not returned in agent-visible payloads; use retrieval-evidence options only when the task needs those details.
 
 
 

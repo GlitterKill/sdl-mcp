@@ -86,8 +86,8 @@ export function getActiveActionToFn(): Record<string, string> {
 const MANUAL_TEMPLATE = `// SDL-MCP API: sdl.context for context; sdl.workflow for multi-step ops
 // repoId lives in workflow envelope.
 // Reference steps as ${"$"}N, e.g. ${"$"}0.results[0].symbolId.
-// Limits: sdl.action.search limit <= 50; workflowContinuationGet limit <= 1000; runtimeExecute maxResponseLines 5..1000; shell runtime requires code.
-// Edit: symbolEdit one symbol; searchEdit identifier/structural/operations[]; runtimeExecute stdin.
+// Limits: sdl.action.search limit <= 50; workflowContinuationGet limit <= 1000; runtimeExecute maxResponseLines 5..1000; shell runtime accepts code or command alias.
+// Edit: symbolEdit one; searchEdit identifier/structural/operations[]; runtime stdin.
 // sdl.context budgets accept maxTokens/maxEstimatedTokens, not maxCards.
 // Use wireFormat:"json" for symbol.search/sliceBuild when ${"$"}N refs need fields.
 // Continuation recipe: symbolSearch -> workflowContinuationGet(handle,path,offset,limit) -> dataMap/dataTemplate.
@@ -95,7 +95,7 @@ const MANUAL_TEMPLATE = `// SDL-MCP API: sdl.context for context; sdl.workflow f
 type RM = "inline"|"auto"|"handle"; type DM = "off"|"auto"; type ResponseHandle = { kind: "responseArtifact"; handle: string; action: "response.get" };
 type SQ = { literal?: string; regex?: string; replacement?: string; global?: boolean; structural?: { language?: string; treeSitterQuery: string; capture?: string; requiredCaptures?: Record<string,string>; replacement?: string }; symbolRef?: object; symbolIds?: string[]; replaceLines?: object; insertAt?: object; content?: string; append?: string };
 type EM = "replacePattern"|"replaceLines"|"insertAt"|"append"|"overwrite"; type ST = "text"|"symbol"|"identifier"|"structural"; type SEOps = { id?: string; targeting: ST; query: SQ; editMode: EM; filters?: object; maxFiles?: number; maxMatchesPerFile?: number; maxTotalMatches?: number };
-type SEO = { kind: "replaceSymbol"|"replaceBody"|"replaceSignature"|"insertBefore"|"insertAfter"; content: string } | { kind: "renameLocal"; name: string; replacement: string }; type SR = { startLine: number; startCol: number; endLine: number; endCol: number }
+type SEO = { kind: "replaceSymbol"|"replaceSignature"|"insertBefore"|"insertAfter"; content: string } | { kind: "renameLocal"; name: string; replacement: string }; type SR = { startLine: number; startCol: number; endLine: number; endCol: number }
 
 // === Query ===
 /** Search symbols by name/pattern */

@@ -138,20 +138,22 @@ async function handlePreview(
     createBackup: request.createBackup,
   });
 
-  const store = getSearchEditPlanStore();
+  const requiresApply = preview.edits.length > 0;
   const skippedSummary = summarizeSkippedFiles(preview.summary.filesSkipped);
   const storedSummary = compactStoredSummary(preview.summary, skippedSummary);
-  const stored = store.create(
-    request.repoId,
-    preview.edits,
-    preview.preconditions,
-    storedSummary,
-    request.createBackup ?? true,
-  );
+  const stored = requiresApply
+    ? getSearchEditPlanStore().create(
+        request.repoId,
+        preview.edits,
+        preview.preconditions,
+        storedSummary,
+        request.createBackup ?? true,
+      )
+    : undefined;
 
   const response: SearchEditPreviewResponse = {
     mode: "preview",
-    planHandle: stored.planHandle,
+    ...(stored ? { planHandle: stored.planHandle } : {}),
     filesMatched: preview.summary.filesMatched,
     matchesFound: preview.summary.matchesFound,
     filesEligible: preview.summary.filesEligible,
@@ -162,8 +164,8 @@ async function handlePreview(
       : {}),
     filesSkippedByReason: skippedSummary.filesSkippedByReason,
     fileEntries: preview.summary.fileEntries,
-    requiresApply: preview.edits.length > 0,
-    expiresAt: new Date(stored.expiresAt).toISOString(),
+    requiresApply,
+    ...(stored ? { expiresAt: new Date(stored.expiresAt).toISOString() } : {}),
     preconditionSnapshot: preview.preconditions.map((pc) => ({
       file: pc.relPath,
       sha256: pc.sha256,
@@ -174,7 +176,9 @@ async function handlePreview(
       ? { retrievalEvidence: compactRetrievalEvidence(preview.retrievalEvidence) }
       : {}),
   };
-  const rawBytes = computeAggregateRawBytes(stored);
+  const rawBytes = stored
+    ? computeAggregateRawBytes(stored)
+    : JSON.stringify(response).length;
   const enriched = attachRaw(response, rawBytes);
   return maybeCompressToolResponse({
     repoId: request.repoId,

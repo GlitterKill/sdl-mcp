@@ -445,4 +445,35 @@ describe("queryArtifactContent trust metadata", () => {
     assert.strictEqual(result.matchCount, 0);
     assert.strictEqual(result.excerpts[0]?.content, "two\nthree");
   });
+  it("queryArtifactContent strips Windows shell prompt echoes", async () => {
+    const { baseDir, handle } = await writeSearchArtifact(
+      "C:\\repo\\project>echo prompt-filter-ok\nprompt-filter-ok\nfinal",
+    );
+
+    const ranged = await queryArtifactContent(handle, [], {
+      baseDir,
+      lineRange: { stream: "stdout", startLine: 1, endLine: 2 },
+    });
+
+    assert.strictEqual(ranged.excerpts[0]?.content, "prompt-filter-ok\nfinal");
+
+    const fallback = await queryArtifactContent(handle, ["missing"], {
+      baseDir,
+      maxExcerpts: 2,
+      contextLines: 0,
+    });
+
+    assert.strictEqual(fallback.excerpts[0]?.content, "prompt-filter-ok\nfinal");
+  });
+
+  it("queryArtifactContent trims wrapper blank lines from excerpts", async () => {
+    const { baseDir, handle } = await writeSearchArtifact("\r\nvisible\r\n");
+
+    const result = await queryArtifactContent(handle, [], {
+      baseDir,
+      lineRange: { stream: "stdout", startLine: 1, endLine: 3 },
+    });
+
+    assert.strictEqual(result.excerpts[0]?.content, "visible");
+  });
 });

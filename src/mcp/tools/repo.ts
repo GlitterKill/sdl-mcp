@@ -201,6 +201,7 @@ export async function handleRepoRegister(
     languages,
     maxFileBytes,
     dryRun,
+    detail = "summary",
     updateExisting,
   } = request;
 
@@ -344,18 +345,24 @@ export async function handleRepoRegister(
     JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
 
   if (dryRun) {
-    return {
+    const changed = configChanges.length > 0;
+    const response: RepoRegisterResponse = {
       ok: true,
       repoId,
       dryRun: true,
-      changed: configChanges.length > 0,
+      changed,
       configChanges,
-      currentConfig: currentConfig ? toConfigRecord(currentConfig) : undefined,
-      proposedConfig: toConfigRecord(proposedConfig),
       message: existingRepo
         ? "Dry run only; existing repo registration was not changed."
         : "Dry run only; repo would be registered.",
     };
+    if (changed || detail === "full") {
+      response.currentConfig = currentConfig
+        ? toConfigRecord(currentConfig)
+        : undefined;
+      response.proposedConfig = toConfigRecord(proposedConfig);
+    }
+    return response;
   }
 
   if (existingRepo && configChanges.length > 0 && !updateExisting) {
@@ -748,7 +755,6 @@ export async function handleIndexRefresh(
   const request = args as IndexRefreshRequest;
   const { repoId, mode } = request;
   const asyncMode = request.async === true;
-  const includeDiagnostics = request.includeDiagnostics === true;
 
   recordToolTrace({
     repoId,
@@ -765,9 +771,6 @@ export async function handleIndexRefresh(
       versionId: result.versionId,
       changedFiles: result.changedFiles,
     };
-    if (includeDiagnostics && result.timings) {
-      response.diagnostics = { timings: result.timings };
-    }
     return response;
   };
 
@@ -839,7 +842,7 @@ export async function handleIndexRefresh(
         : undefined;
 
     const result = await indexRepo(repoId, mode, onProgress, context?.signal, {
-      includeTimings: includeDiagnostics,
+      includeTimings: false,
     });
 
     await runPostRefresh(conn);

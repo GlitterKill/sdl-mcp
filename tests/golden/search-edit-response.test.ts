@@ -98,14 +98,12 @@ describe("sdl.search.edit response golden", () => {
   it("SearchEditPreviewResponse accepts fallback-only retrievalEvidence", () => {
     const response: SearchEditPreviewResponse = {
       mode: "preview",
-      planHandle: "se-fallback-path",
       filesMatched: 0,
       matchesFound: 0,
       filesEligible: 0,
       filesSkipped: [],
       fileEntries: [],
       requiresApply: false,
-      expiresAt: new Date(0).toISOString(),
       preconditionSnapshot: [],
       retrievalEvidence: {
         sources: [],

@@ -169,17 +169,15 @@ describe("index.refresh async mode schema", () => {
     );
   });
 
-  it("response schema includes diagnostics timings", async () => {
+  it("response schema omits agent-visible diagnostics timings", async () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync("src/mcp/tools.ts", "utf8");
-    assert.ok(
-      src.includes("diagnostics:") && src.includes(".object("),
-      "IndexRefreshResponseSchema should have diagnostics field",
-    );
-    assert.ok(
-      src.includes("timings:") && src.includes(".object("),
-      "IndexRefreshResponseSchema should include timings diagnostics",
-    );
+    const schemaStart = src.indexOf("export const IndexRefreshResponseSchema");
+    const schemaEnd = src.indexOf("export const BufferPushRequestSchema", schemaStart);
+    const schemaSrc = src.slice(schemaStart, schemaEnd);
+
+    assert.equal(schemaSrc.includes("diagnostics:"), false);
+    assert.equal(schemaSrc.includes("ToolTimingDiagnosticsSchema"), false);
   });
 
   it("handler supports asyncMode flag", async () => {

@@ -40,6 +40,8 @@ export interface SemanticEnrichmentRefreshRequest {
 export interface SemanticEnrichmentStatusRequest {
   repoId: string;
   languages?: string[];
+  detail?: "compact" | "full";
+  lastRunsLimit?: number;
 }
 
 export interface SemanticEnrichmentRefreshResult {
@@ -54,6 +56,21 @@ export interface SemanticEnrichmentRefreshResult {
   skipped: Array<{ providerType: string; languageId?: string; reason: string }>;
 }
 
+export interface CompactSemanticProviderRun {
+  runId: string;
+  providerType: PersistedSemanticProviderRun["providerType"];
+  providerId: string;
+  languages: string[];
+  status: PersistedSemanticProviderRun["status"];
+  startedAt: string;
+  finishedAt?: string;
+  documentsProcessed: number;
+  symbolsMatched: number;
+  diagnosticsCount: number;
+  cacheHit?: boolean;
+  selected?: boolean;
+}
+
 export interface SemanticEnrichmentStatusResult {
   ok: boolean;
   repoId: string;
@@ -61,7 +78,7 @@ export interface SemanticEnrichmentStatusResult {
   autoRunOnIndexRefresh: boolean;
   installPolicy: SemanticEnrichmentConfig["installPolicy"];
   selections: SemanticSourceSelection[];
-  lastRuns: PersistedSemanticProviderRun[];
+  lastRuns: Array<PersistedSemanticProviderRun | CompactSemanticProviderRun>;
 }
 
 export async function refreshSemanticEnrichment(
@@ -173,10 +190,15 @@ export async function getSemanticEnrichmentStatus(
   );
   const selections = selectSemanticSources(config, packs, detectedTools);
   const conn = await getLadybugConn();
-  const lastRuns = filterProviderRunsByLanguages(
+  const filteredRuns = filterProviderRunsByLanguages(
     await getLatestSemanticProviderRuns(conn, request.repoId),
     config.languages,
   );
+  const lastRuns = filteredRuns
+    .slice(0, request.lastRunsLimit ?? 3)
+    .map((run) =>
+      request.detail === "full" ? run : compactSemanticProviderRun(run),
+    );
 
   return {
     ok: true,
@@ -186,6 +208,25 @@ export async function getSemanticEnrichmentStatus(
     installPolicy: config.installPolicy,
     selections,
     lastRuns,
+  };
+}
+
+function compactSemanticProviderRun(
+  run: PersistedSemanticProviderRun,
+): CompactSemanticProviderRun {
+  return {
+    runId: run.runId,
+    providerType: run.providerType,
+    providerId: run.providerId,
+    languages: run.languages,
+    status: run.status,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    documentsProcessed: run.documentsProcessed,
+    symbolsMatched: run.symbolsMatched,
+    diagnosticsCount: run.diagnosticsCount,
+    cacheHit: run.cacheHit,
+    selected: run.selected,
   };
 }
 

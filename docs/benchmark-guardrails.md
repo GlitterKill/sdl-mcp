@@ -164,7 +164,7 @@ The suite now runs lexical-only, confidence-gated default, and forced semantic/h
 
 A May 12, 2026 SDL-MCP reference run measured lexical recall at `76.7%`, confidence-gated default recall at `80.2%`, and forced semantic recall at `87.1%` with `0%` noise. Scoped precise lookup measured `p95 161ms`.
 
-For tool-call latency regressions, collect at least one cold and one warm sample with `includeDiagnostics: true` before changing retrieval or DB code. Compare the returned phase timings against the observability dashboard's per-tool `phases` and `dbLatencyP95Ms` so regressions can be attributed to server overhead, retrieval, LadybugDB native execution/materialization, response shaping, or runtime artifact handling.
+For tool-call latency regressions, collect at least one cold and one warm sample and compare internal phase timings from logs or the observability dashboard against per-tool `phases` and `dbLatencyP95Ms`. `includeDiagnostics` is accepted for compatibility, but timing diagnostics are not returned in agent-visible tool payloads.
 
 ### Running the Suite
 

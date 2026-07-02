@@ -19,7 +19,6 @@ const BROAD_MODEL_VISIBLE_FIELDS = new Set([
 export const BROAD_VISIBLE_FIELDS = new Set([
   ...BROAD_MODEL_VISIBLE_FIELDS,
   "etag",
-  "diagnostics",
   "retrievalEvidence",
 ]);
 
@@ -264,9 +263,9 @@ function modelOptionsFromArgs(
   const options = isRecord(args.options) ? args.options : {};
   return {
     detail: normalizedDetail(args.detail ?? options.detail),
-    includeDiagnostics:
-      args.includeDiagnostics === true
-      || options.includeDiagnostics === true,
+    // includeDiagnostics remains accepted for compatibility, but timing data is
+    // internal-only and never projected into agent-visible payloads.
+    includeDiagnostics: false,
     includeRetrievalEvidence:
       args.includeRetrievalEvidence === true
       || options.includeRetrievalEvidence === true,
@@ -373,7 +372,7 @@ function shouldKeepModelField(
     return false;
   }
   if (key === "diagnostics") {
-    return options.includeDiagnostics;
+    return false;
   }
   if (key === "retrievalEvidence") {
     return options.includeRetrievalEvidence;
@@ -422,10 +421,6 @@ function projectGenericValueForModel(
     if (shouldDropNoOpField(key, itemValue)) {
       continue;
     }
-    if (key === "diagnostics" && options.includeDiagnostics) {
-      projected[key] = itemValue;
-      continue;
-    }
     if (key === "retrievalEvidence" && options.includeRetrievalEvidence) {
       projected[key] = itemValue;
       continue;
@@ -472,9 +467,6 @@ function projectContextResultForModel(
 
   if (options.includeRetrievalEvidence) {
     copyIfPresent(result, projected, "retrievalEvidence");
-  }
-  if (options.includeDiagnostics) {
-    copyIfPresent(result, projected, "diagnostics");
   }
 
   return projected;
@@ -635,9 +627,6 @@ function projectWorkflowResultForModel(
   if (options.includeTrace) {
     copyIfPresent(result, projected, "trace");
   }
-  if (options.includeDiagnostics) {
-    copyIfPresent(result, projected, "diagnostics");
-  }
   return projected;
 }
 
@@ -724,9 +713,6 @@ function projectRepoStatusForModel(
     projected.watcherHealth = compactWatcher;
   }
   copyIfPresent(result, projected, "nextBestAction");
-  if (options.includeDiagnostics) {
-    copyIfPresent(result, projected, "diagnostics");
-  }
   if (options.includeRetrievalEvidence) {
     copyIfPresent(result, projected, "retrievalEvidence");
   }

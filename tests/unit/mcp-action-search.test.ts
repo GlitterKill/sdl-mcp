@@ -5,6 +5,7 @@ import {
   rankCatalog,
   invalidateCatalog,
 } from "../../dist/code-mode/action-catalog.js";
+import { handleActionSearch } from "../../dist/code-mode/index.js";
 
 describe("sdl.action.search behavior", () => {
   describe("query matching via rankCatalog", () => {
@@ -65,6 +66,19 @@ describe("sdl.action.search behavior", () => {
       assert.ok(ranked.length > 0, "should match at least one action");
     });
 
+    it("returns catalog results for broad discovery queries", () => {
+      invalidateCatalog();
+      const catalog = buildCatalog({ includeSchemas: true });
+      for (const query of [
+        "repo symbol slice code delta policy usage file search edit buffer runtime response agent feedback semantic",
+        "all tools",
+        "tool catalog",
+      ]) {
+        const ranked = rankCatalog(catalog, query);
+        assert.ok(ranked.length > 0, `expected results for ${query}`);
+      }
+    });
+
     it("returns empty array for unknown query", () => {
       invalidateCatalog();
       const catalog = buildCatalog();
@@ -77,6 +91,19 @@ describe("sdl.action.search behavior", () => {
       const catalog = buildCatalog();
       const ranked = rankCatalog(catalog, "qqwwrrttyy99887766");
       assert.strictEqual(ranked.length, 0);
+    });
+  });
+
+  describe("handler output", () => {
+    it("omits disabled hints when excluded disabled actions are not returned", () => {
+      const result = handleActionSearch({
+        query: "all tools",
+        limit: 8,
+        includeSchemas: true,
+        excludeDisabled: true,
+      }) as Record<string, unknown>;
+
+      assert.equal("disabledHint" in result, false);
     });
   });
 

@@ -177,7 +177,7 @@ function buildContextClause(
   input: PreparedSymbolEmbeddingInput,
   returnType: string | null,
   sideEffect: string | null,
-): string {
+): string | null {
   const searchable = `${humanizeIdentifier(input.symbol.name)} ${input.searchTerms.join(" ")}`;
   if (
     /\bsummaries?\b/u.test(searchable) &&
@@ -193,7 +193,7 @@ function buildContextClause(
   }
 
   if (returnType && !sideEffect) {
-    return `returning ${returnType} using available signature, symbol metadata, and graph context details`;
+    return `returning ${returnType}`;
   }
 
   const clauses: string[] = [];
@@ -206,7 +206,7 @@ function buildContextClause(
   }
   if (clauses.length > 0) return clauses.join(" ");
 
-  return "using available signature, role, path, language, and graph context metadata";
+  return null;
 }
 
 /**
@@ -228,7 +228,7 @@ export function buildConciseSymbolSummary(
   }
 
   const context = buildContextClause(input, returnType, sideEffect);
-  return capSummary(`${action}, ${context}.`);
+  return capSummary(context ? `${action}, ${context}.` : `${action}.`);
 }
 /**
  * Build a structured embedding payload for Jina code models.

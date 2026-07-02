@@ -52,7 +52,7 @@ export const WorkflowRequestSchema = z.object({
   trace: WorkflowTraceOptionsSchema.optional(),
   /** When true, validate steps and $N references without executing. Returns validation result only. */
   dryRun: z.boolean().optional(),
-  /** Include phase timing diagnostics for performance investigation. */
+  /** Accepted for compatibility; timing diagnostics stay internal and are not returned. */
   includeDiagnostics: z.boolean().optional(),
   /** Include successful step timing/token telemetry in agent-visible responses. */
   includeTelemetry: z.boolean().optional().default(false),

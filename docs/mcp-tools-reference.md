@@ -146,18 +146,18 @@ Refresh the symbol index in `incremental` or `full` mode.
 | `repoId`             | `string`                  | Yes      | Repository identifier                                                                 |
 | `mode`               | `"full" \| "incremental"` | Yes      | Refresh mode                                                                          |
 | `reason`             | `string`                  | No       | Human-readable reason for the refresh                                                 |
-| `includeDiagnostics` | `boolean`                 | No       | When `true`, include coarse phase timings in the synchronous response                 |
+| `includeDiagnostics` | `boolean`                 | No       | Accepted for compatibility; timing diagnostics stay internal and are not returned     |
 | `async`              | `boolean`                 | No       | When `true`, start indexing in the background and return an `operationId` immediately |
 
-**Response:** `{ ok: boolean, repoId: string, versionId?: string, changedFiles?: integer, async?: boolean, operationId?: string, message?: string, diagnostics?: { timings: { totalMs: number, phases: Record<string, number> } } }`
+**Response:** `{ ok: boolean, repoId: string, versionId?: string, changedFiles?: integer, async?: boolean, operationId?: string, message?: string }`
 
 In incremental mode, files whose modification time predates their last indexed timestamp are skipped. If changed files are found, derived cluster/process state is recomputed inline before the refresh returns. If no tracked files changed, the existing version is reused instead of creating an empty snapshot and the refresh can short-circuit after `scanRepo`, `versioning`, and `memorySync`.
 
 When called with a progress token, the server emits `notifications/progress` messages with the current stage, file path, and completion percentage.
 
-`diagnostics.timings` is only returned for synchronous requests with `includeDiagnostics: true`.
+Timing diagnostics are recorded internally and in observability surfaces, but are not returned in agent-visible responses.
 
-Common `diagnostics.timings.phases` entries include:
+Common internal phase names include:
 
 - `initSharedState.tsResolver`
 - `initSharedState.symbolMaps`
@@ -479,7 +479,7 @@ Use this for edits where the target is one symbol. Use `sdl.search.edit` for cro
   "repoId": "my-repo",
   "mode": "preview",
   "symbolRef": { "name": "handleAuth", "file": "src/auth.ts" },
-  "operation": { "kind": "replaceBody", "content": "return true;\n" }
+  "operation": { "kind": "replaceSymbol", "content": "export function handleAuth() { return true; }\n" }
 }
 ```
 
@@ -912,7 +912,7 @@ Retrieve task-shaped code context with rung path selection and evidence capture.
 | `taskText`           | `string`                                          | Yes      | Task description or prompt                   |
 | `budget`             | `object`                                          | No       | Budget constraints                           |
 | `options`            | `object`                                          | No       | Task-specific options                        |
-| `includeDiagnostics` | `boolean`                                         | No       | Include coarse phase timings in the response |
+| `includeDiagnostics` | `boolean`                                         | No       | Accepted for compatibility; timing diagnostics stay internal |
 
 `budget` fields (all optional):
 
@@ -941,7 +941,7 @@ Retrieve task-shaped code context with rung path selection and evidence capture.
 
 **Response:**
 
-In **broad** mode (default, compact): `taskId`, `taskType`, `success`, `summary`, `answer`, `finalEvidence`, `nextBestAction?`, `retrievalEvidence?`, `diagnostics?`, `error?` — the fields `actionsTaken`, `path`, and `metrics` are omitted from the model-visible response. `finalEvidence` is the primary evidence surface. `retrievalEvidence` carries `sources`, `candidateCountPerSource`, `topRanksPerSource`, `fusionLatencyMs`, `diagnosticTimings`, `ftsAvailable`, and `vectorAvailable` from hybrid seeding when available. `diagnostics` is returned only when `includeDiagnostics: true`. The `answer` field is always preserved on successful responses.
+In **broad** mode (default, compact): `taskId`, `taskType`, `success`, `summary`, `answer`, `finalEvidence`, `nextBestAction?`, `retrievalEvidence?`, `error?` — the fields `actionsTaken`, `path`, and `metrics` are omitted from the model-visible response. `finalEvidence` is the primary evidence surface. `retrievalEvidence` carries `sources`, `candidateCountPerSource`, `topRanksPerSource`, `fusionLatencyMs`, `diagnosticTimings`, `ftsAvailable`, and `vectorAvailable` from hybrid seeding when available. `diagnostics` is returned only when `includeDiagnostics: true`. The `answer` field is always preserved on successful responses.
 
 In **precise** mode: `taskId`, `taskType`, `success`, `path`, `finalEvidence`, `metrics` — envelope fields stripped for token efficiency.
 
@@ -1130,13 +1130,13 @@ Run a command in a repo-scoped subprocess. Runtime execution is enabled by defau
 | `maxResponseLines`   | `integer`                                | No       | Max output lines returned (5-1,000, default: 100)                                                                                                                                                 |
 | `persistOutput`      | `boolean`                                | No       | Save full output to an artifact handle (default: true)                                                                                                                                            |
 | `outputMode`         | `"minimal"` \| `"summary"` \| `"intent"` | No       | Controls response verbosity. `"minimal"` (default): status, artifact handle, and concise stdout/stderr previews. `"summary"`: head+tail excerpts. `"intent"`: only `queryTerms`-matched excerpts. |
-| `includeDiagnostics` | `boolean`                                | No       | Include coarse policy, execution, output decoding, and artifact phase timings                                                                                                                     |
+| `includeDiagnostics` | `boolean`                                | No       | Accepted for compatibility; timing diagnostics stay internal                                                                                                                                       |
 
-Use `stdin` for multiline scripts/input instead of shell quoting or base64 workarounds. SDL-MCP reports `stdinBytes` and `stdinSha256` but does not echo full stdin in visible output or persisted logs. `stdin` does not bypass command validation: the shell runtime still requires `code`. Use `code` for inline snippets or `args` for invoking files/commands. Default Node `code` snippets resolve relative imports from the requested working directory without repo-local temp files. When Node `code` also needs user `stdin`, SDL-MCP runs a temp `.mjs` from the OS temp directory so stdin remains available to the child process. On Windows shell runtime, use `&` or newlines rather than semicolons for command separation; SDL-MCP surfaces a warning when semicolons appear in shell code. Predictable failures can include compact `runtimeHints`, such as using ESM imports instead of `require()` or avoiding Bash syntax under Windows `cmd.exe`. `queryTerms` acts like a built-in grep, extracting only matching lines from long output.
+Use `stdin` for multiline scripts/input instead of shell quoting or base64 workarounds. SDL-MCP reports `stdinBytes` and `stdinSha256` but does not echo full stdin in visible output or persisted logs. `stdin` does not bypass command validation: the shell runtime requires `code`, or `command` as a compatibility alias for `code`. Use `code` for inline snippets or `args` for invoking files/commands. Default Node `code` snippets resolve relative imports from the requested working directory without repo-local temp files. When Node `code` also needs user `stdin`, SDL-MCP runs a temp `.mjs` from the OS temp directory so stdin remains available to the child process. On Windows shell runtime, use `&` or newlines rather than semicolons for command separation; SDL-MCP surfaces a warning when semicolons appear in shell code. Predictable failures can include compact `runtimeHints`, such as using ESM imports instead of `require()` or avoiding Bash syntax under Windows `cmd.exe`. `queryTerms` acts like a built-in grep, extracting only matching lines from long output.
 
 **Response** varies by `outputMode`:
 
-- **All modes:** `status`, `exitCode`, `signal`, `durationMs`, `artifactHandle`, `truncation`, `policyDecision`, `diagnostics?`, plus `stdinBytes`/`stdinSha256` when stdin was provided, `quotingWarnings` when risky quoting patterns are detected, and `runtimeHints` for compact corrective guidance
+- **All modes:** `status`, `exitCode`, `signal`, `durationMs`, `artifactHandle`, `truncation`, `policyDecision`, plus `stdinBytes`/`stdinSha256` when stdin was provided, `quotingWarnings` when risky quoting patterns are detected, and `runtimeHints` for compact corrective guidance
 - **`"minimal"` (default):** returns concise `stdoutPreview` and short `stderrSummary` when output is small enough to show inline. Use `sdl.runtime.queryOutput` to search the artifact for full output.
 - **`"summary"`:** adds `stdoutSummary`, `stderrSummary`, `excerpts`, `truncation` (legacy behavior)
 - **`"intent"`:** adds `excerpts`, `truncation` — only `queryTerms`-matched windows, no head/tail summary
@@ -1359,7 +1359,7 @@ Use `sdl.context` first for `debug`, `review`, `implement`, and `explain` reques
 
 Execute a multi-step workflow of SDL-MCP actions and internal transforms in one round trip.
 
-Use this for runtime execution, data shaping, batch mutations, and reusable multi-step pipelines. Do not use it for context retrieval; route that work to `sdl.context`. Set `includeDiagnostics: true` to include workflow phase timings.
+Use this for runtime execution, data shaping, batch mutations, and reusable multi-step pipelines. Do not use it for context retrieval; route that work to `sdl.context`. `includeDiagnostics` is accepted for compatibility, but workflow timing diagnostics stay internal.
 
 ### `sdl.manual`
 
@@ -1369,7 +1369,7 @@ Use this before `sdl.context` or `sdl.workflow` when the model needs a narrow, t
 
 ### `sdl.file`
 
-Provide a unified Code Mode file gateway for read, write, search/edit preview/apply, symbol edit preview/apply/applyNow, and plan-bound `previewWindow`/`sourceWindow` operations that route indexed source inspection through `code.needWindow` policy. Set `includeDiagnostics: true` to include file gateway phase timings.
+Provide a unified Code Mode file gateway for read, write, search/edit preview/apply, symbol edit preview/apply/applyNow, and plan-bound `previewWindow`/`sourceWindow` operations that route indexed source inspection through `code.needWindow` policy. `includeDiagnostics` is accepted for compatibility, but file gateway timing diagnostics stay internal.
 
 ---
 

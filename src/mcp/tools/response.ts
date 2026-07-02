@@ -42,7 +42,7 @@ export async function handleResponseGet(
       sessionId: context?.sessionId,
     });
     const { savings, metadata, range, ...rest } = response;
-    const { estimatedOriginalTokens: _estimatedOriginalTokens, ...publicMetadata } = metadata;
+    const publicMetadata = metadata;
     const { estimatedReturnedTokens: _estimatedReturnedTokens, ...publicRange } = range;
     const publicResponse = {
       ...rest,

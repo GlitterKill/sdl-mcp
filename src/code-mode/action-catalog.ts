@@ -440,6 +440,13 @@ function describeField(name: string, schema: z.ZodType): SchemaSummaryField {
     field.enumValues = enumValues;
   }
 
+  const discriminator = getDiscriminator(current);
+  if (discriminator) {
+    field.type = "object";
+    field.subFields = zodToSchemaSummary(current).fields;
+    return field;
+  }
+
   const nestedShape = getObjectShape(current);
   if (nestedShape) {
     field.subFields = Object.entries(nestedShape).map(([subName, subSchema]) =>
@@ -532,7 +539,10 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   "symbol.edit": {
     mode: "preview",
     symbolId: "<symbolId>",
-    operation: { kind: "replaceBody", content: "return true;\n" },
+    operation: {
+      kind: "replaceSymbol",
+      content: "export function target() { return true; }\n",
+    },
   },
   "slice.build": {
     taskText: "debug authentication flow",
@@ -1305,12 +1315,31 @@ function normalizeActionSearchTerm(term: string): string {
   }
 }
 
+function schemaSummarySearchText(summary: SchemaSummary | undefined): string {
+  const parts: string[] = [];
+  const visit = (fields: SchemaSummaryField[] | undefined): void => {
+    for (const field of fields ?? []) {
+      parts.push(field.name, field.type, ...(field.enumValues ?? []));
+      visit(field.subFields);
+    }
+  };
+  visit(summary?.fields);
+  return parts.join(" ").toLowerCase();
+}
+
+function isCatalogQuery(query: string): boolean {
+  return /^(all tools|tool catalog|list tools|tools|catalog)$/.test(query.trim());
+}
+
 export function rankCatalog(
   catalog: ActionDescriptor[],
   query: string,
 ): ActionDescriptor[] {
   const q = query.toLowerCase();
-  const rawTerms = q.split(/\s+/).filter(Boolean).map(normalizeActionSearchTerm);
+  const rawTerms = q
+    .split(/[^a-z0-9_.-]+/)
+    .filter(Boolean)
+    .map(normalizeActionSearchTerm);
 
   // Expand synonyms: add related terms for better matching
   const terms = rawTerms.flatMap((term) => {
@@ -1319,7 +1348,7 @@ export function rankCatalog(
   });
 
   // Wildcard or empty query returns all actions sorted alphabetically
-  if (terms.length === 0 || (terms.length === 1 && terms[0] === "*")) {
+  if (terms.length === 0 || isCatalogQuery(q) || (terms.length === 1 && terms[0] === "*")) {
     return [...catalog].sort((a, b) => a.action.localeCompare(b.action));
   }
 
@@ -1345,6 +1374,7 @@ export function rankCatalog(
     ]
       .join(" ")
       .toLowerCase();
+    const schemaStr = schemaSummarySearchText(desc.schemaSummary);
 
     for (const term of terms) {
       // Exact name match (highest weight)
@@ -1364,6 +1394,8 @@ export function rankCatalog(
           score += 10;
         } else if (description.includes(term)) {
           score += 3;
+        } else if (schemaStr.includes(term)) {
+          score += 4;
         } else if (metadataStr.includes(term)) {
           score += 2;
         }

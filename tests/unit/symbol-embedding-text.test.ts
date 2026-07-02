@@ -127,7 +127,22 @@ describe("buildConciseSymbolSummary", () => {
 
     assert.match(summary, /^Configures pipeline/);
     assert.ok(!summary.includes("returns"));
-    assert.ok(wordCount(summary) >= 12 && wordCount(summary) <= 20);
+    assert.doesNotMatch(summary, /using available signature/);
+    assert.ok(wordCount(summary) <= 20);
+  });
+
+  it("does not emit literal null or filler when no context clause exists", () => {
+    const input = makeInput({
+      signatureText: "function refreshCache(options)",
+      roleTags: [],
+      sideEffects: [],
+    });
+    input.symbol.name = "refreshCache";
+
+    const summary = buildConciseSymbolSummary(input);
+
+    assert.match(summary, /^Refreshes cache\./);
+    assert.doesNotMatch(summary, /null|using available signature/);
   });
 
   it("caps the summary for card display", () => {

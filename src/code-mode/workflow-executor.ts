@@ -32,7 +32,6 @@ import { z } from "zod";
 import { getActiveFnNameMap, getActiveActionToFn } from "./manual-generator.js";
 import { findRefsInArgs, type ParsedWorkflowStep } from "./workflow-parser.js";
 import {
-  attachTimingDiagnostics,
   ToolPhaseTimer,
 } from "../mcp/timing-diagnostics.js";
 
@@ -353,9 +352,7 @@ export async function executeWorkflow(
         budgetLimits: request.budget ?? {},
       },
     } as WorkflowResponse;
-    return request.includeDiagnostics
-      ? attachTimingDiagnostics(response, timer.snapshot())
-      : response;
+    return response;
   }
 
   for (let i = 0; i < request.steps.length; i++) {
@@ -959,9 +956,7 @@ export async function executeWorkflow(
   }
   timer.record("workflow.responseAssembly", responseStartedAt);
 
-  return request.includeDiagnostics
-    ? attachTimingDiagnostics(response, timer.snapshot())
-    : response;
+  return response;
 }
 
 // --- Trace Helpers ---

@@ -105,6 +105,32 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     assert.deepEqual(files, ["a.txt", "b.txt"]);
   });
 
+  it("omits apply handle fields when preview has no edits", async () => {
+    const req = SearchEditRequestSchema.parse({
+      mode: "preview",
+      repoId: REPO_ID,
+      targeting: "text",
+      query: {
+        literal: "missingName",
+        replacement: "newName",
+        global: true,
+      },
+      editMode: "replacePattern",
+      filters: { extensions: [".txt"] },
+    });
+    const response = (await handleSearchEdit(req)) as SearchEditPreviewResponse;
+
+    assert.equal(response.mode, "preview");
+    assert.equal(response.requiresApply, false);
+    assert.equal(response.filesMatched, 0);
+    assert.equal(response.matchesFound, 0);
+    assert.equal(response.planHandle, undefined);
+    assert.equal(response.expiresAt, undefined);
+    assert.deepEqual(response.fileEntries, []);
+    assert.deepEqual(response.preconditionSnapshot, []);
+  });
+
+
   it("identifier targeting edits AST identifiers without touching strings or comments", async () => {
     await writeFile(
       join(repoRoot, "ident.ts"),
@@ -772,10 +798,7 @@ describe("sdl.search.edit", { concurrency: false }, () => {
 
     assert.equal(response.responseMode, "handle");
     assert.equal(response.kind, "responseArtifact");
-    assert.equal(
-      (response.metadata as Record<string, unknown>).toolName,
-      "sdl.search.edit",
-    );
+    assert.equal("metadata" in response, false);
 
     const full = (await handleResponseGet({
       repoId: REPO_ID,

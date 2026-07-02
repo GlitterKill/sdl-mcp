@@ -253,6 +253,50 @@ describe("PR Risk Analysis Tool", () => {
 
     assert.ok(response.analysis.changedSymbols, "Expected changedSymbols in analysis");
     assert.ok(Array.isArray(response.analysis.changedSymbols.items), "Expected changedSymbols.items array");
+    const changed = response.analysis.changedSymbols.items[0] as any;
+    assert.ok(changed, "Expected at least one changed symbol item");
+    assert.equal(changed.symbolId, "sym1");
+    assert.equal(changed.name, "testFunc");
+    assert.equal(changed.kind, "function");
+    assert.equal(changed.file, "src/index.ts");
+    assert.ok(
+      changed.name || changed.unresolved === true,
+      "Expected changed symbol item to include metadata or unresolved marker",
+    );
+  });
+
+  it("hydrates symbol references outside changedSymbols", async () => {
+    const response = await handlePRRiskAnalysis({
+      repoId,
+      fromVersion: "v1",
+      toVersion: "v2",
+      budget: {
+        maxChangedSymbols: 3,
+        maxFindings: 3,
+        maxEvidenceItems: 3,
+        maxRecommendedTests: 3,
+      },
+    });
+
+    const assertSymbolRef = (value: unknown): void => {
+      assert.equal(typeof value, "object", `expected symbol ref object, got ${String(value)}`);
+      assert.ok(value && "symbolId" in (value as Record<string, unknown>));
+      assert.ok(
+        "name" in (value as Record<string, unknown>) ||
+          (value as Record<string, unknown>).unresolved === true,
+      );
+    };
+
+    assertSymbolRef(response.summary.topRiskItem);
+    response.analysis.findings.items.forEach((finding: any) => {
+      finding.affectedSymbols.forEach(assertSymbolRef);
+    });
+    response.analysis.evidence.items.forEach((item: any) => {
+      item.data?.symbols?.forEach(assertSymbolRef);
+    });
+    response.analysis.recommendedTests.items.forEach((item: any) => {
+      item.targetSymbols.forEach(assertSymbolRef);
+    });
   });
 
   it("returns evidence collection", async () => {
@@ -352,6 +396,6 @@ describe("PR Risk Analysis Tool", () => {
     );
     assert.ok(regressionTest);
     assert.ok(regressionTest.description.includes(`${callerSymId} -> sym1`));
-    assert.strictEqual(regressionTest.targetSymbols[0], callerSymId);
+    assert.strictEqual(regressionTest.targetSymbols[0]?.symbolId, callerSymId);
   });
 });

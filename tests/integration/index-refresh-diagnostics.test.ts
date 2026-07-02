@@ -136,43 +136,23 @@ describe("index.refresh diagnostics", () => {
     }
   });
 
-  it("includes opt-in timing diagnostics in the tool response", async () => {
-    // Seed the repo with a full index first so the subsequent incremental
-    // run is genuinely incremental — indexRepo auto-upgrades incremental
-    // → full when fileCount===0, which would defeat the deferred-cluster
-    // assertion below.
+  it("accepts includeDiagnostics without returning timing diagnostics", async () => {
     await handleIndexRefresh({
       repoId: REPO_ID,
       mode: "full",
       includeDiagnostics: false,
     });
-    // Modify the source file so the incremental run does real work;
-    // otherwise it short-circuits and most phases are skipped.
     writeFileSync(
       join(repoDir, "src", "index.ts"),
       [
-        "export function greet(name: string): string {",
-        "  return `hello ${name}!`;",
+        "export function add(a: number, b: number): number {",
+        "  return a + b + 1;",
         "}",
-        "",
+        "export const value = add(1, 2);",
       ].join("\n"),
-      "utf8",
     );
-    // Bump mtime so incremental scan sees the change. We avoid setting mtime
-    // far into the future, which would make the file *permanently* look newer
-    // than lastIndexedAt and break the no-op short-circuit assertions in
-    // sibling tests.
-    const { utimes } = await import("node:fs/promises");
-    const slightlyAfter = new Date(Date.now() + 1);
-    await utimes(
-      join(repoDir, "src", "index.ts"),
-      slightlyAfter,
-      slightlyAfter,
-    );
-    // Wait so that subsequent indexes record a `lastIndexedAt` strictly after
-    // the bumped mtime; otherwise mtime===lastIndexedAt could go either way
-    // depending on filesystem timestamp resolution.
     await new Promise((resolve) => setTimeout(resolve, 50));
+
     const result = await handleIndexRefresh({
       repoId: REPO_ID,
       mode: "incremental",
@@ -181,142 +161,10 @@ describe("index.refresh diagnostics", () => {
 
     assert.equal(result.ok, true);
     assert.ok(result.versionId, "expected versionId to be present");
-    assert.ok(
-      result.diagnostics,
-      "expected diagnostics when includeDiagnostics=true",
-    );
-    assert.ok(result.diagnostics.timings, "expected timings diagnostics");
-    assert.ok(
-      result.diagnostics.timings.totalMs >= 0,
-      "expected timings.totalMs to be non-negative",
-    );
-    assert.equal(
-      typeof result.diagnostics.timings.phases.scanRepo,
-      "number",
-      "expected scanRepo phase timing",
-    );
-    assert.equal(
-      typeof result.diagnostics.timings.phases.pass1,
-      "number",
-      "expected pass1 phase timing",
-    );
-    assert.equal(
-      typeof result.diagnostics.timings.phases.pass1Drain,
-      "number",
-      "expected pass1Drain phase timing",
-    );
-    const pass1Drain = result.diagnostics.timings.pass1Drain;
-    assert.ok(pass1Drain, "expected pass1 drain write diagnostics");
-    assert.ok(pass1Drain.batches > 0, "expected at least one pass1 flush batch");
-    assert.ok(
-      pass1Drain.rows.total >= pass1Drain.rows.files,
-      "expected aggregate pass1 row counts",
-    );
-    for (const phase of [
-      "deleteOldSymbols",
-      "upsertFiles",
-      "insertSymbolReferences",
-      "upsertSymbols",
-      "insertEdges",
-    ] as const) {
-      assert.equal(
-        typeof pass1Drain.phases[phase].totalMs,
-        "number",
-        `expected pass1Drain.${phase} timing`,
-      );
-      assert.equal(
-        typeof pass1Drain.phases[phase].rows,
-        "number",
-        `expected pass1Drain.${phase} row count`,
-      );
-    }
-    assert.equal(
-      typeof result.diagnostics.timings.phases["initSharedState.tsResolver"],
-      "number",
-      "expected initSharedState.tsResolver timing",
-    );
-    assert.equal(
-      result.diagnostics.timings.phases[
-        "initSharedState.tsResolver.sourceFiles"
-      ],
-      undefined,
-      "expected lazy TS resolver to skip source-file collection until pass 2 needs the program",
-    );
-    assert.equal(
-      result.diagnostics.timings.phases[
-        "initSharedState.tsResolver.programBuild"
-      ],
-      undefined,
-      "expected lazy TS resolver to skip program build until pass 2 needs it",
-    );
-    assert.equal(
-      typeof result.diagnostics.timings.phases["initSharedState.symbolMaps"],
-      "number",
-      "expected initSharedState.symbolMaps timing",
-    );
-    assert.equal(
-      typeof result.diagnostics.timings.phases["initSharedState.pass2Context"],
-      "number",
-      "expected initSharedState.pass2Context timing",
-    );
-    assert.equal(
-      typeof result.diagnostics.timings.phases["finalizeIndexing.metrics"],
-      "number",
-      "expected finalizeIndexing.metrics timing",
-    );
-    assert.equal(
-      typeof result.diagnostics.timings.phases[
-        "finalizeIndexing.metrics.testRefs"
-      ],
-      "number",
-      "expected finalizeIndexing.metrics.testRefs timing",
-    );
-    assert.equal(
-      typeof result.diagnostics.timings.phases[
-        "finalizeIndexing.fileSummaries"
-      ],
-      "number",
-      "expected finalizeIndexing.fileSummaries timing",
-    );
-    // Incremental runs now compute derived state inline before returning, so
-    // status cannot report stale derived state because a background refresh
-    // failed or timed out after the index call completed.
-    assert.equal(
-      typeof result.diagnostics.timings.phases[
-        "clustersAndProcesses.loadSymbols"
-      ],
-      "number",
-      "expected clustersAndProcesses.loadSymbols to run inline on incremental",
-    );
-    assert.equal(
-      typeof result.diagnostics.timings.phases.clustersAndProcesses,
-      "number",
-      "expected clustersAndProcesses phase to run inline on incremental",
-    );
-    assert.equal(
-      typeof result.diagnostics.timings.phases[
-        "finalizeEdges.resolvePendingCalls"
-      ],
-      "number",
-      "expected finalizeEdges.resolvePendingCalls timing",
-    );
-    assert.equal(
-      typeof result.diagnostics.timings.phases[
-        "finalizeEdges.cleanupUnresolvedBuiltins"
-      ],
-      "number",
-      "expected finalizeEdges.cleanupUnresolvedBuiltins timing",
-    );
-    assert.equal(
-      typeof result.diagnostics.timings.phases[
-        "finalizeEdges.insertConfigEdges"
-      ],
-      "number",
-      "expected finalizeEdges.insertConfigEdges timing",
-    );
+    assert.equal("diagnostics" in result, false);
   });
 
-  it("pre-deletes existing symbols once for full diagnostic refreshes", async () => {
+  it("omits diagnostics for full refreshes even when requested", async () => {
     const result = await handleIndexRefresh({
       repoId: REPO_ID,
       mode: "full",
@@ -324,24 +172,7 @@ describe("index.refresh diagnostics", () => {
     });
 
     assert.equal(result.ok, true);
-    assert.ok(result.diagnostics?.timings, "expected timing diagnostics");
-    assert.equal(
-      typeof result.diagnostics.timings.phases.preDeleteExistingSymbols,
-      "number",
-      "expected full refresh to report upfront stale-symbol deletion",
-    );
-    const pass1Drain = result.diagnostics.timings.pass1Drain;
-    assert.ok(pass1Drain, "expected pass1 drain diagnostics");
-    assert.equal(
-      pass1Drain.rows.existingFiles,
-      0,
-      "full pre-delete should prevent per-batch stale symbol deletion",
-    );
-    assert.equal(
-      pass1Drain.phases.deleteOldSymbols.rows,
-      0,
-      "full pre-delete should remove deleteOldSymbols work from pass1 drain",
-    );
+    assert.equal("diagnostics" in result, false);
   });
 
   it("omits diagnostics when the flag is not set", async () => {
@@ -354,7 +185,7 @@ describe("index.refresh diagnostics", () => {
     assert.equal("diagnostics" in result, false);
   });
 
-  it("short-circuits unchanged incremental refreshes after scan/version/memory sync", async () => {
+  it("short-circuits unchanged incremental refreshes without returning diagnostics", async () => {
     const initial = await handleIndexRefresh({
       repoId: REPO_ID,
       mode: "incremental",
@@ -370,16 +201,6 @@ describe("index.refresh diagnostics", () => {
     assert.equal(noop.ok, true);
     assert.equal(noop.versionId, initial.versionId);
     assert.equal(noop.changedFiles, 0);
-    assert.ok(noop.diagnostics?.timings);
-
-    const phases = noop.diagnostics!.timings.phases;
-    assert.equal(typeof phases.scanRepo, "number");
-    assert.equal(typeof phases.shortCircuitNoOp, "number");
-    assert.equal(typeof phases.versioning, "number");
-    assert.equal(typeof phases.memorySync, "number");
-    assert.equal("pass1" in phases, false);
-    assert.equal("initSharedState" in phases, false);
-    assert.equal("resolveUnresolvedImports" in phases, false);
-    assert.equal("finalizeEdges" in phases, false);
+    assert.equal("diagnostics" in noop, false);
   });
 });

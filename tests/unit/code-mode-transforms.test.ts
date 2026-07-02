@@ -55,6 +55,14 @@ describe("code-mode transforms", () => {
       const result = executeTransform("dataPick", { input: "hello", fields: { v: "value" } });
       assert.deepStrictEqual(result, { v: "hello" });
     });
+
+    it("maps fields from array input", () => {
+      const result = executeTransform("dataPick", {
+        input: [{ symbolId: "s1", name: "Alpha" }],
+        fields: { id: "symbolId", label: "name" },
+      });
+      assert.deepStrictEqual(result, [{ id: "s1", label: "Alpha" }]);
+    });
   });
 
   describe("dataMap", () => {

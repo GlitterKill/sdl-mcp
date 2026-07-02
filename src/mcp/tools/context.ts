@@ -22,7 +22,6 @@ import {
   recordTokenSavings,
 } from "../response-compression.js";
 import {
-  attachTimingDiagnostics,
   ToolPhaseTimer,
 } from "../timing-diagnostics.js";
 
@@ -525,9 +524,7 @@ export async function handleAgentContext(
       });
     }
     if ("notModified" in conditionalResponse) {
-      return request.includeDiagnostics
-        ? attachTimingDiagnostics(conditionalResponse, timer.snapshot())
-        : conditionalResponse;
+      return conditionalResponse;
     }
     const compressionStartedAt = timer.start();
     const compressedResponse = await maybeCompressToolResponse({
@@ -539,9 +536,7 @@ export async function handleAgentContext(
       sessionId: context?.sessionId,
     });
     timer.record("context.responseMode", compressionStartedAt);
-    return request.includeDiagnostics
-      ? attachTimingDiagnostics(compressedResponse, timer.snapshot())
-      : compressedResponse;
+    return compressedResponse;
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(

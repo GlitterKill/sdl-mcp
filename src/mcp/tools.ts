@@ -574,6 +574,7 @@ export const RepoRegisterRequestSchema = z.object({
     .describe(
       "Required to apply config changes to an already registered repo. Exact re-registers remain no-ops.",
     ),
+  detail: z.enum(["summary", "full"]).optional().default("summary"),
 });
 
 export const RepoRegisterResponseSchema = z.object({
@@ -786,14 +787,6 @@ export const IndexRefreshResponseSchema = z.object({
   async: z.boolean().optional(),
   operationId: z.string().optional(),
   message: z.string().optional(),
-  diagnostics: z
-    .object({
-      timings: z.object({
-        totalMs: z.number(),
-        phases: z.record(z.string(), z.number()),
-      }),
-    })
-    .optional(),
 });
 
 const BufferSelectionSchema = z.object({
@@ -1040,8 +1033,8 @@ const ResponseArtifactMetadataSchema = z.object({
   sessionKeyHash: z.string().optional(),
 });
 
-const ResponseArtifactPublicMetadataSchema = ResponseArtifactMetadataSchema.omit({
-  estimatedOriginalTokens: true,
+const ResponseArtifactPublicMetadataSchema = ResponseArtifactMetadataSchema.pick({
+  toolName: true,
 });
 
 export const ToolTimingDiagnosticsSchema = z.object({
@@ -1056,7 +1049,7 @@ export const ResponseArtifactReferenceSchema = z.object({
   kind: z.literal("responseArtifact"),
   handle: z.string(),
   action: z.literal("response.get"),
-  metadata: ResponseArtifactPublicMetadataSchema,
+  metadata: ResponseArtifactPublicMetadataSchema.optional(),
 });
 
 const SessionDeltaMetadataSchema = z.object({
@@ -2142,6 +2135,7 @@ const EnrichedSymbolBaseSchema = z.object({
   name: z.string().optional(),
   kind: z.string().optional(),
   file: z.string().optional(),
+  unresolved: z.boolean().optional(),
 });
 
 const EnrichedChangedSymbolSchema = EnrichedSymbolBaseSchema.extend({
@@ -2377,7 +2371,7 @@ export const AgentContextRequestSchema = z.object({
     .boolean()
     .optional()
     .describe(
-      "Include phase timing diagnostics for performance investigation.",
+      "Accepted for compatibility; timing diagnostics stay internal and are not returned.",
     ),
   ifNoneMatch: z.string().optional(),
 });
@@ -2472,7 +2466,6 @@ const AgentContextPayloadSchema = z.object({
         .optional(),
     })
     .optional(),
-  diagnostics: ToolTimingDiagnosticsSchema.optional(),
   /** Packed wire-format payload. Populated when wireFormat=packed and gate decision was "packed". */
   _packedPayload: z.string().optional(),
   /** Packed wire-format telemetry. Populated when sdl.context ran the packed gate. */
@@ -2658,7 +2651,7 @@ const RuntimeExecuteRequestObjectSchema = z
       .min(1)
       .optional()
       .describe(
-        "Friendly alias for `executable`. Use either field; `executable` wins on conflict.",
+        "Shell compatibility alias for `code`; for non-shell runtimes, alias for `executable`. `code`/`executable` win on conflict.",
       ),
     args: z
       .array(z.string())
@@ -2734,26 +2727,29 @@ const RuntimeExecuteRequestObjectSchema = z
       .boolean()
       .optional()
       .describe(
-        "Include phase timing diagnostics for performance investigation.",
+        "Accepted for compatibility; timing diagnostics stay internal and are not returned.",
       ),
   })
   .strict()
   .superRefine((val, ctx) => {
-    if (val.runtime === "shell" && !val.code) {
+    if (val.runtime === "shell" && !val.code && !val.command) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["code"],
         message:
-          "Shell runtime requires the code parameter. Direct args execution is not supported for security reasons.",
+          "Shell runtime requires code, or command as a compatibility alias. Direct args execution is not supported for security reasons.",
       });
     }
   });
 
-// Public schema accepts `command` as a friendly alias for `executable`.
-// Either field may be set; if both are present, `executable` wins.
+// Public schema accepts `command` as a compatibility alias. For shell,
+// command maps to code; for other runtimes it remains an executable alias.
 export const RuntimeExecuteRequestSchema =
   RuntimeExecuteRequestObjectSchema.transform((val) => {
     const aliased = val as typeof val & { command?: string };
+    if (val.runtime === "shell" && aliased.command && !val.code) {
+      return { ...val, code: aliased.command };
+    }
     if (aliased.command && !aliased.executable) {
       return { ...val, executable: aliased.command };
     }
@@ -2808,7 +2804,6 @@ export const RuntimeExecuteResponseSchema = z.object({
       deniedReasons: z.array(z.string()).optional(),
     })
     .optional(),
-  diagnostics: ToolTimingDiagnosticsSchema.optional(),
 });
 
 export type RuntimeExecuteRequest = z.infer<typeof RuntimeExecuteRequestSchema>;
@@ -3284,7 +3279,6 @@ export interface FileReadInlineResponse {
   extractedPath?: string;
   sessionDelta?: z.infer<typeof SessionDeltaMetadataSchema>;
   delta?: z.infer<typeof SessionDeltaPayloadSchema>;
-  diagnostics?: z.infer<typeof ToolTimingDiagnosticsSchema>;
 }
 
 export type FileReadResponse =
@@ -3324,6 +3318,8 @@ export type SemanticEnrichmentRefreshRequest = z.infer<
 export const SemanticEnrichmentStatusRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   languages: SemanticEnrichmentLanguageListSchema,
+  detail: z.enum(["compact", "full"]).optional().default("compact"),
+  lastRunsLimit: z.number().int().min(0).max(25).optional().default(3),
 });
 
 export type SemanticEnrichmentStatusRequest = z.infer<
@@ -3456,7 +3452,6 @@ export interface FileWriteResponse {
     edgesUpserted?: number;
     error?: string;
   };
-  diagnostics?: z.infer<typeof ToolTimingDiagnosticsSchema>;
 }
 
 // ============================================================================
@@ -3673,7 +3668,7 @@ export type SearchEditRequest = z.infer<typeof SearchEditRequestSchema>;
 
 export interface SearchEditPreviewResponse {
   mode: "preview";
-  planHandle: string;
+  planHandle?: string;
   filesMatched: number;
   matchesFound: number;
   filesEligible: number;
@@ -3713,7 +3708,7 @@ export interface SearchEditPreviewResponse {
     }>;
   }>;
   requiresApply: boolean;
-  expiresAt: string;
+  expiresAt?: string;
   preconditionSnapshot: Array<{
     file: string;
     sha256: string | null;
@@ -3721,7 +3716,6 @@ export interface SearchEditPreviewResponse {
   }>;
   partial?: boolean;
   retrievalEvidence?: RetrievalEvidence;
-  diagnostics?: z.infer<typeof ToolTimingDiagnosticsSchema>;
 }
 
 export interface SearchEditApplyResponse {
@@ -3756,7 +3750,6 @@ export interface SearchEditApplyResponse {
     triggered: boolean;
     restoredFiles: string[];
   };
-  diagnostics?: z.infer<typeof ToolTimingDiagnosticsSchema>;
 }
 
 export type SearchEditResponse =

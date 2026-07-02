@@ -35,9 +35,7 @@ import {
   type StoredPlan,
 } from "./search-edit/plan-store.js";
 import {
-  attachTimingDiagnostics,
   ToolPhaseTimer,
-  type ToolTimingDiagnostics,
 } from "../timing-diagnostics.js";
 
 const FileGatewayReadSchema = z.object({
@@ -381,7 +379,6 @@ export interface FileGatewayPreviewWindowResponse {
   indexedSource: true;
   snippets?: SearchEditPreviewFileEntry["snippets"];
   codeWindow: CodeNeedWindowResponse;
-  diagnostics?: ToolTimingDiagnostics;
 }
 
 export type FileGatewayResponse =
@@ -612,9 +609,7 @@ export async function handleFileGateway(
     phase: string,
   ): T => {
     timer.record(phase, phaseStartedAt);
-    return request.includeDiagnostics
-      ? attachTimingDiagnostics(response, timer.snapshot())
-      : response;
+    return response;
   };
 
   switch (request.op) {

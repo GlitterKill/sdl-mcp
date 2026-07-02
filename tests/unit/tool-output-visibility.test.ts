@@ -229,7 +229,7 @@ describe("visible tool output", () => {
     assert.doesNotMatch(envelope.content[0]?.text ?? "", /etag-sym|etagCache/);
   });
 
-  it("keeps requested diagnostics in structured content without adding them to visible text", () => {
+  it("hides requested diagnostics from structured content and visible text", () => {
     const envelope = buildToolResponseEnvelope(
       {
         taskType: "debug",
@@ -249,12 +249,12 @@ describe("visible tool output", () => {
     );
 
     assert.deepEqual(envelope.structuredContent?.retrievalEvidence, { fusionLatencyMs: 10 });
-    assert.deepEqual(envelope.structuredContent?.diagnostics, { timings: { totalMs: 12 } });
+    assert.equal(envelope.structuredContent?.diagnostics, undefined);
     assert.equal(envelope.structuredContent?._packedStats, undefined);
     assert.doesNotMatch(envelope.content[0]?.text ?? "", /diagnostics|fusionLatencyMs|_packedStats/);
   });
 
-  it("preserves requested timing diagnostics for generic tools", () => {
+  it("hides requested timing diagnostics for generic tools", () => {
     const envelope = buildToolResponseEnvelope(
       {
         ok: true,
@@ -268,9 +268,7 @@ describe("visible tool output", () => {
       { includeDiagnostics: true },
     );
 
-    assert.deepEqual(envelope.structuredContent?.diagnostics, {
-      timings: { totalMs: 12, phases: { dispatch: 10 } },
-    });
+    assert.equal(envelope.structuredContent?.diagnostics, undefined);
   });
 
   it("formats every representative tool with non-JSON visible text", () => {
@@ -362,7 +360,7 @@ describe("visible tool output", () => {
     const structuredContent = result.structuredContent as Record<string, unknown>;
     assert.equal(structuredContent.etag, undefined);
     assert.deepEqual(structuredContent.retrievalEvidence, { fusionLatencyMs: 7 });
-    assert.ok(structuredContent.diagnostics);
+    assert.equal(structuredContent.diagnostics, undefined);
     assert.doesNotMatch(String(content[0]?.text), /fusionLatencyMs|totalMs/);
     assert.doesNotMatch(String(content[0]?.text), /context-etag/);
   });

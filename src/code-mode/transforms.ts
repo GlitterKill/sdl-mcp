@@ -199,6 +199,10 @@ function execDataPick(args: unknown): unknown {
     throw new TransformError("dataPick: input must not be null or undefined");
   }
 
+  if (Array.isArray(input)) {
+    return execDataMap({ input, fields });
+  }
+
   // Wrap scalar values so they can be accessed via the "value" key
   if (typeof input !== "object") {
     input = { value: input };

@@ -283,7 +283,7 @@ export async function handlePRRiskAnalysis(args: unknown) {
   // Helper to enrich a symbolId with name, kind, file
   const enrichSymbol = (symbolId: string) => {
     const sym = symbolMap.get(symbolId);
-    if (!sym) return { symbolId };
+    if (!sym) return { symbolId, unresolved: true };
     const file = sym.fileId ? fileMap.get(sym.fileId) : undefined;
     return {
       symbolId,
@@ -291,6 +291,27 @@ export async function handlePRRiskAnalysis(args: unknown) {
       kind: sym.kind,
       file: file?.relPath ?? undefined,
     };
+  };
+
+
+  const enrichSymbolLike = (value: unknown): unknown => {
+    if (typeof value === "string") return enrichSymbol(value);
+    if (value === null || typeof value !== "object" || !("symbolId" in value)) return value;
+    const symbolId = String(value.symbolId);
+    return { ...enrichSymbol(symbolId), ...value };
+  };
+
+  const enrichSymbolList = (values: unknown[]): unknown[] =>
+    values.map(enrichSymbolLike);
+
+  const enrichEvidenceEntry = (entry: RiskEvidence): RiskEvidence => {
+    const data = entry.data;
+    if (!data || typeof data !== "object" || Array.isArray(data)) return entry;
+    const copy: { [key: string]: unknown } = { ...data };
+    for (const key of ["symbols", "topImpacted"] as const) {
+      if (Array.isArray(copy[key])) copy[key] = enrichSymbolList(copy[key]);
+    }
+    return { ...entry, data: copy };
   };
 
 
@@ -322,7 +343,9 @@ export async function handlePRRiskAnalysis(args: unknown) {
   const totalFindings = findings.length;
   const truncatedFindings = findings.slice(0, maxFindings).map((finding) => ({
     ...finding,
-    affectedSymbols: finding.affectedSymbols.slice(0, maxNestedSymbols),
+    affectedSymbols: finding.affectedSymbols
+      .slice(0, maxNestedSymbols)
+      .map(enrichSymbol),
     metadata: {
       ...(finding.metadata ?? {}),
       affectedSymbolsTotal: finding.affectedSymbols.length,
@@ -337,7 +360,7 @@ export async function handlePRRiskAnalysis(args: unknown) {
     .slice(0, maxRecommendedTests)
     .map((test) => ({
       ...test,
-      targetSymbols: test.targetSymbols.slice(0, maxNestedSymbols),
+      targetSymbols: enrichSymbolList(test.targetSymbols.slice(0, maxNestedSymbols)),
       targetSymbolsTotal: test.targetSymbols.length,
       targetSymbolsTruncated: test.targetSymbols.length > maxNestedSymbols,
     }));
@@ -346,13 +369,11 @@ export async function handlePRRiskAnalysis(args: unknown) {
   const totalEvidence = evidence.length;
   const truncatedEvidence = evidence
     .slice(0, maxEvidenceItems)
-    .map((entry) => trimEvidenceEntry(entry, maxNestedSymbols));
+    .map((entry) => enrichEvidenceEntry(trimEvidenceEntry(entry, maxNestedSymbols)));
 
   // --- Top-level summary for quick triage ---
-  const topRiskItemName =
-    truncatedChangedSymbols.length > 0
-      ? (truncatedChangedSymbols[0].name ?? truncatedChangedSymbols[0].symbolId)
-      : undefined;
+  // --- Top-level summary for quick triage ---
+  const topRiskItem = truncatedChangedSymbols[0];
 
   const response = {
     summary: {
@@ -361,7 +382,7 @@ export async function handlePRRiskAnalysis(args: unknown) {
       changedCount: unfilteredTotal,
       filteredCount: totalChangedSymbols,
       blastRadiusCount: totalBlastRadius,
-      topRiskItem: topRiskItemName,
+      topRiskItem,
     },
     analysis: {
       repoId: delta.repoId,

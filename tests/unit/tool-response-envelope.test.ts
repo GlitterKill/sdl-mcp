@@ -111,7 +111,7 @@ describe("tool response envelope model projection", () => {
     assert.equal(child[0]?.result?._packedStats, undefined);
   });
 
-  it("uses stepIndex when preserving workflow child diagnostics", () => {
+  it("uses stepIndex while hiding workflow child diagnostics", () => {
     const envelope = buildToolResponseEnvelope(
       {
         results: [
@@ -142,11 +142,11 @@ describe("tool response envelope model projection", () => {
     );
 
     const children = envelope.structuredContent?.results as Array<{ result?: Record<string, unknown> }>;
-    assert.deepEqual(children[0]?.result?.diagnostics, { timings: { totalMs: 5 } });
+    assert.equal(children[0]?.result?.diagnostics, undefined);
     assert.deepEqual(children[0]?.result?.retrievalEvidence, { fusionLatencyMs: 3 });
   });
 
-  it("preserves nested workflow child diagnostics when requested by the child step", () => {
+  it("preserves retrieval evidence while hiding nested workflow child diagnostics", () => {
     const envelope = buildToolResponseEnvelope(
       {
         results: [
@@ -185,13 +185,13 @@ describe("tool response envelope model projection", () => {
     );
 
     const children = envelope.structuredContent?.results as Array<{ result?: Record<string, unknown> }>;
-    assert.deepEqual(children[0]?.result?.diagnostics, { timings: { totalMs: 5 } });
+    assert.equal(children[0]?.result?.diagnostics, undefined);
     assert.deepEqual(children[0]?.result?.retrievalEvidence, { fusionLatencyMs: 3 });
     assert.equal(children[1]?.result?.diagnostics, undefined);
     assert.equal(children[1]?.result?.retrievalEvidence, undefined);
   });
 
-  it("preserves diagnostics and retrieval evidence in full detail structured content", () => {
+  it("hides diagnostics and preserves retrieval evidence in full detail structured content", () => {
     const envelope = buildToolResponseEnvelope(
       {
         repoId: "sdl-mcp",
@@ -205,7 +205,7 @@ describe("tool response envelope model projection", () => {
       { detail: "full" },
     );
 
-    assert.deepEqual(envelope.structuredContent?.diagnostics, { timings: { totalMs: 5 } });
+    assert.equal(envelope.structuredContent?.diagnostics, undefined);
     assert.deepEqual(envelope.structuredContent?.retrievalEvidence, { fusionLatencyMs: 3 });
     assert.equal(envelope.structuredContent?._displayFooter, undefined);
   });

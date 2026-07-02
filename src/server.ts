@@ -43,10 +43,7 @@ import {
 } from "./mcp/context-response-projection.js";
 import { logger } from "./util/logger.js";
 import {
-  attachTimingDiagnostics,
-  hasTimingDiagnostics,
   ToolPhaseTimer,
-  type ToolTimingDiagnostics,
 } from "./mcp/timing-diagnostics.js";
 import { SDL_MCP_SERVER_INSTRUCTIONS } from "./mcp/server-instructions.js";
 
@@ -226,8 +223,7 @@ function asStructuredContent(
     const detail = args.detail ?? options.detail;
     const fullDetail = detail === "full";
     return {
-      includeDiagnostics:
-        fullDetail || args.includeDiagnostics === true || options.includeDiagnostics === true,
+      includeDiagnostics: false,
       includeRetrievalEvidence:
         fullDetail
         || args.includeRetrievalEvidence === true
@@ -529,9 +525,8 @@ export class MCPServer {
               `[sdl-mcp] Tool ${toolName} validation error: ${JSON.stringify(validationError)}
 `,
             );
-            const responseForLog = includeDiagnostics
-              ? attachTimingDiagnostics(validationError, timer.snapshot())
-              : validationError;
+            const diagnosticsSnapshot = includeDiagnostics ? timer.snapshot() : undefined;
+            const responseForLog = validationError;
             logToolCall({
               tool: toolName,
               request: normalizedArgs as Record<string, unknown>,
@@ -541,7 +536,7 @@ export class MCPServer {
               symbolId,
               clientKey: toolContext.clientKey,
               taskType: toolContext.taskType,
-              diagnostics: extractTimingDiagnostics(responseForLog),
+              diagnostics: diagnosticsSnapshot,
             });
             return {
               ...buildToolResponseEnvelope(
@@ -748,17 +743,7 @@ export class MCPServer {
               "server.responseProcessing",
               responseProcessingStartedAt,
             );
-            if (includeDiagnostics) {
-              const diagnosticsSnapshot = timer.snapshot();
-              finalResult = attachTimingDiagnostics(
-                finalResult,
-                diagnosticsSnapshot,
-              );
-              structuredResult = attachTimingDiagnostics(
-                structuredResult,
-                diagnosticsSnapshot,
-              );
-            }
+            const diagnosticsSnapshot = includeDiagnostics ? timer.snapshot() : undefined;
 
             logToolCall({
               tool: toolName,
@@ -771,7 +756,7 @@ export class MCPServer {
               taskType: toolContext.taskType,
               tokensUsed: tokensUsedForObs,
               tokensSaved: tokensSavedForObs,
-              diagnostics: extractTimingDiagnostics(finalResult),
+              diagnostics: diagnosticsSnapshot,
             });
             const footerLines: string[] = [];
             if (capturedSummary) {
@@ -793,9 +778,8 @@ export class MCPServer {
               `[sdl-mcp] Tool ${toolName} error: ${error}\n`,
             );
             const errorResponse = errorToMcpResponse(error);
-            const responseForLog = includeDiagnostics
-              ? attachTimingDiagnostics(errorResponse, timer.snapshot())
-              : errorResponse;
+            const diagnosticsSnapshot = includeDiagnostics ? timer.snapshot() : undefined;
+            const responseForLog = errorResponse;
             logToolCall({
               tool: toolName,
               request: normalizedArgs as Record<string, unknown>,
@@ -805,7 +789,7 @@ export class MCPServer {
               symbolId,
               clientKey: toolContext.clientKey,
               taskType: toolContext.taskType,
-              diagnostics: extractTimingDiagnostics(responseForLog),
+              diagnostics: diagnosticsSnapshot,
             });
             // Return projected error content instead of throwing so clients get
             // the same human-first envelope shape as successful tool calls.
@@ -1016,13 +1000,6 @@ function wantsTimingDiagnostics(value: unknown): boolean {
   );
 }
 
-function extractTimingDiagnostics(
-  value: unknown,
-): ToolTimingDiagnostics | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const diagnostics = (value as { diagnostics?: unknown }).diagnostics;
-  return hasTimingDiagnostics(diagnostics) ? diagnostics : undefined;
-}
 
 function convertSchema(
   schema: z.ZodType,

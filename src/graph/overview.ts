@@ -136,6 +136,24 @@ function toCompactRef(row: {
 }
 
 /**
+ * Removes duplicate and synthetic export names before directory summaries are emitted.
+ */
+export function compactDirectoryExports(exportNames: string[]): string[] {
+  const seen = new Set<string>();
+  const compacted: string[] = [];
+  for (const name of exportNames) {
+    if (/typeLiteral\d+/.test(name) || /\.\(params\)/.test(name)) {
+      continue;
+    }
+    if (!seen.has(name)) {
+      seen.add(name);
+      compacted.push(name);
+    }
+  }
+  return compacted;
+}
+
+/**
  * Estimates token count for a directory summary.
  */
 function estimateDirectorySummaryTokens(summary: DirectorySummary): number {
@@ -646,7 +664,7 @@ async function buildDirectorySummaries(
       if (!matches) continue;
     }
 
-    const exportNames = exportsByDir.get(agg.directory) ?? [];
+    const exportNames = compactDirectoryExports(exportsByDir.get(agg.directory) ?? []);
     exportNames.sort((a, b) => a.localeCompare(b));
 
     const summary: DirectorySummary = {

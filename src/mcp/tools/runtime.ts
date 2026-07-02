@@ -49,7 +49,6 @@ import { hashContent } from "../../util/hashing.js";
 import { logger } from "../../util/logger.js";
 import { getServerInfo } from "../../util/runtime-identity.js";
 import {
-  attachTimingDiagnostics,
   ToolPhaseTimer,
 } from "../timing-diagnostics.js";
 import {
@@ -144,6 +143,12 @@ function truncateLine(line: string): string {
     line.slice(0, RUNTIME_MAX_LINE_LENGTH) +
     `… (+${line.length - RUNTIME_MAX_LINE_LENGTH})`
   );
+}
+
+const WINDOWS_PROMPT_ECHO_RE = /^[A-Za-z]:\\[^>]*>.*$/;
+
+function stripShellPromptEchoLines(lines: string[]): string[] {
+  return lines.filter((line) => !WINDOWS_PROMPT_ECHO_RE.test(line.trimEnd()));
 }
 
 function buildStdinMetadata(
@@ -331,8 +336,8 @@ function generateExcerpts(
   stderrSummary: string;
   excerpts: OutputExcerpt[];
 } {
-  const stdoutLines = stdout.split("\n");
-  const stderrLines = stderr.split("\n");
+  const stdoutLines = stripShellPromptEchoLines(stdout.split("\n"));
+  const stderrLines = stripShellPromptEchoLines(stderr.split("\n"));
 
   // Head + tail for stdout summary
   const halfMax = Math.floor(maxResponseLines / 2);
@@ -485,9 +490,7 @@ export async function handleRuntimeExecute(
   };
   const finish = <T extends RuntimeExecuteResponse>(response: T): T => {
     const augmented = augmentResponse(response);
-    return request.includeDiagnostics
-      ? attachTimingDiagnostics(augmented, timer.snapshot())
-      : augmented;
+    return augmented;
   };
 
   // 1. Load config + validate repo
@@ -766,9 +769,6 @@ export async function handleRuntimeExecute(
           policyDecision: policyDecision.decision,
           auditHash: policyDecision.auditHash,
           artifactHandle,
-          diagnostics: request.includeDiagnostics
-            ? timer.snapshot()
-            : undefined,
         });
 
         if (request.outputMode === "minimal") {
@@ -958,7 +958,6 @@ export async function handleRuntimeExecute(
         policyDecision: policyDecision.decision,
         auditHash: policyDecision.auditHash,
         artifactHandle,
-        diagnostics: request.includeDiagnostics ? timer.snapshot() : undefined,
       });
       return finish(
         attachRawContext(
@@ -1009,7 +1008,6 @@ export async function handleRuntimeExecute(
         policyDecision: policyDecision.decision,
         auditHash: policyDecision.auditHash,
         artifactHandle,
-        diagnostics: request.includeDiagnostics ? timer.snapshot() : undefined,
       });
       const intentResponse = {
         status: result.status,
@@ -1056,7 +1054,6 @@ export async function handleRuntimeExecute(
       policyDecision: policyDecision.decision,
       auditHash: policyDecision.auditHash,
       artifactHandle,
-      diagnostics: request.includeDiagnostics ? timer.snapshot() : undefined,
     });
 
     // 15. Return response

@@ -6,9 +6,7 @@ atomic cross-file mutation primitive.
 
 The tool runs in two modes:
 
-- **`preview`** — returns a `planHandle` plus a summary of every file
-  it would touch, the proposed edits, and the precondition snapshot
-  (sha256 + mtime per file). Nothing is written.
+- **`preview`** - returns a summary of every file it would touch, the proposed edits, and the precondition snapshot (sha256 + mtime per file). When edits exist, it also returns a `planHandle` for apply. Nothing is written.
 - **`apply`** — re-checks preconditions against current disk state,
   then writes the files sequentially in deterministic order. A
   mid-batch failure triggers rollback from backups.
@@ -20,7 +18,7 @@ file whose sha256/mtime has drifted since the preview was taken.
 
 ## When to use `search.edit` vs `file.write`
 
-MCP responses are human-first. Preview and apply results show concise visible summaries with bounded diff snippets, while `structuredContent` carries task data such as `planHandle`, file entries, status, `etag`, and error details. Internal precondition snapshots, rollback bookkeeping, timings, and packed/debug stats stay out of normal visible/model-facing output unless diagnostics are explicitly requested.
+MCP responses are human-first. Preview and apply results show concise visible summaries with bounded diff snippets, while `structuredContent` carries task data such as file entries, status, `etag`, error details, and a `planHandle` only when a preview has edits to apply. Internal precondition snapshots, rollback bookkeeping, timings, and packed/debug stats stay out of normal visible/model-facing output unless diagnostics are explicitly requested.
 
 | Tool              | Use when                                                                                                         |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -208,9 +206,9 @@ from v1):
 Preview supports `responseMode: "inline" | "auto" | "handle"`. The default is
 `"inline"`. Use `"auto"` for large previews or `"handle"` when you always want the
 full preview stored behind `response.get`; this is useful when many `fileEntries` or
-snippets would otherwise dominate the model context. Apply still uses the returned
-`planHandle`; `response.get({ handle, full: true })` retrieves the original preview
-payload.
+snippets would otherwise dominate the model context. When `requiresApply` is true,
+apply uses the returned `planHandle`; `response.get({ handle, full: true })`
+retrieves the original preview payload.
 
 ```json
 {
@@ -262,6 +260,10 @@ payload.
   }
 }
 ```
+
+When no edits are planned, preview returns `requiresApply: false` and omits
+`planHandle` and `expiresAt`; there is nothing to apply.
+
 
 Preview snippets are hunk snippets, not raw file reads. Each snippet is anchored to the first matched or changed line and includes 1-based line numbers; the changed anchor is prefixed with `>`. For indexed source files, callers that need more surrounding code should request a gated window tied to the returned plan handle:
 
@@ -385,7 +387,7 @@ handle remains usable only after producing a fresh preview.
 }
 ```
 
-Apply with the returned `planHandle`.
+If `requiresApply` is true, apply with the returned `planHandle`.
 
 ### Rewrite a symbol's home file
 
