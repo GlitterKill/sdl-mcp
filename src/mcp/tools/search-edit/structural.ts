@@ -419,6 +419,16 @@ export function getStructuralLanguageForPath(relPath: string): string | null {
   return descriptorForPath(relPath)?.publicLanguageId ?? null;
 }
 
+/**
+ * Parse a source file with the built-in/plugin grammar registered for its
+ * extension. Null when the extension is unsupported or the parse errors.
+ */
+export function parseTreeForPath(relPath: string, content: string): Tree | null {
+  const descriptor = descriptorForPath(relPath);
+  if (!descriptor) return null;
+  return descriptor.parse(content, relPath);
+}
+
 export function getStructuralLanguageIds(): string[] {
   const languageIds = new Set<string>(
     BUILT_IN_STRUCTURAL_LANGUAGES.map((language) => language.publicLanguageId),
