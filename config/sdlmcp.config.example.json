@@ -271,7 +271,7 @@
   },
   "runtime": {
     "enabled": true,
-    "allowedRuntimes": ["node", "typescript", "python", "shell"],
+    "allowedRuntimes": ["node", "typescript", "python", "shell", "powershell"],
     "allowedExecutables": [],
     "maxDurationMs": 30000,
     "maxStdoutBytes": 1048576,

@@ -72,6 +72,14 @@ const RUNTIME_TABLE: RuntimeTableEntry[] = [
     commandBuilder: "shell",
   },
   {
+    name: "powershell",
+    aliases: ["powershell", "pwsh"],
+    extension: ".ps1",
+    versionFlag: "-Help",
+    candidates: { win32: ["powershell.exe", "pwsh.exe"], unix: ["pwsh", "powershell"] },
+    commandBuilder: "shell",
+  },
+  {
     name: "ruby",
     aliases: ["ruby"],
     extension: ".rb",
@@ -353,6 +361,13 @@ function createDescriptor(entry: RuntimeTableEntry): RuntimeDescriptor {
           throw new ValidationError(
             "Shell runtime requires code parameter. Direct command execution via args is not supported for security reasons.",
           );
+        }
+        if (entry.name === "powershell") {
+          const ps = opts.executable ?? candidates[0];
+          return {
+            executable: ps,
+            args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", opts.codePath, ...args],
+          };
         }
         if (IS_WINDOWS) {
           const cmd = opts.executable ?? "cmd.exe";

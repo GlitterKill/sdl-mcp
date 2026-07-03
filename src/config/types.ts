@@ -827,7 +827,7 @@ export const RuntimeConfigSchema = z.object({
   enabled: z.boolean().default(true),
   allowedRuntimes: z
     .array(z.enum(RUNTIME_NAMES))
-    .default(["node", "typescript", "python", "shell"]),
+    .default(["node", "typescript", "python", "shell", "powershell"]),
   allowedExecutables: z.array(z.string()).default([]),
   maxDurationMs: z
     .number()

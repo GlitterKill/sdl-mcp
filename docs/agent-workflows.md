@@ -79,7 +79,7 @@ SDL-MCP exposes flat, gateway, and Code Mode tool surfaces. Exact tool counts mo
 |                            | `sdl.agent.feedback.query` | Query feedback records and aggregated statistics                                                                                                                     |
 | **File**                   | `sdl.file.read`            | Read non-indexed files with line range, search, or JSON path extraction                                                                                              |
 |                            | `sdl.file.write`           | Write non-indexed files with targeted update modes                                                                                                                   |
-| **Runtime**                | `sdl.runtime.execute`      | Sandboxed subprocess execution with `outputMode` (`minimal`, `summary`, `intent`); 16 runtimes including `node`, `typescript`, `python`, `shell`, `go`, `rust`, etc. |
+| **Runtime**                | `sdl.runtime.execute`      | Sandboxed subprocess execution with `outputMode` (`minimal`, `summary`, `intent`); 17 runtimes including `node`, `typescript`, `python`, `shell`, `powershell`, `go`, `rust`, etc. |
 |                            | `sdl.runtime.queryOutput`  | On-demand keyword search of stored runtime output artifacts by `artifactHandle`                                                                                      |
 | **Memory**                 | `sdl.memory.store`         | Store or update a development memory with symbol/file links                                                                                                          |
 |                            | `sdl.memory.query`         | Search memories by text, type, tags, or linked symbols; `staleOnly` filter                                                                                           |
@@ -153,7 +153,7 @@ Use this order unless task constraints force escalation:
 - **Feature implementation**: use `sdl.context` when you need task-shaped understanding, `symbol.search -> symbol.getCard` for exact targets, and `slice.build` when you need likely files or a dependency frontier before editing. Use `symbol.edit` for one-symbol changes and `search.edit` for bounded batch edits.
 - **PR review**: `delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols`.
 - **Live editing**: `buffer.push` as files change (with cursor/selection tracking) → `buffer.checkpoint` to persist → search/card/slice now reflect draft state.
-- **Test execution**: `runtime.execute` with the narrowest useful runtime (`node`, `python`, or `shell`) to run tests and capture structured output. On Windows shell runtime, use `&` or newlines rather than semicolons for command separation.
+- **Test execution**: `runtime.execute` with the narrowest useful runtime (`node`, `python`, `shell`, or `powershell`) to run tests and capture structured output. On Windows shell runtime, use `&` or newlines rather than semicolons for command separation.
 - **Context retrieval** _(Code Mode)_: use `sdl.context` for task-shaped explain/debug/review/implement context, `symbol.search`/`symbol.getCard` for exact symbols, and `slice.build` for graph/file frontiers. If Code Mode is disabled, follow the manual ladder (`repo.overview` -> `symbol.search` -> `symbol.getCard` -> `slice.build` -> code tools).
 - **Multi-step operations** _(Code Mode)_: `sdl.workflow` for runtime execution, data transforms, batch mutations, and retrieval ladders after the first SDL discovery surface. Do not wrap a single `sdl.context` call in workflow.
 - **Symbol-scoped edits** _(Code Mode)_: `sdl.file` with `op: "symbolEditPreview"` -> review `planHandle` -> `op: "symbolEditApply"`. Use `symbolEditApplyNow` only when you already hold the current `astFingerprint` and range from a fresh card.
@@ -266,7 +266,7 @@ Then, if needed:
 }
 ```
 
-- **Runtimes**: 16 supported runtimes: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`. Default allowed: `["node", "typescript", "python", "shell"]`.
+- **Runtimes**: 17 supported runtimes: `node`, `typescript`, `python`, `shell`, `powershell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`. Default allowed: `["node", "typescript", "python", "shell", "powershell"]`.
 - Use `code` to run inline code or `args` to invoke a file.
 - `queryTerms` extracts only matching lines from output (like a built-in grep). In `"intent"` mode, only matched excerpts are returned.
 - `persistOutput: true` (default) saves full output to an artifact handle for later retrieval via `sdl.runtime.queryOutput`.

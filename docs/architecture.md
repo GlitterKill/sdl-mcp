@@ -580,7 +580,7 @@ See [Development Memories deep dive](./feature-deep-dives/development-memories.m
 
 ## Sandboxed Runtime Execution
 
-`sdl.runtime.execute` runs repo-scoped commands under SDL-MCP governance instead of uncontrolled shell access. 16 runtimes are supported (Node, Python, Go, Java, Rust, C, C++, C#, Kotlin, PHP, Ruby, Perl, R, Elixir, Shell, TypeScript).
+`sdl.runtime.execute` runs repo-scoped commands under SDL-MCP governance instead of uncontrolled shell access. 17 runtimes are supported (Node, Python, Go, Java, Rust, C, C++, C#, Kotlin, PHP, Ruby, Perl, R, Elixir, Shell, PowerShell, TypeScript).
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%

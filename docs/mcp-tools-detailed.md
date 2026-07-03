@@ -1139,7 +1139,7 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 | Parameter            | Type                                     | Required | Description                                                                                                                                                                                              |
 | :------------------- | :--------------------------------------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `repoId`             | string                                   | Yes      | Repository identifier                                                                                                                                                                                    |
-| `runtime`            | string                                   | Yes      | Runtime to use. Supported: `node`, `typescript`, `python`, `shell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`                                           |
+| `runtime`            | string                                   | Yes      | Runtime to use. Supported: `node`, `typescript`, `python`, `shell`, `powershell`, `ruby`, `php`, `perl`, `r`, `elixir`, `go`, `java`, `kotlin`, `rust`, `c`, `cpp`, `csharp`                                           |
 | `executable`         | string                                   | No       | Override the default executable (e.g., `"bun"` instead of `"node"`)                                                                                                                                      |
 | `args`               | string[]                                 | No       | Arguments to pass to the executable                                                                                                                                                                      |
 | `code`               | string                                   | No       | Inline code to execute via runtime-safe stdin/temp handling. Mutually exclusive with args-only mode.                                                                                                      |
@@ -1205,6 +1205,7 @@ No `stdoutSummary` or `stderrSummary` — only matched excerpts are returned.
 - `typescript` → `tsx` / `ts-node`
 - `python` → `python3` (Unix) / `python` (Windows)
 - `shell` → `bash` (Unix) / `cmd.exe` (Windows). On Windows, use `&` or newlines rather than semicolons for command separation; SDL-MCP surfaces a warning when semicolons appear in shell code.
+- `powershell` → `powershell.exe` (Windows) / `pwsh` (Unix when installed). SDL-MCP writes `code` to a `.ps1` file and runs `-NoProfile -ExecutionPolicy Bypass -File`.
 - `go` → `go run`
 - `rust` → `rustc` then execute
 - `java` → `javac` then `java`

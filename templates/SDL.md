@@ -351,7 +351,7 @@ Do not use runtime execution to print indexed source. Use the retrieval ladder i
 }
 ```
 
-For shell runtime, provide `code` when a shell wrapper is the right abstraction.
+For shell runtime, provide `code` when a shell wrapper is the right abstraction. On Windows, `runtime: "shell"` uses `cmd.exe`; use `runtime: "powershell"` for PowerShell `.ps1` snippets.
 
 ---
 
