@@ -1297,17 +1297,20 @@ async function prepareRenameRequest(
 
   const skipped: PreviewFileSkip[] = [];
   if (rename.includeTextOnlyMatches === true) {
+    const rootPath =
+      (await ladybugDb.getRepo(conn, request.repoId))?.rootPath ?? "";
     const textCandidates = await enumerateRepoFiles(
-      (await ladybugDb.getRepo(conn, request.repoId))?.rootPath ?? "",
+      rootPath,
       request.filters,
       request.maxFiles ?? DEFAULT_MAX_FILES,
     );
-    const oldNameRegex = wordRegexForIdentifier(target.name);
+    // No g flag — .test() must be stateless across the file loop.
+    const oldNameRegex = new RegExp(`\\b${escapeRegExp(target.name)}\\b`);
     for (const rel of textCandidates.candidates) {
       if (candidateSet.has(rel)) continue;
       try {
-        const abs = resolve((await ladybugDb.getRepo(conn, request.repoId))?.rootPath ?? "", rel);
-        const readResult = await readSearchEditCandidateFile((await ladybugDb.getRepo(conn, request.repoId))?.rootPath ?? "", abs);
+        const abs = resolve(rootPath, rel);
+        const readResult = await readSearchEditCandidateFile(rootPath, abs);
         if (readResult.ok && oldNameRegex.test(readResult.value.content)) {
           skipped.push({ path: rel, reason: "text-only-match" });
         }

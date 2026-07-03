@@ -225,6 +225,36 @@ describe("search.edit rename", { concurrency: false }, () => {
     assert.equal(recallPreview.fileEntries.some((entry) => entry.file === "src/loose.ts"), false);
   });
 
+  it("reports every text-only match, not alternating ones", async () => {
+    for (const n of ["loose1", "loose2", "loose3"]) {
+      await addIndexedFile(
+        `file-${n}`,
+        `src/${n}.ts`,
+        "export const v = foo();\n",
+        `sym-${n}`,
+        n,
+        false,
+      );
+    }
+
+    const preview = (await handleSearchEdit({
+      mode: "preview",
+      repoId,
+      targeting: "rename",
+      query: {
+        symbolIds: ["sym-foo"],
+        rename: { newName: "bar", includeTextOnlyMatches: true },
+      },
+      editMode: "replacePattern",
+      maxFiles: 10,
+    })) as SearchEditPreviewResponse;
+
+    const reasons = skipReasons(preview);
+    for (const n of ["loose1", "loose2", "loose3"]) {
+      assert.equal(reasons.get(`src/${n}.ts`), "text-only-match");
+    }
+  });
+
   it("reports unsupported-language and stale-edge graph candidates", async () => {
     await addIndexedFile("file-stale", "src/stale.ts", "export const value = 1;\n", "sym-stale", "stale");
     await addIndexedFile("file-text", "src/readme.txt", "foo\n", "sym-text", "textCaller");
