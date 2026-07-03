@@ -9,12 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Workflow wildcard projection**: `$N` references now support `[*]` array projection (e.g. `$0.results[*].symbolId` resolves to a `string[]`), covering the `symbolSearch -> symbolGetCard/sliceBuild` fan-out pattern without `dataMap` gymnastics.
 - **Symbolic refactor ops**: Added graph-scoped `search.edit` `targeting:"rename"` and TypeScript/JavaScript `targeting:"signature"` previews that reuse the two-phase plan/apply pipeline.
 - **Tree-sitter signature engine**: `targeting:"signature"` declaration and callsite transforms now walk the tree-sitter AST instead of a string scanner — call-shaped text inside string literals, comments, and template literals is no longer edited, and calls nested in template interpolations are.
 
 ### Changed
 
 - **Response artifacts**: `search.edit` preview responses now default to `responseMode:"auto"`; pass `responseMode:"inline"` to force full inline previews. The default applies on every dispatch path (direct tool, gateway router, and `sdl.workflow`), not just raw handler calls.
+
+### Fixed
+
+- **response.get**: `maxTokens` is now enforced on the returned content (estimate-based shrink after slicing) instead of only seeding a 4-bytes-per-token pre-slice byte bound; `maxBytes` remains an exact byte cap. Schema description and manual updated to match.
+- **runtime.execute**: `persistOutput: true` now writes a searchable marker artifact when a command completes with no captured stdout/stderr, instead of returning `artifactHandle: null`.
+- **Manual drift**: the workflow manual now advertises `semanticEnrichmentStatus`'s existing `detail`/`limit` params and documents `[*]` reference projection.
 
 ## [0.12.0] - 2026-07-01
 

@@ -2954,7 +2954,7 @@ export const ResponseGetRequestSchema = z.object({
     .min(1)
     .max(250_000)
     .optional()
-    .describe("Estimated token bound to return when full=false"),
+    .describe("Token bound enforced on returned content when full=false (estimate-based); use maxBytes for an exact byte cap"),
   offsetBytes: z
     .number()
     .int()

@@ -815,3 +815,67 @@ describe("generateResponseArtifactHandle", () => {
     assert.strictEqual(isValidResponseArtifactHandle(handle), true);
   });
 });
+
+describe("response artifact maxTokens enforcement", () => {
+  it("maxTokens bounds the estimated tokens of the returned content", async () => {
+    const baseDir = makeTempDir();
+    const payload = {
+      rows: Array.from({ length: 400 }, (_, i) => ({
+        id: `symbol-${i}`,
+        score: i * 0.5,
+        summary: `dense json payload row ${i}`,
+      })),
+    };
+
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "test.tool",
+      payload,
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+    });
+    assert.strictEqual(stored.responseMode, "handle");
+    if (stored.responseMode !== "handle") return;
+
+    const { estimateTokens } = await import("../../dist/util/tokenize.js");
+    const read = await readResponseArtifact({
+      repoId: "repo-a",
+      handle: stored.payload.handle,
+      maxTokens: 100,
+      artifactBaseDir: baseDir,
+    });
+
+    assert.strictEqual(read.truncated, true);
+    const text = String(read.content);
+    const estimated = estimateTokens(text);
+    assert.ok(
+      estimated <= 100,
+      `estimated tokens ${estimated} exceed requested maxTokens 100`,
+    );
+    assert.ok(text.length > 0, "content should not be emptied by the cap");
+  });
+
+  it("maxBytes remains an exact byte cap", async () => {
+    const baseDir = makeTempDir();
+    const payload = { message: "B".repeat(5000) };
+
+    const stored = await maybeStoreLargeResponse({
+      repoId: "repo-a",
+      toolName: "test.tool",
+      payload,
+      responseMode: "handle",
+      artifactBaseDir: baseDir,
+    });
+    assert.strictEqual(stored.responseMode, "handle");
+    if (stored.responseMode !== "handle") return;
+
+    const read = await readResponseArtifact({
+      repoId: "repo-a",
+      handle: stored.payload.handle,
+      maxBytes: 1200,
+      artifactBaseDir: baseDir,
+    });
+
+    assert.strictEqual(read.range.returnedBytes, 1200);
+  });
+});

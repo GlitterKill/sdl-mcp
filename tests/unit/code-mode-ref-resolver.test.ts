@@ -124,3 +124,50 @@ describe("code-mode ref resolver", () => {
     assert.deepStrictEqual(result.data, [1, 2, 3]);
   });
 });
+
+describe("code-mode ref resolver wildcard projection", () => {
+  it("$0.results[*].symbolId projects a field over every element", () => {
+    assert.deepStrictEqual(
+      resolveRef("$0.results[*].symbolId", [
+        { results: [{ symbolId: "a" }, { symbolId: "b" }] },
+      ]),
+      ["a", "b"],
+    );
+  });
+
+  it("trailing [*] returns a shallow copy of the array", () => {
+    const arr = [1, 2, 3];
+    const projected = resolveRef("$0.items[*]", [{ items: arr }]);
+    assert.deepStrictEqual(projected, [1, 2, 3]);
+    assert.notStrictEqual(projected, arr);
+  });
+
+  it("[*] on a non-array throws RefResolutionError", () => {
+    assert.throws(
+      () => resolveRef("$0.results[*].symbolId", [{ results: { symbolId: "a" } }]),
+      RefResolutionError,
+    );
+  });
+
+  it("missing field inside a [*] projection throws RefResolutionError", () => {
+    assert.throws(
+      () => resolveRef("$0.results[*].nope", [{ results: [{ symbolId: "a" }] }]),
+      RefResolutionError,
+    );
+  });
+
+  it("full-string wildcard ref preserves array type through resolveRefs", () => {
+    const result = resolveRefs({ symbolIds: "$0.results[*].symbolId" }, [
+      { results: [{ symbolId: "a" }, { symbolId: "b" }] },
+    ]);
+    assert.deepStrictEqual(result.symbolIds, ["a", "b"]);
+  });
+
+  it("wildcard refs work inside array args (sliceBuild entrySymbols shape)", () => {
+    const result = resolveRefs(
+      { entrySymbols: "$0.results[*].symbolId", budget: { maxCards: 5 } },
+      [{ results: [{ symbolId: "x" }] }],
+    );
+    assert.deepStrictEqual(result.entrySymbols, ["x"]);
+  });
+});

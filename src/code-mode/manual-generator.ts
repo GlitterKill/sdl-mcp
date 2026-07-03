@@ -85,7 +85,7 @@ export function getActiveActionToFn(): Record<string, string> {
 
 const MANUAL_TEMPLATE = `// SDL-MCP API: sdl.context for context; sdl.workflow for multi-step ops
 // repoId lives in workflow envelope.
-// Reference steps as ${"$"}N, e.g. ${"$"}0.results[0].symbolId.
+// Reference steps as ${"$"}N, e.g. ${"$"}0.results[0].symbolId. Wildcard [*] projects arrays: ${"$"}0.results[*].symbolId -> string[].
 // Limits: sdl.action.search limit <= 50; workflowContinuationGet limit <= 1000; runtimeExecute maxResponseLines 5..1000; shell runtime requires code.
 // Edit: symbolEdit one symbol; searchEdit identifier/structural/operations[]; runtimeExecute stdin.
 // sdl.context budgets accept maxTokens/maxEstimatedTokens, not maxCards.
@@ -141,7 +141,7 @@ function policySet(p: { policyPatch: { maxWindowLines?: number; maxWindowTokens?
 /** Refresh semantic enrichment source selection */
 function semanticEnrichmentRefresh(p: { dryRun?: boolean; force?: boolean; install?: boolean; languages?: string[] }): { status: string }
 /** Report semantic enrichment status */
-function semanticEnrichmentStatus(p: { languages?: string[] }): { status: object }
+function semanticEnrichmentStatus(p: { languages?: string[]; detail?: "compact"|"full"; limit?: number }): { status: object }
 // === Memory ===
 /** Store a development memory */
 function memoryStore(p: { type: "decision"|"bugfix"|"task_context"|"pattern"|"convention"|"architecture"|"performance"|"security"; title: string; content: string; tags?: string[]; symbolIds?: string[]; fileRelPaths?: string[] }): { memoryId: string }
@@ -167,7 +167,7 @@ function bufferStatus(): { status: object }
 function runtimeExecute(p: { runtime: string; executable?: string; args?: string[]; code?: string; stdin?: string; relativeCwd?: string; timeoutMs?: number; queryTerms?: string[]; contextLines?: number; maxResponseLines?: number; persistOutput?: boolean; outputMode?: "minimal"|"summary"|"intent" }): { status: string; exitCode: number; durationMs: number; artifactHandle?: string; stdoutSummary?: string; stdinBytes?: number; stdinSha256?: string; quotingWarnings?: string[]; serverDriftWarnings?: string[]; nextAction?: object }
 /** Query stored runtime output by keywords or exact line range */
 function runtimeQueryOutput(p: { artifactHandle: string; queryTerms?: string[]; cursor?: { stream: "stdout"|"stderr"; afterLine: number }; lineRange?: { stream: "stdout"|"stderr"; startLine: number; endLine: number }; maxExcerpts?: number; contextLines?: number; stream?: "stdout"|"stderr"|"both" }): { excerpts: object[]; matchStatus: "matched"|"noMatchFallback"|"lineRange"; matchCount: number; nextCursor?: object }
-/** Retrieve a large tool response by handle */
+/** Retrieve a large tool response by handle; maxTokens is enforced on returned content (estimate-based), maxBytes is an exact byte cap */
 function responseGet(p: { handle: string; full?: boolean; maxBytes?: number; maxTokens?: number; offsetBytes?: number; jsonPath?: string; raw?: boolean; offset?: number; limit?: number }): { content: unknown; truncated: boolean; metadata: object; pagination?: object }
 
 // === Usage ===

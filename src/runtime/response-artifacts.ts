@@ -4,6 +4,8 @@ import { join } from "path";
 import { promisify } from "util";
 import { gzip, gunzip } from "zlib";
 
+import { estimateTokens } from "../util/tokenize.js";
+
 import {
   RUNTIME_DEFAULT_MAX_ARTIFACT_BYTES,
   RUNTIME_DEFAULT_MAX_RESPONSE_ARTIFACTS_PER_REPO,
@@ -650,9 +652,24 @@ export async function readResponseArtifact(
     tokenBoundBytes ?? MAX_RESPONSE_EXCERPT_BYTES,
   );
   const full = opts.full ?? false;
-  const returnedBuffer = full
+  let returnedBuffer = full
     ? decompressed
     : decompressed.subarray(offsetBytes, offsetBytes + boundedMaxBytes);
+  if (!full && opts.maxTokens !== undefined) {
+    // The 4-bytes-per-token pre-slice bound under-counts dense JSON; shrink
+    // the excerpt until the content-based estimate fits the requested cap.
+    let estimated = estimateTokens(returnedBuffer.toString("utf-8"));
+    while (estimated > opts.maxTokens && returnedBuffer.length > 1) {
+      const shrunk = Math.floor(
+        (returnedBuffer.length * opts.maxTokens) / estimated,
+      );
+      if (shrunk >= returnedBuffer.length) {
+        break;
+      }
+      returnedBuffer = returnedBuffer.subarray(0, Math.max(1, shrunk));
+      estimated = estimateTokens(returnedBuffer.toString("utf-8"));
+    }
+  }
   const returnedText = returnedBuffer.toString("utf-8");
   const truncated = !full && offsetBytes + returnedBuffer.length < decompressed.length;
   const content =

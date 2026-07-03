@@ -702,9 +702,15 @@ export async function handleRuntimeExecute(
                 "utf-8",
               );
 
-        if (result.stdout.length === 0 && stderr.length === 0) {
-          return null;
-        }
+        // persistOutput was explicitly requested: keep a searchable marker
+        // artifact even when the command produced no output at all.
+        const stdout =
+          result.stdout.length === 0 && stderr.length === 0
+            ? Buffer.from(
+                `${phase} phase completed with no captured stdout/stderr (exitCode=${result.exitCode ?? "none"}, signal=${result.signal ?? "none"}).`,
+                "utf-8",
+              )
+            : result.stdout;
         const argsHash = hashContent(
           JSON.stringify({ runtime: request.runtime, args: request.args, phase }),
         );
@@ -725,7 +731,7 @@ export async function handleRuntimeExecute(
           exitCode: result.exitCode,
           signal: result.signal,
           durationMs: result.durationMs,
-          stdout: result.stdout,
+          stdout,
           stderr,
           policyAuditHash: policyDecision.auditHash,
           artifactTtlHours: runtimeConfig.artifactTtlHours,

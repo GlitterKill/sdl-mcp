@@ -1,12 +1,12 @@
 /** Global regex for finding $N references (with optional dot/bracket path) embedded in strings. */
 export const REF_PATTERN = new RegExp(
-  String.raw`\$\d+(?:(?:\.(?:[a-zA-Z_]\w*|\d+))|(?:\[\d+\])|(?:\?\.(?:[a-zA-Z_]\w*|\d+|\[\d+\])))*`,
+  String.raw`\$\d+(?:(?:\.(?:[a-zA-Z_]\w*|\d+))|(?:\[(?:\d+|\*)\])|(?:\?\.(?:[a-zA-Z_]\w*|\d+|\[(?:\d+|\*)\])))*`,
   "g",
 );
 
 /** Non-global single-match version used inside resolveRef. */
 const REF_PATTERN_SINGLE = new RegExp(
-  String.raw`^\$(\d+)((?:(?:\.(?:[a-zA-Z_]\w*|\d+))|(?:\[\d+\])|(?:\?\.(?:[a-zA-Z_]\w*|\d+|\[\d+\])))*)$`,
+  String.raw`^\$(\d+)((?:(?:\.(?:[a-zA-Z_]\w*|\d+))|(?:\[(?:\d+|\*)\])|(?:\?\.(?:[a-zA-Z_]\w*|\d+|\[(?:\d+|\*)\])))*)$`,
 );
 
 /** Property names that must never be navigated to prevent prototype pollution. */
@@ -57,6 +57,8 @@ export class RefResolutionError extends Error {
 interface RefSegment {
   optional: boolean;
   value: string | number;
+  /** True for a "[*]" segment that projects over every array element. */
+  wildcard?: boolean;
 }
 
 function parseSegments(pathStr: string, ref: string): RefSegment[] {
@@ -79,10 +81,13 @@ function parseSegments(pathStr: string, ref: string): RefSegment[] {
         throw new RefResolutionError(`Invalid reference syntax: '${ref}'`);
       }
       const rawIndex = pathStr.slice(index + 1, closing);
-      if (!/^\d+$/.test(rawIndex)) {
+      if (rawIndex === "*") {
+        segments.push({ optional, value: "*", wildcard: true });
+      } else if (!/^\d+$/.test(rawIndex)) {
         throw new RefResolutionError(`Invalid reference syntax: '${ref}'`);
+      } else {
+        segments.push({ optional, value: parseInt(rawIndex, 10) });
       }
-      segments.push({ optional, value: parseInt(rawIndex, 10) });
       index = closing + 1;
     } else {
       const numeric = /^\d+/.exec(pathStr.slice(index));
@@ -143,10 +148,42 @@ export function resolveRef(ref: string, priorResults: unknown[]): unknown {
   const segments = parseSegments(pathStr, ref);
 
   const metadata = getRefMetadata(priorResults, n);
-  let current: unknown = priorResults[n];
-  for (const [index, segment] of segments.entries()) {
+  return navigateSegments(priorResults[n], segments, 0, ref, metadata);
+}
+
+function navigateSegments(
+  start: unknown,
+  segments: RefSegment[],
+  startIndex: number,
+  ref: string,
+  metadata?: Record<string, unknown>,
+): unknown {
+  let current: unknown = start;
+  for (let index = startIndex; index < segments.length; index++) {
+    const segment = segments[index];
     const seg = segment.value;
     const isLastSegment = index === segments.length - 1;
+    if (segment.wildcard) {
+      if (current === null || current === undefined) {
+        if (segment.optional) {
+          return undefined;
+        }
+        throw new RefResolutionError(
+          `Cannot navigate into null/undefined at segment '[*]' in reference '${ref}'`,
+        );
+      }
+      if (!Array.isArray(current)) {
+        throw new RefResolutionError(
+          `Expected array at [*] in reference '${ref}', got ${typeof current}`,
+        );
+      }
+      if (isLastSegment) {
+        return [...current];
+      }
+      return current.map((element) =>
+        navigateSegments(element, segments, index + 1, ref),
+      );
+    }
     if (current === null || current === undefined) {
       if (segment.optional) {
         return undefined;
