@@ -8,6 +8,8 @@
 
 import { resolve } from "path";
 
+import type { SyntaxNode } from "tree-sitter";
+
 import { getLadybugConn } from "../../../db/ladybug.js";
 import * as ladybugDb from "../../../db/ladybug-queries.js";
 import { normalizePath } from "../../../util/paths.js";
@@ -16,7 +18,7 @@ import { resolveSymbolRef } from "../../../util/resolve-symbol-ref.js";
 
 import { isIndexedSource } from "../file-write-internals.js";
 import type { PlannedFileEdit, PlanPrecondition } from "./plan-store.js";
-import { collectIdentifierSourceEdits } from "./structural.js";
+import { collectIdentifierSourceEdits, parseTreeForPath } from "./structural.js";
 import { wordRegexForIdentifier } from "./rename.js";
 import {
   DEFAULT_MAX_FILES,
@@ -97,13 +99,6 @@ function splitCommaList(text: string): string[] {
 
 const IDENTIFIER_NAME_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
-function parameterName(param: string): string {
-  return (
-    param
-      .trim()
-      .match(/^(?:\.\.\.)?\s*(?:(?:public|private|protected|readonly|override)\s+)*([A-Za-z_$][A-Za-z0-9_$]*)/)?.[1] ?? ""
-  );
-}
 function formatAddedParam(add: NonNullable<SignatureOps["add"]>[number]): string {
   return add.name + (add.typeText ? ": " + add.typeText : "") + (add.defaultText ? " = " + add.defaultText : "");
 }
@@ -140,24 +135,128 @@ function assertSignatureOpsValid(signature: SignatureOps): void {
   }
 }
 
-function applySignatureOpsToParams(paramsText: string, signature: SignatureOps): { paramsText: string; originalNames: string[] } {
-  const params = splitCommaList(paramsText);
-  const originalNames = params.map(parameterName);
+function applySignatureOpsToParts(
+  parts: string[],
+  names: string[],
+  signature: SignatureOps,
+): { paramsText: string; originalNames: string[] } {
+  const params = [...parts];
+  const paramNames = [...names];
+  const originalNames = [...names];
   for (const remove of signature.remove ?? []) {
-    const index = params.findIndex((param) => parameterName(param) === remove.name);
+    const index = paramNames.indexOf(remove.name);
     if (index === -1) throw new ValidationError("signature remove param not found: " + remove.name);
     params.splice(index, 1);
+    paramNames.splice(index, 1);
   }
   for (const rename of signature.renameParam ?? []) {
-    const index = params.findIndex((param) => parameterName(param) === rename.from);
+    const index = paramNames.indexOf(rename.from);
     if (index === -1) throw new ValidationError("signature rename param not found: " + rename.from);
     params[index] = params[index].replace(new RegExp("^" + escapeRegExp(rename.from) + "\\b"), rename.to);
+    paramNames[index] = rename.to;
   }
   for (const add of signature.add ?? []) {
     const insertAt = Math.min(Math.max(add.index ?? params.length, 0), params.length);
     params.splice(insertAt, 0, formatAddedParam(add));
+    paramNames.splice(insertAt, 0, add.name);
   }
   return { paramsText: params.join(", "), originalNames };
+}
+
+interface DeclarationMatch {
+  /** Function-shaped node owning `parameters`/`parameter` + `body` fields. */
+  fnNode: SyntaxNode;
+  overload: boolean;
+}
+
+/** Collect nodes that declare `name` as a function-shaped symbol. */
+function findDeclarationNodes(root: SyntaxNode, name: string): DeclarationMatch[] {
+  const matches: DeclarationMatch[] = [];
+  const visit = (node: SyntaxNode): void => {
+    switch (node.type) {
+      case "function_declaration":
+      case "generator_function_declaration":
+      case "function_signature": {
+        if (node.childForFieldName("name")?.text === name) {
+          matches.push({ fnNode: node, overload: node.type === "function_signature" });
+        }
+        break;
+      }
+      case "method_definition":
+      case "method_signature": {
+        if (node.childForFieldName("name")?.text === name) {
+          matches.push({ fnNode: node, overload: node.type === "method_signature" });
+        }
+        break;
+      }
+      case "variable_declarator": {
+        const nameNode = node.childForFieldName("name");
+        const value = node.childForFieldName("value");
+        if (
+          nameNode?.text === name &&
+          value !== null &&
+          (value.type === "arrow_function" ||
+            value.type === "function_expression" ||
+            value.type === "generator_function")
+        ) {
+          matches.push({ fnNode: value, overload: false });
+        }
+        break;
+      }
+      default:
+        break;
+    }
+    for (const child of node.namedChildren) visit(child);
+  };
+  visit(root);
+  return matches;
+}
+
+function paramNameFromNode(paramNode: SyntaxNode): string {
+  const target = paramNode.childForFieldName("pattern") ?? paramNode;
+  if (target.type === "identifier") return target.text;
+  if (target.type === "rest_pattern") {
+    const inner = target.namedChildren.find((child) => child.type === "identifier");
+    return inner?.text ?? "";
+  }
+  // Destructuring patterns have no positional name (matches legacy behavior).
+  return "";
+}
+
+interface ParamListInfo {
+  parts: string[];
+  names: string[];
+  editStart: number;
+  editEnd: number;
+  /** True for bare-parameter arrows (`x => ...`) whose replacement needs parens. */
+  wrapInParens: boolean;
+}
+
+function extractParams(fnNode: SyntaxNode): ParamListInfo {
+  const paramsNode = fnNode.childForFieldName("parameters");
+  if (paramsNode) {
+    const paramNodes = paramsNode.namedChildren.filter(
+      (child) => child.type !== "comment",
+    );
+    return {
+      parts: paramNodes.map((child) => child.text),
+      names: paramNodes.map(paramNameFromNode),
+      editStart: paramsNode.startIndex + 1,
+      editEnd: paramsNode.endIndex - 1,
+      wrapInParens: false,
+    };
+  }
+  const bare = fnNode.childForFieldName("parameter");
+  if (bare) {
+    return {
+      parts: [bare.text],
+      names: [bare.text],
+      editStart: bare.startIndex,
+      editEnd: bare.endIndex,
+      wrapInParens: true,
+    };
+  }
+  throw new ValidationError("signature target declaration not found");
 }
 
 function skipWhitespace(content: string, index: number): number {
@@ -264,29 +363,6 @@ function declarationAfterParams(content: string, closeParen: number): SignatureD
   return null;
 }
 
-function pushSignatureDeclaration(
-  declarations: SignatureDeclaration[],
-  seenParamStarts: Set<number>,
-  content: string,
-  openParen: number,
-): void {
-  if (openParen < 0 || seenParamStarts.has(openParen + 1)) return;
-  const closeParen = findMatchingDelimiter(content, openParen, "(", ")");
-  if (closeParen === -1) return;
-  const tail = declarationAfterParams(content, closeParen);
-  if (!tail) return;
-  seenParamStarts.add(openParen + 1);
-  declarations.push({
-    ...tail,
-    paramsStart: openParen + 1,
-    paramsEnd: closeParen,
-  });
-}
-
-function isIdentifierChar(ch: string | undefined): boolean {
-  return ch !== undefined && /[A-Za-z0-9_$]/.test(ch);
-}
-
 function previousNonWhitespace(content: string, index: number): string | undefined {
   for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
     if (!/\s/.test(content[cursor] ?? "")) return content[cursor];
@@ -314,81 +390,44 @@ function hasSignatureDeclarationPrefix(content: string, nameStart: number): bool
   );
 }
 
-function hasVariableDeclarationPrefix(content: string, nameStart: number): boolean {
-  const prefix = content.slice(declarationPrefixStart(content, nameStart), nameStart).trimStart();
-  return /^(?:export\s+)?(?:const|let|var)\s+$/.test(prefix);
-}
-
-function arrowOpenParenAfterName(content: string, nameEnd: number): number {
-  let cursor = skipWhitespace(content, nameEnd);
-  if (content[cursor] === ":") {
-    cursor += 1;
-    while (cursor < content.length && content[cursor] !== "=" && content[cursor] !== "\n" && content[cursor] !== ";") {
-      cursor += 1;
-    }
-  }
-  if (content[cursor] !== "=") return -1;
-  cursor = skipWhitespace(content, cursor + 1);
-  if (content.slice(cursor, cursor + 5) === "async" && !isIdentifierChar(content[cursor + 5])) {
-    cursor = skipWhitespace(content, cursor + 5);
-  }
-  return content[cursor] === "(" ? cursor : -1;
-}
-
-function findSignatureDeclarations(content: string, name: string): SignatureDeclaration[] {
-  const declarations: SignatureDeclaration[] = [];
-  const seenParamStarts = new Set<number>();
-  let nameStart = content.indexOf(name);
-  while (nameStart !== -1) {
-    const nameEnd = nameStart + name.length;
-    if (
-      !isIdentifierChar(content[nameStart - 1]) &&
-      !isIdentifierChar(content[nameEnd]) &&
-      hasSignatureDeclarationPrefix(content, nameStart)
-    ) {
-      let openParen = skipWhitespace(content, nameEnd);
-      if (content[openParen] !== "(" && hasVariableDeclarationPrefix(content, nameStart)) {
-        openParen = arrowOpenParenAfterName(content, nameEnd);
-      }
-      if (content[openParen] === "(") {
-        pushSignatureDeclaration(declarations, seenParamStarts, content, openParen);
-      }
-    }
-    nameStart = content.indexOf(name, nameEnd);
-  }
-  return declarations.sort((a, b) => a.paramsStart - b.paramsStart);
-}
-
 function isTypeScriptOrJavaScriptPath(relPath: string): boolean {
   return /[.][cm]?[jt]sx?$/.test(relPath);
 }
 
 function buildSignatureDeclarationEdits(content: string, relPath: string, name: string, signature: SignatureOps): { edits: SourceEdit[]; originalNames: string[] } {
-  const declarations = findSignatureDeclarations(content, name);
-  if (declarations.length === 0) throw new ValidationError("signature target declaration not found");
-  if (declarations.length > 1 || declarations.some((declaration) => declaration.overload)) {
+  const tree = parseTreeForPath(relPath, content);
+  if (!tree) throw new ValidationError("signature target declaration not found");
+  const matches = findDeclarationNodes(tree.rootNode, name);
+  if (matches.length === 0) throw new ValidationError("signature target declaration not found");
+  if (matches.length > 1 || matches.some((match) => match.overload)) {
     throw new ValidationError("overloads-not-supported");
   }
-  const declaration = declarations[0];
-  const transformed = applySignatureOpsToParams(content.slice(declaration.paramsStart, declaration.paramsEnd), signature);
+  const fnNode = matches[0].fnNode;
+  const info = extractParams(fnNode);
+  const transformed = applySignatureOpsToParts(info.parts, info.names, signature);
+  const replacement = info.wrapInParens
+    ? `(${transformed.paramsText})`
+    : transformed.paramsText;
   const edits: SourceEdit[] = [
     {
       operationId: "signature",
-      start: declaration.paramsStart,
-      end: declaration.paramsEnd,
-      replacement: transformed.paramsText,
+      start: info.editStart,
+      end: info.editEnd,
+      replacement,
     },
   ];
-  for (const rename of signature.renameParam ?? []) {
-    if (declaration.bodyStart === undefined || declaration.bodyEnd === undefined) continue;
-    const identifierEdits = collectIdentifierSourceEdits({
-      content,
-      relPath,
-      literal: rename.from,
-      replacement: rename.to,
-      global: true,
-    }).filter((edit) => edit.start >= declaration.bodyStart! && edit.end <= declaration.bodyEnd!);
-    edits.push(...toSourceEdits(identifierEdits, "signature"));
+  const body = fnNode.childForFieldName("body");
+  if (body) {
+    for (const rename of signature.renameParam ?? []) {
+      const identifierEdits = collectIdentifierSourceEdits({
+        content,
+        relPath,
+        literal: rename.from,
+        replacement: rename.to,
+        global: true,
+      }).filter((edit) => edit.start >= body.startIndex && edit.end <= body.endIndex);
+      edits.push(...toSourceEdits(identifierEdits, "signature"));
+    }
   }
   return { edits, originalNames: transformed.originalNames };
 }

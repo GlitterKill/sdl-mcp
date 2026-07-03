@@ -165,6 +165,16 @@ describe("search.edit signature", { concurrency: false }, () => {
     assert.match(await sourceB(), /handler\('x'\)/);
   });
 
+  it("handles bare-parameter arrow declarations by adding parens", async () => {
+    await writeFile(join(repoRoot, "src", "a.ts"), "export const handler = a => a;\n", "utf-8");
+
+    const preview = await previewSignature({ renameParam: [{ from: "a", to: "value" }] });
+    const apply = await handleSearchEdit(preview.applyArgs);
+
+    assert.equal(apply.mode, "apply");
+    assert.match(await sourceA(), /handler = \(value\) => value;/);
+  });
+
   it("handles class method declarations", async () => {
     await writeFile(join(repoRoot, "src", "a.ts"), "export class Service {\n  handler(a: string, b: number) {\n    return a + b;\n  }\n}\n", "utf-8");
     await writeFile(join(repoRoot, "src", "b.ts"), "import { Service } from './a';\nconst svc = new Service();\nexport const value = svc.handler('x', 1);\n", "utf-8");
