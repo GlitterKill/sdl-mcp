@@ -369,6 +369,26 @@ async function finalizeCodeNeedWindowResponse(
   });
 }
 
+export interface IdentifierMissWarningContext {
+  maxLines: number;
+  rangeNarrowed: boolean;
+  windowTruncated: boolean;
+}
+
+export function buildIdentifierMissWarning(
+  missedIdentifiers: string[],
+  context: IdentifierMissWarningContext,
+): string {
+  const missing = missedIdentifiers.join(", ");
+  if (context.windowTruncated) {
+    return `Identifiers not in visible range (window truncated to ${context.maxLines} lines): ${missing}. Use sdl.code.getHotPath to find them.`;
+  }
+  if (context.rangeNarrowed) {
+    return `Identifiers not in selected visible range: ${missing}. Use sdl.code.getHotPath to find them.`;
+  }
+  return `Identifiers not found in selected symbol: ${missing}. Use sdl.symbol.search for sibling symbols before retrying sdl.code.needWindow.`;
+}
+
 /**
  * Handles code window requests with policy evaluation.
  * Returns full code, skeleton, or hot-path based on policy decisions.
@@ -929,11 +949,21 @@ export async function handleCodeNeedWindow(
       whyApproved.push("redaction-applied");
     }
 
+    const symbolTotalLines = symbolRange.endLine - symbolRange.startLine + 1;
+    const windowLines = windowResult.code.split("\n").length;
+    const isRangeNarrowed =
+      effectiveRange.startLine > symbolRange.startLine ||
+      effectiveRange.endLine < symbolRange.endLine;
+
     // Surface warnings when code is empty despite approval
     const warnings: string[] = [];
     if (missedInWindow && missedInWindow.length > 0) {
       warnings.push(
-        `Identifiers not in visible range (window truncated to ${maxLines} lines): ${missedInWindow.join(", ")}. Use sdl.code.getHotPath to find them.`,
+        buildIdentifierMissWarning(missedInWindow, {
+          maxLines,
+          rangeNarrowed: isRangeNarrowed,
+          windowTruncated: windowResult.truncated,
+        }),
       );
     }
     if (redactedCode === "" && windowResult.emptyReason) {
@@ -971,11 +1001,6 @@ export async function handleCodeNeedWindow(
       reason: whyApproved,
     });
 
-    const symbolTotalLines = symbolRange.endLine - symbolRange.startLine + 1;
-    const windowLines = windowResult.code.split("\n").length;
-    const isRangeNarrowed =
-      effectiveRange.startLine > symbolRange.startLine ||
-      effectiveRange.endLine < symbolRange.endLine;
     const isTruncated = windowResult.truncated || isRangeNarrowed;
     const codeTruncation = isTruncated
       ? {

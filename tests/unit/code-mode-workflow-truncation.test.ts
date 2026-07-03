@@ -45,6 +45,31 @@ describe("workflow-truncation", () => {
     assert.ok(Object.keys(truncObj).length < 50);
   });
 
+  it("keeps a minimum symbol card header when card output is truncated", () => {
+    const result = truncateStepResult(
+      {
+        card: {
+          symbolId: "sym-1",
+          name: "handleSearchEdit",
+          kind: "function",
+          file: "src/mcp/tools/search-edit.ts",
+          summary: "x".repeat(5_000),
+          deps: { imports: Array(50).fill("large"), calls: Array(50).fill("large") },
+        },
+        etag: "etag-sym-1",
+      },
+      50,
+    );
+
+    const preview = result.truncated as {
+      card?: { symbolId?: string; name?: string; file?: string; kind?: string };
+    };
+    assert.equal(preview.card?.symbolId, "sym-1");
+    assert.equal(preview.card?.name, "handleSearchEdit");
+    assert.equal(preview.card?.file, "src/mcp/tools/search-edit.ts");
+    assert.equal(preview.card?.kind, "function");
+  });
+
   it("does not crash when object entries serialize to undefined", () => {
     const data = {
       omitted: undefined,

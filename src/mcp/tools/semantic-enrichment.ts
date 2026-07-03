@@ -39,9 +39,9 @@ export function compactSemanticEnrichmentStatusForAgent(
     autoRunOnIndexRefresh: result.autoRunOnIndexRefresh,
     installPolicy: result.installPolicy,
     selections: {
-      total: result.selections.length,
-      selectedCount: languagesWithSelection.length,
-      skippedCount,
+      totalLanguages: result.selections.length,
+      selectedLanguages: languagesWithSelection.length,
+      skippedProviders: skippedCount,
       languagesWithSelection,
     },
     lastRuns: result.lastRuns.slice(0, limit).map((run) => ({

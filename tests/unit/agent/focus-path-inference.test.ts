@@ -117,8 +117,27 @@ describe("inferFocusPathsFromTaskText", () => {
       `Expected server registration path in ${JSON.stringify(paths)}`,
     );
     assert.ok(
-      paths.includes("src/mcp/tools/index.ts"),
-      `Expected MCP tool index path in ${JSON.stringify(paths)}`,
+      paths.includes("src/mcp/tools.ts"),
+      `Expected MCP tools schema path in ${JSON.stringify(paths)}`,
+    );
+  });
+
+  it("infers tool-surface paths for SDL tool QA prompts", () => {
+    const paths = inferFocusPathsFromTaskText(
+      "SDL tool QA contract pass for inputSchema outputSchema structuredContent and noisy sdl.context evidence",
+    );
+
+    assert.ok(
+      paths.includes("src/server.ts"),
+      `Expected server registration path in ${JSON.stringify(paths)}`,
+    );
+    assert.ok(
+      paths.includes("src/mcp/tools.ts"),
+      `Expected MCP tools schema path in ${JSON.stringify(paths)}`,
+    );
+    assert.ok(
+      paths.includes("src/mcp/tools/"),
+      `Expected MCP tool handler path in ${JSON.stringify(paths)}`,
     );
   });
 

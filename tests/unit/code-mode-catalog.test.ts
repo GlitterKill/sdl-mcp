@@ -133,7 +133,7 @@ describe("code-mode action catalog", () => {
       const maxCards = contextBudget.subFields?.find(
         (field) => field.name === "maxCards",
       );
-      assert.match(maxCards?.description ?? "", /unsupported/i);
+      assert.equal(maxCards, undefined, "context budget must not advertise maxCards");
 
       assert.match(byAction.get("action.search")?.description ?? "", /limit.*50/i);
       assert.match(byAction.get("index.refresh")?.description ?? "", /wait/i);

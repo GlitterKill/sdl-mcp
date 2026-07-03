@@ -2273,15 +2273,10 @@ const AgentContextBudgetSchema = z
       .number()
       .optional()
       .describe("Maximum duration in milliseconds"),
-    maxCards: z
-      .number()
-      .optional()
-      .describe(
-        "Unsupported in sdl.context; use slice.build when card-count budgets are required",
-      ),
   })
+  .passthrough()
   .superRefine((budget, ctx) => {
-    if (budget.maxCards !== undefined) {
+    if ("maxCards" in budget) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["maxCards"],

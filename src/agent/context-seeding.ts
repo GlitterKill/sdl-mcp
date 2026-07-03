@@ -286,6 +286,13 @@ const CONCEPT_DIRECTORY_MAP: Array<{ keywords: string[]; paths: string[] }> = [
     keywords: [
       "mcp contract",
       "tool contract",
+      "tool qa",
+      "tool surface",
+      "tool-surface",
+      "contract pass",
+      "inputschema",
+      "input schema",
+      "structured output",
       "outputschema",
       "output schema",
       "structuredcontent",
@@ -297,8 +304,8 @@ const CONCEPT_DIRECTORY_MAP: Array<{ keywords: string[]; paths: string[] }> = [
     ],
     paths: [
       "src/server.ts",
-      "src/mcp/tools/index.ts",
-      "src/mcp/tools/tool-descriptors.ts",
+      "src/mcp/tools.ts",
+      "src/mcp/tools/",
     ],
   },
   {

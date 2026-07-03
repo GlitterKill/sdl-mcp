@@ -194,8 +194,50 @@ function truncationMarker(): Record<string, unknown> {
   };
 }
 
-function ensureVisibleTruncationPreview(value: unknown): unknown {
-  return isEmptyTruncationPreview(value) ? truncationMarker() : value;
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function compactCardHeader(card: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    ["symbolId", "name", "kind", "file"].flatMap((key) =>
+      card[key] === undefined ? [] : [[key, card[key]]],
+    ),
+  );
+}
+
+function minimumCardPreview(original: unknown): unknown | undefined {
+  if (!isRecordValue(original)) return undefined;
+  if (isRecordValue(original.card)) {
+    return { card: compactCardHeader(original.card) };
+  }
+  if (Array.isArray(original.cards)) {
+    const cards = original.cards
+      .filter(isRecordValue)
+      .slice(0, 3)
+      .map(compactCardHeader);
+    return cards.length > 0 ? { cards } : undefined;
+  }
+  return undefined;
+}
+
+function isGenericTruncationMarker(value: unknown): boolean {
+  return (
+    isRecordValue(value) &&
+    value.truncated === true &&
+    typeof value.reason === "string" &&
+    Object.keys(value).length <= 2
+  );
+}
+
+function ensureVisibleTruncationPreview(
+  value: unknown,
+  original: unknown,
+): unknown {
+  if (isEmptyTruncationPreview(value) || isGenericTruncationMarker(value)) {
+    return minimumCardPreview(original) ?? truncationMarker();
+  }
+  return value;
 }
 
 export function truncateStepResult(
@@ -233,6 +275,7 @@ export function truncateStepResult(
 
   const truncated = ensureVisibleTruncationPreview(
     smartTruncate(result, maxTokens),
+    result,
   );
   const keptTokens = estimateJsonTokens(safeJsonStringify(truncated));
 
