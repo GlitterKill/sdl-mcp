@@ -24,7 +24,10 @@ Complete reference for the SDL-MCP runtime surfaces exposed by `registerTools`.
 
 Flat mode and gateway mode share the same handler layer. The CLI `tool` command exposes direct action aliases for the shared handler layer rather than the full MCP surface.
 
-Parameter normalization is shared across flat and gateway calls. SDL-MCP accepts canonical camelCase fields plus common public aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, `spillover_handle`, `if_none_match`, `known_etags`, `known_card_etags`, `edited_files`, `entry_symbols`, and `relative_cwd`.
+Parameter normalization is shared across flat and gateway calls. SDL-MCP accepts canonical camelCase fields plus common public aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, `spillover_handle`, `limit`, `if_none_match`, `known_etags`, `known_card_etags`, `edited_files`, `entry_symbols`, and `relative_cwd`.
+
+Selected stable tools, starting with `sdl.repo.status`, `sdl.runtime.execute`, and `sdl.runtime.queryOutput`, also advertise MCP `outputSchema` metadata for their structured results.
+
 
 ---
 
@@ -639,13 +642,14 @@ Paginate additional symbols that exceeded the slice budget. Only use when the sl
 | `spilloverHandle` | `string`  | Yes      | Spillover handle from a truncated slice |
 | `cursor`          | `string`  | No       | Pagination cursor from previous page    |
 | `pageSize`        | `integer` | No       | Items per page (1-100, default: 20)     |
+| `limit`           | `integer` | No       | Public alias for `pageSize`             |
 
 **Response:** `{ spilloverHandle, cursor?, hasMore, symbols: SymbolCard[] }`
 
 **Example:**
 
 ```json
-{ "repoId": "my-repo", "spilloverHandle": "sp_abc123", "pageSize": 20 }
+{ "repoId": "my-repo", "spilloverHandle": "sp_abc123", "limit": 20 }
 ```
 
 ---

@@ -190,6 +190,7 @@ Use this order unless task constraints force escalation:
   - Use `outputMode: "summary"` for head+tail output excerpts (legacy behavior).
   - Use `outputMode: "intent"` to return only `queryTerms`-matched excerpts without head/tail summary; set `contextLines: 0` when the agent needs exact matched lines only.
   - Set `timeoutMs` and `maxResponseLines` to bound output. Use `queryTerms` to extract relevant excerpts from long output.
+  - For Node cleanup/edit snippets, use ESM imports such as `import fs from "node:fs"`; bare `require()` fails in ESM code snippets unless wrapped with `createRequire()`.
   - Follow compact `runtimeHints` when present; they call out predictable fixes such as ESM import syntax or Windows `cmd.exe` shell syntax.
 - `sdl.runtime.queryOutput`:
   - Use to search stored output artifacts on-demand after a `minimal`-mode execution.

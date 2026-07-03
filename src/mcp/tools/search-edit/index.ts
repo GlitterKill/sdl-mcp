@@ -236,7 +236,7 @@ async function handleApply(
     request.createBackup !== plan.defaultCreateBackup
   ) {
     throw new ValidationError(
-      `search.edit apply createBackup=${request.createBackup} does not match preview assumption createBackup=${plan.defaultCreateBackup}. Re-run preview with the desired value.`,
+      `search.edit apply createBackup=${request.createBackup} does not match preview assumption createBackup=${plan.defaultCreateBackup}. Re-run preview with createBackup=${request.createBackup}, then apply with the same value.`,
     );
   }
 

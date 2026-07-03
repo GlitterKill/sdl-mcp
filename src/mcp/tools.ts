@@ -1592,7 +1592,14 @@ export const SliceSpilloverGetRequestSchema = z
     sliceHandle: z.string().min(1).max(256).optional(),
     cursor: z.string().optional(),
     pageSize: z.number().int().min(1).max(PAGE_SIZE_MAX).optional(),
+    limit: z.number().int().min(1).max(PAGE_SIZE_MAX).optional(),
   })
+  .transform(({ limit, ...request }) => ({
+    ...request,
+    // `limit` is the public paging name used by retrieve-style callers;
+    // `pageSize` stays canonical for the existing handler and CLI paths.
+    pageSize: request.pageSize ?? limit,
+  }))
   .refine((d) => d.spilloverHandle != null || d.sliceHandle != null, {
     message: "Either spilloverHandle or sliceHandle is required",
   });

@@ -152,6 +152,7 @@ interface ToolDefinition {
   inputSchema: z.ZodType;
   handler: ToolHandler;
   wireSchema?: Record<string, unknown>;
+  outputSchema?: z.ZodType;
   presentation: ToolPresentation;
 }
 
@@ -439,6 +440,9 @@ export class MCPServer {
             inputSchema:
               tool.wireSchema ??
               convertSchema(tool.inputSchema, this._gatewayMode),
+            ...(tool.outputSchema
+              ? { outputSchema: convertSchema(tool.outputSchema, this._gatewayMode) }
+              : {}),
           })),
         };
       } catch (error) {
@@ -847,6 +851,7 @@ export class MCPServer {
     handler: ToolHandler,
     wireSchema?: Record<string, unknown>,
     presentation?: Partial<ToolPresentation>,
+    outputSchema?: z.ZodType,
   ): void {
     if (this.tools.has(name)) {
       logger.warn("Duplicate tool registration", { name });
@@ -858,6 +863,7 @@ export class MCPServer {
       inputSchema,
       handler,
       wireSchema,
+      outputSchema,
       presentation: buildToolPresentation(name, presentation),
     });
   }

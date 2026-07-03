@@ -25,7 +25,7 @@ Do not run `index.refresh` by habit. Refresh only when `repo.status` shows stale
 
 ## 2. Retrieval Ladder
 
-Use `sdl.context` for task-shaped understanding. Use `sdl.retrieve` for one-hop retrieval when the task already names a symbol, API, operation, or focused code target. If you need to decide which files or symbols to edit, build a slice through `sdl.retrieve` before requesting code.
+Use `sdl.context` for task-shaped understanding. Exact tool/action names are seeded from the action catalog, but use `sdl.retrieve` for one-hop retrieval when the task already names a symbol, API, operation, or focused code target. If you need to decide which files or symbols to edit, build a slice through `sdl.retrieve` before requesting code.
 
 Use `sdl.workflow` only when steps need fields from earlier results, transforms, runtime execution, batch operations, mutations, or result piping.
 

@@ -123,4 +123,15 @@ describe("SliceSpilloverGetRequestSchema hardening", () => {
     });
     assert.strictEqual(parsed.success, false);
   });
+
+  it("accepts limit as a pageSize alias", () => {
+    const parsed = SliceSpilloverGetRequestSchema.safeParse({
+      repoId: "repo",
+      spilloverHandle: "abc123",
+      limit: 5,
+    });
+    assert.strictEqual(parsed.success, true);
+    if (!parsed.success) return;
+    assert.strictEqual(parsed.data.pageSize, 5);
+  });
 });
