@@ -52,51 +52,6 @@ export interface SignatureOps {
   renameParam?: Array<{ from: string; to: string }>;
 }
 
-function splitCommaList(text: string): string[] {
-  const parts: string[] = [];
-  let start = 0;
-  let parenDepth = 0;
-  let bracketDepth = 0;
-  let braceDepth = 0;
-  let angleDepth = 0;
-  let quote: string | null = null;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const ch = text[index];
-    const prev = text[index - 1];
-    if (quote !== null) {
-      if (ch === quote && prev !== "\\") quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || ch === "`") {
-      quote = ch;
-      continue;
-    }
-    if (ch === "(") parenDepth += 1;
-    else if (ch === ")") parenDepth = Math.max(0, parenDepth - 1);
-    else if (ch === "[") bracketDepth += 1;
-    else if (ch === "]") bracketDepth = Math.max(0, bracketDepth - 1);
-    else if (ch === "{") braceDepth += 1;
-    else if (ch === "}") braceDepth = Math.max(0, braceDepth - 1);
-    else if (ch === "<") angleDepth += 1;
-    else if (ch === ">") angleDepth = Math.max(0, angleDepth - 1);
-    else if (
-      ch === "," &&
-      parenDepth === 0 &&
-      bracketDepth === 0 &&
-      braceDepth === 0 &&
-      angleDepth === 0
-    ) {
-      parts.push(text.slice(start, index).trim());
-      start = index + 1;
-    }
-  }
-
-  const tail = text.slice(start).trim();
-  if (tail.length > 0) parts.push(tail);
-  return parts;
-}
-
 const IDENTIFIER_NAME_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
 function formatAddedParam(add: NonNullable<SignatureOps["add"]>[number]): string {
@@ -259,137 +214,6 @@ function extractParams(fnNode: SyntaxNode): ParamListInfo {
   throw new ValidationError("signature target declaration not found");
 }
 
-function skipWhitespace(content: string, index: number): number {
-  let cursor = index;
-  while (cursor < content.length && /\s/.test(content[cursor] ?? "")) cursor += 1;
-  return cursor;
-}
-
-function findMatchingDelimiter(content: string, openIndex: number, openChar: string, closeChar: string): number {
-  let depth = 0;
-  let quote: string | null = null;
-  for (let index = openIndex; index < content.length; index += 1) {
-    const ch = content[index];
-    const next = content[index + 1];
-    const prev = content[index - 1];
-    if (quote !== null) {
-      if (ch === quote && prev !== "\\") quote = null;
-      continue;
-    }
-    if (ch === "/" && next === "/") {
-      const newline = content.indexOf("\n", index + 2);
-      if (newline === -1) return -1;
-      index = newline;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      const close = content.indexOf("*/", index + 2);
-      if (close === -1) return -1;
-      index = close + 1;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || ch === "`") {
-      quote = ch;
-      continue;
-    }
-    if (ch === openChar) depth += 1;
-    if (ch === closeChar) {
-      depth -= 1;
-      if (depth === 0) return index;
-    }
-  }
-  return -1;
-}
-
-function skipReturnType(content: string, index: number): number {
-  let cursor = skipWhitespace(content, index);
-  if (content[cursor] !== ":") return cursor;
-  cursor += 1;
-  let parenDepth = 0;
-  let bracketDepth = 0;
-  let braceDepth = 0;
-  let angleDepth = 0;
-  while (cursor < content.length) {
-    const ch = content[cursor];
-    if (ch === "(") parenDepth += 1;
-    else if (ch === ")") parenDepth = Math.max(0, parenDepth - 1);
-    else if (ch === "[") bracketDepth += 1;
-    else if (ch === "]") bracketDepth = Math.max(0, bracketDepth - 1);
-    else if (ch === "{") {
-      if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0 && angleDepth === 0) break;
-      braceDepth += 1;
-    } else if (ch === "}") braceDepth = Math.max(0, braceDepth - 1);
-    else if (ch === "<") angleDepth += 1;
-    else if (ch === ">") angleDepth = Math.max(0, angleDepth - 1);
-    else if ((ch === ";" || ch === "=" || ch === "\n") && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0 && angleDepth === 0) {
-      break;
-    }
-    cursor += 1;
-  }
-  return skipWhitespace(content, cursor);
-}
-
-interface SignatureDeclaration {
-  paramsStart: number;
-  paramsEnd: number;
-  bodyStart?: number;
-  bodyEnd?: number;
-  overload: boolean;
-}
-
-function declarationAfterParams(content: string, closeParen: number): SignatureDeclaration | null {
-  const cursor = skipReturnType(content, closeParen + 1);
-  if (content[cursor] === ";") {
-    return { paramsStart: 0, paramsEnd: 0, overload: true };
-  }
-  if (content[cursor] === "{") {
-    const closeBrace = findMatchingDelimiter(content, cursor, "{", "}");
-    if (closeBrace === -1) return null;
-    return { paramsStart: 0, paramsEnd: 0, bodyStart: cursor + 1, bodyEnd: closeBrace, overload: false };
-  }
-  if (content.slice(cursor, cursor + 2) === "=>") {
-    const bodyStart = skipWhitespace(content, cursor + 2);
-    if (content[bodyStart] === "{") {
-      const closeBrace = findMatchingDelimiter(content, bodyStart, "{", "}");
-      if (closeBrace === -1) return null;
-      return { paramsStart: 0, paramsEnd: 0, bodyStart: bodyStart + 1, bodyEnd: closeBrace, overload: false };
-    }
-    let bodyEnd = content.indexOf(";", bodyStart);
-    const newline = content.indexOf("\n", bodyStart);
-    if (bodyEnd === -1 || (newline !== -1 && newline < bodyEnd)) bodyEnd = newline;
-    if (bodyEnd === -1) bodyEnd = content.length;
-    return { paramsStart: 0, paramsEnd: 0, bodyStart, bodyEnd, overload: false };
-  }
-  return null;
-}
-
-function previousNonWhitespace(content: string, index: number): string | undefined {
-  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-    if (!/\s/.test(content[cursor] ?? "")) return content[cursor];
-  }
-  return undefined;
-}
-
-function declarationPrefixStart(content: string, nameStart: number): number {
-  const lineStart = content.lastIndexOf("\n", nameStart - 1) + 1;
-  const blockStart = content.lastIndexOf("{", nameStart - 1) + 1;
-  const semicolonStart = content.lastIndexOf(";", nameStart - 1) + 1;
-  return Math.max(lineStart, blockStart, semicolonStart, 0);
-}
-
-function hasSignatureDeclarationPrefix(content: string, nameStart: number): boolean {
-  const previous = previousNonWhitespace(content, nameStart);
-  if (previous === "." || previous === ")" || previous === "]") {
-    return false;
-  }
-  const prefix = content.slice(declarationPrefixStart(content, nameStart), nameStart).trimStart();
-  return (
-    /^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+$/.test(prefix) ||
-    /^(?:export\s+)?(?:const|let|var)\s+$/.test(prefix) ||
-    /^(?:(?:public|private|protected|static|async|override|readonly)\s+)*$/.test(prefix)
-  );
-}
-
 function isTypeScriptOrJavaScriptPath(relPath: string): boolean {
   return /[.][cm]?[jt]sx?$/.test(relPath);
 }
@@ -436,62 +260,87 @@ function callsiteOpsRequested(signature: SignatureOps): boolean {
   return (signature.add?.length ?? 0) > 0 || (signature.remove?.length ?? 0) > 0;
 }
 
-function buildSignatureCallsiteEdits(content: string, name: string, signature: SignatureOps, originalNames: string[]): { edits: SourceEdit[]; skipReason?: string } {
+/** True when `node` is a call/new whose callee resolves to `name`. */
+function calleeMatchesName(callee: SyntaxNode, name: string): boolean {
+  if (callee.type === "identifier") return callee.text === name;
+  if (callee.type === "member_expression") {
+    return callee.childForFieldName("property")?.text === name;
+  }
+  return false;
+}
+
+function buildSignatureCallsiteEdits(content: string, relPath: string, name: string, signature: SignatureOps, originalNames: string[]): { edits: SourceEdit[]; skipReason?: string } {
   if (!callsiteOpsRequested(signature)) return { edits: [] };
   if ((signature.add ?? []).some((add) => add.argText === undefined)) return { edits: [], skipReason: "needs-arg-value" };
-  if (new RegExp("\\b" + escapeRegExp(name) + "\\s*\\.\\s*(?:apply|call)\\s*\\(").test(content)) {
-    return { edits: [], skipReason: "manual-review" };
-  }
+  const tree = parseTreeForPath(relPath, content);
+  if (!tree) return { edits: [], skipReason: "manual-review" };
 
   const edits: SourceEdit[] = [];
-  const call = new RegExp("\\b" + escapeRegExp(name) + "\\s*\\(", "g");
   let sawManualReview = false;
   let sawArityMismatch = false;
   let sawCall = false;
-  let match: RegExpExecArray | null;
-  while ((match = call.exec(content)) !== null) {
-    const openParen = content.indexOf("(", match.index);
-    const closeParen = findMatchingDelimiter(content, openParen, "(", ")");
-    if (closeParen === -1) {
-      sawManualReview = true;
-      break;
-    }
-    const prefix = content.slice(Math.max(0, match.index - 24), match.index);
-    if (/function\s+$/.test(prefix)) {
-      call.lastIndex = closeParen + 1;
-      continue;
-    }
-    if (hasSignatureDeclarationPrefix(content, match.index) && declarationAfterParams(content, closeParen)) {
-      call.lastIndex = closeParen + 1;
-      continue;
-    }
 
-    sawCall = true;
-    const argsStart = openParen + 1;
-    const argsEnd = closeParen;
-    const args = splitCommaList(content.slice(argsStart, argsEnd));
-    if (args.some((arg) => arg.trim().startsWith("..."))) {
-      sawManualReview = true;
-      break;
-    }
-    for (const remove of signature.remove ?? []) {
-      const index = originalNames.indexOf(remove.name);
-      if (index >= 0) {
-        if (args.length <= index) {
-          sawArityMismatch = true;
-          break;
+  const visit = (node: SyntaxNode): void => {
+    if (sawManualReview || sawArityMismatch) return;
+    if (node.type === "call_expression" || node.type === "new_expression") {
+      const callee =
+        node.childForFieldName("function") ??
+        node.childForFieldName("constructor");
+      if (callee?.type === "member_expression") {
+        const property = callee.childForFieldName("property")?.text;
+        const objectText = callee.childForFieldName("object")?.text;
+        if (
+          (property === "apply" || property === "call") &&
+          objectText === name
+        ) {
+          // Indirect invocation shifts positional args — leave for review.
+          sawManualReview = true;
+          return;
         }
-        args.splice(index, 1);
+      }
+      const args = node.childForFieldName("arguments");
+      if (callee && args && calleeMatchesName(callee, name)) {
+        const argNodes = args.namedChildren.filter(
+          (child) => child.type !== "comment",
+        );
+        if (argNodes.some((child) => child.type === "spread_element")) {
+          sawManualReview = true;
+          return;
+        }
+        sawCall = true;
+        const argTexts = argNodes.map((child) => child.text);
+        for (const remove of signature.remove ?? []) {
+          const index = originalNames.indexOf(remove.name);
+          if (index >= 0) {
+            if (argTexts.length <= index) {
+              sawArityMismatch = true;
+              return;
+            }
+            argTexts.splice(index, 1);
+          }
+        }
+        for (const add of signature.add ?? []) {
+          const insertAt = Math.min(Math.max(add.index ?? argTexts.length, 0), argTexts.length);
+          argTexts.splice(insertAt, 0, add.argText as string);
+        }
+        edits.push({
+          operationId: "signature",
+          start: args.startIndex + 1,
+          end: args.endIndex - 1,
+          replacement: argTexts.join(", "),
+        });
+        // Do not descend into an edited call — nested edits would overlap
+        // the enclosing argument span (the joined arg texts carry them).
+        return;
       }
     }
-    if (sawArityMismatch) break;
-    for (const add of signature.add ?? []) {
-      const insertAt = Math.min(Math.max(add.index ?? args.length, 0), args.length);
-      args.splice(insertAt, 0, add.argText as string);
+    for (const child of node.namedChildren) {
+      visit(child);
+      if (sawManualReview || sawArityMismatch) return;
     }
-    edits.push({ operationId: "signature", start: argsStart, end: argsEnd, replacement: args.join(", ") });
-    call.lastIndex = closeParen + 1;
-  }
+  };
+  visit(tree.rootNode);
+
   if (sawManualReview) return { edits: [], skipReason: "manual-review" };
   if (sawArityMismatch) return { edits: [], skipReason: "arity-mismatch" };
   if (edits.length === 0 && !sawCall) return { edits: [], skipReason: "no-signature-match" };
@@ -589,7 +438,7 @@ export async function planSignatureSearchEditPreview(request: SearchEditSingleOp
       sourceEdits = result.edits;
       originalNames = result.originalNames;
     } else {
-      const result = buildSignatureCallsiteEdits(content, target.name, signature, originalNames);
+      const result = buildSignatureCallsiteEdits(content, rel, target.name, signature, originalNames);
       sourceEdits = result.edits;
       skipReason = result.skipReason;
     }
