@@ -766,6 +766,10 @@ export interface RepoStats {
   };
   avgSymbolsPerFile: number;
   avgEdgesPerSymbol: number;
+  countNotes?: {
+    symbolCount: string;
+    exportedSymbolCount: string;
+  };
 }
 
 /**

@@ -1,5 +1,6 @@
 # MCP Tools Reference
 
+
 <div align="right">
 <details>
 <summary><strong>Docs Navigation</strong></summary>
@@ -122,7 +123,7 @@ Get status for one repository including latest version, indexed files/symbols, t
 
 **Response includes:**
 
-- `repoId`, `rootPath`, `latestVersionId`, `filesIndexed`, `symbolsIndexed`, `lastIndexedAt`
+- `repoId`, `rootPath`, `latestVersionId`, `filesIndexed`, `symbolsIndexed`, `countNotes`, `lastIndexedAt`
 - `healthScore` (0-100), `healthComponents` (freshness, coverage, errorRate, edgeQuality, callResolution), `healthAvailable`
 - `watcherHealth` (nullable) — runtime telemetry: provider/configuredProvider/fallbackReason, enabled/running state, filesWatched, eventsReceived/Processed, errors, queueDepth, restartCount, stale timestamps, and Watchman warning/recrawl/fresh-instance diagnostics when Watchman is active or was attempted
 - `prefetchStats` — queue depth, hit/waste rates, latency reduction, last run
@@ -216,6 +217,10 @@ Report semantic enrichment source selection, skipped providers, last runs, and p
 | ----------- | ---------- | -------- | ---------------------------------------- |
 | `repoId`    | `string`   | Yes      | Repository identifier                    |
 | `languages` | `string[]` | No       | Restrict status to specific language IDs |
+| `detail`    | `"compact" \| "full"` | No | Defaults to `"compact"`; use `"full"` for untrimmed provider rows and run metadata |
+| `limit`     | `integer`  | No       | Max compact `lastRuns` entries (default: `5`) |
+
+Compact responses return selection counts and `languagesWithSelection`, plus short `lastRuns` summaries. Full responses retain provider rows, skipped-provider details, and raw run metadata.
 
 ---
 
@@ -238,7 +243,7 @@ Start with `level: "stats"` (cheapest). Escalate to `"directories"` or `"full"` 
 
 **Response includes:**
 
-- `stats` — fileCount, symbolCount, edgeCount, exportedSymbolCount, byKind, byEdgeType, avgSymbolsPerFile, avgEdgesPerSymbol
+- `stats` — fileCount, symbolCount, edgeCount, exportedSymbolCount, byKind, byEdgeType, avgSymbolsPerFile, avgEdgesPerSymbol, countNotes
 - `directories` — array of summaries with path, fileCount, symbolCount, compact unique exports, topByFanIn, topByChurn
 - `hotspots` (optional) — mostDepended, mostChanged, largestFiles, mostConnected
 - `clusters` (optional) — totalClusters, averageClusterSize, largestClusters
@@ -1100,6 +1105,8 @@ Write non-indexed files using targeted update modes. This action is also availab
 | `createIfMissing` | `boolean`                           | No       | Create the file when it does not exist                                   |
 
 Provide exactly one write mode: `content`, `replaceLines`, `replacePattern`, `jsonPath`, `insertAt`, or `append`.
+
+For search-edit previews, copy `applyArgs` from the preview when using `sdl.search.edit`. With `sdl.file`, apply using `{ "op": "searchEditApply", "planHandle": preview.planHandle, "createBackup": preview.defaultCreateBackup }` so the backup policy matches the reviewed plan.
 
 **Response includes:**
 

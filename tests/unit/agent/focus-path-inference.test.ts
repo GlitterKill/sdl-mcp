@@ -107,6 +107,21 @@ describe("inferFocusPathsFromTaskText", () => {
     );
   });
 
+  it("infers MCP contract paths for structured output prompts", () => {
+    const paths = inferFocusPathsFromTaskText(
+      "check MCP outputSchema structuredContent registerTool contract behavior",
+    );
+
+    assert.ok(
+      paths.includes("src/server.ts"),
+      `Expected server registration path in ${JSON.stringify(paths)}`,
+    );
+    assert.ok(
+      paths.includes("src/mcp/tools/index.ts"),
+      `Expected MCP tool index path in ${JSON.stringify(paths)}`,
+    );
+  });
+
   it("returns empty array for unrecognized queries", () => {
     const paths = inferFocusPathsFromTaskText("what is the meaning of life?");
     assert.deepStrictEqual(paths, []);

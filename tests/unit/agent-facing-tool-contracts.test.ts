@@ -185,8 +185,11 @@ describe("agent-facing SDL tool contracts", () => {
       ],
     }, 1);
 
+    assert.equal("selected" in compact.selections, false);
+    assert.equal(compact.selections.selectedCount, 1);
+    assert.deepEqual(compact.selections.languagesWithSelection, ["typescript"]);
     assert.equal("metadataJson" in compact.lastRuns[0], false);
-    assert.equal("skipped" in compact.selections[0], false);
+    assert.equal("documentsProcessed" in compact.lastRuns[0], false);
     assert.equal(compact.lastRuns.length, 1);
   });
 
@@ -219,6 +222,13 @@ describe("agent-facing SDL tool contracts", () => {
     const searchPreview: SearchEditPreviewResponse = {
       mode: "preview",
       planHandle: "se-hidden",
+      defaultCreateBackup: false,
+      applyArgs: {
+        mode: "apply",
+        repoId: "r",
+        planHandle: "se-hidden",
+        createBackup: false,
+      },
       filesMatched: 1,
       matchesFound: 1,
       filesEligible: 1,

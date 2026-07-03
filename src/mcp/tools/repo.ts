@@ -724,6 +724,11 @@ function compactPrefetchStatsForStatus(
           : undefined,
       filesIndexed,
       symbolsIndexed,
+      countNotes: {
+        filesIndexed: "Files counted by repo.status index state.",
+        symbolsIndexed:
+          "Real symbols counted by repo.status index state; repo.overview stats use the overview symbol query.",
+      },
       lastIndexedAt,
       ...(includeExpensiveStatus
         ? {

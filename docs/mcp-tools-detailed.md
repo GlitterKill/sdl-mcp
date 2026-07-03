@@ -150,8 +150,9 @@ Returns the current indexing state and health metrics for a registered repositor
 | `repoId`           | string         | Repository identifier                                                                                                                                                                                                                                                  |
 | `rootPath`         | string         | Absolute path to the repository root                                                                                                                                                                                                                                   |
 | `latestVersionId`  | string \| null | Most recent ledger version, or null if never indexed                                                                                                                                                                                                                   |
-| `filesIndexed`     | number         | Total files currently tracked                                                                                                                                                                                                                                          |
-| `symbolsIndexed`   | number         | Total symbols in the graph                                                                                                                                                                                                                                             |
+| `filesIndexed`     | number         | Files counted by the repo status index query                                                                                                                                                                                                                           |
+| `symbolsIndexed`   | number         | Real symbols counted by the repo status index query                                                                                                                                                                                                                    |
+| `countNotes`       | object         | Short notes clarifying the `filesIndexed` and `symbolsIndexed` count boundaries                                                                                                                                                                                        |
 | `lastIndexedAt`    | string \| null | ISO timestamp of the most recent indexing                                                                                                                                                                                                                              |
 | `healthScore`      | number (0-100) | Composite health score                                                                                                                                                                                                                                                 |
 | `healthComponents` | object         | Breakdown: `freshness`, `coverage`, `errorRate`, `edgeQuality`, `callResolution` (each 0-1)                                                                                                                                                                            |
@@ -188,7 +189,7 @@ Returns a token-efficient summary of the entire codebase structure, tunable from
 
 | Field          | Type   | Description                                                                                                                                                                                                                            |
 | :------------- | :----- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `stats`        | object | `fileCount`, `symbolCount`, `edgeCount`, `exportedSymbolCount`, `byKind` (function/class/interface/type/method/variable/module/constructor counts), `byEdgeType` (call/import/config counts), `avgSymbolsPerFile`, `avgEdgesPerSymbol` |
+| `stats`        | object | `fileCount`, `symbolCount`, `edgeCount`, `exportedSymbolCount`, `byKind` (function/class/interface/type/method/variable/module/constructor counts), `byEdgeType` (call/import/config counts), `avgSymbolsPerFile`, `avgEdgesPerSymbol`, `countNotes` |
 | `directories`  | array  | Per-directory: `path`, `fileCount`, `symbolCount`, `exportedCount`, `byKind`, compact unique `exports`, `topByFanIn`, `topByChurn`, `subdirectories`, `estimatedFullTokens`, `summaryTokens`                                           |
 | `hotspots`     | object | `mostDepended` (highest fan-in symbols), `mostChanged` (highest churn), `largestFiles`, `mostConnected` (files with most edges)                                                                                                        |
 | `clusters`     | object | `totalClusters`, `averageClusterSize`, `largestClusters` (list of `{clusterId, label, size}`)                                                                                                                                          |
@@ -300,7 +301,8 @@ Reports semantic enrichment configuration and last-run state for a repository.
 | `detail`    | `"compact"` \| `"full"` | No | Defaults to `"compact"`; use `"full"` for untrimmed provider run metadata |
 | `limit`     | number   | No       | Defaults to `5`; maximum compact `lastRuns` entries to return |
 
-**Response includes:** `enabled`, `autoRunOnIndexRefresh`, `installPolicy`, selected provider per language, skipped providers, and latest provider runs with precision scores. Compact responses omit raw `metadataJson`, collapse repeated skip details, and limit `lastRuns` to the requested `limit`.
+**Response includes:** `enabled`, `autoRunOnIndexRefresh`, `installPolicy`, compact selection counts (`total`, `selectedCount`, `skippedCount`, `languagesWithSelection`), and short latest-run summaries. Compact responses omit provider arrays, raw `metadataJson`, repeated skip details, and per-run bulk counters; use `detail: "full"` for the untrimmed provider rows and run metadata.
+
 
 ---
 
@@ -900,8 +902,7 @@ Write non-indexed files with targeted update modes instead of rewriting entire f
 
 Provide exactly one of `content`, `replaceLines`, `replacePattern`, `jsonPath`, `insertAt`, or `append`.
 
-For `searchEditPreview`/`searchEditApply`, set `createBackup` during preview and repeat the same value during apply. Apply rejects mismatched backup settings so agents do not silently write with a different backup policy than the reviewed plan.
-
+For `searchEditPreview`/`searchEditApply`, set `createBackup` during preview and repeat the same value during apply. Preview responses include `applyArgs` for `sdl.search.edit`; with `sdl.file`, apply using `{ "op": "searchEditApply", "planHandle": preview.planHandle, "createBackup": preview.defaultCreateBackup }`. Apply rejects mismatched backup settings so agents do not silently write with a different backup policy than the reviewed plan.
 
 **Response:**
 

@@ -24,20 +24,39 @@ export function compactSemanticEnrichmentStatusForAgent(
   result: SemanticEnrichmentStatusResult,
   limit = DEFAULT_SEMANTIC_STATUS_LIMIT,
 ): object {
-  const selected = result.selections.flatMap(({ languageId, selected }) =>
-    selected ? [{ languageId, ...selected }] : [],
+  const languagesWithSelection = result.selections
+    .filter((selection) => selection.selected !== undefined)
+    .map((selection) => selection.languageId);
+  const skippedCount = result.selections.reduce(
+    (count, selection) => count + selection.skipped.length,
+    0,
   );
 
   return {
-    ...result,
+    ok: result.ok,
+    repoId: result.repoId,
+    enabled: result.enabled,
+    autoRunOnIndexRefresh: result.autoRunOnIndexRefresh,
+    installPolicy: result.installPolicy,
     selections: {
       total: result.selections.length,
-      selectedCount: selected.length,
-      selected,
+      selectedCount: languagesWithSelection.length,
+      skippedCount,
+      languagesWithSelection,
     },
-    lastRuns: result.lastRuns
-      .slice(0, limit)
-      .map(({ metadataJson: _metadataJson, ...run }) => run),
+    lastRuns: result.lastRuns.slice(0, limit).map((run) => ({
+      runId: run.runId,
+      providerType: run.providerType,
+      providerId: run.providerId,
+      languages: run.languages,
+      status: run.status,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      symbolsMatched: run.symbolsMatched,
+      edgesCreated: run.edgesCreated,
+      diagnosticsCount: run.diagnosticsCount,
+      precisionScore: run.precisionScore,
+    })),
   };
 }
 

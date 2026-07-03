@@ -168,7 +168,7 @@ const ACTION_SEED_QUERY_LIMIT = 3;
 function toPascalCaseIdentifier(identifier: string): string {
   return identifier.length === 0
     ? identifier
-    : identifier[0]!.toUpperCase() + identifier.slice(1);
+    : identifier[0].toUpperCase() + identifier.slice(1);
 }
 
 export function buildActionSeedQueries(taskText: string): string[] {
@@ -281,6 +281,25 @@ const CONCEPT_DIRECTORY_MAP: Array<{ keywords: string[]; paths: string[] }> = [
   {
     keywords: ["identifier extraction", "stop word", "stop words", "stopwords"],
     paths: ["src/agent/identifier-extraction.ts"],
+  },
+  {
+    keywords: [
+      "mcp contract",
+      "tool contract",
+      "outputschema",
+      "output schema",
+      "structuredcontent",
+      "structured content",
+      "registertool",
+      "register tool",
+      "tools/list",
+      "calltoolrequestschema",
+    ],
+    paths: [
+      "src/server.ts",
+      "src/mcp/tools/index.ts",
+      "src/mcp/tools/tool-descriptors.ts",
+    ],
   },
   {
     keywords: ["projection", "broad response", "visible fields"],

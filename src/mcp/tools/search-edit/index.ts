@@ -178,6 +178,12 @@ async function handlePreview(
     mode: "preview",
     planHandle: stored.planHandle,
     defaultCreateBackup: stored.defaultCreateBackup,
+    applyArgs: {
+      mode: "apply",
+      repoId: request.repoId,
+      planHandle: stored.planHandle,
+      createBackup: stored.defaultCreateBackup,
+    },
     filesMatched: preview.summary.filesMatched,
     matchesFound: preview.summary.matchesFound,
     filesEligible: preview.summary.filesEligible,

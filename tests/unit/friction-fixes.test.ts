@@ -78,6 +78,17 @@ describe("symbolSearch exact match priority", () => {
     assert.equal(sorted[2].name, "handleValidate");
   });
 
+  it("prefers MCP tool handlers over formatters for tool-name queries", () => {
+    const results = [
+      { name: "fmtRuntimeExecute", file: "src/mcp/tool-call-formatter.ts" },
+      { name: "handleRuntimeExecute", file: "src/mcp/tools/runtime.ts" },
+      { name: "runtimeExecute", file: "src/cli/commands/tool-actions.ts" },
+    ];
+
+    const sorted = sortByExactMatch([...results], "runtimeExecute");
+    assert.equal(sorted[0].name, "handleRuntimeExecute");
+  });
+
   it("preserves order when all names are equally unrelated", () => {
     const results = [
       { name: "alpha" },

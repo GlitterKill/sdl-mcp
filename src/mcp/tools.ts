@@ -618,6 +618,12 @@ export const RepoStatusResponseSchema = z.object({
   latestVersionId: z.string().nullable(),
   filesIndexed: z.number().int(),
   symbolsIndexed: z.number().int(),
+  countNotes: z
+    .object({
+      filesIndexed: z.string(),
+      symbolsIndexed: z.string(),
+    })
+    .optional(),
   lastIndexedAt: z.string().nullable(),
   healthScore: z.number().int().min(0).max(100).nullable().optional(),
   healthComponents: z
@@ -1974,6 +1980,12 @@ const RepoStatsSchema = z.object({
   }),
   avgSymbolsPerFile: z.number().min(0),
   avgEdgesPerSymbol: z.number().min(0),
+  countNotes: z
+    .object({
+      symbolCount: z.string(),
+      exportedSymbolCount: z.string(),
+    })
+    .optional(),
 });
 
 const TokenMetricsSchema = z.object({
@@ -3683,6 +3695,12 @@ export interface SearchEditPreviewResponse {
   mode: "preview";
   planHandle: string;
   defaultCreateBackup: boolean;
+  applyArgs: {
+    mode: "apply";
+    repoId: string;
+    planHandle: string;
+    createBackup: boolean;
+  };
   filesMatched: number;
   matchesFound: number;
   filesEligible: number;

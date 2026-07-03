@@ -496,6 +496,11 @@ function buildRepoStats(
       symbols.length > 0
         ? Math.round((edgeCount / symbols.length) * 10) / 10
         : 0,
+    countNotes: {
+      symbolCount:
+        "Symbols counted by repo.overview stats; compare repo.status.symbolsIndexed for index status counts.",
+      exportedSymbolCount: "Symbols with exported=true within the overview symbol set.",
+    },
   };
 }
 

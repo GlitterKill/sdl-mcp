@@ -50,7 +50,22 @@ export function sortByExactMatch<T extends { name: string }>(
   query: string,
 ): T[] {
   const queryLower = query.toLowerCase();
+  const handlerAliasLower = query
+    ? `handle${query.charAt(0).toUpperCase()}${query.slice(1)}`.toLowerCase()
+    : "";
+  const mcpToolHandlerScore = (result: T) => {
+    if (!handlerAliasLower) return 0;
+    const file = (result as Record<string, unknown>).file as string | undefined;
+    return result.name.toLowerCase() === handlerAliasLower &&
+      file?.startsWith("src/mcp/tools/")
+      ? 1
+      : 0;
+  };
+
   return [...results].sort((a, b) => {
+    const aHandler = mcpToolHandlerScore(a);
+    const bHandler = mcpToolHandlerScore(b);
+    if (aHandler !== bHandler) return bHandler - aHandler;
     const aExact = a.name.toLowerCase() === queryLower ? 1 : 0;
     const bExact = b.name.toLowerCase() === queryLower ? 1 : 0;
     if (aExact !== bExact) return bExact - aExact;

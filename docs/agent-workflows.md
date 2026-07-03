@@ -157,6 +157,7 @@ Use this order unless task constraints force escalation:
 - **Context retrieval** _(Code Mode)_: use `sdl.context` for task-shaped explain/debug/review/implement context, `symbol.search`/`symbol.getCard` for exact symbols, and `slice.build` for graph/file frontiers. If Code Mode is disabled, follow the manual ladder (`repo.overview` -> `symbol.search` -> `symbol.getCard` -> `slice.build` -> code tools).
 - **Multi-step operations** _(Code Mode)_: `sdl.workflow` for runtime execution, data transforms, batch mutations, and retrieval ladders after the first SDL discovery surface. Do not wrap a single `sdl.context` call in workflow.
 - **Symbol-scoped edits** _(Code Mode)_: `sdl.file` with `op: "symbolEditPreview"` -> review `planHandle` -> `op: "symbolEditApply"`. Use `symbolEditApplyNow` only when you already hold the current `astFingerprint` and range from a fresh card.
+- **Search edits** _(Code Mode)_: `sdl.file` with `op: "searchEditPreview"` -> review `planHandle`, snippets, and `defaultCreateBackup` -> `op: "searchEditApply"` with the same backup value. On the flat `sdl.search.edit` surface, copy preview `applyArgs` directly.
 
 ### 3) Token controls by tool
 
