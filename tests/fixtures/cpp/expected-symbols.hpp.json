@@ -1,6 +1,6 @@
 [
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace:namespace",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:MyNamespace:namespace",
     "kind": "module",
     "name": "MyNamespace",
     "exported": true,
@@ -13,7 +13,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace:namespace",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:MyNamespace::InnerNamespace:namespace",
     "kind": "module",
     "name": "MyNamespace::InnerNamespace",
     "exported": true,
@@ -26,7 +26,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::BaseClass:class",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:MyNamespace::InnerNamespace::BaseClass:class",
     "kind": "class",
     "name": "MyNamespace::InnerNamespace::BaseClass",
     "exported": true,
@@ -42,7 +42,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::BaseClass:constructor",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:MyNamespace::InnerNamespace::BaseClass:constructor",
     "kind": "constructor",
     "name": "MyNamespace::InnerNamespace::BaseClass",
     "exported": true,
@@ -59,7 +59,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::BaseClass:constructor",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:MyNamespace::InnerNamespace::BaseClass:constructor",
     "kind": "constructor",
     "name": "MyNamespace::InnerNamespace::BaseClass",
     "exported": true,
@@ -76,7 +76,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::~BaseClass:destructor",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:MyNamespace::InnerNamespace::~BaseClass:destructor",
     "kind": "constructor",
     "name": "MyNamespace::InnerNamespace::~BaseClass",
     "exported": true,
@@ -93,7 +93,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::DerivedClass:class",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:MyNamespace::InnerNamespace::DerivedClass:class",
     "kind": "class",
     "name": "MyNamespace::InnerNamespace::DerivedClass",
     "exported": true,
@@ -109,7 +109,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::DerivedClass:constructor",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:MyNamespace::InnerNamespace::DerivedClass:constructor",
     "kind": "constructor",
     "name": "MyNamespace::InnerNamespace::DerivedClass",
     "exported": true,
@@ -126,7 +126,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::DerivedClass:constructor",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:MyNamespace::InnerNamespace::DerivedClass:constructor",
     "kind": "constructor",
     "name": "MyNamespace::InnerNamespace::DerivedClass",
     "exported": true,
@@ -143,7 +143,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::InnerNamespace::~DerivedClass:destructor",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:MyNamespace::InnerNamespace::~DerivedClass:destructor",
     "kind": "constructor",
     "name": "MyNamespace::InnerNamespace::~DerivedClass",
     "exported": true,
@@ -160,7 +160,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::TemplateClass:class",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:MyNamespace::TemplateClass:class",
     "kind": "class",
     "name": "MyNamespace::TemplateClass",
     "exported": true,
@@ -176,7 +176,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::TemplateClass:constructor",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:MyNamespace::TemplateClass:constructor",
     "kind": "constructor",
     "name": "MyNamespace::TemplateClass",
     "exported": true,
@@ -193,7 +193,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::~TemplateClass:destructor",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:MyNamespace::~TemplateClass:destructor",
     "kind": "constructor",
     "name": "MyNamespace::~TemplateClass",
     "exported": true,
@@ -210,7 +210,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:MyNamespace::Map:class",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:MyNamespace::Map:class",
     "kind": "class",
     "name": "MyNamespace::Map",
     "exported": true,
@@ -226,7 +226,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:Color:enum",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:Color:enum",
     "kind": "class",
     "name": "Color",
     "exported": true,
@@ -239,7 +239,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:StatusCode:enum",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:StatusCode:enum",
     "kind": "class",
     "name": "StatusCode",
     "exported": true,
@@ -252,7 +252,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:StringAlias:type",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:StringAlias:type",
     "kind": "type",
     "name": "StringAlias",
     "exported": true,
@@ -265,7 +265,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:Vector:type",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:Vector:type",
     "kind": "type",
     "name": "Vector",
     "exported": true,
@@ -278,7 +278,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:Point:class",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:Point:class",
     "kind": "class",
     "name": "Point",
     "exported": true,
@@ -294,11 +294,11 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:Point:constructor",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:Point:constructor",
     "kind": "constructor",
     "name": "Point",
-    "exported": false,
-    "visibility": "private",
+    "exported": true,
+    "visibility": "public",
     "range": {
       "startLine": 86,
       "startCol": 4,
@@ -311,11 +311,11 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:Point:constructor",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:Point:constructor",
     "kind": "constructor",
     "name": "Point",
-    "exported": false,
-    "visibility": "private",
+    "exported": true,
+    "visibility": "public",
     "range": {
       "startLine": 87,
       "startCol": 4,
@@ -328,7 +328,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:UtilityClass:class",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:UtilityClass:class",
     "kind": "class",
     "name": "UtilityClass",
     "exported": true,
@@ -344,7 +344,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:AnonymousNamespaceClass:class",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:AnonymousNamespaceClass:class",
     "kind": "class",
     "name": "AnonymousNamespaceClass",
     "exported": true,
@@ -360,7 +360,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:InlineNamespace:namespace",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:InlineNamespace:namespace",
     "kind": "module",
     "name": "InlineNamespace",
     "exported": true,
@@ -373,7 +373,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.hpp:InlineNamespace::InlineClass:class",
+    "nodeId": "tests/fixtures/cpp/symbols.hpp:InlineNamespace::InlineClass:class",
     "kind": "class",
     "name": "InlineNamespace::InlineClass",
     "exported": true,

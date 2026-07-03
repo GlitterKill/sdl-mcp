@@ -1,6 +1,30 @@
 [
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:validateUser:6",
+    "callerNodeId": "tests/fixtures/php/calls.php:createUser:4",
+    "calleeIdentifier": "$this->userRepository.create",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 15,
+      "startCol": 15,
+      "endLine": 15,
+      "endCol": 51
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/php/calls.php:updateUser:5",
+    "calleeIdentifier": "$this->userRepository.update",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 20,
+      "startCol": 15,
+      "endLine": 20,
+      "endCol": 56
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/php/calls.php:validateUser:6",
     "calleeIdentifier": "Validator::validate",
     "isResolved": false,
     "callType": "function",
@@ -12,7 +36,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:executeCallback:7",
+    "callerNodeId": "tests/fixtures/php/calls.php:executeCallback:7",
     "calleeIdentifier": "$callback",
     "isResolved": false,
     "callType": "dynamic",
@@ -24,7 +48,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:callDynamicMethod:8",
+    "callerNodeId": "tests/fixtures/php/calls.php:callDynamicMethod:8",
     "calleeIdentifier": "$obj.$method",
     "isResolved": false,
     "callType": "dynamic",
@@ -36,7 +60,43 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:getConfig:11",
+    "callerNodeId": "tests/fixtures/php/calls.php:getUserById:9",
+    "calleeIdentifier": "$this->userRepository.with",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 40,
+      "startCol": 15,
+      "endLine": 41,
+      "endCol": 27
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/php/calls.php:getUserById:9",
+    "calleeIdentifier": "$this->userRepository\n            ->with('roles').find",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 40,
+      "startCol": 15,
+      "endLine": 42,
+      "endCol": 23
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/php/calls.php:logAction:10",
+    "calleeIdentifier": "$this->logger.log",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 47,
+      "startCol": 8,
+      "endLine": 47,
+      "endCol": 35
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/php/calls.php:getConfig:11",
     "calleeIdentifier": "\\App\\Config::get",
     "isResolved": false,
     "callType": "function",
@@ -48,11 +108,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:processUser:12",
+    "callerNodeId": "tests/fixtures/php/calls.php:processUser:12",
     "calleeIdentifier": "$this.getUserById",
     "isResolved": true,
     "callType": "method",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:getUserById:9",
+    "calleeSymbolId": "tests/fixtures/php/calls.php:getUserById:9",
     "range": {
       "startLine": 57,
       "startCol": 16,
@@ -61,7 +121,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:processUser:12",
+    "callerNodeId": "tests/fixtures/php/calls.php:processUser:12",
     "calleeIdentifier": "$this.transformUser",
     "isResolved": false,
     "callType": "method",
@@ -73,7 +133,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:batchProcess:13",
+    "callerNodeId": "tests/fixtures/php/calls.php:batchProcess:13",
     "calleeIdentifier": "$user.$method",
     "isResolved": false,
     "callType": "dynamic",
@@ -85,7 +145,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:App\\Services\\sendEmail:14",
+    "callerNodeId": "tests/fixtures/php/calls.php:App\\Services\\sendEmail:14",
     "calleeIdentifier": "mail",
     "isResolved": false,
     "callType": "function",
@@ -97,7 +157,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:App\\Services\\logMessage:15",
+    "callerNodeId": "tests/fixtures/php/calls.php:App\\Services\\logMessage:15",
     "calleeIdentifier": "error_log",
     "isResolved": false,
     "callType": "function",
@@ -109,7 +169,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:App\\Services\\executeCommand:16",
+    "callerNodeId": "tests/fixtures/php/calls.php:App\\Services\\executeCommand:16",
     "calleeIdentifier": "$fn",
     "isResolved": false,
     "callType": "dynamic",
@@ -121,7 +181,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:index:24",
+    "callerNodeId": "tests/fixtures/php/calls.php:index:24",
     "calleeIdentifier": "Cache::get",
     "isResolved": false,
     "callType": "function",
@@ -133,7 +193,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:index:24",
+    "callerNodeId": "tests/fixtures/php/calls.php:index:24",
     "calleeIdentifier": "Database::connect",
     "isResolved": false,
     "callType": "function",
@@ -145,7 +205,19 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:index:24",
+    "callerNodeId": "tests/fixtures/php/calls.php:index:24",
+    "calleeIdentifier": "Database::connect().query",
+    "isResolved": false,
+    "callType": "method",
+    "range": {
+      "startLine": 108,
+      "startCol": 20,
+      "endLine": 108,
+      "endCol": 69
+    }
+  },
+  {
+    "callerNodeId": "tests/fixtures/php/calls.php:index:24",
     "calleeIdentifier": "Cache::set",
     "isResolved": false,
     "callType": "function",
@@ -157,11 +229,11 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:dispatch:26",
+    "callerNodeId": "tests/fixtures/php/calls.php:dispatch:26",
     "calleeIdentifier": "$this.getHandler",
     "isResolved": true,
     "callType": "method",
-    "calleeSymbolId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:getHandler:27",
+    "calleeSymbolId": "tests/fixtures/php/calls.php:getHandler:27",
     "range": {
       "startLine": 118,
       "startCol": 19,
@@ -170,7 +242,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:dispatch:26",
+    "callerNodeId": "tests/fixtures/php/calls.php:dispatch:26",
     "calleeIdentifier": "$handler",
     "isResolved": false,
     "callType": "dynamic",
@@ -182,7 +254,7 @@
     }
   },
   {
-    "callerNodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\calls.php:getHandler:27",
+    "callerNodeId": "tests/fixtures/php/calls.php:getHandler:27",
     "calleeIdentifier": "ucfirst",
     "isResolved": false,
     "callType": "function",

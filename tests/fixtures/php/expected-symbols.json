@@ -1,6 +1,6 @@
 [
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:App\\Models\\RepositoryInterface:0",
+    "nodeId": "tests/fixtures/php/symbols.php:App\\Models\\RepositoryInterface:0",
     "kind": "interface",
     "name": "App\\Models\\RepositoryInterface",
     "exported": true,
@@ -16,7 +16,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:find:1",
+    "nodeId": "tests/fixtures/php/symbols.php:find:1",
     "kind": "method",
     "name": "find",
     "exported": true,
@@ -27,13 +27,18 @@
       "endCol": 43
     },
     "signature": {
-      "params": [],
+      "params": [
+        {
+          "name": "id",
+          "type": "int"
+        }
+      ],
       "returns": "?object"
     },
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:findAll:2",
+    "nodeId": "tests/fixtures/php/symbols.php:findAll:2",
     "kind": "method",
     "name": "findAll",
     "exported": true,
@@ -50,7 +55,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:buildQuery:3",
+    "nodeId": "tests/fixtures/php/symbols.php:buildQuery:3",
     "kind": "method",
     "name": "buildQuery",
     "exported": true,
@@ -67,7 +72,7 @@
     "visibility": "protected"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:App\\Models\\Loggable:4",
+    "nodeId": "tests/fixtures/php/symbols.php:App\\Models\\Loggable:4",
     "kind": "class",
     "name": "App\\Models\\Loggable",
     "exported": true,
@@ -83,7 +88,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:log:5",
+    "nodeId": "tests/fixtures/php/symbols.php:log:5",
     "kind": "method",
     "name": "log",
     "exported": true,
@@ -94,13 +99,18 @@
       "endCol": 5
     },
     "signature": {
-      "params": [],
+      "params": [
+        {
+          "name": "message",
+          "type": "string"
+        }
+      ],
       "returns": "void"
     },
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:logError:6",
+    "nodeId": "tests/fixtures/php/symbols.php:logError:6",
     "kind": "method",
     "name": "logError",
     "exported": false,
@@ -111,13 +121,18 @@
       "endCol": 5
     },
     "signature": {
-      "params": [],
+      "params": [
+        {
+          "name": "error",
+          "type": "string"
+        }
+      ],
       "returns": "void"
     },
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:App\\Models\\User:7",
+    "nodeId": "tests/fixtures/php/symbols.php:App\\Models\\User:7",
     "kind": "class",
     "name": "App\\Models\\User",
     "exported": true,
@@ -133,7 +148,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:MAX_ATTEMPTS:8",
+    "nodeId": "tests/fixtures/php/symbols.php:MAX_ATTEMPTS:8",
     "kind": "variable",
     "name": "MAX_ATTEMPTS",
     "exported": true,
@@ -146,7 +161,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:SECRET_KEY:9",
+    "nodeId": "tests/fixtures/php/symbols.php:SECRET_KEY:9",
     "kind": "variable",
     "name": "SECRET_KEY",
     "exported": false,
@@ -159,7 +174,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:name:10",
+    "nodeId": "tests/fixtures/php/symbols.php:name:10",
     "kind": "variable",
     "name": "name",
     "exported": false,
@@ -172,7 +187,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:age:11",
+    "nodeId": "tests/fixtures/php/symbols.php:age:11",
     "kind": "variable",
     "name": "age",
     "exported": true,
@@ -185,7 +200,7 @@
     "visibility": "protected"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:roles:12",
+    "nodeId": "tests/fixtures/php/symbols.php:roles:12",
     "kind": "variable",
     "name": "roles",
     "exported": true,
@@ -198,7 +213,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:__construct:13",
+    "nodeId": "tests/fixtures/php/symbols.php:__construct:13",
     "kind": "method",
     "name": "__construct",
     "exported": true,
@@ -209,12 +224,21 @@
       "endCol": 5
     },
     "signature": {
-      "params": []
+      "params": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "age",
+          "type": "int"
+        }
+      ]
     },
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:getName:14",
+    "nodeId": "tests/fixtures/php/symbols.php:getName:14",
     "kind": "method",
     "name": "getName",
     "exported": true,
@@ -231,7 +255,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:setName:15",
+    "nodeId": "tests/fixtures/php/symbols.php:setName:15",
     "kind": "method",
     "name": "setName",
     "exported": true,
@@ -242,13 +266,18 @@
       "endCol": 5
     },
     "signature": {
-      "params": [],
+      "params": [
+        {
+          "name": "name",
+          "type": "string"
+        }
+      ],
       "returns": "void"
     },
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:getAge:16",
+    "nodeId": "tests/fixtures/php/symbols.php:getAge:16",
     "kind": "method",
     "name": "getAge",
     "exported": true,
@@ -265,7 +294,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:find:17",
+    "nodeId": "tests/fixtures/php/symbols.php:find:17",
     "kind": "method",
     "name": "find",
     "exported": true,
@@ -276,13 +305,18 @@
       "endCol": 5
     },
     "signature": {
-      "params": [],
+      "params": [
+        {
+          "name": "id",
+          "type": "int"
+        }
+      ],
       "returns": "?object"
     },
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:findAll:18",
+    "nodeId": "tests/fixtures/php/symbols.php:findAll:18",
     "kind": "method",
     "name": "findAll",
     "exported": true,
@@ -299,7 +333,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:buildQuery:19",
+    "nodeId": "tests/fixtures/php/symbols.php:buildQuery:19",
     "kind": "method",
     "name": "buildQuery",
     "exported": true,
@@ -316,7 +350,7 @@
     "visibility": "protected"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:validate:20",
+    "nodeId": "tests/fixtures/php/symbols.php:validate:20",
     "kind": "method",
     "name": "validate",
     "exported": false,
@@ -333,7 +367,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:App\\Models\\BaseController:21",
+    "nodeId": "tests/fixtures/php/symbols.php:App\\Models\\BaseController:21",
     "kind": "class",
     "name": "App\\Models\\BaseController",
     "exported": true,
@@ -349,7 +383,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:render:22",
+    "nodeId": "tests/fixtures/php/symbols.php:render:22",
     "kind": "method",
     "name": "render",
     "exported": true,
@@ -360,13 +394,22 @@
       "endCol": 5
     },
     "signature": {
-      "params": [],
+      "params": [
+        {
+          "name": "view",
+          "type": "string"
+        },
+        {
+          "name": "data",
+          "type": "array"
+        }
+      ],
       "returns": "void"
     },
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:redirect:23",
+    "nodeId": "tests/fixtures/php/symbols.php:redirect:23",
     "kind": "method",
     "name": "redirect",
     "exported": true,
@@ -377,13 +420,18 @@
       "endCol": 5
     },
     "signature": {
-      "params": [],
+      "params": [
+        {
+          "name": "url",
+          "type": "string"
+        }
+      ],
       "returns": "void"
     },
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:App\\Models\\createUser:24",
+    "nodeId": "tests/fixtures/php/symbols.php:App\\Models\\createUser:24",
     "kind": "function",
     "name": "App\\Models\\createUser",
     "exported": true,
@@ -394,13 +442,18 @@
       "endCol": 1
     },
     "signature": {
-      "params": [],
+      "params": [
+        {
+          "name": "name",
+          "type": "string"
+        }
+      ],
       "returns": "User"
     },
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:App\\Models\\sendEmail:25",
+    "nodeId": "tests/fixtures/php/symbols.php:App\\Models\\sendEmail:25",
     "kind": "function",
     "name": "App\\Models\\sendEmail",
     "exported": true,
@@ -411,13 +464,26 @@
       "endCol": 1
     },
     "signature": {
-      "params": [],
+      "params": [
+        {
+          "name": "to",
+          "type": "string"
+        },
+        {
+          "name": "subject",
+          "type": "string"
+        },
+        {
+          "name": "body",
+          "type": "string"
+        }
+      ],
       "returns": "bool"
     },
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:App\\Models\\_privateHelper:26",
+    "nodeId": "tests/fixtures/php/symbols.php:App\\Models\\_privateHelper:26",
     "kind": "function",
     "name": "App\\Models\\_privateHelper",
     "exported": false,
@@ -434,7 +500,7 @@
     "visibility": "private"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:App\\Models\\Service:27",
+    "nodeId": "tests/fixtures/php/symbols.php:App\\Models\\Service:27",
     "kind": "class",
     "name": "App\\Models\\Service",
     "exported": true,
@@ -450,7 +516,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:execute:28",
+    "nodeId": "tests/fixtures/php/symbols.php:execute:28",
     "kind": "method",
     "name": "execute",
     "exported": true,
@@ -467,7 +533,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:validate:29",
+    "nodeId": "tests/fixtures/php/symbols.php:validate:29",
     "kind": "method",
     "name": "validate",
     "exported": true,
@@ -484,7 +550,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:App\\Models\\CacheService:30",
+    "nodeId": "tests/fixtures/php/symbols.php:App\\Models\\CacheService:30",
     "kind": "class",
     "name": "App\\Models\\CacheService",
     "exported": true,
@@ -500,7 +566,7 @@
     "visibility": "public"
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\php\\symbols.php:execute:31",
+    "nodeId": "tests/fixtures/php/symbols.php:execute:31",
     "kind": "method",
     "name": "execute",
     "exported": true,

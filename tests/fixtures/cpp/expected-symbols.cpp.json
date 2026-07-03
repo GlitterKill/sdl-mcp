@@ -1,6 +1,6 @@
 [
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace:namespace",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace:namespace",
     "kind": "module",
     "name": "MyNamespace",
     "exported": true,
@@ -13,7 +13,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace:namespace",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::InnerNamespace:namespace",
     "kind": "module",
     "name": "MyNamespace::InnerNamespace",
     "exported": true,
@@ -26,7 +26,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::BaseClass::BaseClass:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::InnerNamespace::BaseClass::BaseClass:function",
     "kind": "function",
     "name": "MyNamespace::InnerNamespace::BaseClass::BaseClass",
     "exported": true,
@@ -42,7 +42,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::BaseClass::BaseClass:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::InnerNamespace::BaseClass::BaseClass:function",
     "kind": "function",
     "name": "MyNamespace::InnerNamespace::BaseClass::BaseClass",
     "exported": true,
@@ -58,7 +58,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::BaseClass::~BaseClass:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::InnerNamespace::BaseClass::~BaseClass:function",
     "kind": "function",
     "name": "MyNamespace::InnerNamespace::BaseClass::~BaseClass",
     "exported": true,
@@ -74,7 +74,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::BaseClass::publicMethod:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::InnerNamespace::BaseClass::publicMethod:function",
     "kind": "function",
     "name": "MyNamespace::InnerNamespace::BaseClass::publicMethod",
     "exported": true,
@@ -90,7 +90,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::BaseClass::virtualMethod:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::InnerNamespace::BaseClass::virtualMethod:function",
     "kind": "function",
     "name": "MyNamespace::InnerNamespace::BaseClass::virtualMethod",
     "exported": true,
@@ -106,7 +106,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::DerivedClass::DerivedClass:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::InnerNamespace::DerivedClass::DerivedClass:function",
     "kind": "function",
     "name": "MyNamespace::InnerNamespace::DerivedClass::DerivedClass",
     "exported": true,
@@ -122,7 +122,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::DerivedClass::DerivedClass:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::InnerNamespace::DerivedClass::DerivedClass:function",
     "kind": "function",
     "name": "MyNamespace::InnerNamespace::DerivedClass::DerivedClass",
     "exported": true,
@@ -138,7 +138,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::DerivedClass::~DerivedClass:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::InnerNamespace::DerivedClass::~DerivedClass:function",
     "kind": "function",
     "name": "MyNamespace::InnerNamespace::DerivedClass::~DerivedClass",
     "exported": true,
@@ -154,7 +154,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::DerivedClass::overrideMethod:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::InnerNamespace::DerivedClass::overrideMethod:function",
     "kind": "function",
     "name": "MyNamespace::InnerNamespace::DerivedClass::overrideMethod",
     "exported": true,
@@ -170,7 +170,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::InnerNamespace::DerivedClass::protectedMethod:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::InnerNamespace::DerivedClass::protectedMethod:function",
     "kind": "function",
     "name": "MyNamespace::InnerNamespace::DerivedClass::protectedMethod",
     "exported": true,
@@ -186,7 +186,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::TemplateClass<T>::TemplateClass:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::TemplateClass<T>::TemplateClass:function",
     "kind": "function",
     "name": "MyNamespace::TemplateClass<T>::TemplateClass",
     "exported": true,
@@ -202,7 +202,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::TemplateClass<T>::~TemplateClass:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::TemplateClass<T>::~TemplateClass:function",
     "kind": "function",
     "name": "MyNamespace::TemplateClass<T>::~TemplateClass",
     "exported": true,
@@ -218,7 +218,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::TemplateClass<T>::setItem:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::TemplateClass<T>::setItem:function",
     "kind": "function",
     "name": "MyNamespace::TemplateClass<T>::setItem",
     "exported": true,
@@ -234,7 +234,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::TemplateClass<T>::getItem:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::TemplateClass<T>::getItem:function",
     "kind": "function",
     "name": "MyNamespace::TemplateClass<T>::getItem",
     "exported": true,
@@ -250,7 +250,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::Map<Key, Value>::insert:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::Map<Key, Value>::insert:function",
     "kind": "function",
     "name": "MyNamespace::Map<Key, Value>::insert",
     "exported": true,
@@ -266,7 +266,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:MyNamespace::Map<Key, Value>::get:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:MyNamespace::Map<Key, Value>::get:function",
     "kind": "function",
     "name": "MyNamespace::Map<Key, Value>::get",
     "exported": true,
@@ -282,7 +282,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:Point::Point:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:Point::Point:function",
     "kind": "function",
     "name": "Point::Point",
     "exported": true,
@@ -298,7 +298,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:Point::Point:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:Point::Point:function",
     "kind": "function",
     "name": "Point::Point",
     "exported": true,
@@ -314,7 +314,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:UtilityClass::staticMethod:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:UtilityClass::staticMethod:function",
     "kind": "function",
     "name": "UtilityClass::staticMethod",
     "exported": true,
@@ -330,7 +330,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:AnonymousNamespaceClass::method:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:AnonymousNamespaceClass::method:function",
     "kind": "function",
     "name": "AnonymousNamespaceClass::method",
     "exported": true,
@@ -346,7 +346,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:InlineNamespace:namespace",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:InlineNamespace:namespace",
     "kind": "module",
     "name": "InlineNamespace",
     "exported": true,
@@ -359,7 +359,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:InlineNamespace::InlineClass::inlineMethod:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:InlineNamespace::InlineClass::inlineMethod:function",
     "kind": "function",
     "name": "InlineNamespace::InlineClass::inlineMethod",
     "exported": true,
@@ -375,7 +375,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:freeFunction:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:freeFunction:function",
     "kind": "function",
     "name": "freeFunction",
     "exported": true,
@@ -391,7 +391,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:templateFunction:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:templateFunction:function",
     "kind": "function",
     "name": "templateFunction",
     "exported": true,
@@ -407,7 +407,7 @@
     }
   },
   {
-    "nodeId": "F:\\Claude\\projects\\sdl-mcp\\sdl-mcp\\tests\\fixtures\\cpp\\symbols.cpp:main:function",
+    "nodeId": "tests/fixtures/cpp/symbols.cpp:main:function",
     "kind": "function",
     "name": "main",
     "exported": true,
