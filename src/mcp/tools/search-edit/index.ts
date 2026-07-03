@@ -148,6 +148,9 @@ function compactRetrievalEvidence(evidence: RetrievalEvidence): RetrievalEvidenc
 async function handlePreview(
   request: Extract<SearchEditRequest, { mode: "preview" }>,
   context: ToolContext | undefined,
+  explicitResponseMode:
+    | Extract<SearchEditRequest, { mode: "preview" }>["responseMode"]
+    | undefined,
 ): Promise<SearchEditResponse> {
   const preview = await planSearchEditPreview({
     repoId: request.repoId,
@@ -207,7 +210,7 @@ async function handlePreview(
     repoId: request.repoId,
     toolName: "sdl.search.edit",
     payload: enriched,
-    responseMode: request.responseMode,
+    responseMode: explicitResponseMode ?? "auto",
     rawContext: { rawTokens: Math.ceil(rawBytes / 4) },
     sessionId: context?.sessionId,
   });
@@ -288,7 +291,11 @@ export async function handleSearchEdit(
 ): Promise<SearchEditResponse> {
   const request = SearchEditRequestSchema.parse(args);
   if (request.mode === "preview") {
-    return handlePreview(request, context);
+    const explicitResponseMode =
+      typeof args === "object" && args !== null && "responseMode" in args
+        ? request.responseMode
+        : undefined;
+    return handlePreview(request, context, explicitResponseMode);
   }
   return handleApply(request);
 }

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Symbolic refactor ops**: Added graph-scoped `search.edit` `targeting:"rename"` and TypeScript/JavaScript `targeting:"signature"` previews that reuse the two-phase plan/apply pipeline.
+
+### Changed
+
+- **Response artifacts**: `search.edit` preview responses now default to `responseMode:"auto"`; pass `responseMode:"inline"` to force full inline previews.
+
 ## [0.12.0] - 2026-07-01
 
 ### Added

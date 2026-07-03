@@ -423,3 +423,7 @@ Before the final response:
 - Writing indexed source through native edits instead of `symbol.edit`, symbol edit preview/apply, or AST-aware `searchEditPreview`.
 - Keeping `.bak` files without reporting them.
 - Calling `usageStats` by habit when no user-facing savings report or telemetry debugging is needed.
+
+## Symbolic Refactor Ops
+
+Prefer `search.edit` `targeting:"rename"` for graph-scoped symbol renames and `targeting:"signature"` for TypeScript/JavaScript signature edits with callsite propagation.

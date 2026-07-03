@@ -457,6 +457,28 @@ const SearchEditGatewayQuery = z.object({
     .optional(),
   symbolRef: SymbolRefFields.optional(),
   symbolIds: z.array(z.string().min(1)).max(200).optional(),
+  rename: z
+    .object({
+      newName: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
+      minConfidence: z.number().min(0).max(1).optional(),
+      includeTextOnlyMatches: z.boolean().optional(),
+    })
+    .optional(),
+  signature: z
+    .object({
+      add: z
+        .array(z.object({
+          name: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
+          typeText: z.string().max(500).optional(),
+          defaultText: z.string().max(500).optional(),
+          index: z.number().int().min(0).optional(),
+          argText: z.string().max(5000).optional(),
+        }))
+        .optional(),
+      remove: z.array(z.object({ name: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/) })).optional(),
+      renameParam: z.array(z.object({ from: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/), to: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/) })).optional(),
+    })
+    .optional(),
   replaceLines: z
     .object({
       start: z.number().int().min(0),
@@ -515,7 +537,7 @@ const SearchEditAction = z
     action: z.literal("search.edit"),
     mode: z.enum(["preview", "apply"]),
     targeting: z
-      .enum(["text", "symbol", "identifier", "structural"])
+      .enum(["text", "symbol", "identifier", "structural", "rename", "signature"])
       .optional(),
     query: SearchEditGatewayQuery.optional(),
     editMode: SearchEditGatewayEditMode.optional(),

@@ -2064,3 +2064,62 @@ export async function getCallEdgeResolutionCounts(
     resolvableCallEdges: resolvable ? toNumber(resolvable.count) : 0,
   };
 }
+
+export interface ReferencingSymbol {
+  symbolId: string;
+  name: string;
+  kind: string;
+  relPath: string;
+  rangeStartLine: number;
+  rangeEndLine: number;
+  confidence: number;
+  resolution: string;
+  edgeType: string;
+}
+
+export async function getReferencingSymbolsForTarget(
+  conn: Connection,
+  repoId: string,
+  targetSymbolId: string,
+  minConfidence: number,
+): Promise<ReferencingSymbol[]> {
+  const rows = await queryAll<{
+    symbolId: string;
+    name: string;
+    kind: string;
+    relPath: string;
+    rangeStartLine: unknown;
+    rangeEndLine: unknown;
+    confidence: unknown;
+    resolution: string;
+    edgeType: string;
+  }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(src:Symbol)-[edge:DEPENDS_ON]->(:Symbol {symbolId: $targetSymbolId})
+     MATCH (src)-[:SYMBOL_IN_FILE]->(file:File)
+     WHERE edge.confidence >= $minConfidence
+     RETURN src.symbolId AS symbolId,
+            src.name AS name,
+            src.kind AS kind,
+            file.relPath AS relPath,
+            src.rangeStartLine AS rangeStartLine,
+            src.rangeEndLine AS rangeEndLine,
+            edge.confidence AS confidence,
+            edge.resolution AS resolution,
+            edge.edgeType AS edgeType
+     ORDER BY edge.confidence DESC, src.symbolId ASC`,
+    { repoId, targetSymbolId, minConfidence },
+  );
+
+  return rows.map((row) => ({
+    symbolId: row.symbolId,
+    name: row.name,
+    kind: row.kind,
+    relPath: row.relPath,
+    rangeStartLine: toNumber(row.rangeStartLine),
+    rangeEndLine: toNumber(row.rangeEndLine),
+    confidence: toNumber(row.confidence),
+    resolution: row.resolution,
+    edgeType: row.edgeType,
+  }));
+}

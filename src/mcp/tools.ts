@@ -3555,6 +3555,28 @@ export const SearchEditQuerySchema = z.object({
     })
     .optional(),
   symbolIds: z.array(z.string().min(1)).max(200).optional(),
+  rename: z
+    .object({
+      newName: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
+      minConfidence: z.number().min(0).max(1).optional(),
+      includeTextOnlyMatches: z.boolean().optional(),
+    })
+    .optional(),
+  signature: z
+    .object({
+      add: z
+        .array(z.object({
+          name: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/),
+          typeText: z.string().max(500).optional(),
+          defaultText: z.string().max(500).optional(),
+          index: z.number().int().min(0).optional(),
+          argText: z.string().max(5000).optional(),
+        }))
+        .optional(),
+      remove: z.array(z.object({ name: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/) })).optional(),
+      renameParam: z.array(z.object({ from: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/), to: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/) })).optional(),
+    })
+    .optional(),
   replaceLines: z
     .object({
       start: z.number().int().min(0),
@@ -3611,7 +3633,7 @@ const SearchEditPreviewRequestSchema = z
     mode: z.literal("preview"),
     repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
     targeting: z
-      .enum(["text", "symbol", "identifier", "structural"])
+      .enum(["text", "symbol", "identifier", "structural", "rename", "signature"])
       .optional(),
     query: SearchEditQuerySchema.optional(),
     filters: SearchEditFiltersSchema.optional(),
@@ -3668,6 +3690,37 @@ const SearchEditPreviewRequestSchema = z
           path: [field],
           message: "Required when operations[] is not provided.",
         });
+      }
+    }
+    if (value.targeting === "rename") {
+      if (value.editMode !== undefined && value.editMode !== "replacePattern") {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["editMode"], message: "rename targeting supports only editMode=replacePattern." });
+      }
+      if (value.query?.rename === undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["query", "rename"], message: "rename targeting requires query.rename." });
+      }
+      const symbolIdCount = value.query?.symbolIds?.length ?? 0;
+      const hasOneSymbolId = symbolIdCount === 1;
+      const hasSymbolRef = value.query?.symbolRef !== undefined;
+      if (hasOneSymbolId === hasSymbolRef) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["query"], message: "rename targeting requires exactly one of query.symbolIds[0] or query.symbolRef." });
+      }
+    }
+    if (value.targeting === "signature") {
+      if (value.editMode !== undefined && value.editMode !== "replacePattern") {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["editMode"], message: "signature targeting supports only editMode=replacePattern." });
+      }
+      const sig = value.query?.signature;
+      if (sig === undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["query", "signature"], message: "signature targeting requires query.signature." });
+      } else if (!sig.add?.length && !sig.remove?.length && !sig.renameParam?.length) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["query", "signature"], message: "signature targeting requires at least one operation." });
+      }
+      const symbolIdCount = value.query?.symbolIds?.length ?? 0;
+      const hasOneSymbolId = symbolIdCount === 1;
+      const hasSymbolRef = value.query?.symbolRef !== undefined;
+      if (hasOneSymbolId === hasSymbolRef) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["query"], message: "signature targeting requires exactly one of query.symbolIds[0] or query.symbolRef." });
       }
     }
   });
