@@ -10,10 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Symbolic refactor ops**: Added graph-scoped `search.edit` `targeting:"rename"` and TypeScript/JavaScript `targeting:"signature"` previews that reuse the two-phase plan/apply pipeline.
+- **Tree-sitter signature engine**: `targeting:"signature"` declaration and callsite transforms now walk the tree-sitter AST instead of a string scanner — call-shaped text inside string literals, comments, and template literals is no longer edited, and calls nested in template interpolations are.
 
 ### Changed
 
-- **Response artifacts**: `search.edit` preview responses now default to `responseMode:"auto"`; pass `responseMode:"inline"` to force full inline previews.
+- **Response artifacts**: `search.edit` preview responses now default to `responseMode:"auto"`; pass `responseMode:"inline"` to force full inline previews. The default applies on every dispatch path (direct tool, gateway router, and `sdl.workflow`), not just raw handler calls.
 
 ## [0.12.0] - 2026-07-01
 

@@ -385,7 +385,7 @@ export function buildFlatToolDescriptors(
     {
       name: "sdl.search.edit",
       description:
-        'Cross-file search-and-edit in two phases: mode:"preview" returns a planHandle summarizing proposed edits; mode:"apply" executes the plan with sha256/mtime preconditions and rollback on mid-batch failure. Supports text, symbol, identifier, and structural tree-sitter targeting for safer edits across supported structural languages. Prefer this over composing repeated file.write calls.',
+        'Cross-file search-and-edit in two phases: mode:"preview" returns a planHandle summarizing proposed edits; mode:"apply" executes the plan with sha256/mtime preconditions and rollback on mid-batch failure. Supports text, symbol, identifier, and structural tree-sitter targeting for safer edits across supported structural languages. Also supports targeting:"rename" (graph-scoped symbol rename) and targeting:"signature" (TS/JS signature change with AST-based callsite propagation). Preview responses default to responseMode:"auto". Prefer this over composing repeated file.write calls.',
       schema: SearchEditRequestSchema,
       handler: handleSearchEdit,
     },
