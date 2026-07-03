@@ -7,6 +7,7 @@ interface RegisteredToolCall {
   name: string;
   description?: string;
   wireSchema?: Record<string, unknown>;
+  outputSchema?: unknown;
   presentation?: { title?: string };
 }
 
@@ -22,9 +23,10 @@ function makeFakeServer(): { names: string[]; tools: RegisteredToolCall[]; serve
       _handler?: unknown,
       wireSchema?: Record<string, unknown>,
       presentation?: { title?: string },
+      outputSchema?: unknown,
     ): void {
       names.push(name);
-      tools.push({ name, description, wireSchema, presentation });
+      tools.push({ name, description, wireSchema, outputSchema, presentation });
     },
     registerPostDispatchHook(): void {},
   };
@@ -77,6 +79,16 @@ describe("MCP tool registration", () => {
     assert.match(repoStatus.description ?? "", /repository/i);
     assert.ok(getVersion().length > 0, "package version should resolve");
   });
+
+  it("registers stable tools with output schemas", () => {
+    const { tools, server } = makeFakeServer();
+
+    registerTools(server as any);
+
+    const repoStatus = tools.find((tool) => tool.name === "sdl.repo.status");
+    assert.ok(repoStatus?.outputSchema, "expected repo.status output schema");
+  });
+
 
   it("registers live buffer tools alongside existing slice tools", () => {
     const { names, server } = makeFakeServer();

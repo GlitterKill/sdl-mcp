@@ -292,4 +292,24 @@ describe("planTypeScriptSymbolEdit", () => {
       /Cannot locate body range/,
     );
   });
+
+  it("gives a concrete next action when a selected symbol range cannot resolve", () => {
+    assert.throws(
+      () =>
+        planTypeScriptSymbolEdit({
+          content: "export interface ToolResponseEnvelope {\n  ok: boolean;\n}\n",
+          filePath: "src/server.ts",
+          symbol: {
+            symbolId: "sym-envelope",
+            name: "ToolResponseEnvelope",
+            kind: "interface",
+            language: "typescript",
+            range: { startLine: 1, startCol: 1, endLine: 3, endCol: 1 },
+            astFingerprint: "fp-interface",
+          },
+          operation: { kind: "insertAfter", content: "export interface Added {}\n" },
+        }),
+      /Cannot locate AST node.*interface.*source window/i,
+    );
+  });
 });

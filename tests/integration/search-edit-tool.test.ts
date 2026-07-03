@@ -105,10 +105,42 @@ describe("sdl.search.edit", { concurrency: false }, () => {
     assert.deepEqual(files, ["a.txt", "b.txt"]);
   });
 
+  it("apply backup mismatch suggests preview createBackup", async () => {
+    const preview = (await handleSearchEdit(
+      SearchEditRequestSchema.parse({
+        mode: "preview",
+        repoId: REPO_ID,
+        targeting: "text",
+        query: {
+          literal: "oldName",
+          replacement: "newName",
+        },
+        editMode: "replacePattern",
+        filters: { extensions: [".txt"] },
+      }),
+    )) as SearchEditPreviewResponse;
+
+    await assert.rejects(
+      () =>
+        handleSearchEdit(
+          SearchEditRequestSchema.parse({
+            mode: "apply",
+            repoId: REPO_ID,
+            planHandle: preview.planHandle,
+            createBackup: false,
+          }),
+        ),
+      /Re-run preview with createBackup=false/,
+    );
+  });
+
+
   it("identifier targeting edits AST identifiers without touching strings or comments", async () => {
     await writeFile(
       join(repoRoot, "ident.ts"),
       [
+
+
         "const oldName = 1;",
         'const text = "oldName";',
         "// oldName stays here",

@@ -1,6 +1,7 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 import {
+  buildActionSeedQueries,
   buildContextFtsQuery,
   inferFocusPathsFromTaskText,
 } from "../../../dist/agent/context-seeding.js";
@@ -146,5 +147,27 @@ describe("buildContextFtsQuery", () => {
   it("bounds fallback FTS text when no terms survive extraction", () => {
     const query = buildContextFtsQuery("a ".repeat(500));
     assert.ok(query.length <= 200);
+  });
+});
+
+
+describe("buildActionSeedQueries", () => {
+  it("prioritizes exact tool handler and schema names", () => {
+    const queries = buildActionSeedQueries(
+      "debug runtime.execute and runtime.queryOutput behavior",
+    );
+    const joined = queries.join(" ");
+
+    assert.ok(queries.length > 0);
+    assert.ok(joined.includes("handleRuntimeExecute"));
+    assert.ok(joined.includes("RuntimeExecuteRequestSchema"));
+    assert.ok(joined.includes("handleRuntimeQueryOutput"));
+  });
+
+  it("does not seed unrelated prompts", () => {
+    assert.deepStrictEqual(
+      buildActionSeedQueries("what is the meaning of life?"),
+      [],
+    );
   });
 });

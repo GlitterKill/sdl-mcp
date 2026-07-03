@@ -900,6 +900,9 @@ Write non-indexed files with targeted update modes instead of rewriting entire f
 
 Provide exactly one of `content`, `replaceLines`, `replacePattern`, `jsonPath`, `insertAt`, or `append`.
 
+For `searchEditPreview`/`searchEditApply`, set `createBackup` during preview and repeat the same value during apply. Apply rejects mismatched backup settings so agents do not silently write with a different backup policy than the reviewed plan.
+
+
 **Response:**
 
 | Field              | Type   | Description                                                                                         |
@@ -1133,6 +1136,9 @@ Runs code in a sandboxed, policy-gated subprocess scoped to a registered reposit
 12. **Quoting diagnostics** — Risky command patterns such as multiline `node -e`, PowerShell here-strings, base64 decode/eval workarounds, and write scripts without stdin can return `quotingWarnings`.
 13. **Runtime hints** — Predictable failures can return compact `runtimeHints`, such as using ESM imports instead of `require()` or avoiding Bash syntax under Windows `cmd.exe`.
 14. **Audit trail** — Every execution is logged with the policy audit hash, duration, exit code, and byte counts.
+
+Node `code` snippets run as ESM. Use `import fs from "node:fs"` or `createRequire()` instead of bare `require()` in cleanup and edit scripts.
+
 
 **Parameters:**
 

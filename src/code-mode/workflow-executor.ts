@@ -74,6 +74,21 @@ function getDefaultStepResponseTokens(
   );
 }
 
+function getWorkflowAwareStepResponseTokens(
+  request: ParsedWorkflowRequest,
+  budget: WorkflowBudgetTracker,
+  stepIndex: number,
+  step: { maxResponseTokens?: number },
+): number | undefined {
+  const configured = step.maxResponseTokens ?? getDefaultStepResponseTokens(request);
+  const tokensRemaining = budget.state().tokensRemaining;
+  if (tokensRemaining == null) return configured;
+
+  const stepsRemaining = Math.max(1, request.steps.length - stepIndex);
+  const fairShare = Math.max(1, Math.floor(tokensRemaining / stepsRemaining));
+  return configured == null ? fairShare : Math.min(configured, fairShare);
+}
+
 function getGatewayFailureMessage(action: string, result: unknown): string | null {
   if (result == null || typeof result !== "object") return null;
   const record = result as Record<string, unknown>;
@@ -550,7 +565,11 @@ export async function executeWorkflow(
           durationMs: stepDuration,
           status: "ok",
         };
-        applyStepTruncation(stepResult, step, getDefaultStepResponseTokens(request));
+        applyStepTruncation(
+          stepResult,
+          step,
+          getWorkflowAwareStepResponseTokens(request, budget, i, step),
+        );
         budget.record(stepResult.tokens, stepDuration);
         attachStepMetadataToPriorResult(priorResults, i, result, stepResult);
         stepResults.push(stepResult);
@@ -719,7 +738,11 @@ export async function executeWorkflow(
               }
             : {}),
         };
-        applyStepTruncation(stepResult, step, getDefaultStepResponseTokens(request));
+        applyStepTruncation(
+          stepResult,
+          step,
+          getWorkflowAwareStepResponseTokens(request, budget, i, step),
+        );
         budget.record(stepResult.tokens, stepDuration);
         tokenAccumulator.recordUsage(step.fn, stepResult.tokens, rawEquivalent);
         attachStepMetadataToPriorResult(priorResults, i, result, stepResult);

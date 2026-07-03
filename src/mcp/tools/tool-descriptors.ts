@@ -16,6 +16,7 @@ import type { ToolPresentation } from "../tool-presentation.js";
 import {
   RepoRegisterRequestSchema,
   RepoStatusRequestSchema,
+  RepoStatusResponseSchema,
   IndexRefreshRequestSchema,
   RepoOverviewRequestSchema,
   BufferPushRequestSchema,
@@ -37,7 +38,9 @@ import {
   AgentFeedbackRequestSchema,
   AgentFeedbackQueryRequestSchema,
   RuntimeExecuteRequestSchema,
+  RuntimeExecuteResponseSchema,
   RuntimeQueryOutputRequestSchema,
+  RuntimeQueryOutputResponseSchema,
   ResponseGetRequestSchema,
   MemoryStoreRequestSchema,
   MemoryQueryRequestSchema,
@@ -124,6 +127,7 @@ export interface ToolDescriptor {
   schema: z.ZodType;
   handler: ToolHandler;
   wireSchema?: Record<string, unknown>;
+  outputSchema?: z.ZodType;
   presentation?: Partial<ToolPresentation>;
 }
 
@@ -151,6 +155,7 @@ export function buildFlatToolDescriptors(
       name: "sdl.repo.status",
       description: "Get status information about a repository",
       schema: RepoStatusRequestSchema,
+      outputSchema: RepoStatusResponseSchema,
       handler: handleRepoStatus,
     },
     {
@@ -296,6 +301,7 @@ export function buildFlatToolDescriptors(
         "Execute a command in a repo-scoped subprocess with structured output, " +
         "artifact persistence, and deterministic excerpts. Enabled by default; set runtime.enabled = false to disable.",
       schema: RuntimeExecuteRequestSchema,
+      outputSchema: RuntimeExecuteResponseSchema,
       handler: handleRuntimeExecute,
     },
     {
@@ -303,6 +309,7 @@ export function buildFlatToolDescriptors(
       description:
         "Query stored command output by keywords and retrieve specific sections of previous runtime execution results",
       schema: RuntimeQueryOutputRequestSchema,
+      outputSchema: RuntimeQueryOutputResponseSchema,
       handler: handleRuntimeQueryOutput,
     },
     {
@@ -411,6 +418,7 @@ export function registerFlatTools(
       d.handler,
       d.wireSchema,
       d.presentation,
+      d.outputSchema,
     );
   }
 }

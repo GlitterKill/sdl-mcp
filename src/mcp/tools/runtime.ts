@@ -240,12 +240,15 @@ function mergeRuntimeHints(
   return merged.size > 0 ? Array.from(merged) : undefined;
 }
 
-function detectRuntimeHints(
+export function detectRuntimeHints(
   request: RuntimeExecuteRequest,
   outputText = "",
 ): string[] | undefined {
   const hints = new Set<string>();
   const code = request.code ?? "";
+  const commandText = [request.executable, ...request.args, code]
+    .filter((part): part is string => typeof part === "string" && part.length > 0)
+    .join("\n");
 
   if (
     request.runtime === "node" &&
@@ -265,6 +268,16 @@ function detectRuntimeHints(
   ) {
     hints.add(
       "Windows shell runtime uses cmd.exe; use cmd syntax or a portable node/python script.",
+    );
+  }
+
+  if (
+    request.runtime === "powershell" &&
+    /(^|[\s\\/])npm(?:\.ps1)?(?:$|[\s\\/])/i.test(commandText) &&
+    /npm\.ps1|\$LASTEXITCODE/i.test(outputText)
+  ) {
+    hints.add(
+      "PowerShell npm.ps1 shim failed; use npm.cmd for npm scripts on Windows.",
     );
   }
 

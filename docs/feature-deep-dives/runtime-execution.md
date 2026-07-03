@@ -263,6 +263,7 @@ When SDL-MCP is configured for agent enforcement:
 - prefer `runtimeExecute` in `sdl.workflow` over native shell tools
 - prefer the two-phase pattern: `outputMode: "minimal"` then `sdl.runtime.queryOutput` on demand
 - use `stdin` instead of PowerShell here-strings, multiline `node -e`, base64 decode/eval, or filesystem write scripts for multiline input
+- on Windows PowerShell, prefer `npm.cmd` for npm scripts when the `npm.ps1` shim emits `$LASTEXITCODE` noise
 - prefer structured query terms over dumping large output back to the model
 - use `shell` only when a shell is necessary, not as the default runtime
 

@@ -26,6 +26,7 @@ import {
 import { searchSymbols } from "../db/ladybug-queries.js";
 import { searchSymbolsHybridWithOverlay } from "../live-index/overlay-reader.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
+import { buildCatalog, rankCatalog } from "../code-mode/action-catalog.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import { logger } from "../util/logger.js";
 
@@ -160,6 +161,49 @@ export function buildContextFtsQuery(taskText: string): string {
   ].slice(0, 12);
   if (terms.length > 0) return terms.join(" ");
   return taskText.slice(0, 200);
+}
+
+const ACTION_SEED_QUERY_LIMIT = 3;
+
+function toPascalCaseIdentifier(identifier: string): string {
+  return identifier.length === 0
+    ? identifier
+    : identifier[0]!.toUpperCase() + identifier.slice(1);
+}
+
+export function buildActionSeedQueries(taskText: string): string[] {
+  const normalizedTaskText = taskText.toLowerCase();
+  const mentionedActions = buildCatalog().filter(
+    (action) =>
+      normalizedTaskText.includes(action.action.toLowerCase()) ||
+      normalizedTaskText.includes(action.fn.toLowerCase()),
+  );
+  if (mentionedActions.length === 0) return [];
+
+  const rankedActions = rankCatalog(mentionedActions, taskText).slice(
+    0,
+    ACTION_SEED_QUERY_LIMIT,
+  );
+  const queries: string[] = [];
+  const seen = new Set<string>();
+
+  for (const action of rankedActions) {
+    const pascalFn = toPascalCaseIdentifier(action.fn);
+    const query = [
+      `handle${pascalFn}`,
+      `${pascalFn}RequestSchema`,
+      `${pascalFn}ResponseSchema`,
+      action.fn,
+      action.action,
+    ].join(" ");
+
+    if (!seen.has(query)) {
+      seen.add(query);
+      queries.push(query);
+    }
+  }
+
+  return queries;
 }
 
 // ---------------------------------------------------------------------------
@@ -465,6 +509,41 @@ export async function buildSeedContext(
         primarySourceCap,
         Math.max(diversityReserve, preFeedbackCap - sourceCounts.semantic),
       );
+
+  const actionSeedQueries = buildActionSeedQueries(task.taskText);
+  if (actionSeedQueries.length > 0 && sourceCounts.lexical < lexicalTargetCap) {
+    const actionStartedAt = performance.now();
+    try {
+      const conn = await getLadybugConn();
+      let actionRank = 0;
+
+      for (const query of actionSeedQueries) {
+        if (sourceCounts.lexical >= lexicalTargetCap) break;
+        const results = await searchSymbols(conn, task.repoId, query, 4);
+        for (const r of results) {
+          if (sourceCounts.lexical >= lexicalTargetCap) break;
+          const ref = `symbol:${r.symbolId}`;
+          if (seen.has(ref)) continue;
+          seen.add(ref);
+          allCandidates.push({
+            contextRef: ref,
+            source: "lexical",
+            score: Math.max(0.8, 1 - actionRank / 12),
+            sourceRank: actionRank,
+          });
+          sourceCounts.lexical++;
+          actionRank++;
+        }
+      }
+    } catch (err) {
+      logger.debug("Action catalog seeding failed (non-fatal)", {
+        repoId: task.repoId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      recordTiming(timings, "seed.actionCatalog", actionStartedAt);
+    }
+  }
 
   const semanticLaneHasCoverage =
     forceSemanticEntitySearch && sourceCounts.semantic >= diversityReserve;

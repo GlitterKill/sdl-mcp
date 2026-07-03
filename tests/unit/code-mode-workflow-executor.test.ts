@@ -287,7 +287,7 @@ describe("code-mode workflow executor", () => {
     assert.ok(result.results[0].truncatedResponse.continuationHandle);
   });
 
-  it("treats workflow budget maxTokens as a maxTotalTokens alias", async () => {
+  it("treats workflow budget maxTokens as the total response cap", async () => {
     const request: ParsedWorkflowRequest = {
       repoId: "test",
       steps: [
@@ -295,7 +295,7 @@ describe("code-mode workflow executor", () => {
         { fn: "testEcho", action: "test.echo", args: { message: "after" } },
       ],
       defaultMaxResponseTokens: 25,
-      budget: { maxTokens: 20 },
+      budget: { maxTokens: 60 },
       onError: "continue",
     };
 
@@ -306,10 +306,9 @@ describe("code-mode workflow executor", () => {
     );
 
     assert.strictEqual(result.results[0].status, "ok");
-    assert.strictEqual(result.results[1].status, "budget_exceeded");
-    assert.match(result.results[1].error ?? "", /token budget exhausted/);
-    assert.match(result.results[1].error ?? "", /budget\.maxTotalTokens/);
-    assert.match(result.results[1].error ?? "", /budget\.maxTokens/);
+    assert.strictEqual(result.results[1].status, "ok");
+    assert.ok(result.results[0].truncatedResponse);
+    assert.ok(result.totalTokens <= 60);
   });
 
   it("requests JSON output for packed-capable steps referenced later", async () => {
@@ -998,4 +997,31 @@ describe("code-mode workflow executor", () => {
     ]);
   });
 
+});
+
+
+describe("workflow fair-share response caps", () => {
+  it("truncates verbose intermediate results so later steps can run", async () => {
+    const request: ParsedWorkflowRequest = {
+      repoId: "test-repo",
+      steps: [
+        { fn: "testLarge", action: "test.large", args: {} },
+        { fn: "testEcho", action: "test.echo", args: { message: "after" } },
+        { fn: "testEcho", action: "test.echo", args: { message: "still-runs" } },
+      ],
+      budget: { maxTotalTokens: 300 },
+      onError: "continue",
+    };
+
+    const result = await executeWorkflow(
+      request,
+      createMockActionMap(),
+      testConfig,
+    );
+
+    assert.strictEqual(result.results[0].status, "ok");
+    assert.strictEqual(result.results[1].status, "ok");
+    assert.strictEqual(result.results[2].status, "ok");
+    assert.ok(result.results[0].tokens < 150);
+  });
 });
