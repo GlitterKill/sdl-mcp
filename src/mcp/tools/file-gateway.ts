@@ -185,10 +185,7 @@ const FileGatewaySearchEditPreviewSchema = z
     maxMatchesPerFile: z.number().int().min(1).max(5000).optional(),
     maxTotalMatches: z.number().int().min(1).max(50000).optional(),
     createBackup: z.boolean().optional(),
-    responseMode: z
-      .enum(["inline", "auto", "handle"])
-      .optional()
-      .default("inline"),
+    responseMode: z.enum(["inline", "auto", "handle"]).optional(),
     includeDiagnostics: z.boolean().optional(),
   })
   .superRefine((value, ctx) => {
@@ -606,8 +603,6 @@ export async function handleFileGateway(
   const timer = new ToolPhaseTimer();
   const parseStartedAt = timer.start();
   const request = FileGatewayRequestSchema.parse(args);
-  const hasExplicitResponseMode =
-    typeof args === "object" && args !== null && "responseMode" in args;
   timer.record("file.validate", parseStartedAt);
 
   const finish = <T extends FileGatewayResponse>(
@@ -637,17 +632,10 @@ export async function handleFileGateway(
       return finish(await handleFileWrite(rest), phaseStartedAt, "file.write");
     }
     case "searchEditPreview": {
-      const { op: _op, responseMode, ...rest } = request;
+      const { op: _op, ...rest } = request;
       const phaseStartedAt = timer.start();
       return finish(
-        await handleSearchEdit(
-          {
-            mode: "preview",
-            ...rest,
-            ...(hasExplicitResponseMode ? { responseMode } : {}),
-          },
-          context,
-        ),
+        await handleSearchEdit({ mode: "preview", ...rest }, context),
         phaseStartedAt,
         "file.searchEditPreview",
       );

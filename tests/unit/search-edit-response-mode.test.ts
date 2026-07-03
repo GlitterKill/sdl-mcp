@@ -13,6 +13,7 @@ import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { handleFileGateway } from "../../dist/mcp/tools/file-gateway.js";
 import { handleSearchEdit } from "../../dist/mcp/tools/search-edit/index.js";
 import {
+  SearchEditRequestSchema,
   type ResponseArtifactReference,
   type SearchEditPreviewResponse,
 } from "../../dist/mcp/tools.js";
@@ -121,6 +122,54 @@ describe("search.edit responseMode defaults", { concurrency: false }, () => {
       maxFiles: 500,
       responseMode: "inline",
     })) as SearchEditPreviewResponse;
+
+    assert.equal(response.mode, "preview");
+    assert.equal(response.filesMatched, 500);
+  });
+
+  it("defaults to auto when dispatched with schema-parsed args (server/gateway path)", async () => {
+    const parsed = SearchEditRequestSchema.parse({
+      mode: "preview",
+      repoId: REPO_ID,
+      targeting: "text",
+      query: { literal: "oldName", replacement: "newName", global: true },
+      editMode: "replacePattern",
+      filters: { include: ["large/*.txt"] },
+      maxFiles: 500,
+    });
+    const response = await handleSearchEdit(parsed);
+
+    assert.equal(isResponseArtifact(response), true);
+  });
+
+  it("schema parse does not inject a responseMode default for previews", () => {
+    const parsed = SearchEditRequestSchema.parse({
+      mode: "preview",
+      repoId: REPO_ID,
+      targeting: "text",
+      query: { literal: "oldName", replacement: "newName", global: true },
+      editMode: "replacePattern",
+    });
+    assert.equal(
+      "responseMode" in parsed ? parsed.responseMode : undefined,
+      undefined,
+    );
+  });
+
+  it("explicit inline survives schema parse for large previews", async () => {
+    const parsed = SearchEditRequestSchema.parse({
+      mode: "preview",
+      repoId: REPO_ID,
+      targeting: "text",
+      query: { literal: "oldName", replacement: "newName", global: true },
+      editMode: "replacePattern",
+      filters: { include: ["large/*.txt"] },
+      maxFiles: 500,
+      responseMode: "inline",
+    });
+    const response = (await handleSearchEdit(
+      parsed,
+    )) as SearchEditPreviewResponse;
 
     assert.equal(response.mode, "preview");
     assert.equal(response.filesMatched, 500);

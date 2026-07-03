@@ -3648,9 +3648,12 @@ const SearchEditPreviewRequestSchema = z
     maxMatchesPerFile: z.number().int().min(1).max(5000).optional(),
     maxTotalMatches: z.number().int().min(1).max(50000).optional(),
     createBackup: z.boolean().optional(),
-    responseMode: ResponseModeSchema.describe(
-      "Large-preview handling: inline preserves legacy output; auto/handle stores full previews behind response.get handles.",
-    ),
+    responseMode: z
+      .enum(["inline", "auto", "handle"])
+      .optional()
+      .describe(
+        'Large-preview handling: inline preserves legacy output; auto/handle stores full previews behind response.get handles. Previews default to "auto" (spills to a response artifact past the token threshold); pass "inline" to force full inline previews.',
+      ),
   })
   .superRefine((value, ctx) => {
     const operations = value.operations;
