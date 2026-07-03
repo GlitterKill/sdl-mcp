@@ -39,6 +39,11 @@ import {
 import type { FileWriteRequest, FileWriteResponse } from "../../tools.js";
 import type { PlannedFileEdit, PlanPrecondition } from "./plan-store.js";
 import {
+  prepareRenameRequest,
+  validateRenameRequest,
+  wordRegexForIdentifier,
+} from "./rename.js";
+import {
   collectIdentifierSourceEdits,
   collectStructuralSourceEdits,
   createStructuralQueryCache,
@@ -121,7 +126,7 @@ export interface SearchEditPreviewRequest {
   createBackup?: boolean;
 }
 
-interface SearchEditSingleOperationRequest extends SearchEditPreviewRequest {
+export interface SearchEditSingleOperationRequest extends SearchEditPreviewRequest {
   targeting: "text" | "symbol" | "identifier" | "structural" | "rename" | "signature";
   query: SearchEditQueryInput;
   editMode: FileWriteResponse["mode"];
@@ -195,7 +200,7 @@ export interface PreviewResult {
   };
 }
 
-const DEFAULT_MAX_FILES = 50;
+export const DEFAULT_MAX_FILES = 50;
 const DEFAULT_MAX_MATCHES_PER_FILE = 100;
 const DEFAULT_MAX_TOTAL_MATCHES = 500;
 const MAX_PLAN_BYTES = 10 * 1024 * 1024; // 10MB aggregate cap per plan
@@ -1015,20 +1020,7 @@ function validateAstAwareRequest(
     );
   }
   if (request.targeting === "rename") {
-    if (request.editMode !== "replacePattern") {
-      throw new ValidationError('rename targeting currently supports editMode="replacePattern" only');
-    }
-    if (request.query.rename === undefined) {
-      throw new ValidationError("rename targeting requires query.rename");
-    }
-    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(request.query.rename.newName)) {
-      throw new ValidationError("rename.newName must be a valid identifier");
-    }
-    const hasOneSymbolId = request.query.symbolIds?.length === 1;
-    const hasSymbolRef = request.query.symbolRef !== undefined;
-    if (hasOneSymbolId === hasSymbolRef) {
-      throw new ValidationError("rename targeting requires exactly one of query.symbolIds[0] or query.symbolRef");
-    }
+    validateRenameRequest(request);
     return;
   }
   if (request.targeting === "identifier") {
@@ -1241,108 +1233,6 @@ function collectAstAwareSourceEdits(
     collectAstAwareStructuralEdits(content, relPath, request, maxMatches),
     operationId,
   );
-}
-
-function wordRegexForIdentifier(name: string): RegExp {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`\\b${escaped}\\b`, "g");
-}
-
-async function prepareRenameRequest(
-  conn: Awaited<ReturnType<typeof getLadybugConn>>,
-  request: SearchEditSingleOperationRequest,
-): Promise<{
-  request: SearchEditSingleOperationRequest;
-  candidates: string[];
-  skipped: PreviewFileSkip[];
-  regex: RegExp;
-}> {
-  const rename = request.query.rename;
-  if (rename === undefined) {
-    throw new ValidationError("rename targeting requires query.rename");
-  }
-
-  let targetSymbolId = request.query.symbolIds?.[0];
-  if (targetSymbolId === undefined && request.query.symbolRef) {
-    const resolved = await resolveSymbolRef(
-      conn,
-      request.repoId,
-      request.query.symbolRef,
-    );
-    if (resolved.status !== "resolved") {
-      throw new ValidationError(`rename symbolRef ${resolved.status}`);
-    }
-    targetSymbolId = resolved.symbolId;
-  }
-  if (targetSymbolId === undefined) {
-    throw new ValidationError("rename targeting requires query.symbolIds[0] or query.symbolRef");
-  }
-
-  const target = (await ladybugDb.getSymbolsByIds(conn, [targetSymbolId])).get(targetSymbolId);
-  if (!target || target.repoId !== request.repoId) {
-    throw new ValidationError(`rename target symbol not found: ${targetSymbolId}`);
-  }
-
-  const candidateSet = new Set<string>();
-  const targetFile = (await ladybugDb.getFilesByIds(conn, [target.fileId])).get(target.fileId);
-  if (targetFile) candidateSet.add(normalizePath(targetFile.relPath));
-
-  const references = await ladybugDb.getReferencingSymbolsForTarget(
-    conn,
-    request.repoId,
-    targetSymbolId,
-    rename.minConfidence ?? 0.5,
-  );
-  for (const ref of references) candidateSet.add(normalizePath(ref.relPath));
-
-  const skipped: PreviewFileSkip[] = [];
-  if (rename.includeTextOnlyMatches === true) {
-    const rootPath =
-      (await ladybugDb.getRepo(conn, request.repoId))?.rootPath ?? "";
-    const textCandidates = await enumerateRepoFiles(
-      rootPath,
-      request.filters,
-      request.maxFiles ?? DEFAULT_MAX_FILES,
-    );
-    // No g flag — .test() must be stateless across the file loop.
-    const oldNameRegex = new RegExp(`\\b${escapeRegExp(target.name)}\\b`);
-    for (const rel of textCandidates.candidates) {
-      if (candidateSet.has(rel)) continue;
-      try {
-        const abs = resolve(rootPath, rel);
-        const readResult = await readSearchEditCandidateFile(rootPath, abs);
-        if (readResult.ok && oldNameRegex.test(readResult.value.content)) {
-          skipped.push({ path: rel, reason: "text-only-match" });
-        }
-      } catch {
-        // text-only recall hints are best-effort diagnostics.
-      }
-    }
-  }
-
-  const renameCollisionFiles = new Set<string>();
-  for (const rel of candidateSet) {
-    const fileSymbols = await ladybugDb.getSymbolsForFile(conn, request.repoId, rel);
-    if (fileSymbols.some((sym) => sym.name === rename.newName && sym.symbolId !== targetSymbolId)) {
-      renameCollisionFiles.add(rel);
-    }
-  }
-
-  return {
-    request: {
-      ...request,
-      query: {
-        ...request.query,
-        literal: target.name,
-        replacement: rename.newName,
-        global: true,
-      },
-      renameCollisionFiles,
-    },
-    candidates: [...candidateSet],
-    skipped,
-    regex: wordRegexForIdentifier(target.name),
-  };
 }
 
 function truncateCaptureText(text: string): string {
@@ -1601,7 +1491,7 @@ interface SafeReadCandidateResult {
   stats: Stats;
 }
 
-async function readSearchEditCandidateFile(
+export async function readSearchEditCandidateFile(
   rootPath: string,
   abs: string,
 ): Promise<
