@@ -2419,11 +2419,13 @@ async function planSignatureSearchEditPreview(request: SearchEditSingleOperation
 
   const candidates = new Map<string, "declaration" | "callsite">();
   candidates.set(declarationRel, "declaration");
-  const refs = await ladybugDb.getReferencingSymbolsForTarget(conn, request.repoId, target.symbolId, 0.5);
-  for (const ref of refs) {
-    if (ref.edgeType !== "calls") continue;
-    const rel = normalizePath(ref.relPath);
-    if (!candidates.has(rel)) candidates.set(rel, "callsite");
+  if (callsiteOpsRequested(signature)) {
+    const refs = await ladybugDb.getReferencingSymbolsForTarget(conn, request.repoId, target.symbolId, 0.5);
+    for (const ref of refs) {
+      if (ref.edgeType !== "calls") continue;
+      const rel = normalizePath(ref.relPath);
+      if (!candidates.has(rel)) candidates.set(rel, "callsite");
+    }
   }
 
   const edits: PlannedFileEdit[] = [];
@@ -2476,9 +2478,9 @@ async function planSignatureSearchEditPreview(request: SearchEditSingleOperation
       skipReason = result.skipReason;
     }
     if (sourceEdits.length === 0) {
-      if (skipReason !== undefined || role === "declaration") {
-        filesSkipped.push({ path: rel, reason: skipReason ?? "no-signature-match" });
-      }
+      // Always record a reason — silently dropping a candidate hides
+      // callsite files the agent expected to see in the summary.
+      filesSkipped.push({ path: rel, reason: skipReason ?? "no-signature-match" });
       continue;
     }
     if (totalMatches + sourceEdits.length > maxTotalMatches) {

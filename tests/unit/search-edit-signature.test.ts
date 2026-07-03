@@ -146,6 +146,14 @@ describe("search.edit signature", { concurrency: false }, () => {
     assert.match(await sourceA(), /return value \+ b/);
   });
 
+  it("renameParam-only previews scope to the declaration file", async () => {
+    const preview = await previewSignature({ renameParam: [{ from: "a", to: "alpha" }] });
+
+    assert.equal(preview.filesMatched, 1);
+    assert.equal(preview.filesEligible, 1);
+    assert.equal(preview.fileEntries[0].file, "src/a.ts");
+  });
+
   it("handles arrow function declarations", async () => {
     await writeFile(join(repoRoot, "src", "a.ts"), "export const handler = (a: string, b: number) => a + b;\n", "utf-8");
 
