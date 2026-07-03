@@ -221,8 +221,11 @@ function locateAstNode(
 ): Parser.SyntaxNode {
   const found = findNodeByRange(tree.rootNode, symbol.range);
   if (!found) {
+    const symbolLabel = [symbol.kind, symbol.name].filter(Boolean).join(" ");
     throw new ValidationError(
-      "Cannot locate AST node for selected symbol range; re-index or re-run symbol search.",
+      "Cannot locate AST node for selected " +
+        (symbolLabel || "symbol") +
+        " range; re-run symbol search to refresh ranges, or request a source window/codeNeedWindow anchored to the symbol before retrying interface/type edits.",
     );
   }
   return found;

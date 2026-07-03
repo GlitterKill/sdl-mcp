@@ -82,6 +82,90 @@ interface BlastRadiusSeedCandidate {
   tiers?: { riskScore?: number };
 }
 
+interface PRRiskPreflightOptions {
+  riskThreshold?: number;
+  maxChangedSymbols: number;
+  maxFindings: number;
+  maxNestedSymbols: number;
+}
+
+export function buildPRRiskPreflightResponse(
+  delta: ComputedDeltaWithTiers,
+  options: PRRiskPreflightOptions,
+): CompactPRRiskResponseInput {
+  const filteredChangedSymbols =
+    options.riskThreshold !== undefined
+      ? delta.changedSymbols.filter(
+          (symbol: ChangedSymbol) =>
+            (symbol.tiers?.riskScore ?? 0) >= options.riskThreshold!,
+        )
+      : delta.changedSymbols;
+  const visibleChangedSymbols = filteredChangedSymbols
+    .slice(0, options.maxChangedSymbols)
+    .map((symbol: ChangedSymbol) => ({
+      symbolId: symbol.symbolId,
+      changeType: symbol.changeType,
+      tiers: symbol.tiers,
+    }));
+  const riskScore = computeRiskScoreV2(delta, [], new Map());
+  const findings = generateFindings(delta, []);
+  const truncatedFindings = findings
+    .slice(0, options.maxFindings)
+    .map((finding) => ({
+      ...finding,
+      affectedSymbols: finding.affectedSymbols.slice(0, options.maxNestedSymbols),
+      metadata: {
+        ...(finding.metadata ?? {}),
+        affectedSymbolsTotal: finding.affectedSymbols.length,
+        affectedSymbolsTruncated:
+          finding.affectedSymbols.length > options.maxNestedSymbols,
+      },
+    }));
+
+  return {
+    summary: {
+      riskScore,
+      riskLevel: getRiskLevel(riskScore),
+      changedCount: delta.changedSymbols.length,
+      filteredCount: filteredChangedSymbols.length,
+      blastRadiusCount: 0,
+      topRiskItem: visibleChangedSymbols[0]?.symbolId,
+    },
+    analysis: {
+      repoId: delta.repoId,
+      fromVersion: delta.fromVersion,
+      toVersion: delta.toVersion,
+      riskScore,
+      riskLevel: getRiskLevel(riskScore),
+      changedSymbols: {
+        items: visibleChangedSymbols,
+        totalCount: filteredChangedSymbols.length,
+        unfilteredTotal: delta.changedSymbols.length,
+        truncated: filteredChangedSymbols.length > options.maxChangedSymbols,
+        filteredByRiskThreshold: options.riskThreshold !== undefined,
+      },
+      blastRadius: { items: [], totalCount: 0, truncated: false },
+      findings: {
+        items: truncatedFindings,
+        totalCount: findings.length,
+        truncated: findings.length > options.maxFindings,
+      },
+      evidence: { items: [], totalCount: 0, truncated: false },
+      recommendedTests: { items: [], totalCount: 0, truncated: false },
+      changedSymbolsCount: filteredChangedSymbols.length,
+      blastRadiusCount: 0,
+      preflight: {
+        skipped: ["blastRadius", "symbolMetadata", "centrality"],
+        message:
+          "Preflight skipped blast-radius traversal, symbol metadata expansion, and centrality lookup.",
+      },
+    },
+    escalationRequired:
+      riskScore >= (options.riskThreshold ?? 70) &&
+      findings.some((finding) => finding.severity === "high"),
+  };
+}
+
 export function selectBlastRadiusSeedSymbols(
   changedSymbols: BlastRadiusSeedCandidate[],
   options: {
@@ -193,6 +277,22 @@ export async function handlePRRiskAnalysis(args: unknown) {
           (c: ChangedSymbol) => (c.tiers?.riskScore ?? 0) >= riskThreshold,
         )
       : delta.changedSymbols;
+
+  if (validated.preflight) {
+    const response = buildPRRiskPreflightResponse(delta, {
+      riskThreshold,
+      maxChangedSymbols,
+      maxFindings,
+      maxNestedSymbols,
+    });
+    logger.info("PR Risk Analysis preflight completed", {
+      repoId: validated.repoId,
+      changedCount: delta.changedSymbols.length,
+      filteredCount: filteredChangedSymbols.length,
+    });
+    return validated.detail === "full" ? response : compactPRRiskResponse(response);
+  }
+
   const conn = await getLadybugConn();
 
   // Validate repository exists

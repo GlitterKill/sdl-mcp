@@ -24,12 +24,17 @@ export function compactSemanticEnrichmentStatusForAgent(
   result: SemanticEnrichmentStatusResult,
   limit = DEFAULT_SEMANTIC_STATUS_LIMIT,
 ): object {
+  const selected = result.selections.flatMap(({ languageId, selected }) =>
+    selected ? [{ languageId, ...selected }] : [],
+  );
+
   return {
     ...result,
-    selections: result.selections.map(({ languageId, selected }) => ({
-      languageId,
-      ...(selected ? { selected } : {}),
-    })),
+    selections: {
+      total: result.selections.length,
+      selectedCount: selected.length,
+      selected,
+    },
     lastRuns: result.lastRuns
       .slice(0, limit)
       .map(({ metadataJson: _metadataJson, ...run }) => run),

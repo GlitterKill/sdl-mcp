@@ -351,7 +351,7 @@ Do not use runtime execution to print indexed source. Use the retrieval ladder i
 }
 ```
 
-For shell runtime, provide `code` when a shell wrapper is the right abstraction. On Windows, `runtime: "shell"` uses `cmd.exe`; use `runtime: "powershell"` for PowerShell `.ps1` snippets.
+For shell runtime, provide `code` when a shell wrapper is the right abstraction. On Windows, `runtime: "shell"` uses `cmd.exe`; use `runtime: "powershell"` for PowerShell `.ps1` snippets. In PowerShell runtime, call npm scripts through `npm.cmd` when the `npm.ps1` shim emits `$LASTEXITCODE` noise.
 
 ---
 
