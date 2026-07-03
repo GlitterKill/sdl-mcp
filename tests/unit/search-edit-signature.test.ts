@@ -204,6 +204,65 @@ describe("search.edit signature", { concurrency: false }, () => {
     );
   });
 
+  it("does not edit call-shaped text inside string literals", async () => {
+    await writeFile(
+      join(repoRoot, "src", "b.ts"),
+      "import { handler } from './a';\ndeclare function log(m: string): void;\nlog(\"handler(1)\");\nexport const value = handler('x', 1);\n",
+      "utf-8",
+    );
+
+    const preview = await previewSignature({ add: [{ name: "opts", typeText: "Options", argText: "{}" }] });
+    const apply = await handleSearchEdit(preview.applyArgs);
+
+    assert.equal(apply.mode, "apply");
+    assert.match(await sourceB(), /log\("handler\(1\)"\);/);
+    assert.match(await sourceB(), /handler\('x', 1, \{\}\)/);
+  });
+
+  it("does not edit call-shaped text inside comments", async () => {
+    await writeFile(
+      join(repoRoot, "src", "b.ts"),
+      "import { handler } from './a';\n// handler(1) legacy\nexport const value = handler('x', 1);\n",
+      "utf-8",
+    );
+
+    const preview = await previewSignature({ add: [{ name: "opts", typeText: "Options", argText: "{}" }] });
+    const apply = await handleSearchEdit(preview.applyArgs);
+
+    assert.equal(apply.mode, "apply");
+    assert.match(await sourceB(), /\/\/ handler\(1\) legacy/);
+    assert.match(await sourceB(), /handler\('x', 1, \{\}\)/);
+  });
+
+  it("handles template literals containing braces and ${} around the declaration", async () => {
+    await writeFile(
+      join(repoRoot, "src", "a.ts"),
+      "export function handler(a: string, b: number) {\n  const t = `x${\"`\"}y`;\n  return a + b;\n}\n",
+      "utf-8",
+    );
+
+    const preview = await previewSignature({ renameParam: [{ from: "a", to: "value" }] });
+    const apply = await handleSearchEdit(preview.applyArgs);
+
+    assert.equal(apply.mode, "apply");
+    assert.match(await sourceA(), /handler\(value: string, b: number\)/);
+    assert.match(await sourceA(), /return value \+ b/);
+  });
+
+  it("edits calls nested inside template literal interpolations", async () => {
+    await writeFile(
+      join(repoRoot, "src", "b.ts"),
+      "import { handler } from './a';\nexport const s = `x ${handler('x', 1)} y`;\n",
+      "utf-8",
+    );
+
+    const preview = await previewSignature({ add: [{ name: "opts", typeText: "Options", argText: "{}" }] });
+    const apply = await handleSearchEdit(preview.applyArgs);
+
+    assert.equal(apply.mode, "apply");
+    assert.match(await sourceB(), /\$\{handler\('x', 1, \{\}\)\} y/);
+  });
+
   it("skips spread callsites for manual review", async () => {
     await writeFile(join(repoRoot, "src", "b.ts"), "import { handler } from './a';\nconst args = ['x', 1] as const;\nexport const value = handler(...args);\n", "utf-8");
 
