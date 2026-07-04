@@ -115,6 +115,7 @@ const statsByRepo = new Map<string, PrefetchStats>();
 let running = false;
 let enabled = false;
 let maxBudgetPercent = 20;
+let loadSheddingEnabled = true;
 
 function resolveContext(
   context?: PrefetchRequestContext,
@@ -242,7 +243,7 @@ function currentCpuLoadRatio(): number {
 }
 
 function shouldYieldForLoad(): boolean {
-  return currentCpuLoadRatio() > 0.8;
+  return loadSheddingEnabled && currentCpuLoadRatio() > 0.8;
 }
 
 function policyKeyForTask(task: PrefetchTask): {
@@ -866,6 +867,10 @@ export function getPrefetchStats(repoId: string): PrefetchStats {
   stats.deterministicFallback = !gating.enabled || getCurrentModel() === null;
   refreshPolicyStats(repoId, stats);
   return { ...stats, topStrategies: [...stats.topStrategies] };
+}
+
+export function _setPrefetchLoadSheddingForTesting(enabledForTest: boolean): void {
+  loadSheddingEnabled = enabledForTest;
 }
 
 export function _setPrefetchEntryCreatedAtForTesting(

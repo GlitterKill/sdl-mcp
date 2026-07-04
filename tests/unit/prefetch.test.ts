@@ -6,8 +6,10 @@ import {
   consumePrefetchedKeyWithOutcome,
   getPrefetchStats,
   _setPrefetchEntryCreatedAtForTesting,
+  _setPrefetchLoadSheddingForTesting,
   prefetchCardsForSymbols,
   prefetchSliceFrontier,
+  shutdownPrefetch,
 } from "../../dist/graph/prefetch.js";
 
 import {
@@ -47,9 +49,12 @@ describe("prefetch pipeline", () => {
       fallbackToDeterministic: true,
       retrainIntervalMs: 60000,
     });
+    _setPrefetchLoadSheddingForTesting(false);
   });
 
   afterEach(() => {
+    _setPrefetchLoadSheddingForTesting(true);
+    shutdownPrefetch();
     resetModel();
   });
 

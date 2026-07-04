@@ -30,13 +30,14 @@ describe("runtime.execute validation", () => {
 
   it("registers PowerShell as a distinct runtime", () => {
     const runtime = getRuntime("powershell");
+    const expectedExecutable = process.platform === "win32" ? "powershell.exe" : "pwsh";
 
     assert.ok(runtime);
-    assert.strictEqual(getRuntimeDefaultExecutable("powershell"), "powershell.exe");
-    assert.ok(isExecutableCompatibleWithRuntime("powershell", "powershell.exe"));
+    assert.strictEqual(getRuntimeDefaultExecutable("powershell"), expectedExecutable);
+    assert.ok(isExecutableCompatibleWithRuntime("powershell", expectedExecutable));
     assert.ok(isExecutableCompatibleWithRuntime("powershell", "powershell"));
     assert.deepStrictEqual(runtime.buildCommand([], { codePath: "script.ps1" }), {
-      executable: "powershell.exe",
+      executable: expectedExecutable,
       args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "script.ps1"],
     });
     assert.ok(RuntimeConfigSchema.parse({}).allowedRuntimes.includes("powershell"));
