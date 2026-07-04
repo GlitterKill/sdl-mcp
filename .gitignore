@@ -63,6 +63,7 @@ test-red-output*.txt
 test_results.txt
 tests/results/
 tests/stress/results/
+/.determinism-diffs/
 tests/**/.lbug-*-db/
 tests/**/.tmp-*/
 tests/integration/test-*/

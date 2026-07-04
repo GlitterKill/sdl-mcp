@@ -12,6 +12,7 @@
   - [Config Examples](./config-examples.md)
   - [CLI Reference](./cli-reference.md)
   - [MCP Tools Reference](./mcp-tools-reference.md)
+  - [Prompt Cache Hygiene](./prompt-cache-hygiene.md)
   - [Configuration Reference](./configuration-reference.md)
   - [Agent Workflows](./agent-workflows.md)
   - [Tool Enforcement](./tool-enforcement.md)
@@ -35,6 +36,8 @@ Use this page as the entry point for SDL-MCP documentation.
 - I need MCP tool payloads and responses:
   - [MCP Tools Reference](./mcp-tools-reference.md)
   - [MCP Tools Detailed](./mcp-tools-detailed.md)
+- I need prompt-cache stability rules for MCP tools:
+  - [Prompt Cache Hygiene](./prompt-cache-hygiene.md)
 - I want to make symbol-scoped edits safely:
   - [sdl.symbol.edit](./symbol-edit-tool.md)
 - I need to tune repository, policy, and slice behavior:
@@ -86,6 +89,7 @@ Use this page as the entry point for SDL-MCP documentation.
 - [CI Memory Sync Operations](./ci-memory-sync.md)
 - [Cross-Platform Validation](./cross-platform-validation.md)
 - [Testing Guide](./testing.md)
+- [Prompt Cache Hygiene](./prompt-cache-hygiene.md)
 - [Release Test Checklist](./release-test.md)
 - [Plugin SDK Author Guide](./plugin-sdk-author-guide.md)
 - [Plugin SDK Quick Reference](./plugin-sdk-quick-reference.md)

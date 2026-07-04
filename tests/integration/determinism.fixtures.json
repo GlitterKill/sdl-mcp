@@ -1,0 +1,185 @@
+{
+  "$comment": "Determinism fixtures for determinism.test.ts. Adding an SDL-MCP tool requires adding at least one stable call here or an uncoveredAllowlist entry with a reason.",
+  "repoId": "determinism-fixtures",
+  "fixtureRepo": "../stress/fixtures",
+  "toolCalls": [
+    {
+      "tool": "sdl.action.search",
+      "args": {
+        "query": "symbol.search",
+        "limit": 5,
+        "includeSchemas": false,
+        "includeExamples": false
+      }
+    },
+    {
+      "tool": "sdl.symbol.search",
+      "args": {
+        "repoId": "{REPO_ID}",
+        "query": "UserRepository",
+        "limit": 10,
+        "semantic": false,
+        "wireFormat": "json"
+      }
+    },
+    {
+      "tool": "sdl.symbol.search",
+      "args": {
+        "repoId": "{REPO_ID}",
+        "query": "zz_no_such_symbol_zz",
+        "limit": 5,
+        "semantic": false,
+        "wireFormat": "json"
+      }
+    },
+    {
+      "tool": "sdl.symbol.getCard",
+      "args": {
+        "repoId": "{REPO_ID}",
+        "symbolRef": {
+          "name": "UserRepository",
+          "file": "src/typescript/models.ts"
+        }
+      }
+    },
+    {
+      "tool": "sdl.code.getSkeleton",
+      "args": {
+        "repoId": "{REPO_ID}",
+        "symbolRef": {
+          "name": "UserRepository",
+          "file": "src/typescript/models.ts"
+        },
+        "maxLines": 80
+      }
+    },
+    {
+      "tool": "sdl.code.getHotPath",
+      "args": {
+        "repoId": "{REPO_ID}",
+        "symbolRef": {
+          "name": "UserRepository",
+          "file": "src/typescript/models.ts"
+        },
+        "identifiersToFind": ["findById"],
+        "maxLines": 40
+      }
+    },
+    {
+      "tool": "sdl.policy.get",
+      "args": {
+        "repoId": "{REPO_ID}"
+      }
+    }
+  ],
+  "uncoveredAllowlist": [
+    {
+      "tool": "sdl.info",
+      "reason": "Diagnostic surface reports runtime and machine state rather than cache-stable code context."
+    },
+    {
+      "tool": "sdl.repo.register",
+      "reason": "Setup mutation; registration can create versions and enforcement files."
+    },
+    {
+      "tool": "sdl.repo.status",
+      "reason": "Freshness/status surface intentionally reports current index state."
+    },
+    {
+      "tool": "sdl.index.refresh",
+      "reason": "Index mutation; response depends on refreshed version state."
+    },
+    {
+      "tool": "sdl.repo.overview",
+      "reason": "Overview includes repository freshness metadata; add a stable fixture when that output is normalized."
+    },
+    {
+      "tool": "sdl.buffer.push",
+      "reason": "Live draft mutation with session-local state."
+    },
+    {
+      "tool": "sdl.buffer.checkpoint",
+      "reason": "Live draft checkpoint mutation with session-local state."
+    },
+    {
+      "tool": "sdl.buffer.status",
+      "reason": "Live draft status reports current queue/checkpoint state."
+    },
+    {
+      "tool": "sdl.symbol.edit",
+      "reason": "Edit preview/apply surface creates expiring plans and may mutate files."
+    },
+    {
+      "tool": "sdl.slice.build",
+      "reason": "Slice responses include leased handles; add stable fixture after handle lease normalization."
+    },
+    {
+      "tool": "sdl.slice.refresh",
+      "reason": "Requires a prior slice handle with lease state."
+    },
+    {
+      "tool": "sdl.slice.spillover.get",
+      "reason": "Requires a prior spillover handle with lease state."
+    },
+    {
+      "tool": "sdl.delta.get",
+      "reason": "Depends on version history created by index refreshes."
+    },
+    {
+      "tool": "sdl.code.needWindow",
+      "reason": "Governed raw-code access emits audit decisions rather than cache-stable context."
+    },
+    {
+      "tool": "sdl.policy.set",
+      "reason": "Policy mutation."
+    },
+    {
+      "tool": "sdl.pr.risk.analyze",
+      "reason": "Depends on selected version range and risk-analysis state."
+    },
+    {
+      "tool": "sdl.agent.feedback",
+      "reason": "Feedback mutation."
+    },
+    {
+      "tool": "sdl.agent.feedback.query",
+      "reason": "Feedback query depends on previously stored feedback."
+    },
+    {
+      "tool": "sdl.runtime.execute",
+      "reason": "Runtime execution includes process and artifact state."
+    },
+    {
+      "tool": "sdl.runtime.queryOutput",
+      "reason": "Requires a runtime artifact handle from a previous execution."
+    },
+    {
+      "tool": "sdl.response.get",
+      "reason": "Requires a response artifact handle from a previous tool call."
+    },
+    {
+      "tool": "sdl.usage.stats",
+      "reason": "Session usage telemetry is intentionally stateful."
+    },
+    {
+      "tool": "sdl.file.read",
+      "reason": "File reader is path/content stable, but fixture coverage is deferred until non-indexed read payloads are normalized."
+    },
+    {
+      "tool": "sdl.file.write",
+      "reason": "File mutation."
+    },
+    {
+      "tool": "sdl.semantic.enrichment.refresh",
+      "reason": "Provider-backed enrichment mutation."
+    },
+    {
+      "tool": "sdl.semantic.enrichment.status",
+      "reason": "Provider status reports current enrichment run state."
+    },
+    {
+      "tool": "sdl.search.edit",
+      "reason": "Cross-file edit preview/apply surface creates expiring plans and may mutate files."
+    }
+  ]
+}
