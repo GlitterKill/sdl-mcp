@@ -20,6 +20,10 @@ jobs:
     # Using ${{ matrix.os }} in name shows the raw expression when the job is skipped.
     runs-on: ${{ matrix.os }}
     if: github.event_name != 'schedule'
+    env:
+      # Keep the general CI test matrix on the JS indexer path; native coverage
+      # stays isolated in native-build because hosted runners have hit addon bugs.
+      SDL_MCP_DISABLE_NATIVE_ADDON: "1"
     strategy:
       fail-fast: false
       matrix:
