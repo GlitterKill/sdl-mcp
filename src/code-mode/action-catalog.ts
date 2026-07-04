@@ -20,7 +20,7 @@ import { WorkflowRequestSchema } from "./types.js";
 // `./index.ts`, but importing from there creates a load-time circularity
 // (index.ts imports this module). Keep the meta schemas local so the manual
 // renderer can introspect them without pulling the whole gateway.
-const META_ACTION_SEARCH_SCHEMA = z.object({
+export const META_ACTION_SEARCH_SCHEMA = z.object({
   query: z.string().min(1),
   limit: z
     .number()
@@ -690,7 +690,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
     "Request buffer checkpoint. Zero-file success responses include a message explaining why no clean buffers were checkpointed.",
   "buffer.status": "Get buffer status",
   "runtime.execute":
-    "Execute runtime command. Shell runtime requires code; direct args-only shell execution is rejected. Use stdin for multiline scripts/input; maxResponseLines accepts 5-1000 lines (default 100).",
+    "Execute runtime command. Shell runtime requires code; direct args-only shell execution is rejected. Node code runs as ESM (use import/createRequire, not require()). Use stdin for multiline scripts/input; maxResponseLines accepts 5-1000 lines (default 100).",
   "runtime.queryOutput": "Query stored command output by keywords",
   "response.get": "Retrieve a stored large tool response by handle",
   "memory.store": "Store a development memory",

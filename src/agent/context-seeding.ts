@@ -206,6 +206,35 @@ export function buildActionSeedQueries(taskText: string): string[] {
   return queries;
 }
 
+/**
+ * Decide entity-search shaping for context seeding. Tool-QA prompts — task
+ * text that names catalog actions (e.g. "QA runtime.execute output modes") —
+ * get symbol/fileSummary evidence only and an FTS query anchored on the
+ * tool's handler/schema identifiers. Broad-mode cluster/process matches are
+ * off-target evidence for tool-surface questions.
+ */
+export function buildSeedEntitySearchPlan(
+  taskText: string,
+  isBroad: boolean,
+): {
+  entityTypes: Array<"symbol" | "cluster" | "process" | "fileSummary">;
+  ftsQuery: string;
+  actionSeedQueries: string[];
+  toolQaFocused: boolean;
+} {
+  const actionSeedQueries = buildActionSeedQueries(taskText);
+  const toolQaFocused = actionSeedQueries.length > 0;
+  const entityTypes: Array<"symbol" | "cluster" | "process" | "fileSummary"> =
+    isBroad && !toolQaFocused
+      ? ["symbol", "cluster", "process", "fileSummary"]
+      : ["symbol", "fileSummary"];
+  const baseFtsQuery = buildContextFtsQuery(taskText);
+  const ftsQuery = toolQaFocused
+    ? `${baseFtsQuery} ${actionSeedQueries[0]}`.trim()
+    : baseFtsQuery;
+  return { entityTypes, ftsQuery, actionSeedQueries, toolQaFocused };
+}
+
 // ---------------------------------------------------------------------------
 // Focus Path Inference
 // ---------------------------------------------------------------------------
@@ -436,6 +465,7 @@ export async function buildSeedContext(
   let seedEvidence: import("../retrieval/types.js").RetrievalEvidence | undefined;
 
   const isBroad = task.options?.contextMode !== "precise";
+  const seedPlan = buildSeedEntitySearchPlan(task.taskText, isBroad);
   const useSemanticEntitySearch =
     forceSemanticEntitySearch || (!semanticDisabled && isBroad);
   // Stage 1 already runs the hybrid FTS/vector lane. Keep Stage 2 lexical-only
@@ -466,11 +496,9 @@ export async function buildSeedContext(
       const entityResult = await entitySearch({
         repoId: task.repoId,
         query: task.taskText,
-        ftsQuery: buildContextFtsQuery(task.taskText),
+        ftsQuery: seedPlan.ftsQuery,
         limit: isBroad ? 32 : 16,
-        entityTypes: isBroad
-          ? ["symbol", "cluster", "process", "fileSummary"]
-          : ["symbol", "fileSummary"],
+        entityTypes: seedPlan.entityTypes,
         // Keep FTS bounded through entitySearch limits, then fuse/rerank in
         // memory. This restores exact lexical hits without changing schema.
         ftsEnabled: true,
@@ -536,7 +564,7 @@ export async function buildSeedContext(
         Math.max(diversityReserve, preFeedbackCap - sourceCounts.semantic),
       );
 
-  const actionSeedQueries = buildActionSeedQueries(task.taskText);
+  const actionSeedQueries = seedPlan.actionSeedQueries;
   if (actionSeedQueries.length > 0 && sourceCounts.lexical < lexicalTargetCap) {
     const actionStartedAt = performance.now();
     try {

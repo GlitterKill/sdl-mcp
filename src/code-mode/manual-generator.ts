@@ -97,6 +97,10 @@ type SQ = { literal?: string; regex?: string; replacement?: string; global?: boo
 type EM = "replacePattern"|"replaceLines"|"insertAt"|"append"|"overwrite"; type ST = "text"|"symbol"|"identifier"|"structural"; type SEOps = { id?: string; targeting: ST; query: SQ; editMode: EM; filters?: object; maxFiles?: number; maxMatchesPerFile?: number; maxTotalMatches?: number };
 type SEO = { kind: "replaceSymbol"|"replaceBody"|"replaceSignature"|"insertBefore"|"insertAfter"; content: string } | { kind: "renameLocal"; name: string; replacement: string }; type SR = { startLine: number; startCol: number; endLine: number; endCol: number }
 
+// === Discovery ===
+/** Search SDL action catalog; also a workflow step (fn "actionSearch") */
+function actionSearch(p: { query: string; limit?: number; includeSchemas?: boolean }): { actions: object[] }
+
 // === Query ===
 /** Search symbols by name/pattern */
 function symbolSearch(p: { query: string; kinds?: string[]; limit?: number; semantic?: boolean }): { results: { symbolId: string; name: string; kind: string; file: string; relevance?: number }[] }
@@ -163,22 +167,22 @@ function bufferPush(p: { eventType: "open"|"change"|"save"|"close"|"checkpoint";
 function bufferCheckpoint(): { checkpointed: boolean }
 /** Get buffer status */
 function bufferStatus(): { status: object }
-/** Execute runtime command; pass stdin for multiline scripts/input instead of quote-heavy shell payloads */
+/** Execute runtime command; stdin for multiline input. Node code runs as ESM: import/createRequire, never require() */
 function runtimeExecute(p: { runtime: string; executable?: string; args?: string[]; code?: string; stdin?: string; relativeCwd?: string; timeoutMs?: number; queryTerms?: string[]; contextLines?: number; maxResponseLines?: number; persistOutput?: boolean; outputMode?: "minimal"|"summary"|"intent" }): { status: string; exitCode: number; durationMs: number; artifactHandle?: string; stdoutSummary?: string; nextAction?: object }
 /** Query stored runtime output by keywords or exact line range */
 function runtimeQueryOutput(p: { artifactHandle: string; queryTerms?: string[]; cursor?: { stream: "stdout"|"stderr"; afterLine: number }; lineRange?: { stream: "stdout"|"stderr"; startLine: number; endLine: number }; maxExcerpts?: number; contextLines?: number; stream?: "stdout"|"stderr"|"both" }): { excerpts: object[]; matchStatus: "matched"|"noMatchFallback"|"lineRange"; matchCount: number; nextCursor?: object }
-/** Retrieve a large tool response by handle; maxTokens is enforced on returned content (estimate-based), maxBytes is an exact byte cap */
+/** Retrieve stored large response by handle; maxTokens estimate-capped, maxBytes exact */
 function responseGet(p: { handle: string; full?: boolean; maxBytes?: number; maxTokens?: number; offsetBytes?: number; jsonPath?: string; raw?: boolean; offset?: number; limit?: number }): { content: unknown; truncated: boolean; metadata: object; pagination?: object }
 
 // === Usage ===
-/** Get cumulative token savings statistics; compact default returns formattedSummary, detail:"full" returns structured diagnostics */
+/** Token savings stats; compact returns formattedSummary, detail:"full" structured */
 function usageStats(p: { scope?: "session" | "history" | "lifetime" | "both" | "all"; since?: string; limit?: number; persist?: boolean; detail?: "compact" | "full" }): { formattedSummary: string } | object
 
 // === File ===
 /** Read non-indexed file content (templates, configs, docs) */
 function fileRead(p: { filePath: string; maxBytes?: number; offset?: number; limit?: number; search?: string; searchContext?: number; jsonPath?: string; responseMode?: RM; deltaMode?: DM; maxDeltaLines?: number }): { content: string; truncated: boolean; sessionDelta?: object; delta?: object } | ResponseHandle
 function fileWrite(p: { filePath: string; content?: string; replaceLines?: { start: number; end: number; content: string }; replacePattern?: { pattern: string; replacement: string; global?: boolean }; jsonPath?: string; jsonValue?: unknown; insertAt?: { line: number; content: string }; append?: string; createBackup?: boolean; createIfMissing?: boolean }): { filePath: string; mode: string; backupPath?: string; replacementCount?: number }
-/** Cross-file search-and-edit: preview computes a plan; identifier/structural targeting and operations[] batch safer replacements into one shared preview/apply */
+/** Cross-file search-and-edit: preview plan then apply; identifier/structural/operations[] targeting */
 function searchEdit(p: { mode: "preview"; targeting?: ST; query?: SQ; editMode?: EM; operations?: SEOps[]; filters?: object; maxFiles?: number; createBackup?: boolean; responseMode?: RM } | { mode: "apply"; planHandle: string; createBackup?: boolean }): object | ResponseHandle
 
 // === Data Transforms (workflow-only) ===
@@ -192,7 +196,7 @@ function dataFilter(p: { input: unknown[]; clauses: Array<{path: string; op: "eq
 function dataSort(p: { input: unknown[]; by: {path: string; direction?: "asc"|"desc"; type?: "string"|"number"|"date"|"boolean"} }): object[]
 /** Render {{mustache}} template strings from object(s) */
 function dataTemplate(p: { input: Record<string, unknown> | unknown[]; template: string; joinWith?: string }): string
-/** Retrieve continuation data; path pages a selected array/string instead of byte chunks */
+/** Retrieve continuation data; path pages a selected array/string */
 function workflowContinuationGet(p: { handle: string; path?: string; offset?: number; limit?: number }): { data: unknown; totalTokens: number; hasMore: boolean }
 
 // === Compact Wire Format (sliceBuild wireFormat:"compact") ===

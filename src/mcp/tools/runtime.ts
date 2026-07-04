@@ -240,6 +240,28 @@ function mergeRuntimeHints(
   return merged.size > 0 ? Array.from(merged) : undefined;
 }
 
+/**
+ * PowerShell error-record signatures that indicate a script (or a wrapper
+ * shim like npm.ps1) failed even though the process exited 0. `-File`
+ * execution returns exit code 0 for non-terminating errors, so exit code
+ * alone under-reports failures.
+ */
+const POWERSHELL_STDERR_ERROR_PATTERNS: RegExp[] = [
+  /FullyQualifiedErrorId\s*:/,
+  /\+\s*CategoryInfo\s*:/,
+  /^At line:\d+ char:\d+/m,
+  /is not recognized as (?:the name of )?a cmdlet/i,
+  /cannot be retrieved because it has not been set/i,
+  /Exception calling ["'][^"']+["']/,
+];
+
+export function detectPowerShellStderrErrors(stderr: string): boolean {
+  if (!stderr) return false;
+  return POWERSHELL_STDERR_ERROR_PATTERNS.some((pattern) =>
+    pattern.test(stderr),
+  );
+}
+
 export function detectRuntimeHints(
   request: RuntimeExecuteRequest,
   outputText = "",
@@ -966,6 +988,20 @@ export async function handleRuntimeExecute(
       runtimeHints,
       detectRuntimeHints(request, `${stderrStr}\n${stdoutStr}`),
     );
+    // PowerShell -File exits 0 for non-terminating errors and for wrapper
+    // shims (npm.ps1) that swallow child exit codes. Reclassify as failure
+    // when stderr carries PowerShell error records so agents do not treat
+    // a broken run as success.
+    if (
+      request.runtime === "powershell" &&
+      result.status === "success" &&
+      detectPowerShellStderrErrors(stderrStr)
+    ) {
+      result.status = "failure";
+      runtimeHints = mergeRuntimeHints(runtimeHints, [
+        "PowerShell wrote error records to stderr despite exit code 0; status reclassified to failure. Add explicit exit codes in scripts, or use npm.cmd instead of npm.ps1 shims.",
+      ]);
+    }
     timer.record("runtime.decodeOutput", decodeStartedAt);
 
     // 11. Persist artifact (all modes)

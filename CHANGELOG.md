@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **action.search as workflow step**: `sdl.workflow` steps can now call the action catalog directly (`fn: "actionSearch"` or `"action.search"`), matching the manual's wording. The workflow-facing action map routes the step to the meta handler; the manual documents the step under a new Discovery section.
 - **Workflow wildcard projection**: `$N` references now support `[*]` array projection (e.g. `$0.results[*].symbolId` resolves to a `string[]`), covering the `symbolSearch -> symbolGetCard/sliceBuild` fan-out pattern without `dataMap` gymnastics.
 - **Symbolic refactor ops**: Added graph-scoped `search.edit` `targeting:"rename"` and TypeScript/JavaScript `targeting:"signature"` previews that reuse the two-phase plan/apply pipeline.
 - **Tree-sitter signature engine**: `targeting:"signature"` declaration and callsite transforms now walk the tree-sitter AST instead of a string scanner — call-shaped text inside string literals, comments, and template literals is no longer edited, and calls nested in template interpolations are.
@@ -22,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **response.get**: `maxTokens` is now enforced on the returned content (estimate-based shrink after slicing) instead of only seeding a 4-bytes-per-token pre-slice byte bound; `maxBytes` remains an exact byte cap. Schema description and manual updated to match.
 - **runtime.execute**: `persistOutput: true` now writes a searchable marker artifact when a command completes with no captured stdout/stderr, instead of returning `artifactHandle: null`.
 - **Manual drift**: the workflow manual now advertises `semanticEnrichmentStatus`'s existing `detail`/`limit` params and documents `[*]` reference projection.
+- **PowerShell runtime false success**: `runtime.execute` with `runtime: "powershell"` reclassifies exit-code-0 runs as `failure` when stderr carries PowerShell error records (`FullyQualifiedErrorId`, `CategoryInfo`, npm.ps1 `$LASTEXITCODE` noise, etc.), with a corrective `runtimeHint`. Previously `-File` execution and wrapper shims could report success while the command actually failed.
+- **Off-target sdl.context evidence for tool-QA prompts**: broad-mode seeding now detects prompts that name catalog actions, restricts entity search to symbol/fileSummary evidence (no cluster/process noise), and anchors the FTS query on the tool's handler/schema identifiers.
+- **code.needWindow continuation over-promise**: the truncation `suggestedNextCall` now carries `granularity`, `maxTokens`, and `sliceContext` forward and no longer claims "all original params preserved" (response-shaping options must be re-added).
+- **Node runtime ESM docs**: runtime docs, manual, and action catalog now state that Node `code` always runs as ESM (`node --input-type=module` / temp `.mjs`) — use `import`/`createRequire()`, never bare `require()`. The runtime deep-dive example shows an ESM snippet.
 
 ## [0.12.0] - 2026-07-01
 

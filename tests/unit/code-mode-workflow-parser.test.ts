@@ -71,6 +71,27 @@ describe("code-mode workflow parser", () => {
     }
   });
 
+  it("accepts action.search as a workflow step (camelCase and dot forms)", () => {
+    const camel = parseWorkflowRequest({
+      repoId: "test",
+      steps: [{ fn: "actionSearch", args: { query: "runtime execute" } }],
+    });
+    assert.strictEqual(camel.ok, true);
+    if (camel.ok) {
+      assert.strictEqual(camel.request.steps[0].action, "action.search");
+      assert.strictEqual(camel.request.steps[0].fn, "actionSearch");
+    }
+
+    const dotted = parseWorkflowRequest({
+      repoId: "test",
+      steps: [{ fn: "action.search", args: { query: "runtime execute" } }],
+    });
+    assert.strictEqual(dotted.ok, true);
+    if (dotted.ok) {
+      assert.strictEqual(dotted.request.steps[0].action, "action.search");
+    }
+  });
+
   it("unknown function name rejected with clear error when onError=stop", () => {
     const result = parseWorkflowRequest({
       repoId: "test",

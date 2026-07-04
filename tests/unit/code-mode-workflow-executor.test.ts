@@ -175,6 +175,39 @@ describe("code-mode workflow executor", () => {
     assert.strictEqual(result.results[0].status, "ok");
   });
 
+  it("executes action.search as a workflow step via the meta handler", async () => {
+    const { handleActionSearch } = await import(
+      "../../dist/code-mode/index.js"
+    );
+    const { META_ACTION_SEARCH_SCHEMA } = await import(
+      "../../dist/code-mode/action-catalog.js"
+    );
+    const actionMap = {
+      ...createMockActionMap(),
+      "action.search": {
+        schema: META_ACTION_SEARCH_SCHEMA,
+        handler: async (args: unknown) => handleActionSearch(args, {}),
+      },
+    };
+    const request: ParsedWorkflowRequest = {
+      repoId: "test",
+      steps: [
+        {
+          fn: "actionSearch",
+          action: "action.search",
+          args: { query: "runtime execute", limit: 3 },
+        },
+      ],
+      onError: "stop",
+    };
+    const result = await executeWorkflow(request, actionMap, testConfig);
+    assert.strictEqual(result.results.length, 1);
+    assert.strictEqual(result.results[0].status, "ok");
+    const stepResult = result.results[0].result as Record<string, unknown>;
+    assert.ok(Array.isArray(stepResult.actions));
+    assert.ok((stepResult.actions as unknown[]).length > 0);
+  });
+
   it("multi-step chain with $N refs resolves correctly", async () => {
     const request: ParsedWorkflowRequest = {
       repoId: "test",

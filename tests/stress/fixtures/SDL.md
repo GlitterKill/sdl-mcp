@@ -353,6 +353,8 @@ Do not use runtime execution to print indexed source. Use the retrieval ladder i
 }
 ```
 
+Node `code` snippets always run as ESM (`node --input-type=module`); use `import fs from "node:fs"` or `createRequire()` — bare `require()` fails.
+
 For shell runtime, provide `code` when a shell wrapper is the right abstraction. On Windows, `runtime: "shell"` uses `cmd.exe`; use `runtime: "powershell"` for PowerShell `.ps1` snippets. In PowerShell runtime, call npm scripts through `npm.cmd` when the `npm.ps1` shim emits `$LASTEXITCODE` noise.
 
 ---

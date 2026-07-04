@@ -1013,13 +1013,22 @@ export async function handleCodeNeedWindow(
           suggestedNextCall: {
             tool: "sdl.code.needWindow",
             description:
-              "Continue reading from the truncation point. All original params preserved; just copy this args block.",
+              "Continue reading from the truncation point by copying this args block. Core params are carried over; re-add any response-shaping options (responseMode, deltaMode, maxDeltaLines) you passed originally.",
             args: {
               repoId: request.repoId,
               symbolId: request.symbolId,
               reason: request.reason,
               expectedLines: request.expectedLines,
               identifiersToFind: request.identifiersToFind,
+              ...(request.granularity !== undefined
+                ? { granularity: request.granularity }
+                : {}),
+              ...(request.maxTokens !== undefined
+                ? { maxTokens: request.maxTokens }
+                : {}),
+              ...(request.sliceContext !== undefined
+                ? { sliceContext: request.sliceContext }
+                : {}),
               cursor: windowResult.actualRange.endLine,
             },
           },

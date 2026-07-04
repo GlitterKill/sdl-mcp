@@ -34,6 +34,16 @@ export interface ParsedWorkflowRequest {
   includeDiagnostics?: boolean;
 }
 
+/**
+ * Meta workflow steps: these are callable as workflow steps but are not
+ * gateway actions, so they live outside FN_NAME_MAP. The workflow-facing
+ * action map (see registerCodeModeTools) supplies their handlers.
+ */
+const WORKFLOW_META_STEP_ACTIONS: Record<string, string> = {
+  actionSearch: "action.search",
+  "action.search": "action.search",
+};
+
 function readLegacyEtagCache(raw: unknown): Record<string, string> | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return undefined;
@@ -132,7 +142,15 @@ export function parseWorkflowRequest(
       }
     }
 
-    if (!isTransform && !(resolvedFn in fnNameMap)) {
+    const metaAction =
+      !isTransform && Object.hasOwn(WORKFLOW_META_STEP_ACTIONS, step.fn)
+        ? WORKFLOW_META_STEP_ACTIONS[step.fn]
+        : undefined;
+    if (metaAction) {
+      resolvedFn = "actionSearch";
+    }
+
+    if (!isTransform && !metaAction && !(resolvedFn in fnNameMap)) {
       const memoryNames = new Set([
         "memory.store",
         "memory.query",
@@ -194,7 +212,9 @@ export function parseWorkflowRequest(
 
     parsedSteps.push({
       fn: resolvedFn,
-      action: isTransform ? step.fn : fnNameMap[resolvedFn],
+      action: isTransform
+        ? step.fn
+        : metaAction ?? fnNameMap[resolvedFn],
       args: step.args,
       internal: isTransform,
       maxResponseTokens: step.maxResponseTokens,

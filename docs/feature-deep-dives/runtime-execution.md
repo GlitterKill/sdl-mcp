@@ -15,10 +15,22 @@ quote-heavy payloads. SDL-MCP writes it to the child process as UTF-8, closes
 stdin, reports `stdinBytes` and `stdinSha256`, and does not echo the full input
 in visible output or persisted logs. The limit is 512 KiB.
 
-For `runtime: "node"`, inline `code` runs as a temp `.js` file under the
-repository's module type. In ESM repos, use `import` inside `code`; use
-args-only execution such as `args: ["-e", "..."]` when you need CommonJS-style
-`require` snippets.
+For `runtime: "node"`, inline `code` always runs as ESM regardless of the
+repository's module type: SDL-MCP pipes it to `node --input-type=module`
+(or a temp `.mjs` file when the request also supplies `stdin`). Write ESM
+snippets — `import fs from "node:fs"`, or
+`import { createRequire } from "node:module"` when a CommonJS dependency is
+unavoidable. Bare `require()` fails with
+`require is not defined in ES module scope`. Use args-only execution such as
+`args: ["-e", "..."]` only when you specifically need a CommonJS-style
+`require` one-liner.
+
+```json
+{
+  "runtime": "node",
+  "code": "import fs from \"node:fs\";\nconst pkg = JSON.parse(fs.readFileSync(\"package.json\", \"utf-8\"));\nconsole.log(pkg.version);"
+}
+```
 
 ---
 

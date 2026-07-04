@@ -16,6 +16,7 @@ import { getServerInfo } from "../util/runtime-identity.js";
 import {
   buildCatalog,
   rankCatalog,
+  META_ACTION_SEARCH_SCHEMA,
   type ActionDescriptor,
 } from "./action-catalog.js";
 import {
@@ -361,6 +362,19 @@ export function registerCodeModeTools(
   prebuiltActionMap?: ActionMap,
 ): void {
   const actionMap = prebuiltActionMap ?? createActionMap(services.liveIndex);
+  // action.search is a meta tool, not a gateway action, but the manual
+  // documents it as a workflow step (fn: "actionSearch"). Extend the
+  // workflow-facing map (copy, not mutation — the base map is shared with
+  // gateway registration) so those steps route to the meta handler. The
+  // permissive META schema defers default-filling to handleActionSearch so
+  // its narrow-lookup auto-include heuristic still sees the raw args.
+  const workflowActionMap: ActionMap = {
+    ...actionMap,
+    "action.search": {
+      schema: META_ACTION_SEARCH_SCHEMA,
+      handler: async (args: unknown) => handleActionSearch(args, services),
+    },
+  };
 
   server.registerTool(
     "sdl.manual",
@@ -407,7 +421,7 @@ export function registerCodeModeTools(
 
       return executeWorkflow(
         parsed.request,
-        actionMap,
+        workflowActionMap,
         config,
         context,
         traceOpts,
