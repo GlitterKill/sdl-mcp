@@ -144,7 +144,7 @@ Only these two metadata tools are proxied through the CLI today.
 | `memory.remove`        | Remove a development memory                 |
 | `memory.surface`       | Surface relevant memories                   |
 
-`sdl-mcp tool` currently exposes only two Code Mode metadata proxies: `action.search` and `manual` (with `sdl.` aliases). `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only wrapper tools.
+`sdl-mcp tool` currently exposes only two Code Mode metadata proxies: `action.search` and `manual` (with `sdl.` aliases). `sdl.context`, `sdl.retrieve`, `sdl.workflow`, and `sdl.file` remain MCP-only wrapper tools.
 
 Use these CLI edit paths:
 

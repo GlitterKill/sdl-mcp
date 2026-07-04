@@ -95,6 +95,10 @@ function renderChart(rows: readonly LanguageProviderSupportRow[]): string {
   return lines.join("\n");
 }
 
+function normalizeNewlines(value: string): string {
+  return value.replace(/\r\n/gu, "\n");
+}
+
 function main(): void {
   const rows = loadRows();
   const expected = renderChart(rows);
@@ -104,7 +108,7 @@ function main(): void {
   if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
     throw new Error(`${DOC_PATH} must contain ${START} and ${END} markers`);
   }
-  const actual = doc.slice(startIndex + START.length, endIndex).trim();
+  const actual = normalizeNewlines(doc.slice(startIndex + START.length, endIndex).trim());
   if (actual !== expected) {
     console.error("Language provider support chart is stale.");
     console.error(`Update ${DOC_PATH} from ${DATA_PATH}.`);

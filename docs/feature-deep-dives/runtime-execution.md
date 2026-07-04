@@ -34,7 +34,7 @@ unavoidable. Bare `require()` fails with
 
 ---
 
-## Supported Runtimes (16)
+## Supported Runtimes (17)
 
 SDL-MCP is Windows-first but supports all major platforms (Windows, Linux, macOS). The following runtimes are supported:
 
@@ -45,7 +45,8 @@ SDL-MCP is Windows-first but supports all major platforms (Windows, Linux, macOS
 | `node` | `node` or `bun` | JavaScript tests, scripts, build tooling |
 | `typescript` | `tsx` / `ts-node` | TypeScript scripts without pre-compilation |
 | `python` | `python3` / `python` | Tests, scripts, analysis, automation |
-| `shell` | `bash` / `sh` / `cmd.exe` / `powershell` | General command execution |
+| `shell` | `bash` / `sh` / `cmd.exe` | General command execution |
+| `powershell` | `powershell.exe` / `pwsh` | PowerShell scripts and Windows-first automation |
 | `ruby` | `ruby` | Ruby scripts and tests |
 | `php` | `php` | PHP scripts |
 | `perl` | `perl` | Perl scripts |
@@ -244,8 +245,8 @@ Example uses:
 {
   "runtime": {
     "enabled": true,
-    // Default: ["node", "typescript", "python", "shell"]. Add more as needed from the 16 supported runtimes.
-    "allowedRuntimes": ["node", "typescript", "python", "shell"],
+    // Default: ["node", "typescript", "python", "shell", "powershell"]. Add more as needed from the 17 supported runtimes.
+    "allowedRuntimes": ["node", "typescript", "python", "shell", "powershell"],
     "maxDurationMs": 600000,
     "maxConcurrentJobs": 2,
     "maxStdoutBytes": 1048576,

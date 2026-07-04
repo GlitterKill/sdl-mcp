@@ -6,7 +6,7 @@ Language support status is tracked in [Language Provider Support](./language-pro
 
 Provider-first is its own indexing mode. Its symbol IDs are stable within the provider-first pipeline, but they are not intended to be interchangeable with legacy symbol IDs. Consumers should resolve symbols through current graph queries, provider provenance, source path, kind, name, and range rather than assuming a legacy/provider-first ID can be reused across modes.
 
-For performance tuning, use the deterministic subset workflow in [Provider-first fallback benchmark](./provider-first-fallback-benchmark.md). That workflow is the fast iteration loop only. A larger representative run or full target run is still required before declaring an optimization complete.
+For performance tuning, use the deterministic subset workflow in [Provider-first fallback benchmark](../../devdocs/benchmarks/provider-first-fallback-benchmark.md). That workflow is the fast iteration loop only. A larger representative run or full target run is still required before declaring an optimization complete.
 
 ## Quick Reference
 

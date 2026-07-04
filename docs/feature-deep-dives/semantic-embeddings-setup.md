@@ -61,7 +61,7 @@ flowchart TD
 | Dependency            | npm Package        | Version   | Required? | Purpose                                      |
 | :-------------------- | :----------------- | :-------- | :-------- | :------------------------------------------- |
 | ONNX Runtime          | `onnxruntime-node` | `^1.24.3` | Optional  | Run local embedding model inference          |
-| HuggingFace Tokenizer | `tokenizers`       | `^0.13.3` | Optional  | Tokenize text for ONNX models                |
+| HuggingFace Tokenizer | `tokenizers@npm:@anush008/tokenizers` | `^0.6.0` | Optional  | Tokenize text for ONNX models                |
 | Jina Code Model       | downloaded         | -         | Optional  | Default Symbol-lane code embeddings          |
 | Nomic Model           | downloaded         | -         | Optional  | Default FileSummary-lane text embeddings     |
 | Anthropic API Key     | -                  | -         | Optional  | LLM summary generation                       |
@@ -83,7 +83,7 @@ Enhanced heuristics are always active, generating pattern-matched summaries for 
 
 ```bash
 cd sdl-mcp
-npm install onnxruntime-node tokenizers
+npm install onnxruntime-node tokenizers@npm:@anush008/tokenizers@^0.6.0
 ```
 
 **Step 2 - Optionally pre-download the default local models:**
@@ -169,7 +169,7 @@ Use `embeddingProfile: "max-recall"` when you want the old recall-first behavior
 **Step 1 - Install ONNX dependencies and pre-download optional models:**
 
 ```bash
-npm install onnxruntime-node tokenizers
+npm install onnxruntime-node tokenizers@npm:@anush008/tokenizers@^0.6.0
 node scripts/download-models.mjs nomic-embed-text-v1.5
 ```
 
@@ -678,7 +678,7 @@ cardHash = SHA256(symbolName | kind | signature | astFingerprint | providerName 
 **Fix:**
 
 ```bash
-npm install onnxruntime-node tokenizers
+npm install onnxruntime-node tokenizers@npm:@anush008/tokenizers@^0.6.0
 ```
 
 Then run `npx sdl-mcp doctor` to verify.

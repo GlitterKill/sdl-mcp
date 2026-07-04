@@ -56,7 +56,7 @@ sdl-mcp index
 | ------------------------------------------------------------------------- | ---------------------------------------- |
 | [plugin-sdk-author-guide.md](./plugin-sdk-author-guide.md)                | Complete guide for creating plugins      |
 | [plugin-sdk-security.md](./plugin-sdk-security.md)                        | Security best practices and threat model |
-| [templates/README.md](../templates/README.md)                             | Template usage guide                     |
+| [templates/plugin-template/README.md](../templates/plugin-template/README.md) | Template usage guide                     |
 | [examples/example-plugin/README.md](../examples/example-plugin/README.md) | Example plugin documentation             |
 
 ## Plugin Manifest

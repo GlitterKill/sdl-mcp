@@ -665,7 +665,7 @@ for V2:
 Bearer token is missing or wrong. The token is printed to stderr at server startup (look
 for `[sdl-mcp] HTTP auth token: ...`). Pass it as `Authorization: Bearer <token>` on every
 request. To set a static token instead of a generated one, configure
-`httpAuth.token` — see [Configuration reference → httpAuth](../configuration-reference.md#httpauth-optional).
+`httpAuth.token` — see [Configuration reference → httpAuth](../configuration-reference.md#httpauth).
 
 To temporarily disable auth on a trusted local machine:
 

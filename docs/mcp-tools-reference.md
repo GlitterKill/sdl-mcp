@@ -19,9 +19,9 @@
 
 Complete reference for the SDL-MCP runtime surfaces exposed by `registerTools`.
 
-- `36` flat SDL action tools (`35` gateway-routable + `1` flat-only)
+- `35` flat SDL action tools
 - `2` universal tools: `sdl.action.search` and `sdl.info`
-- Code Mode tools: `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file` (`sdl.info` is omitted in Code Mode exclusive)
+- Code Mode tools: `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.retrieve`, `sdl.workflow`, and `sdl.file` (`sdl.info` is omitted in Code Mode exclusive)
 
 Flat mode and gateway mode share the same handler layer. The CLI `tool` command exposes direct action aliases for the shared handler layer rather than the full MCP surface.
 
@@ -386,7 +386,7 @@ Search symbols by name or summary text.
 | `pprDirection`             | `"out" \| "in" \| "both"` | No       | Walk direction across the dependency graph. Default: `"both"`.                                                                                                                  |
 | `pprWeight`                | `number`                  | No       | PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default: `2.0`. Range: `[0, 2]`. |
 
-When `chatMentions` is non-empty, results are re-ranked via Personalized PageRank seeded at those mentions — see [semantic-engine.md → Chat-Aware PageRank Boost](feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0108). When `chatMentions` is **omitted** (`undefined`), the server auto-extracts identifier-like tokens from the query as seeds. Pass an explicit empty array `[]` to disable PPR entirely. PPR diagnostics surface in `response.pprBoosts` when `includeRetrievalEvidence: true`.
+When `chatMentions` is non-empty, results are re-ranked via Personalized PageRank seeded at those mentions — see [semantic-engine.md → Chat-Aware PageRank Boost](feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0109). When `chatMentions` is **omitted** (`undefined`), the server auto-extracts identifier-like tokens from the query as seeds. Pass an explicit empty array `[]` to disable PPR entirely. PPR diagnostics surface in `response.pprBoosts` when `includeRetrievalEvidence: true`.
 
 When semantic mode is enabled, the retrieval path depends on `semantic.retrieval.mode`:
 
@@ -503,9 +503,9 @@ See [sdl.symbol.edit](./symbol-edit-tool.md) for the full operation and precondi
 
 ---
 
-### `sdl.symbol.getCard`
+### `sdl.symbol.getCard` (batch request shape)
 
-Batch fetch up to 100 symbol cards in a single round trip. Prefer this over multiple sequential `sdl.symbol.getCard` calls when you already have a list of symbol IDs or natural symbol references.
+Batch fetch up to 100 symbol cards through the same `sdl.symbol.getCard` tool. Prefer this over multiple sequential calls when you already have a list of symbol IDs or natural symbol references.
 
 **Parameters:**
 
@@ -943,7 +943,7 @@ Retrieve task-shaped code context with rung path selection and evidence capture.
 | `semantic`                 | `boolean`                                     | Opt in to hybrid (FTS + vector + RRF) retrieval for context seeding. Default `false`; leave unset for fast path/path-inferred lexical retrieval, or set `true` when task text alone needs semantic expansion.                                                                                                                                                                        |
 | `includeRetrievalEvidence` | `boolean`                                     | Attach hybrid `retrievalEvidence` to the response (sources, candidate counts, top ranks per source, fusion latency, lane availability). Default `true`                                                                                                                                                                                                                               |
 | `evidenceOptimization`     | `"off" \| "dedupe" \| "budgeted" \| "global"` | Enable opt-in evidence optimization for `sdl.context`. `dedupe` removes duplicate/subsumed evidence; `budgeted` greedily selects finalEvidence by value per token under `budget.maxTokens`; `global` also optimizes broad-mode `summary`, `answer`, and `finalEvidence` together under the response budget while preserving supporting cards for selected hot paths. Default `"off"` |
-| `chatMentions`             | `string[]`                                    | Up to 20 identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank for chat-aware re-ranking. See [semantic-engine.md → Chat-Aware PageRank](feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0108)                                                                                                                 |
+| `chatMentions`             | `string[]`                                    | Up to 20 identifiers / symbol names / IDs the user just mentioned in chat. Seeds Personalized PageRank for chat-aware re-ranking. See [semantic-engine.md → Chat-Aware PageRank](feature-deep-dives/semantic-engine.md#chat-aware-personalized-pagerank-boost-v0109)                                                                                                                 |
 | `chatMentionWeights`       | `Record<string, number>`                      | Per-mention weight overrides; missing entries default to uniform 1.0                                                                                                                                                                                                                                                                                                                 |
 | `pprDirection`             | `"out" \| "in" \| "both"`                     | Walk direction across the dependency graph for chat-aware re-ranking. Default `"both"`                                                                                                                                                                                                                                                                                               |
 | `pprWeight`                | `number`                                      | PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default `2.0`, range `[0, 2]`                                                                                                                                                                                                         |
@@ -1358,7 +1358,7 @@ Get cumulative token usage statistics and savings metrics for the current sessio
 
 ---
 
-## Code Mode (5 tools)
+## Code Mode (6 tools)
 
 ### `sdl.context`
 
@@ -1371,6 +1371,12 @@ Use `sdl.context` first for `debug`, `review`, `implement`, and `explain` reques
 Execute a multi-step workflow of SDL-MCP actions and internal transforms in one round trip.
 
 Use this for runtime execution, data shaping, batch mutations, and reusable multi-step pipelines. Do not use it for context retrieval; route that work to `sdl.context`. Set `includeDiagnostics: true` to include workflow phase timings.
+
+### `sdl.retrieve`
+
+Run one compact retrieval operation inside Code Mode.
+
+Use it when you need a single manual-ladder step without building a workflow. Supported operations are `symbolSearch`, `symbolGetCard`, `sliceBuild`, `codeSkeleton`, `codeHotPath`, and `codeNeedWindow`; `responseMode: "auto"` or `"handle"` can keep large code-window responses handle-backed.
 
 ### `sdl.manual`
 
@@ -1390,15 +1396,16 @@ Use tools in this order for most tasks:
 
 1. `sdl.repo.status` — check repo state and version
 2. `sdl.context` — get task-shaped context first for explain/debug/review/implement/understand/investigate work when Code Mode is available
-3. `sdl.symbol.search` — find exact symbols or APIs (start with tight limits)
-4. `sdl.symbol.getCard` — understand what symbols do; batch through the same tool when you already have many IDs or refs
-5. `sdl.slice.build` — get related symbols when you need a dependency frontier, likely files, blast radius, or edit-planning set
-6. `sdl.repo.overview` — understand repo shape, directories, stats, or hotspots when task-shaped context is not the right surface
-7. `sdl.code.getSkeleton` — see code structure without full bodies
-8. `sdl.code.getHotPath` — find specific identifiers in code
-9. `sdl.code.needWindow` — raw code only when necessary
-10. `sdl.agent.feedback` — record useful/missing symbols when a slice-backed task produced durable training signal
-11. `sdl.memory.store` — persist important decisions, bugfixes, or context for future sessions (requires memory enabled in config)
+3. `sdl.retrieve` — run one exact retrieval step from Code Mode when task-shaped context is too broad
+4. `sdl.symbol.search` — find exact symbols or APIs (start with tight limits)
+5. `sdl.symbol.getCard` — understand what symbols do; batch through the same tool when you already have many IDs or refs
+6. `sdl.slice.build` — get related symbols when you need a dependency frontier, likely files, blast radius, or edit-planning set
+7. `sdl.repo.overview` — understand repo shape, directories, stats, or hotspots when task-shaped context is not the right surface
+8. `sdl.code.getSkeleton` — see code structure without full bodies
+9. `sdl.code.getHotPath` — find specific identifiers in code
+10. `sdl.code.needWindow` — raw code only when necessary
+11. `sdl.agent.feedback` — record useful/missing symbols when a slice-backed task produced durable training signal
+12. `sdl.memory.store` — persist important decisions, bugfixes, or context for future sessions (requires memory enabled in config)
 
 ### Task-Specific Workflows
 

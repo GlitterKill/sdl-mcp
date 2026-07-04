@@ -90,6 +90,7 @@ SDL-MCP exposes flat, gateway, and Code Mode tool surfaces. Exact tool counts mo
 | **Code Mode** _(optional)_ | `sdl.action.search`        | Discover the most relevant SDL actions with optional schema/example metadata                                                                                         |
 |                            | `sdl.manual`               | Return a compact filtered API reference for a queried or explicit action subset                                                                                      |
 |                            | `sdl.context`              | Retrieve task-shaped context inside Code Mode for explain/debug/review/implement work                                                                                |
+|                            | `sdl.retrieve`             | Run one exact retrieval step inside Code Mode without building a workflow                                                                                            |
 |                            | `sdl.workflow`             | Execute up to 50 actions in a single round trip with `$N` result piping, transforms, and optional traces                                                             |
 |                            | `sdl.file`                 | Unified Code Mode file gateway for read, write, search/edit preview/apply, symbol edit preview/apply, and gated source windows                                       |
 
@@ -154,7 +155,7 @@ Use this order unless task constraints force escalation:
 - **PR review**: `delta.get -> pr.risk.analyze -> card/hotPath for high-risk symbols`.
 - **Live editing**: `buffer.push` as files change (with cursor/selection tracking) → `buffer.checkpoint` to persist → search/card/slice now reflect draft state.
 - **Test execution**: `runtime.execute` with the narrowest useful runtime (`node`, `python`, `shell`, or `powershell`) to run tests and capture structured output. On Windows shell runtime, use `&` or newlines rather than semicolons for command separation.
-- **Context retrieval** _(Code Mode)_: use `sdl.context` for task-shaped explain/debug/review/implement context, `symbol.search`/`symbol.getCard` for exact symbols, and `slice.build` for graph/file frontiers. If Code Mode is disabled, follow the manual ladder (`repo.overview` -> `symbol.search` -> `symbol.getCard` -> `slice.build` -> code tools).
+- **Context retrieval** _(Code Mode)_: use `sdl.context` for task-shaped explain/debug/review/implement context, `sdl.retrieve` for one exact retrieval step, `symbol.search`/`symbol.getCard` for exact symbols, and `slice.build` for graph/file frontiers. If Code Mode is disabled, follow the manual ladder (`repo.overview` -> `symbol.search` -> `symbol.getCard` -> `slice.build` -> code tools).
 - **Multi-step operations** _(Code Mode)_: `sdl.workflow` for runtime execution, data transforms, batch mutations, and retrieval ladders after the first SDL discovery surface. Do not wrap a single `sdl.context` call in workflow.
 - **Symbol-scoped edits** _(Code Mode)_: `sdl.file` with `op: "symbolEditPreview"` -> review `planHandle` -> `op: "symbolEditApply"`. Use `symbolEditApplyNow` only when you already hold the current `astFingerprint` and range from a fresh card.
 - **Search edits** _(Code Mode)_: `sdl.file` with `op: "searchEditPreview"` -> review `planHandle`, snippets, and `defaultCreateBackup` -> `op: "searchEditApply"` with the same backup value. On the flat `sdl.search.edit` surface, copy preview `applyArgs` directly.
@@ -274,19 +275,20 @@ Then, if needed:
 - `persistOutput: true` (default) saves full output to an artifact handle for later retrieval via `sdl.runtime.queryOutput`.
 - Per-line truncation caps each output line at 500 characters.
 
-### 7) Code Mode (`sdl.context` + `sdl.workflow`)
+### 7) Code Mode (`sdl.context`, `sdl.retrieve`, `sdl.workflow`, `sdl.file`)
 
-When `codeMode.enabled: true` is set in config, four Code Mode tools sit alongside the universal `sdl.action.search` surface:
+When `codeMode.enabled: true` is set in config, Code Mode registers six tools:
 
 - `sdl.action.search` — returns the most relevant SDL actions for a query, optionally with schema and example metadata.
 - `sdl.manual` — returns a compact filtered API reference for all or part of the action surface.
 - `sdl.context` — retrieves task-shaped context inside Code Mode. Use it for explain/debug/review/implement understanding, not as a wrapper around exact symbol lookup or edit planning.
+- `sdl.retrieve` — runs one exact retrieval step inside Code Mode without the overhead of a workflow.
 - `sdl.workflow` — executes up to 50 actions in a single round trip with `$N` result piping, internal data transforms, and optional traces.
 - `sdl.file` — performs Code Mode file read/write, two-phase search/edit, symbol edit, and gated source-window operations through one `op` discriminator.
 
 Routing guidance:
 
-- Use `sdl.context` for task-shaped understanding, `symbol.search`/`symbol.getCard` for exact targets, and `slice.build` when you need a likely file/symbol frontier before editing.
+- Use `sdl.context` for task-shaped understanding, `sdl.retrieve` for one exact retrieval step, `symbol.search`/`symbol.getCard` for exact targets, and `slice.build` when you need a likely file/symbol frontier before editing.
 - Use `sdl.workflow` only when the task is genuinely multi-step: retrieval ladder escalation, runtime execution, data shaping, batch mutations, or a reusable operation pipeline.
 
 Workflow guidance:

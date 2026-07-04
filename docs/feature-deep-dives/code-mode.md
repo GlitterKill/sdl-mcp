@@ -7,9 +7,11 @@ Code Mode is built around one clear separation of responsibility:
 - `sdl.action.search` is the universal discovery surface.
 - `sdl.manual` loads a compact API subset.
 - `sdl.context` handles task-shaped code understanding.
+- `sdl.retrieve` handles one exact retrieval step.
 - `sdl.workflow` handles multi-step operations.
+- `sdl.file` handles file reads, writes, edits, and gated source windows.
 
-If you remember only one rule, make it this one: use `sdl.context` first for `explain`, `debug`, `review`, and most `implement` requests. Use `sdl.workflow` only when the work is genuinely procedural.
+If you remember only one rule, make it this one: use `sdl.context` first for `explain`, `debug`, `review`, and most `implement` requests. Use `sdl.retrieve` for one exact retrieval step, `sdl.file` for file/edit/window work, and `sdl.workflow` only when the work is genuinely procedural.
 
 ---
 
@@ -27,7 +29,9 @@ Code Mode keeps those flows inside SDL-MCP:
 1. discover the right surface with `sdl.action.search`
 2. load a narrow API slice with `sdl.manual`
 3. route understanding work to `sdl.context`
-4. route execution pipelines to `sdl.workflow`
+4. route one-step retrieval to `sdl.retrieve`
+5. route file, edit, and source-window work to `sdl.file`
+6. route execution pipelines to `sdl.workflow`
 
 ---
 
@@ -71,6 +75,19 @@ It mirrors `sdl.context`, but it sits next to `sdl.manual` and `sdl.workflow` so
 - `review`
 - `implement` when the immediate need is understanding existing code
 
+### `sdl.retrieve`
+
+Use this when you need one exact retrieval step and do not need the planning overhead of a workflow.
+
+Supported operations:
+
+- `symbolSearch`
+- `symbolGetCard`
+- `sliceBuild`
+- `codeSkeleton`
+- `codeHotPath`
+- `codeNeedWindow`
+
 ### `sdl.workflow`
 
 Use this for multi-step operations that would otherwise require multiple SDL calls.
@@ -88,6 +105,17 @@ Bad fits:
 - explain/debug/review context retrieval
 - “figure out what this code does” questions
 
+### `sdl.file`
+
+Use this for file and edit operations inside Code Mode.
+
+Good fits:
+
+- read or write a non-indexed file
+- preview and apply `search.edit`
+- preview and apply `symbol.edit`
+- request policy-gated source windows with `previewWindow` or `sourceWindow`
+
 ---
 
 ## Routing Guide
@@ -98,6 +126,8 @@ Bad fits:
 | Debug a bug or trace behavior | `sdl.context` | Chooses `card`, `skeleton`, `hotPath`, and raw follow-ups only when needed |
 | Review code or inspect risk | `sdl.context` | Gives compact review-oriented evidence first |
 | Learn a pattern before implementing | `sdl.context` | Gets structural context with less overhead than a workflow |
+| Need one exact retrieval step | `sdl.retrieve` | Runs a single symbol, slice, skeleton, hot-path, or code-window operation |
+| Read, write, edit, or request a source window | `sdl.file` | Keeps file operations on the compact Code Mode surface |
 | Run tests, lint, or diagnostics | `sdl.workflow` | Best for `runtimeExecute` plus follow-up parsing |
 | Shape or filter previous results | `sdl.workflow` | Internal transforms avoid wasting model tokens |
 | Batch multiple dependent operations | `sdl.workflow` | `$N` references keep everything in one round trip |
@@ -115,6 +145,8 @@ flowchart TD
         AS["sdl.action.search<br/>Discovery"]
         MN["sdl.manual<br/>Reference"]
         CTX["sdl.context<br/>Task-shaped context"]
+        RET["sdl.retrieve<br/>One-step retrieval"]
+        FILE["sdl.file<br/>File/edit gateway"]
         WF["sdl.workflow<br/>Multi-step operations"]
     end
 
@@ -123,23 +155,29 @@ flowchart TD
     Agent e3@-->|"2. Show me the narrow API"| MN
     MN e4@-->|"compact manual"| Agent
     Agent e5@-->|"3a. Understand code"| CTX
-    Agent e6@-->|"3b. Execute a pipeline"| WF
+    Agent e6@-->|"3b. Run one retrieval step"| RET
+    Agent e7@-->|"3c. Read, edit, or request windows"| FILE
+    Agent e8@-->|"3d. Execute a pipeline"| WF
 
     subgraph "sdl.workflow Example"
         S1["Step 0: symbolSearch"]
         S2["Step 1: runtimeExecute"]
         S3["Step 2: dataTemplate"]
-        S1 e7@-->|"$0"| S2
-        S2 e8@-->|"$1"| S3
+        S1 e9@-->|"$0"| S2
+        S2 e10@-->|"$1"| S3
     end
 
-    WF e9@--> S1
-    CTX e10@-->|"finalEvidence + metrics"| Agent
-    S3 e11@-->|"step results + budget + traces"| Agent
+    WF e11@--> S1
+    CTX e12@-->|"finalEvidence + metrics"| Agent
+    RET e13@-->|"retrieval result"| Agent
+    FILE e14@-->|"file/edit/window result"| Agent
+    S3 e15@-->|"step results + budget + traces"| Agent
 
     style AS fill:#E8F1FF,stroke:#2563EB,stroke-width:2px,color:#102A43
     style MN fill:#FFF4D6,stroke:#B45309,stroke-width:2px,color:#102A43
     style CTX fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43
+    style RET fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43
+    style FILE fill:#F2E8FF,stroke:#7C3AED,stroke-width:2px,color:#102A43
     style WF fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43
 
     classDef source fill:#E7F8F2,stroke:#0F766E,stroke-width:2px,color:#102A43;
@@ -149,7 +187,7 @@ flowchart TD
     classDef output fill:#FFE8EF,stroke:#BE123C,stroke-width:2px,color:#102A43;
     classDef muted fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#102A43;
     classDef animate stroke:#0F766E,stroke-width:2px,stroke-dasharray:10\,5,stroke-dashoffset:900,animation:dash 22s linear infinite;
-    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11 animate;
+    class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13,e14,e15 animate;
 ```
 
 ---
@@ -245,9 +283,9 @@ The workflow engine also provides:
 | Mode | Registered tools |
 |:-----|:-----------------|
 | Disabled | Base flat or gateway tools, plus universal `sdl.action.search` and `sdl.info` |
-| Enabled + gateway | Gateway tools plus `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, `sdl.file` |
-| Enabled + flat | Flat tools plus `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, `sdl.file` |
-| Exclusive | `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, `sdl.file` only |
+| Enabled + gateway | Gateway tools plus `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.retrieve`, `sdl.workflow`, `sdl.file` |
+| Enabled + flat | Flat tools plus `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.retrieve`, `sdl.workflow`, `sdl.file` |
+| Exclusive | `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.retrieve`, `sdl.workflow`, `sdl.file` only |
 
 ---
 
@@ -259,8 +297,10 @@ For SDL-first agents:
 2. `sdl.action.search` when the right surface is unclear
 3. `sdl.manual(query|actions)` when a compact API slice helps
 4. `sdl.context` for explain/debug/review/implement context retrieval
-5. `sdl.workflow` for runtime execution, data shaping, batch mutations, and other procedural pipelines
-6. `runtimeExecute` inside `sdl.workflow` for repo-local build, test, lint, or diagnostics
+5. `sdl.retrieve` for one exact retrieval step
+6. `sdl.file` for file, edit, or source-window work
+7. `sdl.workflow` for runtime execution, data shaping, batch mutations, and other procedural pipelines
+8. `runtimeExecute` inside `sdl.workflow` for repo-local build, test, lint, or diagnostics
 
 This is the intended path for enforced agent setups where SDL-MCP replaces token-heavy default tools whenever possible.
 

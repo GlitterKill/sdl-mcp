@@ -15,7 +15,7 @@ This document covers all three in depth, with architecture diagrams, configurati
 1. [Overview: The Three Pillars](#overview-the-three-pillars)
 2. [Pass-2 Call Resolution](#pass-2-call-resolution)
 3. [Semantic Search & Embeddings](#semantic-search--embeddings)
-4. [LLM Symbol Summaries](#llm-symbol-summaries)
+4. [Symbol Summary Pipeline](#symbol-summary-pipeline)
 5. [Configuration Reference](#configuration-reference)
 6. [Practical Examples](#practical-examples)
 
@@ -314,7 +314,7 @@ When the caller passes `chatMentions`, the orchestrator runs a **Personalized Pa
 - **Algorithm:** Andersen-Chung-Lang forward-push. Walks both directions by default (callers + callees, reverse edges scaled 0.5).
 - **Boost shape:** `final = score × min(1 + pprWeight × pprScore, 2.0)`. Stack cap at 4× the original RRF score (composes with feedback boost).
 - **Defaults:** `pprWeight = 2.0`, `pprDirection = "both"`, `alpha = 0.15`, `epsilon = 1e-4`, max 2000 nodes touched.
-- **Tuning data:** [devdocs/ppr-weight-tune-results.md](../../devdocs/ppr-weight-tune-results.md) — 85% NDCG@10 lift over RRF baseline on near-target mentions, zero effect on `none` / `far` configs (correct safety property), no recall regression, ~5ms PPR overhead.
+- **Tuning data:** [devdocs/benchmarks/ppr-weight-tune-results.md](../../devdocs/benchmarks/ppr-weight-tune-results.md) — 85% NDCG@10 lift over RRF baseline on near-target mentions, zero effect on `none` / `far` configs (correct safety property), no recall regression, ~5ms PPR overhead.
 - **Backends:** Native Rust (`compute_personalized_pagerank` napi export) when the addon is loaded; pure-JS push fallback otherwise. Both kept within 1e-3 of each other.
 - **Cache:** in-memory LRU keyed on `repoId | snapshotCreatedAt | seedHash | alpha | direction`; 64 entries / 5 min TTL.
 

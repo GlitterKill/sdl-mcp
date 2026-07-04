@@ -102,7 +102,7 @@ All MCP tools flow through a single dispatch path in `src/server.ts`. The exact 
 - Flat mode registers the direct action surface plus discovery and diagnostics.
 - Gateway-only mode registers the compact namespace projection plus discovery and diagnostics.
 - Gateway + legacy mode registers both the gateway projection and legacy flat actions.
-- Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`, or can run exclusive with `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`.
+- Code Mode adds `sdl.manual`, `sdl.context`, `sdl.retrieve`, `sdl.workflow`, and `sdl.file`, or can run exclusive with `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.retrieve`, `sdl.workflow`, and `sdl.file`.
 - Exact registration counts live in the generated tool inventory and are checked by `npm run docs:tools:check`.
 
 Before strict Zod validation, requests also pass through a shared normalization layer. Flat and gateway calls therefore accept the same canonical camelCase fields plus common aliases such as `repo_id`, `root_path`, `symbol_id`, `symbol_ids`, `from_version`, `to_version`, `slice_handle`, and `spillover_handle`.
@@ -675,7 +675,7 @@ Current command/tool registration notes:
 
 - CLI commands: 13 (`init`, `doctor`, `info`, `index`, `serve`, `version`, `export`, `import`, `pull`, `benchmark:ci`, `summary`, `health`, `tool`)
 - Gateway mode keeps `sdl.action.search` and `sdl.info` outside the gateway namespace tools
-- Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`, or can run exclusive with `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`
+- Code Mode adds `sdl.manual`, `sdl.context`, `sdl.retrieve`, `sdl.workflow`, and `sdl.file`, or can run exclusive with `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.retrieve`, `sdl.workflow`, and `sdl.file`
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
@@ -738,7 +738,7 @@ graph TD
     subgraph Tool Registration Modes
         J1[Flat Mode]
         J2[Gateway Mode]
-        J3[Code Mode adds manual, context, and workflow]
+        J3[Code Mode adds manual, context, retrieve, workflow, and file]
     end
     J e12@--- J1
     J e13@--- J2
@@ -788,7 +788,7 @@ Registration-mode summary:
 - Flat mode registers the direct action surface.
 - Gateway-only mode registers the compact namespace projection.
 - Gateway + legacy mode registers both surfaces.
-- Code Mode adds `sdl.manual`, `sdl.context`, `sdl.workflow`, and `sdl.file`.
+- Code Mode adds `sdl.manual`, `sdl.context`, `sdl.retrieve`, `sdl.workflow`, and `sdl.file`.
 - Exact counts live in the generated tool inventory.
 
 [Back to README](../README.md)

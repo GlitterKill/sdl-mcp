@@ -297,7 +297,7 @@ Key options:
 
 The CLI parser accepts the canonical action fields plus the same common aliases accepted by MCP requests, such as `--repo-id`, `--symbol-id`, `--symbol-ids`, `--from-version`, `--to-version`, and `--slice-handle`.
 
-Not every MCP surface is available through `sdl-mcp tool`. Only `action.search` and `manual` are currently proxied metadata tools; `sdl.context`, `sdl.workflow`, and `sdl.file` remain MCP-only wrapper tools. The direct flat write actions are available as `file.write`, `search.edit`, and `symbol.edit`. CLI `symbol.edit` operates on saved files; use `applyNow` for CLI writes because preview plan handles are process-local. Overlay-aware draft edits and two-phase symbol apply require an MCP server session. Use [`CLI Tool Access`](./feature-deep-dives/cli-tool-access.md) for the current direct-action matrix.
+Not every MCP surface is available through `sdl-mcp tool`. Only `action.search` and `manual` are currently proxied metadata tools; `sdl.context`, `sdl.retrieve`, `sdl.workflow`, and `sdl.file` remain MCP-only wrapper tools. The direct flat write actions are available as `file.write`, `search.edit`, and `symbol.edit`. CLI `symbol.edit` operates on saved files; use `applyNow` for CLI writes because preview plan handles are process-local. Overlay-aware draft edits and two-phase symbol apply require an MCP server session. Use [`CLI Tool Access`](./feature-deep-dives/cli-tool-access.md) for the current direct-action matrix.
 
 ### `sdl-mcp version`
 

@@ -23,7 +23,6 @@ Flat mode, gateway mode, and the CLI `tool` command share the same normalization
    - [sdl.symbol.search](#sdlsymbolsearch)
    - [sdl.symbol.getCard](#sdlsymbolgetcard)
    - [sdl.symbol.edit](#sdlsymboledit)
-   - [sdl.symbol.getCard](#sdlsymbolgetcards)
 4. [Graph Slices](#4-graph-slices)
    - [sdl.slice.build](#sdlslicebuild)
    - [sdl.slice.refresh](#sdlslicerefresh)
@@ -61,8 +60,10 @@ Flat mode, gateway mode, and the CLI `tool` command share the same normalization
 15. [Code Mode Tools](#15-code-mode-tools)
     - [sdl.context](#sdlcontext)
     - [sdl.workflow](#sdlworkflow)
+    - [sdl.retrieve](#sdlretrieve)
     - [sdl.action.search](#sdlactionsearch)
     - [sdl.manual](#sdlmanual)
+    - [sdl.file](#sdlfile)
 
 ---
 
@@ -533,11 +534,11 @@ See [sdl.symbol.edit](./symbol-edit-tool.md) for examples and Code Mode wrapper 
 
 ---
 
-### sdl.symbol.getCard
+### sdl.symbol.getCard (batch request shape)
 
-Batch-fetches multiple symbol cards in a single round trip.
+Batch-fetches multiple symbol cards through the same `sdl.symbol.getCard` tool.
 
-**What it does:** Identical to `getCard` but accepts an array of up to 100 symbol IDs. Each symbol is resolved independently, with per-symbol ETag support via `knownEtags`. Symbols whose ETags match return `notModified` instead of the full card. This eliminates N sequential `getCard` calls when building context for a task.
+**What it does:** Accepts an array of up to 100 symbol IDs or natural references. Each symbol is resolved independently, with per-symbol ETag support via `knownEtags`. Symbols whose ETags match return `notModified` instead of the full card. This eliminates N sequential `getCard` calls when building context for a task.
 
 **Parameters:**
 
@@ -1121,7 +1122,7 @@ Queries stored feedback records and aggregated statistics for offline tuning pip
 
 Runs code in a sandboxed, policy-gated subprocess scoped to a registered repository.
 
-**What it does:** Executes a command using one of 16 supported runtimes (Node.js, TypeScript, Python, Shell, Go, Java, Kotlin, Rust, C, C++, C#, Ruby, PHP, Perl, R, Elixir) within the repository's directory. The execution is fully governed:
+**What it does:** Executes a command using one of 17 supported runtimes (Node.js, TypeScript, Python, Shell, PowerShell, Go, Java, Kotlin, Rust, C, C++, C#, Ruby, PHP, Perl, R, Elixir) within the repository's directory. The execution is fully governed:
 
 1. **Enabled by default** — Set `runtime.enabled: false` to disable subprocess execution in hardened deployments.
 2. **Policy evaluation** — The policy engine checks whether the requested runtime, executable, CWD, and timeout are allowed.
@@ -1219,7 +1220,7 @@ No `stdoutSummary` or `stderrSummary` — only matched excerpts are returned.
 - `c` / `cpp` → `gcc`/`g++` (Unix) / `cl` (Windows) then execute
 - `csharp` → `dotnet-script` / `csc`
 
-See [Runtime Execution deep dive](../feature-deep-dives/runtime-execution.md) for the complete 16-runtime list.
+See [Runtime Execution deep dive](./feature-deep-dives/runtime-execution.md) for the complete 17-runtime list.
 
 **Use cases:** Running tests, linters, build scripts, or diagnostic commands within SDL-MCP's governance framework.
 
@@ -1389,7 +1390,7 @@ Returns cumulative token usage statistics and savings metrics.
 
 Retrieves task-shaped code context inside Code Mode.
 
-**What it does:** Mirrors `sdl.context` but lives alongside `sdl.manual` and `sdl.workflow`. Use it first for `explain`, `debug`, `review`, and most `implement` requests when you are already operating through the Code Mode surfaces.
+**What it does:** Provides task-shaped context retrieval alongside `sdl.manual`, `sdl.retrieve`, and `sdl.workflow`. Use it first for `explain`, `debug`, `review`, and most `implement` requests when you are already operating through the Code Mode surfaces.
 
 **Parameters:** Same as `sdl.context`, with optional `responseMode` for handle-backed responses and optional `includeDiagnostics` for coarse server/context phase timings.
 
@@ -1426,6 +1427,25 @@ Each step has:
 **Internal transforms:** `dataPick` (project fields), `dataMap` (project from arrays), `dataFilter` (filter by clauses), `dataSort` (sort by field), `dataTemplate` (render template strings).
 
 **Response:** Array of step results plus budget usage metrics.
+
+---
+
+### sdl.retrieve
+
+Runs one compact retrieval operation inside Code Mode without building a workflow.
+
+**What it does:** Routes a single retrieval step to the shared action handler layer. Use it when `sdl.context` is too broad and `sdl.workflow` would be unnecessary overhead.
+
+**Parameters:**
+
+| Parameter      | Type                                                                                                  | Required | Description                                  |
+| :------------- | :---------------------------------------------------------------------------------------------------- | :------- | :------------------------------------------- |
+| `repoId`       | string                                                                                                | Yes      | Repository scope                             |
+| `op`           | `"symbolSearch"` \| `"symbolGetCard"` \| `"sliceBuild"` \| `"codeSkeleton"` \| `"codeHotPath"` \| `"codeNeedWindow"` | Yes      | Retrieval operation to run                   |
+| `args`         | object                                                                                                | No       | Operation-specific arguments                 |
+| `responseMode` | `"inline"` \| `"auto"` \| `"handle"`                                                                  | No       | Response storage mode for large follow-ups   |
+
+**Response:** The same response shape as the routed retrieval action.
 
 ---
 
@@ -1466,3 +1486,15 @@ Returns the SDL-MCP API manual — a compact reference listing all available fun
 | `includeExamples` | boolean                                    | No       | Include usage examples            |
 
 **Response:** `{ manual, tokenEstimate }` for rendered formats or `{ actions, serverInfo, tokenEstimate }` for `format: "json"`. When a focused `actions` request mixes known and unknown selectors, the known actions are returned and `unknownActions` plus `warning` identify the ignored selectors; an all-unknown request still returns `UNKNOWN_ACTIONS`.
+
+---
+
+### sdl.file
+
+Provides the Code Mode file gateway for file reads, writes, search edits, symbol edits, and gated source windows.
+
+**What it does:** Routes file-related operations through one `op` discriminator so Code Mode can stay on a compact tool surface. Indexed source inspection uses the normal `code.needWindow` policy path through `previewWindow` and `sourceWindow`.
+
+**Parameters:** `repoId`, `op`, operation-specific arguments, and optional `includeDiagnostics`.
+
+**Response:** Operation-specific file, edit-plan, apply, or source-window result.

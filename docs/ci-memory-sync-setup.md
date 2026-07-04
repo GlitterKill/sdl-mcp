@@ -40,7 +40,7 @@ sdl-mcp version
 npx --yes sdl-mcp@latest version
 
 # Expected output:
-# SDL-MCP version: 0.11.6
+# SDL-MCP version: 0.12.1
 # Environment:
 #   Node.js: v24.x.x
 #   Platform: linux/win32
@@ -305,7 +305,7 @@ jobs:
 
       - name: Initialize SDL-MCP
         run: |
-          npm run init || node dist/cli/index.js init --force
+          node dist/cli/index.js init --force
 
       - name: Index repository for CI sync
         id: index
@@ -609,7 +609,7 @@ Add performance monitoring:
 ```yaml
 - name: Initialize SDL-MCP
   run: |
-    npm run init || node dist/cli/index.js init --force
+    node dist/cli/index.js init --force
 ```
 
 ### Issue: "Artifact file not found"
