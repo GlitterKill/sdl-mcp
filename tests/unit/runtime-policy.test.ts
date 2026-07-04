@@ -284,13 +284,14 @@ describe("config validation", () => {
     assert.strictEqual(config.enabled, true);
   });
 
-  it("defaults allowedRuntimes to node, typescript, python, and shell", () => {
+  it("defaults allowedRuntimes to node, typescript, python, shell, and powershell", () => {
     const config = RuntimeConfigSchema.parse({});
     assert.deepStrictEqual(config.allowedRuntimes, [
       "node",
       "typescript",
       "python",
       "shell",
+      "powershell",
     ]);
   });
 

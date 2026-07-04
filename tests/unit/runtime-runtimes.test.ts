@@ -11,8 +11,8 @@ import {
 } from "../../dist/runtime/runtimes.js";
 
 describe("runtime table structure", () => {
-  it("should register exactly 16 runtimes", () => {
-    assert.strictEqual(getRegisteredRuntimes().length, 16);
+  it("should register exactly 17 runtimes", () => {
+    assert.strictEqual(getRegisteredRuntimes().length, 17);
   });
 
   it("should export RUNTIME_NAMES matching registered runtimes", () => {

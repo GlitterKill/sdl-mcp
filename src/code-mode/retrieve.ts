@@ -54,6 +54,17 @@ export function normalizeRetrieveArgs(
     normalized.includeProcesses ??= false;
   }
 
+  // retrieve callers commonly use filePath; the code gateway's skeleton action
+  // uses file as its canonical field.
+  if (
+    op === "codeSkeleton" &&
+    normalized.file === undefined &&
+    typeof normalized.filePath === "string"
+  ) {
+    normalized.file = normalized.filePath;
+    delete normalized.filePath;
+  }
+
   if (op === "codeNeedWindow" && normalized.responseMode === undefined) {
     normalized.responseMode = opts.responseMode ?? "auto";
   }

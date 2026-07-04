@@ -1,173 +1,421 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { globSync } from "node:fs";
+import { availableParallelism, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-// Global cleanup for LadybugDB - prevents segfaults on exit
+// Global cleanup for LadybugDB - prevents segfaults on exit.
 const gracefulCleanup = async () => {
   try {
-    // Dynamic import to avoid loading DB code if tests don't need it
+    // Dynamic import avoids loading DB code when setup fails before tests run.
     const { closeLadybugDb } = await import("../dist/db/ladybug.js");
     await closeLadybugDb();
   } catch {
-    // Best effort - DB may not have been initialized
+    // Best effort - DB may not have been initialized.
   }
 };
 
-// Register cleanup before any code runs
 process.on("beforeExit", () => {
   gracefulCleanup().catch(() => {});
 });
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
-import { dirname, join, resolve } from "node:path";
-import { globSync } from "node:fs";
-
-
-// Test results log file
-const testLogPath = join(process.cwd(), 'test-results.log');
-const logLines = [];
-function log(msg) {
-  console.log(msg);
-  logLines.push(msg);
-}
-function writeLog() {
-  writeFileSync(testLogPath, logLines.join('\n'));
-  console.log('\n[run-tests] Full results written to:', testLogPath);
-}
-
-// Summary tracking
-let totalTests = 0;
-let passedTests = 0;
-let failedTests = 0;
-const failedTestFiles = [];
-const passedWithSegfault = [];
-
-// Exit codes that indicate Windows native addon segfaults.
-// 0xC0000005 = ACCESS_VIOLATION, returned as signed int32 = -1073741819
-const WINDOWS_SEGFAULT_EXIT_CODES = new Set([-1073741819, 3221225477]);
-
-// Tests known to trigger native addon segfaults on Windows process exit.
-// These are run isolated with TAP output parsing to determine pass/fail,
-// ignoring the process exit code when it matches a known segfault value.
-// All tests may segfault on Windows due to LadybugDB native addon cleanup
-// TAP parsing will correctly identify real failures vs segfault-on-exit
-const SEGFAULT_BYPASS_ALL = true;
-
-/**
- * Parse TAP output to determine if tests passed.
- * Handles Node 24+ TAP format with nested subtests.
- * 
- * Key insight: When a test file segfaults on exit, Node's test runner emits:
- *   - Indented "ok N - testName" for passing subtests (actual tests)
- *   - Top-level "not ok N - filepath" with exitCode in YAML (file marker)
- * 
- * We consider tests passed if:
- *   1. There are no indented "not ok" lines (actual test failures), AND
- *   2. Either there's a "# fail 0" summary, OR all "not ok" lines are
- *      file-level markers with segfault exit codes in their YAML blocks.
- */
-function parseTapResult(output, testFile = '') {
-  // Strategy: Look for actual test assertion failures, not just any "not ok"
-  // 
-  // TAP structure for Node.js test runner:
-  // - Indented "not ok" = actual test failure within a describe/it block
-  // - Top-level "not ok" with exitCode in YAML = file-level failure
-  //
-  // A file that passes all tests but segfaults on exit will have:
-  // - All "ok" lines for actual tests (possibly indented)
-  // - One "not ok" at file level with exitCode: 3221225477 in YAML
-  //
-  // A file with real failures will have:
-  // - "not ok" lines with assertion errors (AssertionError, ERR_ASSERTION)
-  
-  // Indented "not ok" lines are subtest failures. They are real test failures,
-  // even when the file-level summary reports only one failed suite.
-  if (/^[ \t]+not ok \d+ - /m.test(output)) {
-    log(`[TAP DEBUG] ${testFile}: Subtest failure found`);
-    return { passed: false, reason: 'subtest_failure' };
-  }
-
-  // Check for assertion errors anywhere in the output
-  const hasAssertionError = /AssertionError|ERR_ASSERTION|expected.*actual|Error:.*\n.*at /m.test(output);
-  
-  if (hasAssertionError) {
-    // Find the actual error for debugging
-    const errorMatch = output.match(/error: [|>-]?\n?.*(?:AssertionError|expected|Error:)[\s\S]{0,200}/m);
-    log(`[TAP DEBUG] ${testFile}: Real assertion error found`);
-    return { passed: false, reason: 'assertion_error' };
-  }
-  
-  // Check if this looks like a segfault-only failure:
-  // - Has "not ok" with exitCode 3221225477 in YAML
-  // - Does NOT have assertion errors
-  const hasSegfaultExit = /not ok[\\s\\S]*?exitCode:\\s*(3221225477|-1073741819)/m.test(output);
-  
-  if (hasSegfaultExit) {
-    log(`[TAP DEBUG] ${testFile}: Segfault on exit detected, tests passed`);
-    return { passed: true, reason: 'segfault_only' };
-  }
-  
-  // Fallback: check summary line
-  const summaryMatch = output.match(/# fail (\d+)/m);
-  if (summaryMatch) {
-    const failCount = parseInt(summaryMatch[1], 10);
-    if (failCount === 0) {
-      return { passed: true, reason: 'summary_pass' };
-    }
-    if (failCount > 0) {
-      log(`[TAP DEBUG] ${testFile}: TAP summary reported ${failCount} failure(s)`);
-      return { passed: false, reason: 'summary_failure' };
-    }
-  }
-  
-  // If we got here, assume failure
-  log(`[TAP DEBUG] ${testFile}: Unknown failure pattern`);
-  return { passed: false, reason: 'unknown' };
-}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, "..");
 
-const allTestFiles = [
-  ...globSync("tests/**/*.test.ts", { cwd: repoRoot }),
-].sort();
+const testLogPath = join(process.cwd(), "test-results.log");
+const logLines = [];
+const MAX_TEST_OUTPUT_BYTES = 10 * 1024 * 1024;
+const INIT_DB_ARGS = [
+  "--input-type=module",
+  "-e",
+  "import { initLadybugDb } from './dist/db/ladybug.js'; await initLadybugDb(process.env.SDL_GRAPH_DB_PATH);",
+];
 
+// 0xC0000005 = ACCESS_VIOLATION, returned as signed int32 = -1073741819.
+const WINDOWS_SEGFAULT_EXIT_CODES = new Set([-1073741819, 3221225477]);
+const SEGFAULT_EXIT_CODE_PATTERN = [...WINDOWS_SEGFAULT_EXIT_CODES].join("|");
+const VALID_GROUPS = new Set([
+  "benchmark",
+  "golden",
+  "integration",
+  "mutation",
+  "native",
+  "property",
+  "root",
+  "unit",
+]);
+
+let totalTests = 0;
+let passedTests = 0;
+let failedTests = 0;
+let overallFailed = false;
+const failedTestFiles = [];
+const passedWithSegfault = [];
+
+function log(msg) {
+  console.log(msg);
+  logLines.push(msg);
+}
+
+function writeLog() {
+  writeFileSync(testLogPath, logLines.join("\n"));
+  console.log("\n[run-tests] Full results written to:", testLogPath);
+}
+
+/**
+ * Parse TAP output to determine if tests passed.
+ *
+ * When a test file segfaults on exit, Node's runner can emit passing subtests
+ * plus a file-level "not ok" marker with a native exit code. Treat only that
+ * file-level marker as ignorable; real subtest failures still fail the suite.
+ */
+function parseTapResult(output, testFile = "") {
+  if (/^[ \t]+not ok \d+ - /m.test(output)) {
+    log(`[TAP DEBUG] ${testFile}: Subtest failure found`);
+    return { passed: false, reason: "subtest_failure" };
+  }
+
+  const hasAssertionError =
+    /AssertionError|ERR_ASSERTION|expected.*actual|Error:.*\n.*at /m.test(
+      output,
+    );
+  if (hasAssertionError) {
+    log(`[TAP DEBUG] ${testFile}: Real assertion error found`);
+    return { passed: false, reason: "assertion_error" };
+  }
+
+  const hasSegfaultExit = new RegExp(
+    `not ok[\\s\\S]*?exitCode:\\s*(${SEGFAULT_EXIT_CODE_PATTERN})`,
+    "m",
+  ).test(output);
+  if (hasSegfaultExit) {
+    log(`[TAP DEBUG] ${testFile}: Segfault on exit detected, tests passed`);
+    return { passed: true, reason: "segfault_only" };
+  }
+
+  const summaryMatch = output.match(/# fail (\d+)/m);
+  if (summaryMatch) {
+    const failCount = parseInt(summaryMatch[1], 10);
+    if (failCount === 0) {
+      return { passed: true, reason: "summary_pass" };
+    }
+    log(`[TAP DEBUG] ${testFile}: TAP summary reported ${failCount} failure(s)`);
+    return { passed: false, reason: "summary_failure" };
+  }
+
+  log(`[TAP DEBUG] ${testFile}: Unknown failure pattern`);
+  return { passed: false, reason: "unknown" };
+}
+
+function addGroups(value, groups) {
+  for (const rawGroup of value.split(",")) {
+    const group = rawGroup.trim();
+    if (group === "" || group === "all") {
+      continue;
+    }
+    if (!VALID_GROUPS.has(group)) {
+      throw new Error(
+        `Unknown test group "${group}". Valid groups: ${[
+          ...VALID_GROUPS,
+        ].join(", ")}`,
+      );
+    }
+    groups.add(group);
+  }
+}
+
+function parseSelectedGroups(argv) {
+  const groups = new Set();
+  const ignoredArgs = [];
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--group" || arg === "--groups") {
+      const value = argv[++i];
+      if (!value) {
+        throw new Error(`${arg} requires a value`);
+      }
+      addGroups(value, groups);
+      continue;
+    }
+    if (arg.startsWith("--group=")) {
+      addGroups(arg.slice("--group=".length), groups);
+      continue;
+    }
+    if (arg.startsWith("--groups=")) {
+      addGroups(arg.slice("--groups=".length), groups);
+      continue;
+    }
+    ignoredArgs.push(arg);
+  }
+
+  if (ignoredArgs.length > 0) {
+    log(`[run-tests] Ignoring unsupported runner arg(s): ${ignoredArgs.join(" ")}`);
+  }
+  return groups;
+}
+
+function testGroupFor(filePath) {
+  const normalized = filePath.replaceAll("\\", "/");
+  const parts = normalized.split("/");
+  return parts.length > 2 ? parts[1] : "root";
+}
+
+function defaultJobCount() {
+  return Math.min(4, Math.max(1, availableParallelism() - 1));
+}
+
+function testJobCount() {
+  const requested = process.env.SDL_TEST_JOBS;
+  if (!requested) {
+    return defaultJobCount();
+  }
+
+  const parsed = Number.parseInt(requested, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    log(
+      `[run-tests] Ignoring invalid SDL_TEST_JOBS="${requested}"; using ${defaultJobCount()}`,
+    );
+    return defaultJobCount();
+  }
+  return parsed;
+}
+
+function needsPreinitializedDb(testFile) {
+  const source = readFileSync(resolve(repoRoot, testFile), "utf8");
+  return /\bgetLadybugConn\b/.test(source) && !/\binitLadybugDb\b/.test(source);
+}
+
+function runProcess(command, args, { cwd, env, maxOutputBytes = MAX_TEST_OUTPUT_BYTES }) {
+  return new Promise((resolveResult) => {
+    const child = spawn(command, args, {
+      cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let outputBytes = 0;
+    let killedByOutputLimit = false;
+    let settled = false;
+
+    const settle = (result) => {
+      if (!settled) {
+        settled = true;
+        resolveResult(result);
+      }
+    };
+
+    const collect = (chunk, target) => {
+      outputBytes += chunk.length;
+      if (target === "stdout") {
+        stdout += chunk.toString("utf8");
+      } else {
+        stderr += chunk.toString("utf8");
+      }
+      if (outputBytes > maxOutputBytes && !killedByOutputLimit) {
+        killedByOutputLimit = true;
+        child.kill();
+      }
+    };
+
+    child.stdout.on("data", (chunk) => collect(chunk, "stdout"));
+    child.stderr.on("data", (chunk) => collect(chunk, "stderr"));
+    child.on("error", (error) => {
+      settle({ status: 1, stdout, stderr, error, killedByOutputLimit });
+    });
+    child.on("close", (code) => {
+      settle({ status: code ?? 1, stdout, stderr, killedByOutputLimit });
+    });
+  });
+}
+
+function writeCapturedOutput(result) {
+  if (result.stdout) {
+    process.stdout.write(result.stdout);
+    logLines.push(result.stdout);
+  }
+  if (result.stderr) {
+    process.stderr.write(result.stderr);
+    logLines.push(result.stderr);
+  }
+}
+
+async function runTestFile(testFile, index, baseTestEnv, testTempDir) {
+  const testGraphDbPath = join(testTempDir, `test-${index}-graph`);
+  const env = {
+    ...baseTestEnv,
+    SDL_GRAPH_DB_PATH: testGraphDbPath,
+    SDL_DB_PATH: testGraphDbPath,
+  };
+
+  // Some older tests call getLadybugConn() directly. Preinit only those files
+  // so pure tests do not pay a DB startup cost.
+  if (needsPreinitializedDb(testFile)) {
+    const initResult = await runProcess(process.execPath, INIT_DB_ARGS, {
+      cwd: repoRoot,
+      env,
+    });
+    if ((initResult.status ?? 1) !== 0 || initResult.error) {
+      return {
+        ...initResult,
+        testFile,
+        passed: false,
+        reason: initResult.error?.message ?? "db_init_failed",
+      };
+    }
+  }
+
+  const result = await runProcess(
+    process.execPath,
+    [
+      "--test-concurrency=1",
+      "--test-reporter=tap",
+      "--test",
+      resolve(repoRoot, testFile),
+    ],
+    {
+      cwd: repoRoot,
+      env,
+    },
+  );
+
+  if (result.error) {
+    return {
+      ...result,
+      testFile,
+      passed: false,
+      reason: `spawn error: ${result.error.message}`,
+    };
+  }
+  if (result.killedByOutputLimit) {
+    return {
+      ...result,
+      testFile,
+      passed: false,
+      reason: "output exceeded 10 MB",
+    };
+  }
+
+  const exitCode = result.status ?? 1;
+  if (exitCode === 0) {
+    return { ...result, testFile, passed: true, reason: "clean_exit" };
+  }
+
+  const parsed = parseTapResult(result.stdout ?? "", testFile);
+  return {
+    ...result,
+    testFile,
+    passed: parsed.passed,
+    reason: parsed.reason,
+    passedWithSegfault: parsed.passed && parsed.reason === "segfault_only",
+  };
+}
+
+function recordTestResult(result) {
+  writeCapturedOutput(result);
+
+  totalTests++;
+  if (result.passed) {
+    passedTests++;
+    if (result.passedWithSegfault) {
+      passedWithSegfault.push(result.testFile);
+      log(`[run-tests] ${result.testFile}: PASSED (segfault on exit ignored)`);
+    } else {
+      log(`[run-tests] ${result.testFile}: PASSED`);
+    }
+    return;
+  }
+
+  failedTests++;
+  failedTestFiles.push(result.testFile);
+  overallFailed = true;
+  log(`[run-tests] ${result.testFile}: FAILED (${result.reason || "test failure"})`);
+}
+
+async function runIsolatedTests(isolatedTests, baseTestEnv, testTempDir) {
+  let nextIndex = 0;
+  const workerCount = Math.min(testJobCount(), isolatedTests.length);
+  log(
+    `[run-tests] Running ${isolatedTests.length} test file(s) with ${workerCount} worker(s)`,
+  );
+
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < isolatedTests.length) {
+      const index = nextIndex++;
+      const result = await runTestFile(
+        isolatedTests[index],
+        index,
+        baseTestEnv,
+        testTempDir,
+      );
+      recordTestResult(result);
+    }
+  });
+
+  await Promise.all(workers);
+}
+
+let selectedGroups;
+try {
+  selectedGroups = parseSelectedGroups(process.argv.slice(2));
+} catch (error) {
+  console.error(`[run-tests] ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
+
+const allTestFiles = globSync("tests/**/*.test.ts", { cwd: repoRoot }).sort();
 if (allTestFiles.length === 0) {
   console.error("No test files found under tests/**/*.test.ts");
   process.exit(1);
 }
 
-
-// Skip patterns for tests with import issues or requiring special setup
-// (matches SKIP_PATTERNS in runner.test.ts plus isolated tests run separately)
-// Tests that shouldn't run at all (special setup required, known broken, etc.)
 const SKIP_PATTERNS = [
-  "sqlite-to-ladybug-migration",  // Requires SQLite test data
-  "vscode-buffer-push",           // Requires VS Code extension environment
-  "check-benchmark-claims",       // Benchmark validation only
-  "build-exe",                    // Build process test
-  "stress-timing-diagnostics",   // Stress test only
-  "runner.test.ts",              // Meta-test for test runner itself
+  "sqlite-to-ladybug-migration", // Requires SQLite test data.
+  "vscode-buffer-push", // Requires VS Code extension environment.
+  "check-benchmark-claims", // Benchmark validation only.
+  "build-exe", // Build process test.
+  "stress-timing-diagnostics", // Stress test only.
+  "runner.test.ts", // Meta-test for test runner itself.
 ];
 
-const testFiles = allTestFiles.filter(
-  (f) => !SKIP_PATTERNS.some((p) => f.includes(p)),
-);
-const nodeArgs = [
-  "--test-concurrency=1",
-  "--test-reporter=tap",
-  "--test",
-  ...testFiles.map((f) => resolve(repoRoot, f)),
-];
+const testFiles = allTestFiles.filter((filePath) => {
+  if (SKIP_PATTERNS.some((pattern) => filePath.includes(pattern))) {
+    return false;
+  }
+  return selectedGroups.size === 0 || selectedGroups.has(testGroupFor(filePath));
+});
+
+if (testFiles.length === 0) {
+  const label =
+    selectedGroups.size === 0 ? "all groups" : [...selectedGroups].join(", ");
+  console.error(`[run-tests] No test files selected for ${label}`);
+  process.exit(1);
+}
 
 const testTempDir = mkdtempSync(join(tmpdir(), "sdl-mcp-tests-"));
-const testGraphDbPath = join(testTempDir, "sdl-mcp-graph");
-const testEnv = {
+const setupGraphDbPath = join(testTempDir, "setup-graph");
+const baseTestEnv = {
   ...process.env,
-  SDL_GRAPH_DB_PATH: testGraphDbPath,
-  SDL_DB_PATH: testGraphDbPath,
   SDL_MCP_DISABLE_NATIVE_ADDON: "1",
 };
+const setupEnv = {
+  ...baseTestEnv,
+  SDL_GRAPH_DB_PATH: setupGraphDbPath,
+  SDL_DB_PATH: setupGraphDbPath,
+};
+
+const selectedLabel =
+  selectedGroups.size === 0 ? "all" : [...selectedGroups].sort().join(",");
+log(`[run-tests] Selected test groups: ${selectedLabel}`);
 
 const buildCmd = process.platform === "win32" ? "cmd.exe" : "npm";
 const buildArgs =
@@ -177,7 +425,7 @@ const buildArgs =
 const buildResult = spawnSync(buildCmd, buildArgs, {
   cwd: repoRoot,
   stdio: "inherit",
-  env: testEnv,
+  env: setupEnv,
 });
 
 if ((buildResult.status ?? 1) !== 0) {
@@ -190,7 +438,7 @@ const schemaSyncResult = spawnSync(
   {
     cwd: repoRoot,
     stdio: "inherit",
-    env: testEnv,
+    env: setupEnv,
   },
 );
 
@@ -204,7 +452,7 @@ const treeSitterProbe = spawnSync(
   {
     cwd: repoRoot,
     stdio: "ignore",
-    env: testEnv,
+    env: setupEnv,
   },
 );
 if ((treeSitterProbe.status ?? 1) !== 0) {
@@ -226,7 +474,7 @@ if ((treeSitterProbe.status ?? 1) !== 0) {
     const rebuildResult = spawnSync(rebuildCmd, rebuildArgs, {
       cwd: repoRoot,
       stdio: "inherit",
-      env: testEnv,
+      env: setupEnv,
     });
     if ((rebuildResult.status ?? 1) !== 0) {
       process.exit(rebuildResult.status ?? 1);
@@ -247,185 +495,46 @@ if (!existsSync(kuzuEntryPath)) {
   const rebuildResult = spawnSync(rebuildCmd, rebuildArgs, {
     cwd: repoRoot,
     stdio: "inherit",
-    env: testEnv,
+    env: setupEnv,
   });
   if ((rebuildResult.status ?? 1) !== 0) {
     process.exit(rebuildResult.status ?? 1);
   }
 }
 
-const initResult = spawnSync(
-  process.execPath,
-  [
-    "--input-type=module",
-    "-e",
-    "import { initLadybugDb } from './dist/db/ladybug.js'; await initLadybugDb(process.env.SDL_GRAPH_DB_PATH);",
-  ],
-  {
-    cwd: repoRoot,
-    stdio: "inherit",
-    env: testEnv,
-  },
-);
+await runIsolatedTests(testFiles, baseTestEnv, testTempDir);
 
-if ((initResult.status ?? 1) !== 0) {
-  process.exit(initResult.status ?? 1);
-}
-
-let overallFailed = false;
-
-/* Main batch disabled - all tests run isolated for LadybugDB safety
-// Run main test batch with TAP output to enable segfault-safe pass/fail detection
-const result = spawnSync(process.execPath, nodeArgs, {
-  cwd: repoRoot,
-  stdio: ["inherit", "pipe", "inherit"],
-  env: testEnv,
-  maxBuffer: 100 * 1024 * 1024, // 100MB buffer for TAP output
-});
-
-const mainTapOutput = result.stdout?.toString() ?? "";
-
-// Stream TAP output to console
-process.stdout.write(mainTapOutput);
-
-// Log failing tests for easier debugging
-const failingTests = [...mainTapOutput.matchAll(/^not ok \d+ - (.+)$/gm)]
-  .map(m => m[1])
-  .filter(t => !t.includes('test failed'));
-if (failingTests.length > 0) {
-  console.log('\n[run-tests] Failing tests in main batch:');
-  for (const t of failingTests.slice(0, 20)) {
-    console.log('  - ' + t);
-  }
-  if (failingTests.length > 20) {
-    console.log('  ... and ' + (failingTests.length - 20) + ' more');
-  }
-}
-
-// Check if main batch failed
-const mainExitCode = result.status ?? 1;
-if (mainExitCode !== 0) {
-  const isKnownSegfault = WINDOWS_SEGFAULT_EXIT_CODES.has(mainExitCode);
-  if (isKnownSegfault) {
-    // Parse TAP to determine actual pass/fail
-    const { passed } = parseTapResult(mainTapOutput);
-    if (!passed) {
-      console.error(`[run-tests] Main batch: tests FAILED (TAP parse, exit code ${mainExitCode})`);
-      overallFailed = true;
-    } else {
-      console.warn(
-        `[run-tests] Main batch: tests passed, process exited with ` +
-        `known segfault code ${mainExitCode} (LadybugDB native addon cleanup issue)`,
-      );
-    }
-  } else {
-    console.error(`[run-tests] Main batch: tests FAILED (exit code ${mainExitCode})`);
-    overallFailed = true;
-  }
-}
-
-*/
-
-// Run tests that need process isolation (due to module cache pollution in the main suite)
-// Note: draft-parser.test.ts and file-patcher.test.ts may segfault during process shutdown
-// due to LadybugDB native addon cleanup issues. The tests pass - only exit code is affected.
-// Tests that need process isolation. Tests with LadybugDB segfaults on exit
-// must also be listed in SEGFAULT_BYPASS_TESTS to enable TAP-based pass/fail.
-// All tests run in isolated mode to prevent LadybugDB global state conflicts
-const isolatedTests = testFiles;
-
-for (const testFile of isolatedTests) {
-  const isoResult = spawnSync(
-    process.execPath,
-    ["--test-concurrency=1", "--test-reporter=tap", "--test", resolve(repoRoot, testFile)],
-    {
-      cwd: repoRoot,
-      stdio: "pipe",
-      env: testEnv,
-      encoding: "utf8",
-      maxBuffer: 10 * 1024 * 1024, // 10 MB - prevent truncation of large test output
-    },
-  );
-
-  // Check for spawnSync errors (e.g., buffer overflow)
-  if (isoResult.error) {
-    console.error(`[run-tests] ${testFile}: spawnSync error: ${isoResult.error.message}`);
-    overallFailed = true;
-    continue;
-  }
-
-  // Always print output so it appears in CI logs
-  if (isoResult.stdout) {
-    process.stdout.write(isoResult.stdout);
-    logLines.push(isoResult.stdout);
-  }
-  if (isoResult.stderr) {
-    process.stderr.write(isoResult.stderr);
-    logLines.push(isoResult.stderr);
-  }
-
-  const exitCode = isoResult.status ?? 1;
-  const isKnownSegfault = WINDOWS_SEGFAULT_EXIT_CODES.has(exitCode);
-  const isSegfaultBypassTest = SEGFAULT_BYPASS_ALL;
-
-  if (exitCode !== 0) {
-    // Always parse TAP to determine pass/fail - Node test runner exits with 1 even for segfaults
-    // The actual segfault code (3221225477) is in the TAP YAML, not the process exit code
-    const tapOutput = isoResult.stdout ?? "";
-    const { passed, reason } = parseTapResult(tapOutput, testFile);
-      if (!passed) {
-      log(`[run-tests] ${testFile}: FAILED (${reason || 'test failure'})`);
-      failedTests++;
-      failedTestFiles.push(testFile);
-      overallFailed = true;
-    } else {
-      log(`[run-tests] ${testFile}: PASSED (segfault on exit ignored)`);
-      passedTests++;
-      passedWithSegfault.push(testFile);
-    }
-  } else {
-    // Clean exit (code 0)
-    passedTests++;
-    log(`[run-tests] ${testFile}: PASSED`);
-  }
-  totalTests++;
-}
-
-// Clean up temp directory created for this test run
 try {
   rmSync(testTempDir, { recursive: true, force: true });
 } catch {
-  // Best-effort cleanup (files may be locked on Windows)
+  // Best-effort cleanup (files may be locked on Windows).
 }
 
-// Print summary
-log('\n' + '='.repeat(60));
-log('[run-tests] SUMMARY');
-log('='.repeat(60));
+log("\n" + "=".repeat(60));
+log("[run-tests] SUMMARY");
+log("=".repeat(60));
 log(`Total test files: ${totalTests}`);
 log(`  Passed: ${passedTests}`);
 log(`  Passed (segfault on exit): ${passedWithSegfault.length}`);
 log(`  Failed: ${failedTests}`);
 
 if (failedTestFiles.length > 0) {
-  log('\nFailed tests:');
-  for (const f of failedTestFiles) {
-    log(`  - ${f}`);
+  log("\nFailed tests:");
+  for (const filePath of failedTestFiles) {
+    log(`  - ${filePath}`);
   }
 }
 
 if (passedWithSegfault.length > 0) {
-  log('\nTests that passed but segfaulted on exit:');
-  for (const f of passedWithSegfault) {
-    log(`  - ${f}`);
+  log("\nTests that passed but segfaulted on exit:");
+  for (const filePath of passedWithSegfault) {
+    log(`  - ${filePath}`);
   }
 }
 
-log('='.repeat(60));
-log(`Overall: ${overallFailed ? 'FAILED' : 'PASSED'}`);
-log('='.repeat(60));
+log("=".repeat(60));
+log(`Overall: ${overallFailed ? "FAILED" : "PASSED"}`);
+log("=".repeat(60));
 
-// Write log file
 writeLog();
-
 process.exit(overallFailed ? 1 : 0);

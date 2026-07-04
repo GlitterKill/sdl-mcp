@@ -521,8 +521,8 @@ describe("release regression guards", () => {
 
     assert.match(
       source,
-      /const mergedOverrides = \{\s*\.\.\.existingPolicyOverrides,\s*\.\.\.validatedPatch,\s*};/s,
-      "policy.set should only merge validated patch fields into existing repo overrides",
+      /const mergedOverrides = mergePolicyOverrides\(\s*existingPolicyOverrides as PolicyPatch,\s*validatedPatch,\s*\);/s,
+      "policy.set should merge validated patch fields into existing repo overrides",
     );
 
     assert.match(

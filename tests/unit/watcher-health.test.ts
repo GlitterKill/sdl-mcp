@@ -170,7 +170,7 @@ describe("watcher health", () => {
     );
   });
 
-  it("repo status schema accepts watcher provider diagnostics", () => {
+  it("repo status schema compacts watcher provider diagnostics", () => {
     const parsed = RepoStatusResponseSchema.parse({
       repoId: "test-repo",
       rootPath: "/tmp/test",
@@ -236,7 +236,7 @@ describe("watcher health", () => {
 
     assert.equal(parsed.watcherHealth?.provider, "watchman");
     assert.equal(parsed.watcherHealth?.configuredProvider, "auto");
-    assert.equal(parsed.watcherHealth?.watchmanRecrawlCount, 1);
+    assert.equal("watchmanRecrawlCount" in parsed.watcherHealth!, false);
   });
 
   it("does not consider an idle watcher stale before any events are received", () => {

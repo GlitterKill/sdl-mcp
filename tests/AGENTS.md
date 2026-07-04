@@ -1,7 +1,7 @@
 # tests/ - Test Infrastructure
 
 ## OVERVIEW
-190+ test files using Node.js built-in test runner (`node:test`). No vitest, no jest.
+580+ test files using Node.js built-in test runner (`node:test`). No vitest, no jest.
 
 ## STRUCTURE
 - `runner.test.ts` - Dynamic test importer (entry point for `node --test`)
@@ -19,18 +19,24 @@
 ## RUNNING TESTS
 
 ```bash
-npm test                                              # Full suite (builds first, serial)
+npm test                                              # Full suite (builds first, parallel isolated workers)
+npm run test:unit                                    # Unit test group only
+npm run test:integration                             # Integration test group only
+npm run test:native                                  # Native addon parity + smoke path (requires built addon)
+node scripts/run-tests.mjs --group=golden            # Node tests in tests/golden/
+SDL_TEST_JOBS=2 npm test                             # Override worker count
 node --experimental-strip-types --test tests/unit/my.test.ts  # Single file (set SDL_GRAPH_DB_PATH)
 ```
 
 ## CONVENTIONS
 - All tests use: `import { describe, it } from "node:test"` and `import assert from "node:assert"`
-- Test concurrency: `--test-concurrency=1` (serial, shared LadybugDB state)
+- Test concurrency: `scripts/run-tests.mjs` runs isolated test files through a small worker pool; `SDL_TEST_JOBS` overrides the default `min(4, availableParallelism - 1)`.
 - Native addon disabled: `SDL_MCP_DISABLE_NATIVE_ADDON=1`
-- DB in temp dir: `mkdtempSync`, set via `SDL_GRAPH_DB_PATH`
+- Native parity is not proven by `npm test`; use `npm run test:native` after building/configuring the addon.
+- DB in temp dir: each isolated test process receives its own `SDL_GRAPH_DB_PATH`
 - Build runs automatically before tests (`scripts/run-tests.mjs`)
 - `.test-d.ts` files run as normal `node:test` (not tsd tool)
-- Golden snapshots: `npm run test:golden` to validate, `npm run golden:update` to regenerate
+- Golden snapshots: `npm run test:golden` validates response snapshots, `npm run golden:update` regenerates them; `npm run test:golden-files` runs the Node test files under `tests/golden/`
 
 ## ADDING A TEST
 Drop a `*.test.ts` file in `unit/` or `integration/` - auto-discovered by `runner.test.ts`.

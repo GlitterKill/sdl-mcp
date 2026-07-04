@@ -186,7 +186,7 @@ describe("agent-facing SDL tool contracts", () => {
     }, 1);
 
     assert.equal("selected" in compact.selections, false);
-    assert.equal(compact.selections.selectedCount, 1);
+    assert.equal(compact.selections.selectedLanguages, 1);
     assert.deepEqual(compact.selections.languagesWithSelection, ["typescript"]);
     assert.equal("metadataJson" in compact.lastRuns[0], false);
     assert.equal("documentsProcessed" in compact.lastRuns[0], false);

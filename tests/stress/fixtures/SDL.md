@@ -40,6 +40,8 @@ Escalate through `sdl.retrieve` in this order:
 
 Use `codeNeedWindow` only as a last resort. Include a concrete `reason`, bounded `expectedLines`, and precise `identifiersToFind`. If SDL-MCP returns `nextBestAction`, `fallbackTools`, `fallbackRationale`, or denial guidance, follow that guidance instead of retrying broader native reads, `file.read` on indexed source, or larger raw windows.
 
+For `codeSkeleton` file-mode retrieval, `file` is canonical. `sdl.retrieve` also accepts `args.filePath` and maps it to `file` for compatibility with other file-oriented SDL surfaces.
+
 When workflow steps need fields from earlier `$N` references, force JSON-compatible output on the earlier step. Keep limits tight; `sdl.workflow` manages ETags automatically. Do not include retrieval evidence unless you are debugging retrieval quality.
 
 ### Precise Context

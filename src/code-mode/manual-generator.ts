@@ -164,7 +164,7 @@ function bufferCheckpoint(): { checkpointed: boolean }
 /** Get buffer status */
 function bufferStatus(): { status: object }
 /** Execute runtime command; pass stdin for multiline scripts/input instead of quote-heavy shell payloads */
-function runtimeExecute(p: { runtime: string; executable?: string; args?: string[]; code?: string; stdin?: string; relativeCwd?: string; timeoutMs?: number; queryTerms?: string[]; contextLines?: number; maxResponseLines?: number; persistOutput?: boolean; outputMode?: "minimal"|"summary"|"intent" }): { status: string; exitCode: number; durationMs: number; artifactHandle?: string; stdoutSummary?: string; stdinBytes?: number; stdinSha256?: string; quotingWarnings?: string[]; serverDriftWarnings?: string[]; nextAction?: object }
+function runtimeExecute(p: { runtime: string; executable?: string; args?: string[]; code?: string; stdin?: string; relativeCwd?: string; timeoutMs?: number; queryTerms?: string[]; contextLines?: number; maxResponseLines?: number; persistOutput?: boolean; outputMode?: "minimal"|"summary"|"intent" }): { status: string; exitCode: number; durationMs: number; artifactHandle?: string; stdoutSummary?: string; nextAction?: object }
 /** Query stored runtime output by keywords or exact line range */
 function runtimeQueryOutput(p: { artifactHandle: string; queryTerms?: string[]; cursor?: { stream: "stdout"|"stderr"; afterLine: number }; lineRange?: { stream: "stdout"|"stderr"; startLine: number; endLine: number }; maxExcerpts?: number; contextLines?: number; stream?: "stdout"|"stderr"|"both" }): { excerpts: object[]; matchStatus: "matched"|"noMatchFallback"|"lineRange"; matchCount: number; nextCursor?: object }
 /** Retrieve a large tool response by handle; maxTokens is enforced on returned content (estimate-based), maxBytes is an exact byte cap */
@@ -176,8 +176,8 @@ function usageStats(p: { scope?: "session" | "history" | "lifetime" | "both" | "
 
 // === File ===
 /** Read non-indexed file content (templates, configs, docs) */
-function fileRead(p: { filePath: string; maxBytes?: number; offset?: number; limit?: number; search?: string; searchContext?: number; jsonPath?: string; responseMode?: RM; deltaMode?: DM; maxDeltaLines?: number }): { content: string; bytes: number; totalLines: number; returnedLines: number; truncated: boolean; sessionDelta?: object; delta?: object } | ResponseHandle
-function fileWrite(p: { filePath: string; content?: string; replaceLines?: { start: number; end: number; content: string }; replacePattern?: { pattern: string; replacement: string; global?: boolean }; jsonPath?: string; jsonValue?: unknown; insertAt?: { line: number; content: string }; append?: string; createBackup?: boolean; createIfMissing?: boolean }): { filePath: string; bytesWritten: number; linesWritten: number; mode: string; backupPath?: string; replacementCount?: number }
+function fileRead(p: { filePath: string; maxBytes?: number; offset?: number; limit?: number; search?: string; searchContext?: number; jsonPath?: string; responseMode?: RM; deltaMode?: DM; maxDeltaLines?: number }): { content: string; truncated: boolean; sessionDelta?: object; delta?: object } | ResponseHandle
+function fileWrite(p: { filePath: string; content?: string; replaceLines?: { start: number; end: number; content: string }; replacePattern?: { pattern: string; replacement: string; global?: boolean }; jsonPath?: string; jsonValue?: unknown; insertAt?: { line: number; content: string }; append?: string; createBackup?: boolean; createIfMissing?: boolean }): { filePath: string; mode: string; backupPath?: string; replacementCount?: number }
 /** Cross-file search-and-edit: preview computes a plan; identifier/structural targeting and operations[] batch safer replacements into one shared preview/apply */
 function searchEdit(p: { mode: "preview"; targeting?: ST; query?: SQ; editMode?: EM; operations?: SEOps[]; filters?: object; maxFiles?: number; createBackup?: boolean; responseMode?: RM } | { mode: "apply"; planHandle: string; createBackup?: boolean }): object | ResponseHandle
 
@@ -196,9 +196,8 @@ function dataTemplate(p: { input: Record<string, unknown> | unknown[]; template:
 function workflowContinuationGet(p: { handle: string; path?: string; offset?: number; limit?: number }): { data: unknown; totalTokens: number; hasMore: boolean }
 
 // === Compact Wire Format (sliceBuild wireFormat:"compact") ===
-// wf/wv/vid=wire metadata; fp=file paths; c=cards; e=edges; f=frontier.
-// Card: fi=file index, r=range, k=kind, n=name, sig/signature, sum/summary, d=deps, m=metrics.
-// Truncation: t.tr with dropped counts and res continuation data.
+// wf/wv/vid metadata; fp paths; c cards; e edges; f frontier; card fields include r/k/n/sig/sum/d/m.
+// Truncation uses t.tr with dropped counts and res continuation data.
 `;
 
 export function generateManual(_liveIndex?: LiveIndexCoordinator): string {

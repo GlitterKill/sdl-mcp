@@ -104,6 +104,48 @@ describe("sdl.retrieve", () => {
     );
   });
 
+  it("maps codeSkeleton filePath args to the gateway file field", async () => {
+    const calls: unknown[] = [];
+    const actionMap = {
+      "code.getSkeleton": {
+        schema: z
+          .object({
+            repoId: z.string(),
+            action: z.literal("code.getSkeleton"),
+            file: z.string(),
+            exportedOnly: z.boolean().optional(),
+          })
+          .passthrough(),
+        handler: async (args: unknown) => {
+          calls.push(args);
+          return { skeleton: "export function parse() { ... }" };
+        },
+      },
+    };
+
+    const result = await handleRetrieve(
+      {
+        repoId: "repo",
+        op: "codeSkeleton",
+        args: {
+          filePath: "src/mcp/tools/search-edit/signature.ts",
+          exportedOnly: false,
+        },
+      },
+      actionMap as never,
+    );
+
+    assert.deepEqual(result, { skeleton: "export function parse() { ... }" });
+    assert.deepEqual(calls, [
+      {
+        repoId: "repo",
+        action: "code.getSkeleton",
+        file: "src/mcp/tools/search-edit/signature.ts",
+        exportedOnly: false,
+      },
+    ]);
+  });
+
   it("dispatches through the existing action map and returns the handler result directly", async () => {
     const calls: unknown[] = [];
     const actionMap = {
