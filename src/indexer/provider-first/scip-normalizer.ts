@@ -1133,9 +1133,8 @@ function findDefinitionRange(
   symbol: string,
 ): Range | undefined {
   const definition = definitionsBySymbol.get(symbol);
-  return definition
-    ? scipRangeToRange(definition.enclosingRange ?? definition.range)
-    : undefined;
+  const range = definition ? selectDefinitionRange(definition) : undefined;
+  return range ? scipRangeToRange(range) : undefined;
 }
 
 function collectDefinitionOccurrencesBySymbol(
@@ -2081,7 +2080,8 @@ function buildContainmentSymbols(
 
     const definition = definitionOccurrencesBySymbol.get(info.symbol);
     if (!definition) continue;
-    const range = definition.enclosingRange ?? definition.range;
+    const range = selectDefinitionRange(definition);
+    if (!range) continue;
 
     const symbol: ContainmentSymbol = {
       providerSymbolId: info.symbol,
@@ -2237,6 +2237,38 @@ function rangeContains(container: ScipRange, inner: ScipRange): boolean {
     container.endLine > inner.endLine ||
     (container.endLine === inner.endLine && container.endCol >= inner.endCol);
   return startsBeforeOrAt && endsAfterOrAt;
+}
+
+function selectDefinitionRange(
+  definition: ScipOccurrence,
+): ScipRange | undefined {
+  if (
+    definition.enclosingRange &&
+    isValidScipRange(definition.enclosingRange)
+  ) {
+    return definition.enclosingRange;
+  }
+  return isValidScipRange(definition.range) ? definition.range : undefined;
+}
+
+function isValidScipRange(range: ScipRange): boolean {
+  const values = [
+    range.startLine,
+    range.startCol,
+    range.endLine,
+    range.endCol,
+  ];
+  if (
+    values.some(
+      (value) => !Number.isSafeInteger(value) || value < 0,
+    )
+  ) {
+    return false;
+  }
+  return (
+    range.endLine > range.startLine ||
+    (range.endLine === range.startLine && range.endCol >= range.startCol)
+  );
 }
 
 function coverageLevel(total: number, matched: number): CoverageLevel {

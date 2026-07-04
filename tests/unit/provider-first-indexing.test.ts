@@ -936,6 +936,62 @@ describe("provider-first indexing foundation", () => {
     assert.equal(facts.coverage[0]?.symbolCoverage, "full");
   });
 
+  it("falls back from invalid SCIP enclosing ranges before graph row shaping", () => {
+    const symbol =
+      "scip-java maven cf 1.0.0 src/main/java/example/Fleet.java/Fleet#run().";
+    const facts = normalizeScipProviderFacts({
+      repoId: "repo",
+      generationId: "gen-1",
+      providerId: "scip-io",
+      providerVersion: "0.1.9",
+      documents: [
+        {
+          language: "java",
+          relativePath: "src/main/java/example/Fleet.java",
+          occurrences: [
+            {
+              range: { startLine: 41, startCol: 8, endLine: 41, endCol: 11 },
+              enclosingRange: {
+                startLine: 41,
+                startCol: 8,
+                endLine: 41,
+                endCol: -2,
+              },
+              symbol,
+              symbolRoles: 1,
+              overrideDocumentation: [],
+              syntaxKind: 0,
+              diagnostics: [],
+            },
+          ],
+          symbols: [
+            {
+              symbol,
+              documentation: [],
+              relationships: [],
+              kind: 6,
+              displayName: "run",
+              signatureDocumentation: "void run()",
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.deepEqual(facts.symbols[0]?.range, {
+      startLine: 42,
+      startCol: 8,
+      endLine: 42,
+      endCol: 11,
+    });
+
+    facts.files[0]!.contentHash = "1".repeat(64);
+    facts.files[0]!.byteSize = 42;
+    const rows = providerFactsToGraphRows({ facts });
+    assert.equal(rows.symbols[0]?.rangeEndCol, 11);
+    validateProviderFirstGraphRows(rows, { repoId: "repo" });
+  });
+
   it("normalizes scip-python module initializer symbols as provider-usable modules", () => {
     const symbol =
       "scip-python python sentry 0.0.0 `fixtures.page_objects`/__init__:";
