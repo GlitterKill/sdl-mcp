@@ -2748,12 +2748,13 @@ const RuntimeExecuteRequestObjectSchema = z
       .default(true)
       .describe("Whether to persist full output as a gzip artifact"),
     outputMode: z
-      .enum(["minimal", "summary", "intent"])
+      .enum(["minimal", "summary", "intent", "digest"])
       .default("minimal")
       .describe(
         "Response verbosity: 'minimal' returns only status/exitCode/duration/artifactHandle (~50 tokens); " +
           "'summary' returns head+tail output excerpts (legacy behavior); " +
-          "'intent' returns only queryTerms-matched excerpts, no head/tail summary",
+          "'intent' returns only queryTerms-matched excerpts, no head/tail summary; " +
+          "'digest' parses tsc/node:test/eslint/npm output into a structured failure digest",
       ),
     includeDiagnostics: z
       .boolean()
@@ -2784,6 +2785,25 @@ export const RuntimeExecuteRequestSchema =
     }
     return val;
   });
+
+const RuntimeDigestFailureSchema = z.object({
+  name: z.string().optional().describe("Test name when known"),
+  file: z.string().optional().describe("Repo-relative file path when parseable"),
+  line: z.number().int().optional(),
+  message: z.string().describe("First line of the error, trimmed to 200 chars"),
+});
+
+export const RuntimeOutputDigestSchema = z.object({
+  kind: z.enum(["tsc", "node-test", "eslint", "npm", "generic"]),
+  ok: z.boolean(),
+  summary: z.string().describe("One-line failure summary"),
+  failures: z.array(RuntimeDigestFailureSchema),
+  truncatedFailures: z.number().int().optional(),
+  excerpt: z
+    .string()
+    .optional()
+    .describe("Generic fallback only: bounded excerpt around the first error"),
+});
 
 export const RuntimeExecuteExcerptSchema = z.object({
   lineStart: z.number().int(),
@@ -2821,6 +2841,9 @@ export const RuntimeExecuteResponseSchema = z.object({
     .array(RuntimeExecuteExcerptSchema)
     .optional()
     .describe("Keyword-matched line windows from queryTerms"),
+  digest: RuntimeOutputDigestSchema.optional().describe(
+    "Structured failure digest when outputMode='digest'",
+  ),
   truncation: z.object({
     stdoutTruncated: z.boolean(),
     stderrTruncated: z.boolean(),

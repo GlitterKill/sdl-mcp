@@ -42,6 +42,7 @@ import {
   resolveAndValidateCwd,
 } from "../../runtime/executor.js";
 import { writeArtifact } from "../../runtime/artifacts.js";
+import { buildOutputDigest } from "../../runtime/output-digest.js";
 import type { OutputExcerpt, ConcurrencyTracker } from "../../runtime/types.js";
 import { logRuntimeExecution, logPolicyDecision } from "../telemetry.js";
 import { attachRawContext } from "../token-usage.js";
@@ -709,7 +710,9 @@ export async function handleRuntimeExecute(
       result: Awaited<ReturnType<typeof execute>>,
       phase: "compile" | "execute",
     ): Promise<string | null> => {
-      if (!request.persistOutput) {
+      // Digest mode force-persists so runtime.queryOutput can always
+      // recover the full output behind the compact digest.
+      if (!request.persistOutput && request.outputMode !== "digest") {
         return null;
       }
 
@@ -1013,6 +1016,57 @@ export async function handleRuntimeExecute(
     );
 
     // 13. Branch on outputMode
+    if (request.outputMode === "digest") {
+      const codeHead = request.code?.split("\n", 1)[0] ?? "";
+      const digest = buildOutputDigest({
+        command: [cmd.executable, ...(cmd.args ?? []), codeHead]
+          .filter((part) => part.length > 0)
+          .join(" "),
+        stdout: stdoutStr,
+        stderr: stderrStr,
+        exitCode: result.exitCode,
+        rootPath: repo.rootPath,
+      });
+      logRuntimeExecution({
+        repoId: request.repoId,
+        runtime: request.runtime,
+        executable: cmd.executable,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+        stdoutBytes: result.totalStdoutBytes,
+        stderrBytes: result.totalStderrBytes,
+        timedOut: result.status === "timeout",
+        policyDecision: policyDecision.decision,
+        auditHash: policyDecision.auditHash,
+        artifactHandle,
+        diagnostics: request.includeDiagnostics ? timer.snapshot() : undefined,
+      });
+      return finish(
+        attachRawContext(
+          {
+            status: result.status,
+            exitCode: result.exitCode,
+            signal: result.signal,
+            durationMs: result.durationMs,
+            stdoutSummary: digest.summary,
+            stderrSummary: "",
+            artifactHandle,
+            digest,
+            truncation: {
+              stdoutTruncated: result.stdoutTruncated,
+              stderrTruncated: result.stderrTruncated,
+              totalStdoutBytes: result.totalStdoutBytes,
+              totalStderrBytes: result.totalStderrBytes,
+            },
+            policyDecision: {
+              auditHash: policyDecision.auditHash,
+            },
+          },
+          { rawTokens: rawOutputTokens },
+        ),
+      );
+    }
+
     if (request.outputMode === "minimal") {
       logRuntimeExecution({
         repoId: request.repoId,

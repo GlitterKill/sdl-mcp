@@ -176,4 +176,34 @@ describe("runtime minimal mode compact response", () => {
       "stdoutPreview should stay out of minimal responses",
     );
   });
+
+  it("returns structured digest and force-persisted artifact in digest mode", async () => {
+    const { handleRuntimeExecute } =
+      await import("../../dist/mcp/tools/runtime.js");
+
+    const result = await handleRuntimeExecute({
+      repoId,
+      runtime: "node",
+      args: ["-e", "console.log('x'.repeat(5000)); process.exit(1)"],
+      persistOutput: false,
+      outputMode: "digest",
+    });
+
+    assert.strictEqual(result.status, "failure");
+    const digest = (result as Record<string, unknown>).digest as {
+      kind: string;
+      ok: boolean;
+    };
+    assert.ok(digest, "digest must be attached in digest mode");
+    assert.strictEqual(digest.kind, "generic");
+    assert.strictEqual(digest.ok, false);
+    assert.ok(
+      result.stdoutSummary.length < 200,
+      `digest summary should be compact, got ${result.stdoutSummary.length} chars`,
+    );
+    assert.ok(
+      result.artifactHandle,
+      "digest mode must force-persist the output artifact",
+    );
+  });
 });

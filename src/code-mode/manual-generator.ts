@@ -168,7 +168,7 @@ function bufferCheckpoint(): { checkpointed: boolean }
 /** Get buffer status */
 function bufferStatus(): { status: object }
 /** Execute runtime command; stdin for multiline input. Node code runs as ESM: import/createRequire, never require() */
-function runtimeExecute(p: { runtime: string; executable?: string; args?: string[]; code?: string; stdin?: string; relativeCwd?: string; timeoutMs?: number; queryTerms?: string[]; contextLines?: number; maxResponseLines?: number; persistOutput?: boolean; outputMode?: "minimal"|"summary"|"intent" }): { status: string; exitCode: number; durationMs: number; artifactHandle?: string; stdoutSummary?: string; nextAction?: object }
+function runtimeExecute(p: { runtime: string; executable?: string; args?: string[]; code?: string; stdin?: string; relativeCwd?: string; timeoutMs?: number; queryTerms?: string[]; contextLines?: number; maxResponseLines?: number; persistOutput?: boolean; outputMode?: "minimal"|"summary"|"intent"|"digest" }): { status: string; exitCode: number; durationMs: number; artifactHandle?: string; stdoutSummary?: string; nextAction?: object }
 /** Query stored runtime output by keywords or exact line range */
 function runtimeQueryOutput(p: { artifactHandle: string; queryTerms?: string[]; cursor?: { stream: "stdout"|"stderr"; afterLine: number }; lineRange?: { stream: "stdout"|"stderr"; startLine: number; endLine: number }; maxExcerpts?: number; contextLines?: number; stream?: "stdout"|"stderr"|"both" }): { excerpts: object[]; matchStatus: "matched"|"noMatchFallback"|"lineRange"; matchCount: number; nextCursor?: object }
 /** Retrieve stored large response by handle; maxTokens estimate-capped, maxBytes exact */
