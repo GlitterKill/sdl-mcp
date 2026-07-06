@@ -125,11 +125,17 @@ describe("symbol.search identifier near misses", () => {
   });
 
   it("builds identifier-aware FTS queries", () => {
+    // LadybugDB FTS has no boolean query syntax; fragments ride along as
+    // plain disjunctive tokens and conjunctive queries stay untouched.
     assert.equal(
-      buildIdentifierAwareFtsQuery("buildGraphSlice"),
-      "buildGraphSlice OR (build AND graph AND slice)",
+      buildIdentifierAwareFtsQuery("buildGraphSlice", false),
+      "buildGraphSlice build graph slice",
     );
-    assert.equal(buildIdentifierAwareFtsQuery("slice"), "slice");
+    assert.equal(
+      buildIdentifierAwareFtsQuery("buildGraphSlice", true),
+      "buildGraphSlice",
+    );
+    assert.equal(buildIdentifierAwareFtsQuery("slice", false), "slice");
   });
 
   it("returns the real symbol for camelCase drift", async () => {
