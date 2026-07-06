@@ -8,6 +8,7 @@
 import {
   encodePackedSymbolSearch,
   SYMBOL_SEARCH_ENCODER_ID,
+  SYMBOL_SEARCH_SHORT_ID_ENCODER_ID,
 } from "../wire/packed/encoders/symbol-search.js";
 import {
   decideFormatDetailed,
@@ -51,6 +52,8 @@ export function serializeSymbolSearchForWireFormat(
     packedThreshold?: number;
     packedTokenThreshold?: number;
     packedEnabled?: boolean;
+    sessionId?: string;
+    shortIds?: boolean;
   },
 ): SymbolSearchWireResult {
   if (wireFormat !== "packed" && wireFormat !== "auto") {
@@ -61,7 +64,14 @@ export function serializeSymbolSearchForWireFormat(
   }
 
   const jsonStr = JSON.stringify(input);
-  const packedStr = encodePackedSymbolSearch(input);
+  const aliasesActive = options?.shortIds !== false && typeof options?.sessionId === "string";
+  const encoderId = aliasesActive
+    ? SYMBOL_SEARCH_SHORT_ID_ENCODER_ID
+    : SYMBOL_SEARCH_ENCODER_ID;
+  const packedStr = encodePackedSymbolSearch(input, {
+    sessionId: options?.sessionId,
+    shortIds: options?.shortIds,
+  });
   const jsonTokens = estimateTokens(jsonStr);
   const packedTokens = estimatePackedTokens(packedStr);
   const detail = decideFormatDetailed(
@@ -87,7 +97,7 @@ export function serializeSymbolSearchForWireFormat(
   );
   try {
     getObservabilityTap()?.packedWire({
-      encoderId: SYMBOL_SEARCH_ENCODER_ID,
+      encoderId,
       jsonBytes: jsonStr.length,
       packedBytes: packedStr.length,
       jsonTokens,
@@ -103,7 +113,7 @@ export function serializeSymbolSearchForWireFormat(
     return {
       format: "packed",
       payload: packedStr,
-      encoderId: SYMBOL_SEARCH_ENCODER_ID,
+      encoderId,
       jsonBytes: jsonStr.length,
       packedBytes: packedStr.length,
       jsonTokens,
@@ -116,7 +126,7 @@ export function serializeSymbolSearchForWireFormat(
   return {
     format: "json",
     payload: input,
-    encoderId: SYMBOL_SEARCH_ENCODER_ID,
+    encoderId,
     jsonBytes: jsonStr.length,
     packedBytes: packedStr.length,
     jsonTokens,

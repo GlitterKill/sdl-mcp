@@ -5,6 +5,12 @@
 import { encodeSchemaDriven } from "../schema.js";
 import type { TableSpec } from "../types.js";
 import { cardSummaryForWire } from "../../../tools/symbol-utils.js";
+import {
+  aliasPackedSymbolId,
+  appendIntroducedShortIds,
+  packedShortIdsActive,
+  type PackedShortIdOptions,
+} from "../short-ids.js";
 
 interface ContextCard {
   symbolId?: string;
@@ -91,14 +97,24 @@ const EVIDENCE_SPEC: TableSpec = {
   ],
 };
 
-export function encodePackedContext(input: ContextInput): string {
-  const cardRows = (input.cards ?? []).map((card) => ({
-    id: card.symbolId ?? card.id ?? "",
+export function encodePackedContext(
+  input: ContextInput,
+  options: PackedShortIdOptions = {},
+): string {
+  const introduced = new Map<string, string>();
+  const encoderId = packedShortIdsActive(options)
+    ? CONTEXT_SHORT_ID_ENCODER_ID
+    : CONTEXT_ENCODER_ID;
+  const cardRows = (input.cards ?? []).map((card) => {
+    const id = card.symbolId ?? card.id ?? "";
+    return {
+    id: id ? aliasPackedSymbolId(id, options, introduced) : "",
     f: card.file ?? "",
     k: card.kind ?? "",
     n: card.name ?? "",
     sum: cardSummaryForWire(card.summary, card.name) ?? "",
-  }));
+  };
+  });
   const rungRows = (input.rungs ?? []).map((r) => ({
     rungName: r.rungName ?? r.rung ?? "",
     rationale: r.rationale ?? "",
@@ -115,9 +131,9 @@ export function encodePackedContext(input: ContextInput): string {
     reference: e.reference ?? "",
     summary: e.summary ?? "",
   }));
-  return encodeSchemaDriven({
+  const payload = encodeSchemaDriven({
     toolName: "context",
-    encoderId: "ctx1",
+    encoderId,
     scalars: {
       taskType: input.taskType ?? "",
       windowBytes: input.windowBytes ?? 0,
@@ -144,6 +160,8 @@ export function encodePackedContext(input: ContextInput): string {
       .map((c) => c.file ?? "")
       .filter((f) => f.length > 0),
   });
+  return appendIntroducedShortIds(payload, introduced);
 }
 
 export const CONTEXT_ENCODER_ID = "ctx1";
+export const CONTEXT_SHORT_ID_ENCODER_ID = "ctx2";

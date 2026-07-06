@@ -26,6 +26,8 @@ import { logSemanticSearchTelemetry } from "../telemetry.js";
 import { attachRawContext } from "../token-usage.js";
 import { serializeSymbolSearchForWireFormat } from "./symbol-wire-format.js";
 import { compactCardForWire } from "./symbol-utils.js";
+import { sessionContentLedger } from "../session-dedupe.js";
+import { hashContent } from "../../util/hashing.js";
 import {
   searchSymbolsWithOverlay,
   searchSymbolsHybridWithOverlay,
@@ -698,6 +700,10 @@ export async function handleSymbolSearch(
         total: effectiveResults.length,
       },
       request.wireFormat,
+      {
+        sessionId: context?.sessionId,
+        shortIds: config.wire?.shortIds,
+      },
     );
     if (wireResult.gateDecision) {
       const savedRatio =
@@ -842,6 +848,42 @@ function toBatchFailure(
   };
 }
 
+type RefsMode = "auto" | "off";
+
+interface SessionRefPayload {
+  ref: { key: string; etag?: string };
+  unchanged: true;
+}
+
+function buildSessionRef(key: string, etag?: string): SessionRefPayload {
+  const ref: { key: string; etag?: string } = { key };
+  if (etag !== undefined) ref.etag = etag;
+  return { ref, unchanged: true };
+}
+
+function maybeApplyCardSessionRef(
+  card: Record<string, unknown>,
+  options: {
+    repoId: string;
+    symbolId: string;
+    refsMode?: RefsMode;
+    sessionId?: string;
+  },
+): Record<string, unknown> | SessionRefPayload {
+  if (options.refsMode === "off" || !options.sessionId) return card;
+  const etag = typeof card.etag === "string" ? card.etag : undefined;
+  const key = `card:${options.repoId}:${options.symbolId}`;
+  const result = sessionContentLedger.record({
+    sessionId: options.sessionId,
+    key,
+    contentHash: hashContent(JSON.stringify(card)),
+    etag,
+  });
+  if (result.status === "unchanged") return buildSessionRef(key, etag);
+  if (result.status === "changed") return { ...card, changedSincePrior: true };
+  return card;
+}
+
 async function buildCardsForSymbolIds(
   conn: Awaited<ReturnType<typeof getLadybugConn>>,
   input: {
@@ -922,6 +964,7 @@ export async function handleSymbolGetCard(
     minCallConfidence,
     includeResolutionMetadata,
     includeProcesses,
+    refsMode,
   } = request;
   const symbolId = await resolveRequestedSymbolId(conn, request);
 
@@ -947,10 +990,15 @@ export async function handleSymbolGetCard(
   // Prefetch edge targets for anticipated slice.build
   prefetchSliceFrontier(repoId, [symbolId], context);
 
-  const response = { card: compactCardForWire(result) } as Extract<
-    SymbolGetCardResponse,
-    { card: unknown }
-  >;
+  const card = compactCardForWire(result);
+  const response = {
+    card: maybeApplyCardSessionRef(card, {
+      repoId,
+      symbolId,
+      refsMode,
+      sessionId: context?.sessionId,
+    }),
+  } as Extract<SymbolGetCardResponse, { card: unknown }>;
   const symbol = await ladybugDb.getSymbol(conn, symbolId);
   return symbol
     ? attachRawContext(response, { fileIds: [symbol.fileId] })
@@ -971,6 +1019,7 @@ async function handleBatchCards(
     knownEtags,
     minCallConfidence,
     includeResolutionMetadata,
+    refsMode,
   } = request;
   const conn = await getLadybugConn();
 
@@ -995,8 +1044,15 @@ async function handleBatchCards(
       ...new Set(Array.from(symbolMap.values()).map((symbol) => symbol.fileId)),
     ];
     const response = {
-      cards: cards.map((card) =>
-        "notModified" in card ? card : compactCardForWire(card),
+      cards: cards.map((card, index) =>
+        "notModified" in card
+          ? card
+          : maybeApplyCardSessionRef(compactCardForWire(card), {
+              repoId,
+              symbolId: symbolIds[index] ?? "",
+              refsMode,
+              sessionId: context?.sessionId,
+            }),
       ),
     } as Extract<SymbolGetCardResponse, { cards: unknown }>;
     return attachRawContext(response, { fileIds });
@@ -1040,8 +1096,15 @@ async function handleBatchCards(
   }
 
   const response = {
-    cards: cards.map((card) =>
-      "notModified" in card ? card : compactCardForWire(card),
+    cards: cards.map((card, index) =>
+      "notModified" in card
+        ? card
+        : maybeApplyCardSessionRef(compactCardForWire(card), {
+            repoId,
+            symbolId: resolvedSymbolIds[index] ?? "",
+            refsMode,
+            sessionId: context?.sessionId,
+          }),
     ),
   } as Extract<SymbolGetCardResponse, { cards: unknown }>;
   if (failures.length > 0) {

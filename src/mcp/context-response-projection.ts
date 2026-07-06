@@ -3,6 +3,8 @@
  * limits. Final MCP text content applies the stricter model projection below.
  */
 
+import type { TaskType } from "../agent/types.js";
+
 /** Fields kept in the compact broad response before final model-content projection.
  *  Shared with context-engine.ts for pre-truncation compaction. */
 const BROAD_MODEL_VISIBLE_FIELDS = new Set([
@@ -218,6 +220,79 @@ function copyIfPresent(
   if (key in source) {
     target[key] = source[key];
   }
+}
+
+function copyProjectedDeps(
+  source: Record<string, unknown>,
+  target: Record<string, unknown>,
+  fields: { imports?: true; calls?: true },
+): void {
+  if (!isRecord(source.deps)) {
+    return;
+  }
+
+  const deps: Record<string, unknown> = {};
+  if (fields.imports) copyIfPresent(source.deps, deps, "imports");
+  if (fields.calls) copyIfPresent(source.deps, deps, "calls");
+  if (Object.keys(deps).length > 0) {
+    target.deps = deps;
+  }
+}
+
+export function projectCardForTask(
+  card: Record<string, unknown>,
+  taskType: TaskType,
+): Record<string, unknown> {
+  const projected: Record<string, unknown> = {};
+
+  // Keep the same canonical field order used by compactCardForWire.
+  copyIfPresent(card, projected, "symbolId");
+  copyIfPresent(card, projected, "file");
+  copyIfPresent(card, projected, "range");
+  copyIfPresent(card, projected, "kind");
+  copyIfPresent(card, projected, "name");
+  copyIfPresent(card, projected, "signature");
+
+  if (taskType === "debug") {
+    copyIfPresent(card, projected, "summary");
+    copyIfPresent(card, projected, "sideEffects");
+    copyProjectedDeps(card, projected, { calls: true });
+    copyIfPresent(card, projected, "canonicalTest");
+  } else if (taskType === "implement") {
+    copyIfPresent(card, projected, "summary");
+    copyIfPresent(card, projected, "invariants");
+    copyProjectedDeps(card, projected, { imports: true });
+  } else if (taskType === "explain") {
+    copyIfPresent(card, projected, "summary");
+    copyIfPresent(card, projected, "summaryProvenance");
+    copyProjectedDeps(card, projected, { imports: true, calls: true });
+  } else {
+    copyIfPresent(card, projected, "summary");
+    copyIfPresent(card, projected, "sideEffects");
+    copyIfPresent(card, projected, "metrics");
+  }
+
+  copyIfPresent(card, projected, "ref");
+  copyIfPresent(card, projected, "unchanged");
+  copyIfPresent(card, projected, "changedSincePrior");
+
+  return projected;
+}
+
+export function projectSymbolCardEvidenceForTask(
+  evidence: Record<string, unknown>,
+  taskType: TaskType,
+): Record<string, unknown> {
+  const projected: Record<string, unknown> = {};
+  copyIfPresent(evidence, projected, "type");
+  copyIfPresent(evidence, projected, "reference");
+
+  const projectedCard = projectCardForTask(evidence, taskType);
+  for (const [key, value] of Object.entries(projectedCard)) {
+    projected[key] = value;
+  }
+
+  return projected;
 }
 
 function projectEvidenceForModel(value: unknown): unknown {

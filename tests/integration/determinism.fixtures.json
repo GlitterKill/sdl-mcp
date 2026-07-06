@@ -36,6 +36,7 @@
       "tool": "sdl.symbol.getCard",
       "args": {
         "repoId": "{REPO_ID}",
+        "refsMode": "off",
         "symbolRef": {
           "name": "UserRepository",
           "file": "src/typescript/models.ts"
@@ -46,6 +47,7 @@
       "tool": "sdl.code.getSkeleton",
       "args": {
         "repoId": "{REPO_ID}",
+        "refsMode": "off",
         "symbolRef": {
           "name": "UserRepository",
           "file": "src/typescript/models.ts"
@@ -57,6 +59,7 @@
       "tool": "sdl.code.getHotPath",
       "args": {
         "repoId": "{REPO_ID}",
+        "refsMode": "off",
         "symbolRef": {
           "name": "UserRepository",
           "file": "src/typescript/models.ts"

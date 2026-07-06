@@ -7,6 +7,7 @@
 import {
   encodePackedContext,
   CONTEXT_ENCODER_ID,
+  CONTEXT_SHORT_ID_ENCODER_ID,
 } from "../wire/packed/encoders/context.js";
 import {
   decideFormatDetailed,
@@ -134,6 +135,8 @@ export function serializeContextForWireFormat(
     packedThreshold?: number;
     packedTokenThreshold?: number;
     packedEnabled?: boolean;
+    sessionId?: string;
+    shortIds?: boolean;
   },
 ): ContextWireResult {
   const jsonPayload = Array.isArray(response.cards)
@@ -158,7 +161,12 @@ export function serializeContextForWireFormat(
 
   const input = buildContextInput(jsonPayload);
   const jsonStr = JSON.stringify(jsonPayload);
-  const packedStr = encodePackedContext(input);
+  const aliasesActive = options?.shortIds !== false && typeof options?.sessionId === "string";
+  const encoderId = aliasesActive ? CONTEXT_SHORT_ID_ENCODER_ID : CONTEXT_ENCODER_ID;
+  const packedStr = encodePackedContext(input, {
+    sessionId: options?.sessionId,
+    shortIds: options?.shortIds,
+  });
   const jsonTokens = estimateTokens(jsonStr);
   const packedTokens = estimatePackedTokens(packedStr);
   const detail = decideFormatDetailed(
@@ -180,7 +188,7 @@ export function serializeContextForWireFormat(
     return {
       format: "packed",
       payload: packedStr,
-      encoderId: CONTEXT_ENCODER_ID,
+      encoderId,
       jsonBytes: jsonStr.length,
       packedBytes: packedStr.length,
       jsonTokens,
@@ -193,7 +201,7 @@ export function serializeContextForWireFormat(
   return {
     format: "json",
     payload: jsonPayload,
-    encoderId: CONTEXT_ENCODER_ID,
+    encoderId,
     jsonBytes: jsonStr.length,
     packedBytes: packedStr.length,
     jsonTokens,

@@ -27,7 +27,10 @@ import {
 
 import { getObservabilityTap } from "../../observability/event-tap.js";
 import { tokenAccumulator } from "../token-accumulator.js";
-import { SLICE_ENCODER_ID } from "../wire/packed/encoders/slice.js";
+import {
+  SLICE_ENCODER_ID,
+  SLICE_SHORT_ID_ENCODER_ID,
+} from "../wire/packed/encoders/slice.js";
 
 
 
@@ -192,6 +195,8 @@ export function serializeSliceForWireFormat(
     packedThreshold?: number;
     packedTokenThreshold?: number;
     packedEnabled?: boolean;
+    sessionId?: string;
+    shortIds?: boolean;
   },
 ): WireFormatResult {
   if (wireFormatVersion === 1 || wireFormatVersion === 2) {
@@ -220,7 +225,12 @@ export function serializeSliceForWireFormat(
     }
     const compact = toCompactGraphSliceV3(slice);
     const jsonStr = JSON.stringify(compact);
-    const packedStr = encodePackedSlice(slice);
+    const aliasesActive = options?.shortIds !== false && typeof options?.sessionId === "string";
+    const encoderId = aliasesActive ? SLICE_SHORT_ID_ENCODER_ID : SLICE_ENCODER_ID;
+    const packedStr = encodePackedSlice(slice, {
+      sessionId: options?.sessionId,
+      shortIds: options?.shortIds,
+    });
     const jsonTokens = estimateTokens(jsonStr);
     const packedTokens = estimatePackedTokens(packedStr);
     const detail = decideFormatDetailed(
@@ -239,14 +249,14 @@ export function serializeSliceForWireFormat(
 
     const gateDecision = detail.decision === "packed" ? "packed" : "fallback";
     tokenAccumulator.recordPackedUsage(
-      SLICE_ENCODER_ID,
+      encoderId,
       jsonStr.length,
       packedStr.length,
       gateDecision,
     );
     try {
       getObservabilityTap()?.packedWire({
-        encoderId: SLICE_ENCODER_ID,
+        encoderId,
         jsonBytes: jsonStr.length,
         packedBytes: packedStr.length,
         jsonTokens,
@@ -259,7 +269,7 @@ export function serializeSliceForWireFormat(
       return {
         format: "packed",
         payload: packedStr,
-        encoderId: SLICE_ENCODER_ID,
+        encoderId,
         jsonBytes: jsonStr.length,
         packedBytes: packedStr.length,
         jsonTokens,

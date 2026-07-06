@@ -624,7 +624,11 @@ async function handleSliceBuildInternal(
       slice,
       requestedWireFormat,
       effectiveWireFormatVersion,
-      { includeLegend: request.includeLegend },
+      {
+        includeLegend: request.includeLegend,
+        sessionId: context?.sessionId,
+        shortIds: config.wire?.shortIds,
+      },
     );
     let packedStats:
       | {

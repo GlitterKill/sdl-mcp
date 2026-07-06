@@ -70,10 +70,14 @@ import { getOverlaySnapshot } from "../../live-index/overlay-reader.js";
 import { buildConditionalResponse } from "../../util/conditional-response.js";
 import type { ToolContext } from "../../server.js";
 import { maybeBuildSessionDelta } from "../session-delta.js";
+import { sessionContentLedger } from "../session-dedupe.js";
+import { hashContent } from "../../util/hashing.js";
 import {
   maybeCompressToolResponse,
   recordTokenSavings,
 } from "../response-compression.js";
+
+type RefsMode = "auto" | "off";
 
 type ResolvedCodeNeedWindowRequest = Omit<
   CodeNeedWindowRequest,
@@ -84,6 +88,40 @@ type ResolvedGetHotPathRequest = Omit<
   GetHotPathRequest,
   "symbolId" | "symbolRef"
 > & { symbolId: string };
+
+function buildSessionRef(key: string, etag?: string): { key: string; etag?: string } {
+  const ref: { key: string; etag?: string } = { key };
+  if (etag !== undefined) ref.etag = etag;
+  return ref;
+}
+
+function maybeApplySessionContentRef(
+  response: Record<string, unknown>,
+  options: {
+    sessionId?: string;
+    refsMode?: RefsMode;
+    key: string;
+    heavyField: string;
+  },
+): Record<string, unknown> {
+  if (options.refsMode === "off" || !options.sessionId) return response;
+  const etag = typeof response.etag === "string" ? response.etag : undefined;
+  const result = sessionContentLedger.record({
+    sessionId: options.sessionId,
+    key: options.key,
+    contentHash: hashContent(JSON.stringify(response)),
+    etag,
+  });
+  if (result.status === "unchanged") {
+    const compact = { ...response };
+    delete compact[options.heavyField];
+    compact.ref = buildSessionRef(options.key, etag);
+    compact.unchanged = true;
+    return compact;
+  }
+  if (result.status === "changed") return { ...response, changedSincePrior: true };
+  return response;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1217,9 +1255,16 @@ export async function handleGetSkeleton(
     const enrichedResponse = symbol
       ? attachRawContext(response, { fileIds: [symbol.fileId] })
       : response;
-    return buildConditionalResponse(enrichedResponse, {
+    const conditionalResponse = buildConditionalResponse(enrichedResponse, {
       ifNoneMatch: request.ifNoneMatch,
     });
+    if ("notModified" in conditionalResponse) return conditionalResponse;
+    return maybeApplySessionContentRef(conditionalResponse, {
+      sessionId: context?.sessionId,
+      refsMode: request.refsMode,
+      key: `skeleton:${request.repoId}:${request.symbolId}:${request.skeletonOffset ?? 0}`,
+      heavyField: "skeleton",
+    }) as GetSkeletonResponse;
   } else if (request.file) {
     const result = await generateFileSkeleton(
       request.repoId,
@@ -1269,9 +1314,16 @@ export async function handleGetSkeleton(
     const enrichedResponse = fileRow
       ? attachRawContext(response, { fileIds: [fileRow.fileId] })
       : response;
-    return buildConditionalResponse(enrichedResponse, {
+    const conditionalResponse = buildConditionalResponse(enrichedResponse, {
       ifNoneMatch: request.ifNoneMatch,
     });
+    if ("notModified" in conditionalResponse) return conditionalResponse;
+    return maybeApplySessionContentRef(conditionalResponse, {
+      sessionId: context?.sessionId,
+      refsMode: request.refsMode,
+      key: `skeleton:${request.repoId}:${request.file}:${request.skeletonOffset ?? 0}`,
+      heavyField: "skeleton",
+    }) as GetSkeletonResponse;
   }
 
   throw new ValidationError("Either symbolId or file must be provided");
@@ -1384,7 +1436,14 @@ export async function handleGetHotPath(
   const enrichedResponse = symbol
     ? attachRawContext(response, { fileIds: [symbol.fileId] })
     : response;
-  return buildConditionalResponse(enrichedResponse, {
+  const conditionalResponse = buildConditionalResponse(enrichedResponse, {
     ifNoneMatch: request.ifNoneMatch,
   });
+  if ("notModified" in conditionalResponse) return conditionalResponse;
+  return maybeApplySessionContentRef(conditionalResponse, {
+    sessionId: context?.sessionId,
+    refsMode: request.refsMode,
+    key: `hotpath:${request.repoId}:${request.symbolId}:${request.identifiersToFind.join("|")}:${request.maxLines ?? ""}:${request.maxTokens ?? ""}:${request.contextLines ?? ""}`,
+    heavyField: "excerpt",
+  }) as GetHotPathResponse;
 }

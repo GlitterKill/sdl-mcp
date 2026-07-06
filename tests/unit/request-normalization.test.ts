@@ -1,7 +1,10 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 import { z } from "zod";
-import { normalizeToolArguments } from "../../dist/mcp/request-normalization.js";
+import {
+  extractReferencedSymbolIds,
+  normalizeToolArguments,
+} from "../../dist/mcp/request-normalization.js";
 import { routeGatewayCall } from "../../dist/gateway/router.js";
 
 describe("request normalization", () => {
@@ -66,5 +69,27 @@ describe("request normalization", () => {
       repoId: "repo-1",
       symbolIds: ["sym-1"],
     });
+  });
+
+  it("extracts referenced ids from explicit id-bearing fields", () => {
+    assert.deepStrictEqual(
+      extractReferencedSymbolIds({
+        symbolId: "id3",
+        symbolIds: ["id2", "id1", 42],
+        knownCardEtags: { id4: "etag" },
+        options: {
+          focusSymbols: ["id5", "id2"],
+          ignored: "s1",
+        },
+      }),
+      ["id1", "id2", "id3", "id4", "id5"],
+    );
+  });
+
+  it("does not treat generic alias-shaped strings as referenced ids", () => {
+    assert.deepStrictEqual(
+      extractReferencedSymbolIds({ query: "s1", options: { chatMentions: ["s2"] } }),
+      [],
+    );
   });
 });

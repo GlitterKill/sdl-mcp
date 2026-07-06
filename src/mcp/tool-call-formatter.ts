@@ -168,13 +168,25 @@ function fmtSymbolGetCard(
   // Handle batch mode (symbolIds/symbolRefs returns cards array)
   const cards = result.cards as unknown[] | undefined;
   if (Array.isArray(cards)) {
-    return `symbol.getCard -> ${cards.length} card${cards.length === 1 ? "" : "s"} returned`;
+    const refCount = cards.filter(
+      (card) =>
+        card &&
+        typeof card === "object" &&
+        (card as Record<string, unknown>).unchanged === true,
+    ).length;
+    return refCount > 0
+      ? `symbol.getCard -> ${cards.length} card${cards.length === 1 ? "" : "s"} returned (${refCount} unchanged refs)`
+      : `symbol.getCard -> ${cards.length} card${cards.length === 1 ? "" : "s"} returned`;
   }
   const card = result.card as Record<string, unknown> | undefined;
   if (result.notModified) {
     return "symbol.getCard -> not modified (ETag hit)";
   }
   if (!card) return null;
+  if (card.unchanged === true) {
+    const ref = card.ref as Record<string, unknown> | undefined;
+    return `symbol.getCard -> unchanged (ref ${str(ref?.key)})`;
+  }
   const deps = card.deps as Record<string, unknown[]> | undefined;
   const imports = deps?.imports?.length ?? 0;
   const calls = deps?.calls?.length ?? 0;
@@ -187,6 +199,10 @@ function fmtCodeSkeleton(
 ): string | null {
   if (result.notModified) {
     return "code.getSkeleton -> not modified (ETag hit)";
+  }
+  if (result.unchanged === true) {
+    const ref = result.ref as Record<string, unknown> | undefined;
+    return `code.getSkeleton -> unchanged (ref ${str(ref?.key)})`;
   }
   const file = str(result.file);
   const originalLines = maybeNum(result.originalLines);
@@ -213,6 +229,10 @@ function fmtCodeHotPath(
 ): string | null {
   if (result.notModified) {
     return "code.getHotPath -> not modified (ETag hit)";
+  }
+  if (result.unchanged === true) {
+    const ref = result.ref as Record<string, unknown> | undefined;
+    return `code.getHotPath -> unchanged (ref ${str(ref?.key)})`;
   }
   const matched = result.matchedIdentifiers as string[] | undefined;
   const requested = (args.identifiersToFind as string[])?.length ?? 0;

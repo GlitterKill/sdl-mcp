@@ -4,6 +4,12 @@
 
 import { encodeSchemaDriven } from "../schema.js";
 import type { TableSpec } from "../types.js";
+import {
+  aliasPackedSymbolId,
+  appendIntroducedShortIds,
+  packedShortIdsActive,
+  type PackedShortIdOptions,
+} from "../short-ids.js";
 
 interface SymbolSearchHit {
   symbolId: string;
@@ -33,18 +39,25 @@ const HITS_SPEC: TableSpec = {
   ],
 };
 
-export function encodePackedSymbolSearch(input: SymbolSearchInput): string {
+export function encodePackedSymbolSearch(
+  input: SymbolSearchInput,
+  options: PackedShortIdOptions = {},
+): string {
+  const introduced = new Map<string, string>();
+  const encoderId = packedShortIdsActive(options)
+    ? SYMBOL_SEARCH_SHORT_ID_ENCODER_ID
+    : SYMBOL_SEARCH_ENCODER_ID;
   const rows = input.results.map((r) => ({
-    symbolId: r.symbolId,
+    symbolId: aliasPackedSymbolId(r.symbolId, options, introduced),
     file: r.file ?? "",
     line: r.line ?? 0,
     kind: r.kind ?? "",
     score: r.score ?? 0,
     name: r.name ?? "",
   }));
-  return encodeSchemaDriven({
+  const payload = encodeSchemaDriven({
     toolName: "symbol.search",
-    encoderId: "ss1",
+    encoderId,
     scalars: {
       query: input.query ?? "",
       total: input.total ?? rows.length,
@@ -55,6 +68,8 @@ export function encodePackedSymbolSearch(input: SymbolSearchInput): string {
       .map((r) => r.file ?? "")
       .filter((f) => f.length > 0),
   });
+  return appendIntroducedShortIds(payload, introduced);
 }
 
 export const SYMBOL_SEARCH_ENCODER_ID = "ss1";
+export const SYMBOL_SEARCH_SHORT_ID_ENCODER_ID = "ss2";

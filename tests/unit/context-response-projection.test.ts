@@ -4,6 +4,8 @@ import {
   BROAD_VISIBLE_FIELDS,
   isBroadContextResult,
   projectBroadContextResult,
+  projectCardForTask,
+  projectSymbolCardEvidenceForTask,
   projectContextResultForUsageAccounting,
   projectToolResultForModelContent,
 } from "../../dist/mcp/context-response-projection.js";
@@ -196,6 +198,172 @@ describe("context-response-projection", () => {
       assert.equal(projected.etag, undefined);
       assert.equal(projected.answer, broadResult.answer);
       assert.deepEqual(projected._rawContext, { rawTokens: 1000 });
+    });
+  });
+
+
+  describe("projectCardForTask", () => {
+    const fullCard = {
+      symbolId: "sym-1",
+      repoId: "repo-1",
+      file: "src/example.ts",
+      range: { startLine: 1, startCol: 0, endLine: 5, endCol: 1 },
+      kind: "function",
+      name: "example",
+      exported: true,
+      visibility: "public",
+      signature: "function example(): void",
+      summary: "Does example work.",
+      summaryProvenance: "heuristic",
+      invariants: ["input is normalized"],
+      sideEffects: ["writes cache"],
+      cluster: { clusterId: "c1", label: "context", memberCount: 2 },
+      processes: [{ processId: "p1", label: "flow", role: "entry", depth: 0 }],
+      callResolution: { calls: [] },
+      deps: {
+        imports: ["node:path"],
+        calls: ["helper"],
+        callsNote: "static calls only",
+      },
+      metrics: {
+        fanIn: 3,
+        fanOut: 2,
+        churn30d: 1,
+        canonicalTest: {
+          file: "tests/example.test.ts",
+          distance: 1,
+          proximity: 1,
+        },
+      },
+      canonicalTest: {
+        file: "tests/example.test.ts",
+        distance: 1,
+        proximity: 1,
+      },
+      detailLevel: "full",
+      etag: "etag-1",
+      version: { ledgerVersion: "v1", astFingerprint: "fp" },
+    };
+
+    it("projects debug cards to call and runtime-relevant fields", () => {
+      const projected = projectCardForTask(fullCard, "debug");
+
+      assert.deepEqual(Object.keys(projected).sort(), [
+        "canonicalTest",
+        "deps",
+        "file",
+        "kind",
+        "name",
+        "range",
+        "sideEffects",
+        "signature",
+        "summary",
+        "symbolId",
+      ]);
+      assert.deepEqual(Object.keys(projected.deps as Record<string, unknown>), [
+        "calls",
+      ]);
+    });
+
+    it("projects implement cards to import and invariant fields", () => {
+      const projected = projectCardForTask(fullCard, "implement");
+
+      assert.deepEqual(Object.keys(projected).sort(), [
+        "deps",
+        "file",
+        "invariants",
+        "kind",
+        "name",
+        "range",
+        "signature",
+        "summary",
+        "symbolId",
+      ]);
+      assert.deepEqual(Object.keys(projected.deps as Record<string, unknown>), [
+        "imports",
+      ]);
+    });
+
+    it("projects explain cards to summary and dependency fields", () => {
+      const projected = projectCardForTask(fullCard, "explain");
+
+      assert.deepEqual(Object.keys(projected).sort(), [
+        "deps",
+        "file",
+        "kind",
+        "name",
+        "range",
+        "signature",
+        "summary",
+        "summaryProvenance",
+        "symbolId",
+      ]);
+      assert.deepEqual(Object.keys(projected.deps as Record<string, unknown>), [
+        "imports",
+        "calls",
+      ]);
+    });
+
+    it("projects review cards to metric and side-effect fields", () => {
+      const projected = projectCardForTask(fullCard, "review");
+
+      assert.deepEqual(Object.keys(projected).sort(), [
+        "file",
+        "kind",
+        "metrics",
+        "name",
+        "range",
+        "sideEffects",
+        "signature",
+        "summary",
+        "symbolId",
+      ]);
+      assert.equal("canonicalTest" in projected, false);
+      assert.equal("invariants" in projected, false);
+    });
+
+    it("passes through ref, unchanged, and changedSincePrior fields", () => {
+      const ref = { key: "card:r:s", etag: "e" };
+      const projected = projectCardForTask(
+        { ...fullCard, ref, unchanged: true, changedSincePrior: true },
+        "debug",
+      );
+
+      assert.strictEqual(projected.ref, ref);
+      assert.equal(projected.unchanged, true);
+      assert.equal(projected.changedSincePrior, true);
+    });
+
+    it("projects symbolCard finalEvidence while preserving its envelope", () => {
+      const projected = projectSymbolCardEvidenceForTask(
+        {
+          ...fullCard,
+          type: "symbolCard",
+          reference: "symbol:sym-1",
+          timestamp: 123,
+        },
+        "implement",
+      );
+
+      assert.deepEqual(Object.keys(projected).sort(), [
+        "deps",
+        "file",
+        "invariants",
+        "kind",
+        "name",
+        "range",
+        "reference",
+        "signature",
+        "summary",
+        "symbolId",
+        "type",
+      ]);
+      assert.equal(projected.type, "symbolCard");
+      assert.equal(projected.reference, "symbol:sym-1");
+      assert.equal("timestamp" in projected, false);
+      assert.deepEqual(Object.keys(projected.deps as Record<string, unknown>), [
+        "imports",
+      ]);
     });
   });
 

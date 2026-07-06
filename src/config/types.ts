@@ -1137,6 +1137,7 @@ export type PackedConfig = z.infer<typeof PackedConfigSchema>;
 
 export const WireConfigSchema = z.object({
   packed: PackedConfigSchema.optional(),
+  shortIds: z.boolean().default(true),
 });
 export type WireConfig = z.infer<typeof WireConfigSchema>;
 export type PerformanceTier = z.infer<typeof PerformanceTierSchema>;

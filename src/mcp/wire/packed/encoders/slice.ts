@@ -8,6 +8,12 @@
 import type { GraphSlice } from "../../../types.js";
 import { encodeSchemaDriven } from "../schema.js";
 import type { TableSpec } from "../types.js";
+import {
+  aliasPackedSymbolId,
+  appendIntroducedShortIds,
+  packedShortIdsActive,
+  type PackedShortIdOptions,
+} from "../short-ids.js";
 import { cardSummaryForWire } from "../../../tools/symbol-utils.js";
 
 const CARDS_SPEC: TableSpec = {
@@ -63,9 +69,18 @@ function flattenSignature(
   return "(" + params.map((p) => p.name + (p.type ?? "")).join(", ") + ")";
 }
 
-export function encodePackedSlice(slice: GraphSlice): string {
+export function encodePackedSlice(
+  slice: GraphSlice,
+  options: PackedShortIdOptions = {},
+): string {
+  const introduced = new Map<string, string>();
+  const encoderId = packedShortIdsActive(options)
+    ? SLICE_SHORT_ID_ENCODER_ID
+    : SLICE_ENCODER_ID;
+  const aliasId = (symbolId: string) =>
+    aliasPackedSymbolId(symbolId, options, introduced);
   const cardRows = slice.cards.map((card) => ({
-    id: card.symbolId,
+    id: aliasId(card.symbolId),
     f: card.file,
     k: card.kind,
     n: card.name,
@@ -80,28 +95,28 @@ export function encodePackedSlice(slice: GraphSlice): string {
 
   const symbolIndex = slice.symbolIndex ?? [];
   const edgeRows = slice.edges.map(([from, to, type, weight]) => ({
-    from: symbolIndex[from] ?? String(from),
-    to: symbolIndex[to] ?? String(to),
+    from: aliasId(symbolIndex[from] ?? String(from)),
+    to: aliasId(symbolIndex[to] ?? String(to)),
     type,
     w: weight,
   }));
 
   const refRows = (slice.cardRefs ?? []).map((ref) => ({
-    symbolId: ref.symbolId,
+    symbolId: aliasId(ref.symbolId),
     etag: ref.etag,
   }));
 
   const frontierRows = (slice.frontier ?? []).map((item) => ({
-    symbolId: item.symbolId,
+    symbolId: aliasId(item.symbolId),
     score: item.score,
     why: item.why,
   }));
 
   const legendCandidates = slice.cards.map((c) => c.file);
 
-  return encodeSchemaDriven({
+  const payload = encodeSchemaDriven({
     toolName: "slice.build",
-    encoderId: "sl1",
+    encoderId,
     scalars: {
       versionId: slice.versionId,
       sliceVersion: 3,
@@ -120,6 +135,8 @@ export function encodePackedSlice(slice: GraphSlice): string {
     ],
     legendCandidates,
   });
+  return appendIntroducedShortIds(payload, introduced);
 }
 
 export const SLICE_ENCODER_ID = "sl1";
+export const SLICE_SHORT_ID_ENCODER_ID = "sl2";

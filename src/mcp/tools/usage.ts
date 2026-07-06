@@ -13,6 +13,7 @@ import {
   tokenAccumulator,
   type SessionUsageSnapshot,
 } from "../token-accumulator.js";
+import { wasteLedger, type WasteLedgerSnapshot } from "../waste-ledger.js";
 import { getLadybugConn } from "../../db/ladybug.js";
 import {
   getUsageSnapshots,
@@ -64,7 +65,28 @@ function toAggregateUsage(aggregate: Record<string, number>): AggregateUsage {
   };
 }
 
+function renderSignalDensitySummary(snapshot: WasteLedgerSnapshot): string | undefined {
+  const totals = snapshot.tools.reduce(
+    (acc, tool) => ({
+      deliveredIds: acc.deliveredIds + tool.deliveredIds,
+      referencedIds: acc.referencedIds + tool.referencedIds,
+      deliveredTokens: acc.deliveredTokens + tool.deliveredTokens,
+    }),
+    { deliveredIds: 0, referencedIds: 0, deliveredTokens: 0 },
+  );
+  if (totals.deliveredIds === 0) return undefined;
 
+  const percent = Math.round((totals.referencedIds / totals.deliveredIds) * 100);
+  return `Signal density: ${totals.referencedIds}/${totals.deliveredIds} ids referenced (${percent}%) | ${totals.deliveredTokens} delivered tokens tracked`;
+}
+
+function appendSignalDensitySummary(
+  summary: string,
+  snapshot: WasteLedgerSnapshot,
+): string {
+  const signalSummary = renderSignalDensitySummary(snapshot);
+  return signalSummary ? `${summary}\n${signalSummary}` : summary;
+}
 
 export async function handleUsageStats(
   args: unknown,
@@ -193,6 +215,17 @@ export async function handleUsageStats(
   // Session-only: render the existing Session chart without querying lifetime data.
   if (scope === "session" && response.session) {
     response.formattedSummary = renderSessionSummary(response.session, EMPTY_AGGREGATE, []);
+  }
+
+  const signalDensity = wasteLedger.snapshot();
+  if (signalDensity.tools.length > 0) {
+    response.signalDensity = signalDensity;
+    if (response.formattedSummary) {
+      response.formattedSummary = appendSignalDensitySummary(
+        response.formattedSummary,
+        signalDensity,
+      );
+    }
   }
 
   if (request.detail !== "full") {

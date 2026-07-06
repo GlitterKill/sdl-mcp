@@ -51,6 +51,8 @@ export interface TaskOptions {
   pprDirection?: "out" | "in" | "both";
   /** Multiplicative boost ceiling for Personalized PageRank re-ranking. Default: 0.5. */
   pprWeight?: number;
+  /** "full" bypasses task-conditioned card projection in context responses. */
+  cardDetail?: "task" | "full";
 }
 
 export interface RungPath {

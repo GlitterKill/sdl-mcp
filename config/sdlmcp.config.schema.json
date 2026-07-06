@@ -1919,6 +1919,11 @@
       "type": "object",
       "description": "Wire-format configuration (packed, auto-gate)",
       "properties": {
+        "shortIds": {
+          "type": "boolean",
+          "description": "Enable session-scoped short symbolId aliases in packed wire payloads.",
+          "default": true
+        },
         "packed": {
           "type": "object",
           "properties": {

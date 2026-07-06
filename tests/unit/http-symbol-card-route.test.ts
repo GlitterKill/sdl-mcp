@@ -37,6 +37,7 @@ describe("symbol card HTTP routing", () => {
         repoId: "demo-repo",
         symbolId: "sym-1",
         ifNoneMatch: "etag-123",
+        refsMode: "off",
       },
     ]);
   });
@@ -71,6 +72,7 @@ describe("symbol card HTTP routing", () => {
         repoId: "demo-repo",
         symbolId: "sym-1",
         ifNoneMatch: "etag-456",
+        refsMode: "off",
       },
     ]);
   });

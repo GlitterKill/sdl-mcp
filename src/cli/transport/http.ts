@@ -541,6 +541,7 @@ export async function routeSymbolCardApiRequest(
     repoId,
     symbolId,
     ifNoneMatch,
+    refsMode: "off",
   });
 
   if ("notModified" in response) {
@@ -558,6 +559,13 @@ export async function routeSymbolCardApiRequest(
     return {
       status: 404,
       payload: { error: `Symbol not found: ${symbolId}` },
+    };
+  }
+
+  if ("unchanged" in response.card) {
+    return {
+      status: 409,
+      payload: { error: "Symbol card returned a session ref; retry the request." },
     };
   }
 

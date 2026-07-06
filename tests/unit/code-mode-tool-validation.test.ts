@@ -43,6 +43,17 @@ describe("code-mode tool validation", () => {
 
     assert.equal(parsed.options?.evidenceOptimization, "budgeted");
   });
+  it("accepts sdl.context cardDetail full option", () => {
+    const parsed = AgentContextRequestSchema.parse({
+      repoId: "demo-repo",
+      taskType: "implement",
+      taskText: "explain handleSymbolSearch",
+      options: { cardDetail: "full" },
+    });
+
+    assert.equal(parsed.options?.cardDetail, "full");
+  });
+
   it("accepts sdl.context evidenceOptimization global option", () => {
     const parsed = AgentContextRequestSchema.parse({
       repoId: "demo-repo",

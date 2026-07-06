@@ -1,4 +1,5 @@
 import { contextEngine } from "../../agent/context-engine.js";
+import { loadConfig } from "../../config/loadConfig.js";
 import type { AgentTask } from "../../agent/types.js";
 import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
@@ -16,7 +17,13 @@ import {
 } from "../tools.js";
 import { ZodError } from "zod";
 import { buildConditionalResponse } from "../../util/conditional-response.js";
+import { hashContent } from "../../util/hashing.js";
 import type { ToolContext } from "../../server.js";
+import { sessionContentLedger } from "../session-dedupe.js";
+import {
+  projectCardForTask,
+  projectSymbolCardEvidenceForTask,
+} from "../context-response-projection.js";
 import {
   maybeCompressToolResponse,
   recordTokenSavings,
@@ -394,6 +401,94 @@ export async function estimateContextRawEquivalentTokens(
   }
 }
 
+interface ContextSessionDeltaSummary {
+  newCards: number;
+  changedCards: number;
+  unchangedRefs: number;
+}
+
+function contextSessionRef(key: string, etag?: string): { key: string; etag?: string } {
+  const ref: { key: string; etag?: string } = { key };
+  if (etag !== undefined) ref.etag = etag;
+  return ref;
+}
+
+function symbolIdFromEvidenceReference(reference: unknown): string | undefined {
+  if (typeof reference !== "string") return undefined;
+  return reference.startsWith("symbol:") ? reference.slice("symbol:".length) : reference;
+}
+
+function applyTaskConditionedCardProjection(
+  response: Record<string, unknown>,
+  taskType: AgentTask["taskType"],
+  cardDetail: unknown,
+): void {
+  if (cardDetail === "full") return;
+
+  if (Array.isArray(response.cards)) {
+    response.cards = response.cards.map((card) =>
+      isRecord(card) ? projectCardForTask(card, taskType) : card,
+    );
+  }
+
+  if (Array.isArray(response.finalEvidence)) {
+    response.finalEvidence = response.finalEvidence.map((item) => {
+      if (!isRecord(item) || item.type !== "symbolCard") return item;
+      return projectSymbolCardEvidenceForTask(item, taskType);
+    });
+  }
+}
+
+function applyContextSessionRefs(
+  response: Record<string, unknown>,
+  options: { repoId: string; refsMode?: "auto" | "off"; sessionId?: string },
+): void {
+  if (options.refsMode === "off" || !options.sessionId) return;
+  if (!Array.isArray(response.finalEvidence)) return;
+
+  const sessionDelta: ContextSessionDeltaSummary = {
+    newCards: 0,
+    changedCards: 0,
+    unchangedRefs: 0,
+  };
+  let sawSymbolCard = false;
+  response.finalEvidence = response.finalEvidence.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+    const evidence = item as Record<string, unknown>;
+    if (evidence.type !== "symbolCard") return item;
+
+    const symbolId = symbolIdFromEvidenceReference(evidence.reference);
+    if (!symbolId) return item;
+    sawSymbolCard = true;
+    const key = `card:${options.repoId}:${symbolId}`;
+    const etag = typeof evidence.etag === "string" ? evidence.etag : undefined;
+    const result = sessionContentLedger.record({
+      sessionId: options.sessionId,
+      key,
+      contentHash: hashContent(JSON.stringify(evidence)),
+      etag,
+    });
+
+    if (result.status === "unchanged") {
+      sessionDelta.unchangedRefs += 1;
+      return {
+        type: evidence.type,
+        reference: evidence.reference,
+        ref: contextSessionRef(key, etag),
+        unchanged: true,
+      };
+    }
+    if (result.status === "changed") {
+      sessionDelta.changedCards += 1;
+      return { ...evidence, changedSincePrior: true };
+    }
+    sessionDelta.newCards += 1;
+    return item;
+  });
+
+  if (sawSymbolCard) response.sessionDelta = sessionDelta;
+}
+
 export function buildContextPackedStats(
   wireResult: ContextWireResult,
   payloadAttached: boolean,
@@ -452,17 +547,35 @@ export async function handleAgentContext(
     const rawTokens = await timer.time("context.rawEquivalent", () =>
       estimateContextRawEquivalentTokens(request.repoId, response),
     );
+    const config = loadConfig();
     const enrichedResponse = attachRawContext(response, { rawTokens });
+    const cardDetail = isRecord(request.options)
+      ? (request.options as Record<string, unknown>).cardDetail
+      : undefined;
+    applyTaskConditionedCardProjection(
+      enrichedResponse as Record<string, unknown>,
+      request.taskType,
+      cardDetail,
+    );
     // Snapshot pre-gate bulk fields so the ETag stable view reflects the
-    // original payload identity even when the packed gate clears them.
+    // projected payload identity even when the packed gate clears them.
     const stableView: Record<string, unknown> = {
       ...(enrichedResponse as Record<string, unknown>),
     };
+    applyContextSessionRefs(enrichedResponse as Record<string, unknown>, {
+      repoId: request.repoId,
+      refsMode: request.refsMode,
+      sessionId: context?.sessionId,
+    });
     if (request.wireFormat === "packed" || request.wireFormat === "auto") {
       const wireStartedAt = timer.start();
       const wireResult = serializeContextForWireFormat(
         enrichedResponse as Record<string, unknown>,
         request.wireFormat,
+        {
+          sessionId: context?.sessionId,
+          shortIds: config.wire?.shortIds,
+        },
       );
       if (wireResult.format === "packed") {
         // Only attach _packedPayload for explicit packed requests when it

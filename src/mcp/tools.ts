@@ -911,6 +911,7 @@ export const SymbolSearchRequestSchema = z
     pprWeight: z.number().min(0).max(2).optional(),
     /** Wire format for the response payload. "packed" emits the SDL-MCP packed wire format (gate-protected); "auto" picks the smaller of packed vs JSON; "json" forces legacy JSON. Falls back to JSON below the savings threshold. Default: "auto". */
     wireFormat: z.enum(["json", "packed", "auto"]).optional().default("auto"),
+  refsMode: z.enum(["auto", "off"]).optional().default("auto"),
   })
   .refine((data) => data.query || data.pattern, {
     message: "Either 'query' or 'pattern' must be provided",
@@ -1269,6 +1270,7 @@ export const SymbolGetCardRequestSchema = z
         message: "knownEtags exceeds maximum of 1000 entries",
       })
       .optional(),
+    refsMode: z.enum(["auto", "off"]).optional().default("auto"),
   })
   .superRefine((value, ctx) => {
     const singleProvided =
@@ -1288,13 +1290,30 @@ export const SymbolGetCardRequestSchema = z
     }
   });
 
+const SessionContentRefSchema = z.object({
+  key: z.string(),
+  etag: z.string().optional(),
+});
+
+const SessionContentRefResponseSchema = z.object({
+  ref: SessionContentRefSchema,
+  unchanged: z.literal(true),
+});
+
 const CardWithETagSchema = SymbolCardSchema.extend({
   etag: z.string(),
+  changedSincePrior: z.boolean().optional(),
 });
 
 // Batch card response (when symbolIds/symbolRefs used)
 const BatchCardResponseSchema = z.object({
-  cards: z.array(z.union([CardWithETagSchema, NotModifiedResponseSchema])),
+  cards: z.array(
+    z.union([
+      CardWithETagSchema,
+      NotModifiedResponseSchema,
+      SessionContentRefResponseSchema,
+    ]),
+  ),
   partial: z.boolean().optional(),
   succeeded: z.array(z.string()).optional(),
   failed: z.array(z.string()).optional(),
@@ -1316,7 +1335,7 @@ const BatchCardResponseSchema = z.object({
 
 // Single card response (when symbolId/symbolRef used)
 const SingleCardResponseSchema = z.object({
-  card: CardWithETagSchema,
+  card: z.union([CardWithETagSchema, SessionContentRefResponseSchema]),
   truncation: z
     .object({
       truncated: z.boolean(),
@@ -1771,6 +1790,7 @@ export const GetSkeletonRequestSchema = z
     identifiersToFind: z.array(z.string().min(1).max(256)).max(50).optional(),
     skeletonOffset: z.number().int().min(0).optional(),
     ifNoneMatch: z.string().optional(),
+    refsMode: z.enum(["auto", "off"]).optional().default("auto"),
   })
   .refine(
     (data) =>
@@ -1782,7 +1802,10 @@ export const GetSkeletonRequestSchema = z
     },
   );
 const GetSkeletonPayloadSchema = z.object({
-  skeleton: z.string(),
+  skeleton: z.string().optional(),
+  ref: SessionContentRefSchema.optional(),
+  unchanged: z.literal(true).optional(),
+  changedSincePrior: z.boolean().optional(),
   file: z.string(),
   range: RangeSchema,
   estimatedTokens: z.number().int(),
@@ -1820,6 +1843,7 @@ export const GetHotPathRequestSchema = z
     maxTokens: z.number().int().min(1).optional(),
     contextLines: z.number().int().min(0).optional(),
     ifNoneMatch: z.string().optional(),
+    refsMode: z.enum(["auto", "off"]).optional().default("auto"),
   })
   .superRefine((value, ctx) => {
     const targetCount =
@@ -1835,7 +1859,10 @@ export const GetHotPathRequestSchema = z
   });
 
 const GetHotPathPayloadSchema = z.object({
-  excerpt: z.string(),
+  excerpt: z.string().optional(),
+  ref: SessionContentRefSchema.optional(),
+  unchanged: z.literal(true).optional(),
+  changedSincePrior: z.boolean().optional(),
   file: z.string(),
   range: RangeSchema,
   estimatedTokens: z.number().int(),
@@ -2313,6 +2340,7 @@ const AgentContextBudgetSchema = z
 export const AgentContextRequestSchema = z.object({
   /** Wire format for the response payload. "packed" emits packed wire format (gate-protected); "auto" picks the smaller of packed vs JSON; "json" forces legacy JSON. Default: "auto". */
   wireFormat: z.enum(["json", "packed", "auto"]).optional().default("auto"),
+  refsMode: z.enum(["auto", "off"]).optional().default("auto"),
   responseMode: ResponseModeSchema.describe(
     "Large-response handling: inline preserves legacy output; auto/handle stores full responses behind response.get handles.",
   ),
@@ -2395,6 +2423,12 @@ export const AgentContextRequestSchema = z.object({
         .describe(
           "PPR coefficient: final multiplier is `1 + pprWeight × pprScore`, capped per call at 2× and across stacked boosts at 4× the original RRF score. Default: 2.0 (tuned 2026-04-27).",
         ),
+      cardDetail: z
+        .enum(["task", "full"])
+        .optional()
+        .describe(
+          "Context card detail: task applies task-conditioned card projection; full returns unprojected cards. Default: task.",
+        ),
     })
     .optional()
     .describe("Task-specific options"),
@@ -2446,11 +2480,21 @@ const AgentContextPayloadSchema = z.object({
       z.object({
         type: z.string(),
         reference: z.string(),
-        summary: z.string(),
-        timestamp: z.number(),
+        summary: z.string().optional(),
+        timestamp: z.number().optional(),
+        ref: SessionContentRefSchema.optional(),
+        unchanged: z.literal(true).optional(),
+        changedSincePrior: z.boolean().optional(),
       }),
     )
     .describe("Evidence collected during execution"),
+  sessionDelta: z
+    .object({
+      newCards: z.number().int().min(0),
+      changedCards: z.number().int().min(0),
+      unchangedRefs: z.number().int().min(0),
+    })
+    .optional(),
   summary: z.string().describe("Summary of execution"),
   success: z.boolean().describe("Whether execution was successful"),
   error: z.string().optional().describe("Error message if execution failed"),
@@ -3213,6 +3257,18 @@ const WirePackedSummarySchema = z.object({
   byEncoder: z.record(z.string(), PackedEncoderUsageSchema),
 });
 
+const SignalDensityToolSchema = z.object({
+  tool: z.string(),
+  deliveredIds: z.number().int().nonnegative(),
+  referencedIds: z.number().int().nonnegative(),
+  deliveredTokens: z.number().nonnegative(),
+  signalDensity: z.number(),
+});
+
+const SignalDensitySummarySchema = z.object({
+  tools: z.array(SignalDensityToolSchema),
+});
+
 export const UsageStatsResponseSchema = z.object({
   session: SessionUsageSnapshotSchema.optional(),
   history: z
@@ -3234,6 +3290,7 @@ export const UsageStatsResponseSchema = z.object({
       packed: WirePackedSummarySchema,
     })
     .optional(),
+  signalDensity: SignalDensitySummarySchema.optional(),
   formattedSummary: z.string().optional(),
 });
 

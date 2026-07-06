@@ -3,6 +3,7 @@ import assert from "node:assert";
 
 import { UsageStatsRequestSchema } from "../../dist/mcp/tools.js";
 import { tokenAccumulator } from "../../dist/mcp/token-accumulator.js";
+import { wasteLedger } from "../../dist/mcp/waste-ledger.js";
 
 describe("UsageStatsRequestSchema validation", () => {
   it("parses minimal valid request (defaults scope to 'both')", () => {
@@ -193,6 +194,32 @@ describe("handleUsageStats session scope (no DB required)", () => {
     assert.strictEqual(result.session, undefined);
     assert.strictEqual(result.history, undefined);
     assert.strictEqual(result.wire, undefined);
+  });
+
+  it("includes signal density in session stats", async (t) => {
+    if (!usageAvailable) return t.skip("usage module not available");
+    tokenAccumulator.reset();
+    wasteLedger.clear();
+
+    try {
+      wasteLedger.recordDelivered(
+        "sess",
+        "sdl.symbol.search",
+        ["id1", "id2"],
+        200,
+      );
+      wasteLedger.recordReferenced("sess", ["id2"]);
+
+      const result = (await handleUsageStats({
+        scope: "session",
+        detail: "full",
+      })) as Record<string, unknown>;
+      const signalDensity = result.signalDensity as Record<string, unknown>;
+      assert.ok(signalDensity, "should include signalDensity");
+      assert.match(result.formattedSummary as string, /Signal density: 1\/2/);
+    } finally {
+      wasteLedger.clear();
+    }
   });
 
   it("includes formattedSummary for session scope", async (t) => {

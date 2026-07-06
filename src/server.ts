@@ -21,6 +21,7 @@ import {
   type TokenUsageMetadata,
 } from "./mcp/token-usage.js";
 import { tokenAccumulator } from "./mcp/token-accumulator.js";
+import { wasteLedger } from "./mcp/waste-ledger.js";
 import { renderUserNotificationLine } from "./mcp/savings-meter.js";
 import { formatToolCallForUser } from "./mcp/tool-call-formatter.js";
 import type { LiveIndexCoordinator } from "./live-index/types.js";
@@ -29,7 +30,10 @@ import type {
   GatewayConfig,
   ToolNameFormat,
 } from "./config/types.js";
-import { normalizeToolArguments } from "./mcp/request-normalization.js";
+import {
+  extractReferencedSymbolIds,
+  normalizeToolArguments,
+} from "./mcp/request-normalization.js";
 import {
   buildToolPresentation,
   buildVersionedToolDescription,
@@ -306,6 +310,41 @@ function asStructuredContent(
   return structured as Record<string, unknown>;
 }
 
+function extractDeliveredSymbolIdsFromToolResult(
+  result: Record<string, unknown>,
+): string[] {
+  const ids = new Set<string>();
+  addSymbolIdsFromRows(result.results, ids);
+  addSymbolIdsFromRows(result.cards, ids);
+  addSymbolIdFromCard(result.card, ids);
+  addSymbolIdsFromEvidence(result.finalEvidence, ids);
+  return [...ids].sort();
+}
+
+function addSymbolIdsFromRows(value: unknown, ids: Set<string>): void {
+  if (!Array.isArray(value)) return;
+  for (const item of value) addSymbolIdFromCard(item, ids);
+}
+
+function addSymbolIdFromCard(value: unknown, ids: Set<string>): void {
+  if (!isRecordValue(value) || value.unchanged === true) return;
+  const symbolId = value.symbolId;
+  if (typeof symbolId === "string" && symbolId.length > 0) {
+    ids.add(symbolId);
+  }
+}
+
+function addSymbolIdsFromEvidence(value: unknown, ids: Set<string>): void {
+  if (!Array.isArray(value)) return;
+  for (const item of value) {
+    if (!isRecordValue(item) || item.unchanged === true) continue;
+    if (item.type !== "symbolCard") continue;
+    const reference = item.reference;
+    if (typeof reference === "string") {
+      ids.add(reference.startsWith("symbol:") ? reference.slice("symbol:".length) : reference);
+    }
+  }
+}
 
 export function buildToolResponseContentBlocks(
   primaryPayload: unknown,
@@ -498,6 +537,7 @@ export class MCPServer {
           const normalizeStartedAt = timer.start();
           const normalizedArgs = normalizeToolArguments(
             request.params.arguments,
+            toolContext.sessionId,
           );
           timer.record("server.normalize", normalizeStartedAt);
           const includeDiagnostics = wantsTimingDiagnostics(normalizedArgs);
@@ -559,6 +599,16 @@ export class MCPServer {
             };
           }
 
+          if (toolContext.sessionId && isRecordValue(parseResult.data)) {
+            const referencedSymbolIds = extractReferencedSymbolIds(parseResult.data);
+            if (referencedSymbolIds.length > 0) {
+              wasteLedger.recordReferenced(
+                toolContext.sessionId,
+                referencedSymbolIds,
+              );
+            }
+          }
+
           try {
             // Pass the parsed (validated + coerced) data to the handler
             const dispatchStartedAt = timer.start();
@@ -577,6 +627,7 @@ export class MCPServer {
             let structuredResult: unknown = finalResult;
             let tokensUsedForObs: number | undefined;
             let tokensSavedForObs: number | undefined;
+            let deliveredTokenCount: number | undefined;
             let userDisplay: string | null = null;
             if (result && typeof result === "object") {
               const r = result as Record<string, unknown>;
@@ -601,6 +652,7 @@ export class MCPServer {
                   usage.rawEquivalent,
                 );
                 tokensUsedForObs = usage.sdlTokens;
+                deliveredTokenCount = usage.sdlTokens;
                 tokensSavedForObs = Math.max(
                   0,
                   usage.rawEquivalent - usage.sdlTokens,
@@ -633,7 +685,24 @@ export class MCPServer {
                   r.totalTokens,
                 );
                 tokensUsedForObs = r.totalTokens;
+                deliveredTokenCount = r.totalTokens;
                 tokensSavedForObs = 0;
+              }
+
+              if (
+                toolContext.sessionId &&
+                deliveredTokenCount !== undefined &&
+                deliveredTokenCount > 0
+              ) {
+                const deliveredSymbolIds = extractDeliveredSymbolIdsFromToolResult(r);
+                if (deliveredSymbolIds.length > 0) {
+                  wasteLedger.recordDelivered(
+                    toolContext.sessionId,
+                    toolName,
+                    deliveredSymbolIds,
+                    deliveredTokenCount,
+                  );
+                }
               }
 
               // Send human-readable tool call summary to user (MCP logging)

@@ -244,6 +244,9 @@
     "otlpEndpoint": null,
     "sampleRate": 1
   },
+  "wire": {
+    "shortIds": true
+  },
   "observability": {
     "enabled": true,
     "sampleIntervalMs": 2000,
