@@ -15,6 +15,7 @@ import {
   resolveTokenThreshold,
 } from "../wire/packed/index.js";
 import { estimateTokens, estimatePackedTokens } from "../../util/tokenize.js";
+import { compactCardForWire } from "./symbol-utils.js";
 import { getObservabilityTap } from "../../observability/event-tap.js";
 import { tokenAccumulator } from "../token-accumulator.js";
 
@@ -135,15 +136,28 @@ export function serializeContextForWireFormat(
     packedEnabled?: boolean;
   },
 ): ContextWireResult {
+  const jsonPayload = Array.isArray(response.cards)
+    ? {
+        ...response,
+        cards: response.cards.map((card) =>
+          card !== null && typeof card === "object" && !Array.isArray(card)
+            ? compactCardForWire(
+                card as Parameters<typeof compactCardForWire>[0],
+              )
+            : card,
+        ),
+      }
+    : response;
+
   if (wireFormat !== "packed" && wireFormat !== "auto") {
-    return { format: "json", payload: response };
+    return { format: "json", payload: jsonPayload };
   }
   if (!isPackedEnabled(options?.packedEnabled)) {
-    return { format: "json", payload: response };
+    return { format: "json", payload: jsonPayload };
   }
 
-  const input = buildContextInput(response);
-  const jsonStr = JSON.stringify(response);
+  const input = buildContextInput(jsonPayload);
+  const jsonStr = JSON.stringify(jsonPayload);
   const packedStr = encodePackedContext(input);
   const jsonTokens = estimateTokens(jsonStr);
   const packedTokens = estimatePackedTokens(packedStr);
@@ -178,7 +192,7 @@ export function serializeContextForWireFormat(
 
   return {
     format: "json",
-    payload: response,
+    payload: jsonPayload,
     encoderId: CONTEXT_ENCODER_ID,
     jsonBytes: jsonStr.length,
     packedBytes: packedStr.length,

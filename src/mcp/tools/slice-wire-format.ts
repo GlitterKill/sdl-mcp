@@ -19,6 +19,7 @@ import {
   AST_FINGERPRINT_COMPACT_WIRE_LENGTH,
   SYMBOL_ID_COMPACT_WIRE_LENGTH,
 } from "../../config/constants.js";
+import { compactCardForWire } from "./symbol-utils.js";
 
 import { getObservabilityTap } from "../../observability/event-tap.js";
 import { tokenAccumulator } from "../token-accumulator.js";
@@ -194,7 +195,13 @@ export function serializeSliceForWireFormat(
   }
 
   if (wireFormat === "readable" || wireFormat === "standard") {
-    return { format: wireFormat, payload: slice as unknown as object };
+    return {
+      format: wireFormat,
+      payload: {
+        ...slice,
+        cards: slice.cards.map((card) => compactCardForWire(card)),
+      },
+    };
   }
   if (wireFormat === "agent") {
     return { format: "agent", payload: toAgentGraphSlice(slice) };
@@ -264,7 +271,13 @@ export function serializeSliceForWireFormat(
     return { format: "compact", payload: toCompactGraphSliceV3(slice) };
   }
 
-  return { format: "standard", payload: slice as unknown as object };
+  return {
+    format: "standard",
+    payload: {
+      ...slice,
+      cards: slice.cards.map((card) => compactCardForWire(card)),
+    },
+  };
 }
 
 

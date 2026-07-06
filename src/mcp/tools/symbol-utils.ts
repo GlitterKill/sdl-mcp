@@ -23,3 +23,123 @@ export function toLegacySymbolRow(symbol: SymbolRow): LegacySymbolRow {
     updated_at: symbol.updatedAt,
   };
 }
+
+
+interface WireRangeInput {
+  startLine: number;
+  startCol: number;
+  endLine: number;
+  endCol: number;
+}
+
+interface WireDepsInput {
+  imports?: unknown[] | null;
+  calls?: unknown[] | null;
+  callsNote?: unknown;
+}
+
+interface WireCardInput {
+  symbolId?: unknown;
+  repoId?: unknown;
+  file?: unknown;
+  range?: WireRangeInput | unknown;
+  kind?: unknown;
+  name?: unknown;
+  exported?: unknown;
+  visibility?: unknown;
+  signature?: unknown;
+  summary?: unknown;
+  invariants?: unknown;
+  sideEffects?: unknown;
+  cluster?: unknown;
+  processes?: unknown;
+  callResolution?: unknown;
+  deps?: WireDepsInput | null;
+  metrics?: unknown;
+  detailLevel?: unknown;
+  etag?: unknown;
+  version?: unknown;
+  truncated?: unknown;
+}
+
+function isEmptyObject(value: unknown): value is Record<string, never> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 0
+  );
+}
+
+function shouldOmitWireField(value: unknown): boolean {
+  return (
+    value == null ||
+    (Array.isArray(value) && value.length === 0) ||
+    isEmptyObject(value)
+  );
+}
+
+function compactDepsForWire(
+  deps: WireDepsInput | null | undefined,
+): Record<string, unknown> | undefined {
+  const imports = deps?.imports ?? [];
+  const calls = deps?.calls ?? [];
+  if (imports.length === 0 && calls.length === 0) {
+    return undefined;
+  }
+
+  const out: Record<string, unknown> = {};
+  if (imports.length > 0) out.imports = imports;
+  if (calls.length > 0) {
+    out.calls = calls;
+    if (
+      typeof deps?.callsNote === "string" &&
+      deps.callsNote.trim().length > 0
+    ) {
+      out.callsNote = deps.callsNote;
+    }
+  }
+  return out;
+}
+
+function addWireField(
+  out: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  if (!shouldOmitWireField(value)) {
+    out[key] = value;
+  }
+}
+
+export function compactCardForWire(card: WireCardInput): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+
+  addWireField(out, "symbolId", card.symbolId);
+  addWireField(out, "repoId", card.repoId);
+  addWireField(out, "file", card.file);
+  addWireField(out, "range", card.range);
+  addWireField(out, "kind", card.kind);
+  addWireField(out, "name", card.name);
+  addWireField(out, "exported", card.exported);
+  addWireField(out, "visibility", card.visibility);
+  addWireField(out, "signature", card.signature);
+  if (typeof card.summary === "string") {
+    addWireField(out, "summary", card.summary.trim() === "" ? undefined : card.summary);
+  } else {
+    addWireField(out, "summary", card.summary);
+  }
+  addWireField(out, "invariants", card.invariants);
+  addWireField(out, "sideEffects", card.sideEffects);
+  addWireField(out, "cluster", card.cluster);
+  addWireField(out, "processes", card.processes);
+  addWireField(out, "callResolution", card.callResolution);
+  addWireField(out, "deps", compactDepsForWire(card.deps));
+  addWireField(out, "metrics", card.metrics);
+  addWireField(out, "detailLevel", card.detailLevel);
+  addWireField(out, "etag", card.etag);
+  addWireField(out, "version", card.version);
+  addWireField(out, "truncated", card.truncated);
+
+  return out;
+}

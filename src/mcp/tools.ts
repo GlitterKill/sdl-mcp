@@ -71,8 +71,9 @@ const SymbolSignatureSchema = z.object({
 });
 
 const SymbolDepsSchema = z.object({
-  imports: z.array(z.string()),
-  calls: z.array(z.string()),
+  imports: z.array(z.string()).optional(),
+  calls: z.array(z.string()).optional(),
+  callsNote: z.string().optional(),
 });
 
 const SliceDepRefSchema = z.object({
@@ -81,8 +82,9 @@ const SliceDepRefSchema = z.object({
 });
 
 const SliceSymbolDepsSchema = z.object({
-  imports: z.array(SliceDepRefSchema),
-  calls: z.array(SliceDepRefSchema),
+  imports: z.array(SliceDepRefSchema).optional(),
+  calls: z.array(SliceDepRefSchema).optional(),
+  callsNote: z.string().optional(),
 });
 
 const CallResolutionRefSchema = z.object({
@@ -175,7 +177,7 @@ const SymbolCardSchema = z.object({
   cluster: SymbolClusterInfoSchema.optional(),
   processes: z.array(SymbolProcessInfoSchema).optional(),
   callResolution: CallResolutionSchema.optional(),
-  deps: SymbolDepsSchema,
+  deps: SymbolDepsSchema.optional(),
   metrics: SymbolMetricsSchema.optional(),
   detailLevel: CardDetailLevelSchema.optional(),
   etag: z.string().optional(),
@@ -188,7 +190,7 @@ const SliceSymbolCardSchema = SymbolCardSchema.omit({
   version: true,
   deps: true,
 }).extend({
-  deps: SliceSymbolDepsSchema,
+  deps: SliceSymbolDepsSchema.optional(),
   version: SliceSymbolCardVersionSchema,
 });
 

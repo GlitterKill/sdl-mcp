@@ -21,10 +21,12 @@ import { loadConfig } from "../../config/loadConfig.js";
 import { logSemanticSearchTelemetry } from "../telemetry.js";
 import { attachRawContext } from "../token-usage.js";
 import { serializeSymbolSearchForWireFormat } from "./symbol-wire-format.js";
+import { compactCardForWire } from "./symbol-utils.js";
 import {
   searchSymbolsWithOverlay,
   searchSymbolsHybridWithOverlay,
 } from "../../live-index/overlay-reader.js";
+
 import {
   checkRetrievalHealth,
   shouldFallbackToLegacy,
@@ -864,7 +866,10 @@ export async function handleSymbolGetCard(
   // Prefetch edge targets for anticipated slice.build
   prefetchSliceFrontier(repoId, [symbolId], context);
 
-  const response = { card: result };
+  const response = { card: compactCardForWire(result) } as Extract<
+    SymbolGetCardResponse,
+    { card: unknown }
+  >;
   const symbol = await ladybugDb.getSymbol(conn, symbolId);
   return symbol
     ? attachRawContext(response, { fileIds: [symbol.fileId] })
@@ -908,7 +913,11 @@ async function handleBatchCards(
     const fileIds = [
       ...new Set(Array.from(symbolMap.values()).map((symbol) => symbol.fileId)),
     ];
-    const response = { cards };
+    const response = {
+      cards: cards.map((card) =>
+        "notModified" in card ? card : compactCardForWire(card),
+      ),
+    } as Extract<SymbolGetCardResponse, { cards: unknown }>;
     return attachRawContext(response, { fileIds });
   }
 
@@ -949,7 +958,11 @@ async function handleBatchCards(
     ];
   }
 
-  const response: SymbolGetCardResponse = { cards };
+  const response = {
+    cards: cards.map((card) =>
+      "notModified" in card ? card : compactCardForWire(card),
+    ),
+  } as Extract<SymbolGetCardResponse, { cards: unknown }>;
   if (failures.length > 0) {
     response.partial = resolvedSymbolIds.length > 0;
     response.succeeded = resolvedSymbolIds;
