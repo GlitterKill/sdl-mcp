@@ -68,7 +68,7 @@ export function encodePackedSymbolSearch(
       .map((r) => r.file ?? "")
       .filter((f) => f.length > 0),
   });
-  return appendIntroducedShortIds(payload, introduced);
+  return appendIntroducedShortIds(payload, introduced, options);
 }
 
 export const SYMBOL_SEARCH_ENCODER_ID = "ss1";

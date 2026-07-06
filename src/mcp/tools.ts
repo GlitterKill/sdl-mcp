@@ -911,7 +911,6 @@ export const SymbolSearchRequestSchema = z
     pprWeight: z.number().min(0).max(2).optional(),
     /** Wire format for the response payload. "packed" emits the SDL-MCP packed wire format (gate-protected); "auto" picks the smaller of packed vs JSON; "json" forces legacy JSON. Falls back to JSON below the savings threshold. Default: "auto". */
     wireFormat: z.enum(["json", "packed", "auto"]).optional().default("auto"),
-  refsMode: z.enum(["auto", "off"]).optional().default("auto"),
   })
   .refine((data) => data.query || data.pattern, {
     message: "Either 'query' or 'pattern' must be provided",

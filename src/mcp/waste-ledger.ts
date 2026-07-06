@@ -75,7 +75,7 @@ export class WasteLedger {
       }
 
       if (session.deliveredById.size > this.maxIdsPerSession) {
-        // ponytail: drop the whole session if the ledger exceeds its cap; per-id eviction would corrupt density counts.
+        // Drop the whole session if the ledger exceeds its cap; per-id eviction would corrupt density counts.
         this.sessions.delete(sessionId);
         return;
       }

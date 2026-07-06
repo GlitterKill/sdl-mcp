@@ -316,4 +316,45 @@ describe("handleSymbolGetCard", () => {
 
     assert.strictEqual(parsed.symbolIds.length, 100);
   });
+
+  it("returns a session ref on repeat unchanged delivery for the same session", async () => {
+    const context = { sessionId: "get-cards-dedupe-repeat" };
+
+    const first = await handleSymbolGetCard(
+      { repoId: REPO_ID, symbolIds: [symbolIdA] },
+      context,
+    );
+    assert.ok("etag" in first.cards[0], "first delivery returns the full card");
+
+    const second = await handleSymbolGetCard(
+      { repoId: REPO_ID, symbolIds: [symbolIdA] },
+      context,
+    );
+    const repeat = second.cards[0];
+    assert.strictEqual(repeat.unchanged, true);
+    assert.strictEqual(repeat.ref.key, `card:${REPO_ID}:${symbolIdA}`);
+    assert.ok(!("signature" in repeat), "ref entry carries no card body");
+  });
+
+  it("refsMode off returns the full card on repeat delivery", async () => {
+    const context = { sessionId: "get-cards-dedupe-off" };
+
+    await handleSymbolGetCard(
+      { repoId: REPO_ID, symbolIds: [symbolIdA], refsMode: "off" },
+      context,
+    );
+    const second = await handleSymbolGetCard(
+      { repoId: REPO_ID, symbolIds: [symbolIdA], refsMode: "off" },
+      context,
+    );
+    assert.ok("etag" in second.cards[0]);
+    assert.ok(!("unchanged" in second.cards[0]));
+  });
+
+  it("repeat delivery without a sessionId returns the full card", async () => {
+    const first = await handleSymbolGetCard({ repoId: REPO_ID, symbolIds: [symbolIdB] });
+    const second = await handleSymbolGetCard({ repoId: REPO_ID, symbolIds: [symbolIdB] });
+    assert.ok("etag" in first.cards[0]);
+    assert.ok("etag" in second.cards[0]);
+  });
 });

@@ -160,7 +160,7 @@ export function encodePackedContext(
       .map((c) => c.file ?? "")
       .filter((f) => f.length > 0),
   });
-  return appendIntroducedShortIds(payload, introduced);
+  return appendIntroducedShortIds(payload, introduced, options);
 }
 
 export const CONTEXT_ENCODER_ID = "ctx1";

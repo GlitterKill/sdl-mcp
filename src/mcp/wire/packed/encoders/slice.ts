@@ -135,7 +135,7 @@ export function encodePackedSlice(
     ],
     legendCandidates,
   });
-  return appendIntroducedShortIds(payload, introduced);
+  return appendIntroducedShortIds(payload, introduced, options);
 }
 
 export const SLICE_ENCODER_ID = "sl1";

@@ -31,6 +31,7 @@ import {
   SLICE_ENCODER_ID,
   SLICE_SHORT_ID_ENCODER_ID,
 } from "../wire/packed/encoders/slice.js";
+import { markShortIdsDelivered } from "../wire/packed/short-ids.js";
 
 
 
@@ -266,6 +267,10 @@ export function serializeSliceForWireFormat(
       });
     } catch { /* swallow */ }
     if (detail.decision === "packed") {
+      markShortIdsDelivered(packedStr, {
+        sessionId: options?.sessionId,
+        shortIds: options?.shortIds,
+      });
       return {
         format: "packed",
         payload: packedStr,

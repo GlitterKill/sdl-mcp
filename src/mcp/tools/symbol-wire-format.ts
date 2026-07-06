@@ -10,6 +10,7 @@ import {
   SYMBOL_SEARCH_ENCODER_ID,
   SYMBOL_SEARCH_SHORT_ID_ENCODER_ID,
 } from "../wire/packed/encoders/symbol-search.js";
+import { markShortIdsDelivered } from "../wire/packed/short-ids.js";
 import {
   decideFormatDetailed,
   isPackedEnabled,
@@ -90,7 +91,7 @@ export function serializeSymbolSearchForWireFormat(
   const gateDecision = detail.decision === "packed" ? "packed" : "fallback";
 
   tokenAccumulator.recordPackedUsage(
-    SYMBOL_SEARCH_ENCODER_ID,
+    encoderId,
     jsonStr.length,
     packedStr.length,
     gateDecision,
@@ -110,6 +111,10 @@ export function serializeSymbolSearchForWireFormat(
   }
 
   if (gateDecision === "packed") {
+    markShortIdsDelivered(packedStr, {
+      sessionId: options?.sessionId,
+      shortIds: options?.shortIds,
+    });
     return {
       format: "packed",
       payload: packedStr,

@@ -20,6 +20,7 @@ import { buildConditionalResponse } from "../../util/conditional-response.js";
 import { hashContent } from "../../util/hashing.js";
 import type { ToolContext } from "../../server.js";
 import { sessionContentLedger } from "../session-dedupe.js";
+import { markShortIdsDelivered } from "../wire/packed/short-ids.js";
 import {
   projectCardForTask,
   projectSymbolCardEvidenceForTask,
@@ -599,6 +600,10 @@ export async function handleAgentContext(
           (enrichedResponse as Record<string, unknown>).actionsTaken = [];
           (enrichedResponse as Record<string, unknown>).finalEvidence = [];
           stableView._packedPayload = wireResult.payload;
+          markShortIdsDelivered(wireResult.payload as string, {
+            sessionId: context?.sessionId,
+            shortIds: config.wire?.shortIds,
+          });
           // stableView keeps pre-clear actionsTaken/finalEvidence so two
           // packed responses with different underlying data produce
           // different ETags.

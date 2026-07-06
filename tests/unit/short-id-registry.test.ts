@@ -40,3 +40,12 @@ test("entry cap drops the session without reusing aliases", () => {
   assert.equal(reg.alias("sess", "cccc"), "cccc");
   assert.equal(reg.resolve("sess", "s1"), undefined);
 });
+
+test("markDelivered tracks delivered aliases per session", () => {
+  const reg = new ShortIdRegistry();
+  const alias = reg.alias("sess", "abcd1234");
+  assert.equal(reg.isDelivered("sess", alias), false);
+  reg.markDelivered("sess", [alias]);
+  assert.equal(reg.isDelivered("sess", alias), true);
+  assert.equal(reg.isDelivered("other", alias), false);
+});

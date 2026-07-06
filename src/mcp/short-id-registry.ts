@@ -8,6 +8,7 @@ interface ShortIdSession {
   byId: Map<string, string>;
   byAlias: Map<string, string>;
   counter: number;
+  delivered: Set<string>;
   disabled: boolean;
   lastAccessMs: number;
 }
@@ -87,6 +88,18 @@ export class ShortIdRegistry {
     return session.byAlias.get(idOrAlias);
   }
 
+  markDelivered(sessionId: string, aliases: readonly string[]): void {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.disabled) return;
+    for (const alias of aliases) {
+      session.delivered.add(alias);
+    }
+  }
+
+  isDelivered(sessionId: string, alias: string): boolean {
+    return this.sessions.get(sessionId)?.delivered.has(alias) === true;
+  }
+
   static looksLikeAlias(value: string): boolean {
     return ALIAS_PATTERN.test(value);
   }
@@ -102,6 +115,7 @@ export class ShortIdRegistry {
       byId: new Map(),
       byAlias: new Map(),
       counter: 0,
+      delivered: new Set(),
       disabled: false,
       lastAccessMs: nowMs,
     };
@@ -121,9 +135,10 @@ export class ShortIdRegistry {
   }
 
   private disableSession(session: ShortIdSession): void {
-    // ponytail: keep an empty tombstone so a capped session cannot reuse s1 for a different full id.
+    // Keep an empty tombstone so a capped session cannot reuse s1 for a different full id.
     session.byId.clear();
     session.byAlias.clear();
+    session.delivered.clear();
     session.disabled = true;
   }
 

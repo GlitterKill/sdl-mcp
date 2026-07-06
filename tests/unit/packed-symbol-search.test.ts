@@ -4,6 +4,8 @@ import {
   encodePackedSymbolSearch,
   decodePacked,
 } from "../../dist/mcp/wire/packed/index.js";
+import { markShortIdsDelivered } from "../../dist/mcp/wire/packed/short-ids.js";
+import { shortIdRegistry } from "../../dist/mcp/short-id-registry.js";
 
 test("ss1 round-trip — small result set", () => {
   const payload = encodePackedSymbolSearch({
@@ -67,4 +69,64 @@ test("ss1 round-trip — query string with special chars", () => {
   });
   const decoded = decodePacked(payload);
   assert.equal(decoded.data.query, "type=string, exported");
+});
+
+test("short-id aliases: @ids dictionary re-emitted until payload delivery is marked", () => {
+  const sessionId = "packed-ss-shortid-delivery";
+  const options = { sessionId, shortIds: true };
+  const fullId = "a".repeat(64);
+  const input = {
+    query: "foo",
+    total: 1,
+    results: [
+      {
+        symbolId: fullId,
+        file: "src/a.ts",
+        line: 1,
+        kind: "function",
+        score: 0.9,
+        name: "fooBar",
+      },
+    ],
+  };
+
+  const first = encodePackedSymbolSearch(input, options);
+  const match = /@ids=(s[0-9]+):a{64}/.exec(first);
+  assert.ok(match, "first payload must introduce the alias dictionary");
+  const alias = match[1];
+  assert.equal(shortIdRegistry.resolve(sessionId, alias), fullId);
+
+  // Encoding alone (e.g. packed loses the auto gate) must not consume the introduction.
+  const second = encodePackedSymbolSearch(input, options);
+  assert.ok(
+    second.includes(`@ids=${alias}:${fullId}`),
+    "undelivered alias must be re-introduced",
+  );
+
+  markShortIdsDelivered(second, options);
+  const third = encodePackedSymbolSearch(input, options);
+  assert.ok(!third.includes("@ids="), "delivered alias must not be re-introduced");
+  assert.equal(shortIdRegistry.resolve(sessionId, alias), fullId);
+});
+
+test("short-id aliases: inactive without a sessionId", () => {
+  const payload = encodePackedSymbolSearch(
+    {
+      query: "foo",
+      total: 1,
+      results: [
+        {
+          symbolId: "b".repeat(64),
+          file: "f.ts",
+          line: 1,
+          kind: "function",
+          score: 1,
+          name: "x",
+        },
+      ],
+    },
+    { shortIds: true },
+  );
+  assert.ok(!payload.includes("@ids="));
+  assert.ok(payload.includes("b".repeat(64)));
 });

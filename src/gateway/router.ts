@@ -311,7 +311,7 @@ export async function routeGatewayCall(
   actionMap: ActionMap,
   ctx?: ToolContext,
 ): Promise<unknown> {
-  const normalizedArgs = normalizeToolArguments(rawArgs);
+  const normalizedArgs = normalizeToolArguments(rawArgs, ctx?.sessionId);
   if (!normalizedArgs || typeof normalizedArgs !== "object") {
     throw new Error("Gateway args must be a non-null object");
   }
