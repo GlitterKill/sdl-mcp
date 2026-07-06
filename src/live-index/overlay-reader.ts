@@ -13,6 +13,11 @@ import {
 } from "./coordinator.js";
 import { mergeSearchResults, type OverlaySearchResult } from "./overlay-merge.js";
 import { hybridSearch } from "../retrieval/orchestrator.js";
+import {
+  SYMBOL_SEARCH_MAX_QUERY_TOKENS,
+  SYMBOL_SEARCH_MIN_QUERY_TOKEN_LENGTH,
+} from "../config/constants.js";
+import { splitCamelSubwords } from "../util/symbol-relevance.js";
 import type { RetrievalEvidence } from "../retrieval/types.js";
 import type { DraftOverlayEntry } from "./overlay-store.js";
 import { getOverlayEmbeddingCache } from "./overlay-embedding-cache.js";
@@ -147,6 +152,25 @@ export async function getShadowedDurableSymbol(
   return snapshot.symbolsById.get(symbolId) ? durableSymbol : null;
 }
 
+function buildOverlaySearchTerms(query: string): string[] {
+  const loweredQuery = query.trim().toLowerCase();
+  if (!loweredQuery) return [];
+
+  const primaryTerms = loweredQuery.includes(" ")
+    ? loweredQuery.split(/\s+/).filter((term) => term.length > 0)
+    : [loweredQuery];
+  const identifierFragments = loweredQuery.includes(" ")
+    ? []
+    : splitCamelSubwords(query).filter(
+        (term) => term.length >= SYMBOL_SEARCH_MIN_QUERY_TOKEN_LENGTH,
+      );
+
+  return Array.from(new Set([...primaryTerms, ...identifierFragments])).slice(
+    0,
+    SYMBOL_SEARCH_MAX_QUERY_TOKENS,
+  );
+}
+
 export async function searchSymbolsWithOverlay(
   conn: Connection,
   repoId: string,
@@ -165,9 +189,7 @@ export async function searchSymbolsWithOverlay(
   );
 
   const loweredQuery = query.trim().toLowerCase();
-  const terms = loweredQuery.includes(" ")
-    ? loweredQuery.split(/\s+/).filter((t) => t.length > 0)
-    : [loweredQuery];
+  const terms = buildOverlaySearchTerms(query);
   const isMultiTerm = terms.length > 1;
 
   const overlayRows: OverlaySearchResult[] = [];

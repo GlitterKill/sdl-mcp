@@ -26,3 +26,14 @@
 
 - [ ] symbol.getCard raw builder trim: NOT SHIPPED.
   Evidence: `src/mcp/tools/symbol.ts` `handleSymbolGetCard` returns `{ card: result }` from `buildCardForSymbol`; `src/services/card-builder.ts` `buildCardForSymbol` still constructs `repoId`, `visibility`, `detailLevel`, and `version.ledgerVersion` before projection.
+
+## Stage 3 Search Miss Investigation
+
+- [ ] `queryFts` identifier splitting: NOT SHIPPED before Stage 3.
+  Evidence: `src/retrieval/orchestrator.ts` passed `options.query` through `queryFts` directly into `buildFtsStoredProcQuery` without `splitCamelSubwords` or query expansion.
+
+- [x] FTS indexed content includes identifier fragments: SHIPPED.
+  Evidence: `src/indexer/symbol-enrichment.ts` `buildSearchText` stores `params.name` plus `splitIdentifierLikeText(params.name)`, summary fragments, path tokens, role tags, and signature terms. No schema or reindex change needed for this stage.
+
+- [ ] legacy overlay subword matching: PARTIAL before Stage 3.
+  Evidence: durable legacy search uses `searchSymbolsLite` -> `splitSearchTerms`, which already splits camelCase/PascalCase. The overlay matcher in `src/live-index/overlay-reader.ts` split only whitespace and treated single identifiers as one raw term.

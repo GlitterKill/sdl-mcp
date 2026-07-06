@@ -29,6 +29,11 @@ import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { loadConfig } from "../config/loadConfig.js";
 import {
+  SYMBOL_SEARCH_MAX_QUERY_TOKENS,
+  SYMBOL_SEARCH_MIN_QUERY_TOKEN_LENGTH,
+} from "../config/constants.js";
+import { splitCamelSubwords } from "../util/symbol-relevance.js";
+import {
   type SourceRanking,
   type EntitySourceRanking,
   DEFAULT_RRF_K,
@@ -140,6 +145,22 @@ export function buildFtsStoredProcQuery(
   return `CALL QUERY_FTS_INDEX('${tableName}', '${indexName}', ${queryLiteral}, K := ${DEFAULT_FTS_BM25_K}, TOP := ${top}, conjunctive := ${conjunctive ? "true" : "false"}) RETURN node, score`;
 }
 
+export function buildIdentifierAwareFtsQuery(query: string): string {
+  const trimmed = query.trim();
+  if (!trimmed || trimmed.includes("*") || trimmed.includes("?")) {
+    return query;
+  }
+
+  const fragments = Array.from(new Set(splitCamelSubwords(trimmed)))
+    .filter((fragment) => fragment.length >= SYMBOL_SEARCH_MIN_QUERY_TOKEN_LENGTH)
+    .slice(0, SYMBOL_SEARCH_MAX_QUERY_TOKENS);
+  if (fragments.length < 2) {
+    return query;
+  }
+
+  return `${trimmed} OR (${fragments.join(" AND ")})`;
+}
+
 // Ladybug stored-proc calls are not prepared in this path, so scalar values
 // go through narrow literal serializers before entering CALL syntax.
 function cypherSingleQuotedString(value: string): string {
@@ -202,12 +223,13 @@ async function queryFts(
 ): Promise<FtsRawRow[]> {
   try {
     assertIndexName(indexName);
+    const ftsQuery = buildIdentifierAwareFtsQuery(query);
     const rows = await queryStoredProcAll<FtsRawRow>(
       conn,
       buildFtsStoredProcQuery(
         "Symbol",
         indexName,
-        query,
+        ftsQuery,
         topK,
         conjunctive,
       ),
