@@ -19,7 +19,7 @@ function makeMockSlice(overrides?: Partial<GraphSlice>): GraphSlice {
         name: "doSomething",
         exported: true,
         signature: { params: [{ name: "x", type: ": number" }] },
-        summary: "Does something with a number",
+        summary: "Validates numeric input before updating the task graph",
         deps: {
           imports: [{ symbolId: "sym-2", confidence: 0.8 }],
           calls: [{ symbolId: "sym-3", confidence: 1.0 }],

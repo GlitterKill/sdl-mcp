@@ -558,7 +558,8 @@ describe("toSliceSymbolCard", () => {
     const card = makeCard({
       visibility: "public" as any,
       signature: { name: "fn" },
-      summary: "does stuff",
+      summary: "Validates input before writing to disk",
+      summaryProvenance: "heuristic",
       cluster: { clusterId: "c1", label: "mod", memberCount: 3 },
       processes: [{ processId: "p1", label: "pipe", role: "entry", depth: 0 }],
       invariants: ["must be positive"],
@@ -568,7 +569,8 @@ describe("toSliceSymbolCard", () => {
     const result = toSliceSymbolCard(card);
     assert.strictEqual(result.visibility, "public");
     assert.deepStrictEqual(result.signature, { name: "fn" });
-    assert.strictEqual(result.summary, "does stuff");
+    assert.strictEqual(result.summary, "Validates input before writing to disk");
+    assert.strictEqual(result.summaryProvenance, "heuristic");
     assert.ok(result.cluster);
     assert.strictEqual(result.processes!.length, 1);
     assert.deepStrictEqual(result.invariants, ["must be positive"]);

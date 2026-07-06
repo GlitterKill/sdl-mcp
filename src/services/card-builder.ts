@@ -208,9 +208,14 @@ async function buildOverlayCardForSymbol(
     visibility: (overlay.symbol.visibility ??
       undefined) as SymbolCard["visibility"],
     signature,
-    summary: overlay.symbol.summary
-      ? overlay.symbol.summary.slice(0, SYMBOL_CARD_SUMMARY_MAX_CHARS)
-      : undefined,
+    summary: cardSummaryForWire(overlay.symbol.summary, overlay.symbol.name)?.slice(
+      0,
+      SYMBOL_CARD_SUMMARY_MAX_CHARS,
+    ),
+    summaryProvenance: summaryProvenanceForWire(
+      cardSummaryForWire(overlay.symbol.summary, overlay.symbol.name),
+      undefined,
+    ),
     invariants: invariants
       ? invariants.slice(0, SYMBOL_CARD_MAX_INVARIANTS)
       : undefined,
@@ -292,6 +297,16 @@ async function buildOverlayCardForSymbol(
 }
 
 const CLASS_LIKE_KINDS = new Set(["class", "interface", "module"]);
+
+function summaryProvenanceForWire(
+  summary: string | undefined,
+  source: string | undefined,
+): SymbolCard["summaryProvenance"] {
+  if (summary === undefined) {
+    return undefined;
+  }
+  return source === "llm" ? "llm" : "heuristic";
+}
 
 export async function buildCardForSymbol(
   repoId: string,
@@ -586,6 +601,10 @@ export async function buildCardForSymbol(
     visibility: (symbol.visibility ?? undefined) as SymbolCard["visibility"],
     signature,
     summary: cardSummary,
+    summaryProvenance: summaryProvenanceForWire(
+      cardSummary,
+      symbol.summarySource,
+    ),
     invariants: invariants
       ? invariants.slice(0, SYMBOL_CARD_MAX_INVARIANTS)
       : undefined,

@@ -184,6 +184,7 @@ export interface SymbolCard {
   signature?: SymbolSignature;
 
   summary?: string;
+  summaryProvenance?: "llm" | "heuristic";
   invariants?: string[];
   sideEffects?: string[];
 

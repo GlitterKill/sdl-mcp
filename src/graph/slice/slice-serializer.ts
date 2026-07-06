@@ -234,6 +234,7 @@ export function toSignatureCard(card: SymbolCard): SymbolCard {
       0,
       SYMBOL_CARD_SUMMARY_MAX_CHARS_LIGHT,
     );
+    signature.summaryProvenance = card.summaryProvenance;
   }
 
   if (card.callResolution) {
@@ -285,6 +286,7 @@ export function toDepsCard(card: SymbolCard): SymbolCard {
   const summary = sliceCardSummary(card.summary, card.name);
   if (summary) {
     deps.summary = summary.slice(0, SYMBOL_CARD_SUMMARY_MAX_CHARS_LIGHT);
+    deps.summaryProvenance = card.summaryProvenance;
   }
 
   if (card.callResolution) {
@@ -384,6 +386,7 @@ export function toSliceSymbolCard(
   const summary = sliceCardSummary(card.summary, card.name);
   if (summary) {
     sliceCard.summary = summary;
+    sliceCard.summaryProvenance = card.summaryProvenance;
   }
 
   if (card.cluster) {

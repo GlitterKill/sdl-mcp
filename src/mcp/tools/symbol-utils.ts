@@ -57,6 +57,7 @@ interface WireCardInput {
   visibility?: unknown;
   signature?: unknown;
   summary?: unknown;
+  summaryProvenance?: unknown;
   invariants?: unknown;
   sideEffects?: unknown;
   cluster?: unknown;
@@ -183,7 +184,13 @@ export function compactCardForWire(
   addWireField(out, "exported", card.exported);
   addWireField(out, "visibility", card.visibility);
   addWireField(out, "signature", card.signature);
-  addWireField(out, "summary", cardSummaryForWire(card.summary, card.name));
+  const summary = cardSummaryForWire(card.summary, card.name);
+  addWireField(out, "summary", summary);
+  addWireField(
+    out,
+    "summaryProvenance",
+    summary === undefined ? undefined : card.summaryProvenance,
+  );
   addWireField(out, "invariants", card.invariants);
   addWireField(out, "sideEffects", card.sideEffects);
   addWireField(out, "cluster", card.cluster);

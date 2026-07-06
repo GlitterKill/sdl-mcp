@@ -172,6 +172,7 @@ const SymbolCardSchema = z.object({
     .optional(),
   signature: SymbolSignatureSchema.optional(),
   summary: z.string().optional(),
+  summaryProvenance: z.enum(["llm", "heuristic"]).optional(),
   invariants: z.array(z.string()).optional(),
   sideEffects: z.array(z.string()).optional(),
   cluster: SymbolClusterInfoSchema.optional(),
