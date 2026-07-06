@@ -145,20 +145,35 @@ export function buildFtsStoredProcQuery(
   return `CALL QUERY_FTS_INDEX('${tableName}', '${indexName}', ${queryLiteral}, K := ${DEFAULT_FTS_BM25_K}, TOP := ${top}, conjunctive := ${conjunctive ? "true" : "false"}) RETURN node, score`;
 }
 
-export function buildIdentifierAwareFtsQuery(query: string): string {
+export function buildIdentifierAwareFtsQuery(
+  query: string,
+  conjunctive: boolean,
+): string {
   const trimmed = query.trim();
-  if (!trimmed || trimmed.includes("*") || trimmed.includes("?")) {
+  if (
+    conjunctive ||
+    !trimmed ||
+    trimmed.includes("*") ||
+    trimmed.includes("?")
+  ) {
     return query;
   }
 
   const fragments = Array.from(new Set(splitCamelSubwords(trimmed)))
-    .filter((fragment) => fragment.length >= SYMBOL_SEARCH_MIN_QUERY_TOKEN_LENGTH)
+    .filter(
+      (fragment) => fragment.length >= SYMBOL_SEARCH_MIN_QUERY_TOKEN_LENGTH,
+    )
     .slice(0, SYMBOL_SEARCH_MAX_QUERY_TOKENS);
   if (fragments.length < 2) {
     return query;
   }
 
-  return `${trimmed} OR (${fragments.join(" AND ")})`;
+  // LadybugDB FTS has no boolean query syntax: every token in the query is
+  // matched individually and combined by the conjunctive flag, so fragments
+  // are appended as plain tokens for disjunctive matching. Conjunctive
+  // queries are left untouched above because extra required tokens would
+  // zero out their results.
+  return `${trimmed} ${fragments.join(" ")}`;
 }
 
 // Ladybug stored-proc calls are not prepared in this path, so scalar values
@@ -223,7 +238,7 @@ async function queryFts(
 ): Promise<FtsRawRow[]> {
   try {
     assertIndexName(indexName);
-    const ftsQuery = buildIdentifierAwareFtsQuery(query);
+    const ftsQuery = buildIdentifierAwareFtsQuery(query, conjunctive);
     const rows = await queryStoredProcAll<FtsRawRow>(
       conn,
       buildFtsStoredProcQuery(

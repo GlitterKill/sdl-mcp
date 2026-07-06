@@ -1,7 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { buildFtsStoredProcQuery } from "../../dist/retrieval/orchestrator.js";
+import {
+  buildFtsStoredProcQuery,
+  buildIdentifierAwareFtsQuery,
+} from "../../dist/retrieval/orchestrator.js";
 
 describe("FTS stored procedure query builder", () => {
   it("passes TOP separately from BM25 K", () => {
@@ -26,5 +29,26 @@ describe("FTS stored procedure query builder", () => {
     assert.throws(() =>
       buildFtsStoredProcQuery("Symbol", "idx-name", "query", 10, false),
     );
+  });
+});
+
+describe("identifier-aware FTS query expansion", () => {
+  it("appends camelCase fragments as plain tokens (no boolean syntax)", () => {
+    const query = buildIdentifierAwareFtsQuery("buildGraphSlice", false);
+    assert.equal(query, "buildGraphSlice build graph slice");
+    assert.doesNotMatch(query, /\bOR\b|\bAND\b|[()]/);
+  });
+
+  it("leaves conjunctive queries untouched", () => {
+    assert.equal(
+      buildIdentifierAwareFtsQuery("buildGraphSlice", true),
+      "buildGraphSlice",
+    );
+  });
+
+  it("leaves single-word and wildcard queries untouched", () => {
+    assert.equal(buildIdentifierAwareFtsQuery("slice", false), "slice");
+    assert.equal(buildIdentifierAwareFtsQuery("build*", false), "build*");
+    assert.equal(buildIdentifierAwareFtsQuery("  ", false), "  ");
   });
 });
