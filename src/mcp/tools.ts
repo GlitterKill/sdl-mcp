@@ -879,6 +879,12 @@ const SymbolSearchResultSchema = z.object({
   relevance: z.number().min(0).max(1).optional(),
 });
 
+const SymbolSearchNearMissSchema = z.object({
+  name: z.string(),
+  kind: SymbolKindEnumSchema,
+  file: z.string(),
+});
+
 export const SymbolSearchRequestSchema = z
   .object({
     repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
@@ -954,6 +960,8 @@ export const SymbolSearchResponseSchema = z.object({
   exactMatchFound: z.boolean().optional(),
   /** Suggestion text when results are weak or empty. */
   suggestion: z.string().optional(),
+  /** Closest symbol names returned on miss paths, intentionally omitting symbolIds to keep retries compact. */
+  nearMisses: z.array(SymbolSearchNearMissSchema).max(3).optional(),
   /** Packed wire-format telemetry. Only populated when symbol-search ran the packed gate. */
   _packedStats: z
     .object({

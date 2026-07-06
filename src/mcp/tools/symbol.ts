@@ -6,7 +6,11 @@ import {
   SymbolGetCardResponse,
   type SymbolRef,
 } from "../tools.js";
-import { SYMBOL_SEARCH_DEFAULT_LIMIT } from "../../config/constants.js";
+import {
+  SYMBOL_SEARCH_DEFAULT_LIMIT,
+  SYMBOL_SEARCH_MAX_QUERY_TOKENS,
+  SYMBOL_SEARCH_MIN_QUERY_TOKEN_LENGTH,
+} from "../../config/constants.js";
 import type { SymbolKind } from "../../domain/types.js";
 import type { NotModifiedResponse } from "../types.js";
 import { getLadybugConn } from "../../db/ladybug.js";
@@ -175,6 +179,73 @@ export function shouldUseLexicalFastPathForSymbolSearch(
     request.pprDirection === undefined &&
     request.pprWeight === undefined
   );
+}
+
+interface SymbolSearchNearMiss {
+  name: string;
+  kind: SymbolKind;
+  file: string;
+}
+
+const NEAR_MISS_LIMIT = 3;
+const NO_STRONG_MATCH_SUGGESTION =
+  "No strong match. nearMisses lists closest names; search again with one of them.";
+
+function nearMissQueryFragments(query: string): string[] {
+  if (query.includes("*") || query.includes("?")) return [];
+  const fragments = splitCamelSubwords(query).filter(
+    (fragment) =>
+      fragment.length >= SYMBOL_SEARCH_MIN_QUERY_TOKEN_LENGTH &&
+      !SUGGESTION_STOP_WORDS.has(fragment),
+  );
+  const fallback = query.trim().toLowerCase();
+  const unique = Array.from(
+    new Set(
+      fragments.length > 0
+        ? fragments
+        : fallback.length >= SYMBOL_SEARCH_MIN_QUERY_TOKEN_LENGTH
+          ? [fallback]
+          : [],
+    ),
+  );
+
+  return unique
+    .map((fragment, index) => ({ fragment, index }))
+    .sort((a, b) => b.fragment.length - a.fragment.length || a.index - b.index)
+    .slice(0, SYMBOL_SEARCH_MAX_QUERY_TOKENS)
+    .map((entry) => entry.fragment);
+}
+
+async function findSymbolSearchNearMisses(
+  conn: Awaited<ReturnType<typeof getLadybugConn>>,
+  request: Pick<SymbolSearchRequest, "repoId" | "kinds" | "excludeExternal">,
+  query: string,
+): Promise<SymbolSearchNearMiss[]> {
+  const seen = new Set<string>();
+  for (const fragment of nearMissQueryFragments(query)) {
+    const rows = await searchSymbolsWithOverlay(
+      conn,
+      request.repoId,
+      fragment,
+      NEAR_MISS_LIMIT,
+      request.kinds,
+      request.excludeExternal,
+    );
+    const nearMisses: SymbolSearchNearMiss[] = [];
+    for (const row of rows) {
+      const key = `${row.name}\u0000${row.kind}\u0000${row.filePath}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      nearMisses.push({
+        name: row.name,
+        kind: row.kind as SymbolKind,
+        file: row.filePath,
+      });
+      if (nearMisses.length >= NEAR_MISS_LIMIT) return nearMisses;
+    }
+    if (nearMisses.length > 0) return nearMisses;
+  }
+  return [];
 }
 
 export async function handleSymbolSearch(
@@ -568,13 +639,20 @@ export async function handleSymbolSearch(
   const NOISE_FLOOR = 0.3;
   const effectiveResults =
     !hasExactMatch && bestRelevance < NOISE_FLOOR ? [] : relevant;
+  const nearMisses =
+    effectiveResults.length === 0
+      ? await findSymbolSearchNearMisses(conn, request, query)
+      : [];
   const effectiveSuggestion =
-    effectiveResults.length === 0 && relevant.length > 0
-      ? "No confident matches found. Try more specific terms or exact symbol names."
-      : suggestion;
+    nearMisses.length > 0
+      ? NO_STRONG_MATCH_SUGGESTION
+      : effectiveResults.length === 0 && relevant.length > 0
+        ? "No confident matches found. Try more specific terms or exact symbol names."
+        : suggestion;
   const response: SymbolSearchResponse = {
     results: effectiveResults,
     exactMatchFound: hasExactMatch,
+    ...(nearMisses.length > 0 && { nearMisses }),
     ...(effectiveSuggestion !== undefined && {
       suggestion: effectiveSuggestion,
     }),
@@ -600,7 +678,10 @@ export async function handleSymbolSearch(
         retrievalEvidence.pprBoosts;
     }
   }
-  if (request.wireFormat === "packed" || request.wireFormat === "auto") {
+  if (
+    nearMisses.length === 0 &&
+    (request.wireFormat === "packed" || request.wireFormat === "auto")
+  ) {
     const wireResult = serializeSymbolSearchForWireFormat(
       {
         query,
