@@ -19,7 +19,7 @@ import {
   AST_FINGERPRINT_COMPACT_WIRE_LENGTH,
   SYMBOL_ID_COMPACT_WIRE_LENGTH,
 } from "../../config/constants.js";
-import { compactCardForWire } from "./symbol-utils.js";
+import { compactCardForWire, compactRange } from "./symbol-utils.js";
 
 import { getObservabilityTap } from "../../observability/event-tap.js";
 import { tokenAccumulator } from "../token-accumulator.js";
@@ -359,12 +359,7 @@ export function toCompactGraphSliceV3(slice: GraphSlice): CompactGraphSliceV3 {
     c: slice.cards.map((card) => {
       const compactCard: CompactGraphSliceV3["c"][number] = {
         fi: filePathIndex.get(card.file) ?? 0,
-        r: [
-          card.range.startLine,
-          card.range.startCol,
-          card.range.endLine,
-          card.range.endCol,
-        ],
+        r: compactRange(card.range),
         k: card.kind,
         n: card.name,
         x: card.exported,

@@ -297,12 +297,13 @@ const GraphSliceSchema = z.object({
   memories: z.array(SurfacedMemorySchema).optional(),
 });
 
-const CompactRangeSchema = z.tuple([
+const CompactRangeTupleSchema = z.tuple([
   z.number().int().min(0),
   z.number().int().min(0),
   z.number().int().min(0),
   z.number().int().min(0),
 ]);
+const CompactRangeSchema = z.union([CompactRangeTupleSchema, z.string()]);
 
 const CompactSymbolDepsSchema = z.object({
   i: z.array(SliceDepRefSchema),

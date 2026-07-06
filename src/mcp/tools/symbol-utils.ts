@@ -38,6 +38,10 @@ interface WireDepsInput {
   callsNote?: unknown;
 }
 
+interface CompactCardForWireOptions {
+  compactRanges?: boolean;
+}
+
 interface WireCardInput {
   symbolId?: unknown;
   repoId?: unknown;
@@ -79,6 +83,27 @@ function shouldOmitWireField(value: unknown): boolean {
   );
 }
 
+function isWireRange(value: unknown): value is WireRangeInput {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const range = value as Partial<Record<keyof WireRangeInput, unknown>>;
+  return (
+    typeof range.startLine === "number" &&
+    typeof range.startCol === "number" &&
+    typeof range.endLine === "number" &&
+    typeof range.endCol === "number"
+  );
+}
+
+export function compactRange(range: WireRangeInput): string {
+  if (range.startCol === 0 && range.endCol === 0) {
+    return `${range.startLine}-${range.endLine}`;
+  }
+  return `${range.startLine}:${range.startCol}-${range.endLine}:${range.endCol}`;
+}
+
+
 function compactDepsForWire(
   deps: WireDepsInput | null | undefined,
 ): Record<string, unknown> | undefined {
@@ -112,13 +137,22 @@ function addWireField(
   }
 }
 
-export function compactCardForWire(card: WireCardInput): Record<string, unknown> {
+export function compactCardForWire(
+  card: WireCardInput,
+  opts: CompactCardForWireOptions = {},
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
 
   addWireField(out, "symbolId", card.symbolId);
   addWireField(out, "repoId", card.repoId);
   addWireField(out, "file", card.file);
-  addWireField(out, "range", card.range);
+  addWireField(
+    out,
+    "range",
+    opts.compactRanges && isWireRange(card.range)
+      ? compactRange(card.range)
+      : card.range,
+  );
   addWireField(out, "kind", card.kind);
   addWireField(out, "name", card.name);
   addWireField(out, "exported", card.exported);
