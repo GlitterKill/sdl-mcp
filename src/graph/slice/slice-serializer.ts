@@ -21,6 +21,10 @@ import { CARD_DETAIL_LEVEL_RANK } from "../../domain/types.js";
 import { estimateTokens as estimateTextTokens } from "../../util/tokenize.js";
 import { hashCard } from "../../util/hashing.js";
 import {
+  isMetadataProseTemplate,
+  isNameOnlySummary,
+} from "../../indexer/summaries.js";
+import {
   SYMBOL_CARD_MAX_DEPS_PER_KIND,
   SYMBOL_CARD_MAX_DEPS_PER_KIND_LIGHT,
   SYMBOL_CARD_MAX_INVARIANTS,
@@ -36,6 +40,24 @@ import {
   SYMBOL_TOKEN_MAX,
   AST_FINGERPRINT_WIRE_LENGTH,
 } from "../../config/constants.js";
+
+function sliceCardSummary(
+  summary: string | undefined,
+  symbolName: string,
+): string | undefined {
+  if (summary === undefined) {
+    return undefined;
+  }
+  const trimmed = summary.trim();
+  if (
+    trimmed.length === 0 ||
+    isNameOnlySummary(trimmed, symbolName) ||
+    isMetadataProseTemplate(trimmed, symbolName)
+  ) {
+    return undefined;
+  }
+  return summary;
+}
 
 export function uniqueLimit(values: string[], max: number): string[] {
   const seen = new Set<string>();
@@ -206,8 +228,9 @@ export function toSignatureCard(card: SymbolCard): SymbolCard {
     signature.signature = card.signature;
   }
 
-  if (card.summary) {
-    signature.summary = card.summary.slice(
+  const summary = sliceCardSummary(card.summary, card.name);
+  if (summary) {
+    signature.summary = summary.slice(
       0,
       SYMBOL_CARD_SUMMARY_MAX_CHARS_LIGHT,
     );
@@ -259,8 +282,9 @@ export function toDepsCard(card: SymbolCard): SymbolCard {
     deps.signature = card.signature;
   }
 
-  if (card.summary) {
-    deps.summary = card.summary.slice(0, SYMBOL_CARD_SUMMARY_MAX_CHARS_LIGHT);
+  const summary = sliceCardSummary(card.summary, card.name);
+  if (summary) {
+    deps.summary = summary.slice(0, SYMBOL_CARD_SUMMARY_MAX_CHARS_LIGHT);
   }
 
   if (card.callResolution) {
@@ -357,8 +381,9 @@ export function toSliceSymbolCard(
     sliceCard.signature = card.signature;
   }
 
-  if (card.summary) {
-    sliceCard.summary = card.summary;
+  const summary = sliceCardSummary(card.summary, card.name);
+  if (summary) {
+    sliceCard.summary = summary;
   }
 
   if (card.cluster) {

@@ -17,6 +17,7 @@ import {
   generateFilteredSummary,
   getSummaryQuality,
   hasJSDoc,
+  isMetadataProseTemplate,
   isNameOnlySummary,
 } from "../summaries.js";
 import {
@@ -218,11 +219,16 @@ export async function buildSymbolAndEdgeRows(
     // Filter out stale name-only summaries so they get regenerated.
     const nativeSummaryValue =
       nativeSummary.length > 0 &&
-      !isNameOnlySummary(nativeSummary, extractedSymbol.name)
+      !isNameOnlySummary(nativeSummary, extractedSymbol.name) &&
+      !isMetadataProseTemplate(nativeSummary, extractedSymbol.name)
         ? nativeSummary
         : null;
     let summary = existingSymbol?.summary ?? null;
-    if (summary !== null && isNameOnlySummary(summary, extractedSymbol.name)) {
+    if (
+      summary !== null &&
+      (isNameOnlySummary(summary, extractedSymbol.name) ||
+        isMetadataProseTemplate(summary, extractedSymbol.name))
+    ) {
       summary = null;
     }
     summary = summary ?? nativeSummaryValue;

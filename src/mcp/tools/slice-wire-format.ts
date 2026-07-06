@@ -19,7 +19,11 @@ import {
   AST_FINGERPRINT_COMPACT_WIRE_LENGTH,
   SYMBOL_ID_COMPACT_WIRE_LENGTH,
 } from "../../config/constants.js";
-import { compactCardForWire, compactRange } from "./symbol-utils.js";
+import {
+  cardSummaryForWire,
+  compactCardForWire,
+  compactRange,
+} from "./symbol-utils.js";
 
 import { getObservabilityTap } from "../../observability/event-tap.js";
 import { tokenAccumulator } from "../token-accumulator.js";
@@ -98,7 +102,7 @@ export function toAgentGraphSlice(slice: GraphSlice): AgentWireSlice {
     lines: { start: card.range.startLine, end: card.range.endLine },
     exported: card.exported ?? false,
     signature: flattenSignature(card.signature as Record<string, unknown> | undefined),
-    summary: card.summary ?? undefined,
+    summary: cardSummaryForWire(card.summary, card.name),
     imports: (card.deps?.imports ?? []).map((dep) => ({
       name: idToName.get(dep.symbolId) ?? dep.symbolId,
       ...(dep.confidence != null && dep.confidence !== 1 ? { confidence: dep.confidence } : {}),
@@ -378,7 +382,8 @@ export function toCompactGraphSliceV3(slice: GraphSlice): CompactGraphSliceV3 {
 
       if (card.visibility) compactCard.v = card.visibility;
       if (card.signature) compactCard.sig = card.signature;
-      if (card.summary) compactCard.sum = card.summary;
+      const summary = cardSummaryForWire(card.summary, card.name);
+      if (summary) compactCard.sum = summary;
       if (card.invariants && card.invariants.length > 0) {
         compactCard.inv = card.invariants;
       }

@@ -8,6 +8,7 @@
 import type { GraphSlice } from "../../../types.js";
 import { encodeSchemaDriven } from "../schema.js";
 import type { TableSpec } from "../types.js";
+import { cardSummaryForWire } from "../../../tools/symbol-utils.js";
 
 const CARDS_SPEC: TableSpec = {
   tag: "c",
@@ -74,7 +75,7 @@ export function encodePackedSlice(slice: GraphSlice): string {
         | { params?: Array<{ name: string; type?: string }> }
         | undefined,
     ),
-    sum: card.summary ?? "",
+    sum: cardSummaryForWire(card.summary, card.name) ?? "",
   }));
 
   const symbolIndex = slice.symbolIndex ?? [];

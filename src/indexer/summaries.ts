@@ -71,8 +71,22 @@ export function generateSummary(
   }
 }
 
+const METADATA_PROSE_TAILS = [
+  /using available signature, role, path, language, and graph context metadata\.?$/i,
+  /using available signature, symbol metadata, and graph context details\.?$/i,
+  /using available .{0,80}metadata\.?$/i,
+];
+
+export function isMetadataProseTemplate(
+  summary: string,
+  _symbolName: string,
+): boolean {
+  const s = summary.trim();
+  return METADATA_PROSE_TAILS.some((re) => re.test(s));
+}
+
 /**
- * Applies isNameOnlySummary as a final quality gate on generated summaries.
+ * Applies summary quality gates on generated summaries.
  * Call this wrapper instead of generateSummary directly when you want filtering.
  */
 export function generateFilteredSummary(
@@ -83,6 +97,7 @@ export function generateFilteredSummary(
   if (summary === null) return null;
   if (isNameOnlySummary(summary, symbol.name)) return null;
   if (isTautologicalBodyTemplate(summary, symbol.name)) return null;
+  if (isMetadataProseTemplate(summary, symbol.name)) return null;
   return summary;
 }
 

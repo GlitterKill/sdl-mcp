@@ -12,6 +12,7 @@ import {
   buildConciseSymbolSummary,
   CONCISE_SYMBOL_SUMMARY_BUILDER_VERSION,
 } from "./symbol-embedding-text.js";
+import { isMetadataProseTemplate } from "./summaries.js";
 
 export interface GeneratedSummaryResult {
   summary: string;
@@ -352,6 +353,23 @@ interface PendingSymbolSummaryUpdate {
   summarySource: string;
 }
 
+function prepareCardSummaryForStorage(
+  row: PendingSymbolSummaryUpdate,
+): PendingSymbolSummaryUpdate {
+  if (
+    row.summary === null ||
+    !isMetadataProseTemplate(row.summary, row.symbolId)
+  ) {
+    return row;
+  }
+  return {
+    ...row,
+    summary: null,
+    summaryQuality: 0,
+    summarySource: "filtered",
+  };
+}
+
 interface PendingGeneratedSummary extends PendingSymbolSummaryUpdate {
   provider: string;
   model: string;
@@ -370,12 +388,13 @@ async function updateSymbolSummariesInTransaction(
     await ladybugDb.withTransaction(wConn, async (txConn) => {
       const updatedAt = new Date().toISOString();
       for (const row of rows) {
+        const cardRow = prepareCardSummaryForStorage(row);
         await ladybugDb.updateSymbolSummary(
           txConn,
-          row.symbolId,
-          row.summary,
-          row.summaryQuality,
-          row.summarySource,
+          cardRow.symbolId,
+          cardRow.summary,
+          cardRow.summaryQuality,
+          cardRow.summarySource,
           updatedAt,
         );
       }
@@ -404,12 +423,13 @@ async function persistGeneratedSummariesInTransaction(
           createdAt: now,
           updatedAt: now,
         });
+        const cardRow = prepareCardSummaryForStorage(row);
         await ladybugDb.updateSymbolSummary(
           txConn,
-          row.symbolId,
-          row.summary,
-          row.summaryQuality,
-          row.summarySource,
+          cardRow.symbolId,
+          cardRow.summary,
+          cardRow.summaryQuality,
+          cardRow.summarySource,
           now,
         );
       }

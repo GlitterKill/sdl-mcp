@@ -4,6 +4,7 @@
 
 import { encodeSchemaDriven } from "../schema.js";
 import type { TableSpec } from "../types.js";
+import { cardSummaryForWire } from "../../../tools/symbol-utils.js";
 
 interface ContextCard {
   symbolId?: string;
@@ -96,7 +97,7 @@ export function encodePackedContext(input: ContextInput): string {
     f: card.file ?? "",
     k: card.kind ?? "",
     n: card.name ?? "",
-    sum: card.summary ?? "",
+    sum: cardSummaryForWire(card.summary, card.name) ?? "",
   }));
   const rungRows = (input.rungs ?? []).map((r) => ({
     rungName: r.rungName ?? r.rung ?? "",

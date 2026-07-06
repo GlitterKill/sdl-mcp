@@ -370,8 +370,8 @@ describe("generateSummariesForRepo", () => {
     assert.strictEqual(result.generated, 1);
     assert.ok(symbol);
     assert.notStrictEqual(symbol.summary, "```ts");
-    assert.match(symbol.summary ?? "", /^Function stale code fence/);
-    assert.strictEqual(symbol.summaryQuality, 0.6);
-    assert.strictEqual(symbol.summarySource, "heuristic-typed");
+    assert.strictEqual(symbol.summary ?? "", "");
+    assert.strictEqual(symbol.summaryQuality, 0);
+    assert.strictEqual(symbol.summarySource, "filtered");
   });
 });

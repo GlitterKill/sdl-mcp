@@ -28,7 +28,10 @@ import { decideCodeAccessLegacy } from "../policy/code-access.js";
 import type { PolicyRequestContext } from "../policy/types.js";
 import { logPolicyDecision } from "../mcp/telemetry.js";
 import { uniqueLimit } from "../graph/slice/slice-serializer.js";
-import { toLegacySymbolRow } from "../mcp/tools/symbol-utils.js";
+import {
+  cardSummaryForWire,
+  toLegacySymbolRow,
+} from "../mcp/tools/symbol-utils.js";
 import {
   getOverlaySnapshot,
   getOverlaySymbol,
@@ -469,9 +472,10 @@ export async function buildCardForSymbol(
   const invariants = parseJson<string[]>(symbol.invariantsJson);
   const sideEffects = parseJson<string[]>(symbol.sideEffectsJson);
 
-  const cardSummary = symbol.summary
-    ? symbol.summary.slice(0, SYMBOL_CARD_SUMMARY_MAX_CHARS)
-    : undefined;
+  const cardSummary = cardSummaryForWire(symbol.summary, symbol.name)?.slice(
+    0,
+    SYMBOL_CARD_SUMMARY_MAX_CHARS,
+  );
 
   const importTargetIds = edgesFrom
     .filter((edge) => edge.edgeType === "import")

@@ -1,5 +1,9 @@
 import type { SymbolRow as LegacySymbolRow } from "../../db/schema.js";
 import type { SymbolRow } from "../../db/ladybug-queries.js";
+import {
+  isMetadataProseTemplate,
+  isNameOnlySummary,
+} from "../../indexer/summaries.js";
 
 export function toLegacySymbolRow(symbol: SymbolRow): LegacySymbolRow {
   return {
@@ -103,6 +107,27 @@ export function compactRange(range: WireRangeInput): string {
   return `${range.startLine}:${range.startCol}-${range.endLine}:${range.endCol}`;
 }
 
+export function cardSummaryForWire(
+  summary: unknown,
+  symbolName: unknown,
+): string | undefined {
+  if (typeof summary !== "string") {
+    return undefined;
+  }
+  const trimmed = summary.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  if (
+    typeof symbolName === "string" &&
+    (isNameOnlySummary(trimmed, symbolName) ||
+      isMetadataProseTemplate(trimmed, symbolName))
+  ) {
+    return undefined;
+  }
+  return summary;
+}
+
 
 function compactDepsForWire(
   deps: WireDepsInput | null | undefined,
@@ -158,11 +183,7 @@ export function compactCardForWire(
   addWireField(out, "exported", card.exported);
   addWireField(out, "visibility", card.visibility);
   addWireField(out, "signature", card.signature);
-  if (typeof card.summary === "string") {
-    addWireField(out, "summary", card.summary.trim() === "" ? undefined : card.summary);
-  } else {
-    addWireField(out, "summary", card.summary);
-  }
+  addWireField(out, "summary", cardSummaryForWire(card.summary, card.name));
   addWireField(out, "invariants", card.invariants);
   addWireField(out, "sideEffects", card.sideEffects);
   addWireField(out, "cluster", card.cluster);
