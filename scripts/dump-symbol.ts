@@ -4,10 +4,21 @@ import {
 } from "../src/mcp/tools/symbol.js";
 import { resolveCliConfigPath } from "../src/config/configPath.js";
 import { loadConfig } from "../src/config/loadConfig.js";
-import type { SymbolCard } from "../src/mcp/types.js";
 import { initGraphDb } from "../src/db/initGraphDb.js";
 import { getLadybugConn } from "../src/db/ladybug.js";
 import * as ladybugDb from "../src/db/ladybug-queries.js";
+
+type DumpSymbolCard = Record<string, unknown> & {
+  symbolId: string;
+  metrics?: unknown;
+};
+
+// The MCP handler returns a compact wire card, not the full domain SymbolCard.
+function toDumpSymbolCard(card: unknown): DumpSymbolCard | null {
+  if (typeof card !== "object" || card === null) return null;
+  const record = card as Record<string, unknown>;
+  return typeof record.symbolId === "string" ? (record as DumpSymbolCard) : null;
+}
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -24,15 +35,19 @@ async function main(): Promise<void> {
   await initGraphDb(config, configPath);
   const conn = await getLadybugConn();
 
-  let card: SymbolCard | null = null;
+  let card: DumpSymbolCard | null = null;
   const isSymbolId = /[-_]/.test(query);
 
   if (isSymbolId) {
-    const cardResponse = await handleSymbolGetCard({ symbolId: query });
+    const cardResponse = await handleSymbolGetCard({
+      symbolId: query,
+      refsMode: "off",
+    });
     if ("card" in cardResponse) {
-      card = cardResponse.card;
-    } else {
-      console.error("Symbol not modified, cannot dump");
+      card = toDumpSymbolCard(cardResponse.card);
+    }
+    if (!card) {
+      console.error("Symbol response did not include a dumpable card");
       process.exit(1);
     }
   } else {
@@ -63,11 +78,13 @@ async function main(): Promise<void> {
 
     const cardResponse = await handleSymbolGetCard({
       symbolId: results[0].symbolId,
+      refsMode: "off",
     });
     if ("card" in cardResponse) {
-      card = cardResponse.card;
-    } else {
-      console.error("Symbol not modified, cannot dump");
+      card = toDumpSymbolCard(cardResponse.card);
+    }
+    if (!card) {
+      console.error("Symbol response did not include a dumpable card");
       process.exit(1);
     }
   }
