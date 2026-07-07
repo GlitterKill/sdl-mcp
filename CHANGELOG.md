@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.12.2] - 2026-07-07
 
 ### Added
 
@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Tool display deduplication**: user-facing text summaries no longer replay long `sdl.context` evidence summaries or generic `formattedSummary` payloads that already live in structured content.
+
+_19 commits from 1 contributor_
 
 ## [0.12.1] - 2026-07-04
 
