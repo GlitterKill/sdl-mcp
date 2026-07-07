@@ -11,7 +11,7 @@ Code Mode is built around one clear separation of responsibility:
 - `sdl.workflow` handles multi-step operations.
 - `sdl.file` handles file reads, writes, edits, and gated source windows.
 
-If you remember only one rule, make it this one: use `sdl.context` first for `explain`, `debug`, `review`, and most `implement` requests. Use `sdl.retrieve` for one exact retrieval step, `sdl.file` for file/edit/window work, and `sdl.workflow` only when the work is genuinely procedural.
+If you remember only one rule, make it this one: use `sdl.context` first for `explain`, `debug`, `review`, and most `implement` requests. For explain/debug, try `options.answerFirst: true` before card-heavy context. Use `sdl.retrieve` for one exact retrieval step, `sdl.file` for file/edit/window work, and `sdl.workflow` only when the work is genuinely procedural.
 
 ---
 
@@ -41,6 +41,47 @@ Code Mode tool output is human-first. The first MCP `content` text block is conc
 
 SDL-MCP internal bookkeeping is not duplicated into model-visible output by default. Timing diagnostics, packed-wire stats, raw-context baselines, action traces, precondition snapshots, backup paths, and retrieval-debug details stay in logs or diagnostics surfaces. Set `includeDiagnostics: true` or the relevant retrieval-evidence option only when the task actually needs those details; even then, the normal visible text stays concise.
 
+
+
+## Token Economy Workflow
+
+Code Mode surfaces now include static price tags in `sdl.manual` and `sdl.action.search`. Pick the cheapest rung that can answer the task, then use `usage.stats` and its `signalDensity` section only when you need to inspect token savings or delivered-but-unused context.
+
+For explain/debug, start with an answer-first context request:
+
+```json
+{
+  "repoId": "my-repo",
+  "taskType": "debug",
+  "taskText": "Why does parseConfig reject timeout=0?",
+  "options": { "contextMode": "precise", "answerFirst": true }
+}
+```
+
+If the answer is not enough, expand from the returned evidence IDs with `symbol.getCard` or a normal `sdl.context` call. If the response includes `answerFirstFallback`, use normal card-mode context; the fallback means SDL did not have enough summary provenance to answer safely.
+
+Packed results may introduce session-local aliases:
+
+```text
+@ids=s1:3c6e44f4ed22...,s2:63720054f556...
+row=s1|WorkflowExecutor|src/code-mode/workflow.ts
+```
+
+Use `s1`, `s2`, and other `sN` aliases anywhere a symbol ID is accepted. Recover the full hash from the introducing `@ids` line. If an alias is unknown after compaction or a new session, re-run the producing call or use the full ID.
+
+Repeat deliveries may return an unchanged ref instead of the original body:
+
+```json
+{ "ref": { "key": "card:my-repo:s1", "etag": "abc123" }, "unchanged": true }
+```
+
+Treat unchanged refs as already-held content. Set `refsMode: "off"` only when you need to recover full content after lost context.
+
+When `symbol.search` returns `nearMisses`, retry with one listed `name` instead of guessing broader queries. When `file.read` returns the large-read hint, retry with `search` plus `searchContext`, `offset` plus `limit`, `jsonPath`, `maxTokens`, or `maxBytes`.
+
+Runtime work belongs in `sdl.workflow` with `runtimeExecute` and `outputMode: "digest"` for build/test/lint commands. The digest returns parsed failures and an artifact handle; use `runtimeQueryOutput` only for the specific lines you need.
+
+---
 
 
 ## Tool Surface
@@ -122,13 +163,13 @@ Good fits:
 
 | Request shape | Start with | Why |
 |:--------------|:-----------|:----|
-| Explain a symbol or module | `sdl.context` | Returns task-shaped evidence without hand-building the ladder |
-| Debug a bug or trace behavior | `sdl.context` | Chooses `card`, `skeleton`, `hotPath`, and raw follow-ups only when needed |
+| Explain a symbol or module | `sdl.context` with `answerFirst` | Returns a compact answer plus evidence IDs before cards |
+| Debug a bug or trace behavior | `sdl.context` with `answerFirst` | Starts with a compact answer and falls back to cards when provenance is insufficient |
 | Review code or inspect risk | `sdl.context` | Gives compact review-oriented evidence first |
 | Learn a pattern before implementing | `sdl.context` | Gets structural context with less overhead than a workflow |
 | Need one exact retrieval step | `sdl.retrieve` | Runs a single symbol, slice, skeleton, hot-path, or code-window operation |
 | Read, write, edit, or request a source window | `sdl.file` | Keeps file operations on the compact Code Mode surface |
-| Run tests, lint, or diagnostics | `sdl.workflow` | Best for `runtimeExecute` plus follow-up parsing |
+| Run tests, lint, or diagnostics | `sdl.workflow` | Best for `runtimeExecute` with `outputMode: "digest"` plus targeted output queries |
 | Shape or filter previous results | `sdl.workflow` | Internal transforms avoid wasting model tokens |
 | Batch multiple dependent operations | `sdl.workflow` | `$N` references keep everything in one round trip |
 
@@ -296,11 +337,11 @@ For SDL-first agents:
 1. `sdl.repo.status`
 2. `sdl.action.search` when the right surface is unclear
 3. `sdl.manual(query|actions)` when a compact API slice helps
-4. `sdl.context` for explain/debug/review/implement context retrieval
+4. `sdl.context` for explain/debug/review/implement context retrieval; use `options.answerFirst: true` first for explain/debug
 5. `sdl.retrieve` for one exact retrieval step
 6. `sdl.file` for file, edit, or source-window work
 7. `sdl.workflow` for runtime execution, data shaping, batch mutations, and other procedural pipelines
-8. `runtimeExecute` inside `sdl.workflow` for repo-local build, test, lint, or diagnostics
+8. `runtimeExecute` inside `sdl.workflow` with `outputMode: "digest"` for repo-local build, test, lint, or diagnostics
 
 This is the intended path for enforced agent setups where SDL-MCP replaces token-heavy default tools whenever possible.
 
@@ -311,6 +352,7 @@ This is the intended path for enforced agent setups where SDL-MCP replaces token
 - [Agent Context](./agent-context.md)
 - [Context Modes](./context-modes.md)
 - [Runtime Execution](./runtime-execution.md)
+- [Token Economy](./token-economy.md)
 - [Tool Gateway](./tool-gateway.md)
 - [Governance & Policy](./governance-policy.md)
 

@@ -1156,6 +1156,28 @@ describe("context-response-projection", () => {
       });
     });
 
+    it("keeps action search token estimates in compact model content", () => {
+      const projected = projectToolResultForModelContent(
+        "sdl.action.search",
+        {
+          actions: [
+            {
+              action: "symbol.search",
+              fn: "symbolSearch",
+              requiredParams: ["query"],
+              estTokens: 150,
+              schemaSummary: {
+                fields: [{ path: "query", type: "string", required: true }],
+              },
+            },
+          ],
+        },
+        { detail: "compact" },
+      ) as { actions: Array<Record<string, unknown>> };
+
+      assert.equal(projected.actions[0].estTokens, 150);
+    });
+
     it("continues to hide trace-like internal fields from other tools", () => {
       const projected = projectToolResultForModelContent(
         "sdl.context",

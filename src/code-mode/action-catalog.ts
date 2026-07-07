@@ -635,6 +635,8 @@ export interface ActionDescriptor {
   tags: ActionTag[];
   /** Whether this is a gateway action, internal transform, or top-level Code Mode meta tool */
   kind: "gateway" | "internal" | "meta";
+  /** Static typical response cost in tokens, maintained from release telemetry medians. */
+  estTokens?: number;
   /** Prior actions that usually improve this action's inputs */
   prerequisites: string[];
   /** Likely next actions after this action succeeds */
@@ -657,6 +659,7 @@ export interface ActionMetadata {
   prerequisites: string[];
   recommendedNextActions: string[];
   fallbacks: string[];
+  estTokens?: number;
 }
 
 // --- Descriptions from manual template (extracted) ---
@@ -690,15 +693,15 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
     "Request buffer checkpoint. Zero-file success responses include a message explaining why no clean buffers were checkpointed.",
   "buffer.status": "Get buffer status",
   "runtime.execute":
-    "Execute runtime command. Shell runtime requires code; direct args-only shell execution is rejected. Node code runs as ESM (use import/createRequire, not require()). Use stdin for multiline scripts/input; maxResponseLines accepts 5-1000 lines (default 100).",
+    "Execute runtime command. Shell runtime requires code; direct args-only shell execution is rejected. Use outputMode:\"digest\" for build/test/lint failures, then runtime.queryOutput for full logs. Node code runs as ESM (use import/createRequire, not require()). Use stdin for multiline scripts/input; maxResponseLines accepts 5-1000 lines (default 100).",
   "runtime.queryOutput": "Query stored command output by keywords",
   "response.get": "Retrieve a stored large tool response by handle",
   "memory.store": "Store a development memory",
   "memory.query": "Query memories",
   "memory.remove": "Soft-delete a memory",
   "memory.surface": "Auto-surface relevant memories",
-  "usage.stats": "Get cumulative token savings statistics",
-  "file.read": "Read non-indexed file content (templates, configs, docs)",
+  "usage.stats": "Get cumulative token savings statistics, including Signal density in compact output",
+  "file.read": "Read non-indexed file content (templates, configs, docs); large untargeted reads include a targeted-mode hint",
   "file.write":
     "Write to a single file (indexed or non-indexed) with targeted modes (line replace, pattern replace, JSON path, insert, append); use search.edit for cross-file batching",
   "search.edit":
@@ -828,11 +831,13 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
     prerequisites: ["repo.status"],
     recommendedNextActions: ["symbol.getCard", "slice.build"],
     fallbacks: ["repo.overview"],
+    estTokens: 150,
   },
   "symbol.getCard": {
     prerequisites: ["symbol.search"],
     recommendedNextActions: ["slice.build", "code.getSkeleton"],
     fallbacks: ["symbol.search"],
+    estTokens: 50,
   },
   "symbol.edit": {
     prerequisites: ["symbol.getCard"],
@@ -843,6 +848,7 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
     prerequisites: ["symbol.getCard", "repo.overview"],
     recommendedNextActions: ["slice.refresh", "code.getSkeleton"],
     fallbacks: ["repo.overview"],
+    estTokens: 1500,
   },
   "slice.refresh": {
     prerequisites: ["slice.build"],
@@ -868,16 +874,19 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
     prerequisites: ["code.getSkeleton", "code.getHotPath"],
     recommendedNextActions: [],
     fallbacks: ["code.getSkeleton", "code.getHotPath"],
+    estTokens: 1400,
   },
   "code.getSkeleton": {
     prerequisites: ["symbol.getCard", "slice.build"],
     recommendedNextActions: ["code.getHotPath", "code.needWindow"],
     fallbacks: ["repo.overview"],
+    estTokens: 200,
   },
   "code.getHotPath": {
     prerequisites: ["code.getSkeleton", "symbol.getCard"],
     recommendedNextActions: ["code.needWindow"],
     fallbacks: ["code.getSkeleton"],
+    estTokens: 500,
   },
   "repo.register": {
     prerequisites: [],
@@ -938,6 +947,7 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
     prerequisites: ["repo.status", "policy.get"],
     recommendedNextActions: ["runtime.queryOutput"],
     fallbacks: ["code.getSkeleton"],
+    estTokens: 120,
   },
   "runtime.queryOutput": {
     prerequisites: ["runtime.execute"],
@@ -999,6 +1009,7 @@ const ACTION_METADATA: Record<string, ActionMetadata> = {
     prerequisites: ["action.search"],
     recommendedNextActions: ["agent.feedback"],
     fallbacks: ["slice.build"],
+    estTokens: 800,
   },
   retrieve: {
     prerequisites: ["repo.status"],

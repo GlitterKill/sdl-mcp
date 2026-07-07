@@ -70,6 +70,16 @@ describe("code-mode manual generator", () => {
     assert.ok(tokens < 4000, `Expected tokens < 4000, got ${tokens}`);
   });
 
+  it("documents static token price tags", () => {
+    const manual = generateManual();
+
+    assert.match(manual, /Release-static medians/);
+    assert.match(manual, /search150/);
+    assert.match(manual, /runtimeDigest120/);
+    assert.match(manual, /answerFirst/);
+    assert.match(manual, /nearMisses/);
+  });
+
   it("getManualCached() returns same reference on repeated calls", () => {
     invalidateManualCache();
     const result1 = getManualCached();

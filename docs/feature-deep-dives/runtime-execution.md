@@ -70,6 +70,12 @@ Compiled runtimes use a compile-then-execute workflow: SDL-MCP compiles the sour
 When compilation fails and `persistOutput` is enabled, compiler stdout/stderr are persisted with the same artifact store, so `sdl.runtime.queryOutput` can inspect noisy TS/Rust/C/C++ failures by handle. If a runtime fails before emitting output, SDL-MCP persists a small stderr marker so the failure phase remains queryable by artifact handle.
 
 
+## Output Modes
+
+Use `outputMode: "digest"` for build, test, lint, and other noisy diagnostics. The digest parses common tool output into a compact `digest` object, keeps `stdoutSummary` short, and always leaves full stdout/stderr behind an `artifactHandle` for `sdl.runtime.queryOutput`.
+
+Use `outputMode: "minimal"` when exit status and metadata are enough. Use `outputMode: "intent"` when you already know the terms that define success or failure. If the digest omits the detail you need, query the artifact with focused `queryTerms` or a `lineRange`; do not rerun the command just to print full output.
+
 ---
 
 ## Sandboxed Execution Flow
@@ -78,7 +84,7 @@ When compilation fails and `persistOutput` is enabled, compiler stdout/stderr ar
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#E7F8F2","primaryBorderColor":"#0F766E","primaryTextColor":"#102A43","secondaryColor":"#E8F1FF","secondaryBorderColor":"#2563EB","secondaryTextColor":"#102A43","tertiaryColor":"#FFF4D6","tertiaryBorderColor":"#B45309","tertiaryTextColor":"#102A43","lineColor":"#0F766E","textColor":"#102A43","fontFamily":"Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},"flowchart":{"curve":"basis","htmlLabels":true}}}%%
 flowchart LR
     Agent["Agent"]
-    Execute["sdl.runtime.execute<br/>outputMode: minimal"]
+    Execute["sdl.runtime.execute<br/>outputMode: digest"]
     Store[("Artifact store<br/>gzip stdout/stderr")]
     Status["status + exitCode<br/>artifactHandle"]
     Decision{"exitCode = 0?"}
@@ -119,12 +125,12 @@ flowchart LR
   "repoId": "my-repo",
   "runtime": "node",
   "args": ["--test", "tests/auth.test.ts"],
-  "outputMode": "minimal",
+  "outputMode": "digest",
   "timeoutMs": 30000
 }
 ```
 
-**Response (~50 tokens plus metadata):**
+**Response (digest plus metadata):**
 
 ```json
 {
@@ -132,8 +138,19 @@ flowchart LR
   "exitCode": 1,
   "signal": null,
   "durationMs": 4200,
-  "stdoutSummary": "",
+  "stdoutSummary": "1 failing test: authenticate() rejects expired tokens",
   "stderrSummary": "",
+  "digest": {
+    "kind": "node-test",
+    "ok": false,
+    "summary": "1 failing test: authenticate() rejects expired tokens",
+    "failures": [
+      {
+        "name": "authenticate() rejects expired tokens",
+        "message": "AssertionError: expected 401 but got 200"
+      }
+    ]
+  },
   "artifactHandle": "runtime-my-repo-1774356909696-fc5aa1f22e33e17c",
   "truncation": {
     "stdoutTruncated": false,
@@ -188,7 +205,7 @@ If the running server detects that runtime-critical source files are newer than 
 
 ## sdl.runtime.queryOutput
 
-Retrieves and searches stored runtime output artifacts on demand. Use this after an `outputMode: "minimal"` execution to inspect specific parts of the output without loading it all into context.
+Retrieves and searches stored runtime output artifacts on demand. Use this after an `outputMode: "digest"` or `outputMode: "minimal"` execution to inspect specific parts of the output without loading it all into context.
 
 **Parameters:**
 
@@ -223,7 +240,7 @@ Retrieves and searches stored runtime output artifacts on demand. Use this after
   "repoId": "my-repo",
   "runtime": "node",
   "args": ["scripts/check.mjs"],
-  "outputMode": "summary",
+  "outputMode": "digest",
   "timeoutMs": 30000,
   "queryTerms": ["FAIL", "Error"],
   "maxResponseLines": 100
@@ -274,7 +291,7 @@ sdl-mcp init --client <client> --enforce-agent-tools
 When SDL-MCP is configured for agent enforcement:
 
 - prefer `runtimeExecute` in `sdl.workflow` over native shell tools
-- prefer the two-phase pattern: `outputMode: "minimal"` then `sdl.runtime.queryOutput` on demand
+- prefer the two-phase pattern: `outputMode: "digest"` then `sdl.runtime.queryOutput` on demand
 - use `stdin` instead of PowerShell here-strings, multiline `node -e`, base64 decode/eval, or filesystem write scripts for multiline input
 - on Windows PowerShell, prefer `npm.cmd` for npm scripts when the `npm.ps1` shim emits `$LASTEXITCODE` noise
 - prefer structured query terms over dumping large output back to the model
@@ -287,6 +304,7 @@ When SDL-MCP is configured for agent enforcement:
 - [`sdl.runtime.execute`](../mcp-tools-detailed.md#sdlruntimeexecute)
 - [`sdl.runtime.queryOutput`](../mcp-tools-detailed.md#sdlruntimequeryoutput)
 - [Code Mode](./code-mode.md)
+- [Token Economy](./token-economy.md)
 - [Governance & Policy](./governance-policy.md)
 
 [Back to README](../../README.md)

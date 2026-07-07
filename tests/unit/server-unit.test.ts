@@ -110,6 +110,9 @@ describe("MCPServer", () => {
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /repo\.status/);
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /sdl\.context/);
       assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /usageStats/);
+      assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /outputMode: \"digest\"/);
+      assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /refsMode: \"off\"/);
+      assert.match(SDL_MCP_SERVER_INSTRUCTIONS, /short ids/);
     });
 
     it("has gatewayMode defaulting to false", () => {

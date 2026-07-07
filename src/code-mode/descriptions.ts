@@ -11,12 +11,14 @@ export const WORKFLOW_DESCRIPTION =
   "(dataPick, dataMap, dataFilter, dataSort, dataTemplate). Use $N references " +
   "(e.g., $0.results[0].symbolId) to pass results " +
   "between steps. Includes budget tracking, context-ladder validation, " +
-  "internal ETag caching, and opt-in execution tracing.";
+  "internal ETag caching, opt-in execution tracing, and runtime digest " +
+  "output for build/test/lint commands.";
 
 export const CONTEXT_DESCRIPTION =
   "Retrieve task-shaped code context for explain, debug, review, or implement " +
-  "work. This is the Code Mode equivalent of sdl.context and should be " +
-  "preferred over sdl.workflow for context retrieval.";
+  "work. Use options.answerFirst for compact explain/debug answers before " +
+  "expanding evidence ids. This is the Code Mode equivalent of sdl.context " +
+  "and should be preferred over sdl.workflow for context retrieval.";
 
 export const RETRIEVE_DESCRIPTION =
   "Retrieve compact SDL graph/code context in one step. Use for " +
@@ -25,9 +27,10 @@ export const RETRIEVE_DESCRIPTION =
   "pipelines, transforms, runtime execution, mutations, or $N result piping.";
 
 export const ACTION_SEARCH_DESCRIPTION =
-  "Search for SDL-MCP actions by keyword. Returns ranked matches with optional " +
-  "schema summaries and examples. Use this as the first discovery step before " +
-  "loading the full manual or choosing between sdl.context and sdl.workflow.";
+  "Search for SDL-MCP actions by keyword. Returns ranked matches and nearMisses " +
+  "with optional schema summaries and examples. Use this as the first discovery " +
+  "step before loading the full manual or choosing between sdl.context and " +
+  "sdl.workflow.";
 
 export const FILE_GATEWAY_DESCRIPTION =
   'Unified file I/O gateway. op:"read" reads non-indexed files (configs, docs, ' +

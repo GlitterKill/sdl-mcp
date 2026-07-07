@@ -87,7 +87,8 @@ const MANUAL_TEMPLATE = `// SDL-MCP API: sdl.context for context; sdl.workflow f
 // repoId lives in workflow envelope.
 // Reference steps as ${"$"}N, e.g. ${"$"}0.results[0].symbolId. Wildcard [*] projects arrays: ${"$"}0.results[*].symbolId -> string[].
 // Limits: sdl.action.search limit <= 50; workflowContinuationGet limit <= 1000; runtimeExecute maxResponseLines 5..1000; shell runtime requires code.
-// Edit: symbolEdit one symbol; searchEdit identifier/structural/operations[]; runtimeExecute stdin.
+// Release-static medians: card50 search150 skeleton200 hotPath500 runtimeDigest120 context800/2000 window<=1400 slice1500.
+// Economy: answerFirst explain/debug; nearMisses; refsMode:"off" expands refs; digest build/test/lint.
 // sdl.context budgets accept maxTokens/maxEstimatedTokens, not maxCards.
 // Use wireFormat:"json" for symbol.search/sliceBuild when ${"$"}N refs need fields.
 // Continuation recipe: symbolSearch -> workflowContinuationGet(handle,path,offset,limit) -> dataMap/dataTemplate.
@@ -102,13 +103,13 @@ type SEO = { kind: "replaceSymbol"|"replaceBody"|"replaceSignature"|"insertBefor
 function actionSearch(p: { query: string; limit?: number; includeSchemas?: boolean }): { actions: object[] }
 
 // === Query ===
-/** Search symbols by name/pattern */
+/** Search symbols (~150; nearMisses) */
 function symbolSearch(p: { query: string; kinds?: string[]; limit?: number; semantic?: boolean }): { results: { symbolId: string; name: string; kind: string; file: string; relevance?: number }[] }
-/** Get symbol card (metadata, deps, metrics) */
+/** Get card (~50; refsMode:"off" expands refs) */
 function symbolGetCard(p: { symbolId: string; ifNoneMatch?: string }): { card: object; etag: string } | { notModified: true }
 /** Symbol-scoped edit with snapshot preconditions */
 function symbolEdit(p: { mode: "preview"; symbolId?: string; symbolRef?: object; operation: SEO; createBackup?: boolean } | { mode: "apply"; planHandle: string; createBackup?: boolean } | { mode: "applyNow"; symbolId: string; expectedAstFingerprint: string; expectedRange: SR; operation: SEO; createBackup?: boolean }): { mode: "preview"|"apply"; planHandle: string; symbolId: string; file: string; writeTarget: "file"|"draft"; validation: object }
-/** Build dependency graph slice */
+/** Build slice (~1500) */
 function sliceBuild(p: { taskText?: string; entrySymbols?: string[]; budget?: { maxCards?: number; maxEstimatedTokens?: number }; wireFormat?: "json"|"standard"|"readable"|"compact"|"agent"|"packed"|"auto" }): { sliceHandle: string; slice?: object }
 /** Refresh existing slice (delta only) */
 function sliceRefresh(p: { sliceHandle: string; knownVersion?: string }): { added: object[]; removed: string[]; changed: object[] }
@@ -120,11 +121,11 @@ function deltaGet(p: { fromVersion?: string; toVersion?: string; includeBlastRad
 function prRiskAnalyze(p: { fromVersion: string; toVersion: string; riskThreshold?: number }): { riskItems: object[]; summary: string }
 
 // === Code (ladder: card -> skeleton -> hotPath -> needWindow) ===
-/** Get skeleton IR (signatures + control flow) */
+/** Skeleton IR (~200) */
 function codeSkeleton(p: { symbolId?: string; file?: string; exportedOnly?: boolean; ifNoneMatch?: string }): { skeleton: string; etag: string } | { notModified: true; etag: string }
-/** Get hot-path excerpt for specific identifiers */
+/** Hot-path excerpt (~500) */
 function codeHotPath(p: { symbolId: string; identifiersToFind: string[]; contextLines?: number; ifNoneMatch?: string }): { excerpt: string; foundIdentifiers: string[]; etag: string } | { notModified: true; etag: string }
-/** Request raw code window (requires justification) */
+/** Raw code window (<=1400; justify) */
 function codeNeedWindow(p: { symbolId: string; reason: string; expectedLines: number; identifiersToFind: string[]; maxTokens?: number; responseMode?: RM; deltaMode?: DM; maxDeltaLines?: number }): object | ResponseHandle
 
 // === Repo ===
@@ -167,7 +168,7 @@ function bufferPush(p: { eventType: "open"|"change"|"save"|"close"|"checkpoint";
 function bufferCheckpoint(): { checkpointed: boolean }
 /** Get buffer status */
 function bufferStatus(): { status: object }
-/** Execute runtime command; stdin for multiline input. Node code runs as ESM: import/createRequire, never require() */
+/** Execute command (~120 digest); digest build/test/lint. Node ESM. */
 function runtimeExecute(p: { runtime: string; executable?: string; args?: string[]; code?: string; stdin?: string; relativeCwd?: string; timeoutMs?: number; queryTerms?: string[]; contextLines?: number; maxResponseLines?: number; persistOutput?: boolean; outputMode?: "minimal"|"summary"|"intent"|"digest" }): { status: string; exitCode: number; durationMs: number; artifactHandle?: string; stdoutSummary?: string; nextAction?: object }
 /** Query stored runtime output by keywords or exact line range */
 function runtimeQueryOutput(p: { artifactHandle: string; queryTerms?: string[]; cursor?: { stream: "stdout"|"stderr"; afterLine: number }; lineRange?: { stream: "stdout"|"stderr"; startLine: number; endLine: number }; maxExcerpts?: number; contextLines?: number; stream?: "stdout"|"stderr"|"both" }): { excerpts: object[]; matchStatus: "matched"|"noMatchFallback"|"lineRange"; matchCount: number; nextCursor?: object }
@@ -175,11 +176,11 @@ function runtimeQueryOutput(p: { artifactHandle: string; queryTerms?: string[]; 
 function responseGet(p: { handle: string; full?: boolean; maxBytes?: number; maxTokens?: number; offsetBytes?: number; jsonPath?: string; raw?: boolean; offset?: number; limit?: number }): { content: unknown; truncated: boolean; metadata: object; pagination?: object }
 
 // === Usage ===
-/** Token savings stats; compact returns formattedSummary, detail:"full" structured */
+/** Token stats; compact has Signal density */
 function usageStats(p: { scope?: "session" | "history" | "lifetime" | "both" | "all"; since?: string; limit?: number; persist?: boolean; detail?: "compact" | "full" }): { formattedSummary: string } | object
 
 // === File ===
-/** Read non-indexed file content (templates, configs, docs) */
+/** Read non-indexed; large untargeted gets hint */
 function fileRead(p: { filePath: string; maxBytes?: number; offset?: number; limit?: number; search?: string; searchContext?: number; jsonPath?: string; responseMode?: RM; deltaMode?: DM; maxDeltaLines?: number }): { content: string; truncated: boolean; sessionDelta?: object; delta?: object } | ResponseHandle
 function fileWrite(p: { filePath: string; content?: string; replaceLines?: { start: number; end: number; content: string }; replacePattern?: { pattern: string; replacement: string; global?: boolean }; jsonPath?: string; jsonValue?: unknown; insertAt?: { line: number; content: string }; append?: string; createBackup?: boolean; createIfMissing?: boolean }): { filePath: string; mode: string; backupPath?: string; replacementCount?: number }
 /** Cross-file search-and-edit: preview plan then apply; identifier/structural/operations[] targeting */

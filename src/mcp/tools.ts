@@ -2428,6 +2428,12 @@ export const AgentContextRequestSchema = z.object({
         .describe(
           "Context card detail: task applies task-conditioned card projection; full returns unprojected cards. Default: task.",
         ),
+      answerFirst: z
+        .boolean()
+        .optional()
+        .describe(
+          "Experimental: for explain/debug tasks, return a compact answer plus evidence handles when summary provenance coverage is sufficient.",
+        ),
     })
     .optional()
     .describe("Task-specific options"),
@@ -2511,6 +2517,10 @@ const AgentContextPayloadSchema = z.object({
     .string()
     .optional()
     .describe("Answer to the task based on collected evidence"),
+  answerFirstFallback: z
+    .literal("insufficient-summary-coverage")
+    .optional()
+    .describe("Why answerFirst fell back to normal card mode"),
   nextBestAction: z
     .string()
     .optional()
@@ -2562,7 +2572,28 @@ const AgentContextPayloadSchema = z.object({
     .optional(),
 });
 
+const AgentContextAnswerFirstResponseSchema = z.object({
+  answer: z.string(),
+  confidence: z.enum(["high", "medium"]),
+  evidence: z
+    .array(
+      z.object({
+        symbolId: z.string(),
+        name: z.string(),
+        file: z.string(),
+        why: z.string(),
+      }),
+    )
+    .max(8),
+  expand: z.object({
+    hint: z.string(),
+  }),
+});
+
 export const AgentContextResponseSchema = z.union([
+  AgentContextAnswerFirstResponseSchema.extend({
+    etag: z.string(),
+  }),
   AgentContextPayloadSchema.extend({
     etag: z.string(),
   }),
@@ -3388,6 +3419,7 @@ export interface FileReadInlineResponse {
   extractedPath?: string;
   sessionDelta?: z.infer<typeof SessionDeltaMetadataSchema>;
   delta?: z.infer<typeof SessionDeltaPayloadSchema>;
+  hint?: string;
   diagnostics?: z.infer<typeof ToolTimingDiagnosticsSchema>;
 }
 

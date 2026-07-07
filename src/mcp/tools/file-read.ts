@@ -51,6 +51,9 @@ export const SDL_SOURCE_EXTENSIONS = new Set([
 
 const MAX_FILE_SIZE_BYTES = 512 * 1024; // 512KB
 const BYTES_PER_TOKEN = 4;
+const LARGE_UNTARGETED_READ_LINE_THRESHOLD = 120;
+const LARGE_UNTARGETED_READ_HINT =
+  "Large untargeted read. Use search+searchContext, offset+limit, or maxTokens to fetch only what you need.";
 
 export function computeFileReadLimit(
   fileSize: number,
@@ -267,6 +270,33 @@ function withRawTokenBaseline(
   });
 }
 
+function hasFileReadTargeting(request: FileReadRequest): boolean {
+  return (
+    request.search !== undefined ||
+    request.offset !== undefined ||
+    request.limit !== undefined ||
+    request.jsonPath !== undefined ||
+    request.maxBytes !== undefined
+  );
+}
+
+function maybeAddLargeReadHint(
+  request: FileReadRequest,
+  response: FileReadInlineResponse,
+): FileReadInlineResponse {
+  if (
+    response.returnedLines <= LARGE_UNTARGETED_READ_LINE_THRESHOLD ||
+    hasFileReadTargeting(request)
+  ) {
+    return response;
+  }
+
+  return {
+    ...response,
+    hint: LARGE_UNTARGETED_READ_HINT,
+  };
+}
+
 async function finalizeFileReadResponse(
   request: FileReadRequest,
   context: ToolContext | undefined,
@@ -274,7 +304,8 @@ async function finalizeFileReadResponse(
   rawBytes: number,
 ): Promise<FileReadResponse> {
   const rawTokens = Math.ceil(rawBytes / BYTES_PER_TOKEN);
-  let enriched = withRawTokenBaseline(response, rawBytes);
+  const responseWithHint = maybeAddLargeReadHint(request, response);
+  let enriched = withRawTokenBaseline(responseWithHint, rawBytes);
 
   if (request.deltaMode === "auto") {
     const deltaResult = maybeBuildSessionDelta({
@@ -313,7 +344,7 @@ async function finalizeFileReadResponse(
     if (deltaResult.metadata.deltaApplied && deltaResult.delta) {
       enriched = withRawTokenBaseline(
         {
-          ...response,
+          ...responseWithHint,
           content: "",
           sessionDelta: deltaResult.metadata,
           delta: deltaResult.delta,

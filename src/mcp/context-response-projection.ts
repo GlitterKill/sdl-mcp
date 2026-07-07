@@ -819,6 +819,7 @@ function projectActionSearchForModel(
       copyIfPresent(action, compact, "action");
       copyIfPresent(action, compact, "fn");
       copyIfPresent(action, compact, "requiredParams");
+      copyIfPresent(action, compact, "estTokens");
       copyIfPresent(action, compact, "disabled");
       copyIfPresent(action, compact, "disabledReason");
       if (isRecord(action.schemaSummary) && Array.isArray(action.schemaSummary.fields)) {

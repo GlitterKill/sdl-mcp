@@ -10,7 +10,7 @@ SDL-MCP is the normal repository interface. Native filesystem and shell tools ar
 
 1. Confirm server and repository state with `repo.status`.
 2. For code context, use the cheapest SDL surface that can answer the question:
-   - Use `sdl.context` for explain, debug, review, implement, understand, or investigate prompts.
+   - Use `sdl.context` for explain, debug, review, implement, understand, or investigate prompts. For explain/debug, try `options.answerFirst: true` before card-heavy context.
    - Use `sdl.retrieve` for one-hop retrieval: `symbolSearch`, `symbolGetCard`, `sliceBuild`, `codeSkeleton`, `codeHotPath`, or a bounded `codeNeedWindow`.
    - Use `sdl.workflow` only when steps need result piping, transforms, runtime execution, batch operations, or mutations.
 3. Never use `file.read` for indexed source. It is only for non-indexed files such as docs, configs, templates, JSON, and YAML.
@@ -25,7 +25,7 @@ Do not run `index.refresh` by habit. Refresh only when `repo.status` shows stale
 
 ## 2. Retrieval Ladder
 
-Use `sdl.context` for task-shaped understanding. Exact tool/action names are seeded from the action catalog, but use `sdl.retrieve` for one-hop retrieval when the task already names a symbol, API, operation, or focused code target. If you need to decide which files or symbols to edit, build a slice through `sdl.retrieve` before requesting code.
+Use `sdl.context` for task-shaped understanding. For explain/debug tasks, start with `options.answerFirst: true` and expand through evidence IDs only when the answer is insufficient. Exact tool/action names are seeded from the action catalog, but use `sdl.retrieve` for one-hop retrieval when the task already names a symbol, API, operation, or focused code target. If you need to decide which files or symbols to edit, build a slice through `sdl.retrieve` before requesting code.
 
 Use `sdl.workflow` only when steps need fields from earlier results, transforms, runtime execution, batch operations, mutations, or result piping.
 
@@ -164,12 +164,37 @@ Use this when you need likely files and symbols before choosing `symbol.edit` or
 
 ---
 
+## Token Economy
+
+Use the cheapest rung that answers the task. Static price tags in `sdl.manual` and `sdl.action.search` are release-time estimates, not live telemetry; use them to choose the first probe, then use `usage.stats` and `signalDensity` only when you need a savings or waste report.
+
+- Runtime: prefer `outputMode: "digest"` for build/test/lint and other noisy commands. The digest keeps a compact parsed status and persists full output for `runtimeQueryOutput`.
+  ```json
+  {
+    "fn": "runtimeExecute",
+    "args": {
+      "runtime": "shell",
+      "code": "npm test -- --runInBand",
+      "outputMode": "digest",
+      "persistOutput": true,
+      "timeoutMs": 120000
+    }
+  }
+  ```
+- Dedupe refs: `{ "ref": { "key": "card:<repo>:<symbol>", "etag": "..." }, "unchanged": true }` means SDL already delivered the content in this session. Do not re-request it; set `refsMode: "off"` only after compaction or lost context to recover full content.
+- Short IDs: packed payloads may introduce `s1`, `s2`, ... aliases with an `@ids=s1:<full-symbol-id>` line. Use `sN` anywhere a symbol ID is accepted; if an alias is unknown, re-run the producing call or use the full ID from the introducing `@ids` line.
+- Search misses: when `symbol.search` returns `nearMisses`, retry with one listed `name` instead of inventing broader queries.
+- Answer first: for explain/debug, call `sdl.context` with `options.answerFirst: true`; expand with `symbol.getCard` or a normal context call on the returned evidence IDs only if needed.
+- Targeted files: if `file.read` returns the large-read hint, retry with `search` plus `searchContext`, `offset` plus `limit`, `jsonPath`, `maxTokens`, or `maxBytes`.
+
+---
+
 ## 3. File And Edit Rules
 
 Use SDL file and edit tools instead of native read/write paths.
 
 - Never use `file.read` for indexed source. It will be denied and wastes a turn. Use `sdl.context`, `sdl.retrieve`, `symbol.getCard`, `slice.build`, `codeSkeleton`, `codeHotPath`, or `codeNeedWindow` instead.
-- Read non-indexed files with `file.read` or `sdl.file` `op: "read"`. Prefer `search`, `jsonPath`, or bounded ranges over full reads.
+- Read non-indexed files with `file.read` or `sdl.file` `op: "read"`. Prefer `search`, `jsonPath`, or bounded ranges over full reads; if SDL returns a large-read hint, retry with a targeted read.
 - Write non-indexed files with `file.write` or `sdl.file` `op: "write"` using exactly one targeted write mode.
 - For one-symbol indexed-source edits, use `symbol.edit` `mode: "preview"` then `mode: "apply"`, or `sdl.file` `symbolEditPreview` followed by `symbolEditApply`. This is the default surgical edit path.
 - Use `symbol.edit` `mode: "applyNow"` only with a fresh `astFingerprint` and range from a current symbol card.
@@ -305,7 +330,8 @@ Use this after `sdl.context` or `slice.build` identifies the affected files or s
 
 Run repo-local commands through `runtimeExecute` inside `sdl.workflow`.
 
-Default to `outputMode: "minimal"`, `persistOutput: true`, and an explicit `timeoutMs`. Use `stdin` for multiline scripts/input instead of PowerShell here-strings, quote-heavy `node -e`, or base64 decode/eval workarounds. Query stored logs only when needed with `runtimeQueryOutput` and focused `queryTerms`. Use `outputMode: "intent"` when the command intent is already tied to known terms such as `FAIL`, `Error`, or a test name; set `contextLines: 0` when exact matched lines are cleaner than surrounding context.
+
+Default to `outputMode: "digest"` for build, test, lint, and other noisy diagnostics; use `outputMode: "minimal"` when exit status is enough. Always set `persistOutput: true` and an explicit `timeoutMs`. Use `stdin` for multiline scripts/input instead of PowerShell here-strings, quote-heavy `node -e`, or base64 decode/eval workarounds. Query stored logs only when needed with `runtimeQueryOutput` and focused `queryTerms`. Use `outputMode: "intent"` when the command intent is already tied to known terms such as `FAIL`, `Error`, or a test name; set `contextLines: 0` when exact matched lines are cleaner than surrounding context.
 
 Do not use runtime execution to print indexed source. Use the retrieval ladder instead.
 
@@ -320,7 +346,7 @@ Do not use runtime execution to print indexed source. Use the retrieval ladder i
       "args": {
         "runtime": "node",
         "args": ["--test", "tests/config.test.ts"],
-        "outputMode": "minimal",
+        "outputMode": "digest",
         "persistOutput": true,
         "timeoutMs": 30000
       }

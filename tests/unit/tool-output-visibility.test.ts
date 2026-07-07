@@ -119,7 +119,7 @@ describe("visible tool output", () => {
     assert.equal(envelope.structuredContent?.etag, undefined);
   });
 
-  it("formats sdl.context as an evidence list without internal noise", () => {
+  it("formats sdl.context as an evidence summary without internal noise", () => {
     const blocks = buildToolResponseContentBlocks(
       {
         taskId: "task-1",
@@ -156,12 +156,7 @@ describe("visible tool output", () => {
         "Sdl context",
         "",
         "taskType: debug",
-        "",
-        "symbol:abc",
-        "summary: function attachDisplayFooter | src/server.ts | fileAlias: Server",
-        "",
-        "hotpath:def",
-        "summary: symbol | Hot path (0 matches, ~42 tokens): code",
+        "finalEvidence: 2 items",
       ].join("\n"),
     );
     assert.doesNotMatch(blocks[0]?.text ?? "", /diagnostics|actionsTaken|taskId|rungs|internal action summary/);

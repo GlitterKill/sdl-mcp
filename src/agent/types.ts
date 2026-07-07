@@ -53,6 +53,8 @@ export interface TaskOptions {
   pprWeight?: number;
   /** "full" bypasses task-conditioned card projection in context responses. */
   cardDetail?: "task" | "full";
+  /** Opt-in compact answer plus evidence for explain/debug context calls. */
+  answerFirst?: boolean;
 }
 
 export interface RungPath {

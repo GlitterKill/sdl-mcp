@@ -388,15 +388,10 @@ function fmtAgentContext(
     lines.push("", `taskType: ${taskType}`);
   }
 
-  for (const item of records(result.finalEvidence)) {
-    const reference = str(item.reference);
-    const summary = str(item.summary);
-    if (!reference && !summary) continue;
-    lines.push("");
-    if (reference) lines.push(reference);
-    if (summary) lines.push(`summary: ${summary}`);
+  const evidenceCount = records(result.finalEvidence).length;
+  if (evidenceCount > 0) {
+    lines.push(`finalEvidence: ${evidenceCount} ${plural(evidenceCount, "item")}`);
   }
-
 
   return lines.join("\n");
 }
@@ -715,6 +710,7 @@ const GENERIC_DISPLAY_SKIP_FIELDS = new Set([
   "diagnostics",
   "etag",
   "etagCache",
+  "formattedSummary",
   "indexUpdate",
   "metrics",
   "path",

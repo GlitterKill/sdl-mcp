@@ -84,6 +84,40 @@ describe("sdl.file.read token usage metadata", () => {
     });
   });
 
+  it("adds a targeted-mode hint to large untargeted reads", async () => {
+    const longPath = join(docsDir, "untargeted.md");
+    const content = Array.from({ length: 200 }, (_, index) =>
+      `line ${index + 1}`,
+    ).join("\n");
+    writeFileSync(longPath, content, "utf-8");
+
+    const response = await handleFileRead({
+      repoId,
+      filePath: "docs/untargeted.md",
+    }) as Record<string, unknown>;
+
+    assert.equal(
+      response.hint,
+      "Large untargeted read. Use search+searchContext, offset+limit, or maxTokens to fetch only what you need.",
+    );
+  });
+
+  it("omits the targeted-mode hint when a targeting arg is provided", async () => {
+    const longPath = join(docsDir, "targeted.md");
+    const content = Array.from({ length: 200 }, (_, index) =>
+      index === 150 ? "needle" : `line ${index + 1}`,
+    ).join("\n");
+    writeFileSync(longPath, content, "utf-8");
+
+    const response = await handleFileRead({
+      repoId,
+      filePath: "docs/targeted.md",
+      search: "needle",
+    }) as Record<string, unknown>;
+
+    assert.equal(response.hint, undefined);
+  });
+
   it("searches the whole file before applying the returned line limit", async () => {
     const longPath = join(docsDir, "long.md");
     const content = Array.from({ length: 40 }, (_, index) =>

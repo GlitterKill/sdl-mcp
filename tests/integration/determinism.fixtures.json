@@ -69,6 +69,14 @@
       }
     },
     {
+      "tool": "sdl.file.read",
+      "args": {
+        "repoId": "{REPO_ID}",
+        "filePath": "SDL.md",
+        "responseMode": "inline"
+      }
+    },
+    {
       "tool": "sdl.policy.get",
       "args": {
         "repoId": "{REPO_ID}"
@@ -163,10 +171,6 @@
     {
       "tool": "sdl.usage.stats",
       "reason": "Session usage telemetry is intentionally stateful."
-    },
-    {
-      "tool": "sdl.file.read",
-      "reason": "File reader is path/content stable, but fixture coverage is deferred until non-indexed read payloads are normalized."
     },
     {
       "tool": "sdl.file.write",

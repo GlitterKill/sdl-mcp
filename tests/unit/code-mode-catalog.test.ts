@@ -74,6 +74,16 @@ describe("code-mode action catalog", () => {
       }
     });
 
+    it("includes static token estimates for high-traffic actions", () => {
+      invalidateCatalog();
+      const catalog = buildCatalog();
+      const search = catalog.find((d) => d.action === "symbol.search");
+      const runtime = catalog.find((d) => d.action === "runtime.execute");
+
+      assert.strictEqual(search?.estTokens, 150);
+      assert.strictEqual(runtime?.estTokens, 120);
+    });
+
     it("includes shared agent-facing metadata for dependency hints and fallbacks", () => {
       invalidateCatalog();
       const catalog = buildCatalog({ includeExamples: true });

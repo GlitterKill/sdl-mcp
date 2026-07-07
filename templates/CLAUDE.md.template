@@ -8,6 +8,13 @@ At the start of every new session in this repository, load and follow the `sdl-m
 
 When the SDL-MCP PID file is present, treat native repo-local shell and file tools as fallback-only. Use SDL runtime for shell actions with `stdin` for multiline input, the Iris ladder for indexed reads, `symbol.edit` for one-symbol indexed writes, `searchEditPreview` with `targeting:"identifier"`/`"structural"` or `operations[]` for cross-file indexed edits, and `file.read`/`file.write` for non-indexed files. Native access is reserved for `.codex/**`, `.claude/**`, and non-repo agent skills, memories, and session internals.
 
+## Token Economy
+
+Prefer `runtimeExecute` `outputMode: "digest"` for build/test/lint; query artifacts only when needed.
+For explain/debug, start `sdl.context` with `options.answerFirst: true`; expand through evidence IDs only if insufficient.
+Treat `{ ref, unchanged: true }` as already-held content; use `refsMode: "off"` only to recover after lost context. Use `sN` aliases from `@ids` anywhere symbol IDs are accepted.
+On search misses, retry from `nearMisses`; if `file.read` warns about a large untargeted read, retry with search, range, or token limits.
+
 SDL-MCP (Symbol Delta Ledger MCP Server) - an MCP server providing cards-first code context for polyglot repositories. Replaces bulk code reads with structured symbol cards, graph slices, delta packs, and gated code windows. Uses LadybugDB (graph DB), tree-sitter (AST parsing), and optional Rust native addon (napi-rs) for performance.
 
 > Optimized tool-use workflow for agents: see [SDL.md](./SDL.md).

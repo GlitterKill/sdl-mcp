@@ -232,6 +232,26 @@ describe("formatToolCallForUser", () => {
     assert.ok(result.includes("health 85/100"));
   });
 
+  // --- context ---
+
+  it("summarizes sdl.context final evidence without replaying summaries", () => {
+    const result = formatToolCallForUser("sdl.context", {}, {
+      taskType: "debug",
+      finalEvidence: [
+        {
+          reference: "src/a.ts:10",
+          summary: "This detailed evidence summary belongs in structured content.",
+        },
+        {
+          reference: "src/b.ts:20",
+          summary: "This second detailed summary also stays out of display text.",
+        },
+      ],
+    });
+
+    assert.strictEqual(result, "Sdl context\n\ntaskType: debug\nfinalEvidence: 2 items");
+  });
+
   // --- workflow ---
 
   it("formats workflow results", () => {
@@ -289,6 +309,16 @@ describe("formatToolCallForUser", () => {
   });
 
   // --- pr.risk.analyze ---
+
+  it("omits formattedSummary from generic fallback output", () => {
+    const result = formatToolCallForUser("sdl.usage.stats", {}, {
+      formattedSummary: "Total savings: 1.2k tokens",
+      aggregate: { estimatedTokensAvoided: 1200 },
+    });
+
+    assert.ok(result !== null);
+    assert.ok(!result.includes("formattedSummary"));
+  });
 
   it("formats pr.risk.analyze", () => {
     const result = formatToolCallForUser("sdl.pr.risk.analyze", {}, {

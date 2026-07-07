@@ -1,9 +1,11 @@
 import { contextEngine } from "../../agent/context-engine.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import type { AgentTask } from "../../agent/types.js";
+import type { SymbolCard } from "../../domain/types.js";
 import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { normalizePath } from "../../util/paths.js";
+import { buildCardForSymbol } from "../../services/card-builder.js";
 import { IndexError, ValidationError } from "../errors.js";
 import { attachRawContext } from "../token-usage.js";
 import {
@@ -21,6 +23,11 @@ import { hashContent } from "../../util/hashing.js";
 import type { ToolContext } from "../../server.js";
 import { sessionContentLedger } from "../session-dedupe.js";
 import { markShortIdsDelivered } from "../wire/packed/short-ids.js";
+import {
+  buildAnswerFirstResponse,
+  INSUFFICIENT_SUMMARY_COVERAGE,
+  type AnswerFirstCard,
+} from "../context-answer-first.js";
 import {
   projectCardForTask,
   projectSymbolCardEvidenceForTask,
@@ -419,6 +426,64 @@ function symbolIdFromEvidenceReference(reference: unknown): string | undefined {
   return reference.startsWith("symbol:") ? reference.slice("symbol:".length) : reference;
 }
 
+function isAnswerFirstRequested(
+  taskType: AgentTask["taskType"],
+  options: unknown,
+): boolean {
+  return (
+    (taskType === "explain" || taskType === "debug") &&
+    isRecord(options) &&
+    options.answerFirst === true
+  );
+}
+
+async function loadAnswerFirstCards(
+  repoId: string,
+  response: Extract<AgentContextResponse, { taskId: string }>,
+): Promise<AnswerFirstCard[]> {
+  const seen = new Set<string>();
+  const cards: AnswerFirstCard[] = [];
+
+  for (const evidence of response.finalEvidence) {
+    if (evidence.type !== "symbolCard") continue;
+    const symbolId = symbolIdFromEvidenceReference(evidence.reference);
+    if (!symbolId || seen.has(symbolId)) continue;
+    seen.add(symbolId);
+
+    try {
+      const result = await buildCardForSymbol(repoId, symbolId, undefined);
+      if ("notModified" in result) continue;
+      cards.push(toAnswerFirstCard(result));
+      if (cards.length >= 10) break;
+    } catch {
+      // Planned-but-unloadable cards stay in the coverage denominator so
+      // load failures reduce provenance coverage and trigger fallback.
+      cards.push({ symbolId, name: "", file: "" });
+      if (cards.length >= 10) break;
+    }
+  }
+
+  return cards;
+}
+
+function toAnswerFirstCard(card: SymbolCard): AnswerFirstCard {
+  const deps: NonNullable<AnswerFirstCard["deps"]> = {};
+  if (card.deps.calls.length > 0) deps.calls = card.deps.calls;
+  if (card.deps.imports.length > 0) deps.imports = card.deps.imports;
+
+  return {
+    symbolId: card.symbolId,
+    name: card.name,
+    file: card.file,
+    kind: card.kind,
+    summary: card.summary,
+    summaryProvenance: card.summaryProvenance,
+    deps: Object.keys(deps).length > 0 ? deps : undefined,
+    sideEffects: card.sideEffects,
+    canonicalTest: card.metrics?.canonicalTest?.file,
+  };
+}
+
 function applyTaskConditionedCardProjection(
   response: Record<string, unknown>,
   taskType: AgentTask["taskType"],
@@ -550,6 +615,61 @@ export async function handleAgentContext(
     );
     const config = loadConfig();
     const enrichedResponse = attachRawContext(response, { rawTokens });
+    if (isAnswerFirstRequested(request.taskType, request.options)) {
+      const answerFirstStartedAt = timer.start();
+      const answerFirst = buildAnswerFirstResponse(
+        request.taskType,
+        await loadAnswerFirstCards(request.repoId, response),
+      );
+      timer.record("context.answerFirst", answerFirstStartedAt);
+
+      if (answerFirst.kind === "active") {
+        const answerFirstPayload = attachRawContext(answerFirst.response, {
+          rawTokens,
+        });
+        const etagStartedAt = timer.start();
+        const conditionalResponse = buildConditionalResponse(answerFirstPayload, {
+          ifNoneMatch: request.ifNoneMatch,
+          stableValue: answerFirst.response,
+        });
+        timer.record("context.etag", etagStartedAt);
+        if (request.ifNoneMatch) {
+          const hit = "notModified" in conditionalResponse;
+          recordTokenSavings({
+            repoId: request.repoId,
+            source: "etag",
+            tool: "sdl.context",
+            estimatedTokensAvoided: hit ? rawTokens : 0,
+            opportunity: true,
+            hit,
+            realized: hit,
+          });
+        }
+        if ("notModified" in conditionalResponse) {
+          return request.includeDiagnostics
+            ? attachTimingDiagnostics(conditionalResponse, timer.snapshot())
+            : conditionalResponse;
+        }
+        const compressionStartedAt = timer.start();
+        const compressedResponse = await maybeCompressToolResponse({
+          repoId: request.repoId,
+          toolName: "sdl.context",
+          payload: conditionalResponse,
+          responseMode: request.responseMode,
+          rawContext: { rawTokens },
+          sessionId: context?.sessionId,
+        });
+        timer.record("context.responseMode", compressionStartedAt);
+        return request.includeDiagnostics
+          ? attachTimingDiagnostics(compressedResponse, timer.snapshot())
+          : compressedResponse;
+      }
+
+      if (answerFirst.kind === "fallback") {
+        (enrichedResponse as Record<string, unknown>).answerFirstFallback =
+          INSUFFICIENT_SUMMARY_COVERAGE;
+      }
+    }
     const cardDetail = isRecord(request.options)
       ? (request.options as Record<string, unknown>).cardDetail
       : undefined;
