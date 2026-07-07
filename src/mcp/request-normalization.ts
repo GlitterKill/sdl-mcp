@@ -89,7 +89,7 @@ export function resolveShortIdAliases(
         mapped[resolveMaybeAlias(id, sessionId)] = etag;
       }
       resolved[key] = mapped;
-    } else if (key === "options" && isRecord(value)) {
+    } else if ((key === "options" || key === "args") && isRecord(value)) {
       resolved[key] = resolveShortIdAliases(value, sessionId);
     }
   }
@@ -107,7 +107,7 @@ function collectReferencedSymbolIds(
       for (const item of value) addReferencedSymbolId(item, referenced);
     } else if (ID_MAP_FIELDS.has(key) && isRecord(value)) {
       for (const id of Object.keys(value)) addReferencedSymbolId(id, referenced);
-    } else if (key === "options" && isRecord(value)) {
+    } else if ((key === "options" || key === "args") && isRecord(value)) {
       collectReferencedSymbolIds(value, referenced);
     }
   }

@@ -6,6 +6,7 @@ import {
   normalizeToolArguments,
 } from "../../dist/mcp/request-normalization.js";
 import { routeGatewayCall } from "../../dist/gateway/router.js";
+import { shortIdRegistry } from "../../dist/mcp/short-id-registry.js";
 
 describe("request normalization", () => {
   it("normalizes snake_case and aliases to camelCase fields", () => {
@@ -84,6 +85,19 @@ describe("request normalization", () => {
       }),
       ["id1", "id2", "id3", "id4", "id5"],
     );
+  });
+
+  it("resolves short-id aliases nested under retrieve-style args", () => {
+    const sessionId = "normalization-args-alias-test";
+    const fullId = "f".repeat(64);
+    const alias = shortIdRegistry.alias(sessionId, fullId);
+
+    const normalized = normalizeToolArguments(
+      { repoId: "repo-1", op: "symbolGetCard", args: { symbolId: alias } },
+      sessionId,
+    ) as { args: { symbolId: string } };
+
+    assert.equal(normalized.args.symbolId, fullId);
   });
 
   it("does not treat generic alias-shaped strings as referenced ids", () => {

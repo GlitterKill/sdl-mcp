@@ -509,6 +509,10 @@ function projectContextResultForModel(
   copyIfPresent(result, projected, "taskType");
   copyIfPresent(result, projected, "success");
   copyIfPresent(result, projected, "answer");
+  copyIfPresent(result, projected, "confidence");
+  copyIfPresent(result, projected, "evidence");
+  copyIfPresent(result, projected, "expand");
+  copyIfPresent(result, projected, "answerFirstFallback");
   if (!("answer" in result)) {
     copyIfPresent(result, projected, "summary");
   }

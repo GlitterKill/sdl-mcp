@@ -310,15 +310,50 @@ function asStructuredContent(
   return structured as Record<string, unknown>;
 }
 
-function extractDeliveredSymbolIdsFromToolResult(
+export function extractDeliveredSymbolIdsFromToolResult(
   result: Record<string, unknown>,
 ): string[] {
   const ids = new Set<string>();
-  addSymbolIdsFromRows(result.results, ids);
+  collectDeliveredSymbolIds(result, ids);
+  return [...ids].sort();
+}
+
+function collectDeliveredSymbolIds(
+  result: Record<string, unknown>,
+  ids: Set<string>,
+): void {
+  if (typeof result.results === "string") {
+    addSymbolIdsFromPackedPayload(result.results, ids);
+  } else {
+    addSymbolIdsFromRows(result.results, ids);
+  }
   addSymbolIdsFromRows(result.cards, ids);
   addSymbolIdFromCard(result.card, ids);
   addSymbolIdsFromEvidence(result.finalEvidence, ids);
-  return [...ids].sort();
+  if (typeof result._packedPayload === "string") {
+    addSymbolIdsFromPackedPayload(result._packedPayload, ids);
+  }
+  // sdl.workflow wraps each step as { fn, result } inside results[].
+  if (Array.isArray(result.results)) {
+    for (const step of result.results) {
+      if (isRecordValue(step) && isRecordValue(step.result)) {
+        collectDeliveredSymbolIds(step.result, ids);
+      }
+    }
+  }
+}
+
+function addSymbolIdsFromPackedPayload(payload: string, ids: Set<string>): void {
+  if (!payload.startsWith("#PACKED/")) return;
+  for (const line of payload.split("\n")) {
+    if (!line.startsWith("@ids=")) continue;
+    for (const entry of line.slice("@ids=".length).split(",")) {
+      const separatorAt = entry.indexOf(":");
+      if (separatorAt <= 0) continue;
+      const fullId = entry.slice(separatorAt + 1);
+      if (fullId.length > 0) ids.add(fullId);
+    }
+  }
 }
 
 function addSymbolIdsFromRows(value: unknown, ids: Set<string>): void {

@@ -1178,6 +1178,61 @@ describe("context-response-projection", () => {
       assert.equal(projected.actions[0].estTokens, 150);
     });
 
+    it("keeps answer-first fields in compact context model content", () => {
+      const projected = projectToolResultForModelContent(
+        "sdl.context",
+        {
+          answer: "composed answer",
+          confidence: "medium",
+          evidence: [
+            {
+              symbolId: "sym-1",
+              name: "target",
+              file: "src/a.ts",
+              why: "entry symbol",
+            },
+          ],
+          expand: {
+            hint: "call sdl.context without answerFirst, or symbol.getCard on evidence ids",
+          },
+          etag: "etag-1",
+        },
+        {},
+      ) as Record<string, unknown>;
+
+      assert.equal(projected.answer, "composed answer");
+      assert.equal(projected.confidence, "medium");
+      assert.deepEqual(projected.evidence, [
+        {
+          symbolId: "sym-1",
+          name: "target",
+          file: "src/a.ts",
+          why: "entry symbol",
+        },
+      ]);
+      assert.deepEqual(projected.expand, {
+        hint: "call sdl.context without answerFirst, or symbol.getCard on evidence ids",
+      });
+    });
+
+    it("keeps the answer-first fallback marker in compact context model content", () => {
+      const projected = projectToolResultForModelContent(
+        "sdl.context",
+        {
+          taskType: "explain",
+          success: true,
+          finalEvidence: [],
+          answerFirstFallback: "insufficient-summary-coverage",
+        },
+        {},
+      ) as Record<string, unknown>;
+
+      assert.equal(
+        projected.answerFirstFallback,
+        "insufficient-summary-coverage",
+      );
+    });
+
     it("continues to hide trace-like internal fields from other tools", () => {
       const projected = projectToolResultForModelContent(
         "sdl.context",
