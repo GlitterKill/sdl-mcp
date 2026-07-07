@@ -9,6 +9,7 @@ pub mod cluster;
 pub mod error;
 pub mod extract;
 pub mod lang;
+pub mod layout;
 pub mod pagerank;
 pub mod parse;
 pub mod process;
@@ -169,6 +170,11 @@ pub fn compute_clusters(
 
     assignments.sort_by(|a, b| a.symbol_id.cmp(&b.symbol_id));
     assignments
+}
+
+#[napi]
+pub fn compute_layout(input_json: String, seed: u32, iterations: u32) -> napi::Result<String> {
+    layout::compute_layout_json(&input_json, seed, iterations)
 }
 
 #[napi]

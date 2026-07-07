@@ -282,6 +282,7 @@ export declare function parseFilesAsync(files: Array<NativeFileInput>, threadCou
 export declare function hashContentNative(content: string): string
 export declare function generateSymbolIdNative(repoId: string, relPath: string, kind: string, name: string, fingerprint: string): string
 export declare function computeClusters(symbols: Array<NativeClusterSymbol>, edges: Array<NativeClusterEdge>, minClusterSize: number): Array<NativeClusterAssignment>
+export declare function computeLayout(inputJson: string, seed: number, iterations: number): string
 export declare function computePersonalizedPagerank(adjacency: Array<Array<NativePprAdjEntry>>, seeds: Array<NativePprSeed>, alpha: number, epsilon: number, maxNodesTouched: number): Array<NativePprScore>
 export declare function traceProcesses(symbols: Array<NativeProcessSymbol>, callEdges: Array<NativeProcessCallEdge>, maxDepth: number, entryPatterns: Array<string>): Array<NativeProcess>
 export declare function scipDecodeStart(filePath: string): ScipDecodeHandle
