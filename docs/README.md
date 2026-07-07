@@ -121,6 +121,6 @@ Use this page as the entry point for SDL-MCP documentation.
   - Gateway routing covers most flat actions; `sdl.file.write` is outside the gateway namespace schemas but remains available in flat mode and through Code Mode `sdl.file`. Exact counts live in the generated tool inventory.
   - `sdl-mcp tool` exposes direct CLI action aliases plus only the `action.search` and `manual` metadata proxies; `sdl.context`, `sdl.retrieve`, `sdl.workflow`, and `sdl.file` remain MCP-only wrappers
 - **Semantic features**: hybrid FTS + vector retrieval with 2 supported local ONNX embedding models (Jina Code for Symbols, Nomic for FileSummary), plus optional LLM-generated symbol summaries (Anthropic/Ollama/mock)
-- **HTTP surface**: `/api/graph/*` endpoints and browser explorer at `/ui/graph` when serving over HTTP
+- **HTTP surface**: `/api/graph/*` endpoints and 3D graph viewer at `/ui/viewer` when serving over HTTP
 - **Native addon**: Rust via napi-rs for multi-threaded indexing (default engine, TS fallback)
 - **Runtime execution**: 17 supported runtimes (node, typescript, python, shell, powershell, ruby, php, perl, r, elixir, go, java, kotlin, rust, c, cpp, csharp)

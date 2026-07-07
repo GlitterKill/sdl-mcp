@@ -356,6 +356,16 @@ Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "sym
 
 ---
 
+### SDL Galaxy Graph Viewer
+
+Built-in 3D graph viewer at `/ui/viewer` for cluster-level galaxy navigation, symbol-level LOD expansion, graph activity overlays, search/community/impact/edge lenses, skin packs, and idle ambient mode. The previous `/ui/graph` explorer redirects to `/ui/viewer`; legacy graph REST endpoints remain available for scripts.
+
+[Graph Viewer Deep Dive →](./docs/feature-deep-dives/graph-viewer.md)
+
+---
+
+<br/>
+
 ### Observability Dashboard
 
 Built-in read-only dashboard surfaces every metric needed to diagnose SDL-MCP behaviour without parsing stderr logs. GlitterKill dark UI at `/ui/observability` on the HTTP transport or the loopback-only `sdl-mcp serve --stdio --dashboard-port <port>` sidecar, plus REST + SSE APIs (`/api/observability/snapshot`, `/timeseries`, `/beam-explain`, `/stream`) for programmatic access. Surfaces cache hit rates, predictive-context outcome learning, hybrid-retrieval breakdowns (FTS / vector / PPR / RRF), beam-search decision traces, indexing pipeline metrics, write-pool and drain saturation, packed-wire token efficiency, and runtime CPU/memory/event-loop probes. See [Observability Dashboard Deep Dive](./docs/feature-deep-dives/observability-dashboard.md).

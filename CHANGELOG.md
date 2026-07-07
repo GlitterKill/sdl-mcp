@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **SDL Galaxy graph viewer**: first-class 3D code-graph viewer served by the HTTP transport at `/ui/viewer` (three.js, no bundler, no CDN; vendored assets under `/ui/vendor/`). Includes universe/cluster/symbol LOD, live activity overlay over the observability SSE stream (`/api/observability/stream?types=graph`), search/impact/community/edge lenses, inspector panel, declarative skin packs (zips in `<configDir>/skins`, served raw and unpacked client-side with hard caps), and ambient mode with idle-drift and FPS caps.
+- **Read-only viewer REST facade** under `/api/graph/*` (bearer-gated): universe, clusters, layout (`lod=cluster|symbol`), edges, search, symbol card, impact (delta + blast radius), skins listing/serving, and recent graph events. Also available on the `--dashboard-port` loopback surface.
+- **Deterministic 3D layout engine** in TypeScript and Rust with byte-identical parity (`npm run test:layout-parity`), seeded PRNG (mulberry32/fnv1a32), cached artifacts under `<configDir>/viewer-layout-cache`, and incremental warm-start re-layout.
+- **`viewer.*` config block**: `enabled`, `skinsDir`, `fps`, `ambient.*`, `layout.*` (engine auto/typescript/rust, iterations, cacheDir, maxSymbolsPerClusterExpand), `skins.*` caps.
+- New dependencies `three` + `fflate` (exact-pinned, vendored at build time) and npm scripts `build:ui`, `typecheck:ui`, `test:layout-parity`, `check:skin-template-sync`.
+
+### Changed
+
+- **Breaking (UI)**: the legacy SDL Graph Explorer at `/ui/graph` was removed; `/ui/graph` now issues a 308 redirect to `/ui/viewer`. Legacy `/api/graph/{repoId}/slice|neighborhood|blast-radius` endpoints remain (deprecated, now served from `src/viewer/legacy-graph.ts`).
 ## [0.12.2] - 2026-07-07
 
 ### Added

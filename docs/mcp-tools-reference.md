@@ -1423,10 +1423,17 @@ Use tools in this order for most tasks:
 
 When serving with `sdl-mcp serve --http`, these non-MCP endpoints are available for graph/IDE integrations:
 
-- `/ui/graph`
-- `/api/graph/:repoId/slice/:handle`
-- `/api/graph/:repoId/symbol/:symbolId/neighborhood`
-- `/api/graph/:repoId/blast-radius/:fromVersion/:toVersion`
+- `/ui/viewer` (SDL Galaxy; `/ui/graph` redirects here)
+- `/api/graph/universe`
+- `/api/graph/repo/:repoId/clusters`
+- `/api/graph/repo/:repoId/layout`
+- `/api/graph/repo/:repoId/edges`
+- `/api/graph/repo/:repoId/search`
+- `/api/graph/repo/:repoId/symbol/:symbolId/card`
+- `/api/graph/repo/:repoId/impact`
+- `/api/graph/events/recent`
+- `/api/graph/skins` and `/api/graph/skins/:id`
+- Deprecated legacy graph endpoints: `/api/graph/:repoId/slice/:handle`, `/api/graph/:repoId/symbol/:symbolId/neighborhood`, `/api/graph/:repoId/blast-radius/:fromVersion/:toVersion`
 - `/api/symbol/:repoId/search`
 - `/api/symbol/:repoId/card/:symbolId`
 - `/api/repo/:repoId/status`

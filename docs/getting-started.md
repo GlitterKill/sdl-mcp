@@ -188,7 +188,7 @@ Use HTTP when multiple agents need to share the same SDL-MCP server or when you 
 sdl-mcp serve --http --port 3000
 ```
 
-The HTTP server exposes `/mcp`, `/health`, `/ui/graph`, `/ui/observability`, and `/api/*`. On startup, it prints a bearer token for authenticated requests unless auth is disabled in config. See [Config Examples](./config-examples.md#http-transport-configs) for client snippets and [Observability Dashboard](./feature-deep-dives/observability-dashboard.md) for dashboard details.
+The HTTP server exposes `/mcp`, `/health`, `/ui/viewer`, `/ui/observability`, and `/api/*`. On startup, it prints a bearer token for authenticated requests unless auth is disabled in config. See [Config Examples](./config-examples.md#http-transport-configs) for client snippets and [Observability Dashboard](./feature-deep-dives/observability-dashboard.md) for dashboard details and [Graph Viewer](./feature-deep-dives/graph-viewer.md) for SDL Galaxy.
 
 ## Next Steps
 
