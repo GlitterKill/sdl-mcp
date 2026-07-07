@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SDL Galaxy</title>
+    <link rel="stylesheet" href="/ui/observability.css" />
+    <link rel="stylesheet" href="/ui/viewer/viewer.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/ui/vendor/three.module.min.js",
+          "three/addons/": "/ui/vendor/jsm/",
+          "fflate": "/ui/vendor/fflate.js"
+        }
+      }
+    </script>
+  </head>
+  <body class="viewer-body">
+    <header id="viewerChrome" class="viewer-chrome"></header>
+    <main class="viewer-shell">
+      <section id="viewerCanvas" class="viewer-canvas" aria-label="SDL Galaxy graph canvas"></section>
+      <aside id="viewerInspector" class="panel viewer-inspector" aria-label="Inspector"></aside>
+      <section class="panel viewer-results" aria-label="Search and lens results">
+        <header class="panel-head"><h2>RESULTS</h2><span class="panel-sub">live</span></header>
+        <div id="viewerResults" class="result-list"></div>
+      </section>
+    </main>
+    <div id="viewerCaption" class="viewer-caption" role="status" aria-live="polite"></div>
+    <script type="module" src="/ui/viewer/main.js"></script>
+  </body>
+</html>

@@ -2,7 +2,11 @@
   "compilerOptions": {
     "target": "ES2024",
     "module": "NodeNext",
-    "lib": ["ES2024"],
+    "lib": [
+      "ES2024",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "moduleResolution": "NodeNext",
     "outDir": "./dist",
     "rootDir": "./src",
@@ -32,8 +36,16 @@
     "allowSyntheticDefaultImports": true,
     "allowImportingTsExtensions": false,
     "allowJs": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts"
+  ]
 }

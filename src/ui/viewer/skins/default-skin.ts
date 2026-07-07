@@ -1,0 +1,17 @@
+import type { SkinManifest } from "./manifest-schema.js";
+
+export const DEFAULT_SKIN: SkinManifest = {
+  schemaVersion: 1,
+  name: "Default",
+  version: "1.0.0",
+  author: "sdl-mcp",
+  colors: {
+    "--viewer-bg": "#030712",
+    "--star-call": "#7fd0ff",
+    "--star-import": "#9aa4b2",
+  },
+  background: { starfield: true },
+  nodes: { cluster: { color: "#1f6feb" } },
+  edges: { byKind: { call: { color: "#7fd0ff", style: "solid" }, import: { color: "#9aa4b2", style: "dashed" } } },
+  effects: { pulse: { preset: "ripple", speedMs: 1800, color: "#ffd27f" }, select: { preset: "halo", color: "#ffffff" }, ambientShimmer: { preset: "twinkle", intensity: 0.15 } },
+};

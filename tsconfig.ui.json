@@ -1,0 +1,44 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "outDir": "dist/ui/viewer",
+    "rootDir": "src/ui/viewer",
+    "noEmit": false,
+    "emitDeclarationOnly": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "types": [],
+    "paths": {
+      "three": [
+        "./node_modules/@types/three"
+      ],
+      "three/addons/*": [
+        "./node_modules/@types/three/examples/jsm/*",
+        "./node_modules/three/examples/jsm/*"
+      ],
+      "fflate": [
+        "./node_modules/fflate/lib/index.d.ts"
+      ]
+    },
+    "incremental": true,
+    "tsBuildInfoFile": "./dist/ui/.tsbuildinfo"
+  },
+  "include": [
+    "src/ui/viewer/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts"
+  ]
+}
