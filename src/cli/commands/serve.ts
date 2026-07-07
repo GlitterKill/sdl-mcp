@@ -1,5 +1,6 @@
 import { ServeOptions } from "../types.js";
 import { loadConfig } from "../../config/loadConfig.js";
+import { setViewerRuntimeConfig } from "../../viewer/viewer-config.js";
 import { resolveSemanticEmbeddingModelPlan } from "../../config/semantic-embedding-model-plan.js";
 import { MCPServer, createMCPServer } from "../../server.js";
 import { watchRepository, IndexWatchHandle } from "../../indexer/indexer.js";
@@ -175,6 +176,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
         : "auto-discovery";
   writeServeStderrLine(`[sdl-mcp] Config: ${configPath} (${configSource})`);
   const config = loadConfig(configPath);
+  setViewerRuntimeConfig(config.viewer, configPath);
 
   configureLogger(options.logLevel ?? "info", options.logFormat ?? "pretty");
 

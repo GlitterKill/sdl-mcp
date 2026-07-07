@@ -1,7 +1,7 @@
-import { createReadStream, existsSync, statSync } from "fs";
+﻿import { createReadStream, existsSync, statSync } from "fs";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
-import { join } from "path";
+import { extname, isAbsolute, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -20,8 +20,6 @@ import {
 } from "../../server.js";
 import { logger } from "../../util/logger.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
-import { computeDelta } from "../../delta/diff.js";
-import { runGovernorLoop } from "../../delta/blastRadius.js";
 import { getLadybugConn } from "../../db/ladybug.js";
 import { indexRepo, type IndexProgress } from "../../indexer/indexer.js";
 import {
@@ -38,6 +36,8 @@ import {
 } from "../../mcp/tools/symbol.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 import { routeConfigAdminApiRequest } from "../../config/admin-api.js";
+import { handleViewerApiRequest } from "../../viewer/routes.js";
+import { buildBlastRadiusGraph, buildGraphForSliceHandle, buildNeighborhood } from "../../viewer/legacy-graph.js";
 import type { LiveIndexCoordinator } from "../../live-index/types.js";
 import { SessionManager } from "../../mcp/session-manager.js";
 import { createRuntimeIdentity } from "../../util/runtime-identity.js";
@@ -47,34 +47,15 @@ import type {
   ObservabilitySnapshot,
   TimeseriesWindow,
 } from "../../observability/index.js";
-import type { Connection } from "kuzu";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const UI_DIR_CANDIDATE = join(__dirname, "..", "..", "ui");
-// Ensure graph.html actually exists in the candidate — the compiled dist/ui
-// folder may contain only .js/.d.ts output from src/ui/graph.ts without the
-// html/css assets, in which case we must fall back to src/ui.
-const UI_DIR = existsSync(join(UI_DIR_CANDIDATE, "graph.html"))
+// Ensure observability.html actually exists in the candidate. The compiled
+// dist/ui folder may be missing copied html/css assets, in which case we must
+// fall back to src/ui.
+const UI_DIR = existsSync(join(UI_DIR_CANDIDATE, "observability.html"))
   ? UI_DIR_CANDIDATE
   : join(__dirname, "..", "..", "..", "src", "ui");
-
-type GraphNode = {
-  id: string;
-  label: string;
-  kind: string;
-  file?: string;
-  fanIn?: number;
-  fanOut?: number;
-  size?: number;
-  cluster?: string;
-};
-
-type GraphLink = {
-  source: string;
-  target: string;
-  type: string;
-  weight: number;
-};
 
 export type HttpApiRequest = {
   method?: string;
@@ -155,6 +136,7 @@ const OBSERVABILITY_UI_PATHS = new Set([
   "/ui/observability",
   "/ui/observability.js",
   "/ui/observability.css",
+  "/ui/viewer",
 ]);
 
 const LOCALHOST_ORIGIN_RE =
@@ -392,7 +374,7 @@ class InMemoryEventStore implements EventStore {
   ): Promise<StreamId> {
     const entry = this.events.get(lastEventId);
     if (!entry) {
-      // Event was evicted by FIFO — return an empty replay rather than
+      // Event was evicted by FIFO â€” return an empty replay rather than
       // throwing, which would crash the SDK's resumability path (M4).
       return "" as StreamId;
     }
@@ -587,240 +569,54 @@ export async function routeSymbolCardApiRequest(
 }
 
 // ---------------------------------------------------------------------------
-// Graph visualization helpers
-// ---------------------------------------------------------------------------
-
-function toClusterPath(filePath: string): string {
-  const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
-  if (slash === -1) {
-    return "root";
-  }
-  return filePath.slice(0, slash) || "root";
-}
-
-async function buildNodes(
-  conn: Connection,
-  symbolIds: string[],
-): Promise<GraphNode[]> {
-  const symbolMap = await ladybugDb.getSymbolsByIds(conn, symbolIds);
-  const metricsMap = await ladybugDb.getMetricsBySymbolIds(conn, symbolIds);
-
-  const fileIds = new Set<string>();
-  for (const symbol of symbolMap.values()) {
-    fileIds.add(symbol.fileId);
-  }
-  const fileMap = await ladybugDb.getFilesByIds(conn, Array.from(fileIds));
-
-  const nodes: GraphNode[] = [];
-  for (const symbolId of symbolIds) {
-    const symbol = symbolMap.get(symbolId);
-    if (!symbol) continue;
-    const file = fileMap.get(symbol.fileId);
-    const metrics = metricsMap.get(symbolId);
-
-    nodes.push({
-      id: symbolId,
-      label: symbol.name,
-      kind: symbol.kind,
-      file: file?.relPath,
-      fanIn: metrics?.fanIn,
-      fanOut: metrics?.fanOut,
-      size: Math.max(5, Math.min(40, (metrics?.fanIn ?? 0) + 6)),
-      cluster: toClusterPath(file?.relPath ?? ""),
-    });
-  }
-
-  return nodes;
-}
-
-async function buildLinksForNodes(
-  conn: Connection,
-  ids: Set<string>,
-): Promise<GraphLink[]> {
-  const idList = Array.from(ids);
-  const edgeMap = await ladybugDb.getEdgesFromSymbolsForSlice(conn, idList);
-
-  const links: GraphLink[] = [];
-  for (const fromSymbolId of idList) {
-    const edges = edgeMap.get(fromSymbolId) ?? [];
-    for (const edge of edges) {
-      if (!ids.has(edge.toSymbolId)) continue;
-      links.push({
-        source: fromSymbolId,
-        target: edge.toSymbolId,
-        type: edge.edgeType,
-        weight: edge.weight,
-      });
-    }
-  }
-  return links;
-}
-
-function collapseClusters(
-  nodes: GraphNode[],
-  maxChildrenPerCluster = 10,
-): GraphNode[] {
-  const byCluster = new Map<string, GraphNode[]>();
-  for (const node of nodes) {
-    const key = node.cluster ?? "root";
-    const list = byCluster.get(key) ?? [];
-    list.push(node);
-    byCluster.set(key, list);
-  }
-
-  const collapsed: GraphNode[] = [];
-  for (const [cluster, list] of byCluster) {
-    if (list.length <= maxChildrenPerCluster) {
-      collapsed.push(...list);
-      continue;
-    }
-    const sorted = [...list].sort((a, b) => (b.fanIn ?? 0) - (a.fanIn ?? 0));
-    collapsed.push(...sorted.slice(0, maxChildrenPerCluster));
-    collapsed.push({
-      id: `cluster:${cluster}`,
-      label: `${cluster} (+${list.length - maxChildrenPerCluster})`,
-      kind: "module",
-      cluster,
-      size: 10,
-    });
-  }
-
-  return collapsed;
-}
-
-async function buildNeighborhood(
-  conn: Connection,
-  symbolId: string,
-  maxNodes: number,
-): Promise<{
-  nodes: GraphNode[];
-  links: GraphLink[];
-}> {
-  const ids = new Set<string>();
-  ids.add(symbolId);
-
-  for (const edge of await ladybugDb.getEdgesFrom(conn, symbolId)) {
-    ids.add(edge.toSymbolId);
-  }
-  const edgesTo = await ladybugDb.getEdgesToSymbols(conn, [symbolId]);
-  for (const edge of edgesTo.get(symbolId) ?? []) {
-    ids.add(edge.fromSymbolId);
-  }
-
-  const limited = new Set(Array.from(ids).slice(0, maxNodes));
-  const nodes = await buildNodes(conn, Array.from(limited));
-  const links = await buildLinksForNodes(conn, limited);
-
-  return {
-    nodes: collapseClusters(nodes),
-    links,
-  };
-}
-
-async function buildRepoPreview(
-  conn: Connection,
-  repoId: string,
-  maxNodes: number,
-): Promise<{
-  nodes: GraphNode[];
-  links: GraphLink[];
-}> {
-  const top = await ladybugDb.getTopSymbolsByFanIn(conn, repoId, maxNodes);
-  const symbolIds = top.map((row) => row.symbolId);
-  const ids = new Set(symbolIds);
-  const nodes = await buildNodes(conn, symbolIds);
-  const links = await buildLinksForNodes(conn, ids);
-
-  return {
-    nodes: collapseClusters(nodes),
-    links,
-  };
-}
-
-export async function buildGraphForSliceHandle(
-  conn: Connection,
-  repoId: string,
-  handle: string,
-  maxNodes: number,
-  deps: {
-    getSliceHandle?: typeof ladybugDb.getSliceHandle;
-    buildRepoPreview?: typeof buildRepoPreview;
-    buildBlastRadiusGraph?: typeof buildBlastRadiusGraph;
-  } = {},
-): Promise<{
-  nodes: GraphNode[];
-  links: GraphLink[];
-} | null> {
-  const getSliceHandleFn = deps.getSliceHandle ?? ladybugDb.getSliceHandle;
-  const buildRepoPreviewFn = deps.buildRepoPreview ?? buildRepoPreview;
-  const buildBlastRadiusGraphFn =
-    deps.buildBlastRadiusGraph ?? buildBlastRadiusGraph;
-
-  const handleRow = await getSliceHandleFn(conn, handle);
-  if (!handleRow || handleRow.repoId !== repoId) {
-    return null;
-  }
-
-  if (handleRow.minVersion && handleRow.maxVersion) {
-    return buildBlastRadiusGraphFn(
-      conn,
-      repoId,
-      handleRow.minVersion,
-      handleRow.maxVersion,
-      maxNodes,
-    );
-  }
-
-  return buildRepoPreviewFn(conn, repoId, maxNodes);
-}
-
-async function buildBlastRadiusGraph(
-  conn: Connection,
-  repoId: string,
-  fromVersion: string,
-  toVersion: string,
-  maxNodes: number,
-): Promise<{ nodes: GraphNode[]; links: GraphLink[] }> {
-  const delta = await computeDelta(repoId, fromVersion, toVersion);
-  const changedSymbolIds = delta.changedSymbols.map(
-    (change) => change.symbolId,
-  );
-  const governor = await runGovernorLoop(conn, changedSymbolIds, {
-    repoId,
-    budget: { maxCards: maxNodes, maxEstimatedTokens: 4000 },
-    runDiagnostics: false,
-  });
-
-  const ids = new Set<string>();
-  for (const changed of delta.changedSymbols) {
-    ids.add(changed.symbolId);
-  }
-  for (const affected of governor.blastRadius) {
-    ids.add(affected.symbolId);
-  }
-
-  const limited = new Set(Array.from(ids).slice(0, maxNodes));
-  const nodes = await buildNodes(conn, Array.from(limited));
-  const links = await buildLinksForNodes(conn, limited);
-
-  return {
-    nodes: collapseClusters(nodes),
-    links,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Static UI assets
 // ---------------------------------------------------------------------------
 
+type UiAsset = { file: string; type: string };
+
+function contentTypeForUiPath(filePath: string): string | null {
+  switch (extname(filePath)) {
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".js":
+      return "application/javascript; charset=utf-8";
+    default:
+      return null;
+  }
+}
+
+function getPrefixUiAsset(pathname: string): UiAsset | null {
+  if (!pathname.startsWith("/ui/viewer/") && !pathname.startsWith("/ui/vendor/")) {
+    return null;
+  }
+
+  const file = pathname.slice("/ui/".length);
+  const type = contentTypeForUiPath(file);
+  return type ? { file, type } : null;
+}
+
+function resolveUiAssetPath(file: string): string | null {
+  const rootDir = resolve(UI_DIR);
+  const fullPath = resolve(rootDir, file);
+  const relativePath = relative(rootDir, fullPath);
+  if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
+    return null;
+  }
+  return fullPath;
+}
+
 function serveUiAsset(pathname: string, res: ServerResponse): boolean {
-  const map: Record<string, { file: string; type: string }> = {
-    "/ui/graph": { file: "graph.html", type: "text/html; charset=utf-8" },
-    "/ui/graph.js": {
-      file: "graph.js",
-      type: "application/javascript; charset=utf-8",
-    },
-    "/ui/graph.css": { file: "graph.css", type: "text/css; charset=utf-8" },
+  if (pathname === "/ui/graph" || pathname === "/ui/graph.html") {
+    res.writeHead(308, { Location: "/ui/viewer" });
+    res.end();
+    return true;
+  }
+
+  const map: Record<string, UiAsset> = {
+    "/ui/viewer": { file: "viewer/index.html", type: "text/html; charset=utf-8" },
+    "/ui/viewer/index.html": { file: "viewer/index.html", type: "text/html; charset=utf-8" },
     "/ui/observability": {
       file: "observability.html",
       type: "text/html; charset=utf-8",
@@ -845,12 +641,16 @@ function serveUiAsset(pathname: string, res: ServerResponse): boolean {
     "/ui/config.css": { file: "config.css", type: "text/css; charset=utf-8" },
   };
 
-  const asset = map[pathname];
+  const asset = map[pathname] ?? getPrefixUiAsset(pathname);
   if (!asset) {
     return false;
   }
 
-  const fullPath = join(UI_DIR, asset.file);
+  const fullPath = resolveUiAssetPath(asset.file);
+  if (!fullPath) {
+    json(res, 404, { error: "UI asset not found" });
+    return true;
+  }
   try {
     if (!statSync(fullPath).isFile()) {
       json(res, 500, { error: "Failed to read UI asset" });
@@ -901,7 +701,13 @@ function serveObservabilityUiAsset(
   pathname: string,
   res: ServerResponse,
 ): boolean {
-  if (!OBSERVABILITY_UI_PATHS.has(pathname)) return false;
+  if (
+    !OBSERVABILITY_UI_PATHS.has(pathname) &&
+    !pathname.startsWith("/ui/viewer/") &&
+    !pathname.startsWith("/ui/vendor/")
+  ) {
+    return false;
+  }
   return serveUiAsset(pathname, res);
 }
 
@@ -1017,6 +823,83 @@ async function routeObservabilityApiRequest(
   ) {
     if (!observabilityService) {
       json(res, 503, { error: "observability_disabled" });
+      return true;
+    }
+    if ((url.searchParams.get("types") ?? "").trim() === "graph") {
+      setCorsHeaders(req, res);
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+
+      let closed = false;
+      let unsubscribe: (() => void) | null = null;
+      let heartbeatTimer: NodeJS.Timeout | null = null;
+      let maxStreamTimer: NodeJS.Timeout | null = null;
+      const sendGraphEvent = (data: unknown): boolean => {
+        if (closed || res.destroyed) return false;
+        try {
+          const ok = res.write(`event: graph\ndata: ${JSON.stringify(data)}\n\n`);
+          return ok && res.writableLength <= 1_048_576;
+        } catch (err) {
+          logger.warn("Graph SSE write failed", { error: err });
+          return false;
+        }
+      };
+      const cleanupGraph = (): void => {
+        if (closed) return;
+        closed = true;
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+        if (maxStreamTimer) {
+          clearTimeout(maxStreamTimer);
+          maxStreamTimer = null;
+        }
+        if (unsubscribe) {
+          unsubscribe();
+          unsubscribe = null;
+        }
+      };
+      const endGraphStream = (): void => {
+        cleanupGraph();
+        try {
+          res.end();
+        } catch {
+          /* best-effort */
+        }
+      };
+      req.on("close", cleanupGraph);
+      for (const event of observabilityService.getRecentGraphEvents(200)) {
+        if (!sendGraphEvent(event)) {
+          endGraphStream();
+          return true;
+        }
+      }
+      unsubscribe = observabilityService.onGraphEvent((event) => {
+        if (!sendGraphEvent(event)) {
+          endGraphStream();
+        }
+      });
+      heartbeatTimer = setInterval(() => {
+        if (closed || res.destroyed) {
+          cleanupGraph();
+          return;
+        }
+        try {
+          res.write(": heartbeat\n\n");
+        } catch {
+          endGraphStream();
+        }
+      }, sseHeartbeatMs);
+      heartbeatTimer.unref();
+      maxStreamTimer = setTimeout(() => {
+        endGraphStream();
+      }, sseMaxStreamMs);
+      maxStreamTimer.unref();
       return true;
     }
     const repoId = (url.searchParams.get("repoId") ?? "").trim();
@@ -1162,6 +1045,18 @@ export async function handleObservabilityDashboardRequest(
   }
 
   try {
+    if (
+      pathname.startsWith("/api/graph/") &&
+      (await handleViewerApiRequest(
+        req,
+        res,
+        pathname,
+        url,
+        services.observabilityService ?? null,
+      ))
+    ) {
+      return true;
+    }
     return await routeObservabilityApiRequest(req, res, url, services);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1259,9 +1154,13 @@ async function handleRestRequest(
     }
   }
 
-  // DB-dependent REST API routes — wrapped in try/catch for structured errors.
+  // DB-dependent REST API routes â€” wrapped in try/catch for structured errors.
   // Connection is acquired lazily per-route to avoid unnecessary pool checkouts.
   try {
+    if (await handleViewerApiRequest(req, res, pathname, url, services.observabilityService)) {
+      return true;
+    }
+
     const graphSliceMatch = pathname.match(
       /^\/api\/graph\/([^/]+)\/slice\/([^/]+)$/,
     );
@@ -1422,7 +1321,7 @@ async function handleRestRequest(
       return true;
     }
 
-    // SSE streaming reindex endpoint — streams progress events, then a
+    // SSE streaming reindex endpoint â€” streams progress events, then a
     // final "complete" or "error" event. Used by `sdl-mcp index` when it
     // detects a running HTTP server and delegates indexing.
     const reindexStreamMatch = pathname.match(
@@ -1443,7 +1342,7 @@ async function handleRestRequest(
           }
         }
       } catch {
-        // Empty or invalid body — use default mode
+        // Empty or invalid body â€” use default mode
       }
 
       // Set up SSE response
@@ -1680,7 +1579,7 @@ async function handleMcpStreamableRequest(
           if (registeredSessionId) {
             ctx.cleanupSession(registeredSessionId);
           } else {
-            // MCPServer was created but never connected — stop it directly
+            // MCPServer was created but never connected â€” stop it directly
             void mcpServer.stop().catch((err) => {
               logger.debug("Failed to stop unconnected MCP server", {
                 error: err,
@@ -1747,7 +1646,7 @@ async function handleMcpStreamableRequest(
 }
 
 /**
- * Handle `GET /sse` — establishes a new SSE (deprecated) transport session.
+ * Handle `GET /sse` â€” establishes a new SSE (deprecated) transport session.
  * Validates the `Accept: text/event-stream` header, reserves a session slot,
  * creates the SSEServerTransport, and connects a new per-session MCP server.
  */
@@ -1819,7 +1718,7 @@ async function handleSseConnection(
 }
 
 /**
- * Handle `POST /message` — routes an incoming MCP message to an existing SSE
+ * Handle `POST /message` â€” routes an incoming MCP message to an existing SSE
  * (deprecated) session identified by the `sessionId` query parameter.
  */
 function handleSseMessage(
@@ -1859,11 +1758,11 @@ function handleSseMessage(
 }
 
 // ---------------------------------------------------------------------------
-// Main HTTP transport setup — multi-session SSE + Streamable HTTP
+// Main HTTP transport setup â€” multi-session SSE + Streamable HTTP
 // ---------------------------------------------------------------------------
 
 export interface HttpServerHandle {
-  /** The port the server is actually listening on (resolves port 0 → OS-assigned). */
+  /** The port the server is actually listening on (resolves port 0 â†’ OS-assigned). */
   port: number;
   /** The bearer token required for /mcp and /api/* endpoints, or null if auth is disabled. */
   authToken: string | null;
@@ -1935,7 +1834,8 @@ export async function setupObservabilityDashboardSidecar(
 
         if (
           req.method !== "OPTIONS" &&
-          pathname.startsWith("/api/observability/") &&
+          (pathname.startsWith("/api/observability/") ||
+            pathname.startsWith("/api/graph/")) &&
           authToken &&
           !isAuthorized(req, authToken)
         ) {
@@ -2081,7 +1981,7 @@ export async function setupHttpTransport(
   const sessionManager = services.sessionManager ?? new SessionManager(8);
 
   /**
-   * Idempotent session cleanup — safe to call from onclose, idle reaper,
+   * Idempotent session cleanup â€” safe to call from onclose, idle reaper,
    * error handlers, or graceful shutdown. Cleans transport, MCPServer, and
    * session manager state exactly once per session.
    */
@@ -2138,7 +2038,7 @@ export async function setupHttpTransport(
     cleanupSession,
   };
 
-  // DB is already initialized by serve.ts → initGraphDb() before this
+  // DB is already initialized by serve.ts â†’ initGraphDb() before this
   // function is called. A redundant initLadybugDb() here risked a
   // close+reopen cycle when normalizeGraphDbPath() returned a different
   // path (the DB directory now exists, flipping the hint from "file" to
@@ -2176,7 +2076,7 @@ export async function setupHttpTransport(
         ) {
           json(res, 404, {
             error:
-              "OAuth discovery not supported — this server does not require authentication",
+              "OAuth discovery not supported â€” this server does not require authentication",
           });
           return;
         }
@@ -2241,7 +2141,7 @@ export async function setupHttpTransport(
         }
 
         // ---------------------------------------------------------------
-        // Streamable HTTP Transport — /mcp (POST, GET, DELETE)
+        // Streamable HTTP Transport â€” /mcp (POST, GET, DELETE)
         // ---------------------------------------------------------------
         if (pathname === "/mcp") {
           await handleMcpStreamableRequest(req, res, sessionCtx);
@@ -2249,7 +2149,7 @@ export async function setupHttpTransport(
         }
 
         // ---------------------------------------------------------------
-        // Deprecated SSE Transport — /sse (GET) + /message (POST)
+        // Deprecated SSE Transport â€” /sse (GET) + /message (POST)
         // Supports multiple concurrent SSE sessions (no singleton)
         // ---------------------------------------------------------------
         if (req.method === "GET" && pathname === "/sse") {
@@ -2319,7 +2219,7 @@ export async function setupHttpTransport(
       );
       console.error(`  - Health check:    http://${host}:${actualPort}/health`);
       console.error(
-        `  - Graph UI:        http://${host}:${actualPort}/ui/graph`,
+        `  - Graph UI:        http://${host}:${actualPort}/ui/viewer`,
       );
       if (host !== "localhost" && host !== "127.0.0.1" && host !== "::1") {
         console.error(

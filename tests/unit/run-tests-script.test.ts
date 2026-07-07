@@ -31,7 +31,7 @@ describe("run-tests script parallel suites", () => {
   it("keeps native parity out of the native-disabled group runner", () => {
     assert.strictEqual(
       pkg.scripts?.["test:native"],
-      "npm run build:all && npm run test:native-parity && npm run test:native-index-smoke && npm run test:parity",
+      "npm run build:all && npm run test:native-parity && npm run test:layout-parity && npm run test:native-index-smoke && npm run test:parity",
     );
   });
 

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Public type surface for the observability dashboard.
  *
  * These shapes are CONSUMED by Agents B/C/D/E:
@@ -121,7 +121,7 @@ export interface TokenEfficiencyMetrics {
   totalUsed: number;
   /** Estimated tokens saved vs raw-equivalent baseline. */
   totalSaved: number;
-  /** Saved-vs-used ratio (0-1) — 0 means no savings, 1 means infinite savings. */
+  /** Saved-vs-used ratio (0-1) â€” 0 means no savings, 1 means infinite savings. */
   savingsRatio: number;
   /** Average tokens per tool call. */
   avgPerCall: number;
@@ -513,7 +513,7 @@ export interface ObservabilitySnapshot {
 
 /**
  * A single timeseries point. The `t` field is a unix-millis timestamp.
- * Other fields vary by series — consumers should look up the specific
+ * Other fields vary by series â€” consumers should look up the specific
  * series key to know which fields to expect.
  */
 export interface TimeseriesPoint {
@@ -606,3 +606,14 @@ export interface BeamExplainResponse {
 
 /** Default cap per Aggregator on remembered beam-explain entries (Agent B uses this). */
 export const BEAM_EXPLAIN_MAX_ENTRIES = 512;
+
+export type GraphActivityEvent =
+  | { type: "graph.symbols.upserted"; repoId: string; count: number; clusterIds: string[]; symbolIds: string[] }
+  | { type: "graph.symbols.removed"; repoId: string; count: number; symbolIds: string[] }
+  | { type: "graph.edges.added"; repoId: string; count: number; kinds: Record<string, number> }
+  | { type: "graph.slice.built"; repoId: string; entrySymbols: string[]; cardCount: number }
+  | { type: "graph.delta.computed"; repoId: string; changedCount: number; blastCount: number }
+  | { type: "graph.search.executed"; repoId: string; query: string; topSymbolIds: string[] }
+  | { type: "graph.index.started"; repoId: string; mode: string }
+  | { type: "graph.index.completed"; repoId: string; mode: string; symbolCount: number }
+  | { type: "graph.query.executed"; op: "read" | "write"; tables: string[]; durationMs: number };

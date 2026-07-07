@@ -59,6 +59,79 @@ function recordDbLatency(
   }
 }
 
+const GRAPH_QUERY_EVENT_RATE_LIMIT_PER_SECOND = 20;
+const GRAPH_QUERY_TABLE_CACHE_LIMIT = 512;
+const GRAPH_QUERY_TABLE_PATTERN = /\([^)]*:([A-Za-z_][A-Za-z0-9_]*)/g;
+const graphQueryTableCache = new Map<string, string[]>();
+let graphQueryEventWindowStartedAt = 0;
+let graphQueryEventWindowCount = 0;
+
+function extractGraphQueryTables(statement: string): string[] {
+  const cached = graphQueryTableCache.get(statement);
+  if (cached !== undefined) {
+    graphQueryTableCache.delete(statement);
+    graphQueryTableCache.set(statement, cached);
+    return cached;
+  }
+
+  const tables = new Set<string>();
+  for (const match of statement.matchAll(GRAPH_QUERY_TABLE_PATTERN)) {
+    tables.add(match[1]);
+  }
+  const sorted = [...tables].sort((a, b) => a.localeCompare(b));
+  graphQueryTableCache.set(statement, sorted);
+  if (graphQueryTableCache.size > GRAPH_QUERY_TABLE_CACHE_LIMIT) {
+    const oldestKey = graphQueryTableCache.keys().next().value;
+    if (oldestKey !== undefined) graphQueryTableCache.delete(oldestKey);
+  }
+  return sorted;
+}
+
+function consumeGraphQueryEventToken(nowMs = performance.now()): boolean {
+  const windowStartedAt = Math.floor(nowMs / 1_000) * 1_000;
+  if (windowStartedAt !== graphQueryEventWindowStartedAt) {
+    graphQueryEventWindowStartedAt = windowStartedAt;
+    graphQueryEventWindowCount = 0;
+  }
+  if (graphQueryEventWindowCount >= GRAPH_QUERY_EVENT_RATE_LIMIT_PER_SECOND) {
+    return false;
+  }
+  graphQueryEventWindowCount += 1;
+  return true;
+}
+
+function recordGraphQueryEvent(
+  op: "read" | "write",
+  statement: string,
+  durationMs: number,
+): void {
+  try {
+    const tables = extractGraphQueryTables(statement);
+    if (tables.length === 0 || !consumeGraphQueryEventToken()) return;
+    getObservabilityTap()?.graphEvent({
+      type: "graph.query.executed",
+      op,
+      tables,
+      durationMs: Math.max(0, Math.round(durationMs * 1_000) / 1_000),
+    });
+  } catch {
+    // Graph heatmap taps are best-effort and must not affect DB execution.
+  }
+}
+
+export function _extractGraphQueryTablesForTesting(statement: string): string[] {
+  return extractGraphQueryTables(statement);
+}
+
+export function _consumeGraphQueryEventTokenForTesting(nowMs: number): boolean {
+  return consumeGraphQueryEventToken(nowMs);
+}
+
+export function _resetGraphQueryEventRateLimitForTesting(): void {
+  graphQueryEventWindowStartedAt = 0;
+  graphQueryEventWindowCount = 0;
+}
+
 function getConnMutex(conn: Connection): ConcurrencyLimiter {
   let mutex = connMutex.get(conn);
   if (!mutex) {
@@ -530,12 +603,14 @@ export async function queryAll<T>(
           success = true;
           return rows;
         } finally {
+          const nativeEndedAt = performance.now();
           recordDbLatency("queryAll", {
             queuedAt,
             nativeStartedAt,
-            nativeEndedAt: performance.now(),
+            nativeEndedAt,
             success,
           });
+          if (success) recordGraphQueryEvent("read", statement, nativeEndedAt - nativeStartedAt);
         }
       },
       { statement, callSite },
@@ -571,12 +646,14 @@ export async function exec(
           result.close();
           success = true;
         } finally {
+          const nativeEndedAt = performance.now();
           recordDbLatency("exec", {
             queuedAt,
             nativeStartedAt,
-            nativeEndedAt: performance.now(),
+            nativeEndedAt,
             success,
           });
+          if (success) recordGraphQueryEvent("write", statement, nativeEndedAt - nativeStartedAt);
         }
       },
       { statement, callSite },

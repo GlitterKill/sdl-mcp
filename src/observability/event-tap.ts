@@ -25,7 +25,7 @@ import type {
   ToolCallEvent,
   WatcherHealthTelemetryEvent,
 } from "../mcp/telemetry.js";
-import type { TokenSavingsSource } from "./types.js";
+import type { GraphActivityEvent, TokenSavingsSource } from "./types.js";
 
 export interface PprTapEvent {
   repoId: string;
@@ -187,6 +187,7 @@ export interface ObservabilityTap {
   auditBufferSample(event: AuditBufferTapEvent): void;
   postIndexSession(event: PostIndexSessionTapEvent): void;
   dbLatency(event: DbLatencyTapEvent): void;
+  graphEvent(event: GraphActivityEvent): void;
 }
 
 let installedTap: ObservabilityTap | null = null;

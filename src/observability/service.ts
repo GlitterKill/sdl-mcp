@@ -1,4 +1,4 @@
-import { cpus } from "node:os";
+﻿import { cpus } from "node:os";
 import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks";
 
 import type { ObservabilityConfig } from "../config/types.js";
@@ -33,11 +33,13 @@ import type {
   PostIndexSessionTapEvent,
   TokenSavingsTapEvent,
 } from "./event-tap.js";
+import { RingBuffer } from "./ring-buffer.js";
 import type {
   BeamExplainResponse,
   ObservabilitySnapshot,
   TimeseriesResponse,
   TimeseriesWindow,
+  GraphActivityEvent,
 } from "./types.js";
 
 /**
@@ -58,6 +60,7 @@ export type BeamExplainStoreLike = {
 };
 
 type SnapshotSubscriber = (snapshot: ObservabilitySnapshot) => void;
+type GraphSubscriber = (event: GraphActivityEvent) => void;
 
 /**
  * Per-repo observability service.
@@ -66,7 +69,7 @@ type SnapshotSubscriber = (snapshot: ObservabilitySnapshot) => void;
  * configurable cadence, and exposes the `ObservabilityTap` surface that
  * `src/mcp/telemetry.ts` forwards into.
  *
- * All `ObservabilityTap` methods swallow exceptions internally — a metrics
+ * All `ObservabilityTap` methods swallow exceptions internally â€” a metrics
  * bug must never crash the host. Errors are logged at `warn` level via
  * `src/util/logger.ts`.
  */
@@ -74,6 +77,8 @@ export class ObservabilityService implements ObservabilityTap {
   private readonly config: ObservabilityConfig;
   private readonly aggregators = new Map<string, Aggregator>();
   private readonly subscribers = new Set<SnapshotSubscriber>();
+  private readonly graphSubscribers = new Set<GraphSubscriber>();
+  private readonly graphEvents = new RingBuffer<GraphActivityEvent>(200);
 
   private sampleTimer: NodeJS.Timeout | null = null;
   private eventLoopHistogram: IntervalHistogram | null = null;
@@ -140,7 +145,7 @@ export class ObservabilityService implements ObservabilityTap {
   }
 
   /**
-   * Internal sampler — invoked by the interval timer. Pulls CPU/memory/event-loop
+   * Internal sampler â€” invoked by the interval timer. Pulls CPU/memory/event-loop
    * lag, fans the sample out to every known aggregator, then notifies subscribers.
    * Exceptions are caught locally so the timer keeps firing.
    */
@@ -217,7 +222,7 @@ export class ObservabilityService implements ObservabilityTap {
     let eventLoopLagMs = 0;
     if (this.eventLoopHistogram !== null) {
       try {
-        // p95 in nanoseconds → ms.
+        // p95 in nanoseconds â†’ ms.
         const p95Nanos = this.eventLoopHistogram.percentile(95);
         eventLoopLagMs = Number.isFinite(p95Nanos) ? p95Nanos / 1e6 : 0;
         this.eventLoopHistogram.reset();
@@ -317,8 +322,38 @@ export class ObservabilityService implements ObservabilityTap {
 
   /**
    * Fire a snapshot for every known repository. Subscriber failures are
-   * isolated — one bad subscriber cannot kill the rest.
+   * isolated â€” one bad subscriber cannot kill the rest.
    */
+  onGraphEvent(cb: GraphSubscriber): () => void {
+    this.graphSubscribers.add(cb);
+    return () => {
+      this.graphSubscribers.delete(cb);
+    };
+  }
+
+  getRecentGraphEvents(limit = 200): GraphActivityEvent[] {
+    return this.graphEvents.snapshot().slice(-limit).map((entry) => entry.v);
+  }
+
+  graphEvent(event: GraphActivityEvent): void {
+    this.recordGraphEvent(event);
+  }
+
+  recordGraphEvent(event: GraphActivityEvent): void {
+    try {
+      this.graphEvents.push(event);
+      for (const cb of this.graphSubscribers) {
+        try {
+          cb(event);
+        } catch (err) {
+          this.logWarn("graph subscriber failed", err);
+        }
+      }
+    } catch (err) {
+      this.logWarn("recordGraphEvent failed", err);
+    }
+  }
+
   private emitSnapshot(): void {
     if (this.subscribers.size === 0) return;
     for (const repoId of this.aggregators.keys()) {
@@ -340,7 +375,7 @@ export class ObservabilityService implements ObservabilityTap {
   }
 
   // -------------------------------------------------------------------------
-  // ObservabilityTap surface — every method routes to the relevant aggregator
+  // ObservabilityTap surface â€” every method routes to the relevant aggregator
   // and is wrapped in try/catch.
   // -------------------------------------------------------------------------
 
@@ -358,6 +393,21 @@ export class ObservabilityService implements ObservabilityTap {
       this.getAggregator(event.repoId).recordIndexEvent(event);
     } catch (err) {
       this.logWarn("indexEvent failed", err);
+    }
+    this.recordGraphEvent({
+      type: "graph.index.completed",
+      repoId: event.repoId,
+      mode: "refresh",
+      symbolCount: event.stats.symbolsExtracted,
+    });
+    if (event.stats.symbolsExtracted > 0) {
+      this.recordGraphEvent({
+        type: "graph.symbols.upserted",
+        repoId: event.repoId,
+        count: event.stats.symbolsExtracted,
+        clusterIds: [],
+        symbolIds: [],
+      });
     }
   }
 
@@ -430,15 +480,15 @@ export class ObservabilityService implements ObservabilityTap {
   }
 
   setupPipeline(_event: SetupPipelineEvent): void {
-    // Reserved — setup pipeline is one-shot; no per-repo aggregation needed yet.
+    // Reserved â€” setup pipeline is one-shot; no per-repo aggregation needed yet.
   }
 
   summaryGeneration(_event: SummaryGenerationEvent): void {
-    // Reserved — summary cost/duration surfaced via tool-call telemetry already.
+    // Reserved â€” summary cost/duration surfaced via tool-call telemetry already.
   }
 
   summaryQuality(_event: SummaryQualityTelemetryEvent): void {
-    // Reserved — quality divergence surfaced via dedicated quality dashboard.
+    // Reserved â€” quality divergence surfaced via dedicated quality dashboard.
   }
 
   pprResult(event: PprTapEvent): void {
@@ -466,11 +516,20 @@ export class ObservabilityService implements ObservabilityTap {
     } catch (err) {
       this.logWarn("scipIngest failed", err);
     }
+    const edgeCount = event.edgesCreated + event.edgesUpgraded;
+    if (!event.failed && edgeCount > 0) {
+      this.recordGraphEvent({
+        type: "graph.edges.added",
+        repoId: event.repoId,
+        count: edgeCount,
+        kinds: { dependency: edgeCount },
+      });
+    }
   }
 
   packedWire(event: PackedWireTapEvent): void {
     try {
-      // packedWire is process-global (no repoId) — fan out to every aggregator.
+      // packedWire is process-global (no repoId) â€” fan out to every aggregator.
       for (const aggregator of this.aggregators.values()) {
         aggregator.recordPackedWire(event);
       }
@@ -497,7 +556,7 @@ export class ObservabilityService implements ObservabilityTap {
 
   poolSample(event: PoolSampleTapEvent): void {
     try {
-      // Pool depths are process-global — fan out to every aggregator.
+      // Pool depths are process-global â€” fan out to every aggregator.
       for (const aggregator of this.aggregators.values()) {
         aggregator.recordPoolSample(event);
       }
@@ -520,16 +579,19 @@ export class ObservabilityService implements ObservabilityTap {
     try {
       const targetRepoId = event.repoId;
       if (targetRepoId !== undefined && targetRepoId.length > 0) {
-        // Scoped event — apply only to the named aggregator.
+        // Scoped event - apply only to the named aggregator.
         this.getAggregator(targetRepoId).recordIndexPhase({
           phase: event.phase,
           language: event.language,
           engine: event.engine,
           durationMs: event.durationMs,
         });
+        if (event.phase.toLowerCase().includes("start")) {
+          this.recordGraphEvent({ type: "graph.index.started", repoId: targetRepoId, mode: event.phase });
+        }
         return;
       }
-      // Legacy unscoped event — fan out to every known aggregator.
+      // Legacy unscoped event - fan out to every known aggregator.
       for (const aggregator of this.aggregators.values()) {
         aggregator.recordIndexPhase({
           phase: event.phase,
@@ -569,6 +631,12 @@ export class ObservabilityService implements ObservabilityTap {
     } catch (err) {
       this.logWarn("sliceBuild failed", err);
     }
+    this.recordGraphEvent({
+      type: "graph.slice.built",
+      repoId: event.repoId ?? "_global",
+      entrySymbols: [],
+      cardCount: event.accepted,
+    });
   }
 
   deltaBlastRadius(event: DeltaBlastRadiusTapEvent): void {
@@ -584,6 +652,12 @@ export class ObservabilityService implements ObservabilityTap {
     } catch (err) {
       this.logWarn("deltaBlastRadius failed", err);
     }
+    this.recordGraphEvent({
+      type: "graph.delta.computed",
+      repoId: event.repoId ?? "_global",
+      changedCount: event.changedSymbolCount,
+      blastCount: event.blastRadiusCount,
+    });
   }
 
   auditBufferSample(event: AuditBufferTapEvent): void {
@@ -640,7 +714,7 @@ export class ObservabilityService implements ObservabilityTap {
         error: err instanceof Error ? err.message : String(err),
       });
     } catch {
-      // Logger itself failed — give up silently so a metrics bug cannot crash the host.
+      // Logger itself failed â€” give up silently so a metrics bug cannot crash the host.
     }
   }
 }
@@ -672,3 +746,4 @@ function getCoreCount(): number {
   }
   return 1;
 }
+

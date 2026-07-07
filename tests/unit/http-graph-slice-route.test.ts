@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   buildGraphForSliceHandle,
-} from "../../dist/cli/transport/http.js";
+} from "../../dist/viewer/legacy-graph.js";
 
 test("slice graph construction uses the slice handle version bounds", async () => {
   const calls: Array<

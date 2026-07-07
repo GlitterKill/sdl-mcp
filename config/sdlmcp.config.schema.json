@@ -3,14 +3,20 @@
   "title": "SDL-MCP Configuration",
   "description": "Configuration schema for SDL-MCP (Symbol Delta Ledger MCP Server)",
   "type": "object",
-  "required": ["repos", "policy"],
+  "required": [
+    "repos",
+    "policy"
+  ],
   "properties": {
     "repos": {
       "type": "array",
       "description": "List of repositories to index",
       "items": {
         "type": "object",
-        "required": ["repoId", "rootPath"],
+        "required": [
+          "repoId",
+          "rootPath"
+        ],
         "properties": {
           "repoId": {
             "type": "string",
@@ -102,7 +108,10 @@
             "default": 2000000
           },
           "sourceFileListPath": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Optional benchmark/tuning file list. When set, repository scanning uses these repo-relative source paths instead of walking the full tree."
           },
           "postIndexSessionTimeoutMs": {
@@ -177,7 +186,12 @@
     "performanceTier": {
       "type": "string",
       "description": "CPU performance tier for auto-tuning concurrency defaults. 'auto' (default) detects hardware at startup. 'mid' = 1-8 cores (conservative), 'high' = 9-20 cores (moderate), 'extreme' = 21+ cores (aggressive). Presets only affect fields not explicitly set by the user.",
-      "enum": ["mid", "high", "extreme", "auto"],
+      "enum": [
+        "mid",
+        "high",
+        "extreme",
+        "auto"
+      ],
       "default": "auto"
     },
     "policy": {
@@ -245,7 +259,9 @@
           "description": "Custom redaction patterns",
           "items": {
             "type": "object",
-            "required": ["pattern"],
+            "required": [
+              "pattern"
+            ],
             "properties": {
               "name": {
                 "type": "string",
@@ -278,7 +294,11 @@
         "pipeline": {
           "type": "string",
           "description": "Indexing pipeline selector. auto uses provider-first when SCIP or LSP coverage is configured, otherwise legacy.",
-          "enum": ["legacy", "providerFirst", "auto"],
+          "enum": [
+            "legacy",
+            "providerFirst",
+            "auto"
+          ],
           "default": "auto"
         },
         "providerFirst": {
@@ -288,19 +308,26 @@
             "activation": {
               "type": "string",
               "description": "Activation strategy for full provider-first builds.",
-              "enum": ["shadowDb"],
+              "enum": [
+                "shadowDb"
+              ],
               "default": "shadowDb"
             },
             "readyState": {
               "type": "string",
               "description": "Readiness gate for the first usable index state.",
-              "enum": ["graphPlusAlgorithms"],
+              "enum": [
+                "graphPlusAlgorithms"
+              ],
               "default": "graphPlusAlgorithms"
             },
             "stagingFormat": {
               "type": "string",
               "description": "Preferred provider fact staging format for shadow bulk loads. CSV is the fallback when Parquet is unavailable.",
-              "enum": ["parquet", "csv"],
+              "enum": [
+                "parquet",
+                "csv"
+              ],
               "default": "parquet"
             },
             "maxLegacyFallbackFiles": {
@@ -323,7 +350,9 @@
               "properties": {
                 "mode": {
                   "type": "string",
-                  "enum": ["primaryWithCaps"],
+                  "enum": [
+                    "primaryWithCaps"
+                  ],
                   "default": "primaryWithCaps"
                 },
                 "workspaceSymbolLimit": {
@@ -408,7 +437,12 @@
         "watchProvider": {
           "type": "string",
           "description": "File watcher event source. auto tries Watchman, then Chokidar, then fs.watch. Explicit providers fail visibly when unavailable.",
-          "enum": ["auto", "watchman", "chokidar", "fsWatch"],
+          "enum": [
+            "auto",
+            "watchman",
+            "chokidar",
+            "fsWatch"
+          ],
           "default": "auto"
         },
         "concurrency": {
@@ -438,7 +472,10 @@
         "engine": {
           "type": "string",
           "description": "Pass-1 indexing engine implementation",
-          "enum": ["typescript", "rust"],
+          "enum": [
+            "typescript",
+            "rust"
+          ],
           "default": "rust"
         },
         "watchDebounceMs": {
@@ -466,28 +503,44 @@
             "pageRank": {
               "type": "object",
               "properties": {
-                "enabled": { "type": "boolean", "default": true }
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                }
               },
-              "default": { "enabled": true }
+              "default": {
+                "enabled": true
+              }
             },
             "kCore": {
               "type": "object",
               "properties": {
-                "enabled": { "type": "boolean", "default": true }
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                }
               },
-              "default": { "enabled": true }
+              "default": {
+                "enabled": true
+              }
             },
             "louvain": {
               "type": "object",
               "properties": {
-                "enabled": { "type": "boolean", "default": true },
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
                 "maxCallEdges": {
                   "type": "integer",
                   "minimum": 0,
                   "default": 10000
                 }
               },
-              "default": { "enabled": true, "maxCallEdges": 10000 }
+              "default": {
+                "enabled": true,
+                "maxCallEdges": 10000
+              }
             },
             "workerTimeoutMs": {
               "type": "integer",
@@ -498,9 +551,16 @@
           },
           "default": {
             "enabled": true,
-            "pageRank": { "enabled": true },
-            "kCore": { "enabled": true },
-            "louvain": { "enabled": true, "maxCallEdges": 10000 },
+            "pageRank": {
+              "enabled": true
+            },
+            "kCore": {
+              "enabled": true
+            },
+            "louvain": {
+              "enabled": true,
+              "maxCallEdges": 10000
+            },
             "workerTimeoutMs": 120000
           }
         }
@@ -534,9 +594,16 @@
         "pass2Concurrency": 1,
         "algorithmRefresh": {
           "enabled": true,
-          "pageRank": { "enabled": true },
-          "kCore": { "enabled": true },
-          "louvain": { "enabled": true, "maxCallEdges": 10000 },
+          "pageRank": {
+            "enabled": true
+          },
+          "kCore": {
+            "enabled": true
+          },
+          "louvain": {
+            "enabled": true,
+            "maxCallEdges": 10000
+          },
           "workerTimeoutMs": 120000
         }
       }
@@ -663,7 +730,10 @@
         "mode": {
           "type": "string",
           "description": "Diagnostics mode",
-          "enum": ["tsLS", "tsc"],
+          "enum": [
+            "tsLS",
+            "tsc"
+          ],
           "default": "tsLS"
         },
         "maxErrors": {
@@ -681,7 +751,10 @@
         "scope": {
           "type": "string",
           "description": "Diagnostics scope",
-          "enum": ["changedFiles", "workspace"],
+          "enum": [
+            "changedFiles",
+            "workspace"
+          ],
           "default": "changedFiles"
         }
       },
@@ -784,25 +857,40 @@
         },
         "provider": {
           "type": "string",
-          "enum": ["api", "local", "mock"],
+          "enum": [
+            "api",
+            "local",
+            "mock"
+          ],
           "default": "local"
         },
         "embeddingProfile": {
           "type": "string",
-          "enum": ["specialized", "max-recall"],
+          "enum": [
+            "specialized",
+            "max-recall"
+          ],
           "default": "specialized",
           "description": "Semantic embedding model profile. 'specialized' embeds Symbols with Jina and FileSummary nodes with Nomic. 'max-recall' restores both supported models on both lanes."
         },
         "symbolEmbeddingModels": {
           "type": "array",
-          "items": { "type": "string" },
-          "default": ["jina-embeddings-v2-base-code"],
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "jina-embeddings-v2-base-code"
+          ],
           "description": "Embedding models to populate for Symbol nodes. Overrides embeddingProfile for the Symbol lane when set."
         },
         "fileSummaryEmbeddingModels": {
           "type": "array",
-          "items": { "type": "string" },
-          "default": ["nomic-embed-text-v1.5"],
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "nomic-embed-text-v1.5"
+          ],
           "description": "Embedding models to populate for FileSummary nodes. Overrides embeddingProfile for the FileSummary lane when set."
         },
         "model": {
@@ -811,7 +899,9 @@
         },
         "additionalModels": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Deprecated legacy shared extra embedding models. Use embeddingProfile, symbolEmbeddingModels, or fileSummaryEmbeddingModels instead."
         },
         "modelCacheDir": {
@@ -823,13 +913,19 @@
           "default": true
         },
         "summaryProvider": {
-          "type": ["string", "null"],
-          "enum": ["api", "local", "mock", null],
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "api",
+            "local",
+            "mock",
+            null
+          ],
           "default": "mock",
           "description": "Summary backend, independent from the embedding provider. 'api' = Anthropic, 'local' = OpenAI-compatible (Ollama), 'mock' = deterministic concise prose. Null is treated as unset and resolves to 'mock'."
         },
-
-
         "summaryModel": {
           "type": "string",
           "description": "Model name for summary generation. Defaults per-provider: 'api' uses 'claude-haiku-4-5-20251001', 'local' uses 'gpt-4o-mini'."
@@ -895,19 +991,33 @@
         },
         "executionProviders": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "ONNX Runtime execution providers in priority order. ORT tries them left-to-right; first one that initialises wins. Bundled with default onnxruntime-node npm package: Windows x64 ['cpu', 'dml', 'webgpu'], macOS ['cpu', 'coreml'], Linux x64 ['cpu', 'cuda', 'tensorrt'] (CUDA EP requires NVIDIA GPU + CUDA 12 + cuDNN on the host), Linux arm64 ['cpu']. DirectML covers any DX12 GPU including AMD Radeon, NVIDIA GeForce, Intel Arc. ROCm (AMD on Linux), OpenVINO, QNN need a custom ORT build. Unsupported entries on a given platform are dropped with a warning; 'cpu' is auto-appended as final fallback so session creation never strands.",
-          "default": ["cpu"]
+          "default": [
+            "cpu"
+          ]
         },
         "ann": {
           "type": "object",
           "description": "Deprecated — removed in v0.10.1. Silently ignored. Use retrieval.vector instead.",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "m": { "type": "integer" },
-            "efConstruction": { "type": "integer" },
-            "efSearch": { "type": "integer" },
-            "maxElements": { "type": "integer" }
+            "enabled": {
+              "type": "boolean"
+            },
+            "m": {
+              "type": "integer"
+            },
+            "efConstruction": {
+              "type": "integer"
+            },
+            "efSearch": {
+              "type": "integer"
+            },
+            "maxElements": {
+              "type": "integer"
+            }
           }
         },
         "retrieval": {
@@ -916,7 +1026,10 @@
           "properties": {
             "mode": {
               "type": "string",
-              "enum": ["legacy", "hybrid"],
+              "enum": [
+                "legacy",
+                "hybrid"
+              ],
               "default": "hybrid",
               "description": "'legacy' = original semantic-only re-rank path; 'hybrid' = FTS + vector fusion pipeline."
             },
@@ -990,7 +1103,9 @@
                   "description": "Per-model HNSW index config keyed by model name.",
                   "additionalProperties": {
                     "type": "object",
-                    "required": ["indexName"],
+                    "required": [
+                      "indexName"
+                    ],
                     "properties": {
                       "indexName": {
                         "type": "string",
@@ -1028,7 +1143,9 @@
               "properties": {
                 "strategy": {
                   "type": "string",
-                  "enum": ["rrf"],
+                  "enum": [
+                    "rrf"
+                  ],
                   "default": "rrf",
                   "description": "Fusion strategy. 'rrf' = Reciprocal Rank Fusion."
                 },
@@ -1085,8 +1202,12 @@
         "enabled": true,
         "provider": "local",
         "embeddingProfile": "specialized",
-        "symbolEmbeddingModels": ["jina-embeddings-v2-base-code"],
-        "fileSummaryEmbeddingModels": ["nomic-embed-text-v1.5"],
+        "symbolEmbeddingModels": [
+          "jina-embeddings-v2-base-code"
+        ],
+        "fileSummaryEmbeddingModels": [
+          "nomic-embed-text-v1.5"
+        ],
         "generateSummaries": true,
         "summaryProvider": "mock",
         "summaryModel": "claude-haiku-4-5-20251001",
@@ -1099,7 +1220,10 @@
       "type": "object",
       "description": "Provider-backed graph precision enrichment. Separate from semantic embeddings/retrieval.",
       "properties": {
-        "enabled": { "type": "boolean", "default": true },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
         "autoRunOnIndexRefresh": {
           "type": "boolean",
           "default": false,
@@ -1107,12 +1231,18 @@
         },
         "installPolicy": {
           "type": "string",
-          "enum": ["never", "verified"],
+          "enum": [
+            "never",
+            "verified"
+          ],
           "default": "never",
           "description": "Controls provider download behavior. 'verified' permits only checksum-verified downloads; package-manager install recipes are never executed automatically."
         },
         "cacheDir": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "default": null,
           "description": "Reserved cache root for future durable provider caches. V2 writes provider results to the graph and does not persist LSP response caches here."
         },
@@ -1131,7 +1261,9 @@
         },
         "languages": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Language IDs to enrich. Empty means all current tree-sitter-backed languages."
         },
@@ -1142,17 +1274,30 @@
             "scip": {
               "type": "object",
               "properties": {
-                "enabled": { "type": "boolean", "default": true },
-                "providerId": { "type": "string" },
-                "providerVersion": { "type": "string" },
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "providerId": {
+                  "type": "string"
+                },
+                "providerVersion": {
+                  "type": "string"
+                },
                 "indexes": {
                   "type": "array",
                   "items": {
                     "type": "object",
-                    "required": ["path"],
+                    "required": [
+                      "path"
+                    ],
                     "properties": {
-                      "path": { "type": "string" },
-                      "label": { "type": "string" }
+                      "path": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
                     }
                   },
                   "default": []
@@ -1162,9 +1307,16 @@
             "lsp": {
               "type": "object",
               "properties": {
-                "enabled": { "type": "boolean", "default": true },
-                "providerId": { "type": "string" },
-                "providerVersion": { "type": "string" },
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "providerId": {
+                  "type": "string"
+                },
+                "providerVersion": {
+                  "type": "string"
+                },
                 "confidence": {
                   "type": "number",
                   "minimum": 0.5,
@@ -1181,40 +1333,65 @@
                   "type": "object",
                   "additionalProperties": {
                     "type": "object",
-                    "required": ["serverId", "command"],
+                    "required": [
+                      "serverId",
+                      "command"
+                    ],
                     "properties": {
-                      "enabled": { "type": "boolean", "default": true },
-                      "serverId": { "type": "string" },
-                      "command": { "type": "string" },
+                      "enabled": {
+                        "type": "boolean",
+                        "default": true
+                      },
+                      "serverId": {
+                        "type": "string"
+                      },
+                      "command": {
+                        "type": "string"
+                      },
                       "args": {
                         "type": "array",
-                        "items": { "type": "string" },
+                        "items": {
+                          "type": "string"
+                        },
                         "default": []
                       },
                       "languages": {
                         "type": "array",
-                        "items": { "type": "string" },
+                        "items": {
+                          "type": "string"
+                        },
                         "default": []
                       },
                       "documentLanguageIds": {
                         "type": "array",
-                        "items": { "type": "string" },
+                        "items": {
+                          "type": "string"
+                        },
                         "default": []
                       },
                       "filePatterns": {
                         "type": "array",
-                        "items": { "type": "string" },
+                        "items": {
+                          "type": "string"
+                        },
                         "default": []
                       },
                       "capabilities": {
                         "type": "array",
-                        "items": { "type": "string" },
+                        "items": {
+                          "type": "string"
+                        },
                         "default": []
                       },
-                      "readiness": { "type": "string" },
+                      "readiness": {
+                        "type": "string"
+                      },
                       "documentSessionMode": {
                         "type": "string",
-                        "enum": ["workspace", "document"]
+                        "enum": [
+                          "workspace",
+                          "document"
+                        ]
                       },
                       "documentSymbolRetryCount": {
                         "type": "integer",
@@ -1228,9 +1405,13 @@
                       },
                       "env": {
                         "type": "object",
-                        "additionalProperties": { "type": "string" }
+                        "additionalProperties": {
+                          "type": "string"
+                        }
                       },
-                      "initializationOptions": { "type": "object" }
+                      "initializationOptions": {
+                        "type": "object"
+                      }
                     }
                   },
                   "default": {}
@@ -1277,9 +1458,22 @@
           "description": "Outcome-trained predictive context policy. Safe mode can suppress, trim, or boost existing prefetch strategies but cannot invent new strategy types.",
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean", "default": true },
-            "mode": { "enum": ["observe", "safe"], "default": "safe" },
-            "minSamples": { "type": "integer", "minimum": 1, "default": 20 },
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "mode": {
+              "enum": [
+                "observe",
+                "safe"
+              ],
+              "default": "safe"
+            },
+            "minSamples": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 20
+            },
             "suppressionWasteRate": {
               "type": "number",
               "minimum": 0,
@@ -1292,7 +1486,11 @@
               "maximum": 1,
               "default": 0.35
             },
-            "retentionDays": { "type": "integer", "minimum": 1, "default": 14 },
+            "retentionDays": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 14
+            },
             "maxPriorityBoost": {
               "type": "integer",
               "minimum": 0,
@@ -1430,7 +1628,11 @@
         "exporterType": {
           "type": "string",
           "description": "Exporter type for traces",
-          "enum": ["console", "otlp", "memory"],
+          "enum": [
+            "console",
+            "otlp",
+            "memory"
+          ],
           "default": "console"
         },
         "otlpEndpoint": {
@@ -1483,7 +1685,10 @@
       "description": "LadybugDB graph database configuration for advanced graph queries",
       "properties": {
         "path": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Path to the LadybugDB database file",
           "default": null
         }
@@ -1549,13 +1754,23 @@
         "allowedRuntimes": {
           "type": "array",
           "description": "List of allowed runtime environments",
-          "items": { "type": "string" },
-          "default": ["node", "typescript", "python", "shell", "powershell"]
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "node",
+            "typescript",
+            "python",
+            "shell",
+            "powershell"
+          ]
         },
         "allowedExecutables": {
           "type": "array",
           "description": "List of allowed executable paths or patterns",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": []
         },
         "maxDurationMs": {
@@ -1623,13 +1838,21 @@
         "envAllowlist": {
           "type": "array",
           "description": "Environment variable names to pass through to sandboxed subprocesses",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": []
         }
       },
       "default": {
         "enabled": true,
-        "allowedRuntimes": ["node", "typescript", "python", "shell", "powershell"],
+        "allowedRuntimes": [
+          "node",
+          "typescript",
+          "python",
+          "shell",
+          "powershell"
+        ],
         "allowedExecutables": [],
         "maxDurationMs": 30000,
         "maxConcurrentJobs": 2,
@@ -1643,7 +1866,9 @@
         "allowedRepoRoots": {
           "type": "array",
           "description": "Whitelist of allowed repository root path prefixes. Empty array allows any path.",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": []
         }
       },
@@ -1667,7 +1892,10 @@
         },
         "toolNameFormat": {
           "type": "string",
-          "enum": ["canonical", "openai"],
+          "enum": [
+            "canonical",
+            "openai"
+          ],
           "description": "Tool name format advertised to MCP clients. Use openai to replace dots with underscores for strict tool-name validators.",
           "default": "canonical"
         }
@@ -1688,7 +1916,10 @@
           "default": false
         },
         "token": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Static bearer token. When null a random token is generated at startup.",
           "minLength": 1,
           "default": null
@@ -1777,7 +2008,11 @@
         },
         "ladderValidation": {
           "type": "string",
-          "enum": ["off", "warn", "enforce"],
+          "enum": [
+            "off",
+            "warn",
+            "enforce"
+          ],
           "description": "Context ladder validation mode",
           "default": "warn"
         },
@@ -1796,23 +2031,39 @@
       "type": "object",
       "description": "SCIP index ingestion configuration",
       "properties": {
-        "enabled": { "type": "boolean", "default": true },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
         "indexes": {
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
-              "path": { "type": "string" },
-              "label": { "type": "string" }
+              "path": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              }
             },
-            "required": ["path"]
+            "required": [
+              "path"
+            ]
           },
-          "default": [{ "path": "index.scip" }]
+          "default": [
+            {
+              "path": "index.scip"
+            }
+          ]
         },
         "externalSymbols": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean", "default": true },
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
             "maxPerIndex": {
               "type": "integer",
               "minimum": 100,
@@ -1824,10 +2075,13 @@
         "confidence": {
           "type": "number",
           "minimum": 0.5,
-          "maximum": 1.0,
+          "maximum": 1,
           "default": 0.95
         },
-        "autoIngestOnRefresh": { "type": "boolean", "default": true },
+        "autoIngestOnRefresh": {
+          "type": "boolean",
+          "default": true
+        },
         "ingestConcurrency": {
           "type": "integer",
           "description": "Number of SCIP indexes to ingest concurrently. Decode/parse overlaps; writes still serialise via writeLimiter. Default 1 (sequential).",
@@ -1839,14 +2093,29 @@
           "type": "object",
           "description": "Auto-generate index.scip via the scip-io CLI before each refresh. Has no effect unless scip.enabled is also true. When enabled and the binary is missing, sdl-mcp downloads it from GitHub releases into ~/.sdl-mcp/bin/ with mandatory SHA-256 verification against the release's SHA256SUMS.txt; installs are refused if the checksum file is absent.",
           "properties": {
-            "enabled": { "type": "boolean", "default": true },
-            "binary": { "type": "string", "default": "scip-io" },
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "binary": {
+              "type": "string",
+              "default": "scip-io"
+            },
             "args": {
               "type": "array",
-              "items": { "type": "string" },
-              "default": ["--include-additional-configs", "--timeout", "3600"]
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "--include-additional-configs",
+                "--timeout",
+                "3600"
+              ]
             },
-            "autoInstall": { "type": "boolean", "default": true },
+            "autoInstall": {
+              "type": "boolean",
+              "default": true
+            },
             "timeoutMs": {
               "type": "integer",
               "minimum": 1000,
@@ -1867,7 +2136,11 @@
           "default": {
             "enabled": true,
             "binary": "scip-io",
-            "args": ["--include-additional-configs", "--timeout", "3600"],
+            "args": [
+              "--include-additional-configs",
+              "--timeout",
+              "3600"
+            ],
             "autoInstall": true,
             "timeoutMs": 18000000,
             "cleanupAfterIngest": true,
@@ -1948,7 +2221,11 @@
             },
             "defaultFormat": {
               "type": "string",
-              "enum": ["packed", "auto", "compact"],
+              "enum": [
+                "packed",
+                "auto",
+                "compact"
+              ],
               "description": "Default wire format when client omits the field. Env var SDL_PACKED_DEFAULT_FORMAT overrides.",
               "default": "auto"
             },
@@ -1958,7 +2235,10 @@
               "additionalProperties": {
                 "type": "object",
                 "properties": {
-                  "enabled": { "type": "boolean", "default": true }
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  }
                 },
                 "additionalProperties": false
               }
@@ -1968,6 +2248,150 @@
         }
       },
       "additionalProperties": false
+    },
+    "viewer": {
+      "type": "object",
+      "description": "SDL Galaxy graph viewer configuration",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "skinsDir": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "Directory containing declarative viewer skin zip files. Defaults to <configDir>/skins when omitted."
+        },
+        "fps": {
+          "enum": [
+            15,
+            30,
+            60,
+            90,
+            120
+          ],
+          "default": 60
+        },
+        "ambient": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "idleSeconds": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 3600,
+              "default": 180
+            },
+            "fps": {
+              "enum": [
+                15,
+                30,
+                60,
+                90,
+                120
+              ],
+              "default": 30
+            }
+          },
+          "default": {
+            "enabled": true,
+            "idleSeconds": 180,
+            "fps": 30
+          }
+        },
+        "layout": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "engine": {
+              "enum": [
+                "auto",
+                "typescript",
+                "rust"
+              ],
+              "default": "auto"
+            },
+            "iterations": {
+              "type": "integer",
+              "minimum": 50,
+              "maximum": 2000,
+              "default": 300
+            },
+            "cacheDir": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Directory for deterministic layout artifacts. Defaults to <configDir>/viewer-layout-cache when omitted."
+            },
+            "maxSymbolsPerClusterExpand": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 20000,
+              "default": 5000
+            }
+          },
+          "default": {
+            "engine": "auto",
+            "iterations": 300,
+            "cacheDir": null,
+            "maxSymbolsPerClusterExpand": 5000
+          }
+        },
+        "skins": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxZipBytes": {
+              "type": "integer",
+              "default": 52428800
+            },
+            "maxEntries": {
+              "type": "integer",
+              "default": 500
+            },
+            "maxDecompressedBytes": {
+              "type": "integer",
+              "default": 209715200
+            }
+          },
+          "default": {
+            "maxZipBytes": 52428800,
+            "maxEntries": 500,
+            "maxDecompressedBytes": 209715200
+          }
+        }
+      },
+      "default": {
+        "enabled": true,
+        "skinsDir": null,
+        "fps": 60,
+        "ambient": {
+          "enabled": true,
+          "idleSeconds": 180,
+          "fps": 30
+        },
+        "layout": {
+          "engine": "auto",
+          "iterations": 300,
+          "cacheDir": null,
+          "maxSymbolsPerClusterExpand": 5000
+        },
+        "skins": {
+          "maxZipBytes": 52428800,
+          "maxEntries": 500,
+          "maxDecompressedBytes": 209715200
+        }
+      }
     }
   }
 }

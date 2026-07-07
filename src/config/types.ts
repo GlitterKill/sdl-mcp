@@ -1,4 +1,4 @@
-import { z } from "zod";
+﻿import { z } from "zod";
 import { RUNTIME_NAMES } from "../runtime/runtimes.js";
 import {
   MAX_FILE_BYTES,
@@ -99,7 +99,7 @@ export const MemoryConfigSchema = z.object({
 
 export type MemoryConfig = z.infer<typeof MemoryConfigSchema>;
 
-/** Partial schema for repo-level overrides — no defaults filled in. */
+/** Partial schema for repo-level overrides â€” no defaults filled in. */
 export const MemoryConfigOverrideSchema = z.object({
   enabled: z.boolean().optional(),
   toolsEnabled: z.boolean().optional(),
@@ -543,7 +543,7 @@ export const SemanticConfigSchema = z.object({
   enabled: z.boolean().default(true),
   /**
    * @deprecated Use `retrieval.fusion.rrfK` and the hybrid pipeline instead.
-   * Legacy blend weight (0–1) for semantic vs. keyword score. Still honoured in
+   * Legacy blend weight (0â€“1) for semantic vs. keyword score. Still honoured in
    * "legacy" mode; ignored when `retrieval.mode` is "hybrid".
    */
   alpha: z.number().min(0).max(1).default(0.6),
@@ -570,7 +570,7 @@ export const SemanticConfigSchema = z.object({
   summaryProvider: z.enum(["api", "local", "mock"]).nullish().default("mock"),
 
   /** Model name for summary generation. Defaults per-provider:
-   *  "api" → "claude-haiku-4-5-20251001", "local" → "gpt-4o-mini" (OpenAI-compatible). */
+   *  "api" â†’ "claude-haiku-4-5-20251001", "local" â†’ "gpt-4o-mini" (OpenAI-compatible). */
   summaryModel: z.string().nullish(),
   summaryApiKey: z.string().nullish(),
   summaryApiBaseUrl: z.string().nullish(),
@@ -629,7 +629,7 @@ export const SemanticConfigSchema = z.object({
   /**
    * When two or more embedding models are configured (e.g. jina + nomic),
    * run them in series instead of via `Promise.all`. The default
-   * (`false`) launches all models concurrently — best when ORT can truly
+   * (`false`) launches all models concurrently â€” best when ORT can truly
    * run two sessions on independent thread pools. On systems where the
    * sessions serialize at the ORT thread-pool layer (observed alternation
    * pattern), `true` typically wins by ~5-15%: each model holds the full
@@ -642,7 +642,7 @@ export const SemanticConfigSchema = z.object({
   /**
    * Which ONNX file variant to load for each embedding model. Lets users
    * trade speed for accuracy without recompiling. Valid values depend on
-   * what each model publishes — when a chosen variant is unavailable for
+   * what each model publishes â€” when a chosen variant is unavailable for
    * a given model, the registry falls back to that model's
    * `defaultVariant` with a warning.
    *
@@ -653,8 +653,8 @@ export const SemanticConfigSchema = z.object({
    *     <0.5% accuracy loss.
    *   - `"fp32"`: full precision (~550-650MB). Reference quality, slowest.
    *   - `"q4"`, `"q4f16"`, `"bnb4"`, `"uint8"`: aggressive quantization
-   *     (~110-165MB), 2-4× faster than fp32 with 1-7% accuracy loss
-   *     depending on workload. Availability per model varies — see
+   *     (~110-165MB), 2-4Ã— faster than fp32 with 1-7% accuracy loss
+   *     depending on workload. Availability per model varies â€” see
    *     `ModelInfo.variants` in `model-registry.ts`.
    *
    * Pass-through string so future variants land without a schema bump.
@@ -667,23 +667,23 @@ export const SemanticConfigSchema = z.object({
    * Defaults to `["cpu"]`. The default `onnxruntime-node` npm package
    * ships these providers (no extra installation required):
    *
-   *   - Windows x64: `"dml"` (DirectML — NVIDIA + AMD + Intel DX12 GPUs),
+   *   - Windows x64: `"dml"` (DirectML â€” NVIDIA + AMD + Intel DX12 GPUs),
    *     `"webgpu"`.
    *   - macOS (x64 / arm64): `"coreml"` (Apple Silicon ANE/GPU + Intel
    *     Mac GPU).
    *   - Linux x64: `"cuda"`, `"tensorrt"`. CUDA EP requires an NVIDIA
-   *     GPU plus CUDA 12 + cuDNN installed on the host system — the EP
+   *     GPU plus CUDA 12 + cuDNN installed on the host system â€” the EP
    *     binaries ship with the package but won't initialise without the
    *     runtime libraries.
    *
    * Out of scope (need a custom ORT build): `"rocm"` (AMD on Linux),
    * `"openvino"` (Intel), `"qnn"` (Qualcomm). Users on AMD Linux can
    * substitute their own `onnxruntime-node` build at the package level
-   * and sdl-mcp will pick up the extra providers — the filter only
+   * and sdl-mcp will pick up the extra providers â€” the filter only
    * drops entries known to be unavailable in the default package.
    *
    * Always include `"cpu"` somewhere so initialisation can fall back
-   * when a GPU provider can't load — the helper auto-appends it if you
+   * when a GPU provider can't load â€” the helper auto-appends it if you
    * forget.
    */
   executionProviders: z.array(z.string()).default(["cpu"]),
@@ -695,7 +695,7 @@ export const SemanticConfigSchema = z.object({
    * to a single CCD) leaves half the logical threads idle. Setting this
    * explicitly to `os.availableParallelism()` saturates available threads.
    *
-   * Both fields default to 0 — the helper interprets 0 as "auto" and resolves
+   * Both fields default to 0 â€” the helper interprets 0 as "auto" and resolves
    * to `os.availableParallelism()` for `intraOpNumThreads`, 1 for
    * `interOpNumThreads`. Set explicit positive values to override.
    *
@@ -783,6 +783,56 @@ export const ObservabilityConfigSchema = z.object({
 });
 
 export type ObservabilityConfig = z.infer<typeof ObservabilityConfigSchema>;
+export const ViewerFpsSchema = z.union([
+  z.literal(15),
+  z.literal(30),
+  z.literal(60),
+  z.literal(90),
+  z.literal(120),
+]);
+
+export const ViewerConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  skinsDir: z.string().nullish(),
+  fps: ViewerFpsSchema.default(60),
+  ambient: z
+    .object({
+      enabled: z.boolean().default(true),
+      idleSeconds: z.number().int().min(10).max(3600).default(180),
+      fps: ViewerFpsSchema.default(30),
+    })
+    .default({ enabled: true, idleSeconds: 180, fps: 30 }),
+  layout: z
+    .object({
+      engine: z.enum(["auto", "typescript", "rust"]).default("auto"),
+      iterations: z.number().int().min(50).max(2000).default(300),
+      cacheDir: z.string().nullish(),
+      maxSymbolsPerClusterExpand: z
+        .number()
+        .int()
+        .min(100)
+        .max(20000)
+        .default(5000),
+    })
+    .default({
+      engine: "auto",
+      iterations: 300,
+      maxSymbolsPerClusterExpand: 5000,
+    }),
+  skins: z
+    .object({
+      maxZipBytes: z.number().int().default(52_428_800),
+      maxEntries: z.number().int().default(500),
+      maxDecompressedBytes: z.number().int().default(209_715_200),
+    })
+    .default({
+      maxZipBytes: 52_428_800,
+      maxEntries: 500,
+      maxDecompressedBytes: 209_715_200,
+    }),
+});
+
+export type ViewerConfig = z.infer<typeof ViewerConfigSchema>;
 
 export const TracingConfigSchema = z.object({
   enabled: z.boolean().default(true),
@@ -1148,8 +1198,8 @@ export const AppConfigSchema = z.object({
    * CPU performance tier for auto-tuning concurrency defaults.
    *
    * - "auto" (default): detect hardware at startup and select a tier.
-   * - "mid":    conservative defaults (1–8 logical cores).
-   * - "high":   moderate scaling (9–20 logical cores).
+   * - "mid":    conservative defaults (1â€“8 logical cores).
+   * - "high":   moderate scaling (9â€“20 logical cores).
    * - "extreme": aggressive scaling (21+ logical cores).
    *
    * Presets only affect fields that are NOT explicitly set by the user.
@@ -1181,6 +1231,8 @@ export const AppConfigSchema = z.object({
   scip: ScipConfigSchema.optional(),
   wire: WireConfigSchema.optional(),
   observability: ObservabilityConfigSchema.optional(),
+  viewer: ViewerConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
+

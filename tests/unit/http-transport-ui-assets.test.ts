@@ -72,38 +72,20 @@ async function rmWithRetry(
   }
 }
 
-test("GET /ui/graph returns 500 instead of crashing when the asset stream cannot open", async () => {
-  const graphHtmlPath = fileURLToPath(
-    new URL("../../dist/ui/graph.html", import.meta.url),
-  );
-  const graphUiDir = dirname(graphHtmlPath);
+test("GET /ui/graph redirects to /ui/viewer", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "sdl-mcp-http-ui-"));
-  const backupPath = join(graphUiDir, "graph.html.test-backup");
-  const graphDbPath = join(tempDir, "graph.lbug");
-
-  await rename(graphHtmlPath, backupPath);
-  await mkdir(graphHtmlPath);
-
+  const viewerDbPath = join(tempDir, "viewer.lbug");
   let server;
   try {
-    server = await setupHttpTransport("127.0.0.1", 0, graphDbPath, {});
-    const result = await captureUncaughtException(() =>
-      fetch(`http://127.0.0.1:${server.port}/ui/graph`, {
-        signal: AbortSignal.timeout(5_000),
-      }),
-    );
-
-    assert.equal(result.uncaughtError, null);
-    assert.equal(result.requestError, undefined);
-    assert.ok(result.response);
-    assert.equal(result.response.status, 500);
-
-    const payload = (await result.response.json()) as { error?: unknown };
-    assert.match(String(payload.error ?? ""), /ui asset/i);
+    server = await setupHttpTransport("127.0.0.1", 0, viewerDbPath, {});
+    const response = await fetch(`http://127.0.0.1:${server.port}/ui/graph`, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(5_000),
+    });
+    assert.equal(response.status, 308);
+    assert.equal(response.headers.get("location"), "/ui/viewer");
   } finally {
     await server?.close();
-    await rmWithRetry(graphHtmlPath);
-    await rename(backupPath, join(graphUiDir, "graph.html"));
     await delay(100);
     await rmWithRetry(tempDir, { required: false });
   }

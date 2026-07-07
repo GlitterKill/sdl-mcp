@@ -102,12 +102,30 @@ test("stdio observability dashboard sidecar serves only observability routes", a
     assert.equal((await readJson(snapshot)).repoId, "test-repo");
     assert.deepEqual(snapshotCalls, ["test-repo"]);
 
+    // The SDL Galaxy viewer is served on the dashboard surface too.
+    const viewerHtml = await fetch(`${baseUrl}/ui/viewer`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    assert.equal(viewerHtml.status, 200);
+    assert.match(viewerHtml.headers.get("content-type") ?? "", /text\/html/);
+
+    // /api/graph/* shares the dashboard bearer gate.
+    const graphUnauthorized = await fetch(`${baseUrl}/api/graph/skins`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    assert.equal(graphUnauthorized.status, 401);
+
+    const graphSkins = await fetch(`${baseUrl}/api/graph/skins`, {
+      headers: { Authorization: "Bearer test-token" },
+      signal: AbortSignal.timeout(5_000),
+    });
+    assert.equal(graphSkins.status, 200);
+    assert.deepEqual(Object.keys(await readJson(graphSkins)), ["skins"]);
+
     for (const path of [
       "/mcp",
       "/sse",
       "/message",
-      "/ui/graph",
-      "/api/graph/repo/slice/handle",
       "/api/config",
       "/api/sessions",
     ]) {

@@ -104,8 +104,12 @@
     "pass2Concurrency": 1,
     "algorithmRefresh": {
       "enabled": true,
-      "pageRank": { "enabled": true },
-      "kCore": { "enabled": true },
+      "pageRank": {
+        "enabled": true
+      },
+      "kCore": {
+        "enabled": true
+      },
       "louvain": {
         "enabled": true,
         "maxCallEdges": 10000
@@ -154,8 +158,12 @@
     "enabled": true,
     "provider": "local",
     "embeddingProfile": "specialized",
-    "symbolEmbeddingModels": ["jina-embeddings-v2-base-code"],
-    "fileSummaryEmbeddingModels": ["nomic-embed-text-v1.5"],
+    "symbolEmbeddingModels": [
+      "jina-embeddings-v2-base-code"
+    ],
+    "fileSummaryEmbeddingModels": [
+      "nomic-embed-text-v1.5"
+    ],
     "modelCacheDir": null,
     "generateSummaries": true,
     "summaryProvider": "mock",
@@ -170,7 +178,9 @@
     "fileSummaryEmbeddingMaxChars": 4096,
     "embeddingsSequential": false,
     "modelVariant": "default",
-    "executionProviders": ["cpu"],
+    "executionProviders": [
+      "cpu"
+    ],
     "retrieval": {
       "mode": "hybrid",
       "extensionsOptional": true,
@@ -212,7 +222,11 @@
     "providers": {
       "scip": {
         "enabled": true,
-        "indexes": [{ "path": "index.scip" }]
+        "indexes": [
+          {
+            "path": "index.scip"
+          }
+        ]
       },
       "lsp": {
         "enabled": true,
@@ -274,7 +288,13 @@
   },
   "runtime": {
     "enabled": true,
-    "allowedRuntimes": ["node", "typescript", "python", "shell", "powershell"],
+    "allowedRuntimes": [
+      "node",
+      "typescript",
+      "python",
+      "shell",
+      "powershell"
+    ],
     "allowedExecutables": [],
     "maxDurationMs": 30000,
     "maxStdoutBytes": 1048576,
@@ -334,7 +354,11 @@
     "generator": {
       "enabled": true,
       "binary": "scip-io",
-      "args": ["--include-additional-configs", "--timeout", "3600"],
+      "args": [
+        "--include-additional-configs",
+        "--timeout",
+        "3600"
+      ],
       "autoInstall": true,
       "timeoutMs": 18000000,
       "cleanupAfterIngest": true,
@@ -347,6 +371,27 @@
   "$": {
     "prefetch": {
       "policy": "{\"enabled\":true,\"mode\":\"safe\",\"minSamples\":20,\"suppressionWasteRate\":0.8,\"boostHitRate\":0.35,\"retentionDays\":14,\"maxPriorityBoost\":25,\"maxBudgetTrimPercent\":50}"
+    }
+  },
+  "viewer": {
+    "enabled": true,
+    "skinsDir": null,
+    "fps": 60,
+    "ambient": {
+      "enabled": true,
+      "idleSeconds": 180,
+      "fps": 30
+    },
+    "layout": {
+      "engine": "auto",
+      "iterations": 300,
+      "cacheDir": null,
+      "maxSymbolsPerClusterExpand": 5000
+    },
+    "skins": {
+      "maxZipBytes": 52428800,
+      "maxEntries": 500,
+      "maxDecompressedBytes": 209715200
     }
   }
 }
