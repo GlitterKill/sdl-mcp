@@ -690,7 +690,7 @@ function serveUiAsset(pathname: string, res: ServerResponse): boolean {
     res.destroy(error instanceof Error ? error : undefined);
   });
   stream.once("open", () => {
-    res.writeHead(200, { "Content-Type": asset.type });
+    res.writeHead(200, { "Content-Type": asset.type, "Cache-Control": "no-cache" });
     stream.pipe(res);
   });
   return true;

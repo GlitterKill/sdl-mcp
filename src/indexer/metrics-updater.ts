@@ -7,6 +7,11 @@ import * as ladybugDb from "../db/ladybug-queries.js";
 import { classifyDependencyTarget } from "../db/symbol-placeholders.js";
 import { updateMetricsForRepo } from "../graph/metrics.js";
 import type { FoldedCentralityResult } from "../graph/metrics.js";
+import {
+  createFtsIndex,
+  dropFtsIndex,
+  ENTITY_FTS_INDEX_NAMES,
+} from "../retrieval/index-lifecycle.js";
 import { logger } from "../util/logger.js";
 import { refreshSymbolEmbeddings } from "./embeddings.js";
 import {
@@ -695,14 +700,43 @@ export async function materializeFileSummaries(
 
         if (newUpserts.length > 0) {
           await measureSubphase("writeNewSummaries", async () => {
-            try {
-              await ladybugDb.insertNewFileSummaryBatch(wConn, newUpserts);
-            } catch (error) {
-              logger.warn(
-                "FileSummary COPY insert failed; retrying with merge-safe upsert",
-                { error: error instanceof Error ? error.message : String(error) },
-              );
+            // LadybugDB 0.16.x native FTS maintenance during bulk node loads
+            // is crash-prone (same family as the Cluster/Symbol FTS
+            // drop-rebuild workarounds elsewhere in the indexer). Drop the
+            // FileSummary FTS index around the COPY lane and recreate it
+            // afterwards. If the drop cannot be proven, skip COPY entirely
+            // and take the merge-safe upsert path with the index in place —
+            // per-row MERGE maintenance is the historically safe shape.
+            const ftsDrop = await dropFtsIndex(
+              wConn,
+              "FileSummary",
+              ENTITY_FTS_INDEX_NAMES.fileSummary,
+            );
+            if (ftsDrop.status === "failed") {
               await ladybugDb.upsertFileSummaryBatch(wConn, newUpserts);
+              return;
+            }
+            try {
+              try {
+                await ladybugDb.insertNewFileSummaryBatch(wConn, newUpserts);
+              } catch (error) {
+                logger.warn(
+                  "FileSummary COPY insert failed; retrying with merge-safe upsert",
+                  { error: error instanceof Error ? error.message : String(error) },
+                );
+                await ladybugDb.upsertFileSummaryBatch(wConn, newUpserts);
+              }
+            } finally {
+              // Only recreate what we actually dropped; an "absent" result
+              // means the index was never there (e.g. deferred on an empty
+              // table) and must stay that way for ensureEntityIndexes.
+              if (ftsDrop.status === "dropped") {
+                await createFtsIndex(
+                  wConn,
+                  "FileSummary",
+                  ENTITY_FTS_INDEX_NAMES.fileSummary,
+                );
+              }
             }
           });
         } else {

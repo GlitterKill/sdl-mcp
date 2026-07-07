@@ -239,6 +239,36 @@ export async function insertNewFileSummaryBatch(
     return true;
   });
 
+  // Absence proof before COPY. Callers classify "new" rows from reads taken
+  // before the write lock, so a row can already exist here (stale classifier
+  // snapshot, WAL-rollback residue, or a concurrent materialisation). COPY
+  // aborts the whole transaction on a duplicated primary key — and an aborted
+  // COPY into the FTS/HNSW-indexed FileSummary table is implicated in native
+  // LadybugDB 0.16.x crashes (silent access violation on the next FileSummary
+  // index cycle, observed 2026-07-07). Re-check existence on the node table
+  // and route already-present rows through the merge-safe upsert instead.
+  // Single-writer semantics make this probe race-free: this function runs on
+  // the serialized write connection, so no other writer can interleave
+  // between the probe and the COPY below.
+  const existingRows = await queryAll<{ fileId: string }>(
+    conn,
+    `MATCH (fs:FileSummary)
+     WHERE fs.fileId IN $fileIds
+     RETURN fs.fileId AS fileId`,
+    { fileIds: rows.map((row) => row.fileId) },
+  );
+  const existingIds = new Set(existingRows.map((row) => row.fileId));
+  if (existingIds.size > 0) {
+    const misclassified = rows.filter((row) => existingIds.has(row.fileId));
+    logger.warn(
+      "insertNewFileSummaryBatch: rerouting already-existing rows to merge-safe upsert",
+      { count: misclassified.length },
+    );
+    await upsertFileSummaryBatch(conn, misclassified);
+    rows = rows.filter((row) => !existingIds.has(row.fileId));
+    if (rows.length === 0) return;
+  }
+
   const tempDir = await mkdtemp(join(tmpdir(), "sdl-file-summaries-"));
   const summaryPath = join(tempDir, "file-summaries.csv");
   const summaryInRepoPath = join(tempDir, "file-summary-in-repo.csv");

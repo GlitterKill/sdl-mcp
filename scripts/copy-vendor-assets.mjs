@@ -14,6 +14,11 @@ await copyOne(
   join(targetDir, "three.module.min.js"),
 );
 
+await copyOne(
+  resolve(root, "node_modules", "three", "build", "three.core.min.js"),
+  join(targetDir, "three.core.min.js"),
+);
+
 for (const dir of ["controls", "loaders", "utils"]) {
   await cp(
     resolve(root, "node_modules", "three", "examples", "jsm", dir),

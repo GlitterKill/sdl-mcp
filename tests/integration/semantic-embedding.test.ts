@@ -396,6 +396,7 @@ describe("Semantic Embedding Pipeline", () => {
       model: jinaModel,
       fileIds: ["file1"],
       embeddingProvider: provider,
+      rebuildMinUncachedRows: 1,
     });
 
     assert.deepStrictEqual(first, {
@@ -455,6 +456,7 @@ describe("Semantic Embedding Pipeline", () => {
       model: jinaModel,
       fileIds: ["file1"],
       embeddingProvider: provider,
+      rebuildMinUncachedRows: 1,
     });
 
     assert.deepStrictEqual(third, {
@@ -524,6 +526,7 @@ describe("Semantic Embedding Pipeline", () => {
       fileIds: ["file1", "file2"],
       embeddingProvider: provider,
       batchSize: 1,
+      rebuildMinUncachedRows: 1,
     });
 
     assert.deepStrictEqual(result, {

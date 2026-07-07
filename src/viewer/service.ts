@@ -116,7 +116,7 @@ export async function getClusterEdges(conn: Connection, repoId: string): Promise
      MATCH (a)-[:BELONGS_TO_CLUSTER]->(ca:Cluster)
      MATCH (b)-[:BELONGS_TO_CLUSTER]->(cb:Cluster)
      WHERE ca.clusterId <> cb.clusterId
-     RETURN ca.clusterId AS from, cb.clusterId AS to, COALESCE(d.kind, d.edgeType, 'depends') AS kind, COUNT(*) AS weight
+     RETURN ca.clusterId AS from, cb.clusterId AS to, COALESCE(d.edgeType, 'depends') AS kind, COUNT(*) AS weight
      ORDER BY from ASC, to ASC, kind ASC`,
     { repoId },
   );
@@ -139,7 +139,7 @@ export async function getSymbolEdges(conn: Connection, repoId: string, clusterId
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)
      MATCH (a)-[:BELONGS_TO_CLUSTER]->(ca:Cluster)
      MATCH (b)-[:BELONGS_TO_CLUSTER]->(cb:Cluster)
-     WITH a, b, d, ca, cb, COALESCE(d.kind, d.edgeType, 'depends') AS kind
+     WITH a, b, d, ca, cb, COALESCE(d.edgeType, 'depends') AS kind
      WHERE (ca.clusterId = $clusterId OR cb.clusterId = $clusterId)
        AND (size($kinds) = 0 OR kind IN $kinds)
        AND COALESCE(d.confidence, 1.0) >= $minConfidence
@@ -165,7 +165,7 @@ export async function getSymbolCard(conn: Connection, repoId: string, symbolId: 
   const depsOut = await queryAll<{ symbolId: string; name: string | null; kind: string | null; edgeKind: string | null }>(
     conn,
     `MATCH (s:Symbol {symbolId: $symbolId})-[d:DEPENDS_ON]->(t:Symbol)
-     RETURN t.symbolId AS symbolId, t.name AS name, t.kind AS kind, COALESCE(d.kind, d.edgeType, 'depends') AS edgeKind
+     RETURN t.symbolId AS symbolId, t.name AS name, t.kind AS kind, COALESCE(d.edgeType, 'depends') AS edgeKind
      ORDER BY symbolId ASC, edgeKind ASC
      LIMIT 10`,
     { symbolId },
@@ -173,7 +173,7 @@ export async function getSymbolCard(conn: Connection, repoId: string, symbolId: 
   const depsIn = await queryAll<{ symbolId: string; name: string | null; kind: string | null; edgeKind: string | null }>(
     conn,
     `MATCH (t:Symbol)-[d:DEPENDS_ON]->(s:Symbol {symbolId: $symbolId})
-     RETURN t.symbolId AS symbolId, t.name AS name, t.kind AS kind, COALESCE(d.kind, d.edgeType, 'depends') AS edgeKind
+     RETURN t.symbolId AS symbolId, t.name AS name, t.kind AS kind, COALESCE(d.edgeType, 'depends') AS edgeKind
      ORDER BY symbolId ASC, edgeKind ASC
      LIMIT 10`,
     { symbolId },

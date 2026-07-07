@@ -2,12 +2,17 @@ import {
   DEFAULT_EMBEDDING_BATCH_SIZE,
   DEFAULT_FILE_SUMMARY_EMBEDDING_BATCH_SIZE,
   DEFAULT_FILE_SUMMARY_EMBEDDING_MAX_CHARS,
+  FILE_SUMMARY_VECTOR_REBUILD_MIN_ROWS,
   MAX_EMBEDDING_BATCH_SIZE,
   MAX_EMBEDDING_CONCURRENCY,
   MAX_FILE_SUMMARY_EMBEDDING_BATCH_SIZE,
   VECTOR_REBUILD_THRESHOLD,
 } from "../config/constants.js";
-import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
+import {
+  getLadybugConn,
+  runWalCheckpoint,
+  withWriteConn,
+} from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { IndexError } from "../domain/errors.js";
 import {
@@ -34,6 +39,12 @@ export interface FileSummaryEmbeddingRefreshResult {
   skipped: number;
   missing: number;
   degraded: boolean;
+  /**
+   * Uncached rows intentionally left for a later rebuild cycle. Set only when
+   * the HNSW rebuild debounce defers the write (see
+   * FILE_SUMMARY_VECTOR_REBUILD_MIN_ROWS).
+   */
+  deferred?: number;
 }
 
 export async function refreshFileSummaryEmbeddings(params: {
@@ -45,6 +56,12 @@ export async function refreshFileSummaryEmbeddings(params: {
   concurrency?: number;
   batchSize?: number;
   maxChars?: number;
+  /**
+   * Minimum uncached rows before the HNSW drop -> write -> create cycle runs.
+   * Defaults to FILE_SUMMARY_VECTOR_REBUILD_MIN_ROWS; tests pass 1 to force
+   * immediate rebuilds.
+   */
+  rebuildMinUncachedRows?: number;
   /** @internal Allows tests to exercise refresh semantics without ONNX files. */
   embeddingProvider?: EmbeddingProvider;
 }): Promise<FileSummaryEmbeddingRefreshResult> {
@@ -112,6 +129,41 @@ export async function refreshFileSummaryEmbeddings(params: {
 
   const vecProp = getVecPropertyName(storageModel);
   const indexName = getFileSummaryVectorIndexName(storageModel);
+
+  // Debounce the HNSW rebuild cycle. VECTOR_REBUILD_THRESHOLD is pinned to 0
+  // (LADYBUG#377), so every write takes the drop -> bulk write -> create
+  // path below; that native cycle silently crashed the server twice on
+  // 2026-07-07 (see FILE_SUMMARY_VECTOR_REBUILD_MIN_ROWS in constants.ts).
+  // Defer small refreshes until enough uncached rows accumulate. Full-scope
+  // refreshes where nothing is cached yet (bootstrap / full
+  // re-summarization) always rebuild so small repositories still get
+  // vectors. Deferred rows stay hash-uncached in the DB, so a later refresh
+  // naturally picks them up; FTS/searchText freshness is unaffected.
+  const rebuildMinUncachedRows =
+    params.rebuildMinUncachedRows ?? FILE_SUMMARY_VECTOR_REBUILD_MIN_ROWS;
+  const payloadBearing = candidates.filter((item) => item.hasPayload).length;
+  const bootstrapRebuild =
+    params.fileIds === undefined && uncached.length === payloadBearing;
+  if (
+    vecProp !== null &&
+    indexName !== null &&
+    uncached.length < rebuildMinUncachedRows &&
+    !bootstrapRebuild
+  ) {
+    logger.info("[file-summary-embeddings] Vector rebuild deferred", {
+      model: storageModel,
+      uncached: uncached.length,
+      threshold: rebuildMinUncachedRows,
+    });
+    return {
+      embedded: 0,
+      skipped,
+      missing: missingPayloads,
+      degraded: false,
+      deferred: uncached.length,
+    };
+  }
+
   // Mirrors the Symbol embedding workaround: with the current LadybugDB HNSW
   // behavior, enough is currently any non-cached vector row.
   const useRebuildPath =
@@ -120,6 +172,12 @@ export async function refreshFileSummaryEmbeddings(params: {
     uncached.length >= VECTOR_REBUILD_THRESHOLD;
   let indexDropped = false;
   if (useRebuildPath && indexName !== null) {
+    // Bound WAL loss if the native rebuild kills the process (recurring
+    // LadybugDB 0.16.x failure mode: silent access violation between the
+    // index drop and recreate, leaving a torn WAL). Checkpointing committed
+    // state first means a crash here can only tear this rebuild's writes,
+    // not hours of unrelated committed work. Best-effort by design.
+    await runWalCheckpoint("filesummary-vector-rebuild-pre-drop");
     const dropResult = await withWriteConn((wConn) =>
       dropVectorIndex(wConn, "FileSummary", indexName),
     );
@@ -198,6 +256,10 @@ export async function refreshFileSummaryEmbeddings(params: {
             modelInfo.dimension,
           ),
         );
+        // Persist the rebuilt index + embeddings immediately instead of
+        // leaving them WAL-only until the size-based auto checkpoint; a
+        // later crash then cannot roll this rebuild back. Best-effort.
+        await runWalCheckpoint("filesummary-vector-rebuild-post-create");
       }
     }
   }

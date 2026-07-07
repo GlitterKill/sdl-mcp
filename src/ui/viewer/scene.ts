@@ -22,7 +22,7 @@ export class ViewerScene {
     host.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x030712, 0.0008);
+    this.scene.fog = new THREE.FogExp2(0x030712, 0.00006);
     this.camera = new THREE.PerspectiveCamera(52, 1, 0.1, 100000);
     this.camera.position.set(0, 700, 1200);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);

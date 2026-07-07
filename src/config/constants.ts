@@ -613,6 +613,23 @@ export const DEFAULT_FILE_SUMMARY_EMBEDDING_MAX_CHARS = 4096;
 export const VECTOR_REBUILD_THRESHOLD = 0;
 
 /**
+ * Debounce floor for FileSummary HNSW rebuild cycles.
+ *
+ * Because VECTOR_REBUILD_THRESHOLD above is pinned to 0 (LADYBUG#377), every
+ * FileSummary embedding refresh with >=1 uncached row would otherwise run a
+ * full DROP_VECTOR_INDEX -> bulk write -> CREATE_VECTOR_INDEX cycle. That
+ * native cycle silently crashed the server twice on 2026-07-07 (process died
+ * with no JS error after "Vector index ... dropped on FileSummary", leaving a
+ * corrupt WAL). Refreshes now defer the rebuild until at least this many
+ * uncached rows accumulate; a full-scope refresh where nothing is cached yet
+ * (bootstrap / full re-summarization) always rebuilds so small repositories
+ * still get vectors. Hybrid retrieval degrades gracefully while rows are
+ * deferred: FTS/searchText stays fresh and vector results serve the last
+ * built index.
+ */
+export const FILE_SUMMARY_VECTOR_REBUILD_MIN_ROWS = 50;
+
+/**
  * Default timeout for operations in milliseconds.
  */
 export const DEFAULT_OPERATION_TIMEOUT_MS = 2000;

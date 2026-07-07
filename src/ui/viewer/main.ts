@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { Cluster } from "./api.js";
-import { ViewerApi } from "./api.js";
+import { ViewerApi, type UniverseRepo } from "./api.js";
 import { AmbientController } from "./ambient.js";
 import { ViewerChrome } from "./chrome.js";
 import { InspectorPanel } from "./inspector.js";
@@ -66,13 +66,21 @@ async function boot(): Promise<void> {
   const skins = await api.skins().catch(() => ({ skins: [] }));
   chrome.setSkins(skins.skins);
 
+  const rendered: UniverseRepo[] = [];
   for (const repo of universe.repos.filter((item) => state.visibleRepos.has(item.repoId))) {
-    const [clustersResponse, layout, edgeResponse] = await Promise.all([api.clusters(repo.repoId), api.layout(repo.repoId, "cluster"), api.clusterEdges(repo.repoId)]);
-    const clusters: Cluster[] = clustersResponse.clusters ?? [];
-    universeRenderer.renderRepo(repo, clusters, layout);
-    universeRenderer.renderClusterEdges(repo.repoId, edgeResponse.edges ?? []);
+    try {
+      const [clustersResponse, layout, edgeResponse] = await Promise.all([api.clusters(repo.repoId), api.layout(repo.repoId, "cluster"), api.clusterEdges(repo.repoId)]);
+      const clusters: Cluster[] = clustersResponse.clusters ?? [];
+      universeRenderer.renderRepo(repo, clusters, layout);
+      universeRenderer.renderClusterEdges(repo.repoId, edgeResponse.edges ?? []);
+      rendered.push(repo);
+    } catch (error) {
+      console.warn(`[viewer] skipping repo ${repo.repoId}`, error);
+    }
   }
-  scene.flyTo(new THREE.Vector3(0, 0, 0));
+  const home = rendered.reduce<UniverseRepo | undefined>((best, repo) => (!best || repo.symbolCount > best.symbolCount ? repo : best), undefined);
+  if (home) scene.flyTo(new THREE.Vector3(home.galaxy.position[0], home.galaxy.position[1], home.galaxy.position[2]), Math.max(420, home.galaxy.radius * 1.6));
+  else scene.flyTo(new THREE.Vector3(0, 0, 0));
   scene.onFrame(() => { void lod.maybeExpandNearest(); });
   activity.start();
   chrome.setStatus("live");

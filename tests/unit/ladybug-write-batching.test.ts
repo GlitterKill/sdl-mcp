@@ -551,6 +551,74 @@ describe("LadybugDB write batching", () => {
     );
   });
 
+  it("reroutes already-existing file summaries to the merge-safe upsert before COPY", async () => {
+    const statements: string[] = [];
+    const conn = {
+      async prepare(statement: string) {
+        return {
+          statement,
+          isSuccess() {
+            return true;
+          },
+          getErrorMessage() {
+            return "";
+          },
+        };
+      },
+      async execute(
+        preparedStatement: { statement: string },
+        params?: Record<string, unknown>,
+      ) {
+        void params;
+        statements.push(preparedStatement.statement);
+        return {
+          close(): void {},
+          async getAll(): Promise<unknown[]> {
+            // Absence probe reports file-1 as already present.
+            return preparedStatement.statement.includes("RETURN fs.fileId")
+              ? [{ fileId: "file-1" }]
+              : [];
+          },
+        };
+      },
+      async query(statement: string) {
+        statements.push(statement);
+        return new FakeQueryResult();
+      },
+    } as unknown as import("kuzu").Connection;
+
+    await insertNewFileSummaryBatch(conn, [
+      {
+        fileId: "file-1",
+        repoId: "repo",
+        summary: "row that already exists in the node table",
+        searchText: "file: src/existing.ts",
+        updatedAt: "2026-07-07T00:00:00.000Z",
+      },
+      {
+        fileId: "file-2",
+        repoId: "repo",
+        summary: "provably new row",
+        searchText: "file: src/new.ts",
+        updatedAt: "2026-07-07T00:00:00.000Z",
+      },
+    ]);
+
+    assert.strictEqual(
+      countStatementsContaining(statements, "MERGE (fs:FileSummary"),
+      1,
+      "already-existing rows should take the merge-safe upsert lane",
+    );
+    assert.strictEqual(
+      countStatementsContaining(statements, "COPY FileSummary FROM"),
+      1,
+      "provably-new rows should still use the COPY lane",
+    );
+    // One transaction for the merge-safe reroute chunk, one for the COPY lane.
+    assert.strictEqual(countStatements(statements, "BEGIN TRANSACTION"), 2);
+    assert.strictEqual(countStatements(statements, "COMMIT"), 2);
+  });
+
   it("directly creates replacement cluster members after delete", async () => {
     const statements: string[] = [];
     const conn = createFakeConnection(statements);
