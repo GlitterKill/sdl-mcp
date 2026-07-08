@@ -14,14 +14,14 @@ export function createSymbolEdges(edges: SymbolEdge[], positions: Map<string, TH
     const from = positions.get(edge.from);
     const to = positions.get(edge.to);
     if (!from || !to) continue;
-    const color = new THREE.Color(KIND_COLORS[kind] ?? "#64748b").multiplyScalar(Math.max(0.25, confidence));
+    const color = new THREE.Color(KIND_COLORS[kind] ?? "#93a7c8").multiplyScalar(Math.max(0.65, confidence));
     points.push(from.x, from.y, from.z, to.x, to.y, to.z);
     colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-  return new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.45 }));
+  return new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
 }
 
 export function edgeCounts(edges: SymbolEdge[]): Map<string, number> {

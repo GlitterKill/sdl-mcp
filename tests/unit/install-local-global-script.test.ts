@@ -24,6 +24,9 @@ describe("install-local-global.ps1", () => {
   it("stops managed Watchman before restaging package files", () => {
     assert.match(script, /function Stop-ManagedWatchmanBinary/);
     assert.match(script, /shutdown-server/);
+    // watch-del-all must run before shutdown-server: shutting down with live
+    // watcher threads crashes the vendored watchman build (teardown race).
+    assert.match(script, /watch-del-all[\s\S]*shutdown-server/);
     assert.match(
       script,
       /Stop-ManagedWatchmanBinary -BinaryPath \$watchmanBinary[\s\S]*Invoke-Native node scripts\/prepare-watchman-packages\.mjs/,

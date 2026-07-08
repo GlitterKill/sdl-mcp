@@ -37,7 +37,7 @@ export class LodController {
     ]);
     const nodes: SymbolNode[] = edgeResponse.nodes ?? layout.positions.map((position): SymbolNode => ({ id: position.id }));
     const geometry = new THREE.SphereGeometry(3.5, 10, 8);
-    const material = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.25, vertexColors: true, emissive: new THREE.Color("#000000") });
+    const material = new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.05, vertexColors: true, emissive: new THREE.Color("#0b1526") });
     const mesh = new THREE.InstancedMesh(geometry, material, Math.max(nodes.length, 1));
     mesh.name = "symbols:" + key;
     const matrix = new THREE.Matrix4();

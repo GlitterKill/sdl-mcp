@@ -17,7 +17,7 @@ export class UniverseRenderer {
     repoGroup.name = "repo:" + repo.repoId;
     repoGroup.position.set(repo.galaxy.position[0], repo.galaxy.position[1], repo.galaxy.position[2]);
     const geometry = new THREE.SphereGeometry(10, 16, 12);
-    const material = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.1, vertexColors: true });
+    const material = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0, vertexColors: true });
     const mesh = new THREE.InstancedMesh(geometry, material, Math.max(clusters.length, 1));
     mesh.name = "clusters:" + repo.repoId;
     const color = new THREE.Color();
@@ -42,7 +42,7 @@ export class UniverseRenderer {
   renderClusterEdges(repoId: string, edges: ClusterEdge[]): THREE.LineSegments {
     const points: number[] = [];
     const colors: number[] = [];
-    const color = new THREE.Color("#314155");
+    const color = new THREE.Color("#5f82c4");
     for (const edge of edges) {
       const from = this.clusters.get(repoId + ":" + edge.from)?.position;
       const to = this.clusters.get(repoId + ":" + edge.to)?.position;
@@ -53,7 +53,7 @@ export class UniverseRenderer {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-    const material = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.28 });
+    const material = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false });
     const lines = new THREE.LineSegments(geometry, material);
     lines.name = "cluster-edges:" + repoId;
     this.group.add(lines);

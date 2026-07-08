@@ -29,7 +29,7 @@ export class ViewerScene {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
 
-    const ambient = new THREE.AmbientLight(0xb8d7ff, 0.45);
+    const ambient = new THREE.AmbientLight(0xb8d7ff, 1.15);
     const key = new THREE.DirectionalLight(0xffffff, 1.1);
     key.position.set(600, 900, 500);
     this.scene.add(ambient, key, this.root);

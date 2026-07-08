@@ -129,6 +129,12 @@ function Stop-ManagedWatchmanBinary {
   }
 
   Write-Host "Stopping managed Watchman before restaging: $BinaryPath"
+  # Drop all watched roots first: shutdown-server with live watcher threads
+  # crashes this watchman build (0xc0000005 teardown race) and skips state save.
+  & $BinaryPath --no-pretty --no-spawn watch-del-all *> $null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Watchman watch-del-all exited with $LASTEXITCODE; continuing." -ForegroundColor Yellow
+  }
   & $BinaryPath --no-pretty --no-spawn shutdown-server *> $null
   if ($LASTEXITCODE -ne 0) {
     Write-Host "Watchman shutdown-server exited with $LASTEXITCODE; continuing." -ForegroundColor Yellow
