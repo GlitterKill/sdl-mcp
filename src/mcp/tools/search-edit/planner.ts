@@ -287,11 +287,19 @@ export function compileSearchRegex(
       throw new ValidationError(`Invalid regex pattern: ${pattern}`);
     }
   }
-  const escaped = (query.literal as string).replace(
-    /[.*+?^${}()|[\]\\]/g,
-    "\\$&",
+  return new RegExp(
+    escapeSearchLiteral(query.literal as string),
+    global ? "g" : "",
   );
-  return new RegExp(escaped, global ? "g" : "");
+}
+
+/**
+ * Escape a literal query for regex use. Newlines become EOL-tolerant
+ * (`\r?\n`) so multi-line literals match CRLF files.
+ */
+function escapeSearchLiteral(literal: string): string {
+  const escaped = literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return escaped.replace(/\r\n|\n/g, "\\r?\\n");
 }
 
 const MAX_GLOB_WILDCARDS = 6;
@@ -805,7 +813,7 @@ function buildFileWriteRequestForMode(
       const pattern =
         query.regex !== undefined
           ? query.regex
-          : (query.literal as string).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          : escapeSearchLiteral(query.literal as string);
       return {
         ...base,
         replacePattern: {

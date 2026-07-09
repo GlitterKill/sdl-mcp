@@ -5,7 +5,6 @@ import { AmbientController } from "./ambient.js";
 import { ViewerChrome } from "./chrome.js";
 import { InspectorPanel } from "./inspector.js";
 import { ActivityLens } from "./lenses/activity.js";
-import { applyCommunityLens } from "./lenses/community.js";
 import { attachSearch } from "./lenses/search.js";
 import { LodController } from "./lod.js";
 import { PickingController } from "./picking.js";
@@ -43,7 +42,6 @@ attachSearch(chrome.searchInput, resultsHost, api, firstVisibleRepo, async (resu
 });
 chrome.ambientButton.addEventListener("click", () => setAmbient(!state.ambient));
 chrome.fpsSelect.addEventListener("change", () => scene.setFpsCap(Number(chrome.fpsSelect.value)));
-chrome.lensSelect.addEventListener("change", () => { if (chrome.lensSelect.value === "community") applyCommunityLens(universeRenderer); });
 chrome.skinSelect.addEventListener("change", async () => {
   if (chrome.skinSelect.value === "default") return;
   const bytes = await api.skinBytes(chrome.skinSelect.value);
@@ -52,9 +50,15 @@ chrome.skinSelect.addEventListener("change", async () => {
   applySkinCssVars(canvasHost, skin.manifest);
 });
 
+let lastLens = state.activeLens;
 subscribe((snapshot) => {
   chrome.lensSelect.value = snapshot.activeLens;
   if (snapshot.settings) scene.setFpsCap(snapshot.ambient ? snapshot.settings.ambient.fps : Number(chrome.fpsSelect.value));
+  if (snapshot.activeLens !== lastLens) {
+    lastLens = snapshot.activeLens;
+    universeRenderer.applyLens(snapshot.activeLens);
+    lod.applyLens();
+  }
 });
 
 async function boot(): Promise<void> {

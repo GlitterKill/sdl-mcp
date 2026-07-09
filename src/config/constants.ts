@@ -630,6 +630,21 @@ export const VECTOR_REBUILD_THRESHOLD = 0;
 export const FILE_SUMMARY_VECTOR_REBUILD_MIN_ROWS = 50;
 
 /**
+ * Debounce floor for Symbol HNSW rebuild cycles.
+ *
+ * Same rationale as FILE_SUMMARY_VECTOR_REBUILD_MIN_ROWS above: with
+ * VECTOR_REBUILD_THRESHOLD pinned to 0 (LADYBUG#377), every Symbol embedding
+ * refresh with >=1 uncached row runs the drop -> bulk write -> create cycle
+ * per model. On 2026-07-08 that native cycle silently crashed the server
+ * during the second model's rebuild (259 uncached rows triggered two full
+ * 26k-row HNSW rebuilds), tearing the WAL. Refreshes defer the rebuild until
+ * at least this many uncached rows accumulate; a full-scope refresh where
+ * nothing is cached yet (bootstrap) always rebuilds. Deferred rows stay
+ * hash-uncached, so a later refresh picks them up.
+ */
+export const SYMBOL_VECTOR_REBUILD_MIN_ROWS = 50;
+
+/**
  * Default timeout for operations in milliseconds.
  */
 export const DEFAULT_OPERATION_TIMEOUT_MS = 2000;

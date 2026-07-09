@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Breaking (UI)**: the legacy SDL Graph Explorer at `/ui/graph` was removed; `/ui/graph` now issues a 308 redirect to `/ui/viewer`. Legacy `/api/graph/{repoId}/slice|neighborhood|blast-radius` endpoints remain (deprecated, now served from `src/viewer/legacy-graph.ts`).
+
+### Fixed
+
+- **Symbol HNSW rebuild crash hardening**: ported the FileSummary vector-rebuild hardening to the Symbol embedding lane after a silent native crash on 2026-07-08 (LadybugDB 0.16.x access violation during the second model's drop→write→create cycle tore the WAL). `refreshSymbolEmbeddings` now defers the rebuild until at least `SYMBOL_VECTOR_REBUILD_MIN_ROWS` (50) uncached rows accumulate (bootstrap full-scope runs always rebuild) and brackets each rebuild with WAL checkpoints (`symbol-vector-rebuild-pre-drop` / `-post-create`) so a crash can only tear that rebuild's writes. Also removes the pointless drop/create cycle on refreshes with zero uncached rows.
+- **search.edit CRLF zero-match**: multi-line `query.literal` values with LF newlines silently matched nothing in CRLF files (`filesMatched: 0` with no skip reason). Literal queries are now compiled with EOL-tolerant newlines (`\r?\n`) in both the preview match counter and the replacePattern write path; replacement output already preserved the file's dominant EOL.
+- **Viewer node visibility**: SDL Galaxy cluster/symbol meshes were rendered nearly black because instanced materials set `vertexColors: true` without a per-vertex color attribute, zeroing the shader color before per-instance colors applied. Instanced meshes now use plain bright materials driven by `setColorAt` plus an additive-blend halo shell for glow.
+- **Viewer lens dropdown**: the Normal/Community/Impact/Edges selector only recolored one lens (community) into the colors it already had, so it appeared dead. Lens changes now restyle the whole scene: Normal (pale starlight), Community (palette per cluster), Impact (member-count/fan-in heat), Edges (dimmed nodes, emphasized edge lines); expanded symbol clusters follow the active lens.
+
 ## [0.12.2] - 2026-07-07
 
 ### Added

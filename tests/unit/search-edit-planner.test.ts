@@ -139,6 +139,15 @@ describe("search-edit planner — compileSearchRegex", () => {
     const reSingle = compileSearchRegex({ literal: "x" }, false);
     assert.equal(reSingle.flags.includes("g"), false);
   });
+
+  it("matches either EOL style for multi-line literals", () => {
+    const re = compileSearchRegex({ literal: "foo(\n  bar," }, false);
+    assert.equal(re.test("foo(\r\n  bar,"), true);
+    assert.equal(re.test("foo(\n  bar,"), true);
+    const reCrlf = compileSearchRegex({ literal: "a\r\nb" }, false);
+    assert.equal(reCrlf.test("a\nb"), true);
+    assert.equal(reCrlf.test("a\r\nb"), true);
+  });
 });
 
 describe("search-edit planner — enumerateRepoFiles", () => {

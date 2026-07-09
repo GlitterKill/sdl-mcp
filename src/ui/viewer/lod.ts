@@ -3,10 +3,10 @@ import type { ViewerApi, SymbolNode } from "./api.js";
 import { createSymbolEdges } from "./edges.js";
 import type { ViewerScene } from "./scene.js";
 import { touchExpandedCluster, removeExpandedCluster, state } from "./state.js";
-import { KIND_COLORS } from "./theme.js";
+import { KIND_COLORS, hashColor } from "./theme.js";
 import type { UniverseRenderer } from "./universe.js";
 
-type Expanded = { key: string; group: THREE.Group; positions: Map<string, THREE.Vector3>; nodes: SymbolNode[] };
+type Expanded = { key: string; clusterId: string; group: THREE.Group; positions: Map<string, THREE.Vector3>; nodes: SymbolNode[]; mesh: THREE.InstancedMesh; lines: THREE.LineSegments };
 
 export class LodController {
   private expanded = new Map<string, Expanded>();
@@ -37,7 +37,7 @@ export class LodController {
     ]);
     const nodes: SymbolNode[] = edgeResponse.nodes ?? layout.positions.map((position): SymbolNode => ({ id: position.id }));
     const geometry = new THREE.SphereGeometry(3.5, 10, 8);
-    const material = new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.05, vertexColors: true, emissive: new THREE.Color("#0b1526") });
+    const material = new THREE.MeshBasicMaterial();
     const mesh = new THREE.InstancedMesh(geometry, material, Math.max(nodes.length, 1));
     mesh.name = "symbols:" + key;
     const matrix = new THREE.Matrix4();
@@ -51,15 +51,16 @@ export class LodController {
       const scale = 0.5 + Math.log2(1 + (node.fanIn ?? 0)) * 0.25;
       matrix.compose(position, new THREE.Quaternion(), new THREE.Vector3(scale, scale, scale));
       mesh.setMatrixAt(index, matrix);
-      mesh.setColorAt(index, color.set(KIND_COLORS[node.kind ?? "function"] ?? "#e5e7eb"));
+      mesh.setColorAt(index, this.nodeColor(node, cluster.clusterId, color));
     });
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    const lines = createSymbolEdges(edgeResponse.edges, positions);
     const group = new THREE.Group();
     group.add(mesh);
-    group.add(createSymbolEdges(edgeResponse.edges, positions));
+    group.add(lines);
     this.viewer.root.add(group);
-    this.expanded.set(key, { key, group, positions, nodes });
+    this.expanded.set(key, { key, clusterId: cluster.clusterId, group, positions, nodes, mesh, lines });
   }
 
   collapse(key: string, expanded = this.expanded.get(key)): void {
@@ -67,6 +68,28 @@ export class LodController {
     this.viewer.disposeObject(expanded.group);
     this.expanded.delete(key);
     removeExpandedCluster(key);
+  }
+
+  applyLens(): void {
+    const color = new THREE.Color();
+    for (const expanded of this.expanded.values()) {
+      expanded.nodes.forEach((node, index) => {
+        expanded.mesh.setColorAt(index, this.nodeColor(node, expanded.clusterId, color));
+      });
+      if (expanded.mesh.instanceColor) expanded.mesh.instanceColor.needsUpdate = true;
+      (expanded.lines.material as THREE.LineBasicMaterial).opacity = state.activeLens === "edges" ? 1 : 0.85;
+    }
+  }
+
+  private nodeColor(node: SymbolNode, clusterId: string, target: THREE.Color): THREE.Color {
+    const lens = state.activeLens;
+    if (lens === "community") return target.set(hashColor(clusterId));
+    if (lens === "impact") {
+      const heat = Math.min(1, Math.log2(1 + (node.fanIn ?? 0)) / 8);
+      return target.set("#38bdf8").lerp(new THREE.Color("#fb7185"), heat);
+    }
+    target.set(KIND_COLORS[node.kind ?? "function"] ?? "#e5e7eb");
+    return lens === "edges" ? target.multiplyScalar(0.35) : target;
   }
 
   getExpanded(): Expanded[] { return [...this.expanded.values()]; }

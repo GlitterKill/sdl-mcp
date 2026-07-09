@@ -1,4 +1,8 @@
-import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
+import {
+  getLadybugConn,
+  runWalCheckpoint,
+  withWriteConn,
+} from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { hashContent } from "../util/hashing.js";
 import { logger } from "../util/logger.js";
@@ -6,6 +10,7 @@ import {
   DEFAULT_EMBEDDING_BATCH_SIZE,
   MAX_EMBEDDING_BATCH_SIZE,
   MAX_EMBEDDING_CONCURRENCY,
+  SYMBOL_VECTOR_REBUILD_MIN_ROWS,
   VECTOR_REBUILD_THRESHOLD,
 } from "../config/constants.js";
 import {
@@ -298,7 +303,13 @@ export async function refreshSymbolEmbeddings(params: {
    * value can't OOM the tokenizer or break ONNX session shape contracts.
    */
   batchSize?: number;
-}): Promise<{ embedded: number; skipped: number }> {
+  /**
+   * Minimum uncached rows before the HNSW drop/rebuild cycle runs.
+   * Defaults to SYMBOL_VECTOR_REBUILD_MIN_ROWS; tests pass 1 to force
+   * the rebuild path.
+   */
+  rebuildMinUncachedRows?: number;
+}): Promise<{ embedded: number; skipped: number; deferred?: number }> {
   const modelName = params.model ?? "jina-embeddings-v2-base-code";
   const provider = getEmbeddingProvider(params.provider, modelName);
   const conn = await getLadybugConn();
@@ -369,6 +380,39 @@ export async function refreshSymbolEmbeddings(params: {
   // throughput optimisation.
   uncachedItems.sort((a, b) => a.prefixedText.length - b.prefixedText.length);
 
+  // Debounce the HNSW rebuild cycle. VECTOR_REBUILD_THRESHOLD is pinned to 0
+  // (LADYBUG#377), so every refresh with >=1 uncached row takes the drop ->
+  // bulk write -> create path below; that native cycle silently crashed the
+  // server on 2026-07-08 during the second model's Symbol rebuild (see
+  // SYMBOL_VECTOR_REBUILD_MIN_ROWS in constants.ts). Defer small refreshes
+  // until enough uncached rows accumulate. Full-scope refreshes where
+  // nothing is cached yet (bootstrap) always rebuild so small repositories
+  // still get vectors. Deferred rows stay hash-uncached in the DB, so a
+  // later refresh naturally picks them up.
+  const vecProp = getVecPropertyName(modelName);
+  const indexName = getVectorIndexName(modelName);
+  const rebuildMinUncachedRows =
+    params.rebuildMinUncachedRows ?? SYMBOL_VECTOR_REBUILD_MIN_ROWS;
+  const bootstrapRebuild =
+    params.symbols === undefined &&
+    uncachedItems.length > 0 &&
+    uncachedItems.length === symbols.length;
+  if (
+    vecProp !== null &&
+    indexName !== null &&
+    uncachedItems.length < rebuildMinUncachedRows &&
+    !bootstrapRebuild
+  ) {
+    if (uncachedItems.length > 0) {
+      logger.info("[embeddings] Symbol vector rebuild deferred", {
+        model: storageModel,
+        uncached: uncachedItems.length,
+        threshold: rebuildMinUncachedRows,
+      });
+    }
+    return { embedded: 0, skipped, deferred: uncachedItems.length };
+  }
+
   // Resolve concurrency: clamp to [1, MAX_EMBEDDING_CONCURRENCY].
   const maxConcurrency = Math.max(
     1,
@@ -409,14 +453,20 @@ export async function refreshSymbolEmbeddings(params: {
   // VECTOR_REBUILD_THRESHOLD, dropping the vector index for the duration
   // of the writes is much cheaper than per-row HNSW maintenance:
   // O(N · log N · M · efc) becomes O(rebuild) ≈ a single pass at the end.
-  const vecProp = getVecPropertyName(modelName);
-  const indexName = getVectorIndexName(modelName);
   const useRebuildPath =
     vecProp !== null &&
     indexName !== null &&
     uncachedItems.length >= VECTOR_REBUILD_THRESHOLD;
   let indexDropped = false;
   if (useRebuildPath) {
+    // Bound WAL loss if the native rebuild kills the process (recurring
+    // LadybugDB 0.16.x failure mode: silent access violation between the
+    // index drop and recreate, leaving a torn WAL). Checkpointing committed
+    // state first means a crash here can only tear this rebuild's writes,
+    // not the preceding model's cycle or unrelated committed work. Must run
+    // outside withWriteConn (checkpoint acquires its own connection).
+    // Best-effort by design.
+    await runWalCheckpoint("symbol-vector-rebuild-pre-drop");
     const dropResult = await withWriteConn((wConn) =>
       dropVectorIndex(wConn, "Symbol", indexName),
     );
@@ -695,6 +745,12 @@ export async function refreshSymbolEmbeddings(params: {
             `[embeddings] Vector index '${indexName}' rebuild FAILED — vector retrieval for ${modelName} will degrade until next refresh`,
           );
         }
+        // Persist the rebuilt index + embeddings immediately instead of
+        // leaving them WAL-only until the size-based auto checkpoint; a
+        // later crash (e.g. the next model's cycle) then cannot roll this
+        // rebuild back, and the next cycle starts from a near-empty WAL.
+        // Best-effort.
+        await runWalCheckpoint("symbol-vector-rebuild-post-create");
       }
     }
   }

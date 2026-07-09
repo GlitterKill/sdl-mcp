@@ -87,6 +87,50 @@ describe("semantic pipeline regressions", () => {
     );
   });
 
+  it("debounces and checkpoint-brackets the Symbol HNSW rebuild cycle", () => {
+    const source = readSource("src/indexer/embeddings.ts");
+    const fnStart = source.indexOf(
+      "export async function refreshSymbolEmbeddings(",
+    );
+    const nextFnStart = source.indexOf("\nexport ", fnStart + 1);
+    const fnEnd = nextFnStart !== -1 ? nextFnStart : source.length;
+    assert.ok(fnStart !== -1);
+    const fnBody = source.slice(fnStart, fnEnd);
+
+    // 1. Small refreshes defer the drop/rebuild cycle (2026-07-08 crash:
+    //    silent native death during the second model's Symbol rebuild).
+    const debounceIdx = fnBody.indexOf("SYMBOL_VECTOR_REBUILD_MIN_ROWS");
+    assert.ok(
+      debounceIdx !== -1,
+      "refreshSymbolEmbeddings should debounce small rebuilds via SYMBOL_VECTOR_REBUILD_MIN_ROWS",
+    );
+
+    // 2. WAL checkpoint before the index drop bounds torn-WAL loss to this
+    //    rebuild's writes, and after create persists the rebuilt index.
+    const preDropIdx = fnBody.indexOf(
+      'runWalCheckpoint("symbol-vector-rebuild-pre-drop")',
+    );
+    const dropIdx = fnBody.indexOf('dropVectorIndex(wConn, "Symbol"');
+    const createIdx = fnBody.indexOf("createVectorIndex(");
+    const postCreateIdx = fnBody.indexOf(
+      'runWalCheckpoint("symbol-vector-rebuild-post-create")',
+    );
+    assert.ok(preDropIdx !== -1, "pre-drop WAL checkpoint must exist");
+    assert.ok(postCreateIdx !== -1, "post-create WAL checkpoint must exist");
+    assert.ok(
+      debounceIdx < preDropIdx,
+      "debounce must run before the checkpoint/drop cycle",
+    );
+    assert.ok(
+      preDropIdx < dropIdx,
+      "pre-drop checkpoint must precede the index drop",
+    );
+    assert.ok(
+      createIdx !== -1 && createIdx < postCreateIdx,
+      "post-create checkpoint must follow the index recreate",
+    );
+  });
+
   it("uses hybrid search path instead of legacy rerank", () => {
     const source = readSource("src/mcp/tools/symbol.ts");
     const fnStart = source.indexOf("export async function handleSymbolSearch(");
