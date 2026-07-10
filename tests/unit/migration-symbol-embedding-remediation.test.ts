@@ -1006,6 +1006,19 @@ async function runMultiBatchCase(name: string): Promise<{
 
 describe("SymbolEmbedding remediation batching", () => {
   it("uses deterministic bounded batches for 257 rows in each lane", async () => {
+    const expectedMiniIds = Array.from(
+      { length: 257 },
+      (_, index) => `mini-${String(index).padStart(3, "0")}`,
+    );
+    const expectedNomicIds = Array.from(
+      { length: 257 },
+      (_, index) => `nomic-${String(index).padStart(3, "0")}`,
+    );
+    const expectedDestinationIds = [
+      ...expectedMiniIds,
+      ...expectedNomicIds,
+    ].sort();
+
     const first = await runMultiBatchCase("batch-first");
     const second = await runMultiBatchCase("batch-second");
 
@@ -1028,21 +1041,36 @@ describe("SymbolEmbedding remediation batching", () => {
         assert.equal(result.categories[category].length, Math.ceil(257 / 256));
       }
 
+      assert.deepEqual(
+        result.categories.destinationRead.map(({ length }) => length),
+        [256, 256, 2],
+      );
+      assert.deepEqual(
+        result.categories.destinationRead.flat(),
+        expectedDestinationIds,
+      );
+
       for (const category of [
-        "destinationRead",
         "miniCopy",
-        "nomicCopy",
         "miniDeleteVerify",
         "miniDelete",
+      ] as const) {
+        assert.deepEqual(
+          result.categories[category].map(({ length }) => length),
+          [256, 1],
+        );
+        assert.deepEqual(result.categories[category].flat(), expectedMiniIds);
+      }
+      for (const category of [
+        "nomicCopy",
         "nomicDeleteVerify",
         "nomicDelete",
       ] as const) {
-        const chunks = result.categories[category];
-        for (const ids of chunks) {
-          assert.deepEqual(ids, [...ids].sort());
-        }
-        const flattened = chunks.flat();
-        assert.deepEqual(flattened, [...flattened].sort());
+        assert.deepEqual(
+          result.categories[category].map(({ length }) => length),
+          [256, 1],
+        );
+        assert.deepEqual(result.categories[category].flat(), expectedNomicIds);
       }
     }
 
