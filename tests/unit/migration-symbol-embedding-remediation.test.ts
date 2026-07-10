@@ -7,6 +7,7 @@ import { join } from "node:path";
 import {
   exec,
   execDdl,
+  isConnectionPoisoned,
   queryAll,
 } from "../../dist/db/ladybug-core.js";
 import {
@@ -461,6 +462,7 @@ interface InterceptRule {
   occurrence?: number;
   beforeExecute?: (context: InterceptContext) => void | Promise<void>;
   afterExecute?: (context: InterceptContext) => void | Promise<void>;
+  afterSettle?: (context: InterceptContext) => void | Promise<void>;
 }
 
 interface ExecutedStatement extends InterceptContext {}
@@ -511,10 +513,12 @@ function interceptConnection(
           await activeRule?.beforeExecute?.(context);
 
           try {
-            return await target.execute(prepared, rawParams);
-          } finally {
+            const result = await target.execute(prepared, rawParams);
             await activeRule?.afterExecute?.(context);
-            lifecycle.push(`execute:done:${statement}`);
+            return result;
+          } finally {
+            await activeRule?.afterSettle?.(context);
+            lifecycle.push(`execute:settled:${statement}`);
           }
         };
       }
@@ -632,8 +636,8 @@ describe("SymbolEmbedding remediation failure boundaries", () => {
       [
         {
           match: "ROLLBACK",
-          afterExecute() {
-            lifecycle.push("rollback-complete");
+          afterSettle() {
+            lifecycle.push("rollback-settled");
           },
         },
       ],
@@ -661,10 +665,41 @@ describe("SymbolEmbedding remediation failure boundaries", () => {
     const sourceReadIndex = lifecycle.findIndex((entry) =>
       entry.includes("prepare:MATCH (se:SymbolEmbedding)"),
     );
-    const rollbackIndex = lifecycle.indexOf("rollback-complete");
+    const rollbackIndex = lifecycle.indexOf("rollback-settled");
     assert.ok(sourceReadIndex >= 0);
     assert.ok(sourceReadIndex < rollbackIndex);
     assert.ok(rollbackIndex < lifecycle.indexOf("returned"));
+  });
+
+  it("propagates rollback failures instead of treating them as missing-table no-ops", async () => {
+    const { conn: real } = await createRawDatabase("rollback-failure");
+    await execDdl(
+      real,
+      `CREATE NODE TABLE Symbol (
+        symbolId STRING PRIMARY KEY,
+        embeddingMiniLM STRING,
+        embeddingMiniLMCardHash STRING,
+        embeddingMiniLMUpdatedAt STRING,
+        embeddingNomic STRING,
+        embeddingNomicCardHash STRING,
+        embeddingNomicUpdatedAt STRING
+      )`,
+    );
+
+    const proxy = interceptConnection(real, [
+      {
+        match: "ROLLBACK",
+        beforeExecute() {
+          throw new Error("rollback-sentinel");
+        },
+      },
+    ]);
+
+    await assert.rejects(
+      remediateSymbolEmbeddings(proxy, "rollback-failure"),
+      /rollback-sentinel/,
+    );
+    assert.equal(isConnectionPoisoned(proxy), true);
   });
 
   it("propagates non-table source read failures after rollback", async () => {
@@ -681,8 +716,8 @@ describe("SymbolEmbedding remediation failure boundaries", () => {
         },
         {
           match: "ROLLBACK",
-          afterExecute() {
-            lifecycle.push("rollback-complete");
+          afterSettle() {
+            lifecycle.push("rollback-settled");
           },
         },
       ],
@@ -694,7 +729,7 @@ describe("SymbolEmbedding remediation failure boundaries", () => {
       remediateSymbolEmbeddings(proxy, "source-read-failure"),
       /source-read-sentinel/,
     );
-    assert.ok(lifecycle.includes("rollback-complete"));
+    assert.ok(lifecycle.includes("rollback-settled"));
   });
 
   it("revalidates destination and source fingerprints before copying", async () => {

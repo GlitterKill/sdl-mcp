@@ -2,6 +2,7 @@ import type { Connection } from "kuzu";
 
 import {
   exec,
+  isConnectionPoisoned,
   queryAll,
   withTransaction,
 } from "../ladybug-core.js";
@@ -510,7 +511,12 @@ export async function remediateSymbolEmbeddings(
       return candidates;
     });
   } catch (error) {
-    if (!isMissingSymbolEmbeddingTable(error)) throw error;
+    if (
+      isConnectionPoisoned(conn) ||
+      !isMissingSymbolEmbeddingTable(error)
+    ) {
+      throw error;
+    }
     logRemediationSummary(migrationLabel, summary);
     return summary;
   }
