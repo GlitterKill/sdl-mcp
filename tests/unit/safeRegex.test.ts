@@ -169,6 +169,8 @@ const REJECTED_CLASS_CASES = [
   { pattern: "[a\\/]", reason: /unsupported escape/i },
   { pattern: "[a\\!]", reason: /unsupported escape/i },
   { pattern: "[a--c]", reason: /ASCII letters or digits/i },
+  { pattern: "[a-b-c]", reason: /range endpoints cannot be reused/i },
+  { pattern: "[0-2-4]", reason: /range endpoints cannot be reused/i },
   { pattern: "[[:alpha:]]", reason: /POSIX|nested opening bracket/i },
   { pattern: "[[.ch.]]", reason: /POSIX|nested opening bracket/i },
   { pattern: "[[=a=]]", reason: /POSIX|nested opening bracket/i },

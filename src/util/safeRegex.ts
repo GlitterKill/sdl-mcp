@@ -199,6 +199,9 @@ function compileSafeBracketClass(
 
     const left = tokens[index - 1];
     const right = tokens[index + 1];
+    if (rangeEndpoints.has(index - 1) || rangeEndpoints.has(index + 1)) {
+      invalidClass(glob, startIndex, "range endpoints cannot be reused");
+    }
     const leftKind = asciiRangeKind(left.value);
     const rightKind = asciiRangeKind(right.value);
     if (leftKind === null || rightKind === null) {
