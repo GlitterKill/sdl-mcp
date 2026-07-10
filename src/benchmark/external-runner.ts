@@ -1,18 +1,30 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs, { existsSync, readdirSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
+  buildExternalBenchmarkResults,
   compareArtifactPath,
   fingerprintDirectory,
   fingerprintFiles,
+  hashSerializedManifest,
   normalizeArtifactPath,
+  serializeExternalBenchmarkResults,
+  serializeRunManifest,
   sha256File,
+  type ExternalBenchmarkFailureBoundary,
+  type ExternalBenchmarkRawRepeat,
+  type ExternalBenchmarkRawResult,
   type ExternalBenchmarkRepeatManifest,
+  type ExternalBenchmarkResults,
   type ExternalBenchmarkRunManifest,
+  type ExternalBenchmarkStopBoundary,
   type HashedArtifactFile,
   type InitialDbFile,
 } from "./external-manifest.js";
+import { writeUtf8Output } from "./output-file.js";
 
 export interface DbFamilyFingerprint {
   files: HashedArtifactFile[];
@@ -344,6 +356,8 @@ const THRESHOLD_RULES = [
   ["performance", "avgSkeletonTimeMs", "lower-is-better", "maxMs", "allowableIncreasePercent"],
   ["tokenEfficiency", "avgCardTokens", "lower-is-better", "maxTokens", "allowableIncreasePercent"],
   ["tokenEfficiency", "avgSkeletonTokens", "lower-is-better", "maxTokens", "allowableIncreasePercent"],
+  ["coverage", "callEdgeCoverage", "higher-is-better", "minPercent", "allowableDecreasePercent"],
+  ["coverage", "importEdgeCoverage", "higher-is-better", "minPercent", "allowableDecreasePercent"],
 ] as const;
 
 export function validateThresholdConfigV1(input: unknown): string[] {
@@ -486,6 +500,10 @@ export function assertManifestFileHashes(
   runnerRoot: string,
   artifactRoot: string,
   manifest: ExternalBenchmarkRunManifest,
+  thresholdSourcePath = join(
+    runnerRoot,
+    ...manifest.inputs.thresholdSourcePath.split("/"),
+  ),
 ): void {
   assertFileHash(
     join(runnerRoot, ...manifest.runner.launcherPath.split("/")),
@@ -502,15 +520,11 @@ export function assertManifestFileHashes(
     manifest.inputs.baselineSha256,
     "staged baseline",
   );
-  for (const [root, path] of [
-    [runnerRoot, manifest.inputs.thresholdSourcePath],
-    [artifactRoot, manifest.inputs.thresholdPath],
-  ] as const) {
-    assertFileHash(
-      join(root, ...path.split("/")),
-      manifest.inputs.thresholdSha256,
-      "threshold",
-    );
+  for (const filePath of [
+    thresholdSourcePath,
+    join(artifactRoot, ...manifest.inputs.thresholdPath.split("/")),
+  ]) {
+    assertFileHash(filePath, manifest.inputs.thresholdSha256, "threshold");
   }
 }
 
@@ -630,4 +644,1239 @@ export function assertRunnerSnapshot(
     manifest.runner.launcherSha256,
     "runner launcher",
   );
+}
+
+
+export interface ExternalBenchmarkCliOptions {
+  repoId: string;
+  outDir: string;
+  lock: string;
+  baseConfig: string;
+  externalConfig: string;
+  baseline: string;
+  threshold: string;
+  cacheMode: "cold" | "warm";
+  repeats: number;
+  warmDb: string | undefined;
+  scipArtifact: string | undefined;
+}
+
+const EXTERNAL_BENCHMARK_OPTIONS: ReadonlyMap<string, string> = new Map([
+  ["--repo-id", "repoId"],
+  ["--out-dir", "outDir"],
+  ["--lock", "lock"],
+  ["--base-config", "baseConfig"],
+  ["--external-config", "externalConfig"],
+  ["--baseline", "baseline"],
+  ["--threshold", "threshold"],
+  ["--cache-mode", "cacheMode"],
+  ["--repeats", "repeats"],
+  ["--warm-db", "warmDb"],
+  ["--scip-artifact", "scipArtifact"],
+] as const);
+
+export function parseExternalBenchmarkArgs(
+  argv: readonly string[],
+): ExternalBenchmarkCliOptions {
+  const values = new Map<string, string>();
+  for (let index = 0; index < argv.length; index += 2) {
+    const flag = argv[index];
+    const key = flag === undefined ? undefined : EXTERNAL_BENCHMARK_OPTIONS.get(flag);
+    const value = argv[index + 1];
+    if (key === undefined) {
+      throw new Error("Unknown external benchmark option: " + String(flag));
+    }
+    if (value === undefined || value.startsWith("--")) {
+      throw new Error("Missing value for external benchmark option: " + flag);
+    }
+    if (values.has(key)) {
+      throw new Error("Duplicate external benchmark option: " + flag);
+    }
+    values.set(key, value);
+  }
+
+  const repoId = values.get("repoId");
+  const outDir = values.get("outDir");
+  if (repoId === undefined || outDir === undefined) {
+    throw new Error("--repo-id and --out-dir are required");
+  }
+
+  const cacheMode = values.get("cacheMode") ?? "cold";
+  if (cacheMode !== "cold" && cacheMode !== "warm") {
+    throw new Error("--cache-mode must be cold or warm");
+  }
+  const repeatsText = values.get("repeats") ?? "1";
+  const repeats = Number(repeatsText);
+  if (!/^\d+$/u.test(repeatsText) || repeats < 1 || repeats > 20) {
+    throw new Error("--repeats must be an integer from 1 through 20");
+  }
+
+  const warmDb = values.get("warmDb");
+  if ((cacheMode === "warm") !== (warmDb !== undefined)) {
+    throw new Error("--warm-db is required for warm mode and forbidden for cold mode");
+  }
+
+  return {
+    repoId,
+    outDir,
+    lock: values.get("lock") ?? "scripts/benchmark/matrix-external-repos.lock.json",
+    baseConfig: values.get("baseConfig") ?? "config/sdlmcp.config.json",
+    externalConfig:
+      values.get("externalConfig") ??
+      "benchmarks/real-world/external-repos.config.json",
+    baseline:
+      values.get("baseline") ?? ".benchmark/baseline." + repoId + ".json",
+    threshold: values.get("threshold") ?? "config/benchmark.config.json",
+    cacheMode,
+    repeats,
+    warmDb,
+    scipArtifact: values.get("scipArtifact"),
+  };
+}
+
+export async function runExternalBenchmarkCli(
+  argv: readonly string[],
+  runChild: RunBenchmarkChild = runBenchmarkChild,
+): Promise<number> {
+  return runExternalBenchmarkPrepared(argv, runChild);
+}
+
+
+export interface BenchmarkChildRequest {
+  command: string[];
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  stdoutPath: string;
+  stderrPath: string;
+  rawResultPath: string;
+}
+
+export type RunBenchmarkChild = (
+  request: BenchmarkChildRequest,
+) => Promise<{ exitCode: number | null; durationMs: number }>;
+
+interface PreparedExternalBenchmarkRun {
+  artifactRoot: string;
+  runnerRoot: string;
+  targetRoot: string;
+  targetSnapshot: GitSnapshot;
+  runnerSnapshot: GitSnapshot;
+  baselineSourcePath: string;
+  thresholdSourcePath: string;
+  thresholdPairs: string[];
+  warmSourcePath: string | null;
+  warmSourceFingerprint: DbFamilyFingerprint | null;
+  manifest: ExternalBenchmarkRunManifest;
+  manifestSha256: string;
+}
+
+async function runExternalBenchmarkPrepared(
+  argv: readonly string[],
+  runChild: RunBenchmarkChild,
+): Promise<number> {
+  const options = parseExternalBenchmarkArgs(argv);
+  const requestedRoot = resolve(options.outDir);
+  if (existsSync(requestedRoot)) {
+    throw new Error("External benchmark artifact root must be absent");
+  }
+
+  const artifactRoot = canonicalizePath(requestedRoot);
+  fs.mkdirSync(artifactRoot);
+  writeUtf8Output(join(artifactRoot, "preflight.log"), "", "exclusive");
+
+  let state: PreparedExternalBenchmarkRun;
+  try {
+    state = prepareExternalBenchmarkRun(options, artifactRoot);
+  } catch (error) {
+    writeUtf8Output(
+      join(artifactRoot, "preflight-error.json"),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          boundary: "post-artifact-pre-manifest",
+          message: error instanceof Error ? error.message : String(error),
+        },
+        null,
+        2,
+      ) + "\n",
+      "exclusive",
+    );
+    return 1;
+  }
+
+  return executeExternalBenchmarkRepeats(state, runChild);
+}
+
+function prepareExternalBenchmarkRun(
+  options: ExternalBenchmarkCliOptions,
+  artifactRoot: string,
+): PreparedExternalBenchmarkRun {
+  const runnerRoot = canonicalizePath(
+    resolve(dirname(fileURLToPath(import.meta.url)), "../.."),
+  );
+  const lockPath = canonicalizePath(resolve(runnerRoot, options.lock));
+  if (!existsSync(lockPath)) {
+    throw new Error("External benchmark lock file does not exist");
+  }
+  const lock = record(
+    parseJsonFile(lockPath, "external benchmark lock"),
+    "External benchmark lock",
+  );
+  if (!Array.isArray(lock.repos) || lock.repos.length === 0) {
+    throw new Error("External benchmark lock must contain repos");
+  }
+  const matches = lock.repos
+    .map((value) => record(value, "External benchmark lock repo"))
+    .filter((value) => value.repoId === options.repoId);
+  if (matches.length !== 1) {
+    throw new Error("External benchmark lock must contain the target exactly once");
+  }
+  const selectedLock = matches[0];
+  if (
+    typeof selectedLock.ref !== "string" ||
+    typeof selectedLock.cloneUrl !== "string"
+  ) {
+    throw new Error("External benchmark lock target is invalid");
+  }
+
+  const baseConfigPath = canonicalizePath(resolve(runnerRoot, options.baseConfig));
+  const externalConfigPath = canonicalizePath(
+    resolve(runnerRoot, options.externalConfig),
+  );
+  const generatedConfig = buildGeneratedRunConfig(
+    baseConfigPath,
+    externalConfigPath,
+    options.repoId,
+  );
+  if (!Array.isArray(generatedConfig.repos)) {
+    throw new Error("Generated config repos must be an array");
+  }
+  const generatedRepo = record(generatedConfig.repos[0], "Generated config repo");
+  if (typeof generatedRepo.rootPath !== "string") {
+    throw new Error("Generated config rootPath must be a string");
+  }
+  const targetRoot = canonicalizePath(
+    resolve(runnerRoot, generatedRepo.rootPath),
+  );
+  validateGeneratedRunConfig(
+    generatedConfig,
+    options.repoId,
+    targetRoot,
+    runnerRoot,
+  );
+  const targetSnapshot = assertTargetRef(
+    targetRoot,
+    { ref: selectedLock.ref, cloneUrl: selectedLock.cloneUrl },
+  );
+  const runnerSnapshot = readGitSnapshot(runnerRoot);
+  const distFingerprint = fingerprintDirectory(join(runnerRoot, "dist"));
+  const launcherPath = join(
+    runnerRoot,
+    "scripts",
+    "external-benchmark-runner.mjs",
+  );
+  if (!existsSync(launcherPath) || !fs.statSync(launcherPath).isFile()) {
+    throw new Error("External benchmark launcher does not exist");
+  }
+
+  const packageJson = record(
+    parseJsonFile(join(runnerRoot, "package.json"), "package.json"),
+    "package.json",
+  );
+  if (typeof packageJson.version !== "string") {
+    throw new Error("package.json version must be a string");
+  }
+  const baselineSourcePath = canonicalizePath(
+    resolve(runnerRoot, options.baseline),
+  );
+  const baselineText = fs.readFileSync(baselineSourcePath, "utf8");
+  const baseline = validateBaselineV1(
+    JSON.parse(baselineText),
+    options.repoId,
+  );
+  const thresholdSourcePath = canonicalizePath(
+    resolve(runnerRoot, options.threshold),
+  );
+  const thresholdText = fs.readFileSync(thresholdSourcePath, "utf8");
+  const thresholdPairs = validateThresholdConfigV1(
+    JSON.parse(thresholdText),
+  );
+
+  for (const directory of ["inputs", "logs", "db", "raw"]) {
+    fs.mkdirSync(join(artifactRoot, directory));
+  }
+  const configPath = join(artifactRoot, "inputs", "sdlmcp.config.json");
+  const baselinePath = join(artifactRoot, "inputs", "baseline.json");
+  const thresholdPath = join(artifactRoot, "inputs", "threshold.json");
+  writeUtf8Output(
+    configPath,
+    JSON.stringify(generatedConfig, null, 2) + "\n",
+    "exclusive",
+  );
+  writeUtf8Output(baselinePath, baselineText, "exclusive");
+  writeUtf8Output(thresholdPath, thresholdText, "exclusive");
+  validateGeneratedRunConfig(
+    parseJsonFile(configPath, "staged config"),
+    options.repoId,
+    targetRoot,
+    runnerRoot,
+  );
+  validateBaselineV1(
+    parseJsonFile(baselinePath, "staged baseline"),
+    options.repoId,
+  );
+  const stagedThreshold = validateThresholdFiles(
+    thresholdSourcePath,
+    thresholdPath,
+  );
+  if (JSON.stringify(stagedThreshold.pairs) !== JSON.stringify(thresholdPairs)) {
+    throw new Error("Staged threshold contract changed");
+  }
+
+  let warmSourcePath: string | null = null;
+  let warmSourceFingerprint: DbFamilyFingerprint | null = null;
+  let warmSnapshot: WarmSnapshot | null = null;
+  if (options.cacheMode === "warm") {
+    warmSourcePath = canonicalizePath(resolve(runnerRoot, options.warmDb!));
+    warmSourceFingerprint = fingerprintDbFamily(warmSourcePath);
+    warmSnapshot = stageWarmSnapshot(warmSourcePath, artifactRoot);
+  }
+
+  const repeats: ExternalBenchmarkRepeatManifest[] = [];
+  for (let repeat = 1; repeat <= options.repeats; repeat += 1) {
+    const prepared =
+      options.cacheMode === "cold"
+        ? prepareColdRepeat(artifactRoot, repeat)
+        : prepareWarmRepeat(artifactRoot, repeat, warmSnapshot!);
+    const number = String(repeat).padStart(3, "0");
+    repeats.push({
+      repeat,
+      graphDbPath: prepared.graphDbPath,
+      stdoutPath: `logs/repeat-${number}.stdout.log`,
+      stderrPath: `logs/repeat-${number}.stderr.log`,
+      initialDbFiles: prepared.initialDbFiles,
+      command: [
+        "node",
+        "dist/cli/index.js",
+        "benchmark:ci",
+        "--repo-id",
+        options.repoId,
+        "--baseline-path",
+        "inputs/baseline.json",
+        "--threshold-path",
+        "inputs/threshold.json",
+        "--out-exclusive",
+        "--out",
+        `raw/repeat-${number}.benchmark.json`,
+      ],
+    });
+  }
+
+  let scipArtifactPath: string | null = null;
+  let scipArtifactSha256: string | null = null;
+  if (options.scipArtifact !== undefined) {
+    const absoluteScipPath = canonicalizePath(
+      resolve(targetRoot, options.scipArtifact),
+    );
+    assertCanonicalPathContained(targetRoot, absoluteScipPath);
+    if (!fs.statSync(absoluteScipPath).isFile()) {
+      throw new Error("SCIP artifact must be a regular file");
+    }
+    scipArtifactPath = normalizeArtifactPath(
+      relative(targetRoot, absoluteScipPath),
+    );
+    scipArtifactSha256 = sha256File(absoluteScipPath);
+  }
+
+  const manifest: ExternalBenchmarkRunManifest = {
+    schemaVersion: 1,
+    target: {
+      repoId: options.repoId,
+      sourceRef: selectedLock.ref,
+      sourceCommit: targetSnapshot.commit,
+      sourceDirty: targetSnapshot.dirty,
+      sourceTreeSha256: targetSnapshot.treeSha256,
+      scipArtifactPath,
+      scipArtifactSha256,
+    },
+    runner: {
+      sdlMcpVersion: packageJson.version,
+      sdlMcpCommit: runnerSnapshot.commit,
+      sdlMcpSourceDirty: runnerSnapshot.dirty,
+      sdlMcpBuildTreeSha256: distFingerprint.sha256,
+      launcherPath: "scripts/external-benchmark-runner.mjs",
+      launcherSha256: sha256File(launcherPath),
+      nodeVersion: process.version,
+      platform: process.platform,
+      architecture: process.arch,
+      cacheMode: options.cacheMode,
+      repeats: options.repeats,
+    },
+    inputs: {
+      configPath: "inputs/sdlmcp.config.json",
+      configSha256: sha256File(configPath),
+      baselinePath: "inputs/baseline.json",
+      baselineSha256: sha256File(baselinePath),
+      baselineFormatVersion: "1",
+      baselineTargetRepoId: baseline.repoId,
+      thresholdSourcePath: "config/benchmark.config.json",
+      thresholdPath: "inputs/threshold.json",
+      thresholdSha256: stagedThreshold.sha256,
+      warmSnapshot: warmSnapshot === null ? null : { files: warmSnapshot.files },
+    },
+    repeats,
+  };
+  const serializedManifest = serializeRunManifest(manifest);
+  writeUtf8Output(
+    join(artifactRoot, "run-manifest.json"),
+    serializedManifest,
+    "exclusive",
+  );
+  return {
+    artifactRoot,
+    runnerRoot,
+    targetRoot,
+    targetSnapshot,
+    runnerSnapshot,
+    baselineSourcePath,
+    thresholdSourcePath,
+    thresholdPairs,
+    warmSourcePath,
+    warmSourceFingerprint,
+    manifest,
+    manifestSha256: hashSerializedManifest(serializedManifest),
+  };
+}
+
+function assertExternalBenchmarkInputs(
+  state: PreparedExternalBenchmarkRun,
+  repeat: ExternalBenchmarkRepeatManifest,
+): void {
+  assertGitSnapshot(
+    readGitSnapshot(state.targetRoot),
+    state.targetSnapshot,
+    "target",
+  );
+  assertRunnerSnapshot(state.runnerRoot, state.manifest, state.runnerSnapshot);
+  assertManifestFileHashes(
+    state.runnerRoot,
+    state.artifactRoot,
+    state.manifest,
+    state.thresholdSourcePath,
+  );
+  assertFileHash(
+    state.baselineSourcePath,
+    state.manifest.inputs.baselineSha256,
+    "baseline source",
+  );
+  const stagedBaselinePath = join(
+    state.artifactRoot,
+    ...state.manifest.inputs.baselinePath.split("/"),
+  );
+  if (
+    !fs.readFileSync(state.baselineSourcePath).equals(
+      fs.readFileSync(stagedBaselinePath),
+    )
+  ) {
+    throw new Error("Baseline source and staged files must be byte-identical");
+  }
+  validateBaselineV1(
+    parseJsonFile(state.baselineSourcePath, "baseline"),
+    state.manifest.target.repoId,
+  );
+
+  const stagedThresholdPath = join(
+    state.artifactRoot,
+    ...state.manifest.inputs.thresholdPath.split("/"),
+  );
+  const threshold = validateThresholdFiles(
+    state.thresholdSourcePath,
+    stagedThresholdPath,
+  );
+  if (JSON.stringify(threshold.pairs) !== JSON.stringify(state.thresholdPairs)) {
+    throw new Error("Threshold contract changed");
+  }
+  validateGeneratedRunConfig(
+    parseJsonFile(
+      join(
+        state.artifactRoot,
+        ...state.manifest.inputs.configPath.split("/"),
+      ),
+      "staged config",
+    ),
+    state.manifest.target.repoId,
+    state.targetRoot,
+    state.runnerRoot,
+  );
+
+  if (
+    state.warmSourcePath !== null &&
+    state.warmSourceFingerprint !== null &&
+    JSON.stringify(fingerprintDbFamily(state.warmSourcePath)) !==
+      JSON.stringify(state.warmSourceFingerprint)
+  ) {
+    throw new Error("Warm source database family changed");
+  }
+  for (const file of state.manifest.inputs.warmSnapshot?.files ?? []) {
+    assertFileHash(
+      join(state.artifactRoot, ...file.path.split("/")),
+      file.sha256,
+      "warm snapshot",
+    );
+  }
+
+  const graphDbPath = join(
+    state.artifactRoot,
+    ...repeat.graphDbPath.split("/"),
+  );
+  if (repeat.initialDbFiles.length === 0) {
+    assertDbFamilyAbsent(graphDbPath);
+    return;
+  }
+  const actualPaths = collectDbFamilyFiles(graphDbPath).map((filePath) =>
+    normalizeArtifactPath(relative(state.artifactRoot, filePath)),
+  );
+  const expectedPaths = repeat.initialDbFiles
+    .map((file) => file.destinationPath)
+    .sort(compareArtifactPath);
+  if (JSON.stringify(actualPaths) !== JSON.stringify(expectedPaths)) {
+    throw new Error("Repeat database family membership changed");
+  }
+  for (const file of repeat.initialDbFiles) {
+    assertFileHash(
+      join(state.artifactRoot, ...file.sourcePath.split("/")),
+      file.sha256,
+      "warm source copy",
+    );
+    assertFileHash(
+      join(state.artifactRoot, ...file.destinationPath.split("/")),
+      file.sha256,
+      "repeat database",
+    );
+  }
+}
+
+
+class BenchmarkChildFailure extends Error {
+  constructor(
+    readonly boundary: "child-spawn" | "child-stream",
+    cause: unknown,
+  ) {
+    super(
+      boundary.replace("-", " ") +
+        ": " +
+        (cause instanceof Error ? cause.message : String(cause)),
+    );
+  }
+}
+
+export function runBenchmarkChild(
+  request: BenchmarkChildRequest,
+): Promise<{ exitCode: number | null; durationMs: number }> {
+  const started = performance.now();
+  const stdout = fs.createWriteStream(request.stdoutPath, { flags: "wx" });
+  const stderr = fs.createWriteStream(request.stderrPath, { flags: "wx" });
+
+  return new Promise((resolvePromise, rejectPromise) => {
+    let settled = false;
+    let childClosed = false;
+    let stdoutClosed = false;
+    let stderrClosed = false;
+    let exitCode: number | null = null;
+    let child: ReturnType<typeof spawn> | undefined;
+
+    const fail = (
+      boundary: "child-spawn" | "child-stream",
+      error: unknown,
+    ) => {
+      if (settled) return;
+      settled = true;
+      child?.kill();
+      stdout.destroy();
+      stderr.destroy();
+      rejectPromise(new BenchmarkChildFailure(boundary, error));
+    };
+    const finish = () => {
+      if (settled || !childClosed || !stdoutClosed || !stderrClosed) return;
+      settled = true;
+      resolvePromise({
+        exitCode,
+        durationMs: roundDuration(performance.now() - started),
+      });
+    };
+
+    stdout.once("error", (error) => fail("child-stream", error));
+    stderr.once("error", (error) => fail("child-stream", error));
+    stdout.once("close", () => {
+      stdoutClosed = true;
+      finish();
+    });
+    stderr.once("close", () => {
+      stderrClosed = true;
+      finish();
+    });
+
+    try {
+      child = spawn(process.execPath, request.command.slice(1), {
+        cwd: request.cwd,
+        env: request.env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      fail("child-spawn", error);
+      return;
+    }
+    if (child.stdout === null || child.stderr === null) {
+      fail("child-spawn", new Error("Child stdio pipes are unavailable"));
+      return;
+    }
+    child.once("error", (error) => fail("child-spawn", error));
+    child.once("close", (code) => {
+      exitCode = code;
+      childClosed = true;
+      finish();
+    });
+    child.stdout.pipe(stdout);
+    child.stderr.pipe(stderr);
+  });
+}
+
+async function executeExternalBenchmarkRepeats(
+  state: PreparedExternalBenchmarkRun,
+  runChild: RunBenchmarkChild,
+): Promise<number> {
+  const rawRepeats: ExternalBenchmarkRawRepeat[] = [];
+  let stop: ExternalBenchmarkStopBoundary | undefined;
+  let activeRepeat = 1;
+  let results: ExternalBenchmarkResults | undefined;
+  const usedDbPaths = new Set<string>();
+
+  try {
+    for (const repeat of state.manifest.repeats) {
+      activeRepeat = repeat.repeat;
+      try {
+        assertExternalBenchmarkInputs(state, repeat);
+      } catch {
+        const boundary = "preflight-between-repeats";
+        rawRepeats.push(failedRawRepeat(repeat, boundary));
+        stop = { boundary, failedRepeat: repeat.repeat };
+        break;
+      }
+
+      const request = buildBenchmarkChildRequest(
+        state,
+        repeat,
+        usedDbPaths,
+      );
+      let childResult: { exitCode: number | null; durationMs: number };
+      try {
+        childResult = await runChild(request);
+      } catch (error) {
+        const boundary =
+          error instanceof BenchmarkChildFailure
+            ? error.boundary
+            : "child-spawn";
+        rawRepeats.push(failedRawRepeat(repeat, boundary));
+        stop = { boundary, failedRepeat: repeat.repeat };
+        break;
+      }
+
+      const raw = readRawBenchmarkRepeat(
+        state,
+        repeat,
+        childResult.exitCode,
+        roundDuration(childResult.durationMs),
+        request.rawResultPath,
+      );
+      rawRepeats.push(raw);
+      if (raw.failureBoundary !== null) {
+        stop = {
+          boundary:
+            raw.failureBoundary === "unexecuted-after-failure"
+              ? "raw-result-invalid"
+              : raw.failureBoundary,
+          failedRepeat: repeat.repeat,
+        };
+        break;
+      }
+    }
+  } catch {
+    const repeat = state.manifest.repeats[activeRepeat - 1];
+    const boundary = "child-spawn";
+    if (!rawRepeats.some((raw) => raw.repeat === activeRepeat)) {
+      rawRepeats.push(failedRawRepeat(repeat, boundary));
+    }
+    stop = { boundary, failedRepeat: activeRepeat };
+  } finally {
+    ensureDeclaredLogs(state);
+    results = buildExternalBenchmarkResults(
+      state.manifestSha256,
+      state.manifest.runner.repeats,
+      rawRepeats,
+      stop,
+    );
+    writeUtf8Output(
+      join(state.artifactRoot, "results.json"),
+      serializeExternalBenchmarkResults(results),
+      "exclusive",
+    );
+  }
+
+  return results?.passed === true ? 0 : 1;
+}
+
+function buildBenchmarkChildRequest(
+  state: PreparedExternalBenchmarkRun,
+  repeat: ExternalBenchmarkRepeatManifest,
+  usedDbPaths: Set<string>,
+): BenchmarkChildRequest {
+  const configPath = join(
+    state.artifactRoot,
+    ...state.manifest.inputs.configPath.split("/"),
+  );
+  const graphDbPath = join(
+    state.artifactRoot,
+    ...repeat.graphDbPath.split("/"),
+  );
+  const env = buildChildEnvironment(process.env, configPath, graphDbPath);
+  assertChildEnvironment(
+    env,
+    state.artifactRoot,
+    state.manifest,
+    repeat,
+    usedDbPaths,
+  );
+  return {
+    command: [...repeat.command],
+    cwd: state.runnerRoot,
+    env,
+    stdoutPath: join(state.artifactRoot, ...repeat.stdoutPath.split("/")),
+    stderrPath: join(state.artifactRoot, ...repeat.stderrPath.split("/")),
+    rawResultPath: join(
+      state.artifactRoot,
+      "raw",
+      `repeat-${String(repeat.repeat).padStart(3, "0")}.benchmark.json`,
+    ),
+  };
+}
+
+function readRawBenchmarkRepeat(
+  state: PreparedExternalBenchmarkRun,
+  repeat: ExternalBenchmarkRepeatManifest,
+  exitCode: number | null,
+  durationMs: number,
+  rawResultPath: string,
+): ExternalBenchmarkRawRepeat {
+  if (!existsSync(rawResultPath)) {
+    return failedRawRepeat(
+      repeat,
+      "raw-result-missing",
+      exitCode,
+      durationMs,
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(rawResultPath, "utf8"));
+  } catch {
+    return failedRawRepeat(
+      repeat,
+      "raw-result-invalid",
+      exitCode,
+      durationMs,
+    );
+  }
+
+  let benchmarkResult: ExternalBenchmarkRawResult;
+  try {
+    benchmarkResult = validateRawBenchmarkResult(
+      parsed,
+      state.manifest.target.repoId,
+      state.thresholdPairs,
+    );
+  } catch (error) {
+    return failedRawRepeat(
+      repeat,
+      error instanceof ThresholdEvidenceFailure
+        ? "threshold-evidence-invalid"
+        : "raw-result-invalid",
+      exitCode,
+      durationMs,
+    );
+  }
+  const evaluations = benchmarkResult.thresholdResult!.evaluations;
+  const benchmarkResultPath =
+    repeat.command[repeat.command.length - 1] ??
+    `raw/repeat-${String(repeat.repeat).padStart(3, "0")}.benchmark.json`;
+  const raw: ExternalBenchmarkRawRepeat = {
+    repeat: repeat.repeat,
+    exitCode,
+    failureBoundary: null,
+    durationMs,
+    benchmarkResultPath,
+    benchmarkResultSha256: sha256File(rawResultPath),
+    benchmarkResult,
+  };
+  if (
+    exitCode === null ||
+    (exitCode !== 0 &&
+      !evaluations.some(
+        (value) => record(value, "Raw threshold evaluation").passed === false,
+      ))
+  ) {
+    raw.failureBoundary = "child-exit";
+  }
+  return raw;
+}
+
+function failedRawRepeat(
+  repeat: ExternalBenchmarkRepeatManifest,
+  boundary: Exclude<
+    ExternalBenchmarkFailureBoundary,
+    "unexecuted-after-failure"
+  >,
+  exitCode: number | null = null,
+  durationMs = 0,
+): ExternalBenchmarkRawRepeat {
+  return {
+    repeat: repeat.repeat,
+    exitCode,
+    failureBoundary: boundary,
+    durationMs: roundDuration(durationMs),
+    benchmarkResultPath:
+      repeat.command[repeat.command.length - 1] ??
+      `raw/repeat-${String(repeat.repeat).padStart(3, "0")}.benchmark.json`,
+    benchmarkResultSha256: null,
+    benchmarkResult: null,
+  };
+}
+
+function ensureDeclaredLogs(state: PreparedExternalBenchmarkRun): void {
+  for (const repeat of state.manifest.repeats) {
+    for (const path of [repeat.stdoutPath, repeat.stderrPath]) {
+      const filePath = join(state.artifactRoot, ...path.split("/"));
+      if (!existsSync(filePath)) {
+        writeUtf8Output(filePath, "", "exclusive");
+      }
+    }
+  }
+}
+
+function roundDuration(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+
+class ThresholdEvidenceFailure extends Error {}
+
+const RAW_METRIC_KEYS = [
+  "indexTimePerFile",
+  "indexTimePerSymbol",
+  "symbolsPerFile",
+  "edgesPerSymbol",
+  "graphConnectivity",
+  "exportedSymbolRatio",
+  "sliceBuildTimeMs",
+  "avgSkeletonTimeMs",
+  "avgCardTokens",
+  "avgSkeletonTokens",
+  "functionMethodRatio",
+  "avgDepsPerSymbol",
+  "callEdgeCount",
+  "importEdgeCount",
+  "totalSymbols",
+  "totalFiles",
+  "summaryGenerationMs",
+  "summaryTokens",
+  "healthScore",
+  "watcherEventsProcessed",
+  "watcherErrors",
+] as const;
+
+export function validateRawBenchmarkResult(
+  input: unknown,
+  expectedRepoId: string,
+  expectedPairs: readonly string[],
+): ExternalBenchmarkRawResult {
+  const result = record(input, "Raw benchmark result");
+  if (result.repoId !== expectedRepoId) {
+    throw new Error("Raw benchmark repoId does not match");
+  }
+
+  const metrics = record(result.metrics, "Raw benchmark metrics");
+  for (const key of RAW_METRIC_KEYS) {
+    const value = metrics[key];
+    if (
+      key === "healthScore"
+        ? value !== null &&
+          (typeof value !== "number" || !Number.isFinite(value))
+        : typeof value !== "number" || !Number.isFinite(value)
+    ) {
+      throw new Error("Raw benchmark metric must be finite: " + key);
+    }
+  }
+
+  const thresholdResult = record(
+    result.thresholdResult,
+    "Raw threshold result",
+  );
+  if (
+    typeof thresholdResult.passed !== "boolean" ||
+    !Array.isArray(thresholdResult.evaluations) ||
+    thresholdResult.evaluations.length === 0
+  ) {
+    throw new ThresholdEvidenceFailure("Threshold result is incomplete");
+  }
+
+  const expected = [...expectedPairs].sort(compareArtifactPath);
+  const actual: string[] = [];
+  let passedCount = 0;
+  for (const value of thresholdResult.evaluations) {
+    const evaluation = record(value, "Raw threshold evaluation");
+    if (
+      typeof evaluation.category !== "string" ||
+      typeof evaluation.metricName !== "string"
+    ) {
+      throw new ThresholdEvidenceFailure("Threshold pair is invalid");
+    }
+    const pair = evaluation.category + "/" + evaluation.metricName;
+    if (actual.includes(pair) || !expected.includes(pair)) {
+      throw new ThresholdEvidenceFailure("Threshold pair set is invalid");
+    }
+    actual.push(pair);
+    for (const key of ["currentValue", "baselineValue", "delta", "deltaPercent"]) {
+      const field = evaluation[key];
+      if (
+        field !== undefined &&
+        field !== null &&
+        (typeof field !== "number" || !Number.isFinite(field))
+      ) {
+        throw new ThresholdEvidenceFailure(
+          "Threshold value is invalid: " + pair + "/" + key,
+        );
+      }
+    }
+    if (
+      typeof evaluation.currentValue !== "number" ||
+      !Number.isFinite(evaluation.currentValue) ||
+      typeof evaluation.passed !== "boolean" ||
+      typeof evaluation.message !== "string"
+    ) {
+      throw new ThresholdEvidenceFailure(
+        "Threshold evaluation is invalid: " + pair,
+      );
+    }
+    if (evaluation.passed) passedCount += 1;
+  }
+  actual.sort(compareArtifactPath);
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new ThresholdEvidenceFailure("Threshold pair set is not exact");
+  }
+
+  const summary = record(thresholdResult.summary, "Threshold summary");
+  const total = thresholdResult.evaluations.length;
+  if (
+    summary.total !== total ||
+    summary.passed !== passedCount ||
+    summary.failed !== total - passedCount ||
+    thresholdResult.passed !== (passedCount === total)
+  ) {
+    throw new ThresholdEvidenceFailure("Threshold summary is inconsistent");
+  }
+
+  return input as ExternalBenchmarkRawResult;
+}
+
+
+export function writeDbFamilyFingerprintFile(
+  primaryPath: string,
+  outputPath: string,
+): void {
+  const fingerprint = fingerprintDbFamily(primaryPath);
+  writeUtf8Output(
+    outputPath,
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        files: fingerprint.files,
+        sha256: fingerprint.sha256,
+      },
+      null,
+      2,
+    ) + "\n",
+    "exclusive",
+  );
+}
+
+export interface VerifyExternalBenchmarkEvidenceOptions {
+  root: string;
+  repoId: string;
+  sourceRef: string;
+  sourceCommit: string;
+  cacheMode: "cold" | "warm";
+  repeats: number;
+  defaultDbBefore: string;
+  defaultDbAfter: string;
+  thresholdSourcePath?: string;
+}
+
+export function verifyExternalBenchmarkEvidence(
+  options: VerifyExternalBenchmarkEvidenceOptions,
+): number {
+  const artifactRoot = canonicalizePath(options.root);
+  const runnerRoot = canonicalizePath(
+    resolve(dirname(fileURLToPath(import.meta.url)), "../.."),
+  );
+  const manifestPath = containedArtifactPath(
+    artifactRoot,
+    "run-manifest.json",
+  );
+  const resultsPath = containedArtifactPath(artifactRoot, "results.json");
+  const manifestText = fs.readFileSync(manifestPath, "utf8");
+  const resultsText = fs.readFileSync(resultsPath, "utf8");
+  const manifest = JSON.parse(manifestText) as ExternalBenchmarkRunManifest;
+  const results = JSON.parse(resultsText) as ExternalBenchmarkResults;
+
+  if (serializeRunManifest(manifest) !== manifestText) {
+    throw new Error("Run manifest bytes are not canonical");
+  }
+  if (serializeExternalBenchmarkResults(results) !== resultsText) {
+    throw new Error("External benchmark results bytes are not canonical");
+  }
+  const manifestSha256 = hashSerializedManifest(manifestText);
+  if (
+    results.runManifestSha256 !== manifestSha256 ||
+    results.passed !== true
+  ) {
+    throw new Error("Results do not identify a passing run manifest");
+  }
+  if (
+    manifest.target.repoId !== options.repoId ||
+    manifest.target.sourceRef !== options.sourceRef ||
+    manifest.target.sourceCommit !== options.sourceCommit ||
+    manifest.runner.cacheMode !== options.cacheMode ||
+    manifest.runner.repeats !== options.repeats ||
+    manifest.repeats.length !== options.repeats ||
+    results.repeats.length !== options.repeats
+  ) {
+    throw new Error("Verifier options do not match the run manifest");
+  }
+
+  const runnerSnapshot = readGitSnapshot(runnerRoot);
+  assertRunnerSnapshot(runnerRoot, manifest, runnerSnapshot);
+  const thresholdSourcePath = canonicalizePath(
+    options.thresholdSourcePath ??
+      join(runnerRoot, ...manifest.inputs.thresholdSourcePath.split("/")),
+  );
+  assertManifestFileHashes(
+    runnerRoot,
+    artifactRoot,
+    manifest,
+    thresholdSourcePath,
+  );
+  const threshold = validateThresholdFiles(
+    thresholdSourcePath,
+    containedArtifactPath(artifactRoot, manifest.inputs.thresholdPath),
+  );
+
+  const configPath = containedArtifactPath(
+    artifactRoot,
+    manifest.inputs.configPath,
+  );
+  const config = record(
+    parseJsonFile(configPath, "staged config"),
+    "Staged config",
+  );
+  if (!Array.isArray(config.repos) || config.repos.length !== 1) {
+    throw new Error("Staged config must contain one target");
+  }
+  const repo = record(config.repos[0], "Staged config repo");
+  if (typeof repo.rootPath !== "string") {
+    throw new Error("Staged target rootPath must be a string");
+  }
+  const targetRoot = canonicalizePath(resolve(runnerRoot, repo.rootPath));
+  validateGeneratedRunConfig(
+    config,
+    manifest.target.repoId,
+    targetRoot,
+    runnerRoot,
+  );
+  const targetSnapshot = readGitSnapshot(targetRoot);
+  assertGitSnapshot(
+    targetSnapshot,
+    {
+      commit: manifest.target.sourceCommit,
+      dirty: manifest.target.sourceDirty,
+      treeSha256: manifest.target.sourceTreeSha256,
+    },
+    "target",
+  );
+  validateBaselineV1(
+    parseJsonFile(
+      containedArtifactPath(artifactRoot, manifest.inputs.baselinePath),
+      "staged baseline",
+    ),
+    manifest.target.repoId,
+  );
+
+  if (manifest.target.scipArtifactPath !== null) {
+    const scipPath = canonicalizePath(
+      resolve(targetRoot, manifest.target.scipArtifactPath),
+    );
+    assertCanonicalPathContained(targetRoot, scipPath);
+    assertFileHash(
+      scipPath,
+      manifest.target.scipArtifactSha256!,
+      "SCIP artifact",
+    );
+  } else if (manifest.target.scipArtifactSha256 !== null) {
+    throw new Error("SCIP artifact path and hash must both be null");
+  }
+
+  if (options.cacheMode === "cold") {
+    if (
+      manifest.inputs.warmSnapshot !== null ||
+      manifest.repeats.some((repeat) => repeat.initialDbFiles.length !== 0)
+    ) {
+      throw new Error("Cold evidence must not declare warm inputs");
+    }
+  } else if (manifest.inputs.warmSnapshot === null) {
+    throw new Error("Warm evidence must declare a warm snapshot");
+  }
+  for (const file of manifest.inputs.warmSnapshot?.files ?? []) {
+    assertFileHash(
+      containedArtifactPath(artifactRoot, file.path),
+      file.sha256,
+      "warm snapshot",
+    );
+  }
+
+  const rawRepeats: ExternalBenchmarkRawRepeat[] = [];
+  for (const repeat of manifest.repeats) {
+    const result = results.repeats[repeat.repeat - 1];
+    if (
+      result === undefined ||
+      result.repeat !== repeat.repeat ||
+      result.failureBoundary !== null ||
+      result.passed !== true ||
+      result.benchmarkResultSha256 === null
+    ) {
+      throw new Error("Result repeat is incomplete: " + repeat.repeat);
+    }
+    for (const path of [repeat.stdoutPath, repeat.stderrPath]) {
+      const logPath = containedArtifactPath(artifactRoot, path);
+      if (!fs.statSync(logPath).isFile()) {
+        throw new Error("Declared log is not a file: " + path);
+      }
+    }
+    const rawPath = containedArtifactPath(
+      artifactRoot,
+      result.benchmarkResultPath,
+    );
+    assertFileHash(
+      rawPath,
+      result.benchmarkResultSha256,
+      "raw benchmark result",
+    );
+    const benchmarkResult = validateRawBenchmarkResult(
+      parseJsonFile(rawPath, "raw benchmark result"),
+      manifest.target.repoId,
+      threshold.pairs,
+    );
+    rawRepeats.push({
+      repeat: repeat.repeat,
+      exitCode: result.exitCode,
+      failureBoundary: null,
+      durationMs: result.durationMs,
+      benchmarkResultPath: result.benchmarkResultPath,
+      benchmarkResultSha256: result.benchmarkResultSha256,
+      benchmarkResult,
+    });
+
+    const graphDbPath = containedArtifactPath(
+      artifactRoot,
+      repeat.graphDbPath,
+    );
+    if (collectDbFamilyFiles(graphDbPath).length === 0) {
+      throw new Error("Repeat database family is missing: " + repeat.repeat);
+    }
+    for (const file of repeat.initialDbFiles) {
+      assertFileHash(
+        containedArtifactPath(artifactRoot, file.sourcePath),
+        file.sha256,
+        "initial database source",
+      );
+      assertFileHash(
+        containedArtifactPath(artifactRoot, file.destinationPath),
+        file.sha256,
+        "initial database destination",
+      );
+    }
+  }
+
+  const rebuilt = buildExternalBenchmarkResults(
+    manifestSha256,
+    manifest.runner.repeats,
+    rawRepeats,
+  );
+  if (serializeExternalBenchmarkResults(rebuilt) !== resultsText) {
+    throw new Error("Raw benchmark results do not agree with results.json");
+  }
+
+  const before = fs.readFileSync(canonicalizePath(options.defaultDbBefore));
+  const after = fs.readFileSync(canonicalizePath(options.defaultDbAfter));
+  if (!before.equals(after)) {
+    throw new Error("Default DB family fingerprints differ");
+  }
+  validateDbFamilyFingerprint(JSON.parse(before.toString("utf8")));
+  return 0;
+}
+
+function containedArtifactPath(rootPath: string, artifactPath: string): string {
+  const normalized = normalizeArtifactPath(artifactPath);
+  const filePath = canonicalizePath(
+    join(rootPath, ...normalized.split("/")),
+  );
+  assertCanonicalPathContained(rootPath, filePath);
+  return filePath;
+}
+
+function validateDbFamilyFingerprint(input: unknown): void {
+  const value = record(input, "DB family fingerprint");
+  requireExactKeys(
+    value,
+    ["schemaVersion", "files", "sha256"],
+    "DB family fingerprint",
+  );
+  if (
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.files) ||
+    typeof value.sha256 !== "string"
+  ) {
+    throw new Error("DB family fingerprint is invalid");
+  }
+  const files = value.files.map((entry) => {
+    const file = record(entry, "DB family fingerprint file");
+    requireExactKeys(file, ["path", "sha256"], "DB family fingerprint file");
+    if (typeof file.path !== "string" || typeof file.sha256 !== "string") {
+      throw new Error("DB family fingerprint file is invalid");
+    }
+    return {
+      path: normalizeArtifactPath(file.path),
+      sha256: file.sha256,
+    };
+  });
+  const sorted = [...files].sort((left, right) =>
+    compareArtifactPath(left.path, right.path),
+  );
+  const sha256 = createHash("sha256")
+    .update(JSON.stringify(sorted), "utf8")
+    .digest("hex");
+  if (
+    JSON.stringify(files) !== JSON.stringify(sorted) ||
+    sha256 !== value.sha256
+  ) {
+    throw new Error("DB family fingerprint hash is invalid");
+  }
 }

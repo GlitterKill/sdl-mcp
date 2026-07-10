@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, mkdirSync, existsSync } from "fs";
 import { dirname, resolve } from "path";
 import type { BenchmarkOptions } from "../types.js";
+import { writeUtf8Output } from "../../benchmark/output-file.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
@@ -733,7 +734,11 @@ export async function benchmarkCICommand(
     mkdirSync(outputDir, { recursive: true });
   }
 
-  writeFileSync(outputPath, JSON.stringify(result, null, 2), "utf-8");
+  writeUtf8Output(
+    outputPath,
+    JSON.stringify(result, null, 2),
+    options.outExclusive ? "exclusive" : "overwrite",
+  );
   console.log(`\n✓ Results saved to: ${outputPath}`);
 
   if (options.jsonOutput) {

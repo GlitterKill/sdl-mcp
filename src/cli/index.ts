@@ -84,6 +84,7 @@ async function main(): Promise<void> {
       "threshold-path": { type: "string" },
       "update-baseline": { type: "boolean" },
       "skip-indexing": { type: "boolean" },
+      "out-exclusive": { type: "boolean" },
       budget: { type: "string" },
       format: { type: "string" },
       scope: { type: "string" },
@@ -349,6 +350,7 @@ Global Options:
    --json               Output JSON results
    --update-baseline    Update baseline with current results
    --skip-indexing      Skip re-indexing, use existing data
+   --out-exclusive      Create output exclusively (internal wrapper use)
 
  Summary Options:
    --budget NUMBER      Token budget (default: 2000)

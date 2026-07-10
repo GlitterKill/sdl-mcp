@@ -594,6 +594,8 @@ export function parseBenchmarkOptions(
         throw new Error("--out requires a value");
       }
       options.outputPath = args[++i];
+    } else if (arg === "--out-exclusive") {
+      options.outExclusive = true;
     } else if (arg === "--json") {
       options.jsonOutput = true;
     } else if (arg === "--update-baseline") {
@@ -614,6 +616,9 @@ export function parseBenchmarkOptions(
   }
   if (typeof values.out === "string") {
     options.outputPath = values.out;
+  }
+  if (values["out-exclusive"] === true) {
+    options.outExclusive = true;
   }
   if (values.json === true) {
     options.jsonOutput = true;

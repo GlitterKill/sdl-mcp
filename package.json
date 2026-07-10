@@ -68,6 +68,8 @@
     "benchmark:provider-first-fallback": "node scripts/provider-first-fallback-benchmark.ts",
     "benchmark:record-trace": "node scripts/record-trace.ts",
     "benchmark:setup-external": "node scripts/setup-external-benchmark-repos.ts",
+    "benchmark:external": "node scripts/external-benchmark-runner.mjs",
+    "benchmark:external:verify": "node scripts/verify-external-benchmark-evidence.mjs",
     "benchmark:v067": "node scripts/benchmark/v067-baseline.ts",
     "benchmark:v067:check": "node scripts/benchmark/v067-baseline.ts --check devdocs/benchmarks/v067-baseline.json",
     "benchmark:v067:save": "node scripts/benchmark/v067-baseline.ts --out devdocs/benchmarks/v067-baseline.json",

@@ -72,6 +72,7 @@ export interface BenchmarkOptions extends CLIOptions {
   baselinePath?: string;
   thresholdPath?: string;
   outputPath?: string;
+  outExclusive?: boolean;
   jsonOutput?: boolean;
   updateBaseline?: boolean;
   skipIndexing?: boolean;
