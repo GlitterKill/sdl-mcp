@@ -135,6 +135,34 @@ describe("renderIndexProgress — embeddings stage", () => {
     }
   });
 
+  it("renders deferred FileSummary embeddings with the model count", async () => {
+    const { createProgressState, renderIndexProgress } =
+      await import("../../dist/cli/commands/index.js");
+    try {
+      const state = createProgressState();
+      renderIndexProgress(state, {
+        stage: "embeddings",
+        substage: "fileSummaryEmbeddings",
+        current: 0,
+        total: 0,
+        model: "nomic-embed-text-v1.5",
+        message: "33 deferred",
+      });
+
+      const output = captured.join("");
+      assert.ok(
+        output.includes("Summary Embeddings:"),
+        `deferred work should retain the FileSummary label: ${output}`,
+      );
+      assert.ok(
+        output.includes("nomic: 33 deferred"),
+        `deferred work should show the model and count: ${output}`,
+      );
+    } finally {
+      restoreStdout();
+    }
+  });
+
   it("labels summary and symbol embedding phases separately", async () => {
     const { createProgressState, renderIndexProgress } =
       await import("../../dist/cli/commands/index.js");

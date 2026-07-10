@@ -355,6 +355,8 @@ Setup Wizard semantic tiers map directly to this block:
 - `Enhanced` uses the existing `embeddingProfile: "specialized"` profile: Jina symbols plus Nomic file-summary embeddings, still with `generateSummaries: false`.
 - `Off` writes `semantic.enabled: false` and skips ONNX embedding downloads.
 
+FileSummary vector writes debounce the LadybugDB HNSW rebuild until 50 rows are uncached. Small incremental scopes inspect the repository-wide hash backlog so deferred rows accumulate across runs. The CLI reports pending work, for example `Summary Embeddings: nomic: 33 deferred`; FileSummary FTS remains current while vectors wait for the rebuild batch.
+
 The wizard's Language Providers prompt writes `indexing.pipeline: "auto"` for Yes and `"legacy"` for No. Strict `"providerFirst"` remains an advanced manual setting.
 
 | Field                           | Type                                    | Default                            | Notes                                                                                                                                                                                                                                                                                               |

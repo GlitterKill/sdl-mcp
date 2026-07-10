@@ -431,6 +431,7 @@ describe("Semantic Embedding Pipeline", () => {
       skipped: 1,
       missing: 0,
       degraded: false,
+      deferred: 1,
     });
     assert.strictEqual(
       calls.length,
@@ -475,6 +476,76 @@ describe("Semantic Embedding Pipeline", () => {
       null,
       "payload changes outside the requested set should remain untouched",
     );
+  });
+
+  it("refreshFileSummaryEmbeddings accumulates deferred rows across incremental scopes", async () => {
+    const conn = await getLadybugConn();
+    await upsertStandardFileSummaries(conn);
+    const { provider, calls } = createRecordingProvider();
+
+    const first = await refreshFileSummaryEmbeddings({
+      repoId,
+      provider: "local",
+      model: jinaModel,
+      fileIds: ["file1"],
+      embeddingProvider: provider,
+      rebuildMinUncachedRows: 3,
+    });
+
+    assert.deepStrictEqual(first, {
+      embedded: 0,
+      skipped: 0,
+      missing: 0,
+      degraded: false,
+      deferred: 2,
+    });
+    assert.strictEqual(calls.length, 0);
+
+    await ladybugDb.upsertFile(conn, {
+      fileId: "file3",
+      repoId,
+      relPath: "src/settings.ts",
+      contentHash: "hash3",
+      language: "ts",
+      byteSize: 300,
+      lastIndexedAt: "2026-05-05T00:01:00Z",
+    });
+    await ladybugDb.upsertFileSummaryBatch(conn, [
+      {
+        fileId: "file3",
+        repoId,
+        summary: "File: src/settings.ts\nLanguage: ts\nExports: loadSettings",
+        searchText: "file: src/settings.ts exports: loadSettings",
+        updatedAt: "2026-05-05T00:01:00Z",
+      },
+    ]);
+
+    const second = await refreshFileSummaryEmbeddings({
+      repoId,
+      provider: "local",
+      model: jinaModel,
+      fileIds: ["file3"],
+      embeddingProvider: provider,
+      rebuildMinUncachedRows: 3,
+    });
+
+    assert.deepStrictEqual(second, {
+      embedded: 3,
+      skipped: 0,
+      missing: 0,
+      degraded: false,
+    });
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].length, 3);
+
+    const rows = await readFileSummaryEmbeddingRows(conn, [
+      "file1",
+      "file2",
+      "file3",
+    ]);
+    for (const fileId of ["file1", "file2", "file3"]) {
+      assertStoredVectorArray(rows.get(fileId)?.vectorArray, fileId);
+    }
   });
 
   it("refreshFileSummaryEmbeddings reports empty payloads as missing instead of cached", async () => {

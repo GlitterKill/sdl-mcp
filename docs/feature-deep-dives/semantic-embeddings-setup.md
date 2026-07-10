@@ -158,6 +158,8 @@ checking expiration claims, and normalizing decoded token state. It exports
 validateToken and imports jsonwebtoken.
 ```
 
+Incremental FileSummary vector writes debounce the LadybugDB HNSW rebuild until 50 rows are uncached. When a changed-file scope falls below that threshold, SDL-MCP also checks repository-wide FileSummary hashes so deferred rows join later runs instead of starving. The CLI reports the pending model count, while FileSummary FTS remains current during the delay.
+
 See [Model-Aware Embedding Payloads](./semantic-engine.md#model-aware-embedding-payloads) for details.
 
 ---

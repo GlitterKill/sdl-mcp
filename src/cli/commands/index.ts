@@ -69,7 +69,10 @@ export interface ProgressState {
    * ordering across updates. Cleared on stage transitions away from
    * embeddings.
    */
-  embeddingsByModel: Map<string, { current: number; total: number }>;
+  embeddingsByModel: Map<
+    string,
+    { current: number; total: number; message?: string }
+  >;
 }
 
 /** @internal exported for tests; do not import from product code. */
@@ -1938,16 +1941,20 @@ export function renderIndexProgress(
     // (e.g. 21 → 25 → 22 → 26). The Map preserves insertion order so the
     // displayed columns stay stable across updates.
     const modelKey = p.model ?? "default";
-    state.embeddingsByModel.set(modelKey, {
-      current: p.current,
-      total: p.total,
-    });
+    state.embeddingsByModel.set(
+      modelKey,
+      p.message
+        ? { current: p.current, total: p.total, message: p.message }
+        : { current: p.current, total: p.total },
+    );
     const segments: string[] = [];
     let combinedCurrent = 0;
     let combinedTotal = 0;
     for (const [model, st] of state.embeddingsByModel) {
       const modelLabel = shortModelLabel(model);
-      if (st.total > 0) {
+      if (st.message) {
+        segments.push(`${modelLabel}: ${st.message}`);
+      } else if (st.total > 0) {
         const modelPct = Math.min(
           100,
           Math.floor((st.current / st.total) * 100),
@@ -1959,12 +1966,15 @@ export function renderIndexProgress(
       } else {
         segments.push(`${modelLabel}...`);
       }
-      combinedCurrent += st.current;
-      combinedTotal += st.total;
+      if (!st.message) {
+        combinedCurrent += st.current;
+        combinedTotal += st.total;
+      }
     }
     if (combinedTotal > 0) {
       pct = Math.min(100, Math.floor((combinedCurrent / combinedTotal) * 100));
     }
+    if (p.message) pct = null;
     line = `  ${embeddingStageLabel(p.substage)}: ${segments.join(" | ")}`;
   } else if (p.total > 0) {
     pct = Math.min(100, Math.floor((p.current / p.total) * 100));

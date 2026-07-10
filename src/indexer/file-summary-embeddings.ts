@@ -98,30 +98,52 @@ export async function refreshFileSummaryEmbeddings(params: {
     };
   }
 
-  const candidates = summaries.map((summary) => {
-    const text = buildFileSummaryEmbeddingText(summary, params.maxChars);
-    const hasPayload = text.trim().length > 0;
-    const prefixedText = applyDocumentPrefix(storageModel, text);
-    const cardHash = hashContent([summary.fileId, prefixedText].join("|"));
-    const existingHash =
-      storageModel === "jina-embeddings-v2-base-code"
-        ? summary.embeddingJinaCodeCardHash
-        : summary.embeddingNomicCardHash;
+  const inspectSummaries = (rows: typeof summaries) => {
+    const candidates = rows.map((summary) => {
+      const text = buildFileSummaryEmbeddingText(summary, params.maxChars);
+      const hasPayload = text.trim().length > 0;
+      const prefixedText = applyDocumentPrefix(storageModel, text);
+      const cardHash = hashContent([summary.fileId, prefixedText].join("|"));
+      const existingHash =
+        storageModel === "jina-embeddings-v2-base-code"
+          ? summary.embeddingJinaCodeCardHash
+          : summary.embeddingNomicCardHash;
+      return {
+        summary,
+        prefixedText,
+        cardHash,
+        cached: existingHash === cardHash,
+        hasPayload,
+      };
+    });
     return {
-      summary,
-      prefixedText,
-      cardHash,
-      cached: existingHash === cardHash,
-      hasPayload,
+      candidates,
+      missingPayloads: candidates.filter((item) => !item.hasPayload).length,
+      skipped: candidates.filter((item) => item.hasPayload && item.cached)
+        .length,
+      uncached: candidates
+        .filter((item) => item.hasPayload && !item.cached)
+        .sort((a, b) => a.prefixedText.length - b.prefixedText.length),
     };
-  });
-  const missingPayloads = candidates.filter((item) => !item.hasPayload).length;
-  const skipped = candidates.filter(
-    (item) => item.hasPayload && item.cached,
-  ).length;
-  const uncached = candidates
-    .filter((item) => item.hasPayload && !item.cached)
-    .sort((a, b) => a.prefixedText.length - b.prefixedText.length);
+  };
+
+  const rebuildMinUncachedRows =
+    params.rebuildMinUncachedRows ?? FILE_SUMMARY_VECTOR_REBUILD_MIN_ROWS;
+  let assessment = inspectSummaries(summaries);
+
+  // Small incremental scopes also inspect repository-wide hashes so rows
+  // deferred by earlier runs accumulate toward the safe HNSW rebuild batch.
+  if (
+    params.fileIds &&
+    params.fileIds.length > 0 &&
+    assessment.uncached.length < rebuildMinUncachedRows
+  ) {
+    assessment = inspectSummaries(
+      await ladybugDb.getFileSummariesForRepo(conn, params.repoId),
+    );
+  }
+
+  const { candidates, missingPayloads, skipped, uncached } = assessment;
 
   if (uncached.length === 0) {
     return { embedded: 0, skipped, missing: missingPayloads, degraded: false };
@@ -139,8 +161,6 @@ export async function refreshFileSummaryEmbeddings(params: {
   // re-summarization) always rebuild so small repositories still get
   // vectors. Deferred rows stay hash-uncached in the DB, so a later refresh
   // naturally picks them up; FTS/searchText freshness is unaffected.
-  const rebuildMinUncachedRows =
-    params.rebuildMinUncachedRows ?? FILE_SUMMARY_VECTOR_REBUILD_MIN_ROWS;
   const payloadBearing = candidates.filter((item) => item.hasPayload).length;
   const bootstrapRebuild =
     params.fileIds === undefined && uncached.length === payloadBearing;
@@ -154,6 +174,14 @@ export async function refreshFileSummaryEmbeddings(params: {
       model: storageModel,
       uncached: uncached.length,
       threshold: rebuildMinUncachedRows,
+    });
+    params.onProgress?.({
+      stage: "embeddings",
+      substage: "fileSummaryEmbeddings",
+      current: 0,
+      total: uncached.length,
+      model: storageModel,
+      message: `${uncached.length} deferred`,
     });
     return {
       embedded: 0,
