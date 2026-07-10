@@ -51,7 +51,7 @@ External benchmark baselines use format 1 and identify the repository that produ
 }
 ```
 
-The baseline `repoId` must match the selected repository. Update a baseline only from persisted, repeated measurements after review; never copy a result silently from another target or platform.
+The baseline `repoId` must match the selected repository. Update a baseline only from persisted, repeated measurements after review; never copy or reuse a result from another target or platform.
 
 A baseline records comparison values and never authorizes a threshold edit. A failed threshold remains visible in `results.json` and causes a nonzero exit.
 
