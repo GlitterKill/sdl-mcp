@@ -356,9 +356,23 @@ export function validateThresholdConfigV1(input: unknown): string[] {
     throw new Error("Thresholds must not be empty");
   }
 
+  const categories = [...new Set(THRESHOLD_RULES.map(([category]) => category))];
+  requireExactKeys(thresholds, categories, "Threshold categories");
+  for (const categoryName of categories) {
+    const metrics = THRESHOLD_RULES.filter(
+      ([category]) => category === categoryName,
+    ).map(([, metric]) => metric);
+    requireExactKeys(
+      record(thresholds[categoryName], categoryName),
+      metrics,
+      categoryName + " thresholds",
+    );
+  }
+
   for (const [categoryName, metric, trend, absolute, allowance] of THRESHOLD_RULES) {
     const category = record(thresholds[categoryName], categoryName);
     const rule = record(category[metric], metric);
+    requireExactKeys(rule, ["trend", absolute, allowance], metric + " rule");
     if (rule.trend !== trend) {
       throw new Error("Threshold trend mismatch: " + metric);
     }

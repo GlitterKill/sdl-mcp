@@ -592,6 +592,16 @@ describe("target baseline and threshold validation", () => {
     const badAllowance = structuredClone(validThresholdConfig());
     badAllowance.thresholds.tokenEfficiency.avgCardTokens
       .allowableIncreasePercent = Number.POSITIVE_INFINITY;
+    const extraCategory = structuredClone(validThresholdConfig());
+    extraCategory.thresholds.coverage = {};
+    const extraMetric = structuredClone(validThresholdConfig());
+    extraMetric.thresholds.quality.unexpected = {
+      minValue: 1,
+      trend: "higher-is-better",
+      allowableDecreasePercent: 10,
+    };
+    const extraRuleField = structuredClone(validThresholdConfig());
+    extraRuleField.thresholds.indexing.indexTimePerFile.unexpected = true;
 
     for (const candidate of [
       wrongVersion,
@@ -600,6 +610,9 @@ describe("target baseline and threshold validation", () => {
       wrongTrend,
       badAbsolute,
       badAllowance,
+      extraCategory,
+      extraMetric,
+      extraRuleField,
     ]) {
       let calls = 0;
       assert.throws(() => {
@@ -927,5 +940,39 @@ describe("target and runner git snapshots", () => {
       });
       assert.equal(calls, 0);
     }
+  });
+
+  it("blocks a mismatched target origin before child execution", () => {
+    const root = makeTempRoot();
+    writeFileSync(join(root, "tracked.txt"), "tracked");
+    const commit = "1".repeat(40);
+    const exec = (_file: string, args: readonly string[]) => {
+      const command = args.slice(2).join(" ");
+      if (
+        command === "rev-parse HEAD" ||
+        command === "rev-parse --verify locked^{commit}"
+      ) {
+        return commit;
+      }
+      if (command === "status --porcelain=v1 --untracked-files=all") return "";
+      if (command === "ls-files --cached --others --exclude-standard -z") {
+        return "tracked.txt\0";
+      }
+      if (command === "remote get-url origin") {
+        return "https://example.invalid/wrong.git";
+      }
+      throw new Error("unexpected git command: " + command);
+    };
+    let childCallCount = 0;
+
+    assert.throws(() => {
+      assertTargetRef(
+        root,
+        { ref: "locked", cloneUrl: "https://example.invalid/expected.git" },
+        exec,
+      );
+      childCallCount += 1;
+    }, /origin/u);
+    assert.equal(childCallCount, 0);
   });
 });
