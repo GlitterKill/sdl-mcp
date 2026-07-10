@@ -192,7 +192,7 @@ describe("external benchmark canonical evidence", () => {
   });
 
   it("rejects Windows drive-relative paths during normalization", () => {
-    for (const driveRelativePath of ["C:foo", "C:"]) {
+    for (const driveRelativePath of ["C:foo", "C:", "a/C:foo", "a/C:"]) {
       assert.throws(
         () => normalizeArtifactPath(driveRelativePath),
         /safe relative path/i,
@@ -205,7 +205,7 @@ describe("external benchmark canonical evidence", () => {
   });
 
   it("rejects Windows drive-relative paths during manifest serialization", () => {
-    for (const driveRelativePath of ["C:foo", "C:"]) {
+    for (const driveRelativePath of ["C:foo", "C:", "a/C:foo", "a/C:"]) {
       const manifest = makeManifest();
       manifest.target.scipArtifactPath = driveRelativePath;
       assert.throws(
@@ -217,7 +217,7 @@ describe("external benchmark canonical evidence", () => {
 
   it("rejects Windows drive-relative paths before fingerprint resolution", () => {
     const root = makeTempRoot();
-    for (const driveRelativePath of ["C:foo", "C:"]) {
+    for (const driveRelativePath of ["C:foo", "C:", "a/C:foo", "a/C:"]) {
       assert.throws(
         () => fingerprintFiles(root, [driveRelativePath]),
         /safe relative path/i,

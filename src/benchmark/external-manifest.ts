@@ -190,8 +190,12 @@ export function normalizeArtifactPath(input: string): string {
   if (
     normalized.length === 0 ||
     normalized.startsWith("/") ||
-    /^[A-Za-z]:/u.test(normalized) ||
-    segments.some((segment) => segment === "." || segment === "..")
+    segments.some(
+      (segment) =>
+        segment === "." ||
+        segment === ".." ||
+        /^[A-Za-z]:/u.test(segment),
+    )
   ) {
     throw new Error("Artifact path must be a safe relative path: " + input);
   }
