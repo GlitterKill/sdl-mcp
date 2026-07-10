@@ -56,7 +56,7 @@ export * from "./ladybug-metrics.js";
 // Audit & agent feedback operations
 export * from "./ladybug-feedback.js";
 
-// Symbol embeddings, summary cache, sync artifacts, symbol references
+// Legacy SymbolEmbedding compatibility CRUD, summary cache, sync artifacts, and symbol references.
 export * from "./ladybug-embeddings.js";
 
 // Model-aware Symbol node embedding helpers (replaces SymbolEmbedding table access)

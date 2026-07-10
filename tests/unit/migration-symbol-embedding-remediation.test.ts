@@ -21,7 +21,12 @@ import {
   migrations,
 } from "../../dist/db/migrations/index.js";
 import * as m007 from "../../dist/db/migrations/m007-copy-embeddings-to-symbol.js";
-import { computePendingMigrations } from "../../dist/db/migration-runner.js";
+import * as m021 from "../../dist/db/migrations/m021-remediate-symbol-embeddings.js";
+import { remediateSymbolEmbeddings } from "../../dist/db/migrations/symbol-embedding-remediation.js";
+import {
+  computePendingMigrations,
+  runPendingMigrations,
+} from "../../dist/db/migration-runner.js";
 
 interface LegacyEmbeddingRow {
   symbolId: string;
@@ -442,5 +447,605 @@ describe("SymbolEmbedding migration registry and initializer paths", () => {
     } finally {
       migrations[lastIndex] = original;
     }
+  });
+});
+
+
+interface InterceptContext {
+  statement: string;
+  params: Record<string, unknown>;
+}
+
+interface InterceptRule {
+  match: string;
+  occurrence?: number;
+  beforeExecute?: (context: InterceptContext) => void | Promise<void>;
+  afterExecute?: (context: InterceptContext) => void | Promise<void>;
+}
+
+interface ExecutedStatement extends InterceptContext {}
+
+function interceptConnection(
+  real: import("kuzu").Connection,
+  rules: readonly InterceptRule[] = [],
+  executions: ExecutedStatement[] = [],
+  lifecycle: string[] = [],
+): import("kuzu").Connection {
+  const preparedSql = new Map<import("kuzu").PreparedStatement, string>();
+  const states = rules.map((rule) => ({
+    ...rule,
+    occurrence: rule.occurrence ?? 1,
+    matches: 0,
+    fired: false,
+  }));
+
+  return new Proxy(real, {
+    get(target, property) {
+      if (property === "prepare") {
+        return async (statement: string) => {
+          lifecycle.push(`prepare:${statement}`);
+          const prepared = await target.prepare(statement);
+          preparedSql.set(prepared, statement);
+          return prepared;
+        };
+      }
+
+      if (property === "execute") {
+        return async (
+          prepared: import("kuzu").PreparedStatement,
+          rawParams: Parameters<import("kuzu").Connection["execute"]>[1],
+        ) => {
+          const statement = preparedSql.get(prepared) ?? "";
+          const params = (rawParams ?? {}) as Record<string, unknown>;
+          const context = { statement, params };
+          executions.push(context);
+          lifecycle.push(`execute:start:${statement}`);
+
+          const activeRule = states.find((state) => {
+            if (state.fired || !statement.includes(state.match)) return false;
+            state.matches++;
+            if (state.matches !== state.occurrence) return false;
+            state.fired = true;
+            return true;
+          });
+          await activeRule?.beforeExecute?.(context);
+
+          try {
+            return await target.execute(prepared, rawParams);
+          } finally {
+            await activeRule?.afterExecute?.(context);
+            lifecycle.push(`execute:done:${statement}`);
+          }
+        };
+      }
+
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+async function createFullRemediationDatabase(
+  name: string,
+): Promise<import("kuzu").Connection> {
+  const { conn } = await createRawDatabase(name);
+  await execDdl(
+    conn,
+    `CREATE NODE TABLE Symbol (
+      symbolId STRING PRIMARY KEY,
+      embeddingMiniLM STRING,
+      embeddingMiniLMCardHash STRING,
+      embeddingMiniLMUpdatedAt STRING,
+      embeddingNomic STRING,
+      embeddingNomicCardHash STRING,
+      embeddingNomicUpdatedAt STRING
+    )`,
+  );
+  await createCompatibilityTable(conn);
+  return conn;
+}
+
+async function seedEmptyDestination(
+  conn: import("kuzu").Connection,
+  symbolId: string,
+): Promise<void> {
+  await exec(
+    conn,
+    `CREATE (s:Symbol {
+      symbolId: $symbolId,
+      embeddingMiniLM: null,
+      embeddingMiniLMCardHash: null,
+      embeddingMiniLMUpdatedAt: null,
+      embeddingNomic: null,
+      embeddingNomicCardHash: null,
+      embeddingNomicUpdatedAt: null
+    })`,
+    { symbolId },
+  );
+}
+
+function executedStatementCount(
+  executions: readonly ExecutedStatement[],
+  fragment: string,
+): number {
+  return executions.filter(({ statement }) => statement.includes(fragment))
+    .length;
+}
+
+describe("SymbolEmbedding remediation failure boundaries", () => {
+  it("rolls back the copy transaction and never enters deletion", async () => {
+    const real = await createFullRemediationDatabase("copy-rollback");
+    await seedEmptyDestination(real, "copy-rollback-symbol");
+    await seedLegacyEmbedding(real, legacyRow("copy-rollback-symbol"));
+
+    const executions: ExecutedStatement[] = [];
+    const proxy = interceptConnection(
+      real,
+      [
+        {
+          match: "SET s.embeddingMiniLM =",
+          beforeExecute() {
+            throw new Error("copy-sentinel");
+          },
+        },
+      ],
+      executions,
+    );
+
+    await assert.rejects(
+      remediateSymbolEmbeddings(proxy, "copy-rollback"),
+      /copy-sentinel/,
+    );
+    assert.deepEqual(await readDestinationRows(real), [
+      {
+        symbolId: "copy-rollback-symbol",
+        embeddingMiniLM: null,
+        embeddingMiniLMCardHash: null,
+        embeddingMiniLMUpdatedAt: null,
+        embeddingNomic: null,
+        embeddingNomicCardHash: null,
+        embeddingNomicUpdatedAt: null,
+      },
+    ]);
+    assert.deepEqual(await readSourceIds(real), ["copy-rollback-symbol"]);
+    assert.equal(executedStatementCount(executions, "DELETE se"), 0);
+  });
+
+  it("rolls back a missing-table read before returning an empty summary", async () => {
+    const { conn: real } = await createRawDatabase("missing-table");
+    await execDdl(
+      real,
+      `CREATE NODE TABLE Symbol (
+        symbolId STRING PRIMARY KEY,
+        embeddingMiniLM STRING,
+        embeddingMiniLMCardHash STRING,
+        embeddingMiniLMUpdatedAt STRING,
+        embeddingNomic STRING,
+        embeddingNomicCardHash STRING,
+        embeddingNomicUpdatedAt STRING
+      )`,
+    );
+
+    const lifecycle: string[] = [];
+    const proxy = interceptConnection(
+      real,
+      [
+        {
+          match: "ROLLBACK",
+          afterExecute() {
+            lifecycle.push("rollback-complete");
+          },
+        },
+      ],
+      [],
+      lifecycle,
+    );
+
+    const summary = await remediateSymbolEmbeddings(proxy, "missing-table");
+    lifecycle.push("returned");
+
+    assert.deepEqual(summary, {
+      scanned: 0,
+      copied: 0,
+      alreadyCurrent: 0,
+      deleted: 0,
+      retained: {
+        conflict: 0,
+        duplicateQueryResult: 0,
+        malformed: 0,
+        mock: 0,
+        orphan: 0,
+        unknownModel: 0,
+      },
+    });
+    const sourceReadIndex = lifecycle.findIndex((entry) =>
+      entry.includes("prepare:MATCH (se:SymbolEmbedding)"),
+    );
+    const rollbackIndex = lifecycle.indexOf("rollback-complete");
+    assert.ok(sourceReadIndex >= 0);
+    assert.ok(sourceReadIndex < rollbackIndex);
+    assert.ok(rollbackIndex < lifecycle.indexOf("returned"));
+  });
+
+  it("propagates non-table source read failures after rollback", async () => {
+    const real = await createFullRemediationDatabase("source-read-failure");
+    const lifecycle: string[] = [];
+    const proxy = interceptConnection(
+      real,
+      [
+        {
+          match: "ORDER BY se.symbolId, se.model",
+          beforeExecute() {
+            throw new Error("source-read-sentinel");
+          },
+        },
+        {
+          match: "ROLLBACK",
+          afterExecute() {
+            lifecycle.push("rollback-complete");
+          },
+        },
+      ],
+      [],
+      lifecycle,
+    );
+
+    await assert.rejects(
+      remediateSymbolEmbeddings(proxy, "source-read-failure"),
+      /source-read-sentinel/,
+    );
+    assert.ok(lifecycle.includes("rollback-complete"));
+  });
+
+  it("revalidates destination and source fingerprints before copying", async () => {
+    for (const mutation of ["destination", "source"] as const) {
+      const real = await createFullRemediationDatabase(
+        `copy-revalidation-${mutation}`,
+      );
+      const symbolId = `copy-revalidation-${mutation}`;
+      await seedEmptyDestination(real, symbolId);
+      await seedLegacyEmbedding(real, legacyRow(symbolId));
+
+      const proxy = interceptConnection(real, [
+        {
+          match: "SET s.embeddingMiniLM =",
+          async beforeExecute() {
+            if (mutation === "destination") {
+              await exec(
+                real,
+                `MATCH (s:Symbol {symbolId: $symbolId})
+                 SET s.embeddingMiniLM = $vector`,
+                { symbolId, vector: encoded(384, 9) },
+              );
+            } else {
+              await exec(
+                real,
+                `MATCH (se:SymbolEmbedding {symbolId: $symbolId})
+                 SET se.cardHash = $cardHash`,
+                { symbolId, cardHash: "mutated-source-hash" },
+              );
+            }
+          },
+        },
+      ]);
+
+      const summary = await remediateSymbolEmbeddings(
+        proxy,
+        `copy-revalidation-${mutation}`,
+      );
+      assert.equal(summary.copied, 0);
+      assert.deepEqual(await readSourceIds(real), [symbolId]);
+      const destination = (await readDestinationRows(real))[0];
+      assert.equal(
+        destination?.embeddingMiniLM,
+        mutation === "destination" ? encoded(384, 9) : null,
+      );
+    }
+  });
+
+  it("revalidates source and destination immediately before deletion begins", async () => {
+    for (const mutation of ["source", "destination"] as const) {
+      const real = await createFullRemediationDatabase(
+        `delete-revalidation-${mutation}`,
+      );
+      const symbolId = `delete-revalidation-${mutation}`;
+      await seedEmptyDestination(real, symbolId);
+      await seedLegacyEmbedding(real, legacyRow(symbolId));
+
+      const proxy = interceptConnection(real, [
+        {
+          match: "BEGIN TRANSACTION",
+          occurrence: 2,
+          async beforeExecute() {
+            if (mutation === "source") {
+              await exec(
+                real,
+                `MATCH (se:SymbolEmbedding {symbolId: $symbolId})
+                 SET se.cardHash = $cardHash`,
+                { symbolId, cardHash: "changed-after-copy" },
+              );
+            } else {
+              await exec(
+                real,
+                `MATCH (s:Symbol {symbolId: $symbolId})
+                 SET s.embeddingMiniLMCardHash = $cardHash`,
+                { symbolId, cardHash: "changed-after-copy" },
+              );
+            }
+          },
+        },
+      ]);
+
+      const summary = await remediateSymbolEmbeddings(
+        proxy,
+        `delete-revalidation-${mutation}`,
+      );
+      assert.equal(summary.copied, 1);
+      assert.equal(summary.deleted, 0);
+      assert.deepEqual(await readSourceIds(real), [symbolId]);
+    }
+  });
+
+  it("keeps committed copies when deletion fails and deletes on safe rerun", async () => {
+    const real = await createFullRemediationDatabase("deletion-failure");
+    const symbolId = "deletion-failure-symbol";
+    await seedEmptyDestination(real, symbolId);
+    await seedLegacyEmbedding(real, legacyRow(symbolId));
+
+    const proxy = interceptConnection(real, [
+      {
+        match: "DELETE se",
+        beforeExecute() {
+          throw new Error("delete-sentinel");
+        },
+      },
+    ]);
+
+    await assert.rejects(
+      remediateSymbolEmbeddings(proxy, "deletion-failure"),
+      /delete-sentinel/,
+    );
+    assert.equal(
+      (await readDestinationRows(real))[0]?.embeddingMiniLM,
+      encoded(384),
+    );
+    assert.deepEqual(await readSourceIds(real), [symbolId]);
+
+    const retrySummary = await remediateSymbolEmbeddings(
+      real,
+      "deletion-retry",
+    );
+    assert.equal(retrySummary.copied, 0);
+    assert.equal(retrySummary.alreadyCurrent, 1);
+    assert.equal(retrySummary.deleted, 1);
+    assert.deepEqual(await readSourceIds(real), []);
+  });
+
+  it("safely retries m021 after the final SchemaVersion write fails", async () => {
+    const dbPath = join(testRoot, "schema-version-retry.lbug");
+    mkdirSync(testRoot, { recursive: true });
+    await initLadybugDb(dbPath);
+    const real = await getLadybugConn();
+    const symbolId = "schema-version-retry-symbol";
+    await seedLatestResidual(real, symbolId);
+    await setSchemaVersion(real, 20);
+
+    const wrappedM021 = {
+      ...m021,
+      async up(writeConn: import("kuzu").Connection) {
+        await m021.up(writeConn);
+      },
+    };
+    const proxy = interceptConnection(real, [
+      {
+        match: "MERGE (sv:SchemaVersion",
+        beforeExecute() {
+          throw new Error("schema-version-sentinel");
+        },
+      },
+    ]);
+
+    await assert.rejects(
+      runPendingMigrations(proxy, 20, [wrappedM021]),
+      /schema-version-sentinel/,
+    );
+    assert.equal(await getSchemaVersion(real), 20);
+    assert.equal(
+      (await readDestinationRows(real))[0]?.embeddingMiniLM,
+      encoded(384),
+    );
+    assert.deepEqual(await readSourceIds(real), []);
+
+    await runPendingMigrations(real, 20, [m021]);
+    assert.equal(await getSchemaVersion(real), 21);
+    assert.deepEqual(await readSourceIds(real), []);
+  });
+});
+
+type BatchCategory =
+  | "sourceRead"
+  | "destinationRead"
+  | "miniCopy"
+  | "nomicCopy"
+  | "miniDeleteVerify"
+  | "miniDelete"
+  | "nomicDeleteVerify"
+  | "nomicDelete";
+
+function batchCategory(statement: string): BatchCategory | null {
+  if (statement.includes("ORDER BY se.symbolId, se.model")) {
+    return "sourceRead";
+  }
+  if (statement.includes("UNWIND $symbolIds AS symbolId")) {
+    return "destinationRead";
+  }
+  if (statement.includes("SET s.embeddingMiniLM =")) return "miniCopy";
+  if (statement.includes("SET s.embeddingNomic =")) return "nomicCopy";
+
+  const isDelete = statement.includes("DELETE se");
+  const isVerify = statement.includes("RETURN se.symbolId AS symbolId");
+  if (statement.includes("s.embeddingMiniLM = r.destinationVector")) {
+    if (isDelete) return "miniDelete";
+    if (isVerify) return "miniDeleteVerify";
+  }
+  if (statement.includes("s.embeddingNomic = r.destinationVector")) {
+    if (isDelete) return "nomicDelete";
+    if (isVerify) return "nomicDeleteVerify";
+  }
+  return null;
+}
+
+function executionIds(execution: ExecutedStatement): string[] {
+  const values = execution.params.symbolIds ?? execution.params.rows;
+  if (!Array.isArray(values)) return [];
+
+  return values.flatMap((value) => {
+    if (typeof value === "string") return [value];
+    if (
+      value &&
+      typeof value === "object" &&
+      "symbolId" in value &&
+      typeof value.symbolId === "string"
+    ) {
+      return [value.symbolId];
+    }
+    return [];
+  });
+}
+
+function categorizeExecutions(
+  executions: readonly ExecutedStatement[],
+): Record<BatchCategory, string[][]> {
+  const categories: Record<BatchCategory, string[][]> = {
+    sourceRead: [],
+    destinationRead: [],
+    miniCopy: [],
+    nomicCopy: [],
+    miniDeleteVerify: [],
+    miniDelete: [],
+    nomicDeleteVerify: [],
+    nomicDelete: [],
+  };
+  for (const execution of executions) {
+    const category = batchCategory(execution.statement);
+    if (category) categories[category].push(executionIds(execution));
+  }
+  return categories;
+}
+
+async function seedMultiBatchRows(
+  conn: import("kuzu").Connection,
+): Promise<void> {
+  const rows = [
+    ...Array.from({ length: 257 }, (_, index) => ({
+      symbolId: `mini-${String(index).padStart(3, "0")}`,
+      model: "all-MiniLM-L6-v2",
+      embeddingVector: encoded(384),
+    })),
+    ...Array.from({ length: 257 }, (_, index) => ({
+      symbolId: `nomic-${String(index).padStart(3, "0")}`,
+      model: "nomic-embed-text-v1.5",
+      embeddingVector: encoded(768),
+    })),
+  ];
+
+  for (let offset = 0; offset < rows.length; offset += 256) {
+    const batch = rows.slice(offset, offset + 256);
+    await exec(
+      conn,
+      `UNWIND $rows AS r
+       CREATE (s:Symbol {
+         symbolId: r.symbolId,
+         embeddingMiniLM: null,
+         embeddingMiniLMCardHash: null,
+         embeddingMiniLMUpdatedAt: null,
+         embeddingNomic: null,
+         embeddingNomicCardHash: null,
+         embeddingNomicUpdatedAt: null
+       })`,
+      { rows: batch },
+    );
+    await exec(
+      conn,
+      `UNWIND $rows AS r
+       CREATE (se:SymbolEmbedding {
+         symbolId: r.symbolId,
+         model: r.model,
+         embeddingVector: r.embeddingVector,
+         version: null,
+         cardHash: null,
+         createdAt: null,
+         updatedAt: null
+       })`,
+      { rows: batch },
+    );
+  }
+}
+
+async function runMultiBatchCase(name: string): Promise<{
+  categories: Record<BatchCategory, string[][]>;
+  copied: number;
+  deleted: number;
+  destinationCount: number;
+  sourceIds: string[];
+}> {
+  const real = await createFullRemediationDatabase(name);
+  await seedMultiBatchRows(real);
+  const executions: ExecutedStatement[] = [];
+  const proxy = interceptConnection(real, [], executions);
+  const summary = await remediateSymbolEmbeddings(proxy, name);
+
+  return {
+    categories: categorizeExecutions(executions),
+    copied: summary.copied,
+    deleted: summary.deleted,
+    destinationCount: (await readDestinationRows(real)).length,
+    sourceIds: await readSourceIds(real),
+  };
+}
+
+describe("SymbolEmbedding remediation batching", () => {
+  it("uses deterministic bounded batches for 257 rows in each lane", async () => {
+    const first = await runMultiBatchCase("batch-first");
+    const second = await runMultiBatchCase("batch-second");
+
+    for (const result of [first, second]) {
+      assert.equal(result.copied, 514);
+      assert.equal(result.deleted, 514);
+      assert.equal(result.destinationCount, 514);
+      assert.deepEqual(result.sourceIds, []);
+
+      assert.equal(result.categories.sourceRead.length, 1);
+      assert.equal(result.categories.destinationRead.length, Math.ceil(514 / 256));
+      for (const category of [
+        "miniCopy",
+        "nomicCopy",
+        "miniDeleteVerify",
+        "miniDelete",
+        "nomicDeleteVerify",
+        "nomicDelete",
+      ] as const) {
+        assert.equal(result.categories[category].length, Math.ceil(257 / 256));
+      }
+
+      for (const category of [
+        "destinationRead",
+        "miniCopy",
+        "nomicCopy",
+        "miniDeleteVerify",
+        "miniDelete",
+        "nomicDeleteVerify",
+        "nomicDelete",
+      ] as const) {
+        const chunks = result.categories[category];
+        for (const ids of chunks) {
+          assert.deepEqual(ids, [...ids].sort());
+        }
+        const flattened = chunks.flat();
+        assert.deepEqual(flattened, [...flattened].sort());
+      }
+    }
+
+    assert.deepEqual(second, first);
   });
 });

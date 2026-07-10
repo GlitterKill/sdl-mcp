@@ -27,7 +27,12 @@ export interface SymbolEmbeddingRow {
   updatedAt: string;
 }
 
-/** @deprecated Use setSymbolEmbeddingOnNode from ladybug-symbol-embeddings.ts instead. */
+/**
+ * @deprecated Compatibility-only writer for legacy SymbolEmbedding rows.
+ * New production writes must use the model-aware Symbol node embedding helpers
+ * in ladybug-symbol-embeddings.ts. Keep this export until the compatibility
+ * table is removed at an authorized release boundary.
+ */
 export async function upsertSymbolEmbedding(
   conn: Connection,
   row: SymbolEmbeddingRow,
