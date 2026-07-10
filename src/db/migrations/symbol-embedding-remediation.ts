@@ -169,6 +169,9 @@ export function classifyLegacyEmbeddingRow(
   if (destination === null) {
     return { kind: "retain", reason: "orphan" };
   }
+  if (destination.symbolId !== row.symbolId) {
+    return { kind: "retain", reason: "orphan" };
+  }
 
   const source: LegacyEmbeddingFingerprint = {
     symbolId: row.symbolId,

@@ -236,6 +236,24 @@ describe("SymbolEmbedding remediation classification", () => {
     );
   });
 
+  it("retains mismatched destination symbols as orphaned", () => {
+    const source = legacyRow({ embeddingVector: encoded(384, 1) });
+    const destinations = [
+      destinationRow({ symbolId: "other-symbol" }),
+      destinationRow({
+        symbolId: "other-symbol",
+        vector: encoded(384, 1),
+      }),
+    ];
+
+    for (const destination of destinations) {
+      assert.deepEqual(
+        classifyLegacyEmbeddingRow(source, destination, new Set()),
+        { kind: "retain", reason: "orphan" },
+      );
+    }
+  });
+
   it("retains rows whose destination symbol is absent", () => {
     assert.deepEqual(
       classifyLegacyEmbeddingRow(legacyRow(), null, new Set()),
