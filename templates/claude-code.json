@@ -1,54 +1,19 @@
 {
   "_comment": "Claude Code MCP Configuration Template for SDL-MCP",
   "_documentation": {
-    "purpose": "Configure SDL-MCP as an MCP server for Claude Code",
-    "placement": "Use `claude mcp add-json` or merge into ~/.claude.json under `mcpServers`",
-    "windowsNotes": {
-      "paths": "Use forward slashes (/) or escaped backslashes (\\\\)",
-      "npx": "npx works cross-platform. For global install, use 'node' with full path",
-      "environment": "SDL_CONFIG_PATH or SDL_CONFIG must be set to point to your sdlmcp.config.json"
+    "purpose": "Configure SDL-MCP as a stdio MCP server for Claude Code",
+    "destinations": {
+      "project": "Save the full mcpServers document as .mcp.json in the repository root.",
+      "cli": "For local or user scope, pass only mcpServers.sdl-mcp to claude mcp add-json; use --scope local or --scope user."
     },
-    "quoting": {
-      "powerShell": "Single quotes work for paths, double quotes for variable expansion",
-      "cmd": "Use double quotes for all paths with spaces"
-    },
-    "workspaceFolder": {
-      "description": "Replaced by Claude Code with the current workspace root",
-      "windows": "Resolves to forward-slash path on all platforms"
-    }
+    "windows": "Use the emitted PowerShell snippet. cmd.exe users should use the project .mcp.json form or run the PowerShell snippet."
   },
   "mcpServers": {
     "sdl-mcp": {
+      "type": "stdio",
       "command": "npx",
-      "args": ["--yes", "sdl-mcp@latest", "serve", "--stdio"],
-      "env": {
-        "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json",
-        "_comment_env": "Alternative: Set SDL_CONFIG_PATH if you prefer environment variable name"
-      }
-    }
-  },
-  "_alternative_global_install": {
-    "description": "If you installed SDL-MCP globally with 'npm install -g sdl-mcp':",
-    "mcpServers": {
-      "sdl-mcp": {
-        "command": "sdl-mcp",
-        "args": ["serve", "--stdio"],
-        "env": {
-          "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json"
-        }
-      }
-    }
-  },
-  "_alternative_windows_direct_node": {
-    "description": "Windows alternative using direct Node invocation (if npx is unavailable):",
-    "mcpServers": {
-      "sdl-mcp": {
-        "command": "node",
-        "args": ["F:/path/to/sdl-mcp/dist/main.js", "serve", "--stdio"],
-        "env": {
-          "SDL_CONFIG": "${workspaceFolder}/sdlmcp.config.json"
-        }
-      }
+      "args": ["-y", "sdl-mcp"],
+      "env": {}
     }
   }
 }

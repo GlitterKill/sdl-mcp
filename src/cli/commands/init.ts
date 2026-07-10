@@ -37,6 +37,7 @@ import {
   RUNTIME_DEFAULT_TIMEOUT_MS,
 } from "../../config/constants.js";
 import { LanguageSchema } from "../../config/types.js";
+import { ConfigError } from "../../domain/errors.js";
 import { resolveCliConfigPath } from "../../config/configPath.js";
 import { defaultGraphDbPath } from "../../db/graph-db-path.js";
 import { resolvePidfilePath } from "../../util/pidfile.js";
@@ -2128,24 +2129,141 @@ export function detectInstalledClients(): ClientDetection[] {
   return installed;
 }
 
-async function emitClientConfigBlocks(configPath: string): Promise<void> {
+type JsonObject = Record<string, unknown>;
+
+type ClaudeCodeServerConfig = JsonObject & {
+  type: "stdio";
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+};
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return (
+    isJsonObject(value) &&
+    Object.values(value).every((item) => typeof item === "string")
+  );
+}
+
+function requireClaudeCodeServerConfig(
+  document: unknown,
+): ClaudeCodeServerConfig {
+  const mcpServers =
+    isJsonObject(document) && isJsonObject(document.mcpServers)
+      ? document.mcpServers
+      : undefined;
+  const server = mcpServers?.["sdl-mcp"];
+
+  if (
+    !isJsonObject(server) ||
+    server.type !== "stdio" ||
+    typeof server.command !== "string" ||
+    server.command.trim().length === 0 ||
+    !isStringArray(server.args) ||
+    !isStringRecord(server.env)
+  ) {
+    throw new ConfigError(
+      "Invalid Claude Code template: mcpServers.sdl-mcp must be a stdio server with a non-empty command, string[] args, and string-valued env.",
+    );
+  }
+
+  return server as ClaudeCodeServerConfig;
+}
+
+function quotePowerShellSingle(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function quotePosixSingle(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+export function renderClaudeCodeSetupInstructions(
+  template: unknown,
+  configPath: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  // Validate before generateClientConfig dereferences the template shape.
+  requireClaudeCodeServerConfig(template);
+
+  const generatedDocument: unknown = JSON.parse(
+    generateClientConfig(template, configPath),
+  );
+  const generatedServer = requireClaudeCodeServerConfig(generatedDocument);
+  const serverJson = JSON.stringify(generatedServer);
+  const projectJson = JSON.stringify(
+    {
+      mcpServers: {
+        "sdl-mcp": generatedServer,
+      },
+    },
+    null,
+    2,
+  );
+
+  const shellLines =
+    platform === "win32"
+      ? [
+          "PowerShell (run one command; local or user scope):",
+          `$sdlMcpConfig = ${quotePowerShellSingle(serverJson)}`,
+          "claude mcp add-json --scope local sdl-mcp $sdlMcpConfig",
+          "claude mcp add-json --scope user sdl-mcp $sdlMcpConfig",
+          "cmd.exe users: use the project .mcp.json form or run the PowerShell snippet.",
+        ]
+      : [
+          "POSIX shell (run one command; local or user scope):",
+          `sdl_mcp_config=${quotePosixSingle(serverJson)}`,
+          'claude mcp add-json --scope local sdl-mcp "$sdl_mcp_config"',
+          'claude mcp add-json --scope user sdl-mcp "$sdl_mcp_config"',
+        ];
+
+  return [
+    "Project scope (.mcp.json at the repository root):",
+    projectJson,
+    "",
+    ...shellLines,
+  ].join("\n");
+}
+
+async function emitClientConfigBlocks(
+  configPath: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<void> {
   const detections = detectInstalledClients();
   console.log("");
   console.log("Detected MCP clients and config blocks:");
+
   for (const detection of detections) {
     let block: string;
+    const isClaudeCode = detection.templateClient === "claude-code";
+
     if (detection.templateClient) {
       const template = await loadClientTemplate(detection.templateClient);
-      block = generateClientConfig(template, configPath);
+      block = isClaudeCode
+        ? renderClaudeCodeSetupInstructions(template, configPath, platform)
+        : generateClientConfig(template, configPath);
     } else {
       block = buildGenericClientConfig(configPath);
     }
 
-    console.log(`- ${detection.name}: ${detection.configPath}`);
+    console.log(
+      isClaudeCode
+        ? `- ${detection.name}:`
+        : `- ${detection.name}: ${detection.configPath}`,
+    );
     console.log(block);
     console.log("");
   }
 }
+
 
 function printDryRunPreview(
   configPath: string,
@@ -2661,3 +2779,5 @@ export async function initCommand(options: InitOptions): Promise<void> {
     process.exit(1);
   }
 }
+
+export { emitClientConfigBlocks, generateClientConfig, loadClientTemplate };
