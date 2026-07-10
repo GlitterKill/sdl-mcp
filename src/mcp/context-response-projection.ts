@@ -162,6 +162,25 @@ const PRECONDITION_MODEL_FIELDS = new Set([
   "sha256",
 ]);
 
+const USAGE_STATS_TOOLS = new Set(["usage.stats", "sdl.usage.stats"]);
+const CODE_NEED_WINDOW_TOOLS = new Set([
+  "code.needWindow",
+  "sdl.code.needWindow",
+]);
+
+function shouldOmitToolSpecificModelField(
+  toolName: string,
+  key: string,
+): boolean {
+  if (USAGE_STATS_TOOLS.has(toolName)) {
+    return key === "formattedSummary";
+  }
+  if (CODE_NEED_WINDOW_TOOLS.has(toolName)) {
+    return key === "whyApproved" || key === "estimatedTokens";
+  }
+  return false;
+}
+
 const WORKFLOW_CHILD_TOOL_NAMES: Record<string, string> = {
   actionSearch: "action.search",
   codeHotPath: "code.getHotPath",
@@ -208,6 +227,23 @@ function stripFullDetailHiddenFieldsForModel(value: unknown): unknown {
       continue;
     }
     projected[key] = stripFullDetailHiddenFieldsForModel(itemValue);
+  }
+  return projected;
+}
+
+function stripTopLevelToolSpecificFieldsForModel(
+  toolName: string,
+  value: unknown,
+): unknown {
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const projected: Record<string, unknown> = {};
+  for (const [key, itemValue] of Object.entries(value)) {
+    if (!shouldOmitToolSpecificModelField(toolName, key)) {
+      projected[key] = itemValue;
+    }
   }
   return projected;
 }
@@ -392,11 +428,28 @@ function shouldKeepModelField(
   toolName: string,
   key: string,
   options: ModelContentProjectionOptions,
+  depth: number,
 ): boolean {
   if (PRECONDITION_MODEL_FIELDS.has(key)) {
     return false;
   }
+  if (depth === 0 && shouldOmitToolSpecificModelField(toolName, key)) {
+    return false;
+  }
   if (isFullDetail(options)) {
+    return true;
+  }
+
+  // Direct code-window line matches are actionable; nested matches retain the
+  // established generic omission behavior.
+  if (key === "matchedLineNumbers") {
+    return depth === 0 && CODE_NEED_WINDOW_TOOLS.has(toolName);
+  }
+  if (
+    key === "whyApproved"
+    && depth > 0
+    && CODE_NEED_WINDOW_TOOLS.has(toolName)
+  ) {
     return true;
   }
   if (key === "trace") {
@@ -432,7 +485,6 @@ function shouldKeepModelField(
   if (
     key === "estimatedTokens"
     || key === "originalLines"
-    || key === "matchedLineNumbers"
     || key === "generatedAt"
     || key === "tokenMetrics"
   ) {
@@ -455,10 +507,11 @@ function projectGenericValueForModel(
   toolName: string,
   value: unknown,
   options: ModelContentProjectionOptions,
+  depth = 0,
 ): unknown {
   if (Array.isArray(value)) {
     return value.map((item) =>
-      projectGenericValueForModel(toolName, item, options),
+      projectGenericValueForModel(toolName, item, options, depth + 1),
     );
   }
   if (!isRecord(value)) {
@@ -488,10 +541,15 @@ function projectGenericValueForModel(
       }
       continue;
     }
-    if (!shouldKeepModelField(toolName, key, options)) {
+    if (!shouldKeepModelField(toolName, key, options, depth)) {
       continue;
     }
-    const projectedValue = projectGenericValueForModel(toolName, itemValue, options);
+    const projectedValue = projectGenericValueForModel(
+      toolName,
+      itemValue,
+      options,
+      depth + 1,
+    );
     if (isRecord(projectedValue) && Object.keys(projectedValue).length === 0) {
       continue;
     }
@@ -613,7 +671,7 @@ function projectWorkflowStepResultForModel(
     return isRecord(result) ? projectActionSearchForModel(result) : result;
   }
   if (childToolName === "usage.stats") {
-    return isRecord(result) ? projectUsageStatsForModel(result) : result;
+    return isRecord(result) ? projectUsageStatsForModel() : result;
   }
 
   return projectGenericValueForModel(childToolName, result, childOptions);
@@ -696,12 +754,8 @@ function projectWorkflowResultForModel(
   return projected;
 }
 
-function projectUsageStatsForModel(
-  result: Record<string, unknown>,
-): Record<string, unknown> {
-  const projected: Record<string, unknown> = {};
-  copyIfPresent(result, projected, "formattedSummary");
-  return projected;
+function projectUsageStatsForModel(): Record<string, unknown> {
+  return {};
 }
 
 function projectDerivedStateForModel(value: unknown): unknown {
@@ -919,13 +973,16 @@ export function projectToolResultForModelContent(
     return projectWorkflowResultForModel(result, options, args);
   }
   if (isFullDetail(options)) {
-    return stripFullDetailHiddenFieldsForModel(result);
+    return stripTopLevelToolSpecificFieldsForModel(
+      toolName,
+      stripFullDetailHiddenFieldsForModel(result),
+    );
   }
   if (CONTEXT_TOOLS.has(toolName) && ("answer" in result || "finalEvidence" in result)) {
     return projectContextResultForModel(result, options);
   }
   if (toolName === "usage.stats" || toolName === "sdl.usage.stats") {
-    return projectUsageStatsForModel(result);
+    return projectUsageStatsForModel();
   }
   if (toolName === "repo.status" || toolName === "sdl.repo.status") {
     if (options.detail === "compact" && !options.includeTelemetry) {

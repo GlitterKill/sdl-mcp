@@ -634,19 +634,168 @@ describe("context-response-projection", () => {
       });
     });
 
-    it("returns only formattedSummary for compact usage stats", () => {
+    it("omits the duplicate compact usage summary without mutating the raw result", () => {
+      const raw = {
+        formattedSummary: "summary",
+        session: { callCount: 1 },
+        history: { snapshots: [], aggregate: {} },
+        wire: { packed: { encodings: 1 } },
+      };
+
+      const projected = projectToolResultForModelContent("usage.stats", raw, {});
+
+      assert.deepEqual(projected, {});
+      assert.equal(raw.formattedSummary, "summary");
+      assert.deepEqual(raw.session, { callCount: 1 });
+    });
+
+    it("omits only formattedSummary from full-detail usage model content", () => {
+      const raw = {
+        formattedSummary: "summary",
+        session: { callCount: 1 },
+        history: { snapshots: [], aggregate: {} },
+        wire: { packed: { encodings: 1 } },
+      };
+
       const projected = projectToolResultForModelContent(
-        "usage.stats",
-        {
-          formattedSummary: "summary",
-          session: { callCount: 1 },
-          history: { snapshots: [], aggregate: {} },
-          wire: { packed: { encodings: 1 } },
-        },
-        {},
+        "sdl.usage.stats",
+        raw,
+        { detail: "full" },
       );
 
-      assert.deepEqual(projected, { formattedSummary: "summary" });
+      assert.deepEqual(projected, {
+        session: { callCount: 1 },
+        history: { snapshots: [], aggregate: {} },
+        wire: { packed: { encodings: 1 } },
+      });
+      assert.equal(raw.formattedSummary, "summary");
+      assert.deepEqual(
+        Object.keys(projected as Record<string, unknown>),
+        ["session", "history", "wire"],
+      );
+    });
+
+    it("omits only redundant approval fields from compact code.needWindow model content", () => {
+      const raw = {
+        approved: true,
+        status: "approved",
+        whyApproved: ["matched requested identifier"],
+        estimatedTokens: 240,
+        matchedIdentifiers: ["resolveTarget"],
+        matchedLineNumbers: [120],
+        range: { startLine: 116, startCol: 0, endLine: 124, endCol: 1 },
+        continuation: { cursor: 1 },
+        diagnostic: {
+          whyApproved: "nested evidence",
+          matchedLineNumbers: [999],
+        },
+      };
+
+      const projected = projectToolResultForModelContent("code.needWindow", raw, {});
+
+      assert.deepEqual(projected, {
+        approved: true,
+        status: "approved",
+        matchedIdentifiers: ["resolveTarget"],
+        matchedLineNumbers: [120],
+        range: { startLine: 116, startCol: 0, endLine: 124, endCol: 1 },
+        continuation: { cursor: 1 },
+        diagnostic: {
+          whyApproved: "nested evidence",
+        },
+      });
+      assert.deepEqual(raw.whyApproved, ["matched requested identifier"]);
+      assert.equal(raw.estimatedTokens, 240);
+      assert.deepEqual(
+        Object.keys(projected as Record<string, unknown>),
+        [
+          "approved",
+          "status",
+          "matchedIdentifiers",
+          "matchedLineNumbers",
+          "range",
+          "continuation",
+          "diagnostic",
+        ],
+      );
+    });
+
+    it("preserves downgraded guidance while omitting redundant fields", () => {
+      const downgraded = {
+        approved: false,
+        status: "downgraded",
+        whyApproved: [],
+        estimatedTokens: 400,
+        downgradedTo: "skeleton",
+        reason: "raw window not required",
+        nextBestAction: "Use codeSkeleton",
+        matchedIdentifiers: ["resolveTarget"],
+        matchedLineNumbers: [120],
+        sessionRef: "s4",
+        contentRef: "response-1",
+      };
+
+      const projected = projectToolResultForModelContent(
+        "sdl.code.needWindow",
+        downgraded,
+        {},
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(projected, {
+        approved: false,
+        status: "downgraded",
+        downgradedTo: "skeleton",
+        reason: "raw window not required",
+        nextBestAction: "Use codeSkeleton",
+        matchedIdentifiers: ["resolveTarget"],
+        matchedLineNumbers: [120],
+        sessionRef: "s4",
+        contentRef: "response-1",
+      });
+      assert.deepEqual(Object.keys(projected), [
+        "approved",
+        "status",
+        "downgradedTo",
+        "reason",
+        "nextBestAction",
+        "matchedIdentifiers",
+        "matchedLineNumbers",
+        "sessionRef",
+        "contentRef",
+      ]);
+    });
+
+    it("applies full-detail omissions only at the direct tool-result root", () => {
+      const raw = {
+        approved: true,
+        status: "approved",
+        whyApproved: ["top-level duplicate"],
+        estimatedTokens: 240,
+        matchedIdentifiers: ["resolveTarget"],
+        matchedLineNumbers: [120],
+        range: { startLine: 116, startCol: 0, endLine: 124, endCol: 1 },
+        diagnostic: { whyApproved: "nested evidence" },
+      };
+
+      const projected = projectToolResultForModelContent(
+        "code.needWindow",
+        raw,
+        { detail: "full" },
+      ) as Record<string, unknown>;
+
+      assert.deepEqual(Object.keys(projected), [
+        "approved",
+        "status",
+        "matchedIdentifiers",
+        "matchedLineNumbers",
+        "range",
+        "diagnostic",
+      ]);
+      assert.deepEqual(projected.diagnostic, {
+        whyApproved: "nested evidence",
+      });
+      assert.equal("whyApproved" in projected, false);
+      assert.equal("estimatedTokens" in projected, false);
     });
 
     it("keeps action search summary-only payloads in compact mode", () => {
