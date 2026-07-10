@@ -133,7 +133,7 @@ The cold command uses a stable, single-use artifact directory. A completed run h
     └── repeat-001.benchmark.json
 ```
 
-The `*.lbug.*` pattern includes every produced WAL and sidecar. A failure before `run-manifest.json` retains only `preflight.log` and `preflight-error.json`; a failure after the manifest retains a complete-count `results.json` and every declared log. The artifact directory remains ignored, but the root-workspace owner retains it until the evidence is archived or an authorized run explicitly supersedes it.
+The `*.lbug.*` pattern includes every produced WAL and sidecar. Pre-manifest validation failures record `preflight.log` and `preflight-error.json` and may also retain partially staged directories or files as evidence. Controlled post-manifest benchmark, child, or evidence failures enter the `finally` path, attempt to write an exact-count `results.json`, and retain declared logs. Host filesystem or process-finalization failures can prevent complete writes, so missing declared artifacts make the verifier fail and must not be claimed complete. The artifact directory remains ignored, but the root-workspace owner retains it until the evidence is archived or an authorized run explicitly supersedes it.
 
 The runner copies `config/benchmark.config.json` to `inputs/threshold.json` and requires the source and staged bytes to remain identical. It validates the exact live five-category, twelve-rule set:
 
