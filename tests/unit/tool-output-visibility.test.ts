@@ -362,7 +362,7 @@ describe("visible tool output", () => {
     assert.doesNotMatch(String(content[0]?.text), /context-etag/);
   });
 
-  it("keeps compact usageStats formattedSummary in structured content", async () => {
+  it("omits compact usageStats formattedSummary from structured content", async () => {
     const server = new MCPServer();
     server.registerTool(
       "sdl.usage.stats",
@@ -385,7 +385,7 @@ describe("visible tool output", () => {
     );
 
     const structuredContent = result.structuredContent as Record<string, unknown>;
-    assert.equal(structuredContent.formattedSummary, "usage summary");
+    assert.equal(structuredContent.formattedSummary, undefined);
     assert.match(
       (result.content as Array<Record<string, unknown>>)
         .map((block) => String(block.text))

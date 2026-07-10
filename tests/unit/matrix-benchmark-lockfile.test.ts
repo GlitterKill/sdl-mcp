@@ -25,7 +25,7 @@ describe("matrix benchmark lockfile", () => {
     const repos = lock.repos ?? [];
     assert.deepStrictEqual(
       repos.map((repo) => repo.repoId).sort(),
-      ["ansible-lint-oss", "flask-oss", "preact-oss", "zod-oss"],
+      ["ansible-lint-oss", "flask-oss", "preact-oss", "scip-io", "zod-oss"],
     );
     assert.ok(
       repos.every((repo) => typeof repo.ref === "string" && repo.ref.length >= 7),
