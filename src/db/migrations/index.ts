@@ -24,6 +24,7 @@ import * as m017 from "./m017-repair-dependency-placeholder-quality.js";
 import * as m018 from "./m018-add-semantic-enrichment-tables.js";
 import * as m019 from "./m019-add-prefetch-outcomes.js";
 import * as m020 from "./m020-add-metrics-fingerprint.js";
+import * as m021 from "./m021-remediate-symbol-embeddings.js";
 
 /** Ordered list of all migrations. Must be sorted by version ascending. */
 export const migrations: Migration[] = [
@@ -43,6 +44,7 @@ export const migrations: Migration[] = [
   m018,
   m019,
   m020,
+  m021,
 ];
 
 // --- Registry validation (runs at import time) ---
