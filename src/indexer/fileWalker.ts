@@ -27,7 +27,8 @@ export interface WalkRepositoryFilesOptions {
 }
 
 function compilePatterns(patterns: string[]): RegExp[] {
-  return patterns.map((pattern) => globToSafeRegex(normalizePath(pattern)));
+  // Preserve class escapes; the shared compiler normalizes separators.
+  return patterns.map((pattern) => globToSafeRegex(pattern));
 }
 
 function matchesAnyPattern(path: string, patterns: RegExp[]): boolean {

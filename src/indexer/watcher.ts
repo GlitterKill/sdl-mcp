@@ -1019,9 +1019,8 @@ function matchesExtensions(path: string, extensions: string[]): boolean {
 }
 
 function compileIgnorePatterns(ignorePatterns: readonly string[]): RegExp[] {
-  return ignorePatterns.map((pattern) =>
-    globToSafeRegex(normalizePath(pattern)),
-  );
+  // Keep scanner and watcher on the same raw-pattern compilation path.
+  return ignorePatterns.map((pattern) => globToSafeRegex(pattern));
 }
 
 function matchesAnyPattern(path: string, patterns: readonly RegExp[]): boolean {
