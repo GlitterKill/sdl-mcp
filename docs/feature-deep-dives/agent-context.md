@@ -72,6 +72,27 @@ Use `sdl.workflow` instead when the job is procedural:
 - chain multiple dependent operations
 - batch mutations
 
+### Document-heavy planning
+
+For document-heavy planning, locate the relevant README, ADR, specification, or plan and use targeted `sdl.file` `op: "read"` with `search`, bounded ranges, or `jsonPath`. If broad `sdl.context` returns irrelevant symbol evidence, switch retrieval surfaces instead of widening symbol budgets.
+
+Use a targeted document read when repository prose drives the task:
+
+```json
+{
+  "op": "read",
+  "repoId": "sdl-mcp",
+  "filePath": "docs/feature-deep-dives/agent-context.md",
+  "search": "## When To Use It",
+  "searchContext": 8,
+  "limit": 4
+}
+```
+
+`searchContext` and `limit` bound the result. Keep using cards, slices, skeletons, hot paths, or gated code windows for indexed source; do not use `file.read` for indexed source.
+
+First-class document entities, Markdown indexing, ranking, citations, and a planning-task benchmark remain product work outside this batch.
+
 That separation matters. A workflow can reproduce context retrieval, but it costs more tokens and forces the model to plan a ladder that `sdl.context` already knows how to choose.
 
 ---

@@ -187,6 +187,8 @@ Use the cheapest rung that answers the task. Static price tags in `sdl.manual` a
 - Answer first: for explain/debug, call `sdl.context` with `options.answerFirst: true`; expand with `symbol.getCard` or a normal context call on the returned evidence IDs only if needed.
 - Targeted files: if `file.read` returns the large-read hint, retry with `search` plus `searchContext`, `offset` plus `limit`, `jsonPath`, `maxTokens`, or `maxBytes`.
 
+For document-heavy planning, locate the relevant README, ADR, specification, or plan and use targeted `sdl.file` `op: "read"` with `search`, bounded ranges, or `jsonPath`. If broad `sdl.context` returns irrelevant symbol evidence, switch retrieval surfaces instead of widening symbol budgets.
+
 ---
 
 ## 3. File And Edit Rules
@@ -207,6 +209,23 @@ Use SDL file and edit tools instead of native read/write paths.
 - Track backup paths returned by edit/write tools and remove created `.bak` files after verification through SDL-governed runtime cleanup. Do not run broad native cleanup commands.
 
 ### Non-Indexed Reads
+
+Use this direct targeted document read when repository prose drives the task:
+
+```json
+{
+  "op": "read",
+  "repoId": "sdl-mcp",
+  "filePath": "docs/feature-deep-dives/agent-context.md",
+  "search": "## When To Use It",
+  "searchContext": 8,
+  "limit": 4
+}
+```
+
+`searchContext` and `limit` bound the result.
+
+Use a multi-file workflow when one task needs several non-indexed files:
 
 ```json
 {
