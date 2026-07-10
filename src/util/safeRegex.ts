@@ -1,4 +1,6 @@
+import { ConfigError } from "../domain/errors.js";
 import { logger } from "./logger.js";
+import { normalizePath } from "./paths.js";
 
 /**
  * Detects if a regex pattern has ReDoS (Regular Expression Denial of Service) risks.
@@ -84,6 +86,277 @@ export function safeCompileRegex(
   }
 }
 
+type SafeClassToken = {
+  value: string;
+  escaped: boolean;
+};
+
+type CompiledSafeClass = {
+  source: string;
+  nextIndex: number;
+};
+
+type AsciiRangeKind = "digit" | "upper" | "lower";
+
+function escapeRegexLiteral(value: string): string {
+  return value.replace(
+    /[.*+?^$()|[\]{}\\]/g,
+    (match) => "\\" + match,
+  );
+}
+
+function escapeRegexClassMember(value: string): string {
+  if (value === "\\" || value === "]" || value === "-" || value === "^") {
+    return "\\" + value;
+  }
+  return value;
+}
+
+function findUnescapedClassEnd(glob: string, startIndex: number): number {
+  let escaped = false;
+  for (let index = startIndex + 1; index < glob.length; index++) {
+    const value = glob[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (value === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (value === "]") {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function asciiRangeKind(value: string): AsciiRangeKind | null {
+  const code = value.charCodeAt(0);
+  if (value.length !== 1) return null;
+  if (code >= 48 && code <= 57) return "digit";
+  if (code >= 65 && code <= 90) return "upper";
+  if (code >= 97 && code <= 122) return "lower";
+  return null;
+}
+
+function invalidClass(glob: string, startIndex: number, reason: string): never {
+  throw new ConfigError(
+    "Invalid ignore glob bracket class at index " +
+      startIndex +
+      ' in "' +
+      glob +
+      '": ' +
+      reason,
+  );
+}
+
+function compileSafeBracketClass(
+  glob: string,
+  startIndex: number,
+): CompiledSafeClass | null {
+  const endIndex = findUnescapedClassEnd(glob, startIndex);
+  if (endIndex === -1) return null;
+
+  const body = glob.slice(startIndex + 1, endIndex);
+  if (body.length === 0) {
+    invalidClass(glob, startIndex, "class has no members");
+  }
+  if (body[0] === "!" || body[0] === "^") {
+    invalidClass(glob, startIndex, "class negation is unsupported");
+  }
+
+  const bodyCodePoints = Array.from(body);
+  const tokens: SafeClassToken[] = [];
+  for (let index = 0; index < bodyCodePoints.length; index++) {
+    const value = bodyCodePoints[index];
+    if (value === "[") {
+      invalidClass(glob, startIndex, "nested opening bracket is unsupported");
+    }
+    if (value !== "\\") {
+      tokens.push({ value, escaped: false });
+      continue;
+    }
+
+    const escaped = bodyCodePoints[index + 1];
+    if (escaped !== "]" && escaped !== "-" && escaped !== "\\") {
+      invalidClass(
+        glob,
+        startIndex,
+        "unsupported escape; only \\], \\-, and \\\\ are allowed",
+      );
+    }
+    tokens.push({ value: escaped, escaped: true });
+    index++;
+  }
+
+  // Validate ranges ourselves so RegExp never receives an ambiguous hyphen.
+  const rangeEndpoints = new Set<number>();
+  const pieces: string[] = [];
+  for (let index = 1; index < tokens.length - 1; index++) {
+    const token = tokens[index];
+    if (token.value !== "-" || token.escaped) continue;
+
+    const left = tokens[index - 1];
+    const right = tokens[index + 1];
+    const leftKind = asciiRangeKind(left.value);
+    const rightKind = asciiRangeKind(right.value);
+    if (leftKind === null || rightKind === null) {
+      invalidClass(
+        glob,
+        startIndex,
+        "range endpoints must be ASCII letters or digits",
+      );
+    }
+    if (leftKind !== rightKind) {
+      invalidClass(
+        glob,
+        startIndex,
+        "range endpoints must use the same ASCII category and case",
+      );
+    }
+    if (left.value.charCodeAt(0) > right.value.charCodeAt(0)) {
+      invalidClass(glob, startIndex, "range is reversed");
+    }
+
+    pieces.push(left.value + "-" + right.value);
+    rangeEndpoints.add(index - 1);
+    rangeEndpoints.add(index + 1);
+  }
+
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (token.value === "-" && !token.escaped) {
+      if (index === 0 || index === tokens.length - 1) {
+        pieces.push("\\-");
+      }
+      continue;
+    }
+    if (!rangeEndpoints.has(index)) {
+      pieces.push(escapeRegexClassMember(token.value));
+    }
+  }
+
+  return {
+    source: "[" + pieces.join("") + "]",
+    nextIndex: endIndex + 1,
+  };
+}
+
+function normalizeGlobPreservingClasses(glob: string) {
+  const classes: string[] = [];
+  let sentinel = "\u{E000}";
+  while (glob.includes(sentinel)) sentinel += "\u{E000}";
+  const literalOpenMarker = sentinel + "open" + sentinel;
+  let masked = "";
+
+  // Mask class substrings so normalizePath only consumes ordinary separators.
+  for (let index = 0; index < glob.length; ) {
+    if (glob[index] === "[") {
+      const endIndex = findUnescapedClassEnd(glob, index);
+      if (endIndex !== -1) {
+        const marker = sentinel + classes.length + sentinel;
+        classes.push(glob.slice(index, endIndex + 1));
+        masked += marker;
+        index = endIndex + 1;
+        continue;
+      }
+      masked += literalOpenMarker;
+      index++;
+      continue;
+    }
+    const value = String.fromCodePoint(glob.codePointAt(index)!);
+    masked += value;
+    index += value.length;
+  }
+
+  let normalized = normalizePath(masked);
+  for (let index = 0; index < classes.length; index++) {
+    normalized = normalized.replaceAll(
+      sentinel + index + sentinel,
+      classes[index],
+    );
+  }
+  return { normalizedGlob: normalized, literalOpenMarker };
+}
+
+function compileGlobBody(glob: string, literalOpenMarker: string): string {
+  const source: string[] = [];
+  let currentSegmentHasWildcard = false;
+
+  for (let index = 0; index < glob.length; ) {
+    const value = glob[index];
+
+    if (glob.startsWith(literalOpenMarker, index)) {
+      source.push("\\[");
+      index += literalOpenMarker.length;
+      continue;
+    }
+
+    if (value === "[") {
+      const compiledClass = compileSafeBracketClass(glob, index);
+      if (compiledClass !== null) {
+        source.push(compiledClass.source);
+        currentSegmentHasWildcard = true;
+        index = compiledClass.nextIndex;
+        continue;
+      }
+      source.push("\\[");
+      index++;
+      continue;
+    }
+
+    if (
+      glob.startsWith("**/", index) ||
+      glob.startsWith("**\\", index)
+    ) {
+      source.push("(?:.*/|)");
+      currentSegmentHasWildcard = false;
+      index += 3;
+      continue;
+    }
+
+    if (
+      (value === "/" || value === "\\") &&
+      glob.startsWith("**", index + 1) &&
+      index + 3 === glob.length
+    ) {
+      source.push(
+        currentSegmentHasWildcard ? "(?:/.*)" : "(?:/.*|)",
+      );
+      index += 3;
+      continue;
+    }
+
+    if (glob.startsWith("**", index)) {
+      source.push(".*");
+      currentSegmentHasWildcard = true;
+      index += 2;
+      continue;
+    }
+
+    if (value === "*") {
+      source.push("[^/]*");
+      currentSegmentHasWildcard = true;
+      index++;
+      continue;
+    }
+
+    if (value === "/" || value === "\\") {
+      source.push("/");
+      currentSegmentHasWildcard = false;
+      index++;
+      continue;
+    }
+
+    const codePoint = String.fromCodePoint(glob.codePointAt(index)!);
+    source.push(escapeRegexLiteral(codePoint));
+    index += codePoint.length;
+  }
+
+  return source.join("");
+}
+
 /**
  * Converts a glob pattern to a safe regex.
  * Handles:
@@ -95,80 +368,21 @@ export function safeCompileRegex(
  * @returns RegExp object anchored with ^ and $
  */
 export function globToSafeRegex(glob: string): RegExp {
-  // Guard against excessively complex globs BEFORE doing any transformation
-  // so we short-circuit early and avoid unnecessary work (H2).
+  // Guard raw input before parsing or normalization can reduce its complexity.
   const doubleStarCount = (glob.match(/\*\*/g) || []).length;
   if (doubleStarCount > 5 || glob.length > 500) {
-    logger.warn(`Overly complex glob pattern rejected: ${glob}`);
-    // Fall back to exact literal match of the glob string.
-    // Escape all regex metacharacters individually for clarity.
-    const litEscaped = glob
-      .replace(/\\/g, "\\\\") // backslash
-      .replace(/\./g, "\\.") // dot
-      .replace(/\+/g, "\\+") // plus
-      .replace(/\?/g, "\\?") // question mark
-      .replace(/\*/g, "\\*") // star
-      .replace(/\^/g, "\\^") // caret
-      .replace(/\$/g, "\\$") // dollar
-      .replace(/\|/g, "\\|") // pipe
-      .replace(/\(/g, "\\(") // left paren
-      .replace(/\)/g, "\\)") // right paren
-      .replace(/\[/g, "\\[") // left bracket
-      .replace(/\]/g, "\\]") // right bracket
-      .replace(/\{/g, "\\{") // left brace
-      .replace(/\}/g, "\\}"); // right brace
-    return new RegExp(`^${litEscaped}$`);
+    logger.warn("Overly complex glob pattern rejected: " + glob);
+    const normalizedLiteral = normalizePath(glob);
+    return new RegExp(
+      "^" + escapeRegexLiteral(normalizedLiteral) + "$",
+      "u",
+    );
   }
 
-  const trailingDirectorySegment = glob.endsWith("/**")
-    ? (glob.slice(0, -"/**".length).split("/").pop() ?? "")
-    : "";
-  const trailingDirectorySegmentHasWildcard =
-    trailingDirectorySegment.includes("*");
-
-  // First, handle glob wildcards with placeholders to protect them
-  // **/ must be handled before ** to avoid double-replacement
-  let pattern = glob.replace(/\*\*\//g, "GLOB_DOUBLESTAR_SLASH");
-  pattern = pattern.replace(/\*\*/g, "GLOB_DOUBLESTAR");
-  pattern = pattern.replace(/\*/g, "GLOB_SINGLESTAR");
-
-  // Now escape all regex metacharacters
-  // Order matters: \ must be first
-  pattern = pattern
-    .replace(/\\/g, "\\\\") // backslash
-    .replace(/\./g, "\\.") // dot
-    .replace(/\+/g, "\\+") // plus
-    .replace(/\?/g, "\\?") // question mark
-    .replace(/\(/g, "\\(") // left paren
-    .replace(/\)/g, "\\)") // right paren
-    .replace(/\[/g, "\\[") // left bracket
-    .replace(/\]/g, "\\]") // right bracket
-    .replace(/\{/g, "\\{") // left brace
-    .replace(/\}/g, "\\}") // right brace
-    .replace(/\^/g, "\\^") // caret
-    .replace(/\$/g, "\\$") // dollar
-    .replace(/\|/g, "\\|"); // pipe
-
-  // Replace placeholders with regex equivalents
-  // **/ matches zero or more path segments (including the trailing /)
-  pattern = pattern.replace(/GLOB_DOUBLESTAR_SLASH/g, "(?:.*/)?");
-  // * matches anything except /
-  pattern = pattern.replace(/GLOB_SINGLESTAR/g, "[^/]*");
-
-  // Trailing /** should match directory contents. Exact directory globs also
-  // match the directory itself; wildcard directory globs need a slash boundary
-  // so **/dist-*/** does not match source files named dist-runtime.ts.
-  // Handle /GLOB_DOUBLESTAR at end (the / was already escaped to /)
-  if (pattern.endsWith("/GLOB_DOUBLESTAR")) {
-    const suffix = trailingDirectorySegmentHasWildcard ? "(?:/.*)" : "(?:/.*)?";
-    pattern = pattern.slice(0, -"/GLOB_DOUBLESTAR".length) + suffix;
-  } else if (pattern.endsWith("GLOB_DOUBLESTAR")) {
-    // Bare trailing ** (no preceding /)
-    pattern = pattern.slice(0, -"GLOB_DOUBLESTAR".length) + ".*";
-  }
-  // Non-trailing ** matches anything including /
-  pattern = pattern.replace(/GLOB_DOUBLESTAR/g, ".*");
-
-  // Anchor the pattern
-  return new RegExp(`^${pattern}$`);
+  const { normalizedGlob, literalOpenMarker } =
+    normalizeGlobPreservingClasses(glob);
+  return new RegExp(
+    "^" + compileGlobBody(normalizedGlob, literalOpenMarker) + "$",
+    "u",
+  );
 }
