@@ -165,6 +165,16 @@ Default `ignore` patterns:
 ]
 ```
 
+### Ignore pattern grammar
+
+SDL-MCP defines a bounded ignore-pattern grammar rather than full POSIX or general-purpose glob compatibility. Use `/` as the documented path separator. SDL-MCP also normalizes Windows `\` separators outside recognized bracket classes.
+
+The grammar supports `*`, `**`, `**/`, and bounded bracket classes as its only metacharacters. A class can contain literal members, including astral Unicode characters. Use ascending ASCII ranges only within one category: lowercase letters, uppercase letters, or digits. Examples include `[Bb]in/`, `[a-c]ache/**`, and `[A-Za-z0-9_]`.
+
+Inside a recognized class, only `\]`, `\-`, and `\\` are escape sequences. An unescaped hyphen is literal only when it appears first or last. SDL-MCP rejects empty classes; leading `!` or `^` negation; reversed ranges; ranges that cross ASCII case or character categories; ranges with non-ASCII endpoints; nested `[` characters; other escapes; and chained or overlapping ranges that reuse an endpoint, such as `[a-b-c]`.
+
+SDL-MCP does not support POSIX named classes, collating or equivalence symbols, or brace expansion. An opening `[` is literal when no unescaped closing `]` follows it, and a stray `]` is literal.
+
 ### `repos[].memory`
 
 This override only accepts partial fields. Unspecified values inherit from the top-level `memory` section.
