@@ -191,6 +191,40 @@ describe("external benchmark canonical evidence", () => {
     assert.throws(() => serializeRunManifest(invalidHash), /sha-256/i);
   });
 
+  it("rejects Windows drive-relative paths during normalization", () => {
+    for (const driveRelativePath of ["C:foo", "C:"]) {
+      assert.throws(
+        () => normalizeArtifactPath(driveRelativePath),
+        /safe relative path/i,
+      );
+    }
+    assert.equal(
+      normalizeArtifactPath("segment:with-colon/file"),
+      "segment:with-colon/file",
+    );
+  });
+
+  it("rejects Windows drive-relative paths during manifest serialization", () => {
+    for (const driveRelativePath of ["C:foo", "C:"]) {
+      const manifest = makeManifest();
+      manifest.target.scipArtifactPath = driveRelativePath;
+      assert.throws(
+        () => serializeRunManifest(manifest),
+        /safe relative path/i,
+      );
+    }
+  });
+
+  it("rejects Windows drive-relative paths before fingerprint resolution", () => {
+    const root = makeTempRoot();
+    for (const driveRelativePath of ["C:foo", "C:"]) {
+      assert.throws(
+        () => fingerprintFiles(root, [driveRelativePath]),
+        /safe relative path/i,
+      );
+    }
+  });
+
   it("sorts warm files, initial files, and repeats before serialization", () => {
     const parsed = JSON.parse(serializeRunManifest(makeUnsortedWarmManifest()));
     assert.deepStrictEqual(
