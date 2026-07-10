@@ -8,6 +8,7 @@ export const LADYBUG_WRITE_CHUNK_SIZES = {
   // Symbol rows carry the largest JSON/searchText payloads, so keep the
   // previous conservative chunk size until profiling shows it is the hotspot.
   symbols: 256,
+  embeddingMigrations: 256,
 } as const;
 
 export type LadybugWriteBatchKind = keyof typeof LADYBUG_WRITE_CHUNK_SIZES;
