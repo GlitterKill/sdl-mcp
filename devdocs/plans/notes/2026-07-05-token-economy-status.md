@@ -19,7 +19,7 @@
   Evidence: `src/server.ts` `shouldIncludeDisplayFooter` only allows response footer text for `includeTelemetry: true` or `detail: "full"`; normal responses do not append the savings meter. Per-call savings still goes out as MCP notification via `renderUserNotificationLine`, not as response content.
 
 - [x] usage.stats formattedSummary model dedupe: SHIPPED.
-  Evidence: `src/mcp/context-response-projection.ts` `projectUsageStatsForModel` returns `{}` for compact and full detail, so `formattedSummary` no longer appears in structured wire/model content. `src/server.ts` continues to own user-display text independently. Commit: `a544aea7`.
+  Evidence: `src/mcp/context-response-projection.ts` `projectUsageStatsForModel` returns `{}` for compact detail. In full detail, it removes only the root `formattedSummary` field and preserves `session`, `history`, and `wire` in that order. Structured wire/model content no longer duplicates `formattedSummary`, while `src/server.ts` continues to own user-display text independently. Commit: `a544aea7`.
 
 - [x] symbol.getCard surface trim: SHIPPED.
   Evidence: live `symbolGetCard` for `src/mcp/tools/symbol.ts` `handleSymbolGetCard` omitted `repoId`, `visibility`, `detailLevel`, `version.ledgerVersion`, and `etag`. `src/mcp/context-response-projection.ts` `shouldKeepModelField` drops `repoId` for non-repo tools and drops compact debug fields.
