@@ -28,6 +28,33 @@ Benchmark baselines provide the reference point for detecting performance and qu
 - **Status**: Tracked in version control
 - **Format**: JSON with benchmark results matching the synthetic benchmark format
 
+## Target-Specific External Baselines
+
+External benchmark baselines use format 1 and identify the repository that produced the measurements. The committed `scip-io` baseline has this exact shape:
+
+```json
+{
+  "formatVersion": 1,
+  "repoId": "scip-io",
+  "metrics": {
+    "indexTimePerFile": 311.5638318181818,
+    "indexTimePerSymbol": 10.534432838114753,
+    "symbolsPerFile": 29.575757575757574,
+    "edgesPerSymbol": 0.5527663934426229,
+    "graphConnectivity": 0.2459016393442623,
+    "exportedSymbolRatio": 0.992827868852459,
+    "sliceBuildTimeMs": 465.69450000001234,
+    "avgSkeletonTimeMs": 4.416600000001684,
+    "avgCardTokens": 175.25,
+    "avgSkeletonTokens": 2
+  }
+}
+```
+
+The baseline `repoId` must match the selected repository. Update a baseline only from persisted, repeated measurements after review; never copy a result silently from another target or platform.
+
+A baseline records comparison values and never authorizes a threshold edit. A failed threshold remains visible in `results.json` and causes a nonzero exit.
+
 ## Baseline Refresh Policy
 
 ### When to Update Baselines

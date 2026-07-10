@@ -102,6 +102,59 @@ node dist/cli/index.js benchmark:ci --skip-indexing
     fi
 ```
 
+## External Repository Evidence
+
+The external benchmark wrapper runs a pinned repository against isolated LadybugDB families and writes reproducible evidence beneath an ignored artifact directory. Prepare the locked checkout, build the runtime, and run one cold repeat with this exact sequence:
+
+```bash
+npm run benchmark:setup-external -- --base-dir .tmp/external-benchmarks --out benchmarks/real-world/external-repos.config.json
+npm run build:runtime
+npm run benchmark:external -- --repo-id scip-io --out-dir .benchmark/external/scip-io-cold-smoke-v1 --cache-mode cold --repeats 1
+```
+
+The cold command uses a stable, single-use artifact directory. A completed run has this layout:
+
+```text
+.benchmark/external/scip-io-cold-smoke-v1/
+├── preflight.log
+├── run-manifest.json
+├── results.json
+├── inputs/
+│   ├── sdlmcp.config.json
+│   ├── baseline.json
+│   └── threshold.json
+├── db/
+│   ├── repeat-001.lbug
+│   └── repeat-001.lbug.*
+├── logs/
+│   ├── repeat-001.stdout.log
+│   └── repeat-001.stderr.log
+└── raw/
+    └── repeat-001.benchmark.json
+```
+
+The `*.lbug.*` pattern includes every produced WAL and sidecar. A failure before `run-manifest.json` retains only `preflight.log` and `preflight-error.json`; a failure after the manifest retains a complete-count `results.json` and every declared log. The artifact directory remains ignored, but the root-workspace owner retains it until the evidence is archived or an authorized run explicitly supersedes it.
+
+The runner copies `config/benchmark.config.json` to `inputs/threshold.json` and requires the source and staged bytes to remain identical. It validates the exact live five-category, twelve-rule set:
+
+- `indexing`: `indexTimePerFile`, `indexTimePerSymbol`
+- `quality`: `symbolsPerFile`, `edgesPerSymbol`, `graphConnectivity`, `exportedSymbolRatio`
+- `performance`: `sliceBuildTimeMs`, `avgSkeletonTimeMs`
+- `tokenEfficiency`: `avgCardTokens`, `avgSkeletonTokens`
+- `coverage`: `callEdgeCoverage`, `importEdgeCoverage`
+
+A failed rule remains visible in `results.json` and causes a nonzero exit. Do not weaken a threshold to make an external run pass.
+
+### Warm follow-up
+
+Warm mode is a follow-up operation, and the command below does not claim that a warm result exists:
+
+```bash
+npm run benchmark:external -- --repo-id scip-io --out-dir .benchmark/external/scip-io-warm-smoke-v1 --cache-mode warm --warm-db .benchmark/external/scip-io-cold-smoke-v1/db/repeat-001.lbug --repeats 1
+```
+
+The runner fingerprints the complete source database family before and after staging and rejects membership or byte drift. It stages the family under `inputs/warm-db`, copies every member exclusively to an absent repeat family, and never mutates the source snapshot. Do not report a warm run as green until this command runs and its evidence passes validation.
+
 ## Metrics Tracked
 
 ### Indexing Metrics
