@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { resolve } from "node:path";
 import { describe, it } from "node:test";
 
 import {
@@ -15,7 +12,22 @@ describe("setup external benchmark repos", () => {
 
     assert.deepStrictEqual(
       specs.map((spec) => spec.repoId).sort(),
-      ["ansible-lint-oss", "flask-oss", "preact-oss", "zod-oss"],
+      ["ansible-lint-oss", "flask-oss", "preact-oss", "scip-io", "zod-oss"],
+    );
+    assert.deepStrictEqual(
+      specs.find((spec) => spec.repoId === "scip-io"),
+      {
+        repoId: "scip-io",
+        cloneUrl: "https://github.com/GlitterKill/scip-io.git",
+        ref: "2c6d43c9a82b1f1ddfb36f3d04776994e585bfbd",
+        languages: ["rs", "ts"],
+        ignore: [
+          "**/node_modules/**",
+          "**/dist/**",
+          "**/target/**",
+          "**/coverage/**",
+        ],
+      },
     );
     assert.ok(
       specs.every((spec) => typeof spec.ref === "string" && spec.ref.length >= 7),
@@ -23,12 +35,19 @@ describe("setup external benchmark repos", () => {
     );
   });
 
-  it("builds config entries with normalized paths", () => {
-    const baseDir = mkdtempSync(resolve(tmpdir(), "sdl-mcp-benchmark-lock-"));
+  it("builds relative config entries with normalized paths", () => {
     const specs = loadExternalRepoSpecs();
-    const payload = buildExternalRepoConfig(baseDir, specs);
+    const payload = buildExternalRepoConfig(".tmp/external-benchmarks", specs);
 
-    assert.strictEqual(payload.repos.length, 4);
+    assert.strictEqual(payload.repos.length, 5);
+    assert.strictEqual(
+      payload.repos.find((repo) => repo.repoId === "scip-io")?.rootPath,
+      ".tmp/external-benchmarks/scip-io",
+    );
+    assert.ok(
+      payload.repos.every((repo) => !/^[A-Za-z]:\//.test(repo.rootPath)),
+      "config paths must not be drive-absolute",
+    );
     assert.ok(
       payload.repos.every((repo) => repo.rootPath.includes("/")),
       "config paths should be normalized for cross-platform use",

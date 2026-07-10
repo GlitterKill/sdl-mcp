@@ -1,0 +1,16 @@
+{
+  "formatVersion": 1,
+  "repoId": "scip-io",
+  "metrics": {
+    "indexTimePerFile": 311.5638318181818,
+    "indexTimePerSymbol": 10.534432838114753,
+    "symbolsPerFile": 29.575757575757574,
+    "edgesPerSymbol": 0.5527663934426229,
+    "graphConnectivity": 0.2459016393442623,
+    "exportedSymbolRatio": 0.992827868852459,
+    "sliceBuildTimeMs": 465.69450000001234,
+    "avgSkeletonTimeMs": 4.416600000001684,
+    "avgCardTokens": 175.25,
+    "avgSkeletonTokens": 2
+  }
+}

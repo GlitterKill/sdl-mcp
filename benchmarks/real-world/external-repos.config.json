@@ -73,6 +73,20 @@
         "**/tests/**",
         "**/.tox/**"
       ]
+    },
+    {
+      "repoId": "scip-io",
+      "rootPath": ".tmp/external-benchmarks/scip-io",
+      "languages": [
+        "rs",
+        "ts"
+      ],
+      "ignore": [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/target/**",
+        "**/coverage/**"
+      ]
     }
   ]
 }

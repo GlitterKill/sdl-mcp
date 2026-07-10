@@ -81,6 +81,7 @@ temp/
 .benchmark/*
 !.benchmark/baseline.json
 !.benchmark/baseline.zod-oss.json
+!.benchmark/baseline.scip-io.json
 !.benchmark/baseline.windows.json
 benchmark-*.json
 benchmarks/**/results*.json

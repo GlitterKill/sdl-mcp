@@ -2,7 +2,7 @@
 
 import { execSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { join, resolve } from "path";
+import { join, relative, resolve } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 
 export interface ExternalRepoSpec {
@@ -115,7 +115,8 @@ function main(): void {
     setupExternalRepo(baseDir, spec);
   }
 
-  const payload = buildExternalRepoConfig(baseDir, specs);
+  const configBaseDir = relative(process.cwd(), baseDir) || ".";
+  const payload = buildExternalRepoConfig(configBaseDir, specs);
   writeFileSync(outPath, JSON.stringify(payload, null, 2), "utf-8");
 
   console.log(`\nExternal benchmark repos are ready in: ${toConfigPath(baseDir)}`);

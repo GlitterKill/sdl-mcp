@@ -65,6 +65,18 @@
         "**/tests/**",
         "**/.tox/**"
       ]
+    },
+    {
+      "repoId": "scip-io",
+      "cloneUrl": "https://github.com/GlitterKill/scip-io.git",
+      "ref": "2c6d43c9a82b1f1ddfb36f3d04776994e585bfbd",
+      "languages": ["rs", "ts"],
+      "ignore": [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/target/**",
+        "**/coverage/**"
+      ]
     }
   ]
 }
