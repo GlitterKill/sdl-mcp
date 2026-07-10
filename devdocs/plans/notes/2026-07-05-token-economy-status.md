@@ -9,8 +9,8 @@
 
 ## Companion-Plan Audit
 
-- [ ] trim-tool-response-fields Phase 1: NOT SHIPPED.
-  Evidence: `src/mcp/tools/code.ts` `handleCodeNeedWindow` still populates approved/downgraded response fields `whyApproved`, `estimatedTokens`, `matchedIdentifiers`, and `matchedLineNumbers`; raw approved path also still emits `whyApproved` and `estimatedTokens`.
+- [x] trim-tool-response-fields Phase 1 model projection: SHIPPED.
+  Evidence: `src/mcp/context-response-projection.ts` `shouldOmitToolSpecificModelField` removes root `whyApproved` and `estimatedTokens` from direct `code.needWindow` model responses in compact and full detail. The projection retains actionable `file`, `range`, `code`, `matchedIdentifiers`, `matchedLineNumbers`, and `warnings` evidence; `handleCodeNeedWindow` continues to construct the canonical response before the wire/model boundary. Commit: `a544aea7`.
 
 - [x] compact agent payload projected response path: SHIPPED.
   Evidence: `src/mcp/context-response-projection.ts` exports `projectToolResultForModelContent`, `projectContextResultForUsageAccounting`, `projectBroadContextResult`, `isBroadContextResult`, and `BROAD_VISIBLE_FIELDS`; `src/server.ts` builds text from `modelPayload = projectToolResultForModelContent(...)` and projects `structuredContent`.
@@ -18,25 +18,25 @@
 - [x] compact agent payload normal token-savings footer/meter append: SHIPPED.
   Evidence: `src/server.ts` `shouldIncludeDisplayFooter` only allows response footer text for `includeTelemetry: true` or `detail: "full"`; normal responses do not append the savings meter. Per-call savings still goes out as MCP notification via `renderUserNotificationLine`, not as response content.
 
-- [ ] usage.stats formattedSummary text/structured dedupe: NOT SHIPPED.
-  Evidence: `src/mcp/context-response-projection.ts` `projectUsageStatsForModel` still copies `formattedSummary`; `src/server.ts` special-cases `sdl.usage.stats` to set `userDisplay = summary`, while `structuredResult` still carries `formattedSummary`.
+- [x] usage.stats formattedSummary model dedupe: SHIPPED.
+  Evidence: `src/mcp/context-response-projection.ts` `projectUsageStatsForModel` returns `{}` for compact and full detail, so `formattedSummary` no longer appears in structured wire/model content. `src/server.ts` continues to own user-display text independently. Commit: `a544aea7`.
 
 - [x] symbol.getCard surface trim: SHIPPED.
   Evidence: live `symbolGetCard` for `src/mcp/tools/symbol.ts` `handleSymbolGetCard` omitted `repoId`, `visibility`, `detailLevel`, `version.ledgerVersion`, and `etag`. `src/mcp/context-response-projection.ts` `shouldKeepModelField` drops `repoId` for non-repo tools and drops compact debug fields.
 
-- [ ] symbol.getCard raw builder trim: NOT SHIPPED.
-  Evidence: `src/mcp/tools/symbol.ts` `handleSymbolGetCard` returns `{ card: result }` from `buildCardForSymbol`; `src/services/card-builder.ts` `buildCardForSymbol` still constructs `repoId`, `visibility`, `detailLevel`, and `version.ledgerVersion` before projection.
+- [ ] symbol.getCard canonical builder profiling: PENDING.
+  Evidence: `src/services/card-builder.ts` `buildCardForSymbol` still constructs canonical fields such as `repoId`, `visibility`, `detailLevel`, and `version.ledgerVersion` before model projection. Commit `a544aea7` removes these fields only from the wire/model view, so it does not remove their construction cost. Profile the builder before deciding whether raw construction needs trimming.
 
 ## Stage 3 Search Miss Investigation
 
-- [ ] `queryFts` identifier splitting: NOT SHIPPED before Stage 3.
-  Evidence: `src/retrieval/orchestrator.ts` passed `options.query` through `queryFts` directly into `buildFtsStoredProcQuery` without `splitCamelSubwords` or query expansion.
+- [x] `queryFts` identifier splitting: SHIPPED.
+  Evidence: `src/retrieval/orchestrator.ts` `buildIdentifierAwareFtsQuery` calls `splitCamelSubwords` and expands identifier-like queries before FTS execution. Camel-case and Pascal-case searches now reach the existing identifier fragments.
 
 - [x] FTS indexed content includes identifier fragments: SHIPPED.
   Evidence: `src/indexer/symbol-enrichment.ts` `buildSearchText` stores `params.name` plus `splitIdentifierLikeText(params.name)`, summary fragments, path tokens, role tags, and signature terms. No schema or reindex change needed for this stage.
 
-- [ ] legacy overlay subword matching: PARTIAL before Stage 3.
-  Evidence: durable legacy search uses `searchSymbolsLite` -> `splitSearchTerms`, which already splits camelCase/PascalCase. The overlay matcher in `src/live-index/overlay-reader.ts` split only whitespace and treated single identifiers as one raw term.
+- [x] live-overlay subword matching: SHIPPED.
+  Evidence: `src/live-index/overlay-reader.ts` `buildOverlaySearchTerms` calls `splitCamelSubwords`, deduplicates the primary terms and identifier fragments, and feeds them into `searchSymbolsWithOverlay`. Live-overlay search now matches camel-case and Pascal-case subwords alongside durable search.
 
 ## Chunk 3 Status
 
@@ -55,8 +55,8 @@
 - [x] Stage 12 Agent workflow resources and release hygiene: SHIPPED in working tree plus workstation-local resources. Commit: pending for repo files; no commit for out-of-repo files.
   Evidence: `SDL.md`, templates, server instructions, manual/descriptions, `docs/feature-deep-dives/token-economy.md`, runtime/code-mode docs, `CHANGELOG.md`, `C:\Users\glitt\.codex\skills\sdl-mcp-agent-workflow\SKILL.md`, and `C:\Users\glitt\.claude\CLAUDE.md` document the new token-economy surfaces. Docs/static verification: `runtime-sdl-mcp-1783379029057-9a75431512b139ed`.
 
-- [x] Stage 12.4 Final verification sweep: PARTIAL.
-  Evidence: combined focused suite passed (`runtime-sdl-mcp-1783378604288-bdeca3b4994e3f7f`); determinism passed (`runtime-sdl-mcp-1783378995054-d45d5893116ee1fa`); docs/static checks passed (`runtime-sdl-mcp-1783379029057-9a75431512b139ed`); golden and integration suites passed (`runtime-sdl-mcp-1783379401403-486654712d83cf52`). `npm test` failed twice at the harness boundary after reporting no individual node:test failures (`runtime-sdl-mcp-1783379216646-8d32d003001091f7`, `runtime-sdl-mcp-1783379586060-ee6577f802a4c337`), so full-suite green status is not claimed.
+- [x] Stage 12.4 Final verification sweep: PARTIAL at this historical checkpoint.
+  Evidence: combined focused suite passed (`runtime-sdl-mcp-1783378604288-bdeca3b4994e3f7f`); determinism passed (`runtime-sdl-mcp-1783378995054-d45d5893116ee1fa`); docs/static checks passed (`runtime-sdl-mcp-1783379029057-9a75431512b139ed`); golden and integration suites passed (`runtime-sdl-mcp-1783379401403-486654712d83cf52`). `npm test` failed twice at the harness boundary after reporting no individual node:test failures (`runtime-sdl-mcp-1783379216646-8d32d003001091f7`, `runtime-sdl-mcp-1783379586060-ee6577f802a4c337`). Round 2 later resolved that failure by updating `tests/unit/tool-output-visibility.test.ts`; the fresh full suite passed 596/596 files (`runtime-sdl-mcp-1783385012026-0b30184a1dbfc281`).
 
 ## Chunk 3 Verification Follow-up
 
@@ -70,11 +70,11 @@
 
 - [x] Fresh determinism/golden/integration gates after verifier fixes: determinism, `npm run test:golden`, and `npm run test:integration` passed (`runtime-sdl-mcp-1783381323582-56f140521df4db91`).
 
-- [ ] Full `npm test`: still not green. Current-tree rerun exits 1 after 141.9s while the digest reports `0/2 tests failed` and failure-term query finds only passing TAP summaries (`runtime-sdl-mcp-1783381481261-65fe44932bef5ab5`). Full-suite green status is not claimed.
+- [x] Full `npm test` historical failure: RESOLVED in Round 2. The failing rerun remains recorded as `runtime-sdl-mcp-1783381481261-65fe44932bef5ab5`; updating `tests/unit/tool-output-visibility.test.ts` aligned the expected Stage 11.3 summary, and the fresh full suite passed 596/596 files (`runtime-sdl-mcp-1783385012026-0b30184a1dbfc281`).
 
-- [ ] `npm run benchmark:ci`: not green in this environment. Default run fails on local `data/sdl-mcp-graph.lbug` WAL corruption (`runtime-sdl-mcp-1783380370919-f06f8e1ec1ba40ff`); a temp `SDL_GRAPH_DB_PATH` run exceeded the 300s tool-call ceiling before returning a result. Benchmark no-regression status is not claimed.
+- [ ] External benchmark proof: OWNED BY THE BENCHMARK-ISOLATION TRACK. The historical default run fails on local `data/sdl-mcp-graph.lbug` WAL corruption (`runtime-sdl-mcp-1783380370919-f06f8e1ec1ba40ff`), and the historical temp `SDL_GRAPH_DB_PATH` run exceeded the 300s tool-call ceiling before returning a result. Do not claim benchmark green until that track persists an isolated artifact.
 
-- [ ] Live smoke from Task 12.4 Step 5 remains unrecorded in this note.
+- [x] Live smoke from Task 12.4 Step 5: RECORDED in the two smoke sections below. The later rounds document dedupe refs, short-ID aliases, runtime digest savings, `file.read` hints, catalog `estTokens`, and answer-first behavior.
 
 ## Chunk 3 Verification Round 2 (2026-07-07)
 
@@ -87,7 +87,7 @@
 - [x] Live smoke (Task 12.4 Step 5), partial: dedupe refs verified live (`symbol.getCard` second call returned `{ ref, unchanged: true }`; repeated `sdl.context` returned `unchanged: true` refs for all repeated cards); short-ID reuse verified (second `symbol.search` extended the session alias dictionary without re-emitting known ids); runtime digest verified (failing node:test run returned a structured failure digest).
   - NOT verifiable against the currently running server: `answerFirst`, `file.read` untargeted-read `hint`, and catalog `estTokens` — the running MCP server process predates the chunk-3 dist (its `sdl.context` tool description lacks the new answerFirst text, `options.answerFirst: "yes"` passes schema validation, and a 173KB untargeted `file.read` artifact carries no `hint`). Restart the SDL-MCP server on the rebuilt dist and re-run those three probes.
 
-- [ ] `npm run benchmark:ci` with a temp `SDL_GRAPH_DB_PATH`: completes (WAL-corruption blocker avoided) but FAILS 3/10 thresholds on repo scip-io — `quality.edgesPerSymbol` 0.553 (min 1), `quality.graphConnectivity` 24.6% (min 30%), `performance.sliceBuildTimeMs` 465.7ms (max 350ms) — plus a baseline-mismatch warning (`.benchmark/baseline.json` is for another repo/format). Chunk 3 touches no indexing or slice-build code, so this is judged pre-existing/environmental, but no-regression status remains unclaimed until a baseline for scip-io exists.
+- [ ] External benchmark proof remains pending under the benchmark-isolation track. The historical temp `SDL_GRAPH_DB_PATH` run completes but fails 3/10 thresholds on repo scip-io — `quality.edgesPerSymbol` 0.553 (min 1), `quality.graphConnectivity` 24.6% (min 30%), `performance.sliceBuildTimeMs` 465.7ms (max 350ms) — plus a baseline-mismatch warning (`.benchmark/baseline.json` is for another repo/format). Do not claim green without a persisted isolated artifact.
 
 ## Chunk 3 Smoke Test Round (2026-07-07, post server restart)
 
