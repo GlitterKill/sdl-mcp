@@ -1184,25 +1184,32 @@ export function runBenchmarkChild(
     let stderrClosed = false;
     let exitCode: number | null = null;
     let child: ReturnType<typeof spawn> | undefined;
+    let failure: BenchmarkChildFailure | undefined;
 
-    const fail = (
-      boundary: "child-spawn" | "child-stream",
-      error: unknown,
-    ) => {
-      if (settled) return;
-      settled = true;
-      child?.kill();
-      stdout.destroy();
-      stderr.destroy();
-      rejectPromise(new BenchmarkChildFailure(boundary, error));
-    };
     const finish = () => {
       if (settled || !childClosed || !stdoutClosed || !stderrClosed) return;
       settled = true;
+      if (failure !== undefined) {
+        rejectPromise(failure);
+        return;
+      }
       resolvePromise({
         exitCode,
         durationMs: roundDuration(performance.now() - started),
       });
+    };
+    const fail = (
+      boundary: "child-spawn" | "child-stream",
+      error: unknown,
+    ) => {
+      if (settled || failure !== undefined) return;
+      failure = new BenchmarkChildFailure(boundary, error);
+      child?.kill();
+      child?.stdout?.destroy();
+      child?.stderr?.destroy();
+      stdout.destroy();
+      stderr.destroy();
+      finish();
     };
 
     stdout.once("error", (error) => fail("child-stream", error));
@@ -1223,11 +1230,8 @@ export function runBenchmarkChild(
         stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (error) {
+      childClosed = true;
       fail("child-spawn", error);
-      return;
-    }
-    if (child.stdout === null || child.stderr === null) {
-      fail("child-spawn", new Error("Child stdio pipes are unavailable"));
       return;
     }
     child.once("error", (error) => fail("child-spawn", error));
@@ -1236,6 +1240,12 @@ export function runBenchmarkChild(
       childClosed = true;
       finish();
     });
+    if (child.stdout === null || child.stderr === null) {
+      fail("child-spawn", new Error("Child stdio pipes are unavailable"));
+      return;
+    }
+    child.stdout.once("error", (error) => fail("child-stream", error));
+    child.stderr.once("error", (error) => fail("child-stream", error));
     child.stdout.pipe(stdout);
     child.stderr.pipe(stderr);
   });
@@ -1248,16 +1258,21 @@ async function executeExternalBenchmarkRepeats(
   const rawRepeats: ExternalBenchmarkRawRepeat[] = [];
   let stop: ExternalBenchmarkStopBoundary | undefined;
   let activeRepeat = 1;
+  let unexpectedBoundary:
+    | "preflight-between-repeats"
+    | "raw-result-invalid" = "preflight-between-repeats";
   let results: ExternalBenchmarkResults | undefined;
   const usedDbPaths = new Set<string>();
 
   try {
     for (const repeat of state.manifest.repeats) {
       activeRepeat = repeat.repeat;
+      unexpectedBoundary = "preflight-between-repeats";
       try {
         assertExternalBenchmarkInputs(state, repeat);
-      } catch {
+      } catch (error) {
         const boundary = "preflight-between-repeats";
+        writeRepeatDiagnostic(state, repeat, error);
         rawRepeats.push(failedRawRepeat(repeat, boundary));
         stop = { boundary, failedRepeat: repeat.repeat };
         break;
@@ -1281,6 +1296,7 @@ async function executeExternalBenchmarkRepeats(
         break;
       }
 
+      unexpectedBoundary = "raw-result-invalid";
       const raw = readRawBenchmarkRepeat(
         state,
         repeat,
@@ -1300,9 +1316,10 @@ async function executeExternalBenchmarkRepeats(
         break;
       }
     }
-  } catch {
+  } catch (error) {
     const repeat = state.manifest.repeats[activeRepeat - 1];
-    const boundary = "child-spawn";
+    const boundary = unexpectedBoundary;
+    writeRepeatDiagnostic(state, repeat, error);
     if (!rawRepeats.some((raw) => raw.repeat === activeRepeat)) {
       rawRepeats.push(failedRawRepeat(repeat, boundary));
     }
@@ -1450,6 +1467,20 @@ function failedRawRepeat(
     benchmarkResultSha256: null,
     benchmarkResult: null,
   };
+}
+
+function writeRepeatDiagnostic(
+  state: PreparedExternalBenchmarkRun,
+  repeat: ExternalBenchmarkRepeatManifest,
+  error: unknown,
+): void {
+  const path = join(state.artifactRoot, ...repeat.stderrPath.split("/"));
+  const message = error instanceof Error ? error.message : String(error);
+  if (existsSync(path)) {
+    fs.appendFileSync(path, message + "\n", "utf8");
+  } else {
+    writeUtf8Output(path, message + "\n", "exclusive");
+  }
 }
 
 function ensureDeclaredLogs(state: PreparedExternalBenchmarkRun): void {

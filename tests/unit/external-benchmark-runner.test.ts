@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import childProcess, { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { EventEmitter } from "node:events";
+import { syncBuiltinESMExports } from "node:module";
+import { PassThrough, Writable } from "node:stream";
 import fs, {
   existsSync,
   mkdirSync,
@@ -1471,6 +1474,126 @@ function writeFakeRawResult(
   );
 }
 
+function controlledLogStream() {
+  let completeDestroy: (() => void) | undefined;
+  const stream = new Writable({
+    destroy(_error, callback) {
+      completeDestroy = callback;
+    },
+  });
+  return {
+    stream,
+    close() {
+      assert.ok(completeDestroy);
+      const callback = completeDestroy;
+      completeDestroy = undefined;
+      callback();
+    },
+  };
+}
+
+function startControlledBenchmarkChild() {
+  const stdoutPipe = new PassThrough();
+  const stderrPipe = new PassThrough();
+  let killed = false;
+  const child = Object.assign(new EventEmitter(), {
+    stdout: stdoutPipe,
+    stderr: stderrPipe,
+    kill() {
+      killed = true;
+      return true;
+    },
+  }) as unknown as ReturnType<typeof childProcess.spawn>;
+  const stdoutLog = controlledLogStream();
+  const stderrLog = controlledLogStream();
+  const originalSpawn = childProcess.spawn;
+  const originalCreateWriteStream = fs.createWriteStream;
+
+  Object.defineProperty(childProcess, "spawn", {
+    configurable: true,
+    value: () => child,
+  });
+  syncBuiltinESMExports();
+  let outputIndex = 0;
+  Object.defineProperty(fs, "createWriteStream", {
+    configurable: true,
+    value: () => [stdoutLog.stream, stderrLog.stream][outputIndex++]!,
+  });
+
+  let promise: ReturnType<typeof runBenchmarkChild>;
+  try {
+    promise = runBenchmarkChild({
+      command: ["node", "-e", ""],
+      cwd: process.cwd(),
+      env: { ...process.env },
+      stdoutPath: "unused-stdout.log",
+      stderrPath: "unused-stderr.log",
+      rawResultPath: "unused-result.json",
+    });
+  } finally {
+    Object.defineProperty(fs, "createWriteStream", {
+      configurable: true,
+      value: originalCreateWriteStream,
+    });
+    Object.defineProperty(childProcess, "spawn", {
+      configurable: true,
+      value: originalSpawn,
+    });
+    syncBuiltinESMExports();
+  }
+
+  return {
+    child,
+    stdoutPipe,
+    stderrPipe,
+    stdoutLog,
+    stderrLog,
+    killed: () => killed,
+    promise,
+  };
+}
+
+async function nextEventLoopTurn(): Promise<void> {
+  await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
+}
+
+async function assertStreamFailureWaitsForCleanup(
+  trigger: (state: ReturnType<typeof startControlledBenchmarkChild>) => void,
+): Promise<void> {
+  const state = startControlledBenchmarkChild();
+  let settled = false;
+  const rejection = state.promise.then(
+    () => {
+      settled = true;
+      return new Error("Expected child stream failure");
+    },
+    (error: unknown) => {
+      settled = true;
+      return error;
+    },
+  );
+
+  trigger(state);
+  await nextEventLoopTurn();
+  assert.equal(settled, false);
+  assert.equal(state.killed(), true);
+
+  state.child.emit("close", null);
+  await nextEventLoopTurn();
+  assert.equal(settled, false);
+
+  state.stdoutLog.close();
+  await nextEventLoopTurn();
+  assert.equal(settled, false);
+
+  state.stderrLog.close();
+  const error = await rejection;
+  assert.match(
+    error instanceof Error ? error.message : String(error),
+    /child stream/iu,
+  );
+}
+
 describe("external benchmark child execution and complete repeat count", () => {
   it("continues after a valid threshold failure and persists every repeat", async () => {
     const fixture = createExternalFixture(2);
@@ -1557,6 +1680,110 @@ describe("external benchmark child execution and complete repeat count", () => {
     );
   });
 
+  it("classifies unexpected request construction failures as between-repeat preflight", async () => {
+    const fixture = createExternalFixture(3);
+    const originalStatSync = fs.statSync;
+    let configPath: string | undefined;
+    let calls = 0;
+    let exitCode: number;
+    try {
+      exitCode = await runExternalBenchmarkCli(
+        fixture.args,
+        async (request) => {
+          calls += 1;
+          configPath = request.env.SDL_CONFIG;
+          writeFakeRawResult(request, true);
+          Object.defineProperty(fs, "statSync", {
+            configurable: true,
+            value: (path: fs.PathLike, ...args: unknown[]) => {
+              if (path === configPath) {
+                throw new Error("forced request failure");
+              }
+              return Reflect.apply(originalStatSync, fs, [path, ...args]);
+            },
+          });
+          return { exitCode: 0, durationMs: 1 };
+        },
+      );
+    } finally {
+      Object.defineProperty(fs, "statSync", {
+        configurable: true,
+        value: originalStatSync,
+      });
+    }
+
+    assert.equal(exitCode!, 1);
+    assert.equal(calls, 1);
+    const results = JSON.parse(
+      fs.readFileSync(join(fixture.outDir, "results.json"), "utf8"),
+    );
+    assert.deepStrictEqual(
+      results.repeats.map(
+        (repeat: { failureBoundary: string | null }) => repeat.failureBoundary,
+      ),
+      [null, "preflight-between-repeats", "unexecuted-after-failure"],
+    );
+    assert.match(
+      fs.readFileSync(
+        join(fixture.outDir, "logs", "repeat-002.stderr.log"),
+        "utf8",
+      ),
+      /forced request failure/u,
+    );
+  });
+
+  it("classifies unexpected raw result hashing failures as invalid evidence", async () => {
+    const fixture = createExternalFixture(2);
+    const originalReadFileSync = fs.readFileSync;
+    let rawPath: string | undefined;
+    let rawReads = 0;
+    let exitCode: number;
+    try {
+      exitCode = await runExternalBenchmarkCli(
+        fixture.args,
+        async (request) => {
+          rawPath = request.rawResultPath;
+          writeFakeRawResult(request, true);
+          Object.defineProperty(fs, "readFileSync", {
+            configurable: true,
+            value: (path: fs.PathOrFileDescriptor, ...args: unknown[]) => {
+              if (path === rawPath && (rawReads += 1) === 2) {
+                throw new Error("forced raw hash failure");
+              }
+              return Reflect.apply(originalReadFileSync, fs, [path, ...args]);
+            },
+          });
+          syncBuiltinESMExports();
+          return { exitCode: 0, durationMs: 1 };
+        },
+      );
+    } finally {
+      Object.defineProperty(fs, "readFileSync", {
+        configurable: true,
+        value: originalReadFileSync,
+      });
+      syncBuiltinESMExports();
+    }
+
+    assert.equal(exitCode!, 1);
+    const results = JSON.parse(
+      fs.readFileSync(join(fixture.outDir, "results.json"), "utf8"),
+    );
+    assert.deepStrictEqual(
+      results.repeats.map(
+        (repeat: { failureBoundary: string | null }) => repeat.failureBoundary,
+      ),
+      ["raw-result-invalid", "unexecuted-after-failure"],
+    );
+    assert.match(
+      fs.readFileSync(
+        join(fixture.outDir, "logs", "repeat-001.stderr.log"),
+        "utf8",
+      ),
+      /forced raw hash failure/u,
+    );
+  });
+
   it("records malformed and missing raw results without losing repeat count", async () => {
     for (const mode of ["malformed", "missing"] as const) {
       const fixture = createExternalFixture(2);
@@ -1587,6 +1814,20 @@ describe("external benchmark child execution and complete repeat count", () => {
         "unexecuted-after-failure",
       );
     }
+  });
+
+  it("waits for child and log closes after a writable log failure", async () => {
+    await assertStreamFailureWaitsForCleanup((state) => {
+      state.stdoutLog.stream.emit("error", new Error("forced writable failure"));
+    });
+  });
+
+  it("handles readable pipe errors and waits for child and log closes", async () => {
+    await assertStreamFailureWaitsForCleanup((state) => {
+      assert.equal(state.stdoutPipe.listenerCount("error"), 1);
+      assert.equal(state.stderrPipe.listenerCount("error"), 1);
+      state.stdoutPipe.emit("error", new Error("forced readable failure"));
+    });
   });
 
   it("streams a harmless child exclusively and rejects a raced stream path", async () => {
