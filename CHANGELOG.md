@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.12.3] - 2026-07-11
 
 ### Added
 
@@ -14,10 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Deterministic 3D layout engine** in TypeScript and Rust with byte-identical parity (`npm run test:layout-parity`), seeded PRNG (mulberry32/fnv1a32), cached artifacts under `<configDir>/viewer-layout-cache`, and incremental warm-start re-layout.
 - **`viewer.*` config block**: `enabled`, `skinsDir`, `fps`, `ambient.*`, `layout.*` (engine auto/typescript/rust, iterations, cacheDir, maxSymbolsPerClusterExpand), `skins.*` caps.
 - New dependencies `three` + `fflate` (exact-pinned, vendored at build time) and npm scripts `build:ui`, `typecheck:ui`, `test:layout-parity`, `check:skin-template-sync`.
+- **External benchmark framework**: reproducible external benchmark runs with canonical manifests, isolated databases, pinned SCIP inputs, and hardened preflight validation.
+- **Safe glob patterns**: bounded bracket-class support with scan/watch parity coverage.
+- **Embedding remediation**: safe remediation core and migrations for mismatched embedding destinations.
 
 ### Changed
 
 - **Breaking (UI)**: the legacy SDL Graph Explorer at `/ui/graph` was removed; `/ui/graph` now issues a 308 redirect to `/ui/viewer`. Legacy `/api/graph/{repoId}/slice|neighborhood|blast-radius` endpoints remain (deprecated, now served from `src/viewer/legacy-graph.ts`).
+- **Response efficiency**: trimmed redundant model response fields.
 
 ### Fixed
 
@@ -26,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **search.edit CRLF zero-match**: multi-line `query.literal` values with LF newlines silently matched nothing in CRLF files (`filesMatched: 0` with no skip reason). Literal queries are now compiled with EOL-tolerant newlines (`\r?\n`) in both the preview match counter and the replacePattern write path; replacement output already preserved the file's dominant EOL.
 - **Viewer node visibility**: SDL Galaxy cluster/symbol meshes were rendered nearly black because instanced materials set `vertexColors: true` without a per-vertex color attribute, zeroing the shader color before per-instance colors applied. Instanced meshes now use plain bright materials driven by `setColorAt` plus an additive-blend halo shell for glow.
 - **Viewer lens dropdown**: the Normal/Community/Impact/Edges selector only recolored one lens (community) into the colors it already had, so it appeared dead. Lens changes now restyle the whole scene: Normal (pale starlight), Community (palette per cluster), Impact (member-count/fan-in heat), Edges (dimmed nodes, emphasized edge lines); expanded symbol clusters follow the active lens.
+- **Embedding and watcher maintenance**: deferred FileSummary embedding backlog work now accumulates safely, rollback failures are preserved, and Watchman teardown is hardened.
+- **Benchmark and CLI safety**: benchmark child cleanup and drive-relative path validation are hardened; Claude Code setup now emits valid destinations.
+
+_54 non-merge commits from 1 contributor_
 
 ## [0.12.2] - 2026-07-07
 
