@@ -274,18 +274,33 @@ $agent = 'C:/Users/glitt/.claude/agents/threejs-expert.md'
 if (-not (Test-Path -LiteralPath $bash)) { throw "Git Bash missing: $bash" }
 if (-not (Test-Path -LiteralPath $validatorPath)) { throw "Validator missing: $validator" }
 
-$validatorOutput = @(& $bash $validator $agent 2>&1)
-$validatorExit = $LASTEXITCODE
-$validatorLines = @($validatorOutput | ForEach-Object { $_.ToString().TrimEnd("`r") })
-$validatorLines | ForEach-Object { Write-Output $_ }
+$startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+$startInfo.FileName = $bash
+$startInfo.Arguments = "`"$validator`" `"$agent`""
+$startInfo.UseShellExecute = $false
+$startInfo.RedirectStandardOutput = $true
+$startInfo.RedirectStandardError = $true
+
+$process = [System.Diagnostics.Process]::new()
+$process.StartInfo = $startInfo
+if (-not $process.Start()) { throw 'Failed to start bundled validator' }
+
+$validatorOutput = $process.StandardOutput.ReadToEnd()
+$validatorError = $process.StandardError.ReadToEnd()
+$process.WaitForExit()
+$validatorExit = $process.ExitCode
+[Console]::Out.Write($validatorOutput)
+[Console]::Error.Write($validatorError)
 Write-Output "VALIDATOR_EXIT: $validatorExit"
+
+$validatorLines = @(($validatorOutput + $validatorError) -split '\r?\n')
 
 if ($validatorExit -eq 0) {
   Write-Output 'PASS: bundled validator'
 } else {
-  $legacyWarning = '⚠️ description should include <example> blocks for triggering'
+  $legacyWarningSuffix = 'description should include <example> blocks for triggering'
   $nonEmptyLines = @($validatorLines | Where-Object { $_ -ne '' })
-  $warningLines = @($nonEmptyLines | Where-Object { $_ -match '^⚠️' })
+  $legacyWarningLines = @($nonEmptyLines | Where-Object { $_.EndsWith($legacyWarningSuffix, [StringComparison]::Ordinal) })
   $hasErrorFinding = @($nonEmptyLines | Where-Object { $_ -match '^(?:❌|ERROR\b)' }).Count -gt 0
   $validatorSource = Get-Content -Raw -LiteralPath $validatorPath
   $knownIncrementBug = $validatorSource -match '(?m)^\s*set -euo pipefail\s*$' -and
@@ -293,8 +308,8 @@ if ($validatorExit -eq 0) {
 
   $allowedLegacyExit = $validatorExit -eq 1 -and
     $nonEmptyLines.Count -gt 0 -and
-    $nonEmptyLines[-1] -eq $legacyWarning -and
-    $warningLines.Count -eq 1 -and
+    $nonEmptyLines[-1].EndsWith($legacyWarningSuffix, [StringComparison]::Ordinal) -and
+    $legacyWarningLines.Count -eq 1 -and
     -not $hasErrorFinding -and
     $knownIncrementBug
 
@@ -306,7 +321,7 @@ if ($validatorExit -eq 0) {
 }
 ```
 
-Expected: exit code 0 passes. Exit code 1 is allowed only when the exact captured output stops at the sole legacy `⚠️ description should include <example> blocks for triggering` warning, contains no error finding, and this validator version contains both `set -euo pipefail` and `((warning_count++))`. That known post-increment incompatibility aborts the validator before its remaining checks, so the passing Step 5 deterministic structural validation is authoritative. Any other exit or output is a blocking validation failure. Never alter the correct flat-prose description merely to satisfy the obsolete `<example>` warning.
+Expected: exit code 0 passes. Exit code 1 is allowed only when the last non-empty output line ends with the exact ASCII suffix `description should include <example> blocks for triggering`, exactly one output line has that suffix, there is no error finding, and this validator version contains both `set -euo pipefail` and `((warning_count++))`. Ordinal ASCII-suffix matching intentionally avoids fragile warning-glyph spacing and console encoding while preserving the narrow exception. That known post-increment incompatibility aborts the validator before its remaining checks, so the passing Step 5 deterministic structural validation is authoritative. Any other exit or output is a blocking validation failure. Never alter the correct flat-prose description merely to satisfy the obsolete `<example>` warning.
 
 - [ ] **Step 7: Verify trusted dynamic skill discovery**
 
