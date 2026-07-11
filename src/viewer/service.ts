@@ -134,19 +134,19 @@ export async function getClusterEdges(conn: Connection, repoId: string): Promise
 }
 
 export async function getSymbolEdges(conn: Connection, repoId: string, clusterId: string, kinds: string[], minConfidence: number, limit: number): Promise<SymbolEdgesResponseDto> {
+  // LadybugDB 0.16.1 aborts on `kind IN $kinds` when the bound list is empty.
+  const kindPredicate = kinds.length > 0 ? "\n       AND kind IN $kinds" : "";
   const rows = await queryAll<{ from: string; to: string; kind: string | null; confidence: unknown; resolution: string | null }>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)
-     MATCH (a)-[:BELONGS_TO_CLUSTER]->(ca:Cluster)
-     MATCH (b)-[:BELONGS_TO_CLUSTER]->(cb:Cluster)
-     WITH a, b, d, ca, cb, COALESCE(d.edgeType, 'depends') AS kind
-     WHERE (ca.clusterId = $clusterId OR cb.clusterId = $clusterId)
-       AND (size($kinds) = 0 OR kind IN $kinds)
-       AND COALESCE(d.confidence, 1.0) >= $minConfidence
+     MATCH (a)-[:BELONGS_TO_CLUSTER]->(:Cluster {clusterId: $clusterId})
+     MATCH (b)-[:BELONGS_TO_CLUSTER]->(:Cluster {clusterId: $clusterId})
+     WITH a, b, d, COALESCE(d.edgeType, 'depends') AS kind
+     WHERE COALESCE(d.confidence, 1.0) >= $minConfidence${kindPredicate}
      RETURN a.symbolId AS from, b.symbolId AS to, kind AS kind, COALESCE(d.confidence, 1.0) AS confidence, COALESCE(d.resolution, 'unknown') AS resolution
      ORDER BY from ASC, to ASC, kind ASC
      LIMIT $limit`,
-    { repoId, clusterId, kinds, minConfidence, limit },
+    { repoId, clusterId, minConfidence, limit, ...(kinds.length > 0 ? { kinds } : {}) },
   );
   return { edges: rows.map((row) => ({ from: row.from, to: row.to, kind: row.kind ?? "depends", confidence: toNumber(row.confidence), resolution: row.resolution ?? "unknown" })) };
 }
