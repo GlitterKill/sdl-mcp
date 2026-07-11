@@ -284,7 +284,14 @@ Expected: exit code 0. The validator may emit its legacy advisory requesting `<e
 Run:
 
 ```powershell
-$root = [IO.Path]::GetFullPath('C:\Users\glitt\.agents\skills').TrimEnd('\') + '\'
+$rootPath = 'C:\Users\glitt\.agents\skills'
+$rootItem = Get-Item -LiteralPath $rootPath -Force
+if (-not $rootItem.PSIsContainer) { throw "Skills root is not a directory: $rootPath" }
+if (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+  throw "Skills root is a reparse point: $rootPath"
+}
+$root = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $rootItem.FullName).ProviderPath).TrimEnd('\')
+
 $expected = @(
   'threejs-animation',
   'threejs-fundamentals',
@@ -298,22 +305,73 @@ $expected = @(
   'threejs-textures'
 )
 
-$trusted = Get-ChildItem -LiteralPath $root -Directory -Filter 'threejs-*' |
-  Where-Object {
-    $full = [IO.Path]::GetFullPath($_.FullName)
-    $insideRoot = $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)
-    $isReparsePoint = ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
-    $insideRoot -and -not $isReparsePoint -and (Test-Path -LiteralPath (Join-Path $full 'SKILL.md'))
-  } |
-  Select-Object -ExpandProperty Name
+$trusted = New-Object 'System.Collections.Generic.List[string]'
+$rejected = New-Object 'System.Collections.Generic.List[string]'
+
+foreach ($candidate in Get-ChildItem -LiteralPath $root -Directory -Filter 'threejs-*' -Force) {
+  try {
+    $skillDirectory = Get-Item -LiteralPath $candidate.FullName -Force
+    if (-not $skillDirectory.PSIsContainer) { throw 'Selected skill path is not a directory' }
+    if (($skillDirectory.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+      throw 'Selected skill directory is a reparse point'
+    }
+
+    $skillDirectoryFull = [IO.Path]::GetFullPath(
+      (Resolve-Path -LiteralPath $skillDirectory.FullName).ProviderPath
+    ).TrimEnd('\')
+    $skillParent = [IO.Path]::GetDirectoryName($skillDirectoryFull).TrimEnd('\')
+    if ($skillParent -ine $root) { throw 'Selected skill directory is not directly under the canonical root' }
+
+    $skillPath = Join-Path $skillDirectoryFull 'SKILL.md'
+    if (-not (Test-Path -LiteralPath $skillPath -PathType Leaf)) {
+      throw 'SKILL.md is missing or is not a regular file'
+    }
+
+    $skillFile = Get-Item -LiteralPath $skillPath -Force
+    if ($skillFile.PSIsContainer -or -not ($skillFile -is [IO.FileInfo])) {
+      throw 'SKILL.md is not a regular file'
+    }
+    if (($skillFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+      throw 'SKILL.md is a reparse point'
+    }
+
+    $skillFull = [IO.Path]::GetFullPath(
+      (Resolve-Path -LiteralPath $skillFile.FullName).ProviderPath
+    )
+    if (
+      [IO.Path]::GetDirectoryName($skillFull).TrimEnd('\') -ine $skillDirectoryFull -or
+      [IO.Path]::GetFileName($skillFull) -ine 'SKILL.md'
+    ) {
+      throw 'SKILL.md is not directly contained by its resolved selected skill directory'
+    }
+
+    $stream = $null
+    try {
+      $stream = [IO.File]::Open(
+        $skillFull,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::ReadWrite
+      )
+    } finally {
+      if ($null -ne $stream) { $stream.Dispose() }
+    }
+
+    [void]$trusted.Add($candidate.Name)
+  } catch {
+    [void]$rejected.Add("$($candidate.Name): $($_.Exception.Message)")
+  }
+}
 
 $missing = $expected | Where-Object { $_ -notin $trusted }
-if ($missing) { throw "Missing trusted skills: $($missing -join ', ')" }
+if ($missing) {
+  throw "Missing or untrusted skills: $($missing -join ', '). Rejections: $($rejected -join '; ')"
+}
 
 Write-Output "PASS: trusted Three.js skills ($($trusted.Count)): $($trusted -join ', ')"
 ```
 
-Expected: PASS and all ten expected skill names.
+Expected: PASS and all ten expected skill names. Each selected `SKILL.md` is independently verified as a readable regular non-reparse file directly inside a resolved non-reparse skill directory that is itself directly under the canonical root. Discovery remains dynamic; followed-reference containment stays a runtime agent rule.
 
 - [ ] **Step 8: Prove Claude Code loads the YAML agent definition**
 
