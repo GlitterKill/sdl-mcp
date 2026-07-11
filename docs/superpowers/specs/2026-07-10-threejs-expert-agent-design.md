@@ -28,7 +28,7 @@ Do not invoke it for unrelated generic frontend work, non-Three.js visualization
 
 ## Three.js skill access
 
-At the start of relevant work, discover `C:\Users\glitt\.agents\skills\threejs-*` and read the complete `SKILL.md` for every skill relevant to the task. Resolve each candidate to a real directory under that canonical skills root; ignore symlinks, junctions, and paths that escape the root. Skill enablement state must not restrict access: direct filesystem loading is the required fallback because Claude Code skips disabled skills during frontmatter preloading.
+At the start of relevant work, resolve the canonical skills root and discover real, non-reparse `threejs-*` directories directly beneath it. Each selected `SKILL.md` must resolve to a readable regular non-reparse-point file inside its real selected skill directory. Follow only references routed by that skill, and require every followed local reference to resolve inside the same real skill directory without traversing a reparse point. Skill enablement state must not restrict access: direct filesystem loading remains the fallback because Claude Code skips disabled skills during frontmatter preloading.
 
 The current discovered set is:
 
@@ -47,14 +47,15 @@ Discovery remains dynamic so later `threejs-*` skills are available without edit
 
 ## Current documentation and research
 
-For version-sensitive Three.js work:
+For version-sensitive Three.js work, project and selected-skill instructions govern workflow, while official installed- or target-version sources govern Three.js API facts.
 
-1. Determine the project's installed Three.js version and rendering stack.
-2. Use Context7 to resolve Three.js and select documentation matching the installed version when a versioned library ID is available.
-3. Prefer official Three.js documentation, examples, changelog, and source repositories for technical claims. If Context7 lacks the installed version, use the official documentation and changelog/source tag for that release, state the fallback, and avoid APIs introduced later.
-4. Use `https://github.com/AxiomeCG/awesome-threejs#resources` as a discovery index for goal-specific tools, techniques, assets, and learning material.
-5. Validate consequential third-party guidance against primary sources.
-6. Record source links and retrieval dates in private memory when the resource is durably useful.
+1. Determine the project's installed Three.js version and rendering stack from package metadata and lockfiles.
+2. If project and lock metadata do not identify a release, ask for the target release. Only when proceeding is safe may the agent assume the current stable official release, and it must state that assumption.
+3. Use Context7 to resolve Three.js and select documentation matching the installed or target release when a versioned library ID is available.
+4. Prefer official Three.js documentation, examples, changelog, migration guidance, and source tags for technical claims. If Context7 lacks the release, state the fallback, use the official documentation and changelog/source tag, and avoid APIs introduced later.
+5. Use `https://github.com/AxiomeCG/awesome-threejs#resources` as a discovery index for goal-specific tools, techniques, assets, and learning material.
+6. Validate consequential third-party guidance against primary sources.
+7. Record source links and retrieval dates in private memory when the resource is durably useful.
 
 ## Work process
 
@@ -76,7 +77,7 @@ Use Claude Code's agent-managed user memory. All note paths below are relative t
 - `resources.md`: durable resources, their purpose, source URL, and retrieval date.
 - `bugs.md`: reproducible Three.js, browser, GPU, or SDL-MCP interoperability bugs.
 
-Update or supersede existing entries instead of duplicating them. Never use repository files as a fallback notebook.
+Abstract notes into reusable cross-project guidance and update or supersede existing entries instead of duplicating them. Unless the user explicitly authorizes it, never persist proprietary source or payloads, project or repository identifiers, machine-specific absolute paths, or project-specific evidence. Revalidate project-specific findings before reusing them elsewhere. Never use repository files as a fallback notebook.
 
 A bug entry must include the observed symptom, relevant versions and environment, minimal reproduction steps, expected and actual behavior, evidence, user impact, workaround if known, suspected boundary, source links, and status. Distinguish confirmed facts from hypotheses.
 
@@ -100,7 +101,7 @@ Lead with the outcome. Include relevant project and Three.js versions, verified 
 
 - Missing or unreadable skill: identify the path, continue with available skills, and never claim it was loaded.
 - Current documentation unavailable: label version-sensitive conclusions as potentially stale and avoid unsupported certainty.
-- Conflicting guidance: follow project instructions first, then official documentation, changelog, and source for the project's installed Three.js version, then local skills, and finally validated third-party resources.
+- Conflicting guidance: project and selected-skill instructions control workflow; official installed- or target-version documentation, changelog, and source control Three.js API facts.
 - Memory write failure: report the unsaved note to the user; do not write it into a repository.
 - Resource link failure: find a primary replacement where practical and mark unavailable resources accordingly.
 
@@ -111,10 +112,10 @@ Implementation is complete when:
 - The global agent file exists and its YAML frontmatter parses.
 - The identifier, trigger description, model, color, and `memory: user` are valid.
 - The prompt covers explicit cage-graph work, proactive Three.js debugging, current-documentation research, SDL-MCP interoperability, and unrelated-work exclusions.
-- All ten current `threejs-*` skill directories are discoverable, and future matching directories require no agent edit.
+- All ten current `threejs-*` skill directories are discoverable, future matching directories require no agent edit, and every selected `SKILL.md` and followed local reference satisfies the same-directory non-reparse containment rule.
 - The agent's note policy is private-memory-only.
 - When `C:\Program Files\Git\bin\bash.exe` and the bundled validator exist, `validate-agent.sh C:/Users/glitt/.claude/agents/threejs-expert.md` exits zero. The validator's legacy `<example>` advisory is non-blocking because the current agent-development guidance requires flat prose trigger scenarios.
-- A PowerShell structural check always verifies: exactly two frontmatter delimiters; exact `name`, `model`, `color`, and `memory` values; a description beginning with `Use this agent when` and pointing to `When to invoke`; a non-empty 20-10,000 character prompt; required process, output, failure, skill-access, research, memory, and SDL-MCP sections; no TODO/TBD placeholders; and all current trusted Three.js skill directories.
+- A PowerShell structural check always verifies: exactly two frontmatter delimiters; exact `name`, `model`, `color`, and `memory` values; a description beginning with `Use this agent when` and pointing to `When to invoke`; a non-empty 20-7,500 character prompt that enforces the maintainability ceiling; required process, output, failure, skill-access, research, memory, and SDL-MCP sections; no placeholder markers; and all current trusted Three.js skill directories.
 - No repository source files are changed by the implementation.
 
 ## Non-goals
