@@ -261,23 +261,52 @@ Write-Output "PASS: threejs-expert structure ($promptLength prompt characters)"
 
 Expected: `PASS: threejs-expert structure (... prompt characters)` with a prompt length from 20 through 7,500 characters. The description assertions deterministically cover all four positive trigger domains and both exclusions.
 
-- [ ] **Step 6: Run the bundled agent validator**
+- [ ] **Step 6: Run the bundled agent validator and capture its exact result**
 
 Run:
 
 ```powershell
 $bash = 'C:\Program Files\Git\bin\bash.exe'
 $validator = 'C:/Users/glitt/.codex/plugins/cache/claude-plugins-official/plugin-dev/local/skills/agent-development/scripts/validate-agent.sh'
+$validatorPath = $validator -replace '/', '\'
 $agent = 'C:/Users/glitt/.claude/agents/threejs-expert.md'
 
 if (-not (Test-Path -LiteralPath $bash)) { throw "Git Bash missing: $bash" }
-if (-not (Test-Path -LiteralPath ($validator -replace '/', '\'))) { throw "Validator missing: $validator" }
+if (-not (Test-Path -LiteralPath $validatorPath)) { throw "Validator missing: $validator" }
 
-& $bash $validator $agent
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$validatorOutput = @(& $bash $validator $agent 2>&1)
+$validatorExit = $LASTEXITCODE
+$validatorLines = @($validatorOutput | ForEach-Object { $_.ToString().TrimEnd("`r") })
+$validatorLines | ForEach-Object { Write-Output $_ }
+Write-Output "VALIDATOR_EXIT: $validatorExit"
+
+if ($validatorExit -eq 0) {
+  Write-Output 'PASS: bundled validator'
+} else {
+  $legacyWarning = '⚠️ description should include <example> blocks for triggering'
+  $nonEmptyLines = @($validatorLines | Where-Object { $_ -ne '' })
+  $warningLines = @($nonEmptyLines | Where-Object { $_ -match '^⚠️' })
+  $hasErrorFinding = @($nonEmptyLines | Where-Object { $_ -match '^(?:❌|ERROR\b)' }).Count -gt 0
+  $validatorSource = Get-Content -Raw -LiteralPath $validatorPath
+  $knownIncrementBug = $validatorSource -match '(?m)^\s*set -euo pipefail\s*$' -and
+    $validatorSource -match '\(\(\s*warning_count\+\+\s*\)\)'
+
+  $allowedLegacyExit = $validatorExit -eq 1 -and
+    $nonEmptyLines.Count -gt 0 -and
+    $nonEmptyLines[-1] -eq $legacyWarning -and
+    $warningLines.Count -eq 1 -and
+    -not $hasErrorFinding -and
+    $knownIncrementBug
+
+  if (-not $allowedLegacyExit) {
+    throw "Bundled validator failed with exit $validatorExit"
+  }
+
+  Write-Output 'PASS: known legacy validator incompatibility; Step 5 structural validation is authoritative'
+}
 ```
 
-Expected: exit code 0. The validator may emit its legacy advisory requesting `<example>` blocks; this is non-blocking because the current agent-development skill requires flat prose trigger scenarios.
+Expected: exit code 0 passes. Exit code 1 is allowed only when the exact captured output stops at the sole legacy `⚠️ description should include <example> blocks for triggering` warning, contains no error finding, and this validator version contains both `set -euo pipefail` and `((warning_count++))`. That known post-increment incompatibility aborts the validator before its remaining checks, so the passing Step 5 deterministic structural validation is authoritative. Any other exit or output is a blocking validation failure. Never alter the correct flat-prose description merely to satisfy the obsolete `<example>` warning.
 
 - [ ] **Step 7: Verify trusted dynamic skill discovery**
 
@@ -427,7 +456,7 @@ Include:
 
 - Global agent path.
 - Structural-check result.
-- Bundled-validator result.
+- Bundled-validator exact output and exit, and whether it passed or used the narrowly allowed legacy-warning compatibility path.
 - Trusted-skill inventory result.
 - Confirmation that notes use Claude Code's private user-memory scope.
 - Confirmation that no repository implementation files changed.
