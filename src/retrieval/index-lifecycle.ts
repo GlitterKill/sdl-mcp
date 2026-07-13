@@ -627,8 +627,9 @@ export async function showIndexes(conn: Connection): Promise<IndexInfo[]> {
 // Health check
 // ---------------------------------------------------------------------------
 
-/** Expected FTS index name when not overridden by config. */
-const DEFAULT_FTS_INDEX_NAME = "symbol_search_text_v1";
+/** Default Symbol FTS index name when not overridden by config. */
+export const SYMBOL_FTS_INDEX_NAME = "symbol_search_text_v1";
+const DEFAULT_FTS_INDEX_NAME = SYMBOL_FTS_INDEX_NAME;
 
 // ---------------------------------------------------------------------------
 // Entity FTS + vector index name constants (Stage 3)
