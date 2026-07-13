@@ -4,6 +4,7 @@
  */
 
 import { attachRawContext } from "../../token-usage.js";
+import { parseActionHandlerArgs } from "../../../gateway/dispatch-spine.js";
 import {
   SearchEditRequestSchema,
   type SearchEditApplyResponse,
@@ -286,7 +287,7 @@ export async function handleSearchEdit(
   args: unknown,
   context?: ToolContext,
 ): Promise<SearchEditResponse> {
-  const request = SearchEditRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(SearchEditRequestSchema, args);
   if (request.mode === "preview") {
     return handlePreview(request, context);
   }

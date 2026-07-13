@@ -1,8 +1,14 @@
-import { z } from "zod";
-
 import { ValidationError } from "../domain/errors.js";
-import type { ActionMap } from "../gateway/router.js";
+import { dispatchAction, type ActionMap } from "../gateway/router.js";
 import type { ToolContext } from "../server.js";
+import {
+  RetrieveRequestSchema,
+} from "./retrieve-schema.js";
+
+export {
+  RetrieveOpSchema,
+  RetrieveRequestSchema,
+} from "./retrieve-schema.js";
 
 export const RETRIEVE_ACTION_BY_OP = {
   symbolSearch: "symbol.search",
@@ -12,65 +18,6 @@ export const RETRIEVE_ACTION_BY_OP = {
   codeHotPath: "code.getHotPath",
   codeNeedWindow: "code.needWindow",
 } as const;
-
-export const RetrieveOpSchema = z.enum([
-  "symbolSearch",
-  "symbolGetCard",
-  "sliceBuild",
-  "codeSkeleton",
-  "codeHotPath",
-  "codeNeedWindow",
-]);
-
-export const RetrieveRequestSchema = z.object({
-  repoId: z.string().min(1),
-  op: RetrieveOpSchema,
-  args: z.record(z.string(), z.unknown()).optional().default({}),
-  responseMode: z.enum(["inline", "auto", "handle"]).optional(),
-});
-
-type RetrieveOp = z.infer<typeof RetrieveOpSchema>;
-
-interface RetrieveOptions {
-  responseMode?: "inline" | "auto" | "handle";
-}
-
-export function normalizeRetrieveArgs(
-  op: RetrieveOp,
-  args: Record<string, unknown>,
-  opts: RetrieveOptions,
-): Record<string, unknown> {
-  const normalized = { ...args };
-
-  if (op === "symbolSearch" && normalized.wireFormat === undefined) {
-    normalized.wireFormat = "auto";
-  }
-
-  if (op === "sliceBuild") {
-    normalized.wireFormat ??= "auto";
-    normalized.cardDetail ??= "compact";
-    normalized.includeLegend ??= false;
-    normalized.includeRetrievalEvidence ??= false;
-    normalized.includeProcesses ??= false;
-  }
-
-  // retrieve callers commonly use filePath; the code gateway's skeleton action
-  // uses file as its canonical field.
-  if (
-    op === "codeSkeleton" &&
-    normalized.file === undefined &&
-    typeof normalized.filePath === "string"
-  ) {
-    normalized.file = normalized.filePath;
-    delete normalized.filePath;
-  }
-
-  if (op === "codeNeedWindow" && normalized.responseMode === undefined) {
-    normalized.responseMode = opts.responseMode ?? "auto";
-  }
-
-  return normalized;
-}
 
 export async function handleRetrieve(
   rawArgs: unknown,
@@ -87,15 +34,15 @@ export async function handleRetrieve(
     );
   }
 
-  const normalizedArgs = normalizeRetrieveArgs(request.op, request.args, {
-    responseMode: request.responseMode,
-  });
-  const gatewayArgs = {
+  const actionArgs = {
     repoId: request.repoId,
-    action: actionName,
-    ...normalizedArgs,
+    ...request.args,
   };
-
-  const parsedArgs = action.schema.parse(gatewayArgs);
-  return action.handler(parsedArgs, context);
+  return dispatchAction(
+    actionName,
+    actionArgs,
+    actionMap,
+    { kind: "retrieve", responseMode: request.responseMode },
+    context,
+  );
 }

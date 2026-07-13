@@ -1,3 +1,4 @@
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import {
   type SymbolSearchRequest,
   SymbolSearchResponse,
@@ -941,7 +942,7 @@ export async function handleSymbolGetCard(
   args: unknown,
   context?: ToolContext,
 ): Promise<SymbolGetCardResponse | NotModifiedResponse> {
-  const request = SymbolGetCardRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(SymbolGetCardRequestSchema, args);
 
   // Dispatch to batch handler if symbolIds or symbolRefs is provided
   const isBatch =

@@ -93,3 +93,57 @@ export * from "./ladybug-semantic.js";
 export * from "./ladybug-algorithms.js";
 // Shadow cluster (Louvain) operations
 export * from "./ladybug-shadow-clusters.js";
+
+// New db modules must use named exports here; do not add more `export *` lines.
+export {
+  finalizeProviderFirstShadowDb,
+  type FinalizeProviderFirstShadowDbParams,
+  type ProviderFirstShadowFinalizationBulkArtifact,
+  type ProviderFirstShadowFinalizationBulkLoadSummary,
+  type ProviderFirstShadowFinalizationCounts,
+  type ProviderFirstShadowFinalizationStatus,
+  type ProviderFirstShadowFinalizationSummary,
+} from "./ladybug-shadow-finalization.js";
+export {
+  copyProviderFirstArtifact,
+  deleteProviderReplacementSymbols,
+  readLegacyFallbackEdges,
+  readLegacyFallbackFiles,
+  readLegacyFallbackSymbols,
+  readProviderFirstShadowDbCounts,
+  type LegacyFallbackEdgeDbRow,
+  type LegacyFallbackFileDbRow,
+  type LegacyFallbackSymbolDbRow,
+  type ProviderFirstCopyArtifact,
+  type ProviderFirstShadowDbCounts,
+} from "./ladybug-provider-first.js";
+export {
+  rewriteResolvedImportEdges,
+  type ResolvedImportEdgeRewriteRow,
+} from "./ladybug-unresolved-imports.js";
+export {
+  getClusterLayoutInputRows,
+  getNeighborSymbolIds,
+  getSymbolLayoutInputRows,
+  loadGraphNeighborhoodRows,
+  type GraphLayoutInputRows,
+  type GraphNeighborhoodEdgeRow,
+} from "./ladybug-graph-read.js";
+export {
+  computeGalaxy,
+  fnv1a32,
+  getClusterEdges,
+  getClusterIdsForSymbols,
+  getClusters,
+  getSymbolCard,
+  getSymbolEdges,
+  getUniverse,
+  viewerSettingsSnapshot,
+} from "./ladybug-viewer.js";
+export {
+  findRetrievalSeedSymbolsByIdPrefix,
+  findRetrievalSeedSymbolsByName,
+  hasRetrievalSeedSymbol,
+  type RetrievalSeedCandidateRow,
+} from "./ladybug-retrieval.js";
+export { countRowsInNodeTable } from "./ladybug-index-lifecycle.js";

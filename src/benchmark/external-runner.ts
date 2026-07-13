@@ -4,6 +4,8 @@ import fs, { existsSync, readdirSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { normalizePath } from "../util/paths.js";
+
 import {
   buildExternalBenchmarkResults,
   compareArtifactPath,
@@ -49,8 +51,8 @@ export function collectDbFamilyFiles(primaryPath: string): string[] {
     .map((entry) => join(directory, entry.name))
     .sort((left, right) =>
       compareArtifactPath(
-        left.replaceAll("\\", "/"),
-        right.replaceAll("\\", "/"),
+        normalizePath(left),
+        normalizePath(right),
       ),
     );
 }

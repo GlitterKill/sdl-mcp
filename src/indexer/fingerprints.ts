@@ -185,5 +185,12 @@ export function generateMetadataFingerprint(meta: {
  * @param astFingerprint - AST fingerprint hash
  * @returns Hex string symbol identifier
  */
-// Re-export from canonical source for backward compatibility.
-export { generateSymbolId } from "../util/hashing.js";
+export function generateSymbolId(
+  repoId: string,
+  relPath: string,
+  kind: string,
+  name: string,
+  astFingerprint: string,
+): string {
+  return hashContent(`${repoId}:${relPath}:${kind}:${name}:${astFingerprint}`);
+}

@@ -3,13 +3,15 @@ import {
   batchGetSemanticEdges,
   batchMergeSemanticEdges,
   batchReplaceSemanticEdgeTargets,
+  getSemanticSymbolRangesByPath,
   mergeSemanticDiagnostics,
   mergeSemanticPrecisionMetric,
   mergeSemanticProviderRun,
   type SemanticEdgeWriteRow,
   type SemanticExistingEdge,
+  type SemanticSymbolRangeRow,
 } from "../db/ladybug-semantic.js";
-import { queryAll, toNumber, withTransaction } from "../db/ladybug-core.js";
+import { withTransaction } from "../db/ladybug-core.js";
 import type {
   SemanticEdge,
   SemanticIndex,
@@ -192,13 +194,6 @@ function edgeKey(sourceId: string, targetId: string, edgeType: string): string {
   return `${sourceId}\0${targetId}\0${edgeType}`;
 }
 
-interface SdlSymbolRange {
-  symbolId: string;
-  relPath: string;
-  rangeStartLine: number;
-  rangeEndLine: number;
-}
-
 async function resolveSemanticEdgeEndpoints(
   conn: Connection,
   index: SemanticIndex,
@@ -257,33 +252,14 @@ async function getSdlSymbolsByPath(
   conn: Connection,
   repoId: string,
   relPaths: readonly string[],
-): Promise<Map<string, SdlSymbolRange[]>> {
+): Promise<Map<string, SemanticSymbolRangeRow[]>> {
   if (relPaths.length === 0) return new Map();
-  const rows = await queryAll<{
-    symbolId: string;
-    relPath: string;
-    rangeStartLine: unknown;
-    rangeEndLine: unknown;
-  }>(
-    conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
-     WHERE f.relPath IN $relPaths
-     RETURN s.symbolId AS symbolId,
-            f.relPath AS relPath,
-            s.rangeStartLine AS rangeStartLine,
-            s.rangeEndLine AS rangeEndLine`,
-    { repoId, relPaths },
-  );
+  const rows = await getSemanticSymbolRangesByPath(conn, repoId, relPaths);
 
-  const byPath = new Map<string, SdlSymbolRange[]>();
+  const byPath = new Map<string, SemanticSymbolRangeRow[]>();
   for (const row of rows) {
     const bucket = byPath.get(row.relPath) ?? [];
-    bucket.push({
-      symbolId: row.symbolId,
-      relPath: row.relPath,
-      rangeStartLine: toNumber(row.rangeStartLine),
-      rangeEndLine: toNumber(row.rangeEndLine),
-    });
+    bucket.push(row);
     byPath.set(row.relPath, bucket);
   }
   return byPath;
@@ -291,9 +267,9 @@ async function getSdlSymbolsByPath(
 
 function findContainingSdlSymbol(
   oneBasedLine: number,
-  symbols: readonly SdlSymbolRange[],
-): SdlSymbolRange | null {
-  let best: SdlSymbolRange | null = null;
+  symbols: readonly SemanticSymbolRangeRow[],
+): SemanticSymbolRangeRow | null {
+  let best: SemanticSymbolRangeRow | null = null;
   let bestSpan = Number.POSITIVE_INFINITY;
   for (const symbol of symbols) {
     if (

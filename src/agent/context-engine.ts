@@ -14,6 +14,7 @@ import * as ladybugDb from "../db/ladybug-queries.js";
 import type { ClusterMemberRow } from "../db/ladybug-clusters.js";
 import { ValidationError } from "../domain/errors.js";
 import { logger } from "../util/logger.js";
+import { caseFoldedPathKey } from "../util/paths.js";
 import { classifySymptomType } from "../retrieval/evidence.js";
 import { estimateTokens } from "../util/tokenize.js";
 import { BROAD_VISIBLE_FIELDS } from "../mcp/context-response-projection.js";
@@ -51,7 +52,7 @@ export function selectPathScopedExactSymbol<T extends ExactSymbolCandidate>(
   name?: string,
 ): T | undefined {
   const normalizedFocusPaths = focusPaths
-    .map((path) => path.replace(/\\/g, "/").toLowerCase())
+    .map((path) => caseFoldedPathKey(path))
     .filter(Boolean);
   const normalizedName = name?.toLowerCase();
   const exactRows = normalizedName
@@ -60,9 +61,7 @@ export function selectPathScopedExactSymbol<T extends ExactSymbolCandidate>(
 
   if (normalizedFocusPaths.length > 0) {
     const scoped = exactRows.find((row) => {
-      const filePath = (row.filePath ?? row.file ?? "")
-        .replace(/\\/g, "/")
-        .toLowerCase();
+      const filePath = caseFoldedPathKey(row.filePath ?? row.file ?? "");
       return normalizedFocusPaths.some(
         (focusPath) => filePath === focusPath || filePath.startsWith(focusPath),
       );

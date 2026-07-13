@@ -1,8 +1,12 @@
-import { routeGatewayCall, type ActionMap } from "../gateway/router.js";
+import {
+  prepareActionEntryArgs,
+  routeGatewayCall,
+  type ActionMap,
+} from "../gateway/router.js";
 import type { ToolContext } from "../server.js";
 import type { CodeModeConfig } from "../config/types.js";
 import { estimateTokens } from "../util/tokenize.js";
-import { buildCatalog, type ActionDescriptor } from "./action-catalog.js";
+import { buildCatalog, type ActionCatalogEntry } from "./action-catalog.js";
 import { getWorkflowEtagCache } from "./etag-cache.js";
 import { validateLadder } from "./ladder-validator.js";
 import {
@@ -267,7 +271,8 @@ export async function executeWorkflow(
 ): Promise<WorkflowResponse> {
   const timer = new ToolPhaseTimer();
   const setupStartedAt = timer.start();
-  const actionCatalog = buildCatalog();
+  const memoryVisible = actionMap["memory.store"] !== undefined;
+  const actionCatalog = buildCatalog({ memoryVisible });
   const budget = new WorkflowBudgetTracker(request.budget, {
     maxSteps: config.maxWorkflowSteps,
     maxTokens: config.maxWorkflowTokens,
@@ -295,6 +300,7 @@ export async function executeWorkflow(
       ? buildCatalog({
           includeSchemas: traceOpts.includeSchemas,
           includeExamples: traceOpts.includeExamples,
+          memoryVisible,
         })
       : null;
   timer.record("workflow.setup", setupStartedAt);
@@ -310,8 +316,8 @@ export async function executeWorkflow(
       pendingSchemaValidation?: boolean;
       fixHint?: string;
     }[] = [];
-    const fnNameMap = getActiveFnNameMap();
-    const actionToFn = getActiveActionToFn();
+    const fnNameMap = getActiveFnNameMap(memoryVisible);
+    const actionToFn = getActiveActionToFn(memoryVisible);
 
     const dryRunStartedAt = timer.start();
     for (let i = 0; i < request.steps.length; i++) {
@@ -342,12 +348,30 @@ export async function executeWorkflow(
       let fixHint: string | undefined;
 
       if (!pendingSchemaValidation && fnExists && issues.length === 0) {
-        const schema = step.internal
-          ? INTERNAL_TRANSFORMS[step.fn]?.schema
-          : (actionMap[step.action] ?? actionMap[step.fn])?.schema;
-        const parsed = schema?.safeParse(step.args);
-        if (parsed && !parsed.success) {
-          const schemaIssues = zodIssueLines(parsed.error);
+        let validationError: z.ZodError | undefined;
+        if (step.internal) {
+          const parsed = INTERNAL_TRANSFORMS[step.fn]?.schema.safeParse(
+            step.args,
+          );
+          if (parsed && !parsed.success) validationError = parsed.error;
+        } else {
+          const entry = actionMap[step.action] ?? actionMap[step.fn];
+          if (entry) {
+            try {
+              prepareActionEntryArgs(
+                step.action,
+                entry,
+                step.args,
+                { kind: "workflow" },
+              );
+            } catch (error) {
+              if (error instanceof z.ZodError) validationError = error;
+              else throw error;
+            }
+          }
+        }
+        if (validationError) {
+          const schemaIssues = zodIssueLines(validationError);
           issues.push(...schemaIssues);
           fixHint = dryRunFixHint(step.action, schemaIssues);
         }
@@ -482,15 +506,15 @@ export async function executeWorkflow(
     }
 
     let resolvedArgs: Record<string, unknown>;
+    let forceJsonWireFormat = false;
     const resolveRefsStartedAt = timer.start();
     try {
       resolvedArgs = resolveRefs(step.args, priorResults);
-      if (
-        needsJsonForLaterReference(step, i, referencedStepIndexes) &&
-        resolvedArgs.wireFormat === undefined
-      ) {
-        resolvedArgs = { ...resolvedArgs, wireFormat: "json" };
-      }
+      forceJsonWireFormat = needsJsonForLaterReference(
+        step,
+        i,
+        referencedStepIndexes,
+      );
       timer.record("workflow.resolveRefs", resolveRefsStartedAt);
     } catch (error) {
       timer.record("workflow.resolveRefs", resolveRefsStartedAt);
@@ -666,7 +690,12 @@ export async function executeWorkflow(
 
       try {
         const gatewayStartedAt = timer.start();
-        const result = await routeGatewayCall(gatewayArgs, actionMap, context);
+        const result = await routeGatewayCall(
+          gatewayArgs,
+          actionMap,
+          context,
+          { kind: "workflow", forceJsonWireFormat },
+        );
         timer.record("workflow.gateway", gatewayStartedAt);
         const stepDuration = Date.now() - stepStart;
         const tokens = WorkflowBudgetTracker.estimateResultTokens(result);
@@ -1047,7 +1076,7 @@ function buildTraceStep(
   durationMs: number,
   tokens: number,
   opts: WorkflowTraceOptions,
-  catalog: ActionDescriptor[] | null,
+  catalog: ActionCatalogEntry[] | null,
   resolvedArgs?: Record<string, unknown>,
   result?: unknown,
   error?: string,

@@ -10,10 +10,16 @@
  * remains in TypeScript.
  */
 
-import { createRequire } from "module";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
+import { join } from "path";
+
+import {
+  getNativeAddonLoadFailure,
+  getNativeAddonSourcePath,
+  isNativeAddonGloballyEnabled,
+  loadNativeAddon,
+} from "../native/addon-loader.js";
 import { logger } from "../util/logger.js";
+import { normalizePath } from "../util/paths.js";
 import type { ExtractedImport } from "./treesitter/extractImports.js";
 import type {
   ExtractedCall,
@@ -22,8 +28,6 @@ import type {
 import type { FileMetadata } from "./fileScanner.js";
 import type { ClusterAssignment, ProcessTrace } from "./cluster-types.js";
 
-const require = createRequire(import.meta.url);
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // --- napi-rs type interfaces (mirrors native/src/types.rs) ---
 
@@ -167,8 +171,6 @@ interface NativeAddon {
 
 // --- Addon loading ---
 
-let nativeAddon: NativeAddon | null = null;
-let loadAttempted = false;
 let nativeDisableLogged = false;
 let nativeDisabledForSession = false;
 let nativeAddonSourcePath: string | null = null;
@@ -185,11 +187,8 @@ function isCompatibleNativeAddon(addon: unknown): addon is NativeAddon {
   );
 }
 
-function loadNativeAddon(): NativeAddon | null {
-  const disableNativeAddon = /^(1|true)$/i.test(
-    process.env.SDL_MCP_DISABLE_NATIVE_ADDON ?? "",
-  );
-  if (disableNativeAddon) {
+function loadRustNativeAddon(): NativeAddon | null {
+  if (!isNativeAddonGloballyEnabled()) {
     nativeAddonReason = "disabled by SDL_MCP_DISABLE_NATIVE_ADDON";
     nativeAddonSourcePath = null;
     if (!nativeDisableLogged) {
@@ -198,57 +197,26 @@ function loadNativeAddon(): NativeAddon | null {
     }
     return null;
   }
-  // Reset so toggling the env var at runtime re-emits the log on the next disable.
   nativeDisableLogged = false;
 
   if (nativeDisabledForSession) {
     nativeAddonReason = "disabled for this process after an earlier load failure";
     return null;
   }
-  if (loadAttempted) return nativeAddon;
-  loadAttempted = true;
 
-  const overridePath = process.env.SDL_MCP_NATIVE_ADDON_PATH;
-  const paths = [
-    ...(overridePath ? [overridePath] : []),
-    // Development: built in native/ directory (local dev builds)
-    join(__dirname, "..", "..", "native", "sdl-mcp-native.node"),
-    join(__dirname, "..", "..", "native", "index.node"),
-    // Umbrella package with platform-detection loader (installed via npm)
-    "sdl-mcp-native",
-  ];
-
-  for (const addonPath of paths) {
-    try {
-      const loaded = require(addonPath) as unknown;
-      if (!isCompatibleNativeAddon(loaded)) {
-        nativeAddonReason = `incompatible addon at ${addonPath}`;
-        logger.warn("Native Rust indexer found but incompatible; ignoring", {
-          path: addonPath,
-          exports:
-            loaded && typeof loaded === "object" ? Object.keys(loaded) : [],
-        });
-        continue;
-      }
-
-      nativeAddon = loaded;
-      nativeAddonSourcePath = addonPath;
-      nativeAddonReason = "loaded";
-      logger.info("Loaded native Rust indexer", { path: addonPath });
-      return loaded;
-    } catch (error) {
-      logger.debug("Failed to load native Rust indexer candidate", {
-        path: addonPath,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      // Try next path
-    }
+  const loaded = loadNativeAddon(isCompatibleNativeAddon);
+  if (!isCompatibleNativeAddon(loaded)) {
+    nativeAddonSourcePath = null;
+    nativeAddonReason =
+      loaded === null
+        ? (getNativeAddonLoadFailure() ?? "not found")
+        : "incompatible addon";
+    return null;
   }
 
-  nativeAddonSourcePath = null;
-  nativeAddonReason = "not found";
-  logger.warn("Native Rust indexer not available, using TypeScript engine");
-  return null;
+  nativeAddonSourcePath = getNativeAddonSourcePath();
+  nativeAddonReason = "loaded";
+  return loaded;
 }
 
 // --- Public API ---
@@ -257,7 +225,7 @@ function loadNativeAddon(): NativeAddon | null {
  * Check if the native Rust indexer is available.
  */
 export function isRustEngineAvailable(): boolean {
-  return loadNativeAddon() !== null;
+  return loadRustNativeAddon() !== null;
 }
 
 export function getRustEngineStatus(): {
@@ -266,13 +234,11 @@ export function getRustEngineStatus(): {
   disabledByEnv: boolean;
   reason: string;
 } {
-  const available = loadNativeAddon() !== null;
+  const available = loadRustNativeAddon() !== null;
   return {
     available,
     sourcePath: nativeAddonSourcePath,
-    disabledByEnv: /^(1|true)$/i.test(
-      process.env.SDL_MCP_DISABLE_NATIVE_ADDON ?? "",
-    ),
+    disabledByEnv: !isNativeAddonGloballyEnabled(),
     reason: available ? "loaded" : nativeAddonReason,
   };
 }
@@ -395,7 +361,7 @@ export function parseFilesRust(
   files: FileMetadata[],
   threadCount: number = 0,
 ): Array<RustParseResult | null> | null {
-  const addon = loadNativeAddon();
+  const addon = loadRustNativeAddon();
   if (!addon) return null;
 
   const results = new Array<RustParseResult | null>(files.length).fill(null);
@@ -419,7 +385,7 @@ export function parseFilesRust(
       index,
       input: {
         relPath: file.path,
-        absolutePath: join(repoRoot, file.path).replace(/\\/g, "/"),
+        absolutePath: normalizePath(join(repoRoot, file.path)),
         repoId,
         language,
       },
@@ -509,7 +475,7 @@ export async function parseFilesRustAsync(
   files: FileMetadata[],
   threadCount: number = 0,
 ): Promise<Array<RustParseResult | null> | null> {
-  const addon = loadNativeAddon();
+  const addon = loadRustNativeAddon();
   if (!addon) return null;
 
   // Fall back to sync if addon lacks async support (older binary)
@@ -536,7 +502,7 @@ export async function parseFilesRustAsync(
       index,
       input: {
         relPath: file.path,
-        absolutePath: join(repoRoot, file.path).replace(/\\/g, "/"),
+        absolutePath: normalizePath(join(repoRoot, file.path)),
         repoId,
         language,
       },
@@ -591,7 +557,7 @@ export async function parseFilesRustAsync(
  * Hash content using the native Rust engine (for parity testing).
  */
 export function hashContentRust(content: string): string | null {
-  const addon = loadNativeAddon();
+  const addon = loadRustNativeAddon();
   if (!addon) return null;
   return addon.hashContentNative(content);
 }
@@ -606,7 +572,7 @@ export function generateSymbolIdRust(
   name: string,
   fingerprint: string,
 ): string | null {
-  const addon = loadNativeAddon();
+  const addon = loadRustNativeAddon();
   if (!addon) return null;
   return addon.generateSymbolIdNative(repoId, relPath, kind, name, fingerprint);
 }
@@ -616,7 +582,7 @@ export function computeClustersRust(
   edges: NativeClusterEdge[],
   minClusterSize: number = 3,
 ): ClusterAssignment[] | null {
-  const addon = loadNativeAddon();
+  const addon = loadRustNativeAddon();
   if (!addon?.computeClusters) return null;
 
   try {
@@ -647,7 +613,7 @@ export function computePersonalizedPageRankRust(
   epsilon: number,
   maxNodesTouched: number,
 ): Array<[number, number]> | null {
-  const addon = loadNativeAddon();
+  const addon = loadRustNativeAddon();
   if (!addon?.computePersonalizedPagerank) return null;
 
   const adj = adjacency.map((row) =>
@@ -680,7 +646,7 @@ export function traceProcessesRust(
   maxDepth: number = 20,
   entryPatterns: string[] = [],
 ): ProcessTrace[] | null {
-  const addon = loadNativeAddon();
+  const addon = loadRustNativeAddon();
   if (!addon?.traceProcesses) return null;
 
   try {

@@ -17,7 +17,7 @@ import {
   buildCatalog,
   rankCatalog,
   META_ACTION_SEARCH_SCHEMA,
-  type ActionDescriptor,
+  type ActionCatalogEntry,
 } from "./action-catalog.js";
 import {
   ACTION_SEARCH_DESCRIPTION,
@@ -110,7 +110,7 @@ export function handleActionSearch(
   const effectiveIncludeSchemas = args.includeSchemas || autoIncludeSchemas;
   const effectiveIncludeExamples = args.includeExamples || autoIncludeExamples;
   const catalog = buildCatalog({
-    liveIndex: services.liveIndex,
+    memoryVisible: services.actionAvailability?.memoryTools,
     includeSchemas: effectiveIncludeSchemas,
     includeExamples: effectiveIncludeExamples,
   });
@@ -214,12 +214,15 @@ export function handleManual(
     !includeSchemas &&
     !includeExamples
   ) {
-    const manual = getManualCached(services.liveIndex);
+    const manual = getManualCached(
+      services.liveIndex,
+      services.actionAvailability?.memoryTools,
+    );
     return { manual, tokenEstimate: estimateTokens(manual) };
   }
 
   const fullCatalog = buildCatalog({
-    liveIndex: services.liveIndex,
+    memoryVisible: services.actionAvailability?.memoryTools,
     includeSchemas,
     includeExamples,
   });
@@ -227,7 +230,9 @@ export function handleManual(
   let unknownActions: string[] = [];
 
   if (args.actions && args.actions.length > 0) {
-    const activeFnMap = getActiveFnNameMap();
+    const activeFnMap = getActiveFnNameMap(
+      services.actionAvailability?.memoryTools,
+    );
     const validNames = new Set([
       ...Object.keys(activeFnMap),
       ...Object.values(activeFnMap),
@@ -240,7 +245,7 @@ export function handleManual(
     ]);
 
     const matchesSelector = (
-      entry: ActionDescriptor,
+      entry: ActionCatalogEntry,
       selector: string,
     ): boolean => {
       if (selector.endsWith(".*")) {
@@ -272,7 +277,7 @@ export function handleManual(
       };
     }
 
-    const filtered: ActionDescriptor[] = [];
+    const filtered: ActionCatalogEntry[] = [];
     for (const { normalized: name } of knownRequestedActions) {
       const matches = fullCatalog.filter((entry) =>
         matchesSelector(entry, name),
@@ -361,7 +366,10 @@ export function registerCodeModeTools(
   config: CodeModeConfig,
   prebuiltActionMap?: ActionMap,
 ): void {
-  const actionMap = prebuiltActionMap ?? createActionMap(services.liveIndex);
+  const actionMap = prebuiltActionMap ?? createActionMap(
+    services.liveIndex,
+    services.actionAvailability,
+  );
   // action.search is a meta tool, not a gateway action, but the manual
   // documents it as a workflow step (fn: "actionSearch"). Extend the
   // workflow-facing map (copy, not mutation — the base map is shared with
@@ -407,7 +415,10 @@ export function registerCodeModeTools(
     WORKFLOW_DESCRIPTION,
     WorkflowRequestSchema,
     async (rawArgs: unknown, context?: ToolContext) => {
-      const parsed = parseWorkflowRequest(rawArgs);
+      const parsed = parseWorkflowRequest(
+        rawArgs,
+        services.actionAvailability?.memoryTools,
+      );
       if (!parsed.ok) {
         const error = new ValidationError("Invalid sdl.workflow request");
         Object.assign(error, { details: parsed.errors });
@@ -566,7 +577,7 @@ export function registerCodeModeTools(
   );
 }
 
-function renderTypescript(catalog: ActionDescriptor[]): string {
+function renderTypescript(catalog: ActionCatalogEntry[]): string {
   const lines: string[] = [
     "// SDL-MCP API - use with sdl.workflow for multi-step operations",
     "// Prefer sdl.context for explain/debug/review/implement context retrieval.",
@@ -630,7 +641,7 @@ function renderTypescript(catalog: ActionDescriptor[]): string {
   return lines.join("\n");
 }
 
-function renderMarkdown(catalog: ActionDescriptor[]): string {
+function renderMarkdown(catalog: ActionCatalogEntry[]): string {
   const lines: string[] = [
     "# SDL-MCP API Reference",
     "",

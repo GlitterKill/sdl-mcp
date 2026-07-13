@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = resolve(__dirname, "..");
-const DESCRIPTORS_PATH = resolve(ROOT, "src", "mcp", "tools", "tool-descriptors.ts");
+const ACTION_CATALOG_PATH = resolve(ROOT, "src", "code-mode", "action-catalog.ts");
 const CODE_MODE_PATH = resolve(ROOT, "src", "code-mode", "index.ts");
 const GATEWAY_PATH = resolve(ROOT, "src", "gateway", "index.ts");
 const TOOLS_INDEX_PATH = resolve(ROOT, "src", "mcp", "tools", "index.ts");
@@ -39,11 +39,15 @@ const OUT_MD = resolve(OUT_DIR, "tool-inventory.md");
  * Extract all `name: "sdl.xxx"` values from the flat tool descriptors file.
  */
 function extractFlatToolNames(source: string): string[] {
-  const re = /name:\s*"(sdl\.[^"]+)"/g;
+  const registry = source.match(
+    /const GATEWAY_ACTION_SCHEMAS[\s\S]*?= \[([\s\S]*?)\n\];/,
+  )?.[1];
+  if (!registry) throw new Error("Could not find GATEWAY_ACTION_SCHEMAS");
+  const re = /^\s*\["([^"]+)",/gm;
   const names: string[] = [];
   let m: RegExpExecArray | null;
-  while ((m = re.exec(source)) !== null) {
-    names.push(m[1]);
+  while ((m = re.exec(registry)) !== null) {
+    names.push(`sdl.${m[1]}`);
   }
   return names;
 }
@@ -72,15 +76,15 @@ function normalizeToolNames(names: string[]): string[] {
 
 function main(): void {
   // Read source files
-  let descriptorsSource: string;
+  let actionCatalogSource: string;
   let codeModeSource: string;
   let gatewaySource: string;
   let toolsIndexSource: string;
 
   try {
-    descriptorsSource = readFileSync(DESCRIPTORS_PATH, "utf-8");
+    actionCatalogSource = readFileSync(ACTION_CATALOG_PATH, "utf-8");
   } catch {
-    console.error(`ERROR: Could not read ${DESCRIPTORS_PATH}`);
+    console.error(`ERROR: Could not read ${ACTION_CATALOG_PATH}`);
     process.exit(1);
   }
   try {
@@ -103,7 +107,7 @@ function main(): void {
   }
 
   // --- Flat tools (from tool-descriptors.ts) ---
-  const flatToolNames = normalizeToolNames(extractFlatToolNames(descriptorsSource));
+  const flatToolNames = normalizeToolNames(extractFlatToolNames(actionCatalogSource));
   const flatToolCount = flatToolNames.length;
 
   // --- Universal tools (shared outside Code Mode exclusive) ---

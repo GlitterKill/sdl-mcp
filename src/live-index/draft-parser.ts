@@ -22,6 +22,7 @@ import {
   generateAstFingerprint,
   generateSymbolId,
 } from "../indexer/fingerprints.js";
+import { resolveSymbolNodeForFingerprint } from "../indexer/parser/symbol-node-resolution.js";
 import {
   buildSymbolReferences,
   isTestFile,
@@ -60,26 +61,18 @@ function computeDirectory(relPath: string): string {
   return lastSlash === -1 ? "" : normalized.slice(0, lastSlash);
 }
 
-function getKindNodeTypes(kind: string): string[] {
-  switch (kind) {
-    case "function":
-      return ["function_declaration", "function_definition"];
-    case "class":
-      return ["class_declaration", "class_definition"];
-    case "interface":
-      return ["interface_declaration"];
-    case "type":
-      return ["type_alias_declaration"];
-    case "method":
-      return ["method_definition"];
-    case "variable":
-      return ["variable_declaration"];
-    default:
-      return ["ambient_statement"];
-  }
-}
-
 type DurableSymbolMatchKey = `${string}:${string}:${number}:${number}`;
+
+let durableSymbolFallbackObserver:
+  | ((matchKey: DurableSymbolMatchKey) => void)
+  | undefined;
+
+/** Install deterministic test-only observability for durable-ID fallback use. */
+export function _setDraftSymbolFallbackObserverForTests(
+  observer?: (matchKey: DurableSymbolMatchKey) => void,
+): void {
+  durableSymbolFallbackObserver = observer;
+}
 
 function buildDurableSymbolMatchKey(params: {
   kind: string;
@@ -220,29 +213,31 @@ export async function parseDraftFile(
 
     const symbolDetails = symbolsWithNodeIds.map((extractedSymbol) => {
       let astFingerprint = extractedSymbol.astFingerprint ?? "";
-      const matchingNode = getKindNodeTypes(extractedSymbol.kind)
-        .flatMap((kindNodeType) =>
-          tree.rootNode.descendantsOfType(kindNodeType),
-        )
-        .find(
-          (node) =>
-            node.childForFieldName("name")?.text === extractedSymbol.name,
-        );
+      const matchingNode = resolveSymbolNodeForFingerprint(tree, {
+        kind: extractedSymbol.kind,
+        name: extractedSymbol.name,
+        startLine: extractedSymbol.range.startLine,
+        startCol: extractedSymbol.range.startCol,
+      });
       if (matchingNode) {
         astFingerprint = generateAstFingerprint(matchingNode);
+      }
+
+      const matchKey = buildDurableSymbolMatchKey({
+        kind: extractedSymbol.kind,
+        name: extractedSymbol.name,
+        startLine: extractedSymbol.range.startLine,
+        startCol: extractedSymbol.range.startCol,
+      });
+      const durableSymbol = durableSymbolsByMatchKey.get(matchKey);
+      if (durableSymbol) {
+        durableSymbolFallbackObserver?.(matchKey);
       }
 
       return {
         extractedSymbol,
         symbolId:
-          durableSymbolsByMatchKey.get(
-            buildDurableSymbolMatchKey({
-              kind: extractedSymbol.kind,
-              name: extractedSymbol.name,
-              startLine: extractedSymbol.range.startLine,
-              startCol: extractedSymbol.range.startCol,
-            }),
-          )?.symbolId ??
+          durableSymbol?.symbolId ??
           generateSymbolId(
             input.repoId,
             relPath,

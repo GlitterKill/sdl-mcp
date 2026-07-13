@@ -1,13 +1,14 @@
 /**
  * Rust-native SCIP decoder that wraps the napi-rs ScipDecodeHandle.
  *
- * Mirrors the native addon loading pattern from src/indexer/rustIndexer.ts.
- * Falls back gracefully when the native addon is unavailable.
+ * Uses the shared native addon loader and keeps SCIP capability fallback local.
  */
 
-import { createRequire } from "module";
-import { join } from "path";
-import { fileURLToPath } from "url";
+import {
+  getNativeAddonSourcePath,
+  isNativeAddonGloballyEnabled,
+  loadNativeAddon,
+} from "../native/addon-loader.js";
 import { logger } from "../util/logger.js";
 import type {
   ScipDecoder,
@@ -21,8 +22,6 @@ import type {
   ScipRange,
 } from "./types.js";
 
-const require = createRequire(import.meta.url);
-const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
 // --- Native addon types (camelCase fields from napi-rs) ---
 
@@ -106,10 +105,9 @@ interface ScipNativeAddon {
   scipDecodeStart(filePath: string): NapiScipDecodeHandle;
 }
 
-// --- Addon loading (mirrors rustIndexer.ts pattern) ---
+// --- SCIP capability gate ---
 
-let cachedAddon: ScipNativeAddon | null = null;
-let loadAttempted = false;
+let cachedAddon: ScipNativeAddon | null | undefined;
 
 function isScipCapableAddon(loaded: unknown): loaded is ScipNativeAddon {
   return (
@@ -120,48 +118,28 @@ function isScipCapableAddon(loaded: unknown): loaded is ScipNativeAddon {
 }
 
 function loadScipAddon(): ScipNativeAddon | null {
-  if (loadAttempted) return cachedAddon;
-  loadAttempted = true;
-
-  const disableEnv = process.env.SDL_MCP_DISABLE_NATIVE_ADDON ?? "";
-  const disableNativeAddon = /^(1|true)$/i.test(disableEnv);
-  if (disableNativeAddon) {
+  if (!isNativeAddonGloballyEnabled()) {
     logger.debug("SCIP native decoder disabled by SDL_MCP_DISABLE_NATIVE_ADDON");
     return null;
   }
+  if (cachedAddon !== undefined) return cachedAddon;
 
-  const overridePath = process.env.SDL_MCP_NATIVE_ADDON_PATH;
-  const paths = [
-    ...(overridePath ? [overridePath] : []),
-    // Development: built in native/ directory (local dev builds)
-    join(__dirname, "..", "..", "native", "sdl-mcp-native.node"),
-    join(__dirname, "..", "..", "native", "index.node"),
-    // Umbrella package with platform-detection loader (installed via npm)
-    "sdl-mcp-native",
-  ];
-
-  for (const addonPath of paths) {
-    try {
-      const loaded = require(addonPath) as unknown;
-      if (!isScipCapableAddon(loaded)) {
-        logger.debug("Native addon found but missing SCIP decoder exports", {
-          path: addonPath,
-        });
-        continue;
-      }
-      cachedAddon = loaded;
-      logger.debug("Loaded native SCIP decoder", { path: addonPath });
-      return loaded;
-    } catch (error) {
-      logger.debug("Failed to load native addon for SCIP decoder", {
-        path: addonPath,
-        error: error instanceof Error ? error.message : String(error),
+  const loaded = loadNativeAddon(isScipCapableAddon);
+  if (!isScipCapableAddon(loaded)) {
+    cachedAddon = null;
+    if (loaded !== null) {
+      logger.debug("Native addon found but missing SCIP decoder exports", {
+        path: getNativeAddonSourcePath(),
       });
     }
+    return null;
   }
 
-  logger.debug("Native SCIP decoder not available");
-  return null;
+  cachedAddon = loaded;
+  logger.debug("Loaded native SCIP decoder", {
+    path: getNativeAddonSourcePath(),
+  });
+  return loaded;
 }
 
 // --- Conversion helpers (napi camelCase -> domain types) ---

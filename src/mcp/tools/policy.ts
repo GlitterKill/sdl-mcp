@@ -1,3 +1,4 @@
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import {
   PolicyGetRequestSchema,
   PolicyGetResponse,
@@ -58,7 +59,7 @@ export const _policyToolTesting = { mergePolicyOverrides };
 export async function handlePolicyGet(
   args: unknown,
 ): Promise<PolicyGetResponse> {
-  const request = PolicyGetRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(PolicyGetRequestSchema, args);
   const { repoId } = request;
 
   const conn = await getLadybugConn();
@@ -94,7 +95,7 @@ export async function handlePolicyGet(
 export async function handlePolicySet(
   args: unknown,
 ): Promise<PolicySetResponse> {
-  const request = PolicySetRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(PolicySetRequestSchema, args);
   const { repoId, policyPatch } = request;
 
   const appConfig = loadConfig();

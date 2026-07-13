@@ -6,6 +6,10 @@ Terms are alphabetical. When introducing a new concept during refactors or desig
 
 ---
 
+## Action Definition
+
+The static identity and input contract of one SDL action: action name, code-mode function name, tool name, Zod schema, stable discovery text, examples, Context Ladder metadata, and required parameters. Runtime handler binding and response projection are separate Adapters keyed by the definition's action name.
+
 ## Adapter
 
 A concrete implementation that satisfies an interface at a seam. Two adapters of the same interface make the seam real; one adapter is hypothetical.
@@ -52,6 +56,10 @@ The four progressively richer rungs of code context offered by SDL-MCP, in cost 
 
 Callers should walk the ladder bottom-up — only escalate to Code Window when shallower rungs are insufficient.
 
+## Database Seam
+
+All Cypher lives in `src/db/ladybug-*.ts`. Functions accept row-shaped inputs and return number-typed rows; `toNumber()` is a db-internal concern.
+
 ## Delta Pack
 
 Changes between two versions of a repository's symbol graph. Includes changed symbols with signature/invariant/side-effect diffs and a ranked Blast Radius. Computed by `src/delta/`.
@@ -61,6 +69,10 @@ Changes between two versions of a repository's symbol graph. Includes changed sy
 A property of a Module. A module is **deep** when its interface is small relative to the behavior behind it — high leverage. **Shallow** when the interface is nearly as complex as the implementation — low leverage.
 
 The Code Access Decision module is intended to be deep: one entry function backed by a rule chain that internally dispatches over six request types.
+
+## Dispatch Spine
+
+The single path an SDL action request travels from surface envelope to typed handler: apply canonical aliases and surface defaults, parse once with the published schema, then invoke the typed handler. Gateway, retrieve, workflow, CLI, flat MCP, and validating direct-handler wrappers share this seam.
 
 ## Graph Slice
 
@@ -74,9 +86,21 @@ A focused code excerpt covering only the lines that contain specified identifier
 
 The code inside a Module. Distinct from the Interface, which is everything callers must know.
 
+## Import Candidate Resolution
+
+Language-aware conversion of an import specifier into normalized repository-relative file candidates. Built-in factories are declared by Language Support and instantiated lazily by `src/indexer/import-resolution/registry.ts`; relative-path resolution remains the registry's shared fallback.
+
+## Import Target Resolution
+
+Conversion of resolved import file candidates and imported names into concrete symbol IDs or explicit unresolved/external placeholders. Lives in `src/indexer/edge-builder/import-target-resolver.ts` and consumes Import Candidate Resolution without owning language registration.
+
 ## Interface
 
 Everything a caller must know to use a Module: the type signature plus invariants, error modes, ordering constraints, and config it depends on. Not just the type signature.
+
+## Language Support
+
+The lazy built-in registration contributed by one language: extensions, grammar key, Language Adapter factory, optional Import Candidate Resolution factory, pass-2 resolver factory, and structural matcher metadata. `src/indexer/language-support.ts` owns built-in declarations; the adapter registry retains lazy instance caching and runtime plugin overlays.
 
 ## Leverage
 
@@ -90,9 +114,13 @@ The benefit maintainers get from Depth: change, bugs, knowledge concentrated in 
 
 Anything with an Interface and an Implementation: a function, a class, a TypeScript file, a folder, an npm package. Not a synonym for "file."
 
+## Native Addon Loader
+
+The single Module that locates and caches the Rust native addon and applies the process-wide environment disable. Native consumers validate their required capabilities and own capability-specific fallback health.
+
 ## Policy Engine
 
-The rule-chain implementation that backs Code Access Decision and Runtime Decision. Currently exposed as a class (`PolicyEngine`) in `src/policy/engine.ts`; the class is being made private behind module-function entry points (`decideCodeAccess`, `decideRuntime`). External rule extensibility (`addRule`) is currently dead and under review (see `project_policy_engine_class_review.md` in agent memory).
+The rule-chain implementation that backs Code Access Decision and Runtime Decision. `decideCodeAccess` / `decideRuntime` are the supported interface; `PolicyEngine` is an internal rule-chain implementation and is not re-exported from the policy barrel. External rule extensibility (`addRule`) was confirmed unused (2026-07).
 
 ## Proof-of-Need Gating
 
@@ -120,9 +148,17 @@ A deterministic outline of a symbol or file: signatures, structure, control-flow
 
 A compact JSON record for a single symbol containing identity, signature, 1–2 line summary, invariants, side effects, dependency edges (imports/calls), and metrics (fan-in/out, churn, test refs). The first rung of the Context Ladder.
 
+## Symbol Identity
+
+The computation chain `node → astFingerprint → SymbolID`. One TypeScript module owns the chain; shared golden vectors pin the Rust engine and Live Index draft parser to it. Provider-materialized symbols deliberately use the distinct `createProviderSymbolId` identity scheme in `src/indexer/provider-first/ids.ts`.
+
 ## SymbolID
 
 A stable hash combining `repoId + relPath + kind + name + astFingerprint`. Survives whitespace and trivial refactors. The canonical identity for a symbol across versions and tools.
+
+## Text Edit EOL Policy
+
+Text-edit planning normalizes editable text to LF and restores the target file's dominant EOL at write time through `src/util/eol.ts`. Byte-preserving read, hashing, indexing, protocol, and fixture paths are outside this interface.
 
 ## Window Loader
 

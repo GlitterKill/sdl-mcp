@@ -120,7 +120,7 @@ describe("metrics-updater semantic config branching", () => {
 
   it("quality audit counts untyped no-file placeholders with a direct NOT pattern", () => {
     const source = readFileSync(
-      join(process.cwd(), "src/indexer/metrics-updater.ts"),
+      join(process.cwd(), "src/db/ladybug-metrics.ts"),
       "utf8",
     );
     assert.ok(
@@ -131,7 +131,7 @@ describe("metrics-updater semantic config branching", () => {
 
   it("quality audit reports SCIP phase counts from normalized phase metadata", () => {
     const source = readFileSync(
-      join(process.cwd(), "src/indexer/metrics-updater.ts"),
+      join(process.cwd(), "src/db/ladybug-metrics.ts"),
       "utf8",
     );
     assert.ok(

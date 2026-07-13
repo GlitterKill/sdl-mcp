@@ -1,5 +1,6 @@
 import crypto from "crypto";
 
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import {
   AgentFeedbackRequestSchema,
   AgentFeedbackResponse,
@@ -93,7 +94,7 @@ function createFeedbackRateLimitError(retryAfterSeconds: number): DatabaseError 
 export async function handleAgentFeedback(
   args: unknown,
 ): Promise<AgentFeedbackResponse> {
-  const request = AgentFeedbackRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(AgentFeedbackRequestSchema, args);
   const {
     repoId,
     versionId,
@@ -163,7 +164,10 @@ export async function handleAgentFeedback(
 export async function handleAgentFeedbackQuery(
   args: unknown,
 ): Promise<AgentFeedbackQueryResponse> {
-  const request = AgentFeedbackQueryRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(
+    AgentFeedbackQueryRequestSchema,
+    args,
+  );
   const { repoId, versionId, limit = 50, since } = request;
 
   const conn = await getLadybugConn();

@@ -85,7 +85,8 @@ export async function queryFeedbackBoosts(
   try {
     // Dynamic imports to avoid pulling OTel/DB chains at module load time
     const { entitySearch } = await import("./orchestrator.js");
-    const { queryAll } = await import("../db/ladybug-core.js");
+    const { getAgentFeedbackBoostRows } =
+      await import("../db/ladybug-feedback.js");
     const { safeJsonParse, StringArraySchema } =
       await import("../util/safeJson.js");
     const { logger } = await import("../util/logger.js");
@@ -108,21 +109,7 @@ export async function queryFeedbackBoosts(
       searchResult.results.map((r) => [r.entityId, r.score]),
     );
 
-    const rows = await queryAll<{
-      feedbackId: string;
-      usefulSymbolsJson: string;
-      missingSymbolsJson: string;
-      taskType: string | null;
-    }>(
-      conn,
-      `MATCH (f:AgentFeedback)
-       WHERE f.feedbackId IN $feedbackIds
-       RETURN f.feedbackId AS feedbackId,
-              f.usefulSymbolsJson AS usefulSymbolsJson,
-              f.missingSymbolsJson AS missingSymbolsJson,
-              f.taskType AS taskType`,
-      { feedbackIds },
-    );
+    const rows = await getAgentFeedbackBoostRows(conn, feedbackIds);
 
     for (const row of rows) {
       feedbackHits.push({

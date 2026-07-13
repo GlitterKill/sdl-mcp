@@ -1,8 +1,14 @@
-import { createActionMap } from "../gateway/router.js";
 import type { LiveIndexCoordinator } from "../live-index/types.js";
 import { logger } from "../util/logger.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { anyRepoHasMemoryTools } from "../config/memory-config.js";
+import {
+  ACTION_TO_FN,
+  FN_NAME_MAP,
+  GATEWAY_ACTION_DEFINITIONS,
+} from "./action-catalog.js";
+
+export { ACTION_TO_FN, FN_NAME_MAP } from "./action-catalog.js";
 
 const MEMORY_FN_NAMES = new Set([
   "memoryStore",
@@ -17,53 +23,13 @@ const MEMORY_ACTIONS = new Set([
   "memory.surface",
 ]);
 
-export const FN_NAME_MAP: Record<string, string> = {
-  symbolSearch: "symbol.search",
-  symbolGetCard: "symbol.getCard",
-  symbolEdit: "symbol.edit",
-  sliceBuild: "slice.build",
-  sliceRefresh: "slice.refresh",
-  sliceSpilloverGet: "slice.spillover.get",
-  deltaGet: "delta.get",
-  prRiskAnalyze: "pr.risk.analyze",
-  codeNeedWindow: "code.needWindow",
-  codeSkeleton: "code.getSkeleton",
-  codeHotPath: "code.getHotPath",
-  repoRegister: "repo.register",
-  repoStatus: "repo.status",
-  repoOverview: "repo.overview",
-  indexRefresh: "index.refresh",
-  policyGet: "policy.get",
-  policySet: "policy.set",
-  agentFeedback: "agent.feedback",
-  agentFeedbackQuery: "agent.feedback.query",
-  bufferPush: "buffer.push",
-  bufferCheckpoint: "buffer.checkpoint",
-  bufferStatus: "buffer.status",
-  runtimeExecute: "runtime.execute",
-  runtimeQueryOutput: "runtime.queryOutput",
-  responseGet: "response.get",
-  memoryStore: "memory.store",
-  memoryQuery: "memory.query",
-  memoryRemove: "memory.remove",
-  memorySurface: "memory.surface",
-  usageStats: "usage.stats",
-  fileRead: "file.read",
-  fileWrite: "file.write",
-  searchEdit: "search.edit",
-  semanticEnrichmentRefresh: "semantic.enrichment.refresh",
-  semanticEnrichmentStatus: "semantic.enrichment.status",
-};
-
-export const ACTION_TO_FN: Record<string, string> = Object.fromEntries(
-  Object.entries(FN_NAME_MAP).map(([fn, action]) => [action, fn]),
-);
-
 /**
  * Get the active FN_NAME_MAP, filtering out memory entries when memory is disabled.
  */
-export function getActiveFnNameMap(): Record<string, string> {
-  if (anyRepoHasMemoryTools(loadConfig())) return FN_NAME_MAP;
+export function getActiveFnNameMap(
+  memoryVisible = anyRepoHasMemoryTools(loadConfig()),
+): Readonly<Record<string, string>> {
+  if (memoryVisible) return FN_NAME_MAP;
   const filtered: Record<string, string> = {};
   for (const [fn, action] of Object.entries(FN_NAME_MAP)) {
     if (!MEMORY_FN_NAMES.has(fn)) filtered[fn] = action;
@@ -74,8 +40,10 @@ export function getActiveFnNameMap(): Record<string, string> {
 /**
  * Get the active ACTION_TO_FN, filtering out memory entries when memory is disabled.
  */
-export function getActiveActionToFn(): Record<string, string> {
-  if (anyRepoHasMemoryTools(loadConfig())) return ACTION_TO_FN;
+export function getActiveActionToFn(
+  memoryVisible = anyRepoHasMemoryTools(loadConfig()),
+): Readonly<Record<string, string>> {
+  if (memoryVisible) return ACTION_TO_FN;
   const filtered: Record<string, string> = {};
   for (const [action, fn] of Object.entries(ACTION_TO_FN)) {
     if (!MEMORY_ACTIONS.has(action)) filtered[action] = fn;
@@ -205,10 +173,15 @@ function workflowContinuationGet(p: { handle: string; path?: string; offset?: nu
 // Truncation uses t.tr with dropped counts and res continuation data.
 `;
 
-export function generateManual(_liveIndex?: LiveIndexCoordinator): string {
-  const actionMap = createActionMap(_liveIndex);
-  const actionKeys = Object.keys(actionMap);
-  const activeFnMap = getActiveFnNameMap();
+export function generateManual(
+  _liveIndex?: LiveIndexCoordinator,
+  memoryVisible = anyRepoHasMemoryTools(loadConfig()),
+): string {
+  const actionKeys = GATEWAY_ACTION_DEFINITIONS.filter(
+    (definition) =>
+      memoryVisible || !MEMORY_ACTIONS.has(definition.action),
+  ).map((definition) => definition.action);
+  const activeFnMap = getActiveFnNameMap(memoryVisible);
   const mappedActions = Object.values(activeFnMap);
   for (const key of actionKeys) {
     if (!mappedActions.includes(key)) {
@@ -216,7 +189,6 @@ export function generateManual(_liveIndex?: LiveIndexCoordinator): string {
     }
   }
 
-  const memoryVisible = anyRepoHasMemoryTools(loadConfig());
   if (memoryVisible) {
     return MANUAL_TEMPLATE;
   }
@@ -244,10 +216,12 @@ export function generateManual(_liveIndex?: LiveIndexCoordinator): string {
 let cachedManual: string | null = null;
 let cachedManualMemoryVisible: boolean | null = null;
 
-export function getManualCached(liveIndex?: LiveIndexCoordinator): string {
-  const memoryVisible = anyRepoHasMemoryTools(loadConfig());
+export function getManualCached(
+  liveIndex?: LiveIndexCoordinator,
+  memoryVisible = anyRepoHasMemoryTools(loadConfig()),
+): string {
   if (cachedManual === null || cachedManualMemoryVisible !== memoryVisible) {
-    cachedManual = generateManual(liveIndex);
+    cachedManual = generateManual(liveIndex, memoryVisible);
     cachedManualMemoryVisible = memoryVisible;
   }
   return cachedManual;

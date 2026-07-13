@@ -2,7 +2,7 @@ use crate::parse::content_hash::hash_content;
 
 /// Generate a stable unique identifier for a symbol.
 ///
-/// Exact parity with TypeScript `generateSymbolId` in `hashing.ts:16-25`.
+/// Exact parity with TypeScript `generateSymbolId` in `indexer/fingerprints.ts`.
 ///
 /// Algorithm: `sha256("{repoId}:{relPath}:{kind}:{name}:{astFingerprint}")`
 pub fn generate_symbol_id(

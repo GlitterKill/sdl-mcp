@@ -2,6 +2,7 @@ import type { Connection } from "kuzu";
 
 import type { EdgeRow, FileRow, SymbolRow } from "../../db/ladybug-queries.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
+import { deleteProviderReplacementSymbols } from "../../db/ladybug-provider-first.js";
 import type { EdgeType, SymbolKind } from "../../domain/types.js";
 import {
   dropFtsIndex,
@@ -129,7 +130,6 @@ export type MaterializeProviderFactsPhaseName =
   | "insertEdges"
   | `insertEdges.${ladybugDb.InsertEdgesPhaseName}`;
 
-const PROVIDER_FIRST_DELETE_SYMBOL_FILE_CHUNK_SIZE = 256;
 
 export function providerFactsToGraphRows(
   options: ProviderFactsToGraphRowsOptions,
@@ -354,7 +354,7 @@ export async function materializeProviderFacts(
   const runMaterialization = async (): Promise<void> => {
     if (deleteExistingFileSymbols) {
       await measurePhase("deleteFileSymbols", async () => {
-        await deleteProviderReplacementSymbolsInChunks(
+        await deleteProviderReplacementSymbols(
           conn,
           repoId,
           [...rows.changedFileIds],
@@ -478,158 +478,6 @@ function providerExternalSymbolSources(
     }
   }
   return [...sources];
-}
-
-async function deleteProviderReplacementSymbolsInChunks(
-  conn: Connection,
-  repoId: string,
-  fileIds: string[],
-  incomingSymbolIds: string[],
-): Promise<void> {
-  // Delete fan-out is much larger than file upsert fan-out: one file chunk can
-  // expand into tens of thousands of Symbol ids plus every dependent edge and
-  // enrichment row. Keep this deliberately below the generic file-write chunk.
-  const fileChunkSize = Math.min(
-    ladybugDb.resolveLadybugWriteChunkSize("files"),
-    PROVIDER_FIRST_DELETE_SYMBOL_FILE_CHUNK_SIZE,
-  );
-  const symbolIds = new Set<string>();
-  for (let i = 0; i < fileIds.length; i += fileChunkSize) {
-    const chunk = fileIds.slice(i, i + fileChunkSize);
-    const rows = await ladybugDb.queryAll<{ symbolId: string }>(
-      conn,
-      `MATCH (:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
-       WHERE f.fileId IN $fileIds
-       RETURN s.symbolId AS symbolId`,
-      { repoId, fileIds: chunk },
-    );
-    for (const row of rows) symbolIds.add(row.symbolId);
-  }
-
-  const uniqueIncomingSymbolIds = [...new Set(incomingSymbolIds)];
-  const symbolChunkSize = Math.min(
-    ladybugDb.resolveLadybugWriteChunkSize("symbols"),
-    PROVIDER_FIRST_DELETE_SYMBOL_FILE_CHUNK_SIZE * 4,
-  );
-  for (let i = 0; i < uniqueIncomingSymbolIds.length; i += symbolChunkSize) {
-    const chunk = uniqueIncomingSymbolIds.slice(i, i + symbolChunkSize);
-    const rows = await ladybugDb.queryAll<{ symbolId: string }>(
-      conn,
-      `MATCH (s:Symbol {repoId: $repoId})
-       WHERE s.symbolId IN $symbolIds
-       RETURN s.symbolId AS symbolId`,
-      { repoId, symbolIds: chunk },
-    );
-    for (const row of rows) symbolIds.add(row.symbolId);
-  }
-
-  const uniqueSymbolIds = [...symbolIds];
-  if (uniqueSymbolIds.length === 0) return;
-  for (let i = 0; i < uniqueSymbolIds.length; i += symbolChunkSize) {
-    const chunk = uniqueSymbolIds.slice(i, i + symbolChunkSize);
-    const fileCleanupIds = i === 0 ? fileIds : [];
-    await ladybugDb.withTransaction(conn, async (txConn) => {
-      await retireProviderSymbolsByIds(txConn, repoId, chunk, fileCleanupIds);
-    });
-  }
-}
-
-async function retireProviderSymbolsByIds(
-  conn: Connection,
-  repoId: string,
-  symbolIds: string[],
-  fileIds: string[] = [],
-): Promise<void> {
-  if (symbolIds.length === 0) return;
-  for (const [query, params] of [
-    [
-      `MATCH (s:Symbol)-[d:DEPENDS_ON]->(:Symbol)
-       WHERE s.symbolId IN $symbolIds
-       DELETE d`,
-      { symbolIds },
-    ],
-    [
-      `MATCH (:Symbol)-[d:DEPENDS_ON]->(s:Symbol)
-       WHERE s.symbolId IN $symbolIds
-       DELETE d`,
-      { symbolIds },
-    ],
-    [
-      `MATCH (s:Symbol)-[r:SYMBOL_IN_REPO]->(:Repo)
-       WHERE s.symbolId IN $symbolIds
-       DELETE r`,
-      { symbolIds },
-    ],
-    [
-      `MATCH (s:Symbol)-[r:SYMBOL_IN_FILE]->(:File)
-       WHERE s.symbolId IN $symbolIds
-       DELETE r`,
-      { symbolIds },
-    ],
-    [
-      `MATCH (s:Symbol)-[r:BELONGS_TO_CLUSTER]->(:Cluster)
-       WHERE s.symbolId IN $symbolIds
-       DELETE r`,
-      { symbolIds },
-    ],
-    [
-      `MATCH (s:Symbol)-[r:BELONGS_TO_SHADOW_CLUSTER]->(:ShadowCluster)
-       WHERE s.symbolId IN $symbolIds
-       DELETE r`,
-      { symbolIds },
-    ],
-    [
-      `MATCH (s:Symbol)-[r:PARTICIPATES_IN]->(:Process)
-       WHERE s.symbolId IN $symbolIds
-       DELETE r`,
-      { symbolIds },
-    ],
-    [
-      `MATCH (m:Metrics)
-       WHERE m.symbolId IN $symbolIds
-       DELETE m`,
-      { symbolIds },
-    ],
-    [
-      `MATCH (e:SymbolEmbedding)
-       WHERE e.symbolId IN $symbolIds
-       DELETE e`,
-      { symbolIds },
-    ],
-    [
-      `MATCH (sc:SummaryCache)
-       WHERE sc.symbolId IN $symbolIds
-       DELETE sc`,
-      { symbolIds },
-    ],
-    [
-      `MATCH (sr:SymbolReference)
-       WHERE sr.fileId IN $fileIds
-       DELETE sr`,
-      { fileIds },
-    ],
-    [
-      `MATCH (mem:Memory)-[r:MEMORY_OF]->(s:Symbol)
-       WHERE s.symbolId IN $symbolIds
-       DELETE r`,
-      { symbolIds },
-    ],
-    [
-      `MATCH (mem:Memory)-[r:MEMORY_OF_FILE]->(f:File)
-       WHERE f.fileId IN $fileIds
-       DELETE r`,
-      { fileIds },
-    ],
-    [
-      `MATCH (s:Symbol {repoId: $repoId})
-       WHERE s.symbolId IN $symbolIds
-       DELETE s`,
-      { repoId, symbolIds },
-    ],
-  ] as const) {
-    if ("fileIds" in params && params.fileIds.length === 0) continue;
-    await ladybugDb.exec(conn, query, params);
-  }
 }
 
 function fileFactToRow(

@@ -1,11 +1,12 @@
 // Input validated by server.ts dispatch before reaching handlers
 import { readFile, stat } from "fs/promises";
 
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import {
   type CodeNeedWindowRequest,
   CodeNeedWindowRequestSchema,
   type CodeNeedWindowResponse,
-  type GetSkeletonRequest,
+  GetSkeletonRequestSchema,
   GetSkeletonResponse,
   type GetHotPathRequest,
   GetHotPathRequestSchema,
@@ -440,7 +441,11 @@ export async function handleCodeNeedWindow(
   args: unknown,
   context?: ToolContext,
 ): Promise<CodeNeedWindowResponse> {
-  const rawRequest = CodeNeedWindowRequestSchema.parse(normalizeCodeToolArgs(args));
+  const rawRequest = parseActionHandlerArgs(
+    CodeNeedWindowRequestSchema,
+    args,
+    normalizeCodeToolArgs,
+  );
 
   const conn = await getLadybugConn();
   const resolvedSymbolId = await resolveCodeTargetSymbolId(
@@ -1122,7 +1127,11 @@ export async function handleGetSkeleton(
   args: unknown,
   context?: ToolContext,
 ): Promise<GetSkeletonResponse> {
-  const rawSkeletonRequest = args as GetSkeletonRequest;
+  const rawSkeletonRequest = parseActionHandlerArgs(
+    GetSkeletonRequestSchema,
+    args,
+    normalizeCodeToolArgs,
+  );
 
   // Resolve symbolId shorthand or structured symbolRef if present.
   let resolvedSkeletonSymbolId = rawSkeletonRequest.symbolId;
@@ -1342,7 +1351,11 @@ export async function handleGetHotPath(
   args: unknown,
   context?: ToolContext,
 ): Promise<GetHotPathResponse> {
-  const rawHotPathRequest = GetHotPathRequestSchema.parse(normalizeCodeToolArgs(args));
+  const rawHotPathRequest = parseActionHandlerArgs(
+    GetHotPathRequestSchema,
+    args,
+    normalizeCodeToolArgs,
+  );
 
   const conn = await getLadybugConn();
   const resolvedHotPathSymbolId = await resolveCodeTargetSymbolId(

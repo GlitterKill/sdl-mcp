@@ -5,7 +5,7 @@
  * handler-compatible argument objects using action definitions from tool-actions.ts.
  */
 
-import type { ActionDefinition, ActionArgDef } from "./tool-actions.js";
+import type { CliActionDefinition, ActionArgDef } from "./tool-actions.js";
 
 /**
  * Convert a kebab-case flag name to the corresponding parseArgs key.
@@ -75,7 +75,7 @@ function coerceValue(
  * @throws Error if required args are missing
  */
 export function parseToolArgs(
-  definition: ActionDefinition,
+  definition: CliActionDefinition,
   values: Record<string, unknown>,
   stdinArgs?: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -144,7 +144,7 @@ export function parseToolArgs(
  * Returns an options object suitable for Node's parseArgs().
  */
 export function buildParseArgsOptions(
-  definition: ActionDefinition,
+  definition: CliActionDefinition,
 ): Record<string, { type: "string" | "boolean"; short?: string; multiple?: boolean }> {
   const options: Record<string, { type: "string" | "boolean"; short?: string; multiple?: boolean }> = {};
 

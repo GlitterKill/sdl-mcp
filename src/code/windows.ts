@@ -11,7 +11,11 @@ import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
 import { normalizePath, getAbsolutePathFromRepoRoot } from "../util/paths.js";
-import { estimateTokens as estimateTokenCount } from "../util/tokenize.js";
+import { normalizeToLf } from "../util/eol.js";
+import {
+  estimateTokens as estimateTokenCount,
+  estimateTokensCoarse,
+} from "../util/tokenize.js";
 
 export async function extractCodeWindow(
   repoId: RepoId,
@@ -52,7 +56,7 @@ export async function extractCodeWindow(
     return null;
   }
 
-  const lines = fileContent.replace(/\r\n/g, "\n").split("\n");
+  const lines = normalizeToLf(fileContent).split("\n");
 
   const startLine = symbol.rangeStartLine;
   const endLine = symbol.rangeEndLine;
@@ -71,7 +75,7 @@ export async function extractCodeWindow(
     endCol: symbol.rangeEndCol,
   };
 
-  const estimatedTokens = Math.ceil(code.length / 4);
+  const estimatedTokens = estimateTokensCoarse(code);
 
   return {
     // Note: `approved` here means "extraction succeeded", not "policy approved".
@@ -223,7 +227,7 @@ export async function extractWindow(
     };
   }
 
-  const normalizedContent = normalizeLineEndings(content);
+  const normalizedContent = normalizeToLf(content);
   const lines = splitLines(normalizedContent);
 
   let startLine = range.startLine;
@@ -586,10 +590,6 @@ export function expandToBlock(lines: string[], range: Range): Range {
     endLine,
     endCol: lines[endLine - 1]?.length ?? 0,
   };
-}
-
-function normalizeLineEndings(content: string): string {
-  return content.replace(/\r\n/g, "\n");
 }
 
 function splitLines(content: string): string[] {

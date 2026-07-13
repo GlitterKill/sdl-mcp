@@ -9,6 +9,8 @@ import {
   registerCodeModeTools,
 } from "../../code-mode/index.js";
 import type { CodeModeConfig, GatewayConfig } from "../../config/types.js";
+import { loadConfig } from "../../config/loadConfig.js";
+import { anyRepoHasMemoryTools } from "../../config/memory-config.js";
 import {
   buildFlatToolDescriptors,
   registerFlatTools,
@@ -20,15 +22,26 @@ export function registerTools(
   gatewayConfig?: GatewayConfig,
   codeModeConfig?: CodeModeConfig,
 ): void {
+  // Tool visibility is fixed once at server registration so every projection
+  // sees the same static action set for the lifetime of this process.
+  const stableServices: ToolServices = services.actionAvailability
+    ? services
+    : {
+        ...services,
+        actionAvailability: {
+          memoryTools: anyRepoHasMemoryTools(loadConfig()),
+        },
+      };
+
   // Register memory hint hook for all modes
   server.registerPostDispatchHook(createMemoryHintHook());
 
   // Universal discovery surface
-  registerActionSearchTool(server, services);
+  registerActionSearchTool(server, stableServices);
 
   // Code Mode exclusive: register action search plus code-mode tools only
   if (codeModeConfig?.enabled && codeModeConfig?.exclusive) {
-    registerCodeModeTools(server, services, codeModeConfig);
+    registerCodeModeTools(server, stableServices, codeModeConfig);
     return;
   }
 
@@ -46,12 +59,15 @@ export function registerTools(
 
     // When both gateway and code-mode are active, share one actionMap
     const sharedActionMap = codeModeConfig?.enabled
-      ? createActionMap(services.liveIndex)
+      ? createActionMap(
+          stableServices.liveIndex,
+          stableServices.actionAvailability,
+        )
       : undefined;
 
     registerGatewayTools(
       server,
-      services,
+      stableServices,
       {
         enabled: true,
         emitLegacyTools: gatewayConfig.emitLegacyTools ?? true,
@@ -62,17 +78,22 @@ export function registerTools(
 
     // Code Mode alongside gateway — reuse shared action map
     if (codeModeConfig?.enabled && sharedActionMap) {
-      registerCodeModeTools(server, services, codeModeConfig, sharedActionMap);
+      registerCodeModeTools(
+        server,
+        stableServices,
+        codeModeConfig,
+        sharedActionMap,
+      );
     }
     return;
   }
 
   // Flat tool registration: declarative descriptors registered in a loop
-  const descriptors = buildFlatToolDescriptors(services);
+  const descriptors = buildFlatToolDescriptors(stableServices);
   registerFlatTools(server, descriptors);
 
   // Code Mode alongside flat tools
   if (codeModeConfig?.enabled) {
-    registerCodeModeTools(server, services, codeModeConfig);
+    registerCodeModeTools(server, stableServices, codeModeConfig);
   }
 }

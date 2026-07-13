@@ -3,7 +3,7 @@ import * as path from "path";
 
 import * as ts from "typescript";
 import type { RepoConfig } from "../config/types.js";
-import { getAbsolutePathFromRepoRoot } from "../util/paths.js";
+import { getAbsolutePathFromRepoRoot, normalizePath } from "../util/paths.js";
 import { TS_DIAGNOSTICS_MAX_ERRORS, TS_DIAGNOSTICS_MAX_CACHE } from "../config/constants.js";
 import { globToSafeRegex } from "../util/safeRegex.js";
 import { logger } from "../util/logger.js";
@@ -274,7 +274,7 @@ class DiagnosticsManager {
     filePath: string,
     ignorePatterns: string[],
   ): boolean {
-    const normalizedPath = filePath.replace(/\\/g, "/");
+    const normalizedPath = normalizePath(filePath);
     return ignorePatterns.some((pattern) => {
       const regex = globToSafeRegex(pattern);
       return regex.test(normalizedPath);
@@ -282,7 +282,7 @@ class DiagnosticsManager {
   }
 
   private shouldIgnoreDir(dirPath: string, ignorePatterns: string[]): boolean {
-    const normalizedPath = dirPath.replace(/\\/g, "/");
+    const normalizedPath = normalizePath(dirPath);
     return ignorePatterns.some((pattern) => {
       const regex = globToSafeRegex(pattern);
       return regex.test(normalizedPath);

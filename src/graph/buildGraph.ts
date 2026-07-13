@@ -2,10 +2,9 @@ import type { Connection } from "kuzu";
 import type { EdgeType, RepoId, SymbolId } from "../domain/types.js";
 import type { EdgeRow, FileRow, MetricsRow, SymbolRow } from "../db/schema.js";
 import {
-  assertSafeInt,
-  queryAll,
-  toNumber,
-} from "../db/ladybug-core.js";
+  getNeighborSymbolIds,
+  loadGraphNeighborhoodRows,
+} from "../db/ladybug-graph-read.js";
 import { shortestPath } from "../db/ladybug-algorithms.js";
 import { logger } from "../util/logger.js";
 
@@ -40,31 +39,6 @@ export function logGraphTelemetry(event: GraphTelemetryEvent): void {
 }
 
 let lastLoadStats: GraphLoadStats | null = null;
-
-/**
- * Build a Cypher variable-length path clause like `-[:REL_TYPE*min..max]->`.
- *
- * WHY interpolation is required: Kuzu (LadybugDB) does not support
- * parameterized values inside variable-length path bounds (`*min..max`).
- * Parameters like `$minHops` are rejected by the parser in that position.
- * We therefore validate and clamp the integers here before interpolating.
- */
-function buildVariableLengthPathClause(
-  minHops: number,
-  maxHops: number,
-  relType: string,
-  direction: "in" | "out" | "both" = "both",
-): string {
-  assertSafeInt(minHops, "minHops");
-  assertSafeInt(maxHops, "maxHops");
-  const safeMin = Math.max(0, Math.min(minHops, 50));
-  const safeMax = Math.max(safeMin, Math.min(maxHops, 50));
-  const pattern = `[:${relType}*${safeMin}..${safeMax}]`;
-  if (direction === "out") return `-${pattern}->`;
-  if (direction === "in") return `<-${pattern}-`;
-  return `-${pattern}-`;
-}
-
 
 export function getLastLoadStats(): GraphLoadStats | null {
   return lastLoadStats;
@@ -127,38 +101,7 @@ export async function getNeighbors(
   direction: "in" | "out" | "both",
   edgeType?: EdgeType,
 ): Promise<SymbolId[]> {
-  const neighbors = new Set<SymbolId>();
-
-  const edgeTypeClause = edgeType ? "AND d.edgeType = $edgeType" : "";
-  const params: Record<string, unknown> = { repoId, symbolId };
-  if (edgeType) params.edgeType = edgeType;
-
-  if (direction === "out" || direction === "both") {
-    const rows = await queryAll<{ neighborId: SymbolId }>(
-      conn,
-      `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol {symbolId: $symbolId})
-       MATCH (s)-[d:DEPENDS_ON]->(t:Symbol)-[:SYMBOL_IN_REPO]->(r)
-       WHERE true ${edgeTypeClause}
-       RETURN DISTINCT t.symbolId AS neighborId`,
-      params,
-    );
-    for (const row of rows) neighbors.add(row.neighborId);
-  }
-
-  if (direction === "in" || direction === "both") {
-    const rows = await queryAll<{ neighborId: SymbolId }>(
-      conn,
-      `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol {symbolId: $symbolId})
-       MATCH (t:Symbol)-[d:DEPENDS_ON]->(s)
-       MATCH (t)-[:SYMBOL_IN_REPO]->(r)
-       WHERE true ${edgeTypeClause}
-       RETURN DISTINCT t.symbolId AS neighborId`,
-      params,
-    );
-    for (const row of rows) neighbors.add(row.neighborId);
-  }
-
-  return Array.from(neighbors);
+  return getNeighborSymbolIds(conn, repoId, symbolId, direction, edgeType);
 }
 
 export async function getPath(
@@ -206,55 +149,20 @@ export async function loadNeighborhood(
     return { repoId, symbolIds: new Set(), edges: [] };
   }
 
-  assertSafeInt(maxSymbols, "maxSymbols");
   const safeMaxSymbols = Math.max(1, Math.min(maxSymbols, 100_000));
-
-  const relPattern = buildVariableLengthPathClause(0, Math.min(maxHops, 20), "DEPENDS_ON", direction);
-
-  const symbolRows = await queryAll<{ symbolId: SymbolId }>(
+  const rows = await loadGraphNeighborhoodRows(
     conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
-     WHERE s.symbolId IN $entrySymbols
-     MATCH (s)${relPattern}(t:Symbol)-[:SYMBOL_IN_REPO]->(r)
-     RETURN DISTINCT t.symbolId AS symbolId
-     LIMIT $limit`,
-    { repoId, entrySymbols, limit: safeMaxSymbols },
+    repoId,
+    entrySymbols,
+    maxHops,
+    direction,
+    safeMaxSymbols,
   );
-
-  const symbolIds = new Set(symbolRows.map((r) => r.symbolId));
-
-  const edges: NeighborhoodEdge[] = [];
-  const symbolIdList = Array.from(symbolIds);
-
-  if (symbolIdList.length > 0) {
-    const edgeRows = await queryAll<{
-      fromSymbolId: SymbolId;
-      toSymbolId: SymbolId;
-      edgeType: EdgeType;
-      weight: unknown;
-      confidence: unknown;
-    }>(
-      conn,
-      `MATCH (a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)
-       WHERE a.symbolId IN $symbolIds AND b.symbolId IN $symbolIds
-       RETURN a.symbolId AS fromSymbolId,
-              b.symbolId AS toSymbolId,
-              d.edgeType AS edgeType,
-              d.weight AS weight,
-              d.confidence AS confidence`,
-      { symbolIds: symbolIdList },
-    );
-
-    for (const row of edgeRows) {
-      edges.push({
-        fromSymbolId: row.fromSymbolId,
-        toSymbolId: row.toSymbolId,
-        edgeType: row.edgeType,
-        weight: toNumber(row.weight),
-        confidence: toNumber(row.confidence),
-      });
-    }
-  }
+  const symbolIds = new Set(rows.symbolIds);
+  const edges: NeighborhoodEdge[] = rows.edges.map((row) => ({
+    ...row,
+    edgeType: row.edgeType as EdgeType,
+  }));
 
   const durationMs = Date.now() - startTime;
   lastLoadStats = {

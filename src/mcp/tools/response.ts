@@ -7,6 +7,7 @@
  */
 
 import type { ToolContext } from "../../server.js";
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import { RuntimeConfigSchema } from "../../config/types.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { readResponseArtifact } from "../../runtime/response-artifacts.js";
@@ -21,7 +22,7 @@ export async function handleResponseGet(
   args: unknown,
   context?: ToolContext,
 ): Promise<ResponseGetResponse> {
-  const request = ResponseGetRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(ResponseGetRequestSchema, args);
   const appConfig = loadConfig();
   const runtimeConfig = RuntimeConfigSchema.parse(appConfig.runtime ?? {});
 

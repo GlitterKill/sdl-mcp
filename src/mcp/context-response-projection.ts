@@ -4,6 +4,11 @@
  */
 
 import type { TaskType } from "../agent/types.js";
+import {
+  getResponseProjectionRule,
+  getWorkflowChildAction,
+} from "./context-response-projection-registry.js";
+import { CARD_WIRE_FIELD_ORDER } from "./tools/symbol-utils.js";
 
 /** Fields kept in the compact broad response before final model-content projection.
  *  Shared with context-engine.ts for pre-truncation compaction. */
@@ -24,9 +29,6 @@ export const BROAD_VISIBLE_FIELDS = new Set([
   "diagnostics",
   "retrievalEvidence",
 ]);
-
-/** Tool names eligible for context-specific compaction. */
-const CONTEXT_TOOLS = new Set(["sdl.context"]);
 
 type ProjectionDetail = "compact" | "standard" | "full";
 
@@ -142,17 +144,6 @@ const COMPACT_DEBUG_MODEL_FIELDS = new Set([
   "whyApproved",
 ]);
 
-const REPO_ID_VISIBLE_TOOLS = new Set([
-  "repo.status",
-  "sdl.repo.status",
-  "repo.overview",
-  "sdl.repo.overview",
-  "delta.get",
-  "sdl.delta.get",
-  "sdl.workflow",
-  "workflow",
-]);
-
 const PRECONDITION_MODEL_FIELDS = new Set([
   "astFingerprint",
   "expectedAstFingerprint",
@@ -162,52 +153,13 @@ const PRECONDITION_MODEL_FIELDS = new Set([
   "sha256",
 ]);
 
-const USAGE_STATS_TOOLS = new Set(["usage.stats", "sdl.usage.stats"]);
-const CODE_NEED_WINDOW_TOOLS = new Set([
-  "code.needWindow",
-  "sdl.code.needWindow",
-]);
-
 function shouldOmitToolSpecificModelField(
   toolName: string,
   key: string,
 ): boolean {
-  if (USAGE_STATS_TOOLS.has(toolName)) {
-    return key === "formattedSummary";
-  }
-  if (CODE_NEED_WINDOW_TOOLS.has(toolName)) {
-    return key === "whyApproved" || key === "estimatedTokens";
-  }
-  return false;
+  return getResponseProjectionRule(toolName)?.omitTopLevelFields?.includes(key)
+    ?? false;
 }
-
-const WORKFLOW_CHILD_TOOL_NAMES: Record<string, string> = {
-  actionSearch: "action.search",
-  codeHotPath: "code.getHotPath",
-  codeNeedWindow: "code.needWindow",
-  codeSkeleton: "code.getSkeleton",
-  deltaGet: "delta.get",
-  file: "sdl.file",
-  sdlFile: "sdl.file",
-  fileRead: "file.read",
-  fileWrite: "file.write",
-  indexRefresh: "index.refresh",
-  policyGet: "policy.get",
-  policySet: "policy.set",
-  prRiskAnalyze: "pr.risk.analyze",
-  repoOverview: "repo.overview",
-  repoStatus: "repo.status",
-  runtimeExecute: "runtime.execute",
-  runtimeQueryOutput: "runtime.queryOutput",
-  searchEdit: "search.edit",
-  sliceBuild: "slice.build",
-  sliceRefresh: "slice.refresh",
-  symbolEdit: "symbol.edit",
-  symbolGetCard: "symbol.getCard",
-  symbolGetCards: "symbol.getCards",
-  symbolSearch: "symbol.search",
-  usageStats: "usage.stats",
-};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -258,21 +210,18 @@ function copyIfPresent(
   }
 }
 
-function copyProjectedDeps(
+function projectDeps(
   source: Record<string, unknown>,
-  target: Record<string, unknown>,
   fields: { imports?: true; calls?: true },
-): void {
+): Record<string, unknown> | undefined {
   if (!isRecord(source.deps)) {
-    return;
+    return undefined;
   }
 
   const deps: Record<string, unknown> = {};
   if (fields.imports) copyIfPresent(source.deps, deps, "imports");
   if (fields.calls) copyIfPresent(source.deps, deps, "calls");
-  if (Object.keys(deps).length > 0) {
-    target.deps = deps;
-  }
+  return Object.keys(deps).length > 0 ? deps : undefined;
 }
 
 export function projectCardForTask(
@@ -280,34 +229,46 @@ export function projectCardForTask(
   taskType: TaskType,
 ): Record<string, unknown> {
   const projected: Record<string, unknown> = {};
-
-  // Keep the same canonical field order used by compactCardForWire.
-  copyIfPresent(card, projected, "symbolId");
-  copyIfPresent(card, projected, "file");
-  copyIfPresent(card, projected, "range");
-  copyIfPresent(card, projected, "kind");
-  copyIfPresent(card, projected, "name");
-  copyIfPresent(card, projected, "signature");
-
+  const visibleFields = new Set<string>([
+    "symbolId",
+    "file",
+    "range",
+    "kind",
+    "name",
+    "signature",
+  ]);
+  let deps: Record<string, unknown> | undefined;
   if (taskType === "debug") {
-    copyIfPresent(card, projected, "summary");
-    copyIfPresent(card, projected, "sideEffects");
-    copyProjectedDeps(card, projected, { calls: true });
-    copyIfPresent(card, projected, "canonicalTest");
+    visibleFields.add("summary");
+    visibleFields.add("sideEffects");
+    visibleFields.add("deps");
+    deps = projectDeps(card, { calls: true });
   } else if (taskType === "implement") {
-    copyIfPresent(card, projected, "summary");
-    copyIfPresent(card, projected, "invariants");
-    copyProjectedDeps(card, projected, { imports: true });
+    visibleFields.add("summary");
+    visibleFields.add("invariants");
+    visibleFields.add("deps");
+    deps = projectDeps(card, { imports: true });
   } else if (taskType === "explain") {
-    copyIfPresent(card, projected, "summary");
-    copyIfPresent(card, projected, "summaryProvenance");
-    copyProjectedDeps(card, projected, { imports: true, calls: true });
+    visibleFields.add("summary");
+    visibleFields.add("summaryProvenance");
+    visibleFields.add("deps");
+    deps = projectDeps(card, { imports: true, calls: true });
   } else {
-    copyIfPresent(card, projected, "summary");
-    copyIfPresent(card, projected, "sideEffects");
-    copyIfPresent(card, projected, "metrics");
+    visibleFields.add("summary");
+    visibleFields.add("sideEffects");
+    visibleFields.add("metrics");
   }
 
+  for (const field of CARD_WIRE_FIELD_ORDER) {
+    if (!visibleFields.has(field)) continue;
+    if (field === "deps") {
+      if (deps !== undefined) projected.deps = deps;
+    } else {
+      copyIfPresent(card, projected, field);
+    }
+  }
+
+  if (taskType === "debug") copyIfPresent(card, projected, "canonicalTest");
   copyIfPresent(card, projected, "ref");
   copyIfPresent(card, projected, "unchanged");
   copyIfPresent(card, projected, "changedSincePrior");
@@ -430,6 +391,7 @@ function shouldKeepModelField(
   options: ModelContentProjectionOptions,
   depth: number,
 ): boolean {
+  const projectionRule = getResponseProjectionRule(toolName);
   if (PRECONDITION_MODEL_FIELDS.has(key)) {
     return false;
   }
@@ -443,23 +405,23 @@ function shouldKeepModelField(
   // Direct code-window line matches are actionable; nested matches retain the
   // established generic omission behavior.
   if (key === "matchedLineNumbers") {
-    return depth === 0 && CODE_NEED_WINDOW_TOOLS.has(toolName);
+    return depth === 0 && projectionRule?.keepTopLevelMatchedLines === true;
   }
   if (
     key === "whyApproved"
     && depth > 0
-    && CODE_NEED_WINDOW_TOOLS.has(toolName)
+    && projectionRule?.keepNestedWhyApproved === true
   ) {
     return true;
   }
   if (key === "trace") {
-    return toolName === "sdl.workflow" && options.includeTrace;
+    return projectionRule?.projector === "workflow" && options.includeTrace;
   }
   if (ALWAYS_INTERNAL_MODEL_FIELDS.has(key)) {
     return false;
   }
   if (key === "repoId") {
-    return REPO_ID_VISIBLE_TOOLS.has(toolName);
+    return projectionRule?.showRepoId === true;
   }
   if (key === "processes") {
     return options.includeProcesses;
@@ -470,10 +432,10 @@ function shouldKeepModelField(
   if (COMPACT_DEBUG_MODEL_FIELDS.has(key)) {
     return false;
   }
-  if (toolName === "slice.build" && key === "budget") {
+  if (key === "budget" && projectionRule?.omitBudget === true) {
     return false;
   }
-  if ((toolName === "symbol.search" || toolName === "sdl.symbol.search") && key === "symbols") {
+  if (key === "symbols" && projectionRule?.omitSymbols === true) {
     return false;
   }
   if (key === "diagnostics") {
@@ -639,8 +601,9 @@ function projectWorkflowStepResultForModel(
   args?: unknown,
 ): unknown {
   const childToolName = typeof fn === "string"
-    ? WORKFLOW_CHILD_TOOL_NAMES[fn] ?? "sdl.workflow"
-    : "sdl.workflow";
+    ? getWorkflowChildAction(fn)
+    : "workflow";
+  const childProjectionRule = getResponseProjectionRule(childToolName);
   const childArgOptions = isRecord(args) ? modelOptionsFromArgs(args) : undefined;
   const fileOp = inferWorkflowFileOp(childToolName, result, args);
   if (isFullDetail(options)) {
@@ -661,16 +624,19 @@ function projectWorkflowStepResultForModel(
     return stripFullDetailHiddenFieldsForModel(result);
   }
 
-  if (childToolName === "repo.status") {
+  if (childProjectionRule?.projector === "repoStatus") {
     if (childOptions.detail === "compact" && !childOptions.includeTelemetry) {
       return isRecord(result) ? projectRepoStatusForModel(result, childOptions) : result;
     }
     return projectGenericValueForModel(childToolName, result, childOptions);
   }
-  if (childToolName === "action.search" && childOptions.detail === "compact") {
+  if (
+    childProjectionRule?.projector === "actionSearch"
+    && childOptions.detail === "compact"
+  ) {
     return isRecord(result) ? projectActionSearchForModel(result) : result;
   }
-  if (childToolName === "usage.stats") {
+  if (childProjectionRule?.projector === "usage") {
     return isRecord(result) ? projectUsageStatsForModel() : result;
   }
 
@@ -905,7 +871,7 @@ export function isBroadContextResult(
   toolName: string,
   result: unknown,
 ): boolean {
-  if (!CONTEXT_TOOLS.has(toolName)) {
+  if (getResponseProjectionRule(toolName)?.projector !== "context") {
     return false;
   }
   if (!isRecord(result)) {
@@ -969,7 +935,8 @@ export function projectToolResultForModelContent(
   }
 
   const options = modelOptionsFromArgs(args);
-  if (toolName === "sdl.workflow" || toolName === "workflow") {
+  const projectionRule = getResponseProjectionRule(toolName);
+  if (projectionRule?.projector === "workflow") {
     return projectWorkflowResultForModel(result, options, args);
   }
   if (isFullDetail(options)) {
@@ -978,18 +945,21 @@ export function projectToolResultForModelContent(
       stripFullDetailHiddenFieldsForModel(result),
     );
   }
-  if (CONTEXT_TOOLS.has(toolName) && ("answer" in result || "finalEvidence" in result)) {
+  if (
+    projectionRule?.projector === "context"
+    && ("answer" in result || "finalEvidence" in result)
+  ) {
     return projectContextResultForModel(result, options);
   }
-  if (toolName === "usage.stats" || toolName === "sdl.usage.stats") {
+  if (projectionRule?.projector === "usage") {
     return projectUsageStatsForModel();
   }
-  if (toolName === "repo.status" || toolName === "sdl.repo.status") {
+  if (projectionRule?.projector === "repoStatus") {
     if (options.detail === "compact" && !options.includeTelemetry) {
       return projectRepoStatusForModel(result, options);
     }
   }
-  if (toolName === "action.search" || toolName === "sdl.action.search") {
+  if (projectionRule?.projector === "actionSearch") {
     if (options.detail === "compact") {
       return projectActionSearchForModel(result);
     }

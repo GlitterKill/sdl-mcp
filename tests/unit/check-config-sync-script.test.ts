@@ -9,7 +9,7 @@ const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, "../..");
 
 describe("check-config-sync script", () => {
-  it("uses the built config output when src/config/types.js is not checked in", () => {
+  it("checks the built config output", () => {
     const result = spawnSync(
       process.execPath,
       ["--experimental-strip-types", "scripts/check-config-sync.ts"],

@@ -255,29 +255,14 @@ async function countExistingScipProviderSymbols(
   conn: Awaited<ReturnType<typeof getLadybugConn>>,
   repoId: string,
 ): Promise<number> {
-  const row = await ladybugDb.querySingle<{ count: unknown }>(
-    conn,
-    `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
-     WHERE s.source = 'scip'
-     RETURN count(DISTINCT s) AS count`,
-    { repoId },
-  );
-  return ladybugDb.toNumber(row?.count ?? 0);
+  return ladybugDb.countScipProviderSymbols(conn, repoId);
 }
 
 async function hasProviderFirstBootstrap(
   conn: Awaited<ReturnType<typeof getLadybugConn>>,
   repoId: string,
 ): Promise<boolean> {
-  const row = await ladybugDb.querySingle<{ count: unknown }>(
-    conn,
-    `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
-     WHERE (s.source = 'scip' OR s.source = 'lsp')
-       AND coalesce(s.symbolStatus, 'real') = 'real'
-     RETURN count(DISTINCT s) AS count`,
-    { repoId },
-  );
-  return ladybugDb.toNumber(row?.count ?? 0) > 0;
+  return ladybugDb.hasProviderFirstBootstrap(conn, repoId);
 }
 
 function snapshotPass2ResolverBreakdown(
@@ -1899,38 +1884,17 @@ async function countSymbolVersionsForVersion(
   versionId: string,
 ): Promise<number> {
   const conn = await getLadybugConn();
-  const row = await ladybugDb.querySingle<{ count: unknown }>(
-    conn,
-    `MATCH (sv:SymbolVersion {versionId: $versionId})
-     RETURN count(sv) AS count`,
-    { versionId },
-  );
-  return ladybugDb.toNumber(row?.count ?? 0);
+  return ladybugDb.countSymbolVersionsForVersion(conn, versionId);
 }
 
 async function countMetricsForRepo(repoId: string): Promise<number> {
   const conn = await getLadybugConn();
-  const row = await ladybugDb.querySingle<{ count: unknown }>(
-    conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
-     WHERE coalesce(s.symbolStatus, 'real') = 'real'
-     MATCH (m:Metrics)
-     WHERE m.symbolId = s.symbolId
-     RETURN count(m) AS count`,
-    { repoId },
-  );
-  return ladybugDb.toNumber(row?.count ?? 0);
+  return ladybugDb.countRealMetricsForRepo(conn, repoId);
 }
 
 async function getFileSummaryFileIdsForRepo(repoId: string): Promise<string[]> {
   const conn = await getLadybugConn();
-  const rows = await ladybugDb.queryAll<{ fileId: string }>(
-    conn,
-    `MATCH (fs:FileSummary {repoId: $repoId})
-     RETURN fs.fileId AS fileId`,
-    { repoId },
-  );
-  return rows.map((row) => row.fileId);
+  return ladybugDb.getFileSummaryFileIdsForRepo(conn, repoId);
 }
 
 async function assessNoOpIncrementalRecovery(params: {

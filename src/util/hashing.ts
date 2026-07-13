@@ -15,17 +15,6 @@ export function hashContent(content: string): string {
   return crypto.hash("sha256", content, "hex");
 }
 
-export function generateSymbolId(
-  repoId: string,
-  relPath: string,
-  kind: string,
-  name: string,
-  astFingerprint: string,
-): string {
-  const combined = `${repoId}:${relPath}:${kind}:${name}:${astFingerprint}`;
-  return crypto.hash("sha256", combined, "hex");
-}
-
 export function generateFileId(repoId: string, relPath: string): string {
   const combined = `${repoId}:${normalizePath(relPath)}`;
   return crypto.hash("sha256", combined, "hex");

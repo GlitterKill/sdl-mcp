@@ -1,29 +1,24 @@
 # src/db/ - LadybugDB Persistence Layer
 
 ## OVERVIEW
-Graph database access layer split into 12 domain-specific modules, unified via `ladybug-queries.ts` barrel.
+Graph database access layer split into domain-specific modules, unified via the `ladybug-queries.ts` compatibility barrel.
 
 ## STRUCTURE
-- `ladybug-queries.ts` - Barrel re-export (62 importers use this facade)
+- `ladybug-queries.ts` - Compatibility barrel for DB query exports
 - `ladybug-core.ts` - `exec`, `queryAll`, `querySingle`, `withTransaction`, `getPreparedStatement`
-- `ladybug.ts` - Connection manager (singleton, `MAX_POOL_SIZE=1`)
+- `ladybug.ts` - Configurable read pool (default 4) plus one dedicated write connection
 - `ladybug-schema.ts` - Cypher DDL (idempotent, `LADYBUG_SCHEMA_VERSION=3`)
 - `initGraphDb.ts` - DB path resolution + init
 - `graph-db-path.ts` - Env var / config path resolution
 - `schema.ts` - Legacy SQLite-era row types (still used for TS types)
 
 ### Domain modules
-- `ladybug-repos.ts` - Repo + File nodes
-- `ladybug-symbols.ts` - Symbol CRUD + search
-- `ladybug-edges.ts` - DEPENDS_ON edges (call, import, config)
-- `ladybug-versions.ts` - Version/snapshot operations
-- `ladybug-slices.ts` - SliceHandle + CardHash
-- `ladybug-metrics.ts` - Fan-in/out, churn
-- `ladybug-feedback.ts` - Audit + AgentFeedback
-- `ladybug-embeddings.ts` - Embeddings, summaries, sync artifacts
-- `ladybug-config.ts` - ToolPolicyHash, TsconfigHash
-- `ladybug-clusters.ts` - Cluster nodes
-- `ladybug-processes.ts` - Process nodes
+- Graph identity/state: `ladybug-repos.ts`, `ladybug-symbols.ts`, `ladybug-edges.ts`, `ladybug-versions.ts`, `ladybug-slices.ts`
+- Index lifecycle/provider state: `ladybug-index-lifecycle.ts`, `ladybug-provider-first.ts`, `ladybug-shadow-finalization.ts`, `ladybug-shadow-clusters.ts`, `ladybug-unresolved-imports.ts`
+- Retrieval/analysis: `ladybug-graph-read.ts`, `ladybug-retrieval.ts`, `ladybug-algorithms.ts`, `ladybug-metrics.ts`, `ladybug-clusters.ts`, `ladybug-processes.ts`, `ladybug-viewer.ts`
+- Semantic/enrichment: `ladybug-embeddings.ts`, `ladybug-symbol-embeddings.ts`, `ladybug-semantic.ts`, `ladybug-file-summaries.ts`
+- Operational state: `ladybug-feedback.ts`, `ladybug-memory.ts`, `ladybug-usage.ts`, `ladybug-prefetch-outcomes.ts`, `ladybug-config.ts`, `ladybug-scip.ts`, `ladybug-derived-state.ts`
+- Shared write batching: `ladybug-batching.ts`
 
 ## CONVENTIONS
 - Always use `MERGE` (never `CREATE`) for upserts
@@ -37,7 +32,7 @@ Graph database access layer split into 12 domain-specific modules, unified via `
 ## ANTI-PATTERNS
 - No raw `conn.query()` calls - use `exec`/`queryAll`/`querySingle`
 - No `ALTER TABLE` - LadybugDB does not support it; bump `LADYBUG_SCHEMA_VERSION` and rebuild
-- No concurrent write connections - pool is 1 intentionally
+- Do not bypass `writeLimiter` or the per-session write-body limiter with raw writes; LadybugDB permits one write transaction at a time
 
 ## GRAPH SCHEMA (18 node tables, 9 relationship tables)
 

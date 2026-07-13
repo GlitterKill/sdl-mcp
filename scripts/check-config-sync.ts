@@ -17,10 +17,7 @@ import { fileURLToPath } from "url";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = resolve(__dirname, "..");
 const TS_PATH = resolve(ROOT, "src/config/types.ts");
-const JS_CANDIDATE_PATHS = [
-  resolve(ROOT, "dist/config/types.js"),
-  resolve(ROOT, "src/config/types.js"),
-];
+const JS_CANDIDATE_PATHS = [resolve(ROOT, "dist/config/types.js")];
 
 interface DefaultEntry {
   context: string;
@@ -190,7 +187,7 @@ function main(): void {
 
   if (!jsPath || !jsSource) {
     console.error(
-      `ERROR: Could not read compiled config defaults. Checked: ${JS_CANDIDATE_PATHS.join(", ")}`,
+      "ERROR: dist is stale — run npm run build",
     );
     process.exit(1);
   }

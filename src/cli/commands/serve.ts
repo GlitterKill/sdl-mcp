@@ -1,5 +1,6 @@
 import { ServeOptions } from "../types.js";
 import { loadConfig } from "../../config/loadConfig.js";
+import { isNativeAddonGloballyEnabled } from "../../native/addon-loader.js";
 import { setViewerRuntimeConfig } from "../../viewer/viewer-config.js";
 import { resolveSemanticEmbeddingModelPlan } from "../../config/semantic-embedding-model-plan.js";
 import { MCPServer, createMCPServer } from "../../server.js";
@@ -197,7 +198,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   // Surface diagnostic modes so operators know what a "silent crash"
   // repro environment looks like. These envs are the standard isolation
   // levers when investigating native-layer aborts.
-  if (process.env.SDL_MCP_DISABLE_NATIVE_ADDON) {
+  if (!isNativeAddonGloballyEnabled()) {
     writeServeStderrLine(
       "[sdl-mcp] SDL_MCP_DISABLE_NATIVE_ADDON is set — Rust indexer & SCIP native decoder disabled (TS fallback active). Use this to isolate native-addon crashes.",
     );

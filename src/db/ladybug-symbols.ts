@@ -37,6 +37,35 @@ const CSV_ARRAY_NULL = Symbol("symbolCsvArrayNull");
 const DEFAULT_SYMBOL_SNAPSHOT_PAGE_SIZE = 32_768;
 const MAX_SYMBOL_SNAPSHOT_PAGE_SIZE = 65_536;
 
+export async function countScipProviderSymbols(
+  conn: Connection,
+  repoId: string,
+): Promise<number> {
+  const row = await querySingle<{ count: unknown }>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+     WHERE s.source = 'scip'
+     RETURN count(DISTINCT s) AS count`,
+    { repoId },
+  );
+  return toNumber(row?.count ?? 0);
+}
+
+export async function hasProviderFirstBootstrap(
+  conn: Connection,
+  repoId: string,
+): Promise<boolean> {
+  const row = await querySingle<{ count: unknown }>(
+    conn,
+    `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+     WHERE (s.source = 'scip' OR s.source = 'lsp')
+       AND coalesce(s.symbolStatus, 'real') = 'real'
+     RETURN count(DISTINCT s) AS count`,
+    { repoId },
+  );
+  return toNumber(row?.count ?? 0) > 0;
+}
+
 const SYMBOL_COPY_COLUMNS = [
   "symbolId",
   "repoId",
@@ -2881,7 +2910,7 @@ export async function resolveSymbolByShorthand(
   relPath: string,
   symbolName: string,
 ): Promise<string | null> {
-  const normalizedPath = relPath.replace(/\\/g, "/");
+  const normalizedPath = normalizePath(relPath);
 
   const rows = await queryAll<{ symbolId: string; kind: string }>(
     conn,

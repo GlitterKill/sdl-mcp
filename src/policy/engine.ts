@@ -68,6 +68,7 @@ export function generateAuditHash(
   return crypto.createHash("sha256").update(hashString).digest("hex");
 }
 
+/** @internal Rule-chain implementation behind the policy decision functions. */
 export class PolicyEngine {
   private rules: Map<string, PolicyRule> = new Map();
   private config: PolicyConfig;

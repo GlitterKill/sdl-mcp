@@ -1,11 +1,8 @@
 import { randomBytes } from "node:crypto";
 
-// --- Token estimation ---
+import { estimateTokensCoarse } from "../util/tokenize.js";
 
-/** Approximate tokens from a JSON string (chars / 4) */
-function estimateJsonTokens(json: string): number {
-  return Math.ceil(json.length / 4);
-}
+// --- Token estimation ---
 
 function safeJsonStringify(value: unknown): string {
   try {
@@ -103,7 +100,7 @@ function stringChunk(
   };
   return {
     data,
-    totalTokens: estimateJsonTokens(JSON.stringify(data)),
+    totalTokens: estimateTokensCoarse(JSON.stringify(data)),
     hasMore: end < source.length,
   };
 }
@@ -245,7 +242,7 @@ export function truncateStepResult(
   maxTokens: number,
 ): TruncationResult {
   const json = safeJsonStringify(result);
-  const originalTokens = estimateJsonTokens(json);
+  const originalTokens = estimateTokensCoarse(json);
 
   if (originalTokens <= maxTokens) {
     return {
@@ -277,7 +274,7 @@ export function truncateStepResult(
     smartTruncate(result, maxTokens),
     result,
   );
-  const keptTokens = estimateJsonTokens(safeJsonStringify(truncated));
+  const keptTokens = estimateTokensCoarse(safeJsonStringify(truncated));
 
   return { truncated, handle, originalTokens, keptTokens };
 }
@@ -297,7 +294,7 @@ export function getContinuation(
   if (!entry) return null;
 
   const parsed: unknown = JSON.parse(entry.data);
-  const totalTokens = estimateJsonTokens(entry.data);
+  const totalTokens = estimateTokensCoarse(entry.data);
 
   if (path) {
     const selected = navigatePath(parsed, path);
@@ -311,13 +308,13 @@ export function getContinuation(
         const data = selected.slice(start, end);
         return {
           data,
-          totalTokens: estimateJsonTokens(safeJsonStringify(data)),
+          totalTokens: estimateTokensCoarse(safeJsonStringify(data)),
           hasMore: end < selected.length,
         };
       }
       return {
         data: selected,
-        totalTokens: estimateJsonTokens(safeJsonStringify(selected)),
+        totalTokens: estimateTokensCoarse(safeJsonStringify(selected)),
         hasMore: false,
       };
     }
@@ -327,7 +324,7 @@ export function getContinuation(
       }
       return {
         data: selected,
-        totalTokens: estimateJsonTokens(safeJsonStringify(selected)),
+        totalTokens: estimateTokensCoarse(safeJsonStringify(selected)),
         hasMore: false,
       };
     }
@@ -338,7 +335,7 @@ export function getContinuation(
     }
     return {
       data: selected,
-      totalTokens: estimateJsonTokens(safeJsonStringify(selected)),
+      totalTokens: estimateTokensCoarse(safeJsonStringify(selected)),
       hasMore: false,
     };
   }

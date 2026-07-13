@@ -52,5 +52,22 @@ export default tseslint.config(
       "no-case-declarations": "off",
       "no-useless-escape": "off",
     },
+  },
+  {
+    files: ["src/**/*.ts"],
+    ignores: ["src/db/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Literal[value=/\\b(?:MERGE|MATCH)\\s+\\(/]",
+          message: "Cypher query text must live in src/db/ladybug-*.ts.",
+        },
+        {
+          selector: "TemplateElement[value.raw=/\\b(?:MERGE|MATCH)\\s+\\(/]",
+          message: "Cypher query text must live in src/db/ladybug-*.ts.",
+        },
+      ],
+    },
   }
 );

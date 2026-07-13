@@ -1,4 +1,5 @@
 import { DeltaGetRequestSchema, type DeltaGetResponse } from "../tools.js";
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import { computeDelta } from "../../delta/diff.js";
 import { runGovernorLoop } from "../../delta/blastRadius.js";
 import { truncateArray } from "../../util/truncation.js";
@@ -47,7 +48,7 @@ export async function handleDeltaGet(
   args: unknown,
   context?: ToolContext,
 ): Promise<DeltaGetResponse> {
-  const validated = DeltaGetRequestSchema.parse(args);
+  const validated = parseActionHandlerArgs(DeltaGetRequestSchema, args);
 
   recordToolTrace({
     repoId: validated.repoId,

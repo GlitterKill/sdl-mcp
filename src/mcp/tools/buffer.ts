@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { ZodError } from "zod";
 
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import {
   BufferCheckpointRequestSchema,
   type BufferCheckpointResponse,
@@ -94,7 +95,7 @@ export async function handleBufferPush(
     const normalized = args != null && typeof args === "object" && "timestamp" in args && typeof (args as Record<string, unknown>).timestamp === "number"
       ? { ...args as Record<string, unknown>, timestamp: new Date((args as Record<string, unknown>).timestamp as number).toISOString() }
       : args;
-    const request = BufferPushRequestSchema.parse(normalized);
+    const request = parseActionHandlerArgs(BufferPushRequestSchema, normalized);
     const result = request.filePath
       ? await runSerializedBufferPush(
           `${request.repoId}\0${request.filePath}`,
@@ -124,7 +125,7 @@ export async function handleBufferCheckpoint(
   liveIndex?: LiveIndexCoordinator,
 ): Promise<BufferCheckpointResponse> {
   try {
-    const request = BufferCheckpointRequestSchema.parse(args);
+    const request = parseActionHandlerArgs(BufferCheckpointRequestSchema, args);
     const result = await resolveLiveIndex(liveIndex).checkpointRepo(request);
     // Surface a clear pending flag so callers know whether to poll buffer.status.
     const pending =
@@ -175,7 +176,7 @@ export async function handleBufferStatus(
   liveIndex?: LiveIndexCoordinator,
 ): Promise<BufferStatusResponse> {
   try {
-    const request = BufferStatusRequestSchema.parse(args);
+    const request = parseActionHandlerArgs(BufferStatusRequestSchema, args);
     const status = await resolveLiveIndex(liveIndex).getLiveStatus(request.repoId);
     return compactBufferStatusForAgent(status);
   } catch (error) {

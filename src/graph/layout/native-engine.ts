@@ -1,18 +1,16 @@
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  getNativeAddonLoadFailure,
+  isNativeAddonGloballyEnabled,
+  loadNativeAddon,
+} from "../../native/addon-loader.js";
 
 import type { LayoutInput, LayoutResult } from "./types.js";
-
-const require = createRequire(import.meta.url);
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 interface NativeLayoutAddon {
   computeLayout(inputJson: string, seed: number, iterations: number): string;
 }
 
-let loadAttempted = false;
-let nativeAddon: NativeLayoutAddon | null = null;
+let nativeAddon: NativeLayoutAddon | null | undefined;
 let nativeReason = "not attempted";
 
 function isCompatibleNativeLayoutAddon(addon: unknown): addon is NativeLayoutAddon {
@@ -20,35 +18,24 @@ function isCompatibleNativeLayoutAddon(addon: unknown): addon is NativeLayoutAdd
 }
 
 function loadNativeLayoutAddon(): NativeLayoutAddon | null {
-  if (/^(1|true)$/i.test(process.env.SDL_MCP_DISABLE_NATIVE_ADDON ?? "")) {
+  if (!isNativeAddonGloballyEnabled()) {
     nativeReason = "disabled by SDL_MCP_DISABLE_NATIVE_ADDON";
     return null;
   }
-  if (loadAttempted) return nativeAddon;
-  loadAttempted = true;
+  if (nativeAddon !== undefined) return nativeAddon;
 
-  const overridePath = process.env.SDL_MCP_NATIVE_ADDON_PATH;
-  const paths = [
-    ...(overridePath ? [overridePath] : []),
-    join(__dirname, "..", "..", "..", "native", "sdl-mcp-native.node"),
-    join(__dirname, "..", "..", "..", "native", "index.node"),
-    "sdl-mcp-native",
-  ];
-
-  for (const addonPath of paths) {
-    try {
-      const loaded = require(addonPath) as unknown;
-      if (isCompatibleNativeLayoutAddon(loaded)) {
-        nativeAddon = loaded;
-        nativeReason = "loaded";
-        return nativeAddon;
-      }
-    } catch {
-      // Try the next addon candidate. The layout service falls back to TS in auto mode.
-    }
+  const loaded = loadNativeAddon(isCompatibleNativeLayoutAddon);
+  if (isCompatibleNativeLayoutAddon(loaded)) {
+    nativeAddon = loaded;
+    nativeReason = "loaded";
+    return nativeAddon;
   }
 
-  nativeReason = "not found";
+  nativeAddon = null;
+  nativeReason =
+    loaded === null
+      ? (getNativeAddonLoadFailure() ?? "not found")
+      : "incompatible addon";
   return null;
 }
 

@@ -2,13 +2,7 @@ import {
   compactJsonSchema,
   zodSchemaToJsonSchema,
 } from "./compact-schema.js";
-import {
-  AGENT_ACTIONS,
-  CODE_ACTIONS,
-  QUERY_ACTIONS,
-  REPO_ACTIONS,
-} from "./schemas.js";
-import { createActionMap, type ActionMap } from "./router.js";
+import type { ActionMap } from "./router.js";
 
 type JsonSchema = Record<string, unknown>;
 
@@ -47,22 +41,3 @@ export function buildGatewayWireSchema(
     oneOf: activeActions.map((action) => buildActionEnvelope(action, actionMap)),
   });
 }
-
-const DEFAULT_ACTION_MAP = createActionMap();
-
-export const QUERY_THIN_SCHEMA = buildGatewayWireSchema(
-  QUERY_ACTIONS,
-  DEFAULT_ACTION_MAP,
-);
-export const CODE_THIN_SCHEMA = buildGatewayWireSchema(
-  CODE_ACTIONS,
-  DEFAULT_ACTION_MAP,
-);
-export const REPO_THIN_SCHEMA = buildGatewayWireSchema(
-  REPO_ACTIONS,
-  DEFAULT_ACTION_MAP,
-);
-export const AGENT_THIN_SCHEMA = buildGatewayWireSchema(
-  AGENT_ACTIONS,
-  DEFAULT_ACTION_MAP,
-);

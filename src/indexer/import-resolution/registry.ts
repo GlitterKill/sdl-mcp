@@ -2,30 +2,19 @@ import { dirname, join, resolve } from "path";
 
 import { existsAsync } from "../../util/asyncFs.js";
 import { normalizePath } from "../../util/paths.js";
+import { createBuiltInImportResolutionAdapters } from "../language-support.js";
 
-import { CIncludeImportResolutionAdapter } from "./c-include-adapter.js";
-import { GoImportResolutionAdapter } from "./go-adapter.js";
-import { CSharpImportResolutionAdapter } from "./csharp-adapter.js";
-import { JavaKotlinImportResolutionAdapter } from "./java-kotlin-adapter.js";
-import { PhpImportResolutionAdapter } from "./php-adapter.js";
-import { PythonImportResolutionAdapter } from "./python-adapter.js";
-import { RustImportResolutionAdapter } from "./rust-adapter.js";
-import { ShellImportResolutionAdapter } from "./shell-adapter.js";
 import type {
   ImportResolutionAdapter,
   ResolveImportCandidatePathsParams,
 } from "./types.js";
 
-const IMPORT_RESOLUTION_ADAPTERS: ImportResolutionAdapter[] = [
-  new CIncludeImportResolutionAdapter(),
-  new GoImportResolutionAdapter(),
-  new CSharpImportResolutionAdapter(),
-  new JavaKotlinImportResolutionAdapter(),
-  new RustImportResolutionAdapter(),
-  new PythonImportResolutionAdapter(),
-  new PhpImportResolutionAdapter(),
-  new ShellImportResolutionAdapter(),
-];
+let importResolutionAdapters: ImportResolutionAdapter[] | undefined;
+
+function getImportResolutionAdapters(): readonly ImportResolutionAdapter[] {
+  importResolutionAdapters ??= createBuiltInImportResolutionAdapters();
+  return importResolutionAdapters;
+}
 
 /**
  * ESM-style imports use `.js` extensions that map to `.ts` source files at
@@ -91,7 +80,7 @@ export async function resolveImportCandidatePaths(
     return relativeCandidates;
   }
 
-  for (const adapter of IMPORT_RESOLUTION_ADAPTERS) {
+  for (const adapter of getImportResolutionAdapters()) {
     if (!adapter.supports(params.language)) {
       continue;
     }

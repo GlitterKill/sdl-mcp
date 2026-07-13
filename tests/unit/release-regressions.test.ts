@@ -360,13 +360,13 @@ describe("release regression guards", () => {
     assert.match(
       source,
       /const mergedPolicyConfig = \{\s*maxWindowLines:\s*mergedPolicy\.maxWindowLines,\s*maxWindowTokens:\s*mergedPolicy\.maxWindowTokens,\s*requireIdentifiers:\s*mergedPolicy\.requireIdentifiers,\s*allowBreakGlass:\s*mergedPolicy\.allowBreakGlass,/s,
-      "slice handler should pass merged policy values to decideCodeAccessLegacy",
+      "slice handler should pass merged policy values to decideCodeAccess",
     );
 
     assert.match(
       source,
-      /decideCodeAccessLegacy\(policyContext,\s*mergedPolicyConfig\)/s,
-      "slice handler should call decideCodeAccessLegacy with mergedPolicyConfig",
+      /decideCodeAccess\(policyContext,\s*mergedPolicyConfig\)/s,
+      "slice handler should call decideCodeAccess with mergedPolicyConfig",
     );
   });
 

@@ -53,6 +53,7 @@ import {
   type ToolTimingDiagnostics,
 } from "./mcp/timing-diagnostics.js";
 import { SDL_MCP_SERVER_INSTRUCTIONS } from "./mcp/server-instructions.js";
+import { markActionArgsParsed } from "./gateway/dispatch-spine.js";
 
 export interface ToolContext {
   progressToken?: string | number;
@@ -634,8 +635,12 @@ export class MCPServer {
             };
           }
 
-          if (toolContext.sessionId && isRecordValue(parseResult.data)) {
-            const referencedSymbolIds = extractReferencedSymbolIds(parseResult.data);
+          const parsedArgs = markActionArgsParsed(
+            tool.inputSchema,
+            parseResult.data,
+          );
+          if (toolContext.sessionId && isRecordValue(parsedArgs)) {
+            const referencedSymbolIds = extractReferencedSymbolIds(parsedArgs);
             if (referencedSymbolIds.length > 0) {
               wasteLedger.recordReferenced(
                 toolContext.sessionId,
@@ -647,10 +652,10 @@ export class MCPServer {
           try {
             // Pass the parsed (validated + coerced) data to the handler
             const dispatchStartedAt = timer.start();
-            const result = shouldBypassToolDispatch(toolName, parseResult.data)
-              ? await tool.handler(parseResult.data, toolContext)
+            const result = shouldBypassToolDispatch(toolName, parsedArgs)
+              ? await tool.handler(parsedArgs, toolContext)
               : await runToolDispatch(
-                  () => tool.handler(parseResult.data, toolContext),
+                  () => tool.handler(parsedArgs, toolContext),
                   undefined,
                   toolName,
                 );
@@ -831,7 +836,7 @@ export class MCPServer {
               try {
                 const hookStartedAt = timer.start();
                 await Promise.race([
-                  hook(toolName, parseResult.data, finalResult, hookContext),
+                  hook(toolName, parsedArgs, finalResult, hookContext),
                   new Promise((_, reject) =>
                     (timeoutHandle = setTimeout(() => {
                       hookAbortController.abort();

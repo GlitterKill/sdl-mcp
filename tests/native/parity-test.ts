@@ -5,7 +5,10 @@
  * Run with: npm run test:native-parity
  */
 
-import { hashContent, generateSymbolId } from "../../dist/util/hashing.js";
+import { readFileSync } from "node:fs";
+
+import { hashContent } from "../../dist/util/hashing.js";
+import { generateSymbolId } from "../../dist/indexer/fingerprints.js";
 import {
   isRustEngineAvailable,
   hashContentRust,
@@ -138,6 +141,19 @@ const SYMBOL_ID_VECTORS = [
   },
 ];
 
+interface SymbolIdGoldenVector {
+  repoId: string;
+  relPath: string;
+  kind: string;
+  name: string;
+  astFingerprint: string;
+  expectedSymbolId: string;
+}
+
+const SYMBOL_ID_GOLDEN_VECTORS = JSON.parse(
+  readFileSync(new URL("../fixtures/symbol-id-golden.json", import.meta.url), "utf8"),
+) as SymbolIdGoldenVector[];
+
 async function main(): Promise<void> {
   console.log("=== SDL-MCP Native Parity Tests ===\n");
 
@@ -179,6 +195,21 @@ async function main(): Promise<void> {
       vec.fingerprint,
     );
     assertEqual(rustResult, tsResult, `generateSymbolId: ${vec.label}`);
+  }
+
+  for (const vector of SYMBOL_ID_GOLDEN_VECTORS) {
+    const rustResult = generateSymbolIdRust(
+      vector.repoId,
+      vector.relPath,
+      vector.kind,
+      vector.name,
+      vector.astFingerprint,
+    );
+    assertEqual(
+      rustResult,
+      vector.expectedSymbolId,
+      `generateSymbolId golden: ${vector.repoId}:${vector.relPath}:${vector.name}`,
+    );
   }
 
   // --- Summary ---

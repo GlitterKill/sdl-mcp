@@ -6,32 +6,11 @@
  */
 
 import {
-  encodePackedSymbolSearch,
-  SYMBOL_SEARCH_ENCODER_ID,
-  SYMBOL_SEARCH_SHORT_ID_ENCODER_ID,
-} from "../wire/packed/encoders/symbol-search.js";
-import { markShortIdsDelivered } from "../wire/packed/short-ids.js";
-import {
-  decideFormatDetailed,
-  isPackedEnabled,
-  resolveThreshold,
-  resolveTokenThreshold,
-} from "../wire/packed/index.js";
-import { estimateTokens, estimatePackedTokens } from "../../util/tokenize.js";
-import { getObservabilityTap } from "../../observability/event-tap.js";
-import { tokenAccumulator } from "../token-accumulator.js";
+  gateWireFormat,
+  type WireGateResult,
+} from "../wire/gate.js";
 
-export interface SymbolSearchWireResult {
-  format: "json" | "packed";
-  payload: unknown;
-  encoderId?: string;
-  jsonBytes?: number;
-  packedBytes?: number;
-  jsonTokens?: number;
-  packedTokens?: number;
-  axisHit?: "bytes" | "tokens";
-  gateDecision?: "packed" | "fallback";
-}
+export type SymbolSearchWireResult = WireGateResult;
 
 export interface SymbolSearchWireInput {
   query: string;
@@ -57,86 +36,10 @@ export function serializeSymbolSearchForWireFormat(
     shortIds?: boolean;
   },
 ): SymbolSearchWireResult {
-  if (wireFormat !== "packed" && wireFormat !== "auto") {
-    return { format: "json", payload: input };
-  }
-  if (!isPackedEnabled(options?.packedEnabled)) {
-    return { format: "json", payload: input };
-  }
-
-  const jsonStr = JSON.stringify(input);
-  const aliasesActive = options?.shortIds !== false && typeof options?.sessionId === "string";
-  const encoderId = aliasesActive
-    ? SYMBOL_SEARCH_SHORT_ID_ENCODER_ID
-    : SYMBOL_SEARCH_ENCODER_ID;
-  const packedStr = encodePackedSymbolSearch(input, {
-    sessionId: options?.sessionId,
-    shortIds: options?.shortIds,
-  });
-  const jsonTokens = estimateTokens(jsonStr);
-  const packedTokens = estimatePackedTokens(packedStr);
-  const detail = decideFormatDetailed(
+  return gateWireFormat(
+    "symbol.search",
+    input,
     wireFormat,
-    {
-      jsonBytes: jsonStr.length,
-      packedBytes: packedStr.length,
-      jsonTokens,
-      packedTokens,
-    },
-    resolveThreshold({ callThreshold: options?.packedThreshold }),
-    resolveTokenThreshold({
-      callTokenThreshold: options?.packedTokenThreshold,
-    }),
+    options,
   );
-  const gateDecision = detail.decision === "packed" ? "packed" : "fallback";
-
-  tokenAccumulator.recordPackedUsage(
-    encoderId,
-    jsonStr.length,
-    packedStr.length,
-    gateDecision,
-  );
-  try {
-    getObservabilityTap()?.packedWire({
-      encoderId,
-      jsonBytes: jsonStr.length,
-      packedBytes: packedStr.length,
-      jsonTokens,
-      packedTokens,
-      decision: gateDecision,
-      axisHit: detail.axisHit ?? null,
-    });
-  } catch {
-    /* swallow */
-  }
-
-  if (gateDecision === "packed") {
-    markShortIdsDelivered(packedStr, {
-      sessionId: options?.sessionId,
-      shortIds: options?.shortIds,
-    });
-    return {
-      format: "packed",
-      payload: packedStr,
-      encoderId,
-      jsonBytes: jsonStr.length,
-      packedBytes: packedStr.length,
-      jsonTokens,
-      packedTokens,
-      axisHit: detail.axisHit ?? "bytes",
-      gateDecision,
-    };
-  }
-
-  return {
-    format: "json",
-    payload: input,
-    encoderId,
-    jsonBytes: jsonStr.length,
-    packedBytes: packedStr.length,
-    jsonTokens,
-    packedTokens,
-    axisHit: detail.axisHit ?? undefined,
-    gateDecision,
-  };
 }

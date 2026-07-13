@@ -24,7 +24,10 @@ import { pickDepLabel } from "../util/depLabels.js";
 import { hashCard } from "../util/hashing.js";
 import { DatabaseError } from "../domain/errors.js";
 import { createPolicyDenial } from "../mcp/errors.js";
-import { decideCodeAccessLegacy } from "../policy/code-access.js";
+import {
+  decideCodeAccess,
+  toLegacyPolicyDecision,
+} from "../policy/code-access.js";
 import type { PolicyRequestContext } from "../policy/types.js";
 import { logPolicyDecision } from "../mcp/telemetry.js";
 import { uniqueLimit } from "../graph/slice/slice-serializer.js";
@@ -426,11 +429,16 @@ export async function buildCardForSymbol(
     symbolData: legacySymbol,
   };
 
-  const {
-    decision: policyDecision,
-    nextBestAction,
-    requiredFieldsForNext,
-  } = decideCodeAccessLegacy(policyContext);
+  const accessDecision = decideCodeAccess(policyContext);
+  const policyDecision = toLegacyPolicyDecision(accessDecision);
+  const nextBestAction =
+    accessDecision.kind === "approve"
+      ? undefined
+      : accessDecision.nextBestAction;
+  const requiredFieldsForNext =
+    accessDecision.kind === "approve"
+      ? undefined
+      : accessDecision.requiredFieldsForNext;
 
   logPolicyDecision({
     requestType: policyContext.requestType,

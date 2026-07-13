@@ -199,7 +199,7 @@ describe("indexer.ts monolith shattering", () => {
       "enclosing-symbol.ts",
       "call-resolution.ts",
       "cleanup.ts",
-      "import-resolution.ts",
+      "import-target-resolver.ts",
       "pass2.ts",
       "pending.ts",
       "symbol-index.ts",

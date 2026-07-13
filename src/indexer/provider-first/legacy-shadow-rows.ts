@@ -5,7 +5,13 @@ import type {
   FileRow,
   SymbolRow,
 } from "../../db/ladybug-queries.js";
-import * as ladybugDb from "../../db/ladybug-queries.js";
+import {
+  readLegacyFallbackEdges,
+  readLegacyFallbackFiles,
+  readLegacyFallbackSymbols,
+  type LegacyFallbackEdgeDbRow,
+  type LegacyFallbackSymbolDbRow,
+} from "../../db/ladybug-provider-first.js";
 import { normalizePath } from "../../util/paths.js";
 import { canonicalizeLanguageId } from "../language.js";
 import type { ProviderFirstGraphRows } from "./materializer.js";
@@ -16,65 +22,6 @@ interface CollectLegacyFallbackShadowRowsParams {
   relPaths: Iterable<string>;
   providerRows: ProviderFirstGraphRows;
 }
-
-interface FileQueryRow {
-  fileId: string;
-  relPath: string;
-  contentHash: string;
-  language: string;
-  byteSize: unknown;
-  lastIndexedAt: string | null;
-}
-
-interface SymbolQueryRow {
-  symbolId: string;
-  repoId: string;
-  fileId: string;
-  relPath: string;
-  kind: string;
-  name: string;
-  exported: unknown;
-  visibility: string | null;
-  language: string;
-  rangeStartLine: unknown;
-  rangeStartCol: unknown;
-  rangeEndLine: unknown;
-  rangeEndCol: unknown;
-  astFingerprint: string;
-  signatureJson: string | null;
-  summary: string | null;
-  invariantsJson: string | null;
-  sideEffectsJson: string | null;
-  summaryQuality: unknown;
-  summarySource: string | null;
-  roleTagsJson: string | null;
-  searchText: string | null;
-  external: unknown;
-  source: string | null;
-  packageName: string | null;
-  packageVersion: string | null;
-  scipSymbol: string | null;
-  symbolStatus: string | null;
-  placeholderKind: string | null;
-  placeholderTarget: string | null;
-  updatedAt: string | null;
-}
-
-interface EdgeQueryRow {
-  repoId: string;
-  fromSymbolId: string;
-  toSymbolId: string;
-  edgeType: string | null;
-  weight: unknown;
-  confidence: unknown;
-  resolution: string | null;
-  resolverId: string | null;
-  resolutionPhase: string | null;
-  provenance: string | null;
-  createdAt: string | null;
-}
-
-const READ_CHUNK_SIZE = 1_000;
 
 /**
  * Copy the legacy fallback slice that was just written to the live graph back
@@ -159,34 +106,16 @@ async function collectFiles(
   repoId: string,
   relPaths: readonly string[],
 ): Promise<Array<Omit<FileRow, "directory">>> {
-  const files: Array<Omit<FileRow, "directory">> = [];
-  for (const chunk of chunks(relPaths)) {
-    const rows = await ladybugDb.queryAll<FileQueryRow>(
-      conn,
-      `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)
-       WHERE f.relPath IN $relPaths
-       RETURN f.fileId AS fileId,
-              f.relPath AS relPath,
-              f.contentHash AS contentHash,
-              f.language AS language,
-              f.byteSize AS byteSize,
-              f.lastIndexedAt AS lastIndexedAt
-       ORDER BY f.relPath`,
-      { repoId, relPaths: chunk },
-    );
-    files.push(
-      ...rows.map((row) => ({
-        fileId: row.fileId,
-        repoId,
-        relPath: normalizePath(row.relPath),
-        contentHash: row.contentHash,
-        language: canonicalizeLanguageId(row.language, row.relPath),
-        byteSize: ladybugDb.toNumber(row.byteSize),
-        lastIndexedAt: row.lastIndexedAt ?? null,
-      })),
-    );
-  }
-  return files;
+  const rows = await readLegacyFallbackFiles(conn, repoId, relPaths);
+  return rows.map((row) => ({
+    fileId: row.fileId,
+    repoId,
+    relPath: row.relPath,
+    contentHash: row.contentHash,
+    language: canonicalizeLanguageId(row.language, row.relPath),
+    byteSize: row.byteSize,
+    lastIndexedAt: row.lastIndexedAt,
+  }));
 }
 
 async function collectSymbols(
@@ -195,49 +124,8 @@ async function collectSymbols(
   fileIds: readonly string[],
   indexedAt: string,
 ): Promise<SymbolRow[]> {
-  const symbols: SymbolRow[] = [];
-  for (const chunk of chunks(fileIds)) {
-    const rows = await ladybugDb.queryAll<SymbolQueryRow>(
-      conn,
-      `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
-       WHERE f.fileId IN $fileIds
-       RETURN s.symbolId AS symbolId,
-              r.repoId AS repoId,
-              f.fileId AS fileId,
-              f.relPath AS relPath,
-              s.kind AS kind,
-              s.name AS name,
-              s.exported AS exported,
-              s.visibility AS visibility,
-              s.language AS language,
-              s.rangeStartLine AS rangeStartLine,
-              s.rangeStartCol AS rangeStartCol,
-              s.rangeEndLine AS rangeEndLine,
-              s.rangeEndCol AS rangeEndCol,
-              s.astFingerprint AS astFingerprint,
-              s.signatureJson AS signatureJson,
-              s.summary AS summary,
-              s.invariantsJson AS invariantsJson,
-              s.sideEffectsJson AS sideEffectsJson,
-              s.summaryQuality AS summaryQuality,
-              s.summarySource AS summarySource,
-              s.roleTagsJson AS roleTagsJson,
-              s.searchText AS searchText,
-              coalesce(s.external, false) AS external,
-              s.source AS source,
-              s.packageName AS packageName,
-              s.packageVersion AS packageVersion,
-              s.scipSymbol AS scipSymbol,
-              coalesce(s.symbolStatus, 'real') AS symbolStatus,
-              s.placeholderKind AS placeholderKind,
-              s.placeholderTarget AS placeholderTarget,
-              s.updatedAt AS updatedAt
-       ORDER BY f.relPath, s.rangeStartLine, s.rangeStartCol, s.name`,
-      { repoId, fileIds: chunk },
-    );
-    symbols.push(...rows.map((row) => symbolRow(row, indexedAt)));
-  }
-  return symbols;
+  const rows = await readLegacyFallbackSymbols(conn, repoId, fileIds);
+  return rows.map((row) => symbolRow(row, indexedAt));
 }
 
 async function collectEdges(params: {
@@ -251,55 +139,39 @@ async function collectEdges(params: {
   const fallbackSymbolIds = [...params.fallbackSymbolIds];
   if (fallbackSymbolIds.length === 0) return [];
 
-  for (const chunk of chunks(fallbackSymbolIds)) {
-    const rows = await ladybugDb.queryAll<EdgeQueryRow>(
-      params.conn,
-      `MATCH (from:Symbol)-[d:DEPENDS_ON]->(to:Symbol)
-       WHERE from.repoId = $repoId
-         AND to.repoId = $repoId
-         AND (from.symbolId IN $symbolIds OR to.symbolId IN $symbolIds)
-       RETURN from.repoId AS repoId,
-              from.symbolId AS fromSymbolId,
-              to.symbolId AS toSymbolId,
-              d.edgeType AS edgeType,
-              d.weight AS weight,
-              d.confidence AS confidence,
-              d.resolution AS resolution,
-              d.resolverId AS resolverId,
-              d.resolutionPhase AS resolutionPhase,
-              d.provenance AS provenance,
-              d.createdAt AS createdAt`,
-      { repoId: params.repoId, symbolIds: chunk },
-    );
-    for (const row of rows) {
-      if (
-        !params.availableSymbolIds.has(row.fromSymbolId) ||
-        !params.availableSymbolIds.has(row.toSymbolId)
-      ) {
-        continue;
-      }
-      const edge = edgeRow(row, params.indexedAt);
-      edges.set(edgeKey(edge), edge);
+  const rows = await readLegacyFallbackEdges(
+    params.conn,
+    params.repoId,
+    fallbackSymbolIds,
+  );
+  for (const row of rows) {
+    if (
+      !params.availableSymbolIds.has(row.fromSymbolId) ||
+      !params.availableSymbolIds.has(row.toSymbolId)
+    ) {
+      continue;
     }
+    const edge = edgeRow(row, params.indexedAt);
+    edges.set(edgeKey(edge), edge);
   }
 
   return [...edges.values()];
 }
 
-function symbolRow(row: SymbolQueryRow, indexedAt: string): SymbolRow {
+function symbolRow(row: LegacyFallbackSymbolDbRow, indexedAt: string): SymbolRow {
   return {
     symbolId: row.symbolId,
     repoId: row.repoId,
     fileId: row.fileId,
     kind: row.kind,
     name: row.name,
-    exported: ladybugDb.toBoolean(row.exported),
+    exported: row.exported,
     visibility: row.visibility,
     language: canonicalizeLanguageId(row.language, row.relPath),
-    rangeStartLine: ladybugDb.toNumber(row.rangeStartLine),
-    rangeStartCol: ladybugDb.toNumber(row.rangeStartCol),
-    rangeEndLine: ladybugDb.toNumber(row.rangeEndLine),
-    rangeEndCol: ladybugDb.toNumber(row.rangeEndCol),
+    rangeStartLine: row.rangeStartLine,
+    rangeStartCol: row.rangeStartCol,
+    rangeEndLine: row.rangeEndLine,
+    rangeEndCol: row.rangeEndCol,
     astFingerprint: row.astFingerprint,
     signatureJson: row.signatureJson,
     summary: row.summary,
@@ -308,11 +180,11 @@ function symbolRow(row: SymbolQueryRow, indexedAt: string): SymbolRow {
     summaryQuality:
       row.summaryQuality == null
         ? undefined
-        : ladybugDb.toNumber(row.summaryQuality),
+        : row.summaryQuality,
     summarySource: row.summarySource ?? undefined,
     roleTagsJson: row.roleTagsJson,
     searchText: row.searchText,
-    external: ladybugDb.toBoolean(row.external) || undefined,
+    external: row.external || undefined,
     source: row.source,
     packageName: row.packageName,
     packageVersion: row.packageVersion,
@@ -324,15 +196,14 @@ function symbolRow(row: SymbolQueryRow, indexedAt: string): SymbolRow {
   };
 }
 
-function edgeRow(row: EdgeQueryRow, indexedAt: string): EdgeRow {
+function edgeRow(row: LegacyFallbackEdgeDbRow, indexedAt: string): EdgeRow {
   return {
     repoId: row.repoId,
     fromSymbolId: row.fromSymbolId,
     toSymbolId: row.toSymbolId,
     edgeType: row.edgeType ?? "call",
-    weight: row.weight == null ? 1.0 : ladybugDb.toNumber(row.weight),
-    confidence:
-      row.confidence == null ? 1.0 : ladybugDb.toNumber(row.confidence),
+    weight: row.weight,
+    confidence: row.confidence,
     resolution: row.resolution ?? "heuristic",
     resolverId: row.resolverId ?? undefined,
     resolutionPhase: row.resolutionPhase ?? undefined,
@@ -365,12 +236,4 @@ function emptyGraphRows(): ProviderFirstGraphRows {
     edges: [],
     changedFileIds: new Set(),
   };
-}
-
-function chunks<T>(items: readonly T[]): T[][] {
-  const result: T[][] = [];
-  for (let i = 0; i < items.length; i += READ_CHUNK_SIZE) {
-    result.push(items.slice(i, i + READ_CHUNK_SIZE));
-  }
-  return result;
 }

@@ -1,6 +1,7 @@
 import { resolve } from "path";
 import { open, readFile, stat } from "fs/promises";
 import { existsSync, realpathSync } from "fs";
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import {
   FileReadRequestSchema,
   type FileReadInlineResponse,
@@ -368,7 +369,7 @@ export async function handleFileRead(
   args: unknown,
   context?: ToolContext,
 ): Promise<FileReadResponse> {
-  const request = FileReadRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(FileReadRequestSchema, args);
   const conn = await getLadybugConn();
   const repo = await ladybugDb.getRepo(conn, request.repoId);
   if (!repo) {

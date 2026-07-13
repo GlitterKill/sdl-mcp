@@ -41,6 +41,150 @@ const DEFAULT_METRICS_MISSING_COPY_THRESHOLD_ROWS = 512;
 const METRICS_EXISTING_PROBE_CHUNK_SIZE = 8192;
 const CENTRALITY_UPDATE_CHUNK_SIZE = 4096;
 
+export interface IndexQualityPlaceholderRow {
+  symbolId: string;
+  status: string | null;
+  kind: string | null;
+  target: string | null;
+}
+
+export interface IndexQualityDbStats {
+  unresolvedTargets: number;
+  externalTargets: number;
+  untypedPlaceholderTargets: number;
+  isolatedPlaceholders: number;
+  placeholderRows: IndexQualityPlaceholderRow[];
+  missingSignatureByKind: Record<string, number>;
+  scipPhaseCounts: Record<string, number>;
+}
+
+export interface GraphEntityCounts {
+  symbolCount: number;
+  edgeCount: number;
+}
+
+/** Read the graph-wide counts used by operational health checks. */
+export async function getGraphEntityCounts(
+  conn: Connection,
+): Promise<GraphEntityCounts> {
+  const symbolCountRow = await querySingle<{ symbolCount: unknown }>(
+    conn,
+    "MATCH (s:Symbol) RETURN count(s) AS symbolCount",
+  );
+  const edgeCountRow = await querySingle<{ edgeCount: unknown }>(
+    conn,
+    "MATCH ()-[d:DEPENDS_ON]->() RETURN count(d) AS edgeCount",
+  );
+  return {
+    symbolCount: toNumber(symbolCountRow?.symbolCount ?? 0),
+    edgeCount: toNumber(edgeCountRow?.edgeCount ?? 0),
+  };
+}
+
+export async function countRealMetricsForRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<number> {
+  const row = await querySingle<{ count: unknown }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
+     WHERE coalesce(s.symbolStatus, 'real') = 'real'
+     MATCH (m:Metrics)
+     WHERE m.symbolId = s.symbolId
+     RETURN count(m) AS count`,
+    { repoId },
+  );
+  return toNumber(row?.count ?? 0);
+}
+
+/** Read index-quality audit rows with all Ladybug numeric values normalized. */
+export async function readIndexQualityStats(
+  conn: Connection,
+  repoId: string,
+): Promise<IndexQualityDbStats> {
+  const unresolvedRow = await querySingle<{ unresolvedTargets: unknown }>(
+    conn,
+    `MATCH (a:Symbol {repoId: $repoId})-[d:DEPENDS_ON]->(b:Symbol)
+     WHERE coalesce(b.symbolStatus, '') = 'unresolved'
+     RETURN count(d) AS unresolvedTargets`,
+    { repoId },
+  );
+  const untypedRow = await querySingle<{ untypedPlaceholderTargets: unknown }>(
+    conn,
+    `MATCH (a:Symbol {repoId: $repoId})-[d:DEPENDS_ON]->(b:Symbol)
+     WHERE NOT (b)-[:SYMBOL_IN_FILE]->(:File)
+       AND (b.symbolStatus IS NULL OR b.symbolStatus = '')
+     RETURN count(d) AS untypedPlaceholderTargets`,
+    { repoId },
+  );
+  const externalRow = await querySingle<{ externalTargets: unknown }>(
+    conn,
+    `MATCH (a:Symbol {repoId: $repoId})-[d:DEPENDS_ON]->(b:Symbol)
+     WHERE coalesce(b.symbolStatus, '') = 'external'
+        OR coalesce(b.external, false) = true
+     RETURN count(d) AS externalTargets`,
+    { repoId },
+  );
+  const missingSignatureRows = await queryAll<{ kind: string; count: unknown }>(
+    conn,
+    `MATCH (s:Symbol {repoId: $repoId})
+     WHERE coalesce(s.symbolStatus, 'real') = 'real'
+       AND (s.signatureJson IS NULL OR s.signatureJson = '')
+     RETURN s.kind AS kind, count(s) AS count`,
+    { repoId },
+  );
+  const placeholderRows = await queryAll<IndexQualityPlaceholderRow>(
+    conn,
+    `MATCH (s:Symbol {repoId: $repoId})
+     WHERE NOT (s)-[:SYMBOL_IN_FILE]->(:File)
+       AND (
+         s.symbolId STARTS WITH 'unresolved:'
+         OR coalesce(s.symbolStatus, '') = 'unresolved'
+         OR coalesce(s.symbolStatus, '') = 'external'
+       )
+     RETURN s.symbolId AS symbolId, s.symbolStatus AS status,
+            s.placeholderKind AS kind, s.placeholderTarget AS target`,
+    { repoId },
+  );
+  const isolatedRow = await querySingle<{ count: unknown }>(
+    conn,
+    `MATCH (s:Symbol {repoId: $repoId})
+     WHERE NOT (s)-[:SYMBOL_IN_FILE]->(:File)
+       AND (
+         s.symbolId STARTS WITH 'unresolved:'
+         OR coalesce(s.symbolStatus, '') = 'unresolved'
+         OR coalesce(s.symbolStatus, '') = 'external'
+       )
+       AND NOT (:Symbol)-[:DEPENDS_ON]->(s)
+       AND NOT (s)-[:DEPENDS_ON]->(:Symbol)
+     RETURN count(s) AS count`,
+    { repoId },
+  );
+  const scipPhaseRows = await queryAll<{ phase: string; count: unknown }>(
+    conn,
+    `MATCH (a:Symbol {repoId: $repoId})-[d:DEPENDS_ON]->(:Symbol)
+     WHERE d.resolutionPhase = 'scip' OR d.resolverId = 'scip'
+     RETURN d.resolutionPhase AS phase, count(d) AS count`,
+    { repoId },
+  );
+
+  return {
+    unresolvedTargets: toNumber(unresolvedRow?.unresolvedTargets ?? 0),
+    externalTargets: toNumber(externalRow?.externalTargets ?? 0),
+    untypedPlaceholderTargets: toNumber(
+      untypedRow?.untypedPlaceholderTargets ?? 0,
+    ),
+    isolatedPlaceholders: toNumber(isolatedRow?.count ?? 0),
+    placeholderRows,
+    missingSignatureByKind: Object.fromEntries(
+      missingSignatureRows.map((row) => [row.kind ?? "unknown", toNumber(row.count)]),
+    ),
+    scipPhaseCounts: Object.fromEntries(
+      scipPhaseRows.map((row) => [row.phase ?? "unknown", toNumber(row.count)]),
+    ),
+  };
+}
+
 export interface SymbolMissingMetricsRow {
   symbolId: string;
 }

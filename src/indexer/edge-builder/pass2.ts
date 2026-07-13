@@ -15,7 +15,7 @@ import type { Pass2ImportCache, SubmitEdgeWrite } from "../pass2/types.js";
 import { isBuiltinCall } from "./builtins.js";
 import { resolveCallTarget } from "./call-resolution.js";
 import { findEnclosingSymbolByRange } from "./enclosing-symbol.js";
-import { resolveImportTargets } from "./import-resolution.js";
+import { resolveImportTargets } from "./import-target-resolver.js";
 import { resolveSymbolIdFromIndex } from "./symbol-index.js";
 import { buildSymbolKeyMaps, mapExtractedSymbolId } from "./symbol-mapping.js";
 import {

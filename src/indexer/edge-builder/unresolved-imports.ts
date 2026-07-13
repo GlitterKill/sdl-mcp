@@ -1,5 +1,6 @@
 import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
+import { rewriteResolvedImportEdges } from "../../db/ladybug-unresolved-imports.js";
 
 interface ResolveUnresolvedImportEdgesOptions {
   includeTimings?: boolean;
@@ -100,53 +101,25 @@ async function resolveUnresolvedImportEdges(
     //   2. fileId -> { exportedName -> symbolId } for every resolved file.
     const uniqueRelPaths = Array.from(new Set(parsed.map((p) => p.filePath)));
 
-    const fileRows = await ladybugDb.queryAll<{
-      relPath: string;
-      fileId: string;
-    }>(
+    const fileIdByRelPath = await ladybugDb.getFileIdsByRepoPaths(
       conn,
-      `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)
-       WHERE f.relPath IN $relPaths
-       RETURN f.relPath AS relPath, f.fileId AS fileId`,
-      { repoId, relPaths: uniqueRelPaths },
+      repoId,
+      uniqueRelPaths,
     );
-    const fileIdByRelPath = new Map<string, string>();
-    for (const row of fileRows) {
-      fileIdByRelPath.set(row.relPath, row.fileId);
-    }
     if (fileIdByRelPath.size === 0) return;
 
     const fileIds = Array.from(new Set(fileIdByRelPath.values()));
-    const symbolRows = await ladybugDb.queryAll<{
-      fileId: string;
-      name: string;
-      symbolId: string;
-    }>(
+    const symbolsByFile = await ladybugDb.getExportedSymbolsLiteByFileIds(
       conn,
-      `MATCH (f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
-       WHERE f.fileId IN $fileIds AND s.exported = true
-       RETURN f.fileId AS fileId, s.name AS name, s.symbolId AS symbolId`,
-      { fileIds },
+      fileIds,
     );
-    const exportedByFile = new Map<string, Map<string, string>>();
-    for (const row of symbolRows) {
-      let inner = exportedByFile.get(row.fileId);
-      if (!inner) {
-        inner = new Map<string, string>();
-        exportedByFile.set(row.fileId, inner);
-      }
-      // First exported match wins (mirrors the prior Array.find semantics).
-      if (!inner.has(row.name)) {
-        inner.set(row.name, row.symbolId);
-      }
-    }
 
     for (const entry of parsed) {
       const fileId = fileIdByRelPath.get(entry.filePath);
       if (!fileId) continue;
-      const symbolMap = exportedByFile.get(fileId);
-      if (!symbolMap) continue;
-      const targetSymbolId = symbolMap.get(entry.symbolName);
+      const targetSymbolId = symbolsByFile
+        .get(fileId)
+        ?.find((symbol) => symbol.name === entry.symbolName)?.symbolId;
       if (!targetSymbolId) continue;
       pendingUpdates.push({
         edge: entry.edge,
@@ -163,109 +136,19 @@ async function resolveUnresolvedImportEdges(
   await measure("rewriteEdges", async () => {
     if (pendingUpdates.length === 0) return;
     await withWriteConn(async (wConn) => {
-      await ladybugDb.withTransaction(wConn, async (txConn) => {
-        // Batched DELETE: every "unresolved:" Symbol exists solely as an
-        // import placeholder, so dropping every import edge whose target is
-        // in our resolved old-target set is equivalent to per-(from,to)
-        // deletes. Any source that was not in pendingUpdates would still
-        // share the same lookup outcome (lookup is by oldTo only), so it is
-        // already represented in pendingUpdates and gets re-inserted below.
-        const oldTargetIds = Array.from(
-          new Set(pendingUpdates.map((u) => u.edge.toSymbolId)),
-        );
-        await ladybugDb.exec(
-          txConn,
-          `MATCH (a:Symbol)-[old:DEPENDS_ON]->(b:Symbol)
-           WHERE old.edgeType = 'import' AND b.symbolId IN $oldTargetIds
-           DELETE old`,
-          { oldTargetIds },
-        );
-
-        // UNWIND-batched W3/W4 rewrite (replaces per-row MERGE-rel loop —
-        // missed by the 2026-05-02 sweep because the function name doesn't
-        // match the *Batch audit pattern). Three passes per chunk:
-        //   Pass A: ensure target Symbol node exists (defensive — the lookup
-        //           pulled the symbolId from existing exports so it should
-        //           already exist, but MERGE is cheap idempotent and matches
-        //           the original behaviour).
-        //   Pass B: ensure SYMBOL_IN_REPO via OPTIONAL-MATCH+CREATE — plain
-        //           MERGE-rel inside UNWIND throws the "invalid
-        //           unordered_map<K,T> key" runtime error in LadybugDB
-        //           0.15.x–0.16.0 (kuzu#5685 family).
-        //   Pass C: create DEPENDS_ON if missing.
-        //   Pass D: update existing rel props, with a guard preserving any
-        //           SCIP-written `resolution: "exact"` edges (SCIP and this
-        //           phase write disjoint sets today, but the guard also
-        //           dovetails with the same protection in `insertEdges`).
-        const createdAt = new Date().toISOString();
-        const allRows = pendingUpdates.map((u) => ({
+      const createdAt = new Date().toISOString();
+      resolved = await rewriteResolvedImportEdges(
+        wConn,
+        pendingUpdates.map((update) => ({
           repoId,
-          fromSymbolId: u.edge.fromSymbolId,
-          toSymbolId: u.targetSymbolId,
-          provenance: u.provenance,
+          fromSymbolId: update.edge.fromSymbolId,
+          oldTargetSymbolId: update.edge.toSymbolId,
+          toSymbolId: update.targetSymbolId,
+          provenance: update.provenance,
           createdAt,
-        }));
-        const CHUNK = 256;
-        for (let i = 0; i < allRows.length; i += CHUNK) {
-          const chunk = allRows.slice(i, i + CHUNK);
-
-          await ladybugDb.exec(
-            txConn,
-            `UNWIND $rows AS row
-             MERGE (b:Symbol {symbolId: row.toSymbolId})`,
-            { rows: chunk },
-          );
-          await ladybugDb.exec(
-            txConn,
-            `UNWIND $rows AS row
-             MATCH (r:Repo {repoId: row.repoId})
-             MATCH (b:Symbol {symbolId: row.toSymbolId})
-             OPTIONAL MATCH (b)-[existing:SYMBOL_IN_REPO]->(r)
-             WITH b, r, existing
-             WHERE existing IS NULL
-             CREATE (b)-[:SYMBOL_IN_REPO]->(r)`,
-            { rows: chunk },
-          );
-          await ladybugDb.exec(
-            txConn,
-            `UNWIND $rows AS row
-             MATCH (a:Symbol {symbolId: row.fromSymbolId})
-             MATCH (b:Symbol {symbolId: row.toSymbolId})
-             OPTIONAL MATCH (a)-[existing:DEPENDS_ON {edgeType: 'import'}]->(b)
-             WITH a, b, row, existing
-             WHERE existing IS NULL
-             CREATE (a)-[:DEPENDS_ON {
-               edgeType: 'import',
-               weight: 0.6,
-               confidence: 1.0,
-               resolution: 're-resolved',
-               resolverId: 'import-reresolution',
-               resolutionPhase: 'pass2',
-               provenance: row.provenance,
-               createdAt: row.createdAt
-             }]->(b)`,
-            { rows: chunk },
-          );
-          await ladybugDb.exec(
-            txConn,
-            `UNWIND $rows AS row
-             MATCH (a:Symbol {symbolId: row.fromSymbolId})
-             MATCH (b:Symbol {symbolId: row.toSymbolId})
-             MATCH (a)-[d:DEPENDS_ON {edgeType: 'import'}]->(b)
-             WHERE d.resolution <> 'exact' OR d.confidence < 1.0
-             SET d.weight = 0.6,
-                 d.confidence = 1.0,
-                 d.resolution = 're-resolved',
-                 d.resolverId = 'import-reresolution',
-                 d.resolutionPhase = 'pass2',
-                 d.provenance = row.provenance`,
-            { rows: chunk },
-          );
-
-          resolved += chunk.length;
-          options?.onChunkComplete?.(resolved, allRows.length);
-        }
-      });
+        })),
+        options?.onChunkComplete,
+      );
     });
   });
 

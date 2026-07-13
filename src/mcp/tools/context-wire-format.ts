@@ -5,32 +5,13 @@
  */
 
 import {
-  encodePackedContext,
-  CONTEXT_ENCODER_ID,
-  CONTEXT_SHORT_ID_ENCODER_ID,
-} from "../wire/packed/encoders/context.js";
-import {
-  decideFormatDetailed,
-  isPackedEnabled,
-  resolveThreshold,
-  resolveTokenThreshold,
-} from "../wire/packed/index.js";
-import { estimateTokens, estimatePackedTokens } from "../../util/tokenize.js";
+  gateWireFormat,
+  publishWireDecision,
+  type WireGateResult,
+} from "../wire/gate.js";
 import { compactCardForWire } from "./symbol-utils.js";
-import { getObservabilityTap } from "../../observability/event-tap.js";
-import { tokenAccumulator } from "../token-accumulator.js";
 
-export interface ContextWireResult {
-  format: "json" | "packed";
-  payload: unknown;
-  encoderId?: string;
-  jsonBytes?: number;
-  packedBytes?: number;
-  jsonTokens?: number;
-  packedTokens?: number;
-  axisHit?: "bytes" | "tokens";
-  gateDecision?: "packed" | "fallback";
-}
+export type ContextWireResult = WireGateResult;
 
 /**
  * Build a ContextInput shape from an enriched AgentContextPayload-like
@@ -152,93 +133,22 @@ export function serializeContextForWireFormat(
       }
     : response;
 
-  if (wireFormat !== "packed" && wireFormat !== "auto") {
-    return { format: "json", payload: jsonPayload };
-  }
-  if (!isPackedEnabled(options?.packedEnabled)) {
-    return { format: "json", payload: jsonPayload };
-  }
-
   const input = buildContextInput(jsonPayload);
-  const jsonStr = JSON.stringify(jsonPayload);
-  const aliasesActive = options?.shortIds !== false && typeof options?.sessionId === "string";
-  const encoderId = aliasesActive ? CONTEXT_SHORT_ID_ENCODER_ID : CONTEXT_ENCODER_ID;
-  const packedStr = encodePackedContext(input, {
-    sessionId: options?.sessionId,
-    shortIds: options?.shortIds,
-  });
-  const jsonTokens = estimateTokens(jsonStr);
-  const packedTokens = estimatePackedTokens(packedStr);
-  const detail = decideFormatDetailed(
+  return gateWireFormat(
+    "context",
+    jsonPayload,
     wireFormat,
     {
-      jsonBytes: jsonStr.length,
-      packedBytes: packedStr.length,
-      jsonTokens,
-      packedTokens,
+      ...options,
+      encoderInput: input,
+      publishDecision: false,
     },
-    resolveThreshold({ callThreshold: options?.packedThreshold }),
-    resolveTokenThreshold({
-      callTokenThreshold: options?.packedTokenThreshold,
-    }),
   );
-  const gateDecision = detail.decision === "packed" ? "packed" : "fallback";
-
-  if (gateDecision === "packed") {
-    return {
-      format: "packed",
-      payload: packedStr,
-      encoderId,
-      jsonBytes: jsonStr.length,
-      packedBytes: packedStr.length,
-      jsonTokens,
-      packedTokens,
-      axisHit: detail.axisHit ?? "bytes",
-      gateDecision,
-    };
-  }
-
-  return {
-    format: "json",
-    payload: jsonPayload,
-    encoderId,
-    jsonBytes: jsonStr.length,
-    packedBytes: packedStr.length,
-    jsonTokens,
-    packedTokens,
-    axisHit: detail.axisHit ?? undefined,
-    gateDecision,
-  };
 }
 
 export function publishContextWireDecision(
   wireResult: ContextWireResult,
   decision: "packed" | "fallback",
 ): void {
-  if (
-    !wireResult.encoderId ||
-    typeof wireResult.jsonBytes !== "number" ||
-    typeof wireResult.packedBytes !== "number"
-  ) {
-    return;
-  }
-  tokenAccumulator.recordPackedUsage(
-    wireResult.encoderId,
-    wireResult.jsonBytes,
-    wireResult.packedBytes,
-    decision,
-  );
-  try {
-    getObservabilityTap()?.packedWire({
-      encoderId: wireResult.encoderId,
-      jsonBytes: wireResult.jsonBytes,
-      packedBytes: wireResult.packedBytes,
-      jsonTokens: wireResult.jsonTokens,
-      packedTokens: wireResult.packedTokens,
-      decision,
-      axisHit: wireResult.axisHit ?? null,
-    });
-  } catch {
-    /* swallow */
-  }
+  publishWireDecision(wireResult, decision);
 }

@@ -9,7 +9,7 @@ export {
   type CallResolutionTelemetry,
   type Pass2ResolverTopFile,
 } from "./edge-builder/telemetry.js";
-export { resolveImportTargets } from "./edge-builder/import-resolution.js";
+export { resolveImportTargets } from "./edge-builder/import-target-resolver.js";
 export { resolveCallTarget } from "./edge-builder/call-resolution.js";
 export {
   addToSymbolIndex,

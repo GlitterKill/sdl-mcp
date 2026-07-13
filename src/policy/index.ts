@@ -5,11 +5,9 @@
  *   - `decideCodeAccess` for codeWindow / skeleton / hotPath / symbolCard / graphSlice / delta
  *   - `decideRuntime` for runtime execution
  *
- * Legacy-shape adapters (`decideCodeAccessLegacy`, `decideRuntimeLegacy`,
- * `toLegacyPolicyDecision`) are transitional — they let handlers stop
- * constructing `PolicyEngine` directly without rewriting their decision-
- * handling branches in the same change. New code should consume the
- * discriminated decision shape directly.
+ * `toLegacyPolicyDecision` is a compatibility serializer for existing
+ * telemetry and error payloads; it does not evaluate policy. New code should
+ * consume the discriminated decision shape directly.
  *
  * The `PolicyEngine` class is no longer re-exported from the barrel.
  * The few remaining tests that exercise it directly import from
@@ -19,7 +17,6 @@
 
 export {
   decideCodeAccess,
-  decideCodeAccessLegacy,
   toLegacyPolicyDecision,
 } from "./code-access.js";
 export type {
@@ -31,7 +28,7 @@ export type {
   CapDenialSuggestions,
 } from "./code-access.js";
 
-export { decideRuntime, decideRuntimeLegacy } from "./runtime.js";
+export { decideRuntime } from "./runtime.js";
 export type {
   RuntimeDecision,
   RuntimeApprove,

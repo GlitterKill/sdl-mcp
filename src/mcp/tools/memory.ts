@@ -3,6 +3,7 @@
  * Implements store, query, remove, and surface operations.
  */
 import crypto from "crypto";
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import {
   MemoryStoreRequestSchema,
   type MemoryStoreResponse,
@@ -52,7 +53,7 @@ function generateMemoryId(): string {
 export async function handleMemoryStore(
   args: unknown,
 ): Promise<MemoryStoreResponse> {
-  const request = MemoryStoreRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(MemoryStoreRequestSchema, args);
   const {
     repoId,
     type,
@@ -271,7 +272,7 @@ export async function handleMemoryStore(
 export async function handleMemoryQuery(
   args: unknown,
 ): Promise<MemoryQueryResponse> {
-  const request = MemoryQueryRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(MemoryQueryRequestSchema, args);
   const {
     repoId,
     query,
@@ -345,7 +346,7 @@ export async function handleMemoryQuery(
 export async function handleMemoryRemove(
   args: unknown,
 ): Promise<MemoryRemoveResponse> {
-  const request = MemoryRemoveRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(MemoryRemoveRequestSchema, args);
   const { repoId, memoryId, deleteFile: shouldDeleteFile = true } = request;
 
   const conn = await getLadybugConn();
@@ -401,7 +402,7 @@ export async function handleMemoryRemove(
 export async function handleMemorySurface(
   args: unknown,
 ): Promise<MemorySurfaceResponse> {
-  const request = MemorySurfaceRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(MemorySurfaceRequestSchema, args);
   const { repoId, symbolIds, taskType, limit = 10 } = request;
 
   const conn = await getLadybugConn();

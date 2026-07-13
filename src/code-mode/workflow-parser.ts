@@ -100,6 +100,7 @@ export function findRefsInArgs(args: Record<string, unknown>): number[] {
  */
 export function parseWorkflowRequest(
   raw: unknown,
+  memoryVisible?: boolean,
 ):
   | { ok: true; request: ParsedWorkflowRequest }
   | { ok: false; errors: string[] } {
@@ -126,8 +127,8 @@ export function parseWorkflowRequest(
   const etagCache = readLegacyEtagCache(raw);
   const errors: string[] = [];
   const parsedSteps: ParsedWorkflowStep[] = [];
-  const fnNameMap = getActiveFnNameMap();
-  const actionToFn = getActiveActionToFn();
+  const fnNameMap = getActiveFnNameMap(memoryVisible);
+  const actionToFn = getActiveActionToFn(memoryVisible);
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];

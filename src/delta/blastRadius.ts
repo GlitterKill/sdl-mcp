@@ -10,6 +10,7 @@ import {
   getSymbolsByIds,
 } from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
+import { estimateTokensCoarse } from "../util/tokenize.js";
 import { DatabaseError } from "../domain/errors.js";
 import { shortestPath } from "../db/ladybug-algorithms.js";
 import { getObservabilityTap } from "../observability/event-tap.js";
@@ -864,14 +865,14 @@ function estimateSymbolTokens(symbol: {
   summary: string | null;
 }): number {
   let tokens = 50;
-  tokens += symbol.name.length / 4;
+  tokens += estimateTokensCoarse(symbol.name);
 
   if (symbol.signatureJson) {
-    tokens += symbol.signatureJson.length / 4;
+    tokens += estimateTokensCoarse(symbol.signatureJson);
   }
 
   if (symbol.summary) {
-    tokens += Math.min(symbol.summary.length / 4, 150);
+    tokens += Math.min(estimateTokensCoarse(symbol.summary), 150);
   }
 
   return Math.ceil(tokens);

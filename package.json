@@ -54,6 +54,7 @@
     "test:golden": "npm run build && node scripts/golden/update-goldens.ts validate",
     "golden:update": "npm run build && node scripts/golden/update-goldens.ts generate",
     "benchmark:ci": "node dist/cli/index.js benchmark:ci",
+    "benchmark:seed-resolution": "npm run build && node --experimental-strip-types scripts/evaluate-seed-resolution.ts",
     "migrate": "npm run build:scripts && node dist/scripts/migrate.js",
     "index": "npm run build:scripts && node dist/scripts/index-repo.js",
     "index-repo": "npm run build:scripts && node dist/scripts/index-repo.js",

@@ -2,9 +2,9 @@ import type {
   LanguageAdapter,
   StructuralMatcherDescriptor,
 } from "./LanguageAdapter.js";
-import { adapters as builtInAdapters } from "./adapters.js";
 import { loadPluginsFromConfig, getPluginAdapters } from "./plugin/index.js";
 import { logger } from "../../util/logger.js";
+import { LANGUAGE_SUPPORT } from "../language-support.js";
 
 type AdapterFactory = () => LanguageAdapter;
 
@@ -35,13 +35,18 @@ function loadBuiltInAdapters(): void {
     return;
   }
 
-  for (const { extension, languageId, factory } of builtInAdapters) {
-    ADAPTER_REGISTRY.set(extension.toLowerCase(), {
-      languageId,
-      factory,
-      adapter: null,
-      source: "builtin",
-    });
+  for (const support of LANGUAGE_SUPPORT) {
+    for (const extension of support.extensions) {
+      ADAPTER_REGISTRY.set(extension.toLowerCase(), {
+        languageId: support.language,
+        factory: support.adapterFactory,
+        adapter: null,
+        source: "builtin",
+        ...(support.structuralMatcher
+          ? { structuralMatcher: support.structuralMatcher }
+          : {}),
+      });
+    }
   }
 
   builtInAdaptersLoaded = true;

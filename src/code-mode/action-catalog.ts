@@ -1,19 +1,46 @@
-import { createActionMap } from "../gateway/router.js";
-import { ACTION_TO_FN } from "./manual-generator.js";
-import { INTERNAL_TRANSFORMS } from "./transforms.js";
-import type { LiveIndexCoordinator } from "../live-index/types.js";
 import { z } from "zod";
-import { loadConfig } from "../config/loadConfig.js";
-import { anyRepoHasMemoryTools } from "../config/memory-config.js";
+
+import { INTERNAL_TRANSFORMS } from "./transforms.js";
 import {
+  AgentFeedbackQueryRequestSchema,
+  AgentFeedbackRequestSchema,
   AgentContextRequestSchema,
-  MemoryStoreRequestSchema,
+  BufferCheckpointRequestSchema,
+  BufferPushRequestSchema,
+  BufferStatusRequestSchema,
+  CodeNeedWindowRequestSchema,
+  DeltaGetRequestSchema,
+  FileReadRequestSchema,
+  FileWriteRequestSchema,
+  GetHotPathRequestSchema,
+  GetSkeletonRequestSchema,
+  IndexRefreshRequestSchema,
   MemoryQueryRequestSchema,
   MemoryRemoveRequestSchema,
+  MemoryStoreRequestSchema,
   MemorySurfaceRequestSchema,
+  PolicyGetRequestSchema,
+  PolicySetRequestSchema,
+  PRRiskAnalysisRequestSchema,
+  RepoOverviewRequestSchema,
+  RepoRegisterRequestSchema,
+  RepoStatusRequestSchema,
+  ResponseGetRequestSchema,
+  RuntimeExecuteRequestSchema,
+  RuntimeQueryOutputRequestSchema,
+  SearchEditRequestSchema,
+  SemanticEnrichmentRefreshRequestSchema,
+  SemanticEnrichmentStatusRequestSchema,
+  SliceBuildRequestSchema,
+  SliceRefreshRequestSchema,
+  SliceSpilloverGetRequestSchema,
+  SymbolEditRequestSchema,
+  SymbolGetCardRequestSchema,
+  SymbolSearchRequestSchema,
+  UsageStatsRequestSchema,
 } from "../mcp/tools.js";
 import { FileGatewayRequestSchema } from "../mcp/tools/file-gateway.js";
-import { RetrieveRequestSchema } from "./retrieve.js";
+import { RetrieveRequestSchema } from "./retrieve-schema.js";
 import { WorkflowRequestSchema } from "./types.js";
 
 // Meta-tool schemas. ActionSearchRequestSchema is also exported from
@@ -50,13 +77,6 @@ const META_TOOL_SCHEMAS: Record<string, z.ZodType> = {
   file: FileGatewayRequestSchema,
   retrieve: RetrieveRequestSchema,
   workflow: WorkflowRequestSchema,
-};
-
-const DISABLED_GATEWAY_FALLBACK_SCHEMAS: Record<string, z.ZodType> = {
-  "memory.store": MemoryStoreRequestSchema,
-  "memory.query": MemoryQueryRequestSchema,
-  "memory.remove": MemoryRemoveRequestSchema,
-  "memory.surface": MemorySurfaceRequestSchema,
 };
 
 // --- Action Tags / Categories ---
@@ -622,9 +642,39 @@ const EXAMPLE_REGISTRY: Record<string, Record<string, unknown>> = {
   },
 };
 
-// --- ActionDescriptor ---
+// --- Action Definition and catalog projection ---
 
-export interface ActionDescriptor {
+export type LadderRung = 0 | 1 | 2 | 3 | 4;
+
+export interface ActionAvailability {
+  memoryTools: boolean;
+}
+
+/**
+ * Static identity and input contract for one SDL action.
+ * Runtime handlers and response projection remain separate adapters keyed by action.
+ */
+export interface ActionDefinition {
+  action: string;
+  fn: string | null;
+  toolName: string | null;
+  schema: z.ZodType;
+  /** Canonical pre-parse field aliases accepted by every dispatch surface. */
+  aliases?: Readonly<Record<string, string>>;
+  description: string;
+  example?: Readonly<Record<string, unknown>>;
+  prerequisites: readonly string[];
+  recommendedNextActions: readonly string[];
+  fallbacks: readonly string[];
+  requiredParams: readonly string[];
+  rung: LadderRung | null;
+  tags: readonly ActionTag[];
+  kind: "gateway" | "internal" | "meta";
+  estTokens?: number;
+}
+
+/** Stable response projection used by action search/manual surfaces. */
+export interface ActionCatalogEntry {
   /** Dot-notation action name (e.g., "symbol.search") */
   action: string;
   /** CamelCase fn name for use in sdl.workflow (e.g., "symbolSearch") */
@@ -1037,6 +1087,211 @@ export function getActionMetadata(action: string): ActionMetadata {
   return ACTION_METADATA[action] ?? EMPTY_METADATA;
 }
 
+export const FN_NAME_MAP: Readonly<Record<string, string>> = {
+  symbolSearch: "symbol.search",
+  symbolGetCard: "symbol.getCard",
+  symbolEdit: "symbol.edit",
+  sliceBuild: "slice.build",
+  sliceRefresh: "slice.refresh",
+  sliceSpilloverGet: "slice.spillover.get",
+  deltaGet: "delta.get",
+  prRiskAnalyze: "pr.risk.analyze",
+  codeNeedWindow: "code.needWindow",
+  codeSkeleton: "code.getSkeleton",
+  codeHotPath: "code.getHotPath",
+  repoRegister: "repo.register",
+  repoStatus: "repo.status",
+  repoOverview: "repo.overview",
+  indexRefresh: "index.refresh",
+  policyGet: "policy.get",
+  policySet: "policy.set",
+  agentFeedback: "agent.feedback",
+  agentFeedbackQuery: "agent.feedback.query",
+  bufferPush: "buffer.push",
+  bufferCheckpoint: "buffer.checkpoint",
+  bufferStatus: "buffer.status",
+  runtimeExecute: "runtime.execute",
+  runtimeQueryOutput: "runtime.queryOutput",
+  responseGet: "response.get",
+  memoryStore: "memory.store",
+  memoryQuery: "memory.query",
+  memoryRemove: "memory.remove",
+  memorySurface: "memory.surface",
+  usageStats: "usage.stats",
+  fileRead: "file.read",
+  fileWrite: "file.write",
+  searchEdit: "search.edit",
+  semanticEnrichmentRefresh: "semantic.enrichment.refresh",
+  semanticEnrichmentStatus: "semantic.enrichment.status",
+};
+
+export const ACTION_TO_FN: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(
+    Object.entries(FN_NAME_MAP).map(([fn, action]) => [action, fn]),
+  ),
+);
+
+const GATEWAY_ACTION_SCHEMAS: ReadonlyArray<
+  readonly [action: string, schema: z.ZodType]
+> = [
+  ["symbol.search", SymbolSearchRequestSchema],
+  ["symbol.getCard", SymbolGetCardRequestSchema],
+  ["symbol.edit", SymbolEditRequestSchema],
+  ["slice.build", SliceBuildRequestSchema],
+  ["slice.refresh", SliceRefreshRequestSchema],
+  ["slice.spillover.get", SliceSpilloverGetRequestSchema],
+  ["delta.get", DeltaGetRequestSchema],
+  ["pr.risk.analyze", PRRiskAnalysisRequestSchema],
+  ["code.needWindow", CodeNeedWindowRequestSchema],
+  ["code.getSkeleton", GetSkeletonRequestSchema],
+  ["code.getHotPath", GetHotPathRequestSchema],
+  ["repo.register", RepoRegisterRequestSchema],
+  ["repo.status", RepoStatusRequestSchema],
+  ["repo.overview", RepoOverviewRequestSchema],
+  ["index.refresh", IndexRefreshRequestSchema],
+  ["policy.get", PolicyGetRequestSchema],
+  ["policy.set", PolicySetRequestSchema],
+  ["usage.stats", UsageStatsRequestSchema],
+  ["file.read", FileReadRequestSchema],
+  ["file.write", FileWriteRequestSchema],
+  ["search.edit", SearchEditRequestSchema],
+  ["semantic.enrichment.refresh", SemanticEnrichmentRefreshRequestSchema],
+  ["semantic.enrichment.status", SemanticEnrichmentStatusRequestSchema],
+  ["agent.feedback", AgentFeedbackRequestSchema],
+  ["agent.feedback.query", AgentFeedbackQueryRequestSchema],
+  ["buffer.push", BufferPushRequestSchema],
+  ["buffer.checkpoint", BufferCheckpointRequestSchema],
+  ["buffer.status", BufferStatusRequestSchema],
+  ["runtime.execute", RuntimeExecuteRequestSchema],
+  ["runtime.queryOutput", RuntimeQueryOutputRequestSchema],
+  ["response.get", ResponseGetRequestSchema],
+  ["memory.store", MemoryStoreRequestSchema],
+  ["memory.query", MemoryQueryRequestSchema],
+  ["memory.remove", MemoryRemoveRequestSchema],
+  ["memory.surface", MemorySurfaceRequestSchema],
+];
+
+export const LADDER = Object.freeze([
+  { action: "symbol.search", rung: 0, estTokens: 150 },
+  { action: "symbol.getCard", rung: 1, estTokens: 50 },
+  { action: "slice.build", rung: 1, estTokens: 1500 },
+  { action: "code.getSkeleton", rung: 2, estTokens: 200 },
+  { action: "code.getHotPath", rung: 3, estTokens: 500 },
+  { action: "code.needWindow", rung: 4, estTokens: 1400 },
+] satisfies ReadonlyArray<{
+  action: string;
+  rung: LadderRung;
+  estTokens: number;
+}>);
+
+export const LADDER_RUNG_BY_ACTION: Readonly<Record<string, LadderRung>> =
+  Object.freeze(
+    Object.fromEntries(LADDER.map(({ action, rung }) => [action, rung])),
+  );
+
+function requiredParamsForSchema(schema: z.ZodType): string[] {
+  return zodToSchemaSummary(schema).fields
+    .filter((field) => field.required && field.name !== "repoId")
+    .map((field) => field.name);
+}
+
+function createDefinition(
+  action: string,
+  fn: string,
+  toolName: string | null,
+  schema: z.ZodType,
+  description: string,
+  example: Readonly<Record<string, unknown>> | undefined,
+  tags: readonly ActionTag[],
+  kind: ActionDefinition["kind"],
+  requiredParams = requiredParamsForSchema(schema),
+): ActionDefinition {
+  const metadata = getActionMetadata(action);
+  return Object.freeze({
+    action,
+    fn,
+    toolName,
+    schema,
+    ...(action === "code.getSkeleton"
+      ? { aliases: Object.freeze({ filePath: "file" }) }
+      : {}),
+    description,
+    ...(example ? { example } : {}),
+    prerequisites: metadata.prerequisites,
+    recommendedNextActions: metadata.recommendedNextActions,
+    fallbacks: metadata.fallbacks,
+    requiredParams,
+    rung: LADDER_RUNG_BY_ACTION[action] ?? null,
+    tags,
+    kind,
+    ...(metadata.estTokens === undefined
+      ? {}
+      : { estTokens: metadata.estTokens }),
+  });
+}
+
+export const GATEWAY_ACTION_DEFINITIONS: readonly ActionDefinition[] =
+  Object.freeze(
+    GATEWAY_ACTION_SCHEMAS.map(([action, schema]) =>
+      createDefinition(
+        action,
+        ACTION_TO_FN[action],
+        `sdl.${action}`,
+        schema,
+        ACTION_DESCRIPTIONS[action] ?? "",
+        EXAMPLE_REGISTRY[action],
+        ACTION_TAGS[action] ?? [],
+        "gateway",
+      ),
+    ),
+  );
+
+const INTERNAL_ACTION_DEFINITIONS: readonly ActionDefinition[] = Object.freeze(
+  Object.entries(INTERNAL_TRANSFORMS).map(([fn, transform]) =>
+    createDefinition(
+      fn,
+      fn,
+      null,
+      transform.schema,
+      TRANSFORM_DESCRIPTIONS[fn] ?? transform.description,
+      TRANSFORM_EXAMPLES[fn],
+      ["transform"],
+      "internal",
+    ),
+  ),
+);
+
+const META_ACTION_DEFINITIONS: readonly ActionDefinition[] = Object.freeze(
+  ["action.search", "manual", "context", "file", "retrieve", "workflow"].map(
+    (action) =>
+      createDefinition(
+        action,
+        action,
+        `sdl.${action}`,
+        META_TOOL_SCHEMAS[action],
+        META_TOOL_DESCRIPTIONS[action] ?? "",
+        META_TOOL_EXAMPLES[action],
+        META_TOOL_TAGS[action] ?? ["meta"],
+        "meta",
+        [],
+      ),
+  ),
+);
+
+export const ACTION_DEFINITIONS: readonly ActionDefinition[] = Object.freeze([
+  ...GATEWAY_ACTION_DEFINITIONS,
+  ...INTERNAL_ACTION_DEFINITIONS,
+  ...META_ACTION_DEFINITIONS,
+]);
+
+export const ACTION_DEFINITION_BY_ACTION: Readonly<
+  Record<string, ActionDefinition>
+> = Object.freeze(
+  Object.fromEntries(
+    ACTION_DEFINITIONS.map((definition) => [definition.action, definition]),
+  ),
+);
+
 export function formatActionDiscoveryHints(action: string): string {
   const metadata = getActionMetadata(action);
   const parts: string[] = [];
@@ -1054,11 +1309,15 @@ export function formatActionDiscoveryHints(action: string): string {
 
 // --- Catalog Builder ---
 
-let cachedCatalog: ActionDescriptor[] | null = null;
-// Cache the action map alongside the catalog to avoid redundant createActionMap calls.
-// Assumes liveIndex is a singleton; if it changes, call invalidateCatalog().
-let cachedActionMap: ReturnType<typeof createActionMap> | null = null;
-// Track the memory visibility state used when the cache was built.
+const MEMORY_ACTIONS_LIST = [
+  "memory.store",
+  "memory.query",
+  "memory.remove",
+  "memory.surface",
+] as const;
+const MEMORY_ACTIONS = new Set<string>(MEMORY_ACTIONS_LIST);
+
+let cachedCatalog: ActionCatalogEntry[] | null = null;
 let cachedMemoryVisible: boolean | null = null;
 
 /**
@@ -1066,177 +1325,83 @@ let cachedMemoryVisible: boolean | null = null;
  * Results are cached; call `invalidateCatalog()` to clear.
  */
 export function buildCatalog(opts?: {
-  liveIndex?: LiveIndexCoordinator;
   includeSchemas?: boolean;
   includeExamples?: boolean;
-}): ActionDescriptor[] {
+  memoryVisible?: boolean;
+}): ActionCatalogEntry[] {
   const includeSchemas = opts?.includeSchemas ?? false;
   const includeExamples = opts?.includeExamples ?? false;
+  const memoryVisible = opts?.memoryVisible ?? false;
 
-  // Use cached base catalog if available, but invalidate if memory visibility changed.
-  const memoryVisible = anyRepoHasMemoryTools(loadConfig());
-  if (
-    cachedCatalog === null ||
-    cachedActionMap === null ||
-    cachedMemoryVisible !== memoryVisible
-  ) {
-    cachedActionMap = createActionMap(opts?.liveIndex);
-    cachedCatalog = buildBaseCatalogFromMap(cachedActionMap);
+  if (cachedCatalog === null || cachedMemoryVisible !== memoryVisible) {
+    cachedCatalog = buildBaseCatalog(memoryVisible);
     cachedMemoryVisible = memoryVisible;
-  }
-
-  // When memory is disabled, inject disabled placeholders so callers
-  // know the tools exist and how to enable them.
-  const MEMORY_ACTIONS_LIST = [
-    "memory.store",
-    "memory.query",
-    "memory.remove",
-    "memory.surface",
-  ];
-  if (!memoryVisible) {
-    const hasMemory = cachedCatalog.some((d) =>
-      MEMORY_ACTIONS_LIST.includes(d.action),
-    );
-    if (!hasMemory) {
-      for (const action of MEMORY_ACTIONS_LIST) {
-        const fn = ACTION_TO_FN[action];
-        if (!fn) continue;
-        cachedCatalog.push({
-          action,
-          fn,
-          description: ACTION_DESCRIPTIONS[action] ?? "",
-          tags: ACTION_TAGS[action] ?? [],
-          kind: "gateway",
-          requiredParams: [],
-          disabled: true,
-          disabledReason:
-            "Enable with memory.enabled: true in sdlmcp.config.json",
-          ...getActionMetadata(action),
-        });
-      }
-    }
   }
 
   if (!includeSchemas && !includeExamples) {
     return cachedCatalog;
   }
 
-  // Augment with optional fields using the cached action map
   return cachedCatalog.map((desc) => {
     const result = { ...desc };
+    const definition = ACTION_DEFINITION_BY_ACTION[desc.action];
 
-    if (includeSchemas) {
-      if (desc.kind === "gateway") {
-        const entry = cachedActionMap![desc.action];
-        if (entry) {
-          result.schemaSummary = zodToSchemaSummary(entry.schema);
-        } else {
-          // Disabled gateway placeholder (e.g. memory.* with memory off).
-          // Fall back to the static schema so the manual still describes
-          // the parameters callers will need once the tool is enabled.
-          const fallback = DISABLED_GATEWAY_FALLBACK_SCHEMAS[desc.action];
-          if (fallback) {
-            result.schemaSummary = zodToSchemaSummary(fallback);
-          }
-        }
-      } else if (desc.kind === "internal") {
-        const transform = INTERNAL_TRANSFORMS[desc.fn];
-        if (transform) {
-          result.schemaSummary = zodToSchemaSummary(transform.schema);
-        }
-      } else if (desc.kind === "meta") {
-        const schema = META_TOOL_SCHEMAS[desc.action];
-        if (schema) {
-          result.schemaSummary = zodToSchemaSummary(schema);
-        }
-      }
+    if (includeSchemas && definition) {
+      result.schemaSummary = zodToSchemaSummary(definition.schema);
     }
 
-    if (includeExamples) {
-      if (desc.kind === "gateway") {
-        result.example = EXAMPLE_REGISTRY[desc.action];
-      } else if (desc.kind === "internal") {
-        result.example = TRANSFORM_EXAMPLES[desc.fn];
-      } else {
-        result.example = META_TOOL_EXAMPLES[desc.action];
-      }
+    if (includeExamples && definition?.example) {
+      result.example = { ...definition.example };
     }
 
     return result;
   });
 }
 
-function buildBaseCatalogFromMap(
-  actionMap: ReturnType<typeof createActionMap>,
-): ActionDescriptor[] {
-  const catalog: ActionDescriptor[] = [];
+function projectDefinition(definition: ActionDefinition): ActionCatalogEntry {
+  return {
+    action: definition.action,
+    fn: definition.fn ?? definition.action,
+    description: definition.description,
+    tags: [...definition.tags],
+    kind: definition.kind,
+    requiredParams: [...definition.requiredParams],
+    prerequisites: [...definition.prerequisites],
+    recommendedNextActions: [...definition.recommendedNextActions],
+    fallbacks: [...definition.fallbacks],
+    ...(definition.estTokens === undefined
+      ? {}
+      : { estTokens: definition.estTokens }),
+  };
+}
 
-  // Gateway actions
-  for (const action of Object.keys(actionMap)) {
-    const fn = ACTION_TO_FN[action];
-    if (!fn) continue;
+function buildBaseCatalog(memoryVisible: boolean): ActionCatalogEntry[] {
+  const catalog = ACTION_DEFINITIONS.filter(
+    (definition) => memoryVisible || !MEMORY_ACTIONS.has(definition.action),
+  ).map(projectDefinition);
 
-    // Always extract required params (cheap, just field names)
-    const entry = actionMap[action];
-    let requiredParams: string[] = [];
-    if (entry) {
-      const summary = zodToSchemaSummary(entry.schema);
-      requiredParams = summary.fields
-        .filter((f) => f.required && f.name !== "repoId")
-        .map((f) => f.name);
+  if (!memoryVisible) {
+    for (const action of MEMORY_ACTIONS_LIST) {
+      const definition = ACTION_DEFINITION_BY_ACTION[action];
+      if (!definition) continue;
+      catalog.push({
+        action,
+        fn: definition.fn ?? action,
+        description: definition.description,
+        tags: [...definition.tags],
+        kind: "gateway",
+        requiredParams: [],
+        disabled: true,
+        disabledReason:
+          "Enable with memory.enabled: true in sdlmcp.config.json",
+        prerequisites: [...definition.prerequisites],
+        recommendedNextActions: [...definition.recommendedNextActions],
+        fallbacks: [...definition.fallbacks],
+        ...(definition.estTokens === undefined
+          ? {}
+          : { estTokens: definition.estTokens }),
+      });
     }
-
-    catalog.push({
-      action,
-      fn,
-      description: ACTION_DESCRIPTIONS[action] ?? "",
-      tags: ACTION_TAGS[action] ?? [],
-      kind: "gateway",
-      requiredParams,
-      ...getActionMetadata(action),
-    });
-  }
-
-  // Internal transforms
-  for (const [fn, transform] of Object.entries(INTERNAL_TRANSFORMS)) {
-    // Always extract required params for transforms too
-    let transformRequiredParams: string[] = [];
-    if (transform.schema) {
-      const summary = zodToSchemaSummary(transform.schema);
-      transformRequiredParams = summary.fields
-        .filter((f) => f.required && f.name !== "repoId")
-        .map((f) => f.name);
-    }
-
-    catalog.push({
-      action: fn, // transforms use fn as action name
-      fn,
-      description: TRANSFORM_DESCRIPTIONS[fn] ?? transform.description,
-      tags: ["transform"],
-      kind: "internal",
-      requiredParams: transformRequiredParams,
-      ...EMPTY_METADATA,
-    });
-  }
-
-  // Top-level Code Mode meta tools
-  for (const action of [
-    "action.search",
-    "manual",
-    "context",
-    "file",
-    "retrieve",
-    "workflow",
-  ]) {
-    catalog.push({
-      action,
-      fn: action,
-      description: META_TOOL_DESCRIPTIONS[action] ?? "",
-      tags: META_TOOL_TAGS[action] ?? ["meta"],
-      kind: "meta",
-      requiredParams: [],
-      ...getActionMetadata(action),
-    });
   }
 
   return catalog;
@@ -1244,7 +1409,6 @@ function buildBaseCatalogFromMap(
 
 export function invalidateCatalog(): void {
   cachedCatalog = null;
-  cachedActionMap = null;
   cachedMemoryVisible = null;
 }
 
@@ -1317,9 +1481,9 @@ function normalizeActionSearchTerm(term: string): string {
 }
 
 export function rankCatalog(
-  catalog: ActionDescriptor[],
+  catalog: ActionCatalogEntry[],
   query: string,
-): ActionDescriptor[] {
+): ActionCatalogEntry[] {
   const q = query.toLowerCase();
   const rawTerms = q.split(/\s+/).filter(Boolean).map(normalizeActionSearchTerm);
 

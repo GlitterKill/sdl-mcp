@@ -1,0 +1,50 @@
+[
+  {
+    "repoId": "repo-main",
+    "relPath": "src/foo.ts",
+    "kind": "function",
+    "name": "run",
+    "astFingerprint": "fp-123",
+    "expectedSymbolId": "5cb0f6451d864c30df3685e7a4dbc18cf5748fff92179169db9c739baeca212b"
+  },
+  {
+    "repoId": "repo-main",
+    "relPath": "src\\windows\\file.ts",
+    "kind": "class",
+    "name": "WindowsPath",
+    "astFingerprint": "fp-win",
+    "expectedSymbolId": "83e89367ef121fb9a4701cdd22ec4a37a47d00e582bdcdf32270f21be62bf805"
+  },
+  {
+    "repoId": "repo-main",
+    "relPath": "src/windows/file.ts",
+    "kind": "class",
+    "name": "WindowsPath",
+    "astFingerprint": "fp-win",
+    "expectedSymbolId": "12df6ab05cae19cbecee6d7bbf1fd28651a5a32b03c67aedd64fc02bcf2956d0"
+  },
+  {
+    "repoId": "répo-東京",
+    "relPath": "src/naïve/例.ts",
+    "kind": "function",
+    "name": "café計算",
+    "astFingerprint": "指紋",
+    "expectedSymbolId": "35e697d6c2763d9ca7727abea3a8465d6c48e3a0b89b35c0c46ff98877cc5487"
+  },
+  {
+    "repoId": "repo-main",
+    "relPath": "src/empty.ts",
+    "kind": "variable",
+    "name": "value",
+    "astFingerprint": "",
+    "expectedSymbolId": "954218f73efb90fbc4dc66386550862d25659c9d18742e810bcb79f7ee796857"
+  },
+  {
+    "repoId": "Repo-Main",
+    "relPath": "Src/MixedCase.ts",
+    "kind": "Method",
+    "name": "DoWork",
+    "astFingerprint": "FP-CASE",
+    "expectedSymbolId": "84a72ecd6e586b939b1523577353e3d0c48fc5e585b9c5d8e387df55edcde755"
+  }
+]

@@ -6,6 +6,7 @@
  */
 
 import { RUNTIME_NAMES } from "../../runtime/runtimes.js";
+import { ACTION_DEFINITION_BY_ACTION } from "../../code-mode/action-catalog.js";
 
 
 export interface ActionArgDef {
@@ -25,7 +26,7 @@ export interface ActionArgDef {
   invertBoolean?: boolean;
 }
 
-export interface ActionDefinition {
+export interface CliActionDefinition {
   /** Action name matching gateway action map, e.g. "symbol.search" */
   action: string;
   /** Namespace grouping for --list display */
@@ -76,7 +77,7 @@ const INCLUDE_RESOLUTION_METADATA_ARG: ActionArgDef = {
 // Meta actions (2)
 // ---------------------------------------------------------------------------
 
-const actionSearch: ActionDefinition = {
+const actionSearch: CliActionDefinition = {
   action: "action.search",
   namespace: "meta",
   description:
@@ -133,7 +134,7 @@ const actionSearch: ActionDefinition = {
   ],
 };
 
-const manual: ActionDefinition = {
+const manual: CliActionDefinition = {
   action: "manual",
   namespace: "meta",
   description:
@@ -189,7 +190,7 @@ const manual: ActionDefinition = {
 // Query actions (8)
 // ---------------------------------------------------------------------------
 
-const symbolSearch: ActionDefinition = {
+const symbolSearch: CliActionDefinition = {
   action: "symbol.search",
   namespace: "query",
   description: "Search for symbols by name or summary",
@@ -222,7 +223,7 @@ const symbolSearch: ActionDefinition = {
   ],
 };
 
-const symbolGetCard: ActionDefinition = {
+const symbolGetCard: CliActionDefinition = {
   action: "symbol.getCard",
   namespace: "query",
   description: "Get a single symbol card by ID",
@@ -243,7 +244,7 @@ const symbolGetCard: ActionDefinition = {
   ],
 };
 
-const symbolEdit: ActionDefinition = {
+const symbolEdit: CliActionDefinition = {
   action: "symbol.edit",
   namespace: "repo",
   description:
@@ -311,7 +312,7 @@ const symbolEdit: ActionDefinition = {
   ],
 };
 
-const sliceBuild: ActionDefinition = {
+const sliceBuild: CliActionDefinition = {
   action: "slice.build",
   namespace: "query",
   description: "Build a graph slice for a task context",
@@ -404,7 +405,7 @@ const sliceBuild: ActionDefinition = {
   ],
 };
 
-const sliceRefresh: ActionDefinition = {
+const sliceRefresh: CliActionDefinition = {
   action: "slice.refresh",
   namespace: "query",
   description: "Refresh an existing slice handle and return incremental delta",
@@ -429,7 +430,7 @@ const sliceRefresh: ActionDefinition = {
   ],
 };
 
-const sliceSpilloverGet: ActionDefinition = {
+const sliceSpilloverGet: CliActionDefinition = {
   action: "slice.spillover.get",
   namespace: "query",
   description: "Fetch overflow symbols via spillover handle with pagination",
@@ -457,7 +458,7 @@ const sliceSpilloverGet: ActionDefinition = {
   examples: ['sdl-mcp tool slice.spillover.get --spillover-handle "spill-abc"'],
 };
 
-const deltaGet: ActionDefinition = {
+const deltaGet: CliActionDefinition = {
   action: "delta.get",
   namespace: "query",
   description: "Get delta pack between two versions with blast radius",
@@ -495,7 +496,7 @@ const deltaGet: ActionDefinition = {
   ],
 };
 
-const prRiskAnalyze: ActionDefinition = {
+const prRiskAnalyze: CliActionDefinition = {
   action: "pr.risk.analyze",
   namespace: "query",
   description: "Analyze PR risk with blast radius and test recommendations",
@@ -543,7 +544,7 @@ const prRiskAnalyze: ActionDefinition = {
 // Code actions (3)
 // ---------------------------------------------------------------------------
 
-const codeNeedWindow: ActionDefinition = {
+const codeNeedWindow: CliActionDefinition = {
   action: "code.needWindow",
   namespace: "code",
   description: "Request gated access to raw code window for a symbol",
@@ -613,7 +614,7 @@ const codeNeedWindow: ActionDefinition = {
   ],
 };
 
-const codeGetSkeleton: ActionDefinition = {
+const codeGetSkeleton: CliActionDefinition = {
   action: "code.getSkeleton",
   namespace: "code",
   description: "Get skeleton view (signatures + control flow, elided bodies)",
@@ -668,7 +669,7 @@ const codeGetSkeleton: ActionDefinition = {
   ],
 };
 
-const codeGetHotPath: ActionDefinition = {
+const codeGetHotPath: CliActionDefinition = {
   action: "code.getHotPath",
   namespace: "code",
   description: "Get hot-path excerpt matching identifiers with context",
@@ -716,7 +717,7 @@ const codeGetHotPath: ActionDefinition = {
 // Repo actions (12)
 // ---------------------------------------------------------------------------
 
-const repoRegister: ActionDefinition = {
+const repoRegister: CliActionDefinition = {
   action: "repo.register",
   namespace: "repo",
   description: "Register a new repository for indexing",
@@ -772,7 +773,7 @@ const repoRegister: ActionDefinition = {
   ],
 };
 
-const repoStatus: ActionDefinition = {
+const repoStatus: CliActionDefinition = {
   action: "repo.status",
   namespace: "repo",
   description: "Get status information about a repository",
@@ -780,7 +781,7 @@ const repoStatus: ActionDefinition = {
   examples: ["sdl-mcp tool repo.status --repo-id my-repo"],
 };
 
-const repoOverview: ActionDefinition = {
+const repoOverview: CliActionDefinition = {
   action: "repo.overview",
   namespace: "repo",
   description: "Get token-efficient codebase overview with directory summaries",
@@ -830,7 +831,7 @@ const repoOverview: ActionDefinition = {
   ],
 };
 
-const indexRefresh: ActionDefinition = {
+const indexRefresh: CliActionDefinition = {
   action: "index.refresh",
   namespace: "repo",
   description: "Refresh index for a repository (full or incremental)",
@@ -856,7 +857,7 @@ const indexRefresh: ActionDefinition = {
   ],
 };
 
-const semanticEnrichmentRefresh: ActionDefinition = {
+const semanticEnrichmentRefresh: CliActionDefinition = {
   action: "semantic.enrichment.refresh",
   namespace: "repo",
   description:
@@ -895,7 +896,7 @@ const semanticEnrichmentRefresh: ActionDefinition = {
   ],
 };
 
-const semanticEnrichmentStatus: ActionDefinition = {
+const semanticEnrichmentStatus: CliActionDefinition = {
   action: "semantic.enrichment.status",
   namespace: "repo",
   description:
@@ -927,7 +928,7 @@ const semanticEnrichmentStatus: ActionDefinition = {
   ],
 };
 
-const policyGet: ActionDefinition = {
+const policyGet: CliActionDefinition = {
   action: "policy.get",
   namespace: "repo",
   description: "Get policy configuration for a repository",
@@ -935,7 +936,7 @@ const policyGet: ActionDefinition = {
   examples: ["sdl-mcp tool policy.get --repo-id my-repo"],
 };
 
-const policySet: ActionDefinition = {
+const policySet: CliActionDefinition = {
   action: "policy.set",
   namespace: "repo",
   description: "Update policy configuration for a repository",
@@ -958,7 +959,7 @@ const policySet: ActionDefinition = {
 // Agent actions (11)
 // ---------------------------------------------------------------------------
 
-const agentFeedback: ActionDefinition = {
+const agentFeedback: CliActionDefinition = {
   action: "agent.feedback",
   namespace: "agent",
   description: "Record feedback about useful and missing symbols",
@@ -1015,7 +1016,7 @@ const agentFeedback: ActionDefinition = {
   ],
 };
 
-const agentFeedbackQuery: ActionDefinition = {
+const agentFeedbackQuery: CliActionDefinition = {
   action: "agent.feedback.query",
   namespace: "agent",
   description: "Query feedback records and aggregated statistics",
@@ -1043,7 +1044,7 @@ const agentFeedbackQuery: ActionDefinition = {
   examples: ["sdl-mcp tool agent.feedback.query --repo-id my-repo --limit 10"],
 };
 
-const bufferPush: ActionDefinition = {
+const bufferPush: CliActionDefinition = {
   action: "buffer.push",
   namespace: "agent",
   description:
@@ -1116,7 +1117,7 @@ const bufferPush: ActionDefinition = {
   ],
 };
 
-const bufferCheckpoint: ActionDefinition = {
+const bufferCheckpoint: CliActionDefinition = {
   action: "buffer.checkpoint",
   namespace: "agent",
   description:
@@ -1133,7 +1134,7 @@ const bufferCheckpoint: ActionDefinition = {
   examples: ["sdl-mcp tool buffer.checkpoint --repo-id my-repo"],
 };
 
-const bufferStatus: ActionDefinition = {
+const bufferStatus: CliActionDefinition = {
   action: "buffer.status",
   namespace: "agent",
   description:
@@ -1142,7 +1143,7 @@ const bufferStatus: ActionDefinition = {
   examples: ["sdl-mcp tool buffer.status --repo-id my-repo"],
 };
 
-const runtimeExecute: ActionDefinition = {
+const runtimeExecute: CliActionDefinition = {
   action: "runtime.execute",
   namespace: "agent",
   description: "Execute a command in a repo-scoped subprocess",
@@ -1223,7 +1224,7 @@ const runtimeExecute: ActionDefinition = {
   ],
 };
 
-const runtimeQueryOutput: ActionDefinition = {
+const runtimeQueryOutput: CliActionDefinition = {
   action: "runtime.queryOutput",
   namespace: "agent",
   description:
@@ -1281,7 +1282,7 @@ const runtimeQueryOutput: ActionDefinition = {
   ],
 };
 
-const responseGet: ActionDefinition = {
+const responseGet: CliActionDefinition = {
   action: "response.get",
   namespace: "query",
   description: "Retrieve a stored large tool response by handle",
@@ -1352,7 +1353,7 @@ const responseGet: ActionDefinition = {
   ],
 };
 
-const usageStats: ActionDefinition = {
+const usageStats: CliActionDefinition = {
   action: "usage.stats",
   namespace: "repo",
   description: "Get token usage statistics for the current session or history",
@@ -1392,7 +1393,7 @@ const usageStats: ActionDefinition = {
   examples: ["sdl-mcp tool usage.stats --repo-id my-repo --scope session"],
 };
 
-const fileRead: ActionDefinition = {
+const fileRead: CliActionDefinition = {
   action: "file.read",
   namespace: "repo",
   description: "Read non-indexed file content from a registered repository",
@@ -1467,7 +1468,7 @@ const fileRead: ActionDefinition = {
   ],
 };
 
-const fileWrite: ActionDefinition = {
+const fileWrite: CliActionDefinition = {
   action: "file.write",
   namespace: "repo",
   description: "Write a single file with targeted update modes",
@@ -1545,7 +1546,7 @@ const fileWrite: ActionDefinition = {
   ],
 };
 
-const searchEdit: ActionDefinition = {
+const searchEdit: CliActionDefinition = {
   action: "search.edit",
   namespace: "repo",
   description: "Preview and apply cross-file search/edit plans",
@@ -1644,7 +1645,7 @@ const searchEdit: ActionDefinition = {
   ],
 };
 
-const memoryStore: ActionDefinition = {
+const memoryStore: CliActionDefinition = {
   action: "memory.store",
   namespace: "agent",
   description: "Store or update a development memory",
@@ -1707,7 +1708,7 @@ const memoryStore: ActionDefinition = {
   ],
 };
 
-const memoryQuery: ActionDefinition = {
+const memoryQuery: CliActionDefinition = {
   action: "memory.query",
   namespace: "agent",
   description: "Search stored development memories",
@@ -1761,7 +1762,7 @@ const memoryQuery: ActionDefinition = {
   ],
 };
 
-const memoryRemove: ActionDefinition = {
+const memoryRemove: CliActionDefinition = {
   action: "memory.remove",
   namespace: "agent",
   description: "Remove a stored development memory",
@@ -1786,7 +1787,7 @@ const memoryRemove: ActionDefinition = {
   ],
 };
 
-const memorySurface: ActionDefinition = {
+const memorySurface: CliActionDefinition = {
   action: "memory.surface",
   namespace: "agent",
   description: "Surface the most relevant development memories for a task",
@@ -1820,7 +1821,7 @@ const memorySurface: ActionDefinition = {
 // All action definitions, grouped by namespace
 // ---------------------------------------------------------------------------
 
-export const ACTION_DEFINITIONS: ActionDefinition[] = [
+export const CLI_ACTION_DEFINITIONS: CliActionDefinition[] = [
   // Meta
   actionSearch,
   manual,
@@ -1866,9 +1867,21 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
 ];
 
 /** Lookup by action name */
-export const ACTION_MAP = new Map<string, ActionDefinition>(
-  ACTION_DEFINITIONS.map((def) => [def.action, def]),
+export const CLI_ACTION_MAP = new Map<string, CliActionDefinition>(
+  CLI_ACTION_DEFINITIONS.map((definition) => {
+    if (!ACTION_DEFINITION_BY_ACTION[definition.action]) {
+      throw new Error(
+        `Missing canonical Action Definition for CLI action: ${definition.action}`,
+      );
+    }
+    return [definition.action, definition];
+  }),
 );
 
+// Preserve the established CLI projection exports while keeping their type
+// distinct from the canonical ActionDefinition registry.
+export const ACTION_DEFINITIONS = CLI_ACTION_DEFINITIONS;
+export const ACTION_MAP = CLI_ACTION_MAP;
+
 /** All valid action names */
-export const ALL_ACTION_NAMES = ACTION_DEFINITIONS.map((d) => d.action);
+export const ALL_ACTION_NAMES = CLI_ACTION_DEFINITIONS.map((d) => d.action);

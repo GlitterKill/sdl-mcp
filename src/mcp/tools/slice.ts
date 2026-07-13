@@ -1,3 +1,4 @@
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import {
   type SliceBuildRequest,
   SliceBuildResponse,
@@ -32,7 +33,10 @@ import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { MemoryRow } from "../../db/ladybug-memory.js";
 import type { SymbolKind } from "../../domain/types.js";
 
-import { decideCodeAccessLegacy } from "../../policy/code-access.js";
+import {
+  decideCodeAccess,
+  toLegacyPolicyDecision,
+} from "../../policy/code-access.js";
 import type { PolicyRequestContext } from "../../policy/types.js";
 import { logPolicyDecision } from "../telemetry.js";
 import { logger } from "../../util/logger.js";
@@ -408,11 +412,16 @@ async function handleSliceBuildInternal(
       budget: effectiveBudget,
     };
 
-    const {
-      decision: policyDecision,
-      nextBestAction,
-      requiredFieldsForNext,
-    } = decideCodeAccessLegacy(policyContext, mergedPolicyConfig);
+    const accessDecision = decideCodeAccess(policyContext, mergedPolicyConfig);
+    const policyDecision = toLegacyPolicyDecision(accessDecision);
+    const nextBestAction =
+      accessDecision.kind === "approve"
+        ? undefined
+        : accessDecision.nextBestAction;
+    const requiredFieldsForNext =
+      accessDecision.kind === "approve"
+        ? undefined
+        : accessDecision.requiredFieldsForNext;
 
     logPolicyDecision({
       requestType: policyContext.requestType,
@@ -881,7 +890,7 @@ export async function cleanupExpiredSliceHandles(): Promise<number> {
 export async function handleSliceSpilloverGet(
   args: unknown,
 ): Promise<SliceSpilloverGetResponse> {
-  const request = SliceSpilloverGetRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(SliceSpilloverGetRequestSchema, args);
   const spilloverHandle = request.spilloverHandle ?? request.sliceHandle!;
   const { cursor, pageSize } = request;
 

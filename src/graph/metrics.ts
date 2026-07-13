@@ -843,7 +843,7 @@ function edgeCost(edgeType: string): number {
  * Returns true if the given relative file path matches known test file patterns.
  */
 function isTestFile(relPath: string): boolean {
-  const normalized = relPath.replace(/\\/g, "/");
+  const normalized = normalizePath(relPath);
 
   // Exclude fixture/testdata directories — these are test inputs, not tests
   if (

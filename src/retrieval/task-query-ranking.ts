@@ -1,3 +1,5 @@
+import { caseFoldedPathKey } from "../util/paths.js";
+
 export interface TaskScopedCandidate {
   filePath: string;
   kind: string;
@@ -28,7 +30,7 @@ function tokenizeForRanking(value: string): string[] {
 }
 
 export function isTestLikePath(filePath: string): boolean {
-  const normalized = filePath.replace(/\\/g, "/").toLowerCase();
+  const normalized = caseFoldedPathKey(filePath);
   return normalized.includes("/tests/")
     || normalized.startsWith("tests/")
     || normalized.includes(".test.")

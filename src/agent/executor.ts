@@ -26,10 +26,10 @@ import type {
   ContextSeedCandidate,
 } from "./types.js";
 import { EvidenceCapture } from "./evidence.js";
-import type { PolicyRequestContext, PolicyDecision } from "../policy/types.js";
+import type { PolicyRequestContext } from "../policy/types.js";
 import {
   decideCodeAccess,
-  decideCodeAccessLegacy,
+  type CodeAccessDecision,
 } from "../policy/code-access.js";
 import { IndexError } from "../domain/errors.js";
 import { getLadybugConn } from "../db/ladybug.js";
@@ -45,6 +45,7 @@ import type {
   GraphSlice,
 } from "../domain/types.js";
 import { logger } from "../util/logger.js";
+import { caseFoldedPathKey } from "../util/paths.js";
 import { isHybridRetrievalAvailable } from "../retrieval/fallback.js";
 import { hybridSearch } from "../retrieval/orchestrator.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
@@ -165,7 +166,7 @@ export class Executor {
   private metrics: ExecutionMetrics;
   private startTime = 0;
 
-  private policyDecisions: Map<string, PolicyDecision> = new Map();
+  private policyDecisions: Map<string, CodeAccessDecision> = new Map();
   private gateEvaluator: GateEvaluator;
   private connPromise: ReturnType<typeof getLadybugConn> | null = null;
   private dbQueries: ExecutorDbQueries;
@@ -765,8 +766,8 @@ export class Executor {
     const relPath = fileId.includes(":")
       ? fileId.slice(fileId.indexOf(":") + 1)
       : fileId;
-    const normalizedRelPath = relPath.replace(/\\/g, "/").toLowerCase();
-    const normalizedFocus = focusPath.replace(/\\/g, "/").toLowerCase();
+    const normalizedRelPath = caseFoldedPathKey(relPath);
+    const normalizedFocus = caseFoldedPathKey(focusPath);
     return (
       normalizedRelPath === normalizedFocus ||
       normalizedRelPath.startsWith(
@@ -1253,11 +1254,10 @@ export class Executor {
           symbolId,
         };
 
-        const { decision: policyDecision } =
-          decideCodeAccessLegacy(policyContext);
+        const policyDecision = decideCodeAccess(policyContext);
         this.policyDecisions.set(`${actionId}:${symbolId}`, policyDecision);
 
-        if (policyDecision.decision === "deny") {
+        if (policyDecision.kind === "deny") {
           rawAccessAllowed = false;
           this.evidenceCapture.captureDiagnostic(
             symbolId,

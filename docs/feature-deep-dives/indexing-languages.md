@@ -221,6 +221,37 @@ Every resolved call edge includes a **confidence score** (0.0–1.0), a **resolv
 
 ---
 
+## Adding a Built-In Language
+
+Register a built-in language once in `src/indexer/language-support.ts`. Its
+`LanguageSupport` entry declares:
+
+- the canonical language ID and every owned extension;
+- the tree-sitter grammar key;
+- a lazy `LanguageAdapter` factory;
+- an optional lazy import-candidate factory;
+- a lazy pass-2 resolver factory;
+- optional structural matcher metadata for AST-aware edits.
+
+Keep constructors inside factories. Importing the registration list must not
+load a grammar, read configuration, or create adapter/resolver instances. The
+adapter registry expands the extension list and caches one adapter per
+extension. The import-candidate and pass-2 registries construct their built-in
+defaults from the same list while retaining their selection and ordering
+logic.
+
+When one import-candidate adapter legitimately supports multiple languages,
+reuse the same factory and order value. The runtime registry deduplicates that
+factory; Java/Kotlin and C/C++ use this pattern today.
+
+Runtime plugins remain an overlay, not entries in the built-in list. A plugin
+can add an extension or override a built-in extension without needing a fake
+grammar or pass-2 registration. Validate a change with the Language Support
+parity test, adapter/plugin tests, harness and engine/native parity, then run
+`npm run docs:language-support:check`.
+
+---
+
 ## Incremental Indexing
 
 After the initial full index, subsequent runs use incremental mode:

@@ -5,6 +5,7 @@ import type { SymbolIndex, TsCallResolver } from "../edge-builder/types.js";
 import type { ExtractedImport } from "../treesitter/extractImports.js";
 import type { ExtractedCall } from "../treesitter/extractCalls.js";
 import type { ExtractedSymbol } from "../treesitter/extractSymbols.js";
+import { normalizePath } from "../../util/paths.js";
 
 export interface Pass2Target {
   repoId?: string;
@@ -208,7 +209,7 @@ function emptyPass1ExtractionBuckets(): Record<
 }
 
 function extensionForRelPath(relPath: string): string {
-  const normalized = relPath.replaceAll("\\", "/");
+  const normalized = relPath ? normalizePath(relPath) : relPath;
   const basename = normalized.slice(normalized.lastIndexOf("/") + 1);
   const dotIndex = basename.lastIndexOf(".");
   return dotIndex >= 0 ? basename.slice(dotIndex).toLowerCase() : "";

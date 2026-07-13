@@ -10,6 +10,7 @@ import type { Connection } from "kuzu";
 import { resolveSymbolByShorthand } from "../db/ladybug-symbols.js";
 import { getOverlaySnapshot } from "../live-index/overlay-reader.js";
 import { NotFoundError } from "../mcp/errors.js";
+import { normalizePath } from "./paths.js";
 
 const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
 const SHORTHAND_RE = /^(.+)::([^:]+)$/;
@@ -76,7 +77,7 @@ function resolveShorthandFromOverlay(
   }
   if (!snapshot) return null;
 
-  const normalizedPath = relPath.replace(/\\/g, "/");
+  const normalizedPath = normalizePath(relPath);
 
   for (const symbol of snapshot.symbolsById.values()) {
     if (symbol.repoId !== repoId) continue;
@@ -85,7 +86,7 @@ function resolveShorthandFromOverlay(
     const file = snapshot.filesById.get(symbol.fileId);
     if (!file) continue;
 
-    const fileRelPath = file.relPath.replace(/\\/g, "/");
+    const fileRelPath = normalizePath(file.relPath);
     if (fileRelPath.endsWith(normalizedPath)) {
       return symbol.symbolId;
     }

@@ -5,6 +5,7 @@ import { buildClusterSearchText } from "../db/ladybug-clusters.js";
 import { buildProcessSearchText } from "../db/ladybug-processes.js";
 import { withWriteConn } from "../db/ladybug.js";
 import { logger } from "../util/logger.js";
+import { normalizePath } from "../util/paths.js";
 import { computeClustersTS } from "../graph/cluster.js";
 import type { FoldedCentralityResult } from "../graph/metrics.js";
 import { traceProcessesTS } from "../graph/process.js";
@@ -1074,7 +1075,7 @@ function generateClusterLabel(
     if (!sym) continue;
     const file = filesById.get(sym.fileId);
     if (!file) continue;
-    const dir = file.relPath.replace(/\\/g, "/").replace(/\/[^/]+$/, "") || ".";
+    const dir = normalizePath(file.relPath).replace(/\/[^/]+$/, "") || ".";
     dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + 1);
   }
 

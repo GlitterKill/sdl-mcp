@@ -3,8 +3,16 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseDraftFile } from "../../dist/live-index/draft-parser.js";
-import { closeLadybugDb, initLadybugDb } from "../../dist/db/ladybug.js";
+import {
+  _setDraftSymbolFallbackObserverForTests,
+  parseDraftFile,
+} from "../../dist/live-index/draft-parser.js";
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+} from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { loadBuiltInAdapters } from "../../dist/indexer/adapter/registry.js";
 
 describe("parseDraftFile", () => {
@@ -75,5 +83,44 @@ describe("parseDraftFile", () => {
       ),
     );
     assert.ok(result.references.some((ref) => ref.symbolName === "alpha"));
+  });
+
+  it("reports durable SymbolID fallback without changing draft output", async () => {
+    const input = {
+      repoId: "durable-fallback-repo",
+      repoRoot: process.cwd(),
+      filePath: "src/durable.ts",
+      content: "export function stable() { return 1; }\n",
+      languages: ["ts"],
+      language: "typescript",
+      version: 1,
+    };
+    const initial = await parseDraftFile(input);
+    const durableSymbol = initial.symbols.find((symbol) => symbol.name === "stable");
+    assert.ok(durableSymbol);
+
+    const conn = await getLadybugConn();
+    await ladybugDb.upsertRepo(conn, {
+      repoId: input.repoId,
+      rootPath: input.repoRoot,
+      configJson: "{}",
+      createdAt: "2026-07-13T00:00:00.000Z",
+    });
+    await ladybugDb.upsertFile(conn, initial.file);
+    await ladybugDb.upsertSymbol(conn, durableSymbol);
+
+    const fallbacks: string[] = [];
+    _setDraftSymbolFallbackObserverForTests((matchKey) => fallbacks.push(matchKey));
+    try {
+      const changed = await parseDraftFile({
+        ...input,
+        content: "export function stable() { return 2; }\n",
+        version: 2,
+      });
+      assert.deepEqual(fallbacks, ["function:stable:1:7"]);
+      assert.equal(changed.symbols[0]?.symbolId, durableSymbol.symbolId);
+    } finally {
+      _setDraftSymbolFallbackObserverForTests();
+    }
   });
 });

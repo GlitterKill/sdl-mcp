@@ -1,6 +1,7 @@
 import { relative } from "path";
 import { realpathSync } from "fs";
 
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import {
   FileWriteRequestSchema,
   type DiffPreviewSnippets,
@@ -107,7 +108,7 @@ function buildDiffPreview(
 export async function handleFileWrite(
   args: unknown,
 ): Promise<FileWriteResponse> {
-  const request = FileWriteRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(FileWriteRequestSchema, args);
   const prepared = await preparePath(request.repoId, request.filePath);
   const { rootPath, relPath, absPath, fileExists } = prepared;
 

@@ -24,6 +24,11 @@ import { createHash } from "crypto";
 import { getLadybugConn } from "../../../db/ladybug.js";
 import * as ladybugDb from "../../../db/ladybug-queries.js";
 import { normalizePath, validatePathWithinRoot } from "../../../util/paths.js";
+import {
+  detectDominantEol,
+  normalizeToLf,
+  restoreEol,
+} from "../../../util/eol.js";
 import { NotFoundError, ValidationError } from "../../../domain/errors.js";
 import { resolveSymbolRef } from "../../../util/resolve-symbol-ref.js";
 import { narrowFilesForQuery } from "../../../retrieval/orchestrator.js";
@@ -298,8 +303,8 @@ export function compileSearchRegex(
  * (`\r?\n`) so multi-line literals match CRLF files.
  */
 function escapeSearchLiteral(literal: string): string {
-  const escaped = literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return escaped.replace(/\r\n|\n/g, "\\r?\\n");
+  const escaped = normalizeToLf(literal).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return escaped.replace(/\n/g, "\\r?\\n");
 }
 
 const MAX_GLOB_WILDCARDS = 6;
@@ -598,7 +603,7 @@ interface PreviewLineRange {
 }
 
 function splitPreviewLines(text: string): string[] {
-  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const normalized = normalizeToLf(text);
   if (normalized.length === 0) return [];
   const lines = normalized.split("\n");
   if (lines.length > 1 && lines[lines.length - 1] === "") {
@@ -1332,12 +1337,6 @@ function filtersForAstAwareCandidates(
   };
 }
 
-function dominantEol(content: string): "\r\n" | "\n" {
-  const crlfCount = (content.match(/\r\n/g) || []).length;
-  const lfCount = (content.match(/(?<!\r)\n/g) || []).length;
-  return crlfCount > lfCount ? "\r\n" : "\n";
-}
-
 function expandReplacementString(
   replacement: string,
   match: RegExpExecArray,
@@ -1380,7 +1379,7 @@ function collectReplacePatternSourceEdits(
     );
   }
   const regex = compileSearchRegex(request.query, request.query.global ?? true);
-  const normalizeReplacementEol = dominantEol(content) === "\r\n";
+  const targetEol = detectDominantEol(content);
   const edits: SourceEdit[] = [];
   const matchDeadline = Date.now() + MATCH_TIME_BUDGET_MS;
   let match: RegExpExecArray | null;
@@ -1393,9 +1392,7 @@ function collectReplacePatternSourceEdits(
       match,
       content,
     );
-    if (normalizeReplacementEol) {
-      replacement = replacement.replace(/(?<!\r)\n/g, "\r\n");
-    }
+    replacement = restoreEol(replacement, targetEol);
     edits.push({
       operationId,
       start: match.index,

@@ -395,95 +395,10 @@ async function collectIndexQualityStats(
   repoId: string,
 ): Promise<IndexQualityStats> {
   const conn = await getLadybugConn();
-  const unresolvedRow = await ladybugDb.querySingle<{
-    unresolvedTargets: unknown;
-  }>(
-    conn,
-    `MATCH (a:Symbol {repoId: $repoId})-[d:DEPENDS_ON]->(b:Symbol)
-     WHERE coalesce(b.symbolStatus, '') = 'unresolved'
-     RETURN count(d) AS unresolvedTargets`,
-    { repoId },
-  );
-  const untypedRow = await ladybugDb.querySingle<{
-    untypedPlaceholderTargets: unknown;
-  }>(
-    conn,
-    `MATCH (a:Symbol {repoId: $repoId})-[d:DEPENDS_ON]->(b:Symbol)
-     WHERE NOT (b)-[:SYMBOL_IN_FILE]->(:File)
-       AND (b.symbolStatus IS NULL OR b.symbolStatus = '')
-     RETURN count(d) AS untypedPlaceholderTargets`,
-    { repoId },
-  );
-  const externalRow = await ladybugDb.querySingle<{
-    externalTargets: unknown;
-  }>(
-    conn,
-    `MATCH (a:Symbol {repoId: $repoId})-[d:DEPENDS_ON]->(b:Symbol)
-     WHERE coalesce(b.symbolStatus, '') = 'external'
-        OR coalesce(b.external, false) = true
-     RETURN count(d) AS externalTargets`,
-    { repoId },
-  );
-  const missingSignatureRows = await ladybugDb.queryAll<{
-    kind: string;
-    count: unknown;
-  }>(
-    conn,
-    `MATCH (s:Symbol {repoId: $repoId})
-     WHERE coalesce(s.symbolStatus, 'real') = 'real'
-       AND (s.signatureJson IS NULL OR s.signatureJson = '')
-     RETURN s.kind AS kind, count(s) AS count`,
-    { repoId },
-  );
-  const placeholderRows = await ladybugDb.queryAll<{
-    symbolId: string;
-    status: string | null;
-    kind: string | null;
-    target: string | null;
-  }>(
-    conn,
-    `MATCH (s:Symbol {repoId: $repoId})
-     WHERE NOT (s)-[:SYMBOL_IN_FILE]->(:File)
-       AND (
-         s.symbolId STARTS WITH 'unresolved:'
-         OR coalesce(s.symbolStatus, '') = 'unresolved'
-         OR coalesce(s.symbolStatus, '') = 'external'
-       )
-     RETURN s.symbolId AS symbolId,
-            s.symbolStatus AS status,
-            s.placeholderKind AS kind,
-            s.placeholderTarget AS target`,
-    { repoId },
-  );
-  const isolatedRow = await ladybugDb.querySingle<{
-    count: unknown;
-  }>(
-    conn,
-    `MATCH (s:Symbol {repoId: $repoId})
-     WHERE NOT (s)-[:SYMBOL_IN_FILE]->(:File)
-       AND (
-         s.symbolId STARTS WITH 'unresolved:'
-         OR coalesce(s.symbolStatus, '') = 'unresolved'
-         OR coalesce(s.symbolStatus, '') = 'external'
-       )
-       AND NOT (:Symbol)-[:DEPENDS_ON]->(s)
-       AND NOT (s)-[:DEPENDS_ON]->(:Symbol)
-     RETURN count(s) AS count`,
-    { repoId },
-  );
-  const scipPhaseRows = await ladybugDb.queryAll<{
-    phase: string;
-    count: unknown;
-  }>(
-    conn,
-    `MATCH (a:Symbol {repoId: $repoId})-[d:DEPENDS_ON]->(:Symbol)
-     WHERE d.resolutionPhase = 'scip' OR d.resolverId = 'scip'
-     RETURN d.resolutionPhase AS phase, count(d) AS count`,
-    { repoId },
-  );
+  const dbStats = await ladybugDb.readIndexQualityStats(conn, repoId);
   let placeholderTargetMismatches = 0;
   const placeholderCounts: Record<string, number> = {};
-  for (const row of placeholderRows) {
+  for (const row of dbStats.placeholderRows) {
     if (row.symbolId.startsWith("unresolved:")) {
       const meta = classifyDependencyTarget(row.symbolId);
       if (
@@ -499,28 +414,14 @@ async function collectIndexQualityStats(
   }
 
   return {
-    unresolvedTargets: ladybugDb.toNumber(
-      unresolvedRow?.unresolvedTargets ?? 0,
-    ),
-    externalTargets: ladybugDb.toNumber(externalRow?.externalTargets ?? 0),
-    untypedPlaceholderTargets: ladybugDb.toNumber(
-      untypedRow?.untypedPlaceholderTargets ?? 0,
-    ),
+    unresolvedTargets: dbStats.unresolvedTargets,
+    externalTargets: dbStats.externalTargets,
+    untypedPlaceholderTargets: dbStats.untypedPlaceholderTargets,
     placeholderTargetMismatches,
-    isolatedPlaceholders: ladybugDb.toNumber(isolatedRow?.count ?? 0),
+    isolatedPlaceholders: dbStats.isolatedPlaceholders,
     placeholderCounts,
-    missingSignatureByKind: Object.fromEntries(
-      missingSignatureRows.map((row) => [
-        row.kind ?? "unknown",
-        ladybugDb.toNumber(row.count),
-      ]),
-    ),
-    scipPhaseCounts: Object.fromEntries(
-      scipPhaseRows.map((row) => [
-        row.phase ?? "unknown",
-        ladybugDb.toNumber(row.count),
-      ]),
-    ),
+    missingSignatureByKind: dbStats.missingSignatureByKind,
+    scipPhaseCounts: dbStats.scipPhaseCounts,
   };
 }
 

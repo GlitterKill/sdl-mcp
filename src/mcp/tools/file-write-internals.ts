@@ -23,6 +23,11 @@ import { createHash, randomBytes } from "crypto";
 import { getLadybugConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import { normalizePath, validatePathWithinRoot } from "../../util/paths.js";
+import {
+  detectDominantEol,
+  normalizeToLf,
+  restoreEol,
+} from "../../util/eol.js";
 import { logger } from "../../util/logger.js";
 import { NotFoundError, ValidationError } from "../../domain/errors.js";
 import { patchSavedFile } from "../../live-index/file-patcher.js";
@@ -193,9 +198,7 @@ export function prepareNewContent(
 
   // Detect dominant EOL and BOM for preservation
   const hasBom = existingContent.startsWith("\uFEFF");
-  const crlfCount = (existingContent.match(/\r\n/g) || []).length;
-  const lfCount = (existingContent.match(/(?<!\r)\n/g) || []).length;
-  const dominantEol = crlfCount > lfCount ? "\r\n" : "\n";
+  const targetEol = detectDominantEol(existingContent);
 
   // === Mode: Full content ===
   if (request.content !== undefined) {
@@ -209,7 +212,7 @@ export function prepareNewContent(
   if (request.replaceLines !== undefined) {
     const { start, end, content } = request.replaceLines;
     const normalizedContent = hasBom ? existingContent.slice(1) : existingContent;
-    const lines = normalizedContent.split(/\r?\n/);
+    const lines = normalizeToLf(normalizedContent).split("\n");
     if (start > lines.length) {
       throw new ValidationError(
         `Start line ${start} exceeds file length (${lines.length} lines)`,
@@ -225,9 +228,9 @@ export function prepareNewContent(
         `End line ${end} must be >= start line ${start}`,
       );
     }
-    const newLines = content.split(/\r?\n/);
+    const newLines = normalizeToLf(content).split("\n");
     lines.splice(start, end - start, ...newLines);
-    let newContent = lines.join(dominantEol);
+    let newContent = restoreEol(lines.join("\n"), targetEol);
     if (hasBom) newContent = "\uFEFF" + newContent;
     return {
       newContent,
@@ -296,11 +299,7 @@ export function prepareNewContent(
       newContent = existingContent.replace(regex, replacement);
       if (newContent !== existingContent) replacementCount = 1;
     }
-    // Preserve dominant EOL: if file uses CRLF, normalize any bare LF
-    // introduced by the replacement string back to CRLF.
-    if (dominantEol === "\r\n") {
-      newContent = newContent.replace(/(?<!\r)\n/g, "\r\n");
-    }
+    newContent = restoreEol(newContent, targetEol);
     return {
       newContent,
       mode: "replacePattern",
@@ -336,15 +335,15 @@ export function prepareNewContent(
   if (request.insertAt !== undefined) {
     const { line, content } = request.insertAt;
     const normalizedInsert = hasBom ? existingContent.slice(1) : existingContent;
-    const lines = normalizedInsert.split(/\r?\n/);
+    const lines = normalizeToLf(normalizedInsert).split("\n");
     if (line > lines.length) {
       throw new ValidationError(
         `Insert line ${line} exceeds file length (${lines.length} lines)`,
       );
     }
-    const newLines = content.split(/\r?\n/);
+    const newLines = normalizeToLf(content).split("\n");
     lines.splice(line, 0, ...newLines);
-    let insertResult = lines.join(dominantEol);
+    let insertResult = restoreEol(lines.join("\n"), targetEol);
     if (hasBom) insertResult = "\uFEFF" + insertResult;
     return {
       newContent: insertResult,
@@ -357,7 +356,7 @@ export function prepareNewContent(
     const needsNewline =
       existingContent.length > 0 && !existingContent.endsWith("\n");
     return {
-      newContent: existingContent + (needsNewline ? dominantEol : "") + request.append,
+      newContent: existingContent + (needsNewline ? targetEol : "") + request.append,
       mode: "append",
     };
   }

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 
 import {
   decideCodeAccess,
-  decideCodeAccessLegacy,
   toLegacyPolicyDecision,
 } from "../../../dist/policy/code-access.js";
 import type {
@@ -239,36 +238,6 @@ describe("toLegacyPolicyDecision", () => {
   });
 });
 
-describe("decideCodeAccessLegacy", () => {
-  it("returns the legacy PolicyDecision shape plus nextBestAction info", () => {
-    const result = decideCodeAccessLegacy(
-      makeApprovalContext({
-        identifiersToFind: [],
-        sliceContext: undefined,
-        symbolId: undefined,
-      }),
-      BASE_CONFIG,
-    );
-    assert.notEqual(result.decision.decision, "approve");
-    assert.ok(typeof result.decision.auditHash === "string");
-    // nextBestAction must be one of the documented NextBestAction literals.
-    if (result.nextBestAction !== undefined) {
-      assert.ok(
-        (VALID_NEXT_BEST_ACTIONS as readonly string[]).includes(
-          result.nextBestAction,
-        ),
-        `unexpected nextBestAction: ${result.nextBestAction}`,
-      );
-    }
-  });
-
-  it("returns no nextBestAction on approve", () => {
-    const result = decideCodeAccessLegacy(makeApprovalContext(), BASE_CONFIG);
-    assert.equal(result.decision.decision, "approve");
-    assert.equal(result.nextBestAction, undefined);
-    assert.equal(result.requiredFieldsForNext, undefined);
-  });
-});
 
 /**
  * Rule-ordering invariants — replaces coverage from the deleted

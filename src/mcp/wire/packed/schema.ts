@@ -20,6 +20,7 @@ import {
 } from "./format.js";
 import type { ScalarTypeMap, TableSpec } from "./types.js";
 import { PackedDecodeError } from "./types.js";
+import { normalizePath } from "../../../util/paths.js";
 
 export interface SchemaEncodeInput {
   toolName: string;
@@ -62,7 +63,7 @@ function buildLegends(candidates: string[]): Legends {
   if (candidates.length === 0) return legends;
   const counts = new Map<string, number>();
   for (const path of candidates) {
-    const norm = path.replace(/\\/g, "/");
+    const norm = normalizePath(path);
     const lastSlash = norm.lastIndexOf("/");
     if (lastSlash < 1) continue;
     const prefix = norm.slice(0, lastSlash + 1);

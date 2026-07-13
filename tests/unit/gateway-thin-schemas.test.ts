@@ -1,17 +1,19 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import {
-  QUERY_THIN_SCHEMA,
-  CODE_THIN_SCHEMA,
-  REPO_THIN_SCHEMA,
-  AGENT_THIN_SCHEMA,
-} from "../../dist/gateway/thin-schemas.js";
+import { buildGatewayWireSchema } from "../../dist/gateway/thin-schemas.js";
+import { createActionMap } from "../../dist/gateway/router.js";
 import {
   QUERY_ACTIONS,
   CODE_ACTIONS,
   REPO_ACTIONS,
   AGENT_ACTIONS,
 } from "../../dist/gateway/schemas.js";
+
+const actionMap = createActionMap();
+const QUERY_THIN_SCHEMA = buildGatewayWireSchema(QUERY_ACTIONS, actionMap);
+const CODE_THIN_SCHEMA = buildGatewayWireSchema(CODE_ACTIONS, actionMap);
+const REPO_THIN_SCHEMA = buildGatewayWireSchema(REPO_ACTIONS, actionMap);
+const AGENT_THIN_SCHEMA = buildGatewayWireSchema(AGENT_ACTIONS, actionMap);
 
 function assertGatewaySchema(
   schema: Record<string, unknown>,

@@ -71,6 +71,34 @@ interface WireCardInput {
   truncated?: unknown;
 }
 
+/** Canonical insertion order for every model-visible symbol card field. */
+export const CARD_WIRE_FIELD_ORDER = [
+  "symbolId",
+  "repoId",
+  "file",
+  "range",
+  "kind",
+  "name",
+  "exported",
+  "visibility",
+  "signature",
+  "summary",
+  "summaryProvenance",
+  "invariants",
+  "sideEffects",
+  "cluster",
+  "processes",
+  "callResolution",
+  "deps",
+  "metrics",
+  "detailLevel",
+  "etag",
+  "version",
+  "truncated",
+] as const;
+
+type CardWireField = (typeof CARD_WIRE_FIELD_ORDER)[number];
+
 function isEmptyObject(value: unknown): value is Record<string, never> {
   return (
     value !== null &&
@@ -168,40 +196,39 @@ export function compactCardForWire(
   opts: CompactCardForWireOptions = {},
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-
-  addWireField(out, "symbolId", card.symbolId);
-  addWireField(out, "repoId", card.repoId);
-  addWireField(out, "file", card.file);
-  addWireField(
-    out,
-    "range",
-    opts.compactRanges && isWireRange(card.range)
-      ? compactRange(card.range)
-      : card.range,
-  );
-  addWireField(out, "kind", card.kind);
-  addWireField(out, "name", card.name);
-  addWireField(out, "exported", card.exported);
-  addWireField(out, "visibility", card.visibility);
-  addWireField(out, "signature", card.signature);
   const summary = cardSummaryForWire(card.summary, card.name);
-  addWireField(out, "summary", summary);
-  addWireField(
-    out,
-    "summaryProvenance",
-    summary === undefined ? undefined : card.summaryProvenance,
-  );
-  addWireField(out, "invariants", card.invariants);
-  addWireField(out, "sideEffects", card.sideEffects);
-  addWireField(out, "cluster", card.cluster);
-  addWireField(out, "processes", card.processes);
-  addWireField(out, "callResolution", card.callResolution);
-  addWireField(out, "deps", compactDepsForWire(card.deps));
-  addWireField(out, "metrics", card.metrics);
-  addWireField(out, "detailLevel", card.detailLevel);
-  addWireField(out, "etag", card.etag);
-  addWireField(out, "version", card.version);
-  addWireField(out, "truncated", card.truncated);
+  const values: Record<CardWireField, unknown> = {
+    symbolId: card.symbolId,
+    repoId: card.repoId,
+    file: card.file,
+    range:
+      opts.compactRanges && isWireRange(card.range)
+        ? compactRange(card.range)
+        : card.range,
+    kind: card.kind,
+    name: card.name,
+    exported: card.exported,
+    visibility: card.visibility,
+    signature: card.signature,
+    summary,
+    summaryProvenance:
+      summary === undefined ? undefined : card.summaryProvenance,
+    invariants: card.invariants,
+    sideEffects: card.sideEffects,
+    cluster: card.cluster,
+    processes: card.processes,
+    callResolution: card.callResolution,
+    deps: compactDepsForWire(card.deps),
+    metrics: card.metrics,
+    detailLevel: card.detailLevel,
+    etag: card.etag,
+    version: card.version,
+    truncated: card.truncated,
+  };
+
+  for (const field of CARD_WIRE_FIELD_ORDER) {
+    addWireField(out, field, values[field]);
+  }
 
   return out;
 }

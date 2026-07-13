@@ -1,4 +1,5 @@
 import type { ToolContext } from "../../server.js";
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import {
   refreshSemanticEnrichment,
@@ -16,7 +17,10 @@ export async function handleSemanticEnrichmentRefresh(
   args: unknown,
   _context?: ToolContext,
 ): Promise<object> {
-  const request = SemanticEnrichmentRefreshRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(
+    SemanticEnrichmentRefreshRequestSchema,
+    args,
+  );
   return refreshSemanticEnrichment(request, loadConfig());
 }
 
@@ -64,7 +68,10 @@ export async function handleSemanticEnrichmentStatus(
   args: unknown,
   _context?: ToolContext,
 ): Promise<object> {
-  const request = SemanticEnrichmentStatusRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(
+    SemanticEnrichmentStatusRequestSchema,
+    args,
+  );
   const status = await getSemanticEnrichmentStatus(request, loadConfig());
   return request.detail === "full"
     ? status

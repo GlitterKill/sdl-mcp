@@ -1,13 +1,5 @@
 import type { ParsedWorkflowStep } from "./workflow-parser.js";
-
-const RUNG_ORDER: Record<string, number> = {
-  "symbol.search": 0,
-  "symbol.getCard": 1,
-  "slice.build": 1,
-  "code.getSkeleton": 2,
-  "code.getHotPath": 3,
-  "code.needWindow": 4,
-};
+import { LADDER_RUNG_BY_ACTION } from "./action-catalog.js";
 
 export function validateLadder(
   steps: ParsedWorkflowStep[],
@@ -24,7 +16,7 @@ export function validateLadder(
     // Skip internal transform steps (ladder-neutral)
     if (step.internal) continue;
 
-    const rung = RUNG_ORDER[step.action];
+    const rung = LADDER_RUNG_BY_ACTION[step.action];
 
     // Skip actions not in the ladder map (neutral)
     if (rung === undefined) continue;

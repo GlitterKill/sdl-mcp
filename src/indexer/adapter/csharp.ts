@@ -16,6 +16,7 @@ import type {
 import type { ExtractedImport } from "../treesitter/extractImports.js";
 import { findEnclosingSymbol as findEnclosingSymbolUtil } from "../treesitter/symbolUtils.js";
 import { logger } from "../../util/logger.js";
+import { normalizePath } from "../../util/paths.js";
 
 class CSharpAdapter implements LanguageAdapter {
   languageId = "csharp";
@@ -66,7 +67,7 @@ class CSharpAdapter implements LanguageAdapter {
     filePath: string,
   ): ExtractedSymbol[] {
     const symbols: ExtractedSymbol[] = [];
-    const normalizedPath = filePath.replace(/\\/g, "/");
+    const normalizedPath = normalizePath(filePath);
     this.traverseASTForSymbols(tree.rootNode, symbols, normalizedPath);
     return symbols;
   }

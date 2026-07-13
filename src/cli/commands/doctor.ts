@@ -44,6 +44,7 @@ async function getCheckIndexHealth() {
   return _checkIndexHealth;
 }
 import * as ladybugDb from "../../db/ladybug-queries.js";
+import { getGraphEntityCounts } from "../../db/ladybug-metrics.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
 import {
   getGrammarLoadError,
@@ -659,26 +660,9 @@ async function checkLadybugDb(
       };
     }
 
-    const toNumber = (value: unknown): number => {
-      if (typeof value === "number") return value;
-      if (typeof value === "bigint") return Number(value);
-      if (typeof value === "string") return Number(value);
-      return 0;
-    };
-
     await initLadybugDb(ladybugDbPath);
     const conn = await getLadybugConn();
-
-    const symbolCountRow = await ladybugDb.querySingle<{
-      symbolCount: unknown;
-    }>(conn, "MATCH (s:Symbol) RETURN count(s) AS symbolCount");
-    const symbolCount = toNumber(symbolCountRow?.symbolCount ?? 0);
-
-    const edgeCountRow = await ladybugDb.querySingle<{ edgeCount: unknown }>(
-      conn,
-      "MATCH ()-[d:DEPENDS_ON]->() RETURN count(d) AS edgeCount",
-    );
-    const edgeCount = toNumber(edgeCountRow?.edgeCount ?? 0);
+    const { symbolCount, edgeCount } = await getGraphEntityCounts(conn);
 
     // Schema migration status
     let schemaInfo = "";

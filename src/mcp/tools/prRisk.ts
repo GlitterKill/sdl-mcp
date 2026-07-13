@@ -1,4 +1,5 @@
 import { computeDeltaWithTiers } from "../../delta/diff.js";
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import type { Connection } from "kuzu";
 import { computeBlastRadius } from "../../delta/blastRadius.js";
 import {
@@ -9,7 +10,10 @@ import {
 } from "../../graph/score.js";
 import { getMetricsBySymbolIds } from "../../db/ladybug-metrics.js";
 import { loadConfig } from "../../config/loadConfig.js";
-import { decideCodeAccessLegacy } from "../../policy/code-access.js";
+import {
+  decideCodeAccess,
+  toLegacyPolicyDecision,
+} from "../../policy/code-access.js";
 import { logger } from "../../util/logger.js";
 import { PRRiskAnalysisRequestSchema } from "../tools.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
@@ -211,7 +215,7 @@ export function selectBlastRadiusSeedSymbols(
 }
 
 export async function handlePRRiskAnalysis(args: unknown) {
-  const validated = PRRiskAnalysisRequestSchema.parse(args);
+  const validated = parseActionHandlerArgs(PRRiskAnalysisRequestSchema, args);
   const compactLimit = validated.detail === "compact" ? validated.limit : undefined;
   const compactSmallLimit =
     compactLimit === undefined ? undefined : Math.min(compactLimit, 3);
@@ -365,14 +369,16 @@ export async function handlePRRiskAnalysis(args: unknown) {
     | undefined;
   if (escalationRequired) {
     // Use delta requestType since this is PR/diff analysis, not code window access
-    const { decision: rawDecision } = decideCodeAccessLegacy(
-      {
-        requestType: "delta",
-        repoId: validated.repoId,
-        identifiersToFind: ["pr-risk-escalation"],
-        reason: `PR risk score ${riskScore} exceeds threshold`,
-      },
-      config.policy ?? {},
+    const rawDecision = toLegacyPolicyDecision(
+      decideCodeAccess(
+        {
+          requestType: "delta",
+          repoId: validated.repoId,
+          identifiersToFind: ["pr-risk-escalation"],
+          reason: `PR risk score ${riskScore} exceeds threshold`,
+        },
+        config.policy ?? {},
+      ),
     );
 
     policyDecision = {

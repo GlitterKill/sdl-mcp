@@ -3,7 +3,11 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { finished } from "node:stream/promises";
 
-import { execDdl, querySingle, toNumber } from "../../db/ladybug-core.js";
+import { execDdl } from "../../db/ladybug-core.js";
+import {
+  copyProviderFirstArtifact,
+  readProviderFirstShadowDbCounts,
+} from "../../db/ladybug-provider-first.js";
 import {
   createBaseSchema,
   createSecondaryIndexes,
@@ -444,16 +448,16 @@ async function loadProviderFirstShadowDb(params: {
     const conn = new kuzu.Connection(db);
     try {
       await createBaseSchema(conn);
-      await copyArtifact(conn, "Repo", params.artifacts.repos);
-      await copyArtifact(conn, "File", params.artifacts.files);
-      await copyArtifact(conn, "Symbol", params.artifacts.symbols);
-      await copyArtifact(conn, "Symbol", params.artifacts.externalSymbols);
-      await copyArtifact(conn, "FILE_IN_REPO", params.artifacts.fileInRepo);
-      await copyArtifact(conn, "SYMBOL_IN_FILE", params.artifacts.symbolInFile);
-      await copyArtifact(conn, "SYMBOL_IN_REPO", params.artifacts.symbolInRepo);
-      await copyArtifact(conn, "DEPENDS_ON", params.artifacts.edges);
+      await copyProviderFirstArtifact(conn, "Repo", params.artifacts.repos, CSV_NULL_SENTINEL);
+      await copyProviderFirstArtifact(conn, "File", params.artifacts.files, CSV_NULL_SENTINEL);
+      await copyProviderFirstArtifact(conn, "Symbol", params.artifacts.symbols, CSV_NULL_SENTINEL);
+      await copyProviderFirstArtifact(conn, "Symbol", params.artifacts.externalSymbols, CSV_NULL_SENTINEL);
+      await copyProviderFirstArtifact(conn, "FILE_IN_REPO", params.artifacts.fileInRepo, CSV_NULL_SENTINEL);
+      await copyProviderFirstArtifact(conn, "SYMBOL_IN_FILE", params.artifacts.symbolInFile, CSV_NULL_SENTINEL);
+      await copyProviderFirstArtifact(conn, "SYMBOL_IN_REPO", params.artifacts.symbolInRepo, CSV_NULL_SENTINEL);
+      await copyProviderFirstArtifact(conn, "DEPENDS_ON", params.artifacts.edges, CSV_NULL_SENTINEL);
       const secondaryIndexes = await createSecondaryIndexes(conn);
-      const actualCounts = await readShadowDbCounts(conn);
+      const actualCounts = await readProviderFirstShadowDbCounts(conn);
       validateShadowDbCounts(actualCounts, params.expectedCounts);
       await execDdl(conn, "CHECKPOINT");
       return {
@@ -479,66 +483,6 @@ async function loadProviderFirstShadowDb(params: {
       reasons: [`shadow DB bulk load failed: ${errorMessage(err)}`],
     };
   }
-}
-
-async function copyArtifact(
-  conn: import("kuzu").Connection,
-  tableName: string,
-  artifact: CsvArtifactManifest,
-): Promise<void> {
-  if (artifact.targetTable !== tableName) {
-    throw new Error(
-      `Provider-first shadow artifact target mismatch: expected ${tableName}, got ${artifact.targetTable}`,
-    );
-  }
-  await execDdl(
-    conn,
-    `COPY ${tableName} FROM '${escapeCopyPath(artifact.path)}' ` +
-      `(HEADER=true, PARALLEL=FALSE, QUOTE='"', NULL_STRINGS=['${escapeCopyOptionString(CSV_NULL_SENTINEL)}'])`,
-  );
-}
-
-async function readShadowDbCounts(
-  conn: import("kuzu").Connection,
-): Promise<ProviderFirstShadowDbLoadCounts> {
-  return {
-    repos: await countShadowRows(
-      conn,
-      "MATCH (r:Repo) RETURN count(r) AS count",
-    ),
-    files: await countShadowRows(
-      conn,
-      "MATCH (f:File) RETURN count(f) AS count",
-    ),
-    symbols: await countShadowRows(
-      conn,
-      "MATCH (s:Symbol) RETURN count(s) AS count",
-    ),
-    fileInRepo: await countShadowRows(
-      conn,
-      "MATCH (:File)-[r:FILE_IN_REPO]->(:Repo) RETURN count(r) AS count",
-    ),
-    symbolInFile: await countShadowRows(
-      conn,
-      "MATCH (:Symbol)-[r:SYMBOL_IN_FILE]->(:File) RETURN count(r) AS count",
-    ),
-    symbolInRepo: await countShadowRows(
-      conn,
-      "MATCH (:Symbol)-[r:SYMBOL_IN_REPO]->(:Repo) RETURN count(r) AS count",
-    ),
-    edges: await countShadowRows(
-      conn,
-      "MATCH (:Symbol)-[r:DEPENDS_ON]->(:Symbol) RETURN count(r) AS count",
-    ),
-  };
-}
-
-async function countShadowRows(
-  conn: import("kuzu").Connection,
-  query: string,
-): Promise<number> {
-  const row = await querySingle<{ count: unknown }>(conn, query);
-  return toNumber(row?.count ?? 0);
 }
 
 function validateShadowDbCounts(
@@ -701,14 +645,6 @@ function csvCell(value: unknown): string {
   if (text === "") return '""';
   const escaped = text.replaceAll('"', '""');
   return /[",\r\n]/.test(escaped) ? `"${escaped}"` : escaped;
-}
-
-function escapeCopyPath(path: string): string {
-  return normalizePath(path).replace(/'/g, "''");
-}
-
-function escapeCopyOptionString(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/'/g, "''");
 }
 
 function shadowDbLoadReasons(params: {

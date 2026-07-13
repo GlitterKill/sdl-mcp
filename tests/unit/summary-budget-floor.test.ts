@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { buildContextSummary } from "../../dist/mcp/summary.js";
+import { buildContextSummary } from "../../dist/services/summary.js";
 
 /**
  * Tests for the minimum budget enforcement in buildContextSummary.

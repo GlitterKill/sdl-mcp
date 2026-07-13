@@ -5,6 +5,8 @@
  * MCP content and logging notifications. The JSON response stays first for the LLM.
  */
 
+import { normalizePath } from "../util/paths.js";
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -14,7 +16,7 @@ function truncName(s: string, max = 40): string {
 }
 
 function shortPath(p: string): string {
-  const parts = p.replace(/\\/g, "/").split("/");
+  const parts = (p ? normalizePath(p) : p).split("/");
   return parts.length <= 2 ? p : `…/${parts.slice(-2).join("/")}`;
 }
 

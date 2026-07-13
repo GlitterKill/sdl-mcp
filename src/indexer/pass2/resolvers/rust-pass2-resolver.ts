@@ -17,7 +17,7 @@ import { normalizePath } from "../../../util/paths.js";
 import { getAdapterForExtension } from "../../adapter/registry.js";
 import type { FileMetadata } from "../../fileScanner.js";
 import { isBuiltinCall } from "../../edge-builder/builtins.js";
-import { resolveImportTargets } from "../../edge-builder/import-resolution.js";
+import { resolveImportTargets } from "../../edge-builder/import-target-resolver.js";
 import { findEnclosingSymbolByRange } from "../../edge-builder/enclosing-symbol.js";
 import {
   bucketForResolution,

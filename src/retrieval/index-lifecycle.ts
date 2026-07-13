@@ -9,10 +9,9 @@
 import type { Connection } from "kuzu";
 import {
   execStoredProc,
-  querySingle,
   queryStoredProcAll,
-  toNumber,
 } from "../db/ladybug-core.js";
+import { countRowsInNodeTable } from "../db/ladybug-index-lifecycle.js";
 import { getExtensionCapabilities } from "../db/extension-caps.js";
 import { logger } from "../util/logger.js";
 import type { SemanticRetrievalConfig } from "../config/types.js";
@@ -131,12 +130,7 @@ export async function countRowsInTable(
   conn: Connection,
   tableName: string,
 ): Promise<number> {
-  validateIdentifier(tableName, "table name");
-  const row = await querySingle<{ rowCount: unknown }>(
-    conn,
-    `MATCH (n:${tableName}) RETURN COUNT(n) AS rowCount`,
-  );
-  return toNumber(row?.rowCount ?? 0);
+  return countRowsInNodeTable(conn, tableName);
 }
 
 export function indexExistsForTable(

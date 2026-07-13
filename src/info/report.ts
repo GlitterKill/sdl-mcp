@@ -7,6 +7,10 @@ import {
 } from "../db/ladybug.js";
 import { getRustEngineStatus } from "../indexer/rustIndexer.js";
 import {
+  getNativeAddonLoadFailure,
+  isNativeAddonGloballyEnabled,
+} from "../native/addon-loader.js";
+import {
   getLogFilePath,
   getLoggerDiagnostics,
 } from "../util/logger.js";
@@ -53,7 +57,16 @@ export async function collectInfoReport(
   const version = getPackageVersion();
   const configPath = activateCliConfigPath(options.config);
   const loggerDiagnostics = getLoggerDiagnostics();
-  const nativeStatus = getRustEngineStatus();
+  const rustEngineStatus = getRustEngineStatus();
+  const nativeEnabled = isNativeAddonGloballyEnabled();
+  const nativeStatus = {
+    ...rustEngineStatus,
+    disabledByEnv: !nativeEnabled,
+    reason:
+      rustEngineStatus.available || !nativeEnabled
+        ? rustEngineStatus.reason
+        : (getNativeAddonLoadFailure() ?? rustEngineStatus.reason),
+  };
 
   const report: InfoReport = {
     version,

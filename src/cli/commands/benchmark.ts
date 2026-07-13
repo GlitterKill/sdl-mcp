@@ -35,6 +35,7 @@ import {
   type EdgeAccuracyScore,
 } from "../../benchmark/edgeAccuracy.js";
 import { logEdgeResolutionTelemetry } from "../../mcp/telemetry.js";
+import { estimateTokensCoarse } from "../../util/tokenize.js";
 
 interface BenchmarkCIOptions extends BenchmarkOptions {}
 
@@ -171,10 +172,6 @@ function formatPercent(n: number): string {
   return `${n.toFixed(1)}%`;
 }
 
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
-}
-
 async function collectBenchmarkMetrics(
   repoId: string,
   _repoPath: string,
@@ -231,7 +228,7 @@ async function collectBenchmarkMetrics(
         undefined,
       );
       if (!("notModified" in cardResult)) {
-        totalCardTokens += estimateTokens(JSON.stringify(cardResult));
+        totalCardTokens += estimateTokensCoarse(JSON.stringify(cardResult));
       }
 
       if (symbol.kind === "function" || symbol.kind === "method") {
@@ -243,7 +240,7 @@ async function collectBenchmarkMetrics(
           );
           skeletonTimeMs += performance.now() - skelStart;
           if (skeleton?.skeleton) {
-            totalSkeletonTokens += estimateTokens(skeleton.skeleton);
+            totalSkeletonTokens += estimateTokensCoarse(skeleton.skeleton);
             skeletonCount++;
           }
         } catch {

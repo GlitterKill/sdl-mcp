@@ -2,7 +2,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { Connection } from "kuzu";
 
-import { queryAll, toNumber } from "../../db/ladybug-core.js";
+import {
+  getClusterLayoutInputRows,
+  getSymbolLayoutInputRows,
+} from "../../db/ladybug-graph-read.js";
 import { computeForceLayout, hashLayoutInput } from "./force-layout.js";
 import { computeNativeLayout } from "./native-engine.js";
 import { fnv1a32, mulberry32 } from "./prng.js";
@@ -124,49 +127,11 @@ export function planWarmStart(
 }
 
 async function clusterInput(conn: Connection, repoId: string): Promise<LayoutInput> {
-  const nodes = await queryAll<{ id: string; size: unknown }>(
-    conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:CLUSTER_IN_REPO]-(c:Cluster)
-     RETURN c.clusterId AS id, c.symbolCount AS size
-     ORDER BY id ASC`,
-    { repoId },
-  );
-  const edges = await queryAll<{ from: string; to: string; weight: unknown }>(
-    conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)
-     MATCH (a)-[:BELONGS_TO_CLUSTER]->(ca:Cluster)
-     MATCH (b)-[:BELONGS_TO_CLUSTER]->(cb:Cluster)
-     WHERE ca.clusterId <> cb.clusterId
-     RETURN ca.clusterId AS from, cb.clusterId AS to, COUNT(*) AS weight
-     ORDER BY from ASC, to ASC`,
-    { repoId },
-  );
-  return {
-    nodes: nodes.map((row) => ({ id: row.id, size: toNumber(row.size ?? 1) })),
-    edges: edges.map((row) => ({ from: row.from, to: row.to, weight: toNumber(row.weight ?? 1) })),
-  };
+  return getClusterLayoutInputRows(conn, repoId);
 }
 
 async function symbolInput(conn: Connection, repoId: string, clusterId: string): Promise<LayoutInput> {
-  const nodes = await queryAll<{ id: string; size: unknown }>(
-    conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[:BELONGS_TO_CLUSTER]->(:Cluster {clusterId: $clusterId})
-     OPTIONAL MATCH (:Symbol)-[incoming:DEPENDS_ON]->(s)
-     RETURN s.symbolId AS id, COUNT(incoming) AS size
-     ORDER BY id ASC`,
-    { repoId, clusterId },
-  );
-  const edges = await queryAll<{ from: string; to: string; weight: unknown }>(
-    conn,
-    `MATCH (:Cluster {clusterId: $clusterId})<-[:BELONGS_TO_CLUSTER]-(a:Symbol)-[d:DEPENDS_ON]->(b:Symbol)-[:BELONGS_TO_CLUSTER]->(:Cluster {clusterId: $clusterId})
-     RETURN a.symbolId AS from, b.symbolId AS to, COUNT(*) AS weight
-     ORDER BY from ASC, to ASC`,
-    { clusterId },
-  );
-  return {
-    nodes: nodes.map((row) => ({ id: row.id, size: Math.max(1, toNumber(row.size ?? 1)) })),
-    edges: edges.map((row) => ({ from: row.from, to: row.to, weight: toNumber(row.weight ?? 1) })),
-  };
+  return getSymbolLayoutInputRows(conn, repoId, clusterId);
 }
 
 async function computeWithEngine(

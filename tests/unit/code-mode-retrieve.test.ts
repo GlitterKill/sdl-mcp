@@ -8,7 +8,6 @@ import {
 } from "../../dist/code-mode/index.js";
 import {
   handleRetrieve,
-  normalizeRetrieveArgs,
   RETRIEVE_ACTION_BY_OP,
   RetrieveRequestSchema,
 } from "../../dist/code-mode/retrieve.js";
@@ -61,47 +60,90 @@ describe("sdl.retrieve", () => {
     );
   });
 
-  it("defaults symbolSearch to packed/auto output", () => {
-    assert.deepEqual(normalizeRetrieveArgs("symbolSearch", { query: "foo" }, {}), {
+  it("defaults symbolSearch to packed/auto output", async () => {
+    const result = await handleRetrieve(
+      { repoId: "repo", op: "symbolSearch", args: { query: "foo" } },
+      {
+        "symbol.search": {
+          schema: z.object({
+            repoId: z.string(),
+            query: z.string(),
+            wireFormat: z.literal("auto"),
+          }),
+          handler: async (args: unknown) => args,
+        },
+      } as never,
+    );
+    assert.deepEqual(result, {
+      repoId: "repo",
       query: "foo",
       wireFormat: "auto",
     });
   });
 
-  it("defaults sliceBuild to compact auto output", () => {
-    assert.deepEqual(
-      normalizeRetrieveArgs("sliceBuild", { taskText: "debug foo" }, {}),
+  it("defaults sliceBuild to compact auto output", async () => {
+    const result = await handleRetrieve(
+      { repoId: "repo", op: "sliceBuild", args: { taskText: "debug foo" } },
       {
-        taskText: "debug foo",
-        wireFormat: "auto",
-        cardDetail: "compact",
-        includeLegend: false,
-        includeRetrievalEvidence: false,
-        includeProcesses: false,
-      },
+        "slice.build": {
+          schema: z.object({
+            repoId: z.string(),
+            taskText: z.string(),
+            wireFormat: z.literal("auto"),
+            cardDetail: z.literal("compact"),
+            includeLegend: z.literal(false),
+            includeRetrievalEvidence: z.literal(false),
+            includeProcesses: z.literal(false),
+          }),
+          handler: async (args: unknown) => args,
+        },
+      } as never,
     );
+    assert.deepEqual(result, {
+      repoId: "repo",
+      taskText: "debug foo",
+      wireFormat: "auto",
+      cardDetail: "compact",
+      includeLegend: false,
+      includeRetrievalEvidence: false,
+      includeProcesses: false,
+    });
   });
 
-  it("defaults codeNeedWindow to auto response handles without weakening justification", () => {
-    assert.deepEqual(
-      normalizeRetrieveArgs(
-        "codeNeedWindow",
-        {
+  it("defaults codeNeedWindow to auto response handles without weakening justification", async () => {
+    const result = await handleRetrieve(
+      {
+        repoId: "repo",
+        op: "codeNeedWindow",
+        args: {
           symbolId: "sym",
           reason: "Need exact branch condition.",
           expectedLines: 20,
           identifiersToFind: ["branch"],
         },
-        {},
-      ),
-      {
-        symbolId: "sym",
-        reason: "Need exact branch condition.",
-        expectedLines: 20,
-        identifiersToFind: ["branch"],
-        responseMode: "auto",
       },
+      {
+        "code.needWindow": {
+          schema: z.object({
+            repoId: z.string(),
+            symbolId: z.string(),
+            reason: z.string(),
+            expectedLines: z.number(),
+            identifiersToFind: z.array(z.string()),
+            responseMode: z.literal("auto"),
+          }),
+          handler: async (args: unknown) => args,
+        },
+      } as never,
     );
+    assert.deepEqual(result, {
+      repoId: "repo",
+      symbolId: "sym",
+      reason: "Need exact branch condition.",
+      expectedLines: 20,
+      identifiersToFind: ["branch"],
+      responseMode: "auto",
+    });
   });
 
   it("maps codeSkeleton filePath args to the gateway file field", async () => {
@@ -111,7 +153,6 @@ describe("sdl.retrieve", () => {
         schema: z
           .object({
             repoId: z.string(),
-            action: z.literal("code.getSkeleton"),
             file: z.string(),
             exportedOnly: z.boolean().optional(),
           })
@@ -139,7 +180,6 @@ describe("sdl.retrieve", () => {
     assert.deepEqual(calls, [
       {
         repoId: "repo",
-        action: "code.getSkeleton",
         file: "src/mcp/tools/search-edit/signature.ts",
         exportedOnly: false,
       },
@@ -153,7 +193,6 @@ describe("sdl.retrieve", () => {
         schema: z
           .object({
             repoId: z.string(),
-            action: z.literal("symbol.search"),
             query: z.string(),
             wireFormat: z.literal("auto"),
           })
@@ -174,7 +213,6 @@ describe("sdl.retrieve", () => {
     assert.deepEqual(calls, [
       {
         repoId: "repo",
-        action: "symbol.search",
         query: "foo",
         wireFormat: "auto",
       },
@@ -191,7 +229,6 @@ describe("sdl.retrieve", () => {
         schema: z
           .object({
             repoId: z.string(),
-            action: z.literal("symbol.search"),
             query: z.string(),
             wireFormat: z.literal("auto"),
           })
@@ -216,7 +253,6 @@ describe("sdl.retrieve", () => {
     assert.deepEqual(calls, [
       {
         repoId: "repo",
-        action: "symbol.search",
         query: "foo",
         wireFormat: "auto",
       },

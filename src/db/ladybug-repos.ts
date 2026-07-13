@@ -773,6 +773,23 @@ export interface FileLiteRow {
   contentHash: string;
 }
 
+export async function getFileIdsByRepoPaths(
+  conn: Connection,
+  repoId: string,
+  relPaths: readonly string[],
+): Promise<Map<string, string>> {
+  if (relPaths.length === 0) return new Map();
+  const normalizedPaths = [...new Set(relPaths.map(normalizePath))];
+  const rows = await queryAll<{ relPath: string; fileId: string }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)
+     WHERE f.relPath IN $relPaths
+     RETURN f.relPath AS relPath, f.fileId AS fileId`,
+    { repoId, relPaths: normalizedPaths },
+  );
+  return new Map(rows.map((row) => [normalizePath(row.relPath), row.fileId]));
+}
+
 export async function getFilesByRepoLite(
   conn: Connection,
   repoId: string,

@@ -16,13 +16,16 @@ import { activateCliConfigPath } from "../../config/configPath.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { initGraphDb } from "../../db/initGraphDb.js";
 import { loadConfiguredAdapterPlugins } from "../../startup/plugins.js";
-import { createActionMap } from "../../gateway/router.js";
 import {
-  ACTION_DEFINITIONS,
-  ACTION_MAP,
+  createActionMap,
+  prepareActionEntryArgs,
+} from "../../gateway/router.js";
+import {
+  CLI_ACTION_DEFINITIONS,
+  CLI_ACTION_MAP,
   ALL_ACTION_NAMES,
 } from "./tool-actions.js";
-import type { ActionDefinition } from "./tool-actions.js";
+import type { CliActionDefinition } from "./tool-actions.js";
 import { parseToolArgs, buildParseArgsOptions } from "./tool-arg-parser.js";
 import {
   formatOutput,
@@ -227,7 +230,7 @@ function printActionList(showMemoryActions: boolean): void {
   console.log("\nAvailable actions:\n");
 
   for (const ns of namespaces) {
-    const actions = ACTION_DEFINITIONS.filter(
+    const actions = CLI_ACTION_DEFINITIONS.filter(
       (a) => a.namespace === ns && (showMemoryActions || !a.action.startsWith("memory.")),
     );
     console.log(`  ${labels[ns]}:`);
@@ -259,7 +262,7 @@ function printActionList(showMemoryActions: boolean): void {
 /**
  * Print action-specific help.
  */
-function printActionHelp(definition: ActionDefinition): void {
+function printActionHelp(definition: CliActionDefinition): void {
   console.log(`\n${definition.action} — ${definition.description}\n`);
 
   console.log("Flags:");
@@ -330,7 +333,7 @@ export async function toolDispatchCommand(
   }
 
   // Look up action definition
-  const definition = ACTION_MAP.get(action);
+  const definition = CLI_ACTION_MAP.get(action);
   if (!definition) {
     if (requestedAction && isUnsupportedMetaAction(requestedAction)) {
       throw new Error(unsupportedMetaActionMessage(requestedAction));
@@ -458,7 +461,12 @@ export async function toolDispatchCommand(
   }
 
   // Validate with Zod schema and call handler
-  const parsed = entry.schema.parse(handlerArgs);
+  const parsed = prepareActionEntryArgs(
+    action,
+    entry,
+    handlerArgs,
+    { kind: "cli" },
+  );
   const result = await entry.handler(parsed);
 
   // Output

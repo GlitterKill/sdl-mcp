@@ -15,6 +15,15 @@ export function estimateTokens(text: string): number {
 }
 
 /**
+ * Coarse chars/4 estimate. Use ONLY where a fast upper-bound is needed and
+ * the result is compared against other chars/4 estimates. For budget
+ * enforcement against policy caps, use estimateTokens().
+ */
+export function estimateTokensCoarse(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+/**
  * Token estimate for SDL-MCP packed wire format. Empirical chars/token ratio
  * is ~3.2 (vs JSON's 3.5) because the packed format strips structural sigils
  * and interns redundant prefixes. Plain length / 3.2 over-estimates more

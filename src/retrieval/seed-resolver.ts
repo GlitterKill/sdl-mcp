@@ -16,7 +16,12 @@
  */
 
 import type { Connection } from "kuzu";
-import { queryAll } from "../db/ladybug-core.js";
+import {
+  findRetrievalSeedSymbolsByIdPrefix,
+  findRetrievalSeedSymbolsByName,
+  hasRetrievalSeedSymbol,
+  type RetrievalSeedCandidateRow,
+} from "../db/ladybug-retrieval.js";
 import { logger } from "../util/logger.js";
 import { extractIdentifiersFromText } from "../agent/identifier-extraction.js";
 
@@ -82,25 +87,13 @@ function classify(mention: string): RawSeed["kind"] {
   return "name";
 }
 
-interface IdRow {
-  symbolId: string;
-}
-
 async function existsFullId(
   conn: Connection,
   repoId: string,
   symbolId: string,
 ): Promise<boolean> {
   try {
-    const rows = await queryAll<IdRow>(
-      conn,
-      `MATCH (s:Symbol)
-       WHERE s.symbolId = $symbolId AND s.repoId = $repoId
-       RETURN s.symbolId AS symbolId
-       LIMIT 1`,
-      { symbolId, repoId },
-    );
-    return rows.length > 0;
+    return await hasRetrievalSeedSymbol(conn, repoId, symbolId);
   } catch (err) {
     logger.debug(
       `[seed-resolver] full-id lookup failed for ${symbolId.slice(0, 16)}: ${
@@ -117,14 +110,7 @@ async function expandShortId(
   prefix: string,
 ): Promise<string | null> {
   try {
-    const rows = await queryAll<IdRow>(
-      conn,
-      `MATCH (s:Symbol)
-       WHERE s.repoId = $repoId AND s.symbolId STARTS WITH $prefix
-       RETURN s.symbolId AS symbolId
-       LIMIT 2`,
-      { repoId, prefix },
-    );
+    const rows = await findRetrievalSeedSymbolsByIdPrefix(conn, repoId, prefix);
     if (rows.length === 0) return null;
     if (rows.length > 1) {
       logger.debug(
@@ -132,7 +118,7 @@ async function expandShortId(
       );
       return null;
     }
-    return rows[0].symbolId;
+    return rows[0];
   } catch (err) {
     logger.debug(
       `[seed-resolver] short-id expansion failed for ${prefix}: ${
@@ -141,11 +127,6 @@ async function expandShortId(
     );
     return null;
   }
-}
-
-interface NameRow {
-  symbolId: string;
-  score: number;
 }
 
 async function resolveBareName(
@@ -157,23 +138,15 @@ async function resolveBareName(
   // the hybrid orchestrator (which would itself try to resolve seeds and risk
   // recursion). Top-2 are inspected to detect ambiguity.
   try {
-    const rows = await queryAll<NameRow>(
-      conn,
-      `MATCH (s:Symbol)
-       WHERE s.repoId = $repoId AND s.name = $name
-       RETURN s.symbolId AS symbolId, 1.0 AS score
-       LIMIT 2`,
-      { repoId, name },
-    );
+    const rows: RetrievalSeedCandidateRow[] =
+      await findRetrievalSeedSymbolsByName(conn, repoId, name, "exact");
     if (rows.length === 0) {
       // Fall back to prefix match for camelCase / partial name input.
-      const prefixRows = await queryAll<NameRow>(
+      const prefixRows = await findRetrievalSeedSymbolsByName(
         conn,
-        `MATCH (s:Symbol)
-         WHERE s.repoId = $repoId AND s.name STARTS WITH $name
-         RETURN s.symbolId AS symbolId, 1.0 AS score
-         LIMIT 2`,
-        { repoId, name },
+        repoId,
+        name,
+        "prefix",
       );
       if (prefixRows.length === 0) {
         return { symbolId: null, ambiguous: false };

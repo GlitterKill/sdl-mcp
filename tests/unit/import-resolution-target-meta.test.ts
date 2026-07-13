@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { resolveImportTargets } from "../../dist/indexer/edge-builder/import-resolution.js";
+import { resolveImportTargets } from "../../dist/indexer/edge-builder/import-target-resolver.js";
 
 describe("resolveImportTargets target metadata", () => {
   it("marks outside-repo import placeholders as external", async () => {

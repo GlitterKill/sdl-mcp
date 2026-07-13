@@ -6,6 +6,7 @@
  */
 
 import type { ToolContext } from "../../server.js";
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import {
   RuntimeQueryOutputRequestSchema,
   type RuntimeQueryOutputResponse,
@@ -20,7 +21,7 @@ export async function handleRuntimeQueryOutput(
   args: unknown,
   _context?: ToolContext,
 ): Promise<RuntimeQueryOutputResponse> {
-  const request = RuntimeQueryOutputRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(RuntimeQueryOutputRequestSchema, args);
 
   const appConfig = loadConfig();
   const runtimeConfig = RuntimeConfigSchema.parse(appConfig.runtime ?? {});

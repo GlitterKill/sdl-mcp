@@ -34,6 +34,19 @@ const SYMBOL_VERSION_COPY_COLUMNS = [
 const CSV_NULL_SENTINEL = "__sdl_ladybug_csv_null__";
 const SYMBOL_VERSION_CSV_WRITE_BATCH_SIZE = 4096;
 
+export async function countSymbolVersionsForVersion(
+  conn: Connection,
+  versionId: string,
+): Promise<number> {
+  const row = await querySingle<{ count: unknown }>(
+    conn,
+    `MATCH (sv:SymbolVersion {versionId: $versionId})
+     RETURN count(sv) AS count`,
+    { versionId },
+  );
+  return toNumber(row?.count ?? 0);
+}
+
 export interface VersionRow {
   versionId: string;
   repoId: string;

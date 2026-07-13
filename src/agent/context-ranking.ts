@@ -16,6 +16,7 @@ import type {
   ConfidenceTier,
 } from "./types.js";
 import { logger } from "../util/logger.js";
+import { caseFoldedPathKey, normalizePath } from "../util/paths.js";
 
 /** Symbol metadata subset needed for ranking (avoids coupling to full SymbolRow). */
 export interface RankableSymbol {
@@ -350,8 +351,8 @@ function scoreStructuralBonus(
       ? fileId.slice(fileId.indexOf(":") + 1)
       : fileId;
     for (const fp of focusPaths) {
-      const focus = fp.replace(/\\/g, "/").toLowerCase();
-      const normalizedRelPath = relPath?.replace(/\\/g, "/");
+      const focus = caseFoldedPathKey(fp);
+      const normalizedRelPath = relPath ? normalizePath(relPath) : relPath;
       if (
         normalizedRelPath &&
         (normalizedRelPath === focus ||

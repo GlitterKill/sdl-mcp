@@ -763,3 +763,16 @@ function resolveFileSummaryEmbeddingProperties(model: string): {
 
   return { vectorProp, vecProp, cardHashProp, updatedAtProp };
 }
+
+export async function getFileSummaryFileIdsForRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<string[]> {
+  const rows = await queryAll<{ fileId: string }>(
+    conn,
+    `MATCH (fs:FileSummary {repoId: $repoId})
+     RETURN fs.fileId AS fileId`,
+    { repoId },
+  );
+  return rows.map((row) => row.fileId);
+}

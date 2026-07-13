@@ -1,3 +1,5 @@
+import { caseFoldedPathKey, normalizePath } from "../util/paths.js";
+
 interface SignatureParamLike {
   name?: string | null;
 }
@@ -62,7 +64,7 @@ export function extractRoleTags(
   relPath: string,
 ): string[] {
   const normalizedName = name.toLowerCase();
-  const normalizedPath = relPath.replace(/\\/g, "/").toLowerCase();
+  const normalizedPath = caseFoldedPathKey(relPath);
   const nameTokens = splitIdentifierLikeText(name).map((part) => part.toLowerCase());
   const pathTokens = splitPathTokens(relPath).map((part) => part.toLowerCase());
   const tags: string[] = [];
@@ -217,8 +219,7 @@ function splitIdentifierLikeText(input: string): string[] {
 }
 
 function splitPathTokens(relPath: string): string[] {
-  return relPath
-    .replace(/\\/g, "/")
+  return normalizePath(relPath)
     .split(/[\/._-]+/)
     .filter((part) => part.length > 0);
 }

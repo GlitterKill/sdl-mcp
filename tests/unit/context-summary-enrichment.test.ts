@@ -9,7 +9,7 @@ import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import {
   generateContextSummary,
   renderContextSummary,
-} from "../../dist/mcp/summary.js";
+} from "../../dist/services/summary.js";
 
 const REPO_ID = "test-context-summary-enrichment-repo";
 

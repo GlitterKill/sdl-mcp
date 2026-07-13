@@ -1687,9 +1687,10 @@ function buildEnforcementAssets(
 
   if (client === "claude-code") {
     const graphDbPath = defaultGraphDbPath(configPath);
-    const pidfilePath = resolvePidfilePath(graphDbPath)
-      .replace(/\\/g, "/")
-      .replace(/'/g, "'\\''");
+    const pidfilePath = normalizePath(resolvePidfilePath(graphDbPath)).replace(
+      /'/g,
+      "'\\''",
+    );
     assets.push(
       {
         path: join(repoRoot, ".claude", "settings.json"),
@@ -1723,7 +1724,7 @@ function buildEnforcementAssets(
 
   if (client === "codex") {
     const graphDbPath = defaultGraphDbPath(configPath);
-    const pidfilePath = resolvePidfilePath(graphDbPath).replace(/\\/g, "/");
+    const pidfilePath = normalizePath(resolvePidfilePath(graphDbPath));
     assets.push(
       {
         path: join(repoRoot, ".codex", "config.toml"),

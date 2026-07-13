@@ -204,12 +204,9 @@ function buildCapSuggestions(
 }
 
 /**
- * Transitional adapter — converts the new discriminated `CodeAccessDecision`
- * back into the legacy `PolicyDecision` shape so existing handlers can migrate
- * away from `new PolicyEngine(...)` without rewriting their decision-handling
- * code in the same change.
- *
- * New code should consume `CodeAccessDecision` directly via `decideCodeAccess`.
+ * Compatibility serializer for telemetry and error paths that still emit the
+ * stable `PolicyDecision` wire shape. Policy evaluation stays in
+ * `decideCodeAccess`.
  */
 export function toLegacyPolicyDecision(
   decision: CodeAccessDecision,
@@ -240,27 +237,5 @@ export function toLegacyPolicyDecision(
     auditHash: decision.auditHash,
     deniedReasons:
       decision.deniedReasons.length > 0 ? decision.deniedReasons : undefined,
-  };
-}
-
-/**
- * Convenience: returns legacy `PolicyDecision` plus the next-best-action
- * info that callers previously got from `policyEngine.generateNextBestAction`.
- */
-export function decideCodeAccessLegacy(
-  context: PolicyRequestContext,
-  config: Partial<PolicyConfig> = {},
-): {
-  decision: PolicyDecision;
-  nextBestAction?: NextBestAction;
-  requiredFieldsForNext?: RequiredFieldsForNext;
-} {
-  const access = decideCodeAccess(context, config);
-  return {
-    decision: toLegacyPolicyDecision(access),
-    nextBestAction:
-      access.kind === "approve" ? undefined : access.nextBestAction,
-    requiredFieldsForNext:
-      access.kind === "approve" ? undefined : access.requiredFieldsForNext,
   };
 }

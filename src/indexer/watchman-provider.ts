@@ -124,7 +124,7 @@ export type WatchmanFileChange = {
   exists?: boolean;
   type?: string;
   size?: number;
-  mtime_ms?: number | { toNumber(): number };
+  mtime_ms?: unknown;
 };
 export type WatchmanSubscriptionResponse = {
   subscription?: string;

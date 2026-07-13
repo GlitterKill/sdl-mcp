@@ -2,18 +2,8 @@ import { extname } from "path";
 
 import type { FileMetadata } from "../fileScanner.js";
 import { inferLanguageIdFromPath } from "../language.js";
+import { createBuiltInPass2Resolvers } from "../language-support.js";
 
-import { GoPass2Resolver } from "./resolvers/go-pass2-resolver.js";
-import { JavaPass2Resolver } from "./resolvers/java-pass2-resolver.js";
-import { KotlinPass2Resolver } from "./resolvers/kotlin-pass2-resolver.js";
-import { PhpPass2Resolver } from "./resolvers/php-pass2-resolver.js";
-import { PythonPass2Resolver } from "./resolvers/python-pass2-resolver.js";
-import { RustPass2Resolver } from "./resolvers/rust-pass2-resolver.js";
-import { CPass2Resolver } from "./resolvers/c-pass2-resolver.js";
-import { CppPass2Resolver } from "./resolvers/cpp-pass2-resolver.js";
-import { CSharpPass2Resolver } from "./resolvers/csharp-pass2-resolver.js";
-import { ShellPass2Resolver } from "./resolvers/shell-pass2-resolver.js";
-import { TsPass2Resolver } from "./resolvers/ts-pass2-resolver.js";
 import type { Pass2Resolver, Pass2Target } from "./types.js";
 
 export interface Pass2ResolverRegistry {
@@ -60,17 +50,5 @@ export function createPass2ResolverRegistry(
 }
 
 export function createDefaultPass2ResolverRegistry(): Pass2ResolverRegistry {
-  return createPass2ResolverRegistry([
-    new TsPass2Resolver(),
-    new GoPass2Resolver(),
-    new JavaPass2Resolver(),
-    new PhpPass2Resolver(),
-    new PythonPass2Resolver(),
-    new KotlinPass2Resolver(),
-    new RustPass2Resolver(),
-    new CSharpPass2Resolver(),
-    new CppPass2Resolver(),
-    new CPass2Resolver(),
-    new ShellPass2Resolver(),
-  ]);
+  return createPass2ResolverRegistry(createBuiltInPass2Resolvers());
 }

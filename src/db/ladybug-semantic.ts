@@ -76,6 +76,41 @@ export interface SemanticLspCallEdgeCandidateRow {
   fileContentHash?: string;
 }
 
+export interface SemanticSymbolRangeRow {
+  symbolId: string;
+  relPath: string;
+  rangeStartLine: number;
+  rangeEndLine: number;
+}
+
+export async function getSemanticSymbolRangesByPath(
+  conn: Connection,
+  repoId: string,
+  relPaths: readonly string[],
+): Promise<SemanticSymbolRangeRow[]> {
+  if (relPaths.length === 0) return [];
+  const rows = await queryAll<{
+    symbolId: string;
+    relPath: string;
+    rangeStartLine: unknown;
+    rangeEndLine: unknown;
+  }>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
+     WHERE f.relPath IN $relPaths
+     RETURN s.symbolId AS symbolId,
+            f.relPath AS relPath,
+            s.rangeStartLine AS rangeStartLine,
+            s.rangeEndLine AS rangeEndLine`,
+    { repoId, relPaths: [...relPaths] },
+  );
+  return rows.map((row) => ({
+    ...row,
+    rangeStartLine: toNumber(row.rangeStartLine),
+    rangeEndLine: toNumber(row.rangeEndLine),
+  }));
+}
+
 const EDGE_BATCH_SIZE = 256;
 
 export async function mergeSemanticProviderRun(

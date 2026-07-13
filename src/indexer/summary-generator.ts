@@ -1,5 +1,6 @@
 import { hashContent } from "../util/hashing.js";
 import { logger } from "../util/logger.js";
+import { estimateTokensCoarse } from "../util/tokenize.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import type { AppConfig } from "../config/types.js";
@@ -505,7 +506,7 @@ export async function generateSummaryWithGuardrails(input: {
         cached.summary,
         input.heuristicSummary ?? "",
       );
-      const estimatedTokens = Math.max(1, Math.ceil(cached.summary.length / 4));
+      const estimatedTokens = Math.max(1, estimateTokensCoarse(cached.summary));
       const costUsd = estimatedTokens * 0.000002;
       return {
         summary: cached.summary,
@@ -526,7 +527,7 @@ export async function generateSummaryWithGuardrails(input: {
 
 
   const divergenceScore = tokenDistance(summary, input.heuristicSummary ?? "");
-  const estimatedTokens = Math.max(1, Math.ceil(summary.length / 4));
+  const estimatedTokens = Math.max(1, estimateTokensCoarse(summary));
   const costUsd = estimatedTokens * 0.000002;
 
   // Persist to cache for standalone callers. Batch generation persists cache

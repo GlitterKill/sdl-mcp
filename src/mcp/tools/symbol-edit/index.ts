@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { realpathSync } from "node:fs";
+import { parseActionHandlerArgs } from "../../../gateway/dispatch-spine.js";
 import { extname, resolve } from "node:path";
 
 import { getLadybugConn } from "../../../db/ladybug.js";
@@ -828,7 +829,7 @@ export async function handleSymbolEdit(
   args: unknown,
   _context?: ToolContext,
 ): Promise<SymbolEditResponse> {
-  const request = SymbolEditRequestSchema.parse(args);
+  const request = parseActionHandlerArgs(SymbolEditRequestSchema, args);
   if (request.mode === "preview") {
     const { response } = await buildPreview(request);
     return response;

@@ -6,13 +6,8 @@ import type {
 } from "../tools.js";
 import { WireFormatRetiredError } from "../errors.js";
 import {
-  encodePackedSlice,
-  decideFormatDetailed,
-  isPackedEnabled,
-  resolveThreshold,
-  resolveTokenThreshold,
-} from "../wire/packed/index.js";
-import { estimateTokens, estimatePackedTokens } from "../../util/tokenize.js";
+  gateWireFormat,
+} from "../wire/gate.js";
 import type { WireFormatResult } from "../wire/packed/index.js";
 import type { Visibility } from "../../domain/types.js";
 import {
@@ -25,13 +20,6 @@ import {
   compactRange,
 } from "./symbol-utils.js";
 
-import { getObservabilityTap } from "../../observability/event-tap.js";
-import { tokenAccumulator } from "../token-accumulator.js";
-import {
-  SLICE_ENCODER_ID,
-  SLICE_SHORT_ID_ENCODER_ID,
-} from "../wire/packed/encoders/slice.js";
-import { markShortIdsDelivered } from "../wire/packed/short-ids.js";
 
 
 
@@ -218,68 +206,29 @@ export function serializeSliceForWireFormat(
   }
 
   if (wireFormat === "packed" || wireFormat === "auto") {
-    if (!isPackedEnabled(options?.packedEnabled)) {
-      if (wireFormat === "packed") {
-        throw new WireFormatRetiredError(0);
-      }
-      return { format: "compact", payload: toCompactGraphSliceV3(slice) };
-    }
     const compact = toCompactGraphSliceV3(slice);
-    const jsonStr = JSON.stringify(compact);
-    const aliasesActive = options?.shortIds !== false && typeof options?.sessionId === "string";
-    const encoderId = aliasesActive ? SLICE_SHORT_ID_ENCODER_ID : SLICE_ENCODER_ID;
-    const packedStr = encodePackedSlice(slice, {
-      sessionId: options?.sessionId,
-      shortIds: options?.shortIds,
-    });
-    const jsonTokens = estimateTokens(jsonStr);
-    const packedTokens = estimatePackedTokens(packedStr);
-    const detail = decideFormatDetailed(
+    const gated = gateWireFormat(
+      "slice.build",
+      compact,
       wireFormat,
       {
-        jsonBytes: jsonStr.length,
-        packedBytes: packedStr.length,
-        jsonTokens,
-        packedTokens,
+        ...options,
+        encoderInput: slice,
       },
-      resolveThreshold({ callThreshold: options?.packedThreshold }),
-      resolveTokenThreshold({
-        callTokenThreshold: options?.packedTokenThreshold,
-      }),
     );
-
-    const gateDecision = detail.decision === "packed" ? "packed" : "fallback";
-    tokenAccumulator.recordPackedUsage(
-      encoderId,
-      jsonStr.length,
-      packedStr.length,
-      gateDecision,
-    );
-    try {
-      getObservabilityTap()?.packedWire({
-        encoderId,
-        jsonBytes: jsonStr.length,
-        packedBytes: packedStr.length,
-        jsonTokens,
-        packedTokens,
-        decision: gateDecision,
-        axisHit: detail.axisHit ?? null,
-      });
-    } catch { /* swallow */ }
-    if (detail.decision === "packed") {
-      markShortIdsDelivered(packedStr, {
-        sessionId: options?.sessionId,
-        shortIds: options?.shortIds,
-      });
+    if (!gated.gateDecision && wireFormat === "packed") {
+      throw new WireFormatRetiredError(0);
+    }
+    if (gated.format === "packed") {
       return {
         format: "packed",
-        payload: packedStr,
-        encoderId,
-        jsonBytes: jsonStr.length,
-        packedBytes: packedStr.length,
-        jsonTokens,
-        packedTokens,
-        axisHit: detail.axisHit ?? "bytes",
+        payload: gated.payload as string,
+        encoderId: gated.encoderId!,
+        jsonBytes: gated.jsonBytes!,
+        packedBytes: gated.packedBytes!,
+        jsonTokens: gated.jsonTokens,
+        packedTokens: gated.packedTokens,
+        axisHit: gated.axisHit,
       };
     }
     return { format: "compact", payload: compact };

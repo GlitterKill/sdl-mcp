@@ -10,7 +10,6 @@
 import { getPolicyEngineForConfig } from "./code-access.js";
 import type {
   RuntimePolicyRequestContext,
-  RuntimePolicyDecision,
   PolicyConfig,
   PolicyEvidence,
 } from "./types.js";
@@ -63,38 +62,5 @@ export function decideRuntime(
     deniedReasons: decision.deniedReasons ?? ["runtime denied"],
     evidenceUsed: decision.evidenceUsed,
     auditHash: decision.auditHash,
-  };
-}
-
-/**
- * Transitional adapter — returns the legacy `RuntimePolicyDecision` shape so
- * existing handlers can migrate away from `new PolicyEngine(...)` without
- * rewriting their decision-handling code.
- */
-export function decideRuntimeLegacy(
-  context: RuntimePolicyRequestContext,
-  runtimeConfig: RuntimeConfig,
-  concurrencyTracker?: ConcurrencyTracker,
-  policyConfig: Partial<PolicyConfig> = {},
-): RuntimePolicyDecision {
-  const decision = decideRuntime(
-    context,
-    runtimeConfig,
-    concurrencyTracker,
-    policyConfig,
-  );
-  if (decision.kind === "approve") {
-    return {
-      decision: "approve",
-      evidenceUsed: decision.evidenceUsed,
-      auditHash: decision.auditHash,
-    };
-  }
-  return {
-    decision: "deny",
-    evidenceUsed: decision.evidenceUsed,
-    auditHash: decision.auditHash,
-    deniedReasons:
-      decision.deniedReasons.length > 0 ? decision.deniedReasons : undefined,
   };
 }

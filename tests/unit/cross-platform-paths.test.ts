@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert";
 import {
   normalizePath,
+  caseFoldedPathKey,
   getRelativePath,
   safeJoin,
   getAbsolutePathFromRepoRoot,
@@ -35,6 +36,11 @@ describe("Cross-Platform Path Utilities", () => {
 
     it("should handle single-component paths", () => {
       assert.strictEqual(normalizePath("file.js"), "file.js");
+    });
+
+    it("preserves case unless a case-folded lookup key is requested", () => {
+      assert.strictEqual(normalizePath("Src\\File.ts"), "Src/File.ts");
+      assert.strictEqual(caseFoldedPathKey("Src\\File.ts"), "src/file.ts");
     });
   });
 

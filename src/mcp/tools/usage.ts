@@ -5,6 +5,7 @@
  * historical (persisted in LadybugDB).
  */
 
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import {
   UsageStatsRequestSchema,
   type UsageStatsResponse,
@@ -93,7 +94,7 @@ export async function handleUsageStats(
 ): Promise<UsageStatsResponse> {
   let request;
   try {
-    request = UsageStatsRequestSchema.parse(args);
+    request = parseActionHandlerArgs(UsageStatsRequestSchema, args);
   } catch (error) {
     if (error instanceof ZodError) {
       throw new ValidationError(

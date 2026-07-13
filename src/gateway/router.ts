@@ -1,51 +1,17 @@
 /**
  * Gateway router — maps `action` strings to existing tool handlers.
  *
- * Performs double validation:
- * 1. Gateway schema (discriminated union) — cheap first-pass
- * 2. Original handler schema — strict second-pass via ACTION_MAP
- *
- * The shared `repoId` is merged back into the action params for handler compatibility.
+ * The gateway envelope is validated at the MCP boundary. This router then
+ * prepares and parses the selected action exactly once before invocation.
  */
 import type { ToolContext } from "../server.js";
 import type { LiveIndexCoordinator } from "../live-index/types.js";
 import {
-  SymbolSearchRequestSchema,
-  SymbolGetCardRequestSchema,
-  SymbolEditRequestSchema,
-  SliceBuildRequestSchema,
-  SliceRefreshRequestSchema,
-  SliceSpilloverGetRequestSchema,
-  DeltaGetRequestSchema,
-  PRRiskAnalysisRequestSchema,
-  CodeNeedWindowRequestSchema,
-  GetSkeletonRequestSchema,
-  GetHotPathRequestSchema,
-  RepoRegisterRequestSchema,
-  RepoStatusRequestSchema,
-  RepoOverviewRequestSchema,
-  IndexRefreshRequestSchema,
-  PolicyGetRequestSchema,
-  PolicySetRequestSchema,
-  BufferPushRequestSchema,
-  BufferCheckpointRequestSchema,
-  BufferStatusRequestSchema,
-  AgentFeedbackRequestSchema,
-  AgentFeedbackQueryRequestSchema,
-  RuntimeExecuteRequestSchema,
-  RuntimeQueryOutputRequestSchema,
-  ResponseGetRequestSchema,
-  MemoryStoreRequestSchema,
-  MemoryQueryRequestSchema,
-  MemoryRemoveRequestSchema,
-  MemorySurfaceRequestSchema,
-  UsageStatsRequestSchema,
-  FileReadRequestSchema,
-  FileWriteRequestSchema,
-  SearchEditRequestSchema,
-  SemanticEnrichmentRefreshRequestSchema,
-  SemanticEnrichmentStatusRequestSchema,
-} from "../mcp/tools.js";
+  GATEWAY_ACTION_DEFINITIONS,
+  ACTION_DEFINITION_BY_ACTION,
+  type ActionAvailability,
+  type ActionDefinition,
+} from "../code-mode/action-catalog.js";
 import {
   handleSymbolSearch,
   handleSymbolGetCard,
@@ -100,6 +66,10 @@ import type { z } from "zod";
 import { normalizeToolArguments } from "../mcp/request-normalization.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { anyRepoHasMemoryTools } from "../config/memory-config.js";
+import {
+  prepareAndParseActionArgs,
+  type DispatchSurface,
+} from "./dispatch-spine.js";
 
 const MEMORY_ACTIONS = new Set([
   "memory.store",
@@ -109,10 +79,12 @@ const MEMORY_ACTIONS = new Set([
 ]);
 
 type ActionHandler = (args: unknown, context?: ToolContext) => Promise<unknown>;
+export type ActionHandlerMap = Record<string, ActionHandler>;
 
 export interface ActionEntry {
   schema: z.ZodType;
   handler: ActionHandler;
+  definition?: ActionDefinition;
 }
 
 export type ActionMap = Record<string, ActionEntry>;
@@ -122,161 +94,71 @@ export type ActionMap = Record<string, ActionEntry>;
  * Some handlers need the liveIndex service — those are patched in via
  * `createActionMap()` at registration time.
  */
-export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
-  const map: ActionMap = {
-    // === Query actions ===
-    "symbol.search": {
-      schema: SymbolSearchRequestSchema,
-      handler: handleSymbolSearch,
-    },
-    "symbol.getCard": {
-      schema: SymbolGetCardRequestSchema,
-      handler: handleSymbolGetCard,
-    },
-    "symbol.edit": {
-      schema: SymbolEditRequestSchema,
-      handler: handleSymbolEdit,
-    },
-    "slice.build": {
-      schema: SliceBuildRequestSchema,
-      handler: handleSliceBuild,
-    },
-    "slice.refresh": {
-      schema: SliceRefreshRequestSchema,
-      handler: handleSliceRefresh,
-    },
-    "slice.spillover.get": {
-      schema: SliceSpilloverGetRequestSchema,
-      handler: handleSliceSpilloverGet,
-    },
-    "delta.get": {
-      schema: DeltaGetRequestSchema,
-      handler: handleDeltaGet,
-    },
-    "pr.risk.analyze": {
-      schema: PRRiskAnalysisRequestSchema,
-      handler: handlePRRiskAnalysis,
-    },
-
-    // === Code actions ===
-    "code.needWindow": {
-      schema: CodeNeedWindowRequestSchema,
-      handler: handleCodeNeedWindow,
-    },
-    "code.getSkeleton": {
-      schema: GetSkeletonRequestSchema,
-      handler: handleGetSkeleton,
-    },
-    "code.getHotPath": {
-      schema: GetHotPathRequestSchema,
-      handler: handleGetHotPath,
-    },
-
-    // === Repo actions ===
-    "repo.register": {
-      schema: RepoRegisterRequestSchema,
-      handler: handleRepoRegister,
-    },
-    "repo.status": {
-      schema: RepoStatusRequestSchema,
-      handler: handleRepoStatus,
-    },
-    "repo.overview": {
-      schema: RepoOverviewRequestSchema,
-      handler: handleRepoOverview,
-    },
-    "index.refresh": {
-      schema: IndexRefreshRequestSchema,
-      handler: handleIndexRefresh,
-    },
-    "policy.get": {
-      schema: PolicyGetRequestSchema,
-      handler: handlePolicyGet,
-    },
-    "policy.set": {
-      schema: PolicySetRequestSchema,
-      handler: handlePolicySet,
-    },
-    "usage.stats": {
-      schema: UsageStatsRequestSchema,
-      handler: handleUsageStats,
-    },
-    "file.read": {
-      schema: FileReadRequestSchema,
-      handler: handleFileRead,
-    },
-    "file.write": {
-      schema: FileWriteRequestSchema,
-      handler: handleFileWrite,
-    },
-    "search.edit": {
-      schema: SearchEditRequestSchema,
-      handler: handleSearchEdit,
-    },
-    "semantic.enrichment.refresh": {
-      schema: SemanticEnrichmentRefreshRequestSchema,
-      handler: handleSemanticEnrichmentRefresh,
-    },
-    "semantic.enrichment.status": {
-      schema: SemanticEnrichmentStatusRequestSchema,
-      handler: handleSemanticEnrichmentStatus,
-    },
-
-    // === Agent actions ===
-    "agent.feedback": {
-      schema: AgentFeedbackRequestSchema,
-      handler: handleAgentFeedback,
-    },
-    "agent.feedback.query": {
-      schema: AgentFeedbackQueryRequestSchema,
-      handler: handleAgentFeedbackQuery,
-    },
-    "buffer.push": {
-      schema: BufferPushRequestSchema,
-      handler: (args, ctx) => handleBufferPush(args, ctx, liveIndex),
-    },
-    "buffer.checkpoint": {
-      schema: BufferCheckpointRequestSchema,
-      handler: (args, ctx) => handleBufferCheckpoint(args, ctx, liveIndex),
-    },
-    "buffer.status": {
-      schema: BufferStatusRequestSchema,
-      handler: (args, ctx) => handleBufferStatus(args, ctx, liveIndex),
-    },
-    "runtime.execute": {
-      schema: RuntimeExecuteRequestSchema,
-      handler: handleRuntimeExecute,
-    },
-    "runtime.queryOutput": {
-      schema: RuntimeQueryOutputRequestSchema,
-      handler: handleRuntimeQueryOutput,
-    },
-    "response.get": {
-      schema: ResponseGetRequestSchema,
-      handler: handleResponseGet,
-    },
-    "memory.store": {
-      schema: MemoryStoreRequestSchema,
-      handler: handleMemoryStore,
-    },
-    "memory.query": {
-      schema: MemoryQueryRequestSchema,
-      handler: handleMemoryQuery,
-    },
-    "memory.remove": {
-      schema: MemoryRemoveRequestSchema,
-      handler: handleMemoryRemove,
-    },
-    "memory.surface": {
-      schema: MemorySurfaceRequestSchema,
-      handler: handleMemorySurface,
-    },
+export function createActionHandlerMap(
+  liveIndex?: LiveIndexCoordinator,
+): ActionHandlerMap {
+  return {
+    "symbol.search": handleSymbolSearch,
+    "symbol.getCard": handleSymbolGetCard,
+    "symbol.edit": handleSymbolEdit,
+    "slice.build": handleSliceBuild,
+    "slice.refresh": handleSliceRefresh,
+    "slice.spillover.get": handleSliceSpilloverGet,
+    "delta.get": handleDeltaGet,
+    "pr.risk.analyze": handlePRRiskAnalysis,
+    "code.needWindow": handleCodeNeedWindow,
+    "code.getSkeleton": handleGetSkeleton,
+    "code.getHotPath": handleGetHotPath,
+    "repo.register": handleRepoRegister,
+    "repo.status": handleRepoStatus,
+    "repo.overview": handleRepoOverview,
+    "index.refresh": handleIndexRefresh,
+    "policy.get": handlePolicyGet,
+    "policy.set": handlePolicySet,
+    "usage.stats": handleUsageStats,
+    "file.read": handleFileRead,
+    "file.write": handleFileWrite,
+    "search.edit": handleSearchEdit,
+    "semantic.enrichment.refresh": handleSemanticEnrichmentRefresh,
+    "semantic.enrichment.status": handleSemanticEnrichmentStatus,
+    "agent.feedback": handleAgentFeedback,
+    "agent.feedback.query": handleAgentFeedbackQuery,
+    "buffer.push": (args, ctx) => handleBufferPush(args, ctx, liveIndex),
+    "buffer.checkpoint": (args, ctx) =>
+      handleBufferCheckpoint(args, ctx, liveIndex),
+    "buffer.status": (args, ctx) => handleBufferStatus(args, ctx, liveIndex),
+    "runtime.execute": handleRuntimeExecute,
+    "runtime.queryOutput": handleRuntimeQueryOutput,
+    "response.get": handleResponseGet,
+    "memory.store": handleMemoryStore,
+    "memory.query": handleMemoryQuery,
+    "memory.remove": handleMemoryRemove,
+    "memory.surface": handleMemorySurface,
   };
+}
 
-  if (!anyRepoHasMemoryTools(loadConfig())) {
-    for (const key of MEMORY_ACTIONS) {
-      delete map[key];
+export function createActionMap(
+  liveIndex?: LiveIndexCoordinator,
+  availability: ActionAvailability = {
+    memoryTools: anyRepoHasMemoryTools(loadConfig()),
+  },
+): ActionMap {
+  const handlers = createActionHandlerMap(liveIndex);
+  const map: ActionMap = {};
+
+  for (const definition of GATEWAY_ACTION_DEFINITIONS) {
+    if (!availability.memoryTools && MEMORY_ACTIONS.has(definition.action)) {
+      continue;
     }
+    const handler = handlers[definition.action];
+    if (!handler) {
+      throw new Error(`Missing gateway handler for action: ${definition.action}`);
+    }
+    map[definition.action] = {
+      schema: definition.schema,
+      handler,
+      definition,
+    };
   }
 
   return map;
@@ -290,26 +172,61 @@ export function createActionMap(liveIndex?: LiveIndexCoordinator): ActionMap {
  * @param ctx - MCP tool context
  * @returns The handler result
  */
-/**
- * Pre-normalize action args before Zod schema validation.
- * Coerces known fields (e.g., numeric timestamps) so callers don't
- * need to know the exact schema type expectations.
- */
-function preNormalizeArgs(
+function definitionForEntry(
   action: string,
-  args: Record<string, unknown>,
-): Record<string, unknown> {
-  // buffer.push: coerce numeric timestamp (epoch ms) to ISO string
-  if (action === "buffer.push" && typeof args.timestamp === "number") {
-    return { ...args, timestamp: new Date(args.timestamp).toISOString() };
-  }
-  return args;
+  entry: ActionEntry,
+): ActionDefinition {
+  return (
+    entry.definition ??
+    {
+      action,
+      fn: null,
+      toolName: null,
+      schema: entry.schema,
+      aliases: ACTION_DEFINITION_BY_ACTION[action]?.aliases,
+      description: "",
+      prerequisites: [],
+      recommendedNextActions: [],
+      fallbacks: [],
+      requiredParams: [],
+      rung: null,
+      tags: [],
+      kind: "gateway",
+    }
+  );
+}
+
+export function prepareActionEntryArgs(
+  action: string,
+  entry: ActionEntry,
+  raw: unknown,
+  surface: DispatchSurface,
+): unknown {
+  return prepareAndParseActionArgs(
+    definitionForEntry(action, entry),
+    raw,
+    surface,
+  );
+}
+
+export async function dispatchAction(
+  action: string,
+  raw: unknown,
+  actionMap: ActionMap,
+  surface: DispatchSurface,
+  ctx?: ToolContext,
+): Promise<unknown> {
+  const entry = actionMap[action];
+  if (!entry) throw new Error(`Unknown gateway action: ${action}`);
+  const parsed = prepareActionEntryArgs(action, entry, raw, surface);
+  return entry.handler(parsed, ctx);
 }
 
 export async function routeGatewayCall(
   rawArgs: unknown,
   actionMap: ActionMap,
   ctx?: ToolContext,
+  surface: DispatchSurface = { kind: "gateway" },
 ): Promise<unknown> {
   const normalizedArgs = normalizeToolArguments(rawArgs, ctx?.sessionId);
   if (!normalizedArgs || typeof normalizedArgs !== "object") {
@@ -319,24 +236,9 @@ export async function routeGatewayCall(
   const action = args.action as string;
   const repoId = args.repoId as string | undefined;
 
-  const entry = actionMap[action];
-  if (!entry) {
-    throw new Error(`Unknown gateway action: ${action}`);
-  }
-
   // Build the handler-compatible payload: merge repoId back in, strip action
   const { action: _action, ...rest } = args;
   const merged = repoId !== undefined ? { repoId, ...rest } : rest;
 
-  // Pre-normalize known fields before schema validation.
-  // Coerce numeric timestamps to ISO strings so callers can pass epoch ms.
-  const normalized = preNormalizeArgs(
-    action,
-    merged as Record<string, unknown>,
-  );
-
-  // Second-pass validation using the original strict Zod schema
-  const parsed = entry.schema.parse(normalized);
-
-  return entry.handler(parsed, ctx);
+  return dispatchAction(action, merged, actionMap, surface, ctx);
 }

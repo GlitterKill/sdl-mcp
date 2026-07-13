@@ -27,6 +27,14 @@ export function normalizePath(p: string): string {
   return path.posix.normalize(slashNormalized);
 }
 
+/**
+ * Separator-normalized, case-folded key for call sites whose contract is
+ * explicitly case-insensitive. Never use for DB storage or filesystem identity.
+ */
+export function caseFoldedPathKey(p: string): string {
+  return normalizePath(p).toLowerCase();
+}
+
 export function getRelativePath(from: string, to: string): string {
   const normalizedFrom = normalizePath(from);
   const normalizedTo = normalizePath(to);

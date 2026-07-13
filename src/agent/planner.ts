@@ -1,3 +1,5 @@
+import { normalizePath } from "../util/paths.js";
+
 import type {
   AgentTask,
   ConfidenceTier,
@@ -405,7 +407,7 @@ export class Planner {
       // processes multiple symbols instead of treating a directory as a single
       // opaque file reference (which would yield only ~1 symbol card).
       for (const filePath of options.focusPaths) {
-        const normalizedPath = filePath.replace(/\\/g, "/");
+        const normalizedPath = normalizePath(filePath);
         const isDirectory =
           normalizedPath.endsWith("/") ||
           !normalizedPath.split("/").pop()?.includes(".");

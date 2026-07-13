@@ -27,9 +27,11 @@ import {
   AGENT_ACTIONS,
 } from "./schemas.js";
 import { buildGatewayWireSchema } from "./thin-schemas.js";
+import type { ActionAvailability } from "../code-mode/action-catalog.js";
 
 export type ToolServices = {
   liveIndex?: LiveIndexCoordinator;
+  actionAvailability?: ActionAvailability;
 };
 
 /**
@@ -49,7 +51,10 @@ export function registerGatewayTools(
   config: GatewayConfig,
   prebuiltActionMap?: ActionMap,
 ): void {
-  const actionMap = prebuiltActionMap ?? createActionMap(services.liveIndex);
+  const actionMap = prebuiltActionMap ?? createActionMap(
+    services.liveIndex,
+    services.actionAvailability,
+  );
   const queryWireSchema = buildGatewayWireSchema(QUERY_ACTIONS, actionMap);
   const codeWireSchema = buildGatewayWireSchema(CODE_ACTIONS, actionMap);
   const repoWireSchema = buildGatewayWireSchema(REPO_ACTIONS, actionMap);
@@ -90,7 +95,7 @@ export function registerGatewayTools(
 
   server.registerTool(
     "sdl.agent",
-    getAgentDescription(),
+    getAgentDescription(services.actionAvailability?.memoryTools),
     AgentGatewaySchema,
     makeHandler(),
     agentWireSchema,

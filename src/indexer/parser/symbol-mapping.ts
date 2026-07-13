@@ -11,6 +11,7 @@ import {
 } from "../fingerprints.js";
 import type { SymbolWithNodeId } from "../worker.js";
 import type { SymbolDetail } from "./types.js";
+import { resolveSymbolNodeForFingerprint } from "./symbol-node-resolution.js";
 
 // ── Phase 4: Load existing symbols from DB ──────────────────────────
 
@@ -132,27 +133,12 @@ export function buildSymbolDetails(params: {
     let astFingerprint = extractedSymbol.astFingerprint ?? "";
 
     if (tree) {
-      const nodeType =
-        extractedSymbol.kind === "function"
-          ? "function_declaration"
-          : extractedSymbol.kind === "class"
-            ? "class_declaration"
-            : extractedSymbol.kind === "interface"
-              ? "interface_declaration"
-              : extractedSymbol.kind === "type"
-                ? "type_alias_declaration"
-                : extractedSymbol.kind === "method"
-                  ? "method_definition"
-                  : extractedSymbol.kind === "variable"
-                    ? "variable_declaration"
-                    : "ambient_statement";
-
-      const astNode = tree.rootNode
-        .descendantsOfType(nodeType)
-        .find((node) => {
-          const nameNode = node.childForFieldName("name");
-          return nameNode?.text === extractedSymbol.name;
-        });
+      const astNode = resolveSymbolNodeForFingerprint(tree, {
+        kind: extractedSymbol.kind,
+        name: extractedSymbol.name,
+        startLine: extractedSymbol.range?.startLine,
+        startCol: extractedSymbol.range?.startCol,
+      });
 
       astFingerprint = astNode
         ? generateAstFingerprint(astNode)

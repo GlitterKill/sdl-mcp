@@ -10,6 +10,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { z } from "zod";
 import type { ToolContext } from "../../server.js";
+import { parseActionHandlerArgs } from "../../gateway/dispatch-spine.js";
 import {
   RuntimeExecuteRequestSchema,
   type RuntimeExecuteRequest,
@@ -24,7 +25,7 @@ import {
 } from "../../domain/errors.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { RuntimeConfigSchema } from "../../config/types.js";
-import { decideRuntimeLegacy } from "../../policy/runtime.js";
+import { decideRuntime } from "../../policy/runtime.js";
 import type { RuntimePolicyRequestContext } from "../../policy/types.js";
 import {
   getRuntime,
@@ -504,7 +505,7 @@ export async function handleRuntimeExecute(
   const parseStartedAt = timer.start();
   let request: RuntimeExecuteRequest;
   try {
-    request = RuntimeExecuteRequestSchema.parse(args);
+    request = parseActionHandlerArgs(RuntimeExecuteRequestSchema, args);
   } catch (error) {
     if (error instanceof z.ZodError) {
       throw new ValidationError(runtimeValidationMessage(error));
@@ -584,11 +585,16 @@ export async function handleRuntimeExecute(
     envKeys: [], // No custom env in v1
   };
 
-  const policyDecision = decideRuntimeLegacy(
-    policyContext,
-    runtimeConfig,
-    tracker,
-  );
+  const runtimeDecision = decideRuntime(policyContext, runtimeConfig, tracker);
+  const policyDecision = {
+    decision: runtimeDecision.kind,
+    evidenceUsed: runtimeDecision.evidenceUsed,
+    auditHash: runtimeDecision.auditHash,
+    deniedReasons:
+      runtimeDecision.kind === "deny" && runtimeDecision.deniedReasons.length > 0
+        ? runtimeDecision.deniedReasons
+        : undefined,
+  };
   timer.record("runtime.policy", policyStartedAt);
 
   // Log policy decision

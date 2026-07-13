@@ -48,8 +48,9 @@ const MEMORY_DESCRIPTION_SUFFIX =
  * Get the AGENT_DESCRIPTION dynamically based on memory config.
  * When no repo has memory enabled, memory action references are omitted.
  */
-export function getAgentDescription(): string {
-  const memoryVisible = anyRepoHasMemoryTools(loadConfig());
+export function getAgentDescription(
+  memoryVisible = anyRepoHasMemoryTools(loadConfig()),
+): string {
   return memoryVisible
     ? AGENT_DESCRIPTION_BASE + MEMORY_DESCRIPTION_SUFFIX
     : AGENT_DESCRIPTION_BASE;

@@ -14,45 +14,11 @@ import type { ToolServices } from "../../gateway/index.js";
 import type { ToolPresentation } from "../tool-presentation.js";
 
 import {
-  RepoRegisterRequestSchema,
-  RepoStatusRequestSchema,
   RepoStatusResponseSchema,
-  IndexRefreshRequestSchema,
-  RepoOverviewRequestSchema,
-  BufferPushRequestSchema,
-  BufferCheckpointRequestSchema,
-  BufferStatusRequestSchema,
-  SymbolSearchRequestSchema,
-  SymbolGetCardRequestSchema,
-  SymbolEditRequestSchema,
-  SliceBuildRequestSchema,
-  SliceRefreshRequestSchema,
-  SliceSpilloverGetRequestSchema,
-  DeltaGetRequestSchema,
-  CodeNeedWindowRequestSchema,
-  GetSkeletonRequestSchema,
-  GetHotPathRequestSchema,
-  PolicyGetRequestSchema,
-  PolicySetRequestSchema,
-  PRRiskAnalysisRequestSchema,
-  AgentFeedbackRequestSchema,
-  AgentFeedbackQueryRequestSchema,
-  RuntimeExecuteRequestSchema,
   RuntimeExecuteResponseSchema,
-  RuntimeQueryOutputRequestSchema,
   RuntimeQueryOutputResponseSchema,
-  ResponseGetRequestSchema,
-  MemoryStoreRequestSchema,
-  MemoryQueryRequestSchema,
-  MemoryRemoveRequestSchema,
-  MemorySurfaceRequestSchema,
-  UsageStatsRequestSchema,
-  FileReadRequestSchema,
-  FileWriteRequestSchema,
-  SemanticEnrichmentRefreshRequestSchema,
-  SemanticEnrichmentStatusRequestSchema,
-  SearchEditRequestSchema,
 } from "../tools.js";
+import { ACTION_DEFINITION_BY_ACTION } from "../../code-mode/action-catalog.js";
 
 import {
   handleRepoRegister,
@@ -131,6 +97,26 @@ export interface ToolDescriptor {
   presentation?: Partial<ToolPresentation>;
 }
 
+type ToolDescriptorProjection = Omit<ToolDescriptor, "name" | "schema"> & {
+  action: string;
+};
+
+function projectToolDescriptor(
+  projection: ToolDescriptorProjection,
+): ToolDescriptor {
+  const { action, description, ...rest } = projection;
+  const definition = ACTION_DEFINITION_BY_ACTION[action];
+  if (!definition?.toolName) {
+    throw new Error(`Missing flat-tool Action Definition: ${action}`);
+  }
+  return {
+    name: definition.toolName,
+    description,
+    schema: definition.schema,
+    ...rest,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Descriptor factory
 // ---------------------------------------------------------------------------
@@ -142,254 +128,222 @@ export interface ToolDescriptor {
 export function buildFlatToolDescriptors(
   services: ToolServices,
 ): ToolDescriptor[] {
-  const memoryToolsVisible = anyRepoHasMemoryTools(loadConfig());
+  const memoryToolsVisible =
+    services.actionAvailability?.memoryTools ??
+    anyRepoHasMemoryTools(loadConfig());
 
-  const all: ToolDescriptor[] = [
+  const projections: ToolDescriptorProjection[] = [
     {
-      name: "sdl.repo.register",
+      action: "repo.register",
       description: "Register a new repository for indexing",
-      schema: RepoRegisterRequestSchema,
       handler: handleRepoRegister,
     },
     {
-      name: "sdl.repo.status",
+      action: "repo.status",
       description: "Get status information about a repository",
-      schema: RepoStatusRequestSchema,
       outputSchema: RepoStatusResponseSchema,
       handler: handleRepoStatus,
     },
     {
-      name: "sdl.index.refresh",
+      action: "index.refresh",
       description: "Refresh index for a repository (full or incremental)",
-      schema: IndexRefreshRequestSchema,
       handler: handleIndexRefresh,
     },
     {
-      name: "sdl.repo.overview",
+      action: "repo.overview",
       description:
         "Get token-efficient codebase overview with directory summaries and hotspots",
-      schema: RepoOverviewRequestSchema,
       handler: handleRepoOverview,
     },
     {
-      name: "sdl.buffer.push",
+      action: "buffer.push",
       description: "Push editor buffer updates for live draft indexing",
-      schema: BufferPushRequestSchema,
       handler: (args, context) =>
         handleBufferPush(args, context, services.liveIndex),
     },
     {
-      name: "sdl.buffer.checkpoint",
+      action: "buffer.checkpoint",
       description: "Request a live draft checkpoint for a repository",
-      schema: BufferCheckpointRequestSchema,
       handler: (args, context) =>
         handleBufferCheckpoint(args, context, services.liveIndex),
     },
     {
-      name: "sdl.buffer.status",
+      action: "buffer.status",
       description: "Get live draft buffer status for a repository",
-      schema: BufferStatusRequestSchema,
       handler: (args, context) =>
         handleBufferStatus(args, context, services.liveIndex),
     },
     {
-      name: "sdl.symbol.search",
+      action: "symbol.search",
       description: "Search for symbols by name or summary",
-      schema: SymbolSearchRequestSchema,
       handler: handleSymbolSearch,
     },
     {
-      name: "sdl.symbol.getCard",
+      action: "symbol.getCard",
       description: "Get a single symbol card by ID",
-      schema: SymbolGetCardRequestSchema,
       handler: handleSymbolGetCard,
     },
     {
-      name: "sdl.symbol.edit",
+      action: "symbol.edit",
       description:
         "Symbol-scoped edit preview/apply/applyNow with astFingerprint, range, file sha, draft preconditions, and parse-after validation.",
-      schema: SymbolEditRequestSchema,
       handler: handleSymbolEdit,
     },
     {
-      name: "sdl.slice.build",
+      action: "slice.build",
       description:
         "Build a graph slice for a task context. Accepts taskText alone (no entrySymbols required) " +
         "to auto-discover relevant symbols via full-text search in a single round trip. " +
         "Providing entrySymbols in addition to taskText improves precision. " +
         "When editedFiles is provided, all symbols in those files plus their immediate callers are included as forced entries regardless of score threshold.",
-      schema: SliceBuildRequestSchema,
       handler: handleSliceBuild,
     },
     {
-      name: "sdl.slice.refresh",
+      action: "slice.refresh",
       description:
         "Refresh an existing slice handle and return incremental delta",
-      schema: SliceRefreshRequestSchema,
       handler: handleSliceRefresh,
     },
     {
-      name: "sdl.slice.spillover.get",
+      action: "slice.spillover.get",
       description:
         "Fetch overflow symbols via spillover handle with pagination",
-      schema: SliceSpilloverGetRequestSchema,
       handler: handleSliceSpilloverGet,
     },
     {
-      name: "sdl.delta.get",
+      action: "delta.get",
       description: "Get delta pack between two versions with blast radius",
-      schema: DeltaGetRequestSchema,
       handler: handleDeltaGet,
     },
     {
-      name: "sdl.code.needWindow",
+      action: "code.needWindow",
       description:
         "Request access to raw code window for a symbol with gating policy",
-      schema: CodeNeedWindowRequestSchema,
       handler: handleCodeNeedWindow,
     },
     {
-      name: "sdl.code.getSkeleton",
+      action: "code.getSkeleton",
       description:
         "Get skeleton view of code (signatures + control flow + elided bodies)",
-      schema: GetSkeletonRequestSchema,
       handler: handleGetSkeleton,
     },
     {
-      name: "sdl.code.getHotPath",
+      action: "code.getHotPath",
       description:
         "Get hot-path excerpt showing only lines matching identifiers with context",
-      schema: GetHotPathRequestSchema,
       handler: handleGetHotPath,
     },
     {
-      name: "sdl.policy.get",
+      action: "policy.get",
       description: "Get policy configuration for a repository",
-      schema: PolicyGetRequestSchema,
       handler: handlePolicyGet,
     },
     {
-      name: "sdl.policy.set",
+      action: "policy.set",
       description: "Update policy configuration for a repository",
-      schema: PolicySetRequestSchema,
       handler: handlePolicySet,
     },
     {
-      name: "sdl.pr.risk.analyze",
+      action: "pr.risk.analyze",
       description:
         "Analyze PR risk by computing delta between versions, assessing blast radius, and recommending tests",
-      schema: PRRiskAnalysisRequestSchema,
       handler: handlePRRiskAnalysis,
     },
     {
-      name: "sdl.agent.feedback",
+      action: "agent.feedback",
       description:
         "Record feedback about useful and missing symbols for offline tuning",
-      schema: AgentFeedbackRequestSchema,
       handler: handleAgentFeedback,
     },
     {
-      name: "sdl.agent.feedback.query",
+      action: "agent.feedback.query",
       description:
         "Query feedback records and aggregated statistics for offline tuning pipelines",
-      schema: AgentFeedbackQueryRequestSchema,
       handler: handleAgentFeedbackQuery,
     },
     {
-      name: "sdl.runtime.execute",
+      action: "runtime.execute",
       description:
         "Execute a command in a repo-scoped subprocess with structured output, " +
         "artifact persistence, and deterministic excerpts. Enabled by default; set runtime.enabled = false to disable.",
-      schema: RuntimeExecuteRequestSchema,
       outputSchema: RuntimeExecuteResponseSchema,
       handler: handleRuntimeExecute,
     },
     {
-      name: "sdl.runtime.queryOutput",
+      action: "runtime.queryOutput",
       description:
         "Query stored command output by keywords and retrieve specific sections of previous runtime execution results",
-      schema: RuntimeQueryOutputRequestSchema,
       outputSchema: RuntimeQueryOutputResponseSchema,
       handler: handleRuntimeQueryOutput,
     },
     {
-      name: "sdl.response.get",
+      action: "response.get",
       description:
         "Retrieve a stored large tool response by handle, with bounded excerpt or full payload modes",
-      schema: ResponseGetRequestSchema,
       handler: handleResponseGet,
     },
     {
-      name: "sdl.memory.store",
+      action: "memory.store",
       description:
         "Store or update an agent memory (decision, bugfix, or task context) with optional symbol and file links",
-      schema: MemoryStoreRequestSchema,
       handler: handleMemoryStore,
     },
     {
-      name: "sdl.memory.query",
+      action: "memory.query",
       description:
         "Search and filter agent memories by text, type, tags, or linked symbols",
-      schema: MemoryQueryRequestSchema,
       handler: handleMemoryQuery,
     },
     {
-      name: "sdl.memory.remove",
+      action: "memory.remove",
       description:
         "Soft-delete a memory from the graph and optionally from disk",
-      schema: MemoryRemoveRequestSchema,
       handler: handleMemoryRemove,
     },
     {
-      name: "sdl.memory.surface",
+      action: "memory.surface",
       description:
         "Auto-surface relevant memories for a task context based on symbol overlap and recency",
-      schema: MemorySurfaceRequestSchema,
       handler: handleMemorySurface,
     },
     {
-      name: "sdl.usage.stats",
+      action: "usage.stats",
       description:
         "Get cumulative token savings statistics for the current session and/or historical sessions",
-      schema: UsageStatsRequestSchema,
       handler: handleUsageStats,
     },
     {
-      name: "sdl.file.read",
+      action: "file.read",
       description:
         "Read non-indexed files (templates, configs, docs) with optional line range, search, or JSON path extraction",
-      schema: FileReadRequestSchema,
       handler: handleFileRead,
     },
     {
-      name: "sdl.file.write",
+      action: "file.write",
       description:
         "Write to a single file (indexed or non-indexed) with targeted modes; use sdl.search.edit for cross-file batching: full content, line replacement, pattern replacement, JSON path update, insert, or append",
-      schema: FileWriteRequestSchema,
       handler: handleFileWrite,
     },
     {
-      name: "sdl.semantic.enrichment.refresh",
+      action: "semantic.enrichment.refresh",
       description:
         "Run provider-backed semantic enrichment for a repository using SCIP or LSP source selection.",
-      schema: SemanticEnrichmentRefreshRequestSchema,
       handler: handleSemanticEnrichmentRefresh,
     },
     {
-      name: "sdl.semantic.enrichment.status",
+      action: "semantic.enrichment.status",
       description:
         "Report semantic enrichment provider selection, skipped providers, last runs, and precision scores.",
-      schema: SemanticEnrichmentStatusRequestSchema,
       handler: handleSemanticEnrichmentStatus,
     },
     {
-      name: "sdl.search.edit",
+      action: "search.edit",
       description:
         'Cross-file search-and-edit in two phases: mode:"preview" returns a planHandle summarizing proposed edits; mode:"apply" executes the plan with sha256/mtime preconditions and rollback on mid-batch failure. Supports text, symbol, identifier, and structural tree-sitter targeting for safer edits across supported structural languages. Also supports targeting:"rename" (graph-scoped symbol rename) and targeting:"signature" (TS/JS signature change with AST-based callsite propagation). Preview responses default to responseMode:"auto". Prefer this over composing repeated file.write calls.',
-      schema: SearchEditRequestSchema,
       handler: handleSearchEdit,
     },
   ];
+  const all = projections.map(projectToolDescriptor);
 
   if (!memoryToolsVisible) {
     return all.filter((d) => !d.name.startsWith("sdl.memory."));

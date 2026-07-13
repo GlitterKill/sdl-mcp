@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 
 import {
   decideRuntime,
-  decideRuntimeLegacy,
 } from "../../../dist/policy/runtime.js";
 import type { RuntimePolicyRequestContext } from "../../../dist/policy/types.js";
 import { RuntimeConfigSchema } from "../../../dist/config/types.js";
@@ -188,24 +187,5 @@ describe("decideRuntime — concurrency tracker", () => {
       tracker,
     );
     assert.equal(decision.kind, "approve");
-  });
-});
-
-describe("decideRuntimeLegacy — backward-compat shape", () => {
-  it("returns a legacy RuntimePolicyDecision with decision='approve' on success", () => {
-    const legacy = decideRuntimeLegacy(makeContext(), makeRuntimeConfig());
-    assert.equal(legacy.decision, "approve");
-    assert.ok(typeof legacy.auditHash === "string");
-    assert.equal(legacy.deniedReasons, undefined);
-  });
-
-  it("returns a legacy RuntimePolicyDecision with decision='deny' on failure", () => {
-    const legacy = decideRuntimeLegacy(
-      makeContext(),
-      makeRuntimeConfig({ enabled: false }),
-    );
-    assert.equal(legacy.decision, "deny");
-    assert.ok(Array.isArray(legacy.deniedReasons));
-    assert.ok((legacy.deniedReasons ?? []).length > 0);
   });
 });

@@ -106,6 +106,28 @@ export interface AgentFeedbackRow {
   createdAt: string;
 }
 
+export type AgentFeedbackBoostRow = Pick<
+  AgentFeedbackRow,
+  "feedbackId" | "usefulSymbolsJson" | "missingSymbolsJson" | "taskType"
+>;
+
+export async function getAgentFeedbackBoostRows(
+  conn: Connection,
+  feedbackIds: readonly string[],
+): Promise<AgentFeedbackBoostRow[]> {
+  if (feedbackIds.length === 0) return [];
+  return queryAll<AgentFeedbackBoostRow>(
+    conn,
+    `MATCH (f:AgentFeedback)
+     WHERE f.feedbackId IN $feedbackIds
+     RETURN f.feedbackId AS feedbackId,
+            f.usefulSymbolsJson AS usefulSymbolsJson,
+            f.missingSymbolsJson AS missingSymbolsJson,
+            f.taskType AS taskType`,
+    { feedbackIds: [...feedbackIds] },
+  );
+}
+
 /**
  * Build searchText for an AgentFeedback row by concatenating
  * human-readable fields. Used for FTS indexing.
