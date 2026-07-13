@@ -13,6 +13,18 @@
 </details>
 </div>
 
+## Request flow
+
+```mermaid
+flowchart LR
+  Browser["Browser at /ui/config"] --> Read["GET /api/config"]
+  Browser --> Validate["POST /api/config/validate"]
+  Validate --> Impact["Validation and impact"]
+  Impact --> Save["POST /api/config/save"]
+  Save --> Backup["Backup and atomic write"]
+```
+
+
 ## Overview
 
 The visual configuration admin console is available on the HTTP transport at

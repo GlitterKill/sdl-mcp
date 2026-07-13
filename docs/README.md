@@ -1,126 +1,79 @@
 # Documentation Hub
 
-<div align="right">
-<details>
-<summary><strong>Docs Navigation</strong></summary>
+Use this page to choose the shortest path to the SDL-MCP documentation you need.
 
-- [Overview](../README.md)
-- [Documentation Hub (this page)](./README.md)
-  - [Iris Gate Ladder](./feature-deep-dives/iris-gate-ladder.md)
-  - [Architecture](./architecture.md)
-  - [Getting Started](./getting-started.md)
-  - [Config Examples](./config-examples.md)
-  - [CLI Reference](./cli-reference.md)
-  - [MCP Tools Reference](./mcp-tools-reference.md)
-  - [Prompt Cache Hygiene](./prompt-cache-hygiene.md)
-  - [Configuration Reference](./configuration-reference.md)
-  - [Agent Workflows](./agent-workflows.md)
-  - [Tool Enforcement](./tool-enforcement.md)
-  - [Troubleshooting](./troubleshooting.md)
+## Start and connect
 
-</details>
-</div>
+- [Getting Started](./getting-started.md): install SDL-MCP, initialize a repository, and connect an MCP client.
+- [CLI Reference](./cli-reference.md): command syntax and CLI behavior.
+- [Tool Enforcement](./tool-enforcement.md): generate an SDL-first setup for Claude, Codex, Gemini, or OpenCode.
+- [Claude-specific enforcement](./tool-enforcement-for-claude.md): Claude hooks and generated assets.
 
-Use this page as the entry point for SDL-MCP documentation.
+## Use SDL-MCP
 
-## Read By Goal
+- [MCP Tools Reference](./mcp-tools-reference.md): canonical MCP request, response, and workflow guidance.
+- [Generated Tool Inventory](./generated/tool-inventory.md): current registered tools and mode counts.
+- [Code Mode](./feature-deep-dives/code-mode.md): compact discovery, retrieval, file, and workflow surfaces.
+- [Agent Workflows](./agent-workflows.md): practical retrieval and editing workflows.
+- [CLI Tool Access](./feature-deep-dives/cli-tool-access.md): direct action aliases, output formats, and scripting guidance.
 
-- I want to understand the technical stack and data flow:
-  - [Architecture](./architecture.md)
-- I want to install and run SDL-MCP quickly:
-  - [Getting Started](./getting-started.md)
-- I need command syntax and examples:
-  - [CLI Reference](./cli-reference.md)
-- I need copy-paste SDL-MCP config snippets:
-  - [Config Examples](./config-examples.md)
-- I need MCP tool payloads and responses:
-  - [MCP Tools Reference](./mcp-tools-reference.md)
-  - [MCP Tools Detailed](./mcp-tools-detailed.md)
-- I need prompt-cache stability rules for MCP tools:
-  - [Prompt Cache Hygiene](./prompt-cache-hygiene.md)
-- I want to make symbol-scoped edits safely:
-  - [sdl.symbol.edit](./symbol-edit-tool.md)
-- I need to tune repository, policy, and slice behavior:
-  - [Configuration Reference](./configuration-reference.md)
-- I want agent best practices and Iris Gate Ladder workflows:
-  - [Agent Workflows](./agent-workflows.md)
-  - [Iris Gate Ladder](./feature-deep-dives/iris-gate-ladder.md)
-- I want agents to actually use SDL-MCP instead of native token-heavy tools:
-  - [Tool Enforcement](./tool-enforcement.md)
-  - [Claude-Specific Enforcement](./tool-enforcement-for-claude.md)
-- I need operational debugging guidance:
-  - [Troubleshooting](./troubleshooting.md)
-- I want to edit SDL-MCP configuration visually:
-  - [Visual Configuration Admin Console](./feature-deep-dives/config-admin-console.md)
-- I want to understand the memory protocol (opt-in, disabled by default):
-  - [Memory Protocol](./memory-protocol.md)
+- [File Read](./file-read-tool.md), [File Write](./file-write-tool.md), [Search Edit](./search-edit-tool.md), and [Symbol Edit](./symbol-edit-tool.md): safe file and source-edit operations.
+- [Iris Gate Ladder](./feature-deep-dives/iris-gate-ladder.md): the context escalation model.
+- [Prompt Cache Hygiene](./prompt-cache-hygiene.md): stability rules for cache-friendly tool surfaces.
 
-## Feature Deep-Dives
+## Configure and operate
 
-- [Iris Gate Ladder](./feature-deep-dives/iris-gate-ladder.md)
+- [Configuration Reference](./configuration-reference.md) and [Configuration Examples](./config-examples.md): settings, defaults, and working configurations.
+- [Runtime Execution](./feature-deep-dives/runtime-execution.md): governed repository commands and persisted output.
+- [Observability Dashboard](./feature-deep-dives/observability-dashboard.md): operational metrics and the HTTP dashboard.
+- [Graph Viewer](./feature-deep-dives/graph-viewer.md): SDL Galaxy and graph-viewer endpoints.
+- [Troubleshooting](./troubleshooting.md): common setup and runtime failures.
+- [Testing Guide](./testing.md), [Cross-Platform Validation](./cross-platform-validation.md), and [Release Test Checklist](./release-test.md): verification and release work.
+- [Benchmark Guardrails](./benchmark-guardrails.md), [Benchmark Baseline Management](./benchmark-baseline-management.md), and [Benchmark Failure Guide](./benchmark-failure-guide.md): performance regression work.
+- [Sync Artifacts](./sync-artifacts.md), [CI Memory Sync Setup](./ci-memory-sync-setup.md), and [CI Memory Sync Operations](./ci-memory-sync.md): shared and automated repository state.
+
+## Understand features
+
+### Retrieval and context
+
 - [Graph Slicing](./feature-deep-dives/graph-slicing.md)
-- [Delta & Blast Radius](./feature-deep-dives/delta-blast-radius.md)
-- [Live Indexing](./feature-deep-dives/live-indexing.md)
-- [Governance & Policy](./feature-deep-dives/governance-policy.md)
 - [Agent Context](./feature-deep-dives/agent-context.md)
 - [Context Modes](./feature-deep-dives/context-modes.md)
-- [Indexing & Languages](./feature-deep-dives/indexing-languages.md)
-- [Semantic Engine](./feature-deep-dives/semantic-engine.md)
-- [Semantic Enrichment Bridge](./feature-deep-dives/semantic-enrichment-bridge.md)
-- [Semantic Embeddings Setup](./feature-deep-dives/semantic-embeddings-setup.md)
-- [Provider-First Indexing](./feature-deep-dives/provider-first-indexing.md)
-- [CLI Tool Access](./feature-deep-dives/cli-tool-access.md)
-- [Development Memories](./feature-deep-dives/development-memories.md)
-- [Tool Gateway](./feature-deep-dives/tool-gateway.md)
-- [Code Mode](./feature-deep-dives/code-mode.md)
-- [Runtime Execution](./feature-deep-dives/runtime-execution.md)
+- [Delta and Blast Radius](./feature-deep-dives/delta-blast-radius.md)
+- [Live Indexing](./feature-deep-dives/live-indexing.md)
+- [Governance and Policy](./feature-deep-dives/governance-policy.md)
+- [Token Economy](./feature-deep-dives/token-economy.md)
 - [Token Savings Meter](./feature-deep-dives/token-savings-meter.md)
-- [Observability Dashboard](./feature-deep-dives/observability-dashboard.md)
+
+### Indexing and semantic precision
+
+- [Indexing and Languages](./feature-deep-dives/indexing-languages.md)
+- [Language Provider Support](./feature-deep-dives/language-provider-support.md)
+- [Provider-First Indexing](./feature-deep-dives/provider-first-indexing.md)
+- [SCIP Integration](./feature-deep-dives/scip-integration.md)
+- [Semantic Engine](./feature-deep-dives/semantic-engine.md)
+- [Semantic Embeddings Setup](./feature-deep-dives/semantic-embeddings-setup.md)
+- [Semantic Enrichment Bridge](./feature-deep-dives/semantic-enrichment-bridge.md)
+
+### Platform features
+
+- [Development Memories](./feature-deep-dives/development-memories.md)
+- [Memory Protocol](./memory-protocol.md): opt-in memory behavior and storage rules.
+- [Tool Gateway](./feature-deep-dives/tool-gateway.md)
 - [Visual Configuration Admin Console](./feature-deep-dives/config-admin-console.md)
 
-## Advanced and Supporting Docs
+## Extend SDL-MCP
 
-- [Sync Artifacts](./sync-artifacts.md)
-- [Config Examples](./config-examples.md)
-- [Benchmark Guardrails](./benchmark-guardrails.md)
-- [Benchmark Baseline Management](./benchmark-baseline-management.md)
-- [Benchmark Failure Guide](./benchmark-failure-guide.md)
-- [CI Memory Sync Setup](./ci-memory-sync-setup.md)
-- [CI Memory Sync Operations](./ci-memory-sync.md)
-- [Cross-Platform Validation](./cross-platform-validation.md)
-- [Testing Guide](./testing.md)
-- [Prompt Cache Hygiene](./prompt-cache-hygiene.md)
-- [Release Test Checklist](./release-test.md)
+- [Architecture](./architecture.md): components, data flow, and implementation boundaries.
 - [Plugin SDK Author Guide](./plugin-sdk-author-guide.md)
 - [Plugin SDK Quick Reference](./plugin-sdk-quick-reference.md)
 - [Plugin SDK Security](./plugin-sdk-security.md)
-- [sdl.symbol.edit](./symbol-edit-tool.md)
+- [Canonical Extractor Contract](./canonical-extractor-contract.md)
 
-## Current Scope Snapshot
+## Current interfaces
 
-- **Version**: 0.12.1
-- **Supported languages**: Core adapters plus lazy provider languages; see [Language Provider Support](./feature-deep-dives/language-provider-support.md)
-- **CLI commands** (13): init, doctor, info, index, serve, export, import, pull, benchmark:ci, summary, health, version, tool
-- **Generated tool inventory**: [docs/generated/tool-inventory.md](./generated/tool-inventory.md)
-- **MCP surfaces**:
-  - Core: repo register/status/overview, index refresh, symbol search/getCard/edit, slice build/refresh/spillover, delta get, PR risk analyze
-  - Code access: getSkeleton, getHotPath, needWindow (Iris Gate Ladder)
-  - Policy: get/set
-  - Feedback: agent.feedback, agent.feedback.query
-  - Buffer: push, checkpoint, status
-  - Runtime: execute, queryOutput
-  - File: read and write for non-indexed files
-  - Memory: store, query, remove, surface
-  - SCIP: ingest
-  - Usage: stats
-  - Universal: `sdl.action.search` and `sdl.info`
-  - Default flat mode registers the direct action surface plus universal discovery and diagnostics.
-  - Gateway-only mode registers the compact namespace projection plus universal discovery and diagnostics.
-  - Gateway + legacy mode registers both the gateway projection and legacy flat actions.
-  - Code Mode exclusive registers `sdl.action.search`, `sdl.manual`, `sdl.context`, `sdl.retrieve`, `sdl.workflow`, and `sdl.file`.
-  - Gateway routing covers most flat actions; `sdl.file.write` is outside the gateway namespace schemas but remains available in flat mode and through Code Mode `sdl.file`. Exact counts live in the generated tool inventory.
-  - `sdl-mcp tool` exposes direct CLI action aliases plus only the `action.search` and `manual` metadata proxies; `sdl.context`, `sdl.retrieve`, `sdl.workflow`, and `sdl.file` remain MCP-only wrappers
-- **Semantic features**: hybrid FTS + vector retrieval with 2 supported local ONNX embedding models (Jina Code for Symbols, Nomic for FileSummary), plus optional LLM-generated symbol summaries (Anthropic/Ollama/mock)
-- **HTTP surface**: `/api/graph/*` endpoints and 3D graph viewer at `/ui/viewer` when serving over HTTP
-- **Native addon**: Rust via napi-rs for multi-threaded indexing (default engine, TS fallback)
-- **Runtime execution**: 17 supported runtimes (node, typescript, python, shell, powershell, ruby, php, perl, r, elixir, go, java, kotlin, rust, c, cpp, csharp)
+The project release defines the installed version. Run `sdl-mcp version` to inspect it.
+
+The [Generated Tool Inventory](./generated/tool-inventory.md) is the source of truth for registered MCP tools and mode counts. Use the [MCP Tools Reference](./mcp-tools-reference.md) for request and response guidance.
+
+The direct CLI `tool` command exposes its documented action aliases. Code Mode wrappers such as `sdl.context`, `sdl.retrieve`, `sdl.workflow`, and `sdl.file` remain MCP-only.

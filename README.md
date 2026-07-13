@@ -1,594 +1,138 @@
 <div align="center">
-<img src="https://github.com/GlitterKill/sdl-mcp/blob/main/docs/SDL-MCP_promo.webp" alt="Symbol Delta Ledger MCP">
+  <img src="./docs/readme-assets/readme-hero-v5.webp" alt="SDL-MCP context budget layer hero with symbol graph lens and feature callouts" width="100%">
 
-<br/>
+  # Symbol Delta Ledger
 
-# SYMBOL DELTA LEDGER
+  Cards-first code context for AI coding agents.
 
-### **Cards-first code context for AI coding agents**
-
-_Stop feeding entire files into the context window.<br/>Start giving agents exactly the code intelligence they need._
-
-<br/>
-
-![npm version](https://img.shields.io/npm/v/sdl-mcp.svg?style=for-the-badge)
-![npm downloads](https://img.shields.io/npm/dm/sdl-mcp.svg?style=for-the-badge)
-![GitHub commit activity](https://img.shields.io/github/commit-activity/w/GlitterKill/sdl-mcp?style=for-the-badge)<br/>
-[![RoastMyCode: A](https://roastmycode.ai/badge/GlitterKill/sdl-mcp)](https://roastmycode.ai/roast/latest/GlitterKill/sdl-mcp)
-
----
-
-<br/>
-
-[SDL Token Savings](https://github.com/user-attachments/assets/cdf535a0-dc6e-4c63-ba52-646acfab8999)
+  [Get started](./docs/getting-started.md) · [Documentation](./docs/README.md) · [MCP tools](./docs/mcp-tools-reference.md) · [npm](https://www.npmjs.com/package/sdl-mcp)
 </div>
 
-## What's the problem?
+## Work from the symbols that matter
 
-Every time an AI coding agent reads a file to answer a question, it consumes thousands of tokens. Most of those tokens are irrelevant to the task. The agent doesn't need 500 lines of a file to know that `validateToken` takes a `string` and returns a `Promise<User>` — but it reads them anyway, because that's all it has.
+SDL-MCP indexes a repository into a symbol graph and gives coding agents a controlled path from compact metadata to source code. Instead of starting with full files, an agent can search symbols, inspect cards, build a task-scoped slice, and request a bounded code window only when it needs one.
 
-**Multiply that across a debugging session touching 20 files and you've burned 40,000+ tokens on context gathering alone.**
+The result is a smaller, more deliberate context surface for debugging, reviews, implementation work, and repository exploration. SDL-MCP runs locally and supports the Model Context Protocol over stdio or HTTP.
 
-SDL-MCP fixes this. It indexes your codebase into a searchable **symbol graph** and serves precisely the right amount of context through a controlled escalation path. An agent that uses SDL-MCP understands your code better while consuming a fraction of the tokens.
+## Start in a few minutes
 
-<br/>
-
----
-
-<br/>
-
-## How it works — in 30 seconds
-
-![SDL-MCP indexing and retrieval flow](./docs/readme-assets/readme-how-it-works.webp)
-
-1. **Index once** — SDL-MCP parses every symbol in your repo and stores it as a compact metadata record (a "Symbol Card") in a graph database
-2. **Query efficiently** — Agents use MCP tools to search, slice, and retrieve exactly the context they need
-3. **Escalate only when necessary** — A four-rung ladder controls how much code the agent sees, from a 100-token card to full source (with justification required)
-
-<br/>
-
----
-
-<br/>
-
-## Prerequisites
-
-- **Node.js 24+** is required ([download](https://nodejs.org/)). SDL-MCP uses Node.js features not available in earlier versions. Run `node -v` to check.
-
-> **Peer dependency warnings during install?** The tree-sitter grammar packages may produce `ERESOLVE` warnings about peer dependencies. These are harmless — the install succeeds and everything works correctly. Add `--legacy-peer-deps` to suppress them: `npm install -g sdl-mcp --legacy-peer-deps`. SDL-MCP's postinstall also verifies tree-sitter grammar bindings and rebuilds missing ones before pruning sources; installs that use `--ignore-scripts` should run `npm rebuild tree-sitter tree-sitter-kotlin` if a grammar is unavailable.
-
-<br/>
-
----
-
-<br/>
-
-## Quick Start
-
-```bash
-# Install (requires Node.js 24+)
-npm install -g sdl-mcp
-# Plain npm installs run lifecycle scripts in the background, so run
-# `sdl-mcp init` after install. Use `--foreground-scripts` only when you
-# specifically want npm to show the install-time wizard and lifecycle output.
-
-# Non-interactive setup: initialize, auto-detect languages, index, and run health checks
-sdl-mcp init -y --auto-index
-
-# Start the MCP server for your coding agent
-sdl-mcp serve --stdio
-```
-
-For a clean foreground installer flow, use the tiny wrapper package:
+SDL-MCP requires Node.js 24 or later. For an interactive first install, run the wrapper package from the repository you want to index:
 
 ```bash
 npx create-sdl-mcp
 ```
 
-Run `npx create-sdl-mcp --update` for the fast update path: it installs the server binaries, skips repo setup, and prints the repo-init commands to run later.
-
-Point your MCP client at the server and the agent gains access to SDL-MCP's current configured surface. By default that is exclusive Code Mode; set `codeMode.exclusive: false` when you want Code Mode plus the regular flat or gateway tools in one session.
-
-> **npx users:** Replace `sdl-mcp` with `npx --yes sdl-mcp@latest` in all commands above.
-
-[Full Getting Started Guide →](./docs/getting-started.md)
-
-<br/>
-
----
-
-<br/>
-
-## The Iris Gate Ladder
-
-The core innovation. Named after the adjustable aperture that controls light flow in optics, the Iris Gate Ladder lets agents dial their context "aperture" from a pinhole to wide-open.
-
-![Iris Gate Ladder context escalation tiers](./docs/readme-assets/readme-iris-ladder.webp)
-
-> **Most questions are answered at Rungs 1-2** without ever reading raw code. That's where the token savings come from.
-
-| Scenario                             | Reading the file | Using the Ladder | Savings |
-| :----------------------------------- | :--------------: | :--------------: | :-----: |
-| "What does `parseConfig` accept?"    |    ~2,000 tok    |     ~100 tok     | **20x** |
-| "Show me the shape of `AuthService`" |    ~4,000 tok    |     ~300 tok     | **13x** |
-| "Where is `this.cache` set?"         |    ~2,000 tok    |     ~500 tok     | **4x**  |
-
-**Why it matters:**
-
-- **4–20x token savings** on typical code understanding queries
-- Most questions answered at Rungs 1–2 without ever reading raw code
-- Controlled escalation prevents agents from over-consuming context
-- Policy-gated raw access ensures agents prove they need full source
-
-[Iris Gate Ladder Deep Dive →](./docs/feature-deep-dives/iris-gate-ladder.md)
-
-<br/>
-
----
-
-<br/>
-
-## Feature Tour
-
-### Symbol Cards — The Atoms of Understanding
-
-Every function, class, interface, type, and variable becomes a **Symbol Card**: a compact metadata record (~100 tokens) containing everything an agent needs to _understand_ a symbol without reading its code.
-
-![Symbol Card fields and relationships](./docs/readme-assets/readme-symbol-card.webp)
-
-Cards include **confidence-scored call resolution** (the pass-2 resolver traces imports, aliases, barrel re-exports, and tagged templates to produce accurate dependency edges), **community detection** (cluster membership), and **call-chain tracing** (process participation with entry/intermediate/exit roles).
-
-**Why it matters:**
-
-- **~100 tokens per symbol** vs. ~2,000 tokens to read the full file
-- Confidence-scored dependency edges trace real call relationships across files
-- Community detection and call-chain tracing reveal architectural structure
-- ETag-based conditional requests avoid re-fetching unchanged symbols
-- Workflow ETag caching now seeds `slice.build` internally so repeated slice builds can skip unchanged cards automatically
-
-[Indexing & Language Support Deep Dive →](./docs/feature-deep-dives/indexing-languages.md)
-
----
-
-### Graph Slicing — The Right Context for Every Task
-
-Instead of reading files in the same directory, SDL-MCP follows the _dependency graph_. Starting from symbols relevant to your task, it traverses weighted edges (call: 1.0, config: 0.8, import: 0.6), scores each symbol by relevance, and returns the N most important within a token budget.
-
-![Graph slicing dependency selection flow](./docs/readme-assets/readme-graph-slicing.webp)
-
-Slices have handles, leases, refresh (delta-only updates), and spillover (paged overflow). You can also skip the symbol search entirely — pass a `taskText` string and SDL-MCP auto-discovers the relevant entry symbols.
-
-**Why it matters:**
-
-- Follows the **dependency graph**, not directory boundaries, for cross-cutting context
-- Weighted edge scoring (call > config > import) prioritizes the most relevant symbols
-- Token-budgeted: returns only what fits within your budget (~800 tokens vs. ~16,000 for raw files)
-- Natural-language task-text auto-discovers entry symbols — no symbol IDs needed
-
-[Graph Slicing Deep Dive →](./docs/feature-deep-dives/graph-slicing.md)
-
----
-
-### Delta Packs & Blast Radius — Semantic Change Intelligence
-
-`git diff` tells you what lines changed. SDL-MCP tells you what that change _means_ and who's affected.
-
-![Delta Packs semantic diff and blast radius flow](./docs/readme-assets/readme-delta-packs.webp)
-
-**PR risk analysis** (`sdl.pr.risk.analyze`) wraps this into a scored assessment with findings, evidence, and test recommendations. **Fan-in trend analysis** detects "amplifier" symbols whose growing dependency count means changes ripple further over time.
-
-**Why it matters:**
-
-- Semantic diffs show what a change **means**, not just what lines moved
-- Ranked blast radius identifies which dependent symbols are most at risk
-- Fan-in trend analysis detects "amplifier" symbols whose changes ripple further over time
-- PR risk scoring produces actionable findings with test re-run recommendations
-
-[Delta & Blast Radius Deep Dive →](./docs/feature-deep-dives/delta-blast-radius.md)
-
----
-
-### Live Indexing — Real-Time Code Intelligence
-
-SDL-MCP doesn't wait for you to save. As you type in your editor, buffer updates are pushed to an in-memory overlay store, parsed in the background, and merged with the durable database. Search, cards, and slices reflect your _current_ code, not your last save.
-
-![Live indexing buffer overlay flow](./docs/readme-assets/readme-live-indexing.webp)
-
-**Why it matters:**
-
-- Search, cards, and slices reflect **unsaved editor changes** in real time
-- No manual re-index needed during active development
-- Background AST parsing with in-memory overlay keeps queries fast
-
-[Live Indexing Deep Dive →](./docs/feature-deep-dives/live-indexing.md)
-
----
-
-### Governance & Policy — Controlled Access
-
-Raw code access (Rung 4) is **policy-gated**. Agents must provide:
-
-- A **reason** explaining why they need raw code
-- **Identifiers** they expect to find in the code
-- An **expected line count** within configured limits
-
-Requests that don't meet policy are denied with actionable guidance ("try `getHotPath` with these identifiers instead"). Every access is audit-logged.
-
-The sandboxed runtime execution tool (`sdl.runtime.execute`) has its own governance layer: enabled by default, but still guarded by executable allowlisting, CWD jailing, environment scrubbing, concurrency limits, and timeout enforcement. The `outputMode` parameter (`"minimal"` | `"summary"` | `"intent"`) defaults to `"minimal"` for ~95% token savings, with `sdl.runtime.queryOutput` enabling on-demand output retrieval when needed.
-
-**Why it matters:**
-
-- Proof-of-need gating prevents agents from wastefully reading raw code
-- Denied requests include **actionable next-best-action** guidance
-- Full audit logging of every code access decision
-- Sandboxed runtime with executable allowlisting, CWD jailing, and environment scrubbing
-
-[Governance & Policy Deep Dive →](./docs/feature-deep-dives/governance-policy.md)
-
----
-
-### Agent Context — Task-Shaped Retrieval
-
-`sdl.context` is SDL-MCP's task-shaped context engine. Give it a task type (`debug`, `review`, `implement`, `explain`), a description, and a budget — it selects the right Iris Gate rungs, collects evidence, and returns context tuned to the job. In Code Mode, `sdl.context` provides the same retrieval surface without dropping into `sdl.workflow`.
-
-Unscoped natural-language context calls use confidence-gated hybrid retrieval by default. Exact symbol mentions and explicit `focusPaths` / `focusSymbols` stay on the fast path; low-confidence lexical results can escalate to bounded FTS + vector retrieval. Set `options.semantic: true` to force hybrid retrieval, or `options.semantic: false` to keep lexical-only behavior for deterministic debugging.
-
-The feedback loop (`sdl.agent.feedback`) records which symbols were useful and which were missing, improving future slice quality.
-
-For portable exports such as tickets and PR descriptions, use the CLI `sdl-mcp summary` command. It generates token-bounded context briefings in markdown, JSON, or clipboard format for use outside MCP environments.
-
-**Why it matters:**
-
-- Task-shaped context retrieval plans the **right Iris Gate path** within a token budget
-- Confidence-gated hybrid retrieval improves discovery without slowing known-target lookups
-- Feedback loop records what was useful/missing, improving future slice quality
-- Portable context summaries export findings for use outside MCP environments
-
-[Agent Context Deep Dive →](./docs/feature-deep-dives/agent-context.md) · [Context Modes →](./docs/feature-deep-dives/context-modes.md)
-
----
-
-### Sandboxed Runtime Execution
-
-Run tests, linters, and scripts through SDL-MCP's governance layer instead of uncontrolled shell access. 16 runtimes (Node.js, Python, Go, Java, Rust, Shell, and more), code-mode or args-mode, smart output summarization with keyword-matched excerpts, and gzip artifact persistence.
-
-**Why it matters:**
-
-- Run tests, linters, and scripts **under governance** instead of uncontrolled shell access
-- 16 runtimes supported (Node, Python, Go, Java, Rust, Shell, and more)
-- Executable allowlisting, CWD jailing, timeout enforcement, and environment scrubbing
-- Smart output summarization with keyword-matched excerpts and gzip artifact persistence
-
-[Runtime Execution Deep Dive →](./docs/feature-deep-dives/runtime-execution.md)
-
----
-
-### Development Memories — Cross-Session Knowledge Persistence (Opt-In)
-
-Agents forget everything between sessions. SDL-MCP fixes this with an **opt-in graph-backed memory system** that lets agents store decisions, bugfix context, and task notes linked directly to the symbols and files they relate to. Memory is **disabled by default** and must be explicitly enabled in the configuration. When enabled, memories are stored both in the graph database (for fast querying) and as checked-in markdown files (for version control and team sharing).
-
-![Development Memories storage and surfacing cycle](./docs/readme-assets/readme-development-memories.webp)
-
-When enabled, memories are **automatically surfaced** inside graph slices — when an agent builds a slice touching symbols with linked memories, those memories appear alongside the cards. During re-indexing, memories linked to changed symbols are **flagged as stale**, prompting agents to review and update them. Four MCP tools (`store`, `query`, `remove`, `surface`) provide full CRUD plus intelligent ranking by confidence, recency, and symbol overlap. Memory tools are only available when memory is enabled in the configuration.
-
-**Why it matters:**
-
-- Structured knowledge **persists across sessions**, linked directly to symbols and files
-- Opt-in and disabled by default — enable via `"memory": { "enabled": true }` in config
-- When enabled, automatically surfaced inside graph slices when touching related symbols
-- Stale memories flagged when linked symbols change during re-indexing
-- Dual storage: graph DB for fast querying + markdown files for version control and team sharing
-
-[Development Memories Deep Dive →](./docs/feature-deep-dives/development-memories.md)
-
----
-
-### SCIP Integration — Compiler-Grade Cross-References
-
-Tree-sitter gives SDL-MCP fast, syntax-level symbol extraction across the built-in TypeScript/JavaScript, Python, Go, Java, C#, C/C++, Rust, and Kotlin surface. PHP and Shell/Bash are explicit opt-in language packs for LSP provider-first work and are not enabled by default. SCIP (Source Code Intelligence Protocol) supplies **compiler-grade cross-references** from tools like scip-typescript, scip-go, and rust-analyzer. When `scip.enabled` is true, SDL-MCP uses provider-first indexing to materialize those facts directly, with legacy parsing retained only for uncovered or provider-unusable files.
-
-![SCIP integration compiler cross-reference ingestion flow](./docs/readme-assets/readme-scip-integration.webp)
-
-**Why it matters:**
-
-- Upgrades heuristic call resolution to **compiler-verified exact edges** (confidence 0.95)
-- External dependencies (npm packages, Go modules, crate deps) become searchable graph nodes
-- Interface/trait implementations tracked via `implements` edges
-- Provider-first indexing keeps SCIP/LSP facts owned by the provider path; legacy indexing does not ingest `.scip` overlays
-- Complementary: tree-sitter provides structure, SCIP provides semantic precision
-
-[SCIP Integration Deep Dive →](./docs/feature-deep-dives/scip-integration.md)
-
----
-
-### CLI Tool Access — No MCP Server Required
-
-Access SDL-MCP direct action aliases plus the low-risk `action.search` and `manual` metadata proxies from the command line with `sdl-mcp tool`. No MCP server, transport, or SDK is required.
+For a standard global install, initialize the repository, verify it, then start the stdio server:
 
 ```bash
-# Search for symbols
-sdl-mcp tool symbol.search --query "handleAuth" --output-format pretty
-
-# Build a task-scoped slice
-sdl-mcp tool slice.build --task-text "debug auth flow" --max-cards 50
-
-# Pipe JSON args, chain commands
-echo '{"repoId":"my-repo"}' | sdl-mcp tool symbol.search --query "auth"
-
-# Apply a single-file targeted write
-sdl-mcp tool file.write --repo-id my-repo --file-path config/app.json \
-  --json-path server.port --json-value 8080
-
-# Discover and inspect metadata without opening the graph DB
-sdl-mcp tool action.search --query manual --summary-only
-sdl-mcp tool manual --actions action.search --format json
+npm install -g sdl-mcp
+cd <repository>
+sdl-mcp init
+sdl-mcp doctor
+sdl-mcp serve --stdio
 ```
 
-Features include typed argument coercion (string, number, boolean, string[], json), budget flag merging, stdin JSON piping with CLI flag precedence, auto-resolved `repoId` from cwd for graph actions, four output formats (json, json-compact, pretty, table), typo suggestions, and per-action `--help`. Direct graph actions dispatch through the same gateway router and Zod schemas as the MCP server; `action.search` and `manual` run in process against the same metadata handlers used by MCP registration.
+Use `sdl-mcp init -y --auto-index` for non-interactive setup. The [Getting Started guide](./docs/getting-started.md) covers the setup wizard, supported clients, HTTP transport, and configuration examples.
 
-**Why it matters:**
+## A controlled retrieval loop
 
-- 36 direct graph/action aliases plus `action.search` and `manual` metadata proxies accessible from **any terminal** - no server, transport, or SDK required
-- Direct graph actions keep gateway-router/Zod parity; metadata proxies share the same MCP registration handlers
-- Four output formats (json, json-compact, pretty, table) for scripting and CI pipelines
-- Auto-resolves repoId from cwd, supports stdin JSON piping and per-action `--help`
+![Repository indexing and task-shaped retrieval flow](./docs/readme-assets/readme-how-it-works-v3.webp)
 
-[CLI Tool Access Deep Dive →](./docs/feature-deep-dives/cli-tool-access.md)
+1. Index the repository into symbols, relationships, and compact metadata.
+2. Start with symbol search, task-shaped context, or graph slicing.
+3. Escalate through progressively richer views only when the task requires more detail.
 
----
+The Iris Gate Ladder makes the escalation explicit. Cards, skeletons, hot paths, and policy-gated source windows let an agent ask for the least code that can answer its question.
 
-### Tool Gateway — Compact Tool Registration
+![Iris Gate Ladder showing progressive context views](./docs/readme-assets/readme-iris-ladder-v3.webp)
 
-The tool gateway projects the 35 gateway-routable SDL actions into **4 namespace-scoped tools** (`sdl.query`, `sdl.code`, `sdl.repo`, `sdl.agent`), reducing `tools/list` overhead from the full flat schema surface to a compact gateway surface.
+## Choose the tool surface that fits the client
 
-![Tool Gateway compact registration flow](./docs/readme-assets/readme-tool-gateway.webp)
+The generated [tool inventory](./docs/generated/tool-inventory.md) is the source of truth for registered tools and mode counts.
 
-Each gateway tool accepts an `action` discriminator field (e.g., `{ action: "symbol.search", repoId: "x", query: "auth" }`) and routes to the same handlers with double Zod validation. Thin wire schemas in `tools/list` keep the registration compact while full validation happens server-side. The flat-only `sdl.file.write` action remains outside gateway mode today.
+| Mode | Registered surface |
+| --- | --- |
+| Flat | 37 tools: 2 universal tools and 35 flat tools |
+| Gateway | 6 tools: 2 universal tools and 4 gateway namespaces |
+| Gateway with legacy | 41 tools: 2 universal, 4 gateway, and 35 flat tools |
+| Code Mode exclusive | 6 tools: `sdl.action.search`, `sdl.context`, `sdl.file`, `sdl.manual`, `sdl.retrieve`, and `sdl.workflow` |
 
-**Why it matters:**
+Code Mode provides a compact task-oriented surface. Gateway mode groups the regular actions into `sdl.agent`, `sdl.code`, `sdl.query`, and `sdl.repo`. The [MCP Tools Reference](./docs/mcp-tools-reference.md) explains requests and responses for the installed surface.
 
-- Large reduction in `tools/list` overhead for gateway-first agents
-- 35 gateway-routable actions consolidated into 4 namespace-scoped tools for simpler agent selection
-- Fewer tool choices means faster and more accurate tool dispatch by the agent
-- Choose Code Mode for task-shaped retrieval first; opt out of exclusive Code Mode when you also need regular flat or gateway tools
+## Build context from repository structure
 
-[Tool Gateway Deep Dive →](./docs/feature-deep-dives/tool-gateway.md)
+### Symbol cards
 
----
+Each indexed symbol has a compact card with its identity, signature, summary, relationships, and other retrieval metadata. Cards give an agent a place to begin without opening a full source file.
 
-### SDL Galaxy Graph Viewer
+![Symbol card surrounded by connected repository context](./docs/readme-assets/readme-symbol-card-v3.webp)
 
-Built-in 3D graph viewer at `/ui/viewer` for cluster-level galaxy navigation, symbol-level LOD expansion, graph activity overlays, search/community/impact/edge lenses, skin packs, and idle ambient mode. The previous `/ui/graph` explorer redirects to `/ui/viewer`; legacy graph REST endpoints remain available for scripts.
+### Graph slicing
 
-[Graph Viewer Deep Dive →](./docs/feature-deep-dives/graph-viewer.md)
+Graph slicing follows repository relationships rather than directory boundaries. Give SDL-MCP a task or a starting symbol and it returns a budgeted subgraph that can be refreshed or expanded through spillover.
 
----
+![Task seed resolving to a selected dependency subgraph and spillover frontier](./docs/readme-assets/readme-graph-slicing-v3.webp)
 
-<br/>
+[Read about graph slicing](./docs/feature-deep-dives/graph-slicing.md) · [Read about task-shaped context](./docs/feature-deep-dives/agent-context.md)
 
-### Observability Dashboard
+## Understand change and work against current code
 
-Built-in read-only dashboard surfaces every metric needed to diagnose SDL-MCP behaviour without parsing stderr logs. GlitterKill dark UI at `/ui/observability` on the HTTP transport or the loopback-only `sdl-mcp serve --stdio --dashboard-port <port>` sidecar, plus REST + SSE APIs (`/api/observability/snapshot`, `/timeseries`, `/beam-explain`, `/stream`) for programmatic access. Surfaces cache hit rates, predictive-context outcome learning, hybrid-retrieval breakdowns (FTS / vector / PPR / RRF), beam-search decision traces, indexing pipeline metrics, write-pool and drain saturation, packed-wire token efficiency, and runtime CPU/memory/event-loop probes. See [Observability Dashboard Deep Dive](./docs/feature-deep-dives/observability-dashboard.md).
+### Delta packs and blast radius
 
-<br/>
+SDL-MCP can compare indexed versions, identify changed symbols, and trace affected relationships. `sdl.pr.risk.analyze` packages change evidence and test recommendations for pull-request review.
 
----
+![Changed artifact expanding into semantic facets, impact graph, and validation targets](./docs/readme-assets/readme-delta-packs-v3.webp)
 
-<br/>
+### Live indexing
 
-## Current Tool Surface at a Glance
+Draft-buffer updates can appear in a live overlay before the underlying file is saved. That lets retrieval work from the code an agent is editing instead of only the last durable index.
 
-| Mode                | Tool count | Composition                                                      |
-| :------------------ | :--------- | :--------------------------------------------------------------- |
-| Flat                | `38`       | `2` universal + `36` flat tools                                  |
-| Gateway             | `6`        | `2` universal + `4` gateway tools                                |
-| Gateway + legacy    | `42`       | `2` universal + `4` gateway + `36` flat tools                    |
-| Code Mode exclusive | `5`        | `sdl.action.search`, `sdl.context`, `sdl.file`, `sdl.manual`, `sdl.workflow` |
+![Draft change moving through a live overlay into a durable graph and query results](./docs/readme-assets/readme-live-indexing-v3.webp)
 
-The generated source of truth is [`docs/generated/tool-inventory.md`](./docs/generated/tool-inventory.md).
+[Read about delta packs](./docs/feature-deep-dives/delta-blast-radius.md) · [Read about live indexing](./docs/feature-deep-dives/live-indexing.md)
 
-<table>
-<tr><th>Category</th><th>Tool</th><th>One-Line Description</th></tr>
-<tr><td rowspan="4"><strong>Repository</strong></td>
-    <td><code>sdl.repo.register</code></td><td>Register a codebase for indexing</td></tr>
-<tr><td><code>sdl.repo.status</code></td><td>Health, versions, watcher, prefetch, live-index stats</td></tr>
-<tr><td><code>sdl.repo.overview</code></td><td>Codebase summary: stats, directories, hotspots, clusters, with conditional ETag fetch support</td></tr>
-<tr><td><code>sdl.index.refresh</code></td><td>Trigger full or incremental re-indexing</td></tr>
+## Use compiler and provider facts when they are available
 
-<tr><td rowspan="3"><strong>Live Buffer</strong></td>
-    <td><code>sdl.buffer.push</code></td><td>Push unsaved editor content for real-time indexing</td></tr>
-<tr><td><code>sdl.buffer.checkpoint</code></td><td>Force-write pending buffers to the durable database</td></tr>
-<tr><td><code>sdl.buffer.status</code></td><td>Live indexing diagnostics and queue depth</td></tr>
+SDL-MCP uses tree-sitter for repository structure and can ingest SCIP and language-provider facts through provider-first indexing. This adds precise cross-references where a provider covers the file and falls back to the regular path for files it does not cover.
 
-<tr><td rowspan="3"><strong>Symbols</strong></td>
-    <td><code>sdl.symbol.search</code></td><td>Search symbols by name (with optional semantic reranking)</td></tr>
-<tr><td><code>sdl.symbol.getCard</code></td><td>Get one card or batch-fetch up to 100 cards with ETag-based conditional support</td></tr>
-<tr><td><code>sdl.symbol.edit</code></td><td>Preview/apply one symbol-scoped edit with AST, range, file, and draft preconditions</td></tr>
+![Source artifacts normalized into provider facts and repository graph relationships](./docs/readme-assets/readme-scip-provider-first-v3.webp)
 
-<tr><td rowspan="3"><strong>Slices</strong></td>
-    <td><code>sdl.slice.build</code></td><td>Build a task-scoped dependency subgraph</td></tr>
-<tr><td><code>sdl.slice.refresh</code></td><td>Delta-only update of an existing slice</td></tr>
-<tr><td><code>sdl.slice.spillover.get</code></td><td>Page through overflow symbols beyond the budget</td></tr>
+[Read about SCIP integration](./docs/feature-deep-dives/scip-integration.md) · [Read about provider-first indexing](./docs/feature-deep-dives/provider-first-indexing.md)
 
-<tr><td rowspan="3"><strong>Code Access</strong></td>
-    <td><code>sdl.code.getSkeleton</code></td><td>Signatures + control flow, bodies elided, with conditional ETag fetch support</td></tr>
-<tr><td><code>sdl.code.getHotPath</code></td><td>Lines matching specific identifiers + context by <code>symbolId</code> or <code>symbolRef</code>, with conditional ETag fetch support</td></tr>
-<tr><td><code>sdl.code.needWindow</code></td><td>Full source code by <code>symbolId</code> or <code>symbolRef</code> (policy-gated, requires justification)</td></tr>
+## Keep useful knowledge with the work
 
-<tr><td><strong>Deltas</strong></td>
-    <td><code>sdl.delta.get</code></td><td>Semantic diff + blast radius between versions</td></tr>
+Development memories are opt-in. When enabled, they store decisions and task notes with repository links so later work can retrieve them alongside the relevant context. Memory behavior and storage rules are documented in the [Memory Protocol](./docs/memory-protocol.md).
 
-<tr><td rowspan="2"><strong>Policy</strong></td>
-    <td><code>sdl.policy.get</code></td><td>Read current gating policy</td></tr>
-<tr><td><code>sdl.policy.set</code></td><td>Update line/token limits and identifier requirements</td></tr>
+![Decision artifacts flowing through a protected memory vault, graph context, and query results](./docs/readme-assets/readme-development-memories-v3.webp)
 
-<tr><td><strong>Risk</strong></td>
-    <td><code>sdl.pr.risk.analyze</code></td><td>Scored PR risk with findings and test recommendations</td></tr>
+## Keep tool registration compact
 
-<tr><td rowspan="2"><strong>Agent</strong></td>
-    <td><code>sdl.agent.feedback</code></td><td>Record which symbols were useful or missing</td></tr>
-<tr><td><code>sdl.agent.feedback.query</code></td><td>Query aggregated feedback statistics</td></tr>
+Gateway mode reduces the visible regular action surface to four namespace tools while preserving server-side validation and routing. Use it when a client benefits from fewer tool choices; use the flat surface when direct tool names are more useful.
 
-<tr><td rowspan="2"><strong>Runtime</strong></td>
-    <td><code>sdl.runtime.execute</code></td><td>Sandboxed subprocess execution with outputMode (minimal/summary/intent) and compact corrective hints</td></tr>
-<tr><td><code>sdl.runtime.queryOutput</code></td><td>On-demand retrieval and keyword search of stored output artifacts</td></tr>
+![Many abstract action tiles compressed through a gateway into four namespace panels](./docs/readme-assets/readme-tool-gateway-v3.webp)
 
-<tr><td rowspan="4"><strong>Memory</strong></td>
-    <td><code>sdl.memory.store</code></td><td>Store or update a development memory with symbol/file links</td></tr>
-<tr><td><code>sdl.memory.query</code></td><td>Search memories by text, type, tags, or linked symbols</td></tr>
-<tr><td><code>sdl.memory.remove</code></td><td>Soft-delete a memory from graph and optionally from disk</td></tr>
-<tr><td><code>sdl.memory.surface</code></td><td>Auto-surface relevant memories for a task context</td></tr>
+[Read about the Tool Gateway](./docs/feature-deep-dives/tool-gateway.md) · [Read about Code Mode](./docs/feature-deep-dives/code-mode.md)
 
-<tr><td rowspan="3"><strong>Code Mode</strong></td>
-    <td><code>sdl.context</code></td><td>Code Mode task-shaped context retrieval for explain/debug/review/implement work</td></tr>
-<tr><td><code>sdl.workflow</code></td><td>Multi-step operations with budget tracking, ETag caching, and transforms</td></tr>
-<tr><td><code>sdl.manual</code></td><td>Self-documentation — query usage guide, action schemas, output format reference</td></tr>
+## Operate the repository with guardrails
 
-<tr><td rowspan="2"><strong>File</strong></td>
-    <td><code>sdl.file.read</code></td><td>Read non-indexed files (configs, docs, templates) with line-range, search, or JSON-path modes</td></tr>
-<tr><td><code>sdl.file.write</code></td><td>Policy-aware write helper for non-indexed files and templates</td></tr>
+Policy settings govern raw source windows. The runtime execution surface also applies configured executable, working-directory, environment, concurrency, and timeout controls. For HTTP deployments, SDL-MCP includes the graph viewer and observability dashboard.
 
-<tr><td rowspan="3"><strong>Meta</strong></td>
-    <td><code>sdl.info</code></td><td>Runtime diagnostics — version, Node.js, platform, database, config paths</td></tr>
-<tr><td><code>sdl.usage.stats</code></td><td>Session and lifetime token savings statistics</td></tr>
-<tr><td><code>sdl.action.search</code></td><td>Search SDL action catalog to discover the right tool for a task</td></tr>
-</table>
+![SDL-MCP architecture linking clients, policy, indexing, graph storage, and bounded outputs](./docs/readme-assets/readme-system-architecture-v3.webp)
 
-[Complete MCP Tools Reference (detailed parameters & responses) →](./docs/mcp-tools-detailed.md)
+[Governance and policy](./docs/feature-deep-dives/governance-policy.md) · [Runtime execution](./docs/feature-deep-dives/runtime-execution.md) · [Graph viewer](./docs/feature-deep-dives/graph-viewer.md) · [Observability dashboard](./docs/feature-deep-dives/observability-dashboard.md)
 
-<br/>
+## Documentation map
 
----
-
-<br/>
-
-## CLI Commands
-
-| Command             | Description                                                                            |
-| :------------------ | :------------------------------------------------------------------------------------- |
-| `sdl-mcp init`      | Bootstrap config, detect repo/languages, optionally auto-index                         |
-| `sdl-mcp doctor`    | Validate runtime, config, DB, grammars, repo access                                    |
-| `sdl-mcp index`     | Index repositories (with optional `--watch` mode)                                      |
-| `sdl-mcp serve`     | Start MCP server (`--stdio` or `--http`)                                               |
-| `sdl-mcp tool`      | Access 36 direct action aliases ([docs](./docs/feature-deep-dives/cli-tool-access.md)) |
-| `sdl-mcp info`      | Runtime diagnostics — version, Node.js, platform, database, config                     |
-| `sdl-mcp summary`   | Generate copy/paste context summaries from the CLI                                     |
-| `sdl-mcp health`    | Compute composite health score with badge/JSON output                                  |
-| `sdl-mcp benchmark:ci` | Run CI regression benchmarks                                                           |
-| `sdl-mcp export`    | Export sync artifact                                                                   |
-| `sdl-mcp import`    | Import sync artifact                                                                   |
-| `sdl-mcp pull`      | Pull by version/commit with fallback                                                   |
-| `sdl-mcp version`   | Show version and environment info                                                      |
-
-[CLI Reference →](./docs/cli-reference.md) · [Configuration Reference →](./docs/configuration-reference.md)
-
-<br/>
-
----
-
-<br/>
-
-## Compatible With
-
-SDL-MCP works with any MCP-compatible client:
-
-| Client             | Transport    | Setup                               |
-| :----------------- | :----------- | :---------------------------------- |
-| **Claude Code**    | stdio        | `sdl-mcp init --client claude-code` |
-| **Claude Desktop** | stdio        | `sdl-mcp init --client claude-code` |
-| **Cursor**         | stdio        | Standard MCP server config          |
-| **Windsurf**       | stdio        | Standard MCP server config          |
-| **Codex CLI**      | stdio        | `sdl-mcp init --client codex`       |
-| **Gemini CLI**     | stdio        | `sdl-mcp init --client gemini`      |
-| **OpenCode**       | stdio        | `sdl-mcp init --client opencode`    |
-| **Any MCP client** | stdio / http | `sdl-mcp serve --stdio` or `--http` |
-
-A **VSCode extension** (`sdl-mcp-vscode/`) provides live buffer integration for real-time indexing of unsaved edits.
-
-<br/>
-
----
-
-<br/>
-
-## Tech Stack
-
-| Component          | Technology                                 |
-| :----------------- | :----------------------------------------- |
-| Runtime            | Node.js 24+ / TypeScript 5.9+ (strict ESM) |
-| Graph Database     | LadybugDB (embedded, single-file)          |
-| Indexer (default)  | Rust via napi-rs (multi-threaded)          |
-| Indexer (fallback) | tree-sitter + tree-sitter-typescript       |
-| MCP SDK            | @modelcontextprotocol/sdk                  |
-| Validation         | Zod schemas for all payloads               |
-| Transports         | stdio (agents) · HTTP (dev/network)        |
-
-<br/>
-
----
-
-<br/>
-
-## System Architecture
-
-![SDL-MCP system architecture](./docs/readme-assets/readme-system-architecture.webp)
-
-[Full Architecture Documentation →](./docs/architecture.md)
-
-<br/>
-
----
-
-<br/>
-
-## Documentation
-
-| Document                                                          | Description                                                         |
-| :---------------------------------------------------------------- | :------------------------------------------------------------------ |
-| [Getting Started](./docs/getting-started.md)                      | Installation, 5-minute setup, MCP client config                     |
-| [MCP Tools Reference](./docs/mcp-tools-detailed.md)               | Detailed docs for the current flat, gateway, and Code Mode surfaces |
-| [CLI Reference](./docs/cli-reference.md)                          | All CLI commands and options                                        |
-| [Configuration Reference](./docs/configuration-reference.md)      | Every config option with defaults and guidance                      |
-| [Agent Workflows](./docs/agent-workflows.md)                      | Workflow instructions for CLAUDE.md / AGENTS.md                     |
-| [Architecture](./docs/architecture.md)                            | Tech stack, data flow, component diagram                            |
-| [Iris Gate Ladder](./docs/feature-deep-dives/iris-gate-ladder.md) | Context escalation methodology                                      |
-| [Troubleshooting](./docs/troubleshooting.md)                      | Common issues and fixes                                             |
-
-### Feature Deep Dives
-
-| Topic                                                                               | What You'll Learn                                                                     |
-| :---------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------ |
-| [Iris Gate Ladder](./docs/feature-deep-dives/iris-gate-ladder.md)                   | Four-rung context escalation with token savings analysis                              |
-| [Graph Slicing](./docs/feature-deep-dives/graph-slicing.md)                         | BFS/beam search, edge weights, wire formats, auto-discovery                           |
-| [Delta & Blast Radius](./docs/feature-deep-dives/delta-blast-radius.md)             | Semantic diffs, ranked impact analysis, PR risk scoring                               |
-| [Live Indexing](./docs/feature-deep-dives/live-indexing.md)                         | Real-time editor buffer integration and overlay architecture                          |
-| [Governance & Policy](./docs/feature-deep-dives/governance-policy.md)               | Proof-of-need gating, audit logging, runtime sandboxing                               |
-| [Agent Context](./docs/feature-deep-dives/agent-context.md)                         | Task-shaped context retrieval, feedback loops, portable context summaries             |
-| [Context Modes](./docs/feature-deep-dives/context-modes.md)                         | Precise vs broad retrieval, adaptive symbol ranking, benchmark trade-offs             |
-| [Indexing & Languages](./docs/feature-deep-dives/indexing-languages.md)             | Rust/TS engines, two-pass architecture, built-in and opt-in language support          |
-| [Language Provider Support](./docs/feature-deep-dives/language-provider-support.md) | Language chart for adapters, parser install mode, SCIP/LSP status, and validation     |
-| [Provider-First Indexing](./docs/feature-deep-dives/provider-first-indexing.md)     | SCIP/LSP-first planning, provider facts, shadow DB readiness, fallback boundaries     |
-| [Runtime Execution](./docs/feature-deep-dives/runtime-execution.md)                 | Sandboxed subprocess execution with governance                                        |
-| [CLI Tool Access](./docs/feature-deep-dives/cli-tool-access.md)                     | Direct CLI access to 36 action aliases, output formats, stdin piping, scripting       |
-| [Tool Gateway](./docs/feature-deep-dives/tool-gateway.md)                           | 35 gateway-routable actions, 4 namespace tools, thin schemas, migration guide         |
-| [Semantic Engine](./docs/feature-deep-dives/semantic-engine.md)                     | Pass-2 call resolution, embedding search, LLM summaries, confidence scoring           |
-| [Semantic Embeddings Setup](./docs/feature-deep-dives/semantic-embeddings-setup.md) | Dependencies, model installation, provider configuration, tier-by-tier setup          |
-| [Code Mode](./docs/feature-deep-dives/code-mode.md)                                 | `sdl.context`, `sdl.workflow`, action discovery, manual reference, one-call workflows |
-| [Development Memories](./docs/feature-deep-dives/development-memories.md)           | Graph-backed cross-session memory, file sync, staleness detection, auto-surfacing     |
-| [SCIP Integration](./docs/feature-deep-dives/scip-integration.md)                   | Provider-first compiler-grade cross-references, external deps, implements edges       |
-| [Token Savings Meter](./docs/feature-deep-dives/token-savings-meter.md)             | Per-call meter, session summaries, lifetime tracking, `sdl.usage.stats`               |
-
-<br/>
-
----
-
-<br/>
+| If you need to... | Start here |
+| --- | --- |
+| Install, connect an agent, or choose a transport | [Getting Started](./docs/getting-started.md) |
+| Inspect the current MCP surface | [Generated Tool Inventory](./docs/generated/tool-inventory.md) and [MCP Tools Reference](./docs/mcp-tools-reference.md) |
+| Configure a repository | [Configuration Reference](./docs/configuration-reference.md) and [Configuration Examples](./docs/config-examples.md) |
+| Run CLI commands | [CLI Reference](./docs/cli-reference.md) |
+| Follow retrieval and editing workflows | [Agent Workflows](./docs/agent-workflows.md) |
+| Diagnose setup or runtime issues | [Troubleshooting](./docs/troubleshooting.md) |
+| Browse every public document | [Documentation Hub](./docs/README.md) |
 
 ## License
 
-This project is **source-available**.
-
-- **Free Use (Community License):** You may use, run, and modify this software for any purpose, including **internal business use**, under the terms in [`LICENSE`](./LICENSE).
-- **Commercial Distribution / Embedding:** You must obtain a **commercial license** before you **sell, license, sublicense, bundle, embed, or distribute** this software as part of a for-sale or monetized product. See [`COMMERCIAL_LICENSE.md`](./COMMERCIAL_LICENSE.md).
-
-Questions? Contact **gmullins.gkc@gmail.com**.
+SDL-MCP is source-available. The [Community License](./LICENSE) permits use, running, and modification, including internal business use. A [commercial license](./COMMERCIAL_LICENSE.md) is required before selling, licensing, sublicensing, bundling, embedding, or distributing SDL-MCP as part of a monetized product.

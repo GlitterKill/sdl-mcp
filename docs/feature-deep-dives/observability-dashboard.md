@@ -15,6 +15,17 @@
 </details>
 </div>
 
+## Data flow
+
+```mermaid
+flowchart LR
+  Events["SDL telemetry events"] --> Service["ObservabilityService"]
+  Service --> Metrics["Per-repo metrics"]
+  Metrics --> API["HTTP API and SSE"]
+  API --> Dashboard["/ui/observability"]
+```
+
+
 ## Overview
 
 The **observability dashboard** is a built-in, read-only operational surface that exposes

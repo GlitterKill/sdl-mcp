@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="SDL — Symbol Delta Ledger">
+  <defs>
+    <clipPath id="v3hd" clipPathUnits="userSpaceOnUse">
+      <path clip-rule="evenodd" d="M256,64 L76,448 L436,448 Z M256,182 L148.6,368 L363.4,368 Z"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#v3hd)">
+    <g transform="rotate(-6 256 300)" fill="#F8FAFC">
+      <rect x="-60" y="52" width="632" height="52"/>
+      <rect x="-60" y="126" width="632" height="52"/>
+      <rect x="-60" y="200" width="632" height="52"/>
+      <rect x="-60" y="274" width="632" height="52"/>
+      <rect x="-60" y="348" width="632" height="52"/>
+      <rect x="-60" y="422" width="632" height="52"/>
+    </g>
+  </g>
+  <g fill="none" stroke="#F8FAFC" stroke-width="8" stroke-linejoin="round">
+    <path d="M169.4,356 L310.3,356 L294.1,328 L185.6,328 Z"/>
+    <path d="M185.6,328 L256,206 L272.2,234 L217.9,328 Z"/>
+    <path d="M272.2,234 L342.6,356 L310.3,356 L256,262 Z"/>
+  </g>
+  <path fill="#F8FAFC" d="M256,289 L241.3,314.5 L270.7,314.5 Z"/>
+</svg>

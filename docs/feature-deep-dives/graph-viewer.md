@@ -2,6 +2,17 @@
 
 SDL Galaxy is the first-class 3D graph viewer served by the HTTP transport at `/ui/viewer`. It replaces the old static graph explorer; `/ui/graph` and `/ui/graph.html` return a permanent redirect to `/ui/viewer`.
 
+## Viewer flow
+
+```mermaid
+flowchart LR
+  Universe["Universe and clusters"] --> Layout["Cluster layout"]
+  Layout --> Expand["Expanded cluster"]
+  Expand --> Symbols["Symbol layout"]
+  Symbols --> Edges["Intra-cluster edges"]
+```
+
+
 ## Architecture
 
 The viewer is intentionally no-framework and no-bundler. Browser modules under `src/ui/viewer/` are compiled by `tsconfig.ui.json`, copied with the rest of the UI assets, and load `three` plus `fflate` from local vendor assets. Server-side graph data is exposed through `src/viewer/routes.ts`, keeping `src/cli/transport/http.ts` limited to routing and static asset concerns.
@@ -17,7 +28,7 @@ The layout path has two engines. TypeScript in `src/graph/layout/force-layout.ts
 | `GET /api/graph/repo/:repoId/layout?lod=cluster` | Cached cluster layout. |
 | `GET /api/graph/repo/:repoId/layout?lod=symbol&clusterId=:id` | Cached symbol layout for one expanded cluster. |
 | `GET /api/graph/repo/:repoId/edges?scope=clusters` | Inter-cluster edges. |
-| `GET /api/graph/repo/:repoId/edges?clusterId=:id` | Intra-cluster edges for expanded LOD. |
+| `GET /api/graph/repo/:repoId/edges?clusterId=:id` | Intra-cluster edges for one expanded cluster. With no edge-kind filter, returns renderable edges between symbols in that cluster; boundary edges are omitted. |
 | `GET /api/graph/repo/:repoId/search?q=:query` | Symbol search used by the search lens. |
 | `GET /api/graph/repo/:repoId/symbol/:symbolId/card` | Inspector card payload. |
 | `GET /api/graph/repo/:repoId/impact` | Impact lens payload. |

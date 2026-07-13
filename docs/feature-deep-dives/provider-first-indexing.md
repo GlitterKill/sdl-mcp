@@ -8,6 +8,17 @@ Provider-first is its own indexing mode. Its symbol IDs are stable within the pr
 
 For performance tuning, use the deterministic subset workflow in [Provider-first fallback benchmark](../../devdocs/benchmarks/provider-first-fallback-benchmark.md). That workflow is the fast iteration loop only. A larger representative run or full target run is still required before declaring an optimization complete.
 
+## Provider-first flow
+
+```mermaid
+flowchart LR
+  Provider["SCIP or LSP facts"] --> Normalize["Provider-neutral facts"]
+  Normalize --> Coverage["Coverage validation"]
+  Coverage --> Graph["Provider-owned graph rows"]
+  Coverage --> Fallback["Legacy fallback for uncovered files"]
+```
+
+
 ## Quick Reference
 
 | Need | Where to look |

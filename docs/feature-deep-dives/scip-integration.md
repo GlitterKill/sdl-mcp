@@ -16,6 +16,17 @@
 Unlike heuristic-based analysis, SCIP data comes directly from the compiler. If the compiler resolved a call, the SCIP file knows the exact target.
 
 ---
+## SCIP indexing flow
+
+```mermaid
+flowchart LR
+  Indexer["Language SCIP indexer"] --> Index[".scip index"]
+  Index --> Provider["Provider-first indexing"]
+  Provider --> Graph["SDL graph facts"]
+  Graph --> Context["Cards, search, and slices"]
+```
+
+
 
 ## Why SCIP Matters for SDL-MCP
 

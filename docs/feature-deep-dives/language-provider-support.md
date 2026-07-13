@@ -5,6 +5,17 @@ This chart tracks SDL-MCP language support across syntax adapters, parser instal
 SCIP remains the first provider choice. LSP is used for languages without practical SCIP coverage. New LSP language parser support is installed on demand only after a repository config explicitly enables that language.
 
 Every language implementation change must update `docs/generated/language-provider-support.json` and pass `npm run docs:language-support:check`.
+## Provider selection
+
+```mermaid
+flowchart LR
+  Config["Configured language"] --> SCIP{"Practical SCIP coverage?"}
+  SCIP -->|yes| SCIPRun["SCIP provider-first"]
+  SCIP -->|no| LSP["LSP provider-first"]
+  LSP --> Fallback["Legacy fallback for uncovered files"]
+```
+
+
 
 <!-- language-support-chart:start -->
 | Language | Popularity rank/source | SDL adapter status | Parser install mode | SCIP status | LSP-IO server | Provider-first status | Validation repo | Validation evidence | Notes |

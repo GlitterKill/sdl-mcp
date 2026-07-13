@@ -9,6 +9,18 @@ The semantic enrichment bridge keeps tree-sitter as SDL-MCP's base syntax layer 
 
 Only the selected source runs for a language. Lower-priority providers are reported as skipped with a reason so status output explains why a provider did not run.
 
+## Provider priority
+
+```mermaid
+flowchart LR
+  Language["Configured language"] --> SCIP{"SCIP selected?"}
+  SCIP -->|yes| SCIPRun["SCIP source"]
+  SCIP -->|no| LSP["LSP source"]
+  SCIPRun --> Status["Selection and diagnostics"]
+  LSP --> Status
+```
+
+
 ## Relationship To `semantic`
 
 `semantic` config still means embeddings, generated summaries, and hybrid retrieval. The bridge uses a separate `semanticEnrichment` section because SCIP and LSP change graph precision and provenance rather than vector search behavior.

@@ -1,0 +1,194 @@
+{
+  "meta": {
+    "title": "SDL-MCP minimal symbol exploration",
+    "stage": "Logo exploration",
+    "brand_name": "SDL-MCP",
+    "anchor": "Symbol Delta Ledger: cards-first, graph-aware context for AI coding agents",
+    "summary": "Compare nine minimal symbols for a precision engineering product that filters repository noise into task-relevant context."
+  },
+  "constraints": {
+    "preserve": [
+      "brand meaning: high-signal context from complex codebases",
+      "audience: engineers and AI coding-agent users",
+      "header lockup: symbol paired with SDL-MCP wordmark",
+      "small-size usability and monochrome legibility",
+      "calm, precise, enterprise-ready tone"
+    ],
+    "avoid": [
+      "robot heads or generic AI brains",
+      "generic neural-network knots",
+      "mascot or playful styles",
+      "literal source code or fake API labels",
+      "readable text inside generated symbol tiles",
+      "gradients required for the mark to work"
+    ]
+  },
+  "routes": [
+    {
+      "id": "signal-gate-aperture",
+      "label": "Aperture Gate",
+      "family": "symbol",
+      "usage_contexts": [
+        "header lockup",
+        "app icon",
+        "favicon"
+      ],
+      "prompt": "Create one original, minimal vector-style logo symbol only for SDL-MCP on a pure white inspection background. The product turns repository noise into bounded, task-relevant context for AI coding agents. Use solid black geometry with one restrained electric-cyan accent. Flat, crisp, centered square tile, generous clear space, strong silhouette at 16px. No wordmark, no letters, no readable text, no gradients, no shadows, no mockup, no watermark. Route: Aperture Gate. Show a precise open delta-like aperture that narrows a wide field into one clean forward path, representing selective context retrieval.",
+      "rationale": "Tests the product metaphor without depending on letters.",
+      "best_for": "Header lockup, app icon, and favicon exploration.",
+      "decision_advice": "Compare silhouette, product meaning, and monochrome legibility before selecting.",
+      "watch_out": "Must not resemble a camera brand or play button.",
+      "next_step": "Vectorize the selected route and test it at 16px, 24px, and 32px.",
+      "final_owner": "external-production-identity",
+      "next_prompt_hints": []
+    },
+    {
+      "id": "signal-gate-prism",
+      "label": "Prism Gate",
+      "family": "symbol",
+      "usage_contexts": [
+        "header lockup",
+        "app icon",
+        "favicon"
+      ],
+      "prompt": "Create one original, minimal vector-style logo symbol only for SDL-MCP on a pure white inspection background. The product turns repository noise into bounded, task-relevant context for AI coding agents. Use solid black geometry with one restrained electric-cyan accent. Flat, crisp, centered square tile, generous clear space, strong silhouette at 16px. No wordmark, no letters, no readable text, no gradients, no shadows, no mockup, no watermark. Route: Prism Gate. Use a compact asymmetric prism that receives several thin incoming paths and releases one deliberate ordered path. Keep it architectural rather than illustrative.",
+      "rationale": "Frames SDL-MCP as a precision selector.",
+      "best_for": "Header lockup, app icon, and favicon exploration.",
+      "decision_advice": "Compare silhouette, product meaning, and monochrome legibility before selecting.",
+      "watch_out": "Must not look like a generic funnel or security badge.",
+      "next_step": "Vectorize the selected route and test it at 16px, 24px, and 32px.",
+      "final_owner": "external-production-identity",
+      "next_prompt_hints": []
+    },
+    {
+      "id": "signal-gate-bounded-path",
+      "label": "Bounded Path",
+      "family": "symbol",
+      "usage_contexts": [
+        "header lockup",
+        "app icon",
+        "favicon"
+      ],
+      "prompt": "Create one original, minimal vector-style logo symbol only for SDL-MCP on a pure white inspection background. The product turns repository noise into bounded, task-relevant context for AI coding agents. Use solid black geometry with one restrained electric-cyan accent. Flat, crisp, centered square tile, generous clear space, strong silhouette at 16px. No wordmark, no letters, no readable text, no gradients, no shadows, no mockup, no watermark. Route: Bounded Path. Use two bold interlocking planes to create a protected channel around one selected line, suggesting policy-gated code access without a lock or shield.",
+      "rationale": "Emphasizes controlled context delivery and trust.",
+      "best_for": "Header lockup, app icon, and favicon exploration.",
+      "decision_advice": "Compare silhouette, product meaning, and monochrome legibility before selecting.",
+      "watch_out": "The form must stay open and active, not defensive.",
+      "next_step": "Vectorize the selected route and test it at 16px, 24px, and 32px.",
+      "final_owner": "external-production-identity",
+      "next_prompt_hints": []
+    },
+    {
+      "id": "s-delta-continuous",
+      "label": "Continuous S Delta",
+      "family": "monogram",
+      "usage_contexts": [
+        "header lockup",
+        "app icon",
+        "favicon"
+      ],
+      "prompt": "Create one original, minimal vector-style logo symbol only for SDL-MCP on a pure white inspection background. The product turns repository noise into bounded, task-relevant context for AI coding agents. Use solid black geometry with one restrained electric-cyan accent. Flat, crisp, centered square tile, generous clear space, strong silhouette at 16px. No wordmark, no letters, no readable text, no gradients, no shadows, no mockup, no watermark. Route: Continuous S Delta. Construct an abstract S-shaped path that resolves into a subtle delta triangle through negative space. Engineered, calm, and compact, never calligraphic.",
+      "rationale": "Connects the brand name to change intelligence.",
+      "best_for": "Header lockup, app icon, and favicon exploration.",
+      "decision_advice": "Compare silhouette, product meaning, and monochrome legibility before selecting.",
+      "watch_out": "The S must stay legible at favicon size.",
+      "next_step": "Vectorize the selected route and test it at 16px, 24px, and 32px.",
+      "final_owner": "external-production-identity",
+      "next_prompt_hints": []
+    },
+    {
+      "id": "s-delta-sliced",
+      "label": "Sliced Delta",
+      "family": "monogram",
+      "usage_contexts": [
+        "header lockup",
+        "app icon",
+        "favicon"
+      ],
+      "prompt": "Create one original, minimal vector-style logo symbol only for SDL-MCP on a pure white inspection background. The product turns repository noise into bounded, task-relevant context for AI coding agents. Use solid black geometry with one restrained electric-cyan accent. Flat, crisp, centered square tile, generous clear space, strong silhouette at 16px. No wordmark, no letters, no readable text, no gradients, no shadows, no mockup, no watermark. Route: Sliced Delta. Build a bold geometric S from three precise segments; one segment creates a small delta-shaped cut that implies meaningful change.",
+      "rationale": "Expresses Symbol Delta Ledger through controlled change.",
+      "best_for": "Header lockup, app icon, and favicon exploration.",
+      "decision_advice": "Compare silhouette, product meaning, and monochrome legibility before selecting.",
+      "watch_out": "Must not look like an arbitrary cutout initial.",
+      "next_step": "Vectorize the selected route and test it at 16px, 24px, and 32px.",
+      "final_owner": "external-production-identity",
+      "next_prompt_hints": []
+    },
+    {
+      "id": "s-delta-orbit",
+      "label": "Orbiting S Delta",
+      "family": "monogram",
+      "usage_contexts": [
+        "header lockup",
+        "app icon",
+        "favicon"
+      ],
+      "prompt": "Create one original, minimal vector-style logo symbol only for SDL-MCP on a pure white inspection background. The product turns repository noise into bounded, task-relevant context for AI coding agents. Use solid black geometry with one restrained electric-cyan accent. Flat, crisp, centered square tile, generous clear space, strong silhouette at 16px. No wordmark, no letters, no readable text, no gradients, no shadows, no mockup, no watermark. Route: Orbiting S Delta. Use one geometric S-like trajectory around a compact triangular delta core, suggesting graph relationships converging on a selected change.",
+      "rationale": "Connects the acronym with graph-aware selection.",
+      "best_for": "Header lockup, app icon, and favicon exploration.",
+      "decision_advice": "Compare silhouette, product meaning, and monochrome legibility before selecting.",
+      "watch_out": "Must not resemble a generic AI atom.",
+      "next_step": "Vectorize the selected route and test it at 16px, 24px, and 32px.",
+      "final_owner": "external-production-identity",
+      "next_prompt_hints": []
+    },
+    {
+      "id": "ledger-slice-stacked",
+      "label": "Stacked Ledger Slice",
+      "family": "geometric",
+      "usage_contexts": [
+        "header lockup",
+        "app icon",
+        "favicon"
+      ],
+      "prompt": "Create one original, minimal vector-style logo symbol only for SDL-MCP on a pure white inspection background. The product turns repository noise into bounded, task-relevant context for AI coding agents. Use solid black geometry with one restrained electric-cyan accent. Flat, crisp, centered square tile, generous clear space, strong silhouette at 16px. No wordmark, no letters, no readable text, no gradients, no shadows, no mockup, no watermark. Route: Stacked Ledger Slice. Use three compact horizontal bands that compress into one highlighted diagonal slice, representing context cards, a ledger, and a selected path without becoming a database icon.",
+      "rationale": "Reflects cards-first context and a durable ledger.",
+      "best_for": "Header lockup, app icon, and favicon exploration.",
+      "decision_advice": "Compare silhouette, product meaning, and monochrome legibility before selecting.",
+      "watch_out": "Must not resemble a menu or bar chart.",
+      "next_step": "Vectorize the selected route and test it at 16px, 24px, and 32px.",
+      "final_owner": "external-production-identity",
+      "next_prompt_hints": []
+    },
+    {
+      "id": "ledger-slice-graph-card",
+      "label": "Graph Card Slice",
+      "family": "geometric",
+      "usage_contexts": [
+        "header lockup",
+        "app icon",
+        "favicon"
+      ],
+      "prompt": "Create one original, minimal vector-style logo symbol only for SDL-MCP on a pure white inspection background. The product turns repository noise into bounded, task-relevant context for AI coding agents. Use solid black geometry with one restrained electric-cyan accent. Flat, crisp, centered square tile, generous clear space, strong silhouette at 16px. No wordmark, no letters, no readable text, no gradients, no shadows, no mockup, no watermark. Route: Graph Card Slice. Design one compact card-like frame with a deliberate diagonal cut revealing a three-node path. It must express selected graph context, not a generic document.",
+      "rationale": "Combines cards-first and graph-aware ideas.",
+      "best_for": "Header lockup, app icon, and favicon exploration.",
+      "decision_advice": "Compare silhouette, product meaning, and monochrome legibility before selecting.",
+      "watch_out": "Must not resemble a file or chat icon.",
+      "next_step": "Vectorize the selected route and test it at 16px, 24px, and 32px.",
+      "final_owner": "external-production-identity",
+      "next_prompt_hints": []
+    },
+    {
+      "id": "ledger-slice-delta-ledger",
+      "label": "Delta Ledger",
+      "family": "geometric",
+      "usage_contexts": [
+        "header lockup",
+        "app icon",
+        "favicon"
+      ],
+      "prompt": "Create one original, minimal vector-style logo symbol only for SDL-MCP on a pure white inspection background. The product turns repository noise into bounded, task-relevant context for AI coding agents. Use solid black geometry with one restrained electric-cyan accent. Flat, crisp, centered square tile, generous clear space, strong silhouette at 16px. No wordmark, no letters, no readable text, no gradients, no shadows, no mockup, no watermark. Route: Delta Ledger. Use a bold triangular delta assembled from offset ledger-like planes, with one clean active edge suggesting a version change held in durable context.",
+      "rationale": "Elevates the Delta Ledger name into a geometric icon.",
+      "best_for": "Header lockup, app icon, and favicon exploration.",
+      "decision_advice": "Compare silhouette, product meaning, and monochrome legibility before selecting.",
+      "watch_out": "Must not resemble a cryptocurrency, mountain, or warning sign.",
+      "next_step": "Vectorize the selected route and test it at 16px, 24px, and 32px.",
+      "final_owner": "external-production-identity",
+      "next_prompt_hints": []
+    }
+  ],
+  "handoff": {
+    "default_owner": "external-production-identity",
+    "next_prompt_hints": []
+  }
+}

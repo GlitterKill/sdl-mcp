@@ -1,0 +1,83 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>SDL Logo Preview</title>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #e2e8f0; }
+  .panel { padding: 32px; display: flex; flex-wrap: wrap; gap: 32px; align-items: center; }
+  .light { background: #ffffff; }
+  .dark { background: #0B1220; color: #F8FAFC; }
+  .cell { text-align: center; }
+  .cell p { font-size: 12px; margin: 8px 0 0; opacity: 0.6; }
+  .sizes { display: flex; gap: 16px; align-items: flex-end; }
+  h2 { margin: 24px 32px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.6; }
+  .dark h2 { color: #F8FAFC; }
+</style>
+</head>
+<body>
+  <div class="light">
+    <h2>Light — concept A (strata delta)</h2>
+    <div class="panel">
+      <div class="cell"><img src="sdl-mark.svg" width="160"><p>mark 160</p></div>
+      <div class="cell"><img src="sdl-lockup.svg" width="360"><p>lockup</p></div>
+      <div class="cell sizes">
+        <img src="sdl-mark.svg" width="64"><img src="sdl-mark.svg" width="48">
+        <img src="sdl-mark.svg" width="32"><img src="sdl-mark.svg" width="24">
+        <img src="sdl-mark.svg" width="16">
+      </div>
+      <div class="cell"><img src="sdl-icon.svg" width="96"><p>app icon</p></div>
+    </div>
+    <h2>Light — concept B (graph delta, comparison)</h2>
+    <div class="panel">
+      <div class="cell">
+        <svg viewBox="0 0 256 256" width="160" xmlns="http://www.w3.org/2000/svg">
+          <g fill="none" stroke="#101826" stroke-width="16" stroke-linecap="round">
+            <line x1="118" y1="74" x2="66" y2="168"/>
+            <line x1="138" y1="74" x2="190" y2="168"/>
+            <line x1="76" y1="186" x2="180" y2="186"/>
+          </g>
+          <circle cx="128" cy="56" r="14" fill="#0D9488"/>
+          <circle cx="56" cy="186" r="14" fill="#101826"/>
+          <circle cx="200" cy="186" r="14" fill="#101826"/>
+        </svg>
+        <p>concept B: nodes + edges</p>
+      </div>
+      <div class="cell sizes">
+        <svg viewBox="0 0 256 256" width="32" xmlns="http://www.w3.org/2000/svg">
+          <g fill="none" stroke="#101826" stroke-width="16" stroke-linecap="round">
+            <line x1="118" y1="74" x2="66" y2="168"/>
+            <line x1="138" y1="74" x2="190" y2="168"/>
+            <line x1="76" y1="186" x2="180" y2="186"/>
+          </g>
+          <circle cx="128" cy="56" r="14" fill="#0D9488"/>
+          <circle cx="56" cy="186" r="14" fill="#101826"/>
+          <circle cx="200" cy="186" r="14" fill="#101826"/>
+        </svg>
+        <svg viewBox="0 0 256 256" width="16" xmlns="http://www.w3.org/2000/svg">
+          <g fill="none" stroke="#101826" stroke-width="16" stroke-linecap="round">
+            <line x1="118" y1="74" x2="66" y2="168"/>
+            <line x1="138" y1="74" x2="190" y2="168"/>
+            <line x1="76" y1="186" x2="180" y2="186"/>
+          </g>
+          <circle cx="128" cy="56" r="14" fill="#0D9488"/>
+          <circle cx="56" cy="186" r="14" fill="#101826"/>
+          <circle cx="200" cy="186" r="14" fill="#101826"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+  <div class="dark">
+    <h2>Dark</h2>
+    <div class="panel">
+      <div class="cell"><img src="sdl-mark-dark.svg" width="160"><p>mark 160</p></div>
+      <div class="cell"><img src="sdl-lockup-dark.svg" width="360"><p>lockup</p></div>
+      <div class="cell sizes">
+        <img src="sdl-mark-dark.svg" width="64"><img src="sdl-mark-dark.svg" width="48">
+        <img src="sdl-mark-dark.svg" width="32"><img src="sdl-mark-dark.svg" width="24">
+        <img src="sdl-mark-dark.svg" width="16">
+      </div>
+    </div>
+  </div>
+</body>
+</html>

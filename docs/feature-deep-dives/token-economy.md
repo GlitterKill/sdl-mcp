@@ -3,6 +3,18 @@
 [Back to README](../../README.md)
 
 ---
+## Token-control flow
+
+```mermaid
+flowchart LR
+  Request["Agent request"] --> Compact["Compact response"]
+  Compact --> Reuse["Refs and short IDs"]
+  Compact --> Targeted["Targeted reads and digest output"]
+  Reuse --> Usage["usage.stats signalDensity"]
+  Targeted --> Usage
+```
+
+
 
 ## Why It Exists
 

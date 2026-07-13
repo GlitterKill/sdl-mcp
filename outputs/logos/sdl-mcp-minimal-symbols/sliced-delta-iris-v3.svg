@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" role="img" aria-labelledby="title desc">
+  <title id="title">SDL-MCP sliced delta logo study</title>
+  <desc id="desc">A six-slice tapered delta with a centered double-triangle aperture.</desc>
+  <rect width="1254" height="1254" fill="#fff"/>
+  <g fill="#000">
+    <path d="M626 170 760 394 529 339Z"/>
+    <path d="M515 365 906 486 879 496 453 474Z"/>
+    <path d="M438 495 979 610 957 621 365 590Z"/>
+    <path d="M365 630 1040 748 1018 760 300 745Z"/>
+    <path d="M280 765 1110 880 1088 894 215 880Z"/>
+    <path d="M155 900 1140 1015 1115 1030 95 1013Z"/>
+  </g>
+  <path d="M626 362 389 790 863 790Z" fill="#fff"/>
+  <g fill="none" stroke="#000" stroke-linejoin="miter">
+    <path d="M626 378 412 778 840 778Z" stroke-width="13"/>
+    <path d="M626 414 443 757 809 757Z" stroke-width="9"/>
+  </g>
+  <g fill="none" stroke="#000" stroke-width="10" stroke-linecap="square" stroke-linejoin="miter">
+    <path d="M626 465 675 620 604 620"/>
+    <path d="M735 716 604 620 644 552"/>
+    <path d="M517 716 644 552 675 620"/>
+  </g>
+</svg>
