@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./docs/readme-assets/readme-hero-v5.webp" alt="SDL-MCP context budget layer hero with symbol graph lens and feature callouts" width="100%">
+  <img src="./docs/readme-assets/readme-hero-v9.webp" alt="SDL-MCP context budget layer hero with themed logo, symbol graph lens, and feature callouts" width="100%">
 
   # Symbol Delta Ledger
 
