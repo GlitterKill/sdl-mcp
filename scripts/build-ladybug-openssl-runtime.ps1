@@ -81,16 +81,32 @@ function Use-VsDevEnvironment([string]$VsDevCmd) {
     Remove-Item -LiteralPath $captureScript,$captureOut -Force -ErrorAction SilentlyContinue
   }
 }
-function Run-Logged([string]$Exe, [string[]]$Arguments, [string]$WorkingDirectory) {
+function Convert-ToProcessArgument([string]$Argument) {
+  '"' + ($Argument -replace '"', '\"') + '"'
+}
+
+function Run-Logged([string]$Exe, [string[]]$Arguments, [string]$WorkingDirectory, [int]$TimeoutSeconds = 1200) {
   Write-Host ("> " + $Exe + " " + ($Arguments -join " "))
-  Push-Location -LiteralPath $WorkingDirectory
-  try {
-    & $Exe @Arguments
-    $exitCode = if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 }
-    if ($exitCode -ne 0) { throw "$Exe failed with exit $exitCode" }
-  } finally {
-    Pop-Location
+  $argumentList = ""
+  if ($Arguments.Count -gt 0) {
+    $argumentList = (($Arguments | ForEach-Object { Convert-ToProcessArgument $_ }) -join " ")
   }
+
+  $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $startInfo.FileName = $Exe
+  $startInfo.Arguments = $argumentList
+  $startInfo.WorkingDirectory = $WorkingDirectory
+  $startInfo.UseShellExecute = $false
+
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $startInfo
+  [void]$process.Start()
+  if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+    $kill = Start-Process -FilePath "taskkill.exe" -ArgumentList @("/PID", $process.Id, "/T", "/F") -NoNewWindow -Wait -PassThru
+    if ($kill.ExitCode -ne 0) { Write-Warning "taskkill.exe failed with exit $($kill.ExitCode) for PID $($process.Id)" }
+    throw "$Exe timed out after $TimeoutSeconds seconds"
+  }
+  if ($process.ExitCode -ne 0) { throw "$Exe failed with exit $($process.ExitCode)" }
 }
 
 function Invoke-Captured([string]$Exe, [string[]]$Arguments, [string]$WorkingDirectory) {
