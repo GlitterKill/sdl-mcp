@@ -139,7 +139,7 @@ jobs:
       - name: Publish runtime package
         if: ${{ inputs.dry_run == false }}
         working-directory: ${{ env.PACKAGE_DIR }}
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --tag latest
 
       - name: Verify registry tarball and provenance
         if: ${{ inputs.dry_run == false }}
