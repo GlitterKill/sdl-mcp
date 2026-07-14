@@ -1,0 +1,162 @@
+name: Check Ladybug OpenSSL Updates
+
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    name: Check OpenSSL runtime updates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Check npm advisory surface
+        run: npm audit --omit=dev --json > npm-audit.json || true
+
+      - name: Compare pinned OpenSSL 3.5 LTS patch
+        id: openssl
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+
+          const source = JSON.parse(readFileSync('ladybug-openssl/source.json', 'utf8'));
+          const current = source.opensslVersion;
+          const parsePatch = (version) => {
+            const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+            if (!match) throw new Error(`Unsupported OpenSSL version: ${version}`);
+            return match.slice(1).map(Number);
+          };
+          const compare = (left, right) => {
+            const a = parsePatch(left);
+            const b = parsePatch(right);
+            for (let i = 0; i < a.length; i += 1) {
+              if (a[i] !== b[i]) return a[i] - b[i];
+            }
+            return 0;
+          };
+
+          const headers = {
+            'user-agent': 'sdl-mcp-openssl-update-check',
+            accept: 'application/vnd.github+json',
+          };
+          if (process.env.GITHUB_TOKEN) headers.authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+
+          const releasesResponse = await fetch(
+            'https://api.github.com/repos/openssl/openssl/releases?per_page=100',
+            { headers },
+          );
+          if (!releasesResponse.ok) {
+            throw new Error(`OpenSSL release query failed: ${releasesResponse.status}`);
+          }
+          const releases = await releasesResponse.json();
+          const latest = releases
+            .map((release) => /^openssl-(3\.5\.\d+)$/.exec(release.tag_name)?.[1])
+            .filter(Boolean)
+            .sort((a, b) => compare(b, a))[0];
+          if (!latest) throw new Error('No OpenSSL 3.5 release found');
+
+          const advisoryUrl = 'https://openssl-library.org/news/vulnerabilities/';
+          const advisoryResponse = await fetch(advisoryUrl, { headers: { 'user-agent': headers['user-agent'] } });
+          if (!advisoryResponse.ok) {
+            throw new Error(`OpenSSL advisory query failed: ${advisoryResponse.status}`);
+          }
+
+          let auditSummary = 'npm audit did not return JSON metadata';
+          try {
+            const audit = JSON.parse(readFileSync('npm-audit.json', 'utf8'));
+            const vulnerabilities = audit.metadata?.vulnerabilities ?? {};
+            auditSummary = JSON.stringify(vulnerabilities);
+          } catch {}
+
+          const report = {
+            currentVersion: current,
+            latestVersion: latest,
+            updateAvailable: compare(latest, current) > 0,
+            packageVersion: source.packageVersion,
+            sourceUrl: source.sourceUrl,
+            advisoryUrl,
+            auditSummary,
+          };
+          writeFileSync('openssl-update.json', JSON.stringify(report, null, 2) + '\n');
+          appendFileSync(process.env.GITHUB_OUTPUT, `update_available=${report.updateAvailable}\n`);
+          appendFileSync(process.env.GITHUB_OUTPUT, `latest_version=${latest}\n`);
+          NODE
+
+      - name: Open or update tracking issue
+        if: steps.openssl.outputs.update_available == 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('openssl-update.json', 'utf8'));
+            const labels = ['security', 'ladybug-openssl'];
+            for (const name of labels) {
+              try {
+                await github.rest.issues.getLabel({ owner: context.repo.owner, repo: context.repo.repo, name });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                await github.rest.issues.createLabel({ owner: context.repo.owner, repo: context.repo.repo, name, color: name === 'security' ? 'ee0701' : '5319e7' });
+              }
+            }
+
+            const title = `Update SDL Ladybug OpenSSL runtime to ${report.latestVersion}`;
+            const body = [
+              `Pinned SDL Ladybug OpenSSL runtime: ${report.currentVersion} (${report.packageVersion})`,
+              `Latest OpenSSL 3.5 release: ${report.latestVersion}`,
+              '',
+              `Pinned source: ${report.sourceUrl}`,
+              `Advisories: ${report.advisoryUrl}`,
+              `npm audit --omit=dev summary: ${report.auditSummary}`,
+              '',
+              'Response procedure:',
+              '1. Assess advisory applicability to the Windows FTS runtime DLLs.',
+              '2. Update ladybug-openssl/source.json and the package prerelease suffix.',
+              '3. Rebuild from official signed OpenSSL source.',
+              '4. Rerun OpenSSL tests and Ladybug clean-environment FTS tests.',
+              '5. Publish the runtime package with npm provenance.',
+              '6. Update SDL exact optional-dependency pin and lockfile.',
+              '7. Cut an SDL patch release.',
+              '8. Verify registry tarball hashes and native-reported module origins.',
+            ].join('\n');
+
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'ladybug-openssl',
+              per_page: 100,
+            });
+            const issue = existing.data.find((item) => item.title.startsWith('Update SDL Ladybug OpenSSL runtime'));
+            if (issue) {
+              await github.rest.issues.update({ owner: context.repo.owner, repo: context.repo.repo, issue_number: issue.number, title, body, labels });
+            } else {
+              await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body, labels });
+            }
+
+      - name: Upload update evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ladybug-openssl-update-check
+          path: |
+            openssl-update.json
+            npm-audit.json
+          if-no-files-found: warn
+          retention-days: 14

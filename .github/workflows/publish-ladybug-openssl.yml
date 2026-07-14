@@ -1,0 +1,181 @@
+name: Publish Ladybug OpenSSL Runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and verify without publishing"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PACKAGE_NAME: "@sdl-mcp/ladybug-openssl-win32-x64"
+  PACKAGE_VERSION: "3.5.7-sdl.1"
+  PACKAGE_DIR: ladybug-openssl/npm/win32-x64
+
+jobs:
+  publish:
+    name: Build, verify, and publish runtime
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout immutable commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Install NASM and Strawberry Perl
+        shell: pwsh
+        run: |
+          choco install nasm strawberryperl -y --no-progress
+
+      - name: Verify Visual Studio 2022 C++ toolchain
+        shell: pwsh
+        run: |
+          $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+          $vswhere = Join-Path $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
+          $install = $null
+          if (Test-Path -LiteralPath $vswhere) {
+            $install = & $vswhere -latest -products * -property installationPath
+          }
+          $candidates = @()
+          if ($install) { $candidates += (Join-Path $install "Common7\Tools\VsDevCmd.bat") }
+          $candidates += @(
+            (Join-Path $programFilesX86 "Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"),
+            (Join-Path $programFilesX86 "Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"),
+            (Join-Path $programFilesX86 "Microsoft Visual Studio\2022\Professional\Common7\Tools\VsDevCmd.bat"),
+            (Join-Path $programFilesX86 "Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat")
+          )
+          $devCmd = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $devCmd) { throw "Visual Studio 2022 VsDevCmd.bat was not found" }
+          Write-Host "Using Visual Studio environment: $devCmd"
+
+      - name: Install committed dependencies
+        run: npm ci --ignore-scripts --legacy-peer-deps
+
+      - name: Install disposable Ladybug 0.18.1 probe
+        run: >-
+          npm install --no-save --no-package-lock --ignore-scripts --legacy-peer-deps
+          kuzu@npm:@ladybugdb/core@0.18.1
+
+      - name: Setup LadybugDB native binary
+        shell: pwsh
+        run: |
+          if ((Test-Path node_modules/kuzu/install.js) -and !(Test-Path node_modules/kuzu/lbugjs.node)) {
+            Push-Location node_modules/kuzu
+            node install.js
+            Pop-Location
+          }
+
+      - name: Build pinned OpenSSL runtime
+        shell: pwsh
+        run: |
+          npm run ladybug:openssl:build *>&1 |
+            Tee-Object -FilePath "$env:RUNNER_TEMP/ladybug-openssl-build.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify staged runtime package
+        shell: pwsh
+        run: |
+          npm run ladybug:openssl:verify *>&1 |
+            Tee-Object -FilePath "$env:RUNNER_TEMP/ladybug-openssl-verify.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Inspect npm pack dry-run
+        shell: pwsh
+        run: |
+          $dryRunJson = npm pack ./$env:PACKAGE_DIR --dry-run --json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $dryRunJson | Set-Content -Encoding UTF8 ladybug-openssl/pack-dry-run.json
+
+      - name: Pack runtime tarball
+        shell: pwsh
+        run: |
+          $packJson = npm pack ./$env:PACKAGE_DIR --json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $packJson | Set-Content -Encoding UTF8 ladybug-openssl/pack.json
+          $pack = @($packJson | ConvertFrom-Json)
+          $tarball = $pack[0].filename
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $tarball).Hash.ToLowerInvariant()
+          [ordered]@{
+            tarball = $tarball
+            sha256 = $hash
+            packageName = $env:PACKAGE_NAME
+            packageVersion = $env:PACKAGE_VERSION
+          } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 ladybug-openssl/package-hashes.json
+
+      - name: Upload runtime package evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: ladybug-openssl-runtime-${{ github.sha }}
+          path: |
+            *.tgz
+            ladybug-openssl/build-record.json
+            ladybug-openssl/package-hashes.json
+            ladybug-openssl/pack.json
+            ladybug-openssl/pack-dry-run.json
+            ladybug-openssl/source.json
+            ladybug-openssl/ladybug-fts-0.18.1.json
+            ladybug-openssl/npm/win32-x64/provenance.json
+            ladybug-openssl/npm/win32-x64/sbom.spdx.json
+            ${{ runner.temp }}/ladybug-openssl-build.log
+            ${{ runner.temp }}/ladybug-openssl-verify.log
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish runtime package
+        if: ${{ inputs.dry_run == false }}
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: npm publish --provenance --access public --tag latest
+
+      - name: Verify registry tarball and provenance
+        if: ${{ inputs.dry_run == false }}
+        shell: pwsh
+        run: |
+          $spec = "$env:PACKAGE_NAME@$env:PACKAGE_VERSION"
+          $metadata = npm view $spec --json | ConvertFrom-Json
+          if ($metadata.name -ne $env:PACKAGE_NAME -or $metadata.version -ne $env:PACKAGE_VERSION) {
+            throw "Registry metadata mismatch for $spec"
+          }
+          $packJson = npm pack $spec --json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $packJson | Set-Content -Encoding UTF8 ladybug-openssl/registry-pack.json
+          $pack = @($packJson | ConvertFrom-Json)
+          $registryTarball = $pack[0].filename
+          $registryHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $registryTarball).Hash.ToLowerInvariant()
+          $artifactHash = (Get-Content ladybug-openssl/package-hashes.json -Raw | ConvertFrom-Json).sha256
+          if ($registryHash -ne $artifactHash) {
+            throw "Registry tarball hash mismatch: expected $artifactHash, got $registryHash"
+          }
+          $auditRoot = Join-Path $env:RUNNER_TEMP "ladybug-openssl-provenance-audit"
+          New-Item -ItemType Directory -Force -Path $auditRoot | Out-Null
+          Push-Location $auditRoot
+          npm init -y | Out-Null
+          npm install $spec --ignore-scripts
+          npm audit signatures --json --include-attestations | Tee-Object -FilePath "$env:GITHUB_WORKSPACE/ladybug-openssl/audit-signatures.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Pop-Location
+
+      - name: Upload registry verification evidence
+        if: ${{ inputs.dry_run == false }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ladybug-openssl-registry-${{ github.sha }}
+          path: |
+            ladybug-openssl/registry-pack.json
+            ladybug-openssl/audit-signatures.json
+          if-no-files-found: error
+          retention-days: 30

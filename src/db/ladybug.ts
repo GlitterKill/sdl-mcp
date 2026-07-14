@@ -18,6 +18,10 @@ import {
 } from "./extension-caps.js";
 import { normalizeGraphDbPath } from "./graph-db-path.js";
 import {
+  isWindowsFtsRuntimeUnavailable,
+  withWindowsFtsRuntime,
+} from "./ladybug-windows-fts-runtime.js";
+import {
   createBaseSchema,
   createSecondaryIndexes,
   getSchemaVersion,
@@ -592,7 +596,16 @@ async function loadExtensionsOnConnection(
 ): Promise<void> {
   for (const ext of MANAGED_EXTENSIONS) {
     try {
-      await execDdl(conn, `LOAD EXTENSION ${ext}`);
+      if (ext === "fts") {
+        const result = await withWindowsFtsRuntime(() =>
+          execDdl(conn, `LOAD EXTENSION ${ext}`),
+        );
+        if (isWindowsFtsRuntimeUnavailable(result)) {
+          throw new Error(result.recovery);
+        }
+      } else {
+        await execDdl(conn, `LOAD EXTENSION ${ext}`);
+      }
       recordConnectionExtensionLoad(conn, ext, true);
       logger.debug(`Kuzu extension loaded`, { extension: ext });
     } catch (err) {

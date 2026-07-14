@@ -102,7 +102,10 @@
     "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
     "build:ui": "tsc -p tsconfig.ui.json",
     "typecheck:ui": "tsc -p tsconfig.ui.json --noEmit",
-    "test:layout-parity": "node tests/native/layout-parity-test.ts"
+    "test:layout-parity": "node tests/native/layout-parity-test.ts",
+    "ladybug:openssl:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ladybug-openssl-runtime.ps1",
+    "ladybug:openssl:verify": "node scripts/verify-ladybug-openssl-runtime.mjs",
+    "ladybug:openssl:pack": "npm pack ./ladybug-openssl/npm/win32-x64 --json"
   },
   "keywords": [
     "mcp",

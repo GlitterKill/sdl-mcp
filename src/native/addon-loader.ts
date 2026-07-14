@@ -6,7 +6,7 @@ import { logger } from "../util/logger.js";
 
 type LoadCandidate = (candidate: string) => unknown;
 type LogFailure = (failure: string) => void;
-type NativeAddonCapability = (candidate: unknown) => boolean;
+export type NativeAddonCapability = (candidate: unknown) => boolean;
 
 interface NativeAddonResolution {
   addon: unknown | null;

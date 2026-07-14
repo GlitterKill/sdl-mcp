@@ -1,7 +1,7 @@
 {
   "name": "sdl-mcp-native",
   "version": "0.12.3",
-  "description": "Native Rust indexer for SDL-MCP with tree-sitter parsing and Rayon parallelism",
+  "description": "Native Rust indexer and scoped Windows runtime loader for SDL-MCP",
   "license": "SEE LICENSE IN LICENSE",
   "main": "index.js",
   "types": "index.d.ts",
