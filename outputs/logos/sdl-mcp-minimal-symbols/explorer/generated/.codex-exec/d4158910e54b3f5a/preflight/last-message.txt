@@ -1,1 +1,0 @@
-Ready for the Creative Production image-worker preflight. Send the image brief, source assets, and required output specifications.

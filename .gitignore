@@ -57,6 +57,7 @@ logs/
 *.log
 
 # Test output
+/outputs/
 test-output*.txt
 test-run*.txt
 test-red-output*.txt
