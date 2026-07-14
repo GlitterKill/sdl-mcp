@@ -1,0 +1,100 @@
+name: Ladybug Windows FTS Compatibility
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/ladybug-windows-fts-compat.yml"
+      - "native/**"
+      - "package*.json"
+      - "src/db/**"
+      - "src/live-index/**"
+      - "tests/fixtures/ladybug/**"
+      - "tests/integration/live-index-symbol-fts-crash.test.ts"
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-fts:
+    name: Windows FTS (${{ matrix.mode }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - legacy-crash-baseline
+          - missing-runtime-baseline
+          - fixed-regression
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Install committed dependencies
+        run: npm ci --ignore-scripts --legacy-peer-deps
+
+      - name: Install disposable Ladybug 0.18.1 probe
+        if: matrix.mode == 'missing-runtime-baseline'
+        run: >-
+          npm install --no-save --no-package-lock --ignore-scripts --legacy-peer-deps
+          kuzu@npm:@ladybugdb/core@0.18.1
+
+      - name: Install fixed-mode registry packages
+        if: matrix.mode == 'fixed-regression'
+        shell: pwsh
+        run: |
+          $Version = node -p "require('./package.json').version"
+          npm install --no-save --no-package-lock --ignore-scripts --legacy-peer-deps `
+            kuzu@npm:@ladybugdb/core@0.18.1 `
+            @sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.1 `
+            sdl-mcp-native@$Version
+
+      - name: Setup LadybugDB native binary
+        shell: pwsh
+        run: |
+          if ((Test-Path node_modules/kuzu/install.js) -and !(Test-Path node_modules/kuzu/lbugjs.node)) {
+            Push-Location node_modules/kuzu
+            node install.js
+            Pop-Location
+          }
+
+      - name: Build SDL runtime and native package
+        run: |
+          npm run build:all
+          npm run build:native
+          npm run native:artifacts
+
+      - name: Run isolated compatibility mode
+        shell: pwsh
+        env:
+          SDL_LADYBUG_WINDOWS_FTS_TEST_MODE: ${{ matrix.mode }}
+          SDL_LADYBUG_WINDOWS_FTS_REQUIRE_MODE: "1"
+        run: |
+          node --experimental-strip-types --test-concurrency=1 --test tests/integration/live-index-symbol-fts-crash.test.ts *>&1 |
+            Tee-Object -FilePath "$env:RUNNER_TEMP/ladybug-windows-fts-${{ matrix.mode }}.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Restore committed dependency tree
+        if: always() && (matrix.mode == 'missing-runtime-baseline' || matrix.mode == 'fixed-regression')
+        run: |
+          npm ci --ignore-scripts --legacy-peer-deps
+          npm ls kuzu
+
+      - name: Upload deterministic failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ladybug-windows-fts-${{ matrix.mode }}
+          path: ${{ runner.temp }}/ladybug-windows-fts-${{ matrix.mode }}.log
+          if-no-files-found: error
+          retention-days: 7
