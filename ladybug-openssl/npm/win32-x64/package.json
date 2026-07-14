@@ -1,0 +1,28 @@
+{
+  "name": "@sdl-mcp/ladybug-openssl-win32-x64",
+  "version": "3.5.7-sdl.1",
+  "description": "SDL-MCP temporary OpenSSL runtime for LadybugDB FTS on Windows x64",
+  "license": "Apache-2.0",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/libcrypto-3-x64.dll",
+    "bin/libssl-3-x64.dll",
+    "OPENSSL-LICENSE.txt",
+    "README.md",
+    "provenance.json",
+    "sbom.spdx.json"
+  ],
+  "exports": {
+    "./package.json": "./package.json",
+    "./provenance.json": "./provenance.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

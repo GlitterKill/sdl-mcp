@@ -1,0 +1,9 @@
+{
+  "opensslVersion": "3.5.7",
+  "packageVersion": "3.5.7-sdl.1",
+  "sourceUrl": "https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz",
+  "signatureUrl": "https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz.asc",
+  "sourceSha256": "a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8",
+  "releaseSignerFingerprint": "B146647E45A7B33947AB226B2A2C87D161692D40",
+  "configureTarget": "VC-WIN64A"
+}
