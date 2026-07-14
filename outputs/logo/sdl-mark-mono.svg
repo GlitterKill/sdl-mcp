@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="SDL — Symbol Delta Ledger">
-  <g fill="none" stroke="currentColor" stroke-width="18" stroke-linecap="round">
-    <line x1="107.5" y1="96" x2="148.5" y2="96"/>
-    <line x1="87" y1="132" x2="169" y2="132"/>
-    <line x1="66.5" y1="168" x2="189.5" y2="168"/>
-    <line x1="46" y1="204" x2="210" y2="204"/>
-  </g>
-  <circle cx="128" cy="60" r="11" fill="currentColor"/>
-</svg>
