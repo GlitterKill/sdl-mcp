@@ -1058,3 +1058,44 @@ describe("workflow fair-share response caps", () => {
     assert.ok(result.results[0].tokens < 150);
   });
 });
+
+
+it("classifies denied gateway results as workflow errors", async () => {
+  const actionMap = {
+    ...createMockActionMap(),
+    "test.denied": {
+      schema: z.object({}).passthrough(),
+      handler: async () => ({
+        status: "denied",
+        policyDecision: {
+          allowed: false,
+          deniedReasons: ["Executable is incompatible with the selected runtime."],
+        },
+        nextAction: "Choose a compatible executable.",
+      }),
+    },
+  };
+
+  const response = await executeWorkflow(
+    {
+      repoId: "test-repo",
+      steps: [
+        {
+          fn: "test.denied",
+          action: "test.denied",
+          args: {},
+          internal: false,
+        },
+      ],
+      onError: "continueAll",
+    },
+    actionMap,
+    testConfig,
+  );
+
+  assert.equal(response.results[0]?.status, "error");
+  assert.match(
+    String(response.results[0]?.error),
+    /Executable is incompatible with the selected runtime/,
+  );
+});

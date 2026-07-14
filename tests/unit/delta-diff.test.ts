@@ -46,6 +46,24 @@ describe("diffSignature", () => {
     assert.strictEqual(result, undefined);
   });
 
+  it("normalizes leading colons in historical parameter types", () => {
+    const before = JSON.stringify({
+      params: [{ name: "value", type: ": string" }],
+    });
+    const after = JSON.stringify({
+      params: [{ name: "value", type: ": number" }],
+    });
+
+    const result = diffSignature(before, after);
+    assert.ok(result, "should return a diff object");
+    assert.deepStrictEqual(JSON.parse(result!.before!).params, [
+      { name: "value", type: "string" },
+    ]);
+    assert.deepStrictEqual(JSON.parse(result!.after!).params, [
+      { name: "value", type: "number" },
+    ]);
+  });
+
   it("sets parseWarning when before is invalid JSON", () => {
     const result = diffSignature("not-json", '{"valid": true}');
     assert.ok(result, "should return a diff object");

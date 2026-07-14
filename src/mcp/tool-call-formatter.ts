@@ -349,8 +349,12 @@ function fmtWorkflow(
   const lines = [line];
   const failed = results.find((step) => step.status === "error");
   if (failed) {
+    const failedTrace = failed.failureTrace as
+      | Record<string, unknown>
+      | undefined;
+    const failedStepIndex = failed.stepIndex ?? failedTrace?.stepIndex;
     lines.push(
-      `first error: step ${num(failed.stepIndex)} ${str(failed.fn)} - ${truncName(str(failed.error) || str((failed.failureTrace as Record<string, unknown> | undefined)?.message))}`,
+      `first error: step ${num(failedStepIndex)} ${str(failed.fn)} - ${truncName(str(failed.error) || str(failedTrace?.message))}`,
     );
   }
   const blocked = results.find(
@@ -770,7 +774,7 @@ function fmtGeneric(
   const message = str(error?.message) || str(result.message);
   if (message) lines.push(`error: ${message}`);
 
-  let appended = false;
+  let appended = Boolean(message);
   for (const key of [
     "filePath",
     "file",

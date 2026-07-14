@@ -117,6 +117,8 @@ const WORKFLOW_CHILD_ACTIONS: Readonly<Record<string, string>> = Object.freeze({
   prRiskAnalyze: "pr.risk.analyze",
   repoOverview: "repo.overview",
   repoStatus: "repo.status",
+  semanticEnrichmentStatus: "semantic.enrichment.status",
+  bufferStatus: "buffer.status",
   runtimeExecute: "runtime.execute",
   runtimeQueryOutput: "runtime.queryOutput",
   searchEdit: "search.edit",

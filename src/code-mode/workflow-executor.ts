@@ -96,7 +96,16 @@ function getWorkflowAwareStepResponseTokens(
 function getGatewayFailureMessage(action: string, result: unknown): string | null {
   if (result == null || typeof result !== "object") return null;
   const record = result as Record<string, unknown>;
-  if (record.status !== "failure") return null;
+  if (record.status !== "failure" && record.status !== "denied") return null;
+  const policyDecision =
+    record.policyDecision != null && typeof record.policyDecision === "object"
+      ? (record.policyDecision as Record<string, unknown>)
+      : undefined;
+  const deniedReasons = Array.isArray(policyDecision?.deniedReasons)
+    ? policyDecision.deniedReasons.filter(
+        (reason): reason is string => typeof reason === "string" && reason.length > 0,
+      )
+    : [];
   const detail =
     typeof record.stderrSummary === "string" && record.stderrSummary.trim()
       ? record.stderrSummary.trim()
@@ -106,7 +115,11 @@ function getGatewayFailureMessage(action: string, result: unknown): string | nul
           ? record.message.trim()
           : typeof record.exitCode === "number"
             ? "exit code " + record.exitCode
-            : "returned failure status";
+            : deniedReasons.length > 0
+              ? deniedReasons.join("; ")
+              : record.status === "denied"
+                ? "request denied by policy"
+                : "returned failure status";
   return action + " failed: " + detail;
 }
 

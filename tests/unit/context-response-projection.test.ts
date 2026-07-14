@@ -634,7 +634,7 @@ describe("context-response-projection", () => {
       });
     });
 
-    it("omits the duplicate compact usage summary without mutating the raw result", () => {
+    it("preserves the compact usage summary without mutating the raw result", () => {
       const raw = {
         formattedSummary: "summary",
         session: { callCount: 1 },
@@ -644,7 +644,7 @@ describe("context-response-projection", () => {
 
       const projected = projectToolResultForModelContent("usage.stats", raw, {});
 
-      assert.deepEqual(projected, {});
+      assert.deepEqual(projected, { formattedSummary: "summary" });
       assert.equal(raw.formattedSummary, "summary");
       assert.deepEqual(raw.session, { callCount: 1 });
     });

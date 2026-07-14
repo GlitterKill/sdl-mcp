@@ -27,7 +27,7 @@ Do not run `index.refresh` by habit. Refresh only when `repo.status` shows stale
 
 Use `sdl.context` for task-shaped understanding. For explain/debug tasks, start with `options.answerFirst: true` and expand through evidence IDs only when the answer is insufficient. Exact tool/action names are seeded from the action catalog, but use `sdl.retrieve` for one-hop retrieval when the task already names a symbol, API, operation, or focused code target. If you need to decide which files or symbols to edit, build a slice through `sdl.retrieve` before requesting code.
 
-Use `sdl.workflow` only when steps need fields from earlier results, transforms, runtime execution, batch operations, mutations, or result piping.
+Use `sdl.workflow` only when steps need fields from earlier results, transforms, runtime execution, batch operations, mutations, or result piping. With `onError: "continueAll"`, failed and policy-denied gateway results continue execution but retain `status: "error"` and count as errors in the workflow summary.
 
 Escalate through `sdl.retrieve` in this order:
 
@@ -457,7 +457,7 @@ Before the final response:
 1. Verify the requested work through SDL-MCP runtime or focused SDL checks when applicable.
 2. Remove `.bak` files created during the task, or clearly report any kept intentionally.
 3. Call `usageStats` only when the user asks for token savings, you are debugging telemetry, or you need to persist/report a usage snapshot.
-4. When `usageStats` is explicitly needed, compact output returns `formattedSummary`; use `detail: "full"` only for structured `session`, `history`, or `wire` diagnostics.
+4. When `usageStats` is explicitly needed, compact output returns `formattedSummary`, including through `sdl.workflow`; use `detail: "full"` only for structured `session`, `history`, or `wire` diagnostics.
 
 ---
 

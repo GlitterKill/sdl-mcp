@@ -7,10 +7,10 @@
     "caseCount": 4
   },
   "baseline": {
-    "gitHead": "4581ad286ecb17b24b79ca344df57ba1e2c0cc9a",
-    "evaluatedSourceDiffSha256": "e9d61813cceb08a60861f3697c319daa6387a9438a123d936cdb049e5817700a",
+    "gitHead": "3924b5ff740935a6b6b953717654c26ed186aa46",
+    "evaluatedSourceDiffSha256": "bc8b4755e8f46eae524edbc59509c6e71d733de72bd6d02a410b5a63e93ce6f0",
     "sourceHashes": {
-      "src/agent/context-seeding.ts": "f0cc2e77ee5e2429862e4dfa8ce10f7aaeafe1e02ebb48caa8a4f3d933cc05e1",
+      "src/agent/context-seeding.ts": "949a25a146bef6e9f8938666cd150d451f6af1217c4cb25566d68c0b6b9587d5",
       "src/agent/planner.ts": "fd1b44177d479c5dcdc3a11437b8ea9ba9612a9ebf927fbba5da0e64930c1e38",
       "src/agent/executor.ts": "46f95765549568ac0b1b37f76a2a8b7e6753d48542e89e818b36501bc5501f67",
       "src/graph/slice/start-node-resolver.ts": "9584d711965a144bf56ade8668be759ffb7d5e4619333e903f1c8407327d6ea0",
@@ -254,7 +254,7 @@
           "adjustforbudget_trims",
           "trimsRungs"
         ],
-        "ftsQuery": "adjustForBudget trims rungs incorrectly budget maxTokens very small incorrectlyBudget budgetMaxtokens rungsIncorrectlyBudget incorrectlyBudgetMaxtokens",
+        "ftsQuery": "adjustForBudget trims rungs incorrectly budget maxTokens very small leaving only card even",
         "entityTypes": [
           "symbol",
           "fileSummary"
@@ -355,7 +355,7 @@
           "entitysearch_returns",
           "returnsZero"
         ],
-        "ftsQuery": "entitySearch returns zero results query keyword fallback buildContext uses extractIdentifiersFromText filters out handleContext ContextRequestSchema ContextResponseSchema context context",
+        "ftsQuery": "entitySearch returns zero query keyword fallback buildContext uses extractIdentifiersFromText filters out domain handleContext ContextRequestSchema ContextResponseSchema context context",
         "entityTypes": [
           "symbol",
           "fileSummary"
@@ -472,9 +472,9 @@
     "autopilotExplicitScopeRecall": 1
   },
   "observedMedianPolicyLatencyMs": {
-    "contextAssembly": 0.092,
-    "sliceStartNodes": 0.0083,
-    "autopilotExecution": 0.0013
+    "contextAssembly": 0.1139,
+    "sliceStartNodes": 0.0082,
+    "autopilotExecution": 0.0014
   },
   "interfaces": {
     "contextAssembly": "task text/options -> entity query plan + mixed entity candidates -> context refs",

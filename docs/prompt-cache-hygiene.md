@@ -16,7 +16,7 @@ There is no error signal when hygiene breaks. A timestamp accidentally added to 
 
 **Deterministic tool outputs.** Identical tool calls against an unchanged index return byte-identical results — within a process, across fresh processes, and across a from-scratch re-index of unchanged source. Every LadybugDB query carries an explicit `ORDER BY` with a deterministic tiebreaker (file path, then symbol name, then byte offset), because columnar engines with parallel scans do not guarantee row order otherwise. Result serialization uses a locked key order.
 
-**No volatile content.** Tool responses contain no wall-clock timestamps, query durations, session identifiers, or machine-specific absolute paths. Paths are reported relative to the indexed repository root. Performance and freshness telemetry belongs in logs, never in tool results.
+**No volatile content.** Tool responses contain no wall-clock timestamps, query durations, session identifiers, or machine-specific absolute paths. Paths are reported relative to the indexed repository root. Model-facing status projections omit timestamp fields and timestamp-derived run identifiers by default; `repo.status` exposes its operational telemetry only when callers set `includeTelemetry: true`.
 
 **Cache-friendly session start.** Context that SDL-MCP contributes at session start (via the SessionStart hook) is content-addressed: it changes only when the indexed codebase changes, never with wall-clock time or per-session state. When the codebase is unchanged, a new session presents a byte-identical prefix, making cross-session cache reuse possible within the cache's lifetime.
 

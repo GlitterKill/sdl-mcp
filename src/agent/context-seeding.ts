@@ -137,7 +137,14 @@ export function buildContextFtsQuery(taskText: string): string {
   const lexicalTerms = [...new Set(words ?? [])]
     .map((term) => term.trim())
     .filter((term) => term.length >= 3)
-    .filter((term) => !IDENTIFIER_STOP_WORDS.has(term.toLowerCase()));
+    .filter((term) => !IDENTIFIER_STOP_WORDS.has(term.toLowerCase()))
+    // QA prompts often lead with scaffolding words that should not displace tool names.
+    .filter(
+      (term) =>
+        !/^(existing|files|symbols|cover|covers|result|results|through)$/i.test(
+          term,
+        ),
+    );
   const seenCompoundKeys = new Set<string>();
   const identifierTerms = generateCompoundIdentifiers(taskText).filter((term) => {
     if (
@@ -154,9 +161,8 @@ export function buildContextFtsQuery(taskText: string): string {
   });
   const terms = [
     ...new Set([
-      ...lexicalTerms.slice(0, 8),
+      ...lexicalTerms.slice(0, 12),
       ...identifierTerms.slice(0, 8),
-      ...lexicalTerms.slice(8, 12),
     ]),
   ].slice(0, 12);
   if (terms.length > 0) return terms.join(" ");
@@ -173,11 +179,21 @@ function toPascalCaseIdentifier(identifier: string): string {
 
 export function buildActionSeedQueries(taskText: string): string[] {
   const normalizedTaskText = taskText.toLowerCase();
-  const mentionedActions = buildCatalog().filter(
-    (action) =>
+  const mentionedActions = buildCatalog().filter((action) => {
+    const actionPhrase = action.action.toLowerCase().replaceAll(".", " ");
+    const fnPhrase = action.fn
+      .replace(
+        /([a-z0-9])([A-Z])/g,
+        (_match, lower, upper) => lower + " " + upper,
+      )
+      .toLowerCase();
+    return (
       normalizedTaskText.includes(action.action.toLowerCase()) ||
-      normalizedTaskText.includes(action.fn.toLowerCase()),
-  );
+      normalizedTaskText.includes(action.fn.toLowerCase()) ||
+      normalizedTaskText.includes(actionPhrase) ||
+      normalizedTaskText.includes(fnPhrase)
+    );
+  });
   if (mentionedActions.length === 0) return [];
 
   const rankedActions = rankCatalog(mentionedActions, taskText).slice(

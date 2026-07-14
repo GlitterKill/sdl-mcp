@@ -76,7 +76,9 @@ function extractParameters(
         if (identifier) {
           params.push({
             name: identifier.text,
-            type: typeAnnotation ? typeAnnotation.text : undefined,
+            type: typeAnnotation
+              ? typeAnnotation.text.replace(/^:\s*/, "")
+              : undefined,
           });
         }
       } else if (child.type === "identifier") {
@@ -92,7 +94,9 @@ function extractParameters(
         if (identifier) {
           params.push({
             name: "..." + identifier.text,
-            type: typeAnnotation ? typeAnnotation.text : undefined,
+            type: typeAnnotation
+              ? typeAnnotation.text.replace(/^:\s*/, "")
+              : undefined,
           });
         }
       }

@@ -117,6 +117,34 @@ export async function computeDelta(
   };
 }
 
+function normalizeSignatureParameterTypes(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const signature = value as Record<string, unknown>;
+  if (!Array.isArray(signature.params)) {
+    return value;
+  }
+
+  return {
+    ...signature,
+    params: signature.params.map((param) => {
+      if (!param || typeof param !== "object" || Array.isArray(param)) {
+        return param;
+      }
+
+      const typedParam = param as Record<string, unknown>;
+      if (typeof typedParam.type !== "string") {
+        return param;
+      }
+
+      // Historical versions may store raw tree-sitter annotations with a colon.
+      return { ...typedParam, type: typedParam.type.replace(/^:\s*/, "") };
+    }),
+  };
+}
+
 export function diffSignature(
   before: string | null,
   after: string | null,
@@ -129,7 +157,7 @@ export function diffSignature(
   let parseWarning = false;
   if (before !== null) {
     try {
-      beforeObj = JSON.parse(before);
+      beforeObj = normalizeSignatureParameterTypes(JSON.parse(before));
     } catch (e) {
       parseWarning = true;
       logger.warn(
@@ -141,7 +169,7 @@ export function diffSignature(
   let afterObj = null;
   if (after !== null) {
     try {
-      afterObj = JSON.parse(after);
+      afterObj = normalizeSignatureParameterTypes(JSON.parse(after));
     } catch (e) {
       parseWarning = true;
       logger.warn(
@@ -158,8 +186,8 @@ export function diffSignature(
   }
 
   return {
-    before: before ?? undefined,
-    after: after ?? undefined,
+    before: before === null || parseWarning ? before ?? undefined : beforeStr,
+    after: after === null || parseWarning ? after ?? undefined : afterStr,
     ...(parseWarning ? { parseWarning: true } : {}),
   };
 }

@@ -94,7 +94,7 @@
     },
     {
       "tool": "sdl.repo.status",
-      "reason": "Freshness/status surface intentionally reports current index state."
+      "reason": "Timestamp telemetry is model-gated; health, watcher, and index state remain intentionally live."
     },
     {
       "tool": "sdl.index.refresh",
@@ -182,7 +182,7 @@
     },
     {
       "tool": "sdl.semantic.enrichment.status",
-      "reason": "Provider status reports current enrichment run state."
+      "reason": "Run identifiers and timestamps are model-gated; provider selection and run state remain intentionally live."
     },
     {
       "tool": "sdl.search.edit",

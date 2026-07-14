@@ -385,6 +385,67 @@ function shouldDropNoOpField(key: string, value: unknown): boolean {
   return false;
 }
 
+const VOLATILE_STATUS_MODEL_FIELDS = new Set([
+  "createdAt",
+  "lastIndexedAt",
+  "startedAt",
+  "finishedAt",
+  "updatedAt",
+  "lastEventAt",
+  "lastSuccessfulReindexAt",
+  "lastRunAt",
+  "lastBufferEventAt",
+  "lastCheckpointAt",
+  "lastCheckpointAttemptAt",
+  "oldestReconcileAt",
+  "lastReconciledAt",
+]);
+
+function isStatusToolName(toolName: string): boolean {
+  return toolName.endsWith(".status") || toolName.endsWith("Status");
+}
+
+function isSemanticEnrichmentStatusToolName(toolName: string): boolean {
+  return (
+    toolName.endsWith("semantic.enrichment.status") ||
+    toolName === "semanticEnrichmentStatus"
+  );
+}
+
+function isVolatileStatusModelField(
+  toolName: string,
+  key: string,
+): boolean {
+  return (
+    isStatusToolName(toolName) &&
+    (VOLATILE_STATUS_MODEL_FIELDS.has(key) ||
+      (isSemanticEnrichmentStatusToolName(toolName) && key === "runId"))
+  );
+}
+
+function stripVolatileStatusFieldsForModel(
+  toolName: string,
+  value: unknown,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      stripVolatileStatusFieldsForModel(toolName, item),
+    );
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const projected: Record<string, unknown> = {};
+  for (const [key, itemValue] of Object.entries(value)) {
+    if (isVolatileStatusModelField(toolName, key)) {
+      continue;
+    }
+    projected[key] = stripVolatileStatusFieldsForModel(toolName, itemValue);
+  }
+  return projected;
+}
+
 function shouldKeepModelField(
   toolName: string,
   key: string,
@@ -393,6 +454,12 @@ function shouldKeepModelField(
 ): boolean {
   const projectionRule = getResponseProjectionRule(toolName);
   if (PRECONDITION_MODEL_FIELDS.has(key)) {
+    return false;
+  }
+  if (
+    !options.includeTelemetry &&
+    isVolatileStatusModelField(toolName, key)
+  ) {
     return false;
   }
   if (depth === 0 && shouldOmitToolSpecificModelField(toolName, key)) {
@@ -428,6 +495,12 @@ function shouldKeepModelField(
   }
   if (key === "callResolution") {
     return options.includeResolutionMetadata;
+  }
+  if (
+    key === "matchCount" &&
+    (toolName === "sdl.file" || toolName === "sdl.search.edit")
+  ) {
+    return true;
   }
   if (COMPACT_DEBUG_MODEL_FIELDS.has(key)) {
     return false;
@@ -606,8 +679,22 @@ function projectWorkflowStepResultForModel(
   const childProjectionRule = getResponseProjectionRule(childToolName);
   const childArgOptions = isRecord(args) ? modelOptionsFromArgs(args) : undefined;
   const fileOp = inferWorkflowFileOp(childToolName, result, args);
-  if (isFullDetail(options)) {
+  const filterStatusTelemetry =
+    !(childArgOptions?.includeTelemetry ?? options.includeTelemetry) &&
+    isStatusToolName(childToolName);
+  if (isFullDetail(options) && !filterStatusTelemetry) {
     return stripFullDetailHiddenFieldsForModel(result);
+  }
+  if (
+    filterStatusTelemetry &&
+    isFullDetail(options) &&
+    childArgOptions?.detail !== "compact"
+  ) {
+    // Full workflow detail keeps actionable fields while filtering cache noise.
+    return stripVolatileStatusFieldsForModel(
+      childToolName,
+      stripFullDetailHiddenFieldsForModel(result),
+    );
   }
   const childOptions: ModelContentProjectionOptions = {
     ...options,
@@ -621,7 +708,10 @@ function projectWorkflowStepResultForModel(
   };
 
   if (isFullDetail(childOptions)) {
-    return stripFullDetailHiddenFieldsForModel(result);
+    const fullResult = stripFullDetailHiddenFieldsForModel(result);
+    return filterStatusTelemetry
+      ? stripVolatileStatusFieldsForModel(childToolName, fullResult)
+      : fullResult;
   }
 
   if (childProjectionRule?.projector === "repoStatus") {
@@ -637,7 +727,7 @@ function projectWorkflowStepResultForModel(
     return isRecord(result) ? projectActionSearchForModel(result) : result;
   }
   if (childProjectionRule?.projector === "usage") {
-    return isRecord(result) ? projectUsageStatsForModel() : result;
+    return isRecord(result) ? projectUsageStatsForModel(result) : result;
   }
 
   return projectGenericValueForModel(childToolName, result, childOptions);
@@ -720,8 +810,11 @@ function projectWorkflowResultForModel(
   return projected;
 }
 
-function projectUsageStatsForModel(): Record<string, unknown> {
-  return {};
+function projectUsageStatsForModel(result: unknown): Record<string, unknown> {
+  if (!isRecord(result) || typeof result.formattedSummary !== "string") {
+    return {};
+  }
+  return { formattedSummary: result.formattedSummary };
 }
 
 function projectDerivedStateForModel(value: unknown): unknown {
@@ -939,6 +1032,16 @@ export function projectToolResultForModelContent(
   if (projectionRule?.projector === "workflow") {
     return projectWorkflowResultForModel(result, options, args);
   }
+  if (
+    isFullDetail(options) &&
+    !options.includeTelemetry &&
+    isStatusToolName(toolName)
+  ) {
+    return stripVolatileStatusFieldsForModel(
+      toolName,
+      stripFullDetailHiddenFieldsForModel(result),
+    );
+  }
   if (isFullDetail(options)) {
     return stripTopLevelToolSpecificFieldsForModel(
       toolName,
@@ -952,7 +1055,7 @@ export function projectToolResultForModelContent(
     return projectContextResultForModel(result, options);
   }
   if (projectionRule?.projector === "usage") {
-    return projectUsageStatsForModel();
+    return projectUsageStatsForModel(result);
   }
   if (projectionRule?.projector === "repoStatus") {
     if (options.detail === "compact" && !options.includeTelemetry) {

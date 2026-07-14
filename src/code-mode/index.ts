@@ -115,7 +115,10 @@ export function handleActionSearch(
     includeExamples: effectiveIncludeExamples,
   });
 
-  const allRanked = rankCatalog(catalog, trimmed);
+  let allRanked = rankCatalog(catalog, trimmed);
+  if (args.summaryOnly && allRanked.length === 0) {
+    allRanked = rankCatalog(catalog, "*");
+  }
   const disabledRanked = allRanked.filter((a) => a.disabled);
   let filteredRanked = args.excludeDisabled
     ? allRanked.filter((a) => !a.disabled)
