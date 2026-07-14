@@ -103,6 +103,11 @@ grammar-wrappers/*/package.json.bak
 /data/
 /devdocs/
 devdocs/*
+!/devdocs/
+!/devdocs/benchmarks/
+/devdocs/benchmarks/*
+!/devdocs/benchmarks/seed-resolution-corpus-v1.json
+!/devdocs/benchmarks/seed-resolution-evaluation-v1.json
 /devdocs/validation/
 # Root agent/context files
 /AGENTS.md

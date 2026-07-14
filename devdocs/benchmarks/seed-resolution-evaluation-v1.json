@@ -1,0 +1,492 @@
+{
+  "schemaVersion": 1,
+  "corpus": {
+    "version": 1,
+    "source": "tests/benchmark/context-quality-cases.json",
+    "sha256": "131b872519e1982f42cdf5a28a320de669029e1895a1392129f1bd54a272988f",
+    "caseCount": 4
+  },
+  "baseline": {
+    "gitHead": "4581ad286ecb17b24b79ca344df57ba1e2c0cc9a",
+    "evaluatedSourceDiffSha256": "e9d61813cceb08a60861f3697c319daa6387a9438a123d936cdb049e5817700a",
+    "sourceHashes": {
+      "src/agent/context-seeding.ts": "e7dddf9adaa5f873578a18ab09d6bf12cd4fdf1880f4dd03c45cd8f9f63c8c7f",
+      "src/agent/planner.ts": "fd1b44177d479c5dcdc3a11437b8ea9ba9612a9ebf927fbba5da0e64930c1e38",
+      "src/agent/executor.ts": "60b55344db97c279943439f7a90c421f3ea35ea58e85a2503a3eea0fa97216b5",
+      "src/graph/slice/start-node-resolver.ts": "6a1bc426f68fcdaa140fc6817980aded02018d0080589f4942be5bb21fe0d174",
+      "src/retrieval/seed-resolver.ts": "f2429719b1ae16e02e9b3f296ca09f67240d3ac71bce5d3c42c7295f80b1c672"
+    },
+    "platform": "win32-x64",
+    "node": "v24.14.0",
+    "config": "not used; fixture-only pure-policy evaluation",
+    "indexVersion": null,
+    "providerModelSettings": "not used; no DB, embedding, or provider calls",
+    "nativeAddon": {
+      "globallyEnabled": true,
+      "available": true,
+      "usedByEvaluation": false
+    }
+  },
+  "cases": [
+    {
+      "id": "debug-precise-feedback-boost",
+      "contextAssembly": {
+        "rankedPathHints": [
+          "src/retrieval/feedback-boost.ts",
+          "src/agent/context-engine.ts",
+          "src/agent/context-seeding.ts"
+        ],
+        "autoMentions": [
+          "queryFeedbackBoosts",
+          "FeedbackBoosts",
+          "queryfeedbackboostsReturns",
+          "QueryfeedbackboostsReturns",
+          "queryfeedbackboosts_returns",
+          "returnsStale",
+          "ReturnsStale",
+          "returns_stale"
+        ],
+        "ftsQuery": "queryFeedbackBoosts returns stale boost scores after feedback entries soft deleted still influences handleContext ContextRequestSchema ContextResponseSchema context context",
+        "entityTypes": [
+          "symbol",
+          "fileSummary"
+        ],
+        "toolQaFocused": true,
+        "recall": 1,
+        "evidence": "concept map + action-aware FTS query + mention extraction"
+      },
+      "sliceStartNodes": {
+        "rankedTaskTokens": [
+          {
+            "token": "soft-deleted.",
+            "rank": 4
+          },
+          {
+            "token": "seeding.",
+            "rank": 4
+          },
+          {
+            "token": "queryfeedbackboosts",
+            "rank": 1
+          },
+          {
+            "token": "influences",
+            "rank": 1
+          },
+          {
+            "token": "feedback",
+            "rank": 1
+          },
+          {
+            "token": "returns",
+            "rank": 0
+          },
+          {
+            "token": "entries",
+            "rank": 0
+          },
+          {
+            "token": "deleted",
+            "rank": 0
+          },
+          {
+            "token": "context",
+            "rank": 0
+          },
+          {
+            "token": "scores",
+            "rank": 0
+          },
+          {
+            "token": "stale",
+            "rank": 0
+          },
+          {
+            "token": "boost",
+            "rank": 0
+          },
+          {
+            "token": "after",
+            "rank": 0
+          },
+          {
+            "token": "debug",
+            "rank": 0
+          },
+          {
+            "token": "still",
+            "rank": 0
+          }
+        ],
+        "recall": 1,
+        "evidence": "token rank, then token length, then graph/DB symbol matching"
+      },
+      "autopilotExecution": {
+        "rankedExplicitContext": [
+          "file:src/retrieval/feedback-boost.ts"
+        ],
+        "plannedRungs": [
+          "card",
+          "hotPath"
+        ],
+        "recall": 1,
+        "evidence": "caller order for explicit symbols/paths; executor fallback is later"
+      }
+    },
+    {
+      "id": "debug-precise-executor-card-rung",
+      "contextAssembly": {
+        "rankedPathHints": [
+          "src/runtime/"
+        ],
+        "autoMentions": [
+          "executeCardRung",
+          "selectTopSymbols",
+          "CardRung",
+          "TopSymbols",
+          "executecardrungFails",
+          "ExecutecardrungFails",
+          "executecardrung_fails",
+          "failsSilently"
+        ],
+        "ftsQuery": "executeCardRung fails silently selectTopSymbols returns empty array control flow leads zero evidence",
+        "entityTypes": [
+          "symbol",
+          "fileSummary"
+        ],
+        "toolQaFocused": false,
+        "recall": 0,
+        "evidence": "concept map + action-aware FTS query + mention extraction"
+      },
+      "sliceStartNodes": {
+        "rankedTaskTokens": [
+          {
+            "token": "array.",
+            "rank": 3
+          },
+          {
+            "token": "rung.",
+            "rank": 3
+          },
+          {
+            "token": "selecttopsymbols",
+            "rank": 1
+          },
+          {
+            "token": "executecardrung",
+            "rank": 1
+          },
+          {
+            "token": "silently",
+            "rank": 1
+          },
+          {
+            "token": "evidence",
+            "rank": 1
+          },
+          {
+            "token": "returns",
+            "rank": 0
+          },
+          {
+            "token": "control",
+            "rank": 0
+          },
+          {
+            "token": "fails",
+            "rank": 0
+          },
+          {
+            "token": "empty",
+            "rank": 0
+          },
+          {
+            "token": "debug",
+            "rank": 0
+          },
+          {
+            "token": "leads",
+            "rank": 0
+          },
+          {
+            "token": "flow",
+            "rank": 0
+          },
+          {
+            "token": "zero",
+            "rank": 0
+          },
+          {
+            "token": "card",
+            "rank": 0
+          }
+        ],
+        "recall": 1,
+        "evidence": "token rank, then token length, then graph/DB symbol matching"
+      },
+      "autopilotExecution": {
+        "rankedExplicitContext": [
+          "file:src/agent/executor.ts"
+        ],
+        "plannedRungs": [
+          "card",
+          "hotPath"
+        ],
+        "recall": 1,
+        "evidence": "caller order for explicit symbols/paths; executor fallback is later"
+      }
+    },
+    {
+      "id": "debug-precise-planner-budget",
+      "contextAssembly": {
+        "rankedPathHints": [
+          "src/code/hotpath.ts",
+          "src/agent/executor.ts",
+          "src/util/"
+        ],
+        "autoMentions": [
+          "adjustForBudget",
+          "maxTokens",
+          "hotPath",
+          "ForBudget",
+          "adjustforbudgetTrims",
+          "AdjustforbudgetTrims",
+          "adjustforbudget_trims",
+          "trimsRungs"
+        ],
+        "ftsQuery": "adjustForBudget trims rungs incorrectly budget maxTokens very small incorrectlyBudget budgetMaxtokens rungsIncorrectlyBudget incorrectlyBudgetMaxtokens",
+        "entityTypes": [
+          "symbol",
+          "fileSummary"
+        ],
+        "toolQaFocused": false,
+        "recall": 0,
+        "evidence": "concept map + action-aware FTS query + mention extraction"
+      },
+      "sliceStartNodes": {
+        "rankedTaskTokens": [
+          {
+            "token": "hotpath.",
+            "rank": 4
+          },
+          {
+            "token": "adjustforbudget",
+            "rank": 1
+          },
+          {
+            "token": "incorrectly",
+            "rank": 1
+          },
+          {
+            "token": "maxtokens",
+            "rank": 1
+          },
+          {
+            "token": "leaving",
+            "rank": 0
+          },
+          {
+            "token": "budget",
+            "rank": 0
+          },
+          {
+            "token": "trims",
+            "rank": 0
+          },
+          {
+            "token": "rungs",
+            "rank": 0
+          },
+          {
+            "token": "small",
+            "rank": 0
+          },
+          {
+            "token": "debug",
+            "rank": 0
+          },
+          {
+            "token": "tasks",
+            "rank": 0
+          },
+          {
+            "token": "card",
+            "rank": 0
+          },
+          {
+            "token": "even",
+            "rank": 0
+          },
+          {
+            "token": "need",
+            "rank": 0
+          }
+        ],
+        "recall": 0.667,
+        "evidence": "token rank, then token length, then graph/DB symbol matching"
+      },
+      "autopilotExecution": {
+        "rankedExplicitContext": [
+          "file:src/agent/planner.ts"
+        ],
+        "plannedRungs": [
+          "card",
+          "hotPath"
+        ],
+        "recall": 1,
+        "evidence": "caller order for explicit symbols/paths; executor fallback is later"
+      }
+    },
+    {
+      "id": "debug-broad-entity-search-fallback",
+      "contextAssembly": {
+        "rankedPathHints": [
+          "src/agent/context-engine.ts",
+          "src/agent/context-seeding.ts",
+          "src/agent/identifier-extraction.ts"
+        ],
+        "autoMentions": [
+          "entitySearch",
+          "buildContext",
+          "extractIdentifiersFromText",
+          "IdentifiersFromText",
+          "entitysearchReturns",
+          "EntitysearchReturns",
+          "entitysearch_returns",
+          "returnsZero"
+        ],
+        "ftsQuery": "entitySearch returns zero results query keyword fallback buildContext uses extractIdentifiersFromText filters out handleContext ContextRequestSchema ContextResponseSchema context context",
+        "entityTypes": [
+          "symbol",
+          "fileSummary"
+        ],
+        "toolQaFocused": true,
+        "recall": 0.5,
+        "evidence": "concept map + action-aware FTS query + mention extraction"
+      },
+      "sliceStartNodes": {
+        "rankedTaskTokens": [
+          {
+            "token": "domain-specific",
+            "rank": 4
+          },
+          {
+            "token": "dropped.",
+            "rank": 4
+          },
+          {
+            "token": "symbol.",
+            "rank": 3
+          },
+          {
+            "token": "extractidentifiersfromtext",
+            "rank": 1
+          },
+          {
+            "token": "entitysearch",
+            "rank": 1
+          },
+          {
+            "token": "buildcontext",
+            "rank": 1
+          },
+          {
+            "token": "fallback",
+            "rank": 1
+          },
+          {
+            "token": "relevant",
+            "rank": 1
+          },
+          {
+            "token": "returns",
+            "rank": 0
+          },
+          {
+            "token": "results",
+            "rank": 0
+          },
+          {
+            "token": "keyword",
+            "rank": 0
+          },
+          {
+            "token": "filters",
+            "rank": 0
+          },
+          {
+            "token": "search",
+            "rank": 0
+          },
+          {
+            "token": "terms",
+            "rank": 0
+          },
+          {
+            "token": "slice",
+            "rank": 0
+          },
+          {
+            "token": "debug",
+            "rank": 0
+          },
+          {
+            "token": "zero",
+            "rank": 0
+          },
+          {
+            "token": "uses",
+            "rank": 0
+          },
+          {
+            "token": "like",
+            "rank": 0
+          },
+          {
+            "token": "out",
+            "rank": 0
+          }
+        ],
+        "recall": 1,
+        "evidence": "token rank, then token length, then graph/DB symbol matching"
+      },
+      "autopilotExecution": {
+        "rankedExplicitContext": [
+          "file:src/agent/context-engine.ts",
+          "file:src/agent/executor.ts"
+        ],
+        "plannedRungs": [
+          "card",
+          "skeleton",
+          "hotPath"
+        ],
+        "recall": 1,
+        "evidence": "caller order for explicit symbols/paths; executor fallback is later"
+      }
+    }
+  ],
+  "quality": {
+    "metric": "per-stack labeled recall; cross-stack top-k overlap is invalid because seed domains differ",
+    "contextAssemblyRecall": 0.375,
+    "sliceStartNodeRecall": 0.917,
+    "autopilotExplicitScopeRecall": 1
+  },
+  "observedMedianPolicyLatencyMs": {
+    "contextAssembly": 0.092,
+    "sliceStartNodes": 0.0083,
+    "autopilotExecution": 0.0013
+  },
+  "interfaces": {
+    "contextAssembly": "task text/options -> entity query plan + mixed entity candidates -> context refs",
+    "sliceStartNodes": "entry symbols/stack/test/edited files/task text -> prioritized symbol start nodes",
+    "autopilotExecution": "explicit focus + planned rungs -> resolved context; later per-rung fallback and ranking"
+  },
+  "recommendation": {
+    "option": 2,
+    "summary": "Share proven candidate-retrieval primitives only; retain stack-specific ranking adapters.",
+    "implementationApproved": true,
+    "followUpPlan": "devdocs/plans/2026-07-13-seed-resolution-option-2-implementation-plan.md"
+  },
+  "reproduction": "npm run benchmark:seed-resolution",
+  "check": "npm run build && node --experimental-strip-types scripts/evaluate-seed-resolution.ts --check"
+}

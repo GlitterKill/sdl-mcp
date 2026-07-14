@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "source": "tests/benchmark/context-quality-cases.json",
+  "cases": [
+    {
+      "id": "debug-precise-feedback-boost",
+      "taskType": "debug",
+      "contextMode": "precise",
+      "taskText": "queryFeedbackBoosts returns stale boost scores after feedback entries are soft-deleted. Debug why deleted feedback still influences context seeding.",
+      "focusPaths": ["src/retrieval/feedback-boost.ts"],
+      "expected": {
+        "contextPaths": ["src/retrieval/feedback-boost.ts"],
+        "sliceTokens": ["queryfeedbackboosts", "feedback"],
+        "agentRefs": ["file:src/retrieval/feedback-boost.ts"]
+      }
+    },
+    {
+      "id": "debug-precise-executor-card-rung",
+      "taskType": "debug",
+      "contextMode": "precise",
+      "taskText": "executeCardRung fails silently when selectTopSymbols returns an empty array. Debug the control flow that leads to zero evidence in the card rung.",
+      "focusPaths": ["src/agent/executor.ts"],
+      "expected": {
+        "contextPaths": ["src/agent/executor.ts"],
+        "sliceTokens": ["executecardrung", "selecttopsymbols"],
+        "agentRefs": ["file:src/agent/executor.ts"]
+      }
+    },
+    {
+      "id": "debug-precise-planner-budget",
+      "taskType": "debug",
+      "contextMode": "precise",
+      "taskText": "adjustForBudget trims rungs incorrectly when the budget maxTokens is very small, leaving only card rungs even for debug tasks that need hotPath.",
+      "focusPaths": ["src/agent/planner.ts"],
+      "expected": {
+        "contextPaths": ["src/agent/planner.ts"],
+        "sliceTokens": ["adjustforbudget", "maxtokens", "hotpath"],
+        "agentRefs": ["file:src/agent/planner.ts"]
+      }
+    },
+    {
+      "id": "debug-broad-entity-search-fallback",
+      "taskType": "debug",
+      "contextMode": "broad",
+      "taskText": "When entitySearch returns zero results for a task query, the keyword fallback in buildContext uses extractIdentifiersFromText which filters out domain-specific terms like slice and symbol. Debug why relevant search terms are dropped.",
+      "focusPaths": ["src/agent/context-engine.ts", "src/agent/executor.ts"],
+      "expected": {
+        "contextPaths": ["src/agent/context-engine.ts", "src/agent/executor.ts"],
+        "sliceTokens": ["entitysearch", "buildcontext", "extractidentifiersfromtext"],
+        "agentRefs": ["file:src/agent/context-engine.ts", "file:src/agent/executor.ts"]
+      }
+    }
+  ]
+}
