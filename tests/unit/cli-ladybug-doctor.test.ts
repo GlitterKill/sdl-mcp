@@ -1,5 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
+import { spawnSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname } from "path";
@@ -80,6 +81,81 @@ describe("CLI doctor command - LadybugDB", () => {
       output.includes("Graph database") || output.includes("LadybugDB"),
       "Output should mention graph database or LadybugDB",
     );
+  });
+
+  it("skips graph-dependent checks when another process holds LadybugDB open", async () => {
+    const configPath = join(tempDir, "sdlmcp.config.json");
+    const ladybugPath = join(tempDir, "sdl-mcp-graph.lbug");
+    const config = {
+      repos: [{ repoId: "test", rootPath: tempDir }],
+      dbPath: join(tempDir, "sdlmcp.sqlite"),
+      graphDatabase: { path: ladybugPath },
+      policy: {},
+    };
+    writeFileSync(configPath, JSON.stringify(config));
+
+    const { initLadybugDb, closeLadybugDb } =
+      await import("../../dist/db/ladybug.js");
+    const { writePidfile, removePidfile } =
+      await import("../../dist/util/pidfile.js");
+
+    await initLadybugDb(ladybugPath);
+    const pidfilePath = writePidfile(ladybugPath, "stdio");
+
+    try {
+      const child = spawnSync(
+        process.execPath,
+        [
+          join(process.cwd(), "dist/cli/index.js"),
+          "doctor",
+          "--config",
+          configPath,
+        ],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            SDL_CONFIG: configPath,
+            SDL_CONFIG_PATH: configPath,
+          },
+        },
+      );
+      const output = `${child.stdout}${child.stderr}`;
+
+      assert.strictEqual(child.status, 0, output);
+      assert.match(
+        output,
+        /Graph database \(Ladybug\): .*Active SDL-MCP server .* owns this graph database/i,
+      );
+      for (const name of [
+        "Stale index detection",
+        "DB extension capabilities (fts/vector)",
+        "Retrieval indexes (FTS/vector)",
+      ]) {
+        assert.ok(
+          output.includes(
+            `− ${name}: Skipped because the graph database could not be verified`,
+          ),
+          output,
+        );
+      }
+      assert.doesNotMatch(output, /No Kuzu extensions loaded/);
+      assert.doesNotMatch(output, /No retrieval indexes found/);
+      assert.match(output, /✓ Runtime execution:/);
+
+      const warningCount = output
+        .split(/\r?\n/u)
+        .filter(
+          (line) =>
+            line.startsWith("⚠ ") && !/^⚠ \d+ warning\(s\)/u.test(line),
+        ).length;
+      const summary = output.match(/(\d+) warning\(s\)/);
+      assert.ok(summary, output);
+      assert.strictEqual(Number(summary[1]), warningCount, output);
+    } finally {
+      removePidfile(pidfilePath);
+      await closeLadybugDb();
+    }
   });
 
   it("warns when LadybugDB file does not exist", async () => {

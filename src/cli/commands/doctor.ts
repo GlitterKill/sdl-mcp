@@ -3,6 +3,7 @@ import { DoctorOptions } from "../types.js";
 import { NODE_MIN_MAJOR_VERSION } from "../../config/constants.js";
 import { detectCpuProfile } from "../../util/cpu-detect.js";
 import { getTierPresets } from "../../util/cpu-presets.js";
+import { findExistingProcess } from "../../util/pidfile.js";
 import { activateCliConfigPath } from "../../config/configPath.js";
 import {
   defaultGraphDbPath,
@@ -52,34 +53,56 @@ import {
   type SupportedLanguage,
 } from "../../indexer/treesitter/grammarLoader.js";
 
-const DOCTOR_CHECKS = [
+const DOCTOR_CHECKS: DoctorCheck[] = [
   { name: "Node.js version", check: checkNodeVersion },
   { name: "CPU profile and performance tier", check: checkCpuProfile },
   { name: "Config file exists", check: checkConfigExists },
   { name: "Config file readable", check: checkConfigReadable },
   { name: "Tree-sitter grammars available", check: checkTreeSitterGrammar },
   { name: "Repo paths accessible", check: checkRepoPaths },
-  { name: "Stale index detection", check: checkStaleIndex },
+  {
+    name: "Graph database (Ladybug)",
+    check: checkLadybugDb,
+    graphDbGate: true,
+  },
+  {
+    name: "Stale index detection",
+    check: checkStaleIndex,
+    requiresGraphDb: true,
+  },
   { name: "Watcher health telemetry", check: checkWatcherHealth },
   { name: "Live index runtime", check: checkLiveIndexRuntime },
   {
     name: "Call resolution capabilities",
     check: checkCallResolutionCapabilities,
   },
-  { name: "Graph database (Ladybug)", check: checkLadybugDb },
   {
     name: "DB extension capabilities (fts/vector)",
     check: checkLadybugExtensions,
+    requiresGraphDb: true,
   },
-  { name: "Retrieval indexes (FTS/vector)", check: checkRetrievalIndexes },
+  {
+    name: "Retrieval indexes (FTS/vector)",
+    check: checkRetrievalIndexes,
+    requiresGraphDb: true,
+  },
   { name: "Semantic embedding models", check: checkSemanticModels },
   { name: "Runtime execution", check: checkRuntimeExecution },
 ];
 
 interface DoctorResult {
   name: string;
-  status: "pass" | "fail" | "warn";
+  status: "pass" | "fail" | "warn" | "skip";
   message: string;
+}
+
+interface DoctorCheck {
+  name: string;
+  check: (
+    options: DoctorOptions,
+  ) => Promise<Omit<DoctorResult, "name">>;
+  requiresGraphDb?: boolean;
+  graphDbGate?: boolean;
 }
 
 export async function doctorCommand(options: DoctorOptions): Promise<void> {
@@ -91,17 +114,33 @@ export async function doctorCommand(options: DoctorOptions): Promise<void> {
   };
 
   const results: DoctorResult[] = [];
+  let graphDbVerified = false;
 
-  for (const { name, check } of DOCTOR_CHECKS) {
+  for (const { name, check, requiresGraphDb, graphDbGate } of DOCTOR_CHECKS) {
+    if (requiresGraphDb && !graphDbVerified) {
+      results.push({
+        name,
+        status: "skip",
+        message: "Skipped because the graph database could not be verified",
+      });
+      continue;
+    }
+
     try {
       const result = await check(resolvedOptions);
       results.push({ name, ...result });
+      if (graphDbGate) {
+        graphDbVerified = result.status === "pass";
+      }
     } catch (error) {
       results.push({
         name,
         status: "fail",
         message: error instanceof Error ? error.message : String(error),
       });
+      if (graphDbGate) {
+        graphDbVerified = false;
+      }
     }
   }
 
@@ -660,6 +699,16 @@ async function checkLadybugDb(
       };
     }
 
+    const existing = findExistingProcess(ladybugDbPath);
+    if (existing && existing.pid !== process.pid) {
+      return {
+        status: "warn",
+        message:
+          `Active SDL-MCP server (PID ${existing.pid}, transport: ${existing.transport}) ` +
+          "owns this graph database. Stop it before running offline database checks.",
+      };
+    }
+
     await initLadybugDb(ladybugDbPath);
     const conn = await getLadybugConn();
     const { symbolCount, edgeCount } = await getGraphEntityCounts(conn);
@@ -1029,7 +1078,13 @@ async function checkRuntimeExecution(
 function displayResults(results: DoctorResult[]): void {
   for (const result of results) {
     const icon =
-      result.status === "pass" ? "✓" : result.status === "fail" ? "✗" : "⚠";
+      result.status === "pass"
+        ? "✓"
+        : result.status === "fail"
+          ? "✗"
+          : result.status === "skip"
+            ? "−"
+            : "⚠";
     console.log(`${icon} ${result.name}: ${result.message}`);
   }
 }

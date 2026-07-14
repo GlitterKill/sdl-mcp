@@ -103,6 +103,8 @@ sdl-mcp doctor --log-level info
 
 Checks include Node version, config readability, DB writability, grammar availability, and repo path accessibility.
 
+If the graph database cannot be verified for offline inspection, dependent stale-index, extension, and retrieval-index checks are marked as skipped while independent checks continue.
+
 ### `sdl-mcp info`
 
 Show unified runtime, config, log, Ladybug, and native-addon diagnostics.
