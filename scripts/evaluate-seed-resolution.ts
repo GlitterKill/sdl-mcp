@@ -18,6 +18,7 @@ import {
   loadNativeAddon,
 } from "../dist/native/addon-loader.js";
 import { autoExtractMentions } from "../dist/retrieval/seed-resolver.js";
+import { normalizeToLf } from "../dist/util/eol.js";
 
 interface CorpusCase {
   id: string;
@@ -61,8 +62,12 @@ function sha256(value: string): string {
 }
 
 function sourceHashes(): Record<string, string> {
+  // Keep the baseline stable across checkout EOL policies.
   return Object.fromEntries(
-    SOURCE_PATHS.map((path) => [path, sha256(readFileSync(resolve(ROOT, path), "utf8"))]),
+    SOURCE_PATHS.map((path) => [
+      path,
+      sha256(normalizeToLf(readFileSync(resolve(ROOT, path), "utf8"))),
+    ]),
   );
 }
 
