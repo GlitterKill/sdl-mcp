@@ -16,6 +16,19 @@ pub mod process;
 pub mod scanner;
 pub mod scip;
 pub mod types;
+pub mod windows_loader;
+
+#[napi]
+pub fn preload_windows_library(
+    absolute_path: String,
+) -> napi::Result<windows_loader::PreloadedWindowsLibrary> {
+    windows_loader::preload_windows_library(absolute_path)
+}
+
+#[napi]
+pub fn release_windows_library(token: u32) -> napi::Result<()> {
+    windows_loader::release_windows_library(token)
+}
 
 use types::{
     NativeClusterAssignment, NativeClusterEdge, NativeClusterSymbol, NativeFileInput,

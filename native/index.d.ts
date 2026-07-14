@@ -277,6 +277,12 @@ export interface NativeParsedFile {
   /** Parse error message, if any. */
   parseError?: string
 }
+export interface PreloadedWindowsLibrary {
+  token: number
+  loadedPath: string
+}
+export declare function preloadWindowsLibrary(absolutePath: string): PreloadedWindowsLibrary
+export declare function releaseWindowsLibrary(token: number): void
 export declare function parseFiles(files: Array<NativeFileInput>, threadCount: number): Array<NativeParsedFile>
 export declare function parseFilesAsync(files: Array<NativeFileInput>, threadCount: number): Promise<unknown>
 export declare function hashContentNative(content: string): string

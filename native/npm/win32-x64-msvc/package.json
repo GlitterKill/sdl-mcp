@@ -1,7 +1,7 @@
 {
   "name": "sdl-mcp-native-win32-x64-msvc",
   "version": "0.12.3",
-  "description": "Native Rust indexer for SDL-MCP - Windows x64",
+  "description": "Native Rust indexer and scoped Windows FTS runtime loader for SDL-MCP - Windows x64",
   "license": "SEE LICENSE IN LICENSE",
   "os": [
     "win32"

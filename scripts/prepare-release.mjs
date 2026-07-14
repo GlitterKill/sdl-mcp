@@ -27,6 +27,7 @@ const PACKAGE_LOCK_PATH = join(ROOT, "package-lock.json");
 const CREATE_PACKAGE_PATH = join(ROOT, "packages", "create-sdl-mcp", "package.json");
 const NATIVE_PACKAGE_PATH = join(ROOT, "native", "package.json");
 const NATIVE_NPM_DIR = join(ROOT, "native", "npm");
+const NATIVE_INDEX_DTS_PATH = join(ROOT, "native", "index.d.ts");
 const WATCHMAN_PACKAGE_PATH = join(ROOT, "watchman", "package.json");
 const WATCHMAN_NPM_DIR = join(ROOT, "watchman", "npm");
 const TARBALL_WARN_BYTES = 25 * 1024 * 1024;
@@ -188,6 +189,16 @@ export function findGrammarWrapperAliasDrift(packageJson) {
   return drift;
 }
 
+export function getRequiredNativeWindowsExports() {
+  return ["preloadWindowsLibrary", "releaseWindowsLibrary"];
+}
+
+export function findMissingNativeWindowsExports(nativeIndexDtsSource) {
+  return getRequiredNativeWindowsExports().filter(
+    (name) => !nativeIndexDtsSource.includes("export declare function " + name + "("),
+  );
+}
+
 export function getRequiredPackEntries() {
   return [
     "package.json",
@@ -337,6 +348,13 @@ async function main() {
     fail(
       `native package-lock mismatch detected: ${nativeLockfileMismatches.join(", ")}`,
     );
+  }
+
+  const missingNativeWindowsExports = findMissingNativeWindowsExports(
+    readFileSync(NATIVE_INDEX_DTS_PATH, "utf-8"),
+  );
+  if (missingNativeWindowsExports.length > 0) {
+    fail("native preload API missing: " + missingNativeWindowsExports.join(", "));
   }
 
   const selfTarballDeps = findSelfTarballDependencies(pkg);

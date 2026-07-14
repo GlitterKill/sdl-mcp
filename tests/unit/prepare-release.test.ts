@@ -101,6 +101,20 @@ describe("prepare-release helpers", () => {
     );
 
     assert.deepStrictEqual(
+      helpers.findMissingNativeWindowsExports(
+        "export declare function preloadWindowsLibrary(absolutePath: string): PreloadedWindowsLibrary\n" +
+          "export declare function releaseWindowsLibrary(token: number): void\n",
+      ),
+      [],
+    );
+    assert.deepStrictEqual(
+      helpers.findMissingNativeWindowsExports(
+        "export declare function preloadWindowsLibrary(absolutePath: string): PreloadedWindowsLibrary\n",
+      ),
+      ["releaseWindowsLibrary"],
+    );
+
+    assert.deepStrictEqual(
       helpers.classifyBranchStatus("main", "## main...origin/main"),
       { nonMainBranch: false, unsynced: false },
     );
