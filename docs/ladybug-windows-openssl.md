@@ -27,3 +27,18 @@ Delete only workaround-owned pieces:
 - troubleshooting text that no longer applies.
 
 Keep the clean-environment FTS subprocess regression and the historical design record.
+
+## Security update response
+
+The weekly OpenSSL monitor checks official OpenSSL release/advisory sources and runs `npm audit --omit=dev`. npm audit cannot see CVEs in SDL-built DLLs, so the release/advisory check is the authoritative early-warning path.
+
+When it opens an issue:
+
+1. Assess whether the advisory affects the Windows FTS runtime DLLs.
+2. Update `ladybug-openssl/source.json` and bump the `-sdl.N` package suffix.
+3. Rebuild from official signed OpenSSL source.
+4. Rerun OpenSSL tests and the Ladybug clean-environment FTS tests.
+5. Publish the runtime package with npm provenance.
+6. Update SDL's exact optional-dependency pin and lockfile.
+7. Cut an SDL patch release.
+8. Verify registry tarball hashes and native-reported module origins.
