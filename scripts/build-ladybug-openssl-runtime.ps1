@@ -19,7 +19,19 @@ $installDir = Join-Path $tempRoot "install"
 $binDir = Join-Path $packageRoot "bin"
 
 function Get-Sha256([string]$Path) {
-  (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+      $hash = $sha256.ComputeHash($stream)
+    } finally {
+      $stream.Dispose()
+    }
+  } finally {
+    $sha256.Dispose()
+  }
+
+  -join ($hash | ForEach-Object { $_.ToString("x2") })
 }
 
 function Find-FirstExisting([string[]]$Candidates) {
