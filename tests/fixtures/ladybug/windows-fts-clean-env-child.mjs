@@ -22,6 +22,8 @@ assert.ok(
 );
 
 const require = createRequire(import.meta.url);
+const disableOpenSslProvisioning =
+  process.env.SDL_TEST_DISABLE_OPENSSL_PROVISIONING === "1";
 const home = process.env.USERPROFILE;
 assert.ok(home && home === process.env.HOME, "clean USERPROFILE/HOME mismatch");
 
@@ -310,31 +312,32 @@ async function runRealPatch(options = {}) {
 async function fixedRegression() {
   const missing = [];
   if (packageVersion("kuzu") !== "0.18.1") missing.push("kuzu@0.18.1");
-  if (
-    packageVersion("@sdl-mcp/ladybug-openssl-win32-x64") !== "3.5.7-sdl.1"
-  ) {
-    missing.push("@sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.1");
-  }
   let addon;
-  try {
-    const imported = await import("sdl-mcp-native");
-    addon = imported.default ?? imported;
-  } catch {
-    missing.push("published sdl-mcp-native Windows loader shim");
-  }
-  if (
-    addon &&
-    (typeof addon.preloadWindowsLibrary !== "function" ||
-      typeof addon.releaseWindowsLibrary !== "function")
-  ) {
-    missing.push("published sdl-mcp-native Windows loader shim");
+  if (!disableOpenSslProvisioning) {
+    if (
+      packageVersion("@sdl-mcp/ladybug-openssl-win32-x64") !== "3.5.7-sdl.1"
+    ) {
+      missing.push("@sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.1");
+    }
+    try {
+      const imported = await import("sdl-mcp-native");
+      addon = imported.default ?? imported;
+    } catch {
+      missing.push("published sdl-mcp-native Windows loader shim");
+    }
+    if (
+      addon &&
+      (typeof addon.preloadWindowsLibrary !== "function" ||
+        typeof addon.releaseWindowsLibrary !== "function")
+    ) {
+      missing.push("published sdl-mcp-native Windows loader shim");
+    }
   }
   if (missing.length > 0) dependencyUnavailable([...new Set(missing)]);
 
-  const runtimeRoot = dirname(
-    packageJson("@sdl-mcp/ladybug-openssl-win32-x64"),
-  );
-  const binPath = join(runtimeRoot, "bin");
+  const binPath = disableOpenSslProvisioning
+    ? undefined
+    : join(dirname(packageJson("@sdl-mcp/ladybug-openssl-win32-x64")), "bin");
   const dlls = ["libcrypto-3-x64.dll", "libssl-3-x64.dll"];
   const whereExe = join(
     process.env.SystemRoot ?? "C:\\Windows",
@@ -348,20 +351,47 @@ async function fixedRegression() {
   assert.deepEqual(pathDlls, []);
   console.log(JSON.stringify({ phase: "environment", pathDlls }));
 
-  const kuzu = await import("kuzu");
+  let kuzu;
+  try {
+    kuzu = await import("kuzu");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("lbugjs.node") || message.includes("lbug_native")) {
+      dependencyUnavailable(["kuzu@0.18.1 native lbugjs.node"]);
+    }
+    throw error;
+  }
   const db = new kuzu.Database(join(home, "fixed-raw.lbug"));
   const conn = new kuzu.Connection(db);
   const handles = [];
   try {
     await execute(conn, "INSTALL fts");
     console.log(JSON.stringify({ phase: "install", extension: "fts" }));
-    for (const dll of dlls) {
-      const loaded = addon.preloadWindowsLibrary(join(binPath, dll));
-      assertPackageOrigin(loaded.loadedPath, binPath, dll);
-      handles.push(loaded.token);
+    if (!disableOpenSslProvisioning) {
+      for (const dll of dlls) {
+        const loaded = addon.preloadWindowsLibrary(join(binPath, dll));
+        assertPackageOrigin(loaded.loadedPath, binPath, dll);
+        handles.push(loaded.token);
+      }
+      console.log(JSON.stringify({ phase: "preload", modules: dlls }));
     }
-    console.log(JSON.stringify({ phase: "preload", modules: dlls }));
-    await execute(conn, "LOAD fts");
+    try {
+      await execute(conn, "LOAD fts");
+    } catch (error) {
+      if (!disableOpenSslProvisioning) throw error;
+      await conn.close();
+      await db.close();
+      console.log(
+        JSON.stringify({
+          mode,
+          phase: "load",
+          classification: "upstream-runtime-unavailable",
+          provisioning: "disabled",
+          exitCode: 1,
+        }),
+      );
+      return;
+    }
     console.log(JSON.stringify({ phase: "load", extension: "fts" }));
     await execute(
       conn,

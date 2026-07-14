@@ -84,6 +84,17 @@ jobs:
             Tee-Object -FilePath "$env:RUNNER_TEMP/ladybug-windows-fts-${{ matrix.mode }}.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Run no-SDL-runtime upstream probe
+        if: matrix.mode == 'missing-runtime-baseline'
+        shell: pwsh
+        env:
+          SDL_LADYBUG_WINDOWS_FTS_TEST_MODE: fixed-regression
+          SDL_TEST_DISABLE_OPENSSL_PROVISIONING: "1"
+        run: |
+          node --experimental-strip-types --test-concurrency=1 --test tests/integration/live-index-symbol-fts-crash.test.ts *>&1 |
+            Tee-Object -FilePath "$env:RUNNER_TEMP/ladybug-windows-fts-no-sdl-runtime.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Restore committed dependency tree
         if: always() && (matrix.mode == 'missing-runtime-baseline' || matrix.mode == 'fixed-regression')
         run: |
@@ -95,6 +106,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ladybug-windows-fts-${{ matrix.mode }}
-          path: ${{ runner.temp }}/ladybug-windows-fts-${{ matrix.mode }}.log
+          path: |
+            ${{ runner.temp }}/ladybug-windows-fts-${{ matrix.mode }}.log
+            ${{ runner.temp }}/ladybug-windows-fts-no-sdl-runtime.log
           if-no-files-found: error
           retention-days: 7

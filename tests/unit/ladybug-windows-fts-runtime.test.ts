@@ -66,6 +66,22 @@ describe("withWindowsFtsRuntime", () => {
     assert.equal(calls, 1);
   });
 
+  it("bypasses provisioning when the upstream no-runtime probe disables it", async () => {
+    let calls = 0;
+    const result = await withWindowsFtsRuntime(async () => {
+      calls += 1;
+      return "loaded";
+    }, windowsOptions({
+      disableProvisioning: true,
+      requireResolve: () => {
+        throw new Error("should not resolve package");
+      },
+    }));
+
+    assert.equal(result, "loaded");
+    assert.equal(calls, 1);
+  });
+
   it("returns missing-package without calling LOAD when the runtime package cannot resolve", async () => {
     let calls = 0;
     const result = await withWindowsFtsRuntime(async () => {

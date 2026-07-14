@@ -31,6 +31,7 @@ export interface WindowsFtsRuntimeOptions {
   packageVersion?: string;
   requireResolve?: (specifier: string) => string;
   loadNativeAddon?: (isCompatible: (candidate: unknown) => boolean) => unknown | null | Promise<unknown | null>;
+  disableProvisioning?: boolean;
 }
 
 type VerifiedRuntimePackage = {
@@ -190,7 +191,12 @@ export async function withWindowsFtsRuntime<T>(
 ): Promise<T | WindowsFtsRuntimeUnavailable> {
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;
-  if (platform !== "win32" || arch !== "x64") {
+  if (
+    platform !== "win32" ||
+    arch !== "x64" ||
+    options.disableProvisioning === true ||
+    process.env.SDL_TEST_DISABLE_OPENSSL_PROVISIONING === "1"
+  ) {
     return await loadFts();
   }
 

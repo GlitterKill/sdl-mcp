@@ -43,6 +43,16 @@ const missingRuntimeEvidence = [
     imports: ["libcrypto-3-x64.dll", "libssl-3-x64.dll"],
   },
 ];
+const noSdlRuntimeSuccessEvidence = fixedEvidence.filter(
+  (item) => item.phase !== "preload",
+);
+const noSdlRuntimeExpectedFailure = {
+  mode: "fixed-regression",
+  phase: "load",
+  classification: "upstream-runtime-unavailable",
+  provisioning: "disabled",
+  exitCode: 1,
+};
 
 function cleanEnvironment(home: string): NodeJS.ProcessEnv {
   const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
@@ -62,6 +72,7 @@ function cleanEnvironment(home: string): NodeJS.ProcessEnv {
     "SDL_GRAPH_DB_PATH",
     "SDL_GRAPH_DB_DIR",
     "SDL_CONFIG",
+    "SDL_TEST_DISABLE_OPENSSL_PROVISIONING",
     "NODE_OPTIONS",
     "NODE_PATH",
   ]) {
@@ -112,13 +123,13 @@ function unavailableEvidence(stderr: string):
   return undefined;
 }
 
-function runMode(mode: Mode) {
+function runMode(mode: Mode, extraEnv: NodeJS.ProcessEnv = {}) {
   const home = mkdtempSync(join(tmpdir(), "ladybug-windows-fts-" + mode + "-"));
   try {
     return spawnSync(process.execPath, [childPath, mode], {
       cwd: resolve("."),
       encoding: "utf8",
-      env: cleanEnvironment(home),
+      env: { ...cleanEnvironment(home), ...extraEnv },
       timeout: 60_000,
     });
   } finally {
@@ -200,3 +211,41 @@ for (const mode of MODES) {
     },
   );
 }
+
+
+it(
+  "probes upstream Windows FTS without SDL OpenSSL provisioning",
+  {
+    skip:
+      process.platform !== "win32" ||
+      (requestedMode !== undefined && requestedMode !== "fixed-regression")
+        ? "Windows-only fixed-regression probe not selected"
+        : false,
+  },
+  (t) => {
+    const result = runMode("fixed-regression", {
+      SDL_TEST_DISABLE_OPENSSL_PROVISIONING: "1",
+    });
+    assert.notEqual(result.error?.code, "ETIMEDOUT", failureMessage("fixed-regression", result));
+    const accessViolation =
+      result.status !== null && accessViolationStatuses.has(result.status);
+    assert.ok(
+      !accessViolation,
+      "native access violation 0xC0000005\n" + failureMessage("fixed-regression", result),
+    );
+    const unavailable = unavailableEvidence(result.stderr);
+    if (unavailable) {
+      assert.equal(requireModeDependencies, false, unavailable.missing.join(", "));
+      t.skip(unavailable.missing.join(", "));
+      return;
+    }
+    assert.equal(result.status, 0, failureMessage("fixed-regression", result));
+    const evidence = parseJsonLines(result.stdout);
+    assert.deepEqual(evidence.slice(0, 2), noSdlRuntimeSuccessEvidence.slice(0, 2));
+    if (JSON.stringify(evidence.at(-1)) === JSON.stringify(noSdlRuntimeExpectedFailure)) {
+      t.skip("upstream still requires SDL OpenSSL provisioning");
+      return;
+    }
+    assert.deepEqual(evidence, noSdlRuntimeSuccessEvidence);
+  },
+);
