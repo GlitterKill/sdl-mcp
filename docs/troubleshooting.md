@@ -165,6 +165,25 @@ server log for the preceding `CREATE_FTS_INDEX` or `CREATE_VECTOR_INDEX` warning
 and verify the same command through the `node .../dist/main.js` entrypoint when a
 platform shell wrapper is suspected.
 
+### Windows FTS OpenSSL Runtime
+
+On Windows x64 with LadybugDB 0.18.1, FTS needs SDL's temporary OpenSSL runtime package.
+
+Symptoms:
+
+- `LOAD EXTENSION fts` reports missing `libssl-3-x64.dll` or `libcrypto-3-x64.dll`.
+- FTS is unavailable after installing with `--omit=optional`.
+- `SDL_MCP_DISABLE_NATIVE_ADDON=1` or an old `sdl-mcp-native` package disables FTS.
+- A clean machine loads a different OpenSSL DLL from `PATH`.
+
+Recovery:
+
+- Reinstall with optional dependencies enabled.
+- Keep `sdl-mcp-native` at the same version as `sdl-mcp`.
+- Do not add Git, Conda, or system OpenSSL directories to global `PATH`.
+- Verify package hashes and module origins with the Windows FTS compatibility test.
+- See [Ladybug Windows OpenSSL runtime](./ladybug-windows-openssl.md).
+
 ### Stale Results
 
 - Run `sdl-mcp index`
