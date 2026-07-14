@@ -206,7 +206,7 @@ async function main(): Promise<void> {
     corpus: {
       version: corpus.schemaVersion,
       source: corpus.source,
-      sha256: sha256(readFileSync(CORPUS_PATH, "utf8")),
+      sha256: sha256(normalizeToLf(readFileSync(CORPUS_PATH, "utf8"))),
       caseCount: corpus.cases.length,
     },
     baseline: {
