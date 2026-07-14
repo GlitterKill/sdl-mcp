@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { it } from "node:test";
 
 const repoRoot = resolve(".");
@@ -167,11 +167,18 @@ it("records generated provenance for source, build, DLL hashes, and PE architect
 });
 
 it("npm pack dry-run contains only the allowlisted files", () => {
-  const result = spawnSync("npm", ["pack", "--dry-run", "--json"], {
-    cwd: packageRoot,
-    encoding: "utf8",
-  });
-  assert.equal(result.status, 0, result.stderr);
+  const npmArgs = ["pack", "--dry-run", "--json"];
+  const fallbackNpmExecPath = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+  const npmExecPath = process.env.npm_execpath && existsSync(process.env.npm_execpath)
+    ? process.env.npm_execpath
+    : existsSync(fallbackNpmExecPath)
+      ? fallbackNpmExecPath
+      : undefined;
+  const result = npmExecPath
+    ? spawnSync(process.execPath, [npmExecPath, ...npmArgs], { cwd: packageRoot, encoding: "utf8" })
+    : spawnSync(process.platform === "win32" ? "npm.cmd" : "npm", npmArgs, { cwd: packageRoot, encoding: "utf8" });
+
+  assert.equal(result.status, 0, result.error?.message ?? result.stderr);
   const packed = JSON.parse(result.stdout)[0].files.map((file: { path: string }) => file.path).sort();
-  assert.deepEqual(packed, [...allowedFiles].sort());
+  assert.deepEqual(packed, [...allowedFiles, "package.json"].sort());
 });

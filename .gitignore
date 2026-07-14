@@ -290,3 +290,4 @@ outputs/logos/sdl-mcp-minimal-symbols/sliced-delta-iris-v3.svg
 outputs/logos/sdl-mcp-minimal-symbols/sliced-delta-iris.svg
 ladybug-openssl/npm/win32-x64/bin/*.dll
 ladybug-openssl/npm/win32-x64/sbom.spdx.json
+ladybug-openssl/build-record.json
