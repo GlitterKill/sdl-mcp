@@ -205,7 +205,9 @@ try {
   }
   if (-not $sourceDir) { throw "OpenSSL source directory missing after extraction under: $tempRoot" }
   Run-Logged $perl @("Configure", $source.configureTarget, "shared", "--release", "--prefix=$installDir", "--openssldir=$installDir\ssl") $sourceDir
-  Run-Logged $nmake @() $sourceDir
+  # The default OpenSSL Windows target also compiles test binaries; hosted
+  # runners can exceed the generic short-command timeout before tests start.
+  Run-Logged $nmake @() $sourceDir 3600
   Run-Logged $nmake @("test") $sourceDir 3600
   Run-Logged $nmake @("install_sw") $sourceDir
 
