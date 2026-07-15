@@ -43,6 +43,12 @@ jobs:
       - name: Install committed dependencies
         run: npm ci --ignore-scripts --legacy-peer-deps
 
+      - name: Install disposable Ladybug 0.16.1 legacy probe
+        if: matrix.mode == 'legacy-crash-baseline'
+        run: >-
+          npm install --no-save --no-package-lock --ignore-scripts --legacy-peer-deps
+          kuzu@npm:@ladybugdb/core@0.16.1
+
       - name: Install disposable Ladybug 0.18.1 probe
         if: matrix.mode == 'missing-runtime-baseline'
         run: >-
@@ -96,7 +102,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Restore committed dependency tree
-        if: always() && (matrix.mode == 'missing-runtime-baseline' || matrix.mode == 'fixed-regression')
+        if: always() && (matrix.mode == 'legacy-crash-baseline' || matrix.mode == 'missing-runtime-baseline' || matrix.mode == 'fixed-regression')
         run: |
           npm ci --ignore-scripts --legacy-peer-deps
           npm ls kuzu

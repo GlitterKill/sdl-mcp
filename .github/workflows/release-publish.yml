@@ -383,14 +383,14 @@ jobs:
             pkg_name=$(node -e "console.log(require('./${dir}package.json').name)")
             echo "Publishing ${pkg_name}@${VERSION} (${NPM_DIST_TAG})"
 
-            if [[ "${DRY_RUN}" == "true" ]]; then
-              npm publish "${dir}" --access public --tag "${NPM_DIST_TAG}" --dry-run
-              continue
-            fi
-
             existing=$(npm view "${pkg_name}@${VERSION}" version 2>/dev/null || true)
             if [[ "${existing}" == "${VERSION}" ]]; then
               echo "SKIP ${pkg_name}@${VERSION} already exists"
+              continue
+            fi
+
+            if [[ "${DRY_RUN}" == "true" ]]; then
+              npm publish "${dir}" --access public --tag "${NPM_DIST_TAG}" --dry-run
               continue
             fi
 
@@ -421,14 +421,14 @@ jobs:
           set -euo pipefail
           echo "Publishing sdl-mcp-native@${VERSION} (${NPM_DIST_TAG})"
 
-          if [[ "${DRY_RUN}" == "true" ]]; then
-            npm publish native/ --access public --tag "${NPM_DIST_TAG}" --dry-run
-            exit 0
-          fi
-
           existing=$(npm view "sdl-mcp-native@${VERSION}" version 2>/dev/null || true)
           if [[ "${existing}" == "${VERSION}" ]]; then
             echo "SKIP sdl-mcp-native@${VERSION} already exists"
+            exit 0
+          fi
+
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            npm publish native/ --access public --tag "${NPM_DIST_TAG}" --dry-run
             exit 0
           fi
 
@@ -473,14 +473,14 @@ jobs:
             pkg_name=$(node -e "console.log(require('./${dir}package.json').name)")
             echo "Publishing ${pkg_name}@${VERSION} (${NPM_DIST_TAG})"
 
-            if [[ "${DRY_RUN}" == "true" ]]; then
-              npm publish "${dir}" --access public --tag "${NPM_DIST_TAG}" --dry-run
-              continue
-            fi
-
             existing=$(npm view "${pkg_name}@${VERSION}" version 2>/dev/null || true)
             if [[ "${existing}" == "${VERSION}" ]]; then
               echo "SKIP ${pkg_name}@${VERSION} already exists"
+              continue
+            fi
+
+            if [[ "${DRY_RUN}" == "true" ]]; then
+              npm publish "${dir}" --access public --tag "${NPM_DIST_TAG}" --dry-run
               continue
             fi
 
@@ -510,14 +510,14 @@ jobs:
           set -euo pipefail
           echo "Publishing sdl-mcp-watchman@${VERSION} (${NPM_DIST_TAG})"
 
-          if [[ "${DRY_RUN}" == "true" ]]; then
-            npm publish watchman/ --access public --tag "${NPM_DIST_TAG}" --dry-run
-            exit 0
-          fi
-
           existing=$(npm view "sdl-mcp-watchman@${VERSION}" version 2>/dev/null || true)
           if [[ "${existing}" == "${VERSION}" ]]; then
             echo "SKIP sdl-mcp-watchman@${VERSION} already exists"
+            exit 0
+          fi
+
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            npm publish watchman/ --access public --tag "${NPM_DIST_TAG}" --dry-run
             exit 0
           fi
 
@@ -543,14 +543,14 @@ jobs:
           set -euo pipefail
           echo "Publishing sdl-mcp@${VERSION} (${NPM_DIST_TAG})"
 
-          if [[ "${DRY_RUN}" == "true" ]]; then
-            npm publish . --access public --tag "${NPM_DIST_TAG}" --dry-run
-            exit 0
-          fi
-
           existing=$(npm view "sdl-mcp@${VERSION}" version 2>/dev/null || true)
           if [[ "${existing}" == "${VERSION}" ]]; then
             echo "SKIP sdl-mcp@${VERSION} already exists"
+            exit 0
+          fi
+
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            npm publish . --access public --tag "${NPM_DIST_TAG}" --dry-run
             exit 0
           fi
 
@@ -574,14 +574,14 @@ jobs:
           set -euo pipefail
           echo "Publishing create-sdl-mcp@${VERSION} (${NPM_DIST_TAG})"
 
-          if [[ "${DRY_RUN}" == "true" ]]; then
-            npm publish packages/create-sdl-mcp/ --access public --tag "${NPM_DIST_TAG}" --dry-run
-            exit 0
-          fi
-
           existing=$(npm view "create-sdl-mcp@${VERSION}" version 2>/dev/null || true)
           if [[ "${existing}" == "${VERSION}" ]]; then
             echo "SKIP create-sdl-mcp@${VERSION} already exists"
+            exit 0
+          fi
+
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            npm publish packages/create-sdl-mcp/ --access public --tag "${NPM_DIST_TAG}" --dry-run
             exit 0
           fi
 
