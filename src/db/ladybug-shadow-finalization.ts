@@ -1395,6 +1395,27 @@ function symbolRowFromQuery(
   };
 }
 
+type SymbolFallbackParams = ReturnType<typeof symbolRowToFallbackParams>;
+
+function splitSymbolFallbackRowsBySummaryQualityType(
+  rows: SymbolFallbackParams[],
+): SymbolFallbackParams[][] {
+  const integralRows: SymbolFallbackParams[] = [];
+  const fractionalRows: SymbolFallbackParams[] = [];
+
+  for (const row of rows) {
+    // LadybugDB 0.18.1 infers JS struct-array fields before executing Cypher.
+    // Mixed INT64/DOUBLE inference for summaryQuality rejects the whole rows
+    // payload, so split only at the parameter boundary and preserve values.
+    const group = Number.isInteger(row.summaryQuality)
+      ? integralRows
+      : fractionalRows;
+    group.push(row);
+  }
+
+  return [integralRows, fractionalRows].filter((group) => group.length > 0);
+}
+
 async function ensureRelationshipEndpointSymbols(
   conn: Connection,
   rows: AuxiliarySymbolRow[],
@@ -1402,10 +1423,13 @@ async function ensureRelationshipEndpointSymbols(
   if (rows.length === 0) return;
   const chunkSize = 256;
   for (let i = 0; i < rows.length; i += chunkSize) {
-    const chunk = rows.slice(i, i + chunkSize).map(symbolRowToFallbackParams);
-    await exec(
-      conn,
-      `UNWIND $rows AS row
+    const rowGroups = splitSymbolFallbackRowsBySummaryQualityType(
+      rows.slice(i, i + chunkSize).map(symbolRowToFallbackParams),
+    );
+    for (const chunk of rowGroups) {
+      await exec(
+        conn,
+        `UNWIND $rows AS row
        MERGE (s:Symbol {symbolId: row.symbolId})
        ON CREATE SET s.repoId = row.repoId,
            s.kind = row.kind,
@@ -1435,8 +1459,9 @@ async function ensureRelationshipEndpointSymbols(
            s.symbolStatus = row.symbolStatus,
            s.placeholderKind = row.placeholderKind,
            s.placeholderTarget = row.placeholderTarget`,
-      { rows: chunk },
-    );
+        { rows: chunk },
+      );
+    }
   }
 }
 
@@ -1447,20 +1472,24 @@ async function ensureRelationshipEndpointRepoLinks(
   if (rows.length === 0) return;
   const chunkSize = 256;
   for (let i = 0; i < rows.length; i += chunkSize) {
-    const chunk = rows.slice(i, i + chunkSize).map(symbolRowToFallbackParams);
+    const rowGroups = splitSymbolFallbackRowsBySummaryQualityType(
+      rows.slice(i, i + chunkSize).map(symbolRowToFallbackParams),
+    );
     // Active real symbols already had SYMBOL_IN_REPO membership. Preserve that
     // membership when partial provider coverage left them out of the shadow DB.
-    await exec(
-      conn,
-      `UNWIND $rows AS row
+    for (const chunk of rowGroups) {
+      await exec(
+        conn,
+        `UNWIND $rows AS row
        MATCH (r:Repo {repoId: row.repoId})
        MATCH (s:Symbol {symbolId: row.symbolId})
        OPTIONAL MATCH (s)-[existing:SYMBOL_IN_REPO]->(r)
        WITH s, r, existing
        WHERE existing IS NULL
        CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
-      { rows: chunk },
-    );
+        { rows: chunk },
+      );
+    }
   }
 }
 
@@ -1471,10 +1500,13 @@ async function upsertAuxiliarySymbolsFallback(
   if (rows.length === 0) return;
   const chunkSize = 256;
   for (let i = 0; i < rows.length; i += chunkSize) {
-    const chunk = rows.slice(i, i + chunkSize).map(symbolRowToFallbackParams);
-    await exec(
-      conn,
-      `UNWIND $rows AS row
+    const rowGroups = splitSymbolFallbackRowsBySummaryQualityType(
+      rows.slice(i, i + chunkSize).map(symbolRowToFallbackParams),
+    );
+    for (const chunk of rowGroups) {
+      await exec(
+        conn,
+        `UNWIND $rows AS row
        MERGE (s:Symbol {symbolId: row.symbolId})
        SET s.repoId = row.repoId,
            s.kind = row.kind,
@@ -1504,19 +1536,20 @@ async function upsertAuxiliarySymbolsFallback(
            s.symbolStatus = row.symbolStatus,
            s.placeholderKind = row.placeholderKind,
            s.placeholderTarget = row.placeholderTarget`,
-      { rows: chunk },
-    );
-    await exec(
-      conn,
-      `UNWIND $rows AS row
+        { rows: chunk },
+      );
+      await exec(
+        conn,
+        `UNWIND $rows AS row
        MATCH (r:Repo {repoId: row.repoId})
        MATCH (s:Symbol {symbolId: row.symbolId})
        OPTIONAL MATCH (s)-[existing:SYMBOL_IN_REPO]->(r)
        WITH s, r, existing
        WHERE existing IS NULL
        CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
-      { rows: chunk },
-    );
+        { rows: chunk },
+      );
+    }
   }
 }
 

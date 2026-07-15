@@ -195,13 +195,23 @@ async function missingRuntimeBaseline() {
 }
 
 function assertPackageOrigin(loadedPath, binPath, dll) {
-  const origin = resolve(loadedPath);
+  const origin = resolve(stripWindowsExtendedPathPrefix(loadedPath));
   const expectedRoot = (resolve(binPath) + sep).toLowerCase();
   assert.ok(
     origin.toLowerCase().startsWith(expectedRoot),
     dll + " loaded from " + origin,
   );
   assert.equal(basename(origin).toLowerCase(), dll);
+}
+
+function stripWindowsExtendedPathPrefix(filePath) {
+  if (filePath.startsWith("\\\\?\\UNC\\")) {
+    return "\\\\" + filePath.slice("\\\\?\\UNC\\".length);
+  }
+  if (filePath.startsWith("\\\\?\\")) {
+    return filePath.slice("\\\\?\\".length);
+  }
+  return filePath;
 }
 
 async function runRealPatch(options = {}) {

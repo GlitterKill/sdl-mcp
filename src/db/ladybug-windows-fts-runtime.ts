@@ -158,9 +158,19 @@ function parsePreloadHandle(value: unknown): PreloadedWindowsLibrary {
   return { token: handle.token, loadedPath: handle.loadedPath };
 }
 
+function stripWindowsExtendedPathPrefix(filePath: string): string {
+  if (filePath.startsWith("\\\\?\\UNC\\")) {
+    return "\\\\" + filePath.slice("\\\\?\\UNC\\".length);
+  }
+  if (filePath.startsWith("\\\\?\\")) {
+    return filePath.slice("\\\\?\\".length);
+  }
+  return filePath;
+}
+
 function pathStartsWith(childPath: string, parentPath: string): boolean {
-  const child = resolve(childPath).toLowerCase();
-  const parent = resolve(parentPath).toLowerCase();
+  const child = resolve(stripWindowsExtendedPathPrefix(childPath)).toLowerCase();
+  const parent = resolve(stripWindowsExtendedPathPrefix(parentPath)).toLowerCase();
   return child === parent || child.startsWith(parent.endsWith(sep) ? parent : parent + sep);
 }
 

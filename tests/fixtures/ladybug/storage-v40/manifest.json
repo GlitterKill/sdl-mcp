@@ -1,0 +1,20 @@
+{
+  "fixture": "fixture-v40.lbug.gz",
+  "generatedByPackage": "@ladybugdb/core@0.16.1",
+  "sourcePackageAlias": "kuzu",
+  "storageVersion": 40,
+  "uncompressedBytes": 6619136,
+  "uncompressedSha256": "44b0fe02afbae20a14d59cb33d8bf8d8d333ef4928af87e21c3bb113e157c534",
+  "gzipBytes": 23858,
+  "gzipSha256": "f17c9b733abe58c2931d38a6196a2524e2fe1b21550623930d787437939ba4e0",
+  "repoId": "fixture-repo",
+  "nonDerivedRows": {
+    "Memory": "mem-storage-v40",
+    "AgentFeedback": "fb-storage-v40",
+    "UsageSnapshot": "usage-storage-v40",
+    "Audit": "audit-storage-v40"
+  },
+  "derivedRows": {
+    "DerivedState": "fixture-repo"
+  }
+}

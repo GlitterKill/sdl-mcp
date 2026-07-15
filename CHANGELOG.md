@@ -7,9 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.4] - 2026-07-14
+
+### Added
+
+- **Temporary Windows OpenSSL runtime for LadybugDB FTS**: Windows x64 installs now include the SDL-owned `@sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.1` optional package with provenance, SBOM, license, and hash-pinned `libcrypto-3-x64.dll` / `libssl-3-x64.dll` runtime files for LadybugDB 0.18.1 FTS.
+- **Ladybug storage migration gate**: added a checksum-pinned v40 fixture that verifies LadybugDB 0.18.1 can migrate/checkpoint existing non-derived memory, feedback, usage, and audit rows.
+
+### Changed
+
+- **LadybugDB core upgrade**: the `kuzu` alias now resolves to the official `@ladybugdb/core@0.18.1` package. SDL still does not rebuild or republish LadybugDB itself.
+- **Native package patch release**: `sdl-mcp-native` and its platform packages are released as `0.12.4` so registry installs expose the Windows `preloadWindowsLibrary` / `releaseWindowsLibrary` shim required by the runtime gate.
+
 ### Fixed
 
-- **file.write/search.edit live-index crash**: indexed source writes now pause and rebuild the configured Symbol FTS index around `patchSavedFile()`, preventing the LadybugDB access violation seen with and without `--no-watch`.
+- **file.write/search.edit live-index crash**: Windows Symbol FTS provisioning now preloads the verified OpenSSL runtime by absolute package path before `LOAD EXTENSION fts`, allowing `patchSavedFile()` to mutate active Symbol FTS rows directly without the 0.16.1 drop/rebuild workaround.
 
 ## [0.12.3] - 2026-07-11
 

@@ -153,7 +153,7 @@ export function diffSignature(
     return undefined;
   }
 
-  let beforeObj = null;
+  let beforeObj: unknown = null;
   let parseWarning = false;
   if (before !== null) {
     try {
@@ -166,7 +166,7 @@ export function diffSignature(
     }
   }
 
-  let afterObj = null;
+  let afterObj: unknown = null;
   if (after !== null) {
     try {
       afterObj = normalizeSignatureParameterTypes(JSON.parse(after));

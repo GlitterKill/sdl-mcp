@@ -162,6 +162,63 @@ export interface UpsertKnownFileSymbolsOptions
 
 export interface UpsertSymbolBatchOptions extends LadybugWriteChunkOptions {}
 
+type SymbolBatchUpsertRow = ReturnType<typeof toSymbolBatchUpsertRow>;
+
+function toSymbolBatchUpsertRow(symbol: SymbolRow) {
+  return {
+    symbolId: symbol.symbolId,
+    repoId: symbol.repoId,
+    fileId: symbol.fileId,
+    kind: symbol.kind,
+    name: symbol.name,
+    exported: symbol.exported,
+    visibility: symbol.visibility ?? "",
+    language: symbol.language,
+    rangeStartLine: symbol.rangeStartLine,
+    rangeStartCol: symbol.rangeStartCol,
+    rangeEndLine: symbol.rangeEndLine,
+    rangeEndCol: symbol.rangeEndCol,
+    astFingerprint: symbol.astFingerprint,
+    signatureJson: symbol.signatureJson ?? "",
+    summary: symbol.summary ?? "",
+    invariantsJson: symbol.invariantsJson ?? "",
+    sideEffectsJson: symbol.sideEffectsJson ?? "",
+    roleTagsJson: symbol.roleTagsJson ?? "",
+    searchText: symbol.searchText ?? "",
+    summaryQuality: symbol.summaryQuality ?? 0.0,
+    summarySource: symbol.summarySource ?? "unknown",
+    external: symbol.external ?? false,
+    source: symbol.source ?? PRESERVE_OPTIONAL_SYMBOL_FIELD,
+    packageName: symbol.packageName ?? PRESERVE_OPTIONAL_SYMBOL_FIELD,
+    packageVersion: symbol.packageVersion ?? PRESERVE_OPTIONAL_SYMBOL_FIELD,
+    scipSymbol: symbol.scipSymbol ?? PRESERVE_OPTIONAL_SYMBOL_FIELD,
+    symbolStatus: "real",
+    placeholderKind: "",
+    placeholderTarget: "",
+    updatedAt: symbol.updatedAt,
+  };
+}
+
+function splitSymbolBatchRowsBySummaryQualityType(
+  rows: SymbolBatchUpsertRow[],
+): SymbolBatchUpsertRow[][] {
+  const integralRows: SymbolBatchUpsertRow[] = [];
+  const fractionalRows: SymbolBatchUpsertRow[] = [];
+
+  for (const row of rows) {
+    // LadybugDB 0.18.1 infers JS struct-array fields before Cypher casts run:
+    // integral numbers become INT64, fractional numbers become DOUBLE, and a
+    // mixed payload is rejected. Splitting here preserves values and keeps the
+    // overall logical batch inside the same transaction.
+    const group = Number.isInteger(row.summaryQuality)
+      ? integralRows
+      : fractionalRows;
+    group.push(row);
+  }
+
+  return [integralRows, fractionalRows].filter((group) => group.length > 0);
+}
+
 export interface SymbolSnapshotRow {
   symbolId: string;
   astFingerprint: string;
@@ -285,49 +342,19 @@ export async function upsertSymbolBatch(
     for (let i = 0; i < symbols.length; i += chunkSize) {
       const chunk = symbols.slice(i, i + chunkSize);
       // Coerce nullable STRING fields to '' — kuzu binder picks ANY type
-      // when a struct field is uniformly null AND a sibling Number field
-      // mixes integral (0.0 summaryQuality) with fractional (0.55/0.6/0.8)
-      // values. Upstream kuzudb/kuzu#5685, fixed in PR #5705 but not
-      // backported to LadybugDB 0.16.0. Empty string is the workaround.
-      const rows = chunk.map((symbol) => ({
-        symbolId: symbol.symbolId,
-        repoId: symbol.repoId,
-        fileId: symbol.fileId,
-        kind: symbol.kind,
-        name: symbol.name,
-        exported: symbol.exported,
-        visibility: symbol.visibility ?? "",
-        language: symbol.language,
-        rangeStartLine: symbol.rangeStartLine,
-        rangeStartCol: symbol.rangeStartCol,
-        rangeEndLine: symbol.rangeEndLine,
-        rangeEndCol: symbol.rangeEndCol,
-        astFingerprint: symbol.astFingerprint,
-        signatureJson: symbol.signatureJson ?? "",
-        summary: symbol.summary ?? "",
-        invariantsJson: symbol.invariantsJson ?? "",
-        sideEffectsJson: symbol.sideEffectsJson ?? "",
-        roleTagsJson: symbol.roleTagsJson ?? "",
-        searchText: symbol.searchText ?? "",
-        summaryQuality: symbol.summaryQuality ?? 0.0,
-        summarySource: symbol.summarySource ?? "unknown",
-        external: symbol.external ?? false,
-        source: symbol.source ?? PRESERVE_OPTIONAL_SYMBOL_FIELD,
-        packageName: symbol.packageName ?? PRESERVE_OPTIONAL_SYMBOL_FIELD,
-        packageVersion: symbol.packageVersion ?? PRESERVE_OPTIONAL_SYMBOL_FIELD,
-        scipSymbol: symbol.scipSymbol ?? PRESERVE_OPTIONAL_SYMBOL_FIELD,
-        symbolStatus: "real",
-        placeholderKind: "",
-        placeholderTarget: "",
-        updatedAt: symbol.updatedAt,
-      }));
+      // when a struct field is uniformly null. Empty string keeps the payload
+      // shape stable for the parameter binder.
+      const rowGroups = splitSymbolBatchRowsBySummaryQualityType(
+        chunk.map(toSymbolBatchUpsertRow),
+      );
       // Three-pass W3 workaround for LadybugDB UNWIND+MERGE-rel runtime bug:
       // (1) MERGE node + SET props, (2) idempotent SYMBOL_IN_FILE,
       // (3) idempotent SYMBOL_IN_REPO. Plain MERGE-rel inside UNWIND throws
       // "invalid unordered_map<K, T> key" in 0.15.x–0.16.0.
-      await exec(
-        txConn,
-        `UNWIND $rows AS row
+      for (const rows of rowGroups) {
+        await exec(
+          txConn,
+          `UNWIND $rows AS row
          MATCH (r:Repo {repoId: row.repoId})
          MATCH (f:File {fileId: row.fileId})
          MERGE (s:Symbol {symbolId: row.symbolId})
@@ -371,34 +398,35 @@ export async function upsertSymbolBatch(
                THEN s.scipSymbol
                ELSE row.scipSymbol
              END,
-             s.symbolStatus = row.symbolStatus,
-             s.placeholderKind = row.placeholderKind,
-             s.placeholderTarget = row.placeholderTarget,
-             s.updatedAt = row.updatedAt`,
-        { rows, preserveOptionalSymbolField: PRESERVE_OPTIONAL_SYMBOL_FIELD },
-      );
-      await exec(
-        txConn,
-        `UNWIND $rows AS row
+              s.symbolStatus = row.symbolStatus,
+              s.placeholderKind = row.placeholderKind,
+              s.placeholderTarget = row.placeholderTarget,
+              s.updatedAt = row.updatedAt`,
+          { rows, preserveOptionalSymbolField: PRESERVE_OPTIONAL_SYMBOL_FIELD },
+        );
+        await exec(
+          txConn,
+          `UNWIND $rows AS row
          MATCH (s:Symbol {symbolId: row.symbolId})
          MATCH (f:File {fileId: row.fileId})
          OPTIONAL MATCH (s)-[existing:SYMBOL_IN_FILE]->(f)
          WITH s, f, existing
          WHERE existing IS NULL
          CREATE (s)-[:SYMBOL_IN_FILE]->(f)`,
-        { rows },
-      );
-      await exec(
-        txConn,
-        `UNWIND $rows AS row
+          { rows },
+        );
+        await exec(
+          txConn,
+          `UNWIND $rows AS row
          MATCH (s:Symbol {symbolId: row.symbolId})
          MATCH (r:Repo {repoId: row.repoId})
          OPTIONAL MATCH (s)-[existing:SYMBOL_IN_REPO]->(r)
          WITH s, r, existing
          WHERE existing IS NULL
          CREATE (s)-[:SYMBOL_IN_REPO]->(r)`,
-        { rows },
-      );
+          { rows },
+        );
+      }
     }
   });
 }

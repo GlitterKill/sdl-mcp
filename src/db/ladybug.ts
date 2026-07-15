@@ -310,8 +310,7 @@ async function loadLadybug(): Promise<LadybugModule> {
 
   try {
     const imported = await import("kuzu");
-    const ladybug = (imported.default ?? imported) as unknown as LadybugModule;
-    ladybugModule = ladybug;
+    ladybugModule = (imported.default ?? imported) as unknown as LadybugModule;
     return ladybugModule;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

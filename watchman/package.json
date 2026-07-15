@@ -1,6 +1,6 @@
 {
   "name": "sdl-mcp-watchman",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "description": "SDL-MCP managed Watchman binary package",
   "license": "SEE LICENSE IN LICENSE",
   "main": "index.js",
@@ -8,8 +8,8 @@
     "index.js"
   ],
   "optionalDependencies": {
-    "sdl-mcp-watchman-linux-x64": "0.12.3",
-    "sdl-mcp-watchman-win32-x64": "0.12.3"
+    "sdl-mcp-watchman-linux-x64": "0.12.4",
+    "sdl-mcp-watchman-win32-x64": "0.12.4"
   },
   "repository": {
     "type": "git",

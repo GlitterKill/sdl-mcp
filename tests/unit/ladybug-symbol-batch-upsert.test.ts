@@ -254,6 +254,37 @@ describe("upsertSymbolBatch — integration", () => {
   );
 
   it(
+    "mixed integral and fractional summaryQuality values persist in one logical batch",
+    { skip: !ladybugAvailable },
+    async () => {
+      const conn_ = conn as unknown as import("kuzu").Connection;
+      const symbols = [
+        makeSymbol("batch-quality-zero", repoId, fileId, "qualityZero", {
+          summaryQuality: 0,
+        }),
+        makeSymbol("batch-quality-fractional", repoId, fileId, "qualityFrac", {
+          summaryQuality: 0.55,
+        }),
+        makeSymbol("batch-quality-one", repoId, fileId, "qualityOne", {
+          summaryQuality: 1,
+        }),
+      ];
+
+      await queries.upsertSymbolBatch(conn_, symbols);
+
+      const zero = await queries.getSymbol(conn_, "batch-quality-zero");
+      const fractional = await queries.getSymbol(
+        conn_,
+        "batch-quality-fractional",
+      );
+      const one = await queries.getSymbol(conn_, "batch-quality-one");
+      assert.strictEqual(zero?.summaryQuality, 0);
+      assert.strictEqual(fractional?.summaryQuality, 0.55);
+      assert.strictEqual(one?.summaryQuality, 1);
+    },
+  );
+
+  it(
     "known fresh provider symbols - COPY persists nodes and ownership relationships",
     { skip: !ladybugAvailable },
     async () => {

@@ -18,6 +18,8 @@ Supported tuple:
 
 The official LadybugDB 0.18.1 Windows FTS extension imports `libcrypto-3-x64.dll` and `libssl-3-x64.dll`, but the extension artifact does not ship them. Ladybug loads the extension with plain `LoadLibraryW`. Windows does not search the plugin directory for dependent DLLs in that path, so copying the DLLs beside `libfts.lbug_extension` is insufficient.
 
+Upstream tracker: [LadybugDB/ladybug#685](https://github.com/LadybugDB/ladybug/issues/685).
+
 SDL loads the verified package DLLs by absolute path immediately before `LOAD EXTENSION fts`:
 
 1. verify `package.json` version and `provenance.json` hashes;

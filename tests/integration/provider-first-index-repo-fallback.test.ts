@@ -516,17 +516,18 @@ describe("provider-first indexRepo fallback", () => {
       result.providerFirstExecution?.shadowBuild?.shadowDb?.status,
       "loaded",
     );
+    const finalization = result.providerFirstExecution?.shadowBuild?.finalization;
     assert.equal(
-      result.providerFirstExecution?.shadowBuild?.finalization?.status,
+      finalization?.status,
       "finalized",
+      JSON.stringify(finalization, null, 2),
     );
     assert.equal(
-      result.providerFirstExecution?.shadowBuild?.finalization?.copyMode,
+      finalization?.copyMode,
       "bulkCsv",
     );
     assert.ok(
-      result.providerFirstExecution?.shadowBuild?.finalization?.bulkLoad
-        ?.manifestPath,
+      finalization?.bulkLoad?.manifestPath,
       "shadow finalization should expose the bulk-load manifest for diagnostics",
     );
     assert.equal(
