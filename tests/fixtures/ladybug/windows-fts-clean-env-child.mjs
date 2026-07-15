@@ -336,9 +336,9 @@ async function fixedRegression() {
   let addon;
   if (!disableOpenSslProvisioning) {
     if (
-      packageVersion("@sdl-mcp/ladybug-openssl-win32-x64") !== "3.5.7-sdl.1"
+      packageVersion("@sdl-mcp/ladybug-openssl-win32-x64") !== "3.5.7-sdl.2"
     ) {
-      missing.push("@sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.1");
+      missing.push("@sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.2");
     }
     try {
       const imported = await import("sdl-mcp-native");

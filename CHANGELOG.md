@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Temporary Windows OpenSSL runtime for LadybugDB FTS**: Windows x64 installs now include the SDL-owned `@sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.1` optional package with provenance, SBOM, license, and hash-pinned `libcrypto-3-x64.dll` / `libssl-3-x64.dll` runtime files for LadybugDB 0.18.1 FTS.
+- **Temporary Windows OpenSSL runtime for LadybugDB FTS**: Windows x64 installs now include the SDL-owned `@sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.2` optional package with corrected signer provenance, SBOM, license, and hash-pinned `libcrypto-3-x64.dll` / `libssl-3-x64.dll` runtime files for LadybugDB 0.18.1 FTS. The incorrect `.1` provenance boundary is retired and rejected.
 - **Ladybug storage migration gate**: added a checksum-pinned v40 fixture that verifies LadybugDB 0.18.1 can migrate/checkpoint existing non-derived memory, feedback, usage, and audit rows.
 
 ### Changed

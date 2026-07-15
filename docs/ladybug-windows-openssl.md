@@ -6,8 +6,7 @@ Supported tuple:
 
 - OS/CPU: Windows x64
 - LadybugDB: 0.18.1
-- SDL runtime package: `@sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.1`
-- Corrected runtime build target: `@sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.2`
+- SDL runtime package: `@sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.2`
 - OpenSSL: 3.5.7, `VC-WIN64A shared`
 - Source: `https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz`
 - Source SHA-256: `a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8`
@@ -15,7 +14,7 @@ Supported tuple:
 - License: Apache-2.0, shipped as `OPENSSL-LICENSE.txt`
 - Package provenance: npm provenance plus `provenance.json` and `sbom.spdx.json`
 
-The OpenSSL 3.5.7 archive is signed by OpenSSL's previous official release key, fingerprint `BA5473A2B0587B07FB27CF2D216094DFD0CB81EF`. The published `3.5.7-sdl.1` metadata incorrectly named the newer OpenSSL release key even though signature verification succeeded through a multi-key bundle. The `3.5.7-sdl.2` build contract corrects the signer metadata, commits only the actual signing key, and rejects any `VALIDSIG` fingerprint other than the pinned value. Keep SDL's runtime dependency on `3.5.7-sdl.1` until `3.5.7-sdl.2` is built, published, and registry-verified; then update the exact root pin and cut an SDL patch release.
+The OpenSSL 3.5.7 archive is signed by OpenSSL's previous official release key, fingerprint `BA5473A2B0587B07FB27CF2D216094DFD0CB81EF`. The published `3.5.7-sdl.1` metadata incorrectly named the newer OpenSSL release key even though signature verification succeeded through a multi-key bundle. The registry-verified `3.5.7-sdl.2` build contract corrects the signer metadata, commits only the actual signing key, and rejects any `VALIDSIG` fingerprint other than the pinned value. SDL accepts only exact `3.5.7-sdl.2`; `.1` is retired and no version range or compatibility fallback is supported.
 
 ## Why SDL supplies two DLLs
 

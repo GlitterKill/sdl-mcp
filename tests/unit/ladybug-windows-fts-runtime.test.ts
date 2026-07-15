@@ -18,12 +18,16 @@ function sha256(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-function createRuntimePackage(): { root: string; cleanup: () => void; options: Pick<WindowsFtsRuntimeOptions, "requireResolve"> } {
+function createRuntimePackage(version = "3.5.7-sdl.2"): {
+  root: string;
+  cleanup: () => void;
+  options: Pick<WindowsFtsRuntimeOptions, "requireResolve">;
+} {
   const root = mkdtempSync(join(tmpdir(), "sdl-fts-runtime-test-"));
   const bin = join(root, "bin");
   const crypto = "crypto-runtime";
   const ssl = "ssl-runtime";
-  writeFileSync(join(root, "package.json"), JSON.stringify({ name: packageName, version: "3.5.7-sdl.1" }), "utf8");
+  writeFileSync(join(root, "package.json"), JSON.stringify({ name: packageName, version }), "utf8");
   writeFileSync(join(root, "provenance.json"), JSON.stringify({
     artifacts: {
       "bin/libcrypto-3-x64.dll": { sha256: sha256(crypto) },
@@ -116,7 +120,28 @@ describe("withWindowsFtsRuntime", () => {
     assert.equal(calls, 0);
     assert.equal(isWindowsFtsRuntimeUnavailable(result), true);
     assert.equal(isWindowsFtsRuntimeUnavailable(result) ? result.reason : undefined, "missing-package");
+    assert.match(
+      isWindowsFtsRuntimeUnavailable(result) ? result.recovery : "",
+      /@sdl-mcp\/ladybug-openssl-win32-x64@3\.5\.7-sdl\.2/u,
+    );
     assert.doesNotMatch(isWindowsFtsRuntimeUnavailable(result) ? result.recovery : "", /[A-Z]:\\|\\Users\\|\/tmp\//u);
+  });
+
+  it("rejects the retired 3.5.7-sdl.1 runtime package", async () => {
+    const fixture = createRuntimePackage("3.5.7-sdl.1");
+    try {
+      const result = await withWindowsFtsRuntime(
+        async () => "loaded",
+        windowsOptions({ ...fixture.options, loadNativeAddon: () => null }),
+      );
+      assert.equal(isWindowsFtsRuntimeUnavailable(result), true);
+      assert.equal(
+        isWindowsFtsRuntimeUnavailable(result) ? result.reason : undefined,
+        "invalid-package",
+      );
+    } finally {
+      fixture.cleanup();
+    }
   });
 
   it("returns invalid-package when package metadata or hashes do not match", async () => {

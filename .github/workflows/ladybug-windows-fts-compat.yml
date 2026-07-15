@@ -62,7 +62,7 @@ jobs:
           $Version = node -p "require('./package.json').version"
           npm install --no-save --no-package-lock --ignore-scripts --legacy-peer-deps `
             kuzu@npm:@ladybugdb/core@0.18.1 `
-            @sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.1 `
+            @sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.2 `
             sdl-mcp-native@$Version
 
       - name: Setup LadybugDB native binary
