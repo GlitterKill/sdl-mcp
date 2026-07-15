@@ -443,7 +443,8 @@ export async function insertEdges(
 
       for (let i = 0; i < repoEdges.length; i += chunkSize) {
         const edgeChunk = repoEdges.slice(i, i + chunkSize);
-        const { rows, targetRows } = await measurePhase("prepareRows", () => {
+        const { rows, sourceEndpointRows, targetEndpointRows, targetRows } =
+          await measurePhase("prepareRows", () => {
           const rows = edgeChunk.map((edge) => {
             return {
               repoId,
@@ -467,40 +468,19 @@ export async function insertEdges(
           // Keep placeholder metadata in a unique node-update batch. Updating it
           // from every edge row has previously allowed unrelated UNWIND rows to
           // smear placeholderTarget text across target nodes in LadybugDB.
+          const sourceEndpointRows = buildSourceEndpointRows(edgeChunk);
+          const targetEndpointRows = buildTargetEndpointRows(edgeChunk);
           const targetRows = buildTargetMetadataRows(edgeChunk);
-          return { rows, targetRows };
+          return { rows, sourceEndpointRows, targetEndpointRows, targetRows };
         });
         // 1: ensure both Symbol nodes exist. Real edge endpoints must repair
         // stale placeholder metadata; otherwise a previously unresolved stub
         // can stay excluded after the real file-backed symbol is indexed.
         if (!options?.skipEndpointMetadata) {
-          await measurePhase("endpointMetadata", async () =>
-            exec(
-              txConn,
-              `UNWIND $rows AS row
-               MERGE (a:Symbol {symbolId: row.fromSymbolId})
-               MERGE (b:Symbol {symbolId: row.toSymbolId})
-               SET a.repoId = row.repoId,
-                   a.external = CASE
-                     WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.external, false)
-                     ELSE false
-                   END,
-                   a.symbolStatus = CASE
-                     WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.symbolStatus, 'unresolved')
-                     ELSE 'real'
-                   END,
-                   a.placeholderKind = CASE
-                     WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.placeholderKind, '')
-                     ELSE ''
-                   END,
-                   a.placeholderTarget = CASE
-                     WHEN a.symbolId STARTS WITH 'unresolved:' THEN coalesce(a.placeholderTarget, '')
-                     ELSE ''
-                   END,
-                   b.repoId = row.repoId`,
-              { rows },
-            ),
-          );
+          await measurePhase("endpointMetadata", async () => {
+            await ensureSourceEndpointSymbols(txConn, sourceEndpointRows);
+            await ensureTargetEndpointSymbols(txConn, targetEndpointRows);
+          });
         }
         // Target metadata is node-only and one row per target. Placeholder
         // rows never consult file-backed state, so keep them off the slower
@@ -803,22 +783,43 @@ export async function ensureDependencyTargetsForKnownSourceEdges(
 
     for (let i = 0; i < mergeRows.length; i += chunkSize) {
       const rows = mergeRows.slice(i, i + chunkSize);
-      await measurePhase("symbolMetadata.mergeFallback", async () =>
-        exec(
-          txConn,
-          `UNWIND $rows AS row
-           MERGE (b:Symbol {symbolId: row.toSymbolId})
-           SET b.repoId = row.repoId,
-               b.external = CASE
-                 WHEN row.targetStatus = 'external' THEN true
-                 ELSE false
-               END,
-               b.symbolStatus = row.targetStatus,
-               b.placeholderKind = row.targetPlaceholderKind,
-               b.placeholderTarget = row.targetPlaceholderTarget`,
-          { rows },
-        ),
+      const existingSymbolIds = await measurePhase(
+        "symbolMetadata.probeExisting",
+        async () => await queryExistingSymbolIds(txConn, rows),
       );
+      const existingRows: DependencyTargetMetadataRow[] = [];
+      const missingRows: DependencyTargetMetadataRow[] = [];
+      for (const row of rows) {
+        if (existingSymbolIds.has(row.toSymbolId)) {
+          existingRows.push(row);
+        } else {
+          missingRows.push(row);
+        }
+      }
+
+      if (missingRows.length > 0) {
+        await measurePhase("symbolMetadata.mergeFallback", async () =>
+          exec(
+            txConn,
+            `UNWIND $rows AS row
+             MERGE (b:Symbol {symbolId: row.toSymbolId})
+             SET b.repoId = row.repoId,
+                 b.external = CASE
+                   WHEN row.targetStatus = 'external' THEN true
+                   ELSE false
+                 END,
+                 b.symbolStatus = row.targetStatus,
+                 b.placeholderKind = row.targetPlaceholderKind,
+                 b.placeholderTarget = row.targetPlaceholderTarget`,
+            { rows: missingRows },
+          ),
+        );
+      }
+      if (existingRows.length > 0) {
+        await measurePhase("symbolMetadata.matchExisting", async () =>
+          updateExistingPlaceholderTargets(txConn, existingRows),
+        );
+      }
       await measurePhase("repoLink", async () =>
         ensureDependencyTargetRepoLinks(txConn, rows),
       );
@@ -874,19 +875,24 @@ async function queryExistingSymbolIds(
   conn: Connection,
   rows: readonly DependencyTargetMetadataRow[],
 ): Promise<Set<string>> {
-  const symbolIds = rows.map((row) => row.toSymbolId);
-  const result = await queryAll<{ symbolId: unknown }>(
-    conn,
-    `UNWIND $symbolIds AS symbolId
-     MATCH (s:Symbol {symbolId: symbolId})
-     RETURN s.symbolId AS symbolId`,
-    { symbolIds },
-  );
-  return new Set(
-    result
-      .map((row) => (typeof row.symbolId === "string" ? row.symbolId : null))
-      .filter((symbolId): symbolId is string => symbolId !== null),
-  );
+  const symbolIds = [...new Set(rows.map((row) => row.toSymbolId))];
+  const existing = new Set<string>();
+  for (const symbolId of symbolIds) {
+    // LadybugDB 0.18.1 does not reliably match node properties against
+    // UNWIND/list-derived variables for this path. Scalar parameter probes do
+    // use the primary-key lookup and prevent MERGE from re-creating a symbol
+    // that was just inserted by the fresh-copy Symbol writer.
+    const result = await queryAll<{ symbolId: unknown }>(
+      conn,
+      `MATCH (s:Symbol {symbolId: $symbolId})
+       RETURN s.symbolId AS symbolId`,
+      { symbolId },
+    );
+    if (typeof result[0]?.symbolId === "string") {
+      existing.add(result[0].symbolId);
+    }
+  }
+  return existing;
 }
 
 async function copyMissingPlaceholderTargets(
@@ -1214,6 +1220,102 @@ interface DependencyTargetMetadataRow {
   targetStatus: SymbolPlaceholderMeta["symbolStatus"];
   targetPlaceholderKind: string;
   targetPlaceholderTarget: string;
+}
+
+interface EndpointSymbolRow {
+  repoId: string;
+  symbolId: string;
+  isUnresolved: boolean;
+}
+
+function buildSourceEndpointRows(edges: EdgeRow[]): EndpointSymbolRow[] {
+  const rowsBySymbolId = new Map<string, EndpointSymbolRow>();
+
+  for (const edge of edges) {
+    if (rowsBySymbolId.has(edge.fromSymbolId)) {
+      continue;
+    }
+    rowsBySymbolId.set(edge.fromSymbolId, {
+      repoId: edge.repoId,
+      symbolId: edge.fromSymbolId,
+      isUnresolved: edge.fromSymbolId.startsWith("unresolved:"),
+    });
+  }
+
+  return [...rowsBySymbolId.values()];
+}
+
+function buildTargetEndpointRows(edges: EdgeRow[]): EndpointSymbolRow[] {
+  const rowsBySymbolId = new Map<string, EndpointSymbolRow>();
+
+  for (const edge of edges) {
+    if (rowsBySymbolId.has(edge.toSymbolId)) {
+      continue;
+    }
+    rowsBySymbolId.set(edge.toSymbolId, {
+      repoId: edge.repoId,
+      symbolId: edge.toSymbolId,
+      isUnresolved: edge.toSymbolId.startsWith("unresolved:"),
+    });
+  }
+
+  return [...rowsBySymbolId.values()];
+}
+
+async function ensureSourceEndpointSymbols(
+  conn: Connection,
+  rows: readonly EndpointSymbolRow[],
+): Promise<void> {
+  for (const row of rows) {
+    // LadybugDB 0.18.1 can miss existing primary-key rows when MERGE uses
+    // UNWIND-derived struct fields. Scalar parameters keep endpoint repair
+    // idempotent even when several edges share a source symbol.
+    await exec(
+      conn,
+      `MERGE (a:Symbol {symbolId: $symbolId})
+       SET a.repoId = $repoId,
+           a.external = CASE
+             WHEN $isUnresolved THEN coalesce(a.external, false)
+             ELSE false
+           END,
+           a.symbolStatus = CASE
+             WHEN $isUnresolved THEN coalesce(a.symbolStatus, 'unresolved')
+             ELSE 'real'
+           END,
+           a.placeholderKind = CASE
+             WHEN $isUnresolved THEN coalesce(a.placeholderKind, '')
+             ELSE ''
+           END,
+           a.placeholderTarget = CASE
+             WHEN $isUnresolved THEN coalesce(a.placeholderTarget, '')
+             ELSE ''
+           END`,
+      {
+        repoId: row.repoId,
+        symbolId: row.symbolId,
+        isUnresolved: row.isUnresolved,
+      },
+    );
+  }
+}
+
+async function ensureTargetEndpointSymbols(
+  conn: Connection,
+  rows: readonly EndpointSymbolRow[],
+): Promise<void> {
+  for (const row of rows) {
+    // Target status/placeholder details are applied by the targetMetadata
+    // phase below; this only guarantees the endpoint node exists.
+    await exec(
+      conn,
+      `MERGE (b:Symbol {symbolId: $symbolId})
+       SET b.repoId = $repoId`,
+      {
+        repoId: row.repoId,
+        symbolId: row.symbolId,
+      },
+    );
+  }
 }
 
 function buildTargetMetadataRows(edges: EdgeRow[]): DependencyTargetMetadataRow[] {
