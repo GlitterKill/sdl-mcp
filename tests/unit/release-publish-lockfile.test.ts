@@ -107,7 +107,7 @@ describe("release publish lockfile guards", () => {
     );
   });
 
-  it("verifies packed npm installs on Ubuntu and Windows before publishing", () => {
+  it("verifies the required packed-install matrix before publishing", () => {
     const workflow = readSource(".github/workflows/release-publish.yml");
     const verifyJob = workflow.match(/verify-packed-install:\s*[\s\S]*?\n  publish:/)?.[0] ?? "";
     const publishJob = workflow.match(/publish:\s*[\s\S]*$/)?.[0] ?? "";
@@ -121,7 +121,11 @@ describe("release publish lockfile guards", () => {
       /runs-on:\s*\$\{\{\s*matrix\.os\s*\}\}/,
       "packed install smoke should run across an OS matrix",
     );
-    assert.match(verifyJob, /- ubuntu-latest[\s\S]*- windows-latest/);
+    assert.match(
+      verifyJob,
+      /os:\s*windows-latest[\s\S]*accelerators:\s*included[\s\S]*os:\s*windows-latest[\s\S]*accelerators:\s*disabled[\s\S]*os:\s*ubuntu-latest[\s\S]*accelerators:\s*included[\s\S]*os:\s*macos-latest[\s\S]*accelerators:\s*included/s,
+      "packed install smoke should cover Windows enabled/disabled accelerators plus Linux and macOS normal installs",
+    );
     assert.match(
       verifyJob,
       /SDL_MCP_STRICT_TREE_SITTER_POSTINSTALL:\s*"1"/,
@@ -129,8 +133,48 @@ describe("release publish lockfile guards", () => {
     );
     assert.match(
       verifyJob,
-      /npm pack --pack-destination release-pack[\s\S]*npm install "\$\{tarball\}" --legacy-peer-deps --omit=optional[\s\S]*node node_modules\/sdl-mcp\/scripts\/postinstall-tree-sitter\.mjs --verify-only/s,
+      /needs:\s*[\s\S]*- build-native[\s\S]*npm pack \.\/native\/npm\/win32-x64-msvc[\s\S]*npm pack \.\/native/s,
+      "Windows normal-install proof should use native tarballs built by the same release run",
+    );
+    assert.match(
+      verifyJob,
+      /npm pack --pack-destination release-pack[\s\S]*npm install "\$\{install_args\[@\]\}"[\s\S]*node node_modules\/sdl-mcp\/scripts\/postinstall-tree-sitter\.mjs --verify-only/s,
       "release workflow should install the packed tarball and verify bundled grammar bindings",
+    );
+    assert.match(
+      verifyJob,
+      /SDL_LADYBUG_WINDOWS_FTS_TEST_MODE=fixed-regression[\s\S]*live-index-symbol-fts-crash\.test\.ts/s,
+      "normal Windows packed installs should run the real FTS and patchSavedFile regression",
+    );
+    assert.match(
+      verifyJob,
+      /SDL_MCP_DISABLE_NATIVE_ADDON=1[\s\S]*--test-name-pattern="probes upstream"[\s\S]*live-index-symbol-fts-crash\.test\.ts/s,
+      "disabled Windows accelerators should prove graceful FTS unavailability",
+    );
+    assert.match(
+      verifyJob,
+      /matrix\.accelerators[^\n]*disabled[\s\S]*StdioClientTransport[\s\S]*SDL_MCP_DISABLE_NATIVE_ADDON:\s*"1"[\s\S]*client\.listTools\(\)[\s\S]*client\.callTool[\s\S]*native\?\.disabledByEnv/s,
+      "disabled Windows accelerators should complete an MCP startup handshake and report disabled native status",
+    );
+    assert.doesNotMatch(
+      verifyJob,
+      /--omit=optional/,
+      "Ladybug's recursively optional platform binary makes raw optional omission unsupported",
+    );
+    assert.doesNotMatch(
+      verifyJob,
+      /installed_root="\$\{smoke_dir\}\/node_modules\/sdl-mcp"/,
+      "Node 24 cannot strip TypeScript test files copied under node_modules",
+    );
+    assert.match(
+      verifyJob,
+      /cp -R node_modules\/sdl-mcp\/dist "\$\{smoke_dir\}\/dist"/,
+      "the temporary harness should use the installed package build outside node_modules",
+    );
+    assert.match(
+      verifyJob,
+      /npm init -y > \/dev\/null[\s\S]*npm pkg set type=module/,
+      "the temporary TypeScript harness should run as ESM",
     );
     assert.match(
       publishJob,

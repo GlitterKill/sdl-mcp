@@ -7,16 +7,21 @@ Supported tuple:
 - OS/CPU: Windows x64
 - LadybugDB: 0.18.1
 - SDL runtime package: `@sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.1`
+- Corrected runtime build target: `@sdl-mcp/ladybug-openssl-win32-x64@3.5.7-sdl.2`
 - OpenSSL: 3.5.7, `VC-WIN64A shared`
 - Source: `https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz`
 - Source SHA-256: `a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8`
-- Release signer fingerprint: `B146647E45A7B33947AB226B2A2C87D161692D40`
+- Release signer fingerprint: `BA5473A2B0587B07FB27CF2D216094DFD0CB81EF`
 - License: Apache-2.0, shipped as `OPENSSL-LICENSE.txt`
 - Package provenance: npm provenance plus `provenance.json` and `sbom.spdx.json`
+
+The OpenSSL 3.5.7 archive is signed by OpenSSL's previous official release key, fingerprint `BA5473A2B0587B07FB27CF2D216094DFD0CB81EF`. The published `3.5.7-sdl.1` metadata incorrectly named the newer OpenSSL release key even though signature verification succeeded through a multi-key bundle. The `3.5.7-sdl.2` build contract corrects the signer metadata, commits only the actual signing key, and rejects any `VALIDSIG` fingerprint other than the pinned value. Keep SDL's runtime dependency on `3.5.7-sdl.1` until `3.5.7-sdl.2` is built, published, and registry-verified; then update the exact root pin and cut an SDL patch release.
 
 ## Why SDL supplies two DLLs
 
 The official LadybugDB 0.18.1 Windows FTS extension imports `libcrypto-3-x64.dll` and `libssl-3-x64.dll`, but the extension artifact does not ship them. Ladybug loads the extension with plain `LoadLibraryW`. Windows does not search the plugin directory for dependent DLLs in that path, so copying the DLLs beside `libfts.lbug_extension` is insufficient.
+
+Upstream tracker: [LadybugDB/ladybug#685](https://github.com/LadybugDB/ladybug/issues/685).
 
 SDL loads the verified package DLLs by absolute path immediately before `LOAD EXTENSION fts`:
 
@@ -37,7 +42,7 @@ To verify an installed Windows runtime:
 3. Confirm the native loader reports both module paths under the OpenSSL package `bin` directory.
 4. Confirm the test reaches `mutation`, `patchSavedFile`, and `shutdown` phases.
 
-`--omit=optional`, `SDL_MCP_DISABLE_NATIVE_ADDON=1`, missing package files, or hash mismatches must not crash startup. They disable only FTS-backed capability and should report recovery guidance.
+`@ladybugdb/core` is a required SDL dependency. Its matching platform binary is a transitive optional dependency, so npm's recursive `--omit=optional` mode is unsupported because it removes the database binary itself. To exercise the supported degraded boundary, set `SDL_MCP_DISABLE_NATIVE_ADDON=1`; a disabled/incompatible native addon, missing runtime package files, or hash mismatches disable only FTS-backed capability and should report recovery guidance instead of crashing startup.
 
 ## Recovery
 
@@ -56,9 +61,10 @@ When it opens an issue:
 1. Assess whether the advisory affects the Windows FTS runtime DLLs.
 2. Update `ladybug-openssl/source.json` and bump the `-sdl.N` package suffix.
 3. Rebuild from official signed OpenSSL source.
+   The build must compare GPG's `VALIDSIG` fingerprint with `releaseSignerFingerprint`; checking only that a trusted key bundle contains the fingerprint is insufficient.
 4. Rerun OpenSSL tests and the Ladybug clean-environment FTS tests.
 5. Publish the runtime package with npm provenance.
-6. Update SDL's exact optional-dependency pin and lockfile.
+6. Update SDL's exact optional OpenSSL runtime pin and lockfile.
 7. Cut an SDL patch release.
 8. Verify registry tarball hashes and native-reported module origins.
 
@@ -71,7 +77,7 @@ Remove SDL provisioning only when all are true:
 3. Upstream uses a correct load-directory strategy, a self-contained/static extension, or another proven runtime-resolution fix. Copying DLLs beside a plugin still loaded with plain `LoadLibraryW` is not enough.
 4. Repeated FTS update/delete/query and the mandatory `patchSavedFile()` subprocess regression pass.
 5. The upstream Ladybug issue is closed with a release reference.
-6. Normal and `--omit=optional` packed-install tests pass after removing SDL provisioning.
+6. Normal and native-addon-disabled packed-install tests pass after removing SDL provisioning.
 7. The SDL OpenSSL package and Windows preload API are removed only if no other consumer remains.
 
 ## Deletion checklist for the future removal PR

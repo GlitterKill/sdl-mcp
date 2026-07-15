@@ -19,6 +19,7 @@ import {
   getSymbolsByRepoForSnapshotPage,
   copyClusterMembersAfterDeleteBatch,
   copyProcessStepsAfterDeleteBatch,
+  ensureDependencyTargetsForKnownSourceEdges,
   insertClusterMembersAfterDeleteBatch,
   insertNewFileSummaryBatch,
   insertProcessStepsAfterDeleteBatch,
@@ -408,6 +409,99 @@ describe("LadybugDB write batching", () => {
       countStatementsContaining(statements, "row.targetStatus"),
       0,
       "known-symbol edges should not run placeholder metadata repair",
+    );
+  });
+
+  it("probes copied placeholder-like targets before merge-fallback creates missing symbols", async () => {
+    const existingTarget = "unresolved:packages/bench/benchUtil.ts:makeData";
+    const missingTarget = "unresolved:packages/bench/other.ts:other";
+    const calls: Array<{
+      statement: string;
+      params: Record<string, unknown>;
+    }> = [];
+    const conn = {
+      async prepare(statement: string) {
+        return {
+          statement,
+          isSuccess() {
+            return true;
+          },
+          getErrorMessage() {
+            return "";
+          },
+        };
+      },
+      async execute(
+        preparedStatement: { statement: string },
+        params?: Record<string, unknown>,
+      ) {
+        calls.push({
+          statement: preparedStatement.statement,
+          params: params ?? {},
+        });
+        return {
+          close(): void {},
+          async getAll(): Promise<unknown[]> {
+            return preparedStatement.statement.includes("RETURN s.symbolId AS symbolId") &&
+              params?.symbolId === existingTarget
+              ? [{ symbolId: existingTarget }]
+              : [];
+          },
+        };
+      },
+      async query(statement: string) {
+        calls.push({ statement, params: {} });
+        return new FakeQueryResult();
+      },
+    } as unknown as import("kuzu").Connection;
+    const targetEdge = (
+      toSymbolId: string,
+      placeholderTarget: string,
+    ): EdgeRow => ({
+      repoId: "repo",
+      fromSymbolId: `from-${toSymbolId}`,
+      toSymbolId,
+      edgeType: "call",
+      weight: 1,
+      confidence: 0.95,
+      resolution: "unresolved",
+      resolverId: "test",
+      resolutionPhase: "pass1",
+      provenance: "test",
+      createdAt: "2026-07-15T00:00:00.000Z",
+      targetMeta: {
+        symbolStatus: "unresolved",
+        placeholderKind: "import",
+        placeholderTarget,
+      },
+    });
+
+    await ensureDependencyTargetsForKnownSourceEdges(conn, [
+      targetEdge(existingTarget, "packages/bench/benchUtil.ts:makeData"),
+      targetEdge(missingTarget, "packages/bench/other.ts:other"),
+    ]);
+
+    const mergeCalls = calls.filter((call) =>
+      call.statement.includes("MERGE (b:Symbol {symbolId: row.toSymbolId})"),
+    );
+    const updateCalls = calls.filter((call) =>
+      call.statement.includes("OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]->(:File)"),
+    );
+    assert.strictEqual(mergeCalls.length, 1);
+    assert.deepStrictEqual(
+      (mergeCalls[0]!.params.rows as Array<{ toSymbolId: string }>).map(
+        (row) => row.toSymbolId,
+      ),
+      [missingTarget],
+      "existing placeholder-like symbols copied as file-backed rows must not be sent through MERGE",
+    );
+    assert.strictEqual(updateCalls.length, 1);
+    assert.deepStrictEqual(
+      (updateCalls[0]!.params.rows as Array<{ toSymbolId: string }>).map(
+        (row) => row.toSymbolId,
+      ),
+      [existingTarget],
+      "existing placeholder-like symbols should take the MATCH-update path",
     );
   });
 

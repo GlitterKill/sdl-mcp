@@ -1,6 +1,6 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, rmSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, rmSync, mkdirSync } from "fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -8,11 +8,22 @@ import { fileURLToPath } from "url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DB_DIR = join(tmpdir(), ".ladybug-contract-test-db");
 const TEST_DB_PATH = join(TEST_DB_DIR, "contract.lbug");
+const packageJson = JSON.parse(
+  readFileSync(join(__dirname, "..", "..", "package.json"), "utf8"),
+) as {
+  dependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+};
 
 // Test vendor package contract directly - no SDL-MCP helpers
 describe("Ladybug package contract", () => {
   let db: unknown = null;
   let conn: unknown = null;
+
+  it("declares the Ladybug core as a required dependency", () => {
+    assert.equal(packageJson.dependencies?.kuzu, "npm:@ladybugdb/core@0.18.1");
+    assert.equal(packageJson.optionalDependencies?.kuzu, undefined);
+  });
 
   afterEach(async () => {
     // close in correct order: conn first, then db

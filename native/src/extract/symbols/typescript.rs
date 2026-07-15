@@ -160,7 +160,8 @@ fn extract_parameters(node: Node<'_>, source: &[u8]) -> Vec<ParamInfo> {
             match child.kind() {
                 "required_parameter" | "optional_parameter" => {
                     let identifier = find_child_by_kind(child, "identifier", source);
-                    let type_annotation = find_child_by_kind(child, "type_annotation", source);
+                    let type_annotation = find_child_by_kind(child, "type_annotation", source)
+                        .map(normalize_type_annotation);
 
                     if let Some(name) = identifier {
                         params.push(ParamInfo {
@@ -175,9 +176,18 @@ fn extract_parameters(node: Node<'_>, source: &[u8]) -> Vec<ParamInfo> {
                         type_annotation: None,
                     });
                 }
+                "assignment_pattern" => {
+                    if let Some(name) = find_child_by_kind(child, "identifier", source) {
+                        params.push(ParamInfo {
+                            name,
+                            type_annotation: None,
+                        });
+                    }
+                }
                 "rest_parameter" => {
                     let identifier = find_child_by_kind(child, "identifier", source);
-                    let type_annotation = find_child_by_kind(child, "type_annotation", source);
+                    let type_annotation = find_child_by_kind(child, "type_annotation", source)
+                        .map(normalize_type_annotation);
 
                     if let Some(name) = identifier {
                         params.push(ParamInfo {
@@ -192,6 +202,14 @@ fn extract_parameters(node: Node<'_>, source: &[u8]) -> Vec<ParamInfo> {
     }
 
     params
+}
+
+fn normalize_type_annotation(type_annotation: String) -> String {
+    type_annotation
+        .strip_prefix(':')
+        .map(str::trim_start)
+        .unwrap_or(&type_annotation)
+        .to_string()
 }
 
 fn extract_return_type(node: Node<'_>, source: &[u8]) -> Option<String> {

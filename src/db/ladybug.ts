@@ -310,13 +310,12 @@ async function loadLadybug(): Promise<LadybugModule> {
 
   try {
     const imported = await import("kuzu");
-    const ladybug = (imported.default ?? imported) as unknown as LadybugModule;
-    ladybugModule = ladybug;
+    ladybugModule = (imported.default ?? imported) as unknown as LadybugModule;
     return ladybugModule;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new DatabaseError(
-      `Graph database driver not available: ${msg}. The 'kuzu' package should be installed automatically as an optional dependency of sdl-mcp (backed by @ladybugdb/core). Try: npm install`,
+      `Graph database driver not available: ${msg}. The 'kuzu' package should be installed automatically as a dependency of sdl-mcp (backed by @ladybugdb/core). Try: npm install`,
     );
   }
 }

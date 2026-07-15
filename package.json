@@ -1,6 +1,6 @@
 {
   "name": "sdl-mcp",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "description": "Symbol Delta Ledger MCP Server - Cards-first code context for polyglot repositories",
   "type": "module",
   "main": "dist/main.js",
@@ -128,6 +128,7 @@
     "@opentelemetry/sdk-trace-base": "^2.8.0",
     "@opentelemetry/sdk-trace-node": "^2.8.0",
     "fflate": "0.8.3",
+    "kuzu": "npm:@ladybugdb/core@0.18.1",
     "three": "0.185.1",
     "tree-sitter": "npm:@keqingmoe/tree-sitter@0.26.2",
     "tree-sitter-bash": "npm:sdl-mcp-tree-sitter-bash@^1.0.1",
@@ -157,12 +158,12 @@
   "optionalDependencies": {
     "chokidar": "^5.0.0",
     "fb-watchman": "^2.0.2",
-    "kuzu": "npm:@ladybugdb/core@0.16.1",
+    "@sdl-mcp/ladybug-openssl-win32-x64": "3.5.7-sdl.1",
     "onnxruntime-node": "^1.24.3",
-    "sdl-mcp-native": "0.12.3",
-    "sdl-mcp-watchman": "0.12.3",
-    "sdl-mcp-watchman-linux-x64": "0.12.3",
-    "sdl-mcp-watchman-win32-x64": "0.12.3",
+    "sdl-mcp-native": "0.12.4",
+    "sdl-mcp-watchman": "0.12.4",
+    "sdl-mcp-watchman-linux-x64": "0.12.4",
+    "sdl-mcp-watchman-win32-x64": "0.12.4",
     "tokenizers": "npm:@anush008/tokenizers@^0.6.0"
   },
   "devDependencies": {

@@ -890,6 +890,7 @@ describe("cluster-orchestrator.computeAndStoreClustersAndProcesses", () => {
           { symbolId: "sym-bar", coreness: 1 },
         ],
       }),
+      algorithmCapabilityDetector: async () => ({ supported: true }),
       louvainRunner: async () => {
         throw new Error("simulated louvain failure");
       },

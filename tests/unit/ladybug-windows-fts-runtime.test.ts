@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { describe, it } from "node:test";
@@ -12,6 +12,7 @@ import {
 } from "../../src/db/ladybug-windows-fts-runtime.ts";
 
 const packageName = "@sdl-mcp/ladybug-openssl-win32-x64";
+const ladybugSource = readFileSync("src/db/ladybug.ts", "utf8");
 
 function sha256(content: string): string {
   return createHash("sha256").update(content).digest("hex");
@@ -55,6 +56,25 @@ function windowsOptions(options: Partial<WindowsFtsRuntimeOptions> = {}): Window
 }
 
 describe("withWindowsFtsRuntime", () => {
+  it("does not require the Windows FTS runtime before importing Ladybug core", () => {
+    assert.match(
+      ladybugSource,
+      /async function loadLadybug\(\)[\s\S]*?const imported = await import\("kuzu"\)/u,
+    );
+    assert.doesNotMatch(
+      ladybugSource,
+      /withWindowsFtsRuntime\(\s*async\s*\(\)\s*=>\s*\{[\s\S]*?import\("kuzu"\)/u,
+      "optional Windows FTS runtime failures must not block non-FTS Ladybug startup",
+    );
+  });
+
+  it("preloads the Windows runtime only around LOAD EXTENSION fts", () => {
+    assert.match(
+      ladybugSource,
+      /if \(ext === "fts"\) \{[\s\S]*?withWindowsFtsRuntime\(\(\) =>[\s\S]*?execDdl\(conn, `LOAD EXTENSION \$\{ext\}`\)/u,
+    );
+  });
+
   it("bypasses preloading outside Windows x64 and forwards the load result", async () => {
     let calls = 0;
     const result = await withWindowsFtsRuntime(async () => {
@@ -153,6 +173,30 @@ describe("withWindowsFtsRuntime", () => {
         "release:2",
         "release:1",
       ]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("accepts native-reported extended-length paths inside the package bin directory", async () => {
+    if (process.platform !== "win32") {
+      return;
+    }
+
+    const fixture = createRuntimePackage();
+    try {
+      const result = await withWindowsFtsRuntime(async () => "loaded", windowsOptions({
+        ...fixture.options,
+        loadNativeAddon: () => ({
+          preloadWindowsLibrary: (absolutePath: string) => ({
+            token: absolutePath.endsWith("libcrypto-3-x64.dll") ? 1 : 2,
+            loadedPath: "\\\\?\\" + absolutePath,
+          }),
+          releaseWindowsLibrary: () => undefined,
+        }),
+      }));
+
+      assert.equal(result, "loaded");
     } finally {
       fixture.cleanup();
     }
