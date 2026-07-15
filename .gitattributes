@@ -1,2 +1,9 @@
+/.gitattributes text eol=lf
+
 # Git LFS tracking for large model files
 models/**/*.onnx filter=lfs diff=lfs merge=lfs -text
+
+# Keep audited runtime-package text artifacts byte-stable across Windows checkouts.
+ladybug-openssl/npm/win32-x64/*.json text eol=lf
+ladybug-openssl/npm/win32-x64/*.md text eol=lf
+ladybug-openssl/npm/win32-x64/*.txt text eol=lf
