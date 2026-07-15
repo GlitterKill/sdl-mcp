@@ -87,6 +87,10 @@ it("defines the data-only Windows x64 npm package contract", () => {
   assert.equal(packageJson.version, source.packageVersion);
   assert.equal(packageJson.description, "SDL-MCP temporary OpenSSL runtime for LadybugDB FTS on Windows x64");
   assert.equal(packageJson.license, "Apache-2.0");
+  assert.deepEqual(packageJson.repository, {
+    type: "git",
+    url: "https://github.com/GlitterKill/sdl-mcp",
+  });
   assert.deepEqual(packageJson.os, ["win32"]);
   assert.deepEqual(packageJson.cpu, ["x64"]);
   assert.deepEqual(packageJson.files, [
