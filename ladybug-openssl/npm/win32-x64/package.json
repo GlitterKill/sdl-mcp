@@ -1,6 +1,6 @@
 {
   "name": "@sdl-mcp/ladybug-openssl-win32-x64",
-  "version": "3.5.7-sdl.1",
+  "version": "3.5.7-sdl.2",
   "description": "SDL-MCP temporary OpenSSL runtime for LadybugDB FTS on Windows x64",
   "license": "Apache-2.0",
   "repository": {

@@ -353,6 +353,7 @@ function verifyBuildRecord() {
   const record = readJson(buildRecordPath);
   assert.equal(record.sourceSha256, source.sourceSha256, "build record source hash must match source.json");
   assert.equal(record.signatureVerified, true, "build record must prove detached signature verification");
+  assert.equal(record.signatureFingerprint, source.releaseSignerFingerprint, "build record signer must match source.json");
   assert.match(String(record.configureCommand ?? ""), /perl Configure VC-WIN64A/u);
   assert.match(String(record.buildCommand ?? ""), /nmake/u);
   assert.ok(extractVersion(record.nasm), "build record must include NASM version");
@@ -470,7 +471,11 @@ function runCleanLadybugChild() {
     "    await execute(conn, \"MATCH (a:A) WHERE a.id = \" + index + \" SET a.name = 'after_\" + index + \"'\");",
     "    const rows = await execute(conn, 'MATCH (a:A) WHERE a.id = ' + index + ' RETURN a.name AS name', true);",
     "    assert.equal(rows[0]?.name, 'after_' + index);",
+    "    const ftsRows = await execute(conn, \"CALL QUERY_FTS_INDEX('A', 'a_idx', 'after_\" + index + \"') RETURN node.id AS id\", true);",
+    "    assert.deepEqual(ftsRows.map((row) => Number(row.id)), [index]);",
     "    await execute(conn, 'MATCH (a:A) WHERE a.id = ' + index + ' DELETE a');",
+    "    const deletedRows = await execute(conn, \"CALL QUERY_FTS_INDEX('A', 'a_idx', 'after_\" + index + \"') RETURN node.id AS id\", true);",
+    "    assert.deepEqual(deletedRows, []);",
     "  }",
     "  console.log(JSON.stringify({ mode: 'clean-env-ladybug-fts', iterations: 5 }));",
     "} finally {",
@@ -555,6 +560,7 @@ async function main() {
     source: {
       releaseSignerFingerprint: source.releaseSignerFingerprint,
       sha256: source.sourceSha256,
+      signatureFingerprint: buildRecord.signatureFingerprint,
       signatureUrl: source.signatureUrl,
       signatureVerified: buildRecord.signatureVerified,
       sourceUrl: source.sourceUrl,

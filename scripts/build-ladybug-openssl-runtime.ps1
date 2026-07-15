@@ -146,7 +146,14 @@ try {
   $fingerprints = Get-Content $fingerprintOut -Raw
   if ($fingerprints -notmatch $source.releaseSignerFingerprint) { throw "Committed key bundle does not contain expected fingerprint $($source.releaseSignerFingerprint)" }
   Run-Logged $gpg @("--batch", "--yes", "--dearmor", "--output", $keyringArg, $keyPathArg) $repoRoot
-  Run-Logged $gpgv @("--keyring", $keyringArg, $signaturePathArg, $downloadPathArg) $repoRoot
+  $signatureVerification = Invoke-Captured $gpgv @("--status-fd=1", "--keyring", $keyringArg, $signaturePathArg, $downloadPathArg) $repoRoot
+  if ($signatureVerification.ExitCode -ne 0) { throw "OpenSSL release signature verification failed with exit $($signatureVerification.ExitCode): $($signatureVerification.Output)" }
+  $validSignature = [regex]::Match($signatureVerification.Output, '(?m)^\[GNUPG:\] VALIDSIG ([0-9A-Fa-f]{40})\b')
+  if (-not $validSignature.Success) { throw "OpenSSL release signature verification did not report a VALIDSIG fingerprint: $($signatureVerification.Output)" }
+  $signatureFingerprint = $validSignature.Groups[1].Value.ToUpperInvariant()
+  if ($signatureFingerprint -ne $source.releaseSignerFingerprint.ToUpperInvariant()) {
+    throw "OpenSSL release signature fingerprint mismatch: expected $($source.releaseSignerFingerprint), got $signatureFingerprint"
+  }
 
   $perlOverride = $env:SDL_OPENSSL_PERL
   $nasmOverride = $env:SDL_OPENSSL_NASM
@@ -232,6 +239,7 @@ try {
   $record = [ordered]@{
     sourceSha256 = $actualHash
     signatureVerified = $true
+    signatureFingerprint = $signatureFingerprint
     gpg = $gpgVersion
     gpgPath = $gpg
     gpgv = $gpgvVersion

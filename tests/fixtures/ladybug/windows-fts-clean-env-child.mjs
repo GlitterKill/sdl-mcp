@@ -76,6 +76,17 @@ async function execute(conn, query, rows = false) {
   }
 }
 
+async function queryFtsIds(conn, term) {
+  const rows = await execute(
+    conn,
+    "CALL QUERY_FTS_INDEX('A', 'a_idx', '" +
+      term +
+      "') RETURN node.id AS id",
+    true,
+  );
+  return rows.map((row) => Number(row.id)).sort((left, right) => left - right);
+}
+
 function findExtension(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
@@ -430,7 +441,9 @@ async function fixedRegression() {
         true,
       );
       assert.equal(rows[0]?.name, "after_" + index);
+      assert.deepEqual(await queryFtsIds(conn, "after_" + index), [index]);
       await execute(conn, "MATCH (a:A) WHERE a.id = " + index + " DELETE a");
+      assert.deepEqual(await queryFtsIds(conn, "after_" + index), []);
     }
     console.log(JSON.stringify({ phase: "mutation", iterations: 25 }));
     await conn.close();

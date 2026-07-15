@@ -15,7 +15,7 @@ permissions:
 
 env:
   PACKAGE_NAME: "@sdl-mcp/ladybug-openssl-win32-x64"
-  PACKAGE_VERSION: "3.5.7-sdl.1"
+  PACKAGE_VERSION: "3.5.7-sdl.2"
   PACKAGE_DIR: ladybug-openssl/npm/win32-x64
 
 jobs:

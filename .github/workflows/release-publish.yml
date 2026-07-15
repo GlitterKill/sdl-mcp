@@ -167,16 +167,24 @@ jobs:
           if-no-files-found: error
 
   verify-packed-install:
-    name: Verify Packed Install (${{ matrix.os }})
+    name: Verify Packed Install (${{ matrix.os }}, accelerators=${{ matrix.accelerators }})
     runs-on: ${{ matrix.os }}
-    needs: resolve-version
+    needs:
+      - resolve-version
+      - build-native
     if: needs.resolve-version.outputs.should_publish == 'true'
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
+        include:
+          - os: windows-latest
+            accelerators: included
+          - os: windows-latest
+            accelerators: disabled
+          - os: ubuntu-latest
+            accelerators: included
+          - os: macos-latest
+            accelerators: included
     env:
       VERSION: ${{ needs.resolve-version.outputs.version }}
       SDL_MCP_SKIP_MODEL_DOWNLOAD: "1"
@@ -207,6 +215,22 @@ jobs:
           npm version "${VERSION}" --no-git-tag-version --allow-same-version
           node scripts/sync-native-version.mjs "${VERSION}"
 
+      - name: Download Windows native artifact
+        if: matrix.os == 'windows-latest' && matrix.accelerators == 'included'
+        uses: actions/download-artifact@v7
+        with:
+          name: bindings-x86_64-pc-windows-msvc
+          path: native/artifacts/bindings-x86_64-pc-windows-msvc
+
+      - name: Stage Windows native package
+        if: matrix.os == 'windows-latest' && matrix.accelerators == 'included'
+        shell: bash
+        run: |
+          set -euo pipefail
+          native_node=$(find native/artifacts/bindings-x86_64-pc-windows-msvc -name "*.node" -type f | head -n 1)
+          test -n "${native_node}"
+          cp "${native_node}" native/npm/win32-x64-msvc/sdl-mcp-native.win32-x64-msvc.node
+
       - name: Build runtime package
         run: npm run build:all
 
@@ -216,17 +240,92 @@ jobs:
           set -euo pipefail
           mkdir -p release-pack
           npm pack --pack-destination release-pack
+          if [[ "${{ matrix.os }}" == "windows-latest" && "${{ matrix.accelerators }}" == "included" ]]; then
+            # The main publish is gated by this job, so verify with the native tarballs built in this run.
+            npm pack ./native/npm/win32-x64-msvc --pack-destination release-pack
+            npm pack ./native --pack-destination release-pack
+          fi
 
-      - name: Install packed package and verify grammars
+      - name: Install packed package and verify runtime
         shell: bash
         run: |
           set -euo pipefail
-          tarball=$(node -e "const fs=require('fs');const path=require('path');const f=fs.readdirSync('release-pack').find((name)=>name.endsWith('.tgz'));if(!f)process.exit(1);console.log(path.resolve('release-pack',f).replace(/\\\\/g,'/'));")
+          tarball=$(node -e "const fs=require('fs');const path=require('path');const f='sdl-mcp-'+process.env.VERSION+'.tgz';if(!fs.existsSync(path.join('release-pack',f)))process.exit(1);console.log(path.resolve('release-pack',f).replace(/\\\\/g,'/'));")
+          fixture_test=$(node -e "console.log(require('path').resolve('tests/integration/live-index-symbol-fts-crash.test.ts').replace(/\\\\/g,'/'))")
+          fixture_child=$(node -e "console.log(require('path').resolve('tests/fixtures/ladybug/windows-fts-clean-env-child.mjs').replace(/\\\\/g,'/'))")
+          planner_source=$(node -e "console.log(require('path').resolve('src/agent/planner.ts').replace(/\\\\/g,'/'))")
+          install_args=("${tarball}" "--legacy-peer-deps")
+          if [[ "${{ matrix.os }}" == "windows-latest" && "${{ matrix.accelerators }}" == "included" ]]; then
+            native_tarball=$(node -e "console.log(require('path').resolve('release-pack/sdl-mcp-native-'+process.env.VERSION+'.tgz').replace(/\\\\/g,'/'))")
+            native_platform_tarball=$(node -e "console.log(require('path').resolve('release-pack/sdl-mcp-native-win32-x64-msvc-'+process.env.VERSION+'.tgz').replace(/\\\\/g,'/'))")
+            install_args+=("${native_tarball}" "${native_platform_tarball}")
+          fi
           smoke_dir=$(node -e "const fs=require('fs');const os=require('os');const path=require('path');console.log(fs.mkdtempSync(path.join(os.tmpdir(),'sdl-mcp-pack-smoke-')).replace(/\\\\/g,'/'));")
           cd "${smoke_dir}"
           npm init -y > /dev/null
-          npm install "${tarball}" --legacy-peer-deps --omit=optional
+          npm pkg set type=module
+          npm install "${install_args[@]}"
           node node_modules/sdl-mcp/scripts/postinstall-tree-sitter.mjs --verify-only
+
+          openssl_package="node_modules/@sdl-mcp/ladybug-openssl-win32-x64/package.json"
+          ladybug_platform_package="node_modules/@ladybugdb/core-win32-x64/package.json"
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            node -e "const fs=require('fs');if(!fs.existsSync('$ladybug_platform_package'))throw new Error('missing Ladybug platform binary: $ladybug_platform_package')"
+          fi
+          if [[ "${{ matrix.os }}" == "windows-latest" && "${{ matrix.accelerators }}" == "included" ]]; then
+            node -e "const fs=require('fs');for(const file of ['$openssl_package','node_modules/sdl-mcp-native/package.json','node_modules/sdl-mcp-native-win32-x64-msvc/package.json'])if(!fs.existsSync(file))throw new Error('missing packed-install accelerator: '+file)"
+          elif [[ "${{ matrix.os }}" != "windows-latest" ]]; then
+            node -e "const fs=require('fs');if(fs.existsSync('$openssl_package'))throw new Error('Windows OpenSSL package was not filtered')"
+          fi
+
+          if [[ "${{ matrix.os }}" == "windows-latest" && "${{ matrix.accelerators }}" == "disabled" ]]; then
+            printf '%s\n' '{"repos":[],"policy":{}}' > sdlmcp.config.json
+            node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import path from "node:path";
+          import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+          import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+          const client = new Client({ name: "release-packed-install", version: "1.0.0" });
+          const transport = new StdioClientTransport({
+            command: process.execPath,
+            args: ["node_modules/sdl-mcp/dist/main.js"],
+            env: {
+              ...process.env,
+              NODE_ENV: "test",
+              SDL_CONFIG: path.resolve("sdlmcp.config.json"),
+              SDL_GRAPH_DB_PATH: path.resolve("packed-install-graph.lbug"),
+              SDL_MCP_DISABLE_NATIVE_ADDON: "1",
+              SDL_CONSOLE_LOGGING: "false",
+            },
+          });
+          try {
+            await client.connect(transport);
+            const response = await client.listTools();
+            assert.ok(response.tools.some((tool) => tool.name === "sdl.info"));
+            const info = await client.callTool({ name: "sdl.info", arguments: { redactPaths: true } });
+            assert.equal(info.structuredContent?.ladybug?.available, true);
+            assert.equal(info.structuredContent?.native?.disabledByEnv, true);
+          } finally {
+            await client.close().catch(() => {});
+          }
+          NODE
+          fi
+
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            # Node 24 does not strip TypeScript under node_modules. Build a temporary harness beside it.
+            mkdir -p "${smoke_dir}/tests/integration" "${smoke_dir}/tests/fixtures/ladybug" "${smoke_dir}/src/agent"
+            cp "${fixture_test}" "${smoke_dir}/tests/integration/live-index-symbol-fts-crash.test.ts"
+            cp "${fixture_child}" "${smoke_dir}/tests/fixtures/ladybug/windows-fts-clean-env-child.mjs"
+            cp "${planner_source}" "${smoke_dir}/src/agent/planner.ts"
+            cp -R node_modules/sdl-mcp/dist "${smoke_dir}/dist"
+            if [[ "${{ matrix.accelerators }}" == "included" ]]; then
+              SDL_LADYBUG_WINDOWS_FTS_TEST_MODE=fixed-regression SDL_LADYBUG_WINDOWS_FTS_REQUIRE_MODE=1 \
+                node --experimental-strip-types --test-concurrency=1 --test tests/integration/live-index-symbol-fts-crash.test.ts
+            else
+              SDL_MCP_DISABLE_NATIVE_ADDON=1 node --experimental-strip-types --test --test-name-pattern="probes upstream" tests/integration/live-index-symbol-fts-crash.test.ts
+            fi
+          fi
 
   publish:
     name: Publish npm Packages
