@@ -75,7 +75,11 @@ import {
   resolveProviderFirstSemanticReadinessDeferral,
   runProviderFirstSemanticReadinessRefresh,
 } from "../../dist/indexer/provider-first/semantic-readiness.js";
-import { exec as dbExec, queryAll } from "../../dist/db/ladybug-core.js";
+import {
+  exec as dbExec,
+  queryAll,
+  toNumber,
+} from "../../dist/db/ladybug-core.js";
 import { createBaseSchema } from "../../dist/db/ladybug-schema.js";
 import { normalizePath } from "../../dist/util/paths.js";
 import type { ProviderFactSet } from "../../dist/indexer/provider-first/types.js";
@@ -8263,6 +8267,74 @@ describe("provider-first indexing foundation", () => {
       assert.equal(summary.shadowDb?.status, "loaded");
       assert.equal(summary.shadowDb?.actualCounts.files, rows.files.length);
     } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("skips unsafe large shadow finalization before mutating Symbol rows", async () => {
+    const root = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-finalize-large-guard-"),
+    );
+    const activeDbPath = join(root, "active.lbug");
+    const shadowDbPath = join(root, "shadow.lbug");
+    const kuzu = await import("kuzu");
+    const activeDb = new kuzu.Database(activeDbPath);
+    const activeConn = new kuzu.Connection(activeDb);
+    const shadowDb = new kuzu.Database(shadowDbPath);
+    const shadowConn = new kuzu.Connection(shadowDb);
+    let verifyDb: import("kuzu").Database | undefined;
+    let verifyConn: import("kuzu").Connection | undefined;
+
+    try {
+      await createBaseSchema(activeConn);
+      await createBaseSchema(shadowConn);
+      await dbExec(
+        shadowConn,
+        `UNWIND $symbolIds AS symbolId
+         CREATE (:Symbol {symbolId: symbolId})`,
+        {
+          symbolIds: Array.from(
+            { length: 2_049 },
+            (_, index) => `shadow-symbol-${index}`,
+          ),
+        },
+      );
+      await shadowConn.close();
+      await shadowDb.close();
+
+      const summary = await finalizeProviderFirstShadowDb({
+        activeConn,
+        repoId: "repo",
+        versionId: "version-1",
+        shadowDbPath,
+      });
+
+      assert.equal(summary.status, "skipped");
+      assert.match(
+        summary.reasons.join("\n"),
+        /cannot safely reset 2049 COPY-loaded Symbol rows/,
+      );
+
+      verifyDb = new kuzu.Database(shadowDbPath);
+      verifyConn = new kuzu.Connection(verifyDb);
+      const counts = await queryAll<{
+        physicalTotal: unknown;
+        distinctTotal: unknown;
+      }>(
+        verifyConn,
+        `MATCH (s:Symbol)
+         RETURN count(s) AS physicalTotal,
+                count(DISTINCT s.symbolId) AS distinctTotal`,
+      );
+      assert.equal(toNumber(counts[0]?.physicalTotal), 2_049);
+      assert.equal(toNumber(counts[0]?.distinctTotal), 2_049);
+    } finally {
+      await activeConn.close().catch(() => {});
+      await activeDb.close().catch(() => {});
+      await shadowConn.close().catch(() => {});
+      await shadowDb.close().catch(() => {});
+      await verifyConn?.close().catch(() => {});
+      await verifyDb?.close().catch(() => {});
       rmSync(root, { recursive: true, force: true });
     }
   });

@@ -36,6 +36,7 @@ const CSV_NULL_SENTINEL = "\\N";
 const CSV_ARRAY_NULL = Symbol("symbolCsvArrayNull");
 const DEFAULT_SYMBOL_SNAPSHOT_PAGE_SIZE = 32_768;
 const MAX_SYMBOL_SNAPSHOT_PAGE_SIZE = 65_536;
+const LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT = 2_048;
 
 export async function countScipProviderSymbols(
   conn: Connection,
@@ -836,6 +837,24 @@ export async function pruneIsolatedPlaceholderSymbols(
   );
   const symbolIds = rows.map((row) => row.symbolId);
   if (symbolIds.length === 0) return 0;
+
+  const symbolCountRow = await querySingle<{ count: unknown }>(
+    conn,
+    `MATCH (s:Symbol) RETURN count(s) AS count`,
+  );
+  const symbolCount = toNumber(symbolCountRow?.count ?? 0);
+  if (symbolCount > LADYBUG_SAFE_SYMBOL_DELETE_ROW_LIMIT) {
+    // LadybugDB 0.18.1 corrupts earlier COPY-loaded Symbol vectors when a
+    // large Symbol table's tail nodes or relationships are deleted or mutated.
+    // Retain isolated non-real placeholders until the engine can delete them
+    // safely; stable placeholder IDs keep this bounded across unchanged runs.
+    logger.debug("Retaining isolated placeholders for LadybugDB 0.18.1 safety", {
+      repoId,
+      retained: symbolIds.length,
+      symbolCount,
+    });
+    return 0;
+  }
 
   const cleanup = {
     symbolInFile: await cleanupPatternExists(

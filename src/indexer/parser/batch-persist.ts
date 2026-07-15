@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 
-import { getLadybugConn, withWriteConn } from "../../db/ladybug.js";
+import { withWriteConn } from "../../db/ladybug.js";
 import * as ladybugDb from "../../db/ladybug-queries.js";
 import type { SymbolRow } from "../../db/ladybug-symbols.js";
 import type {
@@ -422,17 +422,6 @@ function recordPass1RepairCauses(
   }
 }
 
-async function filterExistingSymbolIds(symbolIds: string[]): Promise<string[]> {
-  if (symbolIds.length === 0) return [];
-  const conn = await getLadybugConn();
-  const existingSymbolIds = await ladybugDb.getExistingSymbolIds(
-    conn,
-    symbolIds,
-  );
-  if (existingSymbolIds.size === 0) return [];
-  return symbolIds.filter((symbolId) => existingSymbolIds.has(symbolId));
-}
-
 /**
  * Pass 1 replaces a file's symbols before writing its dependency edges. Edges
  * whose endpoints are both real symbols inserted by the same batch can skip
@@ -784,8 +773,6 @@ export class BatchPersistAccumulator {
     const incomingSymbolIds = [
       ...new Set(batch.symbols.map((symbol) => symbol.symbolId)),
     ];
-    const existingIncomingSymbolIds =
-      await filterExistingSymbolIds(incomingSymbolIds);
 
     await withWriteConn(async (wConn) => {
       await ladybugDb.withTransaction(wConn, async (txConn) => {
@@ -797,14 +784,13 @@ export class BatchPersistAccumulator {
 
     await withWriteConn(async (wConn) => {
       await ladybugDb.withTransaction(wConn, async (txConn) => {
+        // Delete every incoming ID on the serialized writer. A separate
+        // existence probe can become stale between fresh-copy flushes.
         await timePhase(
           "deleteIncomingSymbols",
-          existingIncomingSymbolIds.length,
+          incomingSymbolIds.length,
           async () => {
-            await ladybugDb.deleteSymbolsByIds(
-              txConn,
-              existingIncomingSymbolIds,
-            );
+            await ladybugDb.deleteSymbolsByIds(txConn, incomingSymbolIds);
           },
         );
       });

@@ -1,9 +1,22 @@
 import { readFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
+import {
+  closeLadybugDb,
+  initLadybugDb,
+  withWriteConn,
+} from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { unresolvedCallSymbolId } from "../../dist/db/symbol-placeholders.js";
 import { BatchPersistAccumulator } from "../../dist/indexer/parser/batch-persist.js";
-import type { EdgeRow } from "../../dist/db/ladybug-queries.js";
+import type {
+  EdgeRow,
+  SymbolRow,
+} from "../../dist/db/ladybug-queries.js";
 
 function edge(overrides: Partial<EdgeRow> = {}): EdgeRow {
   return {
@@ -264,47 +277,289 @@ describe("BatchPersistAccumulator", () => {
     );
   });
 
-  it("supports fresh-copy symbol batches for provider-first fallback", async () => {
-    const fs = await import("node:fs");
-    const path = await import("node:path");
-    const { fileURLToPath } = await import("node:url");
-    const __filename = fileURLToPath(import.meta.url);
-    const srcPath = path.resolve(
-      path.dirname(__filename),
-      "..",
-      "..",
-      "src",
-      "indexer",
-      "parser",
-      "batch-persist.ts",
-    );
-    const content = fs.readFileSync(srcPath, "utf-8");
+  it("preserves fresh-copy identities across flushes and placeholder pruning", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "sdl-fresh-copy-batch-"));
+    const graphDbPath = join(tempRoot, "graph.lbug");
+    const repoId = "fresh-copy-batch-repo";
+    const providerFileId = "provider-file";
+    const firstFallbackFileId = "fallback-first-file";
+    const secondFallbackFileId = "fallback-second-file";
+    const now = "2026-07-15T00:00:00.000Z";
+    const symbolId = (index: number): string =>
+      `fresh-copy-symbol-${String(index).padStart(4, "0")}`;
+    const symbol = (
+      index: number,
+      name: string,
+      fileId: string,
+    ): SymbolRow => ({
+      symbolId: symbolId(index),
+      repoId,
+      fileId,
+      kind: "function",
+      name,
+      exported: false,
+      visibility: null,
+      language: "ts",
+      rangeStartLine: index + 1,
+      rangeStartCol: 0,
+      rangeEndLine: index + 1,
+      rangeEndCol: 1,
+      astFingerprint: `fingerprint-${index}`,
+      signatureJson: null,
+      summary: null,
+      invariantsJson: null,
+      sideEffectsJson: null,
+      updatedAt: now,
+    });
 
-    assert.match(
-      content,
-      /symbolWriteMode\?:\s*"merge"\s*\|\s*"fresh-copy"/,
-      "BatchPersistAccumulator should expose the fresh-copy provider fallback mode",
-    );
-    assert.match(
-      content,
-      /this\.symbolWriteMode\s*===\s*"fresh-copy"/,
-      "fresh-copy mode should have a dedicated write path",
-    );
-    assert.match(
-      content,
-      /filterExistingSymbolIds\(incomingSymbolIds\)/,
-      "fresh-copy batches should prefilter incoming IDs before delete",
-    );
-    assert.match(
-      content,
-      /deleteSymbolsByIds\(\s*txConn,\s*existingIncomingSymbolIds,\s*\)/,
-      "fresh-copy batches should clear only colliding stubs or stale symbols before COPY",
-    );
-    assert.match(
-      content,
-      /upsertKnownFileSymbols\(txConn,\s*batch\.symbols\)/,
-      "fresh-copy batches should use the duplicate-key-safe symbol COPY writer",
-    );
+    try {
+      await closeLadybugDb();
+      await initLadybugDb(graphDbPath);
+
+      await withWriteConn(async (conn) => {
+        await ladybugDb.upsertRepo(conn, {
+          repoId,
+          rootPath: tempRoot,
+          configJson: "{}",
+          createdAt: now,
+        });
+        await ladybugDb.upsertFileBatch(
+          conn,
+          [
+            { fileId: providerFileId, relPath: "src/provider.ts" },
+            {
+              fileId: firstFallbackFileId,
+              relPath: "src/fallback-first.ts",
+            },
+            {
+              fileId: secondFallbackFileId,
+              relPath: "src/fallback-second.ts",
+            },
+          ].map(({ fileId, relPath }) => ({
+            fileId,
+            repoId,
+            relPath,
+            contentHash: `${fileId}-hash`,
+            language: "ts",
+            byteSize: 1,
+            lastIndexedAt: now,
+          })),
+        );
+        await ladybugDb.upsertKnownFileSymbols(
+          conn,
+          Array.from({ length: 4_096 }, (_, index) =>
+            symbol(index, `provider-${index}`, providerFileId),
+          ),
+        );
+      });
+
+      const accumulator = new BatchPersistAccumulator(189, {
+        autoDrain: false,
+        collectDiagnostics: true,
+        symbolWriteMode: "fresh-copy",
+      });
+      accumulator.addSymbols(
+        Array.from({ length: 189 }, (_, offset) => {
+          const index = 4_096 + offset;
+          return symbol(index, `fallback-first-${index}`, firstFallbackFileId);
+        }),
+      );
+      accumulator.addSymbols([
+        ...Array.from({ length: 10 }, (_, offset) => {
+          const index = 4_096 + offset;
+          return symbol(
+            index,
+            `fallback-second-${index}`,
+            secondFallbackFileId,
+          );
+        }),
+        ...Array.from({ length: 26 }, (_, offset) => {
+          const index = 4_285 + offset;
+          return symbol(
+            index,
+            `fallback-second-${index}`,
+            secondFallbackFileId,
+          );
+        }),
+      ]);
+      assert.equal(accumulator.queueDepth, 1);
+      assert.equal(accumulator.pending, 36);
+      await accumulator.drain();
+      assert.equal(accumulator.getDiagnostics().batches, 2);
+
+      await withWriteConn(async (conn) => {
+        const assertSymbolCounts = async (
+          physicalTotal: number,
+          distinctTotal: number,
+        ): Promise<void> => {
+          const counts = await ladybugDb.querySingle<{
+            physicalTotal: unknown;
+            distinctTotal: unknown;
+          }>(
+            conn,
+            `MATCH (s:Symbol)
+             RETURN count(s) AS physicalTotal,
+                    count(DISTINCT s.symbolId) AS distinctTotal`,
+          );
+          assert.equal(ladybugDb.toNumber(counts?.physicalTotal), physicalTotal);
+          assert.equal(ladybugDb.toNumber(counts?.distinctTotal), distinctTotal);
+        };
+
+        await assertSymbolCounts(4_311, 4_311);
+        await ladybugDb.insertKnownSymbolEdges(
+          conn,
+          Array.from({ length: 4_000 }, (_, index) => ({
+            repoId,
+            fromSymbolId: symbolId(index),
+            toSymbolId: symbolId(index + 1),
+            edgeType: "call",
+            weight: 1,
+            confidence: 0.95,
+            resolution: "exact",
+            resolverId: "fresh-copy-regression",
+            resolutionPhase: "pass1",
+            provenance: "fresh-copy-regression",
+            createdAt: now,
+          })),
+        );
+        await assertSymbolCounts(4_311, 4_311);
+
+        // Finalization prunes placeholder nodes created while preparing fresh
+        // relationship COPY. LadybugDB 0.18.1 must not alias the preceding
+        // Symbol COPY vectors when those placeholders are deleted.
+        await ladybugDb.ensureDependencyTargetsForKnownSourceEdges(
+          conn,
+          Array.from({ length: 58 }, (_, index) => ({
+            repoId,
+            fromSymbolId: symbolId(100),
+            toSymbolId: unresolvedCallSymbolId(`unused-${index}`),
+            edgeType: "call",
+            weight: 1,
+            confidence: 0.5,
+            resolution: "unresolved",
+            resolverId: "fresh-copy-regression",
+            resolutionPhase: "pass1",
+            provenance: "fresh-copy-regression",
+            createdAt: now,
+            targetMeta: {
+              symbolStatus: "unresolved",
+              placeholderKind: "call",
+              placeholderTarget: `unused-${index}`,
+            },
+          })),
+          { measurePhase: async (_phaseName, body) => await body() },
+        );
+        await assertSymbolCounts(4_369, 4_369);
+        assert.equal(
+          await ladybugDb.pruneIsolatedPlaceholderSymbols(conn, repoId),
+          0,
+        );
+
+        const counts = await ladybugDb.querySingle<{
+          physicalTotal: unknown;
+          distinctTotal: unknown;
+        }>(
+          conn,
+          `MATCH (s:Symbol)
+           RETURN count(s) AS physicalTotal,
+                  count(DISTINCT s.symbolId) AS distinctTotal`,
+        );
+        assert.equal(ladybugDb.toNumber(counts?.physicalTotal), 4_369);
+        assert.equal(ladybugDb.toNumber(counts?.distinctTotal), 4_369);
+
+        const activeCounts = await ladybugDb.querySingle<{
+          physicalTotal: unknown;
+          distinctTotal: unknown;
+        }>(
+          conn,
+          `MATCH (s:Symbol {repoId: $repoId})
+           WHERE coalesce(s.symbolStatus, 'real') = 'real'
+             AND (s)-[:SYMBOL_IN_FILE]->(:File)
+           RETURN count(s) AS physicalTotal,
+                  count(DISTINCT s.symbolId) AS distinctTotal`,
+          { repoId },
+        );
+        assert.equal(ladybugDb.toNumber(activeCounts?.physicalTotal), 4_311);
+        assert.equal(ladybugDb.toNumber(activeCounts?.distinctTotal), 4_311);
+
+        const retainedPlaceholders = await ladybugDb.querySingle<{
+          count: unknown;
+        }>(
+          conn,
+          `MATCH (s:Symbol {repoId: $repoId, symbolStatus: 'unresolved'})
+           WHERE (s)-[:SYMBOL_IN_REPO]->(:Repo {repoId: $repoId})
+             AND NOT (s)-[:SYMBOL_IN_FILE]->(:File)
+             AND NOT (:Symbol)-[:DEPENDS_ON]->(s)
+             AND NOT (s)-[:DEPENDS_ON]->(:Symbol)
+           RETURN count(s) AS count`,
+          { repoId },
+        );
+        assert.equal(ladybugDb.toNumber(retainedPlaceholders?.count), 58);
+
+        const mappings = await ladybugDb.queryAll<{
+          symbolId: string;
+          name: string;
+          astFingerprint: string;
+          fileId: string;
+        }>(
+          conn,
+          `MATCH (s:Symbol)-[:SYMBOL_IN_FILE]->(f:File)
+           WHERE s.symbolId IN $symbolIds
+           RETURN s.symbolId AS symbolId,
+                  s.name AS name,
+                  s.astFingerprint AS astFingerprint,
+                  f.fileId AS fileId
+           ORDER BY s.symbolId`,
+          {
+            symbolIds: [0, 2_047, 2_048, 4_096, 4_284, 4_285].map(symbolId),
+          },
+        );
+        assert.deepEqual(mappings, [
+          {
+            symbolId: symbolId(0),
+            name: "provider-0",
+            astFingerprint: "fingerprint-0",
+            fileId: providerFileId,
+          },
+          {
+            symbolId: symbolId(2_047),
+            name: "provider-2047",
+            astFingerprint: "fingerprint-2047",
+            fileId: providerFileId,
+          },
+          {
+            symbolId: symbolId(2_048),
+            name: "provider-2048",
+            astFingerprint: "fingerprint-2048",
+            fileId: providerFileId,
+          },
+          {
+            symbolId: symbolId(4_096),
+            name: "fallback-second-4096",
+            astFingerprint: "fingerprint-4096",
+            fileId: secondFallbackFileId,
+          },
+          {
+            symbolId: symbolId(4_284),
+            name: "fallback-first-4284",
+            astFingerprint: "fingerprint-4284",
+            fileId: firstFallbackFileId,
+          },
+          {
+            symbolId: symbolId(4_285),
+            name: "fallback-second-4285",
+            astFingerprint: "fingerprint-4285",
+            fileId: secondFallbackFileId,
+          },
+        ]);
+      });
+    } finally {
+      try {
+        await closeLadybugDb();
+      } finally {
+        await rm(tempRoot, { recursive: true, force: true });
+      }
+    }
   });
 
   it("splits pass-1 edges so prepared non-real or known real endpoints use COPY", async () => {

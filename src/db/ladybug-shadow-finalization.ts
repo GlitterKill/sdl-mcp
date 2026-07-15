@@ -39,6 +39,8 @@ import { getVersion, type SymbolVersionRow } from "./ladybug-versions.js";
 import { normalizePath } from "../util/paths.js";
 import { canonicalizeLanguageId } from "../indexer/language.js";
 
+const LADYBUG_SAFE_SHADOW_RESET_ROW_LIMIT = 2_048;
+
 export type ProviderFirstShadowFinalizationStatus =
   | "finalized"
   | "skipped"
@@ -400,6 +402,24 @@ export async function finalizeProviderFirstShadowDb(
     const db = new kuzu.Database(shadowDbPath);
     const shadowConn = new kuzu.Connection(db);
     try {
+      const symbolCountRow = await querySingle<{ count: unknown }>(
+        shadowConn,
+        `MATCH (s:Symbol) RETURN count(s) AS count`,
+      );
+      const symbolCount = toNumber(symbolCountRow?.count ?? 0);
+      if (symbolCount > LADYBUG_SAFE_SHADOW_RESET_ROW_LIMIT) {
+        // LadybugDB 0.18.1 aliases earlier COPY-loaded Symbol vectors when
+        // resetBulkFinalizationTargets mutates a large table's tail. Fail
+        // closed before reset so the staged candidate remains uncorrupted.
+        return {
+          status: "skipped",
+          shadowDbPath,
+          reasons: [
+            `LadybugDB 0.18.1 cannot safely reset ${symbolCount} COPY-loaded Symbol rows above ${LADYBUG_SAFE_SHADOW_RESET_ROW_LIMIT}; shadow activation remains disabled`,
+          ],
+        };
+      }
+
       const stagedAuxiliarySymbolIds = await readStagedAuxiliarySymbolIds(
         shadowConn,
         params.repoId,
