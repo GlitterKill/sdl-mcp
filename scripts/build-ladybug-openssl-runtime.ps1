@@ -206,7 +206,7 @@ try {
   if (-not $sourceDir) { throw "OpenSSL source directory missing after extraction under: $tempRoot" }
   Run-Logged $perl @("Configure", $source.configureTarget, "shared", "--release", "--prefix=$installDir", "--openssldir=$installDir\ssl") $sourceDir
   Run-Logged $nmake @() $sourceDir
-  Run-Logged $nmake @("test") $sourceDir
+  Run-Logged $nmake @("test") $sourceDir 3600
   Run-Logged $nmake @("install_sw") $sourceDir
 
   Remove-Item -LiteralPath (Join-Path $binDir "*.dll") -Force -ErrorAction SilentlyContinue
