@@ -148,3 +148,5 @@ if (!nativeBinding) {
 module.exports.parseFiles = nativeBinding.parseFiles;
 module.exports.hashContentNative = nativeBinding.hashContentNative;
 module.exports.generateSymbolIdNative = nativeBinding.generateSymbolIdNative;
+module.exports.preloadWindowsLibrary = nativeBinding.preloadWindowsLibrary;
+module.exports.releaseWindowsLibrary = nativeBinding.releaseWindowsLibrary;
