@@ -37,19 +37,6 @@ jobs:
           registry-url: https://registry.npmjs.org
           cache: npm
 
-      - name: Preflight npm publish scope
-        if: ${{ inputs.dry_run == false }}
-        shell: pwsh
-        run: |
-          $whoami = npm whoami
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Write-Host "npm authenticated as $whoami"
-          $scopePackages = npm access list packages @sdl-mcp --json
-          if ($LASTEXITCODE -ne 0) {
-            throw "npm scope @sdl-mcp is not visible to this token; create the scope or grant publish access before running the OpenSSL build."
-          }
-          $scopePackages | ConvertFrom-Json | Out-Null
-
       - name: Install NASM and Strawberry Perl
         shell: pwsh
         run: |
