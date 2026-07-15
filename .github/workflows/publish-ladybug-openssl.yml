@@ -148,9 +148,23 @@ jobs:
         shell: pwsh
         run: |
           $spec = "$env:PACKAGE_NAME@$env:PACKAGE_VERSION"
-          $metadata = npm view $spec --json | ConvertFrom-Json
-          if ($metadata.name -ne $env:PACKAGE_NAME -or $metadata.version -ne $env:PACKAGE_VERSION) {
-            throw "Registry metadata mismatch for $spec"
+          $metadata = $null
+          for ($attempt = 1; $attempt -le 30; $attempt++) {
+            $metadataJson = npm view $spec --json 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              $candidate = $metadataJson | ConvertFrom-Json
+              if ($candidate.name -eq $env:PACKAGE_NAME -and $candidate.version -eq $env:PACKAGE_VERSION) {
+                $metadata = $candidate
+                break
+              }
+            }
+
+            if ($attempt -eq 30) {
+              throw "Registry metadata mismatch for $spec after $attempt attempts"
+            }
+
+            Write-Host "Registry metadata for $spec is not visible yet; retrying in 20 seconds (attempt $attempt/30)."
+            Start-Sleep -Seconds 20
           }
           $packJson = npm pack $spec --json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
