@@ -109,6 +109,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   let dashboardHandle:
     | Awaited<ReturnType<typeof setupObservabilityDashboardSidecar>>
     | undefined;
+  let graphDbAvailable = false;
 
   const shutdownMgr = new ShutdownManager({
     log: (msg) => safeWriteStderr(`[sdl-mcp] ${msg}\n`),
@@ -137,7 +138,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   shutdownMgr.addCleanup("httpServer", () => httpHandle?.close());
   shutdownMgr.addCleanup("persistUsage", async () => {
     try {
-      if (tokenAccumulator.hasUsage) {
+      if (graphDbAvailable && tokenAccumulator.hasUsage) {
         await persistUsageSnapshot(tokenAccumulator.getSnapshot());
       }
     } catch (err) {
@@ -275,21 +276,36 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
   }
 
   try {
-  await initGraphDb(config, configPath);
+  try {
+    await initGraphDb(config, configPath);
+    graphDbAvailable = true;
+  } catch (error) {
+    graphDbAvailable = false;
+    writeServeStderrLine(
+      "[sdl-mcp] Graph database unavailable; DB-backed tools and indexing are disabled for this process: " +
+        (error instanceof Error ? error.message : String(error)),
+    );
+  }
 
   await loadConfiguredAdapterPlugins(config, configPath, (message) => {
     writeServeStderrLine(message);
   });
 
-  await ensureConfiguredReposRegistered(config, (message) => {
-    writeServeStderrLine(message);
-  });
+  if (graphDbAvailable) {
+    await ensureConfiguredReposRegistered(config, (message) => {
+      writeServeStderrLine(message);
+    });
 
-  await recoverStaleDerivedStateOnStartup(config, (message) => {
-    writeServeStderrLine(message);
-  });
+    await recoverStaleDerivedStateOnStartup(config, (message) => {
+      writeServeStderrLine(message);
+    });
 
-  await startPrefetchPolicy(config);
+    await startPrefetchPolicy(config);
+  } else {
+    writeServeStderrLine(
+      "[sdl-mcp] Skipping repository bootstrap, derived-state recovery, and prefetch startup because the graph database is unavailable.",
+    );
+  }
 
   // Pre-warm the local embeddings ONNX session if semantic search is on.
   // First semantic call paid ~2.7s for session creation; subsequent calls
@@ -324,7 +340,7 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     });
   }
 
-  if (config.indexing?.enableFileWatching && !options.noWatch) {
+  if (graphDbAvailable && config.indexing?.enableFileWatching && !options.noWatch) {
     writeServeStderrLine(
       `Starting file watchers for ${config.repos.length} repo(s)...`,
     );
@@ -352,10 +368,12 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
     writeServeStderrLine(`Watching ${watchers.length} repo(s)`);
   } else if (config.indexing?.enableFileWatching && options.noWatch) {
     writeServeStderrLine("File watching disabled by --no-watch");
+  } else if (!graphDbAvailable && config.indexing?.enableFileWatching) {
+    writeServeStderrLine("File watching disabled because the graph database is unavailable");
   }
 
   await configureDefaultLiveIndexCoordinator({
-    enabled: config.liveIndex?.enabled ?? true,
+    enabled: graphDbAvailable && (config.liveIndex?.enabled ?? true),
     debounceMs: config.liveIndex?.debounceMs,
     maxDraftFiles: config.liveIndex?.maxDraftFiles,
   });
@@ -368,14 +386,16 @@ export async function serveCommand(options: ServeOptions): Promise<void> {
       config.liveIndex?.idleCheckpointMs ??
       DEFAULT_IDLE_CHECKPOINT_QUIET_PERIOD_MS,
   });
-  if (config.liveIndex?.enabled ?? true) {
+  if (graphDbAvailable && (config.liveIndex?.enabled ?? true)) {
     idleMonitor.start();
   }
-  walMaintenance = createWalCheckpointMaintenance({
-    graphDbPath,
-    isIndexingActive,
-  });
-  walMaintenance.start();
+  if (graphDbAvailable) {
+    walMaintenance = createWalCheckpointMaintenance({
+      graphDbPath,
+      isIndexingActive,
+    });
+    walMaintenance.start();
+  }
 
   // For stdio: create a single MCPServer (only one client possible).
   // For HTTP: the transport creates per-session servers via createMCPServer().

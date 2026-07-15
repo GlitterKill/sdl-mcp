@@ -315,7 +315,7 @@ async function loadLadybug(): Promise<LadybugModule> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new DatabaseError(
-      `Graph database driver not available: ${msg}. The 'kuzu' package should be installed automatically as an optional dependency of sdl-mcp (backed by @ladybugdb/core). Try: npm install`,
+      `Graph database driver not available: ${msg}. The 'kuzu' package should be installed automatically as a dependency of sdl-mcp (backed by @ladybugdb/core). Try: npm install`,
     );
   }
 }
