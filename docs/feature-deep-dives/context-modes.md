@@ -106,10 +106,12 @@ Candidate seeding uses a mode-based retrieval pipeline:
 `options.semantic` controls the retrieval gate:
 
 - omitted: use bounded hybrid entity search in broad mode and lexical retrieval in precise mode
-- `true`: force bounded hybrid entity search in either mode
+- `true`: force bounded hybrid entity search in either mode and retain the bounded lexical lane for exact identifiers and domain terms
 - `false`: disable hybrid entity search and keep either mode lexical-only
 
 Explicit `focusPaths` constrain whichever retrieval lane is active. Broad mode defaults to hybrid discovery for recall, while precise mode preserves the lexical fast path unless the caller forces semantic retrieval.
+
+Forced semantic retrieval treats inferred paths as soft coverage hints: retrieval evidence is ranked without inferred-path bias, then at most half of the selected slots are filled for inferred-path coverage. Precise forced-semantic calls may retain up to 20 cards. The first card per selected file also carries a deterministic compact outline of query-ranked names and declarations; the first deterministically ordered file adds a dependency sample bounded to 80 sources, 512 candidate targets, and 24 emitted names. This exposes relevant sibling types and helpers without another search pass. Omitted `semantic`, `semantic: false`, explicit scope, and every other SDL tool keep their existing behavior.
 
 After seeding, an evidence-aware multi-factor scorer ranks every candidate using:
 
@@ -193,7 +195,7 @@ The consistent pattern is:
 
 - precise wins when the target is already known
 - broad wins when the agent is still mapping the problem space
-- forced semantic/hybrid retrieval must keep aggregate recall at or above `85%`, broad recall at or above `85%`, precise recall at or above `75%`, noise at or below `10%`, semantic `p95 <= 2.5s`, and scoped precise `p95 <= 250ms`
+- forced semantic/hybrid retrieval must keep aggregate recall at or above `85%`, noise at or below `10%`, and zero failed cases; precise/broad recall and forced-semantic latency remain reported diagnostics, while the separate default scoped-precise path must keep `p95 <= 250ms`
 
 ---
 

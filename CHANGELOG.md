@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Forced-semantic context recall**: `sdl.context` calls with `options.semantic: true` now retain bounded lexical coverage, balance inferred-path hints against retrieval ranking, keep up to 20 precise cards, and surface deterministic same-file outlines with a bounded first-file dependency sample. The unchanged 26-case benchmark now enforces `>=85%` expected-symbol recall, `<=10%` configured noise, and zero failures; omitted/false semantic modes and other tools are unchanged.
 - sdl.context: explicit focusPaths now scope hybrid retrieval instead of disabling it; precise mode enforces explicit focus paths strictly (empty result when nothing matches); inferred paths keep soft treatment; combined focusPaths/focusSymbols use intersection semantics; path-affinity ranking replaces the buried structural focus bonus; partial rung failures no longer mark evidence-bearing responses unsuccessful.
 
 ## [0.12.4] - 2026-07-14

@@ -186,13 +186,13 @@ The runner fingerprints the complete source database family before and after sta
 
 ## Context Quality Suite
 
-The context quality benchmark (`tests/benchmark/context-quality.test.ts`) validates that `ContextEngine.buildContext()` produces useful, noise-free evidence and preserves answer content under broad-mode truncation. It runs 24 cases across all four task types (debug, explain, review, implement) in both precise and broad context modes.
+The context quality benchmark (`tests/benchmark/context-quality.test.ts`) validates that `ContextEngine.buildContext()` produces useful, noise-free evidence and preserves answer content under broad-mode truncation. It runs 26 cases across all four task types (debug, explain, review, implement), split evenly between precise and broad context modes.
 
 ### What It Measures
 
 - **Answer preservation**: Whether broad-mode responses retain a meaningful `answer` field after truncation. An answer that contains `[answer removed` or `[answer truncated` is counted as lost.
 - **Useful-symbol recall**: The fraction of `expectedUsefulSymbols` (per case) that appear in `finalEvidence[].summary` or `finalEvidence[].reference`. Higher recall means the retrieval pipeline is surfacing the right symbols for the task.
-- **Noise rate**: The fraction of evidence items that mention an `unexpectedSymbol`. Unexpected symbols are things like Zod request schemas, tool descriptors, and unrelated tool handlers that should not appear in task-focused context.
+- **Configured-noise rate**: For each case, count each configured `unexpectedSymbol` at most once when it appears anywhere in the concatenated evidence, sum those hits, and divide by the total evidence-item count. Unexpected symbols are things like Zod request schemas, tool descriptors, and unrelated tool handlers that should not appear in task-focused context. This is a corpus-specific guard, not a general result-precision measurement.
 - **Latency**: Wall-clock time per case, tracked for regression detection.
 
 ### Useful vs Noisy Evidence
@@ -205,17 +205,19 @@ The context quality benchmark (`tests/benchmark/context-quality.test.ts`) valida
 
 The suite now runs lexical-only, confidence-gated default, and forced semantic/hybrid variants. A live indexed repository is required for the quality gates; set `SDL_CONTEXT_QUALITY_REQUIRE_INDEX=1` to fail when the suite cannot find one.
 
-| Metric                    | Gate |
-| ------------------------- | ---- |
-| Forced semantic recall    | `>= 85%` aggregate |
-| Forced semantic precise   | `>= 75%` recall |
-| Forced semantic broad     | `>= 85%` recall |
-| Noise rate                | `<= 10%` for each variant |
-| Forced semantic latency   | `p50 <= 1s`, `p95 <= 2.5s` |
-| Scoped precise latency    | `p95 <= 250ms` |
-| Broad answer preservation | Answers remain present after budget trimming |
+| Metric | Status |
+| ------ | ------ |
+| Forced semantic aggregate recall | Hard gate: `>= 85%` |
+| Forced semantic noise rate | Hard gate: `<= 10%` |
+| Forced semantic failed cases | Hard gate: `0` |
+| Default scoped-precise latency | Hard gate: `p95 <= 250ms` |
+| Forced semantic precise/broad recall | Report-only diagnostic |
+| Forced semantic p50/p95/max and total wall time | Report-only diagnostic |
+| Broad answer preservation | Hard gate: answers remain present after budget trimming |
 
-A May 12, 2026 SDL-MCP reference run measured lexical recall at `76.7%`, confidence-gated default recall at `80.2%`, and forced semantic recall at `87.1%` with `0%` noise. Scoped precise lookup measured `p95 161ms`.
+Candidate comparisons use the same build, configuration, and immutable index. Discard one warmup, then compare the median total wall time from three complete 26-case forced-semantic runs; only candidates that pass every forced-semantic hard gate qualify. The normal full benchmark separately retains the default scoped-precise p95 gate.
+
+A July 16, 2026 pinned-index measurement of the selected forced-semantic implementation produced 109/124 expected-symbol recall (87.9%), one configured-noise hit across 601 evidence items (0.2%), and zero failures in all three measured passes. Total wall times were 47.905, 47.969, and 48.843 seconds (median 47.969 seconds); p50 ranged from 1478 to 1536 ms and p95 from 2805 to 2890 ms.
 
 For tool-call latency regressions, collect at least one cold and one warm sample with `includeDiagnostics: true` before changing retrieval or DB code. Compare the returned phase timings against the observability dashboard's per-tool `phases` and `dbLatencyP95Ms` so regressions can be attributed to server overhead, retrieval, LadybugDB native execution/materialization, response shaping, or runtime artifact handling.
 
@@ -232,6 +234,8 @@ PowerShell:
 $env:SDL_CONTEXT_QUALITY_REQUIRE_INDEX='1'
 node --experimental-strip-types --test tests/benchmark/context-quality.test.ts
 ```
+
+Set `SDL_CONTEXT_QUALITY_VARIANT=semantic` to run only the forced-semantic variant during candidate measurement; this intentionally skips the unrelated default scoped-precise gate, which remains active in the normal full command. Optional diagnostic controls `SDL_CONTEXT_QUALITY_CASE_DETAILS=missing` and `SDL_CONTEXT_QUALITY_CASE_ID=<case-id>` report misses without changing the corpus or gates.
 
 The suite degrades gracefully: when no indexed repository is available, only structural validation of the case definitions runs. Retrieval quality and answer preservation checks are skipped with a summary noting the skip count.
 

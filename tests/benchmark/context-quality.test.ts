@@ -17,6 +17,13 @@ import { performance } from "node:perf_hooks";
 
 const REPO_ID = "sdl-mcp";
 const REQUIRE_LIVE_INDEX = process.env.SDL_CONTEXT_QUALITY_REQUIRE_INDEX === "1";
+const RUN_SEMANTIC_ONLY =
+  process.env.SDL_CONTEXT_QUALITY_VARIANT === "semantic";
+const CASE_DETAIL_MODE = process.env.SDL_CONTEXT_QUALITY_CASE_DETAILS;
+const INCLUDE_CASE_DETAILS =
+  CASE_DETAIL_MODE === "1" || CASE_DETAIL_MODE === "missing";
+const INCLUDE_EVIDENCE_DETAILS = CASE_DETAIL_MODE === "1";
+const SELECTED_CASE_ID = process.env.SDL_CONTEXT_QUALITY_CASE_ID;
 
 const SEMANTIC_AGGREGATE_RECALL_MIN = 85;
 const NOISE_RATE_MAX = 10;
@@ -77,6 +84,8 @@ interface VariantMetrics {
     noiseHits: number;
     evidenceCount: number;
     durationMs: number;
+    missingUsefulSymbols: string[];
+    evidenceSummaries: string[];
   }>;
 }
 
@@ -291,6 +300,12 @@ async function runCase(
     noiseHits,
     evidenceCount,
     durationMs,
+    missingUsefulSymbols: c.expectedUsefulSymbols.filter(
+      (symbol) => !text.includes(symbol),
+    ),
+    evidenceSummaries: (result.finalEvidence ?? []).map(
+      ({ reference, summary }) => `${reference} | ${summary}`,
+    ),
   });
 }
 
@@ -337,23 +352,37 @@ function buildReport(): string {
       `Recall:      ${m.usefulHits}/${m.expectedTotal} (${recall(m).toFixed(1)}%)`,
       `Precise:     ${m.preciseUsefulHits}/${m.preciseExpectedTotal} (${preciseRecall(m).toFixed(1)}%)`,
       `Broad:       ${m.broadUsefulHits}/${m.broadExpectedTotal} (${broadRecall(m).toFixed(1)}%)`,
-      `Noise:       ${m.noiseHits}/${m.totalEvidenceItems} (${noiseRate(m).toFixed(1)}%)`,
+      `Configured noise: ${m.noiseHits}/${m.totalEvidenceItems} (${noiseRate(m).toFixed(1)}%)`,
       `Latency:     p50=${percentile(m.durationsMs, 50).toFixed(0)}ms p95=${percentile(m.durationsMs, 95).toFixed(0)}ms max=${Math.max(0, ...m.durationsMs).toFixed(0)}ms`,
       `Total wall:  ${m.durationsMs.reduce((sum, durationMs) => sum + durationMs, 0).toFixed(0)}ms`,
       "",
     );
+    if (INCLUDE_CASE_DETAILS && m.name === "semantic") {
+      for (const result of m.caseResults) {
+        lines.push(
+          `Case ${result.id}: ${result.usefulHits}/${result.usefulTotal}; missing=${result.missingUsefulSymbols.join(",") || "none"}; ${result.durationMs.toFixed(0)}ms`,
+        );
+        if (INCLUDE_EVIDENCE_DETAILS) {
+          for (const evidence of result.evidenceSummaries) {
+            lines.push(`  ${evidence}`);
+          }
+        }
+      }
+      lines.push("");
+    }
   }
 
   const scoped = metrics.scopedPrecise;
-  lines.push(
-    "--- Scoped Precise Latency ---",
-    `Cases:       ${scoped.cases}`,
-    `Failures:    ${scoped.failures}`,
-    `Latency:     p50=${percentile(scoped.durationsMs, 50).toFixed(0)}ms p95=${percentile(scoped.durationsMs, 95).toFixed(0)}ms max=${Math.max(0, ...scoped.durationsMs).toFixed(0)}ms`,
-    "",
-    "=== End Report ===",
-    "",
-  );
+  if (scoped.cases > 0) {
+    lines.push(
+      "--- Scoped Precise Latency ---",
+      `Cases:       ${scoped.cases}`,
+      `Failures:    ${scoped.failures}`,
+      `Latency:     p50=${percentile(scoped.durationsMs, 50).toFixed(0)}ms p95=${percentile(scoped.durationsMs, 95).toFixed(0)}ms max=${Math.max(0, ...scoped.durationsMs).toFixed(0)}ms`,
+      "",
+    );
+  }
+  lines.push("=== End Report ===", "");
   return lines.join("\n");
 }
 
@@ -469,10 +498,20 @@ describe("context quality benchmarks", () => {
       return;
     }
 
-    for (const variant of variants) {
+    const selectedVariants = RUN_SEMANTIC_ONLY
+      ? variants.filter(({ name }) => name === "semantic")
+      : variants;
+    const selectedCases = SELECTED_CASE_ID
+      ? cases.filter(({ id }) => id === SELECTED_CASE_ID)
+      : cases;
+    assert.ok(
+      !SELECTED_CASE_ID || selectedCases.length === 1,
+      `unknown context quality case: ${SELECTED_CASE_ID}`,
+    );
+    for (const variant of selectedVariants) {
       const target = createMetrics(variant.name);
       metrics.variants.set(variant.name, target);
-      for (const c of cases) {
+      for (const c of selectedCases) {
         await runCase(c, variant, false, target);
       }
     }
@@ -486,11 +525,15 @@ describe("context quality benchmarks", () => {
     );
     assert.ok(
       noiseRate(semantic) <= NOISE_RATE_MAX,
-      `semantic noise rate ${noiseRate(semantic).toFixed(1)}% above ${NOISE_RATE_MAX}%`,
+      `semantic configured-noise rate ${noiseRate(semantic).toFixed(1)}% above ${NOISE_RATE_MAX}%`,
     );
   });
 
-  it("keeps scoped precise lookups below the latency target", async () => {
+  it("keeps scoped precise lookups below the latency target", async (t) => {
+    if (RUN_SEMANTIC_ONLY) {
+      t.skip("semantic-only measurement excludes the default scoped gate");
+      return;
+    }
     if (!metrics.repoAvailable) {
       skipOrFail(metrics.availabilityReason);
       return;

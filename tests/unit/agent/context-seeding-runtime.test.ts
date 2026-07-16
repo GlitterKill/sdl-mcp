@@ -21,6 +21,7 @@ let closeLadybugDb: () => Promise<void>;
 
 const previousConfig = process.env.SDL_CONFIG;
 const previousConfigPath = process.env.SDL_CONFIG_PATH;
+const previousNativeDisabled = process.env.SDL_MCP_DISABLE_NATIVE_ADDON;
 
 function removeTestFile(path: string): void {
   if (existsSync(path)) rmSync(path, { force: true });
@@ -69,6 +70,11 @@ describe("context seeding runtime lanes", () => {
     );
     process.env.SDL_CONFIG = CONFIG_PATH;
     delete process.env.SDL_CONFIG_PATH;
+    // Windows FTS runtime loading uses the native addon's verified DLL
+    // preloader even though retrieval itself remains TypeScript.
+    if (process.platform === "win32") {
+      delete process.env.SDL_MCP_DISABLE_NATIVE_ADDON;
+    }
 
     const [ladybug, queries, lifecycle, seeding] = await Promise.all([
       import("../../../dist/db/ladybug.js"),
@@ -124,12 +130,24 @@ describe("context seeding runtime lanes", () => {
       });
     }
 
-    assert.equal(
-      await lifecycle.createFtsIndex(
+    let ftsReady = false;
+    // The full suite creates FTS fixtures in parallel worker processes. Retry
+    // the extension/index bootstrap so a transient native-loader race does not
+    // turn this lane contract test into a setup failure.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const ensured = await lifecycle.ensureFtsIndexForNonEmptyTable(
         conn,
         "Symbol",
         "symbol_search_text_v1",
-      ),
+      );
+      if (ensured.status === "created" || ensured.status === "exists") {
+        ftsReady = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+    assert.equal(
+      ftsReady,
       true,
       "runtime lane fixture requires a healthy symbol FTS index",
     );
@@ -145,6 +163,11 @@ describe("context seeding runtime lanes", () => {
     else process.env.SDL_CONFIG = previousConfig;
     if (previousConfigPath === undefined) delete process.env.SDL_CONFIG_PATH;
     else process.env.SDL_CONFIG_PATH = previousConfigPath;
+    if (previousNativeDisabled === undefined) {
+      delete process.env.SDL_MCP_DISABLE_NATIVE_ADDON;
+    } else {
+      process.env.SDL_MCP_DISABLE_NATIVE_ADDON = previousNativeDisabled;
+    }
   });
 
   it("keeps bounded lexical fallback in forced semantic mode", async () => {

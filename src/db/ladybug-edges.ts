@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { finished } from "node:stream/promises";
 import type { Connection } from "kuzu";
 import {
+  assertSafeInt,
   exec,
   execDdl,
   queryAll,
@@ -1626,6 +1627,59 @@ export async function getEdgesFromSymbolsLite(
     });
   }
 
+  return result;
+}
+
+export interface BoundedDependencySymbol {
+  symbolId: string;
+  name: string;
+  kind: string;
+  fileId?: string;
+}
+
+/**
+ * Load a deterministic, globally bounded set of dependency targets for a
+ * bounded source list. This keeps forced-semantic outline enrichment from
+ * materializing every outgoing edge of a high-fanout file.
+ */
+export async function getBoundedDependencySymbolsFromSources(
+  conn: Connection,
+  sourceSymbolIds: string[],
+  limit: number,
+): Promise<Map<string, BoundedDependencySymbol>> {
+  const result = new Map<string, BoundedDependencySymbol>();
+  if (sourceSymbolIds.length === 0 || limit <= 0) return result;
+  assertSafeInt(limit, "bounded dependency symbol limit");
+
+  const rows = await queryAll<{
+    symbolId: string;
+    name: string;
+    kind: string;
+    fileId: string | null;
+  }>(
+    conn,
+    `MATCH (a:Symbol)-[:DEPENDS_ON]->(b:Symbol)
+     WHERE a.symbolId IN $sourceSymbolIds
+     WITH DISTINCT b
+     ORDER BY coalesce(b.name, '') ASC, b.symbolId ASC
+     LIMIT $limit
+     OPTIONAL MATCH (b)-[:SYMBOL_IN_FILE]->(f:File)
+     RETURN b.symbolId AS symbolId,
+            coalesce(b.name, '') AS name,
+            coalesce(b.kind, '') AS kind,
+            f.fileId AS fileId
+     ORDER BY coalesce(b.name, '') ASC, b.symbolId ASC`,
+    { sourceSymbolIds, limit },
+  );
+
+  for (const row of rows) {
+    result.set(row.symbolId, {
+      symbolId: row.symbolId,
+      name: row.name,
+      kind: row.kind,
+      fileId: row.fileId ?? undefined,
+    });
+  }
   return result;
 }
 

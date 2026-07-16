@@ -78,3 +78,45 @@ The final report includes baseline versus final recall, noise, failed cases, p50
 ## Documentation
 
 Update `docs/feature-deep-dives/context-modes.md`, `docs/benchmark-guardrails.md`, and `CHANGELOG.md` for the forced-semantic aggregate-only gate and caller-observable behavior. No other tool documentation should change.
+
+## Measured Amendment: Same-File Related Symbols
+
+The first candidate improved the pinned-index baseline from 54.0% to 54.8%. The deterministic one-per-query fallback reduced recall to 52.4% and nearly doubled forced-semantic total wall time from 42.5 seconds to 71.9 seconds, so it is rejected.
+
+Case-level misses show that additional prompt-term searches are the wrong lever. Most missing symbols are siblings of already-relevant cards in the same file, such as `ContextEngine` with truncation helpers, planner budget methods together, executor rung methods together, and skeleton helpers together.
+
+The next bounded candidate therefore reuses `Executor.buildRelatedSymbolNameMap()`, which already loads and relevance-ranks same-file symbols for forced-semantic context cards. It changes only the forced-semantic related-name cap from 14 to 32; inferred-focus/default calls retain 14. This adds no database query, no retrieval batch, and no new response field. A runtime unit test must prove the forced-semantic cap and unchanged inferred-focus cap before measurement.
+
+That cap-only candidate also produced 54.8%, proving the missing names do not reach final evidence through the current related-name selection. It is rejected.
+
+## Measured Amendment: Preserve Exact Mentions Through Executor Ranking
+
+Case-level evidence shows a more direct loss boundary: `ContextEngine.seedExactMentionedSymbols()` resolves and prepends exact symbol refs to `context`. `Executor.resolveContextToSymbols()` normally turns direct symbol refs into lexical score-1 candidates, but skips that upgrade when the same ref already exists as a lower-scored semantic candidate. Under forced semantic, that duplicate semantic candidate can therefore displace an exact resolved symbol such as `adjustForBudget` before evidence is built.
+
+The next candidate retains the existing exact lookup and query count, but for `semantic: true` only, prepends resolved exact symbol refs to all existing `seedCandidates` as lexical score-1 candidates with `sourceRank: -1000 + exactIndex`, then removes only later candidates with duplicate exact refs before calling `Executor.execute()`. Unrelated semantic, lexical, and feedback candidates preserve their order and scores. Omitted and false modes keep the current seed-candidate list. A runtime ContextEngine test must use a duplicate exact/semantic ref and prove the executor receives the lexical score-1 version.
+
+That exact-prior candidate also produced 54.8%. Executor-boundary tracing showed why: exact candidates already entered ranking at lexical score 1, but `ensureFocusPathCoverage()` subsequently replaced every non-focus selection when several inferred paths were present. It is rejected.
+
+## Measured Amendment: Bound Forced-Semantic Inferred Coverage
+
+Inferred paths are soft hints, but the current per-path addition limit can cumulatively fill the entire final selection. For a forced-semantic planner-budget case, `adjustForBudget` entered ranking first at score 1, then three inferred hot-path/util paths replaced it and every other non-focus result.
+
+The next candidate changes only `semantic: true`: inferred-path additions may occupy at most `Math.ceil(maxCount / 2)`, preserving at least `Math.floor(maxCount / 2)` of the already-ranked retrieval selection. Per-path ordering and matching stay unchanged. Omitted and false modes retain the current cumulative per-path behavior. This adds no query, candidate, response field, or schema change.
+
+That finalization-only cap also produced 54.8%. Tracing showed the inferred paths had already been copied into `focusPaths` and dominated `rankSymbols()` before finalization, so there were no ranked non-focus results left to preserve.
+
+## Measured Amendment: Separate Forced-Semantic Ranking From Inferred Coverage
+
+The next candidate combines the bounded finalization cap with a ranking-only task view. When `semantic: true` and `inferredFocusPaths` are present, `Executor.selectTopSymbols()` calls `rankSymbols()` without those inferred `focusPaths`/`inferredFocusPaths`; it still passes the original task to finalization, which may fill at most `Math.ceil(maxCount / 2)` slots from the inferred paths. Explicit focus paths are never removed because they do not carry `inferredFocusPaths`.
+
+This preserves retrieval/lexical ranking for at least `Math.floor(maxCount / 2)` results while keeping bounded inferred coverage. Omitted and false modes use the original ranking task and unlimited inferred additions. No query, schema, response field, or other tool changes.
+
+## Selected Amendment: Repair and Bound Forced-Semantic File Outlines
+
+The combined ranking/coverage candidate reached only 56.5%. The decisive trace was in `Executor.buildRelatedSymbolNameMap()`: selected production symbols carry opaque file IDs, but the inferred-path filter compared those IDs directly with repository-relative paths. Forced-semantic requests with inferred paths therefore discarded every selected file before building related-name evidence.
+
+The selected implementation bypasses that invalid path comparison only for `semantic: true`; the selected symbols have already passed forced-semantic ranking and bounded inferred coverage. It orders forced-semantic outline files deterministically by repository path and source range. For the first card in each selected file, it emits one outline containing up to 80 query-ranked names, then declarative and source-order names up to 160 total. Only the first ordered file adds a dependency sample, using at most 80 source symbols, 512 deterministically selected dependency candidates, and 24 emitted dependency names through one bounded LadybugDB read. Omitted and false modes retain DB-map ordering, the existing inferred-path filter, the 14-name related-symbol limit, and card behavior.
+
+Candidate ablation selected a forced-semantic precise cap of 20 cards. After separate discarded warmups, the normal cap measured 48.037, 48.232, and 48.647 seconds (median 48.232 seconds) at 108/124 recall, while the 20-card cap measured 47.905, 47.969, and 48.843 seconds (median 47.969 seconds) at 109/124 recall. The selected cap was therefore 0.263 seconds faster by the required median comparison and recovered one more expected symbol. All selected-candidate passes had one configured-noise hit across 601 evidence items (0.2%) and zero failures; p50 ranged from 1478 to 1536 ms and p95 from 2805 to 2890 ms. These are expected-symbol recall and corpus-specific configured-noise measurements, not a general precision estimate.
+
+`SDL_CONTEXT_QUALITY_VARIANT=semantic` runs only the forced-semantic corpus and gates for candidate measurement. The normal full benchmark continues to enforce the separate unchanged default scoped-precise p95 gate.

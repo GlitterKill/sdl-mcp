@@ -416,6 +416,18 @@ describe("Executor focus selection", () => {
       maxCount: number,
       seedCandidates?: ContextSeedCandidate[],
     ): Promise<string[]>;
+    finalizeSelection(
+      candidates: string[],
+      rankedIds: string[],
+      symbolMap: Map<string, ReturnType<typeof createExecutorSymbol>>,
+      task: AgentTask,
+      maxCount: number,
+    ): string[];
+    buildRelatedSymbolNameMap(
+      conn: unknown,
+      selectedSymbols: Array<ReturnType<typeof createExecutorSymbol>>,
+      task: AgentTask,
+    ): Promise<Map<string, string[]>>;
   }
 
   function createExecutorSymbol(symbolId: string, fileId: string) {
@@ -839,6 +851,220 @@ describe("Executor focus selection", () => {
     );
 
     assert.deepEqual(selected, []);
+  });
+
+  it("bounds cumulative inferred replacements only for forced semantic", () => {
+    const { privateExecutor, symbolMap } = createSelectionFixture();
+    const ranked = [
+      "src-alpha",
+      "src-beta",
+      "src-gamma",
+      "test-alpha",
+      "test-beta",
+      "test-gamma",
+    ];
+    const selected = ranked.slice(0, 3);
+    const inferredFocusPaths = [
+      "tests/alpha.test.ts",
+      "tests/beta.test.ts",
+      "tests/gamma.test.ts",
+    ];
+    const finalize = (semantic: boolean | undefined) =>
+      privateExecutor.finalizeSelection(
+        selected,
+        ranked,
+        symbolMap,
+        createTask({
+          options: {
+            contextMode: "precise",
+            inferredFocusPaths,
+            ...(semantic === undefined ? {} : { semantic }),
+          },
+        }),
+        3,
+      );
+
+    const forced = finalize(true);
+    assert.equal(
+      forced.filter((symbolId) => symbolId.startsWith("test-")).length,
+      2,
+    );
+    assert.equal(
+      forced.filter((symbolId) => symbolId.startsWith("src-")).length,
+      1,
+    );
+    for (const semantic of [undefined, false] as const) {
+      assert.ok(finalize(semantic).every((symbolId) => symbolId.startsWith("test-")));
+    }
+  });
+
+  it("ranks forced semantic retrieval before bounded inferred coverage", async () => {
+    const { privateExecutor, symbolIds, symbolMap } = createSelectionFixture();
+    symbolMap.get("src-alpha")!.name = "adjustForBudget";
+    symbolMap.get("src-beta")!.name = "maxTokens";
+    symbolMap.get("src-gamma")!.name = "estimateTokens";
+    symbolMap.get("test-alpha")!.name = "HotPathOptions";
+    symbolMap.get("test-beta")!.name = "buildHotPathExcerpt";
+    symbolMap.get("test-gamma")!.name = "executeHotPathRung";
+    const inferredFocusPaths = [
+      "tests/alpha.test.ts",
+      "tests/beta.test.ts",
+      "tests/gamma.test.ts",
+    ];
+    const competitionSeeds: ContextSeedCandidate[] = [
+      {
+        contextRef: "symbol:src-alpha",
+        source: "lexical",
+        score: 1,
+        sourceRank: 0,
+      },
+      ...["test-alpha", "test-beta", "test-gamma"].map(
+        (symbolId, index): ContextSeedCandidate => ({
+          contextRef: `symbol:${symbolId}`,
+          source: "semantic",
+          score: 0.95 - index * 0.05,
+          sourceRank: index,
+        }),
+      ),
+    ];
+    const select = (semantic: boolean | undefined) =>
+      privateExecutor.selectTopSymbols(
+        symbolIds,
+        createTask({
+          taskText:
+            "adjustForBudget trims rungs when maxTokens is small but debug needs hotPath",
+          options: {
+            contextMode: "precise",
+            focusPaths: inferredFocusPaths,
+            inferredFocusPaths,
+            ...(semantic === undefined ? {} : { semantic }),
+          },
+        }),
+        3,
+        competitionSeeds,
+      );
+
+    const forced = await select(true);
+    assert.equal(
+      forced.filter((symbolId) => symbolMap.get(symbolId)?.fileId.includes(":src/"))
+        .length,
+      1,
+      `Expected one lexical source symbol, got ${forced.join(", ")}`,
+    );
+    assert.equal(
+      forced.filter((symbolId) => symbolMap.get(symbolId)?.fileId.includes(":tests/"))
+        .length,
+      2,
+    );
+    for (const semantic of [undefined, false] as const) {
+      assertOnlyTests(await select(semantic), symbolMap);
+    }
+  });
+
+  it("surfaces one compact file outline only for forced semantic", async () => {
+    const fileSymbols = Array.from({ length: 90 }, (_, index) => ({
+      ...createExecutorSymbol(`sym-${index}`, "repo-1:src/focus.ts"),
+      name: `symbol${String(index).padStart(3, "0")}`,
+      rangeStartLine: index + 1,
+    }));
+    let dependencySources: string[] = [];
+    let dependencyLimit = 0;
+    const dbQueries = {
+      getFileByRepoPath: async () => null,
+      getSymbolIdsByFile: async () => [],
+      getFilesByPrefix: async () => [],
+      getSymbolsByFile: async () => fileSymbols,
+      getClusterMembers: async () => [],
+      getProcessStepsByIds: async () => [],
+      getSymbolsByIds: async () => new Map(),
+      getFilesByIds: async () => new Map(),
+      searchSymbols: async () => [],
+      getBoundedDependencySymbolsFromSources: async (
+        _conn: unknown,
+        sourceSymbolIds: string[],
+        limit: number,
+      ) => {
+        dependencySources = sourceSymbolIds;
+        dependencyLimit = limit;
+        return new Map([
+          [
+            "dep-estimate-tokens",
+            {
+              symbolId: "dep-estimate-tokens",
+              name: "estimateTokens",
+              kind: "function",
+              fileId: "repo-1:src/util/tokenize.ts",
+            },
+          ],
+        ]);
+      },
+    } as unknown as ExecutorDbQueries;
+    const executor = new Executor(undefined, dbQueries);
+    const privateExecutor = executor as unknown as ExecutorSelectionPrivate;
+    const selected = [fileSymbols[45]!];
+    const build = (semantic: boolean | undefined) =>
+      privateExecutor.buildRelatedSymbolNameMap(
+        {},
+        selected,
+        createTask({
+          taskText: "Inspect symbol089 behavior",
+          options: {
+            inferredFocusPaths: ["src/focus.ts"],
+            ...(semantic === undefined ? {} : { semantic }),
+          },
+        }),
+      );
+
+    const forced = (await build(true)).get("repo-1:src/focus.ts")!;
+    assert.equal(dependencySources.length, 80);
+    assert.equal(dependencyLimit, 512);
+    assert.equal(forced.length, 90);
+    assert.equal(forced[0], "symbol089");
+    assert.ok(forced.includes("symbol000"));
+    assert.ok(forced.includes("estimateTokens"));
+    for (const semantic of [undefined, false] as const) {
+      assert.equal((await build(semantic)).get("repo-1:src/focus.ts")!.length, 14);
+    }
+  });
+
+  it("keeps forced semantic outlines when selected symbols use opaque file IDs", async () => {
+    const selected = createExecutorSymbol("selected", "opaque-file-id");
+    const related = createExecutorSymbol("related", "opaque-file-id");
+    related.name = "RelatedHelper";
+    const dbQueries: ExecutorDbQueries = {
+      getFileByRepoPath: async () => null,
+      getSymbolIdsByFile: async () => [],
+      getFilesByPrefix: async () => [],
+      getSymbolsByFile: async () => [selected, related],
+      getClusterMembers: async () => [],
+      getProcessStepsByIds: async () => [],
+      getSymbolsByIds: async () => new Map(),
+      getFilesByIds: async () => new Map(),
+      searchSymbols: async () => [],
+    };
+    const privateExecutor = new Executor(
+      undefined,
+      dbQueries,
+    ) as unknown as ExecutorSelectionPrivate;
+    const build = (semantic: boolean | undefined) =>
+      privateExecutor.buildRelatedSymbolNameMap(
+        {},
+        [selected],
+        createTask({
+          options: {
+            inferredFocusPaths: ["src/focus.ts"],
+            ...(semantic === undefined ? {} : { semantic }),
+          },
+        }),
+      );
+
+    assert.deepEqual(
+      (await build(true)).get("opaque-file-id"),
+      ["RelatedHelper"],
+    );
+    for (const semantic of [undefined, false] as const) {
+      assert.equal((await build(semantic)).size, 0);
+    }
   });
 });
 

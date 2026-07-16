@@ -819,6 +819,56 @@ describe("LadybugDB Edge Queries", () => {
   );
 
   it(
+    "getBoundedDependencySymbolsFromSources applies a deterministic hard limit",
+    { skip: !ladybugAvailable },
+    async () => {
+      await exec(
+        conn,
+        "MATCH (s:Symbol {symbolId: 'edge-to'}) SET s.name = 'alpha', s.kind = 'function'",
+      );
+      await exec(
+        conn,
+        "CREATE (:Symbol {symbolId: 'edge-z', name: 'omega', kind: 'function'})",
+      );
+      await exec(
+        conn,
+        "MATCH (f:File {fileId: 'edge-file'}), (s:Symbol) WHERE s.symbolId IN ['edge-to', 'edge-z'] CREATE (s)-[:SYMBOL_IN_FILE]->(f)",
+      );
+      for (const toSymbolId of ["edge-z", "edge-to"]) {
+        await queries.insertEdge(
+          conn as unknown as import("kuzu").Connection,
+          {
+            repoId,
+            fromSymbolId: "edge-from",
+            toSymbolId,
+            edgeType: "call",
+            weight: 1,
+            confidence: 1,
+            resolution: "exact",
+            provenance: null,
+            createdAt: "2026-03-04T00:00:00Z",
+          },
+        );
+      }
+
+      const dependencies =
+        await queries.getBoundedDependencySymbolsFromSources(
+          conn as unknown as import("kuzu").Connection,
+          ["edge-from"],
+          1,
+        );
+
+      assert.deepStrictEqual([...dependencies.keys()], ["edge-to"]);
+      assert.deepStrictEqual(dependencies.get("edge-to"), {
+        symbolId: "edge-to",
+        name: "alpha",
+        kind: "function",
+        fileId,
+      });
+    },
+  );
+
+  it(
     "getEdgesToSymbols groups incoming edges",
     { skip: !ladybugAvailable },
     async () => {

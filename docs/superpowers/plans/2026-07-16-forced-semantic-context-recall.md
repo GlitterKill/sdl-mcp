@@ -4,7 +4,7 @@
 
 **Goal:** Raise the unchanged 26-case benchmark's forced-semantic (`options.semantic: true`) expected-symbol recall from 56.5% to at least 85%, while keeping noise at or below 10%, returning zero failed cases, minimizing measured wall time, and leaving omitted/false semantic modes and every other tool unchanged.
 
-**Architecture:** Keep the shared retrieval APIs and result schemas intact. Change only the `buildSeedContext()` policy that currently suppresses its already-bounded Stage 2 lexical lane after forced-semantic Stage 1 produces enough candidates. Measure that one-line policy correction first; add deterministic per-query lexical coverage only if the minimal candidate misses 85%.
+**Architecture:** Keep shared retrieval APIs, MCP schemas, and result shapes intact. Start by retaining the already-bounded Stage 2 lexical lane for forced semantic. Because that minimal correction did not reach 85%, the selected implementation also isolates forced-semantic executor ranking, precise-card capacity, deterministic same-file outlines, and one bounded dependency-target read. Omitted/false modes retain their existing branches and limits.
 
 **Tech Stack:** TypeScript, Node.js built-in test runner, LadybugDB, existing `ContextEngine` benchmark harness, PowerShell.
 
@@ -215,6 +215,174 @@
   git commit -m "fix(context): preserve semantic query coverage"
   ```
 
+## Task 4A: Measured amendment — widen existing same-file names only for forced semantic
+
+**Run this task after the Task 4 query-batch candidate is rejected by measurement.**
+
+**Files:**
+
+- Modify: `src/agent/executor.ts`
+- Modify: `tests/unit/agent/executor-ranking.test.ts`
+- Test: `tests/unit/agent/executor-ranking.test.ts`
+
+- [ ] **Step 1: Add a failing runtime unit test.**
+
+  Call the private runtime `buildRelatedSymbolNameMap()` through a typed test seam with one selected symbol and at least 40 relevance-ranked siblings. Assert a forced-semantic task returns 32 related names, while inferred-focus tasks with semantic omitted and `semantic: false` both retain the existing 14-name cap.
+
+- [ ] **Step 2: Prove RED.**
+
+  ```powershell
+  npm run build
+  node --experimental-strip-types --test tests/unit/agent/executor-ranking.test.ts
+  ```
+
+  Expected: forced semantic returns the current 14 names instead of 32; inferred focus passes at 14.
+
+- [ ] **Step 3: Make the smallest production change.**
+
+  In `buildRelatedSymbolNameMap()`, set the per-file cap to 32 only when `task.options?.semantic === true`; keep 14 for every other call. Reuse the existing query, relevance ranking, ordering, deduplication, and evidence field.
+
+- [ ] **Step 4: Prove GREEN and benchmark.**
+
+  Run the focused executor/context tests, then repeat Task 3's one discarded warmup plus three measured semantic-only passes against the pinned immutable database. Keep this candidate only if every measured pass clears all hard gates; otherwise reverse it and amend the design from the new case-level evidence.
+
+- [ ] **Step 5: Commit only if selected.**
+
+  ```powershell
+  git add src/agent/executor.ts tests/unit/agent/executor-ranking.test.ts
+  git diff --cached --check
+  git commit -m "fix(context): widen semantic related-symbol coverage"
+  ```
+
+## Task 4B: Measured amendment — preserve exact mentions as forced-semantic ranking priors
+
+**Run this task after Task 4A has no recall effect.**
+
+**Files:**
+
+- Modify: `src/agent/context-engine.ts`
+- Modify: `tests/unit/agent/context-engine.test.ts`
+- Test: `tests/unit/agent/context-engine.test.ts`
+
+- [ ] **Step 1: Extend the forced-semantic exact-seed runtime test.**
+
+  Capture both `context` and `seedCandidates` passed to `Executor.execute()`. Make the mocked semantic result contain the same exact ref at a lower semantic score plus one unrelated semantic candidate. Require the executor input to contain the exact ref once as the first lexical score-1 candidate with `sourceRank: -1000`, followed by the unrelated semantic candidate unchanged. Add omitted and false assertions proving their seed-candidate arrays remain unchanged.
+
+- [ ] **Step 2: Prove RED.**
+
+  ```powershell
+  npm run build
+  node --experimental-strip-types --test tests/unit/agent/context-engine.test.ts
+  ```
+
+  Expected: the exact ref appears once in `seedCandidates` as the lower-scored semantic candidate instead of the required lexical score-1 candidate.
+
+- [ ] **Step 3: Preserve exact refs only for forced semantic.**
+
+  Retain the refs already returned by `seedExactMentionedSymbols()`. When `task.options?.semantic === true`, convert them to deterministic lexical `ContextSeedCandidate` entries with score `1` and `sourceRank: -1000 + exactIndex`, prepend them to all existing seed candidates, and remove only later candidates with duplicate exact refs. Preserve unrelated semantic, lexical, and feedback candidates. Do not issue a query or alter omitted/false candidates.
+
+- [ ] **Step 4: Prove GREEN and measure.**
+
+  Run the focused engine/seeding/executor tests, then one diagnostic semantic-only benchmark pass. If it remains below 85%, retain it only if it improves recall without material wall-time cost, and use the new case evidence to design the next bounded candidate. Before final selection, every combined candidate still must pass the required warmup plus three measured runs.
+
+  If selected, Task 5 documentation and the changelog must note that forced semantic preserves exact-mentioned symbols as top lexical ranking priors while omitted/false behavior is unchanged.
+
+## Task 4C: Measured amendment — bound inferred-path replacement in forced semantic
+
+**Run this task after tracing proves exact score-1 candidates are lost during inferred-path finalization.**
+
+**Files:**
+
+- Modify: `src/agent/executor.ts`
+- Modify: `tests/unit/agent/executor-ranking.test.ts`
+- Test: `tests/unit/agent/executor-ranking.test.ts`
+
+- [ ] **Step 1: Add a failing finalization test.**
+
+  Call private `finalizeSelection()` with three ranked non-focus selections, three exact-file inferred paths, and three matching inferred candidates. Assert forced semantic adds at most two inferred candidates and preserves one ranked result. Assert omitted and `semantic: false` retain the existing all-three inferred replacement behavior.
+
+- [ ] **Step 2: Prove RED.**
+
+  ```powershell
+  npm run build
+  node --experimental-strip-types --test tests/unit/agent/executor-ranking.test.ts
+  ```
+
+- [ ] **Step 3: Cap only cumulative forced-semantic inferred additions.**
+
+  In `finalizeSelection()`, pass `Math.ceil(maxCount / 2)` as an explicit total-addition cap to `ensureFocusPathCoverage()` only when `task.options?.semantic === true`; pass the existing unlimited behavior otherwise. In `ensureFocusPathCoverage()`, keep existing per-path limits and stop when the explicit cumulative cap is reached.
+
+- [ ] **Step 4: Prove GREEN and measure.**
+
+  Run focused executor/context tests, then a diagnostic semantic-only benchmark pass. Keep the candidate only if it improves recall without material wall-time cost. Any final combined candidate still requires one discarded warmup plus three measured passes.
+
+  If selected, Task 5 documentation and changelog must state that forced semantic balances inferred-path hints with ranked retrieval while omitted/false coverage is unchanged.
+
+## Task 4D: Measured amendment — separate forced-semantic ranking from inferred coverage
+
+**Run this task after Task 4C finalization alone has no recall effect.**
+
+**Files:**
+
+- Modify: `src/agent/executor.ts`
+- Modify: `tests/unit/agent/executor-ranking.test.ts`
+- Test: `tests/unit/agent/executor-ranking.test.ts`
+
+- [ ] **Step 1: Add a failing end-to-end selection test.**
+
+  Use `selectTopSymbols()` with three score-1 source seeds and three inferred test-file paths copied into both `focusPaths` and `inferredFocusPaths`. Assert forced semantic returns two inferred symbols plus one ranked source symbol. Assert omitted and false retain all-inferred selection.
+
+- [ ] **Step 2: Prove RED.**
+
+  ```powershell
+  npm run build
+  node --experimental-strip-types --test tests/unit/agent/executor-ranking.test.ts
+  ```
+
+- [ ] **Step 3: Use a ranking-only task view for inferred forced semantic.**
+
+  In `selectTopSymbols()`, when `semantic === true` and `inferredFocusPaths` is non-empty, pass `rankSymbols()` a task clone with `focusPaths` and `inferredFocusPaths` unset. Continue passing the original task into `finalizeSelection()`, where Task 4C's cumulative cap supplies bounded inferred coverage. Do not alter explicit scope or omitted/false tasks.
+
+- [ ] **Step 4: Prove GREEN and measure.**
+
+  Run focused executor/context tests, then a diagnostic semantic-only benchmark pass. Keep only candidates that improve recall without material wall-time cost. The selected combined candidate still requires one discarded warmup plus three measured passes.
+
+  If selected, Task 5 docs and changelog must explain the forced-semantic balance between retrieval ranking and inferred-path coverage, with explicit/omitted/false behavior unchanged.
+
+## Task 4E: Selected amendment — repair forced-semantic file outlines
+
+**Run this task after Task 4D remains below the aggregate recall gate.**
+
+**Files:**
+
+- Modify: `src/agent/executor.ts`
+- Modify: `tests/unit/agent/executor-ranking.test.ts`
+- Test: `tests/benchmark/context-quality.test.ts`
+
+- [x] **Step 1: Reproduce the opaque-file boundary.**
+
+  Add a failing unit test where a selected symbol has an opaque file ID and the task carries repository-relative `inferredFocusPaths`. Prove the current outline map is empty for forced semantic.
+
+- [x] **Step 2: Preserve only forced-semantic selected files.**
+
+  Skip the invalid inferred-path/file-ID comparison only for `semantic: true`. Keep omitted and false behavior unchanged. Rank retrieval without inferred-path bias, then allow inferred coverage to occupy at most half the final selection.
+
+- [x] **Step 3: Emit one deterministic outline per selected file.**
+
+  For forced semantic, include up to 80 query-ranked same-file names, then declarative and source-order names up to 160 total. Attach the outline only to the first selected card for that file. Keep the existing 14-name behavior for omitted/false modes.
+
+- [x] **Step 4: Add one bounded dependency sample.**
+
+  Enrich only the first deterministically ordered selected file through one bounded dependency query, capped at 80 source symbols, 512 candidate targets, and 24 emitted dependency names. Log and continue if this optional enrichment fails.
+
+- [x] **Step 5: Select the faster qualifying card cap.**
+
+  Compare the normal precise card cap with a forced-semantic 20-card cap using a discarded warmup and three measured passes for each. The normal cap produced 108/124 recall with wall times of 48.037, 48.232, and 48.647 seconds (median 48.232 seconds). Keep the 20-card forced-semantic cap: it produced 109/124 recall with wall times of 47.905, 47.969, and 48.843 seconds (median 47.969 seconds), making it 0.263 seconds faster by the required median comparison while recovering one more expected symbol.
+
+- [x] **Step 6: Run final repeated measurement.**
+
+  Discard one warmup, then run three serial forced-semantic 26-case passes on the pinned immutable database. Every selected-candidate pass met aggregate recall `>=85%`, configured noise `<=10%`, and zero failures. The measured runs each produced 109/124 expected-symbol recall (87.9%), one configured-noise hit across 601 evidence items (0.2%), and zero failures. Total wall times were 47.905, 47.969, and 48.843 seconds (median 47.969 seconds); p50 ranged from 1478 to 1536 ms and p95 from 2805 to 2890 ms.
+
 ## Task 5: Update behavior and benchmark documentation
 
 **Files:**
@@ -224,19 +392,19 @@
 - Modify: `CHANGELOG.md`
 - Test: `tests/benchmark/context-quality.test.ts`
 
-- [ ] **Step 1: Document only the selected behavior.**
+- [x] **Step 1: Document only the selected behavior.**
 
-  Explain that explicit `semantic: true` keeps hybrid entity retrieval as the primary lane and now retains the same bounded lexical fallback for exact identifiers and domain terms. State explicitly that omitted/false behavior and other tools are unchanged.
+  Explain that explicit `semantic: true` keeps hybrid entity retrieval as the primary lane, retains bounded lexical fallback, balances inferred coverage with retrieval ranking, and emits one bounded file outline plus a top-file dependency sample. State explicitly that omitted/false behavior and other tools are unchanged.
 
-- [ ] **Step 2: Correct the benchmark gate table.**
+- [x] **Step 2: Correct the benchmark gate table.**
 
   Document the unchanged 26-case corpus and the three hard forced-semantic gates: aggregate recall `>= 85%`, noise `<= 10%`, and zero failures. Label forced-semantic precise/broad recall, p50/p95/max, and total wall time as report-only diagnostics. Preserve the separate default scoped-precise p95 latency gate as a hard gate.
 
-- [ ] **Step 3: Add a concise changelog entry.**
+- [x] **Step 3: Add a concise changelog entry.**
 
-  Note the forced-semantic recall improvement and the benchmark result without claiming a latency ceiling.
+  Note the selected forced-semantic expected-symbol recall improvements, including bounded same-file related-name coverage, and the benchmark result without calling the corpus-specific metric general precision or claiming a latency ceiling.
 
-- [ ] **Step 4: Run documentation checks.**
+- [x] **Step 4: Run documentation checks.**
 
   ```powershell
   npm run docs:tools:check
@@ -256,19 +424,24 @@
 **Files:**
 
 - Verify: `src/agent/context-seeding.ts`
+- Verify: `src/agent/executor.ts`
+- Verify: `src/db/ladybug-edges.ts`
 - Verify: `tests/unit/agent/context-seeding-policy.test.ts`
+- Verify: `tests/unit/agent/executor-raw-rung.test.ts`
+- Verify: `tests/unit/agent/executor-ranking.test.ts`
+- Verify: `tests/unit/ladybug-edge-queries.test.ts`
 - Verify: `tests/benchmark/context-quality.test.ts`
 - Verify: `tests/integration/determinism.fixtures.json`
 
-- [ ] **Step 1: Prove the change surface is isolated.**
+- [x] **Step 1: Prove the change surface is isolated.**
 
   ```powershell
   git diff 588cf86d...HEAD -- src/retrieval src/mcp src/server.ts tests/integration/determinism.fixtures.json
   ```
 
-  Expected: no changes. Review the complete diff and confirm every production change is inside forced-semantic `buildSeedContext()` policy.
+  Expected: no changes in the shared retrieval/MCP/server/determinism-fixture surfaces. Review the complete diff and confirm the context-seeding and executor behavior changes are guarded by `semantic === true`, while the new LadybugDB helper is additive and called only by that forced-semantic executor branch.
 
-- [ ] **Step 2: Run static and focused verification.**
+- [x] **Step 2: Run static and focused verification.**
 
   ```powershell
   npm run typecheck
@@ -308,7 +481,7 @@
   git diff --exit-code 588cf86d...HEAD -- $generatedFixtures
   ```
 
-- [ ] **Step 4: Capture final benchmark evidence.**
+- [x] **Step 4: Capture final benchmark evidence.**
 
   Re-pin `$env:SDL_CONFIG`, `$env:SDL_GRAPH_DB_PATH`, and `$env:SDL_CONTEXT_QUALITY_REQUIRE_INDEX = '1'`. Against the same immutable QA index, run one discarded warmup plus three measured passes. Record each measured forced-semantic recall, noise, failures, p50, p95, and total wall time, then report the median total wall time. Confirm the case file is unchanged from the base commit:
 
@@ -316,7 +489,7 @@
   git diff --exit-code 588cf86d...HEAD -- tests/benchmark/context-quality-cases.json
   ```
 
-- [ ] **Step 5: Audit prompt-cache and cross-tool stability.**
+- [x] **Step 5: Audit prompt-cache and cross-tool stability.**
 
   Run the concrete determinism and golden checks selected by `test-scope`:
 

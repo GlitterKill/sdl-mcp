@@ -79,7 +79,10 @@ export type ExecutorDbQueries = Pick<
   | "getSymbolsByIds"
   | "getFilesByIds"
   | "searchSymbols"
->;
+> &
+  Partial<
+    Pick<typeof ladybugDb, "getBoundedDependencySymbolsFromSources">
+  >;
 
 /**
  * Default gate evaluator backing the autopilot Executor when no override is
@@ -133,7 +136,21 @@ const MAX_HOTPATH_SYMBOLS = 5;
 const MAX_RAW_SYMBOLS = 3;
 const MAX_SEARCH_FALLBACK = 10;
 const MAX_ESCALATIONS = 2;
+const MAX_FORCED_SEMANTIC_PRECISE_CARD_SYMBOLS = 20;
+const MAX_RELATED_SYMBOLS = 14;
+const MAX_FORCED_SEMANTIC_RANKED_FILE_SYMBOLS = 80;
+const MAX_FORCED_SEMANTIC_FILE_OUTLINE_SYMBOLS = 160;
+const MAX_FORCED_SEMANTIC_OUTLINE_EDGE_SOURCES = 80;
+const MAX_FORCED_SEMANTIC_OUTLINE_DEPENDENCY_CANDIDATES = 512;
+const MAX_FORCED_SEMANTIC_OUTLINE_DEPENDENCIES = 24;
 const GENERIC_FILE_BASENAMES = new Set(["engine", "index", "types"]);
+const OUTLINE_DECLARATIVE_KINDS = new Set([
+  "class",
+  "interface",
+  "type",
+  "typeAlias",
+  "enum",
+]);
 
 /** Map rung types to action type strings for error reporting. */
 const RUNG_TO_ACTION_TYPE: Record<RungType, Action["type"]> = {
@@ -668,7 +685,22 @@ export class Executor {
       )
       .filter((symbolId): symbolId is string => !!symbolId);
 
-    const ranking = rankSymbols(symbolIds, symbolMap, identifiers, task, {
+    const hasForcedSemanticInferredScope =
+      task.options?.semantic === true &&
+      (task.options.inferredFocusPaths?.length ?? 0) > 0;
+    // Engine-inferred paths are soft coverage hints for forced semantic calls.
+    // Rank retrieval evidence first, then add bounded path coverage below.
+    const rankingTask = hasForcedSemanticInferredScope
+      ? {
+          ...task,
+          options: {
+            ...task.options,
+            focusPaths: undefined,
+            inferredFocusPaths: undefined,
+          },
+        }
+      : task;
+    const ranking = rankSymbols(symbolIds, symbolMap, identifiers, rankingTask, {
       seedCandidates,
       anchorSymbolIds,
       feedbackBoosts,
@@ -726,6 +758,9 @@ export class Executor {
       symbolMap,
       inferredPaths,
       maxCount,
+      task.options?.semantic === true
+        ? Math.ceil(maxCount / 2)
+        : Number.POSITIVE_INFINITY,
     );
   }
 
@@ -735,16 +770,25 @@ export class Executor {
     symbolMap: Map<string, SymbolRow>,
     focusPaths: string[],
     maxCount: number,
+    maxTotalFocusSymbols: number,
   ): string[] {
     if (focusPaths.length === 0 || selected.length === 0) return selected;
 
     const selectedSet = new Set(selected);
     const additions: string[] = [];
+    const matchesAnyFocusPath = (symbolId: string): boolean => {
+      const symbol = symbolMap.get(symbolId);
+      return focusPaths.some((focusPath) =>
+        this.symbolMatchesFocusPath(symbol, focusPath),
+      );
+    };
+    const selectedFocusCount = selected.filter(matchesAnyFocusPath).length;
     const perPathLimit = focusPaths.some((path) => path.split("/").pop()?.includes("."))
       ? 4
       : 2;
 
     for (const focusPath of focusPaths) {
+      if (selectedFocusCount + additions.length >= maxTotalFocusSymbols) break;
       let addedForPath = 0;
       for (const symbolId of rankedSymbolIds) {
         if (selectedSet.has(symbolId)) continue;
@@ -753,7 +797,12 @@ export class Executor {
         selectedSet.add(symbolId);
         additions.push(symbolId);
         addedForPath++;
-        if (addedForPath >= perPathLimit) break;
+        if (
+          addedForPath >= perPathLimit ||
+          selectedFocusCount + additions.length >= maxTotalFocusSymbols
+        ) {
+          break;
+        }
       }
     }
 
@@ -802,6 +851,7 @@ export class Executor {
     for (const symbol of selectedSymbols) {
       if (!symbol.fileId) continue;
       if (
+        task.options?.semantic !== true &&
         inferredFocusPaths.length > 0 &&
         !inferredFocusPaths.some((focusPath) =>
           this.symbolMatchesFocusPath(symbol, focusPath),
@@ -817,6 +867,8 @@ export class Executor {
     }
 
     const relatedByFile = new Map<string, string[]>();
+    let dependencySourceIds: string[] = [];
+    let dependencyTargetFileId: string | undefined;
     for (const [fileId, selectedIds] of selectedByFile) {
       const fileSymbols = await this.dbQueries.getSymbolsByFile(conn, fileId);
       if (fileSymbols.length === 0) continue;
@@ -827,16 +879,111 @@ export class Executor {
       const ranking = rankSymbols(symbolIds, fileSymbolMap, identifiers, task);
       const names: string[] = [];
       const seenNames = new Set<string>();
+      const forcedSemantic = task.options?.semantic === true;
+      const rankedLimit = forcedSemantic
+        ? MAX_FORCED_SEMANTIC_RANKED_FILE_SYMBOLS
+        : MAX_RELATED_SYMBOLS;
       for (const ranked of ranking.ranked) {
         if (selectedIds.has(ranked.symbolId)) continue;
         const symbol = fileSymbolMap.get(ranked.symbolId);
         if (!symbol || seenNames.has(symbol.name)) continue;
         seenNames.add(symbol.name);
         names.push(symbol.name);
-        if (names.length >= 14) break;
+        if (names.length >= rankedLimit) break;
+      }
+      if (forcedSemantic) {
+        // Add source-order declarations after the query-ranked names so a
+        // forced semantic card carries a compact, deterministic file outline.
+        const sourceOrdered = [...fileSymbols].sort(
+          (a, b) =>
+            a.rangeStartLine - b.rangeStartLine ||
+            a.rangeStartCol - b.rangeStartCol ||
+            a.symbolId.localeCompare(b.symbolId),
+        );
+        for (const symbol of sourceOrdered) {
+          if (
+            !OUTLINE_DECLARATIVE_KINDS.has(symbol.kind) ||
+            selectedIds.has(symbol.symbolId) ||
+            seenNames.has(symbol.name)
+          ) {
+            continue;
+          }
+          seenNames.add(symbol.name);
+          names.push(symbol.name);
+          if (names.length >= MAX_FORCED_SEMANTIC_FILE_OUTLINE_SYMBOLS) break;
+        }
+        for (const symbol of sourceOrdered) {
+          if (names.length >= MAX_FORCED_SEMANTIC_FILE_OUTLINE_SYMBOLS) break;
+          if (selectedIds.has(symbol.symbolId) || seenNames.has(symbol.name)) {
+            continue;
+          }
+          seenNames.add(symbol.name);
+          names.push(symbol.name);
+        }
+        if (dependencySourceIds.length === 0) {
+          dependencySourceIds = [
+            ...new Set([
+              ...selectedIds,
+              ...ranking.ranked.map(({ symbolId }) => symbolId),
+              ...sourceOrdered.map(({ symbolId }) => symbolId),
+            ]),
+          ];
+          dependencyTargetFileId = fileId;
+        }
       }
       if (names.length > 0) {
         relatedByFile.set(fileId, names);
+      }
+    }
+
+    const getDependencies =
+      this.dbQueries.getBoundedDependencySymbolsFromSources;
+    if (
+      getDependencies &&
+      dependencyTargetFileId &&
+      dependencySourceIds.length > 0
+    ) {
+      const edgeSources = dependencySourceIds.slice(
+        0,
+        MAX_FORCED_SEMANTIC_OUTLINE_EDGE_SOURCES,
+      );
+
+      try {
+        const dependencySymbols = await getDependencies(
+          conn,
+          edgeSources,
+          MAX_FORCED_SEMANTIC_OUTLINE_DEPENDENCY_CANDIDATES,
+        );
+        const dependencyIds = [...dependencySymbols.keys()];
+        const dependencyRanking = rankSymbols(
+          dependencyIds,
+          dependencySymbols,
+          identifiers,
+          task,
+        );
+        const names = relatedByFile.get(dependencyTargetFileId) ?? [];
+        const seenNames = new Set(names);
+        let dependencyCount = 0;
+        for (const ranked of dependencyRanking.ranked) {
+          const symbol = dependencySymbols.get(ranked.symbolId);
+          if (!symbol || seenNames.has(symbol.name)) continue;
+          seenNames.add(symbol.name);
+          names.push(symbol.name);
+          dependencyCount++;
+          if (
+            dependencyCount >= MAX_FORCED_SEMANTIC_OUTLINE_DEPENDENCIES
+          ) {
+            break;
+          }
+        }
+        if (names.length > 0) {
+          relatedByFile.set(dependencyTargetFileId, names);
+        }
+      } catch (error) {
+        logger.debug("Forced semantic dependency outline failed", {
+          fileId: dependencyTargetFileId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
     return relatedByFile;
@@ -874,7 +1021,9 @@ export class Executor {
       // adaptive ranking; broad mode retains the larger coverage cap.
       const cardSymbolLimit =
         task.options?.contextMode === "precise"
-          ? MAX_PRECISE_CARD_SYMBOLS
+          ? task.options.semantic === true
+            ? MAX_FORCED_SEMANTIC_PRECISE_CARD_SYMBOLS
+            : MAX_PRECISE_CARD_SYMBOLS
           : MAX_CARD_SYMBOLS;
 
       let allSymbols =
@@ -1043,11 +1192,31 @@ export class Executor {
         // Fetch real symbol data from DB
         const conn = await this.getConn();
         const symbolMap = await this.dbQueries.getSymbolsByIds(conn, allSymbols);
+        let outlineSymbols = [...symbolMap.values()];
+        if (task.options?.semantic === true) {
+          const fileIds = [
+            ...new Set(outlineSymbols.map(({ fileId }) => fileId).filter(Boolean)),
+          ];
+          const files = await this.dbQueries.getFilesByIds(conn, fileIds);
+          // Persisted file IDs are opaque. Repository paths plus source ranges
+          // provide a stable outline order without changing omitted/false mode.
+          outlineSymbols = outlineSymbols.sort((a, b) => {
+            const aPath = files.get(a.fileId)?.relPath ?? a.fileId;
+            const bPath = files.get(b.fileId)?.relPath ?? b.fileId;
+            return (
+              aPath.localeCompare(bPath) ||
+              a.rangeStartLine - b.rangeStartLine ||
+              a.rangeStartCol - b.rangeStartCol ||
+              a.symbolId.localeCompare(b.symbolId)
+            );
+          });
+        }
         const relatedSymbolsByFile = await this.buildRelatedSymbolNameMap(
           conn,
-          [...symbolMap.values()],
+          outlineSymbols,
           task,
         );
+        const surfacedSemanticOutlines = new Set<string>();
 
         // Iterate in ranked order to preserve relevance in evidence
         for (const symbolId of allSymbols) {
@@ -1072,8 +1241,14 @@ export class Executor {
           const relatedSymbols = sym.fileId
             ? relatedSymbolsByFile.get(sym.fileId)
             : undefined;
-          if (relatedSymbols && relatedSymbols.length > 0) {
+          const shouldSurfaceRelated =
+            relatedSymbols &&
+            relatedSymbols.length > 0 &&
+            (task.options?.semantic !== true ||
+              !surfacedSemanticOutlines.has(sym.fileId));
+          if (shouldSurfaceRelated) {
             parts.push(`relatedSymbols: ${relatedSymbols.join(", ")}`);
+            surfacedSemanticOutlines.add(sym.fileId);
           }
           if (sym.signatureJson) {
             try {
