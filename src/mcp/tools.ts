@@ -2380,8 +2380,7 @@ export const AgentContextRequestSchema = z.object({
           "Context breadth: precise returns minimal workflow-efficient context, broad returns richer surrounding context. Default: broad",
         ),
       semantic: z.boolean().optional().describe(
-        // AgentContextRequest retrieval defaults: semantic=true, evidence=true
-        "Use hybrid (FTS + vector) retrieval for context seeding. Default: true.",
+        "Use hybrid (FTS + vector) retrieval for context seeding. Omitted: broad mode uses hybrid retrieval and precise mode uses lexical retrieval; true forces hybrid retrieval; false disables it.",
       ),
       includeRetrievalEvidence: z
         .boolean()

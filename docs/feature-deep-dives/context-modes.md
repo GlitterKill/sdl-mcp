@@ -95,21 +95,21 @@ The important part is not the exact rung count. It is the routing choice:
 
 ## Seeding and Ranking
 
-Candidate seeding uses a confidence-gated hybrid pipeline:
+Candidate seeding uses a mode-based retrieval pipeline:
 
-1. **Exact scope** -- explicit `focusSymbols`, exact symbol mentions, and explicit `focusPaths` seed first so known targets stay fast.
+1. **Exact scope** -- explicit `focusSymbols`, exact symbol mentions, and exact explicit file paths seed first so known targets stay fast. Directory paths scope retrieval and expand only when scoped seeding returns no candidates.
 2. **Path inference** -- file-like task text is mapped to indexed files and nearby symbols, but inferred paths are low-priority anchors rather than a reason to stop discovery.
 3. **Lexical search** -- identifier extraction from camelCase, PascalCase, snake_case, path segments, and domain terms is matched against symbol names and summaries.
-4. **Hybrid entity search** -- unscoped or low-confidence calls use bounded FTS + vector retrieval with reciprocal-rank fusion. Symbol candidates support precise lookup, while file-summary, cluster, and process candidates expand into representative symbols for broad discovery.
+4. **Hybrid entity search** -- broad mode uses bounded FTS + vector retrieval with reciprocal-rank fusion by default; precise mode uses it only when `options.semantic` is `true`. Symbol candidates support precise lookup, while file-summary, cluster, and process candidates expand into representative symbols for broad discovery.
 5. **Feedback priors** -- symbols previously marked useful or missing in past tasks are boosted when the task asks about related feedback or the retrieval signal is otherwise thin.
 
 `options.semantic` controls the retrieval gate:
 
-- omitted: use confidence-gated default behavior
-- `true`: force bounded hybrid retrieval
-- `false`: keep lexical-only behavior
+- omitted: use bounded hybrid entity search in broad mode and lexical retrieval in precise mode
+- `true`: force bounded hybrid entity search in either mode
+- `false`: disable hybrid entity search and keep either mode lexical-only
 
-Explicit `focusPaths` and exact symbols remain the fastest and most predictable way to constrain context. Semantic expansion is now part of the default unscoped discovery path when the lexical signal is weak enough to justify it.
+Explicit `focusPaths` constrain whichever retrieval lane is active. Broad mode defaults to hybrid discovery for recall, while precise mode preserves the lexical fast path unless the caller forces semantic retrieval.
 
 After seeding, an evidence-aware multi-factor scorer ranks every candidate using:
 

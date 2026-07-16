@@ -45,9 +45,9 @@ flowchart TD
 The context engine:
 
 1. Classifies the task as `debug`, `review`, `implement`, or `explain`.
-2. Seeds exact symbol mentions and explicit focus paths first so known targets stay fast.
-3. For unscoped natural-language tasks, runs confidence-gated retrieval: lexical and path inference stay cheap, while low-confidence or broad discovery paths use bounded hybrid entity search (FTS + vector with RRF).
-4. Treats `options.semantic` as an override: `true` forces hybrid retrieval, `false` keeps lexical-only behavior, and omission lets the confidence gate decide.
+2. Seeds exact symbol mentions and exact explicit file paths first so known targets stay fast.
+3. Runs task-text retrieval within explicit path scope. Directory paths expand only when scoped seeding returns no candidates. Broad mode uses bounded hybrid entity search (FTS + vector with RRF) by default, while precise mode uses lexical retrieval by default.
+4. Treats `options.semantic` as an override: `true` forces hybrid entity search in either mode, `false` keeps either mode lexical-only, and omission uses the mode-based default.
 5. Carries seed evidence into executor ranking, including file-summary, cluster, and process candidates that expand into representative symbols.
 6. Plans only the rungs needed for the task and budget.
 7. Returns compact evidence plus an answer envelope when broad mode is used.
@@ -103,6 +103,22 @@ That separation matters. A workflow can reproduce context retrieval, but it cost
 
 - `precise` keeps the smallest useful set of symbols and rungs.
 - `broad` returns more surrounding structure, guidance, and follow-up context.
+
+### `options.focusPaths`
+
+`focusPaths` scopes task-text retrieval to repository-relative files or directories. SDL-MCP distinguishes paths supplied by the caller from paths inferred from task text because they carry different intent.
+
+| Scope | Behavior |
+| :---- | :------- |
+| `contextMode: "precise"` with explicit `focusPaths` | Treats the paths as a hard boundary. Retrieval filters candidates to the paths, and final selection contains only in-scope symbols. |
+| `contextMode: "broad"` with explicit `focusPaths` | Treats the paths as a soft boundary. Retrieval favors in-scope candidates first, then allows the best out-of-scope evidence to spill over for recall. |
+| Inferred paths in either mode | Uses paths as soft hints for coverage and ranking. Inferred paths do not hard-filter candidates, penalize out-of-scope results, or trigger scoped over-fetching. |
+
+> **Caller-visible behavior change:** Precise mode returns an empty selection when no candidate matches explicit `focusPaths`. It does not substitute an out-of-scope guess. Use broad mode when recall outside the supplied paths is acceptable.
+
+When precise mode receives both explicit `focusPaths` and `focusSymbols`, it applies intersection semantics. A named symbol remains eligible only when its file also matches an explicit path.
+
+Path inference runs only when the caller provides no explicit paths or symbols. Internally inferred paths remain identifiable as inferred scope, even though the engine also carries them in `focusPaths` for downstream ranking.
 
 See [Context Modes](./context-modes.md) for the detailed comparison.
 
