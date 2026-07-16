@@ -13,7 +13,8 @@ The existing benchmark cases and fixtures remain authoritative and unchanged. Th
 - semantic aggregate expected-symbol recall: at least 85%;
 - noise rate: no more than 10%;
 - failed cases: zero;
-- precise/broad recall breakdowns and all latency percentiles are report-only;
+- forced-semantic precise/broad recall breakdowns and forced-semantic latency percentiles are report-only;
+- the separate default scoped-precise latency gate remains unchanged;
 - wall time is measured for every candidate implementation, with no fixed threshold.
 
 Production code must not contain benchmark case IDs, expected symbol lists, or case-specific path mappings.
@@ -40,7 +41,7 @@ This fallback does not assume names, paths, or summaries are present on semantic
 2. Run the existing bounded action, compound, and individual lexical queries instead of suppressing them after semantic coverage.
 3. Merge and cap candidates through the existing deterministic score order.
 4. Measure recall and wall time. Stop here if recall is at least 85%.
-5. If recall is still low, preserve the first unique result from each existing lexical query batch, then fill remaining slots in semantic/lexical score order.
+5. If recall is still low, for unscoped forced-semantic calls only, execute every query in the existing bounded lexical plan, preserve the first unique result from each batch, then fill remaining slots in semantic/lexical score order. Scoped collect-before-cap behavior remains unchanged.
 6. Pass the result through the unchanged executor and evidence pipeline.
 
 Query count and candidates remain bounded by existing precise/broad limits and seed caps. Negated clauses keep the existing non-pruning behavior.
@@ -68,7 +69,7 @@ Implementation follows red-green-refactor:
 3. Add a synthetic unit regression proving forced-semantic uses the existing lexical lane while omitted/false semantic modes retain their behavior.
 4. Remove the `semanticLaneHasCoverage` suppression and rerun the live benchmark.
 5. Stop if recall reaches 85%. Otherwise add deterministic one-per-lexical-batch coverage, starting with another failing synthetic unit test.
-6. Change the benchmark and benchmark docs so only aggregate recall, noise, and failures are hard gates; precise/broad recall and latency remain visible but report-only.
+6. Change only the forced-semantic benchmark contract so aggregate recall, noise, and failures are its hard gates; forced-semantic precise/broad recall and latency remain visible but report-only. Preserve the separate default scoped-precise latency gate.
 7. Compare implementations using the same built commit, config, and immutable index. For each candidate, run one discarded warm-up followed by three measured 26-case forced-semantic passes with no concurrent repo workload; select the lowest median total wall time among candidates reaching 85%.
 8. Verify the full test suite, goldens, determinism, typecheck, lint, docs inventory, and a fresh-process MCP call with `semantic: true`.
 

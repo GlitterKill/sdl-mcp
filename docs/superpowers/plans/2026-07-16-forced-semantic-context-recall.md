@@ -14,7 +14,7 @@
 
 - The benchmark corpus remains exactly `tests/benchmark/context-quality-cases.json`: 26 cases with unchanged task text, focus paths, expected useful symbols, and unexpected symbols.
 - Only the `semantic` benchmark variant (`options.semantic: true`) gains new hard gates: aggregate recall `>= 85%`, noise `<= 10%`, and failures `=== 0`.
-- Precise recall, broad recall, all latency percentiles, and total wall time remain visible but report-only.
+- Forced-semantic precise recall, broad recall, latency percentiles, and total wall time remain visible but report-only. The separate default scoped-precise latency gate remains unchanged.
 - The selected implementation is the lowest-median-wall-time candidate among qualifying candidates, measured on the same build, configuration, and immutable index with one discarded warmup plus three measured full forced-semantic passes and no concurrent repository workload.
 - Calls with `options.semantic` omitted or `false`, shared retrieval functions, MCP schemas, response ordering, and all non-`sdl.context` tools retain their current behavior.
 
@@ -32,6 +32,10 @@
 - [ ] **Step 2: Pin and build the immutable QA index, then confirm the old 56.5% forced-semantic failure.**
 
   ```powershell
+  $previousSdlConfig = $env:SDL_CONFIG
+  $previousSdlConfigPath = $env:SDL_CONFIG_PATH
+  $previousGraphDbPath = $env:SDL_GRAPH_DB_PATH
+  $previousRequireIndex = $env:SDL_CONTEXT_QUALITY_REQUIRE_INDEX
   $env:SDL_CONFIG = 'F:\Claude\sdl-mcp\sdlmcp.config.json'
   $env:SDL_GRAPH_DB_PATH = 'F:\Claude\sdl-mcp\qa\forced-semantic-recall-588cf86d.lbug'
   npm run build
@@ -41,16 +45,17 @@
   node --experimental-strip-types --test tests/benchmark/context-quality.test.ts
   ```
 
-  Expected: health identifies `sdl-mcp`, the benchmark availability note prints the exact pinned database path, and the semantic aggregate recall assertion fails below 85%. The report still prints precise, broad, noise, latency, and total wall time. Record the index directory's last-write time; do not mutate or rebuild it for the remainder of candidate comparison.
+  Expected: health identifies `sdl-mcp`, the benchmark availability note prints the exact pinned database path, and the semantic aggregate recall assertion fails below 85%. Record baseline forced-semantic recall, noise, failures, p50, p95, and total wall time. Record the index files' last-write times; do not mutate or rebuild them for the remainder of candidate comparison.
 
 - [ ] **Step 3: Replace obsolete hard thresholds with the approved contract.**
 
-  Delete `SEMANTIC_PRECISE_RECALL_MIN`, `SEMANTIC_BROAD_RECALL_MIN`, `UNSCOPED_P50_MAX_MS`, `UNSCOPED_P95_MAX_MS`, and `SCOPED_PRECISE_P95_MAX_MS`. Remove only their assertions. Preserve:
+  Delete `SEMANTIC_PRECISE_RECALL_MIN`, `SEMANTIC_BROAD_RECALL_MIN`, `UNSCOPED_P50_MAX_MS`, and `UNSCOPED_P95_MAX_MS`. Remove only their assertions. Preserve:
 
   - `semantic.failures === 0`
   - aggregate forced-semantic recall `>= 85`
   - forced-semantic noise `<= 10`
   - the scoped precise execution and its zero-failure assertion
+  - `SCOPED_PRECISE_P95_MAX_MS` and the separate default scoped-precise latency assertion
   - all report-only measurements
 
 - [ ] **Step 4: Verify the case fixtures were not edited.**
@@ -79,8 +84,9 @@
 
 - [ ] **Step 1: Write a failing runtime regression test.**
 
-  Build an isolated temporary LadybugDB in `context-seeding-runtime.test.ts`, insert at least four FTS-matching symbols, create the existing `symbol_search_text_v1` FTS index, and call the compiled `buildSeedContext()` for the same broad task three times: `semantic: true`, omitted, and `semantic: false`. Assert through `diagnosticTimings` that:
+  Build an isolated temporary LadybugDB in `context-seeding-runtime.test.ts`. Before importing/calling the seeding pipeline, create and set `SDL_CONFIG` to a self-contained temporary config with `semantic.retrieval.mode: "hybrid"`, FTS enabled, vectors disabled, and no live index. Insert at least four FTS-matching symbols, create the existing `symbol_search_text_v1` FTS index, and call the compiled `buildSeedContext()` for the same broad task three times: `semantic: true`, omitted, and `semantic: false`. Choose task text with no action-catalog hits. Restore both config environment variables, close LadybugDB, and remove the temporary DB/config/WAL in teardown. Assert through sources and `diagnosticTimings` that:
 
+  - the forced fixture precondition holds: `forced.sources.semantic >= 4`;
   - forced semantic runs both `seed.semanticEntitySearch` and `seed.lexicalFallback`;
   - omitted semantic retains its current semantic-plus-lexical broad behavior;
   - `semantic: false` retains lexical fallback and does not run semantic entity search.
@@ -155,7 +161,7 @@
   }
   ```
 
-  Record each forced-semantic aggregate recall, noise, failures, and total wall time. Treat run 1 as warmup. Compute the median of runs 2-4.
+  Record each forced-semantic aggregate recall, noise, failures, p50, p95, and total wall time. Treat run 1 as warmup. Compute the median total wall time of runs 2-4.
 
 - [ ] **Step 3: Make the stop/go decision.**
 
@@ -177,7 +183,7 @@
 
   Add and export a small `orderForcedSemanticLexicalResults()` helper that accepts already-returned query batches plus a cap. Before implementing it, add synthetic runtime tests that require it to reserve at most one unseen symbol from each non-empty batch in query order, then fill remaining capacity from the same batches without duplicates. Include an empty batch and cross-batch duplicate. The new import/test is RED because the orchestration helper does not exist yet; do not duplicate the existing `selectFirstUnseenPerBatch()` tests.
 
-  Extend `context-seeding-runtime.test.ts` with a synthetic forced-semantic task whose compound batch can fill the lexical cap before later individual-term batches. Assert that each non-empty planned query batch contributes its deterministic anchor. Omitted/false modes must continue through the pre-existing append-and-cap path.
+  Extend `context-seeding-runtime.test.ts` with a synthetic unscoped forced-semantic task whose compound batch can fill the lexical cap before later individual-term batches. Assert that each non-empty planned query batch contributes its deterministic anchor. Add a scoped forced-semantic preservation case proving collect-before-cap behavior is unchanged. Omitted/false modes must continue through the pre-existing append-and-cap path.
 
 - [ ] **Step 2: Run the focused tests and prove RED.**
 
@@ -188,7 +194,7 @@
 
 - [ ] **Step 3: Implement bounded coverage using only already-issued searches.**
 
-  For forced-semantic calls only, execute every query already present in the bounded action/compound/individual query plan even when an earlier batch could fill `lexicalTargetCap`; retain those result arrays instead of stopping early. Implement `orderForcedSemanticLexicalResults()` with the existing `selectFirstUnseenPerBatch()` helper, add selected anchors in query order, then fill remaining `lexicalTargetCap` slots from the same arrays with the current scoring and deduplication rules. This may execute planned queries that the current early-cap break skips, so include that cost in candidate timing. Do not add a query to the plan, raise a limit, hydrate metadata, modify shared search functions, or alter omitted/false paths.
+  Only when `forceSemanticEntitySearch && !collectBeforeCaps`, execute every query already present in the bounded action/compound/individual query plan even when an earlier batch could fill `lexicalTargetCap`; retain those result arrays instead of stopping early. Implement `orderForcedSemanticLexicalResults()` with the existing `selectFirstUnseenPerBatch()` helper, add selected anchors in query order, then fill remaining `lexicalTargetCap` slots from the same arrays with the current scoring and deduplication rules. This may execute planned queries that the current early-cap break skips, so include that cost in candidate timing. Do not add a query to the plan, raise a limit, hydrate metadata, modify shared search functions, alter scoped collect-before-cap behavior, or alter omitted/false paths.
 
 - [ ] **Step 4: Run focused tests and prove GREEN.**
 
@@ -224,7 +230,7 @@
 
 - [ ] **Step 2: Correct the benchmark gate table.**
 
-  Document the unchanged 26-case corpus and the three hard forced-semantic gates: aggregate recall `>= 85%`, noise `<= 10%`, and zero failures. Label precise/broad recall, p50/p95/max, scoped precise latency, and total wall time as report-only diagnostics.
+  Document the unchanged 26-case corpus and the three hard forced-semantic gates: aggregate recall `>= 85%`, noise `<= 10%`, and zero failures. Label forced-semantic precise/broad recall, p50/p95/max, and total wall time as report-only diagnostics. Preserve the separate default scoped-precise p95 latency gate as a hard gate.
 
 - [ ] **Step 3: Add a concise changelog entry.**
 
@@ -275,15 +281,36 @@
 - [ ] **Step 3: Run the full test suite serially.**
 
   ```powershell
+  Remove-Item Env:SDL_CONFIG -ErrorAction SilentlyContinue
+  Remove-Item Env:SDL_CONFIG_PATH -ErrorAction SilentlyContinue
+  Remove-Item Env:SDL_GRAPH_DB_PATH -ErrorAction SilentlyContinue
   Remove-Item Env:SDL_CONTEXT_QUALITY_REQUIRE_INDEX -ErrorAction SilentlyContinue
   npm test
   ```
 
-  Expected: all tests pass. Do not stage test-generated fixture path rewrites from the isolated worktree.
+  Expected: all tests pass. The full suite mechanically rewrites absolute fixture paths when run from a worktree; reverse only those generated diffs before continuing, then assert they match `HEAD`:
+
+  ```powershell
+  $generatedFixtures = @(
+    'tests/fixtures/shell/expected-calls.json',
+    'tests/fixtures/shell/expected-imports.json',
+    'tests/fixtures/shell/expected-symbols.json',
+    'tests/integration/fixtures/example-plugin/expected-calls.json',
+    'tests/integration/fixtures/example-plugin/expected-graph.json',
+    'tests/integration/fixtures/example-plugin/expected-imports.json',
+    'tests/integration/fixtures/example-plugin/expected-symbols.json',
+    'tests/integration/fixtures/python/expected-calls.json',
+    'tests/integration/fixtures/python/expected-imports.json',
+    'tests/integration/fixtures/python/expected-symbols.json'
+  )
+  git diff -- $generatedFixtures | git apply --reverse
+  git diff --exit-code -- $generatedFixtures
+  git diff --exit-code 588cf86d...HEAD -- $generatedFixtures
+  ```
 
 - [ ] **Step 4: Capture final benchmark evidence.**
 
-  Restore `$env:SDL_CONTEXT_QUALITY_REQUIRE_INDEX = '1'`. Against the same pinned config and immutable QA index, run one discarded warmup plus three measured passes. Record each measured forced-semantic recall/noise/failures/total-wall line and the median total wall time. Confirm the case file is unchanged from the base commit:
+  Re-pin `$env:SDL_CONFIG`, `$env:SDL_GRAPH_DB_PATH`, and `$env:SDL_CONTEXT_QUALITY_REQUIRE_INDEX = '1'`. Against the same immutable QA index, run one discarded warmup plus three measured passes. Record each measured forced-semantic recall, noise, failures, p50, p95, and total wall time, then report the median total wall time. Confirm the case file is unchanged from the base commit:
 
   ```powershell
   git diff --exit-code 588cf86d...HEAD -- tests/benchmark/context-quality-cases.json
@@ -305,7 +332,7 @@
   With the pinned `SDL_CONFIG` and `SDL_GRAPH_DB_PATH` still set, launch a new stdio server through the installed MCP SDK and call `sdl.context` with `options.semantic: true`:
 
   ```powershell
-  node --input-type=module -e "import { Client } from '@modelcontextprotocol/sdk/client/index.js'; import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'; const client = new Client({ name: 'forced-semantic-smoke', version: '1.0.0' }); const transport = new StdioClientTransport({ command: process.execPath, args: ['dist/main.js'], env: process.env }); await client.connect(transport); const result = await client.callTool({ name: 'sdl.context', arguments: { repoId: 'sdl-mcp', taskType: 'explain', taskText: 'Explain the context seeding retrieval pipeline', options: { contextMode: 'broad', semantic: true, includeRetrievalEvidence: true } } }); console.log(JSON.stringify(result.structuredContent ?? result.content)); await client.close();"
+  node --input-type=module -e "import { Client } from '@modelcontextprotocol/sdk/client/index.js'; import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'; const client = new Client({ name: 'forced-semantic-smoke', version: '1.0.0' }); const transport = new StdioClientTransport({ command: process.execPath, args: ['dist/main.js'], env: process.env }); await client.connect(transport); const result = await client.callTool({ name: 'sdl.context', arguments: { repoId: 'sdl-mcp', taskType: 'explain', taskText: 'Explain the context seeding retrieval pipeline', wireFormat: 'json', responseMode: 'inline', refsMode: 'off', options: { contextMode: 'broad', semantic: true, includeRetrievalEvidence: true } } }); if (result.isError) throw new Error(JSON.stringify(result.content)); const text = result.content?.find((item) => item.type === 'text')?.text; const payload = result.structuredContent ?? (text ? JSON.parse(text) : undefined); if (payload?.success !== true) throw new Error('forced-semantic smoke returned success=false'); if (!Array.isArray(payload.finalEvidence) || payload.finalEvidence.length === 0) throw new Error('forced-semantic smoke returned no finalEvidence'); console.log(JSON.stringify({ success: payload.success, evidenceCount: payload.finalEvidence.length })); await client.close();"
   ```
 
   Expected: a successful structured response with non-empty evidence and no protocol/server error.
@@ -323,3 +350,12 @@
   ```
 
   Expected: only intentional branch commits; generated absolute-path fixture rewrites are excluded from commits.
+
+  Restore the caller's original benchmark environment after all verification:
+
+  ```powershell
+  if ($null -eq $previousSdlConfig) { Remove-Item Env:SDL_CONFIG -ErrorAction SilentlyContinue } else { $env:SDL_CONFIG = $previousSdlConfig }
+  if ($null -eq $previousSdlConfigPath) { Remove-Item Env:SDL_CONFIG_PATH -ErrorAction SilentlyContinue } else { $env:SDL_CONFIG_PATH = $previousSdlConfigPath }
+  if ($null -eq $previousGraphDbPath) { Remove-Item Env:SDL_GRAPH_DB_PATH -ErrorAction SilentlyContinue } else { $env:SDL_GRAPH_DB_PATH = $previousGraphDbPath }
+  if ($null -eq $previousRequireIndex) { Remove-Item Env:SDL_CONTEXT_QUALITY_REQUIRE_INDEX -ErrorAction SilentlyContinue } else { $env:SDL_CONTEXT_QUALITY_REQUIRE_INDEX = $previousRequireIndex }
+  ```
