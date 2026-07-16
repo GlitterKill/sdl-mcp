@@ -5,6 +5,7 @@ import { promisify } from "util";
 import { gzip, gunzip, gunzipSync } from "zlib";
 import { IndexError } from "../domain/errors.js";
 
+import { invalidateGraphIntegrity } from "../db/ladybug-derived-state.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { resolveSymbolEnrichment } from "../indexer/symbol-enrichment.js";
@@ -268,6 +269,9 @@ export async function importArtifact(
   }
 
   await withWriteConn(async (wConn) => {
+    // Imports can partially mutate canonical rows and may reuse a Version ID.
+    // Invalidate before the first import write so every failure remains closed.
+    await invalidateGraphIntegrity(wConn, artifact.repo_id);
     const existingRepo = await ladybugDb.getRepo(wConn, artifact.repo_id);
     if (!existingRepo) {
       await ladybugDb.upsertRepo(wConn, {

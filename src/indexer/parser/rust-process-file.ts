@@ -32,6 +32,7 @@ import {
   type Pass1ExtractionCache,
   storePass1Extraction,
 } from "../pass2/types.js";
+import { createGraphIntegrityFileDigest } from "../provider-first/persisted-graph-integrity.js";
 
 const C_FAMILY_PASS2_SOURCE_CACHE_EXTENSIONS = new Set([
   ".c",
@@ -174,6 +175,11 @@ export async function processFileFromRustResult(params: {
           relPath,
           symbols: [],
         },
+        graphIntegrityFile: createGraphIntegrityFileDigest({
+          fileId,
+          relPath,
+          symbols: [],
+        }),
       };
     }
 
@@ -359,6 +365,11 @@ export async function processFileFromRustResult(params: {
       globalPreferredSymbolId,
       adapter,
     });
+    const graphIntegrityFile = createGraphIntegrityFileDigest({
+      fileId,
+      relPath,
+      symbols: symbolsToUpsert,
+    });
 
     // ── Persist ──────────────────────────────────────────────────────────
     if (params.batchAccumulator) {
@@ -425,6 +436,7 @@ export async function processFileFromRustResult(params: {
           exported: symbol.exported,
         })),
       },
+      graphIntegrityFile,
     };
   } catch (error) {
     logger.error(`Error processing Rust result for ${fileMeta.path}: ${error}`);

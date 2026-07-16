@@ -59,4 +59,23 @@ describe("health scoring", () => {
 
     assert.strictEqual(result.score, 100);
   });
+
+  it("withholds health while graph integrity is unavailable", () => {
+    const result = computeHealthScore({
+      indexedFiles: 100,
+      totalEligibleFiles: 100,
+      indexErrors: 0,
+      totalFiles: 100,
+      resolvedCallEdges: 20,
+      totalCallEdges: 20,
+      minutesSinceLastIndex: 0,
+      minIndexedFiles: 1,
+      minIndexedSymbols: 1,
+      indexedSymbols: 200,
+      graphIntegrityReady: false,
+    });
+
+    assert.strictEqual(result.available, false);
+    assert.strictEqual(result.score, null);
+  });
 });

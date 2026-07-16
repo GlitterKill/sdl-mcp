@@ -53,6 +53,11 @@ import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js"
 import type { Connection } from "kuzu";
 import { ensureBaselineEnforcementAssets } from "../../cli/commands/enforcement-bootstrap.js";
 import { refreshSemanticEnrichment } from "../../semantic/enrichment.js";
+import {
+  getDerivedStateSummary,
+  graphIntegrityIsVerifiedForVersion,
+  graphIntegrityNextBestAction,
+} from "../../db/ladybug-derived-state.js";
 
 // Health snapshot cache with 30s TTL to avoid expensive recomputation.
 // lastKnownHealth persists indefinitely as a stale fallback when fresh computation times out.
@@ -674,14 +679,8 @@ function compactPrefetchStatsForStatus(
     // Derived-state freshness (clusters/processes/algorithms/summaries/
     // embeddings). Surfaces dirty flags and recovery guidance if a prior
     // post-index derived computation was interrupted or failed.
-    let derivedState: Awaited<
-      ReturnType<
-        typeof import("../../db/ladybug-derived-state.js").getDerivedStateSummary
-      >
-    > | null = null;
+    let derivedState: Awaited<ReturnType<typeof getDerivedStateSummary>> = null;
     try {
-      const { getDerivedStateSummary } =
-        await import("../../db/ladybug-derived-state.js");
       derivedState = await getDerivedStateSummary(repoId);
     } catch (err) {
       logger.debug("derivedState lookup failed (non-critical)", {
@@ -689,6 +688,22 @@ function compactPrefetchStatsForStatus(
         error: err instanceof Error ? err.message : String(err),
       });
     }
+    const graphIntegrityReady = graphIntegrityIsVerifiedForVersion(
+      derivedState,
+      latestVersion?.versionId ?? null,
+    );
+    if (
+      derivedState?.graphIntegrityState === "verified" &&
+      !graphIntegrityReady
+    ) {
+      derivedState = {
+        ...derivedState,
+        nextBestAction: graphIntegrityNextBestAction("version-mismatch"),
+      };
+    }
+    const effectiveHealth = graphIntegrityReady
+      ? health
+      : unavailableHealth.snapshot;
 
     // Surface relevant memories if enabled (default: false) and config allows it
     const memCaps = getMemoryCapabilities(loadConfig(), repoId);
@@ -732,9 +747,9 @@ function compactPrefetchStatsForStatus(
       lastIndexedAt,
       ...(includeExpensiveStatus
         ? {
-            healthScore: health.score,
-            healthComponents: health.components,
-            healthAvailable: health.available,
+            healthScore: effectiveHealth.score,
+            healthComponents: effectiveHealth.components,
+            healthAvailable: effectiveHealth.available,
           }
         : {}),
       ...(!includeExpensiveStatus
@@ -742,6 +757,12 @@ function compactPrefetchStatsForStatus(
             healthNote:
               'Health omitted because detail:"minimal" skips health computation. Use detail:"standard" to inspect health.',
           }
+        : !graphIntegrityReady
+          ? {
+              healthNote:
+                derivedState?.nextBestAction ??
+                graphIntegrityNextBestAction("unknown"),
+            }
         : !health.available
           ? {
               healthNote:

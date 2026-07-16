@@ -21,6 +21,7 @@ import {
   initLadybugDb,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { getDerivedState } from "../../dist/db/ladybug-derived-state.js";
 import type { SymbolRow } from "../../dist/db/ladybug-queries.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
 import { computeAndStoreClustersAndProcesses } from "../../dist/indexer/cluster-orchestrator.js";
@@ -162,6 +163,10 @@ describe("Ladybug E2E (clusters + processes + slices + delta)", () => {
 
     const full = await indexRepo(REPO_ID, "full");
     assert.ok(full.versionId.length > 0);
+    const fullIntegrity = await getDerivedState(REPO_ID);
+    assert.equal(fullIntegrity?.graphIntegrityState, "verified");
+    assert.equal(fullIntegrity?.graphIntegrityVersionId, full.versionId);
+    assert.match(fullIntegrity?.graphIntegrityDigest ?? "", /^[a-f0-9]{64}$/);
 
     const conn = await getLadybugConn();
     const clusters = await ladybugDb.getClustersForRepo(conn, REPO_ID);
@@ -369,6 +374,13 @@ describe("Ladybug E2E (clusters + processes + slices + delta)", () => {
     const inc = await indexRepo(REPO_ID, "incremental");
     const afterVersion = inc.versionId;
     assert.notStrictEqual(afterVersion, beforeVersion);
+    const incrementalIntegrity = await getDerivedState(REPO_ID);
+    assert.equal(incrementalIntegrity?.graphIntegrityState, "verified");
+    assert.equal(incrementalIntegrity?.graphIntegrityVersionId, afterVersion);
+    assert.match(
+      incrementalIntegrity?.graphIntegrityDigest ?? "",
+      /^[a-f0-9]{64}$/,
+    );
 
     // Incremental refresh defers cluster/process recompute to the
     // derived-refresh queue (see Section 5 of the 2026-04-17 plan). The

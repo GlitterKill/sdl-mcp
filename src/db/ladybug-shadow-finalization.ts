@@ -273,6 +273,10 @@ const DERIVED_STATE_COLUMNS = [
   "computedVersionId",
   "updatedAt",
   "lastError",
+  "graphIntegrityState",
+  "graphIntegrityVersionId",
+  "graphIntegrityDigest",
+  "graphIntegrityError",
 ] as const;
 
 interface AuxiliarySymbolRow {
@@ -893,6 +897,10 @@ async function copyFinalizedRows(params: {
         row.computedVersionId,
         row.updatedAt,
         row.lastError,
+        row.graphIntegrityState,
+        row.graphIntegrityVersionId,
+        row.graphIntegrityDigest,
+        row.graphIntegrityError,
       ],
     }),
   ];
@@ -2133,6 +2141,10 @@ async function readDerivedStateRow(
     computedVersionId: string | null;
     updatedAt: string | null;
     lastError: string | null;
+    graphIntegrityState: string | null;
+    graphIntegrityVersionId: string | null;
+    graphIntegrityDigest: string | null;
+    graphIntegrityError: string | null;
   }>(
     conn,
     `MATCH (d:DerivedState {repoId: $repoId})
@@ -2145,7 +2157,11 @@ async function readDerivedStateRow(
             d.targetVersionId AS targetVersionId,
             d.computedVersionId AS computedVersionId,
             d.updatedAt AS updatedAt,
-            d.lastError AS lastError`,
+            d.lastError AS lastError,
+            d.graphIntegrityState AS graphIntegrityState,
+            d.graphIntegrityVersionId AS graphIntegrityVersionId,
+            d.graphIntegrityDigest AS graphIntegrityDigest,
+            d.graphIntegrityError AS graphIntegrityError`,
     { repoId },
   );
   if (!row) return null;
@@ -2160,6 +2176,15 @@ async function readDerivedStateRow(
     computedVersionId: row.computedVersionId,
     updatedAt: row.updatedAt,
     lastError: row.lastError,
+    graphIntegrityState:
+      row.graphIntegrityState === "verifying" ||
+      row.graphIntegrityState === "verified" ||
+      row.graphIntegrityState === "failed"
+        ? row.graphIntegrityState
+        : "unknown",
+    graphIntegrityVersionId: row.graphIntegrityVersionId,
+    graphIntegrityDigest: row.graphIntegrityDigest,
+    graphIntegrityError: row.graphIntegrityError,
   };
 }
 

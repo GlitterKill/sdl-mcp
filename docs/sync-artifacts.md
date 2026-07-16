@@ -164,6 +164,8 @@ console.log(
 );
 ```
 
+Import invalidates any previously verified graph digest before its first canonical graph write. This also applies when the artifact reuses the current version ID and when `pullWithFallback` imports an artifact. Run a full index refresh after import to establish a new verified health baseline.
+
 #### Pull with Fallback
 
 ```typescript

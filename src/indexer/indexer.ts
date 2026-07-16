@@ -158,6 +158,12 @@ import {
 } from "./provider-first/shadow-activation.js";
 import { finalizeProviderFirstShadowDb } from "./provider-first/shadow-finalization.js";
 import {
+  ensureGraphIntegrityVerificationComplete,
+  failActiveGraphIntegrityVerification,
+  GraphIntegrityVerificationError,
+  PersistedGraphIntegritySession,
+} from "./provider-first/persisted-graph-integrity.js";
+import {
   expandIdentifierText,
   hasInvocationCandidateAfterMismatch,
   isIdentifierContinue,
@@ -2044,7 +2050,7 @@ export async function indexRepo(
     if (mode === "full") {
       await preIndexCheckpoint();
     }
-    return indexRepoImpl(
+    const result = await indexRepoImpl(
       repoId,
       mode,
       onProgress,
@@ -2052,6 +2058,8 @@ export async function indexRepo(
       options,
       scipPreRefreshResult,
     );
+    await ensureGraphIntegrityVerificationComplete(repoId);
+    return result;
   };
 
   const resultPromise = withIndexingGate(() =>
@@ -2060,6 +2068,9 @@ export async function indexRepo(
   indexLocks.set(repoId, resultPromise);
   try {
     return await resultPromise;
+  } catch (error) {
+    await failActiveGraphIntegrityVerification(repoId);
+    throw error;
   } finally {
     // Only clear if we're still the active lock holder.
     if (indexLocks.get(repoId) === resultPromise) {
@@ -2296,6 +2307,7 @@ async function indexRepoImpl(
   let providerFirstShadowStagingSkipReason: string | undefined;
   let providerFirstProviderRows: ProviderFirstGraphRows | undefined;
   let providerFirstGenerationId: string | undefined;
+  let providerFirstRemovedFilesDeleted = false;
   const providerFirstFallbackPaths = new Set<string>();
   const providerFirstChangedFileIds = new Set<string>();
   const providerFirstShadowRepoScopeSkipReason =
@@ -2336,7 +2348,11 @@ async function indexRepoImpl(
     appConfig.repos,
     config,
   );
-
+  // Source-file-list runs intentionally represent only a benchmark subset and
+  // cannot establish repository-wide integrity.
+  const graphIntegrity = new PersistedGraphIntegritySession(
+    repoId, mode, !scopedSourceFileListActive,
+  );
   const createOrReuseVersion = async (
     versionReason: string,
     forceNewVersion = false,
@@ -2350,7 +2366,7 @@ async function indexRepoImpl(
       if (mode === "incremental" && !forceNewVersion) {
         const versionId = latestVersion
           ? latestVersion.versionId
-          : `v${Date.now()}`;
+          : graphIntegrity.plannedVersionId ?? `v${Date.now()}`;
         if (!latestVersion) {
           await createVersionAndSnapshot({
             repoId,
@@ -2362,7 +2378,7 @@ async function indexRepoImpl(
         return versionId;
       }
 
-      const versionId = `v${Date.now()}`;
+      const versionId = graphIntegrity.plannedVersionId ?? `v${Date.now()}`;
       await createVersionAndSnapshot({
         repoId,
         versionId,
@@ -2742,11 +2758,12 @@ async function indexRepoImpl(
       stageTotal: providerCoverageScan.files.length,
       message: `scanned ${providerCoverageScan.files.length} file(s) for provider-first coverage`,
     });
-    let providerFirstRemovedFilesDeleted = false;
     if (
       providerFirstIncrementalActive &&
       providerCoverageScan.removedFileIds.length > 0
     ) {
+      await graphIntegrity.begin();
+      graphIntegrity.removeFiles(providerCoverageScan.removedFileIds);
       await measureProviderFirstPhase(
         "deleteRemovedFiles",
         "providerFirstIncrementalDeleteRemovedFiles",
@@ -3036,6 +3053,57 @@ async function indexRepoImpl(
             scanScopedProvider.rows,
             providerRowsExcludedByLegacyFallback,
           );
+          applyScannedFileMetadataToProviderRows({
+            rows: materializedRows,
+            scannedFiles: providerScan.files,
+          });
+          const activeProviderInputHash =
+            scopedSourceFileListActive || providerFirstIncrementalActive
+            ? null
+            : "generatedIndexes" in providerResult
+              ? providerFirstActiveInputFingerprint(
+                  providerResult.generatedIndexes,
+                )
+              : null;
+          const activeProviderInputRecord = activeProviderInputHash
+            ? await ladybugDb.getScipIngestionRecord(
+                conn,
+                repoId,
+                PROVIDER_FIRST_ACTIVE_INPUT_RECORD_PATH,
+              )
+            : null;
+          const activeProviderInputMatches = Boolean(
+            activeProviderInputHash &&
+            activeProviderInputRecord?.contentHash ===
+              activeProviderInputHash &&
+            activeProviderInputRecord.truncated !== true,
+          );
+          const existingProviderSymbolCount =
+            await countExistingScipProviderSymbols(conn, repoId);
+          const activeMaterializationPlan: ProviderFirstActiveMaterializationPlan =
+            providerFirstIncrementalActive
+              ? {
+                  deleteExistingFileSymbols: true,
+                  useKnownFreshWriters: true,
+                  writeEdges: true,
+                  reuseExistingProviderRows: false,
+                }
+              : resolveProviderFirstActiveMaterializationPlan({
+                  existingProviderFileCount: countExistingProviderPrimaryFiles({
+                    providerFiles: materializedRows.files,
+                    existingByPath: providerScan.existingByPath,
+                  }),
+                  providerSymbolCount: materializedRows.symbols.length,
+                  activeProviderInputMatches,
+                  existingProviderSymbolCount,
+                });
+          const integrityVersionId = activeMaterializationPlan.reuseExistingProviderRows
+            ? await resolveActiveGraphVersionId(
+                "Provider-first SCIP active rows reused",
+              )
+            : graphIntegrity.reserveVersionId();
+          await graphIntegrity.begin(integrityVersionId);
+          graphIntegrity.applyProviderRows(materializedRows);
           await measureProviderFirstPhase(
             "persistProvenance",
             "providerFirstPersistProvenance",
@@ -3070,10 +3138,6 @@ async function indexRepoImpl(
           });
           providerFirstProviderRows = materializedRows;
           providerFirstGenerationId = providerResult.generationId;
-          applyScannedFileMetadataToProviderRows({
-            rows: materializedRows,
-            scannedFiles: providerScan.files,
-          });
           let shadowBuild: ProviderFirstExecutionSummary["shadowBuild"];
           if (!legacyFallbackPlan.runLegacyFallback) {
             if (providerFirstShadowStagingSkipReason) {
@@ -3137,46 +3201,6 @@ async function indexRepoImpl(
               }
             }
           }
-          const activeProviderInputHash =
-            scopedSourceFileListActive || providerFirstIncrementalActive
-            ? null
-            : "generatedIndexes" in providerResult
-              ? providerFirstActiveInputFingerprint(
-                  providerResult.generatedIndexes,
-                )
-              : null;
-          const activeProviderInputRecord = activeProviderInputHash
-            ? await ladybugDb.getScipIngestionRecord(
-                conn,
-                repoId,
-                PROVIDER_FIRST_ACTIVE_INPUT_RECORD_PATH,
-              )
-            : null;
-          const activeProviderInputMatches = Boolean(
-            activeProviderInputHash &&
-            activeProviderInputRecord?.contentHash ===
-              activeProviderInputHash &&
-            activeProviderInputRecord.truncated !== true,
-          );
-          const existingProviderSymbolCount =
-            await countExistingScipProviderSymbols(conn, repoId);
-          const activeMaterializationPlan: ProviderFirstActiveMaterializationPlan =
-            providerFirstIncrementalActive
-              ? {
-                  deleteExistingFileSymbols: true,
-                  useKnownFreshWriters: true,
-                  writeEdges: true,
-                  reuseExistingProviderRows: false,
-                }
-              : resolveProviderFirstActiveMaterializationPlan({
-                  existingProviderFileCount: countExistingProviderPrimaryFiles({
-                    providerFiles: materializedRows.files,
-                    existingByPath: providerScan.existingByPath,
-                  }),
-                  providerSymbolCount: materializedRows.symbols.length,
-                  activeProviderInputMatches,
-                  existingProviderSymbolCount,
-                });
           if (activeMaterializationPlan.reuseExistingProviderRows) {
             const deleteTotal = providerFirstMaterializePhaseTotal(
               "deleteFileSymbols",
@@ -3304,6 +3328,12 @@ async function indexRepoImpl(
               }, postIndexSessionTimeoutMs);
             },
           );
+          if (
+            !activeMaterializationPlan.reuseExistingProviderRows &&
+            providerScan.removedFileIds.length > 0
+          ) {
+            providerFirstRemovedFilesDeleted = true;
+          }
           invalidateIndexResultCaches(repoId);
           providerFirstScipMaterialized = true;
           if (activeMaterializationPlan.reuseExistingProviderRows) {
@@ -3429,6 +3459,7 @@ async function indexRepoImpl(
                   semanticDeferred,
                 });
               semanticDeferred = semanticRefresh.semanticDeferred;
+              await graphIntegrity.complete(versionId);
               providerFirstExecutedSummary = withProviderFirstPhaseTimings(
                 providerFirstExecutedSummary,
               );
@@ -3529,6 +3560,7 @@ async function indexRepoImpl(
                 versionId,
                 semanticDeferred: post.semanticDeferred,
               });
+            await graphIntegrity.complete(versionId);
             providerFirstExecutedSummary = withProviderFirstPhaseTimings(
               providerFirstExecutedSummary,
             );
@@ -3565,7 +3597,10 @@ async function indexRepoImpl(
       }
     }
     } catch (err) {
-      if (err instanceof ProviderFirstGraphValidationError) throw err;
+      if (
+        err instanceof ProviderFirstGraphValidationError ||
+        err instanceof GraphIntegrityVerificationError
+      ) throw err;
       if (providerFirst.requestedMode !== "auto") throw err;
       const reason = err instanceof Error ? err.message : String(err);
       const fallbackReason = formatProviderFirstAutoFallbackReason({
@@ -3582,7 +3617,6 @@ async function indexRepoImpl(
       // providerFirstScan stays undefined; legacy scanRepoForIndex will run below.
     }
   }
-
   const {
     files,
     existingByPath,
@@ -3596,6 +3630,7 @@ async function indexRepoImpl(
       repoRoot: repoRow.rootPath,
       config,
       onProgress,
+      deleteRemovedFiles: false,
     }),
   ));
   logger.debug("scanRepoForIndex complete", {
@@ -3768,6 +3803,20 @@ async function indexRepoImpl(
       }
       return result;
     });
+  }
+  await graphIntegrity.begin();
+  graphIntegrity.removeFiles(removedFileIds);
+  if (
+    mode === "incremental" &&
+    !providerFirstRemovedFilesDeleted &&
+    removedFileIds.length > 0
+  ) {
+    await measurePhase("deleteRemovedFiles", () =>
+      withWriteConn((writeConn) =>
+        ladybugDb.deleteFilesByIds(writeConn, removedFileIds),
+      ),
+    );
+    providerFirstRemovedFilesDeleted = true;
   }
 
   const providerFirstLegacyFallbackActive =
@@ -4019,6 +4068,10 @@ async function indexRepoImpl(
       },
       { engine: useRustEngine ? "rust" : "ts" },
     );
+    for (const file of pass1Acc.graphIntegrityFiles.values()) {
+      graphIntegrity.applyFile(file);
+    }
+    pass1Acc.graphIntegrityFiles.clear();
     // Record actual engine used so engineDispatch reflects fallbacks.
     try {
       getObservabilityTap()?.indexPhase({
@@ -4272,7 +4325,8 @@ async function indexRepoImpl(
     const versionId = await measurePhase("versionSnapshot", () =>
       createOrReuseVersion(
         versionReason,
-        mode === "incremental" && hasActualChanges,
+        mode === "incremental" &&
+          (hasActualChanges || graphIntegrity.plannedVersionId !== undefined),
       ),
     );
 
@@ -4560,11 +4614,11 @@ async function indexRepoImpl(
     });
     semanticDeferred = semanticRefresh.semanticDeferred;
     summaryStats = semanticRefresh.summaryStats ?? summaryStats;
+    await graphIntegrity.complete(versionId);
     providerFirstExecutedSummary = withProviderFirstPhaseTimings(
       providerFirstExecutedSummary,
     );
     const totalMs = Date.now() - startTime;
-
     const result: IndexResult = {
       versionId,
       filesProcessed: totalFilesProcessed,

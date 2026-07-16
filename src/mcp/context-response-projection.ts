@@ -63,6 +63,7 @@ const ALWAYS_INTERNAL_MODEL_FIELDS = new Set([
   "tokenEstimate",
   "totalTokens",
   "etagCache",
+  "graphIntegrityError",
   "sliceEtag",
 ]);
 
@@ -390,6 +391,7 @@ const VOLATILE_STATUS_MODEL_FIELDS = new Set([
   "lastIndexedAt",
   "startedAt",
   "finishedAt",
+  "graphIntegrityError",
   "updatedAt",
   "lastEventAt",
   "lastSuccessfulReindexAt",
@@ -835,6 +837,9 @@ function projectDerivedStateForModel(value: unknown): unknown {
     }
   }
   copyIfPresent(value, projected, "lastError");
+  copyIfPresent(value, projected, "graphIntegrityState");
+  copyIfPresent(value, projected, "graphIntegrityVersionId");
+  copyIfPresent(value, projected, "graphIntegrityDigest");
   copyIfPresent(value, projected, "nextBestAction");
   return projected;
 }

@@ -473,7 +473,11 @@ export const NODE_TABLES: string[] = [
     targetVersionId STRING,
     computedVersionId STRING,
     updatedAt STRING,
-    lastError STRING
+    lastError STRING,
+    graphIntegrityState STRING DEFAULT 'unknown',
+    graphIntegrityVersionId STRING,
+    graphIntegrityDigest STRING,
+    graphIntegrityError STRING
   )`,
 ];
 

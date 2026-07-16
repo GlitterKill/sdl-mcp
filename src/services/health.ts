@@ -2,6 +2,10 @@ import type { HealthComponents } from "../mcp/types.js";
 import { RepoConfigSchema } from "../config/types.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
+import {
+  getDerivedState,
+  graphIntegrityIsVerifiedForVersion,
+} from "../db/ladybug-derived-state.js";
 import { scanRepository } from "../indexer/fileScanner.js";
 import { getEmbeddingFailureCount } from "../indexer/embeddings.js";
 import { NotFoundError } from "../domain/errors.js";
@@ -40,6 +44,7 @@ export interface HealthScoreInput {
   minIndexedFiles?: number;
   minIndexedSymbols?: number;
   indexedSymbols: number;
+  graphIntegrityReady?: boolean;
 }
 
 export interface HealthScoreResult {
@@ -53,6 +58,7 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
   const minIndexedSymbols =
     input.minIndexedSymbols ?? DEFAULT_MIN_INDEXED_SYMBOLS;
   const available =
+    input.graphIntegrityReady !== false &&
     input.indexedFiles >= minIndexedFiles &&
     input.indexedSymbols >= minIndexedSymbols;
 
@@ -150,6 +156,12 @@ export async function getRepoHealthSnapshot(
   const files = await ladybugDb.getFilesByRepo(conn, repoId);
   const indexedSymbols = await ladybugDb.getSymbolCount(conn, repoId);
   const callCounts = await ladybugDb.getCallEdgeResolutionCounts(conn, repoId);
+  const latestVersion = await ladybugDb.getLatestVersion(conn, repoId);
+  const derivedState = await getDerivedState(repoId);
+  const graphIntegrityReady = graphIntegrityIsVerifiedForVersion(
+    derivedState,
+    latestVersion?.versionId ?? null,
+  );
 
   const lastIndexedFile = files
     .filter((f) => f.lastIndexedAt !== null)
@@ -175,6 +187,7 @@ export async function getRepoHealthSnapshot(
     resolvableCallEdges: callCounts.resolvableCallEdges,
     minutesSinceLastIndex,
     indexedSymbols,
+    graphIntegrityReady,
   });
 
   return {

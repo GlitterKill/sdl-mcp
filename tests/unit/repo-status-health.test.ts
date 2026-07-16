@@ -25,6 +25,10 @@ describe("repo status health fields", () => {
     assert.ok(source.includes("const healthResult = includeExpensiveStatus"));
     assert.ok(source.includes("const watcherHealth = includeExpensiveStatus"));
     assert.ok(source.includes("const prefetchStats = includeExpensiveStatus"));
+    assert.ok(
+      source.includes("graphIntegrityIsVerifiedForVersion("),
+      "repo.status must gate even cached health against current integrity state",
+    );
     assert.ok(source.includes("serverInfo: getServerInfo(),"));
   });
 
@@ -46,6 +50,9 @@ describe("repo status health fields", () => {
         targetVersionId: "v1",
         computedVersionId: "v1",
         updatedAt: null,
+        graphIntegrityState: "verified",
+        graphIntegrityVersionId: "v1",
+        graphIntegrityDigest: "a".repeat(64),
       },
     });
 
@@ -56,6 +63,53 @@ describe("repo status health fields", () => {
     assert.strictEqual(parsed.liveIndexStatus, undefined);
     assert.strictEqual(parsed.serverInfo, undefined);
     assert.strictEqual(parsed.derivedState?.stale, false);
+    assert.strictEqual(
+      parsed.derivedState?.graphIntegrityState,
+      "verified",
+    );
+    assert.strictEqual(parsed.derivedState?.graphIntegrityVersionId, "v1");
+    assert.strictEqual(
+      parsed.derivedState?.graphIntegrityDigest,
+      "a".repeat(64),
+    );
+  });
+
+  it("keeps integrity failure details out of repo status", () => {
+    const parsed = RepoStatusResponseSchema.parse({
+      repoId: "sdl-mcp",
+      rootPath: ".",
+      latestVersionId: "v2",
+      filesIndexed: 1,
+      symbolsIndexed: 1,
+      lastIndexedAt: null,
+      healthScore: 99,
+      healthAvailable: false,
+      derivedState: {
+        stale: false,
+        clustersDirty: false,
+        processesDirty: false,
+        algorithmsDirty: false,
+        summariesDirty: false,
+        embeddingsDirty: false,
+        targetVersionId: "v2",
+        computedVersionId: "v2",
+        updatedAt: "2026-07-16T01:02:03.000Z",
+        graphIntegrityState: "failed",
+        graphIntegrityVersionId: "v2",
+        graphIntegrityDigest: null,
+        graphIntegrityError: "nondeterministic internal mismatch detail",
+        nextBestAction:
+          'Graph integrity verification failed. Run sdl.index.refresh with mode:"full" to rebuild and verify the graph.',
+      },
+    });
+
+    assert.equal(parsed.healthAvailable, false);
+    assert.equal(parsed.derivedState?.graphIntegrityState, "failed");
+    assert.equal("graphIntegrityError" in (parsed.derivedState ?? {}), false);
+    assert.equal(
+      parsed.derivedState?.nextBestAction,
+      'Graph integrity verification failed. Run sdl.index.refresh with mode:"full" to rebuild and verify the graph.',
+    );
   });
 
   it("accepts compact standard/full telemetry fields when requested", () => {

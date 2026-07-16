@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Persisted graph integrity gate**: Full and incremental indexing now derive deterministic symbol digests from authoritative in-memory rows before persistence, then stream the final active LadybugDB graph in stable keyset order after shadow activation and semantic refresh. `DerivedState` records `unknown`, `verifying`, `verified`, or `failed`; `sdl.repo.status` withholds health until the digest is verified for the latest version and directs migrated or failed repositories to a full refresh. Verified-state publication uses compare-and-set so concurrent mutations win. Durable live-index patches atomically invalidate the previous digest, and sync import/pull invalidates before its first graph write, so watcher, checkpoint, file-write, and same-version artifact mutations cannot leave stale health marked verified.
+
 ### Fixed
 
 - **Provider-first shadow FTS handoff**: Finalized shadow activation now rebuilds and verifies the configured critical Symbol FTS index after reopening the swapped database. Missing or unavailable required FTS state fails the handoff and restores the previous active database instead of reporting a degraded shadow as activated.

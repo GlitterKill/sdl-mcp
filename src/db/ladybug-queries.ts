@@ -147,3 +147,8 @@ export {
   type RetrievalSeedCandidateRow,
 } from "./ladybug-retrieval.js";
 export { countRowsInNodeTable } from "./ladybug-index-lifecycle.js";
+export {
+  getPersistedGraphIntegritySymbolPage,
+  type GraphIntegritySymbolCursor,
+  type PersistedGraphIntegritySymbolRow,
+} from "./ladybug-graph-integrity.js";

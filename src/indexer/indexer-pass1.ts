@@ -81,6 +81,7 @@ export async function runPass1WithRustEngine(
     changedFileIds: new Set(),
     changedPass2FilePaths: new Set(),
     symbolMapFileUpdates: new Map(),
+    graphIntegrityFiles: new Map(),
     rustFilesProcessed: 0,
     tsFilesProcessed: 0,
     rustFallbackFiles: 0,
@@ -293,6 +294,12 @@ export async function runPass1WithRustEngine(
               result.symbolMapFileUpdate,
             );
           }
+          if (result.graphIntegrityFile) {
+            acc.graphIntegrityFiles.set(
+              result.graphIntegrityFile.relPath,
+              result.graphIntegrityFile,
+            );
+          }
           if (skipCallResolution) {
             acc.changedPass2FilePaths.add(file.path);
             for (const hinted of result.pass2HintPaths)
@@ -386,6 +393,12 @@ export async function runPass1WithRustEngine(
             result.symbolMapFileUpdate,
           );
         }
+        if (result.graphIntegrityFile) {
+          acc.graphIntegrityFiles.set(
+            result.graphIntegrityFile.relPath,
+            result.graphIntegrityFile,
+          );
+        }
         if (skipCallResolution) {
           acc.changedPass2FilePaths.add(file.path);
           for (const hinted of result.pass2HintPaths)
@@ -461,6 +474,7 @@ export async function runPass1WithTsEngine(
     changedFileIds: new Set(),
     changedPass2FilePaths: new Set(),
     symbolMapFileUpdates: new Map(),
+    graphIntegrityFiles: new Map(),
     rustFilesProcessed: 0,
     tsFilesProcessed: 0,
     rustFallbackFiles: 0,
@@ -533,6 +547,12 @@ export async function runPass1WithTsEngine(
             acc.symbolMapFileUpdates.set(
               result.symbolMapFileUpdate.fileId,
               result.symbolMapFileUpdate,
+            );
+          }
+          if (result.graphIntegrityFile) {
+            acc.graphIntegrityFiles.set(
+              result.graphIntegrityFile.relPath,
+              result.graphIntegrityFile,
             );
           }
           if (skipCallResolution) {

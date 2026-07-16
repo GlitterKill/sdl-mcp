@@ -25,6 +25,7 @@ import * as m018 from "./m018-add-semantic-enrichment-tables.js";
 import * as m019 from "./m019-add-prefetch-outcomes.js";
 import * as m020 from "./m020-add-metrics-fingerprint.js";
 import * as m021 from "./m021-remediate-symbol-embeddings.js";
+import * as m022 from "./m022-add-graph-integrity-state.js";
 
 /** Ordered list of all migrations. Must be sorted by version ascending. */
 export const migrations: Migration[] = [
@@ -45,6 +46,7 @@ export const migrations: Migration[] = [
   m019,
   m020,
   m021,
+  m022,
 ];
 
 // --- Registry validation (runs at import time) ---

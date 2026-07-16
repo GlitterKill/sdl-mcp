@@ -13,6 +13,10 @@ import {
 } from "../../dist/sync/sync.js";
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import {
+  getDerivedState,
+  markGraphIntegrityVerified,
+} from "../../dist/db/ladybug-derived-state.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -108,6 +112,11 @@ describe("Sync Artifact Model", () => {
       commitSha: "abc123def456",
       outputPath: join(syncDir, "test.sdl-artifact.json"),
     });
+    await markGraphIntegrityVerified(repoId, "v-test", "a".repeat(64));
+    assert.equal(
+      (await getDerivedState(repoId))?.graphIntegrityState,
+      "verified",
+    );
 
     const importResult = await importArtifact({
       artifactPath: exportResult.artifactPath,
@@ -118,6 +127,10 @@ describe("Sync Artifact Model", () => {
     assert.strictEqual(importResult.verified, true);
     assert.strictEqual(importResult.filesRestored, 1);
     assert.strictEqual(importResult.repoId, repoId);
+    const integrity = await getDerivedState(repoId);
+    assert.equal(integrity?.graphIntegrityState, "unknown");
+    assert.equal(integrity?.graphIntegrityVersionId, null);
+    assert.equal(integrity?.graphIntegrityDigest, null);
   });
 
   it("round-trips enrichment metadata through sync artifacts", async () => {

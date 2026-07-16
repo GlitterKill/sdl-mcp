@@ -1,4 +1,5 @@
 import type { RepoConfig } from "../config/types.js";
+import { invalidateGraphIntegrity } from "../db/ladybug-derived-state.js";
 import { getLadybugConn, withWriteConn } from "../db/ladybug.js";
 import * as ladybugDb from "../db/ladybug-queries.js";
 import { readFileAsync } from "../util/asyncFs.js";
@@ -205,6 +206,10 @@ export async function patchSavedFile(
           symbolIds: diff.preserved.map((s) => s.symbolId),
         });
       }
+
+      // This path mutates the active graph without creating a graph Version.
+      // Invalidate in the same transaction so health cannot trust the old digest.
+      await invalidateGraphIntegrity(txConn, request.repoId);
     });
   });
 

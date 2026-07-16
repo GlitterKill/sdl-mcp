@@ -149,6 +149,22 @@ After the finalized graph is active, SDL-MCP runs the configured semantic readin
 
 If semantic refresh cannot complete, the CLI reports `Semantic readiness: deferred`, `DerivedState.embeddingsDirty` remains set, and `DerivedState.summariesDirty` is set only when summaries are configured. Shadow activation re-applies the semantic dirty marker after the activated DB is reopened. Repeated provider-first runs that reuse already-current active provider rows run the same post-graph semantic refresh rather than reporting a clean graph prematurely.
 
+### Persisted Graph Integrity
+
+SDL-MCP verifies the persisted symbol graph before it reports the latest graph version as healthy. The indexer derives the expected digest from authoritative in-memory rows before persistence: provider-first uses normalized `ProviderFirstGraphRows`, while legacy indexing reduces each parser result to a per-file digest before the write buffers drain. The gate retains counts and bounded file/page digests instead of a second full symbol graph.
+
+The canonical tuple covers immutable symbol identity, location, signature, parser/provider source, SCIP identity, status, external classification, and placeholder metadata. It intentionally excludes `summarySource`: supported semantic refresh can replace that provenance after the initial symbol write, so including it would reject a correct final graph. Missing legacy `source` values normalize to the persisted `treesitter` schema default on both sides.
+
+After shadow activation and deferred semantic refresh finish, SDL-MCP streams the final active LadybugDB symbols in stable file-and-symbol keyset order and compares that digest with the expected value. A mismatch records bounded details in operational logs, marks `DerivedState.graphIntegrityState` as `failed`, and returns a generic deterministic error without exposing symbol or path details in MCP output.
+
+Publishing the verified digest is a conditional state transition: it succeeds only while `DerivedState` is still `verifying` for the same version. A concurrent durable mutation first resets that state, so a verifier cannot overwrite the invalidation with a digest captured before the mutation. This keeps the O(symbols) final scan on a read connection; only the constant-time compare-and-set uses the single writer.
+
+Incremental indexing starts from the previous verified digest, re-reads the active graph before any deletion, and replaces only changed or removed per-file digests with current authoritative results. An incremental mutation does not run when the latest version lacks a verified baseline. Run a full refresh after upgrading an existing database or after any integrity failure to rebuild and establish that baseline.
+
+Durable live-index patches run outside that versioned lifecycle. They atomically reset graph integrity to `unknown` in the same transaction as the File/Symbol mutation, which makes health unavailable until a full refresh establishes a new verified baseline. The shared patch boundary covers save, checkpoint, close recovery, stale-draft recovery, and reconcile-worker writes.
+
+Sync artifact import and pull also reset integrity before their first canonical graph write, including same-version re-imports. If an import fails after partially writing its artifact, the repository remains unverified rather than retaining the previous digest.
+
 ### Current Executable Flow
 
 Full SCIP provider-first runs currently:

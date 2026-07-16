@@ -91,6 +91,12 @@ describe("SDL tool functionality QA", () => {
         derivedState: {
           state: "ready",
           updatedAt: "2026-07-14T12:02:00.000Z",
+          graphIntegrityState: "failed",
+          graphIntegrityVersionId: "v2",
+          graphIntegrityDigest: null,
+          graphIntegrityError: "internal mismatch detail",
+          nextBestAction:
+            'Graph integrity verification failed. Run sdl.index.refresh with mode:"full" to rebuild and verify the graph.',
         },
       },
       { detail: "full" },
@@ -102,6 +108,9 @@ describe("SDL tool functionality QA", () => {
     assert.equal("lastIndexedAt" in repoStatus, false);
     assert.equal("startedAt" in serverInfo, false);
     assert.equal("updatedAt" in derivedState, false);
+    assert.equal(derivedState.graphIntegrityState, "failed");
+    assert.equal(derivedState.graphIntegrityVersionId, "v2");
+    assert.equal("graphIntegrityError" in derivedState, false);
 
     const semanticStatus = projectToolResultForModelContent(
       "sdl.semantic.enrichment.status",

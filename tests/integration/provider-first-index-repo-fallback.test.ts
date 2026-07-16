@@ -21,6 +21,7 @@ import {
   withWriteConn,
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { getDerivedState } from "../../dist/db/ladybug-derived-state.js";
 import {
   getGraphSnapshotStats,
   setGraphSnapshot,
@@ -84,6 +85,10 @@ describe("provider-first indexRepo fallback", () => {
     const conn = await getLadybugConn();
     const file = await ladybugDb.getFileByRepoPath(conn, repoId, "src/index.ts");
     assert.ok(file);
+    const integrity = await getDerivedState(repoId);
+    assert.equal(integrity?.graphIntegrityState, "verified");
+    assert.equal(integrity?.graphIntegrityVersionId, result.versionId);
+    assert.match(integrity?.graphIntegrityDigest ?? "", /^[a-f0-9]{64}$/);
   });
 
   it("executes explicit providerFirst for a full SCIP-covered repository", async (t) => {
@@ -170,6 +175,11 @@ describe("provider-first indexRepo fallback", () => {
       false,
     );
     assert.equal(getSliceCacheStats().currentSize, 0);
+
+    const integrity = await getDerivedState(repoId);
+    assert.equal(integrity?.graphIntegrityState, "verified");
+    assert.equal(integrity?.graphIntegrityVersionId, result.versionId);
+    assert.match(integrity?.graphIntegrityDigest ?? "", /^[a-f0-9]{64}$/);
 
     const conn = await getLadybugConn();
     const indexes = await showIndexes(conn);

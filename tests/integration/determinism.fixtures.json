@@ -94,7 +94,7 @@
     },
     {
       "tool": "sdl.repo.status",
-      "reason": "Timestamp telemetry is model-gated; health, watcher, and index state remain intentionally live."
+      "reason": "Timestamp telemetry is model-gated; health, watcher, graph-integrity lifecycle, and index state remain intentionally live."
     },
     {
       "tool": "sdl.index.refresh",

@@ -420,6 +420,7 @@ For indexing:
 - Do not refresh by habit.
 - Run `index.refresh` only when `repo.status` shows stale or missing indexed state and the task depends on current code.
 - Prefer incremental refresh.
+- When `repo.status` reports unverified or failed graph integrity, run `index.refresh` with `mode: "full"`. Incremental mutations require a verified baseline for the latest graph version.
 - If refresh runs asynchronously, poll `repo.status` and wait for completion before continuing graph-backed retrieval.
 - Avoid full refresh unless the repo is newly registered, unindexed, or explicitly required.
 

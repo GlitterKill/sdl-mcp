@@ -15,6 +15,7 @@ import type {
 import { canonicalizeLanguageId } from "../language.js";
 import type { ProcessFileResult } from "./types.js";
 import type { SymbolMapFileUpdate } from "../symbol-map-cache.js";
+import { createGraphIntegrityFileDigest } from "../provider-first/persisted-graph-integrity.js";
 
 interface PersistSkippedFileParams {
   conn: Connection;
@@ -121,6 +122,14 @@ export function createEmptyProcessFileResult(
     configEdges: [],
     pass2HintPaths: [],
     symbolMapFileUpdate,
+    graphIntegrityFile:
+      changed && symbolMapFileUpdate
+        ? createGraphIntegrityFileDigest({
+            fileId: symbolMapFileUpdate.fileId,
+            relPath: symbolMapFileUpdate.relPath,
+            symbols: [],
+          })
+        : undefined,
   };
 }
 

@@ -348,15 +348,15 @@ describe("m007 safe SymbolEmbedding remediation", () => {
 });
 
 describe("SymbolEmbedding migration registry and initializer paths", () => {
-  it("registers m021 as the only migration after version 20", () => {
-    assert.equal(LADYBUG_SCHEMA_VERSION, 21);
+  it("keeps m021 before the graph-integrity migration", () => {
+    assert.equal(LADYBUG_SCHEMA_VERSION, 22);
     assert.deepEqual(
       computePendingMigrations(migrations, 20).map(({ version }) => version),
-      [21],
+      [21, 22],
     );
     assert.deepEqual(
       computePendingMigrations(migrations, 7).map(({ version }) => version),
-      Array.from({ length: 14 }, (_, index) => index + 8),
+      Array.from({ length: 15 }, (_, index) => index + 8),
     );
   });
 
@@ -372,7 +372,7 @@ describe("SymbolEmbedding migration registry and initializer paths", () => {
     await initLadybugDb(dbPath);
     conn = await getLadybugConn();
 
-    assert.equal(await getSchemaVersion(conn), 21);
+    assert.equal(await getSchemaVersion(conn), 22);
     assert.deepEqual(await readSourceIds(conn), []);
     assert.equal(
       (await readDestinationRows(conn))[0]?.embeddingMiniLM,
@@ -409,9 +409,9 @@ describe("SymbolEmbedding migration registry and initializer paths", () => {
       conn = await getLadybugConn();
       assert.deepEqual(
         invoked,
-        Array.from({ length: 14 }, (_, index) => index + 8),
+        Array.from({ length: 15 }, (_, index) => index + 8),
       );
-      assert.equal(await getSchemaVersion(conn), 21);
+      assert.equal(await getSchemaVersion(conn), 22);
       assert.deepEqual(await readSourceIds(conn), []);
       assert.equal(
         (await readDestinationRows(conn))[0]?.embeddingMiniLM,

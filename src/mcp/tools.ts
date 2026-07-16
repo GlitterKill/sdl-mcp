@@ -721,6 +721,14 @@ export const RepoStatusResponseSchema = z.object({
       computedVersionId: z.string().nullable(),
       updatedAt: z.string().nullable(),
       lastError: z.string().nullable().optional(),
+      graphIntegrityState: z.enum([
+        "unknown",
+        "verifying",
+        "verified",
+        "failed",
+      ]),
+      graphIntegrityVersionId: z.string().nullable(),
+      graphIntegrityDigest: z.string().nullable(),
       nextBestAction: z.string().optional(),
     })
     .optional(),

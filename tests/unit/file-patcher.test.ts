@@ -6,9 +6,11 @@ import { tmpdir } from "node:os";
 
 import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import { getDerivedState } from "../../dist/db/ladybug-derived-state.js";
 import { indexRepo } from "../../dist/indexer/indexer.js";
 import { loadBuiltInAdapters } from "../../dist/indexer/adapter/registry.js";
 import { patchSavedFile } from "../../dist/live-index/file-patcher.js";
+import { getRepoHealthSnapshot } from "../../dist/services/health.js";
 
 describe("patchSavedFile", () => {
   const repoId = "file-patcher-repo";
@@ -84,6 +86,9 @@ describe("patchSavedFile", () => {
   });
 
   it("replaces one file's durable symbols and edges transactionally", async () => {
+    const beforeState = await getDerivedState(repoId);
+    assert.equal(beforeState?.graphIntegrityState, "verified");
+
     const result = await patchSavedFile({
       repoId,
       filePath: "src/example.ts",
@@ -117,5 +122,13 @@ describe("patchSavedFile", () => {
 
     const outgoing = await ladybugDb.getEdgesFrom(conn, alpha!.symbolId);
     assert.ok(outgoing.some((edge) => edge.toSymbolId === gamma!.symbolId));
+
+    const afterState = await getDerivedState(repoId);
+    const health = await getRepoHealthSnapshot(repoId);
+    assert.equal(afterState?.graphIntegrityState, "unknown");
+    assert.equal(afterState?.graphIntegrityVersionId, null);
+    assert.equal(afterState?.graphIntegrityDigest, null);
+    assert.equal(health.available, false);
+    assert.equal(health.score, null);
   });
 });

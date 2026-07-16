@@ -124,11 +124,11 @@ Get status for one repository including latest version, indexed files/symbols, t
 **Response includes:**
 
 - `repoId`, `rootPath`, `latestVersionId`, `filesIndexed`, `symbolsIndexed`, `countNotes`, `lastIndexedAt`
-- `healthScore` (0-100), `healthComponents` (freshness, coverage, errorRate, edgeQuality, callResolution), `healthAvailable`
+- `healthScore` (0-100), `healthComponents` (freshness, coverage, errorRate, edgeQuality, callResolution), `healthAvailable`. Health remains unavailable until graph integrity is verified for `latestVersionId`.
 - `watcherHealth` (nullable) — runtime telemetry: provider/configuredProvider/fallbackReason, enabled/running state, filesWatched, eventsReceived/Processed, errors, queueDepth, restartCount, stale timestamps, and Watchman warning/recrawl/fresh-instance diagnostics when Watchman is active or was attempted
 - `prefetchStats` — queue depth, hit/waste rates, latency reduction, last run
 - `liveIndexStatus` — live buffer overlay state: enabled, pendingBuffers, dirtyBuffers, parseQueueDepth, checkpointPending, reconcileQueueDepth, etc.
-- `derivedState` — derived-state freshness: stale flag, dirty cluster/process/algorithm/summary/embedding flags, target/computed version ids, `lastError` when recomputation failed, and `nextBestAction` when recovery is needed. Current index refreshes compute derived state inline; server startup still scans stale persisted rows from older interrupted runs and can enqueue background recovery.
+- `derivedState` — derived-state freshness: stale flag, dirty cluster/process/algorithm/summary/embedding flags, target/computed version ids, `lastError` when recomputation failed, graph-integrity state/version/digest, and `nextBestAction` when recovery is needed. Integrity mismatch details stay in operational logs and never appear in the response. Current index refreshes compute derived state inline; server startup still scans stale persisted rows from older interrupted runs and can enqueue background recovery.
 - `memories` (when `surfaceMemories: true` and memory is enabled in config) — array of relevant development memories auto-surfaced for the repository
 
 **Example:**

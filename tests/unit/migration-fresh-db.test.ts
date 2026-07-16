@@ -55,7 +55,7 @@ describe("migration: fresh database", { skip: !ladybugAvailable }, () => {
     }
   });
 
-  it("creates schema version 21 directly without numbered migrations", async () => {
+  it("creates schema version 22 with unknown graph integrity directly", async () => {
     mkdirSync(testRoot, { recursive: true });
     const dbPath = join(testRoot, "fresh.lbug");
     const original = migrations[0];
@@ -70,8 +70,36 @@ describe("migration: fresh database", { skip: !ladybugAvailable }, () => {
       await initLadybugDb(dbPath);
       const conn = await getLadybugConn();
 
-      assert.equal(LADYBUG_SCHEMA_VERSION, 21);
-      assert.equal(await getSchemaVersion(conn), 21);
+      assert.equal(LADYBUG_SCHEMA_VERSION, 22);
+      assert.equal(await getSchemaVersion(conn), 22);
+
+      await exec(
+        conn,
+        "CREATE (d:DerivedState {repoId: $repoId})",
+        { repoId: "fresh-repo" },
+      );
+      const integrityRows = await queryAll<{
+        graphIntegrityState: string;
+        graphIntegrityVersionId: string | null;
+        graphIntegrityDigest: string | null;
+        graphIntegrityError: string | null;
+      }>(
+        conn,
+        `MATCH (d:DerivedState {repoId: $repoId})
+         RETURN d.graphIntegrityState AS graphIntegrityState,
+                d.graphIntegrityVersionId AS graphIntegrityVersionId,
+                d.graphIntegrityDigest AS graphIntegrityDigest,
+                d.graphIntegrityError AS graphIntegrityError`,
+        { repoId: "fresh-repo" },
+      );
+      assert.deepEqual(integrityRows, [
+        {
+          graphIntegrityState: "unknown",
+          graphIntegrityVersionId: null,
+          graphIntegrityDigest: null,
+          graphIntegrityError: null,
+        },
+      ]);
 
       await exec(
         conn,
