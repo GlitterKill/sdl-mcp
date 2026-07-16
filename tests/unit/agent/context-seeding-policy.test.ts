@@ -79,6 +79,14 @@ describe("context seeding policy", () => {
     assert.match(src, /const useScopedPreciseLexical/);
   });
 
+  it("uses only complete concept coverage instead of redundant scoped seeds", () => {
+    const src = source();
+
+    assert.match(src, /completeScopedConceptRefs/);
+    assert.match(src, /conceptSelection\.complete/);
+    assert.match(src, /completeScopedConceptRefs\.has\(candidate\.contextRef\)/);
+  });
+
   it("keeps general scoped feedback behavior", () => {
     const src = source();
 

@@ -480,6 +480,46 @@ export function filterSeedCandidatesToScope(
 }
 
 /**
+ * Split a multi-topic precise request into bounded lexical queries. Single-topic
+ * requests keep the existing compound/identifier query plan unchanged.
+ */
+export function buildScopedPreciseConceptQueries(taskText: string): string[] {
+  const clauses = taskText
+    .split(/\s*(?:,|\band\b)\s*/i)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+  if (clauses.length <= 1) return [];
+
+  return [
+    ...new Set(
+      clauses.map((clause) =>
+        buildContextFtsQuery(
+          clause.replace(/\bdeterministic\b/gi, "determinism"),
+        ),
+      ),
+    ),
+  ]
+    .filter(Boolean)
+    .slice(0, MAX_SEEDS_PRECISE - DIVERSITY_RESERVE_PRECISE);
+}
+
+/** Select one unique result per batch while preserving batch and row order. */
+export function selectFirstUnseenPerBatch<T>(
+  batches: readonly (readonly T[])[],
+  keyOf: (value: T) => string,
+): { selected: T[]; complete: boolean } {
+  const seen = new Set<string>();
+  const selected: T[] = [];
+  for (const batch of batches) {
+    const firstUnseen = batch.find((value) => !seen.has(keyOf(value)));
+    if (!firstUnseen) continue;
+    seen.add(keyOf(firstUnseen));
+    selected.push(firstUnseen);
+  }
+  return { selected, complete: selected.length === batches.length };
+}
+
+/**
  * Preserve a successful scoped result, including an empty result set, and use
  * the global lane only when the scoped pool was unavailable (for example,
  * after a non-fatal DB query failure).
@@ -673,6 +713,9 @@ export async function buildSeedContext(
 
   const actionSeedQueries = seedPlan.actionSeedQueries;
   const terms = extractIdentifiersFromText(task.taskText, task.taskText);
+  const conceptQueries = useScopedPreciseLexical
+    ? buildScopedPreciseConceptQueries(task.taskText)
+    : [];
   const compoundLimit = isBroad
     ? COMPOUND_LIMIT_BROAD
     : COMPOUND_LIMIT_PRECISE;
@@ -689,11 +732,17 @@ export async function buildSeedContext(
     ...individualTerms.map((query) => ({ query, limit: perTermLimit })),
   ];
   let scopedLexicalResults:
-    | { action: SeedSymbolResult[][]; lexical: SeedSymbolResult[][] }
+    | {
+        concept: SeedSymbolResult[][];
+        action: SeedSymbolResult[][];
+        lexical: SeedSymbolResult[][];
+      }
     | undefined;
   if (
     useScopedPreciseLexical &&
-    (actionSeedQueries.length > 0 || lexicalQueryPlan.length > 0)
+    (conceptQueries.length > 0 ||
+      actionSeedQueries.length > 0 ||
+      lexicalQueryPlan.length > 0)
   ) {
     const scopedLexicalStartedAt = performance.now();
     try {
@@ -706,13 +755,17 @@ export async function buildSeedContext(
       const scopedQueryResults = searchSymbolsLiteQueriesInPool(
         scopedSymbols,
         [
+          ...conceptQueries.map((query) => ({ query, limit: perTermLimit })),
           ...actionSeedQueries.map((query) => ({ query, limit: 4 })),
           ...lexicalQueryPlan,
         ],
       );
+      const actionOffset = conceptQueries.length;
+      const lexicalOffset = actionOffset + actionSeedQueries.length;
       scopedLexicalResults = {
-        action: scopedQueryResults.slice(0, actionSeedQueries.length),
-        lexical: scopedQueryResults.slice(actionSeedQueries.length),
+        concept: scopedQueryResults.slice(0, actionOffset),
+        action: scopedQueryResults.slice(actionOffset, lexicalOffset),
+        lexical: scopedQueryResults.slice(lexicalOffset),
       };
     } catch (err) {
       logger.debug("Scoped lexical seeding failed (non-fatal)", {
@@ -729,6 +782,32 @@ export async function buildSeedContext(
   }
   const usingScopedLexicalPool =
     useScopedPreciseLexical && scopedLexicalResults !== undefined;
+  let completeScopedConceptRefs: Set<string> | undefined;
+
+  if (usingScopedLexicalPool) {
+    const conceptSelection = selectFirstUnseenPerBatch(
+      scopedLexicalResults?.concept ?? [],
+      ({ symbolId }) => symbolId,
+    );
+    const conceptSeeds = conceptSelection.selected;
+    if (conceptQueries.length > 0 && conceptSelection.complete) {
+      completeScopedConceptRefs = new Set(
+        conceptSeeds.map(({ symbolId }) => `symbol:${symbolId}`),
+      );
+    }
+    for (let conceptRank = 0; conceptRank < conceptSeeds.length; conceptRank++) {
+      const ref = `symbol:${conceptSeeds[conceptRank].symbolId}`;
+      if (seen.has(ref)) continue;
+      seen.add(ref);
+      allCandidates.push({
+        contextRef: ref,
+        source: "lexical",
+        score: Math.max(0.8, 1 - conceptRank / 20),
+        sourceRank: conceptRank,
+      });
+      sourceCounts.lexical++;
+    }
+  }
 
   if (
     actionSeedQueries.length > 0 &&
@@ -996,7 +1075,12 @@ export async function buildSeedContext(
           ),
         );
     const lexicalCandidates = scopeFilteredCandidates
-      .filter((candidate) => candidate.source === "lexical")
+      .filter(
+        (candidate) =>
+          candidate.source === "lexical" &&
+          (!completeScopedConceptRefs ||
+            completeScopedConceptRefs.has(candidate.contextRef)),
+      )
       .slice(0, lexicalTargetCap);
     const feedbackCandidates = scopeFilteredCandidates
       .filter((candidate) => candidate.source === "feedback")

@@ -565,12 +565,18 @@ describe("context quality benchmarks", () => {
       resolvedPaths.every((path) => path.startsWith("tests/")),
       `Scoped tool-QA evidence escaped tests/: ${resolvedPaths.join(", ")}`,
     );
-    assert.ok(
-      resolvedPaths.some((path) =>
-        /workflow|usage|search-edit|delta|determinism/i.test(path),
-      ),
-      `Scoped tool-QA evidence missed the requested test areas: ${resolvedPaths.join(", ")}`,
-    );
+    for (const area of [
+      /workflow/i,
+      /usage/i,
+      /search-edit/i,
+      /delta/i,
+      /determinism/i,
+    ]) {
+      assert.ok(
+        resolvedPaths.some((path) => area.test(path)),
+        `Scoped tool-QA evidence missed ${area}: ${resolvedPaths.join(", ")}`,
+      );
+    }
     assert.ok(
       resolvedPaths.filter((path) => path.startsWith("tests/benchmark/")).length <=
         resolvedPaths.length / 2,
