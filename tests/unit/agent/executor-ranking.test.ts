@@ -481,6 +481,7 @@ describe("Executor focus selection", () => {
       getClusterMembers: async () => [],
       getProcessStepsByIds: async () => [],
       getSymbolsByIds: async () => symbolMap,
+      getFilesByIds: async () => new Map(),
       searchSymbols: async () => [],
     };
     const executor = new Executor(undefined, dbQueries);
@@ -521,6 +522,63 @@ describe("Executor focus selection", () => {
     );
 
     assertOnlyTests(selected, symbolMap);
+  });
+
+  it("resolves opaque file IDs before enforcing explicit focus paths", async () => {
+    const symbolMap = new Map([
+      ["src-symbol", createExecutorSymbol("src-symbol", "opaque-src-file")],
+      ["test-symbol", createExecutorSymbol("test-symbol", "opaque-test-file")],
+    ]);
+    const dbQueries = {
+      getFileByRepoPath: async () => null,
+      getSymbolIdsByFile: async () => [],
+      getFilesByPrefix: async () => [],
+      getSymbolsByFile: async () => [],
+      getClusterMembers: async () => [],
+      getProcessStepsByIds: async () => [],
+      getSymbolsByIds: async () => symbolMap,
+      getFilesByIds: async () =>
+        new Map([
+          [
+            "opaque-src-file",
+            {
+              fileId: "opaque-src-file",
+              repoId: "repo-1",
+              relPath: "src/handler.ts",
+              contentHash: "src-hash",
+              language: "typescript",
+              byteSize: 1,
+              lastIndexedAt: "now",
+              directory: "src",
+            },
+          ],
+          [
+            "opaque-test-file",
+            {
+              fileId: "opaque-test-file",
+              repoId: "repo-1",
+              relPath: "tests/handler.test.ts",
+              contentHash: "test-hash",
+              language: "typescript",
+              byteSize: 1,
+              lastIndexedAt: "now",
+              directory: "tests",
+            },
+          ],
+        ]),
+      searchSymbols: async () => [],
+    } as unknown as ExecutorDbQueries;
+    const executor = new Executor(undefined, dbQueries);
+    const privateExecutor = executor as unknown as ExecutorSelectionPrivate;
+    privateExecutor.connPromise = Promise.resolve({});
+
+    const selected = await privateExecutor.selectTopSymbols(
+      [...symbolMap.keys()],
+      createTask({ options: { contextMode: "precise", focusPaths: ["tests"] } }),
+      4,
+    );
+
+    assert.deepEqual(selected, ["test-symbol"]);
   });
 
   it("intersects precise focus paths with out-of-path symbol seeds", async () => {
@@ -784,6 +842,8 @@ describe("Executor seed expansion", () => {
         ] as Awaited<ReturnType<ExecutorDbQueries["getProcessStepsByIds"]>>,
       getSymbolsByIds: async () =>
         new Map() as Awaited<ReturnType<ExecutorDbQueries["getSymbolsByIds"]>>,
+      getFilesByIds: async () =>
+        new Map() as Awaited<ReturnType<ExecutorDbQueries["getFilesByIds"]>>,
       searchSymbols: async () =>
         [] as Awaited<ReturnType<ExecutorDbQueries["searchSymbols"]>>,
     };

@@ -77,6 +77,7 @@ export type ExecutorDbQueries = Pick<
   | "getClusterMembers"
   | "getProcessStepsByIds"
   | "getSymbolsByIds"
+  | "getFilesByIds"
   | "searchSymbols"
 >;
 
@@ -611,9 +612,32 @@ export class Executor {
     seedCandidates: ContextSeedCandidate[] = [],
     feedbackBoosts?: Map<string, number>,
   ): Promise<string[]> {
-    const symbolMap: Map<string, SymbolRow> = symbolIds.length
-      ? await this.dbQueries.getSymbolsByIds(await this.getConn(), symbolIds)
+    const conn = symbolIds.length > 0 ? await this.getConn() : undefined;
+    const storedSymbols: Map<string, SymbolRow> = conn
+      ? await this.dbQueries.getSymbolsByIds(conn, symbolIds)
       : new Map();
+    let symbolMap = storedSymbols;
+    const needsResolvedPaths = task.options?.focusPaths?.some(
+      (focusPath) => focusPath.trim().length > 0,
+    );
+    if (conn && needsResolvedPaths && storedSymbols.size > 0) {
+      const files = await this.dbQueries.getFilesByIds(conn, [
+        ...new Set([...storedSymbols.values()].map((symbol) => symbol.fileId)),
+      ]);
+      // Persisted file IDs are opaque hashes. Clone only the ranking view so
+      // path affinity and explicit-scope finalization receive repo-relative paths.
+      symbolMap = new Map(
+        [...storedSymbols].map(([symbolId, symbol]) => {
+          const file = files.get(symbol.fileId);
+          return [
+            symbolId,
+            file
+              ? { ...symbol, fileId: `${symbol.repoId}:${file.relPath}` }
+              : symbol,
+          ];
+        }),
+      );
+    }
 
     if (!task.taskText || symbolIds.length === 0) {
       return this.finalizeSelection(

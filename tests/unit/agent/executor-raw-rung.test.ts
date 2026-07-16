@@ -179,6 +179,7 @@ describe("executor card fallback", () => {
         }
         return selected;
       },
+      getFilesByIds: async () => new Map(),
       searchSymbols: async (_conn, _repoId, query, limit) => {
         const rows = searchRows(query, limit);
         for (const row of rows) symbolMap.set(row.symbolId, row);
