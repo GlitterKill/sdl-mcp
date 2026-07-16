@@ -871,13 +871,110 @@ describe("ContextEngine", () => {
     assert.deepEqual(capturedContext, ["symbol:exact-handleSymbolSearch"]);
   });
 
-  it("lets explicit focus symbols override broader selected context in precise mode", async () => {
+  it("runs hybrid seeding when explicit focus paths accompany task text", async () => {
+    const seedResult: ContextSeedResult = {
+      candidates: [
+        {
+          contextRef: "symbol:scoped-related",
+          source: "semantic",
+          score: 0.9,
+          sourceRank: 0,
+        },
+      ],
+      sources: { semantic: 1, lexical: 0, feedback: 0 },
+    };
     const seedContextMock = mock.method(
       ContextEngine.prototype as Record<string, unknown>,
       "seedContext",
-      async () => {
-        throw new Error("hybrid seeding should be skipped");
-      },
+      async () => seedResult,
+    );
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => [
+      "file:src/agent/context-engine.ts",
+    ]);
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async () => ({ actions: [], evidence: [], success: true }),
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        taskType: "explain",
+        taskText: "Explain scoped context seeding",
+        options: {
+          contextMode: "precise",
+          focusPaths: ["src/agent/context-engine.ts"],
+        },
+      }),
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(seedContextMock.mock.callCount(), 1);
+  });
+
+  it("preserves focus-symbol-only retrieval without implicit hybrid seeding", async () => {
+    const seedContextMock = mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async (): Promise<ContextSeedResult> => ({
+        candidates: [],
+        sources: { semantic: 0, lexical: 0, feedback: 0 },
+      }),
+    );
+    const exactSeedMock = mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedExactMentionedSymbols",
+      async () => ["symbol:exact-handleRuntimeExecute"],
+    );
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => []);
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async () => ({ actions: [], evidence: [], success: true }),
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        taskType: "explain",
+        taskText: "Explain handleRuntimeExecute",
+        options: {
+          contextMode: "broad",
+          focusSymbols: ["handleRuntimeExecute"],
+        },
+      }),
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(exactSeedMock.mock.callCount(), 1);
+    assert.equal(seedContextMock.mock.callCount(), 0);
+  });
+
+  it("runs scoped hybrid seeding after an exact focus symbol seeds precise context", async () => {
+    const seedResult: ContextSeedResult = {
+      candidates: [
+        {
+          contextRef: "symbol:scoped-related",
+          source: "semantic",
+          score: 0.9,
+          sourceRank: 0,
+        },
+      ],
+      sources: { semantic: 1, lexical: 0, feedback: 0 },
+    };
+    const seedContextMock = mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async () => seedResult,
     );
     const exactSeedMock = mock.method(
       ContextEngine.prototype as Record<string, unknown>,
@@ -919,11 +1016,14 @@ describe("ContextEngine", () => {
 
     assert.equal(result.success, true);
     assert.equal(exactSeedMock.mock.callCount(), 1);
-    assert.equal(seedContextMock.mock.callCount(), 0);
-    assert.deepEqual(capturedContext, ["symbol:exact-handleRuntimeExecute"]);
+    assert.equal(seedContextMock.mock.callCount(), 1);
+    assert.deepEqual(capturedContext, [
+      "symbol:exact-handleRuntimeExecute",
+      "symbol:scoped-related",
+    ]);
   });
 
-  it("lets forced semantic precise mode merge exact and semantic seeds", async () => {
+  it("lets forced semantic focus-symbol precise mode merge exact and semantic seeds", async () => {
     const seedContextMock = mock.method(
       ContextEngine.prototype as Record<string, unknown>,
       "seedContext",
@@ -968,7 +1068,11 @@ describe("ContextEngine", () => {
       createTask({
         taskType: "explain",
         taskText: "explain handleSymbolSearch exact search path",
-        options: { contextMode: "precise", semantic: true },
+        options: {
+          contextMode: "precise",
+          semantic: true,
+          focusSymbols: ["handleSymbolSearch"],
+        },
       }),
     );
 

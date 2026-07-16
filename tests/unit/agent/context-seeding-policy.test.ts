@@ -21,7 +21,10 @@ describe("context seeding policy", () => {
   it("restores bounded FTS in semantic entity search", () => {
     const src = source();
 
-    assert.match(src, /limit: isBroad \? 32 : 16/);
+    assert.match(
+      src,
+      /limit:\s*\(isBroad \? 32 : 16\) \*\s*\(scopePaths\.length > 0 \? 3 : 1\)/,
+    );
     assert.match(src, /ftsEnabled: true/);
   });
 
@@ -47,5 +50,20 @@ describe("context seeding policy", () => {
     );
     assert.match(src, /sourceCounts\.lexical < lexicalTargetCap/);
     assert.match(src, /sourceCounts\.lexical >= lexicalTargetCap/);
+  });
+
+  it("filters scoped candidates before source and final caps", () => {
+    const src = source();
+    const scopeFilter = src.indexOf(
+      "const scopeFilteredCandidates = filterSeedCandidatesToScope(",
+    );
+    const primaryCap = src.indexOf(".slice(0, primarySourceCap)", scopeFilter);
+    const lexicalCap = src.indexOf(".slice(0, lexicalTargetCap)", scopeFilter);
+    const finalCap = src.indexOf(".slice(0, maxSeeds)", scopeFilter);
+
+    assert.ok(scopeFilter >= 0, "expected production scope-filter call");
+    assert.ok(primaryCap > scopeFilter, "semantic cap must follow scope filter");
+    assert.ok(lexicalCap > scopeFilter, "lexical cap must follow scope filter");
+    assert.ok(finalCap > scopeFilter, "final cap must follow scope filter");
   });
 });

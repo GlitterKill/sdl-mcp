@@ -23,6 +23,7 @@ import {
   seedResultToContext,
   inferFocusPathsFromTaskText,
 } from "./context-seeding.js";
+import { explicitFocusPaths } from "./context-ranking.js";
 import { extractIdentifiersFromText } from "./identifier-extraction.js";
 import { randomUUID } from "node:crypto";
 
@@ -564,17 +565,19 @@ export class ContextEngine {
 
       /* sdl.context: always-on hybrid seed merge */
       /* sdl.context: confidence-gated seed merge */
-      // Run seeding whenever no explicit scope was provided. Inferred paths are
-      // low-priority anchors; retrieval candidates carry the evidence used by
-      // final executor ranking. semantic:false keeps this lexical-only.
+      // Explicit paths scope task-text retrieval instead of suppressing it.
+      // Inferred paths remain low-priority anchors, and exact precise seeds
+      // still skip redundant unscoped retrieval unless semantic is forced.
       let seedCandidates: ContextSeedCandidate[] = [];
       let seedEvidence:
         | import("../retrieval/types.js").RetrievalEvidence
         | undefined;
+      const hasExplicitFocusPaths = explicitFocusPaths(task.options).length > 0;
       if (
-        !hasExplicitScope &&
         task.taskText &&
-        (!exactMentionSeededPreciseContext || task.options?.semantic === true)
+        (hasExplicitFocusPaths ||
+          (!hasExplicitScope && !exactMentionSeededPreciseContext) ||
+          task.options?.semantic === true)
       ) {
         const seedStartedAt = performance.now();
         try {
