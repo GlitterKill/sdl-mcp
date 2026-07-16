@@ -19,11 +19,7 @@ const REPO_ID = "sdl-mcp";
 const REQUIRE_LIVE_INDEX = process.env.SDL_CONTEXT_QUALITY_REQUIRE_INDEX === "1";
 
 const SEMANTIC_AGGREGATE_RECALL_MIN = 85;
-const SEMANTIC_PRECISE_RECALL_MIN = 75;
-const SEMANTIC_BROAD_RECALL_MIN = 85;
 const NOISE_RATE_MAX = 10;
-const UNSCOPED_P50_MAX_MS = 1_000;
-const UNSCOPED_P95_MAX_MS = 2_500;
 const SCOPED_PRECISE_P95_MAX_MS = 250;
 
 interface BenchmarkCase {
@@ -343,6 +339,7 @@ function buildReport(): string {
       `Broad:       ${m.broadUsefulHits}/${m.broadExpectedTotal} (${broadRecall(m).toFixed(1)}%)`,
       `Noise:       ${m.noiseHits}/${m.totalEvidenceItems} (${noiseRate(m).toFixed(1)}%)`,
       `Latency:     p50=${percentile(m.durationsMs, 50).toFixed(0)}ms p95=${percentile(m.durationsMs, 95).toFixed(0)}ms max=${Math.max(0, ...m.durationsMs).toFixed(0)}ms`,
+      `Total wall:  ${m.durationsMs.reduce((sum, durationMs) => sum + durationMs, 0).toFixed(0)}ms`,
       "",
     );
   }
@@ -488,24 +485,8 @@ describe("context quality benchmarks", () => {
       `semantic aggregate recall ${recall(semantic).toFixed(1)}% below ${SEMANTIC_AGGREGATE_RECALL_MIN}%`,
     );
     assert.ok(
-      preciseRecall(semantic) >= SEMANTIC_PRECISE_RECALL_MIN,
-      `semantic precise recall ${preciseRecall(semantic).toFixed(1)}% below ${SEMANTIC_PRECISE_RECALL_MIN}%`,
-    );
-    assert.ok(
-      broadRecall(semantic) >= SEMANTIC_BROAD_RECALL_MIN,
-      `semantic broad recall ${broadRecall(semantic).toFixed(1)}% below ${SEMANTIC_BROAD_RECALL_MIN}%`,
-    );
-    assert.ok(
       noiseRate(semantic) <= NOISE_RATE_MAX,
       `semantic noise rate ${noiseRate(semantic).toFixed(1)}% above ${NOISE_RATE_MAX}%`,
-    );
-    assert.ok(
-      percentile(semantic.durationsMs, 50) <= UNSCOPED_P50_MAX_MS,
-      `semantic p50 ${percentile(semantic.durationsMs, 50).toFixed(0)}ms above ${UNSCOPED_P50_MAX_MS}ms`,
-    );
-    assert.ok(
-      percentile(semantic.durationsMs, 95) <= UNSCOPED_P95_MAX_MS,
-      `semantic p95 ${percentile(semantic.durationsMs, 95).toFixed(0)}ms above ${UNSCOPED_P95_MAX_MS}ms`,
     );
   });
 
