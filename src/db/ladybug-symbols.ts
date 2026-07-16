@@ -2611,11 +2611,9 @@ export async function getScopedSearchSymbolPool(
 
   return queryAll<SearchSymbolLiteCandidate>(
     conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)
-     ${scopeClauses.length > 0 ? `WHERE ${scopeClauses.join(" OR ")}` : ""}
-     WITH f
-     MATCH (f)<-[:SYMBOL_IN_FILE]-(s:Symbol)
+    `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
      WHERE coalesce(s.symbolStatus, 'real') = 'real'
+     ${scopeClauses.length > 0 ? `AND (${scopeClauses.join(" OR ")})` : ""}
      RETURN s.symbolId AS symbolId,
             coalesce(s.name, '') AS name,
             f.fileId AS fileId,
