@@ -42,7 +42,6 @@ interface Evidence {
   type: string;
   reference: string;
   summary: string;
-  timestamp: number;
 }
 
 interface ContextResult {
@@ -84,6 +83,13 @@ interface VariantMetrics {
   }>;
 }
 
+type LadybugModule = typeof import("../../dist/db/ladybug.js");
+type LadybugConnection = Awaited<
+  ReturnType<LadybugModule["getLadybugConn"]>
+>;
+type LadybugQueries = typeof import("../../dist/db/ladybug-queries.js");
+type PathsModule = typeof import("../../dist/util/paths.js");
+
 const variants: Variant[] = [
   { name: "lexical", semantic: false },
   { name: "default" },
@@ -101,6 +107,11 @@ const metrics = {
 let cases: BenchmarkCase[] = [];
 let contextEngine: ContextEngineLike | undefined;
 let closeLadybugDb: (() => Promise<void>) | undefined;
+let ladybugConn: LadybugConnection | undefined;
+let ladybugQueries:
+  | Pick<LadybugQueries, "getSymbolsByIds" | "getFilesByIds">
+  | undefined;
+let normalizeEvidencePath: PathsModule["normalizePath"] | undefined;
 
 function createMetrics(name: string): VariantMetrics {
   return {
@@ -158,6 +169,44 @@ function buildTask(c: BenchmarkCase, variant: Variant, scoped: boolean): unknown
     repoId: REPO_ID,
     options,
   };
+}
+
+async function resolveEvidencePaths(
+  evidence: Evidence[],
+): Promise<Array<string | undefined>> {
+  assert.ok(ladybugConn, "LadybugDB connection must be initialized");
+  assert.ok(ladybugQueries, "LadybugDB queries must be initialized");
+  assert.ok(normalizeEvidencePath, "Path normalizer must be initialized");
+
+  const references = evidence.map(({ reference }) => {
+    if (reference.startsWith("symbol:")) {
+      return { symbolId: reference.slice("symbol:".length) };
+    }
+    if (reference.startsWith("hotpath:")) {
+      return { symbolId: reference.slice("hotpath:".length) };
+    }
+    if (reference.startsWith("file:")) {
+      return { fileId: reference.slice("file:".length) };
+    }
+    return {};
+  });
+  const symbolIds = [
+    ...new Set(references.flatMap(({ symbolId }) => (symbolId ? [symbolId] : []))),
+  ];
+  const symbols = await ladybugQueries.getSymbolsByIds(ladybugConn, symbolIds);
+  const fileIds = new Set(
+    references.flatMap(({ fileId }) => (fileId ? [fileId] : [])),
+  );
+  for (const symbol of symbols.values()) {
+    fileIds.add(symbol.fileId);
+  }
+  const files = await ladybugQueries.getFilesByIds(ladybugConn, [...fileIds]);
+
+  return references.map(({ symbolId, fileId }) => {
+    const resolvedFileId = fileId ?? (symbolId ? symbols.get(symbolId)?.fileId : undefined);
+    const file = resolvedFileId ? files.get(resolvedFileId) : undefined;
+    return file ? normalizeEvidencePath(file.relPath) : undefined;
+  });
 }
 
 async function runCase(
@@ -283,13 +332,24 @@ describe("context quality benchmarks", () => {
     metrics.totalCases = cases.length;
 
     try {
-      const [{ activateCliConfigPath }, { loadConfig }, { initGraphDb }, ladybug, core, engine] =
+      const [
+        { activateCliConfigPath },
+        { loadConfig },
+        { initGraphDb },
+        ladybug,
+        core,
+        queries,
+        paths,
+        engine,
+      ] =
         await Promise.all([
           import("../../dist/config/configPath.js"),
           import("../../dist/config/loadConfig.js"),
           import("../../dist/db/initGraphDb.js"),
           import("../../dist/db/ladybug.js"),
           import("../../dist/db/ladybug-core.js"),
+          import("../../dist/db/ladybug-queries.js"),
+          import("../../dist/util/paths.js"),
           import("../../dist/agent/context-engine.js"),
         ]);
       const configPath = activateCliConfigPath(process.env.SDL_CONFIG);
@@ -297,8 +357,11 @@ describe("context quality benchmarks", () => {
       const graphDbPath = await initGraphDb(config, configPath);
       closeLadybugDb = ladybug.closeLadybugDb;
       contextEngine = engine.contextEngine;
+      ladybugQueries = queries;
+      normalizeEvidencePath = paths.normalizePath;
 
       const conn = await ladybug.getLadybugConn();
+      ladybugConn = conn;
       const rows = await core.queryAll(
         conn,
         "MATCH (r:Repo {repoId: $repoId}) RETURN count(r) AS n",
@@ -321,7 +384,7 @@ describe("context quality benchmarks", () => {
 
   describe("case structure validation", () => {
     it("loads the expected number of cases", () => {
-      assert.equal(cases.length, 24, "Expected 24 benchmark cases");
+      assert.equal(cases.length, 26, "Expected 26 benchmark cases");
     });
 
     it("has correct task type distribution", () => {
@@ -331,20 +394,20 @@ describe("context quality benchmarks", () => {
       }
       assert.equal(byType.get("debug"), 8, "Expected 8 debug cases");
       assert.equal(byType.get("explain"), 6, "Expected 6 explain cases");
-      assert.equal(byType.get("review"), 6, "Expected 6 review cases");
+      assert.equal(byType.get("review"), 8, "Expected 8 review cases");
       assert.equal(byType.get("implement"), 4, "Expected 4 implement cases");
     });
 
     it("has correct context mode distribution", () => {
       assert.equal(
         cases.filter((c) => c.contextMode === "precise").length,
-        12,
-        "Expected 12 precise cases",
+        13,
+        "Expected 13 precise cases",
       );
       assert.equal(
         cases.filter((c) => c.contextMode === "broad").length,
-        12,
-        "Expected 12 broad cases",
+        13,
+        "Expected 13 broad cases",
       );
     });
 
@@ -352,7 +415,10 @@ describe("context quality benchmarks", () => {
       for (const c of cases) {
         assert.ok(c.id, "Case missing id");
         assert.ok(c.taskText, `Case ${c.id} missing taskText`);
-        assert.ok(c.focusPaths.length > 0, `Case ${c.id} needs focusPaths`);
+        assert.ok(
+          c.id === "review-broad-sdl-tool-functionality" || c.focusPaths.length > 0,
+          `Case ${c.id} needs focusPaths`,
+        );
         assert.ok(
           c.expectedUsefulSymbols.length > 0,
           `Case ${c.id} needs expectedUsefulSymbols`,
@@ -430,8 +496,78 @@ describe("context quality benchmarks", () => {
     );
   });
 
+  it("keeps scoped tool-QA evidence inside tests", async () => {
+    if (!metrics.repoAvailable) {
+      skipOrFail(metrics.availabilityReason);
+      return;
+    }
+    assert.ok(contextEngine, "ContextEngine must be initialized before benchmarking");
+    const c = cases.find(({ id }) => id === "review-precise-tool-qa-tests");
+    assert.ok(c, "Scoped tool-QA benchmark case must exist");
+
+    const result = await contextEngine.buildContext(
+      buildTask(c, { name: "default" }, true),
+    );
+    const resolvedPaths = (await resolveEvidencePaths(result.finalEvidence ?? [])).filter(
+      (path): path is string => path !== undefined,
+    );
+    console.log(`[context-quality] Case A resolved paths: ${resolvedPaths.join(", ")}`);
+
+    assert.equal(result.success, true, "Scoped tool-QA lookup should succeed");
+    assert.ok(resolvedPaths.length > 0, "Scoped tool-QA evidence should resolve paths");
+    assert.ok(
+      resolvedPaths.every((path) => path.startsWith("tests/")),
+      `Scoped tool-QA evidence escaped tests/: ${resolvedPaths.join(", ")}`,
+    );
+    assert.ok(
+      resolvedPaths.some((path) =>
+        /workflow|usage|search-edit|delta|determinism/i.test(path),
+      ),
+      `Scoped tool-QA evidence missed the requested test areas: ${resolvedPaths.join(", ")}`,
+    );
+    assert.ok(
+      resolvedPaths.filter((path) => path.startsWith("tests/benchmark/")).length <=
+        resolvedPaths.length / 2,
+      `Benchmark tests dominate scoped tool-QA evidence: ${resolvedPaths.join(", ")}`,
+    );
+  });
+
+  it("ranks SDL tool implementation ahead of seed evaluation scripts", async () => {
+    if (!metrics.repoAvailable) {
+      skipOrFail(metrics.availabilityReason);
+      return;
+    }
+    assert.ok(contextEngine, "ContextEngine must be initialized before benchmarking");
+    const c = cases.find(({ id }) => id === "review-broad-sdl-tool-functionality");
+    assert.ok(c, "Broad tool-QA benchmark case must exist");
+
+    const result = await contextEngine.buildContext(
+      buildTask(c, { name: "default" }, false),
+    );
+    const resolvedPaths = (await resolveEvidencePaths(result.finalEvidence ?? [])).filter(
+      (path): path is string => path !== undefined,
+    );
+    const topFive = resolvedPaths.slice(0, 5);
+    console.log(`[context-quality] Case B resolved top 5: ${topFive.join(", ")}`);
+
+    assert.equal(result.success, true, "Broad tool-QA lookup should succeed");
+    assert.ok(
+      resolvedPaths.some(
+        (path) =>
+          path === "src/server.ts" ||
+          path.startsWith("src/mcp/") ||
+          path.startsWith("src/gateway/"),
+      ),
+      `Broad tool-QA evidence missed SDL tool implementation: ${resolvedPaths.join(", ")}`,
+    );
+    assert.ok(
+      !topFive.includes("scripts/evaluate-seed-resolution.ts"),
+      `Seed evaluation script ranked in the top 5: ${topFive.join(", ")}`,
+    );
+  });
+
   it("summary report", () => {
     console.log(buildReport());
-    assert.equal(metrics.totalCases, 24, "Report should cover all 24 cases");
+    assert.equal(metrics.totalCases, 26, "Report should cover all 26 cases");
   });
 });

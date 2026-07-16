@@ -509,5 +509,45 @@
       "registerLegacyTools",
       "computeClustersTS"
     ]
+  },
+  {
+    "id": "review-precise-tool-qa-tests",
+    "taskType": "review",
+    "contextMode": "precise",
+    "taskText": "Find tests for workflow aggregation, usage stats, search edit, delta signatures, and deterministic output",
+    "focusPaths": ["tests"],
+    "includeTests": true,
+    "requireAnswer": false,
+    "expectedUsefulSymbols": [
+      "projectToolResultForModelContent",
+      "handleSearchEdit",
+      "diffSignature",
+      "runLeg"
+    ],
+    "unexpectedSymbols": [
+      "ContextEngine",
+      "computeClustersTS",
+      "registerLegacyTools"
+    ]
+  },
+  {
+    "id": "review-broad-sdl-tool-functionality",
+    "taskType": "review",
+    "contextMode": "broad",
+    "taskText": "Retrieve code context for SDL tool functionality QA: MCP dispatch, workflow, tool formatting",
+    "focusPaths": [],
+    "includeTests": false,
+    "requireAnswer": true,
+    "expectedUsefulSymbols": [
+      "MCPServer",
+      "dispatchAction",
+      "routeGatewayCall",
+      "formatToolCallForUser"
+    ],
+    "unexpectedSymbols": [
+      "evaluateSeedResolution",
+      "runContextQualityBenchmark",
+      "computeClustersTS"
+    ]
   }
 ]
