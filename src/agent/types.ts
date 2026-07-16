@@ -209,6 +209,7 @@ export interface ScoredSymbol {
   summarySupport: number; // 0-10
   feedbackPrior: number; // 0-10
   structuralBonus: number; // 0-14
+  pathAffinity: number; // -10 to 10
   languageAffinity: number; // 0-4
 }
 

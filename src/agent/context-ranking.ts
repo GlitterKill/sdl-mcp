@@ -2,8 +2,8 @@
  * Multi-factor symbol ranking for context retrieval.
  *
  * Combines retrieval priors (seed scores), graph proximity, lexical overlap,
- * summary/searchText support, feedback priors, and structural bonuses into
- * a single 0-100 composite score with confidence metadata.
+ * summary/searchText support, feedback priors, structural bonuses, and path
+ * affinity into a single 0-100 composite score with confidence metadata.
  *
  * @module agent/context-ranking
  */
@@ -14,9 +14,11 @@ import type {
   ScoredSymbol,
   SymbolRankingResult,
   ConfidenceTier,
+  TaskOptions,
 } from "./types.js";
+import { isTestLikePath } from "../retrieval/task-query-ranking.js";
 import { logger } from "../util/logger.js";
-import { caseFoldedPathKey, normalizePath } from "../util/paths.js";
+import { caseFoldedPathKey } from "../util/paths.js";
 
 /** Symbol metadata subset needed for ranking (avoids coupling to full SymbolRow). */
 export interface RankableSymbol {
@@ -329,6 +331,60 @@ function scoreLanguageAffinity(
   return affinityExtensions.has(ext) ? 4 : 0;
 }
 
+const SCRIPT_INTENT = /\bscripts?\b/;
+const DIST_INTENT = /\bdist\b|\bbuild output\b|\bcompiled\b/;
+const TEST_INTENT = /\btests?\b|\bspecs?\b|\btesting\b/;
+
+export function explicitFocusPaths(
+  options: TaskOptions | undefined,
+): string[] {
+  return options?.inferredFocusPaths?.length
+    ? []
+    : (options?.focusPaths ?? []).filter((path) => path.trim().length > 0);
+}
+
+export function pathMatchesFocus(
+  relPath: string,
+  focusPaths: string[],
+): boolean {
+  const normalizedRelPath = caseFoldedPathKey(relPath);
+  return focusPaths.some((focusPath) => {
+    if (!focusPath.trim()) return false;
+    const focus = caseFoldedPathKey(focusPath);
+    if (!focus) return false;
+    if (focus === ".") return true;
+    return (
+      normalizedRelPath === focus ||
+      normalizedRelPath.startsWith(focus.endsWith("/") ? focus : `${focus}/`)
+    );
+  });
+}
+
+export function scorePathAffinity(
+  sym: RankableSymbol,
+  scope: { explicit: string[]; inferred: string[] },
+  taskTextLower: string,
+  includeTests: boolean | undefined,
+): number {
+  if (!sym.fileId) return 0;
+
+  const relPath = sym.fileId.slice(sym.fileId.indexOf(":") + 1);
+  if (scope.explicit.length > 0) {
+    return pathMatchesFocus(relPath, scope.explicit) ? 10 : -8;
+  }
+
+  const inferredScore = pathMatchesFocus(relPath, scope.inferred) ? 6 : 0;
+  let categoryScore = 0;
+  if (pathMatchesFocus(relPath, ["scripts"])) {
+    categoryScore = SCRIPT_INTENT.test(taskTextLower) ? 0 : -6;
+  } else if (pathMatchesFocus(relPath, ["dist"])) {
+    categoryScore = DIST_INTENT.test(taskTextLower) ? 0 : -6;
+  } else if (isTestLikePath(relPath)) {
+    categoryScore = includeTests || TEST_INTENT.test(taskTextLower) ? 6 : -4;
+  }
+  return Math.max(-10, Math.min(10, inferredScore + categoryScore));
+}
+
 /**
  * Structural/centrality bonus (0-14): exported, behavioral kind, focus path
  * match, and task-type affinity.
@@ -342,25 +398,12 @@ function scoreStructuralBonus(
   if (sym.exported) score += 2;
   if (BEHAVIORAL_KINDS.has(sym.kind)) score += 1;
 
-  // Focus paths should prefer symbols that live under the focused file or
-  // directory, not only symbols whose names happen to appear in the path.
+  // Keep the name-in-path signal here; direct file membership is scored
+  // separately by scorePathAffinity.
   if (focusPaths.length > 0) {
     const nameLower = sym.name.toLowerCase();
-    const fileId = sym.fileId?.toLowerCase();
-    const relPath = fileId?.includes(":")
-      ? fileId.slice(fileId.indexOf(":") + 1)
-      : fileId;
     for (const fp of focusPaths) {
       const focus = caseFoldedPathKey(fp);
-      const normalizedRelPath = relPath ? normalizePath(relPath) : relPath;
-      if (
-        normalizedRelPath &&
-        (normalizedRelPath === focus ||
-          normalizedRelPath.startsWith(focus.endsWith("/") ? focus : `${focus}/`))
-      ) {
-        score += 6;
-        break;
-      }
       if (focus.includes(nameLower) && nameLower.length >= 3) {
         score += 2;
         break;
@@ -433,7 +476,7 @@ function computeSourceAgreement(scored: ScoredSymbol): number {
  * Rank symbols by multi-factor composite score (0-100).
  *
  * Combines retrieval priors, graph proximity, lexical overlap,
- * summary support, feedback priors, and structural bonuses.
+ * summary support, feedback priors, structural bonuses, and path affinity.
  */
 export function rankSymbols(
   symbolIds: string[],
@@ -448,6 +491,8 @@ export function rankSymbols(
 ): SymbolRankingResult {
   const taskTextLower = task.taskText.toLowerCase();
   const focusPaths = task.options?.focusPaths ?? [];
+  const explicitPaths = explicitFocusPaths(task.options);
+  const inferredPaths = task.options?.inferredFocusPaths ?? [];
   const affinityExtensions = detectLanguageAffinity(taskTextLower);
 
   // Build seed score lookup: contextRef "symbol:<id>" -> normalized score
@@ -488,6 +533,7 @@ export function rankSymbols(
         summarySupport: 0,
         feedbackPrior: 0,
         structuralBonus: 0,
+        pathAffinity: 0,
         languageAffinity: 0,
       });
       continue;
@@ -508,17 +554,27 @@ export function rankSymbols(
       focusPaths,
       task.taskType,
     );
+    const pathAffinity = scorePathAffinity(
+      sym,
+      { explicit: explicitPaths, inferred: inferredPaths },
+      taskTextLower,
+      task.options?.includeTests,
+    );
     const languageAffinity = scoreLanguageAffinity(sym, affinityExtensions);
 
-    const totalScore = Math.min(
-      100,
-      retrievalPrior +
-        graphProximity +
-        lexicalOverlap +
-        summarySupport +
-        feedbackPrior +
-        structuralBonus +
-        languageAffinity,
+    const totalScore = Math.max(
+      0,
+      Math.min(
+        100,
+        retrievalPrior +
+          graphProximity +
+          lexicalOverlap +
+          summarySupport +
+          feedbackPrior +
+          structuralBonus +
+          pathAffinity +
+          languageAffinity,
+      ),
     );
 
     scored.push({
@@ -530,6 +586,7 @@ export function rankSymbols(
       summarySupport,
       feedbackPrior,
       structuralBonus,
+      pathAffinity,
       languageAffinity,
     });
   }

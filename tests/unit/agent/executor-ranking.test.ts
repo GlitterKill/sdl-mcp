@@ -254,7 +254,7 @@ describe("context-ranking", () => {
       )!;
       const other = result.ranked.find((s) => s.symbolId === "sym-other")!;
 
-      assert.ok(focused.structuralBonus > other.structuralBonus);
+      assert.ok(focused.pathAffinity > other.pathAffinity);
     });
 
     it("confidence tier reflects score gap", () => {
