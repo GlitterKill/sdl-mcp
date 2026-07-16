@@ -442,7 +442,7 @@ export async function getFileByRepoPath(
 
 /**
  * Find files under a directory prefix (e.g. "src/code/").
- * Returns up to `limit` files whose relPath starts with the given prefix.
+ * Returns up to `limit` files ordered by relPath, then fileId.
  */
 export async function getFilesByPrefix(
   conn: Connection,
@@ -450,7 +450,7 @@ export async function getFilesByPrefix(
   prefix: string,
   limit: number = 50,
 ): Promise<FileRow[]> {
-  const normalizedPrefix = normalizePath(prefix);
+  const normalizedPrefix = prefix === "" ? "" : normalizePath(prefix);
   const safeLimitVal = Math.max(1, Math.min(limit, 200));
   const rows = await queryAll<Omit<FileRow, "repoId">>(
     conn,
@@ -463,6 +463,7 @@ export async function getFilesByPrefix(
             f.byteSize AS byteSize,
             f.lastIndexedAt AS lastIndexedAt,
             f.directory AS directory
+     ORDER BY f.relPath ASC, f.fileId ASC
      LIMIT $lim`,
     { repoId, prefix: normalizedPrefix, lim: safeLimitVal },
   );

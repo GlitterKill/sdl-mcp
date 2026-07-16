@@ -1,10 +1,66 @@
 import assert from "node:assert";
-import { describe, it } from "node:test";
+import { existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, describe, it } from "node:test";
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+} from "../../../dist/db/ladybug.js";
+import * as queries from "../../../dist/db/ladybug-queries.js";
 import { Planner } from "../../../dist/agent/planner.js";
 import type { AgentTask } from "../../../dist/agent/types.js";
 
+const TEST_DB_PATH = join(
+  tmpdir(),
+  `.lbug-agent-planner-${process.pid}-test-db.lbug`,
+);
+
 describe("Agent Planner", () => {
   const planner = new Planner();
+
+  before(async () => {
+    await closeLadybugDb();
+    if (existsSync(TEST_DB_PATH)) {
+      rmSync(TEST_DB_PATH, { recursive: true, force: true });
+    }
+    await initLadybugDb(TEST_DB_PATH);
+    const conn = await getLadybugConn();
+    const now = "2026-07-15T00:00:00.000Z";
+    await queries.upsertRepo(conn, {
+      repoId: "test-repo",
+      rootPath: "C:/tmp/test-repo",
+      configJson: "{}",
+      createdAt: now,
+    });
+    for (const [fileId, relPath] of [
+      ["file-license", "LICENSE"],
+      ["file-readme", "README.md"],
+      ["file-one", "file1.ts"],
+      ["file-two", "file2.ts"],
+      ["file-fixture-a", "tests/fixtures.v1/a.ts"],
+      ["file-fixture-b", "tests/fixtures.v1/b.ts"],
+      ["file-test", "tests/other.test.ts"],
+    ]) {
+      await queries.upsertFile(conn, {
+        fileId,
+        repoId: "test-repo",
+        relPath,
+        contentHash: `${fileId}-hash`,
+        language: "ts",
+        byteSize: 1,
+        lastIndexedAt: now,
+      });
+    }
+  });
+
+  after(async () => {
+    await closeLadybugDb();
+    if (existsSync(TEST_DB_PATH)) {
+      rmSync(TEST_DB_PATH, { recursive: true, force: true });
+    }
+  });
 
   function createTask(
     taskType: AgentTask["taskType"],
@@ -200,6 +256,124 @@ describe("Agent Planner", () => {
 
       assert.strictEqual(context.length, 2);
       assert.deepStrictEqual(context, ["file:file1.ts", "file:file2.ts"]);
+    });
+
+    it("defers directory focus paths from selected context", async () => {
+      const task = createTask("debug", {
+        options: { focusPaths: ["tests"] },
+      });
+      const context = await planner.selectContext(task);
+
+      assert.deepStrictEqual(context, []);
+    });
+
+    it("resolves an extensionless exact file without directory expansion", async () => {
+      const task = createTask("debug", {
+        options: { focusPaths: ["LICENSE"] },
+      });
+
+      assert.deepStrictEqual(await planner.selectContext(task), [
+        "file:LICENSE",
+      ]);
+      assert.deepStrictEqual(await planner.expandDirectoryFocusPaths(task), []);
+    });
+
+    it("expands a dotted directory that is not an exact file", async () => {
+      const task = createTask("debug", {
+        options: { focusPaths: ["tests/fixtures.v1"] },
+      });
+
+      assert.deepStrictEqual(await planner.selectContext(task), []);
+      assert.deepStrictEqual(await planner.expandDirectoryFocusPaths(task), [
+        "file:tests/fixtures.v1/a.ts",
+        "file:tests/fixtures.v1/b.ts",
+      ]);
+    });
+
+    it("ranks directory fallback files by task relevance", async () => {
+      const conn = await getLadybugConn();
+      const now = "2026-07-15T00:00:00.000Z";
+      await queries.upsertRepo(conn, {
+        repoId: "relevance-repo",
+        rootPath: "C:/tmp/relevance-repo",
+        configJson: "{}",
+        createdAt: now,
+      });
+      for (let index = 0; index < 25; index++) {
+        const suffix = index.toString().padStart(2, "0");
+        await queries.upsertFile(conn, {
+          fileId: `irrelevant-${suffix}`,
+          repoId: "relevance-repo",
+          relPath: `tests/${suffix}-unrelated.test.ts`,
+          contentHash: `irrelevant-${suffix}-hash`,
+          language: "ts",
+          byteSize: 1,
+          lastIndexedAt: now,
+        });
+      }
+      await queries.upsertFile(conn, {
+        fileId: "relevant-workflow",
+        repoId: "relevance-repo",
+        relPath: "tests/zz-workflow-aggregation.test.ts",
+        contentHash: "relevant-workflow-hash",
+        language: "ts",
+        byteSize: 1,
+        lastIndexedAt: now,
+      });
+      const task = createTask("review", {
+        repoId: "relevance-repo",
+        taskText:
+          "Find tests for workflow aggregation, usage stats, search edit, delta signatures, and deterministic output",
+        options: { focusPaths: ["tests"] },
+      });
+
+      const context = await planner.expandDirectoryFocusPaths(task);
+
+      assert.strictEqual(
+        context[0],
+        "file:tests/zz-workflow-aggregation.test.ts",
+      );
+      assert.strictEqual(context.length, 20);
+    });
+
+    it("expands dot paths from the repository root", async () => {
+      const task = createTask("debug", {
+        options: { focusPaths: [".", "./"] },
+      });
+
+      assert.deepStrictEqual(await planner.selectContext(task), []);
+      assert.deepStrictEqual(await planner.expandDirectoryFocusPaths(task), [
+        "file:LICENSE",
+        "file:README.md",
+        "file:file1.ts",
+        "file:file2.ts",
+        "file:tests/fixtures.v1/a.ts",
+        "file:tests/fixtures.v1/b.ts",
+        "file:tests/other.test.ts",
+      ]);
+    });
+
+    it("ignores blank focus paths", async () => {
+      const task = createTask("debug", {
+        options: { focusPaths: ["", " ", "\t"] },
+      });
+
+      assert.deepStrictEqual(await planner.selectContext(task), []);
+      assert.deepStrictEqual(await planner.expandDirectoryFocusPaths(task), []);
+    });
+
+    it("deduplicates duplicate and overlapping directory expansions", async () => {
+      const task = createTask("debug", {
+        options: {
+          focusPaths: ["tests", "tests/fixtures.v1/", "tests"],
+        },
+      });
+
+      assert.deepStrictEqual(await planner.expandDirectoryFocusPaths(task), [
+        "file:tests/fixtures.v1/a.ts",
+        "file:tests/fixtures.v1/b.ts",
+        "file:tests/other.test.ts",
+      ]);
     });
 
     it("selects both symbols and paths when provided", async () => {

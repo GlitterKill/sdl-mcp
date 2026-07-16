@@ -209,6 +209,57 @@ describe("LadybugDB Repo & File Queries", () => {
   );
 
   it(
+    "getFilesByPrefix orders by relative path and file id before limiting",
+    { skip: !ladybugAvailable },
+    async () => {
+      const repoId = "repo-prefix-order";
+      await queries.upsertRepo(conn as unknown as import("kuzu").Connection, {
+        repoId,
+        rootPath: "C:/tmp/repo-prefix-order",
+        configJson: "{}",
+        createdAt: "2026-07-15T00:00:00Z",
+      });
+
+      for (const [fileId, relPath] of [
+        ["file-z", "src/z.ts"],
+        ["file-a-2", "src/a.ts"],
+        ["file-m", "src/m.ts"],
+        ["file-a-1", "src/a.ts"],
+        ["file-b", "src/b.ts"],
+      ]) {
+        await queries.upsertFile(
+          conn as unknown as import("kuzu").Connection,
+          {
+            fileId,
+            repoId,
+            relPath,
+            contentHash: `${fileId}-hash`,
+            language: "ts",
+            byteSize: 1,
+            lastIndexedAt: null,
+          },
+        );
+      }
+
+      const files = await queries.getFilesByPrefix(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "src/",
+        3,
+      );
+
+      assert.deepStrictEqual(
+        files.map(({ fileId, relPath }) => [relPath, fileId]),
+        [
+          ["src/a.ts", "file-a-1"],
+          ["src/a.ts", "file-a-2"],
+          ["src/b.ts", "file-b"],
+        ],
+      );
+    },
+  );
+
+  it(
     "deleteFilesByIds cascades to symbols/edges/metrics",
     { skip: !ladybugAvailable },
     async () => {

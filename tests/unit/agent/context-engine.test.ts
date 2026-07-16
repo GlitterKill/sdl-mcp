@@ -917,6 +917,255 @@ describe("ContextEngine", () => {
     assert.equal(seedContextMock.mock.callCount(), 1);
   });
 
+  it("does not expand directory focus paths when scoped seeding finds candidates", async () => {
+    const seedResult: ContextSeedResult = {
+      candidates: [
+        {
+          contextRef: "symbol:scoped-related",
+          source: "semantic",
+          score: 0.9,
+          sourceRank: 0,
+        },
+      ],
+      sources: { semantic: 1, lexical: 0, feedback: 0 },
+    };
+    const expandMock = mock.method(
+      Planner.prototype,
+      "expandDirectoryFocusPaths",
+      async () => ["file:tests/expanded.test.ts"],
+    );
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => []);
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async () => seedResult,
+    );
+
+    let capturedContext: string[] = [];
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task: unknown, _rungs: unknown, context: string[]) => {
+        capturedContext = context;
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        taskType: "explain",
+        taskText: "Explain scoped context seeding",
+        options: { contextMode: "precise", focusPaths: ["tests"] },
+      }),
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(expandMock.mock.callCount(), 0);
+    assert.ok(!capturedContext.includes("file:tests/expanded.test.ts"));
+  });
+
+  it("expands directory focus paths when scoped seeding finds no candidates", async () => {
+    const expandMock = mock.method(
+      Planner.prototype,
+      "expandDirectoryFocusPaths",
+      async () => [
+        "file:tests/a.test.ts",
+        "file:tests/b.test.ts",
+        "file:tests/a.test.ts",
+      ],
+    );
+
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => []);
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async (): Promise<ContextSeedResult> => ({
+        candidates: [],
+        sources: { semantic: 0, lexical: 0, feedback: 0 },
+      }),
+    );
+
+    let capturedContext: string[] = [];
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task: unknown, _rungs: unknown, context: string[]) => {
+        capturedContext = context;
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        taskType: "explain",
+        taskText: "Explain scoped context seeding",
+        options: { contextMode: "precise", focusPaths: ["tests"] },
+      }),
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(expandMock.mock.callCount(), 1);
+    assert.deepEqual(capturedContext, [
+      "file:tests/a.test.ts",
+      "file:tests/b.test.ts",
+    ]);
+  });
+
+  it("expands directory focus paths when scoped seeding rejects", async () => {
+    const expandMock = mock.method(
+      Planner.prototype,
+      "expandDirectoryFocusPaths",
+      async () => ["file:tests/fallback.test.ts"],
+    );
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => []);
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async () => {
+        throw new Error("retrieval unavailable");
+      },
+    );
+
+    let capturedContext: string[] = [];
+    mock.method(
+      Executor.prototype,
+      "execute",
+      async (_task: unknown, _rungs: unknown, context: string[]) => {
+        capturedContext = context;
+        return { actions: [], evidence: [], success: true };
+      },
+    );
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        taskType: "explain",
+        taskText: "Explain scoped context seeding",
+        options: { contextMode: "precise", focusPaths: ["tests"] },
+      }),
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(expandMock.mock.callCount(), 1);
+    assert.deepEqual(capturedContext, ["file:tests/fallback.test.ts"]);
+  });
+
+  it("continues when directory focus path expansion rejects", async () => {
+    const expandMock = mock.method(
+      Planner.prototype,
+      "expandDirectoryFocusPaths",
+      async () => {
+        throw new Error("directory lookup unavailable");
+      },
+    );
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => []);
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async (): Promise<ContextSeedResult> => ({
+        candidates: [],
+        sources: { semantic: 0, lexical: 0, feedback: 0 },
+      }),
+    );
+
+    const executeMock = mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence: [],
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        taskType: "explain",
+        taskText: "Explain scoped context seeding",
+        options: { contextMode: "precise", focusPaths: ["tests"] },
+      }),
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(expandMock.mock.callCount(), 1);
+    assert.equal(executeMock.mock.callCount(), 1);
+  });
+
+  it("ignores blank explicit scope when inferring paths and seeding", async () => {
+    const seedResult: ContextSeedResult = {
+      candidates: [
+        {
+          contextRef: "symbol:semantic-hit",
+          source: "semantic",
+          score: 0.9,
+          sourceRank: 0,
+        },
+      ],
+      sources: { semantic: 1, lexical: 0, feedback: 0 },
+    };
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    const selectContextMock = mock.method(
+      Planner.prototype,
+      "selectContext",
+      () => [],
+    );
+    const expandMock = mock.method(
+      Planner.prototype,
+      "expandDirectoryFocusPaths",
+      async () => [],
+    );
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedExactMentionedSymbols",
+      async () => [],
+    );
+    const seedMock = mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async () => seedResult,
+    );
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence: [],
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        taskType: "explain",
+        taskText: "Explain how graph beam search builds a slice",
+        options: {
+          contextMode: "broad",
+          focusPaths: ["", "  "],
+          focusSymbols: ["", "\t"],
+        },
+      }),
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(seedMock.mock.callCount(), 1);
+    assert.equal(expandMock.mock.callCount(), 0);
+    assert.deepEqual(
+      selectContextMock.mock.calls[0]?.arguments[0].options?.inferredFocusPaths,
+      ["src/graph/"],
+    );
+  });
+
   it("preserves focus-symbol-only retrieval without implicit hybrid seeding", async () => {
     const seedContextMock = mock.method(
       ContextEngine.prototype as Record<string, unknown>,

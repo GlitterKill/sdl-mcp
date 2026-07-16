@@ -8,8 +8,13 @@ import type {
   TaskOptions,
 } from "./types.js";
 import { getLadybugConn } from "../db/ladybug.js";
-import { searchSymbols, getFilesByPrefix } from "../db/ladybug-queries.js";
+import {
+  getFileByRepoPath,
+  getFilesByPrefix,
+  searchSymbols,
+} from "../db/ladybug-queries.js";
 import { logger } from "../util/logger.js";
+import { buildContextAwareStopWords } from "./identifier-extraction.js";
 
 const DEFAULT_TOKEN_ESTIMATES: Record<string, number> = {
   card: 50,
@@ -24,6 +29,38 @@ const DEFAULT_DURATION_ESTIMATES_MS: Record<string, number> = {
   hotPath: 100,
   raw: 500,
 };
+
+const DIRECTORY_FALLBACK_LIMIT = 20;
+const DIRECTORY_FALLBACK_CANDIDATE_LIMIT = 200;
+
+function directoryFallbackTerms(taskText: string): string[] {
+  const stopWords = buildContextAwareStopWords(taskText);
+  return [
+    ...new Set(taskText.toLowerCase().match(/[a-z][a-z0-9]{2,}/g) ?? []),
+  ].filter(
+    (term) =>
+      term !== "test" && term !== "tests" && !stopWords.has(term),
+  );
+}
+
+function normalizedFocusPaths(task: AgentTask): string[] {
+  const paths: string[] = [];
+  const seen = new Set<string>();
+
+  for (const rawPath of task.options?.focusPaths ?? []) {
+    const trimmed = rawPath.trim();
+    if (!trimmed) continue;
+    const normalized = normalizePath(trimmed);
+    const focusPath =
+      normalized === "./" ? "." : normalized.replace(/\/+$/, "");
+    if (!seen.has(focusPath)) {
+      paths.push(focusPath);
+      seen.add(focusPath);
+    }
+  }
+
+  return paths;
+}
 
 export class Planner {
   plan(task: AgentTask, confidence?: ConfidenceTier): RungPath {
@@ -375,6 +412,18 @@ export class Planner {
   async selectContext(task: AgentTask): Promise<string[]> {
     const options = task.options ?? {};
     const context: string[] = [];
+    const focusPaths = normalizedFocusPaths(task);
+    const needsConnection =
+      focusPaths.length > 0 ||
+      options.focusSymbols?.some((symbol) => !/^[0-9a-f]{16,}$/i.test(symbol));
+    let conn: Awaited<ReturnType<typeof getLadybugConn>> | undefined;
+    if (needsConnection) {
+      try {
+        conn = await getLadybugConn();
+      } catch {
+        // Name and file resolution are best effort.
+      }
+    }
 
     if (options.focusSymbols && options.focusSymbols.length > 0) {
       for (const sym of options.focusSymbols) {
@@ -382,10 +431,9 @@ export class Planner {
         // or a human-readable symbol name that needs resolution.
         if (/^[0-9a-f]{16,}$/i.test(sym)) {
           context.push(`symbol:${sym}`);
-        } else {
+        } else if (conn) {
           // Resolve name to symbolId via search
           try {
-            const conn = await getLadybugConn();
             const results = await searchSymbols(conn, task.repoId, sym, 1);
             if (results.length > 0) {
               context.push(`symbol:${results[0].symbolId}`);
@@ -402,39 +450,71 @@ export class Planner {
       }
     }
 
-    if (options.focusPaths && options.focusPaths.length > 0) {
-      // Expand directory paths to their constituent files so the executor
-      // processes multiple symbols instead of treating a directory as a single
-      // opaque file reference (which would yield only ~1 symbol card).
-      for (const filePath of options.focusPaths) {
-        const normalizedPath = normalizePath(filePath);
-        const isDirectory =
-          normalizedPath.endsWith("/") ||
-          !normalizedPath.split("/").pop()?.includes(".");
-        if (isDirectory) {
-          try {
-            const dirConn = await getLadybugConn();
-            const dirPrefix = normalizedPath.endsWith("/")
-              ? normalizedPath
-              : normalizedPath + "/";
-            const filesInDir = await getFilesByPrefix(
-              dirConn,
-              task.repoId,
-              dirPrefix,
-              20,
-            );
-            if (filesInDir.length > 0) {
-              context.push(...filesInDir.map((f) => `file:${f.relPath}`));
-            } else {
-              // Fallback: pass as-is and let the executor try
-              context.push(`file:${filePath}`);
-            }
-          } catch {
-            context.push(`file:${filePath}`);
-          }
-        } else {
-          context.push(`file:${filePath}`);
+    if (conn) {
+      for (const focusPath of focusPaths) {
+        if (focusPath === ".") continue;
+        try {
+          const file = await getFileByRepoPath(conn, task.repoId, focusPath);
+          if (file) context.push(`file:${file.relPath}`);
+        } catch {
+          // Missing or unreadable paths remain eligible for directory fallback.
         }
+      }
+    }
+
+    return context;
+  }
+
+  /** Expand directory focus paths for the scoped zero-seed fallback. */
+  async expandDirectoryFocusPaths(task: AgentTask): Promise<string[]> {
+    const context: string[] = [];
+    const seen = new Set<string>();
+    const focusPaths = normalizedFocusPaths(task);
+    const taskTerms = directoryFallbackTerms(task.taskText);
+    let conn: Awaited<ReturnType<typeof getLadybugConn>>;
+
+    try {
+      conn = await getLadybugConn();
+    } catch {
+      return context;
+    }
+
+    for (const focusPath of focusPaths) {
+      try {
+        if (
+          focusPath !== "." &&
+          (await getFileByRepoPath(conn, task.repoId, focusPath))
+        ) {
+          continue;
+        }
+        const prefix = focusPath === "." ? "" : `${focusPath}/`;
+        const files = await getFilesByPrefix(
+          conn,
+          task.repoId,
+          prefix,
+          DIRECTORY_FALLBACK_CANDIDATE_LIMIT,
+        );
+        // Bounded overfetch lets task-relevant paths outrank the deterministic
+        // prefix window without turning fallback into an unbounded directory read.
+        files.sort((left, right) => {
+          const score = (relPath: string): number => {
+            const normalized = normalizePath(relPath).toLowerCase();
+            return taskTerms.reduce(
+              (total, term) => total + Number(normalized.includes(term)),
+              0,
+            );
+          };
+          return score(right.relPath) - score(left.relPath);
+        });
+        for (const file of files.slice(0, DIRECTORY_FALLBACK_LIMIT)) {
+          const ref = `file:${file.relPath}`;
+          if (!seen.has(ref)) {
+            context.push(ref);
+            seen.add(ref);
+          }
+        }
+      } catch {
+        // Directory expansion is a best-effort fallback.
       }
     }
 

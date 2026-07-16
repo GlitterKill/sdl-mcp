@@ -474,7 +474,8 @@ export class ContextEngine {
       // like "how does beam search work" or "debug skeleton IR parameters".
       const inferStartedAt = performance.now();
       const hasExplicitScope = !!(
-        task.options?.focusPaths?.length || task.options?.focusSymbols?.length
+        explicitFocusPaths(task.options).length ||
+        task.options?.focusSymbols?.some((symbol) => symbol.trim().length > 0)
       );
       if (!hasExplicitScope && task.taskText) {
         const inferred = inferFocusPathsFromTaskText(task.taskText);
@@ -573,6 +574,7 @@ export class ContextEngine {
         | import("../retrieval/types.js").RetrievalEvidence
         | undefined;
       const hasExplicitFocusPaths = explicitFocusPaths(task.options).length > 0;
+      let shouldExpandDirectoryFocusPaths = hasExplicitFocusPaths;
       if (
         task.taskText &&
         (hasExplicitFocusPaths ||
@@ -587,6 +589,9 @@ export class ContextEngine {
             seedResult.diagnosticTimings,
           );
           seedCandidates = seedResult.candidates;
+          if (hasExplicitFocusPaths && seedCandidates.length > 0) {
+            shouldExpandDirectoryFocusPaths = false;
+          }
           seedEvidence = seedResult.evidence;
           const seedRefs = seedResultToContext(seedResult);
           if (context.length > 0) {
@@ -618,6 +623,24 @@ export class ContextEngine {
             "engine.seedContext",
             seedStartedAt,
           );
+        }
+      }
+
+      if (shouldExpandDirectoryFocusPaths) {
+        try {
+          const fallbackRefs = await this.planner.expandDirectoryFocusPaths(task);
+          const existing = new Set(context);
+          for (const ref of fallbackRefs) {
+            if (!existing.has(ref)) {
+              context.push(ref);
+              existing.add(ref);
+            }
+          }
+        } catch (err) {
+          logger.debug("Directory focus path expansion failed (non-fatal)", {
+            repoId: task.repoId,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       }
 
