@@ -7,20 +7,20 @@
     "caseCount": 4
   },
   "baseline": {
-    "gitHead": "3924b5ff740935a6b6b953717654c26ed186aa46",
-    "evaluatedSourceDiffSha256": "bc8b4755e8f46eae524edbc59509c6e71d733de72bd6d02a410b5a63e93ce6f0",
+    "gitHead": "075f8e6326bf7bf12fa55565aeda650f9b911812",
+    "evaluatedSourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "sourceHashes": {
-      "src/agent/context-seeding.ts": "949a25a146bef6e9f8938666cd150d451f6af1217c4cb25566d68c0b6b9587d5",
-      "src/agent/planner.ts": "fd1b44177d479c5dcdc3a11437b8ea9ba9612a9ebf927fbba5da0e64930c1e38",
-      "src/agent/executor.ts": "46f95765549568ac0b1b37f76a2a8b7e6753d48542e89e818b36501bc5501f67",
+      "src/agent/context-seeding.ts": "40a0ca7fd6b30cadaea243db20f2c3d6f8ebcbe68ea5a3d8f91be8a804ee15c9",
+      "src/agent/planner.ts": "2c6a8a3f7ad57248a0dc5261d05d5c4f99c59baac8759a35cae89b2a802adecd",
+      "src/agent/executor.ts": "535d6d6f5231d207baac63f11285e8f2beb69689fbd6635e8c1cb102af5c3d1e",
       "src/graph/slice/start-node-resolver.ts": "9584d711965a144bf56ade8668be759ffb7d5e4619333e903f1c8407327d6ea0",
       "src/retrieval/seed-resolver.ts": "f2429719b1ae16e02e9b3f296ca09f67240d3ac71bce5d3c42c7295f80b1c672"
     },
     "platform": "win32-x64",
     "node": "v24.14.0",
-    "config": "not used; fixture-only pure-policy evaluation",
-    "indexVersion": null,
-    "providerModelSettings": "not used; no DB, embedding, or provider calls",
+    "config": "ephemeral fixture index seeded from corpus focusPaths",
+    "indexVersion": "fixture-v1",
+    "providerModelSettings": "not used; no embedding or provider calls",
     "nativeAddon": {
       "globallyEnabled": true,
       "available": true,
@@ -130,7 +130,7 @@
           "hotPath"
         ],
         "recall": 1,
-        "evidence": "caller order for explicit symbols/paths; executor fallback is later"
+        "evidence": "exact indexed files in caller order; executor fallback is later"
       }
     },
     {
@@ -233,7 +233,7 @@
           "hotPath"
         ],
         "recall": 1,
-        "evidence": "caller order for explicit symbols/paths; executor fallback is later"
+        "evidence": "exact indexed files in caller order; executor fallback is later"
       }
     },
     {
@@ -334,7 +334,7 @@
           "hotPath"
         ],
         "recall": 1,
-        "evidence": "caller order for explicit symbols/paths; executor fallback is later"
+        "evidence": "exact indexed files in caller order; executor fallback is later"
       }
     },
     {
@@ -461,7 +461,7 @@
           "hotPath"
         ],
         "recall": 1,
-        "evidence": "caller order for explicit symbols/paths; executor fallback is later"
+        "evidence": "exact indexed files in caller order; executor fallback is later"
       }
     }
   ],
@@ -472,14 +472,14 @@
     "autopilotExplicitScopeRecall": 1
   },
   "observedMedianPolicyLatencyMs": {
-    "contextAssembly": 0.1139,
-    "sliceStartNodes": 0.0082,
-    "autopilotExecution": 0.0014
+    "contextAssembly": 0.1778,
+    "sliceStartNodes": 0.0134,
+    "autopilotExecution": 0.7942
   },
   "interfaces": {
     "contextAssembly": "task text/options -> entity query plan + mixed entity candidates -> context refs",
     "sliceStartNodes": "entry symbols/stack/test/edited files/task text -> prioritized symbol start nodes",
-    "autopilotExecution": "explicit focus + planned rungs -> resolved context; later per-rung fallback and ranking"
+    "autopilotExecution": "explicit indexed focus + planned rungs -> resolved context; later per-rung fallback and ranking"
   },
   "recommendation": {
     "option": 2,

@@ -1,12 +1,19 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 import {
   buildSeedEntitySearchPlan,
   inferFocusPathsFromTaskText,
 } from "../dist/agent/context-seeding.js";
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+} from "../dist/db/ladybug.js";
+import { upsertFile, upsertRepo } from "../dist/db/ladybug-queries.js";
 import { Planner } from "../dist/agent/planner.js";
 import type { AgentTask } from "../dist/agent/types.js";
 import {
@@ -56,6 +63,7 @@ const SOURCE_PATHS = [
   "src/retrieval/seed-resolver.ts",
 ] as const;
 const ITERATIONS = 25;
+const FIXTURE_REPO_ID = "seed-resolution-fixture";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -91,6 +99,30 @@ function roundedMs(value: number): number {
   return Number(value.toFixed(4));
 }
 
+async function seedFixtureIndex(corpus: Corpus): Promise<void> {
+  const conn = await getLadybugConn();
+  const indexedAt = "2026-07-13T00:00:00.000Z";
+  await upsertRepo(conn, {
+    repoId: FIXTURE_REPO_ID,
+    rootPath: "/seed-resolution-fixture",
+    configJson: "{}",
+    createdAt: indexedAt,
+  });
+
+  const focusPaths = new Set(corpus.cases.flatMap((item) => item.focusPaths));
+  for (const [index, relPath] of [...focusPaths].entries()) {
+    await upsertFile(conn, {
+      fileId: `seed-resolution-file-${index}`,
+      repoId: FIXTURE_REPO_ID,
+      relPath,
+      contentHash: `seed-resolution-hash-${index}`,
+      language: "ts",
+      byteSize: 1,
+      lastIndexedAt: indexedAt,
+    });
+  }
+}
+
 async function evaluateCase(input: CorpusCase) {
   const contextPlan = buildSeedEntitySearchPlan(
     input.taskText,
@@ -101,7 +133,7 @@ async function evaluateCase(input: CorpusCase) {
   const sliceTokens = collectTaskTextSeedTokens(input.taskText);
   const planner = new Planner();
   const task: AgentTask = {
-    repoId: "seed-resolution-fixture",
+    repoId: FIXTURE_REPO_ID,
     taskType: input.taskType,
     taskText: input.taskText,
     options: {
@@ -134,7 +166,7 @@ async function evaluateCase(input: CorpusCase) {
       rankedExplicitContext: agentRefs,
       plannedRungs: planner.plan(task).rungs,
       recall: recall(agentRefs, input.expected.agentRefs),
-      evidence: "caller order for explicit symbols/paths; executor fallback is later",
+      evidence: "exact indexed files in caller order; executor fallback is later",
     },
   };
 }
@@ -160,7 +192,7 @@ async function measureLatency(corpus: Corpus): Promise<Record<string, number>> {
 
       started = performance.now();
       await planner.selectContext({
-        repoId: "seed-resolution-fixture",
+        repoId: FIXTURE_REPO_ID,
         taskType: item.taskType,
         taskText: item.taskText,
         options: { contextMode: item.contextMode, focusPaths: item.focusPaths },
@@ -196,8 +228,7 @@ function stableProjection(report: Record<string, unknown>): unknown {
   };
 }
 
-async function main(): Promise<void> {
-  const corpus = JSON.parse(readFileSync(CORPUS_PATH, "utf8")) as Corpus;
+async function main(corpus: Corpus): Promise<void> {
   const cases = [];
   for (const item of corpus.cases) cases.push(await evaluateCase(item));
   const nativeEnabled = isNativeAddonGloballyEnabled();
@@ -217,9 +248,9 @@ async function main(): Promise<void> {
       sourceHashes: sourceHashes(),
       platform: `${process.platform}-${process.arch}`,
       node: process.version,
-      config: "not used; fixture-only pure-policy evaluation",
-      indexVersion: null,
-      providerModelSettings: "not used; no DB, embedding, or provider calls",
+      config: "ephemeral fixture index seeded from corpus focusPaths",
+      indexVersion: "fixture-v1",
+      providerModelSettings: "not used; no embedding or provider calls",
       nativeAddon: {
         globallyEnabled: nativeEnabled,
         available: nativeEnabled && loadNativeAddon() !== null,
@@ -237,7 +268,7 @@ async function main(): Promise<void> {
     interfaces: {
       contextAssembly: "task text/options -> entity query plan + mixed entity candidates -> context refs",
       sliceStartNodes: "entry symbols/stack/test/edited files/task text -> prioritized symbol start nodes",
-      autopilotExecution: "explicit focus + planned rungs -> resolved context; later per-rung fallback and ranking",
+      autopilotExecution: "explicit indexed focus + planned rungs -> resolved context; later per-rung fallback and ranking",
     },
     recommendation: {
       option: 2,
@@ -263,4 +294,16 @@ async function main(): Promise<void> {
   console.log(`Seed Resolution evaluation saved to ${OUTPUT_PATH}`);
 }
 
-await main();
+const corpus = JSON.parse(readFileSync(CORPUS_PATH, "utf8")) as Corpus;
+const fixtureDir = mkdtempSync(join(tmpdir(), "sdl-seed-resolution-"));
+try {
+  await initLadybugDb(join(fixtureDir, "graph.lbug"));
+  await seedFixtureIndex(corpus);
+  await main(corpus);
+} finally {
+  try {
+    await closeLadybugDb();
+  } finally {
+    rmSync(fixtureDir, { recursive: true, force: true });
+  }
+}

@@ -10,6 +10,14 @@ const artifactPath = join(
 );
 
 describe("Seed Resolution evaluation", () => {
+  it("preserves autopilot explicit-scope recall", () => {
+    const artifact = JSON.parse(readFileSync(artifactPath, "utf8")) as {
+      quality: { autopilotExplicitScopeRecall: number };
+    };
+
+    assert.equal(artifact.quality.autopilotExplicitScopeRecall, 1);
+  });
+
   it("persists a reproducible three-stack evidence artifact", () => {
     execFileSync(
       process.execPath,
