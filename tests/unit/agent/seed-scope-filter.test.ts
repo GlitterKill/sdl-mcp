@@ -3,8 +3,8 @@ import { describe, it } from "node:test";
 
 import {
   filterSeedCandidatesToScope,
-  rankScopedSeedSymbols,
 } from "../../../dist/agent/context-seeding.js";
+import * as contextSeedingModule from "../../../dist/agent/context-seeding.js";
 import type { ContextSeedCandidate } from "../../../dist/agent/types.js";
 
 function candidate(
@@ -97,22 +97,27 @@ describe("filterSeedCandidatesToScope", () => {
   });
 });
 
-describe("rankScopedSeedSymbols", () => {
-  it("ranks exact query terms ahead of partial name matches", () => {
-    const ranked = rankScopedSeedSymbols(
-      [
-        { symbolId: "partial", name: "workflowNoise" },
-        { symbolId: "schema", name: "WorkflowRequestSchema" },
-        { symbolId: "unrelated", name: "unrelatedHelper" },
-        { symbolId: "handler", name: "handleWorkflow" },
-      ],
-      "handleWorkflow WorkflowRequestSchema workflow",
-      3,
-    );
+describe("scoped lexical fallback", () => {
+  it("uses global search only when scoped results are unavailable", async () => {
+    const selectResults = (
+      contextSeedingModule as typeof contextSeedingModule & {
+        useScopedResultsOrFallback: <T>(
+          scopedResults: T[] | undefined,
+          fallback: () => Promise<T[]>,
+        ) => Promise<T[]>;
+      }
+    ).useScopedResultsOrFallback;
+    assert.equal(typeof selectResults, "function");
 
-    assert.deepEqual(
-      ranked.map((symbol) => symbol.symbolId),
-      ["handler", "schema", "partial"],
-    );
+    let fallbackCalls = 0;
+    const fallback = async () => {
+      fallbackCalls += 1;
+      return ["global"];
+    };
+
+    assert.deepEqual(await selectResults([], fallback), []);
+    assert.equal(fallbackCalls, 0);
+    assert.deepEqual(await selectResults(undefined, fallback), ["global"]);
+    assert.equal(fallbackCalls, 1);
   });
 });

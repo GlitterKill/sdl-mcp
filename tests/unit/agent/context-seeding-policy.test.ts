@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 
 const source = () =>
   readFileSync(join(process.cwd(), "src/agent/context-seeding.ts"), "utf8");
+const symbolSource = () =>
+  readFileSync(join(process.cwd(), "src/db/ladybug-symbols.ts"), "utf8");
 
 describe("context seeding policy", () => {
   it("keeps Stage 2 lexical-only after the hybrid entity lane", () => {
@@ -67,30 +69,36 @@ describe("context seeding policy", () => {
     assert.ok(finalCap > scopeFilter, "final cap must follow scope filter");
   });
 
-  it("uses the existing scoped file and symbol batches for precise lexical seeding", () => {
+  it("loads precise lexical candidates through one scope-first symbol pool", () => {
     const src = source();
 
-    assert.match(src, /getFileIdsByRepoPaths/);
-    assert.match(src, /getExportedSymbolsLiteByFileIds/);
+    assert.match(src, /getScopedSearchSymbolPool/);
+    assert.match(src, /searchSymbolsLiteQueriesInPool/);
+    assert.doesNotMatch(src, /getFilesByPrefix/);
+    assert.doesNotMatch(src, /getExportedSymbolsLiteByFileIds/);
     assert.match(src, /const useScopedPreciseLexical/);
   });
 
-  it("only queries feedback for explicit feedback intent on the scoped fast path", () => {
+  it("keeps general scoped feedback behavior", () => {
     const src = source();
 
     assert.match(
       src,
-      /\(!useScopedPreciseLexical \|\| taskMentionsFeedback\)/,
+      /const shouldQueryFeedbackBoosts =\s*collectBeforeCaps \|\|\s*!forceSemanticEntitySearch \|\|\s*taskMentionsFeedback \|\|/,
     );
+    assert.doesNotMatch(src, /!useScopedPreciseLexical \|\| taskMentionsFeedback/);
   });
 
-  it("does not re-resolve lexical candidates already loaded from explicit scope", () => {
+  it("falls back to global lexical lanes only when the scoped pool query fails", () => {
     const src = source();
 
-    assert.match(
-      src,
-      /const candidatesNeedingScopeResolution = useScopedPreciseLexical/,
-    );
+    assert.match(src, /let scopedLexicalResults:[\s\S]*\| undefined/);
+    assert.match(src, /const usingScopedLexicalPool =\s*useScopedPreciseLexical && scopedLexicalResults !== undefined/);
+    assert.equal(src.match(/await useScopedResultsOrFallback\(/g)?.length, 3);
+    assert.match(src, /\(\) => searchSymbols\(conn, task\.repoId, query, 4\)/);
+    assert.match(src, /: searchSymbols\(\s*conn,[\s\S]*?compoundQuery/);
+    assert.match(src, /: searchSymbols\(conn, task\.repoId, term, perTermLimit\)/);
+    assert.match(src, /const candidatesNeedingScopeResolution = usingScopedLexicalPool/);
   });
 
   it("short-circuits path resolution when no candidates need filtering", () => {
@@ -98,5 +106,19 @@ describe("context seeding policy", () => {
       source(),
       /if \(candidates\.length === 0\) return new Map<string, string>\(\)/,
     );
+  });
+
+  it("keeps the scope pool to one deterministic unbounded DB query", () => {
+    const src = symbolSource();
+    const start = src.indexOf("export async function getScopedSearchSymbolPool");
+    const end = src.indexOf("\n}\n", start);
+
+    assert.ok(start >= 0, "expected scoped symbol pool query");
+    assert.ok(end > start, "expected scoped symbol pool query body");
+
+    const body = src.slice(start, end + 3);
+    assert.equal(body.match(/queryAll</g)?.length, 1);
+    assert.doesNotMatch(body, /\bLIMIT\b/);
+    assert.match(body, /ORDER BY f\.relPath ASC, s\.symbolId ASC/);
   });
 });

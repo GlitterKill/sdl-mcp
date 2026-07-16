@@ -22,6 +22,35 @@ interface LadybugDatabase {
   close: () => Promise<void>;
 }
 
+interface SearchSymbolLiteCandidate {
+  symbolId: string;
+  name: string;
+  fileId: string;
+  file: string;
+  kind: string;
+  exported: boolean;
+  summary: string;
+  searchText: string;
+}
+
+interface ScopedSearchQueries {
+  getScopedSearchSymbolPool: (
+    conn: import("kuzu").Connection,
+    repoId: string,
+    focusPaths: string[],
+  ) => Promise<SearchSymbolLiteCandidate[]>;
+  searchSymbolsLiteInPool: (
+    candidates: SearchSymbolLiteCandidate[],
+    query: string,
+    limit?: number,
+    kinds?: string[],
+  ) => Array<Omit<SearchSymbolLiteCandidate, "summary" | "searchText">>;
+  searchSymbolsLiteQueriesInPool: (
+    candidates: SearchSymbolLiteCandidate[],
+    queries: Array<{ query: string; limit: number; kinds?: string[] }>,
+  ) => Array<Array<Omit<SearchSymbolLiteCandidate, "summary" | "searchText">>>;
+}
+
 async function createTestDb(): Promise<{
   db: LadybugDatabase;
   conn: LadybugConnection;
@@ -473,6 +502,218 @@ describe("LadybugDB Search Queries", () => {
     assert.strictEqual(configResults.length, 1);
     assert.strictEqual(configResults[0]!.symbolId, "sym-resolve-exported");
   });
+
+  it(
+    "searches all real scoped symbols by name, summary, and full camel query ranking",
+    { skip: !ladybugAvailable },
+    async () => {
+      const scoped = queries as unknown as ScopedSearchQueries;
+      assert.equal(typeof scoped.getScopedSearchSymbolPool, "function");
+      assert.equal(typeof scoped.searchSymbolsLiteInPool, "function");
+      assert.equal(typeof scoped.searchSymbolsLiteQueriesInPool, "function");
+
+      await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
+        symbolId: "sym-handle-workflow-helper",
+        repoId,
+        fileId: "file-core",
+        kind: "function",
+        name: "handleWorkflowHelper",
+        exported: true,
+        visibility: "public",
+        language: "typescript",
+        rangeStartLine: 70,
+        rangeStartCol: 0,
+        rangeEndLine: 75,
+        rangeEndCol: 0,
+        astFingerprint: "handle-helper",
+        signatureJson: null,
+        summary: "workflow helper",
+        invariantsJson: null,
+        sideEffectsJson: null,
+        updatedAt: "2026-03-04T00:00:00Z",
+      });
+      await queries.upsertSymbol(conn as unknown as import("kuzu").Connection, {
+        symbolId: "sym-handle-workflow",
+        repoId,
+        fileId: "file-core",
+        kind: "function",
+        name: "handleWorkflow",
+        exported: false,
+        visibility: "private",
+        language: "typescript",
+        rangeStartLine: 80,
+        rangeStartCol: 0,
+        rangeEndLine: 85,
+        rangeEndCol: 0,
+        astFingerprint: "handle-exact",
+        signatureJson: null,
+        summary: "workflow handler",
+        invariantsJson: null,
+        sideEffectsJson: null,
+        updatedAt: "2026-03-04T00:00:00Z",
+      });
+
+      const pool = await scoped.getScopedSearchSymbolPool(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        ["src/core.ts", "src/internal"],
+      );
+
+      const summaryMatches = scoped.searchSymbolsLiteInPool(pool, "Foo", 20);
+      const privateMatches = scoped.searchSymbolsLiteInPool(
+        pool,
+        "resolveConfig",
+        20,
+      );
+      const camelMatches = scoped.searchSymbolsLiteInPool(
+        pool,
+        "handleWorkflow",
+        20,
+      );
+      const globalCamelMatches = await queries.searchSymbolsLite(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "handleWorkflow",
+        20,
+      );
+      const batchedMatches = scoped.searchSymbolsLiteQueriesInPool(pool, [
+        { query: "Foo", limit: 20 },
+        { query: "resolveConfig", limit: 20 },
+        { query: "handleWorkflow", limit: 20 },
+      ]);
+
+      assert.equal(
+        summaryMatches.some((row) => row.symbolId === "sym-summary-only"),
+        true,
+      );
+      assert.equal(
+        privateMatches.some((row) => row.symbolId === "sym-resolve-private"),
+        true,
+      );
+      assert.equal(camelMatches[0]?.symbolId, "sym-handle-workflow");
+      assert.deepEqual(
+        camelMatches.map((row) => row.symbolId),
+        globalCamelMatches.map((row) => row.symbolId),
+      );
+      assert.deepEqual(batchedMatches, [
+        summaryMatches,
+        privateMatches,
+        camelMatches,
+      ]);
+    },
+  );
+
+  it(
+    "honors mixed and root scopes while excluding non-file-backed symbols",
+    { skip: !ladybugAvailable },
+    async () => {
+      const scoped = queries as unknown as ScopedSearchQueries;
+      assert.equal(typeof scoped.getScopedSearchSymbolPool, "function");
+
+      const mixed = await scoped.getScopedSearchSymbolPool(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        ["src/core.ts", "tests"],
+      );
+      const mixedFiles = new Set(mixed.map((row) => row.file));
+      assert.deepEqual(
+        [...mixedFiles].sort(),
+        ["src/core.ts", "tests/unit/paths.test.ts"],
+      );
+
+      const root = await scoped.getScopedSearchSymbolPool(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        ["src/core.ts", "."],
+      );
+      assert.equal(
+        root.some((row) => row.symbolId === "sym-resolve-private"),
+        true,
+      );
+      assert.equal(
+        root.some((row) => row.symbolId === "unresolved:call:SharedThing"),
+        false,
+      );
+      assert.equal(
+        root.some((row) => row.symbolId === "scip-external-chunk"),
+        false,
+      );
+      assert.deepEqual(
+        root.map((row) => `${row.file}\0${row.symbolId}`),
+        root
+          .map((row) => `${row.file}\0${row.symbolId}`)
+          .toSorted((left, right) => left.localeCompare(right)),
+      );
+    },
+  );
+
+  it(
+    "keeps scoped symbols reachable beyond the first 200 files",
+    { skip: !ladybugAvailable },
+    async () => {
+      const scoped = queries as unknown as ScopedSearchQueries;
+      assert.equal(typeof scoped.getScopedSearchSymbolPool, "function");
+
+      const files = Array.from({ length: 205 }, (_, index) => {
+        const suffix = String(index).padStart(3, "0");
+        return {
+          fileId: `file-bulk-${suffix}`,
+          repoId,
+          relPath: `bulk/file-${suffix}.ts`,
+          contentHash: `bulk-${suffix}`,
+          language: "ts",
+          byteSize: 1,
+          lastIndexedAt: "2026-03-04T00:00:00Z",
+        };
+      });
+      await queries.upsertFileBatch(
+        conn as unknown as import("kuzu").Connection,
+        files,
+        { chunkSize: 256 },
+      );
+      await queries.upsertSymbolBatch(
+        conn as unknown as import("kuzu").Connection,
+        files.map((file, index) => ({
+          symbolId: `sym-bulk-${String(index).padStart(3, "0")}`,
+          repoId,
+          fileId: file.fileId,
+          kind: "function",
+          name: index === 204 ? "lastScopedTarget" : `bulkSymbol${index}`,
+          exported: false,
+          visibility: "private",
+          language: "typescript",
+          rangeStartLine: 1,
+          rangeStartCol: 0,
+          rangeEndLine: 1,
+          rangeEndCol: 0,
+          astFingerprint: `bulk-${index}`,
+          signatureJson: null,
+          summary: null,
+          invariantsJson: null,
+          sideEffectsJson: null,
+          updatedAt: "2026-03-04T00:00:00Z",
+        })),
+        { chunkSize: 256 },
+      );
+
+      const pool = await scoped.getScopedSearchSymbolPool(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        ["bulk"],
+      );
+
+      assert.equal(pool.length, 205);
+      assert.equal(
+        pool.some((row) => row.symbolId === "sym-bulk-204"),
+        true,
+      );
+      assert.equal(
+        scoped.searchSymbolsLiteInPool(pool, "lastScopedTarget", 5)[0]
+          ?.symbolId,
+        "sym-bulk-204",
+      );
+    },
+  );
 
   it(
     "prefers src symbols over tests for multi-term ties",

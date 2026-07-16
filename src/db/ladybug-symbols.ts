@@ -2573,9 +2573,57 @@ export interface SearchSymbolLiteRow {
   exported: boolean;
 }
 
-interface SearchSymbolLiteBatchCandidate extends SearchSymbolLiteRow {
+export interface SearchSymbolLiteCandidate extends SearchSymbolLiteRow {
   summary: string;
   searchText: string;
+}
+
+/**
+ * Load every real, file-backed symbol within the explicit path scope in one
+ * query. Ranking stays in memory so each lexical lane can reuse this pool
+ * without repeating path lookups or imposing an alphabetical pre-limit.
+ */
+export async function getScopedSearchSymbolPool(
+  conn: Connection,
+  repoId: string,
+  focusPaths: string[],
+): Promise<SearchSymbolLiteCandidate[]> {
+  const normalizedPaths = Array.from(
+    new Map(
+      focusPaths
+        .map((focusPath) => normalizePath(focusPath.trim()).replace(/\/+$/, ""))
+        .filter(Boolean)
+        .map((focusPath) => [focusPath.toLowerCase(), focusPath]),
+    ).values(),
+  );
+  if (normalizedPaths.length === 0) return [];
+
+  const hasRootScope = normalizedPaths.some((focusPath) => focusPath === ".");
+  const params: Record<string, unknown> = { repoId };
+  const scopeClauses = hasRootScope
+    ? []
+    : normalizedPaths.map((focusPath, index) => {
+        params[`scopePath${index}`] = focusPath.toLowerCase();
+        params[`scopePrefix${index}`] = `${focusPath.toLowerCase()}/`;
+        return `(lower(f.relPath) = $scopePath${index} OR lower(f.relPath) STARTS WITH $scopePrefix${index})`;
+      });
+
+  return queryAll<SearchSymbolLiteCandidate>(
+    conn,
+    `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
+     WHERE coalesce(s.symbolStatus, 'real') = 'real'
+     ${scopeClauses.length > 0 ? `AND (${scopeClauses.join(" OR ")})` : ""}
+     RETURN s.symbolId AS symbolId,
+            coalesce(s.name, '') AS name,
+            f.fileId AS fileId,
+            f.relPath AS file,
+            coalesce(s.kind, '') AS kind,
+            coalesce(s.exported, false) AS exported,
+            coalesce(s.summary, '') AS summary,
+            coalesce(s.searchText, '') AS searchText
+     ORDER BY f.relPath ASC, s.symbolId ASC`,
+    params,
+  );
 }
 
 /**
@@ -2651,7 +2699,7 @@ async function searchSymbolsLiteSingleTerm(
             coalesce(f.relPath, '') AS file,
             s.kind AS kind,
             s.exported AS exported
-     ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank
+     ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank, s.symbolId
      LIMIT $limit`,
     {
       repoId,
@@ -2662,6 +2710,175 @@ async function searchSymbolsLiteSingleTerm(
       limit: 200,
       ...(kinds && kinds.length > 0 && { kinds }),
     },
+  );
+}
+
+function mergeSearchSymbolLiteTermResults(
+  perTermResults: SearchSymbolLiteRow[][],
+  query: string,
+  limit: number,
+): SearchSymbolLiteRow[] {
+  const matchCounts = new Map<
+    string,
+    { row: SearchSymbolLiteRow; count: number }
+  >();
+  for (const termRows of perTermResults) {
+    for (const row of termRows) {
+      const existing = matchCounts.get(row.symbolId);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        matchCounts.set(row.symbolId, { row, count: 1 });
+      }
+    }
+  }
+
+  const lowerQuery = query.trim().toLowerCase();
+  return Array.from(matchCounts.values())
+    .sort((a, b) => {
+      const aName = a.row.name.toLowerCase();
+      const bName = b.row.name.toLowerCase();
+      const aExact = aName === lowerQuery ? 0 : 1;
+      const bExact = bName === lowerQuery ? 0 : 1;
+      if (aExact !== bExact) return aExact - bExact;
+      const aPrefix = aName.startsWith(lowerQuery) ? 0 : 1;
+      const bPrefix = bName.startsWith(lowerQuery) ? 0 : 1;
+      if (aPrefix !== bPrefix) return aPrefix - bPrefix;
+      const aContains = aName.includes(lowerQuery) ? 0 : 1;
+      const bContains = bName.includes(lowerQuery) ? 0 : 1;
+      if (aContains !== bContains) return aContains - bContains;
+      return (
+        b.count - a.count ||
+        a.row.name.localeCompare(b.row.name) ||
+        (a.row.file.startsWith("tests/") ? 1 : 0) -
+          (b.row.file.startsWith("tests/") ? 1 : 0) ||
+        (a.row.exported ? 0 : 1) - (b.row.exported ? 0 : 1) ||
+        a.row.symbolId.localeCompare(b.row.symbolId)
+      );
+    })
+    .map((entry) => entry.row)
+    .slice(0, limit);
+}
+
+interface PreparedSearchSymbolLiteCandidate {
+  row: SearchSymbolLiteCandidate;
+  name: string;
+  summary: string;
+  searchText: string;
+}
+
+function prepareSearchSymbolLitePool(
+  candidates: SearchSymbolLiteCandidate[],
+): PreparedSearchSymbolLiteCandidate[] {
+  return candidates.map((row) => ({
+    row,
+    name: row.name.toLowerCase(),
+    summary: row.summary.toLowerCase(),
+    searchText: row.searchText.toLowerCase(),
+  }));
+}
+
+function searchSymbolsLiteSingleTermInPreparedPool(
+  candidates: PreparedSearchSymbolLiteCandidate[],
+  term: string,
+  kinds?: string[],
+): SearchSymbolLiteRow[] {
+  const queryLower = term.toLowerCase();
+  const queryPadded = ` ${queryLower} `;
+  const queryStart = `${queryLower} `;
+  const queryEnd = ` ${queryLower}`;
+  const allowedKinds = kinds && kinds.length > 0 ? new Set(kinds) : undefined;
+
+  return candidates
+    .filter((candidate) => {
+      if (allowedKinds && !allowedKinds.has(candidate.row.kind)) return false;
+      return (
+        candidate.name.includes(queryLower) ||
+        candidate.summary.includes(queryLower) ||
+        candidate.searchText.includes(queryLower)
+      );
+    })
+    .sort((a, b) => {
+      const rankA = rankPreparedSearchSymbolLiteCandidate(
+        a,
+        term,
+        queryLower,
+        queryPadded,
+        queryStart,
+        queryEnd,
+      );
+      const rankB = rankPreparedSearchSymbolLiteCandidate(
+        b,
+        term,
+        queryLower,
+        queryPadded,
+        queryStart,
+        queryEnd,
+      );
+      for (let index = 0; index < rankA.length; index++) {
+        const difference = rankA[index] - rankB[index];
+        if (difference !== 0) return difference;
+      }
+      return a.row.symbolId.localeCompare(b.row.symbolId);
+    })
+    .slice(0, 200)
+    .map(({ row: { summary: _summary, searchText: _searchText, ...row } }) =>
+      row,
+    );
+}
+
+function searchSymbolsLiteInPreparedPool(
+  candidates: PreparedSearchSymbolLiteCandidate[],
+  query: string,
+  limit: number,
+  kinds?: string[],
+): SearchSymbolLiteRow[] {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  assertSafeInt(limit, "limit");
+  const safeLimit = Math.max(1, Math.min(limit, 1000));
+  const terms = splitSearchTerms(trimmed);
+  if (terms.length <= 1) {
+    return searchSymbolsLiteSingleTermInPreparedPool(
+      candidates,
+      trimmed,
+      kinds,
+    ).slice(0, safeLimit);
+  }
+
+  return mergeSearchSymbolLiteTermResults(
+    terms.map((term) =>
+      searchSymbolsLiteSingleTermInPreparedPool(candidates, term, kinds),
+    ),
+    trimmed,
+    safeLimit,
+  );
+}
+
+/** Rank a preloaded scoped pool with the same term and merge rules as DB search. */
+export function searchSymbolsLiteInPool(
+  candidates: SearchSymbolLiteCandidate[],
+  query: string,
+  limit = 20,
+  kinds?: string[],
+): SearchSymbolLiteRow[] {
+  return searchSymbolsLiteInPreparedPool(
+    prepareSearchSymbolLitePool(candidates),
+    query,
+    limit,
+    kinds,
+  );
+}
+
+/** Rank a query plan while preparing candidate search fields only once. */
+export function searchSymbolsLiteQueriesInPool(
+  candidates: SearchSymbolLiteCandidate[],
+  queries: Array<{ query: string; limit: number; kinds?: string[] }>,
+): SearchSymbolLiteRow[][] {
+  const prepared = prepareSearchSymbolLitePool(candidates);
+  return queries.map(({ query, limit, kinds }) =>
+    searchSymbolsLiteInPreparedPool(prepared, query, limit, kinds),
   );
 }
 
@@ -2708,49 +2925,7 @@ export async function searchSymbolsLite(
     );
   }
 
-  // Count how many terms each symbol matched
-  const matchCounts = new Map<
-    string,
-    { row: SearchSymbolLiteRow; count: number }
-  >();
-  for (const termRows of perTermResults) {
-    for (const row of termRows) {
-      const existing = matchCounts.get(row.symbolId);
-      if (existing) {
-        existing.count += 1;
-      } else {
-        matchCounts.set(row.symbolId, { row, count: 1 });
-      }
-    }
-  }
-
-  // Sort by match count descending, with compound name match tiebreakers
-  const lt = query.trim().toLowerCase();
-  return Array.from(matchCounts.values())
-    .sort((a, b) => {
-      // Exact name match first
-      const aExact = a.row.name.toLowerCase() === lt ? 0 : 1;
-      const bExact = b.row.name.toLowerCase() === lt ? 0 : 1;
-      if (aExact !== bExact) return aExact - bExact;
-      // Name starts with full query
-      const aPrefix = a.row.name.toLowerCase().startsWith(lt) ? 0 : 1;
-      const bPrefix = b.row.name.toLowerCase().startsWith(lt) ? 0 : 1;
-      if (aPrefix !== bPrefix) return aPrefix - bPrefix;
-      // Name contains full query
-      const aContains = a.row.name.toLowerCase().includes(lt) ? 0 : 1;
-      const bContains = b.row.name.toLowerCase().includes(lt) ? 0 : 1;
-      if (aContains !== bContains) return aContains - bContains;
-      // More terms matched = better
-      return (
-        b.count - a.count ||
-        a.row.name.localeCompare(b.row.name) ||
-        (a.row.file.startsWith("tests/") ? 1 : 0) -
-          (b.row.file.startsWith("tests/") ? 1 : 0) ||
-        (a.row.exported ? 0 : 1) - (b.row.exported ? 0 : 1)
-      );
-    })
-    .map((entry) => entry.row)
-    .slice(0, safeLimit);
+  return mergeSearchSymbolLiteTermResults(perTermResults, trimmed, safeLimit);
 }
 
 export async function searchSymbolsLiteBatch(
@@ -2784,7 +2959,7 @@ export async function searchSymbolsLiteBatch(
     params.kinds = kinds;
   }
 
-  const candidates = await queryAll<SearchSymbolLiteBatchCandidate>(
+  const candidates = await queryAll<SearchSymbolLiteCandidate>(
     conn,
     `MATCH (r:Repo {repoId: $repoId})<-[:SYMBOL_IN_REPO]-(s:Symbol)
      OPTIONAL MATCH (s)-[:SYMBOL_IN_FILE]->(f:File)
@@ -2891,7 +3066,7 @@ export async function searchSymbolsLiteBatch(
 }
 
 function rankSearchSymbolLiteCandidate(
-  row: SearchSymbolLiteBatchCandidate,
+  row: SearchSymbolLiteCandidate,
   query: string,
   queryLower: string,
   queryPadded: string,
@@ -2911,6 +3086,28 @@ function rankSearchSymbolLiteCandidate(
     getSearchSymbolLiteFilePenalty(row.file),
     getSearchSymbolLiteKindRank(row.kind),
     name.includes(queryLower) ? 0 : 1,
+  ];
+}
+
+function rankPreparedSearchSymbolLiteCandidate(
+  candidate: PreparedSearchSymbolLiteCandidate,
+  query: string,
+  queryLower: string,
+  queryPadded: string,
+  queryStart: string,
+  queryEnd: string,
+): number[] {
+  return [
+    candidate.row.name === query ? 0 : 1,
+    candidate.name === queryLower ? 0 : 1,
+    candidate.searchText.includes(queryPadded) ||
+    candidate.searchText.startsWith(queryStart) ||
+    candidate.searchText.endsWith(queryEnd)
+      ? 0
+      : 1,
+    getSearchSymbolLiteFilePenalty(candidate.row.file),
+    getSearchSymbolLiteKindRank(candidate.row.kind),
+    candidate.name.includes(queryLower) ? 0 : 1,
   ];
 }
 

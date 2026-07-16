@@ -24,21 +24,17 @@ import {
   IDENTIFIER_STOP_WORDS,
 } from "./identifier-extraction.js";
 import {
-  getExportedSymbolsLiteByFileIds,
-  getFileIdsByRepoPaths,
   getFilesByIds,
-  getFilesByPrefix,
+  getScopedSearchSymbolPool,
   getSymbolsByIds,
   searchSymbols,
-  splitSearchTerms,
-  type ExportedSymbolLite,
+  searchSymbolsLiteQueriesInPool,
 } from "../db/ladybug-queries.js";
 import { searchSymbolsHybridWithOverlay } from "../live-index/overlay-reader.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
 import { buildCatalog, rankCatalog } from "../code-mode/action-catalog.js";
 import { getLadybugConn } from "../db/ladybug.js";
 import { logger } from "../util/logger.js";
-import { normalizePath } from "../util/paths.js";
 import { explicitFocusPaths, pathMatchesFocus } from "./context-ranking.js";
 
 // ---------------------------------------------------------------------------
@@ -66,6 +62,10 @@ const COMPOUND_LIMIT_BROAD = 15;
 
 /** Maximum feedback rows to consider. */
 const FEEDBACK_LIMIT = 10;
+
+interface SeedSymbolResult {
+  symbolId: string;
+}
 
 /** Slots reserved so a secondary source can still appear when one lane dominates. */
 const DIVERSITY_RESERVE_PRECISE = 3;
@@ -479,6 +479,18 @@ export function filterSeedCandidatesToScope(
   });
 }
 
+/**
+ * Preserve a successful scoped result, including an empty result set, and use
+ * the global lane only when the scoped pool was unavailable (for example,
+ * after a non-fatal DB query failure).
+ */
+export async function useScopedResultsOrFallback<T>(
+  scopedResults: T[] | undefined,
+  fallback: () => Promise<T[]>,
+): Promise<T[]> {
+  return scopedResults === undefined ? fallback() : scopedResults;
+}
+
 async function resolveSeedCandidatePaths(
   candidates: ContextSeedCandidate[],
 ): Promise<Map<string, string>> {
@@ -518,81 +530,6 @@ async function resolveSeedCandidatePaths(
     if (file) candidatePaths.set(contextRef, file.relPath);
   }
   return candidatePaths;
-}
-
-/** Rank an already-scoped symbol pool for one lexical seed query. */
-export function rankScopedSeedSymbols(
-  symbols: ExportedSymbolLite[],
-  query: string,
-  limit: number,
-): ExportedSymbolLite[] {
-  const terms = splitSearchTerms(query).map((term) => term.toLowerCase());
-  if (terms.length === 0 || limit <= 0) return [];
-
-  return symbols
-    .map((symbol) => {
-      const name = symbol.name.toLowerCase();
-      const matches = terms.flatMap((term, index) =>
-        name.includes(term) ? [index] : [],
-      );
-      return {
-        symbol,
-        matches,
-        exactTermIndex: terms.findIndex((term) => name === term),
-        prefixTermIndex: terms.findIndex((term) => name.startsWith(term)),
-      };
-    })
-    .filter(({ matches }) => matches.length > 0)
-    .sort((a, b) => {
-      const exactA = a.exactTermIndex < 0 ? terms.length : a.exactTermIndex;
-      const exactB = b.exactTermIndex < 0 ? terms.length : b.exactTermIndex;
-      const prefixA = a.prefixTermIndex < 0 ? terms.length : a.prefixTermIndex;
-      const prefixB = b.prefixTermIndex < 0 ? terms.length : b.prefixTermIndex;
-      return (
-        exactA - exactB ||
-        prefixA - prefixB ||
-        b.matches.length - a.matches.length ||
-        a.symbol.name.localeCompare(b.symbol.name) ||
-        a.symbol.symbolId.localeCompare(b.symbol.symbolId)
-      );
-    })
-    .slice(0, limit)
-    .map(({ symbol }) => symbol);
-}
-
-async function loadScopedSeedSymbols(
-  repoId: string,
-  focusPaths: string[],
-): Promise<ExportedSymbolLite[]> {
-  const conn = await getLadybugConn();
-  const normalizedPaths = [
-    ...new Set(focusPaths.map((path) => normalizePath(path.trim()))),
-  ];
-  const exactFileIds = await getFileIdsByRepoPaths(
-    conn,
-    repoId,
-    normalizedPaths,
-  );
-  const fileIds = new Set<string>();
-
-  for (const focusPath of normalizedPaths) {
-    const exactFileId = exactFileIds.get(focusPath);
-    if (exactFileId) {
-      fileIds.add(exactFileId);
-      continue;
-    }
-    const prefix = focusPath === "." ? "" : `${focusPath.replace(/\/$/, "")}/`;
-    const files = await getFilesByPrefix(conn, repoId, prefix, 200);
-    for (const file of files) fileIds.add(file.fileId);
-  }
-
-  const symbolsByFile = await getExportedSymbolsLiteByFileIds(conn, [...fileIds]);
-  return [...fileIds]
-    .flatMap((fileId) => symbolsByFile.get(fileId) ?? [])
-    .sort(
-      (a, b) =>
-        a.name.localeCompare(b.name) || a.symbolId.localeCompare(b.symbolId),
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -747,21 +684,36 @@ export async function buildSeedContext(
     : MAX_INDIVIDUAL_TERMS_PRECISE;
   const compoundQuery = terms.slice(0, 6).join(" ");
   const individualTerms = terms.slice(0, maxIndividualTerms);
-  const scopedQueryPlan = [
-    ...actionSeedQueries.map((query) => ({ query, limit: 4 })),
+  const lexicalQueryPlan = [
     ...(compoundQuery ? [{ query: compoundQuery, limit: compoundLimit }] : []),
     ...individualTerms.map((query) => ({ query, limit: perTermLimit })),
   ];
-  let scopedLexicalResults: ExportedSymbolLite[][] = scopedQueryPlan.map(
-    () => [],
-  );
-  if (useScopedPreciseLexical && scopedQueryPlan.length > 0) {
+  let scopedLexicalResults:
+    | { action: SeedSymbolResult[][]; lexical: SeedSymbolResult[][] }
+    | undefined;
+  if (
+    useScopedPreciseLexical &&
+    (actionSeedQueries.length > 0 || lexicalQueryPlan.length > 0)
+  ) {
     const scopedLexicalStartedAt = performance.now();
     try {
-      const scopedSymbols = await loadScopedSeedSymbols(task.repoId, scopePaths);
-      scopedLexicalResults = scopedQueryPlan.map(({ query, limit }) =>
-        rankScopedSeedSymbols(scopedSymbols, query, limit),
+      const conn = await getLadybugConn();
+      const scopedSymbols = await getScopedSearchSymbolPool(
+        conn,
+        task.repoId,
+        scopePaths,
       );
+      const scopedQueryResults = searchSymbolsLiteQueriesInPool(
+        scopedSymbols,
+        [
+          ...actionSeedQueries.map((query) => ({ query, limit: 4 })),
+          ...lexicalQueryPlan,
+        ],
+      );
+      scopedLexicalResults = {
+        action: scopedQueryResults.slice(0, actionSeedQueries.length),
+        lexical: scopedQueryResults.slice(actionSeedQueries.length),
+      };
     } catch (err) {
       logger.debug("Scoped lexical seeding failed (non-fatal)", {
         repoId: task.repoId,
@@ -775,6 +727,8 @@ export async function buildSeedContext(
       );
     }
   }
+  const usingScopedLexicalPool =
+    useScopedPreciseLexical && scopedLexicalResults !== undefined;
 
   if (
     actionSeedQueries.length > 0 &&
@@ -790,9 +744,12 @@ export async function buildSeedContext(
         if (!collectBeforeCaps && sourceCounts.lexical >= lexicalTargetCap) {
           break;
         }
-        const results = useScopedPreciseLexical
-          ? (scopedLexicalResults[queryIndex] ?? [])
-          : await searchSymbols(conn, task.repoId, query, 4);
+        const results = await useScopedResultsOrFallback(
+          usingScopedLexicalPool
+            ? (scopedLexicalResults?.action[queryIndex] ?? [])
+            : undefined,
+          () => searchSymbols(conn, task.repoId, query, 4),
+        );
         for (const r of results) {
           if (!collectBeforeCaps && sourceCounts.lexical >= lexicalTargetCap) {
             break;
@@ -837,11 +794,33 @@ export async function buildSeedContext(
       // Strategy 1: Compound multi-term search
       if (compoundQuery) {
         const compoundStartedAt = performance.now();
-        const compoundResults = useScopedPreciseLexical
-          ? (scopedLexicalResults[actionSeedQueries.length] ?? [])
-          : useHybridLexical
-            ? (await searchSymbolsHybridWithOverlay(conn, task.repoId, compoundQuery, compoundLimit, { chatMentions: resolvedChatMentions, chatMentionWeights: task.options?.chatMentionWeights, pprDirection: task.options?.pprDirection, pprWeight: task.options?.pprWeight })).rows
-            : await searchSymbols(conn, task.repoId, compoundQuery, compoundLimit);
+        const compoundResults = await useScopedResultsOrFallback(
+          usingScopedLexicalPool
+            ? (scopedLexicalResults?.lexical[0] ?? [])
+            : undefined,
+          async () =>
+            useHybridLexical
+              ? (
+                  await searchSymbolsHybridWithOverlay(
+                    conn,
+                    task.repoId,
+                    compoundQuery,
+                    compoundLimit,
+                    {
+                      chatMentions: resolvedChatMentions,
+                      chatMentionWeights: task.options?.chatMentionWeights,
+                      pprDirection: task.options?.pprDirection,
+                      pprWeight: task.options?.pprWeight,
+                    },
+                  )
+                ).rows
+              : searchSymbols(
+                  conn,
+                  task.repoId,
+                  compoundQuery,
+                  compoundLimit,
+                ),
+        );
         recordTiming(timings, "seed.lexicalCompound", compoundStartedAt);
         for (const r of compoundResults) {
           if (!collectBeforeCaps && sourceCounts.lexical >= lexicalTargetCap) {
@@ -870,19 +849,35 @@ export async function buildSeedContext(
       }
 
       // Strategy 2: Individual term searches
-      const termResultOffset =
-        actionSeedQueries.length + (compoundQuery ? 1 : 0);
+      const termResultOffset = compoundQuery ? 1 : 0;
       for (let termIndex = 0; termIndex < individualTerms.length; termIndex++) {
         const term = individualTerms[termIndex];
         if (!collectBeforeCaps && sourceCounts.lexical >= lexicalTargetCap) {
           break;
         }
         const termStartedAt = performance.now();
-        const results = useScopedPreciseLexical
-          ? (scopedLexicalResults[termResultOffset + termIndex] ?? [])
-          : useHybridLexical
-            ? (await searchSymbolsHybridWithOverlay(conn, task.repoId, term, perTermLimit, { chatMentions: resolvedChatMentions, chatMentionWeights: task.options?.chatMentionWeights, pprDirection: task.options?.pprDirection, pprWeight: task.options?.pprWeight })).rows
-            : await searchSymbols(conn, task.repoId, term, perTermLimit);
+        const results = await useScopedResultsOrFallback(
+          usingScopedLexicalPool
+            ? (scopedLexicalResults?.lexical[termResultOffset + termIndex] ?? [])
+            : undefined,
+          async () =>
+            useHybridLexical
+              ? (
+                  await searchSymbolsHybridWithOverlay(
+                    conn,
+                    task.repoId,
+                    term,
+                    perTermLimit,
+                    {
+                      chatMentions: resolvedChatMentions,
+                      chatMentionWeights: task.options?.chatMentionWeights,
+                      pprDirection: task.options?.pprDirection,
+                      pprWeight: task.options?.pprWeight,
+                    },
+                  )
+                ).rows
+              : searchSymbols(conn, task.repoId, term, perTermLimit),
+        );
         recordTiming(timings, "seed.lexicalTermSearch", termStartedAt);
         for (const r of results) {
           if (!collectBeforeCaps && sourceCounts.lexical >= lexicalTargetCap) {
@@ -920,11 +915,10 @@ export async function buildSeedContext(
   const feedbackStartedAt = performance.now();
   const taskMentionsFeedback = /\bfeedback\b/i.test(task.taskText);
   const shouldQueryFeedbackBoosts =
-    (!useScopedPreciseLexical || taskMentionsFeedback) &&
-    (collectBeforeCaps ||
-      !forceSemanticEntitySearch ||
-      taskMentionsFeedback ||
-      sourceCounts.semantic < diversityReserve);
+    collectBeforeCaps ||
+    !forceSemanticEntitySearch ||
+    taskMentionsFeedback ||
+    sourceCounts.semantic < diversityReserve;
   if (shouldQueryFeedbackBoosts) {
     try {
       const conn = await getLadybugConn();
@@ -972,7 +966,7 @@ export async function buildSeedContext(
   if (collectBeforeCaps) {
     // Lexical candidates from the scoped fast path were loaded by file first;
     // only feedback still needs path resolution before source caps apply.
-    const candidatesNeedingScopeResolution = useScopedPreciseLexical
+    const candidatesNeedingScopeResolution = usingScopedLexicalPool
       ? allCandidates.filter((candidate) => candidate.source !== "lexical")
       : allCandidates;
     const candidatePaths = await resolveSeedCandidatePaths(
@@ -983,7 +977,7 @@ export async function buildSeedContext(
       candidatePaths,
       scopePaths,
     );
-    const scopeFilteredCandidates = useScopedPreciseLexical
+    const scopeFilteredCandidates = usingScopedLexicalPool
       ? [
           ...allCandidates.filter((candidate) => candidate.source === "lexical"),
           ...resolvedScopedCandidates,
