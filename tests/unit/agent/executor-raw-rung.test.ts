@@ -70,6 +70,54 @@ describe("executor raw rung", () => {
     assert.equal(action.status, "failed");
     assert.deepEqual(action.output, { symbolsProcessed: 0 });
   });
+
+  it("remains successful when a later rung fails after capturing evidence", async () => {
+    const mockGate: GateEvaluator = async () => ({
+      approved: true,
+      repoId: "test-repo",
+      symbolId: "symbol-1",
+      file: "src/test.ts",
+      range: { startLine: 1, startCol: 0, endLine: 10, endCol: 0 },
+      code: "function test() { return 42; }",
+      whyApproved: ["identifiers-match"],
+      whyDenied: [],
+      estimatedTokens: 50,
+    });
+    const executor = new Executor(mockGate);
+    const testExecutor = executor as unknown as {
+      executeSkeletonRung: (
+        task: AgentTask,
+        context: string[],
+      ) => Promise<void>;
+    };
+    testExecutor.executeSkeletonRung = async () => {
+      throw new Error("forced skeleton dependency failure");
+    };
+    const task: AgentTask = {
+      taskType: "debug",
+      taskText: "Inspect raw context",
+      repoId: "test-repo",
+      budget: { maxActions: 2 },
+    };
+
+    const result = await executor.execute(
+      task,
+      ["raw", "skeleton"],
+      ["symbol:symbol-1"],
+    );
+    const failedActions = result.actions.filter(
+      (action) => action.status === "failed",
+    );
+
+    assert.equal(result.success, true);
+    assert.ok(result.evidence.length > 0);
+    assert.ok(failedActions.length > 0);
+    assert.equal(failedActions[0].type, "getSkeleton");
+    assert.match(
+      failedActions[0].error ?? "",
+      /forced skeleton dependency failure/,
+    );
+  });
 });
 
 describe("executor card fallback", () => {
@@ -300,6 +348,9 @@ describe("executor escalation", () => {
       ["getCard", "getSkeleton", "getHotPath"],
       `Expected rung escalation through hotPath, got ${result.actions.map((a) => a.type).join(", ")}`,
     );
+    assert.ok(result.actions.every((action) => action.status === "failed"));
+    assert.equal(result.evidence.length, 0);
+    assert.equal(result.success, false);
   });
 
   it("does not escalate when evidence is produced", async () => {

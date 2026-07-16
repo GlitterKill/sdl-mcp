@@ -300,10 +300,11 @@ export class Executor {
     this.metrics.totalDurationMs = Date.now() - this.startTime;
     this.metrics.totalActions = this.actions.length;
 
+    const evidence = this.evidenceCapture.getAllEvidence();
     return {
       actions: this.actions,
-      evidence: this.evidenceCapture.getAllEvidence(),
-      success: this.metrics.failedActions === 0,
+      evidence,
+      success: evidence.length > 0 || this.metrics.failedActions === 0,
     };
   }
 
