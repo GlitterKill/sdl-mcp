@@ -70,7 +70,7 @@ Implementation follows red-green-refactor:
 4. Remove the `semanticLaneHasCoverage` suppression and rerun the live benchmark.
 5. Stop if recall reaches 85%. Otherwise add deterministic one-per-lexical-batch coverage, starting with another failing synthetic unit test.
 6. Change only the forced-semantic benchmark contract so aggregate recall, noise, and failures are its hard gates; forced-semantic precise/broad recall and latency remain visible but report-only. Preserve the separate default scoped-precise latency gate.
-7. Compare implementations using the same built commit, config, and immutable index. For each candidate, run one discarded warm-up followed by three measured 26-case forced-semantic passes with no concurrent repo workload; select the lowest median total wall time among candidates reaching 85%.
+7. Compare implementations using the same built commit, config, and fresh clones of one pinned logical index snapshot. For each candidate, run one discarded warm-up followed by three measured 26-case forced-semantic passes on its clone, with no refresh/reindex or concurrent repo workload; select the lowest median total wall time among candidates reaching 85%. LadybugDB checkpoint mtimes are not treated as corpus fingerprints.
 8. Verify the full test suite, goldens, determinism, typecheck, lint, docs inventory, and a fresh-process MCP call with `semantic: true`.
 
 The final report includes baseline versus final recall, noise, failed cases, p50, p95, and total benchmark wall time.

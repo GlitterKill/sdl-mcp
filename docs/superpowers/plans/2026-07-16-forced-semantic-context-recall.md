@@ -15,7 +15,7 @@
 - The benchmark corpus remains exactly `tests/benchmark/context-quality-cases.json`: 26 cases with unchanged task text, focus paths, expected useful symbols, and unexpected symbols.
 - Only the `semantic` benchmark variant (`options.semantic: true`) gains new hard gates: aggregate recall `>= 85%`, noise `<= 10%`, and failures `=== 0`.
 - Forced-semantic precise recall, broad recall, latency percentiles, and total wall time remain visible but report-only. The separate default scoped-precise latency gate remains unchanged.
-- The selected implementation is the lowest-median-wall-time candidate among qualifying candidates, measured on the same build, configuration, and immutable index with one discarded warmup plus three measured full forced-semantic passes and no concurrent repository workload.
+- The selected implementation is the lowest-median-wall-time candidate among qualifying candidates, measured on the same build, configuration, and fresh clones of the same pinned logical index snapshot with one discarded warmup plus three measured full forced-semantic passes and no concurrent repository workload.
 - Calls with `options.semantic` omitted or `false`, shared retrieval functions, MCP schemas, response ordering, and all non-`sdl.context` tools retain their current behavior.
 
 ## Task 1: Make the benchmark express the approved forced-semantic contract
@@ -29,7 +29,7 @@
 
   Extend the report with a deterministic `Total wall:` line calculated as the sum of the existing per-case durations. Keep precise/broad recall and p50/p95/max output unchanged so they remain diagnostic.
 
-- [ ] **Step 2: Pin and build the immutable QA index, then confirm the old 56.5% forced-semantic failure.**
+- [ ] **Step 2: Pin and build the logical QA index snapshot, then confirm the old 56.5% forced-semantic failure.**
 
   ```powershell
   $previousSdlConfig = $env:SDL_CONFIG
@@ -45,7 +45,7 @@
   node --experimental-strip-types --test tests/benchmark/context-quality.test.ts
   ```
 
-  Expected: health identifies `sdl-mcp`, the benchmark availability note prints the exact pinned database path, and the semantic aggregate recall assertion fails below 85%. Record baseline forced-semantic recall, noise, failures, p50, p95, and total wall time. Record the index files' last-write times; do not mutate or rebuild them for the remainder of candidate comparison.
+  Expected: health identifies `sdl-mcp`, the benchmark availability note prints the exact measurement-clone path, and the semantic aggregate recall assertion fails below 85%. Record baseline forced-semantic recall, noise, failures, p50, p95, and total wall time. Do not refresh or reindex the pinned logical snapshot. LadybugDB may checkpoint an opened database and change filesystem mtimes, so mtimes are not used as logical-immutability proof.
 
 - [ ] **Step 3: Replace obsolete hard thresholds with the approved contract.**
 
@@ -139,9 +139,9 @@
 - Read: `tests/benchmark/context-quality-cases.json`
 - Test: `tests/benchmark/context-quality.test.ts`
 
-- [ ] **Step 1: Build once and point every run at the same immutable index.**
+- [ ] **Step 1: Build once and derive every run from the same logical index snapshot.**
 
-  Reuse the exact paths and database built in Task 1 for every candidate and repetition. Never refresh or mutate it after the baseline.
+  Copy the database built in Task 1 to a fresh per-candidate measurement path. Reuse that clone for the candidate's discarded warmup and three measured repetitions. Never refresh or reindex the source snapshot or a measurement clone.
 
   ```powershell
   $env:SDL_CONFIG = 'F:\Claude\sdl-mcp\sdlmcp.config.json'
@@ -151,7 +151,7 @@
   $env:SDL_CONTEXT_QUALITY_REQUIRE_INDEX = '1'
   ```
 
-  Confirm the health output identifies `sdl-mcp`, and confirm every benchmark report's availability note prints the exact pinned database path. Save the index directory's last-write time after indexing; it must remain unchanged across candidate comparisons.
+  Confirm the health output identifies `sdl-mcp`, and record each benchmark report's measurement-clone path plus its source-snapshot provenance. Do not use filesystem mtimes as proof because LadybugDB open/close checkpoints may update them without changing the indexed corpus.
 
 - [ ] **Step 2: Run one discarded warmup and three measured full benchmark passes serially.**
 
@@ -244,7 +244,7 @@
 
 - [ ] **Step 4: Prove GREEN and benchmark.**
 
-  Run the focused executor/context tests, then repeat Task 3's one discarded warmup plus three measured semantic-only passes against the pinned immutable database. Keep this candidate only if every measured pass clears all hard gates; otherwise reverse it and amend the design from the new case-level evidence.
+  Run the focused executor/context tests, then repeat Task 3's one discarded warmup plus three measured semantic-only passes against a fresh clone of the pinned logical snapshot. Keep this candidate only if every measured pass clears all hard gates; otherwise reverse it and amend the design from the new case-level evidence.
 
 - [ ] **Step 5: Commit only if selected.**
 
@@ -381,7 +381,7 @@
 
 - [x] **Step 6: Run final repeated measurement.**
 
-  Discard one warmup, then run three serial forced-semantic 26-case passes on the pinned immutable database. Every selected-candidate pass met aggregate recall `>=85%`, configured noise `<=10%`, and zero failures. The measured runs each produced 109/124 expected-symbol recall (87.9%), one configured-noise hit across 601 evidence items (0.2%), and zero failures. Total wall times were 47.905, 47.969, and 48.843 seconds (median 47.969 seconds); p50 ranged from 1478 to 1536 ms and p95 from 2805 to 2890 ms.
+  Create a fresh clone of the pinned logical snapshot, discard one warmup on that clone, then run three serial forced-semantic 26-case passes without refreshing or reindexing it. Every selected-candidate pass met aggregate recall `>=85%`, configured noise `<=10%`, and zero failures. The measured runs each produced 109/124 expected-symbol recall (87.9%), one configured-noise hit across 601 evidence items (0.2%), and zero failures. Total wall times were 47.905, 47.969, and 48.843 seconds (median 47.969 seconds); p50 ranged from 1478 to 1536 ms and p95 from 2805 to 2890 ms.
 
 ## Task 5: Update behavior and benchmark documentation
 
@@ -451,7 +451,7 @@
   npm run docs:tools:check
   ```
 
-- [ ] **Step 3: Run the full test suite serially.**
+- [x] **Step 3: Run the full test suite serially.**
 
   ```powershell
   Remove-Item Env:SDL_CONFIG -ErrorAction SilentlyContinue
@@ -483,7 +483,7 @@
 
 - [x] **Step 4: Capture final benchmark evidence.**
 
-  Re-pin `$env:SDL_CONFIG`, `$env:SDL_GRAPH_DB_PATH`, and `$env:SDL_CONTEXT_QUALITY_REQUIRE_INDEX = '1'`. Against the same immutable QA index, run one discarded warmup plus three measured passes. Record each measured forced-semantic recall, noise, failures, p50, p95, and total wall time, then report the median total wall time. Confirm the case file is unchanged from the base commit:
+  Re-pin `$env:SDL_CONFIG`, point `$env:SDL_GRAPH_DB_PATH` at a fresh clone of the same logical QA snapshot, and set `$env:SDL_CONTEXT_QUALITY_REQUIRE_INDEX = '1'`. On that clone, run one discarded warmup plus three measured passes without refresh/reindex. Record each measured forced-semantic recall, configured noise, failures, p50, p95, and total wall time, then report the median total wall time. Confirm the case file is unchanged from the base commit:
 
   ```powershell
   git diff --exit-code 588cf86d...HEAD -- tests/benchmark/context-quality-cases.json
@@ -500,7 +500,7 @@
 
   Confirm tool names, descriptions, schemas, response key ordering, and non-context handlers did not change.
 
-- [ ] **Step 6: Make one fresh-process MCP probe.**
+- [x] **Step 6: Make one fresh-process MCP probe.**
 
   With the pinned `SDL_CONFIG` and `SDL_GRAPH_DB_PATH` still set, launch a new stdio server through the installed MCP SDK and call `sdl.context` with `options.semantic: true`:
 
@@ -510,7 +510,7 @@
 
   Expected: a successful structured response with non-empty evidence and no protocol/server error.
 
-- [ ] **Step 7: Request an independent code review.**
+- [x] **Step 7: Request an independent code review.**
 
   Give the reviewer the approved design, this plan, the full base-to-head diff, focused/full test output, and the three measured benchmark runs. Require the reviewer to check scope isolation, metric integrity, unchanged fixtures, TDD coverage, benchmark reproducibility, and the claimed `>=85%` result. Resolve every correctness finding and rerun affected verification.
 

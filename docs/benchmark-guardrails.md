@@ -215,7 +215,7 @@ The suite now runs lexical-only, confidence-gated default, and forced semantic/h
 | Forced semantic p50/p95/max and total wall time | Report-only diagnostic |
 | Broad answer preservation | Hard gate: answers remain present after budget trimming |
 
-Candidate comparisons use the same build, configuration, and immutable index. Discard one warmup, then compare the median total wall time from three complete 26-case forced-semantic runs; only candidates that pass every forced-semantic hard gate qualify. The normal full benchmark separately retains the default scoped-precise p95 gate.
+Candidate comparisons use the same build, configuration, and fresh clones of one pinned logical index snapshot. Discard one warmup, then compare the median total wall time from three complete 26-case forced-semantic runs on that candidate's clone; only candidates that pass every forced-semantic hard gate qualify. Do not refresh or reindex the snapshot or clones. LadybugDB may checkpoint files on open/close, so filesystem mtimes are not corpus fingerprints. The normal full benchmark separately retains the default scoped-precise p95 gate.
 
 A July 16, 2026 pinned-index measurement of the selected forced-semantic implementation produced 109/124 expected-symbol recall (87.9%), one configured-noise hit across 601 evidence items (0.2%), and zero failures in all three measured passes. Total wall times were 47.905, 47.969, and 48.843 seconds (median 47.969 seconds); p50 ranged from 1478 to 1536 ms and p95 from 2805 to 2890 ms.
 
