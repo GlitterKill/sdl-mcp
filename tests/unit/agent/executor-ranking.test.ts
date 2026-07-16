@@ -407,6 +407,300 @@ describe("context-ranking", () => {
   });
 });
 
+describe("Executor focus selection", () => {
+  interface ExecutorSelectionPrivate {
+    connPromise: Promise<unknown> | null;
+    selectTopSymbols(
+      symbolIds: string[],
+      task: AgentTask,
+      maxCount: number,
+      seedCandidates?: ContextSeedCandidate[],
+    ): Promise<string[]>;
+  }
+
+  function createExecutorSymbol(symbolId: string, fileId: string) {
+    return {
+      symbolId,
+      repoId: "repo-1",
+      fileId,
+      kind: "function",
+      name: `sharedHandler${symbolId}`,
+      exported: true,
+      visibility: null,
+      language: "typescript",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 2,
+      rangeEndCol: 0,
+      astFingerprint: symbolId,
+      signatureJson: null,
+      summary: "Shared handler behavior",
+      invariantsJson: null,
+      sideEffectsJson: null,
+      roleTagsJson: null,
+      searchText: null,
+      external: undefined,
+      packageName: null,
+      packageVersion: null,
+      scipSymbol: null,
+      updatedAt: "now",
+    };
+  }
+
+  function createSelectionFixture() {
+    const symbolIds = [
+      "src-alpha",
+      "test-alpha",
+      "src-beta",
+      "test-beta",
+      "src-gamma",
+      "test-gamma",
+    ];
+    const symbolMap = new Map([
+      ["src-alpha", createExecutorSymbol("src-alpha", "repo-1:src/alpha.ts")],
+      [
+        "test-alpha",
+        createExecutorSymbol("test-alpha", "repo-1:tests/alpha.test.ts"),
+      ],
+      ["src-beta", createExecutorSymbol("src-beta", "repo-1:src/beta.ts")],
+      [
+        "test-beta",
+        createExecutorSymbol("test-beta", "repo-1:tests/beta.test.ts"),
+      ],
+      ["src-gamma", createExecutorSymbol("src-gamma", "repo-1:src/gamma.ts")],
+      [
+        "test-gamma",
+        createExecutorSymbol("test-gamma", "repo-1:tests/gamma.test.ts"),
+      ],
+    ]);
+    const dbQueries: ExecutorDbQueries = {
+      getFileByRepoPath: async () => null,
+      getSymbolIdsByFile: async () => [],
+      getFilesByPrefix: async () => [],
+      getSymbolsByFile: async () => [],
+      getClusterMembers: async () => [],
+      getProcessStepsByIds: async () => [],
+      getSymbolsByIds: async () => symbolMap,
+      searchSymbols: async () => [],
+    };
+    const executor = new Executor(undefined, dbQueries);
+    const privateExecutor = executor as unknown as ExecutorSelectionPrivate;
+    privateExecutor.connPromise = Promise.resolve({});
+    return { privateExecutor, symbolIds, symbolMap };
+  }
+
+  function srcSeeds(): ContextSeedCandidate[] {
+    return ["src-alpha", "src-beta", "src-gamma"].map((symbolId, index) => ({
+      contextRef: `symbol:${symbolId}`,
+      source: "semantic",
+      score: 1 - index * 0.05,
+      sourceRank: index,
+    }));
+  }
+
+  function assertOnlyTests(
+    selected: string[],
+    symbolMap: ReturnType<typeof createSelectionFixture>["symbolMap"],
+  ): void {
+    assert.ok(selected.length > 0, "Expected at least one focused symbol");
+    assert.ok(
+      selected.every((symbolId) =>
+        symbolMap.get(symbolId)?.fileId.includes(":tests/"),
+      ),
+      `Expected only tests/ symbols, got ${selected.join(", ")}`,
+    );
+  }
+
+  it("strictly scopes precise selection to explicit focus paths", async () => {
+    const { privateExecutor, symbolIds, symbolMap } = createSelectionFixture();
+
+    const selected = await privateExecutor.selectTopSymbols(
+      symbolIds,
+      createTask({ options: { contextMode: "precise", focusPaths: ["tests"] } }),
+      4,
+    );
+
+    assertOnlyTests(selected, symbolMap);
+  });
+
+  it("intersects precise focus paths with out-of-path symbol seeds", async () => {
+    const { privateExecutor, symbolIds, symbolMap } = createSelectionFixture();
+
+    const selected = await privateExecutor.selectTopSymbols(
+      symbolIds,
+      createTask({
+        taskText: "Investigate src-alpha shared handler behavior",
+        options: {
+          contextMode: "precise",
+          focusPaths: ["tests"],
+          focusSymbols: ["src-alpha"],
+        },
+      }),
+      4,
+      srcSeeds(),
+    );
+
+    assert.ok(!selected.includes("src-alpha"));
+    assertOnlyTests(selected, symbolMap);
+  });
+
+  it("returns no precise symbols when an explicit focus path has no matches", async () => {
+    const { privateExecutor, symbolIds } = createSelectionFixture();
+
+    const selected = await privateExecutor.selectTopSymbols(
+      symbolIds,
+      createTask({
+        options: { contextMode: "precise", focusPaths: ["does-not-exist"] },
+      }),
+      4,
+    );
+
+    assert.deepEqual(selected, []);
+  });
+
+  it("prioritizes explicit focus paths in broad mode before spillover", async () => {
+    const { privateExecutor, symbolIds, symbolMap } = createSelectionFixture();
+
+    const selected = await privateExecutor.selectTopSymbols(
+      symbolIds,
+      createTask({ options: { contextMode: "broad", focusPaths: ["tests"] } }),
+      4,
+      srcSeeds(),
+    );
+
+    assert.equal(selected.length, 4);
+    assert.ok(
+      selected.slice(0, 2).every((symbolId) =>
+        symbolMap.get(symbolId)?.fileId.includes(":tests/"),
+      ),
+    );
+    assert.ok(
+      selected.filter((symbolId) =>
+        symbolMap.get(symbolId)?.fileId.includes(":tests/"),
+      ).length >= 2,
+    );
+  });
+
+  it("does not hard-filter inferred focus paths in precise mode", async () => {
+    const { privateExecutor, symbolIds, symbolMap } = createSelectionFixture();
+
+    const selected = await privateExecutor.selectTopSymbols(
+      symbolIds,
+      createTask({
+        options: {
+          contextMode: "precise",
+          focusPaths: ["tests"],
+          inferredFocusPaths: ["tests"],
+        },
+      }),
+      4,
+      srcSeeds(),
+    );
+
+    assert.ok(
+      selected.some((symbolId) =>
+        symbolMap.get(symbolId)?.fileId.includes(":src/"),
+      ),
+    );
+  });
+
+  it("enforces explicit focus paths when no identifiers or seeds are available", async () => {
+    const { privateExecutor, symbolIds, symbolMap } = createSelectionFixture();
+
+    const selected = await privateExecutor.selectTopSymbols(
+      symbolIds,
+      createTask({
+        taskText: "-",
+        options: { contextMode: "precise", focusPaths: ["tests"] },
+      }),
+      4,
+    );
+
+    assertOnlyTests(selected, symbolMap);
+  });
+
+  it("enforces explicit focus paths when task text is empty", async () => {
+    const { privateExecutor, symbolIds, symbolMap } = createSelectionFixture();
+
+    const selected = await privateExecutor.selectTopSymbols(
+      symbolIds,
+      createTask({
+        taskText: "",
+        options: { contextMode: "precise", focusPaths: ["tests"] },
+      }),
+      4,
+    );
+
+    assertOnlyTests(selected, symbolMap);
+  });
+
+  it("preserves the max count and ordering for unscoped early returns", async () => {
+    const { privateExecutor, symbolIds } = createSelectionFixture();
+
+    const selected = await privateExecutor.selectTopSymbols(
+      symbolIds,
+      createTask({ taskText: "" }),
+      4,
+    );
+
+    assert.deepEqual(selected, symbolIds.slice(0, 4));
+  });
+
+  it("caps inferred early returns without hard-filtering their soft scope", async () => {
+    const { privateExecutor, symbolMap } = createSelectionFixture();
+    const inferredLast = [
+      "src-alpha",
+      "src-beta",
+      "src-gamma",
+      "test-alpha",
+      "test-beta",
+      "test-gamma",
+    ];
+
+    const selected = await privateExecutor.selectTopSymbols(
+      inferredLast,
+      createTask({
+        taskText: "-",
+        options: {
+          contextMode: "precise",
+          focusPaths: ["tests"],
+          inferredFocusPaths: ["tests"],
+        },
+      }),
+      3,
+    );
+
+    assert.ok(
+      inferredLast.slice(0, 3).every((symbolId) =>
+        symbolMap.get(symbolId)?.fileId.includes(":src/"),
+      ),
+    );
+    assert.equal(selected.length, 3);
+    assert.ok(
+      selected.some((symbolId) =>
+        symbolMap.get(symbolId)?.fileId.includes(":tests/"),
+      ),
+    );
+    assert.ok(
+      selected.some((symbolId) =>
+        symbolMap.get(symbolId)?.fileId.includes(":src/"),
+      ),
+    );
+  });
+
+  it("returns an empty selection without hydrating an empty symbol list", async () => {
+    const { privateExecutor } = createSelectionFixture();
+
+    const selected = await privateExecutor.selectTopSymbols(
+      [],
+      createTask({ options: { contextMode: "precise", focusPaths: ["tests"] } }),
+      4,
+    );
+
+    assert.deepEqual(selected, []);
+  });
+});
+
 
 describe("Executor seed expansion", () => {
   interface ExecutorPrivate {

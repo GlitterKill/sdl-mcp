@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { Executor } from "../../../dist/agent/executor.js";
-import type { GateEvaluator } from "../../../dist/agent/executor.js";
+import type {
+  ExecutorDbQueries,
+  GateEvaluator,
+} from "../../../dist/agent/executor.js";
 import type { AgentTask } from "../../../dist/agent/types.js";
 
 describe("executor raw rung", () => {
@@ -66,6 +69,184 @@ describe("executor raw rung", () => {
 
     assert.equal(action.status, "failed");
     assert.deepEqual(action.output, { symbolsProcessed: 0 });
+  });
+});
+
+describe("executor card fallback", () => {
+  function createCardSymbol(symbolId: string, fileId: string) {
+    return {
+      symbolId,
+      repoId: "test-repo",
+      fileId,
+      kind: "function",
+      name: `fallbackCard${symbolId}`,
+      exported: true,
+      visibility: null,
+      language: "typescript",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 2,
+      rangeEndCol: 0,
+      astFingerprint: symbolId,
+      signatureJson: null,
+      summary: "Investigate fallback card context",
+      invariantsJson: null,
+      sideEffectsJson: null,
+      roleTagsJson: null,
+      searchText: null,
+      external: undefined,
+      packageName: null,
+      packageVersion: null,
+      scipSymbol: null,
+      updatedAt: "now",
+    };
+  }
+
+  function createCardExecutor(
+    searchRows: (
+      query: string,
+      limit: number,
+    ) => ReturnType<typeof createCardSymbol>[],
+    initialSymbols: ReturnType<typeof createCardSymbol>[] = [],
+  ): Executor {
+    const symbolMap = new Map<
+      string,
+      ReturnType<typeof createCardSymbol>
+    >(initialSymbols.map((symbol) => [symbol.symbolId, symbol]));
+    const dbQueries: ExecutorDbQueries = {
+      getFileByRepoPath: async () => null,
+      getSymbolIdsByFile: async () => [],
+      getFilesByPrefix: async () => [],
+      getSymbolsByFile: async () => [],
+      getClusterMembers: async () => [],
+      getProcessStepsByIds: async () => [],
+      getSymbolsByIds: async (_conn, symbolIds) => {
+        const selected = new Map<
+          string,
+          ReturnType<typeof createCardSymbol>
+        >();
+        for (const symbolId of symbolIds) {
+          const symbol = symbolMap.get(symbolId);
+          if (symbol) selected.set(symbolId, symbol);
+        }
+        return selected;
+      },
+      searchSymbols: async (_conn, _repoId, query, limit) => {
+        const rows = searchRows(query, limit);
+        for (const row of rows) symbolMap.set(row.symbolId, row);
+        return rows;
+      },
+    };
+    const executor = new Executor(undefined, dbQueries);
+    const privateExecutor = executor as unknown as {
+      connPromise: Promise<unknown> | null;
+    };
+    privateExecutor.connPromise = Promise.resolve({});
+    return executor;
+  }
+
+  it("does not repopulate strict precise scope with fallback symbols", async () => {
+    const executor = createCardExecutor(() => [
+      createCardSymbol("src-alpha", "test-repo:src/alpha.ts"),
+      createCardSymbol("src-beta", "test-repo:src/beta.ts"),
+    ]);
+    const task: AgentTask = {
+      taskType: "debug",
+      taskText: "Investigate fallback card context",
+      repoId: "test-repo",
+      options: {
+        contextMode: "precise",
+        focusPaths: ["tests"],
+        searchTerms: ["fallback"],
+        semantic: false,
+      },
+    };
+
+    const result = await executor.execute(task, ["card"], []);
+
+    assert.deepEqual(
+      result.evidence.filter((evidence) => evidence.type === "symbolCard"),
+      [],
+    );
+    assert.deepEqual(
+      result.actions.find((action) => action.type === "getCard")?.output,
+      { cardsProcessed: 0 },
+    );
+  });
+
+  it("caps multi-term fallback processing at twenty unique cards", async () => {
+    const searchTerms = Array.from({ length: 8 }, (_, index) => `term${index}`);
+    const executor = createCardExecutor((query, limit) =>
+      Array.from({ length: limit }, (_, index) =>
+        createCardSymbol(
+          `${query}-${index}`,
+          `test-repo:src/${query}-${index}.ts`,
+        ),
+      ),
+    );
+    const task: AgentTask = {
+      taskType: "explain",
+      taskText: "Investigate fallback card context",
+      repoId: "test-repo",
+      options: {
+        contextMode: "broad",
+        searchTerms,
+        semantic: false,
+      },
+    };
+
+    const result = await executor.execute(task, ["card"], []);
+    const symbolCards = result.evidence.filter(
+      (evidence) => evidence.type === "symbolCard",
+    );
+
+    assert.equal(symbolCards.length, 20);
+    assert.equal(
+      new Set(symbolCards.map((evidence) => evidence.reference)).size,
+      20,
+    );
+    assert.deepEqual(
+      result.actions.find((action) => action.type === "getCard")?.output,
+      { cardsProcessed: 20 },
+    );
+  });
+
+  it("keeps a feedback-boosted fallback candidate through the card cap", async () => {
+    const boostedId = "zz-feedback-boosted";
+    const symbolIds = [
+      ...Array.from({ length: 23 }, (_, index) => `candidate-${index}`),
+      boostedId,
+    ];
+    const executor = createCardExecutor(
+      () => [],
+      symbolIds.map((symbolId) =>
+        createCardSymbol(symbolId, `test-repo:src/${symbolId}.ts`),
+      ),
+    );
+    const privateExecutor = executor as unknown as {
+      selectTopSymbols(
+        candidates: string[],
+        task: AgentTask,
+        maxCount: number,
+        seedCandidates: [],
+        feedbackBoosts: Map<string, number>,
+      ): Promise<string[]>;
+    };
+
+    const selected = await privateExecutor.selectTopSymbols(
+      symbolIds,
+      {
+        taskType: "explain",
+        taskText: "Investigate fallback card context",
+        repoId: "test-repo",
+      },
+      20,
+      [],
+      new Map([[boostedId, 1]]),
+    );
+
+    assert.equal(selected.length, 20);
+    assert.ok(selected.includes(boostedId));
   });
 });
 

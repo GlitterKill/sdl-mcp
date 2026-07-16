@@ -45,11 +45,15 @@ import type {
   GraphSlice,
 } from "../domain/types.js";
 import { logger } from "../util/logger.js";
-import { caseFoldedPathKey } from "../util/paths.js";
 import { isHybridRetrievalAvailable } from "../retrieval/fallback.js";
 import { hybridSearch } from "../retrieval/orchestrator.js";
 import { queryFeedbackBoosts } from "../retrieval/feedback-boost.js";
-import { rankSymbols, applyAdaptiveCutoff } from "./context-ranking.js";
+import {
+  rankSymbols,
+  applyAdaptiveCutoff,
+  explicitFocusPaths,
+  pathMatchesFocus,
+} from "./context-ranking.js";
 import { randomUUID } from "node:crypto";
 import {
   MAX_IDENTIFIERS,
@@ -604,18 +608,37 @@ export class Executor {
     task: AgentTask,
     maxCount: number,
     seedCandidates: ContextSeedCandidate[] = [],
+    feedbackBoosts?: Map<string, number>,
   ): Promise<string[]> {
+    const symbolMap: Map<string, SymbolRow> = symbolIds.length
+      ? await this.dbQueries.getSymbolsByIds(await this.getConn(), symbolIds)
+      : new Map();
+
     if (!task.taskText || symbolIds.length === 0) {
-      return symbolIds.slice(0, maxCount);
+      return this.finalizeSelection(
+        symbolIds,
+        symbolIds,
+        symbolMap,
+        task,
+        maxCount,
+      );
     }
 
     const identifiers = this.extractIdentifiersFromTask(task);
-    if (identifiers.length === 0 && seedCandidates.length === 0) {
-      return symbolIds.slice(0, maxCount);
+    if (
+      identifiers.length === 0 &&
+      seedCandidates.length === 0 &&
+      !feedbackBoosts?.size
+    ) {
+      return this.finalizeSelection(
+        symbolIds,
+        symbolIds,
+        symbolMap,
+        task,
+        maxCount,
+      );
     }
 
-    const conn = await this.getConn();
-    const symbolMap = await this.dbQueries.getSymbolsByIds(conn, symbolIds);
     const anchorSymbolIds = seedCandidates
       .map((candidate) =>
         candidate.contextRef.startsWith("symbol:")
@@ -627,6 +650,7 @@ export class Executor {
     const ranking = rankSymbols(symbolIds, symbolMap, identifiers, task, {
       seedCandidates,
       anchorSymbolIds,
+      feedbackBoosts,
     });
 
     const isPrecise = task.options?.contextMode === "precise";
@@ -635,11 +659,51 @@ export class Executor {
     );
 
     const selected = applyAdaptiveCutoff(ranking, maxCount, isPrecise, hasScope);
-    return this.ensureFocusPathCoverage(
+    return this.finalizeSelection(
       selected,
       ranking.ranked.map((ranked) => ranked.symbolId),
       symbolMap,
-      task.options?.inferredFocusPaths ?? [],
+      task,
+      maxCount,
+    );
+  }
+
+  /** Apply explicit hard scope or inferred best-effort coverage at one exit point. */
+  private finalizeSelection(
+    candidates: string[],
+    rankedIds: string[],
+    symbolMap: Map<string, SymbolRow>,
+    task: AgentTask,
+    maxCount: number,
+  ): string[] {
+    const explicitPaths = explicitFocusPaths(task.options);
+    const inferredPaths = task.options?.inferredFocusPaths ?? [];
+
+    if (explicitPaths.length > 0) {
+      const matchesFocus = (symbolId: string): boolean =>
+        explicitPaths.some((focusPath) =>
+          this.symbolMatchesFocusPath(symbolMap.get(symbolId), focusPath),
+        );
+      const pool = rankedIds.length > 0 ? rankedIds : candidates;
+      const inFocus = pool.filter(matchesFocus);
+
+      if (task.options?.contextMode === "precise") {
+        return inFocus.slice(0, maxCount);
+      }
+      if (inFocus.length > 0) {
+        return [
+          ...inFocus,
+          ...candidates.filter((symbolId) => !matchesFocus(symbolId)),
+        ].slice(0, maxCount);
+      }
+      return candidates.slice(0, maxCount);
+    }
+
+    return this.ensureFocusPathCoverage(
+      candidates.slice(0, maxCount),
+      rankedIds,
+      symbolMap,
+      inferredPaths,
       maxCount,
     );
   }
@@ -766,14 +830,7 @@ export class Executor {
     const relPath = fileId.includes(":")
       ? fileId.slice(fileId.indexOf(":") + 1)
       : fileId;
-    const normalizedRelPath = caseFoldedPathKey(relPath);
-    const normalizedFocus = caseFoldedPathKey(focusPath);
-    return (
-      normalizedRelPath === normalizedFocus ||
-      normalizedRelPath.startsWith(
-        normalizedFocus.endsWith("/") ? normalizedFocus : `${normalizedFocus}/`,
-      )
-    );
+    return pathMatchesFocus(relPath, [focusPath]);
   }
 
   private async executeCardRung(
@@ -892,6 +949,7 @@ export class Executor {
         }
 
         // Feedback-aware boosting: reorder search results by score + boost
+        let fallbackFeedbackBoosts: Map<string, number> | undefined;
         if (task.taskText && allSymbols.length > 0) {
           try {
             const feedbackConn = await this.getConn();
@@ -900,6 +958,7 @@ export class Executor {
               query: task.taskText,
               limit: 5,
             });
+            fallbackFeedbackBoosts = boosts;
             if (boosts.size > 0) {
               // Move boosted symbols to the front of allSymbols
               const boosted: string[] = [];
@@ -931,6 +990,14 @@ export class Executor {
             );
           }
         }
+
+        allSymbols = await this.selectTopSymbols(
+          allSymbols,
+          task,
+          MAX_CARD_SYMBOLS,
+          [],
+          fallbackFeedbackBoosts,
+        );
       }
 
       if (allSymbols.length === 0) {
