@@ -552,6 +552,34 @@ describe("LadybugDB Search Queries", () => {
         sideEffectsJson: null,
         updatedAt: "2026-03-04T00:00:00Z",
       });
+      for (const [symbolId, line] of [
+        ["sym-tie-z", 90],
+        ["sym-tie-a", 100],
+      ] as const) {
+        await queries.upsertSymbol(
+          conn as unknown as import("kuzu").Connection,
+          {
+            symbolId,
+            repoId,
+            fileId: "file-core",
+            kind: "function",
+            name: "StableTie",
+            exported: true,
+            visibility: "public",
+            language: "typescript",
+            rangeStartLine: line,
+            rangeStartCol: 0,
+            rangeEndLine: line + 1,
+            rangeEndCol: 0,
+            astFingerprint: symbolId,
+            signatureJson: null,
+            summary: "stable tie target",
+            invariantsJson: null,
+            sideEffectsJson: null,
+            updatedAt: "2026-03-04T00:00:00Z",
+          },
+        );
+      }
 
       const pool = await scoped.getScopedSearchSymbolPool(
         conn as unknown as import("kuzu").Connection,
@@ -576,6 +604,29 @@ describe("LadybugDB Search Queries", () => {
         "handleWorkflow",
         20,
       );
+      const globalFullCamelMatches = await queries.searchSymbols(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "handleWorkflow",
+        20,
+      );
+      const scopedTieMatches = scoped.searchSymbolsLiteInPool(
+        pool,
+        "StableTie",
+        20,
+      );
+      const globalTieMatches = await queries.searchSymbols(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "StableTie",
+        20,
+      );
+      const globalSingleTermTieMatches = await queries.searchSymbols(
+        conn as unknown as import("kuzu").Connection,
+        repoId,
+        "tie",
+        20,
+      );
       const batchedMatches = scoped.searchSymbolsLiteQueriesInPool(pool, [
         { query: "Foo", limit: 20 },
         { query: "resolveConfig", limit: 20 },
@@ -594,6 +645,20 @@ describe("LadybugDB Search Queries", () => {
       assert.deepEqual(
         camelMatches.map((row) => row.symbolId),
         globalCamelMatches.map((row) => row.symbolId),
+      );
+      assert.deepEqual(
+        camelMatches.map((row) => row.symbolId),
+        globalFullCamelMatches.map((row) => row.symbolId),
+      );
+      assert.deepEqual(
+        globalTieMatches.map((row) => row.symbolId),
+        scopedTieMatches.map((row) => row.symbolId),
+      );
+      assert.deepEqual(
+        globalSingleTermTieMatches
+          .filter((row) => row.name === "StableTie")
+          .map((row) => row.symbolId),
+        ["sym-tie-a", "sym-tie-z"],
       );
       assert.deepEqual(batchedMatches, [
         summaryMatches,

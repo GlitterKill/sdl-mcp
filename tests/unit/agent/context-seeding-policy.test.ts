@@ -119,6 +119,10 @@ describe("context seeding policy", () => {
     const body = src.slice(start, end + 3);
     assert.equal(body.match(/queryAll</g)?.length, 1);
     assert.doesNotMatch(body, /\bLIMIT\b/);
+    assert.match(
+      body,
+      /MATCH \(r:Repo \{repoId: \$repoId\}\)<-\[:FILE_IN_REPO\]-\(f:File\)[\s\S]*?WITH f\s*MATCH \(f\)<-\[:SYMBOL_IN_FILE\]-\(s:Symbol\)/,
+    );
     assert.match(body, /ORDER BY f\.relPath ASC, s\.symbolId ASC/);
   });
 });

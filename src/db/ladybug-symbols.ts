@@ -2418,7 +2418,7 @@ async function searchSymbolsSingleTerm(
             s.scipSymbol AS scipSymbol,
             s.packageName AS packageName,
             s.packageVersion AS packageVersion
-     ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank
+     ORDER BY exactNameRank, ciExactNameRank, wordBoundaryRank, filePenalty, kindRank, nameMatchRank, s.symbolId
      LIMIT $limit`,
     {
       repoId,
@@ -2557,7 +2557,8 @@ export async function searchSymbols(
         a.row.name.localeCompare(b.row.name) ||
         (a.row.file.startsWith("tests/") ? 1 : 0) -
           (b.row.file.startsWith("tests/") ? 1 : 0) ||
-        (a.row.exported ? 0 : 1) - (b.row.exported ? 0 : 1)
+        (a.row.exported ? 0 : 1) - (b.row.exported ? 0 : 1) ||
+        a.row.symbolId.localeCompare(b.row.symbolId)
       );
     })
     .map((entry) => mapSearchSymbolRow(entry.row, repoId))
@@ -2610,9 +2611,11 @@ export async function getScopedSearchSymbolPool(
 
   return queryAll<SearchSymbolLiteCandidate>(
     conn,
-    `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)<-[:SYMBOL_IN_FILE]-(s:Symbol)
+    `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)
+     ${scopeClauses.length > 0 ? `WHERE ${scopeClauses.join(" OR ")}` : ""}
+     WITH f
+     MATCH (f)<-[:SYMBOL_IN_FILE]-(s:Symbol)
      WHERE coalesce(s.symbolStatus, 'real') = 'real'
-     ${scopeClauses.length > 0 ? `AND (${scopeClauses.join(" OR ")})` : ""}
      RETURN s.symbolId AS symbolId,
             coalesce(s.name, '') AS name,
             f.fileId AS fileId,
@@ -2798,32 +2801,31 @@ function searchSymbolsLiteSingleTermInPreparedPool(
         candidate.searchText.includes(queryLower)
       );
     })
+    .map((candidate) => ({
+      candidate,
+      rank: rankPreparedSearchSymbolLiteCandidate(
+        candidate,
+        term,
+        queryLower,
+        queryPadded,
+        queryStart,
+        queryEnd,
+      ),
+    }))
     .sort((a, b) => {
-      const rankA = rankPreparedSearchSymbolLiteCandidate(
-        a,
-        term,
-        queryLower,
-        queryPadded,
-        queryStart,
-        queryEnd,
-      );
-      const rankB = rankPreparedSearchSymbolLiteCandidate(
-        b,
-        term,
-        queryLower,
-        queryPadded,
-        queryStart,
-        queryEnd,
-      );
-      for (let index = 0; index < rankA.length; index++) {
-        const difference = rankA[index] - rankB[index];
+      for (let index = 0; index < a.rank.length; index++) {
+        const difference = a.rank[index] - b.rank[index];
         if (difference !== 0) return difference;
       }
-      return a.row.symbolId.localeCompare(b.row.symbolId);
+      return a.candidate.row.symbolId.localeCompare(b.candidate.row.symbolId);
     })
     .slice(0, 200)
-    .map(({ row: { summary: _summary, searchText: _searchText, ...row } }) =>
-      row,
+    .map(
+      ({
+        candidate: {
+          row: { summary: _summary, searchText: _searchText, ...row },
+        },
+      }) => row,
     );
 }
 
