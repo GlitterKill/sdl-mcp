@@ -7,10 +7,10 @@
     "caseCount": 4
   },
   "baseline": {
-    "gitHead": "23ecc205aba7657520f92cd26fc9259b80d71979",
+    "gitHead": "3ae09103c501f596f660512f1eb4d226d912195d",
     "evaluatedSourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "sourceHashes": {
-      "src/agent/context-seeding.ts": "9d37db37bdb1744914cec8ea249c43f6da43fd74cbb8853339b590e906a0fea0",
+      "src/agent/context-seeding.ts": "b42342b439b76bc08c120b84607703ca761f19e7380b3102422daf1b22da6173",
       "src/agent/planner.ts": "2c6a8a3f7ad57248a0dc5261d05d5c4f99c59baac8759a35cae89b2a802adecd",
       "src/agent/executor.ts": "535d6d6f5231d207baac63f11285e8f2beb69689fbd6635e8c1cb102af5c3d1e",
       "src/graph/slice/start-node-resolver.ts": "9584d711965a144bf56ade8668be759ffb7d5e4619333e903f1c8407327d6ea0",
@@ -472,9 +472,9 @@
     "autopilotExplicitScopeRecall": 1
   },
   "observedMedianPolicyLatencyMs": {
-    "contextAssembly": 0.1439,
+    "contextAssembly": 0.1486,
     "sliceStartNodes": 0.0102,
-    "autopilotExecution": 0.615
+    "autopilotExecution": 0.5886
   },
   "interfaces": {
     "contextAssembly": "task text/options -> entity query plan + mixed entity candidates -> context refs",
