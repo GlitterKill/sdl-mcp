@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,6 +14,9 @@ import {
 
 const packageName = "@sdl-mcp/ladybug-openssl-win32-x64";
 const ladybugSource = readFileSync("src/db/ladybug.ts", "utf8");
+const openChildPath = resolve(
+  "tests/fixtures/ladybug/windows-fts-open-child.mjs",
+);
 
 function sha256(content: string): string {
   return createHash("sha256").update(content).digest("hex");
@@ -59,7 +63,82 @@ function windowsOptions(options: Partial<WindowsFtsRuntimeOptions> = {}): Window
   return { platform: "win32", arch: "x64", ...options };
 }
 
+function cleanWindowsChildEnvironment(
+  home: string,
+  dbPath: string,
+): NodeJS.ProcessEnv {
+  const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
+  return {
+    HOME: home,
+    PATH: join(systemRoot, "System32"),
+    SDL_GRAPH_DB_PATH: dbPath,
+    SDL_LOG_LEVEL: "error",
+    SystemRoot: systemRoot,
+    TEMP: home,
+    TMP: home,
+    USERPROFILE: home,
+  };
+}
+
+function runOpenChild(mode: "seed" | "open", home: string, dbPath: string) {
+  return spawnSync(process.execPath, [openChildPath, mode, dbPath], {
+    cwd: resolve("."),
+    encoding: "utf8",
+    env: cleanWindowsChildEnvironment(home, dbPath),
+    timeout: 60_000,
+  });
+}
+
+function openChildFailure(
+  mode: "seed" | "open",
+  result: ReturnType<typeof runOpenChild>,
+): string {
+  return [
+    mode + " child exited with " + result.status,
+    result.error?.stack ?? result.error?.message ?? "",
+    result.stdout,
+    result.stderr,
+  ].join("\n");
+}
+
 describe("withWindowsFtsRuntime", () => {
+  it(
+    "reopens a populated FTS database across clean child processes",
+    {
+      skip:
+        process.platform !== "win32"
+          ? "Windows-only FTS runtime boundary"
+          : false,
+    },
+    () => {
+      const home = mkdtempSync(join(tmpdir(), "sdl-fts-reopen-test-"));
+      const dbPath = join(home, "fts-reopen.lbug");
+      try {
+        const seeded = runOpenChild("seed", home, dbPath);
+        assert.notEqual(
+          seeded.error?.code,
+          "ETIMEDOUT",
+          openChildFailure("seed", seeded),
+        );
+        assert.equal(seeded.status, 0, openChildFailure("seed", seeded));
+
+        // Repeating the process boundary catches DLL handle lifetime mistakes
+        // that a same-process singleton reopen cannot expose.
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const opened = runOpenChild("open", home, dbPath);
+          assert.notEqual(
+            opened.error?.code,
+            "ETIMEDOUT",
+            openChildFailure("open", opened),
+          );
+          assert.equal(opened.status, 0, openChildFailure("open", opened));
+        }
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("does not require the Windows FTS runtime before importing Ladybug core", () => {
     assert.match(
       ladybugSource,
