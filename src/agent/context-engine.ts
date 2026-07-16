@@ -869,6 +869,16 @@ export class ContextEngine {
       `Task "${task.taskType}" ${status}. Executed ${actions.length} action(s), collected ${evidence.length} evidence item(s).${clusterNote}`,
     ];
 
+    if (
+      evidence.length === 0 &&
+      task.options?.contextMode === "precise" &&
+      explicitFocusPaths(task.options).length > 0
+    ) {
+      parts.push(
+        "No evidence matched the explicit focusPaths boundary in precise mode. Use broad mode if out-of-scope spillover is acceptable.",
+      );
+    }
+
     // Append per-action details: rung, symbol/file, tokens, duration
     if (actions.length > 0) {
       const actionLines = actions.map((a) => {

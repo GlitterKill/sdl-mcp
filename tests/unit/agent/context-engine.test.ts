@@ -649,6 +649,38 @@ describe("ContextEngine", () => {
     );
   });
 
+  it("explains strict empty precise scope and recommends broad mode", async () => {
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => []);
+    mock.method(Planner.prototype, "expandDirectoryFocusPaths", async () => []);
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async (): Promise<ContextSeedResult> => ({
+        candidates: [],
+        sources: { semantic: 0, lexical: 0, feedback: 0 },
+      }),
+    );
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence: [],
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        options: { contextMode: "precise", focusPaths: ["tests/missing"] },
+      }),
+    );
+
+    assert.equal(result.success, true);
+    assert.match(result.summary, /explicit focusPaths/i);
+    assert.match(result.summary, /broad mode/i);
+  });
+
   it("keeps summary stable when context has no symbols", async () => {
     mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
     mock.method(Planner.prototype, "plan", () => defaultPath);
