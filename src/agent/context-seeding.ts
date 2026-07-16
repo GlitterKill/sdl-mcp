@@ -712,7 +712,8 @@ export async function buildSeedContext(
   // ------------------------------------------------------------------
   // Stage 2: Hybrid/lexical fallback.
   // Always keep a bounded lexical lane available before feedback slots so
-  // exact names and domain terms are not crowded out by semantic vectors.
+  // exact names and domain terms are not crowded out by semantic vectors,
+  // including when callers explicitly force semantic retrieval.
   // ------------------------------------------------------------------
   const lexicalTargetCap = semanticDisabled
     ? preFeedbackCap
@@ -866,14 +867,7 @@ export async function buildSeedContext(
     }
   }
 
-  const semanticLaneHasCoverage =
-    !collectBeforeCaps &&
-    forceSemanticEntitySearch &&
-    sourceCounts.semantic >= diversityReserve;
-  if (
-    (collectBeforeCaps || sourceCounts.lexical < lexicalTargetCap) &&
-    !semanticLaneHasCoverage
-  ) {
+  if (collectBeforeCaps || sourceCounts.lexical < lexicalTargetCap) {
     const lexicalStartedAt = performance.now();
     try {
       const conn = await getLadybugConn();

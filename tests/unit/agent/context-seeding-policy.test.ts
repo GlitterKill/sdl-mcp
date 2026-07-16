@@ -117,7 +117,7 @@ describe("context seeding policy", () => {
   });
 
   it("keeps the scope pool to one deterministic unbounded DB query", () => {
-    const src = symbolSource();
+    const src = symbolSource().replaceAll("\r\n", "\n");
     const start = src.indexOf("export async function getScopedSearchSymbolPool");
     const end = src.indexOf("\n}\n", start);
 
