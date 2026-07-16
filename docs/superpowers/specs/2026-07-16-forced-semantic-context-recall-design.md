@@ -8,46 +8,46 @@ Raise expected-symbol recall for the existing 26-case `sdl.context` benchmark fr
 
 The behavior change is limited to forced-semantic `sdl.context` seeding. Default `sdl.context`, `semantic: false`, shared retrieval functions, MCP schemas, and every other tool keep their current behavior.
 
-The existing benchmark remains authoritative:
+The existing benchmark cases and fixtures remain authoritative and unchanged. The forced-semantic gate becomes:
 
 - semantic aggregate expected-symbol recall: at least 85%;
 - noise rate: no more than 10%;
 - failed cases: zero;
-- fixtures and expected symbols stay unchanged;
-- wall time is measured for every candidate implementation, but has no fixed threshold.
+- precise/broad recall breakdowns and all latency percentiles are report-only;
+- wall time is measured for every candidate implementation, with no fixed threshold.
 
 Production code must not contain benchmark case IDs, expected symbol lists, or case-specific path mappings.
 
 ## Chosen Approach
 
-Add bounded concept-coverage selection inside `buildSeedContext`, guarded by `task.options?.semantic === true`.
+Start with the existing bounded lexical lane inside `buildSeedContext`, guarded by `task.options?.semantic === true`.
 
-The current forced-semantic path can stop after the semantic lane has filled its quota. That preserves high-scoring candidates but can let several candidates cover the same phrase while other task concepts receive no seed. The new selection step will preserve one strong candidate for each distinct task concept, then fill remaining slots in the current score order.
+The current forced-semantic path builds compound and individual lexical queries, then skips them whenever `semanticLaneHasCoverage` is true. The first implementation candidate removes that suppression so forced-semantic calls combine the existing semantic and bounded lexical candidates. If this reaches 85%, no new selector is added.
 
-The implementation reuses existing query and ranking machinery:
+Only if the existing lane remains below 85%, add bounded concept coverage from the lexical result batches already produced by that lane:
 
 - `extractIdentifiersFromText` and the existing FTS query normalization;
 - `buildSeedEntitySearchPlan` action queries;
-- the current `entitySearch` result pool and `ContextSeedCandidate` shape;
-- existing lexical `searchSymbols` only if the semantic pool cannot cover a concept.
+- existing `searchSymbols` result batches;
+- `selectFirstUnseenPerBatch` for deterministic one-per-query coverage;
+- the current `ContextSeedCandidate` shape and final score ordering.
 
-No new retrieval service, schema, configuration knob, or dependency is introduced.
+This fallback does not assume names, paths, or summaries are present on semantic candidates. If later measurement proves metadata hydration necessary, hydrate symbol rows once with the existing batched `getSymbolsByIds` query and count its wall-time cost before keeping it. No new retrieval service, schema, configuration knob, or dependency is introduced.
 
 ## Data Flow
 
 1. Run the existing forced-semantic `entitySearch` exactly once.
-2. Derive a bounded, deterministic concept list from code-like identifiers, normalized task clauses, and existing action-seed queries.
-3. Match concepts against the returned symbol/file-summary metadata already available to `sdl.context`.
-4. Select at most one unique anchor per covered concept.
-5. If a concept has no candidate in the semantic pool, issue the smallest bounded lexical query needed for that concept. Remove this fallback if measurement shows the existing pool alone reaches 85%.
-6. Append remaining candidates in existing score and tie-break order until the normal seed cap is reached.
-7. Pass the result through the unchanged executor and evidence pipeline.
+2. Run the existing bounded action, compound, and individual lexical queries instead of suppressing them after semantic coverage.
+3. Merge and cap candidates through the existing deterministic score order.
+4. Measure recall and wall time. Stop here if recall is at least 85%.
+5. If recall is still low, preserve the first unique result from each existing lexical query batch, then fill remaining slots in semantic/lexical score order.
+6. Pass the result through the unchanged executor and evidence pipeline.
 
-Concept count, fallback query count, and candidates remain bounded by existing precise/broad seed caps. Negated clauses keep the existing non-pruning behavior.
+Query count and candidates remain bounded by existing precise/broad limits and seed caps. Negated clauses keep the existing non-pruning behavior.
 
 ## Isolation
 
-The new branch is entered only when `forceSemanticEntitySearch` is true. Shared functions such as `entitySearch`, `hybridSearch`, and `searchSymbols` are called through their existing contracts and are not modified.
+The changed branch is entered only when `forceSemanticEntitySearch` is true. Shared functions such as `entitySearch`, `hybridSearch`, and `searchSymbols` are called through their existing contracts and are not modified.
 
 Regression tests must prove:
 
@@ -57,23 +57,23 @@ Regression tests must prove:
 
 ## Failure Handling
 
-Concept coverage is an accuracy enhancement, not a new failure boundary. If concept extraction or a targeted lexical fallback returns nothing, selection falls back to the existing semantic order. Existing retrieval exceptions remain non-fatal and continue through current logging and fallback behavior.
+The lexical lane remains an accuracy enhancement, not a new failure boundary. If its queries return nothing or fail, selection falls back to the existing semantic order. Existing retrieval exceptions remain non-fatal and continue through current logging and fallback behavior.
 
 ## Measurement and Testing
 
 Implementation follows red-green-refactor:
 
 1. Persist a case-level forced-semantic diagnostic showing current misses and wall time.
-2. Run the unchanged live benchmark and record the 56.5% red baseline.
-3. Add focused unit tests for deterministic concept coverage, deduplication, caps, and the forced-semantic guard.
-4. Implement the smallest coverage selector using only the existing semantic pool.
-5. Run the live benchmark. Add bounded lexical fallback only if recall remains below 85%.
-6. Compare wall time for every passing variant and retain the fastest.
-7. Verify the full test suite, goldens, determinism, typecheck, lint, docs inventory, and a fresh-process MCP call with `semantic: true`.
+2. Run the live benchmark and record the 56.5% red baseline without changing fixtures.
+3. Add a synthetic unit regression proving forced-semantic uses the existing lexical lane while omitted/false semantic modes retain their behavior.
+4. Remove the `semanticLaneHasCoverage` suppression and rerun the live benchmark.
+5. Stop if recall reaches 85%. Otherwise add deterministic one-per-lexical-batch coverage, starting with another failing synthetic unit test.
+6. Change the benchmark and benchmark docs so only aggregate recall, noise, and failures are hard gates; precise/broad recall and latency remain visible but report-only.
+7. Compare implementations using the same built commit, config, and immutable index. For each candidate, run one discarded warm-up followed by three measured 26-case forced-semantic passes with no concurrent repo workload; select the lowest median total wall time among candidates reaching 85%.
+8. Verify the full test suite, goldens, determinism, typecheck, lint, docs inventory, and a fresh-process MCP call with `semantic: true`.
 
 The final report includes baseline versus final recall, noise, failed cases, p50, p95, and total benchmark wall time.
 
 ## Documentation
 
-Update the `sdl.context` deep dive and `CHANGELOG.md` only if caller-observable forced-semantic behavior changes. No other tool documentation should change.
-
+Update `docs/feature-deep-dives/context-modes.md`, `docs/benchmark-guardrails.md`, and `CHANGELOG.md` for the forced-semantic aggregate-only gate and caller-observable behavior. No other tool documentation should change.
