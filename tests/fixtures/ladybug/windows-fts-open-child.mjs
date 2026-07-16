@@ -75,6 +75,3 @@ async function openWithProductionDatabase() {
 
 if (mode === "seed") await seedFtsDatabase();
 else await openWithProductionDatabase();
-
-// Ladybug's Node wrapper requires explicit exit after native teardown on Windows.
-process.exit(0);
