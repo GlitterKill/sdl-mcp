@@ -878,9 +878,16 @@ export class Executor {
               expandedSeedCandidates,
             )
           : rawSymbols.slice(0, MAX_CARD_SYMBOLS);
+      const strictExplicitPathScope =
+        task.options?.contextMode === "precise" &&
+        explicitFocusPaths(task.options).length > 0;
 
       // Fallback: identifier-based search with per-term resolution
-      if (allSymbols.length === 0 && task.taskText) {
+      if (
+        allSymbols.length === 0 &&
+        task.taskText &&
+        !strictExplicitPathScope
+      ) {
         // Broad mode gets higher limits to cover conceptual queries
         const isBroad = task.options?.contextMode !== "precise";
         const maxTerms = isBroad ? 8 : 5;
@@ -1021,7 +1028,9 @@ export class Executor {
       }
 
       if (allSymbols.length === 0) {
-        this.evidenceCapture.captureSearchResult(task.taskText, 0);
+        if (!strictExplicitPathScope) {
+          this.evidenceCapture.captureSearchResult(task.taskText, 0);
+        }
       } else {
         // Fetch real symbol data from DB
         const conn = await this.getConn();

@@ -288,10 +288,14 @@ describe("executor card fallback", () => {
   }
 
   it("does not repopulate strict precise scope with fallback symbols", async () => {
-    const executor = createCardExecutor(() => [
-      createCardSymbol("src-alpha", "test-repo:src/alpha.ts"),
-      createCardSymbol("src-beta", "test-repo:src/beta.ts"),
-    ]);
+    let searchCalls = 0;
+    const executor = createCardExecutor(() => {
+      searchCalls += 1;
+      return [
+        createCardSymbol("src-alpha", "test-repo:src/alpha.ts"),
+        createCardSymbol("src-beta", "test-repo:src/beta.ts"),
+      ];
+    });
     const task: AgentTask = {
       taskType: "debug",
       taskText: "Investigate fallback card context",
@@ -310,6 +314,12 @@ describe("executor card fallback", () => {
       result.evidence.filter((evidence) => evidence.type === "symbolCard"),
       [],
     );
+    assert.deepEqual(
+      result.evidence.filter((evidence) => evidence.type === "searchResult"),
+      [],
+    );
+    assert.equal(searchCalls, 0);
+    assert.equal(result.success, false);
     assert.deepEqual(
       result.actions.find((action) => action.type === "getCard")?.output,
       { cardsProcessed: 0 },
