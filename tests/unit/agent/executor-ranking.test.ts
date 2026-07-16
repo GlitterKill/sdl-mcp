@@ -525,9 +525,17 @@ describe("Executor focus selection", () => {
   });
 
   it("resolves opaque file IDs before enforcing explicit focus paths", async () => {
+    const sourceSymbol = {
+      ...createExecutorSymbol("src-symbol", "opaque-src-file"),
+      repoId: "org:repo",
+    };
+    const testSymbol = {
+      ...createExecutorSymbol("test-symbol", "opaque-test-file"),
+      repoId: "org:repo",
+    };
     const symbolMap = new Map([
-      ["src-symbol", createExecutorSymbol("src-symbol", "opaque-src-file")],
-      ["test-symbol", createExecutorSymbol("test-symbol", "opaque-test-file")],
+      ["src-symbol", sourceSymbol],
+      ["test-symbol", testSymbol],
     ]);
     const dbQueries = {
       getFileByRepoPath: async () => null,
@@ -579,6 +587,81 @@ describe("Executor focus selection", () => {
     );
 
     assert.deepEqual(selected, ["test-symbol"]);
+  });
+
+  it("resolves opaque file IDs for unscoped path and language affinity", async () => {
+    const scriptSymbol = {
+      ...createExecutorSymbol("a-script", "opaque-script-file"),
+      name: "sharedHandler",
+    };
+    const sourceSymbol = {
+      ...createExecutorSymbol("z-typescript", "opaque-source-file"),
+      name: "sharedHandler",
+    };
+    const symbolMap = new Map([
+      [scriptSymbol.symbolId, scriptSymbol],
+      [sourceSymbol.symbolId, sourceSymbol],
+    ]);
+    let fileLookupCount = 0;
+    let requestedFileIds: string[] = [];
+    const dbQueries = {
+      getFileByRepoPath: async () => null,
+      getSymbolIdsByFile: async () => [],
+      getFilesByPrefix: async () => [],
+      getSymbolsByFile: async () => [],
+      getClusterMembers: async () => [],
+      getProcessStepsByIds: async () => [],
+      getSymbolsByIds: async () => symbolMap,
+      getFilesByIds: async (_conn: unknown, fileIds: string[]) => {
+        fileLookupCount++;
+        requestedFileIds = fileIds;
+        return new Map([
+          [
+            "opaque-script-file",
+            {
+              fileId: "opaque-script-file",
+              repoId: "repo-1",
+              relPath: "scripts/check.py",
+              contentHash: "script-hash",
+              language: "python",
+              byteSize: 1,
+              lastIndexedAt: "now",
+              directory: "scripts",
+            },
+          ],
+          [
+            "opaque-source-file",
+            {
+              fileId: "opaque-source-file",
+              repoId: "repo-1",
+              relPath: "src/handler.ts",
+              contentHash: "source-hash",
+              language: "typescript",
+              byteSize: 1,
+              lastIndexedAt: "now",
+              directory: "src",
+            },
+          ],
+        ]);
+      },
+      searchSymbols: async () => [],
+    } as unknown as ExecutorDbQueries;
+    const executor = new Executor(undefined, dbQueries);
+    const privateExecutor = executor as unknown as ExecutorSelectionPrivate;
+    privateExecutor.connPromise = Promise.resolve({});
+
+    const selected = await privateExecutor.selectTopSymbols(
+      [...symbolMap.keys()],
+      createTask({ taskText: "Review TypeScript shared handler behavior" }),
+      1,
+    );
+
+    assert.deepEqual(selected, ["z-typescript"]);
+    assert.equal(fileLookupCount, 1);
+    assert.deepEqual(requestedFileIds, [
+      "opaque-script-file",
+      "opaque-source-file",
+    ]);
   });
 
   it("intersects precise focus paths with out-of-path symbol seeds", async () => {

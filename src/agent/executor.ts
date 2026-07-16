@@ -617,10 +617,7 @@ export class Executor {
       ? await this.dbQueries.getSymbolsByIds(conn, symbolIds)
       : new Map();
     let symbolMap = storedSymbols;
-    const needsResolvedPaths = task.options?.focusPaths?.some(
-      (focusPath) => focusPath.trim().length > 0,
-    );
-    if (conn && needsResolvedPaths && storedSymbols.size > 0) {
+    if (conn && storedSymbols.size > 0) {
       const files = await this.dbQueries.getFilesByIds(conn, [
         ...new Set([...storedSymbols.values()].map((symbol) => symbol.fileId)),
       ]);
@@ -631,9 +628,7 @@ export class Executor {
           const file = files.get(symbol.fileId);
           return [
             symbolId,
-            file
-              ? { ...symbol, fileId: `${symbol.repoId}:${file.relPath}` }
-              : symbol,
+            file ? { ...symbol, fileId: file.relPath } : symbol,
           ];
         }),
       );
