@@ -488,7 +488,17 @@ export function buildScopedPreciseConceptQueries(taskText: string): string[] {
     .split(/\s*(?:,|\band\b)\s*/i)
     .map((clause) => clause.trim())
     .filter(Boolean);
-  if (clauses.length <= 1) return [];
+  // Keep the legacy plan when logical polarity is present. Treating an
+  // exclusion as a requested concept would retain the excluded result when
+  // complete concept coverage prunes redundant lexical candidates.
+  if (
+    clauses.length <= 1 ||
+    clauses.some((clause) =>
+      /\b(?:not|excluding|except|without)\b/i.test(clause),
+    )
+  ) {
+    return [];
+  }
 
   return [
     ...new Set(

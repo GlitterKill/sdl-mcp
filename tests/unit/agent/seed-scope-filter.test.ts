@@ -120,6 +120,21 @@ describe("scoped lexical fallback", () => {
     assert.deepEqual(buildScopedPreciseConceptQueries("Find workflow tests"), []);
   });
 
+  it("preserves the existing query plan when a clause excludes a concept", () => {
+    for (const taskText of [
+      "Find workflow aggregation tests, not benchmark helpers",
+      "Find workflow aggregation tests, excluding benchmark helpers",
+      "Find workflow aggregation tests, except benchmark helpers",
+      "Find workflow aggregation tests, but without benchmark helpers",
+    ]) {
+      assert.deepEqual(
+        buildScopedPreciseConceptQueries(taskText),
+        [],
+        `expected negated clause to disable concept pruning: ${taskText}`,
+      );
+    }
+  });
+
   it("bounds multi-topic queries to the precise lexical capacity", () => {
     assert.equal(
       buildScopedPreciseConceptQueries(
