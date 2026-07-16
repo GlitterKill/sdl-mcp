@@ -342,10 +342,12 @@ async function rollbackAfterReopenFailure(params: {
     }
   }
 
+  // A nested "restored" only restores the failed rollback swap's source; it
+  // does not mean the original active DB was restored from previousDbPath.
   return {
     ...params.activation,
     status: "failed",
-    rollback: rollback.rollback === "restored" ? "restored" : "failed",
+    rollback: "failed",
     reasons: [
       params.reopenReason,
       `previous active DB could not be restored: ${rollback.reasons.join("; ")}`,
