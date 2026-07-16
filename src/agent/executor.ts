@@ -127,6 +127,7 @@ const RUNG_ESCALATION_ORDER: RungType[] = [
 ];
 
 const MAX_CARD_SYMBOLS = 20;
+const MAX_PRECISE_CARD_SYMBOLS = 10;
 const MAX_SKELETON_SYMBOLS = 5;
 const MAX_HOTPATH_SYMBOLS = 5;
 const MAX_RAW_SYMBOLS = 3;
@@ -868,16 +869,23 @@ export class Executor {
           task,
           seedCandidates,
         );
+      // Precise scoped selection can contain every symbol in an exact file.
+      // Keep card hydration bounded at the same moderate cap used by precise
+      // adaptive ranking; broad mode retains the larger coverage cap.
+      const cardSymbolLimit =
+        task.options?.contextMode === "precise"
+          ? MAX_PRECISE_CARD_SYMBOLS
+          : MAX_CARD_SYMBOLS;
 
       let allSymbols =
         rawSymbols.length > 0 && task.taskText
           ? await this.selectTopSymbols(
               rawSymbols,
               task,
-              MAX_CARD_SYMBOLS,
+              cardSymbolLimit,
               expandedSeedCandidates,
             )
-          : rawSymbols.slice(0, MAX_CARD_SYMBOLS);
+          : rawSymbols.slice(0, cardSymbolLimit);
       const strictExplicitPathScope =
         task.options?.contextMode === "precise" &&
         explicitFocusPaths(task.options).length > 0;
@@ -1021,7 +1029,7 @@ export class Executor {
         allSymbols = await this.selectTopSymbols(
           allSymbols,
           task,
-          MAX_CARD_SYMBOLS,
+          cardSymbolLimit,
           [],
           fallbackFeedbackBoosts,
         );

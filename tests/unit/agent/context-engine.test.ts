@@ -1459,6 +1459,62 @@ describe("ContextEngine", () => {
     assert.equal(result.success, true);
   });
 
+  it("skips graph expansion inside a strict explicit path boundary", async () => {
+    mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
+    mock.method(Planner.prototype, "plan", () => defaultPath);
+    mock.method(Planner.prototype, "selectContext", () => ["symbol:alpha"]);
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "seedContext",
+      async () => ({
+        candidates: [
+          {
+            contextRef: "symbol:alpha",
+            source: "lexical",
+            score: 1,
+            sourceRank: 0,
+          },
+        ],
+        sources: { semantic: 0, lexical: 1, feedback: 0 },
+      }),
+    );
+    let clusterCalls = 0;
+    let edgeCalls = 0;
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "expandContextForClusters",
+      async (context: string[]) => {
+        clusterCalls += 1;
+        return { expandedContext: context, clusterExpandedCount: 0 };
+      },
+    );
+    mock.method(
+      ContextEngine.prototype as Record<string, unknown>,
+      "expandContextByEdges",
+      async (context: string[]) => {
+        edgeCalls += 1;
+        return context;
+      },
+    );
+    mock.method(Executor.prototype, "execute", async () => ({
+      actions: [],
+      evidence: [],
+      success: true,
+    }));
+    mock.method(Executor.prototype, "getMetrics", () => defaultMetrics);
+    mock.method(Executor.prototype, "getNextBestAction", () => undefined);
+
+    const result = await new ContextEngine().buildContext(
+      createTask({
+        options: { contextMode: "precise", focusPaths: ["src/agent"] },
+      }),
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(clusterCalls, 0);
+    assert.equal(edgeCalls, 0);
+  });
+
   it("caps cluster expansion at 10 additional symbols", async () => {
     mock.method(Planner.prototype, "validateTask", () => ({ valid: true }));
     mock.method(Planner.prototype, "plan", () => ({

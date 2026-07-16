@@ -644,13 +644,20 @@ export class ContextEngine {
         }
       }
 
+      // Strict precise scope already has a complete candidate boundary from
+      // scoped seeding. Cluster and edge expansion can only add work that the
+      // executor must filter back to that boundary, so skip both lanes.
+      const skipGraphExpansion =
+        task.options?.contextMode === "precise" && hasExplicitFocusPaths;
       const clusterStartedAt = performance.now();
       const { expandedContext, clusterExpandedCount } =
-        await this.expandContextForClusters(
-          context,
-          task.taskText,
-          task.options?.contextMode,
-        );
+        skipGraphExpansion
+          ? { expandedContext: context, clusterExpandedCount: 0 }
+          : await this.expandContextForClusters(
+              context,
+              task.taskText,
+              task.options?.contextMode,
+            );
       recordDiagnosticTiming(
         diagnosticTimings,
         "engine.clusterExpansion",
@@ -660,10 +667,12 @@ export class ContextEngine {
       // Graph neighbor expansion: follow call/import edges from top-seeded
       // symbols to discover closely related code that keyword search misses.
       const edgeStartedAt = performance.now();
-      const finalContext = await this.expandContextByEdges(
-        expandedContext,
-        task.options?.contextMode,
-      );
+      const finalContext = skipGraphExpansion
+        ? expandedContext
+        : await this.expandContextByEdges(
+            expandedContext,
+            task.options?.contextMode,
+          );
       recordDiagnosticTiming(
         diagnosticTimings,
         "engine.edgeExpansion",

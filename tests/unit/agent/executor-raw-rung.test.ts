@@ -363,6 +363,42 @@ describe("executor card fallback", () => {
     );
   });
 
+  it("caps precise scoped card hydration at ten symbols", async () => {
+    const symbols = Array.from({ length: 18 }, (_, index) =>
+      createCardSymbol(
+        `test-symbol-${index}`,
+        `test-repo:tests/test-symbol-${index}.test.ts`,
+      ),
+    );
+    const executor = createCardExecutor(() => [], symbols);
+    const task: AgentTask = {
+      taskType: "review",
+      taskText: "Review scoped test symbols",
+      repoId: "test-repo",
+      options: {
+        contextMode: "precise",
+        focusPaths: ["tests"],
+        semantic: false,
+      },
+    };
+
+    const result = await executor.execute(
+      task,
+      ["card"],
+      symbols.map(({ symbolId }) => `symbol:${symbolId}`),
+    );
+
+    assert.deepEqual(
+      result.actions.find((action) => action.type === "getCard")?.output,
+      { cardsProcessed: 10 },
+    );
+    assert.equal(
+      result.evidence.filter((evidence) => evidence.type === "symbolCard")
+        .length,
+      10,
+    );
+  });
+
   it("keeps a feedback-boosted fallback candidate through the card cap", async () => {
     const boostedId = "zz-feedback-boosted";
     const symbolIds = [
