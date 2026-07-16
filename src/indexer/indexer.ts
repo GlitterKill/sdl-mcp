@@ -2598,11 +2598,45 @@ async function indexRepoImpl(
             shadowDbPath,
             generationId: finalizedShadowBuild.generationId,
             closeActiveDb: () => closeLadybugDb({ preserveCloseHooks: true }),
-            reopenActiveDb: (path) =>
-              initLadybugDb(path, {
+            reopenActiveDb: async (path) => {
+              await initLadybugDb(path, {
                 bufferPoolBytes:
                   appConfig.graphDatabase?.bufferPoolBytes ?? undefined,
-              }),
+              });
+            },
+            validateActivatedDb: async () => {
+              // Shadow staging cannot load the FTS extension safely beside the
+              // live pool. Validate the required index immediately after the
+              // handoff so a failure triggers the activation rollback path.
+              await ensureCriticalSymbolFtsIndex({
+                recordTiming: recordIndexSubphaseTiming,
+              });
+              const retrievalConfig = appConfig.semantic?.enabled
+                ? appConfig.semantic.retrieval
+                : undefined;
+              const symbolFtsIndexName =
+                retrievalConfig && retrievalConfig.fts?.enabled !== false
+                  ? (retrievalConfig.fts?.indexName ?? "symbol_search_text_v1")
+                  : undefined;
+              if (symbolFtsIndexName) {
+                const { indexExistsForTable, showIndexes } = await import(
+                  "../retrieval/index-lifecycle.js"
+                );
+                const indexes = await showIndexes(await getLadybugConn());
+                if (
+                  !indexExistsForTable(
+                    indexes,
+                    "Symbol",
+                    symbolFtsIndexName,
+                    "fts",
+                  )
+                ) {
+                  throw new Error(
+                    `required Symbol FTS index ${symbolFtsIndexName} is absent after shadow handoff`,
+                  );
+                }
+              }
+            },
           }),
       );
       if (finalizedShadowBuild.activationResult.status === "activated") {

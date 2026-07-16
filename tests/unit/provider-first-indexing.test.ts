@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -77,11 +78,28 @@ import {
 } from "../../dist/indexer/provider-first/semantic-readiness.js";
 import {
   exec as dbExec,
+  execDdl as dbExecDdl,
+  execStoredProc as dbExecStoredProc,
   queryAll,
   toNumber,
 } from "../../dist/db/ladybug-core.js";
-import { createBaseSchema } from "../../dist/db/ladybug-schema.js";
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+  withWriteConn,
+} from "../../dist/db/ladybug.js";
+import * as ladybugDb from "../../dist/db/ladybug-queries.js";
+import {
+  createBaseSchema,
+  createSecondaryIndexes,
+} from "../../dist/db/ladybug-schema.js";
+import { setSymbolEmbeddingBatchOnNode } from "../../dist/db/ladybug-symbol-embeddings.js";
+import { unresolvedCallSymbolId } from "../../dist/db/symbol-placeholders.js";
+import { ensureFtsIndexForNonEmptyTable } from "../../dist/retrieval/index-lifecycle.js";
 import { normalizePath } from "../../dist/util/paths.js";
+import type { SymbolRow } from "../../dist/db/ladybug-queries.js";
+import type { ProviderFirstGraphRows } from "../../dist/indexer/provider-first/materializer.js";
 import type { ProviderFactSet } from "../../dist/indexer/provider-first/types.js";
 import { writeTestScipIndex } from "../fixtures/scip/builder.ts";
 
@@ -7964,6 +7982,290 @@ describe("provider-first indexing foundation", () => {
     );
   });
 
+  it("preserves release-scale symbol identities across provider-first checkpoints", async () => {
+    const root = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-release-scale-integrity-"),
+    );
+    const activeDbPath = join(root, "active.lbug");
+    const repoId = "release-scale-integrity-repo";
+    const now = "2026-07-16T00:00:00.000Z";
+    const fixture = releaseScaleProviderFirstRows(repoId, now);
+    const { rows } = fixture;
+    const expectedSymbols = canonicalProjectionForRows(rows);
+    const expectedRelationships = canonicalRelationshipProjectionForRows(rows);
+    const unresolvedTargets = Array.from({ length: 8 }, (_, index) =>
+      unresolvedCallSymbolId(`release-scale-unused-${index}`),
+    );
+    const expectedPlaceholders = canonicalIsolatedPlaceholderProjection(
+      repoId,
+      unresolvedTargets,
+    );
+    const mutatedPlaceholders = expectedPlaceholders.map((row) => {
+      const embeddingIndex = unresolvedTargets.indexOf(row.symbolId);
+      return row.symbolId === unresolvedTargets.at(-1)
+        ? {
+            ...row,
+            summary: "release-scale mutated placeholder summary",
+            summaryQuality: 0.9,
+            summarySource: "qa:release-scale",
+            embeddingJinaCode: `embedding-${embeddingIndex}`,
+            embeddingJinaCodeCardHash: `card-${embeddingIndex}`,
+          }
+        : {
+            ...row,
+            embeddingJinaCode: `embedding-${embeddingIndex}`,
+            embeddingJinaCodeCardHash: `card-${embeddingIndex}`,
+          };
+    });
+    let activeConn: import("kuzu").Connection | undefined;
+
+    assertProviderIdentityBindings(fixture);
+    validateProviderFirstGraphRows(rows, {
+      repoId,
+      context: "Release-scale provider-first integrity fixture",
+    });
+
+    try {
+      await closeLadybugDb();
+      await initLadybugDb(activeDbPath);
+      await withWriteConn(async (writeConn) => {
+        await ladybugDb.upsertRepo(writeConn, {
+          repoId,
+          rootPath: root,
+          configJson: "{}",
+          createdAt: now,
+        });
+        await ladybugDb.upsertFileBatch(writeConn, rows.files);
+
+        await ladybugDb.upsertKnownFileSymbols(writeConn, rows.symbols);
+        await assertReleaseScaleState(
+          writeConn,
+          "initial Symbol persistence",
+          repoId,
+          expectedSymbols,
+          [],
+          [],
+        );
+
+        await ladybugDb.ensureDependencyTargetsForKnownSourceEdges(
+          writeConn,
+          unresolvedTargets.map((toSymbolId, index) => ({
+            repoId,
+            fromSymbolId: rows.symbols[index]!.symbolId,
+            toSymbolId,
+            edgeType: "call",
+            weight: 1,
+            confidence: 0.5,
+            resolution: "unresolved",
+            resolverId: `provider-first:placeholder-${index}`,
+            resolutionPhase: "provider-first",
+            provenance: JSON.stringify({
+              dedupeKey: `placeholder-${index}`,
+              providerId: `placeholder-${index}`,
+            }),
+            createdAt: now,
+            targetMeta: {
+              symbolStatus: "unresolved" as const,
+              placeholderKind: "call",
+              placeholderTarget: `release-scale-unused-${index}`,
+            },
+          })),
+          { measurePhase: async (_phaseName, fn) => await fn() },
+        );
+        await assertReleaseScaleState(
+          writeConn,
+          "placeholder preparation",
+          repoId,
+          expectedSymbols,
+          expectedPlaceholders,
+          [],
+        );
+
+        assert.equal(
+          await ladybugDb.pruneIsolatedPlaceholderSymbols(writeConn, repoId),
+          0,
+          "large COPY-backed Symbol tables retain isolated placeholders before an unsafe delete",
+        );
+        await assertReleaseScaleState(
+          writeConn,
+          "placeholder pruning",
+          repoId,
+          expectedSymbols,
+          expectedPlaceholders,
+          [],
+        );
+
+        await ladybugDb.insertKnownSymbolEdges(writeConn, rows.edges);
+        await assertReleaseScaleState(
+          writeConn,
+          "relationship materialization",
+          repoId,
+          expectedSymbols,
+          expectedPlaceholders,
+          expectedRelationships,
+        );
+
+        await ladybugDb.updateSymbolSummary(
+          writeConn,
+          unresolvedTargets.at(-1)!,
+          "release-scale mutated placeholder summary",
+          0.9,
+          "qa:release-scale",
+          now,
+        );
+        await setSymbolEmbeddingBatchOnNode(
+          writeConn,
+          "jina-embeddings-v2-base-code",
+          unresolvedTargets.map((symbolId, index) => ({
+            symbolId,
+            vector: `embedding-${index}`,
+            cardHash: `card-${index}`,
+          })),
+        );
+        await assertReleaseScaleState(
+          writeConn,
+          "summary and embedding mutations",
+          repoId,
+          expectedSymbols,
+          mutatedPlaceholders,
+          expectedRelationships,
+        );
+
+        const fts = await ensureFtsIndexForNonEmptyTable(
+          writeConn,
+          "Symbol",
+          "symbol_search_text_v1",
+        );
+        assert.deepEqual(fts, {
+          status: "failed",
+          error: "CREATE_FTS_INDEX returned false",
+        });
+        await assert.rejects(
+          () =>
+            dbExecStoredProc(
+              writeConn,
+              "CALL CREATE_FTS_INDEX('Symbol', 'symbol_search_text_v1', ['searchText'])",
+            ),
+          /function CREATE_FTS_INDEX is not defined/,
+        );
+        await assertReleaseScaleState(
+          writeConn,
+          "FTS extension unavailable runtime boundary",
+          repoId,
+          expectedSymbols,
+          mutatedPlaceholders,
+          expectedRelationships,
+        );
+
+        const secondaryIndexes = await createSecondaryIndexes(writeConn);
+        assert.equal(secondaryIndexes.attempted, 30);
+        assert.equal(secondaryIndexes.failures.length, 30);
+        assert.match(
+          secondaryIndexes.failures[0]?.error ?? "",
+          /expected rule iC_CreateIndex/,
+        );
+        await assertReleaseScaleState(
+          writeConn,
+          "secondary index unsupported-runtime boundary",
+          repoId,
+          expectedSymbols,
+          mutatedPlaceholders,
+          expectedRelationships,
+        );
+      });
+      activeConn = await getLadybugConn();
+
+      const shadowBuild = await stageProviderFirstShadowBuild({
+        repoId,
+        generationId: "release-scale-integrity",
+        activation: "shadowDb",
+        requestedFormat: "csv",
+        activeDbPath,
+        repoRoot: root,
+        repoConfigJson: "{}",
+        rows,
+      });
+      assert.equal(shadowBuild.status, "staged");
+      assert.equal(shadowBuild.shadowDb?.status, "loaded");
+      assert.equal(shadowBuild.shadowDb?.secondaryIndexes.attempted, 30);
+      assert.equal(shadowBuild.shadowDb?.secondaryIndexes.failures.length, 30);
+      assert.match(
+        shadowBuild.shadowDb?.secondaryIndexes.failures[0]?.error ?? "",
+        /expected rule iC_CreateIndex/,
+      );
+      const shadowDbPath = shadowBuild.shadowDb?.path ?? "";
+      await assertReleaseScaleState(
+        activeConn,
+        "shadow persistence active DB",
+        repoId,
+        expectedSymbols,
+        mutatedPlaceholders,
+        expectedRelationships,
+      );
+      await assertReleaseScaleStateAtPath(
+        shadowDbPath,
+        "shadow persistence and secondary indexes",
+        repoId,
+        expectedSymbols,
+        [],
+        expectedRelationships,
+      );
+
+      const finalization = await finalizeProviderFirstShadowDb({
+        activeConn,
+        repoId,
+        versionId: "release-scale-version",
+        shadowDbPath,
+      });
+      assert.equal(finalization.status, "skipped");
+      assert.match(finalization.reasons.join(" "), /above 2048/);
+      await assertReleaseScaleStateAtPath(
+        shadowDbPath,
+        "shadow reset and finalization guard",
+        repoId,
+        expectedSymbols,
+        [],
+        expectedRelationships,
+      );
+
+      const activation = summarizeProviderFirstShadowActivationReadiness({
+        shadowBuild: { ...shadowBuild, finalization },
+        fallbackFiles: 0,
+        graphDerivedStateReady: true,
+        shadowContainsFinalizedGraph: false,
+        finalizedGraphReasons: finalization.reasons,
+      });
+      assert.equal(activation.status, "skipped");
+      await assertReleaseScaleState(
+        activeConn,
+        "shadow activation guard",
+        repoId,
+        expectedSymbols,
+        mutatedPlaceholders,
+        expectedRelationships,
+      );
+
+      await withWriteConn(async (writeConn) => {
+        await dbExecDdl(writeConn, "CHECKPOINT");
+      });
+      await closeLadybugDb();
+      activeConn = undefined;
+      await initLadybugDb(activeDbPath);
+      activeConn = await getLadybugConn();
+      await assertReleaseScaleState(
+        activeConn,
+        "final index completion",
+        repoId,
+        expectedSymbols,
+        mutatedPlaceholders,
+        expectedRelationships,
+      );
+    } finally {
+      await closeLadybugDb().catch(() => {});
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("stages provider rows as CSV artifacts for shadow bulk loading", async () => {
     const root = mkdtempSync(join(tmpdir(), "sdl-provider-first-shadow-"));
     try {
@@ -10085,10 +10387,21 @@ describe("provider-first indexing foundation", () => {
             "shadow",
           );
         },
+        validateActivatedDb: async (path) => {
+          calls.push(`validate:${path}`);
+          assert.equal(
+            readFileSync(join(path, "marker.txt"), "utf8"),
+            "shadow",
+          );
+        },
       });
 
       assert.equal(activation.status, "activated");
-      assert.deepEqual(calls, ["close", `reopen:${normalizePath(activePath)}`]);
+      assert.deepEqual(calls, [
+        "close",
+        `reopen:${normalizePath(activePath)}`,
+        `validate:${normalizePath(activePath)}`,
+      ]);
       assert.equal(
         readFileSync(join(activePath, "marker.txt"), "utf8"),
         "shadow",
@@ -10099,6 +10412,56 @@ describe("provider-first indexing foundation", () => {
           join(activation.previousDbPath ?? "", "marker.txt"),
           "utf8",
         ),
+        "active",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("restores the active DB when post-handoff validation fails", async () => {
+    const root = mkdtempSync(
+      join(tmpdir(), "sdl-provider-first-handoff-validation-"),
+    );
+    try {
+      const activePath = join(root, "active.lbug");
+      const shadowPath = join(root, "shadow.lbug");
+      mkdirSync(activePath);
+      mkdirSync(shadowPath);
+      writeFileSync(join(activePath, "marker.txt"), "active", "utf8");
+      writeFileSync(join(shadowPath, "marker.txt"), "shadow", "utf8");
+      let reopenCalls = 0;
+
+      const activation = await activateProviderFirstShadowDbWithHandoff({
+        activeDbPath: activePath,
+        shadowDbPath: shadowPath,
+        generationId: "provider-first:fts-validation",
+        closeActiveDb: async () => {},
+        reopenActiveDb: async (path) => {
+          reopenCalls++;
+          assert.equal(
+            readFileSync(join(path, "marker.txt"), "utf8"),
+            reopenCalls === 1 ? "shadow" : "active",
+          );
+        },
+        validateActivatedDb: async (path) => {
+          assert.equal(
+            readFileSync(join(path, "marker.txt"), "utf8"),
+            "shadow",
+          );
+          throw new Error("critical Symbol FTS validation failed");
+        },
+      });
+
+      assert.equal(activation.status, "failed");
+      assert.equal(activation.rollback, "restored");
+      assert.match(
+        activation.reasons.join(" "),
+        /critical Symbol FTS validation failed.*previous active DB was restored/,
+      );
+      assert.equal(reopenCalls, 2);
+      assert.equal(
+        readFileSync(join(activePath, "marker.txt"), "utf8"),
         "active",
       );
     } finally {
@@ -10244,6 +10607,579 @@ describe("provider-first indexing foundation", () => {
     }
   });
 });
+
+interface CanonicalProviderSymbolProjection {
+  symbolId: string;
+  fileId: string;
+  relPath: string;
+  name: string;
+  signatureJson: string;
+  kind: string;
+  language: string;
+  rangeStartLine: number;
+  rangeStartCol: number;
+  rangeEndLine: number;
+  rangeEndCol: number;
+  summarySource: string;
+  source: string;
+  scipSymbol: string;
+  astFingerprint: string;
+  symbolStatus: string;
+  external: boolean;
+  placeholderKind: string;
+  placeholderTarget: string;
+}
+
+interface ProviderIdentityBinding {
+  symbolId: string;
+  repoId: string;
+  providerId: string;
+  providerType: "scip";
+  providerSymbolId: string;
+  sourcePath: string;
+}
+
+interface ReleaseScaleProviderFirstFixture {
+  rows: ProviderFirstGraphRows;
+  providerIdentities: ProviderIdentityBinding[];
+}
+
+interface CanonicalIsolatedPlaceholderProjection {
+  symbolId: string;
+  repoId: string;
+  kind: string;
+  name: string;
+  exported: boolean;
+  visibility: string;
+  language: string;
+  rangeStartLine: number;
+  rangeStartCol: number;
+  rangeEndLine: number;
+  rangeEndCol: number;
+  astFingerprint: string;
+  signatureJson: string;
+  summary: string;
+  summaryQuality: number;
+  summarySource: string;
+  external: boolean;
+  source: string;
+  scipSymbol: string;
+  symbolStatus: string;
+  placeholderKind: string;
+  placeholderTarget: string;
+  embeddingJinaCode: string;
+  embeddingJinaCodeCardHash: string;
+}
+
+interface CanonicalRelationshipProjection {
+  fromSymbolId: string;
+  toSymbolId: string;
+  providerId: string;
+  provenance: string;
+}
+
+function releaseScaleProviderFirstRows(
+  repoId: string,
+  updatedAt: string,
+): ReleaseScaleProviderFirstFixture {
+  const symbolCount = 2_112;
+  const fallbackStart = 1_408;
+  const placeholderStart = symbolCount - 16;
+  const id = (index: number): string => String(index).padStart(5, "0");
+  const files = Array.from({ length: symbolCount }, (_, index) => {
+    const suffix = id(index);
+    const language = index % 2 === 0 ? "typescript" : "rust";
+    const extension = language === "typescript" ? "ts" : "rs";
+    const relPath = `src/${language}/release-scale-${suffix}.${extension}`;
+    return {
+      fileId: `release-scale-file-${suffix}`,
+      repoId,
+      relPath,
+      contentHash: createHash("sha256").update(relPath).digest("hex"),
+      language,
+      byteSize: 100 + index,
+      lastIndexedAt: updatedAt,
+    };
+  });
+  const kinds = ["function", "class", "method", "constant"] as const;
+  const providerIdentities: ProviderIdentityBinding[] = [];
+  const symbols: SymbolRow[] = files.map((file, index) => {
+    const suffix = id(index);
+    const placeholder = index >= placeholderStart;
+    const fallbackOnly = index >= fallbackStart && !placeholder;
+    const providerId = `release-scale-provider-${suffix}`;
+    const providerSymbolId = `scip qa fixture ${suffix} releaseScaleName${suffix}().`;
+    const symbolId = fallbackOnly
+      ? `release-scale-fallback-symbol-${suffix}`
+      : createProviderSymbolId({
+          repoId,
+          providerType: "scip",
+          providerId,
+          providerSymbolId,
+          sourcePath: file.relPath,
+        });
+    if (!fallbackOnly) {
+      providerIdentities.push({
+        symbolId,
+        repoId,
+        providerId,
+        providerType: "scip",
+        providerSymbolId,
+        sourcePath: file.relPath,
+      });
+    }
+    return {
+      symbolId,
+      repoId,
+      fileId: file.fileId,
+      kind: kinds[index % kinds.length]!,
+      name: `releaseScaleName${suffix}`,
+      exported: index % 3 !== 0,
+      visibility: index % 5 === 0 ? "private" : "public",
+      language: file.language,
+      rangeStartLine: index + 1,
+      rangeStartCol: index % 17,
+      rangeEndLine: index + 1,
+      rangeEndCol: (index % 17) + 3,
+      astFingerprint: `release-scale-fingerprint-${suffix}`,
+      signatureJson: JSON.stringify({
+        text: `signature releaseScaleName${suffix}(arg${suffix}): Result${suffix}`,
+      }),
+      summary: `release-scale summary ${suffix}`,
+      invariantsJson: JSON.stringify([`invariant-${suffix}`]),
+      sideEffectsJson: JSON.stringify([`effect-${suffix}`]),
+      summaryQuality: 0.5 + (index % 4) / 10,
+      summarySource: fallbackOnly ? "unknown" : "provider:scip",
+      roleTagsJson: JSON.stringify([`role-${suffix}`]),
+      searchText: `releaseScaleName${suffix} signature-${suffix}`,
+      external: false,
+      source: fallbackOnly ? "treesitter" : "scip",
+      packageName: `package-${suffix}`,
+      packageVersion: `1.0.${index}`,
+      scipSymbol: fallbackOnly ? null : providerSymbolId,
+      symbolStatus: placeholder ? "unresolved" : "real",
+      placeholderKind: placeholder ? "provider-metadata" : "",
+      placeholderTarget: placeholder ? `placeholder-${suffix}` : "",
+      updatedAt,
+    };
+  });
+  const edges = Array.from({ length: placeholderStart - 1 }, (_, index) => {
+    const suffix = id(index);
+    const fromSymbolId = symbols[index]!.symbolId;
+    const toSymbolId = symbols[index + 1]!.symbolId;
+    return {
+      repoId,
+      fromSymbolId,
+      toSymbolId,
+      edgeType: "call" as const,
+      weight: 1,
+      confidence: 0.99,
+      resolution: "exact" as const,
+      resolverId: `provider-first:release-scale-${suffix}`,
+      resolutionPhase: "provider-first",
+      provenance: JSON.stringify({
+        dedupeKey: `${fromSymbolId}:${toSymbolId}:call`,
+        providerId: `release-scale-${suffix}`,
+      }),
+      createdAt: updatedAt,
+    };
+  });
+  return {
+    rows: {
+      files,
+      symbols,
+      externalSymbols: [],
+      edges,
+      changedFileIds: new Set(files.map((file) => file.fileId)),
+    },
+    providerIdentities,
+  };
+}
+
+function assertProviderIdentityBindings(
+  fixture: ReleaseScaleProviderFirstFixture,
+): void {
+  const symbolById = new Map(
+    fixture.rows.symbols.map((symbol) => [symbol.symbolId, symbol]),
+  );
+  for (const identity of fixture.providerIdentities) {
+    const symbol = symbolById.get(identity.symbolId);
+    assert.ok(symbol);
+    // Raw providerId is intentionally not a Symbol property. The v2 identity
+    // contract commits it into symbolId, while provider type and native SCIP
+    // identity remain directly queryable as source and scipSymbol.
+    assert.equal(identity.symbolId, createProviderSymbolId(identity));
+    assert.equal(symbol.source, identity.providerType);
+    assert.equal(symbol.scipSymbol, identity.providerSymbolId);
+    assert.equal(symbol.summarySource, `provider:${identity.providerType}`);
+    assert.notEqual(symbol.summarySource, identity.providerId);
+  }
+}
+
+function canonicalProjectionForRows(
+  rows: ProviderFirstGraphRows,
+): CanonicalProviderSymbolProjection[] {
+  const fileById = new Map(rows.files.map((file) => [file.fileId, file]));
+  return rows.symbols
+    .map((symbol) => ({
+      symbolId: symbol.symbolId,
+      fileId: symbol.fileId,
+      relPath: fileById.get(symbol.fileId)?.relPath ?? "",
+      name: symbol.name,
+      signatureJson: symbol.signatureJson ?? "",
+      kind: symbol.kind,
+      language: symbol.language,
+      rangeStartLine: symbol.rangeStartLine,
+      rangeStartCol: symbol.rangeStartCol,
+      rangeEndLine: symbol.rangeEndLine,
+      rangeEndCol: symbol.rangeEndCol,
+      summarySource: symbol.summarySource ?? "unknown",
+      source: symbol.source ?? "",
+      scipSymbol: symbol.scipSymbol ?? "",
+      astFingerprint: symbol.astFingerprint,
+      symbolStatus: symbol.symbolStatus ?? "real",
+      external: symbol.external ?? false,
+      placeholderKind: symbol.placeholderKind ?? "",
+      placeholderTarget: symbol.placeholderTarget ?? "",
+    }))
+    .sort((left, right) => left.symbolId.localeCompare(right.symbolId));
+}
+
+async function assertCanonicalProjection(
+  conn: import("kuzu").Connection,
+  checkpoint: string,
+  repoId: string,
+  expected: CanonicalProviderSymbolProjection[],
+): Promise<void> {
+  const rows = await queryAll<{
+    symbolId: string;
+    fileId: string;
+    relPath: string;
+    name: string;
+    signatureJson: string | null;
+    kind: string;
+    language: string;
+    rangeStartLine: unknown;
+    rangeStartCol: unknown;
+    rangeEndLine: unknown;
+    rangeEndCol: unknown;
+    summarySource: string | null;
+    source: string | null;
+    scipSymbol: string | null;
+    astFingerprint: string;
+    symbolStatus: string | null;
+    external: unknown;
+    placeholderKind: string | null;
+    placeholderTarget: string | null;
+  }>(
+    conn,
+    `MATCH (s:Symbol {repoId: $repoId})-[:SYMBOL_IN_FILE]->(f:File)
+     RETURN s.symbolId AS symbolId,
+            f.fileId AS fileId,
+            f.relPath AS relPath,
+            s.name AS name,
+            s.signatureJson AS signatureJson,
+            s.kind AS kind,
+            s.language AS language,
+            s.rangeStartLine AS rangeStartLine,
+            s.rangeStartCol AS rangeStartCol,
+            s.rangeEndLine AS rangeEndLine,
+            s.rangeEndCol AS rangeEndCol,
+            s.summarySource AS summarySource,
+            s.source AS source,
+            s.scipSymbol AS scipSymbol,
+            s.astFingerprint AS astFingerprint,
+            s.symbolStatus AS symbolStatus,
+            s.external AS external,
+            s.placeholderKind AS placeholderKind,
+            s.placeholderTarget AS placeholderTarget
+     ORDER BY s.symbolId`,
+    { repoId },
+  );
+  const actual = rows
+    .map((row) => ({
+      symbolId: row.symbolId,
+      fileId: row.fileId,
+      relPath: row.relPath,
+      name: row.name,
+      signatureJson: row.signatureJson ?? "",
+      kind: row.kind,
+      language: row.language,
+      rangeStartLine: toNumber(row.rangeStartLine),
+      rangeStartCol: toNumber(row.rangeStartCol),
+      rangeEndLine: toNumber(row.rangeEndLine),
+      rangeEndCol: toNumber(row.rangeEndCol),
+      summarySource: row.summarySource ?? "unknown",
+      source: row.source ?? "",
+      scipSymbol: row.scipSymbol ?? "",
+      astFingerprint: row.astFingerprint,
+      symbolStatus: row.symbolStatus ?? "real",
+      external: Boolean(row.external),
+      placeholderKind: row.placeholderKind ?? "",
+      placeholderTarget: row.placeholderTarget ?? "",
+    }))
+    .sort((left, right) => left.symbolId.localeCompare(right.symbolId));
+  assertProjection(checkpoint, expected, actual);
+}
+
+function canonicalIsolatedPlaceholderProjection(
+  repoId: string,
+  symbolIds: readonly string[],
+): CanonicalIsolatedPlaceholderProjection[] {
+  return symbolIds
+    .map((symbolId, index) => ({
+      symbolId,
+      repoId,
+      kind: "placeholder",
+      name: `release-scale-unused-${index}`,
+      exported: false,
+      visibility: "",
+      language: "",
+      rangeStartLine: 0,
+      rangeStartCol: 0,
+      rangeEndLine: 0,
+      rangeEndCol: 0,
+      astFingerprint: "",
+      signatureJson: "",
+      summary: "",
+      summaryQuality: 0,
+      summarySource: "unknown",
+      external: false,
+      source: "treesitter",
+      scipSymbol: "",
+      symbolStatus: "unresolved",
+      placeholderKind: "call",
+      placeholderTarget: `release-scale-unused-${index}`,
+      embeddingJinaCode: "",
+      embeddingJinaCodeCardHash: "",
+    }))
+    .sort((left, right) => left.symbolId.localeCompare(right.symbolId));
+}
+
+async function assertIsolatedPlaceholderProjection(
+  conn: import("kuzu").Connection,
+  checkpoint: string,
+  repoId: string,
+  expected: CanonicalIsolatedPlaceholderProjection[],
+): Promise<void> {
+  const rows = await queryAll<{
+    symbolId: string;
+    repoId: string;
+    kind: string | null;
+    name: string | null;
+    exported: unknown;
+    visibility: string | null;
+    language: string | null;
+    rangeStartLine: unknown;
+    rangeStartCol: unknown;
+    rangeEndLine: unknown;
+    rangeEndCol: unknown;
+    astFingerprint: string | null;
+    signatureJson: string | null;
+    summary: string | null;
+    summaryQuality: unknown;
+    summarySource: string | null;
+    external: unknown;
+    source: string | null;
+    scipSymbol: string | null;
+    symbolStatus: string | null;
+    placeholderKind: string | null;
+    placeholderTarget: string | null;
+    embeddingJinaCode: string | null;
+    embeddingJinaCodeCardHash: string | null;
+  }>(
+    conn,
+    `MATCH (s:Symbol {repoId: $repoId})
+     WHERE NOT (s)-[:SYMBOL_IN_FILE]->(:File)
+     RETURN s.symbolId AS symbolId,
+            s.repoId AS repoId,
+            s.kind AS kind,
+            s.name AS name,
+            s.exported AS exported,
+            s.visibility AS visibility,
+            s.language AS language,
+            s.rangeStartLine AS rangeStartLine,
+            s.rangeStartCol AS rangeStartCol,
+            s.rangeEndLine AS rangeEndLine,
+            s.rangeEndCol AS rangeEndCol,
+            s.astFingerprint AS astFingerprint,
+            s.signatureJson AS signatureJson,
+            s.summary AS summary,
+            s.summaryQuality AS summaryQuality,
+            s.summarySource AS summarySource,
+            s.external AS external,
+            s.source AS source,
+            s.scipSymbol AS scipSymbol,
+            s.symbolStatus AS symbolStatus,
+            s.placeholderKind AS placeholderKind,
+            s.placeholderTarget AS placeholderTarget,
+            s.embeddingJinaCode AS embeddingJinaCode,
+            s.embeddingJinaCodeCardHash AS embeddingJinaCodeCardHash
+     ORDER BY s.symbolId`,
+    { repoId },
+  );
+  const actual = rows
+    .map((row) => ({
+      symbolId: row.symbolId,
+      repoId: row.repoId,
+      kind: row.kind ?? "",
+      name: row.name ?? "",
+      exported: Boolean(row.exported),
+      visibility: row.visibility ?? "",
+      language: row.language ?? "",
+      rangeStartLine: toNumber(row.rangeStartLine),
+      rangeStartCol: toNumber(row.rangeStartCol),
+      rangeEndLine: toNumber(row.rangeEndLine),
+      rangeEndCol: toNumber(row.rangeEndCol),
+      astFingerprint: row.astFingerprint ?? "",
+      signatureJson: row.signatureJson ?? "",
+      summary: row.summary ?? "",
+      summaryQuality: Number(row.summaryQuality ?? 0),
+      summarySource: row.summarySource ?? "unknown",
+      external: Boolean(row.external),
+      source: row.source ?? "",
+      scipSymbol: row.scipSymbol ?? "",
+      symbolStatus: row.symbolStatus ?? "real",
+      placeholderKind: row.placeholderKind ?? "",
+      placeholderTarget: row.placeholderTarget ?? "",
+      embeddingJinaCode: row.embeddingJinaCode ?? "",
+      embeddingJinaCodeCardHash: row.embeddingJinaCodeCardHash ?? "",
+    }))
+    .sort((left, right) => left.symbolId.localeCompare(right.symbolId));
+  assertProjection(`${checkpoint} isolated placeholders`, expected, actual);
+}
+
+function canonicalRelationshipProjectionForRows(
+  rows: ProviderFirstGraphRows,
+): CanonicalRelationshipProjection[] {
+  return rows.edges
+    .map((edge) => ({
+      fromSymbolId: edge.fromSymbolId,
+      toSymbolId: edge.toSymbolId,
+      providerId: edge.resolverId ?? "",
+      provenance: edge.provenance ?? "",
+    }))
+    .sort((left, right) =>
+      `${left.fromSymbolId}\0${left.toSymbolId}`.localeCompare(
+        `${right.fromSymbolId}\0${right.toSymbolId}`,
+      ),
+    );
+}
+
+async function assertProviderRelationshipProjection(
+  conn: import("kuzu").Connection,
+  checkpoint: string,
+  repoId: string,
+  expected: CanonicalRelationshipProjection[],
+): Promise<void> {
+  const actual = (
+    await queryAll<CanonicalRelationshipProjection>(
+      conn,
+      `MATCH (from:Symbol)-[edge:DEPENDS_ON]->(to:Symbol)
+       WHERE from.repoId = $repoId
+       RETURN from.symbolId AS fromSymbolId,
+              to.symbolId AS toSymbolId,
+              edge.resolverId AS providerId,
+              edge.provenance AS provenance
+       ORDER BY fromSymbolId, toSymbolId`,
+      { repoId },
+    )
+  ).sort((left, right) =>
+    `${left.fromSymbolId}\0${left.toSymbolId}`.localeCompare(
+      `${right.fromSymbolId}\0${right.toSymbolId}`,
+    ),
+  );
+  assertProjection(`${checkpoint} provider relationships`, expected, actual);
+}
+
+async function assertReleaseScaleState(
+  conn: import("kuzu").Connection,
+  checkpoint: string,
+  repoId: string,
+  expectedSymbols: CanonicalProviderSymbolProjection[],
+  expectedPlaceholders: CanonicalIsolatedPlaceholderProjection[],
+  expectedRelationships: CanonicalRelationshipProjection[],
+): Promise<void> {
+  await assertCanonicalProjection(
+    conn,
+    `${checkpoint} file-backed symbols`,
+    repoId,
+    expectedSymbols,
+  );
+  await assertIsolatedPlaceholderProjection(
+    conn,
+    checkpoint,
+    repoId,
+    expectedPlaceholders,
+  );
+  await assertProviderRelationshipProjection(
+    conn,
+    checkpoint,
+    repoId,
+    expectedRelationships,
+  );
+}
+
+async function assertReleaseScaleStateAtPath(
+  dbPath: string,
+  checkpoint: string,
+  repoId: string,
+  expectedSymbols: CanonicalProviderSymbolProjection[],
+  expectedPlaceholders: CanonicalIsolatedPlaceholderProjection[],
+  expectedRelationships: CanonicalRelationshipProjection[],
+): Promise<void> {
+  const kuzu = await import("kuzu");
+  const db = new kuzu.Database(dbPath);
+  const conn = new kuzu.Connection(db);
+  try {
+    await assertReleaseScaleState(
+      conn,
+      checkpoint,
+      repoId,
+      expectedSymbols,
+      expectedPlaceholders,
+      expectedRelationships,
+    );
+  } finally {
+    await conn.close().catch(() => {});
+    await db.close().catch(() => {});
+  }
+}
+
+function assertProjection<T>(
+  checkpoint: string,
+  expected: readonly T[],
+  actual: readonly T[],
+): void {
+  const digest = (rows: readonly T[]): string =>
+    createHash("sha256").update(JSON.stringify(rows)).digest("hex");
+  const expectedDigest = digest(expected);
+  const actualDigest = digest(actual);
+  if (expected.length === actual.length && expectedDigest === actualDigest) {
+    return;
+  }
+
+  const mismatchIndex = Array.from(
+    { length: Math.max(expected.length, actual.length) },
+    (_, index) => index,
+  ).find(
+    (index) =>
+      JSON.stringify(expected[index]) !== JSON.stringify(actual[index]),
+  );
+  assert.fail(
+    `Provider-first canonical projection mismatch: ${JSON.stringify({
+      checkpoint,
+      expectedCount: expected.length,
+      actualCount: actual.length,
+      expectedDigest,
+      actualDigest,
+      mismatchIndex,
+      expected:
+        mismatchIndex === undefined ? undefined : expected[mismatchIndex],
+      actual: mismatchIndex === undefined ? undefined : actual[mismatchIndex],
+    })}`,
+  );
+}
 
 async function readShadowSymbolRows(shadowDbPath: string): Promise<
   Array<{

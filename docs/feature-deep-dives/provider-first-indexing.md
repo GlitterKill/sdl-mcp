@@ -362,6 +362,8 @@ Finalized runs also report `copy=bulkCsv` and the number of finalization artifac
 
 If artifact writes or shadow loading fail, the CLI prints a skipped-staging or skipped-load line with the reason. When activation is not attempted or cannot complete safely, the CLI prints a separate `Provider-first shadow DB activation skipped` or failed line with the missing prerequisites or rollback status.
 
+After a finalized shadow is swapped into the active path, SDL-MCP reopens it and rebuilds or verifies the configured critical Symbol FTS index before accepting the handoff. If that required index is absent or the FTS runtime is unavailable, activation fails and restores the previous active database. The post-handoff validation runs only against the newly activated shadow, so reopening the restored backup does not repeat the failed validation.
+
 ### Coverage Diagnostics
 
 The `Provider-first coverage` line reports:

@@ -50,6 +50,7 @@ export interface ActivateProviderFirstShadowDbWithHandoffParams
   extends ActivateProviderFirstShadowDbParams {
   closeActiveDb: () => Promise<void>;
   reopenActiveDb: (activeDbPath: string) => Promise<void>;
+  validateActivatedDb?: (activeDbPath: string) => Promise<void>;
 }
 
 export function summarizeProviderFirstShadowActivationReadiness(
@@ -257,9 +258,10 @@ export async function activateProviderFirstShadowDbWithHandoff(
 
   try {
     await params.reopenActiveDb(activeDbPath);
+    await params.validateActivatedDb?.(activeDbPath);
     return activation;
   } catch (err) {
-    const reopenReason = `activated shadow LadybugDB could not be reopened; rolling back to previous active DB: ${errorMessage(err)}`;
+    const reopenReason = `activated shadow LadybugDB could not be reopened or validated; rolling back to previous active DB: ${errorMessage(err)}`;
     return rollbackAfterReopenFailure({
       params,
       activation,
