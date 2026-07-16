@@ -85,11 +85,15 @@ export async function queryFeedbackBoosts(
   try {
     // Dynamic imports to avoid pulling OTel/DB chains at module load time
     const { entitySearch } = await import("./orchestrator.js");
-    const { getAgentFeedbackBoostRows } =
+    const { getAgentFeedbackBoostRows, hasAgentFeedbackForRepo } =
       await import("../db/ladybug-feedback.js");
     const { safeJsonParse, StringArraySchema } =
       await import("../util/safeJson.js");
     const { logger } = await import("../util/logger.js");
+
+    if (!(await hasAgentFeedbackForRepo(conn, options.repoId))) {
+      return { boosts: new Map(), feedbackHits: [] };
+    }
 
     const searchResult = await entitySearch({
       repoId: options.repoId,

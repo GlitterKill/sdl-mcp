@@ -111,6 +111,20 @@ export type AgentFeedbackBoostRow = Pick<
   "feedbackId" | "usefulSymbolsJson" | "missingSymbolsJson" | "taskType"
 >;
 
+export async function hasAgentFeedbackForRepo(
+  conn: Connection,
+  repoId: string,
+): Promise<boolean> {
+  const row = await querySingle<{ feedbackId: string }>(
+    conn,
+    `MATCH (f:AgentFeedback {repoId: $repoId})
+     RETURN f.feedbackId AS feedbackId
+     LIMIT 1`,
+    { repoId },
+  );
+  return row !== null;
+}
+
 export async function getAgentFeedbackBoostRows(
   conn: Connection,
   feedbackIds: readonly string[],

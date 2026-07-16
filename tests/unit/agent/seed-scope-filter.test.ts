@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { filterSeedCandidatesToScope } from "../../../dist/agent/context-seeding.js";
+import {
+  filterSeedCandidatesToScope,
+  rankScopedSeedSymbols,
+} from "../../../dist/agent/context-seeding.js";
 import type { ContextSeedCandidate } from "../../../dist/agent/types.js";
 
 function candidate(
@@ -91,5 +94,25 @@ describe("filterSeedCandidatesToScope", () => {
     );
 
     assert.strictEqual(filtered, candidates);
+  });
+});
+
+describe("rankScopedSeedSymbols", () => {
+  it("ranks exact query terms ahead of partial name matches", () => {
+    const ranked = rankScopedSeedSymbols(
+      [
+        { symbolId: "partial", name: "workflowNoise" },
+        { symbolId: "schema", name: "WorkflowRequestSchema" },
+        { symbolId: "unrelated", name: "unrelatedHelper" },
+        { symbolId: "handler", name: "handleWorkflow" },
+      ],
+      "handleWorkflow WorkflowRequestSchema workflow",
+      3,
+    );
+
+    assert.deepEqual(
+      ranked.map((symbol) => symbol.symbolId),
+      ["handler", "schema", "partial"],
+    );
   });
 });

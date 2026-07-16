@@ -55,7 +55,7 @@ describe("context seeding policy", () => {
   it("filters scoped candidates before source and final caps", () => {
     const src = source();
     const scopeFilter = src.indexOf(
-      "const scopeFilteredCandidates = filterSeedCandidatesToScope(",
+      "const resolvedScopedCandidates = filterSeedCandidatesToScope(",
     );
     const primaryCap = src.indexOf(".slice(0, primarySourceCap)", scopeFilter);
     const lexicalCap = src.indexOf(".slice(0, lexicalTargetCap)", scopeFilter);
@@ -65,5 +65,38 @@ describe("context seeding policy", () => {
     assert.ok(primaryCap > scopeFilter, "semantic cap must follow scope filter");
     assert.ok(lexicalCap > scopeFilter, "lexical cap must follow scope filter");
     assert.ok(finalCap > scopeFilter, "final cap must follow scope filter");
+  });
+
+  it("uses the existing scoped file and symbol batches for precise lexical seeding", () => {
+    const src = source();
+
+    assert.match(src, /getFileIdsByRepoPaths/);
+    assert.match(src, /getExportedSymbolsLiteByFileIds/);
+    assert.match(src, /const useScopedPreciseLexical/);
+  });
+
+  it("only queries feedback for explicit feedback intent on the scoped fast path", () => {
+    const src = source();
+
+    assert.match(
+      src,
+      /\(!useScopedPreciseLexical \|\| taskMentionsFeedback\)/,
+    );
+  });
+
+  it("does not re-resolve lexical candidates already loaded from explicit scope", () => {
+    const src = source();
+
+    assert.match(
+      src,
+      /const candidatesNeedingScopeResolution = useScopedPreciseLexical/,
+    );
+  });
+
+  it("short-circuits path resolution when no candidates need filtering", () => {
+    assert.match(
+      source(),
+      /if \(candidates\.length === 0\) return new Map<string, string>\(\)/,
+    );
   });
 });

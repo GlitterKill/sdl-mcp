@@ -14,6 +14,7 @@ import {
   getAgentFeedbackByRepo,
   getAgentFeedbackByVersion,
   getAggregatedFeedback,
+  hasAgentFeedbackForRepo,
   type AuditRow,
   type AgentFeedbackRow,
 } from "../../dist/db/ladybug-feedback.js";
@@ -189,6 +190,15 @@ describe("ladybug-feedback queries", () => {
   it("getAgentFeedback returns null for unknown id", async () => {
     const found = await getAgentFeedback(conn, "missing-fb");
     assert.strictEqual(found, null);
+  });
+
+  it("hasAgentFeedbackForRepo short-circuits empty repositories", async () => {
+    assert.equal(await hasAgentFeedbackForRepo(conn, repoId), false);
+
+    await upsertAgentFeedback(conn, makeFeedbackRow("fb-exists"));
+
+    assert.equal(await hasAgentFeedbackForRepo(conn, repoId), true);
+    assert.equal(await hasAgentFeedbackForRepo(conn, "other-repo"), false);
   });
 
   it("upsertAgentFeedback updates existing row", async () => {
