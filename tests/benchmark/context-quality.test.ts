@@ -42,6 +42,7 @@ interface Evidence {
   type: string;
   reference: string;
   summary: string;
+  timestamp: number;
 }
 
 interface ContextResult {
@@ -109,7 +110,10 @@ let contextEngine: ContextEngineLike | undefined;
 let closeLadybugDb: (() => Promise<void>) | undefined;
 let ladybugConn: LadybugConnection | undefined;
 let ladybugQueries:
-  | Pick<LadybugQueries, "getSymbolsByIds" | "getFilesByIds">
+  | Pick<
+      LadybugQueries,
+      "getSymbolsByIds" | "getFilesByIds" | "getFileIdsByRepoPaths"
+    >
   | undefined;
 let normalizeEvidencePath: PathsModule["normalizePath"] | undefined;
 
@@ -186,27 +190,58 @@ async function resolveEvidencePaths(
       return { symbolId: reference.slice("hotpath:".length) };
     }
     if (reference.startsWith("file:")) {
-      return { fileId: reference.slice("file:".length) };
+      // Skeleton evidence historically used this prefix for a file ID, a
+      // repository-relative path, or a symbol ID. Resolve all three shapes in
+      // batches so benchmark assertions reflect evidence positions faithfully.
+      return { fileReference: reference.slice("file:".length) };
     }
     return {};
   });
   const symbolIds = [
-    ...new Set(references.flatMap(({ symbolId }) => (symbolId ? [symbolId] : []))),
+    ...new Set(
+      references.flatMap(({ symbolId, fileReference }) =>
+        symbolId ? [symbolId] : fileReference ? [fileReference] : [],
+      ),
+    ),
   ];
   const symbols = await ladybugQueries.getSymbolsByIds(ladybugConn, symbolIds);
-  const fileIds = new Set(
-    references.flatMap(({ fileId }) => (fileId ? [fileId] : [])),
+  const fileReferences = [
+    ...new Set(
+      references.flatMap(({ fileReference }) =>
+        fileReference ? [fileReference] : [],
+      ),
+    ),
+  ];
+  const fileIdsByPath = await ladybugQueries.getFileIdsByRepoPaths(
+    ladybugConn,
+    REPO_ID,
+    fileReferences,
   );
+  const fileIds = new Set(fileReferences);
   for (const symbol of symbols.values()) {
     fileIds.add(symbol.fileId);
   }
+  for (const fileId of fileIdsByPath.values()) {
+    fileIds.add(fileId);
+  }
   const files = await ladybugQueries.getFilesByIds(ladybugConn, [...fileIds]);
 
-  return references.map(({ symbolId, fileId }) => {
-    const resolvedFileId = fileId ?? (symbolId ? symbols.get(symbolId)?.fileId : undefined);
+  return references.map(({ symbolId, fileReference }) => {
+    const resolvedFileId = symbolId
+      ? symbols.get(symbolId)?.fileId
+      : fileReference
+        ? files.has(fileReference)
+          ? fileReference
+          : (symbols.get(fileReference)?.fileId ??
+            fileIdsByPath.get(normalizeEvidencePath(fileReference)))
+        : undefined;
     const file = resolvedFileId ? files.get(resolvedFileId) : undefined;
     return file ? normalizeEvidencePath(file.relPath) : undefined;
   });
+}
+
+function hasResolvablePathReference(evidence: Evidence): boolean {
+  return /^(?:symbol|hotpath|file):/.test(evidence.reference);
 }
 
 async function runCase(
@@ -508,12 +543,23 @@ describe("context quality benchmarks", () => {
     const result = await contextEngine.buildContext(
       buildTask(c, { name: "default" }, true),
     );
-    const resolvedPaths = (await resolveEvidencePaths(result.finalEvidence ?? [])).filter(
+    const evidence = result.finalEvidence ?? [];
+    const resolvedByPosition = await resolveEvidencePaths(evidence);
+    const unresolvedPathReferences = evidence.filter(
+      (item, index) =>
+        hasResolvablePathReference(item) && resolvedByPosition[index] === undefined,
+    );
+    const resolvedPaths = resolvedByPosition.filter(
       (path): path is string => path !== undefined,
     );
     console.log(`[context-quality] Case A resolved paths: ${resolvedPaths.join(", ")}`);
 
     assert.equal(result.success, true, "Scoped tool-QA lookup should succeed");
+    assert.deepEqual(
+      unresolvedPathReferences,
+      [],
+      "Scoped tool-QA path references should all resolve",
+    );
     assert.ok(resolvedPaths.length > 0, "Scoped tool-QA evidence should resolve paths");
     assert.ok(
       resolvedPaths.every((path) => path.startsWith("tests/")),
@@ -544,10 +590,15 @@ describe("context quality benchmarks", () => {
     const result = await contextEngine.buildContext(
       buildTask(c, { name: "default" }, false),
     );
-    const resolvedPaths = (await resolveEvidencePaths(result.finalEvidence ?? [])).filter(
+    const evidence = result.finalEvidence ?? [];
+    const resolvedByPosition = await resolveEvidencePaths(evidence);
+    const resolvedPaths = resolvedByPosition.filter(
       (path): path is string => path !== undefined,
     );
-    const topFive = resolvedPaths.slice(0, 5);
+    const topFiveEvidence = evidence.slice(0, 5);
+    const topFive = resolvedByPosition
+      .slice(0, 5)
+      .filter((path): path is string => path !== undefined);
     console.log(`[context-quality] Case B resolved top 5: ${topFive.join(", ")}`);
 
     assert.equal(result.success, true, "Broad tool-QA lookup should succeed");
@@ -561,7 +612,11 @@ describe("context quality benchmarks", () => {
       `Broad tool-QA evidence missed SDL tool implementation: ${resolvedPaths.join(", ")}`,
     );
     assert.ok(
-      !topFive.includes("scripts/evaluate-seed-resolution.ts"),
+      !topFive.includes("scripts/evaluate-seed-resolution.ts") &&
+        !topFiveEvidence.some(
+          ({ reference }) =>
+            reference === "file:scripts/evaluate-seed-resolution.ts",
+        ),
       `Seed evaluation script ranked in the top 5: ${topFive.join(", ")}`,
     );
   });
