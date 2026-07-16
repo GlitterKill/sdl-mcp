@@ -336,6 +336,54 @@ describe("Agent Planner", () => {
       assert.strictEqual(context.length, 20);
     });
 
+    it("applies one fallback cap across multiple directories", async () => {
+      const conn = await getLadybugConn();
+      const now = "2026-07-15T00:00:00.000Z";
+      await queries.upsertRepo(conn, {
+        repoId: "multi-directory-repo",
+        rootPath: "C:/tmp/multi-directory-repo",
+        configJson: "{}",
+        createdAt: now,
+      });
+      for (const directory of ["tests", "specs"]) {
+        for (let index = 0; index < 12; index++) {
+          const suffix = index.toString().padStart(2, "0");
+          await queries.upsertFile(conn, {
+            fileId: `${directory}-${suffix}`,
+            repoId: "multi-directory-repo",
+            relPath: `${directory}/${suffix}-unrelated.ts`,
+            contentHash: `${directory}-${suffix}-hash`,
+            language: "ts",
+            byteSize: 1,
+            lastIndexedAt: now,
+          });
+        }
+      }
+      await queries.upsertFile(conn, {
+        fileId: "specs-workflow",
+        repoId: "multi-directory-repo",
+        relPath: "specs/zz-workflow-aggregation.test.ts",
+        contentHash: "specs-workflow-hash",
+        language: "ts",
+        byteSize: 1,
+        lastIndexedAt: now,
+      });
+      const task = createTask("review", {
+        repoId: "multi-directory-repo",
+        taskText: "Find workflow aggregation coverage",
+        options: { focusPaths: ["tests", "specs"] },
+      });
+
+      const context = await planner.expandDirectoryFocusPaths(task);
+
+      assert.strictEqual(context.length, 20);
+      assert.strictEqual(
+        context[0],
+        "file:specs/zz-workflow-aggregation.test.ts",
+      );
+      assert.strictEqual(new Set(context).size, context.length);
+    });
+
     it("expands dot paths from the repository root", async () => {
       const task = createTask("debug", {
         options: { focusPaths: [".", "./"] },

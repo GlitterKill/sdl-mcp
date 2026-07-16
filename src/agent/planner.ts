@@ -467,8 +467,7 @@ export class Planner {
 
   /** Expand directory focus paths for the scoped zero-seed fallback. */
   async expandDirectoryFocusPaths(task: AgentTask): Promise<string[]> {
-    const context: string[] = [];
-    const seen = new Set<string>();
+    const candidates = new Map<string, Awaited<ReturnType<typeof getFilesByPrefix>>[number]>();
     const focusPaths = normalizedFocusPaths(task);
     const taskTerms = directoryFallbackTerms(task.taskText);
     let conn: Awaited<ReturnType<typeof getLadybugConn>>;
@@ -476,7 +475,7 @@ export class Planner {
     try {
       conn = await getLadybugConn();
     } catch {
-      return context;
+      return [];
     }
 
     for (const focusPath of focusPaths) {
@@ -494,31 +493,30 @@ export class Planner {
           prefix,
           DIRECTORY_FALLBACK_CANDIDATE_LIMIT,
         );
-        // Bounded overfetch lets task-relevant paths outrank the deterministic
-        // prefix window without turning fallback into an unbounded directory read.
-        files.sort((left, right) => {
-          const score = (relPath: string): number => {
-            const normalized = normalizePath(relPath).toLowerCase();
-            return taskTerms.reduce(
-              (total, term) => total + Number(normalized.includes(term)),
-              0,
-            );
-          };
-          return score(right.relPath) - score(left.relPath);
-        });
-        for (const file of files.slice(0, DIRECTORY_FALLBACK_LIMIT)) {
-          const ref = `file:${file.relPath}`;
-          if (!seen.has(ref)) {
-            context.push(ref);
-            seen.add(ref);
-          }
+        // Each directory query has a 200-row recall ceiling. If wider scopes
+        // miss relevant files, move relevance ranking into the DB query.
+        for (const file of files) {
+          if (!candidates.has(file.relPath)) candidates.set(file.relPath, file);
         }
       } catch {
         // Directory expansion is a best-effort fallback.
       }
     }
 
-    return context;
+    return [...candidates.values()]
+      .map((file) => {
+        const normalized = normalizePath(file.relPath).toLowerCase();
+        return {
+          file,
+          score: taskTerms.reduce(
+            (total, term) => total + Number(normalized.includes(term)),
+            0,
+          ),
+        };
+      })
+      .sort((left, right) => right.score - left.score)
+      .slice(0, DIRECTORY_FALLBACK_LIMIT)
+      .map(({ file }) => `file:${file.relPath}`);
   }
 
   validateTask(task: AgentTask): { valid: boolean; error?: string } {
