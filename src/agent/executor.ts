@@ -1320,15 +1320,22 @@ export class Executor {
     const startTime = Date.now();
 
     try {
-      const { symbolIds: symbols } = await this.resolveContextToSymbols(
+      const { symbolIds: rawSymbols } = await this.resolveContextToSymbols(
         context,
         task,
       );
+      // Raw access must honor the same explicit path contract as the cheaper
+      // rungs. This is especially important during dynamic escalation, where
+      // raw was not necessarily part of the original plan.
+      const symbols =
+        explicitFocusPaths(task.options).length > 0
+          ? await this.selectTopSymbols(rawSymbols, task, MAX_RAW_SYMBOLS)
+          : rawSymbols.slice(0, MAX_RAW_SYMBOLS);
       const identifiers = this.extractIdentifiersFromTask(task);
 
       let processedCount = 0;
 
-      for (const symbolId of symbols.slice(0, MAX_RAW_SYMBOLS)) {
+      for (const symbolId of symbols) {
         // Check top-level policy deny. Finer-grained downgrades
         // (downgrade-to-skeleton, downgrade-to-hotpath) are enforced by
         // the gate evaluator (decide → enforce) rather than the executor,

@@ -71,6 +71,99 @@ describe("executor raw rung", () => {
     assert.deepEqual(action.output, { symbolsProcessed: 0 });
   });
 
+  it("enforces strict precise focusPaths before requesting raw windows", async () => {
+    const requestedSymbols: string[] = [];
+    const mockGate: GateEvaluator = async (request) => {
+      requestedSymbols.push(request.symbolId);
+      const file =
+        request.symbolId === "in-scope"
+          ? "tests/in-scope.test.ts"
+          : "src/out-of-scope.ts";
+      return {
+        approved: true,
+        repoId: request.repoId,
+        symbolId: request.symbolId,
+        file,
+        range: { startLine: 1, startCol: 0, endLine: 5, endCol: 0 },
+        code: "const scoped = true;",
+        whyApproved: ["identifiers-match"],
+        whyDenied: [],
+        estimatedTokens: 20,
+      };
+    };
+    const createSymbol = (symbolId: string, fileId: string) => ({
+      symbolId,
+      repoId: "test-repo",
+      fileId,
+      kind: "function",
+      name: `${symbolId}Handler`,
+      exported: true,
+      visibility: null,
+      language: "typescript",
+      rangeStartLine: 1,
+      rangeStartCol: 0,
+      rangeEndLine: 2,
+      rangeEndCol: 0,
+      astFingerprint: symbolId,
+      signatureJson: null,
+      summary: "Scoped raw access fixture",
+      invariantsJson: null,
+      sideEffectsJson: null,
+      roleTagsJson: null,
+      searchText: null,
+      external: undefined,
+      packageName: null,
+      packageVersion: null,
+      scipSymbol: null,
+      updatedAt: "now",
+    });
+    const symbolMap = new Map([
+      ["out-of-scope", createSymbol("out-of-scope", "src/out-of-scope.ts")],
+      ["in-scope", createSymbol("in-scope", "tests/in-scope.test.ts")],
+    ]);
+    const dbQueries: ExecutorDbQueries = {
+      getFileByRepoPath: async () => null,
+      getSymbolIdsByFile: async () => [],
+      getFilesByPrefix: async () => [],
+      getSymbolsByFile: async () => [],
+      getClusterMembers: async () => [],
+      getProcessStepsByIds: async () => [],
+      getSymbolsByIds: async (_conn, symbolIds) =>
+        new Map(
+          symbolIds.flatMap((symbolId) => {
+            const symbol = symbolMap.get(symbolId);
+            return symbol ? [[symbolId, symbol]] : [];
+          }),
+        ),
+      getFilesByIds: async () => new Map(),
+      searchSymbols: async () => [],
+    };
+    const executor = new Executor(mockGate, dbQueries);
+    const privateExecutor = executor as unknown as {
+      connPromise: Promise<unknown> | null;
+    };
+    privateExecutor.connPromise = Promise.resolve({});
+    const task: AgentTask = {
+      taskType: "debug",
+      taskText: "Inspect scoped raw context",
+      repoId: "test-repo",
+      options: { contextMode: "precise", focusPaths: ["tests"] },
+    };
+
+    const result = await executor.execute(task, ["raw"], [
+      "symbol:out-of-scope",
+      "symbol:in-scope",
+    ]);
+
+    assert.deepEqual(requestedSymbols, ["in-scope"]);
+    assert.deepEqual(
+      result.evidence
+        .filter((evidence) => evidence.type === "codeWindow")
+        .map((evidence) => evidence.reference),
+      ["window:tests/in-scope.test.ts:5"],
+    );
+  });
+
   it("remains successful when a later rung fails after capturing evidence", async () => {
     const mockGate: GateEvaluator = async () => ({
       approved: true,
