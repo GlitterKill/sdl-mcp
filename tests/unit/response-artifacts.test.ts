@@ -341,6 +341,13 @@ describe("response artifact storage", () => {
 
   it("requires an explicit retrieval mode before slicing JSON artifacts", async () => {
     const baseDir = makeTempDir();
+    const configPath = join(baseDir, "sdl.config.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({ repos: [], policy: {}, runtime: { artifactBaseDir: baseDir } }),
+    );
+    process.env.SDL_CONFIG = configPath;
+    invalidateConfigCache();
     const payload = {
       finalEvidence: [{ reference: "symbol:alpha" }],
       padding: "x".repeat(2000),
@@ -358,10 +365,9 @@ describe("response artifact storage", () => {
 
     await assert.rejects(
       () =>
-        readResponseArtifact({
+        handleResponseGet({
           repoId: "repo-a",
           handle: stored.payload.handle,
-          artifactBaseDir: baseDir,
           maxBytes: 20,
         }),
       (error: unknown) => {
@@ -458,6 +464,23 @@ describe("response artifact storage", () => {
       (error: unknown) => {
         assert.ok(error instanceof ValidationError);
         assert.match(error.message, /offset and limit.*jsonPath/i);
+        return true;
+      },
+    );
+
+    await assert.rejects(
+      () =>
+        readResponseArtifact({
+          repoId: "repo-a",
+          handle: stored.payload.handle,
+          artifactBaseDir: baseDir,
+          jsonPath: "finalEvidence[0]",
+          offset: 0,
+          limit: 1,
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof ValidationError);
+        assert.match(error.message, /jsonPath.*resolves to an array/i);
         return true;
       },
     );

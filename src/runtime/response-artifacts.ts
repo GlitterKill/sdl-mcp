@@ -698,9 +698,17 @@ export async function readResponseArtifact(
       throw new Error(`jsonPath not found: ${opts.jsonPath}`);
     }
 
+    const pagingRequested =
+      opts.offset !== undefined || opts.limit !== undefined;
+    if (pagingRequested && !Array.isArray(extractedContent)) {
+      throw new ValidationError(
+        "offset and limit require a jsonPath that resolves to an array.",
+      );
+    }
+
     let content = extractedContent;
     let pagination: ResponseArtifactPagination | undefined;
-    if (Array.isArray(extractedContent) && (opts.offset !== undefined || opts.limit !== undefined)) {
+    if (Array.isArray(extractedContent) && pagingRequested) {
       const offset = Math.min(Math.max(0, opts.offset ?? 0), extractedContent.length);
       const limit = Math.max(1, opts.limit ?? extractedContent.length);
       const page = extractedContent.slice(offset, offset + limit);
