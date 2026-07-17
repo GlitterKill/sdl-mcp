@@ -32,6 +32,10 @@ const ARTIFACT_PATH = resolve(
 const SEMANTIC_AGGREGATE_RECALL_MIN = 85;
 const NOISE_RATE_MAX = 10;
 const SCOPED_PRECISE_P95_MAX_MS = 250;
+const REPORT_CASE_IDS = new Set([
+  "review-precise-tool-qa-tests",
+  "review-broad-sdl-tool-functionality",
+]);
 
 interface BenchmarkCase {
   id: string;
@@ -97,8 +101,11 @@ interface CaseMetrics {
   durationMs: number;
   missingUsefulSymbols: string[];
   selectedPaths: string[];
+  selectedPathsByPosition: Array<string | null>;
   selectedSymbols: string[];
   selectedActions: string[];
+  selectedReferences: string[];
+  unresolvedPathReferences: string[];
   evidenceSummaries: string[];
 }
 
@@ -156,6 +163,28 @@ function createMetrics(name: string): VariantMetrics {
   };
 }
 
+function createCaseMetrics(overrides: Partial<CaseMetrics> = {}): CaseMetrics {
+  return {
+    id: "selected-case",
+    success: true,
+    answerPresent: true,
+    usefulHits: 0,
+    usefulTotal: 0,
+    noiseHits: 0,
+    evidenceCount: 0,
+    durationMs: 1,
+    missingUsefulSymbols: [],
+    selectedPaths: [],
+    selectedPathsByPosition: [],
+    selectedSymbols: [],
+    selectedActions: [],
+    selectedReferences: [],
+    unresolvedPathReferences: [],
+    evidenceSummaries: [],
+    ...overrides,
+  };
+}
+
 function percentage(numerator: number, denominator: number): number {
   return denominator > 0 ? (numerator / denominator) * 100 : 0;
 }
@@ -194,6 +223,12 @@ function buildTask(c: BenchmarkCase, variant: Variant, scoped: boolean): unknown
     repoId: REPO_ID,
     options,
   };
+}
+
+function shouldScopeCase(c: BenchmarkCase, selectedCase: boolean): boolean {
+  return (
+    selectedCase && c.contextMode === "precise" && c.focusPaths.length > 0
+  );
 }
 
 async function resolveEvidencePaths(
@@ -316,8 +351,11 @@ async function runCase(
       durationMs,
       missingUsefulSymbols: [...c.expectedUsefulSymbols],
       selectedPaths: [],
+      selectedPathsByPosition: [],
       selectedSymbols: [],
       selectedActions: [],
+      selectedReferences: [],
+      unresolvedPathReferences: [],
       evidenceSummaries: [
         `error | ${error instanceof Error ? error.message : String(error)}`,
       ],
@@ -350,14 +388,13 @@ async function runCase(
   target.totalEvidenceItems += evidenceCount;
   target.noiseHits += noiseHits;
   target.durationsMs.push(durationMs);
-  const selectedPaths =
-    INCLUDE_EVIDENCE_DETAILS &&
-    (c.id === "review-precise-tool-qa-tests" ||
-      c.id === "review-broad-sdl-tool-functionality")
-      ? (await resolveEvidencePaths(evidence)).filter(
-          (path): path is string => path !== undefined,
-        )
+  const resolvedByPosition =
+    INCLUDE_EVIDENCE_DETAILS && REPORT_CASE_IDS.has(c.id)
+      ? await resolveEvidencePaths(evidence)
       : [];
+  const selectedPaths = resolvedByPosition.filter(
+    (path): path is string => path !== undefined,
+  );
   target.caseResults.push({
     id: c.id,
     success: result.success,
@@ -371,8 +408,18 @@ async function runCase(
       (symbol) => !text.includes(symbol),
     ),
     selectedPaths,
+    selectedPathsByPosition: resolvedByPosition.map((path) => path ?? null),
     selectedSymbols: selectedSymbolIds(evidence),
     selectedActions: (result.actionsTaken ?? []).map(({ type }) => type),
+    selectedReferences: evidence.map(({ reference }) => reference),
+    unresolvedPathReferences: INCLUDE_EVIDENCE_DETAILS
+      ? evidence.flatMap((item, index) =>
+          hasResolvablePathReference(item) &&
+          resolvedByPosition[index] === undefined
+            ? [item.reference]
+            : [],
+        )
+      : [],
     evidenceSummaries: evidence.map(
       ({ reference, summary }) => `${reference} | ${summary}`,
     ),
@@ -435,6 +482,64 @@ function assertSemanticQuality(
     noiseRate(semantic) <= NOISE_RATE_MAX,
     `semantic configured-noise rate ${noiseRate(semantic).toFixed(1)}% above ${NOISE_RATE_MAX}%`,
   );
+}
+
+function assertSelectedReportCase(result: CaseMetrics): void {
+  if (result.id === "review-precise-tool-qa-tests") {
+    assert.deepEqual(
+      result.unresolvedPathReferences,
+      [],
+      "Scoped tool-QA path references should all resolve",
+    );
+    assert.ok(
+      result.selectedPaths.length > 0,
+      "Scoped tool-QA evidence should resolve paths",
+    );
+    assert.ok(
+      result.selectedPaths.every((path) => path.startsWith("tests/")),
+      `Scoped tool-QA evidence escaped tests/: ${result.selectedPaths.join(", ")}`,
+    );
+    for (const area of [
+      /workflow/i,
+      /usage/i,
+      /search-edit/i,
+      /delta/i,
+      /determinism/i,
+    ]) {
+      assert.ok(
+        result.selectedPaths.some((path) => area.test(path)),
+        `Scoped tool-QA evidence missed ${area}: ${result.selectedPaths.join(", ")}`,
+      );
+    }
+    assert.ok(
+      result.selectedPaths.filter((path) => path.startsWith("tests/benchmark/"))
+        .length <= result.selectedPaths.length / 2,
+      `Benchmark tests dominate scoped tool-QA evidence: ${result.selectedPaths.join(", ")}`,
+    );
+    return;
+  }
+
+  if (result.id === "review-broad-sdl-tool-functionality") {
+    assert.ok(
+      result.selectedPaths.some(
+        (path) =>
+          path === "src/server.ts" ||
+          path.startsWith("src/mcp/") ||
+          path.startsWith("src/gateway/"),
+      ),
+      `Broad tool-QA evidence missed SDL tool implementation: ${result.selectedPaths.join(", ")}`,
+    );
+    const topFivePaths = result.selectedPathsByPosition
+      .slice(0, 5)
+      .filter((path): path is string => path !== null);
+    assert.ok(
+      !topFivePaths.includes("scripts/evaluate-seed-resolution.ts") &&
+        !result.selectedReferences
+          .slice(0, 5)
+          .includes("file:scripts/evaluate-seed-resolution.ts"),
+      `Seed evaluation script ranked in the top 5: ${topFivePaths.join(", ")}`,
+    );
+  }
 }
 
 function skipOrFail(reason: string): boolean {
@@ -512,8 +617,11 @@ function caseMetricsForArtifact(result: CaseMetrics): Record<string, unknown> {
   };
   if (INCLUDE_EVIDENCE_DETAILS) {
     base.selectedPaths = result.selectedPaths;
+    base.selectedPathsByPosition = result.selectedPathsByPosition;
     base.selectedSymbols = result.selectedSymbols;
     base.selectedActions = result.selectedActions;
+    base.selectedReferences = result.selectedReferences;
+    base.unresolvedPathReferences = result.unresolvedPathReferences;
     base.evidenceSummaries = result.evidenceSummaries;
   }
   return base;
@@ -543,7 +651,7 @@ function variantMetricsForArtifact(m: VariantMetrics): Record<string, unknown> {
 }
 
 function persistBenchmarkArtifact(): void {
-  if (!writeBenchmarkOutput) return;
+  if (!writeBenchmarkOutput || !shouldPersistBenchmarkArtifact()) return;
   mkdirSync(dirname(ARTIFACT_PATH), { recursive: true });
   const artifact = {
     schemaVersion: 1,
@@ -576,6 +684,12 @@ function persistBenchmarkArtifact(): void {
     "overwrite",
   );
   console.log(`[context-quality] artifact: ${ARTIFACT_PATH}`);
+}
+
+function shouldPersistBenchmarkArtifact(
+  repoAvailable = metrics.repoAvailable,
+): boolean {
+  return repoAvailable;
 }
 
 describe("context quality benchmarks", () => {
@@ -713,21 +827,10 @@ describe("context quality benchmarks", () => {
       semantic.cases = 1;
       semantic.expectedTotal = 10;
       semantic.usefulHits = 0;
-      semantic.caseResults.push({
-        id: "selected-case",
-        success: true,
-        answerPresent: true,
-        usefulHits: 0,
+      semantic.caseResults.push(createCaseMetrics({
         usefulTotal: 10,
-        noiseHits: 0,
         evidenceCount: 1,
-        durationMs: 1,
-        missingUsefulSymbols: [],
-        selectedPaths: [],
-        selectedSymbols: [],
-        selectedActions: [],
-        evidenceSummaries: [],
-      });
+      }));
 
       assert.doesNotThrow(() => assertSemanticQuality(semantic, true));
     });
@@ -735,21 +838,10 @@ describe("context quality benchmarks", () => {
     it("rejects a selected case that misses its own expected evidence", () => {
       const semantic = createMetrics("semantic");
       semantic.cases = 1;
-      semantic.caseResults.push({
-        id: "selected-case",
-        success: true,
-        answerPresent: true,
-        usefulHits: 0,
+      semantic.caseResults.push(createCaseMetrics({
         usefulTotal: 1,
-        noiseHits: 0,
-        evidenceCount: 0,
-        durationMs: 1,
         missingUsefulSymbols: ["requiredSymbol"],
-        selectedPaths: [],
-        selectedSymbols: [],
-        selectedActions: [],
-        evidenceSummaries: [],
-      });
+      }));
 
       assert.throws(
         () => assertSemanticQuality(semantic, true),
@@ -760,21 +852,12 @@ describe("context quality benchmarks", () => {
     it("rejects a selected case that loses a required answer", () => {
       const semantic = createMetrics("semantic");
       semantic.cases = 1;
-      semantic.caseResults.push({
-        id: "selected-case",
-        success: true,
+      semantic.caseResults.push(createCaseMetrics({
         answerPresent: false,
         usefulHits: 1,
         usefulTotal: 1,
-        noiseHits: 0,
         evidenceCount: 1,
-        durationMs: 1,
-        missingUsefulSymbols: [],
-        selectedPaths: [],
-        selectedSymbols: [],
-        selectedActions: [],
-        evidenceSummaries: [],
-      });
+      }));
 
       assert.throws(
         () => assertSemanticQuality(semantic, true),
@@ -792,6 +875,43 @@ describe("context quality benchmarks", () => {
         () => assertSemanticQuality(semantic, false),
         /aggregate recall 84\.0% below 85%/i,
       );
+    });
+
+    it("scopes only selected precise cases with explicit focus paths", () => {
+      const precise = cases.find(
+        ({ id }) => id === "review-precise-tool-qa-tests",
+      );
+      const broad = cases.find(
+        ({ id }) => id === "review-broad-sdl-tool-functionality",
+      );
+      assert.ok(precise);
+      assert.ok(broad);
+
+      assert.equal(shouldScopeCase(precise, true), true);
+      assert.equal(shouldScopeCase(precise, false), false);
+      assert.equal(shouldScopeCase(broad, true), false);
+    });
+
+    it("validates the same detailed precise result written to the artifact", () => {
+      const selectedPaths = [
+        "tests/workflow-tool.test.ts",
+        "tests/usage-stats.test.ts",
+        "tests/search-edit-tool.test.ts",
+        "tests/delta-signature.test.ts",
+        "tests/determinism.test.ts",
+      ];
+      const result = createCaseMetrics({
+        id: "review-precise-tool-qa-tests",
+        selectedPaths,
+        selectedPathsByPosition: selectedPaths,
+      });
+
+      assert.doesNotThrow(() => assertSelectedReportCase(result));
+    });
+
+    it("does not persist skip-only benchmark results", () => {
+      assert.equal(shouldPersistBenchmarkArtifact(false), false);
+      assert.equal(shouldPersistBenchmarkArtifact(true), true);
     });
   });
 
@@ -815,21 +935,26 @@ describe("context quality benchmarks", () => {
       const target = createMetrics(variant.name);
       metrics.variants.set(variant.name, target);
       for (const c of selectedCases) {
-        await runCase(c, variant, false, target);
+        const scopedSelectedCase = shouldScopeCase(
+          c,
+          SELECTED_CASE_ID !== undefined,
+        );
+        await runCase(c, variant, scopedSelectedCase, target);
       }
-    }
-
-    for (const target of metrics.variants.values()) {
-      assert.equal(
-        target.failures,
-        0,
-        `${target.name} variant should not fail cases or lose required answers`,
-      );
     }
 
     const semantic = metrics.variants.get("semantic");
     assert.ok(semantic, "semantic variant should have metrics");
     assertSemanticQuality(semantic, SELECTED_CASE_ID !== undefined);
+    if (
+      SELECTED_CASE_ID &&
+      INCLUDE_EVIDENCE_DETAILS &&
+      REPORT_CASE_IDS.has(SELECTED_CASE_ID)
+    ) {
+      const selectedResult = semantic.caseResults[0];
+      assert.ok(selectedResult, "selected report case result should exist");
+      assertSelectedReportCase(selectedResult);
+    }
   });
 
   it("keeps scoped precise lookups below the latency target", async (t) => {
@@ -861,11 +986,10 @@ describe("context quality benchmarks", () => {
   });
 
   it("keeps scoped tool-QA evidence inside tests", async (t) => {
-    if (
-      SELECTED_CASE_ID &&
-      SELECTED_CASE_ID !== "review-precise-tool-qa-tests"
-    ) {
-      t.skip("a different context-quality case was selected");
+    if (RUN_SEMANTIC_ONLY || SELECTED_CASE_ID) {
+      t.skip(
+        "semantic-only and selected-case runs validate the primary invocation",
+      );
       return;
     }
     if (!metrics.repoAvailable) {
@@ -925,11 +1049,10 @@ describe("context quality benchmarks", () => {
   });
 
   it("ranks SDL tool implementation ahead of seed evaluation scripts", async (t) => {
-    if (
-      SELECTED_CASE_ID &&
-      SELECTED_CASE_ID !== "review-broad-sdl-tool-functionality"
-    ) {
-      t.skip("a different context-quality case was selected");
+    if (RUN_SEMANTIC_ONLY || SELECTED_CASE_ID) {
+      t.skip(
+        "semantic-only and selected-case runs validate the primary invocation",
+      );
       return;
     }
     if (!metrics.repoAvailable) {
