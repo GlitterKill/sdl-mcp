@@ -888,11 +888,7 @@ export function createGraphIntegrityFileDigest(params: {
         `Graph integrity symbol ${symbol.symbolId} belongs to ${symbol.fileId}, expected ${params.fileId}`,
       );
     }
-    if (symbol.symbolId === previousSymbolId) {
-      throw new Error(
-        `Graph integrity input contains duplicate symbol ${symbol.symbolId}`,
-      );
-    }
+    if (symbol.symbolId === previousSymbolId) continue;
     appendCanonicalSymbol(builder, symbol);
     previousSymbolId = symbol.symbolId;
   }
@@ -940,7 +936,11 @@ export function createGraphIntegrityFilelessSymbols(rows: {
     ) {
       continue;
     }
-    const metadata = edge.targetMeta ?? classifyDependencyTarget(edge.toSymbolId);
+    // Finalization canonicalizes unresolved placeholders from their encoded ID,
+    // so stale resolver hints must not make the pre-write expectation diverge.
+    const metadata = edge.toSymbolId.startsWith("unresolved:")
+      ? classifyDependencyTarget(edge.toSymbolId)
+      : edge.targetMeta ?? classifyDependencyTarget(edge.toSymbolId);
     if (metadata.symbolStatus === "real") continue;
     fileless.set(edge.toSymbolId, {
       symbolId: edge.toSymbolId,

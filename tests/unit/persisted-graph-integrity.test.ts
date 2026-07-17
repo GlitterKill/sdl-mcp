@@ -161,6 +161,28 @@ describe("persisted graph integrity", () => {
     );
   });
 
+  it("mirrors persistence by keeping the first duplicate symbol row", () => {
+    const createFileDigest = requiredFunction<SyncFn>(
+      integrityModule,
+      "createGraphIntegrityFileDigest",
+    );
+    const first = symbolRow();
+    const duplicate = symbolRow({ name: "duplicate parser row" });
+
+    assert.deepEqual(
+      createFileDigest({
+        fileId: first.fileId,
+        relPath: "src/alpha.ts",
+        symbols: [first, duplicate],
+      }),
+      createFileDigest({
+        fileId: first.fileId,
+        relPath: "src/alpha.ts",
+        symbols: [first],
+      }),
+    );
+  });
+
   it("matches Ladybug UTF-8 ordering for Unicode paths and symbol ids", async () => {
     root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-unicode-order-"));
     await initLadybugDb(join(root, "unicode-order.lbug"));
@@ -654,6 +676,57 @@ describe("persisted graph integrity", () => {
       ],
       "full and baseline plans aggregate repeated references instead of retaining edges",
     );
+  });
+
+  it("canonicalizes unresolved fileless metadata from the symbol ID", () => {
+    const createFilelessSymbols = requiredFunction<SyncFn>(
+      integrityModule,
+      "createGraphIntegrityFilelessSymbols",
+    );
+    const unresolvedId = "unresolved:./helpers.sh:*";
+    const rows = createFilelessSymbols({
+      symbols: [],
+      externalSymbols: [],
+      edges: [
+        {
+          repoId: "repo",
+          fromSymbolId: "sym:alpha",
+          toSymbolId: unresolvedId,
+          edgeType: "import",
+          weight: 0.5,
+          confidence: 0.5,
+          resolution: "unresolved",
+          targetMeta: {
+            symbolStatus: "external",
+            placeholderKind: "scip",
+            placeholderTarget: "stale edge hint",
+          },
+          createdAt: "2026-07-16T00:00:00.000Z",
+        },
+      ],
+    }) as Array<Record<string, unknown>>;
+
+    assert.deepEqual(rows, [
+      {
+        symbolId: unresolvedId,
+        fileId: "",
+        name: unresolvedId,
+        kind: "unknown",
+        language: "unknown",
+        rangeStartLine: 0,
+        rangeStartCol: 0,
+        rangeEndLine: 0,
+        rangeEndCol: 0,
+        signatureJson: null,
+        source: "treesitter",
+        scipSymbol: null,
+        astFingerprint: unresolvedId,
+        symbolStatus: "unresolved",
+        external: false,
+        placeholderKind: "import",
+        placeholderTarget: "* (from ./helpers.sh)",
+      },
+    ]);
   });
 
   it("tracks baseline liveness as counts and current incremental source deltas", () => {
