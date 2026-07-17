@@ -1,7 +1,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
 /**
@@ -24,6 +24,10 @@ const INCLUDE_CASE_DETAILS =
   CASE_DETAIL_MODE === "1" || CASE_DETAIL_MODE === "missing";
 const INCLUDE_EVIDENCE_DETAILS = CASE_DETAIL_MODE === "1";
 const SELECTED_CASE_ID = process.env.SDL_CONTEXT_QUALITY_CASE_ID;
+const ARTIFACT_PATH = resolve(
+  process.env.SDL_CONTEXT_QUALITY_OUTPUT_PATH ??
+    ".benchmark/context-quality-results.json",
+);
 
 const SEMANTIC_AGGREGATE_RECALL_MIN = 85;
 const NOISE_RATE_MAX = 10;
@@ -52,6 +56,9 @@ interface ContextResult {
   finalEvidence?: Evidence[];
   success: boolean;
   answer?: string;
+  actionsTaken?: Array<{
+    type: string;
+  }>;
 }
 
 interface ContextEngineLike {
@@ -76,17 +83,23 @@ interface VariantMetrics {
   totalEvidenceItems: number;
   noiseHits: number;
   durationsMs: number[];
-  caseResults: Array<{
-    id: string;
-    success: boolean;
-    usefulHits: number;
-    usefulTotal: number;
-    noiseHits: number;
-    evidenceCount: number;
-    durationMs: number;
-    missingUsefulSymbols: string[];
-    evidenceSummaries: string[];
-  }>;
+  caseResults: CaseMetrics[];
+}
+
+interface CaseMetrics {
+  id: string;
+  success: boolean;
+  answerPresent: boolean;
+  usefulHits: number;
+  usefulTotal: number;
+  noiseHits: number;
+  evidenceCount: number;
+  durationMs: number;
+  missingUsefulSymbols: string[];
+  selectedPaths: string[];
+  selectedSymbols: string[];
+  selectedActions: string[];
+  evidenceSummaries: string[];
 }
 
 type LadybugModule = typeof import("../../dist/db/ladybug.js");
@@ -95,6 +108,8 @@ type LadybugConnection = Awaited<
 >;
 type LadybugQueries = typeof import("../../dist/db/ladybug-queries.js");
 type PathsModule = typeof import("../../dist/util/paths.js");
+type BenchmarkOutputModule =
+  typeof import("../../dist/benchmark/output-file.js");
 
 const variants: Variant[] = [
   { name: "lexical", semantic: false },
@@ -121,6 +136,7 @@ let ladybugQueries:
     >
   | undefined;
 let normalizeEvidencePath: PathsModule["normalizePath"] | undefined;
+let writeBenchmarkOutput: BenchmarkOutputModule["writeUtf8Output"] | undefined;
 
 function createMetrics(name: string): VariantMetrics {
   return {
@@ -249,6 +265,30 @@ function hasResolvablePathReference(evidence: Evidence): boolean {
   return /^(?:symbol|hotpath|file):/.test(evidence.reference);
 }
 
+function hasRequiredAnswer(c: BenchmarkCase, result: ContextResult): boolean {
+  if (!c.requireAnswer) return true;
+  const answer = result.answer?.trim();
+  return Boolean(answer && !/\[answer (?:removed|truncated)/i.test(answer));
+}
+
+function selectedSymbolIds(evidence: Evidence[]): string[] {
+  const selected = evidence.flatMap(({ reference }) => {
+    const match = /^(?:symbol|hotpath):(.+)$/.exec(reference);
+    return match?.[1] ? [match[1]] : [];
+  });
+  return [...new Set(selected)];
+}
+
+function recordCaseTotals(target: VariantMetrics, c: BenchmarkCase): void {
+  target.cases++;
+  target.expectedTotal += c.expectedUsefulSymbols.length;
+  if (c.contextMode === "precise") {
+    target.preciseExpectedTotal += c.expectedUsefulSymbols.length;
+  } else {
+    target.broadExpectedTotal += c.expectedUsefulSymbols.length;
+  }
+}
+
 async function runCase(
   c: BenchmarkCase,
   variant: Variant,
@@ -257,15 +297,36 @@ async function runCase(
 ): Promise<void> {
   assert.ok(contextEngine, "ContextEngine must be initialized before benchmarking");
   const startedAt = performance.now();
+  recordCaseTotals(target, c);
   let result: ContextResult;
   try {
     result = await contextEngine.buildContext(buildTask(c, variant, scoped));
-  } catch {
+  } catch (error) {
+    const durationMs = performance.now() - startedAt;
     target.failures++;
+    target.durationsMs.push(durationMs);
+    target.caseResults.push({
+      id: c.id,
+      success: false,
+      answerPresent: !c.requireAnswer,
+      usefulHits: 0,
+      usefulTotal: c.expectedUsefulSymbols.length,
+      noiseHits: 0,
+      evidenceCount: 0,
+      durationMs,
+      missingUsefulSymbols: [...c.expectedUsefulSymbols],
+      selectedPaths: [],
+      selectedSymbols: [],
+      selectedActions: [],
+      evidenceSummaries: [
+        `error | ${error instanceof Error ? error.message : String(error)}`,
+      ],
+    });
     return;
   }
 
   const durationMs = performance.now() - startedAt;
+  const evidence = result.finalEvidence ?? [];
   const text = evidenceText(result);
   let usefulHits = 0;
   let noiseHits = 0;
@@ -277,24 +338,30 @@ async function runCase(
     if (text.includes(sym)) noiseHits++;
   }
 
-  const evidenceCount = result.finalEvidence?.length ?? 0;
-  target.cases++;
-  if (!result.success) target.failures++;
-  target.expectedTotal += c.expectedUsefulSymbols.length;
+  const evidenceCount = evidence.length;
+  const answerPresent = hasRequiredAnswer(c, result);
+  if (!result.success || !answerPresent) target.failures++;
   target.usefulHits += usefulHits;
   if (c.contextMode === "precise") {
-    target.preciseExpectedTotal += c.expectedUsefulSymbols.length;
     target.preciseUsefulHits += usefulHits;
   } else {
-    target.broadExpectedTotal += c.expectedUsefulSymbols.length;
     target.broadUsefulHits += usefulHits;
   }
   target.totalEvidenceItems += evidenceCount;
   target.noiseHits += noiseHits;
   target.durationsMs.push(durationMs);
+  const selectedPaths =
+    INCLUDE_EVIDENCE_DETAILS &&
+    (c.id === "review-precise-tool-qa-tests" ||
+      c.id === "review-broad-sdl-tool-functionality")
+      ? (await resolveEvidencePaths(evidence)).filter(
+          (path): path is string => path !== undefined,
+        )
+      : [];
   target.caseResults.push({
     id: c.id,
     success: result.success,
+    answerPresent,
     usefulHits,
     usefulTotal: c.expectedUsefulSymbols.length,
     noiseHits,
@@ -303,7 +370,10 @@ async function runCase(
     missingUsefulSymbols: c.expectedUsefulSymbols.filter(
       (symbol) => !text.includes(symbol),
     ),
-    evidenceSummaries: (result.finalEvidence ?? []).map(
+    selectedPaths,
+    selectedSymbols: selectedSymbolIds(evidence),
+    selectedActions: (result.actionsTaken ?? []).map(({ type }) => type),
+    evidenceSummaries: evidence.map(
       ({ reference, summary }) => `${reference} | ${summary}`,
     ),
   });
@@ -323,6 +393,48 @@ function broadRecall(m: VariantMetrics): number {
 
 function noiseRate(m: VariantMetrics): number {
   return percentage(m.noiseHits, m.totalEvidenceItems);
+}
+
+function assertSemanticQuality(
+  semantic: VariantMetrics,
+  selectedCase: boolean,
+): void {
+  assert.equal(semantic.failures, 0, "semantic variant should not fail cases");
+
+  if (selectedCase) {
+    assert.equal(
+      semantic.caseResults.length,
+      1,
+      "selected semantic run should produce exactly one case result",
+    );
+    const result = semantic.caseResults[0];
+    assert.ok(result, "selected semantic case result should exist");
+    assert.deepEqual(
+      result.missingUsefulSymbols,
+      [],
+      `selected case ${result.id} missing expected evidence: ${result.missingUsefulSymbols.join(", ")}`,
+    );
+    assert.equal(
+      result.noiseHits,
+      0,
+      `selected case ${result.id} returned configured noise`,
+    );
+    assert.equal(
+      result.answerPresent,
+      true,
+      `selected case ${result.id} did not preserve its required answer`,
+    );
+    return;
+  }
+
+  assert.ok(
+    recall(semantic) >= SEMANTIC_AGGREGATE_RECALL_MIN,
+    `semantic aggregate recall ${recall(semantic).toFixed(1)}% below ${SEMANTIC_AGGREGATE_RECALL_MIN}%`,
+  );
+  assert.ok(
+    noiseRate(semantic) <= NOISE_RATE_MAX,
+    `semantic configured-noise rate ${noiseRate(semantic).toFixed(1)}% above ${NOISE_RATE_MAX}%`,
+  );
 }
 
 function skipOrFail(reason: string): boolean {
@@ -386,6 +498,86 @@ function buildReport(): string {
   return lines.join("\n");
 }
 
+function caseMetricsForArtifact(result: CaseMetrics): Record<string, unknown> {
+  const base: Record<string, unknown> = {
+    id: result.id,
+    success: result.success,
+    answerPresent: result.answerPresent,
+    usefulHits: result.usefulHits,
+    usefulTotal: result.usefulTotal,
+    noiseHits: result.noiseHits,
+    evidenceCount: result.evidenceCount,
+    durationMs: result.durationMs,
+    missingUsefulSymbols: result.missingUsefulSymbols,
+  };
+  if (INCLUDE_EVIDENCE_DETAILS) {
+    base.selectedPaths = result.selectedPaths;
+    base.selectedSymbols = result.selectedSymbols;
+    base.selectedActions = result.selectedActions;
+    base.evidenceSummaries = result.evidenceSummaries;
+  }
+  return base;
+}
+
+function variantMetricsForArtifact(m: VariantMetrics): Record<string, unknown> {
+  return {
+    name: m.name,
+    cases: m.cases,
+    failures: m.failures,
+    expectedTotal: m.expectedTotal,
+    usefulHits: m.usefulHits,
+    recallPercent: recall(m),
+    preciseRecallPercent: preciseRecall(m),
+    broadRecallPercent: broadRecall(m),
+    totalEvidenceItems: m.totalEvidenceItems,
+    noiseHits: m.noiseHits,
+    noiseRatePercent: noiseRate(m),
+    latencyMs: {
+      p50: percentile(m.durationsMs, 50),
+      p95: percentile(m.durationsMs, 95),
+      max: Math.max(0, ...m.durationsMs),
+      total: m.durationsMs.reduce((sum, durationMs) => sum + durationMs, 0),
+    },
+    caseResults: m.caseResults.map(caseMetricsForArtifact),
+  };
+}
+
+function persistBenchmarkArtifact(): void {
+  if (!writeBenchmarkOutput) return;
+  mkdirSync(dirname(ARTIFACT_PATH), { recursive: true });
+  const artifact = {
+    schemaVersion: 1,
+    benchmark: "context-quality",
+    repoId: REPO_ID,
+    corpusCaseCount: metrics.totalCases,
+    selectedCaseId: SELECTED_CASE_ID ?? null,
+    requestedVariant: RUN_SEMANTIC_ONLY ? "semantic" : "all",
+    detailMode: INCLUDE_EVIDENCE_DETAILS
+      ? "evidence"
+      : INCLUDE_CASE_DETAILS
+        ? "missing"
+        : "none",
+    repoAvailable: metrics.repoAvailable,
+    availabilityReason: metrics.availabilityReason,
+    thresholds: {
+      semanticAggregateRecallMinPercent: SEMANTIC_AGGREGATE_RECALL_MIN,
+      semanticNoiseRateMaxPercent: NOISE_RATE_MAX,
+      scopedPreciseP95MaxMs: SCOPED_PRECISE_P95_MAX_MS,
+    },
+    variants: [...metrics.variants.values()].map(variantMetricsForArtifact),
+    scopedPrecise:
+      metrics.scopedPrecise.cases > 0
+        ? variantMetricsForArtifact(metrics.scopedPrecise)
+        : null,
+  };
+  writeBenchmarkOutput(
+    ARTIFACT_PATH,
+    `${JSON.stringify(artifact, null, 2)}\n`,
+    "overwrite",
+  );
+  console.log(`[context-quality] artifact: ${ARTIFACT_PATH}`);
+}
+
 describe("context quality benchmarks", () => {
   before(async () => {
     const casesPath = join(import.meta.dirname, "context-quality-cases.json");
@@ -402,6 +594,7 @@ describe("context quality benchmarks", () => {
         queries,
         paths,
         engine,
+        benchmarkOutput,
       ] =
         await Promise.all([
           import("../../dist/config/configPath.js"),
@@ -412,7 +605,9 @@ describe("context quality benchmarks", () => {
           import("../../dist/db/ladybug-queries.js"),
           import("../../dist/util/paths.js"),
           import("../../dist/agent/context-engine.js"),
+          import("../../dist/benchmark/output-file.js"),
         ]);
+      writeBenchmarkOutput = benchmarkOutput.writeUtf8Output;
       const configPath = activateCliConfigPath(process.env.SDL_CONFIG);
       const config = loadConfig(configPath);
       const graphDbPath = await initGraphDb(config, configPath);
@@ -440,7 +635,11 @@ describe("context quality benchmarks", () => {
   });
 
   after(async () => {
-    await closeLadybugDb?.();
+    try {
+      persistBenchmarkArtifact();
+    } finally {
+      await closeLadybugDb?.();
+    }
   });
 
   describe("case structure validation", () => {
@@ -490,6 +689,110 @@ describe("context quality benchmarks", () => {
         );
       }
     });
+
+    it("keeps the broad and precise tool-QA report cases stable", () => {
+      const precise = cases.find(
+        ({ id }) => id === "review-precise-tool-qa-tests",
+      );
+      const broad = cases.find(
+        ({ id }) => id === "review-broad-sdl-tool-functionality",
+      );
+
+      assert.deepEqual(precise?.focusPaths, ["tests"]);
+      assert.equal(precise?.contextMode, "precise");
+      assert.equal(precise?.includeTests, true);
+      assert.deepEqual(broad?.focusPaths, []);
+      assert.equal(broad?.contextMode, "broad");
+      assert.equal(broad?.requireAnswer, true);
+    });
+  });
+
+  describe("semantic gate selection", () => {
+    it("uses one selected case's own expectations instead of aggregate recall", () => {
+      const semantic = createMetrics("semantic");
+      semantic.cases = 1;
+      semantic.expectedTotal = 10;
+      semantic.usefulHits = 0;
+      semantic.caseResults.push({
+        id: "selected-case",
+        success: true,
+        answerPresent: true,
+        usefulHits: 0,
+        usefulTotal: 10,
+        noiseHits: 0,
+        evidenceCount: 1,
+        durationMs: 1,
+        missingUsefulSymbols: [],
+        selectedPaths: [],
+        selectedSymbols: [],
+        selectedActions: [],
+        evidenceSummaries: [],
+      });
+
+      assert.doesNotThrow(() => assertSemanticQuality(semantic, true));
+    });
+
+    it("rejects a selected case that misses its own expected evidence", () => {
+      const semantic = createMetrics("semantic");
+      semantic.cases = 1;
+      semantic.caseResults.push({
+        id: "selected-case",
+        success: true,
+        answerPresent: true,
+        usefulHits: 0,
+        usefulTotal: 1,
+        noiseHits: 0,
+        evidenceCount: 0,
+        durationMs: 1,
+        missingUsefulSymbols: ["requiredSymbol"],
+        selectedPaths: [],
+        selectedSymbols: [],
+        selectedActions: [],
+        evidenceSummaries: [],
+      });
+
+      assert.throws(
+        () => assertSemanticQuality(semantic, true),
+        /missing expected evidence.*requiredSymbol/i,
+      );
+    });
+
+    it("rejects a selected case that loses a required answer", () => {
+      const semantic = createMetrics("semantic");
+      semantic.cases = 1;
+      semantic.caseResults.push({
+        id: "selected-case",
+        success: true,
+        answerPresent: false,
+        usefulHits: 1,
+        usefulTotal: 1,
+        noiseHits: 0,
+        evidenceCount: 1,
+        durationMs: 1,
+        missingUsefulSymbols: [],
+        selectedPaths: [],
+        selectedSymbols: [],
+        selectedActions: [],
+        evidenceSummaries: [],
+      });
+
+      assert.throws(
+        () => assertSemanticQuality(semantic, true),
+        /did not preserve its required answer/i,
+      );
+    });
+
+    it("retains aggregate recall gates for the full suite", () => {
+      const semantic = createMetrics("semantic");
+      semantic.cases = 26;
+      semantic.expectedTotal = 100;
+      semantic.usefulHits = 84;
+
+      assert.throws(
+        () => assertSemanticQuality(semantic, false),
+        /aggregate recall 84\.0% below 85%/i,
+      );
+    });
   });
 
   it("runs lexical, confidence-gated default, and semantic retrieval variants", async () => {
@@ -516,22 +819,24 @@ describe("context quality benchmarks", () => {
       }
     }
 
+    for (const target of metrics.variants.values()) {
+      assert.equal(
+        target.failures,
+        0,
+        `${target.name} variant should not fail cases or lose required answers`,
+      );
+    }
+
     const semantic = metrics.variants.get("semantic");
     assert.ok(semantic, "semantic variant should have metrics");
-    assert.equal(semantic.failures, 0, "semantic variant should not fail cases");
-    assert.ok(
-      recall(semantic) >= SEMANTIC_AGGREGATE_RECALL_MIN,
-      `semantic aggregate recall ${recall(semantic).toFixed(1)}% below ${SEMANTIC_AGGREGATE_RECALL_MIN}%`,
-    );
-    assert.ok(
-      noiseRate(semantic) <= NOISE_RATE_MAX,
-      `semantic configured-noise rate ${noiseRate(semantic).toFixed(1)}% above ${NOISE_RATE_MAX}%`,
-    );
+    assertSemanticQuality(semantic, SELECTED_CASE_ID !== undefined);
   });
 
   it("keeps scoped precise lookups below the latency target", async (t) => {
-    if (RUN_SEMANTIC_ONLY) {
-      t.skip("semantic-only measurement excludes the default scoped gate");
+    if (RUN_SEMANTIC_ONLY || SELECTED_CASE_ID) {
+      t.skip(
+        "semantic-only and selected-case measurements exclude the default scoped gate",
+      );
       return;
     }
     if (!metrics.repoAvailable) {
@@ -555,7 +860,14 @@ describe("context quality benchmarks", () => {
     );
   });
 
-  it("keeps scoped tool-QA evidence inside tests", async () => {
+  it("keeps scoped tool-QA evidence inside tests", async (t) => {
+    if (
+      SELECTED_CASE_ID &&
+      SELECTED_CASE_ID !== "review-precise-tool-qa-tests"
+    ) {
+      t.skip("a different context-quality case was selected");
+      return;
+    }
     if (!metrics.repoAvailable) {
       skipOrFail(metrics.availabilityReason);
       return;
@@ -576,7 +888,11 @@ describe("context quality benchmarks", () => {
     const resolvedPaths = resolvedByPosition.filter(
       (path): path is string => path !== undefined,
     );
-    console.log(`[context-quality] Case A resolved paths: ${resolvedPaths.join(", ")}`);
+    if (INCLUDE_CASE_DETAILS) {
+      console.log(
+        `[context-quality] Case A resolved paths: ${resolvedPaths.join(", ")}`,
+      );
+    }
 
     assert.equal(result.success, true, "Scoped tool-QA lookup should succeed");
     assert.deepEqual(
@@ -608,7 +924,14 @@ describe("context quality benchmarks", () => {
     );
   });
 
-  it("ranks SDL tool implementation ahead of seed evaluation scripts", async () => {
+  it("ranks SDL tool implementation ahead of seed evaluation scripts", async (t) => {
+    if (
+      SELECTED_CASE_ID &&
+      SELECTED_CASE_ID !== "review-broad-sdl-tool-functionality"
+    ) {
+      t.skip("a different context-quality case was selected");
+      return;
+    }
     if (!metrics.repoAvailable) {
       skipOrFail(metrics.availabilityReason);
       return;
@@ -629,7 +952,11 @@ describe("context quality benchmarks", () => {
     const topFive = resolvedByPosition
       .slice(0, 5)
       .filter((path): path is string => path !== undefined);
-    console.log(`[context-quality] Case B resolved top 5: ${topFive.join(", ")}`);
+    if (INCLUDE_CASE_DETAILS) {
+      console.log(
+        `[context-quality] Case B resolved top 5: ${topFive.join(", ")}`,
+      );
+    }
 
     assert.equal(result.success, true, "Broad tool-QA lookup should succeed");
     assert.ok(
