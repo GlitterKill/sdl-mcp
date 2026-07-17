@@ -44,6 +44,7 @@ import {
 import { logger } from "../util/logger.js";
 import { safeJsonParse, StringArraySchema } from "../util/safeJson.js";
 import { captureActiveRepoEpoch } from "./repo-lifecycle.js";
+import { createSymbolSearchFallback } from "./symbol-search-fallback.js";
 
 /**
  * Compare an inbound `ifNoneMatch` header against the current ETag, treating
@@ -379,11 +380,10 @@ export async function buildCardForSymbol(
     overlaySnapshot,
   );
   if (!symbol) {
-    throw Object.assign(new NotFoundError(`Symbol not found: ${symbolId}`), {
-      fallbackTools: ["sdl.symbol.search", "sdl.action.search"],
-      fallbackRationale:
-        "Use sdl.symbol.search to discover the canonical symbol identifier.",
-    });
+    throw Object.assign(
+      new NotFoundError(`Symbol not found: ${symbolId}`),
+      createSymbolSearchFallback(),
+    );
   }
   if (symbol.repoId !== repoId) {
     throw new DatabaseError(

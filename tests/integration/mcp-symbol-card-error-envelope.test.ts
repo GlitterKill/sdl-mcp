@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -164,5 +164,32 @@ describe("missing symbol-card MCP error envelope", () => {
       error?.fallbackRationale,
       "Use sdl.symbol.search to discover the canonical symbol identifier.",
     );
+  });
+
+  it("keeps direct-id and symbol-ref missing-card guidance in parity", async () => {
+    const direct = (await client.callTool({
+      name: "sdl.symbol.getCard",
+      arguments: { repoId: REPO_ID, symbolId: "missing-direct" },
+    })) as ErrorEnvelope;
+    const symbolRef = (await client.callTool({
+      name: "sdl.symbol.getCard",
+      arguments: {
+        repoId: REPO_ID,
+        symbolRef: { name: "missing-reference" },
+      },
+    })) as ErrorEnvelope;
+
+    const guidance = (response: ErrorEnvelope) => {
+      const error = response.structuredContent?.error;
+      return {
+        isError: response.isError,
+        code: error?.code,
+        classification: error?.classification,
+        retryable: error?.retryable,
+        fallbackTools: error?.fallbackTools,
+        fallbackRationale: error?.fallbackRationale,
+      };
+    };
+    assert.deepEqual(guidance(symbolRef), guidance(direct));
   });
 });

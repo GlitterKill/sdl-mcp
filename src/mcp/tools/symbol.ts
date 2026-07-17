@@ -42,6 +42,7 @@ import type { RetrievalEvidence } from "../../retrieval/types.js";
 import { autoExtractMentions } from "../../retrieval/seed-resolver.js";
 import { logger } from "../../util/logger.js";
 import { buildCardForSymbol } from "../../services/card-builder.js";
+import { createSymbolSearchFallback } from "../../services/symbol-search-fallback.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
 import {
   resolveSymbolRef,
@@ -789,7 +790,6 @@ function createSymbolResolutionError(
   repoId: string,
   resolution: Exclude<SymbolRefResolution, { status: "resolved" }>,
 ): Error {
-  const fallbackTools = ["sdl.symbol.search", "sdl.action.search"];
   const candidatePayload = resolution.candidates.map((candidate) => ({
     symbolId: candidate.symbolId,
     name: candidate.name,
@@ -807,9 +807,9 @@ function createSymbolResolutionError(
     return Object.assign(error, {
       classification: "ambiguous_input",
       retryable: false,
-      fallbackTools,
-      fallbackRationale:
+      ...createSymbolSearchFallback(
         "Use sdl.symbol.search or provide file/kind hints to disambiguate.",
+      ),
       candidates: candidatePayload,
     });
   }
@@ -818,9 +818,7 @@ function createSymbolResolutionError(
   return Object.assign(error, {
     classification: "not_found",
     retryable: false,
-    fallbackTools,
-    fallbackRationale:
-      "Use sdl.symbol.search to discover the canonical symbol identifier.",
+    ...createSymbolSearchFallback(),
     candidates: candidatePayload,
   });
 }

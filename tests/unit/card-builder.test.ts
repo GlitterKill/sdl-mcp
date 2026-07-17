@@ -1,9 +1,8 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 import { clearAllCaches } from "../../dist/graph/cache.js";
 import { clearSnapshotCache } from "../../dist/live-index/overlay-reader.js";
@@ -17,13 +16,12 @@ import { buildCardForSymbol } from "../../dist/services/card-builder.js";
 import { NotFoundError } from "../../dist/domain/errors.js";
 import { PolicyEngine } from "../../dist/policy/engine.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 const TEST_DB_PATH = join(
   tmpdir(),
   `.lbug-card-builder-unit-test-db-${process.pid}.lbug`,
 );
 const ORIGINAL_GRAPH_DB_PATH = process.env.SDL_GRAPH_DB_PATH;
+const ORIGINAL_NATIVE_ADDON = process.env.SDL_MCP_DISABLE_NATIVE_ADDON;
 
 async function resetDb(): Promise<void> {
   clearAllCaches();
@@ -37,7 +35,6 @@ async function resetDb(): Promise<void> {
   ]) {
     if (existsSync(p)) rmSync(p, { recursive: true, force: true });
   }
-  mkdirSync(dirname(TEST_DB_PATH), { recursive: true });
   await initLadybugDb(TEST_DB_PATH);
 }
 
@@ -118,6 +115,11 @@ describe("card-builder", () => {
       delete process.env.SDL_GRAPH_DB_PATH;
     } else {
       process.env.SDL_GRAPH_DB_PATH = ORIGINAL_GRAPH_DB_PATH;
+    }
+    if (ORIGINAL_NATIVE_ADDON === undefined) {
+      delete process.env.SDL_MCP_DISABLE_NATIVE_ADDON;
+    } else {
+      process.env.SDL_MCP_DISABLE_NATIVE_ADDON = ORIGINAL_NATIVE_ADDON;
     }
   });
 
