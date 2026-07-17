@@ -6,6 +6,7 @@ import {
   getDerivedState,
   graphIntegrityIsVerifiedForVersion,
   markGraphIntegrityFailed,
+  markGraphIntegrityFailedIfVerifying,
   markGraphIntegrityVerifying,
   markGraphIntegrityVerifiedIfVerifying,
 } from "../../db/ladybug-derived-state.js";
@@ -156,7 +157,7 @@ export class GraphIntegrityVerificationError extends Error {
 }
 
 export interface GraphIntegrityVerificationOptions {
-  persistFailureState?: typeof markGraphIntegrityFailed;
+  persistFailureState?: typeof markGraphIntegrityFailedIfVerifying;
   /** Test barrier used to prove invalidation wins after the final read. */
   afterCapture?: () => Promise<void>;
 }
@@ -1316,7 +1317,7 @@ export async function completeGraphIntegrityVerification(
       });
     }
     try {
-      await (options.persistFailureState ?? markGraphIntegrityFailed)(
+      await (options.persistFailureState ?? markGraphIntegrityFailedIfVerifying)(
         repoId,
         versionId,
         PUBLIC_VERIFICATION_ERROR,
@@ -1337,7 +1338,7 @@ export async function failGraphIntegrityVerification(
   repoId: string,
   versionId: string,
 ): Promise<void> {
-  await markGraphIntegrityFailed(
+  await markGraphIntegrityFailedIfVerifying(
     repoId,
     versionId,
     "Persisted graph integrity verification did not complete",

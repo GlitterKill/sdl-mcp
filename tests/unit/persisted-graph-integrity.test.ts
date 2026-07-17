@@ -1533,6 +1533,77 @@ describe("persisted graph integrity", () => {
     assert.ok((row?.graphIntegrityError?.length ?? 0) <= 1_024);
   });
 
+  it("publishes failure only while the same verification owns state", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-failure-cas-"));
+    await initLadybugDb(join(root, "failure-cas.lbug"));
+    const markVerifying = requiredFunction<AsyncFn>(
+      derivedState,
+      "markGraphIntegrityVerifying",
+    );
+    const markFailedIfVerifying = requiredFunction<AsyncFn>(
+      derivedState,
+      "markGraphIntegrityFailedIfVerifying",
+    );
+
+    await markVerifying("repo", "v1");
+    assert.equal(
+      await markFailedIfVerifying("repo", "v2", "stale failure"),
+      false,
+    );
+    let row = await derivedState.getDerivedState("repo");
+    assert.equal(row?.graphIntegrityState, "verifying");
+    assert.equal(row?.graphIntegrityVersionId, "v1");
+    assert.equal(row?.graphIntegrityError, null);
+
+    assert.equal(
+      await markFailedIfVerifying("repo", "v1", "owned failure"),
+      true,
+    );
+    row = await derivedState.getDerivedState("repo");
+    assert.equal(row?.graphIntegrityState, "failed");
+    assert.equal(row?.graphIntegrityVersionId, "v1");
+    assert.equal(row?.graphIntegrityDigest, null);
+    assert.equal(row?.graphIntegrityError, "owned failure");
+  });
+
+  it("active verification cleanup preserves invalidated state", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-cleanup-cas-"));
+    await initLadybugDb(join(root, "cleanup-cas.lbug"));
+    const Session = requiredFunction<SyncFn>(
+      integrityModule,
+      "PersistedGraphIntegritySession",
+    ) as unknown as new (
+      repoId: string,
+      mode: "full" | "incremental",
+      enabled: boolean,
+    ) => {
+      begin: (versionId: string) => Promise<void>;
+    };
+    const failActive = requiredFunction<AsyncFn>(
+      integrityModule,
+      "failActiveGraphIntegrityVerification",
+    );
+    const invalidate = requiredFunction<AsyncFn>(
+      derivedState,
+      "invalidateGraphIntegrity",
+    );
+
+    const session = new Session("repo", "full", true);
+    await session.begin("v1");
+    await withWriteConn((conn) =>
+      ladybugDb.withTransaction(conn, (txConn) =>
+        invalidate(txConn, "repo"),
+      ),
+    );
+    await failActive("repo");
+
+    const row = await derivedState.getDerivedState("repo");
+    assert.equal(row?.graphIntegrityState, "unknown");
+    assert.equal(row?.graphIntegrityVersionId, null);
+    assert.equal(row?.graphIntegrityDigest, null);
+    assert.equal(row?.graphIntegrityError, null);
+  });
+
   it("normalizes legacy persistence defaults identically on both sides", async () => {
     root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-defaults-"));
     await initLadybugDb(join(root, "defaults.lbug"));
@@ -1715,7 +1786,7 @@ describe("persisted graph integrity", () => {
     assert.equal(stateWriteAttempted, true);
   });
 
-  it("publishes verification under the writer boundary so invalidation wins", async () => {
+  it("preserves unknown state when invalidation wins the verification race", async () => {
     root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-publish-race-"));
     await initLadybugDb(join(root, "publish-race.lbug"));
     const createFileDigest = requiredFunction<SyncFn>(
@@ -1799,8 +1870,97 @@ describe("persisted graph integrity", () => {
     );
 
     const row = await derivedState.getDerivedState("repo");
-    assert.notEqual(row?.graphIntegrityState, "verified");
+    assert.equal(row?.graphIntegrityState, "unknown");
+    assert.equal(row?.graphIntegrityVersionId, null);
     assert.equal(row?.graphIntegrityDigest, null);
+    assert.equal(row?.graphIntegrityError, null);
+  });
+
+  it("preserves a newer verified version when stale verification resumes", async () => {
+    root = mkdtempSync(join(tmpdir(), "sdl-graph-integrity-newer-race-"));
+    await initLadybugDb(join(root, "newer-race.lbug"));
+    const createFileDigest = requiredFunction<SyncFn>(
+      integrityModule,
+      "createGraphIntegrityFileDigest",
+    );
+    const createExpectation = requiredFunction<SyncFn>(
+      integrityModule,
+      "createGraphIntegrityExpectation",
+    );
+    const complete = requiredFunction<AsyncFn>(
+      integrityModule,
+      "completeGraphIntegrityVerification",
+    );
+    const markVerifying = requiredFunction<AsyncFn>(
+      derivedState,
+      "markGraphIntegrityVerifying",
+    );
+    const markVerified = requiredFunction<AsyncFn>(
+      derivedState,
+      "markGraphIntegrityVerified",
+    );
+    const expectedRow = symbolRow({ source: undefined });
+    const expected = createExpectation([
+      createFileDigest({
+        fileId: expectedRow.fileId,
+        relPath: "src/alpha.ts",
+        symbols: [expectedRow],
+      }),
+    ]);
+
+    await withWriteConn(async (conn) => {
+      await ladybugDb.upsertRepo(conn, {
+        repoId: "repo",
+        rootPath: root,
+        configJson: "{}",
+        createdAt: "2026-07-16T00:00:00.000Z",
+      });
+      await ladybugDb.upsertFile(conn, {
+        fileId: expectedRow.fileId,
+        repoId: "repo",
+        relPath: "src/alpha.ts",
+        contentHash: "a".repeat(64),
+        language: "typescript",
+        byteSize: 10,
+        lastIndexedAt: "2026-07-16T00:00:00.000Z",
+      });
+      await ladybugDb.upsertKnownFileSymbols(conn, [expectedRow]);
+    });
+    await markVerifying("repo", "v1");
+
+    let captureReachedResolve!: () => void;
+    const captureReached = new Promise<void>((resolve) => {
+      captureReachedResolve = resolve;
+    });
+    let releasePublishResolve!: () => void;
+    const releasePublish = new Promise<void>((resolve) => {
+      releasePublishResolve = resolve;
+    });
+    const verification = complete("repo", "v1", expected, {
+      afterCapture: async () => {
+        captureReachedResolve();
+        await releasePublish;
+      },
+    });
+    const firstPhase = await Promise.race([
+      captureReached.then(() => "captured" as const),
+      verification.then(() => "published" as const),
+    ]);
+    assert.equal(firstPhase, "captured");
+
+    await markVerifying("repo", "v2");
+    await markVerified("repo", "v2", "b".repeat(64));
+    releasePublishResolve();
+    await assert.rejects(
+      verification,
+      /^Error: Persisted graph integrity verification failed$/,
+    );
+
+    const row = await derivedState.getDerivedState("repo");
+    assert.equal(row?.graphIntegrityState, "verified");
+    assert.equal(row?.graphIntegrityVersionId, "v2");
+    assert.equal(row?.graphIntegrityDigest, "b".repeat(64));
+    assert.equal(row?.graphIntegrityError, null);
   });
 
   it("requires verified integrity for the latest graph version", () => {

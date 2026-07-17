@@ -211,6 +211,35 @@ export async function markGraphIntegrityVerifiedIfVerifying(
   });
 }
 
+/** Publish failure only while the same verification attempt still owns state. */
+export async function markGraphIntegrityFailedIfVerifying(
+  repoId: string,
+  versionId: string,
+  error: string,
+): Promise<boolean> {
+  const updatedAt = getCurrentTimestamp();
+  return withWriteConn(async (wConn) => {
+    const row = await querySingle<{ repoId: string }>(
+      wConn,
+      `MATCH (d:DerivedState {repoId: $repoId})
+       WHERE d.graphIntegrityState = 'verifying'
+         AND d.graphIntegrityVersionId = $versionId
+       SET d.graphIntegrityState = 'failed',
+           d.graphIntegrityDigest = NULL,
+           d.graphIntegrityError = $graphIntegrityError,
+           d.updatedAt = $updatedAt
+       RETURN d.repoId AS repoId`,
+      {
+        repoId,
+        versionId,
+        graphIntegrityError: error.slice(0, 1024),
+        updatedAt,
+      },
+    );
+    return row !== null;
+  });
+}
+
 export async function markGraphIntegrityFailed(
   repoId: string,
   versionId: string,
