@@ -330,6 +330,20 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
     };
   }
 
+  async clearRepo(repoId: string): Promise<void> {
+    const drafts = this.overlayStore.listDrafts(repoId);
+    const staleSymbolIds = drafts
+      .flatMap((draft) => draft.parseResult?.symbols.map((symbol) => symbol.symbolId) ?? []);
+    getOverlayEmbeddingCache().invalidateMany(staleSymbolIds);
+    for (const draft of drafts) {
+      this.parseScheduler.cancel(`${repoId}:${draft.filePath}`);
+    }
+    this.overlayStore.clearRepo(repoId);
+    this.checkpointService.clearRepo(repoId);
+    this.reconcileWorker.clearRepo(repoId);
+    this.repoRootCache.delete(repoId);
+  }
+
   getOverlayStore(): OverlayStore {
     return this.overlayStore;
   }

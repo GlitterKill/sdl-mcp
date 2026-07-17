@@ -101,6 +101,8 @@ function codeNeedWindow(p: { symbolId: string; reason: string; expectedLines: nu
 function repoRegister(p: { rootPath: string }): { repoId: string }
 /** Get repository status */
 function repoStatus(p?: { detail?: "minimal" | "standard" | "full"; includeTelemetry?: boolean }): { status: object }
+/** Permanently remove a runtime repository registration */
+function repoUnregister(p: { confirmRepoId: string; discardDrafts?: boolean }): { ok: true; repoId: string; removed: true }
 /** Get codebase overview */
 function repoOverview(p: { level?: "stats" | "directories" | "full"; ifNoneMatch?: string }): object
 /** Refresh index */

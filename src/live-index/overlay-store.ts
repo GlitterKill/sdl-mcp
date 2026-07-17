@@ -208,6 +208,11 @@ export class OverlayStore {
     this.repoVersions.clear();
   }
 
+  clearRepo(repoId: string): void {
+    this.repos.delete(repoId);
+    this.repoVersions.delete(repoId);
+  }
+
   getRepoStats(repoId: string): {
     pendingBuffers: number;
     dirtyBuffers: number;

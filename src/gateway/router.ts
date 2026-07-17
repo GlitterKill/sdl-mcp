@@ -32,6 +32,7 @@ import {
 import {
   handleRepoRegister,
   handleRepoStatus,
+  handleRepoUnregister,
   handleRepoOverview,
   handleIndexRefresh,
 } from "../mcp/tools/repo.js";
@@ -111,6 +112,8 @@ export function createActionHandlerMap(
     "code.getHotPath": handleGetHotPath,
     "repo.register": handleRepoRegister,
     "repo.status": handleRepoStatus,
+    "repo.unregister": (args, ctx) =>
+      handleRepoUnregister(args, ctx, liveIndex),
     "repo.overview": handleRepoOverview,
     "index.refresh": handleIndexRefresh,
     "policy.get": handlePolicyGet,

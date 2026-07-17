@@ -605,6 +605,18 @@ export const RepoRegisterResponseSchema = z.object({
   proposedConfig: z.record(z.string(), z.unknown()).optional(),
 });
 
+export const RepoUnregisterRequestSchema = z.object({
+  repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  confirmRepoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
+  discardDrafts: z.boolean().optional().default(false),
+});
+
+export const RepoUnregisterResponseSchema = z.object({
+  ok: z.literal(true),
+  repoId: z.string().min(1),
+  removed: z.literal(true),
+});
+
 export const RepoStatusRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   surfaceMemories: z.boolean().optional().default(false),
@@ -2159,6 +2171,8 @@ export const RepoOverviewResponseSchema = z.union([
 
 export type RepoRegisterRequest = z.infer<typeof RepoRegisterRequestSchema>;
 export type RepoRegisterResponse = z.infer<typeof RepoRegisterResponseSchema>;
+export type RepoUnregisterRequest = z.infer<typeof RepoUnregisterRequestSchema>;
+export type RepoUnregisterResponse = z.infer<typeof RepoUnregisterResponseSchema>;
 export type RepoStatusRequest = z.infer<typeof RepoStatusRequestSchema>;
 export type RepoStatusResponse = z.infer<typeof RepoStatusResponseSchema>;
 export type IndexRefreshRequest = z.infer<typeof IndexRefreshRequestSchema>;

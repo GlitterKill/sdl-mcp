@@ -49,7 +49,7 @@ describe("Gateway tool registration", () => {
     );
   });
 
-  it("registers 34 tools when gateway enabled with legacy", () => {
+  it("registers 35 tools when gateway enabled with legacy", () => {
     const names: string[] = [];
     const fakeServer = makeFakeGatewayServer(names);
 
@@ -62,7 +62,7 @@ describe("Gateway tool registration", () => {
       },
     );
 
-    // 2 universal + 4 gateway + 28 legacy = 34
+    // 2 universal + 4 gateway + 29 legacy = 35
     assert.ok(names.includes("sdl.query"), "expected sdl.query gateway tool");
     assert.ok(
       names.includes("sdl.repo.register"),
@@ -75,8 +75,8 @@ describe("Gateway tool registration", () => {
     assert.ok(names.includes("sdl.info"), "expected sdl.info universal tool");
     assert.strictEqual(
       names.length,
-      34,
-      "expected 34 tools (2 universal + 4 gateway + 28 legacy)",
+      35,
+      "expected 35 tools (2 universal + 4 gateway + 29 legacy)",
     );
   });
 

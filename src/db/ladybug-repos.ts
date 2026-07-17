@@ -131,31 +131,64 @@ export async function deleteRepo(
   repoId: string,
 ): Promise<void> {
   await withTransaction(conn, async (txConn) => {
+    // Capture owned identifiers before deleting files so file-backed and
+    // fileless (for example external SCIP placeholder) symbols share one
+    // deterministic cleanup path.
     const fileRows = await queryAll<{ fileId: string }>(
       txConn,
       `MATCH (r:Repo {repoId: $repoId})<-[:FILE_IN_REPO]-(f:File)
        RETURN f.fileId AS fileId`,
       { repoId },
     );
+    const propertySymbolRows = await queryAll<{ symbolId: string }>(
+      txConn,
+      `MATCH (s:Symbol {repoId: $repoId}) RETURN s.symbolId AS symbolId`,
+      { repoId },
+    );
+    const relatedSymbolRows = await queryAll<{ symbolId: string }>(
+      txConn,
+      `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(r:Repo {repoId: $repoId})
+       RETURN s.symbolId AS symbolId`,
+      { repoId },
+    );
+    const symbolIds = [
+      ...new Set(
+        [...propertySymbolRows, ...relatedSymbolRows].map((row) => row.symbolId),
+      ),
+    ];
+    const sharedSymbolRows =
+      symbolIds.length === 0
+        ? []
+        : await queryAll<{ symbolId: string; repoId: string }>(
+            txConn,
+            `MATCH (s:Symbol)-[:SYMBOL_IN_REPO]->(other:Repo)
+             WHERE s.symbolId IN $symbolIds AND other.repoId <> $repoId
+             RETURN s.symbolId AS symbolId, other.repoId AS repoId
+             ORDER BY s.symbolId, other.repoId`,
+            { symbolIds, repoId },
+          );
+    const replacementOwnerBySymbol = new Map<string, string>();
+    for (const row of sharedSymbolRows) {
+      if (!replacementOwnerBySymbol.has(row.symbolId)) {
+        replacementOwnerBySymbol.set(row.symbolId, row.repoId);
+      }
+    }
+    const sharedSymbolIds = new Set(replacementOwnerBySymbol.keys());
+    const deletedSymbolIds = symbolIds.filter(
+      (symbolId) => !sharedSymbolIds.has(symbolId),
+    );
 
     const fileIds = fileRows.map((r) => r.fileId);
     await deleteFilesByIds(txConn, fileIds);
 
-    // Collect versionIds before deleting Version nodes so we can clean up SymbolVersions
+    // Collect versionIds before deleting Version nodes so SymbolVersion rows
+    // can be removed by either owned version or owned symbol.
     const versionRows = await queryAll<{ versionId: string }>(
       txConn,
       `MATCH (v:Version)-[:VERSION_OF_REPO]->(r:Repo {repoId: $repoId})
        RETURN v.versionId AS versionId`,
       { repoId },
     );
-    // Clean up Version nodes and their edges
-    await exec(
-      txConn,
-      `MATCH (v:Version)-[e:VERSION_OF_REPO]->(r:Repo {repoId: $repoId}) DELETE e, v`,
-      { repoId },
-    );
-
-    // Clean up orphaned SymbolVersion nodes for the deleted versions
     const versionIds = versionRows.map((r) => r.versionId);
     if (versionIds.length > 0) {
       await exec(
@@ -164,8 +197,75 @@ export async function deleteRepo(
         { versionIds },
       );
     }
+    if (deletedSymbolIds.length > 0) {
+      await exec(
+        txConn,
+        `MATCH (sv:SymbolVersion) WHERE sv.symbolId IN $deletedSymbolIds DELETE sv`,
+        { deletedSymbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (m:Metrics) WHERE m.symbolId IN $deletedSymbolIds DELETE m`,
+        { deletedSymbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (e:SymbolEmbedding) WHERE e.symbolId IN $deletedSymbolIds DELETE e`,
+        { deletedSymbolIds },
+      );
+      await exec(
+        txConn,
+        `MATCH (s:SummaryCache) WHERE s.symbolId IN $deletedSymbolIds DELETE s`,
+        { deletedSymbolIds },
+      );
+      for (const statement of [
+        `MATCH (s:Symbol)-[e:DEPENDS_ON]->(:Symbol)
+         WHERE s.symbolId IN $deletedSymbolIds DELETE e`,
+        `MATCH (:Symbol)-[e:DEPENDS_ON]->(s:Symbol)
+         WHERE s.symbolId IN $deletedSymbolIds DELETE e`,
+        `MATCH (s:Symbol)-[e:SYMBOL_IN_FILE]->(:File)
+         WHERE s.symbolId IN $deletedSymbolIds DELETE e`,
+        `MATCH (s:Symbol)-[e:SYMBOL_IN_REPO]->(:Repo)
+         WHERE s.symbolId IN $deletedSymbolIds DELETE e`,
+        `MATCH (s:Symbol)-[e:BELONGS_TO_CLUSTER]->(:Cluster)
+         WHERE s.symbolId IN $deletedSymbolIds DELETE e`,
+        `MATCH (s:Symbol)-[e:BELONGS_TO_SHADOW_CLUSTER]->(:ShadowCluster)
+         WHERE s.symbolId IN $deletedSymbolIds DELETE e`,
+        `MATCH (s:Symbol)-[e:PARTICIPATES_IN]->(:Process)
+         WHERE s.symbolId IN $deletedSymbolIds DELETE e`,
+        `MATCH (:Memory)-[e:MEMORY_OF]->(s:Symbol)
+         WHERE s.symbolId IN $deletedSymbolIds DELETE e`,
+      ]) {
+        await exec(txConn, statement, { deletedSymbolIds });
+      }
+      await exec(
+        txConn,
+        `MATCH (s:Symbol) WHERE s.symbolId IN $deletedSymbolIds DELETE s`,
+        { deletedSymbolIds },
+      );
+    }
+    if (replacementOwnerBySymbol.size > 0) {
+      const replacements = Array.from(replacementOwnerBySymbol, ([symbolId, ownerRepoId]) => ({
+        symbolId,
+        ownerRepoId,
+      }));
+      await exec(
+        txConn,
+        `UNWIND $replacements AS replacement
+         MATCH (s:Symbol {symbolId: replacement.symbolId})-[e:SYMBOL_IN_REPO]->(r:Repo {repoId: $repoId})
+         DELETE e
+         SET s.repoId = replacement.ownerRepoId`,
+        { replacements, repoId },
+      );
+    }
 
-    // Clean up Cluster nodes (delete all edge types before nodes)
+    await exec(
+      txConn,
+      `MATCH (v:Version)-[e:VERSION_OF_REPO]->(r:Repo {repoId: $repoId})
+       DELETE e, v`,
+      { repoId },
+    );
+
     await exec(
       txConn,
       `MATCH (c:Cluster {repoId: $repoId})<-[e:BELONGS_TO_CLUSTER]-() DELETE e`,
@@ -180,7 +280,24 @@ export async function deleteRepo(
       repoId,
     });
 
-    // Clean up Process nodes (delete all edge types before nodes)
+    await exec(
+      txConn,
+      `MATCH (c:ShadowCluster {repoId: $repoId})<-[e:BELONGS_TO_SHADOW_CLUSTER]-()
+       DELETE e`,
+      { repoId },
+    );
+    await exec(
+      txConn,
+      `MATCH (c:ShadowCluster {repoId: $repoId})-[e:SHADOW_CLUSTER_IN_REPO]->()
+       DELETE e`,
+      { repoId },
+    );
+    await exec(
+      txConn,
+      `MATCH (c:ShadowCluster {repoId: $repoId}) DELETE c`,
+      { repoId },
+    );
+
     await exec(
       txConn,
       `MATCH (p:Process {repoId: $repoId})<-[e:PARTICIPATES_IN]-() DELETE e`,
@@ -195,12 +312,6 @@ export async function deleteRepo(
       repoId,
     });
 
-    // Clean up SliceHandle nodes
-    await exec(txConn, `MATCH (h:SliceHandle {repoId: $repoId}) DELETE h`, {
-      repoId,
-    });
-
-    // Clean up Memory nodes and their edges
     await exec(
       txConn,
       `MATCH (r:Repo {repoId: $repoId})-[e:HAS_MEMORY]->(m:Memory) DELETE e`,
@@ -220,17 +331,6 @@ export async function deleteRepo(
       repoId,
     });
 
-    // Clean up AgentFeedback nodes
-    await exec(txConn, `MATCH (a:AgentFeedback {repoId: $repoId}) DELETE a`, {
-      repoId,
-    });
-
-    // Clean up SyncArtifact nodes
-    await exec(txConn, `MATCH (s:SyncArtifact {repoId: $repoId}) DELETE s`, {
-      repoId,
-    });
-
-    // Clean up FileSummary nodes and edges
     await exec(
       txConn,
       `MATCH (src)-[e]->(fs:FileSummary) WHERE fs.repoId = $repoId DELETE e`,
@@ -247,23 +347,31 @@ export async function deleteRepo(
       { repoId },
     );
 
-    // Clean up UsageSnapshot nodes
-    await exec(
-      txConn,
-      `MATCH (u:UsageSnapshot) WHERE u.repoId = $repoId DELETE u`,
-      { repoId },
-    );
-
-
-    // Clean up predictive prefetch learning state
-    await exec(txConn, `MATCH (p:PrefetchOutcome {repoId: $repoId}) DELETE p`, {
-      repoId,
-    });
-    await exec(
-      txConn,
-      `MATCH (p:PrefetchPolicyAggregate {repoId: $repoId}) DELETE p`,
-      { repoId },
-    );
+    // Every remaining current-schema repository-owned node has a repoId
+    // property and no relationships. Global content-addressed nodes
+    // (CardHash, ToolPolicyHash, TsconfigHash) and SchemaVersion are omitted.
+    for (const table of [
+      "MetricsFingerprint",
+      "SliceHandle",
+      "Audit",
+      "AgentFeedback",
+      "SyncArtifact",
+      "SymbolReference",
+      "UsageSnapshot",
+      "PrefetchOutcome",
+      "PrefetchPolicyAggregate",
+      "ScipIngestion",
+      "SemanticProviderRun",
+      "SemanticDiagnostic",
+      "SemanticPrecisionMetric",
+      "DerivedState",
+    ]) {
+      await exec(
+        txConn,
+        `MATCH (n:${table}) WHERE n.repoId = $repoId DELETE n`,
+        { repoId },
+      );
+    }
 
     await exec(
       txConn,

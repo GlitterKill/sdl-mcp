@@ -79,7 +79,7 @@ Use `offset` with `limit` to page through large result sets such as `query: "*"`
 
 ---
 
-## Repository and Indexing (6 tools)
+## Repository and Indexing (7 tools)
 
 ### `sdl.repo.register`
 
@@ -139,6 +139,24 @@ Get status for one repository including latest version, indexed files/symbols, t
 ```json
 { "repoId": "my-repo" }
 ```
+
+---
+
+### `sdl.repo.unregister`
+
+Permanently remove a runtime repository registration and all repository-owned graph state. Repositories declared in `SDL_CONFIG` cannot be removed with this action; remove the configuration entry first.
+
+**Parameters:**
+
+| Parameter       | Type      | Required | Description                                                               |
+| --------------- | --------- | -------- | ------------------------------------------------------------------------- |
+| `repoId`        | `string`  | Yes      | Runtime repository identifier                                             |
+| `confirmRepoId` | `string`  | Yes      | Must exactly match `repoId`                                               |
+| `discardDrafts` | `boolean` | No       | Permit removal when dirty live buffers exist (default: `false`)           |
+
+**Response:** `{ ok: true, repoId: string, removed: true }`
+
+Unknown repositories return `NOT_FOUND`. Dirty live buffers fail closed unless `discardDrafts: true`; this discards their transient draft state. Removal also invalidates repository-scoped graph, overview, slice, card, health, prefetch, and stored response-handle state.
 
 ---
 

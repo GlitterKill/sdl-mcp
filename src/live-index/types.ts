@@ -82,4 +82,6 @@ export interface LiveIndexCoordinator {
   pushBufferUpdate(input: BufferUpdateInput): Promise<BufferUpdateResult>;
   checkpointRepo(input: CheckpointRequest): Promise<CheckpointResult>;
   getLiveStatus(repoId: string): Promise<LiveStatus>;
+  /** Discard all transient live-index state for one repository. */
+  clearRepo(repoId: string): Promise<void>;
 }

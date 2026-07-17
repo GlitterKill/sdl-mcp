@@ -4,6 +4,8 @@ import { join, relative, resolve } from "path";
 import {
   type RepoRegisterRequest,
   RepoRegisterResponse,
+  type RepoUnregisterRequest,
+  RepoUnregisterResponse,
   type RepoStatusRequest,
   RepoStatusResponse,
   type IndexRefreshRequest,
@@ -22,14 +24,26 @@ import { createVersionAndSnapshot } from "../../indexer/indexer-version.js";
 import { RepoConfig } from "../../config/types.js";
 import { LanguageSchema } from "../../config/types.js";
 import { normalizePath } from "../../util/paths.js";
-import { DatabaseError, ConfigError, ValidationError } from "../errors.js";
+import {
+  DatabaseError,
+  ConfigError,
+  NotFoundError,
+  ValidationError,
+} from "../errors.js";
 import { logger } from "../../util/logger.js";
 import { loadConfig } from "../../config/loadConfig.js";
 import { getServerInfo } from "../../util/runtime-identity.js";
 
 import { MAX_FILE_BYTES } from "../../config/constants.js";
-import { buildRepoOverview, clearOverviewCache } from "../../graph/overview.js";
-import { clearSliceCache } from "../../graph/sliceCache.js";
+import {
+  buildRepoOverview,
+  clearOverviewCache,
+  invalidateRepoOverviewCache,
+} from "../../graph/overview.js";
+import {
+  clearSliceCache,
+  invalidateRepoSliceCache,
+} from "../../graph/sliceCache.js";
 import { symbolCardCache } from "../../graph/cache.js";
 import {
   getRepoHealthSnapshot,
@@ -39,7 +53,10 @@ import {
   logPrefetchTelemetry,
   logWatcherHealthTelemetry,
 } from "../telemetry.js";
-import { getPrefetchStats } from "../../graph/prefetch.js";
+import {
+  getPrefetchStats,
+  invalidateRepoPrefetch,
+} from "../../graph/prefetch.js";
 import { surfaceRelevantMemories } from "../../memory/surface.js";
 import { getMemoryCapabilities } from "../../config/memory-config.js";
 import { recordToolTrace } from "../../graph/prefetch-model.js";
@@ -53,7 +70,9 @@ import {
 } from "../../util/tracing.js";
 import type { ToolContext } from "../../server.js";
 import { getDefaultLiveIndexCoordinator } from "../../live-index/coordinator.js";
+import type { LiveIndexCoordinator } from "../../live-index/types.js";
 import type { Connection } from "kuzu";
+import { deleteResponseArtifactsForRepo } from "../../runtime/response-artifacts.js";
 import { ensureBaselineEnforcementAssets } from "../../cli/commands/enforcement-bootstrap.js";
 import { refreshSemanticEnrichment } from "../../semantic/enrichment.js";
 import {
@@ -84,6 +103,15 @@ export function _setRepoStatusHealthLoaderForTesting(
   repoStatusHealthLoader = loader;
   healthSnapshotCache.clear();
   lastKnownHealth.clear();
+}
+
+export function clearRepoHealthCache(repoId: string): void {
+  healthSnapshotCache.delete(repoId);
+  lastKnownHealth.delete(repoId);
+}
+
+export function _hasRepoStatusHealthCacheForTesting(repoId: string): boolean {
+  return healthSnapshotCache.has(repoId) || lastKnownHealth.has(repoId);
 }
 
 async function getCachedHealthSnapshot(repoId: string): Promise<{
@@ -528,6 +556,66 @@ function detectWorkspaces(packageJsonPath: string): string[] | undefined {
   }
 
   return undefined;
+}
+
+/** Permanently remove a runtime-only repository registration and its graph data. */
+export async function handleRepoUnregister(
+  args: unknown,
+  _context?: ToolContext,
+  liveIndex?: LiveIndexCoordinator,
+): Promise<RepoUnregisterResponse> {
+  const request = args as RepoUnregisterRequest;
+  const { repoId, confirmRepoId } = request;
+  const discardDrafts = request.discardDrafts ?? false;
+
+  if (confirmRepoId !== repoId) {
+    throw new ValidationError("confirmRepoId must exactly match repoId");
+  }
+
+  // Existence precedes config ownership so a stale SDL_CONFIG entry cannot
+  // mask the stable NOT_FOUND classification for an unknown registration.
+  const conn = await getLadybugConn();
+  const repo = await ladybugDb.getRepo(conn, repoId);
+  if (!repo) {
+    throw new NotFoundError(`Repository not found: ${repoId}`);
+  }
+
+  const appConfig = loadConfig();
+  if (appConfig.repos.some((configured) => configured.repoId === repoId)) {
+    throw new ConfigError(
+      `Repository ${repoId} is defined in SDL_CONFIG. Remove it from SDL_CONFIG before calling repo.unregister.`,
+    );
+  }
+
+  const coordinator = liveIndex ?? getDefaultLiveIndexCoordinator();
+  const liveStatus = await coordinator.getLiveStatus(repoId);
+  if (liveStatus.dirtyBuffers > 0 && !discardDrafts) {
+    throw new ValidationError(
+      `Repository ${repoId} has ${liveStatus.dirtyBuffers} dirty live buffer(s). Re-run with discardDrafts:true to discard them.`,
+    );
+  }
+
+  await withWriteConn(async (writeConn) => {
+    if (!(await ladybugDb.getRepo(writeConn, repoId))) {
+      throw new NotFoundError(`Repository not found: ${repoId}`);
+    }
+    await ladybugDb.deleteRepo(writeConn, repoId);
+    await coordinator.clearRepo(repoId);
+    invalidateRepoPrefetch(repoId);
+  });
+
+  // Runtime state is invalidated only after the database transaction commits.
+  invalidateGraphSnapshot(repoId);
+  invalidateRepoOverviewCache(repoId);
+  invalidateRepoSliceCache(repoId);
+  symbolCardCache.invalidateRepo(repoId);
+  clearRepoHealthCache(repoId);
+  await deleteResponseArtifactsForRepo(
+    repoId,
+    appConfig.runtime?.artifactBaseDir,
+  );
+
+  return { ok: true, repoId, removed: true };
 }
 
 /**

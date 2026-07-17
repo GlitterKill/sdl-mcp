@@ -13,6 +13,7 @@ import type { VersionId, SymbolId, RepoId } from "../domain/types.js";
 import { getObservabilityTap } from "../observability/event-tap.js";
 
 interface CacheEntry<T> {
+  repoId: RepoId;
   value: T;
   versionId: VersionId;
   lastAccessed: number;
@@ -169,6 +170,17 @@ class LRUCache<T> {
     }
   }
 
+  invalidateRepo(repoId: RepoId): void {
+    for (const [key, entry] of Array.from(this.cache.entries())) {
+      if (entry.repoId !== repoId) continue;
+      if (entry) {
+        this.stats.currentSize -= entry.size;
+        this.stats.entryCount--;
+      }
+      this.cache.delete(key);
+    }
+  }
+
   clear(): void {
     this.cache.clear();
     this.stats.currentSize = 0;
@@ -227,6 +239,7 @@ class LRUCache<T> {
       }
 
       this.cache.set(key, {
+        repoId,
         value,
         versionId,
         lastAccessed: now,

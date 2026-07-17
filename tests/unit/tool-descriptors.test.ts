@@ -62,7 +62,13 @@ describe("buildFlatToolDescriptors", () => {
   });
 
   it("groups repo tools together at the start", () => {
-    const repoToolNames = ["sdl.repo.register", "sdl.repo.status", "sdl.index.refresh", "sdl.repo.overview"];
+    const repoToolNames = [
+      "sdl.repo.register",
+      "sdl.repo.status",
+      "sdl.repo.unregister",
+      "sdl.index.refresh",
+      "sdl.repo.overview",
+    ];
     const repoIndices = repoToolNames.map((name) => descriptors.findIndex((d) => d.name === name));
     // All repo tools should exist
     for (let i = 0; i < repoToolNames.length; i++) {

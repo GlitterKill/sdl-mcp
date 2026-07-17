@@ -7,6 +7,7 @@ import type { LiveIndexCoordinator } from "../live-index/types.js";
 import {
   RepoRegisterRequestSchema,
   RepoStatusRequestSchema,
+  RepoUnregisterRequestSchema,
   IndexRefreshRequestSchema,
   RepoOverviewRequestSchema,
   BufferPushRequestSchema,
@@ -37,6 +38,7 @@ import {
 import {
   handleRepoRegister,
   handleRepoStatus,
+  handleRepoUnregister,
   handleIndexRefresh,
   handleRepoOverview,
 } from "../mcp/tools/repo.js";
@@ -102,6 +104,13 @@ export function registerLegacyTools(
     dep("sdl.repo", "Get status information about a repository"),
     RepoStatusRequestSchema,
     handleRepoStatus,
+  );
+  server.registerTool(
+    "sdl.repo.unregister",
+    dep("sdl.repo", "Permanently remove a runtime repository registration"),
+    RepoUnregisterRequestSchema,
+    (args, context) =>
+      handleRepoUnregister(args, context, services.liveIndex),
   );
   server.registerTool(
     "sdl.index.refresh",

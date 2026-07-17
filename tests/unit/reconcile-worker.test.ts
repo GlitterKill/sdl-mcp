@@ -12,6 +12,34 @@ const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, "../..");
 
 describe("ReconcileWorker", () => {
+  it("clears queued work and cancels the exact repository cluster job", () => {
+    const queue = new ReconcileQueue();
+    const cancelled: string[] = [];
+    queue.enqueue(
+      "repo:child",
+      {
+        touchedSymbolIds: ["symbol"],
+        dependentSymbolIds: [],
+        dependentFilePaths: [],
+        importedFilePaths: [],
+        invalidations: ["clusters"],
+      },
+      "2026-07-17T00:00:00.000Z",
+    );
+    const worker = new ReconcileWorker(queue, {
+      clusterScheduler: {
+        schedule: async () => undefined,
+        cancel: (repoId) => cancelled.push(repoId),
+        waitForIdle: async () => undefined,
+      },
+    });
+
+    worker.clearRepo("repo:child");
+
+    assert.deepEqual(cancelled, ["repo:child"]);
+    assert.strictEqual(queue.getStatus("repo:child").queueDepth, 0);
+  });
+
   it("processes a re-enqueued file again within the same drain", async () => {
     const queue = new ReconcileQueue();
     const patchCalls: string[] = [];

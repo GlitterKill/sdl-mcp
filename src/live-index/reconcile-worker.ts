@@ -17,6 +17,7 @@ export class ReconcileWorker {
   private idleWaiters: Array<() => void> = [];
   private readonly clusterScheduler: {
     schedule(repoId: string, delay?: number | undefined): Promise<void> | void;
+    cancel?(repoId: string): void;
     waitForIdle(): Promise<void>;
   };
   private readonly planReconcileWorkFn: typeof planReconcileWork;
@@ -30,6 +31,7 @@ export class ReconcileWorker {
           repoId: string,
           delay?: number | undefined,
         ): Promise<void> | void;
+        cancel?(repoId: string): void;
         waitForIdle(): Promise<void>;
       };
       planReconcileWork?: typeof planReconcileWork;
@@ -115,6 +117,11 @@ export class ReconcileWorker {
       });
     }
     await this.clusterScheduler.waitForIdle();
+  }
+
+  clearRepo(repoId: string): void {
+    this.queue.clearRepo(repoId);
+    this.clusterScheduler.cancel?.(repoId);
   }
 
   private async drain(): Promise<void> {

@@ -158,6 +158,10 @@ export class ReconcileQueue {
     this.repos.clear();
   }
 
+  clearRepo(repoId: string): void {
+    this.repos.delete(repoId);
+  }
+
   private getRepo(repoId: string): RepoQueueState {
     const existing = this.repos.get(repoId);
     if (existing) {

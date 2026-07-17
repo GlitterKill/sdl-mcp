@@ -164,6 +164,8 @@ interface OverviewCacheEntry {
 
 const overviewCache = new Map<string, OverviewCacheEntry>();
 const overviewInflight = new Map<string, Promise<RepoOverview>>();
+let overviewInvalidationGeneration = 0;
+const repoInvalidationGeneration = new Map<string, number>();
 
 function makeOverviewCacheKey(request: RepoOverviewRequest): string {
   const hotspots = request.includeHotspots ?? request.level === "full";
@@ -175,7 +177,21 @@ function makeOverviewCacheKey(request: RepoOverviewRequest): string {
  * Called on version changes / index refresh.
  */
 export function clearOverviewCache(): void {
+  overviewInvalidationGeneration++;
   overviewCache.clear();
+  overviewInflight.clear();
+}
+
+export function invalidateRepoOverviewCache(repoId: string): void {
+  repoInvalidationGeneration.set(
+    repoId,
+    (repoInvalidationGeneration.get(repoId) ?? 0) + 1,
+  );
+  for (const [key, entry] of overviewCache.entries()) {
+    if (entry.result.repoId === repoId) overviewCache.delete(key);
+  }
+  // A bounded global clear prevents an in-flight target result from being
+  // published after unregister without relying on delimiter-ambiguous keys.
   overviewInflight.clear();
 }
 
@@ -259,6 +275,8 @@ export async function buildRepoOverview(
   request: RepoOverviewRequest,
 ): Promise<RepoOverview> {
   const cacheKey = makeOverviewCacheKey(request);
+  const globalGeneration = overviewInvalidationGeneration;
+  const repoGeneration = repoInvalidationGeneration.get(request.repoId) ?? 0;
 
   // 1. Check TTL cache
   const cached = overviewCache.get(cacheKey);
@@ -278,10 +296,15 @@ export async function buildRepoOverview(
 
   try {
     const result = await promise;
-    overviewCache.set(cacheKey, {
-      result,
-      expiresAt: Date.now() + OVERVIEW_CACHE_TTL_MS,
-    });
+    if (
+      globalGeneration === overviewInvalidationGeneration &&
+      repoGeneration === (repoInvalidationGeneration.get(request.repoId) ?? 0)
+    ) {
+      overviewCache.set(cacheKey, {
+        result,
+        expiresAt: Date.now() + OVERVIEW_CACHE_TTL_MS,
+      });
+    }
     // Evict oldest entry if cache exceeds limit
     if (overviewCache.size > MAX_OVERVIEW_CACHE_ENTRIES) {
       let oldestKey: string | null = null;
@@ -296,7 +319,9 @@ export async function buildRepoOverview(
     }
     return result;
   } finally {
-    overviewInflight.delete(cacheKey);
+    if (overviewInflight.get(cacheKey) === promise) {
+      overviewInflight.delete(cacheKey);
+    }
   }
 }
 

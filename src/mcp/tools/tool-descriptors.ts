@@ -15,6 +15,7 @@ import type { ToolPresentation } from "../tool-presentation.js";
 
 import {
   RepoStatusResponseSchema,
+  RepoUnregisterResponseSchema,
   RuntimeExecuteResponseSchema,
   RuntimeQueryOutputResponseSchema,
 } from "../tools.js";
@@ -23,6 +24,7 @@ import { ACTION_DEFINITION_BY_ACTION } from "../../code-mode/action-catalog.js";
 import {
   handleRepoRegister,
   handleRepoStatus,
+  handleRepoUnregister,
   handleIndexRefresh,
   handleRepoOverview,
 } from "./repo.js";
@@ -143,6 +145,13 @@ export function buildFlatToolDescriptors(
       description: "Get status information about a repository",
       outputSchema: RepoStatusResponseSchema,
       handler: handleRepoStatus,
+    },
+    {
+      action: "repo.unregister",
+      description: "Permanently remove a runtime repository registration",
+      outputSchema: RepoUnregisterResponseSchema,
+      handler: (args, context) =>
+        handleRepoUnregister(args, context, services.liveIndex),
     },
     {
       action: "index.refresh",

@@ -31,6 +31,7 @@ const EXPECTED_ACTIONS = [
   "repo.overview",
   "repo.register",
   "repo.status",
+  "repo.unregister",
   "response.get",
   "runtime.execute",
   "runtime.queryOutput",

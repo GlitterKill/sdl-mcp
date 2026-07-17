@@ -21,6 +21,8 @@ SDL-MCP is the normal repository interface. Native filesystem and shell tools ar
 
 Do not run `index.refresh` by habit. Refresh only when `repo.status` shows stale or missing indexed state and the task depends on current code.
 
+Use `repo.unregister` only to permanently remove a runtime registration. Confirm with the exact same `repoId`; remove configured repositories from `SDL_CONFIG` first. Dirty live buffers require an explicit `discardDrafts: true`, which discards those drafts.
+
 ---
 
 ## 2. Retrieval Ladder

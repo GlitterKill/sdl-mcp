@@ -318,6 +318,12 @@ const RepoStatusAction = z.object({
   action: z.literal("repo.status"),
 });
 
+const RepoUnregisterAction = z.object({
+  action: z.literal("repo.unregister"),
+  confirmRepoId: z.string().min(1),
+  discardDrafts: z.boolean().optional().default(false),
+});
+
 const RepoOverviewAction = z.object({
   action: z.literal("repo.overview"),
   level: z.enum(["stats", "directories", "full"]),
@@ -633,6 +639,7 @@ export const RepoGatewaySchema = z
     z.discriminatedUnion("action", [
       RepoRegisterAction,
       RepoStatusAction,
+      RepoUnregisterAction,
       RepoOverviewAction,
       IndexRefreshAction,
       PolicyGetAction,
@@ -886,6 +893,7 @@ export const CODE_ACTIONS = [
 export const REPO_ACTIONS = [
   "repo.register",
   "repo.status",
+  "repo.unregister",
   "repo.overview",
   "index.refresh",
   "policy.get",

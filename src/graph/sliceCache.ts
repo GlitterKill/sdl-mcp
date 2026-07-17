@@ -191,6 +191,15 @@ export function clearSliceCache(): void {
   };
 }
 
+export function invalidateRepoSliceCache(repoId: RepoId): void {
+  for (const [key, entry] of Array.from(sliceCache.entries())) {
+    if (entry.slice.repoId !== repoId) continue;
+    sliceCache.delete(key);
+    removeFromAccessOrder(key);
+    cacheStats.currentSize--;
+  }
+}
+
 export function getSliceCacheStats(): SliceCacheStats {
   return { ...cacheStats };
 }

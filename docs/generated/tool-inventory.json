@@ -1,15 +1,15 @@
 {
-  "generatedAt": "2026-07-03T20:31:50.365Z",
+  "generatedAt": "2026-07-17T05:31:52.129Z",
   "counts": {
-    "flatTools": 35,
+    "flatTools": 36,
     "universalTools": 2,
     "codeModeTools": 6,
     "gatewayTools": 4,
-    "flatModeTotal": 37,
+    "flatModeTotal": 38,
     "gatewayModeTotal": 6,
-    "gatewayLegacyModeTotal": 41,
+    "gatewayLegacyModeTotal": 42,
     "codeModeExclusiveTotal": 6,
-    "allFlatAndCodeModeActions": 41
+    "allFlatAndCodeModeActions": 42
   },
   "flatToolNames": [
     "sdl.agent.feedback",
@@ -34,6 +34,7 @@
     "sdl.repo.overview",
     "sdl.repo.register",
     "sdl.repo.status",
+    "sdl.repo.unregister",
     "sdl.response.get",
     "sdl.runtime.execute",
     "sdl.runtime.queryOutput",

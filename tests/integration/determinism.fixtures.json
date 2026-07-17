@@ -93,6 +93,10 @@
       "reason": "Setup mutation; registration can create versions and enforcement files."
     },
     {
+      "tool": "sdl.repo.unregister",
+      "reason": "Destructive repository-lifecycle mutation; a stable call would consume its own fixture state."
+    },
+    {
       "tool": "sdl.repo.status",
       "reason": "Timestamp telemetry is model-gated; live root availability, health, watcher, graph-integrity lifecycle, and index state remain intentionally live."
     },

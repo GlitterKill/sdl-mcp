@@ -107,6 +107,7 @@ const OUTCOME_EWMA_ALPHA = 0.5;
 let policyConfig: PrefetchPolicyConfig = { ...DEFAULT_PREFETCH_POLICY_CONFIG };
 const aggregates = new Map<string, PrefetchPolicyAggregate>();
 const outcomeResourceKeys = new Set<string>();
+const repoInvalidationGenerations = new Map<string, number>();
 let lastRetentionSweepMs = 0;
 
 function clamp(value: number, min: number, max: number): number {
@@ -302,8 +303,15 @@ function aggregateToRow(
 async function persistOutcome(
   event: PrefetchOutcomeEvent,
   aggregate: PrefetchPolicyAggregate,
+  repoGeneration: number,
 ): Promise<void> {
   await withWriteConn(async (conn) => {
+    if (
+      (repoInvalidationGenerations.get(aggregate.repoId) ?? 0) !==
+      repoGeneration
+    ) {
+      return;
+    }
     const nowIso = event.createdAt ?? new Date().toISOString();
     await ladybugDb.upsertPrefetchOutcomeAndAggregate(
       conn,
@@ -331,9 +339,10 @@ async function persistOutcome(
 function maybePersistOutcome(
   event: PrefetchOutcomeEvent,
   aggregate: PrefetchPolicyAggregate,
+  repoGeneration: number,
 ): void {
   if (event.persist === false) return;
-  void persistOutcome(event, aggregate).catch((error) => {
+  void persistOutcome(event, aggregate, repoGeneration).catch((error) => {
     logger.debug("[prefetch-policy] outcome persistence skipped", {
       error: error instanceof Error ? error.message : String(error),
     });
@@ -444,7 +453,11 @@ export function recordPrefetchOutcome(
     aggregate.updatedAt = nowIso;
     recomputeScore(aggregate);
     aggregates.set(aggregateKey, aggregate);
-    maybePersistOutcome(event, aggregate);
+    maybePersistOutcome(
+      event,
+      aggregate,
+      repoInvalidationGenerations.get(aggregate.repoId) ?? 0,
+    );
     maybeSweepRetention();
   }
   return { ...aggregate };
@@ -619,6 +632,30 @@ export async function hydratePrefetchPolicyFromDb(repoId?: string): Promise<numb
 export function resetPrefetchOutcomeStateForTests(): void {
   aggregates.clear();
   outcomeResourceKeys.clear();
+  repoInvalidationGenerations.clear();
   lastRetentionSweepMs = 0;
   policyConfig = { ...DEFAULT_PREFETCH_POLICY_CONFIG };
+}
+
+/** Remove learned and deduplication state owned by a deleted repository. */
+export function invalidateRepoPrefetchOutcomeState(repoId: string): void {
+  repoInvalidationGenerations.set(
+    repoId,
+    (repoInvalidationGenerations.get(repoId) ?? 0) + 1,
+  );
+  const aggregateKeys = new Set(
+    Array.from(aggregates.values())
+      .filter((aggregate) => aggregate.repoId === repoId)
+      .map((aggregate) => aggregate.aggregateKey),
+  );
+  for (const aggregateKey of aggregateKeys) aggregates.delete(aggregateKey);
+  for (const resourceKey of Array.from(outcomeResourceKeys)) {
+    const separator = resourceKey.indexOf(":");
+    if (
+      separator > 0 &&
+      aggregateKeys.has(resourceKey.slice(0, separator))
+    ) {
+      outcomeResourceKeys.delete(resourceKey);
+    }
+  }
 }

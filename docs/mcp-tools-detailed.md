@@ -6,6 +6,10 @@ It documents the current flat, gateway, and Code Mode surfaces, request and resp
 
 This page remains at its original URL so existing links continue to work.
 
+## Repository removal
+
+Use `repo.unregister` only for runtime registrations. It requires `confirmRepoId` to exactly match `repoId`, rejects configured repositories until their entry is removed from `SDL_CONFIG`, and rejects dirty live buffers unless `discardDrafts: true` is explicit. Successful removal returns only `{ ok: true, repoId, removed: true }` and deletes repository-owned graph data while preserving unrelated repositories and global content-addressed nodes.
+
 ## Find the right guide
 
 - [MCP Tools Reference](./mcp-tools-reference.md): tool parameters, responses, and usage guidance.

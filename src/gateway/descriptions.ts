@@ -24,7 +24,7 @@ export const CODE_DESCRIPTION =
 
 export const REPO_DESCRIPTION =
   `sdl.repo - Repository lifecycle. Pass { repoId, action, ...params }.` +
-  `\nActions: repo.register(rootPath,ignore?,languages?,maxFileBytes?) | repo.status() | ` +
+  `\nActions: repo.register(rootPath,ignore?,languages?,maxFileBytes?) | repo.status() | repo.unregister(confirmRepoId,discardDrafts?) | ` +
   `repo.overview(level,includeHotspots?,directories?,maxDirectories?) | ` +
   `index.refresh(mode,reason?) | policy.get() | policy.set(policyPatch; budgetCaps accepts partial maxCards/maxEstimatedTokens patches) | ` +
   `search.edit(mode,targeting?,query?,editMode?,operations?,planHandle?,responseMode?) | ` +

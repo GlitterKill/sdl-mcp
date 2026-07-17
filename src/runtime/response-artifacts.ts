@@ -438,6 +438,24 @@ async function readManifestEntries(
   return manifests;
 }
 
+/** Delete every stored response handle owned by one repository. */
+export async function deleteResponseArtifactsForRepo(
+  repoId: string,
+  artifactBaseDir?: string | null,
+): Promise<number> {
+  const baseDir = getResponseArtifactBaseDir(artifactBaseDir);
+  return withResponseArtifactWriteLock(baseDir, async () => {
+    const entries = await readManifestEntries(baseDir);
+    const owned = entries.filter((entry) => entry.metadata.repoId === repoId);
+    await Promise.all(
+      owned.map((entry) =>
+        rm(join(baseDir, entry.handle), { recursive: true, force: true }),
+      ),
+    );
+    return owned.length;
+  });
+}
+
 async function sweepExpiredResponseArtifacts(
   baseDir: string,
   now: Date,

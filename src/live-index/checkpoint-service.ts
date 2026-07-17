@@ -191,6 +191,13 @@ export class CheckpointService {
   clear(): void {
     this.statuses.clear();
     this.checkpointInProgress.clear();
+    this.repoRootCache.clear();
+  }
+
+  clearRepo(repoId: string): void {
+    this.statuses.delete(repoId);
+    this.checkpointInProgress.delete(repoId);
+    this.repoRootCache.delete(repoId);
   }
 
   private async patchDraft(

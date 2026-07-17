@@ -20,6 +20,7 @@ import {
   getPrefetchPolicyDecision,
   getTopPrefetchStrategySummaries,
   recordPrefetchOutcome,
+  invalidateRepoPrefetchOutcomeState,
   type PrefetchResourceKind,
   type PublicPrefetchStrategySummary,
 } from "./prefetch-outcomes.js";
@@ -855,6 +856,16 @@ export function shutdownPrefetch(): void {
     stats.running = false;
   }
   logger.debug("[prefetch] Shutdown complete, queue cleared");
+}
+
+/** Remove queued, cached, and telemetry state for a deleted repository. */
+export function invalidateRepoPrefetch(repoId: string): void {
+  for (let index = queue.length - 1; index >= 0; index--) {
+    if (queue[index]?.repoId === repoId) queue.splice(index, 1);
+  }
+  prefetchedKeysByRepo.delete(repoId);
+  statsByRepo.delete(repoId);
+  invalidateRepoPrefetchOutcomeState(repoId);
 }
 
 export function getPrefetchStats(repoId: string): PrefetchStats {

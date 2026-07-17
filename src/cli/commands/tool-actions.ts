@@ -781,6 +781,31 @@ const repoStatus: CliActionDefinition = {
   examples: ["sdl-mcp tool repo.status --repo-id my-repo"],
 };
 
+const repoUnregister: CliActionDefinition = {
+  action: "repo.unregister",
+  namespace: "repo",
+  description: "Permanently remove a runtime repository registration",
+  args: [
+    { ...REPO_ID_ARG },
+    {
+      flag: "--confirm-repo-id",
+      field: "confirmRepoId",
+      type: "string",
+      required: true,
+      description: "Exact repository ID confirmation",
+    },
+    {
+      flag: "--discard-drafts",
+      field: "discardDrafts",
+      type: "boolean",
+      description: "Discard dirty live buffers before removal",
+    },
+  ],
+  examples: [
+    "sdl-mcp tool repo.unregister --repo-id my-repo --confirm-repo-id my-repo",
+  ],
+};
+
 const repoOverview: CliActionDefinition = {
   action: "repo.overview",
   namespace: "repo",
@@ -1842,6 +1867,7 @@ export const CLI_ACTION_DEFINITIONS: CliActionDefinition[] = [
   // Repo
   repoRegister,
   repoStatus,
+  repoUnregister,
   repoOverview,
   indexRefresh,
   semanticEnrichmentRefresh,
