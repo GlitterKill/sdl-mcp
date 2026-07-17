@@ -354,7 +354,7 @@ describe("index.refresh diagnostics", () => {
     assert.equal("diagnostics" in result, false);
   });
 
-  it("short-circuits unchanged incremental refreshes after scan/version/memory sync", async () => {
+  it("short-circuits unchanged incremental refreshes after scan/integrity validation/memory sync", async () => {
     const initial = await handleIndexRefresh({
       repoId: REPO_ID,
       mode: "incremental",
@@ -375,7 +375,7 @@ describe("index.refresh diagnostics", () => {
     const phases = noop.diagnostics!.timings.phases;
     assert.equal(typeof phases.scanRepo, "number");
     assert.equal(typeof phases.shortCircuitNoOp, "number");
-    assert.equal(typeof phases.versioning, "number");
+    assert.equal("versioning" in phases, false);
     assert.equal(typeof phases.memorySync, "number");
     assert.equal("pass1" in phases, false);
     assert.equal("initSharedState" in phases, false);
