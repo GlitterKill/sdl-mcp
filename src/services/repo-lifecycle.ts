@@ -103,18 +103,18 @@ export async function beginRepoRemoval(
   }
 
   let settled = false;
-  const settle = (status: "active" | "removed"): void => {
+  const settle = (status: "active" | "removed", advanceEpoch: boolean): void => {
     if (settled) return;
     settled = true;
-    state.epoch += 1;
+    if (advanceEpoch) state.epoch += 1;
     state.status = status;
   };
 
   return {
     repoId,
     epoch: state.epoch,
-    commitTombstone: () => settle("removed"),
-    abort: () => settle("active"),
+    commitTombstone: () => settle("removed", true),
+    abort: () => settle("active", false),
   };
 }
 
@@ -135,18 +135,18 @@ export async function beginRepoRegistration(
   }
 
   let settled = false;
-  const settle = (status: "active" | "removed"): void => {
+  const settle = (status: "active" | "removed", advanceEpoch: boolean): void => {
     if (settled) return;
     settled = true;
-    state.epoch += 1;
+    if (advanceEpoch) state.epoch += 1;
     state.status = status;
   };
 
   return {
     repoId,
     epoch: state.epoch,
-    commitActive: () => settle("active"),
-    abort: () => settle(previousStatus),
+    commitActive: () => settle("active", true),
+    abort: () => settle(previousStatus, false),
   };
 }
 

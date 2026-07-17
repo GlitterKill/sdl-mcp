@@ -15,7 +15,7 @@ import {
   type LiveIndexCoordinator,
   type LiveStatus,
 } from "./types.js";
-import { IndexError } from "../domain/errors.js";
+import { IndexError, NotFoundError } from "../domain/errors.js";
 import { withIndexingGate } from "../mcp/indexing-gate.js";
 import { getOverlayEmbeddingCache } from "./overlay-embedding-cache.js";
 
@@ -395,48 +395,63 @@ export class InMemoryLiveIndexCoordinator implements LiveIndexCoordinator {
   private async sweepOverlay(): Promise<void> {
     const now = Date.now();
     for (const repoId of this.overlayStore.listRepoIds()) {
-      const drafts = this.overlayStore.listDrafts(repoId);
-      if (drafts.length === 0) continue;
+      try {
+        await withRepoMutation(repoId, async () => {
+          const drafts = this.overlayStore.listDrafts(repoId);
+          if (drafts.length === 0) return;
 
-      // Retry non-dirty drafts left behind by failed save-event patches
-      const hasNonDirty = drafts.some((d) => !d.dirty);
-      if (hasNonDirty) {
-        await this.checkpointService
-          .checkpointRepo({ repoId, reason: "sweep" })
-          .catch((error) => {
-            logger.warn("Sweep checkpoint failed", {
-              repoId,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          });
-      }
-
-      // Evict stale dirty drafts orphaned by editor crash or disconnect
-      for (const draft of drafts) {
-        if (!draft.dirty) continue;
-        const age = now - Date.parse(draft.timestamp);
-        if (age < InMemoryLiveIndexCoordinator.STALE_DIRTY_DRAFT_MS) continue;
-
-        logger.debug("Sweep evicting stale dirty draft", {
-          repoId,
-          filePath: draft.filePath,
-          ageMs: age,
-        });
-        try {
-          await withIndexingGate(() =>
-            patchSavedFile({ repoId, filePath: draft.filePath }),
-          );
-          const current = this.overlayStore.getDraft(repoId, draft.filePath);
-          if (current && current.version === draft.version) {
-            this.overlayStore.removeDraft(repoId, draft.filePath);
+          // Retry non-dirty drafts left behind by failed save-event patches.
+          const hasNonDirty = drafts.some((draft) => !draft.dirty);
+          if (hasNonDirty) {
+            await this.checkpointService
+              .checkpointRepo({ repoId, reason: "sweep" })
+              .catch((error) => {
+                logger.warn("Sweep checkpoint failed", {
+                  repoId,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+              });
           }
-        } catch (error) {
-          logger.warn("Sweep disk recovery failed", {
-            repoId,
-            filePath: draft.filePath,
-            error: error instanceof Error ? error.message : String(error),
-          });
+
+          // Evict stale dirty drafts orphaned by editor crash or disconnect.
+          for (const draft of drafts) {
+            if (!draft.dirty) continue;
+            const age = now - Date.parse(draft.timestamp);
+            if (age < InMemoryLiveIndexCoordinator.STALE_DIRTY_DRAFT_MS) {
+              continue;
+            }
+
+            logger.debug("Sweep evicting stale dirty draft", {
+              repoId,
+              filePath: draft.filePath,
+              ageMs: age,
+            });
+            try {
+              await withIndexingGate(() =>
+                patchSavedFile({ repoId, filePath: draft.filePath }),
+              );
+              const current = this.overlayStore.getDraft(
+                repoId,
+                draft.filePath,
+              );
+              if (current && current.version === draft.version) {
+                this.overlayStore.removeDraft(repoId, draft.filePath);
+              }
+            } catch (error) {
+              logger.warn("Sweep disk recovery failed", {
+                repoId,
+                filePath: draft.filePath,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+        });
+      } catch (error) {
+        if (error instanceof NotFoundError) {
+          logger.debug("Skipped sweep for inactive repository", { repoId });
+          continue;
         }
+        throw error;
       }
     }
   }

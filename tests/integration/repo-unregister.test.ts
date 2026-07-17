@@ -190,19 +190,21 @@ describe("repo.unregister integration", () => {
         filePath: string;
         version: number;
       }) {
-        if (input.filePath === "src/accepted.ts") {
-          markPushEntered();
-          await pushBlocked;
-        }
-        dirtyBuffers = 1;
-        return {
-          accepted: true,
-          repoId: input.repoId,
-          overlayVersion: input.version,
-          parseScheduled: true,
-          checkpointScheduled: false,
-          warnings: [],
-        };
+        return withRepoMutation(input.repoId, async () => {
+          if (input.filePath === "src/accepted.ts") {
+            markPushEntered();
+            await pushBlocked;
+          }
+          dirtyBuffers = 1;
+          return {
+            accepted: true,
+            repoId: input.repoId,
+            overlayVersion: input.version,
+            parseScheduled: true,
+            checkpointScheduled: false,
+            warnings: [],
+          };
+        });
       },
       async getLiveStatus() {
         return { dirtyBuffers };
@@ -274,6 +276,138 @@ describe("repo.unregister integration", () => {
     );
     assert.strictEqual(dirtyBuffers, 1);
     assert.ok(await ladybugDb.getRepo(await getLadybugConn(), repoId));
+  });
+
+  it("keeps response handles valid when dirty unregister is rejected", async () => {
+    writeConfig();
+    const repoId = "dirty-rejection-handle";
+    await seedRepo(repoId);
+    const artifact = await maybeStoreLargeResponse({
+      repoId,
+      toolName: "test.dirty-rejection",
+      payload: { value: "still-current" },
+      responseMode: "handle",
+      artifactBaseDir,
+    });
+    assert.strictEqual(artifact.responseMode, "handle");
+
+    await assert.rejects(
+      () =>
+        handleRepoUnregister(
+          { repoId, confirmRepoId: repoId },
+          undefined,
+          {
+            async getLiveStatus() {
+              return { dirtyBuffers: 1 };
+            },
+          } as never,
+        ),
+      (error: unknown) => (error as { code?: string }).code === "VALIDATION_ERROR",
+    );
+    assert.deepStrictEqual(
+      (
+        await readResponseArtifact({
+          repoId,
+          handle: artifact.payload.handle,
+          artifactBaseDir,
+          full: true,
+        })
+      ).content,
+      { value: "still-current" },
+    );
+  });
+
+  it("keeps response handles valid across registration no-op exits", async () => {
+    writeConfig();
+    const repoId = "registration-noop-handle";
+    const initial = await handleRepoRegister({
+      repoId,
+      rootPath: tempRoot,
+      updateExisting: true,
+    });
+    assert.strictEqual(initial.ok, true);
+    const artifact = await maybeStoreLargeResponse({
+      repoId,
+      toolName: "test.registration-noop",
+      payload: { value: "still-current" },
+      responseMode: "handle",
+      artifactBaseDir,
+    });
+    assert.strictEqual(artifact.responseMode, "handle");
+
+    const assertReadable = async (): Promise<void> => {
+      assert.deepStrictEqual(
+        (
+          await readResponseArtifact({
+            repoId,
+            handle: artifact.payload.handle,
+            artifactBaseDir,
+            full: true,
+          })
+        ).content,
+        { value: "still-current" },
+      );
+    };
+
+    const dryRun = await handleRepoRegister({
+      repoId,
+      rootPath: tempRoot,
+      dryRun: true,
+    });
+    assert.strictEqual(dryRun.dryRun, true);
+    await assertReadable();
+
+    const noChange = await handleRepoRegister({ repoId, rootPath: tempRoot });
+    assert.strictEqual(noChange.changed, false);
+    await assertReadable();
+
+    const updateRefused = await handleRepoRegister({
+      repoId,
+      rootPath: tempRoot,
+      maxFileBytes: 4096,
+    });
+    assert.strictEqual(updateRefused.ok, false);
+    assert.strictEqual(updateRefused.requiresUpdateExisting, true);
+    await assertReadable();
+  });
+
+  it("keeps response handles valid after a pre-commit unregister error", async () => {
+    writeConfig();
+    const repoId = "precommit-error-handle";
+    await seedRepo(repoId);
+    const artifact = await maybeStoreLargeResponse({
+      repoId,
+      toolName: "test.precommit-error",
+      payload: { value: "still-current" },
+      responseMode: "handle",
+      artifactBaseDir,
+    });
+    assert.strictEqual(artifact.responseMode, "handle");
+
+    await assert.rejects(
+      () =>
+        handleRepoUnregister(
+          { repoId, confirmRepoId: repoId },
+          undefined,
+          {
+            async getLiveStatus() {
+              throw new Error("forced pre-commit failure");
+            },
+          } as never,
+        ),
+      /forced pre-commit failure/,
+    );
+    assert.deepStrictEqual(
+      (
+        await readResponseArtifact({
+          repoId,
+          handle: artifact.payload.handle,
+          artifactBaseDir,
+          full: true,
+        })
+      ).content,
+      { value: "still-current" },
+    );
   });
 
   it("does not reactivate registration beneath an unsettled removal lease", async () => {

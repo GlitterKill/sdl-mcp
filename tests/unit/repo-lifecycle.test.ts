@@ -54,15 +54,26 @@ describe("per-repository lifecycle barrier", () => {
     );
   });
 
-  it("advances the epoch on abort and reactivation", async () => {
+  it("restores the prior epoch on abort and advances only committed transitions", async () => {
     const firstEpoch = captureActiveRepoEpoch("repo");
     assert.equal(typeof firstEpoch, "number");
 
-    const removal = await beginRepoRemoval("repo");
+    const removalPromise = beginRepoRemoval("repo");
+    assert.equal(captureActiveRepoEpoch("repo"), undefined);
+    assert.equal(isRepoEpochCurrent("repo", firstEpoch!), false);
+    const removal = await removalPromise;
     removal.abort();
     const afterAbort = captureActiveRepoEpoch("repo");
-    assert.ok(afterAbort! > firstEpoch!);
+    assert.equal(afterAbort, firstEpoch);
+    assert.equal(isRepoEpochCurrent("repo", firstEpoch!), true);
+
+    const registrationPromise = beginRepoRegistration("repo");
+    assert.equal(captureActiveRepoEpoch("repo"), undefined);
     assert.equal(isRepoEpochCurrent("repo", firstEpoch!), false);
+    const abortedRegistration = await registrationPromise;
+    abortedRegistration.abort();
+    assert.equal(captureActiveRepoEpoch("repo"), firstEpoch);
+    assert.equal(isRepoEpochCurrent("repo", firstEpoch!), true);
 
     const secondRemoval = await beginRepoRemoval("repo");
     secondRemoval.commitTombstone();
@@ -71,7 +82,7 @@ describe("per-repository lifecycle barrier", () => {
     const registration = await beginRepoRegistration("repo");
     registration.commitActive();
     const reactivated = captureActiveRepoEpoch("repo")!;
-    assert.ok(reactivated > afterAbort!);
+    assert.ok(reactivated > firstEpoch!);
     assert.equal(captureActiveRepoEpoch("repo"), reactivated);
     assert.equal(
       await withRepoMutation("repo", async ({ epoch }) => epoch),
