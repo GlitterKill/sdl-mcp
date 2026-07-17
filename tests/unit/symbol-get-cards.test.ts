@@ -1,13 +1,19 @@
 import { describe, before, after, it } from "node:test";
 import assert from "node:assert";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 import { handleSymbolGetCard } from "../../dist/mcp/tools/symbol.js";
-import { SymbolGetCardRequestSchema } from "../../dist/mcp/tools.js";
-import { closeLadybugDb, getLadybugConn, initLadybugDb } from "../../dist/db/ladybug.js";
+import {
+  SymbolGetCardRequestSchema,
+  SymbolGetCardResponseSchema,
+} from "../../dist/mcp/tools.js";
+import {
+  closeLadybugDb,
+  getLadybugConn,
+  initLadybugDb,
+} from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 
 /**
@@ -24,11 +30,8 @@ import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 const REPO_ID = "test-get-cards-repo";
 const FOREIGN_REPO_ID = "test-get-cards-foreign-repo";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
 describe("handleSymbolGetCard", () => {
-  const graphDbPath = join(tmpdir(), ".lbug-get-cards-test-db");
+  const graphDbPath = join(tmpdir(), `.lbug-get-cards-test-db-${process.pid}`);
 
   let symbolIdA: string;
   let symbolIdB: string;
@@ -180,6 +183,150 @@ describe("handleSymbolGetCard", () => {
     });
 
     assert.strictEqual(result.cards.length, 2);
+    assert.deepStrictEqual(
+      result.cards.map((card) => ("symbolId" in card ? card.symbolId : null)),
+      [symbolIdA, symbolIdB],
+    );
+    assert.strictEqual(result.partial, undefined);
+    assert.strictEqual(result.succeeded, undefined);
+    assert.strictEqual(result.failed, undefined);
+    assert.strictEqual(result.failures, undefined);
+    assert.strictEqual(
+      SymbolGetCardResponseSchema.safeParse(result).success,
+      true,
+    );
+  });
+
+  it("returns ordered successes and item failures for a mixed explicit-ID batch", async () => {
+    const missingId = "sym-cards-missing-middle";
+    const result = await handleSymbolGetCard({
+      repoId: REPO_ID,
+      symbolIds: [symbolIdA, missingId, symbolIdB],
+    });
+
+    assert.deepStrictEqual(
+      result.cards.map((card) => ("symbolId" in card ? card.symbolId : null)),
+      [symbolIdA, symbolIdB],
+    );
+    assert.strictEqual(result.partial, true);
+    assert.deepStrictEqual(result.succeeded, [symbolIdA, symbolIdB]);
+    assert.deepStrictEqual(result.failed, [missingId]);
+    assert.deepStrictEqual(result.failures, [
+      {
+        input: missingId,
+        message: `Symbol not found: ${missingId}`,
+        code: "NOT_FOUND",
+        classification: "not_found",
+        retryable: false,
+        fallbackTools: ["sdl.symbol.search", "sdl.action.search"],
+        fallbackRationale:
+          "Use sdl.symbol.search to discover the canonical symbol identifier.",
+        candidates: [],
+      },
+    ]);
+    assert.strictEqual(
+      SymbolGetCardResponseSchema.safeParse(result).success,
+      true,
+    );
+  });
+
+  it("returns per-item not_found failures when every explicit ID is missing", async () => {
+    const missingIds = ["sym-cards-missing-a", "sym-cards-missing-b"];
+    const result = await handleSymbolGetCard({
+      repoId: REPO_ID,
+      symbolIds: missingIds,
+    });
+
+    assert.deepStrictEqual(result.cards, []);
+    assert.strictEqual(result.partial, false);
+    assert.deepStrictEqual(result.succeeded, []);
+    assert.deepStrictEqual(result.failed, missingIds);
+    assert.deepStrictEqual(
+      result.failures?.map((failure) => ({
+        input: failure.input,
+        code: failure.code,
+        classification: failure.classification,
+        retryable: failure.retryable,
+        fallbackTools: failure.fallbackTools,
+        fallbackRationale: failure.fallbackRationale,
+        candidates: failure.candidates,
+      })),
+      missingIds.map((input) => ({
+        input,
+        code: "NOT_FOUND",
+        classification: "not_found",
+        retryable: false,
+        fallbackTools: ["sdl.symbol.search", "sdl.action.search"],
+        fallbackRationale:
+          "Use sdl.symbol.search to discover the canonical symbol identifier.",
+        candidates: [],
+      })),
+    );
+  });
+
+  it("preserves duplicate successes and failures in request order", async () => {
+    const missingId = "sym-cards-duplicate-missing";
+    const result = await handleSymbolGetCard({
+      repoId: REPO_ID,
+      symbolIds: [symbolIdA, missingId, symbolIdA, missingId, symbolIdB],
+    });
+
+    assert.deepStrictEqual(
+      result.cards.map((card) => ("symbolId" in card ? card.symbolId : null)),
+      [symbolIdA, symbolIdA, symbolIdB],
+    );
+    assert.deepStrictEqual(result.succeeded, [symbolIdA, symbolIdA, symbolIdB]);
+    assert.deepStrictEqual(result.failed, [missingId, missingId]);
+    assert.deepStrictEqual(
+      result.failures?.map((failure) => failure.input),
+      [missingId, missingId],
+    );
+  });
+
+  it("keys session refs by ordered successes after a leading miss", async () => {
+    const missingId = "sym-cards-leading-missing";
+    const context = { sessionId: "explicit-id-leading-miss-session" };
+    const request = {
+      repoId: REPO_ID,
+      symbolIds: [missingId, symbolIdA],
+    };
+
+    const first = await handleSymbolGetCard(request, context);
+    assert.strictEqual(first.cards.length, 1);
+    assert.strictEqual(
+      "symbolId" in first.cards[0] ? first.cards[0].symbolId : null,
+      symbolIdA,
+    );
+
+    const second = await handleSymbolGetCard(request, context);
+    assert.strictEqual(second.cards.length, 1);
+    assert.strictEqual(second.cards[0].unchanged, true);
+    assert.strictEqual(second.cards[0].ref.key, `card:${REPO_ID}:${symbolIdA}`);
+  });
+
+  it("keeps explicit-ID and symbolRef not_found metadata in parity", async () => {
+    const missingId = "sym-cards-parity-missing";
+    const byId = await handleSymbolGetCard({
+      repoId: REPO_ID,
+      symbolIds: [missingId],
+    });
+    const byRef = await handleSymbolGetCard({
+      repoId: REPO_ID,
+      symbolRefs: [{ name: "missingParitySymbol" }],
+    });
+    const metadata = (failure: NonNullable<typeof byRef.failures>[number]) => ({
+      code: failure.code,
+      classification: failure.classification,
+      retryable: failure.retryable,
+      fallbackTools: failure.fallbackTools,
+      fallbackRationale: failure.fallbackRationale,
+      candidates: failure.candidates,
+    });
+
+    assert.deepStrictEqual(
+      metadata(byId.failures![0]),
+      metadata(byRef.failures![0]),
+    );
   });
 
   it("preserves input order in output cards array", async () => {
@@ -225,7 +372,10 @@ describe("handleSymbolGetCard", () => {
     });
 
     const firstCard = firstResult.cards[0];
-    assert.ok("etag" in firstCard, "Expected first fetch to return full card with etag");
+    assert.ok(
+      "etag" in firstCard,
+      "Expected first fetch to return full card with etag",
+    );
     const etag = (firstCard as { etag: string }).etag;
 
     const secondResult = await handleSymbolGetCard({
@@ -237,7 +387,8 @@ describe("handleSymbolGetCard", () => {
     assert.strictEqual(secondResult.cards.length, 1);
     const cachedCard = secondResult.cards[0];
     assert.ok(
-      "notModified" in cachedCard && (cachedCard as { notModified: boolean }).notModified,
+      "notModified" in cachedCard &&
+        (cachedCard as { notModified: boolean }).notModified,
       "Expected notModified response when ETag matches",
     );
   });
@@ -263,7 +414,8 @@ describe("handleSymbolGetCard", () => {
     const resultB = batchResult.cards[1];
 
     assert.ok(
-      "notModified" in resultA && (resultA as { notModified: boolean }).notModified,
+      "notModified" in resultA &&
+        (resultA as { notModified: boolean }).notModified,
       "Expected notModified for symbolIdA (ETag match)",
     );
 
@@ -280,6 +432,23 @@ describe("handleSymbolGetCard", () => {
         }),
       /belongs to repo/,
     );
+  });
+
+  it("keeps a real database failure fatal for the whole batch", async () => {
+    await closeLadybugDb();
+    try {
+      await assert.rejects(
+        () =>
+          handleSymbolGetCard({
+            repoId: REPO_ID,
+            symbolIds: [symbolIdA, "sym-cards-db-failure-missing"],
+          }),
+        (error: unknown) =>
+          (error as { code?: string }).code === "DATABASE_ERROR",
+      );
+    } finally {
+      await initLadybugDb(graphDbPath);
+    }
   });
 
   it("schema rejects requests with more than 100 symbolIds", () => {
@@ -352,8 +521,14 @@ describe("handleSymbolGetCard", () => {
   });
 
   it("repeat delivery without a sessionId returns the full card", async () => {
-    const first = await handleSymbolGetCard({ repoId: REPO_ID, symbolIds: [symbolIdB] });
-    const second = await handleSymbolGetCard({ repoId: REPO_ID, symbolIds: [symbolIdB] });
+    const first = await handleSymbolGetCard({
+      repoId: REPO_ID,
+      symbolIds: [symbolIdB],
+    });
+    const second = await handleSymbolGetCard({
+      repoId: REPO_ID,
+      symbolIds: [symbolIdB],
+    });
     assert.ok("etag" in first.cards[0]);
     assert.ok("etag" in second.cards[0]);
   });

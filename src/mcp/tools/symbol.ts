@@ -5,7 +5,6 @@ import {
   type SymbolGetCardRequest,
   SymbolGetCardRequestSchema,
   SymbolGetCardResponse,
-  type SymbolRef,
 } from "../tools.js";
 import {
   SYMBOL_SEARCH_DEFAULT_LIMIT,
@@ -823,10 +822,7 @@ function createSymbolResolutionError(
   });
 }
 
-function toBatchFailure(
-  symbolRef: SymbolRef,
-  error: Error,
-): SymbolResolutionFailure {
+function toBatchFailure(input: string, error: Error): SymbolResolutionFailure {
   const detail = error as {
     code?: string;
     classification?: string;
@@ -835,14 +831,15 @@ function toBatchFailure(
     fallbackRationale?: string;
     candidates?: Array<Record<string, unknown>>;
   };
+  const fallback = createSymbolSearchFallback();
   return {
-    input: symbolRef.name,
+    input,
     message: error.message,
     code: detail.code ?? "NOT_FOUND",
     classification: detail.classification ?? "not_found",
     retryable: detail.retryable ?? false,
-    fallbackTools: detail.fallbackTools ?? ["sdl.symbol.search"],
-    fallbackRationale: detail.fallbackRationale,
+    fallbackTools: detail.fallbackTools ?? fallback.fallbackTools,
+    fallbackRationale: detail.fallbackRationale ?? fallback.fallbackRationale,
     candidates: detail.candidates ?? [],
   };
 }
@@ -892,11 +889,15 @@ async function buildCardsForSymbolIds(
     minCallConfidence?: number;
     includeResolutionMetadata?: boolean;
     includeProcesses?: boolean;
+    // Only explicit-ID batches convert missing cards into item failures.
+    collectMissing?: boolean;
   },
   context?: ToolContext,
 ): Promise<{
   cards: Awaited<ReturnType<typeof buildCardForSymbol>>[];
   symbolMap: Map<string, ladybugDb.SymbolRow>;
+  succeeded: string[];
+  failures: SymbolResolutionFailure[];
 }> {
   for (const symbolId of input.symbolIds) {
     consumePrefetchedKey(
@@ -919,17 +920,27 @@ async function buildCardsForSymbolIds(
   }
 
   const cards: Awaited<ReturnType<typeof buildCardForSymbol>>[] = [];
+  const succeeded: string[] = [];
+  const failures: SymbolResolutionFailure[] = [];
   for (const id of input.symbolIds) {
-    cards.push(
-      await buildCardForSymbol(input.repoId, id, input.knownEtags?.[id], {
-        minCallConfidence: input.minCallConfidence,
-        includeResolutionMetadata: input.includeResolutionMetadata,
-        includeProcesses: input.includeProcesses === true,
-      }),
-    );
+    try {
+      cards.push(
+        await buildCardForSymbol(input.repoId, id, input.knownEtags?.[id], {
+          minCallConfidence: input.minCallConfidence,
+          includeResolutionMetadata: input.includeResolutionMetadata,
+          includeProcesses: input.includeProcesses === true,
+        }),
+      );
+      succeeded.push(id);
+    } catch (error) {
+      if (!(error instanceof NotFoundError) || input.collectMissing !== true) {
+        throw error;
+      }
+      failures.push(toBatchFailure(id, error));
+    }
   }
 
-  return { cards, symbolMap };
+  return { cards, symbolMap, succeeded, failures };
 }
 
 /**
@@ -1028,17 +1039,19 @@ async function handleBatchCards(
   }
 
   if (symbolIds) {
-    const { cards, symbolMap } = await buildCardsForSymbolIds(
-      conn,
-      {
-        repoId,
-        symbolIds,
-        knownEtags,
-        minCallConfidence,
-        includeResolutionMetadata,
-      },
-      context,
-    );
+    const { cards, symbolMap, succeeded, failures } =
+      await buildCardsForSymbolIds(
+        conn,
+        {
+          repoId,
+          symbolIds,
+          knownEtags,
+          minCallConfidence,
+          includeResolutionMetadata,
+          collectMissing: true,
+        },
+        context,
+      );
     const fileIds = [
       ...new Set(Array.from(symbolMap.values()).map((symbol) => symbol.fileId)),
     ];
@@ -1048,12 +1061,18 @@ async function handleBatchCards(
           ? card
           : maybeApplyCardSessionRef(compactCardForWire(card), {
               repoId,
-              symbolId: symbolIds[index] ?? "",
+              symbolId: succeeded[index] ?? "",
               refsMode,
               sessionId: context?.sessionId,
             }),
       ),
     } as Extract<SymbolGetCardResponse, { cards: unknown }>;
+    if (failures.length > 0) {
+      response.partial = succeeded.length > 0;
+      response.succeeded = succeeded;
+      response.failed = failures.map((failure) => failure.input);
+      response.failures = failures;
+    }
     return attachRawContext(response, { fileIds });
   }
 
@@ -1067,7 +1086,10 @@ async function handleBatchCards(
     }
 
     failures.push(
-      toBatchFailure(symbolRef, createSymbolResolutionError(repoId, resolution)),
+      toBatchFailure(
+        symbolRef.name,
+        createSymbolResolutionError(repoId, resolution),
+      ),
     );
   }
 
