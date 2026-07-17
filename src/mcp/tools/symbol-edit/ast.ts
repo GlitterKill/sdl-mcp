@@ -286,6 +286,21 @@ function inferIndentUnit(
       return closingIndent.slice(ancestorIndent.length);
     }
   }
+
+  if (closingIndent.length === 0) {
+    const before = precedingLines.slice(0, -1).reverse();
+    const after = content.slice(bodyStart).split(/\r\n|\n/);
+    const distanceLimit = Math.max(before.length, after.length);
+    // Root-level bodies have no ancestor indent, so use the nearest local sample.
+    for (let distance = 0; distance < distanceLimit; distance += 1) {
+      for (const line of [before[distance], after[distance]]) {
+        if (!line || line.trim().length === 0) continue;
+        const sampleIndent = leadingIndent(line);
+        if (sampleIndent.length > 0) return sampleIndent;
+      }
+    }
+  }
+
   return closingIndent.includes("\t") ? "\t" : "  ";
 }
 

@@ -152,6 +152,44 @@ describe("planTypeScriptSymbolEdit", () => {
     );
   });
 
+  it("infers tabs for an empty root-level body from nearby code", () => {
+    const content =
+      "function existing() {\n\treturn false;\n}\nfunction handleAuth() {\n}\n";
+    const result = planTypeScriptSymbolEdit({
+      content,
+      filePath: "src/auth.ts",
+      symbol: {
+        ...functionSnapshot,
+        range: { startLine: 4, startCol: 0, endLine: 5, endCol: 1 },
+      },
+      operation: { kind: "replaceBody", content: "return true;" },
+    });
+
+    assert.equal(
+      result.newContent,
+      "function existing() {\n\treturn false;\n}\nfunction handleAuth() {\n\treturn true;\n}\n",
+    );
+  });
+
+  it("infers four spaces for an empty root-level body from nearby code", () => {
+    const content =
+      "function existing() {\n    return false;\n}\nfunction handleAuth() {\n}\n";
+    const result = planTypeScriptSymbolEdit({
+      content,
+      filePath: "src/auth.ts",
+      symbol: {
+        ...functionSnapshot,
+        range: { startLine: 4, startCol: 0, endLine: 5, endCol: 1 },
+      },
+      operation: { kind: "replaceBody", content: "return true;" },
+    });
+
+    assert.equal(
+      result.newContent,
+      "function existing() {\n    return false;\n}\nfunction handleAuth() {\n    return true;\n}\n",
+    );
+  });
+
   it("preserves CRLF line endings for logical body text", () => {
     const content =
       "export function handleAuth() {\r\n  return false;\r\n}\r\n";
