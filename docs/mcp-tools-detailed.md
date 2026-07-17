@@ -10,6 +10,10 @@ This page remains at its original URL so existing links continue to work.
 
 Use `repo.unregister` only for runtime registrations. It requires `confirmRepoId` to exactly match `repoId`, rejects configured repositories until their entry is removed from `SDL_CONFIG`, and rejects dirty live buffers unless `discardDrafts: true` is explicit. Successful removal returns only `{ ok: true, repoId, removed: true }` and deletes repository-owned graph data while preserving unrelated repositories and global content-addressed nodes.
 
+## Symbol search misses
+
+`sdl.symbol.search` searches symbol names; it does not add file-path matches to symbol ranking. When a search has no useful result and its query is clearly path-like (a slash or backslash, a known source extension, or an exact indexed repository-relative path), the response includes one structured `nextBestAction`. Call `sdl.context` with the supplied arguments to retry using `options.focusPaths: [query]`. Ordinary symbol-name misses do not receive this path-specific hint.
+
 ## Response artifact retrieval
 
 `sdl.response.get` requires an explicit mode for JSON artifacts. Use `full: true` to return the parsed JSON value, `jsonPath` to return one complete structural value (with `offset` and `limit` for extracted arrays), or `raw: true` to request a bounded byte excerpt. Raw JSON excerpts may be syntactically incomplete. `offsetBytes` applies only to raw JSON or text excerpts and cannot be combined with `full: true` or `jsonPath`.

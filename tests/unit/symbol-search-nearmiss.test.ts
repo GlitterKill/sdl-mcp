@@ -11,6 +11,7 @@ import {
 } from "../../dist/db/ladybug.js";
 import * as ladybugDb from "../../dist/db/ladybug-queries.js";
 import { buildIdentifierAwareFtsQuery } from "../../dist/retrieval/orchestrator.js";
+import { SymbolSearchResponseSchema } from "../../dist/mcp/tools.js";
 import { handleSymbolSearch } from "../../dist/mcp/tools/symbol.js";
 
 describe("symbol.search identifier near misses", () => {
@@ -69,6 +70,15 @@ describe("symbol.search identifier near misses", () => {
       relPath: "src/store.ts",
       contentHash: "h2",
       language: "ts",
+      byteSize: 1,
+      lastIndexedAt: now,
+    });
+    await ladybugDb.upsertFile(conn, {
+      fileId: "file-package-json",
+      repoId,
+      relPath: "package.json",
+      contentHash: "h3",
+      language: "json",
       byteSize: 1,
       lastIndexedAt: now,
     });
@@ -178,7 +188,75 @@ describe("symbol.search identifier near misses", () => {
     );
     assert.equal(Object.hasOwn(nearMisses[0] ?? {}, "symbolId"), false);
   });
+
+  it("guides clearly path-like misses to path-scoped context", async () => {
+    for (const query of [
+      "docs/missing-guide",
+      "docs\\missing-guide",
+      "missing-handler.ts",
+    ]) {
+      const search = await handleSymbolSearch({
+        repoId,
+        query,
+        limit: 5,
+        semantic: false,
+        wireFormat: "json",
+      });
+
+      assert.deepEqual(getResultRows(search), []);
+      assert.deepEqual(search.nextBestAction, expectedPathRecovery(query));
+      assert.doesNotThrow(() => SymbolSearchResponseSchema.parse(search));
+    }
+  });
+
+  it("guides an exact indexed relative-path miss without guessing from its extension", async () => {
+    const query = "package.json";
+    const search = await handleSymbolSearch({
+      repoId,
+      query,
+      limit: 5,
+      semantic: false,
+      wireFormat: "json",
+    });
+
+    assert.deepEqual(getResultRows(search), []);
+    assert.deepEqual(search.nextBestAction, expectedPathRecovery(query));
+  });
+
+  it("does not emit path guidance for ordinary symbol misses", async () => {
+    const search = await handleSymbolSearch({
+      repoId,
+      query: "MissingWidget",
+      limit: 5,
+      semantic: false,
+      wireFormat: "json",
+    });
+
+    assert.deepEqual(getResultRows(search), []);
+    assert.equal(search.nextBestAction, undefined);
+  });
 });
+
+function expectedPathRecovery(query: string): {
+  tool: string;
+  args: Record<string, unknown>;
+  rationale: string;
+} {
+  return {
+    tool: "sdl.context",
+    args: {
+      repoId: "symbol-search-nearmiss-repo",
+      taskType: "explain",
+      taskText: `Inspect repository path: ${query}`,
+      options: {
+        focusPaths: [query],
+        contextMode: "precise",
+      },
+    },
+    rationale:
+      "The query looks like a repository path. Use path-scoped context retrieval instead of symbol-name search.",
+  };
+}
 
 function getResultRows(search: { results: unknown }): Array<{
   symbolId: string;

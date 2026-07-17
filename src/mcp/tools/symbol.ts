@@ -44,6 +44,7 @@ import { logger } from "../../util/logger.js";
 import { buildCardForSymbol } from "../../services/card-builder.js";
 import { createSymbolSearchFallback } from "../../services/symbol-search-fallback.js";
 import { resolveSymbolId } from "../../util/resolve-symbol-id.js";
+import { SDL_SOURCE_EXTENSIONS } from "./file-read.js";
 import {
   resolveSymbolRef,
   type SymbolRefResolution,
@@ -194,6 +195,47 @@ interface SymbolSearchNearMiss {
 const NEAR_MISS_LIMIT = 3;
 const NO_STRONG_MATCH_SUGGESTION =
   "No strong match. nearMisses lists closest names; search again with one of them.";
+const PATH_RECOVERY_RATIONALE =
+  "The query looks like a repository path. Use path-scoped context retrieval instead of symbol-name search.";
+
+function hasKnownSourceExtension(query: string): boolean {
+  const fileName = query.split(/[\\/]/).at(-1) ?? "";
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex <= 0) return false;
+  return SDL_SOURCE_EXTENSIONS.has(fileName.slice(dotIndex).toLowerCase());
+}
+
+async function buildPathRecoveryAction(
+  conn: Awaited<ReturnType<typeof getLadybugConn>>,
+  repoId: string,
+  query: string,
+): Promise<SymbolSearchResponse["nextBestAction"]> {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) return undefined;
+
+  const hasPathSyntax =
+    trimmedQuery.includes("/") ||
+    trimmedQuery.includes("\\") ||
+    hasKnownSourceExtension(trimmedQuery);
+  const exactFile = hasPathSyntax
+    ? null
+    : await ladybugDb.getFileByRepoPath(conn, repoId, trimmedQuery);
+  if (!hasPathSyntax && !exactFile) return undefined;
+
+  return {
+    tool: "sdl.context",
+    args: {
+      repoId,
+      taskType: "explain",
+      taskText: `Inspect repository path: ${query}`,
+      options: {
+        focusPaths: [query],
+        contextMode: "precise",
+      },
+    },
+    rationale: PATH_RECOVERY_RATIONALE,
+  };
+}
 
 function nearMissQueryFragments(query: string): string[] {
   if (query.includes("*") || query.includes("?")) return [];
@@ -653,6 +695,10 @@ export async function handleSymbolSearch(
       : effectiveResults.length === 0 && relevant.length > 0
         ? "No confident matches found. Try more specific terms or exact symbol names."
         : suggestion;
+  const nextBestAction =
+    effectiveResults.length === 0
+      ? await buildPathRecoveryAction(conn, request.repoId, query)
+      : undefined;
   const response: SymbolSearchResponse = {
     results: effectiveResults,
     exactMatchFound: hasExactMatch,
@@ -660,6 +706,7 @@ export async function handleSymbolSearch(
     ...(effectiveSuggestion !== undefined && {
       suggestion: effectiveSuggestion,
     }),
+    ...(nextBestAction !== undefined && { nextBestAction }),
   };
   if (request.includeRetrievalEvidence) {
     if (useHybrid && retrievalEvidence) {

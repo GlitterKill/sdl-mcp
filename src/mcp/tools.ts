@@ -968,6 +968,20 @@ const SymbolSearchNearMissSchema = z.object({
   file: z.string(),
 });
 
+const SymbolSearchNextBestActionSchema = z.object({
+  tool: z.literal("sdl.context"),
+  args: z.object({
+    repoId: z.string().min(1),
+    taskType: z.literal("explain"),
+    taskText: z.string().min(1),
+    options: z.object({
+      focusPaths: z.array(z.string().min(1)).length(1),
+      contextMode: z.literal("precise"),
+    }),
+  }),
+  rationale: z.string().min(1),
+});
+
 export const SymbolSearchRequestSchema = z
   .object({
     repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
@@ -1045,6 +1059,8 @@ export const SymbolSearchResponseSchema = z.object({
   suggestion: z.string().optional(),
   /** Closest symbol names returned on miss paths, intentionally omitting symbolIds to keep retries compact. */
   nearMisses: z.array(SymbolSearchNearMissSchema).max(3).optional(),
+  /** Callable path-scoped recovery emitted only when an empty query result looks like a repository path. */
+  nextBestAction: SymbolSearchNextBestActionSchema.optional(),
   /** Packed wire-format telemetry. Only populated when symbol-search ran the packed gate. */
   _packedStats: z
     .object({
