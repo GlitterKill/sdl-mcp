@@ -114,7 +114,7 @@ describe("sdl.symbol.edit", { concurrency: false }, () => {
     assert.ok(preview.planHandle.startsWith("se-"));
     assert.equal(preview.fileEntries[0]?.snippets.beforeStartLine, 1);
     assert.match(preview.fileEntries[0]?.snippets.before ?? "", />2 \|   return false;/);
-    assert.match(preview.fileEntries[0]?.snippets.after ?? "", />2 \| return true;/);
+    assert.match(preview.fileEntries[0]?.snippets.after ?? "", />2 \|   return true;/);
 
     const apply = (await handleSymbolEdit({
       mode: "apply",
@@ -126,7 +126,10 @@ describe("sdl.symbol.edit", { concurrency: false }, () => {
     assert.equal(apply.filesWritten, 1);
     assert.equal(apply.filesFailed, 0);
     assert.equal(apply.writeTarget, "file");
-    assert.match(await readFile(join(repoRoot, "src", "auth.ts"), "utf-8"), /return true;/);
+    assert.equal(
+      await readFile(join(repoRoot, "src", "auth.ts"), "utf-8"),
+      "export function handleAuth(): boolean {\n  return true;\n}\n",
+    );
   });
 
   it("rejects apply when the saved file sha drifts after preview", async () => {

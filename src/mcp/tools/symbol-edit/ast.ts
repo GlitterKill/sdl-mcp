@@ -245,15 +245,77 @@ function locateBody(symbolNode: Parser.SyntaxNode): OffsetRange {
   };
 }
 
-function normalizeBodyContent(content: string, bodyRange: OffsetRange, replacement: string): string {
-  const hadLeadingNewline = content[bodyRange.start] === "\n";
-  const hadTrailingNewline = bodyRange.end > 0 && content[bodyRange.end - 1] === "\n";
-  let text = replacement;
-  if (hadLeadingNewline && !text.startsWith("\n")) {
-    text = "\n" + text;
+function leadingIndent(line: string): string {
+  return /^[\t ]*/.exec(line)?.[0] ?? "";
+}
+
+function commonLeadingIndent(lines: string[]): string {
+  const nonblank = lines.filter((line) => line.trim().length > 0);
+  if (nonblank.length === 0) return "";
+
+  let common = leadingIndent(nonblank[0]);
+  for (const line of nonblank.slice(1)) {
+    const indent = leadingIndent(line);
+    while (common.length > 0 && !indent.startsWith(common)) {
+      common = common.slice(0, -1);
+    }
   }
-  if (hadTrailingNewline && !text.endsWith("\n")) {
-    text += "\n";
+  return common;
+}
+
+function indentAtOffset(content: string, offset: number): string {
+  const lineStart = content.lastIndexOf("\n", Math.max(0, offset - 1)) + 1;
+  return leadingIndent(content.slice(lineStart, offset));
+}
+
+function inferIndentUnit(content: string, closingIndent: string): string {
+  const indents = content
+    .split(/\r\n|\n/)
+    .filter((line) => line.trim().length > 0)
+    .map(leadingIndent)
+    .filter((indent) => indent.length > 0)
+    .sort((a, b) => a.length - b.length || a.localeCompare(b));
+  if (indents[0]) return indents[0];
+  return closingIndent.includes("\t") ? "\t" : "  ";
+}
+
+function normalizeBodyContent(
+  content: string,
+  bodyRange: OffsetRange,
+  replacement: string,
+): string {
+  const newline = content.includes("\r\n") ? "\r\n" : "\n";
+  const bodyContent = content.slice(bodyRange.start, bodyRange.end);
+  const closingIndent = indentAtOffset(content, bodyRange.end);
+  const trailingBoundary = /(?:\r\n|\n)([\t ]*)$/.exec(bodyContent);
+  const hadLeadingNewline = bodyContent.startsWith(newline);
+  const existingBodyLine = bodyContent
+    .split(/\r\n|\n/)
+    .find((line) => line.trim().length > 0);
+  const targetIndent = existingBodyLine
+    ? leadingIndent(existingBodyLine)
+    : closingIndent + inferIndentUnit(content, closingIndent);
+
+  const normalizedReplacement = replacement.replace(/\r\n|\r|\n/g, newline);
+  const replacementLines = normalizedReplacement.split(newline);
+  const callerIndent = commonLeadingIndent(replacementLines);
+  let text = replacementLines
+    .map((line) => {
+      if (line.trim().length === 0) return "";
+      return targetIndent + line.slice(callerIndent.length);
+    })
+    .join(newline);
+
+  // Keep the selected body's established brace/newline boundary while treating
+  // caller content as logical body text rather than preformatted file text.
+  if (hadLeadingNewline && !text.startsWith(newline)) {
+    text = newline + text;
+  }
+  if (trailingBoundary) {
+    if (!text.endsWith(newline)) {
+      text += newline;
+    }
+    text += trailingBoundary[1];
   }
   return text;
 }

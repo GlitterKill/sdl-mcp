@@ -19,13 +19,13 @@ Use `symbol.edit` when the intended edit is anchored to one symbol and the calle
 | Operation          | Description                                                                           | TypeScript/JavaScript family support | Other indexed languages                       |
 | ------------------ | ------------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------- |
 | `replaceSymbol`    | Replace the full symbol range.                                                        | Yes                                  | Yes, when indexed symbol ranges are available |
-| `replaceBody`      | Replace only the inner body content and preserve delimiters.                          | Yes                                  | No                                            |
+| `replaceBody`      | Replace the inner body from logical body text, preserving delimiters and local indentation. | Yes                             | No                                            |
 | `replaceSignature` | Replace the declaration header and preserve the body.                                 | Yes                                  | No                                            |
 | `insertBefore`     | Insert sibling text immediately before the symbol declaration.                        | Yes                                  | Yes, when indexed symbol ranges are available |
 | `insertAfter`      | Insert sibling text immediately after the symbol declaration.                         | Yes                                  | Yes, when indexed symbol ranges are available |
 | `renameLocal`      | Rename a declaration, parameter, or local identifier inside the selected symbol only. | Yes                                  | No                                            |
 
-V1 does not run a formatter or auto-indent replacement text. SDL-MCP inserts the supplied text exactly, except for newline-boundary normalization around adjacent inserts and body delimiters.
+V1 does not run a formatter or reformat the enclosing symbol. For `replaceBody`, SDL-MCP removes the caller's common leading indentation, infers the target indentation from the existing body (or the closing brace plus the file's local indentation unit for an empty body), and indents nonblank replacement lines while preserving newline style and body-boundary newlines. Other operations insert supplied text exactly, except for newline-boundary normalization around adjacent inserts.
 
 Unsupported shapes fail closed. For example, ambient declarations and overload-only TypeScript declarations reject `replaceBody` because there is no body range to edit.
 

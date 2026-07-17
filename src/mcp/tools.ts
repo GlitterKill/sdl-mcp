@@ -1165,7 +1165,12 @@ export const SymbolEditOperationSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("replaceBody"),
-    content: z.string().max(512 * 1024),
+    content: z
+      .string()
+      .max(512 * 1024)
+      .describe(
+        "Logical body text. SDL normalizes common caller indentation and applies the target body's local indentation without formatting surrounding source.",
+      ),
   }),
   z.object({
     kind: z.literal("replaceSignature"),

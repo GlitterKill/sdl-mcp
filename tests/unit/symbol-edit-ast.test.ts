@@ -27,7 +27,7 @@ describe("planTypeScriptSymbolEdit", () => {
 
     assert.equal(
       result.newContent,
-      "export function handleAuth(user: User) {\nreturn true;\n}\n",
+      "export function handleAuth(user: User) {\n  return true;\n}\n",
     );
     assert.equal(result.editMode, "replaceBody");
     assert.equal(result.validation.parseAfter, true);
@@ -48,8 +48,108 @@ describe("planTypeScriptSymbolEdit", () => {
 
     assert.equal(
       result.newContent,
-      "export function handleAuth(input: { enabled: boolean }): boolean {\nreturn true;\n}\n",
+      "export function handleAuth(input: { enabled: boolean }): boolean {\n  return true;\n}\n",
     );
+  });
+
+  it("normalizes caller indentation without double-indenting blank lines", () => {
+    const content = "export function handleAuth() {\n  return false;\n}\n";
+    const result = planTypeScriptSymbolEdit({
+      content,
+      filePath: "src/auth.ts",
+      symbol: functionSnapshot,
+      operation: {
+        kind: "replaceBody",
+        content:
+          "  if (ready) {\n    return true;\n  }\n  \n  return false;\n",
+      },
+    });
+
+    assert.equal(
+      result.newContent,
+      "export function handleAuth() {\n  if (ready) {\n    return true;\n  }\n\n  return false;\n}\n",
+    );
+  });
+
+  it("preserves tab indentation and relative nesting", () => {
+    const content = "export function handleAuth() {\n\treturn false;\n}\n";
+    const result = planTypeScriptSymbolEdit({
+      content,
+      filePath: "src/auth.ts",
+      symbol: functionSnapshot,
+      operation: {
+        kind: "replaceBody",
+        content: "if (ready) {\n\treturn true;\n}\n",
+      },
+    });
+
+    assert.equal(
+      result.newContent,
+      "export function handleAuth() {\n\tif (ready) {\n\t\treturn true;\n\t}\n}\n",
+    );
+  });
+
+  it("infers nested method indentation and leaves surrounding source unchanged", () => {
+    const content =
+      "class Auth {\n  handleAuth() {\n    return false;\n  }\n  untouched() { return 1; }\n}\n";
+    const result = planTypeScriptSymbolEdit({
+      content,
+      filePath: "src/auth.ts",
+      symbol: {
+        ...functionSnapshot,
+        kind: "method",
+        range: { startLine: 2, startCol: 2, endLine: 4, endCol: 3 },
+      },
+      operation: {
+        kind: "replaceBody",
+        content: "if (ready) {\n  return true;\n}\n",
+      },
+    });
+
+    assert.equal(
+      result.newContent,
+      "class Auth {\n  handleAuth() {\n    if (ready) {\n      return true;\n    }\n  }\n  untouched() { return 1; }\n}\n",
+    );
+  });
+
+  it("infers the local indentation unit for an empty body", () => {
+    const content =
+      "class Auth {\n  existing() {\n    return false;\n  }\n  handleAuth() {\n  }\n}\n";
+    const result = planTypeScriptSymbolEdit({
+      content,
+      filePath: "src/auth.ts",
+      symbol: {
+        ...functionSnapshot,
+        kind: "method",
+        range: { startLine: 5, startCol: 2, endLine: 6, endCol: 3 },
+      },
+      operation: { kind: "replaceBody", content: "return true;" },
+    });
+
+    assert.equal(
+      result.newContent,
+      "class Auth {\n  existing() {\n    return false;\n  }\n  handleAuth() {\n    return true;\n  }\n}\n",
+    );
+  });
+
+  it("preserves CRLF line endings for logical body text", () => {
+    const content =
+      "export function handleAuth() {\r\n  return false;\r\n}\r\n";
+    const result = planTypeScriptSymbolEdit({
+      content,
+      filePath: "src/auth.ts",
+      symbol: functionSnapshot,
+      operation: {
+        kind: "replaceBody",
+        content: "if (ready) {\n  return true;\n}\n",
+      },
+    });
+
+    assert.equal(
+      result.newContent,
+      "export function handleAuth() {\r\n  if (ready) {\r\n    return true;\r\n  }\r\n}\r\n",
+    );
+    assert.equal(result.newContent.replace(/\r\n/g, "").includes("\n"), false);
   });
 
   it("replaces the signature while preserving the existing body", () => {
