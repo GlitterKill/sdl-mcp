@@ -52,6 +52,7 @@ describe("tool response envelope model projection", () => {
       {
         repoId: "sdl-mcp",
         rootPath: "F:/secret/workspace/sdl-mcp",
+        rootAvailability: { status: "available" },
         latestVersionId: null,
         lastIndexedAt: "2026-07-16T12:34:56.000Z",
         filesIndexed: 10,
@@ -93,6 +94,7 @@ describe("tool response envelope model projection", () => {
     const raw = RepoStatusResponseSchema.parse({
       repoId: "sdl-mcp",
       rootPath: "F:/workspace/sdl-mcp",
+      rootAvailability: { status: "available" },
       latestVersionId: null,
       filesIndexed: 10,
       symbolsIndexed: 20,

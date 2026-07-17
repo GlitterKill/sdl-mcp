@@ -43,6 +43,7 @@ describe("watcher health", () => {
     const basePayload = {
       repoId: "test-repo",
       rootPath: "/tmp/test",
+      rootAvailability: { status: "available" },
       latestVersionId: "v1",
       filesIndexed: 0,
       symbolsIndexed: 0,
@@ -174,6 +175,7 @@ describe("watcher health", () => {
     const parsed = RepoStatusResponseSchema.parse({
       repoId: "test-repo",
       rootPath: "/tmp/test",
+      rootAvailability: { status: "available" },
       latestVersionId: "v1",
       filesIndexed: 0,
       symbolsIndexed: 0,

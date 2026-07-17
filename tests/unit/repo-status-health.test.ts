@@ -1,6 +1,16 @@
 import assert from "node:assert";
-import { readFileSync } from "node:fs";
-import { describe, it } from "node:test";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, describe, it } from "node:test";
 import {
   RepoStatusRequestSchema,
   RepoStatusResponseSchema,
@@ -32,10 +42,88 @@ describe("repo status health fields", () => {
     assert.ok(source.includes("serverInfo: getServerInfo(),"));
   });
 
+  it("probes only root metadata and read access", async () => {
+    const healthModule = await import("../../dist/services/health.js");
+    const probe = Reflect.get(healthModule, "probeRepositoryRoot");
+
+    assert.strictEqual(typeof probe, "function");
+    const source = String(probe);
+    assert.match(source, /stat\(/);
+    assert.match(source, /access\(/);
+    assert.doesNotMatch(source, /scanRepository|readdir|walk/);
+  });
+
+  it("classifies existing, missing, and file roots", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sdl-root-probe-"));
+    const file = join(root, "not-a-directory");
+    const missing = join(root, "missing");
+    writeFileSync(file, "not a root", "utf8");
+    try {
+      const healthModule = await import("../../dist/services/health.js");
+      const probe = Reflect.get(healthModule, "probeRepositoryRoot") as
+        | ((rootPath: string) => Promise<{ status: string }>)
+        | undefined;
+      assert.ok(probe);
+
+      assert.deepStrictEqual(await probe(root), { status: "available" });
+      assert.deepStrictEqual(await probe(missing), { status: "missing" });
+      assert.deepStrictEqual(await probe(file), { status: "unreadable" });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("classifies an unreadable directory when the platform enforces read mode", async (t) => {
+    const root = mkdtempSync(join(tmpdir(), "sdl-root-unreadable-"));
+    const originalMode = statSync(root).mode;
+    try {
+      chmodSync(root, 0);
+      const healthModule = await import("../../dist/services/health.js");
+      const probe = Reflect.get(healthModule, "probeRepositoryRoot") as
+        | ((rootPath: string) => Promise<{ status: string }>)
+        | undefined;
+      assert.ok(probe);
+      const result = await probe(root);
+      if (result.status === "available") {
+        t.skip("platform does not enforce directory read mode for this process");
+        return;
+      }
+      assert.deepStrictEqual(result, { status: "unreadable" });
+    } finally {
+      chmodSync(root, originalMode);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps unavailable roots and failed-closed health in compact model output", async () => {
+    const { projectToolResultForModelContent } = await import(
+      "../../dist/mcp/context-response-projection.js"
+    );
+    const projected = projectToolResultForModelContent("sdl.repo.status", {
+      repoId: "missing",
+      rootAvailability: {
+        status: "missing",
+        nextBestAction: "Restore the repository root.",
+      },
+      latestVersionId: "v1",
+      filesIndexed: 1,
+      symbolsIndexed: 1,
+      healthAvailable: false,
+    }) as Record<string, unknown>;
+
+    assert.deepStrictEqual(projected.rootAvailability, {
+      status: "missing",
+      nextBestAction: "Restore the repository root.",
+    });
+    assert.strictEqual(projected.healthAvailable, false);
+    assert.strictEqual(projected.healthScore, undefined);
+  });
+
   it("allows compact repo status without health or telemetry fields", () => {
     const parsed = RepoStatusResponseSchema.parse({
       repoId: "sdl-mcp",
       rootPath: ".",
+      rootAvailability: { status: "available" },
       latestVersionId: "v1",
       filesIndexed: 1,
       symbolsIndexed: 1,
@@ -78,6 +166,7 @@ describe("repo status health fields", () => {
     const parsed = RepoStatusResponseSchema.parse({
       repoId: "sdl-mcp",
       rootPath: ".",
+      rootAvailability: { status: "available" },
       latestVersionId: "v2",
       filesIndexed: 1,
       symbolsIndexed: 1,
@@ -116,6 +205,7 @@ describe("repo status health fields", () => {
     const parsed = RepoStatusResponseSchema.parse({
       repoId: "sdl-mcp",
       rootPath: ".",
+      rootAvailability: { status: "available" },
       latestVersionId: "v1",
       filesIndexed: 1,
       symbolsIndexed: 1,
@@ -187,5 +277,183 @@ describe("repo status health fields", () => {
     assert.strictEqual(parsed.liveIndexStatus?.enabled, true);
     assert.strictEqual(parsed.liveIndexStatus?.lastCheckpointResult, "success");
     assert.strictEqual(parsed.serverInfo?.version, "0.0.0-test");
+  });
+});
+
+describe("repo status root availability", { concurrency: 1 }, () => {
+  const testRoot = join(tmpdir(), `sdl-repo-status-root-${process.pid}`);
+  const dbPath = join(testRoot, "graph.lbug");
+  const configPath = join(testRoot, "sdlmcp.config.json");
+  const availableRoot = join(testRoot, "available");
+  const missingRoot = join(testRoot, "missing");
+  const configuredMissingRoot = join(testRoot, "configured-missing");
+  const fileRoot = join(testRoot, "file-root");
+  const originalConfig = process.env.SDL_CONFIG;
+  const originalDbPath = process.env.SDL_GRAPH_DB_PATH;
+
+  before(async () => {
+    rmSync(testRoot, { recursive: true, force: true });
+    mkdirSync(availableRoot, { recursive: true });
+    writeFileSync(fileRoot, "not a directory", "utf8");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        repos: [
+          { repoId: "configured-missing", rootPath: configuredMissingRoot },
+        ],
+        policy: {},
+      }),
+      "utf8",
+    );
+    process.env.SDL_CONFIG = configPath;
+    process.env.SDL_GRAPH_DB_PATH = dbPath;
+
+    const { invalidateConfigCache } = await import(
+      "../../dist/config/loadConfig.js"
+    );
+    const { closeLadybugDb, initLadybugDb, withWriteConn } = await import(
+      "../../dist/db/ladybug.js"
+    );
+    const ladybugDb = await import("../../dist/db/ladybug-queries.js");
+    const derivedState = await import(
+      "../../dist/db/ladybug-derived-state.js"
+    );
+    invalidateConfigCache();
+    await closeLadybugDb();
+    await initLadybugDb(dbPath);
+
+    const roots = new Map([
+      ["available", availableRoot],
+      ["missing", missingRoot],
+      ["configured-missing", configuredMissingRoot],
+      ["file-root", fileRoot],
+      ["integrity-unknown", availableRoot],
+    ]);
+    await withWriteConn(async (conn) => {
+      for (const [repoId, rootPath] of roots) {
+        await ladybugDb.upsertRepo(conn, {
+          repoId,
+          rootPath,
+          configJson: JSON.stringify({
+            repoId,
+            rootPath,
+            ignore: [],
+            languages: ["ts"],
+            maxFileBytes: 2_000_000,
+            includeNodeModulesTypes: false,
+            packageJsonPath: null,
+            tsconfigPath: null,
+            workspaceGlobs: null,
+          }),
+          createdAt: "2026-07-16T00:00:00.000Z",
+        });
+        await ladybugDb.createVersion(conn, {
+          versionId: `${repoId}-v1`,
+          repoId,
+          createdAt: "2026-07-16T00:00:00.000Z",
+          reason: "test",
+          prevVersionHash: null,
+          versionHash: null,
+        });
+      }
+    });
+    for (const repoId of [
+      "available",
+      "missing",
+      "configured-missing",
+      "file-root",
+    ]) {
+      await derivedState.markDerivedStateComputed(repoId, `${repoId}-v1`);
+      await derivedState.markGraphIntegrityVerified(
+        repoId,
+        `${repoId}-v1`,
+        "a".repeat(64),
+      );
+    }
+  });
+
+  after(async () => {
+    const { invalidateConfigCache } = await import(
+      "../../dist/config/loadConfig.js"
+    );
+    const { closeLadybugDb } = await import("../../dist/db/ladybug.js");
+    await closeLadybugDb();
+    if (originalConfig === undefined) delete process.env.SDL_CONFIG;
+    else process.env.SDL_CONFIG = originalConfig;
+    if (originalDbPath === undefined) delete process.env.SDL_GRAPH_DB_PATH;
+    else process.env.SDL_GRAPH_DB_PATH = originalDbPath;
+    invalidateConfigCache();
+    rmSync(testRoot, { recursive: true, force: true });
+  });
+
+  it("returns root availability from every status detail level", async () => {
+    const { handleRepoStatus } = await import("../../dist/mcp/tools/repo.js");
+
+    for (const detail of ["minimal", "standard", "full"] as const) {
+      const status = await handleRepoStatus({ repoId: "available", detail });
+      assert.deepStrictEqual(status.rootAvailability, { status: "available" });
+    }
+  });
+
+  it("keeps clean derived state separate from a missing runtime root", async () => {
+    const { handleRepoStatus } = await import("../../dist/mcp/tools/repo.js");
+    const status = await handleRepoStatus({
+      repoId: "missing",
+      detail: "standard",
+    });
+
+    assert.strictEqual(status.rootAvailability.status, "missing");
+    assert.match(status.rootAvailability.nextBestAction ?? "", /repo\.register/);
+    assert.match(status.rootAvailability.nextBestAction ?? "", /repo\.unregister/);
+    assert.strictEqual(status.derivedState?.stale, false);
+    assert.strictEqual(status.derivedState?.graphIntegrityState, "verified");
+    assert.strictEqual(status.healthAvailable, false);
+    assert.strictEqual(status.healthScore, undefined);
+  });
+
+  it("returns configured-root recovery without runtime unregister guidance", async () => {
+    const { handleRepoStatus } = await import("../../dist/mcp/tools/repo.js");
+    const status = await handleRepoStatus({
+      repoId: "configured-missing",
+      detail: "minimal",
+    });
+
+    assert.strictEqual(status.rootAvailability.status, "missing");
+    assert.match(status.rootAvailability.nextBestAction ?? "", /SDL_CONFIG/);
+    assert.doesNotMatch(
+      status.rootAvailability.nextBestAction ?? "",
+      /repo\.unregister/,
+    );
+    assert.strictEqual(status.healthAvailable, false);
+    assert.strictEqual(status.healthScore, undefined);
+  });
+
+  it("treats a file root as unreadable and fails health closed", async () => {
+    const { handleRepoStatus } = await import("../../dist/mcp/tools/repo.js");
+    const status = await handleRepoStatus({ repoId: "file-root", detail: "full" });
+
+    assert.strictEqual(status.rootAvailability.status, "unreadable");
+    assert.strictEqual(status.healthAvailable, false);
+    assert.strictEqual(status.healthScore, undefined);
+  });
+
+  it("keeps root and graph-integrity gates independent", async () => {
+    const { handleRepoStatus } = await import("../../dist/mcp/tools/repo.js");
+    const status = await handleRepoStatus({
+      repoId: "integrity-unknown",
+      detail: "standard",
+    });
+
+    assert.deepStrictEqual(status.rootAvailability, { status: "available" });
+    assert.strictEqual(status.healthAvailable, false);
+    assert.strictEqual(status.healthScore, null);
+  });
+
+  it("is byte-stable across repeated status calls", async () => {
+    const { handleRepoStatus } = await import("../../dist/mcp/tools/repo.js");
+    const first = await handleRepoStatus({ repoId: "missing", detail: "minimal" });
+    const second = await handleRepoStatus({ repoId: "missing", detail: "minimal" });
+
+    assert.strictEqual(JSON.stringify(first), JSON.stringify(second));
   });
 });

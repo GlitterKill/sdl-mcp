@@ -1,3 +1,6 @@
+import { constants as fsConstants } from "node:fs";
+import { access, stat } from "node:fs/promises";
+
 import type { HealthComponents } from "../mcp/types.js";
 import { RepoConfigSchema } from "../config/types.js";
 import { getLadybugConn } from "../db/ladybug.js";
@@ -13,6 +16,29 @@ import { safeJsonParseOrThrow, ConfigObjectSchema } from "../util/safeJson.js";
 
 const DEFAULT_MIN_INDEXED_FILES = 1;
 const DEFAULT_MIN_INDEXED_SYMBOLS = 1;
+
+export interface RepositoryRootAvailability {
+  status: "available" | "missing" | "unreadable";
+}
+
+/** Check only root metadata and access; repository contents are never scanned. */
+export async function probeRepositoryRoot(
+  rootPath: string,
+): Promise<RepositoryRootAvailability> {
+  try {
+    const root = await stat(rootPath);
+    if (!root.isDirectory()) return { status: "unreadable" };
+    await access(rootPath, fsConstants.R_OK | fsConstants.X_OK);
+    return { status: "available" };
+  } catch (error) {
+    return {
+      status:
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+          ? "missing"
+          : "unreadable",
+    };
+  }
+}
 
 const WEIGHTS = {
   freshness: 0.25,
@@ -45,6 +71,7 @@ export interface HealthScoreInput {
   minIndexedSymbols?: number;
   indexedSymbols: number;
   graphIntegrityReady?: boolean;
+  rootAvailable?: boolean;
 }
 
 export interface HealthScoreResult {
@@ -58,6 +85,7 @@ export function computeHealthScore(input: HealthScoreInput): HealthScoreResult {
   const minIndexedSymbols =
     input.minIndexedSymbols ?? DEFAULT_MIN_INDEXED_SYMBOLS;
   const available =
+    input.rootAvailable !== false &&
     input.graphIntegrityReady !== false &&
     input.indexedFiles >= minIndexedFiles &&
     input.indexedSymbols >= minIndexedSymbols;
@@ -152,7 +180,11 @@ export async function getRepoHealthSnapshot(
     `configJson for repository ${repoId}`,
   );
   const repoConfig = RepoConfigSchema.parse(parsed);
-  const eligibleFiles = await scanRepository(repo.rootPath, repoConfig);
+  const rootAvailability = await probeRepositoryRoot(repo.rootPath);
+  const eligibleFiles =
+    rootAvailability.status === "available"
+      ? await scanRepository(repo.rootPath, repoConfig)
+      : [];
   const files = await ladybugDb.getFilesByRepo(conn, repoId);
   const indexedSymbols = await ladybugDb.getSymbolCount(conn, repoId);
   const callCounts = await ladybugDb.getCallEdgeResolutionCounts(conn, repoId);
@@ -188,6 +220,7 @@ export async function getRepoHealthSnapshot(
     minutesSinceLastIndex,
     indexedSymbols,
     graphIntegrityReady,
+    rootAvailable: rootAvailability.status === "available",
   });
 
   return {

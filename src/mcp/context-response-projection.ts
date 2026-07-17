@@ -877,13 +877,14 @@ function projectRepoStatusForModel(
   const projected: Record<string, unknown> = {};
   for (const key of [
     "repoId",
+    "rootAvailability",
     "latestVersionId",
     "filesIndexed",
     "symbolsIndexed",
   ]) {
     copyIfPresent(result, projected, key);
   }
-  if (result.healthAvailable === true || result.healthScore !== undefined) {
+  if ("healthAvailable" in result || result.healthScore !== undefined) {
     copyIfPresent(result, projected, "healthAvailable");
     copyIfPresent(result, projected, "healthScore");
   }

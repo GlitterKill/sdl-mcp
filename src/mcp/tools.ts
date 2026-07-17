@@ -616,9 +616,15 @@ export const RepoStatusRequestSchema = z.object({
   includeTelemetry: z.boolean().optional().default(false),
 });
 
+const RepoRootAvailabilitySchema = z.object({
+  status: z.enum(["available", "missing", "unreadable"]),
+  nextBestAction: z.string().optional(),
+});
+
 const RepoStatusRawResponseSchema = z.object({
   repoId: z.string().min(1),
   rootPath: z.string(),
+  rootAvailability: RepoRootAvailabilitySchema,
   latestVersionId: z.string().nullable(),
   filesIndexed: z.number().int(),
   symbolsIndexed: z.number().int(),
@@ -751,6 +757,7 @@ const RepoStatusRawResponseSchema = z.object({
  */
 const RepoStatusCompactResponseSchema = z.object({
   repoId: z.string().min(1),
+  rootAvailability: RepoRootAvailabilitySchema,
   latestVersionId: z.string().nullable(),
   filesIndexed: z.number().int(),
   symbolsIndexed: z.number().int(),

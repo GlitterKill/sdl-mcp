@@ -31,7 +31,10 @@ import { MAX_FILE_BYTES } from "../../config/constants.js";
 import { buildRepoOverview, clearOverviewCache } from "../../graph/overview.js";
 import { clearSliceCache } from "../../graph/sliceCache.js";
 import { symbolCardCache } from "../../graph/cache.js";
-import { getRepoHealthSnapshot } from "../../services/health.js";
+import {
+  getRepoHealthSnapshot,
+  probeRepositoryRoot,
+} from "../../services/health.js";
 import {
   logPrefetchTelemetry,
   logWatcherHealthTelemetry,
@@ -545,6 +548,21 @@ export async function handleRepoStatus(
       throw new DatabaseError(`Repository ${repoId} not found`);
     }
 
+    const appConfig = loadConfig();
+    const rootProbe = await probeRepositoryRoot(repo.rootPath);
+    const rootAvailable = rootProbe.status === "available";
+    const configuredRegistration = appConfig.repos.some(
+      (configuredRepo) => configuredRepo.repoId === repoId,
+    );
+    const rootRecoveryAction = rootAvailable
+      ? undefined
+      : configuredRegistration
+        ? "Restore the repository root or update its rootPath in SDL_CONFIG, then restart SDL-MCP."
+        : "Restore the repository root, update it with sdl.repo.register, or remove the runtime registration with sdl.repo.unregister.";
+    const rootAvailability = rootRecoveryAction
+      ? { ...rootProbe, nextBestAction: rootRecoveryAction }
+      : rootProbe;
+
     const includeExpensiveStatus = detail !== "minimal" || includeTelemetry;
     const includeLiveIndex = detail === "full" || includeTelemetry;
 
@@ -602,7 +620,7 @@ function compactPrefetchStatsForStatus(
     const filesIndexed = await ladybugDb.getFileCount(conn, repoId);
     const symbolsIndexed = await ladybugDb.getSymbolCount(conn, repoId);
     const lastIndexedAt = await ladybugDb.getLastIndexedAt(conn, repoId);
-    const healthResult = includeExpensiveStatus
+    const healthResult = includeExpensiveStatus && rootAvailable
       ? await Promise.race([
           getCachedHealthSnapshot(repoId),
           new Promise<typeof unavailableHealth>((resolve) =>
@@ -701,12 +719,12 @@ function compactPrefetchStatsForStatus(
         nextBestAction: graphIntegrityNextBestAction("version-mismatch"),
       };
     }
-    const effectiveHealth = graphIntegrityReady
+    const effectiveHealth = rootAvailable && graphIntegrityReady
       ? health
       : unavailableHealth.snapshot;
 
     // Surface relevant memories if enabled (default: false) and config allows it
-    const memCaps = getMemoryCapabilities(loadConfig(), repoId);
+    const memCaps = getMemoryCapabilities(appConfig, repoId);
     let memories:
       | Awaited<ReturnType<typeof surfaceRelevantMemories>>
       | undefined;
@@ -728,6 +746,7 @@ function compactPrefetchStatsForStatus(
     return {
       repoId,
       rootPath: repo.rootPath,
+      rootAvailability,
       latestVersionId: latestVersion?.versionId ?? null,
       recentVersions:
         detail === "full"
@@ -745,14 +764,18 @@ function compactPrefetchStatsForStatus(
           "Real symbols counted by repo.status index state; repo.overview stats use the overview symbol query.",
       },
       lastIndexedAt,
-      ...(includeExpensiveStatus
+      ...(!rootAvailable
+        ? { healthAvailable: false }
+        : includeExpensiveStatus
         ? {
             healthScore: effectiveHealth.score,
             healthComponents: effectiveHealth.components,
             healthAvailable: effectiveHealth.available,
           }
         : {}),
-      ...(!includeExpensiveStatus
+      ...(!rootAvailable
+        ? { healthNote: rootRecoveryAction }
+        : !includeExpensiveStatus
         ? {
             healthNote:
               'Health omitted because detail:"minimal" skips health computation. Use detail:"standard" to inspect health.',
