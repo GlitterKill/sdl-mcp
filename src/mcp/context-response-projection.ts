@@ -916,14 +916,22 @@ function compactSchemaSummary(value: unknown): unknown {
       return field;
     }
     const projected: Record<string, unknown> = {};
-    for (const key of ["name", "type", "required", "default", "enumValues", "subFields"]) {
-      if (key === "subFields") {
-        if ("subFields" in field) {
-          projected.subFields = compactSchemaSummary(field.subFields);
-        }
-      } else {
-        copyIfPresent(field, projected, key);
-      }
+    for (const key of [
+      "name",
+      "type",
+      "required",
+      "default",
+      "enumValues",
+      "nestedFieldCount",
+    ]) {
+      copyIfPresent(field, projected, key);
+    }
+    if (
+      !("nestedFieldCount" in projected) &&
+      Array.isArray(field.subFields) &&
+      field.subFields.length > 0
+    ) {
+      projected.nestedFieldCount = field.subFields.length;
     }
     return projected;
   });
@@ -959,6 +967,7 @@ function projectActionSearchForModel(
   copyIfPresent(result, projected, "nextCursor");
   copyIfPresent(result, projected, "disabledHint");
   copyIfPresent(result, projected, "schemaHint");
+  copyIfPresent(result, projected, "nextAction");
   return projected;
 }
 

@@ -159,6 +159,31 @@ describe("MCP tool registration", () => {
     );
   });
 
+  it("publishes schema detail parity for action search and manual", () => {
+    const { tools, server } = makeFakeServer();
+
+    registerTools(server as any, {}, undefined, {
+      enabled: true,
+      exclusive: false,
+      maxWorkflowSteps: 20,
+      maxWorkflowTokens: 50000,
+      maxWorkflowDurationMs: 30000,
+      ladderValidation: "warn",
+      etagCaching: true,
+    });
+
+    for (const name of ["sdl.action.search", "sdl.manual"]) {
+      const tool = tools.find((candidate) => candidate.name === name);
+      assert.ok(tool?.wireSchema, `expected ${name} wire schema`);
+      const properties = tool.wireSchema.properties as Record<
+        string,
+        Record<string, unknown>
+      >;
+      assert.deepStrictEqual(properties.detail?.enum, ["compact", "full"]);
+      assert.strictEqual(properties.detail?.default, "compact");
+    }
+  });
+
   it("registers only code-mode tools when exclusive mode is enabled", () => {
     const { names, server } = makeFakeServer();
 

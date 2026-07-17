@@ -62,6 +62,7 @@ export const META_ACTION_SEARCH_SCHEMA = z.object({
   includeExamples: z.boolean().optional(),
   excludeDisabled: z.boolean().optional(),
   summaryOnly: z.boolean().optional(),
+  detail: z.enum(["compact", "full"]).optional().default("compact"),
 });
 const META_MANUAL_SCHEMA = z.object({
   format: z.enum(["typescript", "markdown", "json"]).optional(),
@@ -69,6 +70,7 @@ const META_MANUAL_SCHEMA = z.object({
   actions: z.array(z.string()).optional(),
   includeSchemas: z.boolean().optional(),
   includeExamples: z.boolean().optional(),
+  detail: z.enum(["compact", "full"]).optional().default("compact"),
 });
 
 const META_TOOL_SCHEMAS: Record<string, z.ZodType> = {
@@ -150,6 +152,7 @@ export interface SchemaSummaryField {
   required: boolean;
   default?: unknown;
   enumValues?: string[];
+  nestedFieldCount?: number;
   description?: string;
   subFields?: SchemaSummaryField[];
 }
@@ -1339,10 +1342,12 @@ export function buildCatalog(opts?: {
   includeSchemas?: boolean;
   includeExamples?: boolean;
   memoryVisible?: boolean;
+  detail?: "compact" | "full";
 }): ActionCatalogEntry[] {
   const includeSchemas = opts?.includeSchemas ?? false;
   const includeExamples = opts?.includeExamples ?? false;
   const memoryVisible = opts?.memoryVisible ?? false;
+  const detail = opts?.detail ?? "compact";
 
   if (cachedCatalog === null || cachedMemoryVisible !== memoryVisible) {
     cachedCatalog = buildBaseCatalog(memoryVisible);
@@ -1358,7 +1363,10 @@ export function buildCatalog(opts?: {
     const definition = ACTION_DEFINITION_BY_ACTION[desc.action];
 
     if (includeSchemas && definition) {
-      result.schemaSummary = zodToSchemaSummary(definition.schema);
+      const schemaSummary = zodToSchemaSummary(definition.schema);
+      result.schemaSummary = detail === "full"
+        ? schemaSummary
+        : compactSchemaSummary(schemaSummary);
     }
 
     if (includeExamples && definition?.example) {
@@ -1367,6 +1375,29 @@ export function buildCatalog(opts?: {
 
     return result;
   });
+}
+
+// Keep compact schemas one level deep so recursive detail is always opt-in.
+function compactSchemaSummary(summary: SchemaSummary): SchemaSummary {
+  return {
+    fields: summary.fields.map((field) => {
+      const compact: SchemaSummaryField = {
+        name: field.name,
+        type: field.type,
+        required: field.required,
+      };
+      if (Object.hasOwn(field, "default")) {
+        compact.default = field.default;
+      }
+      if (field.enumValues) {
+        compact.enumValues = [...field.enumValues];
+      }
+      if (field.subFields && field.subFields.length > 0) {
+        compact.nestedFieldCount = field.subFields.length;
+      }
+      return compact;
+    }),
+  };
 }
 
 function projectDefinition(definition: ActionDefinition): ActionCatalogEntry {

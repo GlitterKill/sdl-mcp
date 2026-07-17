@@ -870,6 +870,99 @@ describe("context-response-projection", () => {
       });
     });
 
+    it("keeps compact action schemas shallow with a stable full-schema handoff", () => {
+      const raw = {
+        actions: [
+          {
+            action: "context",
+            fn: "context",
+            schemaSummary: {
+              fields: [
+                {
+                  name: "options",
+                  type: "object",
+                  required: false,
+                  description: "Task-specific options",
+                  subFields: [
+                    {
+                      name: "contextMode",
+                      type: "enum(precise|broad)",
+                      required: false,
+                      enumValues: ["precise", "broad"],
+                    },
+                    {
+                      name: "nested",
+                      type: "object",
+                      required: false,
+                      subFields: [
+                        { name: "value", type: "string", required: true },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+        nextAction: {
+          action: "sdl.manual",
+          args: {
+            actions: ["context"],
+            includeSchemas: true,
+            detail: "full",
+            format: "json",
+          },
+        },
+      };
+
+      const first = projectToolResultForModelContent(
+        "sdl.action.search",
+        raw,
+        { detail: "compact" },
+      ) as Record<string, unknown>;
+      const second = projectToolResultForModelContent(
+        "sdl.action.search",
+        raw,
+        { detail: "compact" },
+      ) as Record<string, unknown>;
+      const full = projectToolResultForModelContent(
+        "sdl.action.search",
+        raw,
+        { detail: "full" },
+      ) as {
+        actions: Array<{
+          schemaSummary: { fields: Array<Record<string, unknown>> };
+        }>;
+      };
+
+      assert.deepEqual(first, {
+        actions: [
+          {
+            action: "context",
+            fn: "context",
+            schemaSummary: {
+              fields: [
+                {
+                  name: "options",
+                  type: "object",
+                  required: false,
+                  nestedFieldCount: 2,
+                },
+              ],
+            },
+          },
+        ],
+        nextAction: raw.nextAction,
+      });
+      assert.equal(JSON.stringify(first), JSON.stringify(second));
+      const fullOptions = full.actions[0]?.schemaSummary.fields.find(
+        (field) => field.name === "options",
+      );
+      assert.ok(fullOptions);
+      assert.ok(Array.isArray(fullOptions.subFields));
+      assert.equal(fullOptions.subFields.length, 2);
+    });
+
     it("keeps compact action search guidance for disabled actions", () => {
       const projected = projectToolResultForModelContent(
         "action.search",

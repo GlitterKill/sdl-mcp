@@ -5,6 +5,10 @@ import {
   rankCatalog,
   invalidateCatalog,
 } from "../../dist/code-mode/action-catalog.js";
+import {
+  handleActionSearch,
+  handleManual,
+} from "../../dist/code-mode/index.js";
 
 describe("sdl.action.search behavior", () => {
   describe("query matching via rankCatalog", () => {
@@ -205,9 +209,152 @@ describe("sdl.action.search behavior", () => {
   });
 
   describe("schema summaries", () => {
+    it("defaults action search to shallow compact schema summaries", () => {
+      const result = handleActionSearch({
+        query: "context",
+        limit: 1,
+        includeSchemas: true,
+      }) as {
+        actions: Array<{
+          action: string;
+          schemaSummary?: {
+            fields: Array<Record<string, unknown>>;
+          };
+        }>;
+        nextAction?: unknown;
+      };
+
+      assert.strictEqual(result.actions[0]?.action, "context");
+      const budget = result.actions[0]?.schemaSummary?.fields.find(
+        (field) => field.name === "budget",
+      );
+      assert.ok(budget, "expected context budget schema field");
+      assert.strictEqual("subFields" in budget, false);
+      assert.deepStrictEqual(Object.keys(budget), [
+        "name",
+        "type",
+        "required",
+        "nestedFieldCount",
+      ]);
+      assert.ok(
+        typeof budget.nestedFieldCount === "number" &&
+          budget.nestedFieldCount > 0,
+        "expected a deterministic nested field count",
+      );
+    });
+
+    it("returns recursive action-search schemas only for explicit full detail", () => {
+      const result = handleActionSearch({
+        query: "context",
+        limit: 1,
+        includeSchemas: true,
+        detail: "full",
+      }) as {
+        actions: Array<{
+          action: string;
+          schemaSummary?: {
+            fields: Array<Record<string, unknown>>;
+          };
+        }>;
+        nextAction?: unknown;
+      };
+
+      const budget = result.actions[0]?.schemaSummary?.fields.find(
+        (field) => field.name === "budget",
+      );
+      assert.ok(budget, "expected context budget schema field");
+      assert.ok(Array.isArray(budget.subFields));
+      assert.ok(budget.subFields.length > 0);
+      assert.strictEqual("nestedFieldCount" in budget, false);
+      assert.strictEqual(result.nextAction, undefined);
+    });
+
+    it("honors compact and full schema detail in manual JSON output", () => {
+      const compact = handleManual({
+        actions: ["context"],
+        format: "json",
+        includeSchemas: true,
+      }) as {
+        actions: Array<{
+          schemaSummary?: { fields: Array<Record<string, unknown>> };
+        }>;
+        nextAction?: unknown;
+      };
+      const full = handleManual({
+        actions: ["context"],
+        format: "json",
+        includeSchemas: true,
+        detail: "full",
+      }) as typeof compact;
+      const compactAgain = handleManual({
+        actions: ["context"],
+        format: "json",
+        includeSchemas: true,
+      }) as typeof compact;
+
+      const compactBudget = compact.actions[0]?.schemaSummary?.fields.find(
+        (field) => field.name === "budget",
+      );
+      const fullBudget = full.actions[0]?.schemaSummary?.fields.find(
+        (field) => field.name === "budget",
+      );
+      assert.ok(compactBudget);
+      assert.strictEqual("subFields" in compactBudget, false);
+      assert.ok(compactBudget.nestedFieldCount);
+      assert.ok(fullBudget);
+      assert.ok(Array.isArray(fullBudget.subFields));
+      assert.ok(fullBudget.subFields.length > 0);
+      assert.deepStrictEqual(compact.nextAction, {
+        action: "sdl.manual",
+        args: {
+          actions: ["context"],
+          includeSchemas: true,
+          detail: "full",
+          format: "json",
+        },
+      });
+      assert.strictEqual(full.nextAction, undefined);
+      assert.strictEqual(JSON.stringify(compact), JSON.stringify(compactAgain));
+    });
+
+    it("returns one stable manual handoff for compact action-search schemas", () => {
+      const args = {
+        query: "context",
+        limit: 1,
+        includeSchemas: true,
+      };
+      const first = handleActionSearch(args) as Record<string, unknown>;
+      const second = handleActionSearch(args) as Record<string, unknown>;
+
+      assert.deepStrictEqual(first.nextAction, {
+        action: "sdl.manual",
+        args: {
+          actions: ["context"],
+          includeSchemas: true,
+          detail: "full",
+          format: "json",
+        },
+      });
+      assert.strictEqual(JSON.stringify(first), JSON.stringify(second));
+    });
+
+    it("publishes detail parity in action-search and manual catalog schemas", () => {
+      invalidateCatalog();
+      const catalog = buildCatalog({ includeSchemas: true, detail: "full" });
+
+      for (const action of ["action.search", "manual"]) {
+        const detail = catalog
+          .find((entry) => entry.action === action)
+          ?.schemaSummary?.fields.find((field) => field.name === "detail");
+        assert.ok(detail, `expected ${action} detail schema field`);
+        assert.deepStrictEqual(detail.enumValues, ["compact", "full"]);
+        assert.strictEqual(detail.default, "compact");
+      }
+    });
+
     it("surfaces important limits and op-specific plan-handle guidance", () => {
       invalidateCatalog();
-      const catalog = buildCatalog({ includeSchemas: true });
+      const catalog = buildCatalog({ includeSchemas: true, detail: "full" });
 
       const actionSearch = catalog.find((d) => d.action === "action.search");
       const actionLimit = actionSearch?.schemaSummary?.fields.find(

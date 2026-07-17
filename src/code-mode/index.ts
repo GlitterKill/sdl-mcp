@@ -60,6 +60,20 @@ function normalizeManualActionSelector(selector: string): string {
   return trimmed.startsWith("sdl.") ? trimmed.slice("sdl.".length) : trimmed;
 }
 
+// Give compact discovery responses one stable path to expand selected schemas.
+function buildFullSchemaNextAction(actions: readonly string[]): object | undefined {
+  if (actions.length === 0) return undefined;
+  return {
+    action: "sdl.manual",
+    args: {
+      actions: [...actions],
+      includeSchemas: true,
+      detail: "full",
+      format: "json",
+    },
+  };
+}
+
 export const ActionSearchRequestSchema = z.object({
   query: z.string().min(1),
   limit: z
@@ -113,6 +127,7 @@ export function handleActionSearch(
     memoryVisible: services.actionAvailability?.memoryTools,
     includeSchemas: effectiveIncludeSchemas,
     includeExamples: effectiveIncludeExamples,
+    detail: args.detail,
   });
 
   let allRanked = rankCatalog(catalog, trimmed);
@@ -183,6 +198,9 @@ export function handleActionSearch(
           })),
         }
       : undefined;
+  const nextAction = args.detail === "compact"
+    ? buildFullSchemaNextAction(ranked.map((action) => action.action))
+    : undefined;
 
   return {
     actions: ranked,
@@ -198,6 +216,7 @@ export function handleActionSearch(
     hasMore: filteredRanked.length > offset + args.limit,
     tokenEstimate: estimateTokens(JSON.stringify(ranked)),
     ...(autoEnabled ? { autoEnabled } : {}),
+    ...(nextAction ? { nextAction } : {}),
   };
 }
 
@@ -228,6 +247,7 @@ export function handleManual(
     memoryVisible: services.actionAvailability?.memoryTools,
     includeSchemas,
     includeExamples,
+    detail: args.detail,
   });
   let catalog = fullCatalog.filter((entry) => !entry.disabled);
   let unknownActions: string[] = [];
@@ -295,6 +315,9 @@ export function handleManual(
   } else if (args.query) {
     catalog = rankCatalog(fullCatalog, args.query);
   }
+  const nextAction = args.detail === "compact"
+    ? buildFullSchemaNextAction(catalog.map((entry) => entry.action))
+    : undefined;
   if (format === "json") {
     return {
       actions: catalog,
@@ -306,6 +329,7 @@ export function handleManual(
             warning: `Ignored unknown action selector(s): ${unknownActions.join(", ")}`,
           }
         : {}),
+      ...(nextAction ? { nextAction } : {}),
     };
   }
 
@@ -321,6 +345,7 @@ export function handleManual(
           warning: `Ignored unknown action selector(s): ${unknownActions.join(", ")}`,
         }
       : {}),
+    ...(nextAction ? { nextAction } : {}),
   };
 }
 
@@ -349,6 +374,12 @@ export function registerActionSearchTool(
         excludeDisabled: {
           type: "boolean",
           description: "Hide disabled actions from results",
+        },
+        detail: {
+          type: "string",
+          enum: ["compact", "full"],
+          default: "compact",
+          description: "Schema detail: compact is shallow; full includes nested fields",
         },
       },
       required: ["query"],
@@ -400,6 +431,12 @@ export function registerCodeModeTools(
         format: { type: "string", enum: ["typescript", "markdown", "json"] },
         includeSchemas: { type: "boolean" },
         includeExamples: { type: "boolean" },
+        detail: {
+          type: "string",
+          enum: ["compact", "full"],
+          default: "compact",
+          description: "Schema detail: compact is shallow; full includes nested fields",
+        },
       },
       additionalProperties: false,
     },

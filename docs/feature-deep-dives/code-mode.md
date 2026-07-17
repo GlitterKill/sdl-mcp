@@ -93,6 +93,7 @@ Use this first when the right SDL action is unclear.
 It returns ranked actions with optional schema summaries, examples, prerequisites, and recommended next steps.
 
 Use `offset` with `limit` to page through large result sets such as `query: "*"`.
+Schema summaries default to `detail: "compact"`, which keeps top-level field metadata and a `nestedFieldCount` without recursive `subFields`. Set `detail: "full"` explicitly to return recursive schemas; compact results include one `sdl.manual` next action for the selected actions.
 
 ### `sdl.manual`
 
@@ -104,6 +105,7 @@ Supported filters:
 - `actions` for an exact subset
 - `format` for `typescript`, `markdown`, or `json`
 - `includeSchemas` / `includeExamples` for richer output
+- `detail` for shallow `compact` schemas (the default) or recursive `full` schemas
 
 ### `sdl.context`
 
