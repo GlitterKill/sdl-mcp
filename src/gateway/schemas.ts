@@ -16,6 +16,7 @@ import {
   RUNTIME_MAX_QUERY_TERMS,
   RUNTIME_DEFAULT_MAX_RESPONSE_LINES,
 } from "../config/constants.js";
+import { LanguageSchema } from "../config/types.js";
 import { RUNTIME_NAMES } from "../runtime/runtimes.js";
 import { MAX_RESPONSE_EXCERPT_BYTES } from "../runtime/response-artifacts.js";
 
@@ -310,7 +311,12 @@ const RepoRegisterAction = z.object({
   action: z.literal("repo.register"),
   rootPath: z.string().min(1),
   ignore: z.array(z.string()).optional(),
-  languages: z.array(z.string()).optional(),
+  languages: z
+    .array(LanguageSchema)
+    .optional()
+    .describe(
+      "SDL language/extension keys. Omit to use the repository registration default language set.",
+    ),
   maxFileBytes: z.number().int().min(1).optional(),
 });
 

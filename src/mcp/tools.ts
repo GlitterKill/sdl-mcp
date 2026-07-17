@@ -49,6 +49,7 @@ import {
   MAX_REPO_ID_LENGTH,
   MAX_SYMBOL_ID_LENGTH,
 } from "../config/constants.js";
+import { LanguageSchema } from "../config/types.js";
 
 const RangeSchema = z.object({
   startLine: z.number().int().min(0),
@@ -562,7 +563,12 @@ export const RepoRegisterRequestSchema = z.object({
   repoId: z.string().min(1).max(MAX_REPO_ID_LENGTH),
   rootPath: z.string().min(1),
   ignore: z.array(z.string()).optional(),
-  languages: z.array(z.string()).optional(),
+  languages: z
+    .array(LanguageSchema)
+    .optional()
+    .describe(
+      "SDL language/extension keys. Omit to use the repository registration default language set.",
+    ),
   maxFileBytes: z.number().int().min(1).optional(),
   dryRun: z
     .boolean()

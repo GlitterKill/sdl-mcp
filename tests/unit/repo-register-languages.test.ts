@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { resolveRepoLanguages } from "../../dist/mcp/tools/repo.js";
+import { RepoRegisterRequestSchema } from "../../dist/mcp/tools.js";
+import { RepoGatewaySchema } from "../../dist/gateway/schemas.js";
+import { LanguageSchema } from "../../dist/config/types.js";
+import { zodSchemaToJsonSchema } from "../../dist/gateway/compact-schema.js";
 
 describe("repo.register language defaults", () => {
   it("defaults to all supported languages when languages are omitted", () => {
@@ -38,5 +42,60 @@ describe("repo.register language defaults", () => {
     assert.equal(languages.includes("commonlisp"), false);
     assert.equal(languages.includes("gleam"), false);
     assert.equal(languages.includes("zig"), false);
+  });
+
+  it("accepts canonical language keys on direct and gateway registrations", () => {
+    const languages = ["ts", "py", "powershell"];
+
+    assert.deepStrictEqual(
+      RepoRegisterRequestSchema.parse({
+        repoId: "direct-repo",
+        rootPath: "C:/repos/direct",
+        languages,
+      }).languages,
+      languages,
+    );
+    assert.deepStrictEqual(
+      RepoGatewaySchema.parse({
+        repoId: "gateway-repo",
+        action: "repo.register",
+        rootPath: "C:/repos/gateway",
+        languages,
+      }).languages,
+      languages,
+    );
+  });
+
+  it("rejects non-canonical language aliases before registration dispatch", () => {
+    const direct = RepoRegisterRequestSchema.safeParse({
+      repoId: "direct-repo",
+      rootPath: "C:/repos/direct",
+      languages: ["typescript"],
+    });
+    const gateway = RepoGatewaySchema.safeParse({
+      repoId: "gateway-repo",
+      action: "repo.register",
+      rootPath: "C:/repos/gateway",
+      languages: ["typescript"],
+    });
+
+    assert.strictEqual(direct.success, false);
+    assert.strictEqual(gateway.success, false);
+  });
+
+  it("publishes the canonical enum and omitted-value guidance", () => {
+    const jsonSchema = zodSchemaToJsonSchema(RepoRegisterRequestSchema) as {
+      properties?: {
+        languages?: {
+          description?: string;
+          items?: { enum?: string[] };
+        };
+      };
+    };
+    const languages = jsonSchema.properties?.languages;
+
+    assert.deepStrictEqual(languages?.items?.enum, LanguageSchema.options);
+    assert.match(languages?.description ?? "", /SDL language\/extension keys/i);
+    assert.match(languages?.description ?? "", /omit/i);
   });
 });
